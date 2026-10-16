@@ -1,0 +1,55 @@
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
+import { DomainError, McpToolInputs, McpToolName } from '@10db/contracts';
+import { getLiveSessionByTokenHash } from '@10db/db';
+import { z } from 'zod';
+import { ParkedError } from '../inbox';
+import { hashToken } from './tokens';
+import { createToolHandlers, TOOL_DESCRIPTIONS, type McpDeps } from './tools';
+
+function errorText(error: unknown): string {
+  // The card stays open; its answer reaches the next session's prompt, so a retry would open a second card.
+  if (error instanceof ParkedError)
+    return '10db parked this session until the builder answers. Do not ask again: the answer arrives in the prompt of the session that resumes this work. End your turn now.';
+  if (error instanceof DomainError) return error.message;
+  if (error instanceof z.ZodError)
+    return `Invalid input: ${error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')}`;
+  return 'Internal error in 10db; retry the call with the same opId.';
+}
+
+/** Stateless streamable-HTTP MCP endpoint; the bearer token identifies the calling session. */
+export function createMcpHandler(deps: McpDeps): (req: Request) => Promise<Response> {
+  return async (req) => {
+    const token = /^Bearer (.+)$/.exec(req.headers.get('authorization') ?? '')?.[1];
+    const session = token ? getLiveSessionByTokenHash(deps.state.db, hashToken(token)) : undefined;
+    if (!session) return Response.json({ error: 'unauthorized' }, { status: 401 });
+
+    const handlers = createToolHandlers(deps, session.id, session.workstreamId);
+    const server = new McpServer({ name: '10db', version: '0.1.0' });
+    for (const name of Object.values(McpToolName)) {
+      const schema = McpToolInputs[name];
+      server.registerTool(
+        name,
+        { description: TOOL_DESCRIPTIONS[name], inputSchema: schema },
+        async (args: unknown) => {
+          try {
+            // Each handler takes its own tool's parsed input; the registry pairs them by name.
+            const handler = handlers[name] as (input: unknown) => Promise<unknown>;
+            const output = await handler(schema.parse(args));
+            return { content: [{ type: 'text' as const, text: JSON.stringify(output) }] };
+          } catch (error) {
+            return { isError: true, content: [{ type: 'text' as const, text: errorText(error) }] };
+          }
+        },
+      );
+    }
+    // No sessionIdGenerator means stateless mode; passing `undefined` explicitly fails exactOptionalPropertyTypes.
+    const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true });
+    await server.connect(transport);
+    try {
+      return await transport.handleRequest(req);
+    } finally {
+      void server.close();
+    }
+  };
+}

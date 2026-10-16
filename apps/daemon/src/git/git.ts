@@ -22,7 +22,7 @@ class GitError extends Error {
   }
 }
 
-interface Git {
+export interface Git {
   head(repo: string): Promise<string>;
   status(repo: string): Promise<{ code: string; path: string }[]>;
   /** Committed and uncommitted changes since `base`, sorted and unique. */

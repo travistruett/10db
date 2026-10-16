@@ -1,1 +1,1 @@
-export { createGit } from './git';
+export { createGit, type Git } from './git';
