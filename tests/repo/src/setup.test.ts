@@ -28,7 +28,7 @@ interface FakeTools {
   systemCargo?: boolean;
 }
 
-/** Runs scripts/setup.sh with only fake tools (plus /usr/bin and /bin) on PATH and no terminal. */
+/** Runs scripts/setup.sh as on macOS, with only fake tools (plus /usr/bin and /bin) on PATH and no terminal. */
 function runSetup(tools: FakeTools, env: Record<string, string> = {}) {
   const dir = mkdtempSync(join(tmpdir(), '10db-setup-'));
   cleanup.push(dir);
@@ -46,6 +46,8 @@ function runSetup(tools: FakeTools, env: Record<string, string> = {}) {
       `if [ "$1" = which ]; then ${whichCargo}; fi\necho "$*" >> '${calls}'\necho "mise $*"`,
     );
   }
+  // setup.sh checks for the Command Line Tools only on macOS, and CI runs this on Linux.
+  script(bin, 'uname', 'echo Darwin');
   if (tools.xcode === 'missing') script(bin, 'xcode-select', 'exit 2');
   else if (tools.xcode !== false) script(bin, 'xcode-select', 'echo /Library/Developer');
   if (tools.cargo === true || tools.systemCargo === true) script(bin, 'cargo', 'exit 0');
