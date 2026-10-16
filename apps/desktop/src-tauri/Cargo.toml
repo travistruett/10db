@@ -12,10 +12,10 @@ name = "tendb_desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
-tauri-build = { version = "=2.7.2", features = [] }
+tauri-build = { version = "=2.7.3", features = [] }
 
 [dependencies]
-tauri = { version = "=2.12.3", features = [] }
+tauri = { version = "=2.12.4", features = [] }
 
 [lints.rust]
 unsafe_code = "forbid"
