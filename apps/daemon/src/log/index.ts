@@ -11,6 +11,15 @@ export interface Logger {
   child(bindings: Record<string, string>): Logger;
 }
 
+/** A logger that discards everything, for tests and callers that need no output. */
+export const silentLogger: Logger = {
+  debug: () => undefined,
+  info: () => undefined,
+  warn: () => undefined,
+  error: () => undefined,
+  child: () => silentLogger,
+};
+
 const REDACT_PATHS = [
   'token',
   '*.token',

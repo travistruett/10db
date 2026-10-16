@@ -26,7 +26,7 @@ import { ManualClock } from '../src/clock';
 import { createEventBus, createStateStore, type StateStore } from '../src/events';
 import { createGit } from '../src/git';
 import { createInboxService, type InboxService } from '../src/inbox';
-import type { Logger } from '../src/log';
+import { silentLogger } from '../src/log';
 import { createMcpHandler } from '../src/mcp';
 import {
   createLiveSessions,
@@ -37,14 +37,6 @@ import {
 import { FakeAdapter, type FakeScriptBook } from '../src/sessions';
 import { createGateRunner } from '../src/verify';
 import { createTempRepo, tempDir } from './fixtures';
-
-const silentLogger: Logger = {
-  debug: () => undefined,
-  info: () => undefined,
-  warn: () => undefined,
-  error: () => undefined,
-  child: () => silentLogger,
-};
 
 export interface TestEngine {
   readonly store: Store;
