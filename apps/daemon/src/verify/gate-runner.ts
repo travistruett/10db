@@ -45,7 +45,8 @@ export function createGateRunner(): GateRunner {
         detached: true,
         stdio: ['ignore', 'pipe', 'pipe'],
       });
-      if (child.pid !== undefined) onSpawn?.(child.pid);
+      // A log that cannot be written must not take the daemon down; the gate still runs and reports its tail.
+      log.on('error', () => undefined);
       const onData = (chunk: Buffer): void => {
         log.write(chunk);
         tail = (tail + chunk.toString('utf8')).slice(-TAIL_BYTES);
@@ -70,17 +71,22 @@ export function createGateRunner(): GateRunner {
       };
       if (signal?.aborted) onAbort();
       else signal?.addEventListener('abort', onAbort, { once: true });
+      const endLog = (done: () => void): void => {
+        if (log.destroyed) done();
+        else log.end(done);
+      };
       return new Promise<GateResult>((resolve, reject) => {
         child.on('error', (error) => {
           clearTimeout(timer);
           signal?.removeEventListener('abort', onAbort);
-          log.end();
-          reject(error);
+          endLog(() => {
+            reject(error);
+          });
         });
         child.on('close', (code) => {
           clearTimeout(timer);
           signal?.removeEventListener('abort', onAbort);
-          log.end(() => {
+          endLog(() => {
             resolve({
               exitCode: timedOut ? TIMEOUT_EXIT : aborted ? ABORT_EXIT : (code ?? 1),
               durationMs: Math.round(performance.now() - started),
@@ -91,6 +97,17 @@ export function createGateRunner(): GateRunner {
             });
           });
         });
+        if (child.pid !== undefined && onSpawn) {
+          try {
+            onSpawn(child.pid);
+          } catch (error) {
+            // The caller could not record the group, so nothing may keep running unobserved.
+            clearTimeout(timer);
+            signal?.removeEventListener('abort', onAbort);
+            killGroup();
+            reject(error instanceof Error ? error : new Error(String(error)));
+          }
+        }
       });
     },
   };
