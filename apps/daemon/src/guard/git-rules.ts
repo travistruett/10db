@@ -22,6 +22,17 @@ const PROTECTED_BRANCHES = new Set(['main', 'master']);
 const REDIRECTING_OPTIONS = ['--git-dir', '--work-tree', '--namespace', '--config-env'];
 const DANGEROUS_PUSH_FLAGS = new Set(['--delete', '--mirror', '--all', '--prune']);
 
+/** Read-only verbs still write files or run programs through a few options. */
+function readOnlySideEffects(verb: string, args: readonly string[]): GitVerdict {
+  const writesFile = args.some((a) => a === '--output' || a.startsWith('--output='));
+  const runsPager =
+    verb === 'grep' &&
+    args.some((a) => a.startsWith('-O') || a.startsWith('--open-files-in-pager'));
+  if (writesFile) return { deny: 'git --output writes a file and is not allowed.' };
+  if (runsPager) return { deny: 'git grep -O runs a program and is not allowed.' };
+  return null;
+}
+
 function pushVerdict(args: readonly string[]): GitVerdict {
   for (const a of args) {
     const shortGroup = /^-[a-zA-Z]+$/.test(a) && /[fd]/.test(a);
@@ -35,8 +46,8 @@ function pushVerdict(args: readonly string[]): GitVerdict {
   const targets = args
     .filter((a) => !a.startsWith('-'))
     .slice(1)
-    .map((ref) => ref.split(':').at(-1) ?? ref);
-  if (targets.some((t) => PROTECTED_BRANCHES.has(t.replace(/^refs\/heads\//, '')))) {
+    .map((ref) => (ref.split(':').at(-1) ?? ref).replace(/^refs\//, '').replace(/^heads\//, ''));
+  if (targets.some((t) => PROTECTED_BRANCHES.has(t))) {
     return { deny: 'Pushing to a protected branch is never allowed.' };
   }
   return null;
@@ -61,7 +72,8 @@ export function gitVerdict(words: readonly string[]): GitVerdict {
   }
   const verb = words[i] ?? '';
   const args = words.slice(i + 1);
-  if (verb === '' || READ_ONLY_GIT.has(verb)) return null;
+  if (verb === '') return null;
+  if (READ_ONLY_GIT.has(verb)) return readOnlySideEffects(verb, args);
   if (verb === 'commit') {
     return {
       deny: 'Direct git commit is not allowed. Use the 10db commit tool with explicit paths.',

@@ -40,17 +40,22 @@ function resolveThroughLinks(p: string, hops = 0): string {
   return realpathSync.native(current);
 }
 
+/** A path that cannot be examined (not a directory, no permission) is treated as outside. */
 export function resolveInRepo(
   repoPath: string,
   filePath: string,
 ): { inside: true; rel: string } | { inside: false } {
-  const root = realpathSync.native(repoPath);
-  const target = resolveThroughLinks(resolve(repoPath, filePath));
-  const rel = relative(root, target);
-  if (rel === '' || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+  try {
+    const root = realpathSync.native(repoPath);
+    const target = resolveThroughLinks(resolve(repoPath, filePath));
+    const rel = relative(root, target);
+    if (rel === '' || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+      return { inside: false };
+    }
+    return { inside: true, rel };
+  } catch {
     return { inside: false };
   }
-  return { inside: true, rel };
 }
 
 const fold = (text: string): string => (CASE_INSENSITIVE ? text.toLowerCase() : text);

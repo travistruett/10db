@@ -47,16 +47,19 @@ export function commandForms(words: readonly string[]): { bare: string[][]; line
   const bareForms = runner ? [bare, bare.slice(runner.length)] : [bare];
   const lines = [words.join(' '), ...bareForms.map((f) => f.join(' '))];
   if (runner) {
-    // Raw words after the runner's own words, so `pnpm dlx vercel --prod` keeps `--prod`.
+    // Raw words after the runner's own words, so `pnpm dlx vercel --prod` keeps `--prod`. Flags
+    // (and the values of flags that take one) before or between the runner words are skipped.
     let consumed = 0;
-    let rest = 0;
-    for (const [index, w] of words.entries()) {
-      if (!w.startsWith('-') && consumed < runner.length) {
+    let i = 0;
+    while (i < words.length) {
+      const w = words[i] ?? '';
+      if (w.startsWith('-')) i += VALUE_FLAGS.has(w) ? 2 : 1;
+      else if (consumed < runner.length) {
         consumed += 1;
-        rest = index + 1;
-      }
+        i += 1;
+      } else break;
     }
-    lines.push(words.slice(rest).join(' '));
+    lines.push(words.slice(i).join(' '));
   }
   return { bare: bareForms, lines };
 }

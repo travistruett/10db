@@ -18,6 +18,7 @@ beforeAll(() => {
   mkdirSync(join(repo.path, 'src/api'), { recursive: true });
   symlinkSync(outside.path, join(repo.path, 'link'));
   writeFileSync(join(repo.path, 'src/api/package.json'), '{}');
+  writeFileSync(join(repo.path, 'src/api/a.ts'), '');
   mkdirSync(join(repo.path, 'packages/db/drizzle'), { recursive: true });
   symlinkSync(join(outside.path, 'new.txt'), join(repo.path, 'src/api/dangling.ts'));
   symlinkSync('../../../outside-relative/new.txt', join(repo.path, 'src/api/dangling-rel.ts'));
@@ -212,6 +213,19 @@ describe('file edits', () => {
     ).toBe('deny');
   });
 
+  it.each<{ name: string; path: string; skip?: boolean }>([
+    { name: 'a path below a regular file (ENOTDIR)', path: 'src/api/a.ts/x' },
+    {
+      name: 'a path in an unreadable directory (EACCES)',
+      path: '/private/var/root/x',
+      skip: process.platform !== 'darwin' || process.getuid?.() === 0,
+    },
+  ])('denies instead of throwing for $name', ({ path, skip }) => {
+    if (skip) return;
+    const verdict = judge('Write', { file_path: path }, API_AND_DB);
+    expect(verdict.decision).toBe('deny');
+  });
+
   it.skipIf(process.platform !== 'darwin')('case-insensitive file systems', () => {
     const rows: { name: string; path: string; reason: string }[] = [
       {
@@ -380,6 +394,47 @@ describe('shell commands', () => {
       command: 'rm -rf .github/tmp',
       decision: 'allow',
     },
+    { name: 'push to heads/main', command: 'git push origin heads/main', decision: 'deny' },
+    { name: 'push feat:heads/main', command: 'git push origin feat:heads/main', decision: 'deny' },
+    {
+      name: 'push feat:refs/heads/main',
+      command: 'git push origin feat:refs/heads/main',
+      decision: 'deny',
+    },
+    {
+      name: 'push refs/heads/master',
+      command: 'git push origin refs/heads/master',
+      decision: 'deny',
+    },
+    { name: 'npx -y vercel --prod', command: 'npx -y vercel --prod', decision: 'deny' },
+    {
+      name: 'pnpm --filter x dlx vercel --prod',
+      command: 'pnpm --filter x dlx vercel --prod',
+      decision: 'deny',
+    },
+    { name: 'git diff --output=file', command: 'git diff --output=out.txt', decision: 'deny' },
+    { name: 'git diff --output file', command: 'git diff --output out.txt', decision: 'deny' },
+    { name: 'git log --output=file', command: 'git log --output=out.txt', decision: 'deny' },
+    { name: 'git show --output=file', command: 'git show HEAD --output=out.txt', decision: 'deny' },
+    { name: 'git grep -O<cmd>', command: 'git grep -Osh foo', decision: 'deny' },
+    {
+      name: 'git grep --open-files-in-pager=cmd',
+      command: 'git grep --open-files-in-pager=sh foo',
+      decision: 'deny',
+    },
+    {
+      name: 'git grep --open-files-in-pager',
+      command: 'git grep --open-files-in-pager foo',
+      decision: 'deny',
+    },
+    { name: 'plain git diff', command: 'git diff', decision: 'allow' },
+    {
+      name: 'git diff --output-indicator-new',
+      command: 'git diff --output-indicator-new=+',
+      decision: 'allow',
+    },
+    { name: 'plain git log', command: 'git log', decision: 'allow' },
+    { name: 'git grep foo', command: 'git grep foo', decision: 'allow' },
     { name: 'a subcommand that only starts like add', command: 'pnpm addons', decision: 'allow' },
   ])('$name: $command -> $decision', ({ command, decision }) => {
     expect(bash(command).decision).toBe(decision);
