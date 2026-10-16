@@ -3,7 +3,7 @@
 min_version = "2026.10.10"
 
 [tools]
-node = "26.11.1"
+node = "26.12.0"
 pnpm = "12.9.1"
 rust = { version = "1.99.0", components = ["clippy", "rustfmt"], profile = "minimal" }
 gitleaks = "8.30.1"
