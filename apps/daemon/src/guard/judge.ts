@@ -1,7 +1,9 @@
 import { homedir } from 'node:os';
-import { isAbsolute, resolve } from 'node:path';
+import { isAbsolute, resolve, sep } from 'node:path';
 import { ClaimKind, type AreaDef, type HazardDef } from '@10db/contracts';
 import { z } from 'zod';
+import { commandForms, startsWithWords } from './command-forms';
+import { gitVerdict } from './git-rules';
 import { classifyPath, resolveInRepo } from './paths';
 import { splitCommand, stripCommandPrefixes } from './shell-words';
 
@@ -21,48 +23,8 @@ const ALLOW: GuardVerdict = { decision: 'allow' };
 const deny = (reason: string): GuardVerdict => ({ decision: 'deny', reason });
 
 const FILE_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
-const READ_ONLY_GIT = new Set([
-  'status',
-  'diff',
-  'log',
-  'show',
-  'blame',
-  'rev-parse',
-  'ls-files',
-  'grep',
-  'describe',
-  'shortlog',
-  'cat-file',
-  'ls-tree',
-  'rev-list',
-]);
-const BANNED_GIT = new Set([
-  'checkout',
-  'switch',
-  'reset',
-  'stash',
-  'commit',
-  'add',
-  'rm',
-  'mv',
-  'restore',
-  'clean',
-  'rebase',
-  'merge',
-  'cherry-pick',
-  'revert',
-  'pull',
-  'am',
-  'apply',
-  'filter-branch',
-  'update-ref',
-  'worktree',
-  'gc',
-  'prune',
-]);
-const PROTECTED_BRANCHES = new Set(['main', 'master']);
 const DEPLOY = [
-  /^(vercel|netlify)\b.*\b(deploy|--prod)\b/,
+  /^(vercel|netlify)\b.*(\bdeploy|--prod)\b/,
   /^fly (deploy|launch)\b/,
   /^kubectl (apply|delete|rollout)\b/,
   /^terraform (apply|destroy)\b/,
@@ -71,50 +33,6 @@ const DEPLOY = [
   /^gh release create\b/,
 ];
 const SHELLS = new Set(['sh', 'bash', 'zsh']);
-/** Flags whose next word is their value, so it is not mistaken for the subcommand. */
-const VALUE_FLAGS = new Set([
-  '--filter',
-  '-F',
-  '--dir',
-  '-C',
-  '--prefix',
-  '--workspace',
-  '--manifest-path',
-  '-p',
-  '--package',
-  '--config',
-]);
-/** Runners whose remaining words are themselves a command (`pnpm exec drizzle-kit generate`). */
-const RUNNERS: readonly (readonly string[])[] = [
-  ['npx'],
-  ['pnpm', 'exec'],
-  ['pnpm', 'dlx'],
-  ['npm', 'exec'],
-  ['yarn', 'dlx'],
-];
-
-/** The command's words without flags or flag values: `pnpm --filter x add zod` → `pnpm add zod`. */
-function withoutFlags(words: readonly string[]): string[] {
-  const out: string[] = [];
-  for (let i = 0; i < words.length; i += 1) {
-    const w = words[i] ?? '';
-    if (!w.startsWith('-')) out.push(w);
-    else if (VALUE_FLAGS.has(w)) i += 1;
-  }
-  return out;
-}
-
-/** The command itself, plus what it runs when it is a runner such as `npx` or `pnpm exec`. */
-function commandForms(words: readonly string[]): string[][] {
-  const bare = withoutFlags(words);
-  const runner = RUNNERS.find((r) => startsWithWords(bare, r));
-  return runner ? [bare, bare.slice(runner.length)] : [bare];
-}
-
-function startsWithWords(words: readonly string[], prefix: readonly string[]): boolean {
-  return prefix.length > 0 && prefix.every((p, i) => words[i] === p);
-}
-
 const ToolInput = z.record(z.string(), z.unknown());
 
 /** Reads a string field from a tool's input, which arrives as untyped JSON. */
@@ -148,46 +66,21 @@ function judgeFile(input: GuardInput, filePath: string): GuardVerdict {
   );
 }
 
-function gitVerdict(words: readonly string[]): GuardVerdict | null {
-  let i = 1;
-  while (i < words.length && (words[i] ?? '').startsWith('-'))
-    i += words[i] === '-C' || words[i] === '-c' ? 2 : 1;
-  const verb = words[i] ?? '';
-  const args = words.slice(i + 1);
-  if (verb === '' || READ_ONLY_GIT.has(verb)) return null;
-  if (verb === 'commit')
-    return deny('Direct git commit is not allowed. Use the 10db commit tool with explicit paths.');
-  if (BANNED_GIT.has(verb))
-    return deny(
-      `git ${verb} changes the shared checkout and is not allowed. Only read-only git is allowed; commit through the 10db commit tool.`,
-    );
-  if (
-    verb === 'branch' &&
-    args.some((a) => !['-a', '-r', '--list', '-v', '-vv', '--show-current'].includes(a))
-  ) {
-    return deny('Creating or deleting branches is not allowed in the shared checkout.');
-  }
-  if (verb === 'push') {
-    if (
-      args.some(
-        (a) => a === '-f' || a.startsWith('--force') || a === '--delete' || a.startsWith('+'),
-      )
-    )
-      return deny('Force pushes and remote deletes are never allowed.');
-    const targets = args
-      .filter((a) => !a.startsWith('-'))
-      .slice(1)
-      .map((ref) => ref.split(':').at(-1) ?? ref);
-    if (targets.some((t) => PROTECTED_BRANCHES.has(t.replace(/^refs\/heads\//, ''))))
-      return deny('Pushing to a protected branch is never allowed.');
-  }
-  return null;
+function isRecursiveRm(words: readonly string[]): boolean {
+  return words.some((w) => w === '--recursive' || /^-[a-zA-Z]*[rR]/.test(w));
 }
 
-function rmVerdict(input: GuardInput, words: readonly string[]): GuardVerdict | null {
-  const flags = words.filter((w) => w.startsWith('-')).join('');
-  if (!/[rR]/.test(flags)) return null;
+function rmVerdict(
+  input: GuardInput,
+  words: readonly string[],
+  afterCd: boolean,
+): GuardVerdict | null {
+  if (!isRecursiveRm(words)) return null;
+  if (afterCd)
+    return deny('rm -r after cd is not allowed: the working directory is not the repository.');
   for (const arg of words.slice(1).filter((w) => !w.startsWith('-'))) {
+    if (arg.includes('$')) return deny(`rm -r of ${arg} uses a variable the guard cannot resolve.`);
+    if (arg.split('/').includes('.git')) return deny('rm -r of a .git path is never allowed.');
     const expanded = arg.startsWith('~') ? arg.replace(/^~/, homedir()) : arg;
     const where = resolveInRepo(
       input.repoPath,
@@ -195,19 +88,28 @@ function rmVerdict(input: GuardInput, words: readonly string[]): GuardVerdict | 
     );
     if (!where.inside)
       return deny(`rm -r of ${arg} reaches outside the repository (or is the repository itself).`);
+    if (where.rel.split(sep).includes('.git'))
+      return deny('rm -r of a .git path is never allowed.');
   }
   return null;
 }
 
+const SHELL_C_FLAG = /^-[a-zA-Z]*c[a-zA-Z]*$/;
+
 function judgeShell(input: GuardInput, command: string, depth = 0): GuardVerdict {
+  let afterCd = false;
+  let previousSeparator = '';
   for (const segment of splitCommand(command)) {
     const words = stripCommandPrefixes(segment.words);
     const head = words[0] ?? '';
-    const line = words.join(' ');
+    const piped = previousSeparator === '|';
+    previousSeparator = segment.separator;
     if (head === 'sudo') return deny('sudo is never allowed.');
-    if (SHELLS.has(head) && words.includes('-c') && depth < 3) {
-      const inner = words[words.indexOf('-c') + 1];
-      if (inner !== undefined) {
+    if (SHELLS.has(head)) {
+      if (piped) return deny('Piping into a shell runs commands the guard cannot see.');
+      const flagIndex = words.findIndex((w) => SHELL_C_FLAG.test(w));
+      const inner = flagIndex === -1 ? undefined : words[flagIndex + 1];
+      if (inner !== undefined && depth < 3) {
         const verdict = judgeShell(input, inner, depth + 1);
         if (verdict.decision === 'deny') return verdict;
       }
@@ -218,18 +120,20 @@ function judgeShell(input: GuardInput, command: string, depth = 0): GuardVerdict
     }
     if (head === 'git') {
       const verdict = gitVerdict(words);
-      if (verdict) return verdict;
+      if (verdict) return deny(verdict.deny);
     }
     if (head === 'rm') {
-      const verdict = rmVerdict(input, words);
+      const verdict = rmVerdict(input, words, afterCd);
       if (verdict) return verdict;
     }
-    if (DEPLOY.some((re) => re.test(line)))
-      return deny('Deploy and publish commands are never run by agents.');
+    if (head === 'cd' || head === 'pushd') afterCd = true;
     const forms = commandForms(words);
+    if (DEPLOY.some((re) => forms.lines.some((l) => re.test(l))))
+      return deny('Deploy and publish commands are never run by agents.');
+    const line = words.join(' ');
     for (const hazard of input.hazards) {
       if (
-        hazard.commands.some((c) => forms.some((f) => startsWithWords(f, c.split(' ')))) &&
+        hazard.commands.some((c) => forms.bare.some((f) => startsWithWords(f, c.split(' ')))) &&
         !claimed(input, ClaimKind.Hazard, hazard.name)
       ) {
         return deny(

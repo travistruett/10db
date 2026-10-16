@@ -1,4 +1,4 @@
-import { mkdirSync, symlinkSync } from 'node:fs';
+import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DEFAULT_HAZARDS, type ClaimKind } from '@10db/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -17,18 +17,27 @@ const outside = tempDir('guard-outside');
 beforeAll(() => {
   mkdirSync(join(repo.path, 'src/api'), { recursive: true });
   symlinkSync(outside.path, join(repo.path, 'link'));
+  writeFileSync(join(repo.path, 'src/api/package.json'), '{}');
+  mkdirSync(join(repo.path, 'packages/db/drizzle'), { recursive: true });
+  symlinkSync(join(outside.path, 'new.txt'), join(repo.path, 'src/api/dangling.ts'));
+  symlinkSync('../../../outside-relative/new.txt', join(repo.path, 'src/api/dangling-rel.ts'));
 });
 afterAll(() => {
   repo.cleanup();
   outside.cleanup();
 });
 
+type Claims = { kind: ClaimKind; name: string }[];
+
 const AREAS = [
   { name: 'api', globs: ['src/api/**'] },
   { name: 'ui', globs: ['src/ui/**'] },
+  { name: 'db', globs: ['packages/db/**'] },
 ];
-
-type Claims = { kind: ClaimKind; name: string }[];
+const API_AND_DB: Claims = [
+  { kind: 'area', name: 'api' },
+  { kind: 'area', name: 'db' },
+];
 
 function judge(
   toolName: string,
@@ -143,6 +152,20 @@ describe('file edits', () => {
       decision: 'deny',
       reason: 'hazard',
     },
+    {
+      name: 'dangling symlink to a new file outside the repo',
+      tool: 'Write',
+      path: 'src/api/dangling.ts',
+      decision: 'deny',
+      reason: 'outside the repository',
+    },
+    {
+      name: 'dangling relative symlink that leaves the repo',
+      tool: 'Write',
+      path: 'src/api/dangling-rel.ts',
+      decision: 'deny',
+      reason: 'outside the repository',
+    },
   ])('$name', ({ tool, path, decision, reason }) => {
     const filePath = path.replace('<repo>', repo.path);
     const verdict = judge(tool, {
@@ -187,6 +210,31 @@ describe('file edits', () => {
     expect(
       judge('Edit', { file_path: 'package.json' }, [{ kind: 'area', name: 'deps' }]).decision,
     ).toBe('deny');
+  });
+
+  it.skipIf(process.platform !== 'darwin')('case-insensitive file systems', () => {
+    const rows: { name: string; path: string; reason: string }[] = [
+      {
+        name: 'existing hazard file in another case',
+        path: 'src/api/PACKAGE.JSON',
+        reason: 'hazard',
+      },
+      {
+        name: 'existing hazard directory in another case',
+        path: 'packages/db/DRIZZLE/0003.sql',
+        reason: 'hazard',
+      },
+      {
+        name: 'new hazard file in a new directory in another case',
+        path: 'src/api/NEW/PACKAGE.JSON',
+        reason: 'hazard',
+      },
+    ];
+    for (const row of rows) {
+      const verdict = judge('Write', { file_path: row.path }, API_AND_DB);
+      expect(verdict.decision, row.name).toBe('deny');
+      if (verdict.decision === 'deny') expect(verdict.reason, row.name).toContain(row.reason);
+    }
   });
 
   it('leaves reads alone', () => {
@@ -267,6 +315,71 @@ describe('shell commands', () => {
       decision: 'deny',
     },
     { name: 'filtered test run', command: 'pnpm --filter @10db/db test', decision: 'allow' },
+    { name: 'single & as a separator', command: 'true & git commit -m x', decision: 'deny' },
+    { name: 'subshell', command: '(git commit -m x)', decision: 'deny' },
+    { name: 'brace group', command: '{ git commit -m x; }', decision: 'deny' },
+    { name: 'absolute path to git', command: '/usr/bin/git commit -m x', decision: 'deny' },
+    { name: 'backslash-escaped git', command: '\\git commit -m x', decision: 'deny' },
+    { name: 'absolute path to rm', command: '/bin/rm -rf /tmp/x', decision: 'deny' },
+    { name: 'bash with combined -lc', command: 'bash -lc "git reset --hard"', decision: 'deny' },
+    { name: 'env with a flag', command: 'env -i git commit -m x', decision: 'deny' },
+    { name: 'env with a valued flag', command: 'env -u FOO git commit -m x', decision: 'deny' },
+    { name: 'time with a flag', command: 'time -p git commit -m x', decision: 'deny' },
+    { name: 'xargs wrapper', command: 'xargs git commit -m x', decision: 'deny' },
+    { name: 'xargs with a valued flag', command: 'xargs -n 1 git commit -m x', decision: 'deny' },
+    { name: 'pipe into sh', command: 'echo "git reset --hard" | sh', decision: 'deny' },
+    { name: 'pipe into bash with flags', command: 'cat x | bash -e', decision: 'deny' },
+    { name: 'stderr redirect is not a separator', command: 'git status 2>&1', decision: 'allow' },
+    {
+      name: 'parameter expansion braces are not a group',
+      command: 'echo ${HOME}',
+      decision: 'allow',
+    },
+    { name: 'git with --git-dir', command: 'git --git-dir .git commit -m x', decision: 'deny' },
+    { name: 'git with --git-dir=', command: 'git --git-dir=.git status', decision: 'deny' },
+    { name: 'git with --work-tree', command: 'git --work-tree . commit -m x', decision: 'deny' },
+    { name: 'git with --namespace', command: 'git --namespace x status', decision: 'deny' },
+    { name: 'git with -c config', command: 'git -c alias.s=!sh status', decision: 'deny' },
+    { name: 'git alias verb', command: 'git c -m x', decision: 'deny' },
+    {
+      name: 'git symbolic-ref',
+      command: 'git symbolic-ref HEAD refs/heads/other',
+      decision: 'deny',
+    },
+    { name: 'git config', command: 'git config alias.c commit', decision: 'deny' },
+    { name: 'git fetch', command: 'git fetch origin', decision: 'deny' },
+    { name: 'git tag create', command: 'git tag v1', decision: 'deny' },
+    { name: 'git -C with a read-only verb', command: 'git -C ../other status', decision: 'allow' },
+    { name: 'git show', command: 'git show HEAD', decision: 'allow' },
+    { name: 'git branch --list', command: 'git branch --list', decision: 'allow' },
+    { name: 'push -d', command: 'git push -d origin feat', decision: 'deny' },
+    { name: 'push colon refspec delete', command: 'git push origin :feat', decision: 'deny' },
+    { name: 'push -fu', command: 'git push -fu origin feat', decision: 'deny' },
+    { name: 'push --mirror', command: 'git push --mirror', decision: 'deny' },
+    { name: 'push --all', command: 'git push --all origin', decision: 'deny' },
+    { name: 'push --delete', command: 'git push --delete origin feat', decision: 'deny' },
+    { name: 'push +refspec', command: 'git push origin +feat', decision: 'deny' },
+    { name: 'push -u', command: 'git push -u origin feat', decision: 'allow' },
+    { name: 'pnpm -r publish', command: 'pnpm -r publish', decision: 'deny' },
+    { name: 'pnpm --filter publish', command: 'pnpm --filter x publish', decision: 'deny' },
+    { name: 'npx vercel deploy --prod', command: 'npx vercel deploy --prod', decision: 'deny' },
+    { name: 'pnpm dlx vercel --prod', command: 'pnpm dlx vercel --prod', decision: 'deny' },
+    { name: 'rm -rf with $HOME', command: 'rm -rf $HOME/projects', decision: 'deny' },
+    { name: 'rm -rf with quoted $HOME', command: 'rm -rf "$HOME"', decision: 'deny' },
+    { name: 'rm -rf .git', command: 'rm -rf .git', decision: 'deny' },
+    { name: 'rm -rf nested .git', command: 'rm -rf sub/.git/hooks', decision: 'deny' },
+    { name: 'rm -r after cd', command: 'cd .. && rm -rf sibling', decision: 'deny' },
+    { name: 'rm -r --recursive form', command: 'rm --recursive ../x', decision: 'deny' },
+    {
+      name: 'rm --force of a file is not recursive',
+      command: 'rm --force build/a.txt',
+      decision: 'allow',
+    },
+    {
+      name: 'rm -r of a dotfile that merely starts with .git',
+      command: 'rm -rf .github/tmp',
+      decision: 'allow',
+    },
     { name: 'a subcommand that only starts like add', command: 'pnpm addons', decision: 'allow' },
   ])('$name: $command -> $decision', ({ command, decision }) => {
     expect(bash(command).decision).toBe(decision);

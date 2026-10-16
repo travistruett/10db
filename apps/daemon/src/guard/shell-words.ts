@@ -1,14 +1,16 @@
+import { basename } from 'node:path';
+
 export interface ShellSegment {
   /** The segment's text with quotes kept, for quote-aware checks. */
   readonly raw: string;
   /** Words with quotes removed. */
   readonly words: string[];
-  /** The operator that ended the segment: `&&`, `||`, `;`, `|`, newline, or empty at the end. */
+  /** The operator that ended the segment: `&&`, `||`, `;`, `|`, `&`, `(`, `)`, newline, or empty at the end. */
   readonly separator: string;
 }
 
 /**
- * Splits a shell command at unquoted `&&`, `||`, `;`, `|` and newlines. The bodies of `$(…)` and
+ * Splits a shell command at unquoted `&&`, `||`, `;`, `|`, `&`, newlines, parentheses and standalone braces. The bodies of `$(…)` and
  * backtick substitutions (outside single quotes) are split too and appended as their own
  * segments, because they run as commands.
  */
@@ -74,8 +76,23 @@ export function splitCommand(command: string): ShellSegment[] {
       i += 1;
       continue;
     }
-    if (ch === ';' || ch === '|' || ch === '\n') {
+    // A lone `&` backgrounds the command before it; `>&`, `<&` and `&>` are redirections.
+    const prev = command.charAt(i - 1);
+    const redirection = ch === '&' && (prev === '>' || prev === '<' || next === '>');
+    if (
+      ch === ';' ||
+      ch === '|' ||
+      ch === '\n' ||
+      ch === '(' ||
+      ch === ')' ||
+      (ch === '&' && !redirection)
+    ) {
       flushSegment(ch);
+      continue;
+    }
+    // `{` and `}` only open or close a group when they stand alone as words.
+    if ((ch === '{' || ch === '}') && word === '' && /^[\s;]?$/.test(next)) {
+      flushSegment('');
       continue;
     }
     raw += ch;
@@ -87,15 +104,42 @@ export function splitCommand(command: string): ShellSegment[] {
   return out;
 }
 
-const PREFIX_COMMANDS = new Set(['env', 'command', 'nohup', 'time', 'exec']);
+/** Wrappers that run the rest of the line, with the flags that take a value. */
+const WRAPPERS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  ['env', new Set(['-u', '-C', '-S', '--unset', '--chdir'])],
+  ['command', new Set<string>()],
+  ['nohup', new Set<string>()],
+  ['time', new Set(['-f', '-o', '--format', '--output'])],
+  ['exec', new Set(['-a'])],
+  ['xargs', new Set(['-n', '-I', '-P', '-L', '-s', '-d', '-E', '-a'])],
+]);
 
-/** Drops leading `VAR=value` assignments and pass-through wrappers such as `env` and `nohup`. */
+/** A command's name as the shell would run it: `/usr/bin/git` and `\git` are both `git`. */
+function commandName(word: string): string {
+  return basename(word.replace(/^\\+/, ''));
+}
+
+/**
+ * Drops leading `VAR=value` assignments and pass-through wrappers such as `env`, `nohup` and
+ * `xargs` together with their flags, and names the command it finds by its basename.
+ */
 export function stripCommandPrefixes(words: readonly string[]): string[] {
   let i = 0;
   while (i < words.length) {
     const w = words[i] ?? '';
-    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(w) || PREFIX_COMMANDS.has(w)) i += 1;
-    else break;
+    const valueFlags = WRAPPERS.get(commandName(w));
+    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(w)) {
+      i += 1;
+    } else if (valueFlags) {
+      i += 1;
+      while (i < words.length && (words[i] ?? '').startsWith('-')) {
+        i += valueFlags.has(words[i] ?? '') ? 2 : 1;
+      }
+    } else {
+      break;
+    }
   }
-  return words.slice(i);
+  const rest = words.slice(i);
+  const head = rest[0];
+  return head === undefined ? rest : [commandName(head), ...rest.slice(1)];
 }
