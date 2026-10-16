@@ -80,9 +80,8 @@ function seedProjectAndWorkstreams() {
   return { projectId, ws1: ws(), ws2: ws() };
 }
 
-function columnNames(table: string): string[] {
-  const rows = db.$client.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]; // PRAGMA output shape is fixed by SQLite
-  return rows.map((row) => row.name);
+function columnNames(table: string): unknown[] {
+  return db.$client.prepare('SELECT name FROM pragma_table_info(?)').pluck().all(table);
 }
 
 describe('schema', () => {
@@ -152,10 +151,12 @@ describe('schema', () => {
     expect(columnNames(table)).toEqual(expect.arrayContaining(expected));
   });
 
-  it.each(['events', 'tool_ops', 'evidence', 'handoffs'])(
+  it.each(['events', 'tool_ops', 'evidence', 'handoffs', 'sources'])(
     'keeps append-only table %s free of updated_at',
     (table) => {
-      expect(columnNames(table)).not.toContain('updated_at');
+      const columns = columnNames(table);
+      expect(columns).not.toHaveLength(0);
+      expect(columns).not.toContain('updated_at');
     },
   );
 });
