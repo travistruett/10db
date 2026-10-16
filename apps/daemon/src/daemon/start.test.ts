@@ -4,6 +4,7 @@ import { WorkstreamId } from '@10db/contracts';
 import { getWorkstream } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
+import { WebSocket } from 'ws';
 import { createTempRepo, tempDir, waitFor } from '../../test/fixtures';
 import { FakeAdapter, type FakeScriptBook } from '../sessions';
 import { AlreadyRunningError, readRuntimeInfo, startDaemon, type RunningDaemon } from './index';
@@ -94,6 +95,31 @@ describe('startDaemon', () => {
       }),
     });
     expect(res.status).toBe(400);
+  });
+
+  it('stops while a UI client is still connected to the event stream', async () => {
+    const running = await startDaemon({
+      dataDir: dir.path,
+      port: 0,
+      adapter: new FakeAdapter({}),
+      logLevel: 'warn',
+    });
+    const client = new WebSocket(
+      `ws://127.0.0.1:${String(running.port)}/events/stream?after=0&token=${running.token}`,
+    );
+    await new Promise<void>((resolve, reject) => {
+      client.once('open', resolve);
+      client.once('error', reject);
+    });
+    const outcome = await Promise.race([
+      running.stop().then(() => 'stopped'),
+      new Promise<string>((r) =>
+        setTimeout(() => {
+          r('hung');
+        }, 3000),
+      ),
+    ]);
+    expect(outcome).toBe('stopped');
   });
 
   it('does not count a clean stop against the recovery limit', async () => {
