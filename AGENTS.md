@@ -28,7 +28,8 @@ A local macOS control plane that runs Claude Code sessions as a software factory
 - Pin every dependency exactly, latest stable when added. A held-back pin gets a row in
   `docs/architecture/decisions.md` saying why.
 - Generated files are never edited by hand: `packages/contracts/generated/`,
-  `packages/db/drizzle/`. `make gate` fails when they drift.
+  `packages/db/drizzle/`. `make gate` fails when they drift. The exception is a
+  `drizzle-kit generate --custom` migration: it is authored by hand once and never regenerated.
 - Done means `make gate` printed `GATE PASS`. Docs are part of done.
 
 ## Git

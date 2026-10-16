@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "inboxId": {
+      "type": "string",
+      "pattern": "^inb_[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "answer": {
+      "type": "string"
+    },
+    "note": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "inboxId",
+    "answer",
+    "note"
+  ]
+}

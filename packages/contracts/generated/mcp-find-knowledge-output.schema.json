@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "decision"
+          },
+          "id": {
+            "type": "string",
+            "pattern": "^dec_[0-9A-HJKMNP-TV-Z]{26}$"
+          },
+          "question": {
+            "type": "string"
+          },
+          "choice": {
+            "type": "string"
+          },
+          "rationale": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "question",
+          "choice",
+          "rationale"
+        ]
+      }
+    },
+    "empty": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "results",
+    "empty"
+  ]
+}

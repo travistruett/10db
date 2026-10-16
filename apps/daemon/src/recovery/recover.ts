@@ -1,0 +1,177 @@
+import {
+  ACTIVE_STATES,
+  EventType,
+  WorkstreamState as S,
+  type InboxItemId,
+  type NextAction,
+  type WorkstreamId,
+} from '@10db/contracts';
+import {
+  clearLease,
+  endSession,
+  getProject,
+  getTask,
+  getWorkstreamRow,
+  latestHandoff,
+  latestToolOp,
+  listInbox,
+  listSessions,
+  listWorkstreams,
+  openItemsForWorkstream,
+  patchWorkstream,
+  releaseClaims,
+  transitionWorkstream,
+} from '@10db/db';
+import type { StateStore } from '../events';
+import type { Git } from '../git';
+import type { InboxService } from '../inbox';
+import type { Logger } from '../log';
+import { nextActionAfterCrash } from '../runner';
+import type { ProcessTerminator } from './processes';
+
+export interface RecoveryReport {
+  readonly requeued: WorkstreamId[];
+  readonly failed: WorkstreamId[];
+  readonly parked: WorkstreamId[];
+  readonly redelivered: InboxItemId[];
+}
+
+/** States that keep their place: only the dead daemon's lease, session and processes are cleaned up. */
+const KEEP_STATE = new Set<string>([S.Queued, S.PausedLimit]);
+
+/** The most dirty files one recovery event records. */
+const MAX_DIRTY_FILES = 200;
+
+/**
+ * Runs once at startup, before the scheduler, so no runner races it. Every non-terminal workstream
+ * loses its dead session, gate process and lease; lane work is then re-queued (or failed once it
+ * has used its attempts), waiting work is parked on its card, and answered cards are redelivered.
+ */
+export async function recoverOnStartup(opts: {
+  readonly state: StateStore;
+  readonly inbox: InboxService;
+  readonly git: Git;
+  readonly processes: ProcessTerminator;
+  readonly maxRecoveryAttempts: number;
+  readonly logger: Logger;
+  /** The previous daemon stopped cleanly, so this restart is not a failed attempt. */
+  readonly cleanShutdown?: boolean;
+}): Promise<RecoveryReport> {
+  const db = opts.state.db;
+  const report: RecoveryReport = { requeued: [], failed: [], parked: [], redelivered: [] };
+
+  for (const ws of listWorkstreams(db, { states: ACTIVE_STATES })) {
+    const row = getWorkstreamRow(db, ws.id);
+    const project = getProject(db, row.projectId);
+    const sessions = listSessions(db, ws.id);
+    const live = sessions.filter((s) => s.endedAt === null);
+    for (const s of live) {
+      if (s.pid !== null && s.pidStart !== null) {
+        await opts.processes.terminate({ pid: s.pid, startedAt: s.pidStart });
+      }
+    }
+    if (row.gatePid !== null && row.gatePidStart !== null) {
+      await opts.processes.terminate({
+        pid: row.gatePid,
+        startedAt: row.gatePidStart,
+        group: true,
+      });
+    }
+    const providerSessionId =
+      [...sessions].reverse().find((s) => s.providerSessionId !== null)?.providerSessionId ?? null;
+    opts.state.write((ctx) => {
+      for (const s of live) endSession(ctx, s.id, 'daemon_restart');
+      patchWorkstream(ctx, ws.id, null, {
+        currentSessionId: null,
+        gatePid: null,
+        gatePidStart: null,
+      });
+      clearLease(ctx, ws.id);
+    });
+    if (KEEP_STATE.has(row.state)) continue;
+
+    const waiting = row.state === S.WaitingHuman;
+    const open = waiting ? openItemsForWorkstream(db, ws.id)[0] : undefined;
+    if (open) {
+      const nextAction: NextAction = { kind: 'answer', inboxId: open.id, providerSessionId };
+      opts.state.write((ctx) => {
+        patchWorkstream(ctx, ws.id, null, { nextAction });
+      });
+      report.parked.push(ws.id);
+      continue;
+    }
+
+    const head = await opts.git.head(project.repoPath).catch(() => 'unknown');
+    const dirty = await opts.git
+      .status(project.repoPath)
+      .then((s) => s.map((x) => x.path))
+      .catch(() => []);
+    const lastOp = latestToolOp(db, ws.id);
+    const attempts = opts.cleanShutdown ? row.recoveryAttempts : row.recoveryAttempts + 1;
+    const nextAction: NextAction =
+      row.state === S.Verifying || row.nextAction.kind === 'verify'
+        ? { kind: 'verify' }
+        : nextActionAfterCrash(row.nextAction, providerSessionId, latestHandoff(db, ws.id));
+    // A waiting workstream has no edge to FAILED, and it never ran a session this boot.
+    const failed = !waiting && attempts > opts.maxRecoveryAttempts;
+    opts.state.write((ctx) => {
+      if (row.state !== S.Recovering && !waiting) {
+        transitionWorkstream(ctx, ws.id, {
+          to: S.Recovering,
+          fence: null,
+          reason: opts.cleanShutdown
+            ? 'daemon restarted after a clean shutdown'
+            : 'daemon restarted',
+        });
+      }
+      ctx.emit({
+        type: EventType.RecoveryStep,
+        entityType: 'workstream',
+        entityId: ws.id,
+        data: {
+          step: 'reconciled',
+          head,
+          dirtyFiles: dirty.slice(0, MAX_DIRTY_FILES),
+          lastOpId: lastOp?.opId ?? null,
+          sessionsEnded: live.length,
+        },
+      });
+      if (failed) {
+        transitionWorkstream(ctx, ws.id, {
+          to: S.Failed,
+          fence: null,
+          patch: {
+            recoveryAttempts: attempts,
+            failureReason: `Recovery failed ${String(attempts)} times`,
+          },
+        });
+        releaseClaims(ctx, ws.id);
+      } else {
+        transitionWorkstream(ctx, ws.id, {
+          to: S.Queued,
+          fence: null,
+          patch: { nextAction, recoveryAttempts: attempts },
+          reason: 'recovered after restart',
+        });
+      }
+    });
+    if (failed) {
+      opts.inbox.flag({
+        projectId: project.id,
+        workstreamId: ws.id,
+        title: `Workstream failed: ${getTask(db, row.taskId).title}`,
+        body: `Recovery failed ${String(attempts)} times.`,
+      });
+      report.failed.push(ws.id);
+    } else {
+      report.requeued.push(ws.id);
+    }
+  }
+
+  for (const item of listInbox(db, { states: ['ANSWERED', 'DELIVERING'] })) {
+    opts.inbox.redeliver(item.id);
+    report.redelivered.push(item.id);
+  }
+  opts.logger.info({ ...report }, 'startup recovery complete');
+  return report;
+}

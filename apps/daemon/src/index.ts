@@ -1,1 +1,1 @@
-export type { AppType } from './api/app';
+export type { AppType } from './api';

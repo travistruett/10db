@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "opId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._:-]{8,100}$",
+      "description": "A unique ID for this call. Reuse it only when retrying the same call."
+    },
+    "category": {
+      "type": "string",
+      "enum": [
+        "product",
+        "design",
+        "engineering",
+        "environment",
+        "other"
+      ]
+    },
+    "question": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000
+    },
+    "options": {
+      "minItems": 2,
+      "maxItems": 4,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "description": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "description"
+        ]
+      }
+    },
+    "recommendation": {
+      "type": "string"
+    },
+    "urgency": {
+      "default": "normal",
+      "type": "string",
+      "enum": [
+        "low",
+        "normal",
+        "high"
+      ]
+    },
+    "consequences": {
+      "type": "string"
+    },
+    "affectedScope": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "opId",
+    "category",
+    "question",
+    "options"
+  ]
+}

@@ -14,6 +14,7 @@ const DaemonEnv = z.object({
   TENDB_DATA_DIR: z.string().min(1).optional(),
   TENDB_PORT: z.coerce.number().int().min(0).max(65535).default(4317),
   TENDB_LOG_LEVEL: z.enum(LogLevel).default(LogLevel.Info),
+  TENDB_FAKE_SCRIPTS: z.string().min(1).optional(),
 });
 export type DaemonEnv = z.infer<typeof DaemonEnv>;
 
