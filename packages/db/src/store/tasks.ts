@@ -12,7 +12,7 @@ import {
   type TaskDto,
   type TaskId,
 } from '@10db/contracts';
-import { and, desc, eq, inArray, max } from 'drizzle-orm';
+import { and, desc, eq, inArray, max, ne } from 'drizzle-orm';
 import * as schema from '../schema';
 import { getProject } from './projects';
 import type { DbReader, WriteContext } from './store';
@@ -29,7 +29,13 @@ export function deriveBoardStatus({
   depsDone,
   workstreamState,
 }: BoardStatusInput): BoardStatus {
-  if (taskStatus === TaskStatus.Done) return BoardStatus.Done;
+  switch (taskStatus) {
+    case TaskStatus.Done:
+    case TaskStatus.Cancelled:
+      return BoardStatus.Done;
+    case TaskStatus.Open:
+      break;
+  }
   if (
     workstreamState === WorkstreamState.WaitingHuman ||
     workstreamState === WorkstreamState.PausedLimit ||
@@ -106,7 +112,7 @@ export function dependenciesDone(db: DbReader, taskId: TaskId): boolean {
     .select({ id: schema.tasks.id })
     .from(schema.taskDeps)
     .innerJoin(schema.tasks, eq(schema.tasks.id, schema.taskDeps.dependsOnId))
-    .where(and(eq(schema.taskDeps.taskId, taskId), eq(schema.tasks.status, TaskStatus.Open)))
+    .where(and(eq(schema.taskDeps.taskId, taskId), ne(schema.tasks.status, TaskStatus.Done)))
     .all();
   return pending.length === 0;
 }
@@ -121,7 +127,7 @@ function toTaskDto(db: DbReader, row: typeof schema.tasks.$inferSelect): TaskDto
     .select({ id: schema.workstreams.id, state: schema.workstreams.state })
     .from(schema.workstreams)
     .where(eq(schema.workstreams.taskId, row.id))
-    .orderBy(desc(schema.workstreams.createdAt))
+    .orderBy(desc(schema.workstreams.createdAt), desc(schema.workstreams.id))
     .limit(1)
     .get();
   return {

@@ -1,16 +1,19 @@
 import {
   BoardStatus,
   ConflictError,
+  Effort,
   EventType,
   InvalidError,
   mintId,
   NotFoundError,
+  WorkstreamState,
 } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import * as schema from '../schema';
 import { listEventsAfter } from './events';
 import { getProject, insertProject, listProjects } from './projects';
 import type { Store, WriteContext } from './store';
-import { deriveBoardStatus, insertTask, listTasks, setTaskStatus } from './tasks';
+import { deriveBoardStatus, getTask, insertTask, listTasks, setTaskStatus } from './tasks';
 import { createTestStore, seedProject } from './test-support';
 
 let store: Store;
@@ -87,6 +90,61 @@ describe('tasks', () => {
     expect(b.id).toBe(after['B']?.id);
   });
 
+  it('keeps a task with a cancelled dependency out of Ready', () => {
+    const project = seedProject(store);
+    const a = store.write((ctx) =>
+      insertTask(ctx, project.id, { title: 'A', acceptanceCriteria: ['a'], areas: ['api'] }),
+    ).value;
+    const b = store.write((ctx) =>
+      insertTask(ctx, project.id, {
+        title: 'B',
+        acceptanceCriteria: ['b'],
+        areas: ['ui'],
+        dependsOn: [a.id],
+      }),
+    ).value;
+    store.write((ctx) => {
+      setTaskStatus(ctx, a.id, 'cancelled');
+    });
+    expect(getTask(store.db, a.id).boardStatus).toBe(BoardStatus.Done);
+    expect(getTask(store.db, b.id).boardStatus).toBe(BoardStatus.Backlog);
+  });
+
+  it('picks the later-minted workstream when two share a creation time', () => {
+    const fixed = new Date('2026-01-01T00:00:00.000Z');
+    const fixedStore = createTestStore(() => fixed);
+    try {
+      const project = seedProject(fixedStore.store);
+      const task = fixedStore.store.write((ctx) =>
+        insertTask(ctx, project.id, { title: 'A', acceptanceCriteria: ['a'], areas: ['api'] }),
+      ).value;
+      const at = fixed.toISOString();
+      const ids = [mintId('Workstream'), mintId('Workstream')] as const;
+      for (const id of ids) {
+        fixedStore.store.db
+          .insert(schema.workstreams)
+          .values({
+            id,
+            taskId: task.id,
+            projectId: project.id,
+            state: WorkstreamState.Queued,
+            nextAction: { kind: 'start' },
+            attempt: 1,
+            recoveryAttempts: 0,
+            model: 'm',
+            effort: Effort.Medium,
+            fence: 0,
+            createdAt: at,
+            updatedAt: at,
+          })
+          .run();
+      }
+      expect(getTask(fixedStore.store.db, task.id).workstreamId).toBe(ids[1]);
+    } finally {
+      fixedStore.close();
+    }
+  });
+
   it('rejects an area the project does not define', () => {
     const project = seedProject(store);
     expect(() =>
@@ -138,6 +196,11 @@ describe('deriveBoardStatus', () => {
       'failed',
       { taskStatus: 'open', depsDone: true, workstreamState: 'FAILED' },
       BoardStatus.Blocked,
+    ],
+    [
+      'cancelled task',
+      { taskStatus: 'cancelled', depsDone: true, workstreamState: null },
+      BoardStatus.Done,
     ],
     [
       'cancelled run',
