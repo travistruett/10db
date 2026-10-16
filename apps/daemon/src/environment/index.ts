@@ -3,6 +3,7 @@ export {
   BILLING_SWITCH_VARS,
   buildSessionEnv,
   inferBillingMode,
+  isBillingSwitch,
   keychainSecrets,
   NESTED_SESSION_VARS,
   SessionEnvError,

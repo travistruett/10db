@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import {
   query as sdkQuery,
   type AccountInfo,
+  type McpServerConfig,
   type Options,
   type Query,
   type SDKSystemMessage,
@@ -23,6 +24,7 @@ import {
   userMessage,
 } from './claude-mapping';
 import { TENDB_MCP_SERVER } from './project-mcp';
+import { projectSettingsBillingProblem } from './project-settings';
 import type { SessionAdapter, SessionEvent, SessionHandle, SessionSpec } from './types';
 
 export const CLAUDE_MCP_SERVER = TENDB_MCP_SERVER;
@@ -88,6 +90,26 @@ function spawnClaude(
   return child;
 }
 
+/** 10db's own server and the repo's approved ones, keyed by name. 10db's is written last, so it keeps its name. */
+export function buildMcpServers(spec: SessionSpec): Record<string, McpServerConfig> {
+  return {
+    ...Object.fromEntries(
+      Object.entries(spec.projectMcpServers).map(([name, server]) => [
+        name,
+        toSdkMcpServer(server),
+      ]),
+    ),
+    [CLAUDE_MCP_SERVER]: {
+      type: 'http',
+      url: spec.mcp.url,
+      headers: { Authorization: `Bearer ${spec.mcp.token}` },
+      timeout: spec.mcp.toolTimeoutMs,
+      // Deferred behind tool search, the agent might not see write_handoff when it needs it.
+      alwaysLoad: true,
+    },
+  };
+}
+
 export function buildQueryOptions(spec: SessionSpec, deps: QueryDeps): Options {
   return {
     cwd: spec.cwd,
@@ -98,28 +120,12 @@ export function buildQueryOptions(spec: SessionSpec, deps: QueryDeps): Options {
     pathToClaudeCodeExecutable: deps.claudePath,
     // Never 'user' or 'local': user hooks and plugins stay out (spec §3), and settings.local.json can switch billing.
     settingSources: ['project'],
-    // Claude Code reads no MCP config itself; the repo's .mcp.json arrives through the spec.
+    // Claude Code reads no MCP config itself. No `mcpServers` here either: the SDK would put them on claude's
+    // command line, readable by any local account. They arrive over the control channel (setMcpServers).
     strictMcpConfig: true,
     // Set explicitly: the builder's own autoCompactEnabled: false (global ~/.claude.json) reaches the session despite
     // settingSources. Compaction stays on as the emergency fallback.
     settings: { autoCompactEnabled: true },
-    mcpServers: {
-      ...Object.fromEntries(
-        Object.entries(spec.projectMcpServers).map(([name, server]) => [
-          name,
-          toSdkMcpServer(server),
-        ]),
-      ),
-      // Last, so 10db's own server always keeps its name.
-      [CLAUDE_MCP_SERVER]: {
-        type: 'http',
-        url: spec.mcp.url,
-        headers: { Authorization: `Bearer ${spec.mcp.token}` },
-        timeout: spec.mcp.toolTimeoutMs,
-        // Deferred behind tool search, the agent might not see write_handoff when it needs it.
-        alwaysLoad: true,
-      },
-    },
     plugins: [{ type: 'local', path: deps.pluginDir }],
     allowedTools: [...spec.allowedTools],
     permissionMode: 'default',
@@ -176,6 +182,14 @@ function settleWithin<T>(clock: Clock, promise: Promise<T>, ms: number): Promise
   });
 }
 
+/** A line for the prompt naming repo servers that didn't connect, so the agent doesn't hunt for their tools. */
+function failedServersNote(names: readonly string[]): string {
+  return (
+    `Note from 10db: these MCP servers from the repo's .mcp.json failed to connect and are not in this session: ${names.join(', ')}. ` +
+    "Don't look for their tools. Work without them, or say in your handoff that the task needs one."
+  );
+}
+
 type EndReason = Extract<SessionEvent, { type: 'ended' }>['reason'];
 
 function startSession(
@@ -186,6 +200,8 @@ function startSession(
   const graceMs = opts.stopGraceMs ?? STOP_GRACE_MS;
   const clock = opts.clock ?? systemClock;
   const log = opts.logger.child({ sessionId: spec.sessionId, workstreamId: spec.workstreamId });
+  const fixHint =
+    "Check the project's billing mode and any env block in the repo's .claude/settings.json.";
   const events = createChannel<SessionEvent>();
   const input = createChannel<SDKUserMessage>();
   const abortController = new AbortController();
@@ -226,11 +242,23 @@ function startSession(
     events.end();
     markFinished();
   };
+  // Read through a function: TypeScript would otherwise keep the narrowing from before the awaits.
+  const halted = (): boolean => ended || stopRequested;
   const endReason = (): EndReason => {
     if (failure) return 'error';
     if (stopRequested) return 'stopped';
     return limitRejected ? 'rate_limited' : 'completed';
   };
+
+  // The repo's committed settings can re-point the endpoint or credentials, which no account check would show.
+  const settingsProblem = projectSettingsBillingProblem(spec.cwd);
+  if (settingsProblem) {
+    const message = `Billing check failed: ${settingsProblem}. No prompt was sent. ${fixHint}`;
+    log.error({ reason: message }, 'claude session refused');
+    events.push({ type: 'ended', reason: 'error', message });
+    events.end();
+    return { events, send: () => undefined, stop: () => Promise.resolve() };
+  }
 
   // The prompt is not pushed yet: it goes in only after the billing preflight passes.
   const q = runQuery({
@@ -258,9 +286,6 @@ function startSession(
     void settleWithin(clock, q.interrupt(), graceMs);
     abortController.abort();
   };
-  const fixHint =
-    "Check the project's billing mode and any env block in the repo's .claude/settings.json.";
-
   /**
    * Before the prompt: the account Claude Code loaded must match the project's billing mode. A named
    * function, not an IIFE: TypeScript reads an IIFE as running inline, and would narrow `ended` to false.
@@ -284,7 +309,27 @@ function startSession(
       resolvePreflight(false);
       return;
     }
-    input.push(userMessage(spec.prompt));
+    let leftOut: string[];
+    try {
+      leftOut = Object.keys((await q.setMcpServers(buildMcpServers(spec))).errors);
+    } catch (error) {
+      log.error({ err: String(error) }, 'claude mcp servers could not be registered');
+      refuse('Claude Code could not register the MCP servers. No prompt was sent.');
+      return;
+    }
+    if (halted()) {
+      resolvePreflight(false);
+      return;
+    }
+    if (leftOut.length > 0) log.warn({ servers: leftOut }, 'claude mcp servers failed to connect');
+    const repoLeftOut = leftOut.filter((name) => name !== CLAUDE_MCP_SERVER);
+    input.push(
+      userMessage(
+        repoLeftOut.length > 0
+          ? `${spec.prompt}\n\n${failedServersNote(repoLeftOut)}`
+          : spec.prompt,
+      ),
+    );
     promptSent = true;
     resolvePreflight(true);
   };

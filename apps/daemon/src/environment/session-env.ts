@@ -6,6 +6,7 @@ export const BILLING_SWITCH_VARS = [
   'ANTHROPIC_API_KEY',
   'ANTHROPIC_AUTH_TOKEN',
   'ANTHROPIC_BASE_URL',
+  'ANTHROPIC_CUSTOM_HEADERS',
   'ANTHROPIC_MODEL',
   'CLAUDE_CODE_USE_BEDROCK',
   'CLAUDE_CODE_USE_VERTEX',
@@ -105,7 +106,8 @@ export class SessionEnvError extends Error {
 const SWITCHES: readonly string[] = BILLING_SWITCH_VARS;
 const NESTED: readonly string[] = NESTED_SESSION_VARS;
 
-function isBillingSwitch(name: string): boolean {
+/** Whether `name` is a billing-switch variable or belongs to a provider-switch family. */
+export function isBillingSwitch(name: string): boolean {
   return (
     SWITCHES.includes(name) || BILLING_SWITCH_PREFIXES.some((prefix) => name.startsWith(prefix))
   );

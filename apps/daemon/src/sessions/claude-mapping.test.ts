@@ -212,6 +212,8 @@ describe('billingMismatch', () => {
     [BillingMode.Subscription, 'none', 'firstParty', 'Claude Pro', false],
     [BillingMode.ApiKey, 'ANTHROPIC_API_KEY', 'firstParty', undefined, false],
     [BillingMode.ApiKey, 'none', 'firstParty', undefined, true],
+    [BillingMode.ApiKey, 'ANTHROPIC_API_KEY', 'bedrock', undefined, true],
+    [BillingMode.ApiKey, 'ANTHROPIC_API_KEY', undefined, undefined, true],
     [BillingMode.Bedrock, 'none', 'bedrock', undefined, false],
     [BillingMode.Bedrock, 'none', 'firstParty', undefined, true],
   ] as const)(

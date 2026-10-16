@@ -176,7 +176,7 @@ export function billingMismatch(
         ? null
         : `expected the Claude subscription but saw ${saw}`;
     case BillingMode.ApiKey:
-      return seen.apiKeySource === 'ANTHROPIC_API_KEY'
+      return seen.apiKeySource === 'ANTHROPIC_API_KEY' && seen.apiProvider === 'firstParty'
         ? null
         : `expected an Anthropic API key but saw ${saw}`;
     case BillingMode.Bedrock:
