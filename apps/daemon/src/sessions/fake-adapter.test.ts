@@ -1,10 +1,11 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { mintId } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { tempDir } from '../../test/fixtures';
 import {
   FakeAdapter,
+  loadFakeScriptBook,
   type FakeScriptBook,
   type SessionEvent,
   type SessionSpec,
@@ -191,5 +192,19 @@ describe('FakeAdapter', () => {
     const adapter = new FakeAdapter({ Alpha: [[{ do: 'end' }]] });
     await collect(adapter.start(spec({ resumeProviderSessionId: 'prov-1' })).events);
     expect(adapter.prompts[0]).toMatchObject({ title: 'Alpha', resume: 'prov-1' });
+  });
+});
+
+describe('loadFakeScriptBook', () => {
+  it('reads a script book from disk', () => {
+    const file = join(dir.path, 'book.json');
+    writeFileSync(file, JSON.stringify({ Alpha: [[{ do: 'turn_complete' }]] }));
+    expect(loadFakeScriptBook(file)).toEqual({ Alpha: [[{ do: 'turn_complete' }]] });
+  });
+
+  it('rejects a file whose steps are not valid', () => {
+    const file = join(dir.path, 'bad.json');
+    writeFileSync(file, JSON.stringify({ Alpha: [[{ do: 'explode' }]] }));
+    expect(() => loadFakeScriptBook(file)).toThrow();
   });
 });

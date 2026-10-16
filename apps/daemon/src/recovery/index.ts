@@ -1,2 +1,2 @@
 export { recoverOnStartup } from './recover';
-export { systemProcesses } from './processes';
+export { systemProcesses, type ProcessTerminator } from './processes';

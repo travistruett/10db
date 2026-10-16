@@ -1,4 +1,4 @@
-export { FakeAdapter, FakeScriptBook } from './fake-adapter';
+export { FakeAdapter, FakeScriptBook, loadFakeScriptBook } from './fake-adapter';
 export type {
   SessionAdapter,
   SessionEvent,
@@ -7,3 +7,4 @@ export type {
   ToolDecision,
   ToolRequest,
 } from './types';
+export { createUnavailableAdapter } from './unavailable-adapter';

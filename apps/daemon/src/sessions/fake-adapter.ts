@@ -41,6 +41,11 @@ export type FakeStep = z.infer<typeof FakeStep>;
 export const FakeScriptBook = z.record(z.string(), z.array(z.array(FakeStep)));
 export type FakeScriptBook = z.infer<typeof FakeScriptBook>;
 
+/** Reads a script book from a JSON file, validating it at the file boundary. */
+export function loadFakeScriptBook(path: string): FakeScriptBook {
+  return FakeScriptBook.parse(JSON.parse(readFileSync(path, 'utf8')));
+}
+
 export interface FakeObservation {
   readonly sessionId: SessionId;
   readonly sequence: number;

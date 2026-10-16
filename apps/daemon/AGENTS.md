@@ -22,7 +22,7 @@ serves agents over MCP, and runs Claude Code sessions.
 modules import only that (ESLint enforces it). Dependencies point one way:
 
 `clock`, `log`, `events`, `guard`, `permissions`, `git`, `verify` → `sessions`, `inbox`, `briefing` →
-`mcp` → `runner` → `scheduler`, `recovery` → `daemon` (composition root) → `main.ts`.
+`mcp` → `runner` → `scheduler`, `recovery`, `backups` → `daemon` (composition root) → `main.ts`.
 `api` depends only on `@10db/contracts` and its own `ApiServices` interface; the composition root
 implements it and hands it to `createApp` in `ApiDeps`.
 

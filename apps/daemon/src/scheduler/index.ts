@@ -1,2 +1,2 @@
 export { createProviderPauses } from './provider-pauses';
-export { createScheduler } from './scheduler';
+export { createScheduler, type Scheduler } from './scheduler';
