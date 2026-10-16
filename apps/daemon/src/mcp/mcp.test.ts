@@ -13,6 +13,7 @@ import {
   insertSession,
   listInbox,
   patchWorkstream,
+  schema,
   type Store,
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -21,6 +22,7 @@ import { createTempRepo, seedWorkstream } from '../../test/fixtures';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit } from '../git';
 import { createInboxService, type InboxService } from '../inbox';
+import type { Logger } from '../log';
 import { createMcpHandler, mintSessionToken } from './index';
 
 let repo: { path: string; cleanup(): void };
@@ -32,10 +34,26 @@ let server: ReturnType<typeof serve>;
 let url: string;
 const git = createGit();
 
+interface LogEntry {
+  readonly obj: object;
+  readonly msg: string | undefined;
+}
+const logged: LogEntry[] = [];
+const capturingLogger: Logger = {
+  debug: () => undefined,
+  info: () => undefined,
+  warn: () => undefined,
+  error: (obj, msg) => {
+    logged.push({ obj, msg });
+  },
+  child: () => capturingLogger,
+};
+
 const ToolContent = z.array(z.object({ type: z.string(), text: z.string() }));
 const JsonObject = z.record(z.string(), z.unknown());
 
 beforeEach(async () => {
+  logged.length = 0;
   repo = createTempRepo();
   const test = createTestStore();
   close = test.close;
@@ -46,6 +64,7 @@ beforeEach(async () => {
     state,
     inbox,
     git,
+    log: capturingLogger,
     waitObserverFor: () => undefined,
     sessionSignal: () => undefined,
   });
@@ -353,6 +372,62 @@ describe('MCP tools', () => {
     expect(result.text).toContain('nowhere');
   });
 
+  it('names a nonexistent path when commit cannot stage it', async () => {
+    const s = await seedSession();
+    const result = await s.call('commit', {
+      opId: 'op-commit-typo',
+      paths: ['src/api/typo.ts'],
+      message: 'x',
+    });
+    expect(result.isError).toBe(true);
+    expect(result.text).toContain('src/api/typo.ts');
+    expect(result.text).not.toContain('Internal error');
+    expect(commitCount()).toBe(1);
+  });
+
+  it('reports malformed input from the schema as a readable tool error', async () => {
+    const s = await seedSession();
+    const result = await s.call('record_evidence', {
+      opId: 'x',
+      command: 'pnpm test',
+      exitCode: 0,
+      summary: 'ok',
+    });
+    expect(result.isError).toBe(true);
+    expect(result.text).toContain('opId');
+  });
+
+  it('logs an unexpected error and does not promise a retry will work', async () => {
+    const failing = createMcpHandler({
+      state,
+      inbox,
+      git: { ...git, commit: () => Promise.reject(new Error('disk exploded')) },
+      log: capturingLogger,
+      waitObserverFor: () => undefined,
+      sessionSignal: () => undefined,
+    });
+    const failingServer = serve({ fetch: failing, hostname: '127.0.0.1', port: 0 });
+    await new Promise((r) => failingServer.once('listening', r));
+    try {
+      // See the beforeEach cast.
+      url = `http://127.0.0.1:${String((failingServer.address() as AddressInfo).port)}/mcp`;
+      const s = await seedSession();
+      writeRepoFile('src/api/d.ts', 'export {}\n');
+      const result = await s.call('commit', {
+        opId: 'op-commit-boom',
+        paths: ['src/api/d.ts'],
+        message: 'd',
+      });
+      expect(result.isError).toBe(true);
+      expect(result.text).not.toContain('retry the call with the same opId');
+      expect(result.text).toContain('commit');
+      expect(logged).toHaveLength(1);
+      expect(logged[0]?.obj).toMatchObject({ tool: 'commit', opId: 'op-commit-boom' });
+    } finally {
+      failingServer.close();
+    }
+  });
+
   it('rejects an opId reused for a different tool', async () => {
     const s = await seedSession();
     await s.call('record_decision', {
@@ -369,6 +444,8 @@ describe('MCP tools', () => {
       reason: 'y',
     });
     expect(reused.isError).toBe(true);
+    expect(reused.text).toContain('already used for record_decision');
+    expect(state.db.select().from(schema.deviations).all()).toHaveLength(0);
   });
 
   it('waits on ask_human until the builder answers', async () => {
@@ -398,6 +475,7 @@ describe('MCP tools', () => {
       state,
       inbox,
       git,
+      log: capturingLogger,
       waitObserverFor: () => undefined,
       sessionSignal: () => abort.signal,
     });
@@ -426,5 +504,106 @@ describe('MCP tools', () => {
     } finally {
       parkedServer.close();
     }
+  });
+});
+
+describe('MCP idempotence by opId', () => {
+  const rows = {
+    decisions: () => state.db.select().from(schema.decisions).all().length,
+    proposals: () => state.db.select().from(schema.proposals).all().length,
+    deviations: () => state.db.select().from(schema.deviations).all().length,
+    evidence: () => state.db.select().from(schema.evidence).all().length,
+    handoffs: () => state.db.select().from(schema.handoffs).all().length,
+    claims: () => state.db.select().from(schema.claims).all().length,
+    inbox: () => listInbox(state.db, {}).length,
+  };
+  const handoff = {
+    objective: { task: 'Alpha', acceptanceCriteria: ['it works'], nonGoals: [] },
+    progress: { done: [], notDone: [], nextAction: 'Write d' },
+    codeState: { uncommittedSummary: '' },
+    reasoning: { decisions: [], tradeOffs: [], rejected: [] },
+    validation: { checks: [], environmentProblems: [] },
+    continuity: { blockers: [], pendingQuestions: [], backgroundJobs: [], notes: '' },
+  };
+  const table: {
+    name: string;
+    tool: string;
+    args: Record<string, unknown>;
+    // Rows that exist after the call, keyed by what each call must have created.
+    created: Partial<Record<keyof typeof rows, number>>;
+  }[] = [
+    {
+      name: 'record_decision',
+      tool: 'record_decision',
+      args: { opId: 'op-idem-0001', question: 'q?', choice: 'c', rationale: 'r', scope: 'project' },
+      created: { decisions: 1 },
+    },
+    {
+      name: 'propose (one proposal and one card)',
+      tool: 'propose',
+      args: { opId: 'op-idem-0002', kind: 'new_task', title: 'Add x', body: 'because' },
+      created: { proposals: 1, inbox: 1 },
+    },
+    {
+      name: 'report_deviation',
+      tool: 'report_deviation',
+      args: { opId: 'op-idem-0003', cause: 'x', severity: 'info', reason: 'y' },
+      created: { deviations: 1 },
+    },
+    {
+      name: 'record_evidence',
+      tool: 'record_evidence',
+      args: { opId: 'op-idem-0004', command: 'pnpm test', exitCode: 0, summary: 'ok' },
+      created: { evidence: 1 },
+    },
+    {
+      name: 'write_handoff',
+      tool: 'write_handoff',
+      args: { opId: 'op-idem-0005', ...handoff },
+      created: { handoffs: 1 },
+    },
+    {
+      name: 'request_claim (granted)',
+      tool: 'request_claim',
+      args: { opId: 'op-idem-0006', kind: 'area', name: 'ui', reason: 'badge' },
+      // The session's own api claim plus the granted ui claim.
+      created: { claims: 2 },
+    },
+  ];
+
+  it.each(table)('$name runs once for a repeated opId', async ({ tool, args, created }) => {
+    const s = await seedSession();
+    const first = await s.call(tool, args);
+    const second = await s.call(tool, args);
+    expect(first.isError).toBe(false);
+    expect(second.json).toEqual(first.json);
+    for (const [key, expected] of Object.entries(created)) {
+      expect(rows[key as keyof typeof rows](), key).toBe(expected);
+    }
+  });
+
+  it('answers a repeated ask_human from the recorded result without a second card', async () => {
+    const s = await seedSession();
+    const args = {
+      opId: 'op-idem-0007',
+      category: 'design',
+      question: 'Teal or red?',
+      options: [
+        { label: 'Teal', description: '' },
+        { label: 'Red', description: '' },
+      ],
+    };
+    const pending = s.call('ask_human', args);
+    let card;
+    for (let i = 0; i < 50 && !card; i += 1) {
+      await new Promise((r) => setTimeout(r, 20));
+      card = listInbox(state.db, { states: ['OPEN'] })[0];
+    }
+    if (!card) throw new Error('no card opened');
+    inbox.answer(card.id, { choice: 'Teal' });
+    const first = await pending;
+    const second = await s.call('ask_human', args);
+    expect(second.json).toEqual(first.json);
+    expect(rows.inbox()).toBe(1);
   });
 });

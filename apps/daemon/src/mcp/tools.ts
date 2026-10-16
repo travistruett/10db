@@ -34,11 +34,13 @@ import type { StateStore } from '../events';
 import type { Git } from '../git';
 import { judgeToolUse } from '../guard';
 import type { InboxService, WaitObserver } from '../inbox';
+import type { Logger } from '../log';
 
 export interface McpDeps {
   readonly state: StateStore;
   readonly inbox: InboxService;
   readonly git: Git;
+  readonly log: Logger;
   waitObserverFor(sessionId: SessionId): WaitObserver | undefined;
   sessionSignal(sessionId: SessionId): AbortSignal | undefined;
 }

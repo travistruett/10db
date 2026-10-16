@@ -7,14 +7,19 @@ import { ParkedError } from '../inbox';
 import { hashToken } from './tokens';
 import { createToolHandlers, TOOL_DESCRIPTIONS, type McpDeps } from './tools';
 
-function errorText(error: unknown): string {
+function errorText(error: unknown, deps: McpDeps, tool: string, args: unknown): string {
   // The card stays open; its answer reaches the next session's prompt, so a retry would open a second card.
   if (error instanceof ParkedError)
     return '10db parked this session until the builder answers. Do not ask again: the answer arrives in the prompt of the session that resumes this work. End your turn now.';
   if (error instanceof DomainError) return error.message;
   if (error instanceof z.ZodError)
     return `Invalid input: ${error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')}`;
-  return 'Internal error in 10db; retry the call with the same opId.';
+  const opId = z.object({ opId: z.string() }).safeParse(args);
+  deps.log.error(
+    { err: error, tool, opId: opId.success ? opId.data.opId : null },
+    'mcp tool failed',
+  );
+  return `The ${tool} call failed inside 10db and was not completed. Check that your input is valid for the current repository state; if it keeps failing, report the problem to the builder with ask_human.`;
 }
 
 /** Stateless streamable-HTTP MCP endpoint; the bearer token identifies the calling session. */
@@ -38,7 +43,10 @@ export function createMcpHandler(deps: McpDeps): (req: Request) => Promise<Respo
             const output = await handler(schema.parse(args));
             return { content: [{ type: 'text' as const, text: JSON.stringify(output) }] };
           } catch (error) {
-            return { isError: true, content: [{ type: 'text' as const, text: errorText(error) }] };
+            return {
+              isError: true,
+              content: [{ type: 'text' as const, text: errorText(error, deps, name, args) }],
+            };
           }
         },
       );

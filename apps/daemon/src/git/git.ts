@@ -143,7 +143,16 @@ export function createGit(): Git {
       return withRepoLock(repo, async () => {
         const existing = await findCommitByOp(repo, opId);
         if (existing) return { sha: existing, alreadyCommitted: true };
-        await git(repo, ['add', '-A', '--', ...clean]);
+        try {
+          await git(repo, ['add', '-A', '--', ...clean]);
+        } catch (error) {
+          if (error instanceof GitError && /pathspec .* did not match/i.test(error.stderr)) {
+            throw new InvalidError(
+              `No file or change at ${clean.join(', ')}: a path must exist or have been deleted since the last commit`,
+            );
+          }
+          throw error;
+        }
         try {
           await git(repo, [
             'commit',
