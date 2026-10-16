@@ -17,3 +17,4 @@ only process that writes the database.
 - Tests use a real database file in a temp directory, never `:memory:`, so WAL and file paths are
   exercised.
 - The daemon bundle ships its own copy of `drizzle/`; pass its path to `migrateDatabase`.
+- Repositories are synchronous functions over `DbReader` (reads) or `WriteContext` (writes); never open a second connection.

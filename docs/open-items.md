@@ -9,3 +9,16 @@
 - [ ] Replace the placeholder app icon.
 - [ ] Post-MVP: backup export and import (spec §13 fast-follow).
 - [ ] Renovate bumps Rust in `mise.toml` but not `rust-toolchain.toml`; match them by hand in that PR (a repo test fails until they agree).
+- [ ] M2: "answered from D-n" lookup before a question reaches the inbox (spec §7).
+- [ ] M2: reviewer approval in flows with a review step before DONE (spec §5.4).
+- [ ] M2: per-workstream log files for the Factory detail view (spec §12; M1a has one shared daemon log, decision 31).
+- [ ] M2: diagnostics bundle export (spec §12; not built in M1a).
+- [ ] M2: project settings for extra allowed commands (test and lint), beyond the gate command.
+- [ ] Spec §8.1: reword "claims are released when the lease expires" to match decision 36 (released on DONE, CANCELLED or FAILED, never by lease expiry).
+- [ ] M2: let a resumed agent retrying `ask_human` with the same `opId` get the parked answer back, instead of only the "do not ask again" message.
+- [ ] M2: inject the environment into `createGit(env)` instead of reading `process.env` in `git.ts` (M1b already calls `createGit()` with no arguments).
+- [ ] Spec §5.1: "Ready" does not yet check for an open blocking inbox item.
+- [ ] Spec §9: the context pack uses FTS only; area match is not built.
+- [ ] Spec §12: the fake adapter is typed at the `SessionEvent` seam, not with the SDK's message types; M1b's scripted query covers the SDK level.
+- [ ] Spec §4: the projects budget ceiling, the inbox delivery record and the workstream flow, persona and profile fields are not built yet.
+- [ ] A multi-question `AskUserQuestion` parked mid-sequence drops the earlier answers, so the agent re-asks. Fix: open all question cards up front, or include every card resolved for the workstream in the resume prompt.

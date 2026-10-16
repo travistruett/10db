@@ -27,3 +27,5 @@ modules import only that (ESLint enforces it). Dependencies point one way:
 implements it and hands it to `createApp` in `ApiDeps`.
 
 Time comes from an injected `Clock`; never call `Date.now()` or `setTimeout` directly in logic.
+
+The fake adapter (`sessions/fake-adapter.ts`) is the test boundary for Claude Code; daemon tests never call the real CLI.
