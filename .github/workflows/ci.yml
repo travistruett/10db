@@ -30,7 +30,7 @@ jobs:
           persist-credentials: false
       - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
         with:
-          version: 2026.10.10
+          version: 2026.10.11
           # gate.sh runs all of tests/repo: the hook and policy tests spawn gitleaks, actionlint and
           # zizmor, and mise-action creates shims only for installed tools.
           install_args: node pnpm gitleaks actionlint zizmor
@@ -49,7 +49,7 @@ jobs:
           persist-credentials: false
       - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
         with:
-          version: 2026.10.10
+          version: 2026.10.11
           install_args: node pnpm rust
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -69,7 +69,7 @@ jobs:
           persist-credentials: false
       - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
         with:
-          version: 2026.10.10
+          version: 2026.10.11
           install_args: node pnpm rust gitleaks actionlint zizmor
       - run: pnpm install --frozen-lockfile
       - name: PR title is a Conventional Commit
@@ -107,6 +107,6 @@ jobs:
           persist-credentials: false
       - uses: jdx/mise-action@08ae2a091c038e1e05ec6f5115dc5c69d5a2a6b8 # v5.1.2
         with:
-          version: 2026.10.10
+          version: 2026.10.11
           install_args: rust cargo-deny
       - run: make deny
