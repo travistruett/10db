@@ -1,6 +1,13 @@
 import { ConflictError, mintId, WorkstreamState as S } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { acquireClaims, activeClaims, claimRequestsForTask, releaseClaims } from './claims';
+import {
+  acquireClaims,
+  activeClaims,
+  claimRequestsForTask,
+  releaseClaims,
+  renewClaimLeases,
+  type ClaimRequest,
+} from './claims';
 import { findToolOp, insertToolOp } from './tool-ops';
 import { getSession, insertSession, markSessionStarted } from './sessions';
 import type { Store } from './store';
@@ -11,6 +18,7 @@ import {
   countLanes,
   getWorkstreamRow,
   insertWorkstream,
+  listWorkstreams,
   patchWorkstream,
   StaleFenceError,
   transitionWorkstream,
@@ -18,7 +26,11 @@ import {
 
 let store: Store;
 let close: () => void;
-beforeEach(() => ({ store, close } = createTestStore()));
+let nowMs: number;
+beforeEach(() => {
+  nowMs = Date.parse('2026-10-13T12:00:00.000Z');
+  ({ store, close } = createTestStore(() => new Date(nowMs)));
+});
 afterEach(() => {
   close();
 });
@@ -227,17 +239,135 @@ describe('claims', () => {
   });
 });
 
+describe('claim cases', () => {
+  const lease = '2026-10-13T12:01:00.000Z';
+  const area = (name: string): ClaimRequest => ({ kind: 'area', name });
+  const hazard = (name: string): ClaimRequest => ({ kind: 'hazard', name });
+  const acquire = (
+    projectId: ReturnType<typeof seedProject>['id'],
+    workstreamId: ReturnType<typeof seedWorkstream>['ws']['id'],
+    requests: ClaimRequest[],
+  ) =>
+    store.write((ctx) =>
+      acquireClaims(ctx, { projectId, workstreamId, requests, leaseExpiresAt: lease }),
+    );
+  const names = (events: { type: string }[], type: string) =>
+    events.filter((e) => e.type === type).length;
+
+  it.each([
+    {
+      name: 'hazard against the same hazard',
+      first: [hazard('migrations')],
+      second: [hazard('migrations')],
+      free: false,
+    },
+    {
+      name: 'two different hazards at once',
+      first: [hazard('migrations')],
+      second: [hazard('deps')],
+      free: true,
+    },
+    {
+      name: 'area and hazard of one name are different claims',
+      first: [area('x')],
+      second: [hazard('x')],
+      free: true,
+    },
+  ])('$name', ({ first, second, free }) => {
+    const a = seedWorkstream('A', ['api']);
+    const b = seedWorkstream('B', ['ui'], a.project);
+    expect(acquire(a.project.id, a.ws.id, first).value.ok).toBe(true);
+    const result = acquire(b.project.id, b.ws.id, second);
+    expect(result.value.ok).toBe(free);
+    expect(activeClaims(store.db, b.ws.id)).toHaveLength(free ? second.length : 0);
+    expect(names(result.events, 'claim.acquired')).toBe(free ? second.length : 0);
+  });
+
+  it('treats the same name in another project as free', () => {
+    const a = seedWorkstream('A', ['api']);
+    const b = seedWorkstream('B', ['api']);
+    expect(acquire(a.project.id, a.ws.id, [area('api')]).value.ok).toBe(true);
+    expect(acquire(b.project.id, b.ws.id, [area('api')]).value.ok).toBe(true);
+  });
+
+  it('collapses duplicate requests in one call into one claim', () => {
+    const a = seedWorkstream('A', ['api']);
+    const result = acquire(a.project.id, a.ws.id, [area('api'), area('api')]);
+    expect(result.value.ok).toBe(true);
+    expect(activeClaims(store.db, a.ws.id)).toHaveLength(1);
+    expect(names(result.events, 'claim.acquired')).toBe(1);
+  });
+
+  it('emits no event when re-acquiring a claim already held', () => {
+    const a = seedWorkstream('A', ['api']);
+    acquire(a.project.id, a.ws.id, [area('api')]);
+    const again = acquire(a.project.id, a.ws.id, [area('api')]);
+    expect(again.events).toEqual([]);
+    expect(activeClaims(store.db, a.ws.id)).toHaveLength(1);
+  });
+
+  it('releases every active claim, returns the count, and leaves released ones alone', () => {
+    const a = seedWorkstream('A', ['api']);
+    acquire(a.project.id, a.ws.id, [area('api'), hazard('migrations')]);
+    const first = store.write((ctx) => releaseClaims(ctx, a.ws.id));
+    expect(first.value).toBe(2);
+    expect(names(first.events, 'claim.released')).toBe(2);
+    expect(activeClaims(store.db, a.ws.id)).toEqual([]);
+    const second = store.write((ctx) => releaseClaims(ctx, a.ws.id));
+    expect(second.value).toBe(0);
+    expect(second.events).toEqual([]);
+  });
+
+  it('renews only active claims of the listed workstreams and stamps updatedAt', () => {
+    const a = seedWorkstream('A', ['api']);
+    const b = seedWorkstream('B', ['ui'], a.project);
+    const c = seedWorkstream('C', ['api'], a.project);
+    acquire(a.project.id, a.ws.id, [area('api')]);
+    acquire(a.project.id, b.ws.id, [area('ui')]);
+    acquire(a.project.id, c.ws.id, [area('data')]);
+    store.write((ctx) => releaseClaims(ctx, c.ws.id));
+    const renewed = '2026-10-13T13:00:00.000Z';
+    nowMs = Date.parse('2026-10-13T12:30:00.000Z');
+    store.write((ctx) => {
+      renewClaimLeases(ctx, [a.ws.id, c.ws.id], renewed);
+    });
+    const [ca] = activeClaims(store.db, a.ws.id);
+    expect(ca).toMatchObject({ leaseExpiresAt: renewed, updatedAt: '2026-10-13T12:30:00.000Z' });
+    const [cb] = activeClaims(store.db, b.ws.id);
+    expect(cb).toMatchObject({ leaseExpiresAt: lease, updatedAt: '2026-10-13T12:00:00.000Z' });
+    expect(activeClaims(store.db, c.ws.id)).toEqual([]);
+  });
+
+  it('treats an empty renewal list as a no-op', () => {
+    const a = seedWorkstream('A', ['api']);
+    acquire(a.project.id, a.ws.id, [area('api')]);
+    nowMs += 60_000;
+    store.write((ctx) => {
+      renewClaimLeases(ctx, [], '2026-10-13T13:00:00.000Z');
+    });
+    expect(activeClaims(store.db, a.ws.id)[0]).toMatchObject({ leaseExpiresAt: lease });
+  });
+});
+
 describe('claim requests', () => {
-  it('turns a hazard-named area into a hazard claim', () => {
-    expect(
-      claimRequestsForTask(
-        { areas: ['api', 'migrations'] },
-        { hazards: [{ name: 'migrations', globs: [], commands: [] }] },
-      ),
-    ).toEqual([
-      { kind: 'area', name: 'api' },
-      { kind: 'hazard', name: 'migrations' },
-    ]);
+  const hz = (name: string) => ({ name, globs: [], commands: [] });
+  it.each([
+    { name: 'no hazards', areas: ['api', 'ui'], hazards: [], kinds: ['area', 'area'] },
+    {
+      name: 'all hazards',
+      areas: ['migrations', 'deps'],
+      hazards: ['migrations', 'deps'],
+      kinds: ['hazard', 'hazard'],
+    },
+    {
+      name: 'a mix',
+      areas: ['api', 'migrations'],
+      hazards: ['migrations'],
+      kinds: ['area', 'hazard'],
+    },
+  ])('$name', ({ areas, hazards, kinds }) => {
+    const out = claimRequestsForTask({ areas }, { hazards: hazards.map(hz) });
+    expect(out).toEqual(areas.map((name, i) => ({ kind: kinds[i], name })));
   });
 });
 
@@ -269,6 +399,14 @@ describe('tool ops', () => {
       tool: 'commit',
       result: { sha: 'a' },
     });
+  });
+});
+
+describe('listWorkstreams ordering', () => {
+  it('keeps insertion order when created_at is equal', () => {
+    const project = seedProject(store);
+    const made = ['A', 'B', 'C', 'D'].map((title) => seedWorkstream(title, ['api'], project).ws.id);
+    expect(listWorkstreams(store.db, {}).map((w) => w.id)).toEqual(made);
   });
 });
 

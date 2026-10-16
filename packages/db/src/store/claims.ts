@@ -71,7 +71,8 @@ export function acquireClaims(
   },
 ): AcquireResult {
   const toInsert: ClaimRequest[] = [];
-  for (const request of input.requests) {
+  const unique = new Map(input.requests.map((r) => [`${r.kind}:${r.name}`, r]));
+  for (const request of unique.values()) {
     const holder = activeHolder(ctx.tx, input.projectId, request);
     if (holder && holder.workstreamId !== input.workstreamId) {
       return {

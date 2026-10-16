@@ -95,7 +95,7 @@ export function listWorkstreams(
     .select()
     .from(schema.workstreams)
     .where(and(...where))
-    .orderBy(asc(schema.workstreams.createdAt))
+    .orderBy(asc(schema.workstreams.createdAt), asc(schema.workstreams.id))
     .all()
     .map((r) => toDto(db, r));
 }
