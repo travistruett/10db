@@ -12,7 +12,7 @@ serves agents over MCP, and runs Claude Code sessions.
 - Listen on `127.0.0.1` only.
 - `pnpm --filter @10db/daemon build` bundles to `dist/daemon.mjs` and copies migrations to
   `dist/drizzle/`. `better-sqlite3` stays external (native addon), so it is a daemon dependency
-  even though only `@10db/db` imports it; `knip.json` ignores it for that reason.
+  even though only `@10db/db` imports it (the crash test also reads the database file with it).
 - `pnpm --filter @10db/daemon dev` runs from source with tsx and loads `apps/daemon/.env` when it
   exists. Copy `.env.example` to `.env` to override a variable; `.env` is git-ignored.
 

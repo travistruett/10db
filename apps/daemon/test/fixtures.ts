@@ -88,3 +88,17 @@ export function handoffArgs(opId: string, nextAction: string): Record<string, un
     continuity: { blockers: [], pendingQuestions: [], backgroundJobs: [], notes: '' },
   };
 }
+
+/** Polls an async `check` until it returns a value (not undefined/false) or the deadline passes. */
+export async function waitForAsync<T>(
+  check: () => Promise<T | undefined | false>,
+  timeoutMs = 10_000,
+): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const value = await check();
+    if (value !== undefined && value !== false) return value;
+    if (Date.now() > deadline) throw new Error('waitForAsync timed out');
+    await new Promise((r) => setTimeout(r, 25));
+  }
+}

@@ -5,8 +5,7 @@
       "entry": [".claude/hooks/*.mjs", "scripts/**/*.mjs"]
     },
     "apps/daemon": {
-      "entry": ["src/main.ts", "scripts/*.ts"],
-      "ignoreDependencies": ["better-sqlite3"]
+      "entry": ["src/main.ts", "scripts/*.ts"]
     },
     "apps/desktop": {
       "entry": ["src/main.tsx"]
