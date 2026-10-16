@@ -60,6 +60,9 @@ function launchDaemon(): ChildProcess {
     env: {
       PATH: process.env['PATH'] ?? '',
       HOME: process.env['HOME'] ?? '',
+      // The child's git must not read the contributor's own config (hooks, signing, templates).
+      GIT_CONFIG_GLOBAL: '/dev/null',
+      GIT_CONFIG_NOSYSTEM: '1',
       TENDB_DATA_DIR: data.path,
       TENDB_PORT: '0',
       TENDB_LOG_LEVEL: 'warn',

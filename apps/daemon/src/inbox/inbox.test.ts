@@ -305,6 +305,12 @@ describe('permission broker', () => {
     expect(listPermissionRules(state.db, ws.project.id, ws.workstream.id)).toEqual([
       expect.objectContaining({ toolName: 'Bash', pattern: 'docker compose', workstreamId: null }),
     ]);
+    expect(searchDecisions(state.db, ws.project.id, 'docker compose', 5)).toEqual([
+      expect.objectContaining({
+        question: 'Allow Bash (docker compose) in this project?',
+        choice: 'Always allow',
+      }),
+    ]);
     expect(await decide(request('Bash', { command: 'docker compose logs' }))).toEqual({
       behavior: 'allow',
     });
