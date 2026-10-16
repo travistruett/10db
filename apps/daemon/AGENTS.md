@@ -7,7 +7,7 @@ serves agents over MCP, and runs Claude Code sessions.
   hands it `process.env`. Every variable is in `.env.example` with a comment. Errors name variables
   and problems, never values.
 - `src/api/` is typechecked by the desktop app too (it imports `AppType`). Code there must not import
-  `node:*` modules or `@10db/db`; receive services through `ApiDeps` interfaces.
+  `node:*` modules or `@10db/db`; receive services through the `ApiServices` interface (passed in `ApiDeps`).
 - The package entry (`src/index.ts`) exports types only.
 - Listen on `127.0.0.1` only.
 - `pnpm --filter @10db/daemon build` bundles to `dist/daemon.mjs` and copies migrations to
@@ -23,6 +23,7 @@ modules import only that (ESLint enforces it). Dependencies point one way:
 
 `clock`, `log`, `events`, `guard`, `permissions`, `git`, `verify` → `sessions`, `inbox`, `briefing` →
 `mcp` → `runner` → `scheduler`, `recovery` → `daemon` (composition root) → `main.ts`.
-`api` depends only on `@10db/contracts` and its own `ApiServices` interface.
+`api` depends only on `@10db/contracts` and its own `ApiServices` interface; the composition root
+implements it and hands it to `createApp` in `ApiDeps`.
 
 Time comes from an injected `Clock`; never call `Date.now()` or `setTimeout` directly in logic.
