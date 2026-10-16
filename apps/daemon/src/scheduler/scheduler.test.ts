@@ -22,6 +22,7 @@ let state: StateStore;
 let clock: ManualClock;
 let launched: { id: WorkstreamId; fence: number }[];
 let paused: Set<string>;
+let running: Set<WorkstreamId>;
 
 beforeEach(() => {
   ({ store, close } = createTestStore());
@@ -29,6 +30,7 @@ beforeEach(() => {
   clock = new ManualClock();
   launched = [];
   paused = new Set();
+  running = new Set();
 });
 afterEach(() => {
   close();
@@ -47,6 +49,7 @@ function scheduler(caps = { global: 4, perProvider: 4 }) {
       launch: (id, fence) => {
         launched.push({ id, fence });
       },
+      isRunning: (id) => running.has(id),
     },
     pauses: { isPaused: (p) => paused.has(p) },
   });
@@ -90,6 +93,38 @@ describe('scheduler', () => {
         .map((l) => getWorkstreamRow(store.db, l.id).projectId)
         .filter((p) => p === a.project.id),
     ).toHaveLength(1);
+  });
+
+  it('enforces the provider cap on its own', () => {
+    queue();
+    queue();
+    queue();
+    expect(scheduler({ global: 4, perProvider: 2 }).tick()).toBe(2);
+    expect(launched).toHaveLength(2);
+  });
+
+  it('re-queues PAUSED_LIMIT work that outlived its provider pause', () => {
+    const a = queue();
+    const s = scheduler();
+    s.tick();
+    state.write((ctx) => {
+      transitionWorkstream(ctx, a.workstream.id, { to: 'PAUSED_LIMIT', fence: null });
+    });
+    launched = [];
+
+    paused.add('claude');
+    s.tick();
+    expect(getWorkstream(store.db, a.workstream.id).state).toBe('PAUSED_LIMIT');
+
+    paused.clear();
+    running.add(a.workstream.id);
+    s.tick();
+    expect(getWorkstream(store.db, a.workstream.id).state).toBe('PAUSED_LIMIT');
+
+    running.clear();
+    s.tick();
+    expect(launched.map((l) => l.id)).toEqual([a.workstream.id]);
+    expect(getWorkstream(store.db, a.workstream.id).state).toBe('STARTING');
   });
 
   it('waits for dependencies', () => {

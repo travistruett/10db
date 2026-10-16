@@ -18,7 +18,10 @@ import type { Logger } from '../log';
 
 export interface SchedulerOptions {
   readonly state: StateStore;
-  readonly runner: { launch(id: WorkstreamId, fence: number): void };
+  readonly runner: {
+    launch(id: WorkstreamId, fence: number): void;
+    isRunning(id: WorkstreamId): boolean;
+  };
   readonly pauses: { isPaused(provider: Provider): boolean };
   readonly clock: Clock;
   readonly instanceId: string;
@@ -42,7 +45,25 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
   let pending = false;
   let started = false;
 
+  // A runner can write PAUSED_LIMIT after the pause's reset timer already fired, so the timer
+  // found nothing to re-queue; work paused for a provider that is no longer paused is re-queued here.
+  function requeueExpiredPauses(): void {
+    for (const ws of listWorkstreams(db, { states: [WorkstreamState.PausedLimit] })) {
+      if (opts.runner.isRunning(ws.id)) continue;
+      if (opts.pauses.isPaused(getProject(db, ws.projectId).provider)) continue;
+      opts.state.write((ctx) => {
+        transitionWorkstream(ctx, ws.id, {
+          to: WorkstreamState.Queued,
+          fence: null,
+          patch: { pausedUntil: null },
+          reason: 'usage limit reset',
+        });
+      });
+    }
+  }
+
   function tick(): number {
+    requeueExpiredPauses();
     const lanes = countLanes(db);
     let global = lanes.global;
     const byProject = new Map(lanes.byProject);
