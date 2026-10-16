@@ -1,5 +1,8 @@
 import type { PermissionRuleDto, ProjectDto } from '@10db/contracts';
-import { splitCommand, stringField, stripCommandPrefixes } from '../guard';
+import { join } from 'node:path';
+import { z } from 'zod';
+import { resolveInRepo, splitCommand, stringField, stripCommandPrefixes } from '../guard';
+import { isLiteralSegment, plainSegments, type PlainSegment } from './plain-segments';
 
 /** Allow rules injected into every managed session. The guard still checks claims. */
 export function baseAllowedTools(project: Pick<ProjectDto, 'gateCommand'>): string[] {
@@ -19,70 +22,145 @@ export function baseAllowedTools(project: Pick<ProjectDto, 'gateCommand'>): stri
     'Bash(git diff:*)',
     'Bash(git log:*)',
     'Bash(git show:*)',
-    'Bash(ls:*)',
     'Bash(pwd)',
   ];
 }
 
-/** One normalized line per command segment, including substitution bodies. */
-function segmentLines(command: string): string[] {
-  return splitCommand(command).map((s) => stripCommandPrefixes(s.words).join(' '));
-}
+const ToolInput = z.record(z.string(), z.unknown());
+/** Tools that only read; the base allow covers them inside the repository. */
+const READ_TOOLS = new Set(['Read', 'Glob', 'Grep', 'LS']);
+/** Input fields of the read tools that name a place on disk. */
+const PATH_FIELDS = ['file_path', 'notebook_path', 'path', 'pattern'];
 
 function startsWithWords(line: string, prefix: string): boolean {
   return line === prefix || line.startsWith(`${prefix} `);
 }
 
-function bashRuleMatches(rule: string, line: string): boolean {
-  if (rule.endsWith(':*')) return startsWithWords(line, rule.slice(0, -2));
-  return line === rule;
+function segmentKey(segment: PlainSegment): string {
+  return `${segment.line}\u0000${segment.separator}`;
 }
 
-/** Whether an allow-list entry (`Name`, `prefix*`, `Bash(cmd)`, `Bash(prefix:*)`) permits the call. */
+function bashEntryMatches(entry: string, segments: readonly PlainSegment[]): boolean {
+  const rule = /^Bash\((.+)\)$/.exec(entry)?.[1];
+  if (rule === undefined) return false;
+  if (rule.endsWith(':*')) {
+    const prefix = rule.slice(0, -2);
+    return segments.every((s) => startsWithWords(s.line, prefix));
+  }
+  const expected = plainSegments(rule);
+  return (
+    expected !== null &&
+    expected.length === segments.length &&
+    expected.every((e, i) => segmentKey(e) === segmentKey(segments[i] ?? e))
+  );
+}
+
+/** The repository root itself resolves as outside, so a child probe stands in for it. */
+function inRepoOrIsRepo(repoPath: string, value: string): boolean {
+  return resolveInRepo(repoPath, value).inside || resolveInRepo(repoPath, join(value, '_')).inside;
+}
+
+/** Whether every path a read tool names resolves inside the repository; no path means the repository. */
+function readsInsideRepo(input: unknown, repoPath: string): boolean {
+  const parsed = ToolInput.safeParse(input);
+  if (!parsed.success) return false;
+  return PATH_FIELDS.every((field) => {
+    const value = parsed.data[field];
+    if (value === undefined) return true;
+    if (typeof value !== 'string') return false;
+    return !value.startsWith('~') && inRepoOrIsRepo(repoPath, value);
+  });
+}
+
+function mcpEntryMatches(entry: string, toolName: string): boolean {
+  const server = entry.slice('mcp__'.length, -'__*'.length);
+  const [prefix, name, ...tool] = toolName.split('__');
+  const toolPart = tool.join('__');
+  return prefix === 'mcp' && name === server && /^[A-Za-z0-9]/.test(toolPart);
+}
+
+/**
+ * Whether an allow-list entry (`Name`, `prefix*`, `mcp__server__*`, `Bash(cmd)`, `Bash(prefix:*)`)
+ * permits the call. A Bash entry covers only plain segments, and every segment must be covered.
+ */
 export function matchesAllowedTool(
   toolName: string,
   input: unknown,
   allowed: readonly string[],
+  repoPath: string,
 ): boolean {
-  for (const entry of allowed) {
-    const bashRule = /^Bash\((.+)\)$/.exec(entry)?.[1];
-    if (bashRule !== undefined) {
-      const command = toolName === 'Bash' ? stringField(input, 'command') : null;
-      if (command === null) continue;
-      const lines = segmentLines(command);
-      if (lines.length > 0 && lines.every((line) => bashRuleMatches(bashRule, line))) return true;
-      continue;
-    }
-    if (entry.endsWith('*') ? toolName.startsWith(entry.slice(0, -1)) : toolName === entry)
-      return true;
+  if (toolName === 'Bash') {
+    const command = stringField(input, 'command');
+    const segments = command === null ? null : plainSegments(command);
+    if (segments === null) return false;
+    return (
+      allowed.some((entry) => bashEntryMatches(entry, segments)) ||
+      segments.every((segment) => allowed.some((entry) => bashEntryMatches(entry, [segment])))
+    );
   }
-  return false;
+  return allowed.some((entry) => {
+    if (entry.startsWith('Bash(')) return false;
+    if (READ_TOOLS.has(toolName) && entry === toolName) return readsInsideRepo(input, repoPath);
+    if (entry.startsWith('mcp__') && entry.endsWith('__*')) return mcpEntryMatches(entry, toolName);
+    return entry.endsWith('*') ? toolName.startsWith(entry.slice(0, -1)) : toolName === entry;
+  });
 }
 
-/** First word, plus the subcommand when the second word is not a flag: "docker compose", "curl". */
-export function commandPrefix(command: string): string {
-  const words = stripCommandPrefixes(splitCommand(command)[0]?.words ?? []);
+const INTERPRETERS = new Set([
+  'sh',
+  'bash',
+  'zsh',
+  'fish',
+  'node',
+  'deno',
+  'bun',
+  'ruby',
+  'perl',
+  'npx',
+  'env',
+  'xargs',
+]);
+const SUBCOMMAND = /^[A-Za-z][A-Za-z0-9_-]*$/;
+
+function runsOtherCommands(words: readonly string[]): boolean {
   const [first = '', second] = words;
-  return second !== undefined &&
-    !second.startsWith('-') &&
-    !second.includes('/') &&
-    !second.includes(':')
-    ? `${first} ${second}`
-    : first;
+  if (INTERPRETERS.has(first) || /^python[\d.]*$/.test(first)) return true;
+  return (
+    (first === 'pnpm' && (second === 'dlx' || second === 'exec')) ||
+    (first === 'npm' && second === 'exec')
+  );
 }
 
-/** The stored rule that permits the call, if any; a Bash pattern must cover every segment. */
+/**
+ * The pattern stored by "always allow": the program plus its subcommand when the second word is
+ * one, otherwise the segment's whole words, so the rule never covers more than what was shown.
+ * Null when the command has a substitution, expansion or redirection, or runs through a wrapper
+ * with a command-carrying flag: such a command can only be allowed once.
+ */
+export function commandPrefix(command: string): string | null {
+  const segments = splitCommand(command);
+  const first = segments[0];
+  if (first === undefined || !segments.every(isLiteralSegment)) return null;
+  const words = stripCommandPrefixes(first.words);
+  const [head, second] = words;
+  if (head === undefined) return null;
+  if (second === undefined) return head;
+  if (!runsOtherCommands(words) && SUBCOMMAND.test(second)) return `${head} ${second}`;
+  return words.join(' ');
+}
+
+/** The stored rule that permits the call, if any; a Bash pattern must cover every plain segment. */
 export function matchPermissionRule(
   req: { readonly toolName: string; readonly input: unknown },
   rules: readonly PermissionRuleDto[],
 ): PermissionRuleDto | undefined {
   return rules.find((rule) => {
     if (rule.toolName !== req.toolName) return false;
+    if (req.toolName !== 'Bash') return rule.pattern === null;
     const pattern = rule.pattern;
-    if (pattern === null) return true;
+    if (pattern === null) return false;
     const command = stringField(req.input, 'command');
-    if (command === null) return false;
-    const lines = segmentLines(command);
-    return lines.length > 0 && lines.every((line) => startsWithWords(line, pattern));
+    const segments = command === null ? null : plainSegments(command);
+    return segments?.every((s) => startsWithWords(s.line, pattern)) === true;
   });
 }
