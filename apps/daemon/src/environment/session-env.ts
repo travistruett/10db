@@ -106,8 +106,7 @@ export class SessionEnvError extends Error {
 const SWITCHES: readonly string[] = BILLING_SWITCH_VARS;
 const NESTED: readonly string[] = NESTED_SESSION_VARS;
 
-/** Whether `name` is a billing-switch variable or belongs to a provider-switch family. */
-export function isBillingSwitch(name: string): boolean {
+function isBillingSwitch(name: string): boolean {
   return (
     SWITCHES.includes(name) || BILLING_SWITCH_PREFIXES.some((prefix) => name.startsWith(prefix))
   );

@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import {
   query as sdkQuery,
   type AccountInfo,
+  type HookJSONOutput,
   type McpServerConfig,
   type Options,
   type Query,
@@ -62,6 +63,8 @@ interface QueryDeps {
   readonly billingVerified: Promise<boolean>;
   readonly onSpawn: (pid: number | null) => void;
   readonly onStderr: (chunk: string) => void;
+  /** Runs after every tool call; its output can halt the agent. */
+  readonly afterToolUse: () => HookJSONOutput;
 }
 
 /** Spawns claude as our own child, so recovery knows its pid and the log gets its stderr. */
@@ -157,6 +160,9 @@ export function buildQueryOptions(spec: SessionSpec, deps: QueryDeps): Options {
           ],
         },
       ],
+      // A tool can write the project's settings mid-session, where no billing check would look again.
+      PostToolUse: [{ hooks: [() => Promise.resolve(deps.afterToolUse())] }],
+      PostToolUseFailure: [{ hooks: [() => Promise.resolve(deps.afterToolUse())] }],
     },
     abortController: deps.abortController,
     spawnClaudeCodeProcess: (options) => spawnClaude(options, deps),
@@ -271,6 +277,14 @@ function startSession(
       onSpawn: (p) => {
         pid = p;
       },
+      afterToolUse: () => {
+        if (halted()) return {};
+        const problem = projectSettingsBillingProblem(spec.cwd);
+        if (!problem) return {};
+        const message = `Billing check failed: ${problem}. A tool changed the project's settings during the session, which was stopped. ${fixHint}`;
+        refuse(message);
+        return { continue: false, stopReason: message, decision: 'block', reason: message };
+      },
       onStderr: (chunk) => {
         log.debug({ stderr: chunk.slice(0, STDERR_LOG_CHARS) }, 'claude stderr');
       },
@@ -313,7 +327,11 @@ function startSession(
     try {
       leftOut = Object.keys((await q.setMcpServers(buildMcpServers(spec))).errors);
     } catch (error) {
-      log.error({ err: String(error) }, 'claude mcp servers could not be registered');
+      // The error can quote the rejected config, which holds credentials; only its class is logged.
+      log.error(
+        { errName: error instanceof Error ? error.name : 'unknown' },
+        'claude mcp servers could not be registered',
+      );
       refuse('Claude Code could not register the MCP servers. No prompt was sent.');
       return;
     }

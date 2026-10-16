@@ -25,7 +25,7 @@ describe('projectSettingsBillingProblem', () => {
   it.each([
     ['no settings file', null],
     ['no env block', { permissions: { allow: ['Read'] } }],
-    ['an env block of harmless names', { env: { BASH_DEFAULT_TIMEOUT_MS: '5000', FOO: 'x' } }],
+    ['an env block of harmless names', { env: { DISABLE_AUTOUPDATER: '1', FOO: 'x' } }],
     ['unknown top-level keys', { somethingNew: { a: 1 }, env: {} }],
   ])('accepts %s', (_name, content) => {
     if (content !== null) writeSettings(content);
@@ -42,12 +42,47 @@ describe('projectSettingsBillingProblem', () => {
     ['ANTHROPIC_BEDROCK_BASE_URL'],
     ['ANTHROPIC_AUTH_TOKEN'],
     ['ANTHROPIC_CUSTOM_HEADERS'],
+    ['ANTHROPIC_SOMETHING_NEW'],
+    ['CLAUDE_CODE_OAUTH_TOKEN'],
+    ['AWS_PROFILE'],
+    ['AWS_ACCESS_KEY_ID'],
+    ['AWS_SECRET_ACCESS_KEY'],
+    ['AWS_SESSION_TOKEN'],
+    ['AWS_REGION'],
+    ['AWS_ENDPOINT_URL_BEDROCK_RUNTIME'],
+    ['GOOGLE_APPLICATION_CREDENTIALS'],
+    ['CLOUD_ML_REGION'],
+    ['VERTEX_REGION_CLAUDE_4_0_SONNET'],
+    ['NODE_TLS_REJECT_UNAUTHORIZED'],
+    ['NODE_EXTRA_CA_CERTS'],
+    ['SSL_CERT_FILE'],
+    ['HTTPS_PROXY'],
+    ['https_proxy'],
+    ['NO_PROXY'],
+    ['REQUESTS_CA_BUNDLE'],
+    ['CURL_CA_BUNDLE'],
   ])('refuses an env block that sets %s, naming the variable but not its value', (name) => {
     writeSettings({ env: { [name]: 'https://attacker.example' } });
     const problem = projectSettingsBillingProblem(repo.path);
     expect(problem).toContain(name);
     expect(problem).not.toContain('attacker.example');
   });
+
+  it.each([
+    ['apiKeyHelper'],
+    ['proxyAuthHelper'],
+    ['awsCredentialExport'],
+    ['awsAuthRefresh'],
+    ['gcpAuthRefresh'],
+  ])(
+    'refuses the %s setting, which runs a repo-chosen command, without echoing the command',
+    (key) => {
+      writeSettings({ [key]: 'sh -c leak-the-token' });
+      const problem = projectSettingsBillingProblem(repo.path);
+      expect(problem).toContain(key);
+      expect(problem).not.toContain('leak-the-token');
+    },
+  );
 
   it.each([
     ['broken JSON', '{"env": '],
