@@ -60,7 +60,32 @@ describe('inbox', () => {
     expect(findOpenByFoldKey(store.db, project.id, 'fold-1')).toBeUndefined();
   });
 
-  it('finds items targeting a workstream', () => {
+  it.each([
+    { state: 'OPEN', included: true },
+    { state: 'ANSWERED', included: true },
+    { state: 'DELIVERING', included: true },
+    { state: 'RESOLVED', included: false },
+    { state: 'CANCELLED', included: false },
+    { state: 'EXPIRED', included: false },
+  ] as const)(
+    'targeting lookup for a $state card includes it: $included',
+    ({ state, included }) => {
+      const project = seedProject(store);
+      const target = mintId('Workstream');
+      const item = store.write((ctx) =>
+        insertInboxItem(
+          ctx,
+          question(project.id, { targets: [{ workstreamId: target, sessionId: null }] }),
+        ),
+      ).value;
+      store.write((ctx) => updateInboxItem(ctx, item.id, { state }));
+      expect(openItemsForWorkstream(store.db, target).map((i) => i.id)).toEqual(
+        included ? [item.id] : [],
+      );
+    },
+  );
+
+  it('finds only the cards that target the workstream', () => {
     const project = seedProject(store);
     const target = mintId('Workstream');
     store.write((ctx) =>
@@ -73,6 +98,25 @@ describe('inbox', () => {
     expect(openItemsForWorkstream(store.db, target)).toHaveLength(1);
   });
 
+  it('returns a card that targets two workstreams for both', () => {
+    const project = seedProject(store);
+    const w1 = mintId('Workstream');
+    const w2 = mintId('Workstream');
+    const item = store.write((ctx) =>
+      insertInboxItem(
+        ctx,
+        question(project.id, {
+          targets: [
+            { workstreamId: w1, sessionId: null },
+            { workstreamId: w2, sessionId: null },
+          ],
+        }),
+      ),
+    ).value;
+    expect(openItemsForWorkstream(store.db, w1).map((i) => i.id)).toEqual([item.id]);
+    expect(openItemsForWorkstream(store.db, w2).map((i) => i.id)).toEqual([item.id]);
+  });
+
   it('breaks urgency and age ties by id on a fixed clock', () => {
     close();
     ({ store, close } = createTestStore(() => new Date('2026-01-01T00:00:00.000Z')));
@@ -81,6 +125,10 @@ describe('inbox', () => {
       (foldKey) =>
         store.write((ctx) => insertInboxItem(ctx, question(project.id, { foldKey }))).value.id,
     );
+    // Push the smallest id to the end of the table's scan order.
+    store.db.$client
+      .prepare('UPDATE inbox_items SET rowid = rowid + 1000 WHERE id = ?')
+      .run(ids[0]);
     expect(listInbox(store.db).map((i) => i.id)).toEqual(ids);
   });
 
@@ -121,38 +169,60 @@ describe('inbox', () => {
 });
 
 describe('permission rules', () => {
-  it('returns project rules plus the workstream rules, not other workstreams', () => {
-    const project = seedProject(store);
-    const mine = mintId('Workstream');
-    const other = mintId('Workstream');
+  type Scope = 'mine' | 'other';
+  const rows: {
+    name: string;
+    rules: { project: Scope; workstream: 'ws' | 'otherWs' | null; tool: string }[];
+    expected: string[];
+  }[] = [
+    { name: 'no rules', rules: [], expected: [] },
+    {
+      name: "another project's project-wide rule is excluded",
+      rules: [{ project: 'other', workstream: null, tool: 'Foreign' }],
+      expected: [],
+    },
+    {
+      name: "another project's rule for the same workstream id is excluded",
+      rules: [{ project: 'other', workstream: 'ws', tool: 'Foreign' }],
+      expected: [],
+    },
+    {
+      name: "this project's project-wide rule is included",
+      rules: [{ project: 'mine', workstream: null, tool: 'Bash' }],
+      expected: ['Bash'],
+    },
+    {
+      name: "this workstream's rule is included",
+      rules: [{ project: 'mine', workstream: 'ws', tool: 'WebFetch' }],
+      expected: ['WebFetch'],
+    },
+    {
+      name: "another workstream's rule is excluded",
+      rules: [{ project: 'mine', workstream: 'otherWs', tool: 'WebSearch' }],
+      expected: [],
+    },
+  ];
+
+  it.each(rows)('$name', ({ rules, expected }) => {
+    const mine = seedProject(store);
+    const other = seedProject(store);
+    const ids = { ws: mintId('Workstream'), otherWs: mintId('Workstream') };
     store.write((ctx) => {
-      insertPermissionRule(ctx, {
-        projectId: project.id,
-        workstreamId: null,
-        toolName: 'Bash',
-        pattern: 'docker compose',
-        sourceInboxId: null,
-      });
-      insertPermissionRule(ctx, {
-        projectId: project.id,
-        workstreamId: mine,
-        toolName: 'WebFetch',
-        pattern: null,
-        sourceInboxId: null,
-      });
-      insertPermissionRule(ctx, {
-        projectId: project.id,
-        workstreamId: other,
-        toolName: 'WebSearch',
-        pattern: null,
-        sourceInboxId: null,
-      });
+      for (const r of rules) {
+        insertPermissionRule(ctx, {
+          projectId: r.project === 'mine' ? mine.id : other.id,
+          workstreamId: r.workstream === null ? null : ids[r.workstream],
+          toolName: r.tool,
+          pattern: null,
+          sourceInboxId: null,
+        });
+      }
     });
     expect(
-      listPermissionRules(store.db, project.id, mine)
+      listPermissionRules(store.db, mine.id, ids.ws)
         .map((r) => r.toolName)
         .sort(),
-    ).toEqual(['Bash', 'WebFetch']);
+    ).toEqual(expected);
   });
 });
 
