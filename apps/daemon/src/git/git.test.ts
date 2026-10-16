@@ -162,3 +162,39 @@ describe('history queries', () => {
     expect(await git.commitsSince(repo.path, base)).toEqual([sha]);
   });
 });
+
+describe('status', () => {
+  it.each([
+    {
+      name: 'a modified file',
+      arrange: () => {
+        write('README.md', 'edited');
+      },
+      expected: [{ code: ' M', path: 'README.md' }],
+    },
+    {
+      name: 'an untracked file',
+      arrange: () => {
+        write('new.txt', 'n');
+      },
+      expected: [{ code: '??', path: 'new.txt' }],
+    },
+    {
+      name: 'a staged rename, reported once under its new path',
+      arrange: () => {
+        rawGit('mv', 'README.md', 'DOC.md');
+      },
+      expected: [{ code: 'R ', path: 'DOC.md' }],
+    },
+    {
+      name: 'a path containing a space',
+      arrange: () => {
+        write('with space.txt', 's');
+      },
+      expected: [{ code: '??', path: 'with space.txt' }],
+    },
+  ])('reports $name', async ({ arrange, expected }) => {
+    arrange();
+    expect(await git.status(repo.path)).toEqual(expected);
+  });
+});

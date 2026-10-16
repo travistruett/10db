@@ -60,10 +60,15 @@ async function revParseHead(repo: string): Promise<string> {
 
 async function status(repo: string): Promise<{ code: string; path: string }[]> {
   const out = await git(repo, ['status', '--porcelain=v1', '-z', '--untracked-files=all']);
-  return out
-    .split('\0')
-    .filter(Boolean)
-    .map((entry) => ({ code: entry.slice(0, 2), path: entry.slice(3) }));
+  const fields = out.split('\0').filter(Boolean);
+  const entries: { code: string; path: string }[] = [];
+  for (let i = 0; i < fields.length; i++) {
+    const entry = fields[i] ?? '';
+    entries.push({ code: entry.slice(0, 2), path: entry.slice(3) });
+    // A rename or copy is followed by its source path as a bare field with no status code.
+    if (entry.startsWith('R') || entry.startsWith('C') || entry[1] === 'R' || entry[1] === 'C') i++;
+  }
+  return entries;
 }
 
 /** Lexical checks first, then the guard's symlink-aware check, so `link/x` can't commit outside the repo. */
