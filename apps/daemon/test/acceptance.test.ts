@@ -180,8 +180,22 @@ describe('§1.3 with the fake adapter', () => {
     );
     expect(gammaCommits.map((o) => o.detail['isError'])).toEqual([false, false]);
     expect(gammaCommits[1]?.detail['text']).toBe(gammaCommits[0]?.detail['text']);
-    const ops = daemon.state.db.select().from(schema.toolOps).all();
-    expect(ops.length).toBe(new Set(ops.map((o) => `${o.workstreamId}:${o.opId}`)).size);
+
+    // Each inbox answer took effect in the session that asked.
+    const seen = (title: string, kind: string) =>
+      adapter.observations.filter((o) => o.title === title && o.kind === kind);
+    expect(seen('Beta', 'tool_denied')).toEqual([]);
+    expect(seen('Beta', 'tool_allowed').map((o) => o.detail['toolName'])).toEqual(
+      expect.arrayContaining(['Bash', 'AskUserQuestion']),
+    );
+    expect(
+      JSON.stringify(
+        seen('Beta', 'tool_allowed').find((o) => o.detail['toolName'] === 'AskUserQuestion')
+          ?.detail['answers'],
+      ),
+    ).toContain('Teal');
+    const asked = seen('Gamma', 'mcp_result').find((o) => o.detail['tool'] === 'ask_human');
+    expect(String(asked?.detail['text'])).toContain('Round');
 
     const decisions = daemon.state.db.select().from(schema.decisions).all();
     expect(decisions.map((d) => d.choice)).toContain('Round');

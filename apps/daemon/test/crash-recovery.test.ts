@@ -29,14 +29,16 @@ const BOOK: FakeScriptBook = {
     ],
     [
       {
-        do: 'mcp',
-        tool: 'commit',
-        args: { opId: 'op-x-00001', paths: ['src/x/one.txt'], message: 'Add one' },
-      },
-      {
         do: 'tool',
         toolName: 'Write',
         input: { file_path: 'src/x/two.txt', content: 'two\n' },
+      },
+      // A retry of the first operation with a path that now has changes: a retry that were not
+      // idempotent would create a second commit carrying the first op's trailer.
+      {
+        do: 'mcp',
+        tool: 'commit',
+        args: { opId: 'op-x-00001', paths: ['src/x/two.txt'], message: 'Add one' },
       },
       {
         do: 'mcp',
@@ -151,6 +153,8 @@ describe('kill -9 mid-step', () => {
       .split('\n')
       .filter(Boolean);
     expect(trailers.filter((t) => t === 'op-x-00001')).toHaveLength(1);
+    expect(trailers.filter((t) => t === 'op-x-00002')).toHaveLength(1);
+    expect(events.filter((e) => e.type === 'commit.recorded')).toHaveLength(2);
     const db = new Database(join(data.path, '10db.sqlite'), { readonly: true });
     const ops = z
       .object({ n: z.number() })
