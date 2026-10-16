@@ -1,7 +1,7 @@
 # Open items
 
 - [ ] Spikes 1–7, 9 run and recorded (plan 00).
-- [ ] M0 scaffold merged (plan 01).
+- [x] M0 scaffold merged (plan 01).
 - [x] M1a engine core merged (plan 02).
 - [ ] M1b sessions and bare UI merged; §1.3 acceptance passed on a disposable repo (plan 03).
 - [ ] Bump `typescript` to 7.x and drop the 6.0 alias once typescript-eslint supports the 7.1 API.
