@@ -6,7 +6,10 @@ import { build } from 'esbuild';
 
 const root = resolve(import.meta.dirname, '..');
 const outDir = resolve(process.argv[2] ?? resolve(root, 'dist'));
-rmSync(outDir, { recursive: true, force: true });
+// Only the bundle's own outputs are removed: the directory is a CLI argument and may hold other files.
+for (const name of ['daemon.mjs', 'daemon.mjs.map', 'drizzle', 'better_sqlite3.node']) {
+  rmSync(resolve(outDir, name), { recursive: true, force: true });
+}
 mkdirSync(outDir, { recursive: true });
 
 await build({

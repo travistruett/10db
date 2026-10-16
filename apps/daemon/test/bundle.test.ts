@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from 'node:child_process';
-import { cpSync, existsSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { readRuntimeInfo } from '../src/daemon';
@@ -65,4 +65,20 @@ describe('the bundled daemon', () => {
     }
     expect(await exited).toBe(0);
   }, 60_000);
+
+  it('writes only its own outputs into an existing directory', () => {
+    const out = join(work.path, 'shared');
+    mkdirSync(join(out, 'drizzle'), { recursive: true });
+    writeFileSync(join(out, '.env'), 'KEEP=1\n');
+    writeFileSync(join(out, 'drizzle', 'stale.sql'), 'stale');
+    execFileSync('pnpm', ['exec', 'tsx', 'scripts/build.ts', out], {
+      cwd: daemonRoot,
+      stdio: 'pipe',
+    });
+    expect(existsSync(join(out, '.env'))).toBe(true);
+    expect(existsSync(join(out, 'daemon.mjs'))).toBe(true);
+    expect(existsSync(join(out, 'better_sqlite3.node'))).toBe(true);
+    expect(existsSync(join(out, 'drizzle', 'meta', '_journal.json'))).toBe(true);
+    expect(existsSync(join(out, 'drizzle', 'stale.sql'))).toBe(false);
+  }, 120_000);
 });
