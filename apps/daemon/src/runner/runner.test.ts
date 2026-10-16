@@ -1,4 +1,5 @@
 import {
+  acquireLease,
   activeClaims,
   getTask,
   getWorkstream,
@@ -8,7 +9,8 @@ import {
   listSessions,
   schema,
 } from '@10db/db';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { SessionHandle } from '../sessions';
 import { handoffArgs, waitFor } from '../../test/fixtures';
 import { createTestEngine, type TestEngine } from '../../test/engine';
 
@@ -52,6 +54,8 @@ const curl = {
   input: { command: 'curl -s https://example.com' },
 };
 
+let current: Parameters<typeof getWorkstream>[1];
+const ws0 = () => current;
 const ws = (id: Parameters<typeof getWorkstream>[1]) => getWorkstream(engine.store.db, id);
 const openCard = () => listInbox(engine.store.db, { states: ['OPEN'] })[0];
 const transitions = (id: Parameters<typeof getWorkstream>[1]) =>
@@ -299,6 +303,158 @@ describe('runner', () => {
         (o) => o.kind === 'tool_allowed' && o.detail['toolName'] === 'Bash',
       ),
     ).toHaveLength(1);
+  });
+
+  describe('lifecycle edges', () => {
+    /** Wraps every handle the fake adapter returns; the wrapper sees each call the runner makes. */
+    const interceptStart = (wrap: (handle: SessionHandle) => SessionHandle) => {
+      const real = engine.adapter.start.bind(engine.adapter);
+      return vi.spyOn(engine.adapter, 'start').mockImplementation((spec) => wrap(real(spec)));
+    };
+    const doneScript = [write('src/api/a.txt'), commit('op-edge-0001', ['src/api/a.txt']), turn];
+
+    it('stops the session process when a newer lease fences the runner off', async () => {
+      engine = await createTestEngine({
+        Alpha: [
+          [
+            { do: 'await_message', contains: 'go' },
+            { do: 'activity', summary: 'later' },
+            { do: 'hang' },
+          ],
+        ],
+      });
+      let inner: SessionHandle | undefined;
+      let stopCalls = 0;
+      interceptStart((h) => {
+        inner = h;
+        return {
+          ...h,
+          stop: () => {
+            stopCalls += 1;
+            return h.stop();
+          },
+        };
+      });
+      const { workstream } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
+      await waitFor(
+        () => listSessions(engine.store.db, workstream.id)[0]?.providerSessionId ?? undefined,
+      );
+      engine.state.write((ctx) => {
+        acquireLease(
+          ctx,
+          workstream.id,
+          'other-daemon',
+          new Date(Date.now() + 60_000).toISOString(),
+        );
+      });
+      inner?.send('go');
+      await engine.runner.idle();
+      expect(stopCalls).toBeGreaterThan(0);
+    });
+
+    it('honours a cancel that arrives before the session starts', async () => {
+      engine = await createTestEngine({ Alpha: [doneScript] });
+      const { workstream } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
+      await engine.runner.cancel(workstream.id);
+      expect(ws(workstream.id).state).toBe('CANCELLED');
+      expect(engine.adapter.prompts).toEqual([]);
+      expect(activeClaims(engine.store.db, workstream.id)).toEqual([]);
+    });
+
+    it.each([
+      ['a cancel', 'CANCELLED', () => engine.runner.cancel(ws0())],
+      [
+        'a provider pause',
+        'DONE',
+        () => engine.runner.stopProvider(engine.project.provider, 'paused'),
+      ],
+    ])(
+      'settles %s that lands while the finished turn is stopping',
+      async (_name, expected, act) => {
+        engine = await createTestEngine({ Alpha: [doneScript] });
+        let first = true;
+        interceptStart((h) => ({
+          ...h,
+          stop: () => {
+            if (first) {
+              first = false;
+              void act();
+            }
+            return h.stop();
+          },
+        }));
+        const { workstream } = engine.addTask('Alpha');
+        current = workstream.id;
+        engine.launch(workstream.id);
+        await engine.runner.idle();
+        expect(ws(workstream.id).state).toBe(expected);
+        expect(
+          listInbox(engine.store.db, { states: ['OPEN'] }).filter((i) => i.kind === 'flag'),
+        ).toEqual([]);
+      },
+    );
+
+    it.each([
+      ['while the card is open', false, 'WAITING_HUMAN'],
+      ['when the card was answered during the stop', true, 'QUEUED'],
+    ])(
+      'parks normally when the turn completes after the wait timer fired, %s',
+      async (_name, answerEarly, expected) => {
+        engine = await createTestEngine({ Alpha: [[askShip, turn]] });
+        let first = true;
+        // The timer's stop is swallowed so the script runs on to turn_complete and a normal end, as a real adapter can.
+        interceptStart((h) => ({
+          ...h,
+          stop: () => {
+            if (!first) return h.stop();
+            first = false;
+            const card = openCard();
+            if (answerEarly && card) engine.inbox.answer(card.id, { choice: 'Yes' });
+            return Promise.resolve();
+          },
+        }));
+        const { workstream } = engine.addTask('Alpha');
+        engine.launch(workstream.id);
+        const card = await waitFor(openCard);
+        engine.clock.advance(10 * 60_000);
+        await engine.runner.idle();
+
+        expect(ws(workstream.id)).toMatchObject({
+          state: expected,
+          currentSessionId: null,
+          recoveryAttempts: 0,
+          nextAction: { kind: 'answer', inboxId: card.id },
+        });
+        expect(listSessions(engine.store.db, workstream.id)[0]?.exitReason).toBe('parked');
+        if (!answerEarly) {
+          engine.inbox.answer(card.id, { choice: 'Yes' });
+          expect(ws(workstream.id).state).toBe('QUEUED');
+        }
+      },
+    );
+
+    it('keeps a rejected usage limit when the turn completes afterwards', async () => {
+      engine = await createTestEngine({
+        Alpha: [[{ do: 'rate_limit', status: 'rejected', resetsInSeconds: 600 }]],
+      });
+      interceptStart((h) => ({
+        ...h,
+        events: (async function* () {
+          for await (const event of h.events) {
+            yield event;
+            if (event.type === 'rate_limit')
+              yield { type: 'turn_complete' as const, inputTokens: 1, outputTokens: 1, costUsd: 0 };
+          }
+        })(),
+      }));
+      const { workstream } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+      expect(ws(workstream.id).state).toBe('PAUSED_LIMIT');
+      expect(engine.rateLimited).toHaveLength(1);
+    });
   });
 
   it('resets the crash count once a session makes progress', async () => {

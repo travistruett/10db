@@ -189,6 +189,11 @@ interface SessionState {
   outcome: Outcome | null;
 }
 
+/** Reads the stop reason afresh: a stop can land at any await, which narrowing cannot see. */
+function stopRequested(ctl: { readonly stopReason: StopReason | null }): StopReason | null {
+  return ctl.stopReason;
+}
+
 export function createRunner(opts: RunnerOptions): Runner {
   const db = opts.state.db;
   const active = new Map<WorkstreamId, Control>();
@@ -351,6 +356,8 @@ export function createRunner(opts: RunnerOptions): Runner {
     const task = getTask(db, row.taskId);
     const action = row.nextAction;
     const baseHead = row.baseHead ?? (await opts.git.head(project.repoPath));
+    // A stop that landed while the head was read finds no handle to stop, so it is honoured here.
+    if (ctl.stopReason) return { kind: 'stopped', reason: ctl.stopReason, providerSessionId: null };
     const answeredItem = action.kind === 'answer' ? getInboxItem(db, action.inboxId) : null;
     const resumeId =
       action.kind === 'resume' || action.kind === 'answer' ? action.providerSessionId : null;
@@ -397,6 +404,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     };
     const log = opts.logger.child({ workstreamId: id, sessionId: session.id });
     let handle: SessionHandle | null = null;
+    let sawEnded = false;
 
     const observer: WaitObserver = {
       onWaitStart(item) {
@@ -560,6 +568,8 @@ export function createRunner(opts: RunnerOptions): Runner {
                 costUsd: event.costUsd,
               });
             });
+            // A parked or limited session may still finish its interrupted turn before it exits.
+            if (st.outcome || st.parkedFor) break;
             const recorded = handoffForSession(db, session.id);
             if (recorded) {
               st.outcome = { kind: 'handoff', handoffId: recorded.id };
@@ -573,12 +583,14 @@ export function createRunner(opts: RunnerOptions): Runner {
             }
             break;
           }
-          case 'ended':
+          case 'ended': {
+            sawEnded = true;
+            const stoppedBy = stopRequested(ctl);
             if (st.outcome) break;
-            if (ctl.stopReason)
+            if (stoppedBy)
               st.outcome = {
                 kind: 'stopped',
-                reason: ctl.stopReason,
+                reason: stoppedBy,
                 providerSessionId: st.providerSessionId,
               };
             else if (st.parkedFor)
@@ -598,20 +610,34 @@ export function createRunner(opts: RunnerOptions): Runner {
               };
             } else st.outcome = { kind: 'step_done', withoutHandoff: st.handoffRequested };
             break;
+          }
         }
       }
     } finally {
+      // Leaving the loop without `ended` (a stale fence, a failed write) must not leave the process running.
+      if (!sawEnded) await handle.stop().catch(() => undefined);
       // Aborting on every exit leaves no inbox waiter registered, so an answer never goes to a dead session.
       st.waitTimer?.cancel();
       abort.abort();
       opts.live.unregister(session.id);
       ctl.handle = null;
     }
-    const outcome: Outcome = st.outcome ?? {
+    const ended: Outcome = st.outcome ?? {
       kind: 'crashed',
       message: 'the session ended without an outcome',
       providerSessionId: st.providerSessionId,
     };
+    // A session whose wait timer fired parks even if it was also limited or stopped meanwhile, so the
+    // card (open or already answered) is never orphaned.
+    const parkedAfterWait =
+      st.parkedFor !== null &&
+      (ended.kind === 'paused' ||
+        ended.kind === 'crashed' ||
+        (ended.kind === 'stopped' && ended.reason !== 'cancelled'));
+    const outcome: Outcome =
+      parkedAfterWait && st.parkedFor
+        ? { kind: 'parked', inboxId: st.parkedFor, providerSessionId: st.providerSessionId }
+        : ended;
     const progressed = outcome.kind === 'handoff' || outcome.kind === 'step_done';
     opts.state.write((ctx) => {
       endSession(
@@ -678,6 +704,11 @@ export function createRunner(opts: RunnerOptions): Runner {
     if (result.aborted) return;
     const head = await opts.git.head(project.repoPath);
     const commitShas = await opts.git.commitsSince(project.repoPath, row.baseHead ?? head);
+    // A cancel that landed while git was read must not be overwritten by the verdict.
+    if (stopRequested(ctl) === 'cancelled') {
+      cancelNow(id, ctl.fence);
+      return;
+    }
     const evidence = {
       workstreamId: id,
       kind: 'gate' as const,
@@ -735,15 +766,24 @@ export function createRunner(opts: RunnerOptions): Runner {
   async function run(id: WorkstreamId, ctl: Control): Promise<void> {
     try {
       for (;;) {
-        if (ctl.stopReason) return;
         const row = getWorkstreamRow(db, id);
-        if (row.nextAction.kind === 'verify' || row.state === S.Verifying) {
+        const verifying = row.nextAction.kind === 'verify' || row.state === S.Verifying;
+        // A pause only stops sessions; verification doesn't use the provider, so it carries on.
+        if (ctl.stopReason && !(ctl.stopReason === 'paused' && verifying)) {
+          settle(id, ctl, { kind: 'stopped', reason: ctl.stopReason, providerSessionId: null });
+          return;
+        }
+        if (verifying) {
           await verify(id, ctl);
           return;
         }
         const outcome = await runSession(id, ctl);
         if (outcome.kind === 'handoff') continue;
         if (outcome.kind === 'step_done') {
+          if (stopRequested(ctl) === 'cancelled') {
+            settle(id, ctl, { kind: 'stopped', reason: 'cancelled', providerSessionId: null });
+            return;
+          }
           if (outcome.withoutHandoff) {
             const row = getWorkstreamRow(db, id);
             opts.inbox.flag({
