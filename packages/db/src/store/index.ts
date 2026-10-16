@@ -11,3 +11,4 @@ export * from './store';
 export * from './tasks';
 export * from './tool-ops';
 export * from './workstreams';
+export { createTestStore, seedProject } from './test-support';
