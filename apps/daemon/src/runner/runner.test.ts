@@ -1,0 +1,386 @@
+import {
+  activeClaims,
+  getTask,
+  getWorkstream,
+  listEventsAfter,
+  listEvidence,
+  listInbox,
+  listSessions,
+  schema,
+} from '@10db/db';
+import { afterEach, describe, expect, it } from 'vitest';
+import { handoffArgs, waitFor } from '../../test/fixtures';
+import { createTestEngine, type TestEngine } from '../../test/engine';
+
+let engine: TestEngine;
+afterEach(async () => {
+  await engine.close();
+});
+
+const write = (path: string, content = 'x') => ({
+  do: 'tool' as const,
+  toolName: 'Write',
+  input: { file_path: path, content },
+});
+const commit = (opId: string, paths: string[]) => ({
+  do: 'mcp' as const,
+  tool: 'commit',
+  args: { opId, paths, message: `Commit ${opId}` },
+});
+const turn = { do: 'turn_complete' as const };
+const askShip = {
+  do: 'tool' as const,
+  toolName: 'AskUserQuestion',
+  input: {
+    questions: [
+      {
+        question: 'Ship it?',
+        header: 'Ship',
+        options: [
+          { label: 'Yes', description: '' },
+          { label: 'No', description: '' },
+        ],
+        multiSelect: false,
+      },
+    ],
+  },
+};
+
+const curl = {
+  do: 'tool' as const,
+  toolName: 'Bash',
+  input: { command: 'curl -s https://example.com' },
+};
+
+const ws = (id: Parameters<typeof getWorkstream>[1]) => getWorkstream(engine.store.db, id);
+const openCard = () => listInbox(engine.store.db, { states: ['OPEN'] })[0];
+const transitions = (id: Parameters<typeof getWorkstream>[1]) =>
+  listEventsAfter(engine.store.db, 0, 1000)
+    .filter((e) => e.type === 'workstream.changed' && e.entityId === id)
+    .map((e) =>
+      [e.data['from'], e.data['to']].map((s) => (typeof s === 'string' ? s : '?')).join('->'),
+    );
+
+describe('runner', () => {
+  it('runs a task to DONE with gate evidence, and the guard blocks an out-of-claim write', async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        [
+          write('src/ui/nope.txt'),
+          write('src/api/a.txt'),
+          commit('op-alpha-001', ['src/api/a.txt']),
+          turn,
+        ],
+      ],
+    });
+    const { task, workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(getTask(engine.store.db, task.id).status).toBe('done');
+    const [gate] = listEvidence(engine.store.db, workstream.id);
+    expect(gate).toMatchObject({ kind: 'gate', exitCode: 0 });
+    expect(gate?.commitShas).toHaveLength(1);
+    expect(activeClaims(engine.store.db, workstream.id)).toEqual([]);
+    expect(listInbox(engine.store.db, { states: ['OPEN'] }).map((i) => i.kind)).toEqual(['review']);
+    expect(
+      engine.adapter.observations.find((o) => o.kind === 'denied_by_guard')?.detail['reason'],
+    ).toContain('request_claim');
+  });
+
+  it('hands off at the threshold, nudges firmly near the limit, and continues in a fresh session', async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        [
+          { do: 'context', percentage: 75 },
+          { do: 'await_message', contains: 'write_handoff' },
+          { do: 'context', percentage: 88 },
+          { do: 'await_message', contains: 'almost full' },
+          {
+            do: 'mcp',
+            tool: 'write_handoff',
+            args: handoffArgs('op-handoff-1', 'Write the second file'),
+          },
+          turn,
+        ],
+        [write('src/api/b.txt'), commit('op-alpha-002', ['src/api/b.txt']), turn],
+      ],
+    });
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(listSessions(engine.store.db, workstream.id).map((s) => s.exitReason)).toEqual([
+      'handoff',
+      'step_done',
+    ]);
+    expect(engine.adapter.prompts[1]?.prompt).toContain('Next action: Write the second file');
+    const states = listEventsAfter(engine.store.db, 0, 1000)
+      .filter((e) => e.type === 'workstream.changed')
+      .map((e) => e.data['to']);
+    expect(states).toContain('HANDING_OFF');
+  });
+
+  it('sends a failed gate back as a fix with the output, then passes', async () => {
+    engine = await createTestEngine(
+      {
+        Alpha: [
+          [turn],
+          [write('src/api/fixed.txt'), commit('op-fix-0001', ['src/api/fixed.txt']), turn],
+        ],
+      },
+      { gateCommand: 'test -f src/api/fixed.txt || { echo MISSING-FIXED-FILE; exit 2; }' },
+    );
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id)).toMatchObject({
+      state: 'QUEUED',
+      nextAction: { kind: 'fix' },
+      attempt: 1,
+    });
+
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(engine.adapter.prompts[1]?.prompt).toContain('MISSING-FIXED-FILE');
+  });
+
+  it('parks a long wait, frees the lane, and resumes with the answer in a new session', async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        [askShip, turn],
+        [write('src/api/a.txt'), commit('op-park-0001', ['src/api/a.txt']), turn],
+      ],
+    });
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    const card = await waitFor(openCard);
+    expect(ws(workstream.id).state).toBe('WAITING_HUMAN');
+
+    engine.clock.advance(10 * 60_000);
+    await engine.runner.idle();
+    expect(ws(workstream.id)).toMatchObject({
+      state: 'WAITING_HUMAN',
+      currentSessionId: null,
+      nextAction: { kind: 'answer', inboxId: card.id },
+    });
+
+    engine.inbox.answer(card.id, { choice: 'Yes' });
+    expect(ws(workstream.id).state).toBe('QUEUED');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+
+    expect(ws(workstream.id).state).toBe('DONE');
+    const [first, second] = listSessions(engine.store.db, workstream.id);
+    expect(engine.adapter.prompts[1]).toMatchObject({ resume: first?.providerSessionId });
+    expect(engine.adapter.prompts[1]?.prompt).toContain('Answer: Yes');
+    expect(second?.exitReason).toBe('step_done');
+  });
+
+  it('delivers a live answer to the same session', async () => {
+    engine = await createTestEngine({
+      Alpha: [[askShip, write('src/api/a.txt'), commit('op-live-0001', ['src/api/a.txt']), turn]],
+    });
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    engine.inbox.answer((await waitFor(openCard)).id, { choice: 'Yes' });
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(listSessions(engine.store.db, workstream.id)).toHaveLength(1);
+    expect(engine.adapter.observations).toContainEqual(
+      expect.objectContaining({
+        kind: 'tool_allowed',
+        detail: { toolName: 'AskUserQuestion', answers: { 'Ship it?': 'Yes' } },
+      }),
+    );
+  });
+
+  it('goes STARTING -> RUNNING -> WAITING_HUMAN when the first step is a question', async () => {
+    engine = await createTestEngine({ Alpha: [[askShip, turn]] });
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    engine.inbox.answer((await waitFor(openCard)).id, { choice: 'Yes' });
+    await engine.runner.idle();
+    expect(transitions(workstream.id).slice(0, 4)).toEqual([
+      'QUEUED->STARTING',
+      'STARTING->RUNNING',
+      'RUNNING->WAITING_HUMAN',
+      'WAITING_HUMAN->RUNNING',
+    ]);
+    expect(ws(workstream.id)).toMatchObject({ state: 'DONE', recoveryAttempts: 0 });
+  });
+
+  it('keeps an answer that arrives while the parked session is still stopping', async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        [askShip, turn],
+        [write('src/api/a.txt'), commit('op-grace-0001', ['src/api/a.txt']), turn],
+      ],
+    });
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    const card = await waitFor(openCard);
+    engine.clock.advance(10 * 60_000);
+    engine.inbox.answer(card.id, { choice: 'Yes' });
+    await engine.runner.idle();
+    expect(ws(workstream.id)).toMatchObject({
+      state: 'QUEUED',
+      recoveryAttempts: 0,
+      nextAction: { kind: 'answer', inboxId: card.id },
+    });
+
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(engine.adapter.prompts[1]?.prompt).toContain('Answer: Yes');
+  });
+
+  it.each(['allow_project', 'allow_once'])(
+    'applies %s answered after parking, without asking again',
+    async (choice) => {
+      engine = await createTestEngine({
+        Alpha: [
+          [curl, turn],
+          [curl, write('src/api/a.txt'), commit('op-perm-0001', ['src/api/a.txt']), turn],
+        ],
+      });
+      const { workstream } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
+      const card = await waitFor(openCard);
+      engine.clock.advance(10 * 60_000);
+      await engine.runner.idle();
+      engine.inbox.answer(card.id, { choice });
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+
+      expect(ws(workstream.id).state).toBe('DONE');
+      expect(listInbox(engine.store.db, { states: ['OPEN'] }).map((i) => i.kind)).toEqual([
+        'review',
+      ]);
+      expect(
+        engine.adapter.observations.filter(
+          (o) => o.kind === 'tool_allowed' && o.detail['toolName'] === 'Bash',
+        ),
+      ).toHaveLength(1);
+      expect(engine.adapter.prompts[1]?.prompt).toContain(
+        'Allow Bash? curl -s https://example.com',
+      );
+    },
+  );
+
+  it('treats allow_project on a command with no storable rule as allow-once after parking', async () => {
+    const unstorable = {
+      do: 'tool' as const,
+      toolName: 'Bash',
+      input: { command: 'echo $(date)' },
+    };
+    engine = await createTestEngine({
+      Alpha: [
+        [unstorable, turn],
+        [unstorable, write('src/api/a.txt'), commit('op-null-0001', ['src/api/a.txt']), turn],
+      ],
+    });
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    const card = await waitFor(openCard);
+    engine.clock.advance(10 * 60_000);
+    await engine.runner.idle();
+    engine.inbox.answer(card.id, { choice: 'allow_project' });
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(listInbox(engine.store.db, { states: ['OPEN'] }).map((i) => i.kind)).toEqual(['review']);
+    expect(
+      engine.adapter.observations.filter(
+        (o) => o.kind === 'tool_allowed' && o.detail['toolName'] === 'Bash',
+      ),
+    ).toHaveLength(1);
+  });
+
+  it('resets the crash count once a session makes progress', async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        [{ do: 'crash', message: 'boom' }],
+        [write('src/api/a.txt'), commit('op-reset-0001', ['src/api/a.txt']), turn],
+      ],
+    });
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).recoveryAttempts).toBe(1);
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id)).toMatchObject({ state: 'DONE', recoveryAttempts: 0 });
+  });
+
+  it('cancels during verification by killing the gate', async () => {
+    engine = await createTestEngine({ Alpha: [[turn]] }, { gateCommand: 'sleep 30' });
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await waitFor(() => ws(workstream.id).state === 'VERIFYING');
+    const started = Date.now();
+    await engine.runner.cancel(workstream.id);
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(ws(workstream.id).state).toBe('CANCELLED');
+    expect(listEvidence(engine.store.db, workstream.id)).toEqual([]);
+  });
+
+  it('retries crashes as resume, then fresh, and fails after the limit with a flag', async () => {
+    const crash = { do: 'crash' as const, message: 'boom' };
+    engine = await createTestEngine({ Alpha: [[crash], [crash], [crash], [crash]] });
+    const { workstream } = engine.addTask('Alpha');
+    const kinds: string[] = [];
+    for (let i = 0; i < 4; i += 1) {
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+      kinds.push(
+        ws(workstream.id).state === 'QUEUED'
+          ? ws(workstream.id).nextAction.kind
+          : ws(workstream.id).state,
+      );
+    }
+    expect(kinds).toEqual(['resume', 'start', 'resume', 'FAILED']);
+    expect(listInbox(engine.store.db, { states: ['OPEN'] }).map((i) => i.kind)).toEqual(['flag']);
+  });
+
+  it('cancels a running workstream, releasing claims', async () => {
+    engine = await createTestEngine({
+      Alpha: [[{ do: 'activity', summary: 'working' }, { do: 'hang' }]],
+    });
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await waitFor(
+      () => listSessions(engine.store.db, workstream.id)[0]?.providerSessionId ?? undefined,
+    );
+    await engine.runner.cancel(workstream.id);
+    expect(ws(workstream.id).state).toBe('CANCELLED');
+    expect(activeClaims(engine.store.db, workstream.id)).toEqual([]);
+  });
+
+  it('pauses on a usage limit until the reported reset', async () => {
+    engine = await createTestEngine({
+      Alpha: [[{ do: 'rate_limit', status: 'rejected', resetsInSeconds: 600 }]],
+    });
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('PAUSED_LIMIT');
+    expect(ws(workstream.id).pausedUntil).not.toBeNull();
+    expect(engine.rateLimited).toHaveLength(1);
+  });
+
+  it('logs emergency compaction as a deviation and re-sends the context pack', async () => {
+    engine = await createTestEngine({
+      Alpha: [[{ do: 'compact' }, { do: 'await_message', contains: 'context pack' }, turn]],
+    });
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(engine.store.db.select().from(schema.deviations).all()).toHaveLength(1);
+  });
+});

@@ -61,3 +61,30 @@ export function seedWorkstream(
   const workstream = store.write((ctx) => insertWorkstream(ctx, task.id)).value;
   return { project, task, workstream };
 }
+
+/** Polls `check` until it returns a value (not undefined/false) or the deadline passes. */
+export async function waitFor<T>(
+  check: () => T | undefined | false,
+  timeoutMs = 10_000,
+): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const value = check();
+    if (value !== undefined && value !== false) return value;
+    if (Date.now() > deadline) throw new Error('waitFor timed out');
+    await new Promise((r) => setTimeout(r, 15));
+  }
+}
+
+/** Arguments for the write_handoff MCP tool in fake scripts. */
+export function handoffArgs(opId: string, nextAction: string): Record<string, unknown> {
+  return {
+    opId,
+    objective: { task: 'scripted', acceptanceCriteria: ['it works'], nonGoals: [] },
+    progress: { done: ['first half'], notDone: ['second half'], nextAction },
+    codeState: { uncommittedSummary: '' },
+    reasoning: { decisions: [], tradeOffs: [], rejected: [] },
+    validation: { checks: [], environmentProblems: [] },
+    continuity: { blockers: [], pendingQuestions: [], backgroundJobs: [], notes: '' },
+  };
+}

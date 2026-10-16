@@ -25,6 +25,9 @@ export interface PromptInput {
 export const HANDOFF_NUDGE =
   '10db: your context is filling up. Finish the step you are on, commit it, then call the write_handoff tool with the six-part handoff and end your turn. Do not start new work.';
 
+export const HANDOFF_FIRM_NUDGE =
+  '10db: your context is almost full. Call write_handoff now and end your turn.';
+
 const RULES = [
   'Edit only files inside your claims. For anything else, call the request_claim tool first.',
   'Commit only through the 10db commit tool, naming every path. Never run git commit, add, checkout, reset, stash or push --force.',

@@ -1,0 +1,17 @@
+import type { HandoffDto, NextAction } from '@10db/contracts';
+
+/** After a crash: resume the provider session once; if resuming already failed, start fresh from the last handoff. */
+export function nextActionAfterCrash(
+  previous: NextAction,
+  providerSessionId: string | null,
+  latest: HandoffDto | null,
+): NextAction {
+  const fresh: NextAction = latest
+    ? { kind: 'continue_from_handoff', handoffId: latest.id }
+    : { kind: 'start' };
+  if (previous.kind === 'verify') return previous;
+  if (previous.kind === 'resume') return fresh;
+  return providerSessionId
+    ? { kind: 'resume', providerSessionId, reason: 'the session crashed' }
+    : fresh;
+}

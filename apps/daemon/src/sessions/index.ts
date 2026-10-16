@@ -1,2 +1,9 @@
 export { FakeAdapter, FakeScriptBook } from './fake-adapter';
-export type { SessionEvent, SessionSpec, ToolDecision, ToolRequest } from './types';
+export type {
+  SessionAdapter,
+  SessionEvent,
+  SessionHandle,
+  SessionSpec,
+  ToolDecision,
+  ToolRequest,
+} from './types';

@@ -1,1 +1,1 @@
-export { createGateRunner } from './gate-runner';
+export { createGateRunner, type GateRunner } from './gate-runner';
