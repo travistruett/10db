@@ -214,17 +214,13 @@ The test passes a path that doesn't exist. Today `openDatabase` ignores its seco
 `apps/daemon/test/bundle.test.ts`:
 ```ts
 import { execFileSync, spawn } from 'node:child_process';
-import { cpSync, existsSync, readFileSync } from 'node:fs';
+import { cpSync, existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { readRuntimeInfo } from '../src/daemon';
 import { tempDir, waitForAsync } from './fixtures';
 
 const daemonRoot = resolve(import.meta.dirname, '..');
-
-interface DaemonJson {
-  readonly pid: number;
-  readonly port: number;
-}
 
 describe('the bundled daemon', () => {
   let work: { path: string; cleanup(): void };
@@ -267,10 +263,10 @@ describe('the bundled daemon', () => {
     });
     try {
       const info = await waitForAsync(() => {
-        const file = join(dataDir, 'daemon.json');
         if (child.exitCode !== null) throw new Error(`the bundle exited early:\n${stderr}`);
-        if (!existsSync(file)) return Promise.resolve(undefined);
-        const parsed = JSON.parse(readFileSync(file, 'utf8')) as DaemonJson;
+        if (!existsSync(join(dataDir, 'daemon.json'))) return Promise.resolve(undefined);
+        // readRuntimeInfo parses the file with the daemon's own schema.
+        const parsed = readRuntimeInfo(dataDir);
         return Promise.resolve(parsed.pid === child.pid ? parsed : undefined);
       }, 30_000);
       const res = await fetch(`http://127.0.0.1:${String(info.port)}/health`);
@@ -283,7 +279,7 @@ describe('the bundled daemon', () => {
   }, 60_000);
 });
 ```
-`as DaemonJson` reads the daemon's own runtime file at a process boundary, and the test only reads two fields. `HOME` points at the temp dir and `SHELL` at `/bin/sh`, so that Task 7's login-shell capture runs fast and touches nothing of the builder's.
+`readRuntimeInfo` reads the daemon's runtime file through its zod schema, as `crash-recovery.test.ts` does, so the test needs no cast. `HOME` points at the temp dir and `SHELL` at `/bin/sh`, so that Task 7's login-shell capture runs fast and touches nothing of the builder's.
 
 - [ ] **Step 2: Let the build take an output directory, and run the tests to see them fail**
 
@@ -434,7 +430,7 @@ const desktop = resolve(import.meta.dirname, '..');
 const repo = resolve(desktop, '../..');
 const tauri = resolve(desktop, 'src-tauri');
 
-// mise.toml pins Node for the whole repo (M0); its `node = "x.y.z"` line is the version to ship.
+// mise.toml pins Node for the whole repo, so its `node = "x.y.z"` line is the version to ship.
 const pinned = /^node = "([^"]+)"$/m.exec(readFileSync(resolve(repo, 'mise.toml'), 'utf8'))?.[1];
 if (!pinned) throw new Error('mise.toml has no node = "x.y.z" line');
 if (process.version !== `v${pinned}`) {
@@ -4852,9 +4848,11 @@ Then add inside `describe('API', …)`:
   });
 ```
 
-Add to `apps/daemon/src/daemon/start.test.ts`. Add `type SystemCheckDto` to the existing `@10db/contracts` import, `waitForAsync` to the existing `../../test/fixtures` import (it already has `createTempRepo`, `tempDir` and `waitFor`), and `import type { CaffeinateSpawner } from '../keep-awake';`.
+Add to `apps/daemon/src/daemon/start.test.ts`. Add `EventsHead`, `KeepAwakeStatus`, `ProjectDto`, `TaskDto`, `WorkstreamDto` and `type SystemCheckDto` to the existing `@10db/contracts` import, `waitForAsync` to the existing `../../test/fixtures` import (it already has `createTempRepo`, `tempDir` and `waitFor`), `import { apiClient } from '../../test/api-client';` and `import type { CaffeinateSpawner } from '../keep-awake';`. Responses are parsed with their contract schemas, never cast.
 
-Every daemon the M1a tests start would now spawn a real `/usr/bin/caffeinate` and a recursive `fs.watch`. Add this below the imports, and spread it into each existing `startDaemon({ … })` call in this file. Do the same in `apps/daemon/test/acceptance.test.ts`, with its own copy of the constant (child processes are mocked at the boundary). The two new tests below pass their own `caffeinate` and `watch`:
+Every daemon the M1a tests start would now spawn a real `/usr/bin/caffeinate` and a recursive `fs.watch`. Add this below the imports, and spread it into each existing `startDaemon({ … })` call in this file. Do the same in `apps/daemon/test/acceptance.test.ts`, with its own copy of the constant (child processes are mocked at the boundary). The two new tests below pass their own `caffeinate` and `watch`.
+
+`apps/daemon/test/crash-recovery.test.ts` is the exception, and stays as it is: it spawns `src/main.ts` as a child process and kills it with `kill -9`, so nothing can be injected, and its daemon runs the real `caffeinate` and `fs.watch` while a lane runs. That is accepted. `caffeinate -w <pid>` exits with the killed daemon (spike 9) and is absent on the Ubuntu runner, and the watcher sees only the test's scripted writes, which sit inside the workstream's claim, so it raises no card. `main.ts` skips the login-shell capture there, because the test uses `TENDB_FAKE_SCRIPTS`.
 ```ts
 /** No real caffeinate and no file watcher in daemon tests that are not about them. */
 const QUIET = { caffeinate: () => null, watch: false } as const;
@@ -4880,7 +4878,7 @@ Then add inside `describe('startDaemon', …)`:
     const put = await fetch(`${daemon.url}/settings/keep-awake`, { method: 'PUT', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify({ mode: 'always' }) });
     expect(await put.json()).toEqual({ mode: 'always', active: true });
     expect(spawned).toEqual([process.pid]);
-    const head = (await (await fetch(`${daemon.url}/events/head`, { headers })).json()) as { seq: number };
+    const head = EventsHead.parse(await (await fetch(`${daemon.url}/events/head`, { headers })).json());
     expect(head.seq).toBeGreaterThan(0);
     expect(await (await fetch(`${daemon.url}/system`, { headers })).json()).toEqual(check);
   });
@@ -4899,25 +4897,18 @@ Then add inside `describe('startDaemon', …)`:
           return { close: () => { closed.push(root); } };
         },
       });
-      const running = daemon;
-      const call = async <T>(method: string, path: string, body?: unknown): Promise<T> => {
-        const res = await fetch(`${running.url}${path}`, {
-          method,
-          headers: { Authorization: `Bearer ${running.token}`, 'content-type': 'application/json' },
-          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-        });
-        return (await res.json()) as T;
-      };
-      const project = await call<{ id: string }>('POST', '/projects', { name: 'wired', repoPath: repo.path, gateCommand: 'true', areas: [{ name: 'api', globs: ['src/api/**'] }] });
-      const task = await call<{ id: string }>('POST', `/projects/${project.id}/tasks`, { title: 'Alpha', acceptanceCriteria: ['works'], areas: ['api'] });
-      const ws = await call<{ id: string }>('POST', `/tasks/${task.id}/start`);
+      const api = apiClient(daemon.url, daemon.token);
+      const project = await api.post('/projects', ProjectDto, { name: 'wired', repoPath: repo.path, gateCommand: 'true', areas: [{ name: 'api', globs: ['src/api/**'] }] });
+      const task = await api.post(`/projects/${project.id}/tasks`, TaskDto, { title: 'Alpha', acceptanceCriteria: ['works'], areas: ['api'] });
+      const ws = await api.post(`/tasks/${task.id}/start`, WorkstreamDto);
+      const keepAwakeActive = async () => (await api.get('/settings/keep-awake', KeepAwakeStatus)).active;
 
-      await waitForAsync(async () => ((await call<{ active: boolean }>('GET', '/settings/keep-awake')).active ? true : undefined));
+      await waitForAsync(async () => ((await keepAwakeActive()) ? true : undefined));
       expect(spawned).toEqual([process.pid]);
       expect(roots).toEqual([repo.path]);
 
-      await call('POST', `/workstreams/${ws.id}/cancel`);
-      await waitForAsync(async () => ((await call<{ active: boolean }>('GET', '/settings/keep-awake')).active ? undefined : true));
+      await api.post(`/workstreams/${ws.id}/cancel`, z.unknown());
+      await waitForAsync(async () => ((await keepAwakeActive()) ? undefined : true));
       expect(closed).toEqual([repo.path]);
     } finally {
       await daemon?.stop();
@@ -5280,7 +5271,6 @@ with
 
 **Entry point.** Replace `apps/daemon/src/main.ts`:
 ```ts
-import { join } from 'node:path';
 import { ToolName, type SystemCheckDto } from '@10db/contracts';
 import { AlreadyRunningError, startDaemon } from './daemon';
 import { loadEnv } from './env';
@@ -5350,7 +5340,6 @@ try {
   throw error;
 }
 ```
-If `join` is now unused in `main.ts`, drop its import; knip and ESLint report it.
 Exit code 2 tells the Tauri supervisor (Task 8) that another daemon owns the data directory, so it stops restarting. `main.ts` passes `process.env` into `captureLoginEnv` the same way it does into `loadEnv`; `env.ts` is still the only module that reads variables out of it.
 
 Add to `apps/daemon/AGENTS.md`:
@@ -6035,34 +6024,50 @@ Expected: FAIL, for these reasons:
 Implement. In `apps/daemon/src/runner/runner.ts`:
 - In `interface SessionState`, replace `waitingOn: InboxItemId | null;` and `waits: number;` with:
   ```ts
-    /** The cards the session is waiting on, oldest first; an answered card leaves the set. */
-    waitingOn: Set<InboxItemId>;
+    /**
+     * The cards the session is waiting on, oldest first, with how many waits each has: a folded card can
+     * be asked twice. A card leaves the map when its last wait ends.
+     */
+    waitingOn: Map<InboxItemId, number>;
   ```
-  and in the `const st: SessionState = { … }` literal, replace `waitingOn: null,` and `waits: 0,` with `waitingOn: new Set(),`.
+  and in the `const st: SessionState = { … }` literal, replace `waitingOn: null,` and `waits: 0,` with `waitingOn: new Map(),`.
 - Above `const endWaits = …`, add:
   ```ts
     /** The oldest card still open: a stop or the wait timer parks on it, never on one already answered. */
-    const firstOpen = (): InboxItemId | null => [...st.waitingOn][0] ?? null;
+    const firstOpen = (): InboxItemId | null => [...st.waitingOn.keys()][0] ?? null;
+    const openWaits = (): number => [...st.waitingOn.values()].reduce((sum, n) => sum + n, 0);
   ```
 - In `endWaits`, replace `if (st.waits > 0 && st.waitingOn) st.parkedFor ??= st.waitingOn;` with `st.parkedFor ??= firstOpen();`.
 - In `onWaitStart(item)`, replace `st.waits += 1;`, `if (st.waits > 1) return;` and `st.waitingOn = item.id;` with:
   ```ts
-        st.waitingOn.add(item.id);
-        if (st.waitingOn.size > 1) return;
+        st.waitingOn.set(item.id, (st.waitingOn.get(item.id) ?? 0) + 1);
+        if (openWaits() > 1) return;
   ```
   and in its timer, replace `st.parkedFor = item.id;` with `st.parkedFor = firstOpen() ?? item.id;`.
 - Change `onWaitEnd()` to `onWaitEnd(item)`, and replace `st.waits = Math.max(0, st.waits - 1);`, `if (st.waits > 0) return;` and `st.waitingOn = null;` with:
   ```ts
-        st.waitingOn.delete(item.id);
+        const left = (st.waitingOn.get(item.id) ?? 0) - 1;
+        if (left > 0) st.waitingOn.set(item.id, left);
+        else st.waitingOn.delete(item.id);
+        // WAITING_HUMAN holds until every wait has ended, including a second wait on the same folded card.
         if (st.waitingOn.size > 0) return;
   ```
+- Give `freshAction` the reader it reads through, so it can run inside a write: change `function freshAction(id: WorkstreamId): NextAction` to `function freshAction(reader: DbReader, id: WorkstreamId): NextAction`, with `latestHandoff(reader, id)` in its body, add `type DbReader` to the `@10db/db` import, and change the existing call `: freshAction(id);` to `: freshAction(db, id);`.
 - In `case 'started':`, inside the `opts.state.write((ctx) => { … })`, after `markSessionStarted(…)`, add:
   ```ts
                 // The session has the answer now. Kept as `answer`, a restart would send it again and
                 // re-grant a one-time permission; a fresh action resumes this session after a crash.
-                if (action.kind === 'answer') patchWorkstream(ctx, id, ctl.fence, { nextAction: freshAction(id) });
+                if (action.kind === 'answer') patchWorkstream(ctx, id, ctl.fence, { nextAction: freshAction(ctx.tx, id) });
   ```
   A crash before `started` still keeps the `answer` action, as `nextActionAfterCrash` intends: that session never saw the answer.
+
+In `apps/daemon/src/runner/next-action.ts`, the doc comment of `nextActionAfterCrash` now overstates how long an answer survives. Replace its second sentence (from "An answer or a gate failure" to "fails the workstream.") with:
+```ts
+ * A gate failure is builder input the next session must still see, so it survives the crash, retried
+ * until the recovery limit fails the workstream. An answer survives only a crash before its session
+ * started: once a session has started, the runner has replaced the `answer` action, so the answer and
+ * a one-time permission reach exactly one session.
+```
 
 In `apps/daemon/src/log/rotate.ts`, give `fileDestination` the stream's own type, so the caller can end it:
 ```ts
@@ -6076,17 +6081,26 @@ Drop the now-unused `type DestinationStream` import there. In `apps/daemon/src/d
   const logFile = fileDestination(logPath);
   const logger = createLogger({ level: opts.logLevel, destination: logFile });
 ```
-and at the end of `shutdown()`, after `lock.release();`, add:
+Below it, add:
 ```ts
-    // Last, after the final lines: a stop right after start would otherwise leak the descriptor, and
-    // the stream's late open fails once a test has removed the data directory.
-    await new Promise<void>((resolve) => {
+  /**
+   * Ends the log file and waits for its descriptor to close. A stop right after start would otherwise
+   * leak the descriptor, and the stream's late open fails once a test has removed the data directory.
+   */
+  function closeLog(): Promise<void> {
+    return new Promise((resolve) => {
       logFile.once('close', () => {
+        resolve();
+      });
+      // SonicBoom emits 'error', not 'close', when its open or close fails, and an unlistened 'error' throws.
+      logFile.once('error', () => {
         resolve();
       });
       logFile.end();
     });
+  }
 ```
+Then wrap the whole body of `shutdown()`, from `createdScheduler.stop();` through `lock.release();`, in `try { … } finally { await closeLog(); }`, so a failed `stopAll` still closes the file. Nothing may log after `closeLog()`: every component that holds the logger (the scheduler, the pauses, the nightly backup, the watcher, keep-awake, the runner and its sessions) is stopped inside the `try`, and `main.ts` only exits once `stop()` resolves. Don't add a log line after the `try`.
 ```bash
 pnpm vitest run --project daemon
 pnpm typecheck && pnpm lint && pnpm knip
@@ -7937,7 +7951,7 @@ export type DaemonClient = ReturnType<typeof createDaemonClient>;
 /** A non-2xx answer from the daemon; `message` is the daemon's own explanation. */
 export class DaemonRequestError extends Error {
   override readonly name = 'DaemonRequestError';
-  // Declared fields, not parameter properties: M0 bans those (TS1294 under erasableSyntaxOnly).
+  // Declared fields, not parameter properties: erasableSyntaxOnly rejects those (TS1294).
   readonly status: number;
   readonly body: unknown;
   constructor(status: number, body: unknown, message: string) {
@@ -8335,7 +8349,7 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   provider: WORK,
   inbox: [queryKeys.inbox, ['workstreams']],
   app_setting: [queryKeys.keepAwake],
-  // `proposal` (M1a's proposal.resolved) has no view in M1; the card that resolved it sends its own inbox event.
+  // `proposal` (from proposal.resolved) has no view to refresh; the card that resolved it sends its own inbox event.
 };
 
 export function eventStreamUrl(conn: DaemonConnection, after: number): string {
@@ -11461,7 +11475,7 @@ beforeAll(async () => {
   repo = createTempRepo();
   data = tempDir('acceptance-checks');
   daemon = await startDaemon({ dataDir: data.path, port: 0, adapter: new FakeAdapter(BOOK), logLevel: 'info', caffeinate: () => null, watch: false });
-  // M1a's test client: every call names the zod schema its response is parsed with.
+  // Every call names the zod schema its response is parsed with, so a changed response fails here.
   const api = apiClient(daemon.url, daemon.token);
   const project = await api.post('/projects', ProjectDto, {
     name: 'checks', repoPath: repo.path, gateCommand: 'test -d src', maxLanes: 2,
