@@ -62,6 +62,9 @@ export function renderHandoff(h: HandoffDto): string {
 
 function renderKnowledge(pack: ContextPack): string {
   const { decisions, droppedCount, empty } = pack.knowledge;
+  if (empty && droppedCount > 0) {
+    return `${String(droppedCount)} recorded decisions exceeded the budget and are not shown; call get_context or find_knowledge for them.`;
+  }
   if (empty)
     return 'No recorded decisions apply to this task yet. Call get_context to refresh later.';
   const lines = decisions.map((d) => `${d.question} -> ${d.choice} (${d.rationale})`);

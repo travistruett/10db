@@ -143,6 +143,20 @@ describe('buildSessionPrompt', () => {
     expect(full).not.toContain('No recorded decisions');
   });
 
+  it('does not claim nothing applies when every decision exceeded the budget', () => {
+    const prompt = buildSessionPrompt({
+      ...base,
+      contextPack: {
+        ...emptyPack,
+        knowledge: { decisions: [], budgetUsed: 0, droppedCount: 3, empty: true },
+      },
+      action: { kind: 'start' },
+    });
+    expect(prompt).toContain('3 recorded decisions exceeded the budget');
+    expect(prompt).toContain('find_knowledge');
+    expect(prompt).not.toContain('No recorded decisions');
+  });
+
   it('asks for write_handoff in the nudge and re-injects the pack after compaction', () => {
     expect(HANDOFF_NUDGE).toContain('write_handoff');
     expect(renderHandoff(handoff)).toContain('Next action: Write the render test');
