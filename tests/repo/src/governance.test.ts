@@ -389,6 +389,15 @@ describe('community files', () => {
     );
     expect(renovate['minimumReleaseAge']).toBe('1 day');
   });
+
+  it('leaves the throwaway spikes alone', () => {
+    const renovate = JSON.parse(readRepoFile('renovate.json')) as {
+      packageRules: { matchFileNames?: string[]; enabled?: boolean }[];
+    };
+    expect(renovate.packageRules).toContainEqual(
+      expect.objectContaining({ matchFileNames: ['spikes/**'], enabled: false }),
+    );
+  });
 });
 
 describe('the new-machine setup checklist', () => {

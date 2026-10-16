@@ -26,6 +26,11 @@
       "groupName": "Mantine"
     },
     {
+      "description": "The spikes are throwaway probes outside the workspace; they keep their own ranges.",
+      "matchFileNames": ["spikes/**"],
+      "enabled": false
+    },
+    {
       "matchManagers": ["github-actions"],
       "groupName": "GitHub Actions"
     }
