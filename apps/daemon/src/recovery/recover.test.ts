@@ -1,7 +1,10 @@
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { mintId, type WorkstreamState } from '@10db/contracts';
 import {
   acquireLease,
+  insertToolOp,
   createTestStore,
   getWorkstream,
   getWorkstreamRow,
@@ -16,7 +19,7 @@ import {
   type Store,
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createTempRepo, seedWorkstream, waitFor } from '../../test/fixtures';
+import { createTempRepo, seedWorkstream, tempDir, waitFor } from '../../test/fixtures';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit } from '../git';
 import { createInboxService, type InboxService } from '../inbox';
@@ -91,6 +94,48 @@ async function orphanProcess(detached = false) {
   return { child, pid, startedAt, exited };
 }
 
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** A gate group: a detached leader plus a grandchild in the same group, whose pid it records. */
+async function orphanGateGroup() {
+  const dir = tempDir('gate');
+  const pidFile = join(dir.path, 'grandchild.pid');
+  const leader = spawn('sh', ['-c', `sleep 60 & echo $! > '${pidFile}'; wait`], {
+    detached: true,
+    stdio: 'ignore',
+  });
+  const pid = leader.pid;
+  if (pid === undefined) throw new Error('spawn failed');
+  const exited = new Promise((r) => leader.once('exit', r));
+  const grandchildPid = await waitFor(() => {
+    try {
+      const n = Number(readFileSync(pidFile, 'utf8').trim());
+      return Number.isInteger(n) && n > 0 ? n : undefined;
+    } catch {
+      return undefined;
+    }
+  });
+  const startedAt = await systemProcesses.identify(pid);
+  if (startedAt === null) throw new Error('ps could not see the leader');
+  return {
+    leader,
+    pid,
+    startedAt,
+    exited,
+    grandchildPid,
+    cleanup: () => {
+      dir.cleanup();
+    },
+  };
+}
+
 function ask(ws: ReturnType<typeof inState>, title: string, signal: AbortSignal) {
   return inbox.ask({
     projectId: ws.project.id,
@@ -146,22 +191,50 @@ describe('recoverOnStartup', () => {
     }
   });
 
-  it('re-runs verification when the daemon died while verifying, killing the orphaned gate group', async () => {
-    const gate = await orphanProcess(true);
-    const ws = inState(['STARTING', 'RUNNING', 'VERIFYING']);
+  it('re-runs verification when the daemon died while verifying, killing the whole orphaned gate group', async () => {
+    const gate = await orphanGateGroup();
+    try {
+      const ws = inState(['STARTING', 'RUNNING', 'VERIFYING']);
+      state.write((ctx) => {
+        patchWorkstream(ctx, ws.workstream.id, null, {
+          gatePid: gate.pid,
+          gatePidStart: gate.startedAt,
+        });
+      });
+      await recover();
+      await gate.exited;
+      await waitFor(() => !alive(gate.grandchildPid));
+      expect(getWorkstream(state.db, ws.workstream.id)).toMatchObject({
+        state: 'QUEUED',
+        nextAction: { kind: 'verify' },
+      });
+      expect(getWorkstreamRow(state.db, ws.workstream.id).gatePid).toBeNull();
+    } finally {
+      if (alive(gate.grandchildPid)) process.kill(gate.grandchildPid, 'SIGKILL');
+      gate.cleanup();
+    }
+  });
+
+  it('records HEAD, the dirty files and the last acknowledged operation in the recovery event', async () => {
+    const ws = inState(['STARTING', 'RUNNING']);
+    writeFileSync(join(repo.path, 'scratch.txt'), 'uncommitted\n');
     state.write((ctx) => {
-      patchWorkstream(ctx, ws.workstream.id, null, {
-        gatePid: gate.pid,
-        gatePidStart: gate.startedAt,
+      insertToolOp(ctx, {
+        workstreamId: ws.workstream.id,
+        sessionId: ws.session.id,
+        opId: 'op-last',
+        tool: 'commit',
+        result: {},
       });
     });
     await recover();
-    await gate.exited;
-    expect(getWorkstream(state.db, ws.workstream.id)).toMatchObject({
-      state: 'QUEUED',
-      nextAction: { kind: 'verify' },
+    const head = execFileSync('git', ['-C', repo.path, 'rev-parse', 'HEAD']).toString().trim();
+    const step = listEventsAfter(state.db, 0, 1000).find((e) => e.type === 'recovery.step');
+    expect(step?.data).toMatchObject({
+      head,
+      dirtyFiles: ['scratch.txt'],
+      lastOpId: 'op-last',
     });
-    expect(getWorkstreamRow(state.db, ws.workstream.id).gatePid).toBeNull();
   });
 
   it('leaves a gate group alone when its pid now belongs to something else', async () => {
