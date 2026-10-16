@@ -22,14 +22,23 @@ const PROTECTED_BRANCHES = new Set(['main', 'master']);
 const REDIRECTING_OPTIONS = ['--git-dir', '--work-tree', '--namespace', '--config-env'];
 const DANGEROUS_PUSH_FLAGS = new Set(['--delete', '--mirror', '--all', '--prune']);
 
+/** Git accepts any unambiguous abbreviation of a long option, so `--open=x` means `--open-files-in-pager=x`. */
+function abbreviates(arg: string, option: string): boolean {
+  const name = arg.split('=')[0] ?? arg;
+  return name.startsWith('--') && name.length >= 3 && option.startsWith(name);
+}
+
 /** Read-only verbs still write files or run programs through a few options. */
 function readOnlySideEffects(verb: string, args: readonly string[]): GitVerdict {
-  const writesFile = args.some((a) => a === '--output' || a.startsWith('--output='));
-  const runsPager =
+  if (args.some((a) => abbreviates(a, '--output'))) {
+    return { deny: 'git --output writes a file and is not allowed.' };
+  }
+  if (
     verb === 'grep' &&
-    args.some((a) => a.startsWith('-O') || a.startsWith('--open-files-in-pager'));
-  if (writesFile) return { deny: 'git --output writes a file and is not allowed.' };
-  if (runsPager) return { deny: 'git grep -O runs a program and is not allowed.' };
+    args.some((a) => /^-[A-Za-z]*O/.test(a) || abbreviates(a, '--open-files-in-pager'))
+  ) {
+    return { deny: 'git grep -O runs a program and is not allowed.' };
+  }
   return null;
 }
 

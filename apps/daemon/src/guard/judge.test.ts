@@ -427,6 +427,27 @@ describe('shell commands', () => {
       command: 'git grep --open-files-in-pager foo',
       decision: 'deny',
     },
+    {
+      name: 'git grep --open=sh (abbreviation)',
+      command: "git grep --open='touch X;true' foo",
+      decision: 'deny',
+    },
+    {
+      name: 'git grep --open-files-in-p=sh',
+      command: 'git grep --open-files-in-p=sh foo',
+      decision: 'deny',
+    },
+    { name: 'git grep --o=sh', command: 'git grep --o=sh foo', decision: 'deny' },
+    { name: 'git grep -nO bundled', command: "git grep -nO'touch X;true' foo", decision: 'deny' },
+    { name: 'git grep -iO with separate value', command: 'git grep -iO sh foo', decision: 'deny' },
+    {
+      name: 'git diff --out=file (abbreviation)',
+      command: 'git diff --out=x.txt',
+      decision: 'deny',
+    },
+    { name: 'git grep -n foo', command: 'git grep -n foo', decision: 'allow' },
+    { name: 'git grep -i foo', command: 'git grep -i foo', decision: 'allow' },
+    { name: 'git grep -e with an O pattern', command: 'git grep -e Opattern', decision: 'allow' },
     { name: 'plain git diff', command: 'git diff', decision: 'allow' },
     {
       name: 'git diff --output-indicator-new',
