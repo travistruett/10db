@@ -1,7 +1,7 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { mintId, type WorkstreamState } from '@10db/contracts';
+import { mintId, type NextAction, type WorkstreamState } from '@10db/contracts';
 import {
   acquireLease,
   insertToolOp,
@@ -339,6 +339,35 @@ describe('recoverOnStartup', () => {
     const report = await recover();
     expect(report.redelivered).toEqual([item.id]);
     await waitFor(() => parked.length > 0);
+  });
+
+  describe('a next action that carries builder input', () => {
+    const inboxId = mintId('InboxItem');
+    const evidenceId = mintId('Evidence');
+    it.each<[string, NextAction, NextAction]>([
+      [
+        'keeps an answer, resuming the latest provider session',
+        { kind: 'answer', inboxId, providerSessionId: null },
+        { kind: 'answer', inboxId, providerSessionId: 'provider-1' },
+      ],
+      [
+        'keeps a fix with its gate evidence',
+        { kind: 'fix', evidenceId },
+        { kind: 'fix', evidenceId },
+      ],
+    ])('%s', async (_name, before, expected) => {
+      const ws = inState(['STARTING', 'RUNNING']);
+      state.write((ctx) => {
+        patchWorkstream(ctx, ws.workstream.id, null, { nextAction: before });
+      });
+      const report = await recover();
+      expect(report.requeued).toEqual([ws.workstream.id]);
+      expect(getWorkstream(state.db, ws.workstream.id)).toMatchObject({
+        state: 'QUEUED',
+        recoveryAttempts: 1,
+        nextAction: expected,
+      });
+    });
   });
 
   describe('each pre-crash state', () => {

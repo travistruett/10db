@@ -1,6 +1,11 @@
 import type { HandoffDto, NextAction } from '@10db/contracts';
 
-/** After a crash: resume the provider session once; if resuming already failed, start fresh from the last handoff. */
+/**
+ * After a crash: resume the provider session once; if resuming already failed, start fresh from the
+ * last handoff. An answer or a gate failure is builder input the next session must still see (and an
+ * answered permission's one-time allowance with it), so it survives the crash, retried until the
+ * recovery limit fails the workstream.
+ */
 export function nextActionAfterCrash(
   previous: NextAction,
   providerSessionId: string | null,
@@ -9,9 +14,18 @@ export function nextActionAfterCrash(
   const fresh: NextAction = latest
     ? { kind: 'continue_from_handoff', handoffId: latest.id }
     : { kind: 'start' };
-  if (previous.kind === 'verify') return previous;
-  if (previous.kind === 'resume') return fresh;
-  return providerSessionId
-    ? { kind: 'resume', providerSessionId, reason: 'the session crashed' }
-    : fresh;
+  switch (previous.kind) {
+    case 'verify':
+    case 'fix':
+      return previous;
+    case 'answer':
+      return { ...previous, providerSessionId: providerSessionId ?? previous.providerSessionId };
+    case 'resume':
+      return fresh;
+    case 'start':
+    case 'continue_from_handoff':
+      return providerSessionId
+        ? { kind: 'resume', providerSessionId, reason: 'the session crashed' }
+        : fresh;
+  }
 }

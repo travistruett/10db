@@ -435,6 +435,94 @@ describe('runner', () => {
       },
     );
 
+    /** Makes the second session the adapter starts end without ever reporting `started`. */
+    const secondSessionNeverStarts = () => {
+      let calls = 0;
+      interceptStart((h) => {
+        calls += 1;
+        if (calls !== 2) return h;
+        return {
+          ...h,
+          events: (async function* () {
+            for await (const event of h.events) if (event.type !== 'started') yield event;
+          })(),
+        };
+      });
+    };
+    const crash = { do: 'crash' as const, message: 'boom before started' };
+
+    it.each([
+      ['a question answer', askShip, 'Yes', [...doneScript], 'Answer: Yes'],
+      [
+        'an allow_once permission',
+        curl,
+        'allow_once',
+        [curl, ...doneScript],
+        'Allow Bash? curl -s https://example.com',
+      ],
+    ])(
+      'carries %s into the next session when the answered session crashes before it starts',
+      async (_name, ask, choice, finalScript, promptText) => {
+        engine = await createTestEngine({ Alpha: [[ask, turn], [crash], finalScript] });
+        secondSessionNeverStarts();
+        const { workstream } = engine.addTask('Alpha');
+        engine.launch(workstream.id);
+        const card = await waitFor(openCard);
+        engine.clock.advance(10 * 60_000);
+        await engine.runner.idle();
+        engine.inbox.answer(card.id, { choice });
+        engine.launch(workstream.id);
+        await engine.runner.idle();
+        expect(ws(workstream.id)).toMatchObject({
+          state: 'QUEUED',
+          recoveryAttempts: 1,
+          nextAction: { kind: 'answer', inboxId: card.id },
+        });
+
+        engine.launch(workstream.id);
+        await engine.runner.idle();
+        expect(ws(workstream.id).state).toBe('DONE');
+        expect(engine.adapter.prompts[2]?.prompt).toContain(promptText);
+        expect(listInbox(engine.store.db, { states: ['OPEN'] }).map((i) => i.kind)).toEqual([
+          'review',
+        ]);
+        expect(
+          engine.adapter.observations.filter(
+            (o) => o.kind === 'tool_allowed' && o.detail['toolName'] === 'Bash',
+          ),
+        ).toHaveLength(choice === 'allow_once' ? 1 : 0);
+      },
+    );
+
+    it('carries the gate failure into the next session when the fix session crashes before it starts', async () => {
+      engine = await createTestEngine(
+        {
+          Alpha: [
+            [turn],
+            [crash],
+            [write('src/api/fixed.txt'), commit('op-fixc-0001', ['src/api/fixed.txt']), turn],
+          ],
+        },
+        { gateCommand: 'test -f src/api/fixed.txt || { echo MISSING-FIXED-FILE; exit 2; }' },
+      );
+      secondSessionNeverStarts();
+      const { workstream } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+      expect(ws(workstream.id)).toMatchObject({
+        state: 'QUEUED',
+        recoveryAttempts: 1,
+        nextAction: { kind: 'fix' },
+      });
+
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+      expect(ws(workstream.id).state).toBe('DONE');
+      expect(engine.adapter.prompts[2]?.prompt).toContain('MISSING-FIXED-FILE');
+    });
+
     it('keeps a rejected usage limit when the turn completes afterwards', async () => {
       engine = await createTestEngine({
         Alpha: [[{ do: 'rate_limit', status: 'rejected', resetsInSeconds: 600 }]],

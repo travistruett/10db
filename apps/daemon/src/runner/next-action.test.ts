@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import { nextActionAfterCrash } from './index';
 
 const handoff = { id: mintId('Handoff') } as HandoffDto;
+const inboxId = mintId('InboxItem');
+const evidenceId = mintId('Evidence');
 
 describe('nextActionAfterCrash', () => {
   it.each<[string, NextAction, string | null, HandoffDto | null, NextAction['kind']]>([
@@ -31,5 +33,30 @@ describe('nextActionAfterCrash', () => {
     ['keeps verification as verification', { kind: 'verify' }, 'p1', handoff, 'verify'],
   ])('%s', (_name, previous, providerSessionId, latest, kind) => {
     expect(nextActionAfterCrash(previous, providerSessionId, latest).kind).toBe(kind);
+  });
+});
+
+describe('nextActionAfterCrash with builder input', () => {
+  it.each<[string, NextAction, string | null, NextAction]>([
+    [
+      'keeps an answer, resuming the provider session the crashed one reported',
+      { kind: 'answer', inboxId, providerSessionId: 'p1' },
+      'p2',
+      { kind: 'answer', inboxId, providerSessionId: 'p2' },
+    ],
+    [
+      'keeps an answer whose session crashed before reporting a provider session',
+      { kind: 'answer', inboxId, providerSessionId: 'p1' },
+      null,
+      { kind: 'answer', inboxId, providerSessionId: 'p1' },
+    ],
+    [
+      'keeps a fix with its gate evidence',
+      { kind: 'fix', evidenceId },
+      'p1',
+      { kind: 'fix', evidenceId },
+    ],
+  ])('%s', (_name, previous, providerSessionId, expected) => {
+    expect(nextActionAfterCrash(previous, providerSessionId, handoff)).toEqual(expected);
   });
 });
