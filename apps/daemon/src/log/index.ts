@@ -20,6 +20,7 @@ const REDACT_PATHS = [
   '*.*.authorization',
   'mcpToken',
   '*.mcpToken',
+  '*.*.mcpToken',
 ];
 
 export function createLogger(options: {
