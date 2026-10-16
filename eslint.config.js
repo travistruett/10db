@@ -67,5 +67,47 @@ export default defineConfig(
     rules: jsxA11y.flatConfigs.strict.rules,
     languageOptions: { globals: globals.browser },
   },
+  {
+    // Daemon modules (src/<module>/) import each other only through index.ts.
+    files: ['apps/daemon/src/*/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              regex: '^@10db/[^/]+/.+',
+              message: 'Import a workspace package through its entry point only.',
+            },
+            // `(?!\\.\\.)` lets tests reach `../../test/fixtures`; only sibling modules are restricted.
+            {
+              regex: '^\\.\\./(?!\\.\\.)[^/]+/.+',
+              message: 'Import another daemon module through its index.ts only.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ['apps/daemon/src/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              regex: '^@10db/[^/]+/.+',
+              message: 'Import a workspace package through its entry point only.',
+            },
+            {
+              regex: '^\\./[^/]+/.+',
+              message: 'Import a daemon module through its index.ts only.',
+            },
+          ],
+        },
+      ],
+    },
+  },
   prettier,
 );

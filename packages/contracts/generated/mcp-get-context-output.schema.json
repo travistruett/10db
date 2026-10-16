@@ -1,0 +1,378 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "task": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "acceptanceCriteria": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "title",
+        "description",
+        "acceptanceCriteria"
+      ]
+    },
+    "claims": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "area",
+              "hazard"
+            ]
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "name"
+        ]
+      }
+    },
+    "handoff": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^hof_[0-9A-HJKMNP-TV-Z]{26}$"
+            },
+            "workstreamId": {
+              "type": "string",
+              "pattern": "^ws_[0-9A-HJKMNP-TV-Z]{26}$"
+            },
+            "sessionId": {
+              "type": "string",
+              "pattern": "^ses_[0-9A-HJKMNP-TV-Z]{26}$"
+            },
+            "content": {
+              "type": "object",
+              "properties": {
+                "objective": {
+                  "type": "object",
+                  "properties": {
+                    "task": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "acceptanceCriteria": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "nonGoals": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  },
+                  "required": [
+                    "task",
+                    "acceptanceCriteria",
+                    "nonGoals"
+                  ]
+                },
+                "progress": {
+                  "type": "object",
+                  "properties": {
+                    "done": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "notDone": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "nextAction": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "done",
+                    "notDone",
+                    "nextAction"
+                  ]
+                },
+                "codeState": {
+                  "type": "object",
+                  "properties": {
+                    "uncommittedSummary": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "uncommittedSummary"
+                  ]
+                },
+                "reasoning": {
+                  "type": "object",
+                  "properties": {
+                    "decisions": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "tradeOffs": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "rejected": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  },
+                  "required": [
+                    "decisions",
+                    "tradeOffs",
+                    "rejected"
+                  ]
+                },
+                "validation": {
+                  "type": "object",
+                  "properties": {
+                    "checks": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "command": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "result": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "required": [
+                          "command",
+                          "result"
+                        ]
+                      }
+                    },
+                    "environmentProblems": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  },
+                  "required": [
+                    "checks",
+                    "environmentProblems"
+                  ]
+                },
+                "continuity": {
+                  "type": "object",
+                  "properties": {
+                    "blockers": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "pendingQuestions": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "backgroundJobs": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "notes": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "blockers",
+                    "pendingQuestions",
+                    "backgroundJobs",
+                    "notes"
+                  ]
+                }
+              },
+              "required": [
+                "objective",
+                "progress",
+                "codeState",
+                "reasoning",
+                "validation",
+                "continuity"
+              ]
+            },
+            "gitHead": {
+              "type": "string"
+            },
+            "gitChangedFiles": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "gitCommits": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "createdAt": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+            }
+          },
+          "required": [
+            "id",
+            "workstreamId",
+            "sessionId",
+            "content",
+            "gitHead",
+            "gitChangedFiles",
+            "gitCommits",
+            "createdAt"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "pendingAnswer": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "question": {
+              "type": "string"
+            },
+            "answer": {
+              "type": "string"
+            },
+            "note": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "question",
+            "answer",
+            "note"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "knowledge": {
+      "type": "object",
+      "properties": {
+        "decisions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "decision"
+              },
+              "id": {
+                "type": "string",
+                "pattern": "^dec_[0-9A-HJKMNP-TV-Z]{26}$"
+              },
+              "question": {
+                "type": "string"
+              },
+              "choice": {
+                "type": "string"
+              },
+              "rationale": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "id",
+              "question",
+              "choice",
+              "rationale"
+            ]
+          }
+        },
+        "budgetUsed": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "droppedCount": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
+        "empty": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "decisions",
+        "budgetUsed",
+        "droppedCount",
+        "empty"
+      ]
+    }
+  },
+  "required": [
+    "task",
+    "claims",
+    "handoff",
+    "pendingAnswer",
+    "knowledge"
+  ]
+}

@@ -11,6 +11,7 @@
     "drift": "drizzle-kit generate && bash ../../scripts/check-clean.sh packages/db/drizzle"
   },
   "dependencies": {
+    "@10db/contracts": "workspace:*",
     "better-sqlite3": "13.0.3",
     "drizzle-orm": "0.45.4"
   },

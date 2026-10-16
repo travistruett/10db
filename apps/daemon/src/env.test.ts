@@ -6,6 +6,12 @@ describe('loadEnv', () => {
     expect(loadEnv({})).toEqual({ TENDB_PORT: 4317, TENDB_LOG_LEVEL: 'info' });
   });
 
+  it('reads the fake script path', () => {
+    expect(loadEnv({ TENDB_FAKE_SCRIPTS: '/tmp/book.json' }).TENDB_FAKE_SCRIPTS).toBe(
+      '/tmp/book.json',
+    );
+  });
+
   it('coerces the port', () => {
     expect(loadEnv({ TENDB_PORT: '0' }).TENDB_PORT).toBe(0);
   });
