@@ -1,6 +1,6 @@
 import { AlreadyRunningError, startDaemon } from './daemon';
 import { loadEnv } from './env';
-import { resolveDataDir, resolveMigrationsDir } from './paths';
+import { resolveDataDir, resolveMigrationsDir, resolveSqliteBinding } from './paths';
 import { createUnavailableAdapter, FakeAdapter, loadFakeScriptBook } from './sessions';
 
 // An unhandled error exits loudly; the supervisor restarts the daemon and recovery runs at startup.
@@ -19,6 +19,8 @@ const adapter = env.TENDB_FAKE_SCRIPTS
   ? new FakeAdapter(loadFakeScriptBook(env.TENDB_FAKE_SCRIPTS))
   : createUnavailableAdapter('No session adapter is configured');
 
+const sqliteBinding = resolveSqliteBinding(env);
+
 try {
   const daemon = await startDaemon({
     dataDir,
@@ -26,6 +28,7 @@ try {
     adapter,
     logLevel: env.TENDB_LOG_LEVEL,
     migrationsDir: resolveMigrationsDir(),
+    ...(sqliteBinding ? { sqliteBinding } : {}),
   });
   console.log(`10db daemon listening on ${daemon.url} (data: ${dataDir})`);
   const shutdown = (): void => {

@@ -16,6 +16,7 @@ const PUBLIC_RESEARCH = [
   'spike-05-questions-permissions.md',
   'spike-06-park-resume.md',
   'spike-07-usage-limits.md',
+  'spike-08-sidecar.md',
   'spike-09-caffeinate.md',
   'spike-10-bg-daemon.md',
   'spike-11-tauri-first-window.md',

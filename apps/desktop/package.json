@@ -3,9 +3,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p scripts/tsconfig.json",
     "dev": "vite",
     "build": "vite build",
+    "sidecar": "tsx scripts/prepare-sidecar.ts",
     "tauri": "tauri"
   },
   "dependencies": {
@@ -35,6 +36,7 @@
     "postcss": "8.5.30",
     "postcss-preset-mantine": "1.18.0",
     "postcss-simple-vars": "7.0.1",
+    "tsx": "4.23.15",
     "vite": "8.3.4"
   }
 }

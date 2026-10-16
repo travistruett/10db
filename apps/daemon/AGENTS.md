@@ -10,9 +10,11 @@ serves agents over MCP, and runs Claude Code sessions.
   `node:*` modules or `@10db/db`; receive services through the `ApiServices` interface (passed in `ApiDeps`).
 - The package entry (`src/index.ts`) exports types only.
 - Listen on `127.0.0.1` only.
-- `pnpm --filter @10db/daemon build` bundles to `dist/daemon.mjs` and copies migrations to
-  `dist/drizzle/`. `better-sqlite3` stays external (native addon), so it is a daemon dependency
-  even though only `@10db/db` imports it (the crash test also reads the database file with it).
+- `pnpm --filter @10db/daemon build [outDir]` bundles everything into `dist/daemon.mjs` and copies
+  migrations (`drizzle/`) and the SQLite addon (`better_sqlite3.node`) beside it. Nothing stays
+  external: the Tauri sidecar runs the bundle from a directory with no node_modules.
+  `better-sqlite3` is still a daemon dependency: the build copies its addon, and
+  `test/crash-recovery.test.ts` opens the database with it directly.
 - `pnpm --filter @10db/daemon dev` runs from source with tsx and loads `apps/daemon/.env` when it
   exists. Copy `.env.example` to `.env` to override a variable; `.env` is git-ignored.
 

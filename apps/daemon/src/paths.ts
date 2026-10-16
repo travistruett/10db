@@ -14,3 +14,10 @@ export function resolveMigrationsDir(): string {
   const bundled = join(import.meta.dirname, 'drizzle');
   return existsSync(bundled) ? bundled : DB_MIGRATIONS_DIR;
 }
+
+/** The SQLite addon: an explicit path, else the bundle's own copy, else node_modules (source runs). */
+export function resolveSqliteBinding(env: DaemonEnv): string | undefined {
+  if (env.TENDB_SQLITE_BINDING) return env.TENDB_SQLITE_BINDING;
+  const bundled = join(import.meta.dirname, 'better_sqlite3.node');
+  return existsSync(bundled) ? bundled : undefined;
+}

@@ -48,6 +48,8 @@ export interface DaemonOptions {
   readonly port: number;
   readonly adapter: SessionAdapter;
   readonly logLevel: LogLevel;
+  /** better_sqlite3.node for bundled runs; source runs leave it unset. */
+  readonly sqliteBinding?: string;
   readonly clock?: Clock;
   /** Lane caps across all projects and per provider. */
   readonly caps?: { readonly global: number; readonly perProvider: number };
@@ -102,7 +104,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   rotateLogFile(logPath);
   const logger = createLogger({ level: opts.logLevel, destination: fileDestination(logPath) });
 
-  const db = openDatabase(join(opts.dataDir, '10db.sqlite'));
+  const db = openDatabase(
+    join(opts.dataDir, '10db.sqlite'),
+    opts.sqliteBinding ? { nativeBinding: opts.sqliteBinding } : {},
+  );
   const migrationsDir = opts.migrationsDir ?? DB_MIGRATIONS_DIR;
   const backupsDir = join(opts.dataDir, 'backups');
   if (hasPendingMigrations(db, migrationsDir)) {

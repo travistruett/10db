@@ -16,6 +16,7 @@ check:
 
 ## rust-check: fmt, clippy (pedantic, warnings are errors) and tests for the Tauri shell.
 rust-check:
+	pnpm --filter @10db/desktop sidecar
 	cd $(TAURI_DIR) && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
 
 ## deny: cargo-deny advisories, licences, bans and sources for the Tauri crate.

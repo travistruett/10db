@@ -9,9 +9,18 @@ export type TendbDatabase = BetterSQLite3Database<typeof schema> & { $client: Da
 /** Migrations shipped with this package; a bundled daemon passes its own copy instead. */
 export const DB_MIGRATIONS_DIR = resolve(import.meta.dirname, '../drizzle');
 
-/** Opens (creating if needed) the database file with the pragmas every connection needs. */
-export function openDatabase(path: string): TendbDatabase {
-  const client = new Database(path);
+/**
+ * Opens (creating if needed) the database file with the pragmas every connection needs.
+ * `nativeBinding` points at `better_sqlite3.node` when the daemon runs from a bundle with no node_modules.
+ */
+export function openDatabase(
+  path: string,
+  opts: { readonly nativeBinding?: string } = {},
+): TendbDatabase {
+  const client = new Database(
+    path,
+    opts.nativeBinding ? { nativeBinding: opts.nativeBinding } : {},
+  );
   client.pragma('journal_mode = WAL');
   client.pragma('foreign_keys = ON');
   client.pragma('busy_timeout = 5000');

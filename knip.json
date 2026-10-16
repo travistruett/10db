@@ -8,7 +8,7 @@
       "entry": ["src/main.ts", "scripts/*.ts"]
     },
     "apps/desktop": {
-      "entry": ["src/main.tsx"]
+      "entry": ["src/main.tsx", "scripts/*.ts"]
     },
     "packages/contracts": {
       "entry": ["scripts/*.ts"]
@@ -19,7 +19,7 @@
     }
   },
   "ignore": ["spikes/**", "scratch/**"],
-  "ignoreBinaries": ["codex"],
+  "ignoreBinaries": ["codex", "rustc"],
   "ignoreDependencies": ["@typescript/native"],
   "ignoreExportsUsedInFile": true
 }

@@ -25,6 +25,13 @@ describe('openDatabase', () => {
     expect(db.$client.pragma('foreign_keys', { simple: true })).toBe(1);
   });
 
+  it('loads the native addon from an explicit path when one is given', () => {
+    const missing = join(dir, 'no-such-addon.node');
+    expect(() => openDatabase(join(dir, 'other.sqlite'), { nativeBinding: missing })).toThrow(
+      /no-such-addon/,
+    );
+  });
+
   it('has FTS5 compiled in', () => {
     const row = db.$client
       .prepare("SELECT 1 AS ok FROM pragma_compile_options WHERE compile_options = 'ENABLE_FTS5'")

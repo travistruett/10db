@@ -15,6 +15,8 @@ export default defineConfig(
     '**/generated/**',
     'packages/db/drizzle/**',
     'apps/desktop/src-tauri/target/**',
+    'apps/desktop/src-tauri/resources/**',
+    'apps/desktop/src-tauri/binaries/**',
     'apps/desktop/src-tauri/gen/**',
     'tests/repo/fixtures/**',
     'spikes/**',
