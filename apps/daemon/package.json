@@ -14,6 +14,7 @@
     "@10db/contracts": "workspace:*",
     "@10db/db": "workspace:*",
     "@hono/node-server": "2.1.5",
+    "@modelcontextprotocol/sdk": "1.32.1",
     "better-sqlite3": "13.0.3",
     "hono": "4.13.13",
     "zod": "4.6.7"
