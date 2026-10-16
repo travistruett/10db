@@ -22,3 +22,6 @@
 - [ ] Spec §12: the fake adapter is typed at the `SessionEvent` seam, not with the SDK's message types; M1b's scripted query covers the SDK level.
 - [ ] Spec §4: the projects budget ceiling, the inbox delivery record and the workstream flow, persona and profile fields are not built yet.
 - [ ] A multi-question `AskUserQuestion` parked mid-sequence drops the earlier answers, so the agent re-asks. Fix: open all question cards up front, or include every card resolved for the workstream in the resume prompt.
+- [ ] M1b: when two waits overlap and the first card is answered, a stop or crash parks on that answered card and the second card's later answer is dropped. Fix: track the set of open waits and park on one that is still open.
+- [ ] M1b: a preserved `answer` next action re-prompts and re-grants the same allow-once on every clean restart before a handoff or step done. Fix: rewrite the next action to `resume` once the session reports `started`.
+- [ ] M1b: end the daemon log's file destination in `stop()`; a daemon stopped milliseconds after start can throw an async ENOENT, and each start leaks a file descriptor.
