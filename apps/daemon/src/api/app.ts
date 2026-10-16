@@ -28,6 +28,8 @@ export interface ApiDeps {
   readonly upgradeWebSocket: UpgradeWebSocket;
   /** The MCP endpoint; it authenticates sessions itself. */
   mcp(req: Request): Promise<Response>;
+  /** Called with every error the API answers as a 500, so the daemon can log it. */
+  onUnexpectedError(error: unknown): void;
 }
 
 const STATUS = { not_found: 404, conflict: 409, invalid: 400 } as const;
@@ -158,6 +160,7 @@ export function createApp(deps: ApiDeps) {
     // `c.req.json()` throws a SyntaxError for a body that is not JSON.
     if (error instanceof SyntaxError)
       return c.json({ error: 'invalid', message: 'The body is not valid JSON' }, 400);
+    deps.onUnexpectedError(error);
     return c.json({ error: 'internal' }, 500);
   });
   return app;

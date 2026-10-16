@@ -45,6 +45,9 @@ const app = createApp({
   token: randomBytes(32).toString('base64url'),
   services: placeholderServices,
   upgradeWebSocket,
+  onUnexpectedError: (error) => {
+    console.error('Unhandled API error', error);
+  },
   mcp: () => Promise.resolve(Response.json({ error: 'not wired' }, { status: 503 })),
 });
 // The node server hands upgrade requests to this noServer socket server. The cast bridges ws's

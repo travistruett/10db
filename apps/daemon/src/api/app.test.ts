@@ -38,8 +38,12 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
 // A helper that never upgrades: it answers 426 so a test can tell the route was reached.
 const noUpgrade = defineWebSocketHelper(() => new Response(null, { status: 426 }));
 
-function app(services = stubServices()) {
+function app(
+  services = stubServices(),
+  onUnexpectedError: (error: unknown) => void = () => undefined,
+) {
   return createApp({
+    onUnexpectedError,
     startedAt,
     allowedOrigins: ['http://localhost:1420'],
     token: TOKEN,
@@ -132,6 +136,20 @@ describe('API', () => {
         })
       ).status,
     ).toBe(409);
+  });
+
+  it('answers 500 for an unexpected error and reports that error to the hook', async () => {
+    const boom = new Error('boom');
+    const seen: unknown[] = [];
+    const services = stubServices({
+      listProjects: () => {
+        throw boom;
+      },
+    });
+    const res = await app(services, (error) => seen.push(error)).request('/projects', auth);
+    expect(res.status).toBe(500);
+    expect(seen).toEqual([boom]);
+    expect(seen[0]).toBe(boom);
   });
 
   it('answers 400 for a malformed ID', async () => {
