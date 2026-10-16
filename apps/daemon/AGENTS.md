@@ -15,3 +15,14 @@ serves agents over MCP, and runs Claude Code sessions.
   even though only `@10db/db` imports it; `knip.json` ignores it for that reason.
 - `pnpm --filter @10db/daemon dev` runs from source with tsx and loads `apps/daemon/.env` when it
   exists. Copy `.env.example` to `.env` to override a variable; `.env` is git-ignored.
+
+## Modules
+
+`src/<module>/` directories are flat; each exports its public surface from `index.ts`, and other
+modules import only that (ESLint enforces it). Dependencies point one way:
+
+`clock`, `log`, `events`, `guard`, `permissions`, `git`, `verify` → `sessions`, `inbox`, `briefing` →
+`mcp` → `runner` → `scheduler`, `recovery` → `daemon` (composition root) → `main.ts`.
+`api` depends only on `@10db/contracts` and its own `ApiServices` interface.
+
+Time comes from an injected `Clock`; never call `Date.now()` or `setTimeout` directly in logic.

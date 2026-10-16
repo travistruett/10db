@@ -2,7 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { serve } from '@hono/node-server';
 import { migrateDatabase, openDatabase } from '@10db/db';
-import { createApp } from './api/app';
+import { createApp } from './api';
 import { loadEnv } from './env';
 import { resolveDataDir, resolveMigrationsDir } from './paths';
 
