@@ -441,6 +441,18 @@ describe('shell commands', () => {
     { name: 'git grep -nO bundled', command: "git grep -nO'touch X;true' foo", decision: 'deny' },
     { name: 'git grep -iO with separate value', command: 'git grep -iO sh foo', decision: 'deny' },
     {
+      name: 'git grep -1O context digit before O',
+      command: "git grep -1O'touch X;true' foo",
+      decision: 'deny',
+    },
+    {
+      name: 'git grep -n1O letter and digit before O',
+      command: "git grep -n1O'touch X;true' foo",
+      decision: 'deny',
+    },
+    { name: 'git grep -12O two digits before O', command: 'git grep -12Osh foo', decision: 'deny' },
+    { name: 'git grep -eO bundled pattern', command: 'git grep -eO foo', decision: 'deny' },
+    {
       name: 'git diff --out=file (abbreviation)',
       command: 'git diff --out=x.txt',
       decision: 'deny',
@@ -448,6 +460,15 @@ describe('shell commands', () => {
     { name: 'git grep -n foo', command: 'git grep -n foo', decision: 'allow' },
     { name: 'git grep -i foo', command: 'git grep -i foo', decision: 'allow' },
     { name: 'git grep -e with an O pattern', command: 'git grep -e Opattern', decision: 'allow' },
+    { name: 'git grep -w -i -n foo', command: 'git grep -w -i -n foo', decision: 'allow' },
+    { name: 'git grep -c foo', command: 'git grep -c foo', decision: 'allow' },
+    { name: 'git grep -E foo', command: 'git grep -E foo', decision: 'allow' },
+    { name: 'git grep -e O as separate words', command: 'git grep -e O foo', decision: 'allow' },
+    {
+      name: 'git grep --only-matching foo',
+      command: 'git grep --only-matching foo',
+      decision: 'allow',
+    },
     { name: 'plain git diff', command: 'git diff', decision: 'allow' },
     {
       name: 'git diff --output-indicator-new',
@@ -468,6 +489,11 @@ describe('shell commands', () => {
   it('points direct commits at the commit tool', () => {
     const verdict = bash("git commit -m 'x'");
     expect(verdict.decision === 'deny' && verdict.reason).toContain('commit tool');
+  });
+
+  it('tells the agent how to pass a pattern starting with O to git grep', () => {
+    const verdict = bash('git grep -eO foo');
+    expect(verdict.decision === 'deny' && verdict.reason).toContain('-e O');
   });
 
   it('allows when the Bash input has no command (the CLI rejects it anyway)', () => {

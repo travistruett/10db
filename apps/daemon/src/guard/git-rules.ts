@@ -33,11 +33,15 @@ function readOnlySideEffects(verb: string, args: readonly string[]): GitVerdict 
   if (args.some((a) => abbreviates(a, '--output'))) {
     return { deny: 'git --output writes a file and is not allowed.' };
   }
+  // git grep bundles letters and context digits before -O (`-n1Osh`), so any short bundle
+  // holding an O is denied rather than modelling the short-option grammar.
   if (
     verb === 'grep' &&
-    args.some((a) => /^-[A-Za-z]*O/.test(a) || abbreviates(a, '--open-files-in-pager'))
+    args.some((a) => /^-[^-]*O/.test(a) || abbreviates(a, '--open-files-in-pager'))
   ) {
-    return { deny: 'git grep -O runs a program and is not allowed.' };
+    return {
+      deny: 'git grep -O runs a program and is not allowed. Any short option group containing O is refused; pass a pattern starting with O as its own argument, for example -e O.',
+    };
   }
   return null;
 }
