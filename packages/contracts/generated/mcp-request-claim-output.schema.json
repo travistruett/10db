@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "granted": {
+          "type": "boolean",
+          "const": true
+        },
+        "claimId": {
+          "type": "string",
+          "pattern": "^clm_[0-9A-HJKMNP-TV-Z]{26}$"
+        }
+      },
+      "required": [
+        "granted",
+        "claimId"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "granted": {
+          "type": "boolean",
+          "const": false
+        },
+        "heldBy": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^ws_[0-9A-HJKMNP-TV-Z]{26}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "inboxId": {
+          "type": "string",
+          "pattern": "^inb_[0-9A-HJKMNP-TV-Z]{26}$"
+        }
+      },
+      "required": [
+        "granted",
+        "heldBy",
+        "inboxId"
+      ]
+    }
+  ]
+}

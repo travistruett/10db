@@ -1,0 +1,183 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "objective": {
+      "type": "object",
+      "properties": {
+        "task": {
+          "type": "string",
+          "minLength": 1
+        },
+        "acceptanceCriteria": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "nonGoals": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "required": [
+        "task",
+        "acceptanceCriteria",
+        "nonGoals"
+      ]
+    },
+    "progress": {
+      "type": "object",
+      "properties": {
+        "done": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "notDone": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "nextAction": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "done",
+        "notDone",
+        "nextAction"
+      ]
+    },
+    "codeState": {
+      "type": "object",
+      "properties": {
+        "uncommittedSummary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "uncommittedSummary"
+      ]
+    },
+    "reasoning": {
+      "type": "object",
+      "properties": {
+        "decisions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "tradeOffs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "rejected": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "required": [
+        "decisions",
+        "tradeOffs",
+        "rejected"
+      ]
+    },
+    "validation": {
+      "type": "object",
+      "properties": {
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "command": {
+                "type": "string",
+                "minLength": 1
+              },
+              "result": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "command",
+              "result"
+            ]
+          }
+        },
+        "environmentProblems": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "required": [
+        "checks",
+        "environmentProblems"
+      ]
+    },
+    "continuity": {
+      "type": "object",
+      "properties": {
+        "blockers": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "pendingQuestions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "backgroundJobs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "notes": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "blockers",
+        "pendingQuestions",
+        "backgroundJobs",
+        "notes"
+      ]
+    }
+  },
+  "required": [
+    "objective",
+    "progress",
+    "codeState",
+    "reasoning",
+    "validation",
+    "continuity"
+  ]
+}

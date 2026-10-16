@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "handoffId": {
+      "type": "string",
+      "pattern": "^hof_[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "instruction": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "handoffId",
+    "instruction"
+  ]
+}

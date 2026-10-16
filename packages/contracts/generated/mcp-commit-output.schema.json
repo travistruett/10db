@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "alreadyCommitted": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "sha",
+    "alreadyCommitted"
+  ]
+}
