@@ -1,0 +1,257 @@
+# Codex twin of .claude/hooks/git-guard.mjs: the git rules in AGENTS.md, for Codex sessions in this
+# repository. Enforcement here is prefix-only: a rule matches the command's leading words exactly,
+# so a flag placed later (`git commit -m x --no-verify`, `git push origin x --force`), an env
+# assignment with any other value (`LEFTHOOK_EXCLUDE=gitleaks git commit`), a `bash -c` wrapper
+# and an implied `gh api` POST all go unmatched. The Claude guard parses the whole command; for
+# Codex, the required CI checks are the backstop.
+
+# Hooks are never skipped by an agent: lefthook is the fast local copy of the CI checks.
+prefix_rule(
+    pattern = ["git", "commit", ["--no-verify", "--no-verif", "--no-veri", "--no-ver", "--no-ve", "--no-v", "-n", "-nm"]],
+    decision = "forbidden",
+    justification = "AGENTS.md Git: agents never skip hooks. Fix what the hook reports instead.",
+)
+
+prefix_rule(
+    pattern = ["git", "push", ["--no-verify", "--no-verif", "--no-veri", "--no-ver", "--no-ve", "--no-v"]],
+    decision = "forbidden",
+    justification = "AGENTS.md Git: agents never skip hooks. Fix what the hook reports instead.",
+)
+
+prefix_rule(
+    pattern = [["LEFTHOOK=0", "LEFTHOOK=false"]],
+    decision = "forbidden",
+    justification = "AGENTS.md Git: agents never disable lefthook. Fix what the hook reports instead.",
+)
+
+prefix_rule(
+    pattern = ["env", ["LEFTHOOK=0", "LEFTHOOK=false"]],
+    decision = "forbidden",
+    justification = "AGENTS.md Git: agents never disable lefthook. Fix what the hook reports instead.",
+)
+
+# core.hooksPath reroutes the hooks. `git -c` asks, because its key can set it for one command.
+prefix_rule(
+    pattern = ["git", "config", ["core.hooksPath", "core.hookspath", "--unset"]],
+    decision = "forbidden",
+    justification = "AGENTS.md Git: agents never redirect core.hooksPath. Fix what the hook reports instead.",
+)
+
+prefix_rule(
+    pattern = ["git", "config", ["--local", "--global", "--worktree", "--system", "set", "unset"], ["core.hooksPath", "core.hookspath"]],
+    decision = "forbidden",
+    justification = "AGENTS.md Git: agents never redirect core.hooksPath. Fix what the hook reports instead.",
+)
+
+prefix_rule(
+    pattern = ["git", ["-c", "--config-env"]],
+    decision = "prompt",
+    justification = "AGENTS.md Git: a -c override can set core.hooksPath and skip the hooks.",
+)
+
+# Bulk staging sweeps in other sessions' work.
+prefix_rule(
+    pattern = ["git", "add", ["-A", "--all", ".", "-u", "--update", ":/", "*"]],
+    decision = "forbidden",
+    justification = "AGENTS.md Git: name each path, git add <path> <path>.",
+)
+
+prefix_rule(
+    pattern = ["git", "commit", ["-a", "--all", "-am"]],
+    decision = "forbidden",
+    justification = "AGENTS.md Git: git commit -a stages everything. Name the paths.",
+)
+
+# Irreversible or history-rewriting commands ask first.
+prefix_rule(
+    pattern = ["git", "commit", "--amend"],
+    decision = "prompt",
+    justification = "AGENTS.md Git: amending rewrites a commit. Make a new commit instead.",
+)
+
+prefix_rule(
+    pattern = ["git", "stash"],
+    decision = "prompt",
+    justification = "AGENTS.md Git: stash moves every uncommitted change, including other sessions' work.",
+)
+
+prefix_rule(
+    pattern = ["git", "reset", ["--hard", "--keep", "--merge"]],
+    decision = "prompt",
+    justification = "AGENTS.md Git: this reset rewrites the working tree.",
+)
+
+prefix_rule(
+    pattern = ["git", "rebase"],
+    decision = "prompt",
+    justification = "AGENTS.md Git: rebase rewrites history.",
+)
+
+prefix_rule(
+    pattern = ["git", "clean"],
+    decision = "prompt",
+    justification = "AGENTS.md Git: clean deletes untracked files that may be another session's.",
+)
+
+prefix_rule(
+    pattern = ["git", "restore"],
+    decision = "prompt",
+    justification = "AGENTS.md Git: restore discards uncommitted work.",
+)
+
+prefix_rule(
+    pattern = ["git", "checkout", "--"],
+    decision = "prompt",
+    justification = "AGENTS.md Git: checkout -- discards uncommitted work.",
+)
+
+prefix_rule(
+    pattern = ["git", "branch", ["-D", "--delete"]],
+    decision = "prompt",
+    justification = "AGENTS.md Git: deleting a branch can lose commits.",
+)
+
+prefix_rule(
+    pattern = ["git", "push", ["--force", "-f", "-uf", "-fu", "--force-with-lease", "--delete", "-d", "--mirror", "--all", "--tags"]],
+    decision = "prompt",
+    justification = "AGENTS.md Git: forced, deleting or every-ref pushes ask first.",
+)
+
+prefix_rule(
+    pattern = ["git", "push", "origin", ["main", "+main", "HEAD:main", "+HEAD:main", "refs/heads/main", "+refs/heads/main", "HEAD:refs/heads/main", "+HEAD:refs/heads/main"]],
+    decision = "prompt",
+    justification = "AGENTS.md Git: main changes only through a pull request.",
+)
+
+prefix_rule(
+    pattern = ["git", "push", ["-u", "--set-upstream"], "origin", ["main", "+main", "HEAD:main", "+HEAD:main", "refs/heads/main", "+refs/heads/main", "HEAD:refs/heads/main", "+HEAD:refs/heads/main"]],
+    decision = "prompt",
+    justification = "AGENTS.md Git: main changes only through a pull request.",
+)
+
+prefix_rule(
+    pattern = ["git", "filter-repo"],
+    decision = "prompt",
+    justification = "AGENTS.md Git: filter-repo rewrites every ref.",
+)
+
+# GitHub settings. Codex can't see --admin at the end of a merge, so every merge asks.
+prefix_rule(
+    pattern = ["gh", "pr", "merge"],
+    decision = "prompt",
+    justification = "AGENTS.md Git: --admin bypasses the code-owner review. Read every .github/, hook and agent-rule change first.",
+)
+
+prefix_rule(
+    pattern = ["gh", "api", ["-X", "--method"]],
+    decision = "prompt",
+    justification = "AGENTS.md Git: an explicit gh api method can change rulesets, environments or secrets.",
+)
+
+prefix_rule(
+    pattern = ["gh", "secret", ["set", "delete", "remove"]],
+    decision = "prompt",
+    justification = "AGENTS.md Git: this changes the repository's secrets.",
+)
+
+prefix_rule(
+    pattern = ["make", "github-settings"],
+    decision = "prompt",
+    justification = "AGENTS.md Git: this rewrites the live rulesets and repo settings on GitHub.",
+)
+
+prefix_rule(
+    pattern = ["node", ["./scripts/github-settings.mjs", "scripts/github-settings.mjs"]],
+    decision = "prompt",
+    justification = "AGENTS.md Git: this rewrites the live rulesets and repo settings on GitHub.",
+)
+
+prefix_rule(
+    pattern = [["./scripts/github-settings.mjs", "scripts/github-settings.mjs"]],
+    decision = "prompt",
+    justification = "AGENTS.md Git: this rewrites the live rulesets and repo settings on GitHub.",
+)
+
+# Wrapped forms. `command`, `exec`, `time`, `nohup`, `sudo`, `xargs` and `setsid` leave the program
+# unchanged, so the rules that matter most repeat behind each of them. A path to git
+# (`/usr/bin/git`), a subshell and a `bash -c` wrapper still go unmatched here; the Claude guard
+# sees those.
+def wrapped(pattern, decision, justification):
+    for wrapper in ["command", "exec", "time", "nohup", "sudo", "xargs", "setsid"]:
+        prefix_rule(
+            pattern = [wrapper] + pattern,
+            decision = decision,
+            justification = justification,
+        )
+
+wrapped(
+    ["git", "commit", ["--no-verify", "--no-verif", "--no-veri", "--no-ver", "--no-ve", "--no-v", "-n", "-nm", "-a", "--all", "-am"]],
+    "forbidden",
+    "AGENTS.md Git: agents never skip hooks or stage everything. Fix what the hook reports instead.",
+)
+
+wrapped(
+    ["git", "push", ["--no-verify", "--no-verif", "--no-veri", "--no-ver", "--no-ve", "--no-v"]],
+    "forbidden",
+    "AGENTS.md Git: agents never skip hooks. Fix what the hook reports instead.",
+)
+
+wrapped(
+    ["git", "add", ["-A", "--all", ".", "-u", "--update", ":/", "*"]],
+    "forbidden",
+    "AGENTS.md Git: name each path, git add <path> <path>.",
+)
+
+wrapped(
+    ["git", "config", ["core.hooksPath", "core.hookspath", "--unset"]],
+    "forbidden",
+    "AGENTS.md Git: agents never redirect core.hooksPath. Fix what the hook reports instead.",
+)
+
+wrapped(
+    ["git", ["-c", "--config-env"]],
+    "prompt",
+    "AGENTS.md Git: a -c override can set core.hooksPath and skip the hooks.",
+)
+
+wrapped(
+    ["git", "commit", "--amend"],
+    "prompt",
+    "AGENTS.md Git: amending rewrites a commit. Make a new commit instead.",
+)
+
+wrapped(
+    ["git", ["stash", "rebase", "clean", "restore", "filter-repo"]],
+    "prompt",
+    "AGENTS.md Git: this rewrites history or discards uncommitted work.",
+)
+
+wrapped(
+    ["git", "reset", ["--hard", "--keep", "--merge"]],
+    "prompt",
+    "AGENTS.md Git: this reset rewrites the working tree.",
+)
+
+wrapped(
+    ["git", "branch", ["-D", "--delete"]],
+    "prompt",
+    "AGENTS.md Git: deleting a branch can lose commits.",
+)
+
+wrapped(
+    ["git", "push", ["--force", "-f", "-uf", "-fu", "--force-with-lease", "--delete", "-d", "--mirror", "--all", "--tags"]],
+    "prompt",
+    "AGENTS.md Git: forced, deleting or every-ref pushes ask first.",
+)
+
+wrapped(
+    ["git", "push", "origin", ["main", "+main", "HEAD:main", "+HEAD:main", "refs/heads/main", "+refs/heads/main", "HEAD:refs/heads/main", "+HEAD:refs/heads/main"]],
+    "prompt",
+    "AGENTS.md Git: main changes only through a pull request.",
+)
+
+wrapped(
+    ["gh", "pr", "merge"],
+    "prompt",
+    "AGENTS.md Git: --admin bypasses the code-owner review. Read every .github/, hook and agent-rule change first.",
+)

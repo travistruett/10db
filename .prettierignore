@@ -1,0 +1,19 @@
+pnpm-lock.yaml
+**/generated/
+packages/db/drizzle/
+apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/gen/
+docs/superpowers/
+scratch/
+# Git-ignored controller scratch.
+.superpowers/
+spikes/
+.gate/
+LICENSE
+# Canonical texts, copied verbatim.
+CODE_OF_CONDUCT.md
+# release-please writes these in its own format: JSON.stringify layout and * bullets.
+CHANGELOG.md
+apps/desktop/src-tauri/tauri.conf.json
+# Append-only log: Prettier would re-pad the whole table on every new row.
+docs/architecture/decisions.md

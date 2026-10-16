@@ -1,0 +1,19 @@
+{
+  "name": "@10db/contracts",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "generate": "tsx scripts/generate.ts",
+    "drift": "tsx scripts/generate.ts && bash ../../scripts/check-clean.sh packages/contracts/generated"
+  },
+  "dependencies": {
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "tsx": "4.23.15"
+  }
+}

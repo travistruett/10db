@@ -1,0 +1,9 @@
+# Codex binding of the `plan-reviewer` role. The body lives in .claude/agents/plan-reviewer.md, the
+# one source of truth for both tools; this file only pins the model.
+name = "plan-reviewer"
+description = "Reviews a spec or implementation plan before execution starts. Dispatch with the document path and the spec it implements."
+model = "gpt-5.6-sol"
+model_reasoning_effort = "high"
+developer_instructions = """
+Read .claude/agents/plan-reviewer.md in this repository and follow its body exactly. Ignore its front matter: the `model:` and `tools:` lines are Claude Code settings and do not apply here. Open your report with the model you are running on, as the body asks.
+"""

@@ -1,0 +1,9 @@
+# Codex binding of the `researcher` role. The body lives in .claude/agents/researcher.md, the
+# one source of truth for both tools; this file only pins the model.
+name = "researcher"
+description = "Reads vendor docs, source code and the web to answer a specific question with cited facts. Never edits code. Dispatch with the question and where the answer goes."
+model = "gpt-5.6-sol"
+model_reasoning_effort = "medium"
+developer_instructions = """
+Read .claude/agents/researcher.md in this repository and follow its body exactly. Ignore its front matter: the `model:` and `tools:` lines are Claude Code settings and do not apply here. Open your report with the model you are running on, as the body asks.
+"""

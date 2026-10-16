@@ -1,0 +1,16 @@
+import { existsSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { DB_MIGRATIONS_DIR } from '@10db/db';
+import type { DaemonEnv } from './env';
+
+/** All 10db state lives under this one directory (spec §12). */
+export function resolveDataDir(env: DaemonEnv): string {
+  return env.TENDB_DATA_DIR ?? join(homedir(), 'Library', 'Application Support', '10db');
+}
+
+/** The bundle carries migrations beside itself; from source, use the db package's folder. */
+export function resolveMigrationsDir(): string {
+  const bundled = join(import.meta.dirname, 'drizzle');
+  return existsSync(bundled) ? bundled : DB_MIGRATIONS_DIR;
+}

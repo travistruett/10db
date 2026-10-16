@@ -1,0 +1,26 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "workspaces": {
+    ".": {
+      "entry": [".claude/hooks/*.mjs", "scripts/**/*.mjs"]
+    },
+    "apps/daemon": {
+      "entry": ["src/main.ts", "scripts/*.ts"],
+      "ignoreDependencies": ["better-sqlite3"]
+    },
+    "apps/desktop": {
+      "entry": ["src/main.tsx"]
+    },
+    "packages/contracts": {
+      "entry": ["scripts/*.ts"]
+    },
+    "tests/repo": {
+      "entry": ["src/**/*.test.ts"],
+      "ignore": ["fixtures/**"]
+    }
+  },
+  "ignore": ["spikes/**", "scratch/**"],
+  "ignoreBinaries": ["codex"],
+  "ignoreDependencies": ["@typescript/native"],
+  "ignoreExportsUsedInFile": true
+}

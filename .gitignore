@@ -1,0 +1,32 @@
+# Personal Claude Code overrides (API-key fallback, local permissions). Never committed.
+.claude/settings.local.json
+
+# Claude Code runtime state.
+.claude/scheduled_tasks.lock
+
+.DS_Store
+
+# Local working notes and handoffs. Never committed.
+scratch/
+
+# Local environment files. Only the committed .env.example documents the variables.
+.env
+.env.*
+!.env.example
+
+# Spike installs and raw evidence. Results are written up in docs/architecture/research/.
+spikes/agent-sdk/node_modules/
+spikes/agent-sdk/out/
+
+# Dependencies and build output.
+node_modules/
+dist/
+coverage/
+.gate/
+apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/gen/
+*.tsbuildinfo
+.eslintcache
+
+# Personal mise overrides.
+mise.local.toml

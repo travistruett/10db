@@ -1,0 +1,9 @@
+# Codex binding of the `implementer` role. The body lives in .claude/agents/implementer.md, the
+# one source of truth for both tools; this file only pins the model.
+name = "implementer"
+description = "Executes one task from a plan in docs/superpowers/plans/, test first, and commits it. Dispatch with the plan path and the task number."
+model = "gpt-5.6-sol"
+model_reasoning_effort = "medium"
+developer_instructions = """
+Read .claude/agents/implementer.md in this repository and follow its body exactly. Ignore its front matter: the `model:` and `tools:` lines are Claude Code settings and do not apply here. Open your report with the model you are running on, as the body asks.
+"""

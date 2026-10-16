@@ -1,0 +1,30 @@
+# 10db
+
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/travistruett/10db/badge)](https://scorecard.dev/viewer/?uri=github.com/travistruett/10db)
+
+A local macOS control plane for running Claude Code sessions as a software factory: pick a project,
+ask for N units of unblocked work, approve the batch, and walk away. Sessions hand off cleanly
+before their context fills, questions and permission prompts land in one inbox, and only the
+blocked work pauses.
+
+Status: under construction. The design is in
+[docs/superpowers/specs/2026-10-13-10db-factory-loop-design.md](docs/superpowers/specs/2026-10-13-10db-factory-loop-design.md).
+
+## Develop
+
+Prerequisites: Homebrew, the Xcode Command Line Tools, and [mise](https://mise.jdx.dev) (`brew install mise`)
+activated in your shell with `eval "$(mise activate zsh)"` in `~/.zshrc`. The complete new-machine
+checklist is in [CONTRIBUTING.md](CONTRIBUTING.md#set-up).
+
+- `mise install && pnpm install`: install the pinned tools, the dependencies and the git hooks.
+  This includes Rust (about 1 GB). `make setup` does the same and asks before installing Rust.
+- `pnpm dev`: run the daemon and the UI.
+- `make gate`: every check; prints one summary line.
+- `make check`: the fast check on what you changed.
+
+Working rules for people and agents are in [AGENTS.md](AGENTS.md); how to contribute is in
+[CONTRIBUTING.md](CONTRIBUTING.md).
+
+## License
+
+Apache-2.0. See [LICENSE](LICENSE).

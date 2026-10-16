@@ -1,0 +1,17 @@
+# Codex binding for this repo. The Claude Code binding is `.claude/`; both bind the same rules in
+# AGENTS.md and .claude/rules/.
+
+# The root AGENTS.md plus an app's own are concatenated into one instruction block; the 32 KiB
+# default would cut it off.
+project_doc_max_bytes = 131072
+
+sandbox_mode = "workspace-write"
+approval_policy = "on-request"
+
+[sandbox_workspace_write]
+network_access = true
+
+# Public Mantine documentation; no credentials. Match the UI's Mantine release.
+[mcp_servers.mantine]
+command = "npx"
+args = ["-y", "@mantine/mcp-server@9.7.2"]

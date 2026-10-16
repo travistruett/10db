@@ -1,0 +1,37 @@
+# cargo-deny policy for the Tauri crate: advisories, licences, bans and sources. `make deny` runs
+# it locally, and the required cargo-deny CI job runs the same target.
+[graph]
+# The app ships for Apple Silicon only, so platform-specific crates for other targets don't count.
+targets = ["aarch64-apple-darwin"]
+
+[advisories]
+# Vulnerabilities and yanked versions fail. Unmaintained crates fail only when this crate depends
+# on them directly; transitive ones are Tauri's to replace.
+unmaintained = "workspace"
+yanked = "deny"
+ignore = []
+
+[licenses]
+# Permissive licences compatible with distributing 10db under Apache-2.0. GPL-family licences are
+# deliberately absent, so a crate under one fails the check.
+allow = [
+  "0BSD",
+  "Apache-2.0",
+  "BSD-3-Clause",
+  "CC0-1.0",
+  "MIT",
+  "MPL-2.0",
+  "Unicode-3.0",
+  "Zlib",
+]
+confidence-threshold = 0.8
+
+[bans]
+# Tauri's tree carries several major versions of some crates; report them, don't fail.
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

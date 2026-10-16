@@ -1,0 +1,12 @@
+# Every path needs the maintainer's review. The lines after the first name again the files that
+# decide what CI checks and what the hooks and agent guards enforce, so a pull request can't
+# loosen its own checks without that review. CODEOWNERS uses the last matching line, so add new
+# lines above these: a line below them could take them over.
+* @travistruett
+/.github/ @travistruett
+/lefthook.yml @travistruett
+/commitlint.config.* @travistruett
+/mise.toml @travistruett
+/mise.lock @travistruett
+/.claude/ @travistruett
+/.codex/ @travistruett

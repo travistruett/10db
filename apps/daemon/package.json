@@ -1,0 +1,25 @@
+{
+  "name": "@10db/daemon",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "dev": "tsx watch --env-file-if-exists=.env src/main.ts",
+    "build": "tsx scripts/build.ts"
+  },
+  "dependencies": {
+    "@10db/contracts": "workspace:*",
+    "@10db/db": "workspace:*",
+    "@hono/node-server": "2.1.5",
+    "better-sqlite3": "13.0.3",
+    "hono": "4.13.13",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "tsx": "4.23.15"
+  }
+}

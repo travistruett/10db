@@ -1,0 +1,30 @@
+# Local git hooks: fast feedback only. Every rule here has a required CI twin (the policy and gate
+# jobs in .github/workflows/ci.yml), because anyone can skip a hook.
+pre-commit:
+  parallel: true
+  jobs:
+    - name: gitleaks
+      run: gitleaks git --pre-commit --staged --no-banner --redact .
+    - name: hygiene
+      run: node scripts/hooks/hygiene.mjs {staged_files}
+    - name: prettier
+      run: pnpm exec prettier --check --ignore-unknown {staged_files}
+    - name: eslint
+      glob: '*.{ts,tsx,js,mjs,cjs}'
+      run: pnpm exec eslint --max-warnings=0 --no-warn-ignored {staged_files}
+    - name: cargo-fmt
+      glob: '*.rs'
+      run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --check
+
+commit-msg:
+  jobs:
+    - name: commitlint
+      run: pnpm exec commitlint --edit {1}
+
+pre-push:
+  jobs:
+    - name: no-push-to-main
+      run: node scripts/hooks/pre-push.mjs
+      use_stdin: true
+    - name: check
+      run: make check

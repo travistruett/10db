@@ -1,0 +1,33 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:best-practices",
+    ":semanticCommits",
+    ":semanticCommitTypeAll(chore)",
+    ":semanticCommitScope(deps)"
+  ],
+  "minimumReleaseAge": "1 day",
+  "rangeStrategy": "pin",
+  "lockFileMaintenance": { "enabled": true, "schedule": ["before 6am on monday"] },
+  "packageRules": [
+    {
+      "description": "Node is pinned in mise.toml and in the root engines field; bump both together.",
+      "matchDepNames": ["node"],
+      "groupName": "Node"
+    },
+    {
+      "description": "pnpm is pinned in mise.toml and in packageManager; bump both together.",
+      "matchDepNames": ["pnpm"],
+      "groupName": "pnpm"
+    },
+    {
+      "description": "The Mantine MCP server is pinned to the Mantine version the UI uses.",
+      "matchPackageNames": ["@mantine/*"],
+      "groupName": "Mantine"
+    },
+    {
+      "matchManagers": ["github-actions"],
+      "groupName": "GitHub Actions"
+    }
+  ]
+}

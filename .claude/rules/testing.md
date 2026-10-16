@@ -1,0 +1,18 @@
+# Testing
+
+- **Prove each test goes red first.** Run it before the code that makes it pass and watch it fail
+  for the expected reason. A test that never failed proves nothing.
+- **Fix production code, not the test.** When a test fails, assume the code is wrong until you
+  have shown the test is.
+- **Real objects, mocks only at boundaries.** Use a real SQLite file in a temp directory, a real
+  git repo in a temp directory, real HTTP via `app.request()`. Mock only the network, the clock
+  and child processes you don't own (the fake Claude adapter is such a boundary).
+- **Table-driven tests** for state machines, rules and parsers: one row per case, named.
+- **Test behavior, not implementation.** Assert on outputs, persisted rows and emitted events,
+  not on which private function ran.
+- **Match rigor to impact.** Recovery, permissions, claims and the git guard get exhaustive cases;
+  a label component gets one render test.
+- **No sleeps.** Wait on a condition with a deadline; inject the clock where time matters.
+- **Never pipe test output through `tail` or append `; echo $?`.** It hides failures and exit
+  codes.
+- **Every knowledge write is read back through search** in its test.

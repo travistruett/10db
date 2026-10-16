@@ -1,0 +1,13 @@
+{
+  "name": "@10db/repo-checks",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "eslint": "10.12.0",
+    "yaml": "2.9.1",
+    "zod": "4.6.7"
+  }
+}

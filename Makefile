@@ -1,0 +1,28 @@
+.PHONY: setup gate check rust-check deny github-settings
+
+TAURI_DIR := apps/desktop/src-tauri
+
+## setup: install the pinned tools and dependencies; safe to rerun. INSTALL_RUST=yes|no answers the Rust question.
+setup:
+	@bash scripts/setup.sh
+
+## gate: every check; prints one summary line.
+gate:
+	@bash scripts/gate.sh
+
+## check: fast focused check on changed files.
+check:
+	@bash scripts/check.sh
+
+## rust-check: fmt, clippy (pedantic, warnings are errors) and tests for the Tauri shell.
+rust-check:
+	cd $(TAURI_DIR) && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
+
+## deny: cargo-deny advisories, licences, bans and sources for the Tauri crate.
+deny:
+	cargo deny --manifest-path $(TAURI_DIR)/Cargo.toml --config deny.toml check
+
+## github-settings: apply .github/rulesets and the repo settings to GitHub. Needs admin rights;
+## run by hand once the repository exists, never in CI.
+github-settings:
+	node scripts/github-settings.mjs
