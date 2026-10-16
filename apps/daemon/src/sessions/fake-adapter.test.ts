@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { mintId } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -147,20 +147,36 @@ describe('FakeAdapter', () => {
     );
   });
 
-  it('waits for a message containing the expected text', async () => {
+  it('blocks on await_message until a message contains the expected text', async () => {
     const adapter = new FakeAdapter({
       Alpha: [
         [
           { do: 'await_message', contains: 'write_handoff' },
-          { do: 'activity', summary: 'got it' },
+          { do: 'tool', toolName: 'Write', input: { file_path: 'after.txt', content: 'go' } },
         ],
       ],
     });
     const handle = adapter.start(spec());
-    const done = collect(handle.events);
+    let ended = false;
+    const done = collect(handle.events).then((events) => {
+      ended = true;
+      return events;
+    });
+    const file = join(dir.path, 'after.txt');
+
     handle.send('unrelated');
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+    expect(existsSync(file)).toBe(false);
+    expect(ended).toBe(false);
+
     handle.send('please call write_handoff now');
-    expect((await done).map((e) => e.type)).toEqual(['started', 'activity', 'ended']);
+    const deadline = Date.now() + 5000;
+    while (!existsSync(file) && Date.now() < deadline) {
+      await new Promise((r) => setImmediate(r));
+    }
+    expect(readFileSync(file, 'utf8')).toBe('go');
+    expect((await done).at(-1)).toEqual({ type: 'ended', reason: 'completed', message: null });
   });
 
   it('ends with stopped when stopped during a hang', async () => {
