@@ -71,6 +71,9 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
     let launched = 0;
     for (const ws of listWorkstreams(db, { states: [WorkstreamState.Queued] })) {
       if (global >= opts.caps.global) break;
+      // A runner that just re-queued this row is still unwinding; launch() would refuse it and
+      // leave it STARTING with a lane. Its lane-freed callback ticks again once it has exited.
+      if (opts.runner.isRunning(ws.id)) continue;
       const project = getProject(db, ws.projectId);
       if (opts.pauses.isPaused(project.provider)) continue;
       if ((byProject.get(project.id) ?? 0) >= project.maxLanes) continue;
@@ -136,6 +139,7 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
       pending = true;
       queueMicrotask(() => {
         pending = false;
+        if (!started) return;
         try {
           tick();
         } catch (error) {

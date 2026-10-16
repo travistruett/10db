@@ -168,6 +168,28 @@ describe('scheduler', () => {
     s.stop();
   });
 
+  it('drops a requested tick when it is stopped before the tick runs', async () => {
+    queue();
+    const s = scheduler();
+    s.start();
+    s.requestTick();
+    s.stop();
+    await Promise.resolve();
+    expect(launched).toHaveLength(0);
+  });
+
+  it('leaves a queued workstream alone while its previous runner is still finishing', () => {
+    const a = queue();
+    running.add(a.workstream.id);
+    expect(scheduler().tick()).toBe(0);
+    expect(getWorkstreamRow(store.db, a.workstream.id)).toMatchObject({
+      state: 'QUEUED',
+      leaseOwner: null,
+    });
+    running.clear();
+    expect(scheduler().tick()).toBe(1);
+  });
+
   it('leases with a fresh fence and renews the lease on the heartbeat', () => {
     const a = queue();
     const s = scheduler();
