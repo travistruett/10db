@@ -1,5 +1,6 @@
-import type { Effort, Provider, SessionId, WorkstreamId } from '@10db/contracts';
+import type { BillingMode, Effort, Provider, SessionId, WorkstreamId } from '@10db/contracts';
 import type { GuardVerdict } from '../guard';
+import type { ProjectMcpServer } from './project-mcp';
 
 export interface ToolRequest {
   readonly toolName: string;
@@ -22,6 +23,10 @@ export interface SessionSpec {
   readonly effort: Effort;
   readonly resumeProviderSessionId: string | null;
   readonly env: Readonly<Record<string, string>>;
+  /** The project's billing mode; the adapter refuses a session whose credentials don't match it. */
+  readonly billingMode: BillingMode;
+  /** The repo's approved MCP servers, already expanded; passed next to 10db's server. */
+  readonly projectMcpServers: Readonly<Record<string, ProjectMcpServer>>;
   readonly allowedTools: readonly string[];
   readonly mcp: {
     readonly url: string;

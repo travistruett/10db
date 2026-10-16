@@ -1,3 +1,4 @@
+export { createClaudeAdapter } from './claude-adapter';
 export { FakeAdapter, FakeScriptBook, loadFakeScriptBook } from './fake-adapter';
 export type {
   SessionAdapter,

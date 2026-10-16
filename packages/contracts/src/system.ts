@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { InboxItemId, ProjectId } from './ids';
 
 /** The tools the system check looks for on the login PATH. */
 export const ToolName = { Claude: 'claude', Git: 'git', Docker: 'docker' } as const;
@@ -21,3 +22,62 @@ export const SystemCheckDto = z.object({
   tools: z.array(ToolCheck),
 });
 export type SystemCheckDto = z.infer<typeof SystemCheckDto>;
+
+/** How a repo `.mcp.json` server is reached. */
+export const McpTransport = { Stdio: 'stdio', Http: 'http', Sse: 'sse' } as const;
+export type McpTransport = (typeof McpTransport)[keyof typeof McpTransport];
+
+const ConfigHash = z.string().regex(/^[0-9a-f]{64}$/);
+
+/**
+ * A repo `.mcp.json` server as the builder reviews it: exactly what would run or be
+ * contacted, and the names, never the values, of what it reads. `configHash` is the SHA-256 of the
+ * server's normalized config, before expansion; an approval covers that hash only.
+ */
+export const McpServerReview = z.object({
+  name: z.string().min(1),
+  configHash: ConfigHash,
+  transport: z.enum(McpTransport),
+  /** stdio: the command and its arguments, as written. */
+  command: z.string().nullable(),
+  args: z.array(z.string()),
+  /** http and sse: the URL, as written. */
+  url: z.string().nullable(),
+  /** The keys of the declared `env` block (stdio) or `headers` block (http, sse). */
+  envNames: z.array(z.string()),
+  headerNames: z.array(z.string()),
+  /** Every `${NAME}` the config references, sorted. Approving the server allows exactly these. */
+  variables: z.array(z.string()),
+  /** The referenced names that look like credentials: shown as a warning on the card. */
+  sensitive: z.array(z.string()),
+});
+export type McpServerReview = z.infer<typeof McpServerReview>;
+
+/** The options on an MCP approval card. */
+export const McpApprovalChoice = { Approve: 'approve', Deny: 'deny' } as const;
+export type McpApprovalChoice = (typeof McpApprovalChoice)[keyof typeof McpApprovalChoice];
+
+export const McpVerdict = { Approved: 'approved', Denied: 'denied' } as const;
+export type McpVerdict = (typeof McpVerdict)[keyof typeof McpVerdict];
+
+/** One project's verdict on one exact server config. */
+export const McpApprovalDto = z.object({
+  projectId: ProjectId,
+  serverName: z.string().min(1),
+  configHash: ConfigHash,
+  verdict: z.enum(McpVerdict),
+  /** The variables the approval lets 10db expand into this server. Empty when denied. */
+  variables: z.array(z.string()),
+  sourceInboxId: InboxItemId.nullable(),
+  /** When the verdict was last recorded; a later answer for the same config replaces it. */
+  updatedAt: z.iso.datetime(),
+});
+export type McpApprovalDto = z.infer<typeof McpApprovalDto>;
+
+/** `POST /projects/:projectId/mcp-servers/review`: each repo server, and where its approval stands. */
+export const McpServerStatusDto = McpServerReview.extend({
+  verdict: z.enum([McpVerdict.Approved, McpVerdict.Denied, 'pending']),
+  /** The open approval card, while the verdict is pending. */
+  inboxId: InboxItemId.nullable(),
+});
+export type McpServerStatusDto = z.infer<typeof McpServerStatusDto>;

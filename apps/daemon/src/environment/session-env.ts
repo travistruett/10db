@@ -94,7 +94,6 @@ export function keychainSecretsWith(exec: KeychainExec): SecretSource {
 
 /**
  * Reads the API key from the login Keychain when a session starts; nothing is cached.
- * @public Wired into the daemon at its composition root.
  */
 export const keychainSecrets: SecretSource = keychainSecretsWith(execFileSync);
 

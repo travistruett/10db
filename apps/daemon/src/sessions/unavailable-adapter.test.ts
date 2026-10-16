@@ -15,6 +15,8 @@ describe('createUnavailableAdapter', () => {
       effort: 'medium',
       resumeProviderSessionId: null,
       env: {},
+      billingMode: 'subscription',
+      projectMcpServers: {},
       allowedTools: [],
       mcp: { url: 'http://127.0.0.1:1/mcp', token: 't', toolTimeoutMs: 1000 },
       preToolUse: () => ({ decision: 'allow' }),

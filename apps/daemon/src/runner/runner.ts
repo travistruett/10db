@@ -472,6 +472,8 @@ export function createRunner(opts: RunnerOptions): Runner {
       effort: row.effort,
       resumeProviderSessionId: resumeId,
       env: opts.sessionEnv(project),
+      billingMode: project.billingMode,
+      projectMcpServers: {},
       allowedTools: baseAllowedTools(project),
       mcp: { url: opts.mcpUrl(), token, toolTimeoutMs: (project.humanWaitMinutes + 5) * 60_000 },
       preToolUse: (req) =>
