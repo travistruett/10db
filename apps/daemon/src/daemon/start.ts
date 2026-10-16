@@ -262,6 +262,32 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   createdScheduler.requestTick();
   logger.info({ port, dataDir: opts.dataDir }, 'daemon started');
 
+  async function shutdown(): Promise<void> {
+    createdScheduler.stop();
+    pauses.stop();
+    nightly.cancel();
+    await createdRunner.stopAll('shutdown');
+    state.write((ctx) => {
+      setAppSetting(ctx, CLEAN_SHUTDOWN_KEY, { at: ctx.now });
+    });
+    // Neither wss.close() nor server.close() ends sockets that are already open, so a connected
+    // UI client would keep stop() waiting forever.
+    for (const client of wss.clients) client.terminate();
+    wss.close();
+    // Only the HTTP/1 server can drop keep-alive sockets; serve() returns it here.
+    if ('closeAllConnections' in server) server.closeAllConnections();
+    await new Promise<void>((resolve) => {
+      server.close(() => {
+        resolve();
+      });
+    });
+    removeRuntimeFiles(opts.dataDir);
+    db.$client.close();
+    lock.release();
+  }
+  // SIGINT then SIGTERM both call stop(); a second shutdown would write to the closed database.
+  let stopping: Promise<void> | null = null;
+
   return {
     url,
     port,
@@ -270,28 +296,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     state,
     runner: createdRunner,
     scheduler: createdScheduler,
-    async stop() {
-      createdScheduler.stop();
-      pauses.stop();
-      nightly.cancel();
-      await createdRunner.stopAll('shutdown');
-      state.write((ctx) => {
-        setAppSetting(ctx, CLEAN_SHUTDOWN_KEY, { at: ctx.now });
-      });
-      // Neither wss.close() nor server.close() ends sockets that are already open, so a connected
-      // UI client would keep stop() waiting forever.
-      for (const client of wss.clients) client.terminate();
-      wss.close();
-      // Only the HTTP/1 server can drop keep-alive sockets; serve() returns it here.
-      if ('closeAllConnections' in server) server.closeAllConnections();
-      await new Promise<void>((resolve) => {
-        server.close(() => {
-          resolve();
-        });
-      });
-      removeRuntimeFiles(opts.dataDir);
-      db.$client.close();
-      lock.release();
+    stop() {
+      stopping ??= shutdown();
+      return stopping;
     },
   };
 }
