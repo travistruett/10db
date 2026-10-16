@@ -36,11 +36,19 @@ describe('findOnPath', () => {
 describe('probeVersion', () => {
   it('returns the first non-empty line of --version', async () => {
     const path = tool('bin', 'claude', 'echo; echo "2.1.299 (Claude Code)"; echo extra');
-    expect(await probeVersion(path)).toBe('2.1.299 (Claude Code)');
+    expect(await probeVersion(path, {})).toBe('2.1.299 (Claude Code)');
+  });
+
+  it('runs the tool with the environment it is given, so a launcher found only on that PATH works', async () => {
+    tool('login-bin', 'helper', 'echo "9.9.9 (helper)"');
+    const path = tool('bin', 'claude', 'exec helper --version');
+    const env = { PATH: join(dir.path, 'login-bin') };
+    expect(await probeVersion(path, env)).toBe('9.9.9 (helper)');
+    expect(await probeVersion(path, { PATH: join(dir.path, 'nowhere') })).toBeNull();
   });
 
   it('returns null when the tool fails', async () => {
-    expect(await probeVersion(tool('bin', 'docker', 'exit 1'))).toBeNull();
+    expect(await probeVersion(tool('bin', 'docker', 'exit 1'), {})).toBeNull();
   });
 });
 
@@ -53,12 +61,24 @@ describe('systemCheck', () => {
       source: 'inherited',
       warning: 'The login shell timed out',
     };
-    const report = await systemCheck(login, (path) => Promise.resolve(`version of ${path}`));
+    const report = await systemCheck(login, (path, env) =>
+      Promise.resolve(`version of ${path} ${env['PATH'] ?? ''}`),
+    );
     expect(report).toEqual({
       loginEnv: { source: 'inherited', warning: 'The login shell timed out' },
       tools: [
-        { name: 'claude', path: claude, version: `version of ${claude}`, required: true },
-        { name: 'git', path: git, version: `version of ${git}`, required: true },
+        {
+          name: 'claude',
+          path: claude,
+          version: `version of ${claude} ${join(dir.path, 'bin')}`,
+          required: true,
+        },
+        {
+          name: 'git',
+          path: git,
+          version: `version of ${git} ${join(dir.path, 'bin')}`,
+          required: true,
+        },
         { name: 'docker', path: null, version: null, required: false },
       ],
     });

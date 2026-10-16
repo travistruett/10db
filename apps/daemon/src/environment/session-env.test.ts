@@ -1,5 +1,6 @@
 import { BillingMode } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
+import { keychainSecretsWith } from './session-env';
 import {
   BILLING_SWITCH_VARS,
   buildSessionEnv,
@@ -193,5 +194,34 @@ describe('inferBillingMode', () => {
     [{ CLAUDE_CODE_USE_BEDROCK: '1', ANTHROPIC_API_KEY: 'k' }, BillingMode.Bedrock],
   ])('%o → %s', (env, mode) => {
     expect(inferBillingMode(env)).toBe(mode);
+  });
+});
+
+describe('keychainSecrets', () => {
+  const failure = (props: object) => () => {
+    throw Object.assign(new Error('Command failed: security ... sk-ant-LEAK'), props);
+  };
+
+  it('returns the key, trimmed', () => {
+    expect(keychainSecretsWith(() => 'sk-ant-k\n').anthropicApiKey()).toBe('sk-ant-k');
+  });
+
+  it.each([
+    ['empty output', () => '\n'],
+    ['item not found (status 44)', failure({ status: 44 })],
+  ])('reports no key for %s', (_name, exec) => {
+    expect(keychainSecretsWith(exec).anthropicApiKey()).toBeNull();
+  });
+
+  it.each([
+    ['user denied (status 51)', failure({ status: 51 }), /status 51/],
+    ['locked keychain (status 36)', failure({ status: 36 }), /status 36/],
+    ['timeout', failure({ code: 'ETIMEDOUT', status: null, signal: 'SIGTERM' }), /timed out/],
+    ['cannot start', failure({ code: 'ENOENT' }), /ENOENT/],
+  ])('throws a SessionEnvError for %s, naming no output', (_name, exec, message) => {
+    const read = () => keychainSecretsWith(exec).anthropicApiKey();
+    expect(read).toThrow(SessionEnvError);
+    expect(read).toThrow(message);
+    expect(read).not.toThrow(/LEAK/);
   });
 });

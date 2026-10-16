@@ -27,15 +27,18 @@ export function findOnPath(name: string, pathVar: string | undefined): string | 
   return null;
 }
 
-export type VersionProbe = (path: string) => Promise<string | null>;
+export type VersionProbe = (
+  path: string,
+  env: Readonly<Record<string, string>>,
+) => Promise<string | null>;
 
 /** The first non-empty line of `<path> --version`, or null if the tool fails or times out. */
-export const probeVersion: VersionProbe = (path) =>
+export const probeVersion: VersionProbe = (path, env) =>
   new Promise((resolve) => {
     execFile(
       path,
       ['--version'],
-      { timeout: VERSION_PROBE_TIMEOUT_MS, encoding: 'utf8' },
+      { timeout: VERSION_PROBE_TIMEOUT_MS, encoding: 'utf8', env: { ...env } },
       (error, stdout) => {
         if (error) {
           resolve(null);
@@ -61,7 +64,7 @@ export async function systemCheck(
       return {
         name: tool.name,
         path,
-        version: path ? await probe(path) : null,
+        version: path ? await probe(path, login.vars) : null,
         required: tool.required,
       };
     }),

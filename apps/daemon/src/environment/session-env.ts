@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, type ExecFileSyncOptionsWithStringEncoding } from 'node:child_process';
 import { BillingMode } from '@10db/contracts';
 
 /** Variables that silently change who is billed. They are removed unless the billing mode needs them. */
@@ -45,28 +45,58 @@ export interface SecretSource {
   anthropicApiKey(): string | null;
 }
 
+/** `security` exits with this status when the Keychain has no such item. */
+const KEYCHAIN_ITEM_NOT_FOUND = 44;
+
+type KeychainExec = (
+  command: string,
+  args: readonly string[],
+  options: ExecFileSyncOptionsWithStringEncoding,
+) => string;
+
+/**
+ * Builds a Keychain reader over `exec`. Only "item not found" means there is no key; a timeout,
+ * a locked or unreachable Keychain or a denied prompt throws, because telling the builder to add
+ * a key that exists would send them the wrong way. Messages carry the status, never the output.
+ */
+export function keychainSecretsWith(exec: KeychainExec): SecretSource {
+  return {
+    anthropicApiKey() {
+      try {
+        const value = exec(
+          '/usr/bin/security',
+          ['find-generic-password', '-s', KEYCHAIN.service, '-a', KEYCHAIN.apiKeyAccount, '-w'],
+          {
+            encoding: 'utf8',
+            stdio: ['ignore', 'pipe', 'ignore'],
+            timeout: KEYCHAIN_TIMEOUT_MS,
+          },
+        ).trim();
+        return value.length > 0 ? value : null;
+      } catch (error) {
+        const failure = error as { status?: number | null; code?: string; signal?: string | null };
+        if (failure.status === KEYCHAIN_ITEM_NOT_FOUND) return null;
+        if (failure.code === 'ETIMEDOUT')
+          throw new SessionEnvError(
+            `Reading the API key from the Keychain timed out after ${String(KEYCHAIN_TIMEOUT_MS / 1000)} s`,
+          );
+        if (typeof failure.status === 'number')
+          throw new SessionEnvError(
+            `Reading the API key from the Keychain failed (security exit status ${String(failure.status)})`,
+          );
+        throw new SessionEnvError(
+          `Reading the API key from the Keychain failed (${failure.code ?? failure.signal ?? 'unknown error'})`,
+        );
+      }
+    },
+  };
+}
+
 /**
  * Reads the API key from the login Keychain when a session starts; nothing is cached.
  * @public Wired into the daemon at its composition root.
  */
-export const keychainSecrets: SecretSource = {
-  anthropicApiKey() {
-    try {
-      const value = execFileSync(
-        '/usr/bin/security',
-        ['find-generic-password', '-s', KEYCHAIN.service, '-a', KEYCHAIN.apiKeyAccount, '-w'],
-        {
-          encoding: 'utf8',
-          stdio: ['ignore', 'pipe', 'ignore'],
-          timeout: KEYCHAIN_TIMEOUT_MS,
-        },
-      ).trim();
-      return value.length > 0 ? value : null;
-    } catch {
-      return null;
-    }
-  },
-};
+export const keychainSecrets: SecretSource = keychainSecretsWith(execFileSync);
 
 /** The session environment can't be built for this billing mode. The message says what to fix. */
 export class SessionEnvError extends Error {
