@@ -1,2 +1,2 @@
 export { createEventBus } from './bus';
-export { createStateStore } from './state-store';
+export { createStateStore, type StateStore } from './state-store';

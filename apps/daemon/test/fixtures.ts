@@ -2,6 +2,8 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { ProjectDto, TaskDto, WorkstreamDto } from '@10db/contracts';
+import { insertTask, insertWorkstream, seedProject, type Store } from '@10db/db';
 
 export interface TempDir {
   path: string;
@@ -31,4 +33,31 @@ export function createTempRepo(): TempDir {
   git('add', 'README.md');
   git('commit', '-q', '-m', 'Initial commit');
   return dir;
+}
+
+export function seedWorkstream(
+  store: Store,
+  opts: {
+    project?: ProjectDto;
+    title?: string;
+    areas?: string[];
+    repoPath?: string;
+    gateCommand?: string;
+  } = {},
+): { project: ProjectDto; task: TaskDto; workstream: WorkstreamDto } {
+  const project =
+    opts.project ??
+    seedProject(store, {
+      ...(opts.repoPath ? { repoPath: opts.repoPath } : {}),
+      ...(opts.gateCommand ? { gateCommand: opts.gateCommand } : {}),
+    });
+  const task = store.write((ctx) =>
+    insertTask(ctx, project.id, {
+      title: opts.title ?? 'Alpha',
+      acceptanceCriteria: ['it works'],
+      areas: opts.areas ?? ['api'],
+    }),
+  ).value;
+  const workstream = store.write((ctx) => insertWorkstream(ctx, task.id)).value;
+  return { project, task, workstream };
 }
