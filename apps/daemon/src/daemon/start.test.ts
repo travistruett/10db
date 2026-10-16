@@ -1,4 +1,4 @@
-import { statSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { WorkstreamId } from '@10db/contracts';
 import { getWorkstream } from '@10db/db';
@@ -123,20 +123,18 @@ describe('startDaemon', () => {
   });
 
   it('runs one shutdown however often stop is called (SIGINT, then SIGTERM, then later)', async () => {
-    const start = () =>
-      startDaemon({
-        dataDir: dir.path,
-        port: 0,
-        adapter: new FakeAdapter({}),
-        logLevel: 'warn',
-      });
-    const running = await start();
+    const running = await startDaemon({
+      dataDir: dir.path,
+      port: 0,
+      adapter: new FakeAdapter({}),
+      logLevel: 'warn',
+    });
     const first = running.stop();
     const second = running.stop();
     await expect(Promise.all([first, second])).resolves.toEqual([undefined, undefined]);
     await expect(running.stop()).resolves.toBeUndefined();
     expect(() => readRuntimeInfo(dir.path)).toThrow();
-    daemon = await start();
+    expect(existsSync(join(dir.path, 'daemon.lock'))).toBe(false);
   });
 
   it('does not count a clean stop against the recovery limit', async () => {
