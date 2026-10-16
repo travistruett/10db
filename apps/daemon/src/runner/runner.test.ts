@@ -435,6 +435,91 @@ describe('runner', () => {
       },
     );
 
+    it.each([
+      ['a provider pause', () => engine.runner.stopProvider(engine.project.provider, 'paused')],
+      ['a shutdown', () => engine.runner.stopAll('shutdown')],
+    ])(
+      'keeps an answer that lands while %s is still stopping a waiting session',
+      async (_name, act) => {
+        engine = await createTestEngine({
+          Alpha: [
+            [askShip, { do: 'hang' }],
+            [write('src/api/a.txt'), commit('op-slow-0001', ['src/api/a.txt']), turn],
+          ],
+        });
+        let release: () => void = () => undefined;
+        const released = new Promise<void>((r) => {
+          release = r;
+        });
+        // A real session can take a while to exit; this one exits only when the test says so.
+        interceptStart((h) => ({
+          ...h,
+          stop: async () => {
+            await released;
+            await h.stop();
+          },
+        }));
+        const { workstream } = engine.addTask('Alpha');
+        engine.launch(workstream.id);
+        const card = await waitFor(openCard);
+        expect(ws(workstream.id).state).toBe('WAITING_HUMAN');
+
+        const stopping = act();
+        engine.inbox.answer(card.id, { choice: 'Yes' });
+        release();
+        await stopping;
+        await engine.runner.idle();
+        expect(ws(workstream.id)).toMatchObject({
+          state: 'QUEUED',
+          currentSessionId: null,
+          nextAction: { kind: 'answer', inboxId: card.id },
+        });
+
+        engine.launch(workstream.id);
+        await engine.runner.idle();
+        expect(ws(workstream.id).state).toBe('DONE');
+        expect(engine.adapter.prompts[1]?.prompt).toContain('Answer: Yes');
+      },
+    );
+
+    it('ends the session and frees it for a parked answer when the loop fails while waiting', async () => {
+      engine = await createTestEngine({ Alpha: [[askShip, { do: 'hang' }]] });
+      let fail: (error: Error) => void = () => undefined;
+      const failed = new Promise<never>((_resolve, reject) => {
+        fail = reject;
+      });
+      failed.catch(() => undefined);
+      // Stands in for a database or IO error thrown inside the event loop.
+      interceptStart((h) => ({
+        ...h,
+        events: (async function* () {
+          const inner = h.events[Symbol.asyncIterator]();
+          for (;;) {
+            const next = await Promise.race([inner.next(), failed]);
+            if (next.done) return;
+            yield next.value;
+          }
+        })(),
+      }));
+      const { workstream } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
+      const card = await waitFor(openCard);
+      fail(new Error('disk I/O error'));
+      await engine.runner.idle();
+
+      expect(ws(workstream.id)).toMatchObject({
+        state: 'WAITING_HUMAN',
+        currentSessionId: null,
+        nextAction: { kind: 'answer', inboxId: card.id },
+      });
+      expect(listSessions(engine.store.db, workstream.id)[0]?.endedAt).not.toBeNull();
+      engine.inbox.answer(card.id, { choice: 'Yes' });
+      expect(ws(workstream.id)).toMatchObject({
+        state: 'QUEUED',
+        nextAction: { kind: 'answer', inboxId: card.id },
+      });
+    });
+
     /** Makes the second session the adapter starts end without ever reporting `started`. */
     const secondSessionNeverStarts = () => {
       let calls = 0;

@@ -12,6 +12,7 @@ import {
   type ProjectDto,
   type ProjectId,
   type Provider,
+  type SessionId,
   type WorkstreamId,
 } from '@10db/contracts';
 import {
@@ -175,6 +176,8 @@ interface Control {
   handle: SessionHandle | null;
   /** Set while the gate runs; aborting it kills the gate's process group. */
   gateAbort: AbortController | null;
+  /** Set while a session runs; ends its inbox waits so later answers go to the card. */
+  endWaits: (() => void) | null;
   done: Promise<void>;
 }
 
@@ -184,6 +187,8 @@ interface SessionState {
   handoffRequested: boolean;
   firmSent: boolean;
   parkedFor: InboxItemId | null;
+  /** The card the session is waiting on, while it waits. */
+  waitingOn: InboxItemId | null;
   waits: number;
   waitTimer: Timer | null;
   outcome: Outcome | null;
@@ -398,6 +403,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       handoffRequested: false,
       firmSent: false,
       parkedFor: null,
+      waitingOn: null,
       waits: 0,
       waitTimer: null,
       outcome: null,
@@ -405,11 +411,22 @@ export function createRunner(opts: RunnerOptions): Runner {
     const log = opts.logger.child({ workstreamId: id, sessionId: session.id });
     let handle: SessionHandle | null = null;
     let sawEnded = false;
+    // Aborting the waits before the process stops means an answer that lands while a slow session
+    // exits goes through onParkedAnswer and the card, never to a waiter that is about to disappear.
+    // A session that was waiting parks on its card.
+    const endWaits = (): void => {
+      if (st.waits > 0 && st.waitingOn) st.parkedFor ??= st.waitingOn;
+      st.waitTimer?.cancel();
+      st.waitTimer = null;
+      abort.abort();
+    };
+    ctl.endWaits = endWaits;
 
     const observer: WaitObserver = {
       onWaitStart(item) {
         st.waits += 1;
         if (st.waits > 1) return;
+        st.waitingOn = item.id;
         opts.state.write((ctx) => {
           // A session can ask before its `started` event is processed; STARTING has no edge to WAITING_HUMAN.
           if (getWorkstreamRow(ctx.tx, id).state === S.Starting)
@@ -431,6 +448,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       onWaitEnd() {
         st.waits = Math.max(0, st.waits - 1);
         if (st.waits > 0) return;
+        st.waitingOn = null;
         st.waitTimer?.cancel();
         st.waitTimer = null;
         opts.state.write((ctx) => {
@@ -479,6 +497,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     });
     ctl.handle = handle;
 
+    let outcome: Outcome;
     try {
       for await (const event of handle.events) {
         switch (event.type) {
@@ -614,14 +633,28 @@ export function createRunner(opts: RunnerOptions): Runner {
         }
       }
     } finally {
+      // Ending the waits on every exit, before any stop, leaves no inbox waiter on a dead session.
+      endWaits();
       // Leaving the loop without `ended` (a stale fence, a failed write) must not leave the process running.
       if (!sawEnded) await handle.stop().catch(() => undefined);
-      // Aborting on every exit leaves no inbox waiter registered, so an answer never goes to a dead session.
-      st.waitTimer?.cancel();
-      abort.abort();
       opts.live.unregister(session.id);
       ctl.handle = null;
+      ctl.endWaits = null;
+      // Every exit ends the session row and frees the workstream's session slot, so a parked answer
+      // is delivered, the lane is freed and the session's MCP token stops working.
+      outcome = finishSession(id, ctl, session.id, st);
     }
+    log.info({ outcome: outcome.kind }, 'session ended');
+    return outcome;
+  }
+
+  /** Works out how a session ended and records it; returns the outcome for the caller to settle. */
+  function finishSession(
+    id: WorkstreamId,
+    ctl: Control,
+    sessionId: SessionId,
+    st: SessionState,
+  ): Outcome {
     const ended: Outcome = st.outcome ?? {
       kind: 'crashed',
       message: 'the session ended without an outcome',
@@ -642,7 +675,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     opts.state.write((ctx) => {
       endSession(
         ctx,
-        session.id,
+        sessionId,
         outcome.kind === 'stopped' && outcome.reason === 'shutdown' ? 'shutdown' : outcome.kind,
       );
       patchWorkstream(ctx, id, ctl.fence, {
@@ -654,7 +687,6 @@ export function createRunner(opts: RunnerOptions): Runner {
           : {}),
       });
     });
-    log.info({ outcome: outcome.kind }, 'session ended');
     return outcome;
   }
 
@@ -842,6 +874,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         stopReason: null,
         handle: null,
         gateAbort: null,
+        endWaits: null,
         done: Promise.resolve(),
       };
       active.set(id, ctl);
@@ -861,6 +894,8 @@ export function createRunner(opts: RunnerOptions): Runner {
       ctl.stopReason = reason;
       // A pause only stops sessions; a running gate doesn't use the provider, so let it finish.
       if (reason !== 'paused') ctl.gateAbort?.abort();
+      // Waits end before the process does, so an answer during a slow exit reaches the card.
+      ctl.endWaits?.();
       await ctl.handle?.stop();
       await ctl.done;
     },
