@@ -403,9 +403,13 @@ describe('tool ops', () => {
 });
 
 describe('listWorkstreams ordering', () => {
-  it('keeps insertion order when created_at is equal', () => {
+  it('orders equal created_at by id, not by storage order', () => {
     const project = seedProject(store);
-    const made = ['A', 'B', 'C', 'D'].map((title) => seedWorkstream(title, ['api'], project).ws.id);
+    const made = ['A', 'B', 'C'].map((title) => seedWorkstream(title, ['api'], project).ws.id);
+    // Push the smallest id to the end of the table's scan order.
+    store.db.$client
+      .prepare('UPDATE workstreams SET rowid = rowid + 1000 WHERE id = ?')
+      .run(made[0]);
     expect(listWorkstreams(store.db, {}).map((w) => w.id)).toEqual(made);
   });
 });
