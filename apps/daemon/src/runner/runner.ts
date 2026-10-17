@@ -220,11 +220,11 @@ interface SessionState {
   handoffRequested: boolean;
   /**
    * The first context reading of the conversation's briefing, which its handoff margin is measured
-   * from: inherited by a resumed session, taken at the first reading of a fresh briefed session,
-   * and null for a conversation that began bare.
+   * from: inherited by a resumed session, taken at the first reading of a briefed session that has
+   * none, and null for a conversation that began bare.
    */
   briefingBaselinePct: number | null;
-  /** A fresh session whose prompt carries a handoff, still waiting for its first context reading. */
+  /** A briefed conversation with no baseline yet: the session's first context reading becomes it. */
   awaitingBriefingBaseline: boolean;
   firmSent: boolean;
   parkedFor: InboxItemId | null;
@@ -504,10 +504,14 @@ export function createRunner(opts: RunnerOptions): Runner {
     // The repo's approved MCP servers, expanded from that environment. A file 10db can't parse fails here too.
     const projectMcp = readProjectMcp(project, id, env);
     const mcpNote = skippedServersNote(projectMcp);
-    // A resumed session continues its conversation, so it keeps that conversation's baseline.
-    const inheritedBaselinePct = resumeId
-      ? (getSessionByProviderId(db, id, resumeId)?.briefingBaselinePct ?? null)
-      : null;
+    // A resumed session continues its conversation, so it keeps whether that conversation began from
+    // a briefing and the briefing's baseline. A fresh session is briefed only when its prompt carries
+    // the handoff, which only a continuation's does.
+    const resumed = resumeId ? getSessionByProviderId(db, id, resumeId) : undefined;
+    const briefed = resumeId
+      ? (resumed?.briefed ?? false)
+      : action.kind === 'continue_from_handoff' && contextPack.handoff !== null;
+    const inheritedBaselinePct = resumed?.briefingBaselinePct ?? null;
     const session = opts.state.write((ctx) => {
       const s = insertSession(ctx, {
         workstreamId: id,
@@ -516,6 +520,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         effort: row.effort,
         mode: 'managed',
         mcpTokenHash: hash,
+        briefed,
         briefingBaselinePct: inheritedBaselinePct,
       });
       patchWorkstream(ctx, id, ctl.fence, { currentSessionId: s.id, baseHead });
@@ -527,7 +532,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       providerSessionId: resumeId,
       handoffRequested: false,
       briefingBaselinePct: inheritedBaselinePct,
-      awaitingBriefingBaseline: resumeId === null && contextPack.handoff !== null,
+      awaitingBriefingBaseline: briefed && inheritedBaselinePct === null,
       firmSent: false,
       parkedFor: null,
       waitingOn: new Map(),

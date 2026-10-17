@@ -396,27 +396,42 @@ describe('runner', () => {
             e.type === 'workstream.changed' && e.entityId === id && e.data['to'] === 'HANDING_OFF',
         )
         .map((e) => e.data['reason']);
+    type Id = Parameters<typeof ws>[0];
+    interface Row {
+      readonly name: string;
+      readonly sessions: Parameters<typeof createTestEngine>[0]['Alpha'];
+      readonly drive: (id: Id) => Promise<void>;
+      readonly gateCommand?: string;
+      readonly reasons: readonly string[];
+      /** The session that must resume the one before it, or null when the last working session is fresh. */
+      readonly resumedSession: number | null;
+      /** Each session's stored briefing baseline, which a restart's resume reads back. */
+      readonly baselines: readonly (number | null)[];
+    }
+    const answerParked = async (id: Id) => {
+      const card = await waitFor(openCard);
+      engine.clock.advance(10 * 60_000);
+      await engine.runner.idle();
+      engine.inbox.answer(card.id, { choice: 'Yes' });
+      engine.launch(id);
+    };
 
-    it.each([
+    it.each<Row>([
       {
         name: 'a first session resumed after a crash hands off at handoffPct',
         sessions: [[ctx(10), crash], [ctx(14), ...handOff('op-conv-001')], finish],
         drive: relaunch,
         reasons: ['context at 14%'],
         resumedSession: 1,
+        baselines: [null, null, null],
       },
       {
         name: 'a first session resumed with an answer hands off at handoffPct',
         sessions: [[ctx(10), askShip, turn], [ctx(14), ...handOff('op-conv-001')], finish],
-        drive: async (id: Parameters<typeof ws>[0]) => {
-          const card = await waitFor(openCard);
-          engine.clock.advance(10 * 60_000);
-          await engine.runner.idle();
-          engine.inbox.answer(card.id, { choice: 'Yes' });
-          engine.launch(id);
-        },
+        drive: answerParked,
         reasons: ['context at 14%'],
         resumedSession: 1,
+        baselines: [null, null, null],
       },
       {
         // The continuation starts at 30%, so its line is 35%; resumed at 33%, it keeps that line.
@@ -430,6 +445,55 @@ describe('runner', () => {
         drive: relaunch,
         reasons: ['context at 20%', 'context at 36%'],
         resumedSession: 2,
+        baselines: [null, 30, 30, null],
+      },
+      {
+        // The continuation dies before its first reading, so the resumed session's first reading is
+        // the briefing's baseline: 30% + 5 = 35%.
+        name: 'a continuation that crashed before its first reading keeps its margin when resumed',
+        sessions: [
+          [ctx(20), ...handOff('op-conv-001')],
+          [crash],
+          [ctx(30), ctx(33), ctx(36), ...handOff('op-conv-002')],
+          finish,
+        ],
+        drive: relaunch,
+        reasons: ['context at 20%', 'context at 36%'],
+        resumedSession: 2,
+        baselines: [null, null, 30, null],
+      },
+      {
+        // Resumed after a crash, the continuation parks on a question and is resumed again with the answer.
+        name: 'a resume of a resumed continuation keeps its margin',
+        sessions: [
+          [ctx(20), ...handOff('op-conv-001')],
+          [ctx(30), crash],
+          [ctx(31), askShip, turn],
+          [ctx(33), ctx(36), ...handOff('op-conv-002')],
+          finish,
+        ],
+        drive: async (id) => {
+          await relaunch(id);
+          await answerParked(id);
+        },
+        reasons: ['context at 20%', 'context at 36%'],
+        resumedSession: 3,
+        baselines: [null, 30, 30, 30, null],
+      },
+      {
+        // A fix prompt carries the gate output, not the handoff, so its bare 10% earns no margin.
+        name: 'a fix session after a handoff gets no margin',
+        sessions: [
+          [ctx(20), ...handOff('op-conv-001')],
+          [turn],
+          [ctx(10), ctx(13), ...handOff('op-conv-002')],
+          finish,
+        ],
+        drive: relaunch,
+        gateCommand: 'test -f src/api/a.txt',
+        reasons: ['context at 20%', 'context at 13%'],
+        resumedSession: null,
+        baselines: [null, null, null, null],
       },
       {
         // Resume fails too, and with no handoff written the third session starts bare at 10%.
@@ -440,15 +504,19 @@ describe('runner', () => {
           [ctx(10), ctx(13), ...handOff('op-conv-001')],
           finish,
         ],
-        drive: async (id: Parameters<typeof ws>[0]) => {
+        drive: async (id) => {
           await relaunch(id);
           await relaunch(id);
         },
         reasons: ['context at 13%'],
         resumedSession: null,
+        baselines: [null, null, null, null],
       },
-    ])('$name', async ({ sessions, drive, reasons, resumedSession }) => {
-      engine = await createTestEngine({ Alpha: sessions }, { handoffPct: 12, nudgePct: 90 });
+    ])('$name', async ({ sessions, drive, gateCommand, reasons, resumedSession, baselines }) => {
+      engine = await createTestEngine(
+        { Alpha: sessions },
+        { handoffPct: 12, nudgePct: 90, ...(gateCommand ? { gateCommand } : {}) },
+      );
       const { workstream } = engine.addTask('Alpha');
       engine.launch(workstream.id);
       await drive(workstream.id);
@@ -458,6 +526,7 @@ describe('runner', () => {
       expect(ws(workstream.id).state).toBe('DONE');
       expect(handoffReasons(workstream.id)).toEqual(reasons);
       const rows = listSessions(engine.store.db, workstream.id);
+      expect(rows.map((r) => r.briefingBaselinePct)).toEqual(baselines);
       if (resumedSession === null) {
         expect(engine.adapter.prompts.at(-2)?.resume).toBeNull();
       } else {
