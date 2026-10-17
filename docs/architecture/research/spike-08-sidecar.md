@@ -66,3 +66,21 @@ real Node binary (not the mise shim), followed by an ad-hoc `codesign`.
 - `pnpm sidecar` must run under the pinned Node (it refuses otherwise), and `make rust-check` now runs it
   first because tauri-build requires `externalBin` and `resources` to exist.
 - The bundle also ships `daemon.mjs.map` (4 MB); Task 7 can drop it from the resources if size matters.
+
+## Shell
+
+Checked on the release `10db.app` bundle (macOS, `TENDB_DATA_DIR` pointing at a scratch directory), by
+running `Contents/MacOS/tendb-desktop` directly from a shell.
+
+- **Start:** the supervisor launches `tendb-node .../Resources/daemon/daemon.mjs` with `TENDB_PORT=0`;
+  `daemon.json` appeared within the first few seconds with an ephemeral port.
+- **Crash:** `kill -9` on the sidecar produced a new sidecar and a new port in `daemon.json` about 4 s later.
+- **Second launch:** a second `tendb-desktop` exited at once and left a single app process (single instance).
+- **Data directory already held:** with a daemon from an earlier run still alive, the sidecar log held one line,
+  `Another 10db daemon is running (pid <pid>)`, the supervisor did not restart it, and the log stayed at one
+  line after 12 s.
+- **SIGTERM to the app process** ends the app without a `RunEvent::Exit`, so the sidecar is orphaned and keeps
+  holding the data directory. Quit from the tray or ⌘Q goes through `app.exit` and does stop it. The next launch
+  connects to the orphan through `daemon.json`.
+- **Not checked from a shell:** the tray menu and title rendering, close-to-tray, the Dock reopen and the
+  tray Quit item need a person at the screen.
