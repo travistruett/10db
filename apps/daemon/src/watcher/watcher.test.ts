@@ -407,6 +407,33 @@ describe('watcher', () => {
     expect(flags()).toEqual([]);
   });
 
+  it.each([
+    WorkstreamState.WaitingHuman,
+    WorkstreamState.PausedLimit,
+    WorkstreamState.Recovering,
+    WorkstreamState.Queued,
+  ])(
+    "does not blame a step's end for writes inside the claim of a lane that is %s",
+    async (idle) => {
+      const a = running('Alpha', ['api']);
+      const b = running('Beta', ['ui']);
+      // B edited inside its own claim, then stopped to wait; A's step ends later.
+      touch('src/ui/b.tsx');
+      state.write((ctx) => {
+        if (idle === WorkstreamState.Queued) {
+          transitionWorkstream(ctx, b.workstream.id, {
+            to: WorkstreamState.Recovering,
+            fence: null,
+          });
+        }
+        transitionWorkstream(ctx, b.workstream.id, { to: idle, fence: null });
+      });
+      touch('src/api/ok.ts');
+      expect(await watcher.stepEnd(a.workstream.id)).toEqual([]);
+      expect(flags()).toEqual([]);
+    },
+  );
+
   it('flags a step-end write inside the claim of a taken-over workstream', async () => {
     const a = running('Alpha', ['api']);
     const b = running('Beta', ['ui']);

@@ -30,6 +30,12 @@ import {
 const WATCH_BATCH_MS = 500;
 const BULK_LISTED = 20;
 const WATCHED_STATES = [...LANE_STATES, WorkstreamState.WaitingHuman];
+/**
+ * Whose claims excuse a write at a step's end: every unfinished workstream but one a human took over. A lane
+ * that edited inside its own claim and then stopped to wait made that write itself; a write into an idle
+ * lane's claim by someone else is the real-time batch's to report, as a foreign write.
+ */
+const STEP_END_CLAIM_STATES = ACTIVE_STATES.filter((s) => s !== WorkstreamState.TakenOver);
 
 export type WatchFn = (
   root: string,
@@ -289,9 +295,12 @@ export function createWatcher(deps: {
       const project = getProject(db, ws.projectId);
       if (!existsSync(project.repoPath)) return [];
       const changed = (await deps.git.status(project.repoPath)).map((s) => s.path);
-      // Only workstreams with a live session can have made these writes; a parked or taken-over
-      // workstream's claims don't excuse them.
-      const { strays, candidates } = straysIn(project, changed, LANE_STATES, workstreamId);
+      const { strays, candidates } = straysIn(
+        project,
+        changed,
+        STEP_END_CLAIM_STATES,
+        workstreamId,
+      );
       raise(project, strays, candidates, workstreamId);
       return strays;
     },
