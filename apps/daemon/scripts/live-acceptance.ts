@@ -144,6 +144,10 @@ let daemon: ChildProcess | null = null;
 // Read through a function: TypeScript would otherwise keep the narrowing from before the awaits.
 const runningDaemon = (): ChildProcess | null => daemon;
 
+/** Set once an interrupt starts stopping the daemon; the run loop must then do nothing more to it. */
+let aborting = false;
+const isAborting = (): boolean => aborting;
+
 function startDaemonProcess(): ChildProcess {
   const inherited = Object.fromEntries(
     Object.entries(process.env).filter(([key]) => !DROPPED_ENV.test(key)),
@@ -352,6 +356,7 @@ async function main(): Promise<void> {
   let killed = false;
   let envKeys: string[] | null = null;
   for (;;) {
+    if (isAborting()) break;
     if (Date.now() > deadline) {
       say('timed out; running the checks on what happened');
       break;
@@ -359,6 +364,7 @@ async function main(): Promise<void> {
     if (daemon?.pid !== undefined) envKeys ??= serverEnvKeys(daemon.pid);
     await answerOpenCards(seen);
     const all = await api(z.array(WorkstreamDto), '/workstreams?active=false');
+    if (isAborting()) break;
     if (
       !killed &&
       git('log', '--format=%(trailers:key=10db-Op,valueonly)').trim() &&
@@ -368,6 +374,7 @@ async function main(): Promise<void> {
       daemon?.kill('SIGKILL');
       if (daemon) await waitForExit(daemon);
       killed = true;
+      if (isAborting()) break;
       startDaemonProcess();
       await waitForHealth();
       say('daemon restarted; recovery runs at startup');
@@ -384,6 +391,8 @@ async function main(): Promise<void> {
     await sleep(2_000);
   }
 
+  // An interrupt is already stopping the daemon and exits the process; no checks or note follow it.
+  if (isAborting()) return;
   const manual: AcceptanceCheck[] = [];
   const reopened = (
     await rl.question(
@@ -438,6 +447,7 @@ async function main(): Promise<void> {
 
 /** Stops the daemon (and so its Claude sessions) and leaves with a failure. */
 const abort = (why: string): void => {
+  aborting = true;
   say(`${why}; stopping the daemon`);
   const current = runningDaemon();
   void (current ? stopChild(current) : Promise.resolve()).finally(() => {

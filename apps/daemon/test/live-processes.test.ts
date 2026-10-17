@@ -29,6 +29,20 @@ describe('stopChild', () => {
     expect(child.signalCode).toBe('SIGKILL');
   });
 
+  it('sends one SIGTERM however many callers stop the child', async () => {
+    // Exits cleanly on the first SIGTERM after a delay; a second SIGTERM would end it by signal.
+    const child = spawnNode(
+      "process.once('SIGTERM', () => { console.log('term'); setTimeout(() => process.exit(0), 300); }); console.log('up'); setInterval(() => undefined, 1000);",
+    );
+    await ready(child);
+    const first = stopChild(child, 5_000);
+    await ready(child); // the child has taken its one SIGTERM
+    const second = stopChild(child, 5_000);
+    await Promise.all([first, second]);
+    expect(child.exitCode).toBe(0);
+    expect(child.signalCode).toBeNull();
+  });
+
   it('returns at once for a child that already exited', async () => {
     const child = spawnNode('process.exit(3)');
     await new Promise((resolve) => child.once('exit', resolve));

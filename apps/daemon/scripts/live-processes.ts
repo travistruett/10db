@@ -16,11 +16,24 @@ export function waitForExit(child: ChildProcess): Promise<void> {
   });
 }
 
-/** SIGTERM, then SIGKILL if the child is still running after `timeoutMs`. Safe to call more than once. */
-export async function stopChild(
+const stops = new WeakMap<ChildProcess, Promise<void>>();
+
+/**
+ * SIGTERM, then SIGKILL if the child is still running after `timeoutMs`. Every caller for the same child
+ * shares one stop: a second SIGTERM would kill a daemon part-way through its clean shutdown.
+ */
+export function stopChild(
   child: ChildProcess,
   timeoutMs: number = DAEMON_STOP_TIMEOUT_MS,
 ): Promise<void> {
+  const existing = stops.get(child);
+  if (existing) return existing;
+  const stop = terminate(child, timeoutMs);
+  stops.set(child, stop);
+  return stop;
+}
+
+async function terminate(child: ChildProcess, timeoutMs: number): Promise<void> {
   if (hasExited(child)) return;
   const exited = waitForExit(child);
   child.kill('SIGTERM');
