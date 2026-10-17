@@ -554,7 +554,7 @@ describe('createClaudeAdapter', () => {
     });
     const events = await collect(adapter.start(spec()).events);
     expect(events.map((e) => e.type)).toEqual(['ended']);
-    expect(events[0]).toMatchObject({ type: 'ended', reason: 'error' });
+    expect(events[0]).toMatchObject({ type: 'ended', reason: 'billing_refused' });
     expect(endMessage(events[0])).toMatch(
       /^Billing check failed: expected the Claude subscription.*No prompt was sent/,
     );
@@ -591,7 +591,7 @@ describe('createClaudeAdapter', () => {
     expect(await decision).toMatchObject({ behavior: 'deny', interrupt: true });
     expect(canUseTool).not.toHaveBeenCalled();
     const last = (await done).at(-1);
-    expect(last).toMatchObject({ type: 'ended', reason: 'error' });
+    expect(last).toMatchObject({ type: 'ended', reason: 'billing_refused' });
     expect(endMessage(last)).toContain('Billing check failed');
     expect(record.inputs).toEqual([]);
   });
@@ -608,7 +608,7 @@ describe('createClaudeAdapter', () => {
     });
     const events = await collect(adapter.start(spec({ canUseTool, preToolUse })).events);
     expect(events.map((e) => e.type)).toEqual(['ended']);
-    expect(events[0]).toMatchObject({ type: 'ended', reason: 'error' });
+    expect(events[0]).toMatchObject({ type: 'ended', reason: 'billing_refused' });
     expect(endMessage(events[0])).toContain('apiKeySource ANTHROPIC_API_KEY');
     // The preflight passed, so only the init check stands between the session and its tools.
     expect(await callTool(record, 'Write')).toMatchObject({ behavior: 'deny', interrupt: true });
@@ -657,7 +657,7 @@ describe('createClaudeAdapter', () => {
     clock.advance(BILLING_PREFLIGHT_MS);
     const events = await done;
     expect(events.map((e) => e.type)).toEqual(['ended']);
-    expect(events[0]).toMatchObject({ type: 'ended', reason: 'error' });
+    expect(events[0]).toMatchObject({ type: 'ended', reason: 'billing_refused' });
     expect(endMessage(events[0])).toMatch(
       /^Billing check failed: Claude Code reported no account within 15 s.*No prompt was sent/,
     );
@@ -672,6 +672,7 @@ describe('createClaudeAdapter', () => {
     });
     const events = await collect(adapter.start(spec()).events);
     expect(events.map((e) => e.type)).toEqual(['ended']);
+    expect(events[0]).toMatchObject({ type: 'ended', reason: 'billing_refused' });
     expect(endMessage(events[0])).toMatch(
       /^Billing check failed: Claude Code reported no account.*No prompt was sent/,
     );
@@ -865,7 +866,7 @@ describe('createClaudeAdapter', () => {
           clock.advance(HALT_GRACE_MS);
           expect(signal?.aborted).toBe(true);
           const events = await done;
-          expect(events.at(-1)).toMatchObject({ type: 'ended', reason: 'error' });
+          expect(events.at(-1)).toMatchObject({ type: 'ended', reason: 'billing_refused' });
           expect(endMessage(events.at(-1))).toMatch(/^Billing check failed:.*ANTHROPIC_BASE_URL/);
           expect(endMessage(events.at(-1))).not.toContain('attacker.example');
         } finally {
@@ -998,6 +999,7 @@ describe('createClaudeAdapter', () => {
         clock.advance(HALT_GRACE_MS);
         const events = await done;
         expect(events.map((e) => e.type)).toEqual(['ended']);
+        expect(events.at(-1)).toMatchObject({ type: 'ended', reason: 'billing_refused' });
         expect(endMessage(events.at(-1))).toMatch(/^Billing check failed:.*ANTHROPIC_BASE_URL/);
         expect(record.inputs).toEqual([]);
       } finally {
@@ -1044,7 +1046,7 @@ describe('createClaudeAdapter', () => {
         const { adapter, record } = adapterFor({ messages: [initMessage()], then: 'hang' });
         const events = await collect(adapter.start(spec({ cwd: repo.path })).events);
         expect(events.map((e) => e.type)).toEqual(['ended']);
-        expect(events[0]).toMatchObject({ type: 'ended', reason: 'error' });
+        expect(events[0]).toMatchObject({ type: 'ended', reason: 'billing_refused' });
         expect(endMessage(events[0])).toMatch(
           /^Billing check failed:.*ANTHROPIC_BASE_URL.*No prompt was sent/,
         );

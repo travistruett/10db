@@ -999,6 +999,23 @@ describe('runner', () => {
     expect(listInbox(engine.store.db, { states: ['OPEN'] }).map((i) => i.kind)).toEqual(['flag']);
   });
 
+  it('fails at once on a billing refusal, without retrying it as a crash', async () => {
+    const refusal =
+      "Billing check failed: expected the Claude subscription, got an API key. No prompt was sent. <b>Check</b> the project's billing mode.";
+    engine = await createTestEngine({
+      Alpha: [[{ do: 'billing_refused', message: refusal }], [turn]],
+    });
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id)).toMatchObject({ state: 'FAILED', failureReason: refusal });
+    expect(listSessions(engine.store.db, workstream.id)).toHaveLength(1);
+    expect(transitions(workstream.id).filter((t) => t.endsWith('->RECOVERING'))).toEqual([]);
+    const cards = listInbox(engine.store.db, { states: ['OPEN'] });
+    expect(cards).toHaveLength(1);
+    expect(cards[0]).toMatchObject({ kind: 'flag', body: refusal });
+  });
+
   it('cancels a running workstream, releasing claims', async () => {
     engine = await createTestEngine({
       Alpha: [[{ do: 'activity', summary: 'working' }, { do: 'hang' }]],

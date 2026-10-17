@@ -39,6 +39,16 @@ export interface SessionSpec {
   canUseTool(req: ToolRequest): Promise<ToolDecision>;
 }
 
+export const SessionEndReason = {
+  Completed: 'completed',
+  Stopped: 'stopped',
+  Error: 'error',
+  RateLimited: 'rate_limited',
+  /** The credentials or the repo's settings failed a billing check; trying again cannot change that. */
+  BillingRefused: 'billing_refused',
+} as const;
+export type SessionEndReason = (typeof SessionEndReason)[keyof typeof SessionEndReason];
+
 export type SessionEvent =
   | { readonly type: 'started'; readonly providerSessionId: string; readonly pid: number | null }
   | { readonly type: 'activity'; readonly kind: 'text' | 'tool'; readonly summary: string }
@@ -62,7 +72,7 @@ export type SessionEvent =
   | { readonly type: 'compacted'; readonly trigger: 'manual' | 'auto' }
   | {
       readonly type: 'ended';
-      readonly reason: 'completed' | 'stopped' | 'error' | 'rate_limited';
+      readonly reason: SessionEndReason;
       readonly message: string | null;
     };
 

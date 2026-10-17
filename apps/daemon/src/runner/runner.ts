@@ -69,6 +69,7 @@ import {
   ProjectMcpError,
   readRepoMcp,
   resolveProjectMcp,
+  SessionEndReason,
   skippedServersNote,
   type ProjectMcp,
   type RepoMcp,
@@ -146,6 +147,12 @@ type Outcome =
     }
   | {
       readonly kind: 'crashed';
+      readonly message: string;
+      readonly providerSessionId: string | null;
+    }
+  | {
+      /** A billing check refused the session; a retry would be refused the same way. */
+      readonly kind: 'refused';
       readonly message: string;
       readonly providerSessionId: string | null;
     }
@@ -418,6 +425,9 @@ export function createRunner(opts: RunnerOptions): Runner {
       }
       case 'parked':
         park(id, ctl.fence, outcome.inboxId, outcome.providerSessionId);
+        return;
+      case 'refused':
+        fail(id, ctl.fence, outcome.message);
         return;
       case 'crashed': {
         const attempts = row.recoveryAttempts + 1;
@@ -737,16 +747,36 @@ export function createRunner(opts: RunnerOptions): Runner {
                 inboxId: st.parkedFor,
                 providerSessionId: st.providerSessionId,
               };
-            else if (event.reason === 'rate_limited') {
-              st.outcome = { kind: 'paused', until: null, providerSessionId: st.providerSessionId };
-              opts.onRateLimited(project.provider, null, project.id);
-            } else if (event.reason === 'error' || event.reason === 'stopped') {
-              st.outcome = {
-                kind: 'crashed',
-                message: event.message ?? 'the session stopped unexpectedly',
-                providerSessionId: st.providerSessionId,
-              };
-            } else st.outcome = { kind: 'step_done', withoutHandoff: st.handoffRequested };
+            else {
+              switch (event.reason) {
+                case SessionEndReason.RateLimited:
+                  st.outcome = {
+                    kind: 'paused',
+                    until: null,
+                    providerSessionId: st.providerSessionId,
+                  };
+                  opts.onRateLimited(project.provider, null, project.id);
+                  break;
+                case SessionEndReason.BillingRefused:
+                  st.outcome = {
+                    kind: 'refused',
+                    message: event.message ?? 'a billing check refused the session',
+                    providerSessionId: st.providerSessionId,
+                  };
+                  break;
+                case SessionEndReason.Error:
+                case SessionEndReason.Stopped:
+                  st.outcome = {
+                    kind: 'crashed',
+                    message: event.message ?? 'the session stopped unexpectedly',
+                    providerSessionId: st.providerSessionId,
+                  };
+                  break;
+                case SessionEndReason.Completed:
+                  st.outcome = { kind: 'step_done', withoutHandoff: st.handoffRequested };
+                  break;
+              }
+            }
             break;
           }
         }
@@ -792,6 +822,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       st.parkedFor !== null &&
       (ended.kind === 'paused' ||
         ended.kind === 'crashed' ||
+        ended.kind === 'refused' ||
         (ended.kind === 'stopped' && ended.reason !== 'cancelled'));
     const outcome: Outcome =
       parkedAfterWait && st.parkedFor

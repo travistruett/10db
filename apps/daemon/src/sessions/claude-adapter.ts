@@ -26,7 +26,13 @@ import {
 } from './claude-mapping';
 import { TENDB_MCP_SERVER } from './project-mcp';
 import { projectSettingsBillingProblem } from './project-settings';
-import type { SessionAdapter, SessionEvent, SessionHandle, SessionSpec } from './types';
+import {
+  SessionEndReason,
+  type SessionAdapter,
+  type SessionEvent,
+  type SessionHandle,
+  type SessionSpec,
+} from './types';
 
 export const CLAUDE_MCP_SERVER = TENDB_MCP_SERVER;
 /** How long Claude Code may take to report its account before the prompt is sent. */
@@ -217,8 +223,6 @@ function failedServersNote(names: readonly string[]): string {
   );
 }
 
-type EndReason = Extract<SessionEvent, { type: 'ended' }>['reason'];
-
 function startSession(
   spec: SessionSpec,
   opts: ClaudeAdapterOptions,
@@ -251,6 +255,8 @@ function startSession(
   let limitRejected = false;
   let lastResetsAt: Date | null = null;
   let failure: string | null = null;
+  /** How the session ends once `failure` is set: a billing refusal is final, anything else may be retried. */
+  let failureReason: SessionEndReason = SessionEndReason.Error;
   /** The answer a failed re-check gave; every later re-check gives it again. */
   let haltOutput: HookJSONOutput | null = null;
   let markFinished: () => void = () => undefined;
@@ -261,7 +267,7 @@ function startSession(
   const emit = (event: SessionEvent): void => {
     if (!ended) events.push(event);
   };
-  const end = (reason: EndReason, message: string | null): void => {
+  const end = (reason: SessionEndReason, message: string | null): void => {
     if (ended) return;
     ended = true;
     resolvePreflight(false);
@@ -274,8 +280,8 @@ function startSession(
   // Read through a function: TypeScript would otherwise keep the narrowing from before the awaits.
   // A recorded failure halts too: nothing more reaches claude while its halting answer is delivered.
   const halted = (): boolean => ended || stopRequested || failure !== null;
-  const endReason = (): EndReason => {
-    if (failure) return 'error';
+  const endReason = (): SessionEndReason => {
+    if (failure) return failureReason;
     if (stopRequested) return 'stopped';
     return limitRejected ? 'rate_limited' : 'completed';
   };
@@ -285,7 +291,7 @@ function startSession(
   if (settingsProblem) {
     const message = `Billing check failed: ${settingsProblem}. No prompt was sent. ${fixHint}`;
     log.error({ reason: message }, 'claude session refused');
-    events.push({ type: 'ended', reason: 'error', message });
+    events.push({ type: 'ended', reason: SessionEndReason.BillingRefused, message });
     events.end();
     return { events, send: () => undefined, stop: () => Promise.resolve() };
   }
@@ -311,6 +317,7 @@ function startSession(
         // Record the failure so every tool is denied and no prompt goes in now, answer the hook, and only
         // then close the process.
         failure = message;
+        failureReason = SessionEndReason.BillingRefused;
         resolvePreflight(false);
         log.error({ reason: message }, 'claude session refused');
         clock.setTimeout(() => {
@@ -327,8 +334,9 @@ function startSession(
     }),
   });
 
-  const refuse = (message: string): void => {
+  const refuse = (reason: SessionEndReason, message: string): void => {
     failure = message;
+    failureReason = reason;
     resolvePreflight(false);
     resolveVerified(false);
     log.error({ reason: message }, 'claude session refused');
@@ -351,7 +359,10 @@ function startSession(
         })
       : `Claude Code reported no account within ${String(BILLING_PREFLIGHT_MS / 1_000)} s`;
     if (mismatch) {
-      refuse(`Billing check failed: ${mismatch}. No prompt was sent. ${fixHint}`);
+      refuse(
+        SessionEndReason.BillingRefused,
+        `Billing check failed: ${mismatch}. No prompt was sent. ${fixHint}`,
+      );
       return;
     }
     if (stopRequested) {
@@ -368,7 +379,10 @@ function startSession(
         { errName: error instanceof Error ? error.name : 'unknown' },
         'claude mcp servers could not be registered',
       );
-      refuse('Claude Code could not register the MCP servers. No prompt was sent.');
+      refuse(
+        SessionEndReason.Error,
+        'Claude Code could not register the MCP servers. No prompt was sent.',
+      );
       return;
     }
     if (halted()) {
@@ -415,6 +429,7 @@ function startSession(
     });
     if (mismatch) {
       refuse(
+        SessionEndReason.BillingRefused,
         `Billing check failed: ${mismatch}. The session stopped at its first turn, before any tool ran; that turn's first request may have been billed this way. ${fixHint}`,
       );
       return;
@@ -485,7 +500,7 @@ function startSession(
       }
       end(endReason(), failure);
     } catch (error) {
-      if (failure) end('error', failure);
+      if (failure) end(failureReason, failure);
       else if (stopRequested) end('stopped', null);
       else end('error', error instanceof Error ? error.message : String(error));
     }
