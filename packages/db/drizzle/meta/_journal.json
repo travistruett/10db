@@ -29,6 +29,13 @@
       "when": 1792203417405,
       "tag": "0003_mcp_server_approvals",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1792267024990,
+      "tag": "0004_session_briefing_baseline",
+      "breakpoints": true
     }
   ]
 }

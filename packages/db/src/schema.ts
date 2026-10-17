@@ -202,6 +202,12 @@ export const sessions = sqliteTable(
     outputTokens: integer('output_tokens').notNull(),
     costUsd: real('cost_usd').notNull(),
     contextPct: real('context_pct'),
+    /**
+     * The first context reading of a conversation that began from a handoff briefing, which its
+     * handoff margin is measured from; null when it began bare. A resumed session copies it from
+     * the session it resumes.
+     */
+    briefingBaselinePct: real('briefing_baseline_pct'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
