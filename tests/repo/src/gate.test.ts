@@ -75,6 +75,13 @@ describe('scripts/gate.sh', () => {
     expect(status).toBe(1);
     expect(last).toMatch(/^GATE FAIL: fail-probe — logs in \.gate\/ \(\d+s\)$/);
   });
+
+  it('runs the e2e step by default, after build', () => {
+    const steps =
+      /^ALL_STEPS=\(([^)]*)\)$/m.exec(readRepoFile('scripts/gate.sh'))?.[1]?.split(' ') ?? [];
+    expect(steps).toContain('e2e');
+    expect(steps.indexOf('e2e')).toBeGreaterThan(steps.indexOf('build'));
+  });
 });
 
 describe('scripts/check.sh', () => {

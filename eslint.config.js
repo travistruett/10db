@@ -70,6 +70,10 @@ export default defineConfig(
     languageOptions: { globals: globals.browser },
   },
   {
+    files: ['apps/desktop/e2e/**/*.ts'],
+    languageOptions: { globals: globals.node },
+  },
+  {
     // Daemon modules (src/<module>/) import each other only through index.ts.
     files: ['apps/daemon/src/*/**/*.ts'],
     rules: {

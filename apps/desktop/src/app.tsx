@@ -5,7 +5,7 @@ import { RouterProvider } from '@tanstack/react-router';
 import type { ConnectionResolver } from './daemon/connection';
 import { DaemonProvider, type DaemonIntervals } from './daemon/provider';
 import type { AppRouter } from './router';
-import { theme } from './theme';
+import { cssVariablesResolver, theme } from './theme';
 
 export interface AppProps {
   readonly router: AppRouter;
@@ -16,7 +16,11 @@ export interface AppProps {
 
 export function App({ router, queryClient, resolve, intervals }: AppProps) {
   return (
-    <MantineProvider theme={theme} defaultColorScheme="dark">
+    <MantineProvider
+      theme={theme}
+      cssVariablesResolver={cssVariablesResolver}
+      defaultColorScheme="dark"
+    >
       <QueryClientProvider client={queryClient}>
         <DaemonProvider resolve={resolve} {...(intervals ? { intervals } : {})}>
           <RouterProvider router={router} />

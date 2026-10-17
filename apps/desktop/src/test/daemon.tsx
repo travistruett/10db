@@ -10,7 +10,7 @@ import { App } from '../app';
 import type { ConnectionResolver, DaemonConnection } from '../daemon/connection';
 import { DaemonProvider, type DaemonIntervals } from '../daemon/provider';
 import { createAppRouter, type AppRouter } from '../router';
-import { theme } from '../theme';
+import { cssVariablesResolver, theme } from '../theme';
 
 /** The daemon every UI test talks to, through MSW. */
 export const TEST_CONNECTION: DaemonConnection = {
@@ -108,7 +108,11 @@ export function renderWithDaemon(
 ): { queryClient: QueryClient } {
   const queryClient = testQueryClient();
   render(
-    <MantineProvider theme={theme} defaultColorScheme="dark">
+    <MantineProvider
+      theme={theme}
+      cssVariablesResolver={cssVariablesResolver}
+      defaultColorScheme="dark"
+    >
       <QueryClientProvider client={queryClient}>
         <DaemonProvider
           resolve={opts.resolve ?? resolveTest}

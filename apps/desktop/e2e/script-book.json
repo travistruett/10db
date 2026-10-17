@@ -1,0 +1,38 @@
+{
+  "Write the greeting": [
+    [
+      {
+        "do": "tool",
+        "toolName": "AskUserQuestion",
+        "input": {
+          "questions": [
+            {
+              "question": "Which greeting?",
+              "header": "Greeting",
+              "options": [
+                { "label": "Hello", "description": "Plain" },
+                { "label": "Howdy", "description": "Friendly" }
+              ],
+              "multiSelect": false
+            }
+          ]
+        }
+      },
+      {
+        "do": "tool",
+        "toolName": "Write",
+        "input": { "file_path": "src/greeting/hello.txt", "content": "hello\n" }
+      },
+      {
+        "do": "mcp",
+        "tool": "commit",
+        "args": {
+          "opId": "op-e2e-commit1",
+          "paths": ["src/greeting/hello.txt"],
+          "message": "Add the greeting"
+        }
+      },
+      { "do": "turn_complete" }
+    ]
+  ]
+}
