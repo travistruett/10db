@@ -18,7 +18,7 @@
     "build": "pnpm -r --if-present run build",
     "drift": "pnpm -r --if-present run drift",
     "knip": "knip",
-    "dev": "pnpm -r --parallel --if-present run dev",
+    "dev": "bash scripts/dev.sh",
     "gate": "bash scripts/gate.sh"
   },
   "devDependencies": {

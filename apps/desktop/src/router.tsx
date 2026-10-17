@@ -6,9 +6,34 @@ import {
   type RouterHistory,
 } from '@tanstack/react-router';
 import { AppLayout } from './shell/app-layout';
+import { ViewBoundary } from './shell/view-boundary';
 import { FactoryView } from './views/factory-view';
 import { InboxView } from './views/inbox-view';
 import { TasksView } from './views/tasks-view';
+
+function FactoryPage() {
+  return (
+    <ViewBoundary name="Factory">
+      <FactoryView />
+    </ViewBoundary>
+  );
+}
+
+function InboxPage() {
+  return (
+    <ViewBoundary name="Inbox">
+      <InboxView />
+    </ViewBoundary>
+  );
+}
+
+function TasksPage() {
+  return (
+    <ViewBoundary name="Tasks">
+      <TasksView />
+    </ViewBoundary>
+  );
+}
 
 const rootRoute = createRootRoute({ component: AppLayout });
 
@@ -24,17 +49,17 @@ const indexRoute = createRoute({
 const factoryRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/factory',
-  component: FactoryView,
+  component: FactoryPage,
 });
 const inboxRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/inbox',
-  component: InboxView,
+  component: InboxPage,
 });
 const tasksRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/tasks',
-  component: TasksView,
+  component: TasksPage,
 });
 
 const routeTree = rootRoute.addChildren([indexRoute, factoryRoute, inboxRoute, tasksRoute]);

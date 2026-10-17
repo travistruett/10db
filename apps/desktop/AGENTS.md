@@ -4,7 +4,13 @@ The 10db window: React 19 + Mantine 9 UI built by Vite, inside a Tauri 2 shell (
 The UI never touches the database; it talks to the daemon over loopback HTTP and WebSocket.
 
 - Daemon calls go through `src/daemon/client.ts` (Hono typed client over `AppType`). Never
-  hand-write a fetch to the daemon.
+  hand-write a fetch to the daemon. Parse every response with its `@10db/contracts` schema via `readJson`.
+- `DaemonProvider` resolves the connection (Tauri `daemon_connection`, or `VITE_DAEMON_URL` and
+  `VITE_DAEMON_TOKEN` in a browser), polls `/health` and owns the connecting, reconnecting and
+  version-mismatch states. `useEventStream` is the one WebSocket; events invalidate query caches by
+  entity type (`INVALIDATIONS`).
+- `pnpm dev` (`scripts/dev.sh`) shares one random token, kept in `.dev/ui-token`, between the daemon and Vite.
+- MSW 3 intercepts jsdom's `WebSocket` as is; no extra environment option is needed.
 - Server state lives in TanStack Query; routes are code-based TanStack Router in `src/router.tsx`.
 - Mantine components and theme tokens only; see `DESIGN.md`. Use the Mantine MCP server for
   component docs (pinned to our Mantine version).

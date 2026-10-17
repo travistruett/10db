@@ -165,6 +165,19 @@ describe('API', () => {
     expect(res.status).toBe(400);
   });
 
+  it('refuses an event-stream upgrade from a foreign origin', async () => {
+    const upgrade = { Upgrade: 'websocket', Connection: 'Upgrade' };
+    const foreign = await app().request(`/events/stream?token=${TOKEN}`, {
+      headers: { ...upgrade, Origin: 'https://evil.example' },
+    });
+    expect(foreign.status).toBe(403);
+    // The stubbed upgrader answers 426, so reaching it proves the allowed origin got through.
+    const allowed = await app().request(`/events/stream?token=${TOKEN}`, {
+      headers: { ...upgrade, Origin: 'http://localhost:1420' },
+    });
+    expect(allowed.status).toBe(426);
+  });
+
   it('answers 400, not 500, when an inbox answer fails the contract schema', async () => {
     const services = stubServices({
       answerInbox: () => {

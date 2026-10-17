@@ -16,6 +16,8 @@ import {
 } from '@10db/contracts';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { HTTPException } from 'hono/http-exception';
+import { validator } from 'hono/validator';
 import type { UpgradeWebSocket } from 'hono/ws';
 import { z } from 'zod';
 import type { ApiServices } from './services';
@@ -72,6 +74,14 @@ export function createApp(deps: ApiDeps) {
       if (!sameToken(presented, deps.token)) return c.json({ error: 'unauthorized' }, 401);
       return next();
     })
+    .use(STREAM_PATH, async (c, next) => {
+      // Browsers don't apply CORS to WebSockets; a page on another origin must not read the stream.
+      // Non-browser clients send no Origin and are covered by the token alone.
+      const origin = c.req.header('origin');
+      if (origin !== undefined && !deps.allowedOrigins.includes(origin))
+        return c.json({ error: 'forbidden origin' }, 403);
+      return next();
+    })
     .all('/mcp', (c) => deps.mcp(c.req.raw))
     .get('/health', (c) =>
       c.json(
@@ -83,20 +93,22 @@ export function createApp(deps: ApiDeps) {
       ),
     )
     .get('/projects', (c) => c.json(deps.services.listProjects()))
-    .post('/projects', async (c) =>
-      c.json(deps.services.createProject(ProjectInput.parse(await c.req.json())), 201),
+    .post(
+      '/projects',
+      validator('json', (value): ProjectInput => ProjectInput.parse(value)),
+      (c) => c.json(deps.services.createProject(c.req.valid('json')), 201),
     )
     .get('/projects/:projectId/tasks', (c) =>
       c.json(deps.services.listTasks(ProjectId.parse(c.req.param('projectId')))),
     )
-    .post('/projects/:projectId/tasks', async (c) =>
-      c.json(
-        deps.services.createTask(
-          ProjectId.parse(c.req.param('projectId')),
-          TaskInput.parse(await c.req.json()),
+    .post(
+      '/projects/:projectId/tasks',
+      validator('json', (value): TaskInput => TaskInput.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.createTask(ProjectId.parse(c.req.param('projectId')), c.req.valid('json')),
+          201,
         ),
-        201,
-      ),
     )
     .post('/projects/:projectId/mcp-servers/review', (c) =>
       c.json(deps.services.reviewProjectMcp(ProjectId.parse(c.req.param('projectId')))),
@@ -104,8 +116,13 @@ export function createApp(deps: ApiDeps) {
     .post('/tasks/:taskId/start', (c) =>
       c.json(deps.services.startTask(TaskId.parse(c.req.param('taskId'))), 201),
     )
-    .get('/workstreams', (c) =>
-      c.json(deps.services.listWorkstreams({ active: c.req.query('active') !== 'false' })),
+    .get(
+      '/workstreams',
+      validator('query', (query): { active?: string } =>
+        typeof query['active'] === 'string' ? { active: query['active'] } : {},
+      ),
+      (c) =>
+        c.json(deps.services.listWorkstreams({ active: c.req.valid('query').active !== 'false' })),
     )
     .post('/workstreams/:id/cancel', async (c) =>
       c.json(await deps.services.cancelWorkstream(WorkstreamId.parse(c.req.param('id')))),
@@ -113,16 +130,21 @@ export function createApp(deps: ApiDeps) {
     .post('/workstreams/:id/retry', (c) =>
       c.json(deps.services.retryWorkstream(WorkstreamId.parse(c.req.param('id')))),
     )
-    .get('/inbox', (c) =>
-      c.json(deps.services.listInbox({ states: StateList.parse(c.req.query('state')) })),
-    )
-    .post('/inbox/:id/answer', async (c) =>
-      c.json(
-        deps.services.answerInbox(
-          InboxItemId.parse(c.req.param('id')),
-          InboxAnswer.parse(await c.req.json()),
-        ),
+    .get(
+      '/inbox',
+      validator('query', (query): { state?: string } =>
+        typeof query['state'] === 'string' ? { state: query['state'] } : {},
       ),
+      (c) =>
+        c.json(deps.services.listInbox({ states: StateList.parse(c.req.valid('query').state) })),
+    )
+    .post(
+      '/inbox/:id/answer',
+      validator('json', (value): InboxAnswer => InboxAnswer.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.answerInbox(InboxItemId.parse(c.req.param('id')), c.req.valid('json')),
+        ),
     )
     .get('/events', (c) =>
       c.json(
@@ -135,8 +157,10 @@ export function createApp(deps: ApiDeps) {
     .get('/events/head', (c) => c.json(EventsHead.parse({ seq: deps.services.eventsHead() })))
     .get('/system', async (c) => c.json(SystemCheckDto.parse(await deps.services.systemCheck())))
     .get('/settings/keep-awake', (c) => c.json(deps.services.keepAwake()))
-    .put('/settings/keep-awake', async (c) =>
-      c.json(deps.services.setKeepAwake(KeepAwakeInput.parse(await c.req.json()).mode)),
+    .put(
+      '/settings/keep-awake',
+      validator('json', (value): z.infer<typeof KeepAwakeInput> => KeepAwakeInput.parse(value)),
+      (c) => c.json(deps.services.setKeepAwake(c.req.valid('json').mode)),
     )
     .get(
       STREAM_PATH,
@@ -157,6 +181,8 @@ export function createApp(deps: ApiDeps) {
     );
 
   app.onError((error, c) => {
+    // Hono's own request errors (a malformed body, a missing content type) carry their status.
+    if (error instanceof HTTPException) return error.getResponse();
     if (error instanceof z.ZodError) {
       return c.json(
         {

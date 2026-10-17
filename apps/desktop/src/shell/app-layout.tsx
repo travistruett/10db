@@ -1,8 +1,14 @@
-import { AppShell, Group, NavLink, Text } from '@mantine/core';
+import { AppShell, Badge, Group, NavLink, Text, VisuallyHidden } from '@mantine/core';
 import { IconBuildingFactory2, IconInbox, IconListCheck } from '@tabler/icons-react';
 import { Link, Outlet } from '@tanstack/react-router';
+import { useDaemonStatus } from '../daemon/provider';
+import { useInbox } from '../daemon/queries';
+import { useDesktopSync } from '../desktop/sync';
 import { ColorSchemeToggle } from './color-scheme-toggle';
 import { DaemonStatus } from './daemon-status';
+import { KeepAwakeControl } from './keep-awake-control';
+import { ReconnectingBanner } from './reconnecting-banner';
+import { SystemAlert } from './system-alert';
 
 const NAV = [
   { to: '/factory', label: 'Factory', icon: IconBuildingFactory2 },
@@ -10,7 +16,21 @@ const NAV = [
   { to: '/tasks', label: 'Tasks', icon: IconListCheck },
 ] as const;
 
+function InboxBadge({ count }: { readonly count: number }) {
+  return (
+    <Badge size="sm" circle>
+      {/* The name computation drops a leading space inside VisuallyHidden, so the number is hidden
+          from assistive tech and the hidden text carries the whole phrase. */}
+      <span aria-hidden="true">{count}</span>
+      <VisuallyHidden>{`${String(count)} open card${count === 1 ? '' : 's'}`}</VisuallyHidden>
+    </Badge>
+  );
+}
+
 export function AppLayout() {
+  useDesktopSync();
+  const status = useDaemonStatus();
+  const openCards = useInbox().data?.length ?? 0;
   return (
     <AppShell header={{ height: 48 }} navbar={{ width: 200, breakpoint: 'sm' }} padding="md">
       <AppShell.Header>
@@ -18,6 +38,7 @@ export function AppLayout() {
           <Text fw={700}>10db</Text>
           <Group gap="sm">
             <DaemonStatus />
+            <KeepAwakeControl />
             <ColorSchemeToggle />
           </Group>
         </Group>
@@ -30,10 +51,15 @@ export function AppLayout() {
             to={to}
             label={label}
             leftSection={<Icon size={16} stroke={1.5} />}
+            rightSection={
+              to === '/inbox' && openCards > 0 ? <InboxBadge count={openCards} /> : undefined
+            }
           />
         ))}
       </AppShell.Navbar>
       <AppShell.Main>
+        {status.kind === 'reconnecting' && <ReconnectingBanner since={status.since} />}
+        <SystemAlert />
         <Outlet />
       </AppShell.Main>
     </AppShell>

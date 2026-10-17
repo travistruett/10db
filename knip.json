@@ -21,5 +21,9 @@
   "ignore": ["spikes/**", "scratch/**"],
   "ignoreBinaries": ["codex", "rustc"],
   "ignoreDependencies": ["@typescript/native"],
+  "ignoreIssues": {
+    "apps/desktop/src/daemon/queries.ts": ["exports"],
+    "apps/desktop/src/test/fixtures.ts": ["exports"]
+  },
   "ignoreExportsUsedInFile": true
 }
