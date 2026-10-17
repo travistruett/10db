@@ -34,7 +34,7 @@ The fake adapter (`sessions/fake-adapter.ts`) is the test boundary for Claude Co
 
 - `environment/` owns the login env (memory only), the session env builder and the system check. Nothing
   else reads the login env. Never write it to disk, the database or logs; log variable names, never values.
-- The Claude adapter (`sessions/claude-adapter.ts`) is the only importer of `@anthropic-ai/claude-agent-sdk`.
+- Only `sessions/claude-*.ts` import `@anthropic-ai/claude-agent-sdk`, and only `claude-adapter.ts` imports it at runtime (the others import types).
   Tests inject a scripted `query`; only `claude-adapter.live.test.ts` runs real Claude Code, behind
   `TENDB_LIVE_CLAUDE=1`.
 - Sessions and the gate both run in `sessionEnv(project)`. Nothing from the daemon's own

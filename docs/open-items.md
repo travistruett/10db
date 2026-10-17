@@ -34,4 +34,4 @@
 - [ ] M3: §1.3 live on the pilot project.
 - [ ] Spec question: a repo's committed .claude/settings.json hooks and statusLine run with session credentials without approval (decision 51 trusts the project); consider bringing them under the .mcp.json approval model.
 - [ ] Spec question: repo-configured git filters (.gitattributes + filter.<name>.clean/process in .git/config) run during the watcher's git status and during 10db's own commits; consider a sanitized git config or refusing sessions whose .git/config gains such keys.
-- [ ] M1b live run: confirm on the setMcpServers route that repo MCP headers reach the server, canUseTool is called for mcp__<server>__<tool>, and a stdio server sees only PATH and HOME (make live-acceptance).
+- [ ] M1b live run: confirm on the setMcpServers route that a repo MCP tool call reaches canUseTool as a permission card (`repo MCP tool gated`) and that a stdio server sees only PATH and HOME (`repo MCP server env`) (make live-acceptance). Header delivery to a repo HTTP server is not covered; 10db's own HTTP MCP server covers the route's headers.

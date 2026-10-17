@@ -22,5 +22,5 @@ The UI never touches the database; it talks to the daemon over loopback HTTP and
   `pnpm dev` already runs. It sets `TENDB_EXTERNAL_DAEMON=1`, which makes the shell skip its sidecar.
   Run `pnpm --filter @10db/desktop sidecar` once first: `tauri-build` checks the sidecar files exist.
 - `pnpm --filter @10db/desktop e2e` drives the Vite app in Playwright's WebKit, the WKWebView engine,
-  against the real daemon on the fake adapter. It is not the Tauri window; `make live-acceptance` covers that.
+  against the real daemon on the fake adapter. It is not the Tauri window. `make live-acceptance` runs the daemon as a plain node process with the browser UI, so the Tauri window (sidecar, tray, close-to-tray, webview) has no scripted coverage and is checked by hand.
   `make setup` installs the browser, and ports 1420 and 4318 must be free.
