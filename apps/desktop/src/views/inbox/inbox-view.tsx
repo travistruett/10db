@@ -36,6 +36,9 @@ export function InboxView() {
   const found = items.findIndex((item) => item.id === selectedId);
   const index = found === -1 ? 0 : found;
   const selected = items[index] ?? null;
+  // The card shown by position is pinned at once, so a card that sorts in ahead later never takes over the
+  // selection, a half-written note or the keys typed after it.
+  if (selected && found === -1) setSelectedId(selected.id);
   // A draft applies to its own card only, so a card that sorts in ahead never inherits a choice or an error.
   const own = selected && draft?.id === selected.id ? draft : null;
   const choice = own?.choice ?? null;
@@ -102,6 +105,7 @@ export function InboxView() {
       if (selected && option) choose(selected, option.label);
     },
     onNote: () => {
+      if (selected) setSelectedId(selected.id);
       noteRef.current?.focus();
     },
     onSubmit: submit,
@@ -141,7 +145,11 @@ export function InboxView() {
                   choose(item, value);
                 }}
                 onNote={(value) => {
+                  setSelectedId(item.id);
                   patch(item.id, { note: value });
+                }}
+                onNoteFocus={() => {
+                  setSelectedId(item.id);
                 }}
                 onSubmit={submit}
               />

@@ -29,6 +29,7 @@ export interface InboxCardProps {
   readonly onSelect: () => void;
   readonly onChoose: (choice: string) => void;
   readonly onNote: (note: string) => void;
+  readonly onNoteFocus: () => void;
   readonly onSubmit: () => void;
 }
 
@@ -61,6 +62,7 @@ export function InboxCard({
   onSelect,
   onChoose,
   onNote,
+  onNoteFocus,
   onSubmit,
 }: InboxCardProps) {
   const review = mcpReview(item);
@@ -155,6 +157,7 @@ export function InboxCard({
             onChange={(e) => {
               onNote(e.currentTarget.value);
             }}
+            onFocus={onNoteFocus}
             onKeyDown={sendFromNote}
           />
         ) : null}
