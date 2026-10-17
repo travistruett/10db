@@ -1,10 +1,11 @@
-import type { InboxItemDto } from '@10db/contracts';
+import { InboxKind, type InboxItemDto } from '@10db/contracts';
 import { invoke } from '@tauri-apps/api/core';
 import {
   isPermissionGranted,
   requestPermission,
   sendNotification,
 } from '@tauri-apps/plugin-notification';
+import { mcpReview } from '../views/inbox/mcp-approval';
 
 export interface TrayCounts {
   readonly lanes: number;
@@ -37,12 +38,25 @@ function canNotify(): Promise<boolean> {
   return permission;
 }
 
+const KIND_TITLES: Readonly<Record<InboxKind, string>> = {
+  [InboxKind.Question]: '10db has a question',
+  [InboxKind.Permission]: '10db needs a permission',
+  [InboxKind.Proposal]: '10db has a proposal',
+  [InboxKind.Review]: '10db has a review for you',
+  [InboxKind.Flag]: '10db flagged something',
+};
+
+/** What a new card's notification says first: what kind of card waits, so the builder can judge it unopened. */
+export function notificationTitle(item: InboxItemDto): string {
+  return mcpReview(item) ? '10db needs an MCP server approval' : KIND_TITLES[item.kind];
+}
+
 /** A macOS notification for a new card, only while the window isn't focused (spec §7). */
 export async function notifyNewCard(item: InboxItemDto): Promise<void> {
   if (!isTauri() || document.hasFocus()) return;
   if (!(await canNotify())) return;
   sendNotification({
-    title: item.kind === 'permission' ? '10db needs a permission' : '10db has a question',
+    title: notificationTitle(item),
     body: item.title,
   });
 }

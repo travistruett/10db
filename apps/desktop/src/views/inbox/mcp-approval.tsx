@@ -32,9 +32,6 @@ export function McpApprovalDetails({
   const reads = review.variables.length > 0 ? review.variables.join('\n') : 'Nothing';
   return (
     <Stack gap="xs">
-      <Text size="sm">
-        {`The repo's .mcp.json declares this ${review.transport} server. Sessions in this project run without it until you approve it, and any change to its config asks again.`}
-      </Text>
       <div>
         <Text size="xs" c="dimmed">
           What approving runs

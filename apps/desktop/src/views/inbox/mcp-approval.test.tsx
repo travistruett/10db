@@ -54,13 +54,14 @@ function serveInbox(items: ReturnType<typeof inboxItemDto>[]): { answers: unknow
 }
 
 describe('MCP approval card', () => {
-  it('shows the daemon-built launch line, the transport and what it reads', async () => {
+  it('shows the daemon-built body and what the server reads', async () => {
     serveInbox([card(review({ variables: ['LOG_LEVEL'] }))]);
     renderApp('/inbox');
     expect(await screen.findByText('Run the repo\'s MCP server "mantine"?')).toBeTruthy();
     expect(screen.getByText('MCP server')).toBeTruthy();
     expect(screen.getByText('Runs: npx -y @mantine/mcp-server@9.7.2')).toBeTruthy();
-    expect(screen.getByText(/declares this stdio server/)).toBeTruthy();
+    // The daemon's body already says what the server is and that sessions run without it.
+    expect(screen.queryByText(/declares this stdio server/)).toBeNull();
     expect(screen.getByText('LOG_LEVEL')).toBeTruthy();
     expect(screen.queryByText(/Environment it gets/)).toBeNull();
     expect(screen.getByRole('radio', { name: /Approve for this project/ })).toBeTruthy();
