@@ -37,9 +37,61 @@ export interface SkillInfo {
 
 const FRONTMATTER = /^---\n([\s\S]*?)\n---\n/;
 
-function frontmatterField(block: string, field: string): string | undefined {
-  const line = block.split('\n').find((l) => l.startsWith(`${field}:`));
-  return line?.slice(field.length + 1).trim();
+/** Plain single-line scalars only: a quote or block indicator would be kept literally. */
+const PlainValue = z
+  .string()
+  .min(1)
+  .refine((value) => !/^[>|"']/.test(value), 'must be a plain single-line value');
+
+const SkillFrontmatter = z.object({ name: PlainValue, description: PlainValue });
+
+/** A skill's SKILL.md is missing, unreadable or has invalid frontmatter. */
+export class SkillManifestError extends Error {
+  override name = 'SkillManifestError';
+
+  constructor(path: string, reason: string, options?: ErrorOptions) {
+    super(`${path}: ${reason}`, options);
+  }
+}
+
+function frontmatterFields(block: string): Record<string, string> {
+  const fields: Record<string, string> = {};
+  for (const line of block.split('\n')) {
+    const match = /^([A-Za-z][\w-]*):\s*(.*)$/.exec(line);
+    if (match?.[1] !== undefined && match[2] !== undefined) fields[match[1]] = match[2].trim();
+  }
+  return fields;
+}
+
+function readSkill(root: string, directory: string): SkillInfo {
+  const path = join(root, directory, 'SKILL.md');
+  let text: string;
+  try {
+    text = readFileSync(path, 'utf8');
+  } catch (error) {
+    throw new SkillManifestError(path, 'SKILL.md cannot be read', { cause: error });
+  }
+  const block = FRONTMATTER.exec(text)?.[1];
+  if (block === undefined) throw new SkillManifestError(path, 'frontmatter is missing');
+  const parsed = SkillFrontmatter.safeParse(frontmatterFields(block));
+  if (!parsed.success) {
+    const fields = parsed.error.issues.map((issue) => issue.path.join('.')).join(', ');
+    throw new SkillManifestError(
+      path,
+      `frontmatter needs a plain name and description (${fields})`,
+    );
+  }
+  if (parsed.data.name !== directory) {
+    throw new SkillManifestError(
+      path,
+      `name "${parsed.data.name}" must match its directory "${directory}"`,
+    );
+  }
+  return {
+    name: parsed.data.name,
+    description: parsed.data.description,
+    bytes: Buffer.byteLength(text, 'utf8'),
+  };
 }
 
 export function listSkills(dir: string = HARNESS_PLUGIN_DIR): SkillInfo[] {
@@ -47,15 +99,6 @@ export function listSkills(dir: string = HARNESS_PLUGIN_DIR): SkillInfo[] {
   if (!existsSync(root)) return [];
   return readdirSync(root, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
-    .map((entry) => {
-      const path = join(root, entry.name, 'SKILL.md');
-      const text = readFileSync(path, 'utf8');
-      const block = FRONTMATTER.exec(text)?.[1];
-      const name = block ? frontmatterField(block, 'name') : undefined;
-      const description = block ? frontmatterField(block, 'description') : undefined;
-      if (!name || !description)
-        throw new Error(`${path} needs frontmatter with name and description`);
-      return { name, description, bytes: Buffer.byteLength(text, 'utf8') };
-    })
+    .map((entry) => readSkill(root, entry.name))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
