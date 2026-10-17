@@ -8,7 +8,7 @@ import {
 import { AppLayout } from './shell/app-layout';
 import { ViewBoundary } from './shell/view-boundary';
 import { FactoryView } from './views/factory/factory-view';
-import { InboxView } from './views/inbox-view';
+import { InboxView } from './views/inbox/inbox-view';
 import { TasksView } from './views/tasks/tasks-view';
 
 function FactoryPage() {

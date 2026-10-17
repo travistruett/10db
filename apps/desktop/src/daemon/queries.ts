@@ -165,7 +165,6 @@ export function useRetryWorkstream() {
   });
 }
 
-/** @public Consumed by the views built on this layer. */
 export function useAnswerInbox() {
   const { client } = useDaemon();
   const queryClient = useQueryClient();
