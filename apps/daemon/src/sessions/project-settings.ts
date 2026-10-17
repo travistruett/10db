@@ -1,6 +1,6 @@
-import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
+import { readRepoConfigFile, RepoConfigFileError } from './repo-config-file';
 
 const SETTINGS_FILE = join('.claude', 'settings.json');
 /**
@@ -31,6 +31,8 @@ const REFUSED_COMMAND_KEYS = [
   'gcpAuthRefresh',
   'otelHeadersHelper',
 ] as const;
+/** Turns off every hook, including 10db's guard and its billing re-check after each tool call. */
+const REFUSED_HOOK_KEYS = ['disableAllHooks'] as const;
 
 function refusedEnvName(name: string): boolean {
   const upper = name.toUpperCase();
@@ -44,28 +46,22 @@ function refusedEnvName(name: string): boolean {
 /** Only `env` matters here; every other key passes through. */
 const ProjectSettings = z.looseObject({ env: z.record(z.string(), z.string()).optional() });
 
-/** The `code` of a Node file-system error, or undefined for anything else. */
-function errorCode(error: unknown): string | undefined {
-  if (typeof error !== 'object' || error === null || !('code' in error)) return undefined;
-  return typeof error.code === 'string' ? error.code : undefined;
-}
-
 /**
  * Whether the repo's committed `.claude/settings.json` could change who is billed or where requests go.
  * Claude Code applies its `env` block to the session after 10db has stripped the same names from the login
  * environment, and no account check would show it. Returns why the session must not start, or null. A missing
- * file is fine; an unreadable or invalid one fails closed. Names are reported, never values.
+ * file is fine; an unreadable or invalid one fails closed, as does anything but a regular file under the size
+ * cap. Names are reported, never values.
  */
 export function projectSettingsBillingProblem(cwd: string): string | null {
-  const path = join(cwd, SETTINGS_FILE);
-  let text: string;
+  let text: string | null;
   try {
-    text = readFileSync(path, 'utf8');
+    text = readRepoConfigFile(join(cwd, SETTINGS_FILE));
   } catch (error) {
-    const code = errorCode(error);
-    if (code === 'ENOENT' || code === 'ENOTDIR') return null;
-    return `${SETTINGS_FILE} could not be read (${code ?? 'error'})`;
+    if (!(error instanceof RepoConfigFileError)) throw error;
+    return `${SETTINGS_FILE} could not be read (${error.message})`;
   }
+  if (text === null) return null;
   let json: unknown;
   try {
     json = JSON.parse(text);
@@ -78,7 +74,8 @@ export function projectSettingsBillingProblem(cwd: string): string | null {
   const refused = [
     ...Object.keys(parsed.data.env ?? {}).filter(refusedEnvName),
     ...REFUSED_COMMAND_KEYS.filter((key) => key in parsed.data),
+    ...REFUSED_HOOK_KEYS.filter((key) => key in parsed.data),
   ];
   if (refused.length === 0) return null;
-  return `${SETTINGS_FILE} sets ${refused.join(', ')}, which would change who is billed, where requests go or what they pass through`;
+  return `${SETTINGS_FILE} sets ${refused.join(', ')}, which would change who is billed, where requests go or what they pass through, or turn off the hooks that check them`;
 }

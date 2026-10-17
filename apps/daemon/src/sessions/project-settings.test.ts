@@ -1,9 +1,11 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { tempDir } from '../../test/fixtures';
 import { BILLING_SWITCH_VARS } from '../environment';
 import { projectSettingsBillingProblem } from './project-settings';
+import { REPO_CONFIG_MAX_BYTES } from './repo-config-file';
 
 let repo: { path: string; cleanup(): void };
 beforeEach(() => {
@@ -97,8 +99,61 @@ describe('projectSettingsBillingProblem', () => {
     expect(projectSettingsBillingProblem(repo.path)).toContain('settings.json');
   });
 
-  it('fails closed on an unreadable settings file', () => {
-    mkdirSync(join(repo.path, '.claude', 'settings.json'), { recursive: true });
+  it('refuses disableAllHooks, which would silence the guard and the billing re-check hooks', () => {
+    writeSettings({ disableAllHooks: true });
+    expect(projectSettingsBillingProblem(repo.path)).toContain('disableAllHooks');
+  });
+
+  const settingsPath = (): string => join(repo.path, '.claude', 'settings.json');
+  const inClaudeDir = (): void => {
+    mkdirSync(join(repo.path, '.claude'), { recursive: true });
+  };
+
+  // Each of these would block the daemon forever or exhaust its memory if it were read.
+  it.each<[string, () => void]>([
+    [
+      'a directory',
+      () => {
+        mkdirSync(settingsPath(), { recursive: true });
+      },
+    ],
+    [
+      'a FIFO',
+      () => {
+        inClaudeDir();
+        execFileSync('mkfifo', [settingsPath()]);
+      },
+    ],
+    [
+      'a symlink to a device that never ends',
+      () => {
+        inClaudeDir();
+        symlinkSync('/dev/zero', settingsPath());
+      },
+    ],
+    [
+      'a symlink to a device that blocks',
+      () => {
+        inClaudeDir();
+        symlinkSync('/dev/stdin', settingsPath());
+      },
+    ],
+    [
+      'a symlink to a regular file',
+      () => {
+        inClaudeDir();
+        writeFileSync(join(repo.path, 'elsewhere.json'), '{}');
+        symlinkSync(join(repo.path, 'elsewhere.json'), settingsPath());
+      },
+    ],
+    [
+      'a file over the size cap',
+      () => {
+        writeSettings(`{"env": {}}${' '.repeat(REPO_CONFIG_MAX_BYTES)}`);
+      },
+    ],
+  ])('fails closed, without reading it, on a settings file that is %s', (_name, make) => {
+    make();
     expect(projectSettingsBillingProblem(repo.path)).toContain('could not be read');
   });
 });

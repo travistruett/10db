@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto';
-import { lstatSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   McpTransport,
@@ -8,6 +7,7 @@ import {
   type McpServerReview,
 } from '@10db/contracts';
 import { z } from 'zod';
+import { readRepoConfigFile, RepoConfigFileError } from './repo-config-file';
 
 /** 10db's own MCP server in every managed session. A repo server with this name never replaces it. */
 export const TENDB_MCP_SERVER = '10db';
@@ -28,8 +28,6 @@ const SENSITIVE_NAME = /^(?:ANTHROPIC_|CLAUDE_|AWS_)|TOKEN|SECRET|PASSWORD|API_?
 const SERVER_NAME = /^[A-Za-z0-9_-]{1,64}$/;
 /** An HTTP header name is an RFC 9110 token. */
 const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
-/** A `.mcp.json` larger than this is not a config; it is refused unread. */
-export const MCP_FILE_MAX_BYTES = 256 * 1024;
 
 /** http or https only; a `${VAR}` may stand in the URL, which the URL parser accepts. */
 const RemoteUrl = z.string().refine(
@@ -117,28 +115,13 @@ export class ProjectMcpError extends Error {
   override readonly name = 'ProjectMcpError';
 }
 
-/** The `code` of a Node file-system error, or undefined for anything else. */
-function errorCode(error: unknown): string | undefined {
-  if (typeof error !== 'object' || error === null || !('code' in error)) return undefined;
-  return typeof error.code === 'string' ? error.code : undefined;
-}
-
 function readMcpFile(path: string): string | null {
   try {
-    // lstat, not stat: a tracked symlink to a device or a huge file must never be opened.
-    const stat = lstatSync(path);
-    if (!stat.isFile()) {
-      throw new ProjectMcpError(`${path} must be a regular file, not a link or a device`);
-    }
-    if (stat.size > MCP_FILE_MAX_BYTES) {
-      throw new ProjectMcpError(`${path} is larger than ${String(MCP_FILE_MAX_BYTES / 1024)} KiB`);
-    }
-    return readFileSync(path, 'utf8');
+    return readRepoConfigFile(path);
   } catch (error) {
-    if (error instanceof ProjectMcpError) throw error;
-    const code = errorCode(error);
-    if (code === 'ENOENT') return null;
-    throw new ProjectMcpError(`${path} could not be read (${code ?? 'error'})`);
+    if (error instanceof RepoConfigFileError)
+      throw new ProjectMcpError(`${path} could not be read (${error.message})`);
+    throw error;
   }
 }
 

@@ -4,7 +4,6 @@ import { McpServerReview } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { tempDir } from '../../test/fixtures';
 import {
-  MCP_FILE_MAX_BYTES,
   ProjectMcpError,
   readRepoMcp,
   resolveProjectMcp,
@@ -12,6 +11,7 @@ import {
   TENDB_MCP_SERVER,
   type McpApproval,
 } from './project-mcp';
+import { REPO_CONFIG_MAX_BYTES } from './repo-config-file';
 
 let repo: { path: string; cleanup(): void };
 beforeEach(() => {
@@ -153,7 +153,7 @@ describe('readRepoMcp', () => {
   });
 
   it('refuses a .mcp.json over the size cap', () => {
-    writeMcp(' '.repeat(MCP_FILE_MAX_BYTES + 1));
+    writeMcp(' '.repeat(REPO_CONFIG_MAX_BYTES + 1));
     expect(readFailure()).toBeInstanceOf(ProjectMcpError);
     expect(String(readFailure())).toContain('larger than');
   });
