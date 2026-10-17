@@ -17,11 +17,16 @@ function runGate(env: Record<string, string>) {
   return { status: result.status, last: lines.at(-1) ?? '' };
 }
 
-/** A directory holding a `cargo` that always fails, so a step that reaches cargo goes red. */
+/**
+ * A directory holding a `cargo` and a `pnpm` that always fail, so the rust step goes red on its
+ * first command instead of building the sidecar, which is slow on a cold CI runner.
+ */
 function failingCargoDir(): string {
   const dir = mkdtempSync(join(tmpdir(), '10db-fake-cargo-'));
-  writeFileSync(join(dir, 'cargo'), '#!/bin/sh\nexit 1\n');
-  chmodSync(join(dir, 'cargo'), 0o755);
+  for (const tool of ['cargo', 'pnpm']) {
+    writeFileSync(join(dir, tool), '#!/bin/sh\nexit 1\n');
+    chmodSync(join(dir, tool), 0o755);
+  }
   return dir;
 }
 
