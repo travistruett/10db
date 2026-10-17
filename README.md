@@ -19,7 +19,7 @@ checklist is in [CONTRIBUTING.md](CONTRIBUTING.md#set-up).
 - `mise install && pnpm install`: install the pinned tools, the dependencies and the git hooks.
   This includes Rust (about 1 GB). `make setup` does the same and asks before installing Rust.
 - `pnpm dev`: run the daemon and the UI.
-- `make gate`: every check; prints one summary line.
+- `make gate`: every check; prints one summary line. Its e2e step needs ports 1420 and 4318 free (stop `pnpm dev`) and the WebKit browser that `make setup` installs.
 - `make check`: the fast check on what you changed.
 
 Working rules for people and agents are in [AGENTS.md](AGENTS.md); how to contribute is in

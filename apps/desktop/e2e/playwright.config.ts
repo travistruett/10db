@@ -36,7 +36,15 @@ export default defineConfig({
       timeout: 60_000,
       stdout: 'pipe',
       stderr: 'pipe',
+      // SIGTERM lets the daemon run its shutdown, which stops a gate's process group.
+      gracefulShutdown: { signal: 'SIGTERM', timeout: 5_000 },
       env: {
+        // Playwright merges the caller's environment in; blank values are dropped by the daemon's env
+        // parser, so nothing from the caller's shell reaches the E2E daemon.
+        TENDB_PARENT_STDIN: '',
+        TENDB_SQLITE_BINDING: '',
+        TENDB_CLAUDE_PATH: '',
+        TENDB_LIVE_CLAUDE: '',
         TENDB_DATA_DIR: E2E_DATA,
         TENDB_PORT: String(E2E_DAEMON_PORT),
         TENDB_FAKE_SCRIPTS: book,
@@ -50,6 +58,7 @@ export default defineConfig({
       url: uiUrl,
       reuseExistingServer: false,
       timeout: 60_000,
+      gracefulShutdown: { signal: 'SIGTERM', timeout: 5_000 },
       env: { VITE_DAEMON_URL: daemonUrl, VITE_DAEMON_TOKEN: E2E_TOKEN },
     },
   ],

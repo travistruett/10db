@@ -32,7 +32,11 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   const projectDialog = page.getByRole('dialog', { name: 'New project' });
   await projectDialog.getByLabel('Name', { exact: true }).fill('e2e');
   await projectDialog.getByLabel('Repository path').fill(E2E_REPO);
-  await projectDialog.getByLabel('Gate command').fill('test -f src/greeting/hello.txt');
+  await projectDialog
+    .getByLabel('Gate command')
+    .fill(
+      "test -f src/greeting/hello.txt && git diff --quiet HEAD && git log -1 --format=%s | grep -qx 'Add the greeting'",
+    );
   await projectDialog.getByLabel('Areas').fill('greeting: src/greeting/**');
   await projectDialog.getByRole('button', { name: 'Create project' }).click();
   await expect(projectDialog).toBeHidden();
@@ -75,10 +79,13 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await expect(taskRow.getByText('Done', { exact: true }).first()).toBeVisible();
   await open(page, 'Inbox');
   await expect(page.getByText(`Review: ${TASK}`)).toBeVisible();
+  // The MCP commit really landed: the runner counts the commits it recorded before the gate.
+  await expect(page.getByText('Gate passed with 1 commit(s).')).toBeVisible();
   await expect(page.getByText(QUESTION)).toHaveCount(0);
 
   // Light mode must be just as usable.
   await page.getByRole('button', { name: 'Switch to light mode' }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-mantine-color-scheme', 'light');
   for (const view of VIEWS) {
     await open(page, view);
     await expectAccessible(page, `${view.toLowerCase()}, light`);
