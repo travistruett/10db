@@ -1,7 +1,13 @@
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { InboxItemDto, ProjectDto, TaskDto, WorkstreamDto } from '@10db/contracts';
+import {
+  InboxItemDto,
+  PermissionChoice,
+  ProjectDto,
+  TaskDto,
+  WorkstreamDto,
+} from '@10db/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { startDaemon, type RunningDaemon } from '../src/daemon';
@@ -59,6 +65,11 @@ const BOOK: FakeScriptBook = {
           ],
         },
       },
+      {
+        do: 'tool',
+        toolName: 'mcp__mantine__search_mantine_docs',
+        input: { query: 'Button' },
+      },
       write('src/b/one.txt'),
       commit('op-b-0001', 'src/b/one.txt'),
       turn,
@@ -104,10 +115,22 @@ beforeAll(async () => {
     });
     await api.post(`/tasks/${task.id}/start`, WorkstreamDto);
   }
-  const question = await waitForAsync(async () =>
-    (await api.get('/inbox?state=OPEN', z.array(InboxItemDto))).find((c) => c.kind === 'question'),
-  );
-  await api.post(`/inbox/${question.id}/answer`, z.unknown(), { choice: 'Howdy' });
+  // Beta asks a question and then calls a repo MCP tool, which becomes a permission card.
+  const answered = new Set<string>();
+  await waitForAsync(async () => {
+    for (const card of await api.get('/inbox?state=OPEN', z.array(InboxItemDto))) {
+      if (answered.has(card.id)) continue;
+      if (card.kind === 'question')
+        await api.post(`/inbox/${card.id}/answer`, z.unknown(), { choice: 'Howdy' });
+      else if (card.kind === 'permission')
+        await api.post(`/inbox/${card.id}/answer`, z.unknown(), {
+          choice: PermissionChoice.AllowOnce,
+        });
+      else continue;
+      answered.add(card.id);
+    }
+    return answered.size >= 2 ? answered : undefined;
+  });
   await waitForAsync(async () => {
     const all = await api.get('/workstreams?active=false', z.array(WorkstreamDto));
     return all.length === 2 && all.every((w) => w.state === 'DONE') ? all : undefined;
@@ -121,14 +144,19 @@ afterAll(() => {
 });
 
 const byName = async (
-  overrides: { logText?: string; minTasks?: number; envKeys?: readonly string[] | null } = {},
+  overrides: {
+    logText?: string;
+    minTasks?: number;
+    envKeys?: readonly string[] | null;
+    server?: string;
+  } = {},
 ) => {
   const checks = await runAcceptanceChecks({
     dbPath: join(data.path, '10db.sqlite'),
     repoPath: repo.path,
     logText: overrides.logText ?? readFileSync(join(data.path, 'logs', 'daemon.log'), 'utf8'),
     minTasks: overrides.minTasks ?? 2,
-    mcpServer: 'mantine',
+    mcpServer: overrides.server ?? 'mantine',
     mcpServerEnvKeys: overrides.envKeys ?? null,
   });
   return new Map(checks.map((c) => [c.name, c]));
@@ -190,6 +218,17 @@ describe('runAcceptanceChecks', () => {
     expect(
       (await byName({ logText: [line, line, noPlan].join('\n') })).get('subscription billing'),
     ).toMatchObject({ ok: false });
+  });
+
+  describe('repo MCP tool gated', () => {
+    // The fake run's Beta session called mcp__mantine__search_mantine_docs, which became a permission card.
+    it.each([
+      { name: 'a card for a tool of the approved server', server: 'mantine', ok: true },
+      { name: 'cards only for another server', server: 'docs', ok: false },
+      { name: 'a server name that is only a prefix of the card tool', server: 'mant', ok: false },
+    ])('$name', async ({ server, ok }) => {
+      expect((await byName({ server })).get('repo MCP tool gated')).toMatchObject({ ok });
+    });
   });
 
   it('fails the repo MCP checks on a run whose repo declared no server', async () => {

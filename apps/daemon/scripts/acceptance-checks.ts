@@ -107,6 +107,11 @@ export async function runAcceptanceChecks(input: {
     const dupOps = count(
       'SELECT count(*) AS n FROM (SELECT workstream_id, op_id FROM tool_ops GROUP BY workstream_id, op_id HAVING count(*) > 1)',
     );
+    // A permission card stores the tool it asks about; "_" is escaped so a name cannot widen the match.
+    const gatedCards = count(
+      "SELECT count(*) AS n FROM inbox_items WHERE kind = 'permission' AND json_extract(detail, '$.toolName') LIKE ? ESCAPE '\\'",
+      `mcp\\_\\_${input.mcpServer.replace(/[\\%_]/g, '\\$&')}\\_\\_%`,
+    );
     const events = z
       .object({ n: z.int(), maxSeq: z.int().nullable() })
       .parse(db.prepare('SELECT count(*) AS n, max(seq) AS maxSeq FROM events').get());
@@ -198,6 +203,11 @@ export async function runAcceptanceChecks(input: {
         'repo MCP server connected',
         reported.some((s) => s.status === 'connected'),
         `${input.mcpServer} status after the first turn in ${String(reported.length)} of ${String(statusLines.length)} session(s): ${statuses}`,
+      ),
+      check(
+        'repo MCP tool gated',
+        gatedCards >= 1,
+        `${String(gatedCards)} permission card(s) for mcp__${input.mcpServer}__ tools: repo tool calls reach canUseTool`,
       ),
       checkServerEnv(input.mcpServer, input.mcpServerEnvKeys),
     ];

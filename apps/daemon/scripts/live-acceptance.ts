@@ -97,7 +97,7 @@ const TASKS = [
     title: 'Gamma notes',
     area: 'gamma',
     description:
-      'Write src/gamma/notes.md listing three short facts about SQLite WAL mode, then commit it.',
+      "Use the mantine MCP server's documentation tool to look up the Button component before writing. Then write src/gamma/notes.md listing three short facts about it, and commit it.",
   },
 ] as const;
 
