@@ -84,18 +84,21 @@ const TASKS = [
   {
     title: 'Alpha haiku pair',
     area: 'alpha',
+    outputs: ['src/alpha/one.md', 'src/alpha/two.md'],
     description:
       'First read reference/sorting.txt and reference/hashing.txt in full, unless a handoff in your briefing says you already have. Then create src/alpha/one.md with a haiku about sorting and commit it with the 10db commit tool. Then create src/alpha/two.md with a haiku about hashing and commit it.',
   },
   {
     title: 'Beta greeting',
     area: 'beta',
+    outputs: ['src/beta/greeting.md'],
     description:
       'Before writing anything, ask the builder with your question tool which greeting to use: Hello or Howdy. Then write src/beta/greeting.md containing only the chosen greeting and commit it.',
   },
   {
     title: 'Gamma notes',
     area: 'gamma',
+    outputs: ['src/gamma/notes.md'],
     description:
       "Use the mantine MCP server's documentation tool to look up the Button component before writing. Then write src/gamma/notes.md listing three short facts about it, and commit it.",
   },
@@ -462,7 +465,7 @@ async function main(): Promise<void> {
     minTasks: TASKS.length,
     mcpServer: REPO_MCP_SERVER,
     mcpServerEnvKeys: envKeys,
-    outputs: ['src/alpha/one.md', 'src/alpha/two.md', 'src/beta/greeting.md', 'src/gamma/notes.md'],
+    outputs: TASKS.flatMap((t) => t.outputs),
   });
   const baseline = sessionBaselines(join(dataDir, '10db.sqlite'));
   const report = renderAcceptanceReport({

@@ -139,7 +139,8 @@ export async function runAcceptanceChecks(input: {
         (r) => Number(r.stdout.trim()),
         () => 0,
       );
-      if (size === 0) missing.push(path);
+      // NaN from unexpected output counts as missing, never as present.
+      if (!(size > 0)) missing.push(path);
     }
 
     const lines = parseLogLines(input.logText);
