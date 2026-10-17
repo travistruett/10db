@@ -120,3 +120,11 @@ export type EvidenceKind = ValueOf<typeof EvidenceKind>;
 
 export const SessionMode = { Managed: 'managed', Terminal: 'terminal' } as const;
 export type SessionMode = ValueOf<typeof SessionMode>;
+
+/** When the daemon holds `caffeinate` (spec §3). */
+export const KeepAwakeMode = {
+  Off: 'off',
+  WhileRunning: 'while_running',
+  Always: 'always',
+} as const;
+export type KeepAwakeMode = ValueOf<typeof KeepAwakeMode>;

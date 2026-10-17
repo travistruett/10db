@@ -18,6 +18,7 @@ import type {
   InboxOption,
   InboxState,
   InboxTarget,
+  McpVerdict,
   NextAction,
   PermissionRuleId,
   ProjectId,
@@ -372,3 +373,22 @@ export const events = sqliteTable('events', {
   data: text('data', { mode: 'json' }).$type<Record<string, Json>>().notNull(),
   at: text('at').notNull(),
 });
+
+/** The builder's verdict on one repo MCP server config, per project. A changed config has a new hash and no verdict. */
+export const mcpServerApprovals = sqliteTable(
+  'mcp_server_approvals',
+  {
+    projectId: text('project_id')
+      .$type<ProjectId>()
+      .notNull()
+      .references(() => projects.id),
+    serverName: text('server_name').notNull(),
+    configHash: text('config_hash').notNull(),
+    verdict: text('verdict').$type<McpVerdict>().notNull(),
+    variables: text('variables', { mode: 'json' }).$type<string[]>().notNull(),
+    sourceInboxId: text('source_inbox_id').$type<InboxItemId>(),
+    /** A later answer for the same config replaces the verdict, so this is when it last changed. */
+    updatedAt: updatedAt(),
+  },
+  (t) => [primaryKey({ columns: [t.projectId, t.serverName, t.configHash] })],
+);

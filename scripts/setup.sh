@@ -57,3 +57,5 @@ if [[ "$want_rust" == "yes" ]]; then
 fi
 # mise exec puts the pinned pnpm first on PATH, so a Homebrew pnpm is never used.
 mise exec -- pnpm install --frozen-lockfile
+# The e2e gate step drives the UI in Playwright's WebKit; the browser lives in Playwright's own cache.
+mise exec -- pnpm --filter @10db/desktop exec playwright install webkit

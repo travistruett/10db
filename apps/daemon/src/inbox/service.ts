@@ -34,6 +34,7 @@ import {
 } from '@10db/db';
 import type { StateStore } from '../events';
 import { commandPrefix } from '../permissions';
+import { applyMcpApproval } from './mcp-approval';
 
 /** Rejects an answer promise when the asking session stops waiting. */
 export class ParkedError extends Error {
@@ -69,6 +70,7 @@ export interface InboxService {
     body: string;
     detail?: Record<string, Json>;
     foldKey?: string;
+    options?: readonly InboxOption[];
   }): InboxItemDto;
   cancelForWorkstream(workstreamId: WorkstreamId): void;
   redeliver(id: InboxItemId): InboxItemDto;
@@ -261,6 +263,7 @@ export function createInboxService(deps: {
         }
         if (item.kind === InboxKind.Permission) applyPermissionChoice(ctx, updated, answer);
         if (item.kind === InboxKind.Proposal) applyProposalVerdict(ctx, updated, answer);
+        if (item.kind === InboxKind.Flag) applyMcpApproval(ctx, updated, answer);
         return updated;
       });
       return answered.state === InboxState.Resolved ? answered : deliver(answered);
@@ -277,7 +280,7 @@ export function createInboxService(deps: {
           kind: InboxKind.Flag,
           title: input.title,
           body: input.body,
-          options: [],
+          options: input.options ? [...input.options] : [],
           recommendation: null,
           category: QuestionCategory.Other,
           urgency: Urgency.High,

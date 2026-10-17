@@ -140,15 +140,16 @@ per verified completion, recovery success rate, and first-pass verification rate
   persisted before it is pushed. Events carry a monotonic sequence number, and a reconnecting UI replays from
   the last sequence it saw.
 - **Process model in this slice:**
-  - The daemon is a bundled Tauri sidecar: a Node single-executable application, still to be confirmed by a
-    spike.
+  - The daemon is a bundled Tauri sidecar: the pinned Node binary run as Tauri's `externalBin`, with
+    `daemon.mjs`, migrations, the harness plugin and the SQLite addon as resources (decision 37), not a
+    single-executable application. The shell spawns it with stdin piped, and it shuts down when that closes (decision 55).
   - The app lives in the menu bar. Closing the window keeps work running; Quit stops it.
   - A single-instance lock and a UI/daemon protocol-version handshake prevent mismatched processes.
   - `SMAppService` login-item registration comes later.
   - In development, run `pnpm dev`.
 - **Environment:**
-  - At onboarding, 10db captures the login-shell environment once (`$SHELL -l -c env`) and checks for
-    `claude`, `git` and `docker`.
+  - At every daemon start, 10db captures the login-shell environment (`$SHELL -l -i -c`) and keeps it in
+    memory only (decision 38), and checks for `claude`, `git` and `docker`.
   - The env builder constructs each session's environment from the captured base plus the project's
     **billing mode**: subscription (default), API key or Bedrock.
   - It removes variables that would silently change billing. It never disables a supported auth method;

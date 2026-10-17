@@ -1,5 +1,5 @@
 {
   "name": "10db-harness",
   "description": "Craft skills, personas and hooks that 10db injects into managed Claude Code sessions.",
-  "version": "0.0.0"
+  "version": "0.1.0"
 }

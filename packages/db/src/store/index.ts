@@ -4,6 +4,7 @@ export * from './evidence';
 export * from './handoffs';
 export * from './inbox';
 export * from './knowledge';
+export * from './mcp-approvals';
 export * from './permission-rules';
 export * from './projects';
 export * from './sessions';

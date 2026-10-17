@@ -1,5 +1,6 @@
-import type { Effort, Provider, SessionId, WorkstreamId } from '@10db/contracts';
+import type { BillingMode, Effort, Provider, SessionId, WorkstreamId } from '@10db/contracts';
 import type { GuardVerdict } from '../guard';
+import type { ProjectMcpServer } from './project-mcp';
 
 export interface ToolRequest {
   readonly toolName: string;
@@ -22,6 +23,10 @@ export interface SessionSpec {
   readonly effort: Effort;
   readonly resumeProviderSessionId: string | null;
   readonly env: Readonly<Record<string, string>>;
+  /** The project's billing mode; the adapter refuses a session whose credentials don't match it. */
+  readonly billingMode: BillingMode;
+  /** The repo's approved MCP servers, already expanded; passed next to 10db's server. */
+  readonly projectMcpServers: Readonly<Record<string, ProjectMcpServer>>;
   readonly allowedTools: readonly string[];
   readonly mcp: {
     readonly url: string;
@@ -33,6 +38,16 @@ export interface SessionSpec {
   /** Called for questions and for tool calls no allow rule covers. */
   canUseTool(req: ToolRequest): Promise<ToolDecision>;
 }
+
+export const SessionEndReason = {
+  Completed: 'completed',
+  Stopped: 'stopped',
+  Error: 'error',
+  RateLimited: 'rate_limited',
+  /** The credentials or the repo's settings failed a billing check; trying again cannot change that. */
+  BillingRefused: 'billing_refused',
+} as const;
+export type SessionEndReason = (typeof SessionEndReason)[keyof typeof SessionEndReason];
 
 export type SessionEvent =
   | { readonly type: 'started'; readonly providerSessionId: string; readonly pid: number | null }
@@ -57,7 +72,7 @@ export type SessionEvent =
   | { readonly type: 'compacted'; readonly trigger: 'manual' | 'auto' }
   | {
       readonly type: 'ended';
-      readonly reason: 'completed' | 'stopped' | 'error' | 'rate_limited';
+      readonly reason: SessionEndReason;
       readonly message: string | null;
     };
 

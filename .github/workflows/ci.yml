@@ -35,6 +35,7 @@ jobs:
           # zizmor, and mise-action creates shims only for installed tools.
           install_args: node pnpm gitleaks actionlint zizmor
       - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @10db/desktop exec playwright install --with-deps webkit
       - run: bash scripts/gate.sh
       - if: failure()
         run: for f in .gate/*.log; do echo "::group::$f"; cat "$f"; echo "::endgroup::"; done

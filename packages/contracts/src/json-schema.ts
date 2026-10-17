@@ -4,6 +4,14 @@ import { DaemonEvent } from './events';
 import { HandoffInput } from './handoff';
 import { HealthResponse } from './health';
 import { McpToolInputs, McpToolName, McpToolOutputs } from './mcp-tools';
+import {
+  EventsHead,
+  KeepAwakeInput,
+  KeepAwakeStatus,
+  McpServerReview,
+  McpServerStatusDto,
+  SystemCheckDto,
+} from './system';
 
 const mcpSchemas: Record<string, z.ZodType> = Object.fromEntries(
   Object.values(McpToolName).flatMap((tool): [string, z.ZodType][] => [
@@ -21,6 +29,12 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'task-dto': TaskDto,
   'workstream-dto': WorkstreamDto,
   'inbox-item-dto': InboxItemDto,
+  'system-check-dto': SystemCheckDto,
+  'keep-awake-status': KeepAwakeStatus,
+  'events-head': EventsHead,
+  'keep-awake-input': KeepAwakeInput,
+  'mcp-server-review': McpServerReview,
+  'mcp-server-status-dto': McpServerStatusDto,
   ...mcpSchemas,
 };
 
