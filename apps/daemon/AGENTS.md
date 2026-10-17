@@ -32,8 +32,11 @@ Time comes from an injected `Clock`; never call `Date.now()` or `setTimeout` dir
 
 The fake adapter (`sessions/fake-adapter.ts`) is the test boundary for Claude Code; daemon tests never call the real CLI.
 
-- The login-shell environment (`environment/`) is captured once at startup and kept only in memory.
-  Never write it to disk, the database or logs; log variable names, never values.
+- `environment/` owns the login env (memory only), the session env builder and the system check. Nothing
+  else reads the login env. Never write it to disk, the database or logs; log variable names, never values.
+- The Claude adapter (`sessions/claude-adapter.ts`) is the only importer of `@anthropic-ai/claude-agent-sdk`.
+  Tests inject a scripted `query`; only `claude-adapter.live.test.ts` runs real Claude Code, behind
+  `TENDB_LIVE_CLAUDE=1`.
 - Sessions and the gate both run in `sessionEnv(project)`. Nothing from the daemon's own
   `process.env` reaches a project's commands.
 - `keep-awake/` and `watcher/` follow lanes through `workstream.*` events, wired in `daemon/start.ts`.

@@ -19,9 +19,19 @@
 - [ ] M2: inject the environment into `createGit(env)` instead of reading `process.env` in `git.ts` (M1b already calls `createGit()` with no arguments).
 - [ ] Spec §5.1: "Ready" does not yet check for an open blocking inbox item.
 - [ ] Spec §9: the context pack uses FTS only; area match is not built.
-- [ ] Spec §12: the fake adapter is typed at the `SessionEvent` seam, not with the SDK's message types; M1b's scripted query covers the SDK level.
+- [x] Spec §12: the fake adapter is typed at the `SessionEvent` seam, not with the SDK's message types; M1b's scripted query covers the SDK level.
 - [ ] Spec §4: the projects budget ceiling, the inbox delivery record and the workstream flow, persona and profile fields are not built yet.
 - [ ] A multi-question `AskUserQuestion` parked mid-sequence drops the earlier answers, so the agent re-asks. Fix: open all question cards up front, or include every card resolved for the workstream in the resume prompt.
-- [ ] M1b: when two waits overlap and the first card is answered, a stop or crash parks on that answered card and the second card's later answer is dropped. Fix: track the set of open waits and park on one that is still open.
-- [ ] M1b: a preserved `answer` next action re-prompts and re-grants the same allow-once on every clean restart before a handoff or step done. Fix: rewrite the next action to `resume` once the session reports `started`.
-- [ ] M1b: end the daemon log's file destination in `stop()`; a daemon stopped milliseconds after start can throw an async ENOENT, and each start leaks a file descriptor.
+- [x] M1b: when two waits overlap and the first card is answered, a stop or crash parks on that answered card and the second card's later answer is dropped. Fix: track the set of open waits and park on one that is still open.
+- [x] M1b: a preserved `answer` next action re-prompted and re-granted the same allow-once on every clean restart before a handoff or step done. Fixed: once the session reports `started`, the runner rewrites the next action to a fresh start action (`start`, or `continue_from_handoff` from the latest handoff), so the answer and a one-time permission reach exactly one session.
+- [x] M1b: end the daemon log's file destination in `stop()`; a daemon stopped milliseconds after start can throw an async ENOENT, and each start leaks a file descriptor.
+- [ ] M2: per-project overrides and security settings for the repo's MCP servers (decisions 39, 50–53): approve a subset of a server's variables, list and revoke approvals in Settings, and check `canUseTool`'s `mcpServer.source` in the adapter.
+- [ ] M2: a setting to allow overage spending per project (decision 41).
+- [ ] M2: evaluate the Tauri MCP bridge (`hypothesi/mcp-server-tauri`) as a debug-only build feature for driving the real webview.
+- [ ] M2: signing and notarization for distributing the .app beyond this machine (spike 8 notes).
+- [ ] M2: Settings view (billing mode, thresholds, keep-awake) and the ⌘K palette.
+- [ ] M2: "Pause all" in the menu bar (spec §10); M1's tray shows lanes, inbox count and keep-awake only.
+- [ ] M3: §1.3 live on the pilot project.
+- [ ] Spec question: a repo's committed .claude/settings.json hooks and statusLine run with session credentials without approval (decision 51 trusts the project); consider bringing them under the .mcp.json approval model.
+- [ ] Spec question: repo-configured git filters (.gitattributes + filter.<name>.clean/process in .git/config) run during the watcher's git status and during 10db's own commits; consider a sanitized git config or refusing sessions whose .git/config gains such keys.
+- [ ] M1b live run: confirm on the setMcpServers route that repo MCP headers reach the server, canUseTool is called for mcp__<server>__<tool>, and a stdio server sees only PATH and HOME (make live-acceptance).

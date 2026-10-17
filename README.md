@@ -18,7 +18,9 @@ checklist is in [CONTRIBUTING.md](CONTRIBUTING.md#set-up).
 
 - `mise install && pnpm install`: install the pinned tools, the dependencies and the git hooks.
   This includes Rust (about 1 GB). `make setup` does the same and asks before installing Rust.
-- `pnpm dev`: run the daemon and the UI.
+- `pnpm dev`: run the daemon and the browser UI with a shared dev token, with state in `.dev/`.
+- `TENDB_DATA_DIR="$PWD/.dev/data" pnpm --filter @10db/desktop dev:shell`: open the Tauri window against that daemon.
+- `make live-acceptance`: the manual §1.3 run on a Max subscription.
 - `make gate`: every check; prints one summary line. Its e2e step needs ports 1420 and 4318 free (stop `pnpm dev`) and the WebKit browser that `make setup` installs.
 - `make check`: the fast check on what you changed.
 

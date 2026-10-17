@@ -5,10 +5,10 @@ The UI never touches the database; it talks to the daemon over loopback HTTP and
 
 - Daemon calls go through `src/daemon/client.ts` (Hono typed client over `AppType`). Never
   hand-write a fetch to the daemon. Parse every response with its `@10db/contracts` schema via `readJson`.
-- `DaemonProvider` resolves the connection (Tauri `daemon_connection`, or `VITE_DAEMON_URL` and
-  `VITE_DAEMON_TOKEN` in a browser), polls `/health` and owns the connecting, reconnecting and
-  version-mismatch states. `useEventStream` is the one WebSocket; events invalidate query caches by
-  entity type (`INVALIDATIONS`).
+- The UI gets its daemon connection from `DaemonProvider` (Tauri `daemon_connection`, or
+  `VITE_DAEMON_URL`/`VITE_DAEMON_TOKEN` in the browser); it also polls `/health` and owns the connecting,
+  reconnecting and version-mismatch states. Use `useDaemon()` and the hooks in `src/daemon/queries.ts`.
+- One event stream (`useEventStream`) invalidates queries by entity type (`INVALIDATIONS`). Don't poll lists.
 - `pnpm dev` (`scripts/dev.sh`) shares one random token, kept in `.dev/ui-token`, between the daemon and Vite.
 - MSW 3 intercepts jsdom's `WebSocket` as is; no extra environment option is needed.
 - Server state lives in TanStack Query; routes are code-based TanStack Router in `src/router.tsx`.
@@ -21,3 +21,6 @@ The UI never touches the database; it talks to the daemon over loopback HTTP and
 - `pnpm --filter @10db/desktop dev:shell` runs the Tauri shell against the daemon and Vite server that
   `pnpm dev` already runs. It sets `TENDB_EXTERNAL_DAEMON=1`, which makes the shell skip its sidecar.
   Run `pnpm --filter @10db/desktop sidecar` once first: `tauri-build` checks the sidecar files exist.
+- `pnpm --filter @10db/desktop e2e` drives the Vite app in Playwright's WebKit, the WKWebView engine,
+  against the real daemon on the fake adapter. It is not the Tauri window; `make live-acceptance` covers that.
+  `make setup` installs the browser, and ports 1420 and 4318 must be free.

@@ -6,8 +6,8 @@ default persona definitions used for seeding, and hooks. Repos never copy any of
 - `plugin/` is a Claude Code plugin: `.claude-plugin/plugin.json`, then `skills/`, `agents/`,
   `hooks/` as they are added. Keep skills short; they load into every session's context.
 - `plugin/skills/*/SKILL.md` are the five craft skills (planning, test-first, review-checklist,
-  brainstorming, handoff). Each stays under 2 KiB (2048 bytes); the test in `src/harness.test.ts`
-  enforces it. Refer to 10db's MCP tools by their full names (`mcp__10db__commit`), never to
+  brainstorming, handoff). Each is under 2 KiB (2048 bytes) and starts its description with 'Use when';
+  `src/harness.test.ts` enforces both. Refer to 10db's MCP tools by their full names (`mcp__10db__commit`), never to
   `git commit`.
 - Hook logic that needs daemon state runs in the daemon as SDK hook callbacks, not as scripts here.
   Script hooks here are only for terminal (takeover) sessions.
