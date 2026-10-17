@@ -1,9 +1,9 @@
 //! Keeps the daemon sidecar running: spawn it, wait, restart with backoff, stop it on quit.
 
 use std::fs::{self, OpenOptions};
-use std::io;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -21,6 +21,16 @@ pub const EXIT_ALREADY_RUNNING: i32 = 2;
 /// for several sessions; killing earlier would orphan `claude` children and leave `daemon.json` behind.
 const STOP_TIMEOUT: Duration = Duration::from_secs(30);
 const POLL_INTERVAL: Duration = Duration::from_millis(200);
+const SIDECAR_LOG: &str = "sidecar.log";
+/// Development and test settings of the daemon; a value in the shell's own environment must not
+/// reach the packaged daemon (a fixed UI token, scripted sessions, a live-Claude test run, an
+/// addon path that only fits another layout).
+const DEV_ONLY_VARS: [&str; 4] = [
+    "TENDB_DEV_UI_TOKEN",
+    "TENDB_FAKE_SCRIPTS",
+    "TENDB_LIVE_CLAUDE",
+    "TENDB_SQLITE_BINDING",
+];
 
 /// Doubling restart delay, capped.
 #[derive(Debug, Clone)]
@@ -73,6 +83,9 @@ pub const fn exit_policy(code: Option<i32>, quitting: bool) -> ExitPolicy {
 #[derive(Debug, Default)]
 struct Shared {
     child: Option<Child>,
+    /// The write end of the daemon's stdin. Dropping it, or the shell dying, closes the pipe, which
+    /// tells the daemon to shut down.
+    stdin: Option<ChildStdin>,
     quitting: bool,
     /// True between deciding to spawn and storing the child, so `stop` can't miss a daemon mid-spawn.
     spawning: bool,
@@ -86,6 +99,7 @@ fn lock(shared: &Mutex<Shared>) -> MutexGuard<'_, Shared> {
 #[derive(Debug, Clone)]
 pub struct Supervisor {
     shared: Arc<Mutex<Shared>>,
+    log_dir: PathBuf,
 }
 
 impl Supervisor {
@@ -95,8 +109,9 @@ impl Supervisor {
     pub fn start(resource_dir: PathBuf, log_dir: PathBuf) -> Self {
         let shared = Arc::new(Mutex::new(Shared::default()));
         let worker = Arc::clone(&shared);
-        thread::spawn(move || run_loop(&worker, &resource_dir, &log_dir));
-        Self { shared }
+        let worker_log_dir = log_dir.clone();
+        thread::spawn(move || run_loop(&worker, &resource_dir, &worker_log_dir));
+        Self { shared, log_dir }
     }
 
     /// Stops restarting, sends SIGTERM so the daemon stops its sessions cleanly, and waits for
@@ -120,7 +135,10 @@ impl Supervisor {
             .args(["-TERM", &pid.to_string()])
             .status()
         {
-            eprintln!("10db: could not signal the daemon: {error}");
+            report(
+                &self.log_dir,
+                &format!("could not signal the daemon: {error}"),
+            );
         }
         while Instant::now() < deadline {
             if lock(&self.shared).child.is_none() {
@@ -131,7 +149,10 @@ impl Supervisor {
         if let Some(child) = lock(&self.shared).child.as_mut()
             && let Err(error) = child.kill()
         {
-            eprintln!("10db: could not kill the daemon: {error}");
+            report(
+                &self.log_dir,
+                &format!("could not kill the daemon: {error}"),
+            );
         }
     }
 }
@@ -152,15 +173,16 @@ fn run_loop(shared: &Mutex<Shared>, resource_dir: &Path, log_dir: &Path) {
             let mut guard = lock(shared);
             guard.spawning = false;
             match spawned {
-                Ok(child) => {
+                Ok(mut child) => {
                     // Stored under the same lock that clears `spawning`: a concurrent `stop` sees the child.
+                    guard.stdin = child.stdin.take();
                     guard.child = Some(child);
                     drop(guard);
-                    wait_for_exit(shared)
+                    wait_for_exit(shared, log_dir)
                 }
                 Err(error) => {
                     drop(guard);
-                    eprintln!("10db: could not start the daemon: {error}");
+                    report(log_dir, &format!("could not start the daemon: {error}"));
                     None
                 }
             }
@@ -176,7 +198,7 @@ fn run_loop(shared: &Mutex<Shared>, resource_dir: &Path, log_dir: &Path) {
 }
 
 /// Polls rather than blocking in `wait`, so `stop` can take the lock to signal the child.
-fn wait_for_exit(shared: &Mutex<Shared>) -> Option<i32> {
+fn wait_for_exit(shared: &Mutex<Shared>, log_dir: &Path) -> Option<i32> {
     loop {
         {
             let mut guard = lock(shared);
@@ -184,18 +206,51 @@ fn wait_for_exit(shared: &Mutex<Shared>) -> Option<i32> {
             match status {
                 Ok(Some(status)) => {
                     guard.child = None;
+                    guard.stdin = None;
                     return status.code();
                 }
                 Ok(None) => {}
                 Err(error) => {
-                    eprintln!("10db: lost track of the daemon: {error}");
+                    report(log_dir, &format!("lost track of the daemon: {error}"));
                     guard.child = None;
+                    guard.stdin = None;
                     return None;
                 }
             }
         }
         thread::sleep(POLL_INTERVAL);
     }
+}
+
+/// Prints `message` and appends it to the sidecar log, where a packaged app's user can find it.
+fn report(log_dir: &Path, message: &str) {
+    eprintln!("10db: {message}");
+    let written = fs::create_dir_all(log_dir)
+        .and_then(|()| {
+            OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(log_dir.join(SIDECAR_LOG))
+        })
+        .and_then(|mut log| writeln!(log, "10db shell: {message}"));
+    if let Err(error) = written {
+        eprintln!("10db: could not write the sidecar log: {error}");
+    }
+}
+
+/// The command that runs the daemon bundle `entry` with the bundled Node binary `node`.
+fn daemon_command(node: &Path, entry: &Path) -> Command {
+    let mut command = Command::new(node);
+    command
+        .arg(entry)
+        // Port 0: the daemon picks a free port and announces it in daemon.json.
+        .env("TENDB_PORT", "0")
+        .env("TENDB_PARENT_STDIN", "1")
+        .stdin(Stdio::piped());
+    for name in DEV_ONLY_VARS {
+        command.env_remove(name);
+    }
+    command
 }
 
 fn spawn_daemon(resource_dir: &Path, log_dir: &Path) -> io::Result<Child> {
@@ -209,12 +264,8 @@ fn spawn_daemon(resource_dir: &Path, log_dir: &Path) -> io::Result<Child> {
     let log = OpenOptions::new()
         .create(true)
         .append(true)
-        .open(log_dir.join("sidecar.log"))?;
-    Command::new(node)
-        .arg(entry)
-        // Port 0: the daemon picks a free port and announces it in daemon.json.
-        .env("TENDB_PORT", "0")
-        .stdin(Stdio::null())
+        .open(log_dir.join(SIDECAR_LOG))?;
+    daemon_command(&node, &entry)
         .stdout(log.try_clone()?)
         .stderr(log)
         .spawn()
@@ -269,5 +320,21 @@ mod tests {
         // Quitting wins over everything.
         assert_eq!(exit_policy(Some(1), true), ExitPolicy::Stop);
         assert_eq!(exit_policy(None, true), ExitPolicy::Stop);
+    }
+
+    #[test]
+    fn the_daemon_command_watches_the_shell_and_drops_dev_settings() {
+        let command = daemon_command(Path::new("/node"), Path::new("/daemon.mjs"));
+        let envs: Vec<_> = command.get_envs().collect();
+        let value = |name: &str| envs.iter().find(|(key, _)| *key == name).map(|(_, v)| *v);
+        assert_eq!(value("TENDB_PORT"), Some(Some(std::ffi::OsStr::new("0"))));
+        assert_eq!(
+            value("TENDB_PARENT_STDIN"),
+            Some(Some(std::ffi::OsStr::new("1")))
+        );
+        for name in DEV_ONLY_VARS {
+            // `Some(None)` is an explicit removal from the inherited environment.
+            assert_eq!(value(name), Some(None), "{name} must be removed");
+        }
     }
 }

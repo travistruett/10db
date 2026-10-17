@@ -79,8 +79,11 @@ running `Contents/MacOS/tendb-desktop` directly from a shell.
 - **Data directory already held:** with a daemon from an earlier run still alive, the sidecar log held one line,
   `Another 10db daemon is running (pid <pid>)`, the supervisor did not restart it, and the log stayed at one
   line after 12 s.
-- **SIGTERM to the app process** ends the app without a `RunEvent::Exit`, so the sidecar is orphaned and keeps
-  holding the data directory. Quit from the tray or ⌘Q goes through `app.exit` and does stop it. The next launch
-  connects to the orphan through `daemon.json`.
+- **Quit:** an Apple-event quit (`tell application id "app.10db.desktop" to quit`) stops the sidecar and
+  removes `daemon.json` (verified by the reviewer). The tray's Quit item was not checked.
+- **Shell death:** the supervisor gives the sidecar a piped stdin and sets `TENDB_PARENT_STDIN=1`; the daemon
+  runs its SIGTERM shutdown when stdin reaches EOF. With `kill -9` on the app process, the sidecar exited about
+  2 s later and `daemon.json` was gone. Before this, any shell death other than Quit left the sidecar running
+  and unsupervised.
 - **Not checked from a shell:** the tray menu and title rendering, close-to-tray, the Dock reopen and the
   tray Quit item need a person at the screen.

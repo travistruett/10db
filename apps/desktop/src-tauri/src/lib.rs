@@ -13,9 +13,10 @@ use tray::{TrayCounts, TrayItems};
 /// The sidecar supervisor; `None` when a development daemon runs outside the app.
 struct Sidecar(Option<Supervisor>);
 
-/// Where the UI connects: the port and token the running daemon announced.
+/// Where the UI connects: the port and token the running daemon announced. Async so the file
+/// reads run off the main thread.
 #[tauri::command]
-fn daemon_connection() -> Result<DaemonConnection, String> {
+async fn daemon_connection() -> Result<DaemonConnection, String> {
     connection::read_connection(&connection::data_dir()).map_err(|error| error.to_string())
 }
 
