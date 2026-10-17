@@ -36,16 +36,40 @@
         "null"
       ]
     },
-    "envNames": {
+    "env": {
       "type": "array",
       "items": {
-        "type": "string"
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "value"
+        ]
       }
     },
-    "headerNames": {
+    "headers": {
       "type": "array",
       "items": {
-        "type": "string"
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "value"
+        ]
       }
     },
     "variables": {
@@ -87,8 +111,8 @@
     "command",
     "args",
     "url",
-    "envNames",
-    "headerNames",
+    "env",
+    "headers",
     "variables",
     "sensitive",
     "verdict",

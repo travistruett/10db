@@ -18,6 +18,7 @@ const DaemonEnv = z.object({
   TENDB_FAKE_SCRIPTS: z.string().min(1).optional(),
   // Development and Playwright only: a fixed UI bearer token instead of a random one per start.
   TENDB_DEV_UI_TOKEN: z.string().min(32).optional(),
+  // Absolute path to the claude binary; otherwise it is found on the login shell's PATH.
   TENDB_CLAUDE_PATH: z.string().startsWith('/').optional(),
   // Test only: runs claude-adapter.live.test.ts against the real claude on the builder's subscription.
   TENDB_LIVE_CLAUDE: z.enum(['0', '1']).optional(),

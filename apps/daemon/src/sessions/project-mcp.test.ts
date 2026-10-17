@@ -1,9 +1,10 @@
-import { writeFileSync } from 'node:fs';
+import { symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { McpServerReview } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { tempDir } from '../../test/fixtures';
 import {
+  MCP_FILE_MAX_BYTES,
   ProjectMcpError,
   readRepoMcp,
   resolveProjectMcp,
@@ -89,14 +90,18 @@ describe('readRepoMcp', () => {
         command: 'npx',
         args: ['-y', '@mantine/mcp-server@9.7.2'],
         url: null,
-        envNames: [],
+        env: [],
+        headers: [],
         variables: [],
         sensitive: [],
       }),
       expect.objectContaining({
         name: 'tools',
         command: '${HOME}/bin/tool',
-        envNames: ['GH', 'LEVEL'],
+        env: [
+          { name: 'GH', value: '${GITHUB_TOKEN}' },
+          { name: 'LEVEL', value: '${LOG_LEVEL:-info}' },
+        ],
         variables: ['GITHUB_TOKEN', 'HOME', 'LOG_LEVEL'],
         sensitive: ['GITHUB_TOKEN'],
       }),
@@ -105,11 +110,52 @@ describe('readRepoMcp', () => {
         transport: 'http',
         command: null,
         url: 'https://docs.example/mcp',
-        headerNames: ['Authorization'],
+        headers: [{ name: 'Authorization', value: 'Bearer ${DOCS_TOKEN}' }],
         variables: ['DOCS_TOKEN'],
         sensitive: ['DOCS_TOKEN'],
       }),
     ]);
+  });
+
+  it.each([
+    [
+      'a newline in a server name',
+      { 'docs\nConnects to: https://safe.example': { command: 'npx' } },
+    ],
+    ['a server name with a space', { 'my docs': { command: 'npx' } }],
+    ['a server name over 64 characters', { ['a'.repeat(65)]: { command: 'npx' } }],
+    ['a file: URL', { docs: { type: 'http', url: 'file:///etc/passwd' } }],
+    ['a javascript: URL', { docs: { type: 'sse', url: 'javascript:alert(1)' } }],
+    ['text that is not a URL', { docs: { type: 'http', url: 'docs.example/mcp' } }],
+    [
+      'a header name that is not an HTTP token',
+      { docs: { type: 'http', url: 'https://docs.example/mcp', headers: { 'X-A\nB': 'x' } } },
+    ],
+    [
+      'a header name with a space',
+      { docs: { type: 'http', url: 'https://docs.example/mcp', headers: { 'X A': 'x' } } },
+    ],
+  ])('rejects %s as an invalid .mcp.json', (_name, servers) => {
+    writeMcp({ mcpServers: servers });
+    expect(readFailure()).toBeInstanceOf(ProjectMcpError);
+    expect(String(readFailure())).toContain('is not a valid MCP config');
+  });
+
+  it('accepts a URL that names its host with a variable', () => {
+    writeMcp({ mcpServers: { docs: { type: 'http', url: 'https://${DOCS_HOST}/mcp' } } });
+    expect(readRepoMcp(repo.path).servers.map((s) => s.name)).toEqual(['docs']);
+  });
+
+  it('refuses a .mcp.json that is a symlink to a device, without reading it', () => {
+    symlinkSync('/dev/zero', join(repo.path, '.mcp.json'));
+    expect(readFailure()).toBeInstanceOf(ProjectMcpError);
+    expect(String(readFailure())).toContain('regular file');
+  });
+
+  it('refuses a .mcp.json over the size cap', () => {
+    writeMcp(' '.repeat(MCP_FILE_MAX_BYTES + 1));
+    expect(readFailure()).toBeInstanceOf(ProjectMcpError);
+    expect(String(readFailure())).toContain('larger than');
   });
 
   it('hashes the normalized config: key order is ignored, and any change gives a new hash', () => {

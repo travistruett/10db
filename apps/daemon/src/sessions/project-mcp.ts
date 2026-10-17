@@ -1,7 +1,12 @@
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { lstatSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { McpTransport, McpVerdict, type McpServerReview } from '@10db/contracts';
+import {
+  McpTransport,
+  McpVerdict,
+  type McpConfigEntry,
+  type McpServerReview,
+} from '@10db/contracts';
 import { z } from 'zod';
 
 /** 10db's own MCP server in every managed session. A repo server with this name never replaces it. */
@@ -19,7 +24,29 @@ const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 /** Names that look like credentials: 10db's billing, Claude Code's and AWS's, and anything named like a secret. */
 const SENSITIVE_NAME = /^(?:ANTHROPIC_|CLAUDE_|AWS_)|TOKEN|SECRET|PASSWORD|API_?KEY|CREDENTIAL/i;
 
-const StringMap = z.record(z.string(), z.string());
+/** A server name: it ends up in tool names (`mcp__<name>__*`) and on the approval card. */
+const SERVER_NAME = /^[A-Za-z0-9_-]{1,64}$/;
+/** An HTTP header name is an RFC 9110 token. */
+const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
+/** A `.mcp.json` larger than this is not a config; it is refused unread. */
+export const MCP_FILE_MAX_BYTES = 256 * 1024;
+
+/** http or https only; a `${VAR}` may stand in the URL, which the URL parser accepts. */
+const RemoteUrl = z.string().refine(
+  (value) => {
+    try {
+      const protocol = new URL(value).protocol;
+      return protocol === 'http:' || protocol === 'https:';
+    } catch {
+      return false;
+    }
+  },
+  { message: 'must be an http or https URL' },
+);
+const HeaderMap = z.record(
+  z.string().regex(HEADER_NAME, 'must be an HTTP header name'),
+  z.string(),
+);
 const StdioServer = z.strictObject({
   type: z.literal('stdio').optional(),
   command: z.string().min(1),
@@ -28,11 +55,14 @@ const StdioServer = z.strictObject({
 });
 const RemoteServer = z.strictObject({
   type: z.enum(['http', 'sse']),
-  url: z.string().min(1),
-  headers: StringMap.optional(),
+  url: RemoteUrl,
+  headers: HeaderMap.optional(),
 });
 const McpFile = z.strictObject({
-  mcpServers: z.record(z.string().min(1), z.union([StdioServer, RemoteServer])),
+  mcpServers: z.record(
+    z.string().regex(SERVER_NAME, 'must be 1 to 64 letters, digits, "_" or "-"'),
+    z.union([StdioServer, RemoteServer]),
+  ),
 });
 type DeclaredServer = z.infer<typeof StdioServer> | z.infer<typeof RemoteServer>;
 
@@ -95,8 +125,17 @@ function errorCode(error: unknown): string | undefined {
 
 function readMcpFile(path: string): string | null {
   try {
+    // lstat, not stat: a tracked symlink to a device or a huge file must never be opened.
+    const stat = lstatSync(path);
+    if (!stat.isFile()) {
+      throw new ProjectMcpError(`${path} must be a regular file, not a link or a device`);
+    }
+    if (stat.size > MCP_FILE_MAX_BYTES) {
+      throw new ProjectMcpError(`${path} is larger than ${String(MCP_FILE_MAX_BYTES / 1024)} KiB`);
+    }
     return readFileSync(path, 'utf8');
   } catch (error) {
+    if (error instanceof ProjectMcpError) throw error;
     const code = errorCode(error);
     if (code === 'ENOENT') return null;
     throw new ProjectMcpError(`${path} could not be read (${code ?? 'error'})`);
@@ -143,6 +182,9 @@ function referencedNames(values: readonly string[]): string[] {
   return [...new Set(names)].sort();
 }
 
+const entriesOf = (map: Readonly<Record<string, string>> | undefined): McpConfigEntry[] =>
+  sortedEntries(map).map(([name, value]) => ({ name, value }));
+
 /** What the builder sees on the approval card, and the hash the approval is keyed on. */
 function reviewOf(name: string, server: DeclaredServer): McpServerReview {
   const stdio = 'command' in server;
@@ -159,8 +201,8 @@ function reviewOf(name: string, server: DeclaredServer): McpServerReview {
     command: stdio ? server.command : null,
     args: stdio ? [...(server.args ?? [])] : [],
     url: stdio ? null : server.url,
-    envNames: stdio ? Object.keys(server.env ?? {}).sort() : [],
-    headerNames: stdio ? [] : Object.keys(server.headers ?? {}).sort(),
+    env: stdio ? entriesOf(server.env) : [],
+    headers: stdio ? [] : entriesOf(server.headers),
     variables,
     sensitive: variables.filter((v) => SENSITIVE_NAME.test(v)),
   };

@@ -358,6 +358,43 @@ describe('startDaemon', () => {
     }
   });
 
+  it('answers 400 when the repo MCP config cannot be parsed, and creates no card', async () => {
+    const repo = createTempRepo();
+    try {
+      writeFileSync(join(repo.path, '.mcp.json'), '{"mcpServers": {');
+      daemon = await startDaemon({
+        dataDir: dir.path,
+        port: 0,
+        adapter: new FakeAdapter({}),
+        logLevel: 'warn',
+        ...QUIET,
+      });
+      const headers = {
+        Authorization: `Bearer ${daemon.token}`,
+        'content-type': 'application/json',
+      };
+      const created = await fetch(`${daemon.url}/projects`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          name: 'broken',
+          repoPath: repo.path,
+          gateCommand: 'true',
+          areas: [{ name: 'src', globs: ['src/**'] }],
+        }),
+      });
+      const project = ProjectDto.parse(await created.json());
+      const res = await fetch(`${daemon.url}/projects/${project.id}/mcp-servers/review`, {
+        method: 'POST',
+        headers,
+      });
+      expect(res.status).toBe(400);
+      expect(await res.text()).toContain('is not valid JSON');
+    } finally {
+      repo.cleanup();
+    }
+  });
+
   it('closes its log file on stop, so a start leaks no file descriptor', async () => {
     const logPath = join(dir.path, 'logs', 'daemon.log');
     // The descriptors that point at daemon.log, found by identity so the count does not depend on GC.
@@ -379,7 +416,8 @@ describe('startDaemon', () => {
       logLevel: 'warn',
       ...QUIET,
     });
-    expect(openLogHandles()).toBe(1);
+    // The destination opens its file asynchronously.
+    await waitFor(() => (openLogHandles() === 1 ? true : undefined));
     await running.stop();
     expect(openLogHandles()).toBe(0);
   });

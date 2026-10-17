@@ -30,6 +30,10 @@ export type McpTransport = (typeof McpTransport)[keyof typeof McpTransport];
 
 const ConfigHash = z.string().regex(/^[0-9a-f]{64}$/);
 
+/** One `env` or `headers` entry as the repo wrote it: the value keeps its `${NAME}` references, never an expanded value. */
+export const McpConfigEntry = z.object({ name: z.string(), value: z.string() });
+export type McpConfigEntry = z.infer<typeof McpConfigEntry>;
+
 /**
  * A repo `.mcp.json` server as the builder reviews it: exactly what would run or be
  * contacted, and the names, never the values, of what it reads. `configHash` is the SHA-256 of the
@@ -44,9 +48,10 @@ export const McpServerReview = z.object({
   args: z.array(z.string()),
   /** http and sse: the URL, as written. */
   url: z.string().nullable(),
-  /** The keys of the declared `env` block (stdio) or `headers` block (http, sse). */
-  envNames: z.array(z.string()),
-  headerNames: z.array(z.string()),
+  /** The declared `env` block (stdio), sorted by name. It is merged over PATH and HOME, so it changes what runs. */
+  env: z.array(McpConfigEntry),
+  /** The declared `headers` block (http, sse), sorted by name. */
+  headers: z.array(McpConfigEntry),
   /** Every `${NAME}` the config references, sorted. Approving the server allows exactly these. */
   variables: z.array(z.string()),
   /** The referenced names that look like credentials: shown as a warning on the card. */

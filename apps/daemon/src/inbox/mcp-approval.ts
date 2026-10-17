@@ -12,24 +12,50 @@ import {
 import { recordMcpApproval, type WriteContext } from '@10db/db';
 import type { InboxService } from './service';
 
-/** A shell-like rendering of one word, quoted only when it needs to be. Text only, never run. */
-const shellWord = (word: string): string =>
-  /^[\w@%+=:,./-]+$/.test(word) ? word : JSON.stringify(word);
+/**
+ * Characters that can hide, reorder or add lines to text the builder reads: C0 and C1 controls, the
+ * Unicode line and paragraph separators, zero-width and joiner characters, and bidi controls.
+ */
+const UNSAFE_CHARS = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu;
+const PLAIN_WORD = /^[\w@%+=:,./-]+$/;
+
+const showChar = (c: string): string => `\\u{${(c.codePointAt(0) ?? 0).toString(16)}}`;
+
+/** Repo-controlled text with every unsafe character shown as `\u{…}`. Used where the text is not a word. */
+const visible = (text: string): string => text.replace(UNSAFE_CHARS, showChar);
+
+/**
+ * The one way repo text reaches the card: a word that is plain is shown as is; anything else is quoted,
+ * with quotes, backslashes and unsafe characters escaped, so the card shows what the text really holds.
+ */
+function word(text: string): string {
+  if (PLAIN_WORD.test(text)) return text;
+  const body = text.replace(/[\\"]/g, (c) => `\\${c}`).replace(UNSAFE_CHARS, showChar);
+  return `"${body}"`;
+}
+
+const assignment = (entry: { name: string; value: string }): string =>
+  `${word(entry.name)}=${word(entry.value)}`;
 
 function approvalBody(review: McpServerReview): string {
   const lines = [
-    `The repo's .mcp.json declares "${review.name}" (${review.transport}). Sessions in this project run without it until you approve it.`,
+    `The repo's .mcp.json declares "${visible(review.name)}" (${review.transport}). Sessions in this project run without it until you approve it.`,
   ];
   if (review.transport === McpTransport.Stdio) {
-    lines.push(`Runs: ${[review.command ?? '', ...review.args].map(shellWord).join(' ')}`);
-    if (review.envNames.length > 0) lines.push(`Sets: ${review.envNames.join(', ')}`);
     lines.push(
-      'It gets PATH and HOME, plus what its env block sets, and nothing else from your environment.',
+      `Runs: ${[...review.env.map(assignment), word(review.command ?? ''), ...review.args.map(word)].join(' ')}`,
+    );
+    if (review.env.length > 0) lines.push(`Sets: ${review.env.map(assignment).join(', ')}`);
+    const replaced = review.env.map((e) => e.name).filter((n) => n === 'PATH' || n === 'HOME');
+    lines.push(
+      replaced.length > 0
+        ? `Its env block replaces ${replaced.join(' and ')}, so what it runs is looked up and started as shown above. It gets nothing else from your environment.`
+        : 'It gets PATH and HOME, plus what its env block sets, and nothing else from your environment.',
     );
   } else {
-    lines.push(`Connects to: ${review.url ?? ''}`);
-    if (review.headerNames.length > 0)
-      lines.push(`Sends headers: ${review.headerNames.join(', ')}`);
+    lines.push(`Connects to: ${word(review.url ?? '')}`);
+    if (review.headers.length > 0)
+      lines.push(`Sends headers: ${review.headers.map(assignment).join(', ')}`);
   }
   lines.push(
     review.variables.length > 0
@@ -68,7 +94,7 @@ export function requestMcpApproval(
   return inbox.flag({
     projectId,
     workstreamId: null,
-    title: `Run the repo's MCP server "${review.name}"?`,
+    title: `Run the repo's MCP server "${visible(review.name)}"?`,
     body: approvalBody(review),
     options: approvalOptions(review),
     detail: { [MCP_APPROVAL_DETAIL]: review },
