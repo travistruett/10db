@@ -1,8 +1,9 @@
-import type { WorkstreamDto } from '@10db/contracts';
+import type { WorkstreamId } from '@10db/contracts';
 import {
   Alert,
   Button,
   Group,
+  Loader,
   Modal,
   Stack,
   Switch,
@@ -23,9 +24,9 @@ export function FactoryView() {
   const workstreams = useWorkstreams({ active: !showFinished });
   const cancel = useCancelWorkstream();
   const retry = useRetryWorkstream();
-  const [confirming, setConfirming] = useState<WorkstreamDto | null>(null);
+  const [confirming, setConfirming] = useState<WorkstreamId | null>(null);
   const rows = workstreams.data ?? [];
-  const error = cancel.error ?? retry.error;
+  const confirmingRow = rows.find((ws) => ws.id === confirming);
 
   return (
     <Stack>
@@ -44,13 +45,16 @@ export function FactoryView() {
           {workstreams.error.message}
         </Alert>
       ) : null}
-      {error ? (
+      {retry.error ? (
         <Alert color="red" title="The daemon refused that">
-          {error.message}
+          {retry.error.message}
         </Alert>
       ) : null}
+      {workstreams.isPending ? <Loader size="sm" aria-label="Loading workstreams" /> : null}
       {workstreams.isSuccess && rows.length === 0 ? (
-        <Text c="dimmed">No workstreams are running.</Text>
+        <Text c="dimmed">
+          {showFinished ? 'No workstreams yet.' : 'No workstreams are running.'}
+        </Text>
       ) : null}
       {rows.length > 0 ? (
         <Table highlightOnHover verticalSpacing="xs">
@@ -109,7 +113,7 @@ export function FactoryView() {
                         variant="subtle"
                         color="red"
                         onClick={() => {
-                          setConfirming(ws);
+                          setConfirming(ws.id);
                         }}
                       >
                         Cancel
@@ -127,29 +131,36 @@ export function FactoryView() {
         opened={confirming !== null}
         onClose={() => {
           setConfirming(null);
+          cancel.reset();
         }}
         title="Cancel this workstream?"
       >
         <Stack>
           <Text size="sm">
             The session stops and its claims are released.{' '}
-            {confirming ? `Task: ${confirming.taskTitle}` : ''}
+            {confirmingRow ? `Task: ${confirmingRow.taskTitle}` : ''}
           </Text>
+          {cancel.error ? (
+            <Alert color="red" title="The daemon refused that">
+              {cancel.error.message}
+            </Alert>
+          ) : null}
           <Group justify="flex-end">
             <Button
               variant="default"
               onClick={() => {
                 setConfirming(null);
+                cancel.reset();
               }}
             >
               Keep running
             </Button>
             <Button
               color="red"
-              loading={cancel.isPending}
+              loading={cancel.isPending && cancel.variables === confirming}
               onClick={() => {
                 if (!confirming) return;
-                cancel.mutate(confirming.id, {
+                cancel.mutate(confirming, {
                   onSuccess: () => {
                     setConfirming(null);
                   },

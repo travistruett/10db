@@ -91,6 +91,52 @@ describe('FactoryView', () => {
     });
   });
 
+  it('shows a refused cancel inside the dialog and clears it when the dialog closes', async () => {
+    const ws = workstreamDto({ taskTitle: 'Alpha', state: 'RUNNING' });
+    serve(
+      workstreams([ws]),
+      http.post(daemonUrl('/workstreams/:id/cancel'), () =>
+        HttpResponse.json({ error: 'conflict', message: 'already finished' }, { status: 409 }),
+      ),
+    );
+    renderApp('/factory');
+
+    fireEvent.click(within(await rowFor('Alpha')).getByRole('button', { name: 'Cancel' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Cancel this workstream?' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel workstream' }));
+    expect(await within(dialog).findByText('already finished')).toBeTruthy();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Keep running' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+    expect(screen.queryByText('already finished')).toBeNull();
+  });
+
+  it('shows a refused retry on the page', async () => {
+    const failed = workstreamDto({ taskTitle: 'Broken', state: 'FAILED' });
+    serve(
+      workstreams([failed]),
+      http.post(daemonUrl('/workstreams/:id/retry'), () =>
+        HttpResponse.json({ error: 'conflict', message: 'not retryable now' }, { status: 409 }),
+      ),
+    );
+    renderApp('/factory');
+
+    fireEvent.click(within(await rowFor('Broken')).getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByText('not retryable now')).toBeTruthy();
+  });
+
+  it('says there is nothing yet, not that nothing is running, when finished ones are shown', async () => {
+    serve(workstreams([], []));
+    renderApp('/factory');
+
+    expect(await screen.findByText('No workstreams are running.')).toBeTruthy();
+    fireEvent.click(screen.getByRole('switch', { name: 'Show finished' }));
+    expect(await screen.findByText('No workstreams yet.')).toBeTruthy();
+    expect(screen.queryByText('No workstreams are running.')).toBeNull();
+  });
+
   it('offers Retry only on a failed workstream, and shows why it failed', async () => {
     const failed = workstreamDto({
       taskTitle: 'Broken',
