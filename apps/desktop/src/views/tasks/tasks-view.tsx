@@ -1,4 +1,4 @@
-import { BoardStatus, TaskStatus, type ProjectId, type TaskDto } from '@10db/contracts';
+import { BoardStatus, ProjectId, TaskStatus, WorkstreamState, type TaskDto } from '@10db/contracts';
 import {
   Alert,
   Button,
@@ -21,12 +21,23 @@ import { ProjectPicker } from './project-picker';
 
 const STARTABLE: readonly BoardStatus[] = [BoardStatus.Ready, BoardStatus.Backlog];
 
-function canStart(task: TaskDto): boolean {
-  return (
-    task.status === TaskStatus.Open &&
-    task.workstreamId === null &&
-    STARTABLE.includes(task.boardStatus)
-  );
+/** A task whose latest workstream ended without finishing can run again. */
+const RESTARTABLE: readonly WorkstreamState[] = [WorkstreamState.Failed, WorkstreamState.Cancelled];
+
+function canStart(task: TaskDto, latest: WorkstreamState | undefined): boolean {
+  if (task.status !== TaskStatus.Open || !STARTABLE.includes(task.boardStatus)) return false;
+  return task.workstreamId === null || (latest !== undefined && RESTARTABLE.includes(latest));
+}
+
+/** The remembered project id comes from storage, so it is validated before it is trusted. */
+function deserializeProjectId(value: string | undefined): ProjectId | null {
+  try {
+    if (value === undefined) return null;
+    const parsed = ProjectId.safeParse(JSON.parse(value));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
 }
 
 export function TasksView() {
@@ -35,6 +46,7 @@ export function TasksView() {
     key: 'tendb.project',
     defaultValue: null,
     getInitialValueInEffect: false,
+    deserialize: deserializeProjectId,
   });
   const list = projects.data ?? [];
   // A remembered project that no longer exists falls back to the first one.
@@ -72,8 +84,23 @@ export function TasksView() {
         </Group>
       </Group>
 
+      {projects.isError ? (
+        <Alert color="red" title="Couldn't load the projects">
+          {projects.error.message}
+        </Alert>
+      ) : null}
+      {tasks.isError ? (
+        <Alert color="red" title="Couldn't load the tasks">
+          {tasks.error.message}
+        </Alert>
+      ) : null}
+      {workstreams.isError ? (
+        <Alert color="red" title="Couldn't load the workstreams">
+          {workstreams.error.message}
+        </Alert>
+      ) : null}
       {projects.isPending ? <Loader size="sm" aria-label="Loading projects" /> : null}
-      {!projects.isPending && !project ? (
+      {projects.isSuccess && !project ? (
         <Text c="dimmed">No projects yet. Create one to start.</Text>
       ) : null}
       {project ? (
@@ -125,7 +152,7 @@ export function TasksView() {
                     </Text>
                   </Table.Td>
                   <Table.Td>
-                    {canStart(task) ? (
+                    {canStart(task, state) ? (
                       <Button
                         size="xs"
                         variant="light"

@@ -169,26 +169,119 @@ describe('TasksView', () => {
     });
   });
 
-  it('does not offer Start for a task that already has a workstream', async () => {
-    const project = projectDto();
-    const ws = workstreamDto({ projectId: project.id, state: 'RUNNING', taskTitle: 'Busy' });
-    const busy = taskDto({
-      projectId: project.id,
-      title: 'Busy',
-      boardStatus: 'in_progress',
-      workstreamId: ws.id,
-    });
+  it.each([
+    ['RUNNING', 'RUNNING', false],
+    ['DONE', 'DONE', false],
+    ['FAILED', 'FAILED', true],
+    ['CANCELLED', 'CANCELLED', true],
+  ] as const)(
+    'offers Start for a ready task whose latest workstream is %s only when it ended without finishing',
+    async (_name, state, startable) => {
+      const project = projectDto();
+      const ws = workstreamDto({ projectId: project.id, state, taskTitle: 'Busy' });
+      const busy = taskDto({
+        projectId: project.id,
+        title: 'Busy',
+        boardStatus: 'ready',
+        workstreamId: ws.id,
+      });
+      serve(
+        http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+        http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([busy])),
+        http.get(daemonUrl('/workstreams'), () => HttpResponse.json([ws])),
+      );
+      renderApp('/tasks');
+
+      const row = (await screen.findByText('Busy')).closest('tr');
+      if (!row) throw new Error('Busy is not in a table row');
+      expect(await within(row).findByText(state)).toBeTruthy();
+      expect(within(row).queryByRole('button', { name: 'Start' }) !== null).toBe(startable);
+    },
+  );
+
+  it("shows the daemon's message, not an empty list, when the projects query fails", async () => {
     serve(
-      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
-      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([busy])),
-      http.get(daemonUrl('/workstreams'), () => HttpResponse.json([ws])),
+      http.get(daemonUrl('/projects'), () =>
+        HttpResponse.json({ error: 'internal', message: 'database is locked' }, { status: 500 }),
+      ),
     );
     renderApp('/tasks');
 
-    const row = (await screen.findByText('Busy')).closest('tr');
-    if (!row) throw new Error('Busy is not in a table row');
-    expect(within(row).getByText('In progress')).toBeTruthy();
-    expect(within(row).queryByRole('button', { name: 'Start' })).toBeNull();
+    expect(await screen.findByText('database is locked')).toBeTruthy();
+    expect(screen.queryByText('No projects yet. Create one to start.')).toBeNull();
+  });
+
+  it("shows the daemon's message when the tasks query fails", async () => {
+    const project = projectDto();
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () =>
+        HttpResponse.json({ error: 'internal', message: 'tasks unavailable' }, { status: 500 }),
+      ),
+    );
+    renderApp('/tasks');
+
+    expect(await screen.findByText('tasks unavailable')).toBeTruthy();
+    expect(screen.queryByText('No tasks yet.')).toBeNull();
+  });
+
+  it("shows the daemon's message when the workstreams query fails", async () => {
+    const project = projectDto();
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () =>
+        HttpResponse.json([taskDto({ projectId: project.id, title: 'Alpha' })]),
+      ),
+      http.get(daemonUrl('/workstreams'), () =>
+        HttpResponse.json(
+          { error: 'internal', message: 'workstreams unavailable' },
+          { status: 500 },
+        ),
+      ),
+    );
+    renderApp('/tasks');
+
+    expect(await screen.findByText('workstreams unavailable')).toBeTruthy();
+  });
+
+  it('falls back to the first project when the remembered id is not a project id', async () => {
+    const first = projectDto({ name: 'first-project' });
+    window.localStorage.setItem('tendb.project', JSON.stringify('garbage'));
+    try {
+      serve(
+        http.get(daemonUrl('/projects'), () => HttpResponse.json([first])),
+        http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([])),
+      );
+      renderApp('/tasks');
+
+      expect(await screen.findByText('No tasks yet.')).toBeTruthy();
+      expect(screen.getByDisplayValue('first-project')).toBeTruthy();
+    } finally {
+      window.localStorage.removeItem('tendb.project');
+    }
+  });
+
+  it('blocks the project form when the handoff field is empty', async () => {
+    let calls = 0;
+    serve(
+      http.post(daemonUrl('/projects'), () => {
+        calls += 1;
+        return HttpResponse.json({}, { status: 500 });
+      }),
+    );
+    renderApp('/tasks');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'New project' }));
+    const dialog = await screen.findByRole('dialog', { name: 'New project' });
+    type('Name', 'demo', dialog);
+    type('Repository path', '/repos/demo', dialog);
+    type('Gate command', 'make gate', dialog);
+    type('Areas', 'api: src/**', dialog);
+    type('Handoff at %', '', dialog);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Create project' }));
+
+    expect(await within(dialog).findByText('Enter the handoff percentage')).toBeTruthy();
+    expect(calls).toBe(0);
   });
 
   it('creates a task with one criterion per line and the only area preselected', async () => {

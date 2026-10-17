@@ -45,7 +45,7 @@ export function NewProjectForm({
   const [gateCommand, setGateCommand] = useState('');
   const [areasText, setAreasText] = useState('');
   const [billingMode, setBillingMode] = useState<BillingMode>(BillingMode.Subscription);
-  const [handoffPct, setHandoffPct] = useState(DEFAULT_HANDOFF_PCT);
+  const [handoffPct, setHandoffPct] = useState<number | ''>(DEFAULT_HANDOFF_PCT);
   const [formError, setFormError] = useState<string | null>(null);
 
   const submit = (event: SyntheticEvent<HTMLFormElement>): void => {
@@ -53,6 +53,10 @@ export function NewProjectForm({
     const parsed = parseAreas(areasText);
     if (!parsed.ok) {
       setFormError(parsed.error);
+      return;
+    }
+    if (handoffPct === '') {
+      setFormError('Enter the handoff percentage');
       return;
     }
     setFormError(null);
@@ -129,12 +133,13 @@ export function NewProjectForm({
         <NumberInput
           label="Handoff at %"
           description="Context use at which a session hands off to a fresh one"
+          allowDecimal={false}
           min={5}
           max={95}
           clampBehavior="strict"
           value={handoffPct}
           onChange={(value) => {
-            setHandoffPct(typeof value === 'number' ? value : DEFAULT_HANDOFF_PCT);
+            setHandoffPct(typeof value === 'number' ? value : '');
           }}
         />
         {error ? (
