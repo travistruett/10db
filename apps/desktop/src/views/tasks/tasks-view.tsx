@@ -13,6 +13,7 @@ import {
 } from '@mantine/core';
 import { useDisclosure, useLocalStorage } from '@mantine/hooks';
 import { useProjects, useStartTask, useTasks, useWorkstreams } from '../../daemon/queries';
+import { StateBadge } from '../factory/state-badge';
 import { formatAreas } from './areas-text';
 import { BoardStatusBadge } from './board-status-badge';
 import { NewProjectForm } from './new-project-form';
@@ -147,9 +148,7 @@ export function TasksView() {
                     </Text>
                   </Table.Td>
                   <Table.Td>
-                    <Text size="sm" ff="monospace">
-                      {state ?? '—'}
-                    </Text>
+                    {state ? <StateBadge state={state} /> : <Text size="sm">—</Text>}
                   </Table.Td>
                   <Table.Td>
                     {canStart(task, state) ? (

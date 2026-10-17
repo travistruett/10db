@@ -7,7 +7,7 @@ import {
 } from '@tanstack/react-router';
 import { AppLayout } from './shell/app-layout';
 import { ViewBoundary } from './shell/view-boundary';
-import { FactoryView } from './views/factory-view';
+import { FactoryView } from './views/factory/factory-view';
 import { InboxView } from './views/inbox-view';
 import { TasksView } from './views/tasks/tasks-view';
 

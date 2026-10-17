@@ -170,13 +170,13 @@ describe('TasksView', () => {
   });
 
   it.each([
-    ['RUNNING', 'RUNNING', false],
-    ['DONE', 'DONE', false],
-    ['FAILED', 'FAILED', true],
-    ['CANCELLED', 'CANCELLED', true],
+    ['RUNNING', 'Running', false],
+    ['DONE', 'Done', false],
+    ['FAILED', 'Failed', true],
+    ['CANCELLED', 'Cancelled', true],
   ] as const)(
     'offers Start for a ready task whose latest workstream is %s only when it ended without finishing',
-    async (_name, state, startable) => {
+    async (state, label, startable) => {
       const project = projectDto();
       const ws = workstreamDto({ projectId: project.id, state, taskTitle: 'Busy' });
       const busy = taskDto({
@@ -194,7 +194,7 @@ describe('TasksView', () => {
 
       const row = (await screen.findByText('Busy')).closest('tr');
       if (!row) throw new Error('Busy is not in a table row');
-      expect(await within(row).findByText(state)).toBeTruthy();
+      expect(await within(row).findByText(label)).toBeTruthy();
       expect(within(row).queryByRole('button', { name: 'Start' }) !== null).toBe(startable);
     },
   );

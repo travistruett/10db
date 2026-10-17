@@ -137,7 +137,6 @@ export function useStartTask() {
   });
 }
 
-/** @public Consumed by the views built on this layer. */
 export function useCancelWorkstream() {
   const { client } = useDaemon();
   const queryClient = useQueryClient();
@@ -152,7 +151,6 @@ export function useCancelWorkstream() {
   });
 }
 
-/** @public Consumed by the views built on this layer. */
 export function useRetryWorkstream() {
   const { client } = useDaemon();
   const queryClient = useQueryClient();
