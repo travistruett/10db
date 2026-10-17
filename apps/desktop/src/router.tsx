@@ -9,7 +9,7 @@ import { AppLayout } from './shell/app-layout';
 import { ViewBoundary } from './shell/view-boundary';
 import { FactoryView } from './views/factory-view';
 import { InboxView } from './views/inbox-view';
-import { TasksView } from './views/tasks-view';
+import { TasksView } from './views/tasks/tasks-view';
 
 function FactoryPage() {
   return (
