@@ -9,7 +9,10 @@ import {
 
 const AT = '2026-10-13T12:00:00.000Z';
 
-/** Schema-valid DTOs for UI tests; each is parsed, so a contract change breaks the fixture first. */
+/**
+ * Schema-valid DTOs for UI tests; each is parsed, so a contract change breaks the fixture first.
+ * @public
+ */
 export function projectDto(overrides: Partial<ProjectDto> = {}): ProjectDto {
   return ProjectDto.parse({
     id: mintId('Project'),
@@ -32,6 +35,7 @@ export function projectDto(overrides: Partial<ProjectDto> = {}): ProjectDto {
   });
 }
 
+/** @public Consumed by the views built on this layer. */
 export function taskDto(overrides: Partial<TaskDto> = {}): TaskDto {
   return TaskDto.parse({
     id: mintId('Task'),

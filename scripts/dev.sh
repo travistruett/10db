@@ -6,8 +6,7 @@ cd "$(dirname "$0")/.."
 mkdir -p .dev
 token_file=.dev/ui-token
 if [ ! -s "$token_file" ]; then
-  node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('base64url'))" > "$token_file"
-  chmod 600 "$token_file"
+  (umask 077 && node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('base64url'))" > "$token_file")
 fi
 token=$(cat "$token_file")
 export TENDB_DEV_UI_TOKEN="$token" VITE_DAEMON_TOKEN="$token"

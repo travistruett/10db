@@ -163,6 +163,8 @@ describe('API', () => {
   it('answers 400 for a body that is not JSON', async () => {
     const res = await app().request('/projects', { method: 'POST', ...json, body: '{nope' });
     expect(res.status).toBe(400);
+    expect(res.headers.get('content-type')).toContain('application/json');
+    expect(await res.json()).toMatchObject({ error: 'invalid' });
   });
 
   it('refuses an event-stream upgrade from a foreign origin', async () => {
@@ -176,6 +178,16 @@ describe('API', () => {
       headers: { ...upgrade, Origin: 'http://localhost:1420' },
     });
     expect(allowed.status).toBe(426);
+  });
+
+  it('answers 400 with the API error shape for a JSON body sent without a content type', async () => {
+    const res = await app().request('/projects', {
+      method: 'POST',
+      ...auth,
+      body: JSON.stringify({ name: 'x' }),
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: 'invalid' });
   });
 
   it('answers 400, not 500, when an inbox answer fails the contract schema', async () => {

@@ -181,8 +181,10 @@ export function createApp(deps: ApiDeps) {
     );
 
   app.onError((error, c) => {
-    // Hono's own request errors (a malformed body, a missing content type) carry their status.
-    if (error instanceof HTTPException) return error.getResponse();
+    // Hono's own request errors (a malformed body, a missing content type) carry their status;
+    // answer them in the API's JSON error shape.
+    if (error instanceof HTTPException)
+      return c.json({ error: 'invalid', message: error.message }, error.status);
     if (error instanceof z.ZodError) {
       return c.json(
         {

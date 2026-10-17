@@ -9,6 +9,8 @@ import type { ConnectionResolver, DaemonConnection } from './connection';
 export const HEALTH_INTERVAL_MS = 5_000;
 /** How often a disconnected UI asks where the daemon is and tries again. */
 export const RECONNECT_INTERVAL_MS = 1_000;
+/** How long a health check may take before the daemon counts as down; below the poll interval. */
+export const HEALTH_TIMEOUT_MS = 2_000;
 
 export interface DaemonIntervals {
   readonly healthy: number;
@@ -93,7 +95,12 @@ export function DaemonProvider({
           }
           current = active;
         }
-        const health = await readJson(await active.client.health.$get(), HealthResponse);
+        const health = await readJson(
+          await active.client.health.$get(undefined, {
+            init: { signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS) },
+          }),
+          HealthResponse,
+        );
         if (stopped) return;
         healthy = true;
         everConnected = true;

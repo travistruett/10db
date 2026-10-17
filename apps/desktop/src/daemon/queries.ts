@@ -50,6 +50,7 @@ export function useProjects() {
   });
 }
 
+/** @public Consumed by the views built on this layer. */
 export function useTasks(projectId: ProjectId | null) {
   const { client } = useDaemon();
   return useQuery({
@@ -100,6 +101,7 @@ export function useSystemCheck() {
   });
 }
 
+/** @public Consumed by the views built on this layer. */
 export function useCreateProject() {
   const { client } = useDaemon();
   const queryClient = useQueryClient();
@@ -110,6 +112,7 @@ export function useCreateProject() {
   });
 }
 
+/** @public Consumed by the views built on this layer. */
 export function useCreateTask(projectId: ProjectId) {
   const { client } = useDaemon();
   const queryClient = useQueryClient();
@@ -123,6 +126,7 @@ export function useCreateTask(projectId: ProjectId) {
   });
 }
 
+/** @public Consumed by the views built on this layer. */
 export function useStartTask() {
   const { client } = useDaemon();
   const queryClient = useQueryClient();
@@ -137,6 +141,7 @@ export function useStartTask() {
   });
 }
 
+/** @public Consumed by the views built on this layer. */
 export function useCancelWorkstream() {
   const { client } = useDaemon();
   const queryClient = useQueryClient();
@@ -151,6 +156,7 @@ export function useCancelWorkstream() {
   });
 }
 
+/** @public Consumed by the views built on this layer. */
 export function useRetryWorkstream() {
   const { client } = useDaemon();
   const queryClient = useQueryClient();
@@ -165,6 +171,7 @@ export function useRetryWorkstream() {
   });
 }
 
+/** @public Consumed by the views built on this layer. */
 export function useAnswerInbox() {
   const { client } = useDaemon();
   const queryClient = useQueryClient();

@@ -6,7 +6,7 @@ import { baseHandlers, daemonUrl, renderWithDaemon, server, TEST_CONNECTION } fr
 import { daemonEvent } from '../test/fixtures';
 import type { ConnectionResolver, DaemonConnection } from './connection';
 import { useEventStream } from './events';
-import { useDaemon, useDaemonStatus } from './provider';
+import { HEALTH_TIMEOUT_MS, useDaemon, useDaemonStatus } from './provider';
 
 const FAST = { healthy: 40, disconnected: 40 } as const;
 
@@ -130,5 +130,21 @@ describe('DaemonProvider', () => {
     expect(resumed.searchParams.get('token')).toBe('test-token-2');
     // It resumed from its own cursor; it didn't skip to the new daemon's head.
     expect(headCallsB).toBe(0);
+  });
+
+  it('treats a daemon that stops answering as down instead of waiting on it', async () => {
+    server.use(...baseHandlers());
+    renderWithDaemon(<StatusProbe />, { intervals: FAST });
+    await waitFor(() => {
+      expect(probeText()).toBe(`connected ${TEST_CONNECTION.url}`);
+    });
+    // The process is alive and accepting connections but never answers.
+    server.use(http.get(daemonUrl('/health'), () => new Promise<never>(() => undefined)));
+    await waitFor(
+      () => {
+        expect(probeText()).toMatch(/^reconnecting /);
+      },
+      { timeout: HEALTH_TIMEOUT_MS + 3_000 },
+    );
   });
 });

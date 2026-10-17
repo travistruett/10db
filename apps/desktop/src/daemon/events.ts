@@ -8,6 +8,8 @@ import { queryKeys } from './queries';
 
 export const STREAM_RETRY_BASE_MS = 500;
 export const STREAM_RETRY_MAX_MS = 10_000;
+/** How long the head fetch may take before the stream retries. */
+const HEAD_TIMEOUT_MS = 2_000;
 
 const WORK: readonly QueryKey[] = [['workstreams'], ['tasks']];
 
@@ -89,8 +91,15 @@ export function useEventStream(onEvent?: (event: DaemonEvent) => void): void {
       let after = lastSeq.current;
       if (after === null) {
         try {
-          after = (await readJson(await client.events.head.$get(), EventsHead)).seq;
-          lastSeq.current = after;
+          const head = await client.events.head.$get(undefined, {
+            init: { signal: AbortSignal.timeout(HEAD_TIMEOUT_MS) },
+          });
+          const seq = (await readJson(head, EventsHead)).seq;
+          // A stale effect (StrictMode, a new connection) must not touch the cursor, and the
+          // cursor only moves forward.
+          if (stopped) return;
+          lastSeq.current = Math.max(lastSeq.current ?? seq, seq);
+          after = lastSeq.current;
         } catch {
           retry();
           return;

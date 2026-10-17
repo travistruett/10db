@@ -20,7 +20,8 @@ const DEV_DAEMON_URL = 'http://127.0.0.1:4317';
  */
 export const resolveConnection: ConnectionResolver = async () => {
   if (isTauri()) return DaemonConnectionSchema.parse(await invoke('daemon_connection'));
-  const token = import.meta.env.VITE_DAEMON_TOKEN;
+  // Only a dev build reads the token, so one in the build environment never lands in dist/.
+  const token = import.meta.env.DEV ? import.meta.env.VITE_DAEMON_TOKEN : undefined;
   if (!token)
     throw new Error(
       'Set VITE_DAEMON_TOKEN to the daemon UI token (TENDB_DEV_UI_TOKEN) for browser development',
