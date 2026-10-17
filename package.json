@@ -19,7 +19,8 @@
     "drift": "pnpm -r --if-present run drift",
     "knip": "knip",
     "dev": "bash scripts/dev.sh",
-    "gate": "bash scripts/gate.sh"
+    "gate": "bash scripts/gate.sh",
+    "live-acceptance": "bash scripts/live-acceptance.sh"
   },
   "devDependencies": {
     "@commitlint/cli": "21.2.3",

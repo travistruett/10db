@@ -1,4 +1,4 @@
-.PHONY: setup gate check rust-check deny github-settings
+.PHONY: setup gate check rust-check deny github-settings live-acceptance
 
 TAURI_DIR := apps/desktop/src-tauri
 
@@ -18,6 +18,10 @@ check:
 rust-check:
 	pnpm --filter @10db/desktop sidecar
 	cd $(TAURI_DIR) && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
+
+## live-acceptance: manual §1.3 run on real Claude Code (subscription only; never CI).
+live-acceptance:
+	@bash scripts/live-acceptance.sh
 
 ## deny: cargo-deny advisories, licences, bans and sources for the Tauri crate.
 deny:
