@@ -143,12 +143,16 @@ afterAll(() => {
   data.cleanup();
 });
 
+/** The files the fake run commits. */
+const FAKE_OUTPUTS = ['src/a/one.txt', 'src/a/two.txt', 'src/b/one.txt'];
+
 const byName = async (
   overrides: {
     logText?: string;
     minTasks?: number;
     envKeys?: readonly string[] | null;
     server?: string;
+    outputs?: readonly string[];
   } = {},
 ) => {
   const checks = await runAcceptanceChecks({
@@ -158,6 +162,7 @@ const byName = async (
     minTasks: overrides.minTasks ?? 2,
     mcpServer: overrides.server ?? 'mantine',
     mcpServerEnvKeys: overrides.envKeys ?? null,
+    outputs: overrides.outputs ?? FAKE_OUTPUTS,
   });
   return new Map(checks.map((c) => [c.name, c]));
 };
@@ -167,6 +172,7 @@ describe('runAcceptanceChecks', () => {
     const checks = await byName();
     for (const name of [
       'tasks done',
+      'task outputs',
       'gate evidence',
       'handoff crossed',
       'question answered',
@@ -176,6 +182,20 @@ describe('runAcceptanceChecks', () => {
     ]) {
       expect(checks.get(name), name).toMatchObject({ ok: true });
     }
+  });
+
+  describe('task outputs', () => {
+    // A task's gate checks only what holds at every step, so this check is what proves each task wrote its file.
+    it.each([
+      { name: 'every expected file committed', outputs: FAKE_OUTPUTS, ok: true },
+      {
+        name: 'one expected file never committed',
+        outputs: [...FAKE_OUTPUTS, 'src/b/two.txt'],
+        ok: false,
+      },
+    ])('$name', async ({ outputs, ok }) => {
+      expect((await byName({ outputs })).get('task outputs')).toMatchObject({ ok });
+    });
   });
 
   it('fails the recovery check when the daemon was never killed', async () => {

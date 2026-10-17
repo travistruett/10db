@@ -462,6 +462,7 @@ async function main(): Promise<void> {
     minTasks: TASKS.length,
     mcpServer: REPO_MCP_SERVER,
     mcpServerEnvKeys: envKeys,
+    outputs: ['src/alpha/one.md', 'src/alpha/two.md', 'src/beta/greeting.md', 'src/gamma/notes.md'],
   });
   const baseline = sessionBaselines(join(dataDir, '10db.sqlite'));
   const report = renderAcceptanceReport({
