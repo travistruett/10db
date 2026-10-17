@@ -64,8 +64,8 @@ interface Script {
   readonly interruptHangs?: boolean;
   /** What mcpServerStatus() answers. */
   readonly mcpStatus?: readonly McpServerStatus[];
-  /** What setMcpServers() answers: a result, or 'reject' to fail. */
-  readonly mcpSet?: McpSetServersResult | 'reject';
+  /** What setMcpServers() answers: a result, a pending result that holds the preflight open, or 'reject' to fail. */
+  readonly mcpSet?: McpSetServersResult | Promise<McpSetServersResult> | 'reject';
   /** The message of the error a rejected setMcpServers() throws. */
   readonly mcpRejection?: string;
 }
@@ -900,6 +900,106 @@ describe('createClaudeAdapter', () => {
         expect(preToolUse).not.toHaveBeenCalled();
         clock.advance(HALT_GRACE_MS);
         await done;
+      } finally {
+        repo.cleanup();
+      }
+    });
+
+    it('sends nothing to claude during the halt grace, not even a message from send()', async () => {
+      const { repo, clock, record, handle, done, writeSettings } = await runningSession();
+      try {
+        writeSettings(BAD_SETTINGS);
+        await callHookFor(record, 'PostToolUse', repo.path);
+        handle.send('continue');
+        // Let the input stream deliver anything pushed before the grace closes it.
+        await new Promise((resolve) => setImmediate(resolve));
+        expect(record.inputs).toHaveLength(1);
+        clock.advance(HALT_GRACE_MS);
+        await done;
+        expect(record.inputs).toHaveLength(1);
+      } finally {
+        repo.cleanup();
+      }
+    });
+
+    it('answers every later re-check with the same halt, and closes the process once', async () => {
+      const { repo, clock, record, done, writeSettings } = await runningSession();
+      try {
+        writeSettings(BAD_SETTINGS);
+        const first = await callHookFor(record, 'PostToolUse', repo.path);
+        expect(first).toMatchObject({ continue: false, decision: 'block' });
+        expect(await callHookFor(record, 'ConfigChange', repo.path)).toEqual(first);
+        expect(await callHookFor(record, 'PostToolUseFailure', repo.path)).toEqual(first);
+        clock.advance(HALT_GRACE_MS);
+        await done;
+        expect(record.interrupts).toBe(1);
+      } finally {
+        repo.cleanup();
+      }
+    });
+
+    it('denies a tool whose permission answer was still pending when a re-check failed', async () => {
+      let answer: (decision: Awaited<ReturnType<SessionSpec['canUseTool']>>) => void = () =>
+        undefined;
+      const canUseTool = vi.fn<SessionSpec['canUseTool']>(
+        () =>
+          new Promise((resolve) => {
+            answer = resolve;
+          }),
+      );
+      const { repo, clock, record, done, writeSettings } = await runningSession({ canUseTool });
+      try {
+        const pending = callTool(record, 'Write');
+        await vi.waitFor(() => {
+          expect(canUseTool).toHaveBeenCalled();
+        });
+        writeSettings(BAD_SETTINGS);
+        await callHookFor(record, 'PostToolUse', repo.path);
+        answer({ behavior: 'allow' });
+        expect(await pending).toMatchObject({ behavior: 'deny', interrupt: true });
+        clock.advance(HALT_GRACE_MS);
+        await done;
+      } finally {
+        repo.cleanup();
+      }
+    });
+
+    it('sends no prompt when a ConfigChange fails while the servers are being registered', async () => {
+      const repo = tempDir('adapter-recheck');
+      const clock = new ManualClock();
+      let registered: (result: McpSetServersResult) => void = () => undefined;
+      const { adapter, record } = adapterFor(
+        {
+          messages: [initMessage()],
+          then: 'hang',
+          mcpSet: new Promise((resolve) => {
+            registered = resolve;
+          }),
+        },
+        1_000,
+        clock,
+      );
+      try {
+        const done = collect(adapter.start(spec({ cwd: repo.path })).events);
+        await vi.waitFor(() => {
+          expect(record.mcpCalls).toHaveLength(1);
+        });
+        // A repo stdio server started by setMcpServers rewrites the project's settings.
+        mkdirSync(join(repo.path, '.claude'), { recursive: true });
+        writeFileSync(join(repo.path, '.claude', 'settings.json'), BAD_SETTINGS);
+        expect(await callHookFor(record, 'ConfigChange', repo.path)).toMatchObject({
+          continue: false,
+          decision: 'block',
+        });
+        registered({ added: [CLAUDE_MCP_SERVER], removed: [], errors: {} });
+        // Let the preflight run on, and the input stream deliver anything it pushed.
+        await new Promise((resolve) => setImmediate(resolve));
+        expect(record.inputs).toEqual([]);
+        clock.advance(HALT_GRACE_MS);
+        const events = await done;
+        expect(events.map((e) => e.type)).toEqual(['ended']);
+        expect(endMessage(events.at(-1))).toMatch(/^Billing check failed:.*ANTHROPIC_BASE_URL/);
+        expect(record.inputs).toEqual([]);
       } finally {
         repo.cleanup();
       }

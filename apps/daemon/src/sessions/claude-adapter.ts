@@ -139,15 +139,16 @@ export function buildQueryOptions(spec: SessionSpec, deps: QueryDeps): Options {
     canUseTool: async (toolName, input, options) => {
       if (!(await deps.billingVerified) || deps.isRefused())
         return { behavior: 'deny', message: BILLING_UNVERIFIED, interrupt: true };
-      return toPermissionResult(
-        await spec.canUseTool({
-          toolName,
-          input,
-          toolUseId: options.toolUseID,
-          signal: options.signal,
-        }),
+      const decision = await spec.canUseTool({
+        toolName,
         input,
-      );
+        toolUseId: options.toolUseID,
+        signal: options.signal,
+      });
+      // The session can be refused while the answer was pending.
+      if (deps.isRefused())
+        return { behavior: 'deny', message: BILLING_UNVERIFIED, interrupt: true };
+      return toPermissionResult(decision, input);
     },
     hooks: {
       PreToolUse: [
@@ -250,6 +251,8 @@ function startSession(
   let limitRejected = false;
   let lastResetsAt: Date | null = null;
   let failure: string | null = null;
+  /** The answer a failed re-check gave; every later re-check gives it again. */
+  let haltOutput: HookJSONOutput | null = null;
   let markFinished: () => void = () => undefined;
   const finished = new Promise<void>((resolve) => {
     markFinished = resolve;
@@ -269,7 +272,8 @@ function startSession(
     markFinished();
   };
   // Read through a function: TypeScript would otherwise keep the narrowing from before the awaits.
-  const halted = (): boolean => ended || stopRequested;
+  // A recorded failure halts too: nothing more reaches claude while its halting answer is delivered.
+  const halted = (): boolean => ended || stopRequested || failure !== null;
   const endReason = (): EndReason => {
     if (failure) return 'error';
     if (stopRequested) return 'stopped';
@@ -299,19 +303,23 @@ function startSession(
       },
       isRefused: () => failure !== null,
       recheckSettings: (what) => {
-        if (halted() || failure) return {};
+        if (haltOutput) return haltOutput;
+        if (halted()) return {};
         const problem = projectSettingsBillingProblem(spec.cwd);
         if (!problem) return {};
         const message = `Billing check failed: ${problem}. ${what} the project's settings during the session, which was stopped. ${fixHint}`;
-        // Record the failure so every tool is denied now, answer the hook, and only then close the process.
+        // Record the failure so every tool is denied and no prompt goes in now, answer the hook, and only
+        // then close the process.
         failure = message;
+        resolvePreflight(false);
         log.error({ reason: message }, 'claude session refused');
         clock.setTimeout(() => {
           input.end();
           void settleWithin(clock, q.interrupt(), graceMs);
           abortController.abort();
         }, HALT_GRACE_MS);
-        return { continue: false, stopReason: message, decision: 'block', reason: message };
+        haltOutput = { continue: false, stopReason: message, decision: 'block', reason: message };
+        return haltOutput;
       },
       onStderr: (chunk) => {
         log.debug({ stderr: chunk.slice(0, STDERR_LOG_CHARS) }, 'claude stderr');
@@ -334,7 +342,7 @@ function startSession(
    */
   const preflight = async (): Promise<void> => {
     account = await settleWithin(clock, q.accountInfo(), BILLING_PREFLIGHT_MS);
-    if (ended) return;
+    if (ended || failure) return;
     const mismatch = account
       ? billingMismatch(spec.billingMode, {
           apiKeySource: account.apiKeySource,
@@ -487,14 +495,14 @@ function startSession(
   return {
     events,
     send(text) {
-      if (ended) return;
+      if (halted()) return;
       // Never ahead of the prompt: a message sent during the preflight waits for it, and is dropped if it fails.
       if (promptSent) {
         input.push(userMessage(text, 'next'));
         return;
       }
       void preflightOk.then((ok) => {
-        if (ok && !ended) input.push(userMessage(text, 'next'));
+        if (ok && !halted()) input.push(userMessage(text, 'next'));
       });
     },
     async stop() {
