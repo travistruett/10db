@@ -15,6 +15,7 @@ import {
 } from '@mantine/core';
 import type { KeyboardEvent, RefObject } from 'react';
 import { McpApprovalDetails, mcpReview } from './mcp-approval';
+import { SELECTED_CARD_ATTRIBUTE } from './use-inbox-keys';
 import { KIND_LABELS, optionLabel } from './permission-labels';
 
 export interface InboxCardProps {
@@ -102,7 +103,7 @@ export function InboxCard({
   const hasOptions = item.options.length > 0;
 
   return (
-    <Paper withBorder p="md" shadow="xs">
+    <Paper withBorder p="md" shadow="xs" {...{ [SELECTED_CARD_ATTRIBUTE]: true }}>
       <Stack gap="sm">
         <Group gap="sm" wrap="nowrap">
           {kind}

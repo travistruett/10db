@@ -7,6 +7,7 @@ import {
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
+import { queryKeys } from '../../daemon/queries';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
 import { inboxItemDto } from '../../test/fixtures';
 
@@ -114,6 +115,48 @@ describe('MCP approval card', () => {
     fireEvent.keyDown(document.body, { key: 'Enter' });
     await waitFor(() => {
       expect(answers).toEqual([{ choice: McpApprovalChoice.Approve }]);
+    });
+  });
+
+  it('never approves by default: Enter with no choice posts nothing', async () => {
+    const { answers } = serveInbox([card(review())]);
+    renderApp('/inbox');
+    await screen.findByText('Run the repo\'s MCP server "mantine"?');
+    fireEvent.keyDown(document.body, { key: 'Enter' });
+    expect(await screen.findByText('Choose an option first (1–4).')).toBeTruthy();
+    expect(answers).toEqual([]);
+  });
+
+  it('keeps approve with the card it was chosen on when another sorts first', async () => {
+    const a = card(review({ name: 'alpha' }));
+    const b = card(review({ name: 'beta', configHash: 'b'.repeat(64) }));
+    let items = [a];
+    const answers: unknown[] = [];
+    server.use(
+      http.get(daemonUrl('/inbox'), () => HttpResponse.json(items)),
+      http.post(daemonUrl('/inbox/:id/answer'), async ({ params, request }) => {
+        answers.push({ id: String(params['id']), body: await request.json() });
+        return HttpResponse.json({ ...a, state: 'RESOLVED' });
+      }),
+      ...baseHandlers(),
+    );
+    const { queryClient } = renderApp('/inbox');
+    await screen.findByText('Run the repo\'s MCP server "alpha"?');
+    fireEvent.keyDown(document.body, { key: '1' });
+    await waitFor(() => {
+      expect(
+        screen
+          .getByRole('radio', { name: /Approve for this project/ })
+          .getAttribute('aria-checked'),
+      ).toBe('true');
+    });
+    items = [b, a];
+    await queryClient.invalidateQueries({ queryKey: queryKeys.inbox });
+    await screen.findByText('Run the repo\'s MCP server "beta"?');
+    expect(screen.getAllByRole('radiogroup')).toHaveLength(1);
+    fireEvent.keyDown(document.body, { key: 'Enter' });
+    await waitFor(() => {
+      expect(answers).toEqual([{ id: a.id, body: { choice: McpApprovalChoice.Approve } }]);
     });
   });
 });

@@ -15,55 +15,75 @@ function recommended(item: InboxItemDto): string | null {
   return item.options.some((o) => o.label === item.recommendation) ? item.recommendation : null;
 }
 
+/** What the builder has typed or picked on one card. */
+interface Draft {
+  readonly id: InboxItemId;
+  readonly choice: string | null;
+  readonly note: string;
+  readonly error: string | null;
+}
+
 export function InboxView() {
   const inbox = useInbox();
   const answer = useAnswerInbox();
   const queryClient = useQueryClient();
   const items = inbox.data ?? [];
   const [selectedId, setSelectedId] = useState<InboxItemId | null>(null);
-  const [choice, setChoice] = useState<string | null>(null);
-  const [note, setNote] = useState('');
-  const [error, setError] = useState<string | null>(null);
+  const [draft, setDraft] = useState<Draft | null>(null);
   const noteRef = useRef<HTMLTextAreaElement>(null);
 
   // Selection follows the card, not its position: when an answered card leaves the list, the first card is next.
   const found = items.findIndex((item) => item.id === selectedId);
   const index = found === -1 ? 0 : found;
   const selected = items[index] ?? null;
+  // A draft applies to its own card only, so a card that sorts in ahead never inherits a choice or an error.
+  const own = selected && draft?.id === selected.id ? draft : null;
+  const choice = own?.choice ?? null;
+  const note = own?.note ?? '';
+  const error = own?.error ?? null;
   const effectiveChoice = selected ? (choice ?? recommended(selected)) : null;
 
   const select = (item: InboxItemDto): void => {
     setSelectedId(item.id);
-    setChoice(null);
-    setNote('');
-    setError(null);
+    setDraft(null);
+  };
+
+  const patch = (id: InboxItemId, change: Partial<Omit<Draft, 'id'>>): void => {
+    setDraft((current) => ({
+      ...(current?.id === id ? current : { id, choice: null, note: '', error: null }),
+      ...change,
+    }));
+  };
+
+  const choose = (card: InboxItemDto, picked: string): void => {
+    setSelectedId(card.id);
+    patch(card.id, { choice: picked, error: null });
   };
 
   const submit = (): void => {
     if (!selected || answer.isPending) return;
+    const id = selected.id;
     const picked = selected.options.length === 0 ? DISMISS_CHOICE : effectiveChoice;
-    if (picked === null) {
-      setError('Choose an option first (1–4).');
+    if (
+      picked === null ||
+      (selected.options.length > 0 && !selected.options.some((o) => o.label === picked))
+    ) {
+      patch(id, { error: 'Choose an option first (1–4).' });
       return;
     }
     const trimmed = note.trim();
     answer.mutate(
-      {
-        id: selected.id,
-        answer: trimmed === '' ? { choice: picked } : { choice: picked, note: trimmed },
-      },
+      { id, answer: trimmed === '' ? { choice: picked } : { choice: picked, note: trimmed } },
       {
         onSuccess: () => {
-          setChoice(null);
-          setNote('');
-          setError(null);
+          setDraft((current) => (current?.id === id ? null : current));
         },
         onError: (failure) => {
           if (failure instanceof DaemonRequestError && failure.status === 409) {
-            setError('This card was already answered.');
+            patch(id, { error: 'This card was already answered.' });
             void queryClient.invalidateQueries({ queryKey: queryKeys.inbox });
           } else {
-            setError(failure.message);
+            patch(id, { error: failure.message });
           }
         },
       },
@@ -79,7 +99,7 @@ export function InboxView() {
     },
     onChoose: (i) => {
       const option = selected?.options[i];
-      if (option) setChoice(option.label);
+      if (selected && option) choose(selected, option.label);
     },
     onNote: () => {
       noteRef.current?.focus();
@@ -118,10 +138,11 @@ export function InboxView() {
                   select(item);
                 }}
                 onChoose={(value) => {
-                  setChoice(value);
-                  setError(null);
+                  choose(item, value);
                 }}
-                onNote={setNote}
+                onNote={(value) => {
+                  patch(item.id, { note: value });
+                }}
                 onSubmit={submit}
               />
             ))}

