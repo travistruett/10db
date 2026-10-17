@@ -372,6 +372,102 @@ describe('runner', () => {
     expect(readingsBefore).toEqual([30, 33, 36]);
   });
 
+  // A resumed session carries its whole conversation, so it hands off where that conversation would:
+  // at handoffPct, or past its briefing's baseline plus the margin when the conversation began from a
+  // handoff. Only a briefing earns the margin, so a fresh session with no handoff gets none.
+  describe('hands off at the threshold of the conversation a session belongs to', () => {
+    const ctx = (percentage: number) => ({ do: 'context' as const, percentage });
+    const crash = { do: 'crash' as const, message: 'boom' };
+    const handOff = (opId: string) => [
+      { do: 'await_message' as const, contains: 'write_handoff' },
+      { do: 'mcp' as const, tool: 'write_handoff', args: handoffArgs(opId, 'Keep going') },
+      turn,
+    ];
+    const finish = [write('src/api/a.txt'), commit('op-conv-099', ['src/api/a.txt']), turn];
+    const relaunch = async (id: Parameters<typeof ws>[0]) => {
+      await engine.runner.idle();
+      expect(ws(id).state).toBe('QUEUED');
+      engine.launch(id);
+    };
+    const handoffReasons = (id: Parameters<typeof ws>[0]) =>
+      listEventsAfter(engine.store.db, 0, 1000)
+        .filter(
+          (e) =>
+            e.type === 'workstream.changed' && e.entityId === id && e.data['to'] === 'HANDING_OFF',
+        )
+        .map((e) => e.data['reason']);
+
+    it.each([
+      {
+        name: 'a first session resumed after a crash hands off at handoffPct',
+        sessions: [[ctx(10), crash], [ctx(14), ...handOff('op-conv-001')], finish],
+        drive: relaunch,
+        reasons: ['context at 14%'],
+        resumedSession: 1,
+      },
+      {
+        name: 'a first session resumed with an answer hands off at handoffPct',
+        sessions: [[ctx(10), askShip, turn], [ctx(14), ...handOff('op-conv-001')], finish],
+        drive: async (id: Parameters<typeof ws>[0]) => {
+          const card = await waitFor(openCard);
+          engine.clock.advance(10 * 60_000);
+          await engine.runner.idle();
+          engine.inbox.answer(card.id, { choice: 'Yes' });
+          engine.launch(id);
+        },
+        reasons: ['context at 14%'],
+        resumedSession: 1,
+      },
+      {
+        // The continuation starts at 30%, so its line is 35%; resumed at 33%, it keeps that line.
+        name: 'a continuation resumed after a crash keeps its briefing margin',
+        sessions: [
+          [ctx(20), ...handOff('op-conv-001')],
+          [ctx(30), ctx(33), crash],
+          [ctx(33), ctx(34), ctx(36), ...handOff('op-conv-002')],
+          finish,
+        ],
+        drive: relaunch,
+        reasons: ['context at 20%', 'context at 36%'],
+        resumedSession: 2,
+      },
+      {
+        // Resume fails too, and with no handoff written the third session starts bare at 10%.
+        name: 'a fresh session with no handoff to brief it gets no margin',
+        sessions: [
+          [ctx(10), crash],
+          [crash],
+          [ctx(10), ctx(13), ...handOff('op-conv-001')],
+          finish,
+        ],
+        drive: async (id: Parameters<typeof ws>[0]) => {
+          await relaunch(id);
+          await relaunch(id);
+        },
+        reasons: ['context at 13%'],
+        resumedSession: null,
+      },
+    ])('$name', async ({ sessions, drive, reasons, resumedSession }) => {
+      engine = await createTestEngine({ Alpha: sessions }, { handoffPct: 12, nudgePct: 90 });
+      const { workstream } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
+      await drive(workstream.id);
+
+      await waitFor(() => handoffReasons(workstream.id).length === reasons.length, 3_000);
+      await engine.runner.idle();
+      expect(ws(workstream.id).state).toBe('DONE');
+      expect(handoffReasons(workstream.id)).toEqual(reasons);
+      const rows = listSessions(engine.store.db, workstream.id);
+      if (resumedSession === null) {
+        expect(engine.adapter.prompts.at(-2)?.resume).toBeNull();
+      } else {
+        expect(engine.adapter.prompts[resumedSession]).toMatchObject({
+          resume: rows[resumedSession - 1]?.providerSessionId,
+        });
+      }
+    });
+  });
+
   it('treats a session environment that cannot be built as a crash, before any session row exists', async () => {
     engine = await createTestEngine(
       { Alpha: [[turn]] },
