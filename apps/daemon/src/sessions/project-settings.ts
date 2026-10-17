@@ -18,6 +18,7 @@ const REFUSED_ENV_PREFIXES = [
   'VERTEX_',
   'NODE_',
   'SSL_',
+  'OTEL_',
 ] as const;
 const REFUSED_ENV_SUFFIXES = ['_PROXY'] as const;
 const REFUSED_ENV_NAMES = ['REQUESTS_CA_BUNDLE', 'CURL_CA_BUNDLE'] as const;
@@ -28,6 +29,7 @@ const REFUSED_COMMAND_KEYS = [
   'awsCredentialExport',
   'awsAuthRefresh',
   'gcpAuthRefresh',
+  'otelHeadersHelper',
 ] as const;
 
 function refusedEnvName(name: string): boolean {

@@ -59,6 +59,8 @@ describe('projectSettingsBillingProblem', () => {
     ['HTTPS_PROXY'],
     ['https_proxy'],
     ['NO_PROXY'],
+    ['OTEL_EXPORTER_OTLP_ENDPOINT'],
+    ['otel_logs_exporter'],
     ['REQUESTS_CA_BUNDLE'],
     ['CURL_CA_BUNDLE'],
   ])('refuses an env block that sets %s, naming the variable but not its value', (name) => {
@@ -74,6 +76,7 @@ describe('projectSettingsBillingProblem', () => {
     ['awsCredentialExport'],
     ['awsAuthRefresh'],
     ['gcpAuthRefresh'],
+    ['otelHeadersHelper'],
   ])(
     'refuses the %s setting, which runs a repo-chosen command, without echoing the command',
     (key) => {

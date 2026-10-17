@@ -32,6 +32,8 @@ export const CLAUDE_MCP_SERVER = TENDB_MCP_SERVER;
 /** How long Claude Code may take to report its account before the prompt is sent. */
 const BILLING_PREFLIGHT_MS = 15_000;
 const STOP_GRACE_MS = 5_000;
+/** How long a halting hook answer has to reach claude before the process is closed under it. */
+const HALT_GRACE_MS = 1_000;
 const STDERR_LOG_CHARS = 2_000;
 const BILLING_UNVERIFIED =
   'The billing check for this session did not pass, so 10db allows no tools in it.';
@@ -63,8 +65,10 @@ interface QueryDeps {
   readonly billingVerified: Promise<boolean>;
   readonly onSpawn: (pid: number | null) => void;
   readonly onStderr: (chunk: string) => void;
-  /** Runs after every tool call; its output can halt the agent. */
-  readonly afterToolUse: () => HookJSONOutput;
+  /** Re-checks the project's settings after something may have changed them; its output can halt the agent. */
+  readonly recheckSettings: (what: string) => HookJSONOutput;
+  /** True once the session has been refused after it started; every tool is denied from then on. */
+  readonly isRefused: () => boolean;
 }
 
 /** Spawns claude as our own child, so recovery knows its pid and the log gets its stderr. */
@@ -133,7 +137,7 @@ export function buildQueryOptions(spec: SessionSpec, deps: QueryDeps): Options {
     allowedTools: [...spec.allowedTools],
     permissionMode: 'default',
     canUseTool: async (toolName, input, options) => {
-      if (!(await deps.billingVerified))
+      if (!(await deps.billingVerified) || deps.isRefused())
         return { behavior: 'deny', message: BILLING_UNVERIFIED, interrupt: true };
       return toPermissionResult(
         await spec.canUseTool({
@@ -151,7 +155,7 @@ export function buildQueryOptions(spec: SessionSpec, deps: QueryDeps): Options {
           hooks: [
             async (hookInput) => {
               if (hookInput.hook_event_name !== 'PreToolUse') return {};
-              if (!(await deps.billingVerified))
+              if (!(await deps.billingVerified) || deps.isRefused())
                 return toHookOutput({ decision: 'deny', reason: BILLING_UNVERIFIED });
               return toHookOutput(
                 spec.preToolUse({ toolName: hookInput.tool_name, input: hookInput.tool_input }),
@@ -161,8 +165,24 @@ export function buildQueryOptions(spec: SessionSpec, deps: QueryDeps): Options {
         },
       ],
       // A tool can write the project's settings mid-session, where no billing check would look again.
-      PostToolUse: [{ hooks: [() => Promise.resolve(deps.afterToolUse())] }],
-      PostToolUseFailure: [{ hooks: [() => Promise.resolve(deps.afterToolUse())] }],
+      PostToolUse: [{ hooks: [() => Promise.resolve(deps.recheckSettings('A tool changed'))] }],
+      PostToolUseFailure: [
+        { hooks: [() => Promise.resolve(deps.recheckSettings('A tool changed'))] },
+      ],
+      // Writers that are not tool calls: a background command, a repo MCP server, a dev server.
+      ConfigChange: [
+        {
+          hooks: [
+            (hookInput) =>
+              Promise.resolve(
+                hookInput.hook_event_name === 'ConfigChange' &&
+                  hookInput.source === 'project_settings'
+                  ? deps.recheckSettings('Something changed')
+                  : {},
+              ),
+          ],
+        },
+      ],
     },
     abortController: deps.abortController,
     spawnClaudeCodeProcess: (options) => spawnClaude(options, deps),
@@ -277,12 +297,20 @@ function startSession(
       onSpawn: (p) => {
         pid = p;
       },
-      afterToolUse: () => {
-        if (halted()) return {};
+      isRefused: () => failure !== null,
+      recheckSettings: (what) => {
+        if (halted() || failure) return {};
         const problem = projectSettingsBillingProblem(spec.cwd);
         if (!problem) return {};
-        const message = `Billing check failed: ${problem}. A tool changed the project's settings during the session, which was stopped. ${fixHint}`;
-        refuse(message);
+        const message = `Billing check failed: ${problem}. ${what} the project's settings during the session, which was stopped. ${fixHint}`;
+        // Record the failure so every tool is denied now, answer the hook, and only then close the process.
+        failure = message;
+        log.error({ reason: message }, 'claude session refused');
+        clock.setTimeout(() => {
+          input.end();
+          void settleWithin(clock, q.interrupt(), graceMs);
+          abortController.abort();
+        }, HALT_GRACE_MS);
         return { continue: false, stopReason: message, decision: 'block', reason: message };
       },
       onStderr: (chunk) => {
