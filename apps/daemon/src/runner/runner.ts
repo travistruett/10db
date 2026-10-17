@@ -21,6 +21,7 @@ import {
   endSession,
   getEvidence,
   getInboxItem,
+  getMcpApproval,
   getProject,
   getTask,
   getWorkstream,
@@ -54,11 +55,25 @@ import type { Clock, Timer } from '../clock';
 import type { StateStore } from '../events';
 import type { Git } from '../git';
 import { judgeToolUse } from '../guard';
-import { createPermissionBroker, type InboxService, type WaitObserver } from '../inbox';
+import {
+  createPermissionBroker,
+  requestMcpApproval,
+  type InboxService,
+  type WaitObserver,
+} from '../inbox';
 import type { Logger } from '../log';
 import { mintSessionToken } from '../mcp';
 import { baseAllowedTools, commandPrefix } from '../permissions';
-import type { SessionAdapter, SessionHandle } from '../sessions';
+import {
+  ProjectMcpError,
+  readRepoMcp,
+  resolveProjectMcp,
+  skippedServersNote,
+  type ProjectMcp,
+  type RepoMcp,
+  type SessionAdapter,
+  type SessionHandle,
+} from '../sessions';
 import type { GateRunner } from '../verify';
 import type { LiveSessions } from './live-sessions';
 import { nextActionAfterCrash } from './next-action';
@@ -256,6 +271,75 @@ export function createRunner(opts: RunnerOptions): Runner {
   }
 
   /**
+   * The repo's MCP servers for one session. Only servers the builder approved for
+   * their exact config are passed; the session starts either way. A server with no verdict gets an approval
+   * card, one 10db can't run as written gets a flag naming the variable, and a reserved name gets a warning
+   * flag. Every card folds, so a retried session adds none. A file 10db can't parse raises a flag that says
+   * why, then throws, so the session fails before its row is written.
+   */
+  function readProjectMcp(
+    project: ProjectDto,
+    id: WorkstreamId,
+    env: Readonly<Record<string, string>>,
+  ): ProjectMcp {
+    let repo: RepoMcp;
+    try {
+      repo = readRepoMcp(project.repoPath);
+    } catch (error) {
+      if (error instanceof ProjectMcpError) {
+        opts.inbox.flag({
+          projectId: project.id,
+          workstreamId: id,
+          title: "The repo's .mcp.json stops sessions from starting",
+          body: error.message,
+          foldKey: `project-mcp-error:${project.id}`,
+        });
+      }
+      throw error;
+    }
+    const mcp = resolveProjectMcp({
+      repo,
+      env,
+      approvalFor: (review) => getMcpApproval(db, project.id, review.name, review.configHash),
+    });
+    for (const warning of mcp.warnings) {
+      opts.inbox.flag({
+        projectId: project.id,
+        workstreamId: id,
+        title: "Check the repo's .mcp.json",
+        body: warning,
+        foldKey: `project-mcp-warning:${project.id}`,
+      });
+    }
+    for (const review of mcp.pending) requestMcpApproval(opts.inbox, project.id, review);
+    for (const failure of mcp.failures) {
+      opts.inbox.flag({
+        projectId: project.id,
+        workstreamId: id,
+        title: `The repo's MCP server "${failure.name}" can't run as written`,
+        body: failure.message,
+        foldKey: `project-mcp-failure:${project.id}:${failure.name}`,
+      });
+    }
+    // Names only, never values. The live acceptance check reads this line by its message and field names.
+    opts.logger.info(
+      {
+        workstreamId: id,
+        passed: Object.entries(mcp.servers).map(([name, server]) => ({
+          name,
+          transport: server.type,
+          envKeys: server.type === 'stdio' ? Object.keys(server.env).sort() : [],
+        })),
+        pending: mcp.pending.map((r) => r.name),
+        denied: mcp.denied,
+        failed: mcp.failures.map((f) => f.name),
+      },
+      'project mcp servers',
+    );
+    return mcp;
+  }
+
+  /**
    * Parks on `inboxId`, whatever state the workstream reached meanwhile. An answer that landed while
    * the session was stopping is already on the card, so the workstream re-queues with it right away.
    */
@@ -396,6 +480,9 @@ export function createRunner(opts: RunnerOptions): Runner {
     const { token, hash } = mintSessionToken();
     // Built first, so a missing key or region fails before any session row exists.
     const env = opts.sessionEnv(project);
+    // The repo's approved MCP servers, expanded from that environment. A file 10db can't parse fails here too.
+    const projectMcp = readProjectMcp(project, id, env);
+    const mcpNote = skippedServersNote(projectMcp);
     const session = opts.state.write((ctx) => {
       const s = insertSession(ctx, {
         workstreamId: id,
@@ -480,13 +567,13 @@ export function createRunner(opts: RunnerOptions): Runner {
       workstreamId: id,
       sequence: session.sequence,
       cwd: project.repoPath,
-      prompt,
+      prompt: mcpNote ? `${prompt}\n\n${mcpNote}` : prompt,
       model: row.model,
       effort: row.effort,
       resumeProviderSessionId: resumeId,
       env,
       billingMode: project.billingMode,
-      projectMcpServers: {},
+      projectMcpServers: projectMcp.servers,
       allowedTools: baseAllowedTools(project),
       mcp: { url: opts.mcpUrl(), token, toolTimeoutMs: (project.humanWaitMinutes + 5) * 60_000 },
       preToolUse: (req) =>

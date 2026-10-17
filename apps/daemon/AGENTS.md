@@ -37,3 +37,7 @@ The fake adapter (`sessions/fake-adapter.ts`) is the test boundary for Claude Co
 - Sessions and the gate both run in `sessionEnv(project)`. Nothing from the daemon's own
   `process.env` reaches a project's commands.
 - `keep-awake/` and `watcher/` follow lanes through `workstream.*` events, wired in `daemon/start.ts`.
+- A managed session's MCP servers are 10db's own plus the repo's `.mcp.json` servers the builder approved
+  for that exact config, resolved per session in `sessions/project-mcp.ts`. Claude Code never reads MCP
+  config itself (`strictMcpConfig: true`). A repo stdio server is launched through `env -i` with PATH,
+  HOME and its declared env only; never hand it the session environment.

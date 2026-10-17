@@ -4,11 +4,14 @@ import {
   ACTIVE_STATES,
   ConflictError,
   InvalidError,
+  type McpServerStatusDto,
   ProjectInput,
   WorkstreamState,
   type SystemCheckDto,
 } from '@10db/contracts';
 import {
+  getMcpApproval,
+  getProject,
   getWorkstream,
   getWorkstreamRow,
   insertProject,
@@ -25,10 +28,11 @@ import {
 } from '@10db/db';
 import type { ApiServices } from '../api';
 import type { EventBus, StateStore } from '../events';
-import type { InboxService } from '../inbox';
+import { requestMcpApproval, type InboxService } from '../inbox';
 import type { KeepAwake } from '../keep-awake';
 import type { Runner } from '../runner';
 import type { Scheduler } from '../scheduler';
+import { ProjectMcpError, readRepoMcp, type RepoMcp } from '../sessions';
 
 /** The HTTP layer's view of the daemon: reads go to the database, writes go through the state store. */
 export function createServices(deps: {
@@ -101,5 +105,23 @@ export function createServices(deps: {
     keepAwake: () => deps.keepAwake.status(),
     setKeepAwake: (mode) => deps.keepAwake.setMode(mode),
     eventsHead: () => latestEventSeq(db),
+    reviewProjectMcp(projectId) {
+      const project = getProject(db, projectId);
+      let repo: RepoMcp;
+      try {
+        repo = readRepoMcp(project.repoPath);
+      } catch (error) {
+        throw error instanceof ProjectMcpError ? new InvalidError(error.message) : error;
+      }
+      return repo.servers.map(({ review }): McpServerStatusDto => {
+        const approval = getMcpApproval(db, projectId, review.name, review.configHash);
+        if (approval) return { ...review, verdict: approval.verdict, inboxId: null };
+        return {
+          ...review,
+          verdict: 'pending',
+          inboxId: requestMcpApproval(deps.inbox, projectId, review).id,
+        };
+      });
+    },
   };
 }

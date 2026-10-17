@@ -1,8 +1,9 @@
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   EventsHead,
   KeepAwakeStatus,
+  McpServerStatusDto,
   ProjectDto,
   TaskDto,
   WorkstreamDto,
@@ -293,6 +294,66 @@ describe('startDaemon', () => {
     } finally {
       await daemon?.stop();
       daemon = null;
+      repo.cleanup();
+    }
+  });
+
+  it("raises an approval card for each repo MCP server on review, and reports the builder's verdict", async () => {
+    const repo = createTempRepo();
+    try {
+      writeFileSync(
+        join(repo.path, '.mcp.json'),
+        JSON.stringify({
+          mcpServers: { mantine: { command: 'npx', args: ['-y', '@mantine/mcp-server@9.7.2'] } },
+        }),
+      );
+      daemon = await startDaemon({
+        dataDir: dir.path,
+        port: 0,
+        adapter: new FakeAdapter({}),
+        logLevel: 'warn',
+        ...QUIET,
+      });
+      const call = async (path: string, body?: unknown) => {
+        const res = await fetch(`${daemon?.url ?? ''}${path}`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${daemon?.token ?? ''}`,
+            'content-type': 'application/json',
+          },
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        });
+        const json: unknown = await res.json();
+        return json;
+      };
+      const project = ProjectDto.parse(
+        await call('/projects', {
+          name: 'demo',
+          repoPath: repo.path,
+          gateCommand: 'true',
+          areas: [{ name: 'src', globs: ['src/**'] }],
+        }),
+      );
+      const [pending] = z
+        .array(McpServerStatusDto)
+        .parse(await call(`/projects/${project.id}/mcp-servers/review`));
+      expect(pending).toMatchObject({
+        name: 'mantine',
+        command: 'npx',
+        args: ['-y', '@mantine/mcp-server@9.7.2'],
+        verdict: 'pending',
+      });
+      // Reviewing again folds into the same open card.
+      expect(
+        z
+          .array(McpServerStatusDto)
+          .parse(await call(`/projects/${project.id}/mcp-servers/review`))[0]?.inboxId,
+      ).toBe(pending?.inboxId);
+      await call(`/inbox/${pending?.inboxId ?? ''}/answer`, { choice: 'approve' });
+      expect(
+        z.array(McpServerStatusDto).parse(await call(`/projects/${project.id}/mcp-servers/review`)),
+      ).toEqual([expect.objectContaining({ verdict: 'approved', inboxId: null })]);
+    } finally {
       repo.cleanup();
     }
   });

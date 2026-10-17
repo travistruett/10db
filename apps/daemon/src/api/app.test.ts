@@ -35,6 +35,7 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
     keepAwake: () => ({ mode: 'while_running', active: false }),
     setKeepAwake: none,
     eventsHead: () => 0,
+    reviewProjectMcp: none,
     ...overrides,
   };
 }
@@ -98,6 +99,25 @@ describe('API', () => {
     expect(await (await put({ mode: 'always' })).json()).toEqual({ mode: 'always', active: true });
     expect((await put({ mode: 'sometimes' })).status).toBe(400);
     expect(modes).toEqual(['always']);
+  });
+
+  it("reviews a project's repo MCP servers behind the token", async () => {
+    const projectId = mintId('Project');
+    const seen: string[] = [];
+    const services = stubServices({
+      reviewProjectMcp: (id) => {
+        seen.push(id);
+        return [];
+      },
+    });
+    const review = (headers: Record<string, string> = {}) =>
+      app(services).request(`/projects/${projectId}/mcp-servers/review`, {
+        method: 'POST',
+        headers,
+      });
+    expect((await review()).status).toBe(401);
+    expect(await (await review(auth.headers)).json()).toEqual([]);
+    expect(seen).toEqual([projectId]);
   });
 
   it('serves /health without a token', async () => {

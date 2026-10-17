@@ -6,6 +6,7 @@ import type {
   InboxState,
   KeepAwakeMode,
   KeepAwakeStatus,
+  McpServerStatusDto,
   ProjectDto,
   ProjectId,
   ProjectInput,
@@ -36,4 +37,6 @@ export interface ApiServices {
   setKeepAwake(mode: KeepAwakeMode): KeepAwakeStatus;
   /** The newest event seq (0 when there are none). */
   eventsHead(): number;
+  /** Each server in the project's `.mcp.json` and its verdict; raises an approval card for each one with none. */
+  reviewProjectMcp(projectId: ProjectId): McpServerStatusDto[];
 }

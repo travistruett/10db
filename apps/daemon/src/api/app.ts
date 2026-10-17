@@ -98,6 +98,9 @@ export function createApp(deps: ApiDeps) {
         201,
       ),
     )
+    .post('/projects/:projectId/mcp-servers/review', (c) =>
+      c.json(deps.services.reviewProjectMcp(ProjectId.parse(c.req.param('projectId')))),
+    )
     .post('/tasks/:taskId/start', (c) =>
       c.json(deps.services.startTask(TaskId.parse(c.req.param('taskId'))), 201),
     )

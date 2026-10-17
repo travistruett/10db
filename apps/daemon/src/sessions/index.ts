@@ -8,4 +8,12 @@ export type {
   ToolDecision,
   ToolRequest,
 } from './types';
+export {
+  ProjectMcpError,
+  readRepoMcp,
+  resolveProjectMcp,
+  skippedServersNote,
+  type ProjectMcp,
+  type RepoMcp,
+} from './project-mcp';
 export { createUnavailableAdapter } from './unavailable-adapter';
