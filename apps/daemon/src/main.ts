@@ -93,13 +93,21 @@ try {
     ...(sqliteBinding ? { sqliteBinding } : {}),
   });
   console.log(`10db daemon listening on ${daemon.url} (data: ${dataDir})`);
+  let stopping = false;
   const shutdown = (): void => {
+    if (stopping) return;
+    stopping = true;
     void daemon.stop().then(() => {
       process.exit(0);
     });
   };
   process.once('SIGINT', shutdown);
   process.once('SIGTERM', shutdown);
+  // The shell holds our stdin open; EOF means it is gone, so stop as if told to.
+  if (env.TENDB_PARENT_STDIN === '1') {
+    process.stdin.once('end', shutdown);
+    process.stdin.resume();
+  }
 } catch (error) {
   if (error instanceof AlreadyRunningError) {
     console.error(error.message);

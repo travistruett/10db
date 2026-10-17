@@ -20,6 +20,9 @@ const DaemonEnv = z.object({
   TENDB_DEV_UI_TOKEN: z.string().min(32).optional(),
   // Absolute path to the claude binary; otherwise it is found on the login shell's PATH.
   TENDB_CLAUDE_PATH: z.string().startsWith('/').optional(),
+  // Set by the desktop shell: the daemon runs its normal shutdown when stdin reaches EOF, which is how
+  // it learns the shell died without a clean Quit.
+  TENDB_PARENT_STDIN: z.enum(['0', '1']).optional(),
   // Test only: runs claude-adapter.live.test.ts against the real claude on the builder's subscription.
   TENDB_LIVE_CLAUDE: z.enum(['0', '1']).optional(),
 });
