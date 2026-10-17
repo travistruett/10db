@@ -1,5 +1,13 @@
 import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
   WorkstreamState,
@@ -346,6 +354,68 @@ describe('watcher', () => {
     emit('src/ui/b.tsx');
     await watcher.flush();
     expect(flags()).toEqual([]);
+  });
+
+  it('flags a directory moved into .git/hooks, which arrives as one rename event', async () => {
+    running();
+    watcher.sync();
+    const staged = join(tempDir('hooks').path, 'h');
+    mkdirSync(staged);
+    writeFileSync(join(staged, 'pre-commit'), 'x');
+    rmSync(join(repo.path, '.git', 'hooks'), { recursive: true, force: true });
+    renameSync(staged, join(repo.path, '.git', 'hooks'));
+    emit('.git/hooks');
+    await watcher.flush();
+    expect(flags().map((f) => f.body)).toEqual(['.git/hooks']);
+  });
+
+  it('flags a dangling symlink written into .git/hooks', async () => {
+    running();
+    watcher.sync();
+    symlinkSync(join(repo.path, 'not-yet'), join(repo.path, '.git', 'hooks', 'pre-commit'));
+    emit('.git/hooks/pre-commit');
+    await watcher.flush();
+    expect(flags().map((f) => f.body)).toEqual(['.git/hooks/pre-commit']);
+  });
+
+  it('keeps a sensitive write on its own card beside a bulk card', async () => {
+    running();
+    watcher.sync();
+    for (let i = 0; i < STRAY_BULK_THRESHOLD + 1; i += 1) {
+      touch(`generated/file-${String(i)}.ts`);
+      emit(`generated/file-${String(i)}.ts`);
+    }
+    touch('.git/hooks/pre-commit');
+    emit('.git/hooks/pre-commit');
+    await watcher.flush();
+    const open = flags();
+    expect(open.map((f) => f.body).filter((b) => b === '.git/hooks/pre-commit')).toHaveLength(1);
+    const bulk = open.find((f) => f.title.endsWith('writes outside every claim'));
+    expect(bulk?.title).toBe(`${String(STRAY_BULK_THRESHOLD + 1)} writes outside every claim`);
+    expect(bulk?.body).not.toContain('.git/hooks');
+  });
+
+  it('does not blame a lane that moved on within the batch window for its own claim', async () => {
+    const { workstream } = running('Alpha', ['api']);
+    watcher.sync();
+    touch('src/api/a.ts');
+    emit('src/api/a.ts');
+    state.write((ctx) =>
+      transitionWorkstream(ctx, workstream.id, { to: WorkstreamState.Verifying, fence: null }),
+    );
+    await watcher.flush();
+    expect(flags()).toEqual([]);
+  });
+
+  it('flags a step-end write inside the claim of a taken-over workstream', async () => {
+    const a = running('Alpha', ['api']);
+    const b = running('Beta', ['ui']);
+    state.write((ctx) =>
+      transitionWorkstream(ctx, b.workstream.id, { to: WorkstreamState.TakenOver, fence: null }),
+    );
+    touch('src/api/ok.ts');
+    touch('src/ui/b.tsx');
+    expect(await watcher.stepEnd(a.workstream.id)).toEqual(['src/ui/b.tsx']);
   });
 
   it('diffs git status against the claims at the end of a step', async () => {

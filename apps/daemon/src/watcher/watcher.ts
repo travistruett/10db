@@ -1,4 +1,4 @@
-import { existsSync, statSync, watch as fsWatch } from 'node:fs';
+import { existsSync, lstatSync, watch as fsWatch } from 'node:fs';
 import { join, sep } from 'node:path';
 import {
   ACTIVE_STATES,
@@ -49,9 +49,11 @@ export const systemWatch: WatchFn = (root, onChange, onError) => {
   };
 };
 
-function isFile(path: string): boolean {
+/** True for anything at the path, including a symlink whose target is missing. */
+function existsAsEntry(path: string): boolean {
   try {
-    return statSync(path).isFile();
+    lstatSync(path);
+    return true;
   } catch {
     return false;
   }
@@ -113,10 +115,23 @@ export function createWatcher(deps: {
     strays: readonly string[],
     candidates: readonly WorkstreamId[],
     owner: WorkstreamId | null,
+    foldable = true,
   ): void {
     if (strays.length === 0) return;
     const workstreamId = owner ?? (candidates.length === 1 ? (candidates[0] ?? null) : null);
-    if (strays.length > STRAY_BULK_THRESHOLD) {
+    // A write that can change what runs gets its own card, so a bulk card never buries it.
+    const sensitive = strays.filter(isSensitivePath);
+    if (foldable && sensitive.length > 0) {
+      raise(project, sensitive, candidates, owner, false);
+      raise(
+        project,
+        strays.filter((rel) => !isSensitivePath(rel)),
+        candidates,
+        owner,
+      );
+      return;
+    }
+    if (foldable && strays.length > STRAY_BULK_THRESHOLD) {
       const listed = strays.slice(0, BULK_LISTED);
       deps.inbox.flag({
         projectId: project.id,
@@ -140,16 +155,20 @@ export function createWatcher(deps: {
     }
   }
 
-  /** Strays among `paths` against every active claim in the project. */
+  /** Strays among `paths` against the claims of the workstreams in `claimStates`, plus any in `alsoHeldBy`. */
   function straysIn(
     project: ProjectDto,
     paths: readonly string[],
+    claimStates: readonly WorkstreamState[],
+    alsoHeldBy: WorkstreamId | null,
   ): { strays: string[]; candidates: WorkstreamId[] } {
     const active = activeIn(project.id);
-    // A parked or queued workstream still holds its claims, so a write inside them isn't outside every claim.
-    const holders = listWorkstreams(db, { states: ACTIVE_STATES, projectId: project.id });
-    const claims = holders.flatMap((ws) =>
-      activeClaims(db, ws.id).map((c) => ({ kind: c.kind, name: c.name })),
+    const holders = listWorkstreams(db, { states: claimStates, projectId: project.id }).map(
+      (ws) => ws.id,
+    );
+    if (alsoHeldBy && !holders.includes(alsoHeldBy)) holders.push(alsoHeldBy);
+    const claims = holders.flatMap((id) =>
+      activeClaims(db, id).map((c) => ({ kind: c.kind, name: c.name })),
     );
     return { strays: findStrays(paths, project, claims), candidates: active.map((ws) => ws.id) };
   }
@@ -162,7 +181,7 @@ export function createWatcher(deps: {
       projectId: project.id,
     }).map((ws) => ({
       id: ws.id,
-      running: ws.state === WorkstreamState.Running,
+      running: LANE_STATES.includes(ws.state),
       claims: activeClaims(db, ws.id).map((c) => ({ kind: c.kind, name: c.name })),
     }));
     const foreign = findForeignClaimWrites(paths, project, holders);
@@ -206,10 +225,10 @@ export function createWatcher(deps: {
     const changed = new Set((await deps.git.status(entry.root)).map((s) => s.path));
     const project = getProject(db, projectId);
     const reported = paths.filter((rel) => changed.has(rel));
-    const { strays, candidates } = straysIn(project, reported);
+    const { strays, candidates } = straysIn(project, reported, ACTIVE_STATES, null);
     // Ignored or unreported paths that can change what runs are flagged whatever the claims say.
     const hidden = paths.filter(
-      (rel) => !changed.has(rel) && isSensitivePath(rel) && isFile(join(entry.root, rel)),
+      (rel) => !changed.has(rel) && isSensitivePath(rel) && existsAsEntry(join(entry.root, rel)),
     );
     raise(project, [...strays, ...hidden], candidates, null);
     const outside = new Set(strays);
@@ -274,10 +293,10 @@ export function createWatcher(deps: {
       const ws = getWorkstream(db, workstreamId);
       const project = getProject(db, ws.projectId);
       if (!existsSync(project.repoPath)) return [];
-      const changed = (await deps.git.status(project.repoPath))
-        .map((s) => s.path)
-        .filter((rel) => !isAlwaysIgnored(rel));
-      const { strays, candidates } = straysIn(project, changed);
+      const changed = (await deps.git.status(project.repoPath)).map((s) => s.path);
+      // Only workstreams with a live session can have made these writes; a parked or taken-over
+      // workstream's claims don't excuse them.
+      const { strays, candidates } = straysIn(project, changed, LANE_STATES, workstreamId);
       raise(project, strays, candidates, workstreamId);
       return strays;
     },

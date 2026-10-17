@@ -24,6 +24,7 @@ describe('isAlwaysIgnored', () => {
     ['.git/refs/heads/main', true],
     ['.git/COMMIT_EDITMSG', true],
     ['.git/config', false],
+    ['.git/hooks', false],
     ['.git/hooks/pre-commit', false],
     ['.git/info/exclude', false],
     ['.DS_Store', true],
@@ -52,7 +53,12 @@ describe('isSensitivePath', () => {
     ['.git/index', false],
     ['dist/x.js', false],
     ['docs/environment.md', false],
-    ['.claude', false],
+    ['.claude', true],
+    ['.codex', true],
+    ['.git/hooks', true],
+    ['.git/info', true],
+    ['.claudex', false],
+    ['.git/information', false],
   ])('%s → %s', (rel, expected) => {
     expect(isSensitivePath(rel)).toBe(expected);
   });

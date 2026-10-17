@@ -9,13 +9,14 @@ export const STRAY_BULK_THRESHOLD = 50;
  * git ignores it or never reports it: agent and tool config, secrets, and the parts of `.git` that hold
  * hooks, excludes and config (an exclude hides later writes; config can name programs git runs).
  */
-const SENSITIVE_PREFIXES = ['.claude/', '.codex/', '.git/hooks/', '.git/info/'] as const;
+const SENSITIVE_DIRECTORIES = ['.claude', '.codex', '.git/hooks', '.git/info'] as const;
 const SENSITIVE_FILES = ['.mcp.json', '.git/config'] as const;
 const SENSITIVE_BASENAME = /^\.env(\..+)?$/;
 
+/** A sensitive directory itself counts: moving one into place arrives as a single event for its own path. */
 export function isSensitivePath(rel: string): boolean {
-  if (SENSITIVE_PREFIXES.some((prefix) => rel.startsWith(prefix))) return true;
-  if ((SENSITIVE_FILES as readonly string[]).includes(rel)) return true;
+  if (SENSITIVE_DIRECTORIES.some((dir) => rel === dir || rel.startsWith(`${dir}/`))) return true;
+  if (SENSITIVE_FILES.some((file) => file === rel)) return true;
   return SENSITIVE_BASENAME.test(rel.slice(rel.lastIndexOf('/') + 1));
 }
 
