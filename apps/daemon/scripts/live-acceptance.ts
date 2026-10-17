@@ -114,11 +114,11 @@ function makeRepo(): void {
     join(repo, 'AGENTS.md'),
     '# Live acceptance repo\n\nA disposable repo for the 10db §1.3 run. Each task owns one folder under src/. Keep files short.\n',
   );
-  // Every area the run uses must hold a non-empty .md file, and no .md may be empty.
-  const areas = TASKS.map((t) => t.area).join(' ');
+  // Every task runs this same gate, often while the others are still working or parked on a
+  // question, so it checks only what must hold at every step: no .md is empty.
   writeFileSync(
     join(repo, 'check.sh'),
-    `for f in $(find src -name "*.md"); do [ -s "$f" ] || { echo "empty: $f"; exit 1; }; done\nfor a in ${areas}; do [ -n "$(find "src/$a" -name "*.md" -size +0)" ] || { echo "no .md in src/$a"; exit 1; }; done\necho "check ok"\n`,
+    `for f in $(find src -name "*.md"); do [ -s "$f" ] || { echo "empty: $f"; exit 1; }; done\necho "check ok"\n`,
   );
   writeFileSync(join(repo, '.mcp.json'), `${JSON.stringify(REPO_MCP_CONFIG, null, 2)}\n`);
   execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: repo });
