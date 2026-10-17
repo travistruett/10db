@@ -36,6 +36,13 @@
       "when": 1792267024990,
       "tag": "0004_session_briefing_baseline",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1792267575360,
+      "tag": "0005_session_briefed",
+      "breakpoints": true
     }
   ]
 }

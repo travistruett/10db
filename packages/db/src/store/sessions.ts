@@ -21,6 +21,8 @@ export interface NewSession {
   readonly effort: Effort;
   readonly mode: SessionMode;
   readonly mcpTokenHash: string;
+  /** See `sessions.briefed`; a resumed session copies it from the session it continues. */
+  readonly briefed?: boolean;
   /** Copied from the session a resumed session continues; see `sessions.briefingBaselinePct`. */
   readonly briefingBaselinePct?: number | null;
 }
@@ -34,6 +36,7 @@ export function insertSession(ctx: WriteContext, input: NewSession): SessionRow 
   const row: SessionRow = {
     id: mintId('Session'),
     ...input,
+    briefed: input.briefed ?? false,
     briefingBaselinePct: input.briefingBaselinePct ?? null,
     sequence: (prior?.n ?? 0) + 1,
     providerSessionId: null,

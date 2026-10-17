@@ -208,6 +208,11 @@ export const sessions = sqliteTable(
      * the session it resumes.
      */
     briefingBaselinePct: real('briefing_baseline_pct'),
+    /**
+     * Whether the conversation began from a handoff briefing. Kept apart from the baseline, so a
+     * session resumed before the briefed session's first reading still knows to take one.
+     */
+    briefed: integer('briefed', { mode: 'boolean' }).notNull().default(false),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
