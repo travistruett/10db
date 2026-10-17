@@ -85,7 +85,7 @@ const TASKS = [
     title: 'Alpha haiku pair',
     area: 'alpha',
     description:
-      'Create src/alpha/one.md with a haiku about sorting and commit it with the 10db commit tool. Then create src/alpha/two.md with a haiku about hashing and commit it.',
+      'First read reference/sorting.txt and reference/hashing.txt in full, unless a handoff in your briefing says you already have. Then create src/alpha/one.md with a haiku about sorting and commit it with the 10db commit tool. Then create src/alpha/two.md with a haiku about hashing and commit it.',
   },
   {
     title: 'Beta greeting',
@@ -101,6 +101,44 @@ const TASKS = [
   },
 ] as const;
 
+/**
+ * Alpha reads these before writing, so its first session crosses `handoffPct` with both haikus
+ * still to do. A session starts near 2.3% of the 1M window and the small tasks alone stay under
+ * 3%; each file adds about 20k tokens (2 points), under the Read tool's per-call token limit.
+ */
+const REFERENCE_LINES = 700;
+const REFERENCES = {
+  sorting: [
+    'bubble sort compares adjacent items and swaps them when they are out of order.',
+    'insertion sort grows a sorted prefix by sliding each new item back into place.',
+    'merge sort splits the list in half, sorts each half and merges the two runs.',
+    'quicksort partitions around a pivot and recurses into both sides of it.',
+    'heapsort builds a max heap and repeatedly moves the largest item to the end.',
+    'a stable sort keeps items with equal keys in the order they arrived in.',
+    'counting sort tallies small integer keys instead of comparing items at all.',
+    'timsort finds runs that are already ordered and merges them by size.',
+  ],
+  hashing: [
+    'a hash function maps a key of any length to a fixed-size number.',
+    'a hash table uses that number to pick the bucket that holds the key.',
+    'two keys landing in one bucket is a collision, and chaining keeps a list there.',
+    'open addressing probes the next free slot instead of keeping a list.',
+    'the load factor is the number of keys divided by the number of buckets.',
+    'a table resizes and rehashes every key once the load factor grows too high.',
+    'a good hash spreads similar keys far apart so buckets stay evenly filled.',
+    'lookups take constant time on average when the buckets stay short.',
+  ],
+} as const;
+
+function referenceText(topic: keyof typeof REFERENCES): string {
+  const facts = REFERENCES[topic];
+  const lines = Array.from(
+    { length: REFERENCE_LINES },
+    (_, i) => `${topic} note ${String(i + 1).padStart(4, '0')}: ${facts[i % facts.length] ?? ''}`,
+  );
+  return `${lines.join('\n')}\n`;
+}
+
 function git(...a: string[]): string {
   return execFileSync('git', a, { cwd: repo, encoding: 'utf8' });
 }
@@ -110,6 +148,9 @@ function makeRepo(): void {
   mkdirSync(join(repo, 'src', 'beta'), { recursive: true });
   mkdirSync(join(repo, 'src', 'gamma'), { recursive: true });
   for (const { area } of TASKS) writeFileSync(join(repo, 'src', area, '.gitkeep'), '');
+  mkdirSync(join(repo, 'reference'));
+  writeFileSync(join(repo, 'reference', 'sorting.txt'), referenceText('sorting'));
+  writeFileSync(join(repo, 'reference', 'hashing.txt'), referenceText('hashing'));
   writeFileSync(
     join(repo, 'AGENTS.md'),
     '# Live acceptance repo\n\nA disposable repo for the 10db §1.3 run. Each task owns one folder under src/. Keep files short.\n',
@@ -129,6 +170,8 @@ function makeRepo(): void {
     '.mcp.json',
     'AGENTS.md',
     'check.sh',
+    'reference/sorting.txt',
+    'reference/hashing.txt',
     'src/alpha/.gitkeep',
     'src/beta/.gitkeep',
     'src/gamma/.gitkeep',
@@ -327,7 +370,7 @@ async function main(): Promise<void> {
       model: args.model,
       effort: args.effort,
       billingMode: BillingMode.Subscription,
-      // The schema's minimums force a handoff on the 1M window (spec §1.3 point 2).
+      // The schema's minimums; Alpha's reference reading carries it past them (spec §1.3 point 2).
       handoffPct: 5,
       nudgePct: 6,
       humanWaitMinutes: 10,

@@ -79,6 +79,9 @@ decisions on items 3–5.
 4. **Applied. Task 14 live acceptance uses `handoffPct` 5 / `nudgePct` 6,** the schema's integer minimums (50k /
    60k tokens on the 1M window), instead of 12 / 20, which assumed 200k. The bare baseline is 1.8%; the run
    reports a 10db session's (`sessionBaselines`), and its troubleshooting step now compares against 5%. Spike 2.
+   The first live runs measured a 2.3% session baseline and a 2.5% peak, since the three tasks alone never
+   reach 5%. So Alpha first reads two seeded reference files of about 20k tokens each, which carries its
+   session past 5% with both haikus still to write.
 5. **Applied (decision 51): the repo's permissions win.** With `settingSources: ['project']`, a repo's committed
    `.claude/settings.json` loads, and its allow rules can approve a call before `canUseTool` runs (the SDK's
    `CLAUDE_SDK_CAN_USE_TOOL_SHADOWED` warning). The builder chose infrastructure as code: those rules are honored
