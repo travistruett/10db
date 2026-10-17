@@ -3,7 +3,13 @@ import { mkdirSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { serve, upgradeWebSocket, type WebSocketServerLike } from '@hono/node-server';
-import { PROTOCOL_VERSION, type ProjectDto } from '@10db/contracts';
+import {
+  EventType,
+  PROTOCOL_VERSION,
+  type ProjectDto,
+  type SystemCheckDto,
+  type WorkstreamId,
+} from '@10db/contracts';
 import {
   createStore,
   DB_MIGRATIONS_DIR,
@@ -23,10 +29,12 @@ import {
 } from '../backups';
 import { systemClock, type Clock } from '../clock';
 import type { LogLevel } from '../env';
+import { REQUIRED_TOOLS } from '../environment';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit } from '../git';
 import { createInboxService } from '../inbox';
-import { createLogger, fileDestination, rotateLogFile } from '../log';
+import { createKeepAwake, systemCaffeinate, type CaffeinateSpawner } from '../keep-awake';
+import { createLogger, fileDestination, rotateLogFile, type Logger } from '../log';
 import { createMcpHandler } from '../mcp';
 import { recoverOnStartup, systemProcesses, type ProcessTerminator } from '../recovery';
 import {
@@ -39,6 +47,7 @@ import {
 import { createProviderPauses, createScheduler, type Scheduler } from '../scheduler';
 import type { SessionAdapter } from '../sessions';
 import { createGateRunner } from '../verify';
+import { createWatcher, systemWatch, type WatchFn } from '../watcher';
 import { acquireInstanceLock } from './instance-lock';
 import { removeRuntimeFiles, writeRuntimeFiles } from './runtime-files';
 import { createServices } from './services';
@@ -46,7 +55,8 @@ import { createServices } from './services';
 export interface DaemonOptions {
   readonly dataDir: string;
   readonly port: number;
-  readonly adapter: SessionAdapter;
+  /** An adapter, or a factory that gets the daemon's logger (the Claude adapter logs into daemon.log). */
+  readonly adapter: SessionAdapter | ((logger: Logger) => SessionAdapter);
   readonly logLevel: LogLevel;
   /** better_sqlite3.node for bundled runs; source runs leave it unset. */
   readonly sqliteBinding?: string;
@@ -65,6 +75,12 @@ export interface DaemonOptions {
   readonly processes?: ProcessTerminator;
   readonly migrationsDir?: string;
   readonly allowedOrigins?: readonly string[];
+  /** A fixed UI token (dev and Playwright); otherwise a random one per start. */
+  readonly uiToken?: string;
+  readonly caffeinate?: CaffeinateSpawner;
+  readonly systemCheck?: () => Promise<SystemCheckDto>;
+  /** `false` turns the file watcher off (tests that don't need it). */
+  readonly watch?: WatchFn | false;
 }
 
 export interface RunningDaemon {
@@ -86,6 +102,9 @@ const UI_ORIGINS = [
 /** Written by stop() after every runner has stopped; its absence at start means the last run crashed. */
 const CLEAN_SHUTDOWN_KEY = 'daemon.clean_shutdown';
 
+/** The session env when none is wired (tests): enough PATH for a gate to find git and test. */
+const DEFAULT_SESSION_PATH = '/usr/bin:/bin';
+
 const DEFAULTS = {
   caps: { global: 4, perProvider: 4 },
   leaseMs: 60_000,
@@ -95,6 +114,19 @@ const DEFAULTS = {
   nightlyBackupsKept: 7,
 } as const;
 
+/** Used when no system check is wired (tests): every tool reads as not found. */
+function noSystemCheck(): Promise<SystemCheckDto> {
+  return Promise.resolve({
+    loginEnv: { source: 'inherited', warning: 'The login environment was not captured' },
+    tools: REQUIRED_TOOLS.map((t) => ({
+      name: t.name,
+      path: null,
+      version: null,
+      required: t.required,
+    })),
+  });
+}
+
 export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const clock = opts.clock ?? systemClock;
   const startedAt = clock.now();
@@ -103,6 +135,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const logPath = join(opts.dataDir, 'logs', 'daemon.log');
   rotateLogFile(logPath);
   const logger = createLogger({ level: opts.logLevel, destination: fileDestination(logPath) });
+  const adapter = typeof opts.adapter === 'function' ? opts.adapter(logger) : opts.adapter;
 
   const db = openDatabase(
     join(opts.dataDir, '10db.sqlite'),
@@ -139,6 +172,16 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       runner?.deliverParkedAnswer(target, item);
     },
   });
+  const watcher =
+    opts.watch === false
+      ? null
+      : createWatcher({ state, inbox, git, logger, clock, watch: opts.watch ?? systemWatch });
+  const keepAwake = createKeepAwake({
+    state,
+    spawn: opts.caffeinate ?? systemCaffeinate,
+    daemonPid: process.pid,
+    logger,
+  });
   const pauses = createProviderPauses({
     state,
     clock,
@@ -151,7 +194,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   });
   const createdRunner = createRunner({
     state,
-    adapter: opts.adapter,
+    adapter,
     inbox,
     git,
     gate: createGateRunner(),
@@ -161,13 +204,16 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     live,
     limits,
     mcpUrl: () => mcpUrl,
-    sessionEnv: opts.sessionEnv ?? (() => ({})),
+    sessionEnv: opts.sessionEnv ?? (() => ({ PATH: DEFAULT_SESSION_PATH })),
     onRateLimited: (provider, resetsAt, projectId) => {
       pauses.pause(provider, resetsAt, projectId);
     },
     onLaneFreed: () => {
       scheduler?.requestTick();
     },
+    ...(watcher
+      ? { afterSession: (id: WorkstreamId) => watcher.stepEnd(id).then(() => undefined) }
+      : {}),
     identifyProcess: (pid) => processes.identify(pid),
   });
   runner = createdRunner;
@@ -199,7 +245,17 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   });
   pauses.restore();
 
-  const token = randomBytes(32).toString('base64url');
+  // Lanes start and stop through workstream events; keep-awake and the watcher follow them.
+  const unsubscribeLanes = bus.subscribe((event) => {
+    if (event.type === EventType.WorkstreamCreated || event.type === EventType.WorkstreamChanged) {
+      keepAwake.refresh();
+      watcher?.sync();
+    }
+  });
+  keepAwake.refresh();
+  watcher?.sync();
+
+  const token = opts.uiToken ?? randomBytes(32).toString('base64url');
   const app = createApp({
     startedAt,
     allowedOrigins: opts.allowedOrigins ?? UI_ORIGINS,
@@ -210,6 +266,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       runner: createdRunner,
       scheduler: createdScheduler,
       inbox,
+      keepAwake,
+      systemCheck: opts.systemCheck ?? noSystemCheck,
     }),
     upgradeWebSocket,
     onUnexpectedError: (error) => {
@@ -271,6 +329,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     createdScheduler.stop();
     pauses.stop();
     nightly.cancel();
+    unsubscribeLanes();
+    watcher?.stop();
+    keepAwake.stop();
     await createdRunner.stopAll('shutdown');
     state.write((ctx) => {
       setAppSetting(ctx, CLEAN_SHUTDOWN_KEY, { at: ctx.now });

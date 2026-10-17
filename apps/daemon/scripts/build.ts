@@ -2,12 +2,13 @@ import { cpSync, mkdirSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
 import { DB_MIGRATIONS_DIR } from '@10db/db';
+import { HARNESS_PLUGIN_DIR } from '@10db/harness';
 import { build } from 'esbuild';
 
 const root = resolve(import.meta.dirname, '..');
 const outDir = resolve(process.argv[2] ?? resolve(root, 'dist'));
 // Only the bundle's own outputs are removed: the directory is a CLI argument and may hold other files.
-for (const name of ['daemon.mjs', 'daemon.mjs.map', 'drizzle', 'better_sqlite3.node']) {
+for (const name of ['daemon.mjs', 'daemon.mjs.map', 'drizzle', 'harness', 'better_sqlite3.node']) {
   rmSync(resolve(outDir, name), { recursive: true, force: true });
 }
 mkdirSync(outDir, { recursive: true });
@@ -26,6 +27,7 @@ await build({
   },
 });
 cpSync(DB_MIGRATIONS_DIR, resolve(outDir, 'drizzle'), { recursive: true });
+cpSync(HARNESS_PLUGIN_DIR, resolve(outDir, 'harness'), { recursive: true });
 cpSync(sqliteAddonPath(), resolve(outDir, 'better_sqlite3.node'));
 console.log(`Built ${outDir}/daemon.mjs`);
 

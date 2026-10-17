@@ -6,7 +6,7 @@ import type { LoginEnv } from './login-env';
 
 const VERSION_PROBE_TIMEOUT_MS = 5_000;
 
-const REQUIRED_TOOLS = [
+export const REQUIRED_TOOLS = [
   { name: ToolName.Claude, required: true },
   { name: ToolName.Git, required: true },
   { name: ToolName.Docker, required: false },

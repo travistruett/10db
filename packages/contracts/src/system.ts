@@ -85,3 +85,13 @@ export type McpServerStatusDto = z.infer<typeof McpServerStatusDto>;
 
 export const KeepAwakeStatus = z.object({ mode: z.enum(KeepAwakeMode), active: z.boolean() });
 export type KeepAwakeStatus = z.infer<typeof KeepAwakeStatus>;
+
+/** The newest event's seq, so a fresh UI can stream from now instead of replaying history. */
+export const EventsHead = z.object({ seq: z.int().min(0) });
+export type EventsHead = z.infer<typeof EventsHead>;
+
+export const KeepAwakeInput = z.object({ mode: z.enum(KeepAwakeMode) });
+export type KeepAwakeInput = z.infer<typeof KeepAwakeInput>;
+
+/** The `detail` key of an MCP approval card; it holds the server's `McpServerReview`. */
+export const MCP_APPROVAL_DETAIL = 'mcpApproval';

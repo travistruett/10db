@@ -6,6 +6,7 @@ import {
   InvalidError,
   ProjectInput,
   WorkstreamState,
+  type SystemCheckDto,
 } from '@10db/contracts';
 import {
   getWorkstream,
@@ -13,6 +14,7 @@ import {
   insertProject,
   insertTask,
   insertWorkstream,
+  latestEventSeq,
   latestHandoff,
   listEventsAfter,
   listInbox,
@@ -24,6 +26,7 @@ import {
 import type { ApiServices } from '../api';
 import type { EventBus, StateStore } from '../events';
 import type { InboxService } from '../inbox';
+import type { KeepAwake } from '../keep-awake';
 import type { Runner } from '../runner';
 import type { Scheduler } from '../scheduler';
 
@@ -34,6 +37,8 @@ export function createServices(deps: {
   readonly runner: Runner;
   readonly scheduler: Scheduler;
   readonly inbox: InboxService;
+  readonly keepAwake: KeepAwake;
+  readonly systemCheck: () => Promise<SystemCheckDto>;
 }): ApiServices {
   const db = deps.state.db;
   return {
@@ -92,5 +97,9 @@ export function createServices(deps: {
     },
     eventsAfter: (after, limit) => listEventsAfter(db, after, limit),
     subscribe: (listener) => deps.bus.subscribe(listener),
+    systemCheck: () => deps.systemCheck(),
+    keepAwake: () => deps.keepAwake.status(),
+    setKeepAwake: (mode) => deps.keepAwake.setMode(mode),
+    eventsHead: () => latestEventSeq(db),
   };
 }

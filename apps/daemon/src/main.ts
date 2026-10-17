@@ -1,7 +1,28 @@
+import { ToolName, type SystemCheckDto } from '@10db/contracts';
 import { AlreadyRunningError, startDaemon } from './daemon';
 import { loadEnv } from './env';
-import { resolveDataDir, resolveMigrationsDir, resolveSqliteBinding } from './paths';
-import { createUnavailableAdapter, FakeAdapter, loadFakeScriptBook } from './sessions';
+import {
+  buildSessionEnv,
+  captureLoginEnv,
+  keychainSecrets,
+  systemCheck,
+  type LoginEnv,
+} from './environment';
+import type { Logger } from './log';
+import {
+  resolveDataDir,
+  resolveHarnessDir,
+  resolveMigrationsDir,
+  resolveSqliteBinding,
+} from './paths';
+import {
+  createClaudeAdapter,
+  createUnavailableAdapter,
+  FakeAdapter,
+  loadFakeScriptBook,
+  type SessionAdapter,
+} from './sessions';
+import { CLIENT_APP } from './version';
 
 // An unhandled error exits loudly; the supervisor restarts the daemon and recovery runs at startup.
 process.on('unhandledRejection', (error) => {
@@ -13,21 +34,62 @@ process.on('uncaughtException', (error) => {
   process.exit(1);
 });
 
+const CLAUDE_MISSING =
+  'Claude Code was not found on your login PATH. Install it, then restart 10db.';
+
 const env = loadEnv(process.env);
 const dataDir = resolveDataDir(env);
-const adapter = env.TENDB_FAKE_SCRIPTS
-  ? new FakeAdapter(loadFakeScriptBook(env.TENDB_FAKE_SCRIPTS))
-  : createUnavailableAdapter('No session adapter is configured');
 
-const sqliteBinding = resolveSqliteBinding(env);
+// A GUI-launched sidecar inherits a bare PATH; the login shell has the builder's real one. It lives
+// only in memory because it can hold secrets. Fake sessions (tests, the E2E, UI work) run no real
+// tools, so they keep the inherited environment and never run the builder's shell profile.
+const login: LoginEnv = env.TENDB_FAKE_SCRIPTS
+  ? {
+      vars: Object.fromEntries(
+        Object.entries(process.env).filter((e): e is [string, string] => e[1] !== undefined),
+      ),
+      source: 'inherited',
+      warning: null,
+    }
+  : await captureLoginEnv({ inherited: process.env });
+if (login.warning) console.warn(`10db daemon: ${login.warning}`);
+
+let checked: Promise<SystemCheckDto> | null = null;
+const check = (): Promise<SystemCheckDto> => (checked ??= systemCheck(login));
+
+async function chooseAdapter(): Promise<SessionAdapter | ((logger: Logger) => SessionAdapter)> {
+  if (env.TENDB_FAKE_SCRIPTS) return new FakeAdapter(loadFakeScriptBook(env.TENDB_FAKE_SCRIPTS));
+  const claudePath =
+    env.TENDB_CLAUDE_PATH ??
+    (await check()).tools.find((t) => t.name === ToolName.Claude)?.path ??
+    null;
+  if (!claudePath) return createUnavailableAdapter(CLAUDE_MISSING);
+  // Through the daemon's own logger: one shared daemon.log, which the live acceptance checks read.
+  return (logger) =>
+    createClaudeAdapter({
+      claudePath,
+      pluginDir: resolveHarnessDir(),
+      logger: logger.child({ component: 'claude' }),
+    });
+}
 
 try {
+  const sqliteBinding = resolveSqliteBinding(env);
   const daemon = await startDaemon({
     dataDir,
     port: env.TENDB_PORT,
-    adapter,
+    adapter: await chooseAdapter(),
     logLevel: env.TENDB_LOG_LEVEL,
     migrationsDir: resolveMigrationsDir(),
+    sessionEnv: (project) =>
+      buildSessionEnv({
+        base: login.vars,
+        billingMode: project.billingMode,
+        clientApp: CLIENT_APP,
+        secrets: keychainSecrets,
+      }),
+    systemCheck: check,
+    ...(env.TENDB_DEV_UI_TOKEN ? { uiToken: env.TENDB_DEV_UI_TOKEN } : {}),
     ...(sqliteBinding ? { sqliteBinding } : {}),
   });
   console.log(`10db daemon listening on ${daemon.url} (data: ${dataDir})`);

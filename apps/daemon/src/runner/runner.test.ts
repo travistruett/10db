@@ -305,6 +305,87 @@ describe('runner', () => {
     ).toHaveLength(1);
   });
 
+  it('runs the gate in the session environment, never the daemon process environment', async () => {
+    process.env['TENDB_PROBE'] = 'leaked';
+    try {
+      engine = await createTestEngine(
+        { Alpha: [[write('src/api/a.txt'), commit('op-gate-env-1', ['src/api/a.txt']), turn]] },
+        { gateCommand: 'test -z "$TENDB_PROBE" && test "$GATE_MARK" = yes' },
+        { sessionEnv: () => ({ GATE_MARK: 'yes' }) },
+      );
+      const { workstream } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+      expect(ws(workstream.id).state).toBe('DONE');
+    } finally {
+      delete process.env['TENDB_PROBE'];
+    }
+  });
+
+  it('does not hand a continuation session off until it grows past its own starting context', async () => {
+    engine = await createTestEngine(
+      {
+        Alpha: [
+          [
+            { do: 'context', percentage: 20 },
+            { do: 'await_message', contains: 'write_handoff' },
+            { do: 'mcp', tool: 'write_handoff', args: handoffArgs('op-base-001', 'Keep going') },
+            turn,
+          ],
+          [
+            { do: 'context', percentage: 30 },
+            { do: 'context', percentage: 33 },
+            { do: 'context', percentage: 36 },
+            { do: 'await_message', contains: 'write_handoff' },
+            {
+              do: 'mcp',
+              tool: 'write_handoff',
+              args: handoffArgs('op-base-002', 'Write the file'),
+            },
+            turn,
+          ],
+          [write('src/api/a.txt'), commit('op-base-003', ['src/api/a.txt']), turn],
+        ],
+      },
+      { handoffPct: 12, nudgePct: 90 },
+    );
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('DONE');
+
+    const second = listSessions(engine.store.db, workstream.id)[1];
+    const events = listEventsAfter(engine.store.db, 0, 1000);
+    const handoffs = events.filter(
+      (e) => e.type === 'workstream.changed' && e.data['to'] === 'HANDING_OFF',
+    );
+    const secondHandoff = handoffs[1]?.seq ?? 0;
+    const readingsBefore = events
+      .filter(
+        (e) => e.type === 'session.context' && e.entityId === second?.id && e.seq < secondHandoff,
+      )
+      .map((e) => e.data['percentage']);
+    // 30% + the 5-point margin = 35%: the 30% and 33% readings must not trigger it.
+    expect(readingsBefore).toEqual([30, 33, 36]);
+  });
+
+  it('treats a session environment that cannot be built as a crash, before any session row exists', async () => {
+    engine = await createTestEngine(
+      { Alpha: [[turn]] },
+      {},
+      {
+        sessionEnv: () => {
+          throw new Error('No Anthropic API key in the Keychain.');
+        },
+      },
+    );
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(listSessions(engine.store.db, workstream.id)).toEqual([]);
+    expect(ws(workstream.id)).toMatchObject({ state: 'QUEUED', recoveryAttempts: 1 });
+  });
+
   describe('lifecycle edges', () => {
     /** Wraps every handle the fake adapter returns; the wrapper sees each call the runner makes. */
     const interceptStart = (wrap: (handle: SessionHandle) => SessionHandle) => {

@@ -1,12 +1,15 @@
 import {
   DomainError,
+  EventsHead,
   HealthResponse,
   InboxAnswer,
   InboxItemId,
   InboxState,
+  KeepAwakeInput,
   ProjectId,
   ProjectInput,
   PROTOCOL_VERSION,
+  SystemCheckDto,
   TaskId,
   TaskInput,
   WorkstreamId,
@@ -125,6 +128,12 @@ export function createApp(deps: ApiDeps) {
           Limit.parse(c.req.query('limit')),
         ),
       ),
+    )
+    .get('/events/head', (c) => c.json(EventsHead.parse({ seq: deps.services.eventsHead() })))
+    .get('/system', async (c) => c.json(SystemCheckDto.parse(await deps.services.systemCheck())))
+    .get('/settings/keep-awake', (c) => c.json(deps.services.keepAwake()))
+    .put('/settings/keep-awake', async (c) =>
+      c.json(deps.services.setKeepAwake(KeepAwakeInput.parse(await c.req.json()).mode)),
     )
     .get(
       STREAM_PATH,

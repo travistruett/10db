@@ -8,4 +8,4 @@ export {
   SessionEnvError,
   type SecretSource,
 } from './session-env';
-export { findOnPath, probeVersion, systemCheck } from './system-check';
+export { findOnPath, probeVersion, REQUIRED_TOOLS, systemCheck } from './system-check';

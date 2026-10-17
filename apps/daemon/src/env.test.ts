@@ -31,6 +31,21 @@ describe('loadEnv', () => {
     expect(() => loadEnv(source)).toThrow(variable);
   });
 
+  it('accepts a long dev UI token and an absolute claude path', () => {
+    const token = 'a'.repeat(43);
+    expect(
+      loadEnv({ TENDB_DEV_UI_TOKEN: token, TENDB_CLAUDE_PATH: '/usr/local/bin/claude' }),
+    ).toMatchObject({ TENDB_DEV_UI_TOKEN: token, TENDB_CLAUDE_PATH: '/usr/local/bin/claude' });
+  });
+
+  it.each([
+    ['a short dev token', { TENDB_DEV_UI_TOKEN: 'short-secret-value' }, 'TENDB_DEV_UI_TOKEN'],
+    ['a relative claude path', { TENDB_CLAUDE_PATH: 'bin/claude' }, 'TENDB_CLAUDE_PATH'],
+  ])('rejects %s without echoing it', (_name, source, variable) => {
+    expect(() => loadEnv(source)).toThrow(variable);
+    expect(() => loadEnv(source)).not.toThrow(String(Object.values(source)[0]));
+  });
+
   it('never puts a value in the error message', () => {
     const secretLooking = 'sk-ant-api03-DO-NOT-LEAK';
     try {

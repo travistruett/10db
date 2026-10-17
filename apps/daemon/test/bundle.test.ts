@@ -81,4 +81,9 @@ describe('the bundled daemon', () => {
     expect(existsSync(join(out, 'drizzle', 'meta', '_journal.json'))).toBe(true);
     expect(existsSync(join(out, 'drizzle', 'stale.sql'))).toBe(false);
   }, 120_000);
+  it('ships the harness plugin beside the bundle', () => {
+    const dist = join(work.path, 'dist');
+    expect(existsSync(join(dist, 'harness', '.claude-plugin', 'plugin.json'))).toBe(true);
+    expect(existsSync(join(dist, 'harness', 'skills', 'planning', 'SKILL.md'))).toBe(true);
+  });
 });

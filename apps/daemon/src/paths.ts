@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { DB_MIGRATIONS_DIR } from '@10db/db';
+import { HARNESS_PLUGIN_DIR } from '@10db/harness';
 import type { DaemonEnv } from './env';
 
 /** All 10db state lives under this one directory (spec §12). */
@@ -20,4 +21,10 @@ export function resolveSqliteBinding(env: DaemonEnv): string | undefined {
   if (env.TENDB_SQLITE_BINDING) return env.TENDB_SQLITE_BINDING;
   const bundled = join(import.meta.dirname, 'better_sqlite3.node');
   return existsSync(bundled) ? bundled : undefined;
+}
+
+/** The bundle carries the harness plugin beside itself; from source, use the harness package's folder. */
+export function resolveHarnessDir(): string {
+  const bundled = join(import.meta.dirname, 'harness');
+  return existsSync(bundled) ? bundled : HARNESS_PLUGIN_DIR;
 }

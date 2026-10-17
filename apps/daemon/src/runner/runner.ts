@@ -63,6 +63,12 @@ import type { GateRunner } from '../verify';
 import type { LiveSessions } from './live-sessions';
 import { nextActionAfterCrash } from './next-action';
 
+/**
+ * A continuation session starts with the briefing already in context. If that baseline is near or over
+ * `handoffPct`, it may hand off only after growing this many points past its first reading.
+ */
+const HANDOFF_BASELINE_MARGIN_PCT = 5;
+
 export type StopReason = 'cancelled' | 'paused' | 'shutdown';
 
 export interface RunnerLimits {
@@ -187,6 +193,8 @@ interface Control {
 interface SessionState {
   providerSessionId: string | null;
   handoffRequested: boolean;
+  /** The first context reading of the session, which a continuation measures its growth from. */
+  baselinePct: number | null;
   firmSent: boolean;
   parkedFor: InboxItemId | null;
   /** The card the session is waiting on, while it waits. */
@@ -386,6 +394,8 @@ export function createRunner(opts: RunnerOptions): Runner {
           : null,
     });
     const { token, hash } = mintSessionToken();
+    // Built first, so a missing key or region fails before any session row exists.
+    const env = opts.sessionEnv(project);
     const session = opts.state.write((ctx) => {
       const s = insertSession(ctx, {
         workstreamId: id,
@@ -403,6 +413,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     const st: SessionState = {
       providerSessionId: resumeId,
       handoffRequested: false,
+      baselinePct: null,
       firmSent: false,
       parkedFor: null,
       waitingOn: null,
@@ -473,7 +484,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       model: row.model,
       effort: row.effort,
       resumeProviderSessionId: resumeId,
-      env: opts.sessionEnv(project),
+      env,
       billingMode: project.billingMode,
       projectMcpServers: {},
       allowedTools: baseAllowedTools(project),
@@ -527,7 +538,7 @@ export function createRunner(opts: RunnerOptions): Runner {
               });
             });
             break;
-          case 'context':
+          case 'context': {
             opts.state.write((ctx) => {
               updateSessionUsage(ctx, session.id, { contextPct: event.percentage });
               patchWorkstream(ctx, id, ctl.fence, { contextPct: event.percentage });
@@ -538,7 +549,13 @@ export function createRunner(opts: RunnerOptions): Runner {
                 data: { workstreamId: id, percentage: event.percentage },
               });
             });
-            if (!st.handoffRequested && event.percentage >= project.handoffPct) {
+            st.baselinePct ??= event.percentage;
+            // A first session's baseline is the prompt alone; only a continuation can start past the line.
+            const handoffAt =
+              session.sequence > 1
+                ? Math.max(project.handoffPct, st.baselinePct + HANDOFF_BASELINE_MARGIN_PCT)
+                : project.handoffPct;
+            if (!st.handoffRequested && event.percentage >= handoffAt) {
               st.handoffRequested = true;
               opts.state.write((ctx) => {
                 if (getWorkstreamRow(ctx.tx, id).state === S.Running) {
@@ -559,6 +576,7 @@ export function createRunner(opts: RunnerOptions): Runner {
               handle.send(HANDOFF_FIRM_NUDGE);
             }
             break;
+          }
           case 'compacted':
             opts.state.write((ctx) => {
               const sourceId = insertSource(ctx, 'daemon', { sessionId: session.id });
@@ -723,7 +741,9 @@ export function createRunner(opts: RunnerOptions): Runner {
       command: project.gateCommand,
       logPath: join(opts.dataDir, 'logs', 'gate', `${id}-${String(run)}.log`),
       timeoutMs: opts.limits.gateTimeoutMs,
-      env: { ...process.env, ...opts.sessionEnv(project) },
+      // The session environment is complete (login shell plus billing mode); the daemon's own
+      // process.env never reaches a project's gate.
+      env: opts.sessionEnv(project),
       signal: gateAbort.signal,
       onSpawn: (pid) => {
         recording = identify(pid).then((gatePidStart) => {

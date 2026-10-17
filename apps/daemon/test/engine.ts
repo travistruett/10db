@@ -107,7 +107,7 @@ export async function createTestEngine(
     live,
     limits: { ...DEFAULT_RUNNER_LIMITS, gateTimeoutMs: 20_000 },
     mcpUrl: () => mcpUrl,
-    sessionEnv: () => ({}),
+    sessionEnv: () => ({ PATH: '/usr/bin:/bin' }),
     onRateLimited: (provider, resetsAt) => {
       rateLimited.push({ provider, resetsAt });
     },

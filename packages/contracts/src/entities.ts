@@ -161,6 +161,7 @@ export type NextAction = z.infer<typeof NextAction>;
 export const WorkstreamDto = z.object({
   id: WorkstreamId,
   taskId: TaskId,
+  taskTitle: z.string(),
   projectId: ProjectId,
   state: z.enum(WorkstreamState),
   nextAction: NextAction,
