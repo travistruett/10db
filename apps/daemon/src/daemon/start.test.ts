@@ -1,4 +1,4 @@
-import { existsSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, fstatSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   EventsHead,
@@ -356,5 +356,31 @@ describe('startDaemon', () => {
     } finally {
       repo.cleanup();
     }
+  });
+
+  it('closes its log file on stop, so a start leaks no file descriptor', async () => {
+    const logPath = join(dir.path, 'logs', 'daemon.log');
+    // The descriptors that point at daemon.log, found by identity so the count does not depend on GC.
+    const openLogHandles = () => {
+      const log = statSync(logPath);
+      return readdirSync('/dev/fd').filter((name) => {
+        try {
+          const handle = fstatSync(Number(name));
+          return handle.ino === log.ino && handle.dev === log.dev;
+        } catch {
+          return false;
+        }
+      }).length;
+    };
+    const running = await startDaemon({
+      dataDir: dir.path,
+      port: 0,
+      adapter: new FakeAdapter({}),
+      logLevel: 'warn',
+      ...QUIET,
+    });
+    expect(openLogHandles()).toBe(1);
+    await running.stop();
+    expect(openLogHandles()).toBe(0);
   });
 });

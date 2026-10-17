@@ -1,5 +1,5 @@
 import { existsSync, renameSync, rmSync, statSync } from 'node:fs';
-import pino, { type DestinationStream } from 'pino';
+import pino from 'pino';
 
 /** Rotates `path` to `path.1` … `path.<keep>` when it is larger than `maxBytes`. */
 export function rotateLogFile(path: string, maxBytes = 10 * 1024 * 1024, keep = 5): void {
@@ -14,6 +14,6 @@ export function rotateLogFile(path: string, maxBytes = 10 * 1024 * 1024, keep = 
 }
 
 /** An asynchronous pino destination that creates the log directory when missing. */
-export function fileDestination(path: string): DestinationStream {
+export function fileDestination(path: string): ReturnType<typeof pino.destination> {
   return pino.destination({ dest: path, mkdir: true, sync: false });
 }

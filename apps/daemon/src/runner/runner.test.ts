@@ -571,6 +571,63 @@ describe('runner', () => {
     });
   });
 
+  it('parks on the card that is still open when two waits overlap and the first is answered', async () => {
+    engine = await createTestEngine({ Alpha: [[{ do: 'hang' }]] });
+    const start = vi.spyOn(engine.adapter, 'start');
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await waitFor(() => ws(workstream.id).state === 'RUNNING');
+    const spec = start.mock.calls[0]?.[0];
+    if (!spec) throw new Error('no session started');
+    // Claude Code asks for parallel tool calls at once, so two permission waits can overlap.
+    const ask = (command: string, toolUseId: string) =>
+      spec.canUseTool({
+        toolName: 'Bash',
+        input: { command },
+        toolUseId,
+        signal: new AbortController().signal,
+      });
+    const first = ask('curl -s https://one.example', 'toolu_1');
+    const second = ask('curl -s https://two.example', 'toolu_2');
+    const cards = await waitFor(() => {
+      const open = listInbox(engine.store.db, { states: ['OPEN'] });
+      return open.length === 2 ? open : undefined;
+    });
+    const one = cards.find((c) => c.body.includes('one.example'));
+    const two = cards.find((c) => c.body.includes('two.example'));
+    if (!one || !two) throw new Error('expected a card per command');
+    engine.inbox.answer(one.id, { choice: 'allow_once' });
+    expect(await first).toMatchObject({ behavior: 'allow' });
+    engine.clock.advance(10 * 60_000);
+    await engine.runner.idle();
+    await second;
+    expect(ws(workstream.id)).toMatchObject({
+      state: 'WAITING_HUMAN',
+      nextAction: { kind: 'answer', inboxId: two.id },
+    });
+  });
+
+  it('hands an answer and its one-time permission to one session only, so a restart cannot grant it again', async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        [curl, turn],
+        [curl, { do: 'hang' }],
+      ],
+    });
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    const card = await waitFor(openCard);
+    engine.clock.advance(10 * 60_000);
+    await engine.runner.idle();
+    engine.inbox.answer(card.id, { choice: 'allow_once' });
+    engine.launch(workstream.id);
+    await waitFor(() => ws(workstream.id).state === 'RUNNING');
+    // The running session has the answer. Recovery after a restart reads this action, so it must no
+    // longer be `answer`; with no handoff yet it is a fresh start, which recovery turns into a resume.
+    expect(ws(workstream.id).nextAction).toEqual({ kind: 'start' });
+    await engine.runner.stopAll('shutdown');
+  });
+
   describe('lifecycle edges', () => {
     /** Wraps every handle the fake adapter returns; the wrapper sees each call the runner makes. */
     const interceptStart = (wrap: (handle: SessionHandle) => SessionHandle) => {

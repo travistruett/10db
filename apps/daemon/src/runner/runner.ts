@@ -41,6 +41,7 @@ import {
   releaseClaims,
   setTaskStatus,
   StaleFenceError,
+  type DbReader,
   transitionWorkstream,
   updateSessionUsage,
 } from '@10db/db';
@@ -212,9 +213,11 @@ interface SessionState {
   baselinePct: number | null;
   firmSent: boolean;
   parkedFor: InboxItemId | null;
-  /** The card the session is waiting on, while it waits. */
-  waitingOn: InboxItemId | null;
-  waits: number;
+  /**
+   * The cards the session is waiting on, oldest first, with how many waits each has: a folded card can
+   * be asked twice. A card leaves the map when its last wait ends.
+   */
+  waitingOn: Map<InboxItemId, number>;
   waitTimer: Timer | null;
   outcome: Outcome | null;
 }
@@ -231,8 +234,8 @@ export function createRunner(opts: RunnerOptions): Runner {
   const identify = (pid: number | null): Promise<string | null> =>
     pid === null || !opts.identifyProcess ? Promise.resolve(null) : opts.identifyProcess(pid);
 
-  function freshAction(id: WorkstreamId): NextAction {
-    const latest = latestHandoff(db, id);
+  function freshAction(reader: DbReader, id: WorkstreamId): NextAction {
+    const latest = latestHandoff(reader, id);
     return latest ? { kind: 'continue_from_handoff', handoffId: latest.id } : { kind: 'start' };
   }
 
@@ -401,7 +404,7 @@ export function createRunner(opts: RunnerOptions): Runner {
               providerSessionId: outcome.providerSessionId,
               reason: 'the usage limit reset',
             }
-          : freshAction(id);
+          : freshAction(db, id);
         opts.state.write((ctx) => {
           transitionWorkstream(ctx, id, {
             to: S.PausedLimit,
@@ -503,19 +506,21 @@ export function createRunner(opts: RunnerOptions): Runner {
       baselinePct: null,
       firmSent: false,
       parkedFor: null,
-      waitingOn: null,
-      waits: 0,
+      waitingOn: new Map(),
       waitTimer: null,
       outcome: null,
     };
     const log = opts.logger.child({ workstreamId: id, sessionId: session.id });
     let handle: SessionHandle | null = null;
     let sawEnded = false;
+    /** The oldest card still open: a stop or the wait timer parks on it, never on one already answered. */
+    const firstOpen = (): InboxItemId | null => [...st.waitingOn.keys()][0] ?? null;
+    const openWaits = (): number => [...st.waitingOn.values()].reduce((sum, n) => sum + n, 0);
     // Aborting the waits before the process stops means an answer that lands while a slow session
     // exits goes through onParkedAnswer and the card, never to a waiter that is about to disappear.
     // A session that was waiting parks on its card.
     const endWaits = (): void => {
-      if (st.waits > 0 && st.waitingOn) st.parkedFor ??= st.waitingOn;
+      st.parkedFor ??= firstOpen();
       st.waitTimer?.cancel();
       st.waitTimer = null;
       abort.abort();
@@ -524,9 +529,8 @@ export function createRunner(opts: RunnerOptions): Runner {
 
     const observer: WaitObserver = {
       onWaitStart(item) {
-        st.waits += 1;
-        if (st.waits > 1) return;
-        st.waitingOn = item.id;
+        st.waitingOn.set(item.id, (st.waitingOn.get(item.id) ?? 0) + 1);
+        if (openWaits() > 1) return;
         opts.state.write((ctx) => {
           // A session can ask before its `started` event is processed; STARTING has no edge to WAITING_HUMAN.
           if (getWorkstreamRow(ctx.tx, id).state === S.Starting)
@@ -538,17 +542,19 @@ export function createRunner(opts: RunnerOptions): Runner {
           });
         });
         st.waitTimer = opts.clock.setTimeout(() => {
-          st.parkedFor = item.id;
+          st.parkedFor = firstOpen() ?? item.id;
           // Abort the waits first: an answer that arrives while the session is still stopping then goes
           // through onParkedAnswer and the card, instead of to a waiter that is about to disappear.
           abort.abort();
           void handle?.stop();
         }, project.humanWaitMinutes * 60_000);
       },
-      onWaitEnd() {
-        st.waits = Math.max(0, st.waits - 1);
-        if (st.waits > 0) return;
-        st.waitingOn = null;
+      onWaitEnd(item) {
+        const left = (st.waitingOn.get(item.id) ?? 0) - 1;
+        if (left > 0) st.waitingOn.set(item.id, left);
+        else st.waitingOn.delete(item.id);
+        // WAITING_HUMAN holds until every wait has ended, including a second wait on the same folded card.
+        if (st.waitingOn.size > 0) return;
         st.waitTimer?.cancel();
         st.waitTimer = null;
         opts.state.write((ctx) => {
@@ -608,6 +614,10 @@ export function createRunner(opts: RunnerOptions): Runner {
             const pidStart = await identify(event.pid);
             opts.state.write((ctx) => {
               markSessionStarted(ctx, session.id, event.providerSessionId, event.pid, pidStart);
+              // The session has the answer now. Kept as `answer`, a restart would send it again and
+              // re-grant a one-time permission; a fresh action resumes this session after a crash.
+              if (action.kind === 'answer')
+                patchWorkstream(ctx, id, ctl.fence, { nextAction: freshAction(ctx.tx, id) });
               const current = getWorkstreamRow(ctx.tx, id).state;
               if (current === S.Starting || current === S.HandingOff)
                 transitionWorkstream(ctx, id, { to: S.Running, fence: ctl.fence });

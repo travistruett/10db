@@ -134,7 +134,24 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const lock = acquireInstanceLock(opts.dataDir);
   const logPath = join(opts.dataDir, 'logs', 'daemon.log');
   rotateLogFile(logPath);
-  const logger = createLogger({ level: opts.logLevel, destination: fileDestination(logPath) });
+  const logFile = fileDestination(logPath);
+  const logger = createLogger({ level: opts.logLevel, destination: logFile });
+  /**
+   * Ends the log file and waits for its descriptor to close. A stop right after start would otherwise
+   * leak the descriptor, and the stream's late open fails once a test has removed the data directory.
+   */
+  function closeLog(): Promise<void> {
+    return new Promise((resolve) => {
+      logFile.once('close', () => {
+        resolve();
+      });
+      // SonicBoom emits 'error', not 'close', when its open or close fails, and an unlistened 'error' throws.
+      logFile.once('error', () => {
+        resolve();
+      });
+      logFile.end();
+    });
+  }
   const adapter = typeof opts.adapter === 'function' ? opts.adapter(logger) : opts.adapter;
 
   const db = openDatabase(
@@ -326,30 +343,34 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   logger.info({ port, dataDir: opts.dataDir }, 'daemon started');
 
   async function shutdown(): Promise<void> {
-    createdScheduler.stop();
-    pauses.stop();
-    nightly.cancel();
-    unsubscribeLanes();
-    watcher?.stop();
-    keepAwake.stop();
-    await createdRunner.stopAll('shutdown');
-    state.write((ctx) => {
-      setAppSetting(ctx, CLEAN_SHUTDOWN_KEY, { at: ctx.now });
-    });
-    // Neither wss.close() nor server.close() ends sockets that are already open, so a connected
-    // UI client would keep stop() waiting forever.
-    for (const client of wss.clients) client.terminate();
-    wss.close();
-    // Only the HTTP/1 server can drop keep-alive sockets; serve() returns it here.
-    if ('closeAllConnections' in server) server.closeAllConnections();
-    await new Promise<void>((resolve) => {
-      server.close(() => {
-        resolve();
+    try {
+      createdScheduler.stop();
+      pauses.stop();
+      nightly.cancel();
+      unsubscribeLanes();
+      watcher?.stop();
+      keepAwake.stop();
+      await createdRunner.stopAll('shutdown');
+      state.write((ctx) => {
+        setAppSetting(ctx, CLEAN_SHUTDOWN_KEY, { at: ctx.now });
       });
-    });
-    removeRuntimeFiles(opts.dataDir);
-    db.$client.close();
-    lock.release();
+      // Neither wss.close() nor server.close() ends sockets that are already open, so a connected
+      // UI client would keep stop() waiting forever.
+      for (const client of wss.clients) client.terminate();
+      wss.close();
+      // Only the HTTP/1 server can drop keep-alive sockets; serve() returns it here.
+      if ('closeAllConnections' in server) server.closeAllConnections();
+      await new Promise<void>((resolve) => {
+        server.close(() => {
+          resolve();
+        });
+      });
+      removeRuntimeFiles(opts.dataDir);
+      db.$client.close();
+      lock.release();
+    } finally {
+      await closeLog();
+    }
   }
   // SIGINT then SIGTERM both call stop(); a second shutdown would write to the closed database.
   let stopping: Promise<void> | null = null;
