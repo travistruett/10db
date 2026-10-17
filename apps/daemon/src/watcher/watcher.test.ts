@@ -418,6 +418,55 @@ describe('watcher', () => {
     expect(await watcher.stepEnd(a.workstream.id)).toEqual(['src/ui/b.tsx']);
   });
 
+  describe('sensitive writes on the foreign-claim route', () => {
+    function idleHolder(areas: string[]) {
+      const idle = seedWorkstream(base, { project, title: 'Beta', areas });
+      state.write((ctx) => {
+        acquireClaims(ctx, {
+          projectId: project.id,
+          workstreamId: idle.workstream.id,
+          requests: claimRequestsForTask(idle.task, project),
+          leaseExpiresAt: '2999-01-01T00:00:00.000Z',
+        });
+      });
+    }
+    const bulkTitle = (n: number) => `${String(n)} writes inside another workstream's claim`;
+    const touchMany = (prefix: string) => {
+      for (let i = 0; i < STRAY_BULK_THRESHOLD + 1; i += 1) {
+        touch(`src/api/${prefix}-${String(i)}.ts`);
+        emit(`src/api/${prefix}-${String(i)}.ts`);
+      }
+    };
+
+    it('keeps a sensitive write on its own card beside the foreign bulk card', async () => {
+      running('Alpha', ['ui']);
+      idleHolder(['api', 'harness']);
+      watcher.sync();
+      touchMany('a');
+      touch('.claude/settings.json');
+      emit('.claude/settings.json');
+      await watcher.flush();
+      const open = flags();
+      expect(open.filter((f) => f.body === '.claude/settings.json')).toHaveLength(1);
+      const bulk = open.find((f) => f.title === bulkTitle(STRAY_BULK_THRESHOLD + 1));
+      expect(bulk?.detail?.['count']).toBe(STRAY_BULK_THRESHOLD + 1);
+      expect(bulk?.body).not.toContain('.claude');
+    });
+
+    it('still raises the sensitive card when a foreign bulk card is already open', async () => {
+      running('Alpha', ['ui']);
+      idleHolder(['api', 'harness']);
+      watcher.sync();
+      touchMany('a');
+      await watcher.flush();
+      touchMany('b');
+      touch('.claude/settings.json');
+      emit('.claude/settings.json');
+      await watcher.flush();
+      expect(flags().map((f) => f.body)).toContain('.claude/settings.json');
+    });
+  });
+
   it('diffs git status against the claims at the end of a step', async () => {
     const { workstream } = running();
     touch('src/api/ok.ts');

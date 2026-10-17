@@ -20,6 +20,17 @@ export function isSensitivePath(rel: string): boolean {
   return SENSITIVE_BASENAME.test(rel.slice(rel.lastIndexOf('/') + 1));
 }
 
+/** Splits items so sensitive paths can get their own cards and never fold into a bulk card. */
+export function splitSensitive<T>(
+  items: readonly T[],
+  pathOf: (item: T) => string,
+): { sensitive: T[]; ordinary: T[] } {
+  const sensitive: T[] = [];
+  const ordinary: T[] = [];
+  for (const item of items) (isSensitivePath(pathOf(item)) ? sensitive : ordinary).push(item);
+  return { sensitive, ordinary };
+}
+
 /** Churn that is never the agent's work: git's own bookkeeping at the repo root, and Finder droppings. */
 export function isAlwaysIgnored(rel: string): boolean {
   if (rel.slice(rel.lastIndexOf('/') + 1) === '.DS_Store') return true;

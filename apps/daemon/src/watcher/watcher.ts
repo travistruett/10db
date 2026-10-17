@@ -21,6 +21,7 @@ import {
   foreignBulkFoldKey,
   isAlwaysIgnored,
   isSensitivePath,
+  splitSensitive,
   type ClaimHolder,
   STRAY_BULK_THRESHOLD,
   strayFoldKey,
@@ -115,35 +116,12 @@ export function createWatcher(deps: {
     strays: readonly string[],
     candidates: readonly WorkstreamId[],
     owner: WorkstreamId | null,
-    foldable = true,
   ): void {
     if (strays.length === 0) return;
     const workstreamId = owner ?? (candidates.length === 1 ? (candidates[0] ?? null) : null);
     // A write that can change what runs gets its own card, so a bulk card never buries it.
-    const sensitive = strays.filter(isSensitivePath);
-    if (foldable && sensitive.length > 0) {
-      raise(project, sensitive, candidates, owner, false);
-      raise(
-        project,
-        strays.filter((rel) => !isSensitivePath(rel)),
-        candidates,
-        owner,
-      );
-      return;
-    }
-    if (foldable && strays.length > STRAY_BULK_THRESHOLD) {
-      const listed = strays.slice(0, BULK_LISTED);
-      deps.inbox.flag({
-        projectId: project.id,
-        workstreamId,
-        title: `${String(strays.length)} writes outside every claim`,
-        body: `${listed.join('\n')}\n…and ${String(strays.length - listed.length)} more`,
-        detail: { count: strays.length, paths: listed, candidates: [...candidates] },
-        foldKey: bulkFoldKey(project.id),
-      });
-      return;
-    }
-    for (const rel of strays) {
+    const { sensitive, ordinary } = splitSensitive(strays, (rel) => rel);
+    const single = (rel: string): void => {
       deps.inbox.flag({
         projectId: project.id,
         workstreamId,
@@ -152,7 +130,21 @@ export function createWatcher(deps: {
         detail: { path: rel, candidates: [...candidates] },
         foldKey: strayFoldKey(project.id, rel),
       });
+    };
+    sensitive.forEach(single);
+    if (ordinary.length > STRAY_BULK_THRESHOLD) {
+      const listed = ordinary.slice(0, BULK_LISTED);
+      deps.inbox.flag({
+        projectId: project.id,
+        workstreamId,
+        title: `${String(ordinary.length)} writes outside every claim`,
+        body: `${listed.join('\n')}\n…and ${String(ordinary.length - listed.length)} more`,
+        detail: { count: ordinary.length, paths: listed, candidates: [...candidates] },
+        foldKey: bulkFoldKey(project.id),
+      });
+      return;
     }
+    ordinary.forEach(single);
   }
 
   /** Strays among `paths` against the claims of the workstreams in `claimStates`, plus any in `alsoHeldBy`. */
@@ -188,19 +180,8 @@ export function createWatcher(deps: {
     if (foreign.length === 0) return;
     const running = holders.filter((h) => h.running).map((h) => h.id);
     const workstreamId = running.length === 1 ? (running[0] ?? null) : null;
-    if (foreign.length > STRAY_BULK_THRESHOLD) {
-      const listed = foreign.slice(0, BULK_LISTED).map((f) => f.path);
-      deps.inbox.flag({
-        projectId: project.id,
-        workstreamId,
-        title: `${String(foreign.length)} writes inside another workstream's claim`,
-        body: `${listed.join('\n')}\n…and ${String(foreign.length - listed.length)} more`,
-        detail: { count: foreign.length, paths: listed, candidates: running },
-        foldKey: foreignBulkFoldKey(project.id),
-      });
-      return;
-    }
-    for (const { path, holders: claimedBy } of foreign) {
+    const { sensitive, ordinary } = splitSensitive(foreign, (f) => f.path);
+    const single = ({ path, holders: claimedBy }: (typeof foreign)[number]): void => {
       deps.inbox.flag({
         projectId: project.id,
         workstreamId,
@@ -209,7 +190,21 @@ export function createWatcher(deps: {
         detail: { path, candidates: running, claimedBy },
         foldKey: strayFoldKey(project.id, path),
       });
+    };
+    sensitive.forEach(single);
+    if (ordinary.length > STRAY_BULK_THRESHOLD) {
+      const listed = ordinary.slice(0, BULK_LISTED).map((f) => f.path);
+      deps.inbox.flag({
+        projectId: project.id,
+        workstreamId,
+        title: `${String(ordinary.length)} writes inside another workstream's claim`,
+        body: `${listed.join('\n')}\n…and ${String(ordinary.length - listed.length)} more`,
+        detail: { count: ordinary.length, paths: listed, candidates: running },
+        foldKey: foreignBulkFoldKey(project.id),
+      });
+      return;
     }
+    ordinary.forEach(single);
   }
 
   async function processBatch(projectId: ProjectId, paths: readonly string[]): Promise<void> {
