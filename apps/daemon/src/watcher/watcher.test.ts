@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
   WorkstreamState,
@@ -18,7 +18,7 @@ import {
   transitionWorkstream,
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createTempRepo, seedWorkstream, waitFor } from '../../test/fixtures';
+import { createTempRepo, seedWorkstream, tempDir, waitFor } from '../../test/fixtures';
 import { ManualClock, systemClock } from '../clock';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit } from '../git';
@@ -166,7 +166,7 @@ describe('watcher', () => {
 
   it('drops .git, node_modules, .DS_Store, directories and gitignored paths', async () => {
     running();
-    writeFileSync(join(repo.path, '.gitignore'), 'dist/\n');
+    writeFileSync(join(repo.path, '.gitignore'), 'dist/\nnode_modules/\n');
     touch('dist/bundle.js');
     touch('docs/.DS_Store');
     touch('node_modules/react/index.js');
@@ -247,6 +247,105 @@ describe('watcher', () => {
     expect(fake.open.size).toBe(0);
     watcher.sync();
     expect([...fake.open.keys()]).toEqual([repo.path]);
+  });
+
+  it('flags a write under a nested node_modules that git reports', async () => {
+    running();
+    watcher.sync();
+    touch('src/node_modules/index.js');
+    emit('src/node_modules/index.js');
+    await watcher.flush();
+    expect(flags().map((f) => f.body)).toEqual(['src/node_modules/index.js']);
+  });
+
+  it.each(['.git/info/exclude', '.git/hooks/pre-commit', '.git/config'])(
+    'flags a write to %s',
+    async (rel) => {
+      running();
+      watcher.sync();
+      touch(rel);
+      emit(rel);
+      emit('.git/index');
+      emit('.git/refs/heads/main');
+      await watcher.flush();
+      expect(flags().map((f) => f.body)).toEqual([rel]);
+    },
+  );
+
+  it('never runs a core.fsmonitor script from the repository config', async () => {
+    running();
+    const scripts = tempDir('fsmonitor').path;
+    const marker = join(scripts, 'ran');
+    const script = join(scripts, 'hook.sh');
+    writeFileSync(script, `#!/bin/sh\ntouch '${marker}'\n`);
+    chmodSync(script, 0o755);
+    execFileSync('git', ['config', 'core.fsmonitor', script], { cwd: repo.path });
+    watcher.sync();
+    touch('docs/a.md');
+    emit('docs/a.md');
+    await watcher.flush();
+    expect(flags().map((f) => f.body)).toEqual(['docs/a.md']);
+    expect(existsSync(marker)).toBe(false);
+  });
+
+  it('flags a gitignored sensitive file but not an ordinary ignored one', async () => {
+    running();
+    writeFileSync(join(repo.path, '.gitignore'), 'dist/\n.env\n.claude/\n');
+    touch('dist/x.js');
+    touch('.env');
+    touch('.claude/settings.local.json');
+    watcher.sync();
+    emit('dist/x.js');
+    emit('.env');
+    emit('.claude/settings.local.json');
+    emit('.claude/gone.json');
+    await watcher.flush();
+    expect(
+      flags()
+        .map((f) => f.body)
+        .sort(),
+    ).toEqual(['.claude/settings.local.json', '.env']);
+  });
+
+  it('flags a write inside the claim of a workstream that is not running', async () => {
+    const a = running('Alpha', ['api']);
+    const idle = seedWorkstream(base, { project, title: 'Beta', areas: ['ui'] });
+    state.write((ctx) => {
+      acquireClaims(ctx, {
+        projectId: project.id,
+        workstreamId: idle.workstream.id,
+        requests: claimRequestsForTask(idle.task, project),
+        leaseExpiresAt: '2999-01-01T00:00:00.000Z',
+      });
+    });
+    watcher.sync();
+    touch('src/ui/b.tsx');
+    touch('src/api/a.ts');
+    emit('src/ui/b.tsx');
+    emit('src/api/a.ts');
+    await watcher.flush();
+    const open = flags();
+    expect(open).toHaveLength(1);
+    expect(open[0]).toMatchObject({
+      body: 'src/ui/b.tsx',
+      targets: [{ workstreamId: a.workstream.id, sessionId: null }],
+    });
+    expect(open[0]?.detail).toMatchObject({
+      path: 'src/ui/b.tsx',
+      claimedBy: [idle.workstream.id],
+    });
+  });
+
+  it('does not flag writes inside the claims of running workstreams', async () => {
+    running('Alpha', ['api']);
+    running('Beta', ['ui']);
+    watcher.sync();
+    touch('src/api/a.ts');
+    touch('src/ui/b.tsx');
+    emit('src/api/a.ts');
+    emit('src/ui/b.tsx');
+    await watcher.flush();
+    expect(flags()).toEqual([]);
   });
 
   it('diffs git status against the claims at the end of a step', async () => {

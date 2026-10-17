@@ -1,6 +1,13 @@
 import { DEFAULT_HAZARDS, mintId } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
-import { bulkFoldKey, findStrays, isAlwaysIgnored, strayFoldKey } from './strays';
+import {
+  bulkFoldKey,
+  findForeignClaimWrites,
+  findStrays,
+  isAlwaysIgnored,
+  isSensitivePath,
+  strayFoldKey,
+} from './strays';
 
 const project = {
   areas: [
@@ -13,12 +20,77 @@ const project = {
 describe('isAlwaysIgnored', () => {
   it.each([
     ['.git/index', true],
-    ['node_modules/react/index.js', true],
-    ['apps/desktop/node_modules/x.js', true],
+    ['.git/objects/ab/cdef', true],
+    ['.git/refs/heads/main', true],
+    ['.git/COMMIT_EDITMSG', true],
+    ['.git/config', false],
+    ['.git/hooks/pre-commit', false],
+    ['.git/info/exclude', false],
+    ['.DS_Store', true],
+    ['docs/.DS_Store', true],
+    ['node_modules/react/index.js', false],
+    ['src/node_modules/index.js', false],
+    ['docs/.git/payload', false],
     ['src/git/index.ts', false],
     ['docs/node_modules.md', false],
   ])('%s → %s', (rel, expected) => {
     expect(isAlwaysIgnored(rel)).toBe(expected);
+  });
+});
+
+describe('isSensitivePath', () => {
+  it.each([
+    ['.env', true],
+    ['.env.local', true],
+    ['apps/daemon/.env', true],
+    ['.mcp.json', true],
+    ['.claude/settings.local.json', true],
+    ['.codex/config.toml', true],
+    ['.git/config', true],
+    ['.git/hooks/pre-commit', true],
+    ['.git/info/exclude', true],
+    ['.git/index', false],
+    ['dist/x.js', false],
+    ['docs/environment.md', false],
+    ['.claude', false],
+  ])('%s → %s', (rel, expected) => {
+    expect(isSensitivePath(rel)).toBe(expected);
+  });
+});
+
+describe('findForeignClaimWrites', () => {
+  const a = mintId('Workstream');
+  const b = mintId('Workstream');
+  const api = { kind: 'area' as const, name: 'api' };
+  const ui = { kind: 'area' as const, name: 'ui' };
+  it.each([
+    [
+      'inside an idle holder claim',
+      ['src/ui/a.tsx'],
+      [
+        { id: a, running: true, claims: [api] },
+        { id: b, running: false, claims: [ui] },
+      ],
+      [{ path: 'src/ui/a.tsx', holders: [b] }],
+    ],
+    [
+      'inside a running holder claim',
+      ['src/api/a.ts'],
+      [
+        { id: a, running: true, claims: [api] },
+        { id: b, running: true, claims: [ui] },
+      ],
+      [],
+    ],
+    [
+      'inside the only running claim',
+      ['src/api/a.ts'],
+      [{ id: a, running: true, claims: [api] }],
+      [],
+    ],
+    ['inside an unclaimed area', ['README.md'], [{ id: a, running: true, claims: [api] }], []],
+  ])('%s', (_name, paths, holders, expected) => {
+    expect(findForeignClaimWrites(paths, project, holders)).toEqual(expected);
   });
 });
 

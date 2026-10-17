@@ -1,6 +1,7 @@
-import { existsSync, watch as fsWatch } from 'node:fs';
-import { sep } from 'node:path';
+import { existsSync, statSync, watch as fsWatch } from 'node:fs';
+import { join, sep } from 'node:path';
 import {
+  ACTIVE_STATES,
   LANE_STATES,
   WorkstreamState,
   type ProjectDto,
@@ -15,8 +16,12 @@ import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
 import {
   bulkFoldKey,
+  findForeignClaimWrites,
   findStrays,
+  foreignBulkFoldKey,
   isAlwaysIgnored,
+  isSensitivePath,
+  type ClaimHolder,
   STRAY_BULK_THRESHOLD,
   strayFoldKey,
 } from './strays';
@@ -43,6 +48,14 @@ export const systemWatch: WatchFn = (root, onChange, onError) => {
     },
   };
 };
+
+function isFile(path: string): boolean {
+  try {
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
+}
 
 export interface Watcher {
   /** Watches every project with active work and stops watching the rest. */
@@ -133,10 +146,51 @@ export function createWatcher(deps: {
     paths: readonly string[],
   ): { strays: string[]; candidates: WorkstreamId[] } {
     const active = activeIn(project.id);
-    const claims = active.flatMap((ws) =>
+    // A parked or queued workstream still holds its claims, so a write inside them isn't outside every claim.
+    const holders = listWorkstreams(db, { states: ACTIVE_STATES, projectId: project.id });
+    const claims = holders.flatMap((ws) =>
       activeClaims(db, ws.id).map((c) => ({ kind: c.kind, name: c.name })),
     );
     return { strays: findStrays(paths, project, claims), candidates: active.map((ws) => ws.id) };
+  }
+
+  /** Writes inside a claim whose holder isn't running, attributed to the sessions that are. */
+  function raiseForeign(project: ProjectDto, paths: readonly string[]): void {
+    if (paths.length === 0) return;
+    const holders: ClaimHolder[] = listWorkstreams(db, {
+      states: ACTIVE_STATES,
+      projectId: project.id,
+    }).map((ws) => ({
+      id: ws.id,
+      running: ws.state === WorkstreamState.Running,
+      claims: activeClaims(db, ws.id).map((c) => ({ kind: c.kind, name: c.name })),
+    }));
+    const foreign = findForeignClaimWrites(paths, project, holders);
+    if (foreign.length === 0) return;
+    const running = holders.filter((h) => h.running).map((h) => h.id);
+    const workstreamId = running.length === 1 ? (running[0] ?? null) : null;
+    if (foreign.length > STRAY_BULK_THRESHOLD) {
+      const listed = foreign.slice(0, BULK_LISTED).map((f) => f.path);
+      deps.inbox.flag({
+        projectId: project.id,
+        workstreamId,
+        title: `${String(foreign.length)} writes inside another workstream's claim`,
+        body: `${listed.join('\n')}\n…and ${String(foreign.length - listed.length)} more`,
+        detail: { count: foreign.length, paths: listed, candidates: running },
+        foldKey: foreignBulkFoldKey(project.id),
+      });
+      return;
+    }
+    for (const { path, holders: claimedBy } of foreign) {
+      deps.inbox.flag({
+        projectId: project.id,
+        workstreamId,
+        title: "Write inside another workstream's claim",
+        body: path,
+        detail: { path, candidates: running, claimedBy },
+        foldKey: strayFoldKey(project.id, path),
+      });
+    }
   }
 
   async function processBatch(projectId: ProjectId, paths: readonly string[]): Promise<void> {
@@ -151,11 +205,18 @@ export function createWatcher(deps: {
     // already committed through 10db's claim-checked commit, whose claims may have been released since the write.
     const changed = new Set((await deps.git.status(entry.root)).map((s) => s.path));
     const project = getProject(db, projectId);
-    const { strays, candidates } = straysIn(
-      project,
-      paths.filter((rel) => changed.has(rel)),
+    const reported = paths.filter((rel) => changed.has(rel));
+    const { strays, candidates } = straysIn(project, reported);
+    // Ignored or unreported paths that can change what runs are flagged whatever the claims say.
+    const hidden = paths.filter(
+      (rel) => !changed.has(rel) && isSensitivePath(rel) && isFile(join(entry.root, rel)),
     );
-    raise(project, strays, candidates, null);
+    raise(project, [...strays, ...hidden], candidates, null);
+    const outside = new Set(strays);
+    raiseForeign(
+      project,
+      reported.filter((rel) => !outside.has(rel)),
+    );
   }
 
   async function processPending(): Promise<void> {
