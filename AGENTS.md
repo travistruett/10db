@@ -80,3 +80,7 @@ model `opus`: Fable isn't available there.
 
 `.mcp.json` (Claude Code) and `.codex/config.toml` (Codex) declare the same servers. Mantine's docs
 server is pinned to the Mantine version the UI uses; bump them together.
+
+The Artificial Analysis server is remote and signs in with OAuth (`/mcp` in Claude Code, `codex mcp
+login artificial-analysis` in Codex); never put a key or token in either file. Its terms allow reading
+its data for this work but not committing it: no AA numbers in the repo, fixtures or docs.

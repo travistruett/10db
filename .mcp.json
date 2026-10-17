@@ -3,6 +3,10 @@
     "mantine": {
       "command": "npx",
       "args": ["-y", "@mantine/mcp-server@9.7.2"]
+    },
+    "artificial-analysis": {
+      "type": "http",
+      "url": "https://mcp.artificialanalysis.ai/mcp"
     }
   }
 }

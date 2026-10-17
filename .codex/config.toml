@@ -15,3 +15,8 @@ network_access = true
 [mcp_servers.mantine]
 command = "npx"
 args = ["-y", "@mantine/mcp-server@9.7.2"]
+
+# Artificial Analysis model benchmarks, read-only. Sign in once with OAuth (`codex mcp login
+# artificial-analysis`); no key is stored here. Its data stays out of the repo (AA's terms).
+[mcp_servers.artificial-analysis]
+url = "https://mcp.artificialanalysis.ai/mcp"
