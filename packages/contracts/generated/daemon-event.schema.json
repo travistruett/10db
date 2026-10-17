@@ -32,7 +32,8 @@
         "proposal.resolved",
         "provider.paused",
         "provider.resumed",
-        "recovery.step"
+        "recovery.step",
+        "settings.changed"
       ]
     },
     "entityType": {

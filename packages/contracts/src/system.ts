@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { InboxItemId, ProjectId } from './ids';
+import { KeepAwakeMode } from './states';
 
 /** The tools the system check looks for on the login PATH. */
 export const ToolName = { Claude: 'claude', Git: 'git', Docker: 'docker' } as const;
@@ -81,3 +82,6 @@ export const McpServerStatusDto = McpServerReview.extend({
   inboxId: InboxItemId.nullable(),
 });
 export type McpServerStatusDto = z.infer<typeof McpServerStatusDto>;
+
+export const KeepAwakeStatus = z.object({ mode: z.enum(KeepAwakeMode), active: z.boolean() });
+export type KeepAwakeStatus = z.infer<typeof KeepAwakeStatus>;
