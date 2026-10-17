@@ -8,6 +8,7 @@ import { startDaemon, type RunningDaemon } from '../src/daemon';
 import { FakeAdapter, type FakeScriptBook } from '../src/sessions';
 import {
   checkServerEnv,
+  claudeCodeVersion,
   renderAcceptanceReport,
   runAcceptanceChecks,
   sessionBaselines,
@@ -228,6 +229,72 @@ describe('runAcceptanceChecks', () => {
     ).toMatchObject({ ok: false });
   });
 
+  describe('every clause of the billing and approval checks', () => {
+    const billing = JSON.stringify({
+      level: 30,
+      msg: 'claude session billing',
+      apiKeySource: 'none',
+      apiProvider: 'firstParty',
+      subscriptionType: 'Claude Max',
+    });
+    const mantine = { name: 'mantine', envKeys: ['HOME', 'PATH'] };
+    const start = JSON.stringify({
+      level: 30,
+      msg: 'project mcp servers',
+      passed: [mantine],
+      pending: [],
+      denied: [],
+      failed: [],
+    });
+    const refused = JSON.stringify({
+      level: 50,
+      msg: 'claude session refused',
+      reason: 'Billing check failed: an API key is in use. No prompt was sent.',
+    });
+    // Alpha ran two sessions and Beta one, so three sessions started.
+    it.each([
+      [
+        'fewer billing lines than started sessions',
+        'subscription billing',
+        [billing, billing],
+        false,
+      ],
+      [
+        'a billing failure beside good lines',
+        'subscription billing',
+        [billing, billing, billing, refused],
+        false,
+      ],
+      [
+        'every started session logged a first-party login',
+        'subscription billing',
+        [billing, billing, billing],
+        true,
+      ],
+      [
+        'fewer approved starts than started sessions',
+        'repo MCP server approved',
+        [start, start],
+        false,
+      ],
+      [
+        'every started session passed the server',
+        'repo MCP server approved',
+        [start, start, start],
+        true,
+      ],
+    ])('%s', async (_name, check, lines, ok) => {
+      expect((await byName({ logText: lines.join('\n') })).get(check)).toMatchObject({ ok });
+    });
+  });
+
+  it('requires at least as many op trailers as tasks', async () => {
+    expect((await byName({ minTasks: 2 })).get('no duplicate commits')).toMatchObject({ ok: true });
+    expect((await byName({ minTasks: 4 })).get('no duplicate commits')).toMatchObject({
+      ok: false,
+    });
+  });
+
   it('passes the connection check on a connected status after the first turn, never on pending', async () => {
     const status = (s: string) =>
       JSON.stringify({
@@ -300,6 +367,15 @@ describe('checkServerEnv', () => {
   it('fails when the process was never seen or lacks PATH', () => {
     expect(checkServerEnv('mantine', null)).toMatchObject({ ok: false });
     expect(checkServerEnv('mantine', ['HOME'])).toMatchObject({ ok: false });
+  });
+});
+
+describe('claudeCodeVersion', () => {
+  it('reads the version from the billing lines and never throws', () => {
+    const line = (v: string) =>
+      JSON.stringify({ msg: 'claude session billing', claudeCodeVersion: v });
+    expect(claudeCodeVersion(['not json', line('2.1.300')].join('\n'))).toBe('2.1.300');
+    expect(claudeCodeVersion('')).toBe('unknown');
   });
 });
 

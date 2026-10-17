@@ -17,9 +17,29 @@ const LogLine = z.looseObject({
   apiKeySource: z.string().optional(),
   apiProvider: z.string().optional(),
   subscriptionType: z.string().optional(),
+  claudeCodeVersion: z.string().optional(),
   mcpServers: z.array(z.object({ name: z.string(), status: z.string() })).optional(),
   passed: z.array(z.object({ name: z.string(), envKeys: z.array(z.string()) })).optional(),
 });
+
+function parseLogLines(logText: string): z.infer<typeof LogLine>[] {
+  return logText.split('\n').flatMap((raw) => {
+    try {
+      const parsed = LogLine.safeParse(JSON.parse(raw));
+      return parsed.success ? [parsed.data] : [];
+    } catch {
+      return [];
+    }
+  });
+}
+
+/** The Claude Code version the sessions logged, or `unknown`; reading it never fails the run. */
+export function claudeCodeVersion(logText: string): string {
+  const version = parseLogLines(logText).find(
+    (l) => l.msg === 'claude session billing' && l.claudeCodeVersion,
+  )?.claudeCodeVersion;
+  return version ?? 'unknown';
+}
 
 /** What 10db passes a stdio server: `env -i PATH=… HOME=…`, and nothing else. */
 const STDIO_ENV_KEYS = ['HOME', 'PATH'];
@@ -105,14 +125,7 @@ export async function runAcceptanceChecks(input: {
       .filter(Boolean);
     const dupCommits = [...new Set(opIds.filter((id, i) => opIds.indexOf(id) !== i))];
 
-    const lines = input.logText.split('\n').flatMap((raw) => {
-      try {
-        const parsed = LogLine.safeParse(JSON.parse(raw));
-        return parsed.success ? [parsed.data] : [];
-      } catch {
-        return [];
-      }
-    });
+    const lines = parseLogLines(input.logText);
     const billing = lines.filter((l) => l.msg === 'claude session billing');
     const firstParty = billing.filter(
       (l) =>
@@ -153,9 +166,9 @@ export async function runAcceptanceChecks(input: {
       ),
       check(
         'no duplicate commits',
-        dupCommits.length === 0,
+        dupCommits.length === 0 && opIds.length >= input.minTasks,
         dupCommits.length === 0
-          ? `${String(opIds.length)} op trailer(s), all unique`
+          ? `${String(opIds.length)} op trailer(s), all unique (need at least ${String(input.minTasks)})`
           : `duplicated: ${dupCommits.join(', ')}`,
       ),
       check(
