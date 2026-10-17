@@ -15,6 +15,8 @@ export default defineConfig(
     '**/generated/**',
     'packages/db/drizzle/**',
     'apps/desktop/src-tauri/target/**',
+    'apps/desktop/src-tauri/resources/**',
+    'apps/desktop/src-tauri/binaries/**',
     'apps/desktop/src-tauri/gen/**',
     'tests/repo/fixtures/**',
     'spikes/**',
@@ -66,6 +68,10 @@ export default defineConfig(
     plugins: { 'jsx-a11y': fixupPluginRules(jsxA11y) },
     rules: jsxA11y.flatConfigs.strict.rules,
     languageOptions: { globals: globals.browser },
+  },
+  {
+    files: ['apps/desktop/e2e/**/*.ts'],
+    languageOptions: { globals: globals.node },
   },
   {
     // Daemon modules (src/<module>/) import each other only through index.ts.

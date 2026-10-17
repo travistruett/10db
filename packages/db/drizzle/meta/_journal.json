@@ -22,6 +22,13 @@
       "when": 1792162709582,
       "tag": "0002_decisions_fts",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1792203417405,
+      "tag": "0003_mcp_server_approvals",
+      "breakpoints": true
     }
   ]
 }

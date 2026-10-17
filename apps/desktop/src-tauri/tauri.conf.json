@@ -4,9 +4,9 @@
   "version": "0.0.0",
   "identifier": "app.10db.desktop",
   "build": {
-    "beforeDevCommand": "pnpm vite",
+    "beforeDevCommand": "pnpm sidecar && pnpm vite",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "pnpm vite build",
+    "beforeBuildCommand": "pnpm sidecar && pnpm vite build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -21,7 +21,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:4317 ws://127.0.0.1:4317; style-src 'self' 'unsafe-inline'; img-src 'self' data:"
+      "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:* ws://127.0.0.1:*; style-src 'self' 'unsafe-inline'; img-src 'self' data:"
     }
   },
   "bundle": {
@@ -35,6 +35,12 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.png"
-    ]
+    ],
+    "externalBin": [
+      "binaries/tendb-node"
+    ],
+    "resources": {
+      "resources/daemon/": "daemon/"
+    }
   }
 }

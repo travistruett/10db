@@ -8,12 +8,13 @@ import { z } from 'zod';
 import type { GuardVerdict } from '../guard';
 import { matchesAllowedTool } from '../permissions';
 import { createChannel } from './channel';
-import type {
-  SessionAdapter,
-  SessionEvent,
-  SessionHandle,
-  SessionSpec,
-  ToolDecision,
+import {
+  SessionEndReason,
+  type SessionAdapter,
+  type SessionEvent,
+  type SessionHandle,
+  type SessionSpec,
+  type ToolDecision,
 } from './types';
 
 const Json: z.ZodType = z.json();
@@ -32,6 +33,7 @@ export const FakeStep = z.discriminatedUnion('do', [
   }),
   z.object({ do: z.literal('compact') }),
   z.object({ do: z.literal('crash'), message: z.string() }),
+  z.object({ do: z.literal('billing_refused'), message: z.string() }),
   z.object({ do: z.literal('hang') }),
   z.object({ do: z.literal('end') }),
 ]);
@@ -95,10 +97,7 @@ export class FakeAdapter implements SessionAdapter {
       finished = r;
     });
 
-    const end = (
-      reason: 'completed' | 'stopped' | 'error' | 'rate_limited',
-      message: string | null,
-    ): void => {
+    const end = (reason: SessionEndReason, message: string | null): void => {
       if (ended) return;
       ended = true;
       channel.push({ type: 'ended', reason, message });
@@ -282,6 +281,9 @@ export class FakeAdapter implements SessionAdapter {
           return 'continue';
         case 'crash':
           end('error', step.message);
+          return 'halt';
+        case 'billing_refused':
+          end(SessionEndReason.BillingRefused, step.message);
           return 'halt';
         case 'hang':
           await untilStopped;

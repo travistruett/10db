@@ -65,11 +65,10 @@ describe('CI workflow', () => {
     expect(installed.sort()).toEqual(pinned.sort());
   });
 
-  it('installs with a frozen lockfile, and the gate job keeps the lines M1b inserts between', () => {
+  it('installs with a frozen lockfile, then WebKit for the e2e step, then runs the gate', () => {
     const text = readRepoFile(CI);
-    expect(text).toContain('pnpm install --frozen-lockfile');
     expect(text).toContain(
-      '      - run: pnpm install --frozen-lockfile\n      - run: bash scripts/gate.sh\n',
+      '      - run: pnpm install --frozen-lockfile\n      - run: pnpm --filter @10db/desktop exec playwright install --with-deps webkit\n      - run: bash scripts/gate.sh\n',
     );
   });
 });

@@ -6,7 +6,7 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 mkdir -p .gate
 
-ALL_STEPS=(format lint typecheck test build drift knip rust)
+ALL_STEPS=(format lint typecheck test build e2e drift knip rust)
 read -r -a steps <<< "${GATE_STEPS:-${ALL_STEPS[*]}}"
 start=$SECONDS
 passed=()
@@ -25,6 +25,7 @@ for step in "${steps[@]}"; do
     typecheck) run_step typecheck pnpm -s typecheck ;;
     test) run_step test pnpm -s test ;;
     build) run_step build pnpm -s build ;;
+    e2e) run_step e2e pnpm -s --filter @10db/desktop e2e ;;
     drift) run_step drift pnpm -s drift ;;
     knip) run_step knip pnpm -s knip ;;
     rust)

@@ -11,12 +11,14 @@
 - **Packaging.** The daemon is bundled as a Tauri sidecar: the Node binary itself plus `daemon.mjs`, migrations, the harness plugin and the SQLite addon.
 - **Tauri shell (Rust).** It supervises the sidecar, owns the tray and close-to-tray, and hands the UI its connection.
 - **UI.** It resolves that connection, keeps one replaying event stream that invalidates TanStack Query caches, and renders three views.
-- **Testing.** Playwright drives the Vite app against the real daemon on the fake adapter. A manual script runs §1.3 live.
+- **Testing.** Playwright drives the Vite app in its WebKit engine against the real daemon on the fake adapter. That is the engine WKWebView uses, but it is not the Tauri window; the manual §1.3 live run (Task 14) is what exercises the real window. Playwright is a dev dependency and never ships in the bundle.
 
 **Tech Stack:** As in M0 and M1a. New dependencies:
 - Daemon: `@anthropic-ai/claude-agent-sdk` 0.3.299, plus `@anthropic-ai/sdk` 0.133.0 as a dev dependency (the types-only peer that supplies `BetaMessage`).
 - Desktop (npm): `@tauri-apps/api` 2.12.3, `@tauri-apps/plugin-notification` 2.6.0, `dayjs` 1.11.23 and `zod` 4.6.7, plus the dev dependencies `@playwright/test` 1.64.0, `@axe-core/playwright` 4.13.0, `tsx` 4.23.15 and `@types/node` 26.6.5.
-- Desktop (Rust): `tauri` with the `tray-icon` feature, `tauri-plugin-single-instance` =2.5.3, `tauri-plugin-notification` =2.6.0, `serde` =1.0.229, `serde_json` =1.0.154.
+- Desktop (Rust): `tauri` (keep the version on `main`) with the `tray-icon` feature, `tauri-plugin-single-instance` =2.5.3, `tauri-plugin-notification` =2.6.0, `serde` =1.0.229, `serde_json` =1.0.154.
+
+**Pins are resolved when each dependency is added, not copied from this list.** The versions above were current when the plan was written, and Renovate keeps moving `main`. For each new npm dependency, run `pnpm view <pkg> time --json` and pin the latest stable release that is at least 24 hours old (`pnpm-workspace.yaml` sets `minimumReleaseAge: 1440`, so a younger one fails to install). For a crate, take the latest stable on crates.io at least a day old. A dependency already on `main` (`zod`, `tsx`, `@types/node`, `tauri`, `tauri-build`, `@tauri-apps/cli`) keeps the version `main` has. Keep `@tauri-apps/api` on the same minor as the `tauri` crate. The Agent SDK pin is the exception: stay on 0.3.299 (or a later 0.3.x whose `sdk.d.ts` you have diffed against the types Task 3 uses), because the spikes measured that version.
 
 **Spec:** `docs/superpowers/specs/2026-10-13-10db-factory-loop-design.md`. This plan implements:
 - §3: the process model, environment, Agent SDK settings and keep-awake.
@@ -28,9 +30,9 @@
 - §13 M1: passing §1.3 on a disposable repo.
 - §14: spike 8.
 
-Not in M1b: the board with drag and drop, the batch approval sheet, ⌘K, the Knowledge and Settings views (apart from the keep-awake control), takeover and the PTY, script hooks for terminal sessions, login-item registration, and the Tauri MCP bridge.
+Not in M1b: the board with drag and drop, the batch approval sheet, ⌘K, the Knowledge and Settings views (apart from the keep-awake control), takeover and the PTY, script hooks for terminal sessions, login-item registration, the menu bar's "pause all" (spec §10; there is no pause-all API yet), and the Tauri MCP bridge.
 
-**Plan series:** `00-spikes` (results in `docs/architecture/research/spikes-summary.md`), `01-m0-scaffold`, `02-m1a-engine-core` (must be merged), **`03-m1b-sessions-and-ui` (this file)**.
+**Plan series:** `00-spikes` (results in `docs/architecture/research/spikes-summary.md`), `01-m0-scaffold`, `02-m1a-engine-core` (merged as `c36abd8`), **`03-m1b-sessions-and-ui` (this file)**. The plan was written before M1a was built and has since been checked against M1a's code on `main`: every file, signature and anchor it names should match. Where one doesn't, trust the code on `main`, adapt the step and note it in the task's report.
 
 **Before you start:** read `docs/architecture/research/spikes-summary.md`, especially its "M1b plan changes required" list, and apply each item to the task it names. This plan was written against the Agent SDK 0.3.299 type declarations, before the spikes ran. These values depend on the spikes. The spikes ran on 2026-10-15, and the summary's change list is applied below; the measured values are in its "Constants for M1b" table:
 
@@ -97,6 +99,10 @@ Everything in M0's and M1a's Global Constraints still applies. On top of that:
   | Billing preflight (`accountInfo()`) | 15 s |
   | Supervisor stop timeout | 30 s |
 - **New env vars** go in `apps/daemon/src/env.ts` and `.env.example`, each with a comment.
+- **Time comes from the injected `Clock`** (`apps/daemon/src/clock`), as `apps/daemon/AGENTS.md` requires: daemon logic never calls `setTimeout` or `Date.now()` directly. Tests drive timeouts with `ManualClock` and wait on a condition (`waitFor`, `waitForAsync`, `vi.waitFor`), never on a sleep.
+- **Code comments carry no decision, spike or task numbers** (`.claude/rules/code-style.md`). The numbers live in this plan's prose, `decisions.md` and the AGENTS files; a comment keeps the why-sentence only. `spec §…` references are fine, as in `runner.ts`.
+- **Research notes are allowlisted.** `tests/repo/src/architecture-docs.test.ts` lists every file allowed in `docs/architecture/research/` (`PUBLIC_RESEARCH`) and rejects `/Users/<name>` paths and key prefixes in them. A task that adds a note there adds its name to `PUBLIC_RESEARCH` in the same commit, and replaces any home-directory path in pasted output with `~`.
+- **`createTempRepo()` is synchronous** (`apps/daemon/test/fixtures.ts`). Never `await` it: `@typescript-eslint/await-thenable` fails the lint.
 
 ## Review Focus
 
@@ -181,6 +187,7 @@ The spec's §14 spike 8 question is "a Node single-executable sidecar inside Tau
 - Create: `apps/desktop/scripts/prepare-sidecar.ts`, `apps/desktop/scripts/tsconfig.json`
 - Modify: `apps/desktop/package.json`, `apps/desktop/src-tauri/tauri.conf.json`, `Makefile`, `.gitignore`, `knip.json`
 - Create: `docs/architecture/research/spike-08-sidecar.md`
+- Modify: `tests/repo/src/architecture-docs.test.ts` (the research allowlist)
 
 **Interfaces:**
 - Consumes: `openDatabase` and `DB_MIGRATIONS_DIR` from `@10db/db` (M0); `startDaemon` and `DaemonOptions` from `daemon` (M1a Task 19); `tempDir` and `waitForAsync` from `apps/daemon/test/fixtures.ts` (M1a).
@@ -207,17 +214,13 @@ The test passes a path that doesn't exist. Today `openDatabase` ignores its seco
 `apps/daemon/test/bundle.test.ts`:
 ```ts
 import { execFileSync, spawn } from 'node:child_process';
-import { cpSync, existsSync, readFileSync } from 'node:fs';
+import { cpSync, existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { readRuntimeInfo } from '../src/daemon';
 import { tempDir, waitForAsync } from './fixtures';
 
 const daemonRoot = resolve(import.meta.dirname, '..');
-
-interface DaemonJson {
-  readonly pid: number;
-  readonly port: number;
-}
 
 describe('the bundled daemon', () => {
   let work: { path: string; cleanup(): void };
@@ -260,10 +263,10 @@ describe('the bundled daemon', () => {
     });
     try {
       const info = await waitForAsync(() => {
-        const file = join(dataDir, 'daemon.json');
         if (child.exitCode !== null) throw new Error(`the bundle exited early:\n${stderr}`);
-        if (!existsSync(file)) return Promise.resolve(undefined);
-        const parsed = JSON.parse(readFileSync(file, 'utf8')) as DaemonJson;
+        if (!existsSync(join(dataDir, 'daemon.json'))) return Promise.resolve(undefined);
+        // readRuntimeInfo parses the file with the daemon's own schema.
+        const parsed = readRuntimeInfo(dataDir);
         return Promise.resolve(parsed.pid === child.pid ? parsed : undefined);
       }, 30_000);
       const res = await fetch(`http://127.0.0.1:${String(info.port)}/health`);
@@ -276,7 +279,7 @@ describe('the bundled daemon', () => {
   }, 60_000);
 });
 ```
-`as DaemonJson` reads the daemon's own runtime file at a process boundary, and the test only reads two fields. `HOME` points at the temp dir and `SHELL` at `/bin/sh`, so that Task 7's login-shell capture runs fast and touches nothing of the builder's.
+`readRuntimeInfo` reads the daemon's runtime file through its zod schema, as `crash-recovery.test.ts` does, so the test needs no cast. `HOME` points at the temp dir and `SHELL` at `/bin/sh`, so that Task 7's login-shell capture runs fast and touches nothing of the builder's.
 
 - [ ] **Step 2: Let the build take an output directory, and run the tests to see them fail**
 
@@ -402,6 +405,8 @@ export function resolveSqliteBinding(env: DaemonEnv): string | undefined {
 - `pnpm --filter @10db/daemon build [outDir]` bundles everything into `dist/daemon.mjs` and copies
   migrations (`drizzle/`) and the SQLite addon (`better_sqlite3.node`) beside it. Nothing stays
   external: the Tauri sidecar runs the bundle from a directory with no node_modules.
+  `better-sqlite3` is still a daemon dependency: the build copies its addon, and
+  `test/crash-recovery.test.ts` opens the database with it directly.
 ```
 
 - [ ] **Step 4: Run the tests to see them pass**
@@ -425,7 +430,7 @@ const desktop = resolve(import.meta.dirname, '..');
 const repo = resolve(desktop, '../..');
 const tauri = resolve(desktop, 'src-tauri');
 
-// mise.toml pins Node for the whole repo (M0); its `node = "x.y.z"` line is the version to ship.
+// mise.toml pins Node for the whole repo, so its `node = "x.y.z"` line is the version to ship.
 const pinned = /^node = "([^"]+)"$/m.exec(readFileSync(resolve(repo, 'mise.toml'), 'utf8'))?.[1];
 if (!pinned) throw new Error('mise.toml has no node = "x.y.z" line');
 if (process.version !== `v${pinned}`) {
@@ -565,7 +570,7 @@ macOS starts Finder-launched apps with `PATH=/usr/bin:/bin:/usr/sbin:/sbin`, so 
 
 - **Status:** <VERIFIED | PARTIAL, with what failed>
 - **Date:** <date run>
-- **Versions:** Node <node -v> · tauri <from Cargo.lock> · @tauri-apps/cli 2.12.2 · macOS <sw_vers -productVersion>
+- **Versions:** Node <node -v> · tauri <from Cargo.lock> · @tauri-apps/cli <from apps/desktop/package.json> · macOS <sw_vers -productVersion>
 - **Command:** `pnpm --filter @10db/desktop sidecar && pnpm --filter @10db/desktop tauri build --bundles app`
 
 ## Question
@@ -596,14 +601,17 @@ externalBin, and the obstacle that stopped it.>
   That is out of scope until there is a release; the ad-hoc signature is for local builds only.
 - <Any change to M1b Tasks 7 or 8, or "none".>
 ```
-Fill each `<…>` from what you observed. This is a results record, so every value comes from the run.
+Fill each `<…>` from what you observed. This is a results record, so every value comes from the run. Replace any home-directory path in pasted output with `~`: the repo test rejects `/Users/<name>` in research notes.
+
+`tests/repo/src/architecture-docs.test.ts`: add `'spike-08-sidecar.md',` to `PUBLIC_RESEARCH`, after `'spike-07-usage-limits.md',`. The test asserts the research directory holds exactly that list, so without it `pnpm test` fails.
 
 - [ ] **Step 9: Check and commit**
 
 ```bash
 pnpm typecheck && pnpm lint && pnpm knip
+pnpm vitest run --project repo architecture-docs
 pnpm format
-git add packages/db/src/database.ts packages/db/src/database.test.ts apps/daemon/scripts/build.ts apps/daemon/src/env.ts apps/daemon/.env.example apps/daemon/src/paths.ts apps/daemon/src/daemon/start.ts apps/daemon/src/main.ts apps/daemon/AGENTS.md apps/daemon/test/bundle.test.ts apps/desktop/scripts/prepare-sidecar.ts apps/desktop/scripts/tsconfig.json apps/desktop/package.json apps/desktop/src-tauri/tauri.conf.json Makefile .gitignore knip.json pnpm-lock.yaml docs/architecture/research/spike-08-sidecar.md && git commit -m 'feat(desktop): ship the daemon bundle and its sqlite addon as a node sidecar (spike 8)'
+git add packages/db/src/database.ts packages/db/src/database.test.ts apps/daemon/scripts/build.ts apps/daemon/src/env.ts apps/daemon/.env.example apps/daemon/src/paths.ts apps/daemon/src/daemon/start.ts apps/daemon/src/main.ts apps/daemon/AGENTS.md apps/daemon/test/bundle.test.ts apps/desktop/scripts/prepare-sidecar.ts apps/desktop/scripts/tsconfig.json apps/desktop/package.json apps/desktop/src-tauri/tauri.conf.json Makefile .gitignore knip.json pnpm-lock.yaml docs/architecture/research/spike-08-sidecar.md tests/repo/src/architecture-docs.test.ts && git commit -m 'feat(desktop): ship the daemon bundle and its sqlite addon as a node sidecar (spike 8)'
 ```
 Expected: all checks exit 0.
 
@@ -619,7 +627,7 @@ A Finder-launched app gets `PATH=/usr/bin:/bin:/usr/sbin:/sbin` (Task 1), so the
 - Test: `apps/daemon/src/environment/login-env.test.ts`, `environment/session-env.test.ts`, `environment/system-check.test.ts`, `packages/contracts/src/system.test.ts`
 
 **Interfaces:**
-- Consumes: `BillingMode` from `@10db/contracts`; `tempDir` from `apps/daemon/test/fixtures.ts`.
+- Consumes: `BillingMode` from `@10db/contracts`; `Clock`, `systemClock` and `ManualClock` from `apps/daemon/src/clock`; `tempDir` and `waitFor` from `apps/daemon/test/fixtures.ts`.
 - Produces:
   - From `@10db/contracts` (`system.ts`):
     - `ToolName = { Claude: 'claude', Git: 'git', Docker: 'docker' } as const`, and its type.
@@ -629,7 +637,7 @@ A Finder-launched app gets `PATH=/usr/bin:/bin:/usr/sbin:/sbin` (Task 1), so the
     - Capture constants: `LOGIN_ENV_MARKER`, `LOGIN_SHELL_TIMEOUT_MS = 10_000`.
     - `interface LoginEnv { readonly vars: Readonly<Record<string, string>>; readonly source: 'login_shell' | 'inherited'; readonly warning: string | null }`
     - `parseEnvBlock(output: string): Record<string, string>`
-    - `captureLoginEnv(opts: { readonly inherited: Readonly<Record<string, string | undefined>>; readonly shell?: string; readonly timeoutMs?: number }): Promise<LoginEnv>`
+    - `captureLoginEnv(opts: { readonly inherited: Readonly<Record<string, string | undefined>>; readonly shell?: string; readonly timeoutMs?: number; readonly clock?: Clock }): Promise<LoginEnv>`. The timeout and drain timers come from `clock` (default `systemClock`).
     - Variable lists: `BILLING_SWITCH_VARS`, `NESTED_SESSION_VARS`. `BILLING_SWITCH_PREFIXES` and `KEYCHAIN` are module constants.
     - Secrets: `interface SecretSource { anthropicApiKey(): string | null }`, `keychainSecrets`, `class SessionEnvError extends Error`.
     - `buildSessionEnv(input: { readonly base: Readonly<Record<string, string>>; readonly billingMode: BillingMode; readonly clientApp: string; readonly secrets: SecretSource }): Record<string, string>`
@@ -667,10 +675,11 @@ describe('SystemCheckDto', () => {
 
 `apps/daemon/src/environment/login-env.test.ts`:
 ```ts
-import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { tempDir } from '../../test/fixtures';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { tempDir, waitFor } from '../../test/fixtures';
+import { ManualClock } from '../clock';
 import { captureLoginEnv, LOGIN_ENV_MARKER, parseEnvBlock } from './index';
 
 let dir: { path: string; cleanup(): void };
@@ -724,18 +733,20 @@ describe('captureLoginEnv', () => {
   it('kills a hanging login shell and its children, then falls back to the inherited environment', async () => {
     const pids = join(dir.path, 'pids');
     const shell = fakeShell('hang.sh', `sleep 30 &\necho "$$ $!" > '${pids}'\nwait`);
-    const started = Date.now();
-    // 1 s leaves the fake shell time to write its pid file even on a loaded machine.
-    const login = await captureLoginEnv({ inherited: { PATH: '/usr/bin:/bin', HOME: '/h', UNSET: undefined }, shell, timeoutMs: 1_000 });
-    expect(Date.now() - started).toBeLessThan(3_000);
+    const clock = new ManualClock();
+    const capture = captureLoginEnv({ inherited: { PATH: '/usr/bin:/bin', HOME: '/h', UNSET: undefined }, shell, timeoutMs: 1_000, clock });
+    // The timeout fires only when the test moves the clock, after both processes are running.
+    await waitFor(() => existsSync(pids) && readFileSync(pids, 'utf8').includes(' '));
+    const [shellPid, sleepPid] = readFileSync(pids, 'utf8').trim().split(' ').map(Number);
+    clock.advance(1_000);
+    const login = await capture;
     expect(login.source).toBe('inherited');
     expect(login.vars).toEqual({ PATH: '/usr/bin:/bin', HOME: '/h' });
     expect(login.warning).toMatch(/did not finish within 1 s; using the environment 10db was started with/);
-    expect(existsSync(pids)).toBe(true);
-    const [shellPid, sleepPid] = readFileSync(pids, 'utf8').trim().split(' ').map(Number);
-    await new Promise((r) => setTimeout(r, 100));
-    expect(alive(shellPid ?? 0)).toBe(false);
-    expect(alive(sleepPid ?? 0)).toBe(false);
+    await vi.waitFor(() => {
+      expect(alive(shellPid ?? 0)).toBe(false);
+      expect(alive(sleepPid ?? 0)).toBe(false);
+    });
   });
 
   it('falls back when the shell exits without printing its environment', async () => {
@@ -758,8 +769,26 @@ describe('captureLoginEnv', () => {
     expect(login.warning).not.toContain(secret);
   });
 });
+
+/** The real shells with the real flags: detached, no terminal, stdin closed, macOS `env -0`. */
+describe.each([
+  { shell: '/bin/zsh', profile: '.zshrc' },
+  { shell: '/bin/sh', profile: '.profile' },
+])('captureLoginEnv with $shell', ({ shell, profile }) => {
+  it.skipIf(!existsSync(shell))('captures what the profile exports and drops its banner', async () => {
+    const home = join(dir.path, 'home');
+    mkdirSync(home);
+    writeFileSync(join(home, profile), "echo 'Good morning from the profile'\nexport FROM_REAL_PROFILE=yes\n");
+    // ZDOTDIR points zsh at the temp profile; /bin/sh ignores it and reads $HOME/.profile.
+    const login = await captureLoginEnv({ inherited: { PATH: '/usr/bin:/bin', HOME: home, ZDOTDIR: home }, shell });
+    expect(login.warning).toBeNull();
+    expect(login.source).toBe('login_shell');
+    expect(login.vars['FROM_REAL_PROFILE']).toBe('yes');
+    expect(Object.values(login.vars).join('\n')).not.toContain('Good morning');
+  });
+});
 ```
-The `pids` file is written right after `sleep` starts. A capture that only killed the shell pid would leave `sleep` running, so the test proves the whole process group is killed.
+The `pids` file is written right after `sleep` starts. A capture that only killed the shell pid would leave `sleep` running, so the test proves the whole process group is killed. The real-shell rows are the only proof that `zsh -l -i -c` works detached with no controlling terminal; zsh reads `$ZDOTDIR/.zshrc` for an interactive shell, and macOS's `/bin/sh` reads `$HOME/.profile` as a login shell. They skip where the shell is missing (zsh on the Ubuntu CI image) and run on every Mac.
 
 `apps/daemon/src/environment/session-env.test.ts`:
 ```ts
@@ -985,6 +1014,7 @@ In `packages/contracts/src/index.ts`, add `export * from './system';`. In `packa
 `apps/daemon/src/environment/login-env.ts`:
 ```ts
 import { spawn } from 'node:child_process';
+import { systemClock, type Clock, type Timer } from '../clock';
 
 /** Printed by the capture command just before `env -0`; everything before it is profile noise. */
 export const LOGIN_ENV_MARKER = '__10DB_ENV_BEGIN__';
@@ -1037,10 +1067,12 @@ export function captureLoginEnv(opts: {
   readonly inherited: Readonly<Record<string, string | undefined>>;
   readonly shell?: string;
   readonly timeoutMs?: number;
+  readonly clock?: Clock;
 }): Promise<LoginEnv> {
   const inherited = definedOnly(opts.inherited);
   const shell = opts.shell ?? inherited['SHELL'] ?? '/bin/zsh';
   const timeoutMs = opts.timeoutMs ?? LOGIN_SHELL_TIMEOUT_MS;
+  const clock = opts.clock ?? systemClock;
   const fallback = (problem: string): LoginEnv => ({
     vars: inherited,
     source: 'inherited',
@@ -1050,7 +1082,7 @@ export function captureLoginEnv(opts: {
   return new Promise((resolve) => {
     let settled = false;
     let output = '';
-    let drain: NodeJS.Timeout | null = null;
+    let drain: Timer | null = null;
     const child = spawn(shell, ['-l', '-i', '-c', `printf '%s\\0' ${LOGIN_ENV_MARKER}; env -0`], {
       env: inherited,
       stdio: ['ignore', 'pipe', 'ignore'],
@@ -1059,8 +1091,8 @@ export function captureLoginEnv(opts: {
     const finish = (result: LoginEnv): void => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
-      if (drain) clearTimeout(drain);
+      timer.cancel();
+      drain?.cancel();
       resolve(result);
     };
     const parse = (code: number | null): void => {
@@ -1068,7 +1100,7 @@ export function captureLoginEnv(opts: {
       if (Object.keys(vars).length > 0) finish({ vars, source: 'login_shell', warning: null });
       else finish(fallback(`The login shell (${shell}) exited with code ${String(code)} without printing its environment`));
     };
-    const timer = setTimeout(() => {
+    const timer = clock.setTimeout(() => {
       killGroup(child.pid);
       finish(fallback(`The login shell (${shell}) did not finish within ${String(timeoutMs / 1000)} s`));
     }, timeoutMs);
@@ -1082,7 +1114,9 @@ export function captureLoginEnv(opts: {
       finish(fallback(`The login shell (${shell}) could not start (${(error as NodeJS.ErrnoException).code ?? error.name})`));
     });
     child.once('exit', (code) => {
-      drain = setTimeout(() => {
+      // After a timeout the group is already killed and the result is in.
+      if (settled) return;
+      drain = clock.setTimeout(() => {
         killGroup(child.pid);
         parse(code);
       }, DRAIN_MS);
@@ -1296,7 +1330,7 @@ pnpm vitest run --project daemon environment
 Expected:
 - `generate` writes `packages/contracts/generated/system-check-dto.schema.json`.
 - All contracts tests PASS, including the drift test.
-- The environment tests PASS. The hang test finishes in well under 3 s.
+- The environment tests PASS, including the real `/bin/zsh` and `/bin/sh` rows on macOS.
 
 Only names that a test or a later task imports are exported. `KEYCHAIN`, `LOGIN_SHELL_TIMEOUT_MS`, `VERSION_PROBE_TIMEOUT_MS`, `BILLING_SWITCH_PREFIXES` and `REQUIRED_TOOLS` stay module constants, so knip has nothing to flag. Task 7 exports `REQUIRED_TOOLS` when `start.ts` first imports it.
 
@@ -1320,13 +1354,14 @@ This task implements M1a's `SessionAdapter` on the Agent SDK's `query()` in stre
 **Files:**
 - Create: `apps/daemon/src/sessions/claude-mapping.ts`, `sessions/claude-adapter.ts`, `sessions/claude-test-support.ts`, `sessions/project-mcp.ts`
 - Modify: `apps/daemon/src/sessions/index.ts`, `apps/daemon/package.json`, `pnpm-workspace.yaml`, `apps/daemon/src/env.ts`, `apps/daemon/.env.example`, `packages/contracts/src/system.ts` (the MCP approval contracts)
-- Modify (M1a): `apps/daemon/src/sessions/types.ts` (`SessionSpec.billingMode` and `SessionSpec.projectMcpServers`), `apps/daemon/src/runner/runner.ts` (passes both), `apps/daemon/src/sessions/fake-adapter.test.ts` (its `spec()` helper)
+- Modify (M1a): `apps/daemon/src/sessions/types.ts` (`SessionSpec.billingMode` and `SessionSpec.projectMcpServers`), `apps/daemon/src/runner/runner.ts` (passes both), `apps/daemon/src/sessions/fake-adapter.test.ts` (its `spec()` helper), `apps/daemon/src/sessions/unavailable-adapter.test.ts` (its `SessionSpec` literal)
+- Modify: `packages/contracts/src/json-schema.ts`, `packages/contracts/generated/` (regenerated)
 - Test: `apps/daemon/src/sessions/project-mcp.test.ts`, `sessions/claude-mapping.test.ts`, `sessions/claude-adapter.test.ts`, `sessions/claude-adapter.live.test.ts`
 
 **Interfaces:**
 - Consumes:
   - M1a's sessions types: `SessionAdapter`, `SessionSpec`, `SessionEvent`, `SessionHandle`, `ToolDecision` and `createChannel` (Task 10).
-  - `GuardVerdict` from `guard`; `Logger` and `createLogger` from `log`.
+  - `GuardVerdict` from `guard`; `Logger` and `createLogger` from `log`; `Clock`, `systemClock` and `ManualClock` from `clock`.
   - `captureLoginEnv`, `findOnPath`, `buildSessionEnv` and `keychainSecrets` from `environment` (Task 2), used by the live test.
   - `createTempRepo` from the test fixtures; `loadEnv` from `env.ts`.
 - Produces:
@@ -1339,10 +1374,10 @@ This task implements M1a's `SessionAdapter` on the Agent SDK's `query()` in stre
     - `toPermissionResult(decision: ToolDecision, input: Record<string, unknown>): PermissionResult`
     - `toHookOutput(verdict: GuardVerdict): HookJSONOutput`
     - `userMessage(text: string, priority?: 'now' | 'next' | 'later'): SDKUserMessage`
-    - `billingMismatch(expected: BillingMode, seen: { readonly apiKeySource: string | undefined; readonly apiProvider: string | undefined }): string | null`
+    - `billingMismatch(expected: BillingMode, seen: { readonly apiKeySource: string | undefined; readonly apiProvider: string | undefined; readonly subscriptionType: string | undefined }): string | null`. A subscription also needs a non-empty `subscriptionType`; it is never compared to a plan name.
     - `STDIO_LAUNCHER = '/usr/bin/env'`
     - `toSdkMcpServer(server: ProjectMcpServer): McpServerConfig`. A stdio server becomes `{ command: STDIO_LAUNCHER, args: ['-i', 'NAME=value', …, command, …args] }` with no `env` block (decision 52).
-  - From `packages/contracts/src/system.ts`: `McpTransport`, `McpServerReview`, `McpApprovalChoice` (`approve`, `deny`), `McpVerdict` (`approved`, `denied`), `McpApprovalDto` and `McpServerStatusDto`. Task 7 stores and serves them; Task 12 renders `McpServerReview`.
+  - From `packages/contracts/src/system.ts`: `McpTransport`, `McpServerReview`, `McpApprovalChoice` (`approve`, `deny`), `McpVerdict` (`approved`, `denied`), `McpApprovalDto` and `McpServerStatusDto`. Task 7 stores and serves them; Task 12 renders `McpServerReview`. `McpServerReview` (inside a card's `detail`) and `McpServerStatusDto` (a route's response) cross HTTP, so both are registered in `CONTRACT_SCHEMAS`; `McpApprovalDto` is the stored row and is not served.
   - From `sessions/project-mcp.ts`. It is pure apart from reading one file; Task 7 exports the runner's names from `index.ts` when the runner first imports them:
     - `TENDB_MCP_SERVER = '10db'` and `STDIO_BASE_ENV = ['PATH', 'HOME']`
     - `type ProjectMcpServer = { type: 'stdio'; command: string; args: readonly string[]; env: Readonly<Record<string, string>> } | { type: 'http' | 'sse'; url: string; headers: Readonly<Record<string, string>> | null }`, every field `readonly`. A stdio server's `env` is its whole environment.
@@ -1359,7 +1394,7 @@ This task implements M1a's `SessionAdapter` on the Agent SDK's `query()` in stre
   - From `sessions/claude-adapter.ts`:
     - `CLAUDE_MCP_SERVER = TENDB_MCP_SERVER` (`'10db'`)
     - `type QueryFn = (params: { prompt: AsyncIterable<SDKUserMessage>; options: Options }) => Query`
-    - `interface ClaudeAdapterOptions { readonly claudePath: string; readonly pluginDir: string; readonly logger: Logger; readonly query?: QueryFn; readonly stopGraceMs?: number }`
+    - `interface ClaudeAdapterOptions { readonly claudePath: string; readonly pluginDir: string; readonly logger: Logger; readonly query?: QueryFn; readonly stopGraceMs?: number; readonly clock?: Clock }`. Every adapter timer (the preflight, the stop grace periods) comes from `clock`, default `systemClock`.
     - A module constant `BILLING_PREFLIGHT_MS = 15_000` (not exported)
     - `buildQueryOptions(spec: SessionSpec, deps: { readonly claudePath: string; readonly pluginDir: string; readonly abortController: AbortController; readonly billingVerified: Promise<boolean>; readonly onSpawn: (pid: number | null) => void; readonly onStderr: (chunk: string) => void }): Options`. `canUseTool` and the PreToolUse hook await `billingVerified` and deny when it is false.
     - `createClaudeAdapter(opts: ClaudeAdapterOptions): SessionAdapter`
@@ -1369,6 +1404,7 @@ This task implements M1a's `SessionAdapter` on the Agent SDK's `query()` in stre
     - `turn_complete` tokens are running totals for the session, so M1a's `updateSessionUsage` (which overwrites) stores the right numbers.
     - `costUsd` is the SDK's cumulative `total_cost_usd`.
     - A billing mismatch ends the session with `ended { reason: 'error', message: 'Billing check failed: …' }` and no `started`.
+    - An assistant message with `error: 'rate_limit'` carries no reset time, so its `rate_limit` event takes the `resetsAt` of the latest `rate_limit_event` in the session. With none seen it stays `null`, and the runner's `defaultPauseMs` applies (spike 7 suggested now + 5 h; a 30-minute pause that hits the limit again simply pauses again).
     - When the preflight (`accountInfo()` within `BILLING_PREFLIGHT_MS`) fails, the prompt is never sent.
     - When only the `init` check fails, the first model request may already have been billed, but no tool runs.
     - At the first `init`, the adapter logs `claude session mcp` with `mcpServers: { name, status }[]`, the servers the CLI reports. MCP startup doesn't block `init`, so a server `npx` is still downloading shows `pending` there. After the first turn the adapter reads `mcpServerStatus()` once and logs `claude session mcp status` with the same shape (names and status only, never the status's `config`, which holds header values). Task 14's acceptance check requires `connected` in that second line.
@@ -1423,12 +1459,12 @@ In M1a's `apps/daemon/src/runner/runner.ts`, in the `opts.adapter.start({ … })
 ```ts
       billingMode: project.billingMode,
 ```
-In M1a's `apps/daemon/src/sessions/fake-adapter.test.ts`, add `billingMode: 'subscription',` to the object the `spec()` helper returns, after `env: {},`. The fake adapter ignores the field.
+In M1a's `apps/daemon/src/sessions/fake-adapter.test.ts`, add `billingMode: 'subscription',` to the object the `spec()` helper returns, after `env: {},`. The fake adapter ignores the field. Do the same in `apps/daemon/src/sessions/unavailable-adapter.test.ts`, whose test builds a whole `SessionSpec` literal; these are the only places outside the runner that build one (`grep -rn 'resumeProviderSessionId:' apps/daemon/src apps/daemon/test`).
 ```bash
 pnpm typecheck
-pnpm vitest run --project daemon fake-adapter runner
+pnpm vitest run --project daemon fake-adapter unavailable-adapter runner
 ```
-Expected: typecheck exits 0 and both suites still PASS.
+Expected: typecheck exits 0 and the suites still PASS.
 
 - [ ] **Step 2: Write the failing test for the repo's MCP config**
 
@@ -1641,7 +1677,7 @@ export type McpTransport = (typeof McpTransport)[keyof typeof McpTransport];
 const ConfigHash = z.string().regex(/^[0-9a-f]{64}$/);
 
 /**
- * A repo `.mcp.json` server as the builder reviews it (decision 52): exactly what would run or be
+ * A repo `.mcp.json` server as the builder reviews it: exactly what would run or be
  * contacted, and the names, never the values, of what it reads. `configHash` is the SHA-256 of the
  * server's normalized config, before expansion; an approval covers that hash only.
  */
@@ -1680,7 +1716,8 @@ export const McpApprovalDto = z.object({
   /** The variables the approval lets 10db expand into this server. Empty when denied. */
   variables: z.array(z.string()),
   sourceInboxId: InboxItemId.nullable(),
-  createdAt: z.iso.datetime(),
+  /** When the verdict was last recorded; a later answer for the same config replaces it. */
+  updatedAt: z.iso.datetime(),
 });
 export type McpApprovalDto = z.infer<typeof McpApprovalDto>;
 
@@ -1705,7 +1742,7 @@ import { z } from 'zod';
 /** 10db's own MCP server in every managed session. A repo server with this name never replaces it. */
 export const TENDB_MCP_SERVER = '10db';
 /**
- * The only session variables a stdio server gets without naming them in its config. Measured for spike 4:
+ * The only session variables a stdio server gets without naming them in its config. Measured:
  * `npx -y @mantine/mcp-server` downloads, starts and lists its tools with these two alone. macOS adds
  * `__CF_USER_TEXT_ENCODING` inside the process itself under `env -i`; it is not a session variable.
  */
@@ -1763,7 +1800,7 @@ export interface RepoMcp {
   readonly warnings: readonly string[];
 }
 
-/** The builder's verdict on one exact config (decision 52). */
+/** The builder's verdict on one exact config. */
 export interface McpApproval {
   readonly verdict: McpVerdict;
   readonly variables: readonly string[];
@@ -1939,7 +1976,7 @@ function resolveServer(server: RepoMcpServer, scope: ExpandScope): ProjectMcpSer
 }
 
 /**
- * Sorts the repo's servers by the builder's verdicts (decision 52). Approved ones are expanded from the
+ * Sorts the repo's servers by the builder's verdicts. Approved ones are expanded from the
  * session environment, with only the variables their approval names; the rest are left out and reported.
  * Nothing here stops the session from starting.
  */
@@ -1994,20 +2031,27 @@ Notes:
 
 In M1a's `apps/daemon/src/sessions/types.ts`, add `import type { ProjectMcpServer } from './project-mcp';` and this field to `SessionSpec`, after `billingMode`:
 ```ts
-  /** The repo's approved MCP servers (decision 52), already expanded; passed next to 10db's server. */
+  /** The repo's approved MCP servers, already expanded; passed next to 10db's server. */
   readonly projectMcpServers: Readonly<Record<string, ProjectMcpServer>>;
 ```
-In M1a's `apps/daemon/src/runner/runner.ts`, add these two lines after Step 1's `billingMode: project.billingMode,`:
+In M1a's `apps/daemon/src/runner/runner.ts`, add this line after Step 1's `billingMode: project.billingMode,` (Task 7 replaces the `{}` with the resolved repo servers):
 ```ts
-      // Task 7 loads the repo's .mcp.json here.
       projectMcpServers: {},
 ```
-In M1a's `apps/daemon/src/sessions/fake-adapter.test.ts`, add `projectMcpServers: {},` to the `spec()` helper's object, after `billingMode: 'subscription',`.
+In M1a's `apps/daemon/src/sessions/fake-adapter.test.ts` and `apps/daemon/src/sessions/unavailable-adapter.test.ts`, add `projectMcpServers: {},` to the spec object, after `billingMode: 'subscription',`.
+
+In `packages/contracts/src/json-schema.ts`, import `McpServerReview` and `McpServerStatusDto` from `./system` and add them to `CONTRACT_SCHEMAS`:
+```ts
+  'mcp-server-review': McpServerReview,
+  'mcp-server-status-dto': McpServerStatusDto,
+```
 ```bash
+pnpm --filter @10db/contracts generate
+pnpm vitest run --project contracts
 pnpm vitest run --project daemon project-mcp
 pnpm typecheck
 ```
-Expected: `project-mcp` PASS (21 tests) and typecheck exits 0.
+Expected: `generate` writes the two schema files, the contracts tests PASS (including the drift test), `project-mcp` PASS (21 tests) and typecheck exits 0.
 
 - [ ] **Step 5: Write the SDK-typed fixtures and the failing mapping test**
 
@@ -2276,21 +2320,26 @@ describe('permission and hook translation', () => {
 });
 
 describe('billingMismatch', () => {
+  const MAX = 'Claude Max';
   it.each([
-    [BillingMode.Subscription, 'none', 'firstParty', false],
-    [BillingMode.Subscription, 'none', 'bedrock', true],
-    [BillingMode.Subscription, 'ANTHROPIC_API_KEY', 'firstParty', true],
-    [BillingMode.Subscription, 'apiKeyHelper', 'firstParty', true],
-    [BillingMode.Subscription, 'none', undefined, true],
+    [BillingMode.Subscription, 'none', 'firstParty', MAX, false],
+    [BillingMode.Subscription, 'none', 'bedrock', MAX, true],
+    [BillingMode.Subscription, 'ANTHROPIC_API_KEY', 'firstParty', MAX, true],
+    [BillingMode.Subscription, 'apiKeyHelper', 'firstParty', MAX, true],
+    [BillingMode.Subscription, 'none', undefined, MAX, true],
     // accountInfo() omits apiKeySource on a claude.ai login; the provider still has to be first-party.
-    [BillingMode.Subscription, undefined, 'firstParty', false],
-    [BillingMode.Subscription, undefined, 'bedrock', true],
-    [BillingMode.ApiKey, 'ANTHROPIC_API_KEY', 'firstParty', false],
-    [BillingMode.ApiKey, 'none', 'firstParty', true],
-    [BillingMode.Bedrock, 'none', 'bedrock', false],
-    [BillingMode.Bedrock, 'none', 'firstParty', true],
-  ] as const)('%s with apiKeySource %s and apiProvider %s → mismatch %s', (mode, apiKeySource, apiProvider, mismatch) => {
-    const result = billingMismatch(mode, { apiKeySource, apiProvider });
+    [BillingMode.Subscription, undefined, 'firstParty', MAX, false],
+    [BillingMode.Subscription, undefined, 'bedrock', MAX, true],
+    // A first-party login with no plan is not a subscription; the plan's name itself is never compared.
+    [BillingMode.Subscription, 'none', 'firstParty', undefined, true],
+    [BillingMode.Subscription, 'none', 'firstParty', '', true],
+    [BillingMode.Subscription, 'none', 'firstParty', 'Claude Pro', false],
+    [BillingMode.ApiKey, 'ANTHROPIC_API_KEY', 'firstParty', undefined, false],
+    [BillingMode.ApiKey, 'none', 'firstParty', undefined, true],
+    [BillingMode.Bedrock, 'none', 'bedrock', undefined, false],
+    [BillingMode.Bedrock, 'none', 'firstParty', undefined, true],
+  ] as const)('%s with apiKeySource %s, apiProvider %s and subscriptionType %s → mismatch %s', (mode, apiKeySource, apiProvider, subscriptionType, mismatch) => {
+    const result = billingMismatch(mode, { apiKeySource, apiProvider, subscriptionType });
     expect(result !== null).toBe(mismatch);
     if (result) expect(result).toContain(apiKeySource ?? 'unknown');
   });
@@ -2429,16 +2478,19 @@ export function userMessage(text: string, priority?: 'now' | 'next' | 'later'): 
 
 /**
  * Whether the session's credentials match the billing mode its environment was built for. `apiKeySource`
- * is 'none' for both a claude.ai login and a cloud provider, so a subscription also needs `apiProvider`.
+ * is 'none' for both a claude.ai login and a cloud provider, so a subscription also needs `apiProvider`,
+ * and a plan: `subscriptionType` must be non-empty. Its value is never compared, because plan names change.
+ * `ApiKeySource` also has 'oauth' and '/login managed key'; a subscription session has shown only 'none'
+ * or nothing, so the others are refused until one is seen on a real login.
  */
 export function billingMismatch(
   expected: BillingMode,
-  seen: { readonly apiKeySource: string | undefined; readonly apiProvider: string | undefined },
+  seen: { readonly apiKeySource: string | undefined; readonly apiProvider: string | undefined; readonly subscriptionType: string | undefined },
 ): string | null {
-  const saw = `apiKeySource ${seen.apiKeySource ?? 'unknown'}, apiProvider ${seen.apiProvider ?? 'unknown'}`;
+  const saw = `apiKeySource ${seen.apiKeySource ?? 'unknown'}, apiProvider ${seen.apiProvider ?? 'unknown'}, subscriptionType ${seen.subscriptionType ? 'set' : 'unknown'}`;
   switch (expected) {
     case BillingMode.Subscription:
-      return (seen.apiKeySource === undefined || seen.apiKeySource === 'none') && seen.apiProvider === 'firstParty'
+      return (seen.apiKeySource === undefined || seen.apiKeySource === 'none') && seen.apiProvider === 'firstParty' && Boolean(seen.subscriptionType)
         ? null
         : `expected the Claude subscription but saw ${saw}`;
     case BillingMode.ApiKey:
@@ -2451,11 +2503,11 @@ export function billingMismatch(
 /**
  * Claude Code merges a stdio server's `env` over its own environment, which is the session's: the
  * subscription token, an API key, AWS credentials. So 10db never relies on `env`. It launches the server
- * through `env -i`, which starts from an empty environment and sets only the names given (decision 52).
+ * through `env -i`, which starts from an empty environment and sets only the names given.
  */
 export const STDIO_LAUNCHER = '/usr/bin/env';
 
-/** A repo-declared MCP server (decisions 39 and 52) in the SDK's shape. */
+/** A repo-declared MCP server in the SDK's shape. */
 export function toSdkMcpServer(server: ProjectMcpServer): McpServerConfig {
   if (server.type === 'stdio') {
     const assignments = Object.entries(server.env).map(([name, value]) => `${name}=${value}`);
@@ -2482,6 +2534,7 @@ Expected: PASS.
 import type { AccountInfo, McpServerStatus, Options, Query, SDKMessage, SDKUserMessage, SpawnedProcess } from '@anthropic-ai/claude-agent-sdk';
 import { mintId } from '@10db/contracts';
 import { describe, expect, it, vi } from 'vitest';
+import { ManualClock, systemClock, type Clock } from '../clock';
 import { createLogger, silentLogger } from '../log';
 import { buildQueryOptions, CLAUDE_MCP_SERVER, createClaudeAdapter, type QueryFn } from './claude-adapter';
 import { assistantMessage, initMessage, PROVIDER_SESSION, rateLimitEvent, resultMessage, textBlock, toolUseBlock } from './claude-test-support';
@@ -2572,9 +2625,9 @@ function fakeQuery(script: Script): { query: QueryFn; record: Record_ } {
   return { query, record };
 }
 
-function adapterFor(script: Script, stopGraceMs = 1_000) {
+function adapterFor(script: Script, stopGraceMs = 1_000, clock: Clock = systemClock) {
   const fake = fakeQuery(script);
-  const adapter = createClaudeAdapter({ claudePath: '/usr/local/bin/claude', pluginDir: '/harness', logger: silentLogger, query: fake.query, stopGraceMs });
+  const adapter = createClaudeAdapter({ claudePath: '/usr/local/bin/claude', pluginDir: '/harness', logger: silentLogger, query: fake.query, stopGraceMs, clock });
   return { adapter, record: fake.record };
 }
 
@@ -2630,7 +2683,7 @@ describe('buildQueryOptions', () => {
     );
     expect(options.strictMcpConfig).toBe(true);
     expect(Object.keys(options.mcpServers ?? {})).toEqual(['mantine', CLAUDE_MCP_SERVER]);
-    // Launched through env -i with the env the runner built (decision 52), never with an `env` block.
+    // Launched through env -i with the env the runner built, never with an `env` block.
     expect(options.mcpServers?.['mantine']).toEqual({
       type: 'stdio',
       command: '/usr/bin/env',
@@ -2811,8 +2864,8 @@ describe('createClaudeAdapter', () => {
       settled = true;
       return d;
     });
-    // Let every pending microtask and timer run: the call must still be waiting on the preflight.
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    // One turn of the event loop lets every pending microtask run: the call must still be waiting on the preflight.
+    await new Promise((resolve) => setImmediate(resolve));
     expect(settled).toBe(false);
     expect(record.inputs).toEqual([]);
     answer({ apiProvider: 'bedrock' });
@@ -2865,13 +2918,23 @@ describe('createClaudeAdapter', () => {
     expect(events.filter((e) => e.type === 'ended')).toHaveLength(1);
   });
 
-  it('aborts when interrupt never answers, and still ends stopped within the grace period', async () => {
-    const { adapter } = adapterFor({ messages: [initMessage()], then: 'hang', interruptHangs: true }, 50);
+  it('gives up on an interrupt that never answers after the grace period, and still ends stopped', async () => {
+    const clock = new ManualClock();
+    const { adapter, record } = adapterFor({ messages: [initMessage()], then: 'hang', interruptHangs: true }, 50, clock);
     const handle = adapter.start(spec());
     const done = collect(handle.events);
-    const started = Date.now();
-    await handle.stop();
-    expect(Date.now() - started).toBeLessThan(1_000);
+    await vi.waitFor(() => {
+      expect(record.inputs).toHaveLength(1);
+    });
+    let returned = false;
+    const stopped = handle.stop().then(() => {
+      returned = true;
+    });
+    expect(record.interrupts).toBe(1);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(returned).toBe(false);
+    clock.advance(50);
+    await stopped;
     expect((await done).at(-1)).toEqual({ type: 'ended', reason: 'stopped', message: null });
   });
 
@@ -2879,6 +2942,12 @@ describe('createClaudeAdapter', () => {
     const { adapter } = adapterFor({ messages: [initMessage()], then: { throws: 'Claude Code process exited with code 1' } });
     const events = await collect(adapter.start(spec()).events);
     expect(events.at(-1)).toEqual({ type: 'ended', reason: 'error', message: 'Claude Code process exited with code 1' });
+  });
+
+  it('gives an assistant rate_limit error the reset time of the latest rate_limit_event', async () => {
+    const { adapter } = adapterFor({ messages: [initMessage(), rateLimitEvent({ status: 'allowed_warning', resetsAt: 1_791_000_000 }), assistantMessage([], 'rate_limit')] });
+    const limits = (await collect(adapter.start(spec()).events)).filter((e) => e.type === 'rate_limit');
+    expect(limits.at(-1)).toEqual({ type: 'rate_limit', status: 'rejected', resetsAt: new Date(1_791_000_000_000) });
   });
 
   it('ends rate_limited when a rejected limit is the last word before the stream ends', async () => {
@@ -2904,6 +2973,7 @@ Notes on the test:
 - `vi.fn<SessionSpec['canUseTool']>` types the mock from the spec, so no unused `_req` parameter is needed for ESLint.
 - `JSON.parse(line) as Record<string, unknown>` reads pino's own output line in the log test.
 - `Record_` has a trailing underscore so it doesn't shadow TypeScript's built-in `Record`.
+- The grace-period test runs on `ManualClock`, so it asserts the order (stop waits on the interrupt until the clock passes the grace period) and never elapsed wall time. `setImmediate` in the preflight test is one event-loop turn, not a timed wait.
 - The hook input carries the base hook fields (`session_id`, `transcript_path`, `cwd`) that `PreToolUseHookInput` requires. The `canUseTool` options carry the two required fields, `toolUseID` and `requestId`. If `tsc` reports another required field in either, add it.
 
 - [ ] **Step 9: Run it to see it fail**
@@ -2929,6 +2999,7 @@ import {
   type SpawnOptions,
 } from '@anthropic-ai/claude-agent-sdk';
 import { Provider } from '@10db/contracts';
+import { systemClock, type Clock } from '../clock';
 import type { Logger } from '../log';
 import { createChannel } from './channel';
 import { billingMismatch, contextEvent, mapSdkMessage, toHookOutput, toPermissionResult, toSdkMcpServer, userMessage } from './claude-mapping';
@@ -2954,6 +3025,8 @@ export interface ClaudeAdapterOptions {
   readonly query?: QueryFn;
   /** How long stop() waits for interrupt, then for exit after abort. */
   readonly stopGraceMs?: number;
+  /** Times the preflight and the stop grace periods; tests pass a ManualClock. */
+  readonly clock?: Clock;
 }
 
 interface QueryDeps {
@@ -2995,10 +3068,10 @@ export function buildQueryOptions(spec: SessionSpec, deps: QueryDeps): Options {
     pathToClaudeCodeExecutable: deps.claudePath,
     // Never 'user' or 'local': user hooks and plugins stay out (spec §3), and settings.local.json can switch billing.
     settingSources: ['project'],
-    // Claude Code reads no MCP config itself; the repo's .mcp.json arrives through the spec (decision 39).
+    // Claude Code reads no MCP config itself; the repo's .mcp.json arrives through the spec.
     strictMcpConfig: true,
     // Set explicitly: the builder's own autoCompactEnabled: false (global ~/.claude.json) reaches the session despite
-    // settingSources (spike 3). Compaction stays on as the emergency fallback (decision 40).
+    // settingSources. Compaction stays on as the emergency fallback.
     settings: { autoCompactEnabled: true },
     mcpServers: {
       ...Object.fromEntries(Object.entries(spec.projectMcpServers).map(([name, server]) => [name, toSdkMcpServer(server)])),
@@ -3038,18 +3111,18 @@ export function buildQueryOptions(spec: SessionSpec, deps: QueryDeps): Options {
 }
 
 /** Resolves with the value, or undefined after `ms` or on rejection. Never rejects. */
-function settleWithin<T>(promise: Promise<T>, ms: number): Promise<T | undefined> {
+function settleWithin<T>(clock: Clock, promise: Promise<T>, ms: number): Promise<T | undefined> {
   return new Promise((resolve) => {
-    const timer = setTimeout(() => {
+    const timer = clock.setTimeout(() => {
       resolve(undefined);
     }, ms);
     promise.then(
       (value) => {
-        clearTimeout(timer);
+        timer.cancel();
         resolve(value);
       },
       () => {
-        clearTimeout(timer);
+        timer.cancel();
         resolve(undefined);
       },
     );
@@ -3060,6 +3133,7 @@ type EndReason = Extract<SessionEvent, { type: 'ended' }>['reason'];
 
 function startSession(spec: SessionSpec, opts: ClaudeAdapterOptions, runQuery: QueryFn): SessionHandle {
   const graceMs = opts.stopGraceMs ?? STOP_GRACE_MS;
+  const clock = opts.clock ?? systemClock;
   const log = opts.logger.child({ sessionId: spec.sessionId, workstreamId: spec.workstreamId });
   const events = createChannel<SessionEvent>();
   const input = createChannel<SDKUserMessage>();
@@ -3081,6 +3155,7 @@ function startSession(spec: SessionSpec, opts: ClaudeAdapterOptions, runQuery: Q
   let stopRequested = false;
   let promptSent = false;
   let limitRejected = false;
+  let lastResetsAt: Date | null = null;
   let failure: string | null = null;
   let markFinished: () => void = () => undefined;
   const finished = new Promise<void>((resolve) => {
@@ -3129,7 +3204,7 @@ function startSession(spec: SessionSpec, opts: ClaudeAdapterOptions, runQuery: Q
     resolveVerified(false);
     log.error({ reason: message }, 'claude session refused');
     input.end();
-    void settleWithin(q.interrupt(), graceMs);
+    void settleWithin(clock, q.interrupt(), graceMs);
     abortController.abort();
   };
   const fixHint = "Check the project's billing mode and any env block in the repo's .claude/settings.json.";
@@ -3139,10 +3214,10 @@ function startSession(spec: SessionSpec, opts: ClaudeAdapterOptions, runQuery: Q
    * function, not an IIFE: TypeScript reads an IIFE as running inline, and would narrow `ended` to false.
    */
   const preflight = async (): Promise<void> => {
-    account = await settleWithin(q.accountInfo(), BILLING_PREFLIGHT_MS);
+    account = await settleWithin(clock, q.accountInfo(), BILLING_PREFLIGHT_MS);
     if (ended) return;
     const mismatch = account
-      ? billingMismatch(spec.billingMode, { apiKeySource: account.apiKeySource, apiProvider: account.apiProvider })
+      ? billingMismatch(spec.billingMode, { apiKeySource: account.apiKeySource, apiProvider: account.apiProvider, subscriptionType: account.subscriptionType })
       : `Claude Code reported no account within ${String(BILLING_PREFLIGHT_MS / 1_000)} s`;
     if (mismatch) {
       refuse(`Billing check failed: ${mismatch}. No prompt was sent. ${fixHint}`);
@@ -3168,7 +3243,8 @@ function startSession(spec: SessionSpec, opts: ClaudeAdapterOptions, runQuery: Q
     );
     // The servers the CLI loaded: 10db's own plus the repo's. Names and status only, never their config.
     log.info({ mcpServers: init.mcp_servers.map((s) => ({ name: s.name, status: s.status })) }, 'claude session mcp');
-    const mismatch = billingMismatch(spec.billingMode, { apiKeySource: init.apiKeySource, apiProvider: account?.apiProvider });
+    // init has no plan field, so the preflight's account supplies apiProvider and subscriptionType.
+    const mismatch = billingMismatch(spec.billingMode, { apiKeySource: init.apiKeySource, apiProvider: account?.apiProvider, subscriptionType: account?.subscriptionType });
     if (mismatch) {
       refuse(`Billing check failed: ${mismatch}. The session stopped at its first turn, before any tool ran; that turn's first request may have been billed this way. ${fixHint}`);
       return;
@@ -3223,8 +3299,12 @@ function startSession(spec: SessionSpec, opts: ClaudeAdapterOptions, runQuery: Q
             limitRejected = false;
             emit({ ...event, inputTokens: totals.inputTokens, outputTokens: totals.outputTokens });
             logMcpStatus();
+          } else if (event.type === 'rate_limit') {
+            if (event.status === 'rejected') limitRejected = true;
+            if (event.resetsAt) lastResetsAt = event.resetsAt;
+            // An assistant rate_limit error carries no reset time: use the latest one a rate_limit_event reported.
+            emit(event.resetsAt ? event : { ...event, resetsAt: lastResetsAt });
           } else {
-            if (event.type === 'rate_limit' && event.status === 'rejected') limitRejected = true;
             emit(event);
           }
         }
@@ -3256,21 +3336,21 @@ function startSession(spec: SessionSpec, opts: ClaudeAdapterOptions, runQuery: Q
       if (ended) return;
       stopRequested = true;
       input.end();
-      await settleWithin(q.interrupt(), graceMs);
-      const abortTimer = setTimeout(() => {
+      await settleWithin(clock, q.interrupt(), graceMs);
+      const abortTimer = clock.setTimeout(() => {
         abortController.abort();
       }, graceMs);
-      const forceTimer = setTimeout(() => {
+      const forceTimer = clock.setTimeout(() => {
         end('stopped', 'claude did not exit after it was aborted');
       }, graceMs * 2);
       await finished;
-      clearTimeout(abortTimer);
-      clearTimeout(forceTimer);
+      abortTimer.cancel();
+      forceTimer.cancel();
     },
   };
 }
 
-/** Runs managed sessions on the builder's installed Claude Code through the Agent SDK (spec decision 5). */
+/** Runs managed sessions on the builder's installed Claude Code through the Agent SDK (spec §3). */
 export function createClaudeAdapter(opts: ClaudeAdapterOptions): SessionAdapter {
   const runQuery: QueryFn = opts.query ?? ((params) => sdkQuery(params));
   return {
@@ -3318,7 +3398,7 @@ describe.skipIf(!live)('Claude adapter, live', () => {
     const login = await captureLoginEnv({ inherited: process.env });
     const claudePath = findOnPath('claude', login.vars['PATH']);
     if (!claudePath) throw new Error('claude is not on the login PATH');
-    const repo = await createTempRepo();
+    const repo = createTempRepo();
     const lines: Record<string, unknown>[] = [];
     const logger = createLogger({
       level: 'info',
@@ -3362,7 +3442,9 @@ describe.skipIf(!live)('Claude adapter, live', () => {
     expect(types).toContain('turn_complete');
     expect(types.filter((t) => t === 'ended')).toEqual(['ended']);
     expect(events.at(-1)).toMatchObject({ type: 'ended', reason: 'stopped' });
-    expect(lines.find((l) => l['msg'] === 'claude session billing')).toMatchObject({ apiKeySource: 'none', apiProvider: 'firstParty' });
+    const billing = lines.find((l) => l['msg'] === 'claude session billing');
+    expect(billing).toMatchObject({ apiKeySource: 'none', apiProvider: 'firstParty' });
+    expect(billing?.['subscriptionType']).toBeTruthy();
   }, 120_000);
 });
 ```
@@ -3377,11 +3459,11 @@ Expected: the first run reports the test as skipped. The second PASSES within tw
 
 - [ ] **Step 13: Check and commit**
 
-`@anthropic-ai/sdk` is a types-only peer, so knip sees no import of it. Before running knip, add `"@anthropic-ai/sdk"` to the `apps/daemon` workspace's `ignoreDependencies` in `knip.json`, next to M0's `"better-sqlite3"`.
+`@anthropic-ai/sdk` is a types-only peer, so knip sees no import of it. Before running knip, add `"ignoreDependencies": ["@anthropic-ai/sdk"]` to the `apps/daemon` block in `knip.json` (it has none yet; the root-level `ignoreDependencies` is a different list).
 ```bash
 pnpm typecheck && pnpm lint && pnpm knip
 pnpm format
-git add packages/contracts/src/system.ts apps/daemon/src/sessions/project-mcp.ts apps/daemon/src/sessions/project-mcp.test.ts apps/daemon/src/sessions/claude-mapping.ts apps/daemon/src/sessions/claude-adapter.ts apps/daemon/src/sessions/claude-test-support.ts apps/daemon/src/sessions/claude-mapping.test.ts apps/daemon/src/sessions/claude-adapter.test.ts apps/daemon/src/sessions/claude-adapter.live.test.ts apps/daemon/src/sessions/index.ts apps/daemon/src/sessions/types.ts apps/daemon/src/sessions/fake-adapter.test.ts apps/daemon/src/runner/runner.ts apps/daemon/src/env.ts apps/daemon/.env.example apps/daemon/package.json pnpm-workspace.yaml pnpm-lock.yaml knip.json && git commit -m 'feat(daemon): add the claude adapter with billing checks and repo mcp pass-through'
+git add packages/contracts/src/system.ts packages/contracts/src/json-schema.ts packages/contracts/generated apps/daemon/src/sessions/project-mcp.ts apps/daemon/src/sessions/project-mcp.test.ts apps/daemon/src/sessions/claude-mapping.ts apps/daemon/src/sessions/claude-adapter.ts apps/daemon/src/sessions/claude-test-support.ts apps/daemon/src/sessions/claude-mapping.test.ts apps/daemon/src/sessions/claude-adapter.test.ts apps/daemon/src/sessions/claude-adapter.live.test.ts apps/daemon/src/sessions/index.ts apps/daemon/src/sessions/types.ts apps/daemon/src/sessions/fake-adapter.test.ts apps/daemon/src/sessions/unavailable-adapter.test.ts apps/daemon/src/runner/runner.ts apps/daemon/src/env.ts apps/daemon/.env.example apps/daemon/package.json pnpm-workspace.yaml pnpm-lock.yaml knip.json && git commit -m 'feat(daemon): add the claude adapter with billing checks and repo mcp pass-through'
 ```
 Expected: all checks exit 0.
 - `createClaudeAdapter` is used by the live test now and by `main.ts` in Task 7.
@@ -4129,11 +4211,11 @@ let clock: ManualClock;
 let fake: FakeWatch;
 let watcher: Watcher;
 
-beforeEach(async () => {
+beforeEach(() => {
   ({ store: base, close } = createTestStore());
   state = createStateStore(base, createEventBus());
   inbox = createInboxService({ state, onParkedAnswer: () => undefined });
-  repo = await createTempRepo();
+  repo = createTempRepo();
   project = seedProject(base, { repoPath: repo.path });
   clock = new ManualClock();
   fake = fakeWatch();
@@ -4639,9 +4721,10 @@ Expected: PASS. The real-file-system test passes on macOS (FSEvents) and on Linu
 **Files:**
 - Create: `apps/daemon/src/version.ts`, `packages/db/src/store/ui-reads.test.ts`
 - Modify:
-  - Contracts and db: `packages/contracts/src/entities.ts` (`taskTitle`), `packages/contracts/src/system.ts` (`EventsHead`, `KeepAwakeInput`), `packages/contracts/generated/` (regenerated), `packages/db/src/store/workstreams.ts` (`toDto`), `packages/db/src/store/events.ts` (`latestEventSeq`)
+  - Contracts and db: `packages/contracts/src/entities.ts` (`taskTitle`), `packages/contracts/src/system.ts` (`EventsHead`, `KeepAwakeInput`), `packages/contracts/src/json-schema.ts`, `packages/contracts/generated/` (regenerated), `packages/db/src/store/workstreams.ts` (`toDto`), `packages/db/src/store/events.ts` (`latestEventSeq`)
   - API: `apps/daemon/src/api/services.ts`, `apps/daemon/src/api/app.ts`, `apps/daemon/src/api/app.test.ts`
-  - Daemon composition: `apps/daemon/src/daemon/services.ts`, `apps/daemon/src/daemon/start.ts`, `apps/daemon/src/daemon/start.test.ts`
+  - Daemon composition: `apps/daemon/src/daemon/services.ts`, `apps/daemon/src/daemon/start.ts`, `apps/daemon/src/daemon/start.test.ts`, `apps/daemon/src/log/rotate.ts` (`fileDestination` returns its stream, so `stop()` can end it)
+  - Daemon tests that start a daemon: `apps/daemon/test/acceptance.test.ts` (no real `caffeinate` or file watcher), `apps/daemon/test/engine.ts` (the default session env has a PATH)
   - Runner: `apps/daemon/src/runner/runner.ts` (session env computed first; gate env = session env), `apps/daemon/src/runner/runner.test.ts`
   - MCP approvals (Steps 5–8, their own commit):
     - db: `packages/db/src/schema.ts`, `packages/db/drizzle/0003_mcp_server_approvals.sql` and `drizzle/meta/` (generated), `packages/db/src/store/mcp-approvals.ts`, `store/mcp-approvals.test.ts`, `store/index.ts`
@@ -4650,6 +4733,7 @@ Expected: PASS. The real-file-system test passes on macOS (FSEvents) and on Linu
     - API: `api/services.ts`, `api/app.ts`, `api/app.test.ts`, `daemon/services.ts`, `daemon/start.test.ts`, `apps/daemon/AGENTS.md`
   - Env, paths and build: `apps/daemon/src/env.ts`, `apps/daemon/src/env.test.ts`, `apps/daemon/.env.example`, `apps/daemon/src/paths.ts`, `apps/daemon/src/paths.test.ts`, `apps/daemon/scripts/build.ts`, `apps/daemon/test/bundle.test.ts`, `apps/daemon/package.json`
   - Entry point and docs: `apps/daemon/src/main.ts`, `apps/daemon/AGENTS.md`
+  - Open items (Step 9, its own commit): `runner/runner.ts`, `runner/runner.test.ts`, `daemon/start.ts`, `daemon/start.test.ts`
 
 **Interfaces:**
 - Consumes:
@@ -4663,7 +4747,7 @@ Expected: PASS. The real-file-system test passes on macOS (FSEvents) and on Linu
 - Produces:
   - **Contracts:**
     - `WorkstreamDto.taskTitle: string`
-    - `EventsHead = z.object({ seq: z.int().min(0) })` and `KeepAwakeInput = z.object({ mode: z.enum(KeepAwakeMode) })`, both in `system.ts`.
+    - `EventsHead = z.object({ seq: z.int().min(0) })` and `KeepAwakeInput = z.object({ mode: z.enum(KeepAwakeMode) })`, both in `system.ts` and both registered in `CONTRACT_SCHEMAS` (`events-head`, `keep-awake-input`).
   - **db:** `latestEventSeq(db: DbReader): number`, which returns 0 when there are no events.
   - **`ApiServices`** gains:
     - `systemCheck(): Promise<SystemCheckDto>`
@@ -4676,17 +4760,18 @@ Expected: PASS. The real-file-system test passes on macOS (FSEvents) and on Linu
     - `TENDB_DEV_UI_TOKEN?: string`, at least 32 characters, for dev and Playwright only.
     - `TENDB_CLAUDE_PATH?: string`, an absolute path.
   - **Paths:** `resolveHarnessDir(): string`. The build copies the harness plugin to `dist/harness/`.
-  - **`DaemonOptions`** gains `uiToken?`, `caffeinate?`, `systemCheck?` and `watch?: WatchFn | false`. Task 1 already added `sqliteBinding?`.
+  - **`DaemonOptions`** gains `uiToken?`, `caffeinate?`, `systemCheck?` and `watch?: WatchFn | false`. Task 1 already added `sqliteBinding?`. `adapter` becomes `SessionAdapter | ((logger: Logger) => SessionAdapter)`: `main.ts` passes a function, so the Claude adapter logs through the daemon's own logger into the one shared `daemon.log` (decision 31). Tests keep passing a `FakeAdapter` instance. The default `sessionEnv` (tests only; `main.ts` always passes one) is `{ PATH: DEFAULT_SESSION_PATH }` with `DEFAULT_SESSION_PATH = '/usr/bin:/bin'`, so a gate in a test daemon finds `git` and `test` without reading the daemon's environment.
   - **`createServices`** deps gain `keepAwake: KeepAwake` and `systemCheck: () => Promise<SystemCheckDto>`.
   - **Runner:**
     - `sessionEnv(project)` is computed before the session row is written, so a `SessionEnvError` becomes a crash with no orphaned session.
+    - **Open items fixed in Step 9:** a session waiting on two cards parks on one still open; a `started` session rewrites a preserved `answer` next action, so a restart neither re-sends the answer nor re-grants a one-time permission; `stop()` ends the daemon log's file stream.
     - `verify` runs the gate with `sessionEnv(project)` only.
     - **The repo's MCP servers** (decisions 39 and 52; Steps 5–8). Right after the environment, the runner reads the repo's `.mcp.json` and resolves it against the project's approvals, and passes only the approved servers as `projectMcpServers`. The session starts either way.
       - A server with no verdict for its config hash gets an approval card (`requestMcpApproval`), project-wide (no workstream target) and folded under `project-mcp-approval:<projectId>:<name>:<hash>`.
       - An approved server 10db can't run as written gets a flag naming the server and the variable, folded under `project-mcp-failure:<projectId>:<name>`.
       - A reserved name becomes a flag folded under `project-mcp-warning:<projectId>`.
       - A file it can't parse becomes a flag folded under `project-mcp-error:<projectId>` and is rethrown. Like a `SessionEnvError`, it is a crash before any session row exists, so recovery retries it until `maxRecoveryAttempts` fails the workstream.
-      - Left-out servers are named in a note appended to the prompt (`skippedServersNote`) and in a `project mcp servers` log line (`passed: { name, transport, envKeys }[]`, `pending`, `denied`, `failed`; names only), which Task 14 reads.
+      - Left-out servers are named in a note appended to the prompt (`skippedServersNote`) and in a `project mcp servers` log line (`passed: { name, transport, envKeys }[]`, `pending`, `denied`, `failed`; names only), which Task 14 reads. Task 14's checker matches this `msg` and these field names exactly, as it does the adapter's `claude session billing` (`apiKeySource`, `apiProvider`) and `claude session mcp status` (`mcpServers[].status`): rename one and the live check reads `ok: false` instead of failing loudly, so change both sides together.
     - **Approvals:** `mcp_server_approvals` (primary key project, server name, config hash), `recordMcpApproval(ctx, input)` and `getMcpApproval(db, projectId, name, hash)` in `@10db/db`. `InboxService.flag` gains `options?: readonly InboxOption[]`. `inbox.answer` on a card whose `detail.mcpApproval` parses as `McpServerReview` records `approved` (with the card's variables) or `denied` in the same transaction. `inbox/mcp-approval.ts` exports `MCP_APPROVAL_DETAIL = 'mcpApproval'`, `requestMcpApproval(inbox, projectId, review)` and `applyMcpApproval(ctx, item, answer)`.
     - **Route:** `POST /projects/:projectId/mcp-servers/review` (UI token) returns `McpServerStatusDto[]`: each repo server, its verdict, and the open card's id while it is `pending`, raising that card if needed. `ApiServices.reviewProjectMcp(projectId)`. A `.mcp.json` 10db can't parse answers 400.
     - **Handoff baseline guard.** A continuation session (sequence > 1) whose first context reading is already near or above `handoffPct` doesn't hand off at once. Its threshold is `max(handoffPct, firstReading + HANDOFF_BASELINE_MARGIN_PCT)`, where `HANDOFF_BASELINE_MARGIN_PCT = 5` is a module constant in `runner.ts`.
@@ -4763,7 +4848,16 @@ Then add inside `describe('API', …)`:
   });
 ```
 
-Add to `apps/daemon/src/daemon/start.test.ts`. Extend the imports with `import type { SystemCheckDto } from '@10db/contracts';`, `import { createTempRepo, waitForAsync } from '../../test/fixtures';` (merge with the existing `tempDir` import) and `import type { CaffeinateSpawner } from '../keep-awake';`. Then add inside `describe('startDaemon', …)`:
+Add to `apps/daemon/src/daemon/start.test.ts`. Add `EventsHead`, `KeepAwakeStatus`, `ProjectDto`, `TaskDto`, `WorkstreamDto` and `type SystemCheckDto` to the existing `@10db/contracts` import, `waitForAsync` to the existing `../../test/fixtures` import (it already has `createTempRepo`, `tempDir` and `waitFor`), `import { apiClient } from '../../test/api-client';` and `import type { CaffeinateSpawner } from '../keep-awake';`. Responses are parsed with their contract schemas, never cast.
+
+Every daemon the M1a tests start would now spawn a real `/usr/bin/caffeinate` and a recursive `fs.watch`. Add this below the imports, and spread it into each existing `startDaemon({ … })` call in this file. Do the same in `apps/daemon/test/acceptance.test.ts`, with its own copy of the constant (child processes are mocked at the boundary). The two new tests below pass their own `caffeinate` and `watch`.
+
+`apps/daemon/test/crash-recovery.test.ts` is the exception, and stays as it is: it spawns `src/main.ts` as a child process and kills it with `kill -9`, so nothing can be injected, and its daemon runs the real `caffeinate` and `fs.watch` while a lane runs. That is accepted. `caffeinate -w <pid>` exits with the killed daemon (spike 9) and is absent on the Ubuntu runner, and the watcher sees only the test's scripted writes, which sit inside the workstream's claim, so it raises no card. `main.ts` skips the login-shell capture there, because the test uses `TENDB_FAKE_SCRIPTS`.
+```ts
+/** No real caffeinate and no file watcher in daemon tests that are not about them. */
+const QUIET = { caffeinate: () => null, watch: false } as const;
+```
+Then add inside `describe('startDaemon', …)`:
 ```ts
   const recordingCaffeinate = (spawned: number[]): CaffeinateSpawner => (pid) => {
     spawned.push(pid);
@@ -4784,13 +4878,13 @@ Add to `apps/daemon/src/daemon/start.test.ts`. Extend the imports with `import t
     const put = await fetch(`${daemon.url}/settings/keep-awake`, { method: 'PUT', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify({ mode: 'always' }) });
     expect(await put.json()).toEqual({ mode: 'always', active: true });
     expect(spawned).toEqual([process.pid]);
-    const head = (await (await fetch(`${daemon.url}/events/head`, { headers })).json()) as { seq: number };
+    const head = EventsHead.parse(await (await fetch(`${daemon.url}/events/head`, { headers })).json());
     expect(head.seq).toBeGreaterThan(0);
     expect(await (await fetch(`${daemon.url}/system`, { headers })).json()).toEqual(check);
   });
 
   it('holds keep-awake and watches the repo while a lane runs, and lets go when it is cancelled', async () => {
-    const repo = await createTempRepo();
+    const repo = createTempRepo();
     const spawned: number[] = [];
     const roots: string[] = [];
     const closed: string[] = [];
@@ -4803,25 +4897,18 @@ Add to `apps/daemon/src/daemon/start.test.ts`. Extend the imports with `import t
           return { close: () => { closed.push(root); } };
         },
       });
-      const running = daemon;
-      const call = async <T>(method: string, path: string, body?: unknown): Promise<T> => {
-        const res = await fetch(`${running.url}${path}`, {
-          method,
-          headers: { Authorization: `Bearer ${running.token}`, 'content-type': 'application/json' },
-          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-        });
-        return (await res.json()) as T;
-      };
-      const project = await call<{ id: string }>('POST', '/projects', { name: 'wired', repoPath: repo.path, gateCommand: 'true', areas: [{ name: 'api', globs: ['src/api/**'] }] });
-      const task = await call<{ id: string }>('POST', `/projects/${project.id}/tasks`, { title: 'Alpha', acceptanceCriteria: ['works'], areas: ['api'] });
-      const ws = await call<{ id: string }>('POST', `/tasks/${task.id}/start`);
+      const api = apiClient(daemon.url, daemon.token);
+      const project = await api.post('/projects', ProjectDto, { name: 'wired', repoPath: repo.path, gateCommand: 'true', areas: [{ name: 'api', globs: ['src/api/**'] }] });
+      const task = await api.post(`/projects/${project.id}/tasks`, TaskDto, { title: 'Alpha', acceptanceCriteria: ['works'], areas: ['api'] });
+      const ws = await api.post(`/tasks/${task.id}/start`, WorkstreamDto);
+      const keepAwakeActive = async () => (await api.get('/settings/keep-awake', KeepAwakeStatus)).active;
 
-      await waitForAsync(async () => ((await call<{ active: boolean }>('GET', '/settings/keep-awake')).active ? true : undefined));
+      await waitForAsync(async () => ((await keepAwakeActive()) ? true : undefined));
       expect(spawned).toEqual([process.pid]);
       expect(roots).toEqual([repo.path]);
 
-      await call('POST', `/workstreams/${ws.id}/cancel`);
-      await waitForAsync(async () => ((await call<{ active: boolean }>('GET', '/settings/keep-awake')).active ? undefined : true));
+      await api.post(`/workstreams/${ws.id}/cancel`, z.unknown());
+      await waitForAsync(async () => ((await keepAwakeActive()) ? undefined : true));
       expect(closed).toEqual([repo.path]);
     } finally {
       await daemon?.stop();
@@ -4951,7 +5038,7 @@ pnpm vitest run --project daemon api start runner env paths bundle
 Expected: FAIL.
 - `latestEventSeq` is missing and `taskTitle` is undefined.
 - The new routes answer 404, and `startDaemon` ignores `uiToken`.
-- The gate sees `TENDB_PROBE` and doesn't see `GATE_MARK`, so the workstream ends QUEUED with a `fix` action.
+- The gate sees `TENDB_PROBE` and doesn't see `GATE_MARK`, so the workstream ends QUEUED with a `fix` action. (The test's `sessionEnv` has no PATH; `test` is a shell builtin, so the gate needs none.)
 - The env-crash test finds a session row.
 - `TENDB_DEV_UI_TOKEN` and `resolveHarnessDir` don't exist, and there is no `dist/harness`.
 
@@ -4970,21 +5057,20 @@ export type EventsHead = z.infer<typeof EventsHead>;
 export const KeepAwakeInput = z.object({ mode: z.enum(KeepAwakeMode) });
 export type KeepAwakeInput = z.infer<typeof KeepAwakeInput>;
 ```
+In `packages/contracts/src/json-schema.ts`, import both from `./system` and add them to `CONTRACT_SCHEMAS`:
+```ts
+  'events-head': EventsHead,
+  'keep-awake-input': KeepAwakeInput,
+```
 Regenerate: `pnpm --filter @10db/contracts generate`.
 
-**db.** In `packages/db/src/store/workstreams.ts`, replace the first lines of `toDto`:
+**db.** In `packages/db/src/store/workstreams.ts` `toDto`, add the task lookup after the `sessions` query and `taskTitle` after `taskId`:
 ```ts
-function toDto(db: DbReader, row: WorkstreamRow): WorkstreamDto {
-  const sessions = db.select({ n: count() }).from(schema.sessions).where(eq(schema.sessions.workstreamId, row.id)).get();
-  return {
-    id: row.id,
-    taskId: row.taskId,
-```
-with
-```ts
-function toDto(db: DbReader, row: WorkstreamRow): WorkstreamDto {
-  const sessions = db.select({ n: count() }).from(schema.sessions).where(eq(schema.sessions.workstreamId, row.id)).get();
-  const task = db.select({ title: schema.tasks.title }).from(schema.tasks).where(eq(schema.tasks.id, row.taskId)).get();
+  const task = db
+    .select({ title: schema.tasks.title })
+    .from(schema.tasks)
+    .where(eq(schema.tasks.id, row.taskId))
+    .get();
   return {
     id: row.id,
     taskId: row.taskId,
@@ -5005,7 +5091,7 @@ export function latestEventSeq(db: DbReader): number {
   /** The newest event seq (0 when there are none). */
   eventsHead(): number;
 ```
-In `apps/daemon/src/api/app.ts`, add `EventsHead`, `KeepAwakeInput` and `SystemCheckDto` to the `@10db/contracts` import. Insert these routes after the `.get('/events', …)` route, before `.get('/events/stream', …)`:
+In `apps/daemon/src/api/app.ts`, add `EventsHead`, `KeepAwakeInput` and `SystemCheckDto` to the `@10db/contracts` import. Insert these routes after the `.get('/events', …)` route, before `.get(STREAM_PATH, …)`:
 ```ts
     .get('/events/head', (c) => c.json(EventsHead.parse({ seq: deps.services.eventsHead() })))
     .get('/system', async (c) => c.json(SystemCheckDto.parse(await deps.services.systemCheck())))
@@ -5036,11 +5122,7 @@ TENDB_DEV_UI_TOKEN=
 TENDB_CLAUDE_PATH=
 ```
 
-**Paths and the bundle.** Add the harness dependency:
-```bash
-pnpm add --filter @10db/daemon @10db/harness@workspace:*
-```
-Add to `apps/daemon/src/paths.ts`:
+**Paths and the bundle.** Task 3 already made `@10db/harness` a daemon dependency. Add to `apps/daemon/src/paths.ts`:
 ```ts
 import { HARNESS_PLUGIN_DIR } from '@10db/harness';
 
@@ -5078,6 +5160,8 @@ cpSync(HARNESS_PLUGIN_DIR, resolve(outDir, 'harness'), { recursive: true });
     const env = opts.sessionEnv(project);
 ```
 In the `opts.adapter.start({ … })` call, replace `env: opts.sessionEnv(project),` with `env,`. Task 3's `projectMcpServers: {}` placeholder stays until Step 7.
+
+In `apps/daemon/test/engine.ts`, change the default `sessionEnv: () => ({}),` to `sessionEnv: () => ({ PATH: '/usr/bin:/bin' }),`: the gate now gets only the session env, and an empty one works only because `/bin/sh` falls back to a compiled-in PATH.
 Add the baseline guard. Below the imports in `runner.ts`, add:
 ```ts
 /**
@@ -5116,6 +5200,18 @@ with
     import { createWatcher, systemWatch, type WatchFn } from '../watcher';
     ```
   - `REQUIRED_TOOLS` was module-private until now. In `apps/daemon/src/environment/system-check.ts`, change `const REQUIRED_TOOLS = [` to `export const REQUIRED_TOOLS = [`, and add `REQUIRED_TOOLS` to the `./system-check` export line in `environment/index.ts`. Stage both files with this task.
+- In `DaemonOptions`, change `readonly adapter: SessionAdapter;` to
+  ```ts
+    /** An adapter, or a factory that gets the daemon's logger (the Claude adapter logs into daemon.log). */
+    readonly adapter: SessionAdapter | ((logger: Logger) => SessionAdapter);
+  ```
+  and add `import type { Logger } from '../log';` if `start.ts` doesn't import the type yet. After `const logger = createLogger(…)`, add `const adapter = typeof opts.adapter === 'function' ? opts.adapter(logger) : opts.adapter;`, and pass `adapter` instead of `opts.adapter` to `createRunner`.
+- Above `DEFAULTS`, add:
+  ```ts
+  /** The session env when none is wired (tests): enough PATH for a gate to find git and test. */
+  const DEFAULT_SESSION_PATH = '/usr/bin:/bin';
+  ```
+  and change `sessionEnv: opts.sessionEnv ?? (() => ({})),` to `sessionEnv: opts.sessionEnv ?? (() => ({ PATH: DEFAULT_SESSION_PATH })),`.
 - Add to `DaemonOptions`, after `allowedOrigins?`:
   ```ts
     /** A fixed UI token (dev and Playwright); otherwise a random one per start. */
@@ -5140,7 +5236,7 @@ with
     const watcher = opts.watch === false ? null : createWatcher({ state, inbox, git, logger, clock, watch: opts.watch ?? systemWatch });
     const keepAwake = createKeepAwake({ state, spawn: opts.caffeinate ?? systemCaffeinate, daemonPid: process.pid, logger });
   ```
-- In the `createRunner({ … })` options, after `onLaneFreed: () => scheduler?.requestTick(),`, add:
+- In the `createRunner({ … })` options, after the `onLaneFreed: () => { scheduler?.requestTick(); },` entry, add:
   ```ts
       ...(watcher ? { afterSession: (id: WorkstreamId) => watcher.stepEnd(id).then(() => undefined) } : {}),
   ```
@@ -5161,11 +5257,12 @@ with
   ```ts
     const token = opts.uiToken ?? randomBytes(32).toString('base64url');
   ```
-- Replace `services: createServices({ state, bus, runner, scheduler, inbox }),` with:
+- In the `createServices({ … })` object (it lists `state`, `bus`, `runner: createdRunner`, `scheduler: createdScheduler` and `inbox`), add after `inbox,`:
   ```ts
-      services: createServices({ state, bus, runner, scheduler, inbox, keepAwake, systemCheck: opts.systemCheck ?? noSystemCheck }),
+        keepAwake,
+        systemCheck: opts.systemCheck ?? noSystemCheck,
   ```
-- In `stop()`, after `nightly.cancel();`, add:
+- In `shutdown()`, after `nightly.cancel();`, add:
   ```ts
         unsubscribeLanes();
         watcher?.stop();
@@ -5174,12 +5271,11 @@ with
 
 **Entry point.** Replace `apps/daemon/src/main.ts`:
 ```ts
-import { join } from 'node:path';
 import { ToolName, type SystemCheckDto } from '@10db/contracts';
 import { AlreadyRunningError, startDaemon } from './daemon';
 import { loadEnv } from './env';
-import { buildSessionEnv, captureLoginEnv, keychainSecrets, systemCheck } from './environment';
-import { createLogger, fileDestination, rotateLogFile } from './log';
+import { buildSessionEnv, captureLoginEnv, keychainSecrets, systemCheck, type LoginEnv } from './environment';
+import type { Logger } from './log';
 import { resolveDataDir, resolveHarnessDir, resolveMigrationsDir, resolveSqliteBinding } from './paths';
 import { createClaudeAdapter, createUnavailableAdapter, FakeAdapter, loadFakeScriptBook, type SessionAdapter } from './sessions';
 import { CLIENT_APP } from './version';
@@ -5199,21 +5295,22 @@ const env = loadEnv(process.env);
 const dataDir = resolveDataDir(env);
 
 // A GUI-launched sidecar inherits a bare PATH; the login shell has the builder's real one. It lives
-// only in memory because it can hold secrets.
-const login = await captureLoginEnv({ inherited: process.env });
+// only in memory because it can hold secrets. Fake sessions (tests, the E2E, UI work) run no real
+// tools, so they keep the inherited environment and never run the builder's shell profile.
+const login: LoginEnv = env.TENDB_FAKE_SCRIPTS
+  ? { vars: Object.fromEntries(Object.entries(process.env).filter((e): e is [string, string] => e[1] !== undefined)), source: 'inherited', warning: null }
+  : await captureLoginEnv({ inherited: process.env });
 if (login.warning) console.warn(`10db daemon: ${login.warning}`);
 
 let checked: Promise<SystemCheckDto> | null = null;
 const check = (): Promise<SystemCheckDto> => (checked ??= systemCheck(login));
 
-async function chooseAdapter(): Promise<SessionAdapter> {
+async function chooseAdapter(): Promise<SessionAdapter | ((logger: Logger) => SessionAdapter)> {
   if (env.TENDB_FAKE_SCRIPTS) return new FakeAdapter(loadFakeScriptBook(env.TENDB_FAKE_SCRIPTS));
   const claudePath = env.TENDB_CLAUDE_PATH ?? (await check()).tools.find((t) => t.name === ToolName.Claude)?.path ?? null;
   if (!claudePath) return createUnavailableAdapter(CLAUDE_MISSING);
-  const logPath = join(dataDir, 'logs', 'sessions.log');
-  rotateLogFile(logPath);
-  const logger = createLogger({ level: env.TENDB_LOG_LEVEL, destination: fileDestination(logPath) });
-  return createClaudeAdapter({ claudePath, pluginDir: resolveHarnessDir(), logger });
+  // Through the daemon's own logger: one shared daemon.log, which the live acceptance checks read.
+  return (logger) => createClaudeAdapter({ claudePath, pluginDir: resolveHarnessDir(), logger: logger.child({ component: 'claude' }) });
 }
 
 try {
@@ -5264,22 +5361,25 @@ pnpm typecheck && pnpm lint && pnpm knip
 pnpm --filter @10db/daemon build
 ls apps/daemon/dist/harness/skills
 TENDB_DATA_DIR="$(mktemp -d)/10db data" TENDB_PORT=4399 TENDB_DEV_UI_TOKEN="$(printf 'x%.0s' {1..40})" node apps/daemon/dist/daemon.mjs &
-sleep 2
+# The login-shell capture can take up to 10 s; poll /health rather than guessing.
+for _ in $(seq 1 60); do curl -sf http://127.0.0.1:4399/health > /dev/null && break; sleep 0.25; done
 curl -s -H "Authorization: Bearer $(printf 'x%.0s' {1..40})" http://127.0.0.1:4399/system
 kill %1
 ```
 Expected:
-- Every test passes, including the M1a acceptance tests: their gate commands are shell builtins, so they pass in the session environment.
+- Every test passes, including the M1a acceptance tests. Their gates run in the default session env (`PATH=/usr/bin:/bin`), never the daemon's.
 - `ls` lists the five skills.
 - `/system` returns `loginEnv.source` `login_shell` and the paths of `claude`, `git` and (if installed) `docker` from your login PATH.
 
 One command stages every path and commits, so the guard sees all of them as this command's own:
 ```bash
 pnpm format
-git add packages/contracts/src/entities.ts packages/contracts/src/system.ts packages/contracts/generated packages/db/src/store/workstreams.ts packages/db/src/store/events.ts packages/db/src/store/ui-reads.test.ts apps/daemon/src/api/services.ts apps/daemon/src/api/app.ts apps/daemon/src/api/app.test.ts apps/daemon/src/daemon/services.ts apps/daemon/src/daemon/start.ts apps/daemon/src/daemon/start.test.ts apps/daemon/src/runner/runner.ts apps/daemon/src/runner/runner.test.ts apps/daemon/src/env.ts apps/daemon/src/env.test.ts apps/daemon/.env.example apps/daemon/src/paths.ts apps/daemon/src/paths.test.ts apps/daemon/src/environment/system-check.ts apps/daemon/src/environment/index.ts apps/daemon/scripts/build.ts apps/daemon/test/bundle.test.ts apps/daemon/package.json apps/daemon/src/version.ts apps/daemon/src/main.ts apps/daemon/AGENTS.md pnpm-lock.yaml && git commit -m 'feat(daemon): wire the claude adapter, login env, keep-awake and watcher'
+git add packages/contracts/src/entities.ts packages/contracts/src/system.ts packages/contracts/src/json-schema.ts packages/contracts/generated packages/db/src/store/workstreams.ts packages/db/src/store/events.ts packages/db/src/store/ui-reads.test.ts apps/daemon/src/api/services.ts apps/daemon/src/api/app.ts apps/daemon/src/api/app.test.ts apps/daemon/src/daemon/services.ts apps/daemon/src/daemon/start.ts apps/daemon/src/daemon/start.test.ts apps/daemon/test/acceptance.test.ts apps/daemon/test/engine.ts apps/daemon/src/runner/runner.ts apps/daemon/src/runner/runner.test.ts apps/daemon/src/env.ts apps/daemon/src/env.test.ts apps/daemon/.env.example apps/daemon/src/paths.ts apps/daemon/src/paths.test.ts apps/daemon/src/environment/system-check.ts apps/daemon/src/environment/index.ts apps/daemon/scripts/build.ts apps/daemon/test/bundle.test.ts apps/daemon/package.json apps/daemon/src/version.ts apps/daemon/src/main.ts apps/daemon/AGENTS.md pnpm-lock.yaml && git commit -m 'feat(daemon): wire the claude adapter, login env, keep-awake and watcher'
 ```
 
-- [ ] **Step 5: Write the failing tests for repo MCP approval (decision 52)**
+- [ ] **Step 5: Write the failing tests for repo MCP approval**
+
+This implements decision 52.
 
 A repo's `.mcp.json` is code the builder didn't write. Nothing from it runs, connects or reads a variable until the builder approves that exact config for the project. The approval is an inbox card, so it uses M1a's inbox and the UI's existing answer path.
 
@@ -5552,13 +5652,13 @@ In `apps/daemon/src/api/app.test.ts`, add `reviewProjectMcp: none,` to `stubServ
   });
 ```
 
-In `apps/daemon/src/daemon/start.test.ts`, add `writeFileSync` to the `node:fs` import, `import { McpServerStatusDto, ProjectDto } from '@10db/contracts';` and `import { z } from 'zod';`, and add inside `describe('startDaemon', …)`:
+In `apps/daemon/src/daemon/start.test.ts`, add `writeFileSync` to the `node:fs` import and `McpServerStatusDto` and `ProjectDto` to the `@10db/contracts` import (`z` is already imported), and add inside `describe('startDaemon', …)`:
 ```ts
   it("raises an approval card for each repo MCP server on review, and reports the builder's verdict", async () => {
-    const repo = await createTempRepo();
+    const repo = createTempRepo();
     try {
       writeFileSync(join(repo.path, '.mcp.json'), JSON.stringify({ mcpServers: { mantine: { command: 'npx', args: ['-y', '@mantine/mcp-server@9.7.2'] } } }));
-      daemon = await startDaemon({ dataDir: dir.path, port: 0, adapter: new FakeAdapter({}), logLevel: 'warn' });
+      daemon = await startDaemon({ dataDir: dir.path, port: 0, adapter: new FakeAdapter({}), logLevel: 'warn', ...QUIET });
       const call = async (path: string, body?: unknown) => {
         const res = await fetch(`${daemon?.url ?? ''}${path}`, {
           method: 'POST',
@@ -5596,7 +5696,7 @@ Expected: FAIL.
 
 **db.** Add `McpVerdict` to the `@10db/contracts` type import in `packages/db/src/schema.ts`, and append:
 ```ts
-/** The builder's verdict on one repo MCP server config, per project (decision 52). A changed config has a new hash and no verdict. */
+/** The builder's verdict on one repo MCP server config, per project. A changed config has a new hash and no verdict. */
 export const mcpServerApprovals = sqliteTable(
   'mcp_server_approvals',
   {
@@ -5606,7 +5706,8 @@ export const mcpServerApprovals = sqliteTable(
     verdict: text('verdict').$type<McpVerdict>().notNull(),
     variables: text('variables', { mode: 'json' }).$type<string[]>().notNull(),
     sourceInboxId: text('source_inbox_id').$type<InboxItemId>(),
-    createdAt: createdAt(),
+    /** A later answer for the same config replaces the verdict, so this is when it last changed. */
+    updatedAt: updatedAt(),
   },
   (t) => [primaryKey({ columns: [t.projectId, t.serverName, t.configHash] })],
 );
@@ -5625,14 +5726,14 @@ import * as schema from '../schema';
 import type { DbReader, WriteContext } from './store';
 
 /** Records the builder's verdict on one exact server config. A second answer for the same config replaces the first. */
-export function recordMcpApproval(ctx: WriteContext, input: Omit<McpApprovalDto, 'createdAt'>): McpApprovalDto {
-  const row: McpApprovalDto = { ...input, variables: [...input.variables], createdAt: ctx.now };
+export function recordMcpApproval(ctx: WriteContext, input: Omit<McpApprovalDto, 'updatedAt'>): McpApprovalDto {
+  const row: McpApprovalDto = { ...input, variables: [...input.variables], updatedAt: ctx.now };
   ctx.tx
     .insert(schema.mcpServerApprovals)
     .values(row)
     .onConflictDoUpdate({
       target: [schema.mcpServerApprovals.projectId, schema.mcpServerApprovals.serverName, schema.mcpServerApprovals.configHash],
-      set: { verdict: row.verdict, variables: row.variables, sourceInboxId: row.sourceInboxId, createdAt: row.createdAt },
+      set: { verdict: row.verdict, variables: row.variables, sourceInboxId: row.sourceInboxId, updatedAt: row.updatedAt },
     })
     .run();
   return row;
@@ -5659,7 +5760,7 @@ import { McpApprovalChoice, McpServerReview, McpTransport, McpVerdict, type Inbo
 import { recordMcpApproval, type WriteContext } from '@10db/db';
 import type { InboxService } from './service';
 
-/** The `detail` key of an MCP approval card; it holds the server's `McpServerReview` (decision 52). */
+/** The `detail` key of an MCP approval card; it holds the server's `McpServerReview`. */
 export const MCP_APPROVAL_DETAIL = 'mcpApproval';
 
 /** A shell-like rendering of one word, quoted only when it needs to be. Text only, never run. */
@@ -5734,7 +5835,7 @@ export { ProjectMcpError, readRepoMcp, resolveProjectMcp, skippedServersNote, ty
 Inside `createRunner`, directly above the doc comment of `function park(`, add:
 ```ts
   /**
-   * The repo's MCP servers for one session (decisions 39 and 52). Only servers the builder approved for
+   * The repo's MCP servers for one session. Only servers the builder approved for
    * their exact config are passed; the session starts either way. A server with no verdict gets an approval
    * card, one 10db can't run as written gets a flag naming the variable, and a reserved name gets a warning
    * flag. Every card folds, so a retried session adds none. A file 10db can't parse raises a flag that says
@@ -5764,7 +5865,7 @@ Inside `createRunner`, directly above the doc comment of `function park(`, add:
         foldKey: `project-mcp-failure:${project.id}:${failure.name}`,
       });
     }
-    // Names only, never values. Task 14's acceptance check reads this line.
+    // Names only, never values. The live acceptance check reads this line by its message and field names.
     opts.logger.info(
       {
         workstreamId: id,
@@ -5788,9 +5889,8 @@ In the `opts.adapter.start({ … })` call, replace `prompt,` with
 ```ts
       prompt: mcpNote ? `${prompt}\n\n${mcpNote}` : prompt,
 ```
-and replace Task 3's two lines
+and replace Task 3's placeholder
 ```ts
-      // Task 7 loads the repo's .mcp.json here.
       projectMcpServers: {},
 ```
 with
@@ -5800,7 +5900,7 @@ with
 
 **Route.** In `apps/daemon/src/api/services.ts`, add `McpServerStatusDto` to the contracts import and to `ApiServices`:
 ```ts
-  /** Each server in the project's `.mcp.json` and its verdict; raises an approval card for each one with none (decision 52). */
+  /** Each server in the project's `.mcp.json` and its verdict; raises an approval card for each one with none. */
   reviewProjectMcp(projectId: ProjectId): McpServerStatusDto[];
 ```
 In `apps/daemon/src/api/app.ts`, add the route before `.post('/tasks/:taskId/start', …)`:
@@ -5848,6 +5948,167 @@ pnpm format
 git add packages/db/src/schema.ts packages/db/drizzle packages/db/src/store/mcp-approvals.ts packages/db/src/store/mcp-approvals.test.ts packages/db/src/store/index.ts apps/daemon/src/inbox/mcp-approval.ts apps/daemon/src/inbox/mcp-approval.test.ts apps/daemon/src/inbox/service.ts apps/daemon/src/inbox/index.ts apps/daemon/src/sessions/index.ts apps/daemon/src/runner/runner.ts apps/daemon/src/runner/runner.test.ts apps/daemon/src/api/services.ts apps/daemon/src/api/app.ts apps/daemon/src/api/app.test.ts apps/daemon/src/daemon/services.ts apps/daemon/src/daemon/start.test.ts apps/daemon/AGENTS.md && git commit -m 'feat(daemon): run repo mcp servers only after per-project approval'
 ```
 
+
+- [ ] **Step 9: Close the three M1b open items in the runner and the daemon's shutdown**
+
+`docs/open-items.md` carries three items tagged M1b, all in code this task already changed. Each gets a test that fails first.
+
+Add to `apps/daemon/src/runner/runner.test.ts`, inside `describe('runner', …)` (`vi`, `waitFor`, `curl` and `openCard` are already there):
+```ts
+  it('parks on the card that is still open when two waits overlap and the first is answered', async () => {
+    engine = await createTestEngine({ Alpha: [[{ do: 'hang' }]] });
+    const start = vi.spyOn(engine.adapter, 'start');
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await waitFor(() => ws(workstream.id).state === 'RUNNING');
+    const spec = start.mock.calls[0]?.[0];
+    if (!spec) throw new Error('no session started');
+    // Claude Code asks for parallel tool calls at once, so two permission waits can overlap.
+    const ask = (command: string, toolUseId: string) =>
+      spec.canUseTool({ toolName: 'Bash', input: { command }, toolUseId, signal: new AbortController().signal });
+    const first = ask('curl -s https://one.example', 'toolu_1');
+    const second = ask('curl -s https://two.example', 'toolu_2');
+    const cards = await waitFor(() => {
+      const open = listInbox(engine.store.db, { states: ['OPEN'] });
+      return open.length === 2 ? open : undefined;
+    });
+    const one = cards.find((c) => c.body.includes('one.example'));
+    const two = cards.find((c) => c.body.includes('two.example'));
+    if (!one || !two) throw new Error('expected a card per command');
+    engine.inbox.answer(one.id, { choice: 'allow_once' });
+    expect(await first).toMatchObject({ behavior: 'allow' });
+    engine.clock.advance(10 * 60_000);
+    await engine.runner.idle();
+    await second;
+    expect(ws(workstream.id)).toMatchObject({ state: 'WAITING_HUMAN', nextAction: { kind: 'answer', inboxId: two.id } });
+  });
+
+  it('hands an answer and its one-time permission to one session only, so a restart cannot grant it again', async () => {
+    engine = await createTestEngine({ Alpha: [[curl, turn], [curl, { do: 'hang' }]] });
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    const card = await waitFor(openCard);
+    engine.clock.advance(10 * 60_000);
+    await engine.runner.idle();
+    engine.inbox.answer(card.id, { choice: 'allow_once' });
+    engine.launch(workstream.id);
+    await waitFor(() => ws(workstream.id).state === 'RUNNING');
+    // The running session has the answer. Recovery after a restart reads this action, so it must no
+    // longer be `answer`; with no handoff yet it is a fresh start, which recovery turns into a resume.
+    expect(ws(workstream.id).nextAction).toEqual({ kind: 'start' });
+    await engine.runner.stopAll('shutdown');
+  });
+```
+Add to `apps/daemon/src/daemon/start.test.ts`, inside `describe('startDaemon', …)`, with `readdirSync` added to the `node:fs` import:
+```ts
+  it('closes its log file on stop, so repeated starts leak no file descriptor', async () => {
+    const openFds = () => readdirSync('/dev/fd').length;
+    const cycle = async () => {
+      await (await startDaemon({ dataDir: dir.path, port: 0, adapter: new FakeAdapter({}), logLevel: 'warn', ...QUIET })).stop();
+    };
+    // The first cycle opens what stays open by design (module handles, the addon).
+    await cycle();
+    const before = openFds();
+    for (let i = 0; i < 3; i += 1) await cycle();
+    expect(openFds()).toBeLessThanOrEqual(before);
+  });
+```
+```bash
+pnpm vitest run --project daemon runner start
+```
+Expected: FAIL, for these reasons:
+- The overlap test finds the workstream QUEUED with `nextAction.inboxId` set to the first card: the session parked on the answered card.
+- The restart test reads `{ kind: 'answer', … }`.
+- The log test counts three more open descriptors, one `daemon.log` stream per start.
+
+Implement. In `apps/daemon/src/runner/runner.ts`:
+- In `interface SessionState`, replace `waitingOn: InboxItemId | null;` and `waits: number;` with:
+  ```ts
+    /**
+     * The cards the session is waiting on, oldest first, with how many waits each has: a folded card can
+     * be asked twice. A card leaves the map when its last wait ends.
+     */
+    waitingOn: Map<InboxItemId, number>;
+  ```
+  and in the `const st: SessionState = { … }` literal, replace `waitingOn: null,` and `waits: 0,` with `waitingOn: new Map(),`.
+- Above `const endWaits = …`, add:
+  ```ts
+    /** The oldest card still open: a stop or the wait timer parks on it, never on one already answered. */
+    const firstOpen = (): InboxItemId | null => [...st.waitingOn.keys()][0] ?? null;
+    const openWaits = (): number => [...st.waitingOn.values()].reduce((sum, n) => sum + n, 0);
+  ```
+- In `endWaits`, replace `if (st.waits > 0 && st.waitingOn) st.parkedFor ??= st.waitingOn;` with `st.parkedFor ??= firstOpen();`.
+- In `onWaitStart(item)`, replace `st.waits += 1;`, `if (st.waits > 1) return;` and `st.waitingOn = item.id;` with:
+  ```ts
+        st.waitingOn.set(item.id, (st.waitingOn.get(item.id) ?? 0) + 1);
+        if (openWaits() > 1) return;
+  ```
+  and in its timer, replace `st.parkedFor = item.id;` with `st.parkedFor = firstOpen() ?? item.id;`.
+- Change `onWaitEnd()` to `onWaitEnd(item)`, and replace `st.waits = Math.max(0, st.waits - 1);`, `if (st.waits > 0) return;` and `st.waitingOn = null;` with:
+  ```ts
+        const left = (st.waitingOn.get(item.id) ?? 0) - 1;
+        if (left > 0) st.waitingOn.set(item.id, left);
+        else st.waitingOn.delete(item.id);
+        // WAITING_HUMAN holds until every wait has ended, including a second wait on the same folded card.
+        if (st.waitingOn.size > 0) return;
+  ```
+- Give `freshAction` the reader it reads through, so it can run inside a write: change `function freshAction(id: WorkstreamId): NextAction` to `function freshAction(reader: DbReader, id: WorkstreamId): NextAction`, with `latestHandoff(reader, id)` in its body, add `type DbReader` to the `@10db/db` import, and change the existing call `: freshAction(id);` to `: freshAction(db, id);`.
+- In `case 'started':`, inside the `opts.state.write((ctx) => { … })`, after `markSessionStarted(…)`, add:
+  ```ts
+                // The session has the answer now. Kept as `answer`, a restart would send it again and
+                // re-grant a one-time permission; a fresh action resumes this session after a crash.
+                if (action.kind === 'answer') patchWorkstream(ctx, id, ctl.fence, { nextAction: freshAction(ctx.tx, id) });
+  ```
+  A crash before `started` still keeps the `answer` action, as `nextActionAfterCrash` intends: that session never saw the answer.
+
+In `apps/daemon/src/runner/next-action.ts`, the doc comment of `nextActionAfterCrash` now overstates how long an answer survives. Replace its second sentence (from "An answer or a gate failure" to "fails the workstream.") with:
+```ts
+ * A gate failure is builder input the next session must still see, so it survives the crash, retried
+ * until the recovery limit fails the workstream. An answer survives only a crash before its session
+ * started: once a session has started, the runner has replaced the `answer` action, so the answer and
+ * a one-time permission reach exactly one session.
+```
+
+In `apps/daemon/src/log/rotate.ts`, give `fileDestination` the stream's own type, so the caller can end it:
+```ts
+/** An asynchronous pino destination that creates the log directory when missing. */
+export function fileDestination(path: string): ReturnType<typeof pino.destination> {
+  return pino.destination({ dest: path, mkdir: true, sync: false });
+}
+```
+Drop the now-unused `type DestinationStream` import there. In `apps/daemon/src/daemon/start.ts`, keep the stream: replace `const logger = createLogger({ level: opts.logLevel, destination: fileDestination(logPath) });` with
+```ts
+  const logFile = fileDestination(logPath);
+  const logger = createLogger({ level: opts.logLevel, destination: logFile });
+```
+Below it, add:
+```ts
+  /**
+   * Ends the log file and waits for its descriptor to close. A stop right after start would otherwise
+   * leak the descriptor, and the stream's late open fails once a test has removed the data directory.
+   */
+  function closeLog(): Promise<void> {
+    return new Promise((resolve) => {
+      logFile.once('close', () => {
+        resolve();
+      });
+      // SonicBoom emits 'error', not 'close', when its open or close fails, and an unlistened 'error' throws.
+      logFile.once('error', () => {
+        resolve();
+      });
+      logFile.end();
+    });
+  }
+```
+Then wrap the whole body of `shutdown()`, from `createdScheduler.stop();` through `lock.release();`, in `try { … } finally { await closeLog(); }`, so a failed `stopAll` still closes the file. Nothing may log after `closeLog()`: every component that holds the logger (the scheduler, the pauses, the nightly backup, the watcher, keep-awake, the runner and its sessions) is stopped inside the `try`, and `main.ts` only exits once `stop()` resolves. Don't add a log line after the `try`.
+```bash
+pnpm vitest run --project daemon
+pnpm typecheck && pnpm lint && pnpm knip
+pnpm format
+git add apps/daemon/src/runner/runner.ts apps/daemon/src/runner/runner.test.ts apps/daemon/src/log/rotate.ts apps/daemon/src/daemon/start.ts apps/daemon/src/daemon/start.test.ts && git commit -m 'fix(daemon): park on an open card, consume an answer once, close the log on stop'
+```
+Expected: every daemon test passes. Task 15 ticks the three items.
+
 ---
 
 
@@ -5855,7 +6116,7 @@ git add packages/db/src/schema.ts packages/db/drizzle packages/db/src/store/mcp-
 
 **Files:**
 - Create: `apps/desktop/src-tauri/src/connection.rs`, `src-tauri/src/supervisor.rs`, `src-tauri/src/tray.rs`
-- Modify: `apps/desktop/src-tauri/Cargo.toml`, `src-tauri/Cargo.lock` (regenerated), `src-tauri/src/lib.rs`, `src-tauri/capabilities/default.json`, `apps/desktop/package.json` (script `dev:shell`)
+- Modify: `apps/desktop/src-tauri/Cargo.toml`, `src-tauri/Cargo.lock` (regenerated), `src-tauri/src/lib.rs`, `src-tauri/capabilities/default.json`, `apps/desktop/package.json` (script `dev:shell`), `apps/desktop/AGENTS.md`
 - Test: unit tests inside `connection.rs`, `supervisor.rs` and `tray.rs` (`cargo test`)
 
 **Interfaces:**
@@ -5905,10 +6166,10 @@ APIs confirmed in the Tauri v2 docs:
 
 - [ ] **Step 1: Add the crates and write the failing tests**
 
-Replace the `[dependencies]` and `[lints.clippy]` sections of `apps/desktop/src-tauri/Cargo.toml`:
+Replace the `[dependencies]` and `[lints.clippy]` sections of `apps/desktop/src-tauri/Cargo.toml`. Keep the `tauri` version `main` already pins (Renovate moves it; `=2.12.4` when this was written) and only add the feature. Pin each new crate to the latest stable release at least a day old, as the header says:
 ```toml
 [dependencies]
-tauri = { version = "=2.12.3", features = ["tray-icon"] }
+tauri = { version = "=2.12.4", features = ["tray-icon"] }
 tauri-plugin-single-instance = "=2.5.3"
 tauri-plugin-notification = "=2.6.0"
 serde = { version = "=1.0.229", features = ["derive"] }
@@ -5919,8 +6180,7 @@ unsafe_code = "forbid"
 
 [lints.clippy]
 pedantic = { level = "warn", priority = -1 }
-# Rust module names repeat in type names here (connection::DaemonConnection) by design; the
-# lint is a style preference that some clippy versions still put under pedantic.
+# Module names repeat in type names here (connection::DaemonConnection) by design.
 module_name_repetitions = "allow"
 ```
 
@@ -6087,8 +6347,10 @@ mod tray;
 
 - [ ] **Step 2: Run the tests to see them fail**
 
+`tauri-build` checks that the `externalBin` and `resources` from Task 1 exist before it compiles anything, so prepare the sidecar first; otherwise the build fails in `build.rs`, not on the missing code:
 ```bash
-cd apps/desktop/src-tauri && cargo test; cd -
+pnpm --filter @10db/desktop sidecar
+cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
 ```
 Expected: FAIL to compile, with `cannot find function 'read_connection'`, `cannot find type 'Backoff'`, `cannot find function 'lanes_label'` and similar errors.
 
@@ -6532,7 +6794,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<TrayItems> {
 - [ ] **Step 6: Run the unit tests**
 
 ```bash
-cd apps/desktop/src-tauri && cargo test; cd -
+cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
 ```
 Expected: the twelve tests in `connection`, `supervisor` and `tray` PASS. `lib.rs` doesn't use the modules yet, so `cargo test` may warn about dead code; Step 7 wires them in.
 
@@ -6639,6 +6901,13 @@ Add a script to `apps/desktop/package.json` for shell development against a daem
 - **Quoting.** pnpm runs the script through `sh`, so the single quotes pass the JSON through intact.
 - **Prepare the sidecar once.** `tauri-build` checks that the `externalBin` exists even in dev, so run `pnpm --filter @10db/desktop sidecar` once before the first `dev:shell`.
 
+Add to `apps/desktop/AGENTS.md`:
+```markdown
+- `pnpm --filter @10db/desktop dev:shell` runs the Tauri shell against the daemon and Vite server that
+  `pnpm dev` already runs. It sets `TENDB_EXTERNAL_DAEMON=1`, which makes the shell skip its sidecar.
+  Run `pnpm --filter @10db/desktop sidecar` once first: `tauri-build` checks the sidecar files exist.
+```
+
 - [ ] **Step 8: Run the Rust checks**
 
 ```bash
@@ -6670,7 +6939,7 @@ Record anything surprising (the tray title rendering, the Dock behavior) in `doc
 The pre-commit hook runs `cargo fmt --check` on the staged `.rs` files, as well as Prettier on the JSON files.
 ```bash
 pnpm format
-git add apps/desktop/src-tauri/Cargo.toml apps/desktop/src-tauri/Cargo.lock apps/desktop/src-tauri/src/lib.rs apps/desktop/src-tauri/src/connection.rs apps/desktop/src-tauri/src/supervisor.rs apps/desktop/src-tauri/src/tray.rs apps/desktop/src-tauri/capabilities/default.json apps/desktop/package.json docs/architecture/research/spike-08-sidecar.md && git commit -m 'feat(desktop): supervise the daemon sidecar, with a tray, close-to-tray and single instance'
+git add apps/desktop/src-tauri/Cargo.toml apps/desktop/src-tauri/Cargo.lock apps/desktop/src-tauri/src/lib.rs apps/desktop/src-tauri/src/connection.rs apps/desktop/src-tauri/src/supervisor.rs apps/desktop/src-tauri/src/tray.rs apps/desktop/src-tauri/capabilities/default.json apps/desktop/package.json apps/desktop/AGENTS.md docs/architecture/research/spike-08-sidecar.md && git commit -m 'feat(desktop): supervise the daemon sidecar, with a tray, close-to-tray and single instance'
 ```
 
 ---
@@ -6729,6 +6998,7 @@ Confirmed in the docs:
 ```bash
 pnpm add --filter @10db/desktop @tauri-apps/api@2.12.3 @tauri-apps/plugin-notification@2.6.0 dayjs@1.11.23 zod@4.6.7
 ```
+Resolve each version first, as the header says: `zod` takes the version the other workspaces pin, `@tauri-apps/api` the latest release on the `tauri` crate's minor, and the rest the latest stable at least a day old.
 
 The UI must call the daemon through the typed client (spec §11, "the Hono typed client gives the UI end-to-end types"). M1a's routes parse their bodies and queries inside the handlers, so the client sees no input types, and `$get({ query })` or `$post({ json })` don't typecheck. This test pins the typed shapes first.
 
@@ -6842,27 +7112,22 @@ Then replace the five routes that read a body or a query (plus Task 7's PUT) wit
 ```
 Leave the other routes as they are. The JSON validator requires `Content-Type: application/json`. M1a's tests and `apiClient` already send it. If any test posts JSON without it, add the header.
 
-`hono/validator` reports a malformed body or a missing content type by throwing Hono's `HTTPException` (status 400). M1a's `onError` maps anything that isn't a `ZodError` or a `DomainError` to 500, so that bad request would read as a daemon crash. Add this test to `apps/daemon/src/api/app.test.ts`:
-```ts
-  it('answers a malformed JSON body with 400, not 500', async () => {
-    const res = await app().request('/projects', { method: 'POST', headers: { ...auth.headers, 'Content-Type': 'application/json' }, body: '{"name": ' });
-    expect(res.status).toBe(400);
-  });
-```
+`hono/validator` reports a malformed body or a missing content type by throwing Hono's `HTTPException` (status 400). M1a's `onError` turns a `ZodError`, a `DomainError` and the `SyntaxError` that `c.req.json()` throws into 400s, and anything else into 500. A route that now parses through the validator never throws that `SyntaxError`, so its bad body would read as a daemon crash. M1a's `answers 400 for a body that is not JSON` test in `apps/daemon/src/api/app.test.ts` already posts `'{nope'` to `/projects`, so it is the red test here; don't add a second one.
 ```bash
 pnpm vitest run --project daemon api
 ```
-Expected: FAIL: the malformed body gets 500.
+Expected: FAIL: `answers 400 for a body that is not JSON` now gets 500.
 
 In `apps/daemon/src/api/app.ts`, add `import { HTTPException } from 'hono/http-exception';`. Make this the first check inside `app.onError((error, c) => { … })`:
 ```ts
     // Hono's own request errors (a malformed body, a missing content type) carry their status.
     if (error instanceof HTTPException) return error.getResponse();
 ```
+Keep the `SyntaxError` branch: the routes left on `c.req.json()` still throw it.
 ```bash
 pnpm vitest run --project daemon api
 ```
-Expected: the API tests PASS, the new one included.
+Expected: the API tests PASS.
 
 Then close a hole that matters once a browser talks to the daemon. Browsers send `Origin` on every WebSocket upgrade but apply no CORS to it, and the stream takes its token in the query string. So the stream must refuse foreign pages itself. Add this test to `apps/daemon/src/api/app.test.ts`:
 ```ts
@@ -7569,8 +7834,16 @@ describe('App shell', () => {
     renderApp('/factory');
     expect(await screen.findByRole('link', { name: /Inbox.*1 open card/ })).toBeTruthy();
   });
+
+  it('draws the color scheme toggle icon at the 20px size DESIGN.md sets', async () => {
+    server.use(...baseHandlers());
+    renderApp();
+    const toggle = await screen.findByRole('button', { name: /^Switch to (dark|light) mode$/ });
+    expect(toggle.querySelector('svg')?.getAttribute('width')).toBe('20');
+  });
 });
 ```
+The last test is M0's DESIGN.md guard, kept from the file this replaces.
 
 - [ ] **Step 5: Run the tests to see them fail**
 
@@ -7678,7 +7951,7 @@ export type DaemonClient = ReturnType<typeof createDaemonClient>;
 /** A non-2xx answer from the daemon; `message` is the daemon's own explanation. */
 export class DaemonRequestError extends Error {
   override readonly name = 'DaemonRequestError';
-  // Declared fields, not parameter properties: M0 bans those (TS1294 under erasableSyntaxOnly).
+  // Declared fields, not parameter properties: erasableSyntaxOnly rejects those (TS1294).
   readonly status: number;
   readonly body: unknown;
   constructor(status: number, body: unknown, message: string) {
@@ -8076,7 +8349,7 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   provider: WORK,
   inbox: [queryKeys.inbox, ['workstreams']],
   app_setting: [queryKeys.keepAwake],
-  // `proposal` (M1a's proposal.resolved) has no view in M1; the card that resolved it sends its own inbox event.
+  // `proposal` (from proposal.resolved) has no view to refresh; the card that resolved it sends its own inbox event.
 };
 
 export function eventStreamUrl(conn: DaemonConnection, after: number): string {
@@ -8095,6 +8368,8 @@ export function eventStreamUrl(conn: DaemonConnection, after: number): string {
 export function useEventStream(onEvent?: (event: DaemonEvent) => void): void {
   const { client, connection } = useDaemon();
   const queryClient = useQueryClient();
+  // Kept across reconnects: a restarted daemon has the same database, so its log continues this seq.
+  // A daemon on a wiped data dir starts over at 1; the UI then needs a reload to see its events.
   const lastSeq = useRef<number | null>(null);
   const listener = useRef(onEvent);
   useEffect(() => {
@@ -9891,6 +10166,8 @@ How the keys behave:
   - Enter on a focused button sends once, with no extra native click.
   - `n` focuses the note without typing an "n" into it.
 
+A known limit, from `docs/open-items.md`: when a multi-question `AskUserQuestion` parks partway through, the resumed session asks the earlier questions again, so the inbox can show a question card the builder already answered. That is expected in M1b; the view needs nothing special for it.
+
 Untrusted text (spec §7): titles, bodies, option text and an MCP approval card's command, arguments and URL render as React text children only. Permission bodies go in a `Code` block and others in `Text` with `white-space: pre-wrap`. Nothing passes through Markdown or `dangerouslySetInnerHTML`, and a test proves it.
 
 - [ ] **Step 1: Write the failing test**
@@ -10185,7 +10462,7 @@ Expected: FAIL. The empty-inbox test passes against the M0 placeholder, but ever
 import { McpServerReview, type InboxItemDto } from '@10db/contracts';
 import { Alert, Code, Stack, Text } from '@mantine/core';
 
-/** The card's `detail` key the daemon puts the review under (decision 52). */
+/** The card's `detail` key the daemon puts the review under. */
 const MCP_APPROVAL_DETAIL = 'mcpApproval';
 
 /** The server under review when `item` is an MCP approval card, else null. */
@@ -10547,7 +10824,7 @@ export function InboxView() {
                 choice={item.id === selected?.id ? effectiveChoice : null}
                 note={item.id === selected?.id ? note : ''}
                 error={item.id === selected?.id ? error : null}
-                pending={answer.isPending && answer.variables.id === item.id}
+                pending={answer.isPending && answer.variables?.id === item.id}
                 noteRef={noteRef}
                 onSelect={() => { select(item); }}
                 onChoose={(value) => { setChoice(value); setError(null); }}
@@ -10599,9 +10876,9 @@ git add apps/desktop/src/views/inbox apps/desktop/src/views/inbox-view.tsx apps/
   - `apps/desktop/package.json`: the dev dependencies, plus the `e2e` and `typecheck` scripts.
   - `apps/desktop/vitest.config.ts`: exclude `e2e/`.
   - `apps/desktop/src/theme.ts` (M0's), `src/app.tsx` and `src/test/daemon.tsx`: the AA theme (Step 2).
-  - `scripts/gate.sh` and `.github/workflows/ci.yml`.
+  - `scripts/gate.sh`, `scripts/setup.sh` and `.github/workflows/ci.yml`.
   - `.gitignore`, `knip.json` and `eslint.config.js`.
-  - `tests/repo/src/gate.test.ts` and `tests/repo/src/ci.test.ts`.
+  - `tests/repo/src/gate.test.ts`, `tests/repo/src/ci.test.ts` and `tests/repo/src/setup.test.ts`.
 - Test: `apps/desktop/e2e/loop.spec.ts` and `apps/desktop/src/theme.test.ts`, plus the two repo tests above.
 
 **Interfaces:**
@@ -10618,14 +10895,17 @@ git add apps/desktop/src/views/inbox apps/desktop/src/views/inbox-view.tsx apps/
 
 The E2E runs the real daemon, with its real database, scheduler, inbox, MCP endpoint, git commit and gate, against the scripted fake adapter (spec §12: "Playwright + axe against the Vite app on a fake daemon"). One serial test covers the loop, because each step depends on the last.
 
+It drives the Vite app in Playwright's WebKit, the engine behind the WKWebView the Tauri shell renders in on macOS. It is not the Tauri window itself: `tauri-driver` has no macOS support, so Task 14's live run is what exercises the real window. Playwright and its browser are dev tools only; nothing of them ships in the bundle.
+
 Ports 1420 and 4318 must be free; stop `pnpm dev` before running the gate. On Linux CI the daemon has no `/usr/bin/caffeinate`. Task 5's `systemCaffeinate` handles the child's `error` event, so keep-awake logs it and the daemon keeps running. If the daemon web server exits with `spawn /usr/bin/caffeinate ENOENT`, fix that in Task 5's spawner, not here.
 
 - [ ] **Step 1: Add the dependencies and the E2E scaffolding**
 
 ```bash
 pnpm add -D --filter @10db/desktop @playwright/test@1.64.0 @axe-core/playwright@4.13.0 @types/node@26.6.5 tsx@4.23.15
-pnpm --filter @10db/desktop exec playwright install chromium
+pnpm --filter @10db/desktop exec playwright install webkit
 ```
+Resolve each pin first, as the header says. `tsx` and `@types/node` take the versions `main` already pins elsewhere.
 
 In `apps/desktop/package.json`, set these two scripts (keep the others). `typecheck` keeps Task 1's `scripts/tsconfig.json` and adds `e2e/`:
 ```json
@@ -10751,7 +11031,8 @@ export default defineConfig({
   reporter: [['list']],
   outputDir: resolve(DESKTOP_DIR, 'test-results'),
   use: { baseURL: uiUrl, colorScheme: 'dark', trace: 'retain-on-failure' },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  // WebKit, because the shipped app renders in WKWebView.
+  projects: [{ name: 'webkit', use: { ...devices['Desktop Safari'] } }],
   webServer: [
     {
       command: 'pnpm --filter @10db/daemon exec tsx src/main.ts',
@@ -10779,7 +11060,7 @@ export default defineConfig({
   ],
 });
 ```
-The daemon's start timeout is 60 s because startup captures the login-shell environment, which can take up to 10 s (Task 2).
+The daemon's start timeout is 60 s for a cold `tsx` start on a slow CI runner. With `TENDB_FAKE_SCRIPTS` set, `main.ts` skips the login-shell capture (Task 7), so the E2E never runs the builder's shell profile.
 
 Wire the tooling:
 - In `knip.json`, set the desktop entry to `"apps/desktop": { "entry": ["src/main.tsx", "scripts/*.ts", "e2e/playwright.config.ts", "e2e/prepare.ts", "e2e/*.spec.ts"] }`. Keep Task 1's `scripts/*.ts`.
@@ -10810,7 +11091,7 @@ import { darken, DEFAULT_THEME, isLightColor, mergeMantineTheme } from '@mantine
 import { describe, expect, it } from 'vitest';
 import { AA_CONTRAST, contrastRatio, cssVariablesResolver, theme } from './theme';
 
-// The pairs Mantine 9 renders, resolved with 10db's theme. Task 13's axe run checks the real pages.
+// The pairs Mantine 9 renders, resolved with 10db's theme. The E2E's axe run checks the real pages.
 const resolved = mergeMantineTheme(DEFAULT_THEME, theme);
 const vars = cssVariablesResolver(resolved);
 const palettes = Object.entries(resolved.colors);
@@ -10856,7 +11137,7 @@ Expected: FAIL, because `./theme` exports no `AA_CONTRAST`, `contrastRatio` or `
 ```ts
 import { createTheme, darken, luminance, type CSSVariablesResolver } from '@mantine/core';
 
-/** WCAG 2 AA for normal text. Task 13's axe checks hold every view to it, in both color schemes. */
+/** WCAG 2 AA for normal text. The E2E's axe checks hold every view to it, in both color schemes. */
 export const AA_CONTRAST = 4.5;
 /** The relative luminance at which black and white text have equal contrast (WCAG 2). */
 const EQUAL_CONTRAST_LUMINANCE = 0.179;
@@ -11037,19 +11318,29 @@ Add to `tests/repo/src/gate.test.ts`, inside the `describe`. M0's file already i
   });
 ```
 
-Add to `tests/repo/src/ci.test.ts`, inside the `describe`:
+In `tests/repo/src/ci.test.ts`, M0's `'installs with a frozen lockfile, and the gate job keeps the lines M1b inserts between'` asserts that the install line is directly followed by the gate line. Replace that test (don't add a second one) with:
 ```ts
-  it('installs Chromium before running the gate, which includes the e2e step', () => {
-    const install = workflow.indexOf('playwright install --with-deps chromium');
-    expect(install).toBeGreaterThan(-1);
-    expect(install).toBeLessThan(workflow.indexOf('run: bash scripts/gate.sh'));
+  it('installs with a frozen lockfile, then WebKit for the e2e step, then runs the gate', () => {
+    const text = readRepoFile(CI);
+    expect(text).toContain(
+      '      - run: pnpm install --frozen-lockfile\n      - run: pnpm --filter @10db/desktop exec playwright install --with-deps webkit\n      - run: bash scripts/gate.sh\n',
+    );
   });
 ```
 
-```bash
-pnpm vitest run --project repo gate ci
+A fresh checkout's `make gate` needs the browser too, so `make setup` installs it. In `tests/repo/src/setup.test.ts`, in `'installs the tools and runs pnpm through the mise-pinned toolchain'`, add the third expected call:
+```ts
+    expect(calls).toEqual([
+      'install node pnpm gitleaks actionlint zizmor cargo-deny',
+      'exec -- pnpm install --frozen-lockfile',
+      'exec -- pnpm --filter @10db/desktop exec playwright install webkit',
+    ]);
 ```
-Expected: FAIL. `ALL_STEPS` has no `e2e`, and the workflow never installs Chromium.
+
+```bash
+pnpm vitest run --project repo gate ci setup
+```
+Expected: FAIL. `ALL_STEPS` has no `e2e`, the workflow has no WebKit install between the two lines, and `setup.sh` makes only two calls.
 
 - [ ] **Step 7: Wire the gate and CI**
 
@@ -11064,13 +11355,20 @@ ALL_STEPS=(format lint typecheck test build e2e drift knip rust)
 In `.github/workflows/ci.yml`, in the `gate` job, insert one step between M0's two lines `- run: pnpm install --frozen-lockfile` and `- run: bash scripts/gate.sh`:
 ```yaml
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @10db/desktop exec playwright install --with-deps chromium
+      - run: pnpm --filter @10db/desktop exec playwright install --with-deps webkit
       - run: bash scripts/gate.sh
+```
+`--with-deps` installs WebKit's system libraries on the Ubuntu runner.
+
+In `scripts/setup.sh`, append after the `pnpm install` line:
+```bash
+# The e2e gate step drives the UI in Playwright's WebKit; the browser lives in Playwright's own cache.
+mise exec -- pnpm --filter @10db/desktop exec playwright install webkit
 ```
 The job keeps M0's `GATE_SKIP_RUST: '1'`, its `jdx/mise-action` step and its `permissions`. The new step uses no action, so M0's workflow hardening test (SHA pins, `permissions`, `persist-credentials: false`) still passes. On failure, the existing log step prints `.gate/e2e.log`, which includes Playwright's list reporter output.
 
 ```bash
-pnpm vitest run --project repo gate ci
+pnpm vitest run --project repo gate ci setup
 make gate
 ```
 Expected: the repo tests PASS, and `make gate` ends with `GATE PASS format lint typecheck test build e2e drift knip rust (<n>s)`.
@@ -11080,7 +11378,7 @@ Expected: the repo tests PASS, and `make gate` ends with `GATE PASS format lint 
 ```bash
 pnpm format
 pnpm typecheck && pnpm lint && pnpm knip && pnpm format:check
-git add apps/desktop/e2e apps/desktop/package.json apps/desktop/vitest.config.ts pnpm-lock.yaml scripts/gate.sh .github/workflows/ci.yml .gitignore knip.json eslint.config.js tests/repo/src/gate.test.ts tests/repo/src/ci.test.ts && git commit -m 'test(desktop): add the playwright and axe e2e loop on the real daemon, in the gate and ci'
+git add apps/desktop/e2e apps/desktop/package.json apps/desktop/vitest.config.ts pnpm-lock.yaml scripts/gate.sh scripts/setup.sh .github/workflows/ci.yml .gitignore knip.json eslint.config.js tests/repo/src/gate.test.ts tests/repo/src/ci.test.ts tests/repo/src/setup.test.ts && git commit -m 'test(desktop): add the playwright and axe e2e loop on the real daemon, in the gate and ci'
 ```
 
 ---
@@ -11092,14 +11390,14 @@ git add apps/desktop/e2e apps/desktop/package.json apps/desktop/vitest.config.ts
 - Create: `apps/daemon/scripts/acceptance-checks.ts`, `apps/daemon/scripts/live-acceptance.ts`, `scripts/live-acceptance.sh`
 - Create (by running it): `docs/architecture/research/m1-live-acceptance.md`
 - Test: `apps/daemon/test/acceptance-checks.test.ts`
-- Modify: `package.json` (root `live-acceptance` script), `Makefile`
+- Modify: `package.json` (root `live-acceptance` script), `Makefile`, `tests/repo/src/architecture-docs.test.ts` (the research allowlist, with the results note)
 
 **Interfaces:**
 - Consumes:
   - `startDaemon`, `FakeAdapter`, `createTempRepo`, `handoffArgs` and `waitForAsync` from M1a's fixtures, plus `apiClient` from M1a Task 20.
   - The HTTP API.
-  - The log lines the Claude adapter writes once per session to `logs/sessions.log` (Task 7 wires its logger there), from Task 3:
-    - `claude session billing`, with the fields `apiKeySource`, `apiProvider`, `claudeCodeVersion` and `model`;
+  - The log lines the Claude adapter writes once per session to `logs/daemon.log` (Task 7 hands it the daemon's logger; there is one shared log, decision 31), from Task 3:
+    - `claude session billing`, with the fields `apiKeySource`, `apiProvider`, `subscriptionType`, `claudeCodeVersion` and `model`;
     - `claude session mcp`, with `mcpServers: { name, status }[]` from the session's `init`;
     - `claude session mcp status`, the same shape, read once after the first turn.
   - The runner's `project mcp servers` line in `logs/daemon.log` (Task 7), with `passed: { name, transport, envKeys }[]`.
@@ -11115,7 +11413,7 @@ git add apps/desktop/e2e apps/desktop/package.json apps/desktop/vitest.config.ts
   - **Live run:** `pnpm live-acceptance` (root) runs `scripts/live-acceptance.sh`, which builds the daemon and runs `apps/daemon/scripts/live-acceptance.ts`.
     - Arguments, each optional: `--model=<name>` (default `sonnet`), `--effort=<low|medium|high|xhigh|max>` (default `medium`), `--timeout-minutes=<5–180>` (default `60`) and `--port=<n>` (default `4327`). `make live-acceptance` runs the defaults.
     - The project uses `handoffPct` 5 and `nudgePct` 6, the schema's minimums, so a handoff is forced on the 1M window the models report (spike 2: 5% is 50k tokens; a bare session starts at 1.8%).
-    - The disposable repo commits a `.mcp.json` that declares the public Mantine docs server, `mantine`, with the same command and pin as 10db's own `.mcp.json` (M0): `npx -y @mantine/mcp-server@9.7.2`. That exercises the pass-through and adds the server's tools to each session's baseline context, which the report measures.
+    - The disposable repo commits a `.mcp.json` that declares the public Mantine docs server, `mantine`, with the same command and pin as 10db's own `.mcp.json` (M0), read from that file at run time (`npx -y @mantine/mcp-server@<the pinned version>`), so a Mantine bump moves both. That exercises the pass-through and adds the server's tools to each session's baseline context, which the report measures.
     - **The script approves `mantine` through the API before any task starts** (decision 52): it calls the review route, checks that the card shows exactly the command, arguments and (no) variables it wrote, and answers the card `approve`, the same card and answer the UI uses. Asking the operator to approve in the UI instead would add a manual step that tests nothing more: the script wrote this `.mcp.json`, so the review a person does for an unknown repo has nothing to find here, while an unapproved first session would run without the server and spoil both the MCP checks and the baseline measurement. The approval card's UI is covered by Task 12's component test.
     - While sessions run, the script reads the env keys of the running `mantine` processes with `ps -E` (keys only, never values) for the `repo MCP server env` check.
 
@@ -11131,7 +11429,7 @@ The checks run against the database, the git repo and the daemon log after the r
 | `no duplicate commits` | 6 | every `10db-Op` trailer in `git log` is unique |
 | `no duplicate tool ops` | 6 | no `(workstream_id, op_id)` appears twice in `tool_ops` |
 | `events replay without gaps` | 7 | `count(events) = max(seq)` |
-| `subscription billing` | (billing safety) | at least one `claude session billing` log line per started session, all with `apiKeySource: none` and `apiProvider: firstParty`, and no `Billing check failed` |
+| `subscription billing` | (billing safety) | at least one `claude session billing` log line per started session, all with `apiKeySource: none`, `apiProvider: firstParty` and a non-empty `subscriptionType`, and no `Billing check failed` |
 | `repo MCP server approved` | (decision 52) | every `project mcp servers` line, at least one per started session, lists `mantine` as passed with `envKeys` exactly `HOME`, `PATH` |
 | `repo MCP server connected` | (decision 39) | some `claude session mcp status` line, read after a session's first turn, lists `mantine` as `connected` (`pending` at `init` doesn't count) |
 | `repo MCP server env` | (decision 52) | the keys `ps -E` showed for the running `mantine` processes pass `checkServerEnv` |
@@ -11143,10 +11441,11 @@ The checks run against the database, the git repo and the daemon log after the r
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ProjectDto, TaskDto, WorkstreamDto } from '@10db/contracts';
+import { InboxItemDto, ProjectDto, TaskDto, WorkstreamDto } from '@10db/contracts';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import { startDaemon, type RunningDaemon } from '../src/daemon';
 import { FakeAdapter, type FakeScriptBook } from '../src/sessions';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { checkServerEnv, renderAcceptanceReport, runAcceptanceChecks, sessionBaselines } from '../scripts/acceptance-checks';
 import { apiClient } from './api-client';
 import { createTempRepo, handoffArgs, tempDir, waitForAsync } from './fixtures';
@@ -11173,22 +11472,23 @@ let data: { path: string; cleanup(): void };
 let daemon: RunningDaemon;
 
 beforeAll(async () => {
-  repo = await createTempRepo();
+  repo = createTempRepo();
   data = tempDir('acceptance-checks');
-  daemon = await startDaemon({ dataDir: data.path, port: 0, adapter: new FakeAdapter(BOOK), logLevel: 'info' });
+  daemon = await startDaemon({ dataDir: data.path, port: 0, adapter: new FakeAdapter(BOOK), logLevel: 'info', caffeinate: () => null, watch: false });
+  // Every call names the zod schema its response is parsed with, so a changed response fails here.
   const api = apiClient(daemon.url, daemon.token);
-  const project = await api.post<ProjectDto>('/projects', {
+  const project = await api.post('/projects', ProjectDto, {
     name: 'checks', repoPath: repo.path, gateCommand: 'test -d src', maxLanes: 2,
     areas: [{ name: 'a', globs: ['src/a/**'] }, { name: 'b', globs: ['src/b/**'] }],
   });
   for (const [title, area] of [['Alpha', 'a'], ['Beta', 'b']] as const) {
-    const task = await api.post<TaskDto>(`/projects/${project.id}/tasks`, { title, acceptanceCriteria: ['file exists'], areas: [area] });
-    await api.post<WorkstreamDto>(`/tasks/${task.id}/start`, {});
+    const task = await api.post(`/projects/${project.id}/tasks`, TaskDto, { title, acceptanceCriteria: ['file exists'], areas: [area] });
+    await api.post(`/tasks/${task.id}/start`, WorkstreamDto);
   }
-  const question = await waitForAsync(async () => (await api.get<{ id: string; kind: string }[]>('/inbox?state=OPEN')).find((c) => c.kind === 'question'));
-  await api.post(`/inbox/${question.id}/answer`, { choice: 'Howdy' });
+  const question = await waitForAsync(async () => (await api.get('/inbox?state=OPEN', z.array(InboxItemDto))).find((c) => c.kind === 'question'));
+  await api.post(`/inbox/${question.id}/answer`, z.unknown(), { choice: 'Howdy' });
   await waitForAsync(async () => {
-    const all = await api.get<WorkstreamDto[]>('/workstreams?active=false');
+    const all = await api.get('/workstreams?active=false', z.array(WorkstreamDto));
     return all.length === 2 && all.every((w) => w.state === 'DONE') ? all : undefined;
   });
   await daemon.stop();
@@ -11229,10 +11529,12 @@ describe('runAcceptanceChecks', () => {
 
   it('passes the billing check only when every session logged a first-party login', async () => {
     const sessions = 3; // Alpha ran two sessions and Beta one.
-    const line = JSON.stringify({ level: 30, msg: 'claude session billing', apiKeySource: 'none', apiProvider: 'firstParty' });
+    const line = JSON.stringify({ level: 30, msg: 'claude session billing', apiKeySource: 'none', apiProvider: 'firstParty', subscriptionType: 'Claude Max' });
     expect((await byName({ logText: Array.from({ length: sessions }, () => line).join('\n') })).get('subscription billing')).toMatchObject({ ok: true });
     const bedrock = JSON.stringify({ level: 30, msg: 'claude session billing', apiKeySource: 'none', apiProvider: 'bedrock' });
     expect((await byName({ logText: [line, line, bedrock].join('\n') })).get('subscription billing')).toMatchObject({ ok: false });
+    const noPlan = JSON.stringify({ level: 30, msg: 'claude session billing', apiKeySource: 'none', apiProvider: 'firstParty' });
+    expect((await byName({ logText: [line, line, noPlan].join('\n') })).get('subscription billing')).toMatchObject({ ok: false });
   });
 
   it('fails the repo MCP checks on a run whose repo declared no server', async () => {
@@ -11277,7 +11579,7 @@ describe('runAcceptanceChecks', () => {
 });
 
 describe('checkServerEnv', () => {
-  // What `ps -E` showed for `env -i PATH=… HOME=… npx -y @mantine/mcp-server@9.7.2` (spike 4).
+  // What `ps -E` showed for `env -i PATH=… HOME=… npx -y @mantine/mcp-server@9.7.2`.
   const MEASURED = ['_', '__CF_USER_TEXT_ENCODING', 'COLOR', 'EDITOR', 'HOME', 'INIT_CWD', 'NODE', 'npm_command', 'npm_config_cache', 'npm_execpath', 'PATH', 'PWD', 'SHLVL'];
 
   it('passes PATH, HOME and the keys npm and macOS add', () => {
@@ -11352,14 +11654,15 @@ const LogLine = z.looseObject({
   msg: z.string().optional(),
   apiKeySource: z.string().optional(),
   apiProvider: z.string().optional(),
+  subscriptionType: z.string().optional(),
   mcpServers: z.array(z.object({ name: z.string(), status: z.string() })).optional(),
   passed: z.array(z.object({ name: z.string(), envKeys: z.array(z.string()) })).optional(),
 });
 
-/** What 10db passes a stdio server (decision 52): `env -i PATH=… HOME=…`, and nothing else. */
+/** What 10db passes a stdio server: `env -i PATH=… HOME=…`, and nothing else. */
 const STDIO_ENV_KEYS = ['HOME', 'PATH'];
 /**
- * Keys npm (`npx`) and macOS add to a process started with only PATH and HOME, measured for spike 4. None
+ * Keys npm (`npx`) and macOS add to a process started with only PATH and HOME, as measured. None
  * of them comes from the session environment.
  */
 const LAUNCHER_KEY = /^(?:npm_\w+|COLOR|EDITOR|INIT_CWD|NODE|PWD|SHLVL|_|__CF_USER_TEXT_ENCODING)$/;
@@ -11426,9 +11729,9 @@ export async function runAcceptanceChecks(input: {
       }
     });
     const billing = lines.filter((l) => l.msg === 'claude session billing');
-    const firstParty = billing.filter((l) => l.apiKeySource === 'none' && l.apiProvider === 'firstParty');
+    const firstParty = billing.filter((l) => l.apiKeySource === 'none' && l.apiProvider === 'firstParty' && Boolean(l.subscriptionType));
     const failedChecks = input.logText.split('Billing check failed').length - 1;
-    // One line per session start: the repo servers the runner passed, with their env keys (decision 52).
+    // One line per session start: the repo servers the runner passed, with their env keys.
     const starts = lines.filter((l) => l.msg === 'project mcp servers');
     const passedOk = starts.filter((l) => (l.passed ?? []).some((s) => s.name === input.mcpServer && [...s.envKeys].sort().join() === STDIO_ENV_KEYS.join()));
     // Read once after each session's first turn: init alone often says `pending` while npx downloads.
@@ -11540,7 +11843,7 @@ Expected: PASS (17 tests). If `no duplicate commits` reports zero trailers, the 
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { Effort, HealthResponse, InboxItemDto, McpServerStatusDto, ProjectDto, TaskDto, WorkstreamDto } from '@10db/contracts';
@@ -11568,11 +11871,14 @@ const say = (line: string): void => { console.log(`[live] ${line}`); };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
- * The repo's own MCP server, passed through to every session once approved (decisions 39 and 52): the
- * public Mantine docs server, pinned as in 10db's own .mcp.json (M0). It needs no credentials.
+ * The repo's own MCP server, passed through to every session once approved: the public Mantine docs
+ * server, read from 10db's own .mcp.json so the run always uses the pinned version. It needs no credentials.
  */
 const REPO_MCP_SERVER = 'mantine';
-const REPO_MCP_COMMAND = { command: 'npx', args: ['-y', '@mantine/mcp-server@9.7.2'] };
+const OwnMcp = z.object({ mcpServers: z.record(z.string(), z.object({ command: z.string(), args: z.array(z.string()) })) });
+const ownServer = OwnMcp.parse(JSON.parse(readFileSync(join(root, '.mcp.json'), 'utf8'))).mcpServers[REPO_MCP_SERVER];
+if (!ownServer) throw new Error(`10db's .mcp.json declares no ${REPO_MCP_SERVER} server`);
+const REPO_MCP_COMMAND = { command: ownServer.command, args: ownServer.args };
 const REPO_MCP_CONFIG = { mcpServers: { [REPO_MCP_SERVER]: REPO_MCP_COMMAND } };
 
 function git(...a: string[]): string {
@@ -11709,7 +12015,7 @@ async function main(): Promise<void> {
     method: 'POST',
     body: JSON.stringify({
       name: 'live-acceptance', repoPath: repo, gateCommand: 'sh check.sh', maxLanes: 3, model: args.model, effort: args.effort,
-      // The schema's minimums force a handoff on the 1M window (spec §1.3 point 2; spike 2).
+      // The schema's minimums force a handoff on the 1M window (spec §1.3 point 2).
       handoffPct: 5, nudgePct: 6, humanWaitMinutes: 10,
       areas: TASKS.map((t) => ({ name: t.area, globs: [`src/${t.area}/**`] })),
     }),
@@ -11754,12 +12060,9 @@ async function main(): Promise<void> {
 
   daemon.kill('SIGTERM');
   await new Promise((r) => daemon.once('exit', r));
-  // The Claude adapter logs to sessions.log (its billing lines); the engine logs to daemon.log.
-  const logText = ['daemon.log', 'sessions.log']
-    .map((f) => join(dataDir, 'logs', f))
-    .filter((f) => existsSync(f))
-    .map((f) => readFileSync(f, 'utf8'))
-    .join('\n');
+  // One shared log: the engine's lines and the Claude adapter's billing and MCP lines.
+  const logPath = join(dataDir, 'logs', 'daemon.log');
+  const logText = existsSync(logPath) ? readFileSync(logPath, 'utf8') : '';
   const checks = await runAcceptanceChecks({ dbPath: join(dataDir, '10db.sqlite'), repoPath: repo, logText, minTasks: TASKS.length, mcpServer: REPO_MCP_SERVER, mcpServerEnvKeys: envKeys });
   const claudeVersion = execFileSync('claude', ['--version'], { encoding: 'utf8' }).trim();
   const baseline = sessionBaselines(join(dataDir, '10db.sqlite'));
@@ -11772,9 +12075,10 @@ async function main(): Promise<void> {
       'Claude Code': claudeVersion,
       Node: process.version,
       'Handoff threshold': '5% (nudge 6%)',
-      'Repo MCP server': `${REPO_MCP_SERVER} (@mantine/mcp-server@9.7.2, from the repo's .mcp.json, approved through its card)`,
+      'Repo MCP server': `${REPO_MCP_SERVER} (${REPO_MCP_COMMAND.args.join(' ')}, from the repo's .mcp.json, approved through its card)`,
       'Session baseline context': baseline ? `${String(baseline.min)}–${String(baseline.max)}% (first reading of ${String(baseline.sessions)} session(s))` : 'not measured',
-      'Work dir': work,
+      // The research notes test rejects home paths; a TMPDIR under the home folder would leak one.
+      'Work dir': work.replace(homedir(), '~'),
     },
   });
   const out = join(root, 'docs/architecture/research/m1-live-acceptance.md');
@@ -11841,19 +12145,21 @@ Expected:
 - After the manual window check, every check row prints `PASS`, including `repo MCP server approved`, `repo MCP server connected` and `repo MCP server env` (`mantine ran with <n> key(s): PATH, HOME and npm's own`), and `docs/architecture/research/m1-live-acceptance.md` reads `Status: VERIFIED`, with `Model: sonnet @ medium` and the `Repo MCP server` line.
 
 When a check fails:
-- `subscription billing` fails: stop. Read the `claude session billing` lines in `<work dir>/data/logs/sessions.log`. Don't rerun until the cause is understood.
+- `subscription billing` fails: stop. Read the `claude session billing` lines in `<work dir>/data/logs/daemon.log`. Don't rerun until the cause is understood.
 - A repo MCP check fails:
   - `approved`: read the `project mcp servers` lines in `<work dir>/data/logs/daemon.log`. `pending` means the approval wasn't found for the config hash (Task 7's store or route); `failed` names a variable; `envKeys` other than `HOME`, `PATH` means the stdio env is wrong (Task 3's `resolveProjectMcp`).
-  - `connected`: read the `claude session mcp status` lines in `sessions.log`. If `mantine` only shows `failed`, run `/usr/bin/env -i PATH="$PATH" HOME="$HOME" npx -y @mantine/mcp-server@9.7.2` in the work dir's repo to see why it won't start with that env.
+  - `connected`: read the `claude session mcp status` lines in `daemon.log`. If `mantine` only shows `failed`, run `/usr/bin/env -i PATH="$PATH" HOME="$HOME" npx -y @mantine/mcp-server@9.7.2` in the work dir's repo to see why it won't start with that env.
   - `env`: the detail lists the unexpected keys. A key npm or macOS adds that isn't in `checkServerEnv`'s list is fine to add there, with a note in the results; a session variable is a leak, so stop and fix Task 3's `toSdkMcpServer` launch.
 - `handoff crossed` fails: compare the report's "Session baseline context" with the 5% threshold. Set `handoffPct` a few points above the measured first-session baseline (never below 5), keep `nudgePct` above it, and rerun. Continuation sessions are protected by the runner's baseline guard (Task 7), so a low threshold can't loop.
 - Anything else: follow `superpowers:systematic-debugging` from the daemon log and the database (`sqlite3 <work dir>/data/10db.sqlite`), fix the cause, then rerun.
 
 - [ ] **Step 8: Commit the results note**
 
+Read the note through before committing it. In `tests/repo/src/architecture-docs.test.ts`, add `'m1-live-acceptance.md',` to `PUBLIC_RESEARCH`: the test allows exactly the listed files in `docs/architecture/research/`, and rejects `/Users/<name>` paths and key prefixes in them.
 ```bash
+pnpm vitest run --project repo architecture-docs
 pnpm format
-git add docs/architecture/research/m1-live-acceptance.md && git commit -m 'docs(docs): record the m1 live acceptance run'
+git add docs/architecture/research/m1-live-acceptance.md tests/repo/src/architecture-docs.test.ts && git commit -m 'docs(docs): record the m1 live acceptance run'
 ```
 
 ---
@@ -11861,7 +12167,7 @@ git add docs/architecture/research/m1-live-acceptance.md && git commit -m 'docs(
 ### Task 15: Records and the PR
 
 **Files:**
-- Modify: `docs/architecture/decisions.md`, `docs/open-items.md`, `apps/daemon/AGENTS.md`, `apps/desktop/AGENTS.md`, `packages/harness/AGENTS.md`, `README.md`
+- Modify: `docs/architecture/decisions.md`, `docs/open-items.md`, `docs/superpowers/specs/2026-10-13-10db-factory-loop-design.md` (§3), `apps/daemon/AGENTS.md`, `apps/desktop/AGENTS.md`, `packages/harness/AGENTS.md`, `README.md`
 
 - [ ] **Step 1: Append decisions**
 
@@ -11881,7 +12187,7 @@ Rows 37–49, appended after row 36:
 | 44 | The gate runs in the session environment built for the project, not the daemon's own `process.env`. | A Bedrock or `TENDB_*` variable in the daemon's environment must not leak into a project's gate command. |
 | 45 | The watcher flags writes outside every active claim and never blocks. With several active workstreams in a project it names all of them as candidates. More than 50 strays in one batch fold into one bulk flag. | FSEvents can't attribute a write to a process. The guard already blocks Edit and Write outside claims; the watcher catches Bash-made writes. |
 | 46 | The event-stream WebSocket refuses upgrades whose `Origin` isn't an allowed UI origin, and the browser dev loop uses a random per-checkout token, never a committed one. | Browsers don't apply CORS to WebSockets and the stream takes its token in the query string, so a page on another origin could otherwise read every event from a known token. |
-| 47 | A managed session's billing is checked against the project's billing mode (`SessionSpec.billingMode`), never against a mode inferred from its env. The check runs in three places: `accountInfo()` before the prompt is sent, `apiKeySource` at the first `init`, and every tool callback, which waits for both. | A check after the prompt bills at least one request the wrong way. A check against the env itself can't catch a builder regression. The repo's committed settings can add an `env` block after the env was built. |
+| 47 | A managed session's billing is checked against the project's billing mode (`SessionSpec.billingMode`), never against a mode inferred from its env. The check runs in three places: `accountInfo()` before the prompt is sent, `apiKeySource` at the first `init`, and every tool callback, which waits for both. A subscription needs a first-party provider and a non-empty `subscriptionType`, whose value is never compared to a plan name. | A check after the prompt bills at least one request the wrong way. A check against the env itself can't catch a builder regression. The repo's committed settings can add an `env` block after the env was built. |
 | 48 | The watcher keeps only paths `git status` still reports as changed when a batch runs. | A committed file already went through the claim-checked `commit`, and its claim may be released within the batch window. The same check drops gitignored files and directories, with no separate `check-ignore` call. |
 | 49 | A continuation session hands off at `max(handoffPct, first reading + 5)`, not at `handoffPct` alone. | A low threshold below a session's starting context would otherwise hand off every new session at once. |
 ```
@@ -11894,9 +12200,13 @@ Rows 50–53, appended after row 49:
 | 53 | An approved stdio server is launched as `/usr/bin/env -i PATH=… HOME=… <its declared env> <command> <args>`, never with an `env` block, so it gets PATH and HOME from the session environment plus what its approved config declares, and nothing else. HTTP and SSE headers carry approved variables only. | Claude Code builds a stdio server's environment as its own environment plus the declared `env` (read from Claude Code 2.1.300's bundle; spike 4 measures it), and its own environment is the session's: the subscription token, an API key in `api_key` mode, AWS credentials in Bedrock mode. An `env` block can add but never remove. PATH and HOME are all `npx -y @mantine/mcp-server` needs to download, start and list its tools. The SDK passes the whole MCP config, including expanded headers and these arguments, on the `claude` command line (`--mcp-config`), so an approved variable's value is visible to local `ps` for the session's life, as 10db's own MCP token already is; on a single-user Mac that is accepted. The billing preflight (decision 47) doesn't gate MCP startup, which is why the approval and the minimal env do. |
 ```
 
-- [ ] **Step 2: Update the open items and the AGENTS files**
+- [ ] **Step 2: Update the open items, the spec and the AGENTS files**
 
-In `docs/open-items.md`, tick `M1b sessions and UI merged` and `§1.3 passed on a disposable repo` after the merge. Add:
+In `docs/open-items.md`:
+- Tick the three items tagged M1b that Task 7 Step 9 fixed: overlapping waits parking on an answered card, the preserved `answer` next action re-granting allow-once, and ending the daemon log's file destination in `stop()`.
+- Tick `Spec §12: the fake adapter is typed at the SessionEvent seam…`: Task 3's scripted `query` and `claude-test-support.ts` cover the SDK level.
+- Leave `M1b sessions and bare UI merged; §1.3 acceptance passed on a disposable repo (plan 03)` unticked. It is one line, and it is ticked in a follow-up docs PR after this one merges, as M1a's was.
+- Add:
 ```markdown
 - [ ] M2: per-project overrides and security settings for the repo's MCP servers (decisions 39, 50–53): approve a subset of a server's variables, list and revoke approvals in Settings, and check `canUseTool`'s `mcpServer.source` in the adapter.
 - [ ] M2: a setting to allow overage spending per project (decision 41).
@@ -11906,6 +12216,11 @@ In `docs/open-items.md`, tick `M1b sessions and UI merged` and `§1.3 passed on 
 - [ ] M2: "Pause all" in the menu bar (spec §10); M1's tray shows lanes, inbox count and keep-awake only.
 - [ ] M3: §1.3 live on the pilot project.
 ```
+
+In the spec's §3, bring two bullets in line with decisions 37 and 38:
+- "Process model": the sidecar is the pinned Node binary run as Tauri's `externalBin`, with `daemon.mjs`, migrations, the harness plugin and the SQLite addon as resources (decision 37), not a single-executable application.
+- "Environment": 10db captures the login-shell environment (`$SHELL -l -i -c`) at every daemon start and keeps it in memory only (decision 38), not once at onboarding.
+
 In `apps/daemon/AGENTS.md`, add:
 - `environment/` owns the login env (memory only), the session env builder and the system check. Nothing else reads the login env.
 - The Claude adapter (`sessions/claude-adapter.ts`) is the only importer of `@anthropic-ai/claude-agent-sdk`. Tests inject a scripted `query`; only `claude-adapter.live.test.ts` runs real Claude Code, behind `TENDB_LIVE_CLAUDE=1`.
@@ -11913,6 +12228,7 @@ In `apps/daemon/AGENTS.md`, add:
 In `apps/desktop/AGENTS.md`, replace the client line with these:
 - The UI gets its daemon connection from `DaemonProvider` (Tauri `daemon_connection`, or `VITE_DAEMON_URL`/`VITE_DAEMON_TOKEN` in the browser). Use `useDaemon()` and the hooks in `src/daemon/queries.ts`, and never hand-write a fetch.
 - One event stream (`useEventStream`) invalidates queries. Don't poll lists.
+- `pnpm --filter @10db/desktop e2e` drives the Vite app in Playwright's WebKit, the WKWebView engine, against the real daemon on the fake adapter. It is not the Tauri window; `make live-acceptance` covers that. `make setup` installs the browser.
 
 In `packages/harness/AGENTS.md`, add: "Each skill is under 2 KB and starts its description with 'Use when'; `harness.test.ts` enforces both."
 
@@ -11927,7 +12243,7 @@ Ask the builder before pushing. The pre-push hook runs `make check`. The PR titl
 ```bash
 make gate
 pnpm format
-git add docs/architecture/decisions.md docs/open-items.md apps/daemon/AGENTS.md apps/desktop/AGENTS.md packages/harness/AGENTS.md README.md && git commit -m 'docs(docs): record m1b decisions, open items and dev notes'
+git add docs/architecture/decisions.md docs/open-items.md docs/superpowers/specs/2026-10-13-10db-factory-loop-design.md apps/daemon/AGENTS.md apps/desktop/AGENTS.md packages/harness/AGENTS.md README.md && git commit -m 'docs(docs): record m1b decisions, open items and dev notes'
 git push -u origin feat/m1b-sessions-and-ui
 gh pr create --base main --title 'feat(desktop): run claude sessions from the menu-bar app with the bare ui (m1b)' --body-file - <<'EOF'
 M1b from docs/superpowers/plans/2026-10-13-10db-03-m1b-sessions-and-ui.md: the Claude adapter on the Agent SDK,

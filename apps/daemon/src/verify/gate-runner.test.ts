@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, fstatSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { tempDir } from '../../test/fixtures';
@@ -113,6 +113,38 @@ describe('gate runner', () => {
       }),
     ).rejects.toThrow('stale fence');
     await expectGone(leader);
+  });
+
+  it('closes its log when onSpawn throws, so nothing writes into the log dir afterwards', async () => {
+    const logPath = join(dir.path, 'logs', 'gate.log');
+    // The descriptors that point at gate.log, found by identity so the count does not depend on GC.
+    const openLogHandles = (): number => {
+      const log = statSync(logPath);
+      return readdirSync('/dev/fd').filter((name) => {
+        try {
+          const handle = fstatSync(Number(name));
+          return handle.ino === log.ino && handle.dev === log.dev;
+        } catch {
+          return false;
+        }
+      }).length;
+    };
+    await expect(
+      runner.run({
+        repo: dir.path,
+        command: 'sleep 30',
+        logPath,
+        timeoutMs: 10_000,
+        env: process.env,
+        onSpawn: () => {
+          throw new Error('stale fence');
+        },
+      }),
+    ).rejects.toThrow('stale fence');
+    // The log opens asynchronously; by the time the run rejects it must have opened and finished, so a
+    // caller that removes the log dir next races no late open.
+    expect(existsSync(logPath)).toBe(true);
+    await waitUntil(() => openLogHandles() === 0, 'the gate log to close');
   });
 
   it('still runs the gate when the log cannot be written', async () => {

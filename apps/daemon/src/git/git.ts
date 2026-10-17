@@ -59,7 +59,15 @@ async function revParseHead(repo: string): Promise<string> {
 }
 
 async function status(repo: string): Promise<{ code: string; path: string }[]> {
-  const out = await git(repo, ['status', '--porcelain=v1', '-z', '--untracked-files=all']);
+  // A repository's own config can name a core.fsmonitor program that git would run on every status.
+  const out = await git(repo, [
+    '-c',
+    'core.fsmonitor=false',
+    'status',
+    '--porcelain=v1',
+    '-z',
+    '--untracked-files=all',
+  ]);
   const fields = out.split('\0').filter(Boolean);
   const entries: { code: string; path: string }[] = [];
   for (let i = 0; i < fields.length; i++) {

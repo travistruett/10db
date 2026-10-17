@@ -31,6 +31,11 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
     answerInbox: none,
     eventsAfter: () => [] as DaemonEvent[],
     subscribe: () => () => undefined,
+    systemCheck: none,
+    keepAwake: () => ({ mode: 'while_running', active: false }),
+    setKeepAwake: none,
+    eventsHead: () => 0,
+    reviewProjectMcp: none,
     ...overrides,
   };
 }
@@ -56,6 +61,65 @@ const auth = { headers: { Authorization: `Bearer ${TOKEN}` } };
 const json = { headers: { ...auth.headers, 'content-type': 'application/json' } };
 
 describe('API', () => {
+  it('serves the event head, keep-awake and the system check behind the token', async () => {
+    const check = {
+      loginEnv: { source: 'login_shell' as const, warning: null },
+      tools: [
+        {
+          name: 'git' as const,
+          path: '/usr/bin/git',
+          version: 'git version 2.50.1',
+          required: true,
+        },
+      ],
+    };
+    const modes: string[] = [];
+    const services = stubServices({
+      eventsHead: () => 41,
+      systemCheck: () => Promise.resolve(check),
+      setKeepAwake: (mode) => {
+        modes.push(mode);
+        return { mode, active: mode === 'always' };
+      },
+    });
+    expect((await app(services).request('/events/head')).status).toBe(401);
+    expect(await (await app(services).request('/events/head', auth)).json()).toEqual({ seq: 41 });
+    expect(await (await app(services).request('/settings/keep-awake', auth)).json()).toEqual({
+      mode: 'while_running',
+      active: false,
+    });
+    expect(await (await app(services).request('/system', auth)).json()).toEqual(check);
+
+    const put = (body: unknown) =>
+      app(services).request('/settings/keep-awake', {
+        method: 'PUT',
+        headers: { ...auth.headers, 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    expect(await (await put({ mode: 'always' })).json()).toEqual({ mode: 'always', active: true });
+    expect((await put({ mode: 'sometimes' })).status).toBe(400);
+    expect(modes).toEqual(['always']);
+  });
+
+  it("reviews a project's repo MCP servers behind the token", async () => {
+    const projectId = mintId('Project');
+    const seen: string[] = [];
+    const services = stubServices({
+      reviewProjectMcp: (id) => {
+        seen.push(id);
+        return [];
+      },
+    });
+    const review = (headers: Record<string, string> = {}) =>
+      app(services).request(`/projects/${projectId}/mcp-servers/review`, {
+        method: 'POST',
+        headers,
+      });
+    expect((await review()).status).toBe(401);
+    expect(await (await review(auth.headers)).json()).toEqual([]);
+    expect(seen).toEqual([projectId]);
+  });
+
   it('serves /health without a token', async () => {
     const res = await app().request('/health');
     expect(HealthResponse.parse(await res.json())).toEqual({
@@ -99,6 +163,31 @@ describe('API', () => {
   it('answers 400 for a body that is not JSON', async () => {
     const res = await app().request('/projects', { method: 'POST', ...json, body: '{nope' });
     expect(res.status).toBe(400);
+    expect(res.headers.get('content-type')).toContain('application/json');
+    expect(await res.json()).toMatchObject({ error: 'invalid' });
+  });
+
+  it('refuses an event-stream upgrade from a foreign origin', async () => {
+    const upgrade = { Upgrade: 'websocket', Connection: 'Upgrade' };
+    const foreign = await app().request(`/events/stream?token=${TOKEN}`, {
+      headers: { ...upgrade, Origin: 'https://evil.example' },
+    });
+    expect(foreign.status).toBe(403);
+    // The stubbed upgrader answers 426, so reaching it proves the allowed origin got through.
+    const allowed = await app().request(`/events/stream?token=${TOKEN}`, {
+      headers: { ...upgrade, Origin: 'http://localhost:1420' },
+    });
+    expect(allowed.status).toBe(426);
+  });
+
+  it('answers 400 with the API error shape for a JSON body sent without a content type', async () => {
+    const res = await app().request('/projects', {
+      method: 'POST',
+      ...auth,
+      body: JSON.stringify({ name: 'x' }),
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: 'invalid' });
   });
 
   it('answers 400, not 500, when an inbox answer fails the contract schema', async () => {

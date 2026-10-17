@@ -8,7 +8,13 @@
       "entry": ["src/main.ts", "scripts/*.ts"]
     },
     "apps/desktop": {
-      "entry": ["src/main.tsx"]
+      "entry": [
+        "src/main.tsx",
+        "scripts/*.ts",
+        "e2e/playwright.config.ts",
+        "e2e/prepare.ts",
+        "e2e/*.spec.ts"
+      ]
     },
     "packages/contracts": {
       "entry": ["scripts/*.ts"]
@@ -19,7 +25,7 @@
     }
   },
   "ignore": ["spikes/**", "scratch/**"],
-  "ignoreBinaries": ["codex"],
+  "ignoreBinaries": ["codex", "mkfifo", "rustc"],
   "ignoreDependencies": ["@typescript/native"],
   "ignoreExportsUsedInFile": true
 }

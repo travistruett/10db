@@ -85,6 +85,9 @@ const BOOK: FakeScriptBook = {
   ],
 };
 
+/** No real caffeinate and no file watcher in daemon tests that are not about them. */
+const QUIET = { caffeinate: () => null, watch: false } as const;
+
 const adapter = new FakeAdapter(BOOK);
 let daemon: RunningDaemon;
 let repo: TempDir;
@@ -99,6 +102,7 @@ beforeAll(async () => {
     port: 0,
     adapter,
     logLevel: 'warn',
+    ...QUIET,
   });
   api = apiClient(daemon.url, daemon.token);
 });

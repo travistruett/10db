@@ -1,8 +1,18 @@
 import { cleanup } from '@testing-library/react';
-import { afterEach } from 'vitest';
+import { afterAll, afterEach, beforeAll } from 'vitest';
+import { server } from './daemon';
 
+beforeAll(() => {
+  // MSW 3 renamed onUnhandledRequest to onUnhandledFrame; it covers requests and WebSocket connections.
+  server.listen({ onUnhandledFrame: 'error' });
+});
 afterEach(() => {
+  // Unmount first, so nothing still polling hits a handler that was just removed.
   cleanup();
+  server.resetHandlers();
+});
+afterAll(() => {
+  server.close();
 });
 
 // jsdom has no matchMedia or ResizeObserver; Mantine reads both.
@@ -33,3 +43,10 @@ class ResizeObserverStub implements ResizeObserver {
   }
 }
 window.ResizeObserver = ResizeObserverStub;
+
+// jsdom has no document.fonts (the CSS Font Loading API). Mantine's Textarea `autosize` subscribes to
+// its `loadingdone` event and crashes the view without it. jsdom loads no fonts, so nothing ever fires.
+Object.defineProperty(document, 'fonts', {
+  configurable: true,
+  value: { addEventListener: () => undefined, removeEventListener: () => undefined },
+});

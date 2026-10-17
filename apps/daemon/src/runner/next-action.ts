@@ -2,9 +2,10 @@ import type { HandoffDto, NextAction } from '@10db/contracts';
 
 /**
  * After a crash: resume the provider session once; if resuming already failed, start fresh from the
- * last handoff. An answer or a gate failure is builder input the next session must still see (and an
- * answered permission's one-time allowance with it), so it survives the crash, retried until the
- * recovery limit fails the workstream.
+ * last handoff. A gate failure is builder input the next session must still see, so it survives the
+ * crash, retried until the recovery limit fails the workstream. An answer survives only a crash before
+ * its session started: once a session has started, the runner has replaced the `answer` action, so the
+ * answer and a one-time permission reach exactly one session.
  */
 export function nextActionAfterCrash(
   previous: NextAction,

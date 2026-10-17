@@ -24,6 +24,7 @@ export const EventType = {
   ProviderPaused: 'provider.paused',
   ProviderResumed: 'provider.resumed',
   RecoveryStep: 'recovery.step',
+  SettingsChanged: 'settings.changed',
 } as const;
 export type EventType = (typeof EventType)[keyof typeof EventType];
 

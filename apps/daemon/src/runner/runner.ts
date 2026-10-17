@@ -21,6 +21,7 @@ import {
   endSession,
   getEvidence,
   getInboxItem,
+  getMcpApproval,
   getProject,
   getTask,
   getWorkstream,
@@ -40,6 +41,7 @@ import {
   releaseClaims,
   setTaskStatus,
   StaleFenceError,
+  type DbReader,
   transitionWorkstream,
   updateSessionUsage,
 } from '@10db/db';
@@ -54,14 +56,35 @@ import type { Clock, Timer } from '../clock';
 import type { StateStore } from '../events';
 import type { Git } from '../git';
 import { judgeToolUse } from '../guard';
-import { createPermissionBroker, type InboxService, type WaitObserver } from '../inbox';
+import {
+  createPermissionBroker,
+  requestMcpApproval,
+  type InboxService,
+  type WaitObserver,
+} from '../inbox';
 import type { Logger } from '../log';
 import { mintSessionToken } from '../mcp';
 import { baseAllowedTools, commandPrefix } from '../permissions';
-import type { SessionAdapter, SessionHandle } from '../sessions';
+import {
+  ProjectMcpError,
+  readRepoMcp,
+  resolveProjectMcp,
+  SessionEndReason,
+  skippedServersNote,
+  type ProjectMcp,
+  type RepoMcp,
+  type SessionAdapter,
+  type SessionHandle,
+} from '../sessions';
 import type { GateRunner } from '../verify';
 import type { LiveSessions } from './live-sessions';
 import { nextActionAfterCrash } from './next-action';
+
+/**
+ * A continuation session starts with the briefing already in context. If that baseline is near or over
+ * `handoffPct`, it may hand off only after growing this many points past its first reading.
+ */
+const HANDOFF_BASELINE_MARGIN_PCT = 5;
 
 export type StopReason = 'cancelled' | 'paused' | 'shutdown';
 
@@ -92,6 +115,8 @@ export interface RunnerOptions {
   sessionEnv(project: ProjectDto): Readonly<Record<string, string>>;
   onRateLimited(provider: Provider, resetsAt: Date | null, projectId: ProjectId): void;
   onLaneFreed(): void;
+  /** Runs after every session ends (the watcher's step-end diff). Errors are logged, never thrown. */
+  readonly afterSession?: (workstreamId: WorkstreamId) => Promise<void>;
   /** The OS start time of a pid, stored beside it so recovery can tell a reused PID apart. */
   identifyProcess?(pid: number): Promise<string | null>;
 }
@@ -122,6 +147,12 @@ type Outcome =
     }
   | {
       readonly kind: 'crashed';
+      readonly message: string;
+      readonly providerSessionId: string | null;
+    }
+  | {
+      /** A billing check refused the session; a retry would be refused the same way. */
+      readonly kind: 'refused';
       readonly message: string;
       readonly providerSessionId: string | null;
     }
@@ -185,11 +216,15 @@ interface Control {
 interface SessionState {
   providerSessionId: string | null;
   handoffRequested: boolean;
+  /** The first context reading of the session, which a continuation measures its growth from. */
+  baselinePct: number | null;
   firmSent: boolean;
   parkedFor: InboxItemId | null;
-  /** The card the session is waiting on, while it waits. */
-  waitingOn: InboxItemId | null;
-  waits: number;
+  /**
+   * The cards the session is waiting on, oldest first, with how many waits each has: a folded card can
+   * be asked twice. A card leaves the map when its last wait ends.
+   */
+  waitingOn: Map<InboxItemId, number>;
   waitTimer: Timer | null;
   outcome: Outcome | null;
 }
@@ -206,8 +241,8 @@ export function createRunner(opts: RunnerOptions): Runner {
   const identify = (pid: number | null): Promise<string | null> =>
     pid === null || !opts.identifyProcess ? Promise.resolve(null) : opts.identifyProcess(pid);
 
-  function freshAction(id: WorkstreamId): NextAction {
-    const latest = latestHandoff(db, id);
+  function freshAction(reader: DbReader, id: WorkstreamId): NextAction {
+    const latest = latestHandoff(reader, id);
     return latest ? { kind: 'continue_from_handoff', handoffId: latest.id } : { kind: 'start' };
   }
 
@@ -243,6 +278,75 @@ export function createRunner(opts: RunnerOptions): Runner {
       title: `Workstream failed: ${getTask(db, row.taskId).title}`,
       body: reason,
     });
+  }
+
+  /**
+   * The repo's MCP servers for one session. Only servers the builder approved for
+   * their exact config are passed; the session starts either way. A server with no verdict gets an approval
+   * card, one 10db can't run as written gets a flag naming the variable, and a reserved name gets a warning
+   * flag. Every card folds, so a retried session adds none. A file 10db can't parse raises a flag that says
+   * why, then throws, so the session fails before its row is written.
+   */
+  function readProjectMcp(
+    project: ProjectDto,
+    id: WorkstreamId,
+    env: Readonly<Record<string, string>>,
+  ): ProjectMcp {
+    let repo: RepoMcp;
+    try {
+      repo = readRepoMcp(project.repoPath);
+    } catch (error) {
+      if (error instanceof ProjectMcpError) {
+        opts.inbox.flag({
+          projectId: project.id,
+          workstreamId: id,
+          title: "The repo's .mcp.json stops sessions from starting",
+          body: error.message,
+          foldKey: `project-mcp-error:${project.id}`,
+        });
+      }
+      throw error;
+    }
+    const mcp = resolveProjectMcp({
+      repo,
+      env,
+      approvalFor: (review) => getMcpApproval(db, project.id, review.name, review.configHash),
+    });
+    for (const warning of mcp.warnings) {
+      opts.inbox.flag({
+        projectId: project.id,
+        workstreamId: id,
+        title: "Check the repo's .mcp.json",
+        body: warning,
+        foldKey: `project-mcp-warning:${project.id}`,
+      });
+    }
+    for (const review of mcp.pending) requestMcpApproval(opts.inbox, project.id, review);
+    for (const failure of mcp.failures) {
+      opts.inbox.flag({
+        projectId: project.id,
+        workstreamId: id,
+        title: `The repo's MCP server "${failure.name}" can't run as written`,
+        body: failure.message,
+        foldKey: `project-mcp-failure:${project.id}:${failure.name}`,
+      });
+    }
+    // Names only, never values. The live acceptance check reads this line by its message and field names.
+    opts.logger.info(
+      {
+        workstreamId: id,
+        passed: Object.entries(mcp.servers).map(([name, server]) => ({
+          name,
+          transport: server.type,
+          envKeys: server.type === 'stdio' ? Object.keys(server.env).sort() : [],
+        })),
+        pending: mcp.pending.map((r) => r.name),
+        denied: mcp.denied,
+        failed: mcp.failures.map((f) => f.name),
+      },
+      'project mcp servers',
+    );
+    return mcp;
   }
 
   /**
@@ -307,7 +411,7 @@ export function createRunner(opts: RunnerOptions): Runner {
               providerSessionId: outcome.providerSessionId,
               reason: 'the usage limit reset',
             }
-          : freshAction(id);
+          : freshAction(db, id);
         opts.state.write((ctx) => {
           transitionWorkstream(ctx, id, {
             to: S.PausedLimit,
@@ -321,6 +425,9 @@ export function createRunner(opts: RunnerOptions): Runner {
       }
       case 'parked':
         park(id, ctl.fence, outcome.inboxId, outcome.providerSessionId);
+        return;
+      case 'refused':
+        fail(id, ctl.fence, outcome.message);
         return;
       case 'crashed': {
         const attempts = row.recoveryAttempts + 1;
@@ -384,6 +491,11 @@ export function createRunner(opts: RunnerOptions): Runner {
           : null,
     });
     const { token, hash } = mintSessionToken();
+    // Built first, so a missing key or region fails before any session row exists.
+    const env = opts.sessionEnv(project);
+    // The repo's approved MCP servers, expanded from that environment. A file 10db can't parse fails here too.
+    const projectMcp = readProjectMcp(project, id, env);
+    const mcpNote = skippedServersNote(projectMcp);
     const session = opts.state.write((ctx) => {
       const s = insertSession(ctx, {
         workstreamId: id,
@@ -401,21 +513,24 @@ export function createRunner(opts: RunnerOptions): Runner {
     const st: SessionState = {
       providerSessionId: resumeId,
       handoffRequested: false,
+      baselinePct: null,
       firmSent: false,
       parkedFor: null,
-      waitingOn: null,
-      waits: 0,
+      waitingOn: new Map(),
       waitTimer: null,
       outcome: null,
     };
     const log = opts.logger.child({ workstreamId: id, sessionId: session.id });
     let handle: SessionHandle | null = null;
     let sawEnded = false;
+    /** The oldest card still open: a stop or the wait timer parks on it, never on one already answered. */
+    const firstOpen = (): InboxItemId | null => [...st.waitingOn.keys()][0] ?? null;
+    const openWaits = (): number => [...st.waitingOn.values()].reduce((sum, n) => sum + n, 0);
     // Aborting the waits before the process stops means an answer that lands while a slow session
     // exits goes through onParkedAnswer and the card, never to a waiter that is about to disappear.
     // A session that was waiting parks on its card.
     const endWaits = (): void => {
-      if (st.waits > 0 && st.waitingOn) st.parkedFor ??= st.waitingOn;
+      st.parkedFor ??= firstOpen();
       st.waitTimer?.cancel();
       st.waitTimer = null;
       abort.abort();
@@ -424,9 +539,8 @@ export function createRunner(opts: RunnerOptions): Runner {
 
     const observer: WaitObserver = {
       onWaitStart(item) {
-        st.waits += 1;
-        if (st.waits > 1) return;
-        st.waitingOn = item.id;
+        st.waitingOn.set(item.id, (st.waitingOn.get(item.id) ?? 0) + 1);
+        if (openWaits() > 1) return;
         opts.state.write((ctx) => {
           // A session can ask before its `started` event is processed; STARTING has no edge to WAITING_HUMAN.
           if (getWorkstreamRow(ctx.tx, id).state === S.Starting)
@@ -438,17 +552,19 @@ export function createRunner(opts: RunnerOptions): Runner {
           });
         });
         st.waitTimer = opts.clock.setTimeout(() => {
-          st.parkedFor = item.id;
+          st.parkedFor = firstOpen() ?? item.id;
           // Abort the waits first: an answer that arrives while the session is still stopping then goes
           // through onParkedAnswer and the card, instead of to a waiter that is about to disappear.
           abort.abort();
           void handle?.stop();
         }, project.humanWaitMinutes * 60_000);
       },
-      onWaitEnd() {
-        st.waits = Math.max(0, st.waits - 1);
-        if (st.waits > 0) return;
-        st.waitingOn = null;
+      onWaitEnd(item) {
+        const left = (st.waitingOn.get(item.id) ?? 0) - 1;
+        if (left > 0) st.waitingOn.set(item.id, left);
+        else st.waitingOn.delete(item.id);
+        // WAITING_HUMAN holds until every wait has ended, including a second wait on the same folded card.
+        if (st.waitingOn.size > 0) return;
         st.waitTimer?.cancel();
         st.waitTimer = null;
         opts.state.write((ctx) => {
@@ -467,11 +583,13 @@ export function createRunner(opts: RunnerOptions): Runner {
       workstreamId: id,
       sequence: session.sequence,
       cwd: project.repoPath,
-      prompt,
+      prompt: mcpNote ? `${prompt}\n\n${mcpNote}` : prompt,
       model: row.model,
       effort: row.effort,
       resumeProviderSessionId: resumeId,
-      env: opts.sessionEnv(project),
+      env,
+      billingMode: project.billingMode,
+      projectMcpServers: projectMcp.servers,
       allowedTools: baseAllowedTools(project),
       mcp: { url: opts.mcpUrl(), token, toolTimeoutMs: (project.humanWaitMinutes + 5) * 60_000 },
       preToolUse: (req) =>
@@ -506,6 +624,10 @@ export function createRunner(opts: RunnerOptions): Runner {
             const pidStart = await identify(event.pid);
             opts.state.write((ctx) => {
               markSessionStarted(ctx, session.id, event.providerSessionId, event.pid, pidStart);
+              // The session has the answer now. Kept as `answer`, a restart would send it again and
+              // re-grant a one-time permission; a fresh action resumes this session after a crash.
+              if (action.kind === 'answer')
+                patchWorkstream(ctx, id, ctl.fence, { nextAction: freshAction(ctx.tx, id) });
               const current = getWorkstreamRow(ctx.tx, id).state;
               if (current === S.Starting || current === S.HandingOff)
                 transitionWorkstream(ctx, id, { to: S.Running, fence: ctl.fence });
@@ -523,7 +645,7 @@ export function createRunner(opts: RunnerOptions): Runner {
               });
             });
             break;
-          case 'context':
+          case 'context': {
             opts.state.write((ctx) => {
               updateSessionUsage(ctx, session.id, { contextPct: event.percentage });
               patchWorkstream(ctx, id, ctl.fence, { contextPct: event.percentage });
@@ -534,7 +656,13 @@ export function createRunner(opts: RunnerOptions): Runner {
                 data: { workstreamId: id, percentage: event.percentage },
               });
             });
-            if (!st.handoffRequested && event.percentage >= project.handoffPct) {
+            st.baselinePct ??= event.percentage;
+            // A first session's baseline is the prompt alone; only a continuation can start past the line.
+            const handoffAt =
+              session.sequence > 1
+                ? Math.max(project.handoffPct, st.baselinePct + HANDOFF_BASELINE_MARGIN_PCT)
+                : project.handoffPct;
+            if (!st.handoffRequested && event.percentage >= handoffAt) {
               st.handoffRequested = true;
               opts.state.write((ctx) => {
                 if (getWorkstreamRow(ctx.tx, id).state === S.Running) {
@@ -555,6 +683,7 @@ export function createRunner(opts: RunnerOptions): Runner {
               handle.send(HANDOFF_FIRM_NUDGE);
             }
             break;
+          }
           case 'compacted':
             opts.state.write((ctx) => {
               const sourceId = insertSource(ctx, 'daemon', { sessionId: session.id });
@@ -618,16 +747,36 @@ export function createRunner(opts: RunnerOptions): Runner {
                 inboxId: st.parkedFor,
                 providerSessionId: st.providerSessionId,
               };
-            else if (event.reason === 'rate_limited') {
-              st.outcome = { kind: 'paused', until: null, providerSessionId: st.providerSessionId };
-              opts.onRateLimited(project.provider, null, project.id);
-            } else if (event.reason === 'error' || event.reason === 'stopped') {
-              st.outcome = {
-                kind: 'crashed',
-                message: event.message ?? 'the session stopped unexpectedly',
-                providerSessionId: st.providerSessionId,
-              };
-            } else st.outcome = { kind: 'step_done', withoutHandoff: st.handoffRequested };
+            else {
+              switch (event.reason) {
+                case SessionEndReason.RateLimited:
+                  st.outcome = {
+                    kind: 'paused',
+                    until: null,
+                    providerSessionId: st.providerSessionId,
+                  };
+                  opts.onRateLimited(project.provider, null, project.id);
+                  break;
+                case SessionEndReason.BillingRefused:
+                  st.outcome = {
+                    kind: 'refused',
+                    message: event.message ?? 'a billing check refused the session',
+                    providerSessionId: st.providerSessionId,
+                  };
+                  break;
+                case SessionEndReason.Error:
+                case SessionEndReason.Stopped:
+                  st.outcome = {
+                    kind: 'crashed',
+                    message: event.message ?? 'the session stopped unexpectedly',
+                    providerSessionId: st.providerSessionId,
+                  };
+                  break;
+                case SessionEndReason.Completed:
+                  st.outcome = { kind: 'step_done', withoutHandoff: st.handoffRequested };
+                  break;
+              }
+            }
             break;
           }
         }
@@ -645,6 +794,13 @@ export function createRunner(opts: RunnerOptions): Runner {
       outcome = finishSession(id, ctl, session.id, st);
     }
     log.info({ outcome: outcome.kind }, 'session ended');
+    if (opts.afterSession) {
+      try {
+        await opts.afterSession(id);
+      } catch (error) {
+        log.warn({ err: String(error) }, 'after-session check failed');
+      }
+    }
     return outcome;
   }
 
@@ -666,6 +822,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       st.parkedFor !== null &&
       (ended.kind === 'paused' ||
         ended.kind === 'crashed' ||
+        ended.kind === 'refused' ||
         (ended.kind === 'stopped' && ended.reason !== 'cancelled'));
     const outcome: Outcome =
       parkedAfterWait && st.parkedFor
@@ -712,7 +869,9 @@ export function createRunner(opts: RunnerOptions): Runner {
       command: project.gateCommand,
       logPath: join(opts.dataDir, 'logs', 'gate', `${id}-${String(run)}.log`),
       timeoutMs: opts.limits.gateTimeoutMs,
-      env: { ...process.env, ...opts.sessionEnv(project) },
+      // The session environment is complete (login shell plus billing mode); the daemon's own
+      // process.env never reaches a project's gate.
+      env: opts.sessionEnv(project),
       signal: gateAbort.signal,
       onSpawn: (pid) => {
         recording = identify(pid).then((gatePidStart) => {

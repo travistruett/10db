@@ -105,7 +105,10 @@ export function createGateRunner(): GateRunner {
             clearTimeout(timer);
             signal?.removeEventListener('abort', onAbort);
             killGroup();
-            reject(error instanceof Error ? error : new Error(String(error)));
+            // The log may still be opening; a caller that removes its directory next must not race it.
+            endLog(() => {
+              reject(error instanceof Error ? error : new Error(String(error)));
+            });
           }
         }
       });

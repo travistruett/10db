@@ -1,3 +1,6 @@
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { MCP_APPROVAL_DETAIL } from '@10db/contracts';
 import {
   acquireLease,
   activeClaims,
@@ -303,6 +306,326 @@ describe('runner', () => {
         (o) => o.kind === 'tool_allowed' && o.detail['toolName'] === 'Bash',
       ),
     ).toHaveLength(1);
+  });
+
+  it('runs the gate in the session environment, never the daemon process environment', async () => {
+    process.env['TENDB_PROBE'] = 'leaked';
+    try {
+      engine = await createTestEngine(
+        { Alpha: [[write('src/api/a.txt'), commit('op-gate-env-1', ['src/api/a.txt']), turn]] },
+        { gateCommand: 'test -z "$TENDB_PROBE" && test "$GATE_MARK" = yes' },
+        { sessionEnv: () => ({ GATE_MARK: 'yes' }) },
+      );
+      const { workstream } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+      expect(ws(workstream.id).state).toBe('DONE');
+    } finally {
+      delete process.env['TENDB_PROBE'];
+    }
+  });
+
+  it('does not hand a continuation session off until it grows past its own starting context', async () => {
+    engine = await createTestEngine(
+      {
+        Alpha: [
+          [
+            { do: 'context', percentage: 20 },
+            { do: 'await_message', contains: 'write_handoff' },
+            { do: 'mcp', tool: 'write_handoff', args: handoffArgs('op-base-001', 'Keep going') },
+            turn,
+          ],
+          [
+            { do: 'context', percentage: 30 },
+            { do: 'context', percentage: 33 },
+            { do: 'context', percentage: 36 },
+            { do: 'await_message', contains: 'write_handoff' },
+            {
+              do: 'mcp',
+              tool: 'write_handoff',
+              args: handoffArgs('op-base-002', 'Write the file'),
+            },
+            turn,
+          ],
+          [write('src/api/a.txt'), commit('op-base-003', ['src/api/a.txt']), turn],
+        ],
+      },
+      { handoffPct: 12, nudgePct: 90 },
+    );
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('DONE');
+
+    const second = listSessions(engine.store.db, workstream.id)[1];
+    const events = listEventsAfter(engine.store.db, 0, 1000);
+    const handoffs = events.filter(
+      (e) => e.type === 'workstream.changed' && e.data['to'] === 'HANDING_OFF',
+    );
+    const secondHandoff = handoffs[1]?.seq ?? 0;
+    const readingsBefore = events
+      .filter(
+        (e) => e.type === 'session.context' && e.entityId === second?.id && e.seq < secondHandoff,
+      )
+      .map((e) => e.data['percentage']);
+    // 30% + the 5-point margin = 35%: the 30% and 33% readings must not trigger it.
+    expect(readingsBefore).toEqual([30, 33, 36]);
+  });
+
+  it('treats a session environment that cannot be built as a crash, before any session row exists', async () => {
+    engine = await createTestEngine(
+      { Alpha: [[turn]] },
+      {},
+      {
+        sessionEnv: () => {
+          throw new Error('No Anthropic API key in the Keychain.');
+        },
+      },
+    );
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(listSessions(engine.store.db, workstream.id)).toEqual([]);
+    expect(ws(workstream.id)).toMatchObject({ state: 'QUEUED', recoveryAttempts: 1 });
+  });
+
+  describe("the repo's MCP servers", () => {
+    const BOOK = { Alpha: [[turn]], Beta: [[turn]] };
+    /** Every credential a session env can hold. None may reach a repo server unless approved. */
+    const SECRET_ENV = {
+      PATH: '/usr/bin:/bin',
+      HOME: '/h',
+      DOCS_TOKEN: 'tok-1',
+      ANTHROPIC_API_KEY: 'sk-ant-x',
+      CLAUDE_CODE_OAUTH_TOKEN: 'oauth-x',
+      AWS_SECRET_ACCESS_KEY: 'aws-x',
+    };
+    const MANTINE = { command: 'npx', args: ['-y', '@mantine/mcp-server@9.7.2'] };
+    const DOCS = {
+      type: 'http',
+      url: 'https://docs.example/mcp',
+      headers: { Authorization: 'Bearer ${DOCS_TOKEN}' },
+    };
+
+    const writeMcp = (servers: Record<string, unknown>) => {
+      writeFileSync(join(engine.repoPath, '.mcp.json'), JSON.stringify({ mcpServers: servers }));
+    };
+    const approvalCards = () =>
+      listInbox(engine.store.db, { states: ['OPEN'] }).filter(
+        (i) => i.detail?.[MCP_APPROVAL_DETAIL] !== undefined,
+      );
+    const answerAll = (choice: 'approve' | 'deny') => {
+      for (const card of approvalCards()) engine.inbox.answer(card.id, { choice });
+    };
+    /** Runs one session of a new task and returns the spec the adapter was started with. */
+    async function runTask(title: keyof typeof BOOK) {
+      const start = vi.spyOn(engine.adapter, 'start');
+      const { workstream } = engine.addTask(title);
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+      const spec = start.mock.calls.at(-1)?.[0];
+      start.mockRestore();
+      if (!spec) throw new Error(`${title} never started a session`);
+      return spec;
+    }
+
+    it('asks once for a server it has not seen, and starts the session without it', async () => {
+      engine = await createTestEngine(BOOK);
+      writeMcp({ mantine: MANTINE });
+      const spec = await runTask('Alpha');
+      expect(spec.projectMcpServers).toEqual({});
+      expect(spec.prompt).toContain("mantine (waiting for the builder's approval)");
+      const cards = approvalCards();
+      expect(cards).toHaveLength(1);
+      expect(cards[0]).toMatchObject({
+        kind: 'flag',
+        targets: [],
+        options: [{ label: 'approve' }, { label: 'deny' }],
+      });
+      expect(cards[0]?.detail?.[MCP_APPROVAL_DETAIL]).toMatchObject({
+        name: 'mantine',
+        transport: 'stdio',
+        command: 'npx',
+        args: MANTINE.args,
+        variables: [],
+      });
+      await runTask('Beta');
+      expect(approvalCards()).toHaveLength(1);
+    });
+
+    it('passes an approved server with only PATH, HOME and the variables the builder approved', async () => {
+      engine = await createTestEngine(BOOK, {}, { sessionEnv: () => SECRET_ENV });
+      writeMcp({ docs: DOCS, mantine: MANTINE });
+      await runTask('Alpha');
+      const reviews = approvalCards().map((c) => c.detail?.[MCP_APPROVAL_DETAIL]);
+      expect(reviews).toHaveLength(2);
+      expect(reviews).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            name: 'docs',
+            variables: ['DOCS_TOKEN'],
+            sensitive: ['DOCS_TOKEN'],
+          }),
+          expect.objectContaining({ name: 'mantine', variables: [] }),
+        ]),
+      );
+      answerAll('approve');
+      const spec = await runTask('Beta');
+      expect(spec.projectMcpServers).toEqual({
+        docs: {
+          type: 'http',
+          url: 'https://docs.example/mcp',
+          headers: { Authorization: 'Bearer tok-1' },
+        },
+        mantine: {
+          type: 'stdio',
+          command: 'npx',
+          args: MANTINE.args,
+          env: { PATH: '/usr/bin:/bin', HOME: '/h' },
+        },
+      });
+      const mantine = spec.projectMcpServers['mantine'];
+      expect(mantine?.type === 'stdio' ? Object.keys(mantine.env).sort() : null).toEqual([
+        'HOME',
+        'PATH',
+      ]);
+      for (const secret of ['sk-ant-x', 'oauth-x', 'aws-x'])
+        expect(JSON.stringify(spec.projectMcpServers)).not.toContain(secret);
+      expect(spec.prompt).not.toContain('Note from 10db');
+    });
+
+    it("asks again when the server's config changes, and runs without it meanwhile", async () => {
+      engine = await createTestEngine(BOOK);
+      writeMcp({ mantine: MANTINE });
+      await runTask('Alpha');
+      answerAll('approve');
+      writeMcp({ mantine: { ...MANTINE, args: ['-y', '@mantine/mcp-server@9.8.0'] } });
+      const spec = await runTask('Beta');
+      expect(spec.projectMcpServers).toEqual({});
+      expect(approvalCards().map((c) => c.detail?.[MCP_APPROVAL_DETAIL])).toEqual([
+        expect.objectContaining({ args: ['-y', '@mantine/mcp-server@9.8.0'] }),
+      ]);
+    });
+
+    it('leaves a denied server out, says so in the prompt, and does not ask again', async () => {
+      engine = await createTestEngine(BOOK);
+      writeMcp({ mantine: MANTINE });
+      await runTask('Alpha');
+      answerAll('deny');
+      const spec = await runTask('Beta');
+      expect(spec.projectMcpServers).toEqual({});
+      expect(spec.prompt).toContain('mantine (denied by the builder)');
+      expect(approvalCards()).toEqual([]);
+    });
+
+    it('flags an approved server whose variable is not set, naming it, and starts without that server', async () => {
+      engine = await createTestEngine(
+        BOOK,
+        {},
+        { sessionEnv: () => ({ PATH: '/usr/bin:/bin', HOME: '/h' }) },
+      );
+      writeMcp({ docs: DOCS, mantine: MANTINE });
+      await runTask('Alpha');
+      answerAll('approve');
+      const spec = await runTask('Beta');
+      expect(Object.keys(spec.projectMcpServers)).toEqual(['mantine']);
+      const flags = listInbox(engine.store.db, { states: ['OPEN'] }).filter((i) =>
+        i.title.includes('"docs"'),
+      );
+      expect(flags.map((f) => f.body)).toEqual([
+        expect.stringContaining(
+          'server "docs" (headers.Authorization) references ${DOCS_TOKEN}, which is not set',
+        ),
+      ]);
+    });
+
+    it('drops a repo server that takes the 10db name, with a warning card, and never asks to approve it', async () => {
+      engine = await createTestEngine(BOOK);
+      writeMcp({ '10db': { command: 'impostor' }, '10db__x': { command: 'impostor' } });
+      const spec = await runTask('Alpha');
+      expect(spec.projectMcpServers).toEqual({});
+      expect(approvalCards()).toEqual([]);
+      const flags = listInbox(engine.store.db, { states: ['OPEN'] }).filter(
+        (i) => i.kind === 'flag',
+      );
+      expect(flags.map((f) => f.body)).toEqual([
+        expect.stringContaining('declares a server named "10db"'),
+      ]);
+    });
+
+    it('fails the session start on a .mcp.json it cannot parse, with one folded flag', async () => {
+      engine = await createTestEngine({ Alpha: [[turn]] });
+      writeFileSync(join(engine.repoPath, '.mcp.json'), '{"mcpServers": {');
+      const { workstream } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+      expect(listSessions(engine.store.db, workstream.id)).toEqual([]);
+      expect(ws(workstream.id)).toMatchObject({ state: 'QUEUED', recoveryAttempts: 2 });
+      const flags = listInbox(engine.store.db, { states: ['OPEN'] }).filter(
+        (i) => i.kind === 'flag',
+      );
+      expect(flags).toHaveLength(1);
+      expect(flags[0]?.body).toContain('is not valid JSON');
+    });
+  });
+
+  it('parks on the card that is still open when two waits overlap and the first is answered', async () => {
+    engine = await createTestEngine({ Alpha: [[{ do: 'hang' }]] });
+    const start = vi.spyOn(engine.adapter, 'start');
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await waitFor(() => ws(workstream.id).state === 'RUNNING');
+    const spec = start.mock.calls[0]?.[0];
+    if (!spec) throw new Error('no session started');
+    // Claude Code asks for parallel tool calls at once, so two permission waits can overlap.
+    const ask = (command: string, toolUseId: string) =>
+      spec.canUseTool({
+        toolName: 'Bash',
+        input: { command },
+        toolUseId,
+        signal: new AbortController().signal,
+      });
+    const first = ask('curl -s https://one.example', 'toolu_1');
+    const second = ask('curl -s https://two.example', 'toolu_2');
+    const cards = await waitFor(() => {
+      const open = listInbox(engine.store.db, { states: ['OPEN'] });
+      return open.length === 2 ? open : undefined;
+    });
+    const one = cards.find((c) => c.body.includes('one.example'));
+    const two = cards.find((c) => c.body.includes('two.example'));
+    if (!one || !two) throw new Error('expected a card per command');
+    engine.inbox.answer(one.id, { choice: 'allow_once' });
+    expect(await first).toMatchObject({ behavior: 'allow' });
+    engine.clock.advance(10 * 60_000);
+    await engine.runner.idle();
+    await second;
+    expect(ws(workstream.id)).toMatchObject({
+      state: 'WAITING_HUMAN',
+      nextAction: { kind: 'answer', inboxId: two.id },
+    });
+  });
+
+  it('hands an answer and its one-time permission to one session only, so a restart cannot grant it again', async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        [curl, turn],
+        [curl, { do: 'hang' }],
+      ],
+    });
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    const card = await waitFor(openCard);
+    engine.clock.advance(10 * 60_000);
+    await engine.runner.idle();
+    engine.inbox.answer(card.id, { choice: 'allow_once' });
+    engine.launch(workstream.id);
+    await waitFor(() => ws(workstream.id).state === 'RUNNING');
+    // The running session has the answer. Recovery after a restart reads this action, so it must no
+    // longer be `answer`; with no handoff yet it is a fresh start, which recovery turns into a resume.
+    expect(ws(workstream.id).nextAction).toEqual({ kind: 'start' });
+    await engine.runner.stopAll('shutdown');
   });
 
   describe('lifecycle edges', () => {
@@ -676,6 +999,23 @@ describe('runner', () => {
     expect(listInbox(engine.store.db, { states: ['OPEN'] }).map((i) => i.kind)).toEqual(['flag']);
   });
 
+  it('fails at once on a billing refusal, without retrying it as a crash', async () => {
+    const refusal =
+      "Billing check failed: expected the Claude subscription, got an API key. No prompt was sent. <b>Check</b> the project's billing mode.";
+    engine = await createTestEngine({
+      Alpha: [[{ do: 'billing_refused', message: refusal }], [turn]],
+    });
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id)).toMatchObject({ state: 'FAILED', failureReason: refusal });
+    expect(listSessions(engine.store.db, workstream.id)).toHaveLength(1);
+    expect(transitions(workstream.id).filter((t) => t.endsWith('->RECOVERING'))).toEqual([]);
+    const cards = listInbox(engine.store.db, { states: ['OPEN'] });
+    expect(cards).toHaveLength(1);
+    expect(cards[0]).toMatchObject({ kind: 'flag', body: refusal });
+  });
+
   it('cancels a running workstream, releasing claims', async () => {
     engine = await createTestEngine({
       Alpha: [[{ do: 'activity', summary: 'working' }, { do: 'hang' }]],
@@ -711,5 +1051,24 @@ describe('runner', () => {
     await engine.runner.idle();
     expect(ws(workstream.id).state).toBe('DONE');
     expect(engine.store.db.select().from(schema.deviations).all()).toHaveLength(1);
+  });
+
+  it('runs the after-session check once per session, and survives it throwing', async () => {
+    const seen: string[] = [];
+    engine = await createTestEngine(
+      { Alpha: [[write('src/api/a.txt'), commit('op-after-001', ['src/api/a.txt']), turn]] },
+      {},
+      {
+        afterSession: (id) => {
+          seen.push(id);
+          return Promise.reject(new Error('watcher broke'));
+        },
+      },
+    );
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(seen).toEqual([workstream.id]);
+    expect(ws(workstream.id).state).toBe('DONE');
   });
 });
