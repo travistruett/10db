@@ -92,6 +92,8 @@ export interface RunnerOptions {
   sessionEnv(project: ProjectDto): Readonly<Record<string, string>>;
   onRateLimited(provider: Provider, resetsAt: Date | null, projectId: ProjectId): void;
   onLaneFreed(): void;
+  /** Runs after every session ends (the watcher's step-end diff). Errors are logged, never thrown. */
+  readonly afterSession?: (workstreamId: WorkstreamId) => Promise<void>;
   /** The OS start time of a pid, stored beside it so recovery can tell a reused PID apart. */
   identifyProcess?(pid: number): Promise<string | null>;
 }
@@ -647,6 +649,13 @@ export function createRunner(opts: RunnerOptions): Runner {
       outcome = finishSession(id, ctl, session.id, st);
     }
     log.info({ outcome: outcome.kind }, 'session ended');
+    if (opts.afterSession) {
+      try {
+        await opts.afterSession(id);
+      } catch (error) {
+        log.warn({ err: String(error) }, 'after-session check failed');
+      }
+    }
     return outcome;
   }
 

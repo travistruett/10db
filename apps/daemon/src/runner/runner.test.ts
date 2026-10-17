@@ -712,4 +712,23 @@ describe('runner', () => {
     expect(ws(workstream.id).state).toBe('DONE');
     expect(engine.store.db.select().from(schema.deviations).all()).toHaveLength(1);
   });
+
+  it('runs the after-session check once per session, and survives it throwing', async () => {
+    const seen: string[] = [];
+    engine = await createTestEngine(
+      { Alpha: [[write('src/api/a.txt'), commit('op-after-001', ['src/api/a.txt']), turn]] },
+      {},
+      {
+        afterSession: (id) => {
+          seen.push(id);
+          return Promise.reject(new Error('watcher broke'));
+        },
+      },
+    );
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(seen).toEqual([workstream.id]);
+    expect(ws(workstream.id).state).toBe('DONE');
+  });
 });

@@ -33,6 +33,7 @@ import {
   createRunner,
   DEFAULT_RUNNER_LIMITS,
   type Runner,
+  type RunnerOptions,
 } from '../src/runner';
 import { FakeAdapter, type FakeScriptBook } from '../src/sessions';
 import { createGateRunner } from '../src/verify';
@@ -61,6 +62,7 @@ export interface TestEngine {
 export async function createTestEngine(
   book: FakeScriptBook,
   project: Partial<ProjectInput> = {},
+  runnerOverrides: Partial<Pick<RunnerOptions, 'afterSession' | 'sessionEnv'>> = {},
 ): Promise<TestEngine> {
   const repo = createTempRepo();
   const data = tempDir('engine-data');
@@ -110,6 +112,7 @@ export async function createTestEngine(
       rateLimited.push({ provider, resetsAt });
     },
     onLaneFreed: () => undefined,
+    ...runnerOverrides,
   });
   runner = created;
   const seeded = seedProject(store, {
