@@ -23,6 +23,7 @@ import {
   getInboxItem,
   getMcpApproval,
   getProject,
+  getSessionByProviderId,
   getTask,
   getWorkstream,
   getWorkstreamRow,
@@ -82,7 +83,8 @@ import { nextActionAfterCrash } from './next-action';
 
 /**
  * A continuation session starts with the briefing already in context. If that baseline is near or over
- * `handoffPct`, it may hand off only after growing this many points past its first reading.
+ * `handoffPct`, it may hand off only after growing this many points past its first reading. A session
+ * that resumes such a conversation keeps the same line.
  */
 const HANDOFF_BASELINE_MARGIN_PCT = 5;
 
@@ -216,8 +218,14 @@ interface Control {
 interface SessionState {
   providerSessionId: string | null;
   handoffRequested: boolean;
-  /** The first context reading of the session, which a continuation measures its growth from. */
-  baselinePct: number | null;
+  /**
+   * The first context reading of the conversation's briefing, which its handoff margin is measured
+   * from: inherited by a resumed session, taken at the first reading of a briefed session that has
+   * none, and null for a conversation that began bare.
+   */
+  briefingBaselinePct: number | null;
+  /** A briefed conversation with no baseline yet: the session's first context reading becomes it. */
+  awaitingBriefingBaseline: boolean;
   firmSent: boolean;
   parkedFor: InboxItemId | null;
   /**
@@ -496,6 +504,14 @@ export function createRunner(opts: RunnerOptions): Runner {
     // The repo's approved MCP servers, expanded from that environment. A file 10db can't parse fails here too.
     const projectMcp = readProjectMcp(project, id, env);
     const mcpNote = skippedServersNote(projectMcp);
+    // A resumed session continues its conversation, so it keeps whether that conversation began from
+    // a briefing and the briefing's baseline. A fresh session is briefed only when its prompt carries
+    // the handoff, which only a continuation's does.
+    const resumed = resumeId ? getSessionByProviderId(db, id, resumeId) : undefined;
+    const briefed = resumeId
+      ? (resumed?.briefed ?? false)
+      : action.kind === 'continue_from_handoff' && contextPack.handoff !== null;
+    const inheritedBaselinePct = resumed?.briefingBaselinePct ?? null;
     const session = opts.state.write((ctx) => {
       const s = insertSession(ctx, {
         workstreamId: id,
@@ -504,6 +520,8 @@ export function createRunner(opts: RunnerOptions): Runner {
         effort: row.effort,
         mode: 'managed',
         mcpTokenHash: hash,
+        briefed,
+        briefingBaselinePct: inheritedBaselinePct,
       });
       patchWorkstream(ctx, id, ctl.fence, { currentSessionId: s.id, baseHead });
       return s;
@@ -513,7 +531,8 @@ export function createRunner(opts: RunnerOptions): Runner {
     const st: SessionState = {
       providerSessionId: resumeId,
       handoffRequested: false,
-      baselinePct: null,
+      briefingBaselinePct: inheritedBaselinePct,
+      awaitingBriefingBaseline: briefed && inheritedBaselinePct === null,
       firmSent: false,
       parkedFor: null,
       waitingOn: new Map(),
@@ -646,8 +665,15 @@ export function createRunner(opts: RunnerOptions): Runner {
             });
             break;
           case 'context': {
+            if (st.awaitingBriefingBaseline) {
+              st.awaitingBriefingBaseline = false;
+              st.briefingBaselinePct = event.percentage;
+            }
             opts.state.write((ctx) => {
-              updateSessionUsage(ctx, session.id, { contextPct: event.percentage });
+              updateSessionUsage(ctx, session.id, {
+                contextPct: event.percentage,
+                briefingBaselinePct: st.briefingBaselinePct,
+              });
               patchWorkstream(ctx, id, ctl.fence, { contextPct: event.percentage });
               ctx.emit({
                 type: EventType.SessionContext,
@@ -656,12 +682,15 @@ export function createRunner(opts: RunnerOptions): Runner {
                 data: { workstreamId: id, percentage: event.percentage },
               });
             });
-            st.baselinePct ??= event.percentage;
-            // A first session's baseline is the prompt alone; only a continuation can start past the line.
+            // Only a briefing can start past the line, so only a conversation that began from one
+            // gets the margin; a resumed session hands off where the conversation it continues would.
             const handoffAt =
-              session.sequence > 1
-                ? Math.max(project.handoffPct, st.baselinePct + HANDOFF_BASELINE_MARGIN_PCT)
-                : project.handoffPct;
+              st.briefingBaselinePct === null
+                ? project.handoffPct
+                : Math.max(
+                    project.handoffPct,
+                    st.briefingBaselinePct + HANDOFF_BASELINE_MARGIN_PCT,
+                  );
             if (!st.handoffRequested && event.percentage >= handoffAt) {
               st.handoffRequested = true;
               opts.state.write((ctx) => {

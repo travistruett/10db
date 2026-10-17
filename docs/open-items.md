@@ -3,7 +3,7 @@
 - [ ] Spikes 1–7, 9 run and recorded (plan 00).
 - [x] M0 scaffold merged (plan 01).
 - [x] M1a engine core merged (plan 02).
-- [ ] M1b sessions and bare UI merged; §1.3 acceptance passed on a disposable repo (plan 03).
+- [x] M1b sessions and bare UI merged; §1.3 acceptance passed on a disposable repo (plan 03).
 - [ ] Bump `typescript` to 7.x and drop the 6.0 alias once typescript-eslint supports the 7.1 API.
 - [ ] Drop the jsx-a11y peer allowance once it supports ESLint 10.
 - [ ] Replace the placeholder app icon.
@@ -34,4 +34,5 @@
 - [ ] M3: §1.3 live on the pilot project.
 - [ ] Spec question: a repo's committed .claude/settings.json hooks and statusLine run with session credentials without approval (decision 51 trusts the project); consider bringing them under the .mcp.json approval model.
 - [ ] Spec question: repo-configured git filters (.gitattributes + filter.<name>.clean/process in .git/config) run during the watcher's git status and during 10db's own commits; consider a sanitized git config or refusing sessions whose .git/config gains such keys.
-- [ ] M1b live run: confirm on the setMcpServers route that a repo MCP tool call reaches canUseTool as a permission card (`repo MCP tool gated`) and that a stdio server sees only PATH and HOME (`repo MCP server env`) (make live-acceptance). Header delivery to a repo HTTP server is not covered; 10db's own HTTP MCP server covers the route's headers.
+- [x] M1b live run: confirm on the setMcpServers route that a repo MCP tool call reaches canUseTool as a permission card (`repo MCP tool gated`) and that a stdio server sees only PATH and HOME (`repo MCP server env`) (make live-acceptance). Header delivery to a repo HTTP server is not covered; 10db's own HTTP MCP server covers the route's headers.
+- [ ] M2: a crash after a session has written its handoff resumes that conversation, which hands off again at once; continuing fresh from the handoff it already wrote would save a session (seen in the M1 live run).

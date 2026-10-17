@@ -8,7 +8,7 @@ import {
   type SessionMode,
   type WorkstreamId,
 } from '@10db/contracts';
-import { and, asc, count, eq, isNull } from 'drizzle-orm';
+import { and, asc, count, desc, eq, isNull } from 'drizzle-orm';
 import * as schema from '../schema';
 import type { DbReader, WriteContext } from './store';
 
@@ -21,6 +21,10 @@ export interface NewSession {
   readonly effort: Effort;
   readonly mode: SessionMode;
   readonly mcpTokenHash: string;
+  /** See `sessions.briefed`; a resumed session copies it from the session it continues. */
+  readonly briefed?: boolean;
+  /** Copied from the session a resumed session continues; see `sessions.briefingBaselinePct`. */
+  readonly briefingBaselinePct?: number | null;
 }
 
 export function insertSession(ctx: WriteContext, input: NewSession): SessionRow {
@@ -32,6 +36,8 @@ export function insertSession(ctx: WriteContext, input: NewSession): SessionRow 
   const row: SessionRow = {
     id: mintId('Session'),
     ...input,
+    briefed: input.briefed ?? false,
+    briefingBaselinePct: input.briefingBaselinePct ?? null,
     sequence: (prior?.n ?? 0) + 1,
     providerSessionId: null,
     pid: null,
@@ -74,7 +80,12 @@ export function markSessionStarted(
 export function updateSessionUsage(
   ctx: WriteContext,
   id: SessionId,
-  patch: Partial<Pick<SessionRow, 'inputTokens' | 'outputTokens' | 'costUsd' | 'contextPct'>>,
+  patch: Partial<
+    Pick<
+      SessionRow,
+      'inputTokens' | 'outputTokens' | 'costUsd' | 'contextPct' | 'briefingBaselinePct'
+    >
+  >,
 ): void {
   ctx.tx
     .update(schema.sessions)
@@ -110,6 +121,25 @@ export function getLiveSessionByTokenHash(db: DbReader, hash: string): SessionRo
     .select()
     .from(schema.sessions)
     .where(and(eq(schema.sessions.mcpTokenHash, hash), isNull(schema.sessions.endedAt)))
+    .get();
+}
+
+/** The latest session of the workstream that ran the provider conversation `providerSessionId`. */
+export function getSessionByProviderId(
+  db: DbReader,
+  workstreamId: WorkstreamId,
+  providerSessionId: string,
+): SessionRow | undefined {
+  return db
+    .select()
+    .from(schema.sessions)
+    .where(
+      and(
+        eq(schema.sessions.workstreamId, workstreamId),
+        eq(schema.sessions.providerSessionId, providerSessionId),
+      ),
+    )
+    .orderBy(desc(schema.sessions.sequence))
     .get();
 }
 

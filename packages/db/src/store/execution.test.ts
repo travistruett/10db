@@ -9,7 +9,7 @@ import {
   type ClaimRequest,
 } from './claims';
 import { findToolOp, insertToolOp } from './tool-ops';
-import { getSession, insertSession, markSessionStarted } from './sessions';
+import { getSession, getSessionByProviderId, insertSession, markSessionStarted } from './sessions';
 import type { Store } from './store';
 import { insertTask } from './tasks';
 import { createTestStore, seedProject } from './test-support';
@@ -182,6 +182,47 @@ describe('sessions', () => {
       pid: 4242,
       pidStart: 'Tue Oct 13 12:00:00 2026',
     });
+  });
+
+  it("finds the workstream's latest session for a provider conversation, with its briefing", () => {
+    const project = seedProject(store);
+    const a = seedWorkstream('A', ['api'], project).ws;
+    const b = seedWorkstream('B', ['ui'], project).ws;
+    const started = (
+      workstreamId: typeof a.id,
+      hash: string,
+      providerSessionId: string,
+      briefing: { briefed?: boolean; briefingBaselinePct?: number | null } = {},
+    ) =>
+      store.write((ctx) => {
+        const s = insertSession(ctx, {
+          workstreamId,
+          provider: 'claude',
+          model: 'sonnet',
+          effort: 'medium',
+          mode: 'managed',
+          mcpTokenHash: hash,
+          ...briefing,
+        });
+        markSessionStarted(ctx, s.id, providerSessionId, null);
+        return s;
+      }).value;
+    started(a.id, 'h1', 'conv-1', { briefed: true, briefingBaselinePct: 30 });
+    const resumed = started(a.id, 'h2', 'conv-1', { briefed: true, briefingBaselinePct: 30 });
+    started(a.id, 'h3', 'conv-2');
+    const other = started(b.id, 'h4', 'conv-1');
+
+    expect(getSessionByProviderId(store.db, a.id, 'conv-1')).toMatchObject({
+      id: resumed.id,
+      briefed: true,
+      briefingBaselinePct: 30,
+    });
+    expect(getSessionByProviderId(store.db, b.id, 'conv-1')).toMatchObject({
+      id: other.id,
+      briefed: false,
+      briefingBaselinePct: null,
+    });
+    expect(getSessionByProviderId(store.db, a.id, 'conv-3')).toBeUndefined();
   });
 });
 

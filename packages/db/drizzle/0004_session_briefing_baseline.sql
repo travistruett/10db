@@ -1,0 +1,1 @@
+ALTER TABLE `sessions` ADD `briefing_baseline_pct` real;

@@ -89,6 +89,8 @@ export async function runAcceptanceChecks(input: {
   readonly mcpServer: string;
   /** The env keys the live run read from the running server's process, or null if it never saw one. */
   readonly mcpServerEnvKeys: readonly string[] | null;
+  /** Files the tasks must leave committed and non-empty at HEAD; a task's gate does not check them. */
+  readonly outputs: readonly string[];
 }): Promise<AcceptanceCheck[]> {
   const db = new Database(input.dbPath, { readonly: true, fileMustExist: true });
   try {
@@ -129,6 +131,17 @@ export async function runAcceptanceChecks(input: {
       .map((s) => s.trim())
       .filter(Boolean);
     const dupCommits = [...new Set(opIds.filter((id, i) => opIds.indexOf(id) !== i))];
+    const missing: string[] = [];
+    for (const path of input.outputs) {
+      const size = await run('git', ['cat-file', '-s', `HEAD:${path}`], {
+        cwd: input.repoPath,
+      }).then(
+        (r) => Number(r.stdout.trim()),
+        () => 0,
+      );
+      // NaN from unexpected output counts as missing, never as present.
+      if (!(size > 0)) missing.push(path);
+    }
 
     const lines = parseLogLines(input.logText);
     const billing = lines.filter((l) => l.msg === 'claude session billing');
@@ -161,6 +174,13 @@ export async function runAcceptanceChecks(input: {
         'gate evidence',
         done > 0 && withoutGate === 0,
         `${String(withoutGate)} DONE workstream(s) without a passing gate record`,
+      ),
+      check(
+        'task outputs',
+        missing.length === 0,
+        missing.length === 0
+          ? `${String(input.outputs.length)} file(s) committed and non-empty at HEAD`
+          : `missing or empty at HEAD: ${missing.join(', ')}`,
       ),
       check('handoff crossed', handoffs >= 1, `${String(handoffs)} handoff(s)`),
       check('question answered', answered >= 1, `${String(answered)} question card(s) resolved`),
