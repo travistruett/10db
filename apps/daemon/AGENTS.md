@@ -23,7 +23,7 @@ serves agents over MCP, and runs Claude Code sessions.
 `src/<module>/` directories are flat; each exports its public surface from `index.ts`, and other
 modules import only that (ESLint enforces it). Dependencies point one way:
 
-`clock`, `log`, `events`, `guard`, `permissions`, `git`, `verify` → `sessions`, `inbox`, `briefing` →
+`clock`, `log`, `events`, `guard`, `permissions`, `git`, `verify`, `routing` → `sessions`, `inbox`, `briefing` →
 `mcp` → `runner` → `watcher`, `scheduler`, `recovery`, `backups` → `daemon` (composition root) → `main.ts`.
 `api` depends only on `@10db/contracts` and its own `ApiServices` interface; the composition root
 implements it and hands it to `createApp` in `ApiDeps`.
@@ -32,6 +32,7 @@ Time comes from an injected `Clock`; never call `Date.now()` or `setTimeout` dir
 
 The fake adapter (`sessions/fake-adapter.ts`) is the test boundary for Claude Code; daemon tests never call the real CLI.
 
+- `routing/` is pure: flows, floors, the per-role AA score, the router, escalation and step plans over rows its caller passes in. It imports `@10db/contracts` only. Its tests use the invented catalogue in `test-catalogue.ts`, never AA's numbers.
 - `environment/` owns the login env (memory only), the session env builder and the system check. Nothing
   else reads the login env. Never write it to disk, the database or logs; log variable names, never values.
 - Only `sessions/claude-*.ts` import `@anthropic-ai/claude-agent-sdk`, and only `claude-adapter.ts` imports it at runtime (the others import types).
