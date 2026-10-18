@@ -41,6 +41,7 @@ import {
   latestHandoffForStep,
   latestToolOp,
   listModelProfiles,
+  listSessions,
   listEvidence,
   markSessionStarted,
   openItemsForWorkstream,
@@ -368,7 +369,16 @@ export function createRunner(opts: RunnerOptions): Runner {
   /** After a read-only step's session: the next step in this lane, DONE, a rework, or a failure. */
   function finishReadOnlyStep(id: WorkstreamId, ctl: Control, row: WorkstreamRow): 'next' | 'stop' {
     const step = currentStep(row);
-    const move = moveAfter(row.steps, row.stepIndex);
+    // A sent-back step still holds its earlier result; only one a session of this step recorded counts.
+    const floorSession = (sessionId: SessionId) =>
+      (listSessions(db, id).find((x) => x.id === sessionId)?.sequence ?? 0) > step.sessionFloor;
+    const recorded = step.result !== null && floorSession(step.result.sessionId);
+    const move = recorded
+      ? moveAfter(row.steps, row.stepIndex)
+      : moveAfter(
+          row.steps.map((s, i) => (i === row.stepIndex ? { ...s, result: null } : s)),
+          row.stepIndex,
+        );
     switch (move.kind) {
       case 'no_result':
         fail(id, ctl.fence, `The ${step.role} step ended without calling complete_step`);
@@ -679,6 +689,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         tools: step.tools,
       },
       priorResults,
+      previousResult: readOnly ? step.result : null,
       revisedBy: reviser ? { role: reviser.role, personaName: reviser.personaName } : null,
       evidence: action.kind === 'fix' ? getEvidence(db, action.evidenceId) : null,
       recovery:

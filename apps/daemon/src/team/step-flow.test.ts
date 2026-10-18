@@ -125,6 +125,12 @@ describe('advanceSteps, sendBackSteps and restartStep', () => {
     expect(moved[1]).toMatchObject({ status: 'pending', result: { verdict: 'reject' } });
   });
 
+  it('keeps a read-only target’s previous result when it is sent back', () => {
+    const plan = step('plan', null);
+    const moved = sendBackSteps([plan, step('plan_review', 'reject')], 1, 0, plan, ENTRY);
+    expect(moved[0]).toMatchObject({ status: 'running', result: { summary: 'notes' } });
+  });
+
   it('restarts a failed step clean for a retry, keeping its session floor', () => {
     const steps = [
       step('implement'),

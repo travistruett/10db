@@ -1,13 +1,19 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { mintId, type NextAction, type WorkstreamState } from '@10db/contracts';
+import {
+  mintId,
+  type NextAction,
+  type WorkstreamState,
+  type WorkstreamStep,
+} from '@10db/contracts';
 import {
   acquireLease,
   insertToolOp,
   createTestStore,
   getWorkstream,
   getWorkstreamRow,
+  insertHandoff,
   insertSession,
   listEventsAfter,
   listInbox,
@@ -80,6 +86,67 @@ const recover = (extra: { cleanShutdown?: boolean } = {}) =>
     logger: silentLogger,
     ...extra,
   });
+
+const flowStep = (role: 'implement' | 'review', sessionFloor: number): WorkstreamStep => ({
+  role,
+  personaId: null,
+  personaName: role,
+  tools: role === 'implement' ? 'edit' : 'read_only',
+  score: role === 'implement' ? 'coding' : 'intelligence',
+  profileId: null,
+  model: 'sonnet',
+  effort: 'medium',
+  need: 40,
+  reason: 'test',
+  overBudget: false,
+  pinned: false,
+  status: 'running',
+  attempts: 0,
+  startedAt: null,
+  sessionFloor,
+  result: null,
+});
+
+/**
+ * A standard-flow workstream on its review step. The implement step's session wrote a handoff and
+ * never reported a provider session; the review has run no session yet.
+ */
+function onReviewStep() {
+  const seeded = seedWorkstream(base, { repoPath: repo.path });
+  const id = seeded.workstream.id;
+  state.write((ctx) => {
+    for (const to of ['STARTING', 'RUNNING'] as const)
+      transitionWorkstream(ctx, id, { to, fence: null });
+    const implementer = insertSession(ctx, {
+      workstreamId: id,
+      provider: 'claude',
+      model: 'sonnet',
+      effort: 'medium',
+      mode: 'managed',
+      mcpTokenHash: mintId('Session'),
+    });
+    insertHandoff(ctx, {
+      workstreamId: id,
+      sessionId: implementer.id,
+      content: {
+        objective: { task: 'scripted', acceptanceCriteria: [], nonGoals: [] },
+        progress: { done: [], notDone: [], nextAction: 'Commit the file' },
+        codeState: { uncommittedSummary: '' },
+        reasoning: { decisions: [], tradeOffs: [], rejected: [] },
+        validation: { checks: [], environmentProblems: [] },
+        continuity: { blockers: [], pendingQuestions: [], backgroundJobs: [], notes: '' },
+      },
+      gitHead: 'abc',
+      gitChangedFiles: [],
+      gitCommits: [],
+    });
+    patchWorkstream(ctx, id, null, {
+      steps: [{ ...flowStep('implement', 0), status: 'done' }, flowStep('review', 1)],
+      stepIndex: 1,
+    });
+  });
+  return id;
+}
 
 /** A real process to stand in for an orphan, with the identity recovery checks before signalling it. */
 async function orphanProcess(detached = false) {
@@ -325,6 +392,27 @@ describe('recoverOnStartup', () => {
     expect(report.failed).toEqual([ws.workstream.id]);
     expect(getWorkstream(state.db, ws.workstream.id).state).toBe('FAILED');
     expect(listInbox(state.db, { states: ['OPEN'] }).map((i) => i.kind)).toEqual(['flag']);
+  });
+
+  it('starts a review step that was running when the daemon died fresh, never from the implementer’s handoff', async () => {
+    const id = onReviewStep();
+    await recover();
+    expect(getWorkstreamRow(state.db, id)).toMatchObject({
+      state: 'QUEUED',
+      stepIndex: 1,
+      nextAction: { kind: 'start' },
+    });
+  });
+
+  it('marks the step it was on failed when a flow workstream uses its recovery attempts', async () => {
+    const id = onReviewStep();
+    state.write((ctx) => {
+      patchWorkstream(ctx, id, null, { recoveryAttempts: 3 });
+    });
+    await recover();
+    const row = getWorkstreamRow(state.db, id);
+    expect(row.state).toBe('FAILED');
+    expect(row.steps.map((s) => s.status)).toEqual(['done', 'failed']);
   });
 
   it('redelivers answers that were mid-delivery', async () => {

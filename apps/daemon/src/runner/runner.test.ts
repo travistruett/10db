@@ -13,6 +13,7 @@ import {
   schema,
 } from '@10db/db';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { RESULT_NUDGE } from '../briefing';
 import type { SessionHandle } from '../sessions';
 import { handoffArgs, waitFor } from '../../test/fixtures';
 import { createTestEngine, type TestEngine } from '../../test/engine';
@@ -1323,7 +1324,7 @@ describe('flows', () => {
     engine = await createTestEngine({
       Alpha: [
         implement('op-flow-0021'),
-        [turn, { do: 'await_message', contains: 'complete_step' }, turn],
+        [turn, { do: 'await_message', contains: RESULT_NUDGE }, turn],
       ],
     });
     const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
@@ -1340,12 +1341,15 @@ describe('flows', () => {
     engine = await createTestEngine({
       Alpha: [
         implement('op-flow-0031'),
-        [turn, { do: 'await_message', contains: 'complete_step' }, approve('op-flow-0032'), turn],
+        [turn, { do: 'await_message', contains: RESULT_NUDGE }, approve('op-flow-0032'), turn],
       ],
     });
     const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+    // The script waits for the exact nudge text, so a nudge that was never sent hangs the review.
     await until(workstream.id, (s) => s === 'DONE');
     expect(ws(workstream.id).state).toBe('DONE');
+    expect(ws(workstream.id).steps.map((s) => s.status)).toEqual(['done', 'done']);
+    expect(step(workstream.id, 1)?.result?.verdict).toBe('approve');
   });
 
   it('fails after the fix limit when the reviewer keeps rejecting, then retries the review cleanly', async () => {
@@ -1359,6 +1363,7 @@ describe('flows', () => {
       state: 'FAILED',
       failureReason: 'The review step rejected the work and the retry limit (3) is used up',
     });
+    expect(listInbox(engine.store.db, { states: ['OPEN'] }).map((i) => i.kind)).toContain('flag');
     // The builder retries: the review starts clean (no stale verdict) and approves.
     engine.retry(workstream.id);
     expect(step(workstream.id, 1)).toMatchObject({ status: 'running', result: null, attempts: 0 });
@@ -1381,6 +1386,8 @@ describe('flows', () => {
       effort: 'low',
     });
     expect(step(workstream.id, 0)?.reason).toBe('escalated from sonnet@high after the gate failed');
+    expect(ws(workstream.id).attempt).toBe(1);
+    expect(step(workstream.id, 0)?.attempts).toBe(1);
     await until(workstream.id, (s) => s === 'DONE');
     expect(ws(workstream.id).state).toBe('DONE');
   });
@@ -1412,6 +1419,71 @@ describe('flows', () => {
     await until(workstream.id, (s) => s === 'DONE');
     expect(engine.adapter.prompts[1]?.prompt).toContain('1. Put it in src/api/a.txt.');
     expect(ws(workstream.id).state).toBe('DONE');
+  });
+
+  it('shows a plan sent back by plan review the plan it is told to fix', async () => {
+    const plan = (opId: string, text: string) => ({
+      do: 'mcp' as const,
+      tool: 'complete_step',
+      args: { opId, summary: text, verdict: null },
+    });
+    engine = await createTestEngine({
+      Alpha: [
+        [plan('op-flow-0101', 'PLAN ONE: edit src/api/a.txt.'), turn],
+        [reject('op-flow-0102', 'Plan review: name the test file.'), turn],
+        [plan('op-flow-0103', 'PLAN TWO: edit src/api/a.txt and test it.'), turn],
+        [approve('op-flow-0104'), turn],
+        implement('op-flow-0105'),
+        [approve('op-flow-0106'), turn],
+        [approve('op-flow-0107'), turn],
+      ],
+    });
+    const { workstream } = engine.addTask('Alpha', ['api'], [], {
+      flow: 'full',
+      criteria: 4,
+      riskTags: ['security'],
+    });
+    expect(ws(workstream.id).steps.map((s) => s.role)).toEqual([
+      'plan',
+      'plan_review',
+      'implement',
+      'review',
+      'qa',
+    ]);
+    await until(workstream.id, (s) => s === 'DONE');
+    expect(ws(workstream.id).state).toBe('DONE');
+    const second = engine.adapter.prompts[2]?.prompt ?? '';
+    expect(second).toContain('Your step: 1 of 5, plan');
+    expect(second).toContain('PLAN ONE: edit src/api/a.txt.');
+    expect(second).toContain('Plan review: name the test file.');
+    // The kept plan is not the revised session's own result: the revision must still be recorded.
+    expect(step(workstream.id, 0)?.result?.summary).toBe(
+      'PLAN TWO: edit src/api/a.txt and test it.',
+    );
+  });
+
+  it('fails a sent-back plan that ends without a new result instead of reusing the old one', async () => {
+    const plan = {
+      do: 'mcp' as const,
+      tool: 'complete_step',
+      args: { opId: 'op-flow-0111', summary: 'PLAN ONE', verdict: null },
+    };
+    engine = await createTestEngine({
+      Alpha: [
+        [plan, turn],
+        [reject('op-flow-0112', 'Needs more.'), turn],
+        [turn, { do: 'await_message', contains: RESULT_NUDGE }, turn],
+      ],
+    });
+    const { workstream } = engine.addTask('Alpha', ['api'], [], {
+      flow: 'full',
+      criteria: 4,
+      riskTags: ['security'],
+    });
+    await until(workstream.id, (s) => s === 'FAILED');
+    expect(ws(workstream.id).failureReason).toBe(
+      'The plan step ended without calling complete_step',
+    );
   });
 
   it('resumes the step it was on after a crash', async () => {
@@ -1461,6 +1533,9 @@ describe('flows', () => {
     // The review crashed twice: once resumed, then started fresh. A fresh review starts, not continues.
     expect(engine.adapter.prompts[4]?.prompt).not.toContain('Continue from the handoff');
     expect(engine.adapter.prompts[4]?.prompt).toContain('Your step: 2 of 2, review');
+    expect(engine.adapter.prompts[4]?.prompt).not.toContain('Commit the file');
+    // The implementer's handoff reached the implement step's own continuation.
+    expect(engine.adapter.prompts[1]?.prompt).toContain('Commit the file');
   });
 
   it('runs a workstream with no stored steps as one implement step', async () => {

@@ -1,4 +1,4 @@
-import { StepRole, StepStatus, Verdict, type WorkstreamStep } from '@10db/contracts';
+import { StepRole, StepStatus, ToolAccess, Verdict, type WorkstreamStep } from '@10db/contracts';
 
 type StepMove =
   | { readonly kind: 'advance'; readonly to: number }
@@ -53,7 +53,11 @@ export function advanceSteps(
   });
 }
 
-/** The rejecting step keeps its notes for the rework; the target restarts with one more attempt. */
+/**
+ * The rejecting step keeps its notes for the rework; the target restarts with one more attempt. A
+ * read-only target keeps its previous result, so it can see what the reviewer judged; the runner
+ * accepts only a result a later session recorded.
+ */
 export function sendBackSteps(
   steps: readonly WorkstreamStep[],
   from: number,
@@ -63,7 +67,12 @@ export function sendBackSteps(
 ): WorkstreamStep[] {
   return steps.map((s, i) => {
     if (i === from) return { ...s, status: StepStatus.Pending };
-    if (i === to) return { ...entered(target, entry), attempts: s.attempts + 1 };
+    if (i === to) {
+      const restarted = { ...entered(target, entry), attempts: s.attempts + 1 };
+      return target.tools === ToolAccess.ReadOnly
+        ? { ...restarted, result: target.result }
+        : restarted;
+    }
     return s;
   });
 }

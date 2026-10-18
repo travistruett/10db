@@ -42,6 +42,8 @@ export interface PromptInput {
   readonly contextPack: ContextPack;
   readonly step: StepBrief;
   readonly priorResults: readonly PriorResult[];
+  /** A read-only step sent back sees the result it gave before. */
+  readonly previousResult: StepResult | null;
   readonly revisedBy: { readonly role: StepRole; readonly personaName: string } | null;
 }
 
@@ -166,6 +168,12 @@ function stepSection(input: PromptInput): string[] {
       const verdict = prior.result.verdict ? `: ${VERDICT_LABEL[prior.result.verdict]}` : '';
       lines.push(`--- ${prior.role} (${prior.personaName})${verdict}`, prior.result.summary, '---');
     }
+  }
+  if (input.previousResult) {
+    const verdict = input.previousResult.verdict
+      ? `: ${VERDICT_LABEL[input.previousResult.verdict]}`
+      : '';
+    lines.push('', `Your previous result${verdict}:`, input.previousResult.summary);
   }
   return lines;
 }
