@@ -158,6 +158,11 @@ const READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
   'NotebookRead',
   'WebFetch',
   'WebSearch',
+  'Skill',
+  'BashOutput',
+  'KillShell',
+  'ListMcpResourcesTool',
+  'ReadMcpResourceTool',
 ]);
 const READ_ONLY_REFUSAL =
   'This step is read-only. Describe the change in mcp__10db__complete_step; the implement step makes it.';
