@@ -16,9 +16,9 @@ import {
   getWorkstreamRow,
   insertProject,
   insertTask,
-  insertWorkstream,
   latestEventSeq,
   latestHandoff,
+  listFlows,
   listEventsAfter,
   listInbox,
   listProjects,
@@ -33,6 +33,7 @@ import type { KeepAwake } from '../keep-awake';
 import type { Runner } from '../runner';
 import type { Scheduler } from '../scheduler';
 import { ProjectMcpError, readRepoMcp, type RepoMcp } from '../sessions';
+import { startTaskWithPlan } from '../team';
 
 /** The HTTP layer's view of the daemon: reads go to the database, writes go through the state store. */
 export function createServices(deps: {
@@ -61,10 +62,11 @@ export function createServices(deps: {
       return task;
     },
     startTask(taskId) {
-      const ws = deps.state.write((ctx) => insertWorkstream(ctx, taskId));
+      const ws = startTaskWithPlan(deps.state, taskId);
       deps.scheduler.requestTick();
       return ws;
     },
+    listFlows: () => listFlows(db),
     listWorkstreams: ({ active }) => listWorkstreams(db, active ? { states: ACTIVE_STATES } : {}),
     async cancelWorkstream(id) {
       await deps.runner.cancel(id);

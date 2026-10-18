@@ -1,5 +1,6 @@
 import type {
   DaemonEvent,
+  FlowDto,
   InboxAnswer,
   InboxItemDto,
   InboxItemId,
@@ -25,6 +26,7 @@ export interface ApiServices {
   listTasks(projectId: ProjectId): TaskDto[];
   createTask(projectId: ProjectId, input: TaskInput): TaskDto;
   startTask(taskId: TaskId): WorkstreamDto;
+  listFlows(): FlowDto[];
   listWorkstreams(filter: { readonly active: boolean }): WorkstreamDto[];
   cancelWorkstream(id: WorkstreamId): Promise<WorkstreamDto>;
   retryWorkstream(id: WorkstreamId): WorkstreamDto;

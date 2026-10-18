@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { readRuntimeInfo } from '../src/daemon';
 import type { FakeScriptBook } from '../src/sessions';
-import { apiClient } from './api-client';
+import { apiClient, quickFlowId } from './api-client';
 import { createTempRepo, tempDir, waitForAsync, type TempDir } from './fixtures';
 
 const DAEMON_DIR = resolve(import.meta.dirname, '..');
@@ -107,6 +107,7 @@ describe('kill -9 mid-step', () => {
       name: 'crash',
       repoPath: repo.path,
       gateCommand: 'test -f src/x/two.txt',
+      flowId: await quickFlowId(api),
       areas: [{ name: 'x', globs: ['src/x/**'] }],
     });
     const task = await api.post(`/projects/${project.id}/tasks`, TaskDto, {

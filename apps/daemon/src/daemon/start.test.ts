@@ -14,7 +14,7 @@ import { getWorkstream } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { WebSocket } from 'ws';
-import { apiClient } from '../../test/api-client';
+import { apiClient, quickFlowId } from '../../test/api-client';
 import { createTempRepo, tempDir, waitFor, waitForAsync } from '../../test/fixtures';
 import type { CaffeinateSpawner } from '../keep-awake';
 import { FakeAdapter, type FakeScriptBook } from '../sessions';
@@ -183,6 +183,7 @@ describe('startDaemon', () => {
         name: 'demo',
         repoPath: repo.path,
         gateCommand: 'true',
+        flowId: await quickFlowId(apiClient(running.url, running.token)),
         areas: [{ name: 'api', globs: ['src/**'] }],
       });
       const task = await call(`/projects/${project.id}/tasks`, {
@@ -273,6 +274,7 @@ describe('startDaemon', () => {
         name: 'wired',
         repoPath: repo.path,
         gateCommand: 'true',
+        flowId: await quickFlowId(api),
         areas: [{ name: 'api', globs: ['src/api/**'] }],
       });
       const task = await api.post(`/projects/${project.id}/tasks`, TaskDto, {

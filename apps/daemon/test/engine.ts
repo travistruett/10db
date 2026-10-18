@@ -4,6 +4,7 @@ import type {
   ProjectDto,
   ProjectInput,
   Provider,
+  RiskTag,
   TaskDto,
   WorkstreamDto,
   WorkstreamId,
@@ -13,6 +14,7 @@ import {
   acquireLease,
   claimRequestsForTask,
   createTestStore,
+  findFlowByName,
   getProject,
   getTask,
   getWorkstreamRow,
@@ -22,6 +24,7 @@ import {
   transitionWorkstream,
   type Store,
 } from '@10db/db';
+import { readDefaultPersonas } from '@10db/harness';
 import { ManualClock } from '../src/clock';
 import { createEventBus, createStateStore, type StateStore } from '../src/events';
 import { createGit } from '../src/git';
@@ -37,6 +40,8 @@ import {
 } from '../src/runner';
 import { FakeAdapter, type FakeScriptBook } from '../src/sessions';
 import { createGateRunner } from '../src/verify';
+import { seedTeam, startTaskWithPlan } from '../src/team';
+import { measureForTests } from './catalogue';
 import { createTempRepo, tempDir } from './fixtures';
 
 export interface TestEngine {
@@ -53,6 +58,7 @@ export interface TestEngine {
     title: string,
     areas?: string[],
     dependsOn?: TaskDto['id'][],
+    plan?: { flow: string; riskTags?: RiskTag[]; criteria?: number },
   ): { task: TaskDto; workstream: WorkstreamDto };
   /** Does what the scheduler does: claims, lease, STARTING, then launch. */
   launch(id: WorkstreamId): void;
@@ -68,6 +74,8 @@ export async function createTestEngine(
   const data = tempDir('engine-data');
   const { store, close } = createTestStore();
   const state = createStateStore(store, createEventBus());
+  seedTeam(state, readDefaultPersonas());
+  measureForTests(state);
   const clock = new ManualClock();
   const adapter = new FakeAdapter(book);
   const live = createLiveSessions();
@@ -134,11 +142,24 @@ export async function createTestEngine(
     project: seeded,
     repoPath: repo.path,
     rateLimited,
-    addTask(title, areas = ['api'], dependsOn = []) {
-      const task = state.write((ctx) =>
-        insertTask(ctx, seeded.id, { title, acceptanceCriteria: ['it works'], areas, dependsOn }),
+    addTask(title, areas = ['api'], dependsOn = [], plan) {
+      const criteria = Array.from({ length: plan?.criteria ?? 1 }, (_, i) =>
+        i === 0 ? 'it works' : `criterion ${String(i + 1)}`,
       );
-      const workstream = state.write((ctx) => insertWorkstream(ctx, task.id));
+      const flowId = plan ? (findFlowByName(store.db, plan.flow)?.id ?? null) : null;
+      const task = state.write((ctx) =>
+        insertTask(ctx, seeded.id, {
+          title,
+          acceptanceCriteria: criteria,
+          areas,
+          dependsOn,
+          riskTags: plan?.riskTags ?? [],
+          flowId,
+        }),
+      );
+      const workstream = plan
+        ? startTaskWithPlan(state, task.id)
+        : state.write((ctx) => insertWorkstream(ctx, task.id));
       return { task, workstream };
     },
     launch(id) {

@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { startDaemon, type RunningDaemon } from '../src/daemon';
 import { FakeAdapter, type FakeScriptBook } from '../src/sessions';
-import { apiClient } from './api-client';
+import { apiClient, quickFlowId } from './api-client';
 import { createTempRepo, handoffArgs, tempDir, waitForAsync, type TempDir } from './fixtures';
 
 const write = (path: string) => ({
@@ -118,6 +118,7 @@ describe('§1.3 with the fake adapter', () => {
       name: 'acceptance',
       repoPath: repo.path,
       gateCommand: 'test -d src',
+      flowId: await quickFlowId(api),
       maxLanes: 3,
       areas: [
         { name: 'a', globs: ['src/a/**'] },

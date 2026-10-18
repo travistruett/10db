@@ -19,7 +19,7 @@ import {
   runAcceptanceChecks,
   sessionBaselines,
 } from '../scripts/acceptance-checks';
-import { apiClient } from './api-client';
+import { apiClient, quickFlowId } from './api-client';
 import { createTempRepo, handoffArgs, tempDir, waitForAsync } from './fixtures';
 
 const write = (path: string) => ({
@@ -98,6 +98,7 @@ beforeAll(async () => {
     name: 'checks',
     repoPath: repo.path,
     gateCommand: 'test -d src',
+    flowId: await quickFlowId(api),
     maxLanes: 2,
     areas: [
       { name: 'a', globs: ['src/a/**'] },

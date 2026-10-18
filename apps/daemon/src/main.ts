@@ -81,6 +81,7 @@ try {
     adapter: await chooseAdapter(),
     logLevel: env.TENDB_LOG_LEVEL,
     migrationsDir: resolveMigrationsDir(),
+    harnessDir: resolveHarnessDir(),
     sessionEnv: (project) =>
       buildSessionEnv({
         base: login.vars,

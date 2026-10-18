@@ -19,6 +19,7 @@ import {
   openDatabase,
   setAppSetting,
 } from '@10db/db';
+import { HARNESS_PLUGIN_DIR, readDefaultPersonas } from '@10db/harness';
 import { WebSocketServer } from 'ws';
 import { createApp } from '../api';
 import {
@@ -46,6 +47,7 @@ import {
 } from '../runner';
 import { createProviderPauses, createScheduler, type Scheduler } from '../scheduler';
 import type { SessionAdapter } from '../sessions';
+import { seedTeam } from '../team';
 import { createGateRunner } from '../verify';
 import { createWatcher, systemWatch, type WatchFn } from '../watcher';
 import { acquireInstanceLock } from './instance-lock';
@@ -74,6 +76,8 @@ export interface DaemonOptions {
   readonly sessionEnv?: (project: ProjectDto) => Readonly<Record<string, string>>;
   readonly processes?: ProcessTerminator;
   readonly migrationsDir?: string;
+  /** The harness plugin folder the default personas are read from. */
+  readonly harnessDir?: string;
   readonly allowedOrigins?: readonly string[];
   /** A fixed UI token (dev and Playwright); otherwise a random one per start. */
   readonly uiToken?: string;
@@ -172,6 +176,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     createStore(db, () => clock.now()),
     bus,
   );
+  // A malformed persona file throws and the daemon doesn't start, the same policy as a failed migration.
+  seedTeam(state, readDefaultPersonas(opts.harnessDir ?? HARNESS_PLUGIN_DIR));
   const instanceId = randomUUID();
   const git = createGit();
   const live = createLiveSessions();
