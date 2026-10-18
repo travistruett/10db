@@ -17,6 +17,7 @@ import { useCancelWorkstream, useRetryWorkstream, useWorkstreams } from '../../d
 import { ContextGauge } from './context-gauge';
 import { RelativeTime } from './relative-time';
 import { StateBadge } from './state-badge';
+import { StepCell } from './step-cell';
 import { canCancel, canRetry } from './workstream-state';
 
 export function FactoryView() {
@@ -62,6 +63,7 @@ export function FactoryView() {
             <Table.Tr>
               <Table.Th>Task</Table.Th>
               <Table.Th>State</Table.Th>
+              <Table.Th>Step</Table.Th>
               <Table.Th>Context</Table.Th>
               <Table.Th>Sessions</Table.Th>
               <Table.Th>Last activity</Table.Th>
@@ -83,6 +85,9 @@ export function FactoryView() {
                 </Table.Td>
                 <Table.Td>
                   <StateBadge state={ws.state} />
+                </Table.Td>
+                <Table.Td>
+                  <StepCell workstream={ws} />
                 </Table.Td>
                 <Table.Td>
                   <ContextGauge pct={ws.contextPct} />

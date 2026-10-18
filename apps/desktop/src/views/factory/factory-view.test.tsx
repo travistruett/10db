@@ -34,6 +34,8 @@ describe('FactoryView', () => {
         workstreamDto({
           taskTitle: 'Alpha',
           state: 'RUNNING',
+          model: 'opus',
+          effort: 'high',
           contextPct: 42,
           sessionCount: 2,
           lastActivityAt: fiveMinutesAgo,
@@ -44,6 +46,7 @@ describe('FactoryView', () => {
 
     const row = await rowFor('Alpha');
     expect(within(row).getByText('Running')).toBeTruthy();
+    expect(within(row).getByText('opus@high')).toBeTruthy();
     expect(within(row).getByText('42%')).toBeTruthy();
     expect(within(row).getByRole('progressbar', { name: 'Context used' })).toBeTruthy();
     expect(within(row).getByText('2')).toBeTruthy();
