@@ -5,7 +5,7 @@ import { z } from 'zod';
 export const AA_FREE_MODELS_URL = 'https://artificialanalysis.ai/api/v2/language/models/free';
 
 /** Pages fetched in one sync at most, so a bad response can't burn the daily quota. */
-const MAX_PAGES = 10;
+export const AA_MAX_PAGES = 10;
 
 const Numbers = z
   .record(z.string(), z.unknown())
@@ -67,7 +67,7 @@ export async function fetchAaModels(deps: {
   readonly now: string;
 }): Promise<AaFetchOutcome> {
   const models: AaModelDto[] = [];
-  for (let page = 1; page <= MAX_PAGES; page += 1) {
+  for (let page = 1; page <= AA_MAX_PAGES; page += 1) {
     let res: Response;
     try {
       res = await deps.fetch(`${AA_FREE_MODELS_URL}?page=${String(page)}`, {
@@ -101,5 +101,8 @@ export async function fetchAaModels(deps: {
     models.push(...parsed.data.data.map((entry) => toModel(entry, version, deps.now)));
     if (!parsed.data.pagination.has_more) return { kind: 'ok', models };
   }
-  return { kind: 'ok', models };
+  return {
+    kind: 'failed',
+    message: `Artificial Analysis listed more than ${String(AA_MAX_PAGES)} pages; keeping the last list`,
+  };
 }

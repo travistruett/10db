@@ -5,7 +5,7 @@ import { ManualClock } from '../clock';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { silentLogger } from '../log';
 import { seedTeam } from '../team';
-import { AA_FREE_MODELS_URL } from './aa-client';
+import { AA_FREE_MODELS_URL, AA_MAX_PAGES } from './aa-client';
 import { AA_SYNC_INTERVAL_MS, createBenchmarkSync } from './index';
 import type { BenchmarkSyncDeps } from './sync';
 
@@ -171,6 +171,68 @@ describe('benchmark sync', () => {
     expect(listAaModels(state.db).map((m) => m.slug)).toEqual(['claude-opus-5-5-high']);
     expect(opusHigh()?.scores.intelligence).toBe(50);
     expect(JSON.stringify(status)).not.toContain(KEY);
+  });
+
+  it('fails, keeping the last data, when the list runs past the page cap', async () => {
+    await sync(
+      fakeFetch({ status: 200, body: page([entry('claude-opus-5-5-high', 50)], false) }),
+    ).sync();
+    requests = [];
+    const endless = Array.from({ length: AA_MAX_PAGES + 1 }, (_, i) => ({
+      status: 200,
+      body: page([entry(`other-${String(i)}`, 10)], true, i + 1),
+    }));
+    const status = await sync(fakeFetch(...endless)).sync();
+    expect(status.outcome).toBe('failed');
+    expect(status.message).toContain(String(AA_MAX_PAGES));
+    expect(requests).toHaveLength(AA_MAX_PAGES);
+    expect(listAaModels(state.db).map((m) => m.slug)).toEqual(['claude-opus-5-5-high']);
+    expect(opusHigh()?.scores.intelligence).toBe(50);
+  });
+
+  it('clears a profile AA stops listing, names it, and leaves manual profiles alone', async () => {
+    const manual = findModelProfile(state.db, 'claude', 'sonnet', 'high');
+    if (!manual) throw new Error('not seeded');
+    state.write((ctx) => patchModelProfile(ctx, manual.id, { costPerTaskUsd: 9 }));
+    await sync(
+      fakeFetch({ status: 200, body: page([entry('claude-opus-5-5-high', 50)], false) }),
+    ).sync();
+    expect(opusHigh()?.scores.intelligence).toBe(50);
+    const status = await sync(
+      fakeFetch({ status: 200, body: page([entry('other-lab-model', 30)], false) }),
+    ).sync();
+    expect(status.outcome).toBe('ok');
+    expect(opusHigh()).toMatchObject({
+      scores: { intelligence: null, coding: null, agentic: null },
+      costPerTaskUsd: null,
+    });
+    expect(status.unmeasuredProfiles).toContain('opus@high');
+    expect(findModelProfile(state.db, 'claude', 'sonnet', 'high')).toMatchObject({
+      source: 'manual',
+      costPerTaskUsd: 9,
+    });
+  });
+
+  it('resolves with a status when the database fails on reads and writes alike', async () => {
+    const closed = new Proxy(state.db, {
+      get() {
+        throw new Error('database is closed');
+      },
+    });
+    const failing: StateStore = {
+      ...state,
+      db: closed,
+      write: () => {
+        throw new Error('database is closed');
+      },
+    };
+    const status = await sync(
+      fakeFetch({ status: 200, body: page([entry('claude-opus-5-5-high', 50)], false) }),
+      KEY,
+      failing,
+    ).sync();
+    expect(status.outcome).toBe('failed');
+    expect(status.models).toBe(0);
   });
 
   it('reports a listed profile AA gives no cost as unmeasured', async () => {

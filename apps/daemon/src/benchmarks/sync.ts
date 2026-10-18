@@ -62,6 +62,15 @@ function measurement(model: AaModelDto) {
   };
 }
 
+/** Clears a profile AA no longer lists, so a stale score can't keep routing steps. */
+const unmeasured = (now: string) => ({
+  scores: { intelligence: null, coding: null, agentic: null },
+  costPerTaskUsd: null,
+  outputTokensPerSecond: null,
+  indexVersion: null,
+  measuredAt: now,
+});
+
 /** A profile the router can use for at least one role: a cost and some score. */
 const measured = (p: ModelProfileDto) =>
   p.costPerTaskUsd !== null &&
@@ -73,14 +82,29 @@ export function createBenchmarkSync(deps: BenchmarkSyncDeps): BenchmarkSync {
   let timer: Timer | null = null;
   let stopped = false;
 
+  /** The latest status this process computed, used when the database can't be read or written. */
+  let remembered: StoredStatus = NEVER;
+
   const stored = (): StoredStatus => {
-    const parsed = StoredStatus.safeParse(getAppSetting(state.db, STATUS_KEY));
-    return parsed.success ? parsed.data : NEVER;
+    try {
+      const parsed = StoredStatus.safeParse(getAppSetting(state.db, STATUS_KEY));
+      return parsed.success ? parsed.data : remembered;
+    } catch {
+      return remembered;
+    }
   };
-  const status = (): BenchmarkStatusDto => ({ ...stored(), models: listAaModels(state.db).length });
-  /** Records the outcome; if even that write fails, the status is returned unrecorded. */
+  const modelCount = (): number => {
+    try {
+      return listAaModels(state.db).length;
+    } catch {
+      return 0;
+    }
+  };
+  const status = (): BenchmarkStatusDto => ({ ...stored(), models: modelCount() });
+  /** Records the outcome; a database that can't be read or written leaves it in memory only. */
   const record = (next: Partial<StoredStatus>): BenchmarkStatusDto => {
     const merged = { ...stored(), ...next };
+    remembered = merged;
     try {
       state.write((ctx) => {
         setAppSetting(ctx, STATUS_KEY, merged);
@@ -91,7 +115,7 @@ export function createBenchmarkSync(deps: BenchmarkSyncDeps): BenchmarkSync {
         'could not record the benchmark status',
       );
     }
-    return { ...merged, models: listAaModels(state.db).length };
+    return { ...merged, models: modelCount() };
   };
 
   async function attempt(now: string): Promise<BenchmarkStatusDto> {
@@ -126,6 +150,7 @@ export function createBenchmarkSync(deps: BenchmarkSyncDeps): BenchmarkSync {
       for (const profile of listModelProfiles(ctx.tx)) {
         const model = profile.aaSlug ? bySlug.get(profile.aaSlug) : undefined;
         if (model) applyAaMeasurement(ctx, profile.id, measurement(model));
+        else applyAaMeasurement(ctx, profile.id, unmeasured(now));
       }
     });
     const unmeasuredProfiles = listModelProfiles(state.db)
@@ -168,12 +193,26 @@ export function createBenchmarkSync(deps: BenchmarkSyncDeps): BenchmarkSync {
     return running;
   };
 
+  /** `sync` never rejects; the catch is a last guard so a daemon-wide unhandled rejection can't happen. */
+  const syncQuietly = (): Promise<void> =>
+    sync().then(
+      () => undefined,
+      (error: unknown) => {
+        deps.logger.error({ err: error instanceof Error ? error.name : 'error' }, 'sync failed');
+      },
+    );
+  const runAndRearm = async (): Promise<void> => {
+    try {
+      await syncQuietly();
+    } finally {
+      schedule(AA_SYNC_INTERVAL_MS);
+    }
+  };
+
   const schedule = (ms: number): void => {
     if (stopped) return;
     timer = deps.clock.setTimeout(() => {
-      void sync().then(() => {
-        schedule(AA_SYNC_INTERVAL_MS);
-      });
+      void runAndRearm();
     }, ms);
   };
 
@@ -185,7 +224,7 @@ export function createBenchmarkSync(deps: BenchmarkSyncDeps): BenchmarkSync {
       const last = stored().lastSuccessAt;
       const age = last === null ? Infinity : deps.clock.now().getTime() - Date.parse(last);
       if (age >= AA_SYNC_INTERVAL_MS) {
-        void sync();
+        void syncQuietly();
         schedule(AA_SYNC_INTERVAL_MS);
       } else {
         schedule(AA_SYNC_INTERVAL_MS - age);
