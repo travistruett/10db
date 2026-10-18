@@ -3,7 +3,13 @@ import { join } from 'node:path';
 import { mintId, type PermissionRuleDto } from '@10db/contracts';
 import { afterAll, describe, expect, it } from 'vitest';
 import { tempDir } from '../../test/fixtures';
-import { baseAllowedTools, commandPrefix, matchesAllowedTool, matchPermissionRule } from './index';
+import {
+  allowedToolsFor,
+  baseAllowedTools,
+  commandPrefix,
+  matchesAllowedTool,
+  matchPermissionRule,
+} from './index';
 
 const repo = tempDir('permissions-repo');
 afterAll(() => {
@@ -272,5 +278,29 @@ describe('matchPermissionRule', () => {
 
   it('does not apply a rule to another tool', () => {
     expect(match('Read', bash('docker compose up'), [rule('Bash', 'docker compose')])).toBe(false);
+  });
+});
+
+describe('allowedToolsFor', () => {
+  const project = { gateCommand: 'make gate' };
+  it.each([
+    {
+      tools: 'edit',
+      has: ['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'Read', 'Bash(make gate)'],
+      lacks: ['Bash(cat:*)'],
+    },
+    {
+      tools: 'read_only',
+      has: ['Read', 'Grep', 'mcp__10db__*', 'Bash(git diff:*)', 'Bash(cat:*)', 'Bash(grep:*)'],
+      lacks: ['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'Bash(make gate)'],
+    },
+  ] as const)('gives a $tools step the right tools', ({ tools, has, lacks }) => {
+    const allowed = allowedToolsFor(project, tools);
+    for (const t of has) expect(allowed, t).toContain(t);
+    for (const t of lacks) expect(allowed, t).not.toContain(t);
+  });
+
+  it('gives an edit step exactly the base list', () => {
+    expect(allowedToolsFor(project, 'edit')).toEqual(baseAllowedTools(project));
   });
 });

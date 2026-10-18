@@ -44,6 +44,7 @@ function judge(
   toolName: string,
   toolInput: unknown,
   claims: Claims = [{ kind: 'area', name: 'api' }],
+  readOnly = false,
 ) {
   return judgeToolUse({
     toolName,
@@ -52,6 +53,7 @@ function judge(
     areas: AREAS,
     hazards: DEFAULT_HAZARDS,
     claims,
+    readOnly,
   });
 }
 const bash = (command: string, claims?: Claims) => judge('Bash', { command }, claims);
@@ -560,5 +562,70 @@ describe('stringField', () => {
     { name: 'a non-object input', input: null, expected: null },
   ])('$name', ({ input, expected }) => {
     expect(stringField(input, 'command')).toBe(expected);
+  });
+});
+
+describe('read-only steps', () => {
+  const ro = (tool: string, input: object) =>
+    judge(tool, input, [{ kind: 'area', name: 'api' }], true);
+  it.each([
+    { tool: 'Write', input: { file_path: 'src/api/a.ts' }, decision: 'deny' },
+    { tool: 'Edit', input: { file_path: 'src/api/a.ts' }, decision: 'deny' },
+    { tool: 'MultiEdit', input: { file_path: 'src/api/a.ts' }, decision: 'deny' },
+    { tool: 'NotebookEdit', input: { notebook_path: 'src/api/n.ipynb' }, decision: 'deny' },
+    { tool: 'Read', input: { file_path: 'src/api/a.ts' }, decision: 'allow' },
+  ])('$decision $tool inside the claims', ({ tool, input, decision }) => {
+    expect(ro(tool, input).decision).toBe(decision);
+  });
+
+  it.each([
+    { name: 'read-only git', command: 'git diff HEAD~1 -- src/api', decision: 'allow' },
+    { name: 'git log piped to head', command: 'git log --oneline | head -5', decision: 'allow' },
+    {
+      name: 'a grep with stderr discarded',
+      command: 'grep -rn TODO src 2>/dev/null',
+      decision: 'allow',
+    },
+    { name: 'find that only lists', command: "find src -name '*.ts'", decision: 'allow' },
+    { name: 'a redirect into a file', command: 'echo x > src/api/a.ts', decision: 'deny' },
+    { name: 'an append', command: 'cat a >> b', decision: 'deny' },
+    { name: 'sed in place', command: "sed -i 's/a/b/' src/api/a.ts", decision: 'deny' },
+    { name: 'a formatter', command: 'pnpm format', decision: 'deny' },
+    { name: 'the gate', command: 'make gate', decision: 'deny' },
+    { name: 'find -delete', command: 'find . -name x -delete', decision: 'deny' },
+    { name: 'find -exec', command: 'find . -exec rm {} ;', decision: 'deny' },
+    { name: 'tee', command: 'git diff | tee out.txt', decision: 'deny' },
+    { name: 'git push', command: 'git push origin HEAD', decision: 'deny' },
+    { name: 'git with a leading option', command: 'git -C /tmp status', decision: 'deny' },
+    {
+      name: 'sort writing a file',
+      command: 'sort -o src/api/a.ts src/api/a.ts',
+      decision: 'deny',
+    },
+    {
+      name: 'sort writing a file, long form',
+      command: 'sort --output=out.txt a.txt',
+      decision: 'deny',
+    },
+    {
+      name: 'uniq, which writes its second operand',
+      command: 'uniq a.txt b.txt',
+      decision: 'deny',
+    },
+    { name: 'tree writing a file', command: 'tree -o out.txt src', decision: 'deny' },
+    {
+      name: 'rg running a preprocessor',
+      command: 'rg --pre ./scripts/x.sh TODO',
+      decision: 'deny',
+    },
+    { name: 'a plain sort', command: 'sort a.txt', decision: 'allow' },
+    { name: 'a plain rg', command: 'rg -n TODO src', decision: 'allow' },
+    {
+      name: 'a read hiding a write in a substitution',
+      command: 'echo $(touch x)',
+      decision: 'deny',
+    },
+  ])('$decision $name', ({ command, decision }) => {
+    expect(ro('Bash', { command }).decision).toBe(decision);
   });
 });

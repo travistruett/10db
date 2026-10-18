@@ -1,1 +1,7 @@
-export { baseAllowedTools, commandPrefix, matchesAllowedTool, matchPermissionRule } from './rules';
+export {
+  allowedToolsFor,
+  baseAllowedTools,
+  commandPrefix,
+  matchesAllowedTool,
+  matchPermissionRule,
+} from './rules';

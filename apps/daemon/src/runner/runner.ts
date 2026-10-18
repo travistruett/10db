@@ -1,8 +1,10 @@
 import { join } from 'node:path';
 import {
+  currentStep,
   EventType,
   InboxKind,
   PermissionChoice,
+  ToolAccess,
   WorkstreamState as S,
   type HandoffId,
   type InboxItemDto,
@@ -22,6 +24,7 @@ import {
   getEvidence,
   getInboxItem,
   getMcpApproval,
+  getPersona,
   getProject,
   getSessionByProviderId,
   getTask,
@@ -52,6 +55,7 @@ import {
   compactionReinjection,
   HANDOFF_FIRM_NUDGE,
   HANDOFF_NUDGE,
+  HANDOFF_NUDGE_READ_ONLY,
 } from '../briefing';
 import type { Clock, Timer } from '../clock';
 import type { StateStore } from '../events';
@@ -65,7 +69,7 @@ import {
 } from '../inbox';
 import type { Logger } from '../log';
 import { mintSessionToken } from '../mcp';
-import { baseAllowedTools, commandPrefix } from '../permissions';
+import { allowedToolsFor, commandPrefix } from '../permissions';
 import {
   ProjectMcpError,
   readRepoMcp,
@@ -475,6 +479,13 @@ export function createRunner(opts: RunnerOptions): Runner {
     const project = getProject(db, row.projectId);
     const task = getTask(db, row.taskId);
     const action = row.nextAction;
+    const step = currentStep(row);
+    const persona = step.personaId ? getPersona(db, step.personaId) : null;
+    const priorResults = row.steps.flatMap((s, i) =>
+      i !== row.stepIndex && s.result
+        ? [{ role: s.role, personaName: s.personaName, result: s.result }]
+        : [],
+    );
     const baseHead = row.baseHead ?? (await opts.git.head(project.repoPath));
     // A stop that landed while the head was read finds no handle to stop, so it is honoured here.
     if (ctl.stopReason) return { kind: 'stopped', reason: ctl.stopReason, providerSessionId: null };
@@ -492,6 +503,16 @@ export function createRunner(opts: RunnerOptions): Runner {
       handoff: contextPack.handoff,
       answer: permission?.prompt ?? contextPack.pendingAnswer,
       contextPack,
+      step: {
+        index: row.stepIndex,
+        count: Math.max(row.steps.length, 1),
+        role: step.role,
+        personaName: step.personaName,
+        instructions: persona?.instructions ?? null,
+        skills: persona?.skills ?? [],
+        tools: step.tools,
+      },
+      priorResults,
       evidence: action.kind === 'fix' ? getEvidence(db, action.evidenceId) : null,
       recovery:
         action.kind === 'resume'
@@ -609,7 +630,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       env,
       billingMode: project.billingMode,
       projectMcpServers: projectMcp.servers,
-      allowedTools: baseAllowedTools(project),
+      allowedTools: allowedToolsFor(project, step.tools),
       mcp: { url: opts.mcpUrl(), token, toolTimeoutMs: (project.humanWaitMinutes + 5) * 60_000 },
       preToolUse: (req) =>
         judgeToolUse({
@@ -619,6 +640,7 @@ export function createRunner(opts: RunnerOptions): Runner {
           areas: project.areas,
           hazards: project.hazards,
           claims: claims(),
+          readOnly: step.tools === ToolAccess.ReadOnly,
         }),
       canUseTool: createPermissionBroker(
         { state: opts.state, inbox: opts.inbox },
@@ -702,7 +724,9 @@ export function createRunner(opts: RunnerOptions): Runner {
                   });
                 }
               });
-              handle.send(HANDOFF_NUDGE);
+              handle.send(
+                step.tools === ToolAccess.ReadOnly ? HANDOFF_NUDGE_READ_ONLY : HANDOFF_NUDGE,
+              );
             } else if (
               st.handoffRequested &&
               !st.firmSent &&
