@@ -17,6 +17,7 @@ import {
 import { and, asc, eq, inArray, sql, type SQL } from 'drizzle-orm';
 import * as schema from '../schema';
 import type { Json } from '../json';
+import { assigneeFor } from './routing-rules';
 import type { DbReader, WriteContext } from './store';
 
 export interface NewInboxItem {
@@ -57,6 +58,21 @@ function toDto(row: typeof schema.inboxItems.$inferSelect): InboxItemDto {
   };
 }
 
+/** The areas the targeted workstreams' tasks claim, so a routing rule can narrow by area. */
+function targetAreas(db: DbReader, targets: readonly InboxTarget[]): string[] {
+  const areas = new Set<string>();
+  for (const target of targets) {
+    const row = db
+      .select({ areas: schema.tasks.areas })
+      .from(schema.workstreams)
+      .innerJoin(schema.tasks, eq(schema.tasks.id, schema.workstreams.taskId))
+      .where(eq(schema.workstreams.id, target.workstreamId))
+      .get();
+    for (const area of row?.areas ?? []) areas.add(area);
+  }
+  return [...areas];
+}
+
 export function insertInboxItem(ctx: WriteContext, item: NewInboxItem): InboxItemDto {
   const row = {
     id: mintId('InboxItem'),
@@ -64,7 +80,7 @@ export function insertInboxItem(ctx: WriteContext, item: NewInboxItem): InboxIte
     options: [...item.options],
     targets: [...item.targets],
     state: InboxState.Open,
-    assignee: 'me',
+    assignee: assigneeFor(ctx.tx, item.projectId, item.category, targetAreas(ctx.tx, item.targets)),
     answer: null,
     createdAt: ctx.now,
     updatedAt: ctx.now,

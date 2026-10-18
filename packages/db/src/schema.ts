@@ -34,6 +34,7 @@ import type {
   ProposalKind,
   Provider,
   QuestionCategory,
+  RiskTag,
   RoutingRuleId,
   SessionId,
   SessionMode,
@@ -48,6 +49,7 @@ import type {
   Urgency,
   WorkstreamId,
   WorkstreamState,
+  WorkstreamStep,
 } from '@10db/contracts';
 import { sql } from 'drizzle-orm';
 import {
@@ -94,6 +96,10 @@ export const projects = sqliteTable('projects', {
   handoffPct: integer('handoff_pct').notNull(),
   nudgePct: integer('nudge_pct').notNull(),
   humanWaitMinutes: integer('human_wait_minutes').notNull(),
+  flowId: text('flow_id')
+    .$type<FlowId>()
+    .references(() => flows.id),
+  budgetCeiling: real('budget_ceiling'),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
@@ -110,6 +116,13 @@ export const tasks = sqliteTable(
     description: text('description').notNull(),
     acceptanceCriteria: text('acceptance_criteria', { mode: 'json' }).$type<string[]>().notNull(),
     areas: text('areas', { mode: 'json' }).$type<string[]>().notNull(),
+    riskTags: text('risk_tags', { mode: 'json' })
+      .$type<RiskTag[]>()
+      .notNull()
+      .default(sql`'[]'`),
+    flowId: text('flow_id')
+      .$type<FlowId>()
+      .references(() => flows.id),
     status: text('status').$type<TaskStatus>().notNull(),
     boardOrder: real('board_order').notNull(),
     workspaceMode: text('workspace_mode').$type<'shared'>().notNull(),
@@ -178,6 +191,11 @@ export const workstreams = sqliteTable(
     recoveryAttempts: integer('recovery_attempts').notNull(),
     model: text('model').notNull(),
     effort: text('effort').$type<Effort>().notNull(),
+    steps: text('steps', { mode: 'json' })
+      .$type<WorkstreamStep[]>()
+      .notNull()
+      .default(sql`'[]'`),
+    stepIndex: integer('step_index').notNull().default(0),
     baseHead: text('base_head'),
     leaseOwner: text('lease_owner'),
     leaseExpiresAt: text('lease_expires_at'),

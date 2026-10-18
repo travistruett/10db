@@ -4,12 +4,14 @@ import {
   mintId,
   RoutingRulesInput,
   type ProjectId,
+  type QuestionCategory,
   type RoutingRuleDto,
 } from '@10db/contracts';
 import { asc, eq, inArray } from 'drizzle-orm';
 import * as schema from '../schema';
 import { getProject } from './projects';
 import type { DbReader, WriteContext } from './store';
+import { BUILDER_HANDLE, getPerson } from './team';
 
 export function listRoutingRules(db: DbReader, projectId: ProjectId): RoutingRuleDto[] {
   return db
@@ -60,4 +62,18 @@ export function setRoutingRules(
       .run();
   ctx.emit({ type: EventType.RoutingRulesSaved, entityType: 'routing_rules', entityId: projectId });
   return listRoutingRules(ctx.tx, projectId);
+}
+
+/** The handle a card goes to: an area rule beats a category rule, and the builder gets the rest (spec §7). */
+export function assigneeFor(
+  db: DbReader,
+  projectId: ProjectId,
+  category: QuestionCategory,
+  areas: readonly string[],
+): string {
+  const rules = listRoutingRules(db, projectId).filter((r) => r.category === category);
+  const rule =
+    rules.find((r) => r.area !== null && areas.includes(r.area)) ??
+    rules.find((r) => r.area === null);
+  return rule ? getPerson(db, rule.personId).handle : BUILDER_HANDLE;
 }

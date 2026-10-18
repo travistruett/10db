@@ -28,6 +28,29 @@
         "type": "string"
       }
     },
+    "riskTags": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "security",
+          "auth",
+          "migration",
+          "dependency"
+        ]
+      }
+    },
+    "flowId": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^flw_[0-9A-HJKMNP-TV-Z]{26}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "status": {
       "type": "string",
       "enum": [
@@ -85,6 +108,8 @@
     "description",
     "acceptanceCriteria",
     "areas",
+    "riskTags",
+    "flowId",
     "status",
     "boardOrder",
     "dependsOn",

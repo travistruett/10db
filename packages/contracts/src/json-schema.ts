@@ -1,6 +1,13 @@
 import { z } from 'zod';
 import { AaModelDto, BenchmarkStatusDto } from './benchmarks';
-import { InboxItemDto, ProjectDto, TaskDto, WorkstreamDto } from './entities';
+import {
+  InboxItemDto,
+  ProjectDto,
+  ProjectPatch,
+  TaskDto,
+  TaskPatch,
+  WorkstreamDto,
+} from './entities';
 import { DaemonEvent } from './events';
 import { FlowDto, FlowInput, FlowPatch } from './flows';
 import { HandoffInput } from './handoff';
@@ -42,6 +49,8 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'handoff-input': HandoffInput,
   'project-dto': ProjectDto,
   'task-dto': TaskDto,
+  'project-patch': ProjectPatch,
+  'task-patch': TaskPatch,
   'workstream-dto': WorkstreamDto,
   'inbox-item-dto': InboxItemDto,
   'system-check-dto': SystemCheckDto,

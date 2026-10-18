@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import {
   EvidenceId,
+  FlowId,
   HandoffId,
   InboxItemId,
   PermissionRuleId,
@@ -18,10 +19,12 @@ import {
   InboxState,
   Provider,
   QuestionCategory,
+  RiskTag,
   TaskStatus,
   Urgency,
   WorkstreamState,
 } from './states';
+import { WorkstreamStep } from './steps';
 
 const Name = z.string().regex(/^[a-z][a-z0-9-]*$/, 'lowercase letters, digits and hyphens');
 const Timestamp = z.iso.datetime();
@@ -84,6 +87,9 @@ export const ProjectInput = z
     handoffPct: z.int().min(5).max(95).default(40),
     nudgePct: z.int().min(6).max(98).default(50),
     humanWaitMinutes: z.int().min(1).max(240).default(10),
+    flowId: FlowId.nullable().default(null),
+    /** The most a task may cost, in USD, compared with a profile's AA cost per task; null for no ceiling. */
+    budgetCeiling: z.number().positive().nullable().default(null),
   })
   .refine((p) => p.nudgePct > p.handoffPct, {
     message: 'nudgePct must be above handoffPct',
@@ -107,10 +113,29 @@ export const ProjectDto = z.object({
   handoffPct: z.int(),
   nudgePct: z.int(),
   humanWaitMinutes: z.int(),
+  flowId: FlowId.nullable(),
+  budgetCeiling: z.number().nullable(),
   createdAt: Timestamp,
   updatedAt: Timestamp,
 });
 export type ProjectDto = z.infer<typeof ProjectDto>;
+
+/** Fields the builder can change after creation; the nudge/handoff rule is checked against the merged values. */
+export const ProjectPatch = z
+  .object({
+    name: z.string().min(1),
+    gateCommand: z.string().min(1),
+    maxLanes: z.int().min(1).max(16),
+    handoffPct: z.int().min(5).max(95),
+    nudgePct: z.int().min(6).max(98),
+    humanWaitMinutes: z.int().min(1).max(240),
+    flowId: FlowId.nullable(),
+    /** The most a task may cost, in USD, compared with a profile's AA cost per task; null for no ceiling. */
+    budgetCeiling: z.number().positive().nullable(),
+  })
+  .partial()
+  .refine((p) => Object.keys(p).length > 0, { message: 'Change at least one field' });
+export type ProjectPatch = z.infer<typeof ProjectPatch>;
 
 export const TaskInput = z.object({
   title: z.string().min(1).max(200),
@@ -118,6 +143,8 @@ export const TaskInput = z.object({
   acceptanceCriteria: z.array(z.string().min(1)).min(1),
   areas: z.array(Name).min(1),
   dependsOn: z.array(TaskId).default([]),
+  riskTags: z.array(z.enum(RiskTag)).default([]),
+  flowId: FlowId.nullable().default(null),
 });
 export type TaskInput = z.input<typeof TaskInput>;
 export type TaskConfig = z.output<typeof TaskInput>;
@@ -129,6 +156,8 @@ export const TaskDto = z.object({
   description: z.string(),
   acceptanceCriteria: z.array(z.string()),
   areas: z.array(z.string()),
+  riskTags: z.array(z.enum(RiskTag)),
+  flowId: FlowId.nullable(),
   status: z.enum(TaskStatus),
   boardOrder: z.number(),
   dependsOn: z.array(TaskId),
@@ -138,6 +167,18 @@ export const TaskDto = z.object({
   updatedAt: Timestamp,
 });
 export type TaskDto = z.infer<typeof TaskDto>;
+
+export const TaskPatch = z
+  .object({
+    title: z.string().min(1).max(200),
+    description: z.string(),
+    acceptanceCriteria: z.array(z.string().min(1)).min(1),
+    riskTags: z.array(z.enum(RiskTag)),
+    flowId: FlowId.nullable(),
+  })
+  .partial()
+  .refine((p) => Object.keys(p).length > 0, { message: 'Change at least one field' });
+export type TaskPatch = z.infer<typeof TaskPatch>;
 
 /** What the runner does the next time the workstream gets a lane. */
 export const NextAction = z.discriminatedUnion('kind', [
@@ -169,6 +210,8 @@ export const WorkstreamDto = z.object({
   recoveryAttempts: z.int(),
   model: z.string(),
   effort: z.enum(Effort),
+  steps: z.array(WorkstreamStep),
+  stepIndex: z.int().min(0),
   currentSessionId: SessionId.nullable(),
   sessionCount: z.int(),
   contextPct: z.number().nullable(),
