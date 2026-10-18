@@ -64,4 +64,29 @@ describe('migrateDatabase', () => {
       migrateDatabase(db);
     }).not.toThrow();
   });
+
+  it.each([
+    [
+      'an applied migration the baseline no longer has',
+      "UPDATE __drizzle_migrations SET hash = 'f00d' WHERE rowid = 1",
+      'StaleSchemaBaselineError',
+    ],
+    [
+      'more applied migrations than this build has, after a matching prefix',
+      "INSERT INTO __drizzle_migrations (hash, created_at) VALUES ('f00d', 1)",
+      'NewerSchemaError',
+    ],
+  ])('refuses a database whose migrations disagree: %s', (_name, tamper, expected) => {
+    migrateDatabase(db);
+    db.$client.exec(tamper);
+    let refusal: unknown;
+    try {
+      migrateDatabase(db);
+    } catch (error) {
+      refusal = error;
+    }
+    expect(refusal).toBeInstanceOf(Error);
+    expect(refusal).toMatchObject({ name: expected });
+    expect(String(refusal)).toContain(join(dir, '10db.sqlite'));
+  });
 });

@@ -4,18 +4,18 @@
   "properties": {
     "id": {
       "type": "string",
-      "pattern": "^ws_[0-9A-HJKMNP-TV-Z]{26}$"
+      "pattern": "^ws_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
     },
     "taskId": {
       "type": "string",
-      "pattern": "^tsk_[0-9A-HJKMNP-TV-Z]{26}$"
+      "pattern": "^tsk_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
     },
     "taskTitle": {
       "type": "string"
     },
     "projectId": {
       "type": "string",
-      "pattern": "^prj_[0-9A-HJKMNP-TV-Z]{26}$"
+      "pattern": "^prj_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
     },
     "state": {
       "type": "string",
@@ -57,7 +57,7 @@
             },
             "handoffId": {
               "type": "string",
-              "pattern": "^hof_[0-9A-HJKMNP-TV-Z]{26}$"
+              "pattern": "^hof_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
             }
           },
           "required": [
@@ -96,7 +96,7 @@
             },
             "inboxId": {
               "type": "string",
-              "pattern": "^inb_[0-9A-HJKMNP-TV-Z]{26}$"
+              "pattern": "^inb_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
             },
             "providerSessionId": {
               "anyOf": [
@@ -125,7 +125,7 @@
             },
             "evidenceId": {
               "type": "string",
-              "pattern": "^evd_[0-9A-HJKMNP-TV-Z]{26}$"
+              "pattern": "^evd_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
             }
           },
           "required": [
@@ -207,7 +207,7 @@
             "anyOf": [
               {
                 "type": "string",
-                "pattern": "^per_[0-9A-HJKMNP-TV-Z]{26}$"
+                "pattern": "^per_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
               },
               {
                 "type": "null"
@@ -236,7 +236,7 @@
             "anyOf": [
               {
                 "type": "string",
-                "pattern": "^mpf_[0-9A-HJKMNP-TV-Z]{26}$"
+                "pattern": "^mpf_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
               },
               {
                 "type": "null"
@@ -328,7 +328,7 @@
                   },
                   "sessionId": {
                     "type": "string",
-                    "pattern": "^ses_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^ses_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
                   },
                   "at": {
                     "type": "string",
@@ -379,7 +379,7 @@
       "anyOf": [
         {
           "type": "string",
-          "pattern": "^ses_[0-9A-HJKMNP-TV-Z]{26}$"
+          "pattern": "^ses_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
         },
         {
           "type": "null"

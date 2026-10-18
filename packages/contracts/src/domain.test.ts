@@ -10,15 +10,32 @@ import {
 } from './index';
 
 describe('ids', () => {
-  it('mints prefixed sortable IDs that parse back', () => {
-    const a = mintId('Task');
-    const b = mintId('Task');
-    expect(a).toMatch(/^tsk_[0-9A-HJKMNP-TV-Z]{26}$/);
-    expect(a < b).toBe(true);
-    expect(TaskId.parse(a)).toBe(a);
+  const UUID_V7 = /^tsk_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+  it('mints a prefixed UUIDv7 that parses back', () => {
+    const id = mintId('Task');
+    expect(id).toMatch(UUID_V7);
+    expect(TaskId.parse(id)).toBe(id);
   });
 
-  it('rejects an ID with the wrong prefix', () => {
+  it('mints IDs that sort in creation order within one millisecond', () => {
+    const ids = Array.from({ length: 1000 }, () => mintId('Task'));
+    expect([...ids].sort()).toEqual(ids);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it.each([
+    ['wrong prefix', 'ws_0199f1c2-7a3b-7c4d-8e5f-0123456789ab'],
+    ['a ULID', 'tsk_01JA2B3C4D5E6F7G8H9J0K1M2N'],
+    ['a UUIDv4', 'tsk_0199f1c2-7a3b-4c4d-8e5f-0123456789ab'],
+    ['upper case', 'tsk_0199F1C2-7A3B-7C4D-8E5F-0123456789AB'],
+    ['a bad variant', 'tsk_0199f1c2-7a3b-7c4d-ce5f-0123456789ab'],
+    ['no prefix', '0199f1c2-7a3b-7c4d-8e5f-0123456789ab'],
+  ])('rejects %s', (_name, value) => {
+    expect(TaskId.safeParse(value).success).toBe(false);
+  });
+
+  it('rejects an ID minted for another kind', () => {
     expect(WorkstreamId.safeParse(mintId('Task')).success).toBe(false);
   });
 });

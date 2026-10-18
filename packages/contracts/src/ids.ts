@@ -1,12 +1,13 @@
-import { monotonicFactory } from 'ulid';
+import { v7 as uuidv7 } from 'uuid';
 import { z } from 'zod';
 
-const ULID = '[0-9A-HJKMNP-TV-Z]{26}';
+/** A lower-case RFC 9562 UUIDv7, which sorts by creation time as text. */
+const UUID_V7 = '[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
 
 function idSchema<const B extends string>(prefix: string, brand: B) {
   return z
     .string()
-    .regex(new RegExp(`^${prefix}_${ULID}$`), `expected a ${brand} (${prefix}_…)`)
+    .regex(new RegExp(`^${prefix}_${UUID_V7}$`), `expected a ${brand} (${prefix}_…)`)
     .brand<B>();
 }
 
@@ -57,12 +58,13 @@ const ID_PREFIX = {
 export type IdKind = keyof typeof ID_SCHEMAS;
 export type IdOf<K extends IdKind> = z.infer<(typeof ID_SCHEMAS)[K]>;
 
-const nextUlid = monotonicFactory();
-
-/** Mints a new ID. Outside of parsing, this is the only way to obtain one. */
+/**
+ * Mints a new ID. Outside of parsing, this is the only way to obtain one. Called without options,
+ * `v7` keeps a per-process sequence, so IDs minted in the same millisecond still sort in order.
+ */
 export function mintId<K extends IdKind>(kind: K): IdOf<K> {
   // The schema for K parses a string it just built from K's prefix, so the cast is the boundary.
-  return ID_SCHEMAS[kind].parse(`${ID_PREFIX[kind]}_${nextUlid()}`) as IdOf<K>;
+  return ID_SCHEMAS[kind].parse(`${ID_PREFIX[kind]}_${uuidv7()}`) as IdOf<K>;
 }
 
 export const ProjectId = ID_SCHEMAS.Project;

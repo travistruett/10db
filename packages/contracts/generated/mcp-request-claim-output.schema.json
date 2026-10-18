@@ -10,7 +10,7 @@
         },
         "claimId": {
           "type": "string",
-          "pattern": "^clm_[0-9A-HJKMNP-TV-Z]{26}$"
+          "pattern": "^clm_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
         }
       },
       "required": [
@@ -29,7 +29,7 @@
           "anyOf": [
             {
               "type": "string",
-              "pattern": "^ws_[0-9A-HJKMNP-TV-Z]{26}$"
+              "pattern": "^ws_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
             },
             {
               "type": "null"
@@ -38,7 +38,7 @@
         },
         "inboxId": {
           "type": "string",
-          "pattern": "^inb_[0-9A-HJKMNP-TV-Z]{26}$"
+          "pattern": "^inb_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
         }
       },
       "required": [

@@ -11,7 +11,7 @@
     "drift": "tsx scripts/generate.ts && bash ../../scripts/check-clean.sh packages/contracts/generated"
   },
   "dependencies": {
-    "ulid": "3.0.2",
+    "uuid": "14.0.3",
     "zod": "4.6.7"
   },
   "devDependencies": {

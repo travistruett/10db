@@ -29,7 +29,9 @@ A local macOS control plane that runs Claude Code sessions as a software factory
   `docs/architecture/decisions.md` saying why.
 - Generated files are never edited by hand: `packages/contracts/generated/`,
   `packages/db/drizzle/`. `make gate` fails when they drift. The exception is a
-  `drizzle-kit generate --custom` migration: it is authored by hand once and never regenerated.
+  `drizzle-kit generate --custom` migration: it is authored by hand once and its SQL never changes.
+  Until the first published release the migration baseline is regenerated instead of extended
+  (`packages/db/AGENTS.md`).
 - Done means `make gate` printed `GATE PASS`. Docs are part of done.
 
 ## Git
