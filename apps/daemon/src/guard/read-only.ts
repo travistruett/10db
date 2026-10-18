@@ -1,5 +1,5 @@
 import { abbreviates } from './git-rules';
-import { splitCommand } from './shell-words';
+import { plainCommandWords } from './plain-command';
 
 /** Commands a read-only step may run: they read or print, and change nothing. */
 export const READ_COMMANDS: ReadonlySet<string> = new Set([
@@ -67,28 +67,16 @@ function usesOption(arg: string, option: string): boolean {
   return arg === option;
 }
 
-/** Redirections that only discard or merge output; the lookahead keeps `2>&1foo` and `>/dev/nullfoo` (real file names) out. */
-const HARMLESS_REDIRECTS = /(?:\d?>\s*\/dev\/null|2>&1)(?=\s|$)/g;
-
-const UNJUDGEABLE = /[$`{}\\]/;
-
-const REFUSAL_EXPANSION =
-  'This step is read-only: a word with $, `, { }, or a backslash is expanded by the shell after 10db checks it, so it cannot be judged. Write the command out literally.';
-
 const REFUSAL =
-  'This step is read-only: the shell may only read (read-only git, cat, grep, ls, find and similar, no redirection). Describe the change in mcp__10db__complete_step.';
+  'This step is read-only: the shell accepts only plain words, simple quoting and read-only commands (read-only git, cat, grep, ls, find and similar), with no redirection other than 2>&1 and >/dev/null. Describe the change in mcp__10db__complete_step.';
 
 /** Why a read-only step may not run this command, or null when every segment only reads. */
 export function readOnlyShellRefusal(command: string): string | null {
-  for (const segment of splitCommand(command)) {
-    if (segment.raw.replace(HARMLESS_REDIRECTS, '').includes('>')) return REFUSAL;
-    const [cmd = '', ...args] = segment.words;
-    if (cmd === '') continue;
+  const segments = plainCommandWords(command);
+  if (segments === null) return REFUSAL;
+  for (const [cmd = '', ...args] of segments) {
     // Only a bare command: no assignment, wrapper or path (those run something else).
     if (cmd.includes('/')) return REFUSAL;
-    // The guard judges words before the shell expands them, so a word that expands or escapes
-    // (`$(echo -o)`, `{-o,x}`, `-de\lete`) could become a writing option.
-    if (segment.words.some((w) => UNJUDGEABLE.test(w))) return REFUSAL_EXPANSION;
     if (cmd === 'git') {
       if (!READ_GIT.has(args[0] ?? '')) return REFUSAL;
       continue;

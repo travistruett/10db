@@ -579,7 +579,7 @@ describe('read-only steps', () => {
   });
 
   it.each([
-    { name: 'read-only git', command: 'git diff HEAD~1 -- src/api', decision: 'allow' },
+    { name: 'read-only git', command: 'git diff HEAD -- src/api', decision: 'allow' },
     { name: 'git log piped to head', command: 'git log --oneline | head -5', decision: 'allow' },
     {
       name: 'a grep with stderr discarded',
@@ -725,6 +725,50 @@ describe('read-only steps', () => {
     },
     { name: 'stderr merged into stdout', command: 'cat x 2>&1', decision: 'allow' },
     { name: 'stdout discarded', command: 'grep -r x src >/dev/null', decision: 'allow' },
+    { name: 'a glob', command: 'sort *', decision: 'deny' },
+    { name: 'a home expansion', command: 'ls ~', decision: 'deny' },
+    { name: 'an =cmd expansion', command: 'cat =ls', decision: 'deny' },
+    { name: 'a comment', command: 'echo x # comment', decision: 'deny' },
+    { name: 'a newline', command: 'cat a\nb', decision: 'deny' },
+    { name: 'a variable in double quotes', command: 'cat "a$b"', decision: 'deny' },
+    { name: 'an escape in double quotes', command: 'cat "a\\"b"', decision: 'deny' },
+    { name: 'a history bang', command: 'ls !x', decision: 'deny' },
+    { name: 'an input redirect', command: 'cat <file', decision: 'deny' },
+    { name: 'a numbered redirect', command: 'cat a 3>x', decision: 'deny' },
+    { name: 'an &> redirect', command: 'cat a &>x', decision: 'deny' },
+    { name: 'a clobber redirect', command: 'cat a >|x', decision: 'deny' },
+    { name: 'a read-write redirect', command: 'cat a<>x', decision: 'deny' },
+    { name: 'backgrounding', command: 'cat a&', decision: 'deny' },
+    { name: 'a |& pipe', command: 'cat a |& cat', decision: 'deny' },
+    { name: 'an empty-quoted option prefix', command: "sort ''-o x y", decision: 'deny' },
+    { name: 'a quoted dash before o', command: 'sort "-"o x y', decision: 'deny' },
+    { name: 'a fullwidth hyphen option', command: 'sort －o x y', decision: 'deny' },
+    { name: 'a trailing separator', command: 'ls ;', decision: 'deny' },
+    { name: 'a leading separator', command: '; ls', decision: 'deny' },
+    { name: 'an unterminated quote', command: "cat 'a", decision: 'deny' },
+    { name: 'parsed: git diff', command: 'git diff', decision: 'allow' },
+    { name: 'parsed: git log with a count', command: 'git log --oneline -5', decision: 'allow' },
+    { name: 'parsed: rg', command: 'rg TODO src', decision: 'allow' },
+    {
+      name: 'parsed: grep with a paren in quotes',
+      command: "grep -rn 'foo(bar' src",
+      decision: 'allow',
+    },
+    { name: 'parsed: find with a quoted glob', command: "find . -name '*.ts'", decision: 'allow' },
+    { name: 'parsed: sort into head', command: 'sort file | head -3', decision: 'allow' },
+    { name: 'parsed: stderr merged', command: 'cat a.ts 2>&1', decision: 'allow' },
+    { name: 'parsed: stdout discarded', command: 'ls src >/dev/null', decision: 'allow' },
+    {
+      name: 'parsed: wc then git status',
+      command: 'wc -l src/a.ts && git status',
+      decision: 'allow',
+    },
+    { name: 'parsed: a command split by quotes', command: "s'o'rt file", decision: 'allow' },
+    {
+      name: 'parsed: a double-quoted pattern',
+      command: 'grep -rn "foo bar" src',
+      decision: 'allow',
+    },
   ])('$decision $name', ({ command, decision }) => {
     expect(ro('Bash', { command }).decision).toBe(decision);
   });
