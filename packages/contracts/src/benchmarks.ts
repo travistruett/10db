@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ScoreKind } from './states';
 
 /**
  * One model from Artificial Analysis's free list, as 10db stores it locally. It is shown
@@ -27,7 +28,13 @@ export const BenchmarkStatusDto = z.object({
   outcome: z.enum(['ok', 'no_key', 'unauthorized', 'rate_limited', 'failed']).nullable(),
   message: z.string().nullable(),
   models: z.int().min(0),
-  /** Enabled profiles the last sync could not measure: AA doesn't list the slug, or lists it without a score or cost. */
+  /** AA's Intelligence Index version (major.minor) from the latest successful sync. */
+  indexVersion: z.string().nullable().default(null),
+  /** Enabled profiles routing can't use at all: AA doesn't list the slug, or lists it without a cost or an Intelligence score. */
   unmeasuredProfiles: z.array(z.string()),
+  /** Enabled profiles routing can use that AA gave no score of some kind, with the kinds missing. */
+  missingScores: z
+    .array(z.object({ profile: z.string(), kinds: z.array(z.enum(ScoreKind)) }))
+    .default([]),
 });
 export type BenchmarkStatusDto = z.infer<typeof BenchmarkStatusDto>;
