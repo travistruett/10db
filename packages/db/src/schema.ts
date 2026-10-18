@@ -1,4 +1,5 @@
 import type {
+  AaModelDto,
   AreaDef,
   BillingMode,
   ClaimId,
@@ -9,6 +10,8 @@ import type {
   EventType,
   EvidenceId,
   EvidenceKind,
+  FlowId,
+  FlowStepDef,
   HandoffId,
   HandoffInput,
   HazardDef,
@@ -19,20 +22,28 @@ import type {
   InboxState,
   InboxTarget,
   McpVerdict,
+  ModelPin,
+  ModelProfileId,
   NextAction,
   PermissionRuleId,
+  PersonaId,
+  PersonId,
+  ProfileSource,
   ProjectId,
   ProposalId,
   ProposalKind,
   Provider,
   QuestionCategory,
+  RoutingRuleId,
   SessionId,
   SessionMode,
   Severity,
   SourceId,
   SourceKind,
+  StepRole,
   TaskId,
   TaskStatus,
+  ToolAccess,
   ToolOpId,
   Urgency,
   WorkstreamId,
@@ -58,6 +69,14 @@ export const appSettings = sqliteTable('app_settings', {
   key: text('key').primaryKey(),
   value: text('value', { mode: 'json' }).notNull(),
   updatedAt: text('updated_at').notNull(),
+});
+
+export const flows = sqliteTable('flows', {
+  id: text('id').$type<FlowId>().primaryKey(),
+  name: text('name').notNull().unique(),
+  steps: text('steps', { mode: 'json' }).$type<FlowStepDef[]>().notNull(),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
 });
 
 export const projects = sqliteTable('projects', {
@@ -403,3 +422,115 @@ export const mcpServerApprovals = sqliteTable(
   },
   (t) => [primaryKey({ columns: [t.projectId, t.serverName, t.configHash] })],
 );
+
+export const personas = sqliteTable('personas', {
+  id: text('id').$type<PersonaId>().primaryKey(),
+  key: text('key').notNull().unique(),
+  name: text('name').notNull(),
+  role: text('role').$type<StepRole>().notNull(),
+  tools: text('tools').$type<ToolAccess>().notNull(),
+  instructions: text('instructions').notNull(),
+  skills: text('skills', { mode: 'json' })
+    .$type<string[]>()
+    .notNull()
+    .default(sql`'[]'`),
+  minimumScore: real('minimum_score'),
+  modelPin: text('model_pin', { mode: 'json' }).$type<ModelPin>(),
+  archived: integer('archived', { mode: 'boolean' }).notNull().default(false),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
+
+export const people = sqliteTable('people', {
+  id: text('id').$type<PersonId>().primaryKey(),
+  handle: text('handle').notNull().unique(),
+  name: text('name').notNull(),
+  isBuilder: integer('is_builder', { mode: 'boolean' }).notNull().default(false),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
+
+/** Per project: which persona plays each role (spec §4). */
+export const teamBindings = sqliteTable(
+  'team_bindings',
+  {
+    projectId: text('project_id')
+      .$type<ProjectId>()
+      .notNull()
+      .references(() => projects.id),
+    role: text('role').$type<StepRole>().notNull(),
+    personaId: text('persona_id')
+      .$type<PersonaId>()
+      .notNull()
+      .references(() => personas.id),
+  },
+  (t) => [primaryKey({ columns: [t.projectId, t.role] })],
+);
+
+export const teamMembers = sqliteTable(
+  'team_members',
+  {
+    projectId: text('project_id')
+      .$type<ProjectId>()
+      .notNull()
+      .references(() => projects.id),
+    personId: text('person_id')
+      .$type<PersonId>()
+      .notNull()
+      .references(() => people.id),
+  },
+  (t) => [primaryKey({ columns: [t.projectId, t.personId] })],
+);
+
+export const routingRules = sqliteTable(
+  'routing_rules',
+  {
+    id: text('id').$type<RoutingRuleId>().primaryKey(),
+    projectId: text('project_id')
+      .$type<ProjectId>()
+      .notNull()
+      .references(() => projects.id),
+    category: text('category').$type<QuestionCategory>().notNull(),
+    area: text('area'),
+    personId: text('person_id')
+      .$type<PersonId>()
+      .notNull()
+      .references(() => people.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index('routing_rules_project_idx').on(t.projectId)],
+);
+
+export const modelProfiles = sqliteTable(
+  'model_profiles',
+  {
+    id: text('id').$type<ModelProfileId>().primaryKey(),
+    provider: text('provider').$type<Provider>().notNull(),
+    model: text('model').notNull(),
+    effort: text('effort').$type<Effort>().notNull(),
+    aaSlug: text('aa_slug'),
+    intelligence: real('intelligence'),
+    coding: real('coding'),
+    agentic: real('agentic'),
+    costPerTaskUsd: real('cost_per_task_usd'),
+    outputTokensPerSecond: real('output_tokens_per_second'),
+    source: text('source').$type<ProfileSource>().notNull(),
+    indexVersion: text('index_version'),
+    measuredAt: text('measured_at'),
+    enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+    stepsRun: integer('steps_run').notNull().default(0),
+    firstPassSteps: integer('first_pass_steps').notNull().default(0),
+    escalations: integer('escalations').notNull().default(0),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex('model_profiles_key_idx').on(t.provider, t.model, t.effort)],
+);
+
+/** Artificial Analysis's free model list, kept only on this machine (AA's terms forbid sharing it); keyed by AA's slug. */
+export const aaModels = sqliteTable('aa_models', {
+  slug: text('slug').primaryKey(),
+  data: text('data', { mode: 'json' }).$type<AaModelDto>().notNull(),
+  updatedAt: text('updated_at').notNull(),
+});

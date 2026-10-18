@@ -43,6 +43,13 @@
       "when": 1792267575360,
       "tag": "0005_session_briefed",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1792282752979,
+      "tag": "0006_teams_and_routing",
+      "breakpoints": true
     }
   ]
 }
