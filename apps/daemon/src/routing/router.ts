@@ -103,13 +103,25 @@ export function escalateStep(
       escalated: false,
     };
   const here = input.profiles.find((p) => p.id === step.profileId);
-  const level = (here && score(here, step.score)) ?? step.need;
-  const next = measured(input.profiles, input.provider, step.score)
-    .filter((p) => (score(p, step.score) ?? 0) > level && withinCeiling(p, input.budgetCeiling))
+  const hereScore = here ? score(here, step.score) : null;
+  if (here && hereScore === null)
+    return {
+      step: {
+        ...step,
+        reason: `kept ${current} after ${input.why}: its ${step.score} score is no longer measured`,
+      },
+      escalated: false,
+    };
+  const level = hereScore ?? step.need;
+  const stronger = measured(input.profiles, input.provider, step.score).filter(
+    (p) => (score(p, step.score) ?? 0) > level,
+  );
+  const next = stronger
+    .filter((p) => withinCeiling(p, input.budgetCeiling))
     .sort(preference(step.score))[0];
   if (!next) {
     const limit =
-      input.budgetCeiling === null
+      input.budgetCeiling === null || stronger.length === 0
         ? 'no stronger profile'
         : `no stronger profile within the budget ceiling of ${dollars(input.budgetCeiling)}`;
     return {

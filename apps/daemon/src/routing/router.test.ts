@@ -75,8 +75,14 @@ describe('route', () => {
     },
     {
       name: 'breaks a cost and speed tie on the lower score',
-      overrides: { 'big@high': { costPerTaskUsd: 1, outputTokensPerSecond: 70 } },
-      want: 'mid@high',
+      overrides: {
+        'big@high': {
+          costPerTaskUsd: 1,
+          outputTokensPerSecond: 70,
+          scores: { intelligence: 50, coding: 42, agentic: 45 },
+        },
+      },
+      want: 'big@high',
     },
     {
       name: 'skips a profile with no cost',
@@ -178,10 +184,41 @@ describe('escalateStep', () => {
       want: 'mid@high',
       escalated: false,
     },
-  ])('moves $name', ({ from, ceiling, want, escalated }) => {
-    const result = escalateStep(from, input(ceiling));
+    {
+      name: 'nothing when the current profile’s score is no longer measured',
+      from: stepOn('big@high', { need: 40 }),
+      ceiling: null,
+      want: 'big@high',
+      escalated: false,
+      unmeasured: 'big@high',
+    },
+    {
+      name: 'nothing above the top, whatever the ceiling',
+      from: stepOn('big@max'),
+      ceiling: 10,
+      want: 'big@max',
+      escalated: false,
+    },
+  ])('moves $name', ({ from, ceiling, want, escalated, ...rest }) => {
+    const unmeasured = 'unmeasured' in rest ? rest.unmeasured : null;
+    const measuredNow = profiles.map((p) =>
+      label(p) === unmeasured ? { ...p, scores: { ...p.scores, coding: null } } : p,
+    );
+    const result = escalateStep(from, { ...input(ceiling), profiles: measuredNow });
     expect(`${result.step.model}@${result.step.effort}`).toBe(want);
     expect(result.escalated).toBe(escalated);
+  });
+
+  it('names the unmeasured score and the true limit', () => {
+    const dropped = profiles.map((p) =>
+      label(p) === 'big@high' ? { ...p, scores: { ...p.scores, coding: null } } : p,
+    );
+    expect(escalateStep(stepOn('big@high'), { ...input(), profiles: dropped }).step.reason).toBe(
+      'kept big@high after the gate failed: its coding score is no longer measured',
+    );
+    expect(escalateStep(stepOn('big@max'), input(10)).step.reason).toBe(
+      'kept big@max after the gate failed: no stronger profile',
+    );
   });
 
   it('says why it moved, or why it could not', () => {
