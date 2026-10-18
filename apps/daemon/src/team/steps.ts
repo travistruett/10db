@@ -46,7 +46,7 @@ export function startTaskWithPlan(state: StateStore, taskId: TaskId): Workstream
     const named = plan.overBudget.map((i) => {
       const step = plan.steps[i];
       const need = step ? `${String(step.need)} ${step.score}` : '?';
-      return `Step ${String(i + 1)} (${step?.role ?? '?'}, need ${need}) has no profile within the budget ceiling of $${String(ceiling)}`;
+      return `Step ${String(i + 1)} (${step?.role ?? '?'}, need ${need}) has no profile within the budget ceiling of $${String(ceiling)}: ${step?.reason ?? 'unknown'}`;
     });
     throw new InvalidError(
       `${named.join('. ')}. Raise the ceiling, lower the need or pin a persona.`,

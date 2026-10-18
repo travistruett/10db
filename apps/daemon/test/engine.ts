@@ -146,7 +146,8 @@ export async function createTestEngine(
       const criteria = Array.from({ length: plan?.criteria ?? 1 }, (_, i) =>
         i === 0 ? 'it works' : `criterion ${String(i + 1)}`,
       );
-      const flowId = plan ? (findFlowByName(store.db, plan.flow)?.id ?? null) : null;
+      const flowId = plan ? findFlowByName(store.db, plan.flow)?.id : null;
+      if (flowId === undefined) throw new Error(`no seeded flow is named ${plan?.flow ?? ''}`);
       const task = state.write((ctx) =>
         insertTask(ctx, seeded.id, {
           title,

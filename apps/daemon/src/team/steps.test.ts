@@ -4,6 +4,7 @@ import {
   findFlowByName,
   getWorkstream,
   insertTask,
+  listWorkstreams,
   patchProject,
   patchTask,
   seedProject,
@@ -95,7 +96,24 @@ describe('startTaskWithPlan', () => {
     state.write((ctx) => patchProject(ctx, project.id, { budgetCeiling: 1 }));
     expect(() => startTaskWithPlan(state, task.id)).toThrow(InvalidError);
     expect(() => startTaskWithPlan(state, task.id)).toThrow(
-      'Step 2 (review, need 48 intelligence) has no profile within the budget ceiling of $1',
+      'Step 2 (review, need 48 intelligence) has no profile within the budget ceiling of $1: cheapest profile at or above 48 intelligence; over the budget ceiling of $1',
     );
+  });
+
+  it('names the risk floor that binds, and inserts no workstream, when the floor causes the refusal', () => {
+    measureForTests(state);
+    const task = state.write((ctx) =>
+      insertTask(ctx, project.id, {
+        title: 'T',
+        acceptanceCriteria: ['x'],
+        areas: ['api'],
+        riskTags: ['security'],
+      }),
+    );
+    state.write((ctx) => patchProject(ctx, project.id, { budgetCeiling: 1.5 }));
+    expect(() => startTaskWithPlan(state, task.id)).toThrow(
+      /Step 2 \(review.*at or above 52 intelligence \(floor: .*\); over the budget ceiling/,
+    );
+    expect(listWorkstreams(state.db, {})).toEqual([]);
   });
 });
