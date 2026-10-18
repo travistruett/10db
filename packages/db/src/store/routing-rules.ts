@@ -6,7 +6,7 @@ import {
   type ProjectId,
   type RoutingRuleDto,
 } from '@10db/contracts';
-import { asc, eq } from 'drizzle-orm';
+import { asc, eq, inArray } from 'drizzle-orm';
 import * as schema from '../schema';
 import { getProject } from './projects';
 import type { DbReader, WriteContext } from './store';
@@ -31,6 +31,19 @@ export function setRoutingRules(
   for (const rule of rules)
     if (rule.area !== null && !areas.has(rule.area))
       throw new InvalidError(`The project has no area "${rule.area}"`);
+  const personIds = [...new Set(rules.map((r) => r.personId))];
+  if (personIds.length > 0) {
+    const found = new Set(
+      ctx.tx
+        .select({ id: schema.people.id })
+        .from(schema.people)
+        .where(inArray(schema.people.id, personIds))
+        .all()
+        .map((p) => p.id),
+    );
+    const missing = personIds.find((id) => !found.has(id));
+    if (missing !== undefined) throw new InvalidError(`No person ${missing}`);
+  }
   ctx.tx.delete(schema.routingRules).where(eq(schema.routingRules.projectId, projectId)).run();
   if (rules.length > 0)
     ctx.tx

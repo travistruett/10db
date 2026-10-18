@@ -1,4 +1,4 @@
-import { ConflictError, EventType, InvalidError, type PersonaId } from '@10db/contracts';
+import { ConflictError, EventType, InvalidError, mintId, type PersonaId } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { listEventsAfter } from './events';
 import { listRoutingRules, setRoutingRules } from './routing-rules';
@@ -138,6 +138,26 @@ describe('people and routing rules', () => {
     ]);
     store.write((ctx) => setRoutingRules(ctx, project.id, { rules: [] }));
     expect(listRoutingRules(store.db, project.id)).toEqual([]);
+  });
+
+  it('refuses a rule for a person who does not exist and keeps the existing rules', () => {
+    const project = seedProject(store);
+    const sam = store.write((ctx) => insertPerson(ctx, { handle: 'sam', name: 'Sam' })).value;
+    store.write((ctx) =>
+      setRoutingRules(ctx, project.id, {
+        rules: [{ category: 'design', area: null, personId: sam.id }],
+      }),
+    );
+    expect(() =>
+      store.write((ctx) =>
+        setRoutingRules(ctx, project.id, {
+          rules: [{ category: 'design', area: null, personId: mintId('Person') }],
+        }),
+      ),
+    ).toThrow(InvalidError);
+    expect(listRoutingRules(store.db, project.id)).toMatchObject([
+      { category: 'design', personId: sam.id },
+    ]);
   });
 
   it('refuses a rule for an area the project does not have', () => {
