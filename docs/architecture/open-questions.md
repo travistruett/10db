@@ -1,8 +1,9 @@
 # Open questions
 
-| Question                                                                                                        | Who or what can answer it | Blocks              |
-| --------------------------------------------------------------------------------------------------------------- | ------------------------- | ------------------- |
-| Codex third-party terms for ChatGPT sign-in                                                                     | OpenAI terms or support   | Codex adapter       |
-| Whether running Claude Code inside a distributed product needs any formal agreement beyond the Commercial Terms | Anthropic                 | any commercial tier |
-| Whether Artificial Analysis data may be imported into `model_profiles`                                          | Artificial Analysis terms | frontier chart      |
-| Pro-plan behavior: no API credits; subscription limits only                                                     | a Pro-plan test account   | Pro-plan support    |
+| Question                                                                                                                                                                 | Who or what can answer it              | Blocks                                   |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------- | ---------------------------------------- |
+| Codex third-party terms for ChatGPT sign-in                                                                                                                              | OpenAI terms or support                | Codex adapter                            |
+| Whether running Claude Code inside a distributed product needs any formal agreement beyond the Commercial Terms                                                          | Anthropic                              | any commercial tier                      |
+| Pro-plan behavior: no API credits; subscription limits only                                                                                                              | a Pro-plan test account                | Pro-plan support                         |
+| Whether showing AA data in a public open-source app's comparison view needs AA's written consent (Data Platform Terms §2.4(c), §2.5 "model/provider selection guidance") | Artificial Analysis (data-api contact) | shipping M2b's chart in a public release |
+| Whether Claude Code's `opus`, `sonnet`, `haiku` and `fable` aliases run the configuration AA benchmarks ("default fallback")                                             | Anthropic docs or a live comparison    | trusting AA scores for routing           |
