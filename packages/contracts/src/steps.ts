@@ -58,6 +58,14 @@ export const ROLE_LABEL: Readonly<Record<StepRole, string>> = {
   qa: 'QA',
 };
 
+/** A stored plan has no step at the index; falling back would hand a read-only step edit access. */
+export class StepIndexError extends Error {
+  override readonly name = 'StepIndexError';
+  constructor(stepIndex: number, planLength: number) {
+    super(`No step at index ${String(stepIndex)} in a plan of ${String(planLength)} steps`);
+  }
+}
+
 export interface StepPosition {
   readonly steps: readonly WorkstreamStep[];
   readonly stepIndex: number;
@@ -67,8 +75,11 @@ export interface StepPosition {
 
 /** The step a workstream is on. One started before flows has none stored: it runs as one implement step. */
 export function currentStep(ws: StepPosition): WorkstreamStep {
-  const stored = ws.steps[ws.stepIndex];
-  if (stored) return stored;
+  if (ws.steps.length > 0) {
+    const stored = ws.steps[ws.stepIndex];
+    if (stored) return stored;
+    throw new StepIndexError(ws.stepIndex, ws.steps.length);
+  }
   return {
     role: StepRole.Implement,
     personaId: null,
