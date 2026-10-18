@@ -26,7 +26,7 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   provider: WORK,
   inbox: [queryKeys.inbox, ['workstreams']],
   app_setting: [queryKeys.keepAwake],
-  // Nothing reads these yet; the entries make the event types known.
+  // No view reads these entity types; the entries make them known.
   persona: [],
   person: [],
   flow: [],

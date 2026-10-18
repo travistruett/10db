@@ -52,6 +52,7 @@ describe('StepCell', () => {
         stepIndex: 1,
       }),
       texts: ['2/2 review', 'Reviewer · sonnet@high'],
+      noRetry: true,
     },
     {
       name: 'a retry count once a step was sent back',
@@ -60,14 +61,30 @@ describe('StepCell', () => {
         stepIndex: 0,
       }),
       texts: ['1/1 implement', 'Implementer · sonnet@high', 'retry 2'],
+      badge: 'retry 2',
     },
     {
       name: 'a workstream started before flows as its model alone',
       ws: workstreamDto({ steps: [], stepIndex: 0, model: 'opus', effort: 'high' }),
       texts: ['opus@high'],
     },
-  ])('shows $name', ({ ws, texts }) => {
+  ])('shows $name', ({ ws, texts, noRetry, badge }) => {
     show(ws);
     for (const text of texts) expect(screen.getByText(text)).toBeTruthy();
+    // The light badge takes the theme's AA-checked text color; plain orange text misses AA in light mode.
+    if (badge) expect(screen.getByText(badge).closest('.mantine-Badge-root')).not.toBeNull();
+    if (noRetry) expect(screen.queryByText(/retry/)).toBeNull();
+  });
+
+  it("carries the router's reason as the tooltip of the step label", () => {
+    show(
+      workstreamDto({
+        steps: [step('implement', 'Implementer', 'sonnet', 'medium')],
+        stepIndex: 0,
+      }),
+    );
+    expect(screen.getByText('Implementer · sonnet@medium').getAttribute('title')).toBe(
+      'cheapest profile at or above 40 coding',
+    );
   });
 });

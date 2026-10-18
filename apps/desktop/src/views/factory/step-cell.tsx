@@ -1,4 +1,4 @@
-import { Stack, Text } from '@mantine/core';
+import { Badge, Stack, Text } from '@mantine/core';
 import type { WorkstreamDto } from '@10db/contracts';
 
 /** The step a workstream is on, who runs it and on which profile; a pre-flow workstream shows its model. */
@@ -12,7 +12,7 @@ export function StepCell({ workstream }: { readonly workstream: WorkstreamDto })
         {`${step.personaName} · ${step.model}@${step.effort}`}
       </Text>
       {step.attempts > 0 ? (
-        <Text size="xs" c="orange">{`retry ${String(step.attempts)}`}</Text>
+        <Badge size="xs" variant="light" color="orange">{`retry ${String(step.attempts)}`}</Badge>
       ) : null}
     </Stack>
   );
