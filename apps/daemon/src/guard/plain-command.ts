@@ -19,8 +19,8 @@ function hasControl(text: string): boolean {
  * `||` and `;`, and returns each segment's words exactly as the shell sees them (quotes
  * removed). Returns null for anything else: expansions, globs, comments, redirections other
  * than `2>&1`, `>/dev/null` and `2>/dev/null`, backgrounding, escapes, control characters and
- * empty segments. A word whose unquoted value has `=` at its start or right after `=` or `:` is
- * refused too: zsh expands `=cmd` to a path after removing empty quotes, and MAGIC_EQUAL_SUBST
+ * empty segments. A word whose decoded value, quoted or not, has `=` at its start or right after `=` or `:`
+ * is refused too: zsh expands `=cmd` to a path after removing empty quotes, and MAGIC_EQUAL_SUBST
  * does the same after an option's `=` and after a `:` in an assignment-like word. Because nothing outside this grammar is accepted, the words cannot
  * differ from what runs.
  */
