@@ -362,7 +362,9 @@ export function createToolHandlers(
             );
           if (REVIEW_ROLES.includes(step.role) && input.verdict === null)
             throw new InvalidError('This review step needs a verdict: approve or reject.');
-          const result = { summary: input.summary, verdict: input.verdict, sessionId, at: ctx.now };
+          // Only a review role gives a verdict; a plan step's is dropped so a later reader cannot mistake it for one.
+          const verdict = REVIEW_ROLES.includes(step.role) ? input.verdict : null;
+          const result = { summary: input.summary, verdict, sessionId, at: ctx.now };
           patchWorkstream(ctx, workstreamId, null, {
             steps: row.steps.map((s, i) => (i === row.stepIndex ? { ...s, result } : s)),
           });
@@ -370,7 +372,7 @@ export function createToolHandlers(
             type: EventType.StepChanged,
             entityType: 'workstream',
             entityId: workstreamId,
-            data: { stepIndex: row.stepIndex, role: step.role, verdict: input.verdict },
+            data: { stepIndex: row.stepIndex, role: step.role, verdict },
           });
           return record(
             'complete_step',

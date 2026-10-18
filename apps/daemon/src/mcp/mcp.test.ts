@@ -684,6 +684,31 @@ describe('complete_step', () => {
     expect(result.text).toContain(says);
   });
 
+  it('emits step.changed once, and not again on an opId replay', async () => {
+    const s = await onStep('review');
+    const args = { opId: 'op-step-0004', summary: 'Fine.', verdict: 'approve' };
+    const count = () =>
+      base.db
+        .select()
+        .from(schema.events)
+        .all()
+        .filter((e) => e.type === 'step.changed').length;
+    const before = count();
+    await s.call('complete_step', args);
+    await s.call('complete_step', args);
+    expect(count() - before).toBe(1);
+  });
+
+  it('stores no verdict for a plan step even when one is sent', async () => {
+    const s = await onStep('plan');
+    await s.call('complete_step', {
+      opId: 'op-step-0005',
+      summary: '1. Do it.',
+      verdict: 'approve',
+    });
+    expect(getWorkstream(base.db, s.workstream.id).steps[1]?.result?.verdict).toBeNull();
+  });
+
   it('accepts a plan with no verdict', async () => {
     const s = await onStep('plan');
     expect(

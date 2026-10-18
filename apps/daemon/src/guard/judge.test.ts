@@ -625,6 +625,67 @@ describe('read-only steps', () => {
       command: 'echo $(touch x)',
       decision: 'deny',
     },
+    { name: 'sort bundled flags', command: 'sort -ro src/api/a.ts other.txt', decision: 'deny' },
+    { name: 'sort -uo', command: 'sort -uo src/api/a.ts b.txt', decision: 'deny' },
+    { name: 'sort --out abbreviation', command: 'sort --out=src/api/a.ts b.txt', decision: 'deny' },
+    {
+      name: 'sort --outp abbreviation',
+      command: 'sort --outp=src/api/a.ts b.txt',
+      decision: 'deny',
+    },
+    {
+      name: 'find with a backslash in -delete',
+      command: 'find . -name x -de\\lete',
+      decision: 'deny',
+    },
+    {
+      name: 'find with a backslash in -exec',
+      command: 'find . -exe\\c rm {} \\;',
+      decision: 'deny',
+    },
+    {
+      name: 'rg abbreviated --pre with a backslash',
+      command: 'rg --pr\\e=./x.sh TODO',
+      decision: 'deny',
+    },
+    {
+      name: 'rg --hostname-bin',
+      command: 'rg --hostname-bin=./any-exe --hyperlink-format=default TODO',
+      decision: 'deny',
+    },
+    { name: 'file -C', command: 'file -C -m src/api/a.ts', decision: 'deny' },
+    { name: 'tree bundled -o', command: 'tree -ao out.txt src', decision: 'deny' },
+    { name: 'tree -R', command: 'tree -R -L 1 -H . src', decision: 'deny' },
+    {
+      name: 'sort --compress-program',
+      command: 'sort --compress-program=./x.sh -S 1k big',
+      decision: 'deny',
+    },
+    { name: 'an assignment with a redirect', command: 'X=1>src/api/a.ts', decision: 'deny' },
+    { name: 'an assignment with an append', command: 'A=b>>out.txt', decision: 'deny' },
+    { name: 'env -S', command: "env -S 'touch pwned' true", decision: 'deny' },
+    { name: 'env -P', command: 'env -P cat /usr/bin/touch pwned', decision: 'deny' },
+    { name: 'xargs -J', command: 'echo p | xargs -J cat touch cat', decision: 'deny' },
+    {
+      name: 'GIT_EXTERNAL_DIFF assignment',
+      command: "GIT_EXTERNAL_DIFF='touch pwned;true' git diff",
+      decision: 'deny',
+    },
+    {
+      name: 'git config env assignments',
+      command:
+        'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=./x git status',
+      decision: 'deny',
+    },
+    { name: 'a command run by path', command: './tools/cat x', decision: 'deny' },
+    { name: 'a wrapper such as time', command: 'time cat a', decision: 'deny' },
+    { name: 'a plain sort of a file', command: 'sort file', decision: 'allow' },
+    { name: 'sort -r', command: 'sort -r file', decision: 'allow' },
+    { name: 'rg with a path', command: 'rg TODO src', decision: 'allow' },
+    { name: 'git diff alone', command: 'git diff', decision: 'allow' },
+    { name: 'git log --oneline', command: 'git log --oneline', decision: 'allow' },
+    { name: 'find -name', command: "find . -name '*.ts'", decision: 'allow' },
+    { name: 'recursive grep', command: 'grep -rn x src', decision: 'allow' },
   ])('$decision $name', ({ command, decision }) => {
     expect(ro('Bash', { command }).decision).toBe(decision);
   });

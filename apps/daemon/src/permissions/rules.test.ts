@@ -292,7 +292,7 @@ describe('allowedToolsFor', () => {
     {
       tools: 'read_only',
       has: ['Read', 'Grep', 'mcp__10db__*', 'Bash(git diff:*)', 'Bash(cat:*)', 'Bash(grep:*)'],
-      lacks: ['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'Bash(make gate)'],
+      lacks: ['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'Bash(make gate)', 'Bash(file:*)'],
     },
   ] as const)('gives a $tools step the right tools', ({ tools, has, lacks }) => {
     const allowed = allowedToolsFor(project, tools);
