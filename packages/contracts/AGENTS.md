@@ -11,7 +11,7 @@ never hand-write a parallel interface.
   `make gate` fails on drift.
 - Changes are additive. Removing or narrowing a field is a protocol change: bump
   `PROTOCOL_VERSION` and record a decision.
-- This package depends on zod and ulid only. It never imports another workspace package, never
+- This package depends on zod and uuid only. It never imports another workspace package, never
   imports `node:*` (the UI bundles it), and holds no I/O.
 - Pure domain rules shared by the daemon and the UI live here too: the workstream state machine
   (`workflow.ts`) and the vocabularies (`states.ts`).

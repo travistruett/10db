@@ -4,7 +4,7 @@
   "properties": {
     "deviationId": {
       "type": "string",
-      "pattern": "^dvn_[0-9A-HJKMNP-TV-Z]{26}$"
+      "pattern": "^dvn_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
     }
   },
   "required": [

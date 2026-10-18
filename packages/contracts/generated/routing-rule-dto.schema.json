@@ -25,15 +25,15 @@
     },
     "personId": {
       "type": "string",
-      "pattern": "^psn_[0-9A-HJKMNP-TV-Z]{26}$"
+      "pattern": "^psn_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
     },
     "id": {
       "type": "string",
-      "pattern": "^rtr_[0-9A-HJKMNP-TV-Z]{26}$"
+      "pattern": "^rtr_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
     },
     "projectId": {
       "type": "string",
-      "pattern": "^prj_[0-9A-HJKMNP-TV-Z]{26}$"
+      "pattern": "^prj_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
     },
     "createdAt": {
       "type": "string",

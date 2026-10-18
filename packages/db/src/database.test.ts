@@ -3,7 +3,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { migrateDatabase, openDatabase, schema, type TendbDatabase } from './index';
+import {
+  migrateDatabase,
+  openDatabase,
+  schema,
+  StaleSchemaBaselineError,
+  type TendbDatabase,
+} from './index';
 
 let dir: string;
 let db: TendbDatabase;
@@ -63,5 +69,25 @@ describe('migrateDatabase', () => {
     expect(() => {
       migrateDatabase(db);
     }).not.toThrow();
+  });
+
+  it.each([
+    [
+      'an applied migration the baseline no longer has',
+      "UPDATE __drizzle_migrations SET hash = 'f00d' WHERE rowid = 1",
+    ],
+    [
+      'more applied migrations than the baseline holds',
+      "INSERT INTO __drizzle_migrations (hash, created_at) VALUES ('f00d', 1)",
+    ],
+  ])('refuses a database migrated under an older baseline: %s', (_name, tamper) => {
+    migrateDatabase(db);
+    db.$client.exec(tamper);
+    expect(() => {
+      migrateDatabase(db);
+    }).toThrow(StaleSchemaBaselineError);
+    expect(() => {
+      migrateDatabase(db);
+    }).toThrow(join(dir, '10db.sqlite'));
   });
 });

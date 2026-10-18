@@ -5,57 +5,15 @@
     {
       "idx": 0,
       "version": "6",
-      "when": 1792091827089,
+      "when": 1792297405433,
       "tag": "0000_init",
       "breakpoints": true
     },
     {
       "idx": 1,
       "version": "6",
-      "when": 1792162709284,
-      "tag": "0001_factory_loop",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "6",
-      "when": 1792162709582,
-      "tag": "0002_decisions_fts",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "6",
-      "when": 1792203417405,
-      "tag": "0003_mcp_server_approvals",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "6",
-      "when": 1792267024990,
-      "tag": "0004_session_briefing_baseline",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "6",
-      "when": 1792267575360,
-      "tag": "0005_session_briefed",
-      "breakpoints": true
-    },
-    {
-      "idx": 6,
-      "version": "6",
-      "when": 1792282752979,
-      "tag": "0006_teams_and_routing",
-      "breakpoints": true
-    },
-    {
-      "idx": 7,
-      "version": "6",
-      "when": 1792283086924,
-      "tag": "0007_planning_fields",
+      "when": 1792297405740,
+      "tag": "0001_decisions_fts",
       "breakpoints": true
     }
   ]

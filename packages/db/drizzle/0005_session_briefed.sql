@@ -1,1 +1,0 @@
-ALTER TABLE `sessions` ADD `briefed` integer DEFAULT false NOT NULL;

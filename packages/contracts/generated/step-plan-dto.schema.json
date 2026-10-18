@@ -24,7 +24,7 @@
             "anyOf": [
               {
                 "type": "string",
-                "pattern": "^per_[0-9A-HJKMNP-TV-Z]{26}$"
+                "pattern": "^per_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
               },
               {
                 "type": "null"
@@ -53,7 +53,7 @@
             "anyOf": [
               {
                 "type": "string",
-                "pattern": "^mpf_[0-9A-HJKMNP-TV-Z]{26}$"
+                "pattern": "^mpf_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
               },
               {
                 "type": "null"
@@ -145,7 +145,7 @@
                   },
                   "sessionId": {
                     "type": "string",
-                    "pattern": "^ses_[0-9A-HJKMNP-TV-Z]{26}$"
+                    "pattern": "^ses_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
                   },
                   "at": {
                     "type": "string",

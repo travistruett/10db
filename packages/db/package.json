@@ -13,7 +13,8 @@
   "dependencies": {
     "@10db/contracts": "workspace:*",
     "better-sqlite3": "13.0.3",
-    "drizzle-orm": "0.45.4"
+    "drizzle-orm": "0.45.4",
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@types/better-sqlite3": "9.6.0",
