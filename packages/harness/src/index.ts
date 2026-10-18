@@ -102,3 +102,91 @@ export function listSkills(dir: string = HARNESS_PLUGIN_DIR): SkillInfo[] {
     .map((entry) => readSkill(root, entry.name))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
+
+/** The default personas 10db seeds on first start (spec §11.3), one per flow role. */
+export const PERSONA_KEYS = ['implementer', 'plan-reviewer', 'planner', 'qa', 'reviewer'] as const;
+
+/** A persona's instructions ride in every session prompt for its step, so they stay short. */
+export const MAX_PERSONA_BYTES = 4096;
+
+const PERSONA_KEY = /^[a-z][a-z0-9-]{0,39}$/;
+
+const PersonaFrontmatter = z
+  .object({
+    name: PlainValue,
+    role: z.enum(['plan', 'plan_review', 'implement', 'review', 'qa']),
+    tools: z.enum(['read_only', 'edit']),
+    skills: z
+      .string()
+      .optional()
+      .transform((list) =>
+        list
+          ? list
+              .split(',')
+              .map((s) => s.trim())
+              .filter(Boolean)
+          : [],
+      )
+      .pipe(z.array(z.enum(SKILL_NAMES))),
+  })
+  .refine((p) => (p.role === 'implement') === (p.tools === 'edit'), {
+    message: 'only the implement role edits',
+  });
+
+export interface HarnessPersona {
+  readonly key: string;
+  readonly name: string;
+  readonly role: z.infer<typeof PersonaFrontmatter>['role'];
+  readonly tools: z.infer<typeof PersonaFrontmatter>['tools'];
+  readonly skills: readonly string[];
+  readonly instructions: string;
+}
+
+/** A persona file is unreadable, misnamed or has invalid frontmatter or instructions. */
+export class PersonaManifestError extends Error {
+  override name = 'PersonaManifestError';
+
+  constructor(path: string, reason: string, options?: ErrorOptions) {
+    super(`${path}: ${reason}`, options);
+  }
+}
+
+function readPersona(root: string, file: string): HarnessPersona {
+  const path = join(root, file);
+  const key = file.slice(0, -'.md'.length);
+  if (!PERSONA_KEY.test(key))
+    throw new PersonaManifestError(path, 'the file name must be a lowercase key');
+  let text: string;
+  try {
+    text = readFileSync(path, 'utf8');
+  } catch (error) {
+    throw new PersonaManifestError(path, 'cannot be read', { cause: error });
+  }
+  const match = FRONTMATTER.exec(text);
+  if (!match?.[1]) throw new PersonaManifestError(path, 'frontmatter is missing');
+  const parsed = PersonaFrontmatter.safeParse(frontmatterFields(match[1]));
+  if (!parsed.success) {
+    const issues = parsed.error.issues.map((i) => i.message).join(', ');
+    throw new PersonaManifestError(
+      path,
+      `frontmatter needs a name, a role, tools and known skills (${issues})`,
+    );
+  }
+  const instructions = text.slice(match[0].length).trim();
+  if (instructions.length === 0) throw new PersonaManifestError(path, 'the instructions are empty');
+  if (Buffer.byteLength(instructions, 'utf8') >= MAX_PERSONA_BYTES)
+    throw new PersonaManifestError(
+      path,
+      `the instructions must be under ${String(MAX_PERSONA_BYTES)} bytes`,
+    );
+  return { key, ...parsed.data, instructions };
+}
+
+export function readDefaultPersonas(dir: string = HARNESS_PLUGIN_DIR): HarnessPersona[] {
+  const root = join(dir, 'personas');
+  if (!existsSync(root)) return [];
+  return readdirSync(root, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.md'))
+    .map((entry) => readPersona(root, entry.name))
+    .sort((a, b) => a.key.localeCompare(b.key));
+}
