@@ -2,6 +2,8 @@ const UNQUOTED = /[A-Za-z0-9_./:,@%+=-]/;
 const DOUBLE_QUOTED_FORBIDDEN = /[$`\\!"]/;
 const BLANK = new Set([' ', '\t']);
 const REDIRECTS = ['2>&1', '>/dev/null', '2>/dev/null'];
+/** zsh `=cmd` expansion: a word's start, or after `=` or `:` under MAGIC_EQUAL_SUBST. */
+const EQUALS_EXPANSION = /(^|[=:])=/;
 
 /** Every control character but tab: newlines and `\r` end or reshape a command. */
 function hasControl(text: string): boolean {
@@ -17,9 +19,9 @@ function hasControl(text: string): boolean {
  * `||` and `;`, and returns each segment's words exactly as the shell sees them (quotes
  * removed). Returns null for anything else: expansions, globs, comments, redirections other
  * than `2>&1`, `>/dev/null` and `2>/dev/null`, backgrounding, escapes, control characters and
- * empty segments. A word whose unquoted value starts with `=` or contains `==` is refused too:
- * zsh expands `=cmd` to a path after removing empty quotes, and MAGIC_EQUAL_SUBST does the same
- * after an option's `=`. Because nothing outside this grammar is accepted, the words cannot
+ * empty segments. A word whose unquoted value has `=` at its start or right after `=` or `:` is
+ * refused too: zsh expands `=cmd` to a path after removing empty quotes, and MAGIC_EQUAL_SUBST
+ * does the same after an option's `=` and after a `:` in an assignment-like word. Because nothing outside this grammar is accepted, the words cannot
  * differ from what runs.
  */
 export function plainCommandWords(command: string): string[][] | null {
@@ -85,7 +87,7 @@ export function plainCommandWords(command: string): string[][] | null {
         return null;
       }
     }
-    if (word.startsWith('=') || word.includes('==')) return null;
+    if (EQUALS_EXPANSION.test(word)) return null;
     words.push(word);
   }
   return endSegment() ? segments : null;

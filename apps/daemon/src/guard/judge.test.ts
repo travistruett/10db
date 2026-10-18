@@ -730,6 +730,7 @@ describe('read-only steps', () => {
     { name: 'an =cmd expansion', command: 'cat =ls', decision: 'deny' },
     { name: 'an =cmd expansion after empty quotes', command: 'cat ""=ls', decision: 'deny' },
     { name: 'an =cmd expansion after an option', command: 'ls --color==ls', decision: 'deny' },
+    { name: 'an =cmd expansion after a colon', command: 'cat a=:=ls', decision: 'deny' },
     { name: 'a comment', command: 'echo x # comment', decision: 'deny' },
     { name: 'a newline', command: 'cat a\nb', decision: 'deny' },
     { name: 'a variable in double quotes', command: 'cat "a$b"', decision: 'deny' },
