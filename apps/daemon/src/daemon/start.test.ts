@@ -5,6 +5,7 @@ import {
   EventsHead,
   KeepAwakeStatus,
   McpServerStatusDto,
+  mintId,
   ModelProfileDto,
   PersonaDto,
   ProjectDto,
@@ -452,6 +453,64 @@ describe('startDaemon', () => {
     } finally {
       repo.cleanup();
     }
+  });
+
+  it('answers 404 for an unknown project on team and routing-rule routes and 201 on creates', async () => {
+    daemon = await startDaemon({
+      dataDir: dir.path,
+      port: 0,
+      adapter: new FakeAdapter({}),
+      logLevel: 'warn',
+      ...QUIET,
+    });
+    const api = apiClient(daemon.url, daemon.token);
+    const ghost = mintId('Project');
+    const send = async (method: string, path: string, body?: unknown) => {
+      const res = await fetch(`${daemon?.url ?? ''}${path}`, {
+        method,
+        headers: {
+          Authorization: `Bearer ${daemon?.token ?? ''}`,
+          ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      });
+      await res.text();
+      return res.status;
+    };
+    const repo = createTempRepo();
+    try {
+      const project = await api.post('/projects', ProjectDto, {
+        name: 'demo',
+        repoPath: repo.path,
+        gateCommand: 'true',
+        areas: [{ name: 'src', globs: ['src/**'] }],
+      });
+      const head = await api.get('/events/head', EventsHead);
+      expect(await send('GET', `/projects/${ghost}/team`)).toBe(404);
+      expect(await send('GET', `/projects/${ghost}/routing-rules`)).toBe(404);
+      expect(await send('PUT', `/projects/${ghost}/team`, { bindings: [], members: [] })).toBe(404);
+      expect(
+        await send('PUT', `/projects/${project.id}/team`, {
+          bindings: [{ role: 'review', personaId: mintId('Persona') }],
+          members: [],
+        }),
+      ).toBe(400);
+      expect(await api.get('/events/head', EventsHead)).toEqual(head);
+    } finally {
+      repo.cleanup();
+    }
+    const persona = {
+      key: 'sec',
+      name: 'Sec',
+      role: 'review',
+      tools: 'read_only',
+      instructions: 'Check auth.',
+    };
+    expect(await send('POST', '/personas', persona)).toBe(201);
+    expect(await send('POST', '/people', { handle: 'sam', name: 'Sam' })).toBe(201);
+    expect(
+      await send('POST', '/flows', { name: 'mine', steps: [{ role: 'implement', need: 40 }] }),
+    ).toBe(201);
   });
 
   it('closes its log file on stop, so a start leaks no file descriptor', async () => {

@@ -120,7 +120,10 @@ export function createServices(deps: {
       return getTeam(db, projectId);
     },
     setTeam: (projectId, input) => deps.state.write((ctx) => setTeam(ctx, projectId, input)),
-    listRoutingRules: (projectId) => listRoutingRules(db, projectId),
+    listRoutingRules(projectId) {
+      getProject(db, projectId);
+      return listRoutingRules(db, projectId);
+    },
     setRoutingRules: (projectId, input) =>
       deps.state.write((ctx) => setRoutingRules(ctx, projectId, input)),
     patchTask: (id, patch) => deps.state.write((ctx) => patchTask(ctx, id, patch)),
