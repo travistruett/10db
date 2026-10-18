@@ -68,7 +68,7 @@ function usesOption(arg: string, option: string): boolean {
 }
 
 const REFUSAL =
-  'This step is read-only: the shell accepts only plain words, simple quoting and read-only commands (read-only git, cat, grep, ls, find and similar), with no redirection other than 2>&1 and >/dev/null. Describe the change in mcp__10db__complete_step.';
+  'This step is read-only: the shell accepts only plain words, simple quoting and read-only commands (read-only git, cat, grep, ls, find and similar), with no redirection other than 2>&1, >/dev/null and 2>/dev/null. Describe the change in mcp__10db__complete_step.';
 
 /** Why a read-only step may not run this command, or null when every segment only reads. */
 export function readOnlyShellRefusal(command: string): string | null {

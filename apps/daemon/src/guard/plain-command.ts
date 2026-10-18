@@ -16,8 +16,11 @@ function hasControl(text: string): boolean {
  * Parses a command that uses only plain words, simple quoting and the separators `|`, `&&`,
  * `||` and `;`, and returns each segment's words exactly as the shell sees them (quotes
  * removed). Returns null for anything else: expansions, globs, comments, redirections other
- * than `2>&1` and `>/dev/null`, backgrounding, escapes, control characters and empty segments.
- * Because nothing outside this grammar is accepted, the words cannot differ from what runs.
+ * than `2>&1`, `>/dev/null` and `2>/dev/null`, backgrounding, escapes, control characters and
+ * empty segments. A word whose unquoted value starts with `=` or contains `==` is refused too:
+ * zsh expands `=cmd` to a path after removing empty quotes, and MAGIC_EQUAL_SUBST does the same
+ * after an option's `=`. Because nothing outside this grammar is accepted, the words cannot
+ * differ from what runs.
  */
 export function plainCommandWords(command: string): string[][] | null {
   if (hasControl(command)) return null;
@@ -63,7 +66,6 @@ export function plainCommandWords(command: string): string[][] | null {
       i += redirect.length;
       continue;
     }
-    if (ch === '=') return null;
     let word = '';
     while (i < command.length && !BLANK.has(command.charAt(i))) {
       const c = command.charAt(i);
@@ -83,6 +85,7 @@ export function plainCommandWords(command: string): string[][] | null {
         return null;
       }
     }
+    if (word.startsWith('=') || word.includes('==')) return null;
     words.push(word);
   }
   return endSegment() ? segments : null;
