@@ -30,9 +30,9 @@ export const BenchmarkStatusDto = z.object({
   models: z.int().min(0),
   /** AA's Intelligence Index version (major.minor) from the latest successful sync. */
   indexVersion: z.string().nullable().default(null),
-  /** Enabled profiles routing can't use at all: AA doesn't list the slug, or lists it without a cost or an Intelligence score. */
+  /** Enabled profiles routing can't use for the Intelligence comparison: AA doesn't list the slug, or lists it without a cost or an Intelligence score. */
   unmeasuredProfiles: z.array(z.string()),
-  /** Enabled profiles routing can use that AA gave no score of some kind, with the kinds missing. */
+  /** Enabled, costed profiles AA gave no score of some kind, with the kinds missing; a profile without Intelligence is here too. */
   missingScores: z
     .array(z.object({ profile: z.string(), kinds: z.array(z.enum(ScoreKind)) }))
     .default([]),
