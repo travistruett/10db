@@ -82,6 +82,7 @@ try {
     logLevel: env.TENDB_LOG_LEVEL,
     migrationsDir: resolveMigrationsDir(),
     harnessDir: resolveHarnessDir(),
+    aaKey: () => keychainSecrets.artificialAnalysisKey(),
     sessionEnv: (project) =>
       buildSessionEnv({
         base: login.vars,
