@@ -1,4 +1,4 @@
-import type { ModelProfileDto, StepRole, WorkstreamStep } from '@10db/contracts';
+import type { StepRole, WorkstreamStep } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { escalateStep, NoProfileError, route, UnmeasuredError } from './router';
 import { label, testCatalogue } from './test-catalogue';
@@ -123,13 +123,10 @@ describe('route', () => {
 });
 
 describe('route when AA lacks the role’s score', () => {
-  const withoutCoding = (labels: string[], extra: Partial<ModelProfileDto> = {}) =>
+  const withoutCoding = (labels: string[]) =>
     testCatalogue(
       Object.fromEntries(
-        labels.map((k) => [
-          k,
-          { scores: { intelligence: 46, coding: null, agentic: 40 }, ...extra },
-        ]),
+        labels.map((k) => [k, { scores: { intelligence: 46, coding: null, agentic: 40 } }]),
       ),
     );
 
@@ -203,16 +200,45 @@ describe('route when AA lacks the role’s score', () => {
     expect(label(choice.profile)).toBe('small@low');
   });
 
-  it('stays unmeasured when no costed profile has intelligence either', () => {
+  it('is not stopped by a disabled profile that lacks the score but has intelligence', () => {
+    const profiles = testCatalogue({
+      'mid@low': { enabled: false, scores: { intelligence: 38, coding: null, agentic: 30 } },
+    });
+    expect(route({ ...at('implement', 40), profiles }).score).toBe('coding');
+  });
+
+  it('keeps the role’s score when the only profile without it has no intelligence either', () => {
+    const profiles = testCatalogue({
+      'big@max': { scores: { intelligence: null, coding: 54, agentic: null } },
+    });
+    const choice = route({ ...at('qa', 35), profiles });
+    expect(choice.score).toBe('agentic');
+    expect(choice.reason).toBe('cheapest profile at or above 35 agentic');
+  });
+
+  it('falls back when a costed profile has intelligence but not the role’s score', () => {
+    const profiles = testCatalogue({
+      'big@max': { scores: { intelligence: 56, coding: null, agentic: 50 } },
+    });
+    expect(route({ ...at('implement', 40), profiles }).score).toBe('intelligence');
+  });
+
+  it('throws UnmeasuredError naming the kind it tried when no profile has any usable score', () => {
     const profiles = testCatalogue(
       Object.fromEntries(
         ['small@low', 'small@high', 'mid@low', 'mid@high', 'big@high', 'big@max'].map((k) => [
           k,
-          { scores: { intelligence: null, coding: 5, agentic: k === 'big@max' ? null : 5 } },
+          { scores: { intelligence: null, coding: null, agentic: null } },
         ]),
       ),
     );
-    expect(() => route({ ...at('qa', 1), profiles })).toThrow(UnmeasuredError);
+    expect.assertions(2);
+    try {
+      route({ ...at('qa', 1), profiles });
+    } catch (error) {
+      expect(error).toBeInstanceOf(UnmeasuredError);
+      expect(error instanceof UnmeasuredError && error.kind).toBe('agentic');
+    }
   });
 });
 

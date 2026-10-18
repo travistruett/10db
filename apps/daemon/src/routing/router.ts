@@ -33,6 +33,13 @@ export class NoProfileError extends Error {
 /** No enabled profile of the provider has a cost and a score to compare on yet: there is nothing to route on. */
 export class UnmeasuredError extends Error {
   override name = 'UnmeasuredError';
+  /** The score kind routing tried to compare on. */
+  readonly kind: ScoreKind;
+
+  constructor(message: string, kind: ScoreKind) {
+    super(message);
+    this.kind = kind;
+  }
 }
 
 const score = (p: ModelProfileDto, kind: ScoreKind): number | null => p.scores[kind];
@@ -59,18 +66,22 @@ const withinCeiling = (p: ModelProfileDto, ceiling: number | null) =>
 const dollars = (n: number) => `$${String(n)}`;
 
 /**
- * The score a routing call compares on: the role's own when every enabled, costed profile of the
- * provider has it, otherwise intelligence for all of them, so two indexes are never mixed.
+ * The score a routing call compares on: the role's own, unless some enabled, costed profile of the
+ * provider has an Intelligence score but lacks the role's own. Then every candidate is compared on
+ * intelligence, so two indexes are never mixed. A profile with neither score can't be routed on
+ * either way, so it doesn't trigger the fallback.
  */
 function comparedOn(input: RouteInput, own: ScoreKind): ScoreKind {
-  const costed = input.profiles.filter(
+  const gap = input.profiles.some(
     (p) =>
+      p.enabled &&
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Provider has one member today; the comparison is what keeps routing correct when another is added.
-      p.enabled && p.provider === input.provider && p.costPerTaskUsd !== null,
+      p.provider === input.provider &&
+      p.costPerTaskUsd !== null &&
+      score(p, ScoreKind.Intelligence) !== null &&
+      score(p, own) === null,
   );
-  return costed.length > 0 && costed.every((p) => score(p, own) !== null)
-    ? own
-    : ScoreKind.Intelligence;
+  return gap ? ScoreKind.Intelligence : own;
 }
 
 /** The cheapest measured profile at or above the step's need and floor, within the ceiling (spec §5.2.3). */
@@ -79,7 +90,7 @@ export function route(input: RouteInput): RouteChoice {
   const kind = comparedOn(input, own);
   const candidates = measured(input.profiles, input.provider, kind);
   if (candidates.length === 0)
-    throw new UnmeasuredError(`No ${input.provider} profile has a ${kind} score yet`);
+    throw new UnmeasuredError(`No ${input.provider} profile has a ${kind} score yet`, kind);
   const minimum = Math.max(input.need, input.floor.minimum);
   const able = candidates.filter((p) => (score(p, kind) ?? 0) >= minimum).sort(preference(kind));
   const best = able.find((p) => withinCeiling(p, input.budgetCeiling)) ?? able[0];

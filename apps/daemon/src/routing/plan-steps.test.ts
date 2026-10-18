@@ -193,7 +193,7 @@ describe('planSteps', () => {
       ['sonnet', 'medium', true, null],
     ]);
     expect(plan.steps[0]?.reason).toBe(
-      "no profile has a coding score yet: runs on the project's model (sync Artificial Analysis to route by score)",
+      "no profile has a coding score to compare on yet: runs on the project's model (sync Artificial Analysis to route by score)",
     );
     expect(plan.overBudget).toEqual([]);
   });
@@ -205,6 +205,22 @@ describe('planSteps', () => {
     expect(implement).toMatchObject({ role: 'implement', score: 'intelligence', pinned: false });
     expect(implement?.profileId).not.toBeNull();
     expect(implement?.reason).toContain('AA gives no coding score; compared on intelligence');
+  });
+
+  it('names the kind it tried in the project-model fallback', () => {
+    const unmeasured = testCatalogue(
+      Object.fromEntries(
+        ['small@low', 'small@high', 'mid@low', 'mid@high', 'big@high', 'big@max'].map((k) => [
+          k,
+          { scores: { intelligence: null, coding: null, agentic: null } },
+        ]),
+      ),
+    );
+    const qaOnly = flow('standard', [{ role: 'qa', need: 30, skip: [], persona: null }]);
+    const plan = planSteps(input({ flow: qaOnly, profiles: unmeasured }));
+    expect(plan.steps[0]?.reason).toBe(
+      "no profile has an agentic score to compare on yet: runs on the project's model (sync Artificial Analysis to route by score)",
+    );
   });
 
   it('lists the steps no profile within the ceiling can run', () => {

@@ -1,6 +1,7 @@
 import {
   ROLE_LABEL,
   ROLE_SCORE,
+  ScoreKind,
   StepRole,
   ToolAccess,
   type FlowDto,
@@ -45,6 +46,9 @@ function personaFor(def: FlowStepDef, input: PlanInput): PersonaDto | undefined 
     input.personas.find((p) => p.role === def.role)
   );
 }
+
+/** The indefinite article for a score kind's name. */
+const article = (kind: ScoreKind): string => (kind === ScoreKind.Coding ? 'a' : 'an');
 
 function routedStep(
   def: FlowStepDef,
@@ -112,7 +116,7 @@ function routedStep(
       profileId: null,
       model: input.project.model,
       effort: input.project.effort,
-      reason: `no profile has a ${kind} score yet: runs on the project's model (sync Artificial Analysis to route by score)`,
+      reason: `no profile has ${article(error.kind)} ${error.kind} score to compare on yet: runs on the project's model (sync Artificial Analysis to route by score)`,
       overBudget: false,
       pinned: true,
     };

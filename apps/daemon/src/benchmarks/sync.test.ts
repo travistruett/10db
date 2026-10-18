@@ -274,7 +274,10 @@ describe('benchmark sync', () => {
       fakeFetch({ status: 200, body: page([noIntelligence], false) }),
     ).sync();
     expect(status.unmeasuredProfiles).toContain('opus@high');
-    expect(status.missingScores.map((m) => m.profile)).not.toContain('opus@high');
+    expect(status.missingScores).toContainEqual({
+      profile: 'opus@high',
+      kinds: ['intelligence', 'agentic'],
+    });
   });
 
   it('reports an unlisted profile as unmeasured and a fully scored one as neither', async () => {
@@ -295,12 +298,17 @@ describe('benchmark sync', () => {
         lastSyncAt: null,
         lastSuccessAt: null,
         outcome: null,
-        message: null,
-        unmeasuredProfiles: [],
+        message: 'stored earlier',
+        unmeasuredProfiles: ['opus@low'],
       });
     });
-    expect(s.status().missingScores).toEqual([]);
-    expect(s.status().indexVersion).toBeNull();
+    expect(s.status()).toMatchObject({
+      keyConfigured: true,
+      message: 'stored earlier',
+      unmeasuredProfiles: ['opus@low'],
+      missingScores: [],
+      indexVersion: null,
+    });
   });
 
   describe('index version', () => {
@@ -347,6 +355,34 @@ describe('benchmark sync', () => {
         expect(second.message).not.toContain('major version');
         expect(warnings).toEqual([]);
       }
+    });
+
+    it('does not flag a numeric version followed by a string one in the same major', async () => {
+      const numeric = await createBenchmarkSync({
+        state,
+        clock,
+        fetch: fakeFetch({
+          status: 200,
+          body: {
+            ...page([entry('claude-opus-5-5-high', 50)], false),
+            intelligence_index_version: 4.3,
+          },
+        }),
+        readKey: () => KEY,
+        logger: warnLogger,
+      }).sync();
+      expect(numeric.indexVersion).toBe('4.3');
+      const next = await syncOn('4.9');
+      expect(next.message).not.toContain('major version');
+      expect(warnings).toEqual([]);
+    });
+
+    it('flags a major change that spans a failed sync', async () => {
+      await syncOn('8.1');
+      await sync(fakeFetch({ status: 503 })).sync();
+      const after = await syncOn('9.0');
+      expect(after.message).toContain('changed from 8 to 9');
+      expect(warnings).toHaveLength(1);
     });
 
     it('keeps the last version through a failed sync', async () => {

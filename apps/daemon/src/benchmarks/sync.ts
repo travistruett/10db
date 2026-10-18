@@ -80,7 +80,7 @@ const unmeasured = (now: string) => ({
 
 const profileName = (p: ModelProfileDto) => `${p.model}@${p.effort}`;
 
-/** A profile the router can use at all: a cost and an Intelligence score, the fallback every role has. */
+/** A profile routing can use for the Intelligence comparison: a cost and an Intelligence score. */
 const routable = (p: ModelProfileDto) =>
   p.costPerTaskUsd !== null && p.scores.intelligence !== null;
 
@@ -171,7 +171,7 @@ export function createBenchmarkSync(deps: BenchmarkSyncDeps): BenchmarkSync {
     const enabled = listModelProfiles(state.db).filter((p) => p.enabled);
     const unmeasuredProfiles = enabled.filter((p) => !routable(p)).map(profileName);
     const missingScores = enabled
-      .filter(routable)
+      .filter((p) => p.costPerTaskUsd !== null)
       .map((p) => ({ profile: profileName(p), kinds: missingKinds(p) }))
       .filter((m) => m.kinds.length > 0);
     deps.logger.info(
