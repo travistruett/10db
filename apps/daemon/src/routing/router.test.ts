@@ -1,4 +1,4 @@
-import type { StepRole, WorkstreamStep } from '@10db/contracts';
+import type { ModelProfileDto, StepRole, WorkstreamStep } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { escalateStep, NoProfileError, route, UnmeasuredError } from './router';
 import { label, testCatalogue } from './test-catalogue';
@@ -108,17 +108,111 @@ describe('route', () => {
     expect(() => route(at('implement', 99))).toThrow(NoProfileError);
   });
 
-  it('throws UnmeasuredError when no profile has the role’s score yet', () => {
+  it('throws UnmeasuredError when no profile has any score to compare on', () => {
     const unmeasured = testCatalogue(
       Object.fromEntries(
         ['small@low', 'small@high', 'mid@low', 'mid@high', 'big@high', 'big@max'].map((k) => [
           k,
-          { scores: { intelligence: 1, coding: null, agentic: 1 } },
+          { scores: { intelligence: null, coding: null, agentic: null } },
         ]),
       ),
     );
     expect(() => route({ ...at('implement', 40), profiles: unmeasured })).toThrow(UnmeasuredError);
-    expect(label(route({ ...at('review', 1), profiles: unmeasured }).profile)).toBe('small@low');
+    expect(() => route({ ...at('review', 1), profiles: unmeasured })).toThrow(UnmeasuredError);
+  });
+});
+
+describe('route when AA lacks the role’s score', () => {
+  const withoutCoding = (labels: string[], extra: Partial<ModelProfileDto> = {}) =>
+    testCatalogue(
+      Object.fromEntries(
+        labels.map((k) => [
+          k,
+          { scores: { intelligence: 46, coding: null, agentic: 40 }, ...extra },
+        ]),
+      ),
+    );
+
+  it('compares on the role’s own score when every costed profile has it', () => {
+    const choice = route({ ...at('implement', 45), profiles: testCatalogue() });
+    expect(choice.score).toBe('coding');
+    expect(label(choice.profile)).toBe('big@high');
+    expect(choice.reason).toBe('cheapest profile at or above 45 coding');
+  });
+
+  it('compares every candidate on intelligence when one enabled profile lacks the score', () => {
+    const profiles = testCatalogue({
+      'big@max': { scores: { intelligence: 56, coding: null, agentic: 50 } },
+    });
+    const choice = route({ ...at('implement', 45), profiles });
+    expect(choice.score).toBe('intelligence');
+    expect(label(choice.profile)).toBe('mid@high');
+    expect(choice.reason).toBe(
+      'cheapest profile at or above 45 intelligence (AA gives no coding score; compared on intelligence)',
+    );
+  });
+
+  it('names the floor and the budget after the fallback note', () => {
+    const profiles = testCatalogue({
+      'big@max': { scores: { intelligence: 56, coding: null, agentic: 50 } },
+    });
+    const choice = route({
+      ...at('implement', 40, { floor: { minimum: 52, why: 'security-sensitive' }, ceiling: 3 }),
+      profiles,
+    });
+    expect(choice.reason).toBe(
+      'cheapest profile at or above 52 intelligence (AA gives no coding score; compared on intelligence) (floor: security-sensitive); over the budget ceiling of $3',
+    );
+  });
+
+  it('falls back for QA on the agentic score the same way', () => {
+    const profiles = testCatalogue({
+      'mid@low': { scores: { intelligence: 38, coding: 36, agentic: null } },
+    });
+    const choice = route({ ...at('qa', 40), profiles });
+    expect(choice.score).toBe('intelligence');
+    expect(choice.reason).toContain('AA gives no agentic score; compared on intelligence');
+  });
+
+  it('is not stopped by a disabled profile that has the score', () => {
+    const profiles = testCatalogue({
+      'mid@low': { scores: { intelligence: 38, coding: null, agentic: 30 } },
+      'big@max': { enabled: false },
+    });
+    expect(route({ ...at('implement', 40), profiles }).score).toBe('intelligence');
+  });
+
+  it('ignores an uncosted profile that lacks the score', () => {
+    const profiles = testCatalogue({
+      'mid@low': { scores: { intelligence: 38, coding: null, agentic: 30 }, costPerTaskUsd: null },
+    });
+    expect(route({ ...at('implement', 40), profiles }).score).toBe('coding');
+  });
+
+  it('uses the intelligence-only catalogue throughout', () => {
+    const profiles = withoutCoding([
+      'small@low',
+      'small@high',
+      'mid@low',
+      'mid@high',
+      'big@high',
+      'big@max',
+    ]);
+    const choice = route({ ...at('implement', 40), profiles });
+    expect(choice.score).toBe('intelligence');
+    expect(label(choice.profile)).toBe('small@low');
+  });
+
+  it('stays unmeasured when no costed profile has intelligence either', () => {
+    const profiles = testCatalogue(
+      Object.fromEntries(
+        ['small@low', 'small@high', 'mid@low', 'mid@high', 'big@high', 'big@max'].map((k) => [
+          k,
+          { scores: { intelligence: null, coding: 5, agentic: k === 'big@max' ? null : 5 } },
+        ]),
+      ),
+    );
+    expect(() => route({ ...at('qa', 1), profiles })).toThrow(UnmeasuredError);
   });
 });
 
@@ -207,6 +301,14 @@ describe('escalateStep', () => {
     const result = escalateStep(from, { ...input(ceiling), profiles: measuredNow });
     expect(`${result.step.model}@${result.step.effort}`).toBe(want);
     expect(result.escalated).toBe(escalated);
+  });
+
+  it('escalates a step routed on intelligence by fallback up intelligence', () => {
+    const noCoding = profiles.map((p) => ({ ...p, scores: { ...p.scores, coding: null } }));
+    const from = stepOn('mid@low', { score: 'intelligence', need: 30 });
+    const result = escalateStep(from, { ...input(), profiles: noCoding });
+    expect(result.escalated).toBe(true);
+    expect(`${result.step.model}@${result.step.effort}`).toBe('mid@high');
   });
 
   it('names the unmeasured score and the true limit', () => {

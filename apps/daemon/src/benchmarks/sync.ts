@@ -1,4 +1,9 @@
-import { BenchmarkStatusDto, type AaModelDto, type ModelProfileDto } from '@10db/contracts';
+import {
+  BenchmarkStatusDto,
+  ScoreKind,
+  type AaModelDto,
+  type ModelProfileDto,
+} from '@10db/contracts';
 import {
   applyAaMeasurement,
   getAppSetting,
@@ -27,6 +32,8 @@ const NEVER: StoredStatus = {
   outcome: null,
   message: null,
   unmeasuredProfiles: [],
+  missingScores: [],
+  indexVersion: null,
 };
 
 export interface BenchmarkSyncDeps {
@@ -71,10 +78,18 @@ const unmeasured = (now: string) => ({
   measuredAt: now,
 });
 
-/** A profile the router can use for at least one role: a cost and some score. */
-const measured = (p: ModelProfileDto) =>
-  p.costPerTaskUsd !== null &&
-  (p.scores.intelligence !== null || p.scores.coding !== null || p.scores.agentic !== null);
+const profileName = (p: ModelProfileDto) => `${p.model}@${p.effort}`;
+
+/** A profile the router can use at all: a cost and an Intelligence score, the fallback every role has. */
+const routable = (p: ModelProfileDto) =>
+  p.costPerTaskUsd !== null && p.scores.intelligence !== null;
+
+/** The score kinds AA gave no value for. */
+const missingKinds = (p: ModelProfileDto) =>
+  Object.values(ScoreKind).filter((kind) => p.scores[kind] === null);
+
+/** The major part of AA's `major.minor` index version. */
+const majorOf = (version: string): string => version.split('.')[0] ?? version;
 
 export function createBenchmarkSync(deps: BenchmarkSyncDeps): BenchmarkSync {
   const { state } = deps;
@@ -153,20 +168,39 @@ export function createBenchmarkSync(deps: BenchmarkSyncDeps): BenchmarkSync {
         else applyAaMeasurement(ctx, profile.id, unmeasured(now));
       }
     });
-    const unmeasuredProfiles = listModelProfiles(state.db)
-      .filter((p) => p.enabled && !measured(p))
-      .map((p) => `${p.model}@${p.effort}`);
+    const enabled = listModelProfiles(state.db).filter((p) => p.enabled);
+    const unmeasuredProfiles = enabled.filter((p) => !routable(p)).map(profileName);
+    const missingScores = enabled
+      .filter(routable)
+      .map((p) => ({ profile: profileName(p), kinds: missingKinds(p) }))
+      .filter((m) => m.kinds.length > 0);
     deps.logger.info(
-      { models: outcome.models.length, unmeasured: unmeasuredProfiles.length },
+      {
+        models: outcome.models.length,
+        unmeasured: unmeasuredProfiles.length,
+        missingScores: missingScores.length,
+      },
       'artificial analysis synced',
     );
+    const indexVersion = outcome.models.find((m) => m.indexVersion !== null)?.indexVersion ?? null;
+    const before = stored().indexVersion;
+    let versionNote = '';
+    if (before !== null && indexVersion !== null && majorOf(before) !== majorOf(indexVersion)) {
+      deps.logger.warn(
+        { from: before, to: indexVersion },
+        'artificial analysis index major version changed',
+      );
+      versionNote = `. Intelligence Index major version changed from ${majorOf(before)} to ${majorOf(indexVersion)}; review the step needs and floors.`;
+    }
     return record({
       keyConfigured: true,
       lastSyncAt: now,
       lastSuccessAt: now,
       outcome: 'ok',
-      message: `${String(outcome.models.length)} models`,
+      message: `${String(outcome.models.length)} models${versionNote}`,
+      indexVersion: indexVersion ?? before,
       unmeasuredProfiles,
+      missingScores,
     });
   }
 

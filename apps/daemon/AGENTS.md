@@ -32,7 +32,7 @@ Time comes from an injected `Clock`; never call `Date.now()` or `setTimeout` dir
 
 The fake adapter (`sessions/fake-adapter.ts`) is the test boundary for Claude Code; daemon tests never call the real CLI.
 
-- `routing/` is pure: flows, floors, the per-role AA score, the router, escalation and step plans over rows its caller passes in. It imports `@10db/contracts` only. Its tests use the invented catalogue in `test-catalogue.ts`, never AA's numbers.
+- `routing/` is pure: flows, floors, the per-role AA score (a role compares its own only when every costed profile has it, otherwise all on Intelligence), the router, escalation and step plans over rows its caller passes in. It imports `@10db/contracts` only. Its tests use the invented catalogue in `test-catalogue.ts`, never AA's numbers.
 - `team/` seeds the team configuration at start and turns a task into its stored step plan. Read the step a workstream is on with `currentStep` from `@10db/contracts`. Daemon tests get an invented measured catalogue from `test/catalogue.ts`.
 - `benchmarks/` syncs Artificial Analysis's free model list with the builder's own key, read from the Keychain (service `10db`, account `artificial-analysis-api-key`). AA data stays on the machine: never in logs, fixtures, docs or the repo, and every view of it shows AA's attribution. Tests use invented numbers and an injected `fetch`.
 - `environment/` owns the login env (memory only), the session env builder and the system check. Nothing

@@ -1,8 +1,8 @@
 import {
   ROLE_SCORE,
+  ScoreKind,
   type ModelProfileDto,
   type Provider,
-  type ScoreKind,
   type StepRole,
   type WorkstreamStep,
 } from '@10db/contracts';
@@ -19,6 +19,8 @@ export interface RouteInput {
 
 export interface RouteChoice {
   readonly profile: ModelProfileDto;
+  /** The score kind the choice was compared on; it is the step's own unless AA lacks it. */
+  readonly score: ScoreKind;
   readonly reason: string;
   readonly overBudget: boolean;
 }
@@ -28,7 +30,7 @@ export class NoProfileError extends Error {
   override name = 'NoProfileError';
 }
 
-/** No enabled profile of the provider has the role's score and a cost yet: there is nothing to route on. */
+/** No enabled profile of the provider has a cost and a score to compare on yet: there is nothing to route on. */
 export class UnmeasuredError extends Error {
   override name = 'UnmeasuredError';
 }
@@ -56,9 +58,25 @@ const withinCeiling = (p: ModelProfileDto, ceiling: number | null) =>
   ceiling === null || (p.costPerTaskUsd ?? 0) <= ceiling;
 const dollars = (n: number) => `$${String(n)}`;
 
+/**
+ * The score a routing call compares on: the role's own when every enabled, costed profile of the
+ * provider has it, otherwise intelligence for all of them, so two indexes are never mixed.
+ */
+function comparedOn(input: RouteInput, own: ScoreKind): ScoreKind {
+  const costed = input.profiles.filter(
+    (p) =>
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Provider has one member today; the comparison is what keeps routing correct when another is added.
+      p.enabled && p.provider === input.provider && p.costPerTaskUsd !== null,
+  );
+  return costed.length > 0 && costed.every((p) => score(p, own) !== null)
+    ? own
+    : ScoreKind.Intelligence;
+}
+
 /** The cheapest measured profile at or above the step's need and floor, within the ceiling (spec §5.2.3). */
 export function route(input: RouteInput): RouteChoice {
-  const kind = ROLE_SCORE[input.role];
+  const own = ROLE_SCORE[input.role];
+  const kind = comparedOn(input, own);
   const candidates = measured(input.profiles, input.provider, kind);
   if (candidates.length === 0)
     throw new UnmeasuredError(`No ${input.provider} profile has a ${kind} score yet`);
@@ -70,6 +88,7 @@ export function route(input: RouteInput): RouteChoice {
       `No enabled ${input.provider} profile reaches ${String(minimum)} ${kind}`,
     );
   const overBudget = !withinCeiling(best, input.budgetCeiling);
+  const fellBack = kind === own ? '' : ` (AA gives no ${own} score; compared on ${kind})`;
   const floor =
     input.floor.why && input.floor.minimum > input.need ? ` (floor: ${input.floor.why})` : '';
   const budget =
@@ -78,8 +97,9 @@ export function route(input: RouteInput): RouteChoice {
       : '';
   return {
     profile: best,
+    score: kind,
     overBudget,
-    reason: `cheapest profile at or above ${String(minimum)} ${kind}${floor}${budget}`,
+    reason: `cheapest profile at or above ${String(minimum)} ${kind}${fellBack}${floor}${budget}`,
   };
 }
 

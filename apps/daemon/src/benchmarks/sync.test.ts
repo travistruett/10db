@@ -1,4 +1,10 @@
-import { createTestStore, findModelProfile, listAaModels, patchModelProfile } from '@10db/db';
+import {
+  createTestStore,
+  findModelProfile,
+  listAaModels,
+  patchModelProfile,
+  setAppSetting,
+} from '@10db/db';
 import { readDefaultPersonas } from '@10db/harness';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ManualClock } from '../clock';
@@ -29,9 +35,9 @@ const entry = (slug: string, score: number) => ({
   pricing: { price_1m_input_tokens: 1, price_1m_output_tokens: 2 },
   performance: { median_output_tokens_per_second: 50 },
 });
-const page = (data: object[], hasMore: boolean, pageNo = 1) => ({
+const page = (data: object[], hasMore: boolean, pageNo = 1, version = '9.9') => ({
   tier: 'free',
-  intelligence_index_version: '9.9',
+  intelligence_index_version: version,
   pagination: { page: pageNo, page_size: 200, total_pages: 2, has_more: hasMore },
   data,
 });
@@ -243,6 +249,111 @@ describe('benchmark sync', () => {
     const status = await sync(fakeFetch({ status: 200, body: page([unpriced], false) })).sync();
     expect(status.outcome).toBe('ok');
     expect(status.unmeasuredProfiles).toContain('opus@high');
+  });
+
+  it('reports a listed profile with no coding or agentic score as missing scores, not unmeasured', async () => {
+    const partial = {
+      ...entry('claude-opus-5-5-high', 50),
+      evaluations: { artificial_analysis_intelligence_index: 50 },
+    };
+    const status = await sync(fakeFetch({ status: 200, body: page([partial], false) })).sync();
+    expect(status.unmeasuredProfiles).not.toContain('opus@high');
+    expect(status.missingScores).toContainEqual({
+      profile: 'opus@high',
+      kinds: ['coding', 'agentic'],
+    });
+    expect(status.missingScores.map((m) => m.profile)).not.toContain('fable@max');
+  });
+
+  it('reports a listed profile with no intelligence score as unmeasured', async () => {
+    const noIntelligence = {
+      ...entry('claude-opus-5-5-high', 50),
+      evaluations: { artificial_analysis_coding_index: 49 },
+    };
+    const status = await sync(
+      fakeFetch({ status: 200, body: page([noIntelligence], false) }),
+    ).sync();
+    expect(status.unmeasuredProfiles).toContain('opus@high');
+    expect(status.missingScores.map((m) => m.profile)).not.toContain('opus@high');
+  });
+
+  it('reports an unlisted profile as unmeasured and a fully scored one as neither', async () => {
+    const status = await sync(
+      fakeFetch({ status: 200, body: page([entry('claude-opus-5-5-high', 50)], false) }),
+    ).sync();
+    expect(status.unmeasuredProfiles).toContain('opus@medium');
+    expect(status.missingScores.map((m) => m.profile)).not.toContain('opus@medium');
+    expect(status.unmeasuredProfiles).not.toContain('opus@high');
+    expect(status.missingScores.map((m) => m.profile)).not.toContain('opus@high');
+  });
+
+  it('reads a status stored before missing scores were recorded', () => {
+    const s = sync(fakeFetch());
+    state.write((ctx) => {
+      setAppSetting(ctx, 'benchmarks.status', {
+        keyConfigured: true,
+        lastSyncAt: null,
+        lastSuccessAt: null,
+        outcome: null,
+        message: null,
+        unmeasuredProfiles: [],
+      });
+    });
+    expect(s.status().missingScores).toEqual([]);
+    expect(s.status().indexVersion).toBeNull();
+  });
+
+  describe('index version', () => {
+    const warnings: { obj: object; msg: string | undefined }[] = [];
+    const warnLogger: BenchmarkSyncDeps['logger'] = {
+      ...silentLogger,
+      warn: (obj, msg) => {
+        warnings.push({ obj, msg });
+      },
+    };
+    const syncOn = (version: string) =>
+      createBenchmarkSync({
+        state,
+        clock,
+        fetch: fakeFetch({
+          status: 200,
+          body: page([entry('claude-opus-5-5-high', 50)], false, 1, version),
+        }),
+        readKey: () => KEY,
+        logger: warnLogger,
+      }).sync();
+    beforeEach(() => {
+      warnings.length = 0;
+    });
+
+    it.each([
+      { name: 'a minor change', from: '8.1', to: '8.2', changed: false },
+      { name: 'no change', from: '8.2', to: '8.2', changed: false },
+      { name: 'a major change', from: '8.2', to: '9.0', changed: true },
+    ])('handles $name', async ({ from, to, changed }) => {
+      const first = await syncOn(from);
+      expect(first.indexVersion).toBe(from);
+      expect(first.message).not.toContain('major version');
+      warnings.length = 0;
+      const second = await syncOn(to);
+      expect(second.indexVersion).toBe(to);
+      if (changed) {
+        expect(second.message).toContain(
+          'Intelligence Index major version changed from 8 to 9; review the step needs and floors.',
+        );
+        expect(warnings).toHaveLength(1);
+        expect(JSON.stringify(warnings[0]?.obj)).toBe(JSON.stringify({ from, to }));
+      } else {
+        expect(second.message).not.toContain('major version');
+        expect(warnings).toEqual([]);
+      }
+    });
+
+    it('keeps the last version through a failed sync', async () => {
+      await syncOn('8.1');
+      const failed = await sync(fakeFetch({ status: 503 })).sync();
+      expect(failed.indexVersion).toBe('8.1');
+    });
   });
 
   it('records a database failure as a failed sync instead of rejecting', async () => {

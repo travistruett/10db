@@ -198,6 +198,15 @@ describe('planSteps', () => {
     expect(plan.overBudget).toEqual([]);
   });
 
+  it('routes an implement step on intelligence when AA gives no coding score', () => {
+    const noCoding = testCatalogue().map((p) => ({ ...p, scores: { ...p.scores, coding: null } }));
+    const plan = planSteps(input({ profiles: noCoding }));
+    const implement = plan.steps[0];
+    expect(implement).toMatchObject({ role: 'implement', score: 'intelligence', pinned: false });
+    expect(implement?.profileId).not.toBeNull();
+    expect(implement?.reason).toContain('AA gives no coding score; compared on intelligence');
+  });
+
   it('lists the steps no profile within the ceiling can run', () => {
     const plan = planSteps(input({ project: { ...project, budgetCeiling: 1.5 } }));
     expect(plan.overBudget).toEqual([1]);

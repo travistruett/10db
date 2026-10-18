@@ -97,6 +97,7 @@ function routedStep(
     });
     return {
       ...base,
+      score: choice.score,
       profileId: choice.profile.id,
       model: choice.profile.model,
       effort: choice.profile.effort,
