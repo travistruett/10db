@@ -686,6 +686,45 @@ describe('read-only steps', () => {
     { name: 'git log --oneline', command: 'git log --oneline', decision: 'allow' },
     { name: 'find -name', command: "find . -name '*.ts'", decision: 'allow' },
     { name: 'recursive grep', command: 'grep -rn x src', decision: 'allow' },
+    {
+      name: 'a command substitution naming -o',
+      command: "sort $(echo -o) src/api/a.ts <<< 'payload'",
+      decision: 'deny',
+    },
+    {
+      name: 'find with a substituted -exec',
+      command: "find . -maxdepth 0 $(echo -exec) sh -c 'touch pwned' ';'",
+      decision: 'deny',
+    },
+    { name: 'a backtick substitution naming -o', command: 'sort `echo -o` x b', decision: 'deny' },
+    { name: 'ANSI-C quoting of -o', command: "sort $'-o' x b", decision: 'deny' },
+    { name: 'locale quoting of -o', command: 'sort $"-o" x b', decision: 'deny' },
+    { name: 'a default expansion yielding -o', command: 'sort ${NOPE:--o} x b', decision: 'deny' },
+    { name: 'brace expansion yielding -o', command: 'sort {-o,x} b', decision: 'deny' },
+    {
+      name: 'brace expansion yielding -exec',
+      command: "find . -maxdepth 0 {-exec,sh,-c,'touch pwned2',';'}",
+      decision: 'deny',
+    },
+    {
+      name: 'brace expansion yielding -delete',
+      command: 'find . -name x {-delete,}',
+      decision: 'deny',
+    },
+    { name: 'brace expansion yielding --pre', command: 'rg {--pre=./x.sh,TODO}', decision: 'deny' },
+    {
+      name: 'a substituted git --output',
+      command: 'git diff $(echo --output=x)',
+      decision: 'deny',
+    },
+    { name: 'a redirect to a file that starts with 1', command: 'cat x 2>&1foo', decision: 'deny' },
+    {
+      name: 'a redirect to a file that starts with null',
+      command: 'echo x >/dev/nullfoo',
+      decision: 'deny',
+    },
+    { name: 'stderr merged into stdout', command: 'cat x 2>&1', decision: 'allow' },
+    { name: 'stdout discarded', command: 'grep -r x src >/dev/null', decision: 'allow' },
   ])('$decision $name', ({ command, decision }) => {
     expect(ro('Bash', { command }).decision).toBe(decision);
   });

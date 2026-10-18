@@ -67,8 +67,13 @@ function usesOption(arg: string, option: string): boolean {
   return arg === option;
 }
 
-/** Redirections that only discard or merge output. */
-const HARMLESS_REDIRECTS = /(?:\d?>\s*\/dev\/null|2>&1)/g;
+/** Redirections that only discard or merge output; the lookahead keeps `2>&1foo` and `>/dev/nullfoo` (real file names) out. */
+const HARMLESS_REDIRECTS = /(?:\d?>\s*\/dev\/null|2>&1)(?=\s|$)/g;
+
+const UNJUDGEABLE = /[$`{}\\]/;
+
+const REFUSAL_EXPANSION =
+  'This step is read-only: a word with $, `, { }, or a backslash is expanded by the shell after 10db checks it, so it cannot be judged. Write the command out literally.';
 
 const REFUSAL =
   'This step is read-only: the shell may only read (read-only git, cat, grep, ls, find and similar, no redirection). Describe the change in mcp__10db__complete_step.';
@@ -79,8 +84,11 @@ export function readOnlyShellRefusal(command: string): string | null {
     if (segment.raw.replace(HARMLESS_REDIRECTS, '').includes('>')) return REFUSAL;
     const [cmd = '', ...args] = segment.words;
     if (cmd === '') continue;
-    // Only a bare command: no assignment, wrapper or path (those run something else), no backslash (it hides an option from matching).
-    if (cmd.includes('/') || segment.words.some((w) => w.includes('\\'))) return REFUSAL;
+    // Only a bare command: no assignment, wrapper or path (those run something else).
+    if (cmd.includes('/')) return REFUSAL;
+    // The guard judges words before the shell expands them, so a word that expands or escapes
+    // (`$(echo -o)`, `{-o,x}`, `-de\lete`) could become a writing option.
+    if (segment.words.some((w) => UNJUDGEABLE.test(w))) return REFUSAL_EXPANSION;
     if (cmd === 'git') {
       if (!READ_GIT.has(args[0] ?? '')) return REFUSAL;
       continue;
