@@ -9,11 +9,13 @@ only process that writes the database.
   `drizzle-kit generate --custom` and kept byte for byte). To change the schema: save
   `0001_decisions_fts.sql`, delete `drizzle/`, run `pnpm exec drizzle-kit generate --name init` and
   then `pnpm exec drizzle-kit generate --custom --name decisions_fts` in this package, and put the
-  saved SQL back. Local data directories are wiped; `migrateDatabase` refuses a database made under
-  an older baseline with `StaleSchemaBaselineError`.
+  saved SQL back. Nothing migrates an old database: `migrateDatabase` refuses one made under an
+  older baseline (`StaleSchemaBaselineError`), the daemon exits with code 3, and the builder deletes
+  the data directory by hand.
 - **From `v0.1.0` on, migrations are forward-only.** After changing the schema, run
   `pnpm --filter @10db/db generate` and commit the new file under `drizzle/`; never delete or
-  regenerate a migration. A `--custom` migration is authored by hand once and never regenerated.
+  regenerate a migration. A `--custom` migration is authored by hand once and never regenerated. A
+  database migrated by a newer build is refused with `NewerSchemaError`, never wiped.
 - Every row has a prefixed UUIDv7 ID (`tsk_<uuidv7>`, sortable by creation) plus `created_at` and
   `updated_at` as ISO text.
   Settings-style tables keyed by a natural key are the first exception; append-only record tables

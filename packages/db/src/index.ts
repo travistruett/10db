@@ -1,7 +1,9 @@
 export {
   DB_MIGRATIONS_DIR,
   migrateDatabase,
+  NewerSchemaError,
   openDatabase,
+  SchemaMismatchError,
   StaleSchemaBaselineError,
   type TendbDatabase,
 } from './database';

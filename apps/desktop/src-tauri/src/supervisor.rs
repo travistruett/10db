@@ -16,6 +16,9 @@ pub const BACKOFF_MAX: Duration = Duration::from_secs(30);
 pub const HEALTHY_UPTIME: Duration = Duration::from_secs(60);
 /// The daemon's exit code when another daemon already holds the data directory.
 pub const EXIT_ALREADY_RUNNING: i32 = 2;
+/// The daemon's exit code when its database's migrations disagree with the ones it ships.
+/// Restarting can't fix that, so the supervisor stops.
+pub const EXIT_SCHEMA_MISMATCH: i32 = 3;
 /// How long Quit waits for the daemon to exit before killing it. Its own shutdown stops every live
 /// session, each with up to 5 s for an interrupt and 5 s more after an abort, so this leaves room
 /// for several sessions; killing earlier would orphan `claude` children and leave `daemon.json` behind.
@@ -75,7 +78,7 @@ pub const fn exit_policy(code: Option<i32>, quitting: bool) -> ExitPolicy {
         return ExitPolicy::Stop;
     }
     match code {
-        Some(0 | EXIT_ALREADY_RUNNING) => ExitPolicy::Stop,
+        Some(0 | EXIT_ALREADY_RUNNING | EXIT_SCHEMA_MISMATCH) => ExitPolicy::Stop,
         _ => ExitPolicy::Restart,
     }
 }
@@ -315,6 +318,11 @@ mod tests {
         // Another daemon owns the data directory: connect to it instead of looping.
         assert_eq!(
             exit_policy(Some(EXIT_ALREADY_RUNNING), false),
+            ExitPolicy::Stop
+        );
+        // The database needs the builder: a restart would meet the same migrations.
+        assert_eq!(
+            exit_policy(Some(EXIT_SCHEMA_MISMATCH), false),
             ExitPolicy::Stop
         );
         // Quitting wins over everything.

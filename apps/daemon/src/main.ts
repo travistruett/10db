@@ -1,4 +1,5 @@
 import { ToolName, type SystemCheckDto } from '@10db/contracts';
+import { SchemaMismatchError } from '@10db/db';
 import { AlreadyRunningError, startDaemon } from './daemon';
 import { loadEnv } from './env';
 import {
@@ -114,6 +115,11 @@ try {
   if (error instanceof AlreadyRunningError) {
     console.error(error.message);
     process.exit(2);
+  }
+  // The shell's supervisor stops on 3 instead of restarting into the same refusal.
+  if (error instanceof SchemaMismatchError) {
+    console.error(error.message);
+    process.exit(3);
   }
   throw error;
 }

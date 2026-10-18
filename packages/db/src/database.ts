@@ -30,20 +30,42 @@ export function openDatabase(
   return drizzle({ client, schema });
 }
 
+/** The database's applied migrations disagree with the ones this build ships; it is not opened. */
+export class SchemaMismatchError extends Error {
+  override readonly name: string = 'SchemaMismatchError';
+  readonly path: string;
+
+  constructor(path: string, message: string) {
+    super(message);
+    this.path = path;
+  }
+}
+
 /**
  * The database was migrated under a schema baseline that has since been regenerated. Until the
  * first published release the baseline is rewritten instead of extended, so the fix is to delete
  * the data directory.
  */
-export class StaleSchemaBaselineError extends Error {
+export class StaleSchemaBaselineError extends SchemaMismatchError {
   override readonly name = 'StaleSchemaBaselineError';
-  readonly path: string;
 
   constructor(path: string) {
     super(
+      path,
       `${path} was created under an older schema baseline. Stop 10db and delete its data directory; pre-release databases are not migrated.`,
     );
-    this.path = path;
+  }
+}
+
+/** A newer 10db has migrated the database further than this build knows how to. */
+export class NewerSchemaError extends SchemaMismatchError {
+  override readonly name = 'NewerSchemaError';
+
+  constructor(path: string) {
+    super(
+      path,
+      `${path} was migrated by a newer version of 10db. Run that version or a later one; this build leaves the database untouched.`,
+    );
   }
 }
 
@@ -63,7 +85,7 @@ function appliedHashes(db: TendbDatabase): string[] {
 
 /**
  * Applies pending migrations, all in one transaction: either every one lands or none. Refuses a
- * database whose applied migrations are not a prefix of this baseline.
+ * database whose applied migrations are not a prefix of the ones this build ships.
  */
 export function migrateDatabase(
   db: TendbDatabase,
@@ -71,8 +93,10 @@ export function migrateDatabase(
 ): void {
   const baseline = readMigrationFiles({ migrationsFolder: migrationsDir }).map((m) => m.hash);
   const applied = appliedHashes(db);
-  if (applied.length > baseline.length || applied.some((hash, i) => hash !== baseline[i])) {
+  const shared = Math.min(applied.length, baseline.length);
+  if (applied.slice(0, shared).some((hash, i) => hash !== baseline[i])) {
     throw new StaleSchemaBaselineError(db.$client.name);
   }
+  if (applied.length > baseline.length) throw new NewerSchemaError(db.$client.name);
   migrate(db, { migrationsFolder: migrationsDir });
 }
