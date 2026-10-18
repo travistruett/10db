@@ -581,6 +581,8 @@ describe('read-only steps', () => {
     { tool: 'NotebookEdit', input: { notebook_path: 'src/api/n.ipynb' }, decision: 'deny' },
     { tool: 'Read', input: { file_path: 'src/api/a.ts' }, decision: 'allow' },
     { tool: 'Grep', input: { pattern: 'x' }, decision: 'allow' },
+    { tool: 'Skill', input: { skill: 'review-checklist' }, decision: 'allow' },
+    { tool: 'BashOutput', input: { bash_id: '1' }, decision: 'allow' },
     { tool: 'mcp__10db__complete_step', input: {}, decision: 'allow' },
     { tool: 'mcp__fs__write_file', input: { path: 'src/api/a.ts' }, decision: 'deny' },
     { tool: 'Agent', input: { prompt: 'edit it' }, decision: 'deny' },
