@@ -128,3 +128,65 @@ export const KeepAwakeMode = {
   Always: 'always',
 } as const;
 export type KeepAwakeMode = ValueOf<typeof KeepAwakeMode>;
+
+/** The roles a flow step can have (spec §4 `flows`). */
+export const StepRole = {
+  Plan: 'plan',
+  PlanReview: 'plan_review',
+  Implement: 'implement',
+  Review: 'review',
+  Qa: 'qa',
+} as const;
+export type StepRole = ValueOf<typeof StepRole>;
+
+/** Roles that judge work and must give a verdict; every role but implement is read-only. */
+export const REVIEW_ROLES: readonly StepRole[] = [
+  StepRole.PlanReview,
+  StepRole.Review,
+  StepRole.Qa,
+];
+
+export const ToolAccess = { ReadOnly: 'read_only', Edit: 'edit' } as const;
+export type ToolAccess = ValueOf<typeof ToolAccess>;
+
+/** Risks that raise a step's floor (spec §5.2: trust boundaries, migrations, auth). */
+export const RiskTag = {
+  Security: 'security',
+  Auth: 'auth',
+  Migration: 'migration',
+  Dependency: 'dependency',
+} as const;
+export type RiskTag = ValueOf<typeof RiskTag>;
+
+export const Verdict = { Approve: 'approve', Reject: 'reject' } as const;
+export type Verdict = ValueOf<typeof Verdict>;
+
+/** A skipped step never enters a plan, so there is no skipped status. */
+export const StepStatus = {
+  Pending: 'pending',
+  Running: 'running',
+  Done: 'done',
+  Failed: 'failed',
+} as const;
+export type StepStatus = ValueOf<typeof StepStatus>;
+
+/** The Artificial Analysis indexes a step can be measured against. */
+export const ScoreKind = {
+  Intelligence: 'intelligence',
+  Coding: 'coding',
+  Agentic: 'agentic',
+} as const;
+export type ScoreKind = ValueOf<typeof ScoreKind>;
+
+/** The score each role is routed on (the builder's choice): code is measured by coding, QA by agentic work. */
+export const ROLE_SCORE: Readonly<Record<StepRole, ScoreKind>> = {
+  plan: ScoreKind.Intelligence,
+  plan_review: ScoreKind.Intelligence,
+  implement: ScoreKind.Coding,
+  review: ScoreKind.Intelligence,
+  qa: ScoreKind.Agentic,
+};
+
+/** Where a profile's scores come from: the AA sync, or the builder's own numbers. */
+export const ProfileSource = { Aa: 'aa', Manual: 'manual' } as const;
+export type ProfileSource = ValueOf<typeof ProfileSource>;

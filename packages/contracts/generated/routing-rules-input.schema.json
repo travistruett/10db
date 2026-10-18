@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "rules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": "string",
+            "enum": [
+              "product",
+              "design",
+              "engineering",
+              "environment",
+              "other"
+            ]
+          },
+          "area": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "personId": {
+            "type": "string",
+            "pattern": "^psn_[0-9A-HJKMNP-TV-Z]{26}$"
+          }
+        },
+        "required": [
+          "category",
+          "area",
+          "personId"
+        ]
+      }
+    }
+  },
+  "required": [
+    "rules"
+  ]
+}

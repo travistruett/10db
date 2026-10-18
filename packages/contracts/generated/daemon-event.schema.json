@@ -33,7 +33,16 @@
         "provider.paused",
         "provider.resumed",
         "recovery.step",
-        "settings.changed"
+        "settings.changed",
+        "persona.saved",
+        "flow.saved",
+        "person.saved",
+        "team.saved",
+        "routing_rules.saved",
+        "model_profile.saved",
+        "benchmarks.synced",
+        "project.changed",
+        "step.changed"
       ]
     },
     "entityType": {
