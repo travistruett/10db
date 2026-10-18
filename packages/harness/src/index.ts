@@ -103,7 +103,7 @@ export function listSkills(dir: string = HARNESS_PLUGIN_DIR): SkillInfo[] {
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
-/** The default personas 10db seeds on first start (spec §11.3), one per flow role. */
+/** The default personas 10db seeds when it starts (spec §11.3), one per flow role. */
 export const PERSONA_KEYS = ['implementer', 'plan-reviewer', 'planner', 'qa', 'reviewer'] as const;
 
 /** A persona's instructions ride in every session prompt for its step, so they stay short. */
