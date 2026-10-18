@@ -1237,3 +1237,238 @@ describe('runner', () => {
     expect(ws(workstream.id).state).toBe('DONE');
   });
 });
+
+describe('flows', () => {
+  const approve = (opId: string) => ({
+    do: 'mcp' as const,
+    tool: 'complete_step',
+    args: { opId, summary: 'Looks right.', verdict: 'approve' },
+  });
+  const reject = (opId: string, notes = '1. The empty state has no test.') => ({
+    do: 'mcp' as const,
+    tool: 'complete_step',
+    args: { opId, summary: notes, verdict: 'reject' },
+  });
+  const implement = (opId: string) => [
+    write('src/api/a.txt', opId),
+    commit(opId, ['src/api/a.txt']),
+    turn,
+  ];
+  const step = (id: Parameters<typeof ws>[0], i: number) => ws(id).steps[i];
+  const until = async (
+    id: Parameters<typeof ws>[0],
+    done: (state: string) => boolean,
+    max = 10,
+  ) => {
+    for (let i = 0; i < max && !done(ws(id).state); i += 1) {
+      engine.launch(id);
+      await engine.runner.idle();
+    }
+  };
+
+  it('runs implement then review to DONE when the reviewer approves', async () => {
+    engine = await createTestEngine({
+      Alpha: [implement('op-flow-0001'), [approve('op-flow-0002'), turn]],
+    });
+    const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id)).toMatchObject({
+      state: 'QUEUED',
+      stepIndex: 1,
+      model: 'opus',
+      effort: 'medium',
+    });
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(ws(workstream.id).steps.map((s) => s.status)).toEqual(['done', 'done']);
+    expect(engine.adapter.prompts[1]?.prompt).toContain('Your step: 2 of 2, review, as Reviewer.');
+    expect(
+      listEvidence(engine.store.db, workstream.id).filter((e) => e.kind === 'gate'),
+    ).toHaveLength(1);
+  });
+
+  it('sends a rejection back to the implement step, one profile up, with the notes', async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        implement('op-flow-0011'),
+        [reject('op-flow-0012'), turn],
+        implement('op-flow-0013'),
+        [approve('op-flow-0014'), turn],
+      ],
+    });
+    const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    engine.launch(workstream.id); // review rejects; the implement step reruns in the same lane
+    await engine.runner.idle();
+    expect(engine.adapter.prompts[2]?.prompt).toContain('1. The empty state has no test.');
+    expect(engine.adapter.prompts[2]?.prompt).toContain(
+      'The review step (Reviewer) rejected the work',
+    );
+    expect(step(workstream.id, 0)).toMatchObject({
+      model: 'opus',
+      effort: 'low',
+      attempts: 1,
+      reason: 'escalated from sonnet@high after the review step rejected it',
+    });
+    expect(ws(workstream.id).attempt).toBe(1);
+    engine.launch(workstream.id); // the second gate passed; review again
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('DONE');
+  });
+
+  it('ends a review step that never gives a verdict as FAILED with a flag, and marks the step failed', async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        implement('op-flow-0021'),
+        [turn, { do: 'await_message', contains: 'complete_step' }, turn],
+      ],
+    });
+    const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+    await until(workstream.id, (s) => s === 'FAILED');
+    expect(ws(workstream.id)).toMatchObject({
+      state: 'FAILED',
+      failureReason: 'The review step ended without calling complete_step',
+    });
+    expect(step(workstream.id, 1)?.status).toBe('failed');
+    expect(listInbox(engine.store.db, { states: ['OPEN'] }).map((i) => i.kind)).toContain('flag');
+  });
+
+  it('accepts a verdict given after the nudge', async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        implement('op-flow-0031'),
+        [turn, { do: 'await_message', contains: 'complete_step' }, approve('op-flow-0032'), turn],
+      ],
+    });
+    const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+    await until(workstream.id, (s) => s === 'DONE');
+    expect(ws(workstream.id).state).toBe('DONE');
+  });
+
+  it('fails after the fix limit when the reviewer keeps rejecting, then retries the review cleanly', async () => {
+    const round = (n: number) => [[turn], [reject(`op-flow-04${String(n)}0`), turn]];
+    engine = await createTestEngine({
+      Alpha: [...[1, 2, 3, 4].flatMap(round), [approve('op-flow-0499'), turn]],
+    });
+    const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+    await until(workstream.id, (s) => s === 'FAILED');
+    expect(ws(workstream.id)).toMatchObject({
+      state: 'FAILED',
+      failureReason: 'The review step rejected the work and the retry limit (3) is used up',
+    });
+    // The builder retries: the review starts clean (no stale verdict) and approves.
+    engine.retry(workstream.id);
+    expect(step(workstream.id, 1)).toMatchObject({ status: 'running', result: null, attempts: 0 });
+    await until(workstream.id, (s) => s === 'DONE');
+    expect(ws(workstream.id).state).toBe('DONE');
+  });
+
+  it('escalates the implement step when the gate fails', async () => {
+    engine = await createTestEngine(
+      { Alpha: [[turn], implement('op-flow-0051'), [approve('op-flow-0052'), turn]] },
+      { gateCommand: 'test -f src/api/a.txt' },
+    );
+    const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id)).toMatchObject({
+      state: 'QUEUED',
+      nextAction: { kind: 'fix' },
+      model: 'opus',
+      effort: 'low',
+    });
+    expect(step(workstream.id, 0)?.reason).toBe('escalated from sonnet@high after the gate failed');
+    await until(workstream.id, (s) => s === 'DONE');
+    expect(ws(workstream.id).state).toBe('DONE');
+  });
+
+  it('gives the implementer the plan', async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        [
+          {
+            do: 'mcp',
+            tool: 'complete_step',
+            args: { opId: 'op-flow-0061', summary: '1. Put it in src/api/a.txt.', verdict: null },
+          },
+          turn,
+        ],
+        implement('op-flow-0062'),
+        [approve('op-flow-0063'), turn],
+        [approve('op-flow-0064'), turn],
+      ],
+    });
+    // Four criteria run the full flow's plan and QA steps; with no risk tag the plan review is skipped.
+    const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'full', criteria: 4 });
+    expect(ws(workstream.id).steps.map((s) => s.role)).toEqual([
+      'plan',
+      'implement',
+      'review',
+      'qa',
+    ]);
+    await until(workstream.id, (s) => s === 'DONE');
+    expect(engine.adapter.prompts[1]?.prompt).toContain('1. Put it in src/api/a.txt.');
+    expect(ws(workstream.id).state).toBe('DONE');
+  });
+
+  it('resumes the step it was on after a crash', async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        implement('op-flow-0071'),
+        [{ do: 'crash', message: 'boom' }],
+        [approve('op-flow-0072'), turn],
+      ],
+    });
+    const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id)).toMatchObject({
+      state: 'QUEUED',
+      stepIndex: 1,
+      nextAction: { kind: 'resume' },
+    });
+    await until(workstream.id, (s) => s === 'DONE');
+    const sessions = listSessions(engine.store.db, workstream.id);
+    expect(engine.adapter.prompts[2]).toMatchObject({ resume: sessions[1]?.providerSessionId });
+  });
+
+  it('never gives a later step an earlier step’s handoff', async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        [
+          { do: 'context', percentage: 75 },
+          { do: 'await_message', contains: 'write_handoff' },
+          {
+            do: 'mcp',
+            tool: 'write_handoff',
+            args: handoffArgs('op-flow-0081', 'Commit the file'),
+          },
+          turn,
+        ],
+        implement('op-flow-0082'),
+        [{ do: 'crash', message: 'boom' }],
+        [{ do: 'crash', message: 'boom again' }],
+        [approve('op-flow-0083'), turn],
+      ],
+    });
+    const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+    await until(workstream.id, (s) => s === 'DONE');
+    // The review crashed twice: once resumed, then started fresh. A fresh review starts, not continues.
+    expect(engine.adapter.prompts[4]?.prompt).not.toContain('Continue from the handoff');
+    expect(engine.adapter.prompts[4]?.prompt).toContain('Your step: 2 of 2, review');
+  });
+
+  it('runs a workstream with no stored steps as one implement step', async () => {
+    engine = await createTestEngine({ Alpha: [implement('op-flow-0091')] });
+    const { workstream } = engine.addTask('Alpha');
+    expect(ws(workstream.id).steps).toEqual([]);
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('DONE');
+  });
+});

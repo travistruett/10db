@@ -40,7 +40,7 @@ import {
 } from '../src/runner';
 import { FakeAdapter, type FakeScriptBook } from '../src/sessions';
 import { createGateRunner } from '../src/verify';
-import { seedTeam, startTaskWithPlan } from '../src/team';
+import { retryWorkstream, seedTeam, startTaskWithPlan } from '../src/team';
 import { measureForTests } from './catalogue';
 import { createTempRepo, tempDir } from './fixtures';
 
@@ -62,6 +62,8 @@ export interface TestEngine {
   ): { task: TaskDto; workstream: WorkstreamDto };
   /** Does what the scheduler does: claims, lease, STARTING, then launch. */
   launch(id: WorkstreamId): void;
+  /** Retries a failed workstream the way the API does. */
+  retry(id: WorkstreamId): WorkstreamDto;
   close(): Promise<void>;
 }
 
@@ -181,6 +183,7 @@ export async function createTestEngine(
       });
       created.launch(id, fence);
     },
+    retry: (id) => retryWorkstream(state, id),
     async close() {
       await created.stopAll('shutdown');
       server.close();

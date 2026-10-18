@@ -42,6 +42,7 @@ export interface PromptInput {
   readonly contextPack: ContextPack;
   readonly step: StepBrief;
   readonly priorResults: readonly PriorResult[];
+  readonly revisedBy: { readonly role: StepRole; readonly personaName: string } | null;
 }
 
 export const HANDOFF_NUDGE =
@@ -141,6 +142,14 @@ function actionSection(input: PromptInput): string {
         : 'The gate failed. Run it, fix the cause, commit, and end your turn.';
     case 'verify':
       return 'Verify the work against the acceptance criteria, commit anything outstanding, and end your turn.';
+    case 'revise': {
+      const by = input.revisedBy
+        ? `The ${input.revisedBy.role} step (${input.revisedBy.personaName})`
+        : 'A reviewer';
+      return input.step.tools === ToolAccess.Edit
+        ? `${by} rejected the work. Its notes are under Earlier steps. Address each one, commit, and end your turn.`
+        : `${by} rejected your result. Its notes are under Earlier steps. Address each one, then call mcp__10db__complete_step again.`;
+    }
   }
 }
 

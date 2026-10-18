@@ -81,6 +81,7 @@ const implementStep = {
 const base = {
   step: implementStep,
   priorResults: [],
+  revisedBy: null,
   task,
   claims: [{ kind: 'area' as const, name: 'ui' }],
   handoff: null,

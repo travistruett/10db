@@ -196,6 +196,8 @@ export const NextAction = z.discriminatedUnion('kind', [
   }),
   z.object({ kind: z.literal('fix'), evidenceId: EvidenceId }),
   z.object({ kind: z.literal('verify') }),
+  /** Rerun a step a reviewer rejected; the rejecting step's notes are in its result. */
+  z.object({ kind: z.literal('revise'), reviewStep: z.int().min(0) }),
 ]);
 export type NextAction = z.infer<typeof NextAction>;
 

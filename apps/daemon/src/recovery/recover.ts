@@ -12,7 +12,7 @@ import {
   getProject,
   getTask,
   getWorkstreamRow,
-  latestHandoff,
+  latestHandoffForStep,
   latestToolOp,
   listInbox,
   listSessions,
@@ -27,6 +27,7 @@ import type { Git } from '../git';
 import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
 import { nextActionAfterCrash } from '../runner';
+import { failStep } from '../team';
 import type { ProcessTerminator } from './processes';
 
 export interface RecoveryReport {
@@ -111,7 +112,7 @@ export async function recoverOnStartup(opts: {
     const nextAction: NextAction =
       row.state === S.Verifying || row.nextAction.kind === 'verify'
         ? { kind: 'verify' }
-        : nextActionAfterCrash(row.nextAction, providerSessionId, latestHandoff(db, ws.id));
+        : nextActionAfterCrash(row.nextAction, providerSessionId, latestHandoffForStep(db, row));
     // A waiting workstream has no edge to FAILED, and it never ran a session this boot.
     const failed = !waiting && attempts > opts.maxRecoveryAttempts;
     opts.state.write((ctx) => {
@@ -143,6 +144,7 @@ export async function recoverOnStartup(opts: {
           patch: {
             recoveryAttempts: attempts,
             failureReason: `Recovery failed ${String(attempts)} times`,
+            ...(row.steps.length > 0 ? { steps: failStep(row.steps, row.stepIndex) } : {}),
           },
         });
         releaseClaims(ctx, ws.id);

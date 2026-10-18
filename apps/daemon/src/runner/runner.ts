@@ -4,6 +4,7 @@ import {
   EventType,
   InboxKind,
   PermissionChoice,
+  StepRole,
   ToolAccess,
   WorkstreamState as S,
   type HandoffId,
@@ -16,6 +17,7 @@ import {
   type Provider,
   type SessionId,
   type WorkstreamId,
+  type WorkstreamStep,
 } from '@10db/contracts';
 import {
   activeClaims,
@@ -36,18 +38,22 @@ import {
   insertInboxItem,
   insertSession,
   insertSource,
-  latestHandoff,
+  latestHandoffForStep,
   latestToolOp,
+  listModelProfiles,
   listEvidence,
   markSessionStarted,
   openItemsForWorkstream,
   patchWorkstream,
+  recordProfileOutcome,
   releaseClaims,
   setTaskStatus,
   StaleFenceError,
   type DbReader,
   transitionWorkstream,
   updateSessionUsage,
+  type WorkstreamRow,
+  type WriteContext,
 } from '@10db/db';
 import {
   buildContextPack,
@@ -56,6 +62,7 @@ import {
   HANDOFF_FIRM_NUDGE,
   HANDOFF_NUDGE,
   HANDOFF_NUDGE_READ_ONLY,
+  RESULT_NUDGE,
 } from '../briefing';
 import type { Clock, Timer } from '../clock';
 import type { StateStore } from '../events';
@@ -70,6 +77,7 @@ import {
 import type { Logger } from '../log';
 import { mintSessionToken } from '../mcp';
 import { allowedToolsFor, commandPrefix } from '../permissions';
+import { escalateStep } from '../routing';
 import {
   ProjectMcpError,
   readRepoMcp,
@@ -81,6 +89,7 @@ import {
   type SessionAdapter,
   type SessionHandle,
 } from '../sessions';
+import { advanceSteps, failStep, moveAfter, sendBackSteps, type StepEntry } from '../team';
 import type { GateRunner } from '../verify';
 import type { LiveSessions } from './live-sessions';
 import { nextActionAfterCrash } from './next-action';
@@ -231,6 +240,8 @@ interface SessionState {
   /** A briefed conversation with no baseline yet: the session's first context reading becomes it. */
   awaitingBriefingBaseline: boolean;
   firmSent: boolean;
+  /** A read-only step that ended its turn without a result is asked once. */
+  resultNudged: boolean;
   parkedFor: InboxItemId | null;
   /**
    * The cards the session is waiting on, oldest first, with how many waits each has: a folded card can
@@ -254,7 +265,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     pid === null || !opts.identifyProcess ? Promise.resolve(null) : opts.identifyProcess(pid);
 
   function freshAction(reader: DbReader, id: WorkstreamId): NextAction {
-    const latest = latestHandoff(reader, id);
+    const latest = latestHandoffForStep(reader, getWorkstreamRow(reader, id));
     return latest ? { kind: 'continue_from_handoff', handoffId: latest.id } : { kind: 'start' };
   }
 
@@ -278,7 +289,11 @@ export function createRunner(opts: RunnerOptions): Runner {
       transitionWorkstream(ctx, id, {
         to: S.Failed,
         fence,
-        patch: { failureReason: reason, currentSessionId: null },
+        patch: {
+          failureReason: reason,
+          currentSessionId: null,
+          ...(row.steps.length > 0 ? { steps: failStep(row.steps, row.stepIndex) } : {}),
+        },
         reason,
       });
       releaseClaims(ctx, id);
@@ -290,6 +305,155 @@ export function createRunner(opts: RunnerOptions): Runner {
       title: `Workstream failed: ${getTask(db, row.taskId).title}`,
       body: reason,
     });
+  }
+
+  /** A step entered now; its floor is the sessions this workstream has run so far. */
+  function entryFor(ctx: WriteContext, id: WorkstreamId): StepEntry {
+    return { now: ctx.now, sessions: getWorkstream(ctx.tx, id).sessionCount };
+  }
+
+  /** Observed stats for the frontier: a finished step counts for its profile. */
+  function countFinished(ctx: WriteContext, step: WorkstreamStep): void {
+    if (step.profileId)
+      recordProfileOutcome(ctx, step.profileId, {
+        firstPass: step.attempts === 0,
+        escalated: false,
+      });
+  }
+
+  /** One profile up a retried step's own score. */
+  function escalated(
+    row: WorkstreamRow,
+    step: WorkstreamStep,
+    why: string,
+  ): { step: WorkstreamStep; moved: boolean } {
+    const project = getProject(db, row.projectId);
+    const result = escalateStep(step, {
+      provider: project.provider,
+      budgetCeiling: project.budgetCeiling,
+      profiles: listModelProfiles(db),
+      why,
+    });
+    return { step: result.step, moved: result.escalated };
+  }
+
+  /** DONE: the task is done, claims are released and the builder gets a review card (spec §7). */
+  function completeInTx(
+    ctx: WriteContext,
+    id: WorkstreamId,
+    fence: number,
+    row: WorkstreamRow,
+    commitShas: readonly string[],
+    reason: string,
+  ): void {
+    transitionWorkstream(ctx, id, { to: S.Done, fence, reason });
+    setTaskStatus(ctx, row.taskId, 'done');
+    releaseClaims(ctx, id);
+    clearLease(ctx, id);
+    insertInboxItem(ctx, {
+      projectId: row.projectId,
+      kind: 'review',
+      title: `Review: ${getTask(ctx.tx, row.taskId).title}`,
+      body: `Gate passed with ${String(commitShas.length)} commit(s).`,
+      options: [{ label: 'accept', description: 'Looks good' }],
+      recommendation: null,
+      category: 'product',
+      urgency: 'low',
+      detail: { workstreamId: id, commits: [...commitShas] },
+      foldKey: null,
+      targets: [],
+    });
+  }
+
+  /** After a read-only step's session: the next step in this lane, DONE, a rework, or a failure. */
+  function finishReadOnlyStep(id: WorkstreamId, ctl: Control, row: WorkstreamRow): 'next' | 'stop' {
+    const step = currentStep(row);
+    const move = moveAfter(row.steps, row.stepIndex);
+    switch (move.kind) {
+      case 'no_result':
+        fail(id, ctl.fence, `The ${step.role} step ended without calling complete_step`);
+        return 'stop';
+      case 'done': {
+        const lastGate = listEvidence(db, id)
+          .filter((e) => e.kind === 'gate' && e.exitCode === 0)
+          .at(-1);
+        opts.state.write((ctx) => {
+          countFinished(ctx, step);
+          patchWorkstream(ctx, id, ctl.fence, {
+            steps: advanceSteps(row.steps, row.stepIndex, -1, entryFor(ctx, id)),
+          });
+          // The workflow has no RUNNING -> DONE edge; a read-only step changed no code, so no second gate.
+          transitionWorkstream(ctx, id, {
+            to: S.Verifying,
+            fence: ctl.fence,
+            reason: 'steps complete',
+          });
+          completeInTx(
+            ctx,
+            id,
+            ctl.fence,
+            row,
+            lastGate?.commitShas ?? [],
+            `${step.role} approved`,
+          );
+        });
+        return 'stop';
+      }
+      case 'advance': {
+        const next = row.steps[move.to];
+        if (!next) return 'stop';
+        opts.state.write((ctx) => {
+          countFinished(ctx, step);
+          patchWorkstream(ctx, id, ctl.fence, {
+            steps: advanceSteps(row.steps, row.stepIndex, move.to, entryFor(ctx, id)),
+            stepIndex: move.to,
+            nextAction: { kind: 'start' },
+            model: next.model,
+            effort: next.effort,
+          });
+          ctx.emit({
+            type: EventType.StepChanged,
+            entityType: 'workstream',
+            entityId: id,
+            data: { stepIndex: move.to, role: next.role },
+          });
+        });
+        return 'next';
+      }
+      case 'send_back': {
+        const attempt = row.attempt + 1;
+        if (attempt > opts.limits.maxFixAttempts) {
+          fail(
+            id,
+            ctl.fence,
+            `The ${step.role} step rejected the work and the retry limit (${String(opts.limits.maxFixAttempts)}) is used up`,
+          );
+          return 'stop';
+        }
+        const target = row.steps[move.to];
+        if (!target) return 'stop';
+        const up = escalated(row, target, `the ${step.role} step rejected it`);
+        opts.state.write((ctx) => {
+          if (up.moved && target.profileId)
+            recordProfileOutcome(ctx, target.profileId, { firstPass: false, escalated: true });
+          patchWorkstream(ctx, id, ctl.fence, {
+            attempt,
+            steps: sendBackSteps(row.steps, row.stepIndex, move.to, up.step, entryFor(ctx, id)),
+            stepIndex: move.to,
+            nextAction: { kind: 'revise', reviewStep: row.stepIndex },
+            model: up.step.model,
+            effort: up.step.effort,
+          });
+          ctx.emit({
+            type: EventType.StepChanged,
+            entityType: 'workstream',
+            entityId: id,
+            data: { stepIndex: move.to, role: target.role, sentBackBy: step.role },
+          });
+        });
+        return 'next';
+      }
+    }
   }
 
   /**
@@ -454,7 +618,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         const nextAction = nextActionAfterCrash(
           row.nextAction,
           outcome.providerSessionId,
-          latestHandoff(db, id),
+          latestHandoffForStep(db, row),
         );
         opts.state.write((ctx) => {
           transitionWorkstream(ctx, id, {
@@ -486,6 +650,8 @@ export function createRunner(opts: RunnerOptions): Runner {
         ? [{ role: s.role, personaName: s.personaName, result: s.result }]
         : [],
     );
+    const reviser = action.kind === 'revise' ? row.steps[action.reviewStep] : undefined;
+    const readOnly = step.tools === ToolAccess.ReadOnly;
     const baseHead = row.baseHead ?? (await opts.git.head(project.repoPath));
     // A stop that landed while the head was read finds no handle to stop, so it is honoured here.
     if (ctl.stopReason) return { kind: 'stopped', reason: ctl.stopReason, providerSessionId: null };
@@ -513,6 +679,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         tools: step.tools,
       },
       priorResults,
+      revisedBy: reviser ? { role: reviser.role, personaName: reviser.personaName } : null,
       evidence: action.kind === 'fix' ? getEvidence(db, action.evidenceId) : null,
       recovery:
         action.kind === 'resume'
@@ -555,6 +722,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       briefingBaselinePct: inheritedBaselinePct,
       awaitingBriefingBaseline: briefed && inheritedBaselinePct === null,
       firmSent: false,
+      resultNudged: false,
       parkedFor: null,
       waitingOn: new Map(),
       waitTimer: null,
@@ -640,7 +808,7 @@ export function createRunner(opts: RunnerOptions): Runner {
           areas: project.areas,
           hazards: project.hazards,
           claims: claims(),
-          readOnly: step.tools === ToolAccess.ReadOnly,
+          readOnly,
         }),
       canUseTool: createPermissionBroker(
         { state: opts.state, inbox: opts.inbox },
@@ -724,9 +892,7 @@ export function createRunner(opts: RunnerOptions): Runner {
                   });
                 }
               });
-              handle.send(
-                step.tools === ToolAccess.ReadOnly ? HANDOFF_NUDGE_READ_ONLY : HANDOFF_NUDGE,
-              );
+              handle.send(readOnly ? HANDOFF_NUDGE_READ_ONLY : HANDOFF_NUDGE);
             } else if (
               st.handoffRequested &&
               !st.firmSent &&
@@ -778,6 +944,13 @@ export function createRunner(opts: RunnerOptions): Runner {
             } else if (st.handoffRequested && !st.firmSent) {
               st.firmSent = true;
               handle.send(HANDOFF_FIRM_NUDGE);
+            } else if (
+              readOnly &&
+              currentStep(getWorkstreamRow(db, id)).result?.sessionId !== session.id &&
+              !st.resultNudged
+            ) {
+              st.resultNudged = true;
+              handle.send(RESULT_NUDGE);
             } else {
               st.outcome = { kind: 'step_done', withoutHandoff: st.handoffRequested };
               await handle.stop();
@@ -963,26 +1136,37 @@ export function createRunner(opts: RunnerOptions): Runner {
       commitShas,
     };
     if (result.exitCode === 0) {
+      const step = currentStep(row);
+      const move = moveAfter(row.steps, row.stepIndex);
+      const next = move.kind === 'advance' ? row.steps[move.to] : undefined;
+      if (move.kind === 'advance' && next) {
+        opts.state.write((ctx) => {
+          insertEvidence(ctx, evidence);
+          countFinished(ctx, step);
+          transitionWorkstream(ctx, id, {
+            to: S.Queued,
+            fence: ctl.fence,
+            patch: {
+              nextAction: { kind: 'start' },
+              steps: advanceSteps(row.steps, row.stepIndex, move.to, entryFor(ctx, id)),
+              stepIndex: move.to,
+              model: next.model,
+              effort: next.effort,
+            },
+            reason: `gate passed; next: ${next.role}`,
+          });
+          clearLease(ctx, id);
+        });
+        return;
+      }
       opts.state.write((ctx) => {
         insertEvidence(ctx, evidence);
-        transitionWorkstream(ctx, id, { to: S.Done, fence: ctl.fence, reason: 'gate passed' });
-        setTaskStatus(ctx, row.taskId, 'done');
-        releaseClaims(ctx, id);
-        clearLease(ctx, id);
-        // Spec §7: a Review card tells the builder verified work is ready to look at.
-        insertInboxItem(ctx, {
-          projectId: project.id,
-          kind: 'review',
-          title: `Review: ${getTask(ctx.tx, row.taskId).title}`,
-          body: `Gate passed with ${String(commitShas.length)} commit(s).`,
-          options: [{ label: 'accept', description: 'Looks good' }],
-          recommendation: null,
-          category: 'product',
-          urgency: 'low',
-          detail: { workstreamId: id, commits: commitShas },
-          foldKey: null,
-          targets: [],
-        });
+        countFinished(ctx, step);
+        if (row.steps.length > 0)
+          patchWorkstream(ctx, id, ctl.fence, {
+            steps: advanceSteps(row.steps, row.stepIndex, -1, entryFor(ctx, id)),
+          });
+        completeInTx(ctx, id, ctl.fence, row, commitShas, 'gate passed');
       });
       return;
     }
@@ -996,11 +1180,27 @@ export function createRunner(opts: RunnerOptions): Runner {
       );
       return;
     }
+    const failedStep = currentStep(row);
+    const up = row.steps.length > 0 ? escalated(row, failedStep, 'the gate failed') : null;
     opts.state.write((ctx) => {
+      if (up?.moved && failedStep.profileId)
+        recordProfileOutcome(ctx, failedStep.profileId, { firstPass: false, escalated: true });
       transitionWorkstream(ctx, id, {
         to: S.Queued,
         fence: ctl.fence,
-        patch: { nextAction: { kind: 'fix', evidenceId }, attempt },
+        patch: {
+          nextAction: { kind: 'fix', evidenceId },
+          attempt,
+          ...(up
+            ? {
+                steps: row.steps.map((s, i) =>
+                  i === row.stepIndex ? { ...up.step, attempts: s.attempts + 1 } : s,
+                ),
+                model: up.step.model,
+                effort: up.step.effort,
+              }
+            : {}),
+        },
         reason: `gate exit ${String(result.exitCode)}`,
       });
       clearLease(ctx, id);
@@ -1028,8 +1228,13 @@ export function createRunner(opts: RunnerOptions): Runner {
             settle(id, ctl, { kind: 'stopped', reason: 'cancelled', providerSessionId: null });
             return;
           }
+          const finished = getWorkstreamRow(db, id);
+          if (currentStep(finished).role !== StepRole.Implement) {
+            if (finishReadOnlyStep(id, ctl, finished) === 'next') continue;
+            return;
+          }
           if (outcome.withoutHandoff) {
-            const row = getWorkstreamRow(db, id);
+            const row = finished;
             opts.inbox.flag({
               projectId: row.projectId,
               workstreamId: id,

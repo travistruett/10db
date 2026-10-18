@@ -1,2 +1,3 @@
 export { seedTeam } from './seed';
-export { resolveStepPlan, startTaskWithPlan } from './steps';
+export { resolveStepPlan, retryWorkstream, startTaskWithPlan } from './steps';
+export { advanceSteps, failStep, moveAfter, sendBackSteps, type StepEntry } from './step-flow';

@@ -18,6 +18,7 @@ export function nextActionAfterCrash(
   switch (previous.kind) {
     case 'verify':
     case 'fix':
+    case 'revise':
       return previous;
     case 'answer':
       return { ...previous, providerSessionId: providerSessionId ?? previous.providerSessionId };

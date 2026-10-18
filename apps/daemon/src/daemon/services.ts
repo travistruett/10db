@@ -2,29 +2,24 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   ACTIVE_STATES,
-  ConflictError,
   InvalidError,
   type McpServerStatusDto,
   ProjectInput,
-  WorkstreamState,
   type SystemCheckDto,
 } from '@10db/contracts';
 import {
   getMcpApproval,
   getProject,
   getWorkstream,
-  getWorkstreamRow,
   insertProject,
   insertTask,
   latestEventSeq,
-  latestHandoff,
   listFlows,
   listEventsAfter,
   listInbox,
   listProjects,
   listTasks,
   listWorkstreams,
-  transitionWorkstream,
 } from '@10db/db';
 import type { ApiServices } from '../api';
 import type { EventBus, StateStore } from '../events';
@@ -33,7 +28,7 @@ import type { KeepAwake } from '../keep-awake';
 import type { Runner } from '../runner';
 import type { Scheduler } from '../scheduler';
 import { ProjectMcpError, readRepoMcp, type RepoMcp } from '../sessions';
-import { startTaskWithPlan } from '../team';
+import { retryWorkstream, startTaskWithPlan } from '../team';
 
 /** The HTTP layer's view of the daemon: reads go to the database, writes go through the state store. */
 export function createServices(deps: {
@@ -73,25 +68,7 @@ export function createServices(deps: {
       return getWorkstream(db, id);
     },
     retryWorkstream(id) {
-      if (getWorkstreamRow(db, id).state !== WorkstreamState.Failed) {
-        throw new ConflictError('Only a failed workstream can be retried');
-      }
-      const latest = latestHandoff(db, id);
-      const ws = deps.state.write((ctx) =>
-        transitionWorkstream(ctx, id, {
-          to: WorkstreamState.Queued,
-          fence: null,
-          patch: {
-            attempt: 0,
-            recoveryAttempts: 0,
-            failureReason: null,
-            nextAction: latest
-              ? { kind: 'continue_from_handoff', handoffId: latest.id }
-              : { kind: 'start' },
-          },
-          reason: 'retried by the builder',
-        }),
-      );
+      const ws = retryWorkstream(deps.state, id);
       deps.scheduler.requestTick();
       return ws;
     },
