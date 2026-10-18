@@ -1,17 +1,30 @@
 import {
   DomainError,
   EventsHead,
+  FlowId,
+  FlowInput,
+  FlowPatch,
   HealthResponse,
   InboxAnswer,
   InboxItemId,
   InboxState,
   KeepAwakeInput,
+  ModelProfileId,
+  ModelProfilePatch,
+  PersonaId,
+  PersonaInput,
+  PersonaPatch,
+  PersonInput,
   ProjectId,
   ProjectInput,
+  ProjectPatch,
   PROTOCOL_VERSION,
+  RoutingRulesInput,
   SystemCheckDto,
   TaskId,
   TaskInput,
+  TaskPatch,
+  TeamInput,
   WorkstreamId,
 } from '@10db/contracts';
 import { Hono } from 'hono';
@@ -114,6 +127,100 @@ export function createApp(deps: ApiDeps) {
       c.json(deps.services.reviewProjectMcp(ProjectId.parse(c.req.param('projectId')))),
     )
     .get('/flows', (c) => c.json(deps.services.listFlows()))
+    .patch(
+      '/projects/:projectId',
+      validator('json', (value): ProjectPatch => ProjectPatch.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.patchProject(
+            ProjectId.parse(c.req.param('projectId')),
+            c.req.valid('json'),
+          ),
+        ),
+    )
+    .get('/projects/:projectId/team', (c) =>
+      c.json(deps.services.getTeam(ProjectId.parse(c.req.param('projectId')))),
+    )
+    .put(
+      '/projects/:projectId/team',
+      validator('json', (value): TeamInput => TeamInput.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.setTeam(ProjectId.parse(c.req.param('projectId')), c.req.valid('json')),
+        ),
+    )
+    .get('/projects/:projectId/routing-rules', (c) =>
+      c.json(deps.services.listRoutingRules(ProjectId.parse(c.req.param('projectId')))),
+    )
+    .put(
+      '/projects/:projectId/routing-rules',
+      validator('json', (value): RoutingRulesInput => RoutingRulesInput.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.setRoutingRules(
+            ProjectId.parse(c.req.param('projectId')),
+            c.req.valid('json'),
+          ),
+        ),
+    )
+    .get('/personas', (c) => c.json(deps.services.listPersonas()))
+    .post(
+      '/personas',
+      validator('json', (value): PersonaInput => PersonaInput.parse(value)),
+      (c) => c.json(deps.services.createPersona(c.req.valid('json')), 201),
+    )
+    .patch(
+      '/personas/:personaId',
+      validator('json', (value): PersonaPatch => PersonaPatch.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.patchPersona(
+            PersonaId.parse(c.req.param('personaId')),
+            c.req.valid('json'),
+          ),
+        ),
+    )
+    .get('/people', (c) => c.json(deps.services.listPeople()))
+    .post(
+      '/people',
+      validator('json', (value): PersonInput => PersonInput.parse(value)),
+      (c) => c.json(deps.services.createPerson(c.req.valid('json')), 201),
+    )
+    .post(
+      '/flows',
+      validator('json', (value): FlowInput => FlowInput.parse(value)),
+      (c) => c.json(deps.services.createFlow(c.req.valid('json')), 201),
+    )
+    .patch(
+      '/flows/:flowId',
+      validator('json', (value): FlowPatch => FlowPatch.parse(value)),
+      (c) =>
+        c.json(deps.services.patchFlow(FlowId.parse(c.req.param('flowId')), c.req.valid('json'))),
+    )
+    .get('/model-profiles', (c) => c.json(deps.services.listModelProfiles()))
+    .patch(
+      '/model-profiles/:profileId',
+      validator('json', (value): ModelProfilePatch => ModelProfilePatch.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.patchModelProfile(
+            ModelProfileId.parse(c.req.param('profileId')),
+            c.req.valid('json'),
+          ),
+        ),
+    )
+    .get('/benchmarks/status', (c) => c.json(deps.services.benchmarkStatus()))
+    .post('/benchmarks/sync', async (c) => c.json(await deps.services.syncBenchmarks()))
+    .get('/benchmarks/models', (c) => c.json(deps.services.listAaModels()))
+    .patch(
+      '/tasks/:taskId',
+      validator('json', (value): TaskPatch => TaskPatch.parse(value)),
+      (c) =>
+        c.json(deps.services.patchTask(TaskId.parse(c.req.param('taskId')), c.req.valid('json'))),
+    )
+    .get('/tasks/:taskId/step-plan', (c) =>
+      c.json(deps.services.stepPlan(TaskId.parse(c.req.param('taskId')))),
+    )
     .post('/tasks/:taskId/start', (c) =>
       c.json(deps.services.startTask(TaskId.parse(c.req.param('taskId'))), 201),
     )

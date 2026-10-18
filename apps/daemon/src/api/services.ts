@@ -1,6 +1,11 @@
 import type {
+  AaModelDto,
+  BenchmarkStatusDto,
   DaemonEvent,
   FlowDto,
+  FlowId,
+  FlowInput,
+  FlowPatch,
   InboxAnswer,
   InboxItemDto,
   InboxItemId,
@@ -8,13 +13,29 @@ import type {
   KeepAwakeMode,
   KeepAwakeStatus,
   McpServerStatusDto,
+  ModelProfileDto,
+  ModelProfileId,
+  ModelProfilePatch,
+  PersonaDto,
+  PersonaId,
+  PersonaInput,
+  PersonaPatch,
+  PersonDto,
+  PersonInput,
   ProjectDto,
   ProjectId,
   ProjectInput,
+  ProjectPatch,
+  RoutingRuleDto,
+  RoutingRulesInput,
+  StepPlanDto,
   SystemCheckDto,
   TaskDto,
   TaskId,
   TaskInput,
+  TaskPatch,
+  TeamDto,
+  TeamInput,
   WorkstreamDto,
   WorkstreamId,
 } from '@10db/contracts';
@@ -41,4 +62,25 @@ export interface ApiServices {
   eventsHead(): number;
   /** Each server in the project's `.mcp.json` and its verdict; raises an approval card for each one with none. */
   reviewProjectMcp(projectId: ProjectId): McpServerStatusDto[];
+  listPersonas(): PersonaDto[];
+  createPersona(input: PersonaInput): PersonaDto;
+  patchPersona(id: PersonaId, patch: PersonaPatch): PersonaDto;
+  listPeople(): PersonDto[];
+  createPerson(input: PersonInput): PersonDto;
+  createFlow(input: FlowInput): FlowDto;
+  patchFlow(id: FlowId, patch: FlowPatch): FlowDto;
+  listModelProfiles(): ModelProfileDto[];
+  patchModelProfile(id: ModelProfileId, patch: ModelProfilePatch): ModelProfileDto;
+  benchmarkStatus(): BenchmarkStatusDto;
+  syncBenchmarks(): Promise<BenchmarkStatusDto>;
+  /** AA's list as stored locally; the UI shows it only with AA's attribution. */
+  listAaModels(): AaModelDto[];
+  patchProject(id: ProjectId, patch: ProjectPatch): ProjectDto;
+  getTeam(projectId: ProjectId): TeamDto;
+  setTeam(projectId: ProjectId, input: TeamInput): TeamDto;
+  listRoutingRules(projectId: ProjectId): RoutingRuleDto[];
+  setRoutingRules(projectId: ProjectId, input: RoutingRulesInput): RoutingRuleDto[];
+  patchTask(id: TaskId, patch: TaskPatch): TaskDto;
+  /** What starting the task would run; throws InvalidError when no flow or profile fits. */
+  stepPlan(taskId: TaskId): StepPlanDto;
 }

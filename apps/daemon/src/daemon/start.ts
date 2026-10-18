@@ -304,6 +304,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       inbox,
       keepAwake,
       systemCheck: opts.systemCheck ?? noSystemCheck,
+      benchmarks,
     }),
     upgradeWebSocket,
     onUnexpectedError: (error) => {

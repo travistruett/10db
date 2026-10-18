@@ -10,17 +10,34 @@ import {
 import {
   getMcpApproval,
   getProject,
+  getTeam,
   getWorkstream,
+  insertFlow,
+  insertPerson,
+  insertPersona,
   insertProject,
   insertTask,
   latestEventSeq,
-  listFlows,
+  listAaModels,
   listEventsAfter,
+  listFlows,
   listInbox,
+  listModelProfiles,
+  listPeople,
+  listPersonas,
   listProjects,
+  listRoutingRules,
   listTasks,
   listWorkstreams,
+  patchFlow,
+  patchModelProfile,
+  patchPersona,
+  patchProject,
+  patchTask,
+  setRoutingRules,
+  setTeam,
 } from '@10db/db';
+import type { BenchmarkSync } from '../benchmarks';
 import type { ApiServices } from '../api';
 import type { EventBus, StateStore } from '../events';
 import { requestMcpApproval, type InboxService } from '../inbox';
@@ -28,7 +45,7 @@ import type { KeepAwake } from '../keep-awake';
 import type { Runner } from '../runner';
 import type { Scheduler } from '../scheduler';
 import { ProjectMcpError, readRepoMcp, type RepoMcp } from '../sessions';
-import { retryWorkstream, startTaskWithPlan } from '../team';
+import { resolveStepPlan, retryWorkstream, startTaskWithPlan } from '../team';
 
 /** The HTTP layer's view of the daemon: reads go to the database, writes go through the state store. */
 export function createServices(deps: {
@@ -39,6 +56,7 @@ export function createServices(deps: {
   readonly inbox: InboxService;
   readonly keepAwake: KeepAwake;
   readonly systemCheck: () => Promise<SystemCheckDto>;
+  readonly benchmarks: BenchmarkSync;
 }): ApiServices {
   const db = deps.state.db;
   return {
@@ -84,6 +102,29 @@ export function createServices(deps: {
     keepAwake: () => deps.keepAwake.status(),
     setKeepAwake: (mode) => deps.keepAwake.setMode(mode),
     eventsHead: () => latestEventSeq(db),
+    listPersonas: () => listPersonas(db, { includeArchived: true }),
+    createPersona: (input) => deps.state.write((ctx) => insertPersona(ctx, input)),
+    patchPersona: (id, patch) => deps.state.write((ctx) => patchPersona(ctx, id, patch)),
+    listPeople: () => listPeople(db),
+    createPerson: (input) => deps.state.write((ctx) => insertPerson(ctx, input)),
+    createFlow: (input) => deps.state.write((ctx) => insertFlow(ctx, input)),
+    patchFlow: (id, patch) => deps.state.write((ctx) => patchFlow(ctx, id, patch)),
+    listModelProfiles: () => listModelProfiles(db),
+    patchModelProfile: (id, patch) => deps.state.write((ctx) => patchModelProfile(ctx, id, patch)),
+    benchmarkStatus: () => deps.benchmarks.status(),
+    syncBenchmarks: () => deps.benchmarks.sync(),
+    listAaModels: () => listAaModels(db),
+    patchProject: (id, patch) => deps.state.write((ctx) => patchProject(ctx, id, patch)),
+    getTeam(projectId) {
+      getProject(db, projectId);
+      return getTeam(db, projectId);
+    },
+    setTeam: (projectId, input) => deps.state.write((ctx) => setTeam(ctx, projectId, input)),
+    listRoutingRules: (projectId) => listRoutingRules(db, projectId),
+    setRoutingRules: (projectId, input) =>
+      deps.state.write((ctx) => setRoutingRules(ctx, projectId, input)),
+    patchTask: (id, patch) => deps.state.write((ctx) => patchTask(ctx, id, patch)),
+    stepPlan: (taskId) => resolveStepPlan(db, taskId),
     reviewProjectMcp(projectId) {
       const project = getProject(db, projectId);
       let repo: RepoMcp;

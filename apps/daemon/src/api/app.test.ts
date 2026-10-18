@@ -7,12 +7,22 @@ import {
   type DaemonEvent,
 } from '@10db/contracts';
 import { defineWebSocketHelper } from 'hono/ws';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from './app';
 import type { ApiServices } from './services';
 
 const TOKEN = 'ui-token-for-tests';
 const startedAt = new Date('2026-10-13T12:00:00.000Z');
+
+const reached: string[] = [];
+beforeEach(() => {
+  reached.length = 0;
+});
+/** A stub that records the call and throws, so the route answers 500 after reaching the right service. */
+const track = (name: string) => (): never => {
+  reached.push(name);
+  throw new Error(`reached ${name}`);
+};
 
 function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
   const none = (): never => {
@@ -37,6 +47,25 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
     setKeepAwake: none,
     eventsHead: () => 0,
     reviewProjectMcp: none,
+    listPersonas: track('listPersonas'),
+    createPersona: track('createPersona'),
+    patchPersona: track('patchPersona'),
+    listPeople: track('listPeople'),
+    createPerson: track('createPerson'),
+    createFlow: track('createFlow'),
+    patchFlow: track('patchFlow'),
+    listModelProfiles: track('listModelProfiles'),
+    patchModelProfile: track('patchModelProfile'),
+    benchmarkStatus: track('benchmarkStatus'),
+    syncBenchmarks: track('syncBenchmarks'),
+    listAaModels: track('listAaModels'),
+    patchProject: track('patchProject'),
+    getTeam: track('getTeam'),
+    setTeam: track('setTeam'),
+    listRoutingRules: track('listRoutingRules'),
+    setRoutingRules: track('setRoutingRules'),
+    patchTask: track('patchTask'),
+    stepPlan: track('stepPlan'),
     ...overrides,
   };
 }
@@ -267,5 +296,186 @@ describe('API', () => {
     expect(ok.headers.get('access-control-allow-origin')).toBe('http://localhost:1420');
     const no = await app().request('/health', { headers: { Origin: 'https://evil.example' } });
     expect(no.headers.get('access-control-allow-origin')).toBeNull();
+  });
+});
+
+describe('team, routing and benchmark routes', () => {
+  const persona = {
+    key: 'sec',
+    name: 'Sec',
+    role: 'review',
+    tools: 'read_only',
+    instructions: 'Check auth.',
+  };
+  const projectId = mintId('Project');
+  const taskId = mintId('Task');
+  it.each([
+    {
+      name: 'GET /personas',
+      method: 'GET',
+      path: '/personas',
+      body: undefined,
+      service: 'listPersonas',
+    },
+    {
+      name: 'POST /personas',
+      method: 'POST',
+      path: '/personas',
+      body: persona,
+      service: 'createPersona',
+    },
+    {
+      name: 'PATCH /personas/:id',
+      method: 'PATCH',
+      path: `/personas/${mintId('Persona')}`,
+      body: { archived: true },
+      service: 'patchPersona',
+    },
+    { name: 'GET /people', method: 'GET', path: '/people', body: undefined, service: 'listPeople' },
+    {
+      name: 'POST /people',
+      method: 'POST',
+      path: '/people',
+      body: { handle: 'sam', name: 'Sam' },
+      service: 'createPerson',
+    },
+    {
+      name: 'POST /flows',
+      method: 'POST',
+      path: '/flows',
+      body: { name: 'mine', steps: [{ role: 'implement', need: 40 }] },
+      service: 'createFlow',
+    },
+    {
+      name: 'PATCH /flows/:id',
+      method: 'PATCH',
+      path: `/flows/${mintId('Flow')}`,
+      body: { steps: [{ role: 'implement', need: 40 }] },
+      service: 'patchFlow',
+    },
+    {
+      name: 'GET /model-profiles',
+      method: 'GET',
+      path: '/model-profiles',
+      body: undefined,
+      service: 'listModelProfiles',
+    },
+    {
+      name: 'PATCH /model-profiles/:id',
+      method: 'PATCH',
+      path: `/model-profiles/${mintId('ModelProfile')}`,
+      body: { enabled: false },
+      service: 'patchModelProfile',
+    },
+    {
+      name: 'GET /benchmarks/status',
+      method: 'GET',
+      path: '/benchmarks/status',
+      body: undefined,
+      service: 'benchmarkStatus',
+    },
+    {
+      name: 'POST /benchmarks/sync',
+      method: 'POST',
+      path: '/benchmarks/sync',
+      body: undefined,
+      service: 'syncBenchmarks',
+    },
+    {
+      name: 'GET /benchmarks/models',
+      method: 'GET',
+      path: '/benchmarks/models',
+      body: undefined,
+      service: 'listAaModels',
+    },
+    {
+      name: 'PATCH /projects/:id',
+      method: 'PATCH',
+      path: `/projects/${projectId}`,
+      body: { budgetCeiling: 2.5 },
+      service: 'patchProject',
+    },
+    {
+      name: 'GET /projects/:id/team',
+      method: 'GET',
+      path: `/projects/${projectId}/team`,
+      body: undefined,
+      service: 'getTeam',
+    },
+    {
+      name: 'PUT /projects/:id/team',
+      method: 'PUT',
+      path: `/projects/${projectId}/team`,
+      body: { bindings: [], members: [] },
+      service: 'setTeam',
+    },
+    {
+      name: 'GET /projects/:id/routing-rules',
+      method: 'GET',
+      path: `/projects/${projectId}/routing-rules`,
+      body: undefined,
+      service: 'listRoutingRules',
+    },
+    {
+      name: 'PUT /projects/:id/routing-rules',
+      method: 'PUT',
+      path: `/projects/${projectId}/routing-rules`,
+      body: { rules: [] },
+      service: 'setRoutingRules',
+    },
+    {
+      name: 'PATCH /tasks/:id',
+      method: 'PATCH',
+      path: `/tasks/${taskId}`,
+      body: { riskTags: ['auth'] },
+      service: 'patchTask',
+    },
+    {
+      name: 'GET /tasks/:id/step-plan',
+      method: 'GET',
+      path: `/tasks/${taskId}/step-plan`,
+      body: undefined,
+      service: 'stepPlan',
+    },
+  ] as const)('routes $name to its service', async ({ method, path, body, service }) => {
+    const res = await app().request(path, {
+      method,
+      ...(body === undefined ? auth : { ...json, body: JSON.stringify(body) }),
+    });
+    // The tracking stub throws after recording, so the API answers 500: the body passed validation.
+    expect(res.status).toBe(500);
+    expect(reached).toEqual([service]);
+  });
+
+  it.each([
+    {
+      name: 'a reviewer persona that edits',
+      method: 'POST',
+      path: '/personas',
+      body: { ...persona, tools: 'edit' },
+    },
+    { name: 'an empty project patch', method: 'PATCH', path: `/projects/${projectId}`, body: {} },
+    {
+      name: 'a negative budget ceiling',
+      method: 'PATCH',
+      path: `/projects/${projectId}`,
+      body: { budgetCeiling: -1 },
+    },
+    {
+      name: 'a flow with no implement step',
+      method: 'POST',
+      path: '/flows',
+      body: { name: 'talk', steps: [{ role: 'review', need: 48 }] },
+    },
+    {
+      name: 'a malformed persona id',
+      method: 'PATCH',
+      path: '/personas/nope',
+      body: { archived: true },
+    },
+  ])('answers 400 for $name without calling a service', async ({ method, path, body }) => {
+    const res = await app().request(path, { method, ...json, body: JSON.stringify(body) });
+    expect(res.status).toBe(400);
+    expect(reached).toEqual([]);
   });
 });

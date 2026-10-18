@@ -1,10 +1,14 @@
 import { existsSync, fstatSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  BenchmarkStatusDto,
   EventsHead,
   KeepAwakeStatus,
   McpServerStatusDto,
+  ModelProfileDto,
+  PersonaDto,
   ProjectDto,
+  StepPlanDto,
   TaskDto,
   WorkstreamDto,
   WorkstreamId,
@@ -392,6 +396,59 @@ describe('startDaemon', () => {
       });
       expect(res.status).toBe(400);
       expect(await res.text()).toContain('is not valid JSON');
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it('seeds the team, reports no AA key, plans on hand-set scores, and refuses an over-budget start', async () => {
+    const repo = createTempRepo();
+    try {
+      daemon = await startDaemon({
+        dataDir: dir.path,
+        port: 0,
+        adapter: new FakeAdapter({}),
+        logLevel: 'warn',
+        ...QUIET,
+      });
+      const api = apiClient(daemon.url, daemon.token);
+      expect((await api.get('/personas', z.array(PersonaDto))).map((p) => p.key)).toContain(
+        'reviewer',
+      );
+      expect(await api.get('/benchmarks/status', BenchmarkStatusDto)).toMatchObject({
+        keyConfigured: false,
+        outcome: 'no_key',
+        models: 0,
+      });
+      const profiles = await api.get('/model-profiles', z.array(ModelProfileDto));
+      const sonnetHigh = profiles.find((p) => p.model === 'sonnet' && p.effort === 'high');
+      if (!sonnetHigh) throw new Error('not seeded');
+      // Hand-set (invented) scores: the profile becomes manual and the only measured one.
+      expect(
+        await api.patch(`/model-profiles/${sonnetHigh.id}`, ModelProfileDto, {
+          scores: { intelligence: 50, coding: 50, agentic: 50 },
+          costPerTaskUsd: 2,
+        }),
+      ).toMatchObject({ source: 'manual' });
+      const project = await api.post('/projects', ProjectDto, {
+        name: 'demo',
+        repoPath: repo.path,
+        gateCommand: 'true',
+        areas: [{ name: 'src', globs: ['src/**'] }],
+      });
+      const task = await api.post(`/projects/${project.id}/tasks`, TaskDto, {
+        title: 'T',
+        acceptanceCriteria: ['x'],
+        areas: ['src'],
+      });
+      const plan = await api.get(`/tasks/${task.id}/step-plan`, StepPlanDto);
+      expect(plan).toMatchObject({ flowName: 'standard', overBudget: [] });
+      expect(plan.steps.map((s) => `${s.role}:${s.model}@${s.effort}`)).toEqual([
+        'implement:sonnet@high',
+        'review:sonnet@high',
+      ]);
+      await api.patch(`/projects/${project.id}`, ProjectDto, { budgetCeiling: 1 });
+      await expect(api.post(`/tasks/${task.id}/start`, WorkstreamDto)).rejects.toThrow('-> 400');
     } finally {
       repo.cleanup();
     }
