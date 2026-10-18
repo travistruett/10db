@@ -1,4 +1,11 @@
-import { ConflictError, EventType, InvalidError, mintId, type PersonaId } from '@10db/contracts';
+import {
+  ConflictError,
+  EventType,
+  InvalidError,
+  mintId,
+  NotFoundError,
+  type PersonaId,
+} from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { listEventsAfter } from './events';
 import { listRoutingRules, setRoutingRules } from './routing-rules';
@@ -118,6 +125,38 @@ describe('team', () => {
     if (archive) store.write((ctx) => patchPersona(ctx, persona.id, { archived: true }));
     expect(() =>
       store.write((ctx) => setTeam(ctx, project.id, { bindings: [bind(persona.id)], members: [] })),
+    ).toThrow(InvalidError);
+  });
+});
+
+describe('setTeam on a missing target', () => {
+  it.each([
+    { name: 'an empty team', body: () => ({ bindings: [], members: [] }) },
+    {
+      name: 'a bound team',
+      body: (id: PersonaId) => ({
+        bindings: [{ role: 'review' as const, personaId: id }],
+        members: [],
+      }),
+    },
+  ])('answers not-found for an unknown project with $name and emits nothing', ({ body }) => {
+    const persona = store.write((ctx) => insertPersona(ctx, reviewer)).value;
+    const before = listEventsAfter(store.db, 0, 100).length;
+    expect(() => store.write((ctx) => setTeam(ctx, mintId('Project'), body(persona.id)))).toThrow(
+      NotFoundError,
+    );
+    expect(listEventsAfter(store.db, 0, 100)).toHaveLength(before);
+  });
+
+  it('refuses an unknown binding persona as invalid, not missing', () => {
+    const project = seedProject(store);
+    expect(() =>
+      store.write((ctx) =>
+        setTeam(ctx, project.id, {
+          bindings: [{ role: 'review', personaId: mintId('Persona') }],
+          members: [],
+        }),
+      ),
     ).toThrow(InvalidError);
   });
 });

@@ -17,6 +17,7 @@ import {
 } from '@10db/contracts';
 import { asc, eq, inArray } from 'drizzle-orm';
 import * as schema from '../schema';
+import { getProject } from './projects';
 import type { DbReader, WriteContext } from './store';
 
 /** The person running this app: every card nobody else owns goes to them (spec §7). */
@@ -130,11 +131,19 @@ export function getTeam(db: DbReader, projectId: ProjectId): TeamDto {
   return { projectId, bindings, members };
 }
 
-/** Replaces the project's bindings and members; a persona must play its own role and not be archived. */
+/** Replaces the project's bindings and members; a persona must exist, play its own role and not be archived. */
 export function setTeam(ctx: WriteContext, projectId: ProjectId, input: TeamInput): TeamDto {
   const team = TeamInput.parse(input);
+  getProject(ctx.tx, projectId);
   for (const binding of team.bindings) {
-    const persona = getPersona(ctx.tx, binding.personaId);
+    let persona: PersonaDto;
+    try {
+      persona = getPersona(ctx.tx, binding.personaId);
+    } catch (error) {
+      throw error instanceof NotFoundError
+        ? new InvalidError(`No persona ${binding.personaId}`)
+        : error;
+    }
     if (persona.archived) throw new InvalidError(`${persona.name} is archived`);
     if (persona.role !== binding.role)
       throw new InvalidError(`${persona.name} is a ${persona.role} persona, not ${binding.role}`);
