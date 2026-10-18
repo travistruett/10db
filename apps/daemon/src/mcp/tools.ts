@@ -1,10 +1,14 @@
 import {
   ClaimKind,
+  currentStep,
   EventType,
   InvalidError,
   McpToolName,
   McpToolOutputs,
   QuestionCategory,
+  REVIEW_ROLES,
+  StepRole,
+  ToolAccess,
   Urgency,
   type McpToolInputs,
   type SessionId,
@@ -25,6 +29,7 @@ import {
   insertProposal,
   insertSource,
   insertToolOp,
+  patchWorkstream,
   searchDecisions,
   type Json,
 } from '@10db/db';
@@ -67,6 +72,8 @@ export const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
   record_evidence: 'Attach verification output: a command you ran, its exit code and a summary.',
   write_handoff:
     'Write the six-part handoff when 10db asks you to. 10db adds the git facts. End your turn after calling it.',
+  complete_step:
+    'Finish a plan, plan-review, review or QA step: your plan or findings as the summary and, for a review, a verdict. Implement steps never call this; they end by ending the turn.',
 };
 
 export function createToolHandlers(
@@ -286,6 +293,8 @@ export function createToolHandlers(
     commit: async (input) => {
       const done = prior(input.opId, McpToolName.Commit);
       if (done !== undefined) return McpToolOutputs.commit.parse(done);
+      if (currentStep(getWorkstreamRow(db, workstreamId)).tools === ToolAccess.ReadOnly)
+        throw new InvalidError('This step is read-only; only an implement step commits.');
       const { project } = context();
       const claims = activeClaims(db, workstreamId).map((c) => ({ kind: c.kind, name: c.name }));
       for (const path of input.paths) {
@@ -296,6 +305,7 @@ export function createToolHandlers(
           areas: project.areas,
           hazards: project.hazards,
           claims,
+          readOnly: false,
         });
         if (verdict.decision === 'deny') throw new InvalidError(verdict.reason);
       }
@@ -335,6 +345,41 @@ export function createToolHandlers(
             commitShas: [],
           });
           return record('record_evidence', input.opId, { evidenceId: evidence.id }, ctx);
+        }),
+      );
+    },
+
+    complete_step: (input) => {
+      const done = prior(input.opId, McpToolName.CompleteStep);
+      if (done !== undefined) return Promise.resolve(McpToolOutputs.complete_step.parse(done));
+      return Promise.resolve(
+        deps.state.write((ctx) => {
+          const row = getWorkstreamRow(ctx.tx, workstreamId);
+          const step = currentStep(row);
+          if (step.role === StepRole.Implement)
+            throw new InvalidError(
+              'An implement step ends by ending your turn; 10db runs the gate.',
+            );
+          if (REVIEW_ROLES.includes(step.role) && input.verdict === null)
+            throw new InvalidError('This review step needs a verdict: approve or reject.');
+          // Only a review role gives a verdict; a plan step's is dropped so a later reader cannot mistake it for one.
+          const verdict = REVIEW_ROLES.includes(step.role) ? input.verdict : null;
+          const result = { summary: input.summary, verdict, sessionId, at: ctx.now };
+          patchWorkstream(ctx, workstreamId, null, {
+            steps: row.steps.map((s, i) => (i === row.stepIndex ? { ...s, result } : s)),
+          });
+          ctx.emit({
+            type: EventType.StepChanged,
+            entityType: 'workstream',
+            entityId: workstreamId,
+            data: { stepIndex: row.stepIndex, role: step.role, verdict },
+          });
+          return record(
+            'complete_step',
+            input.opId,
+            { instruction: 'Recorded. End your turn now.' },
+            ctx,
+          );
         }),
       );
     },

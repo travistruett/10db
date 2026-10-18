@@ -12,6 +12,7 @@ import { createInterface } from 'node:readline/promises';
 import {
   BillingMode,
   Effort,
+  FlowDto,
   HealthResponse,
   InboxItemDto,
   MCP_APPROVAL_DETAIL,
@@ -363,10 +364,14 @@ async function main(): Promise<void> {
     `UI: VITE_DAEMON_URL=${url} VITE_DAEMON_TOKEN=${token} pnpm --filter @10db/desktop dev   (then open http://localhost:1420)`,
   );
 
+  // The run stays implement-only until review sessions join it.
+  const quick = (await api(z.array(FlowDto), '/flows')).find((f) => f.name === 'quick');
+  if (!quick) throw new Error('the quick flow was not seeded');
   const project = await api(ProjectDto, '/projects', {
     method: 'POST',
     body: JSON.stringify({
       name: 'live-acceptance',
+      flowId: quick.id,
       repoPath: repo,
       gateCommand: 'sh check.sh',
       maxLanes: 3,

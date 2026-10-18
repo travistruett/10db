@@ -11,7 +11,8 @@ import {
   ProposalId,
   WorkstreamId,
 } from './ids';
-import { ClaimKind, ProposalKind, QuestionCategory, Severity, Urgency } from './states';
+import { ClaimKind, ProposalKind, QuestionCategory, Severity, Urgency, Verdict } from './states';
+import { MAX_STEP_SUMMARY } from './steps';
 
 const OpId = z
   .string()
@@ -29,6 +30,7 @@ export const McpToolName = {
   Commit: 'commit',
   RecordEvidence: 'record_evidence',
   WriteHandoff: 'write_handoff',
+  CompleteStep: 'complete_step',
 } as const;
 export type McpToolName = (typeof McpToolName)[keyof typeof McpToolName];
 
@@ -112,6 +114,19 @@ export const McpToolInputs = {
     summary: z.string().min(1),
   }),
   write_handoff: HandoffInput.extend({ opId: OpId }),
+  complete_step: z.object({
+    opId: OpId,
+    summary: z
+      .string()
+      .min(1)
+      .max(MAX_STEP_SUMMARY)
+      .describe('Your plan, or your findings as numbered notes.'),
+    verdict: z
+      .enum(Verdict)
+      .nullable()
+      .default(null)
+      .describe('Required for plan_review, review and QA steps; null for a plan step.'),
+  }),
 } as const satisfies Record<McpToolName, z.ZodType>;
 
 export const McpToolOutputs = {
@@ -128,4 +143,5 @@ export const McpToolOutputs = {
   commit: z.object({ sha: z.string().regex(/^[0-9a-f]{40}$/), alreadyCommitted: z.boolean() }),
   record_evidence: z.object({ evidenceId: EvidenceId }),
   write_handoff: z.object({ handoffId: HandoffId, instruction: z.string() }),
+  complete_step: z.object({ instruction: z.string() }),
 } as const satisfies Record<McpToolName, z.ZodType>;

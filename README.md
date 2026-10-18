@@ -27,6 +27,10 @@ checklist is in [CONTRIBUTING.md](CONTRIBUTING.md#set-up).
 Working rules for people and agents are in [AGENTS.md](AGENTS.md); how to contribute is in
 [CONTRIBUTING.md](CONTRIBUTING.md).
 
+## Model data from Artificial Analysis
+
+10db can route each step on [Artificial Analysis](https://artificialanalysis.ai) benchmark scores, using your own free API key. Add it with `security add-generic-password -U -s 10db -a artificial-analysis-api-key -w`, which prompts for the key (`-U` replaces an existing item, so re-running it updates the key). Run it in a terminal that can prompt. Then restart 10db so it syncs; otherwise the next scheduled sync is up to 24 hours away (a sync button comes later). The data is fetched to your machine only, and is not covered by this repository's license. Source: Artificial Analysis (artificialanalysis.ai).
+
 ## License
 
 Apache-2.0. See [LICENSE](LICENSE).

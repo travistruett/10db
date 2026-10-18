@@ -8,6 +8,7 @@ import {
   buildSessionPrompt,
   compactionReinjection,
   HANDOFF_NUDGE,
+  HANDOFF_NUDGE_READ_ONLY,
   renderHandoff,
 } from './index';
 
@@ -68,7 +69,20 @@ const packWithDecision: ContextPack = {
     empty: false,
   },
 };
+const implementStep = {
+  index: 0,
+  count: 1,
+  role: 'implement',
+  personaName: 'Implementer',
+  instructions: null,
+  skills: [],
+  tools: 'edit',
+} as const;
 const base = {
+  step: implementStep,
+  priorResults: [],
+  previousResult: null,
+  revisedBy: null,
   task,
   claims: [{ kind: 'area' as const, name: 'ui' }],
   handoff: null,
@@ -223,5 +237,74 @@ describe('buildContextPack', () => {
     expect(buildContextPack(store.db, workstream, 600)).toEqual(
       buildContextPack(store.db, workstream, 600),
     );
+  });
+});
+
+describe('buildSessionPrompt for flow steps', () => {
+  const reviewStep = {
+    index: 1,
+    count: 2,
+    role: 'review',
+    personaName: 'Reviewer',
+    instructions: 'Hunt for defects.',
+    skills: ['review-checklist'],
+    tools: 'read_only',
+  } as const;
+  const result = (summary: string, verdict: 'approve' | 'reject' | null) => ({
+    summary,
+    verdict,
+    sessionId: mintId('Session'),
+    at: '2026-10-17T12:00:00.000Z',
+  });
+
+  it('names the step, its persona and its skills, keeps the task line, and carries the instructions', () => {
+    const prompt = buildSessionPrompt({ ...base, step: reviewStep, action: { kind: 'start' } });
+    expect(prompt).toContain('Task: Add the badge\n');
+    expect(prompt).toContain('Your step: 2 of 2, review, as Reviewer.');
+    expect(prompt).toContain('Skills to use: review-checklist.');
+    expect(prompt).toContain('How you work:\nHunt for defects.');
+  });
+
+  it('tells a read-only step it cannot write and must finish with complete_step and a verdict', () => {
+    const prompt = buildSessionPrompt({ ...base, step: reviewStep, action: { kind: 'start' } });
+    expect(prompt).toContain('This step is read-only');
+    expect(prompt).toContain('call mcp__10db__complete_step with your findings and a verdict');
+    expect(prompt).not.toContain(
+      'When the acceptance criteria are met and committed, end your turn.',
+    );
+  });
+
+  it('gives read-only steps a handoff nudge that asks for no commit', () => {
+    expect(HANDOFF_NUDGE_READ_ONLY).toContain('mcp__10db__write_handoff');
+    expect(HANDOFF_NUDGE_READ_ONLY).not.toContain('commit');
+  });
+
+  it('keeps the implement rules for an implement step', () => {
+    const prompt = buildSessionPrompt({ ...base, action: { kind: 'start' } });
+    expect(prompt).toContain('When the acceptance criteria are met and committed, end your turn.');
+    expect(prompt).not.toContain('complete_step');
+  });
+
+  it('carries earlier steps’ results as data, with their verdicts', () => {
+    const prompt = buildSessionPrompt({
+      ...base,
+      action: { kind: 'start' },
+      priorResults: [
+        {
+          role: 'plan',
+          personaName: 'Planner',
+          result: result('1. Add <Badge/> to header.tsx', null),
+        },
+        {
+          role: 'review',
+          personaName: 'Reviewer',
+          result: result('1. No empty-state test.', 'reject'),
+        },
+      ],
+    });
+    expect(prompt).toContain(
+      'Earlier steps:\n--- plan (Planner)\n1. Add <Badge/> to header.tsx\n---',
+    );
+    expect(prompt).toContain('--- review (Reviewer): rejected\n1. No empty-state test.\n---');
   });
 });

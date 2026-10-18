@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "bindings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "plan",
+              "plan_review",
+              "implement",
+              "review",
+              "qa"
+            ]
+          },
+          "personaId": {
+            "type": "string",
+            "pattern": "^per_[0-9A-HJKMNP-TV-Z]{26}$"
+          }
+        },
+        "required": [
+          "role",
+          "personaId"
+        ]
+      }
+    },
+    "members": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^psn_[0-9A-HJKMNP-TV-Z]{26}$"
+      }
+    },
+    "projectId": {
+      "type": "string",
+      "pattern": "^prj_[0-9A-HJKMNP-TV-Z]{26}$"
+    }
+  },
+  "required": [
+    "bindings",
+    "members",
+    "projectId"
+  ]
+}

@@ -1,7 +1,13 @@
-import type { PermissionRuleDto, ProjectDto } from '@10db/contracts';
+import { ToolAccess, type PermissionRuleDto, type ProjectDto } from '@10db/contracts';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { resolveInRepo, splitCommand, stringField, stripCommandPrefixes } from '../guard';
+import {
+  READ_COMMANDS,
+  resolveInRepo,
+  splitCommand,
+  stringField,
+  stripCommandPrefixes,
+} from '../guard';
 import { isLiteralSegment, plainSegments, type PlainSegment } from './plain-segments';
 
 /** Allow rules injected into every managed session. The guard still checks claims. */
@@ -23,6 +29,25 @@ export function baseAllowedTools(project: Pick<ProjectDto, 'gateCommand'>): stri
     'Bash(git log:*)',
     'Bash(git show:*)',
     'Bash(pwd)',
+  ];
+}
+
+const WRITE_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
+
+/**
+ * A read-only step drops the file-writing tools and the gate, and may run the read
+ * commands without a card; the guard has already refused anything that writes.
+ */
+export function allowedToolsFor(
+  project: Pick<ProjectDto, 'gateCommand'>,
+  tools: ToolAccess,
+): string[] {
+  const base = baseAllowedTools(project);
+  if (tools === ToolAccess.Edit) return base;
+  const gate = `Bash(${project.gateCommand})`;
+  return [
+    ...base.filter((t) => !WRITE_TOOLS.has(t) && t !== gate),
+    ...[...READ_COMMANDS].map((c) => `Bash(${c}:*)`),
   ];
 }
 

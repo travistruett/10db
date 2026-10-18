@@ -118,6 +118,23 @@
       "minimum": -9007199254740991,
       "maximum": 9007199254740991
     },
+    "flowId": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^flw_[0-9A-HJKMNP-TV-Z]{26}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "budgetCeiling": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
     "createdAt": {
       "type": "string",
       "format": "date-time",
@@ -144,6 +161,8 @@
     "handoffPct",
     "nudgePct",
     "humanWaitMinutes",
+    "flowId",
+    "budgetCeiling",
     "createdAt",
     "updatedAt"
   ]

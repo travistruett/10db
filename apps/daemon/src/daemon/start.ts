@@ -19,8 +19,10 @@ import {
   openDatabase,
   setAppSetting,
 } from '@10db/db';
+import { HARNESS_PLUGIN_DIR, readDefaultPersonas } from '@10db/harness';
 import { WebSocketServer } from 'ws';
 import { createApp } from '../api';
+import { createBenchmarkSync, type BenchmarkSync } from '../benchmarks';
 import {
   backupDatabase,
   hasPendingMigrations,
@@ -46,6 +48,7 @@ import {
 } from '../runner';
 import { createProviderPauses, createScheduler, type Scheduler } from '../scheduler';
 import type { SessionAdapter } from '../sessions';
+import { seedTeam } from '../team';
 import { createGateRunner } from '../verify';
 import { createWatcher, systemWatch, type WatchFn } from '../watcher';
 import { acquireInstanceLock } from './instance-lock';
@@ -74,6 +77,11 @@ export interface DaemonOptions {
   readonly sessionEnv?: (project: ProjectDto) => Readonly<Record<string, string>>;
   readonly processes?: ProcessTerminator;
   readonly migrationsDir?: string;
+  /** The builder's Artificial Analysis key (the Keychain in production); absent means no sync. */
+  readonly aaKey?: () => string | null;
+  readonly fetch?: typeof fetch;
+  /** The harness plugin folder the default personas are read from. */
+  readonly harnessDir?: string;
   readonly allowedOrigins?: readonly string[];
   /** A fixed UI token (dev and Playwright); otherwise a random one per start. */
   readonly uiToken?: string;
@@ -91,6 +99,7 @@ export interface RunningDaemon {
   readonly state: StateStore;
   readonly runner: Runner;
   readonly scheduler: Scheduler;
+  readonly benchmarks: BenchmarkSync;
   stop(): Promise<void>;
 }
 
@@ -172,6 +181,16 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     createStore(db, () => clock.now()),
     bus,
   );
+  // A malformed persona file throws and the daemon doesn't start, the same policy as a failed migration.
+  seedTeam(state, readDefaultPersonas(opts.harnessDir ?? HARNESS_PLUGIN_DIR));
+  const benchmarks = createBenchmarkSync({
+    state,
+    clock,
+    fetch: opts.fetch ?? fetch,
+    readKey: opts.aaKey ?? (() => null),
+    logger: logger.child({ component: 'benchmarks' }),
+  });
+  benchmarks.start();
   const instanceId = randomUUID();
   const git = createGit();
   const live = createLiveSessions();
@@ -285,6 +304,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       inbox,
       keepAwake,
       systemCheck: opts.systemCheck ?? noSystemCheck,
+      benchmarks,
     }),
     upgradeWebSocket,
     onUnexpectedError: (error) => {
@@ -345,6 +365,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   async function shutdown(): Promise<void> {
     try {
       createdScheduler.stop();
+      benchmarks.stop();
       pauses.stop();
       nightly.cancel();
       unsubscribeLanes();
@@ -383,6 +404,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     state,
     runner: createdRunner,
     scheduler: createdScheduler,
+    benchmarks,
     stop() {
       stopping ??= shutdown();
       return stopping;

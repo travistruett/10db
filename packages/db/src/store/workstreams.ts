@@ -15,6 +15,8 @@ import {
   type TaskId,
   type WorkstreamDto,
   type WorkstreamId,
+  type Effort,
+  type WorkstreamStep,
 } from '@10db/contracts';
 import { and, asc, count, eq, inArray, isNotNull, or, type SQL } from 'drizzle-orm';
 import * as schema from '../schema';
@@ -45,6 +47,11 @@ export interface WorkstreamPatch {
   readonly baseHead?: string;
   readonly gatePid?: number | null;
   readonly gatePidStart?: string | null;
+  /** Mutable because drizzle's `.set()` takes the column's own type. */
+  readonly steps?: WorkstreamStep[];
+  readonly stepIndex?: number;
+  readonly model?: string;
+  readonly effort?: Effort;
 }
 
 export function getWorkstreamRow(db: DbReader, id: WorkstreamId): WorkstreamRow {
@@ -75,6 +82,8 @@ function toDto(db: DbReader, row: WorkstreamRow): WorkstreamDto {
     recoveryAttempts: row.recoveryAttempts,
     model: row.model,
     effort: row.effort,
+    steps: row.steps,
+    stepIndex: row.stepIndex,
     currentSessionId: row.currentSessionId,
     sessionCount: sessions?.n ?? 0,
     contextPct: row.contextPct,
@@ -132,6 +141,8 @@ export function insertWorkstream(ctx: WriteContext, taskId: TaskId): WorkstreamD
     recoveryAttempts: 0,
     model: project.model,
     effort: project.effort,
+    steps: [],
+    stepIndex: 0,
     baseHead: null,
     leaseOwner: null,
     leaseExpiresAt: null,

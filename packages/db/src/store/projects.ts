@@ -1,18 +1,23 @@
 import {
   ConflictError,
   EventType,
+  InvalidError,
   mintId,
   NotFoundError,
   ProjectInput,
+  ProjectPatch,
   Provider,
   type ProjectDto,
+  type ProjectId,
 } from '@10db/contracts';
 import { asc, eq } from 'drizzle-orm';
 import * as schema from '../schema';
+import { getFlow } from './flows';
 import type { DbReader, WriteContext } from './store';
 
 export function insertProject(ctx: WriteContext, input: ProjectInput): ProjectDto {
   const config = ProjectInput.parse(input);
+  if (config.flowId) getFlow(ctx.tx, config.flowId);
   const existing = ctx.tx
     .select({ name: schema.projects.name })
     .from(schema.projects)
@@ -40,4 +45,21 @@ export function getProject(db: DbReader, id: ProjectDto['id']): ProjectDto {
 
 export function listProjects(db: DbReader): ProjectDto[] {
   return db.select().from(schema.projects).orderBy(asc(schema.projects.name)).all();
+}
+
+export function patchProject(ctx: WriteContext, id: ProjectId, patch: ProjectPatch): ProjectDto {
+  const changes = ProjectPatch.parse(patch);
+  // A stale flow id answers 404, not a foreign-key failure.
+  if (changes.flowId) getFlow(ctx.tx, changes.flowId);
+  const current = getProject(ctx.tx, id);
+  const nudgePct = changes.nudgePct ?? current.nudgePct;
+  const handoffPct = changes.handoffPct ?? current.handoffPct;
+  if (nudgePct <= handoffPct) throw new InvalidError('nudgePct must be above handoffPct');
+  ctx.tx
+    .update(schema.projects)
+    .set({ ...changes, updatedAt: ctx.now })
+    .where(eq(schema.projects.id, id))
+    .run();
+  ctx.emit({ type: EventType.ProjectChanged, entityType: 'project', entityId: id });
+  return getProject(ctx.tx, id);
 }

@@ -26,6 +26,14 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   provider: WORK,
   inbox: [queryKeys.inbox, ['workstreams']],
   app_setting: [queryKeys.keepAwake],
+  // No view reads these entity types; the entries make them known.
+  persona: [],
+  person: [],
+  flow: [],
+  model_profile: [],
+  team: [],
+  routing_rules: [],
+  benchmarks: [],
   // `proposal` (from proposal.resolved) has no view to refresh; the card that resolved it sends its own inbox event.
 };
 

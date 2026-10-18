@@ -1,10 +1,15 @@
 import { existsSync, fstatSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  BenchmarkStatusDto,
   EventsHead,
   KeepAwakeStatus,
   McpServerStatusDto,
+  mintId,
+  ModelProfileDto,
+  PersonaDto,
   ProjectDto,
+  StepPlanDto,
   TaskDto,
   WorkstreamDto,
   WorkstreamId,
@@ -14,7 +19,7 @@ import { getWorkstream } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { WebSocket } from 'ws';
-import { apiClient } from '../../test/api-client';
+import { apiClient, quickFlowId } from '../../test/api-client';
 import { createTempRepo, tempDir, waitFor, waitForAsync } from '../../test/fixtures';
 import type { CaffeinateSpawner } from '../keep-awake';
 import { FakeAdapter, type FakeScriptBook } from '../sessions';
@@ -183,6 +188,7 @@ describe('startDaemon', () => {
         name: 'demo',
         repoPath: repo.path,
         gateCommand: 'true',
+        flowId: await quickFlowId(apiClient(running.url, running.token)),
         areas: [{ name: 'api', globs: ['src/**'] }],
       });
       const task = await call(`/projects/${project.id}/tasks`, {
@@ -273,6 +279,7 @@ describe('startDaemon', () => {
         name: 'wired',
         repoPath: repo.path,
         gateCommand: 'true',
+        flowId: await quickFlowId(api),
         areas: [{ name: 'api', globs: ['src/api/**'] }],
       });
       const task = await api.post(`/projects/${project.id}/tasks`, TaskDto, {
@@ -393,6 +400,117 @@ describe('startDaemon', () => {
     } finally {
       repo.cleanup();
     }
+  });
+
+  it('seeds the team, reports no AA key, plans on hand-set scores, and refuses an over-budget start', async () => {
+    const repo = createTempRepo();
+    try {
+      daemon = await startDaemon({
+        dataDir: dir.path,
+        port: 0,
+        adapter: new FakeAdapter({}),
+        logLevel: 'warn',
+        ...QUIET,
+      });
+      const api = apiClient(daemon.url, daemon.token);
+      expect((await api.get('/personas', z.array(PersonaDto))).map((p) => p.key)).toContain(
+        'reviewer',
+      );
+      expect(await api.get('/benchmarks/status', BenchmarkStatusDto)).toMatchObject({
+        keyConfigured: false,
+        outcome: 'no_key',
+        models: 0,
+      });
+      const profiles = await api.get('/model-profiles', z.array(ModelProfileDto));
+      const sonnetHigh = profiles.find((p) => p.model === 'sonnet' && p.effort === 'high');
+      if (!sonnetHigh) throw new Error('not seeded');
+      // Hand-set (invented) scores: the profile becomes manual and the only measured one.
+      expect(
+        await api.patch(`/model-profiles/${sonnetHigh.id}`, ModelProfileDto, {
+          scores: { intelligence: 50, coding: 50, agentic: 50 },
+          costPerTaskUsd: 2,
+        }),
+      ).toMatchObject({ source: 'manual' });
+      const project = await api.post('/projects', ProjectDto, {
+        name: 'demo',
+        repoPath: repo.path,
+        gateCommand: 'true',
+        areas: [{ name: 'src', globs: ['src/**'] }],
+      });
+      const task = await api.post(`/projects/${project.id}/tasks`, TaskDto, {
+        title: 'T',
+        acceptanceCriteria: ['x'],
+        areas: ['src'],
+      });
+      const plan = await api.get(`/tasks/${task.id}/step-plan`, StepPlanDto);
+      expect(plan).toMatchObject({ flowName: 'standard', overBudget: [] });
+      expect(plan.steps.map((s) => `${s.role}:${s.model}@${s.effort}`)).toEqual([
+        'implement:sonnet@high',
+        'review:sonnet@high',
+      ]);
+      await api.patch(`/projects/${project.id}`, ProjectDto, { budgetCeiling: 1 });
+      await expect(api.post(`/tasks/${task.id}/start`, WorkstreamDto)).rejects.toThrow('-> 400');
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it('answers 404 for an unknown project on team and routing-rule routes and 201 on creates', async () => {
+    daemon = await startDaemon({
+      dataDir: dir.path,
+      port: 0,
+      adapter: new FakeAdapter({}),
+      logLevel: 'warn',
+      ...QUIET,
+    });
+    const api = apiClient(daemon.url, daemon.token);
+    const ghost = mintId('Project');
+    const send = async (method: string, path: string, body?: unknown) => {
+      const res = await fetch(`${daemon?.url ?? ''}${path}`, {
+        method,
+        headers: {
+          Authorization: `Bearer ${daemon?.token ?? ''}`,
+          ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      });
+      await res.text();
+      return res.status;
+    };
+    const repo = createTempRepo();
+    try {
+      const project = await api.post('/projects', ProjectDto, {
+        name: 'demo',
+        repoPath: repo.path,
+        gateCommand: 'true',
+        areas: [{ name: 'src', globs: ['src/**'] }],
+      });
+      const head = await api.get('/events/head', EventsHead);
+      expect(await send('GET', `/projects/${ghost}/team`)).toBe(404);
+      expect(await send('GET', `/projects/${ghost}/routing-rules`)).toBe(404);
+      expect(await send('PUT', `/projects/${ghost}/team`, { bindings: [], members: [] })).toBe(404);
+      expect(
+        await send('PUT', `/projects/${project.id}/team`, {
+          bindings: [{ role: 'review', personaId: mintId('Persona') }],
+          members: [],
+        }),
+      ).toBe(400);
+      expect(await api.get('/events/head', EventsHead)).toEqual(head);
+    } finally {
+      repo.cleanup();
+    }
+    const persona = {
+      key: 'sec',
+      name: 'Sec',
+      role: 'review',
+      tools: 'read_only',
+      instructions: 'Check auth.',
+    };
+    expect(await send('POST', '/personas', persona)).toBe(201);
+    expect(await send('POST', '/people', { handle: 'sam', name: 'Sam' })).toBe(201);
+    expect(
+      await send('POST', '/flows', { name: 'mine', steps: [{ role: 'implement', need: 40 }] }),
+    ).toBe(201);
   });
 
   it('closes its log file on stop, so a start leaks no file descriptor', async () => {

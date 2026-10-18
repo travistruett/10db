@@ -10,7 +10,7 @@
 - [ ] Post-MVP: backup export and import (spec §13 fast-follow).
 - [ ] Renovate bumps Rust in `mise.toml` but not `rust-toolchain.toml`; match them by hand in that PR (a repo test fails until they agree).
 - [ ] M2: "answered from D-n" lookup before a question reaches the inbox (spec §7).
-- [ ] M2: reviewer approval in flows with a review step before DONE (spec §5.4).
+- [x] M2: reviewer approval in flows with a review step before DONE (spec §5.4). (M2a: review, plan-review and QA steps give verdicts through `complete_step`.)
 - [ ] M2: per-workstream log files for the Factory detail view (spec §12; M1a has one shared daemon log, decision 31).
 - [ ] M2: diagnostics bundle export (spec §12; not built in M1a).
 - [ ] M2: project settings for extra allowed commands (test and lint), beyond the gate command.
@@ -20,7 +20,7 @@
 - [ ] Spec §5.1: "Ready" does not yet check for an open blocking inbox item.
 - [ ] Spec §9: the context pack uses FTS only; area match is not built.
 - [x] Spec §12: the fake adapter is typed at the `SessionEvent` seam, not with the SDK's message types; M1b's scripted query covers the SDK level.
-- [ ] Spec §4: the projects budget ceiling, the inbox delivery record and the workstream flow, persona and profile fields are not built yet.
+- [ ] Spec §4: the inbox delivery record, persona avatars and people's channels are not built yet.
 - [ ] A multi-question `AskUserQuestion` parked mid-sequence drops the earlier answers, so the agent re-asks. Fix: open all question cards up front, or include every card resolved for the workstream in the resume prompt.
 - [x] M1b: when two waits overlap and the first card is answered, a stop or crash parks on that answered card and the second card's later answer is dropped. Fix: track the set of open waits and park on one that is still open.
 - [x] M1b: a preserved `answer` next action re-prompted and re-granted the same allow-once on every clean restart before a handoff or step done. Fixed: once the session reports `started`, the runner rewrites the next action to a fresh start action (`start`, or `continue_from_handoff` from the latest handoff), so the answer and a one-time permission reach exactly one session.
@@ -36,3 +36,12 @@
 - [ ] Spec question: repo-configured git filters (.gitattributes + filter.<name>.clean/process in .git/config) run during the watcher's git status and during 10db's own commits; consider a sanitized git config or refusing sessions whose .git/config gains such keys.
 - [x] M1b live run: confirm on the setMcpServers route that a repo MCP tool call reaches canUseTool as a permission card (`repo MCP tool gated`) and that a stdio server sees only PATH and HOME (`repo MCP server env`) (make live-acceptance). Header delivery to a repo HTTP server is not covered; 10db's own HTTP MCP server covers the route's headers.
 - [ ] M2: a crash after a session has written its handoff resumes that conversation, which hands off again at once; continuing fresh from the handoff it already wrote would save a session (seen in the M1 live run).
+- [ ] M2b: the board, the picker and PM-agent review (need estimates, optional steps), the batch approval sheet that edits a step plan before start, the consult step, ⌘K, and the Settings view (AA key, team bindings, routing rules, budget, flows, personas, profiles) with the AA Intelligence-vs-Cost chart: Pareto line, axis picker, AA logo and source link (plan 07).
+- [ ] M2c: takeover and the PTY (plan 08).
+- [ ] M2b: the live acceptance run adds a task on the standard flow, so a real reviewer calls complete_step (M2a keeps §1.3 on the quick flow).
+- [ ] Spec §7: a card's owner is stored but nothing filters or notifies by owner yet; the inbox's "mine / teammate" filter is M2b.
+- [ ] Spec §4 model_profiles: the observed stats count steps and escalations only; tokens per step are not recorded yet.
+- [ ] Spec §8: a read-only step keeps its task's area claims while it reviews, so other implementers in that area wait; consider releasing claims for read-only steps and re-acquiring them on a send-back.
+- [ ] AA: a real sync confirmed the free API's slugs and its `page` query parameter match the catalogue's and the client's. Still open: AA's index versions may shift scores between syncs, and 10db's needs and floors are absolute index points. The status flags a major-version change (AA says scores are comparable within a major version); patch versions aren't reported, so they can't be detected. AA's free API gives no Coding or Agentic Index for some models; those roles route on Intelligence (decision 66) until it does. The sync status lists the profiles routing can't use (`unmeasuredProfiles`) and the score kinds missing from the rest (`missingScores`).
+- [ ] M2a read-only shell: a read-only step's shell accepts only plain words and simple quoting, so unquoted globs, ~, $, braces and backslashes are refused (quote them), and so is any `=` at the start of a word or right after `=` or `:`, quoted or not (for example `'==='` or `'a:=b'`), so reviewers use the Grep tool for those. Revisit if real reviews hit it.
+- [ ] M2a read-only shell: aliases and functions in the user's shell configuration can rewrite plain words, which the read-only grammar cannot see; check whether Claude Code's Bash tool loads them.

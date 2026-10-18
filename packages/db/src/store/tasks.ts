@@ -6,6 +6,7 @@ import {
   mintId,
   NotFoundError,
   TaskInput,
+  TaskPatch,
   TaskStatus,
   WorkstreamState,
   type ProjectId,
@@ -14,6 +15,7 @@ import {
 } from '@10db/contracts';
 import { and, desc, eq, inArray, max, ne } from 'drizzle-orm';
 import * as schema from '../schema';
+import { getFlow } from './flows';
 import { getProject } from './projects';
 import type { DbReader, WriteContext } from './store';
 
@@ -50,6 +52,7 @@ export function deriveBoardStatus({
 export function insertTask(ctx: WriteContext, projectId: ProjectId, input: TaskInput): TaskDto {
   const project = getProject(ctx.tx, projectId);
   const config = TaskInput.parse(input);
+  if (config.flowId) getFlow(ctx.tx, config.flowId);
   const known = new Set([
     ...project.areas.map((a) => a.name),
     ...project.hazards.map((h) => h.name),
@@ -79,6 +82,8 @@ export function insertTask(ctx: WriteContext, projectId: ProjectId, input: TaskI
     description: config.description,
     acceptanceCriteria: config.acceptanceCriteria,
     areas: config.areas,
+    riskTags: config.riskTags,
+    flowId: config.flowId,
     status: TaskStatus.Open,
     boardOrder: (order?.value ?? 0) + 1,
     workspaceMode: 'shared' as const,
@@ -137,6 +142,8 @@ function toTaskDto(db: DbReader, row: typeof schema.tasks.$inferSelect): TaskDto
     description: row.description,
     acceptanceCriteria: row.acceptanceCriteria,
     areas: row.areas,
+    riskTags: row.riskTags,
+    flowId: row.flowId,
     status: row.status,
     boardOrder: row.boardOrder,
     dependsOn: deps.map((d) => d.id),
@@ -165,4 +172,17 @@ export function listTasks(db: DbReader, projectId: ProjectId): TaskDto[] {
     .orderBy(schema.tasks.boardOrder)
     .all()
     .map((row) => toTaskDto(db, row));
+}
+
+export function patchTask(ctx: WriteContext, id: TaskId, patch: TaskPatch): TaskDto {
+  const changes = TaskPatch.parse(patch);
+  getTask(ctx.tx, id);
+  if (changes.flowId) getFlow(ctx.tx, changes.flowId);
+  ctx.tx
+    .update(schema.tasks)
+    .set({ ...changes, updatedAt: ctx.now })
+    .where(eq(schema.tasks.id, id))
+    .run();
+  ctx.emit({ type: EventType.TaskChanged, entityType: 'task', entityId: id });
+  return getTask(ctx.tx, id);
 }

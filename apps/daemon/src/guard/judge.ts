@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { commandForms, startsWithWords } from './command-forms';
 import { gitVerdict } from './git-rules';
 import { classifyPath, resolveInRepo } from './paths';
+import { readOnlyShellRefusal } from './read-only';
 import { splitCommand, stripCommandPrefixes } from './shell-words';
 
 export interface GuardInput {
@@ -14,6 +15,8 @@ export interface GuardInput {
   readonly areas: readonly AreaDef[];
   readonly hazards: readonly HazardDef[];
   readonly claims: readonly { readonly kind: ClaimKind; readonly name: string }[];
+  /** A read-only step: file writes and writing shell commands are refused, claims or not. */
+  readonly readOnly: boolean;
 }
 
 export type GuardVerdict =
@@ -145,16 +148,47 @@ function judgeShell(input: GuardInput, command: string, depth = 0): GuardVerdict
   return ALLOW;
 }
 
+/** Tools a read-only step may call besides Bash and the 10db MCP server's own tools. */
+const READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
+  'Read',
+  'Glob',
+  'Grep',
+  'LS',
+  'TodoWrite',
+  'NotebookRead',
+  'WebFetch',
+  'WebSearch',
+  'Skill',
+  'BashOutput',
+  'KillShell',
+  'ListMcpResourcesTool',
+  'ReadMcpResourceTool',
+]);
+const READ_ONLY_REFUSAL =
+  'This step is read-only. Describe the change in mcp__10db__complete_step; the implement step makes it.';
+
 /** The PreToolUse decision for a managed session (spec §8.2). Rules only; never an LLM. */
 export function judgeToolUse(input: GuardInput): GuardVerdict {
   if (FILE_TOOLS.has(input.toolName)) {
+    if (input.readOnly) return deny(READ_ONLY_REFUSAL);
     const filePath =
       stringField(input.toolInput, 'file_path') ?? stringField(input.toolInput, 'notebook_path');
     return filePath === null ? ALLOW : judgeFile(input, filePath);
   }
   if (input.toolName === 'Bash') {
     const command = stringField(input.toolInput, 'command');
-    return command === null ? ALLOW : judgeShell(input, command);
+    if (command === null) return ALLOW;
+    if (input.readOnly) {
+      const refusal = readOnlyShellRefusal(command);
+      if (refusal) return deny(refusal);
+    }
+    return judgeShell(input, command);
   }
+  if (
+    input.readOnly &&
+    !READ_ONLY_TOOLS.has(input.toolName) &&
+    !input.toolName.startsWith('mcp__10db__')
+  )
+    return deny(READ_ONLY_REFUSAL);
   return ALLOW;
 }

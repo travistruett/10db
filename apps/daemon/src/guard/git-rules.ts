@@ -23,7 +23,7 @@ const REDIRECTING_OPTIONS = ['--git-dir', '--work-tree', '--namespace', '--confi
 const DANGEROUS_PUSH_FLAGS = new Set(['--delete', '--mirror', '--all', '--prune']);
 
 /** Git accepts any unambiguous abbreviation of a long option, so `--open=x` means `--open-files-in-pager=x`. */
-function abbreviates(arg: string, option: string): boolean {
+export function abbreviates(arg: string, option: string): boolean {
   const name = arg.split('=')[0] ?? arg;
   return name.startsWith('--') && name.length >= 3 && option.startsWith(name);
 }

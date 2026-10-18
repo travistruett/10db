@@ -25,6 +25,15 @@ export const EventType = {
   ProviderResumed: 'provider.resumed',
   RecoveryStep: 'recovery.step',
   SettingsChanged: 'settings.changed',
+  PersonaSaved: 'persona.saved',
+  FlowSaved: 'flow.saved',
+  PersonSaved: 'person.saved',
+  TeamSaved: 'team.saved',
+  RoutingRulesSaved: 'routing_rules.saved',
+  ModelProfileSaved: 'model_profile.saved',
+  BenchmarksSynced: 'benchmarks.synced',
+  ProjectChanged: 'project.changed',
+  StepChanged: 'step.changed',
 } as const;
 export type EventType = (typeof EventType)[keyof typeof EventType];
 

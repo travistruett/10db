@@ -4,7 +4,7 @@ import {
   getHandoff,
   getInboxItem,
   getTask,
-  latestHandoff,
+  latestHandoffForStep,
   listRecentDecisions,
   searchDecisions,
   type DbReader,
@@ -32,7 +32,7 @@ export function buildContextPack(
   const handoff =
     action.kind === 'continue_from_handoff'
       ? getHandoff(db, action.handoffId)
-      : latestHandoff(db, workstream.id);
+      : latestHandoffForStep(db, workstream);
   const answered = action.kind === 'answer' ? getInboxItem(db, action.inboxId) : null;
 
   const relevant = searchDecisions(

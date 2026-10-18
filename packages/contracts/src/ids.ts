@@ -25,6 +25,11 @@ const ID_SCHEMAS = {
   Source: idSchema('src', 'SourceId'),
   Proposal: idSchema('prp', 'ProposalId'),
   PermissionRule: idSchema('prm', 'PermissionRuleId'),
+  Persona: idSchema('per', 'PersonaId'),
+  Flow: idSchema('flw', 'FlowId'),
+  Person: idSchema('psn', 'PersonId'),
+  RoutingRule: idSchema('rtr', 'RoutingRuleId'),
+  ModelProfile: idSchema('mpf', 'ModelProfileId'),
 } as const;
 
 const ID_PREFIX = {
@@ -42,6 +47,11 @@ const ID_PREFIX = {
   Source: 'src',
   Proposal: 'prp',
   PermissionRule: 'prm',
+  Persona: 'per',
+  Flow: 'flw',
+  Person: 'psn',
+  RoutingRule: 'rtr',
+  ModelProfile: 'mpf',
 } as const satisfies Record<keyof typeof ID_SCHEMAS, string>;
 
 export type IdKind = keyof typeof ID_SCHEMAS;
@@ -83,3 +93,13 @@ export const ProposalId = ID_SCHEMAS.Proposal;
 export type ProposalId = IdOf<'Proposal'>;
 export const PermissionRuleId = ID_SCHEMAS.PermissionRule;
 export type PermissionRuleId = IdOf<'PermissionRule'>;
+export const PersonaId = ID_SCHEMAS.Persona;
+export type PersonaId = IdOf<'Persona'>;
+export const FlowId = ID_SCHEMAS.Flow;
+export type FlowId = IdOf<'Flow'>;
+export const PersonId = ID_SCHEMAS.Person;
+export type PersonId = IdOf<'Person'>;
+export const RoutingRuleId = ID_SCHEMAS.RoutingRule;
+export type RoutingRuleId = IdOf<'RoutingRule'>;
+export const ModelProfileId = ID_SCHEMAS.ModelProfile;
+export type ModelProfileId = IdOf<'ModelProfile'>;

@@ -56,6 +56,12 @@ describe('nextActionAfterCrash with builder input', () => {
       'p1',
       { kind: 'fix', evidenceId },
     ],
+    [
+      'keeps a revise with the step that rejected',
+      { kind: 'revise', reviewStep: 1 },
+      'p1',
+      { kind: 'revise', reviewStep: 1 },
+    ],
   ])('%s', (_name, previous, providerSessionId, expected) => {
     expect(nextActionAfterCrash(previous, providerSessionId, handoff)).toEqual(expected);
   });

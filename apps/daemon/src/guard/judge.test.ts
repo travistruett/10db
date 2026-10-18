@@ -44,6 +44,7 @@ function judge(
   toolName: string,
   toolInput: unknown,
   claims: Claims = [{ kind: 'area', name: 'api' }],
+  readOnly = false,
 ) {
   return judgeToolUse({
     toolName,
@@ -52,6 +53,7 @@ function judge(
     areas: AREAS,
     hazards: DEFAULT_HAZARDS,
     claims,
+    readOnly,
   });
 }
 const bash = (command: string, claims?: Claims) => judge('Bash', { command }, claims);
@@ -560,5 +562,231 @@ describe('stringField', () => {
     { name: 'a non-object input', input: null, expected: null },
   ])('$name', ({ input, expected }) => {
     expect(stringField(input, 'command')).toBe(expected);
+  });
+});
+
+describe('implement steps and tools outside the read-only list', () => {
+  it('allows a repo MCP tool in implement mode', () => {
+    expect(judge('mcp__fs__write_file', { path: 'src/api/a.ts' }).decision).toBe('allow');
+  });
+});
+
+describe('read-only steps', () => {
+  const ro = (tool: string, input: object) =>
+    judge(tool, input, [{ kind: 'area', name: 'api' }], true);
+  it.each([
+    { tool: 'Write', input: { file_path: 'src/api/a.ts' }, decision: 'deny' },
+    { tool: 'Edit', input: { file_path: 'src/api/a.ts' }, decision: 'deny' },
+    { tool: 'MultiEdit', input: { file_path: 'src/api/a.ts' }, decision: 'deny' },
+    { tool: 'NotebookEdit', input: { notebook_path: 'src/api/n.ipynb' }, decision: 'deny' },
+    { tool: 'Read', input: { file_path: 'src/api/a.ts' }, decision: 'allow' },
+    { tool: 'Grep', input: { pattern: 'x' }, decision: 'allow' },
+    { tool: 'Skill', input: { skill: 'review-checklist' }, decision: 'allow' },
+    { tool: 'BashOutput', input: { bash_id: '1' }, decision: 'allow' },
+    { tool: 'mcp__10db__complete_step', input: {}, decision: 'allow' },
+    { tool: 'mcp__fs__write_file', input: { path: 'src/api/a.ts' }, decision: 'deny' },
+    { tool: 'Agent', input: { prompt: 'edit it' }, decision: 'deny' },
+  ])('$decision $tool inside the claims', ({ tool, input, decision }) => {
+    expect(ro(tool, input).decision).toBe(decision);
+  });
+
+  it.each([
+    { name: 'read-only git', command: 'git diff HEAD -- src/api', decision: 'allow' },
+    { name: 'git log piped to head', command: 'git log --oneline | head -5', decision: 'allow' },
+    {
+      name: 'a grep with stderr discarded',
+      command: 'grep -rn TODO src 2>/dev/null',
+      decision: 'allow',
+    },
+    { name: 'find that only lists', command: "find src -name '*.ts'", decision: 'allow' },
+    { name: 'a redirect into a file', command: 'echo x > src/api/a.ts', decision: 'deny' },
+    { name: 'an append', command: 'cat a >> b', decision: 'deny' },
+    { name: 'sed in place', command: "sed -i 's/a/b/' src/api/a.ts", decision: 'deny' },
+    { name: 'a formatter', command: 'pnpm format', decision: 'deny' },
+    { name: 'the gate', command: 'make gate', decision: 'deny' },
+    { name: 'find -delete', command: 'find . -name x -delete', decision: 'deny' },
+    { name: 'find -exec', command: 'find . -exec rm {} ;', decision: 'deny' },
+    { name: 'tee', command: 'git diff | tee out.txt', decision: 'deny' },
+    { name: 'git push', command: 'git push origin HEAD', decision: 'deny' },
+    { name: 'git with a leading option', command: 'git -C /tmp status', decision: 'deny' },
+    {
+      name: 'sort writing a file',
+      command: 'sort -o src/api/a.ts src/api/a.ts',
+      decision: 'deny',
+    },
+    {
+      name: 'sort writing a file, long form',
+      command: 'sort --output=out.txt a.txt',
+      decision: 'deny',
+    },
+    {
+      name: 'uniq, which writes its second operand',
+      command: 'uniq a.txt b.txt',
+      decision: 'deny',
+    },
+    { name: 'tree writing a file', command: 'tree -o out.txt src', decision: 'deny' },
+    {
+      name: 'rg running a preprocessor',
+      command: 'rg --pre ./scripts/x.sh TODO',
+      decision: 'deny',
+    },
+    { name: 'cd then a read', command: 'cd src && git diff', decision: 'allow' },
+    { name: 'cd to home', command: 'cd ~', decision: 'deny' },
+    { name: 'a plain sort', command: 'sort a.txt', decision: 'allow' },
+    { name: 'a plain rg', command: 'rg -n TODO src', decision: 'allow' },
+    {
+      name: 'a read hiding a write in a substitution',
+      command: 'echo $(touch x)',
+      decision: 'deny',
+    },
+    { name: 'sort bundled flags', command: 'sort -ro src/api/a.ts other.txt', decision: 'deny' },
+    { name: 'sort -uo', command: 'sort -uo src/api/a.ts b.txt', decision: 'deny' },
+    { name: 'sort --out abbreviation', command: 'sort --out=src/api/a.ts b.txt', decision: 'deny' },
+    {
+      name: 'sort --outp abbreviation',
+      command: 'sort --outp=src/api/a.ts b.txt',
+      decision: 'deny',
+    },
+    {
+      name: 'find with a backslash in -delete',
+      command: 'find . -name x -de\\lete',
+      decision: 'deny',
+    },
+    {
+      name: 'find with a backslash in -exec',
+      command: 'find . -exe\\c rm {} \\;',
+      decision: 'deny',
+    },
+    {
+      name: 'rg abbreviated --pre with a backslash',
+      command: 'rg --pr\\e=./x.sh TODO',
+      decision: 'deny',
+    },
+    {
+      name: 'rg --hostname-bin',
+      command: 'rg --hostname-bin=./any-exe --hyperlink-format=default TODO',
+      decision: 'deny',
+    },
+    { name: 'file -C', command: 'file -C -m src/api/a.ts', decision: 'deny' },
+    { name: 'tree bundled -o', command: 'tree -ao out.txt src', decision: 'deny' },
+    { name: 'tree -R', command: 'tree -R -L 1 -H . src', decision: 'deny' },
+    {
+      name: 'sort --compress-program',
+      command: 'sort --compress-program=./x.sh -S 1k big',
+      decision: 'deny',
+    },
+    { name: 'an assignment with a redirect', command: 'X=1>src/api/a.ts', decision: 'deny' },
+    { name: 'an assignment with an append', command: 'A=b>>out.txt', decision: 'deny' },
+    { name: 'env -S', command: "env -S 'touch pwned' true", decision: 'deny' },
+    { name: 'env -P', command: 'env -P cat /usr/bin/touch pwned', decision: 'deny' },
+    { name: 'xargs -J', command: 'echo p | xargs -J cat touch cat', decision: 'deny' },
+    {
+      name: 'GIT_EXTERNAL_DIFF assignment',
+      command: "GIT_EXTERNAL_DIFF='touch pwned;true' git diff",
+      decision: 'deny',
+    },
+    {
+      name: 'git config env assignments',
+      command:
+        'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=./x git status',
+      decision: 'deny',
+    },
+    { name: 'a command run by path', command: './tools/cat x', decision: 'deny' },
+    { name: 'a wrapper such as time', command: 'time cat a', decision: 'deny' },
+    { name: 'a plain sort of a file', command: 'sort file', decision: 'allow' },
+    { name: 'sort -r', command: 'sort -r file', decision: 'allow' },
+    { name: 'rg with a path', command: 'rg TODO src', decision: 'allow' },
+    { name: 'git diff alone', command: 'git diff', decision: 'allow' },
+    { name: 'git log --oneline', command: 'git log --oneline', decision: 'allow' },
+    { name: 'find -name', command: "find . -name '*.ts'", decision: 'allow' },
+    { name: 'recursive grep', command: 'grep -rn x src', decision: 'allow' },
+    {
+      name: 'a command substitution naming -o',
+      command: "sort $(echo -o) src/api/a.ts <<< 'payload'",
+      decision: 'deny',
+    },
+    {
+      name: 'find with a substituted -exec',
+      command: "find . -maxdepth 0 $(echo -exec) sh -c 'touch pwned' ';'",
+      decision: 'deny',
+    },
+    { name: 'a backtick substitution naming -o', command: 'sort `echo -o` x b', decision: 'deny' },
+    { name: 'ANSI-C quoting of -o', command: "sort $'-o' x b", decision: 'deny' },
+    { name: 'locale quoting of -o', command: 'sort $"-o" x b', decision: 'deny' },
+    { name: 'a default expansion yielding -o', command: 'sort ${NOPE:--o} x b', decision: 'deny' },
+    { name: 'brace expansion yielding -o', command: 'sort {-o,x} b', decision: 'deny' },
+    {
+      name: 'brace expansion yielding -exec',
+      command: "find . -maxdepth 0 {-exec,sh,-c,'touch pwned2',';'}",
+      decision: 'deny',
+    },
+    {
+      name: 'brace expansion yielding -delete',
+      command: 'find . -name x {-delete,}',
+      decision: 'deny',
+    },
+    { name: 'brace expansion yielding --pre', command: 'rg {--pre=./x.sh,TODO}', decision: 'deny' },
+    {
+      name: 'a substituted git --output',
+      command: 'git diff $(echo --output=x)',
+      decision: 'deny',
+    },
+    { name: 'a redirect to a file that starts with 1', command: 'cat x 2>&1foo', decision: 'deny' },
+    {
+      name: 'a redirect to a file that starts with null',
+      command: 'echo x >/dev/nullfoo',
+      decision: 'deny',
+    },
+    { name: 'stderr merged into stdout', command: 'cat x 2>&1', decision: 'allow' },
+    { name: 'stdout discarded', command: 'grep -r x src >/dev/null', decision: 'allow' },
+    { name: 'a glob', command: 'sort *', decision: 'deny' },
+    { name: 'a home expansion', command: 'ls ~', decision: 'deny' },
+    { name: 'an =cmd expansion', command: 'cat =ls', decision: 'deny' },
+    { name: 'an =cmd expansion after empty quotes', command: 'cat ""=ls', decision: 'deny' },
+    { name: 'an =cmd expansion after an option', command: 'ls --color==ls', decision: 'deny' },
+    { name: 'an =cmd expansion after a colon', command: 'cat a=:=ls', decision: 'deny' },
+    { name: 'a comment', command: 'echo x # comment', decision: 'deny' },
+    { name: 'a newline', command: 'cat a\nb', decision: 'deny' },
+    { name: 'a variable in double quotes', command: 'cat "a$b"', decision: 'deny' },
+    { name: 'an escape in double quotes', command: 'cat "a\\"b"', decision: 'deny' },
+    { name: 'a history bang', command: 'ls !x', decision: 'deny' },
+    { name: 'an input redirect', command: 'cat <file', decision: 'deny' },
+    { name: 'a numbered redirect', command: 'cat a 3>x', decision: 'deny' },
+    { name: 'an &> redirect', command: 'cat a &>x', decision: 'deny' },
+    { name: 'a clobber redirect', command: 'cat a >|x', decision: 'deny' },
+    { name: 'a read-write redirect', command: 'cat a<>x', decision: 'deny' },
+    { name: 'backgrounding', command: 'cat a&', decision: 'deny' },
+    { name: 'a |& pipe', command: 'cat a |& cat', decision: 'deny' },
+    { name: 'an empty-quoted option prefix', command: "sort ''-o x y", decision: 'deny' },
+    { name: 'a quoted dash before o', command: 'sort "-"o x y', decision: 'deny' },
+    { name: 'a fullwidth hyphen option', command: 'sort －o x y', decision: 'deny' },
+    { name: 'a trailing separator', command: 'ls ;', decision: 'deny' },
+    { name: 'a leading separator', command: '; ls', decision: 'deny' },
+    { name: 'an unterminated quote', command: "cat 'a", decision: 'deny' },
+    { name: 'parsed: git diff', command: 'git diff', decision: 'allow' },
+    { name: 'parsed: git log with a count', command: 'git log --oneline -5', decision: 'allow' },
+    { name: 'parsed: rg', command: 'rg TODO src', decision: 'allow' },
+    {
+      name: 'parsed: grep with a paren in quotes',
+      command: "grep -rn 'foo(bar' src",
+      decision: 'allow',
+    },
+    { name: 'parsed: find with a quoted glob', command: "find . -name '*.ts'", decision: 'allow' },
+    { name: 'parsed: sort into head', command: 'sort file | head -3', decision: 'allow' },
+    { name: 'parsed: stderr merged', command: 'cat a.ts 2>&1', decision: 'allow' },
+    { name: 'parsed: stdout discarded', command: 'ls src >/dev/null', decision: 'allow' },
+    {
+      name: 'parsed: wc then git status',
+      command: 'wc -l src/a.ts && git status',
+      decision: 'allow',
+    },
+    { name: 'parsed: a command split by quotes', command: "s'o'rt file", decision: 'allow' },
+    {
+      name: 'parsed: a double-quoted pattern',
+      command: 'grep -rn "foo bar" src',
+      decision: 'allow',
+    },
+  ])('$decision $name', ({ command, decision }) => {
+    expect(ro('Bash', { command }).decision).toBe(decision);
   });
 });

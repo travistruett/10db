@@ -1,11 +1,31 @@
-import type {
-  ClaimKind,
-  ContextPack,
-  EvidenceDto,
-  HandoffDto,
-  NextAction,
-  TaskDto,
+import {
+  REVIEW_ROLES,
+  ToolAccess,
+  type ClaimKind,
+  type ContextPack,
+  type EvidenceDto,
+  type HandoffDto,
+  type NextAction,
+  type StepResult,
+  type StepRole,
+  type TaskDto,
 } from '@10db/contracts';
+
+interface StepBrief {
+  readonly index: number;
+  readonly count: number;
+  readonly role: StepRole;
+  readonly personaName: string;
+  readonly instructions: string | null;
+  readonly skills: readonly string[];
+  readonly tools: ToolAccess;
+}
+
+interface PriorResult {
+  readonly role: StepRole;
+  readonly personaName: string;
+  readonly result: StepResult;
+}
 
 export interface PromptInput {
   readonly task: Pick<TaskDto, 'title' | 'description' | 'acceptanceCriteria'>;
@@ -20,6 +40,11 @@ export interface PromptInput {
   readonly evidence: EvidenceDto | null;
   readonly recovery: { readonly reason: string; readonly lastOp: string | null } | null;
   readonly contextPack: ContextPack;
+  readonly step: StepBrief;
+  readonly priorResults: readonly PriorResult[];
+  /** A read-only step sent back sees the result it gave before. */
+  readonly previousResult: StepResult | null;
+  readonly revisedBy: { readonly role: StepRole; readonly personaName: string } | null;
 }
 
 export const HANDOFF_NUDGE =
@@ -27,6 +52,14 @@ export const HANDOFF_NUDGE =
 
 export const HANDOFF_FIRM_NUDGE =
   '10db: your context is almost full. Call write_handoff now and end your turn.';
+
+/** The handoff nudge for a read-only step, which has nothing to commit. */
+export const HANDOFF_NUDGE_READ_ONLY =
+  '10db: your context is filling up. Call mcp__10db__write_handoff with what you have found so far and end your turn. Do not start new checks.';
+
+/** Sent when a read-only step ends its turn without recording its result in this session. */
+export const RESULT_NUDGE =
+  '10db: this step is not finished until you call mcp__10db__complete_step with your result (and, for a review, a verdict). Call it now, then end your turn.';
 
 const RULES = [
   'Edit only files inside your claims. For anything else, call the request_claim tool first.',
@@ -36,6 +69,19 @@ const RULES = [
   'When the acceptance criteria are met and committed, end your turn. 10db runs the gate itself.',
   'If 10db asks you to hand off, finish your current step, call write_handoff, and end your turn.',
 ];
+
+function readOnlyRules(role: StepRole): string[] {
+  return [
+    'This step is read-only: 10db refuses file edits, commits and any shell command that writes. Report what should change; the implement step changes it.',
+    'When a decision is not yours to make, ask with mcp__10db__ask_human (or your question tool). Record routine engineering decisions with mcp__10db__record_decision.',
+    REVIEW_ROLES.includes(role)
+      ? 'When you are done, call mcp__10db__complete_step with your findings and a verdict (approve or reject), then end your turn.'
+      : 'When you are done, call mcp__10db__complete_step with your plan, then end your turn.',
+    'If 10db asks you to hand off, call mcp__10db__write_handoff, and end your turn.',
+  ];
+}
+
+const VERDICT_LABEL = { approve: 'approved', reject: 'rejected' } as const;
 
 const bullets = (lines: readonly string[]) =>
   lines.length === 0 ? '- (none)' : lines.map((l) => `- ${l}`).join('\n');
@@ -98,13 +144,46 @@ function actionSection(input: PromptInput): string {
         : 'The gate failed. Run it, fix the cause, commit, and end your turn.';
     case 'verify':
       return 'Verify the work against the acceptance criteria, commit anything outstanding, and end your turn.';
+    case 'revise': {
+      const by = input.revisedBy
+        ? `The ${input.revisedBy.role} step (${input.revisedBy.personaName})`
+        : 'A reviewer';
+      return input.step.tools === ToolAccess.Edit
+        ? `${by} rejected the work. Its notes are under Earlier steps. Address each one, commit, and end your turn.`
+        : `${by} rejected your result. Its notes are under Earlier steps. Address each one, then call mcp__10db__complete_step again.`;
+    }
   }
+}
+
+function stepSection(input: PromptInput): string[] {
+  const { step } = input;
+  const lines = [
+    `Your step: ${String(step.index + 1)} of ${String(step.count)}, ${step.role}, as ${step.personaName}.`,
+  ];
+  if (step.skills.length > 0) lines.push(`Skills to use: ${step.skills.join(', ')}.`);
+  if (step.instructions) lines.push('', `How you work:\n${step.instructions}`);
+  if (input.priorResults.length > 0) {
+    lines.push('', 'Earlier steps:');
+    for (const prior of input.priorResults) {
+      const verdict = prior.result.verdict ? `: ${VERDICT_LABEL[prior.result.verdict]}` : '';
+      lines.push(`--- ${prior.role} (${prior.personaName})${verdict}`, prior.result.summary, '---');
+    }
+  }
+  if (input.previousResult) {
+    const verdict = input.previousResult.verdict
+      ? `: ${VERDICT_LABEL[input.previousResult.verdict]}`
+      : '';
+    lines.push('', `Your previous result${verdict}:`, input.previousResult.summary);
+  }
+  return lines;
 }
 
 export function buildSessionPrompt(input: PromptInput): string {
   const claims = input.claims.map((c) => `${c.kind} ${c.name}`).join(', ') || '(none)';
   return [
     'You are working on one task in a shared repository, managed by 10db.',
+    '',
+    ...stepSection(input),
     '',
     `Task: ${input.task.title}`,
     input.task.description,
@@ -115,7 +194,7 @@ export function buildSessionPrompt(input: PromptInput): string {
     `Your claims: ${claims}.`,
     '',
     'Rules:',
-    bullets(RULES),
+    bullets(input.step.tools === ToolAccess.ReadOnly ? readOnlyRules(input.step.role) : RULES),
     '',
     'Context pack:',
     renderKnowledge(input.contextPack),

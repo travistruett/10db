@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,39}$"
+    },
+    "steps": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "plan",
+              "plan_review",
+              "implement",
+              "review",
+              "qa"
+            ]
+          },
+          "need": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "skip": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "unless_risk"
+                    },
+                    "tags": {
+                      "minItems": 1,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "security",
+                          "auth",
+                          "migration",
+                          "dependency"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "tags"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "const": "unless_criteria_over"
+                    },
+                    "count": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "count"
+                  ]
+                }
+              ]
+            }
+          },
+          "persona": {
+            "default": null,
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{0,39}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "role",
+          "need"
+        ]
+      }
+    }
+  },
+  "required": [
+    "name",
+    "steps"
+  ]
+}

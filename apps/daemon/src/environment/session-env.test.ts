@@ -38,7 +38,10 @@ const BASE: Readonly<Record<string, string>> = {
   TENDB_FAKE_SCRIPTS: '/scripts.json',
 };
 const CLIENT_APP = '10db/0.1.0';
-const keychain = (key: string | null): SecretSource => ({ anthropicApiKey: () => key });
+const keychain = (key: string | null): SecretSource => ({
+  anthropicApiKey: () => key,
+  artificialAnalysisKey: () => null,
+});
 
 describe('buildSessionEnv', () => {
   it('strips every billing switch for a subscription session, so .zshrc cannot move billing', () => {
@@ -201,6 +204,23 @@ describe('keychainSecrets', () => {
   const failure = (props: object) => () => {
     throw Object.assign(new Error('Command failed: security ... sk-ant-LEAK'), props);
   };
+
+  it('reads the Artificial Analysis key from its own Keychain account', () => {
+    const calls: (readonly string[])[] = [];
+    const secrets = keychainSecretsWith((_cmd, args) => {
+      calls.push(args);
+      return 'aa-key\n';
+    });
+    expect(secrets.artificialAnalysisKey()).toBe('aa-key');
+    expect(calls[0]).toEqual([
+      'find-generic-password',
+      '-s',
+      '10db',
+      '-a',
+      'artificial-analysis-api-key',
+      '-w',
+    ]);
+  });
 
   it('returns the key, trimmed', () => {
     expect(keychainSecretsWith(() => 'sk-ant-k\n').anthropicApiKey()).toBe('sk-ant-k');

@@ -10,12 +10,14 @@ import {
   acquireClaims,
   createTestStore,
   endSession,
+  getWorkstream,
   insertSession,
   listInbox,
   patchWorkstream,
   schema,
   type Store,
 } from '@10db/db';
+import type { WorkstreamStep } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { createTempRepo, seedWorkstream } from '../../test/fixtures';
@@ -149,12 +151,13 @@ describe('MCP auth', () => {
 });
 
 describe('MCP tools', () => {
-  it('lists exactly the ten tools', async () => {
+  it('lists exactly the eleven tools', async () => {
     const s = await seedSession();
     const { tools } = await s.client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual([
       'ask_human',
       'commit',
+      'complete_step',
       'find_knowledge',
       'get_context',
       'propose',
@@ -606,4 +609,124 @@ describe('MCP idempotence by opId', () => {
     expect(second.json).toEqual(first.json);
     expect(rows.inbox()).toBe(1);
   });
+});
+
+const stepAt = (role: 'implement' | 'review' | 'plan'): WorkstreamStep => ({
+  role,
+  personaId: null,
+  personaName: role,
+  tools: role === 'implement' ? 'edit' : 'read_only',
+  score: role === 'implement' ? 'coding' : 'intelligence',
+  profileId: null,
+  model: 'sonnet',
+  effort: 'medium',
+  need: 40,
+  reason: 'test',
+  overBudget: false,
+  pinned: false,
+  status: 'running',
+  attempts: 0,
+  startedAt: null,
+  sessionFloor: 0,
+  result: null,
+});
+
+async function onStep(role: 'implement' | 'review' | 'plan') {
+  const s = await seedSession();
+  state.write((ctx) => {
+    patchWorkstream(ctx, s.workstream.id, null, {
+      steps: [stepAt('implement'), stepAt(role)],
+      stepIndex: 1,
+    });
+  });
+  return s;
+}
+
+describe('complete_step', () => {
+  it('records a review verdict, and the session that gave it, on the current step once per opId', async () => {
+    const s = await onStep('review');
+    const first = await s.call('complete_step', {
+      opId: 'op-step-0001',
+      summary: 'Looks right.',
+      verdict: 'approve',
+    });
+    const retry = await s.call('complete_step', {
+      opId: 'op-step-0001',
+      summary: 'Looks right.',
+      verdict: 'approve',
+    });
+    expect(first.isError).toBe(false);
+    expect(retry.json).toEqual(first.json);
+    expect(getWorkstream(base.db, s.workstream.id).steps[1]?.result).toMatchObject({
+      summary: 'Looks right.',
+      verdict: 'approve',
+      sessionId: s.session.id,
+    });
+  });
+
+  it.each([
+    {
+      name: 'an implement step',
+      role: 'implement',
+      args: { summary: 'Done.', verdict: null },
+      says: 'ends by ending your turn',
+    },
+    {
+      name: 'a review with no verdict',
+      role: 'review',
+      args: { summary: 'Hmm.', verdict: null },
+      says: 'needs a verdict',
+    },
+  ] as const)('refuses $name', async ({ role, args, says }) => {
+    const s = await onStep(role);
+    const result = await s.call('complete_step', { opId: 'op-step-0002', ...args });
+    expect(result.isError).toBe(true);
+    expect(result.text).toContain(says);
+  });
+
+  it('emits step.changed once, and not again on an opId replay', async () => {
+    const s = await onStep('review');
+    const args = { opId: 'op-step-0004', summary: 'Fine.', verdict: 'approve' };
+    const count = () =>
+      base.db
+        .select()
+        .from(schema.events)
+        .all()
+        .filter((e) => e.type === 'step.changed').length;
+    const before = count();
+    await s.call('complete_step', args);
+    await s.call('complete_step', args);
+    expect(count() - before).toBe(1);
+  });
+
+  it('stores no verdict for a plan step even when one is sent', async () => {
+    const s = await onStep('plan');
+    await s.call('complete_step', {
+      opId: 'op-step-0005',
+      summary: '1. Do it.',
+      verdict: 'approve',
+    });
+    expect(getWorkstream(base.db, s.workstream.id).steps[1]?.result?.verdict).toBeNull();
+  });
+
+  it('accepts a plan with no verdict', async () => {
+    const s = await onStep('plan');
+    expect(
+      (await s.call('complete_step', { opId: 'op-step-0003', summary: '1. Do it.', verdict: null }))
+        .isError,
+    ).toBe(false);
+  });
+});
+
+it('refuses to commit from a read-only step', async () => {
+  const s = await onStep('review');
+  writeRepoFile('src/api/a.ts', 'export {}\n');
+  const result = await s.call('commit', {
+    opId: 'op-commit-ro1',
+    paths: ['src/api/a.ts'],
+    message: 'Sneak',
+  });
+  expect(result.isError).toBe(true);
+  expect(result.text).toContain('read-only');
+  expect(commitCount()).toBe(1);
 });

@@ -1,9 +1,31 @@
 import { z } from 'zod';
-import { InboxItemDto, ProjectDto, TaskDto, WorkstreamDto } from './entities';
+import { AaModelDto, BenchmarkStatusDto } from './benchmarks';
+import {
+  InboxItemDto,
+  ProjectDto,
+  ProjectPatch,
+  TaskDto,
+  TaskPatch,
+  WorkstreamDto,
+} from './entities';
 import { DaemonEvent } from './events';
+import { FlowDto, FlowInput, FlowPatch } from './flows';
 import { HandoffInput } from './handoff';
 import { HealthResponse } from './health';
 import { McpToolInputs, McpToolName, McpToolOutputs } from './mcp-tools';
+import { ModelProfileDto, ModelProfilePatch } from './model-profiles';
+import { StepPlanDto } from './steps';
+import {
+  PersonaDto,
+  PersonaInput,
+  PersonaPatch,
+  PersonDto,
+  PersonInput,
+  RoutingRuleDto,
+  RoutingRulesInput,
+  TeamDto,
+  TeamInput,
+} from './team';
 import {
   EventsHead,
   KeepAwakeInput,
@@ -27,6 +49,8 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'handoff-input': HandoffInput,
   'project-dto': ProjectDto,
   'task-dto': TaskDto,
+  'project-patch': ProjectPatch,
+  'task-patch': TaskPatch,
   'workstream-dto': WorkstreamDto,
   'inbox-item-dto': InboxItemDto,
   'system-check-dto': SystemCheckDto,
@@ -35,6 +59,23 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'keep-awake-input': KeepAwakeInput,
   'mcp-server-review': McpServerReview,
   'mcp-server-status-dto': McpServerStatusDto,
+  'aa-model-dto': AaModelDto,
+  'benchmark-status-dto': BenchmarkStatusDto,
+  'flow-dto': FlowDto,
+  'flow-input': FlowInput,
+  'flow-patch': FlowPatch,
+  'model-profile-dto': ModelProfileDto,
+  'model-profile-patch': ModelProfilePatch,
+  'person-dto': PersonDto,
+  'person-input': PersonInput,
+  'persona-dto': PersonaDto,
+  'persona-input': PersonaInput,
+  'persona-patch': PersonaPatch,
+  'routing-rule-dto': RoutingRuleDto,
+  'routing-rules-input': RoutingRulesInput,
+  'step-plan-dto': StepPlanDto,
+  'team-dto': TeamDto,
+  'team-input': TeamInput,
   ...mcpSchemas,
 };
 

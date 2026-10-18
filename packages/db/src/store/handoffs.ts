@@ -1,4 +1,5 @@
 import {
+  currentStep,
   EventType,
   mintId,
   NotFoundError,
@@ -6,9 +7,10 @@ import {
   type HandoffId,
   type HandoffInput,
   type SessionId,
+  type StepPosition,
   type WorkstreamId,
 } from '@10db/contracts';
-import { desc, eq } from 'drizzle-orm';
+import { and, desc, eq, gt } from 'drizzle-orm';
 import * as schema from '../schema';
 import type { DbReader, WriteContext } from './store';
 
@@ -67,4 +69,24 @@ export function handoffForSession(db: DbReader, sessionId: SessionId): HandoffDt
       .limit(1)
       .get() ?? null
   );
+}
+
+/**
+ * The latest handoff written in the step the workstream is on: by a session after the
+ * step's floor. Sessions, not timestamps, because a step can start in the same instant a handoff lands.
+ */
+export function latestHandoffForStep(
+  db: DbReader,
+  ws: StepPosition & { readonly id: WorkstreamId },
+): HandoffDto | null {
+  const floor = currentStep(ws).sessionFloor;
+  const row = db
+    .select({ handoff: schema.handoffs })
+    .from(schema.handoffs)
+    .innerJoin(schema.sessions, eq(schema.sessions.id, schema.handoffs.sessionId))
+    .where(and(eq(schema.handoffs.workstreamId, ws.id), gt(schema.sessions.sequence, floor)))
+    .orderBy(desc(schema.sessions.sequence), desc(schema.handoffs.id))
+    .limit(1)
+    .get();
+  return row?.handoff ?? null;
 }

@@ -33,6 +33,18 @@
         }
       },
       { "do": "turn_complete" }
+    ],
+    [
+      {
+        "do": "mcp",
+        "tool": "complete_step",
+        "args": {
+          "opId": "op-e2e-review1",
+          "summary": "The greeting is written and committed.",
+          "verdict": "approve"
+        }
+      },
+      { "do": "turn_complete" }
     ]
   ]
 }
