@@ -5,6 +5,7 @@ import { plainCommandWords } from './plain-command';
 export const READ_COMMANDS: ReadonlySet<string> = new Set([
   'basename',
   'cat',
+  'cd',
   'diff',
   'dirname',
   'echo',

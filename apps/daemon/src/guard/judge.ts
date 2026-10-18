@@ -148,13 +148,24 @@ function judgeShell(input: GuardInput, command: string, depth = 0): GuardVerdict
   return ALLOW;
 }
 
+/** Tools a read-only step may call besides Bash and the 10db MCP server's own tools. */
+const READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
+  'Read',
+  'Glob',
+  'Grep',
+  'LS',
+  'TodoWrite',
+  'NotebookRead',
+  'WebFetch',
+  'WebSearch',
+]);
+const READ_ONLY_REFUSAL =
+  'This step is read-only. Describe the change in mcp__10db__complete_step; the implement step makes it.';
+
 /** The PreToolUse decision for a managed session (spec §8.2). Rules only; never an LLM. */
 export function judgeToolUse(input: GuardInput): GuardVerdict {
   if (FILE_TOOLS.has(input.toolName)) {
-    if (input.readOnly)
-      return deny(
-        'This step is read-only. Describe the change in mcp__10db__complete_step; the implement step makes it.',
-      );
+    if (input.readOnly) return deny(READ_ONLY_REFUSAL);
     const filePath =
       stringField(input.toolInput, 'file_path') ?? stringField(input.toolInput, 'notebook_path');
     return filePath === null ? ALLOW : judgeFile(input, filePath);
@@ -168,5 +179,11 @@ export function judgeToolUse(input: GuardInput): GuardVerdict {
     }
     return judgeShell(input, command);
   }
+  if (
+    input.readOnly &&
+    !READ_ONLY_TOOLS.has(input.toolName) &&
+    !input.toolName.startsWith('mcp__10db__')
+  )
+    return deny(READ_ONLY_REFUSAL);
   return ALLOW;
 }

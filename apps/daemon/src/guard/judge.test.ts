@@ -565,6 +565,12 @@ describe('stringField', () => {
   });
 });
 
+describe('implement steps and tools outside the read-only list', () => {
+  it('allows a repo MCP tool in implement mode', () => {
+    expect(judge('mcp__fs__write_file', { path: 'src/api/a.ts' }).decision).toBe('allow');
+  });
+});
+
 describe('read-only steps', () => {
   const ro = (tool: string, input: object) =>
     judge(tool, input, [{ kind: 'area', name: 'api' }], true);
@@ -574,6 +580,10 @@ describe('read-only steps', () => {
     { tool: 'MultiEdit', input: { file_path: 'src/api/a.ts' }, decision: 'deny' },
     { tool: 'NotebookEdit', input: { notebook_path: 'src/api/n.ipynb' }, decision: 'deny' },
     { tool: 'Read', input: { file_path: 'src/api/a.ts' }, decision: 'allow' },
+    { tool: 'Grep', input: { pattern: 'x' }, decision: 'allow' },
+    { tool: 'mcp__10db__complete_step', input: {}, decision: 'allow' },
+    { tool: 'mcp__fs__write_file', input: { path: 'src/api/a.ts' }, decision: 'deny' },
+    { tool: 'Agent', input: { prompt: 'edit it' }, decision: 'deny' },
   ])('$decision $tool inside the claims', ({ tool, input, decision }) => {
     expect(ro(tool, input).decision).toBe(decision);
   });
@@ -618,6 +628,8 @@ describe('read-only steps', () => {
       command: 'rg --pre ./scripts/x.sh TODO',
       decision: 'deny',
     },
+    { name: 'cd then a read', command: 'cd src && git diff', decision: 'allow' },
+    { name: 'cd to home', command: 'cd ~', decision: 'deny' },
     { name: 'a plain sort', command: 'sort a.txt', decision: 'allow' },
     { name: 'a plain rg', command: 'rg -n TODO src', decision: 'allow' },
     {
