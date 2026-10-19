@@ -1,7 +1,7 @@
 # Spike 12: Billing identities per config directory and per keyed kind
 
-- **Status:** IN PROGRESS. The gateway check is VERIFIED; the refresh check is running; Bedrock and API-key
-  checks have not run.
+- **Status:** IN PROGRESS. The gateway check is VERIFIED; the refresh check is PARTIAL; Bedrock, API-key and
+  two-subscription checks have not run.
 - **Date:** 2026-10-18
 - **Versions:** claude 2.1.302 (Claude Code) · Agent SDK 0.3.300 · Node v26.12.0
 - **Command:** `pnpm --dir spikes/agent-sdk spike:12 <identity | identity-one | refresh | keyed <kind>>`
@@ -47,13 +47,35 @@ PASS gateway, key unset, default config dir (saved login present): init.model eq
 RESULT 12-accounts: no failures
 ```
 
-## Refresh (`refresh`): RUNNING
+## Refresh (`refresh`): PARTIAL
 
-Four long-lived sessions on one config directory, each sent a one-word turn every 240 s, plus one fresh session
-per cycle, for up to 10 hours. The run stops one cycle after the first OAuth refresh line appears in a debug
-log, so every session takes a turn on the new token. Claude Code may not log a successful refresh at debug
-level; if no line appears, the run lasts the full 10 hours, and every session still succeeding at the end is
-the evidence that they survived a refresh. The run started 2026-10-18 at 19:30 Pacific.
+### Question
+
+Do four concurrent sessions on one config directory survive an OAuth token refresh (spec §10 check 2, Claude Code
+issues 54443 and 61923)?
+
+### Result
+
+Four long-lived sessions on one config directory each took a one-word turn every 240 s, and one fresh session
+started per cycle, for the full 10 hours: 149 cycles, 596 turns in the long-lived sessions and 149 fresh sessions,
+from 19:30 to 05:29 Pacific. Every turn succeeded. No session failed, and the sign-in was still valid at the end.
+
+The refresh itself was not observed. No line in the five debug logs mentions an OAuth refresh, a 401, an expired
+token or a credential change, so Claude Code does not log a successful refresh at debug level, and the run's
+early stop never fired. If an access token lasts less than 10 hours, a refresh happened during the run and every
+session rode through it; the run does not show how long a token lasts. On this evidence the spec's fallbacks (a lane cap, or starting
+sessions one at a time) are not needed.
+
+### Evidence
+
+```
+INFO cycle 149: {"at":"2026-10-19T12:29:07.152Z","turns":[149,149,149,149],"laneFailures":[0,0,0,0],"fresh":"success","refreshLines":[0,0,0,0],"refreshFailures":[0,0,0,0]}
+PARTIAL a token refresh happened during the run: no refresh lines in any debug log; extend SPIKE_HOURS
+PASS no lane failed a turn: [[],[],[],[]]
+PASS no fresh session failed: 0 of 149
+PASS no refresh failures logged: [0,0,0,0]
+RESULT 12-accounts: no failures
+```
 
 ## Not yet run
 
