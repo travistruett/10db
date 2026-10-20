@@ -17,7 +17,7 @@
     "@mantine/hooks": "9.7.2",
     "@tabler/icons-react": "3.49.0",
     "@tanstack/react-query": "5.104.2",
-    "@tanstack/react-router": "1.170.44",
+    "@tanstack/react-router": "1.170.45",
     "@tauri-apps/api": "2.12.4",
     "@tauri-apps/plugin-notification": "2.7.0",
     "dayjs": "1.11.23",
