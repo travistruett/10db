@@ -185,6 +185,31 @@ describe('moveTask between columns', () => {
   });
 });
 
+describe('moveTask neighbours', () => {
+  it('refuses a finished neighbour, which the board would not show among planned cards', () => {
+    store.db
+      .update(schema.tasks)
+      .set({ status: 'done' })
+      .where(eq(schema.tasks.id, tasks.c.id))
+      .run();
+    expect(() =>
+      store.write((ctx) =>
+        moveTask(ctx, tasks.b.id, { to: null, after: tasks.c.id, before: tasks.d.id }),
+      ),
+    ).toThrow(ConflictError);
+    expect(order()).toEqual(['a', 'b', 'c', 'd']);
+  });
+
+  it('refuses a running neighbour', () => {
+    store.write((ctx) => insertWorkstream(ctx, tasks.c.id));
+    expect(() =>
+      store.write((ctx) =>
+        moveTask(ctx, tasks.b.id, { to: null, after: tasks.c.id, before: tasks.d.id }),
+      ),
+    ).toThrow(ConflictError);
+  });
+});
+
 describe('a task with an older run still active', () => {
   it('refuses to move it, whatever its latest run says', () => {
     const first = store.write((ctx) => insertWorkstream(ctx, tasks.a.id)).value;

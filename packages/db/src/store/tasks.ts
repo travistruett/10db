@@ -249,6 +249,9 @@ export function moveTask(ctx: WriteContext, id: TaskId, move: TaskMove): TaskDto
       throw new InvalidError('Both neighbours must be tasks in the same project');
     if (other.boardColumnId !== to)
       throw new InvalidError('A neighbour must be in the column the task moves to');
+    // The board lists only planned and parked work among these cards; anything else moved on.
+    if (other.status !== TaskStatus.Open || !MOVABLE.includes(other.boardStatus))
+      throw new ConflictError('The board changed while you were dragging; try again');
     return other.boardOrder;
   };
   const first = { lo: orderOf(after), hi: orderOf(before) };
@@ -259,6 +262,8 @@ export function moveTask(ctx: WriteContext, id: TaskId, move: TaskMove): TaskDto
   }
   const lo = orderOf(after);
   const hi = orderOf(before);
+  if (lo !== null && hi !== null && lo >= hi)
+    throw new ConflictError('The board changed while you were dragging; try again');
   const boardOrder =
     lo !== null && hi !== null
       ? (lo + hi) / 2
