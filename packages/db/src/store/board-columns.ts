@@ -133,10 +133,11 @@ export function deleteBoardColumn(
 ): BoardColumnDto[] {
   const { moveTasksTo } = BoardColumnDelete.parse(del);
   const column = getBoardColumn(ctx.tx, id);
-  if (moveTasksTo !== null) {
-    if (moveTasksTo === id)
+  const target = moveTasksTo === 'planned' ? null : moveTasksTo;
+  if (target !== null) {
+    if (target === id)
       throw new InvalidError("A column's tasks can't move to the column being deleted");
-    if (getBoardColumn(ctx.tx, moveTasksTo).projectId !== column.projectId)
+    if (getBoardColumn(ctx.tx, target).projectId !== column.projectId)
       throw new InvalidError('The tasks must move to a column in the same project');
   }
   const parked = ctx.tx
@@ -147,14 +148,14 @@ export function deleteBoardColumn(
   for (const task of parked) {
     ctx.tx
       .update(schema.tasks)
-      .set({ boardColumnId: moveTasksTo, updatedAt: ctx.now })
+      .set({ boardColumnId: target, updatedAt: ctx.now })
       .where(eq(schema.tasks.id, task.id))
       .run();
     ctx.emit({
       type: EventType.TaskChanged,
       entityType: 'task',
       entityId: task.id,
-      data: { boardColumnId: moveTasksTo },
+      data: { boardColumnId: target },
     });
   }
   ctx.tx.delete(schema.boardColumns).where(eq(schema.boardColumns.id, id)).run();

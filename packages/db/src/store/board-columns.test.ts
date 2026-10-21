@@ -160,7 +160,7 @@ describe('board columns', () => {
       const parked = park('idea', 'Icebox');
       const { value, events } = store.write((ctx) =>
         deleteBoardColumn(ctx, columnId('Icebox'), {
-          moveTasksTo: target === null ? null : columnId(target),
+          moveTasksTo: target === null ? 'planned' : columnId(target),
         }),
       );
       expect(value.map((c) => [c.name, c.position])).toEqual([['Exploring', 0]]);
@@ -193,7 +193,9 @@ describe('board columns', () => {
 
     it('answers not found for an unknown column', () => {
       expect(() =>
-        store.write((ctx) => deleteBoardColumn(ctx, mintId('BoardColumn'), { moveTasksTo: null })),
+        store.write((ctx) =>
+          deleteBoardColumn(ctx, mintId('BoardColumn'), { moveTasksTo: 'planned' }),
+        ),
       ).toThrow(NotFoundError);
     });
   });
