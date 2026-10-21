@@ -30,7 +30,7 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   // No view reads these entity types; the entries make them known.
   persona: [],
   person: [],
-  flow: [],
+  flow: [queryKeys.flows],
   model_profile: [],
   team: [],
   routing_rules: [],

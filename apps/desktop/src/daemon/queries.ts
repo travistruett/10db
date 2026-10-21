@@ -1,5 +1,6 @@
 import {
   BoardColumnDto,
+  FlowDto,
   InboxItemDto,
   KeepAwakeStatus,
   ProjectDto,
@@ -14,6 +15,7 @@ import {
   type KeepAwakeMode,
   type ProjectId,
   type ProjectInput,
+  type ProjectPatch,
   type TaskId,
   type TaskInput,
   type WorkstreamId,
@@ -32,12 +34,14 @@ export const queryKeys = {
   inbox: ['inbox'],
   keepAwake: ['keep-awake'],
   system: ['system'],
+  flows: ['flows'],
 } as const;
 
 const ProjectList = z.array(ProjectDto);
 const TaskList = z.array(TaskDto);
 const WorkstreamList = z.array(WorkstreamDto);
 const BoardColumnList = z.array(BoardColumnDto);
+const FlowList = z.array(FlowDto);
 const InboxList = z.array(InboxItemDto);
 
 /** Open cards; shared by the Inbox view, the nav badge and notifications. */
@@ -279,5 +283,26 @@ export function useDeleteBoardColumn() {
         queryClient.invalidateQueries({ queryKey: ['board-columns'] }),
         queryClient.invalidateQueries({ queryKey: ['tasks'] }),
       ]),
+  });
+}
+
+export function useFlows() {
+  const { client } = useDaemon();
+  return useQuery({
+    queryKey: queryKeys.flows,
+    queryFn: async () => readJson(await client.flows.$get(), FlowList),
+  });
+}
+
+export function usePatchProject(projectId: ProjectId) {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (patch: ProjectPatch) =>
+      readJson(
+        await client.projects[':projectId'].$patch({ param: { projectId }, json: patch }),
+        ProjectDto,
+      ),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.projects }),
   });
 }

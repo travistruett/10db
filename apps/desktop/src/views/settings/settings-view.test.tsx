@@ -83,4 +83,78 @@ describe('SettingsView', () => {
       expect(put).toEqual([{ mode: 'always' }]);
     });
   });
+
+  it('saves only the changed project fields', async () => {
+    let project = projectDto({ name: 'demo', gateCommand: 'make gate' });
+    const patched: unknown[] = [];
+    server.use(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
+      http.patch(daemonUrl('/projects/:projectId'), async ({ request }) => {
+        const body = await request.json();
+        patched.push(body);
+        project = { ...project, gateCommand: 'make check' };
+        return HttpResponse.json(project);
+      }),
+      ...baseHandlers(),
+    );
+    renderApp('/settings/general');
+    const gate = await screen.findByLabelText('Gate command');
+    fireEvent.change(gate, { target: { value: 'make check' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => {
+      expect(patched).toEqual([{ gateCommand: 'make check' }]);
+    });
+    expect(await screen.findByText('Saved.')).toBeTruthy();
+  });
+
+  it('blocks a nudge at the handoff without calling the daemon', async () => {
+    // One fixed project: a handler that mints a new ID per fetch would remount the form.
+    const project = projectDto();
+    let calls = 0;
+    server.use(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
+      http.patch(daemonUrl('/projects/:projectId'), () => {
+        calls += 1;
+        return HttpResponse.json({}, { status: 500 });
+      }),
+      ...baseHandlers(),
+    );
+    renderApp('/settings/general');
+    fireEvent.change(await screen.findByLabelText('Nudge at %'), { target: { value: '40' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(await screen.findByText('The nudge must come after the handoff')).toBeTruthy();
+    expect(calls).toBe(0);
+  });
+
+  it("shows the daemon's message when it refuses the change", async () => {
+    // One fixed project: a handler that mints a new ID per fetch would remount the form.
+    const project = projectDto();
+    server.use(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
+      http.patch(daemonUrl('/projects/:projectId'), () =>
+        HttpResponse.json({ error: 'not_found', message: 'flow flw_x not found' }, { status: 404 }),
+      ),
+      ...baseHandlers(),
+    );
+    renderApp('/settings/general');
+    fireEvent.change(await screen.findByLabelText('Name'), { target: { value: 'renamed' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(await screen.findByText('flow flw_x not found')).toBeTruthy();
+  });
+
+  it('says there is nothing to change', async () => {
+    // One fixed project: a handler that mints a new ID per fetch would remount the form.
+    const project = projectDto();
+    server.use(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
+      ...baseHandlers(),
+    );
+    renderApp('/settings/general');
+    fireEvent.click(await screen.findByRole('button', { name: 'Save' }));
+    expect(await screen.findByText('Nothing to change.')).toBeTruthy();
+  });
 });

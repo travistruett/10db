@@ -5,6 +5,7 @@ import { KeepAwakeSection } from './keep-awake-section';
 import { PlannedSection } from './planned-section';
 import { ProjectAreas } from './project-areas';
 import { ProjectBilling } from './project-billing';
+import { ProjectGeneralForm } from './project-general-form';
 import { sectionByKey, SettingsSectionKey } from './sections';
 
 function NoProject() {
@@ -25,7 +26,7 @@ export function SectionBody({
       return (
         <>
           {heading}
-          {project ? <Text c="dimmed">Project fields arrive with the form.</Text> : <NoProject />}
+          {project ? <ProjectGeneralForm key={project.id} project={project} /> : <NoProject />}
         </>
       );
     case SettingsSectionKey.BoardColumns:
