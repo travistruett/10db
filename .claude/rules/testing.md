@@ -14,7 +14,8 @@
   a label component gets one render test.
 - **Tests never inherit `GIT_*` from the environment.** Git exports `GIT_DIR` and more to hooks,
   and the pre-push hook runs tests: `tests/git-isolation.setup.ts` (first in every project's
-  `setupFiles`) strips them, and a helper that spawns git passes an isolated `env` too.
+  `setupFiles`) strips them, and every git call in test code passes an isolated `env` too (ESLint
+  enforces it).
 - **No sleeps.** Wait on a condition with a deadline; inject the clock where time matters.
 - **Never pipe test output through `tail` or append `; echo $?`.** It hides failures and exit
   codes.

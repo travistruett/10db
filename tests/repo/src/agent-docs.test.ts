@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { isolatedGitEnvironment } from './fixtures';
 import { manifestPaths, readManifest, readRepoFile, repoRoot } from './workspace';
 
 /**
@@ -12,7 +13,7 @@ function repoFiles(): string[] {
   const out = execFileSync(
     'git',
     ['ls-files', '--cached', '--others', '--exclude-standard', '-z'],
-    { cwd: repoRoot, encoding: 'utf8' },
+    { cwd: repoRoot, env: isolatedGitEnvironment(), encoding: 'utf8' },
   );
   return out
     .split('\0')

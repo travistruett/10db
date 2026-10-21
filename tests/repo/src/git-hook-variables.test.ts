@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { cpSync, globSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { cpSync, globSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -18,6 +18,7 @@ import { repoRoot } from './workspace';
 // core.bare=true and a fixture identity in the shared .git/config and moved a branch. Git's own
 // list of the variables that tie it to one repository is the set no hook child may keep.
 const REPO_VARIABLES = execFileSync('git', ['rev-parse', '--local-env-vars'], {
+  env: isolatedGitEnvironment(),
   encoding: 'utf8',
 })
   .split('\n')
@@ -27,10 +28,53 @@ const VITEST = resolve(repoRoot, 'node_modules/.bin/vitest');
 const BIN = resolve(repoRoot, 'node_modules/.bin');
 const SETUP = resolve(repoRoot, 'tests/git-isolation.setup.ts');
 
-/** The part of a project's vitest config module this file checks. */
-const ProjectConfigModule = z.object({
-  default: z.object({ test: z.object({ setupFiles: z.array(z.string()).default([]) }) }),
+/** The part of a vitest project config this file checks. */
+const ProjectTest = z.object({
+  root: z.string().optional(),
+  setupFiles: z.union([z.string(), z.array(z.string())]).default([]),
 });
+const InlineProject = z.object({ test: ProjectTest });
+type InlineProject = z.infer<typeof InlineProject>;
+const ProjectConfigModule = z.object({ default: InlineProject });
+const RootConfigModule = z.object({
+  default: z.object({
+    test: z.object({ projects: z.array(z.union([z.string(), InlineProject])) }),
+  }),
+});
+
+const ROOT_PROJECTS = RootConfigModule.parse(await import('../../../vitest.config')).default.test
+  .projects;
+
+function projectLabel(entry: string | InlineProject, index: number): string {
+  return typeof entry === 'string' ? entry : `inline #${String(index)}`;
+}
+
+const asList = (files: string | string[]): string[] => (Array.isArray(files) ? files : [files]);
+
+/** Setup files of an inline project, resolved like vitest: against its root, else the repo root. */
+function inlineProject(entry: InlineProject): { setupFiles: string[]; root: string } {
+  return {
+    setupFiles: asList(entry.test.setupFiles),
+    root: resolve(repoRoot, entry.test.root ?? '.'),
+  };
+}
+
+/** Loads the config a path entry names: the file itself, or the vitest config in the directory. */
+async function projectFromPath(entry: string): Promise<{ setupFiles: string[]; root: string }> {
+  if (/[*?{[]/.test(entry)) throw new Error(`${entry} is a glob; list each project`);
+  const target = resolve(repoRoot, entry);
+  const file = statSync(target).isDirectory()
+    ? globSync('{vitest,vite}.config.{ts,mts,cts,js,mjs,cjs}', { cwd: target })
+        .sort((a, b) => Number(b.startsWith('vitest.')) - Number(a.startsWith('vitest.')))
+        .map((name) => join(target, name))[0]
+    : target;
+  if (file === undefined) throw new Error(`${entry} has no vitest config`);
+  const config = ProjectConfigModule.parse(await import(file)).default;
+  return {
+    setupFiles: asList(config.test.setupFiles),
+    root: resolve(dirname(file), config.test.root ?? '.'),
+  };
+}
 
 describe('git hook variables', () => {
   const cleanup: (ThrowawayRepo | string)[] = [];
@@ -142,14 +186,14 @@ describe('the test process environment', () => {
     expect(readFileSync(process.env['GIT_CONFIG_GLOBAL'] ?? '', 'utf8')).toBe('');
   });
 
-  it.each(globSync('{apps,packages,tests}/*/vitest.config.ts', { cwd: repoRoot }).sort())(
-    '%s runs the git isolation setup before its own',
-    async (path) => {
-      const config = ProjectConfigModule.parse(await import(resolve(repoRoot, path))).default;
-      const setupFiles = config.test.setupFiles.map((file) =>
-        resolve(repoRoot, dirname(path), file),
-      );
-      expect(setupFiles[0]).toBe(SETUP);
+  // Every entry the root config runs, however it is written: a path to a directory or config file,
+  // or an inline project. A glob is refused, since it could add a project nobody checked.
+  it.each(ROOT_PROJECTS.map((entry, index) => ({ label: projectLabel(entry, index), entry })))(
+    'project $label runs the git isolation setup before its own',
+    async ({ entry }) => {
+      const { setupFiles, root } =
+        typeof entry === 'string' ? await projectFromPath(entry) : inlineProject(entry);
+      expect(setupFiles.map((file) => resolve(root, file))[0]).toBe(SETUP);
     },
   );
 });
