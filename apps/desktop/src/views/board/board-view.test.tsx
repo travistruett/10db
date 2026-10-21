@@ -171,19 +171,19 @@ describe('BoardView', () => {
   });
 
   it.each([
-    ['RUNNING', 'Running', false],
-    ['DONE', 'Done', false],
-    ['FAILED', 'Failed', true],
-    ['CANCELLED', 'Cancelled', true],
+    ['RUNNING', 'Running', 'in_progress', false],
+    ['DONE', 'Done', 'ready', false],
+    ['FAILED', 'Failed', 'blocked', false],
+    ['CANCELLED', 'Cancelled', 'ready', true],
   ] as const)(
-    'offers Start for a ready task whose latest workstream is %s only when it ended without finishing',
-    async (state, label, startable) => {
+    'offers Start only when the latest workstream %s leaves the task Backlog or Ready and ended without finishing',
+    async (state, label, boardStatus, startable) => {
       const project = projectDto();
       const ws = workstreamDto({ projectId: project.id, state, taskTitle: 'Busy' });
       const busy = taskDto({
         projectId: project.id,
         title: 'Busy',
-        boardStatus: 'ready',
+        boardStatus,
         workstreamId: ws.id,
       });
       serve(
@@ -413,7 +413,7 @@ describe('BoardView', () => {
     renderApp('/board');
     fireEvent.click(await screen.findByRole('button', { name: 'Actions for Idea' }));
     expect(await screen.findByRole('menu')).toBeTruthy();
-    expect(screen.queryByRole('menuitem', { name: 'Start' })).toBeNull();
+    expect(screen.queryByRole('menuitem', { name: 'Start', hidden: true })).toBeNull();
   });
 
   it('shows the 20 most recent done tasks and the rest on request', async () => {

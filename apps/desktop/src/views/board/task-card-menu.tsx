@@ -4,8 +4,8 @@ import { IconDots } from '@tabler/icons-react';
 import type { DropTarget, MenuMove } from './drop-rules';
 
 const STARTABLE: readonly BoardStatus[] = [BoardStatus.Ready, BoardStatus.Backlog];
-/** A task whose latest workstream ended without finishing can run again. */
-const RESTARTABLE: readonly WorkstreamState[] = [WorkstreamState.Failed, WorkstreamState.Cancelled];
+/** A task whose latest workstream was cancelled can run again; a failed one blocks the task and is retried from the Factory. */
+const RESTARTABLE: readonly WorkstreamState[] = [WorkstreamState.Cancelled];
 
 /** A Backlog task queues until its dependencies finish; a parked task never starts. */
 export function canStart(task: TaskDto, latest: WorkstreamState | undefined): boolean {
