@@ -5,16 +5,18 @@ import { useProjects } from '../daemon/queries';
 export interface ProjectPickerProps {
   readonly value: ProjectId | null;
   readonly onChange: (id: ProjectId | null) => void;
+  /** Defaults to a fixed width that fits the board's header. */
+  readonly width?: string | number;
 }
 
-export function ProjectPicker({ value, onChange }: ProjectPickerProps) {
+export function ProjectPicker({ value, onChange, width = 260 }: ProjectPickerProps) {
   const projects = useProjects();
   const data = (projects.data ?? []).map((project) => ({ value: project.id, label: project.name }));
   return (
     <Select
       label="Project"
       size="sm"
-      w={260}
+      w={width}
       data={data}
       value={value}
       allowDeselect={false}

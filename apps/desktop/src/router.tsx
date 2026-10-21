@@ -10,6 +10,8 @@ import { ViewBoundary } from './shell/view-boundary';
 import { BoardView } from './views/board/board-view';
 import { FactoryView } from './views/factory/factory-view';
 import { InboxView } from './views/inbox/inbox-view';
+import { isSettingsSectionKey, SettingsSectionKey } from './views/settings/sections';
+import { SettingsView } from './views/settings/settings-view';
 
 function FactoryPage() {
   return (
@@ -31,6 +33,14 @@ function BoardPage() {
   return (
     <ViewBoundary name="Board">
       <BoardView />
+    </ViewBoundary>
+  );
+}
+
+function SettingsPage() {
+  return (
+    <ViewBoundary name="Settings">
+      <SettingsView />
     </ViewBoundary>
   );
 }
@@ -71,12 +81,33 @@ const tasksRoute = createRoute({
   },
 });
 
+const settingsIndexRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/settings',
+  beforeLoad: () => {
+    // eslint-disable-next-line @typescript-eslint/only-throw-error
+    throw redirect({ to: '/settings/$section', params: { section: SettingsSectionKey.General } });
+  },
+});
+const settingsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/settings/$section',
+  beforeLoad: ({ params }) => {
+    if (!isSettingsSectionKey(params.section))
+      // eslint-disable-next-line @typescript-eslint/only-throw-error
+      throw redirect({ to: '/settings/$section', params: { section: SettingsSectionKey.General } });
+  },
+  component: SettingsPage,
+});
+
 const routeTree = rootRoute.addChildren([
   indexRoute,
   boardRoute,
   factoryRoute,
   inboxRoute,
   tasksRoute,
+  settingsIndexRoute,
+  settingsRoute,
 ]);
 
 export function createAppRouter(history?: RouterHistory) {
