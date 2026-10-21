@@ -1,4 +1,5 @@
 export * from './benchmarks';
+export * from './board';
 export * from './entities';
 export * from './errors';
 export * from './events';
