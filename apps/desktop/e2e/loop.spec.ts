@@ -147,6 +147,8 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await expect(
     page.getByRole('table', { name: 'Human columns' }).getByText('Exploring'),
   ).toBeVisible();
+  // Axe reads colors, so let the Add column button finish its loading state first.
+  await expect(page.getByRole('button', { name: 'Add column' })).toBeEnabled();
   await expectAccessible(page, 'settings, board columns, dark');
   await page.getByRole('link', { name: /Accounts/ }).click();
   await expect(page.getByText('Not built yet')).toBeVisible();
