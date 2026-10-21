@@ -20,6 +20,7 @@ import {
 } from '@10db/contracts';
 import { and, asc, count, eq, inArray, isNotNull, or, type SQL } from 'drizzle-orm';
 import * as schema from '../schema';
+import { getBoardColumn } from './board-columns';
 import { getProject } from './projects';
 import type { DbReader, WriteContext } from './store';
 import { getTask } from './tasks';
@@ -119,6 +120,12 @@ export function insertWorkstream(ctx: WriteContext, taskId: TaskId): WorkstreamD
   const task = getTask(ctx.tx, taskId);
   if (task.status !== TaskStatus.Open)
     throw new ConflictError(`Task ${task.title} is ${task.status}`);
+  if (task.boardColumnId !== null) {
+    const column = getBoardColumn(ctx.tx, task.boardColumnId);
+    throw new ConflictError(
+      `Task ${task.title} is parked in ${column.name}; move it to Backlog or Ready to start it`,
+    );
+  }
   const active = ctx.tx
     .select({ id: schema.workstreams.id })
     .from(schema.workstreams)

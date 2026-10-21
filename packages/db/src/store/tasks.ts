@@ -1,11 +1,13 @@
 import {
   BoardStatus,
+  ConflictError,
   EventType,
   InvalidError,
   isTerminal,
   mintId,
   NotFoundError,
   TaskInput,
+  TaskMove,
   TaskPatch,
   TaskStatus,
   WorkstreamState,
@@ -13,8 +15,9 @@ import {
   type TaskDto,
   type TaskId,
 } from '@10db/contracts';
-import { and, desc, eq, inArray, max, ne } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, max, ne } from 'drizzle-orm';
 import * as schema from '../schema';
+import { getBoardColumn } from './board-columns';
 import { getFlow } from './flows';
 import { getProject } from './projects';
 import type { DbReader, WriteContext } from './store';
@@ -185,5 +188,86 @@ export function patchTask(ctx: WriteContext, id: TaskId, patch: TaskPatch): Task
     .where(eq(schema.tasks.id, id))
     .run();
   ctx.emit({ type: EventType.TaskChanged, entityType: 'task', entityId: id });
+  return getTask(ctx.tx, id);
+}
+
+/** Below this gap between neighbours a midpoint loses precision, so the project is renumbered first. */
+const MIN_ORDER_GAP = 1e-6;
+
+/** Only planned and parked work moves; the rest follows its workstream. */
+const MOVABLE: readonly BoardStatus[] = [BoardStatus.Backlog, BoardStatus.Ready];
+
+/** Rewrites the project's orders as 1…n in their current order; each changed task announces it. */
+function renumberBoard(ctx: WriteContext, projectId: ProjectId): void {
+  const rows = ctx.tx
+    .select({ id: schema.tasks.id, boardOrder: schema.tasks.boardOrder })
+    .from(schema.tasks)
+    .where(eq(schema.tasks.projectId, projectId))
+    .orderBy(asc(schema.tasks.boardOrder), asc(schema.tasks.id))
+    .all();
+  rows.forEach((row, index) => {
+    const boardOrder = index + 1;
+    if (row.boardOrder === boardOrder) return;
+    ctx.tx
+      .update(schema.tasks)
+      .set({ boardOrder, updatedAt: ctx.now })
+      .where(eq(schema.tasks.id, row.id))
+      .run();
+    ctx.emit({
+      type: EventType.TaskChanged,
+      entityType: 'task',
+      entityId: row.id,
+      data: { boardOrder },
+    });
+  });
+}
+
+/** Places a task in a column, between its new neighbours there (spec §10: drag and drop sets priority). */
+export function moveTask(ctx: WriteContext, id: TaskId, move: TaskMove): TaskDto {
+  const { to, after, before } = TaskMove.parse(move);
+  const task = getTask(ctx.tx, id);
+  if (!MOVABLE.includes(task.boardStatus))
+    throw new ConflictError(
+      `${task.title} follows its workstream; only planned and parked tasks move`,
+    );
+  if (to !== null && getBoardColumn(ctx.tx, to).projectId !== task.projectId)
+    throw new InvalidError('The column must belong to the same project');
+  const orderOf = (neighbour: TaskId | null): number | null => {
+    if (neighbour === null) return null;
+    if (neighbour === id) throw new InvalidError('A task cannot be its own neighbour');
+    const other = getTask(ctx.tx, neighbour);
+    if (other.projectId !== task.projectId)
+      throw new InvalidError('Both neighbours must be tasks in the same project');
+    if (other.boardColumnId !== to)
+      throw new InvalidError('A neighbour must be in the column the task moves to');
+    return other.boardOrder;
+  };
+  const first = { lo: orderOf(after), hi: orderOf(before) };
+  if (first.lo !== null && first.hi !== null) {
+    if (first.lo >= first.hi)
+      throw new ConflictError('The board changed while you were dragging; try again');
+    if (first.hi - first.lo < MIN_ORDER_GAP) renumberBoard(ctx, task.projectId);
+  }
+  const lo = orderOf(after);
+  const hi = orderOf(before);
+  const boardOrder =
+    lo !== null && hi !== null
+      ? (lo + hi) / 2
+      : lo !== null
+        ? lo + 1
+        : hi !== null
+          ? hi - 1
+          : task.boardOrder;
+  ctx.tx
+    .update(schema.tasks)
+    .set({ boardOrder, boardColumnId: to, updatedAt: ctx.now })
+    .where(eq(schema.tasks.id, id))
+    .run();
+  ctx.emit({
+    type: EventType.TaskChanged,
+    entityType: 'task',
+    entityId: id,
+    data: { boardOrder, boardColumnId: to },
+  });
   return getTask(ctx.tx, id);
 }
