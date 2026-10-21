@@ -7,6 +7,7 @@ import {
   SystemCheckDto,
   TaskDto,
   WorkstreamDto,
+  type BoardColumnDelete,
   type BoardColumnId,
   type BoardColumnInput,
   type BoardColumnPatch,
@@ -269,7 +270,7 @@ export function useDeleteBoardColumn() {
       moveTasksTo,
     }: {
       readonly id: BoardColumnId;
-      readonly moveTasksTo: BoardColumnId | null;
+      readonly moveTasksTo: BoardColumnDelete['moveTasksTo'];
     }) =>
       readJson(
         await client['board-columns'][':columnId'].delete.$post({

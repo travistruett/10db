@@ -36,6 +36,7 @@ function DeleteColumn({
 }: {
   readonly column: BoardColumnDto;
   readonly columns: readonly BoardColumnDto[];
+  /** How many tasks the column holds; the dialog only opens once that is known. */
   readonly parked: number;
   readonly onClose: () => void;
 }) {
@@ -44,7 +45,9 @@ function DeleteColumn({
   const others = columns.filter((c) => c.id !== column.id);
   // The Select offers only these IDs and PLANNED, so the lookup gives back the branded ID without a cast.
   const byId = new Map<string, BoardColumnId>(others.map((c) => [c.id, c.id]));
-  const moveTasksTo = target === null || target === PLANNED ? null : (byId.get(target) ?? null);
+  // No tasks to place means 'planned' is harmless; otherwise an unresolved choice stays undefined and blocks the delete.
+  const moveTasksTo: BoardColumnId | typeof PLANNED | undefined =
+    parked === 0 || target === PLANNED ? PLANNED : target === null ? undefined : byId.get(target);
   return (
     <Modal opened onClose={onClose} title={`Delete ${column.name}`}>
       <Stack>
@@ -75,10 +78,11 @@ function DeleteColumn({
           </Button>
           <Button
             color="red"
-            disabled={parked > 0 && target === null}
+            disabled={moveTasksTo === undefined}
             loading={remove.isPending}
             onClick={() => {
-              remove.mutate({ id: column.id, moveTasksTo }, { onSuccess: onClose });
+              if (moveTasksTo !== undefined)
+                remove.mutate({ id: column.id, moveTasksTo }, { onSuccess: onClose });
             }}
           >
             Delete column
@@ -209,6 +213,7 @@ export function BoardColumnsSection({ project }: { readonly project: ProjectDto 
                     variant="subtle"
                     color="red"
                     aria-label={`Delete ${column.name}`}
+                    disabled={!tasks.isSuccess}
                     onClick={() => {
                       setDeleting(column);
                     }}
@@ -249,7 +254,7 @@ export function BoardColumnsSection({ project }: { readonly project: ProjectDto 
           {create.error.message}
         </Alert>
       ) : null}
-      {deleting ? (
+      {deleting && tasks.isSuccess ? (
         <DeleteColumn
           column={deleting}
           columns={list}

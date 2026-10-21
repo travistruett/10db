@@ -123,7 +123,7 @@ describe('BoardColumnsSection', () => {
         {
           method: 'DELETE',
           path: `/board-columns/${exploring.id}/delete`,
-          body: { moveTasksTo: null },
+          body: { moveTasksTo: 'planned' },
         },
       ]);
     });
@@ -131,7 +131,7 @@ describe('BoardColumnsSection', () => {
 
   it.each([
     { choice: 'Exploring', expected: () => exploring.id },
-    { choice: 'Planned (Backlog or Ready)', expected: () => null },
+    { choice: 'Planned (Backlog or Ready)', expected: () => 'planned' },
   ])("asks where a non-empty column's tasks go: $choice", async ({ choice, expected }) => {
     const sent = serve([icebox, exploring]);
     fireEvent.click(await screen.findByRole('button', { name: 'Delete Icebox' }));
@@ -152,6 +152,29 @@ describe('BoardColumnsSection', () => {
           body: { moveTasksTo: expected() },
         },
       ]);
+    });
+  });
+
+  it('keeps Delete disabled until the tasks have loaded, so an unknown count is never treated as empty', async () => {
+    serve([icebox, exploring]);
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.use(
+      http.get(daemonUrl('/projects/:projectId/tasks'), async () => {
+        await gate;
+        return HttpResponse.json([]);
+      }),
+    );
+    const remove = await screen.findByRole('button', { name: 'Delete Exploring' });
+    expect(remove).toHaveProperty('disabled', true);
+    release();
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Delete Exploring' })).toHaveProperty(
+        'disabled',
+        false,
+      );
     });
   });
 });
