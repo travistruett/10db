@@ -16,7 +16,7 @@ import { insertBoardColumn, listBoardColumns } from './board-columns';
 import type { Store } from './store';
 import { getTask, insertTask, listTasks, moveTask } from './tasks';
 import { createTestStore, seedProject } from './test-support';
-import { insertWorkstream } from './workstreams';
+import { insertWorkstream, transitionWorkstream } from './workstreams';
 
 let store: Store;
 let close: () => void;
@@ -179,6 +179,21 @@ describe('moveTask between columns', () => {
 
   it('refuses to move a running task', () => {
     store.write((ctx) => insertWorkstream(ctx, tasks.a.id));
+    expect(() =>
+      store.write((ctx) => moveTask(ctx, tasks.a.id, { to: icebox, after: null, before: null })),
+    ).toThrow(ConflictError);
+  });
+});
+
+describe('a task with an older run still active', () => {
+  it('refuses to move it, whatever its latest run says', () => {
+    const first = store.write((ctx) => insertWorkstream(ctx, tasks.a.id)).value;
+    store.write((ctx) => transitionWorkstream(ctx, first.id, { to: 'STARTING', fence: null }));
+    store.write((ctx) => transitionWorkstream(ctx, first.id, { to: 'FAILED', fence: null }));
+    const second = store.write((ctx) => insertWorkstream(ctx, tasks.a.id)).value;
+    store.write((ctx) => transitionWorkstream(ctx, second.id, { to: 'CANCELLED', fence: null }));
+    // Bypass the retry route: the first run is queued again while the latest run is cancelled.
+    store.write((ctx) => transitionWorkstream(ctx, first.id, { to: 'QUEUED', fence: null }));
     expect(() =>
       store.write((ctx) => moveTask(ctx, tasks.a.id, { to: icebox, after: null, before: null })),
     ).toThrow(ConflictError);

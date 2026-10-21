@@ -1,4 +1,5 @@
 import {
+  ACTIVE_STATES,
   BoardStatus,
   ConflictError,
   EventType,
@@ -226,7 +227,15 @@ function renumberBoard(ctx: WriteContext, projectId: ProjectId): void {
 export function moveTask(ctx: WriteContext, id: TaskId, move: TaskMove): TaskDto {
   const { to, after, before } = TaskMove.parse(move);
   const task = getTask(ctx.tx, id);
-  if (!MOVABLE.includes(task.boardStatus))
+  // An older run can still be live while the latest one has ended, so look at every run.
+  const live = ctx.tx
+    .select({ id: schema.workstreams.id })
+    .from(schema.workstreams)
+    .where(
+      and(eq(schema.workstreams.taskId, id), inArray(schema.workstreams.state, [...ACTIVE_STATES])),
+    )
+    .get();
+  if (live || !MOVABLE.includes(task.boardStatus))
     throw new ConflictError(
       `${task.title} follows its workstream; only planned and parked tasks move`,
     );
