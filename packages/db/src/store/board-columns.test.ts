@@ -71,15 +71,28 @@ describe('board columns', () => {
     { name: 'Backlog', typed: 'Backlog' },
     { name: 'a lower-case system label', typed: 'ready' },
     { name: 'a padded system label', typed: ' In Progress ' },
+    { name: 'a doubled inner space', typed: 'In  progress' },
+    { name: 'a no-break space', typed: 'In\u00a0progress' },
+    { name: 'a zero-width character', typed: 'Ba\u200bcklog' },
+    { name: 'a Cyrillic \u0435', typed: 'R\u0435ady' },
     { name: 'Blocked', typed: 'BLOCKED' },
     { name: 'Done', typed: 'Done' },
-  ])('refuses $name as a column name', ({ typed }) => {
-    expect(() => add(typed)).toThrow(ConflictError);
+  ])('refuses $name as a column name with a 400', ({ typed }) => {
+    expect(() => add(typed)).toThrow(InvalidError);
     add('Exploring');
     expect(() =>
       store.write((ctx) => patchBoardColumn(ctx, columnId('Exploring'), { name: typed })),
-    ).toThrow(ConflictError);
+    ).toThrow(InvalidError);
     expect(names()).toEqual(['Icebox', 'Exploring']);
+  });
+
+  it.each([
+    { name: 'a different case', typed: 'icebox' },
+    { name: 'a zero-width character', typed: 'Ice\u200bbox' },
+    { name: 'a doubled space', typed: 'Ice  box' },
+  ])('refuses $name of an existing name as a duplicate', ({ typed }) => {
+    if (typed === 'Ice  box') add('Ice box');
+    expect(() => add(typed)).toThrow(ConflictError);
   });
 
   it('renames a column, refusing a name another column has', () => {

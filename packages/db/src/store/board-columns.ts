@@ -2,16 +2,18 @@ import {
   BoardColumnDelete,
   BoardColumnInput,
   BoardColumnPatch,
+  columnNameKey,
   ConflictError,
   EventType,
   InvalidError,
   mintId,
   NotFoundError,
+  SYSTEM_COLUMN_LABEL,
   type BoardColumnDto,
   type BoardColumnId,
   type ProjectId,
 } from '@10db/contracts';
-import { and, asc, eq, ne } from 'drizzle-orm';
+import { asc, eq } from 'drizzle-orm';
 import * as schema from '../schema';
 import type { DbReader, WriteContext } from './store';
 
@@ -30,12 +32,10 @@ export function getBoardColumn(db: DbReader, id: BoardColumnId): BoardColumnDto 
   return row;
 }
 
-/** The labels of the derived columns; a human column can't share one. */
-const SYSTEM_LABELS = ['Backlog', 'Ready', 'In progress', 'Blocked', 'Done'];
-
 function refuseSystemLabel(name: string): void {
-  const label = SYSTEM_LABELS.find((l) => l.toLowerCase() === name.toLowerCase());
-  if (label) throw new ConflictError(`${label} is a system column`);
+  const key = columnNameKey(name);
+  const label = Object.values(SYSTEM_COLUMN_LABEL).find((l) => columnNameKey(l) === key);
+  if (label) throw new InvalidError(`${label} is a system column`);
 }
 
 function refuseDuplicate(
@@ -44,18 +44,11 @@ function refuseDuplicate(
   name: string,
   except: BoardColumnId | null,
 ): void {
-  const clash = db
-    .select({ id: schema.boardColumns.id })
-    .from(schema.boardColumns)
-    .where(
-      and(
-        eq(schema.boardColumns.projectId, projectId),
-        eq(schema.boardColumns.name, name),
-        ...(except ? [ne(schema.boardColumns.id, except)] : []),
-      ),
-    )
-    .get();
-  if (clash) throw new ConflictError(`This project already has a column named "${name}"`);
+  const key = columnNameKey(name);
+  const clash = listBoardColumns(db, projectId).find(
+    (c) => c.id !== except && columnNameKey(c.name) === key,
+  );
+  if (clash) throw new ConflictError(`This project already has a column named "${clash.name}"`);
 }
 
 /** Writes positions 0…n-1 in the given order; each changed column announces it. */
