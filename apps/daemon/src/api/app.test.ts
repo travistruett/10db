@@ -522,7 +522,7 @@ describe('board routes', () => {
       name: 'POST /board-columns/:id/delete',
       method: 'POST',
       path: `/board-columns/${columnId}/delete`,
-      body: { moveTasksTo: null },
+      body: { moveTasksTo: 'planned' },
       service: 'deleteBoardColumn',
     },
   ] as const)('routes $name to its service', async ({ method, path, body, service }) => {
