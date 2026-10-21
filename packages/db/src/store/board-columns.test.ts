@@ -67,6 +67,21 @@ describe('board columns', () => {
     ).not.toThrow();
   });
 
+  it.each([
+    { name: 'Backlog', typed: 'Backlog' },
+    { name: 'a lower-case system label', typed: 'ready' },
+    { name: 'a padded system label', typed: ' In Progress ' },
+    { name: 'Blocked', typed: 'BLOCKED' },
+    { name: 'Done', typed: 'Done' },
+  ])('refuses $name as a column name', ({ typed }) => {
+    expect(() => add(typed)).toThrow(ConflictError);
+    add('Exploring');
+    expect(() =>
+      store.write((ctx) => patchBoardColumn(ctx, columnId('Exploring'), { name: typed })),
+    ).toThrow(ConflictError);
+    expect(names()).toEqual(['Icebox', 'Exploring']);
+  });
+
   it('renames a column, refusing a name another column has', () => {
     add('Exploring');
     store.write((ctx) => patchBoardColumn(ctx, columnId('Exploring'), { name: 'Needs spec' }));

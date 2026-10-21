@@ -103,6 +103,25 @@ describe('moveTask among planned tasks', () => {
   });
 });
 
+describe('renumbering', () => {
+  it('leaves finished tasks alone', () => {
+    store.db
+      .update(schema.tasks)
+      .set({ status: 'done', boardOrder: 2.5 })
+      .where(eq(schema.tasks.id, tasks.a.id))
+      .run();
+    store.db
+      .update(schema.tasks)
+      .set({ boardOrder: 3 + 1e-9 })
+      .where(eq(schema.tasks.id, tasks.d.id))
+      .run();
+    store.write((ctx) =>
+      moveTask(ctx, tasks.b.id, { to: null, after: tasks.c.id, before: tasks.d.id }),
+    );
+    expect(getTask(store.db, tasks.a.id).boardOrder).toBe(2.5);
+  });
+});
+
 describe('moveTask between columns', () => {
   it('parks a planned task in a human column and plans it again', () => {
     store.write((ctx) => moveTask(ctx, tasks.b.id, { to: icebox, after: null, before: null }));

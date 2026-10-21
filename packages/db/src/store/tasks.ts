@@ -197,12 +197,12 @@ const MIN_ORDER_GAP = 1e-6;
 /** Only planned and parked work moves; the rest follows its workstream. */
 const MOVABLE: readonly BoardStatus[] = [BoardStatus.Backlog, BoardStatus.Ready];
 
-/** Rewrites the project's orders as 1…n in their current order; each changed task announces it. */
+/** Rewrites the open tasks' orders as 1…n in their current order (finished ones sort by finish time); each changed task announces it. */
 function renumberBoard(ctx: WriteContext, projectId: ProjectId): void {
   const rows = ctx.tx
     .select({ id: schema.tasks.id, boardOrder: schema.tasks.boardOrder })
     .from(schema.tasks)
-    .where(eq(schema.tasks.projectId, projectId))
+    .where(and(eq(schema.tasks.projectId, projectId), eq(schema.tasks.status, TaskStatus.Open)))
     .orderBy(asc(schema.tasks.boardOrder), asc(schema.tasks.id))
     .all();
   rows.forEach((row, index) => {

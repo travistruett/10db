@@ -30,6 +30,14 @@ export function getBoardColumn(db: DbReader, id: BoardColumnId): BoardColumnDto 
   return row;
 }
 
+/** The labels of the derived columns; a human column can't share one. */
+const SYSTEM_LABELS = ['Backlog', 'Ready', 'In progress', 'Blocked', 'Done'];
+
+function refuseSystemLabel(name: string): void {
+  const label = SYSTEM_LABELS.find((l) => l.toLowerCase() === name.toLowerCase());
+  if (label) throw new ConflictError(`${label} is a system column`);
+}
+
 function refuseDuplicate(
   db: DbReader,
   projectId: ProjectId,
@@ -74,6 +82,7 @@ export function insertBoardColumn(
   input: BoardColumnInput,
 ): BoardColumnDto {
   const { name } = BoardColumnInput.parse(input);
+  refuseSystemLabel(name);
   refuseDuplicate(ctx.tx, projectId, name, null);
   const row: BoardColumnDto = {
     id: mintId('BoardColumn'),
@@ -101,6 +110,7 @@ export function patchBoardColumn(
   const changes = BoardColumnPatch.parse(patch);
   const column = getBoardColumn(ctx.tx, id);
   if (changes.name !== undefined && changes.name !== column.name) {
+    refuseSystemLabel(changes.name);
     refuseDuplicate(ctx.tx, column.projectId, changes.name, id);
     ctx.tx
       .update(schema.boardColumns)
