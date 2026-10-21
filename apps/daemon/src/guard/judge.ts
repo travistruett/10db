@@ -1,8 +1,9 @@
 import { homedir } from 'node:os';
 import { isAbsolute, resolve, sep } from 'node:path';
-import { ClaimKind, type AreaDef, type HazardDef } from '@10db/contracts';
+import { ClaimKind, Delivery, type AreaDef, type HazardDef } from '@10db/contracts';
 import { z } from 'zod';
 import { commandForms, startsWithWords } from './command-forms';
+import { ghVerdict } from './gh-rules';
 import { gitVerdict } from './git-rules';
 import { classifyPath, resolveInRepo } from './paths';
 import { readOnlyShellRefusal } from './read-only';
@@ -17,6 +18,8 @@ export interface GuardInput {
   readonly claims: readonly { readonly kind: ClaimKind; readonly name: string }[];
   /** A read-only step: file writes and writing shell commands are refused, claims or not. */
   readonly readOnly: boolean;
+  /** The project's delivery; absent means local. In pull-request projects only the daemon pushes. */
+  readonly delivery?: Delivery;
 }
 
 export type GuardVerdict =
@@ -122,7 +125,11 @@ function judgeShell(input: GuardInput, command: string, depth = 0): GuardVerdict
       if (verdict.decision === 'deny') return verdict;
     }
     if (head === 'git') {
-      const verdict = gitVerdict(words);
+      const verdict = gitVerdict(words, input.delivery ?? Delivery.Local);
+      if (verdict) return deny(verdict.deny);
+    }
+    if (head === 'gh') {
+      const verdict = ghVerdict(words);
       if (verdict) return deny(verdict.deny);
     }
     if (head === 'rm') {

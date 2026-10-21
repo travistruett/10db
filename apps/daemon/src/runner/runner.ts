@@ -822,6 +822,7 @@ export function createRunner(opts: RunnerOptions): Runner {
           hazards: project.hazards,
           claims: claims(),
           readOnly,
+          delivery: project.delivery,
         }),
       canUseTool: createPermissionBroker(
         { state: opts.state, inbox: opts.inbox },
