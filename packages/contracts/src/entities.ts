@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import {
+  BoardColumnId,
   EvidenceId,
   FlowId,
   HandoffId,
@@ -160,6 +161,7 @@ export const TaskDto = z.object({
   flowId: FlowId.nullable(),
   status: z.enum(TaskStatus),
   boardOrder: z.number(),
+  boardColumnId: BoardColumnId.nullable(),
   dependsOn: z.array(TaskId),
   boardStatus: z.enum(BoardStatus),
   workstreamId: WorkstreamId.nullable(),

@@ -1,4 +1,5 @@
 export * from './aa-models';
+export * from './board-columns';
 export * from './claims';
 export * from './events';
 export * from './evidence';

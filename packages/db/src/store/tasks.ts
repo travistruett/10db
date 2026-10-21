@@ -146,6 +146,7 @@ function toTaskDto(db: DbReader, row: typeof schema.tasks.$inferSelect): TaskDto
     flowId: row.flowId,
     status: row.status,
     boardOrder: row.boardOrder,
+    boardColumnId: row.boardColumnId,
     dependsOn: deps.map((d) => d.id),
     boardStatus: deriveBoardStatus({
       taskStatus: row.status,

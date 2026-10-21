@@ -48,6 +48,7 @@ export function taskDto(overrides: Partial<TaskDto> = {}): TaskDto {
     flowId: null,
     status: 'open',
     boardOrder: 1,
+    boardColumnId: null,
     dependsOn: [],
     boardStatus: 'ready',
     workstreamId: null,
