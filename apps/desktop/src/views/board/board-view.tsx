@@ -189,7 +189,7 @@ export function BoardView() {
       {project && tasks.isSuccess && taskList.length === 0 ? (
         <Text c="dimmed">No tasks yet.</Text>
       ) : null}
-      {project && tasks.isSuccess ? (
+      {project && tasks.isSuccess && columns.isSuccess ? (
         <BoardColumns
           projectId={project.id}
           layout={layout}

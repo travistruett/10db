@@ -416,6 +416,36 @@ describe('BoardView', () => {
     expect(screen.queryByRole('menuitem', { name: 'Start', hidden: true })).toBeNull();
   });
 
+  it('never shows a parked card in a derived column while the columns are still loading', async () => {
+    const project = projectDto();
+    const icebox = boardColumnDto({ projectId: project.id });
+    const idea = taskDto({
+      projectId: project.id,
+      title: 'Idea',
+      boardStatus: 'ready',
+      boardColumnId: icebox.id,
+    });
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/board-columns'), async () => {
+        await gate;
+        return HttpResponse.json([icebox]);
+      }),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([idea])),
+    );
+    renderApp('/board');
+    await screen.findByText(/gate: true/);
+    await new Promise((r) => setTimeout(r, 200));
+    expect(screen.queryByRole('listitem', { name: 'Idea' })).toBeNull();
+    release();
+    const parked = await screen.findByRole('list', { name: 'Icebox tasks' });
+    expect(within(parked).getByRole('listitem', { name: 'Idea' })).toBeTruthy();
+  });
+
   it('shows the 20 most recent done tasks and the rest on request', async () => {
     const project = projectDto();
     const done = Array.from({ length: 22 }, (_, i) =>
