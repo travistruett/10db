@@ -22,6 +22,7 @@ import {
   releaseClaims,
   transitionWorkstream,
 } from '@10db/db';
+import { batchCardFields } from '../delivery';
 import type { StateStore } from '../events';
 import type { Git } from '../git';
 import type { InboxService } from '../inbox';
@@ -163,6 +164,7 @@ export async function recoverOnStartup(opts: {
         workstreamId: ws.id,
         title: `Workstream failed: ${getTask(db, row.taskId).title}`,
         body: `Recovery failed ${String(attempts)} times.`,
+        ...batchCardFields(row),
       });
       report.failed.push(ws.id);
     } else {

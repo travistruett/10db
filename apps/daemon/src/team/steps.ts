@@ -1,5 +1,6 @@
 import {
   ConflictError,
+  BatchState,
   InvalidError,
   WorkstreamState,
   type BatchId,
@@ -10,6 +11,7 @@ import {
 } from '@10db/contracts';
 import {
   findFlowByName,
+  getBatch,
   getFlow,
   getProject,
   getTask,
@@ -21,6 +23,7 @@ import {
   listModelProfiles,
   listPersonas,
   patchWorkstream,
+  transitionBatch,
   transitionWorkstream,
   type DbReader,
   type WriteContext,
@@ -97,12 +100,27 @@ export function startTaskWithPlan(state: StateStore, taskId: TaskId): Workstream
   return state.write((ctx) => insertPlannedWorkstream(ctx, taskId, plan, null));
 }
 
-/** A failed workstream goes back to the queue; its current step restarts clean, from its own handoffs only. */
+/**
+ * A failed workstream goes back to the queue; its current step restarts clean, from its own handoffs
+ * only. In a batch it may retry only while the batch is OPEN or FAILED, and a FAILED batch reopens
+ * (batch delivery spec §4).
+ */
 export function retryWorkstream(state: StateStore, id: WorkstreamId): WorkstreamDto {
   const row = getWorkstreamRow(state.db, id);
   if (row.state !== WorkstreamState.Failed)
     throw new ConflictError('Only a failed workstream can be retried');
+  const batch = row.batchId ? getBatch(state.db, row.batchId) : null;
+  if (batch && batch.state !== BatchState.Open && batch.state !== BatchState.Failed)
+    throw new ConflictError(
+      `Batch "${batch.title}" is ${batch.state.toLowerCase()}; start the task again to run it in a new batch`,
+    );
   return state.write((ctx) => {
+    if (batch?.state === BatchState.Failed)
+      transitionBatch(ctx, batch.id, {
+        to: BatchState.Open,
+        patch: { failure: null },
+        reason: 'a workstream was retried',
+      });
     const steps = row.steps.length > 0 ? restartStep(row.steps, row.stepIndex, ctx.now) : row.steps;
     const latest = latestHandoffForStep(ctx.tx, { ...row, steps });
     return transitionWorkstream(ctx, id, {

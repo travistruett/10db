@@ -30,6 +30,7 @@ import {
   scheduleNightlyBackup,
 } from '../backups';
 import { systemClock, type Clock } from '../clock';
+import { flagWrongBranch } from '../delivery';
 import type { LogLevel } from '../env';
 import { REQUIRED_TOOLS } from '../environment';
 import { createEventBus, createStateStore, type StateStore } from '../events';
@@ -263,6 +264,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     caps: opts.caps ?? DEFAULTS.caps,
     leaseMs: opts.leaseMs ?? DEFAULTS.leaseMs,
     tickMs: opts.tickMs ?? DEFAULTS.tickMs,
+    branches: git,
+    onWrongBranch: (batch, current, repoPath) => {
+      flagWrongBranch(inbox, batch, current, repoPath);
+    },
   });
   scheduler = createdScheduler;
 
