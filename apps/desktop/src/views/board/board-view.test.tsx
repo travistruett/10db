@@ -3,13 +3,14 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse, type RequestHandler, type WebSocketHandler } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, eventStream, renderApp, server } from '../../test/daemon';
-import { projectDto, taskDto, workstreamDto } from '../../test/fixtures';
+import { boardColumnDto, projectDto, taskDto, workstreamDto } from '../../test/fixtures';
 
 /** The base daemon (health, head, empty lists, a silent event stream), then this test's overrides. */
 function serve(...overrides: (RequestHandler | WebSocketHandler)[]): void {
   server.use(
     ...baseHandlers(),
     eventStream.addEventListener('connection', () => undefined),
+    http.get(daemonUrl('/projects/:projectId/board-columns'), () => HttpResponse.json([])),
   );
   server.use(...overrides);
 }
@@ -18,7 +19,7 @@ function type(label: string, value: string, scope: HTMLElement): void {
   fireEvent.change(within(scope).getByLabelText(label), { target: { value } });
 }
 
-describe('TasksView', () => {
+describe('BoardView', () => {
   it('creates a project from the form, sending the parsed areas', async () => {
     let projects: ProjectDto[] = [];
     const posted: unknown[] = [];
@@ -38,7 +39,7 @@ describe('TasksView', () => {
       }),
       http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([])),
     );
-    renderApp('/tasks');
+    renderApp('/board');
 
     expect(await screen.findByText('No projects yet. Create one to start.')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'New project' }));
@@ -78,7 +79,7 @@ describe('TasksView', () => {
         return HttpResponse.json({}, { status: 500 });
       }),
     );
-    renderApp('/tasks');
+    renderApp('/board');
 
     fireEvent.click(await screen.findByRole('button', { name: 'New project' }));
     const dialog = await screen.findByRole('dialog', { name: 'New project' });
@@ -102,7 +103,7 @@ describe('TasksView', () => {
         ),
       ),
     );
-    renderApp('/tasks');
+    renderApp('/board');
 
     fireEvent.click(await screen.findByRole('button', { name: 'New project' }));
     const dialog = await screen.findByRole('dialog', { name: 'New project' });
@@ -124,7 +125,7 @@ describe('TasksView', () => {
         ),
       ),
     );
-    renderApp('/tasks');
+    renderApp('/board');
 
     fireEvent.click(await screen.findByRole('button', { name: 'New project' }));
     const dialog = await screen.findByRole('dialog', { name: 'New project' });
@@ -158,12 +159,12 @@ describe('TasksView', () => {
         );
       }),
     );
-    renderApp('/tasks');
+    renderApp('/board');
 
-    const row = (await screen.findByText('Alpha')).closest('tr');
-    if (!row) throw new Error('Alpha is not in a table row');
-    expect(within(row).getByText('Ready')).toBeTruthy();
-    fireEvent.click(within(row).getByRole('button', { name: 'Start' }));
+    const ready = await screen.findByRole('list', { name: 'Ready tasks' });
+    const card = within(ready).getByRole('listitem', { name: 'Alpha' });
+    fireEvent.click(within(card).getByRole('button', { name: 'Actions for Alpha' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Start' }));
     await waitFor(() => {
       expect(started).toEqual([alpha.id]);
     });
@@ -190,12 +191,18 @@ describe('TasksView', () => {
         http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([busy])),
         http.get(daemonUrl('/workstreams'), () => HttpResponse.json([ws])),
       );
-      renderApp('/tasks');
+      renderApp('/board');
 
-      const row = (await screen.findByText('Busy')).closest('tr');
-      if (!row) throw new Error('Busy is not in a table row');
-      expect(await within(row).findByText(label)).toBeTruthy();
-      expect(within(row).queryByRole('button', { name: 'Start' }) !== null).toBe(startable);
+      const card = await screen.findByRole('listitem', { name: 'Busy' });
+      if (label !== 'Done' && label !== 'Cancelled')
+        expect(await within(card).findByText(label)).toBeTruthy();
+      fireEvent.click(within(card).getByRole('button', { name: 'Actions for Busy' }));
+      await screen.findByRole('menu', { hidden: true });
+      // jsdom has no layout, so Mantine leaves an open menu display:none; query it as hidden.
+      if (startable)
+        expect(await screen.findByRole('menuitem', { name: 'Start', hidden: true })).toBeTruthy();
+      else expect(screen.queryByRole('menuitem', { name: 'Start', hidden: true })).toBeNull();
+      fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
     },
   );
 
@@ -205,7 +212,7 @@ describe('TasksView', () => {
         HttpResponse.json({ error: 'internal', message: 'database is locked' }, { status: 500 }),
       ),
     );
-    renderApp('/tasks');
+    renderApp('/board');
 
     expect(await screen.findByText('database is locked')).toBeTruthy();
     expect(screen.queryByText('No projects yet. Create one to start.')).toBeNull();
@@ -219,7 +226,7 @@ describe('TasksView', () => {
         HttpResponse.json({ error: 'internal', message: 'tasks unavailable' }, { status: 500 }),
       ),
     );
-    renderApp('/tasks');
+    renderApp('/board');
 
     expect(await screen.findByText('tasks unavailable')).toBeTruthy();
     expect(screen.queryByText('No tasks yet.')).toBeNull();
@@ -239,7 +246,7 @@ describe('TasksView', () => {
         ),
       ),
     );
-    renderApp('/tasks');
+    renderApp('/board');
 
     expect(await screen.findByText('workstreams unavailable')).toBeTruthy();
   });
@@ -252,7 +259,7 @@ describe('TasksView', () => {
         http.get(daemonUrl('/projects'), () => HttpResponse.json([first])),
         http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([])),
       );
-      renderApp('/tasks');
+      renderApp('/board');
 
       expect(await screen.findByText('No tasks yet.')).toBeTruthy();
       expect(screen.getByDisplayValue('first-project')).toBeTruthy();
@@ -269,7 +276,7 @@ describe('TasksView', () => {
         return HttpResponse.json({}, { status: 500 });
       }),
     );
-    renderApp('/tasks');
+    renderApp('/board');
 
     fireEvent.click(await screen.findByRole('button', { name: 'New project' }));
     const dialog = await screen.findByRole('dialog', { name: 'New project' });
@@ -298,7 +305,7 @@ describe('TasksView', () => {
         return HttpResponse.json(task, { status: 201 });
       }),
     );
-    renderApp('/tasks');
+    renderApp('/board');
 
     fireEvent.click(await screen.findByRole('button', { name: 'New task' }));
     const dialog = await screen.findByRole('dialog', { name: 'New task' });
@@ -316,6 +323,128 @@ describe('TasksView', () => {
       areas: ['api'],
       dependsOn: [],
     });
-    expect(await screen.findByText('Beta')).toBeTruthy();
+    expect(await screen.findByRole('listitem', { name: 'Beta' })).toBeTruthy();
+  });
+
+  it('shows human columns before the system columns, and each task where it belongs', async () => {
+    const project = projectDto();
+    const icebox = boardColumnDto({ projectId: project.id, name: 'Icebox' });
+    const ws = workstreamDto({ projectId: project.id, taskTitle: 'Base', state: 'RUNNING' });
+    const running = taskDto({
+      id: ws.taskId,
+      projectId: project.id,
+      title: 'Base',
+      boardStatus: 'in_progress',
+      boardOrder: 1,
+      workstreamId: ws.id,
+    });
+    const next = taskDto({
+      projectId: project.id,
+      title: 'Next',
+      boardStatus: 'backlog',
+      boardOrder: 2,
+      areas: ['api', 'ui'],
+      dependsOn: [running.id],
+    });
+    const idea = taskDto({
+      projectId: project.id,
+      title: 'Idea',
+      boardStatus: 'ready',
+      boardOrder: 3,
+      boardColumnId: icebox.id,
+    });
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/board-columns'), () => HttpResponse.json([icebox])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () =>
+        HttpResponse.json([running, next, idea]),
+      ),
+      http.get(daemonUrl('/workstreams'), () => HttpResponse.json([ws])),
+    );
+    renderApp('/board');
+
+    const lists = await screen.findAllByRole('list', { name: / tasks$/ });
+    expect(lists.map((l) => l.getAttribute('aria-label'))).toEqual([
+      'Icebox tasks',
+      'Backlog tasks',
+      'Ready tasks',
+      'In progress tasks',
+      'Blocked tasks',
+      'Done tasks',
+    ]);
+    const inProgress = screen.getByRole('list', { name: 'In progress tasks' });
+    expect(
+      await within(within(inProgress).getByRole('listitem', { name: 'Base' })).findByText(
+        'Running',
+      ),
+    ).toBeTruthy();
+    const nextCard = within(screen.getByRole('list', { name: 'Backlog tasks' })).getByRole(
+      'listitem',
+      { name: 'Next' },
+    );
+    expect(within(nextCard).getByText('api')).toBeTruthy();
+    expect(within(nextCard).getByText('Waits on Base')).toBeTruthy();
+    expect(
+      within(screen.getByRole('list', { name: 'Icebox tasks' })).getByRole('listitem', {
+        name: 'Idea',
+      }),
+    ).toBeTruthy();
+    expect(
+      within(screen.getByRole('list', { name: 'Ready tasks' })).queryByRole('listitem', {
+        name: 'Idea',
+      }),
+    ).toBeNull();
+  });
+
+  it('offers no Start on a parked card', async () => {
+    const project = projectDto();
+    const icebox = boardColumnDto({ projectId: project.id });
+    const idea = taskDto({
+      projectId: project.id,
+      title: 'Idea',
+      boardStatus: 'ready',
+      boardColumnId: icebox.id,
+    });
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/board-columns'), () => HttpResponse.json([icebox])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([idea])),
+    );
+    renderApp('/board');
+    fireEvent.click(await screen.findByRole('button', { name: 'Actions for Idea' }));
+    expect(await screen.findByRole('menu')).toBeTruthy();
+    expect(screen.queryByRole('menuitem', { name: 'Start' })).toBeNull();
+  });
+
+  it('shows the 20 most recent done tasks and the rest on request', async () => {
+    const project = projectDto();
+    const done = Array.from({ length: 22 }, (_, i) =>
+      taskDto({
+        projectId: project.id,
+        title: `Done ${String(i)}`,
+        boardStatus: 'done',
+        status: 'done',
+        boardOrder: i,
+        updatedAt: `2026-10-13T12:${String(i).padStart(2, '0')}:00.000Z`,
+      }),
+    );
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json(done)),
+    );
+    renderApp('/board');
+
+    const column = await screen.findByRole('list', { name: 'Done tasks' });
+    expect(within(column).getAllByRole('listitem')).toHaveLength(20);
+    expect(within(column).queryByRole('listitem', { name: 'Done 0' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Show all 22' }));
+    expect(within(column).getAllByRole('listitem')).toHaveLength(22);
+  });
+
+  it('redirects /tasks to the board', async () => {
+    serve();
+    const { router } = renderApp('/tasks');
+    expect(await screen.findByRole('heading', { name: 'Board', level: 2 })).toBeTruthy();
+    expect(router.state.location.pathname).toBe('/board');
   });
 });

@@ -7,9 +7,9 @@ import {
 } from '@tanstack/react-router';
 import { AppLayout } from './shell/app-layout';
 import { ViewBoundary } from './shell/view-boundary';
+import { BoardView } from './views/board/board-view';
 import { FactoryView } from './views/factory/factory-view';
 import { InboxView } from './views/inbox/inbox-view';
-import { TasksView } from './views/tasks/tasks-view';
 
 function FactoryPage() {
   return (
@@ -27,10 +27,10 @@ function InboxPage() {
   );
 }
 
-function TasksPage() {
+function BoardPage() {
   return (
-    <ViewBoundary name="Tasks">
-      <TasksView />
+    <ViewBoundary name="Board">
+      <BoardView />
     </ViewBoundary>
   );
 }
@@ -56,13 +56,28 @@ const inboxRoute = createRoute({
   path: '/inbox',
   component: InboxPage,
 });
+const boardRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/board',
+  component: BoardPage,
+});
 const tasksRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/tasks',
-  component: TasksPage,
+  beforeLoad: () => {
+    // TanStack Router's redirect is thrown by design.
+    // eslint-disable-next-line @typescript-eslint/only-throw-error
+    throw redirect({ to: '/board' });
+  },
 });
 
-const routeTree = rootRoute.addChildren([indexRoute, factoryRoute, inboxRoute, tasksRoute]);
+const routeTree = rootRoute.addChildren([
+  indexRoute,
+  boardRoute,
+  factoryRoute,
+  inboxRoute,
+  tasksRoute,
+]);
 
 export function createAppRouter(history?: RouterHistory) {
   return createRouter({ routeTree, defaultPreload: 'intent', ...(history ? { history } : {}) });

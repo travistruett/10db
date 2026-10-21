@@ -1,7 +1,7 @@
 import { BoardStatus } from '@10db/contracts';
 import { Badge, type MantineColor } from '@mantine/core';
 
-const BOARD_STATUS: Readonly<
+export const BOARD_STATUS: Readonly<
   Record<BoardStatus, { readonly label: string; readonly color: MantineColor }>
 > = {
   [BoardStatus.Backlog]: { label: 'Backlog', color: 'gray' },

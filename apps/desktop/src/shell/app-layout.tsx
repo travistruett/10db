@@ -1,5 +1,5 @@
 import { AppShell, Badge, Group, NavLink, Text, VisuallyHidden } from '@mantine/core';
-import { IconBuildingFactory2, IconInbox, IconListCheck } from '@tabler/icons-react';
+import { IconBuildingFactory2, IconInbox, IconLayoutKanban } from '@tabler/icons-react';
 import { Link, Outlet } from '@tanstack/react-router';
 import { useDaemonStatus } from '../daemon/provider';
 import { useInbox } from '../daemon/queries';
@@ -11,9 +11,9 @@ import { ReconnectingBanner } from './reconnecting-banner';
 import { SystemAlert } from './system-alert';
 
 const NAV = [
+  { to: '/board', label: 'Board', icon: IconLayoutKanban },
   { to: '/factory', label: 'Factory', icon: IconBuildingFactory2 },
   { to: '/inbox', label: 'Inbox', icon: IconInbox },
-  { to: '/tasks', label: 'Tasks', icon: IconListCheck },
 ] as const;
 
 function InboxBadge({ count }: { readonly count: number }) {

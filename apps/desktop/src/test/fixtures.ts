@@ -1,4 +1,5 @@
 import {
+  BoardColumnDto,
   DaemonEvent,
   InboxItemDto,
   mintId,
@@ -30,6 +31,18 @@ export function projectDto(overrides: Partial<ProjectDto> = {}): ProjectDto {
     humanWaitMinutes: 10,
     flowId: null,
     budgetCeiling: null,
+    createdAt: AT,
+    updatedAt: AT,
+    ...overrides,
+  });
+}
+
+export function boardColumnDto(overrides: Partial<BoardColumnDto> = {}): BoardColumnDto {
+  return BoardColumnDto.parse({
+    id: mintId('BoardColumn'),
+    projectId: mintId('Project'),
+    name: 'Icebox',
+    position: 0,
     createdAt: AT,
     updatedAt: AT,
     ...overrides,

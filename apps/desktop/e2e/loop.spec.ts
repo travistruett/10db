@@ -4,7 +4,7 @@ import { E2E_REPO } from './paths';
 
 const TASK = 'Write the greeting';
 const QUESTION = 'Which greeting?';
-const VIEWS = ['Tasks', 'Factory', 'Inbox'] as const;
+const VIEWS = ['Board', 'Factory', 'Inbox'] as const;
 
 async function expectAccessible(page: Page, label: string): Promise<void> {
   const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa']).analyze();
@@ -23,9 +23,9 @@ async function open(page: Page, view: (typeof VIEWS)[number]): Promise<void> {
 test.describe.configure({ mode: 'serial' });
 
 test('runs a task from the UI to verified done, and a reload loses nothing', async ({ page }) => {
-  await page.goto('/tasks');
+  await page.goto('/board');
   await expect(page.getByText('No projects yet. Create one to start.')).toBeVisible();
-  await expectAccessible(page, 'tasks, empty, dark');
+  await expectAccessible(page, 'board, empty, dark');
 
   // Create the project on the disposable repo.
   await page.getByRole('button', { name: 'New project' }).click();
@@ -49,8 +49,9 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await taskDialog.getByRole('button', { name: 'Create task' }).click();
   await expect(taskDialog).toBeHidden();
 
-  const taskRow = page.getByRole('row', { name: new RegExp(TASK) });
-  await taskRow.getByRole('button', { name: 'Start' }).click();
+  const card = page.getByRole('listitem', { name: TASK });
+  await card.getByRole('button', { name: `Actions for ${TASK}` }).click();
+  await page.getByRole('menuitem', { name: 'Start' }).click();
 
   // The agent's question reaches the inbox; answer it from the keyboard.
   await open(page, 'Inbox');
@@ -70,13 +71,17 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await expect(factoryRow.getByText('Done', { exact: true })).toBeVisible();
   await expectAccessible(page, 'factory, done, dark');
 
-  await open(page, 'Tasks');
-  await expect(taskRow.getByText('Done', { exact: true }).first()).toBeVisible();
+  await open(page, 'Board');
+  await expect(
+    page.getByRole('list', { name: 'Done tasks' }).getByRole('listitem', { name: TASK }),
+  ).toBeVisible();
 
   // Reopening the window loses nothing: the state comes back from the daemon.
   await page.reload();
-  await expect(page.getByRole('heading', { name: 'Tasks', level: 2 })).toBeVisible();
-  await expect(taskRow.getByText('Done', { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Board', level: 2 })).toBeVisible();
+  await expect(
+    page.getByRole('list', { name: 'Done tasks' }).getByRole('listitem', { name: TASK }),
+  ).toBeVisible();
   await open(page, 'Inbox');
   await expect(page.getByText(`Review: ${TASK}`)).toBeVisible();
   // The MCP commit really landed: the runner counts the commits it recorded before the gate.

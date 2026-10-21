@@ -1,6 +1,6 @@
 import { ProjectId } from '@10db/contracts';
 import { Select } from '@mantine/core';
-import { useProjects } from '../../daemon/queries';
+import { useProjects } from '../daemon/queries';
 
 export interface ProjectPickerProps {
   readonly value: ProjectId | null;

@@ -1,4 +1,5 @@
 import {
+  BoardColumnDto,
   InboxItemDto,
   KeepAwakeStatus,
   ProjectDto,
@@ -23,6 +24,7 @@ import { useDaemon } from './provider';
 export const queryKeys = {
   projects: ['projects'],
   tasks: (projectId: ProjectId) => ['tasks', projectId] as const,
+  boardColumns: (projectId: ProjectId) => ['board-columns', projectId] as const,
   workstreams: (active: boolean) => ['workstreams', { active }] as const,
   inbox: ['inbox'],
   keepAwake: ['keep-awake'],
@@ -32,6 +34,7 @@ export const queryKeys = {
 const ProjectList = z.array(ProjectDto);
 const TaskList = z.array(TaskDto);
 const WorkstreamList = z.array(WorkstreamDto);
+const BoardColumnList = z.array(BoardColumnDto);
 const InboxList = z.array(InboxItemDto);
 
 /** Open cards; shared by the Inbox view, the nav badge and notifications. */
@@ -59,6 +62,21 @@ export function useTasks(projectId: ProjectId | null) {
         ? readJson(
             await client.projects[':projectId'].tasks.$get({ param: { projectId } }),
             TaskList,
+          )
+        : [],
+    enabled: projectId !== null,
+  });
+}
+
+export function useBoardColumns(projectId: ProjectId | null) {
+  const { client } = useDaemon();
+  return useQuery({
+    queryKey: projectId ? queryKeys.boardColumns(projectId) : ['board-columns', 'none'],
+    queryFn: async () =>
+      projectId
+        ? readJson(
+            await client.projects[':projectId']['board-columns'].$get({ param: { projectId } }),
+            BoardColumnList,
           )
         : [],
     enabled: projectId !== null,
