@@ -80,6 +80,8 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
       if ((byProvider.get(project.provider) ?? 0) >= opts.caps.perProvider) continue;
       if (!dependenciesDone(db, ws.taskId)) continue;
       const task = getTask(db, ws.taskId);
+      // A parked task never launches, whatever its queue holds.
+      if (task.boardColumnId !== null) continue;
       const leaseUntil = new Date(opts.clock.now().getTime() + opts.leaseMs).toISOString();
       const fence = opts.state.write((ctx) => {
         const claimed = acquireClaims(ctx, {
