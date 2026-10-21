@@ -1,0 +1,290 @@
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { ConflictError, type BatchDto, type TaskDto } from '@10db/contracts';
+import {
+  activeClaims,
+  acquireClaims,
+  claimRequestsForTask,
+  getBatch,
+  getBatchRow,
+  getTask,
+  getWorkstream,
+  listWorkstreams,
+  transitionBatch,
+} from '@10db/db';
+import { afterEach, describe, expect, it } from 'vitest';
+import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
+import { GhError } from '../github';
+
+let h: DeliveryHarness;
+afterEach(() => {
+  h.close();
+});
+
+/** Opens a batch of `titles`, one task per area, and returns it with its workstreams. */
+async function openBatch(title: string, ...titles: string[]) {
+  const areas = ['api', 'ui'];
+  const tasks: TaskDto[] = titles.map((t, i) => h.addTask(t, { areas: [areas[i % 2] ?? 'api'] }));
+  const started = h.starter.startBatch(h.project.id, { title, taskIds: tasks.map((t) => t.id) });
+  await h.jobs.idle();
+  const batch = getBatch(h.store.db, started.id);
+  return { batch, workstreams: listWorkstreams(h.store.db, { batchId: batch.id }) };
+}
+
+/** The SHA of `branch` on origin, or null when origin doesn't have it. */
+function onOrigin(branch: string | null): string | null {
+  try {
+    return h.origin$('rev-parse', '--verify', '-q', `refs/heads/${branch ?? ''}`);
+  } catch {
+    return null;
+  }
+}
+
+/** Every workstream DONE, as the runner would leave them; the trigger then ships the batch. */
+async function finishAll(batch: BatchDto) {
+  for (const ws of listWorkstreams(h.store.db, { batchId: batch.id })) h.settle(ws.id, 'DONE');
+  await h.jobs.idle();
+  return getBatch(h.store.db, batch.id);
+}
+
+describe('shipping', () => {
+  it('closes a batch with no commits beyond its base, pushing nothing', async () => {
+    h = createDeliveryHarness();
+    const { batch } = await openBatch('Nothing', 'Alpha');
+    const shipped = await finishAll(batch);
+    expect(shipped.state).toBe('CLOSED');
+    expect(onOrigin(batch.branch)).toBeNull();
+    expect(h.gh.prCreates()).toEqual([]);
+  });
+
+  it('pushes the branch, opens one PR titled with the prefix and records its URL', async () => {
+    h = createDeliveryHarness();
+    const { batch } = await openBatch('Add greetings', 'Alpha', 'Beta');
+    h.commit('src/api/alpha.txt');
+    h.commit('src/ui/beta.txt');
+    const shipped = await finishAll(batch);
+    expect(shipped).toMatchObject({
+      state: 'SHIPPED',
+      prUrl: 'https://github.com/acme/widgets/pull/1',
+      gateExitCode: 0,
+      failure: null,
+    });
+    expect(onOrigin(batch.branch)).toBe(h.git$('rev-parse', 'HEAD'));
+    expect(h.git$('rev-parse', '--abbrev-ref', '@{u}')).toBe(`origin/${batch.branch ?? ''}`);
+    expect(h.gh.prCreates()).toEqual([
+      { repo: 'acme/widgets', base: 'main', head: batch.branch, title: 'feat(app): add greetings' },
+    ]);
+    const body = h.gh.body(shipped.prUrl ?? '');
+    expect(body).toContain('- Alpha: done');
+    expect(body).toContain('- Beta: done');
+    expect(body).toContain(`Shipped by 10db, batch ${batch.id}`);
+    expect(getBatchRow(h.store.db, batch.id)).toMatchObject({ gatePid: null, gatePidStart: null });
+  });
+
+  it('passes a title with quotes and $() through as one argument', async () => {
+    h = createDeliveryHarness();
+    const { batch } = await openBatch(`Say "hi" and $(whoami)`, 'Alpha');
+    h.commit('src/api/alpha.txt');
+    await finishAll(batch);
+    expect(h.gh.prCreates().map((c) => c.title)).toEqual([`feat(app): say "hi" and $(whoami)`]);
+  });
+
+  it('records an existing PR for the branch instead of opening a second one', async () => {
+    h = createDeliveryHarness();
+    const { batch } = await openBatch('Greetings', 'Alpha');
+    h.commit('src/api/alpha.txt');
+    const url = h.gh.openPr(batch.branch ?? '', 'CLOSED');
+    const shipped = await finishAll(batch);
+    expect(shipped).toMatchObject({ state: 'SHIPPED', prUrl: url });
+    expect(h.gh.prCreates()).toEqual([]);
+  });
+
+  it.each<{
+    name: string;
+    gate?: string;
+    gateTimeoutMs?: number;
+    arrange?: (x: DeliveryHarness, batch: BatchDto) => void;
+    failure: string;
+    title: string;
+  }>([
+    {
+      name: 'a dirty checkout',
+      arrange: (x) => {
+        writeFileSync(join(x.repo, 'scratch.txt'), 'uncommitted\n');
+      },
+      failure: 'dirty_checkout',
+      title: 'the checkout has uncommitted changes',
+    },
+    {
+      name: 'the checkout on another branch',
+      arrange: (x) => {
+        x.git$('switch', '-q', 'main');
+      },
+      failure: 'wrong_branch',
+      title: 'checkout is on main, the batch branch is',
+    },
+    {
+      name: 'a failing gate',
+      gate: 'echo broken >&2; exit 3',
+      failure: 'gate_failed',
+      title: 'the gate failed (exit 3)',
+    },
+    {
+      name: 'a gate that times out',
+      gate: 'sleep 5',
+      gateTimeoutMs: 300,
+      failure: 'gate_timed_out',
+      title: 'the gate timed out after 0.3 s',
+    },
+    {
+      name: 'a rejected push',
+      arrange: (x, batch) => {
+        x.teammatePush(batch.branch ?? '', 'src/api/theirs.txt');
+      },
+      failure: 'push_rejected',
+      title: 'git push was rejected',
+    },
+    {
+      name: 'gh signed out',
+      arrange: (x) => {
+        x.gh.failNext.set('prView', new GhError('signed_out', 'gh is not signed in'));
+      },
+      failure: 'gh_unavailable',
+      title: 'gh is signed out',
+    },
+    {
+      name: 'gh failing',
+      arrange: (x) => {
+        x.gh.failNext.set('prCreate', new GhError('failed', 'HTTP 502'));
+      },
+      failure: 'network',
+      title: 'gh pr create failed',
+    },
+  ])('fails on $name with a card, and opens no PR', async (row) => {
+    h = createDeliveryHarness(
+      row.gate ? { gateCommand: row.gate } : {},
+      row.gateTimeoutMs ? { gateTimeoutMs: row.gateTimeoutMs } : {},
+    );
+    const { batch } = await openBatch('Greetings', 'Alpha');
+    h.commit('src/api/alpha.txt');
+    const before = onOrigin(batch.branch);
+    row.arrange?.(h, batch);
+    const ended = await finishAll(batch);
+    expect(ended).toMatchObject({ state: 'FAILED', failure: row.failure });
+    expect(h.only(h.cards()).title).toContain(row.title);
+    expect(h.gh.prCreates()).toEqual([]);
+    if (
+      row.failure !== 'push_rejected' &&
+      row.failure !== 'gh_unavailable' &&
+      row.failure !== 'network'
+    )
+      expect(onOrigin(batch.branch)).toBe(before);
+  });
+
+  it('holds the batch open while a workstream failed or waits, and ships when the last one is done', async () => {
+    h = createDeliveryHarness();
+    const { batch, workstreams } = await openBatch('Greetings', 'Alpha', 'Beta');
+    const [alpha, beta] = workstreams;
+    if (!alpha || !beta) throw new Error('two workstreams expected');
+    h.commit('src/api/alpha.txt');
+    h.settle(alpha.id, 'DONE');
+    h.settle(beta.id, 'WAITING_HUMAN');
+    await h.jobs.idle();
+    expect(getBatch(h.store.db, batch.id).state).toBe('OPEN');
+    h.settle(beta.id, 'FAILED');
+    await h.jobs.idle();
+    expect(getBatch(h.store.db, batch.id).state).toBe('OPEN');
+  });
+});
+
+describe('Ship anyway, Retry and Abandon', () => {
+  it('ships anyway only when every workstream is done, cancelled or failed, listing the failed one', async () => {
+    h = createDeliveryHarness();
+    const { batch, workstreams } = await openBatch('Greetings', 'Alpha', 'Beta');
+    const [alpha, beta] = workstreams;
+    if (!alpha || !beta) throw new Error('two workstreams expected');
+    h.commit('src/api/alpha.txt');
+    h.settle(alpha.id, 'DONE');
+    h.settle(beta.id, 'WAITING_HUMAN');
+    expect(() => h.shipper.ship(batch.id)).toThrow(ConflictError);
+    expect(() => h.shipper.ship(batch.id)).toThrow(/Beta \(waiting_human\)/);
+    h.settle(beta.id, 'FAILED');
+    expect(h.shipper.ship(batch.id).state).toBe('SHIPPING');
+    await h.jobs.idle();
+    const shipped = getBatch(h.store.db, batch.id);
+    expect(shipped.state).toBe('SHIPPED');
+    expect(h.gh.body(shipped.prUrl ?? '')).toContain('- Beta (failed)');
+  });
+
+  it('retries a failed batch: ships it when its work is settled, reopens it when work is unfinished', async () => {
+    h = createDeliveryHarness();
+    const { batch, workstreams } = await openBatch('Greetings', 'Alpha');
+    const ws = h.only(workstreams);
+    h.commit('src/api/alpha.txt');
+    // Failed at startup for the wrong branch while its work was still queued.
+    h.state.write((c) =>
+      transitionBatch(c, batch.id, { to: 'FAILED', patch: { failure: 'wrong_branch' } }),
+    );
+    expect(h.shipper.ship(batch.id)).toMatchObject({ state: 'OPEN', failure: null });
+    expect(getWorkstream(h.store.db, ws.id).state).toBe('QUEUED');
+    // Now its gate failed after the work finished: Retry ships.
+    h.state.write((c) =>
+      transitionBatch(c, batch.id, { to: 'FAILED', patch: { failure: 'gate_failed' } }),
+    );
+    h.settle(ws.id, 'DONE');
+    expect(h.shipper.ship(batch.id).state).toBe('SHIPPING');
+    await h.jobs.idle();
+    expect(getBatch(h.store.db, batch.id).state).toBe('SHIPPED');
+  });
+
+  it('refuses to abandon while a lane runs, then cancels the waiting work, releases its claims and keeps the branch', async () => {
+    h = createDeliveryHarness();
+    const { batch, workstreams } = await openBatch('Greetings', 'Alpha', 'Beta');
+    const [alpha, beta] = workstreams;
+    if (!alpha || !beta) throw new Error('two workstreams expected');
+    h.commit('src/api/alpha.txt');
+    h.settle(alpha.id, 'DONE');
+    h.state.write((c) =>
+      acquireClaims(c, {
+        projectId: h.project.id,
+        workstreamId: beta.id,
+        requests: claimRequestsForTask(getTask(c.tx, beta.taskId), h.project),
+        leaseExpiresAt: '2999-01-01T00:00:00.000Z',
+      }),
+    );
+    h.settle(beta.id, 'RUNNING');
+    expect(() => h.shipper.abandon(batch.id)).toThrow(/running/);
+    h.settle(beta.id, 'WAITING_HUMAN');
+    const abandoned = h.shipper.abandon(batch.id);
+    expect(abandoned.state).toBe('ABANDONED');
+    expect(getWorkstream(h.store.db, beta.id).state).toBe('CANCELLED');
+    expect(getWorkstream(h.store.db, alpha.id).state).toBe('DONE');
+    expect(activeClaims(h.store.db, beta.id)).toEqual([]);
+    expect(h.git$('branch', '--list', batch.branch ?? '')).toContain(batch.branch ?? '');
+    expect(h.only(h.cards()).body).toContain('Alpha');
+    await h.jobs.idle();
+    expect(getBatch(h.store.db, batch.id).state).toBe('ABANDONED');
+  });
+
+  it.each(['SHIPPED', 'CLOSED', 'ABANDONED'] as const)(
+    'refuses Ship and Abandon from %s',
+    async (state) => {
+      h = createDeliveryHarness();
+      const { batch } = await openBatch('Greetings', 'Alpha');
+      h.state.write((c) => {
+        if (state === 'ABANDONED') transitionBatch(c, batch.id, { to: 'ABANDONED' });
+        else {
+          transitionBatch(c, batch.id, { to: 'SHIPPING' });
+          transitionBatch(c, batch.id, {
+            to: state,
+            ...(state === 'SHIPPED'
+              ? { patch: { prUrl: 'https://github.com/acme/widgets/pull/9' } }
+              : {}),
+          });
+        }
+      });
+      expect(() => h.shipper.ship(batch.id)).toThrow(ConflictError);
+      expect(() => h.shipper.abandon(batch.id)).toThrow(ConflictError);
+    },
+  );
+});

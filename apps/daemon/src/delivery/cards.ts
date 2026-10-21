@@ -1,7 +1,8 @@
-import type { BatchDto, ProjectDto, TaskId } from '@10db/contracts';
+import { BatchFailure, type BatchDto, type ProjectDto, type TaskId } from '@10db/contracts';
 import type { Json } from '@10db/db';
 import { GitNetworkError } from '../git';
 import { GhError } from '../github';
+import type { GateResult } from '../verify';
 import type { BlockedTask, UnmergedDependency } from './deps';
 
 /** A flag card's text. Every delivery card says what to fix (batch delivery spec §1). */
@@ -157,3 +158,75 @@ export function wrongBranchCard(
       };
   }
 }
+
+const notShipped = (batch: BatchDto): string => `Batch "${batch.title}" not shipped`;
+
+/** "0.3 s" or "45 s" under a minute, "30 min" from one, so a short timeout never reads "0 min". */
+export function duration(ms: number): string {
+  if (ms >= 60_000) return `${String(Math.round(ms / 60_000))} min`;
+  return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)} s`;
+}
+const RETRY = 'Press Retry on the batch strip to ship again; nothing was merged.';
+
+/** A shipping failure: the code the batch records and the card the builder reads. */
+export interface ShipFailure {
+  readonly failure: BatchFailure;
+  readonly card: Card;
+}
+
+export const shipCards = {
+  dirtyCheckout: (batch: BatchDto, paths: readonly string[]): ShipFailure => ({
+    failure: BatchFailure.DirtyCheckout,
+    card: {
+      title: `${notShipped(batch)}: the checkout has uncommitted changes`,
+      body: `10db ships only a clean branch. Commit these with a fix task in the batch, or discard them, then retry:\n${listPaths(paths)}\n\n${RETRY}`,
+      detail: { batchId: batch.id },
+    },
+  }),
+  gateFailed: (batch: BatchDto, gate: GateResult): ShipFailure => ({
+    failure: BatchFailure.GateFailed,
+    card: {
+      title: `${notShipped(batch)}: the gate failed (exit ${String(gate.exitCode)})`,
+      body: `Last output:\n${gate.tail.slice(-1500)}\n\nFull log: ${gate.logPath}\n\nStart a fix task in the batch (it reopens the batch), or ${RETRY.charAt(0).toLowerCase()}${RETRY.slice(1)}`,
+      detail: { batchId: batch.id },
+    },
+  }),
+  gateTimedOut: (batch: BatchDto, timeoutMs: number, logPath: string): ShipFailure => ({
+    failure: BatchFailure.GateTimedOut,
+    card: {
+      title: `${notShipped(batch)}: the gate timed out after ${duration(timeoutMs)}`,
+      body: `10db stopped the gate and pushed nothing. Log: ${logPath}\n\n${RETRY}`,
+      detail: { batchId: batch.id },
+    },
+  }),
+  pushRejected: (batch: BatchDto, detail: string): ShipFailure => ({
+    failure: BatchFailure.PushRejected,
+    card: {
+      title: `${notShipped(batch)}: git push was rejected`,
+      body: `${detail}\n\norigin's ${batch.branch ?? 'branch'} has commits this checkout doesn't, and 10db never force-pushes. Reconcile the branch by hand, then retry.`,
+      detail: { batchId: batch.id },
+    },
+  }),
+  /** gh missing or signed out; anything else gh or the network did is `network`. */
+  network: (batch: BatchDto, step: string, error: unknown): ShipFailure => {
+    const gh = ghCard(notShipped(batch), error, 'retry');
+    return gh
+      ? { failure: BatchFailure.GhUnavailable, card: { ...gh, detail: { batchId: batch.id } } }
+      : {
+          failure: BatchFailure.Network,
+          card: {
+            title: `${notShipped(batch)}: ${step} failed`,
+            body: `${detailOf(error)}\n\n${RETRY}`,
+            detail: { batchId: batch.id },
+          },
+        };
+  },
+  abandoned: (batch: BatchDto, doneTitles: readonly string[]): Card => ({
+    title: `Batch "${batch.title}" abandoned`,
+    body:
+      doneTitles.length > 0
+        ? `These tasks stay done, but their code is unmerged, only on the local branch ${batch.branch ?? '(none)'}:\n${doneTitles.map((t) => `- ${t}`).join('\n')}`
+        : `Nothing in it finished. The local branch ${batch.branch ?? '(none)'} is kept.`,
+    detail: { batchId: batch.id },
+  }),
+};

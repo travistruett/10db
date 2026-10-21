@@ -24,19 +24,25 @@ import {
   type Store,
 } from '@10db/db';
 import { readDefaultPersonas } from '@10db/harness';
+import { ManualClock } from '../src/clock';
 import {
   createBatchStarter,
   createDeliveryJobs,
+  createShipper,
   DEFAULT_DELIVERY_LIMITS,
+  subscribeShipTrigger,
   type BatchStarter,
   type DeliveryContext,
   type DeliveryJobs,
+  type Shipper,
 } from '../src/delivery';
 import { createEventBus, createStateStore, type EventBus, type StateStore } from '../src/events';
 import { createGit, type Git } from '../src/git';
 import { createInboxService, type InboxService } from '../src/inbox';
 import { silentLogger } from '../src/log';
+import { systemProcesses } from '../src/recovery';
 import { seedTeam } from '../src/team';
+import { createGateRunner } from '../src/verify';
 import { measureForTests } from './catalogue';
 import { FakeGh } from './fake-gh';
 import { createTempRepoWithOrigin, NETWORK_ENV, tempDir } from './fixtures';
@@ -73,6 +79,11 @@ export interface DeliveryHarness {
   readonly jobs: DeliveryJobs;
   readonly ctx: DeliveryContext;
   readonly starter: BatchStarter;
+  readonly shipper: Shipper;
+  /** Where the shipper writes PR bodies and gate logs. */
+  readonly dataDir: string;
+  /** Workstreams whose runner is live, as the shipper's `isRunning` sees them. */
+  readonly running: Set<WorkstreamId>;
   readonly project: ProjectDto;
   readonly repo: string;
   readonly origin: string;
@@ -97,7 +108,10 @@ export interface DeliveryHarness {
   close(): void;
 }
 
-export function createDeliveryHarness(project: Partial<ProjectInput> = {}): DeliveryHarness {
+export function createDeliveryHarness(
+  project: Partial<ProjectInput> = {},
+  opts: { readonly gateTimeoutMs?: number; readonly trigger?: boolean } = {},
+): DeliveryHarness {
   const remote = createTempRepoWithOrigin();
   const { store, close } = createTestStore();
   const bus = createEventBus();
@@ -130,12 +144,29 @@ export function createDeliveryHarness(project: Partial<ProjectInput> = {}): Deli
     inbox,
     jobs,
     logger: silentLogger,
-    limits: { ...DEFAULT_DELIVERY_LIMITS, networkTimeoutMs: 10_000, gateTimeoutMs: 20_000 },
+    limits: {
+      ...DEFAULT_DELIVERY_LIMITS,
+      networkTimeoutMs: 10_000,
+      gateTimeoutMs: opts.gateTimeoutMs ?? 20_000,
+    },
     networkEnv: () => NETWORK_ENV,
     onWorkQueued: () => {
       ticks.count += 1;
     },
   };
+  const data = tempDir('delivery-data');
+  const running = new Set<WorkstreamId>();
+  const shipper = createShipper({
+    ...ctx,
+    gate: createGateRunner(),
+    clock: new ManualClock(),
+    dataDir: data.path,
+    sessionEnv: () => ({ PATH: '/usr/bin:/bin' }),
+    identifyProcess: (pid) => systemProcesses.identify(pid),
+    isRunning: (id) => running.has(id),
+  });
+  const unsubscribe =
+    opts.trigger === false ? () => undefined : subscribeShipTrigger(bus, store.db, shipper);
   const run = (dir: string, args: string[]): string =>
     execFileSync('git', ['-C', dir, ...args], { stdio: 'pipe' })
       .toString()
@@ -150,6 +181,9 @@ export function createDeliveryHarness(project: Partial<ProjectInput> = {}): Deli
     jobs,
     ctx,
     starter: createBatchStarter(ctx),
+    shipper,
+    dataDir: data.path,
+    running,
     project: seeded,
     repo: remote.repo.path,
     origin: remote.origin.path,
@@ -208,7 +242,9 @@ export function createDeliveryHarness(project: Partial<ProjectInput> = {}): Deli
       return item;
     },
     close() {
+      unsubscribe();
       close();
+      data.cleanup();
       remote.cleanup();
     },
   };

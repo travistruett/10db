@@ -17,7 +17,8 @@ import { batchBranchName } from './index';
 
 let h: DeliveryHarness;
 beforeEach(() => {
-  h = createDeliveryHarness();
+  // These tests move batches by hand; the ship trigger would race them.
+  h = createDeliveryHarness({}, { trigger: false });
 });
 afterEach(() => {
   h.close();
