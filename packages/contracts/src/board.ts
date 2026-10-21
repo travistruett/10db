@@ -1,14 +1,57 @@
 import { z } from 'zod';
 import { BoardColumnId, ProjectId, TaskId } from './ids';
+import { BoardStatus } from './states';
 
 /** The human column every new project starts with. */
 export const DEFAULT_BOARD_COLUMN = 'Icebox';
 
+/** The labels of the derived columns; a human column can't take one. */
+export const SYSTEM_COLUMN_LABEL: Readonly<Record<BoardStatus, string>> = {
+  [BoardStatus.Backlog]: 'Backlog',
+  [BoardStatus.Ready]: 'Ready',
+  [BoardStatus.InProgress]: 'In progress',
+  [BoardStatus.Blocked]: 'Blocked',
+  [BoardStatus.Done]: 'Done',
+};
+
+/** Latin look-alikes from other scripts, folded so a name can't pass as a system label or another column. */
+const LOOKALIKES: Readonly<Record<string, string>> = {
+  '\u0430': 'a',
+  '\u0435': 'e',
+  '\u043e': 'o',
+  '\u0440': 'p',
+  '\u0441': 'c',
+  '\u0443': 'y',
+  '\u0445': 'x',
+  '\u0456': 'i',
+  '\u0455': 's',
+  '\u0458': 'j',
+  '\u03bf': 'o',
+  '\u03b1': 'a',
+  '\u03b9': 'i',
+  '\u03c1': 'p',
+};
+
+/** NFKC, no invisible format characters, inner whitespace collapsed to single spaces, trimmed. */
+export function normalizeColumnName(name: string): string {
+  return name
+    .normalize('NFKC')
+    .replace(/\p{Cf}/gu, '')
+    .replace(/\s+/gu, ' ')
+    .trim();
+}
+
+/** What two names must differ in to be different columns: case, look-alike letters and spacing do not count. */
+export function columnNameKey(name: string): string {
+  return normalizeColumnName(name)
+    .toLowerCase()
+    .replace(/./gsu, (c) => LOOKALIKES[c] ?? c);
+}
+
 export const BoardColumnName = z
   .string()
-  .trim()
-  .min(1, 'Enter a name')
-  .max(40, 'Use at most 40 characters');
+  .transform(normalizeColumnName)
+  .pipe(z.string().min(1, 'Enter a name').max(40, 'Use at most 40 characters'));
 
 /**
  * A column the builder names and orders. A task in one is parked: never picked and never launched.

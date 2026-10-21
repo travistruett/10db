@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { BoardColumnInput, BoardColumnPatch, DEFAULT_BOARD_COLUMN, TaskMove } from './board';
+import {
+  BoardColumnInput,
+  BoardColumnPatch,
+  columnNameKey,
+  DEFAULT_BOARD_COLUMN,
+  normalizeColumnName,
+  SYSTEM_COLUMN_LABEL,
+  TaskMove,
+} from './board';
 import { EventType } from './events';
 import { BoardColumnId, mintId } from './ids';
 
@@ -58,5 +66,37 @@ describe('board columns', () => {
     expect(DEFAULT_BOARD_COLUMN).toBe('Icebox');
     expect(EventType.BoardColumnSaved).toBe('board_column.saved');
     expect(EventType.BoardColumnDeleted).toBe('board_column.deleted');
+  });
+});
+
+describe('column names', () => {
+  it.each([
+    { name: 'inner runs of spaces', typed: 'In  progress', normalized: 'In progress' },
+    { name: 'a no-break space', typed: 'In\u00a0progress', normalized: 'In progress' },
+    { name: 'a zero-width space', typed: 'Ba\u200bcklog', normalized: 'Backlog' },
+    { name: 'full-width letters', typed: '\uff24one', normalized: 'Done' },
+    { name: 'tabs and newlines', typed: ' Needs\t\nspec ', normalized: 'Needs spec' },
+  ])('normalizes $name', ({ typed, normalized }) => {
+    expect(normalizeColumnName(typed)).toBe(normalized);
+    expect(BoardColumnInput.parse({ name: typed }).name).toBe(normalized);
+  });
+
+  it.each([
+    { name: 'case', a: 'icebox', b: 'Icebox', same: true },
+    { name: 'a zero-width character', a: 'Ice\u200bbox', b: 'Icebox', same: true },
+    { name: 'a Cyrillic \u0435 for Latin e', a: 'R\u0435ady', b: 'Ready', same: true },
+    { name: 'different words', a: 'Icebox', b: 'Exploring', same: false },
+  ])('compares names by key: $name', ({ a, b, same }) => {
+    expect(columnNameKey(a) === columnNameKey(b)).toBe(same);
+  });
+
+  it('labels the five system columns', () => {
+    expect(Object.values(SYSTEM_COLUMN_LABEL)).toEqual([
+      'Backlog',
+      'Ready',
+      'In progress',
+      'Blocked',
+      'Done',
+    ]);
   });
 });
