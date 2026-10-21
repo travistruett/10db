@@ -157,4 +157,29 @@ describe('SettingsView', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Save' }));
     expect(await screen.findByText('Nothing to change.')).toBeTruthy();
   });
+
+  it('keeps what the builder typed and picks up other fields when the project changes mid-edit', async () => {
+    const first = projectDto({ name: 'demo', gateCommand: 'make gate' });
+    let current = first;
+    server.use(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([current])),
+      http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
+      ...baseHandlers(),
+    );
+    const { queryClient } = renderApp('/settings/general');
+    fireEvent.change(await screen.findByLabelText('Name'), { target: { value: 'renamed' } });
+    // Another window changes the gate command and the lane cap while this form is open.
+    current = {
+      ...first,
+      gateCommand: 'make check',
+      maxLanes: 7,
+      updatedAt: '2026-10-13T13:00:00.000Z',
+    };
+    await queryClient.invalidateQueries({ queryKey: ['projects'] });
+    await waitFor(() => {
+      expect(screen.getByLabelText<HTMLInputElement>('Gate command').value).toBe('make check');
+    });
+    expect(screen.getByLabelText<HTMLInputElement>('Name').value).toBe('renamed');
+    expect(screen.getByLabelText<HTMLInputElement>('Lanes').value).toBe('7');
+  });
 });

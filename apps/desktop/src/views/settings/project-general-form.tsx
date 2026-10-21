@@ -9,6 +9,24 @@ import {
   type GeneralValues,
 } from './general-values';
 
+/** Keeps the fields the builder changed and moves the rest to the project's current values. */
+function reseed(current: GeneralValues, seed: GeneralValues, next: GeneralValues): GeneralValues {
+  return {
+    name: current.name === seed.name ? next.name : current.name,
+    gateCommand: current.gateCommand === seed.gateCommand ? next.gateCommand : current.gateCommand,
+    maxLanes: current.maxLanes === seed.maxLanes ? next.maxLanes : current.maxLanes,
+    handoffPct: current.handoffPct === seed.handoffPct ? next.handoffPct : current.handoffPct,
+    nudgePct: current.nudgePct === seed.nudgePct ? next.nudgePct : current.nudgePct,
+    humanWaitMinutes:
+      current.humanWaitMinutes === seed.humanWaitMinutes
+        ? next.humanWaitMinutes
+        : current.humanWaitMinutes,
+    flowId: current.flowId === seed.flowId ? next.flowId : current.flowId,
+    budgetCeiling:
+      current.budgetCeiling === seed.budgetCeiling ? next.budgetCeiling : current.budgetCeiling,
+  };
+}
+
 const asNumber = (value: number | string): number | '' => (typeof value === 'number' ? value : '');
 
 /** The project's editable fields (spec §10 Settings): saved as one patch of what changed. */
@@ -16,6 +34,15 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
   const flows = useFlows();
   const patch = usePatchProject(project.id);
   const [values, setValues] = useState<GeneralValues>(() => generalValues(project));
+  // The values the untouched fields were last seeded from; a field still equal to its seed follows the project.
+  const [seed, setSeed] = useState<GeneralValues>(() => generalValues(project));
+  const [seededFrom, setSeededFrom] = useState(project);
+  if (seededFrom !== project) {
+    const next = generalValues(project);
+    setSeededFrom(project);
+    setSeed(next);
+    setValues((v) => reseed(v, seed, next));
+  }
   const [errors, setErrors] = useState<GeneralErrors>({});
   const [note, setNote] = useState<string | null>(null);
   const set = (change: Partial<GeneralValues>) => {
