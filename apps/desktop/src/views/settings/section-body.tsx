@@ -1,5 +1,6 @@
 import type { ProjectDto } from '@10db/contracts';
 import { Text, Title } from '@mantine/core';
+import { BoardColumnsSection } from './board-columns-section';
 import { KeepAwakeSection } from './keep-awake-section';
 import { PlannedSection } from './planned-section';
 import { ProjectAreas } from './project-areas';
@@ -31,7 +32,7 @@ export function SectionBody({
       return (
         <>
           {heading}
-          {project ? <Text c="dimmed">Columns arrive with their editor.</Text> : <NoProject />}
+          {project ? <BoardColumnsSection key={project.id} project={project} /> : <NoProject />}
         </>
       );
     case SettingsSectionKey.Areas:

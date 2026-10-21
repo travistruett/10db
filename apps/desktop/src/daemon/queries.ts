@@ -6,6 +6,9 @@ import {
   SystemCheckDto,
   TaskDto,
   WorkstreamDto,
+  type BoardColumnId,
+  type BoardColumnInput,
+  type BoardColumnPatch,
   type InboxAnswer,
   type InboxItemId,
   type KeepAwakeMode,
@@ -215,5 +218,66 @@ export function useSetKeepAwake() {
     onSuccess: (status) => {
       queryClient.setQueryData(queryKeys.keepAwake, status);
     },
+  });
+}
+
+export function useCreateBoardColumn(projectId: ProjectId) {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: BoardColumnInput) =>
+      readJson(
+        await client.projects[':projectId']['board-columns'].$post({
+          param: { projectId },
+          json: input,
+        }),
+        BoardColumnDto,
+      ),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['board-columns'] }),
+  });
+}
+
+export function usePatchBoardColumn() {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      id,
+      patch,
+    }: {
+      readonly id: BoardColumnId;
+      readonly patch: BoardColumnPatch;
+    }) =>
+      readJson(
+        await client['board-columns'][':columnId'].$patch({ param: { columnId: id }, json: patch }),
+        BoardColumnList,
+      ),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['board-columns'] }),
+  });
+}
+
+export function useDeleteBoardColumn() {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      id,
+      moveTasksTo,
+    }: {
+      readonly id: BoardColumnId;
+      readonly moveTasksTo: BoardColumnId | null;
+    }) =>
+      readJson(
+        await client['board-columns'][':columnId'].delete.$post({
+          param: { columnId: id },
+          json: { moveTasksTo },
+        }),
+        BoardColumnList,
+      ),
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['board-columns'] }),
+        queryClient.invalidateQueries({ queryKey: ['tasks'] }),
+      ]),
   });
 }
