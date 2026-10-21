@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import * as prettier from 'prettier';
 import { describe, expect, it } from 'vitest';
-import { environmentOf, readWorkflow, releaseWorkflowPaths, stepsOf } from './workflow-yaml';
+import { environmentOf, readWorkflow, releaseWorkflowPaths, stepsOf } from './workflows';
 import { readRepoFile, repoRoot } from './workspace';
 
 interface ReleasePleaseConfig {

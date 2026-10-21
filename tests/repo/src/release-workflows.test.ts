@@ -6,7 +6,7 @@ import {
   releaseWorkflowPaths,
   stepsOf,
   usesLines,
-} from './workflow-yaml';
+} from './workflows';
 import { readRepoFile } from './workspace';
 
 const MISE_ACTION = 'jdx/mise-action@';
