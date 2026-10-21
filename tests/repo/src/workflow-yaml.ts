@@ -43,3 +43,15 @@ export function environmentOf(job: WorkflowJob | undefined): string | undefined 
 export function stepsOf(job: WorkflowJob | undefined): readonly WorkflowStep[] {
   return job?.steps ?? [];
 }
+
+export function allSteps(path: string): readonly WorkflowStep[] {
+  return Object.values(readWorkflow(path).jobs).flatMap((job) => stepsOf(job));
+}
+
+// Comments carry the version a SHA pin stands for, and parsed YAML drops them, so this reads the raw text.
+export function usesLines(text: string): { readonly ref: string; readonly comment: string }[] {
+  return [...text.matchAll(/^\s*(?:-\s+)?uses:\s*(\S+)[ \t]*(#.*)?$/gm)].map((match) => ({
+    ref: match[1] ?? '',
+    comment: (match[2] ?? '').trim(),
+  }));
+}
