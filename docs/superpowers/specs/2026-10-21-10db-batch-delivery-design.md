@@ -1,7 +1,8 @@
 # 10db batch delivery: one branch and one pull request per batch
 
-**Status:** design approved in conversation on 2026-10-21 and revised after plan review; this document awaits
-review.
+**Status:** design approved in conversation on 2026-10-21 and revised after plan review; amended in §4 and §8
+after the implementation plan's review (Retry from `FAILED` ships settled work and otherwise reopens the batch;
+the failed workstream's card actions). This document awaits review.
 **Extends:** `2026-10-13-10db-factory-loop-design.md` (§4 `projects` and `workstreams`, §5 lifecycle, §8 guard).
 **Builds on:** M2a (plan 06). It runs alongside the M2b board plan, which builds batch approval on the batch
 entity and API defined here.
@@ -70,7 +71,7 @@ Until the first published release the migration baseline is regenerated, not ext
 ```
 CUTTING → OPEN → SHIPPING → SHIPPED
    ↓        ↓        ↓    ↘ CLOSED
-(deleted)   ↓      FAILED → SHIPPING (retry) | OPEN (fix task or workstream retry) | ABANDONED
+(deleted)   ↓      FAILED → SHIPPING (Retry, work settled) | OPEN (Retry with work unfinished, fix task or workstream retry) | ABANDONED
             → ABANDONED
 ```
 
@@ -83,15 +84,20 @@ CUTTING → OPEN → SHIPPING → SHIPPED
   `state.write`, moves an `OPEN` batch whose workstreams are all `DONE` or `CANCELLED` to `SHIPPING`. Startup
   runs the same check, so a missed event is caught. A workstream with no batch returns early.
 - **Failed workstreams hold the batch open.** Their existing flag card offers Retry and, for the batch,
-  **Ship anyway**. Ship anyway (`POST /batches/:id/ship` from `OPEN`) is allowed when every workstream in the
-  batch is `DONE`, `CANCELLED` or `FAILED`.
+  **Ship anyway** (and Later, which changes nothing). The card is answered through the inbox like the MCP
+  approval card; a refused action keeps it open and says why. Ship anyway (`POST /batches/:id/ship` from `OPEN`)
+  is allowed when every workstream in the batch is `DONE`, `CANCELLED` or `FAILED`.
 - **Waiting workstreams hold the batch open.** `WAITING_HUMAN` and `PAUSED_LIMIT` keep it `OPEN`; the lane is
   already freed after `human_wait_minutes`, so nothing is spent. The batch strip lists what blocks shipping.
 - **CLOSED.** The batch had no commits beyond `base_sha`. Nothing is pushed.
 - **SHIPPED.** The PR exists and `pr_url` is set. The checkout stays on the branch until the next batch cuts.
 - **FAILED.** Shipping stopped: the checkout was dirty or on the wrong branch, the gate failed or timed out, or a
-  network step failed. `failure` says which, and a flag card carries the detail. From here the builder retries
-  shipping, starts a fix task or retries a workstream in the batch (both reopen it), or abandons it.
+  network step failed. `failure` says which, and a flag card carries the detail. From here the builder presses
+  Retry, starts a fix task or retries a workstream in the batch (both reopen it), or abandons it. **Retry ships
+  when the batch's work is settled** (every workstream `DONE`, `CANCELLED` or `FAILED`); **otherwise it reopens
+  the batch** (`FAILED → OPEN`), so the unfinished work runs and the batch ships itself. Retry never ships
+  unfinished work, and it is the way back for a batch failed at startup for the wrong branch while its work was
+  still queued.
 - **ABANDONED.** Refused while any lane in the batch runs. Otherwise, in one transaction, every workstream in
   the batch that is not `DONE`, `CANCELLED` or `FAILED` is cancelled and its claims released. The branch stays
   local for the builder. Tasks that finished in it stay done on the board, and the card says their code is
@@ -137,7 +143,7 @@ on X, the batch branch is Y", and nothing in it launches.
 1. Count commits beyond `base_sha`. None moves the batch to `CLOSED`.
 2. Run the project's gate with the existing gate runner and `limits.gateTimeoutMs`, recording `gate_pid` and
    `gate_pid_start` as workstreams do. Exit code and log path are recorded. A non-zero exit moves the batch to
-   `FAILED`; a timeout's card says "timed out after N min".
+   `FAILED`; a timeout's card says "timed out after N min" (in seconds when under a minute).
 3. `git push -u origin <branch>`, never forced. A rejected push moves the batch to `FAILED`.
 4. `gh pr view <branch> -R <repo> --json url,state` finds any PR for the branch in any state and records its
    URL. Only when there is none does `gh pr create -R <repo> --base <base_branch> --head <branch> --title
@@ -179,7 +185,8 @@ a different push nor a second PR.
 
 ## 8. API and UI
 
-- `POST /projects/:id/batches`, `POST /batches/:id/ship` (from `FAILED`, or Ship anyway from `OPEN`) and
+- `POST /projects/:id/batches`, `POST /batches/:id/ship` (Retry from `FAILED`, which ships settled work and
+  otherwise reopens the batch, or Ship anyway from `OPEN`) and
   `POST /batches/:id/abandon`. The project view carries `currentBatch`. `batch.updated` is emitted on insert and
   on every change.
 - The project form gains delivery, base branch and PR title prefix, which is required for `pull_request`.

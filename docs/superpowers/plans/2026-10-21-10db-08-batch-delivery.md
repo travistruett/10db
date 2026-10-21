@@ -8,19 +8,23 @@
 
 - **Data.** Projects gain `delivery` (`local` | `pull_request`), `base_branch` and `pr_title_prefix`, with database defaults. A new `batches` table holds one row per batch (`CUTTING → OPEN → SHIPPING → SHIPPED | CLOSED | FAILED`, and `ABANDONED`), with a partial unique index that allows one unfinished batch per project. Workstreams gain `batch_id`.
 - **Wrappers.** `git/` gains `currentBranch`, `remoteUrl`, `fetch`, `switchNewBranch` and `push`. A new `github/` module wraps the `gh` CLI behind a `Gh` interface (`authStatus`, `repoView`, `prView`, `prCreate`) whose output is parsed with zod. Every network call runs in the captured login environment with prompts off, a timeout and an abort signal.
-- **Delivery.** A new `delivery/` module owns the batch lifecycle. The starter validates a start in the request, writes the batch row before any git side effect, and finishes the git and `gh` checks, the branch cut or the join in a background job whose refusals are inbox cards. The shipper runs the shipping steps (branch and clean check, commit count, gate, push, find-or-create PR, record) and the ship trigger moves an `OPEN` batch to `SHIPPING` from `workstream.changed` events. Startup recovery deletes `CUTTING` rows, fails batches whose branch is not checked out, kills an orphaned shipping gate and re-runs shipping from step 0.
-- **Integration.** The scheduler launches `pull_request` work only when its batch is `OPEN` and the checkout is on the batch branch, reading the branch once per tick per project. A workstream retry respects its batch. The guard stops agents pushing in `pull_request` projects and mutating PRs or the repository through `gh` in every project.
-- **API and UI.** `POST /projects/:id/batches`, `POST /batches/:id/ship` and `POST /batches/:id/abandon`; `GET /projects` carries each project's `currentBatch`. The project form gains the delivery fields, and the Tasks view gains a batch strip.
+- **Delivery.** A new `delivery/` module owns the batch lifecycle. The starter validates a start in the request, writes the batch row before any git side effect, and finishes the git and `gh` checks, the branch cut or the join in a background job whose refusals are inbox cards. The shipper runs the shipping steps (branch and clean check, commit count, gate, push, find-or-create PR, record) and the ship trigger moves an `OPEN` batch to `SHIPPING` from `workstream.changed` events. Startup recovery deletes `CUTTING` rows (with a card), fails batches whose branch is not checked out, kills an orphaned shipping gate and re-runs shipping from step 0.
+- **Integration.** The scheduler launches `pull_request` work only when its batch is `OPEN` and the checkout is on the batch branch, reading the branch once per tick per project. A workstream retry respects its batch. A failed workstream's flag card offers Retry and Ship anyway. The guard stops agents pushing in `pull_request` projects and, in every project, lets them run only read-only `gh` commands.
+- **API and UI.** `POST /projects/:id/batches`, `POST /batches/:id/ship` and `POST /batches/:id/abandon`; `GET /projects` carries each project's `currentBatch`. The new-project form and Settings' General form gain the delivery fields, and the board gains a batch strip (Task 11, after M2b Part A).
 
 **Tech Stack:** As in M2a. No new dependencies: `git` and `gh` run through `node:child_process` `execFile` with argument arrays.
 
-**Spec:** `docs/superpowers/specs/2026-10-21-10db-batch-delivery-design.md` (approved; this plan does not change its decisions). It extends `docs/superpowers/specs/2026-10-13-10db-factory-loop-design.md` §4, §5 and §8. This plan implements every section of the batch delivery spec: §3 data (Tasks 1 and 2), §4 lifecycle (Tasks 5, 6, 7 and 9), §5 starting work (Tasks 5 and 7), §6 shipping (Tasks 6 and 9), §7 components (Tasks 3 to 10), §8 API and UI (Tasks 10 and 11) and §10 testing (every task). §9 "Later" is not built; Task 12 records it as open items.
+**Spec:** `docs/superpowers/specs/2026-10-21-10db-batch-delivery-design.md` (approved; amended after the plan review in §4 so that Retry from `FAILED` ships settled work and otherwise reopens the batch, and so that the failed workstream's card names its options; the plan changes no other decision). It extends `docs/superpowers/specs/2026-10-13-10db-factory-loop-design.md` §4, §5 and §8. This plan implements every section of the batch delivery spec: §3 data (Tasks 1 and 2), §4 lifecycle (Tasks 5, 6, 7 and 9), §5 starting work (Tasks 5 and 7), §6 shipping (Tasks 6 and 9), §7 components (Tasks 3 to 10), §8 API and UI (Tasks 10 and 11) and §10 testing (every task). §9 "Later" is not built; Task 12 records it as open items.
 
 **Plan series:** `00-spikes` … `06-m2a-teams-and-routing`, `07-m2b-board-and-settings` (written in parallel), **`08-batch-delivery` (this file)**. The M2b plan builds its batch approval on this plan's `POST /projects/:id/batches`. That route's contract is fixed here and must not change without updating M2b:
 
-- **Request:** `POST /projects/:projectId/batches` with `BatchStartInput` `{ title: string (1–200), taskIds: TaskId[] (1–50, unique) }`.
-- **Answer:** `202` with the `BatchDto` the tasks run in: a new `CUTTING` batch, or the project's `OPEN` or `FAILED` batch they joined. Git and `gh` refusals arrive afterwards as inbox cards and `batch.updated` events (a refused new batch is deleted).
-- **Refusals in the request:** `400` for a `local` project or an invalid body or over-budget step plan, `404` for an unknown project or task, `409` while the project's batch is `CUTTING` or `SHIPPING`, for a task that is not open or already running, and for an unfinished dependency outside the batch (which also raises a card).
+- **Request:** `POST /projects/:projectId/batches` with `BatchStartInput` `{ title: string (1–200), taskIds: TaskId[] (1–50, unique; more than 50 is a 400) }`.
+- **Answer, new batch:** `202` with a new `CUTTING` `BatchDto`. Its workstreams appear when it opens: one `batch.updated` (`CUTTING → OPEN`) and one `workstream.created` per task, whose `data.batchId` is the batch.
+- **Answer, join:** when the project already has an `OPEN` or `FAILED` batch, `202` with **that existing batch, as it is at the moment of the request** (still `FAILED` until the background job reopens it). `title` is ignored. The new tasks have no workstreams yet: a joined task shows up as a `workstream.created` event with that `batchId` (a reopened batch also sends `batch.updated`, `FAILED → OPEN`).
+- **Background refusals:** a refused start or join emits no batch event of its own (a refused new batch is deleted, which sends `batch.updated` with `to: null`). It raises one flag card whose `detail` is `{ batchId?, taskIds }`, naming the refused tasks. A client tells joined from refused by which arrives for a task: a `workstream.created` with its `batchId`, or a card listing it in `detail.taskIds`.
+- **Refusals in the request:** `400` for a `local` project, an invalid body or an over-budget step plan; `404` for an unknown project or task; `409` while the project's batch is `CUTTING` or `SHIPPING`, for a task that is not open or already running, and for an unfinished dependency outside the batch (which also raises a card).
+
+**Execution order.** Tasks 1–10 (contracts, database, daemon) can be executed now, on a branch from `main`. Task 11 (desktop) waits until M2b Part A (`feat/m2b-board-and-settings`) is on `main`: Part A renames `apps/desktop/src/views/tasks` to `views/board` and adds Settings' General form, and Task 11 edits both. Task 12 follows Task 11; Task 13 follows Task 12.
 
 This plan was written against `origin/docs/batch-delivery-design` at `6ae9adc` (main at `2b3d811` plus the spec). Where a file, signature or anchor it names doesn't match the code, trust the code, adapt the step and say so in the task's report.
 
@@ -33,11 +37,11 @@ The spec leaves these open; the plan decides them. Task 12 records the lasting o
 3. **`POST /projects/:id/batches` joins.** When the project has an `OPEN` batch it joins it, and when it has a `FAILED` batch the tasks are fix tasks that reopen it, exactly as `POST /tasks/:id/start` does; the new title is ignored. It refuses a `local` project with 400.
 4. **`POST /tasks/:id/start` answers 201 with the `WorkstreamDto` in a `local` project (unchanged) and 202 with the `BatchDto` in a `pull_request` project.** `TaskStartResult` is the union. Additive: `PROTOCOL_VERSION` stays 2.
 5. **The project view is `GET /projects`,** which returns `ProjectViewDto[]`: `ProjectDto` plus `currentBatch` (the unfinished batch, else the latest, else null). `ProjectDto` itself stays the row type every module reads. `WorkstreamDto` gains `batchId`.
-6. **Retry from `FAILED` (`POST /batches/:id/ship`) never ships unfinished work.** It ships when every workstream in the batch is `DONE`, `CANCELLED` or `FAILED`; otherwise it reopens the batch (`FAILED → OPEN`) so the unfinished work runs and the batch ships itself. This is the way back for a batch failed at startup for being on the wrong branch while its work was still queued.
-7. **Batch actions live on the batch strip.** Spec §4 says a failed workstream's "existing flag card offers Retry and, for the batch, Ship anyway", but today's flag cards carry text and a Dismiss button only. Retry, Ship anyway and Abandon are buttons on the batch strip (and Retry for a workstream stays in the Factory view); every card names the button to use. Answerable actions on flag cards are an open item (Task 12).
-8. **A wrong branch at run time pauses, a wrong branch at startup fails.** While the daemon runs, a `QUEUED` workstream whose `OPEN` batch's branch is not checked out waits, and the scheduler raises one folded card "checkout is on X, the batch branch is Y"; the batch stays `OPEN` and its work launches once the builder switches back. At startup such a batch moves to `FAILED`, as the spec says. A join or reopen that finds the wrong branch raises the same card and adds nothing.
+6. **Retry from `FAILED` (`POST /batches/:id/ship`) never ships unfinished work** (spec §4, amended with this plan's review). It ships when every workstream in the batch is `DONE`, `CANCELLED` or `FAILED`; otherwise it reopens the batch (`FAILED → OPEN`) so the unfinished work runs and the batch ships itself. This is the way back for a batch failed at startup for being on the wrong branch while its work was still queued.
+7. **Batch actions on the card and on the strip.** As spec §4 says, a failed batch member's flag card offers Retry and, for the batch, Ship anyway (plus Later, which closes the card and changes nothing). Flag cards already carry options and are answered through `InboxService.answer`, like the MCP approval card: the card's `detail.batchCard` holds the batch and workstream IDs, and an `onFlagAnswer` hook acts before the answer is recorded, so a refused action keeps the card open and the error answers the request. The batch strip offers Retry, Ship anyway and Abandon too, and Retry for a workstream stays in the Factory view.
+8. **A wrong branch at run time pauses, a wrong branch at startup fails.** While the daemon runs, a `QUEUED` workstream whose `OPEN` batch's branch is not checked out waits, and the scheduler raises one folded card "checkout is on X, the batch branch is Y"; the batch stays `OPEN` and its work launches once the builder switches back. At startup such a batch moves to `FAILED`, as the spec says. A join or reopen that finds the wrong branch raises a "not added" card naming its tasks ("start the task again once the checkout is on <branch>") and adds nothing; the shipping step-0 check has its own "not shipped" card.
 9. **Delivery can't change under running work.** Patching a project's `delivery` is refused (409) while it has an unfinished workstream or batch. A `QUEUED` workstream in a `pull_request` project with no batch never launches, so this keeps any from being stranded.
-10. **The `gh` rules for agents are allowlists.** `gh pr` allows `view`, `list`, `checks`, `diff` and `status`, which also denies `gh pr checkout` (it would switch the shared checkout's branch). `gh repo` allows `view` and `list`. `gh api` allows GET only; a request with `-f`, `-F`, `--field`, `--raw-field` or `--input` and no explicit method counts as POST, as `gh` sends it, so `gh api graphql` is denied too.
+10. **The `gh` rule for agents is one top-level allowlist of reads; everything else is denied with a reason.** Allowed: `gh pr view|list|checks|diff|status`, `gh repo view|list`, `gh issue view|list|status`, `gh run view|list`, `gh workflow view|list`, `gh search …`, `gh status`, `gh auth status`, `gh help …`, `gh version`, bare `gh` and `gh --help|--version`, and `gh api` GET requests. So aliases (`gh alias set`, then `gh m 12`), extensions (`gh extension`, `gh ext`), `gh auth token`, `gh config set`, `gh workflow run`, `gh run rerun|cancel`, `gh pr checkout` (it would switch the shared checkout's branch) and any command `gh` adds later are denied. A `gh api` request with `-f`, `-F`, `--field`, `--raw-field` or `--input` and no explicit method counts as POST, as `gh` sends it, so `gh api graphql` is denied too.
 11. **`failure` is a code:** `wrong_branch`, `dirty_checkout`, `gate_failed`, `gate_timed_out`, `push_rejected`, `gh_unavailable` or `network`. The card carries the detail.
 12. **Git details.** Fetch uses the explicit refspec `+refs/heads/<base>:refs/remotes/origin/<base>`, so it doesn't depend on the clone's fetch config. The cut runs `git switch --no-track -c <branch> origin/<base>`, so the branch has no upstream until the push sets it. "`origin` exists" is `git remote get-url origin`, through a `remoteUrl` method beside the four the spec names, so a missing origin gets its own card.
 13. **Timeouts.** Each network call (`fetch`, `push`, every `gh` call) gets `DEFAULT_DELIVERY_LIMITS.networkTimeoutMs` = 2 minutes. The shipping gate uses the runner's `gateTimeoutMs` (30 minutes by default).
@@ -49,23 +53,25 @@ The spec leaves these open; the plan decides them. Task 12 records the lasting o
 19. **Abandoning raises a card** that names the tasks that finished in the batch and the local branch holding their unmerged code.
 20. **Input rules.** The PR title prefix is a lowercase type with an optional scope and an optional `!` (`fix`, `feat(app)`, `feat(app)!`). A base branch is a plain branch name: no leading `-`, no `..`, `//` or `@{`, no trailing `/`, `.` or `.lock`. Both reach git and `gh` as arguments.
 21. **Which dependencies count as on `origin/<base_branch>`.** A dependency that finished in a batch counts when that batch is `CLOSED` (it had no commits) or its PR's state is `MERGED`. One that finished with no batch (in `local` delivery) counts as merged.
-22. **A batch member is a task's latest workstream in the batch.** A task cancelled and started again in the same batch, or one whose failed workstream was replaced by a fresh start, is judged by its latest workstream for shipping and the PR body (`latestPerTask`).
+22. **A refused start names its tasks.** Every card for a background refusal of a start or join carries `detail.taskIds` (and `detail.batchId` when it was a join), and an interrupted cut or join (daemon shutdown) gets its own card. Nothing else is emitted for a refusal, so a client watching the event stream tells a joined task (a `workstream.created` with the `batchId`) from a refused one (a card naming it).
+23. **`Scheduler.idle()`** resolves once every requested or running tick has settled; tests await it instead of `await Promise.resolve()`, which no longer covers an asynchronous tick.
+24. **A batch member is a task's latest workstream in the batch.** A task cancelled and started again in the same batch, or one whose failed workstream was replaced by a fresh start, is judged by its latest workstream for shipping and the PR body (`latestPerTask`).
 
 ## New decisions
 
 Task 12 appends these to the decision log in `docs/architecture/decisions.md` as consecutive rows numbered from the next free number at merge (69 on `main` when this plan was written). The code follows them from Task 1.
 
-| Label | Decision                                                                                                                                                                                                                                                                                                                                                                         | Why                                                                                                                                  |
-| ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| B1    | A project delivers `local` (commits stay on the checked-out branch, as before) or `pull_request`. In `pull_request` the delivery unit is the batch: one branch and one pull request, and at most one unfinished batch (`CUTTING`, `OPEN`, `SHIPPING`, `FAILED`) per project, enforced by a partial unique index.                                                                 | Batch delivery spec §2. The shared checkout holds one branch at a time (factory spec decision 13), so parallel tasks share it.       |
-| B2    | The daemon creates and switches branches, only when no lane runs in the project; agents still can't. The daemon pushes and opens the PR; agents may not push in `pull_request` projects and may not create, merge, close, edit or check out PRs, call `gh api` with any method but GET, or change the repository through `gh`, in any project. Merging stays with the builder.   | Spec §2: switching under running sessions moves their files; one deterministic shipper builds the PR from records.                   |
-| B3    | The batch row is written before any git side effect, and the branch is verified before every launch and every ship. A `CUTTING` row found at startup is deleted; a branch a crash left behind stays, and the next cut uses a new name.                                                                                                                                           | Spec §2: the pattern the runner and recovery already use for workstreams.                                                            |
-| B4    | A batch ships automatically when all its workstreams are `DONE` or `CANCELLED`. A `FAILED` or waiting workstream holds it `OPEN`; "Ship anyway" ships one whose workstreams are all `DONE`, `CANCELLED` or `FAILED`. Retrying a `FAILED` batch ships it when its work is settled and otherwise reopens it; it never ships unfinished work.                                       | Spec §4; factory spec §5.4 sends failed work back for a retry.                                                                       |
-| B5    | Shipping: verify the branch and a clean checkout, close a batch with no commits beyond its base, run the project gate, `git push -u` (never forced), find any PR for the branch in any state with `gh pr view` and create one only when there is none, then record the URL. A restart re-runs from the first step, which neither pushes different content nor opens a second PR. | Spec §6. Every step is idempotent, so recovery is "run it again".                                                                    |
-| B6    | `gh` is the only host integration. Network calls (`fetch`, `push`, `gh`) run in the captured login environment with `GIT_TERMINAL_PROMPT=0`, `GH_PROMPT_DISABLED=1` and `GH_NO_UPDATE_NOTIFIER=1`, a 2-minute timeout each and an abort signal. Any failure is a `FAILED` batch or a refused start with a card that says what to fix.                                            | Spec §2 and §6. The builder's repos are on GitHub and `gh` is already signed in; a prompt nobody sees would hang forever.            |
-| B7    | Requests answer what the daemon can check without git or the network; the git and `gh` checks run after the API returns, and their refusals are inbox cards. `POST /tasks/:id/start` answers 202 with the batch in a `pull_request` project and 201 with the workstream in a `local` one.                                                                                        | Spec §5 "the API returns the batch at once". The local answer is unchanged, so `PROTOCOL_VERSION` stays 2.                           |
-| B8    | A wrong branch at startup fails the batch; while the daemon runs, it pauses the batch's launches with a card until the builder switches back. Changing a project's delivery is refused while it has unfinished work.                                                                                                                                                             | Spec §5 scheduler rule. A pause is enough while the daemon watches every launch; at startup nobody knows how the checkout got there. |
-| B9    | Batch actions (Retry, Ship anyway, Abandon) are buttons on the Tasks view's batch strip; flag cards explain and name the button.                                                                                                                                                                                                                                                 | Today's flag cards have no actions; making flag cards answerable is a separate change.                                               |
+| Label | Decision                                                                                                                                                                                                                                                                                                                                                                                                                           | Why                                                                                                                                      |
+| ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| B1    | A project delivers `local` (commits stay on the checked-out branch, as before) or `pull_request`. In `pull_request` the delivery unit is the batch: one branch and one pull request, and at most one unfinished batch (`CUTTING`, `OPEN`, `SHIPPING`, `FAILED`) per project, enforced by a partial unique index.                                                                                                                   | Batch delivery spec §2. The shared checkout holds one branch at a time (factory spec decision 13), so parallel tasks share it.           |
+| B2    | The daemon creates and switches branches, only when no lane runs in the project; agents still can't. The daemon pushes and opens the PR; agents may not push in `pull_request` projects, and in every project may run only an allowlist of read-only `gh` commands (PR, issue, run and workflow views and lists, `gh search`, `gh status`, `gh auth status`, help and version, and `gh api` GETs). Merging stays with the builder. | Spec §2: switching under running sessions moves their files; one deterministic shipper builds the PR from records.                       |
+| B3    | The batch row is written before any git side effect, and the branch is verified before every launch and every ship. A `CUTTING` row found at startup is deleted; a branch a crash left behind stays, and the next cut uses a new name.                                                                                                                                                                                             | Spec §2: the pattern the runner and recovery already use for workstreams.                                                                |
+| B4    | A batch ships automatically when all its workstreams are `DONE` or `CANCELLED`. A `FAILED` or waiting workstream holds it `OPEN`; "Ship anyway" ships one whose workstreams are all `DONE`, `CANCELLED` or `FAILED`. Retrying a `FAILED` batch ships it when its work is settled and otherwise reopens it (`FAILED → OPEN`); it never ships unfinished work.                                                                       | Batch delivery spec §4 as amended after plan review; factory spec §5.4 sends failed work back for a retry.                               |
+| B5    | Shipping: verify the branch and a clean checkout, close a batch with no commits beyond its base, run the project gate, `git push -u` (never forced), find any PR for the branch in any state with `gh pr view` and create one only when there is none, then record the URL. A restart re-runs from the first step, which neither pushes different content nor opens a second PR.                                                   | Spec §6. Every step is idempotent, so recovery is "run it again".                                                                        |
+| B6    | `gh` is the only host integration. Network calls (`fetch`, `push`, `gh`) run in the captured login environment with `GIT_TERMINAL_PROMPT=0`, `GH_PROMPT_DISABLED=1` and `GH_NO_UPDATE_NOTIFIER=1`, a 2-minute timeout each and an abort signal. Any failure is a `FAILED` batch or a refused start with a card that says what to fix.                                                                                              | Spec §2 and §6. The builder's repos are on GitHub and `gh` is already signed in; a prompt nobody sees would hang forever.                |
+| B7    | Requests answer what the daemon can check without git or the network; the git and `gh` checks run after the API returns, and their refusals are inbox cards. `POST /tasks/:id/start` answers 202 with the batch in a `pull_request` project and 201 with the workstream in a `local` one.                                                                                                                                          | Spec §5 "the API returns the batch at once". The local answer is unchanged, so `PROTOCOL_VERSION` stays 2.                               |
+| B8    | A wrong branch at startup fails the batch; while the daemon runs, it pauses the batch's launches with a card until the builder switches back. Changing a project's delivery is refused while it has unfinished work.                                                                                                                                                                                                               | Spec §5 scheduler rule. A pause is enough while the daemon watches every launch; at startup nobody knows how the checkout got there.     |
+| B9    | A failed batch member's flag card offers Retry, Ship anyway and Later, acted on through the inbox's answer before it is recorded (a refused action keeps the card open). The batch strip offers Retry, Ship anyway and Abandon. A refused or interrupted start's card names its tasks in `detail.taskIds`.                                                                                                                         | Spec §4. Flag cards are already answerable (the MCP approval card); the task IDs let the board tell a refused start from a pending join. |
 
 ## Global Constraints
 
@@ -83,6 +89,7 @@ Everything in M0's, M1a's, M1b's and M2a's Global Constraints still applies. On 
     The commit commands below pass it as two extra `-m` paragraphs.
   - Run `pnpm format` first. A failing hook leaves the paths staged: fix the cause and rerun the same line. Never `--no-verify` or `LEFTHOOK=0`.
 - **Generated files** are regenerated, never edited: `pnpm --filter @10db/contracts generate` after a contracts change. A schema change regenerates the migration baseline (`packages/db/AGENTS.md`, decision 67): there is no published release, so no new migration file. After Task 2, delete any local `.dev/data` (the daemon refuses a database made under the old baseline and exits with code 3).
+- **Merging with M2b Part A.** Both this branch and M2b Part A change `packages/db/src/schema.ts` and `packages/contracts/src`. Whichever merges second rebases on the other and **re-runs the generators** (the baseline regeneration in Task 2 Step 5, then `pnpm --filter @10db/contracts generate`); it never resolves a conflict in `packages/db/drizzle/` or `packages/contracts/generated/` by hand or by merging the generated SQL or JSON textually.
 - **Contracts are additive** (`packages/contracts/AGENTS.md`): new fields on `ProjectInput`, `ProjectDto`, `ProjectPatch` and `WorkstreamDto`, new schemas, a new `ToolName`, a new event type and a new response shape for a new delivery mode. `PROTOCOL_VERSION` stays 2.
 - **IDs** are minted only through `mintId`. New kind: `Batch` (`bat`).
 - **Every state change writes its row and its event in one transaction** (`state.write`). `batch.updated` (`entityType: 'batch'`) is emitted when a batch is inserted, on every change and when a `CUTTING` row is deleted; the desktop's `INVALIDATIONS` maps it (Task 11).
@@ -94,7 +101,7 @@ Everything in M0's, M1a's, M1b's and M2a's Global Constraints still applies. On 
   - `gh` is faked at the `Gh` interface (`apps/daemon/test/fake-gh.ts`) in delivery tests; `github/gh.test.ts` covers the real `execFile` boundary with scripts on a temp `PATH`.
   - Table-driven for batch transitions, cutting checks, shipping failures, the launch rule, guard verdicts and recovery after each shipping step.
   - No sleeps: wait on `jobs.idle()` or `waitFor` with a deadline.
-- **`local` delivery is unchanged.** The existing daemon suites pass as they are, except where an interface this plan changes forces an edit: the scheduler tests await the now-async `tick()`, the system check lists `gh`, and the project form sends `delivery`.
+- **`local` delivery is unchanged.** The existing daemon suites pass as they are, except where an interface this plan changes forces an edit: the scheduler tests await the now-async `tick()` and the new `idle()`, the system check lists `gh`, and the project form sends `delivery`.
 - **Tunable values are named constants:** `DEFAULT_DELIVERY_LIMITS`, `BRANCH_PREFIX = '10db/'`, `MAX_SLUG = 40`, `MAX_LISTED_PATHS = 20`.
 - **knip:** an `index.ts` re-exports only what another module or a test imports.
 - **Comments never carry decision numbers** (`.claude/rules/code-style.md`); they cite the spec (`batch delivery spec §6`) or say the why in words.
@@ -106,7 +113,7 @@ The conditions most likely to bite a person, each with the task whose tests pin 
 1. **Work runs on the wrong branch.**
    - Case: the builder runs `git switch main` by hand while a batch is open, or the daemon crashed after `git switch` during a cut, or the checkout is detached.
    - Nothing in the batch launches; a running daemon raises one card and waits, a restarted one fails the batch with "checkout is on X, the batch branch is Y".
-   - Tests: Task 7 (launch-rule table, `waits and raises one card when the checkout left the batch branch`), Task 9 (`fails an unfinished batch whose branch is not checked out and launches nothing in it`).
+   - Tests: Task 7 (launch-rule table; the scheduler's `an open batch on another branch` row, which launches nothing and reports the batch once), Task 5 (`adds nothing and raises a card when the checkout left the batch branch`), Task 9 (`fails an unfinished batch whose branch is not checked out, and launches nothing in it`).
 2. **A crash mid-ship pushes twice or opens a second PR.**
    - Case: `kill -9` after any of shipping steps 0–4, including after `gh pr create` returned but before `SHIPPED` was written.
    - Recovery re-runs from step 0; the origin branch ends at the same SHA and `prCreate` was called exactly once.
@@ -116,8 +123,8 @@ The conditions most likely to bite a person, each with the task whose tests pin 
    - The batch stays `OPEN`; Ship anyway is refused (409) while anything is not `DONE`, `CANCELLED` or `FAILED`; Retry from `FAILED` reopens instead of shipping.
    - Tests: Task 6 (`holds the batch open while a workstream failed or waits`, `ships anyway only when…`, `retries a failed batch…`).
 4. **An agent ships or merges behind 10db's back.**
-   - Case: `git push` in a `pull_request` project, `gh pr merge`, `gh pr checkout`, `gh api repos/o/r/pulls -f title=x` (an implicit POST), `gh api -X PATCH`, `gh repo edit`, any of them behind `env`, `sh -c` or `-R owner/repo`.
-   - The guard denies each with a reason; `gh pr view`, `list` and `checks` and `gh api` GETs stay allowed.
+   - Case: `git push` in a `pull_request` project, `gh pr merge`, `gh pr checkout`, `gh api repos/o/r/pulls -f title=x` (an implicit POST), `gh api -X PATCH`, `gh repo edit`, an alias (`gh alias set m 'pr merge'` then `gh m 12`), an extension, `gh auth token`, `gh workflow run`, any of them behind `env`, `sh -c` or `-R owner/repo`.
+   - The guard denies everything outside its allowlist of reads, with a reason; `gh pr view`, `list` and `checks`, `gh issue list`, `gh run view` and `gh api` GETs stay allowed.
    - Tests: Task 8 (guard table, both delivery modes).
 5. **A network call hangs or prompts.**
    - Case: `git fetch` against an unreachable host, `gh` waiting for a login prompt, a slow push.
@@ -126,7 +133,7 @@ The conditions most likely to bite a person, each with the task whose tests pin 
 6. **Two starts race.**
    - Case: two Start clicks, or two API calls, in the same instant.
    - One batch row and one `10db/*` branch; the second start joins or answers 409.
-   - Tests: Task 2 (`the unique index refuses a second unfinished batch`), Task 5 (`gives two simultaneous starts one batch and one branch`), Task 10 (the same over HTTP).
+   - Tests: Task 5 (`gives two simultaneous starts one batch and one branch`) and Task 10 (the same over HTTP) prove the in-process path: the second request finds the batch `CUTTING` and answers 409, or finds it `OPEN` and joins. The partial unique index, the backstop if two writers ever raced, is proven separately by Task 2's raw-insert rows (`the unique index refuses a second unfinished batch while one is …`).
 7. **The daemon stops while the shipping gate runs.**
    - The gate's process group is killed, the batch stays `SHIPPING` with no gate pid, and the next start finishes it; an orphaned gate from a `kill -9` is terminated before the rerun.
    - Tests: Task 9 (`leaves a batch SHIPPING when the daemon stops during its gate`, `terminates an orphaned shipping gate before re-running`).
@@ -163,17 +170,20 @@ apps/daemon/src/
   environment/         network-env.ts (buildNetworkEnv); system-check.ts (+ gh, markGhRequired)
   guard/               gh-rules.ts; git-rules.ts (+ delivery); judge.ts (+ delivery, gh)
   delivery/            jobs.ts branch-name.ts cards.ts deps.ts context.ts start.ts pr-text.ts ship.ts
-                       trigger.ts launch-rule.ts recover.ts index.ts (+ tests)
+                       trigger.ts launch-rule.ts batch-card.ts recover.ts index.ts (+ tests)
+  inbox/service.ts     (+ onFlagAnswer)
   team/steps.ts        (+ planForStart, insertPlannedWorkstream; retryWorkstream batch rule)
-  scheduler/           scheduler.ts (async tick, launch rule)
-  runner/runner.ts     (passes delivery to the guard)
+  scheduler/           scheduler.ts (async tick, idle(), launch rule)
+  runner/runner.ts     (passes delivery to the guard; the failed card's batch options)
+  recovery/recover.ts  (the failed card's batch options)
   api/                 app.ts services.ts (+ batch routes, ProjectViewDto, TaskStartResult)
   daemon/              services.ts start.ts (+ delivery wiring, gh, networkEnv)
   main.ts              (+ networkEnv)
 apps/daemon/test/      fixtures.ts (+ createTempRepoWithOrigin, NETWORK_ENV), fake-gh.ts, delivery-harness.ts,
                        orphan-gate.ts, batch-delivery.test.ts
-apps/desktop/src/      daemon/queries.ts daemon/events.ts test/fixtures.ts
-                       views/tasks/new-project-form.tsx tasks-view.tsx batch-strip.tsx (+ tests)
+apps/desktop/src/      daemon/queries.ts daemon/events.ts test/fixtures.ts shell/selected-project.ts
+  (after M2b Part A)   views/board/new-project-form.tsx board-view.tsx batch-strip.tsx (+ tests)
+                       views/settings/general-values.ts project-general-form.tsx (+ tests)
 docs/architecture/     02-batch-delivery.md, decisions.md, (open-items in docs/open-items.md)
 README.md  apps/daemon/AGENTS.md
 ```
@@ -633,6 +643,8 @@ Expected: PASS, every row.
 Run: `pnpm --filter @10db/contracts generate && pnpm --filter @10db/contracts exec vitest run && pnpm typecheck`
 Expected: four new files (`batch-dto`, `batch-start-input`, `project-view-dto`, `task-start-result`) and a changed `system-check-dto.schema.json` (the `gh` tool name) under `packages/contracts/generated/`; every contracts test passes; typecheck is clean across the workspace.
 
+If M2b Part A merged first, this branch is rebased on it before this step and the generator's output is what gets committed: never merge `packages/contracts/generated/` textually (Global Constraints, "Merging with M2b Part A").
+
 - [ ] **Step 7: Commit**
 
 ```bash
@@ -986,7 +998,7 @@ describe('project delivery', () => {
 - [ ] **Step 2: Run the test to verify it fails**
 
 Run: `pnpm --filter @10db/db exec vitest run src/store/batches.test.ts`
-Expected: FAIL. The suite fails to collect with `insertBatch is not a function` (or a TypeError reading `schema.batches`), because no batches table or repository exists.
+Expected: FAIL. Every case fails at its first call: `TypeError: insertBatch is not a function` (or `currentBatch`, `getBatchRow`, …), and the raw-insert rows with a TypeError on the undefined `schema.batches`. No batches table or repository exists yet. (In this repo's vitest a missing named export reads as `undefined` at the call; only a missing module fails the file at load, with `Failed to load url`.)
 
 - [ ] **Step 3: Add the project and workstream fields to the contracts**
 
@@ -1107,7 +1119,9 @@ Until `v0.1.0` the baseline is regenerated, not extended (`packages/db/AGENTS.md
 cp drizzle/0001_decisions_fts.sql "$TMPDIR/decisions_fts.sql" && rm -rf drizzle && pnpm exec drizzle-kit generate --name init && pnpm exec drizzle-kit generate --custom --name decisions_fts && cp "$TMPDIR/decisions_fts.sql" drizzle/0001_decisions_fts.sql
 ```
 
-Expected: `drizzle/0000_init.sql` now has `CREATE TABLE \`batches\``, the `batches_one_unfinished`index with its`WHERE`clause, the three`projects`columns with their defaults and`workstreams.batch_id`; `drizzle/0001_decisions_fts.sql` is byte for byte what it was (`git diff packages/db/drizzle/0001_decisions_fts.sql` prints nothing).
+Expected: `drizzle/0000_init.sql` now creates the `batches` table, the `batches_one_unfinished` index with its `WHERE` clause, the three `projects` columns with their defaults and `workstreams.batch_id`; `drizzle/0001_decisions_fts.sql` is byte for byte what it was (`git diff packages/db/drizzle/0001_decisions_fts.sql` prints nothing).
+
+Whichever of this branch and M2b Part A merges second re-runs this step on top of the other's `schema.ts`, so the baseline carries both changes. Never merge `packages/db/drizzle/` SQL or snapshots textually.
 
 - [ ] **Step 6: Write the batches repository**
 
@@ -1986,11 +2000,15 @@ describe('systemGhExec', () => {
   });
 
   it('reports gh missing from the PATH as not installed', async () => {
-    await expect(
-      systemGhExec(['auth', 'status'], call({ env: { PATH: '/usr/bin:/bin' } })),
-    ).rejects.toMatchObject({
-      kind: 'not_installed',
-    });
+    // An empty directory, not /usr/bin: GitHub's Ubuntu runners ship /usr/bin/gh.
+    const empty = tempDir('no-gh');
+    try {
+      await expect(
+        systemGhExec(['auth', 'status'], call({ env: { PATH: empty.path } })),
+      ).rejects.toMatchObject({ kind: 'not_installed' });
+    } finally {
+      empty.cleanup();
+    }
   });
 
   it('times out a gh that hangs', async () => {
@@ -2487,10 +2505,10 @@ pnpm format && git add apps/daemon/src/github apps/daemon/test/fake-gh.ts apps/d
   - `InboxService.flag`, `StateStore`, `Logger`; `resolveStepPlan` (`team/steps.ts`).
 - Produces:
   - `team/`: `planForStart(db: DbReader, taskId: TaskId): StepPlanDto` (throws the over-budget `InvalidError` `startTaskWithPlan` throws today) and `insertPlannedWorkstream(ctx: WriteContext, taskId: TaskId, plan: StepPlanDto, batchId: BatchId | null): WorkstreamDto`. `startTaskWithPlan` is now those two.
-  - `delivery/jobs.ts`: `interface DeliveryJobs { run(key: string, job: (signal: AbortSignal) => Promise<void>): void; idle(): Promise<void>; stop(): Promise<void> }`, `createDeliveryJobs(logger: Logger): DeliveryJobs`.
+  - `delivery/jobs.ts`: `interface DeliveryJobs { run(key: string, job: (signal: AbortSignal) => Promise<void>): void; idle(): Promise<void>; stop(): Promise<void> }`, `createDeliveryJobs(logger: Logger): DeliveryJobs`. A job queued before `stop()` still runs, with its signal already aborted; every job checks the signal first.
   - `delivery/context.ts`: `interface DeliveryLimits { readonly networkTimeoutMs: number; readonly gateTimeoutMs: number }`, `DEFAULT_DELIVERY_LIMITS`, `interface DeliveryContext { state; git; gh; inbox; jobs; logger; limits; networkEnv(): Readonly<Record<string, string>>; onWorkQueued(): void }`, `networkCall(ctx, signal): NetworkCall`, `ghCall(ctx, repoPath, signal): GhCall`, `raise(inbox: InboxService, projectId: ProjectId, card: Card): void`.
   - `delivery/branch-name.ts`: `BRANCH_PREFIX = '10db/'`, `MAX_SLUG = 40`, `batchBranchName(title: string, id: BatchId): string`.
-  - `delivery/cards.ts`: `interface Card { title; body; foldKey?; detail? }`, `MAX_LISTED_PATHS = 20`, `listPaths(paths)`, `detailOf(error)`, `startCards`, `wrongBranchCard(batch: BatchDto, current: string | null, repoPath: string, outcome: 'waits' | 'failed'): Card`.
+  - `delivery/cards.ts`: `interface Card { title; body; foldKey?; detail? }`, `MAX_LISTED_PATHS = 20`, `listPaths(paths)`, `detailOf(error)`, `startCards`, `WrongBranchOutcome` (`waits | failed | not_joined | not_shipped`), `wrongBranchCard(batch: BatchDto, current: string | null, repoPath: string, outcome: WrongBranchOutcome): Card`, `forTasks(card: Card, taskIds: Iterable<TaskId>): Card`.
   - `delivery/deps.ts`: `unfinishedDependencies(db, tasks, inBatch): BlockedTask[]`, `unmergedDependencies(input): Promise<UnmergedDependency[]>`.
   - `delivery/start.ts`: `interface BatchStarter { startBatch(projectId: ProjectId, input: BatchStartInput): BatchDto; startTask(taskId: TaskId): BatchDto }`, `createBatchStarter(ctx: DeliveryContext): BatchStarter`.
   - Test harness `createDeliveryHarness(project?: Partial<ProjectInput>): DeliveryHarness` with `store`, `bus`, `state`, `inbox`, `git`, `gh` (`FakeGh`), `jobs`, `ctx`, `starter`, `project`, `repo`, `origin`, `ticks`, `addTask`, `settle`, `commit`, `git$`, `origin$`, `teammatePush`, `cards`, `only`, `close`.
@@ -2990,6 +3008,7 @@ describe('cutting a branch', () => {
     await h.jobs.idle();
     expect(listBatches(h.store.db)).toEqual([]);
     expect(h.cards().map((c) => c.title)).toEqual([expect.stringContaining(title)]);
+    expect(h.only(h.cards()).detail).toMatchObject({ taskIds: [task.id] });
     expect(h.git$('rev-parse', 'HEAD')).toBe(head);
     expect(h.git$('branch', '--show-current')).toBe(branch);
     expect(listWorkstreams(h.store.db, {}).filter((w) => w.taskId === task.id)).toEqual([]);
@@ -3034,10 +3053,26 @@ describe('joining a batch', () => {
     expect(listWorkstreams(h.store.db, { batchId: batch.id }).map((w) => w.taskId)).not.toContain(
       beta.id,
     );
-    expect(h.only(h.cards()).title).toContain(
-      `checkout is on main, the batch branch is ${batch.branch ?? ''}`,
+    const card = h.only(h.cards());
+    expect(card.title).toContain(`checkout is on main, the batch branch is ${batch.branch ?? ''}`);
+    expect(card.body).toContain(
+      `Start the task again once the checkout is on ${batch.branch ?? ''}`,
     );
+    expect(card.detail).toMatchObject({ batchId: batch.id, taskIds: [beta.id] });
     expect(getBatch(h.store.db, batch.id).state).toBe('OPEN');
+  });
+
+  it('says so, naming the tasks, when 10db stops before a join finishes', async () => {
+    const batch = await started('Greetings', h.addTask('Alpha'));
+    const beta = h.addTask('Beta', { areas: ['ui'] });
+    h.starter.startTask(beta.id);
+    await h.jobs.stop();
+    expect(listWorkstreams(h.store.db, { batchId: batch.id }).map((w) => w.taskId)).not.toContain(
+      beta.id,
+    );
+    const card = h.only(h.cards());
+    expect(card.title).toBe('Not added to batch "Greetings": 10db stopped first');
+    expect(card.detail).toMatchObject({ batchId: batch.id, taskIds: [beta.id] });
   });
 
   it('reopens a failed batch with a fix task', async () => {
@@ -3176,7 +3211,8 @@ export function createDeliveryJobs(logger: Logger): DeliveryJobs {
       if (controller.signal.aborted) return;
       const previous = tails.get(key) ?? Promise.resolve();
       const next = previous
-        .then(() => (controller.signal.aborted ? undefined : job(controller.signal)))
+        // A job queued before stop() still runs, with its signal aborted, so it can say it stopped.
+        .then(() => job(controller.signal))
         .catch((error: unknown) => {
           logger.error(
             { err: error instanceof Error ? error.message : String(error), key },
@@ -3277,7 +3313,9 @@ const ID_SUFFIX = 8;
 export function batchBranchName(title: string, id: BatchId): string {
   const slug = title
     .normalize('NFKD')
-    .replace(/[̀-ͯ]/g, '')
+    // Drop the combining marks NFKD split off (`Ü` → `U`); \p{M} stays readable where a range of
+    // literal combining characters would not.
+    .replace(/\p{M}/gu, '')
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
@@ -3290,7 +3328,7 @@ export function batchBranchName(title: string, id: BatchId): string {
 `apps/daemon/src/delivery/cards.ts`:
 
 ```ts
-import type { BatchDto, ProjectDto } from '@10db/contracts';
+import type { BatchDto, ProjectDto, TaskId } from '@10db/contracts';
 import type { Json } from '@10db/db';
 import { GitNetworkError } from '../git';
 import { GhError } from '../github';
@@ -3386,26 +3424,68 @@ export const startCards = {
     body: 'Start the task again once the batch is open, or after it ships.',
     detail: { batchId: batch.id },
   }),
+  joinInterrupted: (batch: BatchDto): Card => ({
+    title: `Not added to batch "${batch.title}": 10db stopped first`,
+    body: 'The daemon shut down before these tasks joined the batch. Start them again.',
+    detail: { batchId: batch.id },
+  }),
+  cutInterrupted: (batch: BatchDto): Card => ({
+    title: `Batch not started: 10db stopped while cutting the branch for "${batch.title}"`,
+    body: 'Nothing was pushed, and its tasks did not start. Start them again.',
+    detail: { batchId: batch.id },
+  }),
 };
+
+/**
+ * A refused start's card names its tasks (and the batch it tried to join), so a client can tell a
+ * refused start from a join that is still on its way: a joined task gets a workstream instead.
+ */
+export function forTasks(card: Card, taskIds: Iterable<TaskId>): Card {
+  return { ...card, detail: { ...card.detail, taskIds: [...taskIds] } };
+}
+
+/** Where a wrong-branch card comes from, which decides what it tells the builder to do. */
+export type WrongBranchOutcome = 'waits' | 'failed' | 'not_joined' | 'not_shipped';
 
 /** The spec's wrong-branch card: "checkout is on X, the batch branch is Y". */
 export function wrongBranchCard(
   batch: BatchDto,
   current: string | null,
   repoPath: string,
-  outcome: 'waits' | 'failed',
+  outcome: WrongBranchOutcome,
 ): Card {
   const on = current ?? 'a detached HEAD';
   const branch = batch.branch ?? '(not cut)';
-  return {
-    title: `Batch "${batch.title}" ${outcome === 'waits' ? 'waits' : 'failed'}: checkout is on ${on}, the batch branch is ${branch}`,
-    body:
-      outcome === 'waits'
-        ? `Nothing in the batch starts until the checkout is back on its branch. Run git switch ${branch} in ${repoPath}, or abandon the batch on the Tasks view.`
-        : `10db restarted with the checkout off the batch branch, so nothing in the batch runs. Run git switch ${branch} in ${repoPath}, then press Retry on the Tasks view's batch strip; or abandon the batch there.`,
-    foldKey: `batch-branch:${batch.id}:${on}:${outcome}`,
-    detail: { batchId: batch.id },
-  };
+  const where = `checkout is on ${on}, the batch branch is ${branch}`;
+  const detail = { batchId: batch.id };
+  switch (outcome) {
+    case 'waits':
+      // The scheduler raises this every time the work waits; one open card per branch is enough.
+      return {
+        title: `Batch "${batch.title}" waits: ${where}`,
+        body: `Nothing in the batch starts until the checkout is back on its branch. Run git switch ${branch} in ${repoPath}, or abandon the batch on its strip.`,
+        foldKey: `batch-branch:${batch.id}:${on}`,
+        detail,
+      };
+    case 'failed':
+      return {
+        title: `Batch "${batch.title}" failed: ${where}`,
+        body: `10db restarted with the checkout off the batch branch, so nothing in the batch runs. Run git switch ${branch} in ${repoPath}, then press Retry on the batch strip; or abandon the batch there.`,
+        detail,
+      };
+    case 'not_shipped':
+      return {
+        title: `Batch "${batch.title}" not shipped: ${where}`,
+        body: `10db ships only from the batch branch, and pushed nothing. Run git switch ${branch} in ${repoPath}, then press Retry on the batch strip.`,
+        detail,
+      };
+    case 'not_joined':
+      return {
+        title: `Not added to batch "${batch.title}": ${where}`,
+        body: `Start the task again once the checkout is on ${branch} (git switch ${branch} in ${repoPath}).`,
+        detail,
+      };
+  }
 }
 ```
 
@@ -3537,7 +3617,7 @@ import {
 } from '@10db/db';
 import { insertPlannedWorkstream, planForStart } from '../team';
 import { batchBranchName } from './branch-name';
-import { startCards, wrongBranchCard, type Card } from './cards';
+import { forTasks, startCards, wrongBranchCard, type Card } from './cards';
 import { ghCall, networkCall, raise, type DeliveryContext } from './context';
 import { unfinishedDependencies, unmergedDependencies } from './deps';
 
@@ -3616,10 +3696,11 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
       ctx.state.write((w) => {
         deleteCuttingBatch(w, batchId, card.title);
       });
-      raise(ctx.inbox, project.id, card);
+      raise(ctx.inbox, project.id, forTasks(card, plans.keys()));
     };
-    // A shutdown mid-cut leaves the CUTTING row; startup deletes it.
+    // A shutdown mid-cut leaves the CUTTING row; startup deletes it and says so.
     const stopped = (): boolean => signal.aborted;
+    if (stopped()) return;
     try {
       const lanes = countLanes(db).byProject.get(project.id) ?? 0;
       if (lanes > 0) {
@@ -3697,10 +3778,18 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
   ): Promise<void> {
     const batch = getBatch(db, batchId);
     const project = getProject(db, batch.projectId);
+    // Every refusal names the tasks it refused; the API already answered 202 for them.
+    const refuse = (card: Card): void => {
+      raise(ctx.inbox, project.id, forTasks(card, plans.keys()));
+    };
+    if (signal.aborted) {
+      refuse(startCards.joinInterrupted(batch));
+      return;
+    }
     try {
       const current = await ctx.git.currentBranch(project.repoPath);
       if (current !== batch.branch) {
-        raise(ctx.inbox, project.id, wrongBranchCard(batch, current, project.repoPath, 'waits'));
+        refuse(wrongBranchCard(batch, current, project.repoPath, 'not_joined'));
         return;
       }
       const call = ghCall(ctx, project.repoPath, signal);
@@ -3713,10 +3802,13 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
         batchId,
       });
       if (unmerged.length > 0) {
-        raise(ctx.inbox, project.id, startCards.unmergedDependencies(unmerged));
+        refuse(startCards.unmergedDependencies(unmerged));
         return;
       }
-      if (signal.aborted) return;
+      if (signal.aborted) {
+        refuse(startCards.joinInterrupted(batch));
+        return;
+      }
       ctx.state.write((w) => {
         const now = getBatch(w.tx, batchId);
         if (now.state === BatchState.Failed)
@@ -3731,7 +3823,9 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
       });
       ctx.onWorkQueued();
     } catch (error) {
-      if (!signal.aborted) raise(ctx.inbox, project.id, startCards.notJoined(batch, error));
+      refuse(
+        signal.aborted ? startCards.joinInterrupted(batch) : startCards.notJoined(batch, error),
+      );
     }
   }
 
@@ -4039,7 +4133,7 @@ describe('shipping', () => {
       gate: 'sleep 5',
       gateTimeoutMs: 300,
       failure: 'gate_timed_out',
-      title: 'the gate timed out after',
+      title: 'the gate timed out after 0.3 s',
     },
     {
       name: 'a rejected push',
@@ -4198,7 +4292,7 @@ describe('Ship anyway, Retry and Abandon', () => {
 - [ ] **Step 3: Run the tests to verify they fail**
 
 Run: `pnpm --filter @10db/daemon exec vitest run src/delivery/pr-text.test.ts src/delivery/ship.test.ts`
-Expected: FAIL. `pr-text.test.ts` fails with `prTitle is not a function`; `ship.test.ts` can't build the harness because `createShipper` is not exported from `../src/delivery`.
+Expected: FAIL. Every `pr-text.test.ts` row fails with `TypeError: prTitle is not a function` (or `prBody`); every `ship.test.ts` case fails building the harness with `TypeError: createShipper is not a function`.
 
 - [ ] **Step 4: Write the PR text**
 
@@ -4253,7 +4347,13 @@ Append to `apps/daemon/src/delivery/cards.ts` (import `BatchFailure`, `type Batc
 
 ```ts
 const notShipped = (batch: BatchDto): string => `Batch "${batch.title}" not shipped`;
-const RETRY = 'Press Retry on the Tasks view’s batch strip to ship again; nothing was merged.';
+
+/** "0.3 s" or "45 s" under a minute, "30 min" from one, so a short timeout never reads "0 min". */
+export function duration(ms: number): string {
+  if (ms >= 60_000) return `${String(Math.round(ms / 60_000))} min`;
+  return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)} s`;
+}
+const RETRY = 'Press Retry on the batch strip to ship again; nothing was merged.';
 
 /** A shipping failure: the code the batch records and the card the builder reads. */
 export interface ShipFailure {
@@ -4281,7 +4381,7 @@ export const shipCards = {
   gateTimedOut: (batch: BatchDto, timeoutMs: number, logPath: string): ShipFailure => ({
     failure: BatchFailure.GateTimedOut,
     card: {
-      title: `${notShipped(batch)}: the gate timed out after ${String(Math.round(timeoutMs / 60_000))} min`,
+      title: `${notShipped(batch)}: the gate timed out after ${duration(timeoutMs)}`,
       body: `10db stopped the gate and pushed nothing. Log: ${logPath}\n\n${RETRY}`,
       detail: { batchId: batch.id },
     },
@@ -4472,7 +4572,8 @@ export function createShipper(deps: ShipperDeps): Shipper {
   /** Batch delivery spec §6, steps 0–5. Each step is safe to repeat, so a restart runs them all again. */
   async function shipSteps(batchId: BatchId, signal: AbortSignal): Promise<void> {
     const batch = getBatch(db, batchId);
-    if (batch.state !== BatchState.Shipping) return;
+    // Queued before shutdown: leave it SHIPPING for recovery.
+    if (signal.aborted || batch.state !== BatchState.Shipping) return;
     const project = getProject(db, batch.projectId);
     const { branch, baseSha, repo } = batch;
     let step = 'checking the branch';
@@ -4482,7 +4583,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
       if (branch === null || baseSha === null || repo === null || current !== branch) {
         fail(batch, {
           failure: BatchFailure.WrongBranch,
-          card: wrongBranchCard(batch, current, project.repoPath, 'failed'),
+          card: wrongBranchCard(batch, current, project.repoPath, 'not_shipped'),
         });
         return;
       }
@@ -4714,14 +4815,15 @@ pnpm format && git add apps/daemon/src/delivery apps/daemon/test/delivery-harnes
 
 ---
 
-### Task 7: The scheduler's launch rule and workstream retry in a batch
+### Task 7: The scheduler's launch rule, workstream retry in a batch, and the failed workstream's card actions
 
 **Files:**
 
 - Create: `apps/daemon/src/delivery/launch-rule.ts`; Modify: `apps/daemon/src/delivery/index.ts`
 - Modify: `apps/daemon/src/scheduler/scheduler.ts`, `apps/daemon/src/daemon/start.ts` (pass the new scheduler options)
 - Modify: `apps/daemon/src/team/steps.ts` (`retryWorkstream`)
-- Test: `apps/daemon/src/delivery/launch-rule.test.ts`, `apps/daemon/src/scheduler/scheduler.test.ts`, `apps/daemon/src/team/steps.test.ts`
+- Create: `apps/daemon/src/delivery/batch-card.ts`; Modify: `apps/daemon/src/inbox/service.ts` (`onFlagAnswer`), `apps/daemon/src/runner/runner.ts` and `apps/daemon/src/recovery/recover.ts` (the failed-workstream card)
+- Test: `apps/daemon/src/delivery/launch-rule.test.ts`, `apps/daemon/src/scheduler/scheduler.test.ts`, `apps/daemon/src/team/steps.test.ts`, `apps/daemon/src/delivery/batch-card.test.ts`
 
 **Interfaces:**
 
@@ -4729,8 +4831,13 @@ pnpm format && git add apps/daemon/src/delivery apps/daemon/test/delivery-harnes
 - Produces:
   - `delivery/launch-rule.ts`: `LaunchVerdict` (`launch | wait | wrong_branch`), `batchLaunchVerdict(batch: BatchDto | null, currentBranch: string | null): LaunchVerdict`, `flagWrongBranch(inbox: InboxService, batch: BatchDto, current: string | null, repoPath: string): void`.
   - `Scheduler.tick(): Promise<number>` (was `number`); ticks are serialized.
+  - `Scheduler.idle(): Promise<void>`: resolves once a tick requested before the call, and every tick queued behind it, has settled. Tests await it instead of a bare microtask.
   - `SchedulerOptions` gains `branches: { currentBranch(repo: string): Promise<string | null> }` and `onWrongBranch(batch: BatchDto, current: string | null, repoPath: string): void`.
   - `retryWorkstream` refuses a workstream whose batch is not `OPEN` or `FAILED` (`ConflictError`) and reopens a `FAILED` batch in the same transaction.
+  - The failed workstream's flag card offers Retry and, for the batch, Ship anyway (batch delivery spec §4):
+    - `delivery/batch-card.ts`: `BATCH_CARD_DETAIL = 'batchCard'`, `BatchCardChoice` (`Retry`, `Ship anyway`, `Later`), `batchCardFields(row: { readonly id: WorkstreamId; readonly batchId: BatchId | null }): { options: InboxOption[]; detail: Record<string, Json> } | null`, `createBatchCardAnswers(deps: { retry(id: WorkstreamId): void; ship(batchId: BatchId): void }): (item: InboxItemDto, answer: InboxAnswer) => void`.
+    - `createInboxService` takes an optional `onFlagAnswer(item: InboxItemDto, answer: InboxAnswer): void`, called for an open flag card before its answer is written. If it throws, the card stays open and the error answers the request (409 for a refused Ship anyway).
+    - The runner's `fail()` and recovery's failed-workstream card spread `batchCardFields(row)` into `inbox.flag`. Task 10 wires the answers to `retryWorkstream` and `Shipper.ship`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -4814,6 +4921,34 @@ describe('batchLaunchVerdict', () => {
 In `apps/daemon/src/scheduler/scheduler.test.ts`:
 
 - Every `scheduler(...).tick()` and `s.tick()` call is awaited (`await s.tick()`, `expect(await scheduler().tick()).toBe(2)`), and the tests that call it become `async`.
+- Two existing tests synced on `await Promise.resolve()`, which no longer covers a tick that is itself asynchronous. Rewrite them to await the new seam:
+
+```ts
+it('ignores requestTick until it is started', async () => {
+  queue();
+  const s = scheduler();
+  s.requestTick();
+  await s.idle();
+  expect(launched).toHaveLength(0);
+  s.start();
+  s.requestTick();
+  await s.idle();
+  expect(launched).toHaveLength(1);
+  s.stop();
+});
+
+it('drops a requested tick when it is stopped before the tick runs', async () => {
+  queue();
+  const s = scheduler();
+  s.start();
+  s.requestTick();
+  s.stop();
+  await s.idle();
+  expect(launched).toHaveLength(0);
+});
+```
+
+- In `leases with a fresh fence and renews the lease on the heartbeat`, the loop's tick is now in flight when the test ends and would read the database after `afterEach` closes it. End the test with `s.stop(); await s.idle();` (the test becomes `async`).
 - The factory passes the two new options from per-test state:
 
 ```ts
@@ -4979,7 +5114,7 @@ describe('retryWorkstream in a batch', () => {
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `pnpm --filter @10db/daemon exec vitest run src/delivery/launch-rule.test.ts src/scheduler src/team`
-Expected: FAIL. `batchLaunchVerdict is not a function`; the pull-request scheduler rows launch work they should not (the scheduler ignores batches) and `branchReads` stays empty; the retry rows for `SHIPPING`, `SHIPPED`, `CLOSED` and `ABANDONED` don't throw, and the `FAILED` row leaves the batch `FAILED`.
+Expected: FAIL. Every `launch-rule.test.ts` row fails with `TypeError: batchLaunchVerdict is not a function` (vitest's module transform turns a missing named export into `undefined` at the call, not a load error); `ignores requestTick until it is started` and `drops a requested tick when it is stopped before the tick runs` fail with `TypeError: s.idle is not a function`; the pull-request scheduler rows launch work they should not (the scheduler ignores batches) and `branchReads` stays empty; the retry rows for `SHIPPING`, `SHIPPED`, `CLOSED` and `ABANDONED` don't throw, and the `FAILED` row leaves the batch `FAILED`.
 
 - [ ] **Step 3: Write the launch rule**
 
@@ -5043,7 +5178,7 @@ In `apps/daemon/src/scheduler/scheduler.ts`:
   readonly onWrongBranch: (batch: BatchDto, current: string | null, repoPath: string) => void;
 ```
 
-- Change `Scheduler.tick` to `tick(): Promise<number>;` with the doc comment "Launches what fits now; resolves to how many were launched. Ticks run one at a time."
+- Change `Scheduler.tick` to `tick(): Promise<number>;` with the doc comment "Launches what fits now; resolves to how many were launched. Ticks run one at a time.", and add `idle(): Promise<void>;` with the doc comment "Settles once every tick requested or running now has finished; tests await it."
 - Rename the existing `tick` to `launchQueued(branches: ReadonlyMap<ProjectId, string | null>): number` and, at the top of its per-workstream loop, after the provider-cap check, add:
 
 ```ts
@@ -5058,10 +5193,11 @@ if (project.delivery === Delivery.PullRequest) {
     opts.onWrongBranch(batch, current, project.repoPath);
   }
   if (verdict !== LaunchVerdict.Launch) continue;
+  if (batch) warned.delete(batch.id);
 }
 ```
 
-with `const warned = new Set<string>();` declared before the loop.
+with `const warned = new Set<string>();` declared in `createScheduler`'s scope, beside `timer` and `pending`, so a batch waiting for its branch is reported once and not on every tick; the entry goes when the batch's work launches again, so a second wrong switch is reported anew.
 
 - Add the snapshot and the serialized tick:
 
@@ -5087,6 +5223,12 @@ function tick(): Promise<number> {
   });
   chain = run.catch(() => undefined);
   return run;
+}
+
+/** A requestTick() schedules its tick in a microtask; let that run first, then wait for the chain. */
+async function idle(): Promise<void> {
+  await Promise.resolve();
+  await chain;
 }
 
 const logTickError = (error: unknown): void => {
@@ -5117,6 +5259,7 @@ function loop(): void {
 ```
 
 - In `requestTick()`, replace the `try { tick(); } catch` block with `void tick().catch(logTickError);` (keeping the `pending` and `started` checks).
+- Return `idle` from `createScheduler` beside `tick`, `requestTick`, `start` and `stop`.
 
 In `apps/daemon/src/daemon/start.ts`, pass the new options to `createScheduler` (import `flagWrongBranch` from `../delivery`):
 
@@ -5157,15 +5300,229 @@ export function retryWorkstream(state: StateStore, id: WorkstreamId): Workstream
 }
 ```
 
-- [ ] **Step 6: Run the tests to verify they pass**
+- [ ] **Step 6: Give the failed workstream's card its actions**
+
+Today's flag cards already carry options and are answered through `InboxService.answer`, as the MCP approval card is (`applyMcpApproval`, keyed on its `detail`). The failed-workstream card of a workstream in a batch gets three options and the IDs it acts on (batch delivery spec §4).
+
+Write the failing test first, `apps/daemon/src/delivery/batch-card.test.ts`:
+
+```ts
+import { ConflictError, InboxKind } from '@10db/contracts';
+import { getBatch, getInboxItem, getWorkstream, listWorkstreams, transitionBatch } from '@10db/db';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
+import { createInboxService, type InboxService } from '../inbox';
+import { retryWorkstream } from '../team';
+import { batchCardFields, createBatchCardAnswers } from './index';
+
+let h: DeliveryHarness;
+let inbox: InboxService;
+beforeEach(() => {
+  h = createDeliveryHarness();
+  inbox = createInboxService({
+    state: h.state,
+    onParkedAnswer: () => undefined,
+    onFlagAnswer: createBatchCardAnswers({
+      retry: (id) => {
+        retryWorkstream(h.state, id);
+      },
+      ship: (batchId) => {
+        h.shipper.ship(batchId);
+      },
+    }),
+  });
+});
+afterEach(() => {
+  h.close();
+});
+
+/** A batch of Alpha (failed, with its card) and Beta (left in `beta`), with one commit on its branch. */
+async function failedInBatch(beta: 'WAITING_HUMAN' | 'DONE') {
+  const alpha = h.addTask('Alpha');
+  const other = h.addTask('Beta', { areas: ['ui'] });
+  const started = h.starter.startBatch(h.project.id, {
+    title: 'Greetings',
+    taskIds: [alpha.id, other.id],
+  });
+  await h.jobs.idle();
+  h.commit('src/ui/beta.txt');
+  const [a, b] = listWorkstreams(h.store.db, { batchId: started.id });
+  if (!a || !b) throw new Error('two workstreams expected');
+  h.settle(b.id, beta);
+  h.settle(a.id, 'FAILED');
+  const fields = batchCardFields({ id: a.id, batchId: started.id });
+  if (!fields) throw new Error('a batch member gets card actions');
+  const card = inbox.flag({
+    projectId: h.project.id,
+    workstreamId: a.id,
+    title: 'Workstream failed: Alpha',
+    body: 'The gate failed 4 times',
+    ...fields,
+  });
+  return { batchId: started.id, failed: a.id, card };
+}
+
+describe('the failed workstream card', () => {
+  it('offers Retry, Ship anyway and Later only for a workstream in a batch', async () => {
+    const { card, batchId, failed } = await failedInBatch('DONE');
+    expect(card.options.map((o) => o.label)).toEqual(['Retry', 'Ship anyway', 'Later']);
+    expect(card.detail).toEqual({ batchCard: { batchId, workstreamId: failed } });
+    expect(batchCardFields({ id: failed, batchId: null })).toBeNull();
+  });
+
+  it('retries the workstream, reopening a failed batch', async () => {
+    const { card, batchId, failed } = await failedInBatch('DONE');
+    h.state.write((c) =>
+      transitionBatch(c, batchId, { to: 'FAILED', patch: { failure: 'gate_failed' } }),
+    );
+    expect(inbox.answer(card.id, { choice: 'Retry' }).state).toBe('RESOLVED');
+    expect(getWorkstream(h.store.db, failed).state).toBe('QUEUED');
+    expect(getBatch(h.store.db, batchId).state).toBe('OPEN');
+  });
+
+  it('refuses Ship anyway while other work is unfinished, keeping the card open, then ships', async () => {
+    const { card, batchId } = await failedInBatch('WAITING_HUMAN');
+    expect(() => inbox.answer(card.id, { choice: 'Ship anyway' })).toThrow(ConflictError);
+    expect(getInboxItem(h.store.db, card.id).state).toBe('OPEN');
+    const beta = listWorkstreams(h.store.db, { batchId }).find((w) => w.state === 'WAITING_HUMAN');
+    if (!beta) throw new Error('Beta waits');
+    h.settle(beta.id, 'DONE');
+    expect(inbox.answer(card.id, { choice: 'Ship anyway' }).state).toBe('RESOLVED');
+    await h.jobs.idle();
+    expect(getBatch(h.store.db, batchId).state).toBe('SHIPPED');
+  });
+
+  it('does nothing for Later, and leaves other flag cards alone', async () => {
+    const { card, batchId, failed } = await failedInBatch('DONE');
+    expect(inbox.answer(card.id, { choice: 'Later' }).state).toBe('RESOLVED');
+    expect(getWorkstream(h.store.db, failed).state).toBe('FAILED');
+    expect(getBatch(h.store.db, batchId).state).toBe('OPEN');
+    const plain = inbox.flag({
+      projectId: h.project.id,
+      workstreamId: null,
+      title: 'FYI',
+      body: '',
+    });
+    expect(plain.kind).toBe(InboxKind.Flag);
+    expect(inbox.answer(plain.id, { choice: 'dismiss' }).state).toBe('RESOLVED');
+  });
+});
+```
+
+Run: `pnpm --filter @10db/daemon exec vitest run src/delivery/batch-card.test.ts`
+Expected: FAIL. Every case fails in `beforeEach` with `TypeError: createBatchCardAnswers is not a function`.
+
+`apps/daemon/src/delivery/batch-card.ts`:
+
+```ts
+import {
+  BatchId,
+  WorkstreamId,
+  type InboxAnswer,
+  type InboxItemDto,
+  type InboxOption,
+} from '@10db/contracts';
+import type { Json } from '@10db/db';
+import { z } from 'zod';
+
+/** The `detail` key of a failed batch member's card. */
+export const BATCH_CARD_DETAIL = 'batchCard';
+
+export const BatchCardChoice = {
+  Retry: 'Retry',
+  ShipAnyway: 'Ship anyway',
+  Later: 'Later',
+} as const;
+export type BatchCardChoice = (typeof BatchCardChoice)[keyof typeof BatchCardChoice];
+
+const BatchCardDetail = z.object({ batchId: BatchId, workstreamId: WorkstreamId });
+
+const OPTIONS: readonly InboxOption[] = [
+  { label: BatchCardChoice.Retry, description: 'Run this workstream again in its batch' },
+  {
+    label: BatchCardChoice.ShipAnyway,
+    description: 'Ship the batch without it, once the rest is done or cancelled',
+  },
+  { label: BatchCardChoice.Later, description: 'Leave the batch open; decide on its strip later' },
+];
+
+/** The failed-workstream card's options and detail when the workstream runs in a batch (spec §4). */
+export function batchCardFields(row: {
+  readonly id: WorkstreamId;
+  readonly batchId: BatchId | null;
+}): { options: InboxOption[]; detail: Record<string, Json> } | null {
+  if (row.batchId === null) return null;
+  return {
+    options: [...OPTIONS],
+    detail: { [BATCH_CARD_DETAIL]: { batchId: row.batchId, workstreamId: row.id } },
+  };
+}
+
+/**
+ * Acts on a batch card's answer before the inbox records it. A refusal (Ship anyway while work is
+ * unfinished, Retry in a batch that shipped) throws, so the card stays open and the builder sees why.
+ */
+export function createBatchCardAnswers(deps: {
+  readonly retry: (id: WorkstreamId) => void;
+  readonly ship: (batchId: BatchId) => void;
+}): (item: InboxItemDto, answer: InboxAnswer) => void {
+  return (item, answer) => {
+    // The detail is JSON read back from the database: a boundary, so parse it.
+    const card = BatchCardDetail.safeParse(item.detail?.[BATCH_CARD_DETAIL]);
+    if (!card.success) return;
+    if (answer.choice === BatchCardChoice.Retry) deps.retry(card.data.workstreamId);
+    else if (answer.choice === BatchCardChoice.ShipAnyway) deps.ship(card.data.batchId);
+    // Later, or a label the inbox's own option check refuses next: nothing to do.
+  };
+}
+```
+
+Export `BATCH_CARD_DETAIL`, `batchCardFields` and `createBatchCardAnswers` from `apps/daemon/src/delivery/index.ts`.
+
+In `apps/daemon/src/inbox/service.ts`, give `createInboxService` the hook and call it from `answer()` before the write:
+
+```ts
+export function createInboxService(deps: {
+  readonly state: StateStore;
+  onParkedAnswer(target: InboxTarget, item: InboxItemDto): void;
+  /** Acts on an open flag card's answer before it is recorded; throwing keeps the card open. */
+  onFlagAnswer?(item: InboxItemDto, answer: InboxAnswer): void;
+}): InboxService {
+  // ...
+    answer(id, raw) {
+      const answer = InboxAnswer.parse(raw);
+      const current = getInboxItem(deps.state.db, id);
+      if (current.kind === InboxKind.Flag && current.state === InboxState.Open)
+        deps.onFlagAnswer?.(current, answer);
+      // ...the existing write, unchanged
+```
+
+In `apps/daemon/src/runner/runner.ts` `fail()` and in `apps/daemon/src/recovery/recover.ts`'s failed branch, spread the fields into the card (import `batchCardFields` from `../delivery`):
+
+```ts
+opts.inbox.flag({
+  projectId: row.projectId,
+  workstreamId: id,
+  title: `Workstream failed: ${getTask(db, row.taskId).title}`,
+  body: reason,
+  ...batchCardFields(row),
+});
+```
+
+(`...null` spreads nothing, so a workstream outside a batch keeps today's text-only card.)
+
+Run: `pnpm --filter @10db/daemon exec vitest run src/delivery/batch-card.test.ts src/inbox src/runner src/recovery`
+Expected: PASS; the inbox, runner and recovery suites are unchanged (no hook, or no batch).
+
+- [ ] **Step 7: Run the tests to verify they pass**
 
 Run: `pnpm --filter @10db/daemon exec vitest run && pnpm typecheck && pnpm lint`
 Expected: PASS: the new rows, and every existing daemon suite (local projects never read the branch, so their scheduling is unchanged; the runner, recovery and `start.test.ts` suites go through `requestTick`).
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
-pnpm format && git add apps/daemon/src/delivery/launch-rule.ts apps/daemon/src/delivery/launch-rule.test.ts apps/daemon/src/delivery/index.ts apps/daemon/src/scheduler/scheduler.ts apps/daemon/src/scheduler/scheduler.test.ts apps/daemon/src/daemon/start.ts apps/daemon/src/team/steps.ts apps/daemon/src/team/steps.test.ts && git commit -m 'feat(daemon): launch batch work only on its branch and keep retries inside open batches' -m 'Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>' -m 'Claude-Session: https://claude.ai/code/session_01KFqjacxo6Va8EyHF93n3xr'
+pnpm format && git add apps/daemon/src/delivery/launch-rule.ts apps/daemon/src/delivery/launch-rule.test.ts apps/daemon/src/delivery/index.ts apps/daemon/src/scheduler/scheduler.ts apps/daemon/src/scheduler/scheduler.test.ts apps/daemon/src/daemon/start.ts apps/daemon/src/team/steps.ts apps/daemon/src/team/steps.test.ts apps/daemon/src/delivery/batch-card.ts apps/daemon/src/delivery/batch-card.test.ts apps/daemon/src/inbox/service.ts apps/daemon/src/runner/runner.ts apps/daemon/src/recovery/recover.ts && git commit -m 'feat(daemon): launch batch work only on its branch, and retry or ship it from its card' -m 'Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>' -m 'Claude-Session: https://claude.ai/code/session_01KFqjacxo6Va8EyHF93n3xr'
 ```
 
 ---
@@ -5184,7 +5541,7 @@ pnpm format && git add apps/daemon/src/delivery/launch-rule.ts apps/daemon/src/d
 - Produces:
   - `GuardInput.delivery?: Delivery` (absent means `local`).
   - `gitVerdict(words: readonly string[], delivery: Delivery): GitVerdict`: `push` is denied with "10db pushes when the batch ships…" in `pull_request`.
-  - `ghVerdict(words: readonly string[]): GhVerdict` (`{ deny: string } | null`): `gh pr` allows `view`, `list`, `checks`, `diff`, `status`; `gh repo` allows `view`, `list`; `gh api` allows only GET, counting `-f`, `-F`, `--field`, `--raw-field` or `--input` without an explicit method as POST.
+  - `ghVerdict(words: readonly string[]): GhVerdict` (`{ deny: string } | null`): a top-level allowlist of read-only gh commands, denying everything else with a reason. Allowed: `gh pr view|list|checks|diff|status`, `gh repo view|list`, `gh issue view|list|status`, `gh run view|list`, `gh workflow view|list`, `gh search …`, `gh status`, `gh auth status`, `gh help …`, `gh version`, bare `gh` and `gh --help|--version`, and `gh api` GET only (a request with `-f`, `-F`, `--field`, `--raw-field` or `--input` and no explicit method counts as POST).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -5380,6 +5737,66 @@ describe('delivery and gh', () => {
     },
     { name: 'issue list', command: 'gh issue list', local: 'allow', pullRequest: 'allow' },
     { name: 'gh with no command', command: 'gh', local: 'allow', pullRequest: 'allow' },
+    { name: 'gh --version', command: 'gh --version', local: 'allow', pullRequest: 'allow' },
+    { name: 'help', command: 'gh help pr', local: 'allow', pullRequest: 'allow' },
+    { name: 'status', command: 'gh status', local: 'allow', pullRequest: 'allow' },
+    { name: 'auth status', command: 'gh auth status', local: 'allow', pullRequest: 'allow' },
+    { name: 'issue view', command: 'gh issue view 3', local: 'allow', pullRequest: 'allow' },
+    { name: 'search', command: 'gh search prs --author @me', local: 'allow', pullRequest: 'allow' },
+    { name: 'run list', command: 'gh run list --limit 5', local: 'allow', pullRequest: 'allow' },
+    { name: 'run view', command: 'gh run view 1', local: 'allow', pullRequest: 'allow' },
+    { name: 'workflow list', command: 'gh workflow list', local: 'allow', pullRequest: 'allow' },
+    {
+      name: 'workflow view',
+      command: 'gh workflow view ci.yml',
+      local: 'allow',
+      pullRequest: 'allow',
+    },
+    {
+      name: 'issue create',
+      command: 'gh issue create --title x --body y',
+      local: 'deny',
+      pullRequest: 'deny',
+    },
+    {
+      name: 'an alias definition',
+      command: "gh alias set m 'pr merge'",
+      local: 'deny',
+      pullRequest: 'deny',
+    },
+    { name: 'an alias call', command: 'gh m 12', local: 'deny', pullRequest: 'deny' },
+    {
+      name: 'an extension install',
+      command: 'gh extension install owner/gh-x',
+      local: 'deny',
+      pullRequest: 'deny',
+    },
+    {
+      name: 'the ext shorthand',
+      command: 'gh ext install owner/gh-x',
+      local: 'deny',
+      pullRequest: 'deny',
+    },
+    {
+      name: 'auth token, which prints the token',
+      command: 'gh auth token',
+      local: 'deny',
+      pullRequest: 'deny',
+    },
+    {
+      name: 'config set',
+      command: 'gh config set git_protocol ssh',
+      local: 'deny',
+      pullRequest: 'deny',
+    },
+    {
+      name: 'workflow run',
+      command: 'gh workflow run deploy.yml',
+      local: 'deny',
+      pullRequest: 'deny',
+    },
+    { name: 'run rerun', command: 'gh run rerun 1', local: 'deny', pullRequest: 'deny' },
+    { name: 'run cancel', command: 'gh run cancel 1', local: 'deny', pullRequest: 'deny' },
   ])('$name: $local in local, $pullRequest in pull_request', ({ command, local, pullRequest }) => {
     expect(run(command, 'local')).toBe(local);
     expect(run(command, 'pull_request')).toBe(pullRequest);
@@ -5422,9 +5839,28 @@ export type GhVerdict = { readonly deny: string } | null;
 
 /** gh flags that take a value and may come before the command group. */
 const LEADING_VALUE_FLAGS = new Set(['-R', '--repo', '--hostname']);
-/** gh pr commands that only read; checkout is not one: it switches the shared checkout's branch. */
-const PR_READS = new Set(['view', 'list', 'checks', 'diff', 'status']);
-const REPO_READS = new Set(['view', 'list']);
+/** A group whose every subcommand only reads. */
+const ANY = 'any';
+/**
+ * The gh commands an agent may run: reads only. Everything else is denied, so an alias (`gh m`),
+ * an extension, `auth token`, `config set`, `workflow run` or a command gh adds later never runs
+ * unseen. `pr checkout` is not a read: it switches the shared checkout's branch.
+ */
+const READS: ReadonlyMap<string, ReadonlySet<string> | typeof ANY> = new Map<
+  string,
+  ReadonlySet<string> | typeof ANY
+>([
+  ['pr', new Set(['view', 'list', 'checks', 'diff', 'status'])],
+  ['repo', new Set(['view', 'list'])],
+  ['issue', new Set(['view', 'list', 'status'])],
+  ['run', new Set(['view', 'list'])],
+  ['workflow', new Set(['view', 'list'])],
+  ['auth', new Set(['status'])],
+  ['search', ANY],
+  ['status', ANY],
+  ['help', ANY],
+  ['version', ANY],
+]);
 /** gh api sends POST by default once any of these is given (gh help api). */
 const FIELD_FLAGS = ['-f', '-F', '--field', '--raw-field', '--input'];
 
@@ -5467,30 +5903,34 @@ function apiMethod(args: readonly string[]): string {
   return method ?? (fields ? 'POST' : 'GET');
 }
 
+const ALLOWED =
+  'Agents may run gh pr view, list, checks, diff and status; gh repo view and list; gh issue view, list and status; gh run and gh workflow view and list; gh search; gh status; gh auth status; gh help; gh --version; and gh api GET requests.';
+
 /**
- * gh in a managed session reads only (batch delivery spec §7): 10db opens the pull request when a
- * batch ships, merging stays with the builder, and nothing changes the repository's settings.
+ * gh in a managed session only reads (batch delivery spec §7): 10db opens the pull request when a
+ * batch ships, merging stays with the builder, and nothing changes GitHub or gh's own config.
  */
 export function ghVerdict(words: readonly string[]): GhVerdict {
   const { group, at } = commandGroup(words);
-  const verb = verbAfter(words, at);
-  if (group === 'pr' && verb !== undefined && !PR_READS.has(verb))
-    return {
-      deny: `gh pr ${verb} is not allowed: 10db opens the pull request when the batch ships, and merging stays with the builder. gh pr view, list, checks, diff and status are allowed.`,
-    };
-  if (group === 'repo' && verb !== undefined && !REPO_READS.has(verb))
-    return {
-      deny: `gh repo ${verb} changes the repository and is not allowed; gh repo view and list are.`,
-    };
+  // Bare `gh`, `gh --help` and `gh --version` only print.
+  if (group === undefined) return null;
   if (group === 'api') {
     // Every argument after `api`, so `-X POST` before or after the endpoint both count.
     const method = apiMethod(words.slice(at + 1));
-    if (method !== 'GET')
-      return {
-        deny: `gh api ${method} requests are not allowed; only GET is. A request with -f, -F, --field or --input is a POST unless it says -X GET.`,
-      };
+    return method === 'GET'
+      ? null
+      : {
+          deny: `gh api ${method} requests are not allowed; only GET is. A request with -f, -F, --field or --input is a POST unless it says -X GET.`,
+        };
   }
-  return null;
+  const reads = READS.get(group);
+  const verb = verbAfter(words, at);
+  if (reads === ANY || (reads !== undefined && (verb === undefined || reads.has(verb))))
+    return null;
+  const what = reads === undefined ? `gh ${group}` : `gh ${group} ${verb ?? ''}`.trim();
+  return {
+    deny: `${what} is not allowed in a managed session: 10db opens the pull request when the batch ships, merging stays with the builder, and agents change nothing on GitHub or in gh's config. ${ALLOWED}`,
+  };
 }
 ```
 
@@ -5553,11 +5993,11 @@ pnpm format && git add apps/daemon/src/guard/gh-rules.ts apps/daemon/src/guard/g
 
 **Interfaces:**
 
-- Consumes: Task 6's `Shipper` (`resume`, `checkOpenBatches`) and harness (`trigger: false`, `gateTimeoutMs`); Task 5's `wrongBranchCard`, `raise`; Task 7's scheduler options; `ProcessTerminator` shape from `recovery/` (structurally, as `GateTerminator`).
+- Consumes: Task 6's `Shipper` (`resume`, `checkOpenBatches`) and harness (`trigger: false`, `gateTimeoutMs`); Task 5's `wrongBranchCard`, `raise`; Task 7's scheduler options and `Scheduler.idle()`; `ProcessTerminator` shape from `recovery/` (structurally, as `GateTerminator`).
 - Produces:
   - `interface GateTerminator { terminate(target: { readonly pid: number; readonly startedAt: string; readonly group?: boolean }): Promise<unknown> }`
   - `interface BatchRecoveryReport { readonly deleted: BatchId[]; readonly failed: BatchId[]; readonly resumed: BatchId[] }`
-  - `recoverBatches(deps: { state: StateStore; git: Git; inbox: InboxService; processes: GateTerminator; shipper: Shipper; logger: Logger }): Promise<BatchRecoveryReport>`. It runs once at startup, after workstream recovery and before the scheduler starts: deletes `CUTTING` rows; kills an orphaned shipping gate group recorded on a `SHIPPING` batch; moves an `OPEN` or `SHIPPING` batch whose branch is not checked out to `FAILED` with the wrong-branch card; resumes shipping from step 0 for the rest of the `SHIPPING` batches; then runs the ship trigger's check for every `OPEN` batch.
+  - `recoverBatches(deps: { state: StateStore; git: Git; inbox: InboxService; processes: GateTerminator; shipper: Shipper; logger: Logger }): Promise<BatchRecoveryReport>`. It runs once at startup, after workstream recovery and before the scheduler starts: deletes `CUTTING` rows, each with a card saying its tasks did not start; kills an orphaned shipping gate group recorded on a `SHIPPING` batch; moves an `OPEN` or `SHIPPING` batch whose branch is not checked out to `FAILED` with the wrong-branch card; resumes shipping from step 0 for the rest of the `SHIPPING` batches; then runs the ship trigger's check for every `OPEN` batch.
   - `apps/daemon/test/orphan-gate.ts`: `orphanGateGroup(): Promise<{ leader; pid; startedAt; exited; grandchildPid; cleanup() }>` and `alive(pid: number): boolean`, exactly as `recover.test.ts` defines them today.
 
 - [ ] **Step 1: Move the orphan helpers**
@@ -5634,7 +6074,7 @@ function onOrigin(branch: string | null): string | null {
 }
 
 describe('recoverBatches', () => {
-  it('deletes a CUTTING row and leaves the branch a crash left behind; the next cut uses a new name', async () => {
+  it('deletes a CUTTING row with a card, and leaves the branch a crash left behind; the next cut uses a new name', async () => {
     h = createDeliveryHarness({}, { trigger: false });
     h.state.write((c) =>
       insertBatch(c, { projectId: h.project.id, title: 'Greetings', baseBranch: 'main' }),
@@ -5643,6 +6083,9 @@ describe('recoverBatches', () => {
     const report = await recover();
     expect(report.deleted).toHaveLength(1);
     expect(listBatches(h.store.db)).toEqual([]);
+    expect(h.only(h.cards()).title).toBe(
+      'Batch not started: 10db stopped while cutting the branch for "Greetings"',
+    );
     expect(h.git$('branch', '--list', '10db/greetings-0a1b2c3d')).toContain(
       '10db/greetings-0a1b2c3d',
     );
@@ -5684,6 +6127,7 @@ describe('recoverBatches', () => {
       onWrongBranch: () => undefined,
     });
     expect(await scheduler.tick()).toBe(0);
+    await scheduler.idle();
     expect(launched).toEqual([]);
   });
 
@@ -5788,7 +6232,7 @@ describe('shutdown while shipping', () => {
 - [ ] **Step 3: Run the tests to verify they fail**
 
 Run: `pnpm --filter @10db/daemon exec vitest run src/delivery/recover.test.ts`
-Expected: FAIL. The recovery cases throw `recoverBatches is not a function`. The shutdown case already passes: Task 6's jobs and gate handle it; it stays as the regression test for spec §6 "Shutdown".
+Expected: FAIL. The recovery cases fail with `TypeError: recoverBatches is not a function`. The shutdown case already passes: Task 6's jobs and gate handle it; it stays as the regression test for spec §6 "Shutdown".
 
 - [ ] **Step 4: Write the recovery**
 
@@ -5808,7 +6252,7 @@ import type { StateStore } from '../events';
 import type { Git } from '../git';
 import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
-import { wrongBranchCard } from './cards';
+import { startCards, wrongBranchCard } from './cards';
 import { raise } from './context';
 import type { Shipper } from './ship';
 
@@ -5848,6 +6292,8 @@ export async function recoverBatches(deps: {
     deps.state.write((w) => {
       deleteCuttingBatch(w, batch.id, 'the daemon restarted while cutting the branch');
     });
+    // The API answered 202 for its tasks; say they didn't start.
+    raise(deps.inbox, batch.projectId, startCards.cutInterrupted(batch));
     report.deleted.push(batch.id);
   }
 
@@ -5911,7 +6357,7 @@ pnpm format && git add apps/daemon/src/delivery/recover.ts apps/daemon/src/deliv
 
 **Interfaces:**
 
-- Consumes: every delivery export (Tasks 5–9), `createGh` (Task 4), `buildNetworkEnv` and `markGhRequired` (Task 4), `listProjectViews` (Task 2), `startTaskWithPlan` (Task 5), `BatchStartInput`, `BatchDto`, `ProjectViewDto`, `TaskStartResult`, `BatchId` (Task 1).
+- Consumes: every delivery export (Tasks 5–9, including Task 7's `createBatchCardAnswers` and the inbox's `onFlagAnswer`), `createGh` (Task 4), `buildNetworkEnv` and `markGhRequired` (Task 4), `listProjectViews` (Task 2), `startTaskWithPlan` (Task 5), `BatchStartInput`, `BatchDto`, `ProjectViewDto`, `TaskStartResult`, `BatchId` (Task 1).
 - Produces:
   - `ApiServices`: `listProjects(): ProjectViewDto[]`; `startTask(taskId: TaskId): TaskStartResult`; `startBatch(projectId: ProjectId, input: BatchStartInput): BatchDto`; `shipBatch(id: BatchId): BatchDto`; `abandonBatch(id: BatchId): BatchDto`.
   - Routes:
@@ -6252,7 +6698,15 @@ In `apps/daemon/src/daemon/start.ts`:
   readonly deliveryLimits?: Partial<DeliveryLimits>;
 ```
 
-- After `const processes = …`, build delivery (the runner and scheduler are reached through the same late-bound references the inbox uses):
+- Give the inbox the batch card's answers through a late-bound reference, as it reaches the runner: declare `let answerBatchCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;` beside `let runner` and `let scheduler`, and add to `createInboxService({...})`:
+
+```ts
+onFlagAnswer: (item, answer) => {
+  answerBatchCard?.(item, answer);
+},
+```
+
+- After `createInboxService(...)` (delivery needs `inbox`; the runner and scheduler are reached through the same late-bound references the inbox uses), build delivery:
 
 ```ts
 const sessionEnv = opts.sessionEnv ?? (() => ({ PATH: DEFAULT_SESSION_PATH }));
@@ -6284,9 +6738,18 @@ const shipper = createShipper({
   identifyProcess: (pid) => processes.identify(pid),
   isRunning: (id) => runner?.isRunning(id) ?? false,
 });
+answerBatchCard = createBatchCardAnswers({
+  retry: (id) => {
+    retryWorkstream(state, id);
+    scheduler?.requestTick();
+  },
+  ship: (batchId) => {
+    shipper.ship(batchId);
+  },
+});
 ```
 
-and pass `sessionEnv` (the same function) to `createRunner` instead of the inline default.
+and pass `sessionEnv` (the same function) to `createRunner` instead of the inline default. (Import `createBatchCardAnswers` from `../delivery`, `retryWorkstream` from `../team`, and the `InboxItemDto` and `InboxAnswer` types from `@10db/contracts`.)
 
 - After `await recoverOnStartup(...)` and `pauses.restore()`:
 
@@ -6360,20 +6823,23 @@ pnpm format && git add apps/daemon/src/api/services.ts apps/daemon/src/api/app.t
 
 ### Task 11: Desktop: the delivery fields and the batch strip
 
+**Runs after M2b Part A is on `main`.** Part A (`feat/m2b-board-and-settings`, plan 07 Tasks 1–10) renames `apps/desktop/src/views/tasks` to `views/board` (`tasks-view.tsx` → `board-view.tsx`, `project-picker.tsx` → `shell/project-picker.tsx`), moves project selection into `shell/selected-project.ts` and adds Settings' General form (`views/settings/general-values.ts`, `project-general-form.tsx`). This task edits those files at their new paths; rebase this branch on `main` first. Tasks 1–10 don't touch `apps/desktop/src/views` and can be executed before Part A lands. If Part A's code differs from what is quoted here, follow Part A's code and keep this task's behavior.
+
 **Files:**
 
-- Modify: `apps/desktop/src/daemon/queries.ts`, `apps/desktop/src/daemon/events.ts`, `apps/desktop/src/test/fixtures.ts`
-- Modify: `apps/desktop/src/views/tasks/new-project-form.tsx`, `apps/desktop/src/views/tasks/tasks-view.tsx`
-- Create: `apps/desktop/src/views/tasks/batch-strip.tsx`
-- Test: `apps/desktop/src/views/tasks/batch-strip.test.tsx`, `apps/desktop/src/views/tasks/tasks-view.test.tsx`
+- Modify: `apps/desktop/src/daemon/queries.ts`, `apps/desktop/src/daemon/events.ts`, `apps/desktop/src/test/fixtures.ts`, `apps/desktop/src/shell/selected-project.ts`
+- Create: `apps/desktop/src/views/board/batch-strip.tsx`; Modify: `apps/desktop/src/views/board/board-view.tsx`, `apps/desktop/src/views/board/new-project-form.tsx`
+- Modify: `apps/desktop/src/views/settings/general-values.ts`, `apps/desktop/src/views/settings/project-general-form.tsx`
+- Test: `apps/desktop/src/views/board/batch-strip.test.tsx`, `apps/desktop/src/views/board/board-view.test.tsx`, `apps/desktop/src/views/settings/general-values.test.ts`, `apps/desktop/src/views/settings/settings-view.test.tsx`
 
 **Interfaces:**
 
-- Consumes: Task 1's `BatchDto`, `ProjectViewDto`, `TaskStartResult`, `shipReadiness`, `isSettled`, `latestPerTask`, `Delivery`, `BatchState`, `BatchFailure`; Task 10's routes through the Hono client (`client.batches[':batchId'].ship.$post`, `.abandon.$post`).
+- Consumes: Task 1's `BatchDto`, `ProjectViewDto`, `TaskStartResult`, `shipReadiness`, `isSettled`, `latestPerTask`, `Delivery`, `BatchState`, `BatchFailure`, `BranchName`, `PrTitlePrefix`; Task 10's routes through the Hono client (`client.batches[':batchId'].ship.$post`, `.abandon.$post`); Part A's `useSelectedProject`, `GeneralValues`, `generalValues`, `checkGeneral`, `ProjectGeneralForm`, `usePatchProject`.
 - Produces:
-  - `queries.ts`: `useProjects()` parses `ProjectViewDto[]`; `useStartTask()` parses `TaskStartResult`; `useShipBatch()` and `useAbandonBatch()` (mutations over a `BatchId`, invalidating projects, workstreams and tasks).
+  - `queries.ts`: `useProjects()` parses `ProjectViewDto[]`; `useStartTask()` parses `TaskStartResult`; `useShipBatch()` and `useAbandonBatch()` (mutations over a `BatchId`, invalidating projects, workstreams and tasks). `useSelectedProject().project` is a `ProjectViewDto | null`.
   - `INVALIDATIONS.batch = [queryKeys.projects, ['workstreams'], ['tasks']]`.
-  - `BatchStrip({ batch, workstreams }: { readonly batch: BatchDto; readonly workstreams: readonly WorkstreamDto[] })`.
+  - `BatchStrip({ batch, workstreams }: { readonly batch: BatchDto; readonly workstreams: readonly WorkstreamDto[] })` in `views/board/batch-strip.tsx`.
+  - `GeneralValues` gains `delivery: Delivery`, `baseBranch: string` and `prTitlePrefix: string` (`''` for none); `checkGeneral` checks and patches them.
   - Fixtures: `batchDto(overrides)`, `projectViewDto(overrides)`.
 
 - [ ] **Step 1: Add the fixtures**
@@ -6408,13 +6874,13 @@ export function projectViewDto(overrides: Partial<ProjectViewDto> = {}): Project
 
 - [ ] **Step 2: Write the failing tests**
 
-`apps/desktop/src/views/tasks/batch-strip.test.tsx`:
+`apps/desktop/src/views/board/batch-strip.test.tsx`:
 
 ```tsx
 import type { BatchDto, WorkstreamDto } from '@10db/contracts';
 import { screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import { renderWithDaemon, server, baseHandlers } from '../../test/daemon';
+import { baseHandlers, renderWithDaemon, server } from '../../test/daemon';
 import { batchDto, workstreamDto } from '../../test/fixtures';
 import { BatchStrip } from './batch-strip';
 
@@ -6502,10 +6968,10 @@ describe('BatchStrip', () => {
 });
 ```
 
-In `apps/desktop/src/views/tasks/tasks-view.test.tsx`:
+In `apps/desktop/src/views/board/board-view.test.tsx` (Part A's renamed file, whose `serve()` already answers `/projects/:projectId/board-columns`):
 
-- The first test's expected body gains `delivery: 'local'` (the form now always sends the delivery).
-- Add:
+- The first test's expected `POST /projects` body gains `delivery: 'local'` (the form now always sends the delivery).
+- Add (import `batchDto`, `projectViewDto` from the fixtures):
 
 ```tsx
 it('creates a pull-request project with its base branch and title prefix, and requires the prefix', async () => {
@@ -6516,7 +6982,7 @@ it('creates a pull-request project with its base branch and title prefix, and re
       return HttpResponse.json(projectDto(), { status: 201 });
     }),
   );
-  renderApp('/tasks');
+  renderApp('/board');
   fireEvent.click(await screen.findByRole('button', { name: 'New project' }));
   const dialog = await screen.findByRole('dialog', { name: 'New project' });
   type('Name', 'shop', dialog);
@@ -6557,7 +7023,7 @@ it("shows the project's batch and retries a failed one", async () => {
       return HttpResponse.json({ ...batch, state: 'SHIPPING', failure: null });
     }),
   );
-  renderApp('/tasks');
+  renderApp('/board');
   expect(await screen.findByText('git push was rejected')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
   await waitFor(() => {
@@ -6566,25 +7032,97 @@ it("shows the project's batch and retries a failed one", async () => {
 });
 ```
 
-(import `batchDto`, `projectViewDto` from the fixtures.)
+In `apps/desktop/src/views/settings/general-values.test.ts`, add these rows to Part A's `checkGeneral` table (they type-check once `GeneralValues` has the fields):
+
+```ts
+    {
+      name: 'pull-request delivery with a prefix, trimmed',
+      change: { delivery: 'pull_request', prTitlePrefix: ' feat(app) ' },
+      expected: { ok: true, patch: { delivery: 'pull_request', prTitlePrefix: 'feat(app)' } },
+    },
+    {
+      name: 'pull-request delivery without a prefix',
+      change: { delivery: 'pull_request' },
+      expected: { ok: false, errors: { prTitlePrefix: 'Enter a PR title prefix such as feat(app)' } },
+    },
+    {
+      name: 'a prefix that is not a Conventional Commit type',
+      change: { prTitlePrefix: 'Feature' },
+      expected: { ok: false, errors: { prTitlePrefix: 'Enter a PR title prefix such as feat(app)' } },
+    },
+    {
+      name: 'a new base branch',
+      change: { baseBranch: 'develop' },
+      expected: { ok: true, patch: { baseBranch: 'develop' } },
+    },
+    {
+      name: 'a base branch that is an option',
+      change: { baseBranch: '-x' },
+      expected: { ok: false, errors: { baseBranch: 'Enter the base branch, such as main' } },
+    },
+```
+
+and one case for clearing a prefix:
+
+```ts
+it('clears a prefix when the field is emptied in local delivery', () => {
+  const prefixed = projectDto({ prTitlePrefix: 'feat(app)' });
+  expect(checkGeneral(prefixed, { ...generalValues(prefixed), prTitlePrefix: '' })).toEqual({
+    ok: true,
+    patch: { prTitlePrefix: null },
+  });
+});
+```
+
+In `apps/desktop/src/views/settings/settings-view.test.tsx`, add:
+
+```tsx
+it('switches a project to pull-request delivery, and shows why the daemon refuses it while work runs', async () => {
+  const patched: unknown[] = [];
+  server.use(
+    http.get(daemonUrl('/projects'), () => HttpResponse.json([projectDto()])),
+    http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
+    http.patch(daemonUrl('/projects/:projectId'), async ({ request }) => {
+      patched.push(await request.json());
+      return HttpResponse.json(
+        {
+          error: 'conflict',
+          message: 'demo has unfinished work; finish or cancel it before changing its delivery',
+        },
+        { status: 409 },
+      );
+    }),
+    ...baseHandlers(),
+  );
+  renderApp('/settings/general');
+  fireEvent.click(await screen.findByRole('radio', { name: 'One pull request per batch' }));
+  fireEvent.change(screen.getByLabelText('PR title prefix'), { target: { value: 'feat(app)' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+  await waitFor(() => {
+    expect(patched).toEqual([{ delivery: 'pull_request', prTitlePrefix: 'feat(app)' }]);
+  });
+  expect(await screen.findByText(/has unfinished work/)).toBeTruthy();
+});
+```
 
 - [ ] **Step 3: Run the tests to verify they fail**
 
-Run: `pnpm --filter @10db/desktop exec vitest run src/views/tasks`
-Expected: FAIL. `batch-strip.test.tsx` can't load `./batch-strip`; the project-form test can't find the `One pull request per batch` radio; the first form test's posted body lacks `delivery`; the strip test finds no `git push was rejected` text.
+Run: `pnpm --filter @10db/desktop exec vitest run src/views/board src/views/settings`
+Expected: FAIL. `batch-strip.test.tsx` fails to load (`Failed to load url ./batch-strip`); the board's project-form test can't find the `One pull request per batch` radio; the first form test's posted body lacks `delivery`; the strip test finds no `git push was rejected` text; the new `checkGeneral` rows get `{ ok: true, patch: null }` (the fields are ignored); the Settings test can't find the delivery radio.
 
-- [ ] **Step 4: Update the queries and the invalidations**
+- [ ] **Step 4: Update the queries, the selection and the invalidations**
 
 In `apps/desktop/src/daemon/queries.ts`:
 
-- Replace `ProjectDto` with `ProjectViewDto` in `ProjectList` (`z.array(ProjectViewDto)`) and parse the start with `TaskStartResult`:
+- Parse the project list with `ProjectViewDto` (`const ProjectList = z.array(ProjectViewDto);`), so `useProjects()` and `useSelectedProject()` carry `currentBatch`. In `apps/desktop/src/shell/selected-project.ts`, change `ProjectDto` to `ProjectViewDto` in `SelectedProject`.
+- Parse the start with `TaskStartResult`, and invalidate the projects too (a pull-request start changes the batch):
 
-```ts
+```
 export function useStartTask() {
   // ...unchanged, except:
     mutationFn: async (taskId: TaskId) =>
       readJson(await client.tasks[':taskId'].start.$post({ param: { taskId } }), TaskStartResult),
-  // onSuccess also invalidates queryKeys.projects (a pull-request start changes the batch).
+  // onSuccess also invalidates queryKeys.projects.
 }
 ```
 
@@ -6625,14 +7163,14 @@ function invalidateBatchViews(queryClient: QueryClient): Promise<unknown> {
 
 In `apps/desktop/src/daemon/events.ts`, add to `INVALIDATIONS`:
 
-```ts
-  // A batch's state shows on the project's strip; cancelling an abandoned batch's work moves tasks.
+```
+  // A batch's state shows on the board's strip; cancelling an abandoned batch's work moves tasks.
   batch: [queryKeys.projects, ...WORK],
 ```
 
-- [ ] **Step 5: Write the batch strip**
+- [ ] **Step 5: Write the batch strip and put it on the board**
 
-`apps/desktop/src/views/tasks/batch-strip.tsx`:
+`apps/desktop/src/views/board/batch-strip.tsx`:
 
 ```tsx
 import {
@@ -6791,23 +7329,19 @@ export function BatchStrip({
 }
 ```
 
-The failure label also appears as the strip's text for the `push_rejected` case, which the Tasks view test reads.
+In `apps/desktop/src/views/board/board-view.tsx`, between the board's header (and its alerts) and the columns, using the board's `useWorkstreams({ active: false })` query (add it if the view no longer calls it):
 
-In `apps/desktop/src/views/tasks/tasks-view.tsx`, under the project's path line:
-
-```tsx
-{
-  project?.currentBatch ? (
-    <BatchStrip batch={project.currentBatch} workstreams={workstreams.data ?? []} />
-  ) : null;
-}
+```
+{project?.currentBatch ? (
+  <BatchStrip batch={project.currentBatch} workstreams={workstreams.data ?? []} />
+) : null}
 ```
 
-- [ ] **Step 6: Add the delivery fields to the project form**
+- [ ] **Step 6: Add the delivery fields to the new-project form**
 
-In `apps/desktop/src/views/tasks/new-project-form.tsx` (import `Delivery`, `PrTitlePrefix`, `BranchName` from `@10db/contracts`, and `Radio`, `Group` from Mantine):
+In `apps/desktop/src/views/board/new-project-form.tsx` (import `Delivery`, `PrTitlePrefix`, `BranchName` from `@10db/contracts`, and `Radio`, `Group` from Mantine), add the state:
 
-```tsx
+```
 const [delivery, setDelivery] = useState<Delivery>(Delivery.Local);
 const [baseBranch, setBaseBranch] = useState('main');
 const [prTitlePrefix, setPrTitlePrefix] = useState('');
@@ -6815,7 +7349,7 @@ const [prTitlePrefix, setPrTitlePrefix] = useState('');
 
 In `submit`, before `create.mutate`:
 
-```tsx
+```
 const pullRequests = delivery === Delivery.PullRequest;
 if (pullRequests && !PrTitlePrefix.safeParse(prTitlePrefix.trim()).success) {
   setFormError('Enter a PR title prefix such as feat(app)');
@@ -6829,14 +7363,14 @@ if (pullRequests && !BranchName.safeParse(baseBranch.trim()).success) {
 
 and add to the mutate input:
 
-```tsx
+```
         delivery,
         ...(pullRequests ? { baseBranch: baseBranch.trim(), prTitlePrefix: prTitlePrefix.trim() } : {}),
 ```
 
-After the Billing select:
+After the Billing select, the fields (shared with Settings in Step 7, so keep the labels identical):
 
-```tsx
+```
 <Radio.Group
   label="Delivery"
   value={delivery}
@@ -6848,43 +7382,72 @@ After the Billing select:
     <Radio value={Delivery.Local} label="Commits on the checked-out branch" />
     <Radio value={Delivery.PullRequest} label="One pull request per batch" />
   </Group>
-</Radio.Group>;
-{
-  delivery === Delivery.PullRequest ? (
-    <>
-      <TextInput
-        label="Base branch"
-        description="The branch on origin each batch starts from and targets"
-        ff="monospace"
-        value={baseBranch}
-        onChange={(e) => {
-          setBaseBranch(e.currentTarget.value);
-        }}
-      />
-      <TextInput
-        label="PR title prefix"
-        description="A Conventional Commit type and scope; titles read feat(app): <batch title>"
-        placeholder="feat(app)"
-        ff="monospace"
-        value={prTitlePrefix}
-        onChange={(e) => {
-          setPrTitlePrefix(e.currentTarget.value);
-        }}
-      />
-    </>
-  ) : null;
-}
+</Radio.Group>
+{delivery === Delivery.PullRequest ? (
+  <>
+    <TextInput
+      label="Base branch"
+      description="The branch on origin each batch starts from and targets"
+      ff="monospace"
+      value={baseBranch}
+      onChange={(e) => {
+        setBaseBranch(e.currentTarget.value);
+      }}
+    />
+    <TextInput
+      label="PR title prefix"
+      description="A Conventional Commit type and scope; titles read feat(app): <batch title>"
+      placeholder="feat(app)"
+      ff="monospace"
+      value={prTitlePrefix}
+      onChange={(e) => {
+        setPrTitlePrefix(e.currentTarget.value);
+      }}
+    />
+  </>
+) : null}
 ```
 
-- [ ] **Step 7: Run the tests to verify they pass**
+- [ ] **Step 7: Add the delivery fields to Settings' General form**
+
+In `apps/desktop/src/views/settings/general-values.ts` (import `BranchName`, `Delivery` and `PrTitlePrefix` from `@10db/contracts`):
+
+- `GeneralValues` gains `readonly delivery: Delivery;`, `readonly baseBranch: string;` and `readonly prTitlePrefix: string;` (`''` means none).
+- `generalValues` fills them: `delivery: project.delivery`, `baseBranch: project.baseBranch`, `prTitlePrefix: project.prTitlePrefix ?? ''`.
+- `checkGeneral` checks them with the daemon's rules, after the existing checks:
+
+```ts
+const baseBranch = values.baseBranch.trim();
+const prefix = values.prTitlePrefix.trim();
+if (!BranchName.safeParse(baseBranch).success)
+  errors.baseBranch = 'Enter the base branch, such as main';
+if (
+  (values.delivery === Delivery.PullRequest || prefix !== '') &&
+  !PrTitlePrefix.safeParse(prefix).success
+)
+  errors.prTitlePrefix = 'Enter a PR title prefix such as feat(app)';
+```
+
+and patches what changed, after the existing fields:
+
+```ts
+if (values.delivery !== project.delivery) patch.delivery = values.delivery;
+if (baseBranch !== project.baseBranch) patch.baseBranch = baseBranch;
+const prTitlePrefix = prefix === '' ? null : prefix;
+if (prTitlePrefix !== project.prTitlePrefix) patch.prTitlePrefix = prTitlePrefix;
+```
+
+In `apps/desktop/src/views/settings/project-general-form.tsx`, add the same three fields as Step 6 (same labels), bound to `values` and `set({...})`, each `TextInput` showing `errors.baseBranch` or `errors.prTitlePrefix`. The daemon refuses a delivery change while the project has unfinished work (Task 2); the form shows that 409's message the way it shows any refusal.
+
+- [ ] **Step 8: Run the tests to verify they pass**
 
 Run: `pnpm --filter @10db/desktop exec vitest run && pnpm typecheck && pnpm lint`
-Expected: PASS, every desktop test, the strip table included. Check the strip by hand in both color schemes with `pnpm dev` (`DESIGN.md`: every view works in light mode too).
+Expected: PASS, every desktop test, the strip table and the new `checkGeneral` rows included. Check the strip and both forms by hand in both color schemes with `pnpm dev` (`DESIGN.md`: every view works in light mode too).
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
-pnpm format && git add apps/desktop/src/daemon/queries.ts apps/desktop/src/daemon/events.ts apps/desktop/src/test/fixtures.ts apps/desktop/src/views/tasks/new-project-form.tsx apps/desktop/src/views/tasks/tasks-view.tsx apps/desktop/src/views/tasks/batch-strip.tsx apps/desktop/src/views/tasks/batch-strip.test.tsx apps/desktop/src/views/tasks/tasks-view.test.tsx && git commit -m 'feat(desktop): add delivery to the project form and a batch strip to the tasks view' -m 'Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>' -m 'Claude-Session: https://claude.ai/code/session_01KFqjacxo6Va8EyHF93n3xr'
+pnpm format && git add apps/desktop/src/daemon/queries.ts apps/desktop/src/daemon/events.ts apps/desktop/src/test/fixtures.ts apps/desktop/src/shell/selected-project.ts apps/desktop/src/views/board/batch-strip.tsx apps/desktop/src/views/board/batch-strip.test.tsx apps/desktop/src/views/board/board-view.tsx apps/desktop/src/views/board/board-view.test.tsx apps/desktop/src/views/board/new-project-form.tsx apps/desktop/src/views/settings/general-values.ts apps/desktop/src/views/settings/general-values.test.ts apps/desktop/src/views/settings/project-general-form.tsx apps/desktop/src/views/settings/settings-view.test.tsx && git commit -m 'feat(desktop): add delivery to the project forms and a batch strip to the board' -m 'Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>' -m 'Claude-Session: https://claude.ai/code/session_01KFqjacxo6Va8EyHF93n3xr'
 ```
 
 ---
@@ -6894,7 +7457,7 @@ pnpm format && git add apps/desktop/src/daemon/queries.ts apps/desktop/src/daemo
 **Files:**
 
 - Create: `docs/architecture/02-batch-delivery.md`
-- Modify: `docs/architecture/decisions.md`, `docs/open-items.md`, `README.md`, `apps/daemon/AGENTS.md`
+- Modify: `docs/architecture/decisions.md`, `docs/open-items.md`, `README.md`, `apps/daemon/AGENTS.md`; `docs/architecture/README.md` only if it has gained a section index
 
 - [ ] **Step 1: Write the architecture section**
 
@@ -6915,8 +7478,8 @@ pnpm format && git add apps/desktop/src/daemon/queries.ts apps/desktop/src/daemo
 | `apps/daemon/src/delivery/`                    | starting (cut, join, dependency checks), shipping, the ship trigger, Ship anyway, Retry, Abandon, the launch rule and startup recovery |
 | `apps/daemon/src/git/`                         | `currentBranch`, `remoteUrl`, `fetch`, `switchNewBranch`, `push`                                                                       |
 | `apps/daemon/src/github/`                      | the `Gh` interface over the `gh` CLI                                                                                                   |
-| `apps/daemon/src/guard/`                       | agents never push in `pull_request` projects, and never mutate PRs or the repository through `gh`                                      |
-| `apps/desktop/src/views/tasks/batch-strip.tsx` | the batch strip                                                                                                                        |
+| `apps/daemon/src/guard/`                       | agents never push in `pull_request` projects, and run only an allowlist of read-only `gh` commands                                     |
+| `apps/desktop/src/views/board/batch-strip.tsx` | the batch strip on the board; Settings' General form and the new-project form hold the delivery fields                                 |
 
 ## Lifecycle
 
@@ -6933,20 +7496,23 @@ CUTTING → OPEN → SHIPPING → SHIPPED | CLOSED | FAILED; FAILED → SHIPPING
 
 Replace `<first>` and `<last>` with the row numbers Step 2 assigns.
 
+`docs/architecture/README.md` describes the numbered sections generically (`NN-*.md`) and lists none, so it needs no change. If a section index has been added to it by the time this task runs, add `02 Batch delivery` to it.
+
 - [ ] **Step 2: Record the decisions**
 
 Append rows B1 to B9 from this plan's "New decisions" table to the decision log in `docs/architecture/decisions.md`, as consecutive rows numbered from the next free number at merge (69 if nothing else has merged since this plan; check `main` when merging and renumber if another PR took it). The test in `tests/repo/src/architecture-docs.test.ts` checks the numbers run without gaps. Use the label's text verbatim, with the numbers in place of `B1`…`B9`, and write the same numbers into Step 1's Summary.
 
 - [ ] **Step 3: Update the open items**
 
-In `docs/open-items.md`, add:
+In `docs/open-items.md`, add these lines:
 
-- `- [ ] Batch delivery: worktrees and one PR per task (`workspace_mode = worktree`), the spec's expected fast-follow (batch delivery spec §9).`
-- `- [ ] Batch delivery: an after-ship action per batch or task (`auto_merge`with`gh pr merge --auto --squash`, or a project deploy command), spec §9.`
-- `- [ ] Batch delivery: stacked batches, rebasing or updating an unmerged PR, and hosts other than GitHub (spec §9).`
-- `- [ ] Batch delivery: flag cards carry text only; give the failed-workstream and failed-batch cards answerable Retry and Ship anyway actions (spec §4 assumed the flag card offers them; plan 08 put them on the batch strip).`
-- `- [ ] Batch delivery: agents' gh api is GET only, so read-only GraphQL queries (always POST) are denied too; allow them if a persona needs them.`
-- `- [ ] Batch delivery: the manual acceptance on a throwaway GitHub repository (plan 08 Task 13).`
+```
+- [ ] Batch delivery: worktrees and one PR per task (workspace_mode = worktree), the spec's expected fast-follow (batch delivery spec §9).
+- [ ] Batch delivery: an after-ship action per batch or task (auto_merge with gh pr merge --auto --squash, or a project deploy command), spec §9.
+- [ ] Batch delivery: stacked batches, rebasing or updating an unmerged PR, and hosts other than GitHub (spec §9).
+- [ ] Batch delivery: agents' gh api is GET only, so read-only GraphQL queries (always POST) are denied too; allow them if a persona needs them.
+- [ ] Batch delivery: the manual acceptance on a throwaway GitHub repository (plan 08 Task 13).
+```
 
 - [ ] **Step 4: Document pull-request delivery in the README**
 
@@ -6956,8 +7522,8 @@ In `README.md`, after "## Develop" and before "## Model data from Artificial Ana
 ## Deliver through pull requests
 
 A project delivers `local` by default: sessions commit on whatever branch the checkout has. Choose
-**One pull request per batch** in the project form (or `PATCH /projects/:id` with
-`{ "delivery": "pull_request", "prTitlePrefix": "feat(app)" }`) and 10db instead:
+**One pull request per batch** when you create the project, or later in Settings, General (10db refuses
+the change while the project has unfinished work), and 10db instead:
 
 1. cuts `10db/<title>-<id>` from `origin/<base branch>` (default `main`) when you start a task or a set of
    tasks, provided the checkout is clean, no task runs in the project, `origin` exists and
@@ -6967,8 +7533,9 @@ A project delivers `local` by default: sessions commit on whatever branch the ch
    request titled `<prefix>: <batch title>`. Merging stays with you.
 
 Every refusal (a dirty checkout, the wrong branch, no `origin`, `gh` missing or signed out, a failed gate, a
-rejected push) is an inbox card that says what to fix; nothing is pushed. The Tasks view's batch strip shows the
-batch and offers Retry, Ship anyway (when a task failed) and Abandon. 10db never force-pushes, and agents can't
+rejected push) is an inbox card that says what to fix; nothing is pushed. A failed task's card offers Retry and
+Ship anyway, and the board's batch strip shows the batch and offers Retry, Ship anyway (when a task failed) and
+Abandon. 10db never force-pushes, and agents can't
 push, merge or open pull requests themselves.
 ```
 
@@ -6977,7 +7544,7 @@ push, merge or open pull requests themselves.
 `apps/daemon/AGENTS.md` names `github` and `delivery` in the module order and has the `github/`/`git/` bullet from Task 4. Add one bullet:
 
 ```
-- `delivery/` owns batches: a start answers at once and cuts or joins in a background job (`jobs.ts`, one at a time per project); git and gh refusals are flag cards (`cards.ts`). `recoverBatches` runs at startup after `recoverOnStartup`; `subscribeShipTrigger` follows `workstream.changed`. The scheduler imports only `batchLaunchVerdict`.
+- `delivery/` owns batches: a start answers at once and cuts or joins in a background job (`jobs.ts`, one at a time per project); git and gh refusals are flag cards (`cards.ts`) that name their tasks in `detail.taskIds`. A failed batch member's card offers Retry and Ship anyway (`batch-card.ts`), acted on through the inbox's `onFlagAnswer`. `recoverBatches` runs at startup after `recoverOnStartup`; `subscribeShipTrigger` follows `workstream.changed`. The scheduler imports only `batchLaunchVerdict` and `flagWrongBranch`; tests wait on `Scheduler.idle()`.
 ```
 
 - [ ] **Step 6: Run the gate**
@@ -7024,7 +7591,7 @@ Expected: `gh auth status` prints a logged-in account; the repository exists on 
 
 In the 10db checkout on the merged-candidate branch: `rm -rf .dev/data && pnpm dev` (the baseline changed in Task 2), and open the UI it prints.
 
-In the Tasks view:
+On the board:
 
 1. **New project**: name `acceptance`, the path of the throwaway clone, gate `./gate.sh`, areas `greetings: greetings/**`, Delivery **One pull request per batch**, base branch `main`, PR title prefix `feat(greetings)`.
 2. Two tasks, each with area `greetings`:
@@ -7074,7 +7641,7 @@ git add docs/open-items.md && git commit -m 'docs(docs): record the batch delive
   - §1 success 1 (fresh branch from the up-to-date base, never on another branch): Tasks 3, 5, 7. Success 2 (gate on the clean branch, push, one PR with a valid title): Task 6. Success 3 (crash at any point): Tasks 5 (shutdown mid-cut leaves CUTTING), 9. Success 4 (every refusal a card, nothing pushed): Tasks 5 and 6 refusal tables.
   - §2 decisions: B1–B9 and Tasks 2, 5, 6, 8.
   - §3 data: Tasks 1 and 2 (columns, defaults, `batches`, the partial unique index, `workstreams.batch_id`, baseline regenerated).
-  - §4 lifecycle: transitions (Task 1), ship trigger and startup check (Tasks 6 and 9), failed and waiting workstreams (Task 6), CLOSED, SHIPPED, FAILED (Task 6), ABANDONED (Task 6), workstream retry (Task 7).
+  - §4 lifecycle: transitions (Task 1), ship trigger and startup check (Tasks 6 and 9), failed and waiting workstreams (Task 6), the failed workstream card's Retry and Ship anyway (Task 7, wired in Task 10), CLOSED, SHIPPED, FAILED (Task 6), Retry from FAILED as amended (Task 6), ABANDONED (Task 6), workstream retry (Task 7).
   - §5 starting: routes (Tasks 5 and 10), dependencies including unmerged PRs (Task 5), cutting steps 1–4 (Task 5), joining and reopening (Task 5), scheduler rule and startup wrong branch (Tasks 7 and 9).
   - §6 shipping: steps 0–5, PR body, network environment and timeouts, `Gh` states, system check, shutdown and recovery (Tasks 3, 4, 6, 9, 10).
   - §7 components: every row has a task (`git` 3, `github` 4, `guard` 8, `scheduler` 7, `team` 5 and 7, `environment` 4, contracts 1, db 2, desktop 11, delivery 5, 6, 7, 9).
@@ -7086,5 +7653,6 @@ git add docs/open-items.md && git commit -m 'docs(docs): record the batch delive
   - `Gh`, `GhCall`, `GhError`, `PrState`, `FakeGh`, `buildNetworkEnv`, `markGhRequired`: Task 4; used in 5, 6, 9, 10.
   - `DeliveryContext`, `DeliveryJobs`, `raise(inbox, …)`, `wrongBranchCard(batch, current, repoPath, outcome)`, `planForStart`, `insertPlannedWorkstream`, the harness: Task 5; extended in 6, used in 7, 9, 10.
   - `Shipper` (`checkBatch`, `checkOpenBatches`, `resume`, `ship`, `abandon`), `subscribeShipTrigger`: Task 6; used in 9 and 10.
-  - `batchLaunchVerdict`, `flagWrongBranch`, async `Scheduler.tick`: Task 7; used in 9 and 10.
+  - `batchLaunchVerdict`, `flagWrongBranch`, async `Scheduler.tick`, `Scheduler.idle`, `batchCardFields`, `createBatchCardAnswers`, `onFlagAnswer`: Task 7; used in 9 and 10.
+  - `WrongBranchOutcome` (`waits`, `failed`, `not_joined`, `not_shipped`), `forTasks`, `startCards.joinInterrupted`, `startCards.cutInterrupted`, `duration`: Tasks 5 and 6; used in 7 and 9.
   - `recoverBatches`, `GateTerminator`: Task 9; used in 10.
