@@ -10,7 +10,17 @@ export const REQUIRED_TOOLS = [
   { name: ToolName.Claude, required: true },
   { name: ToolName.Git, required: true },
   { name: ToolName.Docker, required: false },
+  // Required only while a project delivers pull requests (markGhRequired).
+  { name: ToolName.Gh, required: false },
 ] as const;
+
+/** gh is needed once any project ships pull requests (batch delivery spec §6). */
+export function markGhRequired(check: SystemCheckDto, needed: boolean): SystemCheckDto {
+  return {
+    ...check,
+    tools: check.tools.map((t) => (t.name === ToolName.Gh ? { ...t, required: needed } : t)),
+  };
+}
 
 /** The first executable file called `name` on `pathVar`, like `command -v`. */
 export function findOnPath(name: string, pathVar: string | undefined): string | null {

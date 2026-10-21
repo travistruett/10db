@@ -23,8 +23,8 @@ serves agents over MCP, and runs Claude Code sessions.
 `src/<module>/` directories are flat; each exports its public surface from `index.ts`, and other
 modules import only that (ESLint enforces it). Dependencies point one way:
 
-`clock`, `log`, `events`, `guard`, `permissions`, `git`, `verify`, `routing` → `sessions`, `inbox`, `briefing`, `team` →
-`mcp` → `runner` → `watcher`, `scheduler`, `recovery`, `backups`, `benchmarks` → `daemon` (composition root) → `main.ts`.
+`clock`, `log`, `events`, `guard`, `permissions`, `git`, `github`, `verify`, `routing` → `sessions`, `inbox`, `briefing`, `team` →
+`delivery` → `mcp` → `runner` → `watcher`, `scheduler`, `recovery`, `backups`, `benchmarks` → `daemon` (composition root) → `main.ts`.
 `api` depends only on `@10db/contracts` and its own `ApiServices` interface; the composition root
 implements it and hands it to `createApp` in `ApiDeps`.
 
@@ -35,6 +35,7 @@ The fake adapter (`sessions/fake-adapter.ts`) is the test boundary for Claude Co
 - `routing/` is pure: flows, floors, the per-role AA score (a role compares its own unless some enabled, costed profile that has an Intelligence score lacks it, then all on Intelligence), the router, escalation and step plans over rows its caller passes in. It imports `@10db/contracts` only. Its tests use the invented catalogue in `test-catalogue.ts`, never AA's numbers.
 - `team/` seeds the team configuration at start and turns a task into its stored step plan. Read the step a workstream is on with `currentStep` from `@10db/contracts`. Daemon tests get an invented measured catalogue from `test/catalogue.ts`.
 - `benchmarks/` syncs Artificial Analysis's free model list with the builder's own key, read from the Keychain (service `10db`, account `artificial-analysis-api-key`). AA data stays on the machine: never in logs, fixtures, docs or the repo, and every view of it shows AA's attribution. Tests use invented numbers and an injected `fetch`.
+- `github/` is the only module that runs `gh`, and `git/` the only one that runs `git`; both use `execFile` with argument arrays. Network calls (fetch, push, every `gh` call) take a `NetworkCall` built from `environment/buildNetworkEnv`, a timeout and an abort signal, with prompts off. Delivery tests fake `gh` with `test/fake-gh.ts`; real git runs against a local bare `origin` (`createTempRepoWithOrigin`).
 - `environment/` owns the login env (memory only), the session env builder and the system check. Nothing
   else reads the login env. Never write it to disk, the database or logs; log variable names, never values.
 - Only `sessions/claude-*.ts` import `@anthropic-ai/claude-agent-sdk`, and only `claude-adapter.ts` imports it at runtime (the others import types).
