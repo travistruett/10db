@@ -1,10 +1,10 @@
 import {
   BoardStatus,
+  SYSTEM_COLUMN_LABEL,
   type BoardColumnDto,
   type BoardColumnId,
   type TaskDto,
 } from '@10db/contracts';
-import { BOARD_STATUS } from './board-status';
 
 export type ColumnKey =
   | { readonly kind: 'human'; readonly id: BoardColumnId }
@@ -64,7 +64,7 @@ export function boardLayout(
     })),
     ...SYSTEM_COLUMNS.map((status): LayoutColumn => ({
       key: { kind: 'system', status },
-      label: BOARD_STATUS[status].label,
+      label: SYSTEM_COLUMN_LABEL[status],
       tasks: tasks
         .filter((t) => parkedIn(t) === null && t.boardStatus === status)
         .sort(status === BoardStatus.Done ? recentFirst : byOrder),

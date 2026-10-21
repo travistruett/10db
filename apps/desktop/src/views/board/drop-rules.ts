@@ -1,12 +1,12 @@
 import {
   BoardStatus,
+  SYSTEM_COLUMN_LABEL,
   type BoardColumnId,
   type TaskDto,
   type TaskId,
   type TaskMove,
 } from '@10db/contracts';
 import { columnKeyId, sameColumn, type ColumnKey, type LayoutColumn } from './board-layout';
-import { BOARD_STATUS } from './board-status';
 
 export type DropAction =
   | { readonly kind: 'none' }
@@ -170,7 +170,7 @@ export function menuMoves(layout: readonly LayoutColumn[], taskId: TaskId): Menu
     const status =
       task.boardStatus === BoardStatus.Backlog ? BoardStatus.Backlog : BoardStatus.Ready;
     moves.push({
-      label: `Move to ${BOARD_STATUS[status].label}`,
+      label: `Move to ${SYSTEM_COLUMN_LABEL[status]}`,
       target: { key: { kind: 'system', status }, index: 0 },
     });
   }
