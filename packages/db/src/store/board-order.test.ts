@@ -225,6 +225,31 @@ describe('a task with an older run still active', () => {
   });
 });
 
+describe('a dependency parked in a human column', () => {
+  const dependent = () =>
+    store.write((ctx) =>
+      insertTask(ctx, project.id, {
+        title: 'e',
+        acceptanceCriteria: ['x'],
+        areas: ['api'],
+        dependsOn: [tasks.a.id],
+      }),
+    ).value;
+
+  it('refuses to start its dependent, naming the dependency', () => {
+    const e = dependent();
+    store.write((ctx) => moveTask(ctx, tasks.a.id, { to: icebox, after: null, before: null }));
+    expect(() => store.write((ctx) => insertWorkstream(ctx, e.id))).toThrow(
+      'Task e waits on a, which is parked in Icebox; move it to Backlog or Ready first',
+    );
+  });
+
+  it('lets the dependent queue while the dependency is planned', () => {
+    const e = dependent();
+    expect(() => store.write((ctx) => insertWorkstream(ctx, e.id))).not.toThrow();
+  });
+});
+
 describe('parked tasks', () => {
   it('refuses to start a parked task, naming its column', () => {
     store.write((ctx) => moveTask(ctx, tasks.a.id, { to: icebox, after: null, before: null }));

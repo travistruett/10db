@@ -126,6 +126,16 @@ export function insertWorkstream(ctx: WriteContext, taskId: TaskId): WorkstreamD
       `Task ${task.title} is parked in ${column.name}; move it to Backlog or Ready to start it`,
     );
   }
+  // A queued task waits for its dependencies; one parked in a human column would never finish.
+  for (const dependencyId of task.dependsOn) {
+    const dependency = getTask(ctx.tx, dependencyId);
+    if (dependency.status === TaskStatus.Open && dependency.boardColumnId !== null) {
+      const column = getBoardColumn(ctx.tx, dependency.boardColumnId);
+      throw new ConflictError(
+        `Task ${task.title} waits on ${dependency.title}, which is parked in ${column.name}; move it to Backlog or Ready first`,
+      );
+    }
+  }
   const active = ctx.tx
     .select({ id: schema.workstreams.id })
     .from(schema.workstreams)
