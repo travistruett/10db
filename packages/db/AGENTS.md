@@ -28,3 +28,4 @@ only process that writes the database.
   exercised.
 - The daemon bundle ships its own copy of `drizzle/`; pass its path to `migrateDatabase`.
 - Repositories are synchronous functions over `DbReader` (reads) or `WriteContext` (writes); never open a second connection.
+- `board_columns` holds the builder's human columns; `tasks.board_column_id` set means parked (never started: `insertWorkstream` refuses it), null means planned.

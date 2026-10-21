@@ -3,8 +3,9 @@ import { expect, test, type Page } from '@playwright/test';
 import { E2E_REPO } from './paths';
 
 const TASK = 'Write the greeting';
+const OTHER = 'Tidy the readme';
 const QUESTION = 'Which greeting?';
-const VIEWS = ['Board', 'Factory', 'Inbox'] as const;
+const VIEWS = ['Board', 'Factory', 'Inbox', 'Settings'] as const;
 
 async function expectAccessible(page: Page, label: string): Promise<void> {
   const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa']).analyze();
@@ -16,7 +17,7 @@ async function expectAccessible(page: Page, label: string): Promise<void> {
 }
 
 async function open(page: Page, view: (typeof VIEWS)[number]): Promise<void> {
-  await page.getByRole('link', { name: view }).click();
+  await page.getByRole('link', { name: new RegExp(`^${view}( \\d+ open cards?)?$`) }).click();
   await expect(page.getByRole('heading', { name: view, level: 2 })).toBeVisible();
 }
 
@@ -41,13 +42,51 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await projectDialog.getByRole('button', { name: 'Create project' }).click();
   await expect(projectDialog).toBeHidden();
 
-  // Create the task; its only area is preselected.
-  await page.getByRole('button', { name: 'New task' }).click();
-  const taskDialog = page.getByRole('dialog', { name: 'New task' });
-  await taskDialog.getByLabel('Title').fill(TASK);
-  await taskDialog.getByLabel('Acceptance criteria').fill('src/greeting/hello.txt exists');
-  await taskDialog.getByRole('button', { name: 'Create task' }).click();
-  await expect(taskDialog).toBeHidden();
+  // A new project starts with an Icebox column for parked work.
+  // An empty list has no height, so it is attached rather than visible.
+  await expect(page.getByRole('list', { name: 'Icebox tasks' })).toBeAttached();
+
+  // Create two tasks; the only area is preselected. The first never runs.
+  for (const title of [OTHER, TASK]) {
+    await page.getByRole('button', { name: 'New task' }).click();
+    const taskDialog = page.getByRole('dialog', { name: 'New task' });
+    await taskDialog.getByLabel('Title').fill(title);
+    await taskDialog.getByLabel('Acceptance criteria').fill('src/greeting/hello.txt exists');
+    await taskDialog.getByRole('button', { name: 'Create task' }).click();
+    await expect(taskDialog).toBeHidden();
+  }
+
+  // Reorder with the keyboard, and check that it persisted.
+  const ready = page.getByRole('list', { name: 'Ready tasks' });
+  await expect(ready.getByRole('listitem')).toHaveCount(2);
+  await expect(ready.getByRole('listitem').nth(0)).toHaveAccessibleName(OTHER);
+  const handle = ready.getByRole('button', { name: `Drag ${TASK}` });
+  await handle.focus();
+  await expect(handle).toBeFocused();
+  await page.keyboard.press('Space');
+  await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('Space');
+  await expect(ready.getByRole('listitem').nth(0)).toHaveAccessibleName(TASK);
+  await page.reload();
+  await expect(
+    page.getByRole('list', { name: 'Ready tasks' }).getByRole('listitem').nth(0),
+  ).toHaveAccessibleName(TASK);
+
+  // Park the other task from its menu and plan it again; parking survives a reload.
+  const iceboxList = page.getByRole('list', { name: 'Icebox tasks' });
+  await page.getByRole('button', { name: `Actions for ${OTHER}` }).click();
+  await page.getByRole('menuitem', { name: 'Move to Icebox' }).click();
+  await expect(iceboxList.getByRole('listitem', { name: OTHER })).toBeVisible();
+  await page.reload();
+  await expect(
+    page.getByRole('list', { name: 'Icebox tasks' }).getByRole('listitem', { name: OTHER }),
+  ).toBeVisible();
+  await expectAccessible(page, 'board, parked, dark');
+  await page.getByRole('button', { name: `Actions for ${OTHER}` }).click();
+  await page.getByRole('menuitem', { name: 'Move to Ready' }).click();
+  await expect(
+    page.getByRole('list', { name: 'Ready tasks' }).getByRole('listitem', { name: OTHER }),
+  ).toBeVisible();
 
   const card = page.getByRole('listitem', { name: TASK });
   await card.getByRole('button', { name: `Actions for ${TASK}` }).click();
@@ -87,6 +126,20 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   // The MCP commit really landed: the runner counts the commits it recorded before the gate.
   await expect(page.getByText('Gate passed with 1 commit(s).')).toBeVisible();
   await expect(page.getByText(QUESTION)).toHaveCount(0);
+
+  // Settings: add a human column, and a planned section says it is not built yet.
+  await open(page, 'Settings');
+  await expectAccessible(page, 'settings, general, dark');
+  await page.getByRole('link', { name: /Board columns/ }).click();
+  await page.getByLabel('New column').fill('Exploring');
+  await page.getByRole('button', { name: 'Add column' }).click();
+  await expect(
+    page.getByRole('table', { name: 'Human columns' }).getByText('Exploring'),
+  ).toBeVisible();
+  await page.getByRole('link', { name: /Accounts/ }).click();
+  await expect(page.getByText('Not built yet')).toBeVisible();
+  await open(page, 'Board');
+  await expect(page.getByRole('list', { name: 'Exploring tasks' })).toBeAttached();
 
   // Light mode must be just as usable.
   await page.getByRole('button', { name: 'Switch to light mode' }).click();
