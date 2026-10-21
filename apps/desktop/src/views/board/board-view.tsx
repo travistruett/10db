@@ -1,5 +1,6 @@
 import {
   BoardStatus,
+  TaskStatus,
   WorkstreamState,
   type ProjectId,
   type TaskDto,
@@ -29,6 +30,18 @@ const SHOWN_STATES: readonly WorkstreamState[] = Object.values(WorkstreamState).
   (s) => s !== WorkstreamState.Done && s !== WorkstreamState.Cancelled,
 );
 
+/** The first unfinished dependency that sits in a human column, if any. */
+function parkedDependencyOf(
+  task: TaskDto,
+  peers: ReadonlyMap<TaskId, Pick<TaskDto, 'title' | 'status' | 'boardColumnId'>>,
+): string | null {
+  for (const id of task.dependsOn) {
+    const peer = peers.get(id);
+    if (peer?.status === TaskStatus.Open && peer.boardColumnId !== null) return peer.title;
+  }
+  return null;
+}
+
 const isDone = (column: LayoutColumn) =>
   column.key.kind === 'system' && column.key.status === BoardStatus.Done;
 
@@ -36,7 +49,7 @@ interface BoardColumnsProps {
   readonly projectId: ProjectId;
   readonly layout: readonly LayoutColumn[];
   readonly workstreamById: ReadonlyMap<WorkstreamId, WorkstreamDto>;
-  readonly peers: ReadonlyMap<TaskId, Pick<TaskDto, 'title' | 'status'>>;
+  readonly peers: ReadonlyMap<TaskId, Pick<TaskDto, 'title' | 'status' | 'boardColumnId'>>;
 }
 
 /** The columns and their cards, with drag and drop; split out so the actions hook gets a project. */
@@ -98,6 +111,7 @@ function BoardColumns({ projectId, layout, workstreamById, peers }: BoardColumns
                     <TaskCardMenu
                       task={task}
                       latest={ws?.state}
+                      parkedDependency={parkedDependencyOf(task, peers)}
                       moves={menuMoves(layout, task.id)}
                       onMove={(target) => {
                         actions.apply(resolveDrop(layout, task.id, target));

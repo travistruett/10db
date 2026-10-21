@@ -446,6 +446,33 @@ describe('BoardView', () => {
     expect(within(parked).getByRole('listitem', { name: 'Idea' })).toBeTruthy();
   });
 
+  it('disables Start on a card that waits on a parked dependency, and says why', async () => {
+    const project = projectDto();
+    const icebox = boardColumnDto({ projectId: project.id });
+    const idea = taskDto({
+      projectId: project.id,
+      title: 'Idea',
+      boardStatus: 'ready',
+      boardColumnId: icebox.id,
+    });
+    const next = taskDto({
+      projectId: project.id,
+      title: 'Next',
+      boardStatus: 'backlog',
+      dependsOn: [idea.id],
+    });
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/board-columns'), () => HttpResponse.json([icebox])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([idea, next])),
+    );
+    renderApp('/board');
+    fireEvent.click(await screen.findByRole('button', { name: 'Actions for Next' }));
+    const start = await screen.findByRole('menuitem', { name: /^Start/, hidden: true });
+    expect(start.hasAttribute('data-disabled')).toBe(true);
+    expect(start.textContent).toContain('Idea is parked');
+  });
+
   it('shows the 20 most recent done tasks and the rest on request', async () => {
     const project = projectDto();
     const done = Array.from({ length: 22 }, (_, i) =>
