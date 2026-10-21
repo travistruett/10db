@@ -1,7 +1,7 @@
 # Spike 12: Billing identities per config directory and per keyed kind
 
-- **Status:** IN PROGRESS. The gateway check is VERIFIED; the refresh check is PARTIAL; Bedrock, API-key and
-  two-subscription checks have not run.
+- **Status:** IN PROGRESS. The gateway check is VERIFIED; the refresh check is PARTIAL and deferred (an open
+  question in `docs/architecture/open-questions.md`); Bedrock, API-key and two-subscription checks have not run.
 - **Date:** 2026-10-18
 - **Versions:** claude 2.1.302 (Claude Code) · Agent SDK 0.3.300 · Node v26.12.0
 - **Command:** `pnpm --dir spikes/agent-sdk spike:12 <identity | identity-one | refresh | keyed <kind>>`
@@ -63,8 +63,16 @@ from 19:30 to 05:29 Pacific. Every turn succeeded. No session failed, and the si
 The refresh itself was not observed. No line in the five debug logs mentions an OAuth refresh, a 401, an expired
 token or a credential change, so Claude Code does not log a successful refresh at debug level, and the run's
 early stop never fired. If an access token lasts less than 10 hours, a refresh happened during the run and every
-session rode through it; the run does not show how long a token lasts. On this evidence the spec's fallbacks (a lane cap, or starting
-sessions one at a time) are not needed.
+session rode through it; the run does not show how long a token lasts. Nothing broke, but the run does not rule
+out the refresh race either, so the spec's fallbacks (a lane cap, or starting sessions one at a time) stay
+available until the check is rerun.
+
+### Finishing the check (deferred)
+
+Claude Code logs nothing about credentials at debug level, and `claude auth status` reports no expiry. The rerun
+reads the config directory's stored credential in process each cycle and records only its `expiresAt` and a
+short hash of the access token, never the token. A change in either marks the refresh and its time, and the run
+stops one cycle later. The first cycle's `expiresAt` also shows how long a token lasts.
 
 ### Evidence
 
