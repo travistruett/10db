@@ -1,0 +1,190 @@
+import {
+  BoardStatus,
+  type BoardColumnId,
+  type TaskDto,
+  type TaskId,
+  type TaskMove,
+} from '@10db/contracts';
+import { columnKeyId, sameColumn, type ColumnKey, type LayoutColumn } from './board-layout';
+import { BOARD_STATUS } from './board-status';
+
+export type DropAction =
+  | { readonly kind: 'none' }
+  | { readonly kind: 'refuse'; readonly reason: string }
+  | {
+      readonly kind: 'move';
+      readonly taskId: TaskId;
+      readonly move: TaskMove;
+      /** The client's estimate of the stored order, for the optimistic placement only. */
+      readonly order: number;
+      readonly note: string | null;
+    }
+  | { readonly kind: 'start'; readonly taskId: TaskId };
+
+export interface DropTarget {
+  readonly key: ColumnKey;
+  readonly index: number;
+}
+
+export interface MenuMove {
+  readonly label: string;
+  /** Null when the move would do nothing. */
+  readonly target: DropTarget | null;
+}
+
+const LOCKED_DROP = 'Blocked and Done follow the task’s state; cards can’t be dropped there';
+
+/** Why cards in a column can't be dragged; null when they can. */
+export function dragRefusal(key: ColumnKey): string | null {
+  if (key.kind === 'human') return null;
+  switch (key.status) {
+    case BoardStatus.Backlog:
+    case BoardStatus.Ready:
+      return null;
+    case BoardStatus.InProgress:
+      return 'In progress cards follow their workstream; they can’t be dragged';
+    case BoardStatus.Blocked:
+      return 'Blocked cards wait for a retry or an answer; they can’t be dragged';
+    case BoardStatus.Done:
+      return 'Done cards stay where they finished; they can’t be dragged';
+  }
+}
+
+function locate(layout: readonly LayoutColumn[], taskId: TaskId) {
+  for (const column of layout) {
+    const index = column.tasks.findIndex((t) => t.id === taskId);
+    const task = column.tasks[index];
+    if (task) return { column, index, task };
+  }
+  return null;
+}
+
+function place(
+  layout: readonly LayoutColumn[],
+  task: TaskDto,
+  from: ColumnKey,
+  fromIndex: number,
+  to: DropTarget,
+  boardColumnId: BoardColumnId | null,
+  note: string | null,
+): DropAction {
+  const target = layout.find((c) => sameColumn(c.key, to.key));
+  if (!target) return { kind: 'none' };
+  const rest = target.tasks.filter((t) => t.id !== task.id);
+  const index = Math.max(0, Math.min(to.index, rest.length));
+  if (sameColumn(from, to.key) && fromIndex === index) return { kind: 'none' };
+  const after = index > 0 ? rest[index - 1] : undefined;
+  const before = rest[index];
+  const order =
+    after && before
+      ? (after.boardOrder + before.boardOrder) / 2
+      : after
+        ? after.boardOrder + 1
+        : before
+          ? before.boardOrder - 1
+          : task.boardOrder;
+  return {
+    kind: 'move',
+    taskId: task.id,
+    move: { to: boardColumnId, after: after?.id ?? null, before: before?.id ?? null },
+    order,
+    note,
+  };
+}
+
+/** The board's drag rules: free among human columns and planned work, a start into In progress, nothing else. */
+export function resolveDrop(
+  layout: readonly LayoutColumn[],
+  taskId: TaskId,
+  to: DropTarget,
+): DropAction {
+  const found = locate(layout, taskId);
+  if (!found) return { kind: 'none' };
+  const { column, index, task } = found;
+  const refusal = dragRefusal(column.key);
+  if (refusal) return { kind: 'refuse', reason: refusal };
+  if (to.key.kind === 'human') return place(layout, task, column.key, index, to, to.key.id, null);
+  switch (to.key.status) {
+    case BoardStatus.InProgress:
+      if (column.key.kind === 'human')
+        return {
+          kind: 'refuse',
+          reason: `Move ${task.title} to Backlog or Ready before starting it`,
+        };
+      return column.key.status === BoardStatus.Ready
+        ? { kind: 'start', taskId }
+        : {
+            kind: 'refuse',
+            reason:
+              'Only a Ready card starts by dragging; use Start in its menu to queue it until its dependencies finish',
+          };
+    case BoardStatus.Blocked:
+    case BoardStatus.Done:
+      return { kind: 'refuse', reason: LOCKED_DROP };
+    case BoardStatus.Backlog:
+    case BoardStatus.Ready: {
+      // The derived column decides: a task's dependencies, not the drop, put it in Backlog or Ready.
+      const lands = task.boardStatus;
+      const note =
+        lands !== to.key.status
+          ? `${task.title} ${lands === BoardStatus.Backlog ? 'waits on its dependencies, so it is in Backlog' : 'has no unfinished dependencies, so it is in Ready'}`
+          : null;
+      return place(layout, task, column.key, index, to, null, note);
+    }
+  }
+}
+
+/** A dnd-kit `over.id`: a card's task ID, or `column:<columnKeyId>` for a column's empty space. */
+export function dropTarget(
+  layout: readonly LayoutColumn[],
+  overId: string | null,
+): DropTarget | null {
+  if (overId === null) return null;
+  for (const column of layout) {
+    if (overId === `column:${columnKeyId(column.key)}`)
+      return { key: column.key, index: column.tasks.length };
+    const index = column.tasks.findIndex((t) => t.id === overId);
+    if (index >= 0) return { key: column.key, index };
+  }
+  return null;
+}
+
+/** The card menu's moves: the same rules as a drag, without a pointer (WCAG 2.2 SC 2.5.7). */
+export function menuMoves(layout: readonly LayoutColumn[], taskId: TaskId): MenuMove[] {
+  const found = locate(layout, taskId);
+  if (!found || dragRefusal(found.column.key)) return [];
+  const { column, index, task } = found;
+  const last = column.tasks.length - 1;
+  const at = (i: number): DropTarget | null => (i === index ? null : { key: column.key, index: i });
+  const moves: MenuMove[] = [
+    { label: 'Move to top', target: at(0) },
+    { label: 'Move up', target: index > 0 ? at(index - 1) : null },
+    { label: 'Move down', target: index < last ? at(index + 1) : null },
+    { label: 'Move to bottom', target: at(last) },
+  ];
+  for (const other of layout) {
+    if (other.key.kind !== 'human' || sameColumn(other.key, column.key)) continue;
+    moves.push({ label: `Move to ${other.label}`, target: { key: other.key, index: 0 } });
+  }
+  if (column.key.kind === 'human') {
+    const status =
+      task.boardStatus === BoardStatus.Backlog ? BoardStatus.Backlog : BoardStatus.Ready;
+    moves.push({
+      label: `Move to ${BOARD_STATUS[status].label}`,
+      target: { key: { kind: 'system', status }, index: 0 },
+    });
+  }
+  return moves;
+}
+
+/** The task list with one task placed, sorted as the daemon sorts it. */
+export function placeLocally(
+  tasks: readonly TaskDto[],
+  taskId: TaskId,
+  order: number,
+  boardColumnId: BoardColumnId | null,
+): TaskDto[] {
+  return tasks
+    .map((t) => (t.id === taskId ? { ...t, boardOrder: order, boardColumnId } : t))
+    .sort((x, y) => x.boardOrder - y.boardOrder);
+}

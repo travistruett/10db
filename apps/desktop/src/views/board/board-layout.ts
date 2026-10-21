@@ -4,7 +4,7 @@ import {
   type BoardColumnId,
   type TaskDto,
 } from '@10db/contracts';
-import { BOARD_STATUS } from './board-status-badge';
+import { BOARD_STATUS } from './board-status';
 
 export type ColumnKey =
   | { readonly kind: 'human'; readonly id: BoardColumnId }

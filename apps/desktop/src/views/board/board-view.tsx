@@ -1,32 +1,129 @@
-import { BoardStatus, WorkstreamState } from '@10db/contracts';
+import {
+  BoardStatus,
+  WorkstreamState,
+  type ProjectId,
+  type TaskDto,
+  type TaskId,
+  type WorkstreamDto,
+  type WorkstreamId,
+} from '@10db/contracts';
 import { Alert, Button, Group, Loader, Modal, ScrollArea, Stack, Text, Title } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { useState } from 'react';
-import { useBoardColumns, useStartTask, useTasks, useWorkstreams } from '../../daemon/queries';
+import { useBoardColumns, useTasks, useWorkstreams } from '../../daemon/queries';
 import { ProjectPicker } from '../../shell/project-picker';
 import { useSelectedProject } from '../../shell/selected-project';
 import { formatAreas } from './areas-text';
 import { BoardColumn } from './board-column';
-import { boardLayout, columnKeyId, DONE_LIMIT } from './board-layout';
+import { BoardDnd } from './board-dnd';
+import { boardLayout, DONE_LIMIT, type LayoutColumn } from './board-layout';
+import { menuMoves, resolveDrop } from './drop-rules';
 import { NewProjectForm } from './new-project-form';
 import { NewTaskForm } from './new-task-form';
 import { TaskCard } from './task-card';
 import { TaskCardMenu } from './task-card-menu';
+import { useBoardActions } from './use-board-actions';
 
 /** A finished workstream isn't repeated on its card; the task's column already says so. */
 const SHOWN_STATES: readonly WorkstreamState[] = Object.values(WorkstreamState).filter(
   (s) => s !== WorkstreamState.Done && s !== WorkstreamState.Cancelled,
 );
 
+const isDone = (column: LayoutColumn) =>
+  column.key.kind === 'system' && column.key.status === BoardStatus.Done;
+
+interface BoardColumnsProps {
+  readonly projectId: ProjectId;
+  readonly layout: readonly LayoutColumn[];
+  readonly workstreamById: ReadonlyMap<WorkstreamId, WorkstreamDto>;
+  readonly peers: ReadonlyMap<TaskId, Pick<TaskDto, 'title' | 'status'>>;
+}
+
+/** The columns and their cards, with drag and drop; split out so the actions hook gets a project. */
+function BoardColumns({ projectId, layout, workstreamById, peers }: BoardColumnsProps) {
+  const actions = useBoardActions(projectId);
+  const [showAllDone, setShowAllDone] = useState(false);
+  return (
+    <Stack>
+      {actions.notice ? (
+        <Alert color="yellow" withCloseButton onClose={actions.dismiss}>
+          {actions.notice}
+        </Alert>
+      ) : null}
+      {actions.error ? (
+        <Alert color="red" title="Couldn't move the task">
+          {actions.error.message}
+        </Alert>
+      ) : null}
+      <ScrollArea type="auto" offsetScrollbars>
+        <Group align="flex-start" wrap="nowrap" gap="sm">
+          <BoardDnd
+            layout={layout}
+            shown={(column) =>
+              isDone(column) && !showAllDone ? column.tasks.slice(0, DONE_LIMIT) : column.tasks
+            }
+            onDrop={actions.apply}
+            renderColumn={(column, cards, listRef) => (
+              <BoardColumn
+                listRef={listRef}
+                label={column.label}
+                count={column.tasks.length}
+                locked={column.key.kind === 'system'}
+                footer={
+                  isDone(column) && !showAllDone && column.tasks.length > DONE_LIMIT ? (
+                    <Button
+                      variant="subtle"
+                      size="xs"
+                      onClick={() => {
+                        setShowAllDone(true);
+                      }}
+                    >
+                      {`Show all ${String(column.tasks.length)}`}
+                    </Button>
+                  ) : null
+                }
+              >
+                {cards}
+              </BoardColumn>
+            )}
+            renderCard={(task, handle) => {
+              const ws = task.workstreamId ? workstreamById.get(task.workstreamId) : undefined;
+              return (
+                <TaskCard
+                  task={task}
+                  workstream={ws && SHOWN_STATES.includes(ws.state) ? ws : undefined}
+                  peers={peers}
+                  handle={handle}
+                  menu={
+                    <TaskCardMenu
+                      task={task}
+                      latest={ws?.state}
+                      moves={menuMoves(layout, task.id)}
+                      onMove={(target) => {
+                        actions.apply(resolveDrop(layout, task.id, target));
+                      }}
+                      onStart={() => {
+                        actions.apply({ kind: 'start', taskId: task.id });
+                      }}
+                    />
+                  }
+                />
+              );
+            }}
+          />
+        </Group>
+      </ScrollArea>
+    </Stack>
+  );
+}
+
 export function BoardView() {
   const { projects, project, select } = useSelectedProject();
   const tasks = useTasks(project?.id ?? null);
   const columns = useBoardColumns(project?.id ?? null);
   const workstreams = useWorkstreams({ active: false });
-  const start = useStartTask();
   const [projectOpen, projectModal] = useDisclosure(false);
   const [taskOpen, taskModal] = useDisclosure(false);
-  const [showAllDone, setShowAllDone] = useState(false);
 
   const taskList = tasks.data ?? [];
   const layout = boardLayout(columns.data ?? [], taskList);
@@ -88,70 +185,17 @@ export function BoardView() {
           {formatAreas(project.areas)}
         </Text>
       ) : null}
-      {start.error ? (
-        <Alert color="red" title="Couldn't start the task">
-          {start.error.message}
-        </Alert>
-      ) : null}
 
       {project && tasks.isSuccess && taskList.length === 0 ? (
         <Text c="dimmed">No tasks yet.</Text>
       ) : null}
       {project && tasks.isSuccess ? (
-        <ScrollArea type="auto" offsetScrollbars>
-          <Group align="flex-start" wrap="nowrap" gap="sm">
-            {layout.map((column) => {
-              const isDone = column.key.kind === 'system' && column.key.status === BoardStatus.Done;
-              const shown =
-                isDone && !showAllDone ? column.tasks.slice(0, DONE_LIMIT) : column.tasks;
-              return (
-                <BoardColumn
-                  key={columnKeyId(column.key)}
-                  label={column.label}
-                  count={column.tasks.length}
-                  locked={column.key.kind === 'system'}
-                  footer={
-                    shown.length < column.tasks.length ? (
-                      <Button
-                        variant="subtle"
-                        size="xs"
-                        onClick={() => {
-                          setShowAllDone(true);
-                        }}
-                      >
-                        {`Show all ${String(column.tasks.length)}`}
-                      </Button>
-                    ) : null
-                  }
-                >
-                  {shown.map((task) => {
-                    const ws = task.workstreamId
-                      ? workstreamById.get(task.workstreamId)
-                      : undefined;
-                    return (
-                      <li key={task.id} aria-label={task.title}>
-                        <TaskCard
-                          task={task}
-                          workstream={ws && SHOWN_STATES.includes(ws.state) ? ws : undefined}
-                          peers={peers}
-                          menu={
-                            <TaskCardMenu
-                              task={task}
-                              latest={ws?.state}
-                              onStart={() => {
-                                start.mutate(task.id);
-                              }}
-                            />
-                          }
-                        />
-                      </li>
-                    );
-                  })}
-                </BoardColumn>
-              );
-            })}
-          </Group>
-        </ScrollArea>
+        <BoardColumns
+          projectId={project.id}
+          layout={layout}
+          workstreamById={workstreamById}
+          peers={peers}
+        />
       ) : null}
 
       <Modal opened={projectOpen} onClose={projectModal.close} title="New project" size="lg">

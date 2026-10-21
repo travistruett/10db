@@ -9,10 +9,12 @@ export interface BoardColumnProps {
   readonly locked: boolean;
   readonly children: ReactNode;
   readonly footer?: ReactNode;
+  /** Makes the list a drop target. */
+  readonly listRef?: (element: HTMLElement | null) => void;
 }
 
 /** One column: a titled list whose items are task cards. */
-export function BoardColumn({ label, count, locked, children, footer }: BoardColumnProps) {
+export function BoardColumn({ label, count, locked, children, footer, listRef }: BoardColumnProps) {
   return (
     <Paper withBorder radius="md" p="xs" miw={220}>
       <Stack gap="xs">
@@ -36,6 +38,7 @@ export function BoardColumn({ label, count, locked, children, footer }: BoardCol
         </Group>
         <Stack
           component="ul"
+          ref={listRef}
           gap="xs"
           m={0}
           p={0}
