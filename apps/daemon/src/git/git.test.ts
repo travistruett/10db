@@ -3,9 +3,14 @@ import { rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { InvalidError } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createTempRepo, tempDir } from '../../test/fixtures';
+import {
+  createTempRepo,
+  createTempRepoWithOrigin,
+  NETWORK_ENV,
+  tempDir,
+} from '../../test/fixtures';
 import type { TempDir } from '../../test/fixtures';
-import { createGit } from './index';
+import { createGit, GitNetworkError } from './index';
 
 const git = createGit();
 let repo: TempDir;
@@ -196,5 +201,138 @@ describe('status', () => {
   ])('reports $name', async ({ arrange, expected }) => {
     arrange();
     expect(await git.status(repo.path)).toEqual(expected);
+  });
+});
+
+describe('branches and remotes', () => {
+  it('reads the current branch, and null when HEAD is detached', async () => {
+    expect(await git.currentBranch(repo.path)).toBe('main');
+    rawGit('checkout', '-q', '--detach');
+    expect(await git.currentBranch(repo.path)).toBeNull();
+  });
+
+  it("reads a remote's URL, and null when there is no such remote", async () => {
+    expect(await git.remoteUrl(repo.path, 'origin')).toBeNull();
+    rawGit('remote', 'add', 'origin', '/nowhere/x.git');
+    expect(await git.remoteUrl(repo.path, 'origin')).toBe('/nowhere/x.git');
+  });
+
+  it('switches to a new branch from a start point, with no upstream', async () => {
+    const base = rawGit('rev-parse', 'HEAD');
+    write('later.txt', 'later');
+    rawGit('add', 'later.txt');
+    rawGit('commit', '-q', '-m', 'later');
+    await git.switchNewBranch(repo.path, '10db/greetings-0a1b2c3d', base);
+    expect(rawGit('branch', '--show-current')).toBe('10db/greetings-0a1b2c3d');
+    expect(rawGit('rev-parse', 'HEAD')).toBe(base);
+    expect(() => rawGit('rev-parse', '--abbrev-ref', '@{u}')).toThrow();
+    await expect(git.switchNewBranch(repo.path, '10db/greetings-0a1b2c3d', base)).rejects.toThrow(
+      /already exists/,
+    );
+  });
+});
+
+describe('network calls', () => {
+  let remote: ReturnType<typeof createTempRepoWithOrigin>;
+  beforeEach(() => {
+    remote = createTempRepoWithOrigin();
+  });
+  afterEach(() => {
+    remote.cleanup();
+  });
+
+  const net = { env: NETWORK_ENV, timeoutMs: 10_000 };
+  const local = (...args: string[]) =>
+    execFileSync('git', ['-C', remote.repo.path, ...args])
+      .toString()
+      .trim();
+  const origin = (...args: string[]) =>
+    execFileSync('git', ['-C', remote.origin.path, ...args])
+      .toString()
+      .trim();
+  /** Another clone adds a commit to `branch` on origin, as a teammate would. */
+  function pushFromElsewhere(branch: string, file: string): string {
+    const other = tempDir('other');
+    try {
+      execFileSync('git', ['clone', '-q', remote.origin.path, other.path], { stdio: 'pipe' });
+      const g = (...args: string[]) =>
+        execFileSync('git', ['-C', other.path, ...args], { stdio: 'pipe' })
+          .toString()
+          .trim();
+      g('config', 'user.name', 'teammate');
+      g('config', 'user.email', 'teammate@10db.invalid');
+      g('config', 'commit.gpgsign', 'false');
+      if (branch !== 'main') g('switch', '-q', '-c', branch);
+      writeFileSync(join(other.path, file), file);
+      g('add', file);
+      g('commit', '-q', '-m', `Add ${file}`);
+      g('push', '-q', 'origin', branch);
+      return g('rev-parse', 'HEAD');
+    } finally {
+      other.cleanup();
+    }
+  }
+
+  it('fetches the base branch into origin/<branch> without touching the checkout', async () => {
+    const before = local('rev-parse', 'HEAD');
+    const upstream = pushFromElsewhere('main', 'upstream.txt');
+    await git.fetch(remote.repo.path, 'main', net);
+    expect(local('rev-parse', 'origin/main')).toBe(upstream);
+    expect(local('rev-parse', 'HEAD')).toBe(before);
+  });
+
+  it('fails to fetch a branch origin does not have', async () => {
+    const failure = git.fetch(remote.repo.path, 'develop', net);
+    await expect(failure).rejects.toBeInstanceOf(GitNetworkError);
+    await expect(failure).rejects.toMatchObject({ kind: 'failed' });
+  });
+
+  it('pushes a branch and sets its upstream, and pushing it again changes nothing', async () => {
+    await git.switchNewBranch(remote.repo.path, '10db/x-0a1b2c3d', 'main');
+    writeFileSync(join(remote.repo.path, 'x.txt'), 'x');
+    local('add', 'x.txt');
+    local('commit', '-q', '-m', 'Add x');
+    await git.push(remote.repo.path, '10db/x-0a1b2c3d', net);
+    const sha = local('rev-parse', 'HEAD');
+    expect(origin('rev-parse', 'refs/heads/10db/x-0a1b2c3d')).toBe(sha);
+    expect(local('rev-parse', '--abbrev-ref', '@{u}')).toBe('origin/10db/x-0a1b2c3d');
+    await git.push(remote.repo.path, '10db/x-0a1b2c3d', net);
+    expect(origin('rev-parse', 'refs/heads/10db/x-0a1b2c3d')).toBe(sha);
+  });
+
+  it('reports a rejected push and never forces it', async () => {
+    const theirs = pushFromElsewhere('10db/x-0a1b2c3d', 'theirs.txt');
+    await git.switchNewBranch(remote.repo.path, '10db/x-0a1b2c3d', 'main');
+    writeFileSync(join(remote.repo.path, 'ours.txt'), 'ours');
+    local('add', 'ours.txt');
+    local('commit', '-q', '-m', 'Add ours');
+    const failure = git.push(remote.repo.path, '10db/x-0a1b2c3d', net);
+    await expect(failure).rejects.toMatchObject({ name: 'GitNetworkError', kind: 'rejected' });
+    expect(origin('rev-parse', 'refs/heads/10db/x-0a1b2c3d')).toBe(theirs);
+  });
+
+  it('times out a fetch that hangs', async () => {
+    local('remote', 'set-url', 'origin', 'ssh://git@example.invalid/hang.git');
+    // ssh is replaced by a command that hangs; git appends the host and command as arguments.
+    const hang = {
+      env: { ...NETWORK_ENV, GIT_SSH_COMMAND: 'sleep 5; true', GIT_SSH_VARIANT: 'simple' },
+      timeoutMs: 300,
+    };
+    await expect(git.fetch(remote.repo.path, 'main', hang)).rejects.toMatchObject({
+      kind: 'timeout',
+    });
+  });
+
+  it('stops a fetch when its signal aborts', async () => {
+    local('remote', 'set-url', 'origin', 'ssh://git@example.invalid/hang.git');
+    const controller = new AbortController();
+    const call = {
+      env: { ...NETWORK_ENV, GIT_SSH_COMMAND: 'sleep 5; true', GIT_SSH_VARIANT: 'simple' },
+      timeoutMs: 10_000,
+      signal: controller.signal,
+    };
+    const pending = git.fetch(remote.repo.path, 'main', call);
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ kind: 'aborted' });
   });
 });

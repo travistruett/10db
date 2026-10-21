@@ -22,7 +22,82 @@ class GitError extends Error {
   }
 }
 
+/** How a network call is made: in the login environment, bounded in time, stoppable. */
+export interface NetworkCall {
+  readonly env: Readonly<Record<string, string>>;
+  readonly timeoutMs: number;
+  readonly signal?: AbortSignal;
+}
+
+export const GitNetworkFailure = {
+  Timeout: 'timeout',
+  Rejected: 'rejected',
+  Aborted: 'aborted',
+  Failed: 'failed',
+} as const;
+export type GitNetworkFailure = (typeof GitNetworkFailure)[keyof typeof GitNetworkFailure];
+
+/** A fetch or push that did not complete; `detail` is git's own message, trimmed. */
+export class GitNetworkError extends Error {
+  override readonly name = 'GitNetworkError';
+  readonly kind: GitNetworkFailure;
+  readonly detail: string;
+  constructor(kind: GitNetworkFailure, args: readonly string[], detail: string) {
+    super(`git ${args.join(' ')}: ${kind}${detail ? `: ${detail}` : ''}`);
+    this.kind = kind;
+    this.detail = detail;
+  }
+}
+
+/** Prompts are off whatever the environment says: nobody can answer one. */
+const NO_PROMPTS = { GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never', LC_ALL: 'C' } as const;
+const REJECTED = /\[(remote )?rejected\]|failed to push some refs/i;
+
+function stderrOf(error: unknown): string {
+  return typeof error === 'object' && error !== null && 'stderr' in error
+    ? String(error.stderr).trim().slice(-2000)
+    : String(error);
+}
+
+async function gitNetwork(repo: string, args: readonly string[], net: NetworkCall): Promise<void> {
+  try {
+    await run('git', ['-C', repo, ...args], {
+      env: { ...net.env, ...NO_PROMPTS },
+      timeout: net.timeoutMs,
+      killSignal: 'SIGKILL',
+      ...(net.signal ? { signal: net.signal } : {}),
+      maxBuffer: 16 * 1024 * 1024,
+    });
+  } catch (error) {
+    if (net.signal?.aborted) throw new GitNetworkError(GitNetworkFailure.Aborted, args, '');
+    const killed =
+      typeof error === 'object' && error !== null && 'killed' in error && error.killed === true;
+    if (killed)
+      throw new GitNetworkError(
+        GitNetworkFailure.Timeout,
+        args,
+        `no answer within ${String(Math.round(net.timeoutMs / 1000))} s`,
+      );
+    const stderr = stderrOf(error);
+    throw new GitNetworkError(
+      REJECTED.test(stderr) ? GitNetworkFailure.Rejected : GitNetworkFailure.Failed,
+      args,
+      stderr,
+    );
+  }
+}
+
 export interface Git {
+  /** The checked-out branch; null when HEAD is detached. */
+  currentBranch(repo: string): Promise<string | null>;
+  /** The URL of remote `name`; null when the repository has no such remote. */
+  remoteUrl(repo: string, name: string): Promise<string | null>;
+  /** Updates `origin/<branch>` from origin; the checkout is untouched. */
+  fetch(repo: string, branch: string, net: NetworkCall): Promise<void>;
+  /** Creates `name` at `startPoint` and checks it out, with no upstream. */
+  switchNewBranch(repo: string, name: string, startPoint: string): Promise<void>;
+  /** Pushes `branch` to the same name on origin and sets it as upstream; never forced. */
+  push(repo: string, branch: string, net: NetworkCall): Promise<void>;
   head(repo: string): Promise<string>;
   status(repo: string): Promise<{ code: string; path: string }[]>;
   /** Committed and uncommitted changes since `base`, sorted and unique. */
@@ -131,6 +206,29 @@ export function createGit(): Git {
   }
 
   return {
+    async currentBranch(repo) {
+      const name = (await git(repo, ['branch', '--show-current'])).trim();
+      return name === '' ? null : name;
+    },
+    async remoteUrl(repo, name) {
+      try {
+        return (await git(repo, ['remote', 'get-url', name])).trim();
+      } catch (error) {
+        if (error instanceof GitError && /no such remote/i.test(error.stderr)) return null;
+        throw error;
+      }
+    },
+    fetch: (repo, branch, net) =>
+      gitNetwork(
+        repo,
+        ['fetch', '--no-tags', 'origin', `+refs/heads/${branch}:refs/remotes/origin/${branch}`],
+        net,
+      ),
+    async switchNewBranch(repo, name, startPoint) {
+      await withRepoLock(repo, () => git(repo, ['switch', '--no-track', '-c', name, startPoint]));
+    },
+    push: (repo, branch, net) =>
+      gitNetwork(repo, ['push', '-u', 'origin', `refs/heads/${branch}:refs/heads/${branch}`], net),
     head: revParseHead,
     status,
     async changedFilesSince(repo, base) {

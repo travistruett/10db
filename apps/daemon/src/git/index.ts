@@ -1,1 +1,1 @@
-export { createGit, type Git } from './git';
+export { createGit, GitNetworkError, type Git, type NetworkCall } from './git';

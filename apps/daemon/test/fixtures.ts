@@ -35,6 +35,28 @@ export function createTempRepo(): TempDir {
   return dir;
 }
 
+/** What network calls get in tests: enough PATH to find git and gh scripts, nothing else. */
+export const NETWORK_ENV: Readonly<Record<string, string>> = {
+  PATH: process.env['PATH'] ?? '/usr/bin:/bin',
+};
+
+/** A temp repo whose `origin` is a local bare repo holding `main`, so fetch and push are real. */
+export function createTempRepoWithOrigin(): { repo: TempDir; origin: TempDir; cleanup(): void } {
+  const origin = tempDir('origin');
+  execFileSync('git', ['init', '-q', '--bare', '-b', 'main', origin.path], { stdio: 'pipe' });
+  const repo = createTempRepo();
+  execFileSync('git', ['-C', repo.path, 'remote', 'add', 'origin', origin.path], { stdio: 'pipe' });
+  execFileSync('git', ['-C', repo.path, 'push', '-q', 'origin', 'main'], { stdio: 'pipe' });
+  return {
+    repo,
+    origin,
+    cleanup: () => {
+      repo.cleanup();
+      origin.cleanup();
+    },
+  };
+}
+
 export function seedWorkstream(
   store: Store,
   opts: {
