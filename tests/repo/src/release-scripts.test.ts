@@ -1,8 +1,8 @@
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { readRepoFile, repoRoot } from './workspace';
 
 const checkVersion = join(repoRoot, 'scripts/release/check-version.mjs');
@@ -57,16 +57,28 @@ describe('check-version.mjs', () => {
 });
 
 describe('build-macos.sh', () => {
-  const bare = { PATH: process.env['PATH'] ?? '', HOME: process.env['HOME'] ?? '' };
+  // The PATH holds grep and nothing else, which is all the checks before the platform gate use.
+  // If a refusal regresses, the script stops at its first missing tool (uname) instead of
+  // reaching `rm -rf` on the bundle and dist/release or a real `tauri build`.
+  let toolDir = '';
+  let bare: { PATH: string; HOME: string } = { PATH: '', HOME: '' };
+  beforeAll(() => {
+    toolDir = mkdtempSync(join(tmpdir(), 'build-macos-bin-'));
+    symlinkSync('/usr/bin/grep', join(toolDir, 'grep'));
+    bare = { PATH: toolDir, HOME: process.env['HOME'] ?? '' };
+  });
+  afterAll(() => {
+    rmSync(toolDir, { recursive: true, force: true });
+  });
 
   it('rejects an unknown mode', () => {
-    const result = run('bash', [buildMacos, 'notarized'], bare);
+    const result = run('/bin/bash', [buildMacos, 'notarized'], bare);
     expect(result.status).toBe(2);
     expect(result.stderr).toContain('usage');
   });
 
   it('refuses a signed build without the Apple credentials, before building anything', () => {
-    const result = run('bash', [buildMacos, 'signed'], bare);
+    const result = run('/bin/bash', [buildMacos, 'signed'], bare);
     expect(result.status).toBe(1);
     for (const name of [...Object.keys(appleEnv), 'APPLE_API_KEY_PATH']) {
       expect(result.stderr).toContain(`${name} is not set`);
@@ -75,7 +87,7 @@ describe('build-macos.sh', () => {
 
   it('refuses a signed build when the API key file is missing', () => {
     const env = { ...bare, ...appleEnv, APPLE_API_KEY_PATH: join(repoRoot, 'no-such-key.p8') };
-    const result = run('bash', [buildMacos, 'signed'], env);
+    const result = run('/bin/bash', [buildMacos, 'signed'], env);
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('APPLE_API_KEY_PATH does not point to a file');
   });
@@ -89,7 +101,7 @@ describe('build-macos.sh', () => {
     try {
       const keyPath = join(dir, 'AuthKey.p8');
       writeFileSync(keyPath, content);
-      const result = run('bash', [buildMacos, 'signed'], {
+      const result = run('/bin/bash', [buildMacos, 'signed'], {
         ...bare,
         ...appleEnv,
         APPLE_API_KEY_PATH: keyPath,
