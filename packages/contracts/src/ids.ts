@@ -31,6 +31,7 @@ const ID_SCHEMAS = {
   Person: idSchema('psn', 'PersonId'),
   RoutingRule: idSchema('rtr', 'RoutingRuleId'),
   ModelProfile: idSchema('mpf', 'ModelProfileId'),
+  Batch: idSchema('bat', 'BatchId'),
 } as const;
 
 const ID_PREFIX = {
@@ -53,6 +54,7 @@ const ID_PREFIX = {
   Person: 'psn',
   RoutingRule: 'rtr',
   ModelProfile: 'mpf',
+  Batch: 'bat',
 } as const satisfies Record<keyof typeof ID_SCHEMAS, string>;
 
 export type IdKind = keyof typeof ID_SCHEMAS;
@@ -105,3 +107,5 @@ export const RoutingRuleId = ID_SCHEMAS.RoutingRule;
 export type RoutingRuleId = IdOf<'RoutingRule'>;
 export const ModelProfileId = ID_SCHEMAS.ModelProfile;
 export type ModelProfileId = IdOf<'ModelProfile'>;
+export const BatchId = ID_SCHEMAS.Batch;
+export type BatchId = IdOf<'Batch'>;

@@ -34,7 +34,8 @@
             "enum": [
               "claude",
               "git",
-              "docker"
+              "docker",
+              "gh"
             ]
           },
           "path": {

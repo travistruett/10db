@@ -34,6 +34,7 @@ export const EventType = {
   BenchmarksSynced: 'benchmarks.synced',
   ProjectChanged: 'project.changed',
   StepChanged: 'step.changed',
+  BatchUpdated: 'batch.updated',
 } as const;
 export type EventType = (typeof EventType)[keyof typeof EventType];
 
