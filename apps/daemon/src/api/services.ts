@@ -1,6 +1,11 @@
 import type {
   AaModelDto,
   BenchmarkStatusDto,
+  BoardColumnDelete,
+  BoardColumnDto,
+  BoardColumnId,
+  BoardColumnInput,
+  BoardColumnPatch,
   DaemonEvent,
   FlowDto,
   FlowId,
@@ -33,6 +38,7 @@ import type {
   TaskDto,
   TaskId,
   TaskInput,
+  TaskMove,
   TaskPatch,
   TeamDto,
   TeamInput,
@@ -81,6 +87,13 @@ export interface ApiServices {
   listRoutingRules(projectId: ProjectId): RoutingRuleDto[];
   setRoutingRules(projectId: ProjectId, input: RoutingRulesInput): RoutingRuleDto[];
   patchTask(id: TaskId, patch: TaskPatch): TaskDto;
+  /** Places a task in a column between new neighbours; throws ConflictError for a stale or locked move. */
+  moveTask(id: TaskId, move: TaskMove): TaskDto;
+  listBoardColumns(projectId: ProjectId): BoardColumnDto[];
+  createBoardColumn(projectId: ProjectId, input: BoardColumnInput): BoardColumnDto;
+  patchBoardColumn(id: BoardColumnId, patch: BoardColumnPatch): BoardColumnDto[];
+  /** Moves the column's tasks to another column or to planned, then deletes it. */
+  deleteBoardColumn(id: BoardColumnId, del: BoardColumnDelete): BoardColumnDto[];
   /** What starting the task would run; throws InvalidError when no flow or profile fits. */
   stepPlan(taskId: TaskId): StepPlanDto;
 }

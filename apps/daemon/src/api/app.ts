@@ -1,4 +1,8 @@
 import {
+  BoardColumnDelete,
+  BoardColumnId,
+  BoardColumnInput,
+  BoardColumnPatch,
   DomainError,
   EventsHead,
   FlowId,
@@ -23,6 +27,7 @@ import {
   SystemCheckDto,
   TaskId,
   TaskInput,
+  TaskMove,
   TaskPatch,
   TeamInput,
   WorkstreamId,
@@ -217,6 +222,49 @@ export function createApp(deps: ApiDeps) {
       validator('json', (value): TaskPatch => TaskPatch.parse(value)),
       (c) =>
         c.json(deps.services.patchTask(TaskId.parse(c.req.param('taskId')), c.req.valid('json'))),
+    )
+    .post(
+      '/tasks/:taskId/move',
+      validator('json', (value): TaskMove => TaskMove.parse(value)),
+      (c) =>
+        c.json(deps.services.moveTask(TaskId.parse(c.req.param('taskId')), c.req.valid('json'))),
+    )
+    .get('/projects/:projectId/board-columns', (c) =>
+      c.json(deps.services.listBoardColumns(ProjectId.parse(c.req.param('projectId')))),
+    )
+    .post(
+      '/projects/:projectId/board-columns',
+      validator('json', (value): BoardColumnInput => BoardColumnInput.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.createBoardColumn(
+            ProjectId.parse(c.req.param('projectId')),
+            c.req.valid('json'),
+          ),
+          201,
+        ),
+    )
+    .patch(
+      '/board-columns/:columnId',
+      validator('json', (value): BoardColumnPatch => BoardColumnPatch.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.patchBoardColumn(
+            BoardColumnId.parse(c.req.param('columnId')),
+            c.req.valid('json'),
+          ),
+        ),
+    )
+    .post(
+      '/board-columns/:columnId/delete',
+      validator('json', (value): BoardColumnDelete => BoardColumnDelete.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.deleteBoardColumn(
+            BoardColumnId.parse(c.req.param('columnId')),
+            c.req.valid('json'),
+          ),
+        ),
     )
     .get('/tasks/:taskId/step-plan', (c) =>
       c.json(deps.services.stepPlan(TaskId.parse(c.req.param('taskId')))),
