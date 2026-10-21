@@ -633,8 +633,12 @@ describe('BoardView', () => {
     boardWith([running, shipped], []);
 
     const handle = await screen.findByRole('button', { name: 'Can’t drag Shipped' });
-    expect(handle.hasAttribute('disabled') || handle.hasAttribute('data-disabled')).toBe(true);
-    expect(handle.getAttribute('title')).toBe(
+    // Focusable, so a keyboard user reaches the reason; aria-disabled keeps it from acting.
+    expect(handle.getAttribute('aria-disabled')).toBe('true');
+    expect(handle.hasAttribute('disabled')).toBe(false);
+    const described = handle.getAttribute('aria-describedby');
+    expect(described).not.toBeNull();
+    expect(document.getElementById(described ?? '')?.textContent).toBe(
       'Done cards stay where they finished; they can’t be dragged',
     );
     expect(screen.getByRole('button', { name: 'Can’t drag Running' })).toBeTruthy();

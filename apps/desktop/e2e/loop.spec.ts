@@ -127,6 +127,17 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await expect(page.getByText('Gate passed with 1 commit(s).')).toBeVisible();
   await expect(page.getByText(QUESTION)).toHaveCount(0);
 
+  // A locked card's reason is reachable from the keyboard, not only on hover.
+  await open(page, 'Board');
+  const locked = page
+    .getByRole('list', { name: 'Done tasks' })
+    .getByRole('button', { name: `Can’t drag ${TASK}` });
+  await locked.focus();
+  await expect(locked).toBeFocused();
+  await expect(locked).toHaveAccessibleDescription(
+    'Done cards stay where they finished; they can’t be dragged',
+  );
+
   // Settings: add a human column, and a planned section says it is not built yet.
   await open(page, 'Settings');
   await expectAccessible(page, 'settings, general, dark');
@@ -136,6 +147,7 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await expect(
     page.getByRole('table', { name: 'Human columns' }).getByText('Exploring'),
   ).toBeVisible();
+  await expectAccessible(page, 'settings, board columns, dark');
   await page.getByRole('link', { name: /Accounts/ }).click();
   await expect(page.getByText('Not built yet')).toBeVisible();
   await open(page, 'Board');
@@ -148,4 +160,8 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
     await open(page, view);
     await expectAccessible(page, `${view.toLowerCase()}, light`);
   }
+  await open(page, 'Settings');
+  await page.getByRole('link', { name: /Board columns/ }).click();
+  await expect(page.getByRole('table', { name: 'Human columns' })).toBeVisible();
+  await expectAccessible(page, 'settings, board columns, light');
 });

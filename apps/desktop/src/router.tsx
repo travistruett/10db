@@ -52,7 +52,7 @@ const indexRoute = createRoute({
   path: '/',
   beforeLoad: () => {
     // TanStack Router's redirect is thrown by design.
-    // eslint-disable-next-line @typescript-eslint/only-throw-error
+    // eslint-disable-next-line @typescript-eslint/only-throw-error -- TanStack Router redirects by throwing.
     throw redirect({ to: '/factory' });
   },
 });
@@ -76,7 +76,7 @@ const tasksRoute = createRoute({
   path: '/tasks',
   beforeLoad: () => {
     // TanStack Router's redirect is thrown by design.
-    // eslint-disable-next-line @typescript-eslint/only-throw-error
+    // eslint-disable-next-line @typescript-eslint/only-throw-error -- TanStack Router redirects by throwing.
     throw redirect({ to: '/board' });
   },
 });
@@ -85,7 +85,7 @@ const settingsIndexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/settings',
   beforeLoad: () => {
-    // eslint-disable-next-line @typescript-eslint/only-throw-error
+    // eslint-disable-next-line @typescript-eslint/only-throw-error -- TanStack Router redirects by throwing.
     throw redirect({ to: '/settings/$section', params: { section: SettingsSectionKey.General } });
   },
 });
@@ -94,7 +94,7 @@ const settingsRoute = createRoute({
   path: '/settings/$section',
   beforeLoad: ({ params }) => {
     if (!isSettingsSectionKey(params.section))
-      // eslint-disable-next-line @typescript-eslint/only-throw-error
+      // eslint-disable-next-line @typescript-eslint/only-throw-error -- TanStack Router redirects by throwing.
       throw redirect({ to: '/settings/$section', params: { section: SettingsSectionKey.General } });
   },
   component: SettingsPage,

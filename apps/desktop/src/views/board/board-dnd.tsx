@@ -1,4 +1,3 @@
-/* eslint-disable react-hooks/refs -- dnd-kit's useSortable returns ref callbacks and listeners the compiler's lint reads as render-time ref access. */
 import type { TaskDto } from '@10db/contracts';
 import {
   closestCorners,
@@ -18,7 +17,7 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { ActionIcon, Tooltip } from '@mantine/core';
+import { ActionIcon, VisuallyHidden } from '@mantine/core';
 import { IconGripVertical } from '@tabler/icons-react';
 import type { ReactNode } from 'react';
 import { columnKeyId, type LayoutColumn } from './board-layout';
@@ -35,22 +34,26 @@ function Handle({
 }) {
   // dnd-kit's sortable handle is a bag of refs and listeners the compiler cannot analyze.
   'use no memo';
+  const reasonId = `drag-reason-${task.id}`;
   if (refusal)
     return (
-      <Tooltip label={refusal}>
-        <span>
-          <ActionIcon
-            variant="subtle"
-            size="sm"
-            disabled
-            aria-label={`Can’t drag ${task.title}`}
-            title={refusal}
-          >
-            <IconGripVertical size={16} stroke={1.5} />
-          </ActionIcon>
-        </span>
-      </Tooltip>
+      <>
+        {/* aria-disabled, not disabled: a keyboard user can focus the handle and hear why it is locked. */}
+        <ActionIcon
+          variant="subtle"
+          size="sm"
+          aria-disabled="true"
+          aria-describedby={reasonId}
+          aria-label={`Can’t drag ${task.title}`}
+          title={refusal}
+          style={{ cursor: 'not-allowed', opacity: 0.5 }}
+        >
+          <IconGripVertical size={16} stroke={1.5} />
+        </ActionIcon>
+        <VisuallyHidden id={reasonId}>{refusal}</VisuallyHidden>
+      </>
     );
+  /* eslint-disable react-hooks/refs -- useSortable returns ref callbacks and listeners that the lint reads as render-time ref access. */
   return (
     <ActionIcon
       ref={sortable.setActivatorNodeRef}
@@ -64,6 +67,7 @@ function Handle({
       <IconGripVertical size={16} stroke={1.5} />
     </ActionIcon>
   );
+  /* eslint-enable react-hooks/refs */
 }
 
 function SortableCard({
@@ -78,6 +82,7 @@ function SortableCard({
   // dnd-kit's sortable handle is a bag of refs and listeners the compiler cannot analyze.
   'use no memo';
   const sortable = useSortable({ id: task.id, disabled: refusal !== null });
+  /* eslint-disable react-hooks/refs -- useSortable returns ref callbacks and listeners that the lint reads as render-time ref access. */
   return (
     <li
       ref={sortable.setNodeRef}
@@ -91,6 +96,7 @@ function SortableCard({
       {children(<Handle task={task} refusal={refusal} sortable={sortable} />)}
     </li>
   );
+  /* eslint-enable react-hooks/refs */
 }
 
 /** Makes the column's list a drop target, so an empty column or the space below its cards accepts a card. */
