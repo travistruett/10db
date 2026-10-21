@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  BoardColumnDelete,
   BoardColumnInput,
   BoardColumnPatch,
   columnNameKey,
@@ -98,5 +99,17 @@ describe('column names', () => {
       'Blocked',
       'Done',
     ]);
+  });
+});
+
+describe('BoardColumnDelete', () => {
+  it.each([
+    { name: 'another column', value: { moveTasksTo: column }, ok: true },
+    { name: 'an explicit planned', value: { moveTasksTo: 'planned' }, ok: true },
+    { name: 'null, which no longer means planned', value: { moveTasksTo: null }, ok: false },
+    { name: 'no target', value: {}, ok: false },
+    { name: 'a malformed column', value: { moveTasksTo: 'bcl_nope' }, ok: false },
+  ])('parses a delete with $name: $ok', ({ value, ok }) => {
+    expect(BoardColumnDelete.safeParse(value).success).toBe(ok);
   });
 });

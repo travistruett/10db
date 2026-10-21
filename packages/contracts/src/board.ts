@@ -76,8 +76,10 @@ export const BoardColumnPatch = z
   .refine((p) => Object.keys(p).length > 0, { message: 'Change at least one field' });
 export type BoardColumnPatch = z.infer<typeof BoardColumnPatch>;
 
-/** Where a deleted column's tasks go: another human column, or null for planned. */
-export const BoardColumnDelete = z.object({ moveTasksTo: BoardColumnId.nullable() });
+/** Where a deleted column's tasks go: another human column, or the literal 'planned'. A caller must say which; there is no default. */
+export const BoardColumnDelete = z.object({
+  moveTasksTo: z.union([BoardColumnId, z.literal('planned')]),
+});
 export type BoardColumnDelete = z.infer<typeof BoardColumnDelete>;
 
 /**
