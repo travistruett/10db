@@ -42,9 +42,13 @@ The fake adapter (`sessions/fake-adapter.ts`) is the test boundary for Claude Co
   `TENDB_LIVE_CLAUDE=1`.
 - Sessions and the gate both run in `sessionEnv(project)`. Nothing from the daemon's own
   `process.env` reaches a project's commands.
-- Git's repository variables (`GIT_REPO_ENV_VARS` in `git/`: `GIT_DIR` and the rest of
-  `git rev-parse --local-env-vars`) never reach a git child: `git/` and the session env drop them,
-  so a daemon started from a git hook still acts on the repository it names.
+- The variables that point git at a repository (`GIT_REPO_ENV_VARS` in `git/`: `GIT_DIR` and the
+  rest of `git rev-parse --local-env-vars` except the config ones) are dropped wherever the daemon
+  starts a process that may run git: `git/`'s own calls, the login shell capture, and the session
+  env (sessions and the gate). A daemon started from a git hook still acts on the repository it
+  names. Git config variables (`GIT_CONFIG_COUNT` with its `KEY_n`/`VALUE_n`,
+  `GIT_CONFIG_PARAMETERS`, `GIT_CONFIG`) are kept: they name no repository, and a builder's
+  profile may set them on purpose.
 - `keep-awake/` and `watcher/` follow lanes through `workstream.*` events, wired in `daemon/start.ts`.
 - A managed session's MCP servers are 10db's own plus the repo's `.mcp.json` servers the builder approved
   for that exact config, resolved per session in `sessions/project-mcp.ts`. Claude Code never reads MCP

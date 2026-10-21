@@ -177,10 +177,10 @@ describe('buildSessionEnv', () => {
     ).not.toThrow();
   });
 
-  it('drops the variables that tie git to one repository and keeps the rest of git’s settings', () => {
+  it('drops the variables that name another repository and keeps profile git config and settings', () => {
     // A daemon started from a git hook captures GIT_DIR and friends; a session or gate that
     // inherited them would run git against that repository instead of the project's.
-    const hookVariables = {
+    const repositoryVariables = {
       GIT_DIR: '/h/b/Projects/other/.git',
       GIT_WORK_TREE: '/h/b/Projects/other',
       GIT_INDEX_FILE: '/h/b/Projects/other/.git/index',
@@ -188,17 +188,22 @@ describe('buildSessionEnv', () => {
       GIT_PREFIX: 'src/',
       GIT_OBJECT_DIRECTORY: '/h/b/Projects/other/.git/objects',
       GIT_ALTERNATE_OBJECT_DIRECTORIES: '/h/b/Projects/other/.git/objects',
-      GIT_CONFIG_PARAMETERS: "'core.bare'='true'",
+    };
+    // Deliberate config from the builder's profile, such as a url rewrite, still applies.
+    const kept = {
       GIT_CONFIG_COUNT: '1',
+      GIT_CONFIG_KEY_0: 'url.git@github.com:.insteadOf',
+      GIT_CONFIG_VALUE_0: 'https://github.com/',
+      GIT_SSH_COMMAND: 'ssh -i /h/b/.ssh/work',
     };
     const env = buildSessionEnv({
-      base: { ...BASE, ...hookVariables, GIT_SSH_COMMAND: 'ssh -i /h/b/.ssh/work' },
+      base: { ...BASE, ...repositoryVariables, ...kept },
       billingMode: BillingMode.Subscription,
       clientApp: CLIENT_APP,
       secrets: keychain(null),
     });
-    for (const name of Object.keys(hookVariables)) expect(env).not.toHaveProperty(name);
-    expect(env['GIT_SSH_COMMAND']).toBe('ssh -i /h/b/.ssh/work');
+    for (const name of Object.keys(repositoryVariables)) expect(env).not.toHaveProperty(name);
+    expect(env).toMatchObject(kept);
   });
 
   it('does not modify the captured base', () => {
