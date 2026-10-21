@@ -1,5 +1,7 @@
 import { z } from 'zod';
+import { BranchName, PrTitlePrefix } from './git-names';
 import {
+  BatchId,
   EvidenceId,
   FlowId,
   HandoffId,
@@ -13,6 +15,7 @@ import {
 import {
   BillingMode,
   BoardStatus,
+  Delivery,
   Effort,
   EvidenceKind,
   InboxKind,
@@ -90,10 +93,20 @@ export const ProjectInput = z
     flowId: FlowId.nullable().default(null),
     /** The most a task may cost, in USD, compared with a profile's AA cost per task; null for no ceiling. */
     budgetCeiling: z.number().positive().nullable().default(null),
+    /** How finished work leaves the machine: on the checked-out branch, or as a batch's pull request. */
+    delivery: z.enum(Delivery).default(Delivery.Local),
+    /** The branch on `origin` a batch is cut from and its pull request targets. */
+    baseBranch: BranchName.default('main'),
+    /** `pull_request` delivery titles each PR `<prefix>: <batch title>`. */
+    prTitlePrefix: PrTitlePrefix.nullable().default(null),
   })
   .refine((p) => p.nudgePct > p.handoffPct, {
     message: 'nudgePct must be above handoffPct',
     path: ['nudgePct'],
+  })
+  .refine((p) => p.delivery !== Delivery.PullRequest || p.prTitlePrefix !== null, {
+    message: 'Pull request delivery needs a PR title prefix such as feat(app)',
+    path: ['prTitlePrefix'],
   });
 export type ProjectInput = z.input<typeof ProjectInput>;
 export type ProjectConfig = z.output<typeof ProjectInput>;
@@ -115,6 +128,9 @@ export const ProjectDto = z.object({
   humanWaitMinutes: z.int(),
   flowId: FlowId.nullable(),
   budgetCeiling: z.number().nullable(),
+  delivery: z.enum(Delivery),
+  baseBranch: z.string(),
+  prTitlePrefix: z.string().nullable(),
   createdAt: Timestamp,
   updatedAt: Timestamp,
 });
@@ -132,6 +148,9 @@ export const ProjectPatch = z
     flowId: FlowId.nullable(),
     /** The most a task may cost, in USD, compared with a profile's AA cost per task; null for no ceiling. */
     budgetCeiling: z.number().positive().nullable(),
+    delivery: z.enum(Delivery),
+    baseBranch: BranchName,
+    prTitlePrefix: PrTitlePrefix.nullable(),
   })
   .partial()
   .refine((p) => Object.keys(p).length > 0, { message: 'Change at least one field' });
@@ -206,6 +225,8 @@ export const WorkstreamDto = z.object({
   taskId: TaskId,
   taskTitle: z.string(),
   projectId: ProjectId,
+  /** The batch it runs in; null in local delivery. */
+  batchId: BatchId.nullable(),
   state: z.enum(WorkstreamState),
   nextAction: NextAction,
   attempt: z.int(),

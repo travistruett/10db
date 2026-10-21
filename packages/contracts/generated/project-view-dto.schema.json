@@ -135,6 +135,22 @@
         "null"
       ]
     },
+    "delivery": {
+      "type": "string",
+      "enum": [
+        "local",
+        "pull_request"
+      ]
+    },
+    "baseBranch": {
+      "type": "string"
+    },
+    "prTitlePrefix": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "createdAt": {
       "type": "string",
       "format": "date-time",
@@ -289,6 +305,9 @@
     "humanWaitMinutes",
     "flowId",
     "budgetCeiling",
+    "delivery",
+    "baseBranch",
+    "prTitlePrefix",
     "createdAt",
     "updatedAt"
   ]

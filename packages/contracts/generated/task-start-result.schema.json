@@ -19,6 +19,17 @@
           "type": "string",
           "pattern": "^prj_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
         },
+        "batchId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^bat_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "state": {
           "type": "string",
           "enum": [
@@ -445,6 +456,7 @@
         "taskId",
         "taskTitle",
         "projectId",
+        "batchId",
         "state",
         "nextAction",
         "attempt",

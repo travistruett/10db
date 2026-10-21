@@ -1,10 +1,14 @@
 import type {
   AaModelDto,
   AreaDef,
+  BatchFailure,
+  BatchId,
+  BatchState,
   BillingMode,
   ClaimId,
   ClaimKind,
   DecisionId,
+  Delivery,
   DeviationId,
   Effort,
   EventType,
@@ -100,9 +104,49 @@ export const projects = sqliteTable('projects', {
     .$type<FlowId>()
     .references(() => flows.id),
   budgetCeiling: real('budget_ceiling'),
+  delivery: text('delivery').$type<Delivery>().notNull().default('local'),
+  baseBranch: text('base_branch').notNull().default('main'),
+  prTitlePrefix: text('pr_title_prefix'),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
+
+/**
+ * One branch and one pull request (batch delivery spec §3). The partial unique index allows one
+ * unfinished batch per project; its state list matches UNFINISHED_BATCH_STATES.
+ */
+export const batches = sqliteTable(
+  'batches',
+  {
+    id: text('id').$type<BatchId>().primaryKey(),
+    projectId: text('project_id')
+      .$type<ProjectId>()
+      .notNull()
+      .references(() => projects.id),
+    title: text('title').notNull(),
+    state: text('state').$type<BatchState>().notNull(),
+    branch: text('branch'),
+    baseBranch: text('base_branch').notNull(),
+    baseSha: text('base_sha'),
+    /** The GitHub `owner/name` from `gh repo view`, recorded at cut. */
+    repo: text('repo'),
+    prUrl: text('pr_url'),
+    gateExitCode: integer('gate_exit_code'),
+    gateLogPath: text('gate_log_path'),
+    /** The shipping gate's process-group leader and its OS start time, so recovery can kill an orphaned gate. */
+    gatePid: integer('gate_pid'),
+    gatePidStart: text('gate_pid_start'),
+    failure: text('failure').$type<BatchFailure>(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index('batches_project_idx').on(t.projectId),
+    uniqueIndex('batches_one_unfinished')
+      .on(t.projectId)
+      .where(sql`state IN ('CUTTING', 'OPEN', 'SHIPPING', 'FAILED')`),
+  ],
+);
 
 export const tasks = sqliteTable(
   'tasks',
@@ -185,6 +229,9 @@ export const workstreams = sqliteTable(
       .$type<ProjectId>()
       .notNull()
       .references(() => projects.id),
+    batchId: text('batch_id')
+      .$type<BatchId>()
+      .references(() => batches.id),
     state: text('state').$type<WorkstreamState>().notNull(),
     nextAction: text('next_action', { mode: 'json' }).$type<NextAction>().notNull(),
     attempt: integer('attempt').notNull(),
@@ -211,7 +258,11 @@ export const workstreams = sqliteTable(
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index('workstreams_state_idx').on(t.state), index('workstreams_task_idx').on(t.taskId)],
+  (t) => [
+    index('workstreams_state_idx').on(t.state),
+    index('workstreams_task_idx').on(t.taskId),
+    index('workstreams_batch_idx').on(t.batchId),
+  ],
 );
 
 export const sessions = sqliteTable(

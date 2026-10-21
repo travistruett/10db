@@ -1,6 +1,6 @@
 {
-  "id": "106f7108-6f46-4788-b52f-c520def86cff",
-  "prevId": "6ac590e9-5a87-45a0-adaf-27f01ce5e27e",
+  "id": "f0a14b14-4397-4dfb-9dfa-1883235878b9",
+  "prevId": "24fc9640-a992-42c5-ad0b-9b68224b1119",
   "version": "6",
   "dialect": "sqlite",
   "tables": {
@@ -62,6 +62,158 @@
       },
       "indexes": {},
       "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "batches": {
+      "name": "batches",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "project_id": {
+          "name": "project_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "state": {
+          "name": "state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "branch": {
+          "name": "branch",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "base_branch": {
+          "name": "base_branch",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "base_sha": {
+          "name": "base_sha",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "repo": {
+          "name": "repo",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "pr_url": {
+          "name": "pr_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "gate_exit_code": {
+          "name": "gate_exit_code",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "gate_log_path": {
+          "name": "gate_log_path",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "gate_pid": {
+          "name": "gate_pid",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "gate_pid_start": {
+          "name": "gate_pid_start",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "failure": {
+          "name": "failure",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "batches_project_idx": {
+          "name": "batches_project_idx",
+          "columns": [
+            "project_id"
+          ],
+          "isUnique": false
+        },
+        "batches_one_unfinished": {
+          "name": "batches_one_unfinished",
+          "columns": [
+            "project_id"
+          ],
+          "where": "state IN ('CUTTING', 'OPEN', 'SHIPPING', 'FAILED')",
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "batches_project_id_projects_id_fk": {
+          "name": "batches_project_id_projects_id_fk",
+          "tableFrom": "batches",
+          "columnsFrom": [
+            "project_id"
+          ],
+          "tableTo": "projects",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}
@@ -1462,6 +1614,29 @@
           "notNull": false,
           "autoincrement": false
         },
+        "delivery": {
+          "name": "delivery",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'local'"
+        },
+        "base_branch": {
+          "name": "base_branch",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'main'"
+        },
+        "pr_title_prefix": {
+          "name": "pr_title_prefix",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "text",
@@ -2365,6 +2540,13 @@
           "notNull": true,
           "autoincrement": false
         },
+        "batch_id": {
+          "name": "batch_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "state": {
           "name": "state",
           "type": "text",
@@ -2529,6 +2711,13 @@
             "task_id"
           ],
           "isUnique": false
+        },
+        "workstreams_batch_idx": {
+          "name": "workstreams_batch_idx",
+          "columns": [
+            "batch_id"
+          ],
+          "isUnique": false
         }
       },
       "foreignKeys": {
@@ -2552,6 +2741,19 @@
             "project_id"
           ],
           "tableTo": "projects",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "workstreams_batch_id_batches_id_fk": {
+          "name": "workstreams_batch_id_batches_id_fk",
+          "tableFrom": "workstreams",
+          "columnsFrom": [
+            "batch_id"
+          ],
+          "tableTo": "batches",
           "columnsTo": [
             "id"
           ],
