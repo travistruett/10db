@@ -10,6 +10,10 @@ import {
 import { readRepoFile } from './workspace';
 
 const MISE_ACTION = 'jdx/mise-action@';
+// Any mention of the secrets context: `secrets.X`, `secrets['X']`, `toJSON(secrets)` and `secrets: inherit`.
+const SECRETS_REFERENCE = /\bsecrets\b/;
+// Tools the release build needs from mise.toml; the others (linters, scanners) stay uninstalled.
+const RELEASE_MISE_TOOLS = 'node pnpm rust';
 const ciMise = allSteps('.github/workflows/ci.yml').find(
   (step) => step.uses?.startsWith(MISE_ACTION) === true,
 );
@@ -49,7 +53,7 @@ describe.each(Object.values(releaseWorkflowPaths))('%s', (path) => {
 
   it('reads secrets only in jobs bound to the release or release-bot environment', () => {
     const leaking = jobs
-      .filter(([, job]) => JSON.stringify(job).includes('secrets.'))
+      .filter(([, job]) => SECRETS_REFERENCE.test(JSON.stringify(job)))
       .filter(([, job]) => !['release', 'release-bot'].includes(environmentOf(job) ?? ''))
       .map(([name]) => name);
     expect(leaking).toEqual([]);
@@ -63,6 +67,12 @@ describe.each(Object.values(releaseWorkflowPaths))('%s', (path) => {
   it('restores no caches, so a poisoned cache cannot reach a release build', () => {
     expect(text).not.toMatch(/actions\/cache@|Swatinem\/rust-cache@|cache: pnpm/);
     expect(mise.filter((step) => step.with?.['cache'] !== false)).toEqual([]);
+  });
+
+  it('installs only the mise tools the build needs', () => {
+    expect(mise.map((step) => step.with?.['install_args'])).toEqual(
+      mise.map(() => RELEASE_MISE_TOOLS),
+    );
   });
 
   it('uses the same mise-action pin and mise version as ci.yml', () => {
@@ -112,7 +122,13 @@ describe('release workflow', () => {
       String(order),
     ).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
-    expect(steps.slice(at('--draft=false') + 1).every((step) => step.if === 'always()')).toBe(true);
+    expect(at('--draft=false')).toBe(steps.length - 1);
+  });
+
+  it('removes the API key file right after the build, whether or not it succeeded', () => {
+    const removal = steps[at('build-macos.sh signed') + 1];
+    expect(removal?.run).toBe('rm -f "$RUNNER_TEMP/AuthKey.p8"');
+    expect(removal?.if).toBe('always()');
   });
 
   it('attests every file listed in SHA256SUMS', () => {
@@ -131,7 +147,7 @@ describe('release-dry-run workflow', () => {
   });
 
   it('can reach no secret, no environment and no release', () => {
-    expect(text).not.toMatch(/secrets\.|environment:|gh release|id-token/);
+    expect(text).not.toMatch(/\bsecrets\b|environment:|gh release|id-token/);
     expect(Object.values(workflow.jobs).map((job) => job.permissions)).toEqual([
       { contents: 'read' },
     ]);
@@ -151,14 +167,21 @@ describe('build-macos.sh', () => {
     expect(script).not.toMatch(/x86_64|universal-apple-darwin/);
   });
 
-  it('notarizes, staples and Gatekeeper-checks in signed mode', () => {
+  it('notarizes, staples and Gatekeeper-checks both the DMG and the app in signed mode', () => {
     for (const command of [
       'xcrun notarytool submit',
-      'xcrun stapler staple',
-      'xcrun stapler validate',
-      'spctl --assess',
+      'xcrun stapler staple "$dmg"',
+      'xcrun stapler validate "$dmg"',
+      'xcrun stapler validate "$app"',
+      'spctl --assess --type open --context context:primary-signature --verbose=4 "$dmg"',
+      'spctl --assess --type execute --verbose=4 "$app"',
     ]) {
       expect(script).toContain(command);
     }
+  });
+
+  it('checks every Mach-O in Contents/MacOS for arm64', () => {
+    expect(script).toMatch(/for binary in "\$app"\/Contents\/MacOS\/\*/);
+    expect(script).not.toContain('binaries[0]');
   });
 });

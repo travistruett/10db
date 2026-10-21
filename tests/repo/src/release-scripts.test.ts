@@ -1,4 +1,6 @@
 import { spawnSync } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { readRepoFile, repoRoot } from './workspace';
@@ -76,5 +78,26 @@ describe('build-macos.sh', () => {
     const result = run('bash', [buildMacos, 'signed'], env);
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('APPLE_API_KEY_PATH does not point to a file');
+  });
+
+  it.each([
+    { name: 'empty', content: '' },
+    { name: 'a lone newline', content: '\n' },
+    { name: 'not a private key', content: 'hunter2\n' },
+  ])('refuses a signed build when the API key file is $name', ({ content }) => {
+    const dir = mkdtempSync(join(tmpdir(), 'build-macos-key-'));
+    try {
+      const keyPath = join(dir, 'AuthKey.p8');
+      writeFileSync(keyPath, content);
+      const result = run('bash', [buildMacos, 'signed'], {
+        ...bare,
+        ...appleEnv,
+        APPLE_API_KEY_PATH: keyPath,
+      });
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('APPLE_API_KEY_PATH does not hold a private key');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

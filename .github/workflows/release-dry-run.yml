@@ -19,6 +19,7 @@ jobs:
         with:
           version: 2026.10.11
           cache: false
+          install_args: node pnpm rust
       - run: pnpm install --frozen-lockfile
       - name: Check that the version files agree
         run: node scripts/release/check-version.mjs "$(node -p "require('./package.json').version")"

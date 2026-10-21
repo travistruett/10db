@@ -24,6 +24,7 @@ if [ "$mode" = signed ]; then
   done
   [ "$missing" -eq 0 ] || exit 1
   [ -f "$APPLE_API_KEY_PATH" ] || fail "APPLE_API_KEY_PATH does not point to a file"
+  grep -q 'BEGIN PRIVATE KEY' "$APPLE_API_KEY_PATH" || fail "APPLE_API_KEY_PATH does not hold a private key"
 fi
 
 [ "$(uname -s)-$(uname -m)" = Darwin-arm64 ] || fail "needs an Apple Silicon Mac, got $(uname -s)-$(uname -m)"
@@ -74,7 +75,10 @@ apps=("$mount"/*.app)
 [ "${#apps[@]}" -eq 1 ] || fail "expected one app in the DMG, found ${#apps[@]}"
 app="${apps[0]}"
 binaries=("$app"/Contents/MacOS/*)
-[ "$(lipo -archs "${binaries[0]}")" = arm64 ] || fail "$(basename "${binaries[0]}") is not arm64-only"
+[ "${#binaries[@]}" -gt 0 ] || fail "the app has no executables in Contents/MacOS"
+for binary in "$app"/Contents/MacOS/*; do
+  [ "$(lipo -archs "$binary")" = arm64 ] || fail "$(basename "$binary") is not arm64-only"
+done
 if [ "$mode" = signed ]; then
   codesign --verify --deep --strict --verbose=2 "$app"
   [ "$(team_of "$app")" = "$APPLE_TEAM_ID" ] || fail "the app is not signed by team $APPLE_TEAM_ID"
