@@ -66,6 +66,9 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
     setRoutingRules: track('setRoutingRules'),
     patchTask: track('patchTask'),
     stepPlan: track('stepPlan'),
+    startBatch: track('startBatch'),
+    shipBatch: track('shipBatch'),
+    abandonBatch: track('abandonBatch'),
     ...overrides,
   };
 }
@@ -478,4 +481,62 @@ describe('team, routing and benchmark routes', () => {
     expect(res.status).toBe(400);
     expect(reached).toEqual([]);
   });
+});
+
+describe('batch routes', () => {
+  const batch = {
+    id: mintId('Batch'),
+    projectId: mintId('Project'),
+    title: 'Greetings',
+    state: 'CUTTING',
+    branch: null,
+    baseBranch: 'main',
+    baseSha: null,
+    repo: null,
+    prUrl: null,
+    gateExitCode: null,
+    gateLogPath: null,
+    failure: null,
+    createdAt: '2026-10-21T12:00:00.000Z',
+    updatedAt: '2026-10-21T12:00:00.000Z',
+  } as const;
+  const post = (_path: string, body?: unknown) => ({
+    method: 'POST',
+    headers: { Authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+
+  it('answers 202 with the batch for a batch start, and 400 for an empty one', async () => {
+    const services = stubServices({ startBatch: () => batch });
+    const path = `/projects/${batch.projectId}/batches`;
+    const ok = await app(services).request(
+      path,
+      post(path, { title: 'Greetings', taskIds: [mintId('Task')] }),
+    );
+    expect(ok.status).toBe(202);
+    expect(await ok.json()).toEqual(batch);
+    expect(
+      (await app(services).request(path, post(path, { title: 'x', taskIds: [] }))).status,
+    ).toBe(400);
+  });
+
+  it('answers 202 with the batch when a task starts in a pull-request project', async () => {
+    const res = await app(stubServices({ startTask: () => batch })).request(
+      `/tasks/${mintId('Task')}/start`,
+      post(''),
+    );
+    expect(res.status).toBe(202);
+  });
+
+  it.each([
+    { path: 'ship', service: 'shipBatch' },
+    { path: 'abandon', service: 'abandonBatch' },
+  ])(
+    'routes $path to $service, and refuses an id that is not a batch',
+    async ({ path, service }) => {
+      await app().request(`/batches/${mintId('Batch')}/${path}`, post(''));
+      expect(reached).toEqual([service]);
+      expect((await app().request(`/batches/not-a-batch/${path}`, post(''))).status).toBe(400);
+    },
+  );
 });

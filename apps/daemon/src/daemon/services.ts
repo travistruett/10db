@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   ACTIVE_STATES,
+  Delivery,
   InvalidError,
   type McpServerStatusDto,
   ProjectInput,
@@ -10,6 +11,7 @@ import {
 import {
   getMcpApproval,
   getProject,
+  getTask,
   getTeam,
   getWorkstream,
   insertFlow,
@@ -26,6 +28,7 @@ import {
   listPeople,
   listPersonas,
   listProjects,
+  listProjectViews,
   listRoutingRules,
   listTasks,
   listWorkstreams,
@@ -39,6 +42,8 @@ import {
 } from '@10db/db';
 import type { BenchmarkSync } from '../benchmarks';
 import type { ApiServices } from '../api';
+import type { BatchStarter, Shipper } from '../delivery';
+import { markGhRequired } from '../environment';
 import type { EventBus, StateStore } from '../events';
 import { requestMcpApproval, type InboxService } from '../inbox';
 import type { KeepAwake } from '../keep-awake';
@@ -57,10 +62,12 @@ export function createServices(deps: {
   readonly keepAwake: KeepAwake;
   readonly systemCheck: () => Promise<SystemCheckDto>;
   readonly benchmarks: BenchmarkSync;
+  readonly starter: BatchStarter;
+  readonly shipper: Shipper;
 }): ApiServices {
   const db = deps.state.db;
   return {
-    listProjects: () => listProjects(db),
+    listProjects: () => listProjectViews(db),
     createProject(input) {
       const config = ProjectInput.parse(input);
       if (!existsSync(join(config.repoPath, '.git'))) {
@@ -75,10 +82,17 @@ export function createServices(deps: {
       return task;
     },
     startTask(taskId) {
-      const ws = startTaskWithPlan(deps.state, taskId);
+      const project = getProject(db, getTask(db, taskId).projectId);
+      const started =
+        project.delivery === Delivery.PullRequest
+          ? deps.starter.startTask(taskId)
+          : startTaskWithPlan(deps.state, taskId);
       deps.scheduler.requestTick();
-      return ws;
+      return started;
     },
+    startBatch: (projectId, input) => deps.starter.startBatch(projectId, input),
+    shipBatch: (id) => deps.shipper.ship(id),
+    abandonBatch: (id) => deps.shipper.abandon(id),
     listFlows: () => listFlows(db),
     listWorkstreams: ({ active }) => listWorkstreams(db, active ? { states: ACTIVE_STATES } : {}),
     async cancelWorkstream(id) {
@@ -98,7 +112,11 @@ export function createServices(deps: {
     },
     eventsAfter: (after, limit) => listEventsAfter(db, after, limit),
     subscribe: (listener) => deps.bus.subscribe(listener),
-    systemCheck: () => deps.systemCheck(),
+    systemCheck: async () =>
+      markGhRequired(
+        await deps.systemCheck(),
+        listProjects(db).some((p) => p.delivery === Delivery.PullRequest),
+      ),
     keepAwake: () => deps.keepAwake.status(),
     setKeepAwake: (mode) => deps.keepAwake.setMode(mode),
     eventsHead: () => latestEventSeq(db),

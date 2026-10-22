@@ -1,5 +1,8 @@
 import type {
   AaModelDto,
+  BatchDto,
+  BatchId,
+  BatchStartInput,
   BenchmarkStatusDto,
   DaemonEvent,
   FlowDto,
@@ -26,6 +29,7 @@ import type {
   ProjectId,
   ProjectInput,
   ProjectPatch,
+  ProjectViewDto,
   RoutingRuleDto,
   RoutingRulesInput,
   StepPlanDto,
@@ -34,6 +38,7 @@ import type {
   TaskId,
   TaskInput,
   TaskPatch,
+  TaskStartResult,
   TeamDto,
   TeamInput,
   WorkstreamDto,
@@ -42,11 +47,17 @@ import type {
 
 /** What the HTTP layer needs from the daemon. Implemented in the daemon module. */
 export interface ApiServices {
-  listProjects(): ProjectDto[];
+  listProjects(): ProjectViewDto[];
   createProject(input: ProjectInput): ProjectDto;
   listTasks(projectId: ProjectId): TaskDto[];
   createTask(projectId: ProjectId, input: TaskInput): TaskDto;
-  startTask(taskId: TaskId): WorkstreamDto;
+  /** Local delivery: the workstream. Pull-request delivery: the batch the task runs in. */
+  startTask(taskId: TaskId): TaskStartResult;
+  /** Starts the tasks as a batch, or adds them to the project's open or failed batch. */
+  startBatch(projectId: ProjectId, input: BatchStartInput): BatchDto;
+  /** Ship anyway (from OPEN) or Retry (from FAILED). */
+  shipBatch(id: BatchId): BatchDto;
+  abandonBatch(id: BatchId): BatchDto;
   listFlows(): FlowDto[];
   listWorkstreams(filter: { readonly active: boolean }): WorkstreamDto[];
   cancelWorkstream(id: WorkstreamId): Promise<WorkstreamDto>;
