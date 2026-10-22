@@ -195,7 +195,7 @@ isolation applied to subscriptions only.
 | Question | Who can answer it | Blocks |
 |---|---|---|
 | Whether one person may hold several personal Claude subscriptions (for example plus-addressed emails), one per client | Anthropic's consumer terms, or support | relying on per-client personal subscriptions; Team seats or client API keys are the alternative |
-| Whether `accountInfo()` reports an organization for API-key, Bedrock and gateway sessions | the spike | identity checks for keyed kinds (a key fingerprint is the fallback) |
+| Whether `accountInfo()` reports an organization for API-key and Bedrock sessions. A gateway session reports none and looks first-party, so it uses the key fingerprint (`docs/architecture/research/spike-12-accounts.md`) | the spike | identity checks for API-key and Bedrock accounts (a key fingerprint is the fallback) |
 
 ## 12. Order
 
