@@ -10,6 +10,7 @@ export default defineConfig({
       'packages/harness',
       'apps/daemon',
       'apps/desktop',
+      'apps/desktop/e2e',
     ],
   },
 });

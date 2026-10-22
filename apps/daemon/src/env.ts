@@ -18,6 +18,12 @@ const DaemonEnv = z.object({
   TENDB_FAKE_SCRIPTS: z.string().min(1).optional(),
   // Development and Playwright only: a fixed UI bearer token instead of a random one per start.
   TENDB_DEV_UI_TOKEN: z.string().min(32).optional(),
+  // Development and Playwright only: one more browser origin the API accepts, for a Vite server on a
+  // port other than the Tauri dev port. Loopback http origins only.
+  TENDB_DEV_UI_ORIGIN: z
+    .string()
+    .regex(/^http:\/\/(localhost|127\.0\.0\.1):\d{1,5}$/)
+    .optional(),
   // Absolute path to the claude binary; otherwise it is found on the login shell's PATH.
   TENDB_CLAUDE_PATH: z.string().startsWith('/').optional(),
   // Set by the desktop shell: the daemon runs its normal shutdown when stdin reaches EOF, which is how
