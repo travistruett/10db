@@ -49,9 +49,14 @@ export function createTempRepo(): TempDir {
   return dir;
 }
 
-/** What network calls get in tests: enough PATH to find git and gh scripts, nothing else. */
+/**
+ * What network calls get in tests: enough PATH to find git and gh scripts, and the same config
+ * isolation as `isolatedGitEnv`, nothing else.
+ */
 export const NETWORK_ENV: Readonly<Record<string, string>> = {
   PATH: process.env['PATH'] ?? '/usr/bin:/bin',
+  GIT_CONFIG_NOSYSTEM: '1',
+  GIT_CONFIG_GLOBAL: '/dev/null',
 };
 
 /** A temp repo whose `origin` is a local bare repo holding `main`, so fetch and push are real. */

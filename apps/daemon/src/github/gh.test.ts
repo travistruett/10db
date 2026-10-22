@@ -1,7 +1,8 @@
-import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { tempDir } from '../../test/fixtures';
+import { createDecoyRepo } from '../../test/decoy-repo';
+import { createTempRepo, NETWORK_ENV, tempDir } from '../../test/fixtures';
 import { createGh, GhError, systemGhExec, type GhCall, type GhExec } from './index';
 
 const CALL: GhCall = { cwd: '/tmp', env: {}, timeoutMs: 5_000 };
@@ -192,6 +193,28 @@ describe('systemGhExec', () => {
     expect(out.stdout.trim()).toMatch(
       new RegExp(`^1 1 0 \\S*${bin.path.split('/').pop() ?? ''} auth status$`),
     );
+  });
+
+  it('runs gh where the git it calls finds the repository it runs in, keeping git settings', async () => {
+    // gh runs git in its working directory to read the remotes. A daemon started from a git hook
+    // may have captured GIT_DIR and friends, which would aim that git at another repository.
+    const repo = createTempRepo();
+    const decoy = createDecoyRepo();
+    try {
+      fakeGh('git rev-parse --absolute-git-dir; echo "$GIT_SSH_COMMAND"');
+      const env = {
+        ...NETWORK_ENV,
+        PATH: `${bin.path}:${process.env['PATH'] ?? '/usr/bin:/bin'}`,
+        ...decoy.hookVariables,
+        GIT_SSH_COMMAND: 'ssh -i key',
+      };
+      const out = await systemGhExec(['repo', 'view'], call({ cwd: repo.path, env }));
+      expect(out).toMatchObject({ exitCode: 0 });
+      expect(out.stdout).toBe(`${join(realpathSync(repo.path), '.git')}\nssh -i key\n`);
+    } finally {
+      decoy.cleanup();
+      repo.cleanup();
+    }
   });
 
   it('returns a non-zero exit with its stderr', async () => {

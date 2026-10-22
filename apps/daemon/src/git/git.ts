@@ -63,7 +63,8 @@ function stderrOf(error: unknown): string {
 async function gitNetwork(repo: string, args: readonly string[], net: NetworkCall): Promise<void> {
   try {
     await run('git', ['-C', repo, ...args], {
-      env: { ...net.env, ...NO_PROMPTS },
+      // The login environment may carry a hook's GIT_DIR or GIT_WORK_TREE, which would override -C.
+      env: { ...withoutGitRepoEnv(net.env), ...NO_PROMPTS },
       timeout: net.timeoutMs,
       killSignal: 'SIGKILL',
       ...(net.signal ? { signal: net.signal } : {}),

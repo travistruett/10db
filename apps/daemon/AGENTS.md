@@ -45,9 +45,10 @@ The fake adapter (`sessions/fake-adapter.ts`) is the test boundary for Claude Co
   `process.env` reaches a project's commands.
 - The variables that point git at a repository (`GIT_REPO_ENV_VARS` in `git/`: `GIT_DIR` and the
   rest of `git rev-parse --local-env-vars` except the config ones) are dropped wherever the daemon
-  starts a process that may run git: `git/`'s own calls, the login shell capture, and the session
-  env (sessions and the gate). A daemon started from a git hook still acts on the repository it
-  names. Git config variables (`GIT_CONFIG_COUNT` with its `KEY_n`/`VALUE_n`,
+  starts a process that may run git: `git/`'s own calls (fetch and push take theirs off the
+  `NetworkCall` env), every `gh` call (gh runs git to read the remotes), the login shell capture,
+  and the session env (sessions and the gate). A daemon started from a git hook still acts on the
+  repository it names. Git config variables (`GIT_CONFIG_COUNT` with its `KEY_n`/`VALUE_n`,
   `GIT_CONFIG_PARAMETERS`, `GIT_CONFIG`) are kept: they name no repository, and a builder's
   profile may set them on purpose.
 - `keep-awake/` and `watcher/` follow lanes through `workstream.*` events, wired in `daemon/start.ts`.

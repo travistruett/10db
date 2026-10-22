@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { z } from 'zod';
+import { withoutGitRepoEnv } from '../git';
 
 /** One `gh` call: where it runs, in which environment, for how long, and how to stop it. */
 export interface GhCall {
@@ -84,7 +85,8 @@ export const systemGhExec: GhExec = (args, call) =>
       [...args],
       {
         cwd: call.cwd,
-        env: { ...call.env, ...NO_PROMPTS },
+        // gh runs git in cwd to read the remotes; a hook's GIT_DIR would aim it at another repository.
+        env: { ...withoutGitRepoEnv(call.env), ...NO_PROMPTS },
         timeout: call.timeoutMs,
         killSignal: 'SIGKILL',
         maxBuffer: MAX_OUTPUT,

@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDecoyRepo } from './decoy-repo';
-import { createTempRepo, isolatedGitEnv, type TempDir } from './fixtures';
+import { createTempRepo, createTempRepoWithOrigin, isolatedGitEnv, type TempDir } from './fixtures';
 
 const gitIn = (repo: string, ...args: string[]) =>
   execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8', env: isolatedGitEnv() }).trim();
@@ -43,6 +43,38 @@ describe('createTempRepo', () => {
       expect(gitIn(path, 'config', 'user.name')).toBe('10db test');
     } finally {
       repo?.cleanup();
+      decoy.cleanup();
+    }
+  });
+});
+
+describe('createTempRepoWithOrigin', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('builds its own repository and origin when git hook variables point at another one', () => {
+    const decoy = createDecoyRepo();
+    let remote: ReturnType<typeof createTempRepoWithOrigin> | undefined;
+    try {
+      const before = decoy.snapshot();
+      for (const [name, value] of Object.entries(decoy.hookVariables)) vi.stubEnv(name, value);
+      let failure: unknown;
+      try {
+        remote = createTempRepoWithOrigin();
+      } catch (error) {
+        failure = error;
+      }
+      vi.unstubAllEnvs();
+
+      expect(decoy.snapshot()).toEqual(before);
+      expect(failure).toBeUndefined();
+      const repo = remote?.repo.path ?? '';
+      const origin = remote?.origin.path ?? '';
+      expect(gitIn(repo, 'remote', 'get-url', 'origin')).toBe(origin);
+      expect(gitIn(origin, 'rev-parse', 'refs/heads/main')).toBe(gitIn(repo, 'rev-parse', 'HEAD'));
+    } finally {
+      remote?.cleanup();
       decoy.cleanup();
     }
   });

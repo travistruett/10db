@@ -338,6 +338,43 @@ describe('network calls', () => {
     controller.abort();
     await expect(pending).rejects.toMatchObject({ kind: 'aborted' });
   });
+
+  it.each([
+    {
+      name: 'fetch updates',
+      act: async (env: Readonly<Record<string, string>>) => {
+        const upstream = pushFromElsewhere('main', 'upstream.txt');
+        await git.fetch(remote.repo.path, 'main', { env, timeoutMs: 10_000 });
+        expect(local('rev-parse', 'origin/main')).toBe(upstream);
+      },
+    },
+    {
+      name: 'push sends from',
+      act: async (env: Readonly<Record<string, string>>) => {
+        await git.switchNewBranch(remote.repo.path, '10db/x-0a1b2c3d', 'main');
+        await git.push(remote.repo.path, '10db/x-0a1b2c3d', { env, timeoutMs: 10_000 });
+        expect(origin('rev-parse', 'refs/heads/10db/x-0a1b2c3d')).toBe(local('rev-parse', 'HEAD'));
+      },
+    },
+  ])(
+    '$name the repository it is given when the network environment carries hook variables',
+    async ({ act }) => {
+      // The network environment is the builder's login environment, which a daemon started from a
+      // git hook may have captured with GIT_DIR and friends in it.
+      const decoy = createDecoyRepo();
+      try {
+        const before = decoy.snapshot();
+        let failure: unknown;
+        await act({ ...NETWORK_ENV, ...decoy.hookVariables }).catch((error: unknown) => {
+          failure = error;
+        });
+        expect(decoy.snapshot()).toEqual(before);
+        expect(failure).toBeUndefined();
+      } finally {
+        decoy.cleanup();
+      }
+    },
+  );
 });
 
 describe('git hook variables in the daemon environment', () => {
@@ -367,6 +404,26 @@ describe('git hook variables in the daemon environment', () => {
         write('a.txt', 'a');
         await git.commit({ repo: repo.path, paths: ['a.txt'], message: 'a', opId: 'op-hook-1' });
         expect(commitCount()).toBe(2);
+      },
+    },
+    {
+      name: 'currentBranch reads',
+      act: async () => {
+        expect(await git.currentBranch(repo.path)).toBe('main');
+      },
+    },
+    {
+      name: 'remoteUrl reads',
+      act: async () => {
+        rawGit('remote', 'add', 'origin', '/nowhere/x.git');
+        expect(await git.remoteUrl(repo.path, 'origin')).toBe('/nowhere/x.git');
+      },
+    },
+    {
+      name: 'switchNewBranch writes to',
+      act: async () => {
+        await git.switchNewBranch(repo.path, '10db/hook-0a1b2c3d', 'main');
+        expect(rawGit('branch', '--show-current')).toBe('10db/hook-0a1b2c3d');
       },
     },
   ])('$name the repository it is given and leaves the other untouched', async ({ act }) => {
