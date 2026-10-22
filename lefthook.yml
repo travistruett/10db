@@ -26,5 +26,15 @@ pre-push:
     - name: no-push-to-main
       run: node scripts/hooks/pre-push.mjs
       use_stdin: true
+    # Git exports GIT_DIR (an absolute path when pushing from a linked worktree), GIT_PREFIX and,
+    # after `git -c`, GIT_CONFIG_PARAMETERS to hooks. make check runs tests that create throwaway
+    # repositories; with these set, their git would write to this checkout instead. These are the
+    # variables `git rev-parse --local-env-vars` lists. The pre-commit jobs keep them: they read
+    # the index, which may be a temporary one named by GIT_INDEX_FILE.
     - name: check
-      run: make check
+      run: >-
+        env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_COMMON_DIR -u GIT_PREFIX
+        -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES -u GIT_IMPLICIT_WORK_TREE
+        -u GIT_CONFIG -u GIT_CONFIG_PARAMETERS -u GIT_CONFIG_COUNT -u GIT_GRAFT_FILE
+        -u GIT_NO_REPLACE_OBJECTS -u GIT_REPLACE_REF_BASE -u GIT_SHALLOW_FILE
+        make check
