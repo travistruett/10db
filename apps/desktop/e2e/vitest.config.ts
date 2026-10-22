@@ -5,6 +5,7 @@ export default defineProject({
   test: {
     name: 'desktop-e2e',
     environment: 'node',
+    setupFiles: ['../../../tests/git-isolation.setup.ts'],
     include: ['*.test.ts'],
   },
 });
