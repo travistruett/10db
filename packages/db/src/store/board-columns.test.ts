@@ -75,6 +75,7 @@ describe('board columns', () => {
     { name: 'a no-break space', typed: 'In\u00a0progress' },
     { name: 'a zero-width character', typed: 'Ba\u200bcklog' },
     { name: 'a Cyrillic \u0435', typed: 'R\u0435ady' },
+    { name: 'full-width letters', typed: '\uff24one' },
     { name: 'Blocked', typed: 'BLOCKED' },
     { name: 'Done', typed: 'Done' },
   ])('refuses $name as a column name with a 400', ({ typed }) => {
