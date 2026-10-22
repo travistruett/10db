@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import Database from 'better-sqlite3';
 import { z } from 'zod';
+import { withoutGitRepoEnv } from '../src/git';
 
 const run = promisify(execFile);
 
@@ -121,10 +122,12 @@ export async function runAcceptanceChecks(input: {
       'SELECT count(*) AS n FROM sessions WHERE provider_session_id IS NOT NULL',
     );
 
+    // The repository is the one at repoPath, whatever GIT_DIR this script inherited.
+    const gitEnv = withoutGitRepoEnv(process.env);
     const { stdout } = await run(
       'git',
       ['log', '--format=%(trailers:key=10db-Op,valueonly,separator=%x2C)'],
-      { cwd: input.repoPath },
+      { cwd: input.repoPath, env: gitEnv },
     );
     const opIds = stdout
       .split(/[\n,]/)
@@ -135,6 +138,7 @@ export async function runAcceptanceChecks(input: {
     for (const path of input.outputs) {
       const size = await run('git', ['cat-file', '-s', `HEAD:${path}`], {
         cwd: input.repoPath,
+        env: gitEnv,
       }).then(
         (r) => Number(r.stdout.trim()),
         () => 0,

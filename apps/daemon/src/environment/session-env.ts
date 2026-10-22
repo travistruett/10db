@@ -1,5 +1,6 @@
 import { execFileSync, type ExecFileSyncOptionsWithStringEncoding } from 'node:child_process';
 import { BillingMode } from '@10db/contracts';
+import { withoutGitRepoEnv } from '../git';
 
 /** Variables that silently change who is billed. They are removed unless the billing mode needs them. */
 export const BILLING_SWITCH_VARS = [
@@ -135,8 +136,10 @@ export function buildSessionEnv(input: {
     if (!isBillingSwitch(name)) return true;
     return input.billingMode === BillingMode.Bedrock && BEDROCK_KEEPS.includes(name);
   };
+  // A daemon started from a git hook captures GIT_DIR and friends; a session or gate given them
+  // would run git against that repository instead of the project's.
   const env: Record<string, string> = Object.fromEntries(
-    Object.entries(input.base).filter(([name]) => keep(name)),
+    Object.entries(withoutGitRepoEnv(input.base)).filter(([name]) => keep(name)),
   );
   env[CLIENT_APP_VAR] = input.clientApp;
 

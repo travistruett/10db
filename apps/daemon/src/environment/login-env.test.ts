@@ -71,6 +71,29 @@ describe('captureLoginEnv', () => {
     expect(login.vars['DECOY']).toBeUndefined();
   });
 
+  it('starts the login shell without the variables that name another repository', async () => {
+    // A daemon started from a git hook inherits GIT_DIR; a profile's git prompt or plugin must
+    // not run against that repository, and the captured environment must not carry it on.
+    const seen = join(dir.path, 'profile-env');
+    const shell = fakeShell('record.sh', `env > '${seen}'\n${RUN_LAST_ARG}`);
+    const login = await captureLoginEnv({
+      inherited: {
+        PATH: '/usr/bin:/bin',
+        GIT_DIR: '/h/b/Projects/other/.git',
+        GIT_WORK_TREE: '/h/b/Projects/other',
+        GIT_INDEX_FILE: '/h/b/Projects/other/.git/index',
+        GIT_SSH_COMMAND: 'ssh -i key',
+      },
+      shell,
+    });
+    const profile = readFileSync(seen, 'utf8');
+    expect(profile).not.toMatch(/^GIT_(DIR|WORK_TREE|INDEX_FILE)=/m);
+    expect(profile).toMatch(/^GIT_SSH_COMMAND=ssh -i key$/m);
+    expect(login.source).toBe('login_shell');
+    expect(login.vars).not.toHaveProperty('GIT_DIR');
+    expect(login.vars['GIT_SSH_COMMAND']).toBe('ssh -i key');
+  });
+
   it('kills a hanging login shell and its children, then falls back to the inherited environment', async () => {
     const pids = join(dir.path, 'pids');
     const shell = fakeShell('hang.sh', `sleep 30 &\necho "$$ $!" > '${pids}'\nwait`);
