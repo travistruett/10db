@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   mintId,
@@ -25,7 +25,8 @@ import {
   type Store,
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createTempRepo, seedWorkstream, tempDir, waitFor } from '../../test/fixtures';
+import { createTempRepo, seedWorkstream, waitFor } from '../../test/fixtures';
+import { alive, orphanGateGroup } from '../../test/orphan-gate';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit } from '../git';
 import { createInboxService, type InboxService } from '../inbox';
@@ -159,48 +160,6 @@ async function orphanProcess(detached = false) {
   if (startedAt === null) throw new Error('ps could not see the child');
   const exited = new Promise((r) => child.once('exit', r));
   return { child, pid, startedAt, exited };
-}
-
-function alive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** A gate group: a detached leader plus a grandchild in the same group, whose pid it records. */
-async function orphanGateGroup() {
-  const dir = tempDir('gate');
-  const pidFile = join(dir.path, 'grandchild.pid');
-  const leader = spawn('sh', ['-c', `sleep 60 & echo $! > '${pidFile}'; wait`], {
-    detached: true,
-    stdio: 'ignore',
-  });
-  const pid = leader.pid;
-  if (pid === undefined) throw new Error('spawn failed');
-  const exited = new Promise((r) => leader.once('exit', r));
-  const grandchildPid = await waitFor(() => {
-    try {
-      const n = Number(readFileSync(pidFile, 'utf8').trim());
-      return Number.isInteger(n) && n > 0 ? n : undefined;
-    } catch {
-      return undefined;
-    }
-  });
-  const startedAt = await systemProcesses.identify(pid);
-  if (startedAt === null) throw new Error('ps could not see the leader');
-  return {
-    leader,
-    pid,
-    startedAt,
-    exited,
-    grandchildPid,
-    cleanup: () => {
-      dir.cleanup();
-    },
-  };
 }
 
 function ask(ws: ReturnType<typeof inState>, title: string, signal: AbortSignal) {

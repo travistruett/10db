@@ -7,3 +7,4 @@ export { createShipper, type Shipper, type ShipperDeps } from './ship';
 export { subscribeShipTrigger } from './trigger';
 export { BATCH_CARD_DETAIL, batchCardFields, createBatchCardAnswers } from './batch-card';
 export { batchLaunchVerdict, flagWrongBranch, LaunchVerdict } from './launch-rule';
+export { recoverBatches, type GateTerminator } from './recover';
