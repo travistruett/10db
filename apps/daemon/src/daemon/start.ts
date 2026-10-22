@@ -83,7 +83,7 @@ export interface DaemonOptions {
   /** The harness plugin folder the default personas are read from. */
   readonly harnessDir?: string;
   readonly allowedOrigins?: readonly string[];
-  /** One more browser origin to accept beside the built-in ones (dev and Playwright). */
+  /** One more browser origin to accept beside `allowedOrigins` or the built-in ones (dev and Playwright). */
   readonly devUiOrigin?: string;
   /** A fixed UI token (dev and Playwright); otherwise a random one per start. */
   readonly uiToken?: string;
@@ -296,8 +296,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const token = opts.uiToken ?? randomBytes(32).toString('base64url');
   const app = createApp({
     startedAt,
-    allowedOrigins:
-      opts.allowedOrigins ?? (opts.devUiOrigin ? [...UI_ORIGINS, opts.devUiOrigin] : UI_ORIGINS),
+    allowedOrigins: [
+      ...(opts.allowedOrigins ?? UI_ORIGINS),
+      ...(opts.devUiOrigin ? [opts.devUiOrigin] : []),
+    ],
     token,
     services: createServices({
       state,

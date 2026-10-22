@@ -41,6 +41,7 @@ describe('loadEnv', () => {
   it.each([
     ['localhost', 'http://localhost:51234'],
     ['the IPv4 loopback', 'http://127.0.0.1:51234'],
+    ['the highest port', 'http://localhost:65535'],
   ])('accepts a dev UI origin on %s', (_name, origin) => {
     expect(loadEnv({ TENDB_DEV_UI_ORIGIN: origin }).TENDB_DEV_UI_ORIGIN).toBe(origin);
   });
@@ -50,6 +51,8 @@ describe('loadEnv', () => {
     ['https', 'https://localhost:1420'],
     ['a path', 'http://localhost:1420/app'],
     ['no port', 'http://localhost'],
+    ['port 0', 'http://localhost:0'],
+    ['a port above 65535', 'http://localhost:99999'],
   ])('rejects a dev UI origin with %s', (_name, origin) => {
     expect(() => loadEnv({ TENDB_DEV_UI_ORIGIN: origin })).toThrow('TENDB_DEV_UI_ORIGIN');
   });
