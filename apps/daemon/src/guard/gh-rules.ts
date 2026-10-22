@@ -24,6 +24,16 @@ const READS: ReadonlyMap<string, ReadonlySet<string> | typeof ANY> = new Map<
   ['help', ANY],
   ['version', ANY],
 ]);
+/**
+ * `gh auth status` prints the token with `--show-token` or `-t`, alone or in a cluster such as
+ * `-at`. Any single-dash word holding a `t` counts, even where gh would read it as another flag's
+ * value: a false refusal of a read costs less than a printed token.
+ */
+function showsToken(arg: string): boolean {
+  if (arg === '--show-token' || arg.startsWith('--show-token=')) return true;
+  return /^-[^-]/.test(arg) && arg.includes('t');
+}
+
 /** gh api sends POST by default once any of these is given (gh help api). */
 const FIELD_FLAGS = ['-f', '-F', '--field', '--raw-field', '--input'];
 
@@ -67,7 +77,7 @@ function apiMethod(args: readonly string[]): string {
 }
 
 const ALLOWED =
-  'Agents may run gh pr view, list, checks, diff and status; gh repo view and list; gh issue view, list and status; gh run and gh workflow view and list; gh search; gh status; gh auth status; gh help; gh --version; and gh api GET requests.';
+  'Agents may run gh pr view, list, checks, diff and status; gh repo view and list; gh issue view, list and status; gh run and gh workflow view and list; gh search; gh status; gh auth status without --show-token; gh help; gh --version; and gh api GET requests.';
 
 /**
  * gh in a managed session only reads (batch delivery spec §7): 10db opens the pull request when a
@@ -88,6 +98,11 @@ export function ghVerdict(words: readonly string[]): GhVerdict {
   }
   const reads = READS.get(group);
   const verb = verbAfter(words, at);
+  // gh reads flags on either side of the command words, so every argument counts.
+  if (group === 'auth' && verb === 'status' && words.slice(1).some(showsToken))
+    return {
+      deny: 'gh auth status --show-token (-t) prints the GitHub token and is not allowed in a managed session; run gh auth status without it.',
+    };
   if (reads === ANY || (reads !== undefined && (verb === undefined || reads.has(verb))))
     return null;
   const what = reads === undefined ? `gh ${group}` : `gh ${group} ${verb ?? ''}`.trim();
