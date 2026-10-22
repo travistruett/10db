@@ -21,7 +21,7 @@ checklist is in [CONTRIBUTING.md](CONTRIBUTING.md#set-up).
 - `pnpm dev`: run the daemon and the browser UI with a shared dev token, with state in `.dev/`.
 - `TENDB_DATA_DIR="$PWD/.dev/data" pnpm --filter @10db/desktop dev:shell`: open the Tauri window against that daemon. Run `pnpm --filter @10db/desktop sidecar` once first.
 - `make live-acceptance`: the manual §1.3 run on a Max subscription.
-- `make gate`: every check; prints one summary line. Its e2e step needs the WebKit browser that `make setup` installs. It runs its daemon and UI on free ports, so gates in separate worktrees can run at once, beside `pnpm dev`.
+- `make gate`: every check; prints one summary line. Its e2e step needs the WebKit browser that `make setup` installs. It picks free ports for its daemon and UI, so gates in separate worktrees can run at once, beside `pnpm dev`; a port another process takes before the servers bind it fails the run at startup.
 - `make check`: the fast check on what you changed.
 
 Working rules for people and agents are in [AGENTS.md](AGENTS.md); how to contribute is in

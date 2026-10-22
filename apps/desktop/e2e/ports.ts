@@ -38,7 +38,9 @@ async function freePorts(): Promise<E2ePorts> {
 }
 
 /**
- * The daemon and UI ports of one E2E run, so parallel gates in separate worktrees never collide.
+ * The daemon and UI ports of one E2E run, so parallel gates in separate worktrees don't share fixed
+ * ports. A port another process takes between this probe and the server's bind fails the run at
+ * startup.
  * `E2E_DAEMON_PORT` and `E2E_UI_PORT` fix them for debugging; otherwise free ports are chosen. Either
  * way they are written back to `env`: Playwright's workers load the config again and inherit the
  * runner's environment, so they read the same ports instead of choosing new ones.
