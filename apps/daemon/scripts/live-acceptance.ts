@@ -26,6 +26,7 @@ import {
   WorkstreamDto,
 } from '@10db/contracts';
 import { z } from 'zod';
+import { withoutGitRepoEnv } from '../src/git';
 import {
   claudeCodeVersion,
   renderAcceptanceReport,
@@ -143,8 +144,13 @@ function referenceText(topic: keyof typeof REFERENCES): string {
   return `${lines.join('\n')}\n`;
 }
 
+/** Git in the disposable repo, never in a repository an inherited GIT_DIR names. */
 function git(...a: string[]): string {
-  return execFileSync('git', a, { cwd: repo, encoding: 'utf8' });
+  return execFileSync('git', a, {
+    cwd: repo,
+    encoding: 'utf8',
+    env: withoutGitRepoEnv(process.env),
+  });
 }
 
 function makeRepo(): void {
@@ -166,7 +172,7 @@ function makeRepo(): void {
     `for f in $(find src -name "*.md"); do [ -s "$f" ] || { echo "empty: $f"; exit 1; }; done\necho "check ok"\n`,
   );
   writeFileSync(join(repo, '.mcp.json'), `${JSON.stringify(REPO_MCP_CONFIG, null, 2)}\n`);
-  execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: repo });
+  git('init', '-q', '-b', 'main');
   git('config', 'user.email', 'live@10db.invalid');
   git('config', 'user.name', '10db live acceptance');
   git(

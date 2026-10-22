@@ -14,7 +14,13 @@ import { startDaemon, type RunningDaemon } from '../src/daemon';
 import { FakeAdapter, type FakeScriptBook } from '../src/sessions';
 import { apiClient, quickFlowId } from './api-client';
 import { FakeGh } from './fake-gh';
-import { createTempRepoWithOrigin, NETWORK_ENV, tempDir, waitForAsync } from './fixtures';
+import {
+  createTempRepoWithOrigin,
+  isolatedGitEnv,
+  NETWORK_ENV,
+  tempDir,
+  waitForAsync,
+} from './fixtures';
 
 const write = (path: string) => ({
   do: 'tool' as const,
@@ -56,7 +62,7 @@ afterEach(async () => {
 });
 
 const git = (dir: string, ...args: string[]) =>
-  execFileSync('git', ['-C', dir, ...args])
+  execFileSync('git', ['-C', dir, ...args], { env: isolatedGitEnv() })
     .toString()
     .trim();
 

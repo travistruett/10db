@@ -25,7 +25,7 @@ import {
   type Store,
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createTempRepo, seedWorkstream, waitFor } from '../../test/fixtures';
+import { createTempRepo, isolatedGitEnv, seedWorkstream, waitFor } from '../../test/fixtures';
 import { alive, orphanGateGroup } from '../../test/orphan-gate';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit } from '../git';
@@ -254,7 +254,11 @@ describe('recoverOnStartup', () => {
       });
     });
     await recover();
-    const head = execFileSync('git', ['-C', repo.path, 'rev-parse', 'HEAD']).toString().trim();
+    const head = execFileSync('git', ['-C', repo.path, 'rev-parse', 'HEAD'], {
+      env: isolatedGitEnv(),
+    })
+      .toString()
+      .trim();
     const step = listEventsAfter(state.db, 0, 1000).find((e) => e.type === 'recovery.step');
     expect(step?.data).toMatchObject({
       head,

@@ -45,7 +45,7 @@ import { seedTeam } from '../src/team';
 import { createGateRunner } from '../src/verify';
 import { measureForTests } from './catalogue';
 import { FakeGh } from './fake-gh';
-import { createTempRepoWithOrigin, NETWORK_ENV, tempDir } from './fixtures';
+import { createTempRepoWithOrigin, isolatedGitEnv, NETWORK_ENV, tempDir } from './fixtures';
 
 type Settled = 'DONE' | 'FAILED' | 'CANCELLED' | 'WAITING_HUMAN' | 'RUNNING';
 
@@ -168,7 +168,7 @@ export function createDeliveryHarness(
   const unsubscribe =
     opts.trigger === false ? () => undefined : subscribeShipTrigger(bus, store.db, shipper);
   const run = (dir: string, args: string[]): string =>
-    execFileSync('git', ['-C', dir, ...args], { stdio: 'pipe' })
+    execFileSync('git', ['-C', dir, ...args], { env: isolatedGitEnv(), stdio: 'pipe' })
       .toString()
       .trim();
   return {
@@ -218,7 +218,10 @@ export function createDeliveryHarness(
     teammatePush(branch, path) {
       const other = tempDir('teammate');
       try {
-        execFileSync('git', ['clone', '-q', remote.origin.path, other.path], { stdio: 'pipe' });
+        execFileSync('git', ['clone', '-q', remote.origin.path, other.path], {
+          env: isolatedGitEnv(),
+          stdio: 'pipe',
+        });
         run(other.path, ['config', 'user.name', 'teammate']);
         run(other.path, ['config', 'user.email', 'teammate@10db.invalid']);
         run(other.path, ['config', 'commit.gpgsign', 'false']);

@@ -20,7 +20,7 @@ import {
   sessionBaselines,
 } from '../scripts/acceptance-checks';
 import { apiClient, quickFlowId } from './api-client';
-import { createTempRepo, handoffArgs, tempDir, waitForAsync } from './fixtures';
+import { createTempRepo, handoffArgs, isolatedGitEnv, tempDir, waitForAsync } from './fixtures';
 
 const write = (path: string) => ({
   do: 'tool' as const,
@@ -381,9 +381,10 @@ describe('runAcceptanceChecks', () => {
   it('catches a duplicated 10db-Op trailer in git history', async () => {
     mkdirSync(join(repo.path, 'src', 'a'), { recursive: true });
     writeFileSync(join(repo.path, 'src', 'a', 'dup.txt'), 'dup\n');
-    execFileSync('git', ['add', 'src/a/dup.txt'], { cwd: repo.path });
+    execFileSync('git', ['add', 'src/a/dup.txt'], { cwd: repo.path, env: isolatedGitEnv() });
     execFileSync('git', ['commit', '-q', '-m', 'Duplicate\n\n10db-Op: op-a-0001'], {
       cwd: repo.path,
+      env: isolatedGitEnv(),
     });
     const duplicates = (await byName()).get('no duplicate commits');
     expect(duplicates).toMatchObject({ ok: false });

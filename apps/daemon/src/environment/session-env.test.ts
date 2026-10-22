@@ -177,6 +177,35 @@ describe('buildSessionEnv', () => {
     ).not.toThrow();
   });
 
+  it('drops the variables that name another repository and keeps profile git config and settings', () => {
+    // A daemon started from a git hook captures GIT_DIR and friends; a session or gate that
+    // inherited them would run git against that repository instead of the project's.
+    const repositoryVariables = {
+      GIT_DIR: '/h/b/Projects/other/.git',
+      GIT_WORK_TREE: '/h/b/Projects/other',
+      GIT_INDEX_FILE: '/h/b/Projects/other/.git/index',
+      GIT_COMMON_DIR: '/h/b/Projects/other/.git',
+      GIT_PREFIX: 'src/',
+      GIT_OBJECT_DIRECTORY: '/h/b/Projects/other/.git/objects',
+      GIT_ALTERNATE_OBJECT_DIRECTORIES: '/h/b/Projects/other/.git/objects',
+    };
+    // Deliberate config from the builder's profile, such as a url rewrite, still applies.
+    const kept = {
+      GIT_CONFIG_COUNT: '1',
+      GIT_CONFIG_KEY_0: 'url.git@github.com:.insteadOf',
+      GIT_CONFIG_VALUE_0: 'https://github.com/',
+      GIT_SSH_COMMAND: 'ssh -i /h/b/.ssh/work',
+    };
+    const env = buildSessionEnv({
+      base: { ...BASE, ...repositoryVariables, ...kept },
+      billingMode: BillingMode.Subscription,
+      clientApp: CLIENT_APP,
+      secrets: keychain(null),
+    });
+    for (const name of Object.keys(repositoryVariables)) expect(env).not.toHaveProperty(name);
+    expect(env).toMatchObject(kept);
+  });
+
   it('does not modify the captured base', () => {
     const before = { ...BASE };
     buildSessionEnv({

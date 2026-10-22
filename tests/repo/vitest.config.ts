@@ -5,5 +5,6 @@ export default defineProject({
     name: 'repo',
     environment: 'node',
     include: ['src/**/*.test.ts'],
+    setupFiles: ['../git-isolation.setup.ts'],
   },
 });
