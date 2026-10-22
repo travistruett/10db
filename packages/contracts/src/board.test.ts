@@ -1,15 +1,17 @@
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import {
   BoardColumnDelete,
   BoardColumnInput,
   BoardColumnPatch,
   columnNameKey,
   DEFAULT_BOARD_COLUMN,
-  normalizeColumnName,
+  cleanColumnName,
   SYSTEM_COLUMN_LABEL,
   TaskMove,
 } from './board';
 import { EventType } from './events';
+import { renderJsonSchemas } from './json-schema';
 import { BoardColumnId, mintId } from './ids';
 
 const a = mintId('Task');
@@ -72,14 +74,43 @@ describe('board columns', () => {
 
 describe('column names', () => {
   it.each([
-    { name: 'inner runs of spaces', typed: 'In  progress', normalized: 'In progress' },
-    { name: 'a no-break space', typed: 'In\u00a0progress', normalized: 'In progress' },
-    { name: 'a zero-width space', typed: 'Ba\u200bcklog', normalized: 'Backlog' },
-    { name: 'full-width letters', typed: '\uff24one', normalized: 'Done' },
-    { name: 'tabs and newlines', typed: ' Needs\t\nspec ', normalized: 'Needs spec' },
-  ])('normalizes $name', ({ typed, normalized }) => {
-    expect(normalizeColumnName(typed)).toBe(normalized);
-    expect(BoardColumnInput.parse({ name: typed }).name).toBe(normalized);
+    { name: 'inner runs of spaces', typed: 'In  progress', stored: 'In progress' },
+    { name: 'a no-break space', typed: 'In\u00a0progress', stored: 'In progress' },
+    { name: 'a zero-width space', typed: 'Ba\u200bcklog', stored: 'Backlog' },
+    { name: 'a byte-order mark', typed: '\ufeffIcebox', stored: 'Icebox' },
+    { name: 'bidi controls', typed: '\u202eIcebox\u202c', stored: 'Icebox' },
+    { name: 'tabs and newlines', typed: ' Needs\t\nspec ', stored: 'Needs spec' },
+    {
+      name: 'an emoji sequence (zero-width joiner kept)',
+      typed: '\u{1F9D1}\u200d\u{1F4BB} Dev',
+      stored: '\u{1F9D1}\u200d\u{1F4BB} Dev',
+    },
+    {
+      name: 'a Persian word (zero-width non-joiner kept)',
+      typed: '\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645',
+      stored: '\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645',
+    },
+    { name: 'a circled digit (not folded)', typed: '\u2460 Triage', stored: '\u2460 Triage' },
+    { name: 'full-width letters (not folded)', typed: '\uff24one', stored: '\uff24one' },
+  ])('stores $name as typed apart from cleanup', ({ typed, stored }) => {
+    expect(cleanColumnName(typed)).toBe(stored);
+    expect(BoardColumnInput.parse({ name: typed }).name).toBe(stored);
+  });
+
+  it('still treats full-width and circled look-alikes as the same name when comparing', () => {
+    expect(columnNameKey('\uff24one')).toBe(columnNameKey('Done'));
+    expect(columnNameKey('\u2460')).toBe(columnNameKey('1'));
+  });
+
+  it('publishes the name length limits in the JSON Schema', () => {
+    const rendered = renderJsonSchemas();
+    for (const file of ['board-column-input.schema.json', 'board-column-patch.schema.json']) {
+      const { properties } = z
+        .object({ properties: z.object({ name: z.unknown() }) })
+        .parse(JSON.parse(rendered.get(file) ?? '{}'));
+      const name = properties.name;
+      expect(name).toMatchObject({ type: 'string', minLength: 1, maxLength: 40 });
+    }
   });
 
   it.each([

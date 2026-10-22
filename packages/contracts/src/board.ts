@@ -32,25 +32,31 @@ const LOOKALIKES: Readonly<Record<string, string>> = {
   '\u03c1': 'p',
 };
 
-/** NFKC, no invisible format characters, inner whitespace collapsed to single spaces, trimmed. */
-export function normalizeColumnName(name: string): string {
+/** Bidi controls, the zero-width space and the byte-order mark: invisible, and never part of a real name. */
+const INVISIBLE = /[\u200b\u200e\u200f\u202a-\u202e\u2066-\u2069\ufeff]/gu;
+
+/** The stored form: invisible junk removed and whitespace collapsed, but joiners, digits and letters kept as typed. */
+export function cleanColumnName(name: string): string {
+  return name.replace(INVISIBLE, '').replace(/\s+/gu, ' ').trim();
+}
+
+/** What two names must differ in to be different columns: case, look-alike letters, width forms and spacing do not count. */
+export function columnNameKey(name: string): string {
   return name
     .normalize('NFKC')
     .replace(/\p{Cf}/gu, '')
     .replace(/\s+/gu, ' ')
-    .trim();
-}
-
-/** What two names must differ in to be different columns: case, look-alike letters and spacing do not count. */
-export function columnNameKey(name: string): string {
-  return normalizeColumnName(name)
+    .trim()
     .toLowerCase()
     .replace(/./gsu, (c) => LOOKALIKES[c] ?? c);
 }
 
+/** The limits are checked on the typed text too, so the published JSON Schema carries them. */
 export const BoardColumnName = z
   .string()
-  .transform(normalizeColumnName)
+  .min(1, 'Enter a name')
+  .max(40, 'Use at most 40 characters')
+  .transform(cleanColumnName)
   .pipe(z.string().min(1, 'Enter a name').max(40, 'Use at most 40 characters'));
 
 /**
