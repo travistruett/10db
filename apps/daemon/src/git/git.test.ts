@@ -2,8 +2,9 @@ import { execFileSync } from 'node:child_process';
 import { rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { InvalidError } from '@10db/contracts';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createTempRepo, tempDir } from '../../test/fixtures';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createDecoyRepo } from '../../test/decoy-repo';
+import { createTempRepo, isolatedGitEnv, tempDir } from '../../test/fixtures';
 import type { TempDir } from '../../test/fixtures';
 import { createGit } from './index';
 
@@ -20,7 +21,7 @@ const write = (rel: string, text: string) => {
   writeFileSync(join(repo.path, rel), text);
 };
 const rawGit = (...args: string[]) =>
-  execFileSync('git', ['-C', repo.path, ...args])
+  execFileSync('git', ['-C', repo.path, ...args], { env: isolatedGitEnv() })
     .toString()
     .trim();
 const commitCount = () => Number(rawGit('rev-list', '--count', 'HEAD'));
@@ -196,5 +197,51 @@ describe('status', () => {
   ])('reports $name', async ({ arrange, expected }) => {
     arrange();
     expect(await git.status(repo.path)).toEqual(expected);
+  });
+});
+
+describe('git hook variables in the daemon environment', () => {
+  // Git exports GIT_DIR, GIT_INDEX_FILE and friends to a hook. A daemon started from one must
+  // still act on the repository it is given, never on the one the variables point at.
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it.each([
+    {
+      name: 'head reads',
+      act: async () => {
+        expect(await git.head(repo.path)).toBe(rawGit('rev-parse', 'HEAD'));
+      },
+    },
+    {
+      name: 'status reads',
+      act: async () => {
+        write('new.txt', 'n');
+        expect(await git.status(repo.path)).toEqual([{ code: '??', path: 'new.txt' }]);
+      },
+    },
+    {
+      name: 'commit writes to',
+      act: async () => {
+        write('a.txt', 'a');
+        await git.commit({ repo: repo.path, paths: ['a.txt'], message: 'a', opId: 'op-hook-1' });
+        expect(commitCount()).toBe(2);
+      },
+    },
+  ])('$name the repository it is given and leaves the other untouched', async ({ act }) => {
+    const decoy = createDecoyRepo();
+    try {
+      const before = decoy.snapshot();
+      for (const [name, value] of Object.entries(decoy.hookVariables)) vi.stubEnv(name, value);
+      let failure: unknown;
+      await act().catch((error: unknown) => {
+        failure = error;
+      });
+      expect(decoy.snapshot()).toEqual(before);
+      expect(failure).toBeUndefined();
+    } finally {
+      decoy.cleanup();
+    }
   });
 });
