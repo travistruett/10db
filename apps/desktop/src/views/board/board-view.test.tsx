@@ -437,9 +437,12 @@ describe('BoardView', () => {
       }),
       http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([idea])),
     );
-    renderApp('/board');
+    const { queryClient } = renderApp('/board');
     await screen.findByText(/gate: true/);
-    await new Promise((r) => setTimeout(r, 200));
+    // Wait for the tasks to be in the cache, then check the board still holds back.
+    await waitFor(() => {
+      expect(queryClient.getQueryState(['tasks', project.id])?.status).toBe('success');
+    });
     expect(screen.queryByRole('listitem', { name: 'Idea' })).toBeNull();
     release();
     const parked = await screen.findByRole('list', { name: 'Icebox tasks' });
