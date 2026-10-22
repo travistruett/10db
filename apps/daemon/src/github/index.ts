@@ -1,7 +1,6 @@
 export {
   createGh,
   GhError,
-  GhFailure,
   PrState,
   systemGhExec,
   type Gh,
