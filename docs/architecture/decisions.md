@@ -14,7 +14,7 @@ Decided in `docs/superpowers/specs/2026-10-14-10db-repo-governance-design.md` §
 | G4 | Signed commits on `main`; GitHub signs squash merges. | `.github/rulesets/main-protection.json` |
 | G5 | lefthook git hooks, installed by the root `prepare` script. | `lefthook.yml` |
 | G6 | mise pins every non-npm tool with checksums and replaces `.node-version`; CI uses the same file. | `mise.toml`, `mise.lock` |
-| G7 | Renovate for dependency updates. | `renovate.json` |
+| G7 | Renovate for dependency updates, batched: one PR for every non-major update before 6am Monday (Pacific), lock file maintenance monthly, a major only after its box is ticked on the Dependency Dashboard, and a release used only once it is 3 days old. Security fixes skip the schedule. | `renovate.json`, `tests/repo/src/governance.test.ts` |
 | G8 | One SemVer version for the repo, from `0.1.0`, released by release-please in manifest mode. | `release-please-config.json`, `.release-please-manifest.json` |
 | G9 | macOS releases are Apple Silicon only, signed, notarized and stapled. | plan `05-release` |
 | G10 | Rulesets and repo settings live as JSON and are applied by `make github-settings`. | `.github/rulesets/`, `.github/repo-settings.json`, `scripts/github-settings.mjs` |
