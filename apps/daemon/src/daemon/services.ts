@@ -50,7 +50,7 @@ import type { KeepAwake } from '../keep-awake';
 import type { Runner } from '../runner';
 import type { Scheduler } from '../scheduler';
 import { ProjectMcpError, readRepoMcp, type RepoMcp } from '../sessions';
-import { resolveStepPlan, retryWorkstream, startTaskWithPlan } from '../team';
+import { proposeCandidates, resolveStepPlan, retryWorkstream, startTaskWithPlan } from '../team';
 
 /** The HTTP layer's view of the daemon: reads go to the database, writes go through the state store. */
 export function createServices(deps: {
@@ -144,6 +144,7 @@ export function createServices(deps: {
     patchBoardColumn: (id, patch) => deps.state.write((ctx) => patchBoardColumn(ctx, id, patch)),
     deleteBoardColumn: (id, del) => deps.state.write((ctx) => deleteBoardColumn(ctx, id, del)),
     stepPlan: (taskId) => resolveStepPlan(db, taskId),
+    proposeCandidates: (projectId, size) => proposeCandidates(db, projectId, size),
     reviewProjectMcp(projectId) {
       const project = getProject(db, projectId);
       let repo: RepoMcp;

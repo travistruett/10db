@@ -9,6 +9,7 @@ import {
   mintId,
   ModelProfileDto,
   PersonaDto,
+  PickerProposalDto,
   ProjectDto,
   StepPlanDto,
   TaskDto,
@@ -513,6 +514,48 @@ describe('startDaemon', () => {
         },
       );
       expect(columns.map((c) => c.name)).toEqual(['Exploring']);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it('proposes one ready task per area for the approval sheet', async () => {
+    const repo = createTempRepo();
+    try {
+      daemon = await startDaemon({
+        dataDir: dir.path,
+        port: 0,
+        adapter: new FakeAdapter({}),
+        logLevel: 'warn',
+        ...QUIET,
+      });
+      const api = apiClient(daemon.url, daemon.token);
+      const project = await api.post('/projects', ProjectDto, {
+        name: 'demo',
+        repoPath: repo.path,
+        gateCommand: 'true',
+        areas: [
+          { name: 'src', globs: ['src/**'] },
+          { name: 'docs', globs: ['docs/**'] },
+        ],
+      });
+      for (const [title, area] of [
+        ['code', 'src'],
+        ['words', 'docs'],
+      ] as const)
+        await api.post(`/projects/${project.id}/tasks`, TaskDto, {
+          title,
+          acceptanceCriteria: ['x'],
+          areas: [area],
+        });
+      const proposal = await api.get(
+        `/projects/${project.id}/candidates?size=2`,
+        PickerProposalDto,
+      );
+      expect(proposal.candidates.map((c) => [c.task.title, c.proposed])).toEqual([
+        ['code', true],
+        ['words', true],
+      ]);
     } finally {
       repo.cleanup();
     }
