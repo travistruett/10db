@@ -1,8 +1,10 @@
 import {
+  BatchState,
   Delivery,
   isTerminal,
   WorkstreamState,
   type BatchDto,
+  type BatchId,
   type ProjectId,
   type Provider,
   type WorkstreamId,
@@ -16,6 +18,7 @@ import {
   getBatch,
   getProject,
   getTask,
+  listBatches,
   listWorkstreams,
   renewClaimLeases,
   renewLeases,
@@ -61,7 +64,14 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
   let pending = false;
   let started = false;
   // Batches whose work is waiting for its branch and already reported, so a tick doesn't repeat the card.
-  const warned = new Set<string>();
+  const warned = new Set<BatchId>();
+
+  /** Forgets a reported batch once it is no longer OPEN, so one that reopens is reported again. */
+  function pruneWarned(): void {
+    if (warned.size === 0) return;
+    const open = new Set(listBatches(db, { states: [BatchState.Open] }).map((b) => b.id));
+    for (const id of warned) if (!open.has(id)) warned.delete(id);
+  }
 
   // A runner can write PAUSED_LIMIT after the pause's reset timer already fired, so the timer
   // found nothing to re-queue; work paused for a provider that is no longer paused is re-queued here.
@@ -154,6 +164,7 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
   function tick(): Promise<number> {
     const run = chain.then(async () => {
       requeueExpiredPauses();
+      pruneWarned();
       return launchQueued(await branchSnapshot());
     });
     chain = run.catch(() => undefined);

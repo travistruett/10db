@@ -287,6 +287,23 @@ describe('pull-request delivery', () => {
     expect(wrongBranch).toEqual(warned ? [{ batchId: q.batch.id, current }] : []);
   });
 
+  it('reports a wrong branch once while the batch stays open, and again after it left OPEN and reopened', async () => {
+    const q = inBatch(['OPEN']);
+    branchOf.set(q.project.repoPath, 'main');
+    const s = scheduler();
+    await s.tick();
+    await s.tick();
+    expect(wrongBranch).toHaveLength(1);
+    state.write((ctx) => transitionBatch(ctx, q.batch.id, { to: 'FAILED' }));
+    await s.tick();
+    state.write((ctx) => transitionBatch(ctx, q.batch.id, { to: 'OPEN' }));
+    await s.tick();
+    expect(wrongBranch).toEqual([
+      { batchId: q.batch.id, current: 'main' },
+      { batchId: q.batch.id, current: 'main' },
+    ]);
+  });
+
   it('never launches pull-request work that has no batch', async () => {
     const project = seedProject(store, { delivery: 'pull_request', prTitlePrefix: 'feat(app)' });
     add(project, ['api']);
