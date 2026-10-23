@@ -27,6 +27,7 @@ import {
 } from '@10db/contracts';
 import { z } from 'zod';
 import { withoutGitRepoEnv } from '../src/git';
+import { TEST_REPO_CONFIG } from '../test/fixtures';
 import {
   claudeCodeVersion,
   renderAcceptanceReport,
@@ -173,6 +174,9 @@ function makeRepo(): void {
   );
   writeFileSync(join(repo, '.mcp.json'), `${JSON.stringify(REPO_MCP_CONFIG, null, 2)}\n`);
   git('init', '-q', '-b', 'main');
+  // A disposable repository gets the test repositories' config: no detached background maintenance
+  // writing under `.git` after a commit returns.
+  for (const [key, value] of Object.entries(TEST_REPO_CONFIG)) git('config', key, value);
   git('config', 'user.email', 'live@10db.invalid');
   git('config', 'user.name', '10db live acceptance');
   git(
