@@ -21,6 +21,7 @@ import {
   PersonaInput,
   PersonaPatch,
   PersonInput,
+  PickSize,
   ProjectId,
   ProjectInput,
   ProjectPatch,
@@ -182,6 +183,19 @@ export function createApp(deps: ApiDeps) {
           deps.services.setRoutingRules(
             ProjectId.parse(c.req.param('projectId')),
             c.req.valid('json'),
+          ),
+        ),
+    )
+    .get(
+      '/projects/:projectId/candidates',
+      validator('query', (query): { size?: string } =>
+        typeof query['size'] === 'string' ? { size: query['size'] } : {},
+      ),
+      (c) =>
+        c.json(
+          deps.services.proposeCandidates(
+            ProjectId.parse(c.req.param('projectId')),
+            PickSize.parse(c.req.valid('query').size),
           ),
         ),
     )

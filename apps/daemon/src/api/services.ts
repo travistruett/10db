@@ -30,6 +30,7 @@ import type {
   PersonaPatch,
   PersonDto,
   PersonInput,
+  PickerProposalDto,
   ProjectDto,
   ProjectId,
   ProjectInput,
@@ -110,4 +111,6 @@ export interface ApiServices {
   deleteBoardColumn(id: BoardColumnId, del: BoardColumnDelete): BoardColumnDto[];
   /** What starting the task would run; throws InvalidError when no flow or profile fits. */
   stepPlan(taskId: TaskId): StepPlanDto;
+  /** The picker's proposal for the approval sheet; reads only. */
+  proposeCandidates(projectId: ProjectId, size: number): PickerProposalDto;
 }

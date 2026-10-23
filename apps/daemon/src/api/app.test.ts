@@ -75,6 +75,7 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
     createBoardColumn: track('createBoardColumn'),
     patchBoardColumn: track('patchBoardColumn'),
     deleteBoardColumn: track('deleteBoardColumn'),
+    proposeCandidates: track('proposeCandidates'),
     ...overrides,
   };
 }
@@ -686,5 +687,32 @@ describe('board routes', () => {
     expect(await res.json()).toMatchObject({
       message: 'The board changed while you were dragging; try again',
     });
+  });
+});
+
+describe('candidate routes', () => {
+  const projectId = mintId('Project');
+  it('routes GET /projects/:id/candidates with the size to its service', async () => {
+    const seen: number[] = [];
+    const res = await app(
+      stubServices({
+        proposeCandidates: (_id, size) => {
+          seen.push(size);
+          return { projectId, size, candidates: [] };
+        },
+      }),
+    ).request(`/projects/${projectId}/candidates?size=3`, auth);
+    expect(res.status).toBe(200);
+    expect(seen).toEqual([3]);
+  });
+
+  it.each([
+    { name: 'no size', query: '' },
+    { name: 'a zero size', query: '?size=0' },
+    { name: 'a size over the maximum', query: '?size=17' },
+  ])('answers 400 for $name without calling the service', async ({ query }) => {
+    const res = await app().request(`/projects/${projectId}/candidates${query}`, auth);
+    expect(res.status).toBe(400);
+    expect(reached).toEqual([]);
   });
 });
