@@ -18,6 +18,9 @@ The UI never touches the database; it talks to the daemon over loopback HTTP and
 - The React Compiler is on; don't hand-write `useMemo`/`useCallback` for render performance.
 - Tests: Testing Library + MSW. Hit the daemon URL through MSW, never a real daemon.
 - Rust in `src-tauri/`: `cargo fmt`, `cargo clippy -- -D warnings` with pedantic lints.
+- The app icon's source is `app-icon.svg` ("10" in Geist Bold, "db" in Geist Light, outlined to paths).
+  `src-tauri/icons/` is generated from it with `pnpm --filter @10db/desktop tauri icon app-icon.svg`;
+  never edit those files by hand.
 - `pnpm --filter @10db/desktop dev:shell` runs the Tauri shell against the daemon and Vite server that
   `pnpm dev` already runs. It sets `TENDB_EXTERNAL_DAEMON=1`, which makes the shell skip its sidecar.
   Run `pnpm --filter @10db/desktop sidecar` once first: `tauri-build` checks the sidecar files exist.
