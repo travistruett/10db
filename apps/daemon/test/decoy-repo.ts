@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import { isolatedGitEnv, tempDir } from './fixtures';
+import { isolatedGitEnv, TEST_REPO_CONFIG, tempDir } from './fixtures';
 
 /**
  * A repository that leaked git hook variables could point at, standing in for the contributor's
@@ -21,6 +21,7 @@ export function createDecoyRepo(): DecoyRepo {
   const git = (...args: string[]) =>
     execFileSync('git', args, { cwd: dir.path, env: isolatedGitEnv(), stdio: 'pipe' });
   git('init', '-q', '-b', 'trunk');
+  for (const [key, value] of Object.entries(TEST_REPO_CONFIG)) git('config', key, value);
   git('config', 'user.name', 'decoy owner');
   git('config', 'user.email', 'owner@decoy.invalid');
   writeFileSync(join(dir.path, 'decoy.txt'), 'the real repository\n');

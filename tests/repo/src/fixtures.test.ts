@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -73,6 +73,24 @@ describe('createThrowawayRepo', () => {
       encoding: 'utf8',
     });
     expect(originLog.trim()).toBe('chore(repo): first');
+  });
+
+  // Git can leave a detached `git maintenance run --auto` writing objects/maintenance.lock after a
+  // commit returns, which a snapshot of .git then trips over or records as a change.
+  it('starts no background maintenance or gc when a commit lands', () => {
+    const repo = createThrowawayRepo('10db-fixture');
+    try {
+      repo.stage('a.txt', 'a\n');
+      const commit = spawnSync('git', ['commit', '-q', '-m', 'chore(repo): probe'], {
+        cwd: repo.dir,
+        env: { ...repo.env, GIT_TRACE: '1' },
+        encoding: 'utf8',
+      });
+      expect(commit.status, commit.stderr).toBe(0);
+      expect(commit.stderr).not.toMatch(/run_command: git (maintenance|gc)\b/);
+    } finally {
+      repo.remove();
+    }
   });
 
   it('lets a bare git commit work, with a local identity and no global one', () => {
