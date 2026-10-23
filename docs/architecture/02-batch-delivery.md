@@ -2,7 +2,7 @@
 
 - **Status:** Locked
 - **Scope:** How finished work leaves the machine: `local` delivery, and `pull_request` delivery with one branch and one pull request per batch.
-- **Summary:** The design is `docs/superpowers/specs/2026-10-21-10db-batch-delivery-design.md`; its decisions and the plan's are rows 77–85 of `decisions.md`. Changes are new rows that name what they supersede.
+- **Summary:** The design is `docs/superpowers/specs/2026-10-21-10db-batch-delivery-design.md`; its decisions and the plan's are rows 78–86 of `decisions.md`. Changes are new rows that name what they supersede.
 
 ## Where it lives
 
