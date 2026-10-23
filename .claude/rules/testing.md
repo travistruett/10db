@@ -16,6 +16,10 @@
   and the pre-push hook runs tests: `tests/git-isolation.setup.ts` (first in every project's
   `setupFiles`) strips them, and every git call in test code passes an isolated `env` too (ESLint
   enforces it).
+- **Test repositories turn off git's background maintenance.** A fixture that creates a repository
+  sets `maintenance.auto=false` and `gc.auto=0` in its local config before the first commit. Git
+  2.55 and later otherwise leave a detached `git maintenance run --auto` writing under `.git` after
+  a commit returns, which races any test that reads the repository's files.
 - **No sleeps.** Wait on a condition with a deadline; inject the clock where time matters.
 - **Never pipe test output through `tail` or append `; echo $?`.** It hides failures and exit
   codes.
