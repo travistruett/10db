@@ -41,7 +41,14 @@ async function git(repo: string, args: readonly string[]): Promise<string> {
   try {
     const { stdout } = await run('git', ['-C', repo, ...args], {
       // -C names the repository; an inherited GIT_DIR or GIT_WORK_TREE would override it.
-      env: { ...withoutGitRepoEnv(process.env), GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C' },
+      // No optional locks: a read such as status would otherwise refresh the index under
+      // index.lock, and a commit that runs meanwhile fails with "index.lock: File exists".
+      env: {
+        ...withoutGitRepoEnv(process.env),
+        GIT_TERMINAL_PROMPT: '0',
+        GIT_OPTIONAL_LOCKS: '0',
+        LC_ALL: 'C',
+      },
       maxBuffer: 16 * 1024 * 1024,
     });
     return stdout;
