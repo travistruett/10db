@@ -8,14 +8,20 @@ import type { Card } from './cards';
 import type { DeliveryJobs } from './jobs';
 
 export interface DeliveryLimits {
-  /** Each fetch, push and gh call. */
+  /** Each fetch and gh call. */
   readonly networkTimeoutMs: number;
+  /**
+   * The push, which runs the clone's pre-push hook: a hook may run a whole check suite, so it gets
+   * the gate's time, not a network call's. The daemon passes the runner's gate timeout.
+   */
+  readonly pushTimeoutMs: number;
   /** The shipping gate; the daemon passes the runner's gate timeout. */
   readonly gateTimeoutMs: number;
 }
 
 export const DEFAULT_DELIVERY_LIMITS: DeliveryLimits = {
   networkTimeoutMs: 2 * 60_000,
+  pushTimeoutMs: 30 * 60_000,
   gateTimeoutMs: 30 * 60_000,
 };
 
@@ -36,6 +42,10 @@ export interface DeliveryContext {
 
 export function networkCall(ctx: DeliveryContext, signal: AbortSignal): NetworkCall {
   return { env: ctx.networkEnv(), timeoutMs: ctx.limits.networkTimeoutMs, signal };
+}
+
+export function pushCall(ctx: DeliveryContext, signal: AbortSignal): NetworkCall {
+  return { ...networkCall(ctx, signal), timeoutMs: ctx.limits.pushTimeoutMs };
 }
 
 export function ghCall(ctx: DeliveryContext, repoPath: string, signal: AbortSignal): GhCall {

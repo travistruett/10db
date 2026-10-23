@@ -39,7 +39,8 @@ the change while the project has unfinished work), and 10db instead:
 2. runs the batch's tasks on that branch, and adds tasks you start while it is open;
 3. when every task is done or cancelled, runs the gate on the clean branch, pushes it and opens one pull
    request titled `<prefix>: <batch title>` (the batch title alone when the project sets no prefix).
-   Merging stays with you.
+   The push runs your clone's pre-push hook, with the gate's time limit (30 minutes by default); a fetch
+   or a `gh` call gets 2 minutes. Merging stays with you.
 
 Every refusal (a dirty checkout, the wrong branch, no `origin`, `gh` missing or signed out, a failed gate, a
 rejected push) is an inbox card that says what to fix; nothing is pushed. A failed task's card offers Retry and

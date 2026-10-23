@@ -14,6 +14,9 @@ import {
 } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
+import { waitFor } from '../../test/fixtures';
+import { alive } from '../../test/orphan-gate';
+import { installPrePushHook } from '../../test/pre-push-hook';
 import { GhError } from '../github';
 
 let h: DeliveryHarness;
@@ -213,6 +216,42 @@ describe('shipping', () => {
       expect(getBatch(h.store.db, batch.id).state).toBe('OPEN');
     }
     expect(h.gh.prCreates()).toEqual([]);
+  });
+});
+
+describe("the clone's pre-push hook", () => {
+  it('ships when the hook takes longer than a network call may, but less than the push may', async () => {
+    h = createDeliveryHarness({}, { networkTimeoutMs: 1_000, pushTimeoutMs: 4_000 });
+    const { batch } = await openBatch('Greetings', 'Alpha');
+    h.commit('src/api/alpha.txt');
+    const hook = installPrePushHook(h.repo, 2);
+    try {
+      const shipped = await finishAll(batch);
+      expect(shipped.state).toBe('SHIPPED');
+      expect(onOrigin(batch.branch)).toBe(h.git$('rev-parse', 'HEAD'));
+    } finally {
+      hook.cleanup();
+    }
+  });
+
+  it('stops a hook that runs past the push timeout with every process it started, and fails the batch saying so', async () => {
+    h = createDeliveryHarness({}, { pushTimeoutMs: 1_000 });
+    const { batch } = await openBatch('Greetings', 'Alpha');
+    h.commit('src/api/alpha.txt');
+    const hook = installPrePushHook(h.repo, 30);
+    try {
+      const ended = await finishAll(batch);
+      expect(ended).toMatchObject({ state: 'FAILED', failure: 'network' });
+      const card = h.only(h.cards());
+      expect(card.title).toBe('Batch "Greetings" not shipped: git push ran past 1.0 s');
+      expect(card.body).toContain('pre-push hook');
+      const child = await hook.childPid();
+      await waitFor(() => !alive(child), 2_000);
+      expect(onOrigin(batch.branch)).toBeNull();
+      expect(h.gh.prCreates()).toEqual([]);
+    } finally {
+      hook.cleanup();
+    }
   });
 });
 

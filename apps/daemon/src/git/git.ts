@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { isAbsolute, normalize, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { InvalidError } from '@10db/contracts';
@@ -54,39 +54,72 @@ export class GitNetworkError extends Error {
 const NO_PROMPTS = { GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never', LC_ALL: 'C' } as const;
 const REJECTED = /\[(remote )?rejected\]|failed to push some refs/i;
 
-function stderrOf(error: unknown): string {
-  return typeof error === 'object' && error !== null && 'stderr' in error
-    ? String(error.stderr).trim().slice(-2000)
-    : String(error);
-}
+/** How much of git's stderr a failure keeps: the end, where git says what went wrong. */
+const STDERR_TAIL = 2000;
 
-async function gitNetwork(repo: string, args: readonly string[], net: NetworkCall): Promise<void> {
-  try {
-    await run('git', ['-C', repo, ...args], {
+/**
+ * Runs a fetch or push in a process group of its own. A push runs the clone's pre-push hook, which
+ * may start a whole check suite; a timeout or an abort kills the group, so nothing git started
+ * outlives it, and the call settles only once git has exited.
+ */
+function gitNetwork(repo: string, args: readonly string[], net: NetworkCall): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn('git', ['-C', repo, ...args], {
       // The login environment may carry a hook's GIT_DIR or GIT_WORK_TREE, which would override -C.
       env: { ...withoutGitRepoEnv(net.env), ...NO_PROMPTS },
-      timeout: net.timeoutMs,
-      killSignal: 'SIGKILL',
-      ...(net.signal ? { signal: net.signal } : {}),
-      maxBuffer: 16 * 1024 * 1024,
+      detached: true,
+      stdio: ['ignore', 'ignore', 'pipe'],
     });
-  } catch (error) {
-    if (net.signal?.aborted) throw new GitNetworkError(GitNetworkFailure.Aborted, args, '');
-    const killed =
-      typeof error === 'object' && error !== null && 'killed' in error && error.killed === true;
-    if (killed)
-      throw new GitNetworkError(
-        GitNetworkFailure.Timeout,
-        args,
-        `no answer within ${String(Math.round(net.timeoutMs / 1000))} s`,
-      );
-    const stderr = stderrOf(error);
-    throw new GitNetworkError(
-      REJECTED.test(stderr) ? GitNetworkFailure.Rejected : GitNetworkFailure.Failed,
-      args,
-      stderr,
-    );
-  }
+    let stderr = '';
+    let timedOut = false;
+    child.stderr.on('data', (chunk: Buffer) => {
+      stderr = (stderr + chunk.toString('utf8')).slice(-STDERR_TAIL);
+    });
+    const killGroup = (): void => {
+      try {
+        if (child.pid !== undefined) process.kill(-child.pid, 'SIGKILL');
+      } catch {
+        // ESRCH: the group already exited.
+      }
+    };
+    // A real timer on purpose: it bounds a real child process, so the injected clock does not apply.
+    const timer = setTimeout(() => {
+      timedOut = true;
+      killGroup();
+    }, net.timeoutMs);
+    if (net.signal?.aborted) killGroup();
+    else net.signal?.addEventListener('abort', killGroup, { once: true });
+    const settle = (): void => {
+      clearTimeout(timer);
+      net.signal?.removeEventListener('abort', killGroup);
+    };
+    child.on('error', (error) => {
+      settle();
+      reject(new GitNetworkError(GitNetworkFailure.Failed, args, error.message));
+    });
+    child.on('close', (code) => {
+      settle();
+      const detail = stderr.trim();
+      if (net.signal?.aborted) reject(new GitNetworkError(GitNetworkFailure.Aborted, args, ''));
+      else if (timedOut)
+        reject(
+          new GitNetworkError(
+            GitNetworkFailure.Timeout,
+            args,
+            `still running after ${String(Math.round(net.timeoutMs / 1000))} s; stopped with every process it started`,
+          ),
+        );
+      else if (code === 0) resolve();
+      else
+        reject(
+          new GitNetworkError(
+            REJECTED.test(detail) ? GitNetworkFailure.Rejected : GitNetworkFailure.Failed,
+            args,
+            detail,
+          ),
+        );
+    });
+  });
 }
 
 export interface Git {

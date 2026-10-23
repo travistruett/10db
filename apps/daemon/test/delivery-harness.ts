@@ -110,7 +110,12 @@ export interface DeliveryHarness {
 
 export function createDeliveryHarness(
   project: Partial<ProjectInput> = {},
-  opts: { readonly gateTimeoutMs?: number; readonly trigger?: boolean } = {},
+  opts: {
+    readonly gateTimeoutMs?: number;
+    readonly networkTimeoutMs?: number;
+    readonly pushTimeoutMs?: number;
+    readonly trigger?: boolean;
+  } = {},
 ): DeliveryHarness {
   const remote = createTempRepoWithOrigin();
   const { store, close } = createTestStore();
@@ -146,7 +151,8 @@ export function createDeliveryHarness(
     logger: silentLogger,
     limits: {
       ...DEFAULT_DELIVERY_LIMITS,
-      networkTimeoutMs: 10_000,
+      networkTimeoutMs: opts.networkTimeoutMs ?? 10_000,
+      pushTimeoutMs: opts.pushTimeoutMs ?? 20_000,
       gateTimeoutMs: opts.gateTimeoutMs ?? 20_000,
     },
     networkEnv: () => NETWORK_ENV,

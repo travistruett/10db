@@ -10,8 +10,11 @@ import {
   isolatedGitEnv,
   NETWORK_ENV,
   tempDir,
+  waitFor,
 } from '../../test/fixtures';
 import type { TempDir } from '../../test/fixtures';
+import { alive } from '../../test/orphan-gate';
+import { installPrePushHook } from '../../test/pre-push-hook';
 import { createGit, GitNetworkError } from './index';
 
 const git = createGit();
@@ -324,6 +327,24 @@ describe('network calls', () => {
     await expect(git.fetch(remote.repo.path, 'main', hang)).rejects.toMatchObject({
       kind: 'timeout',
     });
+  });
+
+  it('stops a push whose pre-push hook runs past its timeout, with every process the hook started', async () => {
+    await git.switchNewBranch(remote.repo.path, '10db/x-0a1b2c3d', 'main');
+    const hook = installPrePushHook(remote.repo.path, 30);
+    try {
+      const push = git.push(remote.repo.path, '10db/x-0a1b2c3d', {
+        env: NETWORK_ENV,
+        timeoutMs: 1_000,
+      });
+      const timedOut = expect(push).rejects.toMatchObject({ kind: 'timeout' });
+      const child = await hook.childPid();
+      await timedOut;
+      await waitFor(() => !alive(child), 2_000);
+      expect(() => origin('rev-parse', '--verify', '-q', 'refs/heads/10db/x-0a1b2c3d')).toThrow();
+    } finally {
+      hook.cleanup();
+    }
   });
 
   it('stops a fetch when its signal aborts', async () => {

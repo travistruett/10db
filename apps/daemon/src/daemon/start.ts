@@ -243,6 +243,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     logger: logger.child({ component: 'delivery' }),
     limits: {
       ...DEFAULT_DELIVERY_LIMITS,
+      pushTimeoutMs: limits.gateTimeoutMs,
       gateTimeoutMs: limits.gateTimeoutMs,
       ...opts.deliveryLimits,
     },

@@ -207,6 +207,14 @@ export const shipCards = {
       detail: { batchId: batch.id },
     },
   }),
+  pushTimedOut: (batch: BatchDto, timeoutMs: number): ShipFailure => ({
+    failure: BatchFailure.Network,
+    card: {
+      title: `${notShipped(batch)}: git push ran past ${duration(timeoutMs)}`,
+      body: `git push, or the pre-push hook it runs in this clone, was still running after ${duration(timeoutMs)}, so 10db stopped it and every process it started. Check what the hook runs and why it took so long.\n\n${RETRY}`,
+      detail: { batchId: batch.id },
+    },
+  }),
   /** gh missing or signed out; anything else gh or the network did is `network`. */
   network: (batch: BatchDto, step: string, error: unknown): ShipFailure => {
     const gh = ghCard(notShipped(batch), error, 'retry');
