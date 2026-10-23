@@ -55,6 +55,8 @@ pub fn run() {
             tray::show_main_window(app);
         }))
         .plugin(tauri_plugin_notification::init())
+        // Opens a pull request in the default browser; the webview follows no target="_blank" link.
+        .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![daemon_connection, update_tray])
         .setup(|app| {
             let items = tray::build(app.handle())?;

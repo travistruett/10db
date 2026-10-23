@@ -18,11 +18,20 @@ concurrency:
 jobs:
   gate:
     runs-on: ubuntu-24.04
+    timeout-minutes: 25
     permissions:
       contents: read
+    # Microsoft's Playwright image for the version pnpm-lock.yaml pins ships WebKit and its system
+    # libraries, so no run downloads them from the Ubuntu mirror; bump the tag and digest with
+    # @playwright/test. uid 1001 is the runner user that owns the checkout, so git trusts it
+    # without safe.directory, which the tests' isolated git config would hide. --init reaps the
+    # orphaned processes the recovery tests wait on.
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:47b510dd9230bf0b9bfc9b20102241e577ea7a99334ab4c3ca19f19770e9b8ea
+      options: --init --user 1001
     env:
-      # The runner image ships cargo, but the Tauri crate needs WebKitGTK to build on Linux.
-      # Rust is checked in the desktop job on macOS.
+      # The Tauri crate needs the WebKitGTK development libraries to build on Linux, and this job
+      # has none. Rust is checked in the desktop job on macOS.
       GATE_SKIP_RUST: '1'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -35,13 +44,14 @@ jobs:
           # zizmor, and mise-action creates shims only for installed tools.
           install_args: node pnpm gitleaks actionlint zizmor
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @10db/desktop exec playwright install --with-deps webkit
       - run: bash scripts/gate.sh
       - if: failure()
         run: for f in .gate/*.log; do echo "::group::$f"; cat "$f"; echo "::endgroup::"; done
 
   desktop:
     runs-on: macos-15
+    # A cold Rust cache rebuilds the Tauri crate and its dependencies.
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:
@@ -61,6 +71,7 @@ jobs:
 
   policy:
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
@@ -90,6 +101,7 @@ jobs:
   dependency-review:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
@@ -100,6 +112,7 @@ jobs:
 
   cargo-deny:
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:

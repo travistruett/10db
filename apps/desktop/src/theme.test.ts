@@ -23,6 +23,20 @@ describe('theme contrast (WCAG AA)', () => {
     ).toBeGreaterThanOrEqual(AA_CONTRAST);
   });
 
+  // `c="red"` (a failure reason in the Factory table, a batch's failure on the strip) is
+  // var(--mantine-color-red-text): the filled shade in the light scheme, shade 4 in the dark one.
+  it('reads red status text at AA on the body and on a hovered table row in both schemes', () => {
+    const red = resolved.colors.red;
+    const lightShade =
+      typeof resolved.primaryShade === 'number'
+        ? resolved.primaryShade
+        : resolved.primaryShade.light;
+    for (const background of [resolved.white, resolved.colors.gray[1]])
+      expect(contrastRatio(red[lightShade], background)).toBeGreaterThanOrEqual(AA_CONTRAST);
+    for (const background of [resolved.colors.dark[7], resolved.colors.dark[6]])
+      expect(contrastRatio(red[4], background)).toBeGreaterThanOrEqual(AA_CONTRAST);
+  });
+
   it.each(palettes)('reads %s light-variant text at AA in both schemes', (name, shades) => {
     const lightText = vars.light[`--mantine-color-${name}-light-color`] ?? '';
     // The background, then the hover background (a hovered NavLink or light Button).
@@ -48,4 +62,18 @@ describe('theme contrast (WCAG AA)', () => {
       }
     },
   );
+
+  // A Button keeps its text color on hover, and the pointer rests on a button after a click.
+  it.each(palettes)('reads text on hovered filled %s at AA in both schemes', (name, shades) => {
+    const text = isLightColor(shades[9], resolved.luminanceThreshold)
+      ? resolved.black
+      : resolved.white;
+    for (const scheme of ['light', 'dark'] as const) {
+      // Mantine's own hover is shade 8 when the fill is shade 9.
+      const hover = shade(
+        vars[scheme][`--mantine-color-${name}-filled-hover`] ?? `var(--mantine-color-${name}-8)`,
+      );
+      expect(contrastRatio(text, hover)).toBeGreaterThanOrEqual(AA_CONTRAST);
+    }
+  });
 });

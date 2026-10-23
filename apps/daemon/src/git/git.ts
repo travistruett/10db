@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { isAbsolute, normalize, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { InvalidError } from '@10db/contracts';
@@ -23,7 +23,116 @@ class GitError extends Error {
   }
 }
 
+/** How a network call is made: in the login environment, bounded in time, stoppable. */
+export interface NetworkCall {
+  readonly env: Readonly<Record<string, string>>;
+  readonly timeoutMs: number;
+  readonly signal?: AbortSignal;
+}
+
+export const GitNetworkFailure = {
+  Timeout: 'timeout',
+  Rejected: 'rejected',
+  Aborted: 'aborted',
+  Failed: 'failed',
+} as const;
+export type GitNetworkFailure = (typeof GitNetworkFailure)[keyof typeof GitNetworkFailure];
+
+/** A fetch or push that did not complete; `detail` is git's own message, trimmed. */
+export class GitNetworkError extends Error {
+  override readonly name = 'GitNetworkError';
+  readonly kind: GitNetworkFailure;
+  readonly detail: string;
+  constructor(kind: GitNetworkFailure, args: readonly string[], detail: string) {
+    super(`git ${args.join(' ')}: ${kind}${detail ? `: ${detail}` : ''}`);
+    this.kind = kind;
+    this.detail = detail;
+  }
+}
+
+/** Prompts are off whatever the environment says: nobody can answer one. */
+const NO_PROMPTS = { GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never', LC_ALL: 'C' } as const;
+const REJECTED = /\[(remote )?rejected\]|failed to push some refs/i;
+
+/** How much of git's stderr a failure keeps: the end, where git says what went wrong. */
+const STDERR_TAIL = 2000;
+
+/**
+ * Runs a fetch or push in a process group of its own. A push runs the clone's pre-push hook, which
+ * may start a whole check suite; a timeout or an abort kills the group, so nothing git started
+ * outlives it, and the call settles only once git has exited.
+ */
+function gitNetwork(repo: string, args: readonly string[], net: NetworkCall): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn('git', ['-C', repo, ...args], {
+      // The login environment may carry a hook's GIT_DIR or GIT_WORK_TREE, which would override -C.
+      env: { ...withoutGitRepoEnv(net.env), ...NO_PROMPTS },
+      detached: true,
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+    let stderr = '';
+    let timedOut = false;
+    child.stderr.on('data', (chunk: Buffer) => {
+      stderr = (stderr + chunk.toString('utf8')).slice(-STDERR_TAIL);
+    });
+    const killGroup = (): void => {
+      try {
+        if (child.pid !== undefined) process.kill(-child.pid, 'SIGKILL');
+      } catch {
+        // ESRCH: the group already exited.
+      }
+    };
+    // A real timer on purpose: it bounds a real child process, so the injected clock does not apply.
+    const timer = setTimeout(() => {
+      timedOut = true;
+      killGroup();
+    }, net.timeoutMs);
+    if (net.signal?.aborted) killGroup();
+    else net.signal?.addEventListener('abort', killGroup, { once: true });
+    const settle = (): void => {
+      clearTimeout(timer);
+      net.signal?.removeEventListener('abort', killGroup);
+    };
+    child.on('error', (error) => {
+      settle();
+      reject(new GitNetworkError(GitNetworkFailure.Failed, args, error.message));
+    });
+    child.on('close', (code) => {
+      settle();
+      const detail = stderr.trim();
+      if (net.signal?.aborted) reject(new GitNetworkError(GitNetworkFailure.Aborted, args, ''));
+      else if (timedOut)
+        reject(
+          new GitNetworkError(
+            GitNetworkFailure.Timeout,
+            args,
+            `still running after ${String(Math.round(net.timeoutMs / 1000))} s; stopped with every process it started`,
+          ),
+        );
+      else if (code === 0) resolve();
+      else
+        reject(
+          new GitNetworkError(
+            REJECTED.test(detail) ? GitNetworkFailure.Rejected : GitNetworkFailure.Failed,
+            args,
+            detail,
+          ),
+        );
+    });
+  });
+}
+
 export interface Git {
+  /** The checked-out branch; null when HEAD is detached. */
+  currentBranch(repo: string): Promise<string | null>;
+  /** The URL of remote `name`; null when the repository has no such remote. */
+  remoteUrl(repo: string, name: string): Promise<string | null>;
+  /** Updates `origin/<branch>` from origin; the checkout is untouched. */
+  fetch(repo: string, branch: string, net: NetworkCall): Promise<void>;
+  /** Creates `name` at `startPoint` and checks it out, with no upstream. */
+  switchNewBranch(repo: string, name: string, startPoint: string): Promise<void>;
+  /** Pushes `branch` to the same name on origin and sets it as upstream; never forced. */
+  push(repo: string, branch: string, net: NetworkCall): Promise<void>;
   head(repo: string): Promise<string>;
   status(repo: string): Promise<{ code: string; path: string }[]>;
   /** Committed and uncommitted changes since `base`, sorted and unique. */
@@ -41,7 +150,14 @@ async function git(repo: string, args: readonly string[]): Promise<string> {
   try {
     const { stdout } = await run('git', ['-C', repo, ...args], {
       // -C names the repository; an inherited GIT_DIR or GIT_WORK_TREE would override it.
-      env: { ...withoutGitRepoEnv(process.env), GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C' },
+      // No optional locks: a read such as status would otherwise refresh the index under
+      // index.lock, and a commit that runs meanwhile fails with "index.lock: File exists".
+      env: {
+        ...withoutGitRepoEnv(process.env),
+        GIT_TERMINAL_PROMPT: '0',
+        GIT_OPTIONAL_LOCKS: '0',
+        LC_ALL: 'C',
+      },
       maxBuffer: 16 * 1024 * 1024,
     });
     return stdout;
@@ -133,6 +249,29 @@ export function createGit(): Git {
   }
 
   return {
+    async currentBranch(repo) {
+      const name = (await git(repo, ['branch', '--show-current'])).trim();
+      return name === '' ? null : name;
+    },
+    async remoteUrl(repo, name) {
+      try {
+        return (await git(repo, ['remote', 'get-url', name])).trim();
+      } catch (error) {
+        if (error instanceof GitError && /no such remote/i.test(error.stderr)) return null;
+        throw error;
+      }
+    },
+    fetch: (repo, branch, net) =>
+      gitNetwork(
+        repo,
+        ['fetch', '--no-tags', 'origin', `+refs/heads/${branch}:refs/remotes/origin/${branch}`],
+        net,
+      ),
+    async switchNewBranch(repo, name, startPoint) {
+      await withRepoLock(repo, () => git(repo, ['switch', '--no-track', '-c', name, startPoint]));
+    },
+    push: (repo, branch, net) =>
+      gitNetwork(repo, ['push', '-u', 'origin', `refs/heads/${branch}:refs/heads/${branch}`], net),
     head: revParseHead,
     status,
     async changedFilesSince(repo, base) {

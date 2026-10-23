@@ -421,7 +421,7 @@ describe('InboxView', () => {
       const { answers } = inbox([color]);
       renderApp('/inbox');
       await screen.findByText('Which badge color?');
-      const link = screen.getByRole('link', { name: /Tasks/ });
+      const link = screen.getByRole('link', { name: /Board/ });
       link.focus();
       expect(fireEvent.keyDown(link, { key: 'Enter' })).toBe(true);
       expect(answers).toEqual([]);

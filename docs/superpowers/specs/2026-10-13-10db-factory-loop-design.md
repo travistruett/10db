@@ -385,7 +385,8 @@ becomes an instruction.
 ## 8. Workspace guard (shared checkout)
 
 1. **Claims:** reserved at launch from the project's area vocabulary. Active claims never overlap. They are
-   released on done, cancel or fail, or when the lease expires. Hazard claims (`migrations`, `deps`,
+   released when the workstream reaches DONE, CANCELLED or FAILED (including a recovery that fails it), and are never
+   released by lease expiry. Hazard claims (`migrations`, `deps`,
    `harness`, and project patterns) are exclusive per repo, and hazard work never runs in parallel.
 2. **Guard (`PreToolUse`):**
    - Edit or Write outside the session's claims is denied, with an instruction to call `request_claim`.

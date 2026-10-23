@@ -2,16 +2,20 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   ACTIVE_STATES,
+  Delivery,
   InvalidError,
   type McpServerStatusDto,
   ProjectInput,
   type SystemCheckDto,
 } from '@10db/contracts';
 import {
+  deleteBoardColumn,
   getMcpApproval,
   getProject,
+  getTask,
   getTeam,
   getWorkstream,
+  insertBoardColumn,
   insertFlow,
   insertPerson,
   insertPersona,
@@ -19,6 +23,7 @@ import {
   insertTask,
   latestEventSeq,
   listAaModels,
+  listBoardColumns,
   listEventsAfter,
   listFlows,
   listInbox,
@@ -26,9 +31,12 @@ import {
   listPeople,
   listPersonas,
   listProjects,
+  listProjectViews,
   listRoutingRules,
   listTasks,
   listWorkstreams,
+  moveTask,
+  patchBoardColumn,
   patchFlow,
   patchModelProfile,
   patchPersona,
@@ -39,13 +47,15 @@ import {
 } from '@10db/db';
 import type { BenchmarkSync } from '../benchmarks';
 import type { ApiServices } from '../api';
+import type { BatchStarter, Shipper } from '../delivery';
+import { markGhRequired } from '../environment';
 import type { EventBus, StateStore } from '../events';
 import { requestMcpApproval, type InboxService } from '../inbox';
 import type { KeepAwake } from '../keep-awake';
 import type { Runner } from '../runner';
 import type { Scheduler } from '../scheduler';
 import { ProjectMcpError, readRepoMcp, type RepoMcp } from '../sessions';
-import { resolveStepPlan, retryWorkstream, startTaskWithPlan } from '../team';
+import { proposeCandidates, resolveStepPlan, retryWorkstream, startTaskWithPlan } from '../team';
 
 /** The HTTP layer's view of the daemon: reads go to the database, writes go through the state store. */
 export function createServices(deps: {
@@ -57,10 +67,12 @@ export function createServices(deps: {
   readonly keepAwake: KeepAwake;
   readonly systemCheck: () => Promise<SystemCheckDto>;
   readonly benchmarks: BenchmarkSync;
+  readonly starter: BatchStarter;
+  readonly shipper: Shipper;
 }): ApiServices {
   const db = deps.state.db;
   return {
-    listProjects: () => listProjects(db),
+    listProjects: () => listProjectViews(db),
     createProject(input) {
       const config = ProjectInput.parse(input);
       if (!existsSync(join(config.repoPath, '.git'))) {
@@ -75,10 +87,19 @@ export function createServices(deps: {
       return task;
     },
     startTask(taskId) {
-      const ws = startTaskWithPlan(deps.state, taskId);
+      const project = getProject(db, getTask(db, taskId).projectId);
+      if (project.delivery === Delivery.PullRequest) {
+        const batch = deps.starter.startTask(taskId);
+        deps.scheduler.requestTick();
+        return { kind: 'batch', batch };
+      }
+      const workstream = startTaskWithPlan(deps.state, taskId);
       deps.scheduler.requestTick();
-      return ws;
+      return { kind: 'workstream', workstream };
     },
+    startBatch: (projectId, input) => deps.starter.startBatch(projectId, input),
+    shipBatch: (id) => deps.shipper.ship(id),
+    abandonBatch: (id) => deps.shipper.abandon(id),
     listFlows: () => listFlows(db),
     listWorkstreams: ({ active }) => listWorkstreams(db, active ? { states: ACTIVE_STATES } : {}),
     async cancelWorkstream(id) {
@@ -98,7 +119,11 @@ export function createServices(deps: {
     },
     eventsAfter: (after, limit) => listEventsAfter(db, after, limit),
     subscribe: (listener) => deps.bus.subscribe(listener),
-    systemCheck: () => deps.systemCheck(),
+    systemCheck: async () =>
+      markGhRequired(
+        await deps.systemCheck(),
+        listProjects(db).some((p) => p.delivery === Delivery.PullRequest),
+      ),
     keepAwake: () => deps.keepAwake.status(),
     setKeepAwake: (mode) => deps.keepAwake.setMode(mode),
     eventsHead: () => latestEventSeq(db),
@@ -127,7 +152,19 @@ export function createServices(deps: {
     setRoutingRules: (projectId, input) =>
       deps.state.write((ctx) => setRoutingRules(ctx, projectId, input)),
     patchTask: (id, patch) => deps.state.write((ctx) => patchTask(ctx, id, patch)),
+    moveTask: (id, move) => deps.state.write((ctx) => moveTask(ctx, id, move)),
+    listBoardColumns(projectId) {
+      getProject(db, projectId);
+      return listBoardColumns(db, projectId);
+    },
+    createBoardColumn(projectId, input) {
+      getProject(db, projectId);
+      return deps.state.write((ctx) => insertBoardColumn(ctx, projectId, input));
+    },
+    patchBoardColumn: (id, patch) => deps.state.write((ctx) => patchBoardColumn(ctx, id, patch)),
+    deleteBoardColumn: (id, del) => deps.state.write((ctx) => deleteBoardColumn(ctx, id, del)),
     stepPlan: (taskId) => resolveStepPlan(db, taskId),
+    proposeCandidates: (projectId, size) => proposeCandidates(db, projectId, size),
     reviewProjectMcp(projectId) {
       const project = getProject(db, projectId);
       let repo: RepoMcp;

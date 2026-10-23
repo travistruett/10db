@@ -1,6 +1,14 @@
 import type {
   AaModelDto,
+  BatchDto,
+  BatchId,
+  BatchStartInput,
   BenchmarkStatusDto,
+  BoardColumnDelete,
+  BoardColumnDto,
+  BoardColumnId,
+  BoardColumnInput,
+  BoardColumnPatch,
   DaemonEvent,
   FlowDto,
   FlowId,
@@ -22,10 +30,12 @@ import type {
   PersonaPatch,
   PersonDto,
   PersonInput,
+  PickerProposalDto,
   ProjectDto,
   ProjectId,
   ProjectInput,
   ProjectPatch,
+  ProjectViewDto,
   RoutingRuleDto,
   RoutingRulesInput,
   StepPlanDto,
@@ -33,6 +43,7 @@ import type {
   TaskDto,
   TaskId,
   TaskInput,
+  TaskMove,
   TaskPatch,
   TeamDto,
   TeamInput,
@@ -40,13 +51,23 @@ import type {
   WorkstreamId,
 } from '@10db/contracts';
 
+/** What starting a task made: its workstream in local delivery, the batch it runs in for pull requests. */
+export type TaskStarted =
+  | { readonly kind: 'workstream'; readonly workstream: WorkstreamDto }
+  | { readonly kind: 'batch'; readonly batch: BatchDto };
+
 /** What the HTTP layer needs from the daemon. Implemented in the daemon module. */
 export interface ApiServices {
-  listProjects(): ProjectDto[];
+  listProjects(): ProjectViewDto[];
   createProject(input: ProjectInput): ProjectDto;
   listTasks(projectId: ProjectId): TaskDto[];
   createTask(projectId: ProjectId, input: TaskInput): TaskDto;
-  startTask(taskId: TaskId): WorkstreamDto;
+  startTask(taskId: TaskId): TaskStarted;
+  /** Starts the tasks as a batch, or adds them to the project's open or failed batch. */
+  startBatch(projectId: ProjectId, input: BatchStartInput): BatchDto;
+  /** Ship anyway (from OPEN) or Retry (from FAILED). */
+  shipBatch(id: BatchId): BatchDto;
+  abandonBatch(id: BatchId): BatchDto;
   listFlows(): FlowDto[];
   listWorkstreams(filter: { readonly active: boolean }): WorkstreamDto[];
   cancelWorkstream(id: WorkstreamId): Promise<WorkstreamDto>;
@@ -81,6 +102,15 @@ export interface ApiServices {
   listRoutingRules(projectId: ProjectId): RoutingRuleDto[];
   setRoutingRules(projectId: ProjectId, input: RoutingRulesInput): RoutingRuleDto[];
   patchTask(id: TaskId, patch: TaskPatch): TaskDto;
+  /** Places a task in a column between new neighbours; throws ConflictError for a stale or locked move. */
+  moveTask(id: TaskId, move: TaskMove): TaskDto;
+  listBoardColumns(projectId: ProjectId): BoardColumnDto[];
+  createBoardColumn(projectId: ProjectId, input: BoardColumnInput): BoardColumnDto;
+  patchBoardColumn(id: BoardColumnId, patch: BoardColumnPatch): BoardColumnDto[];
+  /** Moves the column's tasks to another column or to planned, then deletes it. */
+  deleteBoardColumn(id: BoardColumnId, del: BoardColumnDelete): BoardColumnDto[];
   /** What starting the task would run; throws InvalidError when no flow or profile fits. */
   stepPlan(taskId: TaskId): StepPlanDto;
+  /** The picker's proposal for the approval sheet; reads only. */
+  proposeCandidates(projectId: ProjectId, size: number): PickerProposalDto;
 }

@@ -8,6 +8,7 @@ import {
   NotFoundError,
   TaskStatus,
   WorkstreamState,
+  type BatchId,
   type NextAction,
   type ProjectId,
   type Provider,
@@ -18,8 +19,9 @@ import {
   type Effort,
   type WorkstreamStep,
 } from '@10db/contracts';
-import { and, asc, count, eq, inArray, isNotNull, or, type SQL } from 'drizzle-orm';
+import { and, asc, count, desc, eq, inArray, isNotNull, or, type SQL } from 'drizzle-orm';
 import * as schema from '../schema';
+import { getBoardColumn } from './board-columns';
 import { getProject } from './projects';
 import type { DbReader, WriteContext } from './store';
 import { getTask } from './tasks';
@@ -76,6 +78,7 @@ function toDto(db: DbReader, row: WorkstreamRow): WorkstreamDto {
     taskId: row.taskId,
     taskTitle: task?.title ?? '',
     projectId: row.projectId,
+    batchId: row.batchId,
     state: row.state,
     nextAction: row.nextAction,
     attempt: row.attempt,
@@ -101,11 +104,12 @@ export function getWorkstream(db: DbReader, id: WorkstreamId): WorkstreamDto {
 
 export function listWorkstreams(
   db: DbReader,
-  filter: { states?: readonly WorkstreamState[]; projectId?: ProjectId } = {},
+  filter: { states?: readonly WorkstreamState[]; projectId?: ProjectId; batchId?: BatchId } = {},
 ): WorkstreamDto[] {
   const where: SQL[] = [];
   if (filter.states) where.push(inArray(schema.workstreams.state, [...filter.states]));
   if (filter.projectId) where.push(eq(schema.workstreams.projectId, filter.projectId));
+  if (filter.batchId) where.push(eq(schema.workstreams.batchId, filter.batchId));
   return db
     .select()
     .from(schema.workstreams)
@@ -115,10 +119,30 @@ export function listWorkstreams(
     .map((r) => toDto(db, r));
 }
 
-export function insertWorkstream(ctx: WriteContext, taskId: TaskId): WorkstreamDto {
+export function insertWorkstream(
+  ctx: WriteContext,
+  taskId: TaskId,
+  opts: { readonly batchId?: BatchId | null } = {},
+): WorkstreamDto {
   const task = getTask(ctx.tx, taskId);
   if (task.status !== TaskStatus.Open)
     throw new ConflictError(`Task ${task.title} is ${task.status}`);
+  if (task.boardColumnId !== null) {
+    const column = getBoardColumn(ctx.tx, task.boardColumnId);
+    throw new ConflictError(
+      `Task ${task.title} is parked in ${column.name}; move it to Backlog or Ready to start it`,
+    );
+  }
+  // A queued task waits for its dependencies; one parked in a human column would never finish.
+  for (const dependencyId of task.dependsOn) {
+    const dependency = getTask(ctx.tx, dependencyId);
+    if (dependency.status === TaskStatus.Open && dependency.boardColumnId !== null) {
+      const column = getBoardColumn(ctx.tx, dependency.boardColumnId);
+      throw new ConflictError(
+        `Task ${task.title} waits on ${dependency.title}, which is parked in ${column.name}; move it to Backlog or Ready first`,
+      );
+    }
+  }
   const active = ctx.tx
     .select({ id: schema.workstreams.id })
     .from(schema.workstreams)
@@ -135,6 +159,7 @@ export function insertWorkstream(ctx: WriteContext, taskId: TaskId): WorkstreamD
     id: mintId('Workstream'),
     taskId,
     projectId: project.id,
+    batchId: opts.batchId ?? null,
     state: WorkstreamState.Queued,
     nextAction: { kind: 'start' },
     attempt: 0,
@@ -162,9 +187,25 @@ export function insertWorkstream(ctx: WriteContext, taskId: TaskId): WorkstreamD
     type: EventType.WorkstreamCreated,
     entityType: 'workstream',
     entityId: row.id,
-    data: { taskId, projectId: project.id },
+    data: { taskId, projectId: project.id, batchId: opts.batchId ?? null },
   });
   return toDto(ctx.tx, row);
+}
+
+/** The task's most recent DONE workstream: where its code was finished, and in which batch. */
+export function latestDoneWorkstream(db: DbReader, taskId: TaskId): WorkstreamRow | undefined {
+  return db
+    .select()
+    .from(schema.workstreams)
+    .where(
+      and(
+        eq(schema.workstreams.taskId, taskId),
+        eq(schema.workstreams.state, WorkstreamState.Done),
+      ),
+    )
+    .orderBy(desc(schema.workstreams.createdAt), desc(schema.workstreams.id))
+    .limit(1)
+    .get();
 }
 
 function checkFence(row: WorkstreamRow, fence: number | null): void {

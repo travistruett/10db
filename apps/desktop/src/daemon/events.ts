@@ -17,6 +17,9 @@ const WORK: readonly QueryKey[] = [['workstreams'], ['tasks']];
 export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   project: [queryKeys.projects],
   task: [['tasks']],
+  board_column: [['board-columns']],
+  // A batch's state shows on the board's strip; cancelling an abandoned batch's work moves tasks.
+  batch: [queryKeys.projects, ...WORK],
   // Lanes changing can switch keep-awake on or off.
   workstream: [...WORK, queryKeys.keepAwake],
   session: WORK,
@@ -29,7 +32,7 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   // No view reads these entity types; the entries make them known.
   persona: [],
   person: [],
-  flow: [],
+  flow: [queryKeys.flows],
   model_profile: [],
   team: [],
   routing_rules: [],

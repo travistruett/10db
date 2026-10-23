@@ -34,6 +34,9 @@ export const EventType = {
   BenchmarksSynced: 'benchmarks.synced',
   ProjectChanged: 'project.changed',
   StepChanged: 'step.changed',
+  BatchUpdated: 'batch.updated',
+  BoardColumnSaved: 'board_column.saved',
+  BoardColumnDeleted: 'board_column.deleted',
 } as const;
 export type EventType = (typeof EventType)[keyof typeof EventType];
 

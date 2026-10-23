@@ -7,9 +7,11 @@ import {
 } from '@tanstack/react-router';
 import { AppLayout } from './shell/app-layout';
 import { ViewBoundary } from './shell/view-boundary';
+import { BoardView } from './views/board/board-view';
 import { FactoryView } from './views/factory/factory-view';
 import { InboxView } from './views/inbox/inbox-view';
-import { TasksView } from './views/tasks/tasks-view';
+import { isSettingsSectionKey, SettingsSectionKey } from './views/settings/sections';
+import { SettingsView } from './views/settings/settings-view';
 
 function FactoryPage() {
   return (
@@ -27,10 +29,18 @@ function InboxPage() {
   );
 }
 
-function TasksPage() {
+function BoardPage() {
   return (
-    <ViewBoundary name="Tasks">
-      <TasksView />
+    <ViewBoundary name="Board">
+      <BoardView />
+    </ViewBoundary>
+  );
+}
+
+function SettingsPage() {
+  return (
+    <ViewBoundary name="Settings">
+      <SettingsView />
     </ViewBoundary>
   );
 }
@@ -42,7 +52,7 @@ const indexRoute = createRoute({
   path: '/',
   beforeLoad: () => {
     // TanStack Router's redirect is thrown by design.
-    // eslint-disable-next-line @typescript-eslint/only-throw-error
+    // eslint-disable-next-line @typescript-eslint/only-throw-error -- TanStack Router redirects by throwing.
     throw redirect({ to: '/factory' });
   },
 });
@@ -56,13 +66,49 @@ const inboxRoute = createRoute({
   path: '/inbox',
   component: InboxPage,
 });
+const boardRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/board',
+  component: BoardPage,
+});
 const tasksRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/tasks',
-  component: TasksPage,
+  beforeLoad: () => {
+    // TanStack Router's redirect is thrown by design.
+    // eslint-disable-next-line @typescript-eslint/only-throw-error -- TanStack Router redirects by throwing.
+    throw redirect({ to: '/board' });
+  },
 });
 
-const routeTree = rootRoute.addChildren([indexRoute, factoryRoute, inboxRoute, tasksRoute]);
+const settingsIndexRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/settings',
+  beforeLoad: () => {
+    // eslint-disable-next-line @typescript-eslint/only-throw-error -- TanStack Router redirects by throwing.
+    throw redirect({ to: '/settings/$section', params: { section: SettingsSectionKey.General } });
+  },
+});
+const settingsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/settings/$section',
+  beforeLoad: ({ params }) => {
+    if (!isSettingsSectionKey(params.section))
+      // eslint-disable-next-line @typescript-eslint/only-throw-error -- TanStack Router redirects by throwing.
+      throw redirect({ to: '/settings/$section', params: { section: SettingsSectionKey.General } });
+  },
+  component: SettingsPage,
+});
+
+const routeTree = rootRoute.addChildren([
+  indexRoute,
+  boardRoute,
+  factoryRoute,
+  inboxRoute,
+  tasksRoute,
+  settingsIndexRoute,
+  settingsRoute,
+]);
 
 export function createAppRouter(history?: RouterHistory) {
   return createRouter({ routeTree, defaultPreload: 'intent', ...(history ? { history } : {}) });
