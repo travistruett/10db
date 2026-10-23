@@ -20,6 +20,10 @@ describe('lint rules fire', () => {
     );
   });
 
+  it('reports test code that runs git without naming its environment', async () => {
+    expect(await ruleIdsFor('git-spawn.test.ts')).toContain('no-restricted-syntax');
+  });
+
   it('reports deep imports into a workspace package', async () => {
     expect(await ruleIdsFor('deep-import.ts')).toContain('no-restricted-imports');
   });

@@ -1,5 +1,5 @@
 {
   "extends": "./tsconfig.base.json",
   "compilerOptions": { "types": ["node"] },
-  "include": ["vitest.config.ts"]
+  "include": ["vitest.config.ts", "tests/git-isolation.setup.ts"]
 }

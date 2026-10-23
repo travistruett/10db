@@ -74,6 +74,27 @@ export default defineConfig(
     languageOptions: { globals: globals.node },
   },
   {
+    // Test code names the environment of every git it runs: an inherited GIT_DIR (git exports it
+    // to hooks) would aim the command at another repository. See tests/git-isolation.setup.ts.
+    files: [
+      '**/*.test.{ts,tsx}',
+      'apps/daemon/test/**/*.ts',
+      'apps/desktop/e2e/**/*.ts',
+      'tests/repo/src/**/*.ts',
+    ],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        { selector: 'TSEnumDeclaration', message: 'Use an `as const` object and a derived type.' },
+        {
+          selector:
+            "CallExpression[callee.name=/^(execFile|execFileSync|spawn|spawnSync|run)$/][arguments.0.value='git']:not(:has(Property[key.name='env']))",
+          message: 'Pass an isolated `env` to git in test code (isolatedGitEnv and the like).',
+        },
+      ],
+    },
+  },
+  {
     // Daemon modules (src/<module>/) import each other only through index.ts.
     files: ['apps/daemon/src/*/**/*.ts'],
     rules: {

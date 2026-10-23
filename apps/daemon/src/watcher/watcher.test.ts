@@ -26,7 +26,13 @@ import {
   transitionWorkstream,
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createTempRepo, seedWorkstream, tempDir, waitFor } from '../../test/fixtures';
+import {
+  createTempRepo,
+  isolatedGitEnv,
+  seedWorkstream,
+  tempDir,
+  waitFor,
+} from '../../test/fixtures';
 import { ManualClock, systemClock } from '../clock';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit } from '../git';
@@ -224,8 +230,11 @@ describe('watcher', () => {
     touch('src/api/done.ts');
     emit('src/api/done.ts');
     // Alpha commits through 10db, passes its gate and releases its claim inside one batch window.
-    execFileSync('git', ['add', 'src/api/done.ts'], { cwd: repo.path });
-    execFileSync('git', ['commit', '-q', '-m', 'Add done.ts'], { cwd: repo.path });
+    execFileSync('git', ['add', 'src/api/done.ts'], { cwd: repo.path, env: isolatedGitEnv() });
+    execFileSync('git', ['commit', '-q', '-m', 'Add done.ts'], {
+      cwd: repo.path,
+      env: isolatedGitEnv(),
+    });
     state.write((ctx) => {
       releaseClaims(ctx, alpha.workstream.id);
     });
@@ -287,7 +296,10 @@ describe('watcher', () => {
     const script = join(scripts, 'hook.sh');
     writeFileSync(script, `#!/bin/sh\ntouch '${marker}'\n`);
     chmodSync(script, 0o755);
-    execFileSync('git', ['config', 'core.fsmonitor', script], { cwd: repo.path });
+    execFileSync('git', ['config', 'core.fsmonitor', script], {
+      cwd: repo.path,
+      env: isolatedGitEnv(),
+    });
     watcher.sync();
     touch('docs/a.md');
     emit('docs/a.md');

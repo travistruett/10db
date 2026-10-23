@@ -382,12 +382,51 @@ describe('community files', () => {
     expect(scopes.filter((scope) => !contributing.includes(`\`${scope}\``))).toEqual([]);
   });
 
-  it('opens Renovate PRs as chore(deps) commits and waits a day after each release', () => {
+  it('opens Renovate PRs as chore(deps) commits and waits three days after each release', () => {
     const renovate = JSON.parse(readRepoFile('renovate.json')) as Record<string, unknown>;
     expect(renovate['extends']).toEqual(
       expect.arrayContaining([':semanticCommitTypeAll(chore)', ':semanticCommitScope(deps)']),
     );
-    expect(renovate['minimumReleaseAge']).toBe('1 day');
+    expect(renovate['minimumReleaseAge']).toBe('3 days');
+  });
+
+  it('batches Renovate into one weekly window, majors on approval, security fixes at once', () => {
+    interface Rule {
+      matchUpdateTypes?: string[];
+      groupName?: string;
+      dependencyDashboardApproval?: boolean;
+    }
+    const renovate = JSON.parse(readRepoFile('renovate.json')) as {
+      timezone: string;
+      schedule: string[];
+      lockFileMaintenance: { schedule: string[] };
+      vulnerabilityAlerts?: { schedule?: string[] };
+      packageRules: Rule[];
+    };
+    expect(renovate.timezone).toBe('America/Los_Angeles');
+    expect(renovate.schedule).toEqual(['before 6am on monday']);
+    expect(renovate.lockFileMaintenance.schedule).toEqual([
+      'before 6am on the first day of the month',
+    ]);
+    expect(renovate.vulnerabilityAlerts?.schedule ?? []).toEqual([]);
+    // The last rule that matches wins, so the catch-all group must come after the named groups.
+    const nonMajor = renovate.packageRules.findLastIndex(
+      (r) => r.groupName === 'all non-major dependencies',
+    );
+    const named = renovate.packageRules.findLastIndex(
+      (r) => r.groupName !== undefined && r.groupName !== 'all non-major dependencies',
+    );
+    expect(nonMajor).toBeGreaterThan(named);
+    expect(renovate.packageRules[nonMajor]?.matchUpdateTypes).toEqual([
+      'minor',
+      'patch',
+      'pin',
+      'pinDigest',
+      'digest',
+    ]);
+    expect(renovate.packageRules).toContainEqual(
+      expect.objectContaining({ matchUpdateTypes: ['major'], dependencyDashboardApproval: true }),
+    );
   });
 
   it('leaves the throwaway spikes alone', () => {

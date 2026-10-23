@@ -1,8 +1,8 @@
 import { execFileSync } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash, randomBytes } from 'node:crypto';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 
 const TOKEN_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
 
@@ -35,6 +35,17 @@ export function envWithoutGitVariables(): NodeJS.ProcessEnv {
  */
 export function isolatedGitEnvironment(): NodeJS.ProcessEnv {
   return { ...envWithoutGitVariables(), GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' };
+}
+
+/** The SHA-256 of every file under `dir`, keyed by relative path: two equal snapshots mean no byte changed. */
+export function snapshotFiles(dir: string): Record<string, string> {
+  const files: Record<string, string> = {};
+  for (const entry of readdirSync(dir, { recursive: true, withFileTypes: true })) {
+    if (!entry.isFile()) continue;
+    const path = join(entry.parentPath, entry.name);
+    files[relative(dir, path)] = createHash('sha256').update(readFileSync(path)).digest('hex');
+  }
+  return files;
 }
 
 /** A real git repository in a temporary directory, for tests that run hooks and scripts. */
