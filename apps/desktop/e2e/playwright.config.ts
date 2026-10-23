@@ -1,16 +1,11 @@
 import { resolve } from 'node:path';
 import { defineConfig, devices } from '@playwright/test';
-import {
-  DEFAULT_BOOK,
-  DESKTOP_DIR,
-  E2E_DAEMON_PORT,
-  E2E_DATA,
-  E2E_TOKEN,
-  E2E_UI_PORT,
-} from './paths';
+import { DEFAULT_BOOK, DESKTOP_DIR, E2E_DATA, E2E_TOKEN } from './paths';
+import { e2ePorts } from './ports';
 
-const daemonUrl = `http://127.0.0.1:${String(E2E_DAEMON_PORT)}`;
-const uiUrl = `http://localhost:${String(E2E_UI_PORT)}`;
+const ports = await e2ePorts(process.env);
+const daemonUrl = `http://127.0.0.1:${String(ports.daemon)}`;
+const uiUrl = `http://localhost:${String(ports.ui)}`;
 // The red-first run points this at a script book whose session crashes.
 const book = process.env['E2E_BOOK'] ?? DEFAULT_BOOK;
 
@@ -46,14 +41,15 @@ export default defineConfig({
         TENDB_CLAUDE_PATH: '',
         TENDB_LIVE_CLAUDE: '',
         TENDB_DATA_DIR: E2E_DATA,
-        TENDB_PORT: String(E2E_DAEMON_PORT),
+        TENDB_PORT: String(ports.daemon),
         TENDB_FAKE_SCRIPTS: book,
         TENDB_DEV_UI_TOKEN: E2E_TOKEN,
+        TENDB_DEV_UI_ORIGIN: uiUrl,
         TENDB_LOG_LEVEL: 'warn',
       },
     },
     {
-      command: `pnpm vite --port ${String(E2E_UI_PORT)} --strictPort`,
+      command: `pnpm vite --port ${String(ports.ui)} --strictPort`,
       cwd: DESKTOP_DIR,
       url: uiUrl,
       reuseExistingServer: false,
