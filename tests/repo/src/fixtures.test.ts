@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createThrowawayRepo } from './fixtures';
+import { createThrowawayRepo, isolatedGitEnvironment, snapshotFiles } from './fixtures';
 
 describe('createThrowawayRepo', () => {
   const cleanup: string[] = [];
@@ -33,6 +33,46 @@ describe('createThrowawayRepo', () => {
     } finally {
       repo.remove();
     }
+  });
+
+  it('builds its repository and a bare origin in place when git hook variables point elsewhere', () => {
+    const decoy = createThrowawayRepo('10db-decoy');
+    const origin = mkdtempSync(join(tmpdir(), '10db-fixture-origin-'));
+    cleanup.push(decoy.dir, origin);
+    // Its own identity, so a fixture that wrote its identity here would change the bytes.
+    decoy.git('config', 'user.name', 'decoy owner');
+    decoy.git('config', 'user.email', 'owner@decoy.invalid');
+    decoy.stage('decoy.txt', 'the real repository\n');
+    decoy.commit('chore(repo): decoy');
+    const before = snapshotFiles(decoy.dir);
+    const gitDir = join(decoy.dir, '.git');
+    vi.stubEnv('GIT_DIR', gitDir);
+    vi.stubEnv('GIT_WORK_TREE', decoy.dir);
+    vi.stubEnv('GIT_INDEX_FILE', join(gitDir, 'index'));
+    vi.stubEnv('GIT_COMMON_DIR', gitDir);
+    let failure: unknown;
+    let repo: ReturnType<typeof createThrowawayRepo> | undefined;
+    try {
+      repo = createThrowawayRepo('10db-fixture');
+      cleanup.push(repo.dir);
+      execFileSync('git', ['init', '-q', '--bare', origin], { env: repo.env });
+      repo.stage('a.txt', 'a\n');
+      repo.commit('chore(repo): first');
+      repo.git('remote', 'add', 'origin', origin);
+      repo.git('push', '-q', 'origin', 'feat/x');
+    } catch (error) {
+      failure = error;
+    }
+    vi.unstubAllEnvs();
+
+    expect(snapshotFiles(decoy.dir)).toEqual(before);
+    expect(failure).toBeUndefined();
+    expect(repo?.gitOutput('config', 'core.bare')).toBe('false');
+    const originLog = execFileSync('git', ['--git-dir', origin, 'log', '--format=%s', 'feat/x'], {
+      env: isolatedGitEnvironment(),
+      encoding: 'utf8',
+    });
+    expect(originLog.trim()).toBe('chore(repo): first');
   });
 
   it('lets a bare git commit work, with a local identity and no global one', () => {

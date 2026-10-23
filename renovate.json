@@ -6,9 +6,17 @@
     ":semanticCommitTypeAll(chore)",
     ":semanticCommitScope(deps)"
   ],
-  "minimumReleaseAge": "1 day",
+  "timezone": "America/Los_Angeles",
+  "schedule": ["before 6am on monday"],
+  "minimumReleaseAge": "3 days",
   "rangeStrategy": "pin",
-  "lockFileMaintenance": { "enabled": true, "schedule": ["before 6am on monday"] },
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["before 6am on the first day of the month"]
+  },
+  "vulnerabilityAlerts": {
+    "schedule": []
+  },
   "packageRules": [
     {
       "description": "Node is pinned in mise.toml and in the root engines field; bump both together.",
@@ -33,6 +41,16 @@
     {
       "matchManagers": ["github-actions"],
       "groupName": "GitHub Actions"
+    },
+    {
+      "description": "Every update that isn't a major version lands in one weekly PR.",
+      "matchUpdateTypes": ["minor", "patch", "pin", "pinDigest", "digest"],
+      "groupName": "all non-major dependencies"
+    },
+    {
+      "description": "A major version opens a PR only after its box is ticked on the Dependency Dashboard.",
+      "matchUpdateTypes": ["major"],
+      "dependencyDashboardApproval": true
     }
   ]
 }
