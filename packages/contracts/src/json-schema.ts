@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { BatchDto, BatchStartInput, ProjectViewDto, TaskStartResult } from './batches';
 import { AaModelDto, BenchmarkStatusDto } from './benchmarks';
 import {
   BoardColumnDelete,
@@ -55,6 +56,10 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'health-response': HealthResponse,
   'daemon-event': DaemonEvent,
   'handoff-input': HandoffInput,
+  'batch-dto': BatchDto,
+  'batch-start-input': BatchStartInput,
+  'project-view-dto': ProjectViewDto,
+  'task-start-result': TaskStartResult,
   'project-dto': ProjectDto,
   'task-dto': TaskDto,
   'project-patch': ProjectPatch,

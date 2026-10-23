@@ -3,7 +3,7 @@ import { InboxItemId, ProjectId } from './ids';
 import { KeepAwakeMode } from './states';
 
 /** The tools the system check looks for on the login PATH. */
-export const ToolName = { Claude: 'claude', Git: 'git', Docker: 'docker' } as const;
+export const ToolName = { Claude: 'claude', Git: 'git', Docker: 'docker', Gh: 'gh' } as const;
 export type ToolName = (typeof ToolName)[keyof typeof ToolName];
 
 export const ToolCheck = z.object({

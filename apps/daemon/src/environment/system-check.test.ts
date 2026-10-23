@@ -2,7 +2,7 @@ import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { tempDir } from '../../test/fixtures';
-import { findOnPath, probeVersion, systemCheck, type LoginEnv } from './index';
+import { findOnPath, markGhRequired, probeVersion, systemCheck, type LoginEnv } from './index';
 
 let dir: { path: string; cleanup(): void };
 beforeEach(() => {
@@ -80,7 +80,28 @@ describe('systemCheck', () => {
           required: true,
         },
         { name: 'docker', path: null, version: null, required: false },
+        { name: 'gh', path: null, version: null, required: false },
       ],
     });
+  });
+});
+
+describe('markGhRequired', () => {
+  it('requires gh only while some project delivers pull requests', () => {
+    const check = {
+      loginEnv: { source: 'login_shell' as const, warning: null },
+      tools: [
+        { name: 'git' as const, path: '/usr/bin/git', version: '2', required: true },
+        { name: 'gh' as const, path: null, version: null, required: false },
+      ],
+    };
+    expect(markGhRequired(check, true).tools.map((t) => [t.name, t.required])).toEqual([
+      ['git', true],
+      ['gh', true],
+    ]);
+    expect(markGhRequired(check, false).tools.map((t) => [t.name, t.required])).toEqual([
+      ['git', true],
+      ['gh', false],
+    ]);
   });
 });

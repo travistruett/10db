@@ -1,8 +1,10 @@
-import { ConflictError, InvalidError, type TaskId } from '@10db/contracts';
+import { ConflictError, InvalidError, type BatchState, type TaskId } from '@10db/contracts';
 import {
   createTestStore,
   findFlowByName,
+  getBatch,
   getWorkstream,
+  insertBatch,
   insertTask,
   insertWorkstream,
   listBoardColumns,
@@ -11,6 +13,7 @@ import {
   patchProject,
   patchTask,
   seedProject,
+  transitionBatch,
   transitionWorkstream,
 } from '@10db/db';
 import { readDefaultPersonas } from '@10db/harness';
@@ -119,6 +122,50 @@ describe('startTaskWithPlan', () => {
       /Step 2 \(review.*at or above 52 intelligence \(floor: .*\); over the budget ceiling/,
     );
     expect(listWorkstreams(state.db, {})).toEqual([]);
+  });
+});
+
+describe('retryWorkstream in a batch', () => {
+  it.each<{ name: string; to: BatchState[]; allowed: boolean; after?: BatchState }>([
+    { name: 'an open batch', to: ['OPEN'], allowed: true, after: 'OPEN' },
+    {
+      name: 'a failed batch, which it reopens',
+      to: ['OPEN', 'FAILED'],
+      allowed: true,
+      after: 'OPEN',
+    },
+    { name: 'a shipping batch', to: ['OPEN', 'SHIPPING'], allowed: false },
+    { name: 'a shipped batch', to: ['OPEN', 'SHIPPING', 'SHIPPED'], allowed: false },
+    { name: 'a closed batch', to: ['OPEN', 'SHIPPING', 'CLOSED'], allowed: false },
+    { name: 'an abandoned batch', to: ['OPEN', 'ABANDONED'], allowed: false },
+  ])('$name: allowed $allowed', ({ to, allowed, after }) => {
+    const task = addTask();
+    const batch = state.write((ctx) => {
+      const b = insertBatch(ctx, { projectId: project.id, title: 'B', baseBranch: 'main' });
+      transitionBatch(ctx, b.id, { to: 'OPEN' });
+      return b;
+    });
+    const ws = state.write((ctx) => insertWorkstream(ctx, task.id, { batchId: batch.id }));
+    state.write((ctx) => {
+      for (const s of ['STARTING', 'RUNNING', 'FAILED'] as const)
+        transitionWorkstream(ctx, ws.id, { to: s, fence: null });
+      for (const s of to.slice(1)) transitionBatch(ctx, batch.id, { to: s });
+    });
+    if (!allowed) {
+      expect(() => retryWorkstream(state, ws.id)).toThrow(ConflictError);
+      return;
+    }
+    expect(retryWorkstream(state, ws.id).state).toBe('QUEUED');
+    expect(getBatch(state.db, batch.id).state).toBe(after);
+  });
+
+  it('retries a workstream with no batch as before', () => {
+    const ws = state.write((ctx) => insertWorkstream(ctx, addTask().id));
+    state.write((ctx) => {
+      for (const s of ['STARTING', 'RUNNING', 'FAILED'] as const)
+        transitionWorkstream(ctx, ws.id, { to: s, fence: null });
+    });
+    expect(retryWorkstream(state, ws.id).state).toBe('QUEUED');
   });
 });
 

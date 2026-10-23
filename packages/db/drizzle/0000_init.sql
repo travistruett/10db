@@ -10,6 +10,28 @@ CREATE TABLE `app_settings` (
 	`updated_at` text NOT NULL
 );
 --> statement-breakpoint
+CREATE TABLE `batches` (
+	`id` text PRIMARY KEY NOT NULL,
+	`project_id` text NOT NULL,
+	`title` text NOT NULL,
+	`state` text NOT NULL,
+	`branch` text,
+	`base_branch` text NOT NULL,
+	`base_sha` text,
+	`repo` text,
+	`pr_url` text,
+	`gate_exit_code` integer,
+	`gate_log_path` text,
+	`gate_pid` integer,
+	`gate_pid_start` text,
+	`failure` text,
+	`created_at` text NOT NULL,
+	`updated_at` text NOT NULL,
+	FOREIGN KEY (`project_id`) REFERENCES `projects`(`id`) ON UPDATE no action ON DELETE no action
+);
+--> statement-breakpoint
+CREATE INDEX `batches_project_idx` ON `batches` (`project_id`);--> statement-breakpoint
+CREATE UNIQUE INDEX `batches_one_unfinished` ON `batches` (`project_id`) WHERE state IN ('CUTTING', 'OPEN', 'SHIPPING', 'FAILED');--> statement-breakpoint
 CREATE TABLE `board_columns` (
 	`id` text PRIMARY KEY NOT NULL,
 	`project_id` text NOT NULL,
@@ -227,6 +249,9 @@ CREATE TABLE `projects` (
 	`human_wait_minutes` integer NOT NULL,
 	`flow_id` text,
 	`budget_ceiling` real,
+	`delivery` text DEFAULT 'local' NOT NULL,
+	`base_branch` text DEFAULT 'main' NOT NULL,
+	`pr_title_prefix` text,
 	`created_at` text NOT NULL,
 	`updated_at` text NOT NULL,
 	FOREIGN KEY (`flow_id`) REFERENCES `flows`(`id`) ON UPDATE no action ON DELETE no action
@@ -358,6 +383,7 @@ CREATE TABLE `workstreams` (
 	`id` text PRIMARY KEY NOT NULL,
 	`task_id` text NOT NULL,
 	`project_id` text NOT NULL,
+	`batch_id` text,
 	`state` text NOT NULL,
 	`next_action` text NOT NULL,
 	`attempt` integer NOT NULL,
@@ -380,8 +406,10 @@ CREATE TABLE `workstreams` (
 	`created_at` text NOT NULL,
 	`updated_at` text NOT NULL,
 	FOREIGN KEY (`task_id`) REFERENCES `tasks`(`id`) ON UPDATE no action ON DELETE no action,
-	FOREIGN KEY (`project_id`) REFERENCES `projects`(`id`) ON UPDATE no action ON DELETE no action
+	FOREIGN KEY (`project_id`) REFERENCES `projects`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`batch_id`) REFERENCES `batches`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
 CREATE INDEX `workstreams_state_idx` ON `workstreams` (`state`);--> statement-breakpoint
-CREATE INDEX `workstreams_task_idx` ON `workstreams` (`task_id`);
+CREATE INDEX `workstreams_task_idx` ON `workstreams` (`task_id`);--> statement-breakpoint
+CREATE INDEX `workstreams_batch_idx` ON `workstreams` (`batch_id`);

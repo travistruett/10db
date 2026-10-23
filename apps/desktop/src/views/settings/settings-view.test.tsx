@@ -158,6 +158,35 @@ describe('SettingsView', () => {
     expect(await screen.findByText('Nothing to change.')).toBeTruthy();
   });
 
+  it('switches a project to pull-request delivery, and shows why the daemon refuses it while work runs', async () => {
+    // One fixed project: a handler that mints a new ID per fetch would remount the form.
+    const project = projectDto();
+    const patched: unknown[] = [];
+    server.use(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
+      http.patch(daemonUrl('/projects/:projectId'), async ({ request }) => {
+        patched.push(await request.json());
+        return HttpResponse.json(
+          {
+            error: 'conflict',
+            message: 'demo has unfinished work; finish or cancel it before changing its delivery',
+          },
+          { status: 409 },
+        );
+      }),
+      ...baseHandlers(),
+    );
+    renderApp('/settings/general');
+    fireEvent.click(await screen.findByRole('radio', { name: 'One pull request per batch' }));
+    fireEvent.change(screen.getByLabelText('PR title prefix'), { target: { value: 'feat(app)' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => {
+      expect(patched).toEqual([{ delivery: 'pull_request', prTitlePrefix: 'feat(app)' }]);
+    });
+    expect(await screen.findByText(/has unfinished work/)).toBeTruthy();
+  });
+
   it('keeps what the builder typed and picks up other fields when the project changes mid-edit', async () => {
     const first = projectDto({ name: 'demo', gateCommand: 'make gate' });
     let current = first;

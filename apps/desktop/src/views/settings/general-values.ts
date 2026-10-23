@@ -1,4 +1,11 @@
-import type { FlowId, ProjectDto, ProjectPatch } from '@10db/contracts';
+import {
+  BranchName,
+  Delivery,
+  PrTitlePrefix,
+  type FlowId,
+  type ProjectDto,
+  type ProjectPatch,
+} from '@10db/contracts';
 
 /** The General form's fields; an emptied number field is ''. */
 export interface GeneralValues {
@@ -11,6 +18,10 @@ export interface GeneralValues {
   readonly flowId: FlowId | null;
   /** '' means no ceiling. */
   readonly budgetCeiling: number | '';
+  readonly delivery: Delivery;
+  readonly baseBranch: string;
+  /** '' means none. */
+  readonly prTitlePrefix: string;
 }
 
 export type GeneralErrors = Partial<Record<keyof GeneralValues, string>>;
@@ -28,6 +39,9 @@ export function generalValues(project: ProjectDto): GeneralValues {
     humanWaitMinutes: project.humanWaitMinutes,
     flowId: project.flowId,
     budgetCeiling: project.budgetCeiling ?? '',
+    delivery: project.delivery,
+    baseBranch: project.baseBranch,
+    prTitlePrefix: project.prTitlePrefix ?? '',
   };
 }
 
@@ -46,6 +60,15 @@ export function checkGeneral(project: ProjectDto, values: GeneralValues): Genera
   if (values.humanWaitMinutes === '') errors.humanWaitMinutes = 'Enter the wait in minutes';
   if (values.budgetCeiling !== '' && values.budgetCeiling <= 0)
     errors.budgetCeiling = 'Enter a ceiling above $0, or leave it empty for none';
+  const baseBranch = values.baseBranch.trim();
+  const prefix = values.prTitlePrefix.trim();
+  if (!BranchName.safeParse(baseBranch).success)
+    errors.baseBranch = 'Enter the base branch, such as main';
+  if (
+    (values.delivery === Delivery.PullRequest || prefix !== '') &&
+    !PrTitlePrefix.safeParse(prefix).success
+  )
+    errors.prTitlePrefix = 'Enter a PR title prefix such as feat(app)';
   if (Object.keys(errors).length > 0) return { ok: false, errors };
 
   const patch: { -readonly [K in keyof ProjectPatch]: ProjectPatch[K] } = {};
@@ -62,5 +85,9 @@ export function checkGeneral(project: ProjectDto, values: GeneralValues): Genera
   if (values.flowId !== project.flowId) patch.flowId = values.flowId;
   const ceiling = values.budgetCeiling === '' ? null : values.budgetCeiling;
   if (ceiling !== project.budgetCeiling) patch.budgetCeiling = ceiling;
+  if (values.delivery !== project.delivery) patch.delivery = values.delivery;
+  if (baseBranch !== project.baseBranch) patch.baseBranch = baseBranch;
+  const prTitlePrefix = prefix === '' ? null : prefix;
+  if (prTitlePrefix !== project.prTitlePrefix) patch.prTitlePrefix = prTitlePrefix;
   return { ok: true, patch: Object.keys(patch).length > 0 ? patch : null };
 }

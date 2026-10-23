@@ -4,6 +4,7 @@ import {
   mintId,
   NotFoundError,
   PROTOCOL_VERSION,
+  WorkstreamDto,
   type DaemonEvent,
 } from '@10db/contracts';
 import { defineWebSocketHelper } from 'hono/ws';
@@ -66,6 +67,9 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
     setRoutingRules: track('setRoutingRules'),
     patchTask: track('patchTask'),
     stepPlan: track('stepPlan'),
+    startBatch: track('startBatch'),
+    shipBatch: track('shipBatch'),
+    abandonBatch: track('abandonBatch'),
     moveTask: track('moveTask'),
     listBoardColumns: track('listBoardColumns'),
     createBoardColumn: track('createBoardColumn'),
@@ -484,6 +488,101 @@ describe('team, routing and benchmark routes', () => {
     expect(res.status).toBe(400);
     expect(reached).toEqual([]);
   });
+});
+
+describe('batch routes', () => {
+  const batch = {
+    id: mintId('Batch'),
+    projectId: mintId('Project'),
+    title: 'Greetings',
+    state: 'CUTTING',
+    branch: null,
+    baseBranch: 'main',
+    baseSha: null,
+    repo: null,
+    prUrl: null,
+    gateExitCode: null,
+    gateLogPath: null,
+    failure: null,
+    createdAt: '2026-10-21T12:00:00.000Z',
+    updatedAt: '2026-10-21T12:00:00.000Z',
+  } as const;
+  const post = (_path: string, body?: unknown) => ({
+    method: 'POST',
+    headers: { Authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+
+  it('answers 202 with the batch for a batch start, and 400 for an empty one', async () => {
+    const services = stubServices({ startBatch: () => batch });
+    const path = `/projects/${batch.projectId}/batches`;
+    const ok = await app(services).request(
+      path,
+      post(path, { title: 'Greetings', taskIds: [mintId('Task')] }),
+    );
+    expect(ok.status).toBe(202);
+    expect(await ok.json()).toEqual(batch);
+    expect(
+      (await app(services).request(path, post(path, { title: 'x', taskIds: [] }))).status,
+    ).toBe(400);
+  });
+
+  const workstream = WorkstreamDto.parse({
+    id: mintId('Workstream'),
+    taskId: mintId('Task'),
+    projectId: batch.projectId,
+    batchId: null,
+    taskTitle: 'Alpha',
+    state: 'QUEUED',
+    nextAction: { kind: 'start' },
+    attempt: 0,
+    recoveryAttempts: 0,
+    model: 'sonnet',
+    effort: 'medium',
+    steps: [],
+    stepIndex: 0,
+    currentSessionId: null,
+    sessionCount: 0,
+    contextPct: null,
+    pausedUntil: null,
+    failureReason: null,
+    lastActivityAt: null,
+    createdAt: batch.createdAt,
+    updatedAt: batch.updatedAt,
+  });
+  it.each([
+    {
+      name: '201 with the workstream in a local project',
+      started: { kind: 'workstream', workstream },
+      status: 201,
+      body: workstream,
+    },
+    {
+      name: '202 with the batch in a pull-request project',
+      started: { kind: 'batch', batch },
+      status: 202,
+      body: batch,
+    },
+  ] as const)('answers a task start with $name', async ({ started, status, body }) => {
+    const res = await app(stubServices({ startTask: () => started })).request(
+      `/tasks/${mintId('Task')}/start`,
+      post(''),
+    );
+    expect(res.status).toBe(status);
+    expect(await res.json()).toEqual(body);
+  });
+
+  it.each([
+    { path: 'ship', service: 'shipBatch' },
+    { path: 'abandon', service: 'abandonBatch' },
+  ])(
+    'routes $path to $service, and refuses an id that is not a batch',
+    async ({ path, service }) => {
+      await app().request(`/batches/${mintId('Batch')}/${path}`, post(''));
+      expect(reached).toEqual([service]);
+      expect((await app().request(`/batches/not-a-batch/${path}`, post(''))).status).toBe(400);
+    },
+  );
 });
 
 describe('board routes', () => {
