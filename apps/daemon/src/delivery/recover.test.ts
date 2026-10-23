@@ -18,7 +18,7 @@ import { ManualClock } from '../clock';
 import { silentLogger } from '../log';
 import { systemProcesses } from '../recovery';
 import { createScheduler } from '../scheduler';
-import { recoverBatches } from './index';
+import { batchBranchName, recoverBatches } from './index';
 
 let h: DeliveryHarness;
 afterEach(() => {
@@ -62,22 +62,24 @@ function onOrigin(branch: string | null): string | null {
 describe('recoverBatches', () => {
   it('deletes a CUTTING row with a card, and leaves the branch a crash left behind; the next cut uses a new name', async () => {
     h = createDeliveryHarness({}, { trigger: false });
-    h.state.write((c) =>
+    const cutting = h.state.write((c) =>
       insertBatch(c, { projectId: h.project.id, title: 'Greetings', baseBranch: 'main' }),
     );
-    h.git$('switch', '-q', '-c', '10db/greetings-0a1b2c3d');
+    // The branch a crash just after `git switch` leaves behind, named for the CUTTING row.
+    const leftover = batchBranchName(cutting.title, cutting.id);
+    h.git$('switch', '-q', '-c', leftover);
     const report = await recover();
     expect(report.deleted).toHaveLength(1);
     expect(listBatches(h.store.db)).toEqual([]);
     expect(h.only(h.cards()).title).toBe(
       'Batch not started: 10db stopped while cutting the branch for "Greetings"',
     );
-    expect(h.git$('branch', '--list', '10db/greetings-0a1b2c3d')).toContain(
-      '10db/greetings-0a1b2c3d',
-    );
+    expect(h.git$('branch', '--list', leftover)).toContain(leftover);
     const next = await openBatch();
     expect(next.state).toBe('OPEN');
-    expect(next.branch).not.toBe('10db/greetings-0a1b2c3d');
+    expect(next.branch).not.toBe(leftover);
+    const batchBranches = h.git$('branch', '--list', '--format=%(refname:short)', '10db/*');
+    expect(batchBranches.split('\n').sort()).toEqual([leftover, next.branch].sort());
   });
 
   it('fails an unfinished batch whose branch is not checked out, and launches nothing in it', async () => {
