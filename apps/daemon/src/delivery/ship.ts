@@ -29,7 +29,7 @@ import {
   type DbReader,
 } from '@10db/db';
 import type { Clock } from '../clock';
-import { GitNetworkError } from '../git';
+import { GitNetworkError, GitNetworkFailure } from '../git';
 import type { GateResult, GateRunner } from '../verify';
 import { shipCards, wrongBranchCard, type ShipFailure } from './cards';
 import { ghCall, networkCall, raise, type DeliveryContext } from './context';
@@ -60,6 +60,20 @@ export interface Shipper {
 /** A batch's members: each task's latest workstream in it. */
 function members(db: DbReader, batchId: BatchId): WorkstreamDto[] {
   return latestPerTask(listWorkstreams(db, { batchId }));
+}
+
+/** Why a shipping step threw: a rejected push has its own card; any other git or gh failure is `network`. */
+function stepFailure(batch: BatchDto, step: string, error: unknown): ShipFailure {
+  if (!(error instanceof GitNetworkError)) return shipCards.network(batch, step, error);
+  switch (error.kind) {
+    case GitNetworkFailure.Rejected:
+      return shipCards.pushRejected(batch, error.detail);
+    // Only shutdown aborts a push, and the shipper returns before asking for a card then.
+    case GitNetworkFailure.Aborted:
+    case GitNetworkFailure.Timeout:
+    case GitNetworkFailure.Failed:
+      return shipCards.network(batch, step, error);
+  }
 }
 
 export function createShipper(deps: ShipperDeps): Shipper {
@@ -120,9 +134,11 @@ export function createShipper(deps: ShipperDeps): Shipper {
     return result.aborted ? null : result;
   }
 
+  /** `target` is the batch's repo and branch, which step 0 checked are set. */
   async function createPr(
     batch: BatchDto,
     project: ProjectDto,
+    target: { readonly repo: string; readonly branch: string },
     signal: AbortSignal,
   ): Promise<string> {
     const rows = members(db, batch.id).map((w) => ({ title: w.taskTitle, state: w.state }));
@@ -134,9 +150,9 @@ export function createShipper(deps: ShipperDeps): Shipper {
     );
     return deps.gh.prCreate(
       {
-        repo: batch.repo ?? '',
+        repo: target.repo,
         base: batch.baseBranch,
-        head: batch.branch ?? '',
+        head: target.branch,
         title: prTitle(project.prTitlePrefix, batch.title),
         bodyFile: file,
       },
@@ -207,7 +223,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
         ghCall(deps, project.repoPath, signal),
       );
       step = 'gh pr create';
-      const prUrl = existing?.url ?? (await createPr(batch, project, signal));
+      const prUrl = existing?.url ?? (await createPr(batch, project, { repo, branch }, signal));
       // 5. Record it.
       deps.state.write((w) =>
         transitionBatch(w, batchId, {
@@ -219,11 +235,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
     } catch (error) {
       // Shutdown: leave SHIPPING; recovery re-runs from step 0.
       if (stopped()) return;
-      if (error instanceof GitNetworkError && error.kind === 'rejected') {
-        fail(batch, shipCards.pushRejected(batch, error.detail));
-        return;
-      }
-      fail(batch, shipCards.network(batch, step, error));
+      fail(batch, stepFailure(batch, step, error));
     }
   }
 
