@@ -33,6 +33,14 @@ export function isolatedGitEnv(): NodeJS.ProcessEnv {
   };
 }
 
+/**
+ * Local config every test repository gets before its first commit. Without it git starts a detached
+ * `git maintenance run --auto` after a commit, which goes on writing under `.git` (it holds
+ * `objects/maintenance.lock`) after the command returns and races any test that reads those files.
+ * Being local, it reaches every git process that touches the repository, whatever its environment.
+ */
+export const TEST_REPO_CONFIG = { 'maintenance.auto': 'false', 'gc.auto': '0' } as const;
+
 /** A real git repository with one commit on main, for tests that touch git or files. */
 export function createTempRepo(): TempDir {
   const dir = tempDir('repo');
@@ -40,6 +48,7 @@ export function createTempRepo(): TempDir {
   const git = (...args: string[]) =>
     execFileSync('git', ['-C', dir.path, ...args], { env, stdio: 'pipe' });
   git('init', '-q', '-b', 'main');
+  for (const [key, value] of Object.entries(TEST_REPO_CONFIG)) git('config', key, value);
   git('config', 'user.name', '10db test');
   git('config', 'user.email', 'test@10db.invalid');
   git('config', 'commit.gpgsign', 'false');

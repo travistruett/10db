@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { InvalidError } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -206,6 +206,16 @@ describe('status', () => {
   ])('reports $name', async ({ arrange, expected }) => {
     arrange();
     expect(await git.status(repo.path)).toEqual(expected);
+  });
+
+  // A status that refreshed the index would hold index.lock, and a lane's commit running then fails.
+  it('leaves a stale index unwritten', async () => {
+    const index = join(repo.path, '.git', 'index');
+    const later = new Date(Date.now() + 60_000);
+    utimesSync(join(repo.path, 'README.md'), later, later);
+    const before = readFileSync(index);
+    expect(await git.status(repo.path)).toEqual([]);
+    expect(readFileSync(index).equals(before)).toBe(true);
   });
 });
 

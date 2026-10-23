@@ -173,6 +173,10 @@ function makeRepo(): void {
   );
   writeFileSync(join(repo, '.mcp.json'), `${JSON.stringify(REPO_MCP_CONFIG, null, 2)}\n`);
   git('init', '-q', '-b', 'main');
+  // Every test repository sets these two keys (.claude/rules/testing.md). Without them git leaves a
+  // detached `git maintenance run --auto` writing under `.git` after a commit returns.
+  git('config', 'maintenance.auto', 'false');
+  git('config', 'gc.auto', '0');
   git('config', 'user.email', 'live@10db.invalid');
   git('config', 'user.name', '10db live acceptance');
   git(

@@ -13,6 +13,7 @@
         "scripts/*.ts",
         "e2e/playwright.config.ts",
         "e2e/prepare.ts",
+        "e2e/vitest.config.ts",
         "e2e/*.spec.ts"
       ]
     },

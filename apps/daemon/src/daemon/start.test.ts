@@ -217,6 +217,36 @@ describe('startDaemon', () => {
       return { stop: () => undefined, exited: new Promise<void>(() => undefined) };
     };
 
+  it.each([
+    { name: 'the built-in origins', allowedOrigins: undefined, base: 'http://localhost:1420' },
+    {
+      name: 'the origins it is given',
+      allowedOrigins: ['http://localhost:3000'],
+      base: 'http://localhost:3000',
+    },
+  ])(
+    'lets a dev UI origin through CORS beside $name, and no other',
+    async ({ allowedOrigins, base }) => {
+      const running = await startDaemon({
+        dataDir: dir.path,
+        port: 0,
+        adapter: new FakeAdapter({}),
+        logLevel: 'warn',
+        ...(allowedOrigins ? { allowedOrigins } : {}),
+        devUiOrigin: 'http://localhost:51234',
+        ...QUIET,
+      });
+      daemon = running;
+      const allowedOrigin = async (origin: string): Promise<string | null> =>
+        (await fetch(`${running.url}/health`, { headers: { Origin: origin } })).headers.get(
+          'access-control-allow-origin',
+        );
+      expect(await allowedOrigin('http://localhost:51234')).toBe('http://localhost:51234');
+      expect(await allowedOrigin(base)).toBe(base);
+      expect(await allowedOrigin('http://localhost:51235')).toBeNull();
+    },
+  );
+
   it('honors a fixed dev token and serves keep-awake, the event head and the system check', async () => {
     const token = 'd'.repeat(43);
     const spawned: number[] = [];

@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDecoyRepo } from './decoy-repo';
@@ -6,6 +6,28 @@ import { createTempRepo, createTempRepoWithOrigin, isolatedGitEnv, type TempDir 
 
 const gitIn = (repo: string, ...args: string[]) =>
   execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8', env: isolatedGitEnv() }).trim();
+
+describe.each([
+  { fixture: 'createTempRepo', create: () => createTempRepo() },
+  { fixture: 'createDecoyRepo', create: () => createDecoyRepo() },
+])('a repository from $fixture', ({ create }) => {
+  // Git can leave a detached `git maintenance run --auto` writing objects/maintenance.lock after a
+  // commit returns, which a snapshot of .git then trips over or records as a change.
+  it('starts no background maintenance or gc when a commit lands', () => {
+    const repo = create();
+    try {
+      const commit = spawnSync('git', ['commit', '-q', '--allow-empty', '-m', 'probe'], {
+        cwd: repo.path,
+        env: { ...isolatedGitEnv(), GIT_TRACE: '1' },
+        encoding: 'utf8',
+      });
+      expect(commit.status, commit.stderr).toBe(0);
+      expect(commit.stderr).not.toMatch(/run_command: git (maintenance|gc)\b/);
+    } finally {
+      repo.cleanup();
+    }
+  });
+});
 
 describe('createTempRepo', () => {
   afterEach(() => {
