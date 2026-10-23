@@ -18,6 +18,7 @@ export function useBoardActions(projectId: ProjectId) {
         return;
       case 'move':
         setNotice(null);
+        start.reset();
         move.mutate(action, {
           onSuccess: () => {
             setNotice(action.note);
@@ -26,14 +27,21 @@ export function useBoardActions(projectId: ProjectId) {
         return;
       case 'start':
         setNotice(null);
+        move.reset();
         start.mutate(action.taskId);
         return;
     }
   }
+  // Each action clears the other's error, so at most one is set: the latest action's.
+  const failure = move.error
+    ? { title: "Couldn't move the task", error: move.error }
+    : start.error
+      ? { title: "Couldn't start the task", error: start.error }
+      : null;
   return {
     apply,
     notice,
-    error: move.error ?? start.error,
+    failure,
     dismiss: () => {
       setNotice(null);
     },

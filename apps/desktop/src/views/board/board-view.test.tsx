@@ -170,6 +170,29 @@ describe('BoardView', () => {
     });
   });
 
+  it('titles a refused start as a start, not a move', async () => {
+    const project = projectDto();
+    const alpha = taskDto({ projectId: project.id, title: 'Alpha', boardStatus: 'ready' });
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([alpha])),
+      http.post(daemonUrl('/tasks/:taskId/start'), () =>
+        HttpResponse.json(
+          { error: 'conflict', message: 'Task Alpha already has an active workstream' },
+          { status: 409 },
+        ),
+      ),
+    );
+    renderApp('/board');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Actions for Alpha' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Start', hidden: true }));
+    const alert = await screen.findByRole('alert');
+    expect(within(alert).getByText("Couldn't start the task")).toBeTruthy();
+    expect(within(alert).getByText('Task Alpha already has an active workstream')).toBeTruthy();
+    expect(screen.queryByText("Couldn't move the task")).toBeNull();
+  });
+
   it.each([
     ['RUNNING', 'Running', 'in_progress', false],
     ['DONE', 'Done', 'ready', false],

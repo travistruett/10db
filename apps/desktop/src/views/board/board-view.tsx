@@ -68,9 +68,9 @@ function BoardColumns({ projectId, layout, workstreamById, peers, started }: Boa
           {actions.notice}
         </Alert>
       ) : null}
-      {actions.error ? (
-        <Alert color="red" title="Couldn't move the task">
-          {actions.error.message}
+      {actions.failure ? (
+        <Alert color="red" title={actions.failure.title}>
+          {actions.failure.error.message}
         </Alert>
       ) : null}
       <ScrollArea type="auto" offsetScrollbars>
