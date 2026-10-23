@@ -104,6 +104,7 @@ export function BoardColumnsSection({ project }: { readonly project: ProjectDto 
   const [renaming, setRenaming] = useState<{
     readonly id: BoardColumnId;
     readonly name: string;
+    readonly error: string | null;
   } | null>(null);
   const [deleting, setDeleting] = useState<BoardColumnDto | null>(null);
   const list = [...(columns.data ?? [])].sort((a, b) => a.position - b.position);
@@ -122,6 +123,24 @@ export function BoardColumnsSection({ project }: { readonly project: ProjectDto 
       {
         onSuccess: () => {
           setName('');
+        },
+      },
+    );
+  }
+
+  /** The same check as `add`, with the message on the rename field. */
+  function rename(id: BoardColumnId, typed: string) {
+    const parsed = BoardColumnName.safeParse(typed);
+    if (!parsed.success) {
+      setRenaming({ id, name: typed, error: parsed.error.issues[0]?.message ?? 'Enter a name' });
+      return;
+    }
+    setRenaming({ id, name: typed, error: null });
+    patch.mutate(
+      { id, patch: { name: parsed.data } },
+      {
+        onSuccess: () => {
+          setRenaming(null);
         },
       },
     );
@@ -153,21 +172,15 @@ export function BoardColumnsSection({ project }: { readonly project: ProjectDto 
                       size="sm"
                       aria-label={`Name for ${column.name}`}
                       value={renaming.name}
+                      error={renaming.error}
                       onChange={(e) => {
-                        setRenaming({ id: column.id, name: e.currentTarget.value });
+                        setRenaming({ ...renaming, name: e.currentTarget.value });
                       }}
                     />
                     <Button
                       size="xs"
                       onClick={() => {
-                        patch.mutate(
-                          { id: column.id, patch: { name: renaming.name } },
-                          {
-                            onSuccess: () => {
-                              setRenaming(null);
-                            },
-                          },
-                        );
+                        rename(column.id, renaming.name);
                       }}
                     >
                       Save name
@@ -184,7 +197,7 @@ export function BoardColumnsSection({ project }: { readonly project: ProjectDto 
                     variant="subtle"
                     aria-label={`Rename ${column.name}`}
                     onClick={() => {
-                      setRenaming({ id: column.id, name: column.name });
+                      setRenaming({ id: column.id, name: column.name, error: null });
                     }}
                   >
                     <IconPencil size={16} stroke={1.5} />

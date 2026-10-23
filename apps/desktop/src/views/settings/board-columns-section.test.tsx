@@ -112,6 +112,34 @@ describe('BoardColumnsSection', () => {
     });
   });
 
+  it.each([
+    { name: 'an empty name', typed: '', message: 'Enter a name' },
+    { name: 'only spaces', typed: '   ', message: 'Enter a name' },
+    { name: 'a 41-character name', typed: 'x'.repeat(41), message: 'Use at most 40 characters' },
+  ])('checks a rename as Add does, and sends nothing for $name', async ({ typed, message }) => {
+    const sent = serve([icebox, exploring]);
+    fireEvent.click(await screen.findByRole('button', { name: 'Rename Icebox' }));
+    fireEvent.change(screen.getByLabelText('Name for Icebox'), { target: { value: typed } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save name' }));
+    expect(await screen.findByText(message)).toBeTruthy();
+    expect(screen.getByLabelText('Name for Icebox').getAttribute('aria-invalid')).toBe('true');
+    expect(sent).toEqual([]);
+  });
+
+  it('sends a renamed column’s name cleaned, as Add does', async () => {
+    const sent = serve([icebox, exploring]);
+    fireEvent.click(await screen.findByRole('button', { name: 'Rename Icebox' }));
+    fireEvent.change(screen.getByLabelText('Name for Icebox'), {
+      target: { value: '  Some   day ' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save name' }));
+    await waitFor(() => {
+      expect(sent).toEqual([
+        { method: 'PATCH', path: `/board-columns/${icebox.id}`, body: { name: 'Some day' } },
+      ]);
+    });
+  });
+
   it('deletes an empty column after confirming', async () => {
     const sent = serve([icebox, exploring]);
     fireEvent.click(await screen.findByRole('button', { name: 'Delete Exploring' }));
