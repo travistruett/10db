@@ -1,6 +1,7 @@
 import {
   ACTIVE_STATES,
   ConflictError,
+  DEFAULT_BOARD_COLUMN,
   Delivery,
   EventType,
   InvalidError,
@@ -16,6 +17,7 @@ import {
 import { and, asc, eq, inArray } from 'drizzle-orm';
 import * as schema from '../schema';
 import { currentBatch, findUnfinishedBatch } from './batches';
+import { insertBoardColumn } from './board-columns';
 import { getFlow } from './flows';
 import type { DbReader, WriteContext } from './store';
 
@@ -38,6 +40,7 @@ export function insertProject(ctx: WriteContext, input: ProjectInput): ProjectDt
   };
   ctx.tx.insert(schema.projects).values(row).run();
   ctx.emit({ type: EventType.ProjectCreated, entityType: 'project', entityId: row.id });
+  insertBoardColumn(ctx, row.id, { name: DEFAULT_BOARD_COLUMN });
   return row;
 }
 

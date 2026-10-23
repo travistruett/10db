@@ -32,6 +32,7 @@ const ID_SCHEMAS = {
   RoutingRule: idSchema('rtr', 'RoutingRuleId'),
   ModelProfile: idSchema('mpf', 'ModelProfileId'),
   Batch: idSchema('bat', 'BatchId'),
+  BoardColumn: idSchema('bcl', 'BoardColumnId'),
 } as const;
 
 const ID_PREFIX = {
@@ -55,6 +56,7 @@ const ID_PREFIX = {
   RoutingRule: 'rtr',
   ModelProfile: 'mpf',
   Batch: 'bat',
+  BoardColumn: 'bcl',
 } as const satisfies Record<keyof typeof ID_SCHEMAS, string>;
 
 export type IdKind = keyof typeof ID_SCHEMAS;
@@ -109,3 +111,5 @@ export const ModelProfileId = ID_SCHEMAS.ModelProfile;
 export type ModelProfileId = IdOf<'ModelProfile'>;
 export const BatchId = ID_SCHEMAS.Batch;
 export type BatchId = IdOf<'Batch'>;
+export const BoardColumnId = ID_SCHEMAS.BoardColumn;
+export type BoardColumnId = IdOf<'BoardColumn'>;

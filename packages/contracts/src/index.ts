@@ -1,6 +1,7 @@
 export * from './batch-workflow';
 export * from './batches';
 export * from './benchmarks';
+export * from './board';
 export * from './entities';
 export * from './errors';
 export * from './events';

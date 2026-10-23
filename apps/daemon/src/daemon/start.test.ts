@@ -2,6 +2,7 @@ import { existsSync, fstatSync, readdirSync, statSync, writeFileSync } from 'nod
 import { join } from 'node:path';
 import {
   BenchmarkStatusDto,
+  BoardColumnDto,
   EventsHead,
   KeepAwakeStatus,
   McpServerStatusDto,
@@ -450,6 +451,68 @@ describe('startDaemon', () => {
       ]);
       await api.patch(`/projects/${project.id}`, ProjectDto, { budgetCeiling: 1 });
       await expect(api.post(`/tasks/${task.id}/start`, WorkstreamDto)).rejects.toThrow('-> 400');
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it('gives a project Icebox, parks a task in it, refuses to start it, and plans it again', async () => {
+    const repo = createTempRepo();
+    try {
+      daemon = await startDaemon({
+        dataDir: dir.path,
+        port: 0,
+        adapter: new FakeAdapter({}),
+        logLevel: 'warn',
+        ...QUIET,
+      });
+      const api = apiClient(daemon.url, daemon.token);
+      const project = await api.post('/projects', ProjectDto, {
+        name: 'demo',
+        repoPath: repo.path,
+        gateCommand: 'true',
+        areas: [{ name: 'src', globs: ['src/**'] }],
+      });
+      const [icebox] = await api.get(
+        `/projects/${project.id}/board-columns`,
+        z.array(BoardColumnDto),
+      );
+      expect(icebox?.name).toBe('Icebox');
+      if (!icebox) throw new Error('no Icebox');
+      const add = (title: string) =>
+        api.post(`/projects/${project.id}/tasks`, TaskDto, {
+          title,
+          acceptanceCriteria: ['x'],
+          areas: ['src'],
+        });
+      const first = await add('first');
+      const second = await add('second');
+      await api.post(`/tasks/${second.id}/move`, TaskDto, {
+        to: null,
+        after: null,
+        before: first.id,
+      });
+      expect(
+        (await api.get(`/projects/${project.id}/tasks`, z.array(TaskDto))).map((t) => t.title),
+      ).toEqual(['second', 'first']);
+      const parked = await api.post(`/tasks/${first.id}/move`, TaskDto, {
+        to: icebox.id,
+        after: null,
+        before: null,
+      });
+      expect(parked.boardColumnId).toBe(icebox.id);
+      await expect(api.post(`/tasks/${first.id}/start`, WorkstreamDto)).rejects.toThrow('-> 409');
+      const exploring = await api.post(`/projects/${project.id}/board-columns`, BoardColumnDto, {
+        name: 'Exploring',
+      });
+      const columns = await api.post(
+        `/board-columns/${icebox.id}/delete`,
+        z.array(BoardColumnDto),
+        {
+          moveTasksTo: exploring.id,
+        },
+      );
+      expect(columns.map((c) => c.name)).toEqual(['Exploring']);
     } finally {
       repo.cleanup();
     }

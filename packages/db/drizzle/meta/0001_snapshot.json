@@ -1,6 +1,6 @@
 {
-  "id": "f0a14b14-4397-4dfb-9dfa-1883235878b9",
-  "prevId": "24fc9640-a992-42c5-ad0b-9b68224b1119",
+  "id": "cc6d4c95-c116-49b2-ae30-8fc576a6d44b",
+  "prevId": "5b76e437-86e4-46e6-8db6-ff778c657a8d",
   "version": "6",
   "dialect": "sqlite",
   "tables": {
@@ -203,6 +203,81 @@
         "batches_project_id_projects_id_fk": {
           "name": "batches_project_id_projects_id_fk",
           "tableFrom": "batches",
+          "columnsFrom": [
+            "project_id"
+          ],
+          "tableTo": "projects",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "board_columns": {
+      "name": "board_columns",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "project_id": {
+          "name": "project_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "position": {
+          "name": "position",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "board_columns_name_idx": {
+          "name": "board_columns_name_idx",
+          "columns": [
+            "project_id",
+            "name"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "board_columns_project_id_projects_id_fk": {
+          "name": "board_columns_project_id_projects_id_fk",
+          "tableFrom": "board_columns",
           "columnsFrom": [
             "project_id"
           ],
@@ -2246,6 +2321,13 @@
           "notNull": true,
           "autoincrement": false
         },
+        "board_column_id": {
+          "name": "board_column_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "workspace_mode": {
           "name": "workspace_mode",
           "type": "text",
@@ -2298,6 +2380,19 @@
             "flow_id"
           ],
           "tableTo": "flows",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "tasks_board_column_id_board_columns_id_fk": {
+          "name": "tasks_board_column_id_board_columns_id_fk",
+          "tableFrom": "tasks",
+          "columnsFrom": [
+            "board_column_id"
+          ],
+          "tableTo": "board_columns",
           "columnsTo": [
             "id"
           ],

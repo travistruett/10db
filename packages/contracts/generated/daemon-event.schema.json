@@ -43,7 +43,9 @@
         "benchmarks.synced",
         "project.changed",
         "step.changed",
-        "batch.updated"
+        "batch.updated",
+        "board_column.saved",
+        "board_column.deleted"
       ]
     },
     "entityType": {

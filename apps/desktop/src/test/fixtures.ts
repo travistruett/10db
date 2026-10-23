@@ -1,4 +1,5 @@
 import {
+  BoardColumnDto,
   DaemonEvent,
   InboxItemDto,
   mintId,
@@ -39,6 +40,18 @@ export function projectDto(overrides: Partial<ProjectDto> = {}): ProjectDto {
   });
 }
 
+export function boardColumnDto(overrides: Partial<BoardColumnDto> = {}): BoardColumnDto {
+  return BoardColumnDto.parse({
+    id: mintId('BoardColumn'),
+    projectId: mintId('Project'),
+    name: 'Icebox',
+    position: 0,
+    createdAt: AT,
+    updatedAt: AT,
+    ...overrides,
+  });
+}
+
 export function taskDto(overrides: Partial<TaskDto> = {}): TaskDto {
   return TaskDto.parse({
     id: mintId('Task'),
@@ -51,6 +64,7 @@ export function taskDto(overrides: Partial<TaskDto> = {}): TaskDto {
     flowId: null,
     status: 'open',
     boardOrder: 1,
+    boardColumnId: null,
     dependsOn: [],
     boardStatus: 'ready',
     workstreamId: null,

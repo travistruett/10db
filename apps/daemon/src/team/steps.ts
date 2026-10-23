@@ -102,13 +102,22 @@ export function startTaskWithPlan(state: StateStore, taskId: TaskId): Workstream
 
 /**
  * A failed workstream goes back to the queue; its current step restarts clean, from its own handoffs
- * only. In a batch it may retry only while the batch is OPEN or FAILED, and a FAILED batch reopens
- * (batch delivery spec §4).
+ * only. A parked task, or a workstream a newer one replaced, is not retried. In a batch it may retry
+ * only while the batch is OPEN or FAILED, and a FAILED batch reopens (batch delivery spec §4).
  */
 export function retryWorkstream(state: StateStore, id: WorkstreamId): WorkstreamDto {
   const row = getWorkstreamRow(state.db, id);
   if (row.state !== WorkstreamState.Failed)
     throw new ConflictError('Only a failed workstream can be retried');
+  const task = getTask(state.db, row.taskId);
+  if (task.boardColumnId !== null)
+    throw new ConflictError(
+      `${task.title} is parked; move it to Backlog or Ready before retrying it`,
+    );
+  if (task.workstreamId !== id)
+    throw new ConflictError(
+      `${task.title} has a newer workstream; retry that one or start the task`,
+    );
   const batch = row.batchId ? getBatch(state.db, row.batchId) : null;
   if (batch && batch.state !== BatchState.Open && batch.state !== BatchState.Failed)
     throw new ConflictError(

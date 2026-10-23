@@ -32,6 +32,17 @@ CREATE TABLE `batches` (
 --> statement-breakpoint
 CREATE INDEX `batches_project_idx` ON `batches` (`project_id`);--> statement-breakpoint
 CREATE UNIQUE INDEX `batches_one_unfinished` ON `batches` (`project_id`) WHERE state IN ('CUTTING', 'OPEN', 'SHIPPING', 'FAILED');--> statement-breakpoint
+CREATE TABLE `board_columns` (
+	`id` text PRIMARY KEY NOT NULL,
+	`project_id` text NOT NULL,
+	`name` text NOT NULL,
+	`position` integer NOT NULL,
+	`created_at` text NOT NULL,
+	`updated_at` text NOT NULL,
+	FOREIGN KEY (`project_id`) REFERENCES `projects`(`id`) ON UPDATE no action ON DELETE no action
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `board_columns_name_idx` ON `board_columns` (`project_id`,`name`);--> statement-breakpoint
 CREATE TABLE `claims` (
 	`id` text PRIMARY KEY NOT NULL,
 	`project_id` text NOT NULL,
@@ -329,11 +340,13 @@ CREATE TABLE `tasks` (
 	`flow_id` text,
 	`status` text NOT NULL,
 	`board_order` real NOT NULL,
+	`board_column_id` text,
 	`workspace_mode` text NOT NULL,
 	`created_at` text NOT NULL,
 	`updated_at` text NOT NULL,
 	FOREIGN KEY (`project_id`) REFERENCES `projects`(`id`) ON UPDATE no action ON DELETE no action,
-	FOREIGN KEY (`flow_id`) REFERENCES `flows`(`id`) ON UPDATE no action ON DELETE no action
+	FOREIGN KEY (`flow_id`) REFERENCES `flows`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`board_column_id`) REFERENCES `board_columns`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
 CREATE INDEX `tasks_project_idx` ON `tasks` (`project_id`);--> statement-breakpoint

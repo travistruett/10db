@@ -2,6 +2,13 @@ import { z } from 'zod';
 import { BatchDto, BatchStartInput, ProjectViewDto, TaskStartResult } from './batches';
 import { AaModelDto, BenchmarkStatusDto } from './benchmarks';
 import {
+  BoardColumnDelete,
+  BoardColumnDto,
+  BoardColumnInput,
+  BoardColumnPatch,
+  TaskMove,
+} from './board';
+import {
   InboxItemDto,
   ProjectDto,
   ProjectPatch,
@@ -66,6 +73,11 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'mcp-server-status-dto': McpServerStatusDto,
   'aa-model-dto': AaModelDto,
   'benchmark-status-dto': BenchmarkStatusDto,
+  'board-column-delete': BoardColumnDelete,
+  'board-column-dto': BoardColumnDto,
+  'board-column-input': BoardColumnInput,
+  'board-column-patch': BoardColumnPatch,
+  'task-move': TaskMove,
   'flow-dto': FlowDto,
   'flow-input': FlowInput,
   'flow-patch': FlowPatch,

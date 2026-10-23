@@ -9,11 +9,13 @@ import {
   type SystemCheckDto,
 } from '@10db/contracts';
 import {
+  deleteBoardColumn,
   getMcpApproval,
   getProject,
   getTask,
   getTeam,
   getWorkstream,
+  insertBoardColumn,
   insertFlow,
   insertPerson,
   insertPersona,
@@ -21,6 +23,7 @@ import {
   insertTask,
   latestEventSeq,
   listAaModels,
+  listBoardColumns,
   listEventsAfter,
   listFlows,
   listInbox,
@@ -32,6 +35,8 @@ import {
   listRoutingRules,
   listTasks,
   listWorkstreams,
+  moveTask,
+  patchBoardColumn,
   patchFlow,
   patchModelProfile,
   patchPersona,
@@ -147,6 +152,17 @@ export function createServices(deps: {
     setRoutingRules: (projectId, input) =>
       deps.state.write((ctx) => setRoutingRules(ctx, projectId, input)),
     patchTask: (id, patch) => deps.state.write((ctx) => patchTask(ctx, id, patch)),
+    moveTask: (id, move) => deps.state.write((ctx) => moveTask(ctx, id, move)),
+    listBoardColumns(projectId) {
+      getProject(db, projectId);
+      return listBoardColumns(db, projectId);
+    },
+    createBoardColumn(projectId, input) {
+      getProject(db, projectId);
+      return deps.state.write((ctx) => insertBoardColumn(ctx, projectId, input));
+    },
+    patchBoardColumn: (id, patch) => deps.state.write((ctx) => patchBoardColumn(ctx, id, patch)),
+    deleteBoardColumn: (id, del) => deps.state.write((ctx) => deleteBoardColumn(ctx, id, del)),
     stepPlan: (taskId) => resolveStepPlan(db, taskId),
     reviewProjectMcp(projectId) {
       const project = getProject(db, projectId);
