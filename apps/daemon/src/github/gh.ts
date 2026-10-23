@@ -111,6 +111,16 @@ export const systemGhExec: GhExec = (args, call) =>
           );
           return;
         }
+        // Node kills a child whose output passes maxBuffer, so this comes before `killed`.
+        if (error.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') {
+          reject(
+            new GhError(
+              GhFailure.Failed,
+              `gh ${args.slice(0, 2).join(' ')} printed more than ${String(MAX_OUTPUT / 1024 / 1024)} MB, so 10db stopped it`,
+            ),
+          );
+          return;
+        }
         if (error.killed) {
           reject(
             new GhError(

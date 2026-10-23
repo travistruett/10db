@@ -243,4 +243,17 @@ describe('systemGhExec', () => {
       kind: 'timeout',
     });
   });
+
+  it.each([
+    { name: 'gh still running', script: 'yes x | head -c 5000000; sleep 5' },
+    { name: 'gh already exited', script: 'yes x | head -c 5000000' },
+  ])(
+    'reports output over the limit as a failure, not a timeout or an exit code: $name',
+    async ({ script }) => {
+      fakeGh(script);
+      const answer = systemGhExec(['pr', 'view'], call());
+      await expect(answer).rejects.toMatchObject({ kind: 'failed' });
+      await expect(answer).rejects.toThrow(/^gh pr view printed more than 4 MB/);
+    },
+  );
 });
