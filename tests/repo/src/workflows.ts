@@ -15,6 +15,8 @@ export interface WorkflowStep {
 export interface WorkflowJob {
   if?: string;
   'runs-on'?: string;
+  'timeout-minutes'?: number;
+  container?: string | { image?: string; options?: string };
   env?: Record<string, string>;
   permissions?: unknown;
   environment?: string | { name: string };

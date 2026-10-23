@@ -43,6 +43,11 @@
       "groupName": "GitHub Actions"
     },
     {
+      "description": "The CI gate job's container image ships the browsers of one Playwright version; bump it with the npm packages. After the GitHub Actions rule, which also matches the image.",
+      "matchPackageNames": ["@playwright/test", "mcr.microsoft.com/playwright"],
+      "groupName": "Playwright"
+    },
+    {
       "description": "Every update that isn't a major version lands in one weekly PR.",
       "matchUpdateTypes": ["minor", "patch", "pin", "pinDigest", "digest"],
       "groupName": "all non-major dependencies"

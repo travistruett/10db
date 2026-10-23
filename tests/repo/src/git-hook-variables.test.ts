@@ -1,5 +1,15 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { cpSync, globSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import {
+  chmodSync,
+  cpSync,
+  globSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -119,8 +129,12 @@ describe('git hook variables', () => {
     cpSync(resolve(repoRoot, 'scripts/hooks'), join(repo.dir, 'scripts/hooks'), {
       recursive: true,
     });
-    // A stand-in for make check that records the environment it was given.
-    repo.stage('Makefile', 'check:\n\t@env > "$$HOOK_ENV_RECORD"\n');
+    // A stand-in make, first on PATH, that records the environment `make check` was given. It
+    // needs no make installed, and the CI gate's container has none.
+    const fakeMake = join(records, 'bin', 'make');
+    mkdirSync(dirname(fakeMake));
+    writeFileSync(fakeMake, '#!/bin/sh\n[ "$1" = check ] || exit 2\nenv > "$HOOK_ENV_RECORD"\n');
+    chmodSync(fakeMake, 0o755);
     repo.git('add', 'lefthook.yml', 'scripts/hooks');
     repo.commit('chore(repo): init');
     repo.git('remote', 'add', 'origin', origin.dir);
@@ -128,7 +142,7 @@ describe('git hook variables', () => {
     repo.git('worktree', 'add', '-q', '-b', 'feat/y', worktree);
     const env = {
       ...repo.env,
-      PATH: `${BIN}${delimiter}${repo.env['PATH'] ?? ''}`,
+      PATH: [dirname(fakeMake), BIN, repo.env['PATH'] ?? ''].join(delimiter),
       LEFTHOOK: '1',
       HOOK_ENV_RECORD: record,
     };
