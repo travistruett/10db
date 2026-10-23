@@ -17,11 +17,11 @@
   `setupFiles`) strips them, and every git call in test code passes an isolated `env` too (ESLint
   enforces it).
 - **Test repositories turn off git's background maintenance.** A fixture that creates a repository,
-  bare ones included, sets `maintenance.auto=false` and `gc.auto=0` in its local config before the
-  first commit or push. Git (2.46 and later) otherwise starts a detached
-  `git maintenance run --auto` after a commit, or after a push into the repository, which goes on
-  writing there once the command returns and races any test that reads the repository's files or
-  removes it.
+  bare ones included, sets `maintenance.auto=false`, `gc.auto=0` and `receive.autogc=false` in its
+  local config before the first commit or push. Otherwise git starts a detached
+  `git maintenance run --auto` after a commit, or after a push into the repository; an older git's
+  receive-pack starts `git gc --auto` instead. Either goes on writing there once the command returns
+  and races any test that reads the repository's files or removes it.
 - **No sleeps.** Wait on a condition with a deadline; inject the clock where time matters.
 - **Never pipe test output through `tail` or append `; echo $?`.** It hides failures and exit
   codes.
