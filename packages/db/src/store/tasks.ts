@@ -174,7 +174,7 @@ export function listTasks(db: DbReader, projectId: ProjectId): TaskDto[] {
     .select()
     .from(schema.tasks)
     .where(eq(schema.tasks.projectId, projectId))
-    .orderBy(schema.tasks.boardOrder)
+    .orderBy(asc(schema.tasks.boardOrder), asc(schema.tasks.id))
     .all()
     .map((row) => toTaskDto(db, row));
 }
@@ -192,13 +192,29 @@ export function patchTask(ctx: WriteContext, id: TaskId, patch: TaskPatch): Task
   return getTask(ctx.tx, id);
 }
 
-/** Below this gap between neighbours a midpoint loses precision, so the project is renumbered first. */
+/** Below this gap a midpoint loses precision, so the project is renumbered first. */
 const MIN_ORDER_GAP = 1e-6;
 
 /** Only planned and parked work moves; the rest follows its workstream. */
 const MOVABLE: readonly BoardStatus[] = [BoardStatus.Backlog, BoardStatus.Ready];
 
 const STALE_BOARD = 'The board changed while you were dragging; try again';
+
+/** The orders of the project's open tasks other than `except`: a move takes none of them. */
+function openOrders(db: DbReader, projectId: ProjectId, except: TaskId): number[] {
+  return db
+    .select({ boardOrder: schema.tasks.boardOrder })
+    .from(schema.tasks)
+    .where(
+      and(
+        eq(schema.tasks.projectId, projectId),
+        eq(schema.tasks.status, TaskStatus.Open),
+        ne(schema.tasks.id, except),
+      ),
+    )
+    .all()
+    .map((row) => row.boardOrder);
+}
 
 /** Rewrites the open tasks' orders as 1…n in their current order (finished ones sort by finish time); each changed task announces it. */
 function renumberBoard(ctx: WriteContext, projectId: ProjectId): void {
@@ -276,27 +292,35 @@ export function moveTask(ctx: WriteContext, id: TaskId, move: TaskMove): TaskDto
       throw new ConflictError(STALE_BOARD);
     return other.boardOrder;
   };
+  // Orders are project-wide, so a new one is chosen against every open task, not only the column's: no two
+  // open tasks share an order, and neighbours always leave a gap between them.
+  const orders = () => openOrders(ctx.tx, task.projectId, id);
+  /** The least open order above `lo`, or `hi` when none sits between them. */
+  const nextAbove = (lo: number, hi: number) =>
+    orders().reduce((least, o) => (o > lo && o < least ? o : least), hi);
   const first = { lo: orderOf(after), hi: orderOf(before) };
   if (first.lo !== null && first.hi !== null) {
-    if (first.lo >= first.hi) throw new ConflictError(STALE_BOARD);
-    if (first.hi - first.lo < MIN_ORDER_GAP) renumberBoard(ctx, task.projectId);
+    if (first.lo > first.hi) throw new ConflictError(STALE_BOARD);
+    // Neighbours that share an order, or sit too close for a precise midpoint, are spread out first.
+    if (nextAbove(first.lo, first.hi) - first.lo < MIN_ORDER_GAP)
+      renumberBoard(ctx, task.projectId);
   }
   const lo = orderOf(after);
   const hi = orderOf(before);
   if (lo !== null && hi !== null && lo >= hi) throw new ConflictError(STALE_BOARD);
   const boardOrder =
     lo !== null && hi !== null
-      ? (lo + hi) / 2
+      ? (lo + nextAbove(lo, hi)) / 2
       : lo !== null
-        ? lo + 1
+        ? orders().reduce((most, o) => Math.max(most, o), lo) + 1
         : hi !== null
-          ? hi - 1
+          ? orders().reduce((least, o) => Math.min(least, o), hi) - 1
           : task.boardOrder;
   // The column the view placed the task in: the human column, or the derived column of its planned neighbours.
   const derived = [after, before].flatMap((n) =>
     n === null ? [] : [getTask(ctx.tx, n).boardStatus],
   );
-  if (to !== null || derived.length > 0) {
+  if (derived.length > 0) {
     const column = listTasks(ctx.tx, task.projectId).filter(
       (t) =>
         t.id !== id &&
@@ -304,11 +328,9 @@ export function moveTask(ctx: WriteContext, id: TaskId, move: TaskMove): TaskDto
         t.boardColumnId === to &&
         (to !== null || derived.includes(t.boardStatus)),
     );
-    // A view that missed a task now between the neighbours, or at the order the move would take, is stale.
+    // A view that missed a task now between the neighbours, or past the one neighbour of a move to an end, is stale.
     const stale = column.some(
-      (t) =>
-        t.boardOrder === boardOrder ||
-        (lo !== null && hi !== null && t.boardOrder > lo && t.boardOrder < hi),
+      (t) => (lo === null || t.boardOrder > lo) && (hi === null || t.boardOrder < hi),
     );
     if (stale) throw new ConflictError(STALE_BOARD);
   }

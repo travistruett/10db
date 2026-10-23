@@ -1,4 +1,5 @@
 import {
+  BoardStatus,
   ConflictError,
   EventType,
   InvalidError,
@@ -14,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as schema from '../schema';
 import { insertBoardColumn, listBoardColumns } from './board-columns';
 import type { Store } from './store';
-import { getTask, insertTask, listTasks, moveTask } from './tasks';
+import { getTask, insertTask, listTasks, moveTask, setTaskStatus } from './tasks';
 import { createTestStore, seedProject } from './test-support';
 import { insertWorkstream, transitionWorkstream } from './workstreams';
 
@@ -42,6 +43,19 @@ afterEach(() => {
 
 const order = () => listTasks(store.db, project.id).map((t) => t.title);
 const id = (key: keyof typeof tasks | null) => (key === null ? null : tasks[key].id);
+const setOrder = (key: keyof typeof tasks, boardOrder: number) =>
+  store.db.update(schema.tasks).set({ boardOrder }).where(eq(schema.tasks.id, tasks[key].id)).run();
+const waitsOn = (key: keyof typeof tasks, dependency: keyof typeof tasks) =>
+  store.db
+    .insert(schema.taskDeps)
+    .values({ taskId: tasks[key].id, dependsOnId: tasks[dependency].id })
+    .run();
+const park = (key: keyof typeof tasks) =>
+  store.write((ctx) => moveTask(ctx, tasks[key].id, { to: icebox, after: null, before: null }));
+const openOrders = () =>
+  listTasks(store.db, project.id)
+    .filter((t) => t.status === 'open')
+    .map((t) => t.boardOrder);
 
 describe('moveTask among planned tasks', () => {
   it.each([
@@ -119,6 +133,89 @@ describe('renumbering', () => {
       moveTask(ctx, tasks.b.id, { to: null, after: tasks.c.id, before: tasks.d.id }),
     );
     expect(getTask(store.db, tasks.a.id).boardOrder).toBe(2.5);
+  });
+});
+
+describe('orders across columns', () => {
+  it.each([
+    {
+      // Ready holds b alone; c (3) and d (4) wait on b in Backlog.
+      name: 'to the bottom of Ready, past a Backlog task one after the neighbour',
+      setup: () => {
+        park('a');
+        waitsOn('c', 'b');
+        waitsOn('d', 'b');
+      },
+      task: 'a',
+      move: () => ({ to: null, after: tasks.b.id, before: null }),
+      placed: 5,
+    },
+    {
+      // a (1) waits on d in Backlog; Ready holds b, c and d.
+      name: 'to the top of Ready, past a Backlog task one before the neighbour',
+      setup: () => {
+        waitsOn('a', 'd');
+      },
+      task: 'c',
+      move: () => ({ to: null, after: null, before: tasks.b.id }),
+      placed: 0,
+    },
+    {
+      name: 'to the bottom of a human column, past a planned task one after the neighbour',
+      setup: () => {
+        park('a');
+      },
+      task: 'c',
+      move: () => ({ to: icebox, after: tasks.a.id, before: null }),
+      placed: 5,
+    },
+    {
+      name: 'to the top of a human column, past a planned task one before the neighbour',
+      setup: () => {
+        park('b');
+      },
+      task: 'c',
+      move: () => ({ to: icebox, after: null, before: tasks.b.id }),
+      placed: 0,
+    },
+    {
+      // b (2) waits on d in Backlog, halfway between a and c in Ready.
+      name: 'between two Ready tasks, short of a Backlog task at their midpoint',
+      setup: () => {
+        waitsOn('b', 'd');
+      },
+      task: 'd',
+      move: () => ({ to: null, after: tasks.a.id, before: tasks.c.id }),
+      placed: 1.5,
+    },
+  ] as const)('moves a task $name, onto no open task’s order', ({ setup, task, move, placed }) => {
+    setup();
+    store.write((ctx) => moveTask(ctx, tasks[task].id, move()));
+    const orders = openOrders();
+    expect(new Set(orders).size).toBe(orders.length);
+    expect(getTask(store.db, tasks[task].id).boardOrder).toBe(placed);
+  });
+
+  it('keeps a card dropped at the bottom of Ready apart from a Backlog task that joins it', () => {
+    // a is parked; b is Ready; c and d wait on b in Backlog.
+    park('a');
+    waitsOn('c', 'b');
+    waitsOn('d', 'b');
+    store.write((ctx) => moveTask(ctx, tasks.a.id, { to: null, after: tasks.b.id, before: null }));
+    store.write((ctx) => {
+      setTaskStatus(ctx, tasks.b.id, 'done');
+    });
+    const ready = listTasks(store.db, project.id).filter(
+      (t) => t.boardColumnId === null && t.boardStatus === BoardStatus.Ready && t.id !== tasks.d.id,
+    );
+    expect(ready.map((t) => t.title).sort()).toEqual(['a', 'c']);
+    const [above, below] = ready;
+    if (!above || !below) throw new Error('Ready should hold a and c');
+    const moved = store.write((ctx) =>
+      moveTask(ctx, tasks.d.id, { to: null, after: above.id, before: below.id }),
+    ).value;
+    expect(moved.boardOrder).toBeGreaterThan(above.boardOrder);
+    expect(moved.boardOrder).toBeLessThan(below.boardOrder);
   });
 });
 
@@ -212,12 +309,12 @@ describe('moveTask neighbours', () => {
 
 describe('moveTask from a stale view', () => {
   const STALE = 'The board changed while you were dragging; try again';
-  const setOrder = (key: keyof typeof tasks, boardOrder: number) =>
-    store.db
-      .update(schema.tasks)
-      .set({ boardOrder })
-      .where(eq(schema.tasks.id, tasks[key].id))
-      .run();
+  /** The two tasks sharing order 2, in the order the board lists them. */
+  const tied = () => {
+    const [first, second] = listTasks(store.db, project.id).filter((t) => t.boardOrder === 2);
+    if (!first || !second) throw new Error('two tasks should share order 2');
+    return { first: first.id, second: second.id };
+  };
   it.each([
     {
       // The view saw a and c side by side; b now sits between them.
@@ -227,11 +324,11 @@ describe('moveTask from a stale view', () => {
       },
       task: 'd',
       move: () => ({ to: null, after: tasks.a.id, before: tasks.c.id }),
-      refused: true,
+      placed: null,
     },
     {
       // The view saw d last; b now sits right after it, at d + 1.
-      name: 'refuses an end move onto an order an open task already has',
+      name: 'refuses a move to the bottom with an open task right after the neighbour',
       setup: () => {
         setOrder('d', 2);
         setOrder('b', 3);
@@ -239,33 +336,70 @@ describe('moveTask from a stale view', () => {
       },
       task: 'a',
       move: () => ({ to: null, after: tasks.d.id, before: null }),
-      refused: true,
+      placed: null,
+    },
+    {
+      // The view saw d last; b now sits after it, short of d + 1.
+      name: 'refuses a move to the bottom with an open task anywhere after the neighbour',
+      setup: () => {
+        setOrder('b', 4.5);
+      },
+      task: 'a',
+      move: () => ({ to: null, after: tasks.d.id, before: null }),
+      placed: null,
     },
     {
       // The view saw a alone in Icebox; c now sits above it, at a - 1.
-      name: 'refuses a human-column move onto an order an open task there already has',
+      name: 'refuses a human-column move to the top with an open task right before the neighbour',
       setup: () => {
-        store.write((ctx) => moveTask(ctx, tasks.a.id, { to: icebox, after: null, before: null }));
-        store.write((ctx) => moveTask(ctx, tasks.c.id, { to: icebox, after: null, before: null }));
+        park('a');
+        park('c');
         setOrder('c', 0);
       },
       task: 'b',
       move: () => ({ to: icebox, after: null, before: tasks.a.id }),
-      refused: true,
+      placed: null,
     },
     {
+      // The view saw a first; c now sits before it, short of a - 1.
+      name: 'refuses a move to the top with an open task anywhere before the neighbour',
+      setup: () => {
+        setOrder('c', 0.5);
+      },
+      task: 'd',
+      move: () => ({ to: null, after: null, before: tasks.a.id }),
+      placed: null,
+    },
+    {
+      // The board lists tied tasks by ID; a view that shows them the other way round is stale.
+      name: 'refuses neighbours that share an order in the other order from the board',
+      setup: () => {
+        setOrder('c', 2);
+      },
+      task: 'd',
+      move: () => ({ to: null, after: tied().second, before: tied().first }),
+      placed: null,
+    },
+    {
+      // Renumbering gives a, the tied pair and d 1, 2, 3 and 4; d lands halfway between the pair.
+      name: 'places it between neighbours that share an order, renumbering first',
+      setup: () => {
+        setOrder('c', 2);
+      },
+      task: 'd',
+      move: () => ({ to: null, after: tied().first, before: tied().second }),
+      placed: 2.5,
+    },
+    {
+      // b waits on d, so it is in Backlog while a and c are in Ready; d lands halfway to b's order.
       name: 'places it when the task between the neighbours is in another derived column',
       setup: () => {
-        // b waits on d, so it is in Backlog while a and c are in Ready.
-        store.db
-          .insert(schema.taskDeps)
-          .values({ taskId: tasks.b.id, dependsOnId: tasks.d.id })
-          .run();
+        waitsOn('b', 'd');
         setOrder('b', 2.5);
       },
       task: 'd',
       move: () => ({ to: null, after: tasks.a.id, before: tasks.c.id }),
-      refused: false,
+      placed: 1.75,
     },
     {
       name: 'places it when the task between the neighbours is finished',
@@ -278,18 +412,18 @@ describe('moveTask from a stale view', () => {
       },
       task: 'd',
       move: () => ({ to: null, after: tasks.a.id, before: tasks.c.id }),
-      refused: false,
+      placed: 2,
     },
-  ] as const)('$name', ({ setup, task, move, refused }) => {
+  ] as const)('$name', ({ setup, task, move, placed }) => {
     setup();
     const before = listTasks(store.db, project.id).map((t) => [t.title, t.boardOrder]);
     const run = () => store.write((ctx) => moveTask(ctx, tasks[task].id, move()));
-    if (refused) {
+    if (placed === null) {
       expect(run).toThrow(ConflictError);
       expect(run).toThrow(STALE);
       expect(listTasks(store.db, project.id).map((t) => [t.title, t.boardOrder])).toEqual(before);
     } else {
-      expect(run().value.boardOrder).toBe(2);
+      expect(run().value.boardOrder).toBe(placed);
     }
   });
 });
