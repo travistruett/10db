@@ -4,7 +4,7 @@ export default defineProject({
   test: {
     name: 'desktop',
     environment: 'jsdom',
-    setupFiles: ['./src/test/setup.ts'],
+    setupFiles: ['../../tests/git-isolation.setup.ts', './src/test/setup.ts'],
     exclude: [...configDefaults.exclude, 'e2e/**'],
   },
 });

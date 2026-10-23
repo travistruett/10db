@@ -198,6 +198,8 @@ const MIN_ORDER_GAP = 1e-6;
 /** Only planned and parked work moves; the rest follows its workstream. */
 const MOVABLE: readonly BoardStatus[] = [BoardStatus.Backlog, BoardStatus.Ready];
 
+const STALE_BOARD = 'The board changed while you were dragging; try again';
+
 /** Rewrites the open tasks' orders as 1…n in their current order (finished ones sort by finish time); each changed task announces it. */
 function renumberBoard(ctx: WriteContext, projectId: ProjectId): void {
   const rows = ctx.tx
@@ -241,6 +243,26 @@ export function moveTask(ctx: WriteContext, id: TaskId, move: TaskMove): TaskDto
     );
   if (to !== null && getBoardColumn(ctx.tx, to).projectId !== task.projectId)
     throw new InvalidError('The column must belong to the same project');
+  if (to !== null) {
+    // A parked task never finishes, so a dependent that has already started would stay queued for ever.
+    const started = ctx.tx
+      .select({ title: schema.tasks.title })
+      .from(schema.taskDeps)
+      .innerJoin(schema.tasks, eq(schema.tasks.id, schema.taskDeps.taskId))
+      .innerJoin(schema.workstreams, eq(schema.workstreams.taskId, schema.taskDeps.taskId))
+      .where(
+        and(
+          eq(schema.taskDeps.dependsOnId, id),
+          inArray(schema.workstreams.state, [...ACTIVE_STATES]),
+        ),
+      )
+      .orderBy(asc(schema.tasks.boardOrder))
+      .get();
+    if (started)
+      throw new ConflictError(
+        `Task ${started.title} waits on ${task.title} and has started; ${task.title} can't be parked until ${started.title} finishes`,
+      );
+  }
   const orderOf = (neighbour: TaskId | null): number | null => {
     if (neighbour === null) return null;
     if (neighbour === id) throw new InvalidError('A task cannot be its own neighbour');
@@ -251,19 +273,17 @@ export function moveTask(ctx: WriteContext, id: TaskId, move: TaskMove): TaskDto
       throw new InvalidError('A neighbour must be in the column the task moves to');
     // The board lists only planned and parked work among these cards; anything else moved on.
     if (other.status !== TaskStatus.Open || !MOVABLE.includes(other.boardStatus))
-      throw new ConflictError('The board changed while you were dragging; try again');
+      throw new ConflictError(STALE_BOARD);
     return other.boardOrder;
   };
   const first = { lo: orderOf(after), hi: orderOf(before) };
   if (first.lo !== null && first.hi !== null) {
-    if (first.lo >= first.hi)
-      throw new ConflictError('The board changed while you were dragging; try again');
+    if (first.lo >= first.hi) throw new ConflictError(STALE_BOARD);
     if (first.hi - first.lo < MIN_ORDER_GAP) renumberBoard(ctx, task.projectId);
   }
   const lo = orderOf(after);
   const hi = orderOf(before);
-  if (lo !== null && hi !== null && lo >= hi)
-    throw new ConflictError('The board changed while you were dragging; try again');
+  if (lo !== null && hi !== null && lo >= hi) throw new ConflictError(STALE_BOARD);
   const boardOrder =
     lo !== null && hi !== null
       ? (lo + hi) / 2
@@ -272,6 +292,26 @@ export function moveTask(ctx: WriteContext, id: TaskId, move: TaskMove): TaskDto
         : hi !== null
           ? hi - 1
           : task.boardOrder;
+  // The column the view placed the task in: the human column, or the derived column of its planned neighbours.
+  const derived = [after, before].flatMap((n) =>
+    n === null ? [] : [getTask(ctx.tx, n).boardStatus],
+  );
+  if (to !== null || derived.length > 0) {
+    const column = listTasks(ctx.tx, task.projectId).filter(
+      (t) =>
+        t.id !== id &&
+        t.status === TaskStatus.Open &&
+        t.boardColumnId === to &&
+        (to !== null || derived.includes(t.boardStatus)),
+    );
+    // A view that missed a task now between the neighbours, or at the order the move would take, is stale.
+    const stale = column.some(
+      (t) =>
+        t.boardOrder === boardOrder ||
+        (lo !== null && hi !== null && t.boardOrder > lo && t.boardOrder < hi),
+    );
+    if (stale) throw new ConflictError(STALE_BOARD);
+  }
   ctx.tx
     .update(schema.tasks)
     .set({ boardOrder, boardColumnId: to, updatedAt: ctx.now })

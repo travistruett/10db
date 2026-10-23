@@ -4,6 +4,7 @@ import { promisify } from 'node:util';
 import { InvalidError } from '@10db/contracts';
 import { z } from 'zod';
 import { resolveInRepo } from '../guard';
+import { withoutGitRepoEnv } from './repo-env';
 
 const run = promisify(execFile);
 
@@ -39,7 +40,8 @@ export interface Git {
 async function git(repo: string, args: readonly string[]): Promise<string> {
   try {
     const { stdout } = await run('git', ['-C', repo, ...args], {
-      env: { ...process.env, GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C' },
+      // -C names the repository; an inherited GIT_DIR or GIT_WORK_TREE would override it.
+      env: { ...withoutGitRepoEnv(process.env), GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C' },
       maxBuffer: 16 * 1024 * 1024,
     });
     return stdout;

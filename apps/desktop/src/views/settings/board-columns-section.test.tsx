@@ -79,6 +79,23 @@ describe('BoardColumnsSection', () => {
     });
   });
 
+  it('adds a name padded past 40 characters, limited after cleanup as the daemon does', async () => {
+    const sent = serve([icebox]);
+    fireEvent.change(await screen.findByLabelText('New column'), {
+      target: { value: `Needs spec${' '.repeat(31)}` },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Add column' }));
+    await waitFor(() => {
+      expect(sent).toEqual([
+        {
+          method: 'POST',
+          path: `/projects/${project.id}/board-columns`,
+          body: { name: 'Needs spec' },
+        },
+      ]);
+    });
+  });
+
   it("shows the daemon's message for a duplicate name", async () => {
     serve([icebox]);
     // The latest server.use wins, so this refusal overrides serve()'s create handler.
@@ -108,6 +125,34 @@ describe('BoardColumnsSection', () => {
       expect(sent).toEqual([
         { method: 'PATCH', path: `/board-columns/${icebox.id}`, body: { name: 'Someday' } },
         { method: 'PATCH', path: `/board-columns/${icebox.id}`, body: { position: 1 } },
+      ]);
+    });
+  });
+
+  it.each([
+    { name: 'an empty name', typed: '', message: 'Enter a name' },
+    { name: 'only spaces', typed: '   ', message: 'Enter a name' },
+    { name: 'a 41-character name', typed: 'x'.repeat(41), message: 'Use at most 40 characters' },
+  ])('checks a rename as Add does, and sends nothing for $name', async ({ typed, message }) => {
+    const sent = serve([icebox, exploring]);
+    fireEvent.click(await screen.findByRole('button', { name: 'Rename Icebox' }));
+    fireEvent.change(screen.getByLabelText('Name for Icebox'), { target: { value: typed } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save name' }));
+    expect(await screen.findByText(message)).toBeTruthy();
+    expect(screen.getByLabelText('Name for Icebox').getAttribute('aria-invalid')).toBe('true');
+    expect(sent).toEqual([]);
+  });
+
+  it('sends a renamed column’s name cleaned, as Add does', async () => {
+    const sent = serve([icebox, exploring]);
+    fireEvent.click(await screen.findByRole('button', { name: 'Rename Icebox' }));
+    fireEvent.change(screen.getByLabelText('Name for Icebox'), {
+      target: { value: '  Some   day ' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save name' }));
+    await waitFor(() => {
+      expect(sent).toEqual([
+        { method: 'PATCH', path: `/board-columns/${icebox.id}`, body: { name: 'Some day' } },
       ]);
     });
   });

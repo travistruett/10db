@@ -20,11 +20,25 @@ export function tempDir(prefix: string): TempDir {
   };
 }
 
+/**
+ * An environment for a git child process that only the repository it runs in can steer: no
+ * inherited `GIT_*` variable (git exports `GIT_DIR`, `GIT_INDEX_FILE` and more to a hook, which would
+ * redirect the child to the outer repository) and no system or global config.
+ */
+export function isolatedGitEnv(): NodeJS.ProcessEnv {
+  return {
+    ...Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith('GIT_'))),
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_CONFIG_GLOBAL: '/dev/null',
+  };
+}
+
 /** A real git repository with one commit on main, for tests that touch git or files. */
 export function createTempRepo(): TempDir {
   const dir = tempDir('repo');
+  const env = isolatedGitEnv();
   const git = (...args: string[]) =>
-    execFileSync('git', ['-C', dir.path, ...args], { stdio: 'pipe' });
+    execFileSync('git', ['-C', dir.path, ...args], { env, stdio: 'pipe' });
   git('init', '-q', '-b', 'main');
   git('config', 'user.name', '10db test');
   git('config', 'user.email', 'test@10db.invalid');

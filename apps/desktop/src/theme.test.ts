@@ -48,4 +48,18 @@ describe('theme contrast (WCAG AA)', () => {
       }
     },
   );
+
+  // A Button keeps its text color on hover, and the pointer rests on a button after a click.
+  it.each(palettes)('reads text on hovered filled %s at AA in both schemes', (name, shades) => {
+    const text = isLightColor(shades[9], resolved.luminanceThreshold)
+      ? resolved.black
+      : resolved.white;
+    for (const scheme of ['light', 'dark'] as const) {
+      // Mantine's own hover is shade 8 when the fill is shade 9.
+      const hover = shade(
+        vars[scheme][`--mantine-color-${name}-filled-hover`] ?? `var(--mantine-color-${name}-8)`,
+      );
+      expect(contrastRatio(text, hover)).toBeGreaterThanOrEqual(AA_CONTRAST);
+    }
+  });
 });

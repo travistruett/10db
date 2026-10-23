@@ -18,7 +18,7 @@ import { formatAreas } from './areas-text';
 import { BoardColumn } from './board-column';
 import { BoardDnd } from './board-dnd';
 import { boardLayout, DONE_LIMIT, type LayoutColumn } from './board-layout';
-import { menuMoves, resolveDrop } from './drop-rules';
+import { menuMoves, resolveDrop, startedDependents, type DropTarget } from './drop-rules';
 import { NewProjectForm } from './new-project-form';
 import { NewTaskForm } from './new-task-form';
 import { TaskCard } from './task-card';
@@ -50,12 +50,17 @@ interface BoardColumnsProps {
   readonly layout: readonly LayoutColumn[];
   readonly workstreamById: ReadonlyMap<WorkstreamId, WorkstreamDto>;
   readonly peers: ReadonlyMap<TaskId, Pick<TaskDto, 'title' | 'status' | 'boardColumnId'>>;
+  /** For each task, a dependent that has started and waits on it; such a task can't be parked. */
+  readonly started: ReadonlyMap<TaskId, string>;
 }
 
 /** The columns and their cards, with drag and drop; split out so the actions hook gets a project. */
-function BoardColumns({ projectId, layout, workstreamById, peers }: BoardColumnsProps) {
+function BoardColumns({ projectId, layout, workstreamById, peers, started }: BoardColumnsProps) {
   const actions = useBoardActions(projectId);
   const [showAllDone, setShowAllDone] = useState(false);
+  const drop = (taskId: TaskId, target: DropTarget) => {
+    actions.apply(resolveDrop(layout, taskId, target, started));
+  };
   return (
     <Stack>
       {actions.notice ? (
@@ -63,9 +68,9 @@ function BoardColumns({ projectId, layout, workstreamById, peers }: BoardColumns
           {actions.notice}
         </Alert>
       ) : null}
-      {actions.error ? (
-        <Alert color="red" title="Couldn't move the task">
-          {actions.error.message}
+      {actions.failure ? (
+        <Alert color="red" title={actions.failure.title}>
+          {actions.failure.error.message}
         </Alert>
       ) : null}
       <ScrollArea type="auto" offsetScrollbars>
@@ -75,7 +80,7 @@ function BoardColumns({ projectId, layout, workstreamById, peers }: BoardColumns
             shown={(column) =>
               isDone(column) && !showAllDone ? column.tasks.slice(0, DONE_LIMIT) : column.tasks
             }
-            onDrop={actions.apply}
+            onDrop={drop}
             renderColumn={(column, cards, listRef) => (
               <BoardColumn
                 listRef={listRef}
@@ -112,9 +117,9 @@ function BoardColumns({ projectId, layout, workstreamById, peers }: BoardColumns
                       task={task}
                       latest={ws?.state}
                       parkedDependency={parkedDependencyOf(task, peers)}
-                      moves={menuMoves(layout, task.id)}
+                      moves={menuMoves(layout, task.id, started)}
                       onMove={(target) => {
-                        actions.apply(resolveDrop(layout, task.id, target));
+                        drop(task.id, target);
                       }}
                       onStart={() => {
                         actions.apply({ kind: 'start', taskId: task.id });
@@ -140,9 +145,12 @@ export function BoardView() {
   const [taskOpen, taskModal] = useDisclosure(false);
 
   const taskList = tasks.data ?? [];
-  const layout = boardLayout(columns.data ?? [], taskList);
+  // Without the columns a parked card has nowhere to go, so it is left out rather than shown in a derived column.
+  const shownTasks = columns.data ? taskList : taskList.filter((t) => t.boardColumnId === null);
+  const layout = boardLayout(columns.data ?? [], shownTasks);
   const workstreamById = new Map((workstreams.data ?? []).map((ws) => [ws.id, ws]));
   const peers = new Map(taskList.map((t) => [t.id, t]));
+  const started = startedDependents(taskList, workstreamById);
 
   return (
     <Stack>
@@ -180,7 +188,12 @@ export function BoardView() {
       ) : null}
       {columns.isError ? (
         <Alert color="red" title="Couldn't load the board columns">
-          {columns.error.message}
+          <Stack gap={4}>
+            <Text size="sm">{columns.error.message}</Text>
+            {columns.data ? null : (
+              <Text size="sm">Parked tasks are hidden until the columns load.</Text>
+            )}
+          </Stack>
         </Alert>
       ) : null}
       {workstreams.isError ? (
@@ -203,12 +216,13 @@ export function BoardView() {
       {project && tasks.isSuccess && taskList.length === 0 ? (
         <Text c="dimmed">No tasks yet.</Text>
       ) : null}
-      {project && tasks.isSuccess && columns.isSuccess ? (
+      {project && tasks.isSuccess && (columns.data !== undefined || columns.isError) ? (
         <BoardColumns
           projectId={project.id}
           layout={layout}
           workstreamById={workstreamById}
           peers={peers}
+          started={started}
         />
       ) : null}
 

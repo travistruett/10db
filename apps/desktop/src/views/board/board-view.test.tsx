@@ -170,6 +170,29 @@ describe('BoardView', () => {
     });
   });
 
+  it('titles a refused start as a start, not a move', async () => {
+    const project = projectDto();
+    const alpha = taskDto({ projectId: project.id, title: 'Alpha', boardStatus: 'ready' });
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([alpha])),
+      http.post(daemonUrl('/tasks/:taskId/start'), () =>
+        HttpResponse.json(
+          { error: 'conflict', message: 'Task Alpha already has an active workstream' },
+          { status: 409 },
+        ),
+      ),
+    );
+    renderApp('/board');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Actions for Alpha' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Start', hidden: true }));
+    const alert = await screen.findByRole('alert');
+    expect(within(alert).getByText("Couldn't start the task")).toBeTruthy();
+    expect(within(alert).getByText('Task Alpha already has an active workstream')).toBeTruthy();
+    expect(screen.queryByText("Couldn't move the task")).toBeNull();
+  });
+
   it.each([
     ['RUNNING', 'Running', 'in_progress', false],
     ['DONE', 'Done', 'ready', false],
@@ -437,13 +460,51 @@ describe('BoardView', () => {
       }),
       http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([idea])),
     );
-    renderApp('/board');
+    const { queryClient } = renderApp('/board');
     await screen.findByText(/gate: true/);
-    await new Promise((r) => setTimeout(r, 200));
+    // Wait for the tasks to be in the cache, then check the board still holds back.
+    await waitFor(() => {
+      expect(queryClient.getQueryState(['tasks', project.id])?.status).toBe('success');
+    });
     expect(screen.queryByRole('listitem', { name: 'Idea' })).toBeNull();
     release();
     const parked = await screen.findByRole('list', { name: 'Icebox tasks' });
     expect(within(parked).getByRole('listitem', { name: 'Idea' })).toBeTruthy();
+  });
+
+  it('still shows planned and running cards when the columns query fails, and keeps parked ones out of derived columns', async () => {
+    const project = projectDto();
+    const icebox = boardColumnDto({ projectId: project.id });
+    const alpha = taskDto({ projectId: project.id, title: 'Alpha', boardStatus: 'ready' });
+    const busy = taskDto({ projectId: project.id, title: 'Busy', boardStatus: 'in_progress' });
+    const idea = taskDto({
+      projectId: project.id,
+      title: 'Idea',
+      boardStatus: 'ready',
+      boardColumnId: icebox.id,
+    });
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/board-columns'), () =>
+        HttpResponse.json({ error: 'internal', message: 'columns unavailable' }, { status: 500 }),
+      ),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () =>
+        HttpResponse.json([alpha, busy, idea]),
+      ),
+    );
+    renderApp('/board');
+
+    const alert = await screen.findByRole('alert');
+    expect(within(alert).getByText(/columns unavailable/)).toBeTruthy();
+    expect(within(alert).getByText(/Parked tasks are hidden/)).toBeTruthy();
+    const ready = await screen.findByRole('list', { name: 'Ready tasks' });
+    expect(within(ready).getByRole('listitem', { name: 'Alpha' })).toBeTruthy();
+    expect(
+      within(screen.getByRole('list', { name: 'In progress tasks' })).getByRole('listitem', {
+        name: 'Busy',
+      }),
+    ).toBeTruthy();
+    expect(screen.queryByRole('listitem', { name: 'Idea' })).toBeNull();
   });
 
   it('disables Start on a card that waits on a parked dependency, and says why', async () => {
@@ -471,6 +532,34 @@ describe('BoardView', () => {
     const start = await screen.findByRole('menuitem', { name: /^Start/, hidden: true });
     expect(start.hasAttribute('data-disabled')).toBe(true);
     expect(start.textContent).toContain('Idea is parked');
+  });
+
+  it('disables parking a card that a started dependent waits on, and says why', async () => {
+    const project = projectDto();
+    const icebox = boardColumnDto({ projectId: project.id });
+    const base = taskDto({ projectId: project.id, title: 'Base', boardStatus: 'ready' });
+    const ws = workstreamDto({ projectId: project.id, state: 'QUEUED', taskTitle: 'Next' });
+    const next = taskDto({
+      projectId: project.id,
+      title: 'Next',
+      boardStatus: 'in_progress',
+      dependsOn: [base.id],
+      workstreamId: ws.id,
+    });
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/board-columns'), () => HttpResponse.json([icebox])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([base, next])),
+      http.get(daemonUrl('/workstreams'), () => HttpResponse.json([ws])),
+    );
+    renderApp('/board');
+    // The workstream arrives on its own query; wait until the card shows it.
+    const card = await screen.findByRole('listitem', { name: 'Next' });
+    expect(await within(card).findByText('Queued')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for Base' }));
+    const park = await screen.findByRole('menuitem', { name: /^Move to Icebox/, hidden: true });
+    expect(park.hasAttribute('data-disabled')).toBe(true);
+    expect(park.textContent).toContain('Next has started and waits on Base');
   });
 
   it('shows the 20 most recent done tasks and the rest on request', async () => {

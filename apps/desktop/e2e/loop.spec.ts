@@ -143,12 +143,14 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await expectAccessible(page, 'settings, general, dark');
   await page.getByRole('link', { name: /Board columns/ }).click();
   await page.getByLabel('New column').fill('Exploring');
-  await page.getByRole('button', { name: 'Add column' }).click();
+  const addColumn = page.getByRole('button', { name: 'Add column' });
+  await addColumn.click();
   await expect(
     page.getByRole('table', { name: 'Human columns' }).getByText('Exploring'),
   ).toBeVisible();
-  // Axe reads colors, so let the Add column button finish its loading state first.
-  await expect(page.getByRole('button', { name: 'Add column' })).toBeEnabled();
+  // Axe reads colors, so let the Add column button leave its loading state and fade its label back in.
+  await expect(addColumn).toBeEnabled();
+  await expect(addColumn.locator('.mantine-Button-inner')).toHaveCSS('opacity', '1');
   await expectAccessible(page, 'settings, board columns, dark');
   await page.getByRole('link', { name: /Accounts/ }).click();
   await expect(page.getByText('Not built yet')).toBeVisible();

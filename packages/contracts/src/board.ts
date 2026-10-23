@@ -32,26 +32,38 @@ const LOOKALIKES: Readonly<Record<string, string>> = {
   '\u03c1': 'p',
 };
 
-/** NFKC, no invisible format characters, inner whitespace collapsed to single spaces, trimmed. */
-export function normalizeColumnName(name: string): string {
+/** Bidi controls, the zero-width space and the byte-order mark: invisible, and never part of a real name. */
+const INVISIBLE = /[\u200b\u200e\u200f\u202a-\u202e\u2066-\u2069\ufeff]/gu;
+
+/** The stored form: invisible junk removed and whitespace collapsed, but joiners, digits and letters kept as typed. */
+export function cleanColumnName(name: string): string {
+  return name.replace(INVISIBLE, '').replace(/\s+/gu, ' ').trim();
+}
+
+/** What two names must differ in to be different columns: case, look-alike letters, width forms and spacing do not count. */
+export function columnNameKey(name: string): string {
   return name
     .normalize('NFKC')
     .replace(/\p{Cf}/gu, '')
     .replace(/\s+/gu, ' ')
-    .trim();
-}
-
-/** What two names must differ in to be different columns: case, look-alike letters and spacing do not count. */
-export function columnNameKey(name: string): string {
-  return normalizeColumnName(name)
+    .trim()
     .toLowerCase()
     .replace(/./gsu, (c) => LOOKALIKES[c] ?? c);
 }
 
+/**
+ * Cleaned first, then limited, so trailing spaces never count against the 40. JSON Schema can't say
+ * "after cleanup", so the published schema checks one typed character and states the limit in words.
+ */
 export const BoardColumnName = z
   .string()
-  .transform(normalizeColumnName)
-  .pipe(z.string().min(1, 'Enter a name').max(40, 'Use at most 40 characters'));
+  .min(1, 'Enter a name')
+  .transform(cleanColumnName)
+  .pipe(z.string().min(1, 'Enter a name').max(40, 'Use at most 40 characters'))
+  .meta({
+    description:
+      'At most 40 characters once invisible characters are removed, whitespace runs become one space and the ends are trimmed.',
+  });
 
 /**
  * A column the builder names and orders. A task in one is parked: never picked and never launched.

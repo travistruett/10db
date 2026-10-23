@@ -5,7 +5,6 @@ export default defineProject({
     name: 'daemon',
     environment: 'node',
     testTimeout: 30_000,
-    // Tests and the git children they spawn ignore the contributor's global git config.
-    env: { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' },
+    setupFiles: ['../../tests/git-isolation.setup.ts'],
   },
 });

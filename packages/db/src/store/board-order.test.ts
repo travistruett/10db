@@ -210,6 +210,90 @@ describe('moveTask neighbours', () => {
   });
 });
 
+describe('moveTask from a stale view', () => {
+  const STALE = 'The board changed while you were dragging; try again';
+  const setOrder = (key: keyof typeof tasks, boardOrder: number) =>
+    store.db
+      .update(schema.tasks)
+      .set({ boardOrder })
+      .where(eq(schema.tasks.id, tasks[key].id))
+      .run();
+  it.each([
+    {
+      // The view saw a and c side by side; b now sits between them.
+      name: 'refuses neighbours with an open task between them',
+      setup: () => {
+        setOrder('b', 2.5);
+      },
+      task: 'd',
+      move: () => ({ to: null, after: tasks.a.id, before: tasks.c.id }),
+      refused: true,
+    },
+    {
+      // The view saw d last; b now sits right after it, at d + 1.
+      name: 'refuses an end move onto an order an open task already has',
+      setup: () => {
+        setOrder('d', 2);
+        setOrder('b', 3);
+        setOrder('c', 5);
+      },
+      task: 'a',
+      move: () => ({ to: null, after: tasks.d.id, before: null }),
+      refused: true,
+    },
+    {
+      // The view saw a alone in Icebox; c now sits above it, at a - 1.
+      name: 'refuses a human-column move onto an order an open task there already has',
+      setup: () => {
+        store.write((ctx) => moveTask(ctx, tasks.a.id, { to: icebox, after: null, before: null }));
+        store.write((ctx) => moveTask(ctx, tasks.c.id, { to: icebox, after: null, before: null }));
+        setOrder('c', 0);
+      },
+      task: 'b',
+      move: () => ({ to: icebox, after: null, before: tasks.a.id }),
+      refused: true,
+    },
+    {
+      name: 'places it when the task between the neighbours is in another derived column',
+      setup: () => {
+        // b waits on d, so it is in Backlog while a and c are in Ready.
+        store.db
+          .insert(schema.taskDeps)
+          .values({ taskId: tasks.b.id, dependsOnId: tasks.d.id })
+          .run();
+        setOrder('b', 2.5);
+      },
+      task: 'd',
+      move: () => ({ to: null, after: tasks.a.id, before: tasks.c.id }),
+      refused: false,
+    },
+    {
+      name: 'places it when the task between the neighbours is finished',
+      setup: () => {
+        store.db
+          .update(schema.tasks)
+          .set({ status: 'done', boardOrder: 2.5 })
+          .where(eq(schema.tasks.id, tasks.b.id))
+          .run();
+      },
+      task: 'd',
+      move: () => ({ to: null, after: tasks.a.id, before: tasks.c.id }),
+      refused: false,
+    },
+  ] as const)('$name', ({ setup, task, move, refused }) => {
+    setup();
+    const before = listTasks(store.db, project.id).map((t) => [t.title, t.boardOrder]);
+    const run = () => store.write((ctx) => moveTask(ctx, tasks[task].id, move()));
+    if (refused) {
+      expect(run).toThrow(ConflictError);
+      expect(run).toThrow(STALE);
+      expect(listTasks(store.db, project.id).map((t) => [t.title, t.boardOrder])).toEqual(before);
+    } else {
+      expect(run().value.boardOrder).toBe(2);
+    }
+  });
+});
+
 describe('a task with an older run still active', () => {
   it('refuses to move it, whatever its latest run says', () => {
     const first = store.write((ctx) => insertWorkstream(ctx, tasks.a.id)).value;
@@ -247,6 +331,46 @@ describe('a dependency parked in a human column', () => {
   it('lets the dependent queue while the dependency is planned', () => {
     const e = dependent();
     expect(() => store.write((ctx) => insertWorkstream(ctx, e.id))).not.toThrow();
+  });
+
+  const PARK_REFUSAL = "Task e waits on a and has started; a can't be parked until e finishes";
+  it.each([
+    { name: 'refuses to park it under a queued dependent', path: [], to: 'icebox', refusal: true },
+    {
+      name: 'refuses to park it under a running dependent',
+      path: ['STARTING', 'RUNNING'],
+      to: 'icebox',
+      refusal: true,
+    },
+    {
+      name: 'parks it under a finished dependent',
+      path: ['STARTING', 'RUNNING', 'VERIFYING', 'DONE'],
+      to: 'icebox',
+      refusal: false,
+    },
+    {
+      name: 'reorders it among planned work under a queued dependent',
+      path: [],
+      to: 'planned',
+      refusal: false,
+    },
+  ] as const)('$name', ({ path, to, refusal }) => {
+    const e = dependent();
+    const ws = store.write((ctx) => insertWorkstream(ctx, e.id)).value;
+    for (const state of path)
+      store.write((ctx) => transitionWorkstream(ctx, ws.id, { to: state, fence: null }));
+    const move: TaskMove =
+      to === 'icebox'
+        ? { to: icebox, after: null, before: null }
+        : { to: null, after: tasks.b.id, before: tasks.c.id };
+    const park = () => store.write((ctx) => moveTask(ctx, tasks.a.id, move));
+    if (refusal) {
+      expect(park).toThrow(ConflictError);
+      expect(park).toThrow(PARK_REFUSAL);
+      expect(getTask(store.db, tasks.a.id).boardColumnId).toBeNull();
+    } else {
+      expect(park().value.boardColumnId).toBe(move.to);
+    }
   });
 });
 

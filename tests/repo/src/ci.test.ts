@@ -121,7 +121,7 @@ describe.each(workflowPaths())('%s is hardened', (path) => {
 
   it('reads secrets only in jobs bound to an environment', () => {
     const leaky = jobs.filter(
-      ([, job]) => JSON.stringify(job).includes('secrets.') && job.environment === undefined,
+      ([, job]) => /\bsecrets\b/.test(JSON.stringify(job)) && job.environment === undefined,
     );
     expect(leaky.map(([name]) => name)).toEqual([]);
   });
