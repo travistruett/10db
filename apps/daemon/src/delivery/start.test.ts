@@ -5,7 +5,9 @@ import {
   getBatch,
   insertWorkstream,
   listBatches,
+  listBoardColumns,
   listWorkstreams,
+  moveTask,
   patchProject,
   seedProject,
   transitionBatch,
@@ -307,5 +309,17 @@ describe('refusals in the request', () => {
     expect(() =>
       h.starter.startBatch(elsewhere.id, { title: 'x', taskIds: [h.addTask('Beta').id] }),
     ).toThrow(/belongs to another project/);
+  });
+
+  it('refuses a parked task before it cuts a branch', async () => {
+    const alpha = h.addTask('Alpha');
+    const icebox = listBoardColumns(h.store.db, h.project.id)[0];
+    if (!icebox) throw new Error('no Icebox');
+    h.state.write((ctx) => moveTask(ctx, alpha.id, { to: icebox.id, after: null, before: null }));
+    expect(() => h.starter.startTask(alpha.id)).toThrow(ConflictError);
+    expect(() => h.starter.startTask(alpha.id)).toThrow(/parked in Icebox/);
+    await h.jobs.idle();
+    expect(listBatches(h.store.db)).toEqual([]);
+    expect(h.git$('branch', '--list', '10db/*')).toBe('');
   });
 });

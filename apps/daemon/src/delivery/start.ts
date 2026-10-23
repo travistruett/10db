@@ -19,6 +19,7 @@ import {
   deleteCuttingBatch,
   findUnfinishedBatch,
   getBatch,
+  getBoardColumn,
   getProject,
   getTask,
   getWorkstreamRow,
@@ -89,6 +90,11 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
       throw new InvalidError(`Task ${task.title} belongs to another project`);
     if (task.status !== TaskStatus.Open)
       throw new ConflictError(`Task ${task.title} is ${task.status}`);
+    // Checked here, before the cut, so a parked task never leaves a fresh branch checked out.
+    if (task.boardColumnId !== null)
+      throw new ConflictError(
+        `Task ${task.title} is parked in ${getBoardColumn(db, task.boardColumnId).name}; move it to Backlog or Ready to start it`,
+      );
     const latest = task.workstreamId ? getWorkstreamRow(db, task.workstreamId) : null;
     if (latest && ACTIVE_STATES.includes(latest.state))
       throw new ConflictError(`Task ${task.title} is already running`);
