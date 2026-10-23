@@ -32,6 +32,17 @@ import { WorkstreamStep } from './steps';
 const Name = z.string().regex(/^[a-z][a-z0-9-]*$/, 'lowercase letters, digits and hyphens');
 const Timestamp = z.iso.datetime();
 
+const CONTROL_CHARACTER = /\p{Cc}/u;
+/**
+ * A task or batch title: one line, since in pull-request delivery it becomes the pull request's
+ * title, and GitHub refuses one with a newline only after the branch is pushed.
+ */
+export const Title = z
+  .string()
+  .min(1)
+  .max(200)
+  .refine((t) => !CONTROL_CHARACTER.test(t), 'no control characters such as newlines or tabs');
+
 export const AreaDef = z.object({ name: Name, globs: z.array(z.string().min(1)).min(1) });
 export type AreaDef = z.infer<typeof AreaDef>;
 
@@ -157,7 +168,7 @@ export const ProjectPatch = z
 export type ProjectPatch = z.infer<typeof ProjectPatch>;
 
 export const TaskInput = z.object({
-  title: z.string().min(1).max(200),
+  title: Title,
   description: z.string().default(''),
   acceptanceCriteria: z.array(z.string().min(1)).min(1),
   areas: z.array(Name).min(1),
@@ -189,7 +200,7 @@ export type TaskDto = z.infer<typeof TaskDto>;
 
 export const TaskPatch = z
   .object({
-    title: z.string().min(1).max(200),
+    title: Title,
     description: z.string(),
     acceptanceCriteria: z.array(z.string().min(1)).min(1),
     riskTags: z.array(z.enum(RiskTag)),

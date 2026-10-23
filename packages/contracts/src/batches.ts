@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ProjectDto, WorkstreamDto } from './entities';
+import { ProjectDto, Title, WorkstreamDto } from './entities';
 import { BatchId, ProjectId, TaskId } from './ids';
 import { BatchFailure, BatchState } from './states';
 
@@ -30,7 +30,7 @@ export type BatchDto = z.infer<typeof BatchDto>;
 /** `POST /projects/:projectId/batches`. M2b's batch approval sends this; keep it stable. */
 export const BatchStartInput = z
   .object({
-    title: z.string().min(1).max(200),
+    title: Title,
     taskIds: z.array(TaskId).min(1).max(50),
   })
   .refine((i) => new Set(i.taskIds).size === i.taskIds.length, {

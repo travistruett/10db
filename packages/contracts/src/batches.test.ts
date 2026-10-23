@@ -7,6 +7,7 @@ import {
   UNFINISHED_BATCH_STATES,
 } from './batch-workflow';
 import { BatchDto, BatchStartInput, TaskStartResult } from './batches';
+import { TaskInput, TaskPatch } from './entities';
 import { BranchName, PrTitlePrefix } from './git-names';
 import { mintId } from './ids';
 import { BatchState as B, WorkstreamState as S, type BatchState } from './states';
@@ -139,6 +140,28 @@ describe('batch schemas', () => {
     { name: 'a task id that is not one', input: { title: 'Bad', taskIds: ['tsk_1'] }, ok: false },
   ])('BatchStartInput: $name', ({ input, ok }) => {
     expect(BatchStartInput.safeParse(input).success).toBe(ok);
+  });
+
+  describe('a title, which becomes the pull request title', () => {
+    const titles = [
+      { name: 'quotes, $() and accents', title: 'Say "hi" — $(whoami) café ✓', ok: true },
+      { name: 'a newline', title: 'Add\ngreetings', ok: false },
+      { name: 'a carriage return', title: 'Add\rgreetings', ok: false },
+      { name: 'a tab', title: 'Add\tgreetings', ok: false },
+      { name: 'a NUL', title: 'Add\u0000greetings', ok: false },
+      { name: 'DEL', title: 'Add\u007fgreetings', ok: false },
+      { name: 'a C1 control (NEL)', title: 'Add\u0085greetings', ok: false },
+    ];
+    it.each(titles)('BatchStartInput with $name', ({ title, ok }) => {
+      expect(BatchStartInput.safeParse({ title, taskIds: [task] }).success).toBe(ok);
+    });
+    it.each(titles)('TaskInput with $name', ({ title, ok }) => {
+      const input = { title, acceptanceCriteria: ['x'], areas: ['api'] };
+      expect(TaskInput.safeParse(input).success).toBe(ok);
+    });
+    it.each(titles)('TaskPatch with $name', ({ title, ok }) => {
+      expect(TaskPatch.safeParse({ title }).success).toBe(ok);
+    });
   });
 
   it('tells a started batch from a started workstream', () => {
