@@ -145,7 +145,9 @@ export function BoardView() {
   const [taskOpen, taskModal] = useDisclosure(false);
 
   const taskList = tasks.data ?? [];
-  const layout = boardLayout(columns.data ?? [], taskList);
+  // Without the columns a parked card has nowhere to go, so it is left out rather than shown in a derived column.
+  const shownTasks = columns.data ? taskList : taskList.filter((t) => t.boardColumnId === null);
+  const layout = boardLayout(columns.data ?? [], shownTasks);
   const workstreamById = new Map((workstreams.data ?? []).map((ws) => [ws.id, ws]));
   const peers = new Map(taskList.map((t) => [t.id, t]));
   const started = startedDependents(taskList, workstreamById);
@@ -186,7 +188,12 @@ export function BoardView() {
       ) : null}
       {columns.isError ? (
         <Alert color="red" title="Couldn't load the board columns">
-          {columns.error.message}
+          <Stack gap={4}>
+            <Text size="sm">{columns.error.message}</Text>
+            {columns.data ? null : (
+              <Text size="sm">Parked tasks are hidden until the columns load.</Text>
+            )}
+          </Stack>
         </Alert>
       ) : null}
       {workstreams.isError ? (
@@ -209,7 +216,7 @@ export function BoardView() {
       {project && tasks.isSuccess && taskList.length === 0 ? (
         <Text c="dimmed">No tasks yet.</Text>
       ) : null}
-      {project && tasks.isSuccess && columns.isSuccess ? (
+      {project && tasks.isSuccess && (columns.data !== undefined || columns.isError) ? (
         <BoardColumns
           projectId={project.id}
           layout={layout}

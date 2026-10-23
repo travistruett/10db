@@ -472,6 +472,41 @@ describe('BoardView', () => {
     expect(within(parked).getByRole('listitem', { name: 'Idea' })).toBeTruthy();
   });
 
+  it('still shows planned and running cards when the columns query fails, and keeps parked ones out of derived columns', async () => {
+    const project = projectDto();
+    const icebox = boardColumnDto({ projectId: project.id });
+    const alpha = taskDto({ projectId: project.id, title: 'Alpha', boardStatus: 'ready' });
+    const busy = taskDto({ projectId: project.id, title: 'Busy', boardStatus: 'in_progress' });
+    const idea = taskDto({
+      projectId: project.id,
+      title: 'Idea',
+      boardStatus: 'ready',
+      boardColumnId: icebox.id,
+    });
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/board-columns'), () =>
+        HttpResponse.json({ error: 'internal', message: 'columns unavailable' }, { status: 500 }),
+      ),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () =>
+        HttpResponse.json([alpha, busy, idea]),
+      ),
+    );
+    renderApp('/board');
+
+    const alert = await screen.findByRole('alert');
+    expect(within(alert).getByText(/columns unavailable/)).toBeTruthy();
+    expect(within(alert).getByText(/Parked tasks are hidden/)).toBeTruthy();
+    const ready = await screen.findByRole('list', { name: 'Ready tasks' });
+    expect(within(ready).getByRole('listitem', { name: 'Alpha' })).toBeTruthy();
+    expect(
+      within(screen.getByRole('list', { name: 'In progress tasks' })).getByRole('listitem', {
+        name: 'Busy',
+      }),
+    ).toBeTruthy();
+    expect(screen.queryByRole('listitem', { name: 'Idea' })).toBeNull();
+  });
+
   it('disables Start on a card that waits on a parked dependency, and says why', async () => {
     const project = projectDto();
     const icebox = boardColumnDto({ projectId: project.id });
