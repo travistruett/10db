@@ -51,13 +51,19 @@ export function columnNameKey(name: string): string {
     .replace(/./gsu, (c) => LOOKALIKES[c] ?? c);
 }
 
-/** The limits are checked on the typed text too, so the published JSON Schema carries them. */
+/**
+ * Cleaned first, then limited, so trailing spaces never count against the 40. JSON Schema can't say
+ * "after cleanup", so the published schema checks one typed character and states the limit in words.
+ */
 export const BoardColumnName = z
   .string()
   .min(1, 'Enter a name')
-  .max(40, 'Use at most 40 characters')
   .transform(cleanColumnName)
-  .pipe(z.string().min(1, 'Enter a name').max(40, 'Use at most 40 characters'));
+  .pipe(z.string().min(1, 'Enter a name').max(40, 'Use at most 40 characters'))
+  .meta({
+    description:
+      'At most 40 characters once invisible characters are removed, whitespace runs become one space and the ends are trimmed.',
+  });
 
 /**
  * A column the builder names and orders. A task in one is parked: never picked and never launched.

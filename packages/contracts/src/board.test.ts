@@ -54,6 +54,18 @@ describe('board columns', () => {
     { name: 'a padded name, trimmed', value: '  Needs spec ', ok: true, parsed: 'Needs spec' },
     { name: 'an empty name', value: '   ', ok: false, parsed: null },
     { name: 'a 41-character name', value: 'x'.repeat(41), ok: false, parsed: null },
+    {
+      name: 'a name padded past 40 characters, limited after cleanup',
+      value: `Needs spec${' '.repeat(31)}`,
+      ok: true,
+      parsed: 'Needs spec',
+    },
+    {
+      name: 'a name whose inner spaces collapse to 40 characters',
+      value: `${'x'.repeat(20)}     ${'x'.repeat(19)}`,
+      ok: true,
+      parsed: `${'x'.repeat(20)} ${'x'.repeat(19)}`,
+    },
   ])('parses $name', ({ value, ok, parsed }) => {
     const result = BoardColumnInput.safeParse({ name: value });
     expect(result.success).toBe(ok);
@@ -102,14 +114,18 @@ describe('column names', () => {
     expect(columnNameKey('\u2460')).toBe(columnNameKey('1'));
   });
 
-  it('publishes the name length limits in the JSON Schema', () => {
+  // The 40-character limit applies after cleanup, which JSON Schema can't express: a maxLength on the
+  // typed text would refuse a padded name the API accepts, so the limit is published as a description.
+  it('publishes the name limits as they apply: one typed character, 40 after cleanup', () => {
     const rendered = renderJsonSchemas();
     for (const file of ['board-column-input.schema.json', 'board-column-patch.schema.json']) {
       const { properties } = z
         .object({ properties: z.object({ name: z.unknown() }) })
         .parse(JSON.parse(rendered.get(file) ?? '{}'));
       const name = properties.name;
-      expect(name).toMatchObject({ type: 'string', minLength: 1, maxLength: 40 });
+      expect(name).toMatchObject({ type: 'string', minLength: 1 });
+      expect(name).not.toHaveProperty('maxLength');
+      expect(name).toHaveProperty('description', expect.stringContaining('40 characters'));
     }
   });
 

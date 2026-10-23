@@ -79,6 +79,23 @@ describe('BoardColumnsSection', () => {
     });
   });
 
+  it('adds a name padded past 40 characters, limited after cleanup as the daemon does', async () => {
+    const sent = serve([icebox]);
+    fireEvent.change(await screen.findByLabelText('New column'), {
+      target: { value: `Needs spec${' '.repeat(31)}` },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Add column' }));
+    await waitFor(() => {
+      expect(sent).toEqual([
+        {
+          method: 'POST',
+          path: `/projects/${project.id}/board-columns`,
+          body: { name: 'Needs spec' },
+        },
+      ]);
+    });
+  });
+
   it("shows the daemon's message for a duplicate name", async () => {
     serve([icebox]);
     // The latest server.use wins, so this refusal overrides serve()'s create handler.
