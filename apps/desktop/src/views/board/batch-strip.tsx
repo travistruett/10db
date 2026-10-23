@@ -20,7 +20,9 @@ import {
   Text,
   type MantineColor,
 } from '@mantine/core';
+import { useState } from 'react';
 import { useAbandonBatch, useShipBatch } from '../../daemon/queries';
+import { isTauri, openInBrowser } from '../../desktop/tauri';
 import { StateBadge } from '../factory/state-badge';
 
 const B = BatchState;
@@ -72,6 +74,17 @@ export function BatchStrip({
   const canShipAnyway = batch.state === B.Open && readiness === ShipReadiness.ShipAnyway;
   const canAbandon = batch.state === B.Open || batch.state === B.Failed;
   const error = ship.error ?? abandon.error;
+  const [openFailure, setOpenFailure] = useState<string | null>(null);
+  const prUrl = batch.prUrl;
+  // Each action clears the other's error first, so the strip shows only the latest action's refusal.
+  const shipBatch = () => {
+    abandon.reset();
+    ship.mutate(batch.id);
+  };
+  const abandonBatch = () => {
+    ship.reset();
+    abandon.mutate(batch.id);
+  };
 
   return (
     <Paper withBorder p="sm">
@@ -82,8 +95,24 @@ export function BatchStrip({
             {BATCH_LABELS[batch.state]}
           </Badge>
           {batch.branch ? <Code>{batch.branch}</Code> : null}
-          {batch.prUrl ? (
-            <Anchor href={batch.prUrl} target="_blank" rel="noreferrer" size="sm">
+          {prUrl ? (
+            <Anchor
+              href={prUrl}
+              target="_blank"
+              rel="noreferrer"
+              size="sm"
+              onClick={(event) => {
+                // A browser opens the tab itself; the desktop app's webview would follow nothing.
+                if (!isTauri()) return;
+                event.preventDefault();
+                setOpenFailure(null);
+                openInBrowser(prUrl).catch((failure: unknown) => {
+                  setOpenFailure(
+                    `Couldn't open ${prUrl}: ${failure instanceof Error ? failure.message : String(failure)}`,
+                  );
+                });
+              }}
+            >
               Pull request
             </Anchor>
           ) : null}
@@ -108,28 +137,20 @@ export function BatchStrip({
             {error.message}
           </Alert>
         ) : null}
+        {openFailure ? (
+          <Alert color="red" variant="light">
+            {openFailure}
+          </Alert>
+        ) : null}
         {batch.state === B.Failed || canShipAnyway || canAbandon ? (
           <Group gap="xs">
             {batch.state === B.Failed ? (
-              <Button
-                size="xs"
-                loading={ship.isPending}
-                onClick={() => {
-                  ship.mutate(batch.id);
-                }}
-              >
+              <Button size="xs" loading={ship.isPending} onClick={shipBatch}>
                 Retry
               </Button>
             ) : null}
             {canShipAnyway ? (
-              <Button
-                size="xs"
-                variant="light"
-                loading={ship.isPending}
-                onClick={() => {
-                  ship.mutate(batch.id);
-                }}
-              >
+              <Button size="xs" variant="light" loading={ship.isPending} onClick={shipBatch}>
                 Ship anyway
               </Button>
             ) : null}
@@ -139,9 +160,7 @@ export function BatchStrip({
                 variant="default"
                 color="red"
                 loading={abandon.isPending}
-                onClick={() => {
-                  abandon.mutate(batch.id);
-                }}
+                onClick={abandonBatch}
               >
                 Abandon
               </Button>

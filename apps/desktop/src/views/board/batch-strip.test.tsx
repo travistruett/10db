@@ -1,7 +1,9 @@
 import type { BatchDto, WorkstreamDto } from '@10db/contracts';
-import { screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
-import { baseHandlers, renderWithDaemon, server } from '../../test/daemon';
+import { clearMocks, mockIPC } from '@tauri-apps/api/mocks';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { http, HttpResponse } from 'msw';
+import { afterEach, describe, expect, it } from 'vitest';
+import { baseHandlers, daemonUrl, renderWithDaemon, server } from '../../test/daemon';
 import { batchDto, workstreamDto } from '../../test/fixtures';
 import { BatchStrip } from './batch-strip';
 
@@ -39,7 +41,16 @@ describe('BatchStrip', () => {
       batch,
       workstreams: [member('Alpha', 'FAILED'), member('Beta', 'DONE')],
       texts: ['Alpha', 'Failed'],
+      absent: ['Beta'],
       buttons: ['Ship anyway', 'Abandon'],
+    },
+    {
+      name: 'open with every member settled',
+      batch,
+      workstreams: [member('Alpha', 'DONE'), member('Beta', 'CANCELLED')],
+      texts: ['Open'],
+      absent: ['Alpha', 'Beta'],
+      buttons: ['Abandon'],
     },
     {
       name: 'shipping',
@@ -71,6 +82,14 @@ describe('BatchStrip', () => {
       buttons: ['Retry', 'Abandon'],
     },
     {
+      name: 'failed with unfinished work',
+      batch: batchDto({ ...batch, state: 'FAILED', failure: 'wrong_branch' }),
+      workstreams: [member('Alpha', 'QUEUED'), member('Beta', 'DONE')],
+      texts: ['Not shipped', 'The checkout is not on the batch branch', 'Alpha', 'Queued'],
+      absent: ['Beta'],
+      buttons: ['Retry', 'Abandon'],
+    },
+    {
       name: 'abandoned',
       batch: batchDto({ state: 'ABANDONED' }),
       workstreams: [],
@@ -85,5 +104,89 @@ describe('BatchStrip', () => {
     expect(screen.queryAllByRole('button').map((x) => x.textContent)).toEqual(buttons);
     if (link)
       expect(screen.getByRole('link', { name: 'Pull request' }).getAttribute('href')).toBe(link);
+  });
+});
+
+describe('BatchStrip actions', () => {
+  const failed = batchDto({ state: 'FAILED', failure: 'gate_failed' });
+  const refusal = (message: string) =>
+    HttpResponse.json({ error: 'conflict', message }, { status: 409 });
+
+  it.each([
+    {
+      name: 'a refused Retry once Abandon succeeds',
+      first: 'Retry',
+      then: 'Abandon',
+      ship: () => refusal('Batch "Greetings" is shipping'),
+      abandon: () => HttpResponse.json({ ...failed, state: 'ABANDONED' }),
+      stale: 'Batch "Greetings" is shipping',
+    },
+    {
+      name: 'a refused Abandon once Retry succeeds',
+      first: 'Abandon',
+      then: 'Retry',
+      ship: () => HttpResponse.json({ ...failed, state: 'SHIPPING', failure: null }),
+      abandon: () => refusal('Batch "Greetings" is shipped'),
+      stale: 'Batch "Greetings" is shipped',
+    },
+  ])('clears $name', async ({ first, then, ship, abandon, stale }) => {
+    server.use(
+      http.post(daemonUrl('/batches/:batchId/ship'), ship),
+      http.post(daemonUrl('/batches/:batchId/abandon'), abandon),
+      ...baseHandlers(),
+    );
+    renderWithDaemon(<BatchStrip batch={failed} workstreams={[]} />);
+    fireEvent.click(await screen.findByRole('button', { name: first }));
+    expect(await screen.findByText(stale)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: then }));
+    await waitFor(() => {
+      expect(screen.queryByText(stale)).toBeNull();
+    });
+  });
+});
+
+describe('BatchStrip pull request link', () => {
+  const url = 'https://github.com/acme/widgets/pull/7';
+  const shipped = batchDto({ state: 'SHIPPED', prUrl: url });
+  afterEach(() => {
+    clearMocks();
+    // clearMocks leaves the internals object behind, which would make later tests look like the desktop app.
+    Reflect.deleteProperty(window, '__TAURI_INTERNALS__');
+  });
+
+  it('is a plain link to a new tab in a browser', async () => {
+    server.use(...baseHandlers());
+    renderWithDaemon(<BatchStrip batch={shipped} workstreams={[]} />);
+    const link = await screen.findByRole('link', { name: 'Pull request' });
+    expect(link.getAttribute('href')).toBe(url);
+    expect(link.getAttribute('target')).toBe('_blank');
+    // Not prevented: the browser follows the link itself.
+    expect(fireEvent.click(link)).toBe(true);
+  });
+
+  it('opens in the default browser through the opener plugin in the desktop app', async () => {
+    const opened: unknown[] = [];
+    mockIPC((cmd, payload) => {
+      if (cmd === 'plugin:opener|open_url') opened.push(payload);
+    });
+    server.use(...baseHandlers());
+    renderWithDaemon(<BatchStrip batch={shipped} workstreams={[]} />);
+    // The webview would follow nothing, so the click is the opener's.
+    expect(fireEvent.click(await screen.findByRole('link', { name: 'Pull request' }))).toBe(false);
+    await waitFor(() => {
+      expect(opened).toEqual([{ url }]);
+    });
+  });
+
+  it('says why when the desktop app cannot open the link', async () => {
+    mockIPC((cmd) => {
+      // The real plugin rejects with a string, for example when the URL is outside the capability's scope.
+      if (cmd === 'plugin:opener|open_url') return Promise.reject(new Error('not allowed'));
+      return undefined;
+    });
+    server.use(...baseHandlers());
+    renderWithDaemon(<BatchStrip batch={shipped} workstreams={[]} />);
+    fireEvent.click(await screen.findByRole('link', { name: 'Pull request' }));
+    expect(await screen.findByText(`Couldn't open ${url}: not allowed`)).toBeTruthy();
   });
 });
