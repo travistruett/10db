@@ -156,6 +156,8 @@ function applyProposalVerdict(ctx: WriteContext, item: InboxItemDto, answer: Inb
 export function createInboxService(deps: {
   readonly state: StateStore;
   onParkedAnswer(target: InboxTarget, item: InboxItemDto): void;
+  /** Acts on an open flag card's answer before it is recorded; throwing keeps the card open. */
+  onFlagAnswer?(item: InboxItemDto, answer: InboxAnswer): void;
 }): InboxService {
   const waiters = new Map<InboxItemId, Map<SessionId, Waiter>>();
 
@@ -234,6 +236,9 @@ export function createInboxService(deps: {
 
     answer(id, raw) {
       const answer = InboxAnswer.parse(raw);
+      const current = getInboxItem(deps.state.db, id);
+      if (current.kind === InboxKind.Flag && current.state === InboxState.Open)
+        deps.onFlagAnswer?.(current, answer);
       const answered = deps.state.write((ctx) => {
         const item = getInboxItem(ctx.tx, id);
         if (item.state !== InboxState.Open) {

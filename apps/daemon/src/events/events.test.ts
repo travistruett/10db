@@ -22,14 +22,14 @@ describe('StateStore', () => {
     bus.subscribe((e) => seen.push(e));
     const state = createStateStore(store, bus);
     state.write((ctx) => insertProject(ctx, projectInput('one')));
-    expect(seen.map((e) => e.type)).toEqual(['project.created']);
+    expect(seen.map((e) => e.type)).toEqual(['project.created', 'board_column.saved']);
     expect(() =>
       state.write((ctx) => {
         insertProject(ctx, projectInput('two'));
         throw new Error('rollback');
       }),
     ).toThrow('rollback');
-    expect(seen).toHaveLength(1);
+    expect(seen).toHaveLength(2);
   });
 
   it('keeps delivering to other listeners when one throws, and reports the error', () => {
@@ -44,7 +44,8 @@ describe('StateStore', () => {
     state.write((ctx) => insertProject(ctx, projectInput('three')));
     unsubscribe();
     state.write((ctx) => insertProject(ctx, projectInput('four')));
-    expect(seen).toHaveLength(1);
-    expect(errors).toHaveLength(2);
+    // Each project announces itself and its Icebox column.
+    expect(seen).toHaveLength(2);
+    expect(errors).toHaveLength(4);
   });
 });

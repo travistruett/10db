@@ -42,7 +42,10 @@
         "model_profile.saved",
         "benchmarks.synced",
         "project.changed",
-        "step.changed"
+        "step.changed",
+        "batch.updated",
+        "board_column.saved",
+        "board_column.deleted"
       ]
     },
     "entityType": {

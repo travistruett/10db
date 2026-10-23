@@ -1,5 +1,13 @@
 import { z } from 'zod';
+import { BatchDto, BatchStartInput, ProjectViewDto, TaskStartResult } from './batches';
 import { AaModelDto, BenchmarkStatusDto } from './benchmarks';
+import {
+  BoardColumnDelete,
+  BoardColumnDto,
+  BoardColumnInput,
+  BoardColumnPatch,
+  TaskMove,
+} from './board';
 import {
   InboxItemDto,
   ProjectDto,
@@ -14,6 +22,7 @@ import { HandoffInput } from './handoff';
 import { HealthResponse } from './health';
 import { McpToolInputs, McpToolName, McpToolOutputs } from './mcp-tools';
 import { ModelProfileDto, ModelProfilePatch } from './model-profiles';
+import { PickerProposalDto } from './picker';
 import { StepPlanDto } from './steps';
 import {
   PersonaDto,
@@ -47,6 +56,10 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'health-response': HealthResponse,
   'daemon-event': DaemonEvent,
   'handoff-input': HandoffInput,
+  'batch-dto': BatchDto,
+  'batch-start-input': BatchStartInput,
+  'project-view-dto': ProjectViewDto,
+  'task-start-result': TaskStartResult,
   'project-dto': ProjectDto,
   'task-dto': TaskDto,
   'project-patch': ProjectPatch,
@@ -61,11 +74,17 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'mcp-server-status-dto': McpServerStatusDto,
   'aa-model-dto': AaModelDto,
   'benchmark-status-dto': BenchmarkStatusDto,
+  'board-column-delete': BoardColumnDelete,
+  'board-column-dto': BoardColumnDto,
+  'board-column-input': BoardColumnInput,
+  'board-column-patch': BoardColumnPatch,
+  'task-move': TaskMove,
   'flow-dto': FlowDto,
   'flow-input': FlowInput,
   'flow-patch': FlowPatch,
   'model-profile-dto': ModelProfileDto,
   'model-profile-patch': ModelProfilePatch,
+  'picker-proposal-dto': PickerProposalDto,
   'person-dto': PersonDto,
   'person-input': PersonInput,
   'persona-dto': PersonaDto,

@@ -1,4 +1,10 @@
 import {
+  BatchId,
+  BatchStartInput,
+  BoardColumnDelete,
+  BoardColumnId,
+  BoardColumnInput,
+  BoardColumnPatch,
   DomainError,
   EventsHead,
   FlowId,
@@ -15,6 +21,7 @@ import {
   PersonaInput,
   PersonaPatch,
   PersonInput,
+  PickSize,
   ProjectId,
   ProjectInput,
   ProjectPatch,
@@ -23,6 +30,7 @@ import {
   SystemCheckDto,
   TaskId,
   TaskInput,
+  TaskMove,
   TaskPatch,
   TeamInput,
   WorkstreamId,
@@ -126,6 +134,21 @@ export function createApp(deps: ApiDeps) {
     .post('/projects/:projectId/mcp-servers/review', (c) =>
       c.json(deps.services.reviewProjectMcp(ProjectId.parse(c.req.param('projectId')))),
     )
+    .post(
+      '/projects/:projectId/batches',
+      validator('json', (value): BatchStartInput => BatchStartInput.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.startBatch(ProjectId.parse(c.req.param('projectId')), c.req.valid('json')),
+          202,
+        ),
+    )
+    .post('/batches/:batchId/ship', (c) =>
+      c.json(deps.services.shipBatch(BatchId.parse(c.req.param('batchId')))),
+    )
+    .post('/batches/:batchId/abandon', (c) =>
+      c.json(deps.services.abandonBatch(BatchId.parse(c.req.param('batchId')))),
+    )
     .get('/flows', (c) => c.json(deps.services.listFlows()))
     .patch(
       '/projects/:projectId',
@@ -160,6 +183,19 @@ export function createApp(deps: ApiDeps) {
           deps.services.setRoutingRules(
             ProjectId.parse(c.req.param('projectId')),
             c.req.valid('json'),
+          ),
+        ),
+    )
+    .get(
+      '/projects/:projectId/candidates',
+      validator('query', (query): { size?: string } =>
+        typeof query['size'] === 'string' ? { size: query['size'] } : {},
+      ),
+      (c) =>
+        c.json(
+          deps.services.proposeCandidates(
+            ProjectId.parse(c.req.param('projectId')),
+            PickSize.parse(c.req.valid('query').size),
           ),
         ),
     )
@@ -218,12 +254,62 @@ export function createApp(deps: ApiDeps) {
       (c) =>
         c.json(deps.services.patchTask(TaskId.parse(c.req.param('taskId')), c.req.valid('json'))),
     )
+    .post(
+      '/tasks/:taskId/move',
+      validator('json', (value): TaskMove => TaskMove.parse(value)),
+      (c) =>
+        c.json(deps.services.moveTask(TaskId.parse(c.req.param('taskId')), c.req.valid('json'))),
+    )
+    .get('/projects/:projectId/board-columns', (c) =>
+      c.json(deps.services.listBoardColumns(ProjectId.parse(c.req.param('projectId')))),
+    )
+    .post(
+      '/projects/:projectId/board-columns',
+      validator('json', (value): BoardColumnInput => BoardColumnInput.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.createBoardColumn(
+            ProjectId.parse(c.req.param('projectId')),
+            c.req.valid('json'),
+          ),
+          201,
+        ),
+    )
+    .patch(
+      '/board-columns/:columnId',
+      validator('json', (value): BoardColumnPatch => BoardColumnPatch.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.patchBoardColumn(
+            BoardColumnId.parse(c.req.param('columnId')),
+            c.req.valid('json'),
+          ),
+        ),
+    )
+    .post(
+      '/board-columns/:columnId/delete',
+      validator('json', (value): BoardColumnDelete => BoardColumnDelete.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.deleteBoardColumn(
+            BoardColumnId.parse(c.req.param('columnId')),
+            c.req.valid('json'),
+          ),
+        ),
+    )
     .get('/tasks/:taskId/step-plan', (c) =>
       c.json(deps.services.stepPlan(TaskId.parse(c.req.param('taskId')))),
     )
-    .post('/tasks/:taskId/start', (c) =>
-      c.json(deps.services.startTask(TaskId.parse(c.req.param('taskId'))), 201),
-    )
+    .post('/tasks/:taskId/start', (c) => {
+      const started = deps.services.startTask(TaskId.parse(c.req.param('taskId')));
+      // A pull-request start answers before its branch is cut: 202, as a batch start does.
+      switch (started.kind) {
+        case 'workstream':
+          return c.json(started.workstream, 201);
+        case 'batch':
+          return c.json(started.batch, 202);
+      }
+    })
     .get(
       '/workstreams',
       validator('query', (query): { active?: string } =>

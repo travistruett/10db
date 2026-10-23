@@ -27,6 +27,26 @@ checklist is in [CONTRIBUTING.md](CONTRIBUTING.md#set-up).
 Working rules for people and agents are in [AGENTS.md](AGENTS.md); how to contribute is in
 [CONTRIBUTING.md](CONTRIBUTING.md).
 
+## Deliver through pull requests
+
+A project delivers `local` by default: sessions commit on whatever branch the checkout has. Choose
+**One pull request per batch** when you create the project, or later in Settings, General (10db refuses
+the change while the project has unfinished work), and 10db instead:
+
+1. cuts `10db/<title>-<id>` from `origin/<base branch>` (default `main`) when you start a task or a set of
+   tasks, provided the checkout is clean, no task runs in the project, `origin` exists and
+   [`gh`](https://cli.github.com) 2.40 or later is installed and signed in (`gh auth login`);
+2. runs the batch's tasks on that branch, and adds tasks you start while it is open;
+3. when every task is done or cancelled, runs the gate on the clean branch, pushes it and opens one pull
+   request titled `<prefix>: <batch title>`. The push runs your clone's pre-push hook, with the gate's
+   time limit (30 minutes by default); a fetch or a `gh` call gets 2 minutes. Merging stays with you.
+
+Every refusal (a dirty checkout, the wrong branch, no `origin`, `gh` missing or signed out, a failed gate, a
+rejected push) is an inbox card that says what to fix; nothing is pushed. A failed task's card offers Retry and
+Ship anyway, which ships the batch without that task once the rest is done or cancelled. The board's batch strip
+shows the batch and offers Retry (when the batch failed), Ship anyway (when a task failed) and Abandon. 10db
+never force-pushes, and agents can't push, merge or open pull requests themselves.
+
 ## Model data from Artificial Analysis
 
 10db can route each step on [Artificial Analysis](https://artificialanalysis.ai) benchmark scores, using your own free API key. Add it with `security add-generic-password -U -s 10db -a artificial-analysis-api-key -w`, which prompts for the key (`-U` replaces an existing item, so re-running it updates the key). Run it in a terminal that can prompt. Then restart 10db so it syncs; otherwise the next scheduled sync is up to 24 hours away (a sync button comes later). The data is fetched to your machine only, and is not covered by this repository's license. Source: Artificial Analysis (artificialanalysis.ai).

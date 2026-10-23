@@ -2,14 +2,34 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDecoyRepo } from './decoy-repo';
-import { createTempRepo, isolatedGitEnv, type TempDir } from './fixtures';
+import {
+  createTempClone,
+  createTempRepo,
+  createTempRepoWithOrigin,
+  isolatedGitEnv,
+  type TempDir,
+} from './fixtures';
 
 const gitIn = (repo: string, ...args: string[]) =>
   execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8', env: isolatedGitEnv() }).trim();
 
+/** A clone of a fresh origin; its cleanup removes both. */
+function cloneOfFreshOrigin(): TempDir {
+  const remote = createTempRepoWithOrigin();
+  const clone = createTempClone(remote.origin.path);
+  return {
+    path: clone.path,
+    cleanup: () => {
+      clone.cleanup();
+      remote.cleanup();
+    },
+  };
+}
+
 describe.each([
   { fixture: 'createTempRepo', create: () => createTempRepo() },
   { fixture: 'createDecoyRepo', create: () => createDecoyRepo() },
+  { fixture: 'createTempClone', create: cloneOfFreshOrigin },
 ])('a repository from $fixture', ({ create }) => {
   // Git can leave a detached `git maintenance run --auto` writing objects/maintenance.lock after a
   // commit returns, which a snapshot of .git then trips over or records as a change.
@@ -65,6 +85,58 @@ describe('createTempRepo', () => {
       expect(gitIn(path, 'config', 'user.name')).toBe('10db test');
     } finally {
       repo?.cleanup();
+      decoy.cleanup();
+    }
+  });
+});
+
+describe('createTempRepoWithOrigin', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  // A push runs receive-pack in the bare origin, and receive-pack can leave a detached `git
+  // maintenance run --auto` writing there after the push returns, which races the origin's removal.
+  it('starts no background maintenance or gc in the origin when a push lands', () => {
+    const remote = createTempRepoWithOrigin();
+    try {
+      gitIn(remote.repo.path, 'commit', '-q', '--allow-empty', '-m', 'probe');
+      const push = spawnSync('git', ['push', '-q', 'origin', 'main'], {
+        cwd: remote.repo.path,
+        env: { ...isolatedGitEnv(), GIT_TRACE: '1' },
+        encoding: 'utf8',
+      });
+      expect(push.status, push.stderr).toBe(0);
+      // receive-pack traces to the same stderr, so the check below covers the receiving side.
+      expect(push.stderr).toMatch(/built-in: git receive-pack\b/);
+      expect(push.stderr).not.toMatch(/run_command: git (maintenance|gc)\b/);
+    } finally {
+      remote.cleanup();
+    }
+  });
+
+  it('builds its own repository and origin when git hook variables point at another one', () => {
+    const decoy = createDecoyRepo();
+    let remote: ReturnType<typeof createTempRepoWithOrigin> | undefined;
+    try {
+      const before = decoy.snapshot();
+      for (const [name, value] of Object.entries(decoy.hookVariables)) vi.stubEnv(name, value);
+      let failure: unknown;
+      try {
+        remote = createTempRepoWithOrigin();
+      } catch (error) {
+        failure = error;
+      }
+      vi.unstubAllEnvs();
+
+      expect(decoy.snapshot()).toEqual(before);
+      expect(failure).toBeUndefined();
+      const repo = remote?.repo.path ?? '';
+      const origin = remote?.origin.path ?? '';
+      expect(gitIn(repo, 'remote', 'get-url', 'origin')).toBe(origin);
+      expect(gitIn(origin, 'rev-parse', 'refs/heads/main')).toBe(gitIn(repo, 'rev-parse', 'HEAD'));
+    } finally {
+      remote?.cleanup();
       decoy.cleanup();
     }
   });

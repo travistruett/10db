@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "name": {
+      "description": "At most 40 characters once invisible characters are removed, whitespace runs become one space and the ends are trimmed.",
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "required": [
+    "name"
+  ]
+}

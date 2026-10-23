@@ -4,6 +4,7 @@ import {
   mintId,
   NotFoundError,
   PROTOCOL_VERSION,
+  WorkstreamDto,
   type DaemonEvent,
 } from '@10db/contracts';
 import { defineWebSocketHelper } from 'hono/ws';
@@ -66,6 +67,15 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
     setRoutingRules: track('setRoutingRules'),
     patchTask: track('patchTask'),
     stepPlan: track('stepPlan'),
+    startBatch: track('startBatch'),
+    shipBatch: track('shipBatch'),
+    abandonBatch: track('abandonBatch'),
+    moveTask: track('moveTask'),
+    listBoardColumns: track('listBoardColumns'),
+    createBoardColumn: track('createBoardColumn'),
+    patchBoardColumn: track('patchBoardColumn'),
+    deleteBoardColumn: track('deleteBoardColumn'),
+    proposeCandidates: track('proposeCandidates'),
     ...overrides,
   };
 }
@@ -475,6 +485,233 @@ describe('team, routing and benchmark routes', () => {
     },
   ])('answers 400 for $name without calling a service', async ({ method, path, body }) => {
     const res = await app().request(path, { method, ...json, body: JSON.stringify(body) });
+    expect(res.status).toBe(400);
+    expect(reached).toEqual([]);
+  });
+});
+
+describe('batch routes', () => {
+  const batch = {
+    id: mintId('Batch'),
+    projectId: mintId('Project'),
+    title: 'Greetings',
+    state: 'CUTTING',
+    branch: null,
+    baseBranch: 'main',
+    baseSha: null,
+    repo: null,
+    prUrl: null,
+    gateExitCode: null,
+    gateLogPath: null,
+    failure: null,
+    createdAt: '2026-10-21T12:00:00.000Z',
+    updatedAt: '2026-10-21T12:00:00.000Z',
+  } as const;
+  const post = (_path: string, body?: unknown) => ({
+    method: 'POST',
+    headers: { Authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+
+  it('answers 202 with the batch for a batch start, and 400 for an empty one', async () => {
+    const services = stubServices({ startBatch: () => batch });
+    const path = `/projects/${batch.projectId}/batches`;
+    const ok = await app(services).request(
+      path,
+      post(path, { title: 'Greetings', taskIds: [mintId('Task')] }),
+    );
+    expect(ok.status).toBe(202);
+    expect(await ok.json()).toEqual(batch);
+    expect(
+      (await app(services).request(path, post(path, { title: 'x', taskIds: [] }))).status,
+    ).toBe(400);
+  });
+
+  const workstream = WorkstreamDto.parse({
+    id: mintId('Workstream'),
+    taskId: mintId('Task'),
+    projectId: batch.projectId,
+    batchId: null,
+    taskTitle: 'Alpha',
+    state: 'QUEUED',
+    nextAction: { kind: 'start' },
+    attempt: 0,
+    recoveryAttempts: 0,
+    model: 'sonnet',
+    effort: 'medium',
+    steps: [],
+    stepIndex: 0,
+    currentSessionId: null,
+    sessionCount: 0,
+    contextPct: null,
+    pausedUntil: null,
+    failureReason: null,
+    lastActivityAt: null,
+    createdAt: batch.createdAt,
+    updatedAt: batch.updatedAt,
+  });
+  it.each([
+    {
+      name: '201 with the workstream in a local project',
+      started: { kind: 'workstream', workstream },
+      status: 201,
+      body: workstream,
+    },
+    {
+      name: '202 with the batch in a pull-request project',
+      started: { kind: 'batch', batch },
+      status: 202,
+      body: batch,
+    },
+  ] as const)('answers a task start with $name', async ({ started, status, body }) => {
+    const res = await app(stubServices({ startTask: () => started })).request(
+      `/tasks/${mintId('Task')}/start`,
+      post(''),
+    );
+    expect(res.status).toBe(status);
+    expect(await res.json()).toEqual(body);
+  });
+
+  it.each([
+    { path: 'ship', service: 'shipBatch' },
+    { path: 'abandon', service: 'abandonBatch' },
+  ])(
+    'routes $path to $service, and refuses an id that is not a batch',
+    async ({ path, service }) => {
+      await app().request(`/batches/${mintId('Batch')}/${path}`, post(''));
+      expect(reached).toEqual([service]);
+      expect((await app().request(`/batches/not-a-batch/${path}`, post(''))).status).toBe(400);
+    },
+  );
+});
+
+describe('board routes', () => {
+  const taskId = mintId('Task');
+  const projectId = mintId('Project');
+  const columnId = mintId('BoardColumn');
+  it.each([
+    {
+      name: 'POST /tasks/:id/move',
+      method: 'POST',
+      path: `/tasks/${taskId}/move`,
+      body: { to: null, after: mintId('Task'), before: null },
+      service: 'moveTask',
+    },
+    {
+      name: 'GET /projects/:id/board-columns',
+      method: 'GET',
+      path: `/projects/${projectId}/board-columns`,
+      body: undefined,
+      service: 'listBoardColumns',
+    },
+    {
+      name: 'POST /projects/:id/board-columns',
+      method: 'POST',
+      path: `/projects/${projectId}/board-columns`,
+      body: { name: 'Exploring' },
+      service: 'createBoardColumn',
+    },
+    {
+      name: 'PATCH /board-columns/:id',
+      method: 'PATCH',
+      path: `/board-columns/${columnId}`,
+      body: { position: 0 },
+      service: 'patchBoardColumn',
+    },
+    {
+      name: 'POST /board-columns/:id/delete',
+      method: 'POST',
+      path: `/board-columns/${columnId}/delete`,
+      body: { moveTasksTo: 'planned' },
+      service: 'deleteBoardColumn',
+    },
+  ] as const)('routes $name to its service', async ({ method, path, body, service }) => {
+    const res = await app().request(path, {
+      method,
+      ...(body === undefined ? auth : { ...json, body: JSON.stringify(body) }),
+    });
+    expect(res.status).toBe(500);
+    expect(reached).toEqual([service]);
+  });
+
+  it.each([
+    {
+      name: 'a move between a task and itself',
+      path: `/tasks/${taskId}/move`,
+      method: 'POST',
+      body: { to: null, after: taskId, before: taskId },
+    },
+    {
+      name: 'a malformed task id',
+      path: '/tasks/nope/move',
+      method: 'POST',
+      body: { to: null, after: null, before: null },
+    },
+    {
+      name: 'an empty column name',
+      path: `/projects/${projectId}/board-columns`,
+      method: 'POST',
+      body: { name: ' ' },
+    },
+    {
+      name: 'an empty column patch',
+      path: `/board-columns/${columnId}`,
+      method: 'PATCH',
+      body: {},
+    },
+    {
+      name: 'a delete with no target',
+      path: `/board-columns/${columnId}/delete`,
+      method: 'POST',
+      body: {},
+    },
+  ])('answers 400 for $name without calling a service', async ({ path, method, body }) => {
+    const res = await app().request(path, { method, ...json, body: JSON.stringify(body) });
+    expect(res.status).toBe(400);
+    expect(reached).toEqual([]);
+  });
+
+  it('answers 409 with the message when the board changed', async () => {
+    const res = await app(
+      stubServices({
+        moveTask: () => {
+          throw new ConflictError('The board changed while you were dragging; try again');
+        },
+      }),
+    ).request(`/tasks/${taskId}/move`, {
+      method: 'POST',
+      ...json,
+      body: JSON.stringify({ to: null, after: mintId('Task'), before: mintId('Task') }),
+    });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({
+      message: 'The board changed while you were dragging; try again',
+    });
+  });
+});
+
+describe('candidate routes', () => {
+  const projectId = mintId('Project');
+  it('routes GET /projects/:id/candidates with the size to its service', async () => {
+    const seen: number[] = [];
+    const res = await app(
+      stubServices({
+        proposeCandidates: (_id, size) => {
+          seen.push(size);
+          return { projectId, size, candidates: [] };
+        },
+      }),
+    ).request(`/projects/${projectId}/candidates?size=3`, auth);
+    expect(res.status).toBe(200);
+    expect(seen).toEqual([3]);
+  });
+
+  it.each([
+    { name: 'no size', query: '' },
+    { name: 'a zero size', query: '?size=0' },
+    { name: 'a size over the maximum', query: '?size=17' },
+  ])('answers 400 for $name without calling the service', async ({ query }) => {
+    const res = await app().request(`/projects/${projectId}/candidates${query}`, auth);
     expect(res.status).toBe(400);
     expect(reached).toEqual([]);
   });
