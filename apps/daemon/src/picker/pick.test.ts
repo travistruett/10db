@@ -1,6 +1,6 @@
 import { mintId, type TaskId } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
-import { pickCandidates, type PickerTask } from './pick';
+import { pickCandidates, type PickerTask } from './index';
 
 type Spec = Partial<PickerTask> & { readonly title: string };
 function tasks(...specs: Spec[]): PickerTask[] {
@@ -91,10 +91,45 @@ describe('pickCandidates', () => {
     ]);
   });
 
+  const root = mintId('Task');
+  it.each([
+    {
+      name: 'resumed work before a longer chain earlier on the board',
+      list: tasks(
+        { title: 'root', id: root, areas: ['a'] },
+        { title: 'again', areas: ['b'], workstreamId: mintId('Workstream') },
+        { title: 'mid', boardStatus: 'backlog', dependsOn: [root] },
+      ),
+      order: [
+        ['again', true, 0],
+        ['root', false, 1],
+      ],
+    },
+    {
+      name: 'board order, not input order, between otherwise equal tasks',
+      list: tasks(
+        { title: 'y', areas: ['a'], boardOrder: 2 },
+        { title: 'x', areas: ['b'], boardOrder: 1 },
+      ),
+      order: [
+        ['x', false, 0],
+        ['y', false, 0],
+      ],
+    },
+  ])('ranks $name', ({ list, order }) => {
+    expect(run(list).map((p) => [p.title, p.resumed, p.unblocks])).toEqual(order);
+  });
+
   it.each([
     {
       name: 'an area held by active work',
       areas: ['api'],
+      opts: { held: [['api', 'Base']] } satisfies RunOptions,
+      conflict: 'Area api is held by Base, which is already running or queued',
+    },
+    {
+      name: 'its second area held by active work',
+      areas: ['ui', 'api'],
       opts: { held: [['api', 'Base']] } satisfies RunOptions,
       conflict: 'Area api is held by Base, which is already running or queued',
     },
@@ -116,16 +151,32 @@ describe('pickCandidates', () => {
     ]);
   });
 
-  it('leaves out a task that shares an area with one picked before it', () => {
-    const list = tasks(
-      { title: 'first', areas: ['api'] },
-      { title: 'second', areas: ['api', 'ui'] },
-    );
-    expect(run(list).map((p) => [p.title, p.proposed, p.conflict])).toEqual([
-      ['first', true, null],
-      ['second', false, 'Area api is shared with first, picked before it'],
-    ]);
-  });
+  it.each([
+    {
+      name: 'an area',
+      claim: 'api',
+      hazards: [],
+      conflict: 'Area api is shared with first, picked before it',
+    },
+    {
+      name: 'a hazard',
+      claim: 'deps',
+      hazards: ['deps'],
+      conflict: 'Hazard deps is shared with first, picked before it',
+    },
+  ])(
+    'leaves out a task that shares $name with one picked before it',
+    ({ claim, hazards, conflict }) => {
+      const list = tasks(
+        { title: 'first', areas: [claim] },
+        { title: 'second', areas: [claim, 'ui'] },
+      );
+      expect(run(list, { hazards }).map((p) => [p.title, p.proposed, p.conflict])).toEqual([
+        ['first', true, null],
+        ['second', false, conflict],
+      ]);
+    },
+  );
 
   it('proposes at most size tasks and leaves the rest unticked without a conflict', () => {
     const list = tasks(

@@ -1,1 +1,1 @@
-export { pickCandidates } from './pick';
+export { pickCandidates, type PickerTask } from './pick';
