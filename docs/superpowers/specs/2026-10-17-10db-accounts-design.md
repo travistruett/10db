@@ -39,7 +39,8 @@ wrong one. Examples:
 4. A metered account stops starting sessions at its monthly cap.
 5. One project's sessions can't casually read another account's credentials.
 6. A project moves to another account with work in flight, and the work carries on there from its latest
-   handoff. Near its account's usage limit it moves on its own to a fallback account the builder named.
+   handoff. Near its account's usage limit (on a Claude subscription) or at the limit itself (on any
+   account), a project with work in flight moves on its own to a fallback account the builder named.
 
 **In scope since the first draft:** moving a project between accounts with work in flight, by hand or
 automatically to a builder-named fallback account (§6).
@@ -86,7 +87,7 @@ These get numbers when they are recorded in `docs/architecture/decisions.md`.
 | **Accounts start fresh.** The schema is pre-release, with no published release and no users. On first start, the daemon seeds one `claude_subscription` account, the **default account**, labelled "Claude plan", for the builder's current login, and binds new projects to it by default. The builder can rename it. | Nothing exists to migrate (see §9). A label says what the account is; who pays is `payer`, and a company may pay for the builder's plan. |
 | An account is **shown by its label and, once recorded, its identity**: "Claude plan · you@example.com" in every picker and card option. A card's title uses the label alone. | The same label can hide two logins; the identity says which one runs. |
 | A project **moves to another account with work in flight**. A running session finishes on the account it started on; each lane's next session runs on the project's account at that moment. A lane whose next action would resume a conversation from another account starts a fresh session instead, briefed from the step's latest handoff; the builder's answer and a gate failure it was fixing still reach it. Committed work and the batch branch carry over; context neither committed nor handed off is lost. | Claude Code keeps a conversation in its account's config directory, so it can't be resumed on another account; the handoff is the continuity 10db already has. |
-| A project may name a **fallback account**. When a session reports its account's usage at or above the project's threshold (95% by default), once per crossing: with a usable fallback, the project's running lanes on that account are asked to hand off and the project moves there, with a card saying so; without one, a card asks where to move it. At the hard limit itself, a project with a usable fallback moves at once. A metered fallback needs a monthly cap. | The builder's workflow: max out the subscription, finish on Bedrock, come back. A handoff at 95% keeps context a stop at 100% would lose; only the cap bounds spend nobody approves. |
+| A project may name a **fallback account**. When a session on a subscription reports its account's usage at or above the project's threshold (95% by default), once per crossing, each project on the account with work in flight acts: with a usable fallback (ready, not paused, capped when metered), its running lanes on that account are asked to hand off and the project moves there, with a card saying so; without one, a card asks where to move it. At the hard limit itself, on any kind of account, a busy project with a usable fallback moves at once. An idle project stays. A metered fallback needs a monthly cap. Claude Code reports usage short of the limit only for subscriptions, so a keyed account moves its projects only at the hard limit. | The builder's workflow: max out the subscription, finish on Bedrock, come back. A handoff at 95% keeps context a stop at 100% would lose; only the cap bounds spend nobody approves. |
 | A project that leaves an account for its usage limit is **offered the way back**: once that limit resets, one card per project asks whether to move it back. Nothing moves until the builder answers. | Moving away for a limit is temporary, but whether to return mid-task is the builder's call. |
 
 ## 4. Data model
@@ -125,7 +126,8 @@ Other tables:
   - `fallbackAccountId`: optional; another account than its own, not archived, capped when metered;
   - `usageHandoffAt`: the share of the account's usage limit at which the project hands off, default 0.95;
   - `movedFromAccountId` and `moveBackAt`: the account the project left for its usage limit, and when that
-    limit resets, so 10db can offer the way back. Both null otherwise; any later move clears them.
+    limit resets (null when nobody reported it), so 10db can offer the way back. Both null otherwise; any
+    later move clears them.
 - `sessions` gains `accountId`, `tokensIn`, `tokensOut`, `tokensCached` and `costUsd` (null for subscriptions).
 
 Every change writes its row and its event (`AccountSaved`, `AccountCapReached`) in one transaction. The
@@ -178,16 +180,24 @@ other subscription account needs the builder's confirmation.
   flight; only an archived account is refused. An unready or paused target holds the work `QUEUED` there.
   Each lane's next session runs on the new account, fresh from its latest handoff when the conversation it
   would resume ran elsewhere (§3).
-- **The usage-limit card** offers "Continue on <account>" for each account the project could move to now (not
-  archived, not its own, not paused), plus Later.
+- **The usage-limit card** goes to every project on the account that has work in flight, not only the one
+  whose session met the limit. It offers "Continue on <account>" for each account the project could move to
+  now (not archived, not its own, not paused), plus Later. An account that isn't ready yet is offered with what
+  it still needs ("needs sign-in", "needs a secret"). A project with no work in flight gets no card; its later
+  work waits for the pause.
 - **The fallback.** When a session's rate-limit report shows its account's usage at or above a project's
-  `usageHandoffAt`, once per crossing per project and limit, the project moves to its fallback after its
-  running lanes on that account are asked to hand off, or the builder is asked where to move it. At the hard
-  limit a project with a usable fallback moves at once; the account still pauses as above. A fallback that is
-  paused, or metered without a cap, is not used without asking.
+  `usageHandoffAt`, once per crossing per project and limit, each project on that account with work in flight
+  moves to its fallback after its running lanes on the account are told to hand off (the next session starts
+  from the handoff, not the conversation), or the builder is asked where to move it. Claude Code sends that
+  report only for subscription accounts, so on a keyed account only the hard limit acts. At the hard limit a
+  busy project with a usable fallback moves at once; the account still pauses as above. A project with no
+  work in flight never moves on its own. A fallback that is paused, not yet ready, or metered without a cap is
+  not used without asking.
 - **The way back.** A project that left an account for its usage limit (from a card, by its fallback, or by a
   `PATCH` while that account was paused for its usage limit) gets one card once the limit resets: move back,
-  or stay.
+  or stay. When no reset time was reported, 10db asks after its default pause and says it doesn't know whether
+  the limit has reset; it holds the card while that account still reports usage past the project's
+  threshold.
 
 ## 7. API and Settings
 
