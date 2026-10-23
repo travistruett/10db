@@ -18,9 +18,18 @@ The UI never touches the database; it talks to the daemon over loopback HTTP and
 - The React Compiler is on; don't hand-write `useMemo`/`useCallback` for render performance.
 - Tests: Testing Library + MSW. Hit the daemon URL through MSW, never a real daemon.
 - Rust in `src-tauri/`: `cargo fmt`, `cargo clippy -- -D warnings` with pedantic lints.
+- The app icon's source is `app-icon.svg` ("10" in Geist Bold, "db" in Geist Light, outlined to paths).
+  `src-tauri/icons/` is generated from it with `pnpm --filter @10db/desktop tauri icon app-icon.svg`;
+  never edit those files by hand.
 - `pnpm --filter @10db/desktop dev:shell` runs the Tauri shell against the daemon and Vite server that
   `pnpm dev` already runs. It sets `TENDB_EXTERNAL_DAEMON=1`, which makes the shell skip its sidecar.
   Run `pnpm --filter @10db/desktop sidecar` once first: `tauri-build` checks the sidecar files exist.
 - `pnpm --filter @10db/desktop e2e` drives the Vite app in Playwright's WebKit, the WKWebView engine,
   against the real daemon on the fake adapter. It is not the Tauri window. `make live-acceptance` runs the daemon as a plain node process with the browser UI, so the Tauri window (sidecar, tray, close-to-tray, webview) has no scripted coverage and is checked by hand.
-  `make setup` installs the browser, and ports 1420 and 4318 must be free.
+  `make setup` installs the browser. Each run picks free ports for its daemon and Vite server
+  (`e2e/ports.ts`) and passes the Vite origin to the daemon as `TENDB_DEV_UI_ORIGIN`, so parallel
+  gates don't share fixed ports. The ports are probed free on 127.0.0.1 and released before the
+  servers bind them, so another process can take one in between; the run then fails at startup
+  (`reuseExistingServer: false`, Vite's `--strictPort`) rather than reaching another server. Set
+  `E2E_DAEMON_PORT` and `E2E_UI_PORT` to fix them while debugging.
+  `pnpm dev` and the Tauri shell keep Vite on 1420.
