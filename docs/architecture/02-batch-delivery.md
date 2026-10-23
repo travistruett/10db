@@ -26,14 +26,14 @@ CUTTING → OPEN → SHIPPING → SHIPPED | CLOSED | FAILED; FAILED → SHIPPING
 - A start answers at once with what the daemon can check without git or the network: `400` for a batch start in a `local` project (a task start there runs as before) or an invalid body; `404` for an unknown project or task; `409` while the project's batch is `CUTTING` or `SHIPPING`, for a task that is not open, already running or parked in a human column, and for an unfinished dependency outside the batch. The parked check runs before any git work, so a refused start never leaves a fresh branch checked out.
 - A task or batch title refuses control characters such as a newline when the task is created or edited and when a batch starts, because the title becomes the pull request's title and GitHub would refuse it only after the push.
 - The git and `gh` checks run after the answer, in a background job, one at a time per project. A new batch runs the cutting checks (no lane running in the project, a clean checkout, `origin`, a fetch of the base branch, `gh` installed and signed in, the GitHub repository, dependencies merged on the base) and then cuts `10db/<slug>-<8 hex>` from `origin/<base branch>`. A join checks the branch and the dependencies, and reopens a `FAILED` batch.
-- Each background refusal is one inbox card whose `detail.taskIds` names the refused tasks, with `detail.batchId` for a join; a refused new batch's `CUTTING` row is deleted. A joined task arrives instead as a `workstream.created` event with its `batchId`.
+- Each background refusal is one inbox card whose `detail.taskIds` names the refused tasks. A join refused for its branch, an error or a shutdown also carries `detail.batchId` (one refused for unmerged dependencies does not). A refused new batch's `CUTTING` row is deleted. A joined task arrives instead as a `workstream.created` event with its `batchId`.
 
 ## Shipping
 
 - The ship trigger moves an `OPEN` batch to `SHIPPING` when its last member settles (`DONE` or `CANCELLED`); startup runs the same check. A member is a task's latest workstream in the batch.
 - Ship anyway, on a failed member's card or on the strip, ships a batch whose members are all `DONE`, `CANCELLED` or `FAILED`. While any member still runs, waits or is queued, it is refused with the unfinished work named, in an `OPEN` or a `FAILED` batch alike, and it never reopens a batch; a refusal on the card keeps the card open.
 - Retry on a failed member's card runs that workstream again in its batch. Retry on the strip acts on a `FAILED` batch: it ships settled work and otherwise reopens the batch (`FAILED → OPEN`) so the unfinished work runs and the batch ships itself.
-- Abandon takes an `OPEN` or `FAILED` batch with no lane running, cancels its unfinished members and raises a card naming the finished tasks and the local branch that holds their code.
+- Abandon takes an `OPEN` or `FAILED` batch none of whose workstreams is running (in a lane, `TAKEN_OVER`, or `WAITING_HUMAN` with its session still live), cancels its unfinished members and raises a card naming the finished tasks and the local branch that holds their code.
 
 ## Recovery
 
