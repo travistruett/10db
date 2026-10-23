@@ -181,19 +181,38 @@ describe('shipping', () => {
       expect(onOrigin(batch.branch)).toBe(before);
   });
 
-  it('holds the batch open while a workstream failed or waits, and ships when the last one is done', async () => {
+  it.each<{
+    name: string;
+    steps: readonly (readonly ['alpha' | 'beta', 'DONE' | 'FAILED' | 'WAITING_HUMAN'])[];
+  }>([
+    {
+      name: 'one waits and then fails after the other is done',
+      steps: [
+        ['alpha', 'DONE'],
+        ['beta', 'WAITING_HUMAN'],
+        ['beta', 'FAILED'],
+      ],
+    },
+    {
+      // The last DONE fires the trigger, which finds a failed member and must hold the batch.
+      name: 'one fails before the other is the last to be done',
+      steps: [
+        ['beta', 'FAILED'],
+        ['alpha', 'DONE'],
+      ],
+    },
+  ])('holds the batch open when $name', async ({ steps }) => {
     h = createDeliveryHarness();
     const { batch, workstreams } = await openBatch('Greetings', 'Alpha', 'Beta');
     const [alpha, beta] = workstreams;
     if (!alpha || !beta) throw new Error('two workstreams expected');
     h.commit('src/api/alpha.txt');
-    h.settle(alpha.id, 'DONE');
-    h.settle(beta.id, 'WAITING_HUMAN');
-    await h.jobs.idle();
-    expect(getBatch(h.store.db, batch.id).state).toBe('OPEN');
-    h.settle(beta.id, 'FAILED');
-    await h.jobs.idle();
-    expect(getBatch(h.store.db, batch.id).state).toBe('OPEN');
+    for (const [who, to] of steps) {
+      h.settle((who === 'alpha' ? alpha : beta).id, to);
+      await h.jobs.idle();
+      expect(getBatch(h.store.db, batch.id).state).toBe('OPEN');
+    }
+    expect(h.gh.prCreates()).toEqual([]);
   });
 });
 
