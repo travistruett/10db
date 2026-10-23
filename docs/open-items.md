@@ -14,7 +14,7 @@
 - [ ] M2: per-workstream log files for the Factory detail view (spec §12; M1a has one shared daemon log, decision 31).
 - [ ] M2: diagnostics bundle export (spec §12; not built in M1a).
 - [ ] M2: project settings for extra allowed commands (test and lint), beyond the gate command.
-- [ ] Spec §8.1: reword "claims are released when the lease expires" to match decision 36 (released on DONE, CANCELLED or FAILED, never by lease expiry).
+- [x] Spec §8.1: reword "claims are released when the lease expires" to match decision 36 (released on DONE, CANCELLED or FAILED, never by lease expiry).
 - [ ] M2: let a resumed agent retrying `ask_human` with the same `opId` get the parked answer back, instead of only the "do not ask again" message.
 - [ ] M2: inject the environment into `createGit(env)` instead of reading `process.env` in `git.ts` (M1b already calls `createGit()` with no arguments).
 - [ ] Spec §5.1: "Ready" does not yet check for an open blocking inbox item.
