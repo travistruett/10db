@@ -37,9 +37,15 @@ export function isolatedGitEnv(): NodeJS.ProcessEnv {
  * Local config every test repository gets before its first commit. Without it git starts a detached
  * `git maintenance run --auto` after a commit, which goes on writing under `.git` (it holds
  * `objects/maintenance.lock`) after the command returns and races any test that reads those files.
- * Being local, it reaches every git process that touches the repository, whatever its environment.
+ * In a bare origin, receive-pack starts one after a push, and an older git's receive-pack starts
+ * `git gc --auto` instead; `receive.autogc` stops receive-pack starting either. Being local, it
+ * reaches every git process that touches the repository, whatever its environment.
  */
-export const TEST_REPO_CONFIG = { 'maintenance.auto': 'false', 'gc.auto': '0' } as const;
+export const TEST_REPO_CONFIG = {
+  'maintenance.auto': 'false',
+  'gc.auto': '0',
+  'receive.autogc': 'false',
+} as const;
 
 /** A real git repository with one commit on main, for tests that touch git or files. */
 export function createTempRepo(): TempDir {

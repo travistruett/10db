@@ -3,11 +3,43 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { parseAllDocuments } from 'yaml';
+import { z } from 'zod';
 import { createThrowawayRepo, fakeGithubToken, type ThrowawayRepo } from './fixtures';
 import { readRepoFile, repoRoot } from './workspace';
-import { readWorkflow, workflowJobNames, workflowPaths } from './workflows';
+import {
+  parseWorkflow,
+  readWorkflow,
+  WorkflowShapeError,
+  workflowJobNames,
+  workflowPaths,
+} from './workflows';
 
 const CI = '.github/workflows/ci.yml';
+
+/** The part of a pnpm-lock.yaml document that says which Playwright the desktop e2e step runs. */
+const LockfileDocument = z.object({
+  importers: z.record(
+    z.string(),
+    z.object({
+      devDependencies: z.record(z.string(), z.object({ version: z.string() })).optional(),
+    }),
+  ),
+});
+
+/** pnpm writes the lock of pnpm itself and the workspace's lock as two YAML documents in one file. */
+function lockedPlaywrightVersion(): string {
+  const versions = parseAllDocuments(readRepoFile('pnpm-lock.yaml')).map((document) => {
+    const lock = LockfileDocument.parse(document.toJS());
+    return lock.importers['apps/desktop']?.devDependencies?.['@playwright/test']?.version;
+  });
+  return versions.find((version) => version !== undefined) ?? '';
+}
+
+function gateContainer(): { image?: string | undefined; options?: string | undefined } {
+  const container = readWorkflow(CI).jobs['gate']?.container;
+  return typeof container === 'string' ? { image: container } : (container ?? {});
+}
 
 // actionlint and zizmor fail when a repository has no workflow, so the throwaway repo needs one.
 const PROBE_WORKFLOW = `name: probe
@@ -33,8 +65,36 @@ describe('CI workflow', () => {
     ]);
   });
 
-  it('skips Rust in the Ubuntu gate job, where the runner has cargo but no Tauri libraries', () => {
+  it('skips Rust in the Linux gate job, which has no Tauri build libraries', () => {
     expect(readWorkflow(CI).jobs['gate']?.env?.['GATE_SKIP_RUST']).toBe('1');
+  });
+
+  it('runs the gate in the Playwright image of the locked Playwright version, pinned by digest', () => {
+    // The image ships the browsers of one Playwright version with their system libraries, so the
+    // job downloads neither, and its browsers are found only by that same version.
+    const version = lockedPlaywrightVersion();
+    expect(version).toMatch(/^\d+\.\d+\.\d+$/);
+    const tag = `v${version.replaceAll('.', '\\.')}-noble`;
+    expect(gateContainer().image).toMatch(
+      new RegExp(`^mcr\\.microsoft\\.com/playwright:${tag}@sha256:[0-9a-f]{64}$`),
+    );
+  });
+
+  it('runs the gate as the runner user, under an init that reaps orphaned processes', () => {
+    // uid 1001 owns the checkout, and git refuses a repository another user owns; the tests'
+    // isolated git config can't carry a safe.directory exception. The recovery, gate runner and
+    // login-env tests wait for a killed grandchild to disappear, and without an init the job
+    // container's PID 1 leaves it a zombie.
+    expect(gateContainer().options).toBe('--init --user 1001');
+  });
+
+  it('bounds every job, so a stalled download fails in minutes instead of holding merges for hours', () => {
+    // GitHub's default is 360 minutes.
+    const unbounded = Object.entries(readWorkflow(CI).jobs).filter(([, job]) => {
+      const minutes = job['timeout-minutes'];
+      return minutes === undefined || minutes > 30;
+    });
+    expect(unbounded.map(([name]) => name)).toEqual([]);
   });
 
   it('re-runs every job when a PR title is edited, so policy lints the title that gets merged', () => {
@@ -65,11 +125,70 @@ describe('CI workflow', () => {
     expect(installed.sort()).toEqual(pinned.sort());
   });
 
-  it('installs with a frozen lockfile, then WebKit for the e2e step, then runs the gate', () => {
-    const text = readRepoFile(CI);
-    expect(text).toContain(
-      '      - run: pnpm install --frozen-lockfile\n      - run: pnpm --filter @10db/desktop exec playwright install --with-deps webkit\n      - run: bash scripts/gate.sh\n',
+  it('installs with a frozen lockfile, then runs the gate, downloading no browser or system package', () => {
+    expect(readRepoFile(CI)).toContain(
+      '      - run: pnpm install --frozen-lockfile\n      - run: bash scripts/gate.sh\n',
     );
+    const runs = (readWorkflow(CI).jobs['gate']?.steps ?? []).map((step) => step.run ?? '');
+    expect(runs.filter((run) => /playwright install|\bapt(-get)?\b/.test(run))).toEqual([]);
+  });
+});
+
+describe('parseWorkflow', () => {
+  const workflow = (job: string) =>
+    `on:\n  push: {}\npermissions: {}\njobs:\n  gate:\n    runs-on: ubuntu-24.04\n${job}`;
+
+  it.each([
+    {
+      name: 'a container mapping without an image',
+      job: '    container:\n      options: --init\n',
+      path: 'jobs.gate.container',
+    },
+    {
+      name: 'a container image that is not a string',
+      job: '    container:\n      image: 3\n',
+      path: 'jobs.gate.container',
+    },
+    {
+      name: 'a container given as a list',
+      job: '    container: [mcr.microsoft.com/playwright, --init]\n',
+      path: 'jobs.gate.container',
+    },
+    {
+      name: 'a timeout that is not a number',
+      job: '    timeout-minutes: soon\n',
+      path: 'jobs.gate.timeout-minutes',
+    },
+    {
+      name: 'steps that are not a list',
+      job: '    steps: run\n',
+      path: 'jobs.gate.steps',
+    },
+  ])('reports $name as a shape error at $path', ({ job, path }) => {
+    const parse = () => parseWorkflow(workflow(job), 'probe.yml');
+    expect(parse).toThrow(WorkflowShapeError);
+    // One issue, at that path: the rest of the probe is well formed.
+    expect(parse).toThrow(new RegExp(`^probe\\.yml: ${path.replaceAll('.', '\\.')}: [^;]+$`));
+  });
+
+  it('reads both container forms and keeps the keys it does not model', () => {
+    const image = parseWorkflow(workflow('    container: node:26\n'), 'probe.yml');
+    expect(image.jobs['gate']?.container).toBe('node:26');
+    const mapping = parseWorkflow(
+      workflow(
+        '    timeout-minutes: 5\n    strategy:\n      matrix:\n        token: [x]\n    container:\n      image: node:26\n      options: --init\n      credentials:\n        password: ${{ secrets.P }}\n',
+      ),
+      'probe.yml',
+    );
+    const gate = mapping.jobs['gate'];
+    expect(gate?.container).toEqual({
+      image: 'node:26',
+      options: '--init',
+      credentials: { password: '${{ secrets.P }}' },
+    });
+    expect(gate?.['timeout-minutes']).toBe(5);
+    // The secrets check reads the whole job as JSON, so an unmodeled key must survive the parse.
+    expect(JSON.stringify(gate)).toContain('"strategy"');
   });
 });
 
