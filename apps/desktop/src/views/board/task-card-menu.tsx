@@ -43,12 +43,12 @@ export function TaskCardMenu({
         {moves.map((m) => (
           <Menu.Item
             key={m.label}
-            disabled={m.target === null}
+            disabled={m.target === null || m.refusal !== null}
             onClick={() => {
-              if (m.target) onMove(m.target);
+              if (m.target && m.refusal === null) onMove(m.target);
             }}
           >
-            {m.label}
+            {m.refusal === null ? m.label : `${m.label} (${m.refusal})`}
           </Menu.Item>
         ))}
         {moves.length > 0 && canStart(task, latest) ? <Menu.Divider /> : null}

@@ -18,7 +18,7 @@ import { formatAreas } from './areas-text';
 import { BoardColumn } from './board-column';
 import { BoardDnd } from './board-dnd';
 import { boardLayout, DONE_LIMIT, type LayoutColumn } from './board-layout';
-import { menuMoves, resolveDrop } from './drop-rules';
+import { menuMoves, resolveDrop, startedDependents, type DropTarget } from './drop-rules';
 import { NewProjectForm } from './new-project-form';
 import { NewTaskForm } from './new-task-form';
 import { TaskCard } from './task-card';
@@ -50,12 +50,17 @@ interface BoardColumnsProps {
   readonly layout: readonly LayoutColumn[];
   readonly workstreamById: ReadonlyMap<WorkstreamId, WorkstreamDto>;
   readonly peers: ReadonlyMap<TaskId, Pick<TaskDto, 'title' | 'status' | 'boardColumnId'>>;
+  /** For each task, a dependent that has started and waits on it; such a task can't be parked. */
+  readonly started: ReadonlyMap<TaskId, string>;
 }
 
 /** The columns and their cards, with drag and drop; split out so the actions hook gets a project. */
-function BoardColumns({ projectId, layout, workstreamById, peers }: BoardColumnsProps) {
+function BoardColumns({ projectId, layout, workstreamById, peers, started }: BoardColumnsProps) {
   const actions = useBoardActions(projectId);
   const [showAllDone, setShowAllDone] = useState(false);
+  const drop = (taskId: TaskId, target: DropTarget) => {
+    actions.apply(resolveDrop(layout, taskId, target, started));
+  };
   return (
     <Stack>
       {actions.notice ? (
@@ -75,7 +80,7 @@ function BoardColumns({ projectId, layout, workstreamById, peers }: BoardColumns
             shown={(column) =>
               isDone(column) && !showAllDone ? column.tasks.slice(0, DONE_LIMIT) : column.tasks
             }
-            onDrop={actions.apply}
+            onDrop={drop}
             renderColumn={(column, cards, listRef) => (
               <BoardColumn
                 listRef={listRef}
@@ -112,9 +117,9 @@ function BoardColumns({ projectId, layout, workstreamById, peers }: BoardColumns
                       task={task}
                       latest={ws?.state}
                       parkedDependency={parkedDependencyOf(task, peers)}
-                      moves={menuMoves(layout, task.id)}
+                      moves={menuMoves(layout, task.id, started)}
                       onMove={(target) => {
-                        actions.apply(resolveDrop(layout, task.id, target));
+                        drop(task.id, target);
                       }}
                       onStart={() => {
                         actions.apply({ kind: 'start', taskId: task.id });
@@ -143,6 +148,7 @@ export function BoardView() {
   const layout = boardLayout(columns.data ?? [], taskList);
   const workstreamById = new Map((workstreams.data ?? []).map((ws) => [ws.id, ws]));
   const peers = new Map(taskList.map((t) => [t.id, t]));
+  const started = startedDependents(taskList, workstreamById);
 
   return (
     <Stack>
@@ -209,6 +215,7 @@ export function BoardView() {
           layout={layout}
           workstreamById={workstreamById}
           peers={peers}
+          started={started}
         />
       ) : null}
 

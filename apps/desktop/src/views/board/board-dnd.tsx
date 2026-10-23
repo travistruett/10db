@@ -1,4 +1,4 @@
-import type { TaskDto } from '@10db/contracts';
+import type { TaskDto, TaskId } from '@10db/contracts';
 import {
   closestCorners,
   DndContext,
@@ -21,7 +21,7 @@ import { ActionIcon, VisuallyHidden } from '@mantine/core';
 import { IconGripVertical } from '@tabler/icons-react';
 import type { ReactNode } from 'react';
 import { columnKeyId, type LayoutColumn } from './board-layout';
-import { dragRefusal, dropTarget, resolveDrop, type DropAction } from './drop-rules';
+import { dragRefusal, dropTarget, type DropTarget } from './drop-rules';
 
 function Handle({
   task,
@@ -115,7 +115,8 @@ export interface BoardDndProps {
   readonly layout: readonly LayoutColumn[];
   /** The cards to show per column (Done is cut to its limit). */
   readonly shown: (column: LayoutColumn) => readonly TaskDto[];
-  readonly onDrop: (action: DropAction) => void;
+  /** A card was dropped on a target; the caller resolves it with the drop rules. */
+  readonly onDrop: (taskId: TaskId, target: DropTarget) => void;
   /** Renders a column; `listRef` goes on its `<ul>`, which becomes the column's drop target. */
   readonly renderColumn: (
     column: LayoutColumn,
@@ -125,7 +126,7 @@ export interface BoardDndProps {
   readonly renderCard: (task: TaskDto, handle: ReactNode) => ReactNode;
 }
 
-/** One drag-and-drop context for the board; the drop rules decide what each drop does. */
+/** One drag-and-drop context for the board; it reports each drop and the caller's drop rules decide what it does. */
 export function BoardDnd({ layout, shown, onDrop, renderColumn, renderCard }: BoardDndProps) {
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
@@ -150,7 +151,7 @@ export function BoardDnd({ layout, shown, onDrop, renderColumn, renderCard }: Bo
     if (target === null) return;
     const taskId = layout.flatMap((c) => c.tasks).find((t) => t.id === String(active.id))?.id;
     if (taskId === undefined) return;
-    onDrop(resolveDrop(layout, taskId, target));
+    onDrop(taskId, target);
   }
   return (
     <DndContext

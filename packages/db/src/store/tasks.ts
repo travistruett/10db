@@ -241,6 +241,26 @@ export function moveTask(ctx: WriteContext, id: TaskId, move: TaskMove): TaskDto
     );
   if (to !== null && getBoardColumn(ctx.tx, to).projectId !== task.projectId)
     throw new InvalidError('The column must belong to the same project');
+  if (to !== null) {
+    // A parked task never finishes, so a dependent that has already started would stay queued for ever.
+    const started = ctx.tx
+      .select({ title: schema.tasks.title })
+      .from(schema.taskDeps)
+      .innerJoin(schema.tasks, eq(schema.tasks.id, schema.taskDeps.taskId))
+      .innerJoin(schema.workstreams, eq(schema.workstreams.taskId, schema.taskDeps.taskId))
+      .where(
+        and(
+          eq(schema.taskDeps.dependsOnId, id),
+          inArray(schema.workstreams.state, [...ACTIVE_STATES]),
+        ),
+      )
+      .orderBy(asc(schema.tasks.boardOrder))
+      .get();
+    if (started)
+      throw new ConflictError(
+        `Task ${started.title} waits on ${task.title} and has started; ${task.title} can't be parked until ${started.title} finishes`,
+      );
+  }
   const orderOf = (neighbour: TaskId | null): number | null => {
     if (neighbour === null) return null;
     if (neighbour === id) throw new InvalidError('A task cannot be its own neighbour');

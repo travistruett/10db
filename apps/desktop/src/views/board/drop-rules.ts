@@ -1,10 +1,13 @@
 import {
+  ACTIVE_STATES,
   BoardStatus,
   SYSTEM_COLUMN_LABEL,
   type BoardColumnId,
   type TaskDto,
   type TaskId,
   type TaskMove,
+  type WorkstreamDto,
+  type WorkstreamId,
 } from '@10db/contracts';
 import { columnKeyId, sameColumn, type ColumnKey, type LayoutColumn } from './board-layout';
 
@@ -30,6 +33,30 @@ export interface MenuMove {
   readonly label: string;
   /** Null when the move would do nothing. */
   readonly target: DropTarget | null;
+  /** Why the move is refused; null when it is allowed. */
+  readonly refusal: string | null;
+}
+
+/**
+ * For each task, the title of a dependent that has started (its latest workstream is queued or further,
+ * and not finished). The daemon refuses to park such a task: parked, it never finishes and the dependent
+ * would stay queued for ever.
+ */
+export function startedDependents(
+  tasks: readonly TaskDto[],
+  workstreams: ReadonlyMap<WorkstreamId, Pick<WorkstreamDto, 'state'>>,
+): Map<TaskId, string> {
+  const held = new Map<TaskId, string>();
+  for (const task of tasks) {
+    const state = task.workstreamId ? workstreams.get(task.workstreamId)?.state : undefined;
+    if (state === undefined || !ACTIVE_STATES.includes(state)) continue;
+    for (const id of task.dependsOn) if (!held.has(id)) held.set(id, task.title);
+  }
+  return held;
+}
+
+function parkRefusal(task: TaskDto, dependent: string): string {
+  return `${dependent} has started and waits on ${task.title}; park it once ${dependent} finishes`;
 }
 
 const LOCKED_DROP = 'Blocked and Done follow the task’s state; cards can’t be dropped there';
@@ -92,18 +119,26 @@ function place(
   };
 }
 
-/** The board's drag rules: free among human columns and planned work, a start into In progress, nothing else. */
+/**
+ * The board's drag rules: free among human columns and planned work, a start into In progress, nothing
+ * else. `started` is `startedDependents` for the board's tasks.
+ */
 export function resolveDrop(
   layout: readonly LayoutColumn[],
   taskId: TaskId,
   to: DropTarget,
+  started: ReadonlyMap<TaskId, string>,
 ): DropAction {
   const found = locate(layout, taskId);
   if (!found) return { kind: 'none' };
   const { column, index, task } = found;
   const refusal = dragRefusal(column.key);
   if (refusal) return { kind: 'refuse', reason: refusal };
-  if (to.key.kind === 'human') return place(layout, task, column.key, index, to, to.key.id, null);
+  if (to.key.kind === 'human') {
+    const dependent = started.get(task.id);
+    if (dependent !== undefined) return { kind: 'refuse', reason: parkRefusal(task, dependent) };
+    return place(layout, task, column.key, index, to, to.key.id, null);
+  }
   switch (to.key.status) {
     case BoardStatus.InProgress:
       if (column.key.kind === 'human')
@@ -150,10 +185,18 @@ export function dropTarget(
 }
 
 /** The card menu's moves: the same rules as a drag, without a pointer (WCAG 2.2 SC 2.5.7). */
-export function menuMoves(layout: readonly LayoutColumn[], taskId: TaskId): MenuMove[] {
+export function menuMoves(
+  layout: readonly LayoutColumn[],
+  taskId: TaskId,
+  started: ReadonlyMap<TaskId, string>,
+): MenuMove[] {
   const found = locate(layout, taskId);
   if (!found || dragRefusal(found.column.key)) return [];
   const { column, index, task } = found;
+  const dependent = started.get(task.id);
+  // Every move into a human column parks the task, a reorder inside one included.
+  const refusalFor = (key: ColumnKey): string | null =>
+    key.kind === 'human' && dependent !== undefined ? parkRefusal(task, dependent) : null;
   const last = column.tasks.length - 1;
   const at = (i: number): DropTarget | null => (i === index ? null : { key: column.key, index: i });
   const moves: MenuMove[] = [
@@ -161,10 +204,14 @@ export function menuMoves(layout: readonly LayoutColumn[], taskId: TaskId): Menu
     { label: 'Move up', target: index > 0 ? at(index - 1) : null },
     { label: 'Move down', target: index < last ? at(index + 1) : null },
     { label: 'Move to bottom', target: at(last) },
-  ];
+  ].map((m) => ({ ...m, refusal: refusalFor(column.key) }));
   for (const other of layout) {
     if (other.key.kind !== 'human' || sameColumn(other.key, column.key)) continue;
-    moves.push({ label: `Move to ${other.label}`, target: { key: other.key, index: 0 } });
+    moves.push({
+      label: `Move to ${other.label}`,
+      target: { key: other.key, index: 0 },
+      refusal: refusalFor(other.key),
+    });
   }
   if (column.key.kind === 'human') {
     const status =
@@ -172,6 +219,7 @@ export function menuMoves(layout: readonly LayoutColumn[], taskId: TaskId): Menu
     moves.push({
       label: `Move to ${SYSTEM_COLUMN_LABEL[status]}`,
       target: { key: { kind: 'system', status }, index: 0 },
+      refusal: null,
     });
   }
   return moves;

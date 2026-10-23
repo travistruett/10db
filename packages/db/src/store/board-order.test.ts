@@ -248,6 +248,46 @@ describe('a dependency parked in a human column', () => {
     const e = dependent();
     expect(() => store.write((ctx) => insertWorkstream(ctx, e.id))).not.toThrow();
   });
+
+  const PARK_REFUSAL = "Task e waits on a and has started; a can't be parked until e finishes";
+  it.each([
+    { name: 'refuses to park it under a queued dependent', path: [], to: 'icebox', refusal: true },
+    {
+      name: 'refuses to park it under a running dependent',
+      path: ['STARTING', 'RUNNING'],
+      to: 'icebox',
+      refusal: true,
+    },
+    {
+      name: 'parks it under a finished dependent',
+      path: ['STARTING', 'RUNNING', 'VERIFYING', 'DONE'],
+      to: 'icebox',
+      refusal: false,
+    },
+    {
+      name: 'reorders it among planned work under a queued dependent',
+      path: [],
+      to: 'planned',
+      refusal: false,
+    },
+  ] as const)('$name', ({ path, to, refusal }) => {
+    const e = dependent();
+    const ws = store.write((ctx) => insertWorkstream(ctx, e.id)).value;
+    for (const state of path)
+      store.write((ctx) => transitionWorkstream(ctx, ws.id, { to: state, fence: null }));
+    const move: TaskMove =
+      to === 'icebox'
+        ? { to: icebox, after: null, before: null }
+        : { to: null, after: tasks.b.id, before: tasks.c.id };
+    const park = () => store.write((ctx) => moveTask(ctx, tasks.a.id, move));
+    if (refusal) {
+      expect(park).toThrow(ConflictError);
+      expect(park).toThrow(PARK_REFUSAL);
+      expect(getTask(store.db, tasks.a.id).boardColumnId).toBeNull();
+    } else {
+      expect(park().value.boardColumnId).toBe(move.to);
+    }
+  });
 });
 
 describe('parked tasks', () => {
