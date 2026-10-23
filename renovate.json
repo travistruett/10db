@@ -43,7 +43,7 @@
       "groupName": "GitHub Actions"
     },
     {
-      "description": "The CI gate job's container image ships the browsers of one Playwright version; bump it with the npm packages. After the GitHub Actions rule, which also matches the image.",
+      "description": "The CI gate job's container image ships the browsers of one Playwright version. This group moves it with @playwright/test on a major bump only: the later non-major rule renames the group for minor, patch and digest updates, and its weekly PR carries both. tests/repo/src/ci.test.ts fails a split. After the GitHub Actions rule, which also matches the image.",
       "matchPackageNames": ["@playwright/test", "mcr.microsoft.com/playwright"],
       "groupName": "Playwright"
     },

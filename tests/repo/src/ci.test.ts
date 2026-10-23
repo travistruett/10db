@@ -7,7 +7,13 @@ import { parseAllDocuments } from 'yaml';
 import { z } from 'zod';
 import { createThrowawayRepo, fakeGithubToken, type ThrowawayRepo } from './fixtures';
 import { readRepoFile, repoRoot } from './workspace';
-import { readWorkflow, workflowJobNames, workflowPaths } from './workflows';
+import {
+  parseWorkflow,
+  readWorkflow,
+  WorkflowShapeError,
+  workflowJobNames,
+  workflowPaths,
+} from './workflows';
 
 const CI = '.github/workflows/ci.yml';
 
@@ -30,7 +36,7 @@ function lockedPlaywrightVersion(): string {
   return versions.find((version) => version !== undefined) ?? '';
 }
 
-function gateContainer(): { image?: string; options?: string } {
+function gateContainer(): { image?: string | undefined; options?: string | undefined } {
   const container = readWorkflow(CI).jobs['gate']?.container;
   return typeof container === 'string' ? { image: container } : (container ?? {});
 }
@@ -125,6 +131,64 @@ describe('CI workflow', () => {
     );
     const runs = (readWorkflow(CI).jobs['gate']?.steps ?? []).map((step) => step.run ?? '');
     expect(runs.filter((run) => /playwright install|\bapt(-get)?\b/.test(run))).toEqual([]);
+  });
+});
+
+describe('parseWorkflow', () => {
+  const workflow = (job: string) =>
+    `on:\n  push: {}\npermissions: {}\njobs:\n  gate:\n    runs-on: ubuntu-24.04\n${job}`;
+
+  it.each([
+    {
+      name: 'a container mapping without an image',
+      job: '    container:\n      options: --init\n',
+      path: 'jobs.gate.container',
+    },
+    {
+      name: 'a container image that is not a string',
+      job: '    container:\n      image: 3\n',
+      path: 'jobs.gate.container',
+    },
+    {
+      name: 'a container given as a list',
+      job: '    container: [mcr.microsoft.com/playwright, --init]\n',
+      path: 'jobs.gate.container',
+    },
+    {
+      name: 'a timeout that is not a number',
+      job: '    timeout-minutes: soon\n',
+      path: 'jobs.gate.timeout-minutes',
+    },
+    {
+      name: 'steps that are not a list',
+      job: '    steps: run\n',
+      path: 'jobs.gate.steps',
+    },
+  ])('reports $name as a shape error at $path', ({ job, path }) => {
+    const parse = () => parseWorkflow(workflow(job), 'probe.yml');
+    expect(parse).toThrow(WorkflowShapeError);
+    // One issue, at that path: the rest of the probe is well formed.
+    expect(parse).toThrow(new RegExp(`^probe\\.yml: ${path.replaceAll('.', '\\.')}: [^;]+$`));
+  });
+
+  it('reads both container forms and keeps the keys it does not model', () => {
+    const image = parseWorkflow(workflow('    container: node:26\n'), 'probe.yml');
+    expect(image.jobs['gate']?.container).toBe('node:26');
+    const mapping = parseWorkflow(
+      workflow(
+        '    timeout-minutes: 5\n    strategy:\n      matrix:\n        token: [x]\n    container:\n      image: node:26\n      options: --init\n      credentials:\n        password: ${{ secrets.P }}\n',
+      ),
+      'probe.yml',
+    );
+    const gate = mapping.jobs['gate'];
+    expect(gate?.container).toEqual({
+      image: 'node:26',
+      options: '--init',
+      credentials: { password: '${{ secrets.P }}' },
+    });
+    expect(gate?.['timeout-minutes']).toBe(5);
+    // The secrets check reads the whole job as JSON, so an unmodeled key must survive the parse.
+    expect(JSON.stringify(gate)).toContain('"strategy"');
   });
 });
 
