@@ -124,7 +124,8 @@ Other tables:
 - `projects` gains `accountId`, which replaces `billingMode`. A project's provider is its account kind's
   provider. It also gains:
   - `fallbackAccountId`: optional; another account than its own, not archived, capped when metered;
-  - `usageHandoffAt`: the share of the account's usage limit at which the project hands off, default 0.95;
+  - `usageHandoffAt`: the share of the account's usage limit at which the project hands off, default 0.95,
+    from 0.5 to 0.99;
   - `movedFromAccountId` and `moveBackAt`: the account the project left for its usage limit, and when that
     limit resets (null when nobody reported it), so 10db can offer the way back. Both null otherwise; any
     later move clears them.
@@ -183,8 +184,9 @@ other subscription account needs the builder's confirmation.
 - **The usage-limit card** goes to every project on the account that has work in flight, not only the one
   whose session met the limit. It offers "Continue on <account>" for each account the project could move to
   now (not archived, not its own, not paused), plus Later. An account that isn't ready yet is offered with what
-  it still needs ("needs sign-in", "needs a secret"). A project with no work in flight gets no card; its later
-  work waits for the pause.
+  it still needs ("needs sign-in", "needs a secret"). A project with no work in flight when the limit hits
+  gets its card the first time its later work waits on the pause, once per pause: answering Later keeps it
+  quiet until the next pause.
 - **The fallback.** When a session's rate-limit report shows its account's usage at or above a project's
   `usageHandoffAt`, once per crossing per project and limit, each project on that account with work in flight
   moves to its fallback after its running lanes on the account are told to hand off (the next session starts
@@ -215,7 +217,8 @@ Every body is parsed by zod.
 
 **Settings (M2b).** An Accounts screen lists each account with its kind, its verified identity, and this
 month's usage against its cap. It shows the sign-in steps for subscriptions. Project settings get an account
-picker and a fallback picker. Every picker shows an account's identity beside its label.
+picker, a fallback picker and a "Hand off at" field (the project's usage threshold, 50–99%, which applies
+only on a Claude subscription account). Every picker shows an account's identity beside its label.
 
 ## 8. Testing
 
