@@ -72,6 +72,11 @@ export function createThrowawayRepo(prefix: string): ThrowawayRepo {
     execFileSync('git', args, { cwd: dir, env, stdio: 'ignore' });
   };
   git('init', '-q', '-b', 'feat/x');
+  // Without these git starts a detached `git maintenance run --auto` after a commit, which goes on
+  // writing under `.git` (it holds `objects/maintenance.lock`) after the command returns and races
+  // a test that snapshots the repository. Local config reaches every git process run here.
+  git('config', 'maintenance.auto', 'false');
+  git('config', 'gc.auto', '0');
   // A local identity, because the global config is ignored and a bare `git commit` needs one.
   git('config', 'user.name', 't');
   git('config', 'user.email', 't@example.com');
