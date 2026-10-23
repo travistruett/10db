@@ -561,7 +561,7 @@ describe('startDaemon', () => {
     }
   });
 
-  it('answers 404 for an unknown project on team and routing-rule routes and 201 on creates', async () => {
+  it('answers 404 for an unknown project on team, routing-rule and candidate routes and 201 on creates', async () => {
     daemon = await startDaemon({
       dataDir: dir.path,
       port: 0,
@@ -594,6 +594,7 @@ describe('startDaemon', () => {
       const head = await api.get('/events/head', EventsHead);
       expect(await send('GET', `/projects/${ghost}/team`)).toBe(404);
       expect(await send('GET', `/projects/${ghost}/routing-rules`)).toBe(404);
+      expect(await send('GET', `/projects/${ghost}/candidates?size=1`)).toBe(404);
       expect(await send('PUT', `/projects/${ghost}/team`, { bindings: [], members: [] })).toBe(404);
       expect(
         await send('PUT', `/projects/${project.id}/team`, {
