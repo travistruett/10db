@@ -25,6 +25,11 @@ function git(...args: string[]): void {
 
 writeFileSync(join(E2E_REPO, 'src', 'greeting', '.gitkeep'), '');
 git('init', '-b', 'main');
+// Every test repository sets these two keys (.claude/rules/testing.md); daemon test code is not
+// importable from here. Without them git leaves a detached `git maintenance run --auto` writing
+// under `.git` after a commit returns, which races the next run's removal of this directory.
+git('config', 'maintenance.auto', 'false');
+git('config', 'gc.auto', '0');
 git('config', 'user.email', 'e2e@10db.invalid');
 git('config', 'user.name', '10db e2e');
 git('config', 'commit.gpgsign', 'false');

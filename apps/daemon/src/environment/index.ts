@@ -8,4 +8,11 @@ export {
   SessionEnvError,
   type SecretSource,
 } from './session-env';
-export { findOnPath, probeVersion, REQUIRED_TOOLS, systemCheck } from './system-check';
+export { buildNetworkEnv } from './network-env';
+export {
+  findOnPath,
+  markGhRequired,
+  probeVersion,
+  REQUIRED_TOOLS,
+  systemCheck,
+} from './system-check';

@@ -5,6 +5,7 @@ import {
   requestPermission,
   sendNotification,
 } from '@tauri-apps/plugin-notification';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import { mcpReview } from '../views/inbox/mcp-approval';
 
 export interface TrayCounts {
@@ -16,6 +17,14 @@ export interface TrayCounts {
 /** True inside the Tauri webview; false in a plain browser (Vite dev, Playwright, tests). */
 export function isTauri(): boolean {
   return '__TAURI_INTERNALS__' in window;
+}
+
+/**
+ * Opens a web page in the default browser, for the desktop app, whose webview follows no
+ * `target="_blank"` link. The capability allows only `https://github.com/*`.
+ */
+export function openInBrowser(url: string): Promise<void> {
+  return openUrl(url);
 }
 
 /** Mirrors lanes, open cards and keep-awake into the menu bar. A no-op in a browser. */

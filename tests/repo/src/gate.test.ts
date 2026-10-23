@@ -1,9 +1,15 @@
-import { execFileSync, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { chmodSync, globSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createThrowawayRepo, envWithoutGitVariables, type ThrowawayRepo } from './fixtures';
+import {
+  createBareRepo,
+  createThrowawayRepo,
+  envWithoutGitVariables,
+  type BareRepo,
+  type ThrowawayRepo,
+} from './fixtures';
 import { readRepoFile, repoRoot } from './workspace';
 
 // /bin/bash, not bash from PATH: macOS ships bash 3.2 there, and every script must run on it.
@@ -90,7 +96,7 @@ describe('scripts/gate.sh', () => {
 });
 
 describe('scripts/check.sh', () => {
-  let bare: string | undefined;
+  let bare: BareRepo | undefined;
   let repo: ThrowawayRepo;
 
   // A repository whose `main` holds the base commit; `feat/x` is checked out with a passing probe.
@@ -110,7 +116,7 @@ describe('scripts/check.sh', () => {
 
   afterEach(() => {
     repo.remove();
-    if (bare !== undefined) rmSync(bare, { recursive: true, force: true });
+    bare?.remove();
     bare = undefined;
   });
 
@@ -152,11 +158,10 @@ describe('scripts/check.sh', () => {
   });
 
   it('measures from the upstream branch, so already pushed commits are not re-checked', () => {
-    bare = mkdtempSync(join(tmpdir(), '10db-check-remote-'));
-    execFileSync('git', ['init', '-q', '--bare', bare], { env: repo.env });
+    bare = createBareRepo('10db-check-remote');
     repo.stage('broken.test.js', "it('fails', () => { throw new Error('pushed failure'); });\n");
     repo.commit('test(repo): add a failing test');
-    repo.git('remote', 'add', 'origin', bare);
+    repo.git('remote', 'add', 'origin', bare.dir);
     repo.git('push', '-q', '-u', 'origin', 'feat/x');
     repo.stage('fine.test.js', "it('also passes', () => {});\n");
     repo.commit('test(repo): add a passing test');

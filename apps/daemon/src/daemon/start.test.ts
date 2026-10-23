@@ -2,12 +2,14 @@ import { existsSync, fstatSync, readdirSync, statSync, writeFileSync } from 'nod
 import { join } from 'node:path';
 import {
   BenchmarkStatusDto,
+  BoardColumnDto,
   EventsHead,
   KeepAwakeStatus,
   McpServerStatusDto,
   mintId,
   ModelProfileDto,
   PersonaDto,
+  PickerProposalDto,
   ProjectDto,
   StepPlanDto,
   TaskDto,
@@ -215,6 +217,36 @@ describe('startDaemon', () => {
       spawned.push(pid);
       return { stop: () => undefined, exited: new Promise<void>(() => undefined) };
     };
+
+  it.each([
+    { name: 'the built-in origins', allowedOrigins: undefined, base: 'http://localhost:1420' },
+    {
+      name: 'the origins it is given',
+      allowedOrigins: ['http://localhost:3000'],
+      base: 'http://localhost:3000',
+    },
+  ])(
+    'lets a dev UI origin through CORS beside $name, and no other',
+    async ({ allowedOrigins, base }) => {
+      const running = await startDaemon({
+        dataDir: dir.path,
+        port: 0,
+        adapter: new FakeAdapter({}),
+        logLevel: 'warn',
+        ...(allowedOrigins ? { allowedOrigins } : {}),
+        devUiOrigin: 'http://localhost:51234',
+        ...QUIET,
+      });
+      daemon = running;
+      const allowedOrigin = async (origin: string): Promise<string | null> =>
+        (await fetch(`${running.url}/health`, { headers: { Origin: origin } })).headers.get(
+          'access-control-allow-origin',
+        );
+      expect(await allowedOrigin('http://localhost:51234')).toBe('http://localhost:51234');
+      expect(await allowedOrigin(base)).toBe(base);
+      expect(await allowedOrigin('http://localhost:51235')).toBeNull();
+    },
+  );
 
   it('honors a fixed dev token and serves keep-awake, the event head and the system check', async () => {
     const token = 'd'.repeat(43);
@@ -455,7 +487,111 @@ describe('startDaemon', () => {
     }
   });
 
-  it('answers 404 for an unknown project on team and routing-rule routes and 201 on creates', async () => {
+  it('gives a project Icebox, parks a task in it, refuses to start it, and plans it again', async () => {
+    const repo = createTempRepo();
+    try {
+      daemon = await startDaemon({
+        dataDir: dir.path,
+        port: 0,
+        adapter: new FakeAdapter({}),
+        logLevel: 'warn',
+        ...QUIET,
+      });
+      const api = apiClient(daemon.url, daemon.token);
+      const project = await api.post('/projects', ProjectDto, {
+        name: 'demo',
+        repoPath: repo.path,
+        gateCommand: 'true',
+        areas: [{ name: 'src', globs: ['src/**'] }],
+      });
+      const [icebox] = await api.get(
+        `/projects/${project.id}/board-columns`,
+        z.array(BoardColumnDto),
+      );
+      expect(icebox?.name).toBe('Icebox');
+      if (!icebox) throw new Error('no Icebox');
+      const add = (title: string) =>
+        api.post(`/projects/${project.id}/tasks`, TaskDto, {
+          title,
+          acceptanceCriteria: ['x'],
+          areas: ['src'],
+        });
+      const first = await add('first');
+      const second = await add('second');
+      await api.post(`/tasks/${second.id}/move`, TaskDto, {
+        to: null,
+        after: null,
+        before: first.id,
+      });
+      expect(
+        (await api.get(`/projects/${project.id}/tasks`, z.array(TaskDto))).map((t) => t.title),
+      ).toEqual(['second', 'first']);
+      const parked = await api.post(`/tasks/${first.id}/move`, TaskDto, {
+        to: icebox.id,
+        after: null,
+        before: null,
+      });
+      expect(parked.boardColumnId).toBe(icebox.id);
+      await expect(api.post(`/tasks/${first.id}/start`, WorkstreamDto)).rejects.toThrow('-> 409');
+      const exploring = await api.post(`/projects/${project.id}/board-columns`, BoardColumnDto, {
+        name: 'Exploring',
+      });
+      const columns = await api.post(
+        `/board-columns/${icebox.id}/delete`,
+        z.array(BoardColumnDto),
+        {
+          moveTasksTo: exploring.id,
+        },
+      );
+      expect(columns.map((c) => c.name)).toEqual(['Exploring']);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it('proposes one ready task per area for the approval sheet', async () => {
+    const repo = createTempRepo();
+    try {
+      daemon = await startDaemon({
+        dataDir: dir.path,
+        port: 0,
+        adapter: new FakeAdapter({}),
+        logLevel: 'warn',
+        ...QUIET,
+      });
+      const api = apiClient(daemon.url, daemon.token);
+      const project = await api.post('/projects', ProjectDto, {
+        name: 'demo',
+        repoPath: repo.path,
+        gateCommand: 'true',
+        areas: [
+          { name: 'src', globs: ['src/**'] },
+          { name: 'docs', globs: ['docs/**'] },
+        ],
+      });
+      for (const [title, area] of [
+        ['code', 'src'],
+        ['words', 'docs'],
+      ] as const)
+        await api.post(`/projects/${project.id}/tasks`, TaskDto, {
+          title,
+          acceptanceCriteria: ['x'],
+          areas: [area],
+        });
+      const proposal = await api.get(
+        `/projects/${project.id}/candidates?size=2`,
+        PickerProposalDto,
+      );
+      expect(proposal.candidates.map((c) => [c.task.title, c.proposed])).toEqual([
+        ['code', true],
+        ['words', true],
+      ]);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it('answers 404 for an unknown project on team, routing-rule and candidate routes and 201 on creates', async () => {
     daemon = await startDaemon({
       dataDir: dir.path,
       port: 0,
@@ -488,6 +624,7 @@ describe('startDaemon', () => {
       const head = await api.get('/events/head', EventsHead);
       expect(await send('GET', `/projects/${ghost}/team`)).toBe(404);
       expect(await send('GET', `/projects/${ghost}/routing-rules`)).toBe(404);
+      expect(await send('GET', `/projects/${ghost}/candidates?size=1`)).toBe(404);
       expect(await send('PUT', `/projects/${ghost}/team`, { bindings: [], members: [] })).toBe(404);
       expect(
         await send('PUT', `/projects/${project.id}/team`, {

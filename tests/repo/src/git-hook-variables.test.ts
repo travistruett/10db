@@ -1,13 +1,25 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { cpSync, globSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import {
+  chmodSync,
+  cpSync,
+  globSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import {
+  createBareRepo,
   createThrowawayRepo,
   isolatedGitEnvironment,
   snapshotFiles,
+  type BareRepo,
   type ThrowawayRepo,
 } from './fixtures';
 import { repoRoot } from './workspace';
@@ -77,7 +89,7 @@ async function projectFromPath(entry: string): Promise<{ setupFiles: string[]; r
 }
 
 describe('git hook variables', () => {
-  const cleanup: (ThrowawayRepo | string)[] = [];
+  const cleanup: (ThrowawayRepo | BareRepo | string)[] = [];
   afterEach(() => {
     for (const item of cleanup.splice(0)) {
       if (typeof item === 'string') rmSync(item, { recursive: true, force: true });
@@ -108,7 +120,7 @@ describe('git hook variables', () => {
   it('never reach make check when pre-push runs from a linked worktree', () => {
     const repo = createThrowawayRepo('10db-hook-env');
     cleanup.push(repo);
-    const origin = mkdtempSync(join(tmpdir(), '10db-hook-env-origin-'));
+    const origin = createBareRepo('10db-hook-env-origin');
     const worktree = mkdtempSync(join(tmpdir(), '10db-hook-env-worktree-'));
     const records = mkdtempSync(join(tmpdir(), '10db-hook-env-record-'));
     const record = join(records, 'env');
@@ -117,17 +129,20 @@ describe('git hook variables', () => {
     cpSync(resolve(repoRoot, 'scripts/hooks'), join(repo.dir, 'scripts/hooks'), {
       recursive: true,
     });
-    // A stand-in for make check that records the environment it was given.
-    repo.stage('Makefile', 'check:\n\t@env > "$$HOOK_ENV_RECORD"\n');
+    // A stand-in make, first on PATH, that records the environment `make check` was given. It
+    // needs no make installed, and the CI gate's container has none.
+    const fakeMake = join(records, 'bin', 'make');
+    mkdirSync(dirname(fakeMake));
+    writeFileSync(fakeMake, '#!/bin/sh\n[ "$1" = check ] || exit 2\nenv > "$HOOK_ENV_RECORD"\n');
+    chmodSync(fakeMake, 0o755);
     repo.git('add', 'lefthook.yml', 'scripts/hooks');
     repo.commit('chore(repo): init');
-    repo.git('init', '-q', '--bare', origin);
-    repo.git('remote', 'add', 'origin', origin);
+    repo.git('remote', 'add', 'origin', origin.dir);
     rmSync(worktree, { recursive: true });
     repo.git('worktree', 'add', '-q', '-b', 'feat/y', worktree);
     const env = {
       ...repo.env,
-      PATH: `${BIN}${delimiter}${repo.env['PATH'] ?? ''}`,
+      PATH: [dirname(fakeMake), BIN, repo.env['PATH'] ?? ''].join(delimiter),
       LEFTHOOK: '1',
       HOOK_ENV_RECORD: record,
     };
