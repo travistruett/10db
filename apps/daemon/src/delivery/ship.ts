@@ -50,7 +50,10 @@ export interface Shipper {
   checkBatch(batchId: BatchId): void;
   checkOpenBatches(): void;
   resume(batchId: BatchId): void;
+  /** The batch strip: Ship anyway from OPEN, or Retry from FAILED, which reopens unfinished work. */
   ship(batchId: BatchId): BatchDto;
+  /** A failed member's card: ships an open or failed batch whose work is settled, and never reopens one. */
+  shipAnyway(batchId: BatchId): BatchDto;
   abandon(batchId: BatchId): BatchDto;
 }
 
@@ -245,55 +248,67 @@ export function createShipper(deps: ShipperDeps): Shipper {
     if (moved) resume(batchId);
   }
 
+  /** The refusal while a member still runs, waits or is queued; null once every member settled or failed. */
+  function unfinishedWork(batch: BatchDto): ConflictError | null {
+    const current = members(db, batch.id);
+    if (shipReadiness(current.map((m) => m.state)) !== ShipReadiness.Blocked) return null;
+    const blockers = current
+      .filter((m) => !isTerminal(m.state))
+      .map((m) => `${m.taskTitle} (${m.state.toLowerCase()})`);
+    return new ConflictError(
+      `Batch "${batch.title}" still has unfinished work: ${blockers.join(', ')}`,
+    );
+  }
+
+  function ship(batchId: BatchId): BatchDto {
+    const batch = getBatch(db, batchId);
+    const unfinished = unfinishedWork(batch);
+    switch (batch.state) {
+      case BatchState.Open: {
+        if (unfinished) throw unfinished;
+        const shipping = toShipping(batchId, 'shipped anyway by the builder');
+        resume(batchId);
+        return shipping;
+      }
+      case BatchState.Failed: {
+        if (unfinished) {
+          // Never ship unfinished work: resume it; the batch ships itself when it settles.
+          const reopened = deps.state.write((w) =>
+            transitionBatch(w, batchId, {
+              to: BatchState.Open,
+              patch: { failure: null },
+              reason: 'retried with unfinished work',
+            }),
+          );
+          deps.onWorkQueued();
+          return reopened;
+        }
+        const shipping = toShipping(batchId, 'retried by the builder');
+        resume(batchId);
+        return shipping;
+      }
+      case BatchState.Cutting:
+      case BatchState.Shipping:
+      case BatchState.Shipped:
+      case BatchState.Closed:
+      case BatchState.Abandoned:
+        throw new ConflictError(
+          `Batch "${batch.title}" is ${batch.state.toLowerCase()}; only an open or failed batch ships`,
+        );
+    }
+  }
+
   return {
     checkBatch,
     checkOpenBatches() {
       for (const batch of listBatches(db, { states: [BatchState.Open] })) checkBatch(batch.id);
     },
     resume,
-    ship(batchId) {
-      const batch = getBatch(db, batchId);
-      const current = members(db, batchId);
-      const readiness = shipReadiness(current.map((m) => m.state));
-      const blockers = current
-        .filter((m) => !isTerminal(m.state))
-        .map((m) => `${m.taskTitle} (${m.state.toLowerCase()})`);
-      switch (batch.state) {
-        case BatchState.Open: {
-          if (readiness === ShipReadiness.Blocked)
-            throw new ConflictError(
-              `Batch "${batch.title}" still has unfinished work: ${blockers.join(', ')}`,
-            );
-          const shipping = toShipping(batchId, 'shipped anyway by the builder');
-          resume(batchId);
-          return shipping;
-        }
-        case BatchState.Failed: {
-          if (readiness === ShipReadiness.Blocked) {
-            // Never ship unfinished work: resume it; the batch ships itself when it settles.
-            const reopened = deps.state.write((w) =>
-              transitionBatch(w, batchId, {
-                to: BatchState.Open,
-                patch: { failure: null },
-                reason: 'retried with unfinished work',
-              }),
-            );
-            deps.onWorkQueued();
-            return reopened;
-          }
-          const shipping = toShipping(batchId, 'retried by the builder');
-          resume(batchId);
-          return shipping;
-        }
-        case BatchState.Cutting:
-        case BatchState.Shipping:
-        case BatchState.Shipped:
-        case BatchState.Closed:
-        case BatchState.Abandoned:
-          throw new ConflictError(
-            `Batch "${batch.title}" is ${batch.state.toLowerCase()}; only an open or failed batch ships`,
-          );
-      }
+    ship,
+    shipAnyway(batchId) {
+      const unfinished = unfinishedWork(getBatch(db, batchId));
+      if (unfinished) throw unfinished;
+      return ship(batchId);
     },
     abandon(batchId) {
       const batch = getBatch(db, batchId);

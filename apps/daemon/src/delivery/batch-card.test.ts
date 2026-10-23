@@ -17,9 +17,7 @@ beforeEach(() => {
       retry: (id) => {
         retryWorkstream(h.state, id);
       },
-      ship: (batchId) => {
-        h.shipper.ship(batchId);
-      },
+      shipper: h.shipper,
     }),
   });
 });
@@ -75,6 +73,27 @@ describe('the failed workstream card', () => {
     const { card, batchId } = await failedInBatch('WAITING_HUMAN');
     expect(() => inbox.answer(card.id, { choice: 'Ship anyway' })).toThrow(ConflictError);
     expect(getInboxItem(h.store.db, card.id).state).toBe('OPEN');
+    const beta = listWorkstreams(h.store.db, { batchId }).find((w) => w.state === 'WAITING_HUMAN');
+    if (!beta) throw new Error('Beta waits');
+    h.settle(beta.id, 'DONE');
+    expect(inbox.answer(card.id, { choice: 'Ship anyway' }).state).toBe('RESOLVED');
+    await h.jobs.idle();
+    expect(getBatch(h.store.db, batchId).state).toBe('SHIPPED');
+  });
+
+  it('refuses Ship anyway in a failed batch with unfinished work instead of reopening it, then ships', async () => {
+    const { card, batchId } = await failedInBatch('WAITING_HUMAN');
+    h.state.write((c) =>
+      transitionBatch(c, batchId, { to: 'FAILED', patch: { failure: 'wrong_branch' } }),
+    );
+    expect(() => inbox.answer(card.id, { choice: 'Ship anyway' })).toThrow(
+      /still has unfinished work: Beta \(waiting_human\)/,
+    );
+    expect(getInboxItem(h.store.db, card.id).state).toBe('OPEN');
+    expect(getBatch(h.store.db, batchId)).toMatchObject({
+      state: 'FAILED',
+      failure: 'wrong_branch',
+    });
     const beta = listWorkstreams(h.store.db, { batchId }).find((w) => w.state === 'WAITING_HUMAN');
     if (!beta) throw new Error('Beta waits');
     h.settle(beta.id, 'DONE');

@@ -266,9 +266,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       retryWorkstream(state, id);
       scheduler?.requestTick();
     },
-    ship: (batchId) => {
-      shipper.ship(batchId);
-    },
+    shipper,
   });
   const watcher =
     opts.watch === false

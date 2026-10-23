@@ -7,6 +7,7 @@ import {
 } from '@10db/contracts';
 import type { Json } from '@10db/db';
 import { z } from 'zod';
+import type { Shipper } from './ship';
 
 /** The `detail` key of a failed batch member's card. */
 export const BATCH_CARD_DETAIL = 'batchCard';
@@ -43,18 +44,21 @@ export function batchCardFields(row: {
 
 /**
  * Acts on a batch card's answer before the inbox records it. A refusal (Ship anyway while work is
- * unfinished, Retry in a batch that shipped) throws, so the card stays open and the builder sees why.
+ * unfinished, in an open or a failed batch, or Retry in a batch that shipped) throws, so the card
+ * stays open and the builder sees why. Ship anyway never reopens a failed batch: the option
+ * promises a ship, and reopening is the strip's Retry.
  */
 export function createBatchCardAnswers(deps: {
   readonly retry: (id: WorkstreamId) => void;
-  readonly ship: (batchId: BatchId) => void;
+  readonly shipper: Pick<Shipper, 'shipAnyway'>;
 }): (item: InboxItemDto, answer: InboxAnswer) => void {
   return (item, answer) => {
     // The detail is JSON read back from the database: a boundary, so parse it.
     const card = BatchCardDetail.safeParse(item.detail?.[BATCH_CARD_DETAIL]);
     if (!card.success) return;
     if (answer.choice === BatchCardChoice.Retry) deps.retry(card.data.workstreamId);
-    else if (answer.choice === BatchCardChoice.ShipAnyway) deps.ship(card.data.batchId);
+    else if (answer.choice === BatchCardChoice.ShipAnyway)
+      deps.shipper.shipAnyway(card.data.batchId);
     // Later, or a label the inbox's own option check refuses next: nothing to do.
   };
 }
