@@ -1,12 +1,22 @@
 import { execFileSync } from 'node:child_process';
-import { rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { InvalidError } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDecoyRepo } from '../../test/decoy-repo';
-import { createTempRepo, isolatedGitEnv, tempDir } from '../../test/fixtures';
+import {
+  createTempClone,
+  createTempRepo,
+  createTempRepoWithOrigin,
+  isolatedGitEnv,
+  NETWORK_ENV,
+  tempDir,
+  waitFor,
+} from '../../test/fixtures';
 import type { TempDir } from '../../test/fixtures';
-import { createGit } from './index';
+import { alive } from '../../test/orphan-gate';
+import { installPrePushHook } from '../../test/pre-push-hook';
+import { createGit, GitNetworkError } from './index';
 
 const git = createGit();
 let repo: TempDir;
@@ -198,6 +208,200 @@ describe('status', () => {
     arrange();
     expect(await git.status(repo.path)).toEqual(expected);
   });
+
+  // A status that refreshed the index would hold index.lock, and a lane's commit running then fails.
+  it('leaves a stale index unwritten', async () => {
+    const index = join(repo.path, '.git', 'index');
+    const later = new Date(Date.now() + 60_000);
+    utimesSync(join(repo.path, 'README.md'), later, later);
+    const before = readFileSync(index);
+    expect(await git.status(repo.path)).toEqual([]);
+    expect(readFileSync(index).equals(before)).toBe(true);
+  });
+});
+
+describe('branches and remotes', () => {
+  it('reads the current branch, and null when HEAD is detached', async () => {
+    expect(await git.currentBranch(repo.path)).toBe('main');
+    rawGit('checkout', '-q', '--detach');
+    expect(await git.currentBranch(repo.path)).toBeNull();
+  });
+
+  it("reads a remote's URL, and null when there is no such remote", async () => {
+    expect(await git.remoteUrl(repo.path, 'origin')).toBeNull();
+    rawGit('remote', 'add', 'origin', '/nowhere/x.git');
+    expect(await git.remoteUrl(repo.path, 'origin')).toBe('/nowhere/x.git');
+  });
+
+  it('switches to a new branch from a start point, with no upstream', async () => {
+    const base = rawGit('rev-parse', 'HEAD');
+    write('later.txt', 'later');
+    rawGit('add', 'later.txt');
+    rawGit('commit', '-q', '-m', 'later');
+    await git.switchNewBranch(repo.path, '10db/greetings-0a1b2c3d', base);
+    expect(rawGit('branch', '--show-current')).toBe('10db/greetings-0a1b2c3d');
+    expect(rawGit('rev-parse', 'HEAD')).toBe(base);
+    expect(() => rawGit('rev-parse', '--abbrev-ref', '@{u}')).toThrow();
+    await expect(git.switchNewBranch(repo.path, '10db/greetings-0a1b2c3d', base)).rejects.toThrow(
+      /already exists/,
+    );
+  });
+});
+
+describe('network calls', () => {
+  let remote: ReturnType<typeof createTempRepoWithOrigin>;
+  beforeEach(() => {
+    remote = createTempRepoWithOrigin();
+  });
+  afterEach(() => {
+    remote.cleanup();
+  });
+
+  const net = { env: NETWORK_ENV, timeoutMs: 10_000 };
+  const local = (...args: string[]) =>
+    execFileSync('git', ['-C', remote.repo.path, ...args], { env: isolatedGitEnv() })
+      .toString()
+      .trim();
+  const origin = (...args: string[]) =>
+    execFileSync('git', ['-C', remote.origin.path, ...args], { env: isolatedGitEnv() })
+      .toString()
+      .trim();
+  /** Another clone adds a commit to `branch` on origin, as a teammate would. */
+  function pushFromElsewhere(branch: string, file: string): string {
+    const other = createTempClone(remote.origin.path);
+    try {
+      const g = (...args: string[]) =>
+        execFileSync('git', ['-C', other.path, ...args], { env: isolatedGitEnv(), stdio: 'pipe' })
+          .toString()
+          .trim();
+      if (branch !== 'main') g('switch', '-q', '-c', branch);
+      writeFileSync(join(other.path, file), file);
+      g('add', file);
+      g('commit', '-q', '-m', `Add ${file}`);
+      g('push', '-q', 'origin', branch);
+      return g('rev-parse', 'HEAD');
+    } finally {
+      other.cleanup();
+    }
+  }
+
+  it('fetches the base branch into origin/<branch> without touching the checkout', async () => {
+    const before = local('rev-parse', 'HEAD');
+    const upstream = pushFromElsewhere('main', 'upstream.txt');
+    await git.fetch(remote.repo.path, 'main', net);
+    expect(local('rev-parse', 'origin/main')).toBe(upstream);
+    expect(local('rev-parse', 'HEAD')).toBe(before);
+  });
+
+  it('fails to fetch a branch origin does not have', async () => {
+    const failure = git.fetch(remote.repo.path, 'develop', net);
+    await expect(failure).rejects.toBeInstanceOf(GitNetworkError);
+    await expect(failure).rejects.toMatchObject({ kind: 'failed' });
+  });
+
+  it('pushes a branch and sets its upstream, and pushing it again changes nothing', async () => {
+    await git.switchNewBranch(remote.repo.path, '10db/x-0a1b2c3d', 'main');
+    writeFileSync(join(remote.repo.path, 'x.txt'), 'x');
+    local('add', 'x.txt');
+    local('commit', '-q', '-m', 'Add x');
+    await git.push(remote.repo.path, '10db/x-0a1b2c3d', net);
+    const sha = local('rev-parse', 'HEAD');
+    expect(origin('rev-parse', 'refs/heads/10db/x-0a1b2c3d')).toBe(sha);
+    expect(local('rev-parse', '--abbrev-ref', '@{u}')).toBe('origin/10db/x-0a1b2c3d');
+    await git.push(remote.repo.path, '10db/x-0a1b2c3d', net);
+    expect(origin('rev-parse', 'refs/heads/10db/x-0a1b2c3d')).toBe(sha);
+  });
+
+  it('reports a rejected push and never forces it', async () => {
+    const theirs = pushFromElsewhere('10db/x-0a1b2c3d', 'theirs.txt');
+    await git.switchNewBranch(remote.repo.path, '10db/x-0a1b2c3d', 'main');
+    writeFileSync(join(remote.repo.path, 'ours.txt'), 'ours');
+    local('add', 'ours.txt');
+    local('commit', '-q', '-m', 'Add ours');
+    const failure = git.push(remote.repo.path, '10db/x-0a1b2c3d', net);
+    await expect(failure).rejects.toMatchObject({ name: 'GitNetworkError', kind: 'rejected' });
+    expect(origin('rev-parse', 'refs/heads/10db/x-0a1b2c3d')).toBe(theirs);
+  });
+
+  it('times out a fetch that hangs', async () => {
+    local('remote', 'set-url', 'origin', 'ssh://git@example.invalid/hang.git');
+    // ssh is replaced by a command that hangs; git appends the host and command as arguments.
+    const hang = {
+      env: { ...NETWORK_ENV, GIT_SSH_COMMAND: 'sleep 5; true', GIT_SSH_VARIANT: 'simple' },
+      timeoutMs: 300,
+    };
+    await expect(git.fetch(remote.repo.path, 'main', hang)).rejects.toMatchObject({
+      kind: 'timeout',
+    });
+  });
+
+  it('stops a push whose pre-push hook runs past its timeout, with every process the hook started', async () => {
+    await git.switchNewBranch(remote.repo.path, '10db/x-0a1b2c3d', 'main');
+    const hook = installPrePushHook(remote.repo.path, 30);
+    try {
+      const push = git.push(remote.repo.path, '10db/x-0a1b2c3d', {
+        env: NETWORK_ENV,
+        timeoutMs: 1_000,
+      });
+      const timedOut = expect(push).rejects.toMatchObject({ kind: 'timeout' });
+      const child = await hook.childPid();
+      await timedOut;
+      await waitFor(() => !alive(child), 2_000);
+      expect(() => origin('rev-parse', '--verify', '-q', 'refs/heads/10db/x-0a1b2c3d')).toThrow();
+    } finally {
+      hook.cleanup();
+    }
+  });
+
+  it('stops a fetch when its signal aborts', async () => {
+    local('remote', 'set-url', 'origin', 'ssh://git@example.invalid/hang.git');
+    const controller = new AbortController();
+    const call = {
+      env: { ...NETWORK_ENV, GIT_SSH_COMMAND: 'sleep 5; true', GIT_SSH_VARIANT: 'simple' },
+      timeoutMs: 10_000,
+      signal: controller.signal,
+    };
+    const pending = git.fetch(remote.repo.path, 'main', call);
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ kind: 'aborted' });
+  });
+
+  it.each([
+    {
+      name: 'fetch updates',
+      act: async (env: Readonly<Record<string, string>>) => {
+        const upstream = pushFromElsewhere('main', 'upstream.txt');
+        await git.fetch(remote.repo.path, 'main', { env, timeoutMs: 10_000 });
+        expect(local('rev-parse', 'origin/main')).toBe(upstream);
+      },
+    },
+    {
+      name: 'push sends from',
+      act: async (env: Readonly<Record<string, string>>) => {
+        await git.switchNewBranch(remote.repo.path, '10db/x-0a1b2c3d', 'main');
+        await git.push(remote.repo.path, '10db/x-0a1b2c3d', { env, timeoutMs: 10_000 });
+        expect(origin('rev-parse', 'refs/heads/10db/x-0a1b2c3d')).toBe(local('rev-parse', 'HEAD'));
+      },
+    },
+  ])(
+    '$name the repository it is given when the network environment carries hook variables',
+    async ({ act }) => {
+      // The network environment is the builder's login environment, which a daemon started from a
+      // git hook may have captured with GIT_DIR and friends in it.
+      const decoy = createDecoyRepo();
+      try {
+        const before = decoy.snapshot();
+        let failure: unknown;
+        await act({ ...NETWORK_ENV, ...decoy.hookVariables }).catch((error: unknown) => {
+          failure = error;
+        });
+        expect(decoy.snapshot()).toEqual(before);
+        expect(failure).toBeUndefined();
+      } finally {
+        decoy.cleanup();
+      }
+    },
+  );
 });
 
 describe('git hook variables in the daemon environment', () => {
@@ -227,6 +431,26 @@ describe('git hook variables in the daemon environment', () => {
         write('a.txt', 'a');
         await git.commit({ repo: repo.path, paths: ['a.txt'], message: 'a', opId: 'op-hook-1' });
         expect(commitCount()).toBe(2);
+      },
+    },
+    {
+      name: 'currentBranch reads',
+      act: async () => {
+        expect(await git.currentBranch(repo.path)).toBe('main');
+      },
+    },
+    {
+      name: 'remoteUrl reads',
+      act: async () => {
+        rawGit('remote', 'add', 'origin', '/nowhere/x.git');
+        expect(await git.remoteUrl(repo.path, 'origin')).toBe('/nowhere/x.git');
+      },
+    },
+    {
+      name: 'switchNewBranch writes to',
+      act: async () => {
+        await git.switchNewBranch(repo.path, '10db/hook-0a1b2c3d', 'main');
+        expect(rawGit('branch', '--show-current')).toBe('10db/hook-0a1b2c3d');
       },
     },
   ])('$name the repository it is given and leaves the other untouched', async ({ act }) => {

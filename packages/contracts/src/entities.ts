@@ -1,5 +1,8 @@
 import { z } from 'zod';
+import { BranchName, PrTitlePrefix } from './git-names';
 import {
+  BatchId,
+  BoardColumnId,
   EvidenceId,
   FlowId,
   HandoffId,
@@ -13,6 +16,7 @@ import {
 import {
   BillingMode,
   BoardStatus,
+  Delivery,
   Effort,
   EvidenceKind,
   InboxKind,
@@ -28,6 +32,17 @@ import { WorkstreamStep } from './steps';
 
 const Name = z.string().regex(/^[a-z][a-z0-9-]*$/, 'lowercase letters, digits and hyphens');
 const Timestamp = z.iso.datetime();
+
+const CONTROL_CHARACTER = /\p{Cc}/u;
+/**
+ * A task or batch title: one line, since in pull-request delivery it becomes the pull request's
+ * title, and GitHub refuses one with a newline only after the branch is pushed.
+ */
+export const Title = z
+  .string()
+  .min(1)
+  .max(200)
+  .refine((t) => !CONTROL_CHARACTER.test(t), 'no control characters such as newlines or tabs');
 
 export const AreaDef = z.object({ name: Name, globs: z.array(z.string().min(1)).min(1) });
 export type AreaDef = z.infer<typeof AreaDef>;
@@ -90,10 +105,20 @@ export const ProjectInput = z
     flowId: FlowId.nullable().default(null),
     /** The most a task may cost, in USD, compared with a profile's AA cost per task; null for no ceiling. */
     budgetCeiling: z.number().positive().nullable().default(null),
+    /** How finished work leaves the machine: on the checked-out branch, or as a batch's pull request. */
+    delivery: z.enum(Delivery).default(Delivery.Local),
+    /** The branch on `origin` a batch is cut from and its pull request targets. */
+    baseBranch: BranchName.default('main'),
+    /** `pull_request` delivery titles each PR `<prefix>: <batch title>`. */
+    prTitlePrefix: PrTitlePrefix.nullable().default(null),
   })
   .refine((p) => p.nudgePct > p.handoffPct, {
     message: 'nudgePct must be above handoffPct',
     path: ['nudgePct'],
+  })
+  .refine((p) => p.delivery !== Delivery.PullRequest || p.prTitlePrefix !== null, {
+    message: 'Pull request delivery needs a PR title prefix such as feat(app)',
+    path: ['prTitlePrefix'],
   });
 export type ProjectInput = z.input<typeof ProjectInput>;
 export type ProjectConfig = z.output<typeof ProjectInput>;
@@ -115,6 +140,9 @@ export const ProjectDto = z.object({
   humanWaitMinutes: z.int(),
   flowId: FlowId.nullable(),
   budgetCeiling: z.number().nullable(),
+  delivery: z.enum(Delivery),
+  baseBranch: z.string(),
+  prTitlePrefix: z.string().nullable(),
   createdAt: Timestamp,
   updatedAt: Timestamp,
 });
@@ -132,13 +160,16 @@ export const ProjectPatch = z
     flowId: FlowId.nullable(),
     /** The most a task may cost, in USD, compared with a profile's AA cost per task; null for no ceiling. */
     budgetCeiling: z.number().positive().nullable(),
+    delivery: z.enum(Delivery),
+    baseBranch: BranchName,
+    prTitlePrefix: PrTitlePrefix.nullable(),
   })
   .partial()
   .refine((p) => Object.keys(p).length > 0, { message: 'Change at least one field' });
 export type ProjectPatch = z.infer<typeof ProjectPatch>;
 
 export const TaskInput = z.object({
-  title: z.string().min(1).max(200),
+  title: Title,
   description: z.string().default(''),
   acceptanceCriteria: z.array(z.string().min(1)).min(1),
   areas: z.array(Name).min(1),
@@ -160,6 +191,7 @@ export const TaskDto = z.object({
   flowId: FlowId.nullable(),
   status: z.enum(TaskStatus),
   boardOrder: z.number(),
+  boardColumnId: BoardColumnId.nullable(),
   dependsOn: z.array(TaskId),
   boardStatus: z.enum(BoardStatus),
   workstreamId: WorkstreamId.nullable(),
@@ -170,7 +202,7 @@ export type TaskDto = z.infer<typeof TaskDto>;
 
 export const TaskPatch = z
   .object({
-    title: z.string().min(1).max(200),
+    title: Title,
     description: z.string(),
     acceptanceCriteria: z.array(z.string().min(1)).min(1),
     riskTags: z.array(z.enum(RiskTag)),
@@ -206,6 +238,8 @@ export const WorkstreamDto = z.object({
   taskId: TaskId,
   taskTitle: z.string(),
   projectId: ProjectId,
+  /** The batch it runs in; null in local delivery. */
+  batchId: BatchId.nullable(),
   state: z.enum(WorkstreamState),
   nextAction: NextAction,
   attempt: z.int(),

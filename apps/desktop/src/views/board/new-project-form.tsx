@@ -1,9 +1,10 @@
-import { BillingMode, type ProjectDto } from '@10db/contracts';
+import { BillingMode, BranchName, Delivery, PrTitlePrefix, type ProjectDto } from '@10db/contracts';
 import {
   Alert,
   Button,
   Group,
   NumberInput,
+  Radio,
   Select,
   Stack,
   Textarea,
@@ -46,6 +47,9 @@ export function NewProjectForm({
   const [areasText, setAreasText] = useState('');
   const [billingMode, setBillingMode] = useState<BillingMode>(BillingMode.Subscription);
   const [handoffPct, setHandoffPct] = useState<number | ''>(DEFAULT_HANDOFF_PCT);
+  const [delivery, setDelivery] = useState<Delivery>(Delivery.Local);
+  const [baseBranch, setBaseBranch] = useState('main');
+  const [prTitlePrefix, setPrTitlePrefix] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
 
   const submit = (event: SyntheticEvent<HTMLFormElement>): void => {
@@ -59,6 +63,15 @@ export function NewProjectForm({
       setFormError('Enter the handoff percentage');
       return;
     }
+    const pullRequests = delivery === Delivery.PullRequest;
+    if (pullRequests && !PrTitlePrefix.safeParse(prTitlePrefix.trim()).success) {
+      setFormError('Enter a PR title prefix such as feat(app)');
+      return;
+    }
+    if (pullRequests && !BranchName.safeParse(baseBranch.trim()).success) {
+      setFormError('Enter the base branch, such as main');
+      return;
+    }
     setFormError(null);
     create.mutate(
       {
@@ -69,6 +82,10 @@ export function NewProjectForm({
         billingMode,
         handoffPct,
         nudgePct: nudgeFor(handoffPct),
+        delivery,
+        ...(pullRequests
+          ? { baseBranch: baseBranch.trim(), prTitlePrefix: prTitlePrefix.trim() }
+          : {}),
       },
       {
         onSuccess: (project) => {
@@ -130,6 +147,41 @@ export function NewProjectForm({
             if (isBillingMode(value)) setBillingMode(value);
           }}
         />
+        <Radio.Group
+          label="Delivery"
+          value={delivery}
+          onChange={(value) => {
+            setDelivery(value === Delivery.PullRequest ? Delivery.PullRequest : Delivery.Local);
+          }}
+        >
+          <Group mt="xs">
+            <Radio value={Delivery.Local} label="Commits on the checked-out branch" />
+            <Radio value={Delivery.PullRequest} label="One pull request per batch" />
+          </Group>
+        </Radio.Group>
+        {delivery === Delivery.PullRequest ? (
+          <>
+            <TextInput
+              label="Base branch"
+              description="The branch on origin each batch starts from and targets"
+              ff="monospace"
+              value={baseBranch}
+              onChange={(e) => {
+                setBaseBranch(e.currentTarget.value);
+              }}
+            />
+            <TextInput
+              label="PR title prefix"
+              description="A Conventional Commit type and scope; titles read feat(app): <batch title>"
+              placeholder="feat(app)"
+              ff="monospace"
+              value={prTitlePrefix}
+              onChange={(e) => {
+                setPrTitlePrefix(e.currentTarget.value);
+              }}
+            />
+          </>
+        ) : null}
         <NumberInput
           label="Handoff at %"
           description="Context use at which a session hands off to a fresh one"

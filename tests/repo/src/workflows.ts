@@ -1,31 +1,41 @@
 import { globSync } from 'node:fs';
 import { parse } from 'yaml';
+import { z } from 'zod';
 import { readRepoFile, repoRoot } from './workspace';
 
-export interface WorkflowStep {
-  id?: string;
-  name?: string;
-  if?: string;
-  uses?: string;
-  run?: string;
-  with?: Record<string, unknown>;
-  env?: Record<string, unknown>;
-}
+// Loose objects: a key these tests don't model still reaches them, because the secrets checks read
+// whole jobs as JSON.
+const WorkflowStep = z.looseObject({
+  id: z.string().optional(),
+  name: z.string().optional(),
+  if: z.string().optional(),
+  uses: z.string().optional(),
+  run: z.string().optional(),
+  with: z.record(z.string(), z.unknown()).optional(),
+  env: z.record(z.string(), z.unknown()).optional(),
+});
+export type WorkflowStep = z.infer<typeof WorkflowStep>;
 
-export interface WorkflowJob {
-  if?: string;
-  'runs-on'?: string;
-  env?: Record<string, string>;
-  permissions?: unknown;
-  environment?: string | { name: string };
-  steps?: WorkflowStep[];
-}
+const WorkflowJob = z.looseObject({
+  if: z.string().optional(),
+  'runs-on': z.string().optional(),
+  'timeout-minutes': z.number().int().positive().optional(),
+  container: z
+    .union([z.string(), z.looseObject({ image: z.string(), options: z.string().optional() })])
+    .optional(),
+  env: z.record(z.string(), z.string()).optional(),
+  permissions: z.unknown().optional(),
+  environment: z.union([z.string(), z.looseObject({ name: z.string() })]).optional(),
+  steps: z.array(WorkflowStep).optional(),
+});
+export type WorkflowJob = z.infer<typeof WorkflowJob>;
 
-export interface Workflow {
-  on: Record<string, unknown>;
-  permissions?: unknown;
-  jobs: Record<string, WorkflowJob>;
-}
+const Workflow = z.looseObject({
+  on: z.record(z.string(), z.unknown()),
+  permissions: z.unknown().optional(),
+  jobs: z.record(z.string(), WorkflowJob),
+});
+export type Workflow = z.infer<typeof Workflow>;
 
 export const releaseWorkflowPaths = {
   release: '.github/workflows/release.yml',
@@ -38,9 +48,24 @@ export function workflowPaths(root: string = repoRoot): string[] {
   return globSync(['.github/workflows/*.yml', '.github/workflows/*.yaml'], { cwd: root }).sort();
 }
 
+/** A workflow whose YAML doesn't have the shape these tests read. */
+export class WorkflowShapeError extends Error {
+  override readonly name = 'WorkflowShapeError';
+}
+
+/** Parses workflow YAML; `source` names it in a shape error. */
+export function parseWorkflow(text: string, source: string): Workflow {
+  const result = Workflow.safeParse(parse(text));
+  if (result.success) return result.data;
+  const issues = result.error.issues.map(
+    (issue) => `${issue.path.map(String).join('.')}: ${issue.message}`,
+  );
+  throw new WorkflowShapeError(`${source}: ${issues.join('; ')}`);
+}
+
 /** Parses a workflow file, given its repo-relative path. */
 export function readWorkflow(path: string): Workflow {
-  return parse(readRepoFile(path)) as Workflow;
+  return parseWorkflow(readRepoFile(path), path);
 }
 
 /**

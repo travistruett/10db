@@ -1,6 +1,6 @@
 import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { DEFAULT_HAZARDS, type ClaimKind } from '@10db/contracts';
+import { DEFAULT_HAZARDS, type ClaimKind, type Delivery } from '@10db/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { tempDir } from '../../test/fixtures';
 import {
@@ -788,5 +788,373 @@ describe('read-only steps', () => {
     },
   ])('$decision $name', ({ command, decision }) => {
     expect(ro('Bash', { command }).decision).toBe(decision);
+  });
+});
+
+describe('delivery and gh', () => {
+  const run = (command: string, delivery: Delivery) =>
+    judgeToolUse({
+      toolName: 'Bash',
+      toolInput: { command },
+      repoPath: repo.path,
+      areas: AREAS,
+      hazards: DEFAULT_HAZARDS,
+      claims: [{ kind: 'area', name: 'api' }],
+      readOnly: false,
+      delivery,
+    }).decision;
+
+  it.each<{
+    name: string;
+    command: string;
+    local: 'allow' | 'deny';
+    pullRequest: 'allow' | 'deny';
+  }>([
+    {
+      name: 'push a feature branch',
+      command: 'git push origin feat/x',
+      local: 'allow',
+      pullRequest: 'deny',
+    },
+    {
+      name: 'push -u HEAD',
+      command: 'git push -u origin HEAD',
+      local: 'allow',
+      pullRequest: 'deny',
+    },
+    {
+      name: 'push behind git -C',
+      command: 'git -C . push origin feat/x',
+      local: 'allow',
+      pullRequest: 'deny',
+    },
+    {
+      name: 'push inside sh -c',
+      command: "sh -c 'git push origin feat/x'",
+      local: 'allow',
+      pullRequest: 'deny',
+    },
+    {
+      name: 'read-only git',
+      command: 'git log --oneline -3',
+      local: 'allow',
+      pullRequest: 'allow',
+    },
+    { name: 'pr view', command: 'gh pr view 12', local: 'allow', pullRequest: 'allow' },
+    { name: 'pr list', command: 'gh pr list --state open', local: 'allow', pullRequest: 'allow' },
+    { name: 'pr checks', command: 'gh pr checks 12', local: 'allow', pullRequest: 'allow' },
+    { name: 'pr diff', command: 'gh pr diff 12', local: 'allow', pullRequest: 'allow' },
+    { name: 'pr status', command: 'gh pr status', local: 'allow', pullRequest: 'allow' },
+    {
+      name: 'pr create',
+      command: 'gh pr create --title x --body y',
+      local: 'deny',
+      pullRequest: 'deny',
+    },
+    { name: 'pr merge', command: 'gh pr merge 12 --squash', local: 'deny', pullRequest: 'deny' },
+    { name: 'pr close', command: 'gh pr close 12', local: 'deny', pullRequest: 'deny' },
+    { name: 'pr edit', command: 'gh pr edit 12 --title x', local: 'deny', pullRequest: 'deny' },
+    { name: 'pr ready', command: 'gh pr ready 12', local: 'deny', pullRequest: 'deny' },
+    {
+      name: 'pr checkout, which switches the branch',
+      command: 'gh pr checkout 12',
+      local: 'deny',
+      pullRequest: 'deny',
+    },
+    { name: 'pr review', command: 'gh pr review 12 --approve', local: 'deny', pullRequest: 'deny' },
+    {
+      name: 'pr create with -R first',
+      command: 'gh -R acme/widgets pr create',
+      local: 'deny',
+      pullRequest: 'deny',
+    },
+    {
+      name: 'pr merge behind env',
+      command: 'env GH_TOKEN=x gh pr merge 12',
+      local: 'deny',
+      pullRequest: 'deny',
+    },
+    {
+      name: 'pr merge by full path',
+      command: '/opt/homebrew/bin/gh pr merge 12',
+      local: 'deny',
+      pullRequest: 'deny',
+    },
+    {
+      name: 'pr merge after cd',
+      command: 'cd src && gh pr merge 3',
+      local: 'deny',
+      pullRequest: 'deny',
+    },
+    {
+      name: 'pr merge in sh -c',
+      command: "sh -c 'gh pr merge 3'",
+      local: 'deny',
+      pullRequest: 'deny',
+    },
+    {
+      name: 'api GET',
+      command: 'gh api repos/acme/widgets/pulls',
+      local: 'allow',
+      pullRequest: 'allow',
+    },
+    {
+      name: 'api explicit GET with fields',
+      command: 'gh api -X GET search/issues -f q=bug',
+      local: 'allow',
+      pullRequest: 'allow',
+    },
+    {
+      name: 'api -X POST',
+      command: 'gh api -X POST repos/acme/widgets/pulls',
+      local: 'deny',
+      pullRequest: 'deny',
+    },
+    {
+      name: 'api --method=PATCH',
+      command: 'gh api --method=PATCH repos/acme/widgets',
+      local: 'deny',
+      pullRequest: 'deny',
+    },
+    {
+      name: 'api -XDELETE',
+      command: 'gh api -XDELETE repos/acme/widgets/git/refs/heads/x',
+      local: 'deny',
+      pullRequest: 'deny',
+    },
+    {
+      name: 'api with a field (an implicit POST)',
+      command: 'gh api repos/acme/widgets/issues -f title=x',
+      local: 'deny',
+      pullRequest: 'deny',
+    },
+    {
+      name: 'api with a bundled field',
+      command: 'gh api repos/acme/widgets/issues -ftitle=x',
+      local: 'deny',
+      pullRequest: 'deny',
+    },
+    {
+      name: 'api with --input',
+      command: 'gh api repos/acme/widgets/pulls --input body.json',
+      local: 'deny',
+      pullRequest: 'deny',
+    },
+    {
+      name: 'api graphql',
+      command: "gh api graphql -f query='mutation { x }'",
+      local: 'deny',
+      pullRequest: 'deny',
+    },
+    {
+      name: 'repo view',
+      command: 'gh repo view --json nameWithOwner',
+      local: 'allow',
+      pullRequest: 'allow',
+    },
+    { name: 'repo list', command: 'gh repo list acme', local: 'allow', pullRequest: 'allow' },
+    {
+      name: 'repo edit',
+      command: 'gh repo edit --visibility public',
+      local: 'deny',
+      pullRequest: 'deny',
+    },
+    {
+      name: 'repo delete',
+      command: 'gh repo delete acme/widgets --yes',
+      local: 'deny',
+      pullRequest: 'deny',
+    },
+    {
+      name: 'repo create',
+      command: 'gh repo create acme/other',
+      local: 'deny',
+      pullRequest: 'deny',
+    },
+    { name: 'repo sync', command: 'gh repo sync', local: 'deny', pullRequest: 'deny' },
+    {
+      name: 'repo set-default',
+      command: 'gh repo set-default acme/widgets',
+      local: 'deny',
+      pullRequest: 'deny',
+    },
+    { name: 'issue list', command: 'gh issue list', local: 'allow', pullRequest: 'allow' },
+    { name: 'gh with no command', command: 'gh', local: 'allow', pullRequest: 'allow' },
+    { name: 'gh --version', command: 'gh --version', local: 'allow', pullRequest: 'allow' },
+    { name: 'help', command: 'gh help pr', local: 'allow', pullRequest: 'allow' },
+    { name: 'status', command: 'gh status', local: 'allow', pullRequest: 'allow' },
+    { name: 'auth status', command: 'gh auth status', local: 'allow', pullRequest: 'allow' },
+    {
+      name: 'auth status for one active host',
+      command: 'gh auth status --active --hostname github.com',
+      local: 'allow',
+      pullRequest: 'allow',
+    },
+    {
+      name: 'auth status --show-token, which prints the token',
+      command: 'gh auth status --show-token',
+      local: 'deny',
+      pullRequest: 'deny',
+    },
+    {
+      name: 'auth status --show-token with a value',
+      command: 'gh auth status --show-token=true',
+      local: 'deny',
+      pullRequest: 'deny',
+    },
+    { name: 'auth status -t', command: 'gh auth status -t', local: 'deny', pullRequest: 'deny' },
+    {
+      name: 'auth status with -t in a cluster of short flags',
+      command: 'gh auth status -at',
+      local: 'deny',
+      pullRequest: 'deny',
+    },
+    {
+      name: 'auth status with -t after another flag',
+      command: 'gh auth status --hostname github.com -t',
+      local: 'deny',
+      pullRequest: 'deny',
+    },
+    {
+      name: 'auth status with -t before the subcommand',
+      command: 'gh auth -t status',
+      local: 'deny',
+      pullRequest: 'deny',
+    },
+    {
+      name: 'auth status with --show-token before the group',
+      command: 'gh --show-token auth status',
+      local: 'deny',
+      pullRequest: 'deny',
+    },
+    {
+      name: 'auth status with -t first in a cluster',
+      command: 'gh auth status -ta',
+      local: 'deny',
+      pullRequest: 'deny',
+    },
+    {
+      // gh reads this as --hostname t; refused anyway, since a cluster can't be told apart safely.
+      name: 'auth status with -t clustered after -h',
+      command: 'gh auth status -ht',
+      local: 'deny',
+      pullRequest: 'deny',
+    },
+    {
+      name: 'auth status with -t after several flags',
+      command: 'gh auth status -a -h github.com -t',
+      local: 'deny',
+      pullRequest: 'deny',
+    },
+    {
+      name: 'auth status as JSON with the token',
+      command: 'gh auth status --json hosts --show-token',
+      local: 'deny',
+      pullRequest: 'deny',
+    },
+    {
+      name: 'auth status -t by full path',
+      command: '/opt/homebrew/bin/gh auth status -t',
+      local: 'deny',
+      pullRequest: 'deny',
+    },
+    {
+      name: 'auth status -t behind env',
+      command: 'env GH_HOST=github.com gh auth status -t',
+      local: 'deny',
+      pullRequest: 'deny',
+    },
+    {
+      name: 'auth status --show-token inside sh -c',
+      command: "sh -c 'gh auth status --show-token'",
+      local: 'deny',
+      pullRequest: 'deny',
+    },
+    {
+      name: 'auth status as JSON without the token',
+      command: 'gh auth status --json hosts',
+      local: 'allow',
+      pullRequest: 'allow',
+    },
+    { name: 'issue view', command: 'gh issue view 3', local: 'allow', pullRequest: 'allow' },
+    { name: 'search', command: 'gh search prs --author @me', local: 'allow', pullRequest: 'allow' },
+    { name: 'run list', command: 'gh run list --limit 5', local: 'allow', pullRequest: 'allow' },
+    { name: 'run view', command: 'gh run view 1', local: 'allow', pullRequest: 'allow' },
+    { name: 'workflow list', command: 'gh workflow list', local: 'allow', pullRequest: 'allow' },
+    {
+      name: 'workflow view',
+      command: 'gh workflow view ci.yml',
+      local: 'allow',
+      pullRequest: 'allow',
+    },
+    {
+      name: 'issue create',
+      command: 'gh issue create --title x --body y',
+      local: 'deny',
+      pullRequest: 'deny',
+    },
+    {
+      name: 'an alias definition',
+      command: "gh alias set m 'pr merge'",
+      local: 'deny',
+      pullRequest: 'deny',
+    },
+    { name: 'an alias call', command: 'gh m 12', local: 'deny', pullRequest: 'deny' },
+    {
+      name: 'an extension install',
+      command: 'gh extension install owner/gh-x',
+      local: 'deny',
+      pullRequest: 'deny',
+    },
+    {
+      name: 'the ext shorthand',
+      command: 'gh ext install owner/gh-x',
+      local: 'deny',
+      pullRequest: 'deny',
+    },
+    {
+      name: 'auth token, which prints the token',
+      command: 'gh auth token',
+      local: 'deny',
+      pullRequest: 'deny',
+    },
+    {
+      name: 'config set',
+      command: 'gh config set git_protocol ssh',
+      local: 'deny',
+      pullRequest: 'deny',
+    },
+    {
+      name: 'workflow run',
+      command: 'gh workflow run deploy.yml',
+      local: 'deny',
+      pullRequest: 'deny',
+    },
+    { name: 'run rerun', command: 'gh run rerun 1', local: 'deny', pullRequest: 'deny' },
+    { name: 'run cancel', command: 'gh run cancel 1', local: 'deny', pullRequest: 'deny' },
+  ])('$name: $local in local, $pullRequest in pull_request', ({ command, local, pullRequest }) => {
+    expect(run(command, 'local')).toBe(local);
+    expect(run(command, 'pull_request')).toBe(pullRequest);
+  });
+
+  it('tells an agent in a pull-request project that 10db pushes', () => {
+    const verdict = judgeToolUse({
+      toolName: 'Bash',
+      toolInput: { command: 'git push origin feat/x' },
+      repoPath: repo.path,
+      areas: AREAS,
+      hazards: DEFAULT_HAZARDS,
+      claims: [],
+      readOnly: false,
+      delivery: 'pull_request',
+    });
+    expect(verdict).toEqual({
+      decision: 'deny',
+      reason: '10db pushes when the batch ships; agents do not push in pull-request projects.',
+    });
+  });
+
+  it('treats a missing delivery as local', () => {
+    expect(bash('git push origin feat/x').decision).toBe('allow');
   });
 });

@@ -34,7 +34,10 @@ const insertMinimalProject = (ctx: WriteContext) =>
 describe('store.write', () => {
   it('commits rows and events together and returns the persisted events', () => {
     const { value: project, events } = store.write(insertMinimalProject);
-    expect(events.map((e) => e.type)).toEqual([EventType.ProjectCreated]);
+    expect(events.map((e) => e.type)).toEqual([
+      EventType.ProjectCreated,
+      EventType.BoardColumnSaved,
+    ]);
     expect(events[0]?.entityId).toBe(project.id);
     expect(listEventsAfter(store.db, 0, 10)).toEqual(events);
   });

@@ -48,6 +48,21 @@ export function snapshotFiles(dir: string): Record<string, string> {
   return files;
 }
 
+/**
+ * Local config every test repository gets before its first commit or push. Without it git starts a
+ * detached `git maintenance run --auto` after a commit, and receive-pack starts one in a bare
+ * repository after a push. It goes on writing under the repository (it holds
+ * `objects/maintenance.lock`) after the command returns, which races a test that snapshots the
+ * files or removes the directory. An older git's receive-pack starts `git gc --auto` instead;
+ * `receive.autogc` stops receive-pack starting either. Being local, it reaches every git process
+ * that touches the repository.
+ */
+const TEST_REPO_CONFIG = {
+  'maintenance.auto': 'false',
+  'gc.auto': '0',
+  'receive.autogc': 'false',
+} as const;
+
 /** A real git repository in a temporary directory, for tests that run hooks and scripts. */
 export interface ThrowawayRepo {
   readonly dir: string;
@@ -72,6 +87,7 @@ export function createThrowawayRepo(prefix: string): ThrowawayRepo {
     execFileSync('git', args, { cwd: dir, env, stdio: 'ignore' });
   };
   git('init', '-q', '-b', 'feat/x');
+  for (const [key, value] of Object.entries(TEST_REPO_CONFIG)) git('config', key, value);
   // A local identity, because the global config is ignored and a bare `git commit` needs one.
   git('config', 'user.name', 't');
   git('config', 'user.email', 't@example.com');
@@ -88,6 +104,31 @@ export function createThrowawayRepo(prefix: string): ThrowawayRepo {
     commit: (message) => {
       git('commit', '-q', '-m', message);
     },
+    remove: () => {
+      rmSync(dir, { recursive: true, force: true });
+    },
+  };
+}
+
+/** A bare repository in a temporary directory, standing in for the remote a test pushes to. */
+export interface BareRepo {
+  readonly dir: string;
+  /** Runs git against the repository and returns its trimmed output. */
+  gitOutput(...args: string[]): string;
+  remove(): void;
+}
+
+/** Creates an empty bare repository. Call `remove` when the test is done. */
+export function createBareRepo(prefix: string): BareRepo {
+  const dir = mkdtempSync(join(tmpdir(), `${prefix}-`));
+  const env = isolatedGitEnvironment();
+  const git = (...args: string[]) =>
+    execFileSync('git', ['--git-dir', dir, ...args], { env, encoding: 'utf8' }).trim();
+  execFileSync('git', ['init', '-q', '--bare', dir], { env, stdio: 'ignore' });
+  for (const [key, value] of Object.entries(TEST_REPO_CONFIG)) git('config', key, value);
+  return {
+    dir,
+    gitOutput: git,
     remove: () => {
       rmSync(dir, { recursive: true, force: true });
     },

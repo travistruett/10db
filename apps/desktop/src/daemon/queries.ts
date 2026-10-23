@@ -1,20 +1,37 @@
 import {
+  BatchDto,
+  BoardColumnDto,
+  FlowDto,
   InboxItemDto,
   KeepAwakeStatus,
   ProjectDto,
+  ProjectViewDto,
   SystemCheckDto,
   TaskDto,
+  TaskStartResult,
   WorkstreamDto,
+  type BatchId,
+  type BoardColumnDelete,
+  type BoardColumnId,
+  type BoardColumnInput,
+  type BoardColumnPatch,
   type InboxAnswer,
   type InboxItemId,
   type KeepAwakeMode,
   type ProjectId,
   type ProjectInput,
+  type ProjectPatch,
   type TaskId,
   type TaskInput,
   type WorkstreamId,
 } from '@10db/contracts';
-import { queryOptions, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  queryOptions,
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type QueryClient,
+} from '@tanstack/react-query';
 import { z } from 'zod';
 import { readJson, type DaemonClient } from './client';
 import { useDaemon } from './provider';
@@ -23,15 +40,19 @@ import { useDaemon } from './provider';
 export const queryKeys = {
   projects: ['projects'],
   tasks: (projectId: ProjectId) => ['tasks', projectId] as const,
+  boardColumns: (projectId: ProjectId) => ['board-columns', projectId] as const,
   workstreams: (active: boolean) => ['workstreams', { active }] as const,
   inbox: ['inbox'],
   keepAwake: ['keep-awake'],
   system: ['system'],
+  flows: ['flows'],
 } as const;
 
-const ProjectList = z.array(ProjectDto);
+const ProjectList = z.array(ProjectViewDto);
 const TaskList = z.array(TaskDto);
 const WorkstreamList = z.array(WorkstreamDto);
+const BoardColumnList = z.array(BoardColumnDto);
+const FlowList = z.array(FlowDto);
 const InboxList = z.array(InboxItemDto);
 
 /** Open cards; shared by the Inbox view, the nav badge and notifications. */
@@ -59,6 +80,21 @@ export function useTasks(projectId: ProjectId | null) {
         ? readJson(
             await client.projects[':projectId'].tasks.$get({ param: { projectId } }),
             TaskList,
+          )
+        : [],
+    enabled: projectId !== null,
+  });
+}
+
+export function useBoardColumns(projectId: ProjectId | null) {
+  const { client } = useDaemon();
+  return useQuery({
+    queryKey: projectId ? queryKeys.boardColumns(projectId) : ['board-columns', 'none'],
+    queryFn: async () =>
+      projectId
+        ? readJson(
+            await client.projects[':projectId']['board-columns'].$get({ param: { projectId } }),
+            BoardColumnList,
           )
         : [],
     enabled: projectId !== null,
@@ -128,13 +164,44 @@ export function useStartTask() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (taskId: TaskId) =>
-      readJson(await client.tasks[':taskId'].start.$post({ param: { taskId } }), WorkstreamDto),
+      readJson(await client.tasks[':taskId'].start.$post({ param: { taskId } }), TaskStartResult),
+    // A pull-request start also changes the project's batch.
     onSuccess: () =>
       Promise.all([
         queryClient.invalidateQueries({ queryKey: ['tasks'] }),
         queryClient.invalidateQueries({ queryKey: ['workstreams'] }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.projects }),
       ]),
   });
+}
+
+export function useShipBatch() {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (batchId: BatchId) =>
+      readJson(await client.batches[':batchId'].ship.$post({ param: { batchId } }), BatchDto),
+    onSuccess: () => invalidateBatchViews(queryClient),
+  });
+}
+
+export function useAbandonBatch() {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (batchId: BatchId) =>
+      readJson(await client.batches[':batchId'].abandon.$post({ param: { batchId } }), BatchDto),
+    onSuccess: () => invalidateBatchViews(queryClient),
+  });
+}
+
+/** A batch action changes the project's strip, its workstreams and its tasks' columns. */
+function invalidateBatchViews(queryClient: QueryClient): Promise<unknown> {
+  return Promise.all([
+    queryClient.invalidateQueries({ queryKey: queryKeys.projects }),
+    queryClient.invalidateQueries({ queryKey: ['workstreams'] }),
+    queryClient.invalidateQueries({ queryKey: ['tasks'] }),
+  ]);
 }
 
 export function useCancelWorkstream() {
@@ -197,5 +264,87 @@ export function useSetKeepAwake() {
     onSuccess: (status) => {
       queryClient.setQueryData(queryKeys.keepAwake, status);
     },
+  });
+}
+
+export function useCreateBoardColumn(projectId: ProjectId) {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: BoardColumnInput) =>
+      readJson(
+        await client.projects[':projectId']['board-columns'].$post({
+          param: { projectId },
+          json: input,
+        }),
+        BoardColumnDto,
+      ),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['board-columns'] }),
+  });
+}
+
+export function usePatchBoardColumn() {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      id,
+      patch,
+    }: {
+      readonly id: BoardColumnId;
+      readonly patch: BoardColumnPatch;
+    }) =>
+      readJson(
+        await client['board-columns'][':columnId'].$patch({ param: { columnId: id }, json: patch }),
+        BoardColumnList,
+      ),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['board-columns'] }),
+  });
+}
+
+export function useDeleteBoardColumn() {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      id,
+      moveTasksTo,
+    }: {
+      readonly id: BoardColumnId;
+      readonly moveTasksTo: BoardColumnDelete['moveTasksTo'];
+    }) =>
+      readJson(
+        await client['board-columns'][':columnId'].delete.$post({
+          param: { columnId: id },
+          json: { moveTasksTo },
+        }),
+        BoardColumnList,
+      ),
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['board-columns'] }),
+        queryClient.invalidateQueries({ queryKey: ['tasks'] }),
+      ]),
+  });
+}
+
+export function useFlows() {
+  const { client } = useDaemon();
+  return useQuery({
+    queryKey: queryKeys.flows,
+    queryFn: async () => readJson(await client.flows.$get(), FlowList),
+  });
+}
+
+export function usePatchProject(projectId: ProjectId) {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (patch: ProjectPatch) =>
+      readJson(
+        await client.projects[':projectId'].$patch({ param: { projectId }, json: patch }),
+        ProjectDto,
+      ),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.projects }),
   });
 }

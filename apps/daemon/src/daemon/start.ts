@@ -6,6 +6,8 @@ import { serve, upgradeWebSocket, type WebSocketServerLike } from '@hono/node-se
 import {
   EventType,
   PROTOCOL_VERSION,
+  type InboxAnswer,
+  type InboxItemDto,
   type ProjectDto,
   type SystemCheckDto,
   type WorkstreamId,
@@ -30,10 +32,23 @@ import {
   scheduleNightlyBackup,
 } from '../backups';
 import { systemClock, type Clock } from '../clock';
+import {
+  createBatchCardAnswers,
+  createBatchStarter,
+  createDeliveryJobs,
+  createShipper,
+  DEFAULT_DELIVERY_LIMITS,
+  flagWrongBranch,
+  recoverBatches,
+  subscribeShipTrigger,
+  type DeliveryContext,
+  type DeliveryLimits,
+} from '../delivery';
 import type { LogLevel } from '../env';
 import { REQUIRED_TOOLS } from '../environment';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit } from '../git';
+import { createGh, type Gh } from '../github';
 import { createInboxService } from '../inbox';
 import { createKeepAwake, systemCaffeinate, type CaffeinateSpawner } from '../keep-awake';
 import { createLogger, fileDestination, rotateLogFile, type Logger } from '../log';
@@ -48,7 +63,7 @@ import {
 } from '../runner';
 import { createProviderPauses, createScheduler, type Scheduler } from '../scheduler';
 import type { SessionAdapter } from '../sessions';
-import { seedTeam } from '../team';
+import { retryWorkstream, seedTeam } from '../team';
 import { createGateRunner } from '../verify';
 import { createWatcher, systemWatch, type WatchFn } from '../watcher';
 import { acquireInstanceLock } from './instance-lock';
@@ -72,6 +87,11 @@ export interface DaemonOptions {
   readonly leaseMs?: number;
   /** How often the scheduler looks for work when nothing asks it to. */
   readonly tickMs?: number;
+  /** The GitHub CLI wrapper; tests pass a fake. */
+  readonly gh?: Gh;
+  /** The login environment fetch, push and gh run in (main.ts builds it from the login shell). */
+  readonly networkEnv?: () => Readonly<Record<string, string>>;
+  readonly deliveryLimits?: Partial<DeliveryLimits>;
   /** How long a provider stays paused when its usage limit gives no reset time. */
   readonly defaultPauseMs?: number;
   readonly sessionEnv?: (project: ProjectDto) => Readonly<Record<string, string>>;
@@ -83,6 +103,8 @@ export interface DaemonOptions {
   /** The harness plugin folder the default personas are read from. */
   readonly harnessDir?: string;
   readonly allowedOrigins?: readonly string[];
+  /** One more browser origin to accept beside `allowedOrigins` or the built-in ones (dev and Playwright). */
+  readonly devUiOrigin?: string;
   /** A fixed UI token (dev and Playwright); otherwise a random one per start. */
   readonly uiToken?: string;
   readonly caffeinate?: CaffeinateSpawner;
@@ -201,12 +223,53 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // references; they are set before anything can fire a callback.
   let runner: Runner | null = null;
   let scheduler: Scheduler | null = null;
+  let answerBatchCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
 
   const inbox = createInboxService({
     state,
     onParkedAnswer: (target, item) => {
       runner?.deliverParkedAnswer(target, item);
     },
+    onFlagAnswer: (item, answer) => {
+      answerBatchCard?.(item, answer);
+    },
+  });
+  const sessionEnv = opts.sessionEnv ?? (() => ({ PATH: DEFAULT_SESSION_PATH }));
+  const deliveryJobs = createDeliveryJobs(logger.child({ component: 'delivery' }));
+  const delivery: DeliveryContext = {
+    state,
+    git,
+    gh: opts.gh ?? createGh(),
+    inbox,
+    jobs: deliveryJobs,
+    logger: logger.child({ component: 'delivery' }),
+    limits: {
+      ...DEFAULT_DELIVERY_LIMITS,
+      pushTimeoutMs: limits.gateTimeoutMs,
+      gateTimeoutMs: limits.gateTimeoutMs,
+      ...opts.deliveryLimits,
+    },
+    networkEnv: opts.networkEnv ?? (() => ({ PATH: DEFAULT_SESSION_PATH })),
+    onWorkQueued: () => {
+      scheduler?.requestTick();
+    },
+  };
+  const starter = createBatchStarter(delivery);
+  const shipper = createShipper({
+    ...delivery,
+    gate: createGateRunner(),
+    clock,
+    dataDir: opts.dataDir,
+    sessionEnv,
+    identifyProcess: (pid) => processes.identify(pid),
+    isRunning: (id) => runner?.isRunning(id) ?? false,
+  });
+  answerBatchCard = createBatchCardAnswers({
+    retry: (id) => {
+      retryWorkstream(state, id);
+      scheduler?.requestTick();
+    },
+    shipper,
   });
   const watcher =
     opts.watch === false
@@ -240,7 +303,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     live,
     limits,
     mcpUrl: () => mcpUrl,
-    sessionEnv: opts.sessionEnv ?? (() => ({ PATH: DEFAULT_SESSION_PATH })),
+    sessionEnv,
     onRateLimited: (provider, resetsAt, projectId) => {
       pauses.pause(provider, resetsAt, projectId);
     },
@@ -263,6 +326,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     caps: opts.caps ?? DEFAULTS.caps,
     leaseMs: opts.leaseMs ?? DEFAULTS.leaseMs,
     tickMs: opts.tickMs ?? DEFAULTS.tickMs,
+    branches: git,
+    onWrongBranch: (batch, current, repoPath) => {
+      flagWrongBranch(inbox, batch, current, repoPath);
+    },
   });
   scheduler = createdScheduler;
 
@@ -280,6 +347,15 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     cleanShutdown,
   });
   pauses.restore();
+  await recoverBatches({
+    state,
+    git,
+    inbox,
+    processes,
+    shipper,
+    logger: logger.child({ component: 'delivery' }),
+  });
+  const unsubscribeShip = subscribeShipTrigger(bus, state.db, shipper);
 
   // Lanes start and stop through workstream events; keep-awake and the watcher follow them.
   const unsubscribeLanes = bus.subscribe((event) => {
@@ -294,7 +370,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const token = opts.uiToken ?? randomBytes(32).toString('base64url');
   const app = createApp({
     startedAt,
-    allowedOrigins: opts.allowedOrigins ?? UI_ORIGINS,
+    allowedOrigins: [
+      ...(opts.allowedOrigins ?? UI_ORIGINS),
+      ...(opts.devUiOrigin ? [opts.devUiOrigin] : []),
+    ],
     token,
     services: createServices({
       state,
@@ -305,6 +384,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       keepAwake,
       systemCheck: opts.systemCheck ?? noSystemCheck,
       benchmarks,
+      starter,
+      shipper,
     }),
     upgradeWebSocket,
     onUnexpectedError: (error) => {
@@ -365,6 +446,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   async function shutdown(): Promise<void> {
     try {
       createdScheduler.stop();
+      unsubscribeShip();
+      // Aborts a shipping gate and any git or gh child; the batch stays SHIPPING for recovery.
+      await deliveryJobs.stop();
       benchmarks.stop();
       pauses.stop();
       nightly.cancel();

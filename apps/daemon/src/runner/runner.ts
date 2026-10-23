@@ -66,6 +66,7 @@ import {
   RESULT_NUDGE,
 } from '../briefing';
 import type { Clock, Timer } from '../clock';
+import { batchCardFields } from '../delivery';
 import type { StateStore } from '../events';
 import type { Git } from '../git';
 import { judgeToolUse } from '../guard';
@@ -305,6 +306,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       workstreamId: id,
       title: `Workstream failed: ${getTask(db, row.taskId).title}`,
       body: reason,
+      ...batchCardFields(row),
     });
   }
 
@@ -820,6 +822,7 @@ export function createRunner(opts: RunnerOptions): Runner {
           hazards: project.hazards,
           claims: claims(),
           readOnly,
+          delivery: project.delivery,
         }),
       canUseTool: createPermissionBroker(
         { state: opts.state, inbox: opts.inbox },
