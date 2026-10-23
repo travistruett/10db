@@ -151,6 +151,42 @@ describe('createGh', () => {
     ]);
   });
 
+  it.each([
+    {
+      name: 'a trailing https line that is not a pull request',
+      stdout: 'https://github.com/acme/widgets/pull/8\nhttps://github.com/notices/upgrade\n',
+      url: 'https://github.com/acme/widgets/pull/8',
+    },
+    {
+      name: 'an Enterprise host',
+      stdout: 'https://git.acme.dev/acme/widgets/pull/9\n',
+      url: 'https://git.acme.dev/acme/widgets/pull/9',
+    },
+    { name: 'only a non-pull-request https line', stdout: 'https://github.com/acme/widgets\n' },
+    {
+      name: "another repository's pull request",
+      stdout: 'https://github.com/acme/gadgets/pull/8\n',
+    },
+    { name: 'a pull request over http', stdout: 'http://github.com/acme/widgets/pull/8\n' },
+    {
+      name: 'a pull request number that is not one',
+      stdout: 'https://github.com/acme/widgets/pull/x\n',
+    },
+  ])('reads the pull request URL gh pr create prints: $name', async ({ stdout, url }) => {
+    const { exec } = scripted({ 'pr create': { exitCode: 0, stdout } });
+    const created = createGh(exec).prCreate(
+      { repo: 'acme/widgets', base: 'main', head: '10db/x-0a1b2c3d', title: 't', bodyFile: '/b' },
+      CALL,
+    );
+    if (url) await expect(created).resolves.toBe(url);
+    else
+      await expect(created).rejects.toMatchObject({
+        name: 'GhError',
+        kind: 'failed',
+        message: 'gh pr create printed no pull request URL for acme/widgets',
+      });
+  });
+
   it('passes not-installed through from the exec', async () => {
     const missing = new GhError('not_installed', 'gh is not installed');
     await expect(createGh(scripted({ 'auth status': missing }).exec).authStatus(CALL)).rejects.toBe(

@@ -138,6 +138,19 @@ export const systemGhExec: GhExec = (args, call) =>
 const RepoView = z.object({ nameWithOwner: z.string().regex(/^[^/\s]+\/[^/\s]+$/) });
 const PrView = z.object({ url: z.url(), state: z.enum(PrState) });
 
+/**
+ * A pull request URL in `repo` (`owner/name`), on any GitHub host: https and
+ * `/<owner>/<name>/pull/<number>`. GitHub compares owner and name without case.
+ */
+function prUrlIn(repo: string) {
+  return z.url({ protocol: /^https$/ }).refine((url) => {
+    // zod runs a refinement even when the URL check failed.
+    if (!URL.canParse(url)) return false;
+    const path = /^\/([^/]+\/[^/]+)\/pull\/\d+$/.exec(new URL(url).pathname);
+    return path?.[1]?.toLowerCase() === repo.toLowerCase();
+  });
+}
+
 function failure(args: readonly string[], out: GhOutput): GhError {
   if (out.exitCode === AUTH_REQUIRED_EXIT || SIGNED_OUT.test(out.stderr))
     return new GhError(
@@ -215,14 +228,14 @@ export function createGh(exec: GhExec = systemGhExec): Gh {
         '--body-file',
         bodyFile,
       ];
-      const url = (await ok(args, call))
-        .split('\n')
-        .map((line) => line.trim())
-        .reverse()
-        .find((line) => line.startsWith('https://'));
-      if (url === undefined)
-        throw new GhError(GhFailure.Failed, 'gh pr create printed no pull request URL');
-      return url;
+      // gh prints the new pull request's URL last; parse it, so a notice line is never recorded.
+      const prUrl = prUrlIn(repo);
+      const lines = (await ok(args, call)).split('\n').map((line) => line.trim());
+      for (const line of lines.reverse()) {
+        const url = prUrl.safeParse(line);
+        if (url.success) return url.data;
+      }
+      throw new GhError(GhFailure.Failed, `gh pr create printed no pull request URL for ${repo}`);
     },
   };
 }
