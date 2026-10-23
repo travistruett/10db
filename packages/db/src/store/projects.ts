@@ -1,6 +1,8 @@
 import {
+  ACTIVE_STATES,
   ConflictError,
   DEFAULT_BOARD_COLUMN,
+  Delivery,
   EventType,
   InvalidError,
   mintId,
@@ -10,9 +12,11 @@ import {
   Provider,
   type ProjectDto,
   type ProjectId,
+  type ProjectViewDto,
 } from '@10db/contracts';
-import { asc, eq } from 'drizzle-orm';
+import { and, asc, eq, inArray } from 'drizzle-orm';
 import * as schema from '../schema';
+import { currentBatch, findUnfinishedBatch } from './batches';
 import { insertBoardColumn } from './board-columns';
 import { getFlow } from './flows';
 import type { DbReader, WriteContext } from './store';
@@ -58,6 +62,28 @@ export function patchProject(ctx: WriteContext, id: ProjectId, patch: ProjectPat
   const nudgePct = changes.nudgePct ?? current.nudgePct;
   const handoffPct = changes.handoffPct ?? current.handoffPct;
   if (nudgePct <= handoffPct) throw new InvalidError('nudgePct must be above handoffPct');
+  if (changes.delivery !== undefined && changes.delivery !== current.delivery) {
+    // A QUEUED pull-request workstream needs a batch to launch, so delivery can't change under work.
+    const busy = ctx.tx
+      .select({ id: schema.workstreams.id })
+      .from(schema.workstreams)
+      .where(
+        and(
+          eq(schema.workstreams.projectId, id),
+          inArray(schema.workstreams.state, [...ACTIVE_STATES]),
+        ),
+      )
+      .get();
+    if (busy || findUnfinishedBatch(ctx.tx, id))
+      throw new ConflictError(
+        `${current.name} has unfinished work; finish or cancel it before changing its delivery`,
+      );
+  }
+  const delivery = changes.delivery ?? current.delivery;
+  const prefix =
+    changes.prTitlePrefix === undefined ? current.prTitlePrefix : changes.prTitlePrefix;
+  if (delivery === Delivery.PullRequest && prefix === null)
+    throw new InvalidError('Pull request delivery needs a PR title prefix such as feat(app)');
   ctx.tx
     .update(schema.projects)
     .set({ ...changes, updatedAt: ctx.now })
@@ -65,4 +91,9 @@ export function patchProject(ctx: WriteContext, id: ProjectId, patch: ProjectPat
     .run();
   ctx.emit({ type: EventType.ProjectChanged, entityType: 'project', entityId: id });
   return getProject(ctx.tx, id);
+}
+
+/** `GET /projects`: each project with the batch its view shows. */
+export function listProjectViews(db: DbReader): ProjectViewDto[] {
+  return listProjects(db).map((p) => ({ ...p, currentBatch: currentBatch(db, p.id) }));
 }

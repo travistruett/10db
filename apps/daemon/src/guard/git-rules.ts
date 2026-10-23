@@ -1,3 +1,5 @@
+import { Delivery } from '@10db/contracts';
+
 export type GitVerdict = { readonly deny: string } | null;
 
 /** Verbs that only read. Everything not listed here (and not `push` or `branch`) is refused. */
@@ -71,7 +73,7 @@ function pushVerdict(args: readonly string[]): GitVerdict {
  * `push`. Anything else changes the shared checkout or its config; commits go through the
  * 10db commit tool.
  */
-export function gitVerdict(words: readonly string[]): GitVerdict {
+export function gitVerdict(words: readonly string[], delivery: Delivery): GitVerdict {
   let i = 1;
   while (i < words.length && (words[i] ?? '').startsWith('-')) {
     const flag = words[i] ?? '';
@@ -97,7 +99,10 @@ export function gitVerdict(words: readonly string[]): GitVerdict {
       ? null
       : { deny: 'Creating or deleting branches is not allowed in the shared checkout.' };
   }
-  if (verb === 'push') return pushVerdict(args);
+  if (verb === 'push')
+    return delivery === Delivery.PullRequest
+      ? { deny: '10db pushes when the batch ships; agents do not push in pull-request projects.' }
+      : pushVerdict(args);
   return {
     deny: `git ${verb} is not allowed. Only read-only git and push are allowed; commit through the 10db commit tool.`,
   };

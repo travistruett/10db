@@ -190,3 +190,31 @@ export const ROLE_SCORE: Readonly<Record<StepRole, ScoreKind>> = {
 /** Where a profile's scores come from: the AA sync, or the builder's own numbers. */
 export const ProfileSource = { Aa: 'aa', Manual: 'manual' } as const;
 export type ProfileSource = ValueOf<typeof ProfileSource>;
+
+/** How a project's finished work leaves the machine (batch delivery spec §3). */
+export const Delivery = { Local: 'local', PullRequest: 'pull_request' } as const;
+export type Delivery = ValueOf<typeof Delivery>;
+
+/** A batch's lifecycle (batch delivery spec §4). */
+export const BatchState = {
+  Cutting: 'CUTTING',
+  Open: 'OPEN',
+  Shipping: 'SHIPPING',
+  Shipped: 'SHIPPED',
+  Closed: 'CLOSED',
+  Failed: 'FAILED',
+  Abandoned: 'ABANDONED',
+} as const;
+export type BatchState = ValueOf<typeof BatchState>;
+
+/** Why shipping stopped; the batch's flag card carries the detail. */
+export const BatchFailure = {
+  WrongBranch: 'wrong_branch',
+  DirtyCheckout: 'dirty_checkout',
+  GateFailed: 'gate_failed',
+  GateTimedOut: 'gate_timed_out',
+  PushRejected: 'push_rejected',
+  GhUnavailable: 'gh_unavailable',
+  Network: 'network',
+} as const;
+export type BatchFailure = ValueOf<typeof BatchFailure>;

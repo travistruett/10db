@@ -23,6 +23,7 @@
     "@tanstack/react-router": "1.170.44",
     "@tauri-apps/api": "2.12.4",
     "@tauri-apps/plugin-notification": "2.7.0",
+    "@tauri-apps/plugin-opener": "2.7.2",
     "dayjs": "1.11.23",
     "hono": "4.13.13",
     "react": "19.3.1",

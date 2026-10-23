@@ -1,4 +1,4 @@
-import { ProjectId, type ProjectDto } from '@10db/contracts';
+import { ProjectId, type ProjectViewDto } from '@10db/contracts';
 import { useLocalStorage } from '@mantine/hooks';
 import type { UseQueryResult } from '@tanstack/react-query';
 import { useProjects } from '../daemon/queries';
@@ -15,8 +15,8 @@ function deserializeProjectId(value: string | undefined): ProjectId | null {
 }
 
 export interface SelectedProject {
-  readonly projects: UseQueryResult<ProjectDto[]>;
-  readonly project: ProjectDto | null;
+  readonly projects: UseQueryResult<ProjectViewDto[]>;
+  readonly project: ProjectViewDto | null;
   readonly select: (id: ProjectId | null) => void;
 }
 

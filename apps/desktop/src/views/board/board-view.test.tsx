@@ -3,7 +3,14 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse, type RequestHandler, type WebSocketHandler } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, eventStream, renderApp, server } from '../../test/daemon';
-import { boardColumnDto, projectDto, taskDto, workstreamDto } from '../../test/fixtures';
+import {
+  batchDto,
+  boardColumnDto,
+  projectDto,
+  projectViewDto,
+  taskDto,
+  workstreamDto,
+} from '../../test/fixtures';
 
 /** The base daemon (health, head, empty lists, a silent event stream), then this test's overrides. */
 function serve(...overrides: (RequestHandler | WebSocketHandler)[]): void {
@@ -64,11 +71,71 @@ describe('BoardView', () => {
       billingMode: 'subscription',
       handoffPct: 40,
       nudgePct: 50,
+      delivery: 'local',
     });
     await waitFor(() => {
       expect(screen.queryByRole('dialog')).toBeNull();
     });
     expect(await screen.findByText('No tasks yet.')).toBeTruthy();
+  });
+
+  it('creates a pull-request project with its base branch and title prefix, and requires the prefix', async () => {
+    const posted: unknown[] = [];
+    serve(
+      http.post(daemonUrl('/projects'), async ({ request }) => {
+        posted.push(await request.json());
+        return HttpResponse.json(projectDto(), { status: 201 });
+      }),
+    );
+    renderApp('/board');
+    fireEvent.click(await screen.findByRole('button', { name: 'New project' }));
+    const dialog = await screen.findByRole('dialog', { name: 'New project' });
+    type('Name', 'shop', dialog);
+    type('Repository path', '/repos/shop', dialog);
+    type('Gate command', 'make gate', dialog);
+    type('Areas', 'api: src/api/**', dialog);
+    fireEvent.click(within(dialog).getByRole('radio', { name: 'One pull request per batch' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Create project' }));
+    expect(
+      await within(dialog).findByText('Enter a PR title prefix such as feat(app)'),
+    ).toBeTruthy();
+    expect(posted).toEqual([]);
+    type('PR title prefix', 'feat(app)', dialog);
+    type('Base branch', 'develop', dialog);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Create project' }));
+    await waitFor(() => {
+      expect(posted).toHaveLength(1);
+    });
+    expect(posted[0]).toMatchObject({
+      delivery: 'pull_request',
+      baseBranch: 'develop',
+      prTitlePrefix: 'feat(app)',
+    });
+  });
+
+  it("shows the project's batch and retries a failed one", async () => {
+    const batch = batchDto({ state: 'FAILED', failure: 'push_rejected' });
+    const project = projectViewDto({
+      id: batch.projectId,
+      delivery: 'pull_request',
+      prTitlePrefix: 'feat(app)',
+      currentBatch: batch,
+    });
+    const shipped: string[] = [];
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([])),
+      http.post(daemonUrl('/batches/:batchId/ship'), ({ params }) => {
+        shipped.push(String(params['batchId']));
+        return HttpResponse.json({ ...batch, state: 'SHIPPING', failure: null });
+      }),
+    );
+    renderApp('/board');
+    expect(await screen.findByText('git push was rejected')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    await waitFor(() => {
+      expect(shipped).toEqual([batch.id]);
+    });
   });
 
   it('shows an areas mistake without calling the daemon', async () => {

@@ -1,12 +1,16 @@
 import {
+  BatchDto,
   BoardColumnDto,
   FlowDto,
   InboxItemDto,
   KeepAwakeStatus,
   ProjectDto,
+  ProjectViewDto,
   SystemCheckDto,
   TaskDto,
+  TaskStartResult,
   WorkstreamDto,
+  type BatchId,
   type BoardColumnDelete,
   type BoardColumnId,
   type BoardColumnInput,
@@ -21,7 +25,13 @@ import {
   type TaskInput,
   type WorkstreamId,
 } from '@10db/contracts';
-import { queryOptions, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  queryOptions,
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type QueryClient,
+} from '@tanstack/react-query';
 import { z } from 'zod';
 import { readJson, type DaemonClient } from './client';
 import { useDaemon } from './provider';
@@ -38,7 +48,7 @@ export const queryKeys = {
   flows: ['flows'],
 } as const;
 
-const ProjectList = z.array(ProjectDto);
+const ProjectList = z.array(ProjectViewDto);
 const TaskList = z.array(TaskDto);
 const WorkstreamList = z.array(WorkstreamDto);
 const BoardColumnList = z.array(BoardColumnDto);
@@ -154,13 +164,44 @@ export function useStartTask() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (taskId: TaskId) =>
-      readJson(await client.tasks[':taskId'].start.$post({ param: { taskId } }), WorkstreamDto),
+      readJson(await client.tasks[':taskId'].start.$post({ param: { taskId } }), TaskStartResult),
+    // A pull-request start also changes the project's batch.
     onSuccess: () =>
       Promise.all([
         queryClient.invalidateQueries({ queryKey: ['tasks'] }),
         queryClient.invalidateQueries({ queryKey: ['workstreams'] }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.projects }),
       ]),
   });
+}
+
+export function useShipBatch() {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (batchId: BatchId) =>
+      readJson(await client.batches[':batchId'].ship.$post({ param: { batchId } }), BatchDto),
+    onSuccess: () => invalidateBatchViews(queryClient),
+  });
+}
+
+export function useAbandonBatch() {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (batchId: BatchId) =>
+      readJson(await client.batches[':batchId'].abandon.$post({ param: { batchId } }), BatchDto),
+    onSuccess: () => invalidateBatchViews(queryClient),
+  });
+}
+
+/** A batch action changes the project's strip, its workstreams and its tasks' columns. */
+function invalidateBatchViews(queryClient: QueryClient): Promise<unknown> {
+  return Promise.all([
+    queryClient.invalidateQueries({ queryKey: queryKeys.projects }),
+    queryClient.invalidateQueries({ queryKey: ['workstreams'] }),
+    queryClient.invalidateQueries({ queryKey: ['tasks'] }),
+  ]);
 }
 
 export function useCancelWorkstream() {

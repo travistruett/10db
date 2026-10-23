@@ -14,7 +14,7 @@
 - [ ] M2: per-workstream log files for the Factory detail view (spec §12; M1a has one shared daemon log, decision 31).
 - [ ] M2: diagnostics bundle export (spec §12; not built in M1a).
 - [ ] M2: project settings for extra allowed commands (test and lint), beyond the gate command.
-- [ ] Spec §8.1: reword "claims are released when the lease expires" to match decision 36 (released on DONE, CANCELLED or FAILED, never by lease expiry).
+- [x] Spec §8.1: reword "claims are released when the lease expires" to match decision 36 (released on DONE, CANCELLED or FAILED, never by lease expiry).
 - [ ] M2: let a resumed agent retrying `ask_human` with the same `opId` get the parked answer back, instead of only the "do not ask again" message.
 - [ ] M2: inject the environment into `createGit(env)` instead of reading `process.env` in `git.ts` (M1b already calls `createGit()` with no arguments).
 - [ ] Spec §5.1: "Ready" does not yet check for an open blocking inbox item.
@@ -53,3 +53,9 @@
 - [ ] AA: a real sync confirmed the free API's slugs and its `page` query parameter match the catalogue's and the client's. Still open: AA's index versions may shift scores between syncs, and 10db's needs and floors are absolute index points. The status flags a major-version change (AA says scores are comparable within a major version); patch versions aren't reported, so they can't be detected. AA's free API gives no Coding or Agentic Index for some models; those roles route on Intelligence (decision 66) until it does. The sync status lists the profiles routing can't use (`unmeasuredProfiles`) and the score kinds missing from the rest (`missingScores`).
 - [ ] M2a read-only shell: a read-only step's shell accepts only plain words and simple quoting, so unquoted globs, ~, $, braces and backslashes are refused (quote them), and so is any `=` at the start of a word or right after `=` or `:`, quoted or not (for example `'==='` or `'a:=b'`), so reviewers use the Grep tool for those. Revisit if real reviews hit it.
 - [ ] M2a read-only shell: aliases and functions in the user's shell configuration can rewrite plain words, which the read-only grammar cannot see; check whether Claude Code's Bash tool loads them.
+- [ ] Batch delivery: worktrees and one PR per task (workspace_mode = worktree), the spec's expected fast-follow (batch delivery spec §9).
+- [ ] Batch delivery: an after-ship action per batch or task (auto_merge with gh pr merge --auto --squash, or a project deploy command), spec §9.
+- [ ] Batch delivery: stacked batches, rebasing or updating an unmerged PR, and hosts other than GitHub (spec §9).
+- [ ] Batch delivery: agents' gh api is GET only, so read-only GraphQL queries (always POST) are denied too; allow them if a persona needs them.
+- [ ] Batch delivery: the manual acceptance on a throwaway GitHub repository (plan 08 Task 13).
+- [ ] Batch delivery: fork support. The cut records the repository from `gh repo view` without `-R`, which picks the base repository by remote priority (`upstream`, then `github`, then `origin`), so a fork with an `upstream` remote records the parent repository while the push goes to `origin`. Record it from `git remote get-url origin` instead, and test a fork.

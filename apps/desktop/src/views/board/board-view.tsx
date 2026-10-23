@@ -15,6 +15,7 @@ import { useBoardColumns, useTasks, useWorkstreams } from '../../daemon/queries'
 import { ProjectPicker } from '../../shell/project-picker';
 import { useSelectedProject } from '../../shell/selected-project';
 import { formatAreas } from './areas-text';
+import { BatchStrip } from './batch-strip';
 import { BoardColumn } from './board-column';
 import { BoardDnd } from './board-dnd';
 import { boardLayout, DONE_LIMIT, type LayoutColumn } from './board-layout';
@@ -211,6 +212,9 @@ export function BoardView() {
           {'\n'}
           {formatAreas(project.areas)}
         </Text>
+      ) : null}
+      {project?.currentBatch ? (
+        <BatchStrip batch={project.currentBatch} workstreams={workstreams.data ?? []} />
       ) : null}
 
       {project && tasks.isSuccess && taskList.length === 0 ? (

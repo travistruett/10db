@@ -53,10 +53,15 @@ export function snapshotFiles(dir: string): Record<string, string> {
  * detached `git maintenance run --auto` after a commit, and receive-pack starts one in a bare
  * repository after a push. It goes on writing under the repository (it holds
  * `objects/maintenance.lock`) after the command returns, which races a test that snapshots the
- * files or removes the directory. Being local, it reaches every git process that touches the
- * repository.
+ * files or removes the directory. An older git's receive-pack starts `git gc --auto` instead;
+ * `receive.autogc` stops receive-pack starting either. Being local, it reaches every git process
+ * that touches the repository.
  */
-const TEST_REPO_CONFIG = { 'maintenance.auto': 'false', 'gc.auto': '0' } as const;
+const TEST_REPO_CONFIG = {
+  'maintenance.auto': 'false',
+  'gc.auto': '0',
+  'receive.autogc': 'false',
+} as const;
 
 /** A real git repository in a temporary directory, for tests that run hooks and scripts. */
 export interface ThrowawayRepo {

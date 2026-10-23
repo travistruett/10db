@@ -37,9 +37,15 @@ export function isolatedGitEnv(): NodeJS.ProcessEnv {
  * Local config every test repository gets before its first commit. Without it git starts a detached
  * `git maintenance run --auto` after a commit, which goes on writing under `.git` (it holds
  * `objects/maintenance.lock`) after the command returns and races any test that reads those files.
- * Being local, it reaches every git process that touches the repository, whatever its environment.
+ * In a bare origin, receive-pack starts one after a push, and an older git's receive-pack starts
+ * `git gc --auto` instead; `receive.autogc` stops receive-pack starting either. Being local, it
+ * reaches every git process that touches the repository, whatever its environment.
  */
-export const TEST_REPO_CONFIG = { 'maintenance.auto': 'false', 'gc.auto': '0' } as const;
+export const TEST_REPO_CONFIG = {
+  'maintenance.auto': 'false',
+  'gc.auto': '0',
+  'receive.autogc': 'false',
+} as const;
 
 /** A real git repository with one commit on main, for tests that touch git or files. */
 export function createTempRepo(): TempDir {
@@ -55,6 +61,57 @@ export function createTempRepo(): TempDir {
   writeFileSync(join(dir.path, 'README.md'), '# fixture\n');
   git('add', 'README.md');
   git('commit', '-q', '-m', 'Initial commit');
+  return dir;
+}
+
+/**
+ * What network calls get in tests: enough PATH to find git and gh scripts, and the same config
+ * isolation as `isolatedGitEnv`, nothing else.
+ */
+export const NETWORK_ENV: Readonly<Record<string, string>> = {
+  PATH: process.env['PATH'] ?? '/usr/bin:/bin',
+  GIT_CONFIG_NOSYSTEM: '1',
+  GIT_CONFIG_GLOBAL: '/dev/null',
+};
+
+/** A temp repo whose `origin` is a local bare repo holding `main`, so fetch and push are real. */
+export function createTempRepoWithOrigin(): { repo: TempDir; origin: TempDir; cleanup(): void } {
+  const origin = tempDir('origin');
+  const env = isolatedGitEnv();
+  execFileSync('git', ['init', '-q', '--bare', '-b', 'main', origin.path], { env, stdio: 'pipe' });
+  for (const [key, value] of Object.entries(TEST_REPO_CONFIG))
+    execFileSync('git', ['--git-dir', origin.path, 'config', key, value], { env, stdio: 'pipe' });
+  const repo = createTempRepo();
+  execFileSync('git', ['-C', repo.path, 'remote', 'add', 'origin', origin.path], {
+    env,
+    stdio: 'pipe',
+  });
+  execFileSync('git', ['-C', repo.path, 'push', '-q', 'origin', 'main'], { env, stdio: 'pipe' });
+  return {
+    repo,
+    origin,
+    cleanup: () => {
+      repo.cleanup();
+      origin.cleanup();
+    },
+  };
+}
+
+/** A clone of `origin` with a teammate's identity, for a test that moves origin from elsewhere. */
+export function createTempClone(origin: string): TempDir {
+  const dir = tempDir('clone');
+  const env = isolatedGitEnv();
+  // `clone -c` writes the config into the new repository before anything is fetched or committed.
+  const config = Object.entries(TEST_REPO_CONFIG).flatMap(([key, value]) => [
+    '-c',
+    `${key}=${value}`,
+  ]);
+  execFileSync('git', ['clone', '-q', ...config, origin, dir.path], { env, stdio: 'pipe' });
+  const git = (...args: string[]) =>
+    execFileSync('git', ['-C', dir.path, ...args], { env, stdio: 'pipe' });
+  git('config', 'user.name', 'teammate');
+  git('config', 'user.email', 'teammate@10db.invalid');
+  git('config', 'commit.gpgsign', 'false');
   return dir;
 }
 

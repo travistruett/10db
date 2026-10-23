@@ -1,9 +1,11 @@
 import {
+  BatchDto,
   BoardColumnDto,
   DaemonEvent,
   InboxItemDto,
   mintId,
   ProjectDto,
+  ProjectViewDto,
   TaskDto,
   WorkstreamDto,
 } from '@10db/contracts';
@@ -31,6 +33,33 @@ export function projectDto(overrides: Partial<ProjectDto> = {}): ProjectDto {
     humanWaitMinutes: 10,
     flowId: null,
     budgetCeiling: null,
+    delivery: 'local',
+    baseBranch: 'main',
+    prTitlePrefix: null,
+    createdAt: AT,
+    updatedAt: AT,
+    ...overrides,
+  });
+}
+
+export function projectViewDto(overrides: Partial<ProjectViewDto> = {}): ProjectViewDto {
+  return ProjectViewDto.parse({ ...projectDto(), currentBatch: null, ...overrides });
+}
+
+export function batchDto(overrides: Partial<BatchDto> = {}): BatchDto {
+  return BatchDto.parse({
+    id: mintId('Batch'),
+    projectId: mintId('Project'),
+    title: 'Greetings',
+    state: 'OPEN',
+    branch: '10db/greetings-0a1b2c3d',
+    baseBranch: 'main',
+    baseSha: 'a'.repeat(40),
+    repo: 'acme/widgets',
+    prUrl: null,
+    gateExitCode: null,
+    gateLogPath: null,
+    failure: null,
     createdAt: AT,
     updatedAt: AT,
     ...overrides,
@@ -76,6 +105,7 @@ export function workstreamDto(overrides: Partial<WorkstreamDto> = {}): Workstrea
     id: mintId('Workstream'),
     taskId: mintId('Task'),
     projectId: mintId('Project'),
+    batchId: null,
     taskTitle: 'Write the greeting',
     state: 'RUNNING',
     nextAction: { kind: 'start' },

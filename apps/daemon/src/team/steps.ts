@@ -1,7 +1,9 @@
 import {
   ConflictError,
+  BatchState,
   InvalidError,
   WorkstreamState,
+  type BatchId,
   type StepPlanDto,
   type TaskId,
   type WorkstreamDto,
@@ -9,6 +11,7 @@ import {
 } from '@10db/contracts';
 import {
   findFlowByName,
+  getBatch,
   getFlow,
   getProject,
   getTask,
@@ -20,8 +23,10 @@ import {
   listModelProfiles,
   listPersonas,
   patchWorkstream,
+  transitionBatch,
   transitionWorkstream,
   type DbReader,
+  type WriteContext,
 } from '@10db/db';
 import type { StateStore } from '../events';
 import { DEFAULT_PROJECT_FLOW, NoProfileError, planSteps } from '../routing';
@@ -50,11 +55,11 @@ export function resolveStepPlan(db: DbReader, taskId: TaskId): StepPlanDto {
   }
 }
 
-/** Starts a task on its resolved plan, refusing one that no profile within the budget ceiling can run. */
-export function startTaskWithPlan(state: StateStore, taskId: TaskId): WorkstreamDto {
-  const plan = resolveStepPlan(state.db, taskId);
+/** The plan a start would run; refuses one that no profile within the budget ceiling can run. */
+export function planForStart(db: DbReader, taskId: TaskId): StepPlanDto {
+  const plan = resolveStepPlan(db, taskId);
   if (plan.overBudget.length > 0) {
-    const ceiling = getProject(state.db, getTask(state.db, taskId).projectId).budgetCeiling;
+    const ceiling = getProject(db, getTask(db, taskId).projectId).budgetCeiling;
     const named = plan.overBudget.map((i) => {
       const step = plan.steps[i];
       const need = step ? `${String(step.need)} ${step.score}` : '?';
@@ -64,23 +69,42 @@ export function startTaskWithPlan(state: StateStore, taskId: TaskId): Workstream
       `${named.join('. ')}. Raise the ceiling, lower the need or pin a persona.`,
     );
   }
-  const first = plan.steps[0];
-  if (!first) throw new InvalidError('The flow resolved to no steps');
-  return state.write((ctx) => {
-    const ws = insertWorkstream(ctx, taskId);
-    patchWorkstream(ctx, ws.id, null, {
-      steps: plan.steps.map((s, i) =>
-        i === 0 ? { ...s, status: 'running', startedAt: ctx.now } : s,
-      ),
-      stepIndex: 0,
-      model: first.model,
-      effort: first.effort,
-    });
-    return getWorkstream(ctx.tx, ws.id);
-  });
+  if (plan.steps.length === 0) throw new InvalidError('The flow resolved to no steps');
+  return plan;
 }
 
-/** A failed workstream goes back to the queue; its current step restarts clean, from its own handoffs only. */
+/** Inserts the task's workstream on its plan; `batchId` is the batch it runs in, null in local delivery. */
+export function insertPlannedWorkstream(
+  ctx: WriteContext,
+  taskId: TaskId,
+  plan: StepPlanDto,
+  batchId: BatchId | null,
+): WorkstreamDto {
+  const [first] = plan.steps;
+  if (!first) throw new InvalidError('The flow resolved to no steps');
+  const ws = insertWorkstream(ctx, taskId, { batchId });
+  patchWorkstream(ctx, ws.id, null, {
+    steps: plan.steps.map((s, i) =>
+      i === 0 ? { ...s, status: 'running', startedAt: ctx.now } : s,
+    ),
+    stepIndex: 0,
+    model: first.model,
+    effort: first.effort,
+  });
+  return getWorkstream(ctx.tx, ws.id);
+}
+
+/** Starts a task in local delivery: its plan, then its workstream. */
+export function startTaskWithPlan(state: StateStore, taskId: TaskId): WorkstreamDto {
+  const plan = planForStart(state.db, taskId);
+  return state.write((ctx) => insertPlannedWorkstream(ctx, taskId, plan, null));
+}
+
+/**
+ * A failed workstream goes back to the queue; its current step restarts clean, from its own handoffs
+ * only. A parked task, or a workstream a newer one replaced, is not retried. In a batch it may retry
+ * only while the batch is OPEN or FAILED, and a FAILED batch reopens (batch delivery spec §4).
+ */
 export function retryWorkstream(state: StateStore, id: WorkstreamId): WorkstreamDto {
   const row = getWorkstreamRow(state.db, id);
   if (row.state !== WorkstreamState.Failed)
@@ -94,7 +118,18 @@ export function retryWorkstream(state: StateStore, id: WorkstreamId): Workstream
     throw new ConflictError(
       `${task.title} has a newer workstream; retry that one or start the task`,
     );
+  const batch = row.batchId ? getBatch(state.db, row.batchId) : null;
+  if (batch && batch.state !== BatchState.Open && batch.state !== BatchState.Failed)
+    throw new ConflictError(
+      `Batch "${batch.title}" is ${batch.state.toLowerCase()}; start the task again to run it in a new batch`,
+    );
   return state.write((ctx) => {
+    if (batch?.state === BatchState.Failed)
+      transitionBatch(ctx, batch.id, {
+        to: BatchState.Open,
+        patch: { failure: null },
+        reason: 'a workstream was retried',
+      });
     const steps = row.steps.length > 0 ? restartStep(row.steps, row.stepIndex, ctx.now) : row.steps;
     const latest = latestHandoffForStep(ctx.tx, { ...row, steps });
     return transitionWorkstream(ctx, id, {

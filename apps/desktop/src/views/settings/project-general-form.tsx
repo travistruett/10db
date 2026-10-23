@@ -1,5 +1,15 @@
-import type { FlowId, ProjectDto } from '@10db/contracts';
-import { Alert, Button, Group, NumberInput, Select, Stack, Text, TextInput } from '@mantine/core';
+import { Delivery, type FlowId, type ProjectDto } from '@10db/contracts';
+import {
+  Alert,
+  Button,
+  Group,
+  NumberInput,
+  Radio,
+  Select,
+  Stack,
+  Text,
+  TextInput,
+} from '@mantine/core';
 import { useState } from 'react';
 import { useFlows, usePatchProject } from '../../daemon/queries';
 import {
@@ -24,6 +34,10 @@ function reseed(current: GeneralValues, seed: GeneralValues, next: GeneralValues
     flowId: current.flowId === seed.flowId ? next.flowId : current.flowId,
     budgetCeiling:
       current.budgetCeiling === seed.budgetCeiling ? next.budgetCeiling : current.budgetCeiling,
+    delivery: current.delivery === seed.delivery ? next.delivery : current.delivery,
+    baseBranch: current.baseBranch === seed.baseBranch ? next.baseBranch : current.baseBranch,
+    prTitlePrefix:
+      current.prTitlePrefix === seed.prTitlePrefix ? next.prTitlePrefix : current.prTitlePrefix,
   };
 }
 
@@ -154,6 +168,42 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
         error={errors.budgetCeiling}
         onChange={(v) => {
           set({ budgetCeiling: asNumber(v) });
+        }}
+      />
+      <Radio.Group
+        label="Delivery"
+        value={values.delivery}
+        onChange={(value) => {
+          set({
+            delivery: value === Delivery.PullRequest ? Delivery.PullRequest : Delivery.Local,
+          });
+        }}
+      >
+        <Group mt="xs">
+          <Radio value={Delivery.Local} label="Commits on the checked-out branch" />
+          <Radio value={Delivery.PullRequest} label="One pull request per batch" />
+        </Group>
+      </Radio.Group>
+      {/* Shown in local delivery too: checkGeneral checks both fields whatever the delivery, so an error is never hidden. */}
+      <TextInput
+        label="Base branch"
+        description="The branch on origin each batch starts from and targets"
+        ff="monospace"
+        value={values.baseBranch}
+        error={errors.baseBranch}
+        onChange={(e) => {
+          set({ baseBranch: e.currentTarget.value });
+        }}
+      />
+      <TextInput
+        label="PR title prefix"
+        description="A Conventional Commit type and scope; titles read feat(app): <batch title>"
+        placeholder="feat(app)"
+        ff="monospace"
+        value={values.prTitlePrefix}
+        error={errors.prTitlePrefix}
+        onChange={(e) => {
+          set({ prTitlePrefix: e.currentTarget.value });
         }}
       />
       {patch.error ? (
