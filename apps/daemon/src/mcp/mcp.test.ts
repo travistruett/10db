@@ -20,7 +20,7 @@ import {
 import type { WorkstreamStep } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { createTempRepo, seedWorkstream } from '../../test/fixtures';
+import { createTempRepo, isolatedGitEnv, seedWorkstream } from '../../test/fixtures';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit } from '../git';
 import { createInboxService, type InboxService } from '../inbox';
@@ -84,7 +84,11 @@ afterEach(() => {
 async function seedSession(areas = ['api']) {
   const seeded = seedWorkstream(base, { repoPath: repo.path, areas });
   const { token, hash } = mintSessionToken();
-  const head = execFileSync('git', ['-C', repo.path, 'rev-parse', 'HEAD']).toString().trim();
+  const head = execFileSync('git', ['-C', repo.path, 'rev-parse', 'HEAD'], {
+    env: isolatedGitEnv(),
+  })
+    .toString()
+    .trim();
   const session = state.write((ctx) => {
     acquireClaims(ctx, {
       projectId: seeded.project.id,
@@ -127,7 +131,13 @@ const writeRepoFile = (rel: string, text: string) => {
   writeFileSync(join(repo.path, rel), text);
 };
 const commitCount = () =>
-  Number(execFileSync('git', ['-C', repo.path, 'rev-list', '--count', 'HEAD']).toString().trim());
+  Number(
+    execFileSync('git', ['-C', repo.path, 'rev-list', '--count', 'HEAD'], {
+      env: isolatedGitEnv(),
+    })
+      .toString()
+      .trim(),
+  );
 
 describe('MCP auth', () => {
   it('rejects a missing token and an ended session', async () => {

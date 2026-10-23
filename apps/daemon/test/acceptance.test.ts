@@ -6,7 +6,14 @@ import { z } from 'zod';
 import { startDaemon, type RunningDaemon } from '../src/daemon';
 import { FakeAdapter, type FakeScriptBook } from '../src/sessions';
 import { apiClient, quickFlowId } from './api-client';
-import { createTempRepo, handoffArgs, tempDir, waitForAsync, type TempDir } from './fixtures';
+import {
+  createTempRepo,
+  handoffArgs,
+  isolatedGitEnv,
+  tempDir,
+  waitForAsync,
+  type TempDir,
+} from './fixtures';
 
 const write = (path: string) => ({
   do: 'tool' as const,
@@ -168,12 +175,11 @@ describe('§1.3 with the fake adapter', () => {
       ).toBe(0);
     }
 
-    const trailers = execFileSync('git', [
-      '-C',
-      repo.path,
-      'log',
-      '--format=%(trailers:key=10db-Op,valueonly)',
-    ])
+    const trailers = execFileSync(
+      'git',
+      ['-C', repo.path, 'log', '--format=%(trailers:key=10db-Op,valueonly)'],
+      { env: isolatedGitEnv() },
+    )
       .toString()
       .split('\n')
       .filter(Boolean);

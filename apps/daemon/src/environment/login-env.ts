@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { systemClock, type Clock, type Timer } from '../clock';
+import { withoutGitRepoEnv } from '../git';
 
 /** Printed by the capture command just before `env -0`; everything before it is profile noise. */
 export const LOGIN_ENV_MARKER = '__10DB_ENV_BEGIN__';
@@ -56,7 +57,9 @@ export function captureLoginEnv(opts: {
   readonly timeoutMs?: number;
   readonly clock?: Clock;
 }): Promise<LoginEnv> {
-  const inherited = definedOnly(opts.inherited);
+  // A daemon started from a git hook inherits GIT_DIR and friends: a profile's git prompt or plugin
+  // would run against that repository, and the captured environment would carry them on.
+  const inherited = withoutGitRepoEnv(definedOnly(opts.inherited));
   const shell = opts.shell ?? inherited['SHELL'] ?? '/bin/zsh';
   const timeoutMs = opts.timeoutMs ?? LOGIN_SHELL_TIMEOUT_MS;
   const clock = opts.clock ?? systemClock;
