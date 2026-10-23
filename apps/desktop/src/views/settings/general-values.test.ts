@@ -63,6 +63,37 @@ describe('checkGeneral', () => {
         errors: { budgetCeiling: 'Enter a ceiling above $0, or leave it empty for none' },
       },
     },
+    {
+      name: 'pull-request delivery with a prefix, trimmed',
+      change: { delivery: 'pull_request', prTitlePrefix: ' feat(app) ' },
+      expected: { ok: true, patch: { delivery: 'pull_request', prTitlePrefix: 'feat(app)' } },
+    },
+    {
+      name: 'pull-request delivery without a prefix',
+      change: { delivery: 'pull_request' },
+      expected: {
+        ok: false,
+        errors: { prTitlePrefix: 'Enter a PR title prefix such as feat(app)' },
+      },
+    },
+    {
+      name: 'a prefix that is not a Conventional Commit type',
+      change: { prTitlePrefix: 'Feature' },
+      expected: {
+        ok: false,
+        errors: { prTitlePrefix: 'Enter a PR title prefix such as feat(app)' },
+      },
+    },
+    {
+      name: 'a new base branch',
+      change: { baseBranch: 'develop' },
+      expected: { ok: true, patch: { baseBranch: 'develop' } },
+    },
+    {
+      name: 'a base branch that is an option',
+      change: { baseBranch: '-x' },
+      expected: { ok: false, errors: { baseBranch: 'Enter the base branch, such as main' } },
+    },
   ])('answers $name', ({ change, expected }) => {
     expect(checkGeneral(project, { ...base, ...change })).toEqual(expected);
   });
@@ -72,6 +103,14 @@ describe('checkGeneral', () => {
     expect(checkGeneral(capped, { ...generalValues(capped), budgetCeiling: '' })).toEqual({
       ok: true,
       patch: { budgetCeiling: null },
+    });
+  });
+
+  it('clears a prefix when the field is emptied in local delivery', () => {
+    const prefixed = projectDto({ prTitlePrefix: 'feat(app)' });
+    expect(checkGeneral(prefixed, { ...generalValues(prefixed), prTitlePrefix: '' })).toEqual({
+      ok: true,
+      patch: { prTitlePrefix: null },
     });
   });
 });
