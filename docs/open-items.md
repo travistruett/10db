@@ -37,7 +37,8 @@
 - [x] M1b live run: confirm on the setMcpServers route that a repo MCP tool call reaches canUseTool as a permission card (`repo MCP tool gated`) and that a stdio server sees only PATH and HOME (`repo MCP server env`) (make live-acceptance). Header delivery to a repo HTTP server is not covered; 10db's own HTTP MCP server covers the route's headers.
 - [ ] M2: a crash after a session has written its handoff resumes that conversation, which hands off again at once; continuing fresh from the handoff it already wrote would save a session (seen in the M1 live run).
 - [x] M2b: the board with human and derived columns and drag and drop, and the Settings view with General, Board columns, Areas and hazards, Billing and Keep-awake (plan 07, part A).
-- [ ] M2b: the picker and the batch approval sheet (plan 07, part B), after the delivery plan's batch contracts.
+- [x] M2b: the picker rules and `GET /projects/:projectId/candidates`, the approval sheet's input (plan 07, part B, its daemon half).
+- [ ] M2b: the batch approval sheet (plan 07, part B), after the delivery plan's batch contracts.
 - [ ] M2: the PM-agent review (need estimates, optional steps), the Brainstorm panel, the consult step and ⌘K.
 - [ ] M2: Settings editors for team bindings, routing rules, personas, flows and model profiles, the AA key field and the Intelligence-vs-Cost chart (Pareto line, axis picker, AA logo and source link); their sections are slots.
 - [ ] M2: editing a project's areas and hazards (no patch route yet; Settings shows them read-only).

@@ -9,6 +9,7 @@ import {
   mintId,
   ModelProfileDto,
   PersonaDto,
+  PickerProposalDto,
   ProjectDto,
   StepPlanDto,
   TaskDto,
@@ -548,7 +549,49 @@ describe('startDaemon', () => {
     }
   });
 
-  it('answers 404 for an unknown project on team and routing-rule routes and 201 on creates', async () => {
+  it('proposes one ready task per area for the approval sheet', async () => {
+    const repo = createTempRepo();
+    try {
+      daemon = await startDaemon({
+        dataDir: dir.path,
+        port: 0,
+        adapter: new FakeAdapter({}),
+        logLevel: 'warn',
+        ...QUIET,
+      });
+      const api = apiClient(daemon.url, daemon.token);
+      const project = await api.post('/projects', ProjectDto, {
+        name: 'demo',
+        repoPath: repo.path,
+        gateCommand: 'true',
+        areas: [
+          { name: 'src', globs: ['src/**'] },
+          { name: 'docs', globs: ['docs/**'] },
+        ],
+      });
+      for (const [title, area] of [
+        ['code', 'src'],
+        ['words', 'docs'],
+      ] as const)
+        await api.post(`/projects/${project.id}/tasks`, TaskDto, {
+          title,
+          acceptanceCriteria: ['x'],
+          areas: [area],
+        });
+      const proposal = await api.get(
+        `/projects/${project.id}/candidates?size=2`,
+        PickerProposalDto,
+      );
+      expect(proposal.candidates.map((c) => [c.task.title, c.proposed])).toEqual([
+        ['code', true],
+        ['words', true],
+      ]);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it('answers 404 for an unknown project on team, routing-rule and candidate routes and 201 on creates', async () => {
     daemon = await startDaemon({
       dataDir: dir.path,
       port: 0,
@@ -581,6 +624,7 @@ describe('startDaemon', () => {
       const head = await api.get('/events/head', EventsHead);
       expect(await send('GET', `/projects/${ghost}/team`)).toBe(404);
       expect(await send('GET', `/projects/${ghost}/routing-rules`)).toBe(404);
+      expect(await send('GET', `/projects/${ghost}/candidates?size=1`)).toBe(404);
       expect(await send('PUT', `/projects/${ghost}/team`, { bindings: [], members: [] })).toBe(404);
       expect(
         await send('PUT', `/projects/${project.id}/team`, {

@@ -10,6 +10,7 @@ export * from './ids';
 export { CONTRACT_SCHEMAS, renderJsonSchemas } from './json-schema';
 export * from './mcp-tools';
 export * from './model-profiles';
+export * from './picker';
 export { PROTOCOL_VERSION } from './protocol';
 export * from './states';
 export * from './steps';

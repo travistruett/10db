@@ -21,6 +21,7 @@ import { HandoffInput } from './handoff';
 import { HealthResponse } from './health';
 import { McpToolInputs, McpToolName, McpToolOutputs } from './mcp-tools';
 import { ModelProfileDto, ModelProfilePatch } from './model-profiles';
+import { PickerProposalDto } from './picker';
 import { StepPlanDto } from './steps';
 import {
   PersonaDto,
@@ -78,6 +79,7 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'flow-patch': FlowPatch,
   'model-profile-dto': ModelProfileDto,
   'model-profile-patch': ModelProfilePatch,
+  'picker-proposal-dto': PickerProposalDto,
   'person-dto': PersonDto,
   'person-input': PersonInput,
   'persona-dto': PersonaDto,
