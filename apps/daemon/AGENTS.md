@@ -50,6 +50,9 @@ The fake adapter (`sessions/fake-adapter.ts`) is the test boundary for Claude Co
   names. Git config variables (`GIT_CONFIG_COUNT` with its `KEY_n`/`VALUE_n`,
   `GIT_CONFIG_PARAMETERS`, `GIT_CONFIG`) are kept: they name no repository, and a builder's
   profile may set them on purpose.
+- `git/`'s own calls also set `GIT_OPTIONAL_LOCKS=0`, so a read such as `status` never refreshes
+  the index under `index.lock`. With the lock held, a lane's commit running at the same moment
+  fails with "index.lock: File exists".
 - `keep-awake/` and `watcher/` follow lanes through `workstream.*` events, wired in `daemon/start.ts`.
 - A managed session's MCP servers are 10db's own plus the repo's `.mcp.json` servers the builder approved
   for that exact config, resolved per session in `sessions/project-mcp.ts`. Claude Code never reads MCP
