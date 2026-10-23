@@ -8,7 +8,7 @@ import { z } from 'zod';
 import { readRuntimeInfo } from '../src/daemon';
 import type { FakeScriptBook } from '../src/sessions';
 import { apiClient, quickFlowId } from './api-client';
-import { createTempRepo, tempDir, waitForAsync, type TempDir } from './fixtures';
+import { createTempRepo, isolatedGitEnv, tempDir, waitForAsync, type TempDir } from './fixtures';
 
 const DAEMON_DIR = resolve(import.meta.dirname, '..');
 const BOOK: FakeScriptBook = {
@@ -147,12 +147,11 @@ describe('kill -9 mid-step', () => {
     ).toBe(true);
     expect(events.some((e) => e.type === 'recovery.step')).toBe(true);
 
-    const trailers = execFileSync('git', [
-      '-C',
-      repo.path,
-      'log',
-      '--format=%(trailers:key=10db-Op,valueonly)',
-    ])
+    const trailers = execFileSync(
+      'git',
+      ['-C', repo.path, 'log', '--format=%(trailers:key=10db-Op,valueonly)'],
+      { env: isolatedGitEnv() },
+    )
       .toString()
       .split('\n')
       .filter(Boolean);
