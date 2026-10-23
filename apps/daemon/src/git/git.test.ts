@@ -5,6 +5,7 @@ import { InvalidError } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDecoyRepo } from '../../test/decoy-repo';
 import {
+  createTempClone,
   createTempRepo,
   createTempRepoWithOrigin,
   isolatedGitEnv,
@@ -267,17 +268,12 @@ describe('network calls', () => {
       .trim();
   /** Another clone adds a commit to `branch` on origin, as a teammate would. */
   function pushFromElsewhere(branch: string, file: string): string {
-    const other = tempDir('other');
+    const other = createTempClone(remote.origin.path);
     try {
-      const env = isolatedGitEnv();
-      execFileSync('git', ['clone', '-q', remote.origin.path, other.path], { env, stdio: 'pipe' });
       const g = (...args: string[]) =>
-        execFileSync('git', ['-C', other.path, ...args], { env, stdio: 'pipe' })
+        execFileSync('git', ['-C', other.path, ...args], { env: isolatedGitEnv(), stdio: 'pipe' })
           .toString()
           .trim();
-      g('config', 'user.name', 'teammate');
-      g('config', 'user.email', 'teammate@10db.invalid');
-      g('config', 'commit.gpgsign', 'false');
       if (branch !== 'main') g('switch', '-q', '-c', branch);
       writeFileSync(join(other.path, file), file);
       g('add', file);

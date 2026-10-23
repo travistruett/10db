@@ -45,7 +45,13 @@ import { seedTeam } from '../src/team';
 import { createGateRunner } from '../src/verify';
 import { measureForTests } from './catalogue';
 import { FakeGh } from './fake-gh';
-import { createTempRepoWithOrigin, isolatedGitEnv, NETWORK_ENV, tempDir } from './fixtures';
+import {
+  createTempClone,
+  createTempRepoWithOrigin,
+  isolatedGitEnv,
+  NETWORK_ENV,
+  tempDir,
+} from './fixtures';
 
 type Settled = 'DONE' | 'FAILED' | 'CANCELLED' | 'WAITING_HUMAN' | 'RUNNING';
 
@@ -222,15 +228,8 @@ export function createDeliveryHarness(
     git$: (...args) => run(remote.repo.path, args),
     origin$: (...args) => run(remote.origin.path, args),
     teammatePush(branch, path) {
-      const other = tempDir('teammate');
+      const other = createTempClone(remote.origin.path);
       try {
-        execFileSync('git', ['clone', '-q', remote.origin.path, other.path], {
-          env: isolatedGitEnv(),
-          stdio: 'pipe',
-        });
-        run(other.path, ['config', 'user.name', 'teammate']);
-        run(other.path, ['config', 'user.email', 'teammate@10db.invalid']);
-        run(other.path, ['config', 'commit.gpgsign', 'false']);
         if (branch !== 'main') run(other.path, ['switch', '-q', '-c', branch]);
         const file = join(other.path, path);
         mkdirSync(dirname(file), { recursive: true });

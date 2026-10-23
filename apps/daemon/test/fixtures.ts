@@ -73,6 +73,8 @@ export function createTempRepoWithOrigin(): { repo: TempDir; origin: TempDir; cl
   const origin = tempDir('origin');
   const env = isolatedGitEnv();
   execFileSync('git', ['init', '-q', '--bare', '-b', 'main', origin.path], { env, stdio: 'pipe' });
+  for (const [key, value] of Object.entries(TEST_REPO_CONFIG))
+    execFileSync('git', ['--git-dir', origin.path, 'config', key, value], { env, stdio: 'pipe' });
   const repo = createTempRepo();
   execFileSync('git', ['-C', repo.path, 'remote', 'add', 'origin', origin.path], {
     env,
@@ -87,6 +89,24 @@ export function createTempRepoWithOrigin(): { repo: TempDir; origin: TempDir; cl
       origin.cleanup();
     },
   };
+}
+
+/** A clone of `origin` with a teammate's identity, for a test that moves origin from elsewhere. */
+export function createTempClone(origin: string): TempDir {
+  const dir = tempDir('clone');
+  const env = isolatedGitEnv();
+  // `clone -c` writes the config into the new repository before anything is fetched or committed.
+  const config = Object.entries(TEST_REPO_CONFIG).flatMap(([key, value]) => [
+    '-c',
+    `${key}=${value}`,
+  ]);
+  execFileSync('git', ['clone', '-q', ...config, origin, dir.path], { env, stdio: 'pipe' });
+  const git = (...args: string[]) =>
+    execFileSync('git', ['-C', dir.path, ...args], { env, stdio: 'pipe' });
+  git('config', 'user.name', 'teammate');
+  git('config', 'user.email', 'teammate@10db.invalid');
+  git('config', 'commit.gpgsign', 'false');
+  return dir;
 }
 
 export function seedWorkstream(
