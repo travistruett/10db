@@ -85,6 +85,15 @@ export function retryWorkstream(state: StateStore, id: WorkstreamId): Workstream
   const row = getWorkstreamRow(state.db, id);
   if (row.state !== WorkstreamState.Failed)
     throw new ConflictError('Only a failed workstream can be retried');
+  const task = getTask(state.db, row.taskId);
+  if (task.boardColumnId !== null)
+    throw new ConflictError(
+      `${task.title} is parked; move it to Backlog or Ready before retrying it`,
+    );
+  if (task.workstreamId !== id)
+    throw new ConflictError(
+      `${task.title} has a newer workstream; retry that one or start the task`,
+    );
   return state.write((ctx) => {
     const steps = row.steps.length > 0 ? restartStep(row.steps, row.stepIndex, ctx.now) : row.steps;
     const latest = latestHandoffForStep(ctx.tx, { ...row, steps });

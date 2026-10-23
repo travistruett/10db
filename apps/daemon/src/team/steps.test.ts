@@ -1,20 +1,24 @@
-import { InvalidError } from '@10db/contracts';
+import { ConflictError, InvalidError, type TaskId } from '@10db/contracts';
 import {
   createTestStore,
   findFlowByName,
   getWorkstream,
   insertTask,
+  insertWorkstream,
+  listBoardColumns,
   listWorkstreams,
+  moveTask,
   patchProject,
   patchTask,
   seedProject,
+  transitionWorkstream,
 } from '@10db/db';
 import { readDefaultPersonas } from '@10db/harness';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { measureForTests } from '../../test/catalogue';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { seedTeam } from './seed';
-import { resolveStepPlan, startTaskWithPlan } from './steps';
+import { resolveStepPlan, retryWorkstream, startTaskWithPlan } from './steps';
 
 let state: StateStore;
 let close: () => void;
@@ -115,5 +119,46 @@ describe('startTaskWithPlan', () => {
       /Step 2 \(review.*at or above 52 intelligence \(floor: .*\); over the budget ceiling/,
     );
     expect(listWorkstreams(state.db, {})).toEqual([]);
+  });
+});
+
+describe('retryWorkstream', () => {
+  const failedWorkstream = (taskId: TaskId) => {
+    const ws = state.write((ctx) => insertWorkstream(ctx, taskId));
+    state.write((ctx) => transitionWorkstream(ctx, ws.id, { to: 'STARTING', fence: null }));
+    state.write((ctx) => transitionWorkstream(ctx, ws.id, { to: 'FAILED', fence: null }));
+    return ws;
+  };
+  /** The task failed once, was started again, and that second run was cancelled. */
+  const failedThenCancelled = () => {
+    const task = addTask();
+    const first = failedWorkstream(task.id);
+    const second = state.write((ctx) => insertWorkstream(ctx, task.id));
+    state.write((ctx) => transitionWorkstream(ctx, second.id, { to: 'CANCELLED', fence: null }));
+    return { task, first };
+  };
+  const park = (taskId: TaskId) => {
+    const column = listBoardColumns(state.db, project.id)[0];
+    if (!column) throw new Error('no Icebox');
+    state.write((ctx) => moveTask(ctx, taskId, { to: column.id, after: null, before: null }));
+  };
+
+  it('requeues the latest failed workstream of a planned task', () => {
+    const task = addTask();
+    const ws = failedWorkstream(task.id);
+    expect(retryWorkstream(state, ws.id).state).toBe('QUEUED');
+  });
+
+  it('refuses a workstream that is not the latest of its task', () => {
+    const { first } = failedThenCancelled();
+    expect(() => retryWorkstream(state, first.id)).toThrow(ConflictError);
+    expect(getWorkstream(state.db, first.id).state).toBe('FAILED');
+  });
+
+  it('refuses the full sequence: fail, start again, cancel, park, retry the first run', () => {
+    const { task, first } = failedThenCancelled();
+    park(task.id);
+    expect(() => retryWorkstream(state, first.id)).toThrow(ConflictError);
+    expect(getWorkstream(state.db, first.id).state).toBe('FAILED');
   });
 });

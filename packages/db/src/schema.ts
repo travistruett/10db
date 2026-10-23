@@ -2,6 +2,7 @@ import type {
   AaModelDto,
   AreaDef,
   BillingMode,
+  BoardColumnId,
   ClaimId,
   ClaimKind,
   DecisionId,
@@ -104,6 +105,23 @@ export const projects = sqliteTable('projects', {
   updatedAt: updatedAt(),
 });
 
+/** Columns the builder names and orders; a task in one is parked: never picked, never launched. */
+export const boardColumns = sqliteTable(
+  'board_columns',
+  {
+    id: text('id').$type<BoardColumnId>().primaryKey(),
+    projectId: text('project_id')
+      .$type<ProjectId>()
+      .notNull()
+      .references(() => projects.id),
+    name: text('name').notNull(),
+    position: integer('position').notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex('board_columns_name_idx').on(t.projectId, t.name)],
+);
+
 export const tasks = sqliteTable(
   'tasks',
   {
@@ -125,6 +143,10 @@ export const tasks = sqliteTable(
       .references(() => flows.id),
     status: text('status').$type<TaskStatus>().notNull(),
     boardOrder: real('board_order').notNull(),
+    /** Set: parked in that human column. Null: planned, with its column derived from its state. */
+    boardColumnId: text('board_column_id')
+      .$type<BoardColumnId>()
+      .references(() => boardColumns.id),
     workspaceMode: text('workspace_mode').$type<'shared'>().notNull(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),

@@ -29,14 +29,19 @@
 - [ ] M2: a setting to allow overage spending per project (decision 41).
 - [ ] M2: evaluate the Tauri MCP bridge (`hypothesi/mcp-server-tauri`) as a debug-only build feature for driving the real webview.
 - [ ] M2: signing and notarization for distributing the .app beyond this machine (spike 8 notes).
-- [ ] M2: Settings view (billing mode, thresholds, keep-awake) and the ⌘K palette.
+- [ ] M2: the ⌘K palette.
 - [ ] M2: "Pause all" in the menu bar (spec §10); M1's tray shows lanes, inbox count and keep-awake only.
 - [ ] M3: §1.3 live on the pilot project.
 - [ ] Spec question: a repo's committed .claude/settings.json hooks and statusLine run with session credentials without approval (decision 51 trusts the project); consider bringing them under the .mcp.json approval model.
 - [ ] Spec question: repo-configured git filters (.gitattributes + filter.<name>.clean/process in .git/config) run during the watcher's git status and during 10db's own commits; consider a sanitized git config or refusing sessions whose .git/config gains such keys.
 - [x] M1b live run: confirm on the setMcpServers route that a repo MCP tool call reaches canUseTool as a permission card (`repo MCP tool gated`) and that a stdio server sees only PATH and HOME (`repo MCP server env`) (make live-acceptance). Header delivery to a repo HTTP server is not covered; 10db's own HTTP MCP server covers the route's headers.
 - [ ] M2: a crash after a session has written its handoff resumes that conversation, which hands off again at once; continuing fresh from the handoff it already wrote would save a session (seen in the M1 live run).
-- [ ] M2b: the board, the picker and PM-agent review (need estimates, optional steps), the batch approval sheet that edits a step plan before start, the consult step, ⌘K, and the Settings view (AA key, team bindings, routing rules, budget, flows, personas, profiles) with the AA Intelligence-vs-Cost chart: Pareto line, axis picker, AA logo and source link (plan 07).
+- [x] M2b: the board with human and derived columns and drag and drop, and the Settings view with General, Board columns, Areas and hazards, Billing and Keep-awake (plan 07, part A).
+- [ ] M2b: the picker and the batch approval sheet (plan 07, part B), after the delivery plan's batch contracts.
+- [ ] M2: the PM-agent review (need estimates, optional steps), the Brainstorm panel, the consult step and ⌘K.
+- [ ] M2: Settings editors for team bindings, routing rules, personas, flows and model profiles, the AA key field and the Intelligence-vs-Cost chart (Pareto line, axis picker, AA logo and source link); their sections are slots.
+- [ ] M2: editing a project's areas and hazards (no patch route yet; Settings shows them read-only).
+- [ ] Board, designed for later: a per-project manual board setting that lets drags override the system columns; person-linked human columns (board_columns.person_id → people); on-drop behaviors (board_columns.on_drop, e.g. start a consult).
 - [ ] M2c: takeover and the PTY (plan 08).
 - [ ] Idea, after the M2b board: a "Model changes" review tab on a task or PR. Data-model changes (schema, migrations, contract types) are the hardest part of a change to reverse, so review should open on them, not the whole diff. Which paths count as "model" is a setting resolved at layered scopes like VS Code's (account, then project), so other hard-to-reverse areas can be watched the same way. Storage is open: record the matching paths per step and render the diff, or store a link to the forge's diff narrowed to those files. Later: track what reviewers drill into and tune the defaults.
 - [ ] Idea, beside the "Model changes" tab: a "Query changes" view, shown only when a change adds or edits an API endpoint. For each such endpoint it records the SQL the endpoint runs, before and after the change, with each statement's query plan, and flags N+1 and duplicate queries and related rows read one at a time instead of prefetched. The reviewer gets a quick check that the endpoint's data access is sound without reading the handler. Open: how the queries are captured (a query log in the endpoint's tests, or a replay of recorded requests), and which plan changes count as regressions.

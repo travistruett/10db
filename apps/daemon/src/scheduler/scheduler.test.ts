@@ -1,6 +1,8 @@
 import type { WorkstreamId } from '@10db/contracts';
 import {
   createTestStore,
+  listBoardColumns,
+  moveTask,
   getWorkstream,
   getWorkstreamRow,
   insertTask,
@@ -74,6 +76,10 @@ function add(
   return { project, task, workstream: state.write((ctx) => insertWorkstream(ctx, task.id)) };
 }
 
+function moveWorkstream(id: WorkstreamId, to: 'STARTING' | 'FAILED' | 'CANCELLED' | 'QUEUED') {
+  state.write((ctx) => transitionWorkstream(ctx, id, { to, fence: null }));
+}
+
 describe('scheduler', () => {
   it('respects the global cap', () => {
     queue();
@@ -125,6 +131,21 @@ describe('scheduler', () => {
     s.tick();
     expect(launched.map((l) => l.id)).toEqual([a.workstream.id]);
     expect(getWorkstream(store.db, a.workstream.id).state).toBe('STARTING');
+  });
+
+  it('leaves queued work of a parked task alone', () => {
+    const { project, task, workstream: first } = queue();
+    moveWorkstream(first.id, 'STARTING');
+    moveWorkstream(first.id, 'FAILED');
+    const second = state.write((ctx) => insertWorkstream(ctx, task.id));
+    moveWorkstream(second.id, 'CANCELLED');
+    const column = listBoardColumns(store.db, project.id)[0];
+    if (!column) throw new Error('no Icebox');
+    state.write((ctx) => moveTask(ctx, task.id, { to: column.id, after: null, before: null }));
+    // The retry route refuses this; the scheduler holds the line if a queue entry gets here anyway.
+    moveWorkstream(first.id, 'QUEUED');
+    expect(scheduler().tick()).toBe(0);
+    expect(getWorkstream(store.db, first.id).state).toBe('QUEUED');
   });
 
   it('waits for dependencies', () => {

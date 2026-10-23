@@ -1,5 +1,6 @@
 import {
   ConflictError,
+  DEFAULT_BOARD_COLUMN,
   EventType,
   InvalidError,
   mintId,
@@ -12,6 +13,7 @@ import {
 } from '@10db/contracts';
 import { asc, eq } from 'drizzle-orm';
 import * as schema from '../schema';
+import { insertBoardColumn } from './board-columns';
 import { getFlow } from './flows';
 import type { DbReader, WriteContext } from './store';
 
@@ -34,6 +36,7 @@ export function insertProject(ctx: WriteContext, input: ProjectInput): ProjectDt
   };
   ctx.tx.insert(schema.projects).values(row).run();
   ctx.emit({ type: EventType.ProjectCreated, entityType: 'project', entityId: row.id });
+  insertBoardColumn(ctx, row.id, { name: DEFAULT_BOARD_COLUMN });
   return row;
 }
 

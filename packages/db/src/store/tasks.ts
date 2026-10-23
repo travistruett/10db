@@ -1,11 +1,14 @@
 import {
+  ACTIVE_STATES,
   BoardStatus,
+  ConflictError,
   EventType,
   InvalidError,
   isTerminal,
   mintId,
   NotFoundError,
   TaskInput,
+  TaskMove,
   TaskPatch,
   TaskStatus,
   WorkstreamState,
@@ -13,8 +16,9 @@ import {
   type TaskDto,
   type TaskId,
 } from '@10db/contracts';
-import { and, desc, eq, inArray, max, ne } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, max, ne } from 'drizzle-orm';
 import * as schema from '../schema';
+import { getBoardColumn } from './board-columns';
 import { getFlow } from './flows';
 import { getProject } from './projects';
 import type { DbReader, WriteContext } from './store';
@@ -146,6 +150,7 @@ function toTaskDto(db: DbReader, row: typeof schema.tasks.$inferSelect): TaskDto
     flowId: row.flowId,
     status: row.status,
     boardOrder: row.boardOrder,
+    boardColumnId: row.boardColumnId,
     dependsOn: deps.map((d) => d.id),
     boardStatus: deriveBoardStatus({
       taskStatus: row.status,
@@ -184,5 +189,139 @@ export function patchTask(ctx: WriteContext, id: TaskId, patch: TaskPatch): Task
     .where(eq(schema.tasks.id, id))
     .run();
   ctx.emit({ type: EventType.TaskChanged, entityType: 'task', entityId: id });
+  return getTask(ctx.tx, id);
+}
+
+/** Below this gap between neighbours a midpoint loses precision, so the project is renumbered first. */
+const MIN_ORDER_GAP = 1e-6;
+
+/** Only planned and parked work moves; the rest follows its workstream. */
+const MOVABLE: readonly BoardStatus[] = [BoardStatus.Backlog, BoardStatus.Ready];
+
+const STALE_BOARD = 'The board changed while you were dragging; try again';
+
+/** Rewrites the open tasks' orders as 1…n in their current order (finished ones sort by finish time); each changed task announces it. */
+function renumberBoard(ctx: WriteContext, projectId: ProjectId): void {
+  const rows = ctx.tx
+    .select({ id: schema.tasks.id, boardOrder: schema.tasks.boardOrder })
+    .from(schema.tasks)
+    .where(and(eq(schema.tasks.projectId, projectId), eq(schema.tasks.status, TaskStatus.Open)))
+    .orderBy(asc(schema.tasks.boardOrder), asc(schema.tasks.id))
+    .all();
+  rows.forEach((row, index) => {
+    const boardOrder = index + 1;
+    if (row.boardOrder === boardOrder) return;
+    ctx.tx
+      .update(schema.tasks)
+      .set({ boardOrder, updatedAt: ctx.now })
+      .where(eq(schema.tasks.id, row.id))
+      .run();
+    ctx.emit({
+      type: EventType.TaskChanged,
+      entityType: 'task',
+      entityId: row.id,
+      data: { boardOrder },
+    });
+  });
+}
+
+/** Places a task in a column, between its new neighbours there (spec §10: drag and drop sets priority). */
+export function moveTask(ctx: WriteContext, id: TaskId, move: TaskMove): TaskDto {
+  const { to, after, before } = TaskMove.parse(move);
+  const task = getTask(ctx.tx, id);
+  // An older run can still be live while the latest one has ended, so look at every run.
+  const live = ctx.tx
+    .select({ id: schema.workstreams.id })
+    .from(schema.workstreams)
+    .where(
+      and(eq(schema.workstreams.taskId, id), inArray(schema.workstreams.state, [...ACTIVE_STATES])),
+    )
+    .get();
+  if (live || !MOVABLE.includes(task.boardStatus))
+    throw new ConflictError(
+      `${task.title} follows its workstream; only planned and parked tasks move`,
+    );
+  if (to !== null && getBoardColumn(ctx.tx, to).projectId !== task.projectId)
+    throw new InvalidError('The column must belong to the same project');
+  if (to !== null) {
+    // A parked task never finishes, so a dependent that has already started would stay queued for ever.
+    const started = ctx.tx
+      .select({ title: schema.tasks.title })
+      .from(schema.taskDeps)
+      .innerJoin(schema.tasks, eq(schema.tasks.id, schema.taskDeps.taskId))
+      .innerJoin(schema.workstreams, eq(schema.workstreams.taskId, schema.taskDeps.taskId))
+      .where(
+        and(
+          eq(schema.taskDeps.dependsOnId, id),
+          inArray(schema.workstreams.state, [...ACTIVE_STATES]),
+        ),
+      )
+      .orderBy(asc(schema.tasks.boardOrder))
+      .get();
+    if (started)
+      throw new ConflictError(
+        `Task ${started.title} waits on ${task.title} and has started; ${task.title} can't be parked until ${started.title} finishes`,
+      );
+  }
+  const orderOf = (neighbour: TaskId | null): number | null => {
+    if (neighbour === null) return null;
+    if (neighbour === id) throw new InvalidError('A task cannot be its own neighbour');
+    const other = getTask(ctx.tx, neighbour);
+    if (other.projectId !== task.projectId)
+      throw new InvalidError('Both neighbours must be tasks in the same project');
+    if (other.boardColumnId !== to)
+      throw new InvalidError('A neighbour must be in the column the task moves to');
+    // The board lists only planned and parked work among these cards; anything else moved on.
+    if (other.status !== TaskStatus.Open || !MOVABLE.includes(other.boardStatus))
+      throw new ConflictError(STALE_BOARD);
+    return other.boardOrder;
+  };
+  const first = { lo: orderOf(after), hi: orderOf(before) };
+  if (first.lo !== null && first.hi !== null) {
+    if (first.lo >= first.hi) throw new ConflictError(STALE_BOARD);
+    if (first.hi - first.lo < MIN_ORDER_GAP) renumberBoard(ctx, task.projectId);
+  }
+  const lo = orderOf(after);
+  const hi = orderOf(before);
+  if (lo !== null && hi !== null && lo >= hi) throw new ConflictError(STALE_BOARD);
+  const boardOrder =
+    lo !== null && hi !== null
+      ? (lo + hi) / 2
+      : lo !== null
+        ? lo + 1
+        : hi !== null
+          ? hi - 1
+          : task.boardOrder;
+  // The column the view placed the task in: the human column, or the derived column of its planned neighbours.
+  const derived = [after, before].flatMap((n) =>
+    n === null ? [] : [getTask(ctx.tx, n).boardStatus],
+  );
+  if (to !== null || derived.length > 0) {
+    const column = listTasks(ctx.tx, task.projectId).filter(
+      (t) =>
+        t.id !== id &&
+        t.status === TaskStatus.Open &&
+        t.boardColumnId === to &&
+        (to !== null || derived.includes(t.boardStatus)),
+    );
+    // A view that missed a task now between the neighbours, or at the order the move would take, is stale.
+    const stale = column.some(
+      (t) =>
+        t.boardOrder === boardOrder ||
+        (lo !== null && hi !== null && t.boardOrder > lo && t.boardOrder < hi),
+    );
+    if (stale) throw new ConflictError(STALE_BOARD);
+  }
+  ctx.tx
+    .update(schema.tasks)
+    .set({ boardOrder, boardColumnId: to, updatedAt: ctx.now })
+    .where(eq(schema.tasks.id, id))
+    .run();
+  ctx.emit({
+    type: EventType.TaskChanged,
+    entityType: 'task',
+    entityId: id,
+    data: { boardOrder, boardColumnId: to },
+  });
   return getTask(ctx.tx, id);
 }

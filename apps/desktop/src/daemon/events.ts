@@ -17,6 +17,7 @@ const WORK: readonly QueryKey[] = [['workstreams'], ['tasks']];
 export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   project: [queryKeys.projects],
   task: [['tasks']],
+  board_column: [['board-columns']],
   // Lanes changing can switch keep-awake on or off.
   workstream: [...WORK, queryKeys.keepAwake],
   session: WORK,
@@ -29,7 +30,7 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   // No view reads these entity types; the entries make them known.
   persona: [],
   person: [],
-  flow: [],
+  flow: [queryKeys.flows],
   model_profile: [],
   team: [],
   routing_rules: [],

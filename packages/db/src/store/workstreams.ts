@@ -20,6 +20,7 @@ import {
 } from '@10db/contracts';
 import { and, asc, count, eq, inArray, isNotNull, or, type SQL } from 'drizzle-orm';
 import * as schema from '../schema';
+import { getBoardColumn } from './board-columns';
 import { getProject } from './projects';
 import type { DbReader, WriteContext } from './store';
 import { getTask } from './tasks';
@@ -119,6 +120,22 @@ export function insertWorkstream(ctx: WriteContext, taskId: TaskId): WorkstreamD
   const task = getTask(ctx.tx, taskId);
   if (task.status !== TaskStatus.Open)
     throw new ConflictError(`Task ${task.title} is ${task.status}`);
+  if (task.boardColumnId !== null) {
+    const column = getBoardColumn(ctx.tx, task.boardColumnId);
+    throw new ConflictError(
+      `Task ${task.title} is parked in ${column.name}; move it to Backlog or Ready to start it`,
+    );
+  }
+  // A queued task waits for its dependencies; one parked in a human column would never finish.
+  for (const dependencyId of task.dependsOn) {
+    const dependency = getTask(ctx.tx, dependencyId);
+    if (dependency.status === TaskStatus.Open && dependency.boardColumnId !== null) {
+      const column = getBoardColumn(ctx.tx, dependency.boardColumnId);
+      throw new ConflictError(
+        `Task ${task.title} waits on ${dependency.title}, which is parked in ${column.name}; move it to Backlog or Ready first`,
+      );
+    }
+  }
   const active = ctx.tx
     .select({ id: schema.workstreams.id })
     .from(schema.workstreams)
