@@ -414,6 +414,18 @@ describe('moveTask from a stale view', () => {
       move: () => ({ to: null, after: tasks.a.id, before: tasks.c.id }),
       placed: 2,
     },
+    {
+      // d started from Ready and is In progress; the view is fresh, and Ready ends at c.
+      name: 'places it at the bottom when a task past the neighbour has moved on to In progress',
+      setup: () => {
+        const ws = store.write((ctx) => insertWorkstream(ctx, tasks.d.id)).value;
+        for (const state of ['STARTING', 'RUNNING'] as const)
+          store.write((ctx) => transitionWorkstream(ctx, ws.id, { to: state, fence: null }));
+      },
+      task: 'a',
+      move: () => ({ to: null, after: tasks.c.id, before: null }),
+      placed: 5,
+    },
   ] as const)('$name', ({ setup, task, move, placed }) => {
     setup();
     const before = listTasks(store.db, project.id).map((t) => [t.title, t.boardOrder]);

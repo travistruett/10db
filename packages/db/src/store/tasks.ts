@@ -216,7 +216,7 @@ function openOrders(db: DbReader, projectId: ProjectId, except: TaskId): number[
     .map((row) => row.boardOrder);
 }
 
-/** Rewrites the open tasks' orders as 1…n in their current order (finished ones sort by finish time); each changed task announces it. */
+/** Rewrites the open tasks' orders as 1…n in their current order; finished tasks keep theirs, as the Done column sorts by finish time. Each changed task announces it. */
 function renumberBoard(ctx: WriteContext, projectId: ProjectId): void {
   const rows = ctx.tx
     .select({ id: schema.tasks.id, boardOrder: schema.tasks.boardOrder })
