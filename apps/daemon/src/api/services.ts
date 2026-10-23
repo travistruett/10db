@@ -38,12 +38,16 @@ import type {
   TaskId,
   TaskInput,
   TaskPatch,
-  TaskStartResult,
   TeamDto,
   TeamInput,
   WorkstreamDto,
   WorkstreamId,
 } from '@10db/contracts';
+
+/** What starting a task made: its workstream in local delivery, the batch it runs in for pull requests. */
+export type TaskStarted =
+  | { readonly kind: 'workstream'; readonly workstream: WorkstreamDto }
+  | { readonly kind: 'batch'; readonly batch: BatchDto };
 
 /** What the HTTP layer needs from the daemon. Implemented in the daemon module. */
 export interface ApiServices {
@@ -51,8 +55,7 @@ export interface ApiServices {
   createProject(input: ProjectInput): ProjectDto;
   listTasks(projectId: ProjectId): TaskDto[];
   createTask(projectId: ProjectId, input: TaskInput): TaskDto;
-  /** Local delivery: the workstream. Pull-request delivery: the batch the task runs in. */
-  startTask(taskId: TaskId): TaskStartResult;
+  startTask(taskId: TaskId): TaskStarted;
   /** Starts the tasks as a batch, or adds them to the project's open or failed batch. */
   startBatch(projectId: ProjectId, input: BatchStartInput): BatchDto;
   /** Ship anyway (from OPEN) or Retry (from FAILED). */

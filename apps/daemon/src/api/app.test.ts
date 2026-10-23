@@ -4,6 +4,7 @@ import {
   mintId,
   NotFoundError,
   PROTOCOL_VERSION,
+  WorkstreamDto,
   type DaemonEvent,
 } from '@10db/contracts';
 import { defineWebSocketHelper } from 'hono/ws';
@@ -520,12 +521,49 @@ describe('batch routes', () => {
     ).toBe(400);
   });
 
-  it('answers 202 with the batch when a task starts in a pull-request project', async () => {
-    const res = await app(stubServices({ startTask: () => batch })).request(
+  const workstream = WorkstreamDto.parse({
+    id: mintId('Workstream'),
+    taskId: mintId('Task'),
+    projectId: batch.projectId,
+    batchId: null,
+    taskTitle: 'Alpha',
+    state: 'QUEUED',
+    nextAction: { kind: 'start' },
+    attempt: 0,
+    recoveryAttempts: 0,
+    model: 'sonnet',
+    effort: 'medium',
+    steps: [],
+    stepIndex: 0,
+    currentSessionId: null,
+    sessionCount: 0,
+    contextPct: null,
+    pausedUntil: null,
+    failureReason: null,
+    lastActivityAt: null,
+    createdAt: batch.createdAt,
+    updatedAt: batch.updatedAt,
+  });
+  it.each([
+    {
+      name: '201 with the workstream in a local project',
+      started: { kind: 'workstream', workstream },
+      status: 201,
+      body: workstream,
+    },
+    {
+      name: '202 with the batch in a pull-request project',
+      started: { kind: 'batch', batch },
+      status: 202,
+      body: batch,
+    },
+  ] as const)('answers a task start with $name', async ({ started, status, body }) => {
+    const res = await app(stubServices({ startTask: () => started })).request(
       `/tasks/${mintId('Task')}/start`,
       post(''),
     );
-    expect(res.status).toBe(202);
+    expect(res.status).toBe(status);
+    expect(await res.json()).toEqual(body);
   });
 
   it.each([

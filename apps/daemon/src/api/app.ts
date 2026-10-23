@@ -240,8 +240,13 @@ export function createApp(deps: ApiDeps) {
     )
     .post('/tasks/:taskId/start', (c) => {
       const started = deps.services.startTask(TaskId.parse(c.req.param('taskId')));
-      // A workstream has a taskId; a batch, which a pull-request start answers with, doesn't.
-      return 'taskId' in started ? c.json(started, 201) : c.json(started, 202);
+      // A pull-request start answers before its branch is cut: 202, as a batch start does.
+      switch (started.kind) {
+        case 'workstream':
+          return c.json(started.workstream, 201);
+        case 'batch':
+          return c.json(started.batch, 202);
+      }
     })
     .get(
       '/workstreams',

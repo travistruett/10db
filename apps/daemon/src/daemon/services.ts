@@ -83,12 +83,14 @@ export function createServices(deps: {
     },
     startTask(taskId) {
       const project = getProject(db, getTask(db, taskId).projectId);
-      const started =
-        project.delivery === Delivery.PullRequest
-          ? deps.starter.startTask(taskId)
-          : startTaskWithPlan(deps.state, taskId);
+      if (project.delivery === Delivery.PullRequest) {
+        const batch = deps.starter.startTask(taskId);
+        deps.scheduler.requestTick();
+        return { kind: 'batch', batch };
+      }
+      const workstream = startTaskWithPlan(deps.state, taskId);
       deps.scheduler.requestTick();
-      return started;
+      return { kind: 'workstream', workstream };
     },
     startBatch: (projectId, input) => deps.starter.startBatch(projectId, input),
     shipBatch: (id) => deps.shipper.ship(id),
