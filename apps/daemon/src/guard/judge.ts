@@ -3,9 +3,12 @@ import { isAbsolute, resolve, sep } from 'node:path';
 import { ClaimKind, Delivery, type AreaDef, type HazardDef } from '@10db/contracts';
 import { z } from 'zod';
 import {
+  changedDirectory,
   envDumpRefusal,
+  isOwnToolResult,
   keychainRefusal,
   pathRefusal,
+  scriptRefusal,
   secretReferenceRefusal,
   segmentPathRefusal,
   type ProtectedPath,
@@ -15,7 +18,7 @@ import { ghVerdict } from './gh-rules';
 import { gitVerdict } from './git-rules';
 import { classifyPath, resolveInRepo } from './paths';
 import { readOnlyShellRefusal } from './read-only';
-import { splitCommand, stripCommandPrefixes } from './shell-words';
+import { findExecCommands, splitCommand, stripCommandPrefixes } from './shell-words';
 
 export interface GuardInput {
   readonly toolName: string;
@@ -30,6 +33,12 @@ export interface GuardInput {
   readonly delivery?: Delivery;
   /** Paths no tool or command may touch: the data directory and the default account's sign-in. */
   readonly protectedPaths: readonly ProtectedPath[];
+  /**
+   * The session's own config directory and Claude Code session id. Claude Code saves a large tool
+   * output under `<configDir>/projects/*\/<id>/tool-results/` and points the model at it, so Read and
+   * Grep may open that directory.
+   */
+  readonly ownSession?: { readonly configDir: string; readonly providerSessionId: string | null };
 }
 
 export type GuardVerdict =
@@ -112,11 +121,17 @@ function rmVerdict(
 
 const SHELL_C_FLAG = /^-[a-zA-Z]*c[a-zA-Z]*$/;
 
-function judgeShell(input: GuardInput, command: string, depth = 0): GuardVerdict {
+function judgeShell(
+  input: GuardInput,
+  command: string,
+  depth = 0,
+  startDir: string | null = input.repoPath,
+): GuardVerdict {
   let afterCd = false;
+  let cwd = startDir;
   let previousSeparator = '';
   for (const segment of splitCommand(command)) {
-    const words = stripCommandPrefixes(segment.words);
+    const words = stripCommandPrefixes(segment.words, { lookThroughRunners: true });
     const head = words[0] ?? '';
     const piped = previousSeparator === '|';
     previousSeparator = segment.separator;
@@ -125,19 +140,26 @@ function judgeShell(input: GuardInput, command: string, depth = 0): GuardVerdict
       keychainRefusal(words) ??
       envDumpRefusal(segment.words, words) ??
       secretReferenceRefusal(segment.raw) ??
-      segmentPathRefusal(segment.raw, segment.words, input.repoPath, input.protectedPaths);
+      scriptRefusal(head, segment.raw) ??
+      segmentPathRefusal(segment.raw, words, cwd, input.protectedPaths);
     if (accountRule) return deny(accountRule);
     if (SHELLS.has(head)) {
       if (piped) return deny('Piping into a shell runs commands the guard cannot see.');
       const flagIndex = words.findIndex((w) => SHELL_C_FLAG.test(w));
       const inner = flagIndex === -1 ? undefined : words[flagIndex + 1];
       if (inner !== undefined && depth < 3) {
-        const verdict = judgeShell(input, inner, depth + 1);
+        const verdict = judgeShell(input, inner, depth + 1, cwd);
+        if (verdict.decision === 'deny') return verdict;
+      }
+    }
+    if (head === 'find' && depth < 3) {
+      for (const exec of findExecCommands(words)) {
+        const verdict = judgeShell(input, exec.join(' '), depth + 1, cwd);
         if (verdict.decision === 'deny') return verdict;
       }
     }
     if (head === 'eval' && depth < 3) {
-      const verdict = judgeShell(input, words.slice(1).join(' '), depth + 1);
+      const verdict = judgeShell(input, words.slice(1).join(' '), depth + 1, cwd);
       if (verdict.decision === 'deny') return verdict;
     }
     if (head === 'git') {
@@ -152,7 +174,10 @@ function judgeShell(input: GuardInput, command: string, depth = 0): GuardVerdict
       const verdict = rmVerdict(input, words, afterCd);
       if (verdict) return verdict;
     }
-    if (head === 'cd' || head === 'pushd') afterCd = true;
+    if (head === 'cd' || head === 'pushd') {
+      afterCd = true;
+      cwd = changedDirectory(segment.raw, words, cwd);
+    }
     const forms = commandForms(words);
     if (DEPLOY.some((re) => forms.lines.some((l) => re.test(l))))
       return deny('Deploy and publish commands are never run by agents.');
@@ -193,10 +218,26 @@ const READ_ONLY_REFUSAL =
 /** The PreToolUse decision for a managed session (spec §8.2). Rules only; never an LLM. */
 export function judgeToolUse(input: GuardInput): GuardVerdict {
   // Every tool, in every step kind: no path under the data directory or the default sign-in.
+  const searches = input.toolName === 'Grep' || input.toolName === 'Glob';
+  const base = stringField(input.toolInput, 'path') ?? input.repoPath;
   for (const field of ['file_path', 'notebook_path', 'path', 'pattern'] as const) {
+    // Grep's pattern is a regular expression, not a path; Glob's is a path pattern under `path`.
+    if (field === 'pattern' && input.toolName !== 'Glob') continue;
     const value = stringField(input.toolInput, field);
-    const refusal =
-      value === null ? null : pathRefusal(value, input.repoPath, input.protectedPaths);
+    if (value === null) continue;
+    const own =
+      (input.toolName === 'Read' || input.toolName === 'Grep') &&
+      input.ownSession !== undefined &&
+      isOwnToolResult(input.ownSession, value, input.repoPath);
+    if (own) continue;
+    const refusal = pathRefusal(
+      value,
+      field === 'pattern' ? base : input.repoPath,
+      input.protectedPaths,
+      {
+        contains: searches && field === 'path',
+      },
+    );
     if (refusal) return deny(refusal);
   }
   if (FILE_TOOLS.has(input.toolName)) {

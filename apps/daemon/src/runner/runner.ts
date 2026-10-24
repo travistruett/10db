@@ -1,3 +1,4 @@
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import {
   currentStep,
@@ -939,6 +940,10 @@ export function createRunner(opts: RunnerOptions): Runner {
             readOnly,
             delivery: project.delivery,
             protectedPaths: opts.protectedPaths,
+            ownSession: {
+              configDir: launch.env['CLAUDE_CONFIG_DIR'] ?? join(homedir(), '.claude'),
+              providerSessionId: st.providerSessionId ?? resumeId,
+            },
           }),
         canUseTool: createPermissionBroker(
           { state: opts.state, inbox: opts.inbox },

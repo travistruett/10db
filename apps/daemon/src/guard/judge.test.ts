@@ -1,6 +1,6 @@
 import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join, relative } from 'node:path';
 import { DEFAULT_HAZARDS, type ClaimKind, type Delivery } from '@10db/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { tempDir } from '../../test/fixtures';
@@ -19,8 +19,13 @@ const outside = tempDir('guard-outside');
 const data = tempDir('guard data');
 const login = tempDir('login claude');
 const CONFIG = join(data.path, 'accounts', 'acc_1', 'claude');
+const OWN_RESULTS = join(CONFIG, 'projects', '-repo', 'sess_own', 'tool-results');
+const OTHER_RESULTS = join(CONFIG, 'projects', '-repo', 'sess_other', 'tool-results');
 beforeAll(() => {
-  mkdirSync(CONFIG, { recursive: true });
+  mkdirSync(OWN_RESULTS, { recursive: true });
+  mkdirSync(OTHER_RESULTS, { recursive: true });
+  writeFileSync(join(OWN_RESULTS, 'out.txt'), 'big');
+  writeFileSync(join(OTHER_RESULTS, 'out.txt'), 'big');
   writeFileSync(join(CONFIG, '.claude.json'), '{}');
   writeFileSync(join(login.path, '.claude.json'), '{}');
   symlinkSync(data.path, join(repo.path, 'link-data'));
@@ -69,6 +74,7 @@ function judge(
     claims,
     readOnly,
     protectedPaths: guarded(),
+    ownSession: { configDir: CONFIG, providerSessionId: 'sess_own' },
   });
 }
 const bash = (command: string, claims?: Claims) => judge('Bash', { command }, claims);
@@ -1217,7 +1223,50 @@ describe('account isolation', () => {
     ['the data directory inside sh -c', () => `sh -c 'cat "${D()}/x"'`],
     ["Claude Code's default sign-in", () => 'cat ~/.claude/.credentials.json'],
     ['the default sign-in file through $HOME', () => 'cat "$HOME/.claude.json"'],
-    ["the login shell's own config directory", () => `ls ${L()}`],
+    ["the login shell's own config directory", () => `ls "${L()}"`],
+    ['a backup of the sign-in file', () => 'cat ~/.claude.json.backup'],
+    ['the sign-in file doctor backup', () => 'cat ~/.claude.json.doctor-backup'],
+    ['a glob over the default directory', () => 'ls -la ~/.claude*'],
+    ['a glob over the sign-in file', () => 'cat ~/.claude.j*'],
+    ['a ? glob in the default directory', () => 'cat ~/.cl?ude/.credentials.json'],
+    [
+      'a glob in the data directory path',
+      () => `cat ${dirname(D())}/${basename(D()).slice(0, 3)}*/accounts/acc_1/claude/.claude.json`,
+    ],
+    ['cd home then a relative file', () => 'cd ~ && cat .claude.json'],
+    [
+      'cd up then a relative data path',
+      () =>
+        `cd .. && cat "${relative(dirname(repo.path), D())}/accounts/acc_1/claude/.claude.json"`,
+    ],
+    ['cd to the data directory then a relative path', () => `cd "${D()}" && cat accounts/x`],
+    ['a tilde after a redirection', () => 'cat <~/.claude.json'],
+    ['a tilde after a redirection inside $()', () => 'echo "$(<~/.claude.json)"'],
+    ['a named user home', () => `cat ~${basename(homedir())}/.claude.json`],
+    ['grep -r over the home directory', () => 'grep -r accessToken ~'],
+    [
+      'grep -rn with --include over home',
+      () => `grep -rn oauthAccount ${homedir()} --include=.claude.json`,
+    ],
+    ['find over home', () => 'find ~ -name .claude.json -exec cat {} +'],
+    ['rg over the data directory parent', () => `rg -uu token ${dirname(D())}`],
+    ['tar of home', () => 'tar -cf - ~'],
+    ['cp -r of the data directory parent', () => `cp -r ${dirname(D())} /nonexistent-out`],
+    ['rsync of home', () => 'rsync -a ~ /nonexistent-out'],
+    ['env after a backslash', () => '\\env'],
+    ['env behind nice', () => 'nice env'],
+    ['printenv behind timeout', () => 'timeout 5 printenv'],
+    ['printenv behind caffeinate', () => 'caffeinate -i printenv'],
+    ['printenv behind stdbuf', () => 'stdbuf -o0 printenv'],
+    ['printenv through find -exec', () => 'find . -maxdepth 0 -exec printenv \\;'],
+    ['a Keychain read behind nice', () => 'nice security find-generic-password -w'],
+    ['a credential read by node', () => "node -p 'process.env.ANTHROPIC_API_KEY'"],
+    ['a credential read by osascript', () => `osascript -e 'system attribute "ANTHROPIC_API_KEY"'`],
+    ['the whole environment from node', () => 'node -e "console.log(process.env)"'],
+    ['the whole environment from python', () => "python3 -c 'import os;print(os.environ)'"],
+    ['the whole environment from awk', () => "awk 'BEGIN{for(k in ENVIRON) print k}'"],
+    ['indirect expansion of a name', () => 'n=ANTHROPIC_API_KEY; echo ${!n}'],
+    ['indirect expansion by prefix', () => 'echo ${!ANTHROPIC*}'],
   ])('denies %s in an implement step and a read-only step', (_name, command) => {
     for (const readOnly of [false, true]) {
       const verdict = run(command(), readOnly);
@@ -1235,6 +1284,13 @@ describe('account isolation', () => {
     ['set -e', 'set -e'],
     ['an export that sets', 'export FOO=1'],
     ['ps aux', 'ps aux'],
+    ['ps -ef', 'ps -ef'],
+    ['ps with -o columns', 'ps -o pid,user,command'],
+    ['ps -eo columns', 'ps -eo pid,comm'],
+    ['ps of one pid with an elapsed time', 'ps -p 123 -o etime='],
+    ['a quoted mention of the default directory', 'grep -rn "~/.claude" docs'],
+    ['a log search that mentions the sign-in file', "git log --grep='stop reading ~/.claude.json'"],
+    ['node reading one harmless variable', "node -e 'console.log(process.env.HOME)'"],
     ['searching code for a variable name', 'grep -rn ANTHROPIC_API_KEY src'],
     ['a harmless variable', 'echo $HOME'],
     ["the repo's own .claude directory", 'cat .claude/settings.json'],
@@ -1244,26 +1300,86 @@ describe('account isolation', () => {
     expect(run(command, false)).toEqual({ decision: 'allow' });
   });
 
-  it.each<[string, Record<string, unknown>]>([
-    ['Read', { file_path: join(CONFIG, '.claude.json') }],
-    ['Read', { file_path: 'link-data/accounts/acc_1/claude/.claude.json' }],
-    ['Glob', { pattern: '**/*', path: '<data>' }],
-    ['Grep', { pattern: 'token', path: '<data>' }],
-    ['Write', { file_path: join(CONFIG, 'settings.json'), content: '{}' }],
-    ['Read', { file_path: join(homedir(), '.claude.json') }],
-    ['Read', { file_path: '<login>/.claude.json' }],
-  ])('denies %s on a protected path in both step kinds', (tool, input) => {
-    const resolved = Object.fromEntries(
-      Object.entries(input).map(([k, v]) => [
-        k,
-        v === '<data>' ? data.path : typeof v === 'string' ? v.replace('<login>', login.path) : v,
-      ]),
-    );
+  it.each<{ name: string; tool: string; input: () => Record<string, unknown> }>([
+    { name: 'Read', tool: 'Read', input: () => ({ file_path: join(CONFIG, '.claude.json') }) },
+    {
+      name: 'Read through a repo link',
+      tool: 'Read',
+      input: () => ({ file_path: 'link-data/accounts/acc_1/claude/.claude.json' }),
+    },
+    { name: 'Glob', tool: 'Glob', input: () => ({ pattern: '**/*', path: data.path }) },
+    { name: 'Grep', tool: 'Grep', input: () => ({ pattern: 'token', path: data.path }) },
+    {
+      name: 'Write',
+      tool: 'Write',
+      input: () => ({ file_path: join(CONFIG, 'settings.json'), content: '{}' }),
+    },
+    {
+      name: 'Read of the default sign-in file',
+      tool: 'Read',
+      input: () => ({ file_path: join(homedir(), '.claude.json') }),
+    },
+    {
+      name: 'Read of its backup',
+      tool: 'Read',
+      input: () => ({ file_path: join(homedir(), '.claude.json.backup') }),
+    },
+    {
+      name: "Read in the login shell's config directory",
+      tool: 'Read',
+      input: () => ({ file_path: join(login.path, '.claude.json') }),
+    },
+    {
+      name: "Read of another session's saved output",
+      tool: 'Read',
+      input: () => ({ file_path: join(OTHER_RESULTS, 'out.txt') }),
+    },
+    {
+      name: 'Grep over the home directory',
+      tool: 'Grep',
+      input: () => ({ pattern: 'x', path: homedir(), glob: '.claude.json*' }),
+    },
+    {
+      name: 'Glob over the home directory',
+      tool: 'Glob',
+      input: () => ({ pattern: '.claude.json*', path: homedir() }),
+    },
+    {
+      name: 'Glob with a glob in the data directory path',
+      tool: 'Glob',
+      input: () => ({
+        pattern: `${dirname(data.path)}/${basename(data.path).slice(0, 3)}*/**/.claude.json`,
+      }),
+    },
+  ])('denies $name on a protected path in both step kinds', ({ tool, input }) => {
     for (const readOnly of [false, true]) {
-      const verdict = judge(tool, resolved, [{ kind: 'area', name: 'api' }], readOnly);
+      const verdict = judge(tool, input(), [{ kind: 'area', name: 'api' }], readOnly);
       expect(verdict.decision).toBe('deny');
       expect(verdict.decision === 'deny' ? verdict.reason : '').toMatch(/data directory|sign-in/);
     }
+  });
+
+  it.each<{ name: string; tool: string; input: () => Record<string, unknown> }>([
+    {
+      name: "Read of the session's own saved output",
+      tool: 'Read',
+      input: () => ({ file_path: join(OWN_RESULTS, 'out.txt') }),
+    },
+    {
+      name: "Grep in the session's own saved output",
+      tool: 'Grep',
+      input: () => ({ pattern: 'big', path: OWN_RESULTS }),
+    },
+    {
+      name: 'Grep with a regex that looks like a path',
+      tool: 'Grep',
+      input: () => ({ pattern: '~/.claude', path: 'src' }),
+    },
+  ])('allows $name', ({ tool, input }) => {
+    for (const readOnly of [false, true])
+      expect(judge(tool, input(), [{ kind: 'area', name: 'api' }], readOnly)).toEqual({
+        decision: 'allow',
+      });
   });
 
   it('still lets a tool read inside the repo', () => {

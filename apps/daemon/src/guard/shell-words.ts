@@ -104,14 +104,36 @@ export function splitCommand(command: string): ShellSegment[] {
   return out;
 }
 
-/** Wrappers that run the rest of the line, with the flags that take a value. */
-const WRAPPERS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
-  ['env', new Set(['-u', '-C', '-S', '--unset', '--chdir'])],
-  ['command', new Set<string>()],
-  ['nohup', new Set<string>()],
-  ['time', new Set(['-f', '-o', '--format', '--output'])],
-  ['exec', new Set(['-a'])],
-  ['xargs', new Set(['-n', '-I', '-P', '-L', '-s', '-d', '-E', '-a'])],
+interface Wrapper {
+  /** Flags that take the next word as their value. */
+  readonly valueFlags: ReadonlySet<string>;
+  /** Positional words before the wrapped command, such as `timeout`'s duration. */
+  readonly positionals: number;
+}
+const wrapper = (valueFlags: readonly string[] = [], positionals = 0): Wrapper => ({
+  valueFlags: new Set(valueFlags),
+  positionals,
+});
+
+/** Wrappers that run the rest of the line. */
+const WRAPPERS: ReadonlyMap<string, Wrapper> = new Map([
+  ['env', wrapper(['-u', '-C', '-S', '--unset', '--chdir'])],
+  ['command', wrapper()],
+  ['nohup', wrapper()],
+  ['time', wrapper(['-f', '-o', '--format', '--output'])],
+  ['exec', wrapper(['-a'])],
+  ['xargs', wrapper(['-n', '-I', '-P', '-L', '-s', '-d', '-E', '-a'])],
+]);
+
+/**
+ * Further wrappers that run the rest of the line. The guard looks through them to judge the command
+ * they run; a permission prefix keeps them as the command, so they are separate.
+ */
+const RUNNER_WRAPPERS: ReadonlyMap<string, Wrapper> = new Map([
+  ['nice', wrapper(['-n', '--adjustment'])],
+  ['timeout', wrapper(['-s', '-k', '--signal', '--kill-after'], 1)],
+  ['caffeinate', wrapper(['-t', '-w'])],
+  ['stdbuf', wrapper(['-i', '-o', '-e'])],
 ]);
 
 /** A command's name as the shell would run it: `/usr/bin/git` and `\git` are both `git`. */
@@ -123,18 +145,24 @@ function commandName(word: string): string {
  * Drops leading `VAR=value` assignments and pass-through wrappers such as `env`, `nohup` and
  * `xargs` together with their flags, and names the command it finds by its basename.
  */
-export function stripCommandPrefixes(words: readonly string[]): string[] {
+export function stripCommandPrefixes(
+  words: readonly string[],
+  options: { readonly lookThroughRunners?: boolean } = {},
+): string[] {
   let i = 0;
   while (i < words.length) {
     const w = words[i] ?? '';
-    const valueFlags = WRAPPERS.get(commandName(w));
+    const wrapped =
+      WRAPPERS.get(commandName(w)) ??
+      (options.lookThroughRunners ? RUNNER_WRAPPERS.get(commandName(w)) : undefined);
     if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(w)) {
       i += 1;
-    } else if (valueFlags) {
+    } else if (wrapped) {
       i += 1;
       while (i < words.length && (words[i] ?? '').startsWith('-')) {
-        i += valueFlags.has(words[i] ?? '') ? 2 : 1;
+        i += wrapped.valueFlags.has(words[i] ?? '') ? 2 : 1;
       }
+      i += wrapped.positionals;
     } else {
       break;
     }
@@ -142,4 +170,20 @@ export function stripCommandPrefixes(words: readonly string[]): string[] {
   const rest = words.slice(i);
   const head = rest[0];
   return head === undefined ? rest : [commandName(head), ...rest.slice(1)];
+}
+
+const FIND_EXEC = new Set(['-exec', '-execdir', '-ok', '-okdir']);
+const FIND_EXEC_END = new Set([';', '\\;', '\\', '+']);
+
+/** The commands a `find` runs through `-exec` and its kin, each without its `{}` terminator. */
+export function findExecCommands(words: readonly string[]): string[][] {
+  const out: string[][] = [];
+  for (let i = 0; i < words.length; i += 1) {
+    if (!FIND_EXEC.has(words[i] ?? '')) continue;
+    const command: string[] = [];
+    for (i += 1; i < words.length && !FIND_EXEC_END.has(words[i] ?? ''); i += 1)
+      command.push(words[i] ?? '');
+    out.push(command);
+  }
+  return out;
 }
