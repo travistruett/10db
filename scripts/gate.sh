@@ -4,6 +4,8 @@
 # reports rust as skipped even when cargo is installed (the Ubuntu CI job: no Tauri system libraries).
 set -uo pipefail
 cd "$(dirname "$0")/.."
+# Logs from an earlier run would otherwise sit beside this run's, and a skipped step leaves none.
+rm -rf .gate
 mkdir -p .gate
 
 ALL_STEPS=(format lint typecheck test build e2e drift knip rust)
