@@ -899,9 +899,9 @@ describe('runner', () => {
     it.each([
       ['a cancel', 'CANCELLED', () => engine.runner.cancel(ws0())],
       [
-        'a provider pause',
+        'an account pause',
         'DONE',
-        () => engine.runner.stopProvider(engine.project.provider, 'paused'),
+        () => engine.runner.stopAccount(engine.project.accountId, 'paused'),
       ],
     ])(
       'settles %s that lands while the finished turn is stopping',
@@ -969,7 +969,7 @@ describe('runner', () => {
     );
 
     it.each([
-      ['a provider pause', () => engine.runner.stopProvider(engine.project.provider, 'paused')],
+      ['an account pause', () => engine.runner.stopAccount(engine.project.accountId, 'paused')],
       ['a shutdown', () => engine.runner.stopAll('shutdown')],
     ])(
       'keeps an answer that lands while %s is still stopping a waiting session',
@@ -1280,6 +1280,31 @@ describe('runner', () => {
     await engine.runner.idle();
     expect(seen).toEqual([workstream.id]);
     expect(ws(workstream.id).state).toBe('DONE');
+  });
+
+  it('stops a lane at its next session once its account reaches the monthly cap', async () => {
+    engine = await createTestEngine(
+      {
+        Alpha: [
+          [{ do: 'mcp', tool: 'write_handoff', args: handoffArgs('op-cap-0001', 'finish') }, turn],
+          [turn],
+        ],
+      },
+      {},
+      {},
+      { account: { kind: 'anthropic_api_key', label: 'Capped', monthlyCapUsd: 0.01 } },
+    );
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(listSessions(engine.store.db, workstream.id)).toHaveLength(1);
+    expect(ws(workstream.id)).toMatchObject({
+      state: 'PAUSED_LIMIT',
+      nextAction: { kind: 'continue_from_handoff' },
+    });
+    expect(listInbox(engine.store.db, { states: ['OPEN'] }).map((i) => i.title)).toEqual([
+      'Capped reached its monthly cap',
+    ]);
   });
 });
 

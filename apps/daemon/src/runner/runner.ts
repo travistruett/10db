@@ -7,14 +7,13 @@ import {
   StepRole,
   ToolAccess,
   WorkstreamState as S,
+  type AccountId,
   type HandoffId,
   type InboxItemDto,
   type InboxItemId,
   type InboxTarget,
   type NextAction,
   type ProjectDto,
-  type ProjectId,
-  type Provider,
   type SessionId,
   type WorkstreamId,
   type WorkstreamStep,
@@ -23,6 +22,7 @@ import {
   activeClaims,
   clearLease,
   endSession,
+  getAccountRow,
   getEvidence,
   getInboxItem,
   getMcpApproval,
@@ -65,6 +65,7 @@ import {
   HANDOFF_NUDGE_READ_ONLY,
   RESULT_NUDGE,
 } from '../briefing';
+import type { AccountRuntime } from '../accounts';
 import type { Clock, Timer } from '../clock';
 import { batchCardFields } from '../delivery';
 import type { StateStore } from '../events';
@@ -130,7 +131,8 @@ export interface RunnerOptions {
   readonly limits: RunnerLimits;
   mcpUrl(): string;
   sessionEnv(project: ProjectDto): Readonly<Record<string, string>>;
-  onRateLimited(provider: Provider, resetsAt: Date | null, projectId: ProjectId): void;
+  /** Usage limits, refusals and the monthly cap, per account. */
+  readonly accounts: Pick<AccountRuntime, 'blocked' | 'rateLimited' | 'refused' | 'sessionEnded'>;
   onLaneFreed(): void;
   /** Runs after every session ends (the watcher's step-end diff). Errors are logged, never thrown. */
   readonly afterSession?: (workstreamId: WorkstreamId) => Promise<void>;
@@ -142,7 +144,7 @@ export interface Runner {
   launch(id: WorkstreamId, fence: number): void;
   stop(id: WorkstreamId, reason: StopReason): Promise<void>;
   cancel(id: WorkstreamId): Promise<void>;
-  stopProvider(provider: Provider, reason: StopReason): Promise<void>;
+  stopAccount(accountId: AccountId, reason: StopReason): Promise<void>;
   stopAll(reason: StopReason): Promise<void>;
   isRunning(id: WorkstreamId): boolean;
   idle(): Promise<void>;
@@ -159,6 +161,12 @@ type Outcome =
     }
   | {
       readonly kind: 'paused';
+      readonly until: Date | null;
+      readonly providerSessionId: string | null;
+    }
+  | {
+      /** The account can take no session now: it is paused or at its monthly cap. */
+      readonly kind: 'held';
       readonly until: Date | null;
       readonly providerSessionId: string | null;
     }
@@ -219,7 +227,7 @@ function permissionAnswer(item: InboxItemDto): {
 
 interface Control {
   readonly fence: number;
-  readonly provider: Provider;
+  readonly accountId: AccountId;
   stopReason: StopReason | null;
   handle: SessionHandle | null;
   /** Set while the gate runs; aborting it kills the gate's process group. */
@@ -611,6 +619,29 @@ export function createRunner(opts: RunnerOptions): Runner {
         });
         return;
       }
+      case 'held':
+        opts.state.write((ctx) => {
+          transitionWorkstream(ctx, id, {
+            to: S.PausedLimit,
+            fence: ctl.fence,
+            // The next action is kept: the lane resumes exactly where it stopped once the account does.
+            patch: {
+              pausedUntil: outcome.until?.toISOString() ?? null,
+              ...(outcome.providerSessionId
+                ? {
+                    nextAction: {
+                      kind: 'resume',
+                      providerSessionId: outcome.providerSessionId,
+                      reason: 'the account resumed',
+                    },
+                  }
+                : {}),
+            },
+            reason: 'the account is paused',
+          });
+          clearLease(ctx, id);
+        });
+        return;
       case 'parked':
         park(id, ctl.fence, outcome.inboxId, outcome.providerSessionId);
         return;
@@ -938,7 +969,7 @@ export function createRunner(opts: RunnerOptions): Runner {
                 until: event.resetsAt,
                 providerSessionId: st.providerSessionId,
               };
-              opts.onRateLimited(project.provider, event.resetsAt, project.id);
+              opts.accounts.rateLimited(ctl.accountId, event.resetsAt, project.id);
             }
             break;
           case 'turn_complete': {
@@ -995,7 +1026,7 @@ export function createRunner(opts: RunnerOptions): Runner {
                     until: null,
                     providerSessionId: st.providerSessionId,
                   };
-                  opts.onRateLimited(project.provider, null, project.id);
+                  opts.accounts.rateLimited(ctl.accountId, null, project.id);
                   break;
                 case SessionEndReason.BillingRefused:
                   st.outcome = {
@@ -1034,6 +1065,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       outcome = finishSession(id, ctl, session.id, st);
     }
     log.info({ outcome: outcome.kind }, 'session ended');
+    opts.accounts.sessionEnded(getAccountRow(db, ctl.accountId), project.id);
     if (opts.afterSession) {
       try {
         await opts.afterSession(id);
@@ -1061,6 +1093,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     const parkedAfterWait =
       st.parkedFor !== null &&
       (ended.kind === 'paused' ||
+        ended.kind === 'held' ||
         ended.kind === 'crashed' ||
         ended.kind === 'refused' ||
         (ended.kind === 'stopped' && ended.reason !== 'cancelled'));
@@ -1235,6 +1268,13 @@ export function createRunner(opts: RunnerOptions): Runner {
           await verify(id, ctl);
           return;
         }
+        const lane = getProject(db, getWorkstreamRow(db, id).projectId);
+        // The scheduler checked before the launch; a lane checks again before each further session (accounts spec §6).
+        const block = opts.accounts.blocked(getAccountRow(db, ctl.accountId), lane.id);
+        if (block) {
+          settle(id, ctl, { kind: 'held', until: block.until, providerSessionId: null });
+          return;
+        }
         const outcome = await runSession(id, ctl);
         if (outcome.kind === 'handoff') continue;
         if (outcome.kind === 'step_done') {
@@ -1301,7 +1341,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       if (active.has(id)) return;
       const ctl: Control = {
         fence,
-        provider: getProject(db, getWorkstreamRow(db, id).projectId).provider,
+        accountId: getProject(db, getWorkstreamRow(db, id).projectId).accountId,
         stopReason: null,
         handle: null,
         gateAbort: null,
@@ -1334,10 +1374,8 @@ export function createRunner(opts: RunnerOptions): Runner {
       if (active.has(id)) await runner.stop(id, 'cancelled');
       else cancelNow(id, null);
     },
-    async stopProvider(provider, reason) {
-      // Provider has a single member for now, so the comparison is constant until a second provider exists.
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-      const matching = [...active.entries()].filter(([, c]) => c.provider === provider);
+    async stopAccount(accountId, reason) {
+      const matching = [...active.entries()].filter(([, c]) => c.accountId === accountId);
       await Promise.all(matching.map(([id]) => runner.stop(id, reason)));
     },
     async stopAll(reason) {

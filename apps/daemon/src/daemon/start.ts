@@ -24,6 +24,7 @@ import {
 } from '@10db/db';
 import { HARNESS_PLUGIN_DIR, readDefaultPersonas } from '@10db/harness';
 import { WebSocketServer } from 'ws';
+import { createAccountCardAnswers, createAccountPauses, createAccountRuntime } from '../accounts';
 import { createApp } from '../api';
 import { createBenchmarkSync, type BenchmarkSync } from '../benchmarks';
 import {
@@ -62,7 +63,7 @@ import {
   type Runner,
   type RunnerLimits,
 } from '../runner';
-import { createProviderPauses, createScheduler, type Scheduler } from '../scheduler';
+import { createScheduler, type Scheduler } from '../scheduler';
 import type { SessionAdapter } from '../sessions';
 import { retryWorkstream, seedTeam } from '../team';
 import { createGateRunner } from '../verify';
@@ -80,8 +81,8 @@ export interface DaemonOptions {
   /** better_sqlite3.node for bundled runs; source runs leave it unset. */
   readonly sqliteBinding?: string;
   readonly clock?: Clock;
-  /** Lane caps across all projects and per provider. */
-  readonly caps?: { readonly global: number; readonly perProvider: number };
+  /** Lane caps across all projects; each account has its own `laneCap`. */
+  readonly caps?: { readonly global: number };
   /** Recovery attempts, fix attempts and the gate timeout; merged over the runner defaults. */
   readonly limits?: Partial<RunnerLimits>;
   /** How long a lane lease lasts before the scheduler renews it. */
@@ -138,7 +139,7 @@ const CLEAN_SHUTDOWN_KEY = 'daemon.clean_shutdown';
 const DEFAULT_SESSION_PATH = '/usr/bin:/bin';
 
 const DEFAULTS = {
-  caps: { global: 4, perProvider: 4 },
+  caps: { global: 4 },
   leaseMs: 60_000,
   tickMs: 2_000,
   defaultPauseMs: 30 * 60_000,
@@ -228,6 +229,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   let runner: Runner | null = null;
   let scheduler: Scheduler | null = null;
   let answerBatchCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
+  let answerAccountCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
 
   const inbox = createInboxService({
     state,
@@ -236,6 +238,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     },
     onFlagAnswer: (item, answer) => {
       answerBatchCard?.(item, answer);
+      answerAccountCard?.(item, answer);
     },
   });
   const sessionEnv = opts.sessionEnv ?? (() => ({ PATH: DEFAULT_SESSION_PATH }));
@@ -285,15 +288,26 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     daemonPid: process.pid,
     logger,
   });
-  const pauses = createProviderPauses({
+  const accountPauses = createAccountPauses({
     state,
     clock,
     inbox,
-    stopProvider: (provider) => runner?.stopProvider(provider, 'paused') ?? Promise.resolve(),
+    stopAccount: (id) => runner?.stopAccount(id, 'paused') ?? Promise.resolve(),
     onResume: () => {
       scheduler?.requestTick();
     },
+  });
+  const accounts = createAccountRuntime({
+    state,
+    clock,
+    inbox,
+    pauses: accountPauses,
     defaultPauseMs: opts.defaultPauseMs ?? DEFAULTS.defaultPauseMs,
+  });
+  answerAccountCard = createAccountCardAnswers({
+    resume: (id) => {
+      accountPauses.resume(id);
+    },
   });
   const createdRunner = createRunner({
     state,
@@ -308,9 +322,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     limits,
     mcpUrl: () => mcpUrl,
     sessionEnv,
-    onRateLimited: (provider, resetsAt, projectId) => {
-      pauses.pause(provider, resetsAt, projectId);
-    },
+    accounts,
     onLaneFreed: () => {
       scheduler?.requestTick();
     },
@@ -323,7 +335,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const createdScheduler = createScheduler({
     state,
     runner: createdRunner,
-    pauses,
+    accounts,
     clock,
     instanceId,
     logger,
@@ -350,7 +362,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     logger,
     cleanShutdown,
   });
-  pauses.restore();
+  accountPauses.restore();
   await recoverBatches({
     state,
     git,
@@ -454,7 +466,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       // Aborts a shipping gate and any git or gh child; the batch stays SHIPPING for recovery.
       await deliveryJobs.stop();
       benchmarks.stop();
-      pauses.stop();
+      accountPauses.stop();
       nightly.cancel();
       unsubscribeLanes();
       watcher?.stop();

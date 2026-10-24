@@ -1,9 +1,12 @@
 import type { AddressInfo } from 'node:net';
 import { serve } from '@hono/node-server';
 import type {
+  AccountId,
+  AccountInput,
+  InboxAnswer,
+  InboxItemDto,
   ProjectDto,
   ProjectInput,
-  Provider,
   RiskTag,
   TaskDto,
   WorkstreamDto,
@@ -20,11 +23,18 @@ import {
   getWorkstreamRow,
   insertTask,
   insertWorkstream,
+  seedAccount,
   seedProject,
   transitionWorkstream,
   type Store,
 } from '@10db/db';
 import { readDefaultPersonas } from '@10db/harness';
+import {
+  createAccountCardAnswers,
+  createAccountPauses,
+  createAccountRuntime,
+  type AccountRuntime,
+} from '../src/accounts';
 import { ManualClock } from '../src/clock';
 import { createEventBus, createStateStore, type StateStore } from '../src/events';
 import { createGit } from '../src/git';
@@ -53,7 +63,8 @@ export interface TestEngine {
   readonly clock: ManualClock;
   readonly project: ProjectDto;
   readonly repoPath: string;
-  readonly rateLimited: { provider: Provider; resetsAt: Date | null }[];
+  readonly accounts: AccountRuntime;
+  readonly rateLimited: { accountId: AccountId; resetsAt: Date | null }[];
   addTask(
     title: string,
     areas?: string[],
@@ -71,23 +82,48 @@ export async function createTestEngine(
   book: FakeScriptBook,
   project: Partial<ProjectInput> = {},
   runnerOverrides: Partial<Pick<RunnerOptions, 'afterSession' | 'sessionEnv'>> = {},
+  setup: { readonly account?: AccountInput } = {},
 ): Promise<TestEngine> {
   const repo = createTempRepo();
   const data = tempDir('engine-data');
-  const { store, close } = createTestStore();
+  // The store stamps sessions with the test clock, so the monthly cap reads the clock's month.
+  const clock = new ManualClock();
+  const { store, close } = createTestStore(() => clock.now());
   const state = createStateStore(store, createEventBus());
   seedTeam(state, readDefaultPersonas());
   measureForTests(state);
-  const clock = new ManualClock();
   const adapter = new FakeAdapter(book);
   const live = createLiveSessions();
   const git = createGit();
-  const rateLimited: { provider: Provider; resetsAt: Date | null }[] = [];
+  const rateLimited: { accountId: AccountId; resetsAt: Date | null }[] = [];
   let runner: Runner | null = null;
+  let answerAccountCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   const inbox = createInboxService({
     state,
     onParkedAnswer: (target, item) => {
       runner?.deliverParkedAnswer(target, item);
+    },
+    onFlagAnswer: (item, answer) => {
+      answerAccountCard?.(item, answer);
+    },
+  });
+  const pauses = createAccountPauses({
+    state,
+    clock,
+    inbox,
+    stopAccount: (id) => runner?.stopAccount(id, 'paused') ?? Promise.resolve(),
+    onResume: () => undefined,
+  });
+  const accounts = createAccountRuntime({
+    state,
+    clock,
+    inbox,
+    pauses,
+    defaultPauseMs: 30 * 60_000,
+  });
+  answerAccountCard = createAccountCardAnswers({
+    resume: (id) => {
+      pauses.resume(id);
     },
   });
   const server = serve({
@@ -118,14 +154,20 @@ export async function createTestEngine(
     limits: { ...DEFAULT_RUNNER_LIMITS, gateTimeoutMs: 20_000 },
     mcpUrl: () => mcpUrl,
     sessionEnv: () => ({ PATH: '/usr/bin:/bin' }),
-    onRateLimited: (provider, resetsAt) => {
-      rateLimited.push({ provider, resetsAt });
+    // A usage limit is recorded but pauses nothing, so a test sees the lane's own outcome.
+    accounts: {
+      ...accounts,
+      rateLimited: (accountId, resetsAt) => {
+        rateLimited.push({ accountId, resetsAt });
+      },
     },
     onLaneFreed: () => undefined,
     ...runnerOverrides,
   });
   runner = created;
+  const account = setup.account ? seedAccount(store, setup.account) : null;
   const seeded = seedProject(store, {
+    ...(account ? { accountId: account.id } : {}),
     repoPath: repo.path,
     gateCommand: 'true',
     areas: [
@@ -143,6 +185,7 @@ export async function createTestEngine(
     clock,
     project: seeded,
     repoPath: repo.path,
+    accounts,
     rateLimited,
     addTask(title, areas = ['api'], dependsOn = [], plan) {
       const criteria = Array.from({ length: plan?.criteria ?? 1 }, (_, i) =>

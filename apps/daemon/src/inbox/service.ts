@@ -73,6 +73,8 @@ export interface InboxService {
     options?: readonly InboxOption[];
   }): InboxItemDto;
   cancelForWorkstream(workstreamId: WorkstreamId): void;
+  /** Rewrites an open card's body (a cap card's running overshoot); a closed card is left as it was. */
+  reword(id: InboxItemId, body: string): void;
   redeliver(id: InboxItemId): InboxItemDto;
 }
 
@@ -309,6 +311,12 @@ export function createInboxService(deps: {
             targets.length === 0 ? { state: InboxState.Cancelled, targets } : { targets },
           );
         }
+      });
+    },
+
+    reword(id, body) {
+      deps.state.write((ctx) => {
+        if (getInboxItem(ctx.tx, id).state === InboxState.Open) updateInboxItem(ctx, id, { body });
       });
     },
 

@@ -99,7 +99,7 @@ describe('recoverBatches', () => {
     const scheduler = createScheduler({
       state: h.state,
       clock: new ManualClock(),
-      caps: { global: 4, perProvider: 4 },
+      caps: { global: 4 },
       instanceId: 'daemon-1',
       leaseMs: 60_000,
       tickMs: 2_000,
@@ -110,7 +110,7 @@ describe('recoverBatches', () => {
         },
         isRunning: () => false,
       },
-      pauses: { isPaused: () => false },
+      accounts: { blocked: () => null, isPaused: () => false },
       branches: h.git,
       onWrongBranch: () => undefined,
     });
