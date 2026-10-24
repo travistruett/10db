@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "accountId": {
+      "type": "string",
+      "pattern": "^acc_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "email": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "organization": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "apiProvider": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "apiKeySource": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "tokenSource": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "subscription": {
+      "type": "boolean"
+    },
+    "refusal": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "problem": {
+              "type": "string",
+              "enum": [
+                "unconfirmed",
+                "identity_mismatch",
+                "wrong_credentials",
+                "signed_out",
+                "secret_missing",
+                "secret_changed",
+                "cannot_bill"
+              ]
+            },
+            "message": {
+              "type": "string"
+            },
+            "seenIdentity": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "problem",
+            "message",
+            "seenIdentity"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "accountId",
+    "email",
+    "organization",
+    "apiProvider",
+    "apiKeySource",
+    "tokenSource",
+    "subscription",
+    "refusal"
+  ]
+}

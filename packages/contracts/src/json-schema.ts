@@ -1,5 +1,15 @@
 import { z } from 'zod';
 import { BatchDto, BatchStartInput, ProjectViewDto, TaskStartResult } from './batches';
+import {
+  AccountCreatedDto,
+  AccountDto,
+  AccountIdentityDto,
+  AccountInput,
+  AccountPatch,
+  AccountSecretInput,
+  AccountSignInDto,
+  AccountUsageDto,
+} from './accounts';
 import { AaModelDto, BenchmarkStatusDto } from './benchmarks';
 import {
   BoardColumnDelete,
@@ -54,6 +64,14 @@ const mcpSchemas: Record<string, z.ZodType> = Object.fromEntries(
 /** Every schema visible outside the daemon, keyed by the file stem of its generated JSON Schema. */
 export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'health-response': HealthResponse,
+  'account-created-dto': AccountCreatedDto,
+  'account-dto': AccountDto,
+  'account-identity-dto': AccountIdentityDto,
+  'account-input': AccountInput,
+  'account-patch': AccountPatch,
+  'account-secret-input': AccountSecretInput,
+  'account-sign-in-dto': AccountSignInDto,
+  'account-usage-dto': AccountUsageDto,
   'daemon-event': DaemonEvent,
   'handoff-input': HandoffInput,
   'batch-dto': BatchDto,

@@ -1,3 +1,4 @@
+export * from './accounts';
 export * from './batch-workflow';
 export * from './batches';
 export * from './benchmarks';
