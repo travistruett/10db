@@ -19,6 +19,7 @@ import {
   getAccount,
   getAccountRow,
   getProject,
+  getSession,
   insertSession,
   insertTask,
   insertWorkstream,
@@ -245,6 +246,14 @@ describe('projects on accounts', () => {
     expect(seedProject(store, { accountId: key.id }).accountId).toBe(key.id);
   });
 
+  it('still binds the default account when a non-default account was created first', () => {
+    apiKey();
+    const project = seedProject(store);
+    const defaultId = defaultAccountId(store.db);
+    expect(defaultId).not.toBeNull();
+    expect(project.accountId).toBe(defaultId);
+  });
+
   it('moves a project with work in flight, but never to an archived or unknown account', () => {
     const project = seedProject(store);
     const key = apiKey();
@@ -297,6 +306,8 @@ describe('usage', () => {
       new Date(2026, 9, 2),
     );
     expect(session.accountId).toBe(project.accountId);
+    expect(getSession(store.db, session.id).costUsd).toBeNull();
+    expect(accountSpendUsd(store.db, project.accountId, OCTOBER)).toBe(0);
     const usage = accountUsage(store.db, project.accountId, OCTOBER);
     expect(usage.total).toEqual({ tokensIn: 100, tokensOut: 10, tokensCached: 50, costUsd: null });
   });
