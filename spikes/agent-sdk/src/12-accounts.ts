@@ -5,12 +5,15 @@
 //   keyed <kind>        bedrock | gateway | api_key: the env names, apiKeySource, apiProvider and model
 // Secrets for keyed kinds come from the login Keychain (service 10db-spike, account <kind>), read in
 // process and never printed. Emails are masked in all output.
+// `refresh` reads the refresh dir's own stored OAuth credential (never the default login's) in process each
+// cycle and keeps only its expiry and a short hash of the access token.
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative, isAbsolute } from 'node:path';
 import { query, type AccountInfo, type CanUseTool, type Options, type SDKMessage, type SDKSystemMessage } from '@anthropic-ai/claude-agent-sdk';
+import { z } from 'zod';
 import { CLAUDE } from './claude.ts';
 import { buildChildEnv } from './env.ts';
 import { makeFixtureRepo } from './fixture-repo.ts';
@@ -184,6 +187,47 @@ function refreshLines(file: string): { total: number; failed: number; lock: numb
   };
 }
 
+// Only the two fields the probe keeps; everything else in the stored credential is ignored.
+const StoredCredential = z.object({
+  claudeAiOauth: z.object({ accessToken: z.string().min(1), expiresAt: z.number().int().positive() }),
+});
+
+type TokenStamp = { expiresAt: string; expiresAtMs: number; token: string };
+
+/**
+ * The stored credential's expiry and a 12-hex sha256 prefix of its access token. On macOS Claude Code keeps a
+ * CLAUDE_CONFIG_DIR's credential in the login Keychain under `Claude Code-credentials-<sha256(dir) first 8 hex>`;
+ * elsewhere, or when the Keychain is unavailable, in `<dir>/.credentials.json`. Errors never carry the secret.
+ */
+function readTokenStamp(configDir: string): TokenStamp | { error: string } {
+  const rel = relative(SPIKE_HOME, configDir);
+  if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) return { error: `refusing to read a credential outside ${SPIKE_HOME}` };
+  let raw: string;
+  const file = join(configDir, '.credentials.json');
+  if (existsSync(file)) {
+    raw = readFileSync(file, 'utf8');
+  } else {
+    const service = `Claude Code-credentials-${createHash('sha256').update(configDir).digest('hex').slice(0, 8)}`;
+    try {
+      raw = execFileSync('security', ['find-generic-password', '-s', service, '-w'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 20_000 });
+    } catch (e) {
+      const status = e instanceof Error && 'status' in e ? String(e.status) : 'none';
+      const signal = e instanceof Error && 'signal' in e ? String(e.signal) : 'none';
+      return { error: `security find-generic-password -s '${service}' failed: status ${status}, signal ${signal}` };
+    }
+  }
+  let json: unknown;
+  try {
+    json = JSON.parse(raw);
+  } catch {
+    return { error: 'stored credential is not JSON' };
+  }
+  const parsed = StoredCredential.safeParse(json);
+  if (!parsed.success) return { error: `stored credential has an unexpected shape at ${parsed.error.issues.map((i) => i.path.join('.')).join(', ')}` };
+  const { accessToken, expiresAt } = parsed.data.claudeAiOauth;
+  return { expiresAt: new Date(expiresAt).toISOString(), expiresAtMs: expiresAt, token: createHash('sha256').update(accessToken).digest('hex').slice(0, 12) };
+}
+
 async function refresh(): Promise<void> {
   const dir = process.env.SPIKE_REFRESH_DIR ?? DIR_A;
   const lanes = Number(process.env.SPIKE_LANES ?? 4);
@@ -228,34 +272,52 @@ async function refresh(): Promise<void> {
     laneObjs.push(lane);
   }
 
-  // Stops one cycle after the first refresh line, so every lane takes a turn on the new token.
+  // Stops one cycle after the stored token changes or a refresh line appears, so every lane takes a turn on the new token.
   let cycle = 0;
   let freshFailures = 0;
+  let unreadable = 0;
   let refreshedAt: number | undefined;
+  let lastStamp: TokenStamp | undefined;
+  let tokenChange: string | undefined;
   while (Date.now() < deadline && (refreshedAt === undefined || cycle <= refreshedAt)) {
     cycle++;
     for (const lane of laneObjs) lane.push(`Cycle ${cycle}: reply with the single word ok. Use no tools.`);
     const fresh = await observe(`fresh ${cycle}`, subEnv(dir), { extraArgs: { 'debug-file': outPath(join('12-refresh', `fresh.debug.log`)) } });
     if (!succeeded(fresh)) freshFailures++;
     const logs = [...laneObjs.keys()].map((i) => refreshLines(debugFile(i)));
+    const now = new Date();
+    const stamp = readTokenStamp(dir);
+    if ('error' in stamp) unreadable++;
     info(`cycle ${cycle}`, {
-      at: new Date().toISOString(),
+      at: now.toISOString(),
       turns: laneObjs.map((l) => l.turns),
       laneFailures: laneObjs.map((l) => l.failures.length),
       fresh: fresh.resultSubtype ?? fresh.error,
       refreshLines: logs.map((l) => l.total),
       refreshFailures: logs.map((l) => l.failed),
+      ...('error' in stamp ? { tokenError: stamp.error } : { expiresAt: stamp.expiresAt, token: stamp.token }),
     });
-    if (refreshedAt === undefined && (logs.some((l) => l.total > 0) || refreshLines(outPath(join('12-refresh', 'fresh.debug.log'))).total > 0)) refreshedAt = cycle;
+    if (!('error' in stamp)) {
+      if (cycle === 1) info('token expires in', `${((stamp.expiresAtMs - now.getTime()) / 60_000).toFixed(1)} min (at ${stamp.expiresAt})`);
+      if (lastStamp && tokenChange === undefined && (stamp.expiresAt !== lastStamp.expiresAt || stamp.token !== lastStamp.token)) {
+        tokenChange = `${now.toISOString()} (cycle ${cycle}): expiresAt ${lastStamp.expiresAt} → ${stamp.expiresAt}, token ${lastStamp.token} → ${stamp.token}`;
+        info('token changed', tokenChange);
+      }
+      lastStamp = stamp;
+    }
+    if (refreshedAt === undefined && (tokenChange !== undefined || logs.some((l) => l.total > 0) || refreshLines(outPath(join('12-refresh', 'fresh.debug.log'))).total > 0)) refreshedAt = cycle;
     await new Promise((r) => setTimeout(r, everyMs));
   }
 
   const logs = [...laneObjs.keys()].map((i) => refreshLines(debugFile(i)));
   const fresh = refreshLines(outPath(join('12-refresh', 'fresh.debug.log')));
   info('refresh log samples', logs.map((l) => l.sample));
-  const sawRefresh = logs.some((l) => l.total > 0) || fresh.total > 0;
-  if (sawRefresh) check('a token refresh happened during the run', true, `lane lines ${logs.map((l) => l.total).join(',')}, fresh ${fresh.total}`);
-  else partial('a token refresh happened during the run', 'no refresh lines in any debug log; extend SPIKE_HOURS');
+  const sawLines = logs.some((l) => l.total > 0) || fresh.total > 0;
+  const lineDetail = `lane lines ${logs.map((l) => l.total).join(',')}, fresh ${fresh.total}`;
+  if (tokenChange !== undefined) check('a token refresh happened during the run', true, `stored token changed at ${tokenChange}; ${lineDetail}`);
+  else if (sawLines) check('a token refresh happened during the run', true, lineDetail);
+  else partial('a token refresh happened during the run', `stored token unchanged (expiresAt ${lastStamp?.expiresAt ?? 'unknown'}) and no refresh lines in any debug log; extend SPIKE_HOURS`);
+  check('the stored credential was readable every cycle', unreadable === 0, `${unreadable} of ${cycle} unreadable`);
   check('no lane failed a turn', laneObjs.every((l) => l.failures.length === 0), JSON.stringify(laneObjs.map((l) => l.failures.slice(0, 3))));
   check('no fresh session failed', freshFailures === 0, `${freshFailures} of ${cycle}`);
   check('no refresh failures logged', logs.every((l) => l.failed === 0) && fresh.failed === 0, JSON.stringify(logs.map((l) => l.failed)));

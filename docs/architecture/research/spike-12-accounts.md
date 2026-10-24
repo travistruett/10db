@@ -1,7 +1,8 @@
 # Spike 12: Billing identities per config directory and per keyed kind
 
-- **Status:** IN PROGRESS. The gateway check is VERIFIED; the refresh check is PARTIAL and deferred (an open
-  question in `docs/architecture/open-questions.md`); Bedrock, API-key and two-subscription checks have not run.
+- **Status:** IN PROGRESS. The gateway check is VERIFIED; the refresh check is PARTIAL, with its probe ready for
+  a rerun (an open question in `docs/architecture/open-questions.md`); Bedrock, API-key and two-subscription
+  checks have not run.
 - **Date:** 2026-10-18
 - **Versions:** claude 2.1.302 (Claude Code) · Agent SDK 0.3.300 · Node v26.12.0
 - **Command:** `pnpm --dir spikes/agent-sdk spike:12 <identity | identity-one | refresh | keyed <kind>>`
@@ -67,12 +68,40 @@ session rode through it; the run does not show how long a token lasts. Nothing b
 out the refresh race either, so the spec's fallbacks (a lane cap, or starting sessions one at a time) stay
 available until the check is rerun.
 
-### Finishing the check (deferred)
+### Finishing the check (probe ready, rerun pending)
 
-Claude Code logs nothing about credentials at debug level, and `claude auth status` reports no expiry. The rerun
-reads the config directory's stored credential in process each cycle and records only its `expiresAt` and a
-short hash of the access token, never the token. A change in either marks the refresh and its time, and the run
-stops one cycle later. The first cycle's `expiresAt` also shows how long a token lasts.
+Claude Code logs nothing about credentials at debug level, and `claude auth status` reports no expiry, so the
+probe now reads the config directory's stored credential in process each cycle. On macOS that is the login
+Keychain generic password `Claude Code-credentials-<first 8 hex of sha256(config dir)>`; the default login uses
+`Claude Code-credentials` and is never read. Where the Keychain is not used, the credential is
+`<config dir>/.credentials.json`, which the probe reads instead when it exists. It refuses any directory outside
+`~/.10db-spike`, parses the JSON with zod and keeps only `expiresAt` and a 12-hex sha256 prefix of the access
+token. The token, the refresh token and the raw JSON are never printed or written.
+
+Each `cycle` line carries `expiresAt` and `token`. The first cycle also logs the time left until expiry. A change
+in either value logs `token changed` with its time, passes `a token refresh happened during the run`, and the
+run stops one cycle later. A further check fails if any cycle could not read the credential.
+
+A 6-minute run on 2026-10-22 (claude 2.1.306, 6 cycles, 60 s apart) read the credential every cycle. The
+stored token had expired since the 10-hour run, and a session renewed it as the run started: cycle 1 saw a new
+`expiresAt` 479.9 minutes ahead, so an access token lasts 8 hours. Every later cycle saw the same `expiresAt`
+and hash. The Keychain item's modification time from the 10-hour run, 03:23 Pacific, is about 8 hours after
+that run began, which fits a refresh partway through it, but nothing in that run's output records one.
+
+The full check runs past one token lifetime, so the default 10 hours covers it and the early stop ends it about
+one cycle after the refresh:
+
+```
+pnpm --dir spikes/agent-sdk spike:12 refresh
+```
+
+```
+INFO cycle 1: {"at":"2026-10-22T22:37:50.502Z","turns":[0,1,1,1],"laneFailures":[0,0,0,0],"fresh":"success","refreshLines":[0,0,0,0],"refreshFailures":[0,0,0,0],"expiresAt":"2026-10-23T06:37:46.759Z","token":"5a941de1a789"}
+INFO token expires in: 479.9 min (at 2026-10-23T06:37:46.759Z)
+INFO cycle 6: {"at":"2026-10-22T22:43:04.356Z","turns":[6,6,6,6],"laneFailures":[0,0,0,0],"fresh":"success","refreshLines":[0,0,0,0],"refreshFailures":[0,0,0,0],"expiresAt":"2026-10-23T06:37:46.759Z","token":"5a941de1a789"}
+PARTIAL a token refresh happened during the run: stored token unchanged (expiresAt 2026-10-23T06:37:46.759Z) and no refresh lines in any debug log; extend SPIKE_HOURS
+PASS the stored credential was readable every cycle: 0 of 6 unreadable
+```
 
 ### Evidence
 
