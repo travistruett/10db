@@ -339,6 +339,7 @@ CREATE TABLE `tasks` (
 	`areas` text NOT NULL,
 	`risk_tags` text DEFAULT '[]' NOT NULL,
 	`flow_id` text,
+	`proposal_id` text,
 	`status` text NOT NULL,
 	`board_order` real NOT NULL,
 	`board_column_id` text,
@@ -347,6 +348,7 @@ CREATE TABLE `tasks` (
 	`updated_at` text NOT NULL,
 	FOREIGN KEY (`project_id`) REFERENCES `projects`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`flow_id`) REFERENCES `flows`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`proposal_id`) REFERENCES `proposals`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`board_column_id`) REFERENCES `board_columns`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint

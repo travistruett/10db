@@ -1,9 +1,12 @@
 import {
   ConflictError,
+  EventType,
   InvalidError,
   mintId,
   type InboxItemDto,
   type InboxTarget,
+  type ProposalId,
+  type ProposalKind,
 } from '@10db/contracts';
 import {
   createTestStore,
@@ -12,8 +15,11 @@ import {
   insertInboxItem,
   insertProposal,
   insertSource,
+  listEventsAfter,
   listInbox,
   listPermissionRules,
+  listTasks,
+  schema,
   searchDecisions,
   updateInboxItem,
 } from '@10db/db';
@@ -231,6 +237,107 @@ describe('inbox questions', () => {
     const { item } = ask(ws);
     inbox.cancelForWorkstream(ws.workstream.id);
     expect(getInboxItem(state.db, item.id).state).toBe('CANCELLED');
+  });
+});
+
+describe('proposal verdicts', () => {
+  function proposalCard(
+    ws: ReturnType<typeof seedWorkstream>,
+    kind: ProposalKind,
+    title: string,
+    body: string,
+  ): { proposalId: ProposalId; card: InboxItemDto } {
+    const proposalId = state.write((ctx) =>
+      insertProposal(ctx, {
+        projectId: ws.project.id,
+        kind,
+        title,
+        body,
+        sourceId: insertSource(ctx, 'agent', {}),
+      }),
+    );
+    const card = state.write((ctx) =>
+      insertInboxItem(ctx, {
+        projectId: ws.project.id,
+        kind: 'proposal',
+        title,
+        body,
+        options: [
+          { label: 'accept', description: '' },
+          { label: 'reject', description: '' },
+        ],
+        recommendation: null,
+        category: 'product',
+        urgency: 'low',
+        detail: { proposalId },
+        foldKey: null,
+        targets: [],
+      }),
+    );
+    return { proposalId, card };
+  }
+  const taskCount = (ws: ReturnType<typeof seedWorkstream>) =>
+    listTasks(state.db, ws.project.id).length;
+
+  it('files an accepted new task as an open task with the proposal title and body', () => {
+    const ws = seedWorkstream(base);
+    const { proposalId, card } = proposalCard(ws, 'new_task', 'Add caching', 'Cache the query.');
+    inbox.answer(card.id, { choice: 'accept', note: 'next milestone' });
+    expect(getProposal(state.db, proposalId).status).toBe('accepted');
+    expect(listTasks(state.db, ws.project.id).find((t) => t.title === 'Add caching')).toMatchObject(
+      { projectId: ws.project.id, description: 'Cache the query.', status: 'open' },
+    );
+  });
+
+  it('links the filed task to its proposal and the task.created event carries the link', () => {
+    const ws = seedWorkstream(base);
+    const { proposalId, card } = proposalCard(ws, 'new_task', 'Add caching', 'Cache the query.');
+    inbox.answer(card.id, { choice: 'accept' });
+    const filed = listTasks(state.db, ws.project.id).find((t) => t.title === 'Add caching');
+    if (!filed) throw new Error('expected the accepted proposal to file a task');
+    const linked = state.db
+      .select({ id: schema.tasks.id, proposalId: schema.tasks.proposalId })
+      .from(schema.tasks)
+      .all()
+      .find((row) => row.id === filed.id);
+    expect(linked?.proposalId).toBe(proposalId);
+    expect(
+      listEventsAfter(state.db, 0, 1000).filter(
+        (e) => e.type === EventType.TaskCreated && e.entityId === filed.id,
+      ),
+    ).toEqual([expect.objectContaining({ data: { projectId: ws.project.id, proposalId } })]);
+  });
+
+  it('files nothing when the proposal is rejected', () => {
+    const ws = seedWorkstream(base);
+    const before = taskCount(ws);
+    const { proposalId, card } = proposalCard(ws, 'new_task', 'Add caching', 'Cache the query.');
+    inbox.answer(card.id, { choice: 'reject', note: 'not now' });
+    expect(getProposal(state.db, proposalId).status).toBe('rejected');
+    expect(taskCount(ws)).toBe(before);
+  });
+
+  it.each([
+    ['a change to a task', 'change_task'],
+    ['a principle', 'principle'],
+    ['a note', 'note'],
+  ] as const)('files nothing when %s is accepted', (_name, kind) => {
+    const ws = seedWorkstream(base);
+    const before = taskCount(ws);
+    const { proposalId, card } = proposalCard(ws, kind, 'Something', 'Body.');
+    inbox.answer(card.id, { choice: 'accept' });
+    expect(getProposal(state.db, proposalId).status).toBe('accepted');
+    expect(taskCount(ws)).toBe(before);
+  });
+
+  it('keeps the proposal pending and its card open when the task cannot be filed', () => {
+    const ws = seedWorkstream(base);
+    const before = taskCount(ws);
+    const { proposalId, card } = proposalCard(ws, 'new_task', '   ', 'Body.');
+    expect(() => inbox.answer(card.id, { choice: 'accept' })).toThrow(InvalidError);
+    expect(getProposal(state.db, proposalId).status).toBe('pending');
+    expect(getInboxItem(state.db, card.id).state).toBe('OPEN');
+    expect(taskCount(ws)).toBe(before);
   });
 });
 
