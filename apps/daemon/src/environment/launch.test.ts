@@ -26,6 +26,12 @@ const BASE: Readonly<Record<string, string>> = {
   AWS_REGION: 'us-east-1',
   AWS_ACCESS_KEY_ID: 'AKIA-login',
   AWS_SECRET_ACCESS_KEY: 'login-secret',
+  AWS_WEB_IDENTITY_TOKEN_FILE: 'login-value',
+  AWS_ROLE_ARN: 'login-value',
+  AWS_CONTAINER_CREDENTIALS_FULL_URI: 'login-value',
+  AWS_CONTAINER_CREDENTIALS_RELATIVE_URI: 'login-value',
+  AWS_CONTAINER_AUTHORIZATION_TOKEN: 'login-value',
+  AWS_ENDPOINT_URL_BEDROCK_RUNTIME: 'login-value',
   CLAUDECODE: '1',
   GIT_DIR: '/elsewhere/.git',
   TENDB_DATA_DIR: '/data',
@@ -142,6 +148,12 @@ describe('a session launch', () => {
         CLAUDE_CONFIG_DIR: KEY_DIR,
       },
       absent: [
+        'AWS_WEB_IDENTITY_TOKEN_FILE',
+        'AWS_ROLE_ARN',
+        'AWS_CONTAINER_CREDENTIALS_FULL_URI',
+        'AWS_CONTAINER_CREDENTIALS_RELATIVE_URI',
+        'AWS_CONTAINER_AUTHORIZATION_TOKEN',
+        'AWS_ENDPOINT_URL_BEDROCK_RUNTIME',
         'AWS_ACCESS_KEY_ID',
         'AWS_SECRET_ACCESS_KEY',
         'AWS_BEARER_TOKEN_BEDROCK',
@@ -273,7 +285,7 @@ describe("the login shell's config directory", () => {
 
 describe('signInCommand', () => {
   it.each<[string | null, string]>([
-    [null, 'claude /login'],
+    [null, 'env -u CLAUDE_CONFIG_DIR claude /login'],
     [
       '/data/accounts/acc_1/claude',
       "CLAUDE_CONFIG_DIR='/data/accounts/acc_1/claude' claude /login",

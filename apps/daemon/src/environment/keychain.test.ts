@@ -56,6 +56,16 @@ describe('keychainWith', () => {
     expect(security.calls).toEqual([]);
   });
 
+  it('refuses an account name that would inject arguments into the security line', () => {
+    const security = securityDouble();
+    const keychain = keychainWith(security.exec);
+    for (const bad of ['acc" -w "x', 'a b', 'a\nb', ''])
+      expect(() => {
+        keychain.write(bad, 'sk-ant-SECRET-1234');
+      }).toThrow(KeychainError);
+    expect(security.calls).toEqual([]);
+  });
+
   it('fails a write the Keychain did not store as given, naming no value', () => {
     const keychain = keychainWith(securityDouble({ mangle: (s) => s.slice(1) }).exec);
     const write = () => {

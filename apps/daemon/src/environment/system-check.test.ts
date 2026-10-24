@@ -94,6 +94,21 @@ describe('systemCheck', () => {
   });
 });
 
+describe('systemCheck version warning', () => {
+  it('warns when the installed claude has a newer major version', async () => {
+    tool('bin', 'claude', 'exit 0');
+    const login: LoginEnv = {
+      vars: { PATH: join(dir.path, 'bin') },
+      source: 'login_shell',
+      warning: null,
+    };
+    const report = await systemCheck(login, (path) =>
+      Promise.resolve(path.endsWith('claude') ? '3.0.0 (Claude Code)' : null),
+    );
+    expect(report.claudeCode.warning).toContain('3.0.0');
+  });
+});
+
 describe('markGhRequired', () => {
   it('requires gh only while some project delivers pull requests', () => {
     const check = {

@@ -25,6 +25,12 @@ const AWS_LOGIN_VARS: readonly string[] = [
   'AWS_DEFAULT_PROFILE',
   'AWS_REGION',
   'AWS_DEFAULT_REGION',
+  'AWS_WEB_IDENTITY_TOKEN_FILE',
+  'AWS_ROLE_ARN',
+  'AWS_CONTAINER_CREDENTIALS_FULL_URI',
+  'AWS_CONTAINER_CREDENTIALS_RELATIVE_URI',
+  'AWS_CONTAINER_AUTHORIZATION_TOKEN',
+  'AWS_ENDPOINT_URL_BEDROCK_RUNTIME',
 ];
 const CLIENT_APP_VAR = 'CLAUDE_AGENT_SDK_CLIENT_APP';
 
@@ -79,10 +85,10 @@ function quoted(text: string): string {
   return `'${text.replaceAll("'", `'\\''`)}'`;
 }
 
-/** Signs a subscription in with the unmodified `claude`; the path is one shell word even with spaces. */
+/** Signs a subscription in with the unmodified `claude`, unsetting any exported directory for the default account; the path is one shell word even with spaces. */
 export function signInCommand(configDir: string | null): string {
   return configDir === null
-    ? 'claude /login'
+    ? 'env -u CLAUDE_CONFIG_DIR claude /login'
     : `CLAUDE_CONFIG_DIR=${quoted(configDir)} claude /login`;
 }
 
