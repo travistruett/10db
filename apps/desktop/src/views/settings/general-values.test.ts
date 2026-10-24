@@ -113,4 +113,40 @@ describe('checkGeneral', () => {
       patch: { prTitlePrefix: null },
     });
   });
+
+  it.each<{ name: string; allowedCommands: string; expected: ReturnType<typeof checkGeneral> }>([
+    {
+      name: 'a list, one command per line, trimmed and without blank lines',
+      allowedCommands: ' pnpm test \n\npnpm exec prettier\n',
+      expected: { ok: true, patch: { allowedCommands: ['pnpm test', 'pnpm exec prettier'] } },
+    },
+    {
+      name: 'the same command twice',
+      allowedCommands: 'pnpm test\npnpm test',
+      expected: { ok: false, errors: { allowedCommands: 'List each command once' } },
+    },
+  ])('answers $name', ({ allowedCommands, expected }) => {
+    expect(checkGeneral(project, { ...base, allowedCommands })).toEqual(expected);
+  });
+
+  it('names the first line that is not a plain command prefix', () => {
+    const checked = checkGeneral(project, { ...base, allowedCommands: 'pnpm test\npnpm --run' });
+    expect(checked.ok).toBe(false);
+    expect(checked.ok ? undefined : checked.errors.allowedCommands).toMatch(/^Line 2: /);
+  });
+
+  it('shows the project list as one command per line', () => {
+    const listed = projectDto({ allowedCommands: ['pnpm test', 'pnpm exec prettier'] });
+    expect(generalValues(listed).allowedCommands).toBe('pnpm test\npnpm exec prettier');
+  });
+
+  it('sends nothing for the list when it is unchanged, and clears it when emptied', () => {
+    const listed = projectDto({ allowedCommands: ['pnpm test'] });
+    const values = generalValues(listed);
+    expect(checkGeneral(listed, values)).toEqual({ ok: true, patch: null });
+    expect(checkGeneral(listed, { ...values, allowedCommands: '' })).toEqual({
+      ok: true,
+      patch: { allowedCommands: [] },
+    });
+  });
 });

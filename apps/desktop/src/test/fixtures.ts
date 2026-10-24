@@ -36,6 +36,7 @@ export function projectDto(overrides: Partial<ProjectDto> = {}): ProjectDto {
     delivery: 'local',
     baseBranch: 'main',
     prTitlePrefix: null,
+    allowedCommands: [],
     createdAt: AT,
     updatedAt: AT,
     ...overrides,

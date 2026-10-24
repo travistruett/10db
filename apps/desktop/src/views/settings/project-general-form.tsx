@@ -8,6 +8,7 @@ import {
   Select,
   Stack,
   Text,
+  Textarea,
   TextInput,
 } from '@mantine/core';
 import { useState } from 'react';
@@ -38,6 +39,10 @@ function reseed(current: GeneralValues, seed: GeneralValues, next: GeneralValues
     baseBranch: current.baseBranch === seed.baseBranch ? next.baseBranch : current.baseBranch,
     prTitlePrefix:
       current.prTitlePrefix === seed.prTitlePrefix ? next.prTitlePrefix : current.prTitlePrefix,
+    allowedCommands:
+      current.allowedCommands === seed.allowedCommands
+        ? next.allowedCommands
+        : current.allowedCommands,
   };
 }
 
@@ -204,6 +209,18 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
         error={errors.prTitlePrefix}
         onChange={(e) => {
           set({ prTitlePrefix: e.currentTarget.value });
+        }}
+      />
+      <Textarea
+        label="Extra allowed commands"
+        description="One command per line, such as pnpm test. A lane runs these without a permission card; the guard still checks each one."
+        ff="monospace"
+        autosize
+        minRows={2}
+        value={values.allowedCommands}
+        error={errors.allowedCommands}
+        onChange={(e) => {
+          set({ allowedCommands: e.currentTarget.value });
         }}
       />
       {patch.error ? (
