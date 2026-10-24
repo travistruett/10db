@@ -1,5 +1,6 @@
 import {
   isCommandRunner,
+  packageToolProgramIndex,
   ToolAccess,
   type PermissionRuleDto,
   type ProjectDto,
@@ -139,19 +140,19 @@ export function matchesAllowedTool(
   });
 }
 
-/** Package tools that run the package or file they name, so "always allow" keeps the whole command. */
-const NAMED_PROGRAM_RUNNERS: ReadonlySet<string> = new Set(['npx', 'bunx', 'pnpx', 'bun']);
-/** Package managers whose `dlx`, `exec` or `x` subcommand runs the program it is given: `pnpm dlx bash`. */
-const PACKAGE_MANAGERS: ReadonlySet<string> = new Set(['npm', 'pnpm', 'yarn']);
-const PROGRAM_SUBCOMMANDS: ReadonlySet<string> = new Set(['dlx', 'exec', 'x']);
+/** Bun runs the file it names as well as a package, so every bun command keeps its whole words. */
+const FILE_RUNNERS: ReadonlySet<string> = new Set(['bun']);
 const SUBCOMMAND = /^[A-Za-z][A-Za-z0-9_-]*$/;
 
-/** Compared without case: a case-insensitive file system runs `PNPM` as `pnpm`, so it gets the whole command. */
+/**
+ * Whether the words run another program, so "always allow" keeps them whole. The package tools that
+ * name a program come from @10db/contracts, the same list allowed-commands reads. Names are compared
+ * without case: a case-insensitive file system runs `PNPM` as `pnpm`.
+ */
 function runsOtherCommands(words: readonly string[]): boolean {
-  const [first = '', second = ''] = words;
+  const [first = ''] = words;
   const name = first.toLowerCase();
-  if (isCommandRunner(name) || NAMED_PROGRAM_RUNNERS.has(name)) return true;
-  return PACKAGE_MANAGERS.has(name) && PROGRAM_SUBCOMMANDS.has(second.toLowerCase());
+  return isCommandRunner(name) || FILE_RUNNERS.has(name) || packageToolProgramIndex(words) !== null;
 }
 
 /**
