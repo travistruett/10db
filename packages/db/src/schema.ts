@@ -190,6 +190,10 @@ export const tasks = sqliteTable(
     flowId: text('flow_id')
       .$type<FlowId>()
       .references(() => flows.id),
+    /** The accepted proposal this task was filed from; null for a task made by hand. */
+    proposalId: text('proposal_id')
+      .$type<ProposalId>()
+      .references(() => proposals.id),
     status: text('status').$type<TaskStatus>().notNull(),
     boardOrder: real('board_order').notNull(),
     /** Set: parked in that human column. Null: planned, with its column derived from its state. */

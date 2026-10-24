@@ -15,7 +15,24 @@ describe('SystemCheckDto', () => {
         { name: 'docker', path: null, version: null, required: false },
       ],
     };
+    expect(SystemCheckDto.parse(report)).toEqual({ ...report, benchmarkSync: null });
+  });
+
+  it('reads a failed Artificial Analysis sync, and refuses an outcome that is not a failure', () => {
+    const warning = {
+      outcome: 'rate_limited',
+      message: 'The daily Artificial Analysis limit is used up',
+    };
+    const report = {
+      loginEnv: { source: 'login_shell', warning: null },
+      tools: [],
+      benchmarkSync: warning,
+    };
     expect(SystemCheckDto.parse(report)).toEqual(report);
+    expect(
+      SystemCheckDto.safeParse({ ...report, benchmarkSync: { outcome: 'ok', message: '8 models' } })
+        .success,
+    ).toBe(false);
   });
 
   it('rejects an unknown tool name', () => {

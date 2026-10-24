@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "0aa16441-d6c2-4851-b6ee-8e247aa1b88e",
+  "id": "c1997c12-21f0-4c61-a094-3351e6de1cc6",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "aa_models": {
@@ -2315,6 +2315,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "proposal_id": {
+          "name": "proposal_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "status": {
           "name": "status",
           "type": "text",
@@ -2387,6 +2394,19 @@
           "tableTo": "flows",
           "columnsFrom": [
             "flow_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "tasks_proposal_id_proposals_id_fk": {
+          "name": "tasks_proposal_id_proposals_id_fk",
+          "tableFrom": "tasks",
+          "tableTo": "proposals",
+          "columnsFrom": [
+            "proposal_id"
           ],
           "columnsTo": [
             "id"

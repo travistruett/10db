@@ -112,6 +112,7 @@ describe('API', () => {
           required: true,
         },
       ],
+      benchmarkSync: null,
     };
     const modes: string[] = [];
     const services = stubServices({

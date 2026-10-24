@@ -8,6 +8,7 @@ import {
   InvalidError,
   PermissionChoice,
   ProposalId,
+  ProposalKind,
   QuestionCategory,
   Urgency,
   type InboxItemDto,
@@ -26,6 +27,7 @@ import {
   insertInboxItem,
   insertPermissionRule,
   insertSource,
+  insertTaskFromProposal,
   openItemsForWorkstream,
   resolveProposal,
   updateInboxItem,
@@ -35,6 +37,7 @@ import {
 import type { StateStore } from '../events';
 import { commandPrefix } from '../permissions';
 import { applyMcpApproval } from './mcp-approval';
+import { taskFieldsFromProposal } from './proposal-task';
 
 /** Rejects an answer promise when the asking session stops waiting. */
 export class ParkedError extends Error {
@@ -139,7 +142,11 @@ function applyPermissionChoice(ctx: WriteContext, item: InboxItemDto, answer: In
   }
 }
 
-/** A proposal keeps its status and the builder's accept/reject rationale; a resolved one is final. */
+/**
+ * A proposal keeps its status and the builder's accept/reject rationale; a resolved one is final. Accepting
+ * a new-task proposal files its task in the same transaction, so a task that cannot be filed leaves the
+ * proposal pending.
+ */
 function applyProposalVerdict(ctx: WriteContext, item: InboxItemDto, answer: InboxAnswer): void {
   const proposalId = ProposalId.safeParse(item.detail?.['proposalId']);
   if (!proposalId.success) return;
@@ -147,10 +154,18 @@ function applyProposalVerdict(ctx: WriteContext, item: InboxItemDto, answer: Inb
   if (proposal.status !== 'pending') {
     throw new ConflictError(`Proposal ${proposal.id} is already ${proposal.status}`);
   }
+  const accepted = answer.choice === 'accept';
   resolveProposal(ctx, proposalId.data, {
-    status: answer.choice === 'accept' ? 'accepted' : 'rejected',
+    status: accepted ? 'accepted' : 'rejected',
     rationale: answer.note ?? null,
   });
+  if (accepted && proposal.kind === ProposalKind.NewTask) {
+    insertTaskFromProposal(ctx, {
+      proposalId: proposal.id,
+      projectId: proposal.projectId,
+      ...taskFieldsFromProposal(proposal),
+    });
+  }
 }
 
 export function createInboxService(deps: {
