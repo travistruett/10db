@@ -10,6 +10,7 @@ import {
 } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as schema from '../schema';
+import { seedDefaultAccount } from './accounts';
 import { listEventsAfter } from './events';
 import { getProject, insertProject, listProjects } from './projects';
 import type { Store, WriteContext } from './store';
@@ -18,7 +19,10 @@ import { createTestStore, seedProject } from './test-support';
 
 let store: Store;
 let close: () => void;
-beforeEach(() => ({ store, close } = createTestStore()));
+beforeEach(() => {
+  ({ store, close } = createTestStore());
+  store.write((ctx) => seedDefaultAccount(ctx, { expectedIdentity: null }));
+});
 afterEach(() => {
   close();
 });
@@ -33,16 +37,18 @@ const insertMinimalProject = (ctx: WriteContext) =>
 
 describe('store.write', () => {
   it('commits rows and events together and returns the persisted events', () => {
+    const after = listEventsAfter(store.db, 0, 10).at(-1)?.seq ?? 0;
     const { value: project, events } = store.write(insertMinimalProject);
     expect(events.map((e) => e.type)).toEqual([
       EventType.ProjectCreated,
       EventType.BoardColumnSaved,
     ]);
     expect(events[0]?.entityId).toBe(project.id);
-    expect(listEventsAfter(store.db, 0, 10)).toEqual(events);
+    expect(listEventsAfter(store.db, after, 10)).toEqual(events);
   });
 
   it('rolls back rows and events when the function throws', () => {
+    const after = listEventsAfter(store.db, 0, 10).at(-1)?.seq ?? 0;
     expect(() =>
       store.write((ctx) => {
         insertMinimalProject(ctx);
@@ -50,7 +56,7 @@ describe('store.write', () => {
       }),
     ).toThrow('boom');
     expect(listProjects(store.db)).toEqual([]);
-    expect(listEventsAfter(store.db, 0, 10)).toEqual([]);
+    expect(listEventsAfter(store.db, after, 10)).toEqual([]);
   });
 });
 

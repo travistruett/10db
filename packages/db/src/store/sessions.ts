@@ -1,5 +1,6 @@
 import {
   EventType,
+  isMetered,
   mintId,
   NotFoundError,
   type Effort,
@@ -8,7 +9,7 @@ import {
   type SessionMode,
   type WorkstreamId,
 } from '@10db/contracts';
-import { and, asc, count, desc, eq, isNull } from 'drizzle-orm';
+import { and, asc, count, desc, eq, isNull, sql } from 'drizzle-orm';
 import * as schema from '../schema';
 import type { DbReader, WriteContext } from './store';
 
@@ -33,9 +34,18 @@ export function insertSession(ctx: WriteContext, input: NewSession): SessionRow 
     .from(schema.sessions)
     .where(eq(schema.sessions.workstreamId, input.workstreamId))
     .get();
+  const owner = ctx.tx
+    .select({ accountId: schema.projects.accountId, kind: schema.accounts.kind })
+    .from(schema.workstreams)
+    .innerJoin(schema.projects, eq(schema.projects.id, schema.workstreams.projectId))
+    .innerJoin(schema.accounts, eq(schema.accounts.id, schema.projects.accountId))
+    .where(eq(schema.workstreams.id, input.workstreamId))
+    .get();
+  if (!owner) throw new NotFoundError('workstream', input.workstreamId);
   const row: SessionRow = {
     id: mintId('Session'),
     ...input,
+    accountId: owner.accountId,
     briefed: input.briefed ?? false,
     briefingBaselinePct: input.briefingBaselinePct ?? null,
     sequence: (prior?.n ?? 0) + 1,
@@ -47,7 +57,9 @@ export function insertSession(ctx: WriteContext, input: NewSession): SessionRow 
     exitReason: null,
     inputTokens: 0,
     outputTokens: 0,
-    costUsd: 0,
+    cachedTokens: 0,
+    // A subscription's dollars are not real money, so its cost stays null.
+    costUsd: isMetered(owner.kind) ? 0 : null,
     contextPct: null,
     createdAt: ctx.now,
     updatedAt: ctx.now,
@@ -83,13 +95,23 @@ export function updateSessionUsage(
   patch: Partial<
     Pick<
       SessionRow,
-      'inputTokens' | 'outputTokens' | 'costUsd' | 'contextPct' | 'briefingBaselinePct'
+      'inputTokens' | 'outputTokens' | 'cachedTokens' | 'contextPct' | 'briefingBaselinePct'
     >
-  >,
+  > & { readonly costUsd?: number },
 ): void {
+  const { costUsd, ...rest } = patch;
   ctx.tx
     .update(schema.sessions)
-    .set({ ...patch, updatedAt: ctx.now })
+    .set({
+      ...rest,
+      // The cost never lands on a session whose cost is null (a subscription).
+      ...(costUsd === undefined
+        ? {}
+        : {
+            costUsd: sql`case when ${schema.sessions.costUsd} is null then null else ${costUsd} end`,
+          }),
+      updatedAt: ctx.now,
+    })
     .where(eq(schema.sessions.id, id))
     .run();
 }

@@ -19,6 +19,7 @@ import {
   getAppSetting,
   migrateDatabase,
   openDatabase,
+  seedDefaultAccount,
   setAppSetting,
 } from '@10db/db';
 import { HARNESS_PLUGIN_DIR, readDefaultPersonas } from '@10db/harness';
@@ -205,6 +206,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   );
   // A malformed persona file throws and the daemon doesn't start, the same policy as a failed migration.
   seedTeam(state, readDefaultPersonas(opts.harnessDir ?? HARNESS_PLUGIN_DIR));
+  // The builder's current login is the default account, so a project made without one binds to it.
+  state.write((ctx) => seedDefaultAccount(ctx, { expectedIdentity: null }));
   const benchmarks = createBenchmarkSync({
     state,
     clock,

@@ -20,6 +20,19 @@ afterEach(() => {
 });
 
 function seedProjectAndWorkstreams() {
+  const accountId = mintId('Account');
+  db.insert(schema.accounts)
+    .values({
+      id: accountId,
+      kind: 'claude_subscription',
+      label: 'a',
+      payer: '',
+      settings: {},
+      laneCap: 4,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .run();
   const projectId = mintId('Project');
   db.insert(schema.projects)
     .values({
@@ -31,6 +44,7 @@ function seedProjectAndWorkstreams() {
       hazards: [],
       maxLanes: 2,
       provider: 'claude',
+      accountId,
       billingMode: 'subscription',
       model: 'sonnet',
       effort: 'medium',

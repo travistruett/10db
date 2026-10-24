@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { BranchName, PrTitlePrefix } from './git-names';
 import {
+  AccountId,
   BatchId,
   BoardColumnId,
   EvidenceId,
@@ -111,6 +112,8 @@ export const ProjectInput = z
     baseBranch: BranchName.default('main'),
     /** `pull_request` delivery titles each PR `<prefix>: <batch title>`. */
     prTitlePrefix: PrTitlePrefix.nullable().default(null),
+    /** The account that pays; absent means the default account. */
+    accountId: AccountId.optional(),
   })
   .refine((p) => p.nudgePct > p.handoffPct, {
     message: 'nudgePct must be above handoffPct',
@@ -132,6 +135,7 @@ export const ProjectDto = z.object({
   hazards: z.array(HazardDef),
   maxLanes: z.int(),
   provider: z.enum(Provider),
+  accountId: AccountId,
   billingMode: z.enum(BillingMode),
   model: z.string(),
   effort: z.enum(Effort),
@@ -163,6 +167,8 @@ export const ProjectPatch = z
     delivery: z.enum(Delivery),
     baseBranch: BranchName,
     prTitlePrefix: PrTitlePrefix.nullable(),
+    /** Moves the project to another account; work in flight follows at each lane's next session. */
+    accountId: AccountId,
   })
   .partial()
   .refine((p) => Object.keys(p).length > 0, { message: 'Change at least one field' });

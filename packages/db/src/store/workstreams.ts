@@ -8,6 +8,7 @@ import {
   NotFoundError,
   TaskStatus,
   WorkstreamState,
+  type AccountId,
   type BatchId,
   type NextAction,
   type ProjectId,
@@ -289,11 +290,16 @@ export interface LaneCounts {
   readonly global: number;
   readonly byProject: ReadonlyMap<ProjectId, number>;
   readonly byProvider: ReadonlyMap<Provider, number>;
+  readonly byAccount: ReadonlyMap<AccountId, number>;
 }
 
 export function countLanes(db: DbReader): LaneCounts {
   const rows = db
-    .select({ projectId: schema.workstreams.projectId, provider: schema.projects.provider })
+    .select({
+      projectId: schema.workstreams.projectId,
+      provider: schema.projects.provider,
+      accountId: schema.projects.accountId,
+    })
     .from(schema.workstreams)
     .innerJoin(schema.projects, eq(schema.projects.id, schema.workstreams.projectId))
     .where(
@@ -308,9 +314,11 @@ export function countLanes(db: DbReader): LaneCounts {
     .all();
   const byProject = new Map<ProjectId, number>();
   const byProvider = new Map<Provider, number>();
+  const byAccount = new Map<AccountId, number>();
   for (const r of rows) {
     byProject.set(r.projectId, (byProject.get(r.projectId) ?? 0) + 1);
     byProvider.set(r.provider, (byProvider.get(r.provider) ?? 0) + 1);
+    byAccount.set(r.accountId, (byAccount.get(r.accountId) ?? 0) + 1);
   }
-  return { global: rows.length, byProject, byProvider };
+  return { global: rows.length, byProject, byProvider, byAccount };
 }

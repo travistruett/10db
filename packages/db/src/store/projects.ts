@@ -10,16 +10,27 @@ import {
   ProjectInput,
   ProjectPatch,
   Provider,
+  type AccountId,
   type ProjectDto,
   type ProjectId,
   type ProjectViewDto,
 } from '@10db/contracts';
 import { and, asc, eq, inArray } from 'drizzle-orm';
 import * as schema from '../schema';
+import { defaultAccountId, getAccountRow } from './accounts';
 import { currentBatch, findUnfinishedBatch } from './batches';
 import { insertBoardColumn } from './board-columns';
 import { getFlow } from './flows';
 import type { DbReader, WriteContext } from './store';
+
+/** The account a new project binds to: the one it names, else the default; never an archived one. */
+function accountFor(ctx: WriteContext, named: AccountId | undefined): AccountId {
+  const id = named ?? defaultAccountId(ctx.tx);
+  if (!id) throw new InvalidError('There is no account to bind the project to; create one first');
+  const account = getAccountRow(ctx.tx, id);
+  if (account.archived) throw new InvalidError(`Account "${account.label}" is archived`);
+  return id;
+}
 
 export function insertProject(ctx: WriteContext, input: ProjectInput): ProjectDto {
   const config = ProjectInput.parse(input);
@@ -31,9 +42,11 @@ export function insertProject(ctx: WriteContext, input: ProjectInput): ProjectDt
     .get();
   if (existing)
     throw new ConflictError(`Project "${existing.name}" already uses ${config.repoPath}`);
+  const { accountId: named, ...rest } = config;
   const row: ProjectDto = {
     id: mintId('Project'),
-    ...config,
+    ...rest,
+    accountId: accountFor(ctx, named),
     provider: Provider.Claude,
     createdAt: ctx.now,
     updatedAt: ctx.now,
@@ -84,6 +97,11 @@ export function patchProject(ctx: WriteContext, id: ProjectId, patch: ProjectPat
     changes.prTitlePrefix === undefined ? current.prTitlePrefix : changes.prTitlePrefix;
   if (delivery === Delivery.PullRequest && prefix === null)
     throw new InvalidError('Pull request delivery needs a PR title prefix such as feat(app)');
+  if (changes.accountId !== undefined && changes.accountId !== current.accountId) {
+    // Work in flight moves too: each lane's next session runs on the new account.
+    const account = getAccountRow(ctx.tx, changes.accountId);
+    if (account.archived) throw new InvalidError(`Account "${account.label}" is archived`);
+  }
   ctx.tx
     .update(schema.projects)
     .set({ ...changes, updatedAt: ctx.now })
