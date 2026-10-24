@@ -8,8 +8,14 @@ export function SystemAlert() {
   if (!check) return null;
   const missing = check.tools.filter((tool) => tool.required && tool.path === null);
   const warning = check.loginEnv.warning;
-  if (missing.length === 0 && !warning) return null;
+  const versionWarning = check.claudeCode.warning;
+  if (missing.length === 0 && !warning && !versionWarning) return null;
   const icon = <IconAlertTriangle size={20} stroke={1.5} />;
+  const versionAlert = versionWarning ? (
+    <Alert color="yellow" icon={icon} title="This Claude Code is newer than 10db's account checks">
+      {versionWarning}
+    </Alert>
+  ) : null;
   return (
     <Stack gap="xs" mb="md">
       {missing.map((tool) => (
@@ -27,6 +33,7 @@ export function SystemAlert() {
           {warning}
         </Alert>
       )}
+      {versionAlert}
     </Stack>
   );
 }

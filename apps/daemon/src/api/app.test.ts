@@ -104,6 +104,7 @@ describe('API', () => {
   it('serves the event head, keep-awake and the system check behind the token', async () => {
     const check = {
       loginEnv: { source: 'login_shell' as const, warning: null },
+      claudeCode: { verifiedOn: '2.1.302', warning: null },
       tools: [
         {
           name: 'git' as const,

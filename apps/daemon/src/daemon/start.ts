@@ -46,7 +46,7 @@ import {
   type DeliveryLimits,
 } from '../delivery';
 import type { LogLevel } from '../env';
-import { REQUIRED_TOOLS } from '../environment';
+import { ACCOUNT_NAMES_VERIFIED_ON, REQUIRED_TOOLS } from '../environment';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit } from '../git';
 import { createGh, type Gh } from '../github';
@@ -150,6 +150,7 @@ const DEFAULTS = {
 function noSystemCheck(): Promise<SystemCheckDto> {
   return Promise.resolve({
     loginEnv: { source: 'inherited', warning: 'The login environment was not captured' },
+    claudeCode: { verifiedOn: ACCOUNT_NAMES_VERIFIED_ON, warning: null },
     tools: REQUIRED_TOOLS.map((t) => ({
       name: t.name,
       path: null,

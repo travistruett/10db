@@ -1,12 +1,12 @@
 import { BillingMode } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
-import { keychainSecretsWith } from './session-env';
 import {
   BILLING_SWITCH_VARS,
   buildSessionEnv,
   inferBillingMode,
   NESTED_SESSION_VARS,
   SessionEnvError,
+  stripBillingSwitches,
   type SecretSource,
 } from './index';
 
@@ -30,6 +30,8 @@ const BASE: Readonly<Record<string, string>> = {
   ANTHROPIC_VERTEX_PROJECT_ID: 'vertex-project',
   CLAUDE_CODE_USE_MANTLE: '1',
   CLAUDE_CODE_SUBAGENT_MODEL: 'claude-sub',
+  CLAUDE_CONFIG_DIR: '/h/b/.claude-other',
+  CLAUDE_CODE_OAUTH_TOKEN: 'oauth-from-zshrc',
   CLAUDECODE: '1',
   CLAUDE_CODE_ENTRYPOINT: 'cli',
   CLAUDE_CODE_SSE_PORT: '5555',
@@ -229,48 +231,18 @@ describe('inferBillingMode', () => {
   });
 });
 
-describe('keychainSecrets', () => {
-  const failure = (props: object) => () => {
-    throw Object.assign(new Error('Command failed: security ... sk-ant-LEAK'), props);
-  };
-
-  it('reads the Artificial Analysis key from its own Keychain account', () => {
-    const calls: (readonly string[])[] = [];
-    const secrets = keychainSecretsWith((_cmd, args) => {
-      calls.push(args);
-      return 'aa-key\n';
-    });
-    expect(secrets.artificialAnalysisKey()).toBe('aa-key');
-    expect(calls[0]).toEqual([
-      'find-generic-password',
-      '-s',
-      '10db',
-      '-a',
-      'artificial-analysis-api-key',
-      '-w',
-    ]);
-  });
-
-  it('returns the key, trimmed', () => {
-    expect(keychainSecretsWith(() => 'sk-ant-k\n').anthropicApiKey()).toBe('sk-ant-k');
-  });
-
+describe('stripBillingSwitches', () => {
   it.each([
-    ['empty output', () => '\n'],
-    ['item not found (status 44)', failure({ status: 44 })],
-  ])('reports no key for %s', (_name, exec) => {
-    expect(keychainSecretsWith(exec).anthropicApiKey()).toBeNull();
-  });
-
-  it.each([
-    ['user denied (status 51)', failure({ status: 51 }), /status 51/],
-    ['locked keychain (status 36)', failure({ status: 36 }), /status 36/],
-    ['timeout', failure({ code: 'ETIMEDOUT', status: null, signal: 'SIGTERM' }), /timed out/],
-    ['cannot start', failure({ code: 'ENOENT' }), /ENOENT/],
-  ])('throws a SessionEnvError for %s, naming no output', (_name, exec, message) => {
-    const read = () => keychainSecretsWith(exec).anthropicApiKey();
-    expect(read).toThrow(SessionEnvError);
-    expect(read).toThrow(message);
-    expect(read).not.toThrow(/LEAK/);
+    ['a billing switch', 'ANTHROPIC_API_KEY'],
+    ['a config directory', 'CLAUDE_CONFIG_DIR'],
+    ['an OAuth token', 'CLAUDE_CODE_OAUTH_TOKEN'],
+    ['a provider family member', 'CLAUDE_CODE_USE_MANTLE'],
+    ['a nested-session marker', 'CLAUDECODE'],
+    ['a 10db variable', 'TENDB_DATA_DIR'],
+    ['a git repository variable', 'GIT_DIR'],
+  ])('drops %s', (_name, variable) => {
+    const env = stripBillingSwitches({ ...BASE, [variable]: 'x', GIT_DIR: '/elsewhere/.git' });
+    expect(env).not.toHaveProperty(variable);
+    expect(env).toMatchObject({ PATH: BASE['PATH'], HOME: '/h/b', AWS_PROFILE: 'dev' });
   });
 });

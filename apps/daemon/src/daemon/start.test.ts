@@ -253,6 +253,7 @@ describe('startDaemon', () => {
     const spawned: number[] = [];
     const check: SystemCheckDto = {
       loginEnv: { source: 'login_shell', warning: null },
+      claudeCode: { verifiedOn: '2.1.302', warning: null },
       tools: [{ name: 'git', path: '/usr/bin/git', version: 'git version 2.50.1', required: true }],
     };
     daemon = await startDaemon({

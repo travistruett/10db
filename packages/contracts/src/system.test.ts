@@ -5,6 +5,7 @@ describe('SystemCheckDto', () => {
   it('accepts a report with a missing optional tool', () => {
     const report = {
       loginEnv: { source: 'login_shell', warning: null },
+      claudeCode: { verifiedOn: '2.1.302', warning: null },
       tools: [
         {
           name: 'claude',
@@ -22,6 +23,7 @@ describe('SystemCheckDto', () => {
     expect(
       SystemCheckDto.safeParse({
         loginEnv: { source: 'inherited', warning: 'x' },
+        claudeCode: { verifiedOn: '2.1.302', warning: null },
         tools: [{ name: 'node', path: null, version: null, required: true }],
       }).success,
     ).toBe(false);

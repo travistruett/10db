@@ -1,6 +1,6 @@
-import { execFileSync, type ExecFileSyncOptionsWithStringEncoding } from 'node:child_process';
 import { BillingMode } from '@10db/contracts';
 import { withoutGitRepoEnv } from '../git';
+import { AA_KEY_ACCOUNT, KEYCHAIN_SERVICE, systemKeychain } from './keychain';
 
 /** Variables that silently change who is billed. They are removed unless the billing mode needs them. */
 export const BILLING_SWITCH_VARS = [
@@ -15,6 +15,9 @@ export const BILLING_SWITCH_VARS = [
   'AWS_BEARER_TOKEN_BEDROCK',
   'ANTHROPIC_BEDROCK_BASE_URL',
   'CLAUDE_CODE_SUBAGENT_MODEL',
+  // A config directory or an OAuth token picks the subscription, so only an account may set one.
+  'CLAUDE_CONFIG_DIR',
+  'CLAUDE_CODE_OAUTH_TOKEN',
 ] as const;
 /**
  * Whole families of provider switches, so a provider added in a later Claude Code release is stripped too.
@@ -39,12 +42,9 @@ export const NESTED_SESSION_VARS = [
 
 const OWN_PREFIX = 'TENDB_';
 const CLIENT_APP_VAR = 'CLAUDE_AGENT_SDK_CLIENT_APP';
-const KEYCHAIN_TIMEOUT_MS = 5_000;
-
 const KEYCHAIN = {
-  service: '10db',
+  service: KEYCHAIN_SERVICE,
   apiKeyAccount: 'anthropic-api-key',
-  aaKeyAccount: 'artificial-analysis-api-key',
 } as const;
 
 export interface SecretSource {
@@ -52,59 +52,11 @@ export interface SecretSource {
   artificialAnalysisKey(): string | null;
 }
 
-/** `security` exits with this status when the Keychain has no such item. */
-const KEYCHAIN_ITEM_NOT_FOUND = 44;
-
-type KeychainExec = (
-  command: string,
-  args: readonly string[],
-  options: ExecFileSyncOptionsWithStringEncoding,
-) => string;
-
-/**
- * Builds a Keychain reader over `exec`. Only "item not found" means there is no key; a timeout,
- * a locked or unreachable Keychain or a denied prompt throws, because telling the builder to add
- * a key that exists would send them the wrong way. Messages carry the status, never the output.
- */
-export function keychainSecretsWith(exec: KeychainExec): SecretSource {
-  const read = (account: string, what: string): string | null => {
-    try {
-      const value = exec(
-        '/usr/bin/security',
-        ['find-generic-password', '-s', KEYCHAIN.service, '-a', account, '-w'],
-        {
-          encoding: 'utf8',
-          stdio: ['ignore', 'pipe', 'ignore'],
-          timeout: KEYCHAIN_TIMEOUT_MS,
-        },
-      ).trim();
-      return value.length > 0 ? value : null;
-    } catch (error) {
-      const failure = error as { status?: number | null; code?: string; signal?: string | null };
-      if (failure.status === KEYCHAIN_ITEM_NOT_FOUND) return null;
-      if (failure.code === 'ETIMEDOUT')
-        throw new SessionEnvError(
-          `Reading ${what} from the Keychain timed out after ${String(KEYCHAIN_TIMEOUT_MS / 1000)} s`,
-        );
-      if (typeof failure.status === 'number')
-        throw new SessionEnvError(
-          `Reading ${what} from the Keychain failed (security exit status ${String(failure.status)})`,
-        );
-      throw new SessionEnvError(
-        `Reading ${what} from the Keychain failed (${failure.code ?? failure.signal ?? 'unknown error'})`,
-      );
-    }
-  };
-  return {
-    anthropicApiKey: () => read(KEYCHAIN.apiKeyAccount, 'the API key'),
-    artificialAnalysisKey: () => read(KEYCHAIN.aaKeyAccount, 'the Artificial Analysis key'),
-  };
-}
-
-/**
- * Reads the API key from the login Keychain when a session starts; nothing is cached.
- */
-export const keychainSecrets: SecretSource = keychainSecretsWith(execFileSync);
+/** Reads the API key from the login Keychain when a session starts; nothing is cached. */
+export const keychainSecrets: SecretSource = {
+  anthropicApiKey: () => systemKeychain.read(KEYCHAIN.apiKeyAccount),
+  artificialAnalysisKey: () => systemKeychain.read(AA_KEY_ACCOUNT),
+};
 
 /** The session environment can't be built for this billing mode. The message says what to fix. */
 export class SessionEnvError extends Error {
@@ -117,6 +69,17 @@ const NESTED: readonly string[] = NESTED_SESSION_VARS;
 function isBillingSwitch(name: string): boolean {
   return (
     SWITCHES.includes(name) || BILLING_SWITCH_PREFIXES.some((prefix) => name.startsWith(prefix))
+  );
+}
+
+/** The login environment without any billing switch, nested-session marker, 10db variable or git repository variable. */
+export function stripBillingSwitches(
+  base: Readonly<Record<string, string>>,
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(withoutGitRepoEnv(base)).filter(
+      ([name]) => !name.startsWith(OWN_PREFIX) && !NESTED.includes(name) && !isBillingSwitch(name),
+    ),
   );
 }
 

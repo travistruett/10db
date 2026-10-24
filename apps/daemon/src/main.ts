@@ -3,11 +3,13 @@ import { SchemaMismatchError } from '@10db/db';
 import { AlreadyRunningError, startDaemon } from './daemon';
 import { loadEnv } from './env';
 import {
+  AA_KEY_ACCOUNT,
   buildNetworkEnv,
   buildSessionEnv,
   captureLoginEnv,
   keychainSecrets,
   systemCheck,
+  systemKeychain,
   type LoginEnv,
 } from './environment';
 import type { Logger } from './log';
@@ -84,7 +86,7 @@ try {
     logLevel: env.TENDB_LOG_LEVEL,
     migrationsDir: resolveMigrationsDir(),
     harnessDir: resolveHarnessDir(),
-    aaKey: () => keychainSecrets.artificialAnalysisKey(),
+    aaKey: () => systemKeychain.read(AA_KEY_ACCOUNT),
     sessionEnv: (project) =>
       buildSessionEnv({
         base: login.vars,
