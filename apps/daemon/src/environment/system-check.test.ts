@@ -82,6 +82,8 @@ describe('systemCheck', () => {
         { name: 'docker', path: null, version: null, required: false },
         { name: 'gh', path: null, version: null, required: false },
       ],
+      // The services layer fills this per request; the environment check reports no benchmark warning.
+      benchmarkSync: null,
     });
   });
 });
@@ -94,6 +96,7 @@ describe('markGhRequired', () => {
         { name: 'git' as const, path: '/usr/bin/git', version: '2', required: true },
         { name: 'gh' as const, path: null, version: null, required: false },
       ],
+      benchmarkSync: null,
     };
     expect(markGhRequired(check, true).tools.map((t) => [t.name, t.required])).toEqual([
       ['git', true],

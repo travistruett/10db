@@ -456,3 +456,116 @@ describe('benchmark sync', () => {
     s.stop();
   });
 });
+
+describe('retry after a failed sync', () => {
+  const MINUTE = 60_000;
+  /** The wait after each failure in a row, in minutes: 15 doubling, capped at 6 hours. */
+  const RETRY_WAITS_MINUTES = [15, 30, 60, 120, 240, 360, 360];
+  const OK = { status: 200, body: page([entry('claude-opus-5-5-high', 50)], false) };
+
+  /**
+   * Resolves once the attempt that ran at the clock's current time has recorded its outcome and its
+   * promise chain has cleared the running sync. The yield to a real macrotask is what lets that chain
+   * finish; the clock under test is the injected one, so no time passes here.
+   */
+  const recorded = async (s: ReturnType<typeof sync>): Promise<void> => {
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 0);
+    });
+    await vi.waitFor(() => {
+      expect(s.status().lastSyncAt).toBe(clock.now().toISOString());
+    });
+  };
+
+  it.each([
+    { name: 'a rejected key', reply: { status: 401 }, outcome: 'unauthorized' },
+    {
+      name: 'the rate limit',
+      reply: { status: 429, headers: { 'Retry-After': '3600' } },
+      outcome: 'rate_limited',
+    },
+    { name: 'a server error', reply: { status: 503 }, outcome: 'failed' },
+    { name: 'a network error', reply: 'network-error' as const, outcome: 'failed' },
+  ])('retries 15 minutes after a failure on $name', async ({ reply, outcome }) => {
+    const s = sync(fakeFetch(reply, OK));
+    s.start();
+    await recorded(s);
+    expect(s.status().outcome).toBe(outcome);
+    clock.advance(15 * MINUTE - 1);
+    expect(requests).toHaveLength(1);
+    clock.advance(1);
+    expect(requests).toHaveLength(2);
+    await recorded(s);
+    expect(s.status().outcome).toBe('ok');
+  });
+
+  it('doubles the wait after each failure in a row, capped at 6 hours', async () => {
+    const s = sync(
+      fakeFetch(...Array.from({ length: RETRY_WAITS_MINUTES.length + 1 }, () => ({ status: 503 }))),
+    );
+    s.start();
+    await recorded(s);
+    for (const [i, minutes] of RETRY_WAITS_MINUTES.entries()) {
+      clock.advance(minutes * MINUTE - 1);
+      expect(requests).toHaveLength(i + 1);
+      clock.advance(1);
+      expect(requests).toHaveLength(i + 2);
+      await recorded(s);
+    }
+  });
+
+  it('goes back to the daily sync after a retry succeeds, and the next failure starts the backoff again', async () => {
+    const s = sync(fakeFetch({ status: 503 }, { status: 503 }, OK, { status: 503 }, OK));
+    s.start();
+    await recorded(s);
+    clock.advance(15 * MINUTE);
+    await recorded(s);
+    clock.advance(30 * MINUTE);
+    await recorded(s);
+    expect(s.status().outcome).toBe('ok');
+    clock.advance(AA_SYNC_INTERVAL_MS - 1);
+    expect(requests).toHaveLength(3);
+    clock.advance(1);
+    expect(requests).toHaveLength(4);
+    await recorded(s);
+    expect(s.status().outcome).toBe('failed');
+    clock.advance(15 * MINUTE - 1);
+    expect(requests).toHaveLength(4);
+    clock.advance(1);
+    expect(requests).toHaveLength(5);
+  });
+
+  it('waits for the daily sync, not the backoff, when no key is configured', async () => {
+    const s = sync(fakeFetch(), null);
+    s.start();
+    await recorded(s);
+    expect(s.status().outcome).toBe('no_key');
+    const checkedAt = s.status().lastSyncAt;
+    clock.advance(15 * MINUTE);
+    expect(s.status().lastSyncAt).toBe(checkedAt);
+    clock.advance(AA_SYNC_INTERVAL_MS - 15 * MINUTE);
+    expect(s.status().lastSyncAt).not.toBe(checkedAt);
+  });
+
+  it('stop cancels a pending retry', async () => {
+    const s = sync(fakeFetch({ status: 503 }, OK));
+    s.start();
+    await recorded(s);
+    s.stop();
+    clock.advance(AA_SYNC_INTERVAL_MS * 2);
+    expect(requests).toHaveLength(1);
+  });
+
+  it('retries at start when the last sync failed, even though the last success is recent', async () => {
+    await sync(fakeFetch(OK)).sync();
+    clock.advance(AA_SYNC_INTERVAL_MS / 2);
+    await sync(fakeFetch({ status: 503 })).sync();
+    clock.advance(MINUTE);
+    requests = [];
+    const s = sync(fakeFetch(OK));
+    s.start();
+    await recorded(s);
+    expect(requests).toHaveLength(1);
+    expect(s.status().outcome).toBe('ok');
+  });
+});
