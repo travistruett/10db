@@ -485,6 +485,18 @@ describe('team, routing and benchmark routes', () => {
       body: { allowedCommands: ['pnpm --filter web test'] },
     },
     {
+      name: 'an allowed command that runs a shell',
+      method: 'PATCH',
+      path: `/projects/${projectId}`,
+      body: { allowedCommands: ['pnpm exec bash'] },
+    },
+    {
+      name: 'an allowed command that runs an interpreter',
+      method: 'PATCH',
+      path: `/projects/${projectId}`,
+      body: { allowedCommands: ['node'] },
+    },
+    {
       name: 'a flow with no implement step',
       method: 'POST',
       path: '/flows',

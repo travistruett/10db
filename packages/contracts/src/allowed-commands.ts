@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { isCommandRunner } from './command-runners';
 
 /** The most command prefixes one project may allow. */
 export const MAX_ALLOWED_COMMANDS = 32;
@@ -8,24 +9,6 @@ export const MAX_ALLOWED_COMMANDS = 32;
  * not: a flag can carry a command of its own, so a prefix never names one.
  */
 const PLAIN_WORD = /^[A-Za-z0-9@][A-Za-z0-9._/@:+-]*$/;
-/** Programs that run the commands they are given, so a prefix naming one allows whatever follows it. */
-const RUNNER_PROGRAMS: ReadonlySet<string> = new Set([
-  'sh',
-  'bash',
-  'zsh',
-  'fish',
-  'dash',
-  'env',
-  'xargs',
-  'sudo',
-  'eval',
-  'exec',
-  'command',
-  'nohup',
-  'time',
-  'timeout',
-  'nice',
-]);
 /** Package managers run any script or package they are named with, so one word alone allows them all. */
 const PACKAGE_MANAGERS: ReadonlySet<string> = new Set(['npm', 'pnpm', 'yarn', 'bun']);
 /** Tools that fetch and run a package by name; alone, they allow every package. */
@@ -34,8 +17,30 @@ const PACKAGE_RUNNERS: ReadonlySet<string> = new Set(['npx', 'bunx', 'pnpx', 'dl
 const PROGRAM_RUNNERS: ReadonlySet<string> = new Set(['exec', 'dlx', 'x']);
 
 /**
+ * The position of the program a package tool runs: `pnpm exec X` and `npm x X` name it third, `npx X`
+ * second. Null when the prefix names no program that way.
+ */
+function namedProgramIndex(name: string, subcommand: string): number | null {
+  if (PACKAGE_MANAGERS.has(name) && PROGRAM_RUNNERS.has(subcommand)) return 2;
+  if (PACKAGE_RUNNERS.has(name)) return 1;
+  return null;
+}
+
+/**
+ * Whether a program a prefix names runs whatever it is given, so allowing the prefix allows anything: a
+ * runner, or a package tool that runs another package. The guard reads a path-qualified program by its
+ * last part, so this reads one the same way.
+ */
+function runsAnything(program: string): boolean {
+  const name = program.slice(program.lastIndexOf('/') + 1).toLowerCase();
+  return isCommandRunner(name) || PACKAGE_MANAGERS.has(name) || PACKAGE_RUNNERS.has(name);
+}
+
+/**
  * Why a command prefix can't be allowed, or null when it can. A prefix is one to a few plain words, and
- * its program is a name on PATH, because the guard reads a path-qualified program by its last part.
+ * its program is a name on PATH, because the guard reads a path-qualified program by its last part. A
+ * prefix may not name a program that runs what it is given: one alone, or one that a package tool runs
+ * through `exec`, `dlx` or `x`, or through `npx`, `bunx` or `pnpx`.
  */
 export function allowedCommandProblem(command: string): string | null {
   if (command.trim() === '') return 'Enter a command prefix such as pnpm test';
@@ -47,12 +52,19 @@ export function allowedCommandProblem(command: string): string | null {
   const [program = '', subcommand = ''] = words;
   if (program.includes('/'))
     return `${program} is a path; name the program by its name on PATH, such as make`;
-  if (RUNNER_PROGRAMS.has(program))
-    return `${program} runs the commands it is given, so it can't be allowed as a prefix`;
-  if (words.length === 1 && (PACKAGE_MANAGERS.has(program) || PACKAGE_RUNNERS.has(program)))
+  const name = program.toLowerCase();
+  if (isCommandRunner(name))
+    return `${program} runs the commands or code it is given, so it can't be allowed as a prefix`;
+  if (words.length === 1 && (PACKAGE_MANAGERS.has(name) || PACKAGE_RUNNERS.has(name)))
     return `${program} alone allows every script or package; name what it runs, such as ${program} test`;
-  if (words.length === 2 && PACKAGE_MANAGERS.has(program) && PROGRAM_RUNNERS.has(subcommand))
-    return `${program} ${subcommand} runs any program it is given; name the program, such as ${program} ${subcommand} prettier`;
+  const at = namedProgramIndex(name, subcommand.toLowerCase());
+  if (at === null) return null;
+  const through = words.slice(0, at).join(' ');
+  const named = words[at];
+  if (named === undefined)
+    return `${through} runs any program it is given; name the program, such as ${through} prettier`;
+  if (runsAnything(named))
+    return `${named} runs the commands or code it is given, so ${through} ${named} can't be allowed`;
   return null;
 }
 

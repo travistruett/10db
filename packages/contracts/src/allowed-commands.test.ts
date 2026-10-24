@@ -9,6 +9,11 @@ describe('AllowedCommand', () => {
     ['a single program', 'make'],
     ['a path inside the program argument', 'pnpm exec scripts/check.sh'],
     ['a scoped package name', 'pnpm exec @10db/tool'],
+    ['a package named after npx', 'npx prettier'],
+    ['a package named after pnpm dlx', 'pnpm dlx create-vite'],
+    ['a package named after npm x', 'npm x prettier'],
+    ['a bin inside node_modules', 'pnpm exec node_modules/.bin/tsc'],
+    ['a bun subcommand', 'bun test'],
   ])('accepts %s (%s)', (_name, command) => {
     expect(AllowedCommand.safeParse(command).success).toBe(true);
   });
@@ -47,6 +52,26 @@ describe('AllowedCommand', () => {
     ['an x runner with no package', 'npm x'],
     ['a package manager alone', 'pnpm'],
     ['a bare npx', 'npx'],
+    ['a shell run by pnpm exec', 'pnpm exec bash'],
+    ['a shell run by pnpm dlx', 'pnpm dlx sh'],
+    ['a shell run by npm x', 'npm x zsh'],
+    ['a shell run by npx', 'npx bash'],
+    ['a shell given by a relative path through pnpm exec', 'pnpm exec bin/sh'],
+    ['a shell given by an absolute path', 'pnpm exec /bin/sh'],
+    ['a shell in capitals', 'pnpm exec BASH'],
+    ['a package manager run by pnpm exec', 'pnpm exec pnpm'],
+    ['a package runner run by npx', 'npx npx'],
+    ['a wrapper run by pnpm exec', 'pnpm exec env'],
+    ['an interpreter', 'node'],
+    ['an interpreter in capitals', 'NODE'],
+    ['a python', 'python3'],
+    ['a python with a minor version', 'python3.12'],
+    ['a perl', 'perl'],
+    ['a ruby', 'ruby'],
+    ['a deno', 'deno'],
+    ['an interpreter run by pnpm exec', 'pnpm exec node'],
+    ['an interpreter run by npx', 'npx python3'],
+    ['an applescript runner', 'osascript'],
   ])('rejects %s (%s)', (_name, command) => {
     expect(AllowedCommand.safeParse(command).success).toBe(false);
   });

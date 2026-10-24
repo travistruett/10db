@@ -1,4 +1,9 @@
-import { ToolAccess, type PermissionRuleDto, type ProjectDto } from '@10db/contracts';
+import {
+  isCommandRunner,
+  ToolAccess,
+  type PermissionRuleDto,
+  type ProjectDto,
+} from '@10db/contracts';
 import { join } from 'node:path';
 import { z } from 'zod';
 import {
@@ -134,25 +139,13 @@ export function matchesAllowedTool(
   });
 }
 
-const INTERPRETERS = new Set([
-  'sh',
-  'bash',
-  'zsh',
-  'fish',
-  'node',
-  'deno',
-  'bun',
-  'ruby',
-  'perl',
-  'npx',
-  'env',
-  'xargs',
-]);
+/** Package tools that run the package or file they name, so "always allow" keeps the whole command. */
+const NAMED_PROGRAM_RUNNERS: ReadonlySet<string> = new Set(['npx', 'bun']);
 const SUBCOMMAND = /^[A-Za-z][A-Za-z0-9_-]*$/;
 
 function runsOtherCommands(words: readonly string[]): boolean {
   const [first = '', second] = words;
-  if (INTERPRETERS.has(first) || /^python[\d.]*$/.test(first)) return true;
+  if (isCommandRunner(first) || NAMED_PROGRAM_RUNNERS.has(first.toLowerCase())) return true;
   return (
     (first === 'pnpm' && (second === 'dlx' || second === 'exec')) ||
     (first === 'npm' && second === 'exec')
