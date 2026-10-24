@@ -19,6 +19,22 @@ import { alive } from '../../test/orphan-gate';
 import { installPrePushHook } from '../../test/pre-push-hook';
 import { GhError } from '../github';
 
+/** The repo's template, as a repository commits it at `.github/pull_request_template.md`. */
+const PR_TEMPLATE = [
+  '## What and why',
+  '',
+  '<!-- What this changes and why. -->',
+  '',
+  '## How it was checked',
+  '',
+  '<!-- Commands you ran and what they printed. -->',
+  '',
+  '## Checklist',
+  '',
+  '- [ ] `make gate` prints `GATE PASS`.',
+  '',
+].join('\n');
+
 let h: DeliveryHarness;
 afterEach(() => {
   h.close();
@@ -78,10 +94,37 @@ describe('shipping', () => {
       { repo: 'acme/widgets', base: 'main', head: batch.branch, title: 'feat(app): add greetings' },
     ]);
     const body = h.gh.body(shipped.prUrl ?? '');
-    expect(body).toContain('- Alpha: done');
-    expect(body).toContain('- Beta: done');
+    expect(body).toContain('### Alpha');
+    expect(body).toContain('### Beta');
     expect(body).toContain(`Shipped by 10db, batch ${batch.id}`);
     expect(getBatchRow(h.store.db, batch.id)).toMatchObject({ gatePid: null, gatePidStart: null });
+  });
+
+  it('fills the repo pull request template, with each task and CI for the pushed head', async () => {
+    h = createDeliveryHarness();
+    const alpha = h.addTask('Alpha', {
+      description: 'Greets the builder, per decision 36.',
+      acceptanceCriteria: ['It greets.'],
+    });
+    const started = h.starter.startBatch(h.project.id, {
+      title: 'Add greetings',
+      taskIds: [alpha.id],
+    });
+    await h.jobs.idle();
+    const batch = getBatch(h.store.db, started.id);
+    h.commit('.github/pull_request_template.md', PR_TEMPLATE);
+    h.commit('src/api/alpha.txt');
+    const shipped = await finishAll(batch);
+    const body = h.gh.body(shipped.prUrl ?? '');
+    expect(body).toContain('## What and why\n\n### Alpha\n\nGreets the builder, per decision 36.');
+    expect(body).toContain('- It greets.');
+    expect(body).toContain('## How it was checked');
+    expect(body).toContain(
+      `https://github.com/acme/widgets/commit/${h.git$('rev-parse', 'HEAD')}/checks`,
+    );
+    expect(body).toContain('## Checklist\n\n- [ ] `make gate` prints `GATE PASS`.');
+    expect(body).not.toContain('<!--');
+    expect(body).not.toContain('Exited');
   });
 
   it('passes a title with quotes and $() through as one argument', async () => {
