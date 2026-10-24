@@ -20,6 +20,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { seedSpend, seedWorkstream } from '../../test/fixtures';
 import { ManualClock } from '../clock';
+import type { Timer } from '../clock';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createInboxService, type InboxService } from '../inbox';
 import {
@@ -40,8 +41,16 @@ let runtime: AccountRuntime;
 let key: AccountDto;
 let project: ProjectDto;
 
-beforeEach(() => {
-  clock = new ManualClock(new Date(2026, 9, 20, 12));
+/** Refuses a delay Node would silently turn into 1 ms. */
+class StrictClock extends ManualClock {
+  override setTimeout(fn: () => void, ms: number): Timer {
+    if (ms > 2 ** 31 - 1) throw new Error(`a timer of ${String(ms)} ms overflows`);
+    return super.setTimeout(fn, ms);
+  }
+}
+
+function build(start: Date): void {
+  clock = new StrictClock(start);
   ({ store, close } = createTestStore(() => clock.now()));
   state = createStateStore(store, createEventBus());
   inbox = createInboxService({ state, onParkedAnswer: () => undefined });
@@ -55,6 +64,10 @@ beforeEach(() => {
   runtime = createAccountRuntime({ state, clock, inbox, pauses, defaultPauseMs: 30 * 60_000 });
   key = seedAccount(store, { kind: 'anthropic_api_key', label: 'Client key', monthlyCapUsd: 5 });
   project = seedProject(store, { accountId: key.id });
+}
+
+beforeEach(() => {
+  build(new Date(2026, 9, 20, 12));
 });
 afterEach(() => {
   close();
@@ -111,6 +124,57 @@ describe('the monthly cap', () => {
         .map((c) => c.projectId)
         .sort(),
     ).toEqual([project.id, second.id].sort());
+  });
+
+  it('holds a cap reached early in the month until the next month, with no overflowing timer', () => {
+    close();
+    build(new Date(2026, 9, 2, 12));
+    seedSpend(store, project, 5);
+    const { workstream } = seedWorkstream(store, { project });
+    state.write((ctx) => {
+      transitionWorkstream(ctx, workstream.id, { to: 'STARTING', fence: null });
+      transitionWorkstream(ctx, workstream.id, { to: 'PAUSED_LIMIT', fence: null });
+    });
+    expect(runtime.blocked(row(), project.id)).toEqual({
+      reason: 'monthly_cap',
+      until: new Date(2026, 10, 1),
+    });
+    const resumes = () =>
+      listEventsAfter(state.db, 0, 1000).filter((e) => e.type === EventType.AccountResumed);
+    clock.advance(20 * 24 * 3_600_000);
+    expect(runtime.isPaused(key.id)).toBe(true);
+    expect(resumes()).toHaveLength(0);
+    expect(getWorkstream(state.db, workstream.id).state).toBe('PAUSED_LIMIT');
+    clock.advance(new Date(2026, 10, 1).getTime() - clock.now().getTime());
+    expect(runtime.isPaused(key.id)).toBe(false);
+    expect(resumes()).toHaveLength(1);
+    expect(getWorkstream(state.db, workstream.id).state).toBe('QUEUED');
+  });
+
+  it("rewrites every project's cap card as sessions end, since spend is account-wide", () => {
+    const second = seedProject(store, { accountId: key.id });
+    seedSpend(store, project, 5);
+    runtime.blocked(row(), project.id);
+    runtime.blocked(row(), second.id);
+    seedSpend(store, second, 1);
+    runtime.sessionEnded(row(), second.id);
+    seedSpend(store, second, 1);
+    runtime.sessionEnded(row(), second.id);
+    const bodies = openCards().map((c) => c.body);
+    expect(bodies).toHaveLength(2);
+    for (const body of bodies) expect(body).toMatch(/\$7\.00 of its \$5\.00 cap.*\$2\.00 over/);
+  });
+
+  it("shows the new month's spend when the cap is reached again after the month turned", () => {
+    seedSpend(store, project, 5);
+    runtime.blocked(row(), project.id);
+    clock.advance(new Date(2026, 10, 1).getTime() - clock.now().getTime());
+    expect(runtime.isPaused(key.id)).toBe(false);
+    seedSpend(store, project, 6);
+    runtime.blocked(row(), project.id);
+    const cards = openCards();
+    expect(cards).toHaveLength(1);
+    expect(cards[0]?.body).toMatch(/\$6\.00 of its \$5\.00 cap is spent in 2026-11/);
   });
 
   it('rewrites the cap card with the overshoot as running sessions end', () => {

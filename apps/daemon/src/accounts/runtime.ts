@@ -4,7 +4,7 @@ import {
   type AccountRefusal,
   type ProjectId,
 } from '@10db/contracts';
-import { findOpenByFoldKey, getAccountRow, type AccountRow } from '@10db/db';
+import { findOpenByFoldKey, getAccountRow, listProjects, type AccountRow } from '@10db/db';
 import type { Clock } from '../clock';
 import type { StateStore } from '../events';
 import type { InboxService } from '../inbox';
@@ -60,8 +60,14 @@ export function createAccountRuntime(opts: {
     blocked(account, projectId) {
       const paused = opts.pauses.pausedFor(account.id);
       if (paused) {
-        if (paused.reason === AccountPauseReason.MonthlyCap)
-          ensureCapCard(account, projectId, paused);
+        switch (paused.reason) {
+          case AccountPauseReason.MonthlyCap:
+            ensureCapCard(account, projectId, paused);
+            break;
+          case AccountPauseReason.UsageLimit:
+          case AccountPauseReason.Refused:
+            break;
+        }
         return paused;
       }
       capCarded.delete(account.id);
@@ -93,20 +99,40 @@ export function createAccountRuntime(opts: {
         { projectId, card: refusedCard(account, refusal), data: { problem: refusal.problem } },
       );
     },
-    sessionEnded(account, projectId) {
-      if (opts.pauses.pausedFor(account.id)?.reason !== AccountPauseReason.MonthlyCap) return;
-      const cap = capStatus(db, account, opts.clock.now());
-      const open = findOpenByFoldKey(
-        db,
-        projectId,
-        accountFoldKey(account.id, AccountPauseReason.MonthlyCap),
-      );
-      if (cap && open) opts.inbox.reword(open.id, capCard(account, cap).body);
+    sessionEnded(account) {
+      const held = opts.pauses.pausedFor(account.id);
+      if (!held) return;
+      switch (held.reason) {
+        case AccountPauseReason.MonthlyCap: {
+          // Spend is account-wide, so every project's cap card shows the same running total.
+          const cap = capStatus(db, account, opts.clock.now());
+          if (!cap) return;
+          const body = capCard(account, cap).body;
+          const foldKey = accountFoldKey(account.id, AccountPauseReason.MonthlyCap);
+          for (const project of listProjects(db)) {
+            if (project.accountId !== account.id) continue;
+            const open = findOpenByFoldKey(db, project.id, foldKey);
+            if (open) opts.inbox.reword(open.id, body);
+          }
+          return;
+        }
+        case AccountPauseReason.UsageLimit:
+        case AccountPauseReason.Refused:
+          return;
+      }
     },
     isPaused: (accountId) => opts.pauses.pausedFor(accountId) !== null,
     saved(accountId) {
       const paused = opts.pauses.pausedFor(accountId);
-      if (paused && paused.reason !== AccountPauseReason.UsageLimit) opts.pauses.resume(accountId);
+      if (!paused) return;
+      switch (paused.reason) {
+        case AccountPauseReason.MonthlyCap:
+        case AccountPauseReason.Refused:
+          opts.pauses.resume(accountId);
+          return;
+        case AccountPauseReason.UsageLimit:
+          return;
+      }
     },
   };
 }

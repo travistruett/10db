@@ -144,4 +144,21 @@ describe('account pauses', () => {
     expect(getWorkstream(state.db, work.id).state).toBe('QUEUED');
     expect(resumed).toBe(1);
   });
+
+  it('treats a pause whose end passed as over even when its timer never fired', () => {
+    const work = pausedWork();
+    const accountId = getProject(state.db, work.projectId).accountId;
+    const p = pauses();
+    p.pause(
+      accountId,
+      { reason: AccountPauseReason.UsageLimit, until: inMinutes(1) },
+      { projectId: work.projectId, card: card(accountId, 'u') },
+    );
+    // A sleeping machine or a stopped timer: the clock moves, no callback runs.
+    p.stop();
+    clock.advance(2 * 60_000);
+    expect(p.pausedFor(accountId)).toBeNull();
+    expect(getWorkstream(state.db, work.id).state).toBe('QUEUED');
+    expect(resumed).toBe(1);
+  });
 });

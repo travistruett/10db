@@ -146,6 +146,25 @@ describe('scheduler', () => {
     queue();
     state.write((ctx) => patchAccount(ctx, a.project.accountId, { laneCap: 2 }));
     expect(await scheduler().tick()).toBe(2);
+    expect(
+      launched
+        .map((l) => getWorkstreamRow(store.db, l.id).projectId)
+        .filter((p) => p === a.project.id),
+    ).toHaveLength(1);
+  });
+
+  it('leaves PAUSED_LIMIT work alone while its account is paused', async () => {
+    const a = queue();
+    const s = scheduler();
+    await s.tick();
+    pause(a.project);
+    state.write((ctx) => {
+      transitionWorkstream(ctx, a.workstream.id, { to: 'PAUSED_LIMIT', fence: null });
+    });
+    launched = [];
+    await s.tick();
+    expect(getWorkstream(store.db, a.workstream.id).state).toBe('PAUSED_LIMIT');
+    expect(launched).toEqual([]);
   });
 
   it('re-queues PAUSED_LIMIT work that outlived its account pause', async () => {

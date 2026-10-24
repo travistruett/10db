@@ -49,6 +49,8 @@ const PauseSetting = z.object({
   reason: z.enum(AccountPauseReason),
   until: z.iso.datetime().nullable(),
 });
+/** Node treats a longer delay as 1 ms, so a long pause re-arms in steps. */
+const MAX_TIMER_MS = 2 ** 31 - 1;
 const settingKey = (id: AccountId): string => `account_pause.${id}`;
 
 /** A pause with no end outranks one that ends; otherwise the later end wins. */
@@ -74,15 +76,29 @@ export function createAccountPauses(opts: {
     timers.delete(id);
     paused.set(id, pause);
     if (pause.until === null) return;
+    const until = pause.until;
+    const remaining = Math.max(0, until.getTime() - opts.clock.now().getTime());
     timers.set(
       id,
       opts.clock.setTimeout(
         () => {
-          resume(id);
+          if (opts.clock.now() >= until) resume(id);
+          else arm(id, pause);
         },
-        Math.max(0, pause.until.getTime() - opts.clock.now().getTime()),
+        Math.min(remaining, MAX_TIMER_MS),
       ),
     );
+  }
+
+  /** The pause in force now; one whose end has passed is resumed here, whether or not its timer fired. */
+  function current(id: AccountId): AccountPause | null {
+    const pause = paused.get(id);
+    if (!pause) return null;
+    if (pause.until !== null && pause.until <= opts.clock.now()) {
+      resume(id);
+      return null;
+    }
+    return pause;
   }
 
   function resume(id: AccountId): void {
@@ -113,24 +129,30 @@ export function createAccountPauses(opts: {
 
   return {
     pause(id, pause, at) {
-      const current = paused.get(id);
-      if (!current || outlasts(pause, current)) {
+      const held = current(id);
+      if (!held || outlasts(pause, held)) {
         arm(id, pause);
         opts.state.write((ctx) => {
           const until = pause.until?.toISOString() ?? null;
           setAppSetting(ctx, settingKey(id), { reason: pause.reason, until });
           const data = { reason: pause.reason, until, ...at.data };
           ctx.emit({ type: EventType.AccountPaused, entityType: 'account', entityId: id, data });
-          if (pause.reason === AccountPauseReason.MonthlyCap)
-            ctx.emit({
-              type: EventType.AccountCapReached,
-              entityType: 'account',
-              entityId: id,
-              data,
-            });
+          switch (pause.reason) {
+            case AccountPauseReason.MonthlyCap:
+              ctx.emit({
+                type: EventType.AccountCapReached,
+                entityType: 'account',
+                entityId: id,
+                data,
+              });
+              break;
+            case AccountPauseReason.UsageLimit:
+            case AccountPauseReason.Refused:
+              break;
+          }
         });
       }
-      opts.inbox.flag({
+      const item = opts.inbox.flag({
         projectId: at.projectId,
         workstreamId: null,
         title: at.card.title,
@@ -139,10 +161,19 @@ export function createAccountPauses(opts: {
         foldKey: at.card.foldKey,
         ...(at.card.options ? { options: at.card.options } : {}),
       });
+      // A card still open from an earlier pause folds this one in; it shows this pause's text.
+      if (item.body !== at.card.body) opts.inbox.reword(item.id, at.card.body);
       // Only a usage limit stops running sessions; a capped or refused account lets them finish.
-      if (pause.reason === AccountPauseReason.UsageLimit) void opts.stopAccount(id);
+      switch (pause.reason) {
+        case AccountPauseReason.UsageLimit:
+          void opts.stopAccount(id);
+          break;
+        case AccountPauseReason.MonthlyCap:
+        case AccountPauseReason.Refused:
+          break;
+      }
     },
-    pausedFor: (id) => paused.get(id) ?? null,
+    pausedFor: (id) => current(id),
     resume(id) {
       if (paused.has(id)) resume(id);
     },
