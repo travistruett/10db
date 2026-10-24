@@ -1,4 +1,4 @@
-import { writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { MCP_APPROVAL_DETAIL } from '@10db/contracts';
 import {
@@ -1589,5 +1589,93 @@ describe('flows', () => {
     engine.launch(workstream.id);
     await engine.runner.idle();
     expect(ws(workstream.id).state).toBe('DONE');
+  });
+
+  it('flags a read-only step that leaves changes in its claims, and the flow still completes', async () => {
+    engine = await createTestEngine({
+      Alpha: [implement('op-flow-0101'), [approve('op-flow-0102'), turn]],
+    });
+    const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    // The review session's own change: it lands inside the claim after the implement step committed.
+    mkdirSync(join(engine.repoPath, 'src/api'), { recursive: true });
+    writeFileSync(join(engine.repoPath, 'src/api/review-note.txt'), 'x');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(
+      listInbox(engine.store.db, { states: ['OPEN'] })
+        .filter((i) => i.kind === 'flag')
+        .map((i) => ({ title: i.title, body: i.body })),
+    ).toEqual([
+      {
+        title: 'The review step left changes in its claims',
+        body: 'src/api/review-note.txt',
+      },
+    ]);
+  });
+});
+
+describe('a step that ends with changes in its claims', () => {
+  const gateEvidence = (id: Parameters<typeof ws>[0]) =>
+    listEvidence(engine.store.db, id).filter((e) => e.kind === 'gate');
+
+  it('goes back to the same step, naming the files, and no gate runs on them', async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        [write('src/api/a.txt'), turn],
+        [commit('op-uncom-0001', ['src/api/a.txt']), turn],
+      ],
+    });
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+
+    expect(ws(workstream.id)).toMatchObject({
+      state: 'QUEUED',
+      stepIndex: 0,
+      attempt: 1,
+      nextAction: { kind: 'uncommitted', paths: ['src/api/a.txt'] },
+    });
+    expect(gateEvidence(workstream.id)).toEqual([]);
+
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(engine.adapter.prompts[1]?.prompt).toContain('- src/api/a.txt');
+    expect(gateEvidence(workstream.id)).toHaveLength(1);
+  });
+
+  it('leaves a change outside its claims to the watcher, so the step still goes to the gate', async () => {
+    engine = await createTestEngine({
+      Alpha: [[write('src/api/a.txt'), commit('op-uncom-0002', ['src/api/a.txt']), turn]],
+    });
+    mkdirSync(join(engine.repoPath, 'src/ui'), { recursive: true });
+    writeFileSync(join(engine.repoPath, 'src/ui/elsewhere.txt'), 'x');
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(gateEvidence(workstream.id)).toHaveLength(1);
+  });
+
+  it('fails the step once it has been sent back as many times as the fix limit allows', async () => {
+    const uncommitted = [write('src/api/a.txt'), turn];
+    engine = await createTestEngine({
+      Alpha: [uncommitted, uncommitted, uncommitted, uncommitted],
+    });
+    const { workstream } = engine.addTask('Alpha');
+    const finished = (): boolean => ['DONE', 'FAILED'].includes(ws(workstream.id).state);
+    for (let run = 0; run < 4 && !finished(); run += 1) {
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+    }
+
+    expect(ws(workstream.id).state).toBe('FAILED');
+    expect(ws(workstream.id).failureReason).toContain('uncommitted changes');
+    expect(gateEvidence(workstream.id)).toEqual([]);
   });
 });

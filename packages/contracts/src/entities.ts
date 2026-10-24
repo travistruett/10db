@@ -232,6 +232,8 @@ export const NextAction = z.discriminatedUnion('kind', [
     providerSessionId: z.string().min(1).nullable(),
   }),
   z.object({ kind: z.literal('fix'), evidenceId: EvidenceId }),
+  /** The step ended with these changes in its claims uncommitted; the next session commits them. */
+  z.object({ kind: z.literal('uncommitted'), paths: z.array(z.string().min(1)).min(1) }),
   z.object({ kind: z.literal('verify') }),
   /** Rerun a step a reviewer rejected; the rejecting step's notes are in its result. */
   z.object({ kind: z.literal('revise'), reviewStep: z.int().min(0) }),

@@ -62,6 +62,12 @@ describe('nextActionAfterCrash with builder input', () => {
       'p1',
       { kind: 'revise', reviewStep: 1 },
     ],
+    [
+      'keeps an uncommitted step with the files it left, so the next session still commits them',
+      { kind: 'uncommitted', paths: ['src/api/a.ts'] },
+      'p1',
+      { kind: 'uncommitted', paths: ['src/api/a.ts'] },
+    ],
   ])('%s', (_name, previous, providerSessionId, expected) => {
     expect(nextActionAfterCrash(previous, providerSessionId, handoff)).toEqual(expected);
   });

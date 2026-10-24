@@ -93,6 +93,7 @@ import {
 } from '../sessions';
 import { advanceSteps, failStep, moveAfter, sendBackSteps, type StepEntry } from '../team';
 import type { GateRunner } from '../verify';
+import { findClaimed } from '../watcher';
 import type { LiveSessions } from './live-sessions';
 import { nextActionAfterCrash } from './next-action';
 
@@ -1087,6 +1088,44 @@ export function createRunner(opts: RunnerOptions): Runner {
     return outcome;
   }
 
+  /** The paths in the claims the workstream holds right now that git reports as changed. */
+  async function claimedChanges(row: WorkstreamRow): Promise<string[]> {
+    const project = getProject(db, row.projectId);
+    const changed = (await opts.git.status(project.repoPath)).map((s) => s.path);
+    const claims = activeClaims(db, row.id).map((c) => ({ kind: c.kind, name: c.name }));
+    return findClaimed(changed, project, claims).sort();
+  }
+
+  /**
+   * A write step that ends with changes in its claims uncommitted goes back to the same step, which
+   * commits them. The gate tests what is committed, so it does not run on this attempt.
+   */
+  function sendBackUncommitted(
+    id: WorkstreamId,
+    ctl: Control,
+    row: WorkstreamRow,
+    paths: readonly string[],
+  ): void {
+    const attempt = row.attempt + 1;
+    if (attempt > opts.limits.maxFixAttempts) {
+      fail(
+        id,
+        ctl.fence,
+        `The ${currentStep(row).role} step ended with uncommitted changes in its claims ${String(attempt)} times, and the retry limit (${String(opts.limits.maxFixAttempts)}) is used up`,
+      );
+      return;
+    }
+    opts.state.write((ctx) => {
+      transitionWorkstream(ctx, id, {
+        to: S.Queued,
+        fence: ctl.fence,
+        patch: { nextAction: { kind: 'uncommitted', paths: [...paths] }, attempt },
+        reason: `uncommitted changes in ${String(paths.length)} file(s)`,
+      });
+      clearLease(ctx, id);
+    });
+  }
+
   async function verify(id: WorkstreamId, ctl: Control): Promise<void> {
     if (getWorkstreamRow(db, id).state !== S.Verifying) {
       opts.state.write((ctx) =>
@@ -1099,6 +1138,16 @@ export function createRunner(opts: RunnerOptions): Runner {
     }
     const row = getWorkstreamRow(db, id);
     const project = getProject(db, row.projectId);
+    const uncommitted = await claimedChanges(row);
+    // A cancel that landed while git was read must not be overwritten by a send-back.
+    if (stopRequested(ctl) === 'cancelled') {
+      cancelNow(id, ctl.fence);
+      return;
+    }
+    if (uncommitted.length > 0) {
+      sendBackUncommitted(id, ctl, row, uncommitted);
+      return;
+    }
     const run = listEvidence(db, id).filter((e) => e.kind === 'gate').length + 1;
     const gateAbort = new AbortController();
     ctl.gateAbort = gateAbort;
@@ -1238,12 +1287,23 @@ export function createRunner(opts: RunnerOptions): Runner {
         const outcome = await runSession(id, ctl);
         if (outcome.kind === 'handoff') continue;
         if (outcome.kind === 'step_done') {
+          const finished = getWorkstreamRow(db, id);
+          const readOnly = currentStep(finished).role !== StepRole.Implement;
+          // A read-only step has no changes to make. One it leaves in its claims is flagged, and it still finishes.
+          const changed = readOnly ? await claimedChanges(finished) : [];
           if (stopRequested(ctl) === 'cancelled') {
             settle(id, ctl, { kind: 'stopped', reason: 'cancelled', providerSessionId: null });
             return;
           }
-          const finished = getWorkstreamRow(db, id);
-          if (currentStep(finished).role !== StepRole.Implement) {
+          if (changed.length > 0) {
+            opts.inbox.flag({
+              projectId: finished.projectId,
+              workstreamId: id,
+              title: `The ${currentStep(finished).role} step left changes in its claims`,
+              body: changed.join('\n'),
+            });
+          }
+          if (readOnly) {
             if (finishReadOnlyStep(id, ctl, finished) === 'next') continue;
             return;
           }

@@ -5,7 +5,8 @@ import type { HandoffDto, NextAction } from '@10db/contracts';
  * last handoff. A gate failure is builder input the next session must still see, so it survives the
  * crash, retried until the recovery limit fails the workstream. An answer survives only a crash before
  * its session started: once a session has started, the runner has replaced the `answer` action, so the
- * answer and a one-time permission reach exactly one session.
+ * answer and a one-time permission reach exactly one session. Uncommitted changes survive the same way:
+ * the step still has to commit them.
  */
 export function nextActionAfterCrash(
   previous: NextAction,
@@ -19,6 +20,7 @@ export function nextActionAfterCrash(
     case 'verify':
     case 'fix':
     case 'revise':
+    case 'uncommitted':
       return previous;
     case 'answer':
       return { ...previous, providerSessionId: providerSessionId ?? previous.providerSessionId };
