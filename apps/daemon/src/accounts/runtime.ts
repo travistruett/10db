@@ -2,6 +2,7 @@ import {
   AccountPauseReason,
   type AccountId,
   type AccountRefusal,
+  type InboxItemId,
   type ProjectId,
 } from '@10db/contracts';
 import { findOpenByFoldKey, getAccountRow, listProjects, type AccountRow } from '@10db/db';
@@ -11,6 +12,8 @@ import type { InboxService } from '../inbox';
 import { capStatus } from './cap';
 import { accountFoldKey, capCard, refusedCard, usageLimitCard } from './cards';
 import type { AccountPause, AccountPauses } from './pauses';
+import { unready } from './readiness';
+import { closeSettledCards } from './stale-cards';
 
 /** What the scheduler and the runner ask about an account before and after a session. */
 export interface AccountRuntime {
@@ -24,7 +27,7 @@ export interface AccountRuntime {
   sessionEnded(account: AccountRow, projectId: ProjectId): void;
   isPaused(accountId: AccountId): boolean;
   /** It was saved: a cap or refusal pause ends, and the next check decides again. */
-  saved(accountId: AccountId): void;
+  saved(accountId: AccountId, answering?: InboxItemId): void;
 }
 
 export function createAccountRuntime(opts: {
@@ -122,7 +125,10 @@ export function createAccountRuntime(opts: {
       }
     },
     isPaused: (accountId) => opts.pauses.pausedFor(accountId) !== null,
-    saved(accountId) {
+    saved(accountId, answering) {
+      // A ready account no longer needs the cards that asked the builder to make it ready.
+      if (!unready(getAccountRow(db, accountId)))
+        closeSettledCards(opts.state, accountId, answering);
       const paused = opts.pauses.pausedFor(accountId);
       if (!paused) return;
       switch (paused.reason) {

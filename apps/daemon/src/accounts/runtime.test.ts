@@ -12,6 +12,7 @@ import {
   listEventsAfter,
   listInbox,
   patchAccount,
+  recordAccountSecret,
   seedAccount,
   seedProject,
   transitionWorkstream,
@@ -30,6 +31,7 @@ import {
   type AccountPauses,
   type AccountRuntime,
 } from './index';
+import { confirmCard, secretCard, signInCard } from './cards';
 
 let store: Store;
 let close: () => void;
@@ -235,6 +237,26 @@ describe('refusals and usage limits', () => {
       seenIdentity: 'other@example.com',
     });
     expect(openCards()[0]?.options.map((o) => o.label)).toEqual(['Confirm', 'Resume', 'Later']);
+  });
+
+  it('closes sign-in, confirm and secret cards once the account is ready and saved', () => {
+    const sub = seedAccount(store, { kind: 'claude_subscription', label: 'Company A' });
+    const keyed = seedAccount(store, { kind: 'anthropic_api_key', label: 'Metered' });
+    const subRow = getAccountRow(state.db, sub.id);
+    const keyedRow = getAccountRow(state.db, keyed.id);
+    inbox.flag({ projectId: project.id, workstreamId: null, ...signInCard(subRow) });
+    inbox.flag({
+      projectId: project.id,
+      workstreamId: null,
+      ...confirmCard(subRow, 'a@x.example'),
+    });
+    inbox.flag({ projectId: project.id, workstreamId: null, ...secretCard(keyedRow) });
+    state.write((ctx) => patchAccount(ctx, sub.id, { expectedIdentity: 'a@x.example' }));
+    runtime.saved(sub.id);
+    expect(openCards().map((c) => c.title)).toEqual(['Set the secret of Metered']);
+    state.write((ctx) => recordAccountSecret(ctx, keyed.id, 'sha256:0000000000000000'));
+    runtime.saved(keyed.id);
+    expect(openCards()).toEqual([]);
   });
 
   it('resumes a refused account when its card is answered Resume', () => {

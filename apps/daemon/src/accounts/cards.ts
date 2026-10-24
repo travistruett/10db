@@ -165,3 +165,13 @@ export function secretCard(account: AccountRow): AccountCard {
     detail: detail(account, null, AccountProblem.SecretMissing, null),
   };
 }
+
+/** A first-party directory that reports credentials a subscription can't run on; signing in doesn't change that. */
+export function credentialsCard(account: AccountRow, refusal: AccountRefusal): AccountCard {
+  return {
+    title: `Fix the credentials of ${account.label}`,
+    body: `${refusal.message}. ${account.label}'s work waits; 10db tries again in a minute. ${fixFor(account, AccountProblem.WrongCredentials)}`,
+    foldKey: accountFoldKey(account.id, AccountProblem.WrongCredentials),
+    detail: detail(account, null, AccountProblem.WrongCredentials, null),
+  };
+}

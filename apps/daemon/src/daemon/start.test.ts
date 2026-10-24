@@ -205,6 +205,56 @@ describe('startDaemon', () => {
     }
   });
 
+  it('waits for an identity probe in flight before it closes the database', async () => {
+    const repo = createTempRepo();
+    try {
+      const adapter = new FakeAdapter({ Alpha: [[{ do: 'turn_complete' }]] });
+      let release: () => void = () => undefined;
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      adapter.probeAccount = async (probe) => {
+        adapter.probes.push(probe);
+        await held;
+        return adapter.probeSeen;
+      };
+      const running = await startDaemon({
+        dataDir: dir.path,
+        port: 0,
+        adapter,
+        logLevel: 'warn',
+        ...QUIET,
+      });
+      daemon = running;
+      const api = apiClient(running.url, running.token);
+      const project = await api.post('/projects', ProjectDto, {
+        name: 'demo',
+        repoPath: repo.path,
+        gateCommand: 'true',
+        flowId: await quickFlowId(api),
+        areas: [{ name: 'src', globs: ['src/**'] }],
+      });
+      const task = await api.post(`/projects/${project.id}/tasks`, TaskDto, {
+        title: 'Alpha',
+        acceptanceCriteria: ['it works'],
+        areas: ['src'],
+      });
+      await api.post(`/tasks/${task.id}/start`, z.unknown());
+      await waitFor(() => adapter.probes.length === 1);
+      let stopped = false;
+      const stopping = running.stop().then(() => {
+        stopped = true;
+      });
+      // The deadline is the proof: a stop that ignored the probe would finish well inside it.
+      await expect(waitFor(() => stopped, 750)).rejects.toThrow('timed out');
+      release();
+      await stopping;
+      daemon = null;
+    } finally {
+      repo.cleanup();
+    }
+  });
+
   it('does not count a clean stop against the recovery limit', async () => {
     const repo = createTempRepo();
     const book: FakeScriptBook = { Alpha: [[{ do: 'hang' }], [{ do: 'hang' }]] };

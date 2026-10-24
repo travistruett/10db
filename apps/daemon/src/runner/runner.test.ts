@@ -4,6 +4,7 @@ import { ACCOUNT_CARD_DETAIL, AccountCardChoice, MCP_APPROVAL_DETAIL } from '@10
 import {
   acquireLease,
   activeClaims,
+  getAccount,
   getTask,
   getWorkstream,
   listEventsAfter,
@@ -1475,6 +1476,70 @@ describe('accounts', () => {
     // Unready is prepared, never refused: no pause and no refusal card.
     expect(engine.accounts.isPaused(engine.project.accountId)).toBe(false);
     expect(listInbox(engine.store.db, { states: ['OPEN'] })).toEqual([]);
+  });
+
+  it('re-queues a lane between sessions when its account lost its identity, keeping the handoff', async () => {
+    engine = await createTestEngine(
+      {
+        Alpha: [
+          [{ do: 'mcp', tool: 'write_handoff', args: handoffArgs('op-ready-001', 'finish') }, turn],
+          [turn],
+        ],
+      },
+      {},
+      {
+        afterSession: () => {
+          engine.state.write((ctx) =>
+            patchAccount(ctx, engine.project.accountId, { expectedIdentity: null }),
+          );
+          return Promise.resolve();
+        },
+      },
+    );
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(listSessions(engine.store.db, workstream.id)).toHaveLength(1);
+    expect(ws(workstream.id)).toMatchObject({
+      state: 'QUEUED',
+      nextAction: { kind: 'continue_from_handoff' },
+    });
+    expect(engine.prepared).toEqual([
+      { accountId: engine.project.accountId, projectId: engine.project.id },
+    ]);
+    expect(engine.accounts.isPaused(engine.project.accountId)).toBe(false);
+    expect(listInbox(engine.store.db, { states: ['OPEN'] })).toEqual([]);
+  });
+
+  it('confirms a different identity from a refusal card, resumes the account and re-queues the lane', async () => {
+    engine = await createTestEngine({ Alpha: [[turn]] });
+    engine.adapter.seen = () => ({ email: 'someone-else@example.com' });
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(engine.accounts.isPaused(engine.project.accountId)).toBe(true);
+    const card = listInbox(engine.store.db, { states: ['OPEN'] })[0];
+    if (!card) throw new Error('no refusal card');
+    expect(card.options.map((o) => o.label)).toContain('Confirm');
+    engine.inbox.answer(card.id, { choice: AccountCardChoice.Confirm });
+    expect(getAccount(engine.store.db, engine.project.accountId).expectedIdentity).toBe(
+      'someone-else@example.com',
+    );
+    expect(engine.accounts.isPaused(engine.project.accountId)).toBe(false);
+    expect(ws(workstream.id).state).toBe('QUEUED');
+  });
+
+  it('releases the start gate when the adapter throws on a subscription account', async () => {
+    engine = await createTestEngine({ Alpha: [[turn]] });
+    engine.adapter.start = () => {
+      throw new Error('spawn failed');
+    };
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(engine.startGate.waiting(engine.project.accountId)).toBe(0);
+    // A leaked holder would leave this acquire pending forever.
+    (await engine.startGate.acquire(engine.project.accountId))();
   });
 });
 

@@ -4,6 +4,7 @@ import {
   getAccount,
   getAccountRow,
   listInbox,
+  patchAccount,
   seedAccount,
   seedDefaultAccount,
   seedProject,
@@ -16,7 +17,7 @@ import { createLauncher } from '../environment';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createInboxService, type InboxService } from '../inbox';
 import { silentLogger } from '../log';
-import { AccountProbeError, FakeAdapter } from '../sessions';
+import { AccountProbeError, FakeAdapter, type SeenAccount } from '../sessions';
 import {
   createAccountCardAnswers,
   createAccountPreparer,
@@ -182,6 +183,92 @@ describe('the preparer', () => {
     expect(cards.map((c) => c.title)).toEqual(['Sign in the account Claude plan']);
     expect(cards[0]?.body).toMatch(/reported no account within 15 s.*claude \/login/);
     expect(getAccount(state.db, defaultAccount.id).expectedIdentity).toBeNull();
+  });
+
+  it.each<[string, Partial<SeenAccount>, string]>([
+    [
+      'a default directory whose settings force Bedrock',
+      { email: undefined, subscriptionType: undefined, apiProvider: 'bedrock' },
+      'bedrock',
+    ],
+    [
+      'an apiKeyHelper',
+      { email: undefined, subscriptionType: undefined, apiKeySource: 'apiKeyHelper' },
+      'apiKeyHelper',
+    ],
+    [
+      'a Console login with an email and no plan',
+      { email: 'me@example.com', subscriptionType: undefined },
+      'needs',
+    ],
+  ])('raises a credentials card, not a sign-in card, for %s', async (_name, seen, mention) => {
+    const { defaultAccount, projectId } = freshDefault();
+    adapter.probeSeen = { ...adapter.probeSeen, ...seen };
+    preparer.prepare(getAccountRow(state.db, defaultAccount.id), projectId);
+    await preparer.idle();
+    const cards = openCards();
+    expect(cards.map((c) => c.title)).toEqual(['Fix the credentials of Claude plan']);
+    expect(cards[0]?.body).toContain(mention);
+    expect(cards[0]?.body).not.toContain('claude /login');
+    expect(getAccount(state.db, defaultAccount.id).expectedIdentity).toBeNull();
+  });
+
+  it('keeps quiet after Later, until the account is saved', async () => {
+    seedProject(store);
+    const sub = seedAccount(store, { kind: 'claude_subscription', label: 'Company A' });
+    const projectId = seedProject(store, { accountId: sub.id }).id;
+    const row = () => getAccountRow(state.db, sub.id);
+    preparer.prepare(row(), projectId);
+    await preparer.idle();
+    const card = openCards()[0];
+    if (!card) throw new Error('no confirm card');
+    clock.advance(1000);
+    inbox.answer(card.id, { choice: AccountCardChoice.Later });
+    clock.advance(PREPARE_RETRY_MS);
+    preparer.prepare(row(), projectId);
+    await preparer.idle();
+    expect(adapter.probes).toHaveLength(1);
+    expect(openCards()).toEqual([]);
+    clock.advance(1000);
+    state.write((ctx) => patchAccount(ctx, sub.id, { laneCap: 3 }));
+    clock.advance(PREPARE_RETRY_MS);
+    preparer.prepare(row(), projectId);
+    await preparer.idle();
+    expect(adapter.probes).toHaveLength(2);
+    expect(openCards().map((c) => c.title)).toEqual(['Confirm the account Company A']);
+  });
+
+  it('probes no more while a Confirm card waits in any project of the account', async () => {
+    seedProject(store);
+    const sub = seedAccount(store, { kind: 'claude_subscription', label: 'Company A' });
+    const first = seedProject(store, { accountId: sub.id }).id;
+    const second = seedProject(store, { accountId: sub.id }).id;
+    const row = getAccountRow(state.db, sub.id);
+    preparer.prepare(row, first);
+    await preparer.idle();
+    clock.advance(PREPARE_RETRY_MS);
+    preparer.prepare(row, second);
+    await preparer.idle();
+    expect(adapter.probes).toHaveLength(1);
+    expect(openCards().map((c) => c.projectId)).toEqual([first]);
+  });
+
+  it('closes the sign-in card once the identity is recorded', async () => {
+    const { defaultAccount, projectId } = freshDefault();
+    const row = getAccountRow(state.db, defaultAccount.id);
+    adapter.probeSeen = { ...adapter.probeSeen, email: undefined, subscriptionType: undefined };
+    preparer.prepare(row, projectId);
+    await preparer.idle();
+    expect(openCards().map((c) => c.title)).toEqual(['Sign in the account Claude plan']);
+    adapter.probeSeen = {
+      ...adapter.probeSeen,
+      email: 'me@example.com',
+      subscriptionType: 'Claude Max',
+    };
+    clock.advance(PREPARE_RETRY_MS);
+    preparer.prepare(row, projectId);
+    await preparer.idle();
+    expect(openCards().map((c) => c.title)).toEqual(['Claude plan runs as me@example.com']);
   });
 
   it('does nothing for a ready account', async () => {

@@ -334,9 +334,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     resume: (id) => {
       accountPauses.resume(id);
     },
-    confirm: (id, identity) => {
+    confirm: (id, identity, answering) => {
       state.write((ctx) => patchAccount(ctx, id, { expectedIdentity: identity }));
-      accounts.saved(id);
+      accounts.saved(id, answering);
       scheduler?.requestTick();
     },
   });
@@ -527,7 +527,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       unsubscribeLanes();
       watcher?.stop();
       keepAwake.stop();
+      // A probe in flight writes to the database; the runner can ask for another while it stops.
+      await preparer.idle();
       await createdRunner.stopAll('shutdown');
+      await preparer.idle();
       state.write((ctx) => {
         setAppSetting(ctx, CLEAN_SHUTDOWN_KEY, { at: ctx.now });
       });

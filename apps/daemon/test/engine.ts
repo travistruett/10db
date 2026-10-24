@@ -139,9 +139,9 @@ export async function createTestEngine(
     resume: (id) => {
       pauses.resume(id);
     },
-    confirm: (id, identity) => {
+    confirm: (id, identity, answering) => {
       state.write((ctx) => patchAccount(ctx, id, { expectedIdentity: identity }));
-      accounts.saved(id);
+      accounts.saved(id, answering);
     },
   });
   const server = serve({

@@ -1,20 +1,30 @@
-import { AccountKind, AccountProblem, type AccountId, type ProjectId } from '@10db/contracts';
-import { defaultAccountId, findOpenByFoldKey, patchAccount, type AccountRow } from '@10db/db';
+import {
+  ACCOUNT_CARD_DETAIL,
+  AccountCardDetail,
+  AccountKind,
+  AccountCardChoice,
+  AccountProblem,
+  InboxState,
+  type AccountId,
+  type ProjectId,
+} from '@10db/contracts';
+import { defaultAccountId, listInbox, patchAccount, type AccountRow } from '@10db/db';
 import type { Clock } from '../clock';
 import type { Launcher } from '../environment';
 import type { StateStore } from '../events';
 import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
-import type { SessionAdapter, SeenAccount } from '../sessions';
+import { checkAccount, type SessionAdapter, type SeenAccount } from '../sessions';
 import {
-  accountFoldKey,
   confirmCard,
+  credentialsCard,
   recordedCard,
   secretCard,
   signInCard,
   type AccountCard,
 } from './cards';
 import { unready } from './readiness';
+import { closeSettledCards } from './stale-cards';
 import type { StartGate } from './start-gate';
 
 /** How long an unready account waits before it is probed again. */
@@ -72,7 +82,18 @@ export function createAccountPreparer(opts: {
       raise(projectId, signInCard(account, error instanceof Error ? error.message : String(error)));
       return;
     }
-    if (!seen.email || !seen.subscriptionType) {
+    // No identity is confirmed yet, so the check compares none: it tells a signed-out directory from
+    // credentials a login can't fix (Bedrock settings, an apiKeyHelper, a Console login).
+    const refusal = checkAccount(opts.launcher.probe(account).expect, seen);
+    if (refusal?.problem === AccountProblem.SignedOut) {
+      raise(projectId, signInCard(account));
+      return;
+    }
+    if (refusal) {
+      raise(projectId, credentialsCard(account, refusal));
+      return;
+    }
+    if (!seen.email) {
       raise(projectId, signInCard(account));
       return;
     }
@@ -81,6 +102,7 @@ export function createAccountPreparer(opts: {
       const email = seen.email;
       opts.state.write((ctx) => patchAccount(ctx, account.id, { expectedIdentity: email }));
       opts.logger.info({ accountId: account.id }, 'recorded the default account identity');
+      closeSettledCards(opts.state, account.id);
       raise(projectId, recordedCard(account, email));
       opts.onReady();
       return;
@@ -88,17 +110,33 @@ export function createAccountPreparer(opts: {
     raise(projectId, confirmCard(account, seen.email));
   }
 
+  /** The account's Confirm cards in the given states, from every project. */
+  const confirmCards = (account: AccountRow, states: readonly InboxState[]) =>
+    listInbox(opts.state.db, { states }).filter((item) => {
+      const card = AccountCardDetail.safeParse(item.detail?.[ACCOUNT_CARD_DETAIL]);
+      return (
+        card.success &&
+        card.data.accountId === account.id &&
+        card.data.reason === null &&
+        card.data.problem === AccountProblem.Unconfirmed
+      );
+    });
+
+  function confirmPending(account: AccountRow): boolean {
+    if (confirmCards(account, [InboxState.Open]).length > 0) return true;
+    return confirmCards(account, [InboxState.Resolved, InboxState.Answered]).some(
+      (item) =>
+        item.answer?.choice === AccountCardChoice.Later && item.updatedAt >= account.updatedAt,
+    );
+  }
+
   return {
     prepare(account, projectId) {
       const problem = unready(account);
       if (!problem || running.has(account.id)) return;
-      // A Confirm card already waits on the builder; probing again would only raise it again.
-      const confirming = findOpenByFoldKey(
-        opts.state.db,
-        projectId,
-        accountFoldKey(account.id, AccountProblem.Unconfirmed),
-      );
-      if (confirming) return;
+      // A Confirm card already waits on the builder, in this project or another: probing again would
+      // only raise it again. One the builder put off with Later stays quiet until the account is saved.
+      if (confirmPending(account)) return;
       const now = opts.clock.now().getTime();
       const last = lastTried.get(account.id);
       if (last !== undefined && now - last < PREPARE_RETRY_MS) return;
