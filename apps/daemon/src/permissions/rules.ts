@@ -37,13 +37,16 @@ const WRITE_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 /**
  * A read-only step drops the file-writing tools and the gate, and may run the read
  * commands without a card; the guard has already refused anything that writes.
+ * An edit step also runs the project's extra allowed commands without a card. Each is a prefix,
+ * so `pnpm test` covers `pnpm test --run`; the guard still judges every command first.
  */
 export function allowedToolsFor(
-  project: Pick<ProjectDto, 'gateCommand'>,
+  project: Pick<ProjectDto, 'gateCommand' | 'allowedCommands'>,
   tools: ToolAccess,
 ): string[] {
   const base = baseAllowedTools(project);
-  if (tools === ToolAccess.Edit) return base;
+  if (tools === ToolAccess.Edit)
+    return [...base, ...project.allowedCommands.map((command) => `Bash(${command}:*)`)];
   const gate = `Bash(${project.gateCommand})`;
   return [
     ...base.filter((t) => !WRITE_TOOLS.has(t) && t !== gate),
