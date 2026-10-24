@@ -252,6 +252,7 @@ CREATE TABLE `projects` (
 	`delivery` text DEFAULT 'local' NOT NULL,
 	`base_branch` text DEFAULT 'main' NOT NULL,
 	`pr_title_prefix` text,
+	`allowed_commands` text DEFAULT '[]' NOT NULL,
 	`created_at` text NOT NULL,
 	`updated_at` text NOT NULL,
 	FOREIGN KEY (`flow_id`) REFERENCES `flows`(`id`) ON UPDATE no action ON DELETE no action
