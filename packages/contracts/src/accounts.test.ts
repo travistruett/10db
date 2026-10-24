@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import {
   AccountCardDetail,
   accountDisplayName,
@@ -90,6 +91,16 @@ describe('AccountInput', () => {
       name: 'a gateway over plain http',
       input: { kind: 'gateway', label: 'x', settings: { baseUrl: 'http://g.example' } },
       message: /baseUrl/,
+    },
+    {
+      name: 'a gateway URL with no scheme',
+      input: { kind: 'gateway', label: 'x', settings: { baseUrl: 'openrouter.ai/api' } },
+      message: /baseUrl/,
+    },
+    {
+      name: 'a gateway URL with a fragment',
+      input: { kind: 'gateway', label: 'x', settings: { baseUrl: 'https://g.example/#sk-secret' } },
+      message: /no credentials/,
     },
     {
       name: 'a gateway URL with credentials in it',
@@ -189,7 +200,7 @@ describe('account kinds', () => {
   it('refuses settings that belong to another kind', () => {
     expect(() =>
       parseAccountSettings('gateway', { region: 'us-west-2', awsProfile: null }),
-    ).toThrow();
+    ).toThrow(z.ZodError);
   });
 });
 

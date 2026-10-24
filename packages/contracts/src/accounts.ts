@@ -87,10 +87,16 @@ const AwsProfile = z.string().regex(/^[A-Za-z0-9._-]{1,64}$/, 'an AWS profile na
 /** A gateway's endpoint. Credentials in it would land in the database, so it may carry none. */
 const BaseUrl = z.url({ protocol: /^https$/ }).refine(
   (url) => {
-    const parsed = new URL(url);
-    return parsed.username === '' && parsed.password === '' && parsed.search === '';
+    const parsed = URL.parse(url);
+    return (
+      parsed !== null &&
+      parsed.username === '' &&
+      parsed.password === '' &&
+      parsed.search === '' &&
+      parsed.hash === ''
+    );
   },
-  { message: 'an https URL with no credentials and no query' },
+  { message: 'an https URL with no credentials, query or fragment' },
 );
 
 export const SubscriptionSettings = z.strictObject({ ...modelChoice });
