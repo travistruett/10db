@@ -5,9 +5,7 @@ import { loadEnv } from './env';
 import {
   AA_KEY_ACCOUNT,
   buildNetworkEnv,
-  buildSessionEnv,
   captureLoginEnv,
-  keychainSecrets,
   systemCheck,
   systemKeychain,
   type LoginEnv,
@@ -26,7 +24,6 @@ import {
   loadFakeScriptBook,
   type SessionAdapter,
 } from './sessions';
-import { CLIENT_APP } from './version';
 
 // An unhandled error exits loudly; the supervisor restarts the daemon and recovery runs at startup.
 process.on('unhandledRejection', (error) => {
@@ -87,13 +84,8 @@ try {
     migrationsDir: resolveMigrationsDir(),
     harnessDir: resolveHarnessDir(),
     aaKey: () => systemKeychain.read(AA_KEY_ACCOUNT),
-    sessionEnv: (project) =>
-      buildSessionEnv({
-        base: login.vars,
-        billingMode: project.billingMode,
-        clientApp: CLIENT_APP,
-        secrets: keychainSecrets,
-      }),
+    loginEnv: login.vars,
+    keychain: systemKeychain,
     systemCheck: check,
     networkEnv: () => buildNetworkEnv(login.vars),
     ...(env.TENDB_DEV_UI_TOKEN ? { uiToken: env.TENDB_DEV_UI_TOKEN } : {}),

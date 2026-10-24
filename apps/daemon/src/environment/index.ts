@@ -11,19 +11,13 @@ export {
   ACCOUNT_NAMES_VERIFIED_ON,
   AccountLaunchError,
   createLauncher,
+  type AccountExpectation,
+  type Launcher,
+  type SessionLaunch,
   signInCommand,
 } from './launch';
 export { captureLoginEnv, LOGIN_ENV_MARKER, parseEnvBlock, type LoginEnv } from './login-env';
-export {
-  BILLING_SWITCH_VARS,
-  buildSessionEnv,
-  inferBillingMode,
-  keychainSecrets,
-  NESTED_SESSION_VARS,
-  SessionEnvError,
-  stripBillingSwitches,
-  type SecretSource,
-} from './session-env';
+export { BILLING_SWITCH_VARS, NESTED_SESSION_VARS, stripBillingSwitches } from './session-env';
 export { buildNetworkEnv } from './network-env';
 export {
   claudeCodeWarning,

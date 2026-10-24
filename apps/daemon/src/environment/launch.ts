@@ -35,7 +35,7 @@ const AWS_LOGIN_VARS: readonly string[] = [
 const CLIENT_APP_VAR = 'CLAUDE_AGENT_SDK_CLIENT_APP';
 
 /** What a session on an account must report before its prompt (accounts spec §5). */
-interface AccountExpectation {
+export interface AccountExpectation {
   readonly accountId: AccountId;
   readonly label: string;
   readonly kind: SupportedAccountKind;
@@ -43,7 +43,7 @@ interface AccountExpectation {
   readonly identity: string | null;
 }
 
-interface SessionLaunch {
+export interface SessionLaunch {
   readonly env: Readonly<Record<string, string>>;
   /** The alias, or the channel's model ID from the account's model map. */
   readonly model: string;
@@ -68,7 +68,7 @@ export class AccountLaunchError extends Error {
 }
 
 /** The one owner of account variables (accounts spec §3). */
-interface Launcher {
+export interface Launcher {
   /** The login env with every billing switch stripped: for the gate and the repo's MCP servers. */
   projectEnv(): Record<string, string>;
   /** A session on `account` asking for `alias`; reads a keyed account's secret now and caches nothing. */

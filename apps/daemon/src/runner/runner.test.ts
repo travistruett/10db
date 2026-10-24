@@ -1,6 +1,6 @@
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { MCP_APPROVAL_DETAIL } from '@10db/contracts';
+import { AccountCardChoice, MCP_APPROVAL_DETAIL } from '@10db/contracts';
 import {
   acquireLease,
   activeClaims,
@@ -14,11 +14,17 @@ import {
 } from '@10db/db';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RESULT_NUDGE } from '../briefing';
+import { createLauncher } from '../environment';
 import type { SessionHandle } from '../sessions';
-import { handoffArgs, waitFor } from '../../test/fixtures';
+import { createMemoryKeychain, handoffArgs, waitFor } from '../../test/fixtures';
 import { createTestEngine, type TestEngine } from '../../test/engine';
 
 let engine: TestEngine;
+
+/** A launcher whose project env is `base` less its billing switches. */
+const launcherOver = (base: Record<string, string>) => ({
+  launcher: createLauncher({ base, clientApp: 'test', keychain: createMemoryKeychain() }),
+});
 afterEach(async () => {
   await engine.close();
 });
@@ -359,7 +365,7 @@ describe('runner', () => {
       engine = await createTestEngine(
         { Alpha: [[write('src/api/a.txt'), commit('op-gate-env-1', ['src/api/a.txt']), turn]] },
         { gateCommand: 'test -z "$TENDB_PROBE" && test "$GATE_MARK" = yes' },
-        { sessionEnv: () => ({ GATE_MARK: 'yes' }) },
+        launcherOver({ GATE_MARK: 'yes' }),
       );
       const { workstream } = engine.addTask('Alpha');
       engine.launch(workstream.id);
@@ -587,8 +593,11 @@ describe('runner', () => {
       { Alpha: [[turn]] },
       {},
       {
-        sessionEnv: () => {
-          throw new Error('No Anthropic API key in the Keychain.');
+        launcher: {
+          projectEnv: () => ({}),
+          session: () => {
+            throw new Error('The launch could not be built.');
+          },
         },
       },
     );
@@ -664,7 +673,7 @@ describe('runner', () => {
     });
 
     it('passes an approved server with only PATH, HOME and the variables the builder approved', async () => {
-      engine = await createTestEngine(BOOK, {}, { sessionEnv: () => SECRET_ENV });
+      engine = await createTestEngine(BOOK, {}, launcherOver(SECRET_ENV));
       writeMcp({ docs: DOCS, mantine: MANTINE });
       await runTask('Alpha');
       const reviews = approvalCards().map((c) => c.detail?.[MCP_APPROVAL_DETAIL]);
@@ -732,7 +741,7 @@ describe('runner', () => {
       engine = await createTestEngine(
         BOOK,
         {},
-        { sessionEnv: () => ({ PATH: '/usr/bin:/bin', HOME: '/h' }) },
+        launcherOver({ PATH: '/usr/bin:/bin', HOME: '/h' }),
       );
       writeMcp({ docs: DOCS, mantine: MANTINE });
       await runTask('Alpha');
@@ -1151,7 +1160,13 @@ describe('runner', () => {
           for await (const event of h.events) {
             yield event;
             if (event.type === 'rate_limit')
-              yield { type: 'turn_complete' as const, inputTokens: 1, outputTokens: 1, costUsd: 0 };
+              yield {
+                type: 'turn_complete' as const,
+                inputTokens: 1,
+                outputTokens: 1,
+                cachedTokens: 0,
+                costUsd: 0,
+              };
           }
         })(),
       }));
@@ -1292,7 +1307,10 @@ describe('runner', () => {
       },
       {},
       {},
-      { account: { kind: 'anthropic_api_key', label: 'Capped', monthlyCapUsd: 0.01 } },
+      {
+        account: { kind: 'anthropic_api_key', label: 'Capped', monthlyCapUsd: 0.01 },
+        secret: 'sk-ant-api03-cap-test-key',
+      },
     );
     const { workstream } = engine.addTask('Alpha');
     engine.launch(workstream.id);
@@ -1305,6 +1323,96 @@ describe('runner', () => {
     expect(listInbox(engine.store.db, { states: ['OPEN'] }).map((i) => i.title)).toEqual([
       'Capped reached its monthly cap',
     ]);
+  });
+});
+
+describe('accounts', () => {
+  it('pauses the account and sends no prompt when the identity differs, then resumes after Resume', async () => {
+    engine = await createTestEngine({ Alpha: [[turn]] });
+    engine.adapter.seen = () => ({ email: 'someone-else@example.com' });
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(engine.adapter.prompts).toEqual([]);
+    expect(ws(workstream.id)).toMatchObject({
+      state: 'PAUSED_LIMIT',
+      nextAction: { kind: 'start' },
+    });
+    expect(engine.accounts.isPaused(engine.project.accountId)).toBe(true);
+    const card = listInbox(engine.store.db, { states: ['OPEN'] })[0];
+    expect(card?.body).toContain('someone-else@example.com');
+    expect(transitions(workstream.id).filter((t) => t.endsWith('->FAILED'))).toEqual([]);
+
+    engine.adapter.seen = () => ({});
+    if (!card) throw new Error('no refusal card');
+    engine.inbox.answer(card.id, { choice: AccountCardChoice.Resume });
+    expect(ws(workstream.id).state).toBe('QUEUED');
+  });
+
+  it('refuses an API-key account whose Keychain secret changed, before any session row', async () => {
+    engine = await createTestEngine(
+      { Alpha: [[turn]] },
+      {},
+      {},
+      {
+        account: { kind: 'anthropic_api_key', label: 'Client key' },
+        secret: 'sk-ant-api03-original-key',
+      },
+    );
+    engine.keychain.write(`account:${engine.project.accountId}`, 'sk-ant-api03-someone-elses');
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(listSessions(engine.store.db, workstream.id)).toEqual([]);
+    expect(ws(workstream.id).state).toBe('PAUSED_LIMIT');
+    const cards = listInbox(engine.store.db, { states: ['OPEN'] });
+    expect(cards.map((c) => c.title)).toEqual(['Client key: sessions refused']);
+    expect(JSON.stringify(cards)).not.toContain('sk-ant');
+  });
+
+  it('resumes the same conversation after credentials expired mid-session', async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        [
+          { do: 'activity', summary: 'working' },
+          { do: 'auth_error', error: 'authentication_failed' },
+        ],
+      ],
+    });
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id)).toMatchObject({
+      state: 'PAUSED_LIMIT',
+      nextAction: { kind: 'resume' },
+    });
+    expect(listInbox(engine.store.db, { states: ['OPEN'] })[0]?.body).toContain('claude /login');
+  });
+
+  it('fails the workstream at once when the model differs', async () => {
+    engine = await createTestEngine({ Alpha: [[turn]] });
+    engine.adapter.seen = () => ({ model: 'claude-opus-5-5' });
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id)).toMatchObject({ state: 'FAILED' });
+    expect(ws(workstream.id).failureReason).toMatch(/Model check failed/);
+  });
+
+  it("gives the gate the project env, never the account's key", async () => {
+    engine = await createTestEngine(
+      { Alpha: [[write('src/api/a.txt'), commit('op-key-0001', ['src/api/a.txt']), turn]] },
+      { gateCommand: 'test -z "$ANTHROPIC_API_KEY"' },
+      {},
+      {
+        account: { kind: 'anthropic_api_key', label: 'Client key' },
+        secret: 'sk-ant-api03-gate-must-not-see',
+      },
+    );
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('DONE');
   });
 });
 

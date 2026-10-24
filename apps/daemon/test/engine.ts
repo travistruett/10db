@@ -23,6 +23,8 @@ import {
   getWorkstreamRow,
   insertTask,
   insertWorkstream,
+  accountSecretRef,
+  recordAccountSecret,
   seedAccount,
   seedProject,
   transitionWorkstream,
@@ -36,6 +38,7 @@ import {
   type AccountRuntime,
 } from '../src/accounts';
 import { ManualClock } from '../src/clock';
+import { createLauncher, secretFingerprint, type Keychain } from '../src/environment';
 import { createEventBus, createStateStore, type StateStore } from '../src/events';
 import { createGit } from '../src/git';
 import { createInboxService, type InboxService } from '../src/inbox';
@@ -52,7 +55,7 @@ import { FakeAdapter, type FakeScriptBook } from '../src/sessions';
 import { createGateRunner } from '../src/verify';
 import { retryWorkstream, seedTeam, startTaskWithPlan } from '../src/team';
 import { measureForTests } from './catalogue';
-import { createTempRepo, tempDir } from './fixtures';
+import { createMemoryKeychain, createTempRepo, tempDir } from './fixtures';
 
 export interface TestEngine {
   readonly store: Store;
@@ -64,6 +67,7 @@ export interface TestEngine {
   readonly project: ProjectDto;
   readonly repoPath: string;
   readonly accounts: AccountRuntime;
+  readonly keychain: Keychain;
   readonly rateLimited: { accountId: AccountId; resetsAt: Date | null }[];
   addTask(
     title: string,
@@ -81,8 +85,8 @@ export interface TestEngine {
 export async function createTestEngine(
   book: FakeScriptBook,
   project: Partial<ProjectInput> = {},
-  runnerOverrides: Partial<Pick<RunnerOptions, 'afterSession' | 'sessionEnv'>> = {},
-  setup: { readonly account?: AccountInput } = {},
+  runnerOverrides: Partial<Pick<RunnerOptions, 'afterSession' | 'launcher'>> = {},
+  setup: { readonly account?: AccountInput; readonly secret?: string } = {},
 ): Promise<TestEngine> {
   const repo = createTempRepo();
   const data = tempDir('engine-data');
@@ -95,6 +99,7 @@ export async function createTestEngine(
   const adapter = new FakeAdapter(book);
   const live = createLiveSessions();
   const git = createGit();
+  const keychain = createMemoryKeychain();
   const rateLimited: { accountId: AccountId; resetsAt: Date | null }[] = [];
   let runner: Runner | null = null;
   let answerAccountCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
@@ -153,7 +158,7 @@ export async function createTestEngine(
     live,
     limits: { ...DEFAULT_RUNNER_LIMITS, gateTimeoutMs: 20_000 },
     mcpUrl: () => mcpUrl,
-    sessionEnv: () => ({ PATH: '/usr/bin:/bin' }),
+    launcher: createLauncher({ base: { PATH: '/usr/bin:/bin' }, clientApp: 'test', keychain }),
     // A usage limit is recorded but pauses nothing, so a test sees the lane's own outcome.
     accounts: {
       ...accounts,
@@ -166,6 +171,11 @@ export async function createTestEngine(
   });
   runner = created;
   const account = setup.account ? seedAccount(store, setup.account) : null;
+  const secret = setup.secret;
+  if (account && secret !== undefined) {
+    keychain.write(accountSecretRef(account.id), secret);
+    state.write((ctx) => recordAccountSecret(ctx, account.id, secretFingerprint(secret)));
+  }
   const seeded = seedProject(store, {
     ...(account ? { accountId: account.id } : {}),
     repoPath: repo.path,
@@ -186,6 +196,7 @@ export async function createTestEngine(
     project: seeded,
     repoPath: repo.path,
     accounts,
+    keychain,
     rateLimited,
     addTask(title, areas = ['api'], dependsOn = [], plan) {
       const criteria = Array.from({ length: plan?.criteria ?? 1 }, (_, i) =>

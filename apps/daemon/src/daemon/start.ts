@@ -8,7 +8,6 @@ import {
   PROTOCOL_VERSION,
   type InboxAnswer,
   type InboxItemDto,
-  type ProjectDto,
   type SystemCheckDto,
   type WorkstreamId,
 } from '@10db/contracts';
@@ -47,7 +46,13 @@ import {
   type DeliveryLimits,
 } from '../delivery';
 import type { LogLevel } from '../env';
-import { ACCOUNT_NAMES_VERIFIED_ON, REQUIRED_TOOLS } from '../environment';
+import {
+  ACCOUNT_NAMES_VERIFIED_ON,
+  createLauncher,
+  REQUIRED_TOOLS,
+  unavailableKeychain,
+  type Keychain,
+} from '../environment';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit } from '../git';
 import { createGh, type Gh } from '../github';
@@ -67,6 +72,7 @@ import { createScheduler, type Scheduler } from '../scheduler';
 import type { SessionAdapter } from '../sessions';
 import { retryWorkstream, seedTeam } from '../team';
 import { createGateRunner } from '../verify';
+import { CLIENT_APP } from '../version';
 import { createWatcher, systemWatch, type WatchFn } from '../watcher';
 import { acquireInstanceLock } from './instance-lock';
 import { removeRuntimeFiles, writeRuntimeFiles } from './runtime-files';
@@ -96,7 +102,10 @@ export interface DaemonOptions {
   readonly deliveryLimits?: Partial<DeliveryLimits>;
   /** How long a provider stays paused when its usage limit gives no reset time. */
   readonly defaultPauseMs?: number;
-  readonly sessionEnv?: (project: ProjectDto) => Readonly<Record<string, string>>;
+  /** The environment sessions and gates start from: the captured login shell in production. */
+  readonly loginEnv?: Readonly<Record<string, string>>;
+  /** Where account secrets are read and written: the login Keychain in production. */
+  readonly keychain?: Keychain;
   readonly processes?: ProcessTerminator;
   readonly migrationsDir?: string;
   /** The builder's Artificial Analysis key (the Keychain in production); absent means no sync. */
@@ -208,8 +217,19 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   );
   // A malformed persona file throws and the daemon doesn't start, the same policy as a failed migration.
   seedTeam(state, readDefaultPersonas(opts.harnessDir ?? HARNESS_PLUGIN_DIR));
-  // The builder's current login is the default account, so a project made without one binds to it.
-  state.write((ctx) => seedDefaultAccount(ctx, { expectedIdentity: null }));
+  const launcher = createLauncher({
+    base: opts.loginEnv ?? { PATH: DEFAULT_SESSION_PATH },
+    clientApp: CLIENT_APP,
+    keychain: opts.keychain ?? unavailableKeychain,
+  });
+  // The builder's current login is the default account, so a project made without one binds to it: the
+  // login shell's own Claude Code directory, else Claude Code's default.
+  const seeded = state.write((ctx) =>
+    seedDefaultAccount(ctx, { expectedIdentity: null, configDir: launcher.loginConfigDir() }),
+  );
+  // A relative login directory was ignored, so the default account landed on Claude Code's default directory: say so when it is seeded.
+  const ignoredLoginDir = launcher.loginConfigDirWarning();
+  if (seeded && ignoredLoginDir) logger.warn({}, ignoredLoginDir);
   const benchmarks = createBenchmarkSync({
     state,
     clock,
@@ -241,7 +261,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       answerAccountCard?.(item, answer);
     },
   });
-  const sessionEnv = opts.sessionEnv ?? (() => ({ PATH: DEFAULT_SESSION_PATH }));
   const deliveryJobs = createDeliveryJobs(logger.child({ component: 'delivery' }));
   const delivery: DeliveryContext = {
     state,
@@ -267,7 +286,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     gate: createGateRunner(),
     clock,
     dataDir: opts.dataDir,
-    sessionEnv,
+    sessionEnv: () => launcher.projectEnv(),
     identifyProcess: (pid) => processes.identify(pid),
     isRunning: (id) => runner?.isRunning(id) ?? false,
   });
@@ -321,7 +340,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     live,
     limits,
     mcpUrl: () => mcpUrl,
-    sessionEnv,
+    launcher,
     accounts,
     onLaneFreed: () => {
       scheduler?.requestTick();

@@ -1,4 +1,4 @@
-import { existsSync, fstatSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, fstatSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   BenchmarkStatusDto,
@@ -17,7 +17,7 @@ import {
   WorkstreamId,
   type SystemCheckDto,
 } from '@10db/contracts';
-import { getWorkstream } from '@10db/db';
+import { getWorkstream, listAccounts } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { WebSocket } from 'ws';
@@ -676,5 +676,41 @@ describe('startDaemon', () => {
     await waitFor(() => (openLogHandles() === 1 ? true : undefined));
     await running.stop();
     expect(openLogHandles()).toBe(0);
+  });
+
+  it.each<{ name: string; shellDir: string; configDir: string | null; warns: boolean }>([
+    {
+      name: "seeds the default account on the login shell's own Claude Code directory",
+      shellDir: '/Users/b/.claude-work',
+      configDir: '/Users/b/.claude-work',
+      warns: false,
+    },
+    {
+      name: "seeds the default account on Claude Code's default directory, with a warning, when the login shell sets a relative one",
+      shellDir: '.claude-relative',
+      configDir: null,
+      warns: true,
+    },
+  ])('$name', async ({ shellDir, configDir, warns }) => {
+    const running = await startDaemon({
+      dataDir: dir.path,
+      port: 0,
+      adapter: new FakeAdapter({}),
+      logLevel: 'warn',
+      loginEnv: { PATH: '/usr/bin:/bin', CLAUDE_CONFIG_DIR: shellDir },
+      ...QUIET,
+    });
+    daemon = running;
+    expect(listAccounts(running.state.db)).toMatchObject([
+      { label: 'Claude plan', configDir, isDefault: true },
+    ]);
+    if (warns) {
+      // The log is written asynchronously, so wait for the warning; it names the variable, never the value.
+      const logPath = join(dir.path, 'logs', 'daemon.log');
+      await waitFor(
+        () => existsSync(logPath) && readFileSync(logPath, 'utf8').includes('CLAUDE_CONFIG_DIR'),
+      );
+      expect(readFileSync(logPath, 'utf8')).not.toContain(shellDir);
+    }
   });
 });

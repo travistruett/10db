@@ -1,5 +1,7 @@
-import type { BillingMode, Effort, Provider, SessionId, WorkstreamId } from '@10db/contracts';
+import type { AccountRefusal, Effort, Provider, SessionId, WorkstreamId } from '@10db/contracts';
+import type { AccountExpectation } from '../environment';
 import type { GuardVerdict } from '../guard';
+import type { SeenAccount } from './account-check';
 import type { ProjectMcpServer } from './project-mcp';
 
 export interface ToolRequest {
@@ -23,8 +25,8 @@ export interface SessionSpec {
   readonly effort: Effort;
   readonly resumeProviderSessionId: string | null;
   readonly env: Readonly<Record<string, string>>;
-  /** The project's billing mode; the adapter refuses a session whose credentials don't match it. */
-  readonly billingMode: BillingMode;
+  /** The account the session must prove it is, before its prompt (accounts spec §5). */
+  readonly account: AccountExpectation;
   /** The repo's approved MCP servers, already expanded; passed next to 10db's server. */
   readonly projectMcpServers: Readonly<Record<string, ProjectMcpServer>>;
   readonly allowedTools: readonly string[];
@@ -46,6 +48,8 @@ export const SessionEndReason = {
   RateLimited: 'rate_limited',
   /** The credentials or the repo's settings failed a billing check; trying again cannot change that. */
   BillingRefused: 'billing_refused',
+  /** Claude Code is not the account it should be, or its credentials failed; the account is paused. */
+  AccountRefused: 'account_refused',
 } as const;
 export type SessionEndReason = (typeof SessionEndReason)[keyof typeof SessionEndReason];
 
@@ -62,6 +66,7 @@ export type SessionEvent =
       readonly type: 'turn_complete';
       readonly inputTokens: number;
       readonly outputTokens: number;
+      readonly cachedTokens: number;
       readonly costUsd: number;
     }
   | {
@@ -74,6 +79,7 @@ export type SessionEvent =
       readonly type: 'ended';
       readonly reason: SessionEndReason;
       readonly message: string | null;
+      readonly refusal?: AccountRefusal;
     };
 
 export interface SessionHandle {
@@ -85,7 +91,19 @@ export interface SessionHandle {
   stop(): Promise<void>;
 }
 
+export interface AccountProbeSpec {
+  readonly cwd: string;
+  readonly env: Readonly<Record<string, string>>;
+}
+
+/** Claude Code reported no account in time. */
+export class AccountProbeError extends Error {
+  override readonly name = 'AccountProbeError';
+}
+
 export interface SessionAdapter {
   readonly provider: Provider;
   start(spec: SessionSpec): SessionHandle;
+  /** Starts Claude Code with no prompt only to read who it is. */
+  probeAccount(probe: AccountProbeSpec): Promise<SeenAccount>;
 }

@@ -7,7 +7,9 @@ import {
   StepRole,
   ToolAccess,
   WorkstreamState as S,
+  AccountProblem,
   type AccountId,
+  type AccountRefusal,
   type HandoffId,
   type InboxItemDto,
   type InboxItemId,
@@ -69,6 +71,7 @@ import type { AccountRuntime } from '../accounts';
 import type { Clock, Timer } from '../clock';
 import { batchCardFields } from '../delivery';
 import type { StateStore } from '../events';
+import { AccountLaunchError, type Launcher, type SessionLaunch } from '../environment';
 import type { Git } from '../git';
 import { judgeToolUse } from '../guard';
 import {
@@ -130,7 +133,8 @@ export interface RunnerOptions {
   readonly live: LiveSessions;
   readonly limits: RunnerLimits;
   mcpUrl(): string;
-  sessionEnv(project: ProjectDto): Readonly<Record<string, string>>;
+  /** Builds each session's launch, and the env the gate runs in. */
+  readonly launcher: Pick<Launcher, 'projectEnv' | 'session'>;
   /** Usage limits, refusals and the monthly cap, per account. */
   readonly accounts: Pick<AccountRuntime, 'blocked' | 'rateLimited' | 'refused' | 'sessionEnded'>;
   onLaneFreed(): void;
@@ -168,6 +172,8 @@ type Outcome =
       /** The account can take no session now: it is paused or at its monthly cap. */
       readonly kind: 'held';
       readonly until: Date | null;
+      /** Set when the account refused the session: it is paused with this reason. */
+      readonly refusal: AccountRefusal | null;
       readonly providerSessionId: string | null;
     }
   | {
@@ -259,6 +265,8 @@ interface SessionState {
    */
   waitingOn: Map<InboxItemId, number>;
   waitTimer: Timer | null;
+  /** Set by the `started` event; a session that never started has no conversation to resume. */
+  started: boolean;
   outcome: Outcome | null;
 }
 
@@ -637,10 +645,17 @@ export function createRunner(opts: RunnerOptions): Runner {
                   }
                 : {}),
             },
-            reason: 'the account is paused',
+            reason: outcome.refusal
+              ? `account refused: ${outcome.refusal.problem}`
+              : 'the account is paused',
           });
           clearLease(ctx, id);
         });
+        if (outcome.refusal) {
+          // The account the session ran on, which a move can make differ from the project's own.
+          const lane = getProject(db, getWorkstreamRow(db, id).projectId);
+          opts.accounts.refused(getAccountRow(db, ctl.accountId), lane.id, outcome.refusal);
+        }
         return;
       case 'parked':
         park(id, ctl.fence, outcome.inboxId, outcome.providerSessionId);
@@ -731,10 +746,22 @@ export function createRunner(opts: RunnerOptions): Runner {
           : null,
     });
     const { token, hash } = mintSessionToken();
-    // Built first, so a missing key or region fails before any session row exists.
-    const env = opts.sessionEnv(project);
-    // The repo's approved MCP servers, expanded from that environment. A file 10db can't parse fails here too.
-    const projectMcp = readProjectMcp(project, id, env);
+    // Built first, so a missing or changed secret refuses the session before any session row exists.
+    let launch: SessionLaunch;
+    try {
+      launch = opts.launcher.session(getAccountRow(db, ctl.accountId), row.model);
+    } catch (error) {
+      if (!(error instanceof AccountLaunchError)) throw error;
+      return {
+        kind: 'held',
+        until: null,
+        refusal: { problem: error.problem, message: error.message, seenIdentity: null },
+        providerSessionId: null,
+      };
+    }
+    // The repo's MCP servers expand from the project env: an account's credential never reaches them.
+    // A file 10db can't parse fails here too.
+    const projectMcp = readProjectMcp(project, id, opts.launcher.projectEnv());
     const mcpNote = skippedServersNote(projectMcp);
     // A resumed session continues its conversation, so it keeps whether that conversation began from
     // a briefing and the briefing's baseline. A fresh session is briefed only when its prompt carries
@@ -770,6 +797,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       parkedFor: null,
       waitingOn: new Map(),
       waitTimer: null,
+      started: false,
       outcome: null,
     };
     const log = opts.logger.child({ workstreamId: id, sessionId: session.id });
@@ -836,11 +864,11 @@ export function createRunner(opts: RunnerOptions): Runner {
       sequence: session.sequence,
       cwd: project.repoPath,
       prompt: mcpNote ? `${prompt}\n\n${mcpNote}` : prompt,
-      model: row.model,
+      model: launch.model,
       effort: row.effort,
       resumeProviderSessionId: resumeId,
-      env,
-      billingMode: project.billingMode,
+      env: launch.env,
+      account: launch.expect,
       projectMcpServers: projectMcp.servers,
       allowedTools: allowedToolsFor(project, step.tools),
       mcp: { url: opts.mcpUrl(), token, toolTimeoutMs: (project.humanWaitMinutes + 5) * 60_000 },
@@ -875,6 +903,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         switch (event.type) {
           case 'started': {
             st.providerSessionId = event.providerSessionId;
+            st.started = true;
             const pidStart = await identify(event.pid);
             opts.state.write((ctx) => {
               markSessionStarted(ctx, session.id, event.providerSessionId, event.pid, pidStart);
@@ -977,6 +1006,7 @@ export function createRunner(opts: RunnerOptions): Runner {
               updateSessionUsage(ctx, session.id, {
                 inputTokens: event.inputTokens,
                 outputTokens: event.outputTokens,
+                cachedTokens: event.cachedTokens,
                 costUsd: event.costUsd,
               });
             });
@@ -1027,6 +1057,19 @@ export function createRunner(opts: RunnerOptions): Runner {
                     providerSessionId: st.providerSessionId,
                   };
                   opts.accounts.rateLimited(ctl.accountId, null, project.id);
+                  break;
+                case SessionEndReason.AccountRefused:
+                  st.outcome = {
+                    kind: 'held',
+                    until: null,
+                    refusal: event.refusal ?? {
+                      problem: AccountProblem.WrongCredentials,
+                      message: event.message ?? 'Claude Code refused the account',
+                      seenIdentity: null,
+                    },
+                    // A session that never started has no conversation to resume; its next action stands.
+                    providerSessionId: st.started ? st.providerSessionId : null,
+                  };
                   break;
                 case SessionEndReason.BillingRefused:
                   st.outcome = {
@@ -1142,9 +1185,8 @@ export function createRunner(opts: RunnerOptions): Runner {
       command: project.gateCommand,
       logPath: join(opts.dataDir, 'logs', 'gate', `${id}-${String(run)}.log`),
       timeoutMs: opts.limits.gateTimeoutMs,
-      // The session environment is complete (login shell plus billing mode); the daemon's own
-      // process.env never reaches a project's gate.
-      env: opts.sessionEnv(project),
+      // The project env: the login shell without billing switches, and never the account's credentials.
+      env: opts.launcher.projectEnv(),
       signal: gateAbort.signal,
       onSpawn: (pid) => {
         recording = identify(pid).then((gatePidStart) => {
@@ -1272,7 +1314,12 @@ export function createRunner(opts: RunnerOptions): Runner {
         // The scheduler checked before the launch; a lane checks again before each further session (accounts spec §6).
         const block = opts.accounts.blocked(getAccountRow(db, ctl.accountId), lane.id);
         if (block) {
-          settle(id, ctl, { kind: 'held', until: block.until, providerSessionId: null });
+          settle(id, ctl, {
+            kind: 'held',
+            until: block.until,
+            refusal: null,
+            providerSessionId: null,
+          });
           return;
         }
         const outcome = await runSession(id, ctl);

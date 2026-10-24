@@ -1,6 +1,6 @@
 export { createClaudeAdapter } from './claude-adapter';
 export { FakeAdapter, FakeScriptBook, loadFakeScriptBook } from './fake-adapter';
-export { SessionEndReason } from './types';
+export { AccountProbeError, SessionEndReason } from './types';
 export type {
   SessionAdapter,
   SessionEvent,

@@ -5,7 +5,6 @@ import type {
   SDKMessage,
   SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
-import { BillingMode } from '@10db/contracts';
 import type { GuardVerdict } from '../guard';
 import type { ProjectMcpServer } from './project-mcp';
 import type { SessionEvent, ToolDecision } from './types';
@@ -97,9 +96,9 @@ export function mapSdkMessage(
     return [
       {
         type: 'turn_complete',
-        inputTokens:
-          usage.input_tokens + usage.cache_read_input_tokens + usage.cache_creation_input_tokens,
+        inputTokens: usage.input_tokens + usage.cache_creation_input_tokens,
         outputTokens: usage.output_tokens,
+        cachedTokens: usage.cache_read_input_tokens,
         costUsd: msg.total_cost_usd,
       },
     ];
@@ -150,38 +149,6 @@ export function userMessage(text: string, priority?: 'now' | 'next' | 'later'): 
     parent_tool_use_id: null,
     ...(priority ? { priority } : {}),
   };
-}
-
-/**
- * Whether the session's credentials match the billing mode its environment was built for. `apiKeySource`
- * is 'none' for both a claude.ai login and a cloud provider, so a subscription also needs `apiProvider`,
- * and a plan: `subscriptionType` must be non-empty. Its value is never compared, because plan names change.
- * `ApiKeySource` also has 'oauth' and '/login managed key'; a subscription session has shown only 'none'
- * or nothing, so the others are refused until one is seen on a real login.
- */
-export function billingMismatch(
-  expected: BillingMode,
-  seen: {
-    readonly apiKeySource: string | undefined;
-    readonly apiProvider: string | undefined;
-    readonly subscriptionType: string | undefined;
-  },
-): string | null {
-  const saw = `apiKeySource ${seen.apiKeySource ?? 'unknown'}, apiProvider ${seen.apiProvider ?? 'unknown'}, subscriptionType ${seen.subscriptionType ? 'set' : 'unknown'}`;
-  switch (expected) {
-    case BillingMode.Subscription:
-      return (seen.apiKeySource === undefined || seen.apiKeySource === 'none') &&
-        seen.apiProvider === 'firstParty' &&
-        Boolean(seen.subscriptionType)
-        ? null
-        : `expected the Claude subscription but saw ${saw}`;
-    case BillingMode.ApiKey:
-      return seen.apiKeySource === 'ANTHROPIC_API_KEY' && seen.apiProvider === 'firstParty'
-        ? null
-        : `expected an Anthropic API key but saw ${saw}`;
-    case BillingMode.Bedrock:
-      return seen.apiProvider === 'bedrock' ? null : `expected Bedrock but saw ${saw}`;
-  }
 }
 
 /**

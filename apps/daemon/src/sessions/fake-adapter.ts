@@ -3,13 +3,22 @@ import { dirname, resolve } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
-import { Provider, type SessionId } from '@10db/contracts';
+import {
+  AccountKind,
+  AccountProblem,
+  Provider,
+  type AccountRefusal,
+  type SessionId,
+} from '@10db/contracts';
 import { z } from 'zod';
+import type { AccountExpectation } from '../environment';
 import type { GuardVerdict } from '../guard';
 import { matchesAllowedTool } from '../permissions';
+import { checkAccount, credentialProblem, modelMatches, type SeenAccount } from './account-check';
 import { createChannel } from './channel';
 import {
   SessionEndReason,
+  type AccountProbeSpec,
   type SessionAdapter,
   type SessionEvent,
   type SessionHandle,
@@ -18,6 +27,52 @@ import {
 } from './types';
 
 const Json: z.ZodType = z.json();
+
+/** The email the fake reports for a subscription that expects none, and for an identity probe. */
+export const FAKE_ACCOUNT_EMAIL = 'builder@example.com';
+
+const NOTHING_SEEN: SeenAccount = {
+  email: undefined,
+  organization: undefined,
+  subscriptionType: undefined,
+  tokenSource: undefined,
+  apiKeySource: undefined,
+  apiProvider: undefined,
+};
+
+/** What a well-configured session of each kind reports: exactly what it expects. */
+function expectedSeen(expect: AccountExpectation): SeenAccount {
+  switch (expect.kind) {
+    case AccountKind.ClaudeSubscription:
+      return {
+        ...NOTHING_SEEN,
+        email: expect.identity ?? FAKE_ACCOUNT_EMAIL,
+        subscriptionType: 'Claude Max',
+        apiProvider: 'firstParty',
+        apiKeySource: 'none',
+      };
+    case AccountKind.AnthropicApiKey:
+      return {
+        ...NOTHING_SEEN,
+        apiKeySource: 'ANTHROPIC_API_KEY',
+        apiProvider: 'firstParty',
+        organization: expect.identity ?? undefined,
+      };
+    case AccountKind.Bedrock:
+      return {
+        ...NOTHING_SEEN,
+        apiProvider: 'bedrock',
+        organization: expect.identity ?? undefined,
+      };
+    case AccountKind.Gateway:
+      return {
+        ...NOTHING_SEEN,
+        apiProvider: 'firstParty',
+        apiKeySource: 'none',
+        tokenSource: 'ANTHROPIC_AUTH_TOKEN',
+      };
+  }
+}
 
 export const FakeStep = z.discriminatedUnion('do', [
   z.object({ do: z.literal('context'), percentage: z.number().min(0).max(100) }),
@@ -34,6 +89,16 @@ export const FakeStep = z.discriminatedUnion('do', [
   z.object({ do: z.literal('compact') }),
   z.object({ do: z.literal('crash'), message: z.string() }),
   z.object({ do: z.literal('billing_refused'), message: z.string() }),
+  z.object({
+    do: z.literal('auth_error'),
+    error: z.enum([
+      'authentication_failed',
+      'oauth_org_not_allowed',
+      'cloud_credential_error',
+      'billing_error',
+      'account_on_hold',
+    ]),
+  }),
   z.object({ do: z.literal('hang') }),
   z.object({ do: z.literal('end') }),
 ]);
@@ -69,13 +134,43 @@ export class FakeAdapter implements SessionAdapter {
     resume: string | null;
   }[] = [];
 
+  /** What a session reports for its account, over what it expects; tests set it to stage a mismatch. */
+  seen: (spec: SessionSpec) => Partial<SeenAccount> & { readonly model?: string } = () => ({});
+  /** What an identity probe reports. */
+  probeSeen: SeenAccount = {
+    ...NOTHING_SEEN,
+    email: FAKE_ACCOUNT_EMAIL,
+    subscriptionType: 'Claude Max',
+    apiProvider: 'firstParty',
+    apiKeySource: 'none',
+  };
+  readonly probes: AccountProbeSpec[] = [];
+
   private readonly book: FakeScriptBook;
 
   constructor(book: FakeScriptBook) {
     this.book = book;
   }
 
+  probeAccount(probe: AccountProbeSpec): Promise<SeenAccount> {
+    this.probes.push(probe);
+    return Promise.resolve(this.probeSeen);
+  }
+
   start(spec: SessionSpec): SessionHandle {
+    const { model: reportedModel, ...override } = this.seen(spec);
+    const refusal = checkAccount(spec.account, { ...expectedSeen(spec.account), ...override });
+    if (refusal) {
+      const refused = createChannel<SessionEvent>();
+      refused.push({
+        type: 'ended',
+        reason: SessionEndReason.AccountRefused,
+        message: `${refusal.message}. No prompt was sent.`,
+        refusal,
+      });
+      refused.end();
+      return { events: refused, send: () => undefined, stop: () => Promise.resolve() };
+    }
     const title = Object.keys(this.book).find((t) => spec.prompt.includes(`Task: ${t}\n`)) ?? '';
     const steps = this.book[title]?.[spec.sequence - 1];
     this.prompts.push({
@@ -97,10 +192,14 @@ export class FakeAdapter implements SessionAdapter {
       finished = r;
     });
 
-    const end = (reason: SessionEndReason, message: string | null): void => {
+    const end = (
+      reason: SessionEndReason,
+      message: string | null,
+      refusal?: AccountRefusal,
+    ): void => {
       if (ended) return;
       ended = true;
-      channel.push({ type: 'ended', reason, message });
+      channel.push({ type: 'ended', reason, message, ...(refusal ? { refusal } : {}) });
       channel.end();
       void mcp?.close();
       finished();
@@ -259,6 +358,7 @@ export class FakeAdapter implements SessionAdapter {
             type: 'turn_complete',
             inputTokens: 1000,
             outputTokens: 200,
+            cachedTokens: 0,
             costUsd: 0.01,
           });
           return 'continue';
@@ -285,6 +385,13 @@ export class FakeAdapter implements SessionAdapter {
         case 'billing_refused':
           end(SessionEndReason.BillingRefused, step.message);
           return 'halt';
+        case 'auth_error':
+          end(SessionEndReason.AccountRefused, `Claude Code reported ${step.error}`, {
+            problem: credentialProblem(step.error) ?? AccountProblem.SignedOut,
+            message: `Claude Code reported ${step.error}`,
+            seenIdentity: null,
+          });
+          return 'halt';
         case 'hang':
           await untilStopped;
           return 'halt';
@@ -300,6 +407,13 @@ export class FakeAdapter implements SessionAdapter {
         providerSessionId: spec.resumeProviderSessionId ?? `fake-${spec.sessionId}`,
         pid: null,
       });
+      if (!modelMatches(spec.model, reportedModel ?? spec.model)) {
+        end(
+          SessionEndReason.BillingRefused,
+          `Model check failed: 10db asked for ${spec.model} but Claude Code runs ${reportedModel ?? ''}.`,
+        );
+        return;
+      }
       if (!steps) {
         end('error', `No fake script for "${title}" session ${String(spec.sequence)}`);
         return;

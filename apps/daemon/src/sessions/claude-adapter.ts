@@ -11,12 +11,20 @@ import {
   type SpawnedProcess,
   type SpawnOptions,
 } from '@anthropic-ai/claude-agent-sdk';
-import { Provider } from '@10db/contracts';
+import { Provider, type AccountRefusal } from '@10db/contracts';
 import { systemClock, type Clock } from '../clock';
 import type { Logger } from '../log';
+import {
+  checkAccount,
+  checkInitCredentials,
+  credentialProblem,
+  missingAccountRefusal,
+  modelMatches,
+  seenFrom,
+  type SeenAccount,
+} from './account-check';
 import { createChannel } from './channel';
 import {
-  billingMismatch,
   contextEvent,
   mapSdkMessage,
   toHookOutput,
@@ -27,7 +35,9 @@ import {
 import { TENDB_MCP_SERVER } from './project-mcp';
 import { projectSettingsBillingProblem } from './project-settings';
 import {
+  AccountProbeError,
   SessionEndReason,
+  type AccountProbeSpec,
   type SessionAdapter,
   type SessionEvent,
   type SessionHandle,
@@ -37,6 +47,8 @@ import {
 export const CLAUDE_MCP_SERVER = TENDB_MCP_SERVER;
 /** How long Claude Code may take to report its account before the prompt is sent. */
 const BILLING_PREFLIGHT_MS = 15_000;
+/** How long an identity probe waits for `accountInfo()`. */
+const IDENTITY_PROBE_MS = 15_000;
 const STOP_GRACE_MS = 5_000;
 /** How long a halting hook answer has to reach claude before the process is closed under it. */
 const HALT_GRACE_MS = 1_000;
@@ -232,11 +244,11 @@ function startSession(
   const clock = opts.clock ?? systemClock;
   const log = opts.logger.child({ sessionId: spec.sessionId, workstreamId: spec.workstreamId });
   const fixHint =
-    "Check the project's billing mode and any env block in the repo's .claude/settings.json.";
+    "Check the project's account and any env block in the repo's .claude/settings.json.";
   const events = createChannel<SessionEvent>();
   const input = createChannel<SDKUserMessage>();
   const abortController = new AbortController();
-  const totals = { inputTokens: 0, outputTokens: 0 };
+  const totals = { inputTokens: 0, outputTokens: 0, cachedTokens: 0 };
   let account: AccountInfo | undefined;
   // The preflight gates the prompt; billingVerified (preflight plus the init check) gates every tool.
   let resolvePreflight: (ok: boolean) => void = () => undefined;
@@ -257,6 +269,8 @@ function startSession(
   let failure: string | null = null;
   /** How the session ends once `failure` is set: a billing refusal is final, anything else may be retried. */
   let failureReason: SessionEndReason = SessionEndReason.Error;
+  /** The account refusal behind `failure`, when it is the account's. */
+  let failureRefusal: AccountRefusal | null = null;
   /** The answer a failed re-check gave; every later re-check gives it again. */
   let haltOutput: HookJSONOutput | null = null;
   let markFinished: () => void = () => undefined;
@@ -273,7 +287,14 @@ function startSession(
     resolvePreflight(false);
     resolveVerified(false);
     input.end();
-    events.push({ type: 'ended', reason, message });
+    events.push({
+      type: 'ended',
+      reason,
+      message,
+      ...(failureRefusal && reason === SessionEndReason.AccountRefused
+        ? { refusal: failureRefusal }
+        : {}),
+    });
     events.end();
     markFinished();
   };
@@ -334,9 +355,10 @@ function startSession(
     }),
   });
 
-  const refuse = (reason: SessionEndReason, message: string): void => {
+  const refuse = (reason: SessionEndReason, message: string, refusal?: AccountRefusal): void => {
     failure = message;
     failureReason = reason;
+    failureRefusal = refusal ?? null;
     resolvePreflight(false);
     resolveVerified(false);
     log.error({ reason: message }, 'claude session refused');
@@ -351,18 +373,26 @@ function startSession(
   const preflight = async (): Promise<void> => {
     account = await settleWithin(clock, q.accountInfo(), BILLING_PREFLIGHT_MS);
     if (ended || failure) return;
-    const mismatch = account
-      ? billingMismatch(spec.billingMode, {
-          apiKeySource: account.apiKeySource,
-          apiProvider: account.apiProvider,
-          subscriptionType: account.subscriptionType,
-        })
-      : `Claude Code reported no account within ${String(BILLING_PREFLIGHT_MS / 1_000)} s`;
-    if (mismatch) {
-      refuse(
-        SessionEndReason.BillingRefused,
-        `Billing check failed: ${mismatch}. No prompt was sent. ${fixHint}`,
-      );
+    if (!account) {
+      const why = `Claude Code reported no account within ${String(BILLING_PREFLIGHT_MS / 1_000)} s`;
+      // A signed-out subscription may answer nothing: the account waits for its sign-in, the lane doesn't fail.
+      const signedOut = missingAccountRefusal(spec.account, why);
+      if (signedOut)
+        refuse(
+          SessionEndReason.AccountRefused,
+          `${signedOut.message}. No prompt was sent.`,
+          signedOut,
+        );
+      else
+        refuse(
+          SessionEndReason.BillingRefused,
+          `Account check failed: ${why}. No prompt was sent. ${fixHint}`,
+        );
+      return;
+    }
+    const refusal = checkAccount(spec.account, seenFrom(account));
+    if (refusal) {
+      refuse(SessionEndReason.AccountRefused, `${refusal.message}. No prompt was sent.`, refusal);
       return;
     }
     if (stopRequested) {
@@ -422,15 +452,23 @@ function startSession(
       'claude session mcp',
     );
     // init has no plan field, so the preflight's account supplies apiProvider and subscriptionType.
-    const mismatch = billingMismatch(spec.billingMode, {
-      apiKeySource: init.apiKeySource,
-      apiProvider: account?.apiProvider,
-      subscriptionType: account?.subscriptionType,
-    });
-    if (mismatch) {
+    const credentials = checkInitCredentials(
+      spec.account,
+      init.apiKeySource,
+      seenFrom(account ?? {}),
+    );
+    if (credentials) {
+      refuse(
+        SessionEndReason.AccountRefused,
+        `${credentials.message}. The session stopped at its first turn, before any tool ran.`,
+        credentials,
+      );
+      return;
+    }
+    if (!modelMatches(spec.model, init.model)) {
       refuse(
         SessionEndReason.BillingRefused,
-        `Billing check failed: ${mismatch}. The session stopped at its first turn, before any tool ran; that turn's first request may have been billed this way. ${fixHint}`,
+        `Model check failed: 10db asked for ${spec.model} but Claude Code runs ${init.model}. The session stopped at its first turn, before any tool ran; that turn's first request may have been billed.`,
       );
       return;
     }
@@ -473,6 +511,18 @@ function startSession(
     try {
       for await (const msg of q) {
         if (failure) continue;
+        if (msg.type === 'assistant') {
+          const problem = credentialProblem(msg.error);
+          if (problem) {
+            const refusal = {
+              problem,
+              message: `Claude Code reported ${String(msg.error)} for account "${spec.account.label}"`,
+              seenIdentity: null,
+            };
+            refuse(SessionEndReason.AccountRefused, `${refusal.message}.`, refusal);
+            continue;
+          }
+        }
         if (msg.type === 'system' && msg.subtype === 'init') {
           if (started) continue;
           if (!(await preflightOk)) continue;
@@ -484,8 +534,14 @@ function startSession(
           if (event.type === 'turn_complete') {
             totals.inputTokens += event.inputTokens;
             totals.outputTokens += event.outputTokens;
+            totals.cachedTokens += event.cachedTokens;
             limitRejected = false;
-            emit({ ...event, inputTokens: totals.inputTokens, outputTokens: totals.outputTokens });
+            emit({
+              ...event,
+              inputTokens: totals.inputTokens,
+              outputTokens: totals.outputTokens,
+              cachedTokens: totals.cachedTokens,
+            });
             logMcpStatus();
           } else if (event.type === 'rate_limit') {
             if (event.status === 'rejected') limitRejected = true;
@@ -538,11 +594,58 @@ function startSession(
   };
 }
 
+/** Ends the stream so the process exits; anything it throws after the abort means nothing here. */
+async function drain(q: AsyncIterable<unknown>): Promise<void> {
+  try {
+    for await (const message of q) if (message === undefined) break;
+  } catch {
+    return;
+  }
+}
+
+/** Claude Code started only to say who it is: no prompt, no project settings, no MCP servers, no tools. */
+async function probeAccount(
+  probe: AccountProbeSpec,
+  opts: ClaudeAdapterOptions,
+  runQuery: QueryFn,
+): Promise<SeenAccount> {
+  const clock = opts.clock ?? systemClock;
+  const input = createChannel<SDKUserMessage>();
+  const abortController = new AbortController();
+  const q = runQuery({
+    prompt: input,
+    options: {
+      cwd: probe.cwd,
+      env: { ...probe.env },
+      pathToClaudeCodeExecutable: opts.claudePath,
+      settingSources: [],
+      strictMcpConfig: true,
+      permissionMode: 'default',
+      canUseTool: () =>
+        Promise.resolve({ behavior: 'deny', message: 'An identity probe runs no tools.' }),
+      abortController,
+    },
+  });
+  try {
+    const info = await settleWithin(clock, q.accountInfo(), IDENTITY_PROBE_MS);
+    if (!info)
+      throw new AccountProbeError(
+        `Claude Code reported no account within ${String(IDENTITY_PROBE_MS / 1_000)} s`,
+      );
+    return seenFrom(info);
+  } finally {
+    input.end();
+    abortController.abort();
+    void drain(q);
+  }
+}
+
 /** Runs managed sessions on the builder's installed Claude Code through the Agent SDK (spec §3). */
 export function createClaudeAdapter(opts: ClaudeAdapterOptions): SessionAdapter {
   const runQuery: QueryFn = opts.query ?? ((params) => sdkQuery(params));
   return {
     provider: Provider.Claude,
     start: (spec) => startSession(spec, opts, runQuery),
+    probeAccount: (probe) => probeAccount(probe, opts, runQuery),
   };
 }

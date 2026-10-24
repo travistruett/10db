@@ -1,7 +1,5 @@
-import { BillingMode } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import {
-  billingMismatch,
   contextEvent,
   mapSdkMessage,
   resetsAtToDate,
@@ -59,7 +57,7 @@ describe('mapSdkMessage', () => {
     ]);
   });
 
-  it('maps a result to turn_complete with cache tokens counted as input', () => {
+  it('maps a result to turn_complete with cache reads apart from input', () => {
     expect(
       mapSdkMessage(
         resultMessage({
@@ -71,7 +69,15 @@ describe('mapSdkMessage', () => {
         }),
         ctx,
       ),
-    ).toEqual([{ type: 'turn_complete', inputTokens: 1_050, outputTokens: 20, costUsd: 0.0123 }]);
+    ).toEqual([
+      {
+        type: 'turn_complete',
+        inputTokens: 150,
+        outputTokens: 20,
+        cachedTokens: 900,
+        costUsd: 0.0123,
+      },
+    ]);
   });
 
   it('maps rate limit events, with the reset time', () => {
@@ -193,37 +199,6 @@ describe('permission and hook translation', () => {
     });
     expect(userMessage('nudge', 'next')).toMatchObject({ priority: 'next' });
   });
-});
-
-describe('billingMismatch', () => {
-  const MAX = 'Claude Max';
-  it.each([
-    [BillingMode.Subscription, 'none', 'firstParty', MAX, false],
-    [BillingMode.Subscription, 'none', 'bedrock', MAX, true],
-    [BillingMode.Subscription, 'ANTHROPIC_API_KEY', 'firstParty', MAX, true],
-    [BillingMode.Subscription, 'apiKeyHelper', 'firstParty', MAX, true],
-    [BillingMode.Subscription, 'none', undefined, MAX, true],
-    // accountInfo() omits apiKeySource on a claude.ai login; the provider still has to be first-party.
-    [BillingMode.Subscription, undefined, 'firstParty', MAX, false],
-    [BillingMode.Subscription, undefined, 'bedrock', MAX, true],
-    // A first-party login with no plan is not a subscription; the plan's name itself is never compared.
-    [BillingMode.Subscription, 'none', 'firstParty', undefined, true],
-    [BillingMode.Subscription, 'none', 'firstParty', '', true],
-    [BillingMode.Subscription, 'none', 'firstParty', 'Claude Pro', false],
-    [BillingMode.ApiKey, 'ANTHROPIC_API_KEY', 'firstParty', undefined, false],
-    [BillingMode.ApiKey, 'none', 'firstParty', undefined, true],
-    [BillingMode.ApiKey, 'ANTHROPIC_API_KEY', 'bedrock', undefined, true],
-    [BillingMode.ApiKey, 'ANTHROPIC_API_KEY', undefined, undefined, true],
-    [BillingMode.Bedrock, 'none', 'bedrock', undefined, false],
-    [BillingMode.Bedrock, 'none', 'firstParty', undefined, true],
-  ] as const)(
-    '%s with apiKeySource %s, apiProvider %s and subscriptionType %s → mismatch %s',
-    (mode, apiKeySource, apiProvider, subscriptionType, mismatch) => {
-      const result = billingMismatch(mode, { apiKeySource, apiProvider, subscriptionType });
-      expect(result !== null).toBe(mismatch);
-      if (result) expect(result).toContain(apiKeySource ?? 'unknown');
-    },
-  );
 });
 
 describe('toSdkMcpServer', () => {

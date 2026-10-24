@@ -1,8 +1,6 @@
-import { BillingMode } from '@10db/contracts';
 import { withoutGitRepoEnv } from '../git';
-import { AA_KEY_ACCOUNT, KEYCHAIN_SERVICE, systemKeychain } from './keychain';
 
-/** Variables that silently change who is billed. They are removed unless the billing mode needs them. */
+/** Variables that silently change who is billed. A session gets one back only through its account's launch. */
 export const BILLING_SWITCH_VARS = [
   'ANTHROPIC_API_KEY',
   'ANTHROPIC_AUTH_TOKEN',
@@ -29,9 +27,6 @@ const BILLING_SWITCH_PREFIXES = [
   'ANTHROPIC_VERTEX_',
   'ANTHROPIC_FOUNDRY_',
 ] as const;
-/** Kept in Bedrock mode only: Bedrock's own credentials and endpoint. */
-const BEDROCK_KEEPS: readonly string[] = ['AWS_BEARER_TOKEN_BEDROCK', 'ANTHROPIC_BEDROCK_BASE_URL'];
-
 /** Set inside a Claude Code session; a managed session started from one must not inherit them. */
 export const NESTED_SESSION_VARS = [
   'CLAUDECODE',
@@ -41,28 +36,6 @@ export const NESTED_SESSION_VARS = [
 ] as const;
 
 const OWN_PREFIX = 'TENDB_';
-const CLIENT_APP_VAR = 'CLAUDE_AGENT_SDK_CLIENT_APP';
-const KEYCHAIN = {
-  service: KEYCHAIN_SERVICE,
-  apiKeyAccount: 'anthropic-api-key',
-} as const;
-
-export interface SecretSource {
-  anthropicApiKey(): string | null;
-  artificialAnalysisKey(): string | null;
-}
-
-/** Reads the API key from the login Keychain when a session starts; nothing is cached. */
-export const keychainSecrets: SecretSource = {
-  anthropicApiKey: () => systemKeychain.read(KEYCHAIN.apiKeyAccount),
-  artificialAnalysisKey: () => systemKeychain.read(AA_KEY_ACCOUNT),
-};
-
-/** The session environment can't be built for this billing mode. The message says what to fix. */
-export class SessionEnvError extends Error {
-  override readonly name = 'SessionEnvError';
-}
-
 const SWITCHES: readonly string[] = BILLING_SWITCH_VARS;
 const NESTED: readonly string[] = NESTED_SESSION_VARS;
 
@@ -81,56 +54,4 @@ export function stripBillingSwitches(
       ([name]) => !name.startsWith(OWN_PREFIX) && !NESTED.includes(name) && !isBillingSwitch(name),
     ),
   );
-}
-
-/**
- * One session's environment: the captured login environment, minus anything that would change
- * billing or confuse a nested Claude Code, plus what the project's billing mode requires.
- * It only prevents accidental switches; every supported auth method still works when chosen.
- */
-export function buildSessionEnv(input: {
-  readonly base: Readonly<Record<string, string>>;
-  readonly billingMode: BillingMode;
-  readonly clientApp: string;
-  readonly secrets: SecretSource;
-}): Record<string, string> {
-  const keep = (name: string): boolean => {
-    if (name.startsWith(OWN_PREFIX) || NESTED.includes(name)) return false;
-    if (!isBillingSwitch(name)) return true;
-    return input.billingMode === BillingMode.Bedrock && BEDROCK_KEEPS.includes(name);
-  };
-  // A daemon started from a git hook captures GIT_DIR and friends; a session or gate given them
-  // would run git against that repository instead of the project's.
-  const env: Record<string, string> = Object.fromEntries(
-    Object.entries(withoutGitRepoEnv(input.base)).filter(([name]) => keep(name)),
-  );
-  env[CLIENT_APP_VAR] = input.clientApp;
-
-  switch (input.billingMode) {
-    case BillingMode.Subscription:
-      break;
-    case BillingMode.ApiKey: {
-      const key = input.secrets.anthropicApiKey();
-      if (!key) {
-        throw new SessionEnvError(
-          `No Anthropic API key in the Keychain. Add it with: security add-generic-password -s ${KEYCHAIN.service} -a ${KEYCHAIN.apiKeyAccount} -w`,
-        );
-      }
-      env['ANTHROPIC_API_KEY'] = key;
-      break;
-    }
-    case BillingMode.Bedrock:
-      if (!env['AWS_REGION'] && !env['AWS_DEFAULT_REGION'])
-        throw new SessionEnvError('Bedrock billing needs AWS_REGION in your login shell');
-      env['CLAUDE_CODE_USE_BEDROCK'] = '1';
-      break;
-  }
-  return env;
-}
-
-/** The billing mode an environment built by `buildSessionEnv` selects. */
-export function inferBillingMode(env: Readonly<Record<string, string>>): BillingMode {
-  if (env['CLAUDE_CODE_USE_BEDROCK']) return BillingMode.Bedrock;
-  if (env['ANTHROPIC_API_KEY']) return BillingMode.ApiKey;
-  return BillingMode.Subscription;
 }

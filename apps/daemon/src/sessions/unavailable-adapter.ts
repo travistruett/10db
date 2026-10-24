@@ -1,11 +1,12 @@
 import { Provider } from '@10db/contracts';
 import { createChannel } from './channel';
-import type { SessionAdapter, SessionEvent } from './types';
+import { AccountProbeError, type SessionAdapter, type SessionEvent } from './types';
 
 /** Ends every session at once with a clear message; used until a real adapter is configured. */
 export function createUnavailableAdapter(message: string): SessionAdapter {
   return {
     provider: Provider.Claude,
+    probeAccount: () => Promise.reject(new AccountProbeError(message)),
     start() {
       const channel = createChannel<SessionEvent>();
       channel.push({ type: 'ended', reason: 'error', message });

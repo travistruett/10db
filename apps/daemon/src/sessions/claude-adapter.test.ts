@@ -32,6 +32,7 @@ import {
   textBlock,
   toolUseBlock,
 } from './claude-test-support';
+import { AccountProbeError } from './index';
 import type { SessionEvent, SessionSpec } from './types';
 
 function spec(overrides: Partial<SessionSpec> = {}): SessionSpec {
@@ -45,7 +46,12 @@ function spec(overrides: Partial<SessionSpec> = {}): SessionSpec {
     effort: 'medium',
     resumeProviderSessionId: null,
     env: { PATH: '/usr/bin:/bin', CLAUDE_AGENT_SDK_CLIENT_APP: '10db/0.1.0' },
-    billingMode: 'subscription',
+    account: {
+      accountId: mintId('Account'),
+      label: 'Claude plan',
+      kind: 'claude_subscription',
+      identity: 'builder@example.com',
+    },
     projectMcpServers: {},
     allowedTools: ['Read', 'mcp__10db__*'],
     mcp: { url: 'http://127.0.0.1:4317/mcp', token: 'session-token', toolTimeoutMs: 900_000 },
@@ -138,7 +144,11 @@ function fakeQuery(script: Script): { query: QueryFn; record: Record_ } {
       accountInfo: () => {
         record.order.push('accountInfo');
         return Promise.resolve(
-          script.account ?? { apiProvider: 'firstParty', subscriptionType: 'Claude Max' },
+          script.account ?? {
+            apiProvider: 'firstParty',
+            subscriptionType: 'Claude Max',
+            email: 'builder@example.com',
+          },
         );
       },
       setMcpServers: (servers: Record<string, McpServerConfig>) => {
@@ -422,6 +432,7 @@ describe('createClaudeAdapter', () => {
       type: 'turn_complete',
       inputTokens: 100,
       outputTokens: 10,
+      cachedTokens: 0,
       costUsd: 0.01,
     });
     expect(events.filter((e) => e.type === 'ended')).toEqual([
@@ -541,8 +552,14 @@ describe('createClaudeAdapter', () => {
       (e) => e.type === 'turn_complete',
     );
     expect(turns).toEqual([
-      { type: 'turn_complete', inputTokens: 100, outputTokens: 10, costUsd: 0.01 },
-      { type: 'turn_complete', inputTokens: 150, outputTokens: 15, costUsd: 0.015 },
+      { type: 'turn_complete', inputTokens: 100, outputTokens: 10, cachedTokens: 0, costUsd: 0.01 },
+      {
+        type: 'turn_complete',
+        inputTokens: 150,
+        outputTokens: 15,
+        cachedTokens: 0,
+        costUsd: 0.015,
+      },
     ]);
   });
 
@@ -550,14 +567,20 @@ describe('createClaudeAdapter', () => {
     const { adapter, record } = adapterFor({
       messages: [initMessage('none'), assistantMessage([textBlock('working')])],
       then: 'hang',
-      account: { apiProvider: 'bedrock' },
+      account: {
+        apiProvider: 'bedrock',
+        subscriptionType: 'Claude Max',
+        email: 'builder@example.com',
+      },
     });
     const events = await collect(adapter.start(spec()).events);
     expect(events.map((e) => e.type)).toEqual(['ended']);
-    expect(events[0]).toMatchObject({ type: 'ended', reason: 'billing_refused' });
-    expect(endMessage(events[0])).toMatch(
-      /^Billing check failed: expected the Claude subscription.*No prompt was sent/,
-    );
+    expect(events[0]).toMatchObject({
+      type: 'ended',
+      reason: 'account_refused',
+      refusal: { problem: 'wrong_credentials' },
+    });
+    expect(endMessage(events[0])).toMatch(/needs a Claude subscription.*No prompt was sent/);
     expect(record.inputs).toEqual([]);
     expect(record.interrupts).toBe(1);
   });
@@ -591,8 +614,8 @@ describe('createClaudeAdapter', () => {
     expect(await decision).toMatchObject({ behavior: 'deny', interrupt: true });
     expect(canUseTool).not.toHaveBeenCalled();
     const last = (await done).at(-1);
-    expect(last).toMatchObject({ type: 'ended', reason: 'billing_refused' });
-    expect(endMessage(last)).toContain('Billing check failed');
+    expect(last).toMatchObject({ type: 'ended', reason: 'account_refused' });
+    expect(endMessage(last)).toContain('No prompt was sent');
     expect(record.inputs).toEqual([]);
   });
 
@@ -608,7 +631,7 @@ describe('createClaudeAdapter', () => {
     });
     const events = await collect(adapter.start(spec({ canUseTool, preToolUse })).events);
     expect(events.map((e) => e.type)).toEqual(['ended']);
-    expect(events[0]).toMatchObject({ type: 'ended', reason: 'billing_refused' });
+    expect(events[0]).toMatchObject({ type: 'ended', reason: 'account_refused' });
     expect(endMessage(events[0])).toContain('apiKeySource ANTHROPIC_API_KEY');
     // The preflight passed, so only the init check stands between the session and its tools.
     expect(await callTool(record, 'Write')).toMatchObject({ behavior: 'deny', interrupt: true });
@@ -642,41 +665,71 @@ describe('createClaudeAdapter', () => {
     expect(canUseTool).not.toHaveBeenCalled();
   });
 
-  it('refuses to start, without sending a prompt, when the billing preflight times out', async () => {
-    const clock = new ManualClock();
-    const { adapter, record } = adapterFor(
+  describe('a preflight that gets no account', () => {
+    const noAnswer = {
+      'never answers': () => new Promise<AccountInfo>(() => undefined),
+      rejects: () => Promise.reject(new Error('control channel closed')),
+    } as const;
+    it.each<{
+      how: keyof typeof noAnswer;
+      kind: 'claude_subscription' | 'anthropic_api_key';
+      reason: string;
+      message: RegExp;
+    }>([
       {
-        messages: [initMessage()],
-        then: 'hang',
-        account: new Promise<AccountInfo>(() => undefined),
+        how: 'never answers',
+        kind: 'claude_subscription',
+        reason: 'account_refused',
+        message:
+          /^Claude Code reported no account within 15 s for account "Claude plan".*No prompt was sent/,
       },
-      1_000,
-      clock,
+      {
+        how: 'rejects',
+        kind: 'claude_subscription',
+        reason: 'account_refused',
+        message: /^Claude Code reported no account.*No prompt was sent/,
+      },
+      {
+        how: 'never answers',
+        kind: 'anthropic_api_key',
+        reason: 'billing_refused',
+        message:
+          /^Account check failed: Claude Code reported no account within 15 s.*No prompt was sent/,
+      },
+      {
+        how: 'rejects',
+        kind: 'anthropic_api_key',
+        reason: 'billing_refused',
+        message: /^Account check failed: Claude Code reported no account.*No prompt was sent/,
+      },
+    ])(
+      '$kind: accountInfo() $how, so no prompt is sent',
+      async ({ how, kind, reason, message }) => {
+        const clock = new ManualClock();
+        const { adapter, record } = adapterFor(
+          { messages: [initMessage()], then: 'hang', account: noAnswer[how]() },
+          1_000,
+          clock,
+        );
+        const account = {
+          accountId: mintId('Account'),
+          label: 'Claude plan',
+          kind,
+          identity: kind === 'claude_subscription' ? 'builder@example.com' : null,
+        };
+        const done = collect(adapter.start(spec({ account })).events);
+        clock.advance(BILLING_PREFLIGHT_MS);
+        const events = await done;
+        expect(events.map((e) => e.type)).toEqual(['ended']);
+        expect(events[0]).toMatchObject({ type: 'ended', reason });
+        if (reason === 'account_refused')
+          expect(events[0]).toMatchObject({
+            refusal: { problem: 'signed_out', seenIdentity: null },
+          });
+        expect(endMessage(events[0])).toMatch(message);
+        expect(record.inputs).toEqual([]);
+      },
     );
-    const done = collect(adapter.start(spec()).events);
-    clock.advance(BILLING_PREFLIGHT_MS);
-    const events = await done;
-    expect(events.map((e) => e.type)).toEqual(['ended']);
-    expect(events[0]).toMatchObject({ type: 'ended', reason: 'billing_refused' });
-    expect(endMessage(events[0])).toMatch(
-      /^Billing check failed: Claude Code reported no account within 15 s.*No prompt was sent/,
-    );
-    expect(record.inputs).toEqual([]);
-  });
-
-  it('refuses to start, without sending a prompt, when accountInfo() rejects', async () => {
-    const { adapter, record } = adapterFor({
-      messages: [initMessage()],
-      then: 'hang',
-      account: Promise.reject(new Error('control channel closed')),
-    });
-    const events = await collect(adapter.start(spec()).events);
-    expect(events.map((e) => e.type)).toEqual(['ended']);
-    expect(events[0]).toMatchObject({ type: 'ended', reason: 'billing_refused' });
-    expect(endMessage(events[0])).toMatch(
-      /^Billing check failed: Claude Code reported no account.*No prompt was sent/,
-    );
-    expect(record.inputs).toEqual([]);
   });
 
   it("registers 10db's and the repo's servers after the preflight and before the prompt", async () => {
@@ -1067,7 +1120,12 @@ describe('createClaudeAdapter', () => {
     const events = await collect(
       adapter.start(
         spec({
-          billingMode: 'bedrock',
+          account: {
+            accountId: mintId('Account'),
+            label: 'Claude plan',
+            kind: 'bedrock',
+            identity: null,
+          },
           env: { PATH: '/bin', CLAUDE_CODE_USE_BEDROCK: '1', AWS_REGION: 'us-west-2' },
         }),
       ).events,
@@ -1186,5 +1244,173 @@ describe('createClaudeAdapter', () => {
     await handle.stop();
     expect(record.inputs).toHaveLength(1);
     expect(record.interrupts).toBe(0);
+  });
+});
+
+describe('the account check', () => {
+  it('refuses before the prompt when Claude Code reports another email', async () => {
+    const { adapter, record } = adapterFor({
+      messages: [initMessage(), resultMessage({ input: 1, output: 1, costUsd: 0 })],
+      then: 'hang',
+      account: {
+        apiProvider: 'firstParty',
+        subscriptionType: 'Claude Max',
+        email: 'other@example.com',
+      },
+    });
+    const events = await collect(adapter.start(spec()).events);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      type: 'ended',
+      reason: 'account_refused',
+      refusal: { problem: 'identity_mismatch', seenIdentity: 'other@example.com' },
+    });
+    expect(endMessage(events[0])).not.toContain('@');
+    expect(record.inputs).toEqual([]);
+  });
+
+  it('refuses a gateway session that bills a saved login instead of its token', async () => {
+    const { adapter, record } = adapterFor({
+      messages: [initMessage()],
+      then: 'hang',
+      account: {
+        apiProvider: 'firstParty',
+        subscriptionType: 'Claude Max',
+        email: 'builder@example.com',
+      },
+    });
+    const events = await collect(
+      adapter.start(
+        spec({
+          account: {
+            accountId: mintId('Account'),
+            label: 'OpenRouter',
+            kind: 'gateway',
+            identity: null,
+          },
+        }),
+      ).events,
+    );
+    expect(events.at(-1)).toMatchObject({
+      reason: 'account_refused',
+      refusal: { problem: 'wrong_credentials' },
+    });
+    expect(record.inputs).toEqual([]);
+  });
+
+  it('stops at the first init when the model is not the one asked for', async () => {
+    const { adapter } = adapterFor({
+      messages: [
+        initMessage('none', undefined, 'claude-sonnet-5-5'),
+        assistantMessage([textBlock('working')]),
+      ],
+      then: 'hang',
+    });
+    const events = await collect(adapter.start(spec({ model: 'opus' })).events);
+    expect(events.map((e) => e.type)).toEqual(['ended']);
+    expect(events[0]).toMatchObject({ reason: 'billing_refused' });
+    expect(endMessage(events[0])).toMatch(/asked for opus but Claude Code runs claude-sonnet-5-5/);
+  });
+
+  it('accepts a mapped model only when init reports it exactly', async () => {
+    const mapped = '~anthropic/claude-haiku-latest';
+    const ok = adapterFor({
+      messages: [
+        initMessage('none', undefined, mapped),
+        resultMessage({ input: 1, output: 1, costUsd: 0 }),
+      ],
+    });
+    const fine = await collect(ok.adapter.start(spec({ model: mapped })).events);
+    expect(fine.map((e) => e.type)).toEqual(['started', 'turn_complete', 'ended']);
+  });
+
+  it('ends a session that reports authentication_failed as signed out, before any tool runs', async () => {
+    const { adapter } = adapterFor({
+      messages: [initMessage(), assistantMessage([textBlock('')], 'authentication_failed')],
+      then: 'hang',
+    });
+    const events = await collect(adapter.start(spec()).events);
+    expect(events.at(-1)).toMatchObject({
+      type: 'ended',
+      reason: 'account_refused',
+      refusal: { problem: 'signed_out', seenIdentity: null },
+    });
+  });
+
+  it('reports cache reads apart from input, and cache writes as input', async () => {
+    const { adapter } = adapterFor({
+      messages: [
+        initMessage(),
+        resultMessage({ input: 100, output: 10, cacheRead: 400, cacheCreation: 50, costUsd: 0.01 }),
+      ],
+    });
+    const turns = (await collect(adapter.start(spec()).events)).filter(
+      (e) => e.type === 'turn_complete',
+    );
+    expect(turns).toEqual([
+      {
+        type: 'turn_complete',
+        inputTokens: 150,
+        outputTokens: 10,
+        cachedTokens: 400,
+        costUsd: 0.01,
+      },
+    ]);
+  });
+});
+
+describe('probeAccount', () => {
+  it('reads the account without a prompt, without project settings or MCP servers, and ends the process', async () => {
+    const fake = fakeQuery({
+      messages: [],
+      then: 'hang',
+      account: {
+        apiProvider: 'firstParty',
+        subscriptionType: 'Claude Max',
+        email: 'b@example.com',
+      },
+    });
+    const adapter = createClaudeAdapter({
+      claudePath: '/usr/local/bin/claude',
+      pluginDir: '/harness',
+      logger: silentLogger,
+      query: fake.query,
+    });
+    const seen = await adapter.probeAccount({
+      cwd: '/data',
+      env: { PATH: '/bin', CLAUDE_CONFIG_DIR: '/data/accounts/a/claude' },
+    });
+    expect(seen).toMatchObject({
+      email: 'b@example.com',
+      apiProvider: 'firstParty',
+      subscriptionType: 'Claude Max',
+    });
+    expect(fake.record.inputs).toEqual([]);
+    expect(fake.record.mcpCalls).toEqual([]);
+    expect(fake.record.options).toMatchObject({
+      cwd: '/data',
+      settingSources: [],
+      strictMcpConfig: true,
+    });
+    expect(fake.record.options?.abortController?.signal.aborted).toBe(true);
+  });
+
+  it('fails with AccountProbeError when Claude Code reports no account in time', async () => {
+    const clock = new ManualClock();
+    const fake = fakeQuery({
+      messages: [],
+      then: 'hang',
+      account: new Promise<never>(() => undefined),
+    });
+    const adapter = createClaudeAdapter({
+      claudePath: '/c',
+      pluginDir: '/h',
+      logger: silentLogger,
+      query: fake.query,
+      clock,
+    });
+    const probe = adapter.probeAccount({ cwd: '/data', env: {} });
+    clock.advance(15_000);
+    await expect(probe).rejects.toThrow(AccountProbeError);
   });
 });
