@@ -20,6 +20,7 @@ import {
   clearLease,
   getBatch,
   getProject,
+  getTask,
   listBatches,
   listWorkstreams,
   patchBatch,
@@ -34,6 +35,7 @@ import type { GateResult, GateRunner } from '../verify';
 import { shipCards, wrongBranchCard, type ShipFailure } from './cards';
 import { ghCall, pushCall, raise, type DeliveryContext, type DeliveryLimits } from './context';
 import { prBody, prTitle } from './pr-text';
+import { readPrTemplate } from './pr-template';
 
 export interface ShipperDeps extends DeliveryContext {
   readonly gate: GateRunner;
@@ -150,12 +152,27 @@ export function createShipper(deps: ShipperDeps): Shipper {
     target: { readonly repo: string; readonly branch: string },
     signal: AbortSignal,
   ): Promise<string> {
-    const rows = members(db, batch.id).map((w) => ({ title: w.taskTitle, state: w.state }));
+    const tasks = members(db, batch.id).map((w) => {
+      const task = getTask(db, w.taskId);
+      return {
+        title: w.taskTitle,
+        description: task.description,
+        acceptanceCriteria: task.acceptanceCriteria,
+        state: w.state,
+      };
+    });
+    const sha = await deps.git.head(project.repoPath);
     const file = join(deps.dataDir, 'delivery', `${batch.id}-pr-body.md`);
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(
       file,
-      prBody({ batch, rows, gate: { command: project.gateCommand, exitCode: 0 } }),
+      prBody({
+        batch,
+        tasks,
+        gate: { command: project.gateCommand },
+        ci: { repo: target.repo, sha },
+        template: readPrTemplate(project.repoPath),
+      }),
     );
     return deps.gh.prCreate(
       {

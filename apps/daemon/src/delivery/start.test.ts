@@ -40,8 +40,21 @@ describe('batchBranchName', () => {
     { title: '  --Leading dashes', slug: 'leading-dashes' },
     { title: '$(rm -rf /)', slug: 'rm-rf' },
     { title: '***', slug: 'batch' },
-    { title: `${'a'.repeat(30)} ${'b'.repeat(30)}`, slug: `${'a'.repeat(30)}-${'b'.repeat(9)}` },
+    // A cut lands on the last whole word that fits the cap, never inside a word.
+    {
+      title: 'Reword spec claim release to match decisions',
+      slug: 'reword-spec-claim-release-to-match',
+    },
+    { title: `${'a'.repeat(30)} ${'b'.repeat(30)}`, slug: 'a'.repeat(30) },
+    {
+      title: `${'a'.repeat(30)} ${'b'.repeat(9)} ${'c'.repeat(5)}`,
+      slug: `${'a'.repeat(30)}-${'b'.repeat(9)}`,
+    },
     { title: `${'x'.repeat(39)} yz`, slug: 'x'.repeat(39) },
+    { title: `${'x'.repeat(40)} yz`, slug: 'x'.repeat(40) },
+    // A first word longer than the cap has no boundary to end on, so it is cut to the cap.
+    { title: 'x'.repeat(50), slug: 'x'.repeat(40) },
+    { title: `${'x'.repeat(45)} yz`, slug: 'x'.repeat(40) },
   ])('names "$title" 10db/$slug-<id>', ({ title, slug }) => {
     const id = mintId('Batch');
     const name = batchBranchName(title, id);
