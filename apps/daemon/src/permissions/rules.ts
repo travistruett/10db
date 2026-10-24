@@ -140,16 +140,18 @@ export function matchesAllowedTool(
 }
 
 /** Package tools that run the package or file they name, so "always allow" keeps the whole command. */
-const NAMED_PROGRAM_RUNNERS: ReadonlySet<string> = new Set(['npx', 'bun']);
+const NAMED_PROGRAM_RUNNERS: ReadonlySet<string> = new Set(['npx', 'bunx', 'pnpx', 'bun']);
+/** Package managers whose `dlx`, `exec` or `x` subcommand runs the program it is given: `pnpm dlx bash`. */
+const PACKAGE_MANAGERS: ReadonlySet<string> = new Set(['npm', 'pnpm', 'yarn']);
+const PROGRAM_SUBCOMMANDS: ReadonlySet<string> = new Set(['dlx', 'exec', 'x']);
 const SUBCOMMAND = /^[A-Za-z][A-Za-z0-9_-]*$/;
 
+/** Compared without case: a case-insensitive file system runs `PNPM` as `pnpm`, so it gets the whole command. */
 function runsOtherCommands(words: readonly string[]): boolean {
-  const [first = '', second] = words;
-  if (isCommandRunner(first) || NAMED_PROGRAM_RUNNERS.has(first.toLowerCase())) return true;
-  return (
-    (first === 'pnpm' && (second === 'dlx' || second === 'exec')) ||
-    (first === 'npm' && second === 'exec')
-  );
+  const [first = '', second = ''] = words;
+  const name = first.toLowerCase();
+  if (isCommandRunner(name) || NAMED_PROGRAM_RUNNERS.has(name)) return true;
+  return PACKAGE_MANAGERS.has(name) && PROGRAM_SUBCOMMANDS.has(second.toLowerCase());
 }
 
 /**
