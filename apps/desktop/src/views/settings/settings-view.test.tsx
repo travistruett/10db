@@ -108,6 +108,53 @@ describe('SettingsView', () => {
     expect(await screen.findByText('Saved.')).toBeTruthy();
   });
 
+  it('saves the extra allowed commands, one per line', async () => {
+    const project = projectDto({ name: 'demo', gateCommand: 'make gate' });
+    const patched: unknown[] = [];
+    server.use(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
+      http.patch(daemonUrl('/projects/:projectId'), async ({ request }) => {
+        patched.push(await request.json());
+        return HttpResponse.json({
+          ...project,
+          allowedCommands: ['pnpm exec prettier', 'pnpm test'],
+        });
+      }),
+      ...baseHandlers(),
+    );
+    renderApp('/settings/general');
+    fireEvent.change(await screen.findByLabelText('Extra allowed commands'), {
+      target: { value: 'pnpm exec prettier\npnpm test' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => {
+      expect(patched).toEqual([{ allowedCommands: ['pnpm exec prettier', 'pnpm test'] }]);
+    });
+    expect(await screen.findByText('Saved.')).toBeTruthy();
+  });
+
+  it('shows the bad line of the extra allowed commands without calling the daemon', async () => {
+    const project = projectDto({ name: 'demo', gateCommand: 'make gate' });
+    const patched: unknown[] = [];
+    server.use(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
+      http.patch(daemonUrl('/projects/:projectId'), async ({ request }) => {
+        patched.push(await request.json());
+        return HttpResponse.json(project);
+      }),
+      ...baseHandlers(),
+    );
+    renderApp('/settings/general');
+    fireEvent.change(await screen.findByLabelText('Extra allowed commands'), {
+      target: { value: 'pnpm test\npnpm --run' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(await screen.findByText(/^Line 2: /)).toBeTruthy();
+    expect(patched).toEqual([]);
+  });
+
   it('blocks a nudge at the handoff without calling the daemon', async () => {
     // One fixed project: a handler that mints a new ID per fetch would remount the form.
     const project = projectDto();

@@ -13,7 +13,7 @@
 - [x] M2: reviewer approval in flows with a review step before DONE (spec §5.4). (M2a: review, plan-review and QA steps give verdicts through `complete_step`.)
 - [ ] M2: per-workstream log files for the Factory detail view (spec §12; M1a has one shared daemon log, decision 31).
 - [ ] M2: diagnostics bundle export (spec §12; not built in M1a).
-- [ ] M2: project settings for extra allowed commands (test and lint), beyond the gate command.
+- [x] M2: project settings for extra allowed commands (test and lint), beyond the gate command. A project lists command prefixes in Settings > General; an edit step runs each without a permission card, and the guard still judges every command.
 - [x] Spec §8.1: reword "claims are released when the lease expires" to match decision 36 (released on DONE, CANCELLED or FAILED, never by lease expiry).
 - [ ] M2: let a resumed agent retrying `ask_human` with the same `opId` get the parked answer back, instead of only the "do not ask again" message.
 - [ ] M2: inject the environment into `createGit(env)` instead of reading `process.env` in `git.ts` (M1b already calls `createGit()` with no arguments).

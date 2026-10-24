@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { AllowedCommands } from './allowed-commands';
 import { BranchName, PrTitlePrefix } from './git-names';
 import {
   AccountId,
@@ -114,6 +115,8 @@ export const ProjectInput = z
     prTitlePrefix: PrTitlePrefix.nullable().default(null),
     /** The account that pays; absent means the default account. */
     accountId: AccountId.optional(),
+    /** Command prefixes a lane runs without a permission card, beyond the gate command. */
+    allowedCommands: AllowedCommands.default([]),
   })
   .refine((p) => p.nudgePct > p.handoffPct, {
     message: 'nudgePct must be above handoffPct',
@@ -147,6 +150,7 @@ export const ProjectDto = z.object({
   delivery: z.enum(Delivery),
   baseBranch: z.string(),
   prTitlePrefix: z.string().nullable(),
+  allowedCommands: z.array(z.string()),
   createdAt: Timestamp,
   updatedAt: Timestamp,
 });
@@ -169,6 +173,7 @@ export const ProjectPatch = z
     prTitlePrefix: PrTitlePrefix.nullable(),
     /** Moves the project to another account; work in flight follows at each lane's next session. */
     accountId: AccountId,
+    allowedCommands: AllowedCommands,
   })
   .partial()
   .refine((p) => Object.keys(p).length > 0, { message: 'Change at least one field' });

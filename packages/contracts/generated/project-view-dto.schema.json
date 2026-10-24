@@ -155,6 +155,12 @@
         "null"
       ]
     },
+    "allowedCommands": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
     "createdAt": {
       "type": "string",
       "format": "date-time",
@@ -313,6 +319,7 @@
     "delivery",
     "baseBranch",
     "prTitlePrefix",
+    "allowedCommands",
     "createdAt",
     "updatedAt"
   ]
