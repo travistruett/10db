@@ -567,11 +567,7 @@ describe('createClaudeAdapter', () => {
     const { adapter, record } = adapterFor({
       messages: [initMessage('none'), assistantMessage([textBlock('working')])],
       then: 'hang',
-      account: {
-        apiProvider: 'bedrock',
-        subscriptionType: 'Claude Max',
-        email: 'builder@example.com',
-      },
+      account: { apiProvider: 'bedrock' },
     });
     const events = await collect(adapter.start(spec()).events);
     expect(events.map((e) => e.type)).toEqual(['ended']);

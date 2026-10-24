@@ -81,8 +81,13 @@ const same = (a: string, b: string): boolean => a.trim().toLowerCase() === b.tri
 /** Before the prompt (accounts spec §5): who Claude Code is, and the credential it bills. */
 export function checkAccount(expect: AccountExpectation, seen: SeenAccount): AccountRefusal | null {
   const who = `account "${expect.label}"`;
+  // A third-party provider or a gateway token reports no email or plan either, and signing in cannot fix
+  // that: only a first-party report with nothing in it is a signed-out directory.
+  const firstParty = seen.apiProvider === undefined || seen.apiProvider === 'firstParty';
   if (
     expect.kind === AccountKind.ClaudeSubscription &&
+    firstParty &&
+    seen.tokenSource !== 'ANTHROPIC_AUTH_TOKEN' &&
     !seen.email &&
     !seen.subscriptionType &&
     noKey(seen.apiKeySource)

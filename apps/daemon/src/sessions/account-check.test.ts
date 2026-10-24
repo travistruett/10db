@@ -88,7 +88,19 @@ describe('checkAccount', () => {
     {
       name: 'Bedrock where the subscription should be',
       expected: expect_('claude_subscription', 'a@example.com'),
+      seen: { apiProvider: 'bedrock' },
+      problem: 'wrong_credentials',
+    },
+    {
+      name: 'Bedrock with a plan and an email where the subscription should be',
+      expected: expect_('claude_subscription', 'a@example.com'),
       seen: { ...SUB, apiProvider: 'bedrock' },
+      problem: 'wrong_credentials',
+    },
+    {
+      name: 'a gateway token alone where the subscription should be',
+      expected: expect_('claude_subscription', 'a@example.com'),
+      seen: { tokenSource: 'ANTHROPIC_AUTH_TOKEN' },
       problem: 'wrong_credentials',
     },
     {

@@ -1,6 +1,6 @@
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { AccountCardChoice, MCP_APPROVAL_DETAIL } from '@10db/contracts';
+import { ACCOUNT_CARD_DETAIL, AccountCardChoice, MCP_APPROVAL_DETAIL } from '@10db/contracts';
 import {
   acquireLease,
   activeClaims,
@@ -1397,6 +1397,36 @@ describe('accounts', () => {
     await engine.runner.idle();
     expect(ws(workstream.id)).toMatchObject({ state: 'FAILED' });
     expect(ws(workstream.id).failureReason).toMatch(/Model check failed/);
+    // A model mismatch is the work's, not the account's: the account isn't paused and no account card opens.
+    expect(engine.accounts.isPaused(engine.project.accountId)).toBe(false);
+    expect(
+      listInbox(engine.store.db, { states: ['OPEN'] }).filter(
+        (i) => i.detail?.[ACCOUNT_CARD_DETAIL] !== undefined,
+      ),
+    ).toEqual([]);
+  });
+
+  it('keeps a parked answer for the next session when the account is refused before it starts', async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        [askShip, turn],
+        [write('src/api/a.txt'), commit('op-ans-0001', ['src/api/a.txt']), turn],
+      ],
+    });
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    const card = await waitFor(openCard);
+    engine.clock.advance(10 * 60_000);
+    await engine.runner.idle();
+    engine.inbox.answer(card.id, { choice: 'Yes' });
+    // The answer session resumes a conversation, so it has a provider session id from the start.
+    engine.adapter.seen = () => ({ email: 'someone-else@example.com' });
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id)).toMatchObject({
+      state: 'PAUSED_LIMIT',
+      nextAction: { kind: 'answer', inboxId: card.id },
+    });
   });
 
   it("gives the gate the project env, never the account's key", async () => {
