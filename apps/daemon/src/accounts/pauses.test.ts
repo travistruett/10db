@@ -161,4 +161,32 @@ describe('account pauses', () => {
     expect(getWorkstream(state.db, work.id).state).toBe('QUEUED');
     expect(resumed).toBe(1);
   });
+
+  it('keeps the held pause text when a shorter pause folds into its card', () => {
+    const work = pausedWork();
+    const accountId = getProject(state.db, work.projectId).accountId;
+    const p = pauses();
+    const at = (body: string) => ({
+      projectId: work.projectId,
+      card: { ...card(accountId, 'usage_limit'), body },
+    });
+    p.pause(
+      accountId,
+      { reason: AccountPauseReason.UsageLimit, until: inMinutes(120) },
+      at('until 15:00'),
+    );
+    p.pause(
+      accountId,
+      { reason: AccountPauseReason.UsageLimit, until: inMinutes(30) },
+      at('until 13:30'),
+    );
+    expect(p.pausedFor(accountId)?.until).toEqual(inMinutes(120));
+    expect(listInbox(state.db, { states: ['OPEN'] }).map((i) => i.body)).toEqual(['until 15:00']);
+    p.pause(
+      accountId,
+      { reason: AccountPauseReason.UsageLimit, until: inMinutes(180) },
+      at('until 16:00'),
+    );
+    expect(listInbox(state.db, { states: ['OPEN'] }).map((i) => i.body)).toEqual(['until 16:00']);
+  });
 });

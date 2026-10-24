@@ -130,7 +130,8 @@ export function createAccountPauses(opts: {
   return {
     pause(id, pause, at) {
       const held = current(id);
-      if (!held || outlasts(pause, held)) {
+      const armed = !held || outlasts(pause, held);
+      if (armed) {
         arm(id, pause);
         opts.state.write((ctx) => {
           const until = pause.until?.toISOString() ?? null;
@@ -161,8 +162,8 @@ export function createAccountPauses(opts: {
         foldKey: at.card.foldKey,
         ...(at.card.options ? { options: at.card.options } : {}),
       });
-      // A card still open from an earlier pause folds this one in; it shows this pause's text.
-      if (item.body !== at.card.body) opts.inbox.reword(item.id, at.card.body);
+      // A card still open from an earlier pause folds this one in; it shows the pause in force.
+      if (armed && item.body !== at.card.body) opts.inbox.reword(item.id, at.card.body);
       // Only a usage limit stops running sessions; a capped or refused account lets them finish.
       switch (pause.reason) {
         case AccountPauseReason.UsageLimit:

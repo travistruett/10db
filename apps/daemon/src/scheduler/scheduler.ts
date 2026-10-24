@@ -19,6 +19,7 @@ import {
   getAccountRow,
   getProject,
   getTask,
+  getWorkstreamRow,
   listBatches,
   listWorkstreams,
   renewClaimLeases,
@@ -81,6 +82,8 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
     for (const ws of listWorkstreams(db, { states: [WorkstreamState.PausedLimit] })) {
       if (opts.runner.isRunning(ws.id)) continue;
       if (opts.accounts.isPaused(getProject(db, ws.projectId).accountId)) continue;
+      // Asking can resume an account whose pause ended unnoticed, which re-queues this row itself.
+      if (getWorkstreamRow(db, ws.id).state !== WorkstreamState.PausedLimit) continue;
       opts.state.write((ctx) => {
         transitionWorkstream(ctx, ws.id, {
           to: WorkstreamState.Queued,

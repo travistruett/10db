@@ -189,6 +189,22 @@ describe('scheduler', () => {
     expect(getWorkstream(store.db, a.workstream.id).state).toBe('STARTING');
   });
 
+  it('re-queues work whose account pause ended unnoticed, without a second transition', async () => {
+    const a = queue();
+    const s = scheduler();
+    await s.tick();
+    pause(a.project);
+    state.write((ctx) => {
+      transitionWorkstream(ctx, a.workstream.id, { to: 'PAUSED_LIMIT', fence: null });
+    });
+    // The machine slept through the pause's timer.
+    pauses.stop();
+    clock.advance(120_000);
+    launched = [];
+    await s.tick();
+    expect(launched.map((l) => l.id)).toEqual([a.workstream.id]);
+  });
+
   it('leaves queued work of a parked task alone', async () => {
     const { project, task, workstream: first } = queue();
     moveWorkstream(first.id, 'STARTING');

@@ -145,6 +145,12 @@ describe('the monthly cap', () => {
     expect(runtime.isPaused(key.id)).toBe(true);
     expect(resumes()).toHaveLength(0);
     expect(getWorkstream(state.db, workstream.id).state).toBe('PAUSED_LIMIT');
+    // The first capped timer fires on Oct 27; the pause must be re-armed, not resumed, then.
+    for (const day of [28, 31]) {
+      clock.advance(new Date(2026, 9, day, 12).getTime() - clock.now().getTime());
+      expect(runtime.isPaused(key.id)).toBe(true);
+      expect(resumes()).toHaveLength(0);
+    }
     clock.advance(new Date(2026, 10, 1).getTime() - clock.now().getTime());
     expect(runtime.isPaused(key.id)).toBe(false);
     expect(resumes()).toHaveLength(1);
