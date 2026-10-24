@@ -50,20 +50,40 @@ export function foreignBulkFoldKey(projectId: ProjectId): string {
   return `stray-write:${projectId}:bulk-foreign`;
 }
 
+/** Whether a held claim covers the path: one of its areas or hazards is held. */
+function isClaimed(
+  rel: string,
+  project: Pick<ProjectDto, 'areas' | 'hazards'>,
+  held: ReadonlySet<string>,
+): boolean {
+  const hit = classifyPath(rel, project.areas, project.hazards);
+  return (
+    hit.areas.some((a) => held.has(`area:${a}`)) || hit.hazards.some((h) => held.has(`hazard:${h}`))
+  );
+}
+
+function heldClaims(claims: readonly { readonly kind: ClaimKind; readonly name: string }[]) {
+  return new Set(claims.map((c) => `${c.kind}:${c.name}`));
+}
+
 /** Paths that no held claim covers: their areas and hazards are all unclaimed. */
 export function findStrays(
   paths: readonly string[],
   project: Pick<ProjectDto, 'areas' | 'hazards'>,
   claims: readonly { readonly kind: ClaimKind; readonly name: string }[],
 ): string[] {
-  const held = new Set(claims.map((c) => `${c.kind}:${c.name}`));
-  return paths.filter((rel) => {
-    const hit = classifyPath(rel, project.areas, project.hazards);
-    return (
-      !hit.areas.some((a) => held.has(`area:${a}`)) &&
-      !hit.hazards.some((h) => held.has(`hazard:${h}`))
-    );
-  });
+  const held = heldClaims(claims);
+  return paths.filter((rel) => !isClaimed(rel, project, held));
+}
+
+/** Paths a held claim covers: the complement of `findStrays` over the same claims. */
+export function findClaimed(
+  paths: readonly string[],
+  project: Pick<ProjectDto, 'areas' | 'hazards'>,
+  claims: readonly { readonly kind: ClaimKind; readonly name: string }[],
+): string[] {
+  const held = heldClaims(claims);
+  return paths.filter((rel) => isClaimed(rel, project, held));
 }
 
 export interface ClaimHolder {

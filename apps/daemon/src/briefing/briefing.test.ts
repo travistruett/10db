@@ -285,6 +285,22 @@ describe('buildSessionPrompt for flow steps', () => {
     expect(prompt).not.toContain('complete_step');
   });
 
+  it('tells an implement step to commit every change before it ends its turn', () => {
+    const prompt = buildSessionPrompt({ ...base, action: { kind: 'start' } });
+    expect(prompt).toContain(
+      'Before you end your turn, commit every change in your claims through mcp__10db__commit.',
+    );
+  });
+
+  it('names the files a step ended with uncommitted, and asks for their commit', () => {
+    const prompt = buildSessionPrompt({
+      ...base,
+      action: { kind: 'uncommitted', paths: ['src/api/a.ts', 'src/api/a.test.ts'] },
+    });
+    expect(prompt).toContain('- src/api/a.ts\n- src/api/a.test.ts');
+    expect(prompt).toContain('Commit each one through mcp__10db__commit');
+  });
+
   it('carries earlier steps’ results as data, with their verdicts', () => {
     const prompt = buildSessionPrompt({
       ...base,
