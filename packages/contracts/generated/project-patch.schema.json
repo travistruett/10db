@@ -75,6 +75,13 @@
           "type": "null"
         }
       ]
+    },
+    "allowedCommands": {
+      "maxItems": 32,
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
     }
   }
 }

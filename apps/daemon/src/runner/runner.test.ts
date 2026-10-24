@@ -57,6 +57,7 @@ const curl = {
   toolName: 'Bash',
   input: { command: 'curl -s https://example.com' },
 };
+const shell = (command: string) => ({ do: 'tool' as const, toolName: 'Bash', input: { command } });
 
 let current: Parameters<typeof getWorkstream>[1];
 const ws0 = () => current;
@@ -307,6 +308,49 @@ describe('runner', () => {
         (o) => o.kind === 'tool_allowed' && o.detail['toolName'] === 'Bash',
       ),
     ).toHaveLength(1);
+  });
+
+  it('runs a listed allowed command without a permission card', async () => {
+    engine = await createTestEngine(
+      {
+        Alpha: [
+          [
+            shell('pnpm exec prettier --write src/api/a.txt && git status --short && git diff'),
+            write('src/api/a.txt'),
+            commit('op-allow-0001', ['src/api/a.txt']),
+            turn,
+          ],
+        ],
+      },
+      { allowedCommands: ['pnpm exec prettier'] },
+    );
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    // The first thing to settle is the run finishing or a card asking; a card would park it, so it fails here.
+    const outcome = await waitFor(() => ws(workstream.id).state === 'DONE' || openCard());
+    expect(outcome).toBe(true);
+    await engine.runner.idle();
+
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(listInbox(engine.store.db, { states: ['OPEN'] }).map((i) => i.kind)).toEqual(['review']);
+    expect(
+      engine.adapter.observations.filter(
+        (o) => o.kind === 'tool_allowed' && o.detail['toolName'] === 'Bash',
+      ),
+    ).toHaveLength(1);
+  });
+
+  it('still raises a permission card for a command the project does not allow', async () => {
+    engine = await createTestEngine(
+      { Alpha: [[shell('pnpm lint'), turn]] },
+      { allowedCommands: ['pnpm exec prettier'] },
+    );
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    const card = await waitFor(openCard);
+    expect(card).toMatchObject({ kind: 'permission', title: 'Allow Bash?', body: 'pnpm lint' });
+    // The lane waits on the card until a person answers it.
+    await waitFor(() => ws(workstream.id).state === 'WAITING_HUMAN');
   });
 
   it('runs the gate in the session environment, never the daemon process environment', async () => {

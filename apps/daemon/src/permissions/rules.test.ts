@@ -197,6 +197,9 @@ describe('commandPrefix', () => {
     ['sh script.sh', 'sh script.sh'],
     ['node -e x', 'node -e x'],
     ['node build.js', 'node build.js'],
+    ['php evil run', 'php evil run'],
+    ['nice make test', 'nice make test'],
+    ['eval make test', 'eval make test'],
     ['python3 -c x', 'python3 -c x'],
     ['python3.12 tool.py', 'python3.12 tool.py'],
     ['pnpm dlx evil', 'pnpm dlx evil'],
@@ -281,8 +284,41 @@ describe('matchPermissionRule', () => {
   });
 });
 
+describe('allowedToolsFor with the extra allowed commands of a project', () => {
+  const project = {
+    gateCommand: 'make gate',
+    allowedCommands: ['pnpm exec prettier', 'pnpm test'],
+  };
+  const edit = allowedToolsFor(project, 'edit');
+  const readOnly = allowedToolsFor(project, 'read_only');
+
+  it.each<[string, string, boolean]>([
+    [
+      'the dogfood lane command, compound',
+      'pnpm exec prettier --write a.ts && git status --short && git diff',
+      true,
+    ],
+    ['a listed command with arguments', 'pnpm test --run', true],
+    ['a listed prefix alone', 'pnpm test', true],
+    ['a program that only shares the first characters', 'pnpm exec prettier-plugin-x', false],
+    ['a command that is not listed', 'pnpm lint', false],
+    [
+      'a listed command chained to an unlisted one',
+      'pnpm exec prettier --write a.ts && pnpm lint',
+      false,
+    ],
+  ])('matches %s (%s) in an edit step: %s', (_name, command, expected) => {
+    expect(matchesAllowedTool('Bash', bash(command), edit, repo.path)).toBe(expected);
+  });
+
+  it('gives no listed command to a read-only step', () => {
+    expect(readOnly).not.toContain('Bash(pnpm test:*)');
+    expect(matchesAllowedTool('Bash', bash('pnpm test'), readOnly, repo.path)).toBe(false);
+  });
+});
+
 describe('allowedToolsFor', () => {
-  const project = { gateCommand: 'make gate' };
+  const project = { gateCommand: 'make gate', allowedCommands: [] };
   it.each([
     {
       tools: 'edit',

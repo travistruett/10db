@@ -1,4 +1,9 @@
-import { ToolAccess, type PermissionRuleDto, type ProjectDto } from '@10db/contracts';
+import {
+  isCommandRunner,
+  ToolAccess,
+  type PermissionRuleDto,
+  type ProjectDto,
+} from '@10db/contracts';
 import { join } from 'node:path';
 import { z } from 'zod';
 import {
@@ -37,13 +42,16 @@ const WRITE_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 /**
  * A read-only step drops the file-writing tools and the gate, and may run the read
  * commands without a card; the guard has already refused anything that writes.
+ * An edit step also runs the project's extra allowed commands without a card. Each is a prefix,
+ * so `pnpm test` covers `pnpm test --run`; the guard still judges every command first.
  */
 export function allowedToolsFor(
-  project: Pick<ProjectDto, 'gateCommand'>,
+  project: Pick<ProjectDto, 'gateCommand' | 'allowedCommands'>,
   tools: ToolAccess,
 ): string[] {
   const base = baseAllowedTools(project);
-  if (tools === ToolAccess.Edit) return base;
+  if (tools === ToolAccess.Edit)
+    return [...base, ...project.allowedCommands.map((command) => `Bash(${command}:*)`)];
   const gate = `Bash(${project.gateCommand})`;
   return [
     ...base.filter((t) => !WRITE_TOOLS.has(t) && t !== gate),
@@ -131,25 +139,13 @@ export function matchesAllowedTool(
   });
 }
 
-const INTERPRETERS = new Set([
-  'sh',
-  'bash',
-  'zsh',
-  'fish',
-  'node',
-  'deno',
-  'bun',
-  'ruby',
-  'perl',
-  'npx',
-  'env',
-  'xargs',
-]);
+/** Package tools that run the package or file they name, so "always allow" keeps the whole command. */
+const NAMED_PROGRAM_RUNNERS: ReadonlySet<string> = new Set(['npx', 'bun']);
 const SUBCOMMAND = /^[A-Za-z][A-Za-z0-9_-]*$/;
 
 function runsOtherCommands(words: readonly string[]): boolean {
   const [first = '', second] = words;
-  if (INTERPRETERS.has(first) || /^python[\d.]*$/.test(first)) return true;
+  if (isCommandRunner(first) || NAMED_PROGRAM_RUNNERS.has(first.toLowerCase())) return true;
   return (
     (first === 'pnpm' && (second === 'dlx' || second === 'exec')) ||
     (first === 'npm' && second === 'exec')

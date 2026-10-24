@@ -56,6 +56,22 @@ describe('ProjectInput', () => {
       billingMode: 'subscription',
     });
     expect(parsed.hazards.map((h) => h.name)).toEqual(['migrations', 'deps', 'harness']);
+    expect(parsed.allowedCommands).toEqual([]);
+  });
+
+  it('takes the extra allowed commands and rejects one that is not a plain prefix', () => {
+    const base = {
+      name: 'demo',
+      repoPath: '/tmp/demo',
+      gateCommand: 'make gate',
+      areas: [{ name: 'src', globs: ['src/**'] }],
+    };
+    expect(ProjectInput.parse({ ...base, allowedCommands: ['pnpm test'] }).allowedCommands).toEqual(
+      ['pnpm test'],
+    );
+    expect(ProjectInput.safeParse({ ...base, allowedCommands: ['pnpm --run'] }).success).toBe(
+      false,
+    );
   });
 
   it('rejects a nudge threshold at or below the handoff threshold', () => {

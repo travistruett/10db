@@ -406,6 +406,13 @@ describe('team, routing and benchmark routes', () => {
       service: 'patchProject',
     },
     {
+      name: 'PATCH /projects/:id with extra allowed commands',
+      method: 'PATCH',
+      path: `/projects/${projectId}`,
+      body: { allowedCommands: ['pnpm exec prettier', 'pnpm test'] },
+      service: 'patchProject',
+    },
+    {
       name: 'GET /projects/:id/team',
       method: 'GET',
       path: `/projects/${projectId}/team`,
@@ -470,6 +477,24 @@ describe('team, routing and benchmark routes', () => {
       method: 'PATCH',
       path: `/projects/${projectId}`,
       body: { budgetCeiling: -1 },
+    },
+    {
+      name: 'an allowed command with a flag',
+      method: 'PATCH',
+      path: `/projects/${projectId}`,
+      body: { allowedCommands: ['pnpm --filter web test'] },
+    },
+    {
+      name: 'an allowed command that runs a shell',
+      method: 'PATCH',
+      path: `/projects/${projectId}`,
+      body: { allowedCommands: ['pnpm exec bash'] },
+    },
+    {
+      name: 'an allowed command that runs an interpreter',
+      method: 'PATCH',
+      path: `/projects/${projectId}`,
+      body: { allowedCommands: ['node'] },
     },
     {
       name: 'a flow with no implement step',

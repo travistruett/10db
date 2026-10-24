@@ -11,7 +11,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as schema from '../schema';
 import { listEventsAfter } from './events';
-import { getProject, insertProject, listProjects } from './projects';
+import { getProject, insertProject, listProjects, patchProject } from './projects';
 import type { Store, WriteContext } from './store';
 import { deriveBoardStatus, getTask, insertTask, listTasks, setTaskStatus } from './tasks';
 import { createTestStore, seedProject } from './test-support';
@@ -63,6 +63,39 @@ describe('projects', () => {
     store.write(insertMinimalProject);
     expect(() => store.write(insertMinimalProject)).toThrow(ConflictError);
     expect(listProjects(store.db)).toHaveLength(1);
+  });
+
+  it('stores the extra allowed commands a project was created with', () => {
+    const project = seedProject(store, { allowedCommands: ['pnpm exec prettier', 'pnpm test'] });
+    expect(getProject(store.db, project.id).allowedCommands).toEqual([
+      'pnpm exec prettier',
+      'pnpm test',
+    ]);
+  });
+
+  it('has no extra allowed commands unless it was given some', () => {
+    const project = seedProject(store);
+    expect(getProject(store.db, project.id).allowedCommands).toEqual([]);
+  });
+
+  it('replaces the allowed commands on a patch and leaves the other fields alone', () => {
+    const project = seedProject(store, { allowedCommands: ['pnpm test'] });
+    const patched = store.write((ctx) =>
+      patchProject(ctx, project.id, { allowedCommands: ['pnpm lint'] }),
+    ).value;
+    expect(patched).toMatchObject({ allowedCommands: ['pnpm lint'], gateCommand: 'true' });
+    expect(listProjects(store.db)[0]?.allowedCommands).toEqual(['pnpm lint']);
+
+    store.write((ctx) => patchProject(ctx, project.id, { allowedCommands: [] }));
+    expect(getProject(store.db, project.id).allowedCommands).toEqual([]);
+  });
+
+  it('refuses a patch with a command that is not a plain prefix and keeps the old list', () => {
+    const project = seedProject(store, { allowedCommands: ['pnpm test'] });
+    expect(() =>
+      store.write((ctx) => patchProject(ctx, project.id, { allowedCommands: ['pnpm --run'] })),
+    ).toThrow();
+    expect(getProject(store.db, project.id).allowedCommands).toEqual(['pnpm test']);
   });
 });
 

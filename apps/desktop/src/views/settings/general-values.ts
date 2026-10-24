@@ -1,4 +1,6 @@
 import {
+  allowedCommandProblem,
+  AllowedCommands,
   BranchName,
   Delivery,
   PrTitlePrefix,
@@ -22,6 +24,8 @@ export interface GeneralValues {
   readonly baseBranch: string;
   /** '' means none. */
   readonly prTitlePrefix: string;
+  /** One command prefix per line; blank lines are ignored. */
+  readonly allowedCommands: string;
 }
 
 export type GeneralErrors = Partial<Record<keyof GeneralValues, string>>;
@@ -42,6 +46,29 @@ export function generalValues(project: ProjectDto): GeneralValues {
     delivery: project.delivery,
     baseBranch: project.baseBranch,
     prTitlePrefix: project.prTitlePrefix ?? '',
+    allowedCommands: project.allowedCommands.join('\n'),
+  };
+}
+
+/**
+ * The commands on the non-blank lines, trimmed, or the error for the first line that can't be one.
+ * The error names the line, so the builder can find it in the box.
+ */
+function parseAllowedCommands(text: string): { commands: string[]; error: string | null } {
+  const commands: string[] = [];
+  for (const [index, line] of text.split('\n').entries()) {
+    const command = line.trim();
+    if (command === '') continue;
+    const problem = allowedCommandProblem(command);
+    if (problem !== null) return { commands, error: `Line ${String(index + 1)}: ${problem}` };
+    commands.push(command);
+  }
+  const listed = AllowedCommands.safeParse(commands);
+  return {
+    commands,
+    error: listed.success
+      ? null
+      : (listed.error.issues[0]?.message ?? 'Check the allowed commands'),
   };
 }
 
@@ -50,6 +77,8 @@ export function checkGeneral(project: ProjectDto, values: GeneralValues): Genera
   const errors: GeneralErrors = {};
   const name = values.name.trim();
   const gateCommand = values.gateCommand.trim();
+  const allowed = parseAllowedCommands(values.allowedCommands);
+  if (allowed.error !== null) errors.allowedCommands = allowed.error;
   if (name === '') errors.name = 'Enter a name';
   if (gateCommand === '') errors.gateCommand = 'Enter the gate command';
   if (values.maxLanes === '') errors.maxLanes = 'Enter the lane cap';
@@ -89,5 +118,11 @@ export function checkGeneral(project: ProjectDto, values: GeneralValues): Genera
   if (baseBranch !== project.baseBranch) patch.baseBranch = baseBranch;
   const prTitlePrefix = prefix === '' ? null : prefix;
   if (prTitlePrefix !== project.prTitlePrefix) patch.prTitlePrefix = prTitlePrefix;
+  if (!sameCommands(allowed.commands, project.allowedCommands))
+    patch.allowedCommands = allowed.commands;
   return { ok: true, patch: Object.keys(patch).length > 0 ? patch : null };
+}
+
+function sameCommands(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((command, i) => command === b[i]);
 }

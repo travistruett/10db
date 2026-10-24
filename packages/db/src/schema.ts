@@ -108,6 +108,11 @@ export const projects = sqliteTable('projects', {
   delivery: text('delivery').$type<Delivery>().notNull().default('local'),
   baseBranch: text('base_branch').notNull().default('main'),
   prTitlePrefix: text('pr_title_prefix'),
+  /** Command prefixes a lane runs without a permission card, beyond the gate command. */
+  allowedCommands: text('allowed_commands', { mode: 'json' })
+    .$type<string[]>()
+    .notNull()
+    .default(sql`'[]'`),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
