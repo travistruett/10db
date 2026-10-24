@@ -75,7 +75,7 @@ import { batchCardFields } from '../delivery';
 import type { StateStore } from '../events';
 import { AccountLaunchError, type Launcher, type SessionLaunch } from '../environment';
 import type { Git } from '../git';
-import { judgeToolUse } from '../guard';
+import { judgeToolUse, type ProtectedPath } from '../guard';
 import {
   createPermissionBroker,
   requestMcpApproval,
@@ -124,6 +124,8 @@ export const DEFAULT_RUNNER_LIMITS: RunnerLimits = {
 };
 
 export interface RunnerOptions {
+  /** Paths no session tool or command may touch. */
+  readonly protectedPaths: readonly ProtectedPath[];
   readonly state: StateStore;
   readonly adapter: SessionAdapter;
   readonly inbox: InboxService;
@@ -936,6 +938,7 @@ export function createRunner(opts: RunnerOptions): Runner {
             claims: claims(),
             readOnly,
             delivery: project.delivery,
+            protectedPaths: opts.protectedPaths,
           }),
         canUseTool: createPermissionBroker(
           { state: opts.state, inbox: opts.inbox },

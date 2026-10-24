@@ -1,4 +1,5 @@
 import type { AddressInfo } from 'node:net';
+import { homedir } from 'node:os';
 import { serve } from '@hono/node-server';
 import type {
   AccountId,
@@ -47,6 +48,7 @@ import { createEventBus, createStateStore, type StateStore } from '../src/events
 import { createGit } from '../src/git';
 import { createInboxService, type InboxService } from '../src/inbox';
 import { silentLogger } from '../src/log';
+import { protectedPaths } from '../src/guard';
 import { createMcpHandler } from '../src/mcp';
 import {
   createLiveSessions,
@@ -144,8 +146,10 @@ export async function createTestEngine(
       accounts.saved(id, answering);
     },
   });
+  const guarded = protectedPaths({ dataDir: data.path, home: homedir(), loginConfigDir: null });
   const server = serve({
     fetch: createMcpHandler({
+      protectedPaths: guarded,
       state,
       inbox,
       git,
@@ -160,6 +164,7 @@ export async function createTestEngine(
   // serve() on a TCP port always reports an AddressInfo once listening.
   const mcpUrl = `http://127.0.0.1:${String((server.address() as AddressInfo).port)}/mcp`;
   const created = createRunner({
+    protectedPaths: guarded,
     state,
     adapter,
     inbox,

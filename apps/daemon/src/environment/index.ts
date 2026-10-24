@@ -27,3 +27,4 @@ export {
   REQUIRED_TOOLS,
   systemCheck,
 } from './system-check';
+export { SECRET_VARIABLES } from './secret-variables';

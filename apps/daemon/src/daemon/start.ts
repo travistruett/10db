@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { serve, upgradeWebSocket, type WebSocketServerLike } from '@hono/node-server';
 import {
@@ -66,6 +67,7 @@ import { createGh, type Gh } from '../github';
 import { createInboxService } from '../inbox';
 import { createKeepAwake, systemCaffeinate, type CaffeinateSpawner } from '../keep-awake';
 import { createLogger, fileDestination, rotateLogFile, type Logger } from '../log';
+import { protectedPaths } from '../guard';
 import { createMcpHandler } from '../mcp';
 import { recoverOnStartup, systemProcesses, type ProcessTerminator } from '../recovery';
 import {
@@ -354,7 +356,14 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       scheduler?.requestTick();
     },
   });
+  // The data directory, and the default account's sign-in wherever the login shell keeps it.
+  const guarded = protectedPaths({
+    dataDir: opts.dataDir,
+    home: homedir(),
+    loginConfigDir: launcher.loginConfigDir(),
+  });
   const createdRunner = createRunner({
+    protectedPaths: guarded,
     state,
     adapter,
     inbox,
@@ -464,6 +473,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       logger.error({ err: error }, 'unhandled API error');
     },
     mcp: createMcpHandler({
+      protectedPaths: guarded,
       state,
       inbox,
       git,

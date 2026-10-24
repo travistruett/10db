@@ -2,6 +2,14 @@ import { homedir } from 'node:os';
 import { isAbsolute, resolve, sep } from 'node:path';
 import { ClaimKind, Delivery, type AreaDef, type HazardDef } from '@10db/contracts';
 import { z } from 'zod';
+import {
+  envDumpRefusal,
+  keychainRefusal,
+  pathRefusal,
+  secretReferenceRefusal,
+  segmentPathRefusal,
+  type ProtectedPath,
+} from './account-rules';
 import { commandForms, startsWithWords } from './command-forms';
 import { ghVerdict } from './gh-rules';
 import { gitVerdict } from './git-rules';
@@ -20,6 +28,8 @@ export interface GuardInput {
   readonly readOnly: boolean;
   /** The project's delivery; absent means local. In pull-request projects only the daemon pushes. */
   readonly delivery?: Delivery;
+  /** Paths no tool or command may touch: the data directory and the default account's sign-in. */
+  readonly protectedPaths: readonly ProtectedPath[];
 }
 
 export type GuardVerdict =
@@ -111,6 +121,12 @@ function judgeShell(input: GuardInput, command: string, depth = 0): GuardVerdict
     const piped = previousSeparator === '|';
     previousSeparator = segment.separator;
     if (head === 'sudo') return deny('sudo is never allowed.');
+    const accountRule =
+      keychainRefusal(words) ??
+      envDumpRefusal(segment.words, words) ??
+      secretReferenceRefusal(segment.raw) ??
+      segmentPathRefusal(segment.raw, segment.words, input.repoPath, input.protectedPaths);
+    if (accountRule) return deny(accountRule);
     if (SHELLS.has(head)) {
       if (piped) return deny('Piping into a shell runs commands the guard cannot see.');
       const flagIndex = words.findIndex((w) => SHELL_C_FLAG.test(w));
@@ -176,6 +192,13 @@ const READ_ONLY_REFUSAL =
 
 /** The PreToolUse decision for a managed session (spec §8.2). Rules only; never an LLM. */
 export function judgeToolUse(input: GuardInput): GuardVerdict {
+  // Every tool, in every step kind: no path under the data directory or the default sign-in.
+  for (const field of ['file_path', 'notebook_path', 'path', 'pattern'] as const) {
+    const value = stringField(input.toolInput, field);
+    const refusal =
+      value === null ? null : pathRefusal(value, input.repoPath, input.protectedPaths);
+    if (refusal) return deny(refusal);
+  }
   if (FILE_TOOLS.has(input.toolName)) {
     if (input.readOnly) return deny(READ_ONLY_REFUSAL);
     const filePath =
