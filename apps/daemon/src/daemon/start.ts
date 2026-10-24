@@ -18,12 +18,19 @@ import {
   getAppSetting,
   migrateDatabase,
   openDatabase,
+  patchAccount,
   seedDefaultAccount,
   setAppSetting,
 } from '@10db/db';
 import { HARNESS_PLUGIN_DIR, readDefaultPersonas } from '@10db/harness';
 import { WebSocketServer } from 'ws';
-import { createAccountCardAnswers, createAccountPauses, createAccountRuntime } from '../accounts';
+import {
+  createAccountCardAnswers,
+  createAccountPauses,
+  createAccountPreparer,
+  createAccountRuntime,
+  createStartGate,
+} from '../accounts';
 import { createApp } from '../api';
 import { createBenchmarkSync, type BenchmarkSync } from '../benchmarks';
 import {
@@ -327,6 +334,25 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     resume: (id) => {
       accountPauses.resume(id);
     },
+    confirm: (id, identity) => {
+      state.write((ctx) => patchAccount(ctx, id, { expectedIdentity: identity }));
+      accounts.saved(id);
+      scheduler?.requestTick();
+    },
+  });
+  const startGate = createStartGate();
+  const preparer = createAccountPreparer({
+    state,
+    clock,
+    inbox,
+    adapter,
+    launcher,
+    startGate,
+    dataDir: opts.dataDir,
+    logger: logger.child({ component: 'accounts' }),
+    onReady: () => {
+      scheduler?.requestTick();
+    },
   });
   const createdRunner = createRunner({
     state,
@@ -341,7 +367,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     limits,
     mcpUrl: () => mcpUrl,
     launcher,
-    accounts,
+    startGate,
+    accounts: {
+      ...accounts,
+      prepare: (account, projectId) => {
+        preparer.prepare(account, projectId);
+      },
+    },
     onLaneFreed: () => {
       scheduler?.requestTick();
     },
@@ -354,7 +386,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const createdScheduler = createScheduler({
     state,
     runner: createdRunner,
-    accounts,
+    accounts: {
+      ...accounts,
+      prepare: (account, projectId) => {
+        preparer.prepare(account, projectId);
+      },
+    },
     clock,
     instanceId,
     logger,

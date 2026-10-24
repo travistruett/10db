@@ -110,7 +110,7 @@ describe('recoverBatches', () => {
         },
         isRunning: () => false,
       },
-      accounts: { blocked: () => null, isPaused: () => false },
+      accounts: { blocked: () => null, isPaused: () => false, prepare: () => undefined },
       branches: h.git,
       onWrongBranch: () => undefined,
     });

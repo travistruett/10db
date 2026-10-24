@@ -226,6 +226,17 @@ describe('refusals and usage limits', () => {
     expect(runtime.isPaused(key.id)).toBe(false);
   });
 
+  it('offers Confirm on a refusal that names a subscription email', () => {
+    const onDefault = seedProject(store);
+    runtime.refused(getAccountRow(state.db, onDefault.accountId), onDefault.id, {
+      problem: 'identity_mismatch',
+      message:
+        'Claude Code reported a different email than the one confirmed for account "Claude plan"',
+      seenIdentity: 'other@example.com',
+    });
+    expect(openCards()[0]?.options.map((o) => o.label)).toEqual(['Confirm', 'Resume', 'Later']);
+  });
+
   it('resumes a refused account when its card is answered Resume', () => {
     runtime.refused(row(), project.id, {
       problem: 'cannot_bill',
@@ -236,6 +247,7 @@ describe('refusals and usage limits', () => {
       resume: (id) => {
         pauses.resume(id);
       },
+      confirm: () => undefined,
     });
     const item = openCards()[0];
     if (!item) throw new Error('the refusal raised no card');

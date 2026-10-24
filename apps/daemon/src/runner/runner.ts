@@ -7,6 +7,7 @@ import {
   StepRole,
   ToolAccess,
   WorkstreamState as S,
+  AccountKind,
   AccountProblem,
   type AccountId,
   type AccountRefusal,
@@ -24,6 +25,7 @@ import {
   activeClaims,
   clearLease,
   endSession,
+  getAccount,
   getAccountRow,
   getEvidence,
   getInboxItem,
@@ -67,7 +69,7 @@ import {
   HANDOFF_NUDGE_READ_ONLY,
   RESULT_NUDGE,
 } from '../briefing';
-import type { AccountRuntime } from '../accounts';
+import { unready, type AccountPreparer, type AccountRuntime, type StartGate } from '../accounts';
 import type { Clock, Timer } from '../clock';
 import { batchCardFields } from '../delivery';
 import type { StateStore } from '../events';
@@ -83,7 +85,7 @@ import {
 import type { Logger } from '../log';
 import { mintSessionToken } from '../mcp';
 import { allowedToolsFor, commandPrefix } from '../permissions';
-import { escalateStep } from '../routing';
+import { escalateStep, offeredProfiles } from '../routing';
 import {
   ProjectMcpError,
   readRepoMcp,
@@ -136,7 +138,10 @@ export interface RunnerOptions {
   /** Builds each session's launch, and the env the gate runs in. */
   readonly launcher: Pick<Launcher, 'projectEnv' | 'session'>;
   /** Usage limits, refusals and the monthly cap, per account. */
-  readonly accounts: Pick<AccountRuntime, 'blocked' | 'rateLimited' | 'refused' | 'sessionEnded'>;
+  readonly accounts: Pick<AccountRuntime, 'blocked' | 'rateLimited' | 'refused' | 'sessionEnded'> &
+    Pick<AccountPreparer, 'prepare'>;
+  /** One start at a time on a subscription account. */
+  readonly startGate: StartGate;
   onLaneFreed(): void;
   /** Runs after every session ends (the watcher's step-end diff). Errors are logged, never thrown. */
   readonly afterSession?: (workstreamId: WorkstreamId) => Promise<void>;
@@ -175,6 +180,12 @@ type Outcome =
       /** Set when the account refused the session: it is paused with this reason. */
       readonly refusal: AccountRefusal | null;
       readonly providerSessionId: string | null;
+    }
+  | {
+      /** The account can't start a session yet (no confirmed identity, no secret): it is prepared, not refused. */
+      readonly kind: 'unready';
+      readonly refusal: AccountRefusal;
+      readonly providerSessionId: null;
     }
   | {
       readonly kind: 'crashed';
@@ -350,7 +361,10 @@ export function createRunner(opts: RunnerOptions): Runner {
     const result = escalateStep(step, {
       provider: project.provider,
       budgetCeiling: project.budgetCeiling,
-      profiles: listModelProfiles(db),
+      profiles: offeredProfiles(
+        listModelProfiles(db),
+        getAccount(db, project.accountId).settings.aliases,
+      ),
       why,
     });
     return { step: result.step, moved: result.escalated };
@@ -657,6 +671,26 @@ export function createRunner(opts: RunnerOptions): Runner {
           opts.accounts.refused(getAccountRow(db, ctl.accountId), lane.id, outcome.refusal);
         }
         return;
+      case 'unready': {
+        opts.state.write((ctx) => {
+          // The state machine has no shorter way back to the queue; the next action is kept as it was.
+          transitionWorkstream(ctx, id, {
+            to: S.PausedLimit,
+            fence: ctl.fence,
+            reason: `account not ready: ${outcome.refusal.problem}`,
+          });
+          transitionWorkstream(ctx, id, {
+            to: S.Queued,
+            fence: ctl.fence,
+            reason: 'waiting for the account to be ready',
+          });
+          clearLease(ctx, id);
+        });
+        // The scheduler holds it there until the preparer makes the account ready.
+        const lane = getProject(db, row.projectId);
+        opts.accounts.prepare(getAccountRow(db, ctl.accountId), lane.id);
+        return;
+      }
       case 'parked':
         park(id, ctl.fence, outcome.inboxId, outcome.providerSessionId);
         return;
@@ -746,10 +780,13 @@ export function createRunner(opts: RunnerOptions): Runner {
           : null,
     });
     const { token, hash } = mintSessionToken();
+    const account = getAccountRow(db, ctl.accountId);
+    const notReady = unready(account);
+    if (notReady) return { kind: 'unready', refusal: notReady, providerSessionId: null };
     // Built first, so a missing or changed secret refuses the session before any session row exists.
     let launch: SessionLaunch;
     try {
-      launch = opts.launcher.session(getAccountRow(db, ctl.accountId), row.model);
+      launch = opts.launcher.session(account, row.model);
     } catch (error) {
       if (!(error instanceof AccountLaunchError)) throw error;
       return {
@@ -771,20 +808,36 @@ export function createRunner(opts: RunnerOptions): Runner {
       ? (resumed?.briefed ?? false)
       : action.kind === 'continue_from_handoff' && contextPack.handoff !== null;
     const inheritedBaselinePct = resumed?.briefingBaselinePct ?? null;
-    const session = opts.state.write((ctx) => {
-      const s = insertSession(ctx, {
-        workstreamId: id,
-        provider: project.provider,
-        model: row.model,
-        effort: row.effort,
-        mode: 'managed',
-        mcpTokenHash: hash,
-        briefed,
-        briefingBaselinePct: inheritedBaselinePct,
+    // A subscription's sessions start one at a time until the OAuth refresh race is ruled out.
+    const releaseStart =
+      account.kind === AccountKind.ClaudeSubscription
+        ? await opts.startGate.acquire(account.id)
+        : () => undefined;
+    const stopping = stopRequested(ctl);
+    if (stopping) {
+      releaseStart();
+      return { kind: 'stopped', reason: stopping, providerSessionId: resumeId };
+    }
+    let session: ReturnType<typeof insertSession>;
+    try {
+      session = opts.state.write((ctx) => {
+        const s = insertSession(ctx, {
+          workstreamId: id,
+          provider: project.provider,
+          model: row.model,
+          effort: row.effort,
+          mode: 'managed',
+          mcpTokenHash: hash,
+          briefed,
+          briefingBaselinePct: inheritedBaselinePct,
+        });
+        patchWorkstream(ctx, id, ctl.fence, { currentSessionId: s.id, baseHead });
+        return s;
       });
-      patchWorkstream(ctx, id, ctl.fence, { currentSessionId: s.id, baseHead });
-      return s;
-    });
+    } catch (error) {
+      releaseStart();
+      throw error;
+    }
 
     const abort = new AbortController();
     const st: SessionState = {
@@ -858,43 +911,48 @@ export function createRunner(opts: RunnerOptions): Runner {
     };
 
     opts.live.register(session.id, { signal: abort.signal, observer });
-    handle = opts.adapter.start({
-      sessionId: session.id,
-      workstreamId: id,
-      sequence: session.sequence,
-      cwd: project.repoPath,
-      prompt: mcpNote ? `${prompt}\n\n${mcpNote}` : prompt,
-      model: launch.model,
-      effort: row.effort,
-      resumeProviderSessionId: resumeId,
-      env: launch.env,
-      account: launch.expect,
-      projectMcpServers: projectMcp.servers,
-      allowedTools: allowedToolsFor(project, step.tools),
-      mcp: { url: opts.mcpUrl(), token, toolTimeoutMs: (project.humanWaitMinutes + 5) * 60_000 },
-      preToolUse: (req) =>
-        judgeToolUse({
-          toolName: req.toolName,
-          toolInput: req.input,
-          repoPath: project.repoPath,
-          areas: project.areas,
-          hazards: project.hazards,
-          claims: claims(),
-          readOnly,
-          delivery: project.delivery,
-        }),
-      canUseTool: createPermissionBroker(
-        { state: opts.state, inbox: opts.inbox },
-        {
-          projectId: project.id,
-          workstreamId: id,
-          sessionId: session.id,
-          observer,
-          signal: abort.signal,
-          allowOnce: permission?.allowOnce ?? null,
-        },
-      ),
-    });
+    try {
+      handle = opts.adapter.start({
+        sessionId: session.id,
+        workstreamId: id,
+        sequence: session.sequence,
+        cwd: project.repoPath,
+        prompt: mcpNote ? `${prompt}\n\n${mcpNote}` : prompt,
+        model: launch.model,
+        effort: row.effort,
+        resumeProviderSessionId: resumeId,
+        env: launch.env,
+        account: launch.expect,
+        projectMcpServers: projectMcp.servers,
+        allowedTools: allowedToolsFor(project, step.tools),
+        mcp: { url: opts.mcpUrl(), token, toolTimeoutMs: (project.humanWaitMinutes + 5) * 60_000 },
+        preToolUse: (req) =>
+          judgeToolUse({
+            toolName: req.toolName,
+            toolInput: req.input,
+            repoPath: project.repoPath,
+            areas: project.areas,
+            hazards: project.hazards,
+            claims: claims(),
+            readOnly,
+            delivery: project.delivery,
+          }),
+        canUseTool: createPermissionBroker(
+          { state: opts.state, inbox: opts.inbox },
+          {
+            projectId: project.id,
+            workstreamId: id,
+            sessionId: session.id,
+            observer,
+            signal: abort.signal,
+            allowOnce: permission?.allowOnce ?? null,
+          },
+        ),
+      });
+    } catch (error) {
+      releaseStart();
+      throw error;
+    }
     ctl.handle = handle;
 
     let outcome: Outcome;
@@ -904,6 +962,7 @@ export function createRunner(opts: RunnerOptions): Runner {
           case 'started': {
             st.providerSessionId = event.providerSessionId;
             st.started = true;
+            releaseStart();
             const pidStart = await identify(event.pid);
             opts.state.write((ctx) => {
               markSessionStarted(ctx, session.id, event.providerSessionId, event.pid, pidStart);
@@ -1034,6 +1093,7 @@ export function createRunner(opts: RunnerOptions): Runner {
           }
           case 'ended': {
             sawEnded = true;
+            releaseStart();
             const stoppedBy = stopRequested(ctl);
             if (st.outcome) break;
             if (stoppedBy)
@@ -1098,6 +1158,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     } finally {
       // Ending the waits on every exit, before any stop, leaves no inbox waiter on a dead session.
       endWaits();
+      releaseStart();
       // Leaving the loop without `ended` (a stale fence, a failed write) must not leave the process running.
       if (!sawEnded) await handle.stop().catch(() => undefined);
       opts.live.unregister(session.id);

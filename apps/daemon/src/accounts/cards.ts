@@ -99,8 +99,69 @@ export function refusedCard(account: AccountRow, refusal: AccountRefusal): Accou
     foldKey: accountFoldKey(account.id, AccountPauseReason.Refused, refusal.problem),
     detail: detail(account, AccountPauseReason.Refused, refusal.problem, refusal.seenIdentity),
     options: [
+      ...(account.kind === AccountKind.ClaudeSubscription && refusal.seenIdentity !== null
+        ? [
+            {
+              label: AccountCardChoice.Confirm,
+              description: `Run ${account.label} as ${refusal.seenIdentity} from now on`,
+            },
+          ]
+        : []),
       { label: AccountCardChoice.Resume, description: 'I fixed it: try the account again' },
       { label: AccountCardChoice.Later, description: 'Keep its work waiting' },
     ],
+  };
+}
+
+/** For an account on its own directory: the builder confirms the email Claude Code reported (spec §5). */
+export function confirmCard(account: AccountRow, email: string): AccountCard {
+  return {
+    title: `Confirm the account ${account.label}`,
+    body: `Claude Code in ${account.configDir ?? "Claude Code's default directory"} is signed in as ${email}. Confirm it, and ${account.label}'s sessions run only while they report this email.`,
+    foldKey: accountFoldKey(account.id, AccountProblem.Unconfirmed),
+    detail: detail(account, null, AccountProblem.Unconfirmed, email),
+    options: [
+      { label: AccountCardChoice.Confirm, description: `Run ${account.label} as ${email}` },
+      { label: AccountCardChoice.Later, description: 'Keep its work waiting' },
+    ],
+  };
+}
+
+/**
+ * A subscription with no login. `why` is what the probe met when it got no answer at all: a signed-out
+ * directory may report nothing, so that gets the sign-in command too.
+ */
+export function signInCard(account: AccountRow, why: string | null = null): AccountCard {
+  const seen =
+    why === null
+      ? `Claude Code is not signed in for ${account.label}`
+      : `${why}, so ${account.label} may be signed out`;
+  return {
+    title: `Sign in the account ${account.label}`,
+    body: `${seen}. Its work waits; 10db tries again in a minute. Sign in with: ${signInCommand(account.configDir)}`,
+    foldKey: accountFoldKey(account.id, AccountProblem.SignedOut),
+    detail: detail(account, null, AccountProblem.SignedOut, null),
+  };
+}
+
+/**
+ * The default account's identity is recorded from its first probe without a Confirm (it is the builder's current
+ * login), so this card says which login that was. It holds no work.
+ */
+export function recordedCard(account: AccountRow, email: string): AccountCard {
+  return {
+    title: `${account.label} runs as ${email}`,
+    body: `10db recorded ${email}, the login in ${account.configDir ?? "Claude Code's default directory"}, as ${account.label}'s identity, and runs its sessions only while they report it. If that is the wrong login, sign in as the right one with: ${signInCommand(account.configDir)}. The next session is then refused, and its card offers Confirm.`,
+    foldKey: accountFoldKey(account.id, 'recorded'),
+    detail: detail(account, null, null, email),
+  };
+}
+
+export function secretCard(account: AccountRow): AccountCard {
+  return {
+    title: `Set the secret of ${account.label}`,
+    body: `${account.label} has no secret yet, so its work waits. ${fixFor(account, AccountProblem.SecretMissing)}`,
+    foldKey: accountFoldKey(account.id, AccountProblem.SecretMissing),
+    detail: detail(account, null, AccountProblem.SecretMissing, null),
   };
 }

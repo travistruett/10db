@@ -17,7 +17,7 @@ import {
   WorkstreamId,
   type SystemCheckDto,
 } from '@10db/contracts';
-import { getWorkstream, listAccounts } from '@10db/db';
+import { getAccount, getWorkstream, listAccounts } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { WebSocket } from 'ws';
@@ -162,6 +162,47 @@ describe('startDaemon', () => {
     await expect(running.stop()).resolves.toBeUndefined();
     expect(() => readRuntimeInfo(dir.path)).toThrow();
     expect(existsSync(join(dir.path, 'daemon.lock'))).toBe(false);
+  });
+
+  it("records the default account's identity from its first probe, then runs the task", async () => {
+    const repo = createTempRepo();
+    try {
+      // A fresh data directory: the default account is seeded with no identity; the fake's probe reports builder@example.com.
+      const adapter = new FakeAdapter({ Alpha: [[{ do: 'turn_complete' }]] });
+      const running = await startDaemon({
+        dataDir: dir.path,
+        port: 0,
+        adapter,
+        logLevel: 'warn',
+        ...QUIET,
+      });
+      daemon = running;
+      const api = apiClient(running.url, running.token);
+      const project = await api.post('/projects', ProjectDto, {
+        name: 'demo',
+        repoPath: repo.path,
+        gateCommand: 'true',
+        flowId: await quickFlowId(api),
+        areas: [{ name: 'src', globs: ['src/**'] }],
+      });
+      const task = await api.post(`/projects/${project.id}/tasks`, TaskDto, {
+        title: 'Alpha',
+        acceptanceCriteria: ['it works'],
+        areas: ['src'],
+      });
+      await api.post(`/tasks/${task.id}/start`, z.unknown());
+      await waitForAsync(async () =>
+        (await api.get('/workstreams?active=false', z.array(WorkstreamDto))).some(
+          (w) => w.taskId === task.id && w.state === 'DONE',
+        ),
+      );
+      expect(adapter.probes).toHaveLength(1);
+      expect(getAccount(running.state.db, project.accountId).expectedIdentity).toBe(
+        'builder@example.com',
+      );
+    } finally {
+      repo.cleanup();
+    }
   });
 
   it('does not count a clean stop against the recovery limit', async () => {

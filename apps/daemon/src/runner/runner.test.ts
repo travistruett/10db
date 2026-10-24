@@ -10,6 +10,7 @@ import {
   listEvidence,
   listInbox,
   listSessions,
+  patchAccount,
   schema,
 } from '@10db/db';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -1443,6 +1444,37 @@ describe('accounts', () => {
     engine.launch(workstream.id);
     await engine.runner.idle();
     expect(ws(workstream.id).state).toBe('DONE');
+  });
+
+  it('starts one session at a time on a subscription account', async () => {
+    engine = await createTestEngine({ Alpha: [[turn]] });
+    const release = await engine.startGate.acquire(engine.project.accountId);
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await waitFor(() => engine.startGate.waiting(engine.project.accountId) === 1);
+    expect(engine.adapter.prompts).toEqual([]);
+    release();
+    await engine.runner.idle();
+    expect(engine.adapter.prompts).toHaveLength(1);
+    expect(engine.startGate.waiting(engine.project.accountId)).toBe(0);
+  });
+
+  it('re-queues a lane whose subscription account lost its identity, and asks the preparer', async () => {
+    engine = await createTestEngine({ Alpha: [[turn]] });
+    engine.state.write((ctx) =>
+      patchAccount(ctx, engine.project.accountId, { expectedIdentity: null }),
+    );
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(listSessions(engine.store.db, workstream.id)).toEqual([]);
+    expect(ws(workstream.id)).toMatchObject({ state: 'QUEUED', nextAction: { kind: 'start' } });
+    expect(engine.prepared).toEqual([
+      { accountId: engine.project.accountId, projectId: engine.project.id },
+    ]);
+    // Unready is prepared, never refused: no pause and no refusal card.
+    expect(engine.accounts.isPaused(engine.project.accountId)).toBe(false);
+    expect(listInbox(engine.store.db, { states: ['OPEN'] })).toEqual([]);
   });
 });
 

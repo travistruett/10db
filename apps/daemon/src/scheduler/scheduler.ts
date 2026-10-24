@@ -26,7 +26,7 @@ import {
   renewLeases,
   transitionWorkstream,
 } from '@10db/db';
-import type { AccountRuntime } from '../accounts';
+import { unready, type AccountPreparer, type AccountRuntime } from '../accounts';
 import type { Clock, Timer } from '../clock';
 import { batchLaunchVerdict, LaunchVerdict } from '../delivery';
 import type { StateStore } from '../events';
@@ -38,7 +38,8 @@ export interface SchedulerOptions {
     launch(id: WorkstreamId, fence: number): void;
     isRunning(id: WorkstreamId): boolean;
   };
-  readonly accounts: Pick<AccountRuntime, 'blocked' | 'isPaused'>;
+  readonly accounts: Pick<AccountRuntime, 'blocked' | 'isPaused'> &
+    Pick<AccountPreparer, 'prepare'>;
   readonly clock: Clock;
   readonly instanceId: string;
   readonly caps: { readonly global: number };
@@ -102,6 +103,8 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
     const byAccount = new Map(lanes.byAccount);
     // Accounts a cap check found open this tick: it reads the month's spend, so it runs once per account.
     const open = new Set<AccountId>();
+    // Accounts that can't start a session yet: the preparer is asked once per account per tick.
+    const notReady = new Set<AccountId>();
     let launched = 0;
     for (const ws of listWorkstreams(db, { states: [WorkstreamState.Queued] })) {
       if (global >= opts.caps.global) break;
@@ -110,6 +113,12 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
       if (opts.runner.isRunning(ws.id)) continue;
       const project = getProject(db, ws.projectId);
       const account = getAccountRow(db, project.accountId);
+      if (notReady.has(account.id)) continue;
+      if (!open.has(account.id) && unready(account)) {
+        opts.accounts.prepare(account, project.id);
+        notReady.add(account.id);
+        continue;
+      }
       // A held account is asked once per project with work: each project gets its own cap card.
       if (!open.has(account.id)) {
         if (opts.accounts.blocked(account, project.id) !== null) continue;

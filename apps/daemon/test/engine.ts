@@ -6,6 +6,7 @@ import type {
   InboxAnswer,
   InboxItemDto,
   ProjectDto,
+  ProjectId,
   ProjectInput,
   RiskTag,
   TaskDto,
@@ -23,6 +24,7 @@ import {
   getWorkstreamRow,
   insertTask,
   insertWorkstream,
+  patchAccount,
   accountSecretRef,
   recordAccountSecret,
   seedAccount,
@@ -35,7 +37,9 @@ import {
   createAccountCardAnswers,
   createAccountPauses,
   createAccountRuntime,
+  createStartGate,
   type AccountRuntime,
+  type StartGate,
 } from '../src/accounts';
 import { ManualClock } from '../src/clock';
 import { createLauncher, secretFingerprint, type Keychain } from '../src/environment';
@@ -69,6 +73,9 @@ export interface TestEngine {
   readonly accounts: AccountRuntime;
   readonly keychain: Keychain;
   readonly rateLimited: { accountId: AccountId; resetsAt: Date | null }[];
+  readonly startGate: StartGate;
+  /** What the runner asked the preparer; the engine has no scheduler. */
+  readonly prepared: { accountId: AccountId; projectId: ProjectId }[];
   addTask(
     title: string,
     areas?: string[],
@@ -101,6 +108,8 @@ export async function createTestEngine(
   const git = createGit();
   const keychain = createMemoryKeychain();
   const rateLimited: { accountId: AccountId; resetsAt: Date | null }[] = [];
+  const prepared: { accountId: AccountId; projectId: ProjectId }[] = [];
+  const startGate = createStartGate();
   let runner: Runner | null = null;
   let answerAccountCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   const inbox = createInboxService({
@@ -129,6 +138,10 @@ export async function createTestEngine(
   answerAccountCard = createAccountCardAnswers({
     resume: (id) => {
       pauses.resume(id);
+    },
+    confirm: (id, identity) => {
+      state.write((ctx) => patchAccount(ctx, id, { expectedIdentity: identity }));
+      accounts.saved(id);
     },
   });
   const server = serve({
@@ -165,7 +178,11 @@ export async function createTestEngine(
       rateLimited: (accountId, resetsAt) => {
         rateLimited.push({ accountId, resetsAt });
       },
+      prepare: (account, projectId) => {
+        prepared.push({ accountId: account.id, projectId });
+      },
     },
+    startGate,
     onLaneFreed: () => undefined,
     ...runnerOverrides,
   });
@@ -198,6 +215,8 @@ export async function createTestEngine(
     accounts,
     keychain,
     rateLimited,
+    startGate,
+    prepared,
     addTask(title, areas = ['api'], dependsOn = [], plan) {
       const criteria = Array.from({ length: plan?.criteria ?? 1 }, (_, i) =>
         i === 0 ? 'it works' : `criterion ${String(i + 1)}`,

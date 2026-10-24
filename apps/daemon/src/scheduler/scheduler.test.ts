@@ -1,10 +1,11 @@
-import type { BatchState, WorkstreamId } from '@10db/contracts';
+import type { AccountId, BatchState, ProjectId, WorkstreamId } from '@10db/contracts';
 import {
   countLanes,
   createTestStore,
   listBoardColumns,
   listInbox,
   patchAccount,
+  recordAccountSecret,
   seedAccount,
   moveTask,
   getWorkstream,
@@ -43,6 +44,7 @@ let accounts: AccountRuntime;
 let running: Set<WorkstreamId>;
 let branchOf: Map<string, string | null>;
 let branchReads: string[];
+let prepared: { accountId: AccountId; projectId: ProjectId }[];
 let wrongBranch: { batchId: string; current: string | null }[];
 
 beforeEach(() => {
@@ -63,6 +65,7 @@ beforeEach(() => {
   branchOf = new Map();
   branchReads = [];
   wrongBranch = [];
+  prepared = [];
 });
 afterEach(() => {
   close();
@@ -83,7 +86,12 @@ function scheduler(caps = { global: 4 }) {
       },
       isRunning: (id) => running.has(id),
     },
-    accounts,
+    accounts: {
+      ...accounts,
+      prepare: (account, projectId) => {
+        prepared.push({ accountId: account.id, projectId });
+      },
+    },
     branches: {
       currentBranch: (repo) => {
         branchReads.push(repo);
@@ -407,7 +415,22 @@ describe('accounts', () => {
   const metered = (
     label: string,
     overrides: Partial<{ laneCap: number; monthlyCapUsd: number }> = {},
-  ) => seedAccount(store, { kind: 'anthropic_api_key', label, ...overrides });
+  ) => {
+    const account = seedAccount(store, { kind: 'anthropic_api_key', label, ...overrides });
+    state.write((ctx) => recordAccountSecret(ctx, account.id, 'sha256:0000000000000000'));
+    return account;
+  };
+
+  it('leaves work on an unready account queued and asks the preparer once a tick', async () => {
+    const sub = seedAccount(store, { kind: 'claude_subscription', label: 'Company A' });
+    const waiting = queue({ accountId: sub.id });
+    add(waiting.project, ['ui']);
+    const keyed = seedAccount(store, { kind: 'anthropic_api_key', label: 'No secret yet' });
+    queue({ accountId: keyed.id });
+    expect(await scheduler().tick()).toBe(0);
+    expect(prepared.map((p) => p.accountId)).toEqual([sub.id, keyed.id]);
+    expect(getWorkstream(state.db, waiting.workstream.id).state).toBe('QUEUED');
+  });
 
   it('caps lanes per account across two projects', async () => {
     const key = metered('Shared', { laneCap: 2 });
