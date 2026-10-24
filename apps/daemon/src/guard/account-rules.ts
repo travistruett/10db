@@ -63,26 +63,22 @@ export function keychainRefusal(command: readonly string[]): string | null {
 const isSecretName = (word: string): boolean => SECRET_VARIABLES.includes(word.split('=')[0] ?? '');
 const commandName = (word: string): string => basename(word.replace(/^\\+/, ''));
 
-/** `ps` options whose next word is a value, not a flag. */
-const PS_VALUE_FLAGS: ReadonlySet<string> = new Set([
-  '-o',
-  '-O',
-  '-p',
-  '-u',
-  '-U',
-  '-g',
-  '-G',
-  '-t',
-]);
+/** A `ps` option cluster that ends in a flag taking the next word as its value (`-o`, `-eo`, `-p`…). */
+const PS_VALUE_FLAG = /^-[a-zA-Z]*[oOpuUgGt]$/;
 
-/** macOS `ps` prints each process's environment with `-E`, or `e` in a BSD-style first word. */
+/**
+ * macOS `ps` prints each process's environment with `-E`, or with `e` in a BSD-style option word:
+ * any word that is not a flag and not the value of one.
+ */
 function psShowsEnvironment(args: readonly string[]): boolean {
-  const first = args[0];
-  if (first !== undefined && !first.startsWith('-') && first.includes('e')) return true;
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i] ?? '';
-    if (PS_VALUE_FLAGS.has(arg)) i += 1;
-    else if (/^-[a-zA-Z]*E/.test(arg)) return true;
+    if (arg.startsWith('-')) {
+      if (/^-[a-zA-Z]*E/.test(arg)) return true;
+      if (PS_VALUE_FLAG.test(arg)) i += 1;
+    } else if (arg.includes('e')) {
+      return true;
+    }
   }
   return false;
 }
@@ -141,9 +137,10 @@ const INTERPRETERS: ReadonlySet<string> = new Set([
   'gawk',
   'nawk',
 ]);
-const ENV_READERS = /process\.env|os\.environ|\bENVIRON\b|getenv|system attribute/;
+const ENV_READERS =
+  /process\.env|Bun\.env|os\.environ|\bENVIRON\b|\bENV\b|\$ENV\b|getenv|system attribute/;
 const ENV_AS_A_WHOLE =
-  /process\.env(?![\w$]|\s*[.[])|os\.environ(?![\w$]|\s*\[|\.get\b)|\bin\s+ENVIRON\b/;
+  /(?:process|Bun)\.env(?![\w$]|\s*[.[])|os\.environ(?![\w$]|\s*\[|\.get\b)|\bin\s+ENVIRON\b|%ENV\b|\bENV\b(?!\s*\[|\.fetch\b)/;
 
 /**
  * Shell indirection that expands a variable named at run time, and a one-line script that reads a
@@ -162,12 +159,14 @@ function homeOf(name: string): string {
   return name === '' || name === basename(home) ? home : join(dirname(home), name);
 }
 
-/** What follows `$HOME` or `${HOME}` at `at` in the text, or null when it is some other variable. */
-function homeVariableAt(text: string, at: number): { replaced: number } | null {
-  if (text.startsWith('${HOME}', at)) return { replaced: 7 };
-  if (text.startsWith('$HOME', at) && !/[A-Za-z0-9_]/.test(text.charAt(at + 5)))
-    return { replaced: 5 };
-  return null;
+const USER_VARIABLE = /^(?:\$\{(HOME|USER|LOGNAME)\}|\$(HOME|USER|LOGNAME)(?![A-Za-z0-9_]))/;
+
+/** The expansion of `$HOME`, `$USER` or `$LOGNAME` (braced or not) at the start of the text. */
+function userVariable(text: string): { length: number; value: string } | null {
+  const match = USER_VARIABLE.exec(text);
+  if (!match) return null;
+  const name = match[1] ?? match[2];
+  return { length: match[0].length, value: name === 'HOME' ? homedir() : basename(homedir()) };
 }
 
 /** A `~` or `~name` at the start of the text, as the shell expands it. */
@@ -207,11 +206,11 @@ function shellWords(raw: string): string[] {
       continue;
     }
     if (ch === '$') {
-      const home = homeVariableAt(raw, i);
-      if (home) {
-        word += homedir();
+      const variable = userVariable(raw.slice(i));
+      if (variable) {
+        word += variable.value;
         open = true;
-        i += home.replaced - 1;
+        i += variable.length - 1;
         continue;
       }
     }
@@ -245,7 +244,7 @@ function shellWords(raw: string): string[] {
   return words;
 }
 
-const GLOB_CHARACTERS = /[*?[]/;
+const GLOB_CHARACTERS = /[*?[{]/;
 const lower = (text: string): string => text.toLowerCase();
 
 /** The path as given and as the file system resolves it (a temp directory is often a link). */
@@ -296,22 +295,50 @@ function globMatches(path: string, pattern: string): boolean {
   }
 }
 
-/** Whether a glob can expand to the protected path or to something inside it. */
-function globReaches(pattern: string, protectedPath: ProtectedPath): boolean {
-  const pat = lower(pattern);
-  const patternSegments = pat.split('/');
-  return forms(protectedPath.path).some((form) => {
-    const path = lower(form);
-    const segments = path.split('/');
-    if (patternSegments.length >= segments.length) {
-      const prefix = patternSegments.slice(0, segments.length);
-      if (!prefix.includes('**') && globMatches(path, prefix.join('/'))) return true;
-    }
-    return (
-      globMatches(path, pat) ||
-      globMatches(`${path}/x`, pat) ||
-      (protectedPath.family === true && globMatches(`${path}.x`, pat))
-    );
+/** The glob with its leading literal directories resolved through links, as the shell would open them. */
+function throughLinks(pattern: string): string {
+  const parts = pattern.split('/');
+  const literal = parts.findIndex((part) => GLOB_CHARACTERS.test(part));
+  const fixed = (literal === -1 ? parts : parts.slice(0, literal)).join('/');
+  try {
+    return [
+      realpathSync.native(fixed || '/'),
+      ...(literal === -1 ? [] : parts.slice(literal)),
+    ].join('/');
+  } catch {
+    return pattern;
+  }
+}
+
+/**
+ * Whether a glob can expand to the protected path or into it. `**` and a walking command also
+ * reach it from a parent: the part before a `**` matches the same depth of the path, and a walker
+ * descends into any directory the pattern names.
+ */
+function globReaches(pattern: string, protectedPath: ProtectedPath, walking: boolean): boolean {
+  return [pattern, throughLinks(pattern)].some((candidate) => {
+    const pat = lower(candidate);
+    const patternSegments = pat.split('/');
+    const star = patternSegments.indexOf('**');
+    return forms(protectedPath.path).some((form) => {
+      const path = lower(form);
+      const segments = path.split('/');
+      const depth = star === -1 ? segments.length : Math.min(star, segments.length);
+      const enough = star !== -1 || patternSegments.length >= segments.length;
+      const prefix = (list: readonly string[]): string => list.slice(0, depth).join('/');
+      if (enough && (depth <= 1 || globMatches(prefix(segments), prefix(patternSegments))))
+        return true;
+      if (
+        globMatches(path, pat) ||
+        globMatches(`${path}/x`, pat) ||
+        (protectedPath.family === true && globMatches(`${path}.x`, pat))
+      )
+        return true;
+      if (!walking) return false;
+      for (let k = 2; k < segments.length; k += 1)
+        if (globMatches(segments.slice(0, k).join('/'), pat)) return true;
+      return false;
+    });
   });
 }
 
@@ -335,7 +362,8 @@ function reachRefusal(
   }
   const glob = GLOB_CHARACTERS.test(word);
   for (const p of paths) {
-    if (glob ? globReaches(target, p) : touches(p, target) || namesPath(word, p)) return p.refusal;
+    if (glob ? globReaches(target, p, reach.contains) : touches(p, target) || namesPath(word, p))
+      return p.refusal;
     if (!glob && reach.contains && isWithin(target, p.path)) return p.refusal;
   }
   return null;
@@ -370,10 +398,43 @@ function walksDirectories(command: readonly string[]): boolean {
   return flag !== undefined && args.some((a) => flag.test(a));
 }
 
+/** Commands that run quoted code of their own, which may name a path the shell never sees as a word. */
+function runsQuotedCode(command: readonly string[]): boolean {
+  const head = command[0] ?? '';
+  return head === 'ssh' || INTERPRETERS.has(head) || /^python3\.\d+$/.test(head);
+}
+
+/** Text with `$HOME`, `$USER` and a `~` after whitespace, a quote or `(` expanded, as code inside it would. */
+function expandEmbedded(text: string): string {
+  const variables = text.replace(
+    /\$\{(?:HOME|USER|LOGNAME)\}|\$(?:HOME|USER|LOGNAME)(?![A-Za-z0-9_])/g,
+    (found) => userVariable(found)?.value ?? found,
+  );
+  return variables.replace(
+    /(^|[\s'"(`=])~([A-Za-z0-9_.-]*)(?=[/\s'")`]|$)/g,
+    (_found, before: string, name: string) => before + homeOf(name),
+  );
+}
+
+/** The index of the word a copy or extract writes to, which is not a source a walker reads. */
+function destinationIndex(command: readonly string[], words: readonly string[]): number {
+  const head = command[0];
+  if (head === 'cp' || head === 'rsync') {
+    for (let i = words.length - 1; i >= 0; i -= 1) if (!(words[i] ?? '').startsWith('-')) return i;
+  }
+  if (head === 'tar') {
+    const flag = words.findIndex((w) => w === '-C' || w === '--directory');
+    if (flag !== -1) return flag + 1;
+  }
+  return -1;
+}
+
 /**
  * A shell segment with a word that resolves onto a protected path from `cwd`, names one written out,
- * is a glob that can expand to one, or (for a recursive reader) is a directory that holds one. A
- * word mentioned inside a longer quoted text is not a path. `cwd` is null after a `cd` the guard
+ * is a glob that can expand to one, or (for a recursive reader) names a directory that holds one;
+ * a copy's or extract's destination is not a source. Text that merely mentions a path (a grep
+ * pattern, a message) is not a word that names one. A command that runs quoted code (an interpreter,
+ * ssh) also has the paths written inside its words checked. `cwd` is null after a `cd` the guard
  * cannot resolve.
  */
 export function segmentPathRefusal(
@@ -382,13 +443,22 @@ export function segmentPathRefusal(
   cwd: string | null,
   paths: readonly ProtectedPath[],
 ): string | null {
-  const reach = { contains: walksDirectories(command) };
-  for (const word of shellWords(raw)) {
+  const walks = walksDirectories(command);
+  const code = runsQuotedCode(command);
+  const words = shellWords(raw);
+  const destination = destinationIndex(command, words);
+  for (const [index, word] of words.entries()) {
+    const reach = { contains: walks && index !== destination };
     const tail = word.includes('=') ? word.slice(word.indexOf('=') + 1).split(':') : [];
     const candidates = word.startsWith('-') ? tail : [word, ...tail];
     for (const candidate of candidates) {
       const refusal = reachRefusal(candidate, cwd, paths, reach);
       if (refusal) return refusal;
+    }
+    if (code) {
+      const text = expandEmbedded(word);
+      const named = paths.find((p) => namesPath(text, p));
+      if (named) return named.refusal;
     }
   }
   return null;
@@ -403,8 +473,8 @@ export function changedDirectory(
   const words = shellWords(raw);
   const target = words[words.findIndex((w) => commandName(w) === command[0]) + 1];
   if (target === undefined) return homedir();
-  if (cwd === null || target.startsWith('-') || /[$`*?[]/.test(target)) return null;
-  return resolve(cwd, target);
+  if (target.startsWith('-') || /[$`*?[{]/.test(target)) return null;
+  return cwd === null && !isAbsolute(target) ? null : resolve(cwd ?? '/', target);
 }
 
 /** Whether a session's own saved tool output is what `value` names (Claude Code points the model at it). */

@@ -175,7 +175,7 @@ export function stripCommandPrefixes(
 const FIND_EXEC = new Set(['-exec', '-execdir', '-ok', '-okdir']);
 const FIND_EXEC_END = new Set([';', '\\;', '\\', '+']);
 
-/** The commands a `find` runs through `-exec` and its kin, each without its `{}` terminator. */
+/** The commands a `find` runs through `-exec` and its kin, each without its `;` or `+` terminator. */
 export function findExecCommands(words: readonly string[]): string[][] {
   const out: string[][] = [];
   for (let i = 0; i < words.length; i += 1) {

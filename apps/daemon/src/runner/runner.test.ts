@@ -1,5 +1,5 @@
-import { writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { ACCOUNT_CARD_DETAIL, AccountCardChoice, MCP_APPROVAL_DETAIL } from '@10db/contracts';
 import {
   acquireLease,
@@ -1849,5 +1849,54 @@ describe('flows', () => {
     engine.launch(workstream.id);
     await engine.runner.idle();
     expect(ws(workstream.id).state).toBe('DONE');
+  });
+});
+
+describe('the session guard', () => {
+  // An account's config directory lives under the data directory, which the guard protects.
+  const configDir = () => join(engine.dataDir, 'accounts', 'a', 'claude');
+  const results = (sessionId: string) =>
+    join(configDir(), 'projects', 'p', sessionId, 'tool-results', 'out.txt');
+  let workstreamId = '' as Parameters<typeof listSessions>[1];
+  // The session id is the fake provider's, derived from the session row; read when the step runs.
+  const ownSession = () => `fake-${listSessions(engine.store.db, workstreamId)[0]?.id ?? ''}`;
+  const read = (path: () => string) => ({
+    do: 'tool' as const,
+    toolName: 'Read',
+    input: {
+      get file_path() {
+        return path();
+      },
+    },
+  });
+  const start = async (
+    steps: (ReturnType<typeof read> | { do: 'activity'; summary: string })[],
+  ) => {
+    engine = await createTestEngine({ Alpha: [[...steps, turn]] });
+    mkdirSync(dirname(results('someone-else')), { recursive: true });
+    // The test database's accounts are all this test's; point them at that directory.
+    engine.store.db.update(schema.accounts).set({ configDir: configDir() }).run();
+    const { workstream } = engine.addTask('Alpha');
+    workstreamId = workstream.id;
+    engine.launch(workstream.id);
+  };
+  const denials = () => engine.adapter.observations.filter((o) => o.kind === 'denied_by_guard');
+  it('lets a session read its own saved output', async () => {
+    await start([
+      read(() => {
+        // Claude Code has written the output by the time the model reads it.
+        const path = results(ownSession());
+        mkdirSync(dirname(path), { recursive: true });
+        return path;
+      }),
+    ]);
+    await waitFor(openCard);
+    expect(denials().map((d) => d.detail['reason'])).toEqual([]);
+  });
+
+  it("refuses a read of another session's saved output", async () => {
+    await start([read(() => results('someone-else'))]);
+    await waitFor(() => denials().length > 0);
+    expect(String(denials()[0]?.detail['reason'])).toContain('sign-in');
   });
 });

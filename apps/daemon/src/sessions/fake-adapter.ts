@@ -407,6 +407,10 @@ export class FakeAdapter implements SessionAdapter {
         providerSessionId: spec.resumeProviderSessionId ?? `fake-${spec.sessionId}`,
         pid: null,
       });
+      // The real CLI reports its session before any tool call; let the consumer see `started` first.
+      await new Promise<void>((resolve) => {
+        setImmediate(resolve);
+      });
       if (!modelMatches(spec.model, reportedModel ?? spec.model)) {
         end(
           SessionEndReason.BillingRefused,

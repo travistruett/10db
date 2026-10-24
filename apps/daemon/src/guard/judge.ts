@@ -119,6 +119,10 @@ function rmVerdict(
   return null;
 }
 
+const UNCONDITIONAL_BEFORE: ReadonlySet<string> = new Set(['', '&&', ';', '\n']);
+const UNCONDITIONAL_AFTER: ReadonlySet<string> = new Set(['&&', ';', '\n']);
+const shellQuote = (word: string): string => `'${word.replaceAll("'", "'\\''")}'`;
+
 const SHELL_C_FLAG = /^-[a-zA-Z]*c[a-zA-Z]*$/;
 
 function judgeShell(
@@ -134,6 +138,7 @@ function judgeShell(
     const words = stripCommandPrefixes(segment.words, { lookThroughRunners: true });
     const head = words[0] ?? '';
     const piped = previousSeparator === '|';
+    const before = previousSeparator;
     previousSeparator = segment.separator;
     if (head === 'sudo') return deny('sudo is never allowed.');
     const accountRule =
@@ -154,7 +159,7 @@ function judgeShell(
     }
     if (head === 'find' && depth < 3) {
       for (const exec of findExecCommands(words)) {
-        const verdict = judgeShell(input, exec.join(' '), depth + 1, cwd);
+        const verdict = judgeShell(input, exec.map(shellQuote).join(' '), depth + 1, cwd);
         if (verdict.decision === 'deny') return verdict;
       }
     }
@@ -176,8 +181,12 @@ function judgeShell(
     }
     if (head === 'cd' || head === 'pushd') {
       afterCd = true;
-      cwd = changedDirectory(segment.raw, words, cwd);
+      // Only a `cd` that always runs, in this shell, moves the directory the later words resolve from.
+      const certain =
+        UNCONDITIONAL_BEFORE.has(before) && UNCONDITIONAL_AFTER.has(segment.separator);
+      cwd = certain ? changedDirectory(segment.raw, words, cwd) : null;
     }
+    if (head === 'popd' || segment.separator === ')') cwd = null;
     const forms = commandForms(words);
     if (DEPLOY.some((re) => forms.lines.some((l) => re.test(l))))
       return deny('Deploy and publish commands are never run by agents.');
@@ -219,7 +228,7 @@ const READ_ONLY_REFUSAL =
 export function judgeToolUse(input: GuardInput): GuardVerdict {
   // Every tool, in every step kind: no path under the data directory or the default sign-in.
   const searches = input.toolName === 'Grep' || input.toolName === 'Glob';
-  const base = stringField(input.toolInput, 'path') ?? input.repoPath;
+  const base = resolve(input.repoPath, stringField(input.toolInput, 'path') ?? '.');
   for (const field of ['file_path', 'notebook_path', 'path', 'pattern'] as const) {
     // Grep's pattern is a regular expression, not a path; Glob's is a path pattern under `path`.
     if (field === 'pattern' && input.toolName !== 'Glob') continue;
@@ -235,7 +244,7 @@ export function judgeToolUse(input: GuardInput): GuardVerdict {
       field === 'pattern' ? base : input.repoPath,
       input.protectedPaths,
       {
-        contains: searches && field === 'path',
+        contains: searches && (field === 'path' || field === 'pattern'),
       },
     );
     if (refusal) return deny(refusal);

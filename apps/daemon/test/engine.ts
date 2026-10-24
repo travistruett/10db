@@ -72,6 +72,8 @@ export interface TestEngine {
   readonly clock: ManualClock;
   readonly project: ProjectDto;
   readonly repoPath: string;
+  /** The daemon's data directory, which the guard protects. */
+  readonly dataDir: string;
   readonly accounts: AccountRuntime;
   readonly keychain: Keychain;
   readonly rateLimited: { accountId: AccountId; resetsAt: Date | null }[];
@@ -217,6 +219,7 @@ export async function createTestEngine(
     clock,
     project: seeded,
     repoPath: repo.path,
+    dataDir: data.path,
     accounts,
     keychain,
     rateLimited,

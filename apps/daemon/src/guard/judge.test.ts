@@ -25,6 +25,7 @@ beforeAll(() => {
   mkdirSync(OWN_RESULTS, { recursive: true });
   mkdirSync(OTHER_RESULTS, { recursive: true });
   writeFileSync(join(OWN_RESULTS, 'out.txt'), 'big');
+  symlinkSync(join(CONFIG, '.claude.json'), join(OWN_RESULTS, 'escape'));
   writeFileSync(join(OTHER_RESULTS, 'out.txt'), 'big');
   writeFileSync(join(CONFIG, '.claude.json'), '{}');
   writeFileSync(join(login.path, '.claude.json'), '{}');
@@ -1267,6 +1268,35 @@ describe('account isolation', () => {
     ['the whole environment from awk', () => "awk 'BEGIN{for(k in ENVIRON) print k}'"],
     ['indirect expansion of a name', () => 'n=ANTHROPIC_API_KEY; echo ${!n}'],
     ['indirect expansion by prefix', () => 'echo ${!ANTHROPIC*}'],
+    [
+      'osascript running a shell that reads the sign-in file',
+      () => `osascript -e 'do shell script "cat ~/.claude.json"'`,
+    ],
+    [
+      'python running a shell that reads the sign-in file',
+      () => `python3 -c 'import os; os.system("cat ~/.claude.json")'`,
+    ],
+    [
+      'perl running a shell that reads the sign-in file',
+      () => "perl -e 'print `cat ~/.claude.json`'",
+    ],
+    [
+      'ssh to the same machine reading the sign-in file',
+      () => "ssh localhost 'cat ~/.claude.json'",
+    ],
+    ['cd after || is not trusted', () => 'cd ~ || cd /tmp; cat .claude.json'],
+    ['cd in a subshell is not trusted', () => 'cd ~ && (cd /tmp); cat .claude.json'],
+    ['cd before a pipe is not trusted', () => 'cd ~ && cd /tmp | cat; cat .claude.json'],
+    ['ps with a BSD option word after a flag', () => 'ps -p 1 e'],
+    ['the user name from $USER', () => `cat /Users/$USER/.claude.json`],
+    ['the user name from ${USER}', () => 'cat /Users/${USER}/.claude.json'],
+    ['the user name from $LOGNAME', () => 'cat /Users/$LOGNAME/.claude.json'],
+    ['a brace glob over the sign-in file', () => 'cat ~/.claude{,.json}'],
+    ['a brace glob over the default directory', () => 'cat ~/.{claude,x}.json'],
+    ['ruby reading a credential', () => `ruby -e 'puts ENV["ANTHROPIC_API_KEY"]'`],
+    ['perl reading a credential', () => "perl -e 'print $ENV{ANTHROPIC_API_KEY}'"],
+    ['bun reading a credential', () => "bun -e 'console.log(Bun.env.ANTHROPIC_API_KEY)'"],
+    ['a glob through a repo link', () => 'cat link-data/acc*/acc_1/claude/.claude.json'],
   ])('denies %s in an implement step and a read-only step', (_name, command) => {
     for (const readOnly of [false, true]) {
       const verdict = run(command(), readOnly);
@@ -1290,6 +1320,15 @@ describe('account isolation', () => {
     ['ps of one pid with an elapsed time', 'ps -p 123 -o etime='],
     ['a quoted mention of the default directory', 'grep -rn "~/.claude" docs'],
     ['a log search that mentions the sign-in file', "git log --grep='stop reading ~/.claude.json'"],
+    ['ps by user name', 'ps -u name'],
+    ['ps -eo with a user column', 'ps -eo pid,user,command'],
+    [
+      'find running grep with a quoted pattern',
+      "find . -name '*.sh' -exec grep -lE 'bash|sh' {} +",
+    ],
+    ['find running grep for a quoted mention', "find docs -exec grep -l '~/.claude' {} +"],
+    ['copying a tree into home', 'cp -r dist ~'],
+    ['extracting an archive into home', 'tar xzf x.tgz -C ~'],
     ['node reading one harmless variable', "node -e 'console.log(process.env.HOME)'"],
     ['searching code for a variable name', 'grep -rn ANTHROPIC_API_KEY src'],
     ['a harmless variable', 'echo $HOME'],
@@ -1351,6 +1390,23 @@ describe('account isolation', () => {
         pattern: `${dirname(data.path)}/${basename(data.path).slice(0, 3)}*/**/.claude.json`,
       }),
     },
+    {
+      name: "Read of the session's saved output through a link out of it",
+      tool: 'Read',
+      input: () => ({ file_path: join(OWN_RESULTS, 'escape') }),
+    },
+    {
+      name: "Read of another session's output through ..",
+      tool: 'Read',
+      input: () => ({
+        file_path: join(OWN_RESULTS, '..', '..', 'sess_other', 'tool-results', 'out.txt'),
+      }),
+    },
+    {
+      name: 'Glob whose relative path and pattern reach the data directory through a link',
+      tool: 'Glob',
+      input: () => ({ pattern: '../link-data/**', path: 'src' }),
+    },
   ])('denies $name on a protected path in both step kinds', ({ tool, input }) => {
     for (const readOnly of [false, true]) {
       const verdict = judge(tool, input(), [{ kind: 'area', name: 'api' }], readOnly);
@@ -1384,5 +1440,56 @@ describe('account isolation', () => {
 
   it('still lets a tool read inside the repo', () => {
     expect(judge('Read', { file_path: 'src/api/a.ts' })).toEqual({ decision: 'allow' });
+  });
+});
+
+describe('account isolation with a nested data directory', () => {
+  const nested = tempDir('nested home');
+  const NESTED_DATA = join(nested.path, 'Library', 'Application Support', '10db');
+  beforeAll(() => {
+    mkdirSync(join(NESTED_DATA, 'accounts', 'acc_1', 'claude'), { recursive: true });
+    writeFileSync(join(NESTED_DATA, 'accounts', 'acc_1', 'claude', '.claude.json'), '{}');
+  });
+  afterAll(() => {
+    nested.cleanup();
+  });
+  const run = (toolName: string, toolInput: unknown) =>
+    judgeToolUse({
+      toolName,
+      toolInput,
+      repoPath: repo.path,
+      areas: AREAS,
+      hazards: DEFAULT_HAZARDS,
+      claims: [{ kind: 'area', name: 'api' }],
+      readOnly: false,
+      protectedPaths: protectedPaths({
+        dataDir: NESTED_DATA,
+        home: homedir(),
+        loginConfigDir: null,
+      }),
+    });
+  const N = () => nested.path;
+
+  it.each<[string, () => string]>([
+    ['grep -r over a glob of the home directory', () => `grep -r accessToken "${N()}"/*`],
+    ['tar of a glob of the home directory', () => `tar czf /tmp/h.tgz "${N()}"/*`],
+    ['a ** glob under Library', () => `cat "${N()}"/Library/**/.claude.json`],
+    [
+      'a ** glob under Application Support',
+      () => `grep oauthAccount "${N()}/Library/Application Support"/**/.claude.json`,
+    ],
+    ['grep -r over a glob of the parent of home', () => `grep -r token ${dirname(N())}/*`],
+  ])('denies %s', (_name, command) => {
+    const verdict = run('Bash', { command: command() });
+    expect(verdict.decision).toBe('deny');
+    expect(verdict.decision === 'deny' ? verdict.reason : '').toMatch(/data directory/);
+  });
+
+  it('denies the Glob tool with a ** pattern under Library', () => {
+    expect(run('Glob', { pattern: `${N()}/Library/**/.claude.json` }).decision).toBe('deny');
+  });
+
+  it('allows a glob that stays clear of the data directory', () => {
+    expect(run('Bash', { command: `ls "${N()}"/Projects/*` })).toEqual({ decision: 'allow' });
   });
 });
