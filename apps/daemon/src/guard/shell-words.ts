@@ -7,6 +7,8 @@ export interface ShellSegment {
   readonly words: string[];
   /** The operator that ended the segment: `&&`, `||`, `;`, `|`, `&`, `(`, `)`, newline, or empty at the end. */
   readonly separator: string;
+  /** How many `(` subshells enclose the segment; a `cd` inside one does not outlive its `)`. */
+  readonly depth: number;
 }
 
 /**
@@ -21,6 +23,7 @@ export function splitCommand(command: string): ShellSegment[] {
   let word = '';
   let words: string[] = [];
   let quote: "'" | '"' | null = null;
+  let depth = 0;
 
   const flushWord = (): void => {
     if (word !== '') words.push(word);
@@ -28,7 +31,7 @@ export function splitCommand(command: string): ShellSegment[] {
   };
   const flushSegment = (separator: string): void => {
     flushWord();
-    if (raw.trim() !== '') out.push({ raw: raw.trim(), words, separator });
+    if (raw.trim() !== '') out.push({ raw: raw.trim(), words, separator, depth });
     raw = '';
     words = [];
   };
@@ -88,6 +91,8 @@ export function splitCommand(command: string): ShellSegment[] {
       (ch === '&' && !redirection)
     ) {
       flushSegment(ch);
+      if (ch === '(') depth += 1;
+      if (ch === ')') depth = Math.max(0, depth - 1);
       continue;
     }
     // `{` and `}` only open or close a group when they stand alone as words.

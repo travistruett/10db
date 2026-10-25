@@ -76,7 +76,7 @@ function psShowsEnvironment(args: readonly string[]): boolean {
     if (arg.startsWith('-')) {
       if (/^-[a-zA-Z]*E/.test(arg)) return true;
       if (PS_VALUE_FLAG.test(arg)) i += 1;
-    } else if (arg.includes('e')) {
+    } else if (/[eE]/.test(arg)) {
       return true;
     }
   }
@@ -416,13 +416,32 @@ function expandEmbedded(text: string): string {
   );
 }
 
-/** The index of the word a copy or extract writes to, which is not a source a walker reads. */
+/** Whether a `tar` command line extracts: a bundled `xzf`, a `-x` cluster, or `--extract`/`--get`. */
+function tarExtracts(command: readonly string[], words: readonly string[]): boolean {
+  const start = words.findIndex((w) => commandName(w) === 'tar');
+  const rest = words.slice(start + 1);
+  if (rest.some((w) => w === '--extract' || w === '--get' || /^-[a-zA-Z]*x/.test(w))) return true;
+  const bundle = rest[0] ?? '';
+  return command[0] === 'tar' && /^[a-zA-Z]+$/.test(bundle) && bundle.includes('x');
+}
+
+/**
+ * The index of the word a copy or extract writes to, which is not a source a walker reads. A copy has
+ * one only with a destination operand after at least one source (and no `-t`); a tar `-C` is one only
+ * when extracting, since a create reads from it.
+ */
 function destinationIndex(command: readonly string[], words: readonly string[]): number {
   const head = command[0];
   if (head === 'cp' || head === 'rsync') {
-    for (let i = words.length - 1; i >= 0; i -= 1) if (!(words[i] ?? '').startsWith('-')) return i;
+    const start = words.findIndex((w) => commandName(w) === head);
+    if (words.some((w) => w === '-t' || w.startsWith('--target-directory'))) return -1;
+    const operands: number[] = [];
+    for (let i = start + 1; i < words.length; i += 1) {
+      if (!(words[i] ?? '').startsWith('-')) operands.push(i);
+    }
+    return operands.length >= 2 ? (operands[operands.length - 1] ?? -1) : -1;
   }
-  if (head === 'tar') {
+  if (head === 'tar' && tarExtracts(command, words)) {
     const flag = words.findIndex((w) => w === '-C' || w === '--directory');
     if (flag !== -1) return flag + 1;
   }

@@ -134,7 +134,12 @@ function judgeShell(
   let afterCd = false;
   let cwd = startDir;
   let previousSeparator = '';
+  // The directory each enclosing subshell was entered from; leaving one restores it.
+  const outerDirs: (string | null)[] = [];
+  let parens = 0;
   for (const segment of splitCommand(command)) {
+    for (; parens < segment.depth; parens += 1) outerDirs.push(cwd);
+    for (; parens > segment.depth; parens -= 1) cwd = outerDirs.pop() ?? null;
     const words = stripCommandPrefixes(segment.words, { lookThroughRunners: true });
     const head = words[0] ?? '';
     const piped = previousSeparator === '|';
@@ -186,7 +191,7 @@ function judgeShell(
         UNCONDITIONAL_BEFORE.has(before) && UNCONDITIONAL_AFTER.has(segment.separator);
       cwd = certain ? changedDirectory(segment.raw, words, cwd) : null;
     }
-    if (head === 'popd' || segment.separator === ')') cwd = null;
+    if (head === 'popd') cwd = null;
     const forms = commandForms(words);
     if (DEPLOY.some((re) => forms.lines.some((l) => re.test(l))))
       return deny('Deploy and publish commands are never run by agents.');
