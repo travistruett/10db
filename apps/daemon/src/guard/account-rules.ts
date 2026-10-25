@@ -11,6 +11,7 @@ import {
   sep,
 } from 'node:path';
 import { SECRET_VARIABLES } from '../environment';
+import { abbreviates } from './git-rules';
 import { isWithin } from './paths';
 
 const KEYCHAIN = 'Keychain commands are never run by agents: 10db keeps account secrets there.';
@@ -276,9 +277,17 @@ function namesPath(text: string, protectedPath: ProtectedPath): boolean {
   });
 }
 
+/** The target, as written, is the protected path or under it: for a protected path not created yet. */
+function writtenWithin(protectedPath: ProtectedPath, target: string): boolean {
+  return forms(protectedPath.path).some((form) => {
+    const rel = relative(lower(form), lower(resolve(target)));
+    return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
+  });
+}
+
 /** The target is the protected path, inside it, or (for a family) a file named like it plus a suffix. */
 function touches(protectedPath: ProtectedPath, target: string): boolean {
-  if (isWithin(protectedPath.path, target)) return true;
+  if (isWithin(protectedPath.path, target) || writtenWithin(protectedPath, target)) return true;
   if (!protectedPath.family) return false;
   const beside = resolve(target);
   return (
@@ -382,7 +391,8 @@ export function pathRefusal(
   return reachRefusal(expandTilde(value), baseDir, paths, reach);
 }
 
-const RECURSIVE_READERS: ReadonlySet<string> = new Set(['rg', 'find', 'tar', 'rsync']);
+const TAR_NAMES: ReadonlySet<string> = new Set(['tar', 'bsdtar', 'gtar']);
+const RECURSIVE_READERS: ReadonlySet<string> = new Set(['rg', 'find', 'rsync', ...TAR_NAMES]);
 const RECURSIVE_FLAG: Readonly<Record<string, RegExp>> = {
   grep: /^(?:-[a-zA-Z]*[rR]|--recursive$)/,
   egrep: /^(?:-[a-zA-Z]*[rR]|--recursive$)/,
@@ -416,32 +426,85 @@ function expandEmbedded(text: string): string {
   );
 }
 
-/** Whether a `tar` command line extracts: a bundled `xzf`, a `-x` cluster, or `--extract`/`--get`. */
-function tarExtracts(command: readonly string[], words: readonly string[]): boolean {
-  const start = words.findIndex((w) => commandName(w) === 'tar');
-  const rest = words.slice(start + 1);
-  if (rest.some((w) => w === '--extract' || w === '--get' || /^-[a-zA-Z]*x/.test(w))) return true;
-  const bundle = rest[0] ?? '';
-  return command[0] === 'tar' && /^[a-zA-Z]+$/.test(bundle) && bundle.includes('x');
+/** tar's mode letters: extract, create, list, append, update, diff and catenate. */
+const TAR_MODE_LETTERS = 'xctruAd';
+const TAR_MODES = /[xctruAd]/g;
+/** Short options that take a value in GNU tar or bsdtar: the rest of their cluster, or the next word. */
+const TAR_VALUE_LETTERS = 'bCfFgHIKLNsTVX';
+const TAR_LONG_MODES: ReadonlySet<string> = new Set([
+  '--create',
+  '--list',
+  '--append',
+  '--update',
+  '--diff',
+  '--compare',
+  '--delete',
+  '--catenate',
+  '--concatenate',
+  '--test-label',
+]);
+
+/**
+ * Whether tar extracts, from the first mode it is given: an old-style bundle such as `xzf`, a mode
+ * letter in a `-…` cluster, `--extract` or `--get`, or another long mode. The values of options that
+ * take one are skipped, and so is the word after any other long option without `=`, which may be its
+ * value. With no mode before `--` or the end, it is not an extract.
+ */
+function tarExtracts(args: readonly string[]): boolean {
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i] ?? '';
+    if (arg === '--') return false;
+    if (i === 0 && /^[A-Za-z]+$/.test(arg)) {
+      const modes = arg.match(TAR_MODES) ?? [];
+      return modes.length === 1 && modes[0] === 'x';
+    }
+    if (arg.startsWith('--')) {
+      const name = arg.split('=')[0] ?? arg;
+      if (name === '--extract' || name === '--get') return true;
+      if (TAR_LONG_MODES.has(name)) return false;
+      if (!arg.includes('=')) i += 1;
+      continue;
+    }
+    if (!arg.startsWith('-')) continue;
+    for (let at = 1; at < arg.length; at += 1) {
+      const letter = arg.charAt(at);
+      if (TAR_MODE_LETTERS.includes(letter)) return letter === 'x';
+      if (TAR_VALUE_LETTERS.includes(letter)) {
+        if (at === arg.length - 1) i += 1;
+        break;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * GNU cp names its destination with `-t`, alone or in a cluster, or with `--target-directory`,
+ * however abbreviated.
+ */
+function namesTargetDirectory(arg: string): boolean {
+  return /^-[^-]/.test(arg) ? arg.includes('t') : abbreviates(arg, '--target-directory');
 }
 
 /**
  * The index of the word a copy or extract writes to, which is not a source a walker reads. A copy has
- * one only with a destination operand after at least one source (and no `-t`); a tar `-C` is one only
- * when extracting, since a create reads from it.
+ * one only with a destination operand after at least one source, and for cp no target directory; a
+ * tar `-C` is one only when extracting, since a create reads from it.
  */
 function destinationIndex(command: readonly string[], words: readonly string[]): number {
-  const head = command[0];
+  const head = command[0] ?? '';
+  const start = words.findIndex((w) => commandName(w) === head);
+  const args = words.slice(start + 1);
   if (head === 'cp' || head === 'rsync') {
-    const start = words.findIndex((w) => commandName(w) === head);
-    if (words.some((w) => w === '-t' || w.startsWith('--target-directory'))) return -1;
+    // rsync's `-t` keeps modification times; it names no target.
+    if (head === 'cp' && args.some(namesTargetDirectory)) return -1;
     const operands: number[] = [];
     for (let i = start + 1; i < words.length; i += 1) {
       if (!(words[i] ?? '').startsWith('-')) operands.push(i);
     }
     return operands.length >= 2 ? (operands[operands.length - 1] ?? -1) : -1;
   }
-  if (head === 'tar' && tarExtracts(command, words)) {
+  if (TAR_NAMES.has(head) && tarExtracts(args)) {
     const flag = words.findIndex((w) => w === '-C' || w === '--directory');
     if (flag !== -1) return flag + 1;
   }
@@ -453,14 +516,15 @@ function destinationIndex(command: readonly string[], words: readonly string[]):
  * is a glob that can expand to one, or (for a recursive reader) names a directory that holds one;
  * a copy's or extract's destination is not a source. Text that merely mentions a path (a grep
  * pattern, a message) is not a word that names one. A command that runs quoted code (an interpreter,
- * ssh) also has the paths written inside its words checked. `cwd` is null after a `cd` the guard
- * cannot resolve.
+ * ssh) also has the paths written inside its words and its nested scripts (code it reads from a
+ * here-document) checked. `cwd` is null when the guard cannot name the directory.
  */
 export function segmentPathRefusal(
   raw: string,
   command: readonly string[],
   cwd: string | null,
   paths: readonly ProtectedPath[],
+  scripts: readonly string[] = [],
 ): string | null {
   const walks = walksDirectories(command);
   const code = runsQuotedCode(command);
@@ -480,18 +544,29 @@ export function segmentPathRefusal(
       if (named) return named.refusal;
     }
   }
+  if (code) {
+    for (const script of scripts) {
+      const text = expandEmbedded(script);
+      const named = paths.find((p) => namesPath(text, p));
+      if (named) return named.refusal;
+    }
+  }
   return null;
 }
 
-/** Where `cd` or `pushd` goes from `cwd`; null when the target is not a plain path the guard can follow. */
+/**
+ * Where `cd`, `pushd` or `popd` goes from `cwd`; null when the target is not a plain path the guard
+ * can follow, such as `popd`'s, which is on the directory stack.
+ */
 export function changedDirectory(
   raw: string,
   command: readonly string[],
   cwd: string | null,
 ): string | null {
+  if (command[0] === 'popd') return null;
   const words = shellWords(raw);
   const target = words[words.findIndex((w) => commandName(w) === command[0]) + 1];
-  if (target === undefined) return homedir();
+  if (target === undefined) return command[0] === 'cd' ? homedir() : null;
   if (target.startsWith('-') || /[$`*?[{]/.test(target)) return null;
   return cwd === null && !isAbsolute(target) ? null : resolve(cwd ?? '/', target);
 }

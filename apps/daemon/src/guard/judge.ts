@@ -18,7 +18,13 @@ import { ghVerdict } from './gh-rules';
 import { gitVerdict } from './git-rules';
 import { classifyPath, resolveInRepo } from './paths';
 import { readOnlyShellRefusal } from './read-only';
-import { findExecCommands, splitCommand, stripCommandPrefixes } from './shell-words';
+import {
+  findExecCommands,
+  leadingWords,
+  parseShell,
+  stripCommandPrefixes,
+  type ShellSegment,
+} from './shell-words';
 
 export interface GuardInput {
   readonly toolName: string;
@@ -119,58 +125,158 @@ function rmVerdict(
   return null;
 }
 
-const UNCONDITIONAL_BEFORE: ReadonlySet<string> = new Set(['', '&&', ';', '\n']);
-const UNCONDITIONAL_AFTER: ReadonlySet<string> = new Set(['&&', ';', '\n']);
 const shellQuote = (word: string): string => `'${word.replaceAll("'", "'\\''")}'`;
 
 const SHELL_C_FLAG = /^-[a-zA-Z]*c[a-zA-Z]*$/;
 
+/** The scripts a shell's words hand it: a `-c` argument and a `<<<` here-string. */
+function shellScripts(words: readonly string[]): string[] {
+  const flag = words.findIndex((w) => SHELL_C_FLAG.test(w));
+  const here = words.findIndex((w) => w.startsWith('<<<'));
+  const hereWord = words[here];
+  return [
+    ...(flag === -1 ? [] : words.slice(flag + 1, flag + 2)),
+    ...(hereWord === undefined
+      ? []
+      : hereWord === '<<<'
+        ? words.slice(here + 1, here + 2)
+        : [hereWord.slice(3)]),
+  ];
+}
+
+/** A directory a command may run in; null when the guard cannot name it (`cd "$DIR"`). */
+type Dir = string | null;
+const union = (...lists: readonly (readonly Dir[])[]): Dir[] => [...new Set(lists.flat())];
+const DIRECTORY_CHANGES: ReadonlySet<string> = new Set(['cd', 'pushd', 'popd']);
+
+/** The command a segment runs, past reserved words, assignments and wrappers. */
+function commandOf(segment: ShellSegment): {
+  readonly words: string[];
+  readonly negated: boolean;
+  readonly outOfOrder: boolean;
+} {
+  const leading = leadingWords(segment.words);
+  return {
+    words: stripCommandPrefixes(leading.command, { lookThroughRunners: true }),
+    negated: leading.negated,
+    outOfOrder: leading.outOfOrder,
+  };
+}
+
+/**
+ * Every directory a `cd` in the segments names, in an `eval` or a nested script too; a relative one
+ * is unknown.
+ */
+function directoriesNamed(segments: readonly ShellSegment[]): Dir[] {
+  return segments.flatMap((segment) => {
+    const { words } = commandOf(segment);
+    const head = words[0] ?? '';
+    const scripts =
+      head === 'eval' ? [words.slice(1).join(' '), ...segment.nested] : segment.nested;
+    const own = DIRECTORY_CHANGES.has(head) ? [changedDirectory(segment.raw, words, null)] : [];
+    return [...own, ...scripts.flatMap((script) => directoriesNamed(parseShell(script).segments))];
+  });
+}
+
+function firstRefusal(dirs: readonly Dir[], refusal: (dir: Dir) => string | null): string | null {
+  for (const dir of dirs) {
+    const found = refusal(dir);
+    if (found) return found;
+  }
+  return null;
+}
+
+/**
+ * Judges a command run from any of the `start` directories. Each segment is checked from every
+ * directory it may run in. In order, that is where the `cd`s before it may have left the shell: a
+ * `cd` that fails or is skipped leaves it where it was, so only a command joined to a `cd` by `&&`
+ * runs in its target alone, and a subshell's `cd`s end at its `)`. When the order is not certain (a
+ * loop, a function, a parenthesis that is not a subshell), every segment may run from the start or
+ * any directory a `cd` in the command names.
+ */
 function judgeShell(
   input: GuardInput,
   command: string,
   depth = 0,
-  startDir: string | null = input.repoPath,
+  start: readonly Dir[] = [input.repoPath],
 ): GuardVerdict {
-  let afterCd = false;
-  let cwd = startDir;
+  const parse = parseShell(command);
+  const segments = parse.segments.map((segment) => ({ segment, ...commandOf(segment) }));
+  const ordered = parse.certain && !segments.some((s) => s.outOfOrder);
+  const named = ordered ? [] : directoriesNamed(parse.segments);
+  const anywhere = union(start, named);
+  let afterCd = named.length > 0;
+  let dirs: Dir[] = [...start];
+  // Every directory the shell may be in by now.
+  let possible: Dir[] = [...start];
+  // Where a segment after `&&` runs: set by a `cd` or an `eval` that may move the shell.
+  let chained: Dir[] | null = null;
+  // The subshells the previous segment ran in, each with what was possible outside it.
+  const subshells: { readonly id: number; readonly possible: Dir[] }[] = [];
   let previousSeparator = '';
-  // The directory each enclosing subshell was entered from; leaving one restores it.
-  const outerDirs: (string | null)[] = [];
-  let parens = 0;
-  for (const segment of splitCommand(command)) {
-    for (; parens < segment.depth; parens += 1) outerDirs.push(cwd);
-    for (; parens > segment.depth; parens -= 1) cwd = outerDirs.pop() ?? null;
-    const words = stripCommandPrefixes(segment.words, { lookThroughRunners: true });
+  for (const { segment, words, negated } of segments) {
+    if (ordered) {
+      let left = false;
+      while (
+        subshells.length > 0 &&
+        segment.subshells[subshells.length - 1] !== subshells[subshells.length - 1]?.id
+      ) {
+        possible = subshells.pop()?.possible ?? possible;
+        left = true;
+      }
+      // The operator after a `)` is not kept, so a segment after a subshell may run anywhere possible.
+      dirs = !left && previousSeparator === '&&' ? (chained ?? dirs) : possible;
+      for (const id of segment.subshells.slice(subshells.length)) {
+        subshells.push({ id, possible });
+        possible = [...dirs];
+      }
+    } else {
+      dirs = anywhere;
+    }
+    chained = null;
     const head = words[0] ?? '';
     const piped = previousSeparator === '|';
-    const before = previousSeparator;
     previousSeparator = segment.separator;
     if (head === 'sudo') return deny('sudo is never allowed.');
+    // Substitutions and here-documents run where the segment runs.
+    for (const body of segment.nested) {
+      const verdict = judgeShell(input, body, depth, dirs);
+      if (verdict.decision === 'deny') return verdict;
+    }
     const accountRule =
       keychainRefusal(words) ??
       envDumpRefusal(segment.words, words) ??
       secretReferenceRefusal(segment.raw) ??
-      scriptRefusal(head, segment.raw) ??
-      segmentPathRefusal(segment.raw, words, cwd, input.protectedPaths);
+      scriptRefusal(head, [segment.raw, ...segment.nested].join('\n')) ??
+      firstRefusal(dirs, (dir) =>
+        segmentPathRefusal(segment.raw, words, dir, input.protectedPaths, segment.nested),
+      );
     if (accountRule) return deny(accountRule);
     if (SHELLS.has(head)) {
       if (piped) return deny('Piping into a shell runs commands the guard cannot see.');
-      const flagIndex = words.findIndex((w) => SHELL_C_FLAG.test(w));
-      const inner = flagIndex === -1 ? undefined : words[flagIndex + 1];
-      if (inner !== undefined && depth < 3) {
-        const verdict = judgeShell(input, inner, depth + 1, cwd);
+      for (const inner of shellScripts(words)) {
+        if (depth >= 3) break;
+        const verdict = judgeShell(input, inner, depth + 1, dirs);
         if (verdict.decision === 'deny') return verdict;
       }
     }
     if (head === 'find' && depth < 3) {
       for (const exec of findExecCommands(words)) {
-        const verdict = judgeShell(input, exec.map(shellQuote).join(' '), depth + 1, cwd);
+        const verdict = judgeShell(input, exec.map(shellQuote).join(' '), depth + 1, dirs);
         if (verdict.decision === 'deny') return verdict;
       }
     }
     if (head === 'eval' && depth < 3) {
-      const verdict = judgeShell(input, words.slice(1).join(' '), depth + 1, cwd);
+      const script = words.slice(1).join(' ');
+      const verdict = judgeShell(input, script, depth + 1, dirs);
       if (verdict.decision === 'deny') return verdict;
+      // eval runs in this shell, so a `cd` in it moves this shell.
+      const moved = directoriesNamed(parseShell(script).segments);
+      if (moved.length > 0) {
+        afterCd = true;
+        possible = union(possible, moved);
+        chained = union(dirs, moved);
+      }
     }
     if (head === 'git') {
       const verdict = gitVerdict(words, input.delivery ?? Delivery.Local);
@@ -184,14 +290,13 @@ function judgeShell(
       const verdict = rmVerdict(input, words, afterCd);
       if (verdict) return verdict;
     }
-    if (head === 'cd' || head === 'pushd') {
+    if (DIRECTORY_CHANGES.has(head)) {
       afterCd = true;
-      // Only a `cd` that always runs, in this shell, moves the directory the later words resolve from.
-      const certain =
-        UNCONDITIONAL_BEFORE.has(before) && UNCONDITIONAL_AFTER.has(segment.separator);
-      cwd = certain ? changedDirectory(segment.raw, words, cwd) : null;
+      const moved = union(dirs.map((dir) => changedDirectory(segment.raw, words, dir)));
+      possible = union(possible, moved);
+      // After `! cd`, what follows `&&` runs when the cd failed.
+      chained = negated ? union(dirs, moved) : moved;
     }
-    if (head === 'popd') cwd = null;
     const forms = commandForms(words);
     if (DEPLOY.some((re) => forms.lines.some((l) => re.test(l))))
       return deny('Deploy and publish commands are never run by agents.');
