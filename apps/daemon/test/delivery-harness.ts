@@ -97,12 +97,17 @@ export interface DeliveryHarness {
   readonly ticks: { count: number };
   addTask(
     title: string,
-    opts?: { readonly areas?: string[]; readonly dependsOn?: TaskId[] },
+    opts?: {
+      readonly areas?: string[];
+      readonly dependsOn?: TaskId[];
+      readonly description?: string;
+      readonly acceptanceCriteria?: string[];
+    },
   ): TaskDto;
   /** Moves a workstream on from where it is, as the runner would; DONE also marks its task done. */
   settle(id: WorkstreamId, to: Settled): void;
   /** Commits a file on the checked-out branch, as the commit tool does for an agent. */
-  commit(path: string): string;
+  commit(path: string, content?: string): string;
   git$(...args: string[]): string;
   origin$(...args: string[]): string;
   /** Another clone commits `path` to `branch` on origin, as a teammate would; returns the new SHA. */
@@ -204,7 +209,8 @@ export function createDeliveryHarness(
       return state.write((c) =>
         insertTask(c, seeded.id, {
           title,
-          acceptanceCriteria: ['it works'],
+          description: opts.description ?? '',
+          acceptanceCriteria: opts.acceptanceCriteria ?? ['it works'],
           areas: opts.areas ?? ['api'],
           dependsOn: opts.dependsOn ?? [],
         }),
@@ -217,10 +223,10 @@ export function createDeliveryHarness(
         if (to === 'DONE') setTaskStatus(c, getWorkstreamRow(c.tx, id).taskId, 'done');
       });
     },
-    commit(path) {
+    commit(path, content = `${path}\n`) {
       const file = join(remote.repo.path, path);
       mkdirSync(dirname(file), { recursive: true });
-      writeFileSync(file, `${path}\n`);
+      writeFileSync(file, content);
       run(remote.repo.path, ['add', path]);
       run(remote.repo.path, ['commit', '-q', '-m', `Add ${path}`]);
       return run(remote.repo.path, ['rev-parse', 'HEAD']);

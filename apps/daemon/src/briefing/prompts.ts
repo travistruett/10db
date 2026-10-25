@@ -64,6 +64,7 @@ export const RESULT_NUDGE =
 const RULES = [
   'Edit only files inside your claims. For anything else, call the request_claim tool first.',
   'Commit only through the 10db commit tool, naming every path. Never run git commit, add, checkout, reset, stash or push --force.',
+  'Before you end your turn, commit every change in your claims through mcp__10db__commit. A step that ends with changes uncommitted is sent back to you, and no gate runs on it.',
   'When a decision is not yours to make, ask with ask_human (or your question tool). Record routine engineering decisions with record_decision.',
   'If you depart from the plan or a principle, call report_deviation with your reason.',
   'When the acceptance criteria are met and committed, end your turn. 10db runs the gate itself.',
@@ -142,6 +143,8 @@ function actionSection(input: PromptInput): string {
       return input.evidence
         ? `The gate failed (exit ${String(input.evidence.exitCode)} from \`${input.evidence.command}\`). Fix the cause, commit, and end your turn.\n\nGate output (end):\n\`\`\`\n${input.evidence.summary}\n\`\`\``
         : 'The gate failed. Run it, fix the cause, commit, and end your turn.';
+    case 'uncommitted':
+      return `Your step ended with changes in your claims that are not committed:\n${bullets(input.action.paths)}\nCommit each one through mcp__10db__commit, naming every path, then end your turn. 10db runs the gate once they are committed.`;
     case 'verify':
       return 'Verify the work against the acceptance criteria, commit anything outstanding, and end your turn.';
     case 'revise': {

@@ -2,6 +2,7 @@ import { DEFAULT_HAZARDS, mintId } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import {
   bulkFoldKey,
+  findClaimed,
   findForeignClaimWrites,
   findStrays,
   isAlwaysIgnored,
@@ -125,6 +126,42 @@ describe('findStrays', () => {
     ['no claims at all', ['src/api/a.ts'], [], ['src/api/a.ts']],
   ])('%s', (_name, paths, claims, expected) => {
     expect(findStrays(paths, project, claims)).toEqual(expected);
+  });
+});
+
+describe('findClaimed', () => {
+  it.each([
+    [
+      'inside a held area',
+      ['src/api/a.ts', 'src/ui/a.tsx'],
+      [{ kind: 'area' as const, name: 'api' }],
+      ['src/api/a.ts'],
+    ],
+    ['in an area nobody holds', ['src/ui/a.tsx'], [{ kind: 'area' as const, name: 'api' }], []],
+    ['outside every area', ['README.md'], [{ kind: 'area' as const, name: 'api' }], []],
+    [
+      'a hazard file with the hazard claim',
+      ['package.json'],
+      [{ kind: 'hazard' as const, name: 'deps' }],
+      ['package.json'],
+    ],
+    [
+      'a hazard file without the hazard claim',
+      ['package.json'],
+      [{ kind: 'area' as const, name: 'api' }],
+      [],
+    ],
+    ['no claims at all', ['src/api/a.ts'], [], []],
+  ])('%s', (_name, paths, claims, expected) => {
+    expect(findClaimed(paths, project, claims)).toEqual(expected);
+  });
+
+  it('partitions the paths with findStrays, so no path is both or neither', () => {
+    const paths = ['src/api/a.ts', 'src/ui/a.tsx', 'package.json', 'README.md'];
+    const claims = [{ kind: 'area' as const, name: 'api' }];
+    const claimed = findClaimed(paths, project, claims);
+    const strays = findStrays(paths, project, claims);
+    expect([...claimed, ...strays].sort()).toEqual([...paths].sort());
   });
 });
 

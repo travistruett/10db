@@ -1,8 +1,16 @@
 import { execFileSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, relative } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 
 const TOKEN_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
 
@@ -104,6 +112,35 @@ export function createThrowawayRepo(prefix: string): ThrowawayRepo {
     commit: (message) => {
       git('commit', '-q', '-m', message);
     },
+    remove: () => {
+      rmSync(dir, { recursive: true, force: true });
+    },
+  };
+}
+
+/** A directory that stands in for the checkout when a test runs `scripts/gate.sh`. */
+export interface GateSandbox {
+  readonly dir: string;
+  remove(): void;
+}
+
+/**
+ * A temporary directory laid out like the checkout's top level. `scripts/gate.sh` runs in the
+ * directory above its own path, so it writes `.gate/` here. The script and the Makefile are links
+ * to the checkout's own, so the test runs the real ones. The `package.json` stubs `format:check`,
+ * so the format step does not walk the checkout.
+ */
+export function createGateSandbox(checkout: string): GateSandbox {
+  const dir = mkdtempSync(join(tmpdir(), '10db-gate-'));
+  mkdirSync(join(dir, 'scripts'));
+  symlinkSync(resolve(checkout, 'scripts/gate.sh'), join(dir, 'scripts/gate.sh'));
+  symlinkSync(resolve(checkout, 'Makefile'), join(dir, 'Makefile'));
+  writeFileSync(
+    join(dir, 'package.json'),
+    '{"name":"gate-sandbox","private":true,"scripts":{"format:check":"true"}}\n',
+  );
+  return {
+    dir,
     remove: () => {
       rmSync(dir, { recursive: true, force: true });
     },

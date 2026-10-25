@@ -1,21 +1,35 @@
 import { spawnSync } from 'node:child_process';
-import { chmodSync, globSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  globSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   createBareRepo,
+  createGateSandbox,
   createThrowawayRepo,
   envWithoutGitVariables,
   type BareRepo,
+  type GateSandbox,
   type ThrowawayRepo,
 } from './fixtures';
 import { readRepoFile, repoRoot } from './workspace';
 
 // /bin/bash, not bash from PATH: macOS ships bash 3.2 there, and every script must run on it.
-function runGate(env: Record<string, string>) {
-  const result = spawnSync('/bin/bash', [resolve(repoRoot, 'scripts/gate.sh')], {
-    cwd: repoRoot,
+// The script is run from the sandbox's link, because it writes `.gate/` beside its own path.
+function runGate(sandbox: GateSandbox, env: Record<string, string>) {
+  const result = spawnSync('/bin/bash', [join(sandbox.dir, 'scripts/gate.sh')], {
+    cwd: sandbox.dir,
     encoding: 'utf8',
     env: { ...envWithoutGitVariables(), ...env },
   });
@@ -36,19 +50,46 @@ function failingCargoDir(): string {
   return dir;
 }
 
+/**
+ * The checkout's `.gate/` logs with their modification times. `make gate` writes `test.log` while
+ * this file runs, so that one log is left out.
+ */
+function checkoutGateLogs(): Record<string, number> {
+  const dir = resolve(repoRoot, '.gate');
+  if (!existsSync(dir)) return {};
+  return Object.fromEntries(
+    readdirSync(dir)
+      .filter((name) => name !== 'test.log')
+      .map((name) => [name, statSync(resolve(dir, name)).mtimeMs]),
+  );
+}
+
 describe('scripts/gate.sh', () => {
+  let sandbox: GateSandbox;
+
+  beforeEach(() => {
+    sandbox = createGateSandbox(repoRoot);
+  });
+
+  afterEach(() => {
+    sandbox.remove();
+  });
+
   it('prints one PASS summary line when the selected steps pass', () => {
-    const { status, last } = runGate({ GATE_STEPS: 'format' });
+    const { status, last } = runGate(sandbox, { GATE_STEPS: 'format' });
     expect(status).toBe(0);
     expect(last).toMatch(/^GATE PASS format \(\d+s\)$/);
-    // Prettier walks the whole repo, which is slow while the other test files run alongside.
   }, 60_000);
 
   it('reports rust as skipped, not failed, when cargo is missing', () => {
     // A PATH without cargo but with node and pnpm.
     const path = [resolve(process.execPath, '..'), '/usr/bin', '/bin'].join(':');
     // The CI gate job sets GATE_SKIP_RUST for the whole job; clear it so this proves the cargo path.
-    const { status, last } = runGate({ GATE_STEPS: 'rust', GATE_SKIP_RUST: '', PATH: path });
+    const { status, last } = runGate(sandbox, {
+      GATE_STEPS: 'rust',
+      GATE_SKIP_RUST: '',
+      PATH: path,
+    });
     expect(status).toBe(0);
     expect(last).toMatch(/^GATE PASS rust skipped \(\d+s\)$/);
   });
@@ -57,7 +98,7 @@ describe('scripts/gate.sh', () => {
     const fake = failingCargoDir();
     try {
       // The CI gate job sets GATE_SKIP_RUST for the whole job; clear it for this case.
-      const { status, last } = runGate({
+      const { status, last } = runGate(sandbox, {
         GATE_STEPS: 'rust',
         GATE_SKIP_RUST: '',
         PATH: `${fake}:${process.env['PATH'] ?? ''}`,
@@ -73,7 +114,11 @@ describe('scripts/gate.sh', () => {
     const fake = failingCargoDir();
     try {
       const path = `${fake}:${process.env['PATH'] ?? ''}`;
-      const { status, last } = runGate({ GATE_STEPS: 'rust', GATE_SKIP_RUST: '1', PATH: path });
+      const { status, last } = runGate(sandbox, {
+        GATE_STEPS: 'rust',
+        GATE_SKIP_RUST: '1',
+        PATH: path,
+      });
       expect(status).toBe(0);
       expect(last).toMatch(/^GATE PASS rust skipped \(\d+s\)$/);
     } finally {
@@ -82,10 +127,25 @@ describe('scripts/gate.sh', () => {
   });
 
   it('names the failing step and exits non-zero', () => {
-    const { status, last } = runGate({ GATE_STEPS: 'fail-probe' });
+    const { status, last } = runGate(sandbox, { GATE_STEPS: 'fail-probe' });
     expect(status).toBe(1);
     expect(last).toMatch(/^GATE FAIL: fail-probe — logs in \.gate\/ \(\d+s\)$/);
   });
+
+  it("writes nothing under the checkout's .gate/", () => {
+    const before = checkoutGateLogs();
+    runGate(sandbox, { GATE_STEPS: 'format fail-probe' });
+    expect(checkoutGateLogs()).toEqual(before);
+  }, 60_000);
+
+  it('leaves only the logs of its own run in .gate/', () => {
+    // A rust log from an earlier run with cargo: this run skips rust, so nothing rewrites it.
+    mkdirSync(join(sandbox.dir, '.gate'));
+    writeFileSync(join(sandbox.dir, '.gate', 'rust.log'), 'left by an earlier run\n');
+    const { status } = runGate(sandbox, { GATE_STEPS: 'format' });
+    expect(status).toBe(0);
+    expect(readdirSync(join(sandbox.dir, '.gate'))).toEqual(['format.log']);
+  }, 60_000);
 
   it('runs the e2e step by default, after build', () => {
     const steps =

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { isCommandRunner } from './command-runners';
+import { isCommandRunner, isPackageTool, packageToolProgramIndex } from './command-runners';
 
 /** The most command prefixes one project may allow. */
 export const MAX_ALLOWED_COMMANDS = 32;
@@ -9,22 +9,6 @@ export const MAX_ALLOWED_COMMANDS = 32;
  * not: a flag can carry a command of its own, so a prefix never names one.
  */
 const PLAIN_WORD = /^[A-Za-z0-9@][A-Za-z0-9._/@:+-]*$/;
-/** Package managers run any script or package they are named with, so one word alone allows them all. */
-const PACKAGE_MANAGERS: ReadonlySet<string> = new Set(['npm', 'pnpm', 'yarn', 'bun']);
-/** Tools that fetch and run a package by name; alone, they allow every package. */
-const PACKAGE_RUNNERS: ReadonlySet<string> = new Set(['npx', 'bunx', 'pnpx', 'dlx']);
-/** Subcommands that run the program named after them: `pnpm exec prettier` names one, `pnpm exec` names none. */
-const PROGRAM_RUNNERS: ReadonlySet<string> = new Set(['exec', 'dlx', 'x']);
-
-/**
- * The position of the program a package tool runs: `pnpm exec X` and `npm x X` name it third, `npx X`
- * second. Null when the prefix names no program that way.
- */
-function namedProgramIndex(name: string, subcommand: string): number | null {
-  if (PACKAGE_MANAGERS.has(name) && PROGRAM_RUNNERS.has(subcommand)) return 2;
-  if (PACKAGE_RUNNERS.has(name)) return 1;
-  return null;
-}
 
 /**
  * Whether a program a prefix names runs whatever it is given, so allowing the prefix allows anything: a
@@ -32,8 +16,8 @@ function namedProgramIndex(name: string, subcommand: string): number | null {
  * last part, so this reads one the same way.
  */
 function runsAnything(program: string): boolean {
-  const name = program.slice(program.lastIndexOf('/') + 1).toLowerCase();
-  return isCommandRunner(name) || PACKAGE_MANAGERS.has(name) || PACKAGE_RUNNERS.has(name);
+  const name = program.slice(program.lastIndexOf('/') + 1);
+  return isCommandRunner(name) || isPackageTool(name);
 }
 
 /**
@@ -49,15 +33,15 @@ export function allowedCommandProblem(command: string): string | null {
     return 'Use plain words separated by single spaces: no flags, quotes, globs, variables or shell operators';
   if (words.some((word) => word.split('/').includes('..')))
     return 'A path in a prefix may not climb out with ..';
-  const [program = '', subcommand = ''] = words;
+  const [program = ''] = words;
   if (program.includes('/'))
     return `${program} is a path; name the program by its name on PATH, such as make`;
   const name = program.toLowerCase();
   if (isCommandRunner(name))
     return `${program} runs the commands or code it is given, so it can't be allowed as a prefix`;
-  if (words.length === 1 && (PACKAGE_MANAGERS.has(name) || PACKAGE_RUNNERS.has(name)))
+  if (words.length === 1 && isPackageTool(name))
     return `${program} alone allows every script or package; name what it runs, such as ${program} test`;
-  const at = namedProgramIndex(name, subcommand.toLowerCase());
+  const at = packageToolProgramIndex(words);
   if (at === null) return null;
   const through = words.slice(0, at).join(' ');
   const named = words[at];

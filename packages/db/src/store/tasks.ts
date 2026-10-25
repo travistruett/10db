@@ -11,8 +11,11 @@ import {
   TaskMove,
   TaskPatch,
   TaskStatus,
+  Title,
   WorkstreamState,
   type ProjectId,
+  type ProposalId,
+  type TaskConfig,
   type TaskDto,
   type TaskId,
 } from '@10db/contracts';
@@ -74,6 +77,40 @@ export function insertTask(ctx: WriteContext, projectId: ProjectId, input: TaskI
       throw new InvalidError('Every dependency must be an existing task in the same project');
     }
   }
+  return writeTask(ctx, projectId, { ...config, proposalId: null });
+}
+
+/**
+ * Files an accepted new-task proposal as an open task linked to it. The proposal names no areas or
+ * acceptance criteria, so the task starts with none; its title meets the same rule as a task made by hand.
+ */
+export function insertTaskFromProposal(
+  ctx: WriteContext,
+  input: {
+    readonly proposalId: ProposalId;
+    readonly projectId: ProjectId;
+    readonly title: string;
+    readonly description: string;
+  },
+): TaskDto {
+  return writeTask(ctx, input.projectId, {
+    title: Title.parse(input.title),
+    description: input.description,
+    acceptanceCriteria: [],
+    areas: [],
+    dependsOn: [],
+    riskTags: [],
+    flowId: null,
+    proposalId: input.proposalId,
+  });
+}
+
+/** Writes a task the caller has already validated, at the end of the board, and announces it with its proposal, if any. */
+function writeTask(
+  ctx: WriteContext,
+  projectId: ProjectId,
+  config: TaskConfig & { readonly proposalId: ProposalId | null },
+): TaskDto {
   const order = ctx.tx
     .select({ value: max(schema.tasks.boardOrder) })
     .from(schema.tasks)
@@ -88,6 +125,7 @@ export function insertTask(ctx: WriteContext, projectId: ProjectId, input: TaskI
     areas: config.areas,
     riskTags: config.riskTags,
     flowId: config.flowId,
+    proposalId: config.proposalId,
     status: TaskStatus.Open,
     boardOrder: (order?.value ?? 0) + 1,
     workspaceMode: 'shared' as const,
@@ -101,7 +139,7 @@ export function insertTask(ctx: WriteContext, projectId: ProjectId, input: TaskI
     type: EventType.TaskCreated,
     entityType: 'task',
     entityId: row.id,
-    data: { projectId },
+    data: { projectId, proposalId: config.proposalId },
   });
   return getTask(ctx.tx, row.id);
 }

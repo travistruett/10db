@@ -45,7 +45,7 @@ import {
   setRoutingRules,
   setTeam,
 } from '@10db/db';
-import type { BenchmarkSync } from '../benchmarks';
+import { syncWarning, type BenchmarkSync } from '../benchmarks';
 import type { ApiServices } from '../api';
 import type { BatchStarter, Shipper } from '../delivery';
 import { markGhRequired } from '../environment';
@@ -119,11 +119,14 @@ export function createServices(deps: {
     },
     eventsAfter: (after, limit) => listEventsAfter(db, after, limit),
     subscribe: (listener) => deps.bus.subscribe(listener),
-    systemCheck: async () =>
-      markGhRequired(
+    systemCheck: async () => ({
+      ...markGhRequired(
         await deps.systemCheck(),
         listProjects(db).some((p) => p.delivery === Delivery.PullRequest),
       ),
+      // Read per request: the tool check is memoized at start, but a sync can fail or recover at any time.
+      benchmarkSync: syncWarning(deps.benchmarks.status()),
+    }),
     keepAwake: () => deps.keepAwake.status(),
     setKeepAwake: (mode) => deps.keepAwake.setMode(mode),
     eventsHead: () => latestEventSeq(db),

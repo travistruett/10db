@@ -20,6 +20,18 @@ import { fetchAaModels } from './aa-client';
 
 /** A daily sync stays far inside the free tier's 100 requests a day. */
 export const AA_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
+/** The wait before the retry after one failure; each further failure in a row doubles it, up to the cap. */
+const AA_RETRY_BASE_MS = 15 * 60 * 1000;
+const AA_RETRY_CAP_MS = 6 * 60 * 60 * 1000;
+
+/** The wait before the retry that follows `failures` failures in a row. */
+function retryDelayMs(failures: number): number {
+  return Math.min(AA_RETRY_BASE_MS * 2 ** (failures - 1), AA_RETRY_CAP_MS);
+}
+
+/** The outcomes that keep the last good data and retry on the backoff. */
+const isFailure = (outcome: BenchmarkStatusDto['outcome']): boolean =>
+  outcome === 'unauthorized' || outcome === 'rate_limited' || outcome === 'failed';
 
 const STATUS_KEY = 'benchmarks.status';
 /** Everything but the model count is recorded at sync time, so reading the status never touches the Keychain. */
@@ -49,8 +61,12 @@ export interface BenchmarkSync {
   status(): BenchmarkStatusDto;
   /** One sync; a sync already running is joined, not repeated. It never rejects. */
   sync(): Promise<BenchmarkStatusDto>;
-  /** Syncs now if the last success is a day old, then once a day. */
+  /**
+   * Syncs now if the last sync failed or the last success is a day old. Then the next sync is a day after
+   * a good one, and after a failure the backoff, which a later sync replaces.
+   */
   start(): void;
+  /** Cancels the pending sync; a sync already running finishes without scheduling another. */
   stop(): void;
 }
 
@@ -95,7 +111,9 @@ export function createBenchmarkSync(deps: BenchmarkSyncDeps): BenchmarkSync {
   const { state } = deps;
   let running: Promise<BenchmarkStatusDto> | null = null;
   let timer: Timer | null = null;
-  let stopped = false;
+  let active = false;
+  /** Failures in a row; the next wait grows with it and a good sync resets it. */
+  let failures = 0;
 
   /** The latest status this process computed, used when the database can't be read or written. */
   let remembered: StoredStatus = NEVER;
@@ -116,10 +134,14 @@ export function createBenchmarkSync(deps: BenchmarkSyncDeps): BenchmarkSync {
     }
   };
   const status = (): BenchmarkStatusDto => ({ ...stored(), models: modelCount() });
-  /** Records the outcome; a database that can't be read or written leaves it in memory only. */
+  /**
+   * Records the outcome and re-arms the timer for it, so the timer and the status move together. A database
+   * that can't be read or written leaves the status in memory only.
+   */
   const record = (next: Partial<StoredStatus>): BenchmarkStatusDto => {
     const merged = { ...stored(), ...next };
     remembered = merged;
+    failures = isFailure(merged.outcome) ? failures + 1 : 0;
     try {
       state.write((ctx) => {
         setAppSetting(ctx, STATUS_KEY, merged);
@@ -130,6 +152,7 @@ export function createBenchmarkSync(deps: BenchmarkSyncDeps): BenchmarkSync {
         'could not record the benchmark status',
       );
     }
+    rearm();
     return { ...merged, models: modelCount() };
   };
 
@@ -235,37 +258,35 @@ export function createBenchmarkSync(deps: BenchmarkSyncDeps): BenchmarkSync {
         deps.logger.error({ err: error instanceof Error ? error.name : 'error' }, 'sync failed');
       },
     );
-  const runAndRearm = async (): Promise<void> => {
-    try {
-      await syncQuietly();
-    } finally {
-      schedule(AA_SYNC_INTERVAL_MS);
-    }
+  const schedule = (ms: number): void => {
+    if (!active) return;
+    timer = deps.clock.setTimeout(() => {
+      void syncQuietly();
+    }, ms);
   };
 
-  const schedule = (ms: number): void => {
-    if (stopped) return;
-    timer = deps.clock.setTimeout(() => {
-      void runAndRearm();
-    }, ms);
+  /** Called from `record`, so the timer is re-armed in the same step as the status it follows. */
+  const rearm = (): void => {
+    timer?.cancel();
+    timer = null;
+    schedule(failures === 0 ? AA_SYNC_INTERVAL_MS : retryDelayMs(failures));
   };
 
   return {
     status,
     sync,
     start() {
-      stopped = false;
-      const last = stored().lastSuccessAt;
-      const age = last === null ? Infinity : deps.clock.now().getTime() - Date.parse(last);
-      if (age >= AA_SYNC_INTERVAL_MS) {
-        void syncQuietly();
-        schedule(AA_SYNC_INTERVAL_MS);
-      } else {
-        schedule(AA_SYNC_INTERVAL_MS - age);
-      }
+      active = true;
+      const last = stored();
+      const age =
+        last.lastSuccessAt === null
+          ? Infinity
+          : deps.clock.now().getTime() - Date.parse(last.lastSuccessAt);
+      if (isFailure(last.outcome) || age >= AA_SYNC_INTERVAL_MS) void syncQuietly();
+      else schedule(AA_SYNC_INTERVAL_MS - age);
     },
     stop() {
-      stopped = true;
+      active = false;
       timer?.cancel();
       timer = null;
     },

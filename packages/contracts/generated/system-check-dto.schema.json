@@ -79,6 +79,34 @@
           "required"
         ]
       }
+    },
+    "benchmarkSync": {
+      "default": null,
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "outcome": {
+              "type": "string",
+              "enum": [
+                "unauthorized",
+                "rate_limited",
+                "failed"
+              ]
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "outcome",
+            "message"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   },
   "required": [

@@ -14,6 +14,16 @@ export const ToolCheck = z.object({
 });
 export type ToolCheck = z.infer<typeof ToolCheck>;
 
+/**
+ * An Artificial Analysis sync that failed and no later sync has cleared. Routing keeps the last good
+ * scores meanwhile, so steps can fall back to the project default without any other sign.
+ */
+export const BenchmarkSyncWarning = z.object({
+  outcome: z.enum(['unauthorized', 'rate_limited', 'failed']),
+  message: z.string(),
+});
+export type BenchmarkSyncWarning = z.infer<typeof BenchmarkSyncWarning>;
+
 /** What `GET /system` reports: where each tool is, and whether the login-shell capture worked. */
 export const SystemCheckDto = z.object({
   loginEnv: z.object({
@@ -23,6 +33,7 @@ export const SystemCheckDto = z.object({
   /** The Claude Code version the account checks were verified on, and a warning on a newer major version (accounts spec §10). */
   claudeCode: z.object({ verifiedOn: z.string(), warning: z.string().nullable() }),
   tools: z.array(ToolCheck),
+  benchmarkSync: BenchmarkSyncWarning.nullable().default(null),
 });
 export type SystemCheckDto = z.infer<typeof SystemCheckDto>;
 

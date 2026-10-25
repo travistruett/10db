@@ -14,8 +14,8 @@ import {
   StepPlanDto,
   TaskDto,
   WorkstreamDto,
+  SystemCheckDto,
   WorkstreamId,
-  type SystemCheckDto,
 } from '@10db/contracts';
 import { getAccount, getWorkstream, listAccounts } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -23,6 +23,7 @@ import { z } from 'zod';
 import { WebSocket } from 'ws';
 import { apiClient, quickFlowId } from '../../test/api-client';
 import { createTempRepo, tempDir, waitFor, waitForAsync } from '../../test/fixtures';
+import { ManualClock } from '../clock';
 import type { CaffeinateSpawner } from '../keep-awake';
 import { FakeAdapter, type FakeScriptBook } from '../sessions';
 import { AlreadyRunningError, readRuntimeInfo, startDaemon, type RunningDaemon } from './index';
@@ -346,6 +347,7 @@ describe('startDaemon', () => {
       loginEnv: { source: 'login_shell', warning: null },
       claudeCode: { verifiedOn: '2.1.302', warning: null },
       tools: [{ name: 'git', path: '/usr/bin/git', version: 'git version 2.50.1', required: true }],
+      benchmarkSync: null,
     };
     daemon = await startDaemon({
       dataDir: dir.path,
@@ -524,6 +526,47 @@ describe('startDaemon', () => {
     } finally {
       repo.cleanup();
     }
+  });
+
+  it('names a rate-limited Artificial Analysis sync on the system check, and clears it when the retry succeeds', async () => {
+    const clock = new ManualClock(new Date('2026-10-17T12:00:00.000Z'));
+    let aaStatus = 429;
+    const aaFetch: typeof fetch = () =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            intelligence_index_version: '9.9',
+            pagination: { has_more: false },
+            data: [{ slug: 'other-model', name: 'Other', model_creator: { name: 'Lab' } }],
+          }),
+          { status: aaStatus },
+        ),
+      );
+    daemon = await startDaemon({
+      dataDir: dir.path,
+      port: 0,
+      adapter: new FakeAdapter({}),
+      logLevel: 'warn',
+      ...QUIET,
+      clock,
+      aaKey: () => 'aa-test-key',
+      fetch: aaFetch,
+    });
+    const api = apiClient(daemon.url, daemon.token);
+    const warning = await waitForAsync(
+      async () => (await api.get('/system', SystemCheckDto)).benchmarkSync,
+    );
+    expect(warning).toMatchObject({ outcome: 'rate_limited' });
+    expect(warning?.message).toContain('limit');
+
+    aaStatus = 200;
+    clock.advance(15 * 60_000);
+    await waitForAsync(async () =>
+      (await api.get('/system', SystemCheckDto)).benchmarkSync === null ? true : undefined,
+    );
+    expect(await api.get('/benchmarks/status', BenchmarkStatusDto)).toMatchObject({
+      outcome: 'ok',
+    });
   });
 
   it('seeds the team, reports no AA key, plans on hand-set scores, and refuses an over-budget start', async () => {

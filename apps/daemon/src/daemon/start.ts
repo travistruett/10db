@@ -176,6 +176,7 @@ function noSystemCheck(): Promise<SystemCheckDto> {
       version: null,
       required: t.required,
     })),
+    benchmarkSync: null,
   });
 }
 
