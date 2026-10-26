@@ -2,7 +2,7 @@
 
 - **Status:** Locked
 - **Scope:** Who pays for each project's sessions: accounts, how a session proves it runs on its account, per-account concurrency, pauses and monthly caps, usage, moving a project between accounts with work in flight, and how agents are kept from credentials.
-- **Summary:** The design is `docs/superpowers/specs/2026-10-17-10db-accounts-design.md`, with spike 12's findings in `docs/architecture/research/spike-12-accounts.md`; its decisions and the plan's are rows 104–117 of `decisions.md`. Changes are new rows that name what they supersede.
+- **Summary:** The design is `docs/superpowers/specs/2026-10-17-10db-accounts-design.md`, with spike 12's findings in `docs/architecture/research/spike-12-accounts.md`; its decisions and the plan's are rows 105–118 of `decisions.md`. Changes are new rows that name what they supersede.
 
 ## Where it lives
 

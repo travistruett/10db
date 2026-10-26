@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { isCommandRunner, isPackageTool, packageToolProgramIndex } from './command-runners';
+import {
+  isCommandRunner,
+  isPackageTool,
+  packageToolForwards,
+  packageToolProgramIndex,
+} from './command-runners';
 
 describe('isCommandRunner', () => {
   it.each([
@@ -59,6 +64,37 @@ describe('isPackageTool', () => {
     ['a tool whose name starts with a package runner', 'npxx'],
   ])('does not name %s (%s) as a package tool', (_name, program) => {
     expect(isPackageTool(program)).toBe(false);
+  });
+});
+
+describe('packageToolForwards', () => {
+  it.each<[string, string[], boolean]>([
+    ['yarn workspace, which runs a command in a workspace', ['yarn', 'workspace'], true],
+    ['yarn workspace with a command after it', ['yarn', 'workspace', 'web', 'exec', 'bash'], true],
+    ['yarn workspaces, which runs a command in each workspace', ['yarn', 'workspaces'], true],
+    ['yarn workspaces foreach', ['yarn', 'workspaces', 'foreach', 'run'], true],
+    ['pnpm recursive exec', ['pnpm', 'recursive', 'exec', 'bash'], true],
+    ['yarn node, which runs node with the rest of the line', ['yarn', 'node', '-e', 'x'], true],
+    ['npm init with a package', ['npm', 'init', 'foo'], true],
+    ['npm init alone, which runs any package given to it', ['npm', 'init'], true],
+    ['npm create with a package', ['npm', 'create', 'vite'], true],
+    ['pnpm create with a package', ['pnpm', 'create', 'vite'], true],
+    ['yarn create with a package', ['yarn', 'create', 'vite'], true],
+    ['pnpm multi, an alias of pnpm recursive', ['pnpm', 'multi', 'exec', 'bash'], true],
+    ['pnpm m, a short alias of pnpm recursive', ['pnpm', 'm', 'exec', 'bash'], true],
+    ['npm innit with a package, an alias of npm init', ['npm', 'innit', 'foo'], true],
+    ['bun create with a template', ['bun', 'create', 'vite'], true],
+    ['bun c, a short alias of bun create', ['bun', 'c', 'vite'], true],
+    ['capitalised tool and subcommand', ['PNPM', 'RECURSIVE', 'exec'], true],
+    ['yarn init, which fetches no package', ['yarn', 'init'], false],
+    ['pnpm init, which fetches no package', ['pnpm', 'init'], false],
+    ['a package manager running a script', ['npm', 'run', 'build'], false],
+    ['yarn running a script', ['yarn', 'test'], false],
+    ['a workspace subcommand of another tool', ['make', 'workspace', 'web'], false],
+    ['a recursive subcommand of npm', ['npm', 'recursive'], false],
+    ['no words', [], false],
+  ])('%s: %j -> %j', (_name, words, forwards) => {
+    expect(packageToolForwards(words)).toBe(forwards);
   });
 });
 

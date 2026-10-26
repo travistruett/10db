@@ -60,7 +60,7 @@
 - [ ] Batch delivery: the manual acceptance on a throwaway GitHub repository (plan 08 Task 13).
 - [ ] Batch delivery: fork support. The cut records the repository from `gh repo view` without `-R`, which picks the base repository by remote priority (`upstream`, then `github`, then `origin`), so a fork with an `upstream` remote records the parent repository while the push goes to `origin`. Record it from `git remote get-url origin` instead, and test a fork.
 - [ ] Accounts: the Accounts Settings screen (accounts spec §7, §12 point 4): list accounts with kind, verified identity and this month's usage against the cap, sign-in steps, secret entry and confirmation (plan 12, `10db-12-accounts-settings`).
-- [ ] Accounts: relax staggered subscription starts once the refresh question is answered (decision AC8; spike 12 refresh rerun).
+- [ ] Accounts: relax staggered subscription starts once the refresh question is answered (decision 112; spike 12 refresh rerun).
 - [ ] Accounts: the Factory view shows a paused workstream's account and pause reason; today the inbox card says why.
 - [ ] Accounts: an account card folds per project, so an account two projects share can raise one card in each.
 - [ ] Accounts: OS-level isolation (one macOS user per subscription account), if two-subscription Keychain separation fails (accounts spec §10).

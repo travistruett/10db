@@ -14,6 +14,8 @@ describe('AllowedCommand', () => {
     ['a package named after npm x', 'npm x prettier'],
     ['a bin inside node_modules', 'pnpm exec node_modules/.bin/tsc'],
     ['a bun subcommand', 'bun test'],
+    ['a yarn script', 'yarn test'],
+    ['an npm script', 'npm run build'],
   ])('accepts %s (%s)', (_name, command) => {
     expect(AllowedCommand.safeParse(command).success).toBe(true);
   });
@@ -72,6 +74,34 @@ describe('AllowedCommand', () => {
     ['an interpreter run by pnpm exec', 'pnpm exec node'],
     ['an interpreter run by npx', 'npx python3'],
     ['an applescript runner', 'osascript'],
+    ['yarn workspace, which forwards what follows', 'yarn workspace'],
+    ['yarn workspace with a name', 'yarn workspace web'],
+    ['yarn workspace running a shell', 'yarn workspace web exec bash'],
+    ['yarn workspace running a test script', 'yarn workspace web test'],
+    ['yarn workspaces, which forwards what follows', 'yarn workspaces'],
+    ['yarn workspaces foreach', 'yarn workspaces foreach'],
+    ['pnpm recursive, which forwards what follows', 'pnpm recursive'],
+    ['pnpm recursive exec', 'pnpm recursive exec'],
+    ['yarn node, which runs node with what follows', 'yarn node'],
+    ['npm init alone, which runs any package it is given', 'npm init'],
+    ['npm init with a package', 'npm init create-app'],
+    ['npm create alone, which runs any package it is given', 'npm create'],
+    ['npm create with a package', 'npm create vite'],
+    ['pnpm create alone', 'pnpm create'],
+    ['pnpm create with a package', 'pnpm create vite'],
+    ['yarn create alone', 'yarn create'],
+    ['yarn create with a package', 'yarn create vite'],
+    ['pnpm multi, an alias of pnpm recursive', 'pnpm multi'],
+    ['pnpm multi running a shell', 'pnpm multi exec bash'],
+    ['pnpm m, a short alias of pnpm recursive', 'pnpm m'],
+    ['pnpm m running a shell', 'pnpm m exec bash'],
+    ['npm innit alone, an alias of npm init', 'npm innit'],
+    ['npm innit with a package', 'npm innit create-app'],
+    ['bun create alone', 'bun create'],
+    ['bun create with a template', 'bun create vite'],
+    ['bun c, a short alias of bun create', 'bun c'],
+    ['bun c with a template', 'bun c vite'],
+    ['a forwarding form in capitals', 'PNPM RECURSIVE'],
   ])('rejects %s (%s)', (_name, command) => {
     expect(AllowedCommand.safeParse(command).success).toBe(false);
   });
