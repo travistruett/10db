@@ -17,10 +17,11 @@ import { isWithin } from './paths';
 /**
  * Two kinds of rule live here. The shell-text rules (Keychain commands, environment dumps, secret
  * references and protected paths in shell text) are interim policy that keeps a cooperative agent
- * from casual reads; text matching cannot see everything a shell does, and the lane sandbox plan
- * removes them (lane sandbox design, D12). `pathRefusal`, `protectedPaths` and `isOwnToolResult`
- * are the resolved-path check on the file tools, which D8 keeps as part of the file-tool boundary.
- * The kernel sandbox is the lane boundary (D1).
+ * from casual reads; text matching cannot see everything a shell does. The lane sandbox is designed
+ * but not built: once it is, the kernel sandbox is the lane boundary and these rules go.
+ * `pathRefusal`, `protectedPaths` and `isOwnToolResult` are the resolved-path check on the file
+ * tools, which the sandbox design keeps as part of the file-tool boundary
+ * (`docs/architecture/03-trust-boundaries.md`).
  */
 
 const KEYCHAIN = 'Keychain commands are never run by agents: 10db keeps account secrets there.';
