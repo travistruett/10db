@@ -10,6 +10,7 @@ import {
   listBoardColumns,
   listWorkstreams,
   moveTask,
+  patchAccount,
   patchProject,
   patchTask,
   seedProject,
@@ -79,6 +80,13 @@ describe('resolveStepPlan', () => {
     measureForTests(state);
     const plan = resolveStepPlan(state.db, addTask().id);
     expect(plan.steps.map((s) => `${s.model}@${s.effort}`)).toEqual(['sonnet@high', 'opus@medium']);
+  });
+
+  it("routes only on the aliases the project's account offers", () => {
+    measureForTests(state);
+    state.write((ctx) => patchAccount(ctx, project.accountId, { settings: { aliases: ['opus'] } }));
+    const plan = resolveStepPlan(state.db, addTask().id);
+    expect(plan.steps.map((s) => s.model)).toEqual(['opus', 'opus']);
   });
 });
 

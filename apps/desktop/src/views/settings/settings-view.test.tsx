@@ -3,7 +3,20 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
-import { projectDto } from '../../test/fixtures';
+import { accountDto, DEFAULT_ACCOUNT, projectDto } from '../../test/fixtures';
+
+/** Opens a Select and picks an option from its own list (every Select keeps its options in the document). */
+async function pick(select: HTMLElement, option: string): Promise<void> {
+  fireEvent.click(select);
+  const labelId = select instanceof HTMLInputElement ? select.labels?.[0]?.id : undefined;
+  const listbox = screen
+    .getAllByRole('listbox', { hidden: true })
+    .find((l) => l.getAttribute('aria-labelledby') === labelId);
+  expect(listbox).toBeDefined();
+  fireEvent.click(
+    await within(listbox ?? document.body).findByRole('option', { name: option, hidden: true }),
+  );
+}
 
 describe('SettingsView', () => {
   it('opens General from /settings and lists every section in its group', async () => {
@@ -51,21 +64,166 @@ describe('SettingsView', () => {
     expect(await screen.findByText('Create a project on the board first.')).toBeTruthy();
   });
 
-  it("shows the selected project's areas, hazards and billing", async () => {
+  it("shows the selected project's areas, hazards and account, moves it, and names its fallback", async () => {
     const project = projectDto({
       areas: [{ name: 'api', globs: ['src/api/**'] }],
       hazards: [{ name: 'deps', globs: ['**/package.json'], commands: ['pnpm add'] }],
     });
+    const client = accountDto({
+      kind: 'anthropic_api_key',
+      label: 'Client key',
+      configDir: '/data/accounts/k/claude',
+    });
+    const patched: unknown[] = [];
     server.use(
       http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/accounts'), () => HttpResponse.json([DEFAULT_ACCOUNT, client])),
+      http.patch(daemonUrl('/projects/:projectId'), async ({ request }) => {
+        const body = await request.json();
+        patched.push(body);
+        // The daemon refuses an uncapped metered fallback; the move itself goes through.
+        return typeof body === 'object' && body !== null && 'fallbackAccountId' in body
+          ? HttpResponse.json(
+              {
+                error: 'invalid',
+                message:
+                  'Set a monthly cap on "Client key" before making it a fallback: 10db moves work onto it without asking',
+              },
+              { status: 400 },
+            )
+          : HttpResponse.json(project);
+      }),
       ...baseHandlers(),
     );
     renderApp('/settings/areas');
     expect(await screen.findByText('src/api/**')).toBeTruthy();
     expect(screen.getByText('pnpm add')).toBeTruthy();
     fireEvent.click(screen.getByRole('link', { name: /Billing/ }));
-    expect(await screen.findByText('Subscription')).toBeTruthy();
-    expect(screen.getByText(/account picker/)).toBeTruthy();
+    const picker = await screen.findByRole('combobox', { name: 'Account' });
+    // The account list loads after the section opens.
+    await waitFor(() => {
+      expect(picker).toHaveProperty(
+        'value',
+        'Claude plan · builder@example.com (Claude subscription)',
+      );
+    });
+    await pick(picker, 'Client key (Anthropic API key)');
+    await waitFor(() => {
+      expect(patched).toEqual([{ accountId: client.id }]);
+    });
+
+    const fallback = screen.getByRole('combobox', { name: 'Fallback account' });
+    expect(fallback).toHaveProperty('value', '');
+    await pick(fallback, 'Client key (Anthropic API key)');
+    await waitFor(() => {
+      expect(patched).toEqual([{ accountId: client.id }, { fallbackAccountId: client.id }]);
+    });
+    expect(await screen.findByText(/Set a monthly cap on "Client key"/)).toBeTruthy();
+  });
+
+  it('saves the handoff threshold as a share of the limit, and refuses one outside 50–99%', async () => {
+    const project = projectDto();
+    const patched: unknown[] = [];
+    server.use(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.patch(daemonUrl('/projects/:projectId'), async ({ request }) => {
+        patched.push(await request.json());
+        return HttpResponse.json(project);
+      }),
+      ...baseHandlers(),
+    );
+    renderApp('/settings/areas');
+    fireEvent.click(await screen.findByRole('link', { name: /Billing/ }));
+    const field = await screen.findByRole('textbox', { name: 'Hand off at' });
+    expect(field).toHaveProperty('value', '95%');
+    expect(screen.getByText(/only on a Claude subscription account/)).toBeTruthy();
+
+    fireEvent.change(field, { target: { value: '100' } });
+    fireEvent.blur(field);
+    expect(await screen.findByText('Between 50% and 99%')).toBeTruthy();
+    expect(patched).toEqual([]);
+
+    fireEvent.change(field, { target: { value: '40' } });
+    fireEvent.blur(field);
+    expect(await screen.findByText('Between 50% and 99%')).toBeTruthy();
+    expect(patched).toEqual([]);
+
+    fireEvent.change(field, { target: { value: '90' } });
+    fireEvent.blur(field);
+    await waitFor(() => {
+      expect(patched).toEqual([{ usageHandoffAt: 0.9 }]);
+    });
+  });
+
+  it("offers the project's other accounts as its fallback, never its own", async () => {
+    const project = projectDto();
+    const client = accountDto({ label: 'Client key', kind: 'anthropic_api_key' });
+    server.use(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/accounts'), () => HttpResponse.json([DEFAULT_ACCOUNT, client])),
+      ...baseHandlers(),
+    );
+    renderApp('/settings/areas');
+    fireEvent.click(await screen.findByRole('link', { name: /Billing/ }));
+    const fallback = await screen.findByRole('combobox', { name: 'Fallback account' });
+    fireEvent.click(fallback);
+    const labelId = fallback instanceof HTMLInputElement ? fallback.labels?.[0]?.id : undefined;
+    const listbox = screen
+      .getAllByRole('listbox', { hidden: true })
+      .find((l) => l.getAttribute('aria-labelledby') === labelId);
+    expect(listbox).toBeDefined();
+    // The account list loads after the section opens.
+    await within(listbox ?? document.body).findByRole('option', { hidden: true });
+    const names = within(listbox ?? document.body)
+      .getAllByRole('option', { hidden: true })
+      .map((o) => o.textContent);
+    expect(names).toEqual(['Client key (Anthropic API key)']);
+  });
+
+  it('shows the recorded fallback after 10db moved the project onto it', async () => {
+    const client = accountDto({ label: 'Client key', kind: 'anthropic_api_key' });
+    const project = projectDto({
+      accountId: client.id,
+      fallbackAccountId: client.id,
+      movedFromAccountId: DEFAULT_ACCOUNT.id,
+    });
+    server.use(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/accounts'), () => HttpResponse.json([DEFAULT_ACCOUNT, client])),
+      ...baseHandlers(),
+    );
+    renderApp('/settings/areas');
+    fireEvent.click(await screen.findByRole('link', { name: /Billing/ }));
+    const fallback = await screen.findByRole('combobox', { name: 'Fallback account' });
+    await waitFor(() => {
+      expect(fallback).toHaveProperty('value', 'Client key (Anthropic API key)');
+    });
+  });
+
+  it("shows each project's own threshold after the project changes, and saves nothing on blur", async () => {
+    const a = projectDto({ name: 'Alpha', usageHandoffAt: 0.9 });
+    const b = projectDto({ name: 'Beta', usageHandoffAt: 0.95 });
+    const patched: unknown[] = [];
+    server.use(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([a, b])),
+      http.patch(daemonUrl('/projects/:projectId'), async ({ request }) => {
+        patched.push(await request.json());
+        return HttpResponse.json(b);
+      }),
+      ...baseHandlers(),
+    );
+    renderApp('/settings/areas');
+    fireEvent.click(await screen.findByRole('link', { name: /Billing/ }));
+    expect(await screen.findByRole('textbox', { name: 'Hand off at' })).toHaveProperty(
+      'value',
+      '90%',
+    );
+    await pick(screen.getByRole('combobox', { name: 'Project' }), 'Beta');
+    await waitFor(() => {
+      expect(screen.getByRole('textbox', { name: 'Hand off at' })).toHaveProperty('value', '95%');
+    });
+    fireEvent.blur(screen.getByRole('textbox', { name: 'Hand off at' }));
+    expect(patched).toEqual([]);
   });
 
   it('changes the keep-awake mode', async () => {
@@ -104,6 +262,46 @@ describe('SettingsView', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => {
       expect(patched).toEqual([{ gateCommand: 'make check' }]);
+    });
+    expect(await screen.findByText('Saved.')).toBeTruthy();
+  });
+
+  it('shows the permissions control with the project mode and a note that auto mode is no boundary', async () => {
+    const project = projectDto({ permissionMode: 'auto' });
+    server.use(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
+      ...baseHandlers(),
+    );
+    renderApp('/settings/general');
+    const group = await screen.findByRole('radiogroup', { name: 'Permissions' });
+    expect(within(group).getByRole<HTMLInputElement>('radio', { name: /Auto mode/ }).checked).toBe(
+      true,
+    );
+    expect(
+      within(group).getByRole<HTMLInputElement>('radio', { name: /Ask for each command/ }).checked,
+    ).toBe(false);
+    expect(group.getAttribute('aria-describedby')).toBeTruthy();
+    expect(await screen.findByText(/Auto mode is not a security boundary/)).toBeTruthy();
+  });
+
+  it('saves the permission mode as a patch', async () => {
+    const project = projectDto({ name: 'demo', gateCommand: 'make gate' });
+    const patched: unknown[] = [];
+    server.use(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
+      http.patch(daemonUrl('/projects/:projectId'), async ({ request }) => {
+        patched.push(await request.json());
+        return HttpResponse.json({ ...project, permissionMode: 'auto' });
+      }),
+      ...baseHandlers(),
+    );
+    renderApp('/settings/general');
+    fireEvent.click(await screen.findByRole('radio', { name: /Auto mode/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => {
+      expect(patched).toEqual([{ permissionMode: 'auto' }]);
     });
     expect(await screen.findByText('Saved.')).toBeTruthy();
   });

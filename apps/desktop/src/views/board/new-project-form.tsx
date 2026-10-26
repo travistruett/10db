@@ -1,4 +1,11 @@
-import { BillingMode, BranchName, Delivery, PrTitlePrefix, type ProjectDto } from '@10db/contracts';
+import {
+  AccountId,
+  BranchName,
+  Delivery,
+  PermissionMode,
+  PrTitlePrefix,
+  type ProjectDto,
+} from '@10db/contracts';
 import {
   Alert,
   Button,
@@ -11,24 +18,15 @@ import {
   TextInput,
 } from '@mantine/core';
 import { useState, type SyntheticEvent } from 'react';
-import { useCreateProject } from '../../daemon/queries';
+import { useAccounts, useCreateProject } from '../../daemon/queries';
+import { accountOptions } from '../settings/account-kind-label';
+import { PermissionModeField } from '../settings/permission-mode-field';
 import { parseAreas } from './areas-text';
-
-const BILLING_OPTIONS = [
-  { value: BillingMode.Subscription, label: 'Subscription (your Claude plan)' },
-  { value: BillingMode.ApiKey, label: 'API key (from the Keychain)' },
-  { value: BillingMode.Bedrock, label: 'Amazon Bedrock' },
-];
-const BILLING_VALUES: readonly string[] = Object.values(BillingMode);
 
 /** Starting heuristics (spec §15); the daemon validates the final values. */
 const DEFAULT_HANDOFF_PCT = 40;
 const DEFAULT_NUDGE_PCT = 50;
 const MAX_NUDGE_PCT = 98;
-
-function isBillingMode(value: string | null): value is BillingMode {
-  return value !== null && BILLING_VALUES.includes(value);
-}
 
 /** The firm nudge must sit above the handoff threshold. */
 function nudgeFor(handoffPct: number): number {
@@ -45,11 +43,15 @@ export function NewProjectForm({
   const [repoPath, setRepoPath] = useState('');
   const [gateCommand, setGateCommand] = useState('');
   const [areasText, setAreasText] = useState('');
-  const [billingMode, setBillingMode] = useState<BillingMode>(BillingMode.Subscription);
+  const accounts = useAccounts().data ?? [];
+  const [accountId, setAccountId] = useState<string | null>(null);
+  // Until the builder picks one, the default account ("Claude plan" on a fresh install) is shown and sent.
+  const chosen = accountId ?? accounts.find((a) => a.isDefault && !a.archived)?.id ?? null;
   const [handoffPct, setHandoffPct] = useState<number | ''>(DEFAULT_HANDOFF_PCT);
   const [delivery, setDelivery] = useState<Delivery>(Delivery.Local);
   const [baseBranch, setBaseBranch] = useState('main');
   const [prTitlePrefix, setPrTitlePrefix] = useState('');
+  const [permissionMode, setPermissionMode] = useState<PermissionMode>(PermissionMode.Default);
   const [formError, setFormError] = useState<string | null>(null);
 
   const submit = (event: SyntheticEvent<HTMLFormElement>): void => {
@@ -79,10 +81,11 @@ export function NewProjectForm({
         repoPath: repoPath.trim(),
         gateCommand: gateCommand.trim(),
         areas: parsed.areas,
-        billingMode,
+        ...(chosen ? { accountId: AccountId.parse(chosen) } : {}),
         handoffPct,
         nudgePct: nudgeFor(handoffPct),
         delivery,
+        permissionMode,
         ...(pullRequests
           ? { baseBranch: baseBranch.trim(), prTitlePrefix: prTitlePrefix.trim() }
           : {}),
@@ -139,12 +142,13 @@ export function NewProjectForm({
           }}
         />
         <Select
-          label="Billing"
-          data={BILLING_OPTIONS}
-          value={billingMode}
+          label="Account"
+          description="Who pays for this project's sessions"
+          data={accountOptions(accounts)}
+          value={chosen}
           allowDeselect={false}
           onChange={(value) => {
-            if (isBillingMode(value)) setBillingMode(value);
+            setAccountId(value);
           }}
         />
         <Radio.Group
@@ -194,6 +198,7 @@ export function NewProjectForm({
             setHandoffPct(typeof value === 'number' ? value : '');
           }}
         />
+        <PermissionModeField value={permissionMode} onChange={setPermissionMode} />
         {error ? (
           <Alert color="red" title="Couldn't create the project">
             {error}

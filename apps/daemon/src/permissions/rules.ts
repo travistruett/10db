@@ -1,13 +1,9 @@
-import {
-  isCommandRunner,
-  packageToolProgramIndex,
-  ToolAccess,
-  type PermissionRuleDto,
-  type ProjectDto,
-} from '@10db/contracts';
+import { ToolAccess, type PermissionRuleDto, type ProjectDto } from '@10db/contracts';
 import { join } from 'node:path';
 import { z } from 'zod';
 import {
+  EQUALS_EXPANSION,
+  parseShell,
   READ_COMMANDS,
   resolveInRepo,
   splitCommand,
@@ -15,6 +11,7 @@ import {
   stripCommandPrefixes,
 } from '../guard';
 import { isLiteralSegment, plainSegments, type PlainSegment } from './plain-segments';
+import { runsOtherCommands, runsUnnamedProgram } from './runner-forms';
 
 /** Allow rules injected into every managed session. The guard still checks claims. */
 export function baseAllowedTools(project: Pick<ProjectDto, 'gateCommand'>): string[] {
@@ -66,12 +63,17 @@ const READ_TOOLS = new Set(['Read', 'Glob', 'Grep', 'LS']);
 /** Input fields of the read tools that name a place on disk. */
 const PATH_FIELDS = ['file_path', 'notebook_path', 'path', 'pattern'];
 
-function startsWithWords(line: string, prefix: string): boolean {
-  return line === prefix || line.startsWith(`${prefix} `);
+/** Whether the segment's words begin with the prefix's words, compared word by word. */
+function startsWithWords(words: readonly string[], prefix: string): boolean {
+  const parsed = plainSegments(prefix);
+  const prefixWords = parsed?.length === 1 ? parsed[0]?.words : undefined;
+  if (prefixWords === undefined || prefixWords.length === 0) return false;
+  if (prefixWords.join(' ') !== prefix || !prefixWords.every(isPlainWord)) return false;
+  return prefixWords.every((word, i) => words[i] === word);
 }
 
 function segmentKey(segment: PlainSegment): string {
-  return `${segment.line}\u0000${segment.separator}`;
+  return `${JSON.stringify(segment.words)}${segment.separator}`;
 }
 
 function bashEntryMatches(entry: string, segments: readonly PlainSegment[]): boolean {
@@ -79,7 +81,7 @@ function bashEntryMatches(entry: string, segments: readonly PlainSegment[]): boo
   if (rule === undefined) return false;
   if (rule.endsWith(':*')) {
     const prefix = rule.slice(0, -2);
-    return segments.every((s) => startsWithWords(s.line, prefix));
+    return segments.every((s) => startsWithWords(s.words, prefix));
   }
   const expected = plainSegments(rule);
   return (
@@ -140,37 +142,50 @@ export function matchesAllowedTool(
   });
 }
 
-/** Bun runs the file it names as well as a package, so every bun command keeps its whole words. */
-const FILE_RUNNERS: ReadonlySet<string> = new Set(['bun']);
 const SUBCOMMAND = /^[A-Za-z][A-Za-z0-9_-]*$/;
-
-/**
- * Whether the words run another program, so "always allow" keeps them whole. The package tools that
- * name a program come from @10db/contracts, the same list allowed-commands reads. Names are compared
- * without case: a case-insensitive file system runs `PNPM` as `pnpm`.
- */
-function runsOtherCommands(words: readonly string[]): boolean {
-  const [first = ''] = words;
-  const name = first.toLowerCase();
-  return isCommandRunner(name) || FILE_RUNNERS.has(name) || packageToolProgramIndex(words) !== null;
-}
 
 /**
  * The pattern stored by "always allow": the program plus its subcommand when the second word is
  * one, otherwise the segment's whole words, so the rule never covers more than what was shown.
- * Null when the command has a substitution, expansion or redirection, or runs through a wrapper
- * with a command-carrying flag: such a command can only be allowed once.
+ * Null when the command has a substitution, expansion or redirection, runs through a wrapper
+ * with a command-carrying flag, runs a program it does not name (see runsUnnamedProgram), cannot
+ * be parsed with certainty, or the stored words would not read back as the same one segment (a
+ * word with whitespace, `#`, `;`, `&&` or a brace): such a command can only be allowed once.
  */
 export function commandPrefix(command: string): string | null {
+  if (!parseShell(command).certain) return null;
   const segments = splitCommand(command);
   const first = segments[0];
   if (first === undefined || !segments.every(isLiteralSegment)) return null;
-  const words = stripCommandPrefixes(first.words);
+  const words = stripCommandPrefixes(first.words, { keepCommandPath: true });
   const [head, second] = words;
-  if (head === undefined) return null;
-  if (second === undefined) return head;
-  if (!runsOtherCommands(words) && SUBCOMMAND.test(second)) return `${head} ${second}`;
-  return words.join(' ');
+  if (head === undefined || runsUnnamedProgram(words)) return null;
+  if (second === undefined) return storable(head, words);
+  if (!runsOtherCommands(words) && SUBCOMMAND.test(second))
+    return storable(`${head} ${second}`, [head, second]);
+  return storable(words.join(' '), words);
+}
+
+/** Characters whose meaning never depends on quoting; any other word is allowed once only. */
+const PLAIN_WORD = /^[A-Za-z0-9._/:@%+=,-]+$/;
+
+/** A word that means the same quoted or not: plain characters and no zsh `=cmd` expansion. */
+function isPlainWord(word: string): boolean {
+  return PLAIN_WORD.test(word) && !EQUALS_EXPANSION.test(word);
+}
+
+/**
+ * The pattern when it reads back as one segment of exactly these words. A word that holds
+ * whitespace, `#`, `;`, `&&` or a brace changes meaning once the words are joined into text, and a
+ * word with `~`, `*`, `?`, `[`, `!` or the like means something else once its quotes are gone.
+ */
+function storable(pattern: string, words: readonly string[]): string | null {
+  if (!words.every(isPlainWord)) return null;
+  const parsed = plainSegments(pattern);
+  const [only] = parsed ?? [];
+  if (parsed?.length !== 1 || only === undefined) return null;
+  const same = only.words.length === words.length && only.words.every((w, i) => w === words[i]);
+  return same ? pattern : null;
 }
 
 /** The stored rule that permits the call, if any; a Bash pattern must cover every plain segment. */
@@ -182,9 +197,10 @@ export function matchPermissionRule(
     if (rule.toolName !== req.toolName) return false;
     if (req.toolName !== 'Bash') return rule.pattern === null;
     const pattern = rule.pattern;
-    if (pattern === null) return false;
+    // A pattern whose words name no program, such as a bare runner, covers nothing, even one stored earlier.
+    if (pattern === null || runsUnnamedProgram(pattern.split(' '))) return false;
     const command = stringField(req.input, 'command');
     const segments = command === null ? null : plainSegments(command);
-    return segments?.every((s) => startsWithWords(s.line, pattern)) === true;
+    return segments?.every((s) => startsWithWords(s.words, pattern)) === true;
   });
 }

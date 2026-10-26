@@ -18,15 +18,16 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   project: [queryKeys.projects],
   task: [['tasks']],
   board_column: [['board-columns']],
-  // A batch's state shows on the board's strip; cancelling an abandoned batch's work moves tasks.
-  batch: [queryKeys.projects, ...WORK],
+  // A batch's state shows on the board's strip and in its list; cancelling an abandoned batch's work moves tasks.
+  batch: [queryKeys.projects, ['batches'], ...WORK],
   // Lanes changing can switch keep-awake on or off.
   workstream: [...WORK, queryKeys.keepAwake],
   session: WORK,
   claim: WORK,
   handoff: WORK,
   evidence: WORK,
-  provider: WORK,
+  // An account pause moves workstreams, which send their own events.
+  account: [queryKeys.accounts],
   inbox: [queryKeys.inbox, ['workstreams']],
   app_setting: [queryKeys.keepAwake],
   // No view reads these entity types; the entries make them known.

@@ -76,12 +76,39 @@
         }
       ]
     },
+    "accountId": {
+      "type": "string",
+      "pattern": "^acc_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "fallbackAccountId": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^acc_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "usageHandoffAt": {
+      "type": "number",
+      "minimum": 0.5,
+      "maximum": 0.99
+    },
     "allowedCommands": {
       "maxItems": 32,
       "type": "array",
       "items": {
         "type": "string"
       }
+    },
+    "permissionMode": {
+      "type": "string",
+      "enum": [
+        "default",
+        "auto"
+      ]
     }
   }
 }

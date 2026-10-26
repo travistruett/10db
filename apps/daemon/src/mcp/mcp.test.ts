@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { serve } from '@hono/node-server';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -23,9 +24,16 @@ import { z } from 'zod';
 import { createTempRepo, isolatedGitEnv, seedWorkstream } from '../../test/fixtures';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit } from '../git';
+import { protectedPaths } from '../guard';
 import { createInboxService, type InboxService } from '../inbox';
 import type { Logger } from '../log';
 import { createMcpHandler, mintSessionToken } from './index';
+
+const GUARDED = protectedPaths({
+  dataDir: join(tmpdir(), 'mcp-test-data'),
+  home: homedir(),
+  loginConfigDir: null,
+});
 
 let repo: { path: string; cleanup(): void };
 let close: () => void;
@@ -63,6 +71,7 @@ beforeEach(async () => {
   state = createStateStore(test.store, createEventBus());
   inbox = createInboxService({ state, onParkedAnswer: () => undefined });
   const handler = createMcpHandler({
+    protectedPaths: GUARDED,
     state,
     inbox,
     git,
@@ -412,6 +421,7 @@ describe('MCP tools', () => {
 
   it('logs an unexpected error and does not promise a retry will work', async () => {
     const failing = createMcpHandler({
+      protectedPaths: GUARDED,
       state,
       inbox,
       git: { ...git, commit: () => Promise.reject(new Error('disk exploded')) },
@@ -485,6 +495,7 @@ describe('MCP tools', () => {
   it('tells a parked ask_human not to ask again', async () => {
     const abort = new AbortController();
     const parkedHandler = createMcpHandler({
+      protectedPaths: GUARDED,
       state,
       inbox,
       git,

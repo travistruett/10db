@@ -5,21 +5,53 @@ import {
   Delivery,
   EventType,
   InvalidError,
+  isMetered,
   mintId,
   NotFoundError,
   ProjectInput,
   ProjectPatch,
   Provider,
+  type AccountId,
   type ProjectDto,
   type ProjectId,
   type ProjectViewDto,
 } from '@10db/contracts';
 import { and, asc, eq, inArray } from 'drizzle-orm';
 import * as schema from '../schema';
+import { defaultAccountId, getAccountRow } from './accounts';
 import { currentBatch, findUnfinishedBatch } from './batches';
 import { insertBoardColumn } from './board-columns';
 import { getFlow } from './flows';
 import type { DbReader, WriteContext } from './store';
+
+/** The account a new project binds to: the one it names, else the default; never an archived one. */
+function accountFor(ctx: WriteContext, named: AccountId | undefined): AccountId {
+  const id = named ?? defaultAccountId(ctx.tx);
+  if (!id) throw new InvalidError('There is no account to bind the project to; create one first');
+  const account = getAccountRow(ctx.tx, id);
+  if (account.archived) throw new InvalidError(`Account "${account.label}" is archived`);
+  return id;
+}
+
+/**
+ * A fallback is another account than the project's own, not archived, and capped when metered:
+ * 10db moves work onto it without asking, and only the cap bounds that spend.
+ */
+function checkFallback(
+  ctx: WriteContext,
+  accountId: AccountId,
+  fallbackId: AccountId | null,
+): void {
+  if (fallbackId === null) return;
+  if (fallbackId === accountId)
+    throw new InvalidError("A project's fallback is another account than its own");
+  const fallback = getAccountRow(ctx.tx, fallbackId);
+  if (fallback.archived) throw new InvalidError(`Account "${fallback.label}" is archived`);
+  if (isMetered(fallback.kind) && fallback.monthlyCapUsd === null)
+    throw new InvalidError(
+      `Set a monthly cap on "${fallback.label}" before making it a fallback: 10db moves work onto it without asking`,
+    );
+}
 
 export function insertProject(ctx: WriteContext, input: ProjectInput): ProjectDto {
   const config = ProjectInput.parse(input);
@@ -31,9 +63,15 @@ export function insertProject(ctx: WriteContext, input: ProjectInput): ProjectDt
     .get();
   if (existing)
     throw new ConflictError(`Project "${existing.name}" already uses ${config.repoPath}`);
+  const { accountId: named, ...rest } = config;
+  const accountId = accountFor(ctx, named);
+  checkFallback(ctx, accountId, rest.fallbackAccountId);
   const row: ProjectDto = {
     id: mintId('Project'),
-    ...config,
+    ...rest,
+    accountId,
+    movedFromAccountId: null,
+    moveBackAt: null,
     provider: Provider.Claude,
     createdAt: ctx.now,
     updatedAt: ctx.now,
@@ -84,13 +122,58 @@ export function patchProject(ctx: WriteContext, id: ProjectId, patch: ProjectPat
     changes.prTitlePrefix === undefined ? current.prTitlePrefix : changes.prTitlePrefix;
   if (delivery === Delivery.PullRequest && prefix === null)
     throw new InvalidError('Pull request delivery needs a PR title prefix such as feat(app)');
+  // Re-saving the fallback the project already has asks nothing again, even while it runs on it.
+  if (
+    changes.fallbackAccountId !== undefined &&
+    changes.fallbackAccountId !== current.fallbackAccountId
+  )
+    checkFallback(ctx, changes.accountId ?? current.accountId, changes.fallbackAccountId);
+  const moving = changes.accountId !== undefined && changes.accountId !== current.accountId;
+  if (changes.accountId !== undefined && moving) {
+    // Work in flight moves too: each lane's next session runs on the new account.
+    const account = getAccountRow(ctx.tx, changes.accountId);
+    if (account.archived) throw new InvalidError(`Account "${account.label}" is archived`);
+  }
   ctx.tx
     .update(schema.projects)
-    .set({ ...changes, updatedAt: ctx.now })
+    // Any move forgets an earlier move back; a move for a usage limit records its own after this write.
+    .set({
+      ...changes,
+      ...(moving ? { movedFromAccountId: null, moveBackAt: null } : {}),
+      updatedAt: ctx.now,
+    })
     .where(eq(schema.projects.id, id))
     .run();
   ctx.emit({ type: EventType.ProjectChanged, entityType: 'project', entityId: id });
   return getProject(ctx.tx, id);
+}
+
+/**
+ * Records the account a project left for its usage limit and when that limit resets (null when nobody
+ * said); a null record forgets it.
+ */
+export function setMoveBack(
+  ctx: WriteContext,
+  id: ProjectId,
+  moveBack: { readonly accountId: AccountId; readonly at: string | null } | null,
+): ProjectDto {
+  getProject(ctx.tx, id);
+  ctx.tx
+    .update(schema.projects)
+    .set({
+      movedFromAccountId: moveBack?.accountId ?? null,
+      moveBackAt: moveBack?.at ?? null,
+      updatedAt: ctx.now,
+    })
+    .where(eq(schema.projects.id, id))
+    .run();
+  ctx.emit({ type: EventType.ProjectChanged, entityType: 'project', entityId: id });
+  return getProject(ctx.tx, id);
+}
+
+/** The projects 10db is to offer the way back to an account they left. */
+export function listMoveBacks(db: DbReader): ProjectDto[] {
+  return listProjects(db).filter((p) => p.movedFromAccountId !== null);
 }
 
 /** `GET /projects`: each project with the batch its view shows. */

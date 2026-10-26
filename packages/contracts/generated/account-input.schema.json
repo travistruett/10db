@@ -1,0 +1,324 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "claude_subscription"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "payer": {
+          "default": "",
+          "type": "string",
+          "maxLength": 200
+        },
+        "laneCap": {
+          "default": 4,
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16
+        },
+        "settings": {
+          "default": {},
+          "type": "object",
+          "properties": {
+            "modelMap": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "pattern": "^[a-z]+$"
+              },
+              "additionalProperties": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              }
+            },
+            "aliases": {
+              "minItems": 1,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z]+$"
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "kind",
+        "label"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "anthropic_api_key"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "payer": {
+          "default": "",
+          "type": "string",
+          "maxLength": 200
+        },
+        "laneCap": {
+          "default": 4,
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16
+        },
+        "monthlyCapUsd": {
+          "default": null,
+          "anyOf": [
+            {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 1000000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "expectedIdentity": {
+          "default": null,
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "settings": {
+          "default": {},
+          "type": "object",
+          "properties": {
+            "modelMap": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "pattern": "^[a-z]+$"
+              },
+              "additionalProperties": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              }
+            },
+            "aliases": {
+              "minItems": 1,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z]+$"
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "kind",
+        "label"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "bedrock"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "payer": {
+          "default": "",
+          "type": "string",
+          "maxLength": 200
+        },
+        "laneCap": {
+          "default": 4,
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16
+        },
+        "monthlyCapUsd": {
+          "default": null,
+          "anyOf": [
+            {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 1000000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "expectedIdentity": {
+          "default": null,
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "settings": {
+          "type": "object",
+          "properties": {
+            "modelMap": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "pattern": "^[a-z]+$"
+              },
+              "additionalProperties": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              }
+            },
+            "aliases": {
+              "minItems": 1,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z]+$"
+              }
+            },
+            "region": {
+              "type": "string",
+              "pattern": "^[a-z]{2}(-[a-z]+)+-\\d+$"
+            },
+            "awsProfile": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9._-]{1,64}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "region",
+            "awsProfile"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "kind",
+        "label",
+        "settings"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "gateway"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "payer": {
+          "default": "",
+          "type": "string",
+          "maxLength": 200
+        },
+        "laneCap": {
+          "default": 4,
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16
+        },
+        "monthlyCapUsd": {
+          "default": null,
+          "anyOf": [
+            {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 1000000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "settings": {
+          "type": "object",
+          "properties": {
+            "modelMap": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "pattern": "^[a-z]+$"
+              },
+              "additionalProperties": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              }
+            },
+            "aliases": {
+              "minItems": 1,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z]+$"
+              }
+            },
+            "baseUrl": {
+              "type": "string",
+              "format": "uri"
+            }
+          },
+          "required": [
+            "baseUrl"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "kind",
+        "label",
+        "settings"
+      ],
+      "additionalProperties": false
+    }
+  ]
+}

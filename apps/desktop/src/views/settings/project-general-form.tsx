@@ -19,6 +19,7 @@ import {
   type GeneralErrors,
   type GeneralValues,
 } from './general-values';
+import { PermissionModeField } from './permission-mode-field';
 
 /** Keeps the fields the builder changed and moves the rest to the project's current values. */
 function reseed(current: GeneralValues, seed: GeneralValues, next: GeneralValues): GeneralValues {
@@ -43,6 +44,8 @@ function reseed(current: GeneralValues, seed: GeneralValues, next: GeneralValues
       current.allowedCommands === seed.allowedCommands
         ? next.allowedCommands
         : current.allowedCommands,
+    permissionMode:
+      current.permissionMode === seed.permissionMode ? next.permissionMode : current.permissionMode,
   };
 }
 
@@ -221,6 +224,12 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
         error={errors.allowedCommands}
         onChange={(e) => {
           set({ allowedCommands: e.currentTarget.value });
+        }}
+      />
+      <PermissionModeField
+        value={values.permissionMode}
+        onChange={(permissionMode) => {
+          set({ permissionMode });
         }}
       />
       {patch.error ? (

@@ -1,9 +1,11 @@
 import type { DaemonEvent } from '@10db/contracts';
-import { createTestStore, insertProject } from '@10db/db';
+import { createTestStore, insertProject, seedDefaultAccount } from '@10db/db';
 import { afterAll, describe, expect, it } from 'vitest';
 import { createEventBus, createStateStore } from './index';
 
 const { store, close } = createTestStore();
+// On the raw store, so no listener sees the seed.
+store.write((ctx) => seedDefaultAccount(ctx, { expectedIdentity: null }));
 afterAll(() => {
   close();
 });

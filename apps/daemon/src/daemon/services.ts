@@ -23,6 +23,7 @@ import {
   insertTask,
   latestEventSeq,
   listAaModels,
+  listBatches,
   listBoardColumns,
   listEventsAfter,
   listFlows,
@@ -45,6 +46,7 @@ import {
   setRoutingRules,
   setTeam,
 } from '@10db/db';
+import { MoveCause, type AccountMoves, type AccountService } from '../accounts';
 import { syncWarning, type BenchmarkSync } from '../benchmarks';
 import type { ApiServices } from '../api';
 import type { BatchStarter, Shipper } from '../delivery';
@@ -69,6 +71,8 @@ export function createServices(deps: {
   readonly benchmarks: BenchmarkSync;
   readonly starter: BatchStarter;
   readonly shipper: Shipper;
+  readonly accounts: AccountService;
+  readonly moves: Pick<AccountMoves, 'move'>;
 }): ApiServices {
   const db = deps.state.db;
   return {
@@ -98,6 +102,8 @@ export function createServices(deps: {
       return { kind: 'workstream', workstream };
     },
     startBatch: (projectId, input) => deps.starter.startBatch(projectId, input),
+    // The store lists oldest first; the API answers newest first.
+    listBatches: (projectId) => listBatches(db, { projectId }).reverse(),
     shipBatch: (id) => deps.shipper.ship(id),
     abandonBatch: (id) => deps.shipper.abandon(id),
     listFlows: () => listFlows(db),
@@ -142,7 +148,19 @@ export function createServices(deps: {
     benchmarkStatus: () => deps.benchmarks.status(),
     syncBenchmarks: () => deps.benchmarks.sync(),
     listAaModels: () => listAaModels(db),
-    patchProject: (id, patch) => deps.state.write((ctx) => patchProject(ctx, id, patch)),
+    patchProject: (id, patch) =>
+      patch.accountId === undefined
+        ? deps.state.write((ctx) => patchProject(ctx, id, patch))
+        : // The account through the move, with the other fields in the same write.
+          deps.moves.move(id, patch.accountId, { cause: MoveCause.Builder }, { patch }),
+    listAccounts: () => deps.accounts.list(),
+    createAccount: (input) => deps.accounts.create(input),
+    patchAccount: (id, patch) => deps.accounts.patch(id, patch),
+    archiveAccount: (id) => deps.accounts.archive(id),
+    setAccountSecret: (id, input) => deps.accounts.setSecret(id, input),
+    accountSignIn: (id) => deps.accounts.signIn(id),
+    accountIdentity: (id) => deps.accounts.identity(id),
+    accountUsage: (id, month) => deps.accounts.usage(id, month),
     getTeam(projectId) {
       getProject(db, projectId);
       return getTeam(db, projectId);

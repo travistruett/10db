@@ -1,4 +1,8 @@
 import {
+  AccountId,
+  AccountInput,
+  AccountPatch,
+  AccountSecretInput,
   BatchId,
   BatchStartInput,
   BoardColumnDelete,
@@ -16,6 +20,7 @@ import {
   InboxState,
   KeepAwakeInput,
   ModelProfileId,
+  Month,
   ModelProfilePatch,
   PersonaId,
   PersonaInput,
@@ -34,6 +39,7 @@ import {
   TaskPatch,
   TeamInput,
   WorkstreamId,
+  type AccountConfig,
 } from '@10db/contracts';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
@@ -134,6 +140,9 @@ export function createApp(deps: ApiDeps) {
     .post('/projects/:projectId/mcp-servers/review', (c) =>
       c.json(deps.services.reviewProjectMcp(ProjectId.parse(c.req.param('projectId')))),
     )
+    .get('/projects/:projectId/batches', (c) =>
+      c.json(deps.services.listBatches(ProjectId.parse(c.req.param('projectId')))),
+    )
     .post(
       '/projects/:projectId/batches',
       validator('json', (value): BatchStartInput => BatchStartInput.parse(value)),
@@ -158,6 +167,54 @@ export function createApp(deps: ApiDeps) {
           deps.services.patchProject(
             ProjectId.parse(c.req.param('projectId')),
             c.req.valid('json'),
+          ),
+        ),
+    )
+    .get('/accounts', (c) => c.json(deps.services.listAccounts()))
+    .post(
+      '/accounts',
+      validator('json', (value): AccountConfig => AccountInput.parse(value)),
+      (c) => c.json(deps.services.createAccount(c.req.valid('json')), 201),
+    )
+    .patch(
+      '/accounts/:accountId',
+      validator('json', (value): AccountPatch => AccountPatch.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.patchAccount(
+            AccountId.parse(c.req.param('accountId')),
+            c.req.valid('json'),
+          ),
+        ),
+    )
+    .post('/accounts/:accountId/archive', (c) =>
+      c.json(deps.services.archiveAccount(AccountId.parse(c.req.param('accountId')))),
+    )
+    .put(
+      '/accounts/:accountId/secret',
+      validator('json', (value): AccountSecretInput => AccountSecretInput.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.setAccountSecret(
+            AccountId.parse(c.req.param('accountId')),
+            c.req.valid('json'),
+          ),
+        ),
+    )
+    .get('/accounts/:accountId/signin', (c) =>
+      c.json(deps.services.accountSignIn(AccountId.parse(c.req.param('accountId')))),
+    )
+    .get('/accounts/:accountId/identity', async (c) =>
+      c.json(await deps.services.accountIdentity(AccountId.parse(c.req.param('accountId')))),
+    )
+    .get(
+      '/accounts/:accountId/usage',
+      validator('query', (query) => z.object({ month: Month.optional() }).parse(query)),
+      (c) =>
+        c.json(
+          deps.services.accountUsage(
+            AccountId.parse(c.req.param('accountId')),
+            c.req.valid('query').month ?? null,
           ),
         ),
     )

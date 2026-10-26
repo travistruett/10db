@@ -1,5 +1,10 @@
 import { z } from 'zod';
-import { isCommandRunner, isPackageTool, packageToolProgramIndex } from './command-runners';
+import {
+  isCommandRunner,
+  isPackageTool,
+  packageToolForwards,
+  packageToolProgramIndex,
+} from './command-runners';
 
 /** The most command prefixes one project may allow. */
 export const MAX_ALLOWED_COMMANDS = 32;
@@ -24,7 +29,10 @@ function runsAnything(program: string): boolean {
  * Why a command prefix can't be allowed, or null when it can. A prefix is one to a few plain words, and
  * its program is a name on PATH, because the guard reads a path-qualified program by its last part. A
  * prefix may not name a program that runs what it is given: one alone, or one that a package tool runs
- * through `exec`, `dlx` or `x`, or through `npx`, `bunx` or `pnpx`.
+ * through `exec`, `dlx` or `x`, or through `npx`, `bunx` or `pnpx`. Nor may it name a package tool's
+ * forwarding subcommand or package creator, or an alias of one (`yarn workspace`, `pnpm recursive`,
+ * `pnpm multi`, `yarn node`, `npm init`, `npm innit`, `npm create`, `bun create`), which runs whatever
+ * follows it.
  */
 export function allowedCommandProblem(command: string): string | null {
   if (command.trim() === '') return 'Enter a command prefix such as pnpm test';
@@ -41,6 +49,8 @@ export function allowedCommandProblem(command: string): string | null {
     return `${program} runs the commands or code it is given, so it can't be allowed as a prefix`;
   if (words.length === 1 && isPackageTool(name))
     return `${program} alone allows every script or package; name what it runs, such as ${program} test`;
+  if (packageToolForwards(words))
+    return `${words.slice(0, 2).join(' ')} runs a command or package it is given, so it can't be allowed as a prefix`;
   const at = packageToolProgramIndex(words);
   if (at === null) return null;
   const through = words.slice(0, at).join(' ');

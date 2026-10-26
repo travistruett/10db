@@ -127,6 +127,18 @@ export function foldPathCase(text: string): string {
 
 const fold = foldPathCase;
 
+/** Whether `target` is `dir` itself (a file counts) or inside it, following links as a write would; a path that can't be read contains nothing. */
+export function isWithin(dir: string, target: string): boolean {
+  try {
+    const root = fold(realpathSync.native(dir));
+    const resolved = fold(resolveThroughLinks(resolve(target)));
+    const rel = relative(root, resolved);
+    return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
+  } catch {
+    return false;
+  }
+}
+
 export function classifyPath(
   rel: string,
   areas: readonly AreaDef[],

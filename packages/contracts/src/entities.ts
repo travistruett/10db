@@ -1,7 +1,9 @@
 import { z } from 'zod';
+import { USAGE_HANDOFF_AT, USAGE_HANDOFF_MAX, USAGE_HANDOFF_MIN } from './accounts';
 import { AllowedCommands } from './allowed-commands';
 import { BranchName, PrTitlePrefix } from './git-names';
 import {
+  AccountId,
   BatchId,
   BoardColumnId,
   EvidenceId,
@@ -15,13 +17,13 @@ import {
   WorkstreamId,
 } from './ids';
 import {
-  BillingMode,
   BoardStatus,
   Delivery,
   Effort,
   EvidenceKind,
   InboxKind,
   InboxState,
+  PermissionMode,
   Provider,
   QuestionCategory,
   RiskTag,
@@ -87,6 +89,8 @@ export const DEFAULT_HAZARDS: readonly HazardDef[] = [
   },
 ];
 
+const UsageHandoffAt = z.number().min(USAGE_HANDOFF_MIN).max(USAGE_HANDOFF_MAX);
+
 export const ProjectInput = z
   .object({
     name: z.string().min(1),
@@ -95,7 +99,6 @@ export const ProjectInput = z
     areas: z.array(AreaDef).min(1),
     hazards: z.array(HazardDef).default(() => [...DEFAULT_HAZARDS]),
     maxLanes: z.int().min(1).max(16).default(2),
-    billingMode: z.enum(BillingMode).default(BillingMode.Subscription),
     model: z.string().min(1).default('sonnet'),
     effort: z.enum(Effort).default(Effort.Medium),
     // Defaults hand off at about 400k tokens on a 1M window (spikes summary). Low minimums let acceptance runs
@@ -112,8 +115,20 @@ export const ProjectInput = z
     baseBranch: BranchName.default('main'),
     /** `pull_request` delivery titles each PR `<prefix>: <batch title>`. */
     prTitlePrefix: PrTitlePrefix.nullable().default(null),
+    /** The account that pays; absent means the default account. */
+    accountId: AccountId.optional(),
+    /**
+     * The account 10db moves the project to on its own near its account's usage limit. Claude Code
+     * reports usage short of the limit only for a subscription, so on a keyed account only the hard
+     * limit moves it.
+     */
+    fallbackAccountId: AccountId.nullable().default(null),
+    /** The share of the account's usage limit at which the project hands off. */
+    usageHandoffAt: UsageHandoffAt.default(USAGE_HANDOFF_AT),
     /** Command prefixes a lane runs without a permission card, beyond the gate command. */
     allowedCommands: AllowedCommands.default([]),
+    /** How the project's lane sessions decide permission prompts; read when each session starts. */
+    permissionMode: z.enum(PermissionMode).default(PermissionMode.Default),
   })
   .refine((p) => p.nudgePct > p.handoffPct, {
     message: 'nudgePct must be above handoffPct',
@@ -135,7 +150,16 @@ export const ProjectDto = z.object({
   hazards: z.array(HazardDef),
   maxLanes: z.int(),
   provider: z.enum(Provider),
-  billingMode: z.enum(BillingMode),
+  accountId: AccountId,
+  /** The account the project left for its usage limit; 10db offers to move it back once that limit resets. */
+  movedFromAccountId: AccountId.nullable(),
+  /**
+   * When that limit resets, as the pause or the session reported it: when 10db asks about the move
+   * back. Null with a `movedFromAccountId` when nobody said; 10db then asks after its default pause.
+   */
+  moveBackAt: Timestamp.nullable(),
+  fallbackAccountId: AccountId.nullable(),
+  usageHandoffAt: z.number(),
   model: z.string(),
   effort: z.enum(Effort),
   handoffPct: z.int(),
@@ -147,6 +171,7 @@ export const ProjectDto = z.object({
   baseBranch: z.string(),
   prTitlePrefix: z.string().nullable(),
   allowedCommands: z.array(z.string()),
+  permissionMode: z.enum(PermissionMode),
   createdAt: Timestamp,
   updatedAt: Timestamp,
 });
@@ -167,7 +192,12 @@ export const ProjectPatch = z
     delivery: z.enum(Delivery),
     baseBranch: BranchName,
     prTitlePrefix: PrTitlePrefix.nullable(),
+    /** Moves the project to another account; work in flight follows at each lane's next session. */
+    accountId: AccountId,
+    fallbackAccountId: AccountId.nullable(),
+    usageHandoffAt: UsageHandoffAt,
     allowedCommands: AllowedCommands,
+    permissionMode: z.enum(PermissionMode),
   })
   .partial()
   .refine((p) => Object.keys(p).length > 0, { message: 'Change at least one field' });

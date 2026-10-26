@@ -30,6 +30,8 @@ export const SystemCheckDto = z.object({
     source: z.enum(['login_shell', 'inherited']),
     warning: z.string().nullable(),
   }),
+  /** The Claude Code version the account checks were verified on, and a warning on a newer major version (accounts spec §10). */
+  claudeCode: z.object({ verifiedOn: z.string(), warning: z.string().nullable() }),
   tools: z.array(ToolCheck),
   benchmarkSync: BenchmarkSyncWarning.nullable().default(null),
 });

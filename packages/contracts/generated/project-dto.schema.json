@@ -82,13 +82,46 @@
         "claude"
       ]
     },
-    "billingMode": {
+    "accountId": {
       "type": "string",
-      "enum": [
-        "subscription",
-        "api_key",
-        "bedrock"
+      "pattern": "^acc_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "movedFromAccountId": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^acc_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        {
+          "type": "null"
+        }
       ]
+    },
+    "moveBackAt": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "fallbackAccountId": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^acc_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "usageHandoffAt": {
+      "type": "number"
     },
     "model": {
       "type": "string"
@@ -157,6 +190,13 @@
         "type": "string"
       }
     },
+    "permissionMode": {
+      "type": "string",
+      "enum": [
+        "default",
+        "auto"
+      ]
+    },
     "createdAt": {
       "type": "string",
       "format": "date-time",
@@ -177,7 +217,11 @@
     "hazards",
     "maxLanes",
     "provider",
-    "billingMode",
+    "accountId",
+    "movedFromAccountId",
+    "moveBackAt",
+    "fallbackAccountId",
+    "usageHandoffAt",
     "model",
     "effort",
     "handoffPct",
@@ -189,6 +233,7 @@
     "baseBranch",
     "prTitlePrefix",
     "allowedCommands",
+    "permissionMode",
     "createdAt",
     "updatedAt"
   ]

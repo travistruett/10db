@@ -38,13 +38,6 @@ export type InboxState = ValueOf<typeof InboxState>;
 export const ClaimKind = { Area: 'area', Hazard: 'hazard' } as const;
 export type ClaimKind = ValueOf<typeof ClaimKind>;
 
-export const BillingMode = {
-  Subscription: 'subscription',
-  ApiKey: 'api_key',
-  Bedrock: 'bedrock',
-} as const;
-export type BillingMode = ValueOf<typeof BillingMode>;
-
 export const Provider = { Claude: 'claude' } as const;
 export type Provider = ValueOf<typeof Provider>;
 
@@ -194,6 +187,13 @@ export type ProfileSource = ValueOf<typeof ProfileSource>;
 /** How a project's finished work leaves the machine (batch delivery spec §3). */
 export const Delivery = { Local: 'local', PullRequest: 'pull_request' } as const;
 export type Delivery = ValueOf<typeof Delivery>;
+
+/**
+ * How a project's lane sessions decide permission prompts. `default` turns what no rule allows into a
+ * card; `auto` lets Claude Code's classifier approve routine calls. The guard still runs first.
+ */
+export const PermissionMode = { Default: 'default', Auto: 'auto' } as const;
+export type PermissionMode = ValueOf<typeof PermissionMode>;
 
 /** A batch's lifecycle (batch delivery spec §4). */
 export const BatchState = {

@@ -68,6 +68,7 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
     patchTask: track('patchTask'),
     stepPlan: track('stepPlan'),
     startBatch: track('startBatch'),
+    listBatches: track('listBatches'),
     shipBatch: track('shipBatch'),
     abandonBatch: track('abandonBatch'),
     moveTask: track('moveTask'),
@@ -76,6 +77,14 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
     patchBoardColumn: track('patchBoardColumn'),
     deleteBoardColumn: track('deleteBoardColumn'),
     proposeCandidates: track('proposeCandidates'),
+    listAccounts: () => [],
+    createAccount: track('createAccount'),
+    patchAccount: track('patchAccount'),
+    archiveAccount: track('archiveAccount'),
+    setAccountSecret: track('setAccountSecret'),
+    accountSignIn: track('accountSignIn'),
+    accountIdentity: track('accountIdentity'),
+    accountUsage: track('accountUsage'),
     ...overrides,
   };
 }
@@ -104,6 +113,7 @@ describe('API', () => {
   it('serves the event head, keep-awake and the system check behind the token', async () => {
     const check = {
       loginEnv: { source: 'login_shell' as const, warning: null },
+      claudeCode: { verifiedOn: '2.1.302', warning: null },
       tools: [
         {
           name: 'git' as const,
@@ -414,6 +424,13 @@ describe('team, routing and benchmark routes', () => {
       service: 'patchProject',
     },
     {
+      name: 'PATCH /projects/:id with a permission mode',
+      method: 'PATCH',
+      path: `/projects/${projectId}`,
+      body: { permissionMode: 'auto' },
+      service: 'patchProject',
+    },
+    {
       name: 'GET /projects/:id/team',
       method: 'GET',
       path: `/projects/${projectId}/team`,
@@ -464,6 +481,30 @@ describe('team, routing and benchmark routes', () => {
     expect(res.status).toBe(500);
     expect(reached).toEqual([service]);
   });
+  it.each<[string, string, string, unknown]>([
+    ['createAccount', 'POST', '/accounts', { kind: 'claude_subscription', label: 'A' }],
+    ['patchAccount', 'PATCH', '/accounts/{id}', { payer: 'x' }],
+    ['archiveAccount', 'POST', '/accounts/{id}/archive', undefined],
+    ['setAccountSecret', 'PUT', '/accounts/{id}/secret', { secret: 'sk-ant-api03-abcdef' }],
+    ['accountSignIn', 'GET', '/accounts/{id}/signin', undefined],
+    ['accountIdentity', 'GET', '/accounts/{id}/identity', undefined],
+    ['accountUsage', 'GET', '/accounts/{id}/usage?month=2026-10', undefined],
+  ])('routes %s behind the token', async (service, method, path, body) => {
+    const request = (headers: Record<string, string>) =>
+      app().request(path.replace('{id}', mintId('Account')), {
+        method,
+        headers: {
+          ...headers,
+          ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      });
+    expect((await request({})).status).toBe(401);
+    expect(reached).toEqual([]);
+    const res = await request({ Authorization: `Bearer ${TOKEN}` });
+    expect(res.status).toBe(500);
+    expect(reached).toEqual([service]);
+  });
 
   it.each([
     {
@@ -478,6 +519,12 @@ describe('team, routing and benchmark routes', () => {
       method: 'PATCH',
       path: `/projects/${projectId}`,
       body: { budgetCeiling: -1 },
+    },
+    {
+      name: 'an unknown permission mode',
+      method: 'PATCH',
+      path: `/projects/${projectId}`,
+      body: { permissionMode: 'yolo' },
     },
     {
       name: 'an allowed command with a flag',
@@ -537,6 +584,20 @@ describe('batch routes', () => {
     method: 'POST',
     headers: { Authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+
+  it("answers a project's batches through the service, and refuses a malformed project id", async () => {
+    const path = `/projects/${batch.projectId}/batches`;
+    const ok = await app(stubServices({ listBatches: () => [batch] })).request(path, {
+      headers: { Authorization: `Bearer ${TOKEN}` },
+    });
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toEqual([batch]);
+    const bad = await app().request('/projects/not-a-project/batches', {
+      headers: { Authorization: `Bearer ${TOKEN}` },
+    });
+    expect(bad.status).toBe(400);
+    expect(reached).toEqual([]);
   });
 
   it('answers 202 with the batch for a batch start, and 400 for an empty one', async () => {

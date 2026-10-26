@@ -38,15 +38,25 @@ export const GitNetworkFailure = {
 } as const;
 export type GitNetworkFailure = (typeof GitNetworkFailure)[keyof typeof GitNetworkFailure];
 
+/** What a fetch or push did: how long git ran, and what it and its hooks printed, the end of it. */
+export interface NetworkRun {
+  readonly durationMs: number;
+  readonly output: string;
+}
+
 /** A fetch or push that did not complete; `detail` is git's own message, trimmed. */
 export class GitNetworkError extends Error {
   override readonly name = 'GitNetworkError';
   readonly kind: GitNetworkFailure;
   readonly detail: string;
-  constructor(kind: GitNetworkFailure, args: readonly string[], detail: string) {
+  readonly durationMs: number;
+  readonly output: string;
+  constructor(kind: GitNetworkFailure, args: readonly string[], detail: string, run: NetworkRun) {
     super(`git ${args.join(' ')}: ${kind}${detail ? `: ${detail}` : ''}`);
     this.kind = kind;
     this.detail = detail;
+    this.durationMs = run.durationMs;
+    this.output = run.output;
   }
 }
 
@@ -54,26 +64,37 @@ export class GitNetworkError extends Error {
 const NO_PROMPTS = { GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never', LC_ALL: 'C' } as const;
 const REJECTED = /\[(remote )?rejected\]|failed to push some refs/i;
 
-/** How much of git's stderr a failure keeps: the end, where git says what went wrong. */
-const STDERR_TAIL = 2000;
+/**
+ * How much of git's output a run keeps: the end, where git and its hooks say what went wrong. A
+ * hook's stdout is kept with stderr, since a hook may print its results to either.
+ */
+const OUTPUT_TAIL = 2000;
 
 /**
  * Runs a fetch or push in a process group of its own. A push runs the clone's pre-push hook, which
  * may start a whole check suite; a timeout or an abort kills the group, so nothing git started
  * outlives it, and the call settles only once git has exited.
  */
-function gitNetwork(repo: string, args: readonly string[], net: NetworkCall): Promise<void> {
+function gitNetwork(repo: string, args: readonly string[], net: NetworkCall): Promise<NetworkRun> {
   return new Promise((resolve, reject) => {
+    const started = performance.now();
     const child = spawn('git', ['-C', repo, ...args], {
       // The login environment may carry a hook's GIT_DIR or GIT_WORK_TREE, which would override -C.
       env: { ...withoutGitRepoEnv(net.env), ...NO_PROMPTS },
       detached: true,
-      stdio: ['ignore', 'ignore', 'pipe'],
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
     let stderr = '';
+    let output = '';
     let timedOut = false;
+    const elapsed = (): number => Math.round(performance.now() - started);
+    child.stdout.on('data', (chunk: Buffer) => {
+      output = (output + chunk.toString('utf8')).slice(-OUTPUT_TAIL);
+    });
     child.stderr.on('data', (chunk: Buffer) => {
-      stderr = (stderr + chunk.toString('utf8')).slice(-STDERR_TAIL);
+      const text = chunk.toString('utf8');
+      stderr = (stderr + text).slice(-OUTPUT_TAIL);
+      output = (output + text).slice(-OUTPUT_TAIL);
     });
     const killGroup = (): void => {
       try {
@@ -95,27 +116,36 @@ function gitNetwork(repo: string, args: readonly string[], net: NetworkCall): Pr
     };
     child.on('error', (error) => {
       settle();
-      reject(new GitNetworkError(GitNetworkFailure.Failed, args, error.message));
+      reject(
+        new GitNetworkError(GitNetworkFailure.Failed, args, error.message, {
+          durationMs: elapsed(),
+          output: output.trim(),
+        }),
+      );
     });
     child.on('close', (code) => {
       settle();
       const detail = stderr.trim();
-      if (net.signal?.aborted) reject(new GitNetworkError(GitNetworkFailure.Aborted, args, ''));
+      const run: NetworkRun = { durationMs: elapsed(), output: output.trim() };
+      if (net.signal?.aborted)
+        reject(new GitNetworkError(GitNetworkFailure.Aborted, args, '', run));
       else if (timedOut)
         reject(
           new GitNetworkError(
             GitNetworkFailure.Timeout,
             args,
             `still running after ${String(Math.round(net.timeoutMs / 1000))} s; stopped with every process it started`,
+            run,
           ),
         );
-      else if (code === 0) resolve();
+      else if (code === 0) resolve(run);
       else
         reject(
           new GitNetworkError(
             REJECTED.test(detail) ? GitNetworkFailure.Rejected : GitNetworkFailure.Failed,
             args,
             detail,
+            run,
           ),
         );
     });
@@ -128,11 +158,14 @@ export interface Git {
   /** The URL of remote `name`; null when the repository has no such remote. */
   remoteUrl(repo: string, name: string): Promise<string | null>;
   /** Updates `origin/<branch>` from origin; the checkout is untouched. */
-  fetch(repo: string, branch: string, net: NetworkCall): Promise<void>;
+  fetch(repo: string, branch: string, net: NetworkCall): Promise<NetworkRun>;
   /** Creates `name` at `startPoint` and checks it out, with no upstream. */
   switchNewBranch(repo: string, name: string, startPoint: string): Promise<void>;
-  /** Pushes `branch` to the same name on origin and sets it as upstream; never forced. */
-  push(repo: string, branch: string, net: NetworkCall): Promise<void>;
+  /**
+   * Pushes `branch` to the same name on origin and sets it as upstream; never forced. Resolves with
+   * how long the push ran and what it printed, the pre-push hook's output included.
+   */
+  push(repo: string, branch: string, net: NetworkCall): Promise<NetworkRun>;
   head(repo: string): Promise<string>;
   status(repo: string): Promise<{ code: string; path: string }[]>;
   /** Committed and uncommitted changes since `base`, sorted and unique. */

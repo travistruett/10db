@@ -6,6 +6,7 @@ import { baseHandlers, daemonUrl, eventStream, renderApp, server } from '../../t
 import {
   batchDto,
   boardColumnDto,
+  DEFAULT_ACCOUNT,
   projectDto,
   projectViewDto,
   taskDto,
@@ -55,6 +56,11 @@ describe('BoardView', () => {
     type('Repository path', '/repos/demo', dialog);
     type('Gate command', 'make gate', dialog);
     type('Areas', 'api: src/api/**\nui: src/ui/**, src/shared/**', dialog);
+    expect(
+      await within(dialog).findByDisplayValue(
+        'Claude plan · builder@example.com (Claude subscription)',
+      ),
+    ).toBeTruthy();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Create project' }));
 
     await waitFor(() => {
@@ -68,15 +74,42 @@ describe('BoardView', () => {
         { name: 'api', globs: ['src/api/**'] },
         { name: 'ui', globs: ['src/ui/**', 'src/shared/**'] },
       ],
-      billingMode: 'subscription',
+      accountId: DEFAULT_ACCOUNT.id,
+      delivery: 'local',
+      permissionMode: 'default',
       handoffPct: 40,
       nudgePct: 50,
-      delivery: 'local',
     });
     await waitFor(() => {
       expect(screen.queryByRole('dialog')).toBeNull();
     });
     expect(await screen.findByText('No tasks yet.')).toBeTruthy();
+  });
+
+  it('creates a project in auto mode when the builder picks it', async () => {
+    const posted: unknown[] = [];
+    serve(
+      http.post(daemonUrl('/projects'), async ({ request }) => {
+        posted.push(await request.json());
+        return HttpResponse.json(projectDto(), { status: 201 });
+      }),
+    );
+    renderApp('/board');
+    fireEvent.click(await screen.findByRole('button', { name: 'New project' }));
+    const dialog = await screen.findByRole('dialog', { name: 'New project' });
+    type('Name', 'demo', dialog);
+    type('Repository path', '/repos/demo', dialog);
+    type('Gate command', 'make gate', dialog);
+    type('Areas', 'src: src/**', dialog);
+    expect(
+      within(dialog).getByRole<HTMLInputElement>('radio', { name: /Ask for each command/ }).checked,
+    ).toBe(true);
+    fireEvent.click(within(dialog).getByRole('radio', { name: /Auto mode/ }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Create project' }));
+    await waitFor(() => {
+      expect(posted).toHaveLength(1);
+    });
+    expect(posted[0]).toMatchObject({ permissionMode: 'auto' });
   });
 
   it('creates a pull-request project with its base branch and title prefix, and requires the prefix', async () => {
@@ -136,6 +169,88 @@ describe('BoardView', () => {
     await waitFor(() => {
       expect(shipped).toEqual([batch.id]);
     });
+  });
+
+  it("keeps a shipped batch's pull request reachable once the next batch starts", async () => {
+    const url = 'https://github.com/acme/widgets/pull/1';
+    const shipped = batchDto({ title: 'Alpha first', state: 'SHIPPED', prUrl: url });
+    const current = batchDto({
+      projectId: shipped.projectId,
+      title: 'Beta second',
+      state: 'OPEN',
+      branch: '10db/beta-second',
+    });
+    const project = projectViewDto({
+      id: shipped.projectId,
+      delivery: 'pull_request',
+      prTitlePrefix: 'feat(app)',
+      currentBatch: current,
+    });
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([])),
+      http.get(daemonUrl('/projects/:projectId/batches'), () =>
+        HttpResponse.json([current, shipped]),
+      ),
+    );
+    renderApp('/board');
+
+    const list = await screen.findByRole('list', { name: 'Batches' });
+    expect(within(list).getByText('Alpha first')).toBeTruthy();
+    expect(within(list).getByRole('link', { name: 'Pull request' }).getAttribute('href')).toBe(url);
+  });
+
+  it.each([
+    {
+      name: 'shows the pull request of the batch that shipped it',
+      batchState: 'SHIPPED' as const,
+      prUrl: 'https://github.com/acme/widgets/pull/1',
+      link: 'https://github.com/acme/widgets/pull/1',
+    },
+    {
+      name: 'shows no pull request while its batch has not shipped',
+      batchState: 'OPEN' as const,
+      prUrl: null,
+      link: null,
+    },
+  ])('a finished task $name', async ({ batchState, prUrl, link }) => {
+    const batch = batchDto({ title: 'Alpha first', state: batchState, prUrl });
+    const project = projectViewDto({
+      id: batch.projectId,
+      delivery: 'pull_request',
+      prTitlePrefix: 'feat(app)',
+      currentBatch: batch,
+    });
+    const ws = workstreamDto({
+      projectId: project.id,
+      batchId: batch.id,
+      taskTitle: 'Alpha',
+      state: 'DONE',
+    });
+    const done = taskDto({
+      projectId: project.id,
+      title: 'Alpha',
+      boardStatus: 'done',
+      status: 'done',
+      boardOrder: 1,
+      workstreamId: ws.id,
+    });
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([done])),
+      http.get(daemonUrl('/workstreams'), () => HttpResponse.json([ws])),
+      http.get(daemonUrl('/projects/:projectId/batches'), () => HttpResponse.json([batch])),
+    );
+    renderApp('/board');
+
+    const card = within(await screen.findByRole('list', { name: 'Done tasks' })).getByRole(
+      'listitem',
+      { name: 'Alpha' },
+    );
+    const hrefs = within(card)
+      .queryAllByRole('link', { name: 'Pull request' })
+      .map((a) => a.getAttribute('href'));
+    expect(hrefs).toEqual(link === null ? [] : [link]);
   });
 
   it('shows an areas mistake without calling the daemon', async () => {

@@ -1,4 +1,4 @@
-import type { HandoffDto, NextAction } from '@10db/contracts';
+import type { EvidenceId, HandoffDto, NextAction } from '@10db/contracts';
 
 /**
  * After a crash: resume the provider session once; if resuming already failed, start fresh from the
@@ -31,5 +31,33 @@ export function nextActionAfterCrash(
       return providerSessionId
         ? { kind: 'resume', providerSessionId, reason: 'the session crashed' }
         : fresh;
+  }
+}
+
+/**
+ * Before a session on the project's account, when the conversation the lane would resume ran on
+ * another one: Claude Code keeps a conversation in its account's config directory, so the lane
+ * starts fresh as after a failed resume, from the step's latest handoff. The builder's answer still
+ * reaches the fresh session, and so does a gate failure the lane was fixing.
+ */
+export function nextActionOnAnotherAccount(
+  previous: NextAction,
+  latest: HandoffDto | null,
+  failedGate: EvidenceId | null,
+): NextAction {
+  switch (previous.kind) {
+    case 'answer':
+      return { ...previous, providerSessionId: null };
+    case 'resume':
+      return failedGate
+        ? { kind: 'fix', evidenceId: failedGate }
+        : nextActionAfterCrash(previous, null, latest);
+    case 'start':
+    case 'continue_from_handoff':
+    case 'fix':
+    case 'uncommitted':
+    case 'verify':
+    case 'revise':
+      return previous;
   }
 }

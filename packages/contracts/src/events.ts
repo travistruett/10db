@@ -1,6 +1,10 @@
 import { z } from 'zod';
 
 export const EventType = {
+  AccountSaved: 'account.saved',
+  AccountCapReached: 'account.cap_reached',
+  AccountPaused: 'account.paused',
+  AccountResumed: 'account.resumed',
   ProjectCreated: 'project.created',
   TaskCreated: 'task.created',
   TaskChanged: 'task.changed',
@@ -21,8 +25,6 @@ export const EventType = {
   DeviationRecorded: 'deviation.recorded',
   ProposalCreated: 'proposal.created',
   ProposalResolved: 'proposal.resolved',
-  ProviderPaused: 'provider.paused',
-  ProviderResumed: 'provider.resumed',
   RecoveryStep: 'recovery.step',
   SettingsChanged: 'settings.changed',
   PersonaSaved: 'persona.saved',

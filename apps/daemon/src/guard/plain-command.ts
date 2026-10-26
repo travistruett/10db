@@ -3,7 +3,7 @@ const DOUBLE_QUOTED_FORBIDDEN = /[$`\\!"]/;
 const BLANK = new Set([' ', '\t']);
 const REDIRECTS = ['2>&1', '>/dev/null', '2>/dev/null'];
 /** zsh `=cmd` expansion: a word's start, or after `=` or `:` under MAGIC_EQUAL_SUBST. */
-const EQUALS_EXPANSION = /(^|[=:])=/;
+export const EQUALS_EXPANSION = /(^|[=:])=/;
 
 /** Every control character but tab: newlines and `\r` end or reshape a command. */
 function hasControl(text: string): boolean {

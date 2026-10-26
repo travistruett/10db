@@ -24,7 +24,7 @@ serves agents over MCP, and runs Claude Code sessions.
 modules import only that (ESLint enforces it). Dependencies point one way:
 
 `clock`, `log`, `events`, `guard`, `permissions`, `sandbox`, `git`, `github`, `verify`, `routing`, `picker` → `sessions`, `inbox`, `briefing`, `team` →
-`delivery` → `mcp` → `runner` → `watcher`, `scheduler`, `recovery`, `backups`, `benchmarks` → `daemon` (composition root) → `main.ts`.
+`delivery`, `accounts` → `mcp` → `runner` → `watcher`, `scheduler`, `recovery`, `backups`, `benchmarks` → `daemon` (composition root) → `main.ts`.
 `api` depends only on `@10db/contracts` and its own `ApiServices` interface; the composition root
 implements it and hands it to `createApp` in `ApiDeps`.
 
@@ -38,19 +38,22 @@ The fake adapter (`sessions/fake-adapter.ts`) is the test boundary for Claude Co
 - `team/` seeds the team configuration at start and turns a task into its stored step plan. Read the step a workstream is on with `currentStep` from `@10db/contracts`. Daemon tests get an invented measured catalogue from `test/catalogue.ts`.
 - `benchmarks/` syncs Artificial Analysis's free model list with the builder's own key, read from the Keychain (service `10db`, account `artificial-analysis-api-key`). AA data stays on the machine: never in logs, fixtures, docs or the repo, and every view of it shows AA's attribution. Tests use invented numbers and an injected `fetch`.
 - `github/` is the only module that runs `gh`, and `git/` the only one that runs `git`; both use `execFile` or `spawn` with argument arrays, never a shell. Network calls (fetch, push, every `gh` call) take a `NetworkCall` built from `environment/buildNetworkEnv`, a timeout and an abort signal, with prompts off. A push gets `pushTimeoutMs` (the gate's timeout), since it runs the clone's pre-push hook; fetch and `gh` get `networkTimeoutMs`. Fetch and push run detached in their own process group, and a timeout or abort kills the group. Delivery tests fake `gh` with `test/fake-gh.ts`; real git runs against a local bare `origin` (`createTempRepoWithOrigin`).
+- `accounts/` owns account pauses (`account_pause.<id>`; usage limit, monthly cap, refused), the monthly cap in local time on the injected clock, readiness and the preparer, staggered subscription starts, the account cards and the account service. The scheduler and the runner ask `AccountRuntime.blocked` before every session start; a cap or refusal pause lets running sessions finish and a usage limit stops them. `limits.ts` acts on a session's usage report: past a project's threshold its lanes hand off and it moves to its usable fallback (ready, not paused, capped when metered), or the builder is asked; at the hard limit a project with a fallback moves at once. Only projects with work in flight move or are asked.
+- `accounts/` also moves projects between accounts. `PATCH /projects/:id` and the cards go through `AccountMoves.move` (`moves.ts`), which remembers a move off a usage-limited account; `move-back.ts` asks to move back when that limit resets; `usage-reports.ts` keeps each account's latest report in memory. `Runner.handOff` asks a project's lanes on an account to hand off in the account's own words (`HANDOFF_NUDGE_ACCOUNT`). The runner reads the project's account before each session and never resumes a conversation that ran on another account: `runner/next-action.ts` starts the lane fresh from its handoff.
 - `delivery/` owns batches: a start answers at once and cuts or joins in a background job (`jobs.ts`, one at a time per project); git and gh refusals are flag cards (`cards.ts`) that name their tasks in `detail.taskIds`, except the card for a `CUTTING` row startup deletes, which has only `detail.batchId`. A failed batch member's card offers Retry and Ship anyway (`batch-card.ts`), acted on through the inbox's `onFlagAnswer`. `recoverBatches` runs at startup after `recoverOnStartup`; `subscribeShipTrigger` follows `workstream.changed`. The scheduler imports only `batchLaunchVerdict` and `LaunchVerdict`, and the composition root passes `flagWrongBranch` to it as `onWrongBranch`; the runner and workstream recovery import `batchCardFields` for the failed card. Tests wait on `Scheduler.idle()` and the delivery jobs' `idle()`.
-- `environment/` owns the login env (memory only), the session env builder and the system check. Nothing
-  else reads the login env. Never write it to disk, the database or logs; log variable names, never values.
+- `environment/` owns the login env (memory only), the Keychain, the launcher and the system check. Nothing else reads the login env, and only `launch.ts` names account variables (`CLAUDE_CONFIG_DIR`, `ANTHROPIC_API_KEY`, …); other modules use `SECRET_VARIABLES`, `signInCommand` and `Launcher.loginConfigDir()`. Never write the login env or a secret to disk, the database or logs.
+- The guard's protected paths (`guard/account-rules.ts`) are the data directory and the default account's sign-in; `startDaemon` builds them once and passes them to the runner and the MCP handler.
+- A lane session's permission mode is `SessionSpec.permissionMode`: the runner sets `auto` when the project's `permissionMode` is `auto`, read from the project before each session, or when `TENDB_LANE_PERMISSION_MODE=auto` reaches it as `permissionModeOverride` (a dev override for every project). The adapters never read the env.
 - Only `sessions/claude-*.ts` import `@anthropic-ai/claude-agent-sdk`, and only `claude-adapter.ts` imports it at runtime (the others import types).
   Tests inject a scripted `query`; only `claude-adapter.live.test.ts` runs real Claude Code, behind
   `TENDB_LIVE_CLAUDE=1`.
-- Sessions and the gate both run in `sessionEnv(project)`. Nothing from the daemon's own
-  `process.env` reaches a project's commands.
+- A session runs in its launch env (the project env plus its account's variables); the gate, the shipping gate and the repo's MCP servers run in the project env (the login env with every billing switch stripped). Nothing from the daemon's own `process.env` reaches a project's commands.
+- Both adapters check a session's account with `sessions/account-check.ts` before the prompt and at the first `init`; a refusal ends the session as `account_refused`, which pauses the account, and a model mismatch fails the workstream. Logs never carry an email or organization.
 - The variables that point git at a repository (`GIT_REPO_ENV_VARS` in `git/`: `GIT_DIR` and the
   rest of `git rev-parse --local-env-vars` except the config ones) are dropped wherever the daemon
   starts a process that may run git: `git/`'s own calls (fetch and push take theirs off the
   `NetworkCall` env), every `gh` call (gh runs git to read the remotes), the login shell capture,
-  and the session env (sessions and the gate). A daemon started from a git hook still acts on the
+  and the launcher's env (sessions and the gate). A daemon started from a git hook still acts on the
   repository it names. Git config variables (`GIT_CONFIG_COUNT` with its `KEY_n`/`VALUE_n`,
   `GIT_CONFIG_PARAMETERS`, `GIT_CONFIG`) are kept: they name no repository, and a builder's
   profile may set them on purpose.

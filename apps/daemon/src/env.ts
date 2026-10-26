@@ -1,3 +1,4 @@
+import { PermissionMode } from '@10db/contracts';
 import { z } from 'zod';
 
 export const LogLevel = {
@@ -9,9 +10,6 @@ export const LogLevel = {
   Trace: 'trace',
 } as const;
 export type LogLevel = (typeof LogLevel)[keyof typeof LogLevel];
-
-export const LanePermissionMode = { Default: 'default', Auto: 'auto' } as const;
-export type LanePermissionMode = (typeof LanePermissionMode)[keyof typeof LanePermissionMode];
 
 export const Switch = { On: 'on', Off: 'off' } as const;
 export type Switch = (typeof Switch)[keyof typeof Switch];
@@ -33,9 +31,9 @@ const DaemonEnv = z.object({
     .optional(),
   // Absolute path to the claude binary; otherwise it is found on the login shell's PATH.
   TENDB_CLAUDE_PATH: z.string().startsWith('/').optional(),
-  // How lane sessions decide permission prompts: `auto` lets Claude Code's classifier approve routine
-  // calls. The guard's refusals still apply first and escalated calls still become cards.
-  TENDB_LANE_PERMISSION_MODE: z.enum(LanePermissionMode).default(LanePermissionMode.Default),
+  // Dev override: `auto` runs every project's lanes in Claude Code's auto mode, whatever the project's own
+  // setting says. The guard's refusals still apply first and escalated calls still become cards.
+  TENDB_LANE_PERMISSION_MODE: z.enum(PermissionMode).default(PermissionMode.Default),
   // Lane sessions run Bash under Claude Code's sandbox: commands can only write the checkout and the
   // lane's temp directory, and a card is raised only for hazards and new hosts.
   TENDB_LANE_SANDBOX: z.enum(Switch).default(Switch.Off),

@@ -365,6 +365,7 @@ describe('fileAccessJudge in the guard', () => {
       hazards: [],
       claims: [{ kind: 'area', name: 'all' }],
       readOnly: false,
+      protectedPaths: [],
       fileAccess,
     });
 

@@ -138,6 +138,29 @@ describe('batch delivery through the daemon', () => {
     expect(git(remote.origin.path, 'rev-parse', 'main')).toBe(shipped.baseSha);
   });
 
+  it('keeps a shipped batch listed with its pull request, newest batch first, once the next batch starts', async () => {
+    const { api, project, alpha, beta } = await start();
+    const listed = () => api.get(`/projects/${project.id}/batches`, z.array(BatchDto));
+    const first = await api.post(`/projects/${project.id}/batches`, BatchDto, {
+      title: 'Alpha first',
+      taskIds: [alpha.id],
+    });
+    await waitForAsync(async () => {
+      const batch = (await listed()).find((b) => b.id === first.id);
+      return batch?.state === 'SHIPPED' ? batch : undefined;
+    }, 30_000);
+    const second = await api.post(`/projects/${project.id}/batches`, BatchDto, {
+      title: 'Beta second',
+      taskIds: [beta.id],
+    });
+    const batches = await listed();
+    expect(batches.map((b) => b.id)).toEqual([second.id, first.id]);
+    expect(batches.find((b) => b.id === first.id)).toMatchObject({
+      state: 'SHIPPED',
+      prUrl: 'https://github.com/acme/widgets/pull/1',
+    });
+  });
+
   it('answers 202 with the batch when a task starts, and gives two racing starts one batch and one branch', async () => {
     const { api, project, alpha, beta } = await start();
     const call = (id: string) =>
@@ -165,6 +188,7 @@ describe('batch delivery through the daemon', () => {
   it('marks gh required in the system check once a project delivers pull requests', async () => {
     const check: SystemCheck = SystemCheckDto.parse({
       loginEnv: { source: 'login_shell', warning: null },
+      claudeCode: { verifiedOn: '2.1.302', warning: null },
       tools: [{ name: 'gh', path: null, version: null, required: false }],
     });
     const { api } = await start(() => Promise.resolve(check));
