@@ -22,6 +22,13 @@ export function createAccountCardAnswers(deps: {
     // The inbox checks this too, but only after this hook has acted.
     if (item.options.length > 0 && !item.options.some((o) => o.label === answer.choice))
       throw new InvalidError(`Choose one of: ${item.options.map((o) => o.label).join(', ')}`);
+    // A card with no options (the recorded identity) offers neither: acting on it would undo a later change.
+    const offered = item.options.some((o) => o.label === answer.choice);
+    if (
+      (answer.choice === AccountCardChoice.Confirm || answer.choice === AccountCardChoice.Resume) &&
+      !offered
+    )
+      throw new InvalidError(`This card does not offer ${answer.choice}`);
     if (answer.choice === AccountCardChoice.Confirm) {
       if (card.data.seenIdentity === null)
         throw new ConflictError('This card names no identity to confirm');

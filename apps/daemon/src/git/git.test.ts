@@ -31,7 +31,10 @@ const write = (rel: string, text: string) => {
   writeFileSync(join(repo.path, rel), text);
 };
 const rawGit = (...args: string[]) =>
-  execFileSync('git', ['-C', repo.path, ...args], { env: isolatedGitEnv() })
+  execFileSync('git', ['-C', repo.path, ...args], {
+    env: isolatedGitEnv(),
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
     .toString()
     .trim();
 const commitCount = () => Number(rawGit('rev-list', '--count', 'HEAD'));
@@ -241,7 +244,7 @@ describe('branches and remotes', () => {
     await git.switchNewBranch(repo.path, '10db/greetings-0a1b2c3d', base);
     expect(rawGit('branch', '--show-current')).toBe('10db/greetings-0a1b2c3d');
     expect(rawGit('rev-parse', 'HEAD')).toBe(base);
-    expect(() => rawGit('rev-parse', '--abbrev-ref', '@{u}')).toThrow();
+    expect(() => rawGit('rev-parse', '--abbrev-ref', '@{u}')).toThrow(/no upstream configured/);
     await expect(git.switchNewBranch(repo.path, '10db/greetings-0a1b2c3d', base)).rejects.toThrow(
       /already exists/,
     );

@@ -35,7 +35,12 @@ import {
   type Launcher,
 } from '../environment';
 import type { StateStore } from '../events';
-import { checkAccount, type SeenAccount, type SessionAdapter } from '../sessions';
+import {
+  AccountProbeError,
+  checkAccount,
+  type SeenAccount,
+  type SessionAdapter,
+} from '../sessions';
 import { monthOf, monthWindow, usageWindow } from './month';
 import type { AccountRuntime } from './runtime';
 import type { StartGate } from './start-gate';
@@ -145,6 +150,8 @@ export function createAccountService(deps: {
       try {
         launch = deps.launcher.probe(row);
       } catch (error) {
+        // A locked Keychain is a conflict the builder can fix, as it is when saving a secret.
+        if (error instanceof KeychainError) throw new ConflictError(error.message);
         if (!(error instanceof AccountLaunchError)) throw error;
         return {
           ...nothingSeen(id),
@@ -163,6 +170,8 @@ export function createAccountService(deps: {
           release();
         }
       } catch (error) {
+        // Only a probe that reported nothing is a conflict; anything else is a bug and reaches the log.
+        if (!(error instanceof AccountProbeError)) throw error;
         throw new ConflictError(
           `Couldn't read the account ${row.label}: ${error instanceof Error ? error.message : String(error)}`,
         );

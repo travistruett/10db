@@ -482,14 +482,18 @@ describe('team, routing and benchmark routes', () => {
     ['accountIdentity', 'GET', '/accounts/{id}/identity', undefined],
     ['accountUsage', 'GET', '/accounts/{id}/usage?month=2026-10', undefined],
   ])('routes %s behind the token', async (service, method, path, body) => {
-    const res = await app().request(path.replace('{id}', mintId('Account')), {
-      method,
-      headers: {
-        Authorization: `Bearer ${TOKEN}`,
-        ...(body === undefined ? {} : { 'content-type': 'application/json' }),
-      },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    });
+    const request = (headers: Record<string, string>) =>
+      app().request(path.replace('{id}', mintId('Account')), {
+        method,
+        headers: {
+          ...headers,
+          ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      });
+    expect((await request({})).status).toBe(401);
+    expect(reached).toEqual([]);
+    const res = await request({ Authorization: `Bearer ${TOKEN}` });
     expect(res.status).toBe(500);
     expect(reached).toEqual([service]);
   });

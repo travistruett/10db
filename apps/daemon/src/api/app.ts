@@ -206,9 +206,7 @@ export function createApp(deps: ApiDeps) {
     )
     .get(
       '/accounts/:accountId/usage',
-      validator('query', (query): { month?: string } =>
-        typeof query['month'] === 'string' ? { month: Month.parse(query['month']) } : {},
-      ),
+      validator('query', (query) => z.object({ month: Month.optional() }).parse(query)),
       (c) =>
         c.json(
           deps.services.accountUsage(
