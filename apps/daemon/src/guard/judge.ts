@@ -20,6 +20,17 @@ export interface GuardInput {
   readonly readOnly: boolean;
   /** The project's delivery; absent means local. In pull-request projects only the daemon pushes. */
   readonly delivery?: Delivery;
+  /** Present for a sandboxed lane: refuses reads and writes by the real path they name. */
+  readonly fileAccess?: FileAccessJudge;
+}
+
+/**
+ * Judges the real paths a file tool names. The guard takes it as a function so it need not import
+ * the module that knows the sandbox's read policy.
+ */
+export interface FileAccessJudge {
+  read(toolName: string, input: unknown): 'ok' | { refuse: string };
+  write(path: string): 'ok' | { refuse: string };
 }
 
 export type GuardVerdict =
@@ -38,6 +49,7 @@ const DEPLOY = [
   /^cargo publish\b/,
   /^gh release create\b/,
 ];
+const PATH_READ_TOOLS = new Set(['Read', 'Grep', 'Glob', 'LS']);
 const SHELLS = new Set(['sh', 'bash', 'zsh']);
 const ToolInput = z.record(z.string(), z.unknown());
 
@@ -176,10 +188,18 @@ const READ_ONLY_REFUSAL =
 
 /** The PreToolUse decision for a managed session (spec §8.2). Rules only; never an LLM. */
 export function judgeToolUse(input: GuardInput): GuardVerdict {
+  if (input.fileAccess && PATH_READ_TOOLS.has(input.toolName)) {
+    const verdict = input.fileAccess.read(input.toolName, input.toolInput);
+    if (verdict !== 'ok') return deny(verdict.refuse);
+  }
   if (FILE_TOOLS.has(input.toolName)) {
     if (input.readOnly) return deny(READ_ONLY_REFUSAL);
     const filePath =
       stringField(input.toolInput, 'file_path') ?? stringField(input.toolInput, 'notebook_path');
+    if (filePath !== null && input.fileAccess) {
+      const verdict = input.fileAccess.write(filePath);
+      if (verdict !== 'ok') return deny(verdict.refuse);
+    }
     return filePath === null ? ALLOW : judgeFile(input, filePath);
   }
   if (input.toolName === 'Bash') {

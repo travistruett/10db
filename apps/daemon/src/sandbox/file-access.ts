@@ -1,5 +1,5 @@
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { foldPathCase, realPathOf, stringField } from '../guard';
+import { foldPathCase, realPathOf, stringField, type FileAccessJudge } from '../guard';
 import { isEqualOrUnder, pathsEqual } from './protected-reads';
 
 export interface FileAccessContext {
@@ -162,4 +162,28 @@ export function writeAccess(
   }
   if (isClaudeProtected(real, ctx)) return { access: 'claude-protected', realPath: real, viaLink };
   return { access: 'ok', realPath: real, viaLink };
+}
+
+/** The guard's file-access judge for one lane: protected reads and git internals are refused by real path. */
+export function fileAccessJudge(ctx: FileAccessContext): FileAccessJudge {
+  return {
+    read(toolName, input) {
+      for (const path of readPathsOf(toolName, input)) {
+        if (readAccess(path, ctx).access === 'protected') {
+          return { refuse: `${path} is a protected path; 10db never lets a lane read it.` };
+        }
+      }
+      return 'ok';
+    },
+    write(path) {
+      const result = writeAccess(path, ctx);
+      if (result.access === 'git-internal') {
+        return { refuse: '.git/ internals are never edited; use the commit tool.' };
+      }
+      if (result.access === 'claude-protected' && result.viaLink) {
+        return { refuse: `Edit ${result.realPath} by its own path, not through a link.` };
+      }
+      return 'ok';
+    },
+  };
 }

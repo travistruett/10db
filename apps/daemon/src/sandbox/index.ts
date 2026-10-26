@@ -17,6 +17,7 @@ export {
   SandboxTempDirError,
 } from './temp-dir';
 export {
+  fileAccessJudge,
   isOwnToolResult,
   readAccess,
   readPathsOf,

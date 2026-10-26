@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { tempDir } from '../../test/fixtures';
 import {
   classifyPath,
+  type FileAccessJudge,
   judgeToolUse,
   resolveInRepo,
   splitCommand,
@@ -1157,4 +1158,128 @@ describe('delivery and gh', () => {
   it('treats a missing delivery as local', () => {
     expect(bash('git push origin feat/x').decision).toBe('allow');
   });
+});
+
+describe('file access judge', () => {
+  const refusing: FileAccessJudge = {
+    read: () => ({ refuse: 'no reads' }),
+    write: () => ({ refuse: 'no writes' }),
+  };
+  const permissive: FileAccessJudge = { read: () => 'ok', write: () => 'ok' };
+  const withJudge = (
+    fileAccess: FileAccessJudge | undefined,
+    toolName: string,
+    toolInput: unknown,
+  ) =>
+    judgeToolUse({
+      toolName,
+      toolInput,
+      repoPath: repo.path,
+      areas: AREAS,
+      hazards: DEFAULT_HAZARDS,
+      claims: [{ kind: 'area', name: 'api' }],
+      readOnly: false,
+      ...(fileAccess ? { fileAccess } : {}),
+    });
+
+  const rows: {
+    name: string;
+    judge: FileAccessJudge | undefined;
+    tool: string;
+    input: unknown;
+    expected: 'allow' | { reason: string };
+  }[] = [
+    {
+      name: 'Read refused',
+      judge: refusing,
+      tool: 'Read',
+      input: { file_path: '/x' },
+      expected: { reason: 'no reads' },
+    },
+    {
+      name: 'Grep refused',
+      judge: refusing,
+      tool: 'Grep',
+      input: { path: '/x' },
+      expected: { reason: 'no reads' },
+    },
+    {
+      name: 'Glob refused',
+      judge: refusing,
+      tool: 'Glob',
+      input: { pattern: '*' },
+      expected: { reason: 'no reads' },
+    },
+    {
+      name: 'LS refused',
+      judge: refusing,
+      tool: 'LS',
+      input: { path: '/x' },
+      expected: { reason: 'no reads' },
+    },
+    {
+      name: 'Edit of .git refused',
+      judge: refusing,
+      tool: 'Edit',
+      input: { file_path: '.git/config' },
+      expected: { reason: 'no writes' },
+    },
+    {
+      name: 'Write refused',
+      judge: refusing,
+      tool: 'Write',
+      input: { file_path: 'src/api/a.ts' },
+      expected: { reason: 'no writes' },
+    },
+    {
+      name: 'Grep allowed when the judge says ok',
+      judge: permissive,
+      tool: 'Grep',
+      input: { path: '.' },
+      expected: 'allow',
+    },
+    {
+      name: 'Edit allowed when the judge says ok',
+      judge: permissive,
+      tool: 'Edit',
+      input: { file_path: 'src/api/a.ts' },
+      expected: 'allow',
+    },
+    {
+      name: 'no judge: Read',
+      judge: undefined,
+      tool: 'Read',
+      input: { file_path: '/x' },
+      expected: 'allow',
+    },
+    {
+      name: 'no judge: Edit',
+      judge: undefined,
+      tool: 'Edit',
+      input: { file_path: 'src/api/a.ts' },
+      expected: 'allow',
+    },
+    {
+      name: 'no judge: Edit outside',
+      judge: undefined,
+      tool: 'Edit',
+      input: { file_path: '/etc/x' },
+      expected: {
+        reason: '/etc/x is outside the repository. Edit files inside ' + 'REPO' + ' only.',
+      },
+    },
+  ];
+  for (const row of rows) {
+    it(row.name, () => {
+      const verdict = withJudge(row.judge, row.tool, row.input);
+      if (row.expected === 'allow') {
+        expect(verdict).toEqual({ decision: 'allow' });
+      } else {
+        expect(verdict).toEqual({
+          decision: 'deny',
+          reason: row.expected.reason.replace('REPO', repo.path),
+        });
+      }
+    });
+  }
 });

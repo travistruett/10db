@@ -10,7 +10,9 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { judgeToolUse, type FileAccessJudge } from '../guard';
 import {
+  fileAccessJudge,
   protectedReads,
   readAccess,
   readPathsOf,
@@ -202,5 +204,58 @@ describe('writeAccess', () => {
       realPath: join(checkout, 'src', 'a.ts'),
       viaLink: false,
     });
+  });
+});
+
+describe('fileAccessJudge in the guard', () => {
+  const guard = (fileAccess: FileAccessJudge, toolName: string, toolInput: unknown) =>
+    judgeToolUse({
+      toolName,
+      toolInput,
+      repoPath: checkout,
+      areas: [{ name: 'all', globs: ['**'] }],
+      hazards: [],
+      claims: [{ kind: 'area', name: 'all' }],
+      readOnly: false,
+      fileAccess,
+    });
+
+  it('refuses a read of a protected path through a link', () => {
+    symlinkSync(join(home, '.claude.json'), join(checkout, 'link.json'));
+    const verdict = guard(fileAccessJudge(context()), 'Read', { file_path: 'link.json' });
+    expect(verdict).toEqual({
+      decision: 'deny',
+      reason: 'link.json is a protected path; 10db never lets a lane read it.',
+    });
+  });
+
+  it('lets a read of the checkout and an unlisted path through to the sandbox', () => {
+    const judge = fileAccessJudge(context());
+    expect(guard(judge, 'Read', { file_path: 'src/a.ts' })).toEqual({ decision: 'allow' });
+    expect(guard(judge, 'Grep', { path: '../other' })).toEqual({ decision: 'allow' });
+  });
+
+  it('refuses a Glob whose literal prefix reaches a protected directory', () => {
+    const verdict = guard(fileAccessJudge(context()), 'Glob', { pattern: '../../home/.claude/*' });
+    expect(verdict.decision).toBe('deny');
+  });
+
+  it('refuses an edit of .git internals', () => {
+    const verdict = guard(fileAccessJudge(context()), 'Edit', { file_path: '.git/config' });
+    expect(verdict).toEqual({
+      decision: 'deny',
+      reason: '.git/ internals are never edited; use the commit tool.',
+    });
+  });
+
+  it('refuses an edit of a protected Claude file through a link, not by its own path', () => {
+    writeFileSync(join(checkout, '.claude', 'settings.json'), '{}');
+    symlinkSync(join(checkout, '.claude', 'settings.json'), join(checkout, 'src', 's.json'));
+    const real = join(checkout, '.claude', 'settings.json');
+    expect(guard(fileAccessJudge(context()), 'Edit', { file_path: 'src/s.json' })).toEqual({
+      decision: 'deny',
+      reason: `Edit ${real} by its own path, not through a link.`,
+    });
+    expect(fileAccessJudge(context()).write('.claude/settings.json')).toBe('ok');
   });
 });
