@@ -418,6 +418,8 @@ describe('cosmetic forms in stored rules', () => {
     ['pnpm test; echo "exit $?"', 'pnpm test'],
     ['pnpm -s exec vitest run; echo $?', 'pnpm exec vitest run'],
     ['pnpm test; echo $HOME', null],
+    ['pnpm -s', null],
+    ['pnpm --silent -s; echo $?', null],
   ])('commandPrefix of %s is %s', (command, expected) => {
     expect(commandPrefix(command)).toBe(expected);
   });

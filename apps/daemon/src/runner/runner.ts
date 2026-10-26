@@ -834,7 +834,7 @@ export function createRunner(opts: RunnerOptions): Runner {
           sessionId: session.id,
           observer,
           signal: abort.signal,
-          allowedTools,
+          allowedCommands: step.tools === ToolAccess.Edit ? project.allowedCommands : [],
           repoPath: project.repoPath,
           allowOnce: permission?.allowOnce ?? null,
         },

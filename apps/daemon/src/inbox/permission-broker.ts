@@ -12,7 +12,7 @@ import {
 import { listPermissionRules } from '@10db/db';
 import { z } from 'zod';
 import type { StateStore } from '../events';
-import { commandPrefix, matchesAllowedTool, matchPermissionRule } from '../permissions';
+import { commandPrefix, matchesProjectCommand, matchPermissionRule } from '../permissions';
 import type { ToolDecision, ToolRequest } from '../sessions';
 import { ParkedError, type InboxService } from './service';
 
@@ -27,9 +27,9 @@ interface BrokerContext {
   readonly sessionId: SessionId;
   readonly observer: WaitObserver;
   readonly signal: AbortSignal;
-  /** The allow list the step's session was started with; a Bash call it covers needs no card. */
-  readonly allowedTools?: readonly string[];
-  /** The repository the step runs in, for the allow list's path checks. */
+  /** The project's own allowed commands for this step; empty on a read-only step. */
+  readonly allowedCommands?: readonly string[];
+  /** The repository the step runs in; a shortcut call may name only paths inside it. */
   readonly repoPath?: string;
   /** An `allow_once` answered after the workstream was parked: the first identical call is allowed. */
   readonly allowOnce?: { readonly toolName: string; readonly summary: string } | null;
@@ -127,11 +127,13 @@ export function createPermissionBroker(
   async function askPermission(req: ToolRequest): Promise<ToolDecision> {
     const rules = listPermissionRules(deps.state.db, ctx.projectId, ctx.workstreamId);
     if (matchPermissionRule(req, rules)) return { behavior: 'allow' };
-    // Claude Code matches its allow rules literally and so asks about forms 10db's matcher reads as
-    // the same command; the allow list is judged here the way the guard-checked rules are.
+    // Claude Code matches its allowed commands literally and so asks about two cosmetic forms of them;
+    // 10db's matcher reads those as the same command, and checks the program and paths strictly.
+    const command = req.input['command'];
     if (
       req.toolName === 'Bash' &&
-      matchesAllowedTool(req.toolName, req.input, ctx.allowedTools ?? [], ctx.repoPath ?? '')
+      typeof command === 'string' &&
+      matchesProjectCommand(command, ctx.allowedCommands ?? [], ctx.repoPath ?? '')
     )
       return { behavior: 'allow' };
     const summary = summarize(req);

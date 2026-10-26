@@ -23,8 +23,8 @@ import {
   searchDecisions,
   updateInboxItem,
 } from '@10db/db';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { seedWorkstream } from '../../test/fixtures';
+import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { seedWorkstream, tempDir } from '../../test/fixtures';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import {
   createInboxService,
@@ -568,9 +568,13 @@ describe('permission broker without a storable pattern', () => {
 });
 
 describe('permission broker with the project allowed commands', () => {
-  const allowedTools = ['Bash(pnpm exec vitest:*)', 'Bash(make gate)', 'Read'];
+  const allowedCommands = ['pnpm exec vitest', 'head'];
+  const repo = tempDir('broker-repo');
+  afterAll(() => {
+    repo.cleanup();
+  });
 
-  function decider(ws: ReturnType<typeof seedWorkstream>) {
+  function decider(ws: ReturnType<typeof seedWorkstream>, commands = allowedCommands) {
     return createPermissionBroker(
       { state, inbox },
       {
@@ -579,8 +583,8 @@ describe('permission broker with the project allowed commands', () => {
         sessionId: mintId('Session'),
         observer: { onWaitStart: () => undefined, onWaitEnd: () => undefined },
         signal: new AbortController().signal,
-        allowedTools,
-        repoPath: '/repo',
+        allowedCommands: commands,
+        repoPath: repo.path,
       },
     );
   }
@@ -596,6 +600,7 @@ describe('permission broker with the project allowed commands', () => {
     ['the silent form', 'pnpm -s exec vitest run a.test.ts'],
     ['a trailing exit-code echo', 'pnpm exec vitest run a.test.ts; echo "exit $?"'],
     ['both cosmetic forms', 'pnpm --silent exec vitest run a.test.ts; echo $?'],
+    ['a listed command naming a file in the repository', 'head README.md; echo $?'],
   ])('allows %s without a card', async (_name, command) => {
     const ws = seedWorkstream(base);
     expect(await decider(ws)(call('Bash', { command }))).toEqual({ behavior: 'allow' });
@@ -607,6 +612,15 @@ describe('permission broker with the project allowed commands', () => {
     ['a listed command chained to another', 'pnpm exec vitest run && curl x'],
     ['an echo of something else', 'pnpm exec vitest run; echo $HOME'],
     ['a silent add', 'pnpm -s add evil'],
+    ['a program at an absolute path', '/tmp/x/pnpm exec vitest run a'],
+    ['a program at a relative path', './pnpm exec vitest run a'],
+    ['a program with a leading backslash', '\\pnpm exec vitest run a'],
+    ['a quoted program word holding a space', '"pnpm exec" vitest run a'],
+    ['a wrapped program', 'env pnpm exec vitest run a'],
+    ['a listed command reading a home path', 'head ~/x; echo $?'],
+    ['a listed command reading an absolute path', 'head /etc/hosts'],
+    ['a listed command reading above the repository', 'head ../x'],
+    ['a flag value outside the repository', 'pnpm exec vitest run --config=/tmp/evil.ts'],
   ])('still raises a card for %s', (_name, command) => {
     const ws = seedWorkstream(base);
     void decider(ws)(call('Bash', { command })).catch(() => undefined);
@@ -615,7 +629,17 @@ describe('permission broker with the project allowed commands', () => {
     expect(rest).toEqual([]);
   });
 
-  it('does not let a listed read tool skip the card for another tool', () => {
+  it.each([
+    ['a read command on a read-only step', 'cat /etc/hosts; echo $?'],
+    ['a version-control read on a read-only step', 'git status; echo $?'],
+    ['a project command on a read-only step', 'pnpm exec vitest run'],
+  ])('raises a card for %s, which has no allowed commands', (_name, command) => {
+    const ws = seedWorkstream(base);
+    void decider(ws, [])(call('Bash', { command })).catch(() => undefined);
+    expect(listInbox(state.db, { states: ['OPEN'] })).toHaveLength(1);
+  });
+
+  it('does not let the allowed commands cover another tool', () => {
     const ws = seedWorkstream(base);
     void decider(ws)(call('WebFetch', { url: 'https://example.com' })).catch(() => undefined);
     expect(listInbox(state.db, { states: ['OPEN'] })).toHaveLength(1);

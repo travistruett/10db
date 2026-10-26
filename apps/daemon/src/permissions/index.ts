@@ -3,5 +3,6 @@ export {
   baseAllowedTools,
   commandPrefix,
   matchesAllowedTool,
+  matchesProjectCommand,
   matchPermissionRule,
 } from './rules';
