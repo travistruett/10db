@@ -29,8 +29,10 @@ const HOME_CANARY = join(HOME, `.10db-s14-canary-${RUN}`);
 const SHARED_CANARY = `/Users/Shared/.10db-s14-canary-${RUN}`;
 // Per-session temp directories sit under the per-user macOS temp dir; the shared roots get canaries of their own.
 const TMP_ROOT = realpathSync(mkdtempSync(join(tmpdir(), '10db-s14-')));
-const LANE_TMP = join(TMP_ROOT, 'laneA');
-const OTHER_TMP = join(TMP_ROOT, 'laneB');
+// Claude Code uses CLAUDE_CODE_TMPDIR for the sandbox only when the path is at most 44 bytes; a longer one falls
+// back to /tmp. Lane temp directories are short paths under /private/tmp for that reason.
+const LANE_TMP = `/private/tmp/10db-${RUN}-a`;
+const OTHER_TMP = `/private/tmp/10db-${RUN}-b`;
 const CLAUDE_SHARED_TMP = `/private/tmp/claude-${UID}`;
 const CLAUDE_SHARED_CANARY = join(CLAUDE_SHARED_TMP, `.10db-s14-canary-${RUN}`);
 const SYSTEM_TMP_CANARY = `/private/tmp/.10db-s14-canary-${RUN}`;
@@ -107,8 +109,8 @@ function removeCanaries(): void {
       console.log(`CLEANUP: detach ${VOLUME} by hand`);
     }
   }
-  for (const dir of [PROJECTS, HOME_CANARY, SHARED_CANARY, TMP_ROOT, CLAUDE_SHARED_CANARY, SYSTEM_TMP_CANARY]) rmSync(dir, { recursive: true, force: true });
-  const left = [PROJECTS, HOME_CANARY, SHARED_CANARY, TMP_ROOT, CLAUDE_SHARED_CANARY, SYSTEM_TMP_CANARY, VOLUME].filter((p) => existsSync(p));
+  for (const dir of [PROJECTS, HOME_CANARY, SHARED_CANARY, TMP_ROOT, LANE_TMP, OTHER_TMP, CLAUDE_SHARED_CANARY, SYSTEM_TMP_CANARY]) rmSync(dir, { recursive: true, force: true });
+  const left = [PROJECTS, HOME_CANARY, SHARED_CANARY, TMP_ROOT, LANE_TMP, OTHER_TMP, CLAUDE_SHARED_CANARY, SYSTEM_TMP_CANARY, VOLUME].filter((p) => existsSync(p));
   console.log(`CLEANUP ${left.length === 0 ? 'all canaries gone' : `LEFT: ${left.map(tilde).join(', ')}`}`);
 }
 
@@ -348,6 +350,8 @@ async function policy(): Promise<void> {
     ['policy-deny-slash-fixed', lane({ filesystem: { denyRead: ['/', ...PROTECTED, envDeny], allowRead: [...SYSTEM_READS, '/private/var/select', CLAUDE_SHARED_TMP, LANE, ...TOOLCHAIN_READS] } }), fixedEnv],
     ['policy-deny-slash-fixed-tmp-link', lane({ filesystem: { denyRead: ['/', ...PROTECTED, envDeny], allowRead: [...SYSTEM_READS, '/private/var/select', '/tmp', CLAUDE_SHARED_TMP, LANE, ...TOOLCHAIN_READS] } }), fixedEnv],
     ['policy-deny-slash-final', lane({ filesystem: { denyRead: ['/', ...PROTECTED, envDeny], allowRead: [...SYSTEM_READS, ...ROOT_LINKS, '/private/var/select', CLAUDE_SHARED_TMP, LANE, ...TOOLCHAIN_READS] } }), fixedEnv],
+    // The lane profile: deny /, its own short temp directory, and no shared temp root.
+    ['policy-lane-profile', lane({ filesystem: { denyRead: ['/', ...PROTECTED, envDeny], allowRead: [...SYSTEM_READS, ...ROOT_LINKS, '/private/var/select', LANE_TMP, LANE, ...TOOLCHAIN_READS] } }), { ...fixedEnv, CLAUDE_CODE_TMPDIR: LANE_TMP }],
   ];
   const only = process.env.SPIKE_VARIANTS?.split(',');
   for (const [label, sandbox, env] of variants.filter(([l]) => !only || only.includes(l))) {
@@ -506,8 +510,28 @@ async function deps(): Promise<void> {
     ['deps-autoallow-ask-rule', lane({ network, autoAllowBashIfSandboxed: true }), undefined, { settings: { permissions: { ask: ['Bash(pnpm add:*)', 'Bash(npm install:*)'] } } }],
   ];
   // A store and cache inside the checkout, the one shared-cache-free place a lane may write.
-  const storeCmds = ['pnpm add is-number@7.0.0 --store-dir .pnpm-store', 'ls node_modules | wc -l', 'git status --short'];
-  const pStore = await probe({ label: 'deps-checkout-store', cwd: proj, prompt: bashPrompt(storeCmds), expected: storeCmds, sandbox: lane({ network }), env: { CLAUDE_CODE_TMPDIR: LANE_TMP } });
+  const storeCmds = [
+    'env | grep -c "^TMPDIR="; echo "shell TMPDIR=$TMPDIR"',
+    'export TMPDIR && pnpm add is-number@7.0.0',
+    'ls node_modules | wc -l',
+    'pnpm add is-odd@3.0.1',
+    'pnpm config get store-dir; pnpm config get state-dir; pnpm config get cache-dir',
+    'npm install is-even@1.0.0 --no-save',
+    'ls node_modules | wc -l',
+  ];
+  // The env form a lane would get: every pnpm and npm cache, store and state directory inside the checkout.
+  const cacheEnv = {
+    CLAUDE_CODE_TMPDIR: LANE_TMP,
+    npm_config_cache: join(proj, '.pkg-cache', 'npm'),
+    pnpm_config_store_dir: join(proj, '.pkg-cache', 'pnpm-store'),
+    pnpm_config_state_dir: join(proj, '.pkg-cache', 'pnpm-state'),
+    pnpm_config_cache_dir: join(proj, '.pkg-cache', 'pnpm-cache'),
+    XDG_CACHE_HOME: join(proj, '.pkg-cache', 'xdg-cache'),
+    XDG_STATE_HOME: join(proj, '.pkg-cache', 'xdg-state'),
+    XDG_DATA_HOME: join(proj, '.pkg-cache', 'xdg-data'),
+  };
+  const pStore = await probe({ label: 'deps-checkout-store', cwd: proj, prompt: bashPrompt(storeCmds), expected: storeCmds, sandbox: lane({ network, filesystem: { allowWrite: [LANE_TMP] } }), env: cacheEnv });
+  info('deps-checkout-store: files outside node_modules', execFileSync('find', [proj, '-maxdepth', '2', '-not', '-path', '*/node_modules*', '-not', '-path', '*/.git/*'], { encoding: 'utf8' }).split(proj).join('<proj>'));
   info('deps-checkout-store: per command', storeCmds.map((cmd) => ({ cmd, out: oneLine(callFor(pStore, cmd)?.output ?? 'not run', 400) })));
   info('deps-checkout-store: network requests', pStore.asked.filter((a) => a.tool !== 'Bash').map((a) => ({ tool: a.tool, input: a.input })));
   if (process.env.SPIKE_VARIANTS === 'store') return;

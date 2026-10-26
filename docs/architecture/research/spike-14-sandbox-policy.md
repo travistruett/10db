@@ -1,8 +1,8 @@
 # Spike 14: the lane sandbox's read policy, links, temp directory and cards
 
-- **Status:** Checks 5, 9 and 12 are VERIFIED. Check 10 is REFUTED for `Options.sandbox`: a session can't get
-  its own Bash temp directory. Check 11 is PARTIAL: no setting made the sandbox unavailable on macOS, and the run
-  found an invalid sandbox setting that turns the sandbox off without an error.
+- **Status:** Checks 5, 9, 10 and 12 are VERIFIED. A session gets its own Bash temp directory only through a
+  `CLAUDE_CODE_TMPDIR` of 44 bytes or less. Check 11 is PARTIAL: no setting made the sandbox unavailable on macOS,
+  and the run found an invalid sandbox setting that turns the sandbox off without an error.
 - **Date:** 2026-10-26
 - **Versions:** claude 2.1.310 (Claude Code) · Agent SDK 0.3.300 · Node v26.12.0 · pnpm 12.13.0 · mise 2026.10.11
 - **Command:** `pnpm --dir spikes/agent-sdk spike:14 <policy | links | tmp | unavailable | deps>`
@@ -16,17 +16,17 @@ that names a real credential location. Haiku ran every listed step verbatim.
 Each content check reads a canary: a file holding a random token, made for the run and removed afterwards. The
 canaries sit in nine places:
 
-| Canary      | Where                                                                                         |
-| ----------- | --------------------------------------------------------------------------------------------- |
-| `home`      | `~/.10db-s14-canary-<run>/`                                                                   |
-| `sibling`   | a second repository beside the lane's checkout, `~/.10db-s14-projects-<run>/other/`           |
-| `shared`    | `/Users/Shared/.10db-s14-canary-<run>/`                                                       |
-| `otherTmp`  | another lane's temp directory under the per-user macOS temp dir (`/private/var/folders/…/T/`) |
-| `claudeTmp` | Claude Code's shared temp directory, `/private/tmp/claude-<uid>/`                             |
-| `systemTmp` | `/private/tmp/`                                                                               |
-| `volume`    | a 4 MB disk image the run mounts at `/Volumes/10db-s14-<run>`                                 |
-| `envFile`   | `.env.local` in the lane's checkout                                                           |
-| `linked`    | in the home canary directory, reached through links in the checkout (check 12)                |
+| Canary      | Where                                                                               |
+| ----------- | ----------------------------------------------------------------------------------- |
+| `home`      | `~/.10db-s14-canary-<run>/`                                                         |
+| `sibling`   | a second repository beside the lane's checkout, `~/.10db-s14-projects-<run>/other/` |
+| `shared`    | `/Users/Shared/.10db-s14-canary-<run>/`                                             |
+| `otherTmp`  | another lane's temp directory, `/private/tmp/10db-<run>-b/`                         |
+| `claudeTmp` | Claude Code's shared temp directory, `/private/tmp/claude-<uid>/`                   |
+| `systemTmp` | `/private/tmp/`                                                                     |
+| `volume`    | a 4 MB disk image the run mounts at `/Volumes/10db-s14-<run>`                       |
+| `envFile`   | `.env.local` in the lane's checkout                                                 |
+| `linked`    | in the home canary directory, reached through links in the checkout (check 12)      |
 
 The lane's checkout is a git repository under home, `~/.10db-s14-projects-<run>/lane`, where the builder's
 projects live. Nothing touches the Keychain, and no real credential file is read.
@@ -48,13 +48,13 @@ The protected reads are in every `denyRead`: `~/.claude`, `~/.claude.json`, `~/L
 
 ## Summary
 
-| #   | Check                                            | Result   | Evidence (in `spikes/agent-sdk/out/`)                                                         |
-| --- | ------------------------------------------------ | -------- | --------------------------------------------------------------------------------------------- |
-| 5   | `allowRead` under a denied root; deny `/`        | VERIFIED | `14-run-policy.txt`, `14-run-policy-fixed.txt`, `14-run-policy-final.txt`, `14-policy-*.json` |
-| 12  | Read deny rules and links; Grep and Glob         | VERIFIED | `14-run-links.txt`, `14-links-*.json`                                                         |
-| 10  | A temp directory per session                     | REFUTED  | `14-tmp-*.json`                                                                               |
-| 11  | How a sandbox that can't start is reported       | PARTIAL  | `14-unavailable-*.json`, `14-unavailable-bad-mask.debug.log`                                  |
-| 9   | A real `pnpm add <package>` reaches `canUseTool` | VERIFIED | `14-run-deps.txt`, `14-deps-*.json`                                                           |
+| #   | Check                                            | Result   | Evidence (in `spikes/agent-sdk/out/`)                        |
+| --- | ------------------------------------------------ | -------- | ------------------------------------------------------------ |
+| 5   | `allowRead` under a denied root; deny `/`        | VERIFIED | `14-run-policy*.txt`, `14-policy-*.json`                     |
+| 12  | Read deny rules and links; Grep and Glob         | VERIFIED | `14-run-links.txt`, `14-links-*.json`                        |
+| 10  | A temp directory per session                     | VERIFIED | `14-run-tmp.txt`, `14-tmp-*.json`, `14-run-policy-lane.txt`  |
+| 11  | How a sandbox that can't start is reported       | PARTIAL  | `14-unavailable-*.json`, `14-unavailable-bad-mask.debug.log` |
+| 9   | A real `pnpm add <package>` reaches `canUseTool` | VERIFIED | `14-run-deps.txt`, `14-deps-*.json`                          |
 
 ## 5. The read policy (`policy`): VERIFIED
 
@@ -68,13 +68,14 @@ deny `/` and allow the system paths back? What must be allowed again for git, no
 Each variant ran the same 16 commands: a `cat` of each canary, then reads in the checkout, git, node, pnpm,
 mise, a write to `$TMPDIR` and a write in the checkout.
 
-| Variant                  | `denyRead` (plus the protected reads and `.env.local`)                                     | Canaries read                                            | Tools                                        |
-| ------------------------ | ------------------------------------------------------------------------------------------ | -------------------------------------------------------- | -------------------------------------------- |
-| control                  | the protected reads only, no `.env.local`                                                  | every canary but `linked`                                | all work                                     |
-| deny home                | `~`                                                                                        | `shared`, `otherTmp`, `claudeTmp`, `systemTmp`, `volume` | git fails: it can't read `~/.gitconfig`      |
-| deny the user-data roots | `/Users`, `/Volumes`, `/private/tmp`, `/private/var/folders`                               | none                                                     | git fails as above; writes to `$TMPDIR` fail |
-| deny the roots, fixed    | the same, with `/private/tmp/claude-<uid>` allowed again and `GIT_CONFIG_GLOBAL=/dev/null` | `claudeTmp` only                                         | all work                                     |
-| deny `/`, final          | `/`, with the system paths allowed again (below)                                           | `claudeTmp` only                                         | all work                                     |
+| Variant                  | `denyRead` (plus the protected reads and `.env.local`)                                        | Canaries read                                            | Tools                                        |
+| ------------------------ | --------------------------------------------------------------------------------------------- | -------------------------------------------------------- | -------------------------------------------- |
+| control                  | the protected reads only, no `.env.local`                                                     | every canary but `linked`                                | all work                                     |
+| deny home                | `~`                                                                                           | `shared`, `otherTmp`, `claudeTmp`, `systemTmp`, `volume` | git fails: it can't read `~/.gitconfig`      |
+| deny the user-data roots | `/Users`, `/Volumes`, `/private/tmp`, `/private/var/folders`                                  | none                                                     | git fails as above; writes to `$TMPDIR` fail |
+| deny the roots, fixed    | the same, with `/private/tmp/claude-<uid>` allowed again and `GIT_CONFIG_GLOBAL=/dev/null`    | `claudeTmp` only                                         | all work                                     |
+| deny `/`, final          | `/`, with the system paths allowed again (below)                                              | `claudeTmp` only                                         | all work                                     |
+| the lane profile         | the deny-`/` form, with the lane's own temp directory in place of `/private/tmp/claude-<uid>` | none                                                     | all work                                     |
 
 - **`allowRead` reopens a child of a denied root.** VERIFIED. Under every deny form, `cat README.md` in the
   checkout worked, and so did git, node and pnpm, once the checkout and the toolchain directories were in
@@ -91,7 +92,8 @@ mise, a write to `$TMPDIR` and a write in the checkout.
     link itself is readable: with `/tmp` denied, every command failed with `zsh: operation not permitted:
 /tmp/claude-<uid>/cwd-…`, and git failed because xcode-select couldn't read `/var/select/developer_dir`.
     Allowing `/tmp` reopened only the link: the `systemTmp` canary in `/private/tmp` stayed unreadable.
-  - **Claude Code's temp directory:** `/private/tmp/claude-<uid>` (check 10 says why it can't move).
+  - **The lane's temp directory:** the directory `CLAUDE_CODE_TMPDIR` names (check 10). Without it, Claude Code's
+    shared `/private/tmp/claude-<uid>` has to be allowed instead, and every lane can then read it.
   - **Toolchains:** `~/.local/share/mise`, `~/.config/mise`, `~/.local/state/mise`, `~/.cache/mise`,
     `~/Library/pnpm`, `~/Library/Caches/pnpm` and `~/Library/Preferences/pnpm`. These were enough for node, pnpm
     and mise. No entry was removed one at a time to show it is needed.
@@ -112,7 +114,9 @@ PASS policy-deny-roots: no canary outside the checkout leaked: none
 INFO policy-deny-home: tool git status: fatal: unable to access '~/.gitconfig': Operation not permitted
 PASS policy-deny-slash-final: the checkout reads (allowRead reopens it): # s14 lane
 INFO probe policy-deny-slash-final done: {"leakedAnywhere":["claudeTmp"]}
-INFO policy-deny-slash-final: tool pnpm --version && pnpm run hello: 12.13.0 ⏎ hello-from-pnpm
+PASS policy-lane-profile: no canary outside the checkout leaked: none
+INFO policy-lane-profile: tool pnpm --version && pnpm run hello: 12.13.0 ⏎ hello-from-pnpm
+INFO policy-lane-profile: tool echo "TMPDIR=$TMPDIR" && touch "$TMPDIR/…": TMPDIR=/private/tmp/10db-1cfa65ac-a/claude-501 ⏎ tmp-write-ok
 CALL cat .env.local → Exit code 1 ⏎ cat: .env.local: Operation not permitted
 ```
 
@@ -167,7 +171,7 @@ CALL Read {"file_path":"~/.10DB-S14-CANARY-…/linked.txt"} [deny rule] → File
 ASKED Read {"file_path":"<checkout>/link-file.txt"} reason=<checkout>/link-file.txt resolves through a symlink to ~/.10db-s14-canary-…/linked.txt, which is outside the allowed working directories
 ```
 
-## 10. A temp directory per session (`tmp`): REFUTED for `Options.sandbox`
+## 10. A temp directory per session (`tmp`): VERIFIED, with a length limit
 
 ### Question
 
@@ -175,30 +179,39 @@ Can each session's sandbox get its own temp directory instead of the shared `/tm
 
 ### Result
 
-- **Bash's `TMPDIR` is always `/tmp/claude-<uid>`.** VERIFIED. It stayed there with `CLAUDE_CODE_TMPDIR`,
-  `CLAUDE_TMPDIR` and `TMPDIR` each set to the lane's own directory in the session environment.
-- **`CLAUDE_CODE_TMPDIR` moves only Claude Code's own files.** VERIFIED. Claude Code created
-  `<dir>/claude-<uid>` and wrote there, but Bash's `TMPDIR` didn't change. A `CLAUDE_CODE_TMPDIR` that is not a
-  directory stops the session before `init` (check 11).
-- **The shared directory must stay writable.** VERIFIED. With `denyWrite` on `/private/tmp/claude-<uid>`, every
-  command failed: the Bash tool writes `/tmp/claude-<uid>/cwd-<id>` from inside the sandbox after each command.
-- **It must stay readable too.** VERIFIED in check 5. With `/private/tmp` denied, a tool can't read back what it
-  wrote to `$TMPDIR`, and `touch "$TMPDIR/x"` fails.
-- **Every lane can read every other lane's files there.** VERIFIED. The `claudeTmp` canary was readable in every
-  profile that works. All lanes run as one user and share the directory.
-- **Other temp roots can be closed.** VERIFIED. With `/private/tmp` and `/private/var/folders` denied and only
-  `/private/tmp/claude-<uid>` allowed again, the `otherTmp` and `systemTmp` canaries were unreadable. A lane
-  directory the profile names in `allowWrite` was writable; one it doesn't name was not.
+- **`CLAUDE_CODE_TMPDIR` moves Bash's `TMPDIR`, if the path is short.** VERIFIED. With `CLAUDE_CODE_TMPDIR` set
+  to `/private/tmp/10db-<run>-a` in the session environment, Bash's `TMPDIR` was
+  `/private/tmp/10db-<run>-a/claude-<uid>`, and writes there worked.
+- **A path over 44 bytes falls back to the shared directory without a word.** VERIFIED. The first runs used a
+  directory under `/private/var/folders/…/T/`, about 70 bytes. Claude Code then made `<dir>/claude-<uid>` for its
+  own files, but Bash's `TMPDIR` stayed `/tmp/claude-<uid>`. The 2.1.310 bundle chooses the sandbox's temp root
+  with `Buffer.byteLength(dir) <= 44 ? dir : "/tmp"`, which keeps unix socket paths under macOS's limit.
+  `CLAUDE_TMPDIR` and `TMPDIR` in the session environment change nothing.
+- **The shared directory closes.** VERIFIED. With a short `CLAUDE_CODE_TMPDIR`, a write to
+  `/private/tmp/claude-<uid>` was refused (`Operation not permitted`) with no other setting. With the temp roots
+  (`/private/tmp`, `/private/var/folders`) in `denyRead` and the lane's directory in `allowRead`, the `otherTmp`
+  canary in another lane's directory and the `claudeTmp` canary in the shared one were unreadable, and a write into
+  the other lane's directory was refused.
+- **Without it, the shared directory must stay open.** VERIFIED. When Bash's `TMPDIR` is `/tmp/claude-<uid>`,
+  `denyWrite` on it fails every command (the Bash tool writes `cwd-<id>` there after each one), and denying reads
+  of it stops tools reading back their own temp files. Every lane then reads every other lane's files.
+- **The whole lane profile runs with it.** VERIFIED in check 5 (`policy-lane-profile`): deny `/`, the lane's own
+  temp directory, and no shared temp root. No canary leaked, and git, node, pnpm and mise worked.
+- **`mktemp` with no template ignored `TMPDIR`.** It tried `/private/var/folders/…/T/` and was refused, in every
+  variant. Why is UNKNOWN; `mktemp "$TMPDIR/x.XXXXXX"` is the shape that works.
+- **A `CLAUDE_CODE_TMPDIR` that is not a directory stops the session before `init`** (check 11).
 
-So for lanes, D14 can't be built as written. A lane's Bash shares `/tmp/claude-<uid>` with every other lane, for
-reading and writing. `srt` takes whatever temp directory 10db writes, so the gate can still get its own.
+So D14 can be built for lanes: 10db makes a directory with a short path per session, sets `CLAUDE_CODE_TMPDIR`
+to it, allows it in the profile, and checks the length before the session starts.
 
 ### Evidence
 
 ```
-CALL echo "TMPDIR=$TMPDIR" [CLAUDE_CODE_TMPDIR, CLAUDE_TMPDIR and TMPDIR set] → TMPDIR=/tmp/claude-501
-CALL echo "TMPDIR=$TMPDIR" [denyWrite /private/tmp/claude-501] → Exit code 1 ⏎ TMPDIR=/tmp/claude-501 ⏎ zsh:1: operation not permitted: /tmp/claude-501/cwd-6ce2
-CALL cat '/private/tmp/claude-501/.10db-s14-canary-…/secret.txt' [default] → «canary:claudeTmp»
+CALL echo "TMPDIR=$TMPDIR" [CLAUDE_CODE_TMPDIR under /private/var/folders, ~70 bytes] → TMPDIR=/tmp/claude-501
+CALL echo "TMPDIR=$TMPDIR" [CLAUDE_CODE_TMPDIR=/private/tmp/10db-70447a6e-a] → TMPDIR=/private/tmp/10db-70447a6e-a/claude-501
+CALL touch '/private/tmp/claude-501/s14-shared-…' [short CLAUDE_CODE_TMPDIR] → touch: …: Operation not permitted
+CALL cat '/private/tmp/10db-70447a6e-b/secret.txt' [short CLAUDE_CODE_TMPDIR, temp roots denied] → cat: …: Operation not permitted
+CALL echo "TMPDIR=$TMPDIR" [CLAUDE_CODE_TMPDIR unset, denyWrite /private/tmp/claude-501] → zsh:1: operation not permitted: /tmp/claude-501/cwd-6ce2
 ```
 
 ## 11. A sandbox that can't start (`unavailable`): PARTIAL
@@ -262,11 +275,18 @@ A throwaway project in the temp directory, with `registry.npmjs.org` in `allowed
   `This command requires approval`. A hook's `ask` and an `ask` rule also bring a command to `canUseTool` under
   auto-allow, so either is a fallback. The broker still has to tell a hazard from an ordinary command: every
   non-read-only command arrives the same way.
-- **An approved install fails in the sandbox.** VERIFIED. pnpm failed with `ERR_PNPM_STORE_DIR_OPEN_OPERATION_LOCK
-… Failed to open the store operation lock at "pnpm-store-operation-locks": Operation not permitted`, and npm
-  with `EPERM` on `~/.npm/_cacache`. Both write their shared caches outside the checkout. `--store-dir
-.pnpm-store`, a store in the checkout, failed the same way, so pnpm writes some other state outside it too.
-  Which path that is stays UNKNOWN. No `SandboxNetworkAccess` request was made: the registry was listed.
+- **An approved install fails with the shared caches.** VERIFIED. With default config, pnpm failed with
+  `ERR_PNPM_STORE_DIR_OPEN_OPERATION_LOCK … Failed to open the store operation lock at "pnpm-store-operation-locks":
+Operation not permitted`, and npm with `EPERM` on `~/.npm/_cacache`. Both write shared caches outside the
+  checkout. No `SandboxNetworkAccess` request was made: the registry was listed.
+- **npm works with its cache in the checkout.** VERIFIED. With `npm_config_cache=<checkout>/.pkg-cache/npm`,
+  `npm install is-even@1.0.0` added its five packages inside the sandbox.
+- **pnpm 12 still fails with every directory in the checkout.** VERIFIED. `pnpm_config_store_dir`,
+  `pnpm_config_state_dir` and `pnpm_config_cache_dir` point pnpm into the checkout (`pnpm config get` shows them,
+  and unsandboxed pnpm then writes only there), and `--store-dir` and `--state-dir` do the same. Inside the
+  sandbox the same lock error remains, with `TMPDIR` exported to the lane's own directory. pnpm takes the lock with
+  `flock` on a file whose location is UNKNOWN; neither the error, the sandbox's debug output nor the system log
+  names it.
 
 ### Evidence
 
@@ -282,23 +302,23 @@ CALL pnpm add is-number@7.0.0 --store-dir .pnpm-store [canUseTool(This command r
 - **D2: build the deny-`/` form.** It is the strongest form, and node, pnpm, mise and git run under it with the
   list in check 5. The lane env sets `GIT_CONFIG_GLOBAL=/dev/null`. Secret files in the checkout are listed by
   exact path, until a glob in `denyRead` is shown to work.
-- **D14: lanes share Claude Code's temp directory.** Lanes read and write `/private/tmp/claude-<uid>`, which every
-  lane shares. Every other temp root stays denied. The gate's `srt` profile can still use a directory per run. The
-  threat model's R11 holds for the gate only, and the lane part becomes known and accepted.
+- **D14: each lane gets its own temp directory through `CLAUDE_CODE_TMPDIR`.** The path must be 44 bytes or less,
+  or Claude Code falls back to the shared `/tmp/claude-<uid>` without a word, so 10db refuses to start a session
+  whose path is longer. Every temp root, the shared one included, stays denied.
 - **D8: Claude Code's link resolution is the first layer.** A deny rule and a scoped allow rule both resolve links
   in 2.1.310. The guard's resolved-path check is the second layer. Grep's `path` is the shape that crosses a link.
 - **D1: validate the profile.** An invalid sandbox value turns the sandbox off without an error. 10db builds no
   patterns, checks the profile against a strict schema, and a live test proves the built profile denies a canary.
 - **D3: the mechanism is sound.** With auto-allow off, every non-read-only command reaches the broker, a real
   dependency change included.
-- **Dependency installs need a decision.** An approved `pnpm add` fails, because pnpm and npm write shared caches
-  outside the checkout.
+- **Dependency installs use per-project caches (the builder's choice).** npm works with its cache in the checkout.
+  pnpm 12's `add` still fails on its store lock inside the sandbox, so an approved pnpm dependency change can't run
+  in a lane until that lock is found.
 
 ## Gaps that remain
 
 - `denyRead` with a glob, for `.env*` files made after the session starts.
-- Which path pnpm 12 writes outside the checkout during `pnpm add`, and whether a project-local store and cache
-  can hold all of it.
+- Where pnpm 12 takes its store operation lock, and how to move it into the checkout.
 - How a sandbox that never starts is reported (macOS gave no way to stop it).
 - Whether other invalid values also drop the sandbox. Only an invalid `extract` was tried.
 - Minimality of the toolchain list, and cargo.
