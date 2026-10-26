@@ -428,6 +428,15 @@ describe('matchPermissionRule', () => {
     expect(match('WebSearch', {}, [rule('WebFetch', null)])).toBe(false);
   });
 
+  it('lets a network rule without a pattern allow every host outside the sandbox, as it always did', () => {
+    expect(
+      match('SandboxNetworkAccess', { host: 'evil.com' }, [rule('SandboxNetworkAccess', null)]),
+    ).toBe(true);
+    expect(match('SandboxNetworkAccess', { host: 'evil.com' }, [rule('WebFetch', null)])).toBe(
+      false,
+    );
+  });
+
   describe('with real paths', () => {
     const rulesFor = (...rules: PermissionRuleDto[]) => rules;
     const matchPaths = (
@@ -821,6 +830,18 @@ describe('storableRule', () => {
       'SandboxNetworkAccess',
       'Registry.NPMJS.org',
       { toolName: 'SandboxNetworkAccess', pattern: 'registry.npmjs.org' },
+    ],
+    [
+      'a network summary in JSON, from a lane without the sandbox, stores no pattern',
+      'SandboxNetworkAccess',
+      '{"host":"example.com"}',
+      { toolName: 'SandboxNetworkAccess', pattern: null },
+    ],
+    [
+      'a host with a port stores no pattern',
+      'SandboxNetworkAccess',
+      'example.com:8443',
+      { toolName: 'SandboxNetworkAccess', pattern: null },
     ],
     ['Read keeps its path', 'Read', '/a/b.ts', { toolName: 'Read', pattern: '/a/b.ts' }],
     ['Grep is stored as Read', 'Grep', '/a/b', { toolName: 'Read', pattern: '/a/b' }],

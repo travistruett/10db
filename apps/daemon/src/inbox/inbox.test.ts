@@ -880,6 +880,25 @@ describe('permission broker in a sandboxed lane', () => {
     ).toBe('deny');
   });
 
+  it('never lets an unscoped network rule allow a host', async () => {
+    const ws = seedWorkstream(base);
+    base.write((ctx) =>
+      insertPermissionRule(ctx, {
+        projectId: ws.project.id,
+        workstreamId: null,
+        toolName: 'SandboxNetworkAccess',
+        pattern: null,
+        sourceInboxId: null,
+      }),
+    );
+    const decision = await sandboxed(ws)(request('SandboxNetworkAccess', { host: 'example.com' }));
+    expect(decision.behavior).toBe('deny');
+    expect(onlyOpenCard().detail).toEqual({
+      toolName: 'SandboxNetworkAccess',
+      summary: 'example.com',
+    });
+  });
+
   it('allows a host with a stored rule, with no card', async () => {
     const ws = seedWorkstream(base);
     base.write((ctx) =>
@@ -1105,6 +1124,39 @@ describe('permission broker in a sandboxed lane', () => {
       ['Allow Read?', JSON.stringify({ file_path: join(fileAccess.home, '.claude.json') })],
       ['Allow SandboxNetworkAccess?', '{"host":"example.com"}'],
     ]);
+  });
+});
+
+describe('permission broker without a sandbox keeps its network cards', () => {
+  it('stores an unscoped network rule on always allow, which then allows with no card', async () => {
+    const ws = seedWorkstream(base);
+    const decide = createPermissionBroker(
+      { state, inbox },
+      {
+        projectId: ws.project.id,
+        workstreamId: ws.workstream.id,
+        sessionId: mintId('Session'),
+        observer: { onWaitStart: () => undefined, onWaitEnd: () => undefined },
+        signal: new AbortController().signal,
+      },
+    );
+    const request = (host: string) => ({
+      toolName: 'SandboxNetworkAccess',
+      input: { host },
+      toolUseId: 't1',
+      escalated: false,
+      signal: new AbortController().signal,
+    });
+    const pending = decide(request('example.com'));
+    const [card] = listInbox(state.db, { states: ['OPEN'] });
+    if (!card) throw new Error('expected a card');
+    inbox.answer(card.id, { choice: 'allow_project' });
+    expect(await pending).toEqual({ behavior: 'allow' });
+    expect(listPermissionRules(state.db, ws.project.id, ws.workstream.id)).toEqual([
+      expect.objectContaining({ toolName: 'SandboxNetworkAccess', pattern: null }),
+    ]);
+    expect(await decide(request('other.example'))).toEqual({ behavior: 'allow' });
+    expect(listInbox(state.db, { states: ['OPEN'] })).toEqual([]);
   });
 });
 

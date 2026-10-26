@@ -206,7 +206,10 @@ export function createPermissionBroker(
     }
     const host = parsed.data.host.toLowerCase();
     const rules = listPermissionRules(deps.state.db, ctx.projectId, ctx.workstreamId);
-    if (matchPermissionRule({ toolName: NETWORK_TOOL, input: { host } }, rules)) {
+    // A sandboxed call: a host names no path, and an unscoped network rule covers no host.
+    if (
+      matchPermissionRule({ toolName: NETWORK_TOOL, input: { host } }, rules, { realPaths: [] })
+    ) {
       return { behavior: 'allow' };
     }
     if (hostsAllowedOnce.delete(host)) return { behavior: 'allow' };

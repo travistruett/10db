@@ -1,6 +1,7 @@
 export { deniedEnvNames } from './env-allowlist';
 export {
   buildLaneProfile,
+  isSandboxDomain,
   SandboxProfileError,
   SYSTEM_READS,
   type LaneProfileInput,

@@ -12,6 +12,7 @@ import {
   stringField,
   stripCommandPrefixes,
 } from '../guard';
+import { isSandboxDomain } from '../sandbox';
 import { isLiteralSegment, plainSegments, type PlainSegment } from './plain-segments';
 import { runsOtherCommands, runsUnnamedProgram } from './runner-forms';
 
@@ -37,6 +38,8 @@ export function baseAllowedTools(project: Pick<ProjectDto, 'gateCommand'>): stri
   ];
 }
 
+/** The sandbox's ask to reach a host; a stored rule for it names the host. */
+const NETWORK_TOOL = 'SandboxNetworkAccess';
 /** Tools that write a file; a stored rule for one names the real path it may write. */
 const WRITE_TOOLS: ReadonlySet<string> = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 
@@ -228,10 +231,10 @@ function storable(pattern: string, words: readonly string[]): string | null {
 }
 
 /**
- * The stored rule that permits the call, if any; a Bash pattern must cover every plain segment.
- * A patterned rule for a file tool matches only by real path, and given real paths an unscoped one
- * matches nothing: the caller passes the real paths the
- * call names, and without them such a rule matches nothing.
+ * The stored rule that permits the call, if any: a Bash pattern must cover every plain segment, a
+ * file rule's pattern every real path in `paths`, and a network rule's pattern the host. A sandboxed
+ * lane passes `paths` (empty for a host), and there an unscoped file or network rule matches
+ * nothing; without it an unscoped rule allows its tool, as it always has.
  */
 export function matchPermissionRule(
   req: { readonly toolName: string; readonly input: unknown },
@@ -240,14 +243,11 @@ export function matchPermissionRule(
 ): PermissionRuleDto | undefined {
   return rules.find((rule) => {
     const { pattern } = rule;
-    if (req.toolName === 'SandboxNetworkAccess') {
+    if (req.toolName === NETWORK_TOOL) {
+      if (rule.toolName !== req.toolName) return false;
+      if (pattern === null) return paths === undefined;
       const host = stringField(req.input, 'host');
-      return (
-        rule.toolName === req.toolName &&
-        pattern !== null &&
-        host !== null &&
-        host.toLowerCase() === pattern
-      );
+      return host !== null && host.toLowerCase() === pattern;
     }
     if (pattern !== null && READ_TOOLS.has(req.toolName)) {
       const real = paths?.realPaths ?? [];
@@ -298,8 +298,11 @@ export function storableRule(toolName: string, summary: string): StorableRule | 
     const pattern = commandPrefix(summary);
     return pattern === null ? undefined : { toolName, pattern };
   }
-  if (toolName === 'SandboxNetworkAccess') {
-    return summary === '' ? undefined : { toolName, pattern: summary.toLowerCase() };
+  if (toolName === NETWORK_TOOL) {
+    // A sandboxed lane's summary is the host. Any other summary (the JSON input a lane without the
+    // sandbox shows) stores no pattern, as it always has.
+    const host = summary.toLowerCase();
+    return { toolName, pattern: isSandboxDomain(host) ? host : null };
   }
   const reads = READ_TOOLS.has(toolName);
   // An absolute path is a sandboxed lane's summary; any other summary is the unscoped form a lane
