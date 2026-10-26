@@ -167,6 +167,11 @@ export interface Git {
    */
   push(repo: string, branch: string, net: NetworkCall): Promise<NetworkRun>;
   head(repo: string): Promise<string>;
+  /**
+   * The repository's own git dir and its common dir, both absolute and real. They are the same
+   * directory except in a linked worktree, whose common dir is the main repository's.
+   */
+  gitDirs(repo: string): Promise<{ gitDir: string; commonDir: string }>;
   status(repo: string): Promise<{ code: string; path: string }[]>;
   /** Committed and uncommitted changes since `base`, sorted and unique. */
   changedFilesSince(repo: string, base: string): Promise<string[]>;
@@ -306,6 +311,20 @@ export function createGit(): Git {
     push: (repo, branch, net) =>
       gitNetwork(repo, ['push', '-u', 'origin', `refs/heads/${branch}:refs/heads/${branch}`], net),
     head: revParseHead,
+    async gitDirs(repo) {
+      // Without --path-format a common dir is printed relative to the working directory.
+      const out = await git(repo, [
+        'rev-parse',
+        '--absolute-git-dir',
+        '--path-format=absolute',
+        '--git-common-dir',
+      ]);
+      const [gitDir = '', commonDir = ''] = out.split('\n');
+      if (!isAbsolute(gitDir) || !isAbsolute(commonDir)) {
+        throw new GitError(['rev-parse'], 'git named no absolute git dirs');
+      }
+      return { gitDir, commonDir };
+    },
     status,
     async changedFilesSince(repo, base) {
       const committed = (await git(repo, ['diff', '--name-only', `${base}..HEAD`]))

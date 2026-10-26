@@ -1,5 +1,12 @@
 import { execFileSync } from 'node:child_process';
-import { readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import {
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { InvalidError } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -174,6 +181,28 @@ describe('history queries', () => {
     write('b.txt', 'b');
     expect(await git.changedFilesSince(repo.path, base)).toEqual(['a.txt', 'b.txt']);
     expect(await git.commitsSince(repo.path, base)).toEqual([sha]);
+  });
+});
+
+describe('gitDirs', () => {
+  it('names one directory for both in an ordinary checkout', async () => {
+    const gitDir = join(realpathSync(repo.path), '.git');
+    expect(await git.gitDirs(repo.path)).toEqual({ gitDir, commonDir: gitDir });
+  });
+
+  it("names a linked worktree's own git dir and the main repository's common dir", async () => {
+    const outside = tempDir('worktree');
+    try {
+      const checkout = join(outside.path, 'wt');
+      rawGit('worktree', 'add', '-q', '-b', 'wt', checkout);
+      const commonDir = join(realpathSync(repo.path), '.git');
+      expect(await git.gitDirs(checkout)).toEqual({
+        gitDir: join(commonDir, 'worktrees', 'wt'),
+        commonDir,
+      });
+    } finally {
+      outside.cleanup();
+    }
   });
 });
 
