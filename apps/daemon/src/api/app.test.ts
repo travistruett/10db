@@ -76,6 +76,14 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
     patchBoardColumn: track('patchBoardColumn'),
     deleteBoardColumn: track('deleteBoardColumn'),
     proposeCandidates: track('proposeCandidates'),
+    listAccounts: () => [],
+    createAccount: track('createAccount'),
+    patchAccount: track('patchAccount'),
+    archiveAccount: track('archiveAccount'),
+    setAccountSecret: track('setAccountSecret'),
+    accountSignIn: track('accountSignIn'),
+    accountIdentity: track('accountIdentity'),
+    accountUsage: track('accountUsage'),
     ...overrides,
   };
 }
@@ -462,6 +470,26 @@ describe('team, routing and benchmark routes', () => {
       ...(body === undefined ? auth : { ...json, body: JSON.stringify(body) }),
     });
     // The tracking stub throws after recording, so the API answers 500: the body passed validation.
+    expect(res.status).toBe(500);
+    expect(reached).toEqual([service]);
+  });
+  it.each<[string, string, string, unknown]>([
+    ['createAccount', 'POST', '/accounts', { kind: 'claude_subscription', label: 'A' }],
+    ['patchAccount', 'PATCH', '/accounts/{id}', { payer: 'x' }],
+    ['archiveAccount', 'POST', '/accounts/{id}/archive', undefined],
+    ['setAccountSecret', 'PUT', '/accounts/{id}/secret', { secret: 'sk-ant-api03-abcdef' }],
+    ['accountSignIn', 'GET', '/accounts/{id}/signin', undefined],
+    ['accountIdentity', 'GET', '/accounts/{id}/identity', undefined],
+    ['accountUsage', 'GET', '/accounts/{id}/usage?month=2026-10', undefined],
+  ])('routes %s behind the token', async (service, method, path, body) => {
+    const res = await app().request(path.replace('{id}', mintId('Account')), {
+      method,
+      headers: {
+        Authorization: `Bearer ${TOKEN}`,
+        ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
     expect(res.status).toBe(500);
     expect(reached).toEqual([service]);
   });

@@ -3,6 +3,7 @@ import {
   AccountCardChoice,
   AccountCardDetail,
   ConflictError,
+  InvalidError,
   type AccountId,
   type InboxAnswer,
   type InboxItemId,
@@ -18,6 +19,9 @@ export function createAccountCardAnswers(deps: {
   return (item, answer) => {
     const card = AccountCardDetail.safeParse(item.detail?.[ACCOUNT_CARD_DETAIL]);
     if (!card.success) return;
+    // The inbox checks this too, but only after this hook has acted.
+    if (item.options.length > 0 && !item.options.some((o) => o.label === answer.choice))
+      throw new InvalidError(`Choose one of: ${item.options.map((o) => o.label).join(', ')}`);
     if (answer.choice === AccountCardChoice.Confirm) {
       if (card.data.seenIdentity === null)
         throw new ConflictError('This card names no identity to confirm');

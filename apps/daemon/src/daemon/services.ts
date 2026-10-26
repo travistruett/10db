@@ -45,6 +45,7 @@ import {
   setRoutingRules,
   setTeam,
 } from '@10db/db';
+import type { AccountService } from '../accounts';
 import { syncWarning, type BenchmarkSync } from '../benchmarks';
 import type { ApiServices } from '../api';
 import type { BatchStarter, Shipper } from '../delivery';
@@ -69,6 +70,7 @@ export function createServices(deps: {
   readonly benchmarks: BenchmarkSync;
   readonly starter: BatchStarter;
   readonly shipper: Shipper;
+  readonly accounts: AccountService;
 }): ApiServices {
   const db = deps.state.db;
   return {
@@ -142,7 +144,20 @@ export function createServices(deps: {
     benchmarkStatus: () => deps.benchmarks.status(),
     syncBenchmarks: () => deps.benchmarks.sync(),
     listAaModels: () => listAaModels(db),
-    patchProject: (id, patch) => deps.state.write((ctx) => patchProject(ctx, id, patch)),
+    patchProject(id, patch) {
+      const project = deps.state.write((ctx) => patchProject(ctx, id, patch));
+      // Work waiting on the old account's state is looked at again.
+      if (patch.accountId !== undefined) deps.scheduler.requestTick();
+      return project;
+    },
+    listAccounts: () => deps.accounts.list(),
+    createAccount: (input) => deps.accounts.create(input),
+    patchAccount: (id, patch) => deps.accounts.patch(id, patch),
+    archiveAccount: (id) => deps.accounts.archive(id),
+    setAccountSecret: (id, input) => deps.accounts.setSecret(id, input),
+    accountSignIn: (id) => deps.accounts.signIn(id),
+    accountIdentity: (id) => deps.accounts.identity(id),
+    accountUsage: (id, month) => deps.accounts.usage(id, month),
     getTeam(projectId) {
       getProject(db, projectId);
       return getTeam(db, projectId);

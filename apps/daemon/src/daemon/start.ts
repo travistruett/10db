@@ -30,6 +30,7 @@ import {
   createAccountPauses,
   createAccountPreparer,
   createAccountRuntime,
+  createAccountService,
   createStartGate,
 } from '../accounts';
 import { createApp } from '../api';
@@ -357,6 +358,19 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       scheduler?.requestTick();
     },
   });
+  const accountService = createAccountService({
+    state,
+    clock,
+    dataDir: opts.dataDir,
+    keychain: opts.keychain ?? unavailableKeychain,
+    launcher,
+    adapter,
+    startGate,
+    runtime: accounts,
+    onSaved: () => {
+      scheduler?.requestTick();
+    },
+  });
   // The data directory, and the default account's sign-in wherever the login shell keeps it.
   const guarded = protectedPaths({
     dataDir: opts.dataDir,
@@ -468,6 +482,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       benchmarks,
       starter,
       shipper,
+      accounts: accountService,
     }),
     upgradeWebSocket,
     onUnexpectedError: (error) => {
