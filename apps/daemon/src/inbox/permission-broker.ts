@@ -92,6 +92,15 @@ const PNPM_CARD_BODY =
 
 const NetworkInput = z.looseObject({ host: z.string().min(1) });
 
+/**
+ * A file tool whose path the broker cannot judge is refused, never asked about: a card would carry
+ * no real path, so a stored unscoped rule could allow it. The guard refuses these calls too.
+ */
+const UNJUDGED_PATH: ToolDecision = {
+  behavior: 'deny',
+  message: "10db could not judge this call's path.",
+};
+
 /** What the broker asks about once a sandboxed call needs a person: the card's text and the real paths it names. */
 interface Ask {
   readonly summary: string;
@@ -258,7 +267,7 @@ export function createPermissionBroker(
     sandbox: NonNullable<BrokerContext['sandbox']>,
   ): ToolDecision | Ask {
     const inputs = readPathsOf(req.toolName, req.input);
-    if (inputs.length === 0) return { summary: summarize(req) };
+    if (inputs.length === 0) return UNJUDGED_PATH;
     const asking: string[] = [];
     try {
       for (const path of inputs) {
@@ -284,14 +293,17 @@ export function createPermissionBroker(
     };
   }
 
-  function judgeEdit(req: ToolRequest, sandbox: NonNullable<BrokerContext['sandbox']>): Ask {
+  function judgeEdit(
+    req: ToolRequest,
+    sandbox: NonNullable<BrokerContext['sandbox']>,
+  ): ToolDecision | Ask {
     const path = stringField(req.input, 'file_path') ?? stringField(req.input, 'notebook_path');
-    if (path === null) return { summary: summarize(req) };
+    if (path === null) return UNJUDGED_PATH;
     try {
       const { realPath } = writeAccess(path, sandbox.fileAccess);
       return { summary: realPath, realPaths: [realPath] };
     } catch {
-      return { summary: summarize(req) };
+      return UNJUDGED_PATH;
     }
   }
 

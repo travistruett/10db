@@ -1022,6 +1022,50 @@ describe('permission broker in a sandboxed lane', () => {
     expect(openCards()).toHaveLength(2);
   });
 
+  it.each<{ name: string; toolName: string; input: Record<string, unknown>; fails?: boolean }>([
+    { name: 'a Read with no file path', toolName: 'Read', input: {} },
+    { name: 'an Edit with no file path', toolName: 'Edit', input: { old_string: 'a' } },
+    {
+      name: 'an Edit whose path judging fails',
+      toolName: 'Edit',
+      input: { file_path: 'src/a.ts' },
+      fails: true,
+    },
+  ])(
+    'denies $name with no card, even with an old unscoped rule stored',
+    async ({ toolName, input, fails }) => {
+      const ws = seedWorkstream(base);
+      base.write((ctx) =>
+        insertPermissionRule(ctx, {
+          projectId: ws.project.id,
+          workstreamId: null,
+          toolName,
+          pattern: null,
+          sourceInboxId: null,
+        }),
+      );
+      if (fails === true) {
+        // An unexpected failure while judging: reading the context throws.
+        const { checkout, protectedReads: reads, readList, configDir } = fileAccess;
+        fileAccess = {
+          checkout,
+          protectedReads: reads,
+          readList,
+          configDir,
+          providerSessionId: 'own-id',
+          get home(): string {
+            throw new Error('the context could not be read');
+          },
+        };
+      }
+      expect(await sandboxed(ws)(request(toolName, input))).toEqual({
+        behavior: 'deny',
+        message: "10db could not judge this call's path.",
+      });
+      expect(openCards()).toEqual([]);
+    },
+  );
+
   it('cards an edit with the real path and stores a rule for that one path', async () => {
     const ws = seedWorkstream(base);
     const decide = sandboxed(ws);
