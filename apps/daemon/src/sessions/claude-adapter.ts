@@ -12,7 +12,9 @@ import {
   type SpawnOptions,
 } from '@anthropic-ai/claude-agent-sdk';
 import { Provider } from '@10db/contracts';
+import { z } from 'zod';
 import { systemClock, type Clock } from '../clock';
+import type { LanePermissionMode } from '../env';
 import type { Logger } from '../log';
 import { createChannel } from './channel';
 import {
@@ -54,6 +56,8 @@ export interface ClaudeAdapterOptions {
   readonly claudePath: string;
   /** The injected harness plugin directory. */
   readonly pluginDir: string;
+  /** How lane sessions decide permission prompts; `default` when omitted. */
+  readonly permissionMode?: LanePermissionMode;
   readonly logger: Logger;
   /** The SDK's query(); tests pass a scripted one. */
   readonly query?: QueryFn;
@@ -64,6 +68,7 @@ export interface ClaudeAdapterOptions {
 }
 
 interface QueryDeps {
+  readonly permissionMode: LanePermissionMode;
   readonly claudePath: string;
   readonly pluginDir: string;
   readonly abortController: AbortController;
@@ -123,6 +128,24 @@ export function buildMcpServers(spec: SessionSpec): Record<string, McpServerConf
   };
 }
 
+/**
+ * What Claude Code adds to a permission request when auto mode's classifier blocked the call and
+ * handed it to a person. The SDK passes these fields at runtime but its typings omit them.
+ */
+const EscalationFields = z.looseObject({
+  requiresUserInteraction: z.boolean().optional(),
+  decisionReasonType: z.string().optional(),
+});
+
+function isClassifierEscalation(options: unknown): boolean {
+  const parsed = EscalationFields.safeParse(options);
+  return (
+    parsed.success &&
+    (parsed.data.requiresUserInteraction === true ||
+      parsed.data.decisionReasonType === 'classifier')
+  );
+}
+
 export function buildQueryOptions(spec: SessionSpec, deps: QueryDeps): Options {
   return {
     cwd: spec.cwd,
@@ -141,7 +164,7 @@ export function buildQueryOptions(spec: SessionSpec, deps: QueryDeps): Options {
     settings: { autoCompactEnabled: true },
     plugins: [{ type: 'local', path: deps.pluginDir }],
     allowedTools: [...spec.allowedTools],
-    permissionMode: 'default',
+    permissionMode: deps.permissionMode,
     canUseTool: async (toolName, input, options) => {
       if (!(await deps.billingVerified) || deps.isRefused())
         return { behavior: 'deny', message: BILLING_UNVERIFIED, interrupt: true };
@@ -149,6 +172,7 @@ export function buildQueryOptions(spec: SessionSpec, deps: QueryDeps): Options {
         toolName,
         input,
         toolUseId: options.toolUseID,
+        escalated: isClassifierEscalation(options),
         signal: options.signal,
       });
       // The session can be refused while the answer was pending.
@@ -300,6 +324,7 @@ function startSession(
   const q = runQuery({
     prompt: input,
     options: buildQueryOptions(spec, {
+      permissionMode: opts.permissionMode ?? 'default',
       claudePath: opts.claudePath,
       pluginDir: opts.pluginDir,
       abortController,

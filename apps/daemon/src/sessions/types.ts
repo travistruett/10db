@@ -6,6 +6,11 @@ export interface ToolRequest {
   readonly toolName: string;
   readonly input: Record<string, unknown>;
   readonly toolUseId: string | null;
+  /**
+   * Claude Code's auto-mode classifier blocked the call and handed it to a person. No stored grant or
+   * carried allowance may answer it.
+   */
+  readonly escalated: boolean;
   readonly signal: AbortSignal;
 }
 

@@ -211,6 +211,7 @@ export class FakeAdapter implements SessionAdapter {
                 toolName: step.toolName,
                 input,
                 toolUseId: `fake-tool-${String(index)}`,
+                escalated: false,
                 signal: abort.signal,
               }),
               untilStopped,
