@@ -217,6 +217,7 @@ async function callHook(record: Record_, toolName: string) {
 const BILLING_PREFLIGHT_MS = 15_000;
 
 const deps = {
+  permissionMode: 'default' as const,
   claudePath: '/usr/local/bin/claude',
   pluginDir: '/harness',
   abortController: new AbortController(),
@@ -287,6 +288,17 @@ describe('buildQueryOptions', () => {
     });
   });
 
+  it.each<[string, Parameters<typeof buildQueryOptions>[1]['permissionMode'], string]>([
+    ['default', 'default', 'default'],
+    ['auto', 'auto', 'auto'],
+  ])('uses the %s lane permission mode', (_name, mode, expected) => {
+    const options = buildQueryOptions(spec(), { ...deps, permissionMode: mode });
+    expect(options.permissionMode).toBe(expected);
+    // The guard and the broker stay wired in either mode.
+    expect(options.canUseTool).toBeTypeOf('function');
+    expect(options.hooks?.PreToolUse).toHaveLength(1);
+  });
+
   it('resumes when the spec names a provider session', () => {
     expect(buildQueryOptions(spec({ resumeProviderSessionId: 'prov-9' }), deps).resume).toBe(
       'prov-9',
@@ -308,10 +320,48 @@ describe('buildQueryOptions', () => {
       toolName: 'Bash',
       input: { command: 'curl x' },
       toolUseId: 'toolu_7',
+      escalated: false,
       signal,
     });
     expect(result).toEqual({ behavior: 'deny', message: 'Parked', interrupt: true });
   });
+
+  it.each<[string, Record<string, unknown>, boolean]>([
+    ['no escalation fields', {}, false],
+    ['a requires-user-interaction ask', { requiresUserInteraction: true }, true],
+    ['a classifier decision reason', { decisionReasonType: 'classifier' }, true],
+    ['a rule decision reason', { decisionReasonType: 'rule' }, false],
+    ['an interaction flag of false', { requiresUserInteraction: false }, false],
+  ])('marks the request escalated for %s: %s', async (_name, extra, expected) => {
+    const canUseTool = vi.fn<SessionSpec['canUseTool']>(() =>
+      Promise.resolve({ behavior: 'allow' }),
+    );
+    const options = buildQueryOptions(spec({ canUseTool }), deps);
+    await options.canUseTool?.(
+      'WebFetch',
+      { url: 'https://example.com' },
+      { signal: new AbortController().signal, toolUseID: 'toolu_8', requestId: 'req_2', ...extra },
+    );
+    expect(canUseTool).toHaveBeenCalledWith(expect.objectContaining({ escalated: expected }));
+  });
+
+  it.each<['default' | 'auto']>([['auto'], ['default']])(
+    'passes the %s lane permission mode from the adapter options to claude',
+    async (mode) => {
+      const fake = fakeQuery({
+        messages: [initMessage(), resultMessage({ input: 1, output: 1, costUsd: 0 })],
+      });
+      const adapter = createClaudeAdapter({
+        claudePath: '/usr/local/bin/claude',
+        pluginDir: '/harness',
+        logger: silentLogger,
+        query: fake.query,
+        permissionMode: mode,
+      });
+      await collect(adapter.start(spec()).events);
+      expect(fake.record.options?.permissionMode).toBe(mode);
+    },
+  );
 
   it('denies tools without asking the spec when billing was not verified', async () => {
     const canUseTool = vi.fn<SessionSpec['canUseTool']>(() =>

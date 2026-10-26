@@ -3,7 +3,11 @@ import { EnvError, loadEnv } from './env';
 
 describe('loadEnv', () => {
   it('applies defaults', () => {
-    expect(loadEnv({})).toEqual({ TENDB_PORT: 4317, TENDB_LOG_LEVEL: 'info' });
+    expect(loadEnv({})).toEqual({
+      TENDB_PORT: 4317,
+      TENDB_LOG_LEVEL: 'info',
+      TENDB_LANE_PERMISSION_MODE: 'default',
+    });
   });
 
   it('reads the fake script path', () => {
@@ -20,6 +24,7 @@ describe('loadEnv', () => {
     expect(loadEnv({ TENDB_DATA_DIR: '', TENDB_PORT: '', TENDB_LOG_LEVEL: '' })).toEqual({
       TENDB_PORT: 4317,
       TENDB_LOG_LEVEL: 'info',
+      TENDB_LANE_PERMISSION_MODE: 'default',
     });
   });
 
@@ -30,6 +35,24 @@ describe('loadEnv', () => {
     expect(() => loadEnv(source)).toThrow(EnvError);
     expect(() => loadEnv(source)).toThrow(variable);
   });
+
+  it.each<[string, Record<string, string>, string]>([
+    ['unset', {}, 'default'],
+    ['empty', { TENDB_LANE_PERMISSION_MODE: '' }, 'default'],
+    ['default', { TENDB_LANE_PERMISSION_MODE: 'default' }, 'default'],
+    ['auto', { TENDB_LANE_PERMISSION_MODE: 'auto' }, 'auto'],
+  ])('reads the lane permission mode when it is %s', (_name, source, expected) => {
+    expect(loadEnv(source).TENDB_LANE_PERMISSION_MODE).toBe(expected);
+  });
+
+  it.each([['bypassPermissions'], ['plan'], ['AUTO'], ['on']])(
+    'rejects the lane permission mode %s, naming the variable',
+    (value) => {
+      expect(() => loadEnv({ TENDB_LANE_PERMISSION_MODE: value })).toThrow(
+        'TENDB_LANE_PERMISSION_MODE',
+      );
+    },
+  );
 
   it('accepts a long dev UI token and an absolute claude path', () => {
     const token = 'a'.repeat(43);

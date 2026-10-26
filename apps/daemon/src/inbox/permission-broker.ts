@@ -122,9 +122,10 @@ export function createPermissionBroker(
 
   async function askPermission(req: ToolRequest): Promise<ToolDecision> {
     const rules = listPermissionRules(deps.state.db, ctx.projectId, ctx.workstreamId);
-    if (matchPermissionRule(req, rules)) return { behavior: 'allow' };
+    // A call the classifier handed to a person is answered by a person, never by a stored grant.
+    if (!req.escalated && matchPermissionRule(req, rules)) return { behavior: 'allow' };
     const summary = summarize(req);
-    if (allowOnce?.toolName === req.toolName && allowOnce.summary === summary) {
+    if (!req.escalated && allowOnce?.toolName === req.toolName && allowOnce.summary === summary) {
       allowOnce = null;
       return { behavior: 'allow' };
     }

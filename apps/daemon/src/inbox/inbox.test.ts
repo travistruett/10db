@@ -358,10 +358,11 @@ describe('permission broker', () => {
       },
     );
   }
-  const request = (toolName: string, input: Record<string, unknown>) => ({
+  const request = (toolName: string, input: Record<string, unknown>, escalated = false) => ({
     toolName,
     input,
     toolUseId: 't1',
+    escalated,
     signal: new AbortController().signal,
   });
   function onlyOpenCard(): InboxItemDto {
@@ -429,6 +430,40 @@ describe('permission broker', () => {
     inbox.answer(onlyOpenCard().id, { choice: 'deny', note: 'use the vendored docs' });
     const decision = await pending;
     expect(decision.behavior === 'deny' && decision.message).toContain('use the vendored docs');
+  });
+
+  it('allows a call a stored rule covers, but raises a card when the classifier escalated it', async () => {
+    const ws = seedWorkstream(base);
+    const decide = broker(ws);
+    const first = decide(request('Bash', { command: 'pnpm test' }));
+    inbox.answer(onlyOpenCard().id, { choice: 'allow_project' });
+    expect(await first).toEqual({ behavior: 'allow' });
+    expect(await decide(request('Bash', { command: 'pnpm test --run' }))).toEqual({
+      behavior: 'allow',
+    });
+    expect(listInbox(state.db, { states: ['OPEN'] })).toEqual([]);
+
+    void decide(request('Bash', { command: 'pnpm test --run' }, true)).catch(() => undefined);
+    expect(onlyOpenCard().kind).toBe('permission');
+  });
+
+  it('raises a card for an escalated call that matches the carried allow-once', () => {
+    const ws = seedWorkstream(base);
+    const decide = createPermissionBroker(
+      { state, inbox },
+      {
+        projectId: ws.project.id,
+        workstreamId: ws.workstream.id,
+        sessionId: mintId('Session'),
+        signal: new AbortController().signal,
+        observer: { onWaitStart: () => undefined, onWaitEnd: () => undefined },
+        allowOnce: { toolName: 'Bash', summary: 'curl -s https://example.com' },
+      },
+    );
+    void decide(request('Bash', { command: 'curl -s https://example.com' }, true)).catch(
+      () => undefined,
+    );
+    expect(onlyOpenCard().kind).toBe('permission');
   });
 
   it('allows the first matching call once when an allow_once arrived after parking', async () => {
@@ -553,6 +588,7 @@ describe('permission broker without a storable pattern', () => {
       toolName: 'Bash',
       input: { command: 'echo $HOME' },
       toolUseId: 't1',
+      escalated: false,
       signal: new AbortController().signal,
     });
     const [card] = listInbox(state.db, { states: ['OPEN'] });
