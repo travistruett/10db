@@ -676,7 +676,7 @@ describe('permission cards store scoped rules', () => {
 
 describe('permission broker in a sandboxed lane', () => {
   const PNPM_BODY =
-    "pnpm 12 can't install inside the lane sandbox yet (spike 14 check 9). Approving lets the command run; it will fail on pnpm's store lock. Run it yourself, or use npm.";
+    "pnpm 12 can't install inside the lane sandbox yet. Approving lets the command run; it will fail on pnpm's store lock. Run it yourself, or use npm.";
   const HOST_BODY =
     'The command was refused. Allow the host for the project and the next session gets it; allow once only reaches a session that is still running.';
 
