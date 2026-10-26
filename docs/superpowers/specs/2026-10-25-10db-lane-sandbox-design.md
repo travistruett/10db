@@ -96,7 +96,10 @@ These get numbers when they are recorded in `docs/architecture/decisions.md`.
   `CLAUDE.md` into a lane. The briefing points the lane at the repo's agent instructions instead.
 - **The first run of a project may fail on a path or host nobody listed.** A file-tool read and an unlisted
   host raise a card that can add the path or host to the project. A sandboxed Bash read has no card: it fails
-  with `Operation not permitted`, the lane reports it, and the builder adds the path in Settings.
+  with `Operation not permitted` and the lane reports it. Today a read-list path is added by answering a
+  file-tool card "always allow in this project"; adding one in Settings is designed. A toolchain whose files
+  live outside the PATH entries the profile opens (nvm's `lib`, volta's `tools`) can hit `Operation not
+  permitted` the same way.
 - **Package caches are per project.** A lane writes only the checkout and its temp directory, so npm's cache and
   pnpm's store, state and cache directories live under `~/Library/Caches/10db/projects/<project id>` (the
   builder's choice), not in the shared `~/.npm` or `~/Library/pnpm`. npm's cache env points there (built); an install with that cache is unmeasured, though spike 14 check 9 measured one with the cache in the checkout. pnpm 12's
