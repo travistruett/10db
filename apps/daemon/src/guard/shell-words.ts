@@ -420,7 +420,7 @@ function commandName(word: string): string {
  * letter that takes a value takes the rest of the word, or the next word when it is the last letter,
  * so `env -iP /tmp/x git` runs `git`.
  */
-export function flagSpan(flag: string, valueFlags: ReadonlySet<string>): number {
+function flagSpan(flag: string, valueFlags: ReadonlySet<string>): number {
   if (valueFlags.has(flag)) return 2;
   if (flag.startsWith('--')) return 1;
   for (let i = 1; i < flag.length; i += 1) {
@@ -501,7 +501,7 @@ const ENV_LONG_OPTIONS: ReadonlySet<string> = new Set([
  * so in `env --uns X git status` X is a value, not the program; 10db reads none of them. `--` only
  * ends the options.
  */
-export function isUnknownEnvLongFlag(flag: string): boolean {
+function isUnknownEnvLongFlag(flag: string): boolean {
   if (!flag.startsWith('--') || flag === '--') return false;
   return !ENV_LONG_OPTIONS.has(flag.split('=')[0] ?? flag);
 }

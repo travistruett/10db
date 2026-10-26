@@ -515,6 +515,53 @@ describe('matchPermissionRule', () => {
     );
   });
 
+  it.each<[string, string, string | null]>([
+    ['nice with an abbreviated long option', 'nice --adj 5 git status', 'nice --adj 5 git status'],
+    [
+      'timeout with an abbreviated long option',
+      'timeout --sig KILL 5 git status',
+      'timeout --sig KILL 5 git status',
+    ],
+    [
+      'stdbuf with an abbreviated long option',
+      'stdbuf --out=L git status',
+      'stdbuf --out=L git status',
+    ],
+    ['env with an unknown short flag', 'env -a x git status', null],
+    ['env with an unknown letter in a cluster', 'env -iX git status', null],
+    ['env with a cluster of known letters', 'env -iv git status', null],
+    ['env with an abbreviated long option', 'env --uns X git status', null],
+    ['env ending its options', 'env -- git status', null],
+    ['time with an unknown flag', 'time -x git status', null],
+    ['nohup with a flag', 'nohup --foo git status', null],
+    ['exec with an unknown flag', 'exec -z git status', null],
+  ])(
+    'a wrapper flag outside its exact flags matches no rule: %s (%s)',
+    (_name, command, stored) => {
+      expect(match('Bash', bash(command), [rule('Bash', 'git status')])).toBe(false);
+      expect(
+        matchesAllowedTool('Bash', bash(command), baseAllowedTools({ gateCommand: 'x' }), '/r'),
+      ).toBe(false);
+      // nice, timeout and stdbuf stay the command, so their whole words cover only themselves.
+      expect(commandPrefix(command)).toBe(stored);
+    },
+  );
+
+  it.each<[string, string | null, boolean]>([
+    ['env -u FOO git status', 'git status', true],
+    ['env -uFOO git status', 'git status', true],
+    ['env --unset=FOO git status', 'git status', true],
+    ['env -i git status', 'git status', true],
+    ['time -p git status', 'git status', true],
+    ['exec -a x git status', 'git status', true],
+    ['nohup git status', 'git status', true],
+    ['nice -n 5 git status', 'nice -n 5 git status', false],
+    ['timeout 5 git status', 'timeout 5 git status', false],
+  ])('control: %s stores %j and matches a git status rule: %s', (command, stored, matches) => {
+    expect(commandPrefix(command)).toBe(stored);
+    expect(match('Bash', bash(command), [rule('Bash', 'git status')])).toBe(matches);
+  });
+
   it('does not apply a Bash pattern to missing, non-string or non-object input', () => {
     const rules = [rule('Bash', 'docker compose')];
     expect(match('Bash', {}, rules)).toBe(false);

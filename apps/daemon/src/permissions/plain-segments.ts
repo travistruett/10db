@@ -1,73 +1,60 @@
-import {
-  flagSpan,
-  isUnknownEnvLongFlag,
-  parseShell,
-  splitCommand,
-  stripCommandPrefixes,
-  type ShellSegment,
-} from '../guard';
+import { parseShell, splitCommand, stripCommandPrefixes, type ShellSegment } from '../guard';
 
 /** Redirections that only discard or merge output; every other redirection can write or read a file. */
 const HARMLESS_REDIRECTIONS = new Set(['2>&1', '>/dev/null', '2>/dev/null']);
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
 
-/**
- * Wrapper flags that carry a command or a path, so the words after them no longer say what
- * runs: env's `-P` sets the path its command is looked up in. `*` marks a wrapper that is never
- * plain.
- */
-const UNSAFE_WRAPPER_FLAGS: ReadonlyMap<string, readonly string[]> = new Map([
-  ['env', ['-S', '--split-string', '-C', '--chdir', '-P']],
-  ['time', ['-o', '--output']],
-  ['xargs', ['*']],
-]);
-const PASS_THROUGH_WRAPPERS = new Set(['env', 'command', 'nohup', 'time', 'exec', 'xargs']);
-/** The flags of a pass-through wrapper that consume the following word. */
-const VALUE_FLAGS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
-  ['env', new Set(['-u', '--unset'])],
-  ['time', new Set(['-f', '--format'])],
-  ['exec', new Set(['-a'])],
-]);
+interface WrapperFlags {
+  /** Flags that stand alone. */
+  readonly bare: ReadonlySet<string>;
+  /** Flags that take a value: the next word, attached to a short one (`-uNAME`) or after `=` on a long one. */
+  readonly valued: ReadonlySet<string>;
+}
+const flags = (bare: readonly string[], valued: readonly string[] = []): WrapperFlags => ({
+  bare: new Set(bare),
+  valued: new Set(valued),
+});
 
-const NO_VALUE_FLAGS: ReadonlySet<string> = new Set();
+/**
+ * The pass-through wrappers and the only flags each may carry in a plain segment, spelled exactly.
+ * Any other flag word makes the segment not plain: an unknown letter, a cluster, an abbreviated or
+ * unknown long option, or a flag that names a command or a path (env's `-S`, `-C` and `-P`, time's
+ * `-o`), after which the words no longer say what runs. Null marks a wrapper that is never plain.
+ */
+const WRAPPER_FLAGS: ReadonlyMap<string, WrapperFlags | null> = new Map([
+  [
+    'env',
+    flags(['-i', '-0', '-v', '--ignore-environment', '--null', '--debug'], ['-u', '--unset']),
+  ],
+  ['command', flags(['-p', '-v', '-V'])],
+  ['nohup', flags([])],
+  [
+    'time',
+    flags(
+      ['-p', '-l', '-h', '-a', '-v', '--portability', '--verbose', '--append', '--quiet'],
+      ['-f', '--format'],
+    ),
+  ],
+  ['exec', flags(['-c', '-l'], ['-a'])],
+  ['xargs', null],
+]);
 
 function wrapperName(word: string): string | null {
   const name = word.replace(/^\\+/, '').split('/').pop() ?? '';
-  return PASS_THROUGH_WRAPPERS.has(name) ? name : null;
+  return WRAPPER_FLAGS.has(name) ? name : null;
 }
 
-/**
- * The letters of a short-flag cluster up to and including its first that takes a value, which
- * takes the rest of the word: `-iP/tmp/x` is `-i` and `-P`, while `-uP` unsets a variable named P.
- */
-function clusterLetters(name: string, flag: string): string[] {
-  if (flag.startsWith('--')) return [];
-  const valued = VALUE_FLAGS.get(name) ?? NO_VALUE_FLAGS;
-  const unsafe = UNSAFE_WRAPPER_FLAGS.get(name) ?? [];
-  const letters: string[] = [];
-  for (const letter of flag.slice(1)) {
-    letters.push(letter);
-    if (valued.has(`-${letter}`) || unsafe.includes(`-${letter}`)) break;
+/** How many words a wrapper's flag takes, or null when it is not one of the wrapper's exact flags. */
+function plainFlagSpan(known: WrapperFlags, flag: string): 1 | 2 | null {
+  if (known.bare.has(flag)) return 1;
+  if (known.valued.has(flag)) return 2;
+  for (const valued of known.valued) {
+    const attached = valued.startsWith('--')
+      ? flag.startsWith(`${valued}=`)
+      : flag.startsWith(valued) && flag.length > valued.length;
+    if (attached) return 1;
   }
-  return letters;
-}
-
-/** A long flag as written, or abbreviated as GNU tools allow: `--split=x` is `--split-string=x`. */
-function namesLongFlag(flag: string, long: string): boolean {
-  const name = flag.split('=')[0] ?? flag;
-  return name.length > 2 && long.startsWith(name);
-}
-
-function hasUnsafeFlag(name: string, flag: string): boolean {
-  // An abbreviated env option may take the next word as its value, so what runs is unknown.
-  if (name === 'env' && isUnknownEnvLongFlag(flag)) return true;
-  const unsafe = UNSAFE_WRAPPER_FLAGS.get(name) ?? [];
-  const letters = clusterLetters(name, flag);
-  return unsafe.some((u) =>
-    u.startsWith('--')
-      ? flag.startsWith('--') && namesLongFlag(flag, u)
-      : letters.includes(u.slice(1)),
-  );
+  return null;
 }
 
 function hasShellExpansion(words: readonly string[]): boolean {
@@ -79,7 +66,7 @@ function hasRedirection(words: readonly string[]): boolean {
 }
 
 interface PrefixFacts {
-  /** A wrapper flag carries a command or a path. */
+  /** A wrapper carries a flag outside its exact flags, or is never plain. */
   readonly unsafeWrapper: boolean;
   /** A `NAME=value` assignment precedes the command, possibly after a wrapper. */
   readonly assignment: boolean;
@@ -97,13 +84,12 @@ function prefixFacts(words: readonly string[]): PrefixFacts {
       i += 1;
     } else if (name !== null) {
       i += 1;
-      if (UNSAFE_WRAPPER_FLAGS.get(name)?.includes('*') === true)
-        return { unsafeWrapper: true, assignment };
+      const known = WRAPPER_FLAGS.get(name);
+      if (!known) return { unsafeWrapper: true, assignment };
       while (i < words.length && (words[i] ?? '').startsWith('-')) {
-        const flag = words[i] ?? '';
-        if (hasUnsafeFlag(name, flag)) return { unsafeWrapper: true, assignment };
-        // Skipped as the guard skips it, so an assignment after `env -iu NAME` is still seen.
-        i += flagSpan(flag, VALUE_FLAGS.get(name) ?? NO_VALUE_FLAGS);
+        const span = plainFlagSpan(known, words[i] ?? '');
+        if (span === null) return { unsafeWrapper: true, assignment };
+        i += span;
       }
     } else {
       break;
