@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   buildLaneProfile,
@@ -144,6 +144,36 @@ describe('buildLaneProfile', () => {
     expect(thrown).toHaveProperty('message', expect.stringContaining(field));
   });
 
+  it.each<[string, string]>([
+    ['a dot-dot segment', '/h/x/../.claude/y'],
+    ['a doubled slash', '//h/.claude/y'],
+    ['a dot segment', '/h/.claude/./y'],
+    ['a trailing slash', '/h/.claude/y/'],
+  ])('refuses a read-list path with %s', (_name, path) => {
+    expect(() => buildLaneProfile(input({ readList: [path] }))).toThrow(SandboxProfileError);
+  });
+
+  it.skipIf(process.platform !== 'darwin')(
+    'drops a differently cased spelling of a protected read',
+    () => {
+      const spelled = join(home, '.CLAUDE', 'y');
+      const { allowRead, allowWrite } = buildLaneProfile(
+        input({ readList: [spelled], extraWrites: [spelled] }),
+      ).filesystem;
+      expect(allowRead).not.toContain(spelled);
+      expect(allowWrite).not.toContain(spelled);
+    },
+  );
+
+  it('drops a read-list entry that is a secret file', () => {
+    const secret = join(checkout, '.env');
+    const { allowRead, allowWrite } = buildLaneProfile(
+      input({ secretFiles: [secret], readList: [secret], extraWrites: [secret] }),
+    ).filesystem;
+    expect(allowRead).not.toContain(secret);
+    expect(allowWrite).not.toContain(secret);
+  });
+
   it('refuses a checkout that does not exist', () => {
     expect(() => buildLaneProfile(input({ checkout: join(root, 'missing') }))).toThrow(
       SandboxProfileError,
@@ -166,6 +196,14 @@ describe('protectedReads', () => {
       '/h/Library/Keychains',
       '/usr/bin/security',
     ]);
+  });
+});
+
+describe('protectedReads, relative input', () => {
+  it('resolves a relative data or config dir instead of dropping it', () => {
+    const list = protectedReads({ home: '/h', dataDir: 'data', configDirs: ['cfg'] });
+    expect(list).toContain(resolve('data'));
+    expect(list).toContain(resolve('cfg'));
   });
 });
 

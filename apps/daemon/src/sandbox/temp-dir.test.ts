@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -6,6 +7,8 @@ import {
   realpathSync,
   rmSync,
   statSync,
+  symlinkSync,
+  writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -66,6 +69,28 @@ describe('lane temp directory', () => {
     removeLaneTempDir(dir, root);
     expect(existsSync(dir)).toBe(false);
     expect(existsSync(other)).toBe(true);
+  });
+
+  it('removes a directory the lane made read-only, with a file inside', () => {
+    const dir = createLaneTempDir(root);
+    const locked = join(dir, 'locked');
+    mkdirSync(join(locked, 'deeper'), { recursive: true });
+    writeFileSync(join(locked, 'deeper', 'f'), 'x');
+    chmodSync(join(locked, 'deeper'), 0o555);
+    chmodSync(locked, 0o555);
+    removeLaneTempDir(dir, root);
+    expect(existsSync(dir)).toBe(false);
+  });
+
+  it('does not follow a link out of the directory while unlocking', () => {
+    const dir = createLaneTempDir(root);
+    const outside = join(root, 'outside');
+    mkdirSync(outside, { mode: 0o500 });
+    symlinkSync(outside, join(dir, 'link'));
+    removeLaneTempDir(dir, root);
+    expect(existsSync(dir)).toBe(false);
+    expect(statSync(outside).mode & 0o777).toBe(0o500);
+    chmodSync(outside, 0o700);
   });
 
   it('removing a directory that is already gone is not an error', () => {

@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { chmodSync, lstatSync, mkdtempSync, readdirSync, realpathSync, rmSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 
 /** Where lane temp directories live; the sandbox's Unix socket path limit needs a short prefix. */
@@ -42,5 +42,22 @@ export function removeLaneTempDir(dir: string, root: string = LANE_TEMP_ROOT): v
   if (dirname(dir) !== root || !basename(dir).startsWith(PREFIX)) {
     throw new SandboxTempDirError('Not a lane temp directory');
   }
-  rmSync(dir, { recursive: true, force: true });
+  try {
+    rmSync(dir, { recursive: true, force: true });
+  } catch {
+    try {
+      unlockTree(dir);
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      throw new SandboxTempDirError('Could not remove the lane temp directory');
+    }
+  }
+}
+
+/** Makes every directory under `dir` owner-writable so a lane's read-only directory can be removed. */
+function unlockTree(dir: string): void {
+  // lstat, never stat: a link the lane planted must not lead the walk out of the directory.
+  if (!lstatSync(dir).isDirectory()) return;
+  chmodSync(dir, 0o700);
+  for (const entry of readdirSync(dir)) unlockTree(join(dir, entry));
 }

@@ -58,7 +58,13 @@ export function resolveInRepo(
   }
 }
 
-const fold = (text: string): string => (CASE_INSENSITIVE ? text.toLowerCase() : text);
+/** Folds a path's spelling the way the file system does: Unicode NFC, and lowercase where case is folded. */
+export function foldPathCase(text: string): string {
+  const composed = text.normalize('NFC');
+  return CASE_INSENSITIVE ? composed.toLowerCase() : composed;
+}
+
+const fold = foldPathCase;
 
 export function classifyPath(
   rel: string,

@@ -1,4 +1,5 @@
 import { realpathSync } from 'node:fs';
+import { posix } from 'node:path';
 import { z } from 'zod';
 import { isEqualOrUnder } from './protected-reads';
 
@@ -36,7 +37,15 @@ export class SandboxProfileError extends Error {
 // carries no pattern characters and a domain is a plain host or a `*.` wildcard.
 const sandboxPath = z
   .string()
-  .refine((path) => path.startsWith('/') && !/[*?[{\n]/.test(path), 'not a plain absolute path');
+  .refine(
+    (path) =>
+      path.startsWith('/') &&
+      !path.startsWith('//') &&
+      path === posix.normalize(path) &&
+      (path === '/' || !path.endsWith('/')) &&
+      !/[*?[{\n]/.test(path),
+    'not a plain normalized absolute path',
+  );
 const sandboxDomain = z.string().regex(/^(\*\.)?[a-z0-9.-]+$/);
 const envName = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/);
 
@@ -90,6 +99,8 @@ export function buildLaneProfile(input: LaneProfileInput): LaneSandboxSettings {
   } catch {
     throw new SandboxProfileError('checkout', 'unreadable');
   }
+  const denied = [...input.protectedReads, ...input.secretFiles];
+  const isAllowed = (path: string): boolean => !denied.some((root) => isEqualOrUnder(path, root));
   const readable = [
     ...SYSTEM_READS,
     input.tmpDir,
@@ -98,10 +109,8 @@ export function buildLaneProfile(input: LaneProfileInput): LaneSandboxSettings {
     input.packageCacheDir,
     ...input.readList,
     ...input.extraReads,
-  ].filter((path) => !input.protectedReads.some((root) => isEqualOrUnder(path, root)));
-  const writable = [input.tmpDir, input.packageCacheDir, ...input.extraWrites].filter(
-    (path) => !input.protectedReads.some((root) => isEqualOrUnder(path, root)),
-  );
+  ].filter(isAllowed);
+  const writable = [input.tmpDir, input.packageCacheDir, ...input.extraWrites].filter(isAllowed);
   const candidate: LaneSandboxSettings = {
     enabled: true,
     failIfUnavailable: true,
