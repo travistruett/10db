@@ -23,6 +23,20 @@ describe('deniedEnvNames', () => {
   });
 
   it.each([
+    'MISE_GITHUB_TOKEN',
+    'pnpm_config__authToken',
+    'MISE_SECRET',
+    'LC_PASSWORD',
+    'pnpm_config_registry_cookie',
+  ])('denies %s: a secret-looking name is denied even under an allowed prefix', (name) => {
+    expect(deniedEnvNames({ [name]: 'v' })).toEqual([name]);
+  });
+
+  it.each(['MISE_SHELL', 'pnpm_config_store_dir', 'LC_ALL'])('keeps %s', (name) => {
+    expect(deniedEnvNames({ [name]: 'v' })).toEqual([]);
+  });
+
+  it.each([
     'CLAUDE_CODE_TMPDIR',
     'GIT_CONFIG_GLOBAL',
     'npm_config_cache',
