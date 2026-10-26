@@ -1,7 +1,7 @@
 # Spike 13: Claude Code's Bash sandbox as the boundary for lanes
 
-- **Status:** PARTIAL. Checks 1, 5, 6, 8 and 9 are done. Check 10 is REFUTED: no configuration tried makes
-  `make gate` pass inside the sandbox. Checks 2–4 wait for the builder's own run. Check 7 was not run; it
+- **Status:** PARTIAL. Checks 1–6, 8 and 9 are VERIFIED. Checks 2–4 come from the builder's own script run.
+  Check 10 is REFUTED: no configuration tried makes `make gate` pass inside the sandbox. Check 7 was not run; it
   rests on the documented behavior.
 - **Date:** 2026-10-25
 - **Versions:** claude 2.1.310 (Claude Code) · Agent SDK 0.3.300 · Node v26.12.0
@@ -11,7 +11,8 @@ The sandbox is `Options.sandbox` (Seatbelt on macOS), set per session through th
 `haiku` with effort `low`, billed to the subscription (`apiKeySource` none, `apiProvider` firstParty,
 `subscriptionType` Claude Max), with `maxBudgetUsd: 0.5`. Haiku ran every listed command verbatim and declined
 nothing, so no check is marked PARTIAL for a refusal. The probe adds an operator note to the system prompt saying
-the commands are a sanctioned test of the sandbox; an earlier haiku run declined a bypass battery without it.
+the commands are a sanctioned test of the sandbox. An earlier haiku run declined the bypass battery even with
+that note, so checks 2–4 ran as a plain script with no model.
 
 The lane base config for every check except 1's control is:
 
@@ -37,7 +38,7 @@ The lane base config for every check except 1's control is:
 | #   | Check                  | Result   | Evidence file (in `spikes/agent-sdk/out/`)                                                      |
 | --- | ---------------------- | -------- | ----------------------------------------------------------------------------------------------- |
 | 1   | Sandbox engages        | VERIFIED | `13-engage.json`, `13-engage-control.json`, `13-run-engage.txt`                                 |
-| 2–4 | File denial, Keychain  | PENDING  | the builder's run                                                                               |
+| 2–4 | File denial, Keychain  | VERIFIED | `13-partA/summary.txt` (the builder's run of `13-partA.sh`)                                     |
 | 5   | Environment scrub      | VERIFIED | `13-env-baseline.json`, `13-env-scrub.json`, `13-env-credentials-deny.json`                     |
 | 6   | Read tool routing      | VERIFIED | `13-read-denyread-only.json`, `13-read-disallowed-rule.json`, `13-read-settings-deny.json`      |
 | 7   | Escape hatch           | NOT RUN  | documented behavior only                                                                        |
@@ -80,30 +81,63 @@ PASS engage: cat ~/.10db-spike13-canary/secret.txt: no token → Exit code 1 ⏎
 PASS engage: the sandbox runtime reports restrictions applied to each command: [SandboxDebug] [Sandbox macOS] Applied restrictions - network: true, read: denyAllExcept, write: denyAllExcept
 ```
 
-## 2–4. File denial and Keychain: PENDING
+## 2–4. File denial and Keychain (`13-partA.sh`): VERIFIED
 
-The builder runs these from their own terminal. Fill each section from that run.
+The builder ran these from their own terminal as a plain script, `spikes/agent-sdk/13-partA.sh`, with no model
+in the loop. It runs each command under `srt` (`@anthropic-ai/sandbox-runtime` 0.0.81, the library Claude Code's
+Bash sandbox is built on), with the lane deny list above. It writes only to the working directory. Every content
+check reads a canary with a random token: `~/.10db-spike13-canary/` and a login-Keychain item. The script
+removes both on exit and confirms they are gone. Real credential paths are probed only for size or entry count.
 
-### 2. File-denial routes
+Controls: without the sandbox the canary is readable. Under it, a direct `cat` is refused, a write in the cwd
+works and a write to `~` is refused.
+
+### 2. File-denial routes: VERIFIED
 
 - **Question:** does `denyRead` on a directory hold against every read route (copies, links, archives, other
   interpreters, path spellings)?
-- **Result:**
-- **Evidence:**
+- **Result:** yes. All 25 routes were refused with `Operation not permitted`, and no token appeared:
+  - `head`, `dd`, `cp`, `cp -c` (APFS clone);
+  - `tar` from `-C ~`, `zip -r`, `ditto`, `rsync`;
+  - `$(…)` in a subshell after `cd ~`, a glob, `find -exec cat`, `grep -r`;
+  - python, node, perl and `osascript` reads;
+  - a symlink in the cwd (the read through it is refused) and a hard link (`ln` itself is refused);
+  - a case-changed path, `./` and `//`, `~/../$USER/`, the `/System/Volumes/Data` firmlink, a `/.vol/<dev>/<inode>`
+    path;
+  - a `launchctl submit` job meant to copy the file outside the sandbox (no job wrote anything).
+- **Evidence:** `out/13-partA/summary.txt` and one output file per row. For example, `f-tar.txt` reads `tar:
+.10db-spike13-canary: Couldn't visit directory`, and `f-hardlink.txt` reads `ln: …/secret.txt: Operation not
+permitted`.
 
-### 3. Real credential paths
+### 3. Real credential paths: VERIFIED
 
 - **Question:** do `~/.claude.json`, `~/.claude`, `~/Library/Keychains` and the 10db data directory stay
-  unreadable, while the session still runs and writes its own transcript?
-- **Result:**
-- **Evidence:**
+  unreadable?
+- **Result:** `wc -c < ~/.claude.json`, `ls ~/.claude` and `wc -c < ~/Library/Keychains/login.keychain-db` were all
+  refused (exit 1). The 10db data directory doesn't exist on this machine, so that row only shows that the probe
+  ran. That the session still runs with these paths denied was shown through the SDK in check 1, because the
+  claude process itself is outside the Bash sandbox.
+- **Evidence:** `out/13-partA/r-*.txt`.
 
-### 4. Keychain
+### 4. Keychain: VERIFIED, with one open detail
 
 - **Question:** with `~/Library/Keychains` denied, does `security find-generic-password -w` return a canary item?
   What if the directory is not denied, or the `security` binary is denied?
 - **Result:**
-- **Evidence:**
+  - **Denied directory:** the item is not found (exit 44, "could not be found in the keychain"). The binary's
+    Seatbelt profile allows `mach-lookup` to `com.apple.SecurityServer` and `com.apple.securityd.xpc`, and the
+    settings can't remove that. Even so, the client can't open the keychain file, and that is enough.
+  - **Directory not denied:** the canary is printed. The `~/Library/Keychains` entry is the setting that protects
+    login-keychain items, and 10db keeps keyed-account secrets there.
+  - **`/usr/bin/security` in `denyRead`:** the binary can't run at all (exit 127).
+  - **Open:** `security dump-keychain` under the lane config still prints 3253 lines of metadata. No secrets
+    appeared, and no canary. It probably lists the System keychains outside the denied directory. The run kept a
+    line count only, so this is unconfirmed; `security dump-keychain | grep -c 10db-spike13-canary` would settle
+    it.
+- **Evidence:** `out/13-partA/k-*.txt`.
+- **Version caveat:** these rows ran under srt 0.0.81. The copy bundled in claude 2.1.310 may differ. Check 1
+  showed that the SDK path applies the same `denyAllExcept` restrictions, and its direct read was refused the same
+  way.
 
 ## 5. Environment scrub (`env`): VERIFIED
 
@@ -385,8 +419,12 @@ Other findings that shape the config:
 - **Credentials in the environment (check 5).** The sandbox does not strip them. Use
   `credentials.envVars` deny by name for each secret the daemon holds; `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` misses
   a variable whose name and value do not look like a credential, and leaves GitHub tokens.
-- **Keychain (check 4), file-denial routes (checks 2 and 3).** Pending the builder's run. Until then, a denied
-  directory is verified for `cat` only.
+- **Keychain metadata (check 4).** `security dump-keychain` still lists 3253 lines of item metadata under the lane
+  config, with no secrets. It is probably the System keychains; that is unconfirmed. Denying `/usr/bin/security`
+  as well would close it.
+- **Daemon reads.** The Bash sandbox doesn't cover the daemon. A lane can commit a symlink, for example
+  `.github/pull_request_template.md` pointing to `~/.claude.json`, and the daemon follows it when it reads the
+  repo. Creating a link never reads its target, so no sandbox stops it.
 - **The unsandboxed retry (check 7).** Documented, not run. Keep `allowUnsandboxedCommands: false`.
 - **Unverified minimality.** Each of the three network additions was seen to fix a failure; none was removed one at
   a time from the final config to show it is still needed, and `/tmp/claude-501` is wider than the one tsx
