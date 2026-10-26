@@ -15,11 +15,12 @@ import { abbreviates } from './git-rules';
 import { isWithin } from './paths';
 
 /**
- * Interim policy that keeps a cooperative agent from casual reads of account credentials: Keychain
- * commands, environment dumps, secret-variable references and protected paths in shell text.
- * These rules are not a boundary. Text matching cannot see everything a shell does, and a
- * deliberate command can get past them. The lane sandbox (lane sandbox design, D12) makes the
- * kernel the boundary and removes these rules once it is built.
+ * Two kinds of rule live here. The shell-text rules (Keychain commands, environment dumps, secret
+ * references and protected paths in shell text) are interim policy that keeps a cooperative agent
+ * from casual reads; text matching cannot see everything a shell does, and the lane sandbox plan
+ * removes them (lane sandbox design, D12). `pathRefusal`, `protectedPaths` and `isOwnToolResult`
+ * are the resolved-path check on the file tools, which D8 keeps as part of the file-tool boundary.
+ * The kernel sandbox is the lane boundary (D1).
  */
 
 const KEYCHAIN = 'Keychain commands are never run by agents: 10db keeps account secrets there.';

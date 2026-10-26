@@ -69,7 +69,8 @@ const PATH_FIELDS = ['file_path', 'notebook_path', 'path', 'pattern'];
 
 /** Whether the segment's words begin with the prefix's words, compared word by word. */
 function startsWithWords(words: readonly string[], prefix: string): boolean {
-  const prefixWords = plainSegments(prefix)?.[0]?.words;
+  const parsed = plainSegments(prefix);
+  const prefixWords = parsed?.length === 1 ? parsed[0]?.words : undefined;
   if (prefixWords === undefined || prefixWords.length === 0) return false;
   return prefixWords.every((word, i) => words[i] === word);
 }
@@ -163,9 +164,9 @@ function runsOtherCommands(words: readonly string[]): boolean {
  * The pattern stored by "always allow": the program plus its subcommand when the second word is
  * one, otherwise the segment's whole words, so the rule never covers more than what was shown.
  * Null when the command has a substitution, expansion or redirection, or runs through a wrapper
- * with a command-carrying flag, or the scanner cannot parse it with certainty, or its program or
- * subcommand word holds whitespace (an escaped space or a quoted string): such a command can only
- * be allowed once.
+ * with a command-carrying flag, or the scanner cannot parse it with certainty, or the stored
+ * words would not read back as the same one segment (a word with whitespace, `#`, `;`, `&&` or a
+ * brace): such a command can only be allowed once.
  */
 export function commandPrefix(command: string): string | null {
   if (!parseShell(command).certain) return null;
@@ -174,11 +175,23 @@ export function commandPrefix(command: string): string | null {
   if (first === undefined || !segments.every(isLiteralSegment)) return null;
   const words = stripCommandPrefixes(first.words);
   const [head, second] = words;
-  if (head === undefined || /\s/.test(head)) return null;
-  if (second === undefined) return head;
-  if (/\s/.test(second)) return null;
-  if (!runsOtherCommands(words) && SUBCOMMAND.test(second)) return `${head} ${second}`;
-  return words.join(' ');
+  if (head === undefined) return null;
+  if (second === undefined) return storable(head, words);
+  if (!runsOtherCommands(words) && SUBCOMMAND.test(second))
+    return storable(`${head} ${second}`, [head, second]);
+  return storable(words.join(' '), words);
+}
+
+/**
+ * The pattern when it reads back as one segment of exactly these words. A word that holds
+ * whitespace, `#`, `;`, `&&` or a brace changes meaning once the words are joined into text.
+ */
+function storable(pattern: string, words: readonly string[]): string | null {
+  const parsed = plainSegments(pattern);
+  const [only] = parsed ?? [];
+  if (parsed?.length !== 1 || only === undefined) return null;
+  const same = only.words.length === words.length && only.words.every((w, i) => w === words[i]);
+  return same ? pattern : null;
 }
 
 /** The stored rule that permits the call, if any; a Bash pattern must cover every plain segment. */

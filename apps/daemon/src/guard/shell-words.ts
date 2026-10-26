@@ -203,10 +203,12 @@ function scan(command: string, from: number, substitution: boolean): Scan {
       continue;
     }
     if (ch === '$' && next === "'") {
-      // ANSI-C quoting: a backslash escapes any character, a quote included.
+      // ANSI-C quoting: a backslash escapes a quote, a backslash or a double quote; every other
+      // escape (`\n`, `\t`, `\x41`) decodes to a character this scanner does not model.
       let j = i + 2;
       while (j < command.length && command.charAt(j) !== "'") {
         const escaped = command.charAt(j) === '\\' && j + 1 < command.length;
+        if (escaped && !`'\\"`.includes(command.charAt(j + 1))) certain = false;
         word += command.charAt(escaped ? j + 1 : j);
         j += escaped ? 2 : 1;
       }
