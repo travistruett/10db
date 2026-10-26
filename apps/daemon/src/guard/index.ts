@@ -8,11 +8,10 @@ export {
   PathResolutionError,
   realPathOf,
   resolveInRepo,
-  resolveInRepoReadings,
 } from './paths';
 export { parseShell, splitCommand, stripCommandPrefixes, type ShellSegment } from './shell-words';
 export { READ_COMMANDS } from './read-only';
 export { protectedPaths, type ProtectedPath } from './account-rules';
 export { EQUALS_EXPANSION } from './plain-command';
 export { plainWords } from './command-forms';
-export { hazardFor, hazardHit, type HazardHit } from './hazards';
+export { hazardFor, hazardHit } from './hazards';

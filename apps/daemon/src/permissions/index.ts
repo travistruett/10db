@@ -5,5 +5,4 @@ export {
   matchesAllowedTool,
   matchPermissionRule,
   storableRule,
-  type StorableRule,
 } from './rules';

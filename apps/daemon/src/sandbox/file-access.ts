@@ -117,7 +117,7 @@ function spellings(root: string): string[] {
  * True only for a file under this session's own `tool-results` directory in Claude Code's config:
  * `<configDir>/projects/<slug>/<providerSessionId>/tool-results/<file>`.
  */
-export function isOwnToolResult(realPath: string, ctx: FileAccessContext): boolean {
+function isOwnToolResult(realPath: string, ctx: FileAccessContext): boolean {
   if (ctx.providerSessionId === null) return false;
   const sessionId = foldPathCase(ctx.providerSessionId);
   for (const config of spellings(ctx.configDir)) {

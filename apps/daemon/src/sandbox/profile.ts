@@ -60,7 +60,7 @@ export function isSandboxDomain(value: string): boolean {
 }
 
 /** The settings Claude Code's sandbox takes, with the SDK's field names. */
-export const LaneSandboxSettingsSchema = z.strictObject({
+const LaneSandboxSettingsSchema = z.strictObject({
   enabled: z.boolean(),
   failIfUnavailable: z.boolean(),
   allowUnsandboxedCommands: z.boolean(),
