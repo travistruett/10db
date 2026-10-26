@@ -21,6 +21,7 @@ describe('SystemAlert benchmark sync', () => {
         HttpResponse.json(
           SystemCheckDto.parse({
             loginEnv: { source: 'login_shell', warning: null },
+            claudeCode: { verifiedOn: '2.1.0', warning: null },
             tools: [],
             benchmarkSync,
           }),
