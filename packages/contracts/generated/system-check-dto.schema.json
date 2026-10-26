@@ -24,6 +24,24 @@
         "warning"
       ]
     },
+    "claudeCode": {
+      "type": "object",
+      "properties": {
+        "verifiedOn": {
+          "type": "string"
+        },
+        "warning": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "verifiedOn",
+        "warning"
+      ]
+    },
     "tools": {
       "type": "array",
       "items": {
@@ -93,6 +111,7 @@
   },
   "required": [
     "loginEnv",
+    "claudeCode",
     "tools"
   ]
 }

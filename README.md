@@ -47,6 +47,43 @@ Ship anyway, which ships the batch without that task once the rest is done or ca
 shows the batch and offers Retry (when the batch failed), Ship anyway (when a task failed) and Abandon. 10db
 never force-pushes, and agents can't push, merge or open pull requests themselves.
 
+## Accounts
+
+Every project runs on an account: who pays for its sessions. A fresh 10db has one, **Claude plan** (the default account), which is
+the Claude Code login you already use (`claude /login`, in `CLAUDE_CONFIG_DIR` if your shell sets it).
+10db records its email the first time a task runs, tells you in the inbox which email it recorded
+("Claude plan runs as …"), and refuses any session that reports a different one.
+
+Until the Accounts screen ships, add other accounts through the daemon's API, with the token in
+`~/Library/Application Support/10db/ui-token` and the port in `daemon.json` beside it:
+
+```sh
+T=$(cat ~/Library/Application\ Support/10db/ui-token)
+P=$(jq .port ~/Library/Application\ Support/10db/daemon.json)
+# A second Claude subscription: 10db prints the sign-in command for its own config directory.
+curl -s -H "Authorization: Bearer $T" -H 'content-type: application/json' \
+  -d '{"kind":"claude_subscription","label":"Company A"}' http://127.0.0.1:$P/accounts
+# A client's API key, capped at $500 a month; the key goes to your login Keychain, never to 10db's database.
+curl -s -H "Authorization: Bearer $T" -H 'content-type: application/json' \
+  -d '{"kind":"anthropic_api_key","label":"Client B","monthlyCapUsd":500}' http://127.0.0.1:$P/accounts
+curl -s -X PUT -H "Authorization: Bearer $T" -H 'content-type: application/json' \
+  -d '{"secret":"sk-ant-…"}' http://127.0.0.1:$P/accounts/<id>/secret
+```
+
+After you sign a new subscription in, 10db asks you in the inbox to confirm the email it found. Pick a
+project's account in Settings, Billing. Sessions on an account run under its own lane cap and usage limits; a
+metered account stops starting sessions at its monthly cap until the next month or a raised cap.
+`GET /accounts/<id>/usage?month=YYYY-MM` shows its tokens and dollars per project.
+
+A project can move to another account in Settings, Billing, even with work in flight. A running session
+finishes where it is, and each lane's next session runs on the new account, fresh from its latest handoff;
+work that was neither committed nor handed off stays behind. When an account hits its usage limit, each
+project with work on it gets an inbox card offering to continue on another account (a project whose work queues
+during the pause gets it then, once), and once the limit resets 10db asks whether to move back. Name a fallback account in Billing, and 10db moves a project with work in
+flight there by itself: on a Claude subscription when it reaches 95% of a usage limit ("Hand off at" in
+Billing changes that), after asking its running lanes to hand off; on any account at the limit itself. The fallback
+must be ready to run, and a metered one needs a monthly cap, because nobody approves that spend.
+
 ## Model data from Artificial Analysis
 
 10db can route each step on [Artificial Analysis](https://artificialanalysis.ai) benchmark scores, using your own free API key. Add it with `security add-generic-password -U -s 10db -a artificial-analysis-api-key -w`, which prompts for the key (`-U` replaces an existing item, so re-running it updates the key). Run it in a terminal that can prompt. Then restart 10db so it syncs; otherwise the next scheduled sync is up to 24 hours away (a sync button comes later). The data is fetched to your machine only, and is not covered by this repository's license. Source: Artificial Analysis (artificialanalysis.ai).

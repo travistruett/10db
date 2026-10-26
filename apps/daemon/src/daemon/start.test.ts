@@ -1,4 +1,4 @@
-import { existsSync, fstatSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, fstatSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   BenchmarkStatusDto,
@@ -17,7 +17,7 @@ import {
   SystemCheckDto,
   WorkstreamId,
 } from '@10db/contracts';
-import { getWorkstream } from '@10db/db';
+import { getAccount, getWorkstream, listAccounts } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { WebSocket } from 'ws';
@@ -165,6 +165,97 @@ describe('startDaemon', () => {
     expect(existsSync(join(dir.path, 'daemon.lock'))).toBe(false);
   });
 
+  it("records the default account's identity from its first probe, then runs the task", async () => {
+    const repo = createTempRepo();
+    try {
+      // A fresh data directory: the default account is seeded with no identity; the fake's probe reports builder@example.com.
+      const adapter = new FakeAdapter({ Alpha: [[{ do: 'turn_complete' }]] });
+      const running = await startDaemon({
+        dataDir: dir.path,
+        port: 0,
+        adapter,
+        logLevel: 'warn',
+        ...QUIET,
+      });
+      daemon = running;
+      const api = apiClient(running.url, running.token);
+      const project = await api.post('/projects', ProjectDto, {
+        name: 'demo',
+        repoPath: repo.path,
+        gateCommand: 'true',
+        flowId: await quickFlowId(api),
+        areas: [{ name: 'src', globs: ['src/**'] }],
+      });
+      const task = await api.post(`/projects/${project.id}/tasks`, TaskDto, {
+        title: 'Alpha',
+        acceptanceCriteria: ['it works'],
+        areas: ['src'],
+      });
+      await api.post(`/tasks/${task.id}/start`, z.unknown());
+      await waitForAsync(async () =>
+        (await api.get('/workstreams?active=false', z.array(WorkstreamDto))).some(
+          (w) => w.taskId === task.id && w.state === 'DONE',
+        ),
+      );
+      expect(adapter.probes).toHaveLength(1);
+      expect(getAccount(running.state.db, project.accountId).expectedIdentity).toBe(
+        'builder@example.com',
+      );
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it('waits for an identity probe in flight before it closes the database', async () => {
+    const repo = createTempRepo();
+    try {
+      const adapter = new FakeAdapter({ Alpha: [[{ do: 'turn_complete' }]] });
+      let release: () => void = () => undefined;
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      adapter.probeAccount = async (probe) => {
+        adapter.probes.push(probe);
+        await held;
+        return adapter.probeSeen;
+      };
+      const running = await startDaemon({
+        dataDir: dir.path,
+        port: 0,
+        adapter,
+        logLevel: 'warn',
+        ...QUIET,
+      });
+      daemon = running;
+      const api = apiClient(running.url, running.token);
+      const project = await api.post('/projects', ProjectDto, {
+        name: 'demo',
+        repoPath: repo.path,
+        gateCommand: 'true',
+        flowId: await quickFlowId(api),
+        areas: [{ name: 'src', globs: ['src/**'] }],
+      });
+      const task = await api.post(`/projects/${project.id}/tasks`, TaskDto, {
+        title: 'Alpha',
+        acceptanceCriteria: ['it works'],
+        areas: ['src'],
+      });
+      await api.post(`/tasks/${task.id}/start`, z.unknown());
+      await waitFor(() => adapter.probes.length === 1);
+      let stopped = false;
+      const stopping = running.stop().then(() => {
+        stopped = true;
+      });
+      // The deadline is the proof: a stop that ignored the probe would finish well inside it.
+      await expect(waitFor(() => stopped, 750)).rejects.toThrow('timed out');
+      release();
+      await stopping;
+      daemon = null;
+    } finally {
+      repo.cleanup();
+    }
+  });
+
   it('does not count a clean stop against the recovery limit', async () => {
     const repo = createTempRepo();
     const book: FakeScriptBook = { Alpha: [[{ do: 'hang' }], [{ do: 'hang' }]] };
@@ -254,6 +345,7 @@ describe('startDaemon', () => {
     const spawned: number[] = [];
     const check: SystemCheckDto = {
       loginEnv: { source: 'login_shell', warning: null },
+      claudeCode: { verifiedOn: '2.1.302', warning: null },
       tools: [{ name: 'git', path: '/usr/bin/git', version: 'git version 2.50.1', required: true }],
       benchmarkSync: null,
     };
@@ -718,5 +810,41 @@ describe('startDaemon', () => {
     await waitFor(() => (openLogHandles() === 1 ? true : undefined));
     await running.stop();
     expect(openLogHandles()).toBe(0);
+  });
+
+  it.each<{ name: string; shellDir: string; configDir: string | null; warns: boolean }>([
+    {
+      name: "seeds the default account on the login shell's own Claude Code directory",
+      shellDir: '/Users/b/.claude-work',
+      configDir: '/Users/b/.claude-work',
+      warns: false,
+    },
+    {
+      name: "seeds the default account on Claude Code's default directory, with a warning, when the login shell sets a relative one",
+      shellDir: '.claude-relative',
+      configDir: null,
+      warns: true,
+    },
+  ])('$name', async ({ shellDir, configDir, warns }) => {
+    const running = await startDaemon({
+      dataDir: dir.path,
+      port: 0,
+      adapter: new FakeAdapter({}),
+      logLevel: 'warn',
+      loginEnv: { PATH: '/usr/bin:/bin', CLAUDE_CONFIG_DIR: shellDir },
+      ...QUIET,
+    });
+    daemon = running;
+    expect(listAccounts(running.state.db)).toMatchObject([
+      { label: 'Claude plan', configDir, isDefault: true },
+    ]);
+    if (warns) {
+      // The log is written asynchronously, so wait for the warning; it names the variable, never the value.
+      const logPath = join(dir.path, 'logs', 'daemon.log');
+      await waitFor(
+        () => existsSync(logPath) && readFileSync(logPath, 'utf8').includes('CLAUDE_CONFIG_DIR'),
+      );
+      expect(readFileSync(logPath, 'utf8')).not.toContain(shellDir);
+    }
   });
 });

@@ -60,6 +60,7 @@ describe('App shell', () => {
             warning:
               'The login shell timed out after 10 s; using the environment 10db was started with',
           },
+          claudeCode: { verifiedOn: '2.1.302', warning: null },
           tools: [
             { name: 'claude', path: null, version: null, required: true },
             { name: 'git', path: '/usr/bin/git', version: 'git version 2.50.0', required: true },
@@ -74,6 +75,30 @@ describe('App shell', () => {
     expect(screen.getByText(/The login shell timed out after 10 s/)).toBeTruthy();
     // docker is optional, so its absence is not an alert.
     expect(screen.queryByText('docker was not found on your login PATH')).toBeNull();
+  });
+
+  it('warns when Claude Code is newer than the account checks were verified on', async () => {
+    server.use(
+      http.get(daemonUrl('/system'), () =>
+        HttpResponse.json({
+          loginEnv: { source: 'login_shell', warning: null },
+          claudeCode: {
+            verifiedOn: '2.1.302',
+            warning: 'Claude Code 3.0.0 is a newer major version.',
+          },
+          tools: [
+            { name: 'claude', path: '/bin/claude', version: '3.0.0 (Claude Code)', required: true },
+            { name: 'git', path: '/usr/bin/git', version: 'git version 2.50.0', required: true },
+          ],
+        }),
+      ),
+      ...baseHandlers(),
+    );
+    renderApp('/factory');
+    expect(
+      await screen.findByText("This Claude Code is newer than 10db's account checks"),
+    ).toBeTruthy();
+    expect(screen.getByText('Claude Code 3.0.0 is a newer major version.')).toBeTruthy();
   });
 
   it('shows the open-card count on the Inbox link', async () => {

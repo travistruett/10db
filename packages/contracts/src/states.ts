@@ -38,13 +38,6 @@ export type InboxState = ValueOf<typeof InboxState>;
 export const ClaimKind = { Area: 'area', Hazard: 'hazard' } as const;
 export type ClaimKind = ValueOf<typeof ClaimKind>;
 
-export const BillingMode = {
-  Subscription: 'subscription',
-  ApiKey: 'api_key',
-  Bedrock: 'bedrock',
-} as const;
-export type BillingMode = ValueOf<typeof BillingMode>;
-
 export const Provider = { Claude: 'claude' } as const;
 export type Provider = ValueOf<typeof Provider>;
 

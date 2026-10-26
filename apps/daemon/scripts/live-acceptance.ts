@@ -10,7 +10,6 @@ import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import {
-  BillingMode,
   Effort,
   FlowDto,
   HealthResponse,
@@ -387,7 +386,6 @@ async function main(): Promise<void> {
       maxLanes: 3,
       model: args.model,
       effort: args.effort,
-      billingMode: BillingMode.Subscription,
       // The schema's minimums; Alpha's reference reading carries it past them (spec §1.3 point 2).
       handoffPct: 5,
       nudgePct: 6,

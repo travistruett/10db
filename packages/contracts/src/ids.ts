@@ -12,6 +12,7 @@ function idSchema<const B extends string>(prefix: string, brand: B) {
 }
 
 const ID_SCHEMAS = {
+  Account: idSchema('acc', 'AccountId'),
   Project: idSchema('prj', 'ProjectId'),
   Task: idSchema('tsk', 'TaskId'),
   Workstream: idSchema('ws', 'WorkstreamId'),
@@ -36,6 +37,7 @@ const ID_SCHEMAS = {
 } as const;
 
 const ID_PREFIX = {
+  Account: 'acc',
   Project: 'prj',
   Task: 'tsk',
   Workstream: 'ws',
@@ -113,3 +115,5 @@ export const BatchId = ID_SCHEMAS.Batch;
 export type BatchId = IdOf<'Batch'>;
 export const BoardColumnId = ID_SCHEMAS.BoardColumn;
 export type BoardColumnId = IdOf<'BoardColumn'>;
+export const AccountId = ID_SCHEMAS.Account;
+export type AccountId = IdOf<'Account'>;

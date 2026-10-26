@@ -3,7 +3,17 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ProjectDto, TaskDto, WorkstreamDto } from '@10db/contracts';
-import { insertTask, insertWorkstream, seedProject, type Store } from '@10db/db';
+import {
+  getSession,
+  insertSession,
+  insertTask,
+  insertWorkstream,
+  seedProject,
+  updateSessionUsage,
+  type SessionRow,
+  type Store,
+} from '@10db/db';
+import type { Keychain } from '../src/environment';
 
 export interface TempDir {
   path: string;
@@ -181,4 +191,37 @@ export async function waitForAsync<T>(
     if (Date.now() > deadline) throw new Error('waitForAsync timed out');
     await new Promise((r) => setTimeout(r, 25));
   }
+}
+
+/** A Keychain double at the `Keychain` interface: items live in memory, `items` seeds it. */
+export function createMemoryKeychain(items: Record<string, string> = {}): Keychain {
+  const map = new Map(Object.entries(items));
+  return {
+    read: (account) => map.get(account) ?? null,
+    write: (account, secret) => {
+      map.set(account, secret);
+    },
+  };
+}
+
+/** One session on `project`'s account that has spent `costUsd`, started at the store's now. */
+export function seedSpend(store: Store, project: ProjectDto, costUsd: number): SessionRow {
+  return store.write((ctx) => {
+    const task = insertTask(ctx, project.id, {
+      title: `spend ${String(Math.random())}`,
+      acceptanceCriteria: ['x'],
+      areas: [project.areas[0]?.name ?? 'api'],
+    });
+    const ws = insertWorkstream(ctx, task.id);
+    const session = insertSession(ctx, {
+      workstreamId: ws.id,
+      provider: 'claude',
+      model: 'sonnet',
+      effort: 'medium',
+      mode: 'managed',
+      mcpTokenHash: `spend-${String(Math.random())}`,
+    });
+    updateSessionUsage(ctx, session.id, { costUsd });
+    return getSession(ctx.tx, session.id);
+  }).value;
 }

@@ -7,7 +7,10 @@ import {
   buildContextPack,
   buildSessionPrompt,
   compactionReinjection,
+  HANDOFF_FIRM_NUDGE_ACCOUNT,
   HANDOFF_NUDGE,
+  HANDOFF_NUDGE_ACCOUNT,
+  HANDOFF_NUDGE_ACCOUNT_READ_ONLY,
   HANDOFF_NUDGE_READ_ONLY,
   renderHandoff,
 } from './index';
@@ -109,6 +112,110 @@ describe('buildSessionPrompt', () => {
     });
     expect(prompt).toContain('Write the render test');
     expect(prompt).toContain('src/ui/badge.tsx');
+  });
+
+  it('briefs a fix from a handoff written after the gate failed, and not from an older one', () => {
+    const failed = {
+      id: mintId('Evidence'),
+      workstreamId: handoff.workstreamId,
+      kind: 'gate' as const,
+      command: 'make gate',
+      exitCode: 2,
+      summary: 'FAIL badge.test.ts',
+      logPath: null,
+      commitShas: [],
+    };
+    const fix = { kind: 'fix' as const, evidenceId: failed.id };
+    const before = new Date(Date.parse(handoff.createdAt) - 60_000).toISOString();
+    const after = new Date(Date.parse(handoff.createdAt) + 60_000).toISOString();
+    const cutOff = buildSessionPrompt({
+      ...base,
+      handoff,
+      evidence: { ...failed, createdAt: before },
+      action: fix,
+    });
+    expect(cutOff).toContain('Write the render test');
+    expect(cutOff).toContain('FAIL badge.test.ts');
+    expect(
+      buildSessionPrompt({
+        ...base,
+        handoff,
+        evidence: { ...failed, createdAt: after },
+        action: fix,
+      }),
+    ).not.toContain('Write the render test');
+  });
+
+  it("briefs a fresh session from the handoff before the builder's answer", () => {
+    const answer = { question: 'Color?', answer: 'Teal', note: null };
+    const fresh = buildSessionPrompt({
+      ...base,
+      handoff,
+      answer,
+      action: { kind: 'answer', inboxId: mintId('InboxItem'), providerSessionId: null },
+    });
+    expect(fresh).toContain('Write the render test');
+    expect(fresh.indexOf('Write the render test')).toBeLessThan(fresh.indexOf('Answer: Teal'));
+    const resumed = buildSessionPrompt({
+      ...base,
+      handoff,
+      answer,
+      action: { kind: 'answer', inboxId: mintId('InboxItem'), providerSessionId: 'p1' },
+    });
+    expect(resumed).toContain('Answer: Teal');
+    expect(resumed).not.toContain('Write the render test');
+    expect(
+      buildSessionPrompt({
+        ...base,
+        answer,
+        action: { kind: 'answer', inboxId: mintId('InboxItem'), providerSessionId: null },
+      }),
+    ).toContain('inspect git status first');
+  });
+
+  it('puts the gate output a fresh answer session was fixing between the handoff and the answer', () => {
+    const prompt = buildSessionPrompt({
+      ...base,
+      handoff,
+      answer: { question: 'Color?', answer: 'Teal', note: null },
+      evidence: {
+        id: mintId('Evidence'),
+        workstreamId: handoff.workstreamId,
+        kind: 'gate',
+        command: 'make gate',
+        exitCode: 2,
+        summary: 'FAIL badge.test.ts',
+        logPath: null,
+        commitShas: [],
+        createdAt: handoff.createdAt,
+      },
+      action: { kind: 'answer', inboxId: mintId('InboxItem'), providerSessionId: null },
+    });
+    const at = (text: string) => prompt.indexOf(text);
+    expect(at('Write the render test')).toBeLessThan(at('FAIL badge.test.ts'));
+    expect(at('FAIL badge.test.ts')).toBeLessThan(at('Answer: Teal'));
+  });
+
+  it('gives a resumed answer no gate text even when evidence is passed', () => {
+    const prompt = buildSessionPrompt({
+      ...base,
+      handoff,
+      answer: { question: 'Color?', answer: 'Teal', note: null },
+      evidence: {
+        id: mintId('Evidence'),
+        workstreamId: handoff.workstreamId,
+        kind: 'gate',
+        command: 'make gate',
+        exitCode: 2,
+        summary: 'FAIL badge.test.ts',
+        logPath: null,
+        commitShas: [],
+        createdAt: handoff.createdAt,
+      },
+      action: { kind: 'answer', inboxId: mintId('InboxItem'), providerSessionId: 'p1' },
+    });
+    expect(prompt).toContain('Answer: Teal');
+    expect(prompt).not.toContain('FAIL badge.test.ts');
   });
 
   it('carries the answer, the gate output or the recovery note', () => {
@@ -277,6 +384,17 @@ describe('buildSessionPrompt for flow steps', () => {
   it('gives read-only steps a handoff nudge that asks for no commit', () => {
     expect(HANDOFF_NUDGE_READ_ONLY).toContain('mcp__10db__write_handoff');
     expect(HANDOFF_NUDGE_READ_ONLY).not.toContain('commit');
+  });
+
+  it('asks for a handoff before an account move in its own words, with no commit in a read-only step', () => {
+    expect(HANDOFF_NUDGE_ACCOUNT).toMatch(/near its usage limit/);
+    expect(HANDOFF_NUDGE_ACCOUNT).toMatch(/starts from your handoff, not this conversation/);
+    expect(HANDOFF_NUDGE_ACCOUNT).toMatch(/commit everything/);
+    expect(HANDOFF_NUDGE_ACCOUNT).toContain('write_handoff');
+    expect(HANDOFF_NUDGE_ACCOUNT_READ_ONLY).toMatch(/near its usage limit/);
+    expect(HANDOFF_NUDGE_ACCOUNT_READ_ONLY).not.toMatch(/commit/);
+    expect(HANDOFF_FIRM_NUDGE_ACCOUNT).toMatch(/usage limit/);
+    expect(HANDOFF_FIRM_NUDGE_ACCOUNT).toContain('write_handoff');
   });
 
   it('keeps the implement rules for an implement step', () => {

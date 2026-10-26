@@ -1,5 +1,14 @@
 import type {
   AaModelDto,
+  AccountConfig,
+  AccountCreatedDto,
+  AccountDto,
+  AccountId,
+  AccountIdentityDto,
+  AccountPatch,
+  AccountSecretInput,
+  AccountSignInDto,
+  AccountUsageDto,
   BatchDto,
   BatchId,
   BatchStartInput,
@@ -113,4 +122,16 @@ export interface ApiServices {
   stepPlan(taskId: TaskId): StepPlanDto;
   /** The picker's proposal for the approval sheet; reads only. */
   proposeCandidates(projectId: ProjectId, size: number): PickerProposalDto;
+  listAccounts(): AccountDto[];
+  /** Answers the account and, for a subscription, how to sign it in (accounts spec §5). */
+  createAccount(input: AccountConfig): AccountCreatedDto;
+  patchAccount(id: AccountId, patch: AccountPatch): AccountDto;
+  archiveAccount(id: AccountId): AccountDto;
+  /** Write-only: the secret goes to the Keychain; the answer carries `secretSet`, never the secret. */
+  setAccountSecret(id: AccountId, input: AccountSecretInput): AccountDto;
+  accountSignIn(id: AccountId): AccountSignInDto;
+  /** Starts Claude Code on the account, with no prompt, to read who it is now. */
+  accountIdentity(id: AccountId): Promise<AccountIdentityDto>;
+  /** A month's tokens and dollars, in total and per project; `null` is the current month. */
+  accountUsage(id: AccountId, month: string | null): AccountUsageDto;
 }

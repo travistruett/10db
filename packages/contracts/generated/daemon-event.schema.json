@@ -10,6 +10,10 @@
     "type": {
       "type": "string",
       "enum": [
+        "account.saved",
+        "account.cap_reached",
+        "account.paused",
+        "account.resumed",
         "project.created",
         "task.created",
         "task.changed",
@@ -30,8 +34,6 @@
         "deviation.recorded",
         "proposal.created",
         "proposal.resolved",
-        "provider.paused",
-        "provider.resumed",
         "recovery.step",
         "settings.changed",
         "persona.saved",

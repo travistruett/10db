@@ -15,7 +15,12 @@ describe('createUnavailableAdapter', () => {
       effort: 'medium',
       resumeProviderSessionId: null,
       env: {},
-      billingMode: 'subscription',
+      account: {
+        accountId: mintId('Account'),
+        label: 'Claude plan',
+        kind: 'claude_subscription',
+        identity: null,
+      },
       projectMcpServers: {},
       allowedTools: [],
       mcp: { url: 'http://127.0.0.1:1/mcp', token: 't', toolTimeoutMs: 1000 },

@@ -1,15 +1,18 @@
 import {
   EventType,
+  isMetered,
   mintId,
   NotFoundError,
+  type AccountId,
   type Effort,
   type Provider,
   type SessionId,
   type SessionMode,
   type WorkstreamId,
 } from '@10db/contracts';
-import { and, asc, count, desc, eq, isNull } from 'drizzle-orm';
+import { and, asc, count, desc, eq, isNull, sql } from 'drizzle-orm';
 import * as schema from '../schema';
+import { getAccountRow } from './accounts';
 import type { DbReader, WriteContext } from './store';
 
 export type SessionRow = typeof schema.sessions.$inferSelect;
@@ -25,6 +28,20 @@ export interface NewSession {
   readonly briefed?: boolean;
   /** Copied from the session a resumed session continues; see `sessions.briefingBaselinePct`. */
   readonly briefingBaselinePct?: number | null;
+  /** The account the session launches on; absent, the project's current account. */
+  readonly accountId?: AccountId;
+}
+
+function projectOwner(ctx: WriteContext, workstreamId: WorkstreamId) {
+  const owner = ctx.tx
+    .select({ accountId: schema.projects.accountId, kind: schema.accounts.kind })
+    .from(schema.workstreams)
+    .innerJoin(schema.projects, eq(schema.projects.id, schema.workstreams.projectId))
+    .innerJoin(schema.accounts, eq(schema.accounts.id, schema.projects.accountId))
+    .where(eq(schema.workstreams.id, workstreamId))
+    .get();
+  if (!owner) throw new NotFoundError('workstream', workstreamId);
+  return owner;
 }
 
 export function insertSession(ctx: WriteContext, input: NewSession): SessionRow {
@@ -33,9 +50,15 @@ export function insertSession(ctx: WriteContext, input: NewSession): SessionRow 
     .from(schema.sessions)
     .where(eq(schema.sessions.workstreamId, input.workstreamId))
     .get();
+  // A project can move while a session waits for its start, so the runner names the account it launched on.
+  const owner =
+    input.accountId === undefined
+      ? projectOwner(ctx, input.workstreamId)
+      : { accountId: input.accountId, kind: getAccountRow(ctx.tx, input.accountId).kind };
   const row: SessionRow = {
     id: mintId('Session'),
     ...input,
+    accountId: owner.accountId,
     briefed: input.briefed ?? false,
     briefingBaselinePct: input.briefingBaselinePct ?? null,
     sequence: (prior?.n ?? 0) + 1,
@@ -47,7 +70,9 @@ export function insertSession(ctx: WriteContext, input: NewSession): SessionRow 
     exitReason: null,
     inputTokens: 0,
     outputTokens: 0,
-    costUsd: 0,
+    cachedTokens: 0,
+    // A subscription's dollars are not real money, so its cost stays null.
+    costUsd: isMetered(owner.kind) ? 0 : null,
     contextPct: null,
     createdAt: ctx.now,
     updatedAt: ctx.now,
@@ -83,13 +108,23 @@ export function updateSessionUsage(
   patch: Partial<
     Pick<
       SessionRow,
-      'inputTokens' | 'outputTokens' | 'costUsd' | 'contextPct' | 'briefingBaselinePct'
+      'inputTokens' | 'outputTokens' | 'cachedTokens' | 'contextPct' | 'briefingBaselinePct'
     >
-  >,
+  > & { readonly costUsd?: number },
 ): void {
+  const { costUsd, ...rest } = patch;
   ctx.tx
     .update(schema.sessions)
-    .set({ ...patch, updatedAt: ctx.now })
+    .set({
+      ...rest,
+      // The cost never lands on a session whose cost is null (a subscription).
+      ...(costUsd === undefined
+        ? {}
+        : {
+            costUsd: sql`case when ${schema.sessions.costUsd} is null then null else ${costUsd} end`,
+          }),
+      updatedAt: ctx.now,
+    })
     .where(eq(schema.sessions.id, id))
     .run();
 }

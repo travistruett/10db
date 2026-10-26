@@ -27,6 +27,7 @@ import {
   listWorkstreams,
   patchBatch,
   patchProject,
+  seedAccount,
   seedProject,
   transitionBatch,
   transitionWorkstream,
@@ -228,6 +229,7 @@ describe('project delivery', () => {
 
   it('fills the column defaults for a row written without the delivery columns', () => {
     const id = mintId('Project');
+    const account = seedAccount(store, { kind: 'claude_subscription', label: 'raw' });
     store.db
       .insert(schema.projects)
       .values({
@@ -239,7 +241,7 @@ describe('project delivery', () => {
         hazards: [],
         maxLanes: 1,
         provider: 'claude',
-        billingMode: 'subscription',
+        accountId: account.id,
         model: 'sonnet',
         effort: 'medium',
         handoffPct: 40,

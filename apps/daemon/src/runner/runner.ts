@@ -1,3 +1,4 @@
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import {
   currentStep,
@@ -7,6 +8,10 @@ import {
   StepRole,
   ToolAccess,
   WorkstreamState as S,
+  AccountKind,
+  AccountProblem,
+  type AccountId,
+  type AccountRefusal,
   type HandoffId,
   type InboxItemDto,
   type InboxItemId,
@@ -14,7 +19,6 @@ import {
   type NextAction,
   type ProjectDto,
   type ProjectId,
-  type Provider,
   type SessionId,
   type WorkstreamId,
   type WorkstreamStep,
@@ -23,6 +27,8 @@ import {
   activeClaims,
   clearLease,
   endSession,
+  getAccount,
+  getAccountRow,
   getEvidence,
   getInboxItem,
   getMcpApproval,
@@ -57,19 +63,36 @@ import {
   type WriteContext,
 } from '@10db/db';
 import {
+  briefedFromHandoff,
   buildContextPack,
   buildSessionPrompt,
   compactionReinjection,
   HANDOFF_FIRM_NUDGE,
+  HANDOFF_FIRM_NUDGE_ACCOUNT,
   HANDOFF_NUDGE,
+  HANDOFF_NUDGE_ACCOUNT,
+  HANDOFF_NUDGE_ACCOUNT_READ_ONLY,
   HANDOFF_NUDGE_READ_ONLY,
   RESULT_NUDGE,
 } from '../briefing';
+import {
+  unready,
+  type AccountLimits,
+  type AccountPreparer,
+  type AccountRuntime,
+  type StartGate,
+} from '../accounts';
 import type { Clock, Timer } from '../clock';
 import { batchCardFields } from '../delivery';
 import type { StateStore } from '../events';
+import {
+  AccountLaunchError,
+  KeychainError,
+  type Launcher,
+  type SessionLaunch,
+} from '../environment';
 import type { Git } from '../git';
-import { judgeToolUse } from '../guard';
+import { judgeToolUse, type ProtectedPath } from '../guard';
 import {
   createPermissionBroker,
   requestMcpApproval,
@@ -79,7 +102,7 @@ import {
 import type { Logger } from '../log';
 import { mintSessionToken } from '../mcp';
 import { allowedToolsFor, commandPrefix } from '../permissions';
-import { escalateStep } from '../routing';
+import { escalateStep, offeredProfiles } from '../routing';
 import {
   ProjectMcpError,
   readRepoMcp,
@@ -95,7 +118,8 @@ import { advanceSteps, failStep, moveAfter, sendBackSteps, type StepEntry } from
 import type { GateRunner } from '../verify';
 import { findClaimed } from '../watcher';
 import type { LiveSessions } from './live-sessions';
-import { nextActionAfterCrash } from './next-action';
+import { failedGateEvidence } from './failed-gate';
+import { nextActionAfterCrash, nextActionOnAnotherAccount } from './next-action';
 
 /**
  * A continuation session starts with the briefing already in context. If that baseline is near or over
@@ -119,6 +143,8 @@ export const DEFAULT_RUNNER_LIMITS: RunnerLimits = {
 };
 
 export interface RunnerOptions {
+  /** Paths no session tool or command may touch. */
+  readonly protectedPaths: readonly ProtectedPath[];
   readonly state: StateStore;
   readonly adapter: SessionAdapter;
   readonly inbox: InboxService;
@@ -130,8 +156,14 @@ export interface RunnerOptions {
   readonly live: LiveSessions;
   readonly limits: RunnerLimits;
   mcpUrl(): string;
-  sessionEnv(project: ProjectDto): Readonly<Record<string, string>>;
-  onRateLimited(provider: Provider, resetsAt: Date | null, projectId: ProjectId): void;
+  /** Builds each session's launch, and the env the gate runs in. */
+  readonly launcher: Pick<Launcher, 'projectEnv' | 'session'>;
+  /** Usage limits, refusals and the monthly cap, per account. */
+  readonly accounts: Pick<AccountRuntime, 'blocked' | 'rateLimited' | 'refused' | 'sessionEnded'> &
+    Pick<AccountPreparer, 'prepare'> &
+    Pick<AccountLimits, 'usageReported'>;
+  /** One start at a time on a subscription account. */
+  readonly startGate: StartGate;
   onLaneFreed(): void;
   /** Runs after every session ends (the watcher's step-end diff). Errors are logged, never thrown. */
   readonly afterSession?: (workstreamId: WorkstreamId) => Promise<void>;
@@ -143,15 +175,25 @@ export interface Runner {
   launch(id: WorkstreamId, fence: number): void;
   stop(id: WorkstreamId, reason: StopReason): Promise<void>;
   cancel(id: WorkstreamId): Promise<void>;
-  stopProvider(provider: Provider, reason: StopReason): Promise<void>;
+  stopAccount(accountId: AccountId, reason: StopReason): Promise<void>;
   stopAll(reason: StopReason): Promise<void>;
   isRunning(id: WorkstreamId): boolean;
+  /**
+   * Asks the project's lanes whose session runs on the account to hand off; a lane already asked isn't
+   * asked again. A lane between sessions, or waiting for its start slot, needs no nudge: its next
+   * session runs where the project is now.
+   */
+  handOff(projectId: ProjectId, accountId: AccountId, reason: string): void;
   idle(): Promise<void>;
   deliverParkedAnswer(target: InboxTarget, item: InboxItemDto): void;
 }
 
 type Outcome =
   | { readonly kind: 'handoff'; readonly handoffId: HandoffId }
+  | {
+      /** The project moved while the lane waited for its start slot. */
+      readonly kind: 'moved';
+    }
   | { readonly kind: 'step_done'; readonly withoutHandoff: boolean }
   | {
       readonly kind: 'parked';
@@ -162,6 +204,20 @@ type Outcome =
       readonly kind: 'paused';
       readonly until: Date | null;
       readonly providerSessionId: string | null;
+    }
+  | {
+      /** The account can take no session now: it is paused or at its monthly cap. */
+      readonly kind: 'held';
+      readonly until: Date | null;
+      /** Set when the account refused the session: it is paused with this reason. */
+      readonly refusal: AccountRefusal | null;
+      readonly providerSessionId: string | null;
+    }
+  | {
+      /** The account can't start a session yet (no confirmed identity, no secret): it is prepared, not refused. */
+      readonly kind: 'unready';
+      readonly refusal: AccountRefusal;
+      readonly providerSessionId: null;
     }
   | {
       readonly kind: 'crashed';
@@ -180,7 +236,7 @@ type Outcome =
       readonly providerSessionId: string | null;
     };
 
-type Terminal = Exclude<Outcome, { kind: 'handoff' } | { kind: 'step_done' }>;
+type Terminal = Exclude<Outcome, { kind: 'handoff' } | { kind: 'moved' } | { kind: 'step_done' }>;
 
 const PERMISSION_ANSWER_TEXT: Readonly<Record<string, string>> = {
   [PermissionChoice.AllowOnce]:
@@ -218,11 +274,30 @@ function permissionAnswer(item: InboxItemDto): {
   };
 }
 
+/** Why a session is asked to hand off: its context filled, or its account neared its usage limit. */
+type HandoffCause = 'context' | 'account';
+
+/** What a session is told when asked to hand off, by why it is asked. */
+const NUDGES: Readonly<
+  Record<HandoffCause, { readonly edit: string; readonly readOnly: string; readonly firm: string }>
+> = {
+  context: { edit: HANDOFF_NUDGE, readOnly: HANDOFF_NUDGE_READ_ONLY, firm: HANDOFF_FIRM_NUDGE },
+  account: {
+    edit: HANDOFF_NUDGE_ACCOUNT,
+    readOnly: HANDOFF_NUDGE_ACCOUNT_READ_ONLY,
+    firm: HANDOFF_FIRM_NUDGE_ACCOUNT,
+  },
+};
+
 interface Control {
   readonly fence: number;
-  readonly provider: Provider;
+  readonly projectId: ProjectId;
+  /** The account of the lane's current session, or of its next one: read from the project before each session, so a move applies at the lane's next session. */
+  accountId: AccountId;
   stopReason: StopReason | null;
   handle: SessionHandle | null;
+  /** Set while a session runs: asks it to hand off once. */
+  requestHandoff: ((cause: HandoffCause, reason: string) => void) | null;
   /** Set while the gate runs; aborting it kills the gate's process group. */
   gateAbort: AbortController | null;
   /** Set while a session runs; ends its inbox waits so later answers go to the card. */
@@ -234,6 +309,8 @@ interface Control {
 interface SessionState {
   providerSessionId: string | null;
   handoffRequested: boolean;
+  /** Why the session was asked to hand off, so a firm nudge uses the same words. */
+  handoffCause: HandoffCause;
   /**
    * The first context reading of the conversation's briefing, which its handoff margin is measured
    * from: inherited by a resumed session, taken at the first reading of a briefed session that has
@@ -252,6 +329,8 @@ interface SessionState {
    */
   waitingOn: Map<InboxItemId, number>;
   waitTimer: Timer | null;
+  /** Set by the `started` event; a session that never started has no conversation to resume. */
+  started: boolean;
   outcome: Outcome | null;
 }
 
@@ -270,6 +349,30 @@ export function createRunner(opts: RunnerOptions): Runner {
   function freshAction(reader: DbReader, id: WorkstreamId): NextAction {
     const latest = latestHandoffForStep(reader, getWorkstreamRow(reader, id));
     return latest ? { kind: 'continue_from_handoff', handoffId: latest.id } : { kind: 'start' };
+  }
+
+  /**
+   * A conversation lives in the config directory of the account its session ran on, so once the
+   * project has moved the lane can't resume it: its next action becomes a fresh start on the
+   * project's account (accounts spec §6). The new action is saved with the session row, so a lane
+   * that never launches there still resumes if the project moves back.
+   */
+  function actionOnAnotherAccount(
+    id: WorkstreamId,
+    ctl: Control,
+    row: WorkstreamRow,
+  ): NextAction | null {
+    const action = row.nextAction;
+    const resumeId =
+      action.kind === 'resume' || action.kind === 'answer' ? action.providerSessionId : null;
+    if (resumeId === null) return null;
+    const ranOn = getSessionByProviderId(db, id, resumeId)?.accountId;
+    if (ranOn === undefined || ranOn === ctl.accountId) return null;
+    return nextActionOnAnotherAccount(
+      action,
+      latestHandoffForStep(db, row),
+      failedGateEvidence(db, id),
+    );
   }
 
   function cancelNow(id: WorkstreamId, fence: number | null): void {
@@ -335,7 +438,10 @@ export function createRunner(opts: RunnerOptions): Runner {
     const result = escalateStep(step, {
       provider: project.provider,
       budgetCeiling: project.budgetCeiling,
-      profiles: listModelProfiles(db),
+      profiles: offeredProfiles(
+        listModelProfiles(db),
+        getAccount(db, project.accountId).settings.aliases,
+      ),
       why,
     });
     return { step: result.step, moved: result.escalated };
@@ -612,6 +718,56 @@ export function createRunner(opts: RunnerOptions): Runner {
         });
         return;
       }
+      case 'held':
+        opts.state.write((ctx) => {
+          transitionWorkstream(ctx, id, {
+            to: S.PausedLimit,
+            fence: ctl.fence,
+            // The next action is kept: the lane resumes exactly where it stopped once the account does.
+            patch: {
+              pausedUntil: outcome.until?.toISOString() ?? null,
+              ...(outcome.providerSessionId
+                ? {
+                    nextAction: {
+                      kind: 'resume',
+                      providerSessionId: outcome.providerSessionId,
+                      reason: 'the account resumed',
+                    },
+                  }
+                : {}),
+            },
+            reason: outcome.refusal
+              ? `account refused: ${outcome.refusal.problem}`
+              : 'the account is paused',
+          });
+          clearLease(ctx, id);
+        });
+        if (outcome.refusal) {
+          // The account the session ran on, which a move can make differ from the project's own.
+          const lane = getProject(db, getWorkstreamRow(db, id).projectId);
+          opts.accounts.refused(getAccountRow(db, ctl.accountId), lane.id, outcome.refusal);
+        }
+        return;
+      case 'unready': {
+        opts.state.write((ctx) => {
+          // The state machine has no shorter way back to the queue; the next action is kept as it was.
+          transitionWorkstream(ctx, id, {
+            to: S.PausedLimit,
+            fence: ctl.fence,
+            reason: `account not ready: ${outcome.refusal.problem}`,
+          });
+          transitionWorkstream(ctx, id, {
+            to: S.Queued,
+            fence: ctl.fence,
+            reason: 'waiting for the account to be ready',
+          });
+          clearLease(ctx, id);
+        });
+        // The scheduler holds it there until the preparer makes the account ready.
+        const lane = getProject(db, row.projectId);
+        opts.accounts.prepare(getAccountRow(db, ctl.accountId), lane.id);
+        return;
+      }
       case 'parked':
         park(id, ctl.fence, outcome.inboxId, outcome.providerSessionId);
         return;
@@ -655,7 +811,8 @@ export function createRunner(opts: RunnerOptions): Runner {
     const row = getWorkstreamRow(db, id);
     const project = getProject(db, row.projectId);
     const task = getTask(db, row.taskId);
-    const action = row.nextAction;
+    const fresh = actionOnAnotherAccount(id, ctl, row);
+    const action = fresh ?? row.nextAction;
     const step = currentStep(row);
     const persona = step.personaId ? getPersona(db, step.personaId) : null;
     const priorResults = row.steps.flatMap((s, i) =>
@@ -667,7 +824,16 @@ export function createRunner(opts: RunnerOptions): Runner {
     const readOnly = step.tools === ToolAccess.ReadOnly;
     const baseHead = row.baseHead ?? (await opts.git.head(project.repoPath));
     // A stop that landed while the head was read finds no handle to stop, so it is honoured here.
-    if (ctl.stopReason) return { kind: 'stopped', reason: ctl.stopReason, providerSessionId: null };
+    // A stop before any session launched leaves the saved action as it is, so the provider session it
+    // names stays the one the lane resumes.
+    const savedResumeId =
+      row.nextAction.kind === 'resume' || row.nextAction.kind === 'answer'
+        ? row.nextAction.providerSessionId
+        : null;
+    if (ctl.stopReason)
+      return { kind: 'stopped', reason: ctl.stopReason, providerSessionId: savedResumeId };
+    // So does a move: the account the lane read before the await may not be the project's now.
+    if (getProject(db, row.projectId).accountId !== ctl.accountId) return { kind: 'moved' };
     const answeredItem = action.kind === 'answer' ? getInboxItem(db, action.inboxId) : null;
     const resumeId =
       action.kind === 'resume' || action.kind === 'answer' ? action.providerSessionId : null;
@@ -675,6 +841,14 @@ export function createRunner(opts: RunnerOptions): Runner {
     const permission =
       answeredItem?.kind === InboxKind.Permission ? permissionAnswer(answeredItem) : null;
     const contextPack = buildContextPack(db, getWorkstream(db, id));
+    // A fresh session that takes the builder's answer to a fix still needs the failure it was fixing.
+    const evidenceId =
+      action.kind === 'fix'
+        ? action.evidenceId
+        : action.kind === 'answer' && action.providerSessionId === null
+          ? failedGateEvidence(db, id)
+          : null;
+    const evidence = evidenceId ? getEvidence(db, evidenceId) : null;
     const prompt = buildSessionPrompt({
       task,
       claims: claims(),
@@ -694,45 +868,97 @@ export function createRunner(opts: RunnerOptions): Runner {
       priorResults,
       previousResult: readOnly ? step.result : null,
       revisedBy: reviser ? { role: reviser.role, personaName: reviser.personaName } : null,
-      evidence: action.kind === 'fix' ? getEvidence(db, action.evidenceId) : null,
+      evidence,
       recovery:
         action.kind === 'resume'
           ? { reason: action.reason, lastOp: latestToolOp(db, id)?.opId ?? null }
           : null,
     });
     const { token, hash } = mintSessionToken();
-    // Built first, so a missing key or region fails before any session row exists.
-    const env = opts.sessionEnv(project);
-    // The repo's approved MCP servers, expanded from that environment. A file 10db can't parse fails here too.
-    const projectMcp = readProjectMcp(project, id, env);
+    const account = getAccountRow(db, ctl.accountId);
+    const notReady = unready(account);
+    if (notReady) return { kind: 'unready', refusal: notReady, providerSessionId: null };
+    // Built first, so a missing or changed secret refuses the session before any session row exists.
+    let launch: SessionLaunch;
+    try {
+      launch = opts.launcher.session(account, row.model);
+    } catch (error) {
+      if (!(error instanceof AccountLaunchError || error instanceof KeychainError)) throw error;
+      // A locked or unreachable Keychain is the account's problem, not the lane's: it pauses the account
+      // like a refusal, and the card's Resume tries again.
+      const problem =
+        error instanceof KeychainError ? AccountProblem.KeychainUnavailable : error.problem;
+      return {
+        kind: 'held',
+        until: null,
+        refusal: { problem, message: error.message, seenIdentity: null },
+        providerSessionId: null,
+      };
+    }
+    // The repo's MCP servers expand from the project env: an account's credential never reaches them.
+    // A file 10db can't parse fails here too.
+    const projectMcp = readProjectMcp(project, id, opts.launcher.projectEnv());
     const mcpNote = skippedServersNote(projectMcp);
     // A resumed session continues its conversation, so it keeps whether that conversation began from
     // a briefing and the briefing's baseline. A fresh session is briefed only when its prompt carries
-    // the handoff, which only a continuation's does.
+    // the handoff.
     const resumed = resumeId ? getSessionByProviderId(db, id, resumeId) : undefined;
     const briefed = resumeId
       ? (resumed?.briefed ?? false)
-      : action.kind === 'continue_from_handoff' && contextPack.handoff !== null;
+      : briefedFromHandoff(action, contextPack.handoff, evidence);
     const inheritedBaselinePct = resumed?.briefingBaselinePct ?? null;
-    const session = opts.state.write((ctx) => {
-      const s = insertSession(ctx, {
-        workstreamId: id,
-        provider: project.provider,
-        model: row.model,
-        effort: row.effort,
-        mode: 'managed',
-        mcpTokenHash: hash,
-        briefed,
-        briefingBaselinePct: inheritedBaselinePct,
+    // A subscription's sessions start one at a time until the OAuth refresh race is ruled out.
+    const releaseStart =
+      account.kind === AccountKind.ClaudeSubscription
+        ? await opts.startGate.acquire(account.id)
+        : () => undefined;
+    const stopping = stopRequested(ctl);
+    if (stopping) {
+      releaseStart();
+      return { kind: 'stopped', reason: stopping, providerSessionId: savedResumeId };
+    }
+    // The project moved while this lane waited for its start: give the slot back and start over there.
+    if (getProject(db, row.projectId).accountId !== ctl.accountId) {
+      releaseStart();
+      return { kind: 'moved' };
+    }
+    let session: ReturnType<typeof insertSession>;
+    try {
+      session = opts.state.write((ctx) => {
+        const s = insertSession(ctx, {
+          workstreamId: id,
+          provider: project.provider,
+          model: row.model,
+          effort: row.effort,
+          mode: 'managed',
+          accountId: ctl.accountId,
+          mcpTokenHash: hash,
+          briefed,
+          briefingBaselinePct: inheritedBaselinePct,
+        });
+        patchWorkstream(ctx, id, ctl.fence, {
+          currentSessionId: s.id,
+          baseHead,
+          ...(fresh ? { nextAction: fresh } : {}),
+        });
+        return s;
       });
-      patchWorkstream(ctx, id, ctl.fence, { currentSessionId: s.id, baseHead });
-      return s;
-    });
+      if (fresh) {
+        opts.logger.info(
+          { workstreamId: id, to: ctl.accountId },
+          'the project moved accounts; the lane starts a fresh session',
+        );
+      }
+    } catch (error) {
+      releaseStart();
+      throw error;
+    }
 
     const abort = new AbortController();
     const st: SessionState = {
       providerSessionId: resumeId,
       handoffRequested: false,
+      handoffCause: 'context',
       briefingBaselinePct: inheritedBaselinePct,
       awaitingBriefingBaseline: briefed && inheritedBaselinePct === null,
       firmSent: false,
@@ -740,6 +966,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       parkedFor: null,
       waitingOn: new Map(),
       waitTimer: null,
+      started: false,
       outcome: null,
     };
     const log = opts.logger.child({ workstreamId: id, sessionId: session.id });
@@ -800,44 +1027,66 @@ export function createRunner(opts: RunnerOptions): Runner {
     };
 
     opts.live.register(session.id, { signal: abort.signal, observer });
-    handle = opts.adapter.start({
-      sessionId: session.id,
-      workstreamId: id,
-      sequence: session.sequence,
-      cwd: project.repoPath,
-      prompt: mcpNote ? `${prompt}\n\n${mcpNote}` : prompt,
-      model: row.model,
-      effort: row.effort,
-      resumeProviderSessionId: resumeId,
-      env,
-      billingMode: project.billingMode,
-      projectMcpServers: projectMcp.servers,
-      allowedTools: allowedToolsFor(project, step.tools),
-      mcp: { url: opts.mcpUrl(), token, toolTimeoutMs: (project.humanWaitMinutes + 5) * 60_000 },
-      preToolUse: (req) =>
-        judgeToolUse({
-          toolName: req.toolName,
-          toolInput: req.input,
-          repoPath: project.repoPath,
-          areas: project.areas,
-          hazards: project.hazards,
-          claims: claims(),
-          readOnly,
-          delivery: project.delivery,
-        }),
-      canUseTool: createPermissionBroker(
-        { state: opts.state, inbox: opts.inbox },
-        {
-          projectId: project.id,
-          workstreamId: id,
-          sessionId: session.id,
-          observer,
-          signal: abort.signal,
-          allowOnce: permission?.allowOnce ?? null,
-        },
-      ),
-    });
+    try {
+      handle = opts.adapter.start({
+        sessionId: session.id,
+        workstreamId: id,
+        sequence: session.sequence,
+        cwd: project.repoPath,
+        prompt: mcpNote ? `${prompt}\n\n${mcpNote}` : prompt,
+        model: launch.model,
+        effort: row.effort,
+        resumeProviderSessionId: resumeId,
+        env: launch.env,
+        account: launch.expect,
+        projectMcpServers: projectMcp.servers,
+        allowedTools: allowedToolsFor(project, step.tools),
+        mcp: { url: opts.mcpUrl(), token, toolTimeoutMs: (project.humanWaitMinutes + 5) * 60_000 },
+        preToolUse: (req) =>
+          judgeToolUse({
+            toolName: req.toolName,
+            toolInput: req.input,
+            repoPath: project.repoPath,
+            areas: project.areas,
+            hazards: project.hazards,
+            claims: claims(),
+            readOnly,
+            delivery: project.delivery,
+            protectedPaths: opts.protectedPaths,
+            ownSession: {
+              configDir: launch.env['CLAUDE_CONFIG_DIR'] ?? join(homedir(), '.claude'),
+              providerSessionId: st.providerSessionId ?? resumeId,
+            },
+          }),
+        canUseTool: createPermissionBroker(
+          { state: opts.state, inbox: opts.inbox },
+          {
+            projectId: project.id,
+            workstreamId: id,
+            sessionId: session.id,
+            observer,
+            signal: abort.signal,
+            allowOnce: permission?.allowOnce ?? null,
+          },
+        ),
+      });
+    } catch (error) {
+      releaseStart();
+      throw error;
+    }
     ctl.handle = handle;
+    /** Asks the session to hand off, once: its context filled, or its account neared its usage limit. */
+    const requestHandoff = (cause: HandoffCause, reason: string): void => {
+      if (st.handoffRequested || st.outcome) return;
+      st.handoffRequested = true;
+      st.handoffCause = cause;
+      opts.state.write((ctx) => {
+        if (getWorkstreamRow(ctx.tx, id).state === S.Running)
+          transitionWorkstream(ctx, id, { to: S.HandingOff, fence: ctl.fence, reason });
+      });
+      handle.send(readOnly ? NUDGES[cause].readOnly : NUDGES[cause].edit);
+    };
+    ctl.requestHandoff = requestHandoff;
 
     let outcome: Outcome;
     try {
@@ -845,6 +1094,8 @@ export function createRunner(opts: RunnerOptions): Runner {
         switch (event.type) {
           case 'started': {
             st.providerSessionId = event.providerSessionId;
+            st.started = true;
+            releaseStart();
             const pidStart = await identify(event.pid);
             opts.state.write((ctx) => {
               markSessionStarted(ctx, session.id, event.providerSessionId, event.pid, pidStart);
@@ -853,8 +1104,18 @@ export function createRunner(opts: RunnerOptions): Runner {
               if (action.kind === 'answer')
                 patchWorkstream(ctx, id, ctl.fence, { nextAction: freshAction(ctx.tx, id) });
               const current = getWorkstreamRow(ctx.tx, id).state;
-              if (current === S.Starting || current === S.HandingOff)
+              if (current === S.Starting) {
                 transitionWorkstream(ctx, id, { to: S.Running, fence: ctl.fence });
+                // Asked to hand off before it reported starting: the board shows it handing off, not running.
+                if (st.handoffRequested)
+                  transitionWorkstream(ctx, id, {
+                    to: S.HandingOff,
+                    fence: ctl.fence,
+                    reason: 'asked to hand off while starting',
+                  });
+              } else if (current === S.HandingOff && !st.handoffRequested) {
+                transitionWorkstream(ctx, id, { to: S.Running, fence: ctl.fence });
+              }
             });
             break;
           }
@@ -897,24 +1158,14 @@ export function createRunner(opts: RunnerOptions): Runner {
                     st.briefingBaselinePct + HANDOFF_BASELINE_MARGIN_PCT,
                   );
             if (!st.handoffRequested && event.percentage >= handoffAt) {
-              st.handoffRequested = true;
-              opts.state.write((ctx) => {
-                if (getWorkstreamRow(ctx.tx, id).state === S.Running) {
-                  transitionWorkstream(ctx, id, {
-                    to: S.HandingOff,
-                    fence: ctl.fence,
-                    reason: `context at ${String(event.percentage)}%`,
-                  });
-                }
-              });
-              handle.send(readOnly ? HANDOFF_NUDGE_READ_ONLY : HANDOFF_NUDGE);
+              requestHandoff('context', `context at ${String(event.percentage)}%`);
             } else if (
               st.handoffRequested &&
               !st.firmSent &&
               event.percentage >= project.nudgePct
             ) {
               st.firmSent = true;
-              handle.send(HANDOFF_FIRM_NUDGE);
+              handle.send(NUDGES[st.handoffCause].firm);
             }
             break;
           }
@@ -933,13 +1184,25 @@ export function createRunner(opts: RunnerOptions): Runner {
             handle.send(compactionReinjection(buildContextPack(db, getWorkstream(db, id))));
             break;
           case 'rate_limit':
+            // Logged without any identity: what a Max plan reports here is not yet verified.
+            log.info(
+              { status: event.status, utilization: event.utilization, limitType: event.limitType },
+              'usage reported',
+            );
+            // First, so a project that moves to its fallback is off the account before the pause raises cards.
+            opts.accounts.usageReported(ctl.accountId, {
+              status: event.status,
+              utilization: event.utilization,
+              limitType: event.limitType,
+              resetsAt: event.resetsAt,
+            });
             if (event.status === 'rejected' && !st.outcome) {
               st.outcome = {
                 kind: 'paused',
                 until: event.resetsAt,
                 providerSessionId: st.providerSessionId,
               };
-              opts.onRateLimited(project.provider, event.resetsAt, project.id);
+              opts.accounts.rateLimited(ctl.accountId, event.resetsAt, project.id);
             }
             break;
           case 'turn_complete': {
@@ -947,6 +1210,7 @@ export function createRunner(opts: RunnerOptions): Runner {
               updateSessionUsage(ctx, session.id, {
                 inputTokens: event.inputTokens,
                 outputTokens: event.outputTokens,
+                cachedTokens: event.cachedTokens,
                 costUsd: event.costUsd,
               });
             });
@@ -958,7 +1222,7 @@ export function createRunner(opts: RunnerOptions): Runner {
               await handle.stop();
             } else if (st.handoffRequested && !st.firmSent) {
               st.firmSent = true;
-              handle.send(HANDOFF_FIRM_NUDGE);
+              handle.send(NUDGES[st.handoffCause].firm);
             } else if (
               readOnly &&
               currentStep(getWorkstreamRow(db, id)).result?.sessionId !== session.id &&
@@ -974,6 +1238,7 @@ export function createRunner(opts: RunnerOptions): Runner {
           }
           case 'ended': {
             sawEnded = true;
+            releaseStart();
             const stoppedBy = stopRequested(ctl);
             if (st.outcome) break;
             if (stoppedBy)
@@ -996,7 +1261,26 @@ export function createRunner(opts: RunnerOptions): Runner {
                     until: null,
                     providerSessionId: st.providerSessionId,
                   };
-                  opts.onRateLimited(project.provider, null, project.id);
+                  opts.accounts.usageReported(ctl.accountId, {
+                    status: 'rejected',
+                    utilization: null,
+                    limitType: null,
+                    resetsAt: null,
+                  });
+                  opts.accounts.rateLimited(ctl.accountId, null, project.id);
+                  break;
+                case SessionEndReason.AccountRefused:
+                  st.outcome = {
+                    kind: 'held',
+                    until: null,
+                    refusal: event.refusal ?? {
+                      problem: AccountProblem.WrongCredentials,
+                      message: event.message ?? 'Claude Code refused the account',
+                      seenIdentity: null,
+                    },
+                    // A session that never started has no conversation to resume; its next action stands.
+                    providerSessionId: st.started ? st.providerSessionId : null,
+                  };
                   break;
                 case SessionEndReason.BillingRefused:
                   st.outcome = {
@@ -1025,16 +1309,19 @@ export function createRunner(opts: RunnerOptions): Runner {
     } finally {
       // Ending the waits on every exit, before any stop, leaves no inbox waiter on a dead session.
       endWaits();
+      releaseStart();
       // Leaving the loop without `ended` (a stale fence, a failed write) must not leave the process running.
       if (!sawEnded) await handle.stop().catch(() => undefined);
       opts.live.unregister(session.id);
       ctl.handle = null;
+      ctl.requestHandoff = null;
       ctl.endWaits = null;
       // Every exit ends the session row and frees the workstream's session slot, so a parked answer
       // is delivered, the lane is freed and the session's MCP token stops working.
       outcome = finishSession(id, ctl, session.id, st);
     }
     log.info({ outcome: outcome.kind }, 'session ended');
+    opts.accounts.sessionEnded(getAccountRow(db, ctl.accountId), project.id);
     if (opts.afterSession) {
       try {
         await opts.afterSession(id);
@@ -1062,6 +1349,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     const parkedAfterWait =
       st.parkedFor !== null &&
       (ended.kind === 'paused' ||
+        ended.kind === 'held' ||
         ended.kind === 'crashed' ||
         ended.kind === 'refused' ||
         (ended.kind === 'stopped' && ended.reason !== 'cancelled'));
@@ -1158,9 +1446,8 @@ export function createRunner(opts: RunnerOptions): Runner {
       command: project.gateCommand,
       logPath: join(opts.dataDir, 'logs', 'gate', `${id}-${String(run)}.log`),
       timeoutMs: opts.limits.gateTimeoutMs,
-      // The session environment is complete (login shell plus billing mode); the daemon's own
-      // process.env never reaches a project's gate.
-      env: opts.sessionEnv(project),
+      // The project env: the login shell without billing switches, and never the account's credentials.
+      env: opts.launcher.projectEnv(),
       signal: gateAbort.signal,
       onSpawn: (pid) => {
         recording = identify(pid).then((gatePidStart) => {
@@ -1284,8 +1571,22 @@ export function createRunner(opts: RunnerOptions): Runner {
           await verify(id, ctl);
           return;
         }
+        const lane = getProject(db, getWorkstreamRow(db, id).projectId);
+        // A running session finished on the account it started on; the next one runs where the project is now.
+        ctl.accountId = lane.accountId;
+        // The scheduler checked before the launch; a lane checks again before each further session (accounts spec §6).
+        const block = opts.accounts.blocked(getAccountRow(db, ctl.accountId), lane.id);
+        if (block) {
+          settle(id, ctl, {
+            kind: 'held',
+            until: block.until,
+            refusal: null,
+            providerSessionId: null,
+          });
+          return;
+        }
         const outcome = await runSession(id, ctl);
-        if (outcome.kind === 'handoff') continue;
+        if (outcome.kind === 'handoff' || outcome.kind === 'moved') continue;
         if (outcome.kind === 'step_done') {
           const finished = getWorkstreamRow(db, id);
           const readOnly = currentStep(finished).role !== StepRole.Implement;
@@ -1359,11 +1660,14 @@ export function createRunner(opts: RunnerOptions): Runner {
   const runner: Runner = {
     launch(id, fence) {
       if (active.has(id)) return;
+      const workstream = getWorkstreamRow(db, id);
       const ctl: Control = {
         fence,
-        provider: getProject(db, getWorkstreamRow(db, id).projectId).provider,
+        projectId: workstream.projectId,
+        accountId: getProject(db, workstream.projectId).accountId,
         stopReason: null,
         handle: null,
+        requestHandoff: null,
         gateAbort: null,
         endWaits: null,
         done: Promise.resolve(),
@@ -1394,16 +1698,19 @@ export function createRunner(opts: RunnerOptions): Runner {
       if (active.has(id)) await runner.stop(id, 'cancelled');
       else cancelNow(id, null);
     },
-    async stopProvider(provider, reason) {
-      // Provider has a single member for now, so the comparison is constant until a second provider exists.
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-      const matching = [...active.entries()].filter(([, c]) => c.provider === provider);
+    async stopAccount(accountId, reason) {
+      const matching = [...active.entries()].filter(([, c]) => c.accountId === accountId);
       await Promise.all(matching.map(([id]) => runner.stop(id, reason)));
     },
     async stopAll(reason) {
       await Promise.all([...active.keys()].map((id) => runner.stop(id, reason)));
     },
     isRunning: (id) => active.has(id),
+    handOff(projectId, accountId, reason) {
+      for (const c of active.values())
+        if (c.projectId === projectId && c.accountId === accountId)
+          c.requestHandoff?.('account', reason);
+    },
     idle: () => (active.size === 0 ? Promise.resolve() : new Promise((r) => idleWaiters.push(r))),
     deliverParkedAnswer(target, item) {
       const row = getWorkstreamRow(db, target.workstreamId);

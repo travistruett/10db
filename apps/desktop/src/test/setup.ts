@@ -50,3 +50,6 @@ Object.defineProperty(document, 'fonts', {
   configurable: true,
   value: { addEventListener: () => undefined, removeEventListener: () => undefined },
 });
+
+// jsdom does no layout and has no scrollIntoView; Mantine's Select scrolls the active option into view.
+Element.prototype.scrollIntoView = () => undefined;
