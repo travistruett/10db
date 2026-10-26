@@ -247,7 +247,12 @@ const laneSandbox: LaneSandboxSpec = {
     allowUnsandboxedCommands: false,
     allowAppleEvents: false,
     autoAllowBashIfSandboxed: false,
-    filesystem: { denyRead: ['/'], allowRead: ['/repo'], allowWrite: ['/private/tmp/10db-x'] },
+    filesystem: {
+      denyRead: ['/'],
+      allowRead: ['/repo'],
+      allowWrite: ['/private/tmp/10db-x'],
+      denyWrite: [],
+    },
     network: {
       allowedDomains: ['github.com'],
       allowMachLookup: ['com.apple.FSEvents'],

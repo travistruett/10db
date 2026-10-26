@@ -142,7 +142,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
     async forSession(input) {
       const checkout = realCheckoutOf(input.project.repoPath);
       const secretFiles = secretFilesIn(checkout);
-      const { commonDir } = await deps.gitDirs(checkout);
+      const { gitDir, commonDir } = await deps.gitDirs(checkout);
       const linkedWorktree = !isEqualOrUnder(commonDir, checkout);
       const protectedList = protectedReads({
         home: deps.home,
@@ -180,6 +180,9 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           // config it wrote. Lanes commit through the daemon.
           extraReads: linkedWorktree ? [commonDir] : [],
           extraWrites: [],
+          // Claude Code opens a linked worktree's git dir for writing and holds back `commondir` and
+          // `config.worktree`, but not `gitdir`, the link git follows from the main repository.
+          denyWrites: linkedWorktree ? [join(gitDir, 'gitdir')] : [],
           loopback: deps.loopback,
           deniedEnvNames: deniedEnvNames({ ...input.env, ...env }),
         });

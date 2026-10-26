@@ -159,10 +159,12 @@ describe('createLaneSandbox', () => {
         input({ project: { id: projectId, repoPath: worktree } }),
       );
       try {
-        const { allowRead, allowWrite } = session.spec.settings.filesystem;
+        const { allowRead, allowWrite, denyWrite } = session.spec.settings.filesystem;
         expect(allowRead).toContain(commonDir);
         // The daemon's unsandboxed git follows `commondir`, `gitdir` and `config.worktree` there.
         expect(allowWrite.filter((path) => isEqualOrUnder(path, commonDir))).toEqual([]);
+        // Claude Code opens the worktree's git dir for writing and holds back all but `gitdir`.
+        expect(denyWrite).toEqual([join(commonDir, 'worktrees', 'wt', 'gitdir')]);
       } finally {
         session.dispose();
       }
@@ -174,9 +176,10 @@ describe('createLaneSandbox', () => {
   it('opens no git dir beyond the checkout for an ordinary repository', async () => {
     const session = await sandbox().forSession(input());
     try {
-      const { allowRead, allowWrite } = session.spec.settings.filesystem;
+      const { allowRead, allowWrite, denyWrite } = session.spec.settings.filesystem;
       expect(allowRead.filter((path) => path.includes('.git'))).toEqual([]);
       expect(allowWrite.filter((path) => path.includes('.git'))).toEqual([]);
+      expect(denyWrite).toEqual([]);
     } finally {
       session.dispose();
     }

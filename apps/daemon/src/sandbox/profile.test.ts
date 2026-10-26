@@ -32,6 +32,7 @@ function input(overrides: Partial<LaneProfileInput> = {}): LaneProfileInput {
     readList: [],
     extraReads: [],
     extraWrites: [],
+    denyWrites: [],
     loopback: false,
     deniedEnvNames: ['GH_TOKEN'],
     ...overrides,
@@ -111,6 +112,14 @@ describe('buildLaneProfile', () => {
     expect(allowWrite).not.toContain(protectedExtra);
   });
 
+  it('denies writes to exactly the paths it is given', () => {
+    const gitdirFile = join(root, 'main', '.git', 'worktrees', 'w', 'gitdir');
+    expect(buildLaneProfile(input()).filesystem.denyWrite).toEqual([]);
+    expect(buildLaneProfile(input({ denyWrites: [gitdirFile] })).filesystem.denyWrite).toEqual([
+      gitdirFile,
+    ]);
+  });
+
   it.each([
     ['false', false, undefined],
     ['true', true, true],
@@ -131,6 +140,7 @@ describe('buildLaneProfile', () => {
     ['a glob in a secret file', { secretFiles: ['/r/.env*'] }, 'filesystem.denyRead'],
     ['a relative read-list path', { readList: ['rel/x'] }, 'filesystem.allowRead'],
     ['a brace in an extra write', { extraWrites: ['/r/{a,b}'] }, 'filesystem.allowWrite'],
+    ['a glob in a denied write', { denyWrites: ['/r/.git/*'] }, 'filesystem.denyWrite'],
     ['a URL as a domain', { allowedDomains: ['https://x'] }, 'network.allowedDomains'],
     ['a bad env name', { deniedEnvNames: ['A=B'] }, 'credentials.envVars'],
   ])('refuses %s', (_name, overrides, field) => {

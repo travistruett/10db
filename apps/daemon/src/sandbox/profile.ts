@@ -70,6 +70,7 @@ export const LaneSandboxSettingsSchema = z.strictObject({
     denyRead: z.array(sandboxPath),
     allowRead: z.array(sandboxPath),
     allowWrite: z.array(sandboxPath),
+    denyWrite: z.array(sandboxPath),
   }),
   network: z.strictObject({
     allowedDomains: z.array(sandboxDomain),
@@ -97,6 +98,8 @@ export interface LaneProfileInput {
   extraReads: readonly string[];
   /** Extra writable paths, such as a linked worktree's git dirs. */
   extraWrites: readonly string[];
+  /** Exact paths no command may write, even where Claude Code opens their directory for writing. */
+  denyWrites: readonly string[];
   loopback: boolean;
   deniedEnvNames: readonly string[];
 }
@@ -131,6 +134,7 @@ export function buildLaneProfile(input: LaneProfileInput): LaneSandboxSettings {
       denyRead: ['/', ...input.protectedReads, ...input.secretFiles],
       allowRead: readable,
       allowWrite: writable,
+      denyWrite: [...input.denyWrites],
     },
     network: {
       allowedDomains: [...input.allowedDomains],
