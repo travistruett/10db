@@ -16,3 +16,12 @@ export {
   removeLaneTempDir,
   SandboxTempDirError,
 } from './temp-dir';
+export {
+  isOwnToolResult,
+  readAccess,
+  readPathsOf,
+  writeAccess,
+  type FileAccessContext,
+  type ReadAccess,
+  type WriteAccess,
+} from './file-access';

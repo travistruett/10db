@@ -40,6 +40,11 @@ function resolveThroughLinks(p: string, hops = 0): string {
   return realpathSync.native(current);
 }
 
+/** The real path `p` names, following links through every existing component; `p` need not exist. Throws when a component cannot be examined (EACCES, ENOTDIR). */
+export function realPathOf(p: string): string {
+  return resolveThroughLinks(p);
+}
+
 /** A path that cannot be examined (not a directory, no permission) is treated as outside. */
 export function resolveInRepo(
   repoPath: string,
