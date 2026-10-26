@@ -157,7 +157,7 @@ export function commandPrefix(command: string): string | null {
   const segments = splitCommand(command);
   const first = segments[0];
   if (first === undefined || !segments.every(isLiteralSegment)) return null;
-  const words = stripCommandPrefixes(first.words);
+  const words = stripCommandPrefixes(first.words, { keepCommandPath: true });
   const [head, second] = words;
   if (head === undefined || runsUnnamedProgram(words)) return null;
   if (second === undefined) return storable(head, words);

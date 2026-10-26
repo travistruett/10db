@@ -1,4 +1,10 @@
-import { parseShell, splitCommand, stripCommandPrefixes, type ShellSegment } from '../guard';
+import {
+  flagSpan,
+  parseShell,
+  splitCommand,
+  stripCommandPrefixes,
+  type ShellSegment,
+} from '../guard';
 
 /** Redirections that only discard or merge output; every other redirection can write or read a file. */
 const HARMLESS_REDIRECTIONS = new Set(['2>&1', '>/dev/null', '2>/dev/null']);
@@ -6,10 +12,11 @@ const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
 
 /**
  * Wrapper flags that carry a command or a path, so the words after them no longer say what
- * runs. `*` marks a wrapper that is never plain.
+ * runs: env's `-P` sets the path its command is looked up in. `*` marks a wrapper that is never
+ * plain.
  */
 const UNSAFE_WRAPPER_FLAGS: ReadonlyMap<string, readonly string[]> = new Map([
-  ['env', ['-S', '--split-string', '-C', '--chdir']],
+  ['env', ['-S', '--split-string', '-C', '--chdir', '-P']],
   ['time', ['-o', '--output']],
   ['xargs', ['*']],
 ]);
@@ -21,15 +28,37 @@ const VALUE_FLAGS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
   ['exec', new Set(['-a'])],
 ]);
 
+const NO_VALUE_FLAGS: ReadonlySet<string> = new Set();
+
 function wrapperName(word: string): string | null {
   const name = word.replace(/^\\+/, '').split('/').pop() ?? '';
   return PASS_THROUGH_WRAPPERS.has(name) ? name : null;
 }
 
+/**
+ * The letters of a short-flag cluster up to and including its first that takes a value, which
+ * takes the rest of the word: `-iP/tmp/x` is `-i` and `-P`, while `-uP` unsets a variable named P.
+ */
+function clusterLetters(name: string, flag: string): string[] {
+  if (flag.startsWith('--')) return [];
+  const valued = VALUE_FLAGS.get(name) ?? NO_VALUE_FLAGS;
+  const unsafe = UNSAFE_WRAPPER_FLAGS.get(name) ?? [];
+  const letters: string[] = [];
+  for (const letter of flag.slice(1)) {
+    letters.push(letter);
+    if (valued.has(`-${letter}`) || unsafe.includes(`-${letter}`)) break;
+  }
+  return letters;
+}
+
 function hasUnsafeFlag(name: string, flag: string): boolean {
   const unsafe = UNSAFE_WRAPPER_FLAGS.get(name) ?? [];
+  const letters = clusterLetters(name, flag);
   return unsafe.some(
-    (u) => flag === u || flag.startsWith(`${u}=`) || (!u.startsWith('--') && flag.startsWith(u)),
+    (u) =>
+      flag === u ||
+      flag.startsWith(`${u}=`) ||
+      (!u.startsWith('--') && letters.includes(u.slice(1))),
   );
 }
 
@@ -65,7 +94,8 @@ function prefixFacts(words: readonly string[]): PrefixFacts {
       while (i < words.length && (words[i] ?? '').startsWith('-')) {
         const flag = words[i] ?? '';
         if (hasUnsafeFlag(name, flag)) return { unsafeWrapper: true, assignment };
-        i += VALUE_FLAGS.get(name)?.has(flag) === true ? 2 : 1;
+        // Skipped as the guard skips it, so an assignment after `env -iu NAME` is still seen.
+        i += flagSpan(flag, VALUE_FLAGS.get(name) ?? NO_VALUE_FLAGS);
       }
     } else {
       break;
@@ -89,7 +119,7 @@ export function isPlainSegment(segment: ShellSegment): boolean {
 }
 
 export interface PlainSegment {
-  /** The command as the shell runs it, with wrappers and path prefixes removed. */
+  /** The command as the shell runs it, with wrappers removed and the program as it was written. */
   readonly line: string;
   /** The words the matcher compares: an escaped space or a quoted string stays one word. */
   readonly words: string[];
@@ -105,7 +135,7 @@ export function plainSegments(command: string): PlainSegment[] | null {
   const segments = splitCommand(command);
   if (segments.length === 0 || !segments.every(isPlainSegment)) return null;
   return segments.map((s) => {
-    const words = stripCommandPrefixes(s.words);
+    const words = stripCommandPrefixes(s.words, { keepCommandPath: true });
     return { line: words.join(' '), words, separator: s.separator };
   });
 }

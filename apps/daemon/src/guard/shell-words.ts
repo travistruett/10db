@@ -390,7 +390,7 @@ const wrapper = (valueFlags: readonly string[] = [], positionals = 0): Wrapper =
 
 /** Wrappers that run the rest of the line. */
 const WRAPPERS: ReadonlyMap<string, Wrapper> = new Map([
-  ['env', wrapper(['-u', '-C', '-S', '--unset', '--chdir'])],
+  ['env', wrapper(['-u', '-C', '-S', '-P', '--unset', '--chdir'])],
   ['command', wrapper()],
   ['nohup', wrapper()],
   ['time', wrapper(['-f', '-o', '--format', '--output'])],
@@ -416,12 +416,28 @@ function commandName(word: string): string {
 }
 
 /**
+ * How many words a wrapper's flag takes. A short-flag cluster reads as getopt reads it: its first
+ * letter that takes a value takes the rest of the word, or the next word when it is the last letter,
+ * so `env -iP /tmp/x git` runs `git`.
+ */
+export function flagSpan(flag: string, valueFlags: ReadonlySet<string>): number {
+  if (valueFlags.has(flag)) return 2;
+  if (flag.startsWith('--')) return 1;
+  for (let i = 1; i < flag.length; i += 1) {
+    if (valueFlags.has(`-${flag.charAt(i)}`)) return i === flag.length - 1 ? 2 : 1;
+  }
+  return 1;
+}
+
+/**
  * Drops leading `VAR=value` assignments and pass-through wrappers such as `env`, `nohup` and
- * `xargs` together with their flags, and names the command it finds by its basename.
+ * `xargs` together with their flags, and names the command it finds by its basename. With
+ * `keepCommandPath` the command keeps the path it was written with: `/tmp/x/git` runs another
+ * program than `git`.
  */
 export function stripCommandPrefixes(
   words: readonly string[],
-  options: { readonly lookThroughRunners?: boolean } = {},
+  options: { readonly lookThroughRunners?: boolean; readonly keepCommandPath?: boolean } = {},
 ): string[] {
   let i = 0;
   while (i < words.length) {
@@ -434,7 +450,7 @@ export function stripCommandPrefixes(
     } else if (wrapped) {
       i += 1;
       while (i < words.length && (words[i] ?? '').startsWith('-')) {
-        i += wrapped.valueFlags.has(words[i] ?? '') ? 2 : 1;
+        i += flagSpan(words[i] ?? '', wrapped.valueFlags);
       }
       i += wrapped.positionals;
     } else {
@@ -443,7 +459,8 @@ export function stripCommandPrefixes(
   }
   const rest = words.slice(i);
   const head = rest[0];
-  return head === undefined ? rest : [commandName(head), ...rest.slice(1)];
+  if (head === undefined || options.keepCommandPath === true) return rest;
+  return [commandName(head), ...rest.slice(1)];
 }
 
 const FIND_EXEC = new Set(['-exec', '-execdir', '-ok', '-okdir']);

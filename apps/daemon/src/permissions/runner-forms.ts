@@ -13,9 +13,11 @@ const FILE_RUNNERS: ReadonlySet<string> = new Set(['bun']);
  * Whether the words run another program, so "always allow" keeps them whole. The package-tool forms come
  * from @10db/contracts, the same list allowed-commands reads: a program a package tool runs, and a
  * forwarding subcommand or package creator that runs what follows it. Names are compared without case:
- * a case-insensitive file system runs `PNPM` as `pnpm`.
+ * a case-insensitive file system runs `PNPM` as `pnpm`. A program named by its path is judged by its
+ * last part, so `/usr/local/bin/pnpm exec` is still a runner.
  */
-export function runsOtherCommands(words: readonly string[]): boolean {
+export function runsOtherCommands(raw: readonly string[]): boolean {
+  const words = stripCommandPrefixes(raw);
   const [first = ''] = words;
   const name = first.toLowerCase();
   return (
