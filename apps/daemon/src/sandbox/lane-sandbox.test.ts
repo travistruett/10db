@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   realpathSync,
   rmSync,
   symlinkSync,
@@ -215,6 +216,10 @@ describe('createLaneSandbox', () => {
         CLAUDE_CODE_TMPDIR: session.tmpDir,
         GIT_CONFIG_GLOBAL: '/dev/null',
         CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1',
+        CLAUDE_ENV_FILE: join(
+          tmpRoot,
+          readdirSync(tmpRoot).find((name) => name.startsWith('10db-env-')) ?? '',
+        ),
       });
       expect(session.spec.settings.filesystem.allowWrite).toEqual(
         expect.arrayContaining([session.tmpDir, cache]),
@@ -320,6 +325,37 @@ describe('createLaneSandbox', () => {
     } finally {
       session.dispose();
     }
+  });
+
+  it('gives the session an env file outside every writable path that turns git global config off', async () => {
+    const session = await sandbox().forSession(input());
+    try {
+      const file = session.spec.env['CLAUDE_ENV_FILE'] ?? '';
+      expect(dirname(file)).toBe(tmpRoot);
+      expect(readFileSync(file, 'utf8')).toBe('export GIT_CONFIG_GLOBAL=/dev/null\n');
+      const { allowRead, allowWrite } = session.spec.settings.filesystem;
+      expect(allowWrite.filter((path) => isEqualOrUnder(file, path))).toEqual([]);
+      expect(allowRead).toContain(file);
+      // Claude Code drops the whole sandbox over a pattern character in a path.
+      expect([...allowRead, ...allowWrite].filter((path) => /[*?[\]{}]/.test(path))).toEqual([]);
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it('removes the env file on dispose', async () => {
+    const session = await sandbox().forSession(input());
+    const file = session.spec.env['CLAUDE_ENV_FILE'] ?? '';
+    expect(existsSync(file)).toBe(true);
+    session.dispose();
+    expect(existsSync(file)).toBe(false);
+  });
+
+  it('removes the env file and the temp dir when the profile is refused', async () => {
+    await expect(
+      sandbox().forSession(input({ env: { PATH: '/usr/bin', 'A=B': 'x' } })),
+    ).rejects.toThrow(SandboxProfileError);
+    expect(readdirSync(tmpRoot)).toEqual([]);
   });
 
   it('removes the temp dir on dispose, and a second dispose does nothing', async () => {

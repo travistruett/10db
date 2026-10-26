@@ -13,6 +13,7 @@ import {
   type LaneSandboxSettings,
 } from './profile';
 import { isEqualOrUnder, protectedReads } from './protected-reads';
+import { createLaneEnvFile, removeLaneEnvFile } from './env-file';
 import { createLaneTempDir, LANE_TEMP_ROOT, removeLaneTempDir } from './temp-dir';
 import { toolchainReads } from './toolchain-reads';
 
@@ -156,7 +157,9 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
       const readList = storedPatterns(input.rules, 'Read', isSandboxPath);
       const cacheDir = projectCacheDir(deps.home, input.project.id);
       const tmpDir = createLaneTempDir(tmpRoot);
+      let envFile: string | null = null;
       try {
+        envFile = createLaneEnvFile(tmpRoot);
         const env: Record<string, string> = {
           ...packageCacheEnv(cacheDir),
           CLAUDE_CODE_TMPDIR: tmpDir,
@@ -164,6 +167,8 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           // hooks, credential helpers and includes the sandboxed git would run or read.
           GIT_CONFIG_GLOBAL: '/dev/null',
           CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1',
+          // Claude Code drops GIT_CONFIG_GLOBAL from a sandboxed command's env; this file sets it back.
+          CLAUDE_ENV_FILE: envFile,
         };
         const settings = buildLaneProfile({
           checkout,
@@ -178,7 +183,8 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           // Read-only: the daemon's unsandboxed git follows a worktree's `commondir`, `gitdir` and
           // `config.worktree`, so a lane that could write its git dir could aim that git at a
           // config it wrote. Lanes commit through the daemon.
-          extraReads: linkedWorktree ? [commonDir] : [],
+          // The env file is read to set up each command's shell, in case that happens in the sandbox.
+          extraReads: [envFile, ...(linkedWorktree ? [commonDir] : [])],
           extraWrites: [],
           // Claude Code opens a linked worktree's git dir for writing and holds back `commondir` and
           // `config.worktree`, but not `gitdir`, the link git follows from the main repository.
@@ -225,6 +231,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
             return providerSessionId;
           },
         };
+        const ownEnvFile = envFile;
         let disposed = false;
         return {
           spec,
@@ -236,11 +243,13 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           dispose() {
             if (disposed) return;
             disposed = true;
+            removeLaneEnvFile(ownEnvFile, tmpRoot);
             removeLaneTempDir(tmpDir, tmpRoot);
           },
         };
       } catch (error) {
         try {
+          if (envFile !== null) removeLaneEnvFile(envFile, tmpRoot);
           removeLaneTempDir(tmpDir, tmpRoot);
         } catch {
           // The error that stopped the session is the one to report.

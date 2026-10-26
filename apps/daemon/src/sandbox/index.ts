@@ -10,6 +10,7 @@ export {
 export { protectedReads } from './protected-reads';
 export { toolchainReads } from './toolchain-reads';
 export { packageCacheEnv, projectCacheDir } from './package-cache';
+export { createLaneEnvFile, removeLaneEnvFile } from './env-file';
 export {
   createLaneTempDir,
   MAX_SANDBOX_TMP_BYTES,
