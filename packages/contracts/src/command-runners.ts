@@ -80,3 +80,36 @@ export function packageToolProgramIndex(words: readonly string[]): number | null
   if (PACKAGE_RUNNERS.has(name)) return 1;
   return null;
 }
+
+/**
+ * Subcommands that hand the rest of the line to another command or to each workspace in turn: `yarn
+ * workspace web exec bash` runs bash, and `pnpm recursive exec` runs anything. A prefix that stops at one
+ * covers whatever follows it.
+ */
+const FORWARDING_SUBCOMMANDS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  ['yarn', new Set(['workspace', 'workspaces', 'node'])],
+  ['pnpm', new Set(['recursive'])],
+]);
+/**
+ * Subcommands that fetch the package named after them and run it: `npm create vite` runs create-vite.
+ * Bare, they run whichever package is named later, so a prefix that stops at one covers all of them.
+ */
+const PACKAGE_CREATORS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  ['npm', new Set(['init', 'create'])],
+  ['pnpm', new Set(['create'])],
+  ['yarn', new Set(['create'])],
+]);
+
+/**
+ * Whether the words run another command or a package they name through a subcommand of a package tool:
+ * the forwarding subcommands and the package creators. Names are compared without case.
+ */
+export function packageToolForwards(words: readonly string[]): boolean {
+  const [first = '', second = ''] = words;
+  const name = first.toLowerCase();
+  const subcommand = second.toLowerCase();
+  return (
+    FORWARDING_SUBCOMMANDS.get(name)?.has(subcommand) === true ||
+    PACKAGE_CREATORS.get(name)?.has(subcommand) === true
+  );
+}

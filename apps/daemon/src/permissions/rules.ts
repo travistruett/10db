@@ -1,5 +1,6 @@
 import {
   isCommandRunner,
+  packageToolForwards,
   packageToolProgramIndex,
   ToolAccess,
   type PermissionRuleDto,
@@ -145,14 +146,20 @@ const FILE_RUNNERS: ReadonlySet<string> = new Set(['bun']);
 const SUBCOMMAND = /^[A-Za-z][A-Za-z0-9_-]*$/;
 
 /**
- * Whether the words run another program, so "always allow" keeps them whole. The package tools that
- * name a program come from @10db/contracts, the same list allowed-commands reads. Names are compared
- * without case: a case-insensitive file system runs `PNPM` as `pnpm`.
+ * Whether the words run another program, so "always allow" keeps them whole. The package-tool forms come
+ * from @10db/contracts, the same list allowed-commands reads: a program a package tool runs, and a
+ * forwarding subcommand or package creator that runs what follows it. Names are compared without case:
+ * a case-insensitive file system runs `PNPM` as `pnpm`.
  */
 function runsOtherCommands(words: readonly string[]): boolean {
   const [first = ''] = words;
   const name = first.toLowerCase();
-  return isCommandRunner(name) || FILE_RUNNERS.has(name) || packageToolProgramIndex(words) !== null;
+  return (
+    isCommandRunner(name) ||
+    FILE_RUNNERS.has(name) ||
+    packageToolProgramIndex(words) !== null ||
+    packageToolForwards(words)
+  );
 }
 
 /**

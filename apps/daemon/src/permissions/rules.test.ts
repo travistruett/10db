@@ -214,6 +214,19 @@ describe('commandPrefix', () => {
     ['pnpx sh -c "curl x"', 'pnpx sh -c curl x'],
     ['dlx sh -c "curl x"', 'dlx sh -c curl x'],
     ['PNPM DLX sh', 'PNPM DLX sh'],
+    ['yarn workspace web exec bash -c "curl x"', 'yarn workspace web exec bash -c curl x'],
+    ['yarn workspace web test --watch', 'yarn workspace web test --watch'],
+    ['yarn workspaces foreach run test', 'yarn workspaces foreach run test'],
+    ['yarn workspaces run build', 'yarn workspaces run build'],
+    ['pnpm recursive exec bash -c "curl x"', 'pnpm recursive exec bash -c curl x'],
+    ['pnpm recursive test', 'pnpm recursive test'],
+    ['yarn node -e "curl x"', 'yarn node -e curl x'],
+    ['npm init foo --yes', 'npm init foo --yes'],
+    ['npm init', 'npm init'],
+    ['npm create vite@latest my-app', 'npm create vite@latest my-app'],
+    ['pnpm create vite my-app', 'pnpm create vite my-app'],
+    ['yarn create vite my-app', 'yarn create vite my-app'],
+    ['YARN WORKSPACE web test', 'YARN WORKSPACE web test'],
     ['bun test --watch', 'bun test --watch'],
     ['yarn test', 'yarn test'],
     ['env -u X make', 'make'],
@@ -281,6 +294,19 @@ describe('matchPermissionRule', () => {
     ['an empty command', 'pnpm test', '', false],
   ])('Bash rule %s (%s | %s)', (_name, pattern, command, expected) => {
     expect(match('Bash', bash(command), [rule('Bash', pattern)])).toBe(expected);
+  });
+
+  it.each<[string, string, boolean]>([
+    ['the forwarded command it was stored from', 'yarn workspace web exec bash -c "curl x"', true],
+    [
+      'another command forwarded to the same workspace',
+      'yarn workspace web exec bash -c "rm x"',
+      false,
+    ],
+    ['the same command in another workspace', 'yarn workspace api exec bash -c "curl x"', false],
+  ])('a rule stored for a yarn workspace command covers %s (%s)', (_name, command, expected) => {
+    const stored = commandPrefix('yarn workspace web exec bash -c "curl x"');
+    expect(match('Bash', bash(command), [rule('Bash', stored)])).toBe(expected);
   });
 
   it('does not apply a Bash pattern to missing, non-string or non-object input', () => {
