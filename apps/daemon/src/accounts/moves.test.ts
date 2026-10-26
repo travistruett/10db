@@ -1,6 +1,7 @@
 import {
   AccountCardChoice,
   AccountPauseReason,
+  ConflictError,
   InvalidError,
   type AccountDto,
   type AccountId,
@@ -12,6 +13,7 @@ import {
 import {
   createTestStore,
   findOpenByFoldKey,
+  getAccountRow,
   getProject,
   listInbox,
   seedAccount,
@@ -37,6 +39,7 @@ import {
   type AccountRuntime,
   type MoveBack,
 } from './index';
+import { recordedCard } from './cards';
 
 const DEFAULT_PAUSE_MS = 30 * 60_000;
 
@@ -201,7 +204,11 @@ describe('moving a project', () => {
       movedFromAccountId: plan,
       moveBackAt: null,
     });
-    clock.advance(DEFAULT_PAUSE_MS);
+    clock.advance(DEFAULT_PAUSE_MS - 1);
+    expect(
+      findOpenByFoldKey(state.db, project.id, accountFoldKey(plan, MOVE_BACK_CARD)),
+    ).toBeUndefined();
+    clock.advance(1);
     expect(backCard().body).toContain("10db doesn't know whether that limit has reset");
   });
 
@@ -238,5 +245,69 @@ describe('moving a project', () => {
       ),
     ).toThrow(InvalidError);
     expect(getProject(state.db, project.id).accountId).toBe(second.id);
+  });
+
+  it('withdraws an open move-back card when the project moves again', () => {
+    const third = seedAccount(store, { kind: 'claude_subscription', label: 'Third plan' });
+    runtime.rateLimited(plan, inMinutes(60), project.id);
+    inbox.answer(limitCard().id, { choice: CONTINUE });
+    clock.advance(60 * 60_000);
+    const back = backCard();
+    moves.move(project.id, third.id, { cause: MoveCause.Builder });
+    expect(openCards().map((c) => c.id)).not.toContain(back.id);
+  });
+
+  it('keeps a limit card current as the accounts it could move to change', () => {
+    const paused = seedAccount(store, { kind: 'claude_subscription', label: 'Paused plan' });
+    pauses.pause(
+      paused.id,
+      { reason: 'refused', until: null },
+      { projectId: project.id, card: null },
+    );
+    runtime.rateLimited(plan, inMinutes(60), project.id);
+    // Only the paused account and the second plan exist besides this one: the second is offered.
+    expect(limitCard().options.map((o) => o.label)).toEqual([CONTINUE, 'Later']);
+    // The second plan is then refused: the card no longer offers a move there.
+    pauses.pause(
+      second.id,
+      { reason: 'refused', until: null },
+      { projectId: project.id, card: null },
+    );
+    runtime.rateLimited(plan, inMinutes(90), project.id);
+    expect(limitCard().options).toEqual([]);
+    expect(limitCard().detail?.['accountCard']).toMatchObject({ moves: [] });
+    // And when the second plan is free again, the card offers it once more.
+    pauses.resume(second.id);
+    runtime.rateLimited(plan, inMinutes(120), project.id);
+    expect(limitCard().options.map((o) => o.label)).toEqual([CONTINUE, 'Later']);
+    inbox.answer(limitCard().id, { choice: CONTINUE });
+    expect(getProject(state.db, project.id).accountId).toBe(second.id);
+  });
+
+  it('closes a limit card when its pause ends, so a later answer moves nothing', () => {
+    runtime.rateLimited(plan, inMinutes(60), project.id);
+    const stale = limitCard();
+    clock.advance(60 * 60_000);
+    expect(openCards()).toEqual([]);
+    expect(() => inbox.answer(stale.id, { choice: CONTINUE })).toThrow(ConflictError);
+    expect(getProject(state.db, project.id).accountId).toBe(plan);
+    // The next pause raises a card of its own, showing its own end.
+    runtime.rateLimited(plan, inMinutes(30), project.id);
+    expect(limitCard().id).not.toBe(stale.id);
+    expect(limitCard().body).toContain(inMinutes(30).toISOString());
+  });
+
+  it('refuses Stay on a card that does not offer it, and keeps the move back', () => {
+    runtime.rateLimited(plan, inMinutes(60), project.id);
+    inbox.answer(limitCard().id, { choice: CONTINUE });
+    const recorded = inbox.flag({
+      projectId: project.id,
+      workstreamId: null,
+      ...recordedCard(getAccountRow(state.db, second.id), 'someone@example.com'),
+    });
+    expect(() => inbox.answer(recorded.id, { choice: AccountCardChoice.Stay })).toThrow(
+      InvalidError,
+    );
+    expect(getProject(state.db, project.id).movedFromAccountId).toBe(plan);
   });
 });

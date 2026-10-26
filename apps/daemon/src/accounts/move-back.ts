@@ -1,10 +1,10 @@
-import { AccountPauseReason, type ProjectDto, type ProjectId } from '@10db/contracts';
+import type { ProjectDto, ProjectId } from '@10db/contracts';
 import { getAccountRow, getProject, listMoveBacks, setMoveBack } from '@10db/db';
-import type { Clock, Timer } from '../clock';
+import { timerAt, type Clock, type Timer } from '../clock';
 import type { StateStore } from '../events';
 import type { InboxService } from '../inbox';
 import { moveBackCard } from './cards';
-import type { AccountPauses } from './pauses';
+import { usageLimitEnd, type AccountPauses } from './pauses';
 
 export interface MoveBack {
   /**
@@ -36,18 +36,17 @@ export function createMoveBack(opts: {
 
   function schedule(projectId: ProjectId, at: Date): void {
     timers.get(projectId)?.cancel();
-    const wait = at.getTime() - opts.clock.now().getTime();
-    if (wait <= 0) {
+    if (at <= opts.clock.now()) {
       timers.delete(projectId);
       due(projectId);
       return;
     }
     timers.set(
       projectId,
-      opts.clock.setTimeout(() => {
+      timerAt(opts.clock, at, () => {
         timers.delete(projectId);
         due(projectId);
-      }, wait),
+      }),
     );
   }
 
@@ -59,8 +58,7 @@ export function createMoveBack(opts: {
       opts.state.write((ctx) => setMoveBack(ctx, projectId, null));
       return;
     }
-    const paused = opts.pauses.pausedFor(from.id);
-    const stillLimited = paused?.reason === AccountPauseReason.UsageLimit ? paused.until : null;
+    const stillLimited = usageLimitEnd(opts.pauses.pausedFor(from.id));
     if (stillLimited !== null && stillLimited > opts.clock.now()) {
       // The limit was met again after the move: ask when it really ends.
       opts.state.write((ctx) =>

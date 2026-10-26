@@ -16,10 +16,11 @@ import {
   type Json,
 } from '@10db/db';
 import { z } from 'zod';
-import type { Clock, Timer } from '../clock';
+import { timerAt, type Clock, type Timer } from '../clock';
 import type { StateStore } from '../events';
 import type { InboxService } from '../inbox';
 import type { AccountCard } from './cards';
+import { withdrawLimitCards } from './stale-cards';
 
 export interface AccountPause {
   readonly reason: AccountPauseReason;
@@ -54,9 +55,19 @@ const PauseSetting = z.object({
   reason: z.enum(AccountPauseReason),
   until: z.iso.datetime().nullable(),
 });
-/** Node treats a longer delay as 1 ms, so a long pause re-arms in steps. */
-const MAX_TIMER_MS = 2 ** 31 - 1;
 const settingKey = (id: AccountId): string => `account_pause.${id}`;
+
+/** The end of a usage-limit pause; null when there is no pause, it has no end, or it is another kind. */
+export function usageLimitEnd(pause: AccountPause | null): Date | null {
+  if (!pause) return null;
+  switch (pause.reason) {
+    case AccountPauseReason.UsageLimit:
+      return pause.until;
+    case AccountPauseReason.MonthlyCap:
+    case AccountPauseReason.Refused:
+      return null;
+  }
+}
 
 /** A pause with no end outranks one that ends; otherwise the later end wins. */
 function outlasts(next: AccountPause, current: AccountPause): boolean {
@@ -83,17 +94,11 @@ export function createAccountPauses(opts: {
     timers.delete(id);
     paused.set(id, pause);
     if (pause.until === null) return;
-    const until = pause.until;
-    const remaining = Math.max(0, until.getTime() - opts.clock.now().getTime());
     timers.set(
       id,
-      opts.clock.setTimeout(
-        () => {
-          if (opts.clock.now() >= until) resume(id);
-          else arm(id, pause);
-        },
-        Math.min(remaining, MAX_TIMER_MS),
-      ),
+      timerAt(opts.clock, pause.until, () => {
+        resume(id);
+      }),
     );
   }
 
@@ -125,6 +130,8 @@ export function createAccountPauses(opts: {
           reason: 'the account resumed',
         });
       }
+      // A usage limit's cards offered moves for a limit that is over; answering one later would move for nothing.
+      if (was?.reason === AccountPauseReason.UsageLimit) withdrawLimitCards(ctx, id);
       ctx.emit({
         type: EventType.AccountResumed,
         entityType: 'account',

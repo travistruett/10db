@@ -248,6 +248,42 @@ describe('refusals and usage limits', () => {
     expect(runtime.isPaused(key.id)).toBe(false);
   });
 
+  it("shows every project's card the longest end, even when a later limit resets sooner", () => {
+    const other = seedProject(store, { name: 'other', accountId: key.id });
+    seedWorkstream(store, { project });
+    seedWorkstream(store, { project: other });
+    const longest = new Date(clock.now().getTime() + 90 * 60_000);
+    runtime.rateLimited(key.id, longest, project.id);
+    runtime.rateLimited(key.id, new Date(clock.now().getTime() + 10 * 60_000), other.id);
+    const cards = openCards().filter((c) => c.title === 'Client key usage limit reached');
+    expect(cards).toHaveLength(2);
+    for (const card of cards) expect(card.body).toContain(longest.toISOString());
+  });
+
+  it('rewords the card of a project whose work has finished, as the pause is extended', () => {
+    const other = seedProject(store, { name: 'other', accountId: key.id });
+    seedWorkstream(store, { project });
+    const { workstream } = seedWorkstream(store, { project: other });
+    runtime.rateLimited(key.id, new Date(clock.now().getTime() + 10 * 60_000), project.id);
+    state.write((ctx) =>
+      transitionWorkstream(ctx, workstream.id, { to: 'CANCELLED', fence: null }),
+    );
+    const later = new Date(clock.now().getTime() + 90 * 60_000);
+    runtime.rateLimited(key.id, later, project.id);
+    const card = openCards().find((c) => c.projectId === other.id);
+    expect(card?.body).toContain(later.toISOString());
+  });
+
+  it("names the usage limit's own end on a card, not the end of a cap or refusal pause", () => {
+    seedWorkstream(store, { project });
+    seedSpend(store, project, 5);
+    expect(runtime.blocked(row(), project.id)?.reason).toBe('monthly_cap');
+    const reset = new Date(clock.now().getTime() + 60_000);
+    runtime.rateLimited(key.id, reset, project.id);
+    const card = openCards().find((c) => c.title === 'Client key usage limit reached');
+    expect(card?.body).toContain(reset.toISOString());
+  });
+
   it('leaves a usage-limit pause alone when the account is saved', () => {
     runtime.rateLimited(key.id, null, project.id);
     runtime.saved(key.id);

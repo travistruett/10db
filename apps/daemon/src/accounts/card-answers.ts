@@ -30,7 +30,9 @@ export function createAccountCardAnswers(deps: {
     // A card with no options (the recorded identity) offers neither: acting on it would undo a later change.
     const offered = item.options.some((o) => o.label === answer.choice);
     if (
-      (answer.choice === AccountCardChoice.Confirm || answer.choice === AccountCardChoice.Resume) &&
+      (answer.choice === AccountCardChoice.Confirm ||
+        answer.choice === AccountCardChoice.Resume ||
+        answer.choice === AccountCardChoice.Stay) &&
       !offered
     )
       throw new InvalidError(`This card does not offer ${answer.choice}`);

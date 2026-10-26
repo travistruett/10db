@@ -146,11 +146,18 @@ export function updateInboxItem(
     readonly body?: string;
     readonly answer?: InboxAnswer;
     readonly targets?: readonly InboxTarget[];
+    readonly options?: readonly InboxOption[];
+    readonly detail?: Record<string, Json>;
   },
 ): InboxItemDto {
-  // Drizzle's `.set()` wants a mutable array, so `targets` is copied rather than spread through.
-  const { targets, ...rest } = patch;
-  const set = { ...rest, ...(targets ? { targets: [...targets] } : {}), updatedAt: ctx.now };
+  // Drizzle's `.set()` wants a mutable array, so `targets` and `options` are copied rather than spread through.
+  const { targets, options, ...rest } = patch;
+  const set = {
+    ...rest,
+    ...(targets ? { targets: [...targets] } : {}),
+    ...(options ? { options: [...options] } : {}),
+    updatedAt: ctx.now,
+  };
   const result = ctx.tx
     .update(schema.inboxItems)
     .set(set)

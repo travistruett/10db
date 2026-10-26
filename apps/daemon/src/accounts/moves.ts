@@ -22,7 +22,7 @@ import type { StateStore } from '../events';
 import type { InboxService } from '../inbox';
 import { accountFoldKey, MOVE_BACK_CARD } from './cards';
 import type { MoveBack } from './move-back';
-import type { AccountPauses } from './pauses';
+import { usageLimitEnd, type AccountPauses } from './pauses';
 
 export const MoveCause = { Builder: 'builder', UsageLimit: 'usage_limit' } as const;
 export type MoveCause = (typeof MoveCause)[keyof typeof MoveCause];
@@ -98,7 +98,7 @@ export function createAccountMoves(opts: {
       if (to === from)
         return opts.state.write((ctx) => patchProject(ctx, projectId, { ...patch, accountId: to }));
       const paused = opts.pauses.pausedFor(from);
-      const limitEnds = paused?.reason === AccountPauseReason.UsageLimit ? paused.until : null;
+      const limitEnds = usageLimitEnd(paused);
       const forLimit = why.cause === MoveCause.UsageLimit || limitEnds !== null;
       // Null when nobody reported when the limit resets: the move back asks after its default pause.
       const backAt = limitEnds ?? (why.cause === MoveCause.UsageLimit ? why.resetsAt : null);

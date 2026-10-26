@@ -262,6 +262,17 @@ describe('projects on accounts', () => {
     expect(listMoveBacks(store.db)).toEqual([]);
   });
 
+  it('keeps a pending move back when a patch names the account the project is already on', () => {
+    const project = seedProject(store);
+    const key = apiKey();
+    store.write((ctx) => {
+      patchProject(ctx, project.id, { accountId: key.id });
+      setMoveBack(ctx, project.id, { accountId: project.accountId, at: null });
+      patchProject(ctx, project.id, { accountId: key.id, maxLanes: 3 });
+    });
+    expect(getProject(store.db, project.id).movedFromAccountId).toBe(project.accountId);
+  });
+
   it('binds a new project to the default account, or the one it names', () => {
     const plain = seedProject(store);
     expect(plain.accountId).toBe(defaultAccountId(store.db));

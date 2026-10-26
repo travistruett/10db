@@ -1,12 +1,13 @@
 import {
   ACCOUNT_CARD_DETAIL,
   AccountCardDetail,
+  AccountPauseReason,
   AccountProblem,
   InboxState,
   type AccountId,
   type InboxItemId,
 } from '@10db/contracts';
-import { listInbox, updateInboxItem } from '@10db/db';
+import { listInbox, updateInboxItem, type WriteContext } from '@10db/db';
 import type { StateStore } from '../events';
 
 const PREPARING = new Set<AccountProblem>([
@@ -41,4 +42,17 @@ export function closeSettledCards(
   state.write((ctx) => {
     for (const item of stale) updateInboxItem(ctx, item.id, { state: InboxState.Resolved });
   });
+}
+
+/** Cancels the account's open usage-limit cards, in every project, once its limit is over. */
+export function withdrawLimitCards(ctx: WriteContext, accountId: AccountId): void {
+  for (const item of listInbox(ctx.tx, { states: [InboxState.Open] })) {
+    const card = AccountCardDetail.safeParse(item.detail?.[ACCOUNT_CARD_DETAIL]);
+    if (
+      card.success &&
+      card.data.accountId === accountId &&
+      card.data.reason === AccountPauseReason.UsageLimit
+    )
+      updateInboxItem(ctx, item.id, { state: InboxState.Cancelled });
+  }
 }
