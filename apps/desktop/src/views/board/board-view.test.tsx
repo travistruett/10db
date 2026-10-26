@@ -138,6 +138,88 @@ describe('BoardView', () => {
     });
   });
 
+  it("keeps a shipped batch's pull request reachable once the next batch starts", async () => {
+    const url = 'https://github.com/acme/widgets/pull/1';
+    const shipped = batchDto({ title: 'Alpha first', state: 'SHIPPED', prUrl: url });
+    const current = batchDto({
+      projectId: shipped.projectId,
+      title: 'Beta second',
+      state: 'OPEN',
+      branch: '10db/beta-second',
+    });
+    const project = projectViewDto({
+      id: shipped.projectId,
+      delivery: 'pull_request',
+      prTitlePrefix: 'feat(app)',
+      currentBatch: current,
+    });
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([])),
+      http.get(daemonUrl('/projects/:projectId/batches'), () =>
+        HttpResponse.json([current, shipped]),
+      ),
+    );
+    renderApp('/board');
+
+    const list = await screen.findByRole('list', { name: 'Batches' });
+    expect(within(list).getByText('Alpha first')).toBeTruthy();
+    expect(within(list).getByRole('link', { name: 'Pull request' }).getAttribute('href')).toBe(url);
+  });
+
+  it.each([
+    {
+      name: 'shows the pull request of the batch that shipped it',
+      batchState: 'SHIPPED' as const,
+      prUrl: 'https://github.com/acme/widgets/pull/1',
+      link: 'https://github.com/acme/widgets/pull/1',
+    },
+    {
+      name: 'shows no pull request while its batch has not shipped',
+      batchState: 'OPEN' as const,
+      prUrl: null,
+      link: null,
+    },
+  ])('a finished task $name', async ({ batchState, prUrl, link }) => {
+    const batch = batchDto({ title: 'Alpha first', state: batchState, prUrl });
+    const project = projectViewDto({
+      id: batch.projectId,
+      delivery: 'pull_request',
+      prTitlePrefix: 'feat(app)',
+      currentBatch: batch,
+    });
+    const ws = workstreamDto({
+      projectId: project.id,
+      batchId: batch.id,
+      taskTitle: 'Alpha',
+      state: 'DONE',
+    });
+    const done = taskDto({
+      projectId: project.id,
+      title: 'Alpha',
+      boardStatus: 'done',
+      status: 'done',
+      boardOrder: 1,
+      workstreamId: ws.id,
+    });
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([done])),
+      http.get(daemonUrl('/workstreams'), () => HttpResponse.json([ws])),
+      http.get(daemonUrl('/projects/:projectId/batches'), () => HttpResponse.json([batch])),
+    );
+    renderApp('/board');
+
+    const card = within(await screen.findByRole('list', { name: 'Done tasks' })).getByRole(
+      'listitem',
+      { name: 'Alpha' },
+    );
+    const hrefs = within(card)
+      .queryAllByRole('link', { name: 'Pull request' })
+      .map((a) => a.getAttribute('href'));
+    expect(hrefs).toEqual(link === null ? [] : [link]);
+  });
+
   it('shows an areas mistake without calling the daemon', async () => {
     let calls = 0;
     serve(

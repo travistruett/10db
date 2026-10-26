@@ -3,6 +3,7 @@ import { Badge, Code, Group, Paper, Stack, Text } from '@mantine/core';
 import type { ReactNode } from 'react';
 import { StateBadge } from '../factory/state-badge';
 import { StepCell } from '../factory/step-cell';
+import { PullRequestLink } from './pull-request-link';
 
 export interface TaskCardProps {
   readonly task: TaskDto;
@@ -13,10 +14,12 @@ export interface TaskCardProps {
   readonly menu: ReactNode;
   /** The drag handle. */
   readonly handle?: ReactNode;
+  /** The pull request of the batch that shipped a finished task. */
+  readonly pullRequest?: string | undefined;
 }
 
-/** A board card: title, areas, unfinished dependencies and live workstream state (spec §10). */
-export function TaskCard({ task, workstream, peers, menu, handle }: TaskCardProps) {
+/** A board card: title, areas, unfinished dependencies, live workstream state (spec §10) and a shipped pull request. */
+export function TaskCard({ task, workstream, peers, menu, handle, pullRequest }: TaskCardProps) {
   const waits = task.dependsOn.flatMap((id) => {
     const peer = peers.get(id);
     return peer && peer.status !== TaskStatus.Done ? [peer.title] : [];
@@ -50,6 +53,11 @@ export function TaskCard({ task, workstream, peers, menu, handle }: TaskCardProp
           <Group gap="xs" align="flex-start">
             <StateBadge state={workstream.state} />
             <StepCell workstream={workstream} />
+          </Group>
+        ) : null}
+        {pullRequest ? (
+          <Group gap="xs">
+            <PullRequestLink url={pullRequest} />
           </Group>
         ) : null}
       </Stack>

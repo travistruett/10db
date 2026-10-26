@@ -43,6 +43,7 @@ export function baseHandlers(
       HttpResponse.json(EventsHead.parse({ seq: opts.headSeq ?? 0 })),
     ),
     http.get(daemonUrl('/projects', base), () => HttpResponse.json([])),
+    http.get(daemonUrl('/projects/:projectId/batches', base), () => HttpResponse.json([])),
     http.get(daemonUrl('/workstreams', base), () => HttpResponse.json([])),
     http.get(daemonUrl('/inbox', base), () => HttpResponse.json([])),
     http.get(daemonUrl('/settings/keep-awake', base), () =>

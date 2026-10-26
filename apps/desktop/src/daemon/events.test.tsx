@@ -1,11 +1,11 @@
-import { EventsHead, type DaemonEvent } from '@10db/contracts';
+import { EventsHead, mintId, type DaemonEvent, type ProjectId } from '@10db/contracts';
 import { screen, waitFor } from '@testing-library/react';
 import { http, HttpResponse, type HttpHandler } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, eventStream, renderWithDaemon, server } from '../test/daemon';
 import { daemonEvent } from '../test/fixtures';
 import { eventStreamUrl, useEventStream } from './events';
-import { useProjects } from './queries';
+import { useBatches, useProjects } from './queries';
 
 function Stream({ onEvent }: { readonly onEvent?: (event: DaemonEvent) => void }) {
   useEventStream(onEvent);
@@ -17,11 +17,20 @@ function ProjectCount() {
   return <p data-testid="count">{projects.data?.length ?? '-'}</p>;
 }
 
+/** Mounts the project's batch list, so a batch event has a query to refetch. */
+function BatchesOf({ projectId }: { readonly projectId: ProjectId }) {
+  useBatches(projectId);
+  return null;
+}
+
 /**
- * Counts `/projects` fetches and holds `/events/head` until the first one is served. Without the hold,
+ * Counts fetches of `path` and holds `/events/head` until the first one is served. Without the hold,
  * whether the list fetch or the stream's open-time refetch comes first depends on timing.
  */
-function listBeforeHead(): { readonly handlers: HttpHandler[]; readonly fetches: () => number } {
+function listBeforeHead(path = '/projects'): {
+  readonly handlers: HttpHandler[];
+  readonly fetches: () => number;
+} {
   let fetches = 0;
   let release: () => void = () => undefined;
   const listed = new Promise<void>((resolve) => {
@@ -30,7 +39,7 @@ function listBeforeHead(): { readonly handlers: HttpHandler[]; readonly fetches:
   return {
     fetches: () => fetches,
     handlers: [
-      http.get(daemonUrl('/projects'), () => {
+      http.get(daemonUrl(path), () => {
         fetches += 1;
         release();
         return HttpResponse.json([]);
@@ -101,6 +110,35 @@ describe('useEventStream', () => {
     });
     sockets[0]?.send(
       JSON.stringify(daemonEvent({ seq: 1, type: 'project.created', entityType: 'project' })),
+    );
+    await waitFor(() => {
+      expect(list.fetches()).toBe(3);
+    });
+  });
+
+  it("refetches a project's batches when a batch event arrives, so a shipped pull request appears", async () => {
+    const list = listBeforeHead('/projects/:projectId/batches');
+    const sockets: { send(data: string): void }[] = [];
+    server.use(
+      ...list.handlers,
+      ...baseHandlers(),
+      eventStream.addEventListener('connection', ({ client }) => {
+        sockets.push(client);
+      }),
+    );
+    renderWithDaemon(
+      <>
+        <Stream />
+        <BatchesOf projectId={mintId('Project')} />
+      </>,
+    );
+    // The batch list's fetch, then the first-open refetch; count from there.
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+      expect(list.fetches()).toBe(2);
+    });
+    sockets[0]?.send(
+      JSON.stringify(daemonEvent({ seq: 1, type: 'batch.updated', entityType: 'batch' })),
     );
     await waitFor(() => {
       expect(list.fetches()).toBe(3);
