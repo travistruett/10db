@@ -13,6 +13,9 @@ export type LogLevel = (typeof LogLevel)[keyof typeof LogLevel];
 export const LanePermissionMode = { Default: 'default', Auto: 'auto' } as const;
 export type LanePermissionMode = (typeof LanePermissionMode)[keyof typeof LanePermissionMode];
 
+export const Switch = { On: 'on', Off: 'off' } as const;
+export type Switch = (typeof Switch)[keyof typeof Switch];
+
 const DaemonEnv = z.object({
   TENDB_DATA_DIR: z.string().min(1).optional(),
   TENDB_PORT: z.coerce.number().int().min(0).max(65535).default(4317),
@@ -33,6 +36,11 @@ const DaemonEnv = z.object({
   // How lane sessions decide permission prompts: `auto` lets Claude Code's classifier approve routine
   // calls. The guard's refusals still apply first and escalated calls still become cards.
   TENDB_LANE_PERMISSION_MODE: z.enum(LanePermissionMode).default(LanePermissionMode.Default),
+  // Lane sessions run Bash under Claude Code's sandbox: commands can only write the checkout and the
+  // lane's temp directory, and a card is raised only for hazards and new hosts.
+  TENDB_LANE_SANDBOX: z.enum(Switch).default(Switch.Off),
+  // Lets sandboxed commands bind and connect on localhost. It opens every local port to the lane.
+  TENDB_LANE_SANDBOX_LOOPBACK: z.enum(Switch).default(Switch.Off),
   // Set by the desktop shell: the daemon runs its normal shutdown when stdin reaches EOF, which is how
   // it learns the shell died without a clean Quit.
   TENDB_PARENT_STDIN: z.enum(['0', '1']).optional(),
