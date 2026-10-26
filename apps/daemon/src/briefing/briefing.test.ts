@@ -170,6 +170,29 @@ describe('buildSessionPrompt', () => {
     ).toContain('inspect git status first');
   });
 
+  it('puts the gate output a fresh answer session was fixing between the handoff and the answer', () => {
+    const prompt = buildSessionPrompt({
+      ...base,
+      handoff,
+      answer: { question: 'Color?', answer: 'Teal', note: null },
+      evidence: {
+        id: mintId('Evidence'),
+        workstreamId: handoff.workstreamId,
+        kind: 'gate',
+        command: 'make gate',
+        exitCode: 2,
+        summary: 'FAIL badge.test.ts',
+        logPath: null,
+        commitShas: [],
+        createdAt: handoff.createdAt,
+      },
+      action: { kind: 'answer', inboxId: mintId('InboxItem'), providerSessionId: null },
+    });
+    const at = (text: string) => prompt.indexOf(text);
+    expect(at('Write the render test')).toBeLessThan(at('FAIL badge.test.ts'));
+    expect(at('FAIL badge.test.ts')).toBeLessThan(at('Answer: Teal'));
+  });
+
   it('carries the answer, the gate output or the recovery note', () => {
     expect(
       buildSessionPrompt({

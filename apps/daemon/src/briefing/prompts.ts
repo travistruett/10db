@@ -155,6 +155,9 @@ export function briefedFromHandoff(
 const fromHandoff = (handoff: HandoffDto): string =>
   `Continue from the handoff below. Do not redo finished work.\n\nHandoff:\n${renderHandoff(handoff)}`;
 
+const gateFailure = (evidence: EvidenceDto): string =>
+  `The gate failed (exit ${String(evidence.exitCode)} from \`${evidence.command}\`). Fix the cause, commit, and end your turn.\n\nGate output (end):\n\`\`\`\n${evidence.summary}\n\`\`\``;
+
 function actionSection(input: PromptInput): string {
   switch (input.action.kind) {
     case 'start':
@@ -170,16 +173,17 @@ function actionSection(input: PromptInput): string {
         ? `The builder answered your question.\nQuestion: ${input.answer.question}\nAnswer: ${input.answer.answer}${input.answer.note ? `\nNote: ${input.answer.note}` : ''}\nContinue.`
         : 'The builder answered your question; continue.';
       if (input.action.providerSessionId !== null) return answer;
-      // No conversation to resume: the session starts from the handoff, as a continuation would.
+      // No conversation to resume: the session starts from the handoff, as a continuation would,
+      // and still sees a gate failure it was fixing.
       const brief =
         input.handoff && briefedFromHandoff(input.action, input.handoff, input.evidence)
           ? fromHandoff(input.handoff)
           : 'The previous session left no handoff, so inspect git status first.';
-      return `${brief}\n\n${answer}`;
+      return [brief, ...(input.evidence ? [gateFailure(input.evidence)] : []), answer].join('\n\n');
     }
     case 'fix': {
       const gate = input.evidence
-        ? `The gate failed (exit ${String(input.evidence.exitCode)} from \`${input.evidence.command}\`). Fix the cause, commit, and end your turn.\n\nGate output (end):\n\`\`\`\n${input.evidence.summary}\n\`\`\``
+        ? gateFailure(input.evidence)
         : 'The gate failed. Run it, fix the cause, commit, and end your turn.';
       // A fix session that was cut off left a handoff after the failure; the next one starts from it.
       return input.handoff && briefedFromHandoff(input.action, input.handoff, input.evidence)

@@ -1724,6 +1724,130 @@ describe('moving accounts', () => {
     expect(ws(workstream.id).state).toBe('DONE');
     expect(engine.adapter.prompts.map((p) => p.accountId)).toEqual([second.id]);
     expect(accountsOf(workstream.id)).toEqual([second.id]);
+    // The slot the lane gave back is free: a leak would leave every later session on that account waiting.
+    const slot = engine.startGate.acquire(engine.project.accountId);
+    await waitFor(() => engine.startGate.waiting(engine.project.accountId) === 0);
+    (await slot)();
+  });
+
+  it('keeps the gate failure a fix session was answered on after the project moved', async () => {
+    engine = await createTestEngine(
+      {
+        Alpha: [
+          [turn],
+          [askShip, turn],
+          [write('src/api/fixed.txt'), commit('op-moveans-01', ['src/api/fixed.txt']), turn],
+        ],
+      },
+      { gateCommand: 'test -f src/api/fixed.txt || { echo MISSING-FIXED-FILE; exit 2; }' },
+    );
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).nextAction).toMatchObject({ kind: 'fix' });
+    engine.launch(workstream.id);
+    const card = await waitFor(openCard);
+    engine.clock.advance(10 * 60_000);
+    await engine.runner.idle();
+    expect(ws(workstream.id).nextAction).toMatchObject({ kind: 'answer', inboxId: card.id });
+
+    moveTo(secondPlan().id);
+    engine.inbox.answer(card.id, { choice: 'Yes' });
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(engine.adapter.prompts[2]).toMatchObject({ resume: null });
+    expect(engine.adapter.prompts[2]?.prompt).toContain('MISSING-FIXED-FILE');
+    expect(engine.adapter.prompts[2]?.prompt).toContain('Answer: Yes');
+  });
+
+  it('resumes the conversation when the project moves away and back before a session launches', async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        [
+          { do: 'mcp', tool: 'write_handoff', args: handoffArgs('op-moveback-1', 'Write b') },
+          { do: 'rate_limit', status: 'rejected', resetsInSeconds: 600 },
+        ],
+        [write('src/api/b.txt'), commit('op-moveback-2', ['src/api/b.txt']), turn],
+      ],
+    });
+    const home = engine.project.accountId;
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).nextAction).toMatchObject({ kind: 'resume' });
+    const first = listSessions(engine.store.db, workstream.id)[0]?.providerSessionId;
+
+    // The new account has no confirmed identity, so no session launches on it.
+    const unconfirmed = seedAccount(engine.store, {
+      kind: 'claude_subscription',
+      label: 'Unconfirmed plan',
+    });
+    moveTo(unconfirmed.id);
+    requeue(workstream.id);
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(engine.adapter.prompts).toHaveLength(1);
+
+    moveTo(home);
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(engine.adapter.prompts[1]?.resume).toBe(first);
+  });
+
+  it('does not settle the lane on the account the project left while its head was read', async () => {
+    engine = await createTestEngine(
+      {
+        Alpha: [[write('src/api/a.txt'), commit('op-movehead-1', ['src/api/a.txt']), turn]],
+      },
+      {},
+      {},
+      { account: { kind: 'claude_subscription', label: 'Unconfirmed plan' } },
+    );
+    const { workstream } = engine.addTask('Alpha');
+    // launch runs the lane up to its first await, the read of the repository head.
+    engine.launch(workstream.id);
+    const second = secondPlan();
+    moveTo(second.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(engine.prepared).toEqual([]);
+    expect(accountsOf(workstream.id)).toEqual([second.id]);
+  });
+
+  it('lets a running session finish on its account when the project moves, and runs the next on the new one', async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        [
+          askShip,
+          { do: 'context', percentage: 75 },
+          { do: 'await_message', contains: 'write_handoff' },
+          {
+            do: 'mcp',
+            tool: 'write_handoff',
+            args: handoffArgs('op-moverun-01', 'Write the second file'),
+          },
+          turn,
+        ],
+        [write('src/api/b.txt'), commit('op-moverun-02', ['src/api/b.txt']), turn],
+      ],
+    });
+    const home = engine.project.accountId;
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    const card = await waitFor(openCard);
+    const second = secondPlan();
+    moveTo(second.id);
+    // The session is still running on the account it started on.
+    expect(engine.runner.isRunning(workstream.id)).toBe(true);
+    expect(engine.adapter.prompts).toHaveLength(1);
+    engine.inbox.answer(card.id, { choice: 'Yes' });
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(engine.adapter.prompts.map((p) => p.accountId)).toEqual([home, second.id]);
+    expect(accountsOf(workstream.id)).toEqual([home, second.id]);
+    expect(engine.rateLimited).toEqual([]);
   });
 });
 

@@ -12,6 +12,7 @@ import {
   AccountProblem,
   type AccountId,
   type AccountRefusal,
+  type EvidenceId,
   type HandoffId,
   type InboxItemDto,
   type InboxItemId,
@@ -308,34 +309,35 @@ export function createRunner(opts: RunnerOptions): Runner {
     return latest ? { kind: 'continue_from_handoff', handoffId: latest.id } : { kind: 'start' };
   }
 
-  /**
-   * A conversation lives in the config directory of the account its session ran on, so once the
-   * project has moved the lane can't resume it: its next action becomes a fresh start on the
-   * project's account (accounts spec §6).
-   */
-  function leaveOtherAccount(id: WorkstreamId, ctl: Control): void {
-    const row = getWorkstreamRow(db, id);
-    const action = row.nextAction;
-    const resumeId =
-      action.kind === 'resume' || action.kind === 'answer' ? action.providerSessionId : null;
-    if (resumeId === null) return;
-    const ranOn = getSessionByProviderId(db, id, resumeId)?.accountId;
-    if (ranOn === undefined || ranOn === ctl.accountId) return;
-    // The lane's latest gate run failed and none has passed since: it was fixing that failure.
+  /** The lane's latest gate run failed and none has passed since: the evidence it is fixing. */
+  function failedGateEvidence(id: WorkstreamId): EvidenceId | null {
     const lastGate = listEvidence(db, id)
       .filter((e) => e.kind === 'gate')
       .at(-1);
-    const nextAction = nextActionOnAnotherAccount(
+    return lastGate && lastGate.exitCode !== 0 ? lastGate.id : null;
+  }
+
+  /**
+   * A conversation lives in the config directory of the account its session ran on, so once the
+   * project has moved the lane can't resume it: its next action becomes a fresh start on the
+   * project's account (accounts spec §6). The new action is saved with the session row, so a lane
+   * that never launches there still resumes if the project moves back.
+   */
+  function actionOnAnotherAccount(
+    id: WorkstreamId,
+    ctl: Control,
+    row: WorkstreamRow,
+  ): NextAction | null {
+    const action = row.nextAction;
+    const resumeId =
+      action.kind === 'resume' || action.kind === 'answer' ? action.providerSessionId : null;
+    if (resumeId === null) return null;
+    const ranOn = getSessionByProviderId(db, id, resumeId)?.accountId;
+    if (ranOn === undefined || ranOn === ctl.accountId) return null;
+    return nextActionOnAnotherAccount(
       action,
       latestHandoffForStep(db, row),
-      lastGate && lastGate.exitCode !== 0 ? lastGate.id : null,
-    );
-    opts.state.write((ctx) => {
-      patchWorkstream(ctx, id, ctl.fence, { nextAction });
-    });
-    opts.logger.info(
-      { workstreamId: id, from: ranOn, to: ctl.accountId },
-      'the project moved accounts; the lane starts a fresh session',
+      failedGateEvidence(id),
     );
   }
 
@@ -772,11 +774,11 @@ export function createRunner(opts: RunnerOptions): Runner {
   }
 
   async function runSession(id: WorkstreamId, ctl: Control): Promise<Outcome> {
-    leaveOtherAccount(id, ctl);
     const row = getWorkstreamRow(db, id);
     const project = getProject(db, row.projectId);
     const task = getTask(db, row.taskId);
-    const action = row.nextAction;
+    const fresh = actionOnAnotherAccount(id, ctl, row);
+    const action = fresh ?? row.nextAction;
     const step = currentStep(row);
     const persona = step.personaId ? getPersona(db, step.personaId) : null;
     const priorResults = row.steps.flatMap((s, i) =>
@@ -789,6 +791,8 @@ export function createRunner(opts: RunnerOptions): Runner {
     const baseHead = row.baseHead ?? (await opts.git.head(project.repoPath));
     // A stop that landed while the head was read finds no handle to stop, so it is honoured here.
     if (ctl.stopReason) return { kind: 'stopped', reason: ctl.stopReason, providerSessionId: null };
+    // So does a move: the account the lane read before the await may not be the project's now.
+    if (getProject(db, row.projectId).accountId !== ctl.accountId) return { kind: 'moved' };
     const answeredItem = action.kind === 'answer' ? getInboxItem(db, action.inboxId) : null;
     const resumeId =
       action.kind === 'resume' || action.kind === 'answer' ? action.providerSessionId : null;
@@ -796,7 +800,14 @@ export function createRunner(opts: RunnerOptions): Runner {
     const permission =
       answeredItem?.kind === InboxKind.Permission ? permissionAnswer(answeredItem) : null;
     const contextPack = buildContextPack(db, getWorkstream(db, id));
-    const evidence = action.kind === 'fix' ? getEvidence(db, action.evidenceId) : null;
+    // A fresh session that takes the builder's answer to a fix still needs the failure it was fixing.
+    const evidenceId =
+      action.kind === 'fix'
+        ? action.evidenceId
+        : action.kind === 'answer' && action.providerSessionId === null
+          ? failedGateEvidence(id)
+          : null;
+    const evidence = evidenceId ? getEvidence(db, evidenceId) : null;
     const prompt = buildSessionPrompt({
       task,
       claims: claims(),
@@ -880,9 +891,19 @@ export function createRunner(opts: RunnerOptions): Runner {
           briefed,
           briefingBaselinePct: inheritedBaselinePct,
         });
-        patchWorkstream(ctx, id, ctl.fence, { currentSessionId: s.id, baseHead });
+        patchWorkstream(ctx, id, ctl.fence, {
+          currentSessionId: s.id,
+          baseHead,
+          ...(fresh ? { nextAction: fresh } : {}),
+        });
         return s;
       });
+      if (fresh) {
+        opts.logger.info(
+          { workstreamId: id, to: ctl.accountId },
+          'the project moved accounts; the lane starts a fresh session',
+        );
+      }
     } catch (error) {
       releaseStart();
       throw error;
