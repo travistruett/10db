@@ -314,8 +314,6 @@ const DIRECTORY_CHANGES: ReadonlySet<string> = new Set(['cd', 'pushd', 'popd']);
 /** The command a segment runs, past reserved words, assignments and wrappers. */
 export function commandOf(segment: ShellSegment): {
   readonly words: string[];
-  /** The command word as written, before its path is dropped: `$(…)` when a substitution runs. */
-  readonly commandWord: string;
   readonly negated: boolean;
   readonly outOfOrder: boolean;
   /** env hides the command it runs: a split string, or a long option not spelled in full. */
@@ -324,15 +322,11 @@ export function commandOf(segment: ShellSegment): {
   readonly hiddenByRedirection: boolean;
 } {
   const leading = leadingWords(segment.words);
-  const command = stripCommandPrefixes(leading.command, {
-    lookThroughRunners: true,
-    skipRedirections: true,
-    keepCommandPath: true,
-  });
-  const head = command[0];
   return {
-    words: head === undefined ? command : [commandName(head), ...command.slice(1)],
-    commandWord: head ?? '',
+    words: stripCommandPrefixes(leading.command, {
+      lookThroughRunners: true,
+      skipRedirections: true,
+    }),
     negated: leading.negated,
     outOfOrder: leading.outOfOrder,
     hiddenByEnv: hidesEnvCommand(leading.command),
@@ -389,15 +383,6 @@ const DATA_READERS: ReadonlySet<string> = new Set([
   'git',
 ]);
 
-/** Commands that run a substitution's output as shell. */
-const SHELL_RUNNERS: ReadonlySet<string> = new Set([
-  ...SHELLS,
-  'dash',
-  'ksh',
-  'eval',
-  'source',
-  '.',
-]);
 /** Reserved words that close a loop or a conditional; piped, the body's output reaches the pipe. */
 const BODY_CLOSERS: ReadonlySet<string> = new Set(['done', 'fi', 'esac']);
 const ANGLE = /[<>]/;
@@ -427,8 +412,9 @@ interface NestedScript {
   /** The script is a here-document body read as data, so a brace in it is not group syntax. */
   readonly bracesAsData?: boolean;
   /**
-   * The script's output reaches a shell (a substitution a shell runs, or a command that forwards
-   * output), so a here-document a data reader takes in it may still run as shell elsewhere.
+   * The script's output reaches another command (a substitution body, a script a forwarding
+   * segment runs, or anything `forwardsOutput` finds), so a here-document a data reader takes in it
+   * may still run as shell elsewhere.
    */
   readonly forwarded?: boolean;
 }
@@ -456,8 +442,7 @@ function judgeShell(
   // The subshells the previous segment ran in, each with what was possible outside it.
   const subshells: { readonly id: number; readonly possible: Dir[] }[] = [];
   let previousSeparator = '';
-  for (const [index, entry] of segments.entries()) {
-    const { segment, words, commandWord, negated, hiddenByEnv, hiddenByRedirection } = entry;
+  for (const { segment, words, negated, hiddenByEnv, hiddenByRedirection } of segments) {
     if (ordered) {
       let left = false;
       while (
@@ -489,24 +474,22 @@ function judgeShell(
         'env -S, or an env option not spelled in full, hides the command it runs. Run the command itself instead.',
       );
     const scripts = [...segment.nested, ...segment.hereDocuments];
-    // Substitutions always run as shell. Their output reaches a shell when the substitution is the
-    // command, the command is a shell runner, or the segment pipes into one; a data here-document
-    // inside one keeps its relaxed brace rule otherwise (`curl -d "$(cat <<EOF …)"`).
-    const nextHead = segments[index + 1]?.words[0] ?? '';
-    const runsSubstitutions =
-      /\$\(|`/.test(commandWord) ||
-      SHELL_RUNNERS.has(head) ||
-      (segment.separator === '|' && SHELL_RUNNERS.has(nextHead));
+    // Substitutions always run as shell, and their output may reach a shell the guard does not
+    // see (`watch "$(…)"`, a here-document a shell reads), so a here-document inside one is never
+    // data.
     for (const body of segment.nested) {
-      const verdict = judgeShell(input, body, depth, dirs, {
-        forwarded: forwarded || runsSubstitutions,
-      });
+      const verdict = judgeShell(input, body, depth, dirs, { forwarded: true });
       if (verdict.decision === 'deny') return verdict;
     }
+    // A script this segment runs (`sh -c`, `find -exec`, `eval`) writes where the segment writes.
+    const inner: NestedScript = {
+      bracesAsData,
+      forwarded: forwarded || segment.outputForwarded,
+    };
     // A here-document body is always judged as shell. Its braces are data only when a known data
     // reader takes it and its output is not forwarded (a pipe, a process substitution, a group or
-    // subshell that is piped, a substitution a shell runs, or anything `forwardsOutput` finds in
-    // the whole command), so an interpreter reached through a wrapper or a pipeline, or a body
+    // subshell that is piped, a substitution body, or anything `forwardsOutput` finds in the whole
+    // command), so an interpreter reached through a wrapper or a pipeline, or a body
     // that reaches a shell through the reader's output, is still judged with the brace-group rule.
     const bodyIsData = DATA_READERS.has(head) && !segment.outputForwarded && !forwarded;
     for (const body of segment.hereDocuments) {
@@ -531,21 +514,21 @@ function judgeShell(
     if (accountRule) return deny(accountRule);
     if (SHELLS.has(head)) {
       if (piped) return deny('Piping into a shell runs commands the guard cannot see.');
-      for (const inner of shellScripts(words)) {
+      for (const script of shellScripts(words)) {
         if (depth >= 3) break;
-        const verdict = judgeShell(input, inner, depth + 1, dirs);
+        const verdict = judgeShell(input, script, depth + 1, dirs, inner);
         if (verdict.decision === 'deny') return verdict;
       }
     }
     if (head === 'find' && depth < 3) {
       for (const exec of findExecCommands(words)) {
-        const verdict = judgeShell(input, exec.map(shellQuote).join(' '), depth + 1, dirs);
+        const verdict = judgeShell(input, exec.map(shellQuote).join(' '), depth + 1, dirs, inner);
         if (verdict.decision === 'deny') return verdict;
       }
     }
     if (head === 'eval' && depth < 3) {
       const script = words.slice(1).join(' ');
-      const verdict = judgeShell(input, script, depth + 1, dirs);
+      const verdict = judgeShell(input, script, depth + 1, dirs, inner);
       if (verdict.decision === 'deny') return verdict;
       // eval runs in this shell, so a `cd` in it moves this shell.
       const moved = directoriesNamed(parseShell(script).segments);

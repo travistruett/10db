@@ -202,7 +202,8 @@ function scan(command: string, from: number, substitution: boolean): Scan {
     // the shell reads them as data, not a group. What remains is uncertain when it holds an
     // unmatched brace (a `{` that opens a group, or a `}` that closes one opened earlier), or a
     // balanced `{…}` in command position, which zsh runs as a one-word group (`{pwd}`).
-    let braces = wordMask.replace(/\$\{[^{}]*\}/g, (m) => '\0'.repeat(m.length));
+    const parameters = wordMask.replace(/\$\{[^{}]*\}/g, (m) => '\0'.repeat(m.length));
+    let braces = parameters;
     for (let prev = ''; braces !== prev;) {
       prev = braces;
       braces = braces.replace(/\{[^{}]*(?:,|\.\.)[^{}]*\}/, (m) => '\0'.repeat(m.length));
@@ -223,10 +224,10 @@ function scan(command: string, from: number, substitution: boolean): Scan {
     }
     if (word !== '') {
       // Brace expansion turns one word into several; each is judged on its own. Only an unquoted
-      // brace opens an expansion, and a quoted or escaped brace, comma or dot inside one is
-      // literal text, as the shell reads it. Over the caps the expansion is unread, and the word
-      // is uncertain.
-      const expanded = wordMask.includes('{') ? expandBraceWord(word, wordMask) : [word];
+      // brace opens an expansion, and a quoted or escaped brace, comma or dot inside one, or one in
+      // a `${…}` parameter expansion, is literal text, as the shell reads it. Over the caps the
+      // expansion is unread, and the word is uncertain.
+      const expanded = parameters.includes('{') ? expandBraceWord(word, parameters) : [word];
       if (expanded === null) {
         certain = false;
         wordsCertain = false;

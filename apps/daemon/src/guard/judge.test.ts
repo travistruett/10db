@@ -1007,6 +1007,43 @@ describe('rm -r arguments beyond a plain path', () => {
     ],
     ['a sequence past the sequence cap', 'echo {1..5000}'],
     ['a sequence that yields option words', 'rm {-5..-1}'],
+    [
+      'a substitution in a here-doc that zsh reads',
+      "zsh <<EOF\n: $(cat <<'X'\n\n{rm -rf .git}\nX\n)\nEOF",
+    ],
+    [
+      'a substitution in a here-doc that source reads',
+      "source /dev/stdin <<EOF\n: $(cat <<'X'\n\n{rm -rf .git}\nX\n)\nEOF",
+    ],
+    [
+      'a substitution in an argument that watch runs',
+      'watch -n1 "$(cat <<\'X\'\n{rm -rf .git}\nX\n)"',
+    ],
+    [
+      'an eval here-doc redirected to a process substitution',
+      'eval "cat <<\'EOF\'\n{rm -rf .git}\nEOF" > >(sh)',
+    ],
+    [
+      'an eval here-doc in a group redirected to a process substitution',
+      '{ eval "cat <<\'EOF\'\n{rm -rf .git}\nEOF"; } > >(sh)',
+    ],
+    [
+      'an eval here-doc after an earlier process substitution',
+      'true > >(sh); eval "cat <<\'EOF\'\n{rm -rf .git}\nEOF"',
+    ],
+    ['an eval here-doc piped onward', 'eval "cat <<\'EOF\'\n{rm -rf .git}\nEOF" | dash'],
+    [
+      'a bash -c here-doc after an earlier process substitution',
+      'true > >(sh); bash -c "cat <<\'EOF\'\n{rm -rf .git}\nEOF"',
+    ],
+    [
+      'a zsh -c here-doc redirected to a process substitution',
+      'zsh -c "cat <<\'EOF\'\n{rm -rf .git}\nEOF" > >(sh)',
+    ],
+    [
+      'a find -exec sh -c here-doc after an earlier process substitution',
+      'true > >(sh); find . -exec sh -c "cat <<\'EOF\'\n{rm -rf .git}\nEOF" \\;',
+    ],
   ])('denies %s as words the guard cannot read', (_name, command) => {
     expect(run(command)).toEqual(unread);
   });
@@ -1070,6 +1107,16 @@ describe('rm -r arguments beyond a plain path', () => {
     ],
   ])('denies %s: a here-document body is always judged as shell', (_name, command, reason) => {
     expect(run(command)).toEqual({ decision: 'deny', reason });
+  });
+
+  // A substitution's output may reach a shell the guard does not see (`watch`, a here-document a
+  // shell reads), so a here-document inside one is never data: brace data there is refused.
+  it.each([
+    'curl -s -X POST localhost:3000/api -d "$(cat <<\'EOF\'\n{ "name": "x" }\nEOF\n)"',
+    'node -e "$(cat <<\'EOF\'\nconst x = { a: 1 };\nconsole.log(x);\nEOF\n)"',
+    'jq -n --argjson x "$(cat <<\'EOF\'\n{ "a": 1 }\nEOF\n)" \'$x\'',
+  ])('denies brace data in a here-doc inside a substitution: %s', (command) => {
+    expect(run(command)).toEqual(unread);
   });
 
   it.each(['echo {1..300000000}', 'echo {1..99999999999}'])(
@@ -1151,14 +1198,14 @@ describe('rm -r arguments beyond a plain path', () => {
     'for i in {1..100}; do echo $i; done',
     'echo {a..z}',
     'echo {0..3}',
-    'curl -s -X POST localhost:3000/api -d "$(cat <<\'EOF\'\n{ "name": "x" }\nEOF\n)"',
-    'node -e "$(cat <<\'EOF\'\nconst x = { a: 1 };\nconsole.log(x);\nEOF\n)"',
-    'jq -n --argjson x "$(cat <<\'EOF\'\n{ "a": 1 }\nEOF\n)" \'$x\'',
     'echo "$(cat <<\'EOF\'\n{\n}\nEOF\n)"',
     '{ cat <<\'EOF\'\n{ "a": 1 }\nEOF\n} > out.json',
     "( cat <<'EOF'\nconst x = { a: 1 };\nEOF\n) > a.ts",
     "cat <<'EOF' > a.ts || echo failed\nconst x = { a: 1 };\nEOF",
     "{ cat <<'EOF'\nconst x = { a: 1 };\nEOF\n} || true",
+    'echo ${HOME:-..}',
+    'cd ${DIR:-..}',
+    'ls ${x%..}',
   ])('allows %s', (command) => {
     expect(run(command)).toEqual({ decision: 'allow' });
   });
