@@ -127,16 +127,51 @@ export function foldPathCase(text: string): string {
 
 const fold = foldPathCase;
 
-/** Whether `target` is `dir` itself (a file counts) or inside it, following links as a write would; a path that can't be read contains nothing. */
-export function isWithin(dir: string, target: string): boolean {
-  try {
-    const root = fold(realpathSync.native(dir));
-    const resolved = fold(resolveThroughLinks(resolve(target)));
-    const rel = relative(root, resolved);
-    return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
-  } catch {
-    return false;
+/**
+ * The real paths an absolute path names on each reading that resolves: as the kernel opens it, and
+ * with `..` collapsed as text first. `complete` is false when a reading cannot be resolved (a `..`
+ * after a missing part, a link loop, a part that cannot be examined).
+ */
+export function realPathReadings(p: string): {
+  readonly paths: string[];
+  readonly complete: boolean;
+} {
+  const paths: string[] = [];
+  let complete = true;
+  for (const reading of [p, resolve(p)]) {
+    try {
+      const real = resolveThroughLinks(reading);
+      if (!paths.includes(real)) paths.push(real);
+    } catch {
+      complete = false;
+    }
   }
+  return { paths, complete };
+}
+
+function contains(root: string, path: string): boolean {
+  const rel = relative(fold(root), fold(path));
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
+}
+
+/**
+ * Whether `target` is `dir` itself (a file counts) or inside it on some reading of each (see
+ * `realPathReadings`), following links as a write would. Pass `target` with its `..` as written.
+ */
+export function isWithin(dir: string, target: string): boolean {
+  const roots = realPathReadings(dir).paths;
+  return realPathReadings(target).paths.some((path) => roots.some((root) => contains(root, path)));
+}
+
+/** Whether every reading of `target` is inside `dir`; false when a reading cannot be resolved. */
+export function isWithinOnEveryReading(dir: string, target: string): boolean {
+  const roots = realPathReadings(dir).paths;
+  const readings = realPathReadings(target);
+  return (
+    readings.complete &&
+    readings.paths.length > 0 &&
+    readings.paths.every((path) => roots.some((root) => contains(root, path)))
+  );
 }
 
 export function classifyPath(

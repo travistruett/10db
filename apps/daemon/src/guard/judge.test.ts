@@ -845,6 +845,153 @@ describe('rm -r arguments beyond a plain path', () => {
       expect(run(command)).toEqual({ decision: 'allow' });
     },
   );
+
+  const unread = {
+    decision: 'deny',
+    reason:
+      "The command has words the guard cannot read: an ANSI-C escape such as $'\\x2e', or a lone { or } in the middle of a command. Write the words plainly.",
+  };
+
+  it.each([
+    ['an ANSI-C escape that spells .git', "rm -rf $'\\x2egit'"],
+    ['an ANSI-C escape that spells --', "rm -rf -$'\\x2d' -d/../.git"],
+    ['an ANSI-C escape that spells the flags', "rm $'\\x2drf' .git"],
+    ['an ANSI-C escape inside the flags', "rm -$'\\x72'f .git"],
+    ['an ANSI-C escape inside a path', "rm -rf dist/$'\\x2e'git"],
+    ['an ANSI-C escape that spells the command', "$'\\x72m' -rf .git"],
+    ['an unclosed ANSI-C quote', "rm -rf $'.git"],
+    ['a lone { before .git', 'rm -rf { .git'],
+    ['a lone } before .git', 'rm -rf } .git'],
+    ['a lone } between arguments', 'rm -rf build } .git'],
+    ['a lone } after --', 'rm -rf -- } .git'],
+    ['a lone { after --', 'rm -rf -- { .git'],
+    ['a lone { inside an if', 'if true; then rm -rf { .git; fi'],
+    ['a zsh short if whose group closes without ;', 'if true { rm -rf .git }'],
+    ['a zsh short if whose group closes after ;', 'if true { rm -rf .git; }'],
+    ['a lone { before a force flag', 'git push { --force'],
+  ])('denies %s as words the guard cannot read', (_name, command) => {
+    expect(run(command)).toEqual(unread);
+  });
+
+  it.each([
+    ['a redirection before rm', '2>/dev/null rm -rf .git'],
+    ['a bare redirection whose target looks like an option', '> -x rm -rf .git'],
+    ['a redirection after an assignment', 'X=1 >x rm -rf .git'],
+    ['a redirection after env', 'env >x rm -rf .git'],
+    ['a redirection after nice', 'nice 2>x rm -rf .git'],
+    ['a redirection between env flags', 'env -i >x -u X rm -rf .git'],
+    ['an input redirection before rm', '<x rm -rf ../out'],
+  ])('denies rm -r with %s as unjudged syntax', (_name, command) => {
+    expect(run(command)).toEqual(unjudged);
+  });
+
+  it.each([
+    ['a group opened after then', 'if true; then { rm -rf .git; }; fi'],
+    ['a group opened after time', 'time { rm -rf .git; }'],
+    ['a function body', 'function f { rm -rf .git; }'],
+  ])('judges the rm in %s as its own command', (_name, command) => {
+    expect(run(command)).toEqual({
+      decision: 'deny',
+      reason: 'rm -r of a .git path is never allowed.',
+    });
+  });
+
+  it.each([
+    '{ rm -rf build; }',
+    '2>/dev/null git status',
+    "echo $'it\\'s'",
+    'find dist -name x -exec rm {} +',
+  ])('allows %s', (command) => {
+    expect(run(command)).toEqual({ decision: 'allow' });
+  });
+
+  it.each([
+    [
+      '>x git push --force',
+      'Force pushes, remote deletes, mirrors and push --all are never allowed.',
+    ],
+    ['>x sudo ls', 'sudo is never allowed.'],
+  ])('judges %s as the command after the redirection', (command, reason) => {
+    expect(run(command)).toEqual({ decision: 'deny', reason });
+  });
+});
+
+describe('protected paths reached through a link and ..', () => {
+  const root = tempDir('guard-link-dots');
+  const repoDir = () => join(root.path, 'repo');
+  const homeDir = () => join(root.path, 'home');
+  const dataDir = () => join(root.path, 'data');
+  const configDir = () => join(dataDir(), 'accounts', 'acc_1', 'claude');
+  const results = () => join(configDir(), 'projects', '-repo', 'sess_own', 'tool-results');
+  beforeAll(() => {
+    mkdirSync(join(repoDir(), '.git'), { recursive: true });
+    writeFileSync(join(repoDir(), 'README.md'), '');
+    mkdirSync(join(homeDir(), 'docs'), { recursive: true });
+    mkdirSync(join(homeDir(), '.claude'), { recursive: true });
+    writeFileSync(join(homeDir(), '.claude', '.credentials.json'), '{}');
+    writeFileSync(join(homeDir(), '.claude.json'), '{}');
+    mkdirSync(join(root.path, 'side'), { recursive: true });
+    mkdirSync(results(), { recursive: true });
+    writeFileSync(join(configDir(), '.claude.json'), '{}');
+    symlinkSync(join(homeDir(), 'docs'), join(repoDir(), 'h'));
+    symlinkSync(join(root.path, 'side'), join(repoDir(), 's'));
+    symlinkSync(join(configDir(), 'projects'), join(results(), 'cfg'));
+  });
+  afterAll(() => {
+    root.cleanup();
+  });
+  const run = (toolName: string, toolInput: unknown) =>
+    judgeToolUse({
+      toolName,
+      toolInput,
+      repoPath: repoDir(),
+      areas: AREAS,
+      hazards: DEFAULT_HAZARDS,
+      claims: [{ kind: 'area', name: 'api' }],
+      readOnly: false,
+      protectedPaths: protectedPaths({ dataDir: dataDir(), home: homeDir(), loginConfigDir: null }),
+      ownSession: { configDir: configDir(), providerSessionId: 'sess_own' },
+    });
+
+  it.each<[string, string, () => unknown]>([
+    ['cat of the credentials', 'Bash', () => ({ command: 'cat h/../.claude/.credentials.json' })],
+    ['cat of the sign-in file', 'Bash', () => ({ command: 'cat h/../.claude.json' })],
+    ['Read of the sign-in file', 'Read', () => ({ file_path: 'h/../.claude.json' })],
+    [
+      'a link made in the same command',
+      'Bash',
+      () => ({
+        command: `ln -s ${join(homeDir(), 'docs')} h2 && cat h2/../.claude/.credentials.json`,
+      }),
+    ],
+    [
+      'Read of the data directory',
+      'Read',
+      () => ({ file_path: `${repoDir()}/s/../data/accounts/x` }),
+    ],
+    ['Glob under a base that climbs', 'Glob', () => ({ path: 'h/..', pattern: '.claude/*' })],
+    ['Grep over a root that holds the sign-in', 'Grep', () => ({ pattern: 'x', path: 'h/..' })],
+    [
+      'Read of tool results that climbs out through a link',
+      'Read',
+      () => ({ file_path: `${results()}/cfg/../.claude.json` }),
+    ],
+  ])('denies %s', (_name, tool, input) => {
+    expect(run(tool, input()).decision).toBe('deny');
+  });
+
+  it.each<[string, string, unknown]>([
+    ['cat README.md', 'Bash', { command: 'cat README.md' }],
+    ['sed with a .. in its script', 'Bash', { command: "sed 's/../x/' README.md" }],
+    ['Read of README.md', 'Read', { file_path: 'README.md' }],
+  ])('allows %s', (_name, tool, input) => {
+    expect(run(tool, input)).toEqual({ decision: 'allow' });
+  });
+
+  it('allows a Read of the session tool results', () => {
+    writeFileSync(join(results(), 'out.txt'), 'big');
+    expect(run('Read', { file_path: join(results(), 'out.txt') })).toEqual({ decision: 'allow' });
+  });
 });
 
 describe('very long paths', () => {

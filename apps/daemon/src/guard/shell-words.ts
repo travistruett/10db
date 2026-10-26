@@ -14,6 +14,12 @@ export interface ShellSegment {
    * `$(…)`, backtick, `<(…)` and `>(…)` substitutions, and its here-documents.
    */
   readonly nested: readonly string[];
+  /**
+   * The words are the ones the shell passes. False when an ANSI-C escape the scanner does not
+   * decode keeps its `$'…'` text, or a lone `{` or `}` stands in the middle of a command, where zsh
+   * may read it as a group.
+   */
+  readonly wordsCertain: boolean;
 }
 
 /** A command split into the segments it runs. */
@@ -102,6 +108,20 @@ function readHereDocuments(command: string, at: number, pending: readonly HereDo
 
 const SEPARATORS: ReadonlySet<string> = new Set([';', '|', '&']);
 
+/** Reserved words a command may follow and still run, in this shell (`time` is a wrapper). */
+const BEFORE_COMMAND: ReadonlySet<string> = new Set([
+  '!',
+  'if',
+  'then',
+  'elif',
+  'else',
+  'do',
+  'while',
+  'until',
+]);
+/** Words after which a lone `{` still opens a group: the reserved words above, and `time`. */
+const GROUP_LEADERS: ReadonlySet<string> = new Set([...BEFORE_COMMAND, 'time']);
+
 /**
  * Splits from `from` to the end of the command or, for a substitution, to the unquoted `)` that
  * closes it. Quotes, escapes, comments and here-documents are read as the shell reads them, so
@@ -113,6 +133,7 @@ function scan(command: string, from: number, substitution: boolean): Scan {
   const parens: (number | null)[] = [];
   const pending: HereDocument[] = [];
   let certain = true;
+  let wordsCertain = true;
   let opened = 0;
   let raw = '';
   let word = '';
@@ -133,12 +154,18 @@ function scan(command: string, from: number, substitution: boolean): Scan {
     const text = raw.trim();
     if (text !== '') {
       const subshells = parens.filter((p): p is number => p !== null);
-      segments.push({ raw: text, words, separator, subshells, nested });
+      segments.push({ raw: text, words, separator, subshells, nested, wordsCertain });
     }
     raw = '';
     words = [];
     nested = [];
+    wordsCertain = true;
   };
+  // Where a lone `{` or `}` opens or closes a group: no word yet, or only reserved words a command
+  // may follow, or after `function name`.
+  const commandPosition = (): boolean =>
+    word === '' &&
+    (words.every((w) => GROUP_LEADERS.has(w)) || (words.length === 2 && words[0] === 'function'));
   const append = (text: string): void => {
     raw += text;
     word += text;
@@ -204,17 +231,26 @@ function scan(command: string, from: number, substitution: boolean): Scan {
     }
     if (ch === '$' && next === "'") {
       // ANSI-C quoting: a backslash escapes a quote, a backslash or a double quote; every other
-      // escape (`\n`, `\t`, `\x41`) decodes to a character this scanner does not model.
+      // escape (`\n`, `\t`, `\x41`) decodes to a character this scanner does not model. Such a
+      // word keeps its `$'…'` text as written, so no rule reads it as the word the shell passes.
       let j = i + 2;
+      let decoded = '';
+      let decodes = true;
       while (j < command.length && command.charAt(j) !== "'") {
         const escaped = command.charAt(j) === '\\' && j + 1 < command.length;
-        if (escaped && !`'\\"`.includes(command.charAt(j + 1))) certain = false;
-        word += command.charAt(escaped ? j + 1 : j);
+        if (escaped && !`'\\"`.includes(command.charAt(j + 1))) decodes = false;
+        decoded += command.charAt(escaped ? j + 1 : j);
         j += escaped ? 2 : 1;
       }
-      if (j >= command.length) certain = false;
+      if (j >= command.length) decodes = false;
       const end = Math.min(j, command.length);
-      raw += command.slice(i, end + 1);
+      const text = command.slice(i, end + 1);
+      if (!decodes) {
+        certain = false;
+        wordsCertain = false;
+      }
+      raw += text;
+      word += decodes ? decoded : text;
       inWord = true;
       i = end;
       continue;
@@ -296,10 +332,15 @@ function scan(command: string, from: number, substitution: boolean): Scan {
       }
       continue;
     }
-    // `{` and `}` only open or close a group when they stand alone as words.
+    // `{` and `}` only open or close a group when they stand alone as words where a command
+    // starts. Anywhere else bash passes them as words, while zsh may still read a group there.
     if ((ch === '{' || ch === '}') && !inWord && /^[\s;]?$/.test(next)) {
-      flush('');
-      continue;
+      if (commandPosition()) {
+        flush('');
+        continue;
+      }
+      certain = false;
+      wordsCertain = false;
     }
     raw += ch;
     if (ch === ' ' || ch === '\t') {
@@ -331,17 +372,6 @@ export function splitCommand(command: string): ShellSegment[] {
   return [...segments, ...segments.flatMap((s) => s.nested.flatMap((body) => splitCommand(body)))];
 }
 
-/** Reserved words a command may follow and still run, in this shell (`time` is a wrapper). */
-const BEFORE_COMMAND: ReadonlySet<string> = new Set([
-  '!',
-  'if',
-  'then',
-  'elif',
-  'else',
-  'do',
-  'while',
-  'until',
-]);
 /** Reserved words of loops and functions, whose commands run later, again or not at all. */
 const OUT_OF_ORDER: ReadonlySet<string> = new Set([
   'for',
@@ -356,9 +386,24 @@ const OUT_OF_ORDER: ReadonlySet<string> = new Set([
   'coproc',
 ]);
 
+/** A redirection word: an optional descriptor (`2`, `&`), the operator, and its target if attached. */
+const REDIRECTION_WORD = /^(?:\d+|&)?(?:<<<|<<-?|<>|<&|>>|>\||>&|<|>)/;
+
 /**
- * The words of a segment from its command on, past the reserved words before it: whether a `!`
- * inverts its status, and whether it belongs to a loop or a function.
+ * How many words a redirection at `at` takes: none when the word is not one, one when its target is
+ * attached (`2>/dev/null`), two when the target is the next word (`> out`).
+ */
+function redirectionSpan(words: readonly string[], at: number): number {
+  const word = words[at] ?? '';
+  const operator = REDIRECTION_WORD.exec(word);
+  if (!operator) return 0;
+  return operator[0] === word ? 2 : 1;
+}
+
+/**
+ * The words of a segment from its command on, past the reserved words and the redirections before
+ * it (`2>/dev/null rm` runs `rm`): whether a `!` inverts its status, and whether it belongs to a
+ * loop or a function.
  */
 export function leadingWords(words: readonly string[]): {
   readonly command: string[];
@@ -368,11 +413,17 @@ export function leadingWords(words: readonly string[]): {
   let negated = false;
   let outOfOrder = false;
   let i = 0;
-  for (; i < words.length; i += 1) {
+  while (i < words.length) {
     const word = words[i] ?? '';
+    const redirection = redirectionSpan(words, i);
+    if (redirection > 0) {
+      i += redirection;
+      continue;
+    }
     if (OUT_OF_ORDER.has(word)) outOfOrder = true;
     if (!BEFORE_COMMAND.has(word)) break;
     if (word === '!') negated = true;
+    i += 1;
   }
   return { command: words.slice(i), negated, outOfOrder };
 }
@@ -436,21 +487,36 @@ interface Prefixes {
   readonly flags: readonly { readonly wrapper: string; readonly flag: string }[];
 }
 
-/** Walks the leading `VAR=value` assignments and pass-through wrappers with their flags. */
-function prefixes(words: readonly string[], lookThroughRunners: boolean): Prefixes {
+/**
+ * Walks the leading `VAR=value` assignments and pass-through wrappers with their flags, and with
+ * `skipRedirections` the redirections among them (`env >x rm` runs `rm`).
+ */
+function prefixes(
+  words: readonly string[],
+  lookThroughRunners: boolean,
+  skipRedirections = false,
+): Prefixes {
   const flags: { wrapper: string; flag: string }[] = [];
+  const redirection = (at: number): number => (skipRedirections ? redirectionSpan(words, at) : 0);
   let i = 0;
   while (i < words.length) {
     const w = words[i] ?? '';
     const name = commandName(w);
     const wrapped =
       WRAPPERS.get(name) ?? (lookThroughRunners ? RUNNER_WRAPPERS.get(name) : undefined);
-    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(w)) {
+    if (redirection(i) > 0) {
+      i += redirection(i);
+    } else if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(w)) {
       i += 1;
     } else if (wrapped) {
       i += 1;
-      while (i < words.length && (words[i] ?? '').startsWith('-')) {
+      while (i < words.length) {
         const flag = words[i] ?? '';
+        if (redirection(i) > 0) {
+          i += redirection(i);
+          continue;
+        }
+        if (!flag.startsWith('-')) break;
         flags.push({ wrapper: name, flag });
         i += flagSpan(flag, wrapped.valueFlags);
       }
@@ -466,13 +532,23 @@ function prefixes(words: readonly string[], lookThroughRunners: boolean): Prefix
  * Drops leading `VAR=value` assignments and pass-through wrappers such as `env`, `nohup` and
  * `xargs` together with their flags, and names the command it finds by its basename. With
  * `keepCommandPath` the command keeps the path it was written with: `/tmp/x/git` runs another
- * program than `git`.
+ * program than `git`. With `skipRedirections` the redirections among them are dropped too, so the
+ * guard judges the command they would hide.
  */
 export function stripCommandPrefixes(
   words: readonly string[],
-  options: { readonly lookThroughRunners?: boolean; readonly keepCommandPath?: boolean } = {},
+  options: {
+    readonly lookThroughRunners?: boolean;
+    readonly keepCommandPath?: boolean;
+    readonly skipRedirections?: boolean;
+  } = {},
 ): string[] {
-  const rest = words.slice(prefixes(words, options.lookThroughRunners === true).at);
+  const at = prefixes(
+    words,
+    options.lookThroughRunners === true,
+    options.skipRedirections === true,
+  ).at;
+  const rest = words.slice(at);
   const head = rest[0];
   if (head === undefined || options.keepCommandPath === true) return rest;
   return [commandName(head), ...rest.slice(1)];
@@ -521,7 +597,7 @@ function isSplitString(flag: string): boolean {
  * or a long option not spelled in full, after which the guard can't tell a value from the program.
  */
 export function hidesEnvCommand(words: readonly string[]): boolean {
-  return prefixes(words, true).flags.some(
+  return prefixes(words, true, true).flags.some(
     (f) => f.wrapper === 'env' && (isSplitString(f.flag) || isUnknownEnvLongFlag(f.flag)),
   );
 }

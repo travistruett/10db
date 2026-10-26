@@ -1,6 +1,6 @@
 import { lstatSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, resolve, sep } from 'node:path';
+import { isAbsolute, join, sep } from 'node:path';
 import { ClaimKind, Delivery, type AreaDef, type HazardDef } from '@10db/contracts';
 import { z } from 'zod';
 import {
@@ -145,6 +145,8 @@ const MAX_WILDCARDS = 4;
  * which words it takes as its target cannot be told apart from the paths rm removes.
  */
 const REDIRECTION = /[<>]/;
+const UNREAD_WORDS =
+  "The command has words the guard cannot read: an ANSI-C escape such as $'\\x2e', or a lone { or } in the middle of a command. Write the words plainly.";
 const UNJUDGED_RM = 'rm -r argument uses shell syntax the guard does not judge; name the paths.';
 
 function hasGitPart(path: string): boolean {
@@ -315,7 +317,10 @@ function commandOf(segment: ShellSegment): {
 } {
   const leading = leadingWords(segment.words);
   return {
-    words: stripCommandPrefixes(leading.command, { lookThroughRunners: true }),
+    words: stripCommandPrefixes(leading.command, {
+      lookThroughRunners: true,
+      skipRedirections: true,
+    }),
     negated: leading.negated,
     outOfOrder: leading.outOfOrder,
     hiddenByEnv: hidesEnvCommand(leading.command),
@@ -396,6 +401,7 @@ function judgeShell(
     const head = words[0] ?? '';
     const piped = previousSeparator === '|';
     previousSeparator = segment.separator;
+    if (!segment.wordsCertain) return deny(UNREAD_WORDS);
     if (head === 'sudo') return deny('sudo is never allowed.');
     if (hiddenByEnv)
       return deny(
@@ -501,7 +507,9 @@ const READ_ONLY_REFUSAL =
 export function judgeToolUse(input: GuardInput): GuardVerdict {
   // Every tool, in every step kind: no path under the data directory or the default sign-in.
   const searches = input.toolName === 'Grep' || input.toolName === 'Glob';
-  const base = resolve(input.repoPath, stringField(input.toolInput, 'path') ?? '.');
+  // The search path keeps its `..`, so a pattern under it is judged on each reading.
+  const searchPath = stringField(input.toolInput, 'path') ?? '.';
+  const base = isAbsolute(searchPath) ? searchPath : `${input.repoPath}${sep}${searchPath}`;
   for (const field of ['file_path', 'notebook_path', 'path', 'pattern'] as const) {
     // Grep's pattern is a regular expression, not a path; Glob's is a path pattern under `path`.
     if (field === 'pattern' && input.toolName !== 'Glob') continue;

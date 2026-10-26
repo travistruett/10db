@@ -12,7 +12,7 @@ import {
 } from 'node:path';
 import { SECRET_VARIABLES } from '../environment';
 import { abbreviates } from './git-rules';
-import { isWithin } from './paths';
+import { isWithin, isWithinOnEveryReading, realPathReadings } from './paths';
 
 /**
  * Two kinds of rule live here. The shell-text rules (Keychain commands, environment dumps, secret
@@ -295,14 +295,18 @@ function writtenWithin(protectedPath: ProtectedPath, target: string): boolean {
   });
 }
 
-/** The target is the protected path, inside it, or (for a family) a file named like it plus a suffix. */
+/**
+ * The target is the protected path, inside it, or (for a family) a file named like it plus a
+ * suffix, on any reading: as written, through its links as the kernel opens it, or with `..`
+ * collapsed first.
+ */
 function touches(protectedPath: ProtectedPath, target: string): boolean {
   if (isWithin(protectedPath.path, target) || writtenWithin(protectedPath, target)) return true;
   if (!protectedPath.family) return false;
-  const beside = resolve(target);
-  return (
-    lower(dirname(beside)) === lower(dirname(protectedPath.path)) &&
-    lower(basename(beside)).startsWith(`${lower(basename(protectedPath.path))}.`)
+  return [resolve(target), ...realPathReadings(target).paths].some(
+    (beside) =>
+      lower(dirname(beside)) === lower(dirname(protectedPath.path)) &&
+      lower(basename(beside)).startsWith(`${lower(basename(protectedPath.path))}.`),
   );
 }
 
@@ -335,7 +339,7 @@ function throughLinks(pattern: string): string {
  * descends into any directory the pattern names.
  */
 function globReaches(pattern: string, protectedPath: ProtectedPath, walking: boolean): boolean {
-  return [pattern, throughLinks(pattern)].some((candidate) => {
+  return [resolve(pattern), throughLinks(pattern)].some((candidate) => {
     const pat = lower(candidate);
     const patternSegments = pat.split('/');
     const star = patternSegments.indexOf('**');
@@ -366,18 +370,25 @@ interface Reach {
   readonly contains: boolean;
 }
 
+/** The word with `base` before it and its `..` kept, so each reading of it can be judged. */
+function written(word: string, base: string): string {
+  return isAbsolute(word) ? word : `${base}${sep}${word}`;
+}
+
 function reachRefusal(
   word: string,
   base: string | null,
   paths: readonly ProtectedPath[],
   reach: Reach,
 ): string | null {
-  const target = base === null && !isAbsolute(word) ? null : resolve(base ?? '/', word);
-  if (target === null) {
-    // The working directory is unknown after a `cd` the guard cannot follow: a word that names a
-    // protected path's last component is refused.
+  const target = base === null && !isAbsolute(word) ? null : written(word, base ?? '/');
+  // The working directory is unknown after a `cd` the guard cannot follow, or the path cannot be
+  // resolved now (a `..` after a part that does not exist yet may climb out of a link the command
+  // makes first): a word that names a protected path's last component is refused.
+  if (target === null || !realPathReadings(target).complete) {
     const segments = lower(word).split('/');
-    return paths.find((p) => segments.includes(lower(basename(p.path))))?.refusal ?? null;
+    const named = paths.find((p) => segments.includes(lower(basename(p.path))));
+    if (named || target === null) return named?.refusal ?? null;
   }
   const glob = GLOB_CHARACTERS.test(word);
   for (const p of paths) {
@@ -581,18 +592,24 @@ export function changedDirectory(
   return cwd === null && !isAbsolute(target) ? null : resolve(cwd ?? '/', target);
 }
 
-/** Whether a session's own saved tool output is what `value` names (Claude Code points the model at it). */
+/**
+ * Whether a session's own saved tool output is what `value` names, on every reading (Claude Code
+ * points the model at it).
+ */
 export function isOwnToolResult(
   session: { readonly configDir: string; readonly providerSessionId: string | null },
   value: string,
   baseDir: string,
 ): boolean {
   if (session.providerSessionId === null) return false;
-  const target = resolve(baseDir, expandTilde(value));
-  const parts = relative(session.configDir, target).split(sep);
+  const path = written(expandTilde(value), baseDir);
+  const parts = relative(session.configDir, resolve(path)).split(sep);
   const [projects, slug, id, results] = parts;
   if (projects !== 'projects' || slug === undefined || id !== session.providerSessionId)
     return false;
   if (results !== 'tool-results' || parts.includes('..')) return false;
-  return isWithin(join(session.configDir, 'projects', slug, id, 'tool-results'), target);
+  return isWithinOnEveryReading(
+    join(session.configDir, 'projects', slug, id, 'tool-results'),
+    path,
+  );
 }
