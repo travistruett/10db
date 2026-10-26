@@ -22,7 +22,7 @@ import {
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { seedWorkstream } from '../../test/fixtures';
-import { ManualClock } from '../clock';
+import { ManualClock, type Timer } from '../clock';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createInboxService, type InboxService } from '../inbox';
 import {
@@ -46,7 +46,15 @@ const DEFAULT_PAUSE_MS = 30 * 60_000;
 let store: Store;
 let close: () => void;
 let state: StateStore;
-let clock: ManualClock;
+/** A clock whose timers can be made to fire late, as after the machine slept past them. */
+class SleepyClock extends ManualClock {
+  asleep = false;
+  override setTimeout(fn: () => void, ms: number): Timer {
+    return this.asleep ? { cancel: () => undefined } : super.setTimeout(fn, ms);
+  }
+}
+
+let clock: SleepyClock;
 let inbox: InboxService;
 let pauses: AccountPauses;
 let runtime: AccountRuntime;
@@ -91,7 +99,7 @@ function build(): void {
 }
 
 beforeEach(() => {
-  clock = new ManualClock(new Date(2026, 9, 20, 12));
+  clock = new SleepyClock(new Date(2026, 9, 20, 12));
   ({ store, close } = createTestStore(() => clock.now()));
   state = createStateStore(store, createEventBus());
   // As in the daemon: a card's answer acts before the inbox records it.
@@ -274,7 +282,7 @@ describe('moving a project', () => {
       { projectId: project.id, card: null },
     );
     runtime.rateLimited(plan, inMinutes(90), project.id);
-    expect(limitCard().options).toEqual([]);
+    expect(limitCard().options.map((o) => o.label)).toEqual(['Later']);
     expect(limitCard().detail?.['accountCard']).toMatchObject({ moves: [] });
     // And when the second plan is free again, the card offers it once more.
     pauses.resume(second.id);
@@ -309,5 +317,51 @@ describe('moving a project', () => {
       InvalidError,
     );
     expect(getProject(state.db, project.id).movedFromAccountId).toBe(plan);
+  });
+
+  it('refuses an answer that races the end of the limit: nothing moves, and the card is gone', () => {
+    // The machine sleeps past the reset, so the pause's own timer never gets to fire.
+    clock.asleep = true;
+    runtime.rateLimited(plan, inMinutes(60), project.id);
+    const card = limitCard();
+    clock.advance(61 * 60_000);
+    expect(() => inbox.answer(card.id, { choice: CONTINUE })).toThrow(ConflictError);
+    expect(getProject(state.db, project.id)).toMatchObject({
+      accountId: plan,
+      movedFromAccountId: null,
+    });
+    expect(openCards()).toEqual([]);
+  });
+
+  it('closes a limit card whose pause ended while the daemon was down', () => {
+    runtime.rateLimited(plan, inMinutes(60), project.id);
+    const stale = limitCard();
+    moveBack.stop();
+    pauses.stop();
+    clock.advance(90 * 60_000);
+    build();
+    pauses.restore();
+    expect(openCards().map((c) => c.id)).not.toContain(stale.id);
+  });
+
+  it('closes a limit card when the refusal that replaced its pause is lifted', () => {
+    runtime.rateLimited(plan, inMinutes(60), project.id);
+    const stale = limitCard();
+    pauses.pause(plan, { reason: 'refused', until: null }, { projectId: project.id, card: null });
+    pauses.resume(plan);
+    expect(openCards().map((c) => c.id)).not.toContain(stale.id);
+  });
+
+  it('refuses a choice that the card no longer offers', () => {
+    runtime.rateLimited(plan, inMinutes(60), project.id);
+    const card = limitCard();
+    pauses.pause(
+      second.id,
+      { reason: 'refused', until: null },
+      { projectId: project.id, card: null },
+    );
+    runtime.rateLimited(plan, inMinutes(90), project.id);
+    expect(() => inbox.answer(card.id, { choice: CONTINUE })).toThrow(InvalidError);
+    expect(getProject(state.db, project.id).accountId).toBe(plan);
   });
 });

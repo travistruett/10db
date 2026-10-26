@@ -111,17 +111,14 @@ export function usageLimitCard(
     }`,
     foldKey: accountFoldKey(account.id, AccountPauseReason.UsageLimit),
     detail: detail(account, AccountPauseReason.UsageLimit, null, null, { moves }),
-    ...(moves.length > 0
-      ? {
-          options: [
-            ...moves.map((m) => ({
-              label: m.choice,
-              description: `Move ${project.name} there until ${account.label} is available again`,
-            })),
-            { label: AccountCardChoice.Later, description: `Wait for ${account.label}` },
-          ],
-        }
-      : {}),
+    // Later is always offered, so a stale move choice is refused rather than recorded as an answer.
+    options: [
+      ...moves.map((m) => ({
+        label: m.choice,
+        description: `Move ${project.name} there until ${account.label} is available again`,
+      })),
+      { label: AccountCardChoice.Later, description: `Wait for ${account.label}` },
+    ],
   };
 }
 

@@ -130,8 +130,10 @@ export function createAccountPauses(opts: {
           reason: 'the account resumed',
         });
       }
-      // A usage limit's cards offered moves for a limit that is over; answering one later would move for nothing.
-      if (was?.reason === AccountPauseReason.UsageLimit) withdrawLimitCards(ctx, id);
+      // One pause holds an account, so none is in force now and no usage limit is: its cards offered
+      // moves for a limit that is over, and answering one later would move for nothing. This holds
+      // whichever pause was lifted, and after a restart that remembers none.
+      withdrawLimitCards(ctx, id);
       ctx.emit({
         type: EventType.AccountResumed,
         entityType: 'account',

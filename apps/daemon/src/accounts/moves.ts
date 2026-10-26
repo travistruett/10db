@@ -1,5 +1,6 @@
 import {
   AccountPauseReason,
+  ConflictError,
   ACTIVE_STATES,
   type AccountDto,
   type AccountId,
@@ -95,6 +96,14 @@ export function createAccountMoves(opts: {
     move(projectId, to, why, { patch = {}, answering } = {}) {
       const project = getProject(db, projectId);
       const from = project.accountId;
+      // A limit card answered after its limit ended is stale: asking lifts an expired pause, which
+      // also closes the card, and nothing may move for a limit that is over.
+      if (
+        answering !== undefined &&
+        why.cause === MoveCause.UsageLimit &&
+        usageLimitEnd(opts.pauses.pausedFor(from)) === null
+      )
+        throw new ConflictError('That usage limit has ended, so this card no longer applies');
       if (to === from)
         return opts.state.write((ctx) => patchProject(ctx, projectId, { ...patch, accountId: to }));
       const paused = opts.pauses.pausedFor(from);
