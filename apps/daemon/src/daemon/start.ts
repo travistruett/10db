@@ -105,9 +105,10 @@ export interface DaemonOptions {
   readonly permissionModeOverride?: PermissionMode;
   /**
    * Runs every lane under the lane sandbox, in `default` permission mode; `loopback` lets its
-   * commands bind local ports. Null or absent, lanes run unsandboxed.
+   * commands bind local ports, and `tmpRoot` (tests) moves its temp dirs off `/private/tmp`. Null
+   * or absent, lanes run unsandboxed.
    */
-  readonly laneSandbox?: { readonly loopback: boolean } | null;
+  readonly laneSandbox?: { readonly loopback: boolean; readonly tmpRoot?: string } | null;
   /** better_sqlite3.node for bundled runs; source runs leave it unset. */
   readonly sqliteBinding?: string;
   readonly clock?: Clock;
@@ -439,6 +440,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         loopback: opts.laneSandbox.loopback,
         loginConfigDir: launcher.loginConfigDir(),
         gitDirs: (repo) => git.gitDirs(repo),
+        ...(opts.laneSandbox.tmpRoot === undefined ? {} : { tmpRoot: opts.laneSandbox.tmpRoot }),
       })
     : null;
   const createdRunner = createRunner({

@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -16,10 +17,13 @@ import { createTempRepo, isolatedGitEnv, tempDir, type TempDir } from '../../tes
 import { createGit } from '../git';
 import {
   createLaneSandbox,
+  fileAccessJudge,
   SandboxProfileError,
   type LaneSandbox,
   type LaneSessionInput,
 } from './index';
+import { secretFilesIn } from './lane-sandbox';
+import { isEqualOrUnder } from './protected-reads';
 
 const git = createGit();
 const projectId = mintId('Project');
@@ -142,7 +146,7 @@ describe('createLaneSandbox', () => {
     }
   });
 
-  it("opens a linked worktree's common dir for reading and its own git dir for writing", async () => {
+  it("opens a linked worktree's common dir for reading, and never its own git dir for writing", async () => {
     const outside = tempDir('lane-worktree');
     try {
       const worktree = join(outside.path, 'wt');
@@ -157,7 +161,8 @@ describe('createLaneSandbox', () => {
       try {
         const { allowRead, allowWrite } = session.spec.settings.filesystem;
         expect(allowRead).toContain(commonDir);
-        expect(allowWrite).toContain(join(commonDir, 'worktrees', 'wt'));
+        // The daemon's unsandboxed git follows `commondir`, `gitdir` and `config.worktree` there.
+        expect(allowWrite.filter((path) => isEqualOrUnder(path, commonDir))).toEqual([]);
       } finally {
         session.dispose();
       }
@@ -324,11 +329,74 @@ describe('createLaneSandbox', () => {
     }).not.toThrow();
   });
 
-  it('removes the temp dir it made when the profile is refused', async () => {
-    // A bracket is a pattern character no sandbox path may hold.
-    writeIn(checkout, '.env[1]');
-    await expect(sandbox().forSession(input())).rejects.toThrow(SandboxProfileError);
-    expect(readdirSync(tmpRoot)).toEqual([]);
+  it.each(['.env[1]', '.env]x', '.env}x', '.env{x', '.env\\x', '.env*'])(
+    'refuses the lane with a profile error for a secret file named %s, removing the temp dir it made',
+    async (name) => {
+      // Claude Code drops the whole sandbox, silently, over a pattern character in a path.
+      writeIn(checkout, name);
+      await expect(sandbox().forSession(input())).rejects.toThrow(SandboxProfileError);
+      expect(readdirSync(tmpRoot)).toEqual([]);
+    },
+  );
+
+  it.skipIf(process.platform !== 'darwin')(
+    'lists a secret file whatever the case of its name, as the file system folds it',
+    async () => {
+      const upper = writeIn(checkout, 'apps/x/.ENV.local');
+      const mixed = writeIn(checkout, '.Env');
+      const session = await sandbox().forSession(input());
+      try {
+        expect(session.spec.settings.filesystem.denyRead).toEqual(
+          expect.arrayContaining([upper, mixed]),
+        );
+      } finally {
+        session.dispose();
+      }
+    },
+  );
+
+  it.skipIf(process.getuid?.() === 0)(
+    'refuses the lane when a directory in the checkout cannot be listed, naming it',
+    async () => {
+      const locked = join(checkout, 'apps', 'locked');
+      mkdirSync(locked, { recursive: true });
+      chmodSync(locked, 0o000);
+      try {
+        await expect(sandbox().forSession(input())).rejects.toThrow(
+          /secretFiles: cannot list apps\/locked/,
+        );
+        expect(readdirSync(tmpRoot)).toEqual([]);
+      } finally {
+        chmodSync(locked, 0o700);
+      }
+    },
+  );
+
+  it("refuses the session's file tools on its secret files, by real path, and still searches the checkout", async () => {
+    const env = writeIn(checkout, '.env', 'SECRET=1');
+    writeIn(checkout, 'src/a.ts');
+    symlinkSync(env, join(checkout, 'src', 'innocent'));
+    const session = await sandbox().forSession(input());
+    try {
+      const judge = fileAccessJudge(session.fileAccess);
+      const refused = (verdict: 'ok' | { refuse: string }): string =>
+        verdict === 'ok' ? '' : verdict.refuse;
+      expect(refused(judge.read('Read', { file_path: '.env' }))).toContain('protected path');
+      expect(refused(judge.read('Read', { file_path: env }))).toContain('protected path');
+      expect(refused(judge.read('Read', { file_path: 'src/innocent' }))).toContain(
+        'protected path',
+      );
+      expect(refused(judge.read('Grep', { path: '.env', pattern: 'SECRET' }))).toContain(
+        'protected path',
+      );
+      expect(refused(judge.read('Glob', { pattern: '.env' }))).toContain('protected path');
+      expect(judge.read('Read', { file_path: 'src/a.ts' })).toBe('ok');
+      expect(judge.read('Grep', { pattern: 'SECRET' })).toBe('ok');
+      expect(judge.read('Grep', { path: checkout, pattern: 'SECRET' })).toBe('ok');
+      expect(judge.read('LS', { path: checkout })).toBe('ok');
+    } finally {
+      session.dispose();
+    }
   });
 
   it('gives each session of a project its own temp dir', async () => {
@@ -343,4 +411,32 @@ describe('createLaneSandbox', () => {
     }
     expect(readdirSync(tmpRoot)).toEqual([]);
   });
+});
+
+describe('secretFilesIn', () => {
+  const failing = (dir: string, code: string) => (path: string) => {
+    if (path === dir) throw Object.assign(new Error(`${code}: ${path}`), { code });
+    return readdirSync(path, { withFileTypes: true });
+  };
+
+  it.each(['ENOENT', 'ENOTDIR'])(
+    'skips a directory that vanished during the walk (%s), which hides nothing',
+    (code) => {
+      const kept = writeIn(checkout, 'apps/a/.env');
+      writeIn(checkout, 'apps/gone/.env');
+      expect(secretFilesIn(checkout, failing(join(checkout, 'apps', 'gone'), code))).toEqual([
+        kept,
+      ]);
+    },
+  );
+
+  it.each(['EACCES', 'EPERM', 'EIO'])(
+    'refuses on any other listing error (%s), naming the directory by its relative path',
+    (code) => {
+      writeIn(checkout, 'apps/odd/.env');
+      expect(() => secretFilesIn(checkout, failing(join(checkout, 'apps', 'odd'), code))).toThrow(
+        new SandboxProfileError('secretFiles', 'cannot list apps/odd'),
+      );
+    },
+  );
 });

@@ -15,6 +15,8 @@ export interface FileAccessContext {
   readonly checkout: string;
   readonly home: string;
   readonly protectedReads: readonly string[];
+  /** The checkout's secret files by exact real path; unlike protected reads, a search over their directory is not refused. */
+  readonly secretFiles?: readonly string[];
   readonly readList: readonly string[];
   /** Claude Code's config directory, where it keeps each session's tool results. */
   readonly configDir: string;
@@ -141,6 +143,7 @@ const READ_STRICTNESS: Record<ReadAccess, number> = {
 
 function judgeRead(real: string, ctx: FileAccessContext, tree: boolean): ReadAccess {
   if (isOwnToolResult(real, ctx)) return 'allowed';
+  if ((ctx.secretFiles ?? []).some((file) => pathsEqual(real, file))) return 'protected';
   const roots = ctx.protectedReads.flatMap(spellings);
   if (roots.some((root) => isEqualOrUnder(real, root))) return 'protected';
   if (tree && roots.some((root) => isEqualOrUnder(root, real))) return 'contains-protected';

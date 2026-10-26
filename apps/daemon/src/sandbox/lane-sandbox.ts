@@ -1,6 +1,7 @@
-import { readdirSync, realpathSync } from 'node:fs';
-import { join } from 'node:path';
+import { readdirSync, realpathSync, type Dirent } from 'node:fs';
+import { join, relative } from 'node:path';
 import type { PermissionRuleDto, ProjectDto } from '@10db/contracts';
+import { foldPathCase } from '../guard';
 import { deniedEnvNames } from './env-allowlist';
 import { claudeProtectedPaths, type FileAccessContext } from './file-access';
 import { packageCacheEnv, projectCacheDir } from './package-cache';
@@ -65,26 +66,43 @@ export interface LaneSandboxDeps {
 }
 
 const NETWORK_TOOL = 'SandboxNetworkAccess';
-const SECRET_FILE_PREFIX = '.env';
+/** Folded the way the file system folds names, so `.ENV` is caught where it is the same file. */
+const SECRET_FILE_PREFIX = foldPathCase('.env');
 const UNWALKED_DIRECTORIES: ReadonlySet<string> = new Set(['node_modules', '.git']);
+/** Listing errors that mean the directory is gone, so it can hide no secret file. */
+const VANISHED: ReadonlySet<string> = new Set(['ENOENT', 'ENOTDIR']);
 
-/** Every `.env*` file, or link, under `root`, by real path; directories in `UNWALKED_DIRECTORIES` and links are not entered. */
-function secretFilesIn(root: string): string[] {
+type ListDirectory = (dir: string) => Dirent[];
+const listDirectory: ListDirectory = (dir) => readdirSync(dir, { withFileTypes: true });
+
+function errorCode(error: unknown): string | null {
+  return error instanceof Error && 'code' in error && typeof error.code === 'string'
+    ? error.code
+    : null;
+}
+
+/**
+ * Every `.env*` file, or link, under `root`, by real path; directories in `UNWALKED_DIRECTORIES`
+ * and links are not entered. A directory that vanished mid-walk is skipped; one that can't be
+ * listed for any other reason could hide a secret file, so the walk refuses, naming it.
+ */
+export function secretFilesIn(root: string, list: ListDirectory = listDirectory): string[] {
   const found: string[] = [];
   const pending = [root];
   for (let dir = pending.pop(); dir !== undefined; dir = pending.pop()) {
-    let entries;
+    let entries: Dirent[];
     try {
-      entries = readdirSync(dir, { withFileTypes: true });
-    } catch {
-      // A directory that can't be listed could hide a secret file the profile must name.
-      throw new SandboxProfileError('secretFiles', 'unreadable');
+      entries = list(dir);
+    } catch (error) {
+      const code = errorCode(error);
+      if (code !== null && VANISHED.has(code)) continue;
+      throw new SandboxProfileError('secretFiles', `cannot list ${relative(root, dir) || '.'}`);
     }
     for (const entry of entries) {
       const path = join(dir, entry.name);
       if (entry.isDirectory()) {
         if (!UNWALKED_DIRECTORIES.has(entry.name)) pending.push(path);
-      } else if (entry.name.startsWith(SECRET_FILE_PREFIX)) {
+      } else if (foldPathCase(entry.name).startsWith(SECRET_FILE_PREFIX)) {
         found.push(path);
       }
     }
@@ -124,7 +142,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
     async forSession(input) {
       const checkout = realCheckoutOf(input.project.repoPath);
       const secretFiles = secretFilesIn(checkout);
-      const { gitDir, commonDir } = await deps.gitDirs(checkout);
+      const { commonDir } = await deps.gitDirs(checkout);
       const linkedWorktree = !isEqualOrUnder(commonDir, checkout);
       const protectedList = protectedReads({
         home: deps.home,
@@ -157,8 +175,11 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           packageCacheDir: cacheDir,
           allowedDomains: hosts,
           readList,
+          // Read-only: the daemon's unsandboxed git follows a worktree's `commondir`, `gitdir` and
+          // `config.worktree`, so a lane that could write its git dir could aim that git at a
+          // config it wrote. Lanes commit through the daemon.
           extraReads: linkedWorktree ? [commonDir] : [],
-          extraWrites: linkedWorktree ? [gitDir] : [],
+          extraWrites: [],
           loopback: deps.loopback,
           deniedEnvNames: deniedEnvNames({ ...input.env, ...env }),
         });
@@ -194,6 +215,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           checkout: input.project.repoPath,
           home: deps.home,
           protectedReads: protectedList,
+          secretFiles,
           readList,
           configDir: input.configDir,
           get providerSessionId() {

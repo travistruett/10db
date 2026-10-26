@@ -43,7 +43,7 @@ const sandboxPath = z
       !path.startsWith('//') &&
       path === posix.normalize(path) &&
       (path === '/' || !path.endsWith('/')) &&
-      !/[*?[{\n]/.test(path),
+      !/[*?[\]{}\\\n]/.test(path),
     'not a plain normalized absolute path',
   );
 const sandboxDomain = z.string().regex(/^(\*\.)?[a-z0-9.-]+$/);
