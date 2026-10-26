@@ -134,13 +134,17 @@ function isRecursiveRm(words: readonly string[]): boolean {
 
 /** A plain path: these characters only, after an optional `~` or `~/` at the very start. */
 const PLAIN_PATH = /^(?:~(?=\/|$))?[A-Za-z0-9_\-./@+%,:]*$/;
-/** A last segment with wildcards: no leading `.`, no character but these and `*` and `?`. */
-const WILDCARD_SEGMENT = /^[A-Za-z0-9_\-*?][A-Za-z0-9_\-.*?]*$/;
+/**
+ * A last segment with wildcards: no leading `.`, no character but these and `*` and `?`, and no two
+ * `*` side by side, which zsh's `globstarshort` turns into a walk that follows links.
+ */
+const WILDCARD_SEGMENT = /^(?!.*\*\*)[A-Za-z0-9_\-*?][A-Za-z0-9_\-.*?]*$/;
 const MAX_WILDCARDS = 4;
-/** A redirection word, such as `2>/dev/null` or a bare `>` whose target is the next word. */
-const REDIRECTION = /^\d*(?:&>>?|>\||>>?&?|<&?)/;
-/** Text that can quote or escape a word, which the parser drops: a word in such a segment may only look like a redirection. */
-const QUOTING = /['"\\`]/;
+/**
+ * A redirection or here-document anywhere in the segment, or a quoted word that looks like one:
+ * which words it takes as its target cannot be told apart from the paths rm removes.
+ */
+const REDIRECTION = /[<>]/;
 const UNJUDGED_RM = 'rm -r argument uses shell syntax the guard does not judge; name the paths.';
 
 function hasGitPart(path: string): boolean {
@@ -225,31 +229,45 @@ function rmWildcard(input: GuardInput, arg: string): GuardVerdict | null {
 }
 
 /**
+ * The words of an `rm` that may name paths. Options end at the first `--` or the first operand:
+ * after either, BSD rm takes every word as a path, `-d/../.git` too. GNU rm still reads a `-` word
+ * after an operand as an option; judging it as a path as well only refuses more.
+ */
+function rmArguments(words: readonly string[]): string[] {
+  const args: string[] = [];
+  let options = true;
+  for (const word of words.slice(1)) {
+    if (options && word === '--') {
+      options = false;
+      continue;
+    }
+    if (options && word.startsWith('-') && word !== '-') continue;
+    options = false;
+    args.push(word);
+  }
+  return args;
+}
+
+/**
  * Judges each argument of an `rm -r`. An argument is judged only as a plain path or as a plain
  * directory followed by one wildcard segment; any other shell syntax (grouping, braces, classes,
- * escapes, `~user`, `=cmd`, deeper wildcards) is refused, and the lane names the paths instead.
- * Quotes are not a special case: the parser drops them and the same rules apply.
+ * escapes, `~user`, `=cmd`, deeper wildcards, redirections) is refused, and the lane names the
+ * paths instead. Quotes are not a special case: the parser drops them and the same rules apply.
  */
 function rmVerdict(
   input: GuardInput,
   words: readonly string[],
   afterCd: boolean,
-  segment: { readonly raw: string; readonly separator: string },
+  segment: { readonly raw: string; readonly separator: string; readonly words: readonly string[] },
 ): GuardVerdict | null {
   if (!isRecursiveRm(words)) return null;
   if (afterCd)
     return deny('rm -r after cd is not allowed: the working directory is not the repository.');
   // A `(` straight after the arguments is zsh glob grouping, never a subshell.
   if (segment.separator === '(') return deny(UNJUDGED_RM);
-  const redirections = !QUOTING.test(segment.raw);
-  const args = words.slice(1).filter((w) => !w.startsWith('-'));
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index] ?? '';
-    const redirection = redirections ? REDIRECTION.exec(arg) : null;
-    if (redirection) {
-      if (redirection[0] === arg) index += 1;
-      continue;
-    }
+  if (REDIRECTION.test(segment.raw) || segment.words.some((w) => REDIRECTION.test(w)))
+    return deny(UNJUDGED_RM);
+  for (const arg of rmArguments(words)) {
     if (isOverLongPath(arg)) return deny(OVER_LONG_PATH_REFUSAL);
     if (arg.includes('$')) return deny(`rm -r of ${arg} uses a variable the guard cannot resolve.`);
     if (PLAIN_PATH.test(arg)) {

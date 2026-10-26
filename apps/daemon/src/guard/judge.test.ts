@@ -800,10 +800,51 @@ describe('rm -r arguments beyond a plain path', () => {
     'rm -rf build/a?c*',
     'rm -rf src/../dist',
     'rm -rf src/../dist/*',
-    'rm -rf build 2>/dev/null',
   ])('allows %s', (command) => {
     expect(run(command)).toEqual({ decision: 'allow' });
   });
+
+  it.each([
+    ['a redirection whose target hides an option', 'rm -rf > -x .git'],
+    ['a numbered redirection', 'rm -rf 2> -o ../victim'],
+    ['a clobber redirection', 'rm -rf >| -- .git'],
+    ['a redirection of both streams', 'rm -rf &> -x ~'],
+    ['a redirection joined to its target', 'rm -rf build 2>/dev/null'],
+    ['a double star', 'rm -rf dist/**'],
+    ['a triple star', 'rm -rf dist/***'],
+    ['a triple star with a name', 'rm -rf dist/***pkg'],
+    ['a double star inside a name', 'rm -rf dist/a**b'],
+  ])('denies rm -r with %s as unjudged syntax', (_name, command) => {
+    expect(run(command)).toEqual(unjudged);
+  });
+
+  it.each([
+    [
+      'a dash word after -- that climbs to .git',
+      'rm -rf -- -d/../.git',
+      'rm -r of a .git path is never allowed.',
+    ],
+    [
+      'a dash word after -- that climbs out',
+      'rm -rf -- -d/../../victim',
+      'rm -r of -d/../../victim reaches outside the repository (or is the repository itself).',
+    ],
+    ['.git after --', 'rm -rf -- .git', 'rm -r of a .git path is never allowed.'],
+    [
+      'a dash word after an operand, which BSD rm takes as a path',
+      'rm -rf build -d/../.git',
+      'rm -r of a .git path is never allowed.',
+    ],
+  ])('denies rm -r of %s', (_name, command, reason) => {
+    expect(run(command)).toEqual({ decision: 'deny', reason });
+  });
+
+  it.each(['rm -rf build', 'rm -rf -- dist', 'rm -rf dist/*', 'rm -rf dist/*.o', 'rm -r build -f'])(
+    'still allows %s',
+    (command) => {
+      expect(run(command)).toEqual({ decision: 'allow' });
+    },
+  );
 });
 
 describe('very long paths', () => {
