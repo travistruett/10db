@@ -1,4 +1,4 @@
-import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { foldPathCase, realPathOf, stringField, type FileAccessJudge } from '../guard';
 import { isEqualOrUnder, pathsEqual } from './protected-reads';
 
@@ -59,26 +59,10 @@ function plainPath(path: string, ctx: FileAccessContext): string {
   return resolve(ctx.checkout, expandHome(path, ctx.home));
 }
 
-/**
- * Where the kernel would open `path`: each component is resolved through links as it is met, and a
- * `..` applies to the directory reached so far, not to the text before it. Null when a component
- * cannot be examined.
- */
+/** Where the kernel would open `path`: links resolve as they are met, and `..` follows them. */
 function kernelPath(path: string, ctx: FileAccessContext): string | null {
   const raw = expandHome(path, ctx.home);
-  let current = isAbsolute(raw) ? sep : tryRealPath(ctx.checkout);
-  if (current === null) return null;
-  for (const part of raw.split(sep)) {
-    if (part === '' || part === '.') continue;
-    if (part === '..') {
-      current = dirname(current);
-      continue;
-    }
-    const next = tryRealPath(join(current, part));
-    if (next === null) return null;
-    current = next;
-  }
-  return current;
+  return tryRealPath(isAbsolute(raw) ? raw : `${ctx.checkout}${sep}${raw}`);
 }
 
 /** The real paths a tool input could name: the text read lexically, and as the kernel reads it. */
@@ -153,24 +137,81 @@ export function readAccess(
   return best ?? { access: 'ask', realPath: plainPath(path, ctx) };
 }
 
-const CLIMBS_AFTER_GLOB = /(^|[/{,])\.\.([/},]|$)/;
+const CLIMBS_AFTER_GLOB = /(^|\/)\.\.(\/|$)/;
+const MAX_BRACE_ALTERNATIVES = 64;
+
+/** Splits `text` at the commas that are not inside a nested brace. */
+function topLevelAlternatives(text: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+    if (character === '{') depth += 1;
+    else if (character === '}') depth -= 1;
+    else if (character === ',' && depth === 0) {
+      parts.push(text.slice(start, index));
+      start = index + 1;
+    }
+  }
+  parts.push(text.slice(start));
+  return parts;
+}
 
 /**
- * The directories a glob pattern names before its first glob character, joined onto `base`. A
- * pattern whose prefix says nothing about where it reaches (it opens with `{`, or climbs with `..`
- * after a glob character) is judged as the root.
+ * Expands the braces of a glob pattern, nested ones included. Null when a brace is unbalanced or
+ * the pattern has more than `MAX_BRACE_ALTERNATIVES` alternatives.
+ */
+function expandBraces(pattern: string): string[] | null {
+  const open = pattern.indexOf('{');
+  if (open === -1) return pattern.includes('}') ? null : [pattern];
+  let depth = 0;
+  let close = -1;
+  for (let index = open; index < pattern.length && close === -1; index += 1) {
+    if (pattern[index] === '{') depth += 1;
+    else if (pattern[index] === '}') {
+      depth -= 1;
+      if (depth === 0) close = index;
+    }
+  }
+  if (close === -1) return null;
+  const before = pattern.slice(0, open);
+  const after = pattern.slice(close + 1);
+  const expanded: string[] = [];
+  for (const alternative of topLevelAlternatives(pattern.slice(open + 1, close))) {
+    const rest = expandBraces(`${before}${alternative}${after}`);
+    if (rest === null) return null;
+    expanded.push(...rest);
+    if (expanded.length > MAX_BRACE_ALTERNATIVES) return null;
+  }
+  return expanded;
+}
+
+function underBase(base: string, literal: string): string {
+  if (isAbsolute(literal)) return literal;
+  return base === '.' ? literal : `${base}${sep}${literal}`;
+}
+
+/** The directory one brace-free pattern names before its first glob character. */
+function patternPrefix(pattern: string, base: string): string | null {
+  const wild = pattern.search(GLOB_CHARACTERS);
+  if (wild === -1) return pattern === '' ? null : underBase(base, pattern);
+  if (CLIMBS_AFTER_GLOB.test(pattern.slice(wild))) return sep;
+  const cut = pattern.lastIndexOf('/', wild);
+  if (cut === -1) return null;
+  return cut === 0 ? sep : underBase(base, pattern.slice(0, cut));
+}
+
+/**
+ * The directories a glob pattern reaches, joined onto `base`: every brace alternative is judged by
+ * its literal prefix. A pattern that cannot be judged by its prefix (an unbalanced brace, too many
+ * alternatives, a `..` after a glob character) is judged as the root.
  */
 function patternPaths(pattern: string, base: string): string[] {
-  const wild = pattern.search(GLOB_CHARACTERS);
-  if (wild === -1)
-    return pattern === '' ? [] : [isAbsolute(pattern) ? pattern : join(base, pattern)];
-  if (pattern.replace(/^\//, '').startsWith('{') || CLIMBS_AFTER_GLOB.test(pattern.slice(wild))) {
-    return [sep];
-  }
-  const cut = pattern.lastIndexOf('/', wild);
-  if (cut === -1) return [];
-  const literal = cut === 0 ? sep : pattern.slice(0, cut);
-  return [isAbsolute(literal) ? literal : join(base, literal)];
+  const alternatives = expandBraces(pattern);
+  if (alternatives === null) return [sep];
+  const prefixes = alternatives.map((alternative) => patternPrefix(alternative, base));
+  return [...new Set(prefixes.filter((prefix) => prefix !== null))];
 }
 
 /** The paths a read-side tool would open, as the tool's input spells them. */
@@ -180,10 +221,7 @@ export function readPathsOf(toolName: string, input: unknown): string[] {
       const file = stringField(input, 'file_path');
       return file === null ? [] : [file];
     }
-    case 'Grep': {
-      const base = stringField(input, 'path') ?? '.';
-      return [base, ...patternPaths(stringField(input, 'glob') ?? '', base)];
-    }
+    case 'Grep':
     case 'LS':
       return [stringField(input, 'path') ?? '.'];
     case 'Glob': {
@@ -215,8 +253,8 @@ function isClaudeProtected(real: string, ctx: FileAccessContext): boolean {
 
 const WRITE_STRICTNESS: Record<WriteAccess, number> = {
   ok: 0,
-  'claude-protected': 1,
-  'git-internal': 2,
+  'claude-protected': 2,
+  'git-internal': 4,
 };
 
 function judgeWrite(real: string, ctx: FileAccessContext): WriteAccess {
@@ -228,22 +266,23 @@ function judgeWrite(real: string, ctx: FileAccessContext): WriteAccess {
 
 /**
  * Judges a path a file tool would write, on the real path it names. A path with `..` after a link
- * is judged both ways and the stricter verdict wins.
+ * is judged both ways and the stricter verdict wins; a Claude-protected reading reached through a
+ * link outranks one that is not, since that is the one the judge refuses.
  */
 export function writeAccess(
   path: string,
   ctx: FileAccessContext,
 ): { access: WriteAccess; realPath: string; viaLink: boolean } {
   const baseline = withoutLinks(plainPath(path, ctx), ctx);
-  let best: { access: WriteAccess; realPath: string } | null = null;
+  let best: { access: WriteAccess; realPath: string; viaLink: boolean; rank: number } | null = null;
   for (const real of candidates(path, ctx)) {
     const access = judgeWrite(real, ctx);
-    if (best === null || WRITE_STRICTNESS[access] > WRITE_STRICTNESS[best.access]) {
-      best = { access, realPath: real };
-    }
+    const viaLink = !pathsEqual(real, baseline);
+    const rank = WRITE_STRICTNESS[access] + (access === 'claude-protected' && viaLink ? 1 : 0);
+    if (best === null || rank > best.rank) best = { access, realPath: real, viaLink, rank };
   }
-  const chosen = best ?? { access: 'ok' as const, realPath: plainPath(path, ctx) };
-  return { ...chosen, viaLink: !pathsEqual(chosen.realPath, baseline) };
+  if (best === null) return { access: 'ok', realPath: plainPath(path, ctx), viaLink: false };
+  return { access: best.access, realPath: best.realPath, viaLink: best.viaLink };
 }
 
 /** The guard's file-access judge for one lane: protected reads and git internals are refused by real path. */

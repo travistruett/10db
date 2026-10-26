@@ -11,36 +11,57 @@ function isMissing(error: unknown): boolean {
   return error instanceof Error && 'code' in error && error.code === 'ENOENT';
 }
 
+/** A path cannot be resolved the way the kernel would: a link loop, or `..` past a missing part. */
+export class PathResolutionError extends Error {
+  override readonly name = 'PathResolutionError';
+}
+
 /**
- * Resolves `p` to the path it really names, without requiring it to exist. Every existing
- * component is resolved (symlinks, including dangling ones, are followed through their targets),
- * and the part that does not exist yet is appended as written. A symlinked parent or a link to a
- * file that has not been created therefore cannot hide where a write would land.
+ * Resolves `p` the way the kernel opens it, without requiring it to exist. A resolved directory
+ * and a queue of components that remain are kept: `.` is skipped, `..` goes to the resolved
+ * directory's parent, and a link's target components go to the front of the queue (an absolute
+ * target restarts at its root). A link, even a dangling one, is therefore followed through its
+ * target, and a `..` inside a link target applies to where the link really leads. Components after
+ * the first missing one are appended as written; a `..` among them throws, as the kernel would
+ * fail it. A path that cannot be examined (EACCES, ENOTDIR) or loops through links throws.
  */
-function resolveThroughLinks(p: string, hops = 0): string {
-  if (hops > MAX_LINK_HOPS) return p;
-  const { root } = parse(p);
-  const parts = p.slice(root.length).split(sep).filter(Boolean);
-  let current = root;
-  for (const [index, part] of parts.entries()) {
-    const next = join(current, part);
+function resolveThroughLinks(p: string): string {
+  let directory = parse(p).root;
+  const queue = p.slice(directory.length).split(sep);
+  let hops = 0;
+  while (queue.length > 0) {
+    const part = queue.shift();
+    if (part === undefined || part === '' || part === '.') continue;
+    if (part === '..') {
+      directory = dirname(directory);
+      continue;
+    }
+    const next = join(directory, part);
     let isLink: boolean;
     try {
       isLink = lstatSync(next).isSymbolicLink();
     } catch (error) {
       if (!isMissing(error)) throw error;
-      return join(realpathSync.native(current), ...parts.slice(index));
+      const tail = [part, ...queue].filter((name) => name !== '' && name !== '.');
+      if (tail.includes('..')) {
+        throw new PathResolutionError(`${p} climbs with .. past a part that does not exist`);
+      }
+      return join(realpathSync.native(directory), ...tail);
     }
-    if (isLink) {
-      const target = resolve(dirname(next), readlinkSync(next));
-      return resolveThroughLinks(resolve(target, ...parts.slice(index + 1)), hops + 1);
+    if (!isLink) {
+      directory = next;
+      continue;
     }
-    current = next;
+    hops += 1;
+    if (hops > MAX_LINK_HOPS) throw new PathResolutionError(`${p} passes through too many links`);
+    const target = readlinkSync(next);
+    if (isAbsolute(target)) directory = parse(target).root;
+    queue.unshift(...target.slice(parse(target).root.length).split(sep));
   }
-  return realpathSync.native(current);
+  return realpathSync.native(directory);
 }
 
-/** The real path `p` names, following links through every existing component; `p` need not exist. Throws when a component cannot be examined (EACCES, ENOTDIR). */
+/** The real path `p` names, following links through every existing component; `p` need not exist. Throws when a component cannot be examined (EACCES, ENOTDIR), a `..` follows a missing part, or links loop. */
 export function realPathOf(p: string): string {
   return resolveThroughLinks(p);
 }
@@ -52,7 +73,11 @@ export function resolveInRepo(
 ): { inside: true; rel: string } | { inside: false } {
   try {
     const root = realpathSync.native(repoPath);
-    const target = resolveThroughLinks(resolve(repoPath, filePath));
+    // Joined as text, never `resolve`d: a `..` must apply to where a link leads, not to its name.
+    const base = resolve(repoPath);
+    const target = resolveThroughLinks(
+      isAbsolute(filePath) ? filePath : `${base}${sep}${filePath}`,
+    );
     const rel = relative(root, target);
     if (rel === '' || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
       return { inside: false };

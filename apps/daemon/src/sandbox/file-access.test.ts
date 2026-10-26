@@ -116,6 +116,33 @@ describe('readAccess', () => {
       expected: 'protected',
     },
     {
+      name: 'a link to a link whose target climbs with ..',
+      setup: () => {
+        mkdirSync(join(configDir, 'projects'), { recursive: true });
+        symlinkSync(join(configDir, 'projects'), join(checkout, 'c'));
+        symlinkSync('c/../x', join(checkout, 'd'));
+      },
+      path: () => join(checkout, 'd'),
+      expected: 'protected',
+    },
+    {
+      name: 'a link loop',
+      setup: () => {
+        symlinkSync('b', join(checkout, 'a'));
+        symlinkSync('a', join(checkout, 'b'));
+      },
+      path: () => join(checkout, 'a'),
+      expected: 'ask',
+    },
+    {
+      name: 'an ordinary link to a checkout directory',
+      setup: () => {
+        symlinkSync('src', join(checkout, 'lnk-src'));
+      },
+      path: () => join(checkout, 'lnk-src', 'a.ts'),
+      expected: 'inside',
+    },
+    {
       name: 'a plain .. inside the checkout',
       path: () => `${checkout}/src/../src/a.ts`,
       expected: 'inside',
@@ -177,6 +204,18 @@ describe('readPathsOf', () => {
       input: { pattern: '../../x/*' },
       expected: ['.', '../../x'],
     },
+    {
+      name: 'Grep ignores its glob filter',
+      tool: 'Grep',
+      input: { path: 'src', glob: '../../*' },
+      expected: ['src'],
+    },
+    {
+      name: 'Glob with brace alternatives',
+      tool: 'Glob',
+      input: { pattern: '{src,tests}/**/*.ts' },
+      expected: ['.', 'src', 'tests'],
+    },
     { name: 'Edit', tool: 'Edit', input: { file_path: '/a' }, expected: [] },
   ];
   for (const row of rows) {
@@ -199,6 +238,30 @@ describe('writeAccess', () => {
     const result = writeAccess(`${checkout}/lnk/../config`, context());
     expect(result.access).toBe('git-internal');
     expect(result.realPath).toBe(join(checkout, '.git', 'config'));
+  });
+
+  it('flags a link to a link whose target climbs with ..', () => {
+    symlinkSync('.git/hooks', join(checkout, 'a'));
+    symlinkSync('a/../config', join(checkout, 'b'));
+    const result = writeAccess('b', context());
+    expect(result.access).toBe('git-internal');
+    expect(result.realPath).toBe(join(checkout, '.git', 'config'));
+  });
+
+  it('writes through an ordinary link to a checkout directory', () => {
+    symlinkSync('src', join(checkout, 'lnk-src'));
+    expect(writeAccess('lnk-src/new.ts', context()).access).toBe('ok');
+  });
+
+  it('refuses a kernel reading through a link even when the text is protected too', () => {
+    mkdirSync(join(checkout, '.claude', 'hooks'), { recursive: true });
+    mkdirSync(join(checkout, '.claude', 'skills', 'z'), { recursive: true });
+    symlinkSync('../skills/z', join(checkout, '.claude', 'hooks', 'lk'));
+    const result = writeAccess('.claude/hooks/lk/../y', context());
+    expect(result).toMatchObject({ access: 'claude-protected', viaLink: true });
+    expect(fileAccessJudge(context()).write('.claude/hooks/lk/../y')).toEqual({
+      refuse: `Edit ${join(checkout, '.claude', 'skills', 'y')} by its own path, not through a link.`,
+    });
   });
 
   it('leaves a plain .. alone', () => {
@@ -292,6 +355,10 @@ describe('fileAccessJudge in the guard', () => {
 });
 
 describe('directory-scoped reads', () => {
+  beforeEach(() => {
+    mkdirSync(join(checkout, 'src', 'deep'), { recursive: true });
+  });
+
   const judge = () => fileAccessJudge(context());
   const contains = (path: string) => ({
     refuse: `${path} contains protected paths; 10db never lets a lane search or list it.`,
@@ -300,7 +367,7 @@ describe('directory-scoped reads', () => {
     name: string;
     tool: string;
     input: unknown;
-    expected: 'ok' | { refuse: string };
+    expected: 'ok' | { refuse: string } | { within: string };
   }[] = [
     {
       name: 'Grep over home',
@@ -337,7 +404,45 @@ describe('directory-scoped reads', () => {
       name: 'pattern opening with a brace',
       tool: 'Glob',
       input: { pattern: '{../../home,src}/*' },
+      expected: { within: 'contains protected paths' },
+    },
+    {
+      name: 'a brace that expands to ..',
+      tool: 'Glob',
+      input: { pattern: 'src/deep/{.,.}./{.,.}./{.,.}./{.,.}./home/.claude/projects/*/*' },
+      expected: { within: 'protected path' },
+    },
+    {
+      name: 'braced directories',
+      tool: 'Glob',
+      input: { pattern: '{src,tests}/**/*.ts' },
+      expected: 'ok',
+    },
+    {
+      name: 'more alternatives than the cap',
+      tool: 'Glob',
+      input: {
+        pattern: `src/{${Array.from({ length: 65 }, (_, i) => `a${String(i)}`).join(',')}}/*`,
+      },
       expected: contains('/'),
+    },
+    {
+      name: 'an unbalanced brace',
+      tool: 'Glob',
+      input: { pattern: 'src/{a,b/*' },
+      expected: contains('/'),
+    },
+    {
+      name: 'a Grep glob filter that climbs',
+      tool: 'Grep',
+      input: { pattern: 'p', path: 'src', glob: '../../*' },
+      expected: 'ok',
+    },
+    {
+      name: 'a braced Grep glob filter',
+      tool: 'Grep',
+      input: { pattern: 'p', glob: '{*.ts,*.tsx}' },
+      expected: 'ok',
     },
     {
       name: 'pattern climbing after a glob',
@@ -345,17 +450,16 @@ describe('directory-scoped reads', () => {
       input: { pattern: 'src/*/../../../x' },
       expected: contains('/'),
     },
-    {
-      name: 'Grep glob climbing out',
-      tool: 'Grep',
-      input: { pattern: 'p', glob: 'src/*/../../../x' },
-      expected: contains('/'),
-    },
     { name: 'ordinary pattern', tool: 'Glob', input: { pattern: 'src/**/*.ts' }, expected: 'ok' },
   ];
   for (const row of rows) {
     it(row.name, () => {
-      expect(judge().read(row.tool, row.input)).toEqual(row.expected);
+      const verdict = judge().read(row.tool, row.input);
+      if (typeof row.expected === 'object' && 'within' in row.expected) {
+        expect(verdict === 'ok' ? 'ok' : verdict.refuse).toContain(row.expected.within);
+      } else {
+        expect(verdict).toEqual(row.expected);
+      }
     });
   }
 });

@@ -541,6 +541,19 @@ describe('resolveInRepo', () => {
     });
   });
 
+  it('follows a link target that climbs with .. the way the kernel does', () => {
+    const own = tempDir('guard-climb');
+    try {
+      mkdirSync(join(own.path, '.git', 'hooks'), { recursive: true });
+      writeFileSync(join(own.path, '.git', 'config'), '');
+      symlinkSync('.git/hooks', join(own.path, 'a'));
+      symlinkSync('a/../config', join(own.path, 'b'));
+      expect(resolveInRepo(own.path, 'b')).toEqual({ inside: true, rel: join('.git', 'config') });
+    } finally {
+      own.cleanup();
+    }
+  });
+
   it('reports a symlinked parent that leaves the repo as outside', () => {
     expect(resolveInRepo(repo.path, 'link/deep/x.ts')).toEqual({ inside: false });
   });
