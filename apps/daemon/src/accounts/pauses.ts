@@ -3,6 +3,7 @@ import {
   EventType,
   WorkstreamState,
   type AccountId,
+  type InboxItemId,
   type ProjectId,
 } from '@10db/contracts';
 import {
@@ -20,7 +21,7 @@ import { timerAt, type Clock, type Timer } from '../clock';
 import type { StateStore } from '../events';
 import type { InboxService } from '../inbox';
 import type { AccountCard } from './cards';
-import { withdrawLimitCards } from './stale-cards';
+import { closePauseCards } from './stale-cards';
 
 export interface AccountPause {
   readonly reason: AccountPauseReason;
@@ -45,7 +46,15 @@ export interface AccountPauses {
    * In memory, so a restart during a pause may card a project once more.
    */
   firstCard(accountId: AccountId, projectId: ProjectId): boolean;
-  resume(accountId: AccountId): void;
+  /**
+   * Lifts the account's pause and closes its pause cards. `only` lifts it only while it is that kind
+   * of pause: a card's Resume about a pause that has since been replaced lifts nothing. `answering` is
+   * the card being answered, which the inbox closes itself.
+   */
+  resume(
+    accountId: AccountId,
+    opts?: { readonly only?: AccountPauseReason | null; readonly answering?: InboxItemId },
+  ): void;
   /** Re-arms pauses persisted before a restart. */
   restore(): void;
   stop(): void;
@@ -113,7 +122,7 @@ export function createAccountPauses(opts: {
     return pause;
   }
 
-  function resume(id: AccountId): void {
+  function resume(id: AccountId, answering: InboxItemId | null = null): void {
     timers.get(id)?.cancel();
     timers.delete(id);
     const was = paused.get(id);
@@ -130,10 +139,10 @@ export function createAccountPauses(opts: {
           reason: 'the account resumed',
         });
       }
-      // One pause holds an account, so none is in force now and no usage limit is: its cards offered
-      // moves for a limit that is over, and answering one later would move for nothing. This holds
+      // One pause holds an account, so none is in force now: its usage-limit cards offered moves for a
+      // limit that is over, and its cap and refusal cards describe a pause that has ended. This holds
       // whichever pause was lifted, and after a restart that remembers none.
-      withdrawLimitCards(ctx, id);
+      closePauseCards(ctx, id, answering);
       ctx.emit({
         type: EventType.AccountResumed,
         entityType: 'account',
@@ -204,8 +213,10 @@ export function createAccountPauses(opts: {
       projects.add(projectId);
       return true;
     },
-    resume(id) {
-      if (paused.has(id)) resume(id);
+    resume(id, { only = null, answering } = {}) {
+      const held = paused.get(id);
+      if (!held || (only !== null && held.reason !== only)) return;
+      resume(id, answering ?? null);
     },
     restore() {
       for (const account of listAccounts(opts.state.db, { includeArchived: true })) {

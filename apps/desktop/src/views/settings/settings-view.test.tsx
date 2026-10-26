@@ -180,6 +180,26 @@ describe('SettingsView', () => {
     expect(names).toEqual(['Client key (Anthropic API key)']);
   });
 
+  it('shows the recorded fallback after 10db moved the project onto it', async () => {
+    const client = accountDto({ label: 'Client key', kind: 'anthropic_api_key' });
+    const project = projectDto({
+      accountId: client.id,
+      fallbackAccountId: client.id,
+      movedFromAccountId: DEFAULT_ACCOUNT.id,
+    });
+    server.use(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/accounts'), () => HttpResponse.json([DEFAULT_ACCOUNT, client])),
+      ...baseHandlers(),
+    );
+    renderApp('/settings/areas');
+    fireEvent.click(await screen.findByRole('link', { name: /Billing/ }));
+    const fallback = await screen.findByRole('combobox', { name: 'Fallback account' });
+    await waitFor(() => {
+      expect(fallback).toHaveProperty('value', 'Client key (Anthropic API key)');
+    });
+  });
+
   it("shows each project's own threshold after the project changes, and saves nothing on blur", async () => {
     const a = projectDto({ name: 'Alpha', usageHandoffAt: 0.9 });
     const b = projectDto({ name: 'Beta', usageHandoffAt: 0.95 });

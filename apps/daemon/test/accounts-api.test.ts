@@ -300,6 +300,42 @@ describe('accounts over HTTP', () => {
     }
   });
 
+  it('confirms a new subscription from its Confirm card and starts the work waiting on it', async () => {
+    const repo = createTempRepo();
+    try {
+      const { api } = await start();
+      const { account } = await api.post('/accounts', AccountCreatedDto, {
+        kind: 'claude_subscription',
+        label: 'Company A',
+      });
+      const { task } = await startedTaskOn(api, repo.path, account.id);
+      const card = await waitForAsync(async () => {
+        const open = (await accountCards(api, account.id, AccountProblem.Unconfirmed)).find(
+          (item) => item.state === InboxState.Open,
+        );
+        return open ?? undefined;
+      });
+      const seen = AccountCardDetail.parse(card.detail?.[ACCOUNT_CARD_DETAIL]).seenIdentity;
+
+      const answered = await api.post(`/inbox/${card.id}/answer`, InboxItemDto, {
+        choice: AccountCardChoice.Confirm,
+      });
+
+      expect(answered).toMatchObject({ state: InboxState.Resolved, answer: { choice: 'Confirm' } });
+      const after = (await api.get('/accounts', z.array(AccountDto))).find(
+        (a) => a.id === account.id,
+      );
+      expect(after?.expectedIdentity).toBe(seen);
+      const started = await waitForAsync(async () => {
+        const workstream = await workstreamOf(api, task.id);
+        return workstream && workstream.state !== WorkstreamState.Queued ? workstream : undefined;
+      });
+      expect(started.state).not.toBe(WorkstreamState.Queued);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
   const AnyCard = {
     options: [
       { label: AccountCardChoice.Resume, description: 'try again' },

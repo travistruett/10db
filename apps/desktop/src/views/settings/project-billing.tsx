@@ -41,7 +41,11 @@ export function ProjectBilling({ project }: { readonly project: ProjectDto }) {
         label="Fallback account"
         description="Where 10db moves the project when its account reaches a usage limit: at 95% on a Claude subscription, after a handoff, and at the limit itself on any account. A metered fallback needs a monthly cap."
         placeholder="None"
-        data={accountOptions(accounts).filter((o) => o.value !== project.accountId)}
+        // The project's own account is never offered, but after 10db moved the project onto its fallback
+        // the recorded fallback is that account, and it still shows.
+        data={accountOptions(accounts).filter(
+          (o) => o.value !== project.accountId || o.value === project.fallbackAccountId,
+        )}
         value={project.fallbackAccountId}
         clearable
         disabled={patch.isPending}

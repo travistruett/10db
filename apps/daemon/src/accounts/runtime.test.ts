@@ -111,6 +111,16 @@ describe('the monthly cap', () => {
     expect(runtime.blocked(row(), project.id)).toBeNull();
   });
 
+  it('closes the cap card in every project when the month turns', () => {
+    const second = seedProject(store, { accountId: key.id });
+    seedSpend(store, project, 5);
+    runtime.blocked(row(), project.id);
+    runtime.blocked(row(), second.id);
+    expect(openCards()).toHaveLength(2);
+    clock.advance(new Date(2026, 10, 1).getTime() - clock.now().getTime());
+    expect(openCards()).toEqual([]);
+  });
+
   it('raises the cap card in every project whose work the cap holds, once each', () => {
     const second = seedProject(store, { accountId: key.id });
     seedSpend(store, project, 5);
@@ -246,6 +256,20 @@ describe('refusals and usage limits', () => {
     expect(refusal?.options.map((o) => o.label)).toEqual(['Resume', 'Later']);
     runtime.saved(key.id);
     expect(runtime.isPaused(key.id)).toBe(false);
+  });
+
+  it('closes the refusal card in every project when the account is saved', () => {
+    const second = seedProject(store, { accountId: key.id });
+    const refusal = {
+      problem: 'secret_changed',
+      message: 'The Keychain secret of account "Client key" changed outside 10db',
+      seenIdentity: null,
+    } as const;
+    runtime.refused(row(), project.id, refusal);
+    runtime.refused(row(), second.id, refusal);
+    expect(openCards()).toHaveLength(2);
+    runtime.saved(key.id);
+    expect(openCards()).toEqual([]);
   });
 
   it("shows every project's card the longest end, even when a later limit resets sooner", () => {

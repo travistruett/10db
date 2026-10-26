@@ -42,7 +42,7 @@ import {
   type AccountRuntime,
   type MoveBack,
 } from './index';
-import { recordedCard, usageHighCard } from './cards';
+import { recordedCard, refusedCard, usageHighCard } from './cards';
 import type { AccountPause } from './pauses';
 
 const DEFAULT_PAUSE_MS = 30 * 60_000;
@@ -102,7 +102,9 @@ function build(): void {
     },
   });
   answerCard = createAccountCardAnswers({
-    resume: () => undefined,
+    resume: (id, about) => {
+      pauses.resume(id, about);
+    },
     confirm: () => undefined,
     move: (projectId, to, why, answering) => {
       moves.move(projectId, to, why, { answering });
@@ -450,5 +452,36 @@ describe('moving a project', () => {
     runtime.rateLimited(plan, inMinutes(90), project.id);
     expect(() => inbox.answer(card.id, { choice: CONTINUE })).toThrow(InvalidError);
     expect(getProject(state.db, project.id).accountId).toBe(plan);
+  });
+});
+
+describe('resuming an account from a card', () => {
+  const refusal = {
+    problem: 'signed_out',
+    message: 'Claude Code reported no login for account "Claude plan"',
+    seenIdentity: null,
+  } as const;
+
+  it('lifts the refusal and closes its card in every project on Resume', () => {
+    const other = seedProject(store, { name: 'other', accountId: plan });
+    runtime.refused(getAccountRow(state.db, plan), project.id, refusal);
+    runtime.refused(getAccountRow(state.db, plan), other.id, refusal);
+    const card = cardAbout(`${AccountPauseReason.Refused}:signed_out`);
+    const answered = inbox.answer(card.id, { choice: AccountCardChoice.Resume });
+    expect(answered).toMatchObject({ state: 'RESOLVED', answer: { choice: 'Resume' } });
+    expect(pauses.pausedFor(plan)).toBeNull();
+    expect(openCards()).toEqual([]);
+  });
+
+  it('lifts no other pause when a refusal card left open is answered Resume', () => {
+    const stale = inbox.flag({
+      projectId: project.id,
+      workstreamId: null,
+      ...refusedCard(getAccountRow(state.db, plan), refusal),
+    });
+    runtime.rateLimited(plan, inMinutes(60), project.id);
+    inbox.answer(stale.id, { choice: AccountCardChoice.Resume });
+    expect(pauses.pausedFor(plan)?.reason).toBe('usage_limit');
+    expect(limitCard().state).toBe('OPEN');
   });
 });

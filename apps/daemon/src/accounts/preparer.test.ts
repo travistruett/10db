@@ -273,6 +273,45 @@ describe('the preparer', () => {
     expect(openCards().map((c) => c.title)).toEqual(['Claude plan runs as me@example.com']);
   });
 
+  it.each<[string, Partial<SeenAccount>, string]>([
+    [
+      'the sign-in card',
+      { email: undefined, subscriptionType: undefined },
+      'Sign in the account Company A',
+    ],
+    [
+      'the credentials card',
+      { email: undefined, subscriptionType: undefined, apiKeySource: 'apiKeyHelper' },
+      'Fix the credentials of Company A',
+    ],
+  ])(
+    'closes %s once a later probe asks to confirm, and it stays closed after Later',
+    async (_name, before, title) => {
+      seedProject(store);
+      const sub = seedAccount(store, { kind: 'claude_subscription', label: 'Company A' });
+      const projectId = seedProject(store, { accountId: sub.id }).id;
+      const row = () => getAccountRow(state.db, sub.id);
+      const signedIn = adapter.probeSeen;
+      adapter.probeSeen = { ...signedIn, ...before };
+      preparer.prepare(row(), projectId);
+      await preparer.idle();
+      expect(openCards().map((c) => c.title)).toEqual([title]);
+
+      adapter.probeSeen = { ...signedIn, email: 'a@company.example' };
+      clock.advance(PREPARE_RETRY_MS);
+      preparer.prepare(row(), projectId);
+      await preparer.idle();
+      const [confirm, ...others] = openCards();
+      expect(others).toEqual([]);
+      expect(confirm?.title).toBe('Confirm the account Company A');
+
+      clock.advance(1000);
+      if (!confirm) throw new Error('no confirm card');
+      inbox.answer(confirm.id, { choice: AccountCardChoice.Later });
+      expect(openCards()).toEqual([]);
+    },
+  );
+
   it('does nothing for a ready account', async () => {
     // seedProject's default account is confirmed for builder@example.com.
     const project = seedProject(store);

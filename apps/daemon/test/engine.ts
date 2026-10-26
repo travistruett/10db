@@ -178,8 +178,8 @@ export async function createTestEngine(
   });
   limits = createAccountLimits({ state, clock, inbox, pauses, moves, reports: usageReportBook });
   answerAccountCard = createAccountCardAnswers({
-    resume: (id) => {
-      pauses.resume(id);
+    resume: (id, about) => {
+      pauses.resume(id, about);
     },
     confirm: (id, identity, answering) => {
       state.write((ctx) => patchAccount(ctx, id, { expectedIdentity: identity }));

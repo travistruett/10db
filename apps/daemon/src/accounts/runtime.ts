@@ -190,7 +190,7 @@ export function createAccountRuntime(opts: {
       switch (paused.reason) {
         case AccountPauseReason.MonthlyCap:
         case AccountPauseReason.Refused:
-          opts.pauses.resume(accountId);
+          opts.pauses.resume(accountId, answering === undefined ? {} : { answering });
           return;
         case AccountPauseReason.UsageLimit:
           return;

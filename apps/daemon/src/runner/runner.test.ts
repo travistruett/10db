@@ -1866,6 +1866,24 @@ describe('moving accounts', () => {
     expect(accountsOf(workstream.id)).toEqual([second.id]);
   });
 
+  it('honours a cancel that lands while the head is read, before the account is checked', async () => {
+    engine = await createTestEngine(
+      { Alpha: [[turn]] },
+      {},
+      {},
+      { account: { kind: 'anthropic_api_key', label: 'Client key' } },
+    );
+    const { workstream } = engine.addTask('Alpha');
+    // launch runs the lane up to its first await, the read of the repository head.
+    engine.launch(workstream.id);
+    await engine.runner.cancel(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('CANCELLED');
+    // The account has no secret, so a lane that went on would have been sent back to be prepared.
+    expect(engine.prepared).toEqual([]);
+    expect(engine.adapter.prompts).toEqual([]);
+  });
+
   it('lets a running session finish on its account when the project moves, and runs the next on the new one', async () => {
     engine = await createTestEngine({
       Alpha: [

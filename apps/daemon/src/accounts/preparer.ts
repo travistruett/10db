@@ -24,7 +24,7 @@ import {
   type AccountCard,
 } from './cards';
 import { unready } from './readiness';
-import { closeSettledCards } from './stale-cards';
+import { closeNoLoginCards, closeSettledCards } from './stale-cards';
 import type { StartGate } from './start-gate';
 
 /** How long an unready account waits before it is probed again. */
@@ -107,6 +107,7 @@ export function createAccountPreparer(opts: {
       opts.onReady();
       return;
     }
+    closeNoLoginCards(opts.state, account.id);
     raise(projectId, confirmCard(account, seen.email));
   }
 

@@ -375,8 +375,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     reports,
   });
   answerAccountCard = createAccountCardAnswers({
-    resume: (id) => {
-      accountPauses.resume(id);
+    resume: (id, about) => {
+      accountPauses.resume(id, about);
     },
     confirm: (id, identity, answering) => {
       state.write((ctx) => patchAccount(ctx, id, { expectedIdentity: identity }));

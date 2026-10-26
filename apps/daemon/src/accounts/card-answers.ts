@@ -27,7 +27,11 @@ function raisedByUsageLimit(reason: AccountPauseReason | null): boolean {
 
 /** Acts on an account card's answer before the inbox records it; other cards pass through untouched. */
 export function createAccountCardAnswers(deps: {
-  resume(accountId: AccountId): void;
+  /** Lifts the pause while it is the kind the card is about; `answering` is the card being answered. */
+  resume(
+    accountId: AccountId,
+    about: { readonly only: AccountPauseReason | null; readonly answering: InboxItemId },
+  ): void;
   /** `answering` is the card being answered, which the inbox closes itself. */
   confirm(accountId: AccountId, identity: string, answering: InboxItemId): void;
   /** Moves the project as `PATCH` does; `answering` is the card being answered. */
@@ -54,7 +58,8 @@ export function createAccountCardAnswers(deps: {
         throw new ConflictError('This card names no identity to confirm');
       deps.confirm(card.data.accountId, card.data.seenIdentity, item.id);
     }
-    if (answer.choice === AccountCardChoice.Resume) deps.resume(card.data.accountId);
+    if (answer.choice === AccountCardChoice.Resume)
+      deps.resume(card.data.accountId, { only: card.data.reason, answering: item.id });
     if (answer.choice === AccountCardChoice.Stay) deps.stay(item.projectId);
     const limitCard = raisedByUsageLimit(card.data.reason);
     const target = card.data.moves?.find((m) => m.choice === answer.choice);

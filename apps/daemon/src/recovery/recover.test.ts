@@ -322,18 +322,23 @@ describe('recoverOnStartup', () => {
     });
   });
 
-  it('brings a restarted fix session back as a fix, not from the handoff', async () => {
+  it.each<[string, readonly number[], 'fix' | 'start']>([
+    ['brings a restarted fix session back as a fix, not from the handoff', [2], 'fix'],
+    ['starts a lane whose failed gate has since passed fresh, not as a fix', [2, 0], 'start'],
+  ])('%s', async (_name, exitCodes, kind) => {
     const ws = inState(['STARTING', 'RUNNING']);
-    const failed = state.write((ctx) =>
-      insertEvidence(ctx, {
-        workstreamId: ws.workstream.id,
-        kind: 'gate',
-        command: 'make gate',
-        exitCode: 2,
-        summary: 'FAIL badge.test.ts',
-        logPath: null,
-        commitShas: [],
-      }),
+    const gates = exitCodes.map((exitCode) =>
+      state.write((ctx) =>
+        insertEvidence(ctx, {
+          workstreamId: ws.workstream.id,
+          kind: 'gate',
+          command: 'make gate',
+          exitCode,
+          summary: exitCode === 0 ? 'PASS' : 'FAIL badge.test.ts',
+          logPath: null,
+          commitShas: [],
+        }),
+      ),
     );
     state.write((ctx) => {
       patchWorkstream(ctx, ws.workstream.id, null, {
@@ -345,10 +350,9 @@ describe('recoverOnStartup', () => {
       });
     });
     await recover();
-    expect(getWorkstream(state.db, ws.workstream.id).nextAction).toEqual({
-      kind: 'fix',
-      evidenceId: failed.id,
-    });
+    const { nextAction } = getWorkstream(state.db, ws.workstream.id);
+    expect(nextAction.kind).toBe(kind);
+    if (kind === 'fix') expect(nextAction).toEqual({ kind, evidenceId: gates[0]?.id });
   });
 
   it('parks a workstream that was waiting on an open card', async () => {
