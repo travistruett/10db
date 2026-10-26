@@ -1,12 +1,13 @@
 import {
   isCommandRunner,
+  isPackageTool,
   packageToolForwards,
   packageToolProgramIndex,
   ToolAccess,
   type PermissionRuleDto,
   type ProjectDto,
 } from '@10db/contracts';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { z } from 'zod';
 import {
   READ_COMMANDS,
@@ -163,10 +164,21 @@ function runsOtherCommands(words: readonly string[]): boolean {
 }
 
 /**
+ * Whether a bare program runs the command or code it is given, or is a package tool that runs the
+ * package it names. A rule for it would cover every later call of that program. The guard reads a
+ * path-qualified program by its basename, so this does too.
+ */
+function runsAnything(program: string): boolean {
+  const name = basename(program);
+  return isCommandRunner(name) || isPackageTool(name);
+}
+
+/**
  * The pattern stored by "always allow": the program plus its subcommand when the second word is
  * one, otherwise the segment's whole words, so the rule never covers more than what was shown.
- * Null when the command has a substitution, expansion or redirection, or runs through a wrapper
- * with a command-carrying flag: such a command can only be allowed once.
+ * Null when the command has a substitution, expansion or redirection, runs through a wrapper
+ * with a command-carrying flag, or is a bare runner or package tool: such a command can only be
+ * allowed once.
  */
 export function commandPrefix(command: string): string | null {
   const segments = splitCommand(command);
@@ -175,7 +187,7 @@ export function commandPrefix(command: string): string | null {
   const words = stripCommandPrefixes(first.words);
   const [head, second] = words;
   if (head === undefined) return null;
-  if (second === undefined) return head;
+  if (second === undefined) return runsAnything(head) ? null : head;
   if (!runsOtherCommands(words) && SUBCOMMAND.test(second)) return `${head} ${second}`;
   return words.join(' ');
 }
