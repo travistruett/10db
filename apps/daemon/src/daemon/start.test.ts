@@ -25,7 +25,7 @@ import { apiClient, quickFlowId } from '../../test/api-client';
 import { createTempRepo, tempDir, waitFor, waitForAsync } from '../../test/fixtures';
 import { ManualClock } from '../clock';
 import type { CaffeinateSpawner } from '../keep-awake';
-import { FakeAdapter, type FakeScriptBook } from '../sessions';
+import { FakeAdapter, type FakeScriptBook, type SessionSpec } from '../sessions';
 import { AlreadyRunningError, readRuntimeInfo, startDaemon, type RunningDaemon } from './index';
 
 /** No real caffeinate and no file watcher in daemon tests that are not about them. */
@@ -201,6 +201,48 @@ describe('startDaemon', () => {
       expect(getAccount(running.state.db, project.accountId).expectedIdentity).toBe(
         'builder@example.com',
       );
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it.each([
+    ['null', { laneSandbox: null }],
+    ['absent', {}],
+  ] as const)('runs lanes unsandboxed when the lane sandbox is %s', async (_name, sandbox) => {
+    const repo = createTempRepo();
+    try {
+      const adapter = new FakeAdapter({ Alpha: [[{ do: 'turn_complete' }]] });
+      const specs: SessionSpec[] = [];
+      adapter.seen = (spec) => {
+        specs.push(spec);
+        return {};
+      };
+      const running = await startDaemon({
+        dataDir: dir.path,
+        port: 0,
+        adapter,
+        logLevel: 'warn',
+        ...sandbox,
+        ...QUIET,
+      });
+      daemon = running;
+      const api = apiClient(running.url, running.token);
+      const project = await api.post('/projects', ProjectDto, {
+        name: 'demo',
+        repoPath: repo.path,
+        gateCommand: 'true',
+        flowId: await quickFlowId(api),
+        areas: [{ name: 'src', globs: ['src/**'] }],
+      });
+      const task = await api.post(`/projects/${project.id}/tasks`, TaskDto, {
+        title: 'Alpha',
+        acceptanceCriteria: ['it works'],
+        areas: ['src'],
+      });
+      await api.post(`/tasks/${task.id}/start`, z.unknown());
+      await waitFor(() => specs.length > 0);
+      expect(specs[0]?.sandbox).toBeNull();
     } finally {
       repo.cleanup();
     }

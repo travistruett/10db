@@ -54,6 +54,14 @@ const CLAUDE_PROTECTED_IN_HOME = [
   '.gitconfig',
 ];
 
+/** The checkout's Claude-protected paths under `checkout`: files by exact path, directories with their trees. */
+export function claudeProtectedPaths(checkout: string): { files: string[]; directories: string[] } {
+  return {
+    files: CLAUDE_PROTECTED_IN_CHECKOUT.map((path) => join(checkout, path)),
+    directories: CLAUDE_PROTECTED_DIRECTORIES.map((path) => join(checkout, path)),
+  };
+}
+
 /** The real path of `p`, or null when a component cannot be examined. */
 function tryRealPath(p: string): string | null {
   try {

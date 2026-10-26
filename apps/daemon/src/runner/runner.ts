@@ -48,6 +48,7 @@ import {
   latestHandoffForStep,
   latestToolOp,
   listModelProfiles,
+  listPermissionRules,
   listSessions,
   listEvidence,
   markSessionStarted,
@@ -104,6 +105,13 @@ import type { Logger } from '../log';
 import { mintSessionToken } from '../mcp';
 import { allowedToolsFor, storableRule } from '../permissions';
 import { escalateStep, offeredProfiles } from '../routing';
+import {
+  fileAccessJudge,
+  SandboxProfileError,
+  SandboxTempDirError,
+  type LaneSandbox,
+  type LaneSession,
+} from '../sandbox';
 import {
   ProjectMcpError,
   readRepoMcp,
@@ -175,6 +183,11 @@ export interface RunnerOptions {
   readonly afterSession?: (workstreamId: WorkstreamId) => Promise<void>;
   /** The OS start time of a pid, stored beside it so recovery can tell a reused PID apart. */
   identifyProcess?(pid: number): Promise<string | null>;
+  /**
+   * Runs every lane session under the lane sandbox, in `default` permission mode whatever the
+   * project or the override says. Null or absent, sessions run unsandboxed.
+   */
+  readonly laneSandbox?: LaneSandbox | null;
 }
 
 export interface Runner {
@@ -856,6 +869,7 @@ export function createRunner(opts: RunnerOptions): Runner {
           : null;
     const evidence = evidenceId ? getEvidence(db, evidenceId) : null;
     const prompt = buildSessionPrompt({
+      sandboxed: Boolean(opts.laneSandbox),
       task,
       claims: claims(),
       action,
@@ -918,13 +932,50 @@ export function createRunner(opts: RunnerOptions): Runner {
       account.kind === AccountKind.ClaudeSubscription
         ? await opts.startGate.acquire(account.id)
         : () => undefined;
+    // Where Claude Code keeps this account's sessions, and with them each one's saved tool results.
+    const configDir = launch.env['CLAUDE_CONFIG_DIR'] ?? join(homedir(), '.claude');
+    let laneSession: LaneSession | null = null;
+    if (opts.laneSandbox) {
+      try {
+        laneSession = await opts.laneSandbox.forSession({
+          project,
+          env: launch.env,
+          rules: listPermissionRules(db, project.id, id),
+          resumeProviderSessionId: resumeId,
+          configDir,
+        });
+      } catch (error) {
+        releaseStart();
+        // A profile or temp dir the sandbox refuses would be refused the same way on a retry.
+        if (error instanceof SandboxProfileError || error instanceof SandboxTempDirError) {
+          return {
+            kind: 'refused',
+            message: `The lane sandbox could not start: ${error.message}`,
+            providerSessionId: savedResumeId,
+          };
+        }
+        throw error;
+      }
+    }
+    const dispose = (): void => {
+      try {
+        laneSession?.dispose();
+      } catch (error) {
+        opts.logger.warn(
+          { workstreamId: id, err: error instanceof Error ? error.message : String(error) },
+          'the lane temp directory could not be removed',
+        );
+      }
+    };
     const stopping = stopRequested(ctl);
     if (stopping) {
+      dispose();
       releaseStart();
       return { kind: 'stopped', reason: stopping, providerSessionId: savedResumeId };
     }
     // The project moved while this lane waited for its start: give the slot back and start over there.
     if (getProject(db, row.projectId).accountId !== ctl.accountId) {
+      dispose();
       releaseStart();
       return { kind: 'moved' };
     }
@@ -956,6 +1007,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         );
       }
     } catch (error) {
+      dispose();
       releaseStart();
       throw error;
     }
@@ -1033,6 +1085,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     };
 
     opts.live.register(session.id, { signal: abort.signal, observer });
+    const fileAccess = laneSession ? fileAccessJudge(laneSession.fileAccess) : null;
     try {
       handle = opts.adapter.start({
         sessionId: session.id,
@@ -1043,14 +1096,21 @@ export function createRunner(opts: RunnerOptions): Runner {
         model: launch.model,
         effort: row.effort,
         resumeProviderSessionId: resumeId,
-        permissionMode:
-          opts.permissionModeOverride === PermissionMode.Auto
+        // Auto mode's classifier would answer the calls the sandbox's cards exist to ask about.
+        permissionMode: laneSession
+          ? PermissionMode.Default
+          : opts.permissionModeOverride === PermissionMode.Auto
             ? PermissionMode.Auto
             : project.permissionMode,
         env: launch.env,
         account: launch.expect,
         projectMcpServers: projectMcp.servers,
-        allowedTools: allowedToolsFor(project, step.tools),
+        sandbox: laneSession?.spec ?? null,
+        allowedTools: allowedToolsFor(
+          project,
+          step.tools,
+          laneSession ? { sandboxed: { checkout: project.repoPath } } : {},
+        ),
         mcp: { url: opts.mcpUrl(), token, toolTimeoutMs: (project.humanWaitMinutes + 5) * 60_000 },
         preToolUse: (req) =>
           judgeToolUse({
@@ -1064,9 +1124,10 @@ export function createRunner(opts: RunnerOptions): Runner {
             delivery: project.delivery,
             protectedPaths: opts.protectedPaths,
             ownSession: {
-              configDir: launch.env['CLAUDE_CONFIG_DIR'] ?? join(homedir(), '.claude'),
+              configDir,
               providerSessionId: st.providerSessionId ?? resumeId,
             },
+            ...(fileAccess ? { fileAccess } : {}),
           }),
         canUseTool: createPermissionBroker(
           { state: opts.state, inbox: opts.inbox },
@@ -1077,10 +1138,14 @@ export function createRunner(opts: RunnerOptions): Runner {
             observer,
             signal: abort.signal,
             allowOnce: permission?.allowOnce ?? null,
+            ...(laneSession
+              ? { sandbox: { fileAccess: laneSession.fileAccess, hazards: project.hazards } }
+              : {}),
           },
         ),
       });
     } catch (error) {
+      dispose();
       releaseStart();
       throw error;
     }
@@ -1104,6 +1169,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         switch (event.type) {
           case 'started': {
             st.providerSessionId = event.providerSessionId;
+            laneSession?.setProviderSession(event.providerSessionId);
             st.started = true;
             releaseStart();
             const pidStart = await identify(event.pid);
@@ -1299,6 +1365,13 @@ export function createRunner(opts: RunnerOptions): Runner {
                     providerSessionId: st.providerSessionId,
                   };
                   break;
+                case SessionEndReason.SandboxRefused:
+                  st.outcome = {
+                    kind: 'refused',
+                    message: event.message ?? 'The lane sandbox could not start',
+                    providerSessionId: st.providerSessionId,
+                  };
+                  break;
                 case SessionEndReason.Error:
                 case SessionEndReason.Stopped:
                   st.outcome = {
@@ -1323,6 +1396,8 @@ export function createRunner(opts: RunnerOptions): Runner {
       // Leaving the loop without `ended` (a stale fence, a failed write) must not leave the process running.
       if (!sawEnded) await handle.stop().catch(() => undefined);
       opts.live.unregister(session.id);
+      // Only once the lane process is gone: a command still running could swap a part of the tree.
+      dispose();
       ctl.handle = null;
       ctl.requestHandoff = null;
       ctl.endWaits = null;

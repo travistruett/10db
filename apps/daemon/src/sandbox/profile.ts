@@ -49,6 +49,16 @@ const sandboxPath = z
 const sandboxDomain = z.string().regex(/^(\*\.)?[a-z0-9.-]+$/);
 const envName = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/);
 
+/** True for a value every path field of the profile accepts. */
+export function isSandboxPath(value: string): boolean {
+  return sandboxPath.safeParse(value).success;
+}
+
+/** True for a value `network.allowedDomains` accepts. */
+export function isSandboxDomain(value: string): boolean {
+  return sandboxDomain.safeParse(value).success;
+}
+
 /** The settings Claude Code's sandbox takes, with the SDK's field names. */
 export const LaneSandboxSettingsSchema = z.strictObject({
   enabled: z.boolean(),

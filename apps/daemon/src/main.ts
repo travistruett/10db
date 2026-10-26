@@ -81,6 +81,10 @@ try {
     port: env.TENDB_PORT,
     adapter: await chooseAdapter(),
     permissionModeOverride: env.TENDB_LANE_PERMISSION_MODE,
+    laneSandbox:
+      env.TENDB_LANE_SANDBOX === 'on'
+        ? { loopback: env.TENDB_LANE_SANDBOX_LOOPBACK === 'on' }
+        : null,
     logLevel: env.TENDB_LOG_LEVEL,
     migrationsDir: resolveMigrationsDir(),
     harnessDir: resolveHarnessDir(),

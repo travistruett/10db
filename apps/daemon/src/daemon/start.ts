@@ -84,6 +84,7 @@ import {
   type Runner,
   type RunnerLimits,
 } from '../runner';
+import { createLaneSandbox } from '../sandbox';
 import { createScheduler, type Scheduler } from '../scheduler';
 import type { SessionAdapter } from '../sessions';
 import { retryWorkstream, seedTeam } from '../team';
@@ -102,6 +103,11 @@ export interface DaemonOptions {
   readonly logLevel: LogLevel;
   /** `auto` runs every project's lanes in auto mode (the dev switch); otherwise each project decides. */
   readonly permissionModeOverride?: PermissionMode;
+  /**
+   * Runs every lane under the lane sandbox, in `default` permission mode; `loopback` lets its
+   * commands bind local ports. Null or absent, lanes run unsandboxed.
+   */
+  readonly laneSandbox?: { readonly loopback: boolean } | null;
   /** better_sqlite3.node for bundled runs; source runs leave it unset. */
   readonly sqliteBinding?: string;
   readonly clock?: Clock;
@@ -426,8 +432,18 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     home: homedir(),
     loginConfigDir: launcher.loginConfigDir(),
   });
+  const laneSandbox = opts.laneSandbox
+    ? createLaneSandbox({
+        home: homedir(),
+        dataDir: opts.dataDir,
+        loopback: opts.laneSandbox.loopback,
+        loginConfigDir: launcher.loginConfigDir(),
+        gitDirs: (repo) => git.gitDirs(repo),
+      })
+    : null;
   const createdRunner = createRunner({
     protectedPaths: guarded,
+    laneSandbox,
     state,
     adapter,
     inbox,

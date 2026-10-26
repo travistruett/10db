@@ -412,6 +412,37 @@ describe('buildSessionPrompt for flow steps', () => {
     expect(prompt).toContain('no trailing `; echo $?`');
   });
 
+  const SANDBOX_LINES = [
+    "Read the repository's agent instructions first: `AGENTS.md`, or `CLAUDE.md` where the repo uses it.",
+    'Make temp files with `mktemp "$TMPDIR/x.XXXXXX"`; a bare `mktemp` fails in the sandbox.',
+    "A command that fails with `Operation not permitted` hit the sandbox: say which path in your handoff, and don't retry it another way.",
+  ];
+
+  it.each([
+    ['an implement step', implementStep],
+    ['a read-only step', reviewStep],
+  ])('tells %s how to work in the lane sandbox when the session is sandboxed', (_name, step) => {
+    const prompt = buildSessionPrompt({
+      ...base,
+      step,
+      action: { kind: 'start' },
+      sandboxed: true,
+    });
+    for (const line of SANDBOX_LINES) expect(prompt).toContain(`- ${line}`);
+  });
+
+  it.each([
+    ['sandboxed: false', { sandboxed: false }],
+    ['no sandbox flag', {}],
+  ])('says nothing of the sandbox with %s', (_name, flag) => {
+    for (const step of [implementStep, reviewStep]) {
+      const prompt = buildSessionPrompt({ ...base, step, action: { kind: 'start' }, ...flag });
+      expect(prompt).not.toContain('mktemp');
+      expect(prompt).not.toContain('Operation not permitted');
+      expect(prompt).not.toContain('agent instructions');
+    }
+  });
+
   it('tells an implement step to commit every change before it ends its turn', () => {
     const prompt = buildSessionPrompt({ ...base, action: { kind: 'start' } });
     expect(prompt).toContain(

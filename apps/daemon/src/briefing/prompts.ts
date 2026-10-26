@@ -45,6 +45,8 @@ export interface PromptInput {
   /** A read-only step sent back sees the result it gave before. */
   readonly previousResult: StepResult | null;
   readonly revisedBy: { readonly role: StepRole; readonly personaName: string } | null;
+  /** The session runs in the lane sandbox, which loads no repo settings and blocks paths outside its profile. */
+  readonly sandboxed?: boolean;
 }
 
 export const HANDOFF_NUDGE =
@@ -74,6 +76,13 @@ export const RESULT_NUDGE =
 const PLAIN_COMMANDS =
   "Run project commands in their plain form: `pnpm exec <tool> …` or the project's own scripts, with no `-s` or `--silent`, no trailing `; echo $?` (the exit code is reported to you), no `timeout` wrapper, and no piping test output through head or tail.";
 
+/** Beside the plain-commands line in a sandboxed session. */
+const SANDBOX_RULES = [
+  "Read the repository's agent instructions first: `AGENTS.md`, or `CLAUDE.md` where the repo uses it.",
+  'Make temp files with `mktemp "$TMPDIR/x.XXXXXX"`; a bare `mktemp` fails in the sandbox.',
+  "A command that fails with `Operation not permitted` hit the sandbox: say which path in your handoff, and don't retry it another way.",
+];
+
 const RULES = [
   'Edit only files inside your claims. For anything else, call the request_claim tool first.',
   'Commit only through the 10db commit tool, naming every path. Never run git commit, add, checkout, reset, stash or push --force.',
@@ -95,6 +104,12 @@ function readOnlyRules(role: StepRole): string[] {
     PLAIN_COMMANDS,
     'If 10db asks you to hand off, call mcp__10db__write_handoff, and end your turn.',
   ];
+}
+
+/** The rules with the sandbox's lines after the plain-commands line, when the session is sandboxed. */
+function withSandboxRules(rules: readonly string[], sandboxed: boolean): string[] {
+  if (!sandboxed) return [...rules];
+  return rules.flatMap((rule) => (rule === PLAIN_COMMANDS ? [rule, ...SANDBOX_RULES] : [rule]));
 }
 
 const VERDICT_LABEL = { approve: 'approved', reject: 'rejected' } as const;
@@ -259,7 +274,12 @@ export function buildSessionPrompt(input: PromptInput): string {
     `Your claims: ${claims}.`,
     '',
     'Rules:',
-    bullets(input.step.tools === ToolAccess.ReadOnly ? readOnlyRules(input.step.role) : RULES),
+    bullets(
+      withSandboxRules(
+        input.step.tools === ToolAccess.ReadOnly ? readOnlyRules(input.step.role) : RULES,
+        input.sandboxed === true,
+      ),
+    ),
     '',
     'Context pack:',
     renderKnowledge(input.contextPack),

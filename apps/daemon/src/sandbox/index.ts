@@ -26,3 +26,10 @@ export {
   type ReadAccess,
   type WriteAccess,
 } from './file-access';
+export {
+  createLaneSandbox,
+  type LaneSandbox,
+  type LaneSandboxSpec,
+  type LaneSession,
+  type LaneSessionInput,
+} from './lane-sandbox';
