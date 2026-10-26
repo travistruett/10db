@@ -260,8 +260,8 @@ guard task tests each one.
   is a flaw in R4. Wrapping the whole process would make it the kernel's, and lane sandbox spec D10 says when
   that is possible.
 - **Auto mode.** With auto mode on, a classifier-approved WebFetch can send data to any URL, and the classifier
-  is not a boundary. The guard's refusals still apply first, and a call the classifier hands to a person always
-  becomes a card.
+  is not a boundary. The guard's refusals still apply first. A call Claude Code marks as needing a person becomes
+  a card; an older `claude` that doesn't mark it lets a stored rule answer it.
 - **Merged code.** Review is the boundary (§1).
 
 ## 8. Open checks
