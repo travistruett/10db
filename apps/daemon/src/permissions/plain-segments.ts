@@ -51,14 +51,19 @@ function clusterLetters(name: string, flag: string): string[] {
   return letters;
 }
 
+/** A long flag as written, or abbreviated as GNU tools allow: `--split=x` is `--split-string=x`. */
+function namesLongFlag(flag: string, long: string): boolean {
+  const name = flag.split('=')[0] ?? flag;
+  return name.length > 2 && long.startsWith(name);
+}
+
 function hasUnsafeFlag(name: string, flag: string): boolean {
   const unsafe = UNSAFE_WRAPPER_FLAGS.get(name) ?? [];
   const letters = clusterLetters(name, flag);
-  return unsafe.some(
-    (u) =>
-      flag === u ||
-      flag.startsWith(`${u}=`) ||
-      (!u.startsWith('--') && letters.includes(u.slice(1))),
+  return unsafe.some((u) =>
+    u.startsWith('--')
+      ? flag.startsWith('--') && namesLongFlag(flag, u)
+      : letters.includes(u.slice(1)),
   );
 }
 

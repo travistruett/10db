@@ -429,6 +429,39 @@ export function flagSpan(flag: string, valueFlags: ReadonlySet<string>): number 
   return 1;
 }
 
+interface Prefixes {
+  /** Where the command starts. */
+  readonly at: number;
+  /** The flags each wrapper was given, by the wrapper's name. */
+  readonly flags: readonly { readonly wrapper: string; readonly flag: string }[];
+}
+
+/** Walks the leading `VAR=value` assignments and pass-through wrappers with their flags. */
+function prefixes(words: readonly string[], lookThroughRunners: boolean): Prefixes {
+  const flags: { wrapper: string; flag: string }[] = [];
+  let i = 0;
+  while (i < words.length) {
+    const w = words[i] ?? '';
+    const name = commandName(w);
+    const wrapped =
+      WRAPPERS.get(name) ?? (lookThroughRunners ? RUNNER_WRAPPERS.get(name) : undefined);
+    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(w)) {
+      i += 1;
+    } else if (wrapped) {
+      i += 1;
+      while (i < words.length && (words[i] ?? '').startsWith('-')) {
+        const flag = words[i] ?? '';
+        flags.push({ wrapper: name, flag });
+        i += flagSpan(flag, wrapped.valueFlags);
+      }
+      i += wrapped.positionals;
+    } else {
+      break;
+    }
+  }
+  return { at: i, flags };
+}
+
 /**
  * Drops leading `VAR=value` assignments and pass-through wrappers such as `env`, `nohup` and
  * `xargs` together with their flags, and names the command it finds by its basename. With
@@ -439,28 +472,37 @@ export function stripCommandPrefixes(
   words: readonly string[],
   options: { readonly lookThroughRunners?: boolean; readonly keepCommandPath?: boolean } = {},
 ): string[] {
-  let i = 0;
-  while (i < words.length) {
-    const w = words[i] ?? '';
-    const wrapped =
-      WRAPPERS.get(commandName(w)) ??
-      (options.lookThroughRunners ? RUNNER_WRAPPERS.get(commandName(w)) : undefined);
-    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(w)) {
-      i += 1;
-    } else if (wrapped) {
-      i += 1;
-      while (i < words.length && (words[i] ?? '').startsWith('-')) {
-        i += flagSpan(words[i] ?? '', wrapped.valueFlags);
-      }
-      i += wrapped.positionals;
-    } else {
-      break;
-    }
-  }
-  const rest = words.slice(i);
+  const rest = words.slice(prefixes(words, options.lookThroughRunners === true).at);
   const head = rest[0];
   if (head === undefined || options.keepCommandPath === true) return rest;
   return [commandName(head), ...rest.slice(1)];
+}
+
+/** env's flags that take a value, so a letter after one in a cluster is part of that value. */
+const ENV_VALUE_LETTERS: ReadonlySet<string> = new Set(['u', 'C', 'P']);
+
+/**
+ * Whether env's flag is its split string: `-S`, attached or in a cluster such as `-iS`, or
+ * `--split-string`, abbreviated as GNU env allows. `-uS` unsets a variable named S.
+ */
+function isSplitString(flag: string): boolean {
+  if (flag.startsWith('--')) {
+    const name = flag.split('=')[0] ?? flag;
+    return name.length > 2 && '--split-string'.startsWith(name);
+  }
+  for (const letter of flag.slice(1)) {
+    if (letter === 'S') return true;
+    if (ENV_VALUE_LETTERS.has(letter)) return false;
+  }
+  return false;
+}
+
+/**
+ * Whether the command runs through env with a split string, which env splits into words and runs
+ * as a command of its own the guard never reads.
+ */
+export function runsEnvSplitString(words: readonly string[]): boolean {
+  return prefixes(words, true).flags.some((f) => f.wrapper === 'env' && isSplitString(f.flag));
 }
 
 const FIND_EXEC = new Set(['-exec', '-execdir', '-ok', '-okdir']);

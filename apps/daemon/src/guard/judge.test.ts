@@ -323,6 +323,40 @@ describe('shell commands', () => {
     { name: 'pnpm publish', command: 'pnpm publish', decision: 'deny' },
     { name: 'terraform apply', command: 'terraform apply', decision: 'deny' },
     { name: 'sudo', command: 'sudo ls', decision: 'deny' },
+    { name: 'env split string', command: "env -S 'git status'", decision: 'deny' },
+    { name: 'env split string in a cluster', command: "env -iS 'rm -rf ~'", decision: 'deny' },
+    {
+      name: 'env long split string',
+      command: "env --split-string='git status'",
+      decision: 'deny',
+    },
+    {
+      name: 'env abbreviated split string',
+      command: "env --split='cat ~/.claude.json'",
+      decision: 'deny',
+    },
+    { name: 'env split string behind nice', command: "nice env -S 'git status'", decision: 'deny' },
+    {
+      name: 'env split string before a command',
+      command: "env -S 'rm -rf ~' true",
+      decision: 'deny',
+    },
+    {
+      name: 'env split string in a cluster before a command',
+      command: "env -iS 'git checkout .' true",
+      decision: 'deny',
+    },
+    {
+      name: 'env long split string before a command',
+      command: "env --split-string='git checkout .' true",
+      decision: 'deny',
+    },
+    {
+      name: 'env abbreviated split string before a command',
+      command: "env --split='git checkout .' true",
+      decision: 'deny',
+    },
+    { name: 'env unsetting a variable named S', command: 'env -uS git status', decision: 'allow' },
     { name: 'pnpm add', command: 'pnpm add zod', decision: 'deny' },
     { name: 'pnpm add with -w', command: 'pnpm -w add zod', decision: 'deny' },
     {
