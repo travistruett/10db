@@ -91,6 +91,16 @@ describe('AllowedCommand', () => {
     ['pnpm create with a package', 'pnpm create vite'],
     ['yarn create alone', 'yarn create'],
     ['yarn create with a package', 'yarn create vite'],
+    ['pnpm multi, an alias of pnpm recursive', 'pnpm multi'],
+    ['pnpm multi running a shell', 'pnpm multi exec bash'],
+    ['pnpm m, a short alias of pnpm recursive', 'pnpm m'],
+    ['pnpm m running a shell', 'pnpm m exec bash'],
+    ['npm innit alone, an alias of npm init', 'npm innit'],
+    ['npm innit with a package', 'npm innit create-app'],
+    ['bun create alone', 'bun create'],
+    ['bun create with a template', 'bun create vite'],
+    ['bun c, a short alias of bun create', 'bun c'],
+    ['bun c with a template', 'bun c vite'],
     ['a forwarding form in capitals', 'PNPM RECURSIVE'],
   ])('rejects %s (%s)', (_name, command) => {
     expect(AllowedCommand.safeParse(command).success).toBe(false);

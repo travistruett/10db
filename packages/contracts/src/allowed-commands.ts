@@ -30,8 +30,9 @@ function runsAnything(program: string): boolean {
  * its program is a name on PATH, because the guard reads a path-qualified program by its last part. A
  * prefix may not name a program that runs what it is given: one alone, or one that a package tool runs
  * through `exec`, `dlx` or `x`, or through `npx`, `bunx` or `pnpx`. Nor may it name a package tool's
- * forwarding subcommand or package creator (`yarn workspace`, `pnpm recursive`, `yarn node`, `npm init`,
- * `npm create`), which runs whatever follows it.
+ * forwarding subcommand or package creator, or an alias of one (`yarn workspace`, `pnpm recursive`,
+ * `pnpm multi`, `yarn node`, `npm init`, `npm innit`, `npm create`, `bun create`), which runs whatever
+ * follows it.
  */
 export function allowedCommandProblem(command: string): string | null {
   if (command.trim() === '') return 'Enter a command prefix such as pnpm test';

@@ -84,20 +84,22 @@ export function packageToolProgramIndex(words: readonly string[]): number | null
 /**
  * Subcommands that hand the rest of the line to another command or to each workspace in turn: `yarn
  * workspace web exec bash` runs bash, and `pnpm recursive exec` runs anything. A prefix that stops at one
- * covers whatever follows it.
+ * covers whatever follows it. `pnpm multi` and `pnpm m` are other names for `pnpm recursive`.
  */
 const FORWARDING_SUBCOMMANDS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
   ['yarn', new Set(['workspace', 'workspaces', 'node'])],
-  ['pnpm', new Set(['recursive'])],
+  ['pnpm', new Set(['recursive', 'multi', 'm'])],
 ]);
 /**
  * Subcommands that fetch the package named after them and run it: `npm create vite` runs create-vite.
  * Bare, they run whichever package is named later, so a prefix that stops at one covers all of them.
+ * `npm innit` is another name for `npm init`, and `bun c` for `bun create`.
  */
 const PACKAGE_CREATORS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
-  ['npm', new Set(['init', 'create'])],
+  ['npm', new Set(['init', 'create', 'innit'])],
   ['pnpm', new Set(['create'])],
   ['yarn', new Set(['create'])],
+  ['bun', new Set(['create', 'c'])],
 ]);
 
 /**
