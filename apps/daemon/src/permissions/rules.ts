@@ -8,6 +8,7 @@ import {
 import { join } from 'node:path';
 import { z } from 'zod';
 import {
+  EQUALS_EXPANSION,
   parseShell,
   READ_COMMANDS,
   resolveInRepo,
@@ -72,7 +73,7 @@ function startsWithWords(words: readonly string[], prefix: string): boolean {
   const parsed = plainSegments(prefix);
   const prefixWords = parsed?.length === 1 ? parsed[0]?.words : undefined;
   if (prefixWords === undefined || prefixWords.length === 0) return false;
-  if (prefixWords.join(' ') !== prefix) return false;
+  if (prefixWords.join(' ') !== prefix || !prefixWords.every(isPlainWord)) return false;
   return prefixWords.every((word, i) => words[i] === word);
 }
 
@@ -186,13 +187,18 @@ export function commandPrefix(command: string): string | null {
 /** Characters whose meaning never depends on quoting; any other word is allowed once only. */
 const PLAIN_WORD = /^[A-Za-z0-9._/:@%+=,-]+$/;
 
+/** A word that means the same quoted or not: plain characters and no zsh `=cmd` expansion. */
+function isPlainWord(word: string): boolean {
+  return PLAIN_WORD.test(word) && !EQUALS_EXPANSION.test(word);
+}
+
 /**
  * The pattern when it reads back as one segment of exactly these words. A word that holds
  * whitespace, `#`, `;`, `&&` or a brace changes meaning once the words are joined into text, and a
  * word with `~`, `*`, `?`, `[`, `!` or the like means something else once its quotes are gone.
  */
 function storable(pattern: string, words: readonly string[]): string | null {
-  if (!words.every((w) => PLAIN_WORD.test(w))) return null;
+  if (!words.every(isPlainWord)) return null;
   const parsed = plainSegments(pattern);
   const [only] = parsed ?? [];
   if (parsed?.length !== 1 || only === undefined) return null;
