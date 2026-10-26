@@ -1,4 +1,4 @@
-import { splitCommand, stripCommandPrefixes, type ShellSegment } from '../guard';
+import { parseShell, splitCommand, stripCommandPrefixes, type ShellSegment } from '../guard';
 
 /** Redirections that only discard or merge output; every other redirection can write or read a file. */
 const HARMLESS_REDIRECTIONS = new Set(['2>&1', '>/dev/null', '2>/dev/null']);
@@ -91,12 +91,17 @@ export function isPlainSegment(segment: ShellSegment): boolean {
 export interface PlainSegment {
   /** The command as the shell runs it, with wrappers and path prefixes removed. */
   readonly line: string;
+  /** The words the matcher compares: an escaped space or a quoted string stays one word. */
   readonly words: string[];
   readonly separator: string;
 }
 
-/** The command's segments when every one is plain; null when any segment could do more than it says. */
+/**
+ * The command's segments when every one is plain; null when any segment could do more than it says.
+ * A command the scanner cannot parse with certainty is never plain, so it matches no stored rule.
+ */
 export function plainSegments(command: string): PlainSegment[] | null {
+  if (!parseShell(command).certain) return null;
   const segments = splitCommand(command);
   if (segments.length === 0 || !segments.every(isPlainSegment)) return null;
   return segments.map((s) => {

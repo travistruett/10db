@@ -14,6 +14,14 @@ import { SECRET_VARIABLES } from '../environment';
 import { abbreviates } from './git-rules';
 import { isWithin } from './paths';
 
+/**
+ * Interim policy that keeps a cooperative agent from casual reads of account credentials: Keychain
+ * commands, environment dumps, secret-variable references and protected paths in shell text.
+ * These rules are not a boundary. Text matching cannot see everything a shell does, and a
+ * deliberate command can get past them. The lane sandbox (lane sandbox design, D12) makes the
+ * kernel the boundary and removes these rules once it is built.
+ */
+
 const KEYCHAIN = 'Keychain commands are never run by agents: 10db keeps account secrets there.';
 const ENV_DUMP =
   'Printing the environment would show account credentials. Read the one variable you need, if it holds no credential.';

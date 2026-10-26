@@ -8,6 +8,7 @@ import {
 import { join } from 'node:path';
 import { z } from 'zod';
 import {
+  parseShell,
   READ_COMMANDS,
   resolveInRepo,
   splitCommand,
@@ -66,12 +67,15 @@ const READ_TOOLS = new Set(['Read', 'Glob', 'Grep', 'LS']);
 /** Input fields of the read tools that name a place on disk. */
 const PATH_FIELDS = ['file_path', 'notebook_path', 'path', 'pattern'];
 
-function startsWithWords(line: string, prefix: string): boolean {
-  return line === prefix || line.startsWith(`${prefix} `);
+/** Whether the segment's words begin with the prefix's words, compared word by word. */
+function startsWithWords(words: readonly string[], prefix: string): boolean {
+  const prefixWords = plainSegments(prefix)?.[0]?.words;
+  if (prefixWords === undefined || prefixWords.length === 0) return false;
+  return prefixWords.every((word, i) => words[i] === word);
 }
 
 function segmentKey(segment: PlainSegment): string {
-  return `${segment.line}\u0000${segment.separator}`;
+  return `${JSON.stringify(segment.words)}${segment.separator}`;
 }
 
 function bashEntryMatches(entry: string, segments: readonly PlainSegment[]): boolean {
@@ -79,7 +83,7 @@ function bashEntryMatches(entry: string, segments: readonly PlainSegment[]): boo
   if (rule === undefined) return false;
   if (rule.endsWith(':*')) {
     const prefix = rule.slice(0, -2);
-    return segments.every((s) => startsWithWords(s.line, prefix));
+    return segments.every((s) => startsWithWords(s.words, prefix));
   }
   const expected = plainSegments(rule);
   return (
@@ -159,16 +163,20 @@ function runsOtherCommands(words: readonly string[]): boolean {
  * The pattern stored by "always allow": the program plus its subcommand when the second word is
  * one, otherwise the segment's whole words, so the rule never covers more than what was shown.
  * Null when the command has a substitution, expansion or redirection, or runs through a wrapper
- * with a command-carrying flag: such a command can only be allowed once.
+ * with a command-carrying flag, or the scanner cannot parse it with certainty, or its program or
+ * subcommand word holds whitespace (an escaped space or a quoted string): such a command can only
+ * be allowed once.
  */
 export function commandPrefix(command: string): string | null {
+  if (!parseShell(command).certain) return null;
   const segments = splitCommand(command);
   const first = segments[0];
   if (first === undefined || !segments.every(isLiteralSegment)) return null;
   const words = stripCommandPrefixes(first.words);
   const [head, second] = words;
-  if (head === undefined) return null;
+  if (head === undefined || /\s/.test(head)) return null;
   if (second === undefined) return head;
+  if (/\s/.test(second)) return null;
   if (!runsOtherCommands(words) && SUBCOMMAND.test(second)) return `${head} ${second}`;
   return words.join(' ');
 }
@@ -185,6 +193,6 @@ export function matchPermissionRule(
     if (pattern === null) return false;
     const command = stringField(req.input, 'command');
     const segments = command === null ? null : plainSegments(command);
-    return segments?.every((s) => startsWithWords(s.line, pattern)) === true;
+    return segments?.every((s) => startsWithWords(s.words, pattern)) === true;
   });
 }
