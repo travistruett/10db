@@ -23,7 +23,7 @@ serves agents over MCP, and runs Claude Code sessions.
 `src/<module>/` directories are flat; each exports its public surface from `index.ts`, and other
 modules import only that (ESLint enforces it). Dependencies point one way:
 
-`clock`, `log`, `events`, `guard`, `permissions`, `git`, `github`, `verify`, `routing`, `picker` → `sessions`, `inbox`, `briefing`, `team` →
+`clock`, `log`, `events`, `guard`, `permissions`, `sandbox`, `git`, `github`, `verify`, `routing`, `picker` → `sessions`, `inbox`, `briefing`, `team` →
 `delivery` → `mcp` → `runner` → `watcher`, `scheduler`, `recovery`, `backups`, `benchmarks` → `daemon` (composition root) → `main.ts`.
 `api` depends only on `@10db/contracts` and its own `ApiServices` interface; the composition root
 implements it and hands it to `createApp` in `ApiDeps`.
@@ -32,6 +32,7 @@ Time comes from an injected `Clock`; never call `Date.now()` or `setTimeout` dir
 
 The fake adapter (`sessions/fake-adapter.ts`) is the test boundary for Claude Code; daemon tests never call the real CLI.
 
+- `sandbox/` owns the lane sandbox: the settings profile Claude Code's Bash sandbox runs under (`buildLaneProfile`, validated by `LaneSandboxSettingsSchema`, whose field names match the SDK's `SandboxSettings`), the protected reads, the toolchain reads, the env-name allowlist, and each lane's short temp directory and per-project package caches. It imports no SDK and no other module; callers pass paths in.
 - `routing/` is pure: flows, floors, the per-role AA score (a role compares its own unless some enabled, costed profile that has an Intelligence score lacks it, then all on Intelligence), the router, escalation and step plans over rows its caller passes in. It imports `@10db/contracts` only. Its tests use the invented catalogue in `test-catalogue.ts`, never AA's numbers.
 - `picker/` is pure like `routing/`: the spec §5.2.1 rules over rows its caller passes in, planned tasks only. `team/candidates.ts` gathers the rows and adds each candidate's claims and step plan; `GET /projects/:projectId/candidates` serves the result. It models no batch: a batch is the delivery spec's entity.
 - `team/` seeds the team configuration at start and turns a task into its stored step plan. Read the step a workstream is on with `currentStep` from `@10db/contracts`. Daemon tests get an invented measured catalogue from `test/catalogue.ts`.
