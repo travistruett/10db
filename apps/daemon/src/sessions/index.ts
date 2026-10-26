@@ -1,6 +1,6 @@
 export { createClaudeAdapter } from './claude-adapter';
 export { FakeAdapter, FakeScriptBook, loadFakeScriptBook } from './fake-adapter';
-export { LanePermissionMode, SessionEndReason } from './types';
+export { SessionEndReason } from './types';
 export type {
   SessionAdapter,
   SessionEvent,

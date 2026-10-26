@@ -800,7 +800,6 @@ export function createRunner(opts: RunnerOptions): Runner {
     };
 
     opts.live.register(session.id, { signal: abort.signal, observer });
-    const allowedTools = allowedToolsFor(project, step.tools);
     handle = opts.adapter.start({
       sessionId: session.id,
       workstreamId: id,
@@ -813,7 +812,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       env,
       billingMode: project.billingMode,
       projectMcpServers: projectMcp.servers,
-      allowedTools,
+      allowedTools: allowedToolsFor(project, step.tools),
       mcp: { url: opts.mcpUrl(), token, toolTimeoutMs: (project.humanWaitMinutes + 5) * 60_000 },
       preToolUse: (req) =>
         judgeToolUse({
@@ -834,8 +833,6 @@ export function createRunner(opts: RunnerOptions): Runner {
           sessionId: session.id,
           observer,
           signal: abort.signal,
-          allowedCommands: step.tools === ToolAccess.Edit ? project.allowedCommands : [],
-          repoPath: project.repoPath,
           allowOnce: permission?.allowOnce ?? null,
         },
       ),

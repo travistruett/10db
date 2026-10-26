@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { LanePermissionMode } from './sessions';
 
 export const LogLevel = {
   Fatal: 'fatal',
@@ -10,6 +9,9 @@ export const LogLevel = {
   Trace: 'trace',
 } as const;
 export type LogLevel = (typeof LogLevel)[keyof typeof LogLevel];
+
+export const LanePermissionMode = { Default: 'default', Auto: 'auto' } as const;
+export type LanePermissionMode = (typeof LanePermissionMode)[keyof typeof LanePermissionMode];
 
 const DaemonEnv = z.object({
   TENDB_DATA_DIR: z.string().min(1).optional(),

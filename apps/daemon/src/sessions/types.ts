@@ -2,18 +2,15 @@ import type { BillingMode, Effort, Provider, SessionId, WorkstreamId } from '@10
 import type { GuardVerdict } from '../guard';
 import type { ProjectMcpServer } from './project-mcp';
 
-/**
- * How a lane's Claude Code session decides permission prompts. `auto` lets Claude Code's classifier
- * approve routine calls; the guard's PreToolUse refusals still apply first, and calls the classifier
- * escalates reach the broker as before.
- */
-export const LanePermissionMode = { Default: 'default', Auto: 'auto' } as const;
-export type LanePermissionMode = (typeof LanePermissionMode)[keyof typeof LanePermissionMode];
-
 export interface ToolRequest {
   readonly toolName: string;
   readonly input: Record<string, unknown>;
   readonly toolUseId: string | null;
+  /**
+   * Claude Code's auto-mode classifier blocked the call and handed it to a person. No stored grant or
+   * carried allowance may answer it.
+   */
+  readonly escalated: boolean;
   readonly signal: AbortSignal;
 }
 

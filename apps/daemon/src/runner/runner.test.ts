@@ -795,6 +795,7 @@ describe('runner', () => {
         toolName: 'Bash',
         input: { command },
         toolUseId,
+        escalated: false,
         signal: new AbortController().signal,
       });
     const first = ask('curl -s https://one.example', 'toolu_1');

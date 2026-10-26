@@ -1,12 +1,10 @@
 import {
   isCommandRunner,
-  isPackageTool,
   packageToolProgramIndex,
   ToolAccess,
   type PermissionRuleDto,
   type ProjectDto,
 } from '@10db/contracts';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
 import {
@@ -16,14 +14,7 @@ import {
   stringField,
   stripCommandPrefixes,
 } from '../guard';
-import {
-  isLiteralSegment,
-  isPlainSegment,
-  plainSegments,
-  withoutExitStatusEcho,
-  withoutSilentFlag,
-  type PlainSegment,
-} from './plain-segments';
+import { isLiteralSegment, plainSegments, type PlainSegment } from './plain-segments';
 
 /** Allow rules injected into every managed session. The guard still checks claims. */
 export function baseAllowedTools(project: Pick<ProjectDto, 'gateCommand'>): string[] {
@@ -103,45 +94,6 @@ function inRepoOrIsRepo(repoPath: string, value: string): boolean {
   return resolveInRepo(repoPath, value).inside || resolveInRepo(repoPath, join(value, '_')).inside;
 }
 
-/** Whether a path word, with a leading `~` expanded, resolves inside the repository. */
-function wordInsideRepo(repoPath: string, word: string): boolean {
-  if (!word.startsWith('~')) return inRepoOrIsRepo(repoPath, word);
-  if (word !== '~' && !word.startsWith('~/')) return false;
-  return inRepoOrIsRepo(repoPath, join(homedir(), word.slice(1)));
-}
-
-/** Whether every argument, and every `--flag=value` value, resolves inside the repository. */
-function argumentsInsideRepo(words: readonly string[], repoPath: string): boolean {
-  return words.slice(1).every((word) => {
-    if (!word.startsWith('-')) return wordInsideRepo(repoPath, word);
-    const value = word.slice(word.indexOf('=') + 1);
-    return !word.includes('=') || value === '' || wordInsideRepo(repoPath, value);
-  });
-}
-
-/**
- * Whether a Bash command is covered by the project's own allowed commands, which are command
- * prefixes. It differs from Claude Code's matcher only in ignoring the two cosmetic forms, and it
- * is as strict about the rest: the program word must equal the prefix's literally (no path,
- * wrapper, backslash or quoted space), and every argument must stay inside the repository.
- */
-export function matchesProjectCommand(
-  command: string,
-  allowedCommands: readonly string[],
-  repoPath: string,
-): boolean {
-  const segments = withoutExitStatusEcho(splitCommand(command));
-  if (segments.length === 0 || !segments.every(isPlainSegment)) return false;
-  return segments.every((segment) => {
-    const words = withoutSilentFlag(segment.words);
-    const covered = allowedCommands.some((entry) => {
-      const prefix = entry.split(' ');
-      return prefix.every((word, i) => words[i] === word);
-    });
-    return covered && argumentsInsideRepo(words, repoPath);
-  });
-}
-
 /** Whether every path a read tool names resolves inside the repository; no path means the repository. */
 function readsInsideRepo(input: unknown, repoPath: string): boolean {
   const parsed = ToolInput.safeParse(input);
@@ -206,18 +158,17 @@ function runsOtherCommands(words: readonly string[]): boolean {
 /**
  * The pattern stored by "always allow": the program plus its subcommand when the second word is
  * one, otherwise the segment's whole words, so the rule never covers more than what was shown.
- * pnpm's silent flag and a last segment that only echoes the exit status are left out, as the matcher
- * leaves them out. Null when the command has a substitution, expansion or redirection, or runs through a wrapper
+ * Null when the command has a substitution, expansion or redirection, or runs through a wrapper
  * with a command-carrying flag: such a command can only be allowed once.
  */
 export function commandPrefix(command: string): string | null {
-  const segments = withoutExitStatusEcho(splitCommand(command));
+  const segments = splitCommand(command);
   const first = segments[0];
   if (first === undefined || !segments.every(isLiteralSegment)) return null;
-  const words = withoutSilentFlag(stripCommandPrefixes(first.words));
+  const words = stripCommandPrefixes(first.words);
   const [head, second] = words;
   if (head === undefined) return null;
-  if (second === undefined) return isCommandRunner(head) || isPackageTool(head) ? null : head;
+  if (second === undefined) return head;
   if (!runsOtherCommands(words) && SUBCOMMAND.test(second)) return `${head} ${second}`;
   return words.join(' ');
 }

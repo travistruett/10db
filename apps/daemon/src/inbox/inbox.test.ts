@@ -23,8 +23,8 @@ import {
   searchDecisions,
   updateInboxItem,
 } from '@10db/db';
-import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { seedWorkstream, tempDir } from '../../test/fixtures';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { seedWorkstream } from '../../test/fixtures';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import {
   createInboxService,
@@ -358,10 +358,11 @@ describe('permission broker', () => {
       },
     );
   }
-  const request = (toolName: string, input: Record<string, unknown>) => ({
+  const request = (toolName: string, input: Record<string, unknown>, escalated = false) => ({
     toolName,
     input,
     toolUseId: 't1',
+    escalated,
     signal: new AbortController().signal,
   });
   function onlyOpenCard(): InboxItemDto {
@@ -429,6 +430,40 @@ describe('permission broker', () => {
     inbox.answer(onlyOpenCard().id, { choice: 'deny', note: 'use the vendored docs' });
     const decision = await pending;
     expect(decision.behavior === 'deny' && decision.message).toContain('use the vendored docs');
+  });
+
+  it('allows a call a stored rule covers, but raises a card when the classifier escalated it', async () => {
+    const ws = seedWorkstream(base);
+    const decide = broker(ws);
+    const first = decide(request('Bash', { command: 'pnpm test' }));
+    inbox.answer(onlyOpenCard().id, { choice: 'allow_project' });
+    expect(await first).toEqual({ behavior: 'allow' });
+    expect(await decide(request('Bash', { command: 'pnpm test --run' }))).toEqual({
+      behavior: 'allow',
+    });
+    expect(listInbox(state.db, { states: ['OPEN'] })).toEqual([]);
+
+    void decide(request('Bash', { command: 'pnpm test --run' }, true)).catch(() => undefined);
+    expect(onlyOpenCard().kind).toBe('permission');
+  });
+
+  it('raises a card for an escalated call that matches the carried allow-once', () => {
+    const ws = seedWorkstream(base);
+    const decide = createPermissionBroker(
+      { state, inbox },
+      {
+        projectId: ws.project.id,
+        workstreamId: ws.workstream.id,
+        sessionId: mintId('Session'),
+        signal: new AbortController().signal,
+        observer: { onWaitStart: () => undefined, onWaitEnd: () => undefined },
+        allowOnce: { toolName: 'Bash', summary: 'curl -s https://example.com' },
+      },
+    );
+    void decide(request('Bash', { command: 'curl -s https://example.com' }, true)).catch(
+      () => undefined,
+    );
+    expect(onlyOpenCard().kind).toBe('permission');
   });
 
   it('allows the first matching call once when an allow_once arrived after parking', async () => {
@@ -553,6 +588,7 @@ describe('permission broker without a storable pattern', () => {
       toolName: 'Bash',
       input: { command: 'echo $HOME' },
       toolUseId: 't1',
+      escalated: false,
       signal: new AbortController().signal,
     });
     const [card] = listInbox(state.db, { states: ['OPEN'] });
@@ -564,84 +600,5 @@ describe('permission broker without a storable pattern', () => {
     expect(await pending).toEqual({ behavior: 'allow' });
     expect(listPermissionRules(state.db, ws.project.id, ws.workstream.id)).toEqual([]);
     expect(searchDecisions(state.db, ws.project.id, 'allow', 5)).toEqual([]);
-  });
-});
-
-describe('permission broker with the project allowed commands', () => {
-  const allowedCommands = ['pnpm exec vitest', 'head'];
-  const repo = tempDir('broker-repo');
-  afterAll(() => {
-    repo.cleanup();
-  });
-
-  function decider(ws: ReturnType<typeof seedWorkstream>, commands = allowedCommands) {
-    return createPermissionBroker(
-      { state, inbox },
-      {
-        projectId: ws.project.id,
-        workstreamId: ws.workstream.id,
-        sessionId: mintId('Session'),
-        observer: { onWaitStart: () => undefined, onWaitEnd: () => undefined },
-        signal: new AbortController().signal,
-        allowedCommands: commands,
-        repoPath: repo.path,
-      },
-    );
-  }
-  const call = (toolName: string, input: Record<string, unknown>) => ({
-    toolName,
-    input,
-    toolUseId: 't1',
-    signal: new AbortController().signal,
-  });
-
-  it.each([
-    ['the plain command', 'pnpm exec vitest run a.test.ts'],
-    ['the silent form', 'pnpm -s exec vitest run a.test.ts'],
-    ['a trailing exit-code echo', 'pnpm exec vitest run a.test.ts; echo "exit $?"'],
-    ['both cosmetic forms', 'pnpm --silent exec vitest run a.test.ts; echo $?'],
-    ['a listed command naming a file in the repository', 'head README.md; echo $?'],
-  ])('allows %s without a card', async (_name, command) => {
-    const ws = seedWorkstream(base);
-    expect(await decider(ws)(call('Bash', { command }))).toEqual({ behavior: 'allow' });
-    expect(listInbox(state.db, { states: ['OPEN'] })).toEqual([]);
-  });
-
-  it.each([
-    ['a command outside the allowed list', 'curl https://example.com'],
-    ['a listed command chained to another', 'pnpm exec vitest run && curl x'],
-    ['an echo of something else', 'pnpm exec vitest run; echo $HOME'],
-    ['a silent add', 'pnpm -s add evil'],
-    ['a program at an absolute path', '/tmp/x/pnpm exec vitest run a'],
-    ['a program at a relative path', './pnpm exec vitest run a'],
-    ['a program with a leading backslash', '\\pnpm exec vitest run a'],
-    ['a quoted program word holding a space', '"pnpm exec" vitest run a'],
-    ['a wrapped program', 'env pnpm exec vitest run a'],
-    ['a listed command reading a home path', 'head ~/x; echo $?'],
-    ['a listed command reading an absolute path', 'head /etc/hosts'],
-    ['a listed command reading above the repository', 'head ../x'],
-    ['a flag value outside the repository', 'pnpm exec vitest run --config=/tmp/evil.ts'],
-  ])('still raises a card for %s', (_name, command) => {
-    const ws = seedWorkstream(base);
-    void decider(ws)(call('Bash', { command })).catch(() => undefined);
-    const [card, ...rest] = listInbox(state.db, { states: ['OPEN'] });
-    expect(card?.kind).toBe('permission');
-    expect(rest).toEqual([]);
-  });
-
-  it.each([
-    ['a read command on a read-only step', 'cat /etc/hosts; echo $?'],
-    ['a version-control read on a read-only step', 'git status; echo $?'],
-    ['a project command on a read-only step', 'pnpm exec vitest run'],
-  ])('raises a card for %s, which has no allowed commands', (_name, command) => {
-    const ws = seedWorkstream(base);
-    void decider(ws, [])(call('Bash', { command })).catch(() => undefined);
-    expect(listInbox(state.db, { states: ['OPEN'] })).toHaveLength(1);
-  });
-
-  it('does not let the allowed commands cover another tool', () => {
-    const ws = seedWorkstream(base);
-    void decider(ws)(call('WebFetch', { url: 'https://example.com' })).catch(() => undefined);
-    expect(listInbox(state.db, { states: ['OPEN'] })).toHaveLength(1);
   });
 });
