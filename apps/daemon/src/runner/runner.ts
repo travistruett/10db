@@ -85,7 +85,12 @@ import {
 import type { Clock, Timer } from '../clock';
 import { batchCardFields } from '../delivery';
 import type { StateStore } from '../events';
-import { AccountLaunchError, type Launcher, type SessionLaunch } from '../environment';
+import {
+  AccountLaunchError,
+  KeychainError,
+  type Launcher,
+  type SessionLaunch,
+} from '../environment';
 import type { Git } from '../git';
 import { judgeToolUse, type ProtectedPath } from '../guard';
 import {
@@ -878,11 +883,15 @@ export function createRunner(opts: RunnerOptions): Runner {
     try {
       launch = opts.launcher.session(account, row.model);
     } catch (error) {
-      if (!(error instanceof AccountLaunchError)) throw error;
+      if (!(error instanceof AccountLaunchError || error instanceof KeychainError)) throw error;
+      // A locked or unreachable Keychain is the account's problem, not the lane's: it pauses the account
+      // like a refusal, and the card's Resume tries again.
+      const problem =
+        error instanceof KeychainError ? AccountProblem.KeychainUnavailable : error.problem;
       return {
         kind: 'held',
         until: null,
-        refusal: { problem: error.problem, message: error.message, seenIdentity: null },
+        refusal: { problem, message: error.message, seenIdentity: null },
         providerSessionId: null,
       };
     }

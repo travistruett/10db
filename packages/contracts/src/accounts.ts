@@ -42,6 +42,8 @@ export const AccountProblem = {
   SignedOut: 'signed_out',
   SecretMissing: 'secret_missing',
   SecretChanged: 'secret_changed',
+  /** The login Keychain timed out, was locked or denied 10db's read: the secret may well be there. */
+  KeychainUnavailable: 'keychain_unavailable',
   CannotBill: 'cannot_bill',
 } as const;
 export type AccountProblem = ValueOf<typeof AccountProblem>;

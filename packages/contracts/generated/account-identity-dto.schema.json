@@ -53,6 +53,7 @@
                 "signed_out",
                 "secret_missing",
                 "secret_changed",
+                "keychain_unavailable",
                 "cannot_bill"
               ]
             },

@@ -72,6 +72,8 @@ export function fixFor(account: AccountRow, problem: AccountProblem): string {
     case AccountProblem.SecretMissing:
     case AccountProblem.SecretChanged:
       return `Set the secret with PUT /accounts/${account.id}/secret; the account resumes when it is saved.`;
+    case AccountProblem.KeychainUnavailable:
+      return "Unlock the login Keychain, and allow 10db's access if macOS asks, then answer Resume.";
     case AccountProblem.CannotBill:
       return "Check the account's billing with its provider, then answer Resume.";
   }

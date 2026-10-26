@@ -31,7 +31,7 @@ import {
   HANDOFF_NUDGE_ACCOUNT,
   RESULT_NUDGE,
 } from '../briefing';
-import { createLauncher } from '../environment';
+import { createLauncher, KeychainError } from '../environment';
 import type { SessionHandle } from '../sessions';
 import { createMemoryKeychain, handoffArgs, waitFor } from '../../test/fixtures';
 import { createTestEngine, type TestEngine } from '../../test/engine';
@@ -1386,6 +1386,48 @@ describe('accounts', () => {
     const cards = listInbox(engine.store.db, { states: ['OPEN'] });
     expect(cards.map((c) => c.title)).toEqual(['Client key: sessions refused']);
     expect(JSON.stringify(cards)).not.toContain('sk-ant');
+  });
+
+  it('pauses the account when its Keychain cannot be read, and retries the lane after Resume', async () => {
+    engine = await createTestEngine(
+      { Alpha: [[turn]] },
+      {},
+      {},
+      {
+        account: { kind: 'anthropic_api_key', label: 'Client key' },
+        secret: 'sk-ant-api03-original-key',
+      },
+    );
+    const unlocked = engine.keychain.read.bind(engine.keychain);
+    let locked = true;
+    engine.keychain.read = (account) => {
+      if (!locked) return unlocked(account);
+      throw new KeychainError(`Reading the Keychain item ${account} failed (timed out after 5 s)`);
+    };
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(listSessions(engine.store.db, workstream.id)).toEqual([]);
+    expect(ws(workstream.id)).toMatchObject({
+      state: 'PAUSED_LIMIT',
+      nextAction: { kind: 'start' },
+    });
+    expect(transitions(workstream.id).filter((t) => t.endsWith('->FAILED'))).toEqual([]);
+    expect(engine.accounts.isPaused(engine.project.accountId)).toBe(true);
+    const [card, ...others] = listInbox(engine.store.db, { states: ['OPEN'] });
+    expect(others).toEqual([]);
+    expect(card?.title).toBe('Client key: sessions refused');
+    expect(card?.body).toContain('Unlock the login Keychain');
+    expect(card?.detail?.[ACCOUNT_CARD_DETAIL]).toMatchObject({
+      reason: 'refused',
+      problem: 'keychain_unavailable',
+    });
+
+    locked = false;
+    if (!card) throw new Error('no refusal card');
+    engine.inbox.answer(card.id, { choice: AccountCardChoice.Resume });
+    expect(engine.accounts.isPaused(engine.project.accountId)).toBe(false);
+    expect(ws(workstream.id).state).toBe('QUEUED');
   });
 
   it('resumes the same conversation after credentials expired mid-session', async () => {
