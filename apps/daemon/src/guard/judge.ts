@@ -5,8 +5,15 @@ import { z } from 'zod';
 import { commandForms, startsWithWords } from './command-forms';
 import { ghVerdict } from './gh-rules';
 import { gitVerdict } from './git-rules';
-import { classifyPath, foldPathCase, resolveInRepoReadings } from './paths';
+import {
+  classifyPath,
+  foldPathCase,
+  isOverLongPath,
+  OVER_LONG_PATH_REFUSAL,
+  resolveInRepoReadings,
+} from './paths';
 import { readOnlyShellRefusal } from './read-only';
+import { shellGlobMatches } from './shell-glob';
 import { splitCommand, stripCommandPrefixes } from './shell-words';
 
 export interface GuardInput {
@@ -83,6 +90,7 @@ function judgeRelative(input: GuardInput, rel: string): GuardVerdict {
 
 /** Every reading of the path (as the kernel opens it, and with `..` collapsed) must be allowed. */
 function judgeFile(input: GuardInput, filePath: string): GuardVerdict {
+  if (isOverLongPath(filePath)) return deny(OVER_LONG_PATH_REFUSAL);
   const where = resolveInRepoReadings(input.repoPath, filePath);
   if (!where.inside)
     return deny(`${filePath} is outside the repository. Edit files inside ${input.repoPath} only.`);
@@ -97,6 +105,27 @@ function isRecursiveRm(words: readonly string[]): boolean {
   return words.some((w) => w === '--recursive' || /^-[a-zA-Z]*[rR]/.test(w));
 }
 
+/** Characters that make the shell expand a word into paths. */
+const SHELL_GLOB_CHARACTERS = /[*?[\]{}\\]/;
+
+function hasGitPart(path: string): boolean {
+  return path.split(sep).some((part) => foldPathCase(part) === '.git');
+}
+
+/** Judges one path an `rm -r` of `arg` would remove: it must be inside the repository, not `.git`. */
+function rmPathVerdict(input: GuardInput, arg: string, path: string): GuardVerdict | null {
+  if (hasGitPart(path)) return deny('rm -r of a .git path is never allowed.');
+  const where = resolveInRepoReadings(input.repoPath, path);
+  if (!where.inside)
+    return deny(`rm -r of ${arg} reaches outside the repository (or is the repository itself).`);
+  if (where.rels.some(hasGitPart)) return deny('rm -r of a .git path is never allowed.');
+  return null;
+}
+
+/**
+ * Judges each argument of an `rm -r` as written and, when the shell could expand it, every path it
+ * could expand to. The parser drops quotes, so a quoted wildcard is expanded too.
+ */
 function rmVerdict(
   input: GuardInput,
   words: readonly string[],
@@ -106,14 +135,18 @@ function rmVerdict(
   if (afterCd)
     return deny('rm -r after cd is not allowed: the working directory is not the repository.');
   for (const arg of words.slice(1).filter((w) => !w.startsWith('-'))) {
+    if (isOverLongPath(arg)) return deny(OVER_LONG_PATH_REFUSAL);
     if (arg.includes('$')) return deny(`rm -r of ${arg} uses a variable the guard cannot resolve.`);
-    if (arg.split('/').includes('.git')) return deny('rm -r of a .git path is never allowed.');
     const expanded = arg.startsWith('~') ? arg.replace(/^~/, homedir()) : arg;
-    const where = resolveInRepoReadings(input.repoPath, expanded);
-    if (!where.inside)
-      return deny(`rm -r of ${arg} reaches outside the repository (or is the repository itself).`);
-    if (where.rels.some((rel) => rel.split(sep).some((part) => foldPathCase(part) === '.git')))
-      return deny('rm -r of a .git path is never allowed.');
+    const literal = rmPathVerdict(input, arg, expanded);
+    if (literal) return literal;
+    if (!SHELL_GLOB_CHARACTERS.test(arg)) continue;
+    const matches = shellGlobMatches(expanded, input.repoPath);
+    if (matches === null) return deny(`rm -r of ${arg} expands to paths the guard cannot judge.`);
+    for (const match of matches) {
+      const verdict = rmPathVerdict(input, arg, match);
+      if (verdict) return verdict;
+    }
   }
   return null;
 }

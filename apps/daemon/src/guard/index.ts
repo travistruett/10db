@@ -1,7 +1,10 @@
 export { judgeToolUse, stringField, type FileAccessJudge, type GuardVerdict } from './judge';
+export { expandBraces } from './braces';
 export {
   classifyPath,
   foldPathCase,
+  isOverLongPath,
+  OVER_LONG_PATH_REFUSAL,
   PathResolutionError,
   realPathOf,
   resolveInRepo,

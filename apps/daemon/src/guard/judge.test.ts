@@ -608,6 +608,114 @@ describe('paths that climb out of a link', () => {
   });
 });
 
+describe('a path decided by its collapsed reading', () => {
+  const own = tempDir('guard-collapsed');
+  beforeAll(() => {
+    mkdirSync(join(own.path, 'src', 'api', 'sub'), { recursive: true });
+    mkdirSync(join(own.path, 'docs'), { recursive: true });
+    symlinkSync('../src/api/sub', join(own.path, 'docs', 'lk'));
+  });
+  afterAll(() => {
+    own.cleanup();
+  });
+
+  it('denies an edit whose kernel reading is claimed but whose text is not', () => {
+    const verdict = judgeToolUse({
+      toolName: 'Edit',
+      toolInput: { file_path: 'docs/lk/../x.ts' },
+      repoPath: own.path,
+      areas: [...AREAS, { name: 'docs', globs: ['docs/**'] }],
+      hazards: DEFAULT_HAZARDS,
+      claims: [{ kind: 'area', name: 'api' }],
+      readOnly: false,
+    });
+    expect(verdict).toEqual({
+      decision: 'deny',
+      reason: `${join('docs', 'x.ts')} is outside your claims (it is in area "docs"). Call the request_claim tool for the area you need.`,
+    });
+  });
+});
+
+describe('rm -r of an argument the shell expands', () => {
+  const own = tempDir('guard-rm-glob');
+  beforeAll(() => {
+    mkdirSync(join(own.path, '.git', 'objects'), { recursive: true });
+    mkdirSync(join(own.path, 'dist', 'a'), { recursive: true });
+    mkdirSync(join(own.path, 'many'), { recursive: true });
+    for (let i = 0; i <= 1000; i += 1) writeFileSync(join(own.path, 'many', String(i)), '');
+  });
+  afterAll(() => {
+    own.cleanup();
+  });
+  const run = (command: string) =>
+    judgeToolUse({
+      toolName: 'Bash',
+      toolInput: { command },
+      repoPath: own.path,
+      areas: AREAS,
+      hazards: DEFAULT_HAZARDS,
+      claims: [],
+      readOnly: false,
+    });
+  const gitDenied = { decision: 'deny', reason: 'rm -r of a .git path is never allowed.' };
+
+  it.each([
+    ['a question mark', 'rm -rf .gi?'],
+    ['a star', 'rm -rf .g*'],
+    ['a brace list', 'rm -rf .{git,x}'],
+    ['a backslash escape', 'rm -rf .gi\\t'],
+    ['a class', 'rm -rf .gi[st]'],
+    ['a leading star, with dotfiles matched', 'rm -rf *'],
+    ['a star below the root', 'rm -rf */objects'],
+  ])('denies %s that reaches .git', (_name, command) => {
+    expect(run(command)).toEqual(gitDenied);
+  });
+
+  it.each(['.?/x', '.*/x', '.[.]/x'])('denies %s, which the shell can expand to ../x', (arg) => {
+    expect(run(`rm -rf ${arg}`)).toEqual({
+      decision: 'deny',
+      reason: `rm -r of ${arg} reaches outside the repository (or is the repository itself).`,
+    });
+  });
+
+  it('denies an expansion past the match cap', () => {
+    expect(run('rm -rf many/*')).toEqual({
+      decision: 'deny',
+      reason: 'rm -r of many/* expands to paths the guard cannot judge.',
+    });
+  });
+
+  it('denies a brace sequence the guard does not expand', () => {
+    expect(run('rm -rf .{f..h}it')).toEqual({
+      decision: 'deny',
+      reason: 'rm -r of .{f..h}it expands to paths the guard cannot judge.',
+    });
+  });
+
+  it('allows a glob that matches only ordinary paths', () => {
+    expect(run('rm -rf dist/*')).toEqual({ decision: 'allow' });
+  });
+});
+
+describe('very long paths', () => {
+  const overLong = 'A path over 4096 characters or 1024 parts is never judged; 10db refuses it.';
+
+  it('refuses an edit of a long climbing path quickly', () => {
+    const started = performance.now();
+    const verdict = judge('Edit', { file_path: `${'../'.repeat(300000)}x` });
+    expect(performance.now() - started).toBeLessThan(100);
+    expect(verdict).toEqual({ decision: 'deny', reason: overLong });
+  });
+
+  it('refuses rm -r of a path with more than 1024 parts', () => {
+    expect(bash(`rm -rf ${'a/'.repeat(1025)}`)).toEqual({ decision: 'deny', reason: overLong });
+  });
+
+  it('refuses rm -r of a path over 4096 characters', () => {
+    expect(bash(`rm -rf ${'a'.repeat(4097)}`)).toEqual({ decision: 'deny', reason: overLong });
+  });
+});
+
 describe('classifyPath', () => {
   it('lists the areas and hazards a path falls in', () => {
     expect(classifyPath('src/api/package.json', AREAS, DEFAULT_HAZARDS)).toEqual({

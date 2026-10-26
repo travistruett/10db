@@ -1,5 +1,6 @@
 import {
   chmodSync,
+  globSync,
   mkdirSync,
   mkdtempSync,
   realpathSync,
@@ -185,7 +186,23 @@ describe('readAccess', () => {
         locked = dir;
       },
       path: () => join(checkout, 'locked', 'f'),
-      expected: 'ask',
+      expected: 'protected',
+    },
+    {
+      name: 'a .. past an unreadable directory, reached through a link',
+      setup: () => {
+        mkdirSync(join(configDir, 'np', 'sub'), { recursive: true });
+        symlinkSync(configDir, join(checkout, 'lk'));
+        chmodSync(join(configDir, 'np'), 0o000);
+        locked = join(configDir, 'np');
+      },
+      path: () => 'lk/np/sub/../../../src/a.ts',
+      expected: 'protected',
+    },
+    {
+      name: 'a path through a regular file',
+      path: () => 'src/a.ts/x',
+      expected: 'protected',
     },
   ];
   for (const row of rows) {
@@ -280,6 +297,21 @@ describe('writeAccess', () => {
     });
   });
 
+  it('refuses a .. past an unreadable directory, reached through a link', () => {
+    mkdirSync(join(configDir, 'np', 'sub'), { recursive: true });
+    symlinkSync(configDir, join(checkout, 'lk'));
+    chmodSync(join(configDir, 'np'), 0o000);
+    locked = join(configDir, 'np');
+    expect(writeAccess('lk/np/sub/../../../src/a.ts', context()).access).toBe('unresolvable');
+    expect(fileAccessJudge(context()).write('lk/np/sub/../../../src/a.ts')).toEqual({
+      refuse: 'lk/np/sub/../../../src/a.ts cannot be resolved to one real path; 10db refuses it.',
+    });
+  });
+
+  it('refuses a path through a regular file', () => {
+    expect(writeAccess('src/a.ts/x', context()).access).toBe('unresolvable');
+  });
+
   it('refuses a link loop', () => {
     symlinkSync('b', join(checkout, 'a'));
     symlinkSync('a', join(checkout, 'b'));
@@ -364,6 +396,44 @@ describe('fileAccessJudge in the guard', () => {
     });
   });
 
+  const overLong = 'A path over 4096 characters or 1024 parts is never judged; 10db refuses it.';
+
+  it('refuses an edit of a very long climbing path quickly', () => {
+    const started = performance.now();
+    const verdict = guard(fileAccessJudge(context()), 'Edit', {
+      file_path: `${'../'.repeat(300000)}x`,
+    });
+    expect(performance.now() - started).toBeLessThan(100);
+    expect(verdict).toEqual({ decision: 'deny', reason: overLong });
+  });
+
+  it('refuses a read of a path with more than 1024 parts', () => {
+    const verdict = fileAccessJudge(context()).read('Read', { file_path: 'a/'.repeat(1025) });
+    expect(verdict).toEqual({ refuse: overLong });
+  });
+
+  describe('patterns the glob engine climbs with', () => {
+    beforeEach(() => {
+      mkdirSync(join(checkout, 'src', 'deep'), { recursive: true });
+      mkdirSync(join(configDir, 'projects', 'p'), { recursive: true });
+      writeFileSync(join(configDir, 'projects', 'p', 's'), 'secret');
+    });
+    const climb = (segment: string) =>
+      `src/deep/${Array.from({ length: 4 }, () => segment).join('/')}/home/.claude/projects/*/*`;
+    for (const segment of ['[.][.]', '.[.]', '[.].', '.{Z..a}.']) {
+      it(`refuses ${segment}`, () => {
+        const pattern = climb(segment);
+        expect(globSync(pattern, { cwd: checkout })).toContain(
+          join('..', '..', 'home', '.claude', 'projects', 'p', 's'),
+        );
+        expect(guard(fileAccessJudge(context()), 'Glob', { pattern })).toEqual({
+          decision: 'deny',
+          reason: '/ contains protected paths; 10db never lets a lane search or list it.',
+        });
+      });
+    }
+  });
+
   it('refuses an edit of a protected Claude file through a link, not by its own path', () => {
     writeFileSync(join(checkout, '.claude', 'settings.json'), '{}');
     symlinkSync(join(checkout, '.claude', 'settings.json'), join(checkout, 'src', 's.json'));
@@ -390,7 +460,54 @@ describe('directory-scoped reads', () => {
     tool: string;
     input: unknown;
     expected: string | { refuse: string } | { within: string };
+    /** An adversarial pattern, which must also be judged quickly. */
+    timed?: true;
   }[] = [
+    ...[
+      '.{Z..a}./q',
+      '.{Z..a}./*',
+      '{Z..a}',
+      '{1..2}',
+      '{..}/q',
+      '[.][.]/q',
+      '.[.]/q',
+      '[.].',
+      '[--/][--/]/q',
+      '@(..)/q',
+      '.@(.)/q',
+      '+(.).',
+      '!(x)/q',
+      'src/[.]*/x',
+      'src/[a]/x',
+      'src/[a-Z]/x',
+      'src/[a-]/x',
+      'src/[a/x',
+      'src/a]/x',
+      'src/{a,b}/[{.,a}]/x',
+      'src/*/../../x',
+      'src/**/../x',
+      'src/caf\u00e9/*',
+    ].map((pattern) => ({
+      name: `refuses ${pattern} as the root`,
+      tool: 'Glob',
+      input: { pattern },
+      expected: contains('/'),
+    })),
+    ...[
+      'src/**/*.[jt]s',
+      'src/**/*.{ts,tsx}',
+      'src/[a-z]*/x.ts',
+      'src/**/[!_]*.ts',
+      'src/[A-Z0-9_]/x.ts',
+      'src/**/?./q',
+      'src/.*/q',
+      'src/a b@+~%=,:-x/*.ts',
+    ].map((pattern) => ({
+      name: `judges ${pattern} by its prefix`,
+      tool: 'Glob',
+      input: { pattern },
+      expected: 'ok',
+    })),
     {
       name: 'Grep over home',
       tool: 'Grep',
@@ -472,18 +589,21 @@ describe('directory-scoped reads', () => {
     {
       name: 'twenty thousand empty braces',
       tool: 'Glob',
+      timed: true,
       input: { pattern: `${'{}'.repeat(20000)}/*` },
       expected: contains('/'),
     },
     {
       name: 'twenty thousand single braces',
       tool: 'Glob',
+      timed: true,
       input: { pattern: `src/${'{a}'.repeat(20000)}/*` },
       expected: contains('/'),
     },
     {
       name: 'five thousand nested braces',
       tool: 'Glob',
+      timed: true,
       input: { pattern: `src/${'{'.repeat(5000)}a${'}'.repeat(5000)}/*` },
       expected: contains('/'),
     },
@@ -531,7 +651,7 @@ describe('directory-scoped reads', () => {
     it(row.name, () => {
       const started = performance.now();
       const verdict = judge().read(row.tool, row.input);
-      expect(performance.now() - started).toBeLessThan(100);
+      if (row.timed) expect(performance.now() - started).toBeLessThan(100);
       if (typeof row.expected === 'string' && row.expected !== 'ok') {
         expect(verdict).toEqual({ refuse: row.expected });
       } else if (typeof row.expected === 'object' && 'within' in row.expected) {

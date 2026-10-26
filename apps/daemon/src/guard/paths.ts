@@ -3,6 +3,17 @@ import { dirname, isAbsolute, join, matchesGlob, parse, relative, resolve, sep }
 import type { AreaDef, HazardDef } from '@10db/contracts';
 
 const MAX_LINK_HOPS = 40;
+const MAX_PATH_LENGTH = 4096;
+const MAX_PATH_PARTS = 1024;
+
+/** The refusal for a path too long to judge; it does not repeat the path. */
+export const OVER_LONG_PATH_REFUSAL =
+  'A path over 4096 characters or 1024 parts is never judged; 10db refuses it.';
+
+/** Whether `p` is longer than any path the judges resolve, in characters or in parts. */
+export function isOverLongPath(p: string): boolean {
+  return p.length > MAX_PATH_LENGTH || p.split(sep).length > MAX_PATH_PARTS;
+}
 
 /** Whether the file system folds case, so `PACKAGE.JSON` and `package.json` are the same file. */
 const CASE_INSENSITIVE = process.platform === 'darwin' || process.platform === 'win32';
@@ -18,20 +29,21 @@ export class PathResolutionError extends Error {
 
 /**
  * Resolves `p` the way the kernel opens it, without requiring it to exist. A resolved directory
- * and a queue of components that remain are kept: `.` is skipped, `..` goes to the resolved
- * directory's parent, and a link's target components go to the front of the queue (an absolute
- * target restarts at its root). A link, even a dangling one, is therefore followed through its
- * target, and a `..` inside a link target applies to where the link really leads. Components after
- * the first missing one are appended as written; a `..` among them throws, as the kernel would
- * fail it. A path that cannot be examined (EACCES, ENOTDIR) or loops through links throws.
+ * and a stack of the components that remain (the next one on top) are kept: `.` is skipped, `..`
+ * goes to the resolved directory's parent, and a link's target components go on top of the stack
+ * (an absolute target restarts at its root). A link, even a dangling one, is therefore followed
+ * through its target, and a `..` inside a link target applies to where the link really leads.
+ * Components after the first missing one are appended as written; a `..` among them throws, as the
+ * kernel would fail it. A path that cannot be examined (EACCES, ENOTDIR) or loops through links
+ * throws, and so does one longer than `isOverLongPath` allows.
  */
 function resolveThroughLinks(p: string): string {
+  if (isOverLongPath(p)) throw new PathResolutionError('a path is too long to resolve');
   let directory = parse(p).root;
-  const queue = p.slice(directory.length).split(sep);
+  const stack = p.slice(directory.length).split(sep).reverse();
   let hops = 0;
-  while (queue.length > 0) {
-    const part = queue.shift();
-    if (part === undefined || part === '' || part === '.') continue;
+  for (let part = stack.pop(); part !== undefined; part = stack.pop()) {
+    if (part === '' || part === '.') continue;
     if (part === '..') {
       directory = dirname(directory);
       continue;
@@ -42,7 +54,7 @@ function resolveThroughLinks(p: string): string {
       isLink = lstatSync(next).isSymbolicLink();
     } catch (error) {
       if (!isMissing(error)) throw error;
-      const tail = [part, ...queue].filter((name) => name !== '' && name !== '.');
+      const tail = [part, ...stack.reverse()].filter((name) => name !== '' && name !== '.');
       if (tail.includes('..')) {
         throw new PathResolutionError(`${p} climbs with .. past a part that does not exist`);
       }
@@ -56,12 +68,12 @@ function resolveThroughLinks(p: string): string {
     if (hops > MAX_LINK_HOPS) throw new PathResolutionError(`${p} passes through too many links`);
     const target = readlinkSync(next);
     if (isAbsolute(target)) directory = parse(target).root;
-    queue.unshift(...target.slice(parse(target).root.length).split(sep));
+    stack.push(...target.slice(parse(target).root.length).split(sep).reverse());
   }
   return realpathSync.native(directory);
 }
 
-/** The real path `p` names, following links through every existing component; `p` need not exist. Throws when a component cannot be examined (EACCES, ENOTDIR), a `..` follows a missing part, or links loop. */
+/** The real path `p` names, following links through every existing component; `p` need not exist. Throws when a component cannot be examined (EACCES, ENOTDIR), a `..` follows a missing part, links loop, or `p` is too long. */
 export function realPathOf(p: string): string {
   return resolveThroughLinks(p);
 }

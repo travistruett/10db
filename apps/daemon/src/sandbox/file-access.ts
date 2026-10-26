@@ -1,11 +1,14 @@
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import {
   foldPathCase,
+  isOverLongPath,
+  OVER_LONG_PATH_REFUSAL,
   PathResolutionError,
   realPathOf,
   stringField,
   type FileAccessJudge,
 } from '../guard';
+import { globPatternBases } from './glob-bases';
 import { isEqualOrUnder, pathsEqual } from './protected-reads';
 
 export interface FileAccessContext {
@@ -21,17 +24,13 @@ export interface FileAccessContext {
 
 /** `contains-protected` is a directory-scoped read of a path that has a protected path under it. */
 export type ReadAccess = 'inside' | 'allowed' | 'protected' | 'contains-protected' | 'ask';
-/** `unresolvable` is a path that no single real path can be named for (a link loop, `..` past a missing part). */
+/** `unresolvable` is a path that no single real path can be named for (a link loop, `..` past a missing part, a part that cannot be examined). */
 export type WriteAccess = 'ok' | 'git-internal' | 'claude-protected' | 'unresolvable';
 
 /** A file-tool judgment that could not be made; the judge refuses the call. */
 export class FileAccessError extends Error {
   override readonly name = 'FileAccessError';
 }
-
-const GLOB_CHARACTERS = /[*?[{]/;
-const MAX_PATTERN_LENGTH = 1024;
-const MAX_BRACE_GROUPS = 32;
 
 const CLAUDE_PROTECTED_IN_CHECKOUT = [
   '.claude/settings.json',
@@ -73,13 +72,17 @@ function plainPath(path: string, ctx: FileAccessContext): string {
   return resolve(ctx.checkout, expandHome(path, ctx.home));
 }
 
-/** The real path of a tool input's path, or null when it cannot be examined; a path with no single real path throws. */
-function strictRealPath(p: string): string | null {
+/**
+ * The real path of a tool input's path. Only a missing tail is resolved without the file system;
+ * anything else that stops the resolution (a part that cannot be examined, a part that is not a
+ * directory, a `..` past a missing part, a link loop) throws a `PathResolutionError`.
+ */
+function strictRealPath(p: string): string {
   try {
     return realPathOf(p);
   } catch (error) {
     if (error instanceof PathResolutionError) throw error;
-    return null;
+    throw new PathResolutionError(`${p} cannot be examined`, { cause: error });
   }
 }
 
@@ -88,11 +91,10 @@ function strictRealPath(p: string): string | null {
  * Throws a `PathResolutionError` when either reading has no single real path.
  */
 function candidates(path: string, ctx: FileAccessContext): string[] {
-  const plain = plainPath(path, ctx);
-  const lexical = strictRealPath(plain) ?? plain;
+  const lexical = strictRealPath(plainPath(path, ctx));
   const raw = expandHome(path, ctx.home);
   const kernel = strictRealPath(isAbsolute(raw) ? raw : `${ctx.checkout}${sep}${raw}`);
-  return kernel === null || pathsEqual(kernel, lexical) ? [lexical] : [lexical, kernel];
+  return pathsEqual(kernel, lexical) ? [lexical] : [lexical, kernel];
 }
 
 /** Both spellings of a root: as given and with its links resolved. */
@@ -141,8 +143,9 @@ function judgeRead(real: string, ctx: FileAccessContext, tree: boolean): ReadAcc
 
 /**
  * Judges a path a file tool would read, on the real path it names. A path with `..` after a link
- * is judged both ways and the stricter verdict wins. With `tree` set the path is searched or
- * listed as a directory, so one that holds a protected path is refused too.
+ * is judged both ways and the stricter verdict wins; one that cannot be resolved exactly is
+ * `protected`. With `tree` set the path is searched or listed as a directory, so one that holds a
+ * protected path is refused too.
  */
 export function readAccess(
   path: string,
@@ -160,93 +163,12 @@ export function readAccess(
     throw error;
   }
   for (const real of reals) {
-    const access = tryRealPath(real) === null ? 'ask' : judgeRead(real, ctx, tree);
+    const access = judgeRead(real, ctx, tree);
     if (best === null || READ_STRICTNESS[access] > READ_STRICTNESS[best.access]) {
       best = { access, realPath: real };
     }
   }
   return best ?? { access: 'ask', realPath: plainPath(path, ctx) };
-}
-
-const CLIMBS_AFTER_GLOB = /(^|\/)\.\.(\/|$)/;
-const MAX_BRACE_ALTERNATIVES = 64;
-
-/** Splits `text` at the commas that are not inside a nested brace. */
-function topLevelAlternatives(text: string): string[] {
-  const parts: string[] = [];
-  let depth = 0;
-  let start = 0;
-  for (let index = 0; index < text.length; index += 1) {
-    const character = text[index];
-    if (character === '{') depth += 1;
-    else if (character === '}') depth -= 1;
-    else if (character === ',' && depth === 0) {
-      parts.push(text.slice(start, index));
-      start = index + 1;
-    }
-  }
-  parts.push(text.slice(start));
-  return parts;
-}
-
-/**
- * Expands the braces of a glob pattern, nested ones included. Null when a brace is unbalanced or
- * the pattern has more than `MAX_BRACE_ALTERNATIVES` alternatives.
- */
-function expandBraces(pattern: string): string[] | null {
-  const open = pattern.indexOf('{');
-  if (open === -1) return pattern.includes('}') ? null : [pattern];
-  let depth = 0;
-  let close = -1;
-  for (let index = open; index < pattern.length && close === -1; index += 1) {
-    if (pattern[index] === '{') depth += 1;
-    else if (pattern[index] === '}') {
-      depth -= 1;
-      if (depth === 0) close = index;
-    }
-  }
-  if (close === -1) return null;
-  const before = pattern.slice(0, open);
-  const after = pattern.slice(close + 1);
-  const expanded: string[] = [];
-  for (const alternative of topLevelAlternatives(pattern.slice(open + 1, close))) {
-    const rest = expandBraces(`${before}${alternative}${after}`);
-    if (rest === null) return null;
-    expanded.push(...rest);
-    if (expanded.length > MAX_BRACE_ALTERNATIVES) return null;
-  }
-  return expanded;
-}
-
-function underBase(base: string, literal: string): string {
-  if (isAbsolute(literal)) return literal;
-  return base === '.' ? literal : `${base}${sep}${literal}`;
-}
-
-/** The directory one brace-free pattern names before its first glob character. */
-function patternPrefix(pattern: string, base: string): string | null {
-  const wild = pattern.search(GLOB_CHARACTERS);
-  if (wild === -1) return pattern === '' ? null : underBase(base, pattern);
-  if (CLIMBS_AFTER_GLOB.test(pattern.slice(wild))) return sep;
-  const cut = pattern.lastIndexOf('/', wild);
-  if (cut === -1) return null;
-  return cut === 0 ? sep : underBase(base, pattern.slice(0, cut));
-}
-
-/**
- * The directories a glob pattern reaches, joined onto `base`: every brace alternative is judged by
- * its literal prefix. A pattern that cannot be judged by its prefix (an unbalanced brace, too many
- * alternatives, a `..` after a glob character) is judged as the root.
- */
-function patternPaths(pattern: string, base: string): string[] {
-  // A backslash escapes characters the expansion below does not model, and a long or deeply
-  // braced pattern is not worth expanding: neither is judged by its prefix.
-  if (pattern.includes('\\') || pattern.length > MAX_PATTERN_LENGTH) return [sep];
-  if (pattern.split('{').length - 1 > MAX_BRACE_GROUPS) return [sep];
-  const alternatives = expandBraces(pattern);
-  if (alternatives === null) return [sep];
-  const prefixes = alternatives.map((alternative) => patternPrefix(alternative, base));
-  return [...new Set(prefixes.filter((prefix) => prefix !== null))];
 }
 
 /** The paths a read-side tool would open, as the tool's input spells them. */
@@ -261,7 +183,7 @@ export function readPathsOf(toolName: string, input: unknown): string[] {
       return [stringField(input, 'path') ?? '.'];
     case 'Glob': {
       const base = stringField(input, 'path') ?? '.';
-      return [base, ...patternPaths(stringField(input, 'pattern') ?? '', base)];
+      return [base, ...globPatternBases(stringField(input, 'pattern') ?? '', base)];
     }
     default:
       return [];
@@ -337,6 +259,7 @@ export function fileAccessJudge(ctx: FileAccessContext): FileAccessJudge {
       let path = toolName;
       try {
         for (path of readPathsOf(toolName, input)) {
+          if (isOverLongPath(path)) return { refuse: OVER_LONG_PATH_REFUSAL };
           const { access } = readAccess(path, ctx, toolName !== 'Read');
           if (access === 'protected') {
             return { refuse: `${path} is a protected path; 10db never lets a lane read it.` };
@@ -353,6 +276,7 @@ export function fileAccessJudge(ctx: FileAccessContext): FileAccessJudge {
       }
     },
     write(path) {
+      if (isOverLongPath(path)) return { refuse: OVER_LONG_PATH_REFUSAL };
       try {
         const result = writeAccess(path, ctx);
         if (result.access === 'git-internal') {
