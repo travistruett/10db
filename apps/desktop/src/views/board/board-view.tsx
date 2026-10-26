@@ -2,6 +2,8 @@ import {
   BoardStatus,
   TaskStatus,
   WorkstreamState,
+  type BatchDto,
+  type BatchId,
   type ProjectId,
   type TaskDto,
   type TaskId,
@@ -11,10 +13,11 @@ import {
 import { Alert, Button, Group, Loader, Modal, ScrollArea, Stack, Text, Title } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { useState } from 'react';
-import { useBoardColumns, useTasks, useWorkstreams } from '../../daemon/queries';
+import { useBatches, useBoardColumns, useTasks, useWorkstreams } from '../../daemon/queries';
 import { ProjectPicker } from '../../shell/project-picker';
 import { useSelectedProject } from '../../shell/selected-project';
 import { formatAreas } from './areas-text';
+import { BatchHistory } from './batch-history';
 import { BatchStrip } from './batch-strip';
 import { BoardColumn } from './board-column';
 import { BoardDnd } from './board-dnd';
@@ -43,6 +46,16 @@ function parkedDependencyOf(
   return null;
 }
 
+/** A finished task's pull request: the one its batch opened, once that batch has shipped. */
+function shippedPullRequest(
+  task: TaskDto,
+  workstream: WorkstreamDto | undefined,
+  batchById: ReadonlyMap<BatchId, BatchDto>,
+): string | undefined {
+  if (task.status !== TaskStatus.Done || !workstream?.batchId) return undefined;
+  return batchById.get(workstream.batchId)?.prUrl ?? undefined;
+}
+
 const isDone = (column: LayoutColumn) =>
   column.key.kind === 'system' && column.key.status === BoardStatus.Done;
 
@@ -50,13 +63,21 @@ interface BoardColumnsProps {
   readonly projectId: ProjectId;
   readonly layout: readonly LayoutColumn[];
   readonly workstreamById: ReadonlyMap<WorkstreamId, WorkstreamDto>;
+  readonly batchById: ReadonlyMap<BatchId, BatchDto>;
   readonly peers: ReadonlyMap<TaskId, Pick<TaskDto, 'title' | 'status' | 'boardColumnId'>>;
   /** For each task, a dependent that has started and waits on it; such a task can't be parked. */
   readonly started: ReadonlyMap<TaskId, string>;
 }
 
 /** The columns and their cards, with drag and drop; split out so the actions hook gets a project. */
-function BoardColumns({ projectId, layout, workstreamById, peers, started }: BoardColumnsProps) {
+function BoardColumns({
+  projectId,
+  layout,
+  workstreamById,
+  batchById,
+  peers,
+  started,
+}: BoardColumnsProps) {
   const actions = useBoardActions(projectId);
   const [showAllDone, setShowAllDone] = useState(false);
   const drop = (taskId: TaskId, target: DropTarget) => {
@@ -111,6 +132,7 @@ function BoardColumns({ projectId, layout, workstreamById, peers, started }: Boa
                 <TaskCard
                   task={task}
                   workstream={ws && SHOWN_STATES.includes(ws.state) ? ws : undefined}
+                  pullRequest={shippedPullRequest(task, ws, batchById)}
                   peers={peers}
                   handle={handle}
                   menu={
@@ -142,6 +164,7 @@ export function BoardView() {
   const tasks = useTasks(project?.id ?? null);
   const columns = useBoardColumns(project?.id ?? null);
   const workstreams = useWorkstreams({ active: false });
+  const batches = useBatches(project?.id ?? null);
   const [projectOpen, projectModal] = useDisclosure(false);
   const [taskOpen, taskModal] = useDisclosure(false);
 
@@ -150,6 +173,8 @@ export function BoardView() {
   const shownTasks = columns.data ? taskList : taskList.filter((t) => t.boardColumnId === null);
   const layout = boardLayout(columns.data ?? [], shownTasks);
   const workstreamById = new Map((workstreams.data ?? []).map((ws) => [ws.id, ws]));
+  const batchList = batches.data ?? [];
+  const batchById = new Map(batchList.map((b) => [b.id, b]));
   const peers = new Map(taskList.map((t) => [t.id, t]));
   const started = startedDependents(taskList, workstreamById);
 
@@ -202,6 +227,11 @@ export function BoardView() {
           {workstreams.error.message}
         </Alert>
       ) : null}
+      {batches.isError ? (
+        <Alert color="red" title="Couldn't load the batches">
+          {batches.error.message}
+        </Alert>
+      ) : null}
       {projects.isPending ? <Loader size="sm" aria-label="Loading projects" /> : null}
       {projects.isSuccess && !project ? (
         <Text c="dimmed">No projects yet. Create one to start.</Text>
@@ -216,6 +246,7 @@ export function BoardView() {
       {project?.currentBatch ? (
         <BatchStrip batch={project.currentBatch} workstreams={workstreams.data ?? []} />
       ) : null}
+      {project && batchList.length > 0 ? <BatchHistory batches={batchList} /> : null}
 
       {project && tasks.isSuccess && taskList.length === 0 ? (
         <Text c="dimmed">No tasks yet.</Text>
@@ -225,6 +256,7 @@ export function BoardView() {
           projectId={project.id}
           layout={layout}
           workstreamById={workstreamById}
+          batchById={batchById}
           peers={peers}
           started={started}
         />

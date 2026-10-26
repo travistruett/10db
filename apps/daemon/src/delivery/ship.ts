@@ -104,7 +104,12 @@ export function createShipper(deps: ShipperDeps): Shipper {
       });
       return true;
     });
-    if (moved) raise(deps.inbox, batch.projectId, outcome.card);
+    if (!moved) return;
+    deps.logger.warn(
+      { batchId: batch.id, failure: outcome.failure, title: outcome.card.title },
+      'batch not shipped',
+    );
+    raise(deps.inbox, batch.projectId, outcome.card);
   }
 
   /** Runs the project gate on the batch branch, recording its process group for recovery. */
@@ -114,15 +119,17 @@ export function createShipper(deps: ShipperDeps): Shipper {
     signal: AbortSignal,
   ): Promise<GateResult | null> {
     let recording: Promise<void> = Promise.resolve();
+    const logPath = join(
+      deps.dataDir,
+      'logs',
+      'gate',
+      `batch-${batch.id}-${String(deps.clock.now().getTime())}.log`,
+    );
+    deps.logger.info({ batchId: batch.id, command: project.gateCommand, logPath }, 'gate started');
     const result = await deps.gate.run({
       repo: project.repoPath,
       command: project.gateCommand,
-      logPath: join(
-        deps.dataDir,
-        'logs',
-        'gate',
-        `batch-${batch.id}-${String(deps.clock.now().getTime())}.log`,
-      ),
+      logPath,
       timeoutMs: deps.limits.gateTimeoutMs,
       env: deps.sessionEnv(project),
       signal,
@@ -134,6 +141,17 @@ export function createShipper(deps: ShipperDeps): Shipper {
       },
     });
     await recording.catch(() => undefined);
+    deps.logger.info(
+      {
+        batchId: batch.id,
+        exitCode: result.exitCode,
+        durationMs: result.durationMs,
+        logPath: result.logPath,
+        timedOut: result.timedOut,
+        aborted: result.aborted,
+      },
+      'gate finished',
+    );
     deps.state.write((w) =>
       patchBatch(w, batch.id, {
         gatePid: null,
@@ -143,6 +161,35 @@ export function createShipper(deps: ShipperDeps): Shipper {
     );
     // Shutdown killed the gate: record nothing; the batch stays SHIPPING and recovery re-runs it.
     return result.aborted ? null : result;
+  }
+
+  /** Logs the push's duration and output, landed or refused, so the pre-push hook's output is on record. */
+  async function pushBranch(
+    batch: BatchDto,
+    project: ProjectDto,
+    branch: string,
+    signal: AbortSignal,
+  ): Promise<void> {
+    try {
+      const run = await deps.git.push(project.repoPath, branch, pushCall(deps, signal));
+      deps.logger.info(
+        { batchId: batch.id, branch, durationMs: run.durationMs, output: run.output },
+        'git push finished',
+      );
+    } catch (error) {
+      if (error instanceof GitNetworkError)
+        deps.logger.warn(
+          {
+            batchId: batch.id,
+            branch,
+            kind: error.kind,
+            durationMs: error.durationMs,
+            output: error.output,
+          },
+          'git push failed',
+        );
+      throw error;
+    }
   }
 
   /** `target` is the batch's repo and branch, which step 0 checked are set. */
@@ -174,7 +221,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
         template: readPrTemplate(project.repoPath),
       }),
     );
-    return deps.gh.prCreate(
+    const prUrl = await deps.gh.prCreate(
       {
         repo: target.repo,
         base: batch.baseBranch,
@@ -184,6 +231,17 @@ export function createShipper(deps: ShipperDeps): Shipper {
       },
       ghCall(deps, project.repoPath, signal),
     );
+    deps.logger.info(
+      {
+        batchId: batch.id,
+        repo: target.repo,
+        baseBranch: batch.baseBranch,
+        branch: target.branch,
+        prUrl,
+      },
+      'gh pr create finished',
+    );
+    return prUrl;
   }
 
   /** Batch delivery spec §6, steps 0–5. Each step is safe to repeat, so a restart runs them all again. */
@@ -219,12 +277,9 @@ export function createShipper(deps: ShipperDeps): Shipper {
       }
       // 1. Nothing beyond the base: nothing to push.
       if ((await deps.git.commitsSince(project.repoPath, baseSha)).length === 0) {
-        deps.state.write((w) =>
-          transitionBatch(w, batchId, {
-            to: BatchState.Closed,
-            reason: 'no commits beyond the base',
-          }),
-        );
+        const reason = 'no commits beyond the base';
+        deps.state.write((w) => transitionBatch(w, batchId, { to: BatchState.Closed, reason }));
+        deps.logger.info({ batchId, reason }, 'batch closed');
         return;
       }
       // 2. The gate, on the branch as it will be pushed.
@@ -241,7 +296,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
       }
       // 3. Push, never forced.
       step = 'git push';
-      await deps.git.push(project.repoPath, branch, pushCall(deps, signal));
+      await pushBranch(batch, project, branch, signal);
       // 4. Any PR for the branch, in any state; create one only when there is none.
       step = 'gh pr view';
       const existing = await deps.gh.prView(
@@ -258,6 +313,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
           reason: 'pull request open',
         }),
       );
+      deps.logger.info({ batchId, branch, prUrl }, 'batch shipped');
     } catch (error) {
       // Shutdown: leave SHIPPING; recovery re-runs from step 0.
       if (stopped()) return;

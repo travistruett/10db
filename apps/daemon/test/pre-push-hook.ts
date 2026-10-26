@@ -3,6 +3,15 @@ import { join } from 'node:path';
 import { tempDir, waitFor } from './fixtures';
 import { alive } from './orphan-gate';
 
+/** A pre-push hook in `repo` that runs `script` (shell) and exits with its status. */
+export function writePrePushHook(repo: string, script: string): void {
+  const hooks = join(repo, '.git', 'hooks');
+  mkdirSync(hooks, { recursive: true });
+  const hook = join(hooks, 'pre-push');
+  writeFileSync(hook, `#!/bin/sh\n${script}\n`);
+  chmodSync(hook, 0o755);
+}
+
 /**
  * A pre-push hook in `repo` that starts `sleep <seconds>` as its own child and waits for it, as a
  * hook running `make check` waits for its tools. The child's pid is recorded, so a test can tell
