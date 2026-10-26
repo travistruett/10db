@@ -112,7 +112,7 @@ describe('workstreams', () => {
     });
     const lanes = countLanes(store.db);
     expect(lanes.global).toBe(2);
-    expect(lanes.byProvider.get('claude')).toBe(2);
+    expect(lanes.byAccount.get(a.project.accountId)).toBe(2);
     expect(lanes.byProject.get(a.project.id)).toBe(1);
   });
 });

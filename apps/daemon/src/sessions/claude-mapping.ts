@@ -5,7 +5,6 @@ import type {
   SDKMessage,
   SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
-import { BillingMode } from '@10db/contracts';
 import type { GuardVerdict } from '../guard';
 import type { ProjectMcpServer } from './project-mcp';
 import type { SessionEvent, ToolDecision } from './types';
@@ -89,7 +88,13 @@ export function mapSdkMessage(
       }
     }
     if (msg.error === 'rate_limit')
-      events.push({ type: 'rate_limit', status: 'rejected', resetsAt: null });
+      events.push({
+        type: 'rate_limit',
+        status: 'rejected',
+        resetsAt: null,
+        utilization: null,
+        limitType: null,
+      });
     return events;
   }
   if (msg.type === 'result') {
@@ -97,9 +102,9 @@ export function mapSdkMessage(
     return [
       {
         type: 'turn_complete',
-        inputTokens:
-          usage.input_tokens + usage.cache_read_input_tokens + usage.cache_creation_input_tokens,
+        inputTokens: usage.input_tokens + usage.cache_creation_input_tokens,
         outputTokens: usage.output_tokens,
+        cachedTokens: usage.cache_read_input_tokens,
         costUsd: msg.total_cost_usd,
       },
     ];
@@ -108,11 +113,20 @@ export function mapSdkMessage(
     const info = msg.rate_limit_info;
     // Spending extra usage costs money a subscription run never asked for, so it pauses like a hard limit.
     const overage = info.isUsingOverage === true;
+    // A share of the limit; a value outside 0 to 1 is a shape 10db hasn't seen, so no threshold fires on it.
+    const utilization =
+      typeof info.utilization === 'number' && info.utilization >= 0 && info.utilization <= 1
+        ? info.utilization
+        : null;
+    // Claude Code's payload is not checked against its types, so a limit type is a string or nothing.
+    const limitType = typeof info.rateLimitType === 'string' ? info.rateLimitType : null;
     return [
       {
         type: 'rate_limit',
         status: overage ? 'rejected' : info.status,
         resetsAt: resetsAtToDate(overage ? (info.overageResetsAt ?? info.resetsAt) : info.resetsAt),
+        utilization,
+        limitType,
       },
     ];
   }
@@ -150,38 +164,6 @@ export function userMessage(text: string, priority?: 'now' | 'next' | 'later'): 
     parent_tool_use_id: null,
     ...(priority ? { priority } : {}),
   };
-}
-
-/**
- * Whether the session's credentials match the billing mode its environment was built for. `apiKeySource`
- * is 'none' for both a claude.ai login and a cloud provider, so a subscription also needs `apiProvider`,
- * and a plan: `subscriptionType` must be non-empty. Its value is never compared, because plan names change.
- * `ApiKeySource` also has 'oauth' and '/login managed key'; a subscription session has shown only 'none'
- * or nothing, so the others are refused until one is seen on a real login.
- */
-export function billingMismatch(
-  expected: BillingMode,
-  seen: {
-    readonly apiKeySource: string | undefined;
-    readonly apiProvider: string | undefined;
-    readonly subscriptionType: string | undefined;
-  },
-): string | null {
-  const saw = `apiKeySource ${seen.apiKeySource ?? 'unknown'}, apiProvider ${seen.apiProvider ?? 'unknown'}, subscriptionType ${seen.subscriptionType ? 'set' : 'unknown'}`;
-  switch (expected) {
-    case BillingMode.Subscription:
-      return (seen.apiKeySource === undefined || seen.apiKeySource === 'none') &&
-        seen.apiProvider === 'firstParty' &&
-        Boolean(seen.subscriptionType)
-        ? null
-        : `expected the Claude subscription but saw ${saw}`;
-    case BillingMode.ApiKey:
-      return seen.apiKeySource === 'ANTHROPIC_API_KEY' && seen.apiProvider === 'firstParty'
-        ? null
-        : `expected an Anthropic API key but saw ${saw}`;
-    case BillingMode.Bedrock:
-      return seen.apiProvider === 'bedrock' ? null : `expected Bedrock but saw ${saw}`;
-  }
 }
 
 /**

@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { accessSync, constants, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { SystemCheckDto, ToolName } from '@10db/contracts';
+import { ACCOUNT_NAMES_VERIFIED_ON } from './launch';
 import type { LoginEnv } from './login-env';
 
 const VERSION_PROBE_TIMEOUT_MS = 5_000;
@@ -64,6 +65,19 @@ export const probeVersion: VersionProbe = (path, env) =>
     );
   });
 
+const major = (version: string | null): number | null => {
+  const match = /^(\d+)\.\d+\.\d+/.exec(version ?? '');
+  return match?.[1] === undefined ? null : Number(match[1]);
+};
+
+/** A newer major Claude Code may rename the variables or fields the account checks rely on. */
+export function claudeCodeWarning(version: string | null): string | null {
+  const installed = major(version);
+  const verified = major(ACCOUNT_NAMES_VERIFIED_ON);
+  if (installed === null || verified === null || installed <= verified) return null;
+  return `Claude Code ${version ?? ''} is a newer major version than ${ACCOUNT_NAMES_VERIFIED_ON}, the version 10db's account checks were verified on. Sessions that report unexpected credentials are refused until the live check is rerun on it.`;
+}
+
 export async function systemCheck(
   login: LoginEnv,
   probe: VersionProbe = probeVersion,
@@ -81,6 +95,10 @@ export async function systemCheck(
   );
   return SystemCheckDto.parse({
     loginEnv: { source: login.source, warning: login.warning },
+    claudeCode: {
+      verifiedOn: ACCOUNT_NAMES_VERIFIED_ON,
+      warning: claudeCodeWarning(tools.find((t) => t.name === ToolName.Claude)?.version ?? null),
+    },
     tools,
   });
 }

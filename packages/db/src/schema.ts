@@ -1,10 +1,11 @@
 import type {
   AaModelDto,
+  AccountId,
+  AccountSettings,
   AreaDef,
   BatchFailure,
   BatchId,
   BatchState,
-  BillingMode,
   BoardColumnId,
   ClaimId,
   ClaimKind,
@@ -47,6 +48,7 @@ import type {
   SourceId,
   SourceKind,
   StepRole,
+  SupportedAccountKind,
   TaskId,
   TaskStatus,
   ToolAccess,
@@ -56,6 +58,7 @@ import type {
   WorkstreamState,
   WorkstreamStep,
 } from '@10db/contracts';
+import { USAGE_HANDOFF_AT } from '@10db/contracts';
 import { sql } from 'drizzle-orm';
 import {
   index,
@@ -86,6 +89,31 @@ export const flows = sqliteTable('flows', {
   updatedAt: updatedAt(),
 });
 
+export const accounts = sqliteTable(
+  'accounts',
+  {
+    id: text('id').$type<AccountId>().primaryKey(),
+    kind: text('kind').$type<SupportedAccountKind>().notNull(),
+    label: text('label').notNull(),
+    payer: text('payer').notNull(),
+    /** The email (subscription) or organization (keyed) a session must report; null when none is compared. */
+    expectedIdentity: text('expected_identity'),
+    /** The Claude Code config directory its sessions run on; null is Claude Code's default (the default account only). */
+    configDir: text('config_dir'),
+    /** The Keychain account (service `10db`) of the secret, for kinds that have one. */
+    secretRef: text('secret_ref'),
+    /** `sha256:` and 16 hex digits of the secret 10db last stored: the account's identity for keyed kinds. */
+    secretFingerprint: text('secret_fingerprint'),
+    settings: text('settings', { mode: 'json' }).$type<AccountSettings>().notNull(),
+    laneCap: integer('lane_cap').notNull(),
+    monthlyCapUsd: real('monthly_cap_usd'),
+    archived: integer('archived', { mode: 'boolean' }).notNull().default(false),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex('accounts_label_idx').on(t.label)],
+);
+
 export const projects = sqliteTable('projects', {
   id: text('id').$type<ProjectId>().primaryKey(),
   name: text('name').notNull(),
@@ -95,7 +123,22 @@ export const projects = sqliteTable('projects', {
   hazards: text('hazards', { mode: 'json' }).$type<HazardDef[]>().notNull(),
   maxLanes: integer('max_lanes').notNull(),
   provider: text('provider').$type<Provider>().notNull(),
-  billingMode: text('billing_mode').$type<BillingMode>().notNull(),
+  accountId: text('account_id')
+    .$type<AccountId>()
+    .notNull()
+    .references(() => accounts.id),
+  /** The account the project left for its usage limit; 10db offers to move it back once that limit resets. */
+  movedFromAccountId: text('moved_from_account_id')
+    .$type<AccountId>()
+    .references(() => accounts.id),
+  /** When that limit resets, as the pause or the session reported it; null when nobody said. */
+  moveBackAt: text('move_back_at'),
+  /** The account 10db moves the project to on its own near its account's usage limit. */
+  fallbackAccountId: text('fallback_account_id')
+    .$type<AccountId>()
+    .references(() => accounts.id),
+  /** The share of the account's usage limit at which the project hands off. */
+  usageHandoffAt: real('usage_handoff_at').notNull().default(USAGE_HANDOFF_AT),
   model: text('model').notNull(),
   effort: text('effort').$type<Effort>().notNull(),
   handoffPct: integer('handoff_pct').notNull(),
@@ -304,6 +347,10 @@ export const sessions = sqliteTable(
       .$type<WorkstreamId>()
       .notNull()
       .references(() => workstreams.id),
+    accountId: text('account_id')
+      .$type<AccountId>()
+      .notNull()
+      .references(() => accounts.id),
     sequence: integer('sequence').notNull(),
     provider: text('provider').$type<Provider>().notNull(),
     providerSessionId: text('provider_session_id'),
@@ -319,7 +366,9 @@ export const sessions = sqliteTable(
     exitReason: text('exit_reason'),
     inputTokens: integer('input_tokens').notNull(),
     outputTokens: integer('output_tokens').notNull(),
-    costUsd: real('cost_usd').notNull(),
+    cachedTokens: integer('cached_tokens').notNull().default(0),
+    /** The SDK's cumulative dollars for a metered account; null for a subscription. */
+    costUsd: real('cost_usd'),
     contextPct: real('context_pct'),
     /**
      * The first context reading of a conversation that began from a handoff briefing, which its
@@ -335,7 +384,10 @@ export const sessions = sqliteTable(
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index('sessions_workstream_idx').on(t.workstreamId)],
+  (t) => [
+    index('sessions_workstream_idx').on(t.workstreamId),
+    index('sessions_account_started_idx').on(t.accountId, t.startedAt),
+  ],
 );
 
 export const handoffs = sqliteTable('handoffs', {

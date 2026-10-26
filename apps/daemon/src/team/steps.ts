@@ -20,6 +20,7 @@ import {
   getWorkstreamRow,
   insertWorkstream,
   latestHandoffForStep,
+  getAccount,
   listModelProfiles,
   listPersonas,
   patchWorkstream,
@@ -29,7 +30,7 @@ import {
   type WriteContext,
 } from '@10db/db';
 import type { StateStore } from '../events';
-import { DEFAULT_PROJECT_FLOW, NoProfileError, planSteps } from '../routing';
+import { DEFAULT_PROJECT_FLOW, NoProfileError, offeredProfiles, planSteps } from '../routing';
 import { restartStep } from './step-flow';
 
 /** What starting this task would run: its flow resolved against the project's team and the catalogue. */
@@ -47,7 +48,10 @@ export function resolveStepPlan(db: DbReader, taskId: TaskId): StepPlanDto {
       project,
       personas: listPersonas(db),
       bindings: getTeam(db, project.id).bindings,
-      profiles: listModelProfiles(db),
+      profiles: offeredProfiles(
+        listModelProfiles(db),
+        getAccount(db, project.accountId).settings.aliases,
+      ),
     });
   } catch (error) {
     if (error instanceof NoProfileError) throw new InvalidError(error.message);

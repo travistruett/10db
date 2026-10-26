@@ -59,3 +59,12 @@
 - [ ] Batch delivery: agents' gh api is GET only, so read-only GraphQL queries (always POST) are denied too; allow them if a persona needs them.
 - [ ] Batch delivery: the manual acceptance on a throwaway GitHub repository (plan 08 Task 13).
 - [ ] Batch delivery: fork support. The cut records the repository from `gh repo view` without `-R`, which picks the base repository by remote priority (`upstream`, then `github`, then `origin`), so a fork with an `upstream` remote records the parent repository while the push goes to `origin`. Record it from `git remote get-url origin` instead, and test a fork.
+- [ ] Accounts: the Accounts Settings screen (accounts spec §7, §12 point 4): list accounts with kind, verified identity and this month's usage against the cap, sign-in steps, secret entry and confirmation (plan 12, `10db-12-accounts-settings`).
+- [ ] Accounts: relax staggered subscription starts once the refresh question is answered (decision 112; spike 12 refresh rerun).
+- [ ] Accounts: the Factory view shows a paused workstream's account and pause reason; today the inbox card says why.
+- [ ] Accounts: an account card folds per project, so an account two projects share can raise one card in each.
+- [ ] Accounts: OS-level isolation (one macOS user per subscription account), if two-subscription Keychain separation fails (accounts spec §10).
+- [ ] Accounts: Codex accounts (`openai_api_key`, `codex_signin`) with the Codex adapter.
+- [ ] Accounts: the manual live checks, two subscriptions in parallel, an API-key or Bedrock account, a project moved mid-step and back, and the rate-limit events on a Max plan (plan 09 Task 14).
+- [ ] Accounts: spike carrying a cut-off conversation to the account a project moved to (`forkSession` and `getSessionMessages` on a per-account config directory, a subscription transcript resumed on Bedrock, thinking blocks, token cost). If it passes, a small follow-up plan resumes that conversation after a move instead of starting fresh from the handoff (accounts spec §11).
+- [ ] Accounts: the Accounts screen shows each project's fallback, the account it moved from and when 10db will ask to move it back.

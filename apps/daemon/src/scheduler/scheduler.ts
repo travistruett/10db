@@ -5,8 +5,8 @@ import {
   WorkstreamState,
   type BatchDto,
   type BatchId,
+  type AccountId,
   type ProjectId,
-  type Provider,
   type WorkstreamId,
 } from '@10db/contracts';
 import {
@@ -16,14 +16,17 @@ import {
   countLanes,
   dependenciesDone,
   getBatch,
+  getAccountRow,
   getProject,
   getTask,
+  getWorkstreamRow,
   listBatches,
   listWorkstreams,
   renewClaimLeases,
   renewLeases,
   transitionWorkstream,
 } from '@10db/db';
+import { unready, type AccountPreparer, type AccountRuntime } from '../accounts';
 import type { Clock, Timer } from '../clock';
 import { batchLaunchVerdict, LaunchVerdict } from '../delivery';
 import type { StateStore } from '../events';
@@ -35,10 +38,11 @@ export interface SchedulerOptions {
     launch(id: WorkstreamId, fence: number): void;
     isRunning(id: WorkstreamId): boolean;
   };
-  readonly pauses: { isPaused(provider: Provider): boolean };
+  readonly accounts: Pick<AccountRuntime, 'blocked' | 'isPaused'> &
+    Pick<AccountPreparer, 'prepare'>;
   readonly clock: Clock;
   readonly instanceId: string;
-  readonly caps: { readonly global: number; readonly perProvider: number };
+  readonly caps: { readonly global: number };
   readonly leaseMs: number;
   readonly tickMs: number;
   readonly logger: Logger;
@@ -74,17 +78,19 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
   }
 
   // A runner can write PAUSED_LIMIT after the pause's reset timer already fired, so the timer
-  // found nothing to re-queue; work paused for a provider that is no longer paused is re-queued here.
+  // found nothing to re-queue; work paused for an account that is no longer paused is re-queued here.
   function requeueExpiredPauses(): void {
     for (const ws of listWorkstreams(db, { states: [WorkstreamState.PausedLimit] })) {
       if (opts.runner.isRunning(ws.id)) continue;
-      if (opts.pauses.isPaused(getProject(db, ws.projectId).provider)) continue;
+      if (opts.accounts.isPaused(getProject(db, ws.projectId).accountId)) continue;
+      // Asking can resume an account whose pause ended unnoticed, which re-queues this row itself.
+      if (getWorkstreamRow(db, ws.id).state !== WorkstreamState.PausedLimit) continue;
       opts.state.write((ctx) => {
         transitionWorkstream(ctx, ws.id, {
           to: WorkstreamState.Queued,
           fence: null,
           patch: { pausedUntil: null },
-          reason: 'usage limit reset',
+          reason: 'the account resumed',
         });
       });
     }
@@ -94,7 +100,14 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
     const lanes = countLanes(db);
     let global = lanes.global;
     const byProject = new Map(lanes.byProject);
-    const byProvider = new Map(lanes.byProvider);
+    const byAccount = new Map(lanes.byAccount);
+    // Accounts a cap check found open this tick: it reads the month's spend, so it runs once per account.
+    const open = new Set<AccountId>();
+    // Accounts that can't start a session yet: the preparer is asked once per account per tick.
+    const notReady = new Set<AccountId>();
+    // Account and project pairs found blocked this tick: each project is asked once, so it gets its
+    // own card, and a project with several queued lanes isn't asked again.
+    const blockedThisTick = new Set<string>();
     let launched = 0;
     for (const ws of listWorkstreams(db, { states: [WorkstreamState.Queued] })) {
       if (global >= opts.caps.global) break;
@@ -102,9 +115,24 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
       // leave it STARTING with a lane. Its lane-freed callback ticks again once it has exited.
       if (opts.runner.isRunning(ws.id)) continue;
       const project = getProject(db, ws.projectId);
-      if (opts.pauses.isPaused(project.provider)) continue;
+      const account = getAccountRow(db, project.accountId);
+      if (notReady.has(account.id)) continue;
+      if (!open.has(account.id) && unready(account)) {
+        opts.accounts.prepare(account, project.id);
+        notReady.add(account.id);
+        continue;
+      }
+      if (!open.has(account.id)) {
+        const asked = `${account.id}:${project.id}`;
+        if (blockedThisTick.has(asked)) continue;
+        if (opts.accounts.blocked(account, project.id) !== null) {
+          blockedThisTick.add(asked);
+          continue;
+        }
+        open.add(account.id);
+      }
       if ((byProject.get(project.id) ?? 0) >= project.maxLanes) continue;
-      if ((byProvider.get(project.provider) ?? 0) >= opts.caps.perProvider) continue;
+      if ((byAccount.get(account.id) ?? 0) >= account.laneCap) continue;
       if (project.delivery === Delivery.PullRequest) {
         // Read after this tick's branch snapshot: wait for the next tick rather than guess.
         if (!branches.has(project.id)) continue;
@@ -142,7 +170,7 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
       if (fence === null) continue;
       global += 1;
       byProject.set(project.id, (byProject.get(project.id) ?? 0) + 1);
-      byProvider.set(project.provider, (byProvider.get(project.provider) ?? 0) + 1);
+      byAccount.set(account.id, (byAccount.get(account.id) ?? 0) + 1);
       launched += 1;
       opts.runner.launch(ws.id, fence);
     }

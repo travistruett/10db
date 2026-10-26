@@ -1,7 +1,12 @@
-import type { BatchState, WorkstreamId } from '@10db/contracts';
+import type { AccountId, BatchState, ProjectId, WorkstreamId } from '@10db/contracts';
 import {
+  countLanes,
   createTestStore,
   listBoardColumns,
+  listInbox,
+  patchAccount,
+  recordAccountSecret,
+  seedAccount,
   moveTask,
   getWorkstream,
   getWorkstreamRow,
@@ -16,8 +21,16 @@ import {
   type Store,
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { seedSpend } from '../../test/fixtures';
+import {
+  createAccountPauses,
+  createAccountRuntime,
+  type AccountPauses,
+  type AccountRuntime,
+} from '../accounts';
 import { ManualClock } from '../clock';
 import { createEventBus, createStateStore, type StateStore } from '../events';
+import { createInboxService, type InboxService } from '../inbox';
 import { silentLogger } from '../log';
 import { createScheduler } from './index';
 
@@ -26,28 +39,40 @@ let close: () => void;
 let state: StateStore;
 let clock: ManualClock;
 let launched: { id: WorkstreamId; fence: number }[];
-let paused: Set<string>;
+let inbox: InboxService;
+let pauses: AccountPauses;
+let accounts: AccountRuntime;
 let running: Set<WorkstreamId>;
 let branchOf: Map<string, string | null>;
 let branchReads: string[];
+let prepared: { accountId: AccountId; projectId: ProjectId }[];
 let wrongBranch: { batchId: string; current: string | null }[];
 
 beforeEach(() => {
-  ({ store, close } = createTestStore());
+  clock = new ManualClock(new Date(2026, 9, 20, 12));
+  ({ store, close } = createTestStore(() => clock.now()));
   state = createStateStore(store, createEventBus());
-  clock = new ManualClock();
+  inbox = createInboxService({ state, onParkedAnswer: () => undefined });
+  pauses = createAccountPauses({
+    state,
+    clock,
+    inbox,
+    stopAccount: () => Promise.resolve(),
+    onResume: () => undefined,
+  });
+  accounts = createAccountRuntime({ state, clock, inbox, pauses, defaultPauseMs: 30 * 60_000 });
   launched = [];
-  paused = new Set();
   running = new Set();
   branchOf = new Map();
   branchReads = [];
   wrongBranch = [];
+  prepared = [];
 });
 afterEach(() => {
   close();
 });
 
-function scheduler(caps = { global: 4, perProvider: 4 }) {
+function scheduler(caps = { global: 4 }) {
   return createScheduler({
     state,
     clock,
@@ -62,7 +87,12 @@ function scheduler(caps = { global: 4, perProvider: 4 }) {
       },
       isRunning: (id) => running.has(id),
     },
-    pauses: { isPaused: (p) => paused.has(p) },
+    accounts: {
+      ...accounts,
+      prepare: (account, projectId) => {
+        prepared.push({ accountId: account.id, projectId });
+      },
+    },
     branches: {
       currentBranch: (repo) => {
         branchReads.push(repo);
@@ -94,6 +124,17 @@ function add(
   return { project, task, workstream: state.write((ctx) => insertWorkstream(ctx, task.id)) };
 }
 
+function pause(project: ReturnType<typeof seedProject>): void {
+  pauses.pause(
+    project.accountId,
+    { reason: 'usage_limit', until: new Date(clock.now().getTime() + 60_000) },
+    {
+      projectId: project.id,
+      card: { title: 't', body: 'b', foldKey: 'k', detail: {} },
+    },
+  );
+}
+
 function moveWorkstream(id: WorkstreamId, to: 'STARTING' | 'FAILED' | 'CANCELLED' | 'QUEUED') {
   state.write((ctx) => transitionWorkstream(ctx, id, { to, fence: null }));
 }
@@ -103,15 +144,17 @@ describe('scheduler', () => {
     queue();
     queue();
     queue();
-    expect(await scheduler({ global: 2, perProvider: 4 }).tick()).toBe(2);
+    expect(await scheduler({ global: 2 }).tick()).toBe(2);
     expect(launched).toHaveLength(2);
   });
 
-  it('respects a project lane limit and the provider cap', async () => {
+  it('respects a project lane limit and the account lane cap', async () => {
     const a = queue({ maxLanes: 1 });
     add(a.project, ['ui']);
     queue();
-    expect(await scheduler({ global: 4, perProvider: 2 }).tick()).toBe(2);
+    queue();
+    state.write((ctx) => patchAccount(ctx, a.project.accountId, { laneCap: 2 }));
+    expect(await scheduler().tick()).toBe(2);
     expect(
       launched
         .map((l) => getWorkstreamRow(store.db, l.id).projectId)
@@ -119,28 +162,32 @@ describe('scheduler', () => {
     ).toHaveLength(1);
   });
 
-  it('enforces the provider cap on its own', async () => {
-    queue();
-    queue();
-    queue();
-    expect(await scheduler({ global: 4, perProvider: 2 }).tick()).toBe(2);
-    expect(launched).toHaveLength(2);
-  });
-
-  it('re-queues PAUSED_LIMIT work that outlived its provider pause', async () => {
+  it('leaves PAUSED_LIMIT work alone while its account is paused', async () => {
     const a = queue();
     const s = scheduler();
     await s.tick();
+    pause(a.project);
+    state.write((ctx) => {
+      transitionWorkstream(ctx, a.workstream.id, { to: 'PAUSED_LIMIT', fence: null });
+    });
+    launched = [];
+    await s.tick();
+    expect(getWorkstream(store.db, a.workstream.id).state).toBe('PAUSED_LIMIT');
+    expect(launched).toEqual([]);
+  });
+
+  it('re-queues PAUSED_LIMIT work that outlived its account pause', async () => {
+    const a = queue();
+    const s = scheduler();
+    await s.tick();
+    pause(a.project);
+    // The runner writes PAUSED_LIMIT after the pause's reset timer already fired.
+    clock.advance(60_000);
     state.write((ctx) => {
       transitionWorkstream(ctx, a.workstream.id, { to: 'PAUSED_LIMIT', fence: null });
     });
     launched = [];
 
-    paused.add('claude');
-    await s.tick();
-    expect(getWorkstream(store.db, a.workstream.id).state).toBe('PAUSED_LIMIT');
-
-    paused.clear();
     running.add(a.workstream.id);
     await s.tick();
     expect(getWorkstream(store.db, a.workstream.id).state).toBe('PAUSED_LIMIT');
@@ -149,6 +196,22 @@ describe('scheduler', () => {
     await s.tick();
     expect(launched.map((l) => l.id)).toEqual([a.workstream.id]);
     expect(getWorkstream(store.db, a.workstream.id).state).toBe('STARTING');
+  });
+
+  it('re-queues work whose account pause ended unnoticed, without a second transition', async () => {
+    const a = queue();
+    const s = scheduler();
+    await s.tick();
+    pause(a.project);
+    state.write((ctx) => {
+      transitionWorkstream(ctx, a.workstream.id, { to: 'PAUSED_LIMIT', fence: null });
+    });
+    // The machine slept through the pause's timer.
+    pauses.stop();
+    clock.advance(120_000);
+    launched = [];
+    await s.tick();
+    expect(launched.map((l) => l.id)).toEqual([a.workstream.id]);
   });
 
   it('leaves queued work of a parked task alone', async () => {
@@ -188,9 +251,9 @@ describe('scheduler', () => {
     expect(launched.map((l) => l.id)).toEqual([a.workstream.id, b.workstream.id]);
   });
 
-  it('skips a paused provider', async () => {
-    queue();
-    paused.add('claude');
+  it("skips a paused account's work", async () => {
+    const a = queue();
+    pause(a.project);
     expect(await scheduler().tick()).toBe(0);
   });
 
@@ -346,5 +409,106 @@ describe('pull-request delivery', () => {
     const s = scheduler();
     const [first, second] = await Promise.all([s.tick(), s.tick()]);
     expect([first, second]).toEqual([1, 0]);
+  });
+});
+
+describe('accounts', () => {
+  const metered = (
+    label: string,
+    overrides: Partial<{ laneCap: number; monthlyCapUsd: number }> = {},
+  ) => {
+    const account = seedAccount(store, { kind: 'anthropic_api_key', label, ...overrides });
+    state.write((ctx) => recordAccountSecret(ctx, account.id, 'sha256:0000000000000000'));
+    return account;
+  };
+
+  it('leaves work on an unready account queued and asks the preparer once a tick', async () => {
+    const sub = seedAccount(store, { kind: 'claude_subscription', label: 'Company A' });
+    const waiting = queue({ accountId: sub.id });
+    add(waiting.project, ['ui']);
+    const keyed = seedAccount(store, { kind: 'anthropic_api_key', label: 'No secret yet' });
+    queue({ accountId: keyed.id });
+    expect(await scheduler().tick()).toBe(0);
+    expect(prepared.map((p) => p.accountId)).toEqual([sub.id, keyed.id]);
+    expect(getWorkstream(state.db, waiting.workstream.id).state).toBe('QUEUED');
+  });
+
+  it('caps lanes per account across two projects', async () => {
+    const key = metered('Shared', { laneCap: 2 });
+    const a = queue({ accountId: key.id, maxLanes: 3 });
+    add(a.project, ['ui']);
+    const b = queue({ accountId: key.id, maxLanes: 3 });
+    add(b.project, ['ui']);
+    expect(await scheduler().tick()).toBe(2);
+    expect(countLanes(state.db).byAccount.get(key.id)).toBe(2);
+  });
+
+  it("holds only the paused account's projects", async () => {
+    const key = metered('Client key');
+    const held = queue({ accountId: key.id });
+    const free = queue();
+    accounts.rateLimited(key.id, null, held.project.id);
+    expect(await scheduler().tick()).toBe(1);
+    expect(launched.map((l) => l.id)).toEqual([free.workstream.id]);
+  });
+
+  it('raises the usage-limit card once per pause for a project whose work queued during it', async () => {
+    const key = metered('Client key');
+    const idle = seedProject(store, { name: 'idle', accountId: key.id });
+    // The limit hits while the project has no work: the pause raises no card for it.
+    accounts.rateLimited(key.id, null, idle.id);
+    const limitCards = () =>
+      listInbox(state.db, { states: ['OPEN'] }).filter(
+        (c) => c.projectId === idle.id && c.title === 'Client key usage limit reached',
+      );
+    expect(limitCards()).toEqual([]);
+
+    add(idle, ['api']);
+    await scheduler().tick();
+    expect(limitCards()).toHaveLength(1);
+    expect(limitCards()[0]?.options.map((o) => o.label)).toEqual([
+      'Continue on Claude plan · builder@example.com',
+      'Later',
+    ]);
+    await scheduler().tick();
+    expect(limitCards()).toHaveLength(1);
+
+    const [card] = limitCards();
+    if (!card) throw new Error('no usage-limit card');
+    inbox.answer(card.id, { choice: 'Later' });
+    await scheduler().tick();
+    expect(limitCards()).toEqual([]);
+
+    // The next pause is a new one: the waiting work raises the card again.
+    pauses.resume(key.id);
+    pauses.pause(
+      key.id,
+      { reason: 'usage_limit', until: new Date(clock.now().getTime() + 60_000) },
+      { projectId: idle.id, card: null },
+    );
+    await scheduler().tick();
+    expect(limitCards()).toHaveLength(1);
+  });
+
+  it('launches nothing on a metered account at its monthly cap, and launches under it', async () => {
+    const key = metered('Capped', { monthlyCapUsd: 5 });
+    const capped = queue({ accountId: key.id });
+    seedSpend(store, capped.project, 5);
+    expect(await scheduler().tick()).toBe(0);
+    expect(accounts.isPaused(key.id)).toBe(true);
+    expect(listInbox(state.db, { states: ['OPEN'] }).map((i) => i.title)).toEqual([
+      'Capped reached its monthly cap',
+    ]);
+    const second = add(seedProject(store, { accountId: key.id }), ['api']);
+    expect(await scheduler().tick()).toBe(0);
+    expect(
+      listInbox(state.db, { states: ['OPEN'] })
+        .map((i) => i.projectId)
+        .sort(),
+    ).toEqual([capped.project.id, second.project.id].sort());
+    const roomy = metered('Roomy', { monthlyCapUsd: 5 });
+    const under = queue({ accountId: roomy.id });
+    seedSpend(store, under.project, 4.99);
+    expect(await scheduler().tick()).toBe(1);
   });
 });

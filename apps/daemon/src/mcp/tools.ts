@@ -37,11 +37,12 @@ import type { z } from 'zod';
 import { buildContextPack } from '../briefing';
 import type { StateStore } from '../events';
 import type { Git } from '../git';
-import { judgeToolUse } from '../guard';
+import { judgeToolUse, type ProtectedPath } from '../guard';
 import type { InboxService, WaitObserver } from '../inbox';
 import type { Logger } from '../log';
 
 export interface McpDeps {
+  readonly protectedPaths: readonly ProtectedPath[];
   readonly state: StateStore;
   readonly inbox: InboxService;
   readonly git: Git;
@@ -306,6 +307,7 @@ export function createToolHandlers(
           hazards: project.hazards,
           claims,
           readOnly: false,
+          protectedPaths: deps.protectedPaths,
         });
         if (verdict.decision === 'deny') throw new InvalidError(verdict.reason);
       }

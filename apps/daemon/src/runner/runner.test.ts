@@ -1,25 +1,48 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { MCP_APPROVAL_DETAIL } from '@10db/contracts';
+import { dirname, join } from 'node:path';
+import {
+  ACCOUNT_CARD_DETAIL,
+  AccountCardChoice,
+  MCP_APPROVAL_DETAIL,
+  type AccountId,
+} from '@10db/contracts';
 import {
   acquireLease,
   activeClaims,
+  getAccount,
+  getProject,
   getTask,
   getWorkstream,
   listEventsAfter,
   listEvidence,
   listInbox,
   listSessions,
+  patchAccount,
+  patchProject,
   schema,
+  seedAccount,
+  transitionWorkstream,
 } from '@10db/db';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { RESULT_NUDGE } from '../briefing';
+import {
+  HANDOFF_FIRM_NUDGE,
+  HANDOFF_FIRM_NUDGE_ACCOUNT,
+  HANDOFF_NUDGE,
+  HANDOFF_NUDGE_ACCOUNT,
+  RESULT_NUDGE,
+} from '../briefing';
+import { createLauncher, KeychainError } from '../environment';
 import type { SessionHandle } from '../sessions';
-import { handoffArgs, waitFor } from '../../test/fixtures';
+import { createMemoryKeychain, handoffArgs, waitFor } from '../../test/fixtures';
 import { createTestEngine, type TestEngine } from '../../test/engine';
 import { captureLogs } from '../../test/log-capture';
 
 let engine: TestEngine;
+
+/** A launcher whose project env is `base` less its billing switches. */
+const launcherOver = (base: Record<string, string>) => ({
+  launcher: createLauncher({ base, clientApp: 'test', keychain: createMemoryKeychain() }),
+});
 afterEach(async () => {
   await engine.close();
 });
@@ -390,7 +413,7 @@ describe('runner', () => {
       engine = await createTestEngine(
         { Alpha: [[write('src/api/a.txt'), commit('op-gate-env-1', ['src/api/a.txt']), turn]] },
         { gateCommand: 'test -z "$TENDB_PROBE" && test "$GATE_MARK" = yes' },
-        { sessionEnv: () => ({ GATE_MARK: 'yes' }) },
+        launcherOver({ GATE_MARK: 'yes' }),
       );
       const { workstream } = engine.addTask('Alpha');
       engine.launch(workstream.id);
@@ -618,8 +641,11 @@ describe('runner', () => {
       { Alpha: [[turn]] },
       {},
       {
-        sessionEnv: () => {
-          throw new Error('No Anthropic API key in the Keychain.');
+        launcher: {
+          projectEnv: () => ({}),
+          session: () => {
+            throw new Error('The launch could not be built.');
+          },
         },
       },
     );
@@ -695,7 +721,7 @@ describe('runner', () => {
     });
 
     it('passes an approved server with only PATH, HOME and the variables the builder approved', async () => {
-      engine = await createTestEngine(BOOK, {}, { sessionEnv: () => SECRET_ENV });
+      engine = await createTestEngine(BOOK, {}, launcherOver(SECRET_ENV));
       writeMcp({ docs: DOCS, mantine: MANTINE });
       await runTask('Alpha');
       const reviews = approvalCards().map((c) => c.detail?.[MCP_APPROVAL_DETAIL]);
@@ -763,7 +789,7 @@ describe('runner', () => {
       engine = await createTestEngine(
         BOOK,
         {},
-        { sessionEnv: () => ({ PATH: '/usr/bin:/bin', HOME: '/h' }) },
+        launcherOver({ PATH: '/usr/bin:/bin', HOME: '/h' }),
       );
       writeMcp({ docs: DOCS, mantine: MANTINE });
       await runTask('Alpha');
@@ -931,9 +957,9 @@ describe('runner', () => {
     it.each([
       ['a cancel', 'CANCELLED', () => engine.runner.cancel(ws0())],
       [
-        'a provider pause',
+        'an account pause',
         'DONE',
-        () => engine.runner.stopProvider(engine.project.provider, 'paused'),
+        () => engine.runner.stopAccount(engine.project.accountId, 'paused'),
       ],
     ])(
       'settles %s that lands while the finished turn is stopping',
@@ -1001,7 +1027,7 @@ describe('runner', () => {
     );
 
     it.each([
-      ['a provider pause', () => engine.runner.stopProvider(engine.project.provider, 'paused')],
+      ['an account pause', () => engine.runner.stopAccount(engine.project.accountId, 'paused')],
       ['a shutdown', () => engine.runner.stopAll('shutdown')],
     ])(
       'keeps an answer that lands while %s is still stopping a waiting session',
@@ -1183,7 +1209,13 @@ describe('runner', () => {
           for await (const event of h.events) {
             yield event;
             if (event.type === 'rate_limit')
-              yield { type: 'turn_complete' as const, inputTokens: 1, outputTokens: 1, costUsd: 0 };
+              yield {
+                type: 'turn_complete' as const,
+                inputTokens: 1,
+                outputTokens: 1,
+                cachedTokens: 0,
+                costUsd: 0,
+              };
           }
         })(),
       }));
@@ -1312,6 +1344,751 @@ describe('runner', () => {
     await engine.runner.idle();
     expect(seen).toEqual([workstream.id]);
     expect(ws(workstream.id).state).toBe('DONE');
+  });
+
+  it('stops a lane at its next session once its account reaches the monthly cap', async () => {
+    engine = await createTestEngine(
+      {
+        Alpha: [
+          [{ do: 'mcp', tool: 'write_handoff', args: handoffArgs('op-cap-0001', 'finish') }, turn],
+          [turn],
+        ],
+      },
+      {},
+      {},
+      {
+        account: { kind: 'anthropic_api_key', label: 'Capped', monthlyCapUsd: 0.01 },
+        secret: 'sk-ant-api03-cap-test-key',
+      },
+    );
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(listSessions(engine.store.db, workstream.id)).toHaveLength(1);
+    expect(ws(workstream.id)).toMatchObject({
+      state: 'PAUSED_LIMIT',
+      nextAction: { kind: 'continue_from_handoff' },
+    });
+    expect(listInbox(engine.store.db, { states: ['OPEN'] }).map((i) => i.title)).toEqual([
+      'Capped reached its monthly cap',
+    ]);
+  });
+});
+
+describe('accounts', () => {
+  it('pauses the account and sends no prompt when the identity differs, then resumes after Resume', async () => {
+    engine = await createTestEngine({ Alpha: [[turn]] });
+    engine.adapter.seen = () => ({ email: 'someone-else@example.com' });
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(engine.adapter.prompts).toEqual([]);
+    expect(ws(workstream.id)).toMatchObject({
+      state: 'PAUSED_LIMIT',
+      nextAction: { kind: 'start' },
+    });
+    expect(engine.accounts.isPaused(engine.project.accountId)).toBe(true);
+    const card = listInbox(engine.store.db, { states: ['OPEN'] })[0];
+    expect(card?.body).toContain('someone-else@example.com');
+    expect(transitions(workstream.id).filter((t) => t.endsWith('->FAILED'))).toEqual([]);
+
+    engine.adapter.seen = () => ({});
+    if (!card) throw new Error('no refusal card');
+    engine.inbox.answer(card.id, { choice: AccountCardChoice.Resume });
+    expect(ws(workstream.id).state).toBe('QUEUED');
+  });
+
+  it('refuses an API-key account whose Keychain secret changed, before any session row', async () => {
+    engine = await createTestEngine(
+      { Alpha: [[turn]] },
+      {},
+      {},
+      {
+        account: { kind: 'anthropic_api_key', label: 'Client key' },
+        secret: 'sk-ant-api03-original-key',
+      },
+    );
+    engine.keychain.write(`account:${engine.project.accountId}`, 'sk-ant-api03-someone-elses');
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(listSessions(engine.store.db, workstream.id)).toEqual([]);
+    expect(ws(workstream.id).state).toBe('PAUSED_LIMIT');
+    const cards = listInbox(engine.store.db, { states: ['OPEN'] });
+    expect(cards.map((c) => c.title)).toEqual(['Client key: sessions refused']);
+    expect(JSON.stringify(cards)).not.toContain('sk-ant');
+  });
+
+  it('pauses the account when its Keychain cannot be read, and retries the lane after Resume', async () => {
+    engine = await createTestEngine(
+      { Alpha: [[turn]] },
+      {},
+      {},
+      {
+        account: { kind: 'anthropic_api_key', label: 'Client key' },
+        secret: 'sk-ant-api03-original-key',
+      },
+    );
+    const unlocked = engine.keychain.read.bind(engine.keychain);
+    let locked = true;
+    engine.keychain.read = (account) => {
+      if (!locked) return unlocked(account);
+      throw new KeychainError(`Reading the Keychain item ${account} failed (timed out after 5 s)`);
+    };
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(listSessions(engine.store.db, workstream.id)).toEqual([]);
+    expect(ws(workstream.id)).toMatchObject({
+      state: 'PAUSED_LIMIT',
+      nextAction: { kind: 'start' },
+    });
+    expect(transitions(workstream.id).filter((t) => t.endsWith('->FAILED'))).toEqual([]);
+    expect(engine.accounts.isPaused(engine.project.accountId)).toBe(true);
+    const [card, ...others] = listInbox(engine.store.db, { states: ['OPEN'] });
+    expect(others).toEqual([]);
+    expect(card?.title).toBe('Client key: sessions refused');
+    expect(card?.body).toContain('Unlock the login Keychain');
+    expect(card?.detail?.[ACCOUNT_CARD_DETAIL]).toMatchObject({
+      reason: 'refused',
+      problem: 'keychain_unavailable',
+    });
+
+    locked = false;
+    if (!card) throw new Error('no refusal card');
+    engine.inbox.answer(card.id, { choice: AccountCardChoice.Resume });
+    expect(engine.accounts.isPaused(engine.project.accountId)).toBe(false);
+    expect(ws(workstream.id).state).toBe('QUEUED');
+  });
+
+  it('resumes the same conversation after credentials expired mid-session', async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        [
+          { do: 'activity', summary: 'working' },
+          { do: 'auth_error', error: 'authentication_failed' },
+        ],
+      ],
+    });
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id)).toMatchObject({
+      state: 'PAUSED_LIMIT',
+      nextAction: { kind: 'resume' },
+    });
+    expect(listInbox(engine.store.db, { states: ['OPEN'] })[0]?.body).toContain('claude /login');
+  });
+
+  it('fails the workstream at once when the model differs', async () => {
+    engine = await createTestEngine({ Alpha: [[turn]] });
+    engine.adapter.seen = () => ({ model: 'claude-opus-5-5' });
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id)).toMatchObject({ state: 'FAILED' });
+    expect(ws(workstream.id).failureReason).toMatch(/Model check failed/);
+    // A model mismatch is the work's, not the account's: the account isn't paused and no account card opens.
+    expect(engine.accounts.isPaused(engine.project.accountId)).toBe(false);
+    expect(
+      listInbox(engine.store.db, { states: ['OPEN'] }).filter(
+        (i) => i.detail?.[ACCOUNT_CARD_DETAIL] !== undefined,
+      ),
+    ).toEqual([]);
+  });
+
+  it('keeps a parked answer for the next session when the account is refused before it starts', async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        [askShip, turn],
+        [write('src/api/a.txt'), commit('op-ans-0001', ['src/api/a.txt']), turn],
+      ],
+    });
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    const card = await waitFor(openCard);
+    engine.clock.advance(10 * 60_000);
+    await engine.runner.idle();
+    engine.inbox.answer(card.id, { choice: 'Yes' });
+    // The answer session resumes a conversation, so it has a provider session id from the start.
+    engine.adapter.seen = () => ({ email: 'someone-else@example.com' });
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id)).toMatchObject({
+      state: 'PAUSED_LIMIT',
+      nextAction: { kind: 'answer', inboxId: card.id },
+    });
+  });
+
+  it("gives the gate the project env, never the account's key", async () => {
+    engine = await createTestEngine(
+      { Alpha: [[write('src/api/a.txt'), commit('op-key-0001', ['src/api/a.txt']), turn]] },
+      { gateCommand: 'test -z "$ANTHROPIC_API_KEY"' },
+      {},
+      {
+        account: { kind: 'anthropic_api_key', label: 'Client key' },
+        secret: 'sk-ant-api03-gate-must-not-see',
+      },
+    );
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('DONE');
+  });
+
+  it('starts one session at a time on a subscription account', async () => {
+    engine = await createTestEngine({ Alpha: [[turn]] });
+    const release = await engine.startGate.acquire(engine.project.accountId);
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await waitFor(() => engine.startGate.waiting(engine.project.accountId) === 1);
+    expect(engine.adapter.prompts).toEqual([]);
+    release();
+    await engine.runner.idle();
+    expect(engine.adapter.prompts).toHaveLength(1);
+    expect(engine.startGate.waiting(engine.project.accountId)).toBe(0);
+  });
+
+  it('re-queues a lane whose subscription account lost its identity, and asks the preparer', async () => {
+    engine = await createTestEngine({ Alpha: [[turn]] });
+    engine.state.write((ctx) =>
+      patchAccount(ctx, engine.project.accountId, { expectedIdentity: null }),
+    );
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(listSessions(engine.store.db, workstream.id)).toEqual([]);
+    expect(ws(workstream.id)).toMatchObject({ state: 'QUEUED', nextAction: { kind: 'start' } });
+    expect(engine.prepared).toEqual([
+      { accountId: engine.project.accountId, projectId: engine.project.id },
+    ]);
+    // Unready is prepared, never refused: no pause and no refusal card.
+    expect(engine.accounts.isPaused(engine.project.accountId)).toBe(false);
+    expect(listInbox(engine.store.db, { states: ['OPEN'] })).toEqual([]);
+  });
+
+  it('re-queues a lane between sessions when its account lost its identity, keeping the handoff', async () => {
+    engine = await createTestEngine(
+      {
+        Alpha: [
+          [{ do: 'mcp', tool: 'write_handoff', args: handoffArgs('op-ready-001', 'finish') }, turn],
+          [turn],
+        ],
+      },
+      {},
+      {
+        afterSession: () => {
+          engine.state.write((ctx) =>
+            patchAccount(ctx, engine.project.accountId, { expectedIdentity: null }),
+          );
+          return Promise.resolve();
+        },
+      },
+    );
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(listSessions(engine.store.db, workstream.id)).toHaveLength(1);
+    expect(ws(workstream.id)).toMatchObject({
+      state: 'QUEUED',
+      nextAction: { kind: 'continue_from_handoff' },
+    });
+    expect(engine.prepared).toEqual([
+      { accountId: engine.project.accountId, projectId: engine.project.id },
+    ]);
+    expect(engine.accounts.isPaused(engine.project.accountId)).toBe(false);
+    expect(listInbox(engine.store.db, { states: ['OPEN'] })).toEqual([]);
+  });
+
+  it('confirms a different identity from a refusal card, resumes the account and re-queues the lane', async () => {
+    engine = await createTestEngine({ Alpha: [[turn]] });
+    engine.adapter.seen = () => ({ email: 'someone-else@example.com' });
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(engine.accounts.isPaused(engine.project.accountId)).toBe(true);
+    const card = listInbox(engine.store.db, { states: ['OPEN'] })[0];
+    if (!card) throw new Error('no refusal card');
+    expect(card.options.map((o) => o.label)).toContain('Confirm');
+    engine.inbox.answer(card.id, { choice: AccountCardChoice.Confirm });
+    expect(getAccount(engine.store.db, engine.project.accountId).expectedIdentity).toBe(
+      'someone-else@example.com',
+    );
+    expect(engine.accounts.isPaused(engine.project.accountId)).toBe(false);
+    expect(ws(workstream.id).state).toBe('QUEUED');
+  });
+
+  it('releases the start gate when the adapter throws on a subscription account', async () => {
+    engine = await createTestEngine({ Alpha: [[turn]] });
+    engine.adapter.start = () => {
+      throw new Error('spawn failed');
+    };
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(engine.startGate.waiting(engine.project.accountId)).toBe(0);
+    // A leaked holder would leave this acquire pending forever.
+    (await engine.startGate.acquire(engine.project.accountId))();
+  });
+});
+
+describe('moving accounts', () => {
+  /** A second subscription, confirmed, so a session on it is ready and reports what it expects. */
+  const secondPlan = () => {
+    const account = seedAccount(engine.store, {
+      kind: 'claude_subscription',
+      label: 'Second plan',
+    });
+    engine.state.write((ctx) =>
+      patchAccount(ctx, account.id, { expectedIdentity: 'second@example.com' }),
+    );
+    return account;
+  };
+  const moveTo = (accountId: AccountId) =>
+    engine.state.write((ctx) => patchProject(ctx, engine.project.id, { accountId }));
+  /** What the scheduler does once the new account isn't paused. */
+  const requeue = (id: Parameters<typeof getWorkstream>[1]) =>
+    engine.state.write((ctx) => transitionWorkstream(ctx, id, { to: 'QUEUED', fence: null }));
+  const accountsOf = (id: Parameters<typeof getWorkstream>[1]) =>
+    listSessions(engine.store.db, id).map((s) => s.accountId);
+
+  it('starts a fresh session from the handoff when the project moved off the account its conversation ran on', async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        [
+          {
+            do: 'mcp',
+            tool: 'write_handoff',
+            args: handoffArgs('op-move-0001', 'Write the second file'),
+          },
+          { do: 'rate_limit', status: 'rejected', resetsInSeconds: 600 },
+        ],
+        [write('src/api/b.txt'), commit('op-move-0002', ['src/api/b.txt']), turn],
+      ],
+    });
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id)).toMatchObject({
+      state: 'PAUSED_LIMIT',
+      nextAction: { kind: 'resume' },
+    });
+
+    const second = secondPlan();
+    moveTo(second.id);
+    requeue(workstream.id);
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(accountsOf(workstream.id)).toEqual([engine.project.accountId, second.id]);
+    expect(engine.adapter.prompts[1]).toMatchObject({ resume: null });
+    expect(engine.adapter.prompts[1]?.prompt).toContain('Next action: Write the second file');
+  });
+
+  it("brings the builder's answer to a fresh session after the project moved", async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        [askShip, turn],
+        [write('src/api/a.txt'), commit('op-moveask-01', ['src/api/a.txt']), turn],
+      ],
+    });
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    const card = await waitFor(openCard);
+    engine.clock.advance(10 * 60_000);
+    await engine.runner.idle();
+    expect(ws(workstream.id).nextAction).toMatchObject({ kind: 'answer', inboxId: card.id });
+
+    moveTo(secondPlan().id);
+    engine.inbox.answer(card.id, { choice: 'Yes' });
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(engine.adapter.prompts[1]).toMatchObject({ resume: null });
+    expect(engine.adapter.prompts[1]?.prompt).toContain('Answer: Yes');
+    expect(engine.adapter.prompts[1]?.prompt).toContain('inspect git status first');
+  });
+
+  it('keeps the gate failure a lane was fixing when the project moved', async () => {
+    engine = await createTestEngine(
+      {
+        Alpha: [
+          [turn],
+          [
+            {
+              do: 'mcp',
+              tool: 'write_handoff',
+              args: handoffArgs('op-movefix-00', 'Create src/api/fixed.txt'),
+            },
+            { do: 'rate_limit', status: 'rejected', resetsInSeconds: 600 },
+          ],
+          [write('src/api/fixed.txt'), commit('op-movefix-01', ['src/api/fixed.txt']), turn],
+        ],
+      },
+      { gateCommand: 'test -f src/api/fixed.txt || { echo MISSING-FIXED-FILE; exit 2; }' },
+    );
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).nextAction).toMatchObject({ kind: 'fix' });
+    // The test clock is frozen: the fix session's handoff is written after the gate failure.
+    engine.clock.advance(1_000);
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id)).toMatchObject({
+      state: 'PAUSED_LIMIT',
+      nextAction: { kind: 'resume' },
+    });
+
+    moveTo(secondPlan().id);
+    requeue(workstream.id);
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(engine.adapter.prompts[2]).toMatchObject({ resume: null });
+    expect(engine.adapter.prompts[2]?.prompt).toContain('MISSING-FIXED-FILE');
+    expect(engine.adapter.prompts[2]?.prompt).toContain('Next action: Create src/api/fixed.txt');
+  });
+
+  it("runs a lane's next session on the account its project moved to while the first one ran", async () => {
+    const moved: { to: AccountId | null } = { to: null };
+    engine = await createTestEngine(
+      {
+        Alpha: [
+          [
+            { do: 'context', percentage: 75 },
+            { do: 'await_message', contains: 'write_handoff' },
+            {
+              do: 'mcp',
+              tool: 'write_handoff',
+              args: handoffArgs('op-movelane-1', 'Write the second file'),
+            },
+            turn,
+          ],
+          [write('src/api/b.txt'), commit('op-movelane-2', ['src/api/b.txt']), turn],
+        ],
+      },
+      {},
+      {
+        // The builder moves the project while the first session runs; it ends on the old account.
+        afterSession: () => {
+          if (moved.to === null) {
+            moved.to = secondPlan().id;
+            moveTo(moved.to);
+          }
+          return Promise.resolve();
+        },
+      },
+    );
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('DONE');
+    // What each session was launched on, and what its row records, are the same account.
+    const launchedOn = engine.adapter.prompts.map((p) => p.accountId);
+    expect(launchedOn).toEqual([engine.project.accountId, moved.to]);
+    expect(accountsOf(workstream.id)).toEqual(launchedOn);
+  });
+
+  it('runs on the account the project moved to while the lane waited for its start', async () => {
+    engine = await createTestEngine({
+      Alpha: [[write('src/api/a.txt'), commit('op-movegate-1', ['src/api/a.txt']), turn]],
+    });
+    const release = await engine.startGate.acquire(engine.project.accountId);
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await waitFor(() => engine.startGate.waiting(engine.project.accountId) === 1);
+    const second = secondPlan();
+    moveTo(second.id);
+    release();
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(engine.adapter.prompts.map((p) => p.accountId)).toEqual([second.id]);
+    expect(accountsOf(workstream.id)).toEqual([second.id]);
+    // The slot the lane gave back is free: a leak would leave every later session on that account waiting.
+    const slot = engine.startGate.acquire(engine.project.accountId);
+    await waitFor(() => engine.startGate.waiting(engine.project.accountId) === 0);
+    (await slot)();
+  });
+
+  it('keeps the gate failure a fix session was answered on after the project moved', async () => {
+    engine = await createTestEngine(
+      {
+        Alpha: [
+          [turn],
+          [askShip, turn],
+          [write('src/api/fixed.txt'), commit('op-moveans-01', ['src/api/fixed.txt']), turn],
+        ],
+      },
+      { gateCommand: 'test -f src/api/fixed.txt || { echo MISSING-FIXED-FILE; exit 2; }' },
+    );
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).nextAction).toMatchObject({ kind: 'fix' });
+    engine.launch(workstream.id);
+    const card = await waitFor(openCard);
+    engine.clock.advance(10 * 60_000);
+    await engine.runner.idle();
+    expect(ws(workstream.id).nextAction).toMatchObject({ kind: 'answer', inboxId: card.id });
+
+    moveTo(secondPlan().id);
+    engine.inbox.answer(card.id, { choice: 'Yes' });
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(engine.adapter.prompts[2]).toMatchObject({ resume: null });
+    expect(engine.adapter.prompts[2]?.prompt).toContain('MISSING-FIXED-FILE');
+    expect(engine.adapter.prompts[2]?.prompt).toContain('Answer: Yes');
+  });
+
+  it('resumes the conversation when the project moves away and back before a session launches', async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        [
+          { do: 'mcp', tool: 'write_handoff', args: handoffArgs('op-moveback-1', 'Write b') },
+          { do: 'rate_limit', status: 'rejected', resetsInSeconds: 600 },
+        ],
+        [write('src/api/b.txt'), commit('op-moveback-2', ['src/api/b.txt']), turn],
+      ],
+    });
+    const home = engine.project.accountId;
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).nextAction).toMatchObject({ kind: 'resume' });
+    const first = listSessions(engine.store.db, workstream.id)[0]?.providerSessionId;
+
+    // The new account has no confirmed identity, so no session launches on it.
+    const unconfirmed = seedAccount(engine.store, {
+      kind: 'claude_subscription',
+      label: 'Unconfirmed plan',
+    });
+    moveTo(unconfirmed.id);
+    requeue(workstream.id);
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(engine.adapter.prompts).toHaveLength(1);
+
+    moveTo(home);
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(engine.adapter.prompts[1]?.resume).toBe(first);
+  });
+
+  it('does not settle the lane on the account the project left while its head was read', async () => {
+    engine = await createTestEngine(
+      {
+        Alpha: [[write('src/api/a.txt'), commit('op-movehead-1', ['src/api/a.txt']), turn]],
+      },
+      {},
+      {},
+      { account: { kind: 'claude_subscription', label: 'Unconfirmed plan' } },
+    );
+    const { workstream } = engine.addTask('Alpha');
+    // launch runs the lane up to its first await, the read of the repository head.
+    engine.launch(workstream.id);
+    const second = secondPlan();
+    moveTo(second.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(engine.prepared).toEqual([]);
+    expect(accountsOf(workstream.id)).toEqual([second.id]);
+  });
+
+  it('honours a cancel that lands while the head is read, before the account is checked', async () => {
+    engine = await createTestEngine(
+      { Alpha: [[turn]] },
+      {},
+      {},
+      { account: { kind: 'anthropic_api_key', label: 'Client key' } },
+    );
+    const { workstream } = engine.addTask('Alpha');
+    // launch runs the lane up to its first await, the read of the repository head.
+    engine.launch(workstream.id);
+    await engine.runner.cancel(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('CANCELLED');
+    // The account has no secret, so a lane that went on would have been sent back to be prepared.
+    expect(engine.prepared).toEqual([]);
+    expect(engine.adapter.prompts).toEqual([]);
+  });
+
+  it('lets a running session finish on its account when the project moves, and runs the next on the new one', async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        [askShip, { do: 'rate_limit', status: 'rejected', resetsInSeconds: 600 }],
+        [write('src/api/b.txt'), commit('op-moverun-02', ['src/api/b.txt']), turn],
+      ],
+    });
+    const home = engine.project.accountId;
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    const card = await waitFor(openCard);
+    const second = secondPlan();
+    moveTo(second.id);
+    // The running session isn't stopped by the move; it ends on the account it started on.
+    expect(engine.adapter.prompts).toHaveLength(1);
+    engine.inbox.answer(card.id, { choice: 'Yes' });
+    await engine.runner.idle();
+    expect(engine.rateLimited.map((r) => r.accountId)).toEqual([home]);
+    expect(engine.sessionsEnded.map((e) => e.accountId)).toEqual([home]);
+    expect(ws(workstream.id).state).toBe('PAUSED_LIMIT');
+
+    requeue(workstream.id);
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(engine.adapter.prompts.map((p) => p.accountId)).toEqual([home, second.id]);
+    expect(accountsOf(workstream.id)).toEqual([home, second.id]);
+    expect(engine.sessionsEnded.map((e) => e.accountId)).toEqual([home, second.id]);
+  });
+
+  it('resumes the conversation when the lane was stopped waiting for the new account and the project moves back', async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        [
+          { do: 'mcp', tool: 'write_handoff', args: handoffArgs('op-movestop-1', 'Write b') },
+          { do: 'rate_limit', status: 'rejected', resetsInSeconds: 600 },
+        ],
+        [write('src/api/b.txt'), commit('op-movestop-2', ['src/api/b.txt']), turn],
+      ],
+    });
+    const home = engine.project.accountId;
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    const first = listSessions(engine.store.db, workstream.id)[0]?.providerSessionId;
+
+    const second = secondPlan();
+    const hold = await engine.startGate.acquire(second.id);
+    moveTo(second.id);
+    requeue(workstream.id);
+    engine.launch(workstream.id);
+    await waitFor(() => engine.startGate.waiting(second.id) === 1);
+    // The new account hits its usage limit: its lanes are stopped, this one before any session ran there.
+    const stopped = engine.runner.stopAccount(second.id, 'paused');
+    hold();
+    await stopped;
+    await engine.runner.idle();
+    expect(ws(workstream.id)).toMatchObject({
+      state: 'PAUSED_LIMIT',
+      nextAction: { kind: 'resume', providerSessionId: first },
+    });
+
+    moveTo(home);
+    requeue(workstream.id);
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(engine.adapter.prompts[1]?.resume).toBe(first);
+  });
+});
+
+describe('usage thresholds', () => {
+  it('asks a lane on the account to hand off once, in the account words, and runs its next session on the fallback', async () => {
+    const nearLimit = (utilization: number) => ({
+      do: 'rate_limit' as const,
+      status: 'allowed_warning' as const,
+      resetsInSeconds: 3600,
+      utilization,
+      limitType: 'five_hour',
+    });
+    engine = await createTestEngine({
+      Alpha: [
+        [
+          nearLimit(0.96),
+          { do: 'await_message', contains: 'near its usage limit' },
+          nearLimit(0.97),
+          {
+            do: 'mcp',
+            tool: 'write_handoff',
+            args: handoffArgs('op-usage-0001', 'Write the second file'),
+          },
+          turn,
+        ],
+        [write('src/api/b.txt'), commit('op-usage-0002', ['src/api/b.txt']), turn],
+      ],
+    });
+    const fallback = seedAccount(engine.store, {
+      kind: 'claude_subscription',
+      label: 'Second plan',
+    });
+    engine.state.write((ctx) =>
+      patchAccount(ctx, fallback.id, { expectedIdentity: 'second@example.com' }),
+    );
+    engine.state.write((ctx) =>
+      patchProject(ctx, engine.project.id, { fallbackAccountId: fallback.id }),
+    );
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(transitions(workstream.id).filter((t) => t === 'RUNNING->HANDING_OFF')).toHaveLength(1);
+    const sent = engine.adapter.sent.map((s) => s.text);
+    expect(sent.filter((text) => text === HANDOFF_NUDGE_ACCOUNT)).toHaveLength(1);
+    expect(sent).not.toContain(HANDOFF_NUDGE);
+    expect(listSessions(engine.store.db, workstream.id).map((s) => s.accountId)).toEqual([
+      engine.project.accountId,
+      fallback.id,
+    ]);
+    expect(engine.adapter.prompts[1]?.prompt).toContain('Next action: Write the second file');
+    expect(engine.usageReports.map((r) => r.report.utilization)).toEqual([0.96, 0.97]);
+  });
+
+  it('nudges a lane once however often it is asked, then firmly in the account words', async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        [
+          { do: 'await_message', contains: 'near its usage limit' },
+          // The turn ends with no handoff written: the firm nudge follows.
+          turn,
+          { do: 'await_message', contains: 'about to reach its usage limit' },
+          {
+            do: 'mcp',
+            tool: 'write_handoff',
+            args: handoffArgs('op-usage-0003', 'Write the second file'),
+          },
+          turn,
+        ],
+        [write('src/api/b.txt'), commit('op-usage-0004', ['src/api/b.txt']), turn],
+      ],
+    });
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await waitFor(() => engine.adapter.prompts.length === 1);
+    const { accountId, id: projectId } = engine.project;
+    engine.runner.handOff(projectId, accountId, 'first');
+    engine.runner.handOff(projectId, accountId, 'second');
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('DONE');
+    const sent = engine.adapter.sent.map((m) => m.text);
+    expect(sent.filter((text) => text === HANDOFF_NUDGE_ACCOUNT)).toHaveLength(1);
+    expect(sent.filter((text) => text === HANDOFF_FIRM_NUDGE_ACCOUNT)).toHaveLength(1);
+    expect(sent).not.toContain(HANDOFF_NUDGE);
+    expect(sent).not.toContain(HANDOFF_FIRM_NUDGE);
+  });
+
+  it('moves a project with a fallback when a session ends rate limited with no report', async () => {
+    engine = await createTestEngine({
+      Alpha: [[{ do: 'end', reason: 'rate_limited' }]],
+    });
+    const fallback = seedAccount(engine.store, {
+      kind: 'claude_subscription',
+      label: 'Second plan',
+    });
+    engine.state.write((ctx) =>
+      patchAccount(ctx, fallback.id, { expectedIdentity: 'second@example.com' }),
+    );
+    engine.state.write((ctx) =>
+      patchProject(ctx, engine.project.id, { fallbackAccountId: fallback.id }),
+    );
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(engine.usageReports.map((r) => r.report.status)).toEqual(['rejected']);
+    expect(getProject(engine.store.db, engine.project.id).accountId).toBe(fallback.id);
   });
 });
 
@@ -1709,5 +2486,54 @@ describe('a step that ends with changes in its claims', () => {
     expect(ws(workstream.id).state).toBe('FAILED');
     expect(ws(workstream.id).failureReason).toContain('uncommitted changes');
     expect(gateEvidence(workstream.id)).toEqual([]);
+  });
+});
+
+describe('the session guard', () => {
+  // An account's config directory lives under the data directory, which the guard protects.
+  const configDir = () => join(engine.dataDir, 'accounts', 'a', 'claude');
+  const results = (sessionId: string) =>
+    join(configDir(), 'projects', 'p', sessionId, 'tool-results', 'out.txt');
+  let workstreamId = '' as Parameters<typeof listSessions>[1];
+  // The session id is the fake provider's, derived from the session row; read when the step runs.
+  const ownSession = () => `fake-${listSessions(engine.store.db, workstreamId)[0]?.id ?? ''}`;
+  const read = (path: () => string) => ({
+    do: 'tool' as const,
+    toolName: 'Read',
+    input: {
+      get file_path() {
+        return path();
+      },
+    },
+  });
+  const start = async (
+    steps: (ReturnType<typeof read> | { do: 'activity'; summary: string })[],
+  ) => {
+    engine = await createTestEngine({ Alpha: [[...steps, turn]] });
+    mkdirSync(dirname(results('someone-else')), { recursive: true });
+    // The test database's accounts are all this test's; point them at that directory.
+    engine.store.db.update(schema.accounts).set({ configDir: configDir() }).run();
+    const { workstream } = engine.addTask('Alpha');
+    workstreamId = workstream.id;
+    engine.launch(workstream.id);
+  };
+  const denials = () => engine.adapter.observations.filter((o) => o.kind === 'denied_by_guard');
+  it('lets a session read its own saved output', async () => {
+    await start([
+      read(() => {
+        // Claude Code has written the output by the time the model reads it.
+        const path = results(ownSession());
+        mkdirSync(dirname(path), { recursive: true });
+        return path;
+      }),
+    ]);
+    await waitFor(openCard);
+    expect(denials().map((d) => d.detail['reason'])).toEqual([]);
+  });
+
+  it("refuses a read of another session's saved output", async () => {
+    await start([read(() => results('someone-else'))]);
+    await waitFor(() => denials().length > 0);
+    expect(String(denials()[0]?.detail['reason'])).toContain('sign-in');
   });
 });

@@ -1,9 +1,10 @@
 import { mintId } from '@10db/contracts';
+import type { AccountRow } from '@10db/db';
 import { HARNESS_PLUGIN_DIR } from '@10db/harness';
 import { describe, expect, it } from 'vitest';
 import { createTempRepo } from '../../test/fixtures';
 import { loadEnv } from '../env';
-import { buildSessionEnv, captureLoginEnv, findOnPath, keychainSecrets } from '../environment';
+import { captureLoginEnv, createLauncher, findOnPath, systemKeychain } from '../environment';
 import { createLogger } from '../log';
 import { createClaudeAdapter } from './index';
 import type { SessionEvent } from './types';
@@ -27,22 +28,48 @@ describe.skipIf(!live)('Claude adapter, live', () => {
       },
     });
     const adapter = createClaudeAdapter({ claudePath, pluginDir: HARNESS_PLUGIN_DIR, logger });
+    // The default account lives where the builder's login does; a probe reads who that is.
+    const launcher = createLauncher({
+      base: login.vars,
+      clientApp: '10db/live-test',
+      keychain: systemKeychain,
+    });
+    const defaultAccount: AccountRow = {
+      id: mintId('Account'),
+      kind: 'claude_subscription',
+      label: 'Claude plan',
+      payer: '',
+      expectedIdentity: null,
+      configDir: launcher.loginConfigDir(),
+      secretRef: null,
+      secretFingerprint: null,
+      settings: {},
+      laneCap: 4,
+      monthlyCapUsd: null,
+      archived: false,
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(),
+    };
+    const seen = await adapter.probeAccount({
+      cwd: repo.path,
+      env: launcher.probe(defaultAccount).env,
+    });
+    expect(seen.email).toBeTruthy();
+    const launch = launcher.session(
+      { ...defaultAccount, expectedIdentity: seen.email ?? null },
+      'haiku',
+    );
     const handle = adapter.start({
       sessionId: mintId('Session'),
       workstreamId: mintId('Workstream'),
       sequence: 1,
       cwd: repo.path,
       prompt: 'Reply with the single word: ready',
-      model: 'haiku',
+      model: launch.model,
       effort: 'low',
       resumeProviderSessionId: null,
-      env: buildSessionEnv({
-        base: login.vars,
-        billingMode: 'subscription',
-        clientApp: '10db/live-test',
-        secrets: keychainSecrets,
-      }),
-      billingMode: 'subscription',
+      env: launch.env,
+      account: launch.expect,
       projectMcpServers: {},
       allowedTools: [],
       // Nothing listens here; the session runs without 10db's tools.

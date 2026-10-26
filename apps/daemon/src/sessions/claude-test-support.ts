@@ -18,6 +18,7 @@ type Content = SDKAssistantMessage['message']['content'];
 export function initMessage(
   apiKeySource: ApiKeySource = 'none',
   mcpServers: SDKSystemMessage['mcp_servers'] = [{ name: '10db', status: 'connected' }],
+  model = 'claude-sonnet-5-5',
 ): SDKSystemMessage {
   return {
     type: 'system',
@@ -27,7 +28,7 @@ export function initMessage(
     cwd: '/repo',
     tools: ['Read', 'Write', 'Bash', 'mcp__10db__write_handoff'],
     mcp_servers: mcpServers,
-    model: 'claude-haiku-5-5',
+    model,
     permissionMode: 'default',
     slash_commands: [],
     output_style: 'default',

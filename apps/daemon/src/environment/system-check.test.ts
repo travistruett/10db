@@ -2,7 +2,14 @@ import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { tempDir } from '../../test/fixtures';
-import { findOnPath, markGhRequired, probeVersion, systemCheck, type LoginEnv } from './index';
+import {
+  claudeCodeWarning,
+  findOnPath,
+  markGhRequired,
+  probeVersion,
+  systemCheck,
+  type LoginEnv,
+} from './index';
 
 let dir: { path: string; cleanup(): void };
 beforeEach(() => {
@@ -66,6 +73,7 @@ describe('systemCheck', () => {
     );
     expect(report).toEqual({
       loginEnv: { source: 'inherited', warning: 'The login shell timed out' },
+      claudeCode: { verifiedOn: '2.1.302', warning: null },
       tools: [
         {
           name: 'claude',
@@ -88,10 +96,26 @@ describe('systemCheck', () => {
   });
 });
 
+describe('systemCheck version warning', () => {
+  it('warns when the installed claude has a newer major version', async () => {
+    tool('bin', 'claude', 'exit 0');
+    const login: LoginEnv = {
+      vars: { PATH: join(dir.path, 'bin') },
+      source: 'login_shell',
+      warning: null,
+    };
+    const report = await systemCheck(login, (path) =>
+      Promise.resolve(path.endsWith('claude') ? '3.0.0 (Claude Code)' : null),
+    );
+    expect(report.claudeCode.warning).toContain('3.0.0');
+  });
+});
+
 describe('markGhRequired', () => {
   it('requires gh only while some project delivers pull requests', () => {
     const check = {
       loginEnv: { source: 'login_shell' as const, warning: null },
+      claudeCode: { verifiedOn: '2.1.302', warning: null },
       tools: [
         { name: 'git' as const, path: '/usr/bin/git', version: '2', required: true },
         { name: 'gh' as const, path: null, version: null, required: false },
@@ -106,5 +130,20 @@ describe('markGhRequired', () => {
       ['git', true],
       ['gh', false],
     ]);
+  });
+});
+
+describe('claudeCodeWarning', () => {
+  it.each<[string | null, boolean]>([
+    ['2.1.302 (Claude Code)', false],
+    ['2.9.0 (Claude Code)', false],
+    ['1.0.0 (Claude Code)', false],
+    ['3.0.0 (Claude Code)', true],
+    ['not a version', false],
+    [null, false],
+  ])('%s warns: %s', (version, warns) => {
+    const warning = claudeCodeWarning(version);
+    expect(warning !== null).toBe(warns);
+    if (warning) expect(warning).toContain('2.1.302');
   });
 });

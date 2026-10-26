@@ -1,7 +1,5 @@
-import { BillingMode } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import {
-  billingMismatch,
   contextEvent,
   mapSdkMessage,
   resetsAtToDate,
@@ -55,11 +53,17 @@ describe('mapSdkMessage', () => {
 
   it('turns an assistant rate_limit error into a rejected rate limit', () => {
     expect(mapSdkMessage(assistantMessage([], 'rate_limit'), ctx)).toEqual([
-      { type: 'rate_limit', status: 'rejected', resetsAt: null },
+      {
+        type: 'rate_limit',
+        status: 'rejected',
+        resetsAt: null,
+        utilization: null,
+        limitType: null,
+      },
     ]);
   });
 
-  it('maps a result to turn_complete with cache tokens counted as input', () => {
+  it('maps a result to turn_complete with cache reads apart from input', () => {
     expect(
       mapSdkMessage(
         resultMessage({
@@ -71,15 +75,62 @@ describe('mapSdkMessage', () => {
         }),
         ctx,
       ),
-    ).toEqual([{ type: 'turn_complete', inputTokens: 1_050, outputTokens: 20, costUsd: 0.0123 }]);
+    ).toEqual([
+      {
+        type: 'turn_complete',
+        inputTokens: 150,
+        outputTokens: 20,
+        cachedTokens: 900,
+        costUsd: 0.0123,
+      },
+    ]);
   });
 
   it('maps rate limit events, with the reset time', () => {
     expect(
       mapSdkMessage(rateLimitEvent({ status: 'allowed_warning', resetsAt: 1_791_000_000 }), ctx),
     ).toEqual([
-      { type: 'rate_limit', status: 'allowed_warning', resetsAt: new Date(1_791_000_000_000) },
+      {
+        type: 'rate_limit',
+        status: 'allowed_warning',
+        resetsAt: new Date(1_791_000_000_000),
+        utilization: null,
+        limitType: null,
+      },
     ]);
+  });
+
+  it('carries the utilization and the limit type, and drops a utilization outside 0 to 1', () => {
+    expect(
+      mapSdkMessage(
+        rateLimitEvent({
+          status: 'allowed_warning',
+          resetsAt: 1_791_000_000,
+          utilization: 0.96,
+          rateLimitType: 'five_hour',
+        }),
+        ctx,
+      ),
+    ).toEqual([
+      {
+        type: 'rate_limit',
+        status: 'allowed_warning',
+        resetsAt: new Date(1_791_000_000_000),
+        utilization: 0.96,
+        limitType: 'five_hour',
+      },
+    ]);
+    expect(
+      mapSdkMessage(rateLimitEvent({ status: 'allowed_warning', utilization: 96 }), ctx),
+    ).toEqual([expect.objectContaining({ utilization: null })]);
+  });
+
+  it('ignores a utilization or a limit type of the wrong type, which the SDK types do not guarantee', () => {
+    // Claude Code's payload is not verified against its types: a string that would coerce is no share.
+    const odd = { status: 'allowed_warning', utilization: '0.96', rateLimitType: 5 };
+    expect(
+      mapSdkMessage(rateLimitEvent(odd as unknown as Parameters<typeof rateLimitEvent>[0]), ctx),
+    ).toEqual([expect.objectContaining({ utilization: null, limitType: null })]);
   });
 
   it('treats spending extra usage as a rejected limit, so lanes pause instead of billing overage', () => {
@@ -93,7 +144,15 @@ describe('mapSdkMessage', () => {
         }),
         ctx,
       ),
-    ).toEqual([{ type: 'rate_limit', status: 'rejected', resetsAt: new Date(1_791_500_000_000) }]);
+    ).toEqual([
+      {
+        type: 'rate_limit',
+        status: 'rejected',
+        resetsAt: new Date(1_791_500_000_000),
+        utilization: null,
+        limitType: null,
+      },
+    ]);
   });
 
   it('maps a compact boundary to compacted', () => {
@@ -193,37 +252,6 @@ describe('permission and hook translation', () => {
     });
     expect(userMessage('nudge', 'next')).toMatchObject({ priority: 'next' });
   });
-});
-
-describe('billingMismatch', () => {
-  const MAX = 'Claude Max';
-  it.each([
-    [BillingMode.Subscription, 'none', 'firstParty', MAX, false],
-    [BillingMode.Subscription, 'none', 'bedrock', MAX, true],
-    [BillingMode.Subscription, 'ANTHROPIC_API_KEY', 'firstParty', MAX, true],
-    [BillingMode.Subscription, 'apiKeyHelper', 'firstParty', MAX, true],
-    [BillingMode.Subscription, 'none', undefined, MAX, true],
-    // accountInfo() omits apiKeySource on a claude.ai login; the provider still has to be first-party.
-    [BillingMode.Subscription, undefined, 'firstParty', MAX, false],
-    [BillingMode.Subscription, undefined, 'bedrock', MAX, true],
-    // A first-party login with no plan is not a subscription; the plan's name itself is never compared.
-    [BillingMode.Subscription, 'none', 'firstParty', undefined, true],
-    [BillingMode.Subscription, 'none', 'firstParty', '', true],
-    [BillingMode.Subscription, 'none', 'firstParty', 'Claude Pro', false],
-    [BillingMode.ApiKey, 'ANTHROPIC_API_KEY', 'firstParty', undefined, false],
-    [BillingMode.ApiKey, 'none', 'firstParty', undefined, true],
-    [BillingMode.ApiKey, 'ANTHROPIC_API_KEY', 'bedrock', undefined, true],
-    [BillingMode.ApiKey, 'ANTHROPIC_API_KEY', undefined, undefined, true],
-    [BillingMode.Bedrock, 'none', 'bedrock', undefined, false],
-    [BillingMode.Bedrock, 'none', 'firstParty', undefined, true],
-  ] as const)(
-    '%s with apiKeySource %s, apiProvider %s and subscriptionType %s → mismatch %s',
-    (mode, apiKeySource, apiProvider, subscriptionType, mismatch) => {
-      const result = billingMismatch(mode, { apiKeySource, apiProvider, subscriptionType });
-      expect(result !== null).toBe(mismatch);
-      if (result) expect(result).toContain(apiKeySource ?? 'unknown');
-    },
-  );
 });
 
 describe('toSdkMcpServer', () => {

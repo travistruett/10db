@@ -31,7 +31,12 @@ function spec(overrides: Partial<SessionSpec> = {}): SessionSpec {
     effort: 'medium',
     resumeProviderSessionId: null,
     env: {},
-    billingMode: 'subscription',
+    account: {
+      accountId: mintId('Account'),
+      label: 'Claude plan',
+      kind: 'claude_subscription',
+      identity: 'builder@example.com',
+    },
     projectMcpServers: {},
     allowedTools: ['Write'],
     mcp: { url: 'http://127.0.0.1:1/mcp', token: 't', toolTimeoutMs: 1000 },
@@ -194,6 +199,27 @@ describe('FakeAdapter', () => {
     const adapter = new FakeAdapter({ Alpha: [[{ do: 'end' }]] });
     await collect(adapter.start(spec({ resumeProviderSessionId: 'prov-1' })).events);
     expect(adapter.prompts[0]).toMatchObject({ title: 'Alpha', resume: 'prov-1' });
+  });
+
+  it('refuses before the prompt when the scripted account differs, and records no prompt', async () => {
+    const adapter = new FakeAdapter({ Alpha: [[{ do: 'turn_complete' }]] });
+    adapter.seen = () => ({ email: 'other@example.com' });
+    const events = await collect(adapter.start(spec()).events);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      type: 'ended',
+      reason: 'account_refused',
+      refusal: { problem: 'identity_mismatch' },
+    });
+    expect(adapter.prompts).toEqual([]);
+  });
+
+  it('answers a probe with what it is told to report, and records it', async () => {
+    const adapter = new FakeAdapter({});
+    expect(await adapter.probeAccount({ cwd: '/d', env: {} })).toMatchObject({
+      email: 'builder@example.com',
+    });
+    expect(adapter.probes).toEqual([{ cwd: '/d', env: {} }]);
   });
 });
 

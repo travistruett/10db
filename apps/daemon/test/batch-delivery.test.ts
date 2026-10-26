@@ -188,6 +188,7 @@ describe('batch delivery through the daemon', () => {
   it('marks gh required in the system check once a project delivers pull requests', async () => {
     const check: SystemCheck = SystemCheckDto.parse({
       loginEnv: { source: 'login_shell', warning: null },
+      claudeCode: { verifiedOn: '2.1.302', warning: null },
       tools: [{ name: 'gh', path: null, version: null, required: false }],
     });
     const { api } = await start(() => Promise.resolve(check));

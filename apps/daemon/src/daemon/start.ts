@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { serve, upgradeWebSocket, type WebSocketServerLike } from '@hono/node-server';
 import {
@@ -8,7 +9,6 @@ import {
   PROTOCOL_VERSION,
   type InboxAnswer,
   type InboxItemDto,
-  type ProjectDto,
   type SystemCheckDto,
   type WorkstreamId,
 } from '@10db/contracts';
@@ -19,10 +19,25 @@ import {
   getAppSetting,
   migrateDatabase,
   openDatabase,
+  patchAccount,
+  seedDefaultAccount,
   setAppSetting,
 } from '@10db/db';
 import { HARNESS_PLUGIN_DIR, readDefaultPersonas } from '@10db/harness';
 import { WebSocketServer } from 'ws';
+import {
+  createAccountCardAnswers,
+  createAccountLimits,
+  createAccountMoves,
+  createAccountPauses,
+  createAccountPreparer,
+  createAccountRuntime,
+  createAccountService,
+  createMoveBack,
+  createStartGate,
+  createUsageReports,
+  type AccountLimits,
+} from '../accounts';
 import { createApp } from '../api';
 import { createBenchmarkSync, type BenchmarkSync } from '../benchmarks';
 import {
@@ -45,13 +60,20 @@ import {
   type DeliveryLimits,
 } from '../delivery';
 import type { LogLevel } from '../env';
-import { REQUIRED_TOOLS } from '../environment';
+import {
+  ACCOUNT_NAMES_VERIFIED_ON,
+  createLauncher,
+  REQUIRED_TOOLS,
+  unavailableKeychain,
+  type Keychain,
+} from '../environment';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit } from '../git';
 import { createGh, type Gh } from '../github';
 import { createInboxService } from '../inbox';
 import { createKeepAwake, systemCaffeinate, type CaffeinateSpawner } from '../keep-awake';
 import { createLogger, fileDestination, rotateLogFile, type Logger } from '../log';
+import { protectedPaths } from '../guard';
 import { createMcpHandler } from '../mcp';
 import { recoverOnStartup, systemProcesses, type ProcessTerminator } from '../recovery';
 import {
@@ -61,10 +83,11 @@ import {
   type Runner,
   type RunnerLimits,
 } from '../runner';
-import { createProviderPauses, createScheduler, type Scheduler } from '../scheduler';
+import { createScheduler, type Scheduler } from '../scheduler';
 import type { SessionAdapter } from '../sessions';
 import { retryWorkstream, seedTeam } from '../team';
 import { createGateRunner } from '../verify';
+import { CLIENT_APP } from '../version';
 import { createWatcher, systemWatch, type WatchFn } from '../watcher';
 import { acquireInstanceLock } from './instance-lock';
 import { removeRuntimeFiles, writeRuntimeFiles } from './runtime-files';
@@ -79,8 +102,8 @@ export interface DaemonOptions {
   /** better_sqlite3.node for bundled runs; source runs leave it unset. */
   readonly sqliteBinding?: string;
   readonly clock?: Clock;
-  /** Lane caps across all projects and per provider. */
-  readonly caps?: { readonly global: number; readonly perProvider: number };
+  /** Lane caps across all projects; each account has its own `laneCap`. */
+  readonly caps?: { readonly global: number };
   /** Recovery attempts, fix attempts and the gate timeout; merged over the runner defaults. */
   readonly limits?: Partial<RunnerLimits>;
   /** How long a lane lease lasts before the scheduler renews it. */
@@ -94,7 +117,10 @@ export interface DaemonOptions {
   readonly deliveryLimits?: Partial<DeliveryLimits>;
   /** How long a provider stays paused when its usage limit gives no reset time. */
   readonly defaultPauseMs?: number;
-  readonly sessionEnv?: (project: ProjectDto) => Readonly<Record<string, string>>;
+  /** The environment sessions and gates start from: the captured login shell in production. */
+  readonly loginEnv?: Readonly<Record<string, string>>;
+  /** Where account secrets are read and written: the login Keychain in production. */
+  readonly keychain?: Keychain;
   readonly processes?: ProcessTerminator;
   readonly migrationsDir?: string;
   /** The builder's Artificial Analysis key (the Keychain in production); absent means no sync. */
@@ -137,7 +163,7 @@ const CLEAN_SHUTDOWN_KEY = 'daemon.clean_shutdown';
 const DEFAULT_SESSION_PATH = '/usr/bin:/bin';
 
 const DEFAULTS = {
-  caps: { global: 4, perProvider: 4 },
+  caps: { global: 4 },
   leaseMs: 60_000,
   tickMs: 2_000,
   defaultPauseMs: 30 * 60_000,
@@ -149,6 +175,7 @@ const DEFAULTS = {
 function noSystemCheck(): Promise<SystemCheckDto> {
   return Promise.resolve({
     loginEnv: { source: 'inherited', warning: 'The login environment was not captured' },
+    claudeCode: { verifiedOn: ACCOUNT_NAMES_VERIFIED_ON, warning: null },
     tools: REQUIRED_TOOLS.map((t) => ({
       name: t.name,
       path: null,
@@ -206,6 +233,19 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   );
   // A malformed persona file throws and the daemon doesn't start, the same policy as a failed migration.
   seedTeam(state, readDefaultPersonas(opts.harnessDir ?? HARNESS_PLUGIN_DIR));
+  const launcher = createLauncher({
+    base: opts.loginEnv ?? { PATH: DEFAULT_SESSION_PATH },
+    clientApp: CLIENT_APP,
+    keychain: opts.keychain ?? unavailableKeychain,
+  });
+  // The builder's current login is the default account, so a project made without one binds to it: the
+  // login shell's own Claude Code directory, else Claude Code's default.
+  const seeded = state.write((ctx) =>
+    seedDefaultAccount(ctx, { expectedIdentity: null, configDir: launcher.loginConfigDir() }),
+  );
+  // A relative login directory was ignored, so the default account landed on Claude Code's default directory: say so when it is seeded.
+  const ignoredLoginDir = launcher.loginConfigDirWarning();
+  if (seeded && ignoredLoginDir) logger.warn({}, ignoredLoginDir);
   const benchmarks = createBenchmarkSync({
     state,
     clock,
@@ -225,6 +265,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   let runner: Runner | null = null;
   let scheduler: Scheduler | null = null;
   let answerBatchCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
+  let answerAccountCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
 
   const inbox = createInboxService({
     state,
@@ -233,9 +274,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     },
     onFlagAnswer: (item, answer) => {
       answerBatchCard?.(item, answer);
+      answerAccountCard?.(item, answer);
     },
   });
-  const sessionEnv = opts.sessionEnv ?? (() => ({ PATH: DEFAULT_SESSION_PATH }));
   const deliveryJobs = createDeliveryJobs(logger.child({ component: 'delivery' }));
   const delivery: DeliveryContext = {
     state,
@@ -261,7 +302,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     gate: createGateRunner(),
     clock,
     dataDir: opts.dataDir,
-    sessionEnv,
+    sessionEnv: () => launcher.projectEnv(),
     identifyProcess: (pid) => processes.identify(pid),
     isRunning: (id) => runner?.isRunning(id) ?? false,
   });
@@ -282,17 +323,108 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     daemonPid: process.pid,
     logger,
   });
-  const pauses = createProviderPauses({
+  const accountPauses = createAccountPauses({
     state,
     clock,
     inbox,
-    stopProvider: (provider) => runner?.stopProvider(provider, 'paused') ?? Promise.resolve(),
+    stopAccount: (id) => runner?.stopAccount(id, 'paused') ?? Promise.resolve(),
     onResume: () => {
       scheduler?.requestTick();
     },
+  });
+  const accounts = createAccountRuntime({
+    state,
+    clock,
+    inbox,
+    pauses: accountPauses,
     defaultPauseMs: opts.defaultPauseMs ?? DEFAULTS.defaultPauseMs,
   });
+  const reports = createUsageReports({
+    clock,
+    staleMs: opts.defaultPauseMs ?? DEFAULTS.defaultPauseMs,
+  });
+  // Built after the moves, which tell it when a project moved.
+  let accountLimits: AccountLimits | null = null;
+  const moveBack = createMoveBack({
+    state,
+    clock,
+    inbox,
+    pauses: accountPauses,
+    reports,
+    defaultPauseMs: opts.defaultPauseMs ?? DEFAULTS.defaultPauseMs,
+  });
+  const moves = createAccountMoves({
+    state,
+    inbox,
+    pauses: accountPauses,
+    moveBack,
+    handOff: (projectId, accountId, reason) => {
+      runner?.handOff(projectId, accountId, reason);
+    },
+    onMoved: (projectId) => {
+      accountLimits?.forget(projectId);
+      scheduler?.requestTick();
+    },
+  });
+  accountLimits = createAccountLimits({
+    state,
+    clock,
+    inbox,
+    pauses: accountPauses,
+    moves,
+    reports,
+  });
+  answerAccountCard = createAccountCardAnswers({
+    resume: (id, about) => {
+      accountPauses.resume(id, about);
+    },
+    confirm: (id, identity, answering) => {
+      state.write((ctx) => patchAccount(ctx, id, { expectedIdentity: identity }));
+      accounts.saved(id, answering);
+      scheduler?.requestTick();
+    },
+    move: (projectId, to, why, answering) => {
+      moves.move(projectId, to, why, { answering });
+    },
+    stay: (projectId) => {
+      moves.stay(projectId);
+    },
+  });
+  const startGate = createStartGate();
+  const preparer = createAccountPreparer({
+    state,
+    clock,
+    inbox,
+    adapter,
+    launcher,
+    startGate,
+    dataDir: opts.dataDir,
+    logger: logger.child({ component: 'accounts' }),
+    onReady: () => {
+      scheduler?.requestTick();
+    },
+  });
+  const accountService = createAccountService({
+    state,
+    clock,
+    dataDir: opts.dataDir,
+    keychain: opts.keychain ?? unavailableKeychain,
+    launcher,
+    adapter,
+    startGate,
+    runtime: accounts,
+    onSaved: () => {
+      scheduler?.requestTick();
+    },
+  });
+  // The data directory, and the default account's sign-in wherever the login shell keeps it.
+  const guarded = protectedPaths({
+    dataDir: opts.dataDir,
+    home: homedir(),
+    loginConfigDir: launcher.loginConfigDir(),
+  });
   const createdRunner = createRunner({
+    protectedPaths: guarded,
     state,
     adapter,
     inbox,
@@ -304,9 +436,16 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     live,
     limits,
     mcpUrl: () => mcpUrl,
-    sessionEnv,
-    onRateLimited: (provider, resetsAt, projectId) => {
-      pauses.pause(provider, resetsAt, projectId);
+    launcher,
+    startGate,
+    accounts: {
+      ...accounts,
+      prepare: (account, projectId) => {
+        preparer.prepare(account, projectId);
+      },
+      usageReported: (accountId, report) => {
+        accountLimits.usageReported(accountId, report);
+      },
     },
     onLaneFreed: () => {
       scheduler?.requestTick();
@@ -320,7 +459,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const createdScheduler = createScheduler({
     state,
     runner: createdRunner,
-    pauses,
+    accounts: {
+      ...accounts,
+      prepare: (account, projectId) => {
+        preparer.prepare(account, projectId);
+      },
+    },
     clock,
     instanceId,
     logger,
@@ -347,7 +491,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     logger,
     cleanShutdown,
   });
-  pauses.restore();
+  accountPauses.restore();
+  // A move back that came due reads the pauses.
+  moveBack.restore();
   await recoverBatches({
     state,
     git,
@@ -381,18 +527,21 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       bus,
       runner: createdRunner,
       scheduler: createdScheduler,
+      moves,
       inbox,
       keepAwake,
       systemCheck: opts.systemCheck ?? noSystemCheck,
       benchmarks,
       starter,
       shipper,
+      accounts: accountService,
     }),
     upgradeWebSocket,
     onUnexpectedError: (error) => {
       logger.error({ err: error }, 'unhandled API error');
     },
     mcp: createMcpHandler({
+      protectedPaths: guarded,
       state,
       inbox,
       git,
@@ -451,12 +600,16 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       // Aborts a shipping gate and any git or gh child; the batch stays SHIPPING for recovery.
       await deliveryJobs.stop();
       benchmarks.stop();
-      pauses.stop();
+      accountPauses.stop();
+      moveBack.stop();
       nightly.cancel();
       unsubscribeLanes();
       watcher?.stop();
       keepAwake.stop();
+      // A probe in flight writes to the database; the runner can ask for another while it stops.
+      await preparer.idle();
       await createdRunner.stopAll('shutdown');
+      await preparer.idle();
       state.write((ctx) => {
         setAppSetting(ctx, CLEAN_SHUTDOWN_KEY, { at: ctx.now });
       });
