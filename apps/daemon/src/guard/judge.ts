@@ -31,6 +31,7 @@ import {
   leadingWords,
   parseShell,
   hidesEnvCommand,
+  redirectionHidesCommand,
   stripCommandPrefixes,
   type ShellSegment,
 } from './shell-words';
@@ -146,7 +147,9 @@ const MAX_WILDCARDS = 4;
  */
 const REDIRECTION = /[<>]/;
 const UNREAD_WORDS =
-  "The command has words the guard cannot read: an ANSI-C escape such as $'\\x2e', or a lone { or } in the middle of a command. Write the words plainly.";
+  "The command has words the guard cannot read: an ANSI-C escape it does not decode (such as $'\\q' or a NUL), a / or newline decoded inside a word, or a lone { or } in the middle of a command. Write the words plainly.";
+const HIDDEN_BY_REDIRECTION =
+  "A redirection among a wrapper's words, or one the guard does not recognize, hides which command runs. Put redirections after the command.";
 const UNJUDGED_RM = 'rm -r argument uses shell syntax the guard does not judge; name the paths.';
 
 function hasGitPart(path: string): boolean {
@@ -314,6 +317,8 @@ function commandOf(segment: ShellSegment): {
   readonly outOfOrder: boolean;
   /** env hides the command it runs: a split string, or a long option not spelled in full. */
   readonly hiddenByEnv: boolean;
+  /** A redirection among the prefix words, or one the guard does not read, may hide the command. */
+  readonly hiddenByRedirection: boolean;
 } {
   const leading = leadingWords(segment.words);
   return {
@@ -324,6 +329,7 @@ function commandOf(segment: ShellSegment): {
     negated: leading.negated,
     outOfOrder: leading.outOfOrder,
     hiddenByEnv: hidesEnvCommand(leading.command),
+    hiddenByRedirection: leading.hiddenByRedirection || redirectionHidesCommand(leading.command),
   };
 }
 
@@ -378,7 +384,7 @@ function judgeShell(
   // The subshells the previous segment ran in, each with what was possible outside it.
   const subshells: { readonly id: number; readonly possible: Dir[] }[] = [];
   let previousSeparator = '';
-  for (const { segment, words, negated, hiddenByEnv } of segments) {
+  for (const { segment, words, negated, hiddenByEnv, hiddenByRedirection } of segments) {
     if (ordered) {
       let left = false;
       while (
@@ -402,6 +408,7 @@ function judgeShell(
     const piped = previousSeparator === '|';
     previousSeparator = segment.separator;
     if (!segment.wordsCertain) return deny(UNREAD_WORDS);
+    if (hiddenByRedirection) return deny(HIDDEN_BY_REDIRECTION);
     if (head === 'sudo') return deny('sudo is never allowed.');
     if (hiddenByEnv)
       return deny(

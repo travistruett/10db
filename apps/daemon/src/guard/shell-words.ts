@@ -1,4 +1,5 @@
 import { basename } from 'node:path';
+import { decodeAnsiC } from './ansi-c';
 
 export interface ShellSegment {
   /** The segment's text with quotes kept and comments and line continuations left out. */
@@ -144,10 +145,18 @@ function scan(command: string, from: number, substitution: boolean): Scan {
   // The previous character, when it was neither quoted nor escaped.
   let lastPlain = '';
 
+  // Where in the current word an ANSI-C escape decoded to a newline.
+  let decodedNewlines: number[] = [];
   const flushWord = (): void => {
+    // A decoded newline is only read the same way at the end of a word (`IFS=$'\n'`).
+    if (decodedNewlines.some((at) => at < word.length - 1)) {
+      certain = false;
+      wordsCertain = false;
+    }
     if (word !== '') words.push(word);
     word = '';
     inWord = false;
+    decodedNewlines = [];
   };
   const flush = (separator: string): void => {
     flushWord();
@@ -230,27 +239,27 @@ function scan(command: string, from: number, substitution: boolean): Scan {
       continue;
     }
     if (ch === '$' && next === "'") {
-      // ANSI-C quoting: a backslash escapes a quote, a backslash or a double quote; every other
-      // escape (`\n`, `\t`, `\x41`) decodes to a character this scanner does not model. Such a
-      // word keeps its `$'…'` text as written, so no rule reads it as the word the shell passes.
+      // ANSI-C quoting, decoded with bash's escape set. The raw text gets the decoded word in
+      // single quotes, so rules that read the text see what the shell passes. A body that does not
+      // decode exactly, or is never closed, keeps its `$'…'` text and leaves the words uncertain.
       let j = i + 2;
-      let decoded = '';
-      let decodes = true;
-      while (j < command.length && command.charAt(j) !== "'") {
-        const escaped = command.charAt(j) === '\\' && j + 1 < command.length;
-        if (escaped && !`'\\"`.includes(command.charAt(j + 1))) decodes = false;
-        decoded += command.charAt(escaped ? j + 1 : j);
-        j += escaped ? 2 : 1;
-      }
-      if (j >= command.length) decodes = false;
+      while (j < command.length && command.charAt(j) !== "'")
+        j += command.charAt(j) === '\\' && j + 1 < command.length ? 2 : 1;
       const end = Math.min(j, command.length);
       const text = command.slice(i, end + 1);
-      if (!decodes) {
+      const ansi = decodeAnsiC(command.slice(i + 2, end));
+      if (!ansi.exact || j >= command.length) {
         certain = false;
         wordsCertain = false;
+        raw += text;
+        word += text;
+      } else {
+        // Permission rules match plain text only, so any real escape keeps them away.
+        if (ansi.escapes) certain = false;
+        decodedNewlines.push(...ansi.newlines.map((at) => word.length + at));
+        raw += `'${ansi.text.replaceAll("'", "'\\''")}'`;
+        word += ansi.text;
       }
-      raw += text;
-      word += decodes ? decoded : text;
       inWord = true;
       i = end;
       continue;
@@ -386,6 +395,8 @@ const OUT_OF_ORDER: ReadonlySet<string> = new Set([
   'coproc',
 ]);
 
+/** A `<` or `>`, which may be part of a redirection the guard does not read, such as `{fd}>x`. */
+const ANGLE = /[<>]/;
 /** A redirection word: an optional descriptor (`2`, `&`), the operator, and its target if attached. */
 const REDIRECTION_WORD = /^(?:\d+|&)?(?:<<<|<<-?|<>|<&|>>|>\||>&|<|>)/;
 
@@ -409,9 +420,12 @@ export function leadingWords(words: readonly string[]): {
   readonly command: string[];
   readonly negated: boolean;
   readonly outOfOrder: boolean;
+  /** A word before the command holds a `<` or `>` that is not a redirection the guard reads. */
+  readonly hiddenByRedirection: boolean;
 } {
   let negated = false;
   let outOfOrder = false;
+  let hiddenByRedirection = false;
   let i = 0;
   while (i < words.length) {
     const word = words[i] ?? '';
@@ -420,12 +434,13 @@ export function leadingWords(words: readonly string[]): {
       i += redirection;
       continue;
     }
+    if (ANGLE.test(word)) hiddenByRedirection = true;
     if (OUT_OF_ORDER.has(word)) outOfOrder = true;
     if (!BEFORE_COMMAND.has(word)) break;
     if (word === '!') negated = true;
     i += 1;
   }
-  return { command: words.slice(i), negated, outOfOrder };
+  return { command: words.slice(i), negated, outOfOrder, hiddenByRedirection };
 }
 
 interface Wrapper {
@@ -485,11 +500,18 @@ interface Prefixes {
   readonly at: number;
   /** The flags each wrapper was given, by the wrapper's name. */
   readonly flags: readonly { readonly wrapper: string; readonly flag: string }[];
+  /**
+   * With `skipRedirections`: a redirection follows a wrapper, where it may stand for a flag's
+   * value, or a word holds a `<` or `>` that is not a redirection the guard reads.
+   */
+  readonly hidden: boolean;
 }
 
 /**
- * Walks the leading `VAR=value` assignments and pass-through wrappers with their flags, and with
- * `skipRedirections` the redirections among them (`env >x rm` runs `rm`).
+ * Walks the leading `VAR=value` assignments and pass-through wrappers with their flags. With
+ * `skipRedirections`, redirections before the first wrapper are skipped (`X=1 >x rm` runs `rm`),
+ * and any other `<` or `>` up to the command marks the walk `hidden`: after a wrapper a redirection
+ * may sit where a flag's value goes (`env -u >x FOO rm`), and `{fd}>x` is not read at all.
  */
 function prefixes(
   words: readonly string[],
@@ -497,35 +519,47 @@ function prefixes(
   skipRedirections = false,
 ): Prefixes {
   const flags: { wrapper: string; flag: string }[] = [];
-  const redirection = (at: number): number => (skipRedirections ? redirectionSpan(words, at) : 0);
+  const angled = (from: number, to: number): boolean =>
+    skipRedirections && words.slice(from, to).some((w) => ANGLE.test(w));
+  let wrappers = 0;
   let i = 0;
   while (i < words.length) {
     const w = words[i] ?? '';
     const name = commandName(w);
     const wrapped =
       WRAPPERS.get(name) ?? (lookThroughRunners ? RUNNER_WRAPPERS.get(name) : undefined);
-    if (redirection(i) > 0) {
-      i += redirection(i);
+    const redirection = skipRedirections ? redirectionSpan(words, i) : 0;
+    if (redirection > 0 && wrappers === 0) {
+      i += redirection;
+    } else if (angled(i, i + 1)) {
+      return { at: i, flags, hidden: true };
     } else if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(w)) {
       i += 1;
     } else if (wrapped) {
+      wrappers += 1;
       i += 1;
-      while (i < words.length) {
+      while (i < words.length && (words[i] ?? '').startsWith('-')) {
         const flag = words[i] ?? '';
-        if (redirection(i) > 0) {
-          i += redirection(i);
-          continue;
-        }
-        if (!flag.startsWith('-')) break;
+        const span = flagSpan(flag, wrapped.valueFlags);
+        if (angled(i, i + span)) return { at: i, flags, hidden: true };
         flags.push({ wrapper: name, flag });
-        i += flagSpan(flag, wrapped.valueFlags);
+        i += span;
       }
+      if (angled(i, i + wrapped.positionals + 1)) return { at: i, flags, hidden: true };
       i += wrapped.positionals;
     } else {
       break;
     }
   }
-  return { at: i, flags };
+  return { at: i, flags, hidden: false };
+}
+
+/**
+ * Whether a redirection among a command's prefix words, or one the guard does not read, may hide
+ * which command runs (see `prefixes`).
+ */
+export function redirectionHidesCommand(words: readonly string[]): boolean {
+  return prefixes(words, true, true).hidden;
 }
 
 /**

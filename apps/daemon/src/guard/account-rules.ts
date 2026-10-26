@@ -12,7 +12,13 @@ import {
 } from 'node:path';
 import { SECRET_VARIABLES } from '../environment';
 import { abbreviates } from './git-rules';
-import { isWithin, isWithinOnEveryReading, realPathReadings } from './paths';
+import {
+  isOverLongPath,
+  isWithin,
+  isWithinOnEveryReading,
+  OVER_LONG_PATH_REFUSAL,
+  realPathReadings,
+} from './paths';
 
 /**
  * Two kinds of rule live here. The shell-text rules (Keychain commands, environment dumps, secret
@@ -370,6 +376,16 @@ interface Reach {
   readonly contains: boolean;
 }
 
+const unresolved = (word: string): string =>
+  `${word} cannot be resolved here: a .. after a wildcard, or after a part that does not exist yet, could reach a protected path. Name the path plainly.`;
+
+/** Whether a `..` follows a part with a wildcard. */
+function climbsAfterGlob(word: string): boolean {
+  const parts = word.split('/');
+  const glob = parts.findIndex((part) => GLOB_CHARACTERS.test(part));
+  return glob !== -1 && parts.slice(glob + 1).includes('..');
+}
+
 /** The word with `base` before it and its `..` kept, so each reading of it can be judged. */
 function written(word: string, base: string): string {
   return isAbsolute(word) ? word : `${base}${sep}${word}`;
@@ -382,14 +398,17 @@ function reachRefusal(
   reach: Reach,
 ): string | null {
   const target = base === null && !isAbsolute(word) ? null : written(word, base ?? '/');
-  // The working directory is unknown after a `cd` the guard cannot follow, or the path cannot be
-  // resolved now (a `..` after a part that does not exist yet may climb out of a link the command
-  // makes first): a word that names a protected path's last component is refused.
-  if (target === null || !realPathReadings(target).complete) {
+  if (target === null) {
+    // The working directory is unknown after a `cd` the guard cannot follow: a word that names a
+    // protected path's last component is refused.
     const segments = lower(word).split('/');
-    const named = paths.find((p) => segments.includes(lower(basename(p.path))));
-    if (named || target === null) return named?.refusal ?? null;
+    return paths.find((p) => segments.includes(lower(basename(p.path))))?.refusal ?? null;
   }
+  // A `..` after a wildcard, or after a part that does not exist yet (a link the command makes
+  // first may stand there), climbs from a place the guard cannot name.
+  if (paths.length > 0 && isOverLongPath(target)) return OVER_LONG_PATH_REFUSAL;
+  if (paths.length > 0 && (climbsAfterGlob(word) || !realPathReadings(target).complete))
+    return unresolved(word);
   const glob = GLOB_CHARACTERS.test(word);
   for (const p of paths) {
     if (glob ? globReaches(target, p, reach.contains) : touches(p, target) || namesPath(word, p))

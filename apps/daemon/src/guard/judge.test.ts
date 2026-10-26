@@ -756,7 +756,6 @@ describe('rm -r arguments beyond a plain path', () => {
     'dist/*/',
     'dist/[ab]',
     'dist/*.{o,a}',
-    'src/*/../x',
     '"my dir"',
   ])('denies rm -rf %s', (arg) => {
     expect(run(`rm -rf ${arg}`)).toEqual(unjudged);
@@ -766,6 +765,14 @@ describe('rm -r arguments beyond a plain path', () => {
     expect(run('rm -rf .gi\\t')).toEqual({
       decision: 'deny',
       reason: 'rm -r of a .git path is never allowed.',
+    });
+  });
+
+  it('denies a .. after a wildcard as a path the guard cannot resolve', () => {
+    expect(run('rm -rf src/*/../x')).toEqual({
+      decision: 'deny',
+      reason:
+        'src/*/../x cannot be resolved here: a .. after a wildcard, or after a part that does not exist yet, could reach a protected path. Name the path plainly.',
     });
   });
 
@@ -849,16 +856,35 @@ describe('rm -r arguments beyond a plain path', () => {
   const unread = {
     decision: 'deny',
     reason:
-      "The command has words the guard cannot read: an ANSI-C escape such as $'\\x2e', or a lone { or } in the middle of a command. Write the words plainly.",
+      "The command has words the guard cannot read: an ANSI-C escape it does not decode (such as $'\\q' or a NUL), a / or newline decoded inside a word, or a lone { or } in the middle of a command. Write the words plainly.",
   };
 
   it.each([
-    ['an ANSI-C escape that spells .git', "rm -rf $'\\x2egit'"],
-    ['an ANSI-C escape that spells --', "rm -rf -$'\\x2d' -d/../.git"],
-    ['an ANSI-C escape that spells the flags', "rm $'\\x2drf' .git"],
-    ['an ANSI-C escape inside the flags', "rm -$'\\x72'f .git"],
-    ['an ANSI-C escape inside a path', "rm -rf dist/$'\\x2e'git"],
-    ['an ANSI-C escape that spells the command', "$'\\x72m' -rf .git"],
+    ['a hex escape that spells .git', "rm -rf $'\\x2egit'"],
+    ['an octal escape that spells .git', "rm -rf $'\\056git'"],
+    ['a Unicode escape that spells .git', "rm -rf $'\\u002egit'"],
+    ['hex escapes for every letter of .git', "rm -rf $'\\x2e\\x67\\x69\\x74'"],
+    ['a hex escape that spells the flags', "rm $'\\x2drf' .git"],
+    ['a hex escape inside the flags', "rm -$'\\x72'f .git"],
+    ['a hex escape that spells --', "rm -rf -$'\\x2d' -d/../.git"],
+    ['a hex escape inside a path', "rm -rf dist/$'\\x2e'git"],
+    ['a hex escape that spells the command', "$'\\x72m' -rf .git"],
+  ])('denies %s for the .git it decodes to', (_name, command) => {
+    expect(run(command)).toEqual({
+      decision: 'deny',
+      reason: 'rm -r of a .git path is never allowed.',
+    });
+  });
+
+  it.each([
+    ['an unknown escape', "echo $'\\q'"],
+    ['a decoded NUL', "echo $'\\x00'"],
+    ['a control escape that decodes to NUL', "echo $'\\c@'"],
+    ['a hex escape with no digits', "echo $'\\x'"],
+    ['an octal escape past one byte', "echo $'\\777'"],
+    ['a Unicode escape with no digits', "echo $'\\u'"],
+    ['a decoded / inside a word', "rm -rf $'dist\\x2f.git'"],
+    ['a decoded newline inside a word', "printf $'a\\nb'"],
     ['an unclosed ANSI-C quote', "rm -rf $'.git"],
     ['a lone { before .git', 'rm -rf { .git'],
     ['a lone } before .git', 'rm -rf } .git'],
@@ -877,12 +903,29 @@ describe('rm -r arguments beyond a plain path', () => {
     ['a redirection before rm', '2>/dev/null rm -rf .git'],
     ['a bare redirection whose target looks like an option', '> -x rm -rf .git'],
     ['a redirection after an assignment', 'X=1 >x rm -rf .git'],
-    ['a redirection after env', 'env >x rm -rf .git'],
-    ['a redirection after nice', 'nice 2>x rm -rf .git'],
-    ['a redirection between env flags', 'env -i >x -u X rm -rf .git'],
     ['an input redirection before rm', '<x rm -rf ../out'],
   ])('denies rm -r with %s as unjudged syntax', (_name, command) => {
     expect(run(command)).toEqual(unjudged);
+  });
+
+  const hiddenByRedirection = {
+    decision: 'deny',
+    reason:
+      "A redirection among a wrapper's words, or one the guard does not recognize, hides which command runs. Put redirections after the command.",
+  };
+
+  it.each([
+    ['a redirection after env', 'env >x rm -rf .git'],
+    ['a redirection after nice', 'nice 2>x rm -rf .git'],
+    ['a redirection between env flags', 'env -i >x -u X rm -rf .git'],
+    ["a redirection in place of env -u's value", 'env -u >x FOO rm -rf .git'],
+    ["a redirection in place of nice -n's value", 'nice -n >x 5 rm -rf .git'],
+    ["a redirection before timeout's duration", 'timeout >x 5 rm -rf .git'],
+    ['a named descriptor before rm', '{fd}>x rm -rf .git'],
+    ['a named descriptor before git', '{fd}<x git push --force'],
+    ['a redirection joined to the command name', 'a>b rm -rf .git'],
+  ])('denies %s as a redirection that hides the command', (_name, command) => {
+    expect(run(command)).toEqual(hiddenByRedirection);
   });
 
   it.each([
@@ -899,7 +942,12 @@ describe('rm -r arguments beyond a plain path', () => {
   it.each([
     '{ rm -rf build; }',
     '2>/dev/null git status',
+    '2>/dev/null env FOO=1 git status',
     "echo $'it\\'s'",
+    "IFS=$'\\n' read -r x",
+    "printf $'a\\tb\\n'",
+    "grep $'\\t' file",
+    "echo $'\\e[1m\\cA\\?\\a'",
     'find dist -name x -exec rm {} +',
   ])('allows %s', (command) => {
     expect(run(command)).toEqual({ decision: 'allow' });
@@ -926,7 +974,7 @@ describe('protected paths reached through a link and ..', () => {
   beforeAll(() => {
     mkdirSync(join(repoDir(), '.git'), { recursive: true });
     writeFileSync(join(repoDir(), 'README.md'), '');
-    mkdirSync(join(homeDir(), 'docs'), { recursive: true });
+    mkdirSync(join(homeDir(), 'docs', 'sub'), { recursive: true });
     mkdirSync(join(homeDir(), '.claude'), { recursive: true });
     writeFileSync(join(homeDir(), '.claude', '.credentials.json'), '{}');
     writeFileSync(join(homeDir(), '.claude.json'), '{}');
@@ -982,10 +1030,30 @@ describe('protected paths reached through a link and ..', () => {
 
   it.each<[string, string, unknown]>([
     ['cat README.md', 'Bash', { command: 'cat README.md' }],
-    ['sed with a .. in its script', 'Bash', { command: "sed 's/../x/' README.md" }],
+    ['cat of a glob', 'Bash', { command: 'cat src/*.ts' }],
     ['Read of README.md', 'Read', { file_path: 'README.md' }],
   ])('allows %s', (_name, tool, input) => {
     expect(run(tool, input)).toEqual({ decision: 'allow' });
+  });
+
+  it.each([
+    ['a glob and .. through a link under home', 'cat h/*/../.claude.json'],
+    [
+      'a glob and .. under a directory not made yet',
+      'cat newdir/*/../../.claude/.credentials.json',
+    ],
+    ['a glob and .. that end in a glob', 'cat h/*/../.cl*'],
+    ['a .. in a sed script, read as a path', "sed 'y/../ab/' README.md"],
+  ])('refuses %s as a path it cannot resolve', (_name, command) => {
+    const verdict = run('Bash', { command });
+    expect(verdict.decision === 'deny' ? verdict.reason : 'allowed').toMatch(
+      /cannot be resolved here/,
+    );
+  });
+
+  it('refuses the sign-in file spelled with a hex escape as the sign-in file', () => {
+    const verdict = run('Bash', { command: `cat ${homeDir()}/$'\\x2e'claude.json` });
+    expect(verdict.decision === 'deny' ? verdict.reason : 'allowed').toMatch(/own sign-in/);
   });
 
   it('allows a Read of the session tool results', () => {
