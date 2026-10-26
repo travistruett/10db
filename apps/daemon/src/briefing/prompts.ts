@@ -71,12 +71,16 @@ export const HANDOFF_FIRM_NUDGE_ACCOUNT =
 export const RESULT_NUDGE =
   '10db: this step is not finished until you call mcp__10db__complete_step with your result (and, for a review, a verdict). Call it now, then end your turn.';
 
+const PLAIN_COMMANDS =
+  "Run project commands in their plain form: `pnpm exec <tool> …` or the project's own scripts, with no `-s` or `--silent`, no trailing `; echo $?` (the exit code is reported to you), no `timeout` wrapper, and no piping test output through head or tail.";
+
 const RULES = [
   'Edit only files inside your claims. For anything else, call the request_claim tool first.',
   'Commit only through the 10db commit tool, naming every path. Never run git commit, add, checkout, reset, stash or push --force.',
   'Before you end your turn, commit every change in your claims through mcp__10db__commit. A step that ends with changes uncommitted is sent back to you, and no gate runs on it.',
   'When a decision is not yours to make, ask with ask_human (or your question tool). Record routine engineering decisions with record_decision.',
   'If you depart from the plan or a principle, call report_deviation with your reason.',
+  PLAIN_COMMANDS,
   'When the acceptance criteria are met and committed, end your turn. 10db runs the gate itself.',
   'If 10db asks you to hand off, finish your current step, call write_handoff, and end your turn.',
 ];
@@ -88,6 +92,7 @@ function readOnlyRules(role: StepRole): string[] {
     REVIEW_ROLES.includes(role)
       ? 'When you are done, call mcp__10db__complete_step with your findings and a verdict (approve or reject), then end your turn.'
       : 'When you are done, call mcp__10db__complete_step with your plan, then end your turn.',
+    PLAIN_COMMANDS,
     'If 10db asks you to hand off, call mcp__10db__write_handoff, and end your turn.',
   ];
 }

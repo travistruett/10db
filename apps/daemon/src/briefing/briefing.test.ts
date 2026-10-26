@@ -403,6 +403,15 @@ describe('buildSessionPrompt for flow steps', () => {
     expect(prompt).not.toContain('complete_step');
   });
 
+  it.each([
+    ['an implement step', implementStep],
+    ['a read-only step', reviewStep],
+  ])('asks %s to run project commands in their plain form', (_name, step) => {
+    const prompt = buildSessionPrompt({ ...base, step, action: { kind: 'start' } });
+    expect(prompt).toContain('Run project commands in their plain form');
+    expect(prompt).toContain('no trailing `; echo $?`');
+  });
+
   it('tells an implement step to commit every change before it ends its turn', () => {
     const prompt = buildSessionPrompt({ ...base, action: { kind: 'start' } });
     expect(prompt).toContain(
