@@ -510,6 +510,23 @@ describe('matchPermissionRule', () => {
       ).toBe(expected);
     });
 
+    it.each<[string, string, string[]]>([
+      ['a Read rule without a pattern allows nothing outside the checkout', 'Read', ['/outside/x']],
+      [
+        'an Edit rule without a pattern allows no edit of a protected path',
+        'Edit',
+        ['/r/.claude/hooks/x'],
+      ],
+      [
+        'a Write rule without a pattern allows no edit of a protected path',
+        'Write',
+        ['/r/.claude/hooks/x'],
+      ],
+    ])('%s', (_name, tool, realPaths) => {
+      expect(matchPaths(tool, {}, rulesFor(rule(tool, null)), realPaths)).toBe(false);
+      expect(match(tool, {}, [rule(tool, null)])).toBe(true);
+    });
+
     it('a Read rule without a pattern still covers only a Read', () => {
       expect(match('Read', {}, [rule('Read', null)])).toBe(true);
       expect(match('Grep', {}, [rule('Read', null)])).toBe(false);
@@ -809,7 +826,18 @@ describe('storableRule', () => {
     ['Grep is stored as Read', 'Grep', '/a/b', { toolName: 'Read', pattern: '/a/b' }],
     ['Glob is stored as Read', 'Glob', '/a/b', { toolName: 'Read', pattern: '/a/b' }],
     ['LS is stored as Read', 'LS', '/a/b', { toolName: 'Read', pattern: '/a/b' }],
-    ['a relative read path stores nothing', 'Read', 'a/b.ts', undefined],
+    [
+      'a JSON summary stores what it always did',
+      'Grep',
+      '{"pattern":"x"}',
+      { toolName: 'Grep', pattern: null },
+    ],
+    [
+      'a relative read path is the unscoped form',
+      'Read',
+      'a/b.ts',
+      { toolName: 'Read', pattern: null },
+    ],
     ['a read path with a glob stores nothing', 'Read', '/a/*', undefined],
     ['a read path with a brace stores nothing', 'Read', '/a/{b,c}', undefined],
     ['Edit keeps its tool and path', 'Edit', '/a/b.ts', { toolName: 'Edit', pattern: '/a/b.ts' }],
@@ -831,7 +859,12 @@ describe('storableRule', () => {
       '/a/b.ipynb',
       { toolName: 'NotebookEdit', pattern: '/a/b.ipynb' },
     ],
-    ['an edit of a relative path stores nothing', 'Edit', 'b.ts', undefined],
+    [
+      'an edit summary in JSON stores what it always did',
+      'Edit',
+      '{"file_path":"b.ts"}',
+      { toolName: 'Edit', pattern: null },
+    ],
     [
       'any other tool has no pattern',
       'WebFetch',

@@ -248,7 +248,7 @@ export function createPermissionBroker(
     const hit = hazardHit(command, sandbox.hazards);
     if (hit === null && parseShell(command).certain && !req.escalated) return { behavior: 'allow' };
     return hit?.name === 'deps' && hit.words[0] === 'pnpm'
-      ? { summary: command, body: PNPM_CARD_BODY }
+      ? { summary: command, body: `${command}\n\n${PNPM_CARD_BODY}` }
       : { summary: command };
   }
 
@@ -276,7 +276,12 @@ export function createPermissionBroker(
     }
     const [first] = asking;
     if (first === undefined && !req.escalated) return { behavior: 'allow' };
-    return { summary: first ?? summarize(req), realPaths: asking };
+    const body = asking.length > 1 ? asking.join('\n') : undefined;
+    return {
+      summary: first ?? summarize(req),
+      ...(body === undefined ? {} : { body }),
+      realPaths: asking,
+    };
   }
 
   function judgeEdit(req: ToolRequest, sandbox: NonNullable<BrokerContext['sandbox']>): Ask {

@@ -112,7 +112,7 @@ interface Waiter {
 /**
  * A permission card's choice becomes rules in the answer's own transaction, so the choice holds even
  * when the asking session was parked before the builder answered. A Bash command with no storable
- * prefix, and a file path that is relative or holds a glob character, get no rule: the choice then
+ * prefix, and a sandboxed file path that holds a glob character, get no rule: the choice then
  * behaves as allow-once.
  */
 function applyPermissionChoice(ctx: WriteContext, item: InboxItemDto, answer: InboxAnswer): void {

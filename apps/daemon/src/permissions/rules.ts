@@ -229,7 +229,8 @@ function storable(pattern: string, words: readonly string[]): string | null {
 
 /**
  * The stored rule that permits the call, if any; a Bash pattern must cover every plain segment.
- * A patterned rule for a file tool matches only by real path: the caller passes the real paths the
+ * A patterned rule for a file tool matches only by real path, and given real paths an unscoped one
+ * matches nothing: the caller passes the real paths the
  * call names, and without them such a rule matches nothing.
  */
 export function matchPermissionRule(
@@ -258,7 +259,11 @@ export function matchPermissionRule(
     }
     if (rule.toolName !== req.toolName) return false;
     if (req.toolName !== 'Bash') {
-      if (pattern === null) return true;
+      if (pattern === null) {
+        // With real paths in hand (a sandboxed lane) an unscoped file rule covers no path.
+        const fileTool = READ_TOOLS.has(req.toolName) || WRITE_TOOLS.has(req.toolName);
+        return !(paths !== undefined && fileTool);
+      }
       const real = paths?.realPaths ?? [];
       return (
         WRITE_TOOLS.has(req.toolName) &&
@@ -297,9 +302,12 @@ export function storableRule(toolName: string, summary: string): StorableRule | 
     return summary === '' ? undefined : { toolName, pattern: summary.toLowerCase() };
   }
   const reads = READ_TOOLS.has(toolName);
-  if (reads || WRITE_TOOLS.has(toolName)) {
-    const pathOnly = isAbsolute(summary) && !GLOB_CHARACTER.test(summary);
-    return pathOnly ? { toolName: reads ? 'Read' : toolName, pattern: summary } : undefined;
+  // An absolute path is a sandboxed lane's summary; any other summary is the unscoped form a lane
+  // without the sandbox has always had, which stores no pattern.
+  if ((reads || WRITE_TOOLS.has(toolName)) && isAbsolute(summary)) {
+    return GLOB_CHARACTER.test(summary)
+      ? undefined
+      : { toolName: reads ? 'Read' : toolName, pattern: summary };
   }
   return { toolName, pattern: null };
 }

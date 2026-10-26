@@ -663,15 +663,15 @@ describe('permission cards store scoped rules', () => {
     ]);
   });
 
-  it.each([
-    { name: 'a glob path', toolName: 'Read', summary: '/work/*' },
-    { name: 'a relative path', toolName: 'Edit', summary: 'src/a.ts' },
-  ])('stores nothing for $name', ({ toolName, summary }) => {
-    const ws = seedWorkstream(base);
-    inbox.answer(permissionCard(ws, toolName, summary).id, { choice: 'allow_project' });
-    expect(listPermissionRules(state.db, ws.project.id, ws.workstream.id)).toEqual([]);
-    expect(searchDecisions(state.db, ws.project.id, 'allow', 5)).toEqual([]);
-  });
+  it.each([{ name: 'a glob path', toolName: 'Read', summary: '/work/*' }])(
+    'stores nothing for $name',
+    ({ toolName, summary }) => {
+      const ws = seedWorkstream(base);
+      inbox.answer(permissionCard(ws, toolName, summary).id, { choice: 'allow_project' });
+      expect(listPermissionRules(state.db, ws.project.id, ws.workstream.id)).toEqual([]);
+      expect(searchDecisions(state.db, ws.project.id, 'allow', 5)).toEqual([]);
+    },
+  );
 });
 
 describe('permission broker in a sandboxed lane', () => {
@@ -768,8 +768,22 @@ describe('permission broker in a sandboxed lane', () => {
     const ws = seedWorkstream(base);
     void sandboxed(ws)(request('Bash', { command: 'pnpm add zod' })).catch(() => undefined);
     const card = onlyOpenCard();
-    expect(card.body).toBe(PNPM_BODY);
+    expect(card.body).toBe(`pnpm add zod\n\n${PNPM_BODY}`);
     expect(card.detail).toEqual({ toolName: 'Bash', summary: 'pnpm add zod' });
+  });
+
+  it('keeps two different pnpm commands on two cards', () => {
+    const first = seedWorkstream(base);
+    const second = seedWorkstream(base, { project: first.project, title: 'Beta' });
+    void sandboxed(first)(request('Bash', { command: 'pnpm add zod' })).catch(() => undefined);
+    void sandboxed(second)(request('Bash', { command: 'pnpm add evil-pkg' })).catch(
+      () => undefined,
+    );
+    expect(
+      openCards()
+        .map((card) => card.detail?.['summary'])
+        .sort(),
+    ).toEqual(['pnpm add evil-pkg', 'pnpm add zod']);
   });
 
   it('cards a hazard hidden in sh -c', () => {
@@ -855,6 +869,12 @@ describe('permission broker in a sandboxed lane', () => {
     await settle();
     expect(await decide(ask)).toEqual({ behavior: 'allow' });
     expect(await sandboxed(ws)(ask)).toEqual({ behavior: 'allow' });
+    expect(searchDecisions(state.db, ws.project.id, 'registry.npmjs.org', 5)).toEqual([
+      expect.objectContaining({
+        question: 'Allow SandboxNetworkAccess (registry.npmjs.org) in this project?',
+        choice: 'Always allow',
+      }),
+    ]);
     expect(
       (await decide(request('SandboxNetworkAccess', { host: 'evil.npmjs.org' }))).behavior,
     ).toBe('deny');
@@ -969,6 +989,39 @@ describe('permission broker in a sandboxed lane', () => {
     expect(onlyOpenCard().body).toBe(outside);
   });
 
+  it('names every path a read needs asking about in the card body', () => {
+    const ws = seedWorkstream(base);
+    const a = join(root, 'work', 'other');
+    const b = join(root, 'work', 'elsewhere');
+    mkdirSync(b);
+    void sandboxed(ws)(request('Glob', { pattern: `${a}/*.txt`, path: b })).catch(() => undefined);
+    const card = onlyOpenCard();
+    expect(card.body).toContain(a);
+    expect(card.body).toContain(b);
+    expect(card.detail?.['summary']).toBe(b);
+  });
+
+  it('does not let an old unscoped Read or Edit rule cover a sandboxed card', () => {
+    const ws = seedWorkstream(base);
+    for (const toolName of ['Read', 'Edit']) {
+      base.write((ctx) =>
+        insertPermissionRule(ctx, {
+          projectId: ws.project.id,
+          workstreamId: null,
+          toolName,
+          pattern: null,
+          sourceInboxId: null,
+        }),
+      );
+    }
+    const decide = sandboxed(ws);
+    void decide(request('Edit', { file_path: '.claude/hooks/x' })).catch(() => undefined);
+    void decide(request('Read', { file_path: join(root, 'work', 'other', 'notes.txt') })).catch(
+      () => undefined,
+    );
+    expect(openCards()).toHaveLength(2);
+  });
+
   it('cards an edit with the real path and stores a rule for that one path', async () => {
     const ws = seedWorkstream(base);
     const decide = sandboxed(ws);
@@ -1007,6 +1060,42 @@ describe('permission broker in a sandboxed lane', () => {
       ['Allow Bash?', 'pnpm test'],
       ['Allow Read?', JSON.stringify({ file_path: join(fileAccess.home, '.claude.json') })],
       ['Allow SandboxNetworkAccess?', '{"host":"example.com"}'],
+    ]);
+  });
+});
+
+describe('permission broker without a sandbox keeps its Read and Edit cards', () => {
+  it.each([
+    ['Read', { file_path: '/etc/hosts' }],
+    ['Edit', { file_path: 'src/a.ts', old_string: 'a', new_string: 'b' }],
+  ])('offers always-allow on a %s card and stores the unscoped rule', async (toolName, input) => {
+    const ws = seedWorkstream(base);
+    const decide = createPermissionBroker(
+      { state, inbox },
+      {
+        projectId: ws.project.id,
+        workstreamId: ws.workstream.id,
+        sessionId: mintId('Session'),
+        observer: { onWaitStart: () => undefined, onWaitEnd: () => undefined },
+        signal: new AbortController().signal,
+      },
+    );
+    const pending = decide({
+      toolName,
+      input,
+      toolUseId: 't1',
+      escalated: false,
+      signal: new AbortController().signal,
+    });
+    const [card] = listInbox(state.db, { states: ['OPEN'] });
+    if (!card) throw new Error('expected a card');
+    expect(card.options.find((o) => o.label === 'allow_project')?.description).toBe(
+      'Always allow in this project (records a decision)',
+    );
+    inbox.answer(card.id, { choice: 'allow_project' });
+    expect(await pending).toEqual({ behavior: 'allow' });
+    expect(listPermissionRules(state.db, ws.project.id, ws.workstream.id)).toEqual([
+      expect.objectContaining({ toolName, pattern: null }),
     ]);
   });
 });
