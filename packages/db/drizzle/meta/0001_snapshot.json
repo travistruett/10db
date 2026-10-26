@@ -1,6 +1,6 @@
 {
-  "id": "4fed30a8-2e3d-445f-87f2-4049c780bdec",
-  "prevId": "fec19517-2484-4f38-8f09-51a6fd2fe046",
+  "id": "bd484efe-2da3-426e-80d5-7188b95df24d",
+  "prevId": "2df27d43-8a2c-4e4d-9b0f-026ca132fecb",
   "version": "6",
   "dialect": "sqlite",
   "tables": {
@@ -1785,13 +1785,6 @@
           "notNull": true,
           "autoincrement": false,
           "default": 0.95
-        },
-        "billing_mode": {
-          "name": "billing_mode",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
         },
         "model": {
           "name": "model",

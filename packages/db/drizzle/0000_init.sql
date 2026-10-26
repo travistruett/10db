@@ -264,7 +264,6 @@ CREATE TABLE `projects` (
 	`move_back_at` text,
 	`fallback_account_id` text,
 	`usage_handoff_at` real DEFAULT 0.95 NOT NULL,
-	`billing_mode` text NOT NULL,
 	`model` text NOT NULL,
 	`effort` text NOT NULL,
 	`handoff_pct` integer NOT NULL,

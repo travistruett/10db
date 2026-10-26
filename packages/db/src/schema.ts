@@ -6,7 +6,6 @@ import type {
   BatchFailure,
   BatchId,
   BatchState,
-  BillingMode,
   BoardColumnId,
   ClaimId,
   ClaimKind,
@@ -140,7 +139,6 @@ export const projects = sqliteTable('projects', {
     .references(() => accounts.id),
   /** The share of the account's usage limit at which the project hands off. */
   usageHandoffAt: real('usage_handoff_at').notNull().default(USAGE_HANDOFF_AT),
-  billingMode: text('billing_mode').$type<BillingMode>().notNull(),
   model: text('model').notNull(),
   effort: text('effort').$type<Effort>().notNull(),
   handoffPct: integer('handoff_pct').notNull(),

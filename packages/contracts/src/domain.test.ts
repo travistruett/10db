@@ -53,7 +53,6 @@ describe('ProjectInput', () => {
       handoffPct: 40,
       nudgePct: 50,
       humanWaitMinutes: 10,
-      billingMode: 'subscription',
       fallbackAccountId: null,
       usageHandoffAt: 0.95,
     });

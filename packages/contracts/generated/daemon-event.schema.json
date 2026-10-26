@@ -34,8 +34,6 @@
         "deviation.recorded",
         "proposal.created",
         "proposal.resolved",
-        "provider.paused",
-        "provider.resumed",
         "recovery.step",
         "settings.changed",
         "persona.saved",

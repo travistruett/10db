@@ -26,7 +26,8 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   claim: WORK,
   handoff: WORK,
   evidence: WORK,
-  provider: WORK,
+  // An account pause moves workstreams, which send their own events.
+  account: [queryKeys.accounts],
   inbox: [queryKeys.inbox, ['workstreams']],
   app_setting: [queryKeys.keepAwake],
   // No view reads these entity types; the entries make them known.

@@ -1,4 +1,5 @@
 import {
+  AccountDto,
   BatchDto,
   BoardColumnDto,
   FlowDto,
@@ -38,6 +39,7 @@ import { useDaemon } from './provider';
 
 /** Query keys; events invalidate by prefix (`['tasks']` covers every project's task list). */
 export const queryKeys = {
+  accounts: ['accounts'],
   projects: ['projects'],
   tasks: (projectId: ProjectId) => ['tasks', projectId] as const,
   boardColumns: (projectId: ProjectId) => ['board-columns', projectId] as const,
@@ -48,6 +50,7 @@ export const queryKeys = {
   flows: ['flows'],
 } as const;
 
+const AccountList = z.array(AccountDto);
 const ProjectList = z.array(ProjectViewDto);
 const TaskList = z.array(TaskDto);
 const WorkstreamList = z.array(WorkstreamDto);
@@ -60,6 +63,14 @@ export function inboxQueryOptions(client: DaemonClient) {
   return queryOptions({
     queryKey: queryKeys.inbox,
     queryFn: async () => readJson(await client.inbox.$get({ query: { state: 'OPEN' } }), InboxList),
+  });
+}
+
+export function useAccounts() {
+  const { client } = useDaemon();
+  return useQuery({
+    queryKey: queryKeys.accounts,
+    queryFn: async () => readJson(await client.accounts.$get(), AccountList),
   });
 }
 

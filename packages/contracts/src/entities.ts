@@ -17,7 +17,6 @@ import {
   WorkstreamId,
 } from './ids';
 import {
-  BillingMode,
   BoardStatus,
   Delivery,
   Effort,
@@ -99,7 +98,6 @@ export const ProjectInput = z
     areas: z.array(AreaDef).min(1),
     hazards: z.array(HazardDef).default(() => [...DEFAULT_HAZARDS]),
     maxLanes: z.int().min(1).max(16).default(2),
-    billingMode: z.enum(BillingMode).default(BillingMode.Subscription),
     model: z.string().min(1).default('sonnet'),
     effort: z.enum(Effort).default(Effort.Medium),
     // Defaults hand off at about 400k tokens on a 1M window (spikes summary). Low minimums let acceptance runs
@@ -159,7 +157,6 @@ export const ProjectDto = z.object({
   moveBackAt: Timestamp.nullable(),
   fallbackAccountId: AccountId.nullable(),
   usageHandoffAt: z.number(),
-  billingMode: z.enum(BillingMode),
   model: z.string(),
   effort: z.enum(Effort),
   handoffPct: z.int(),

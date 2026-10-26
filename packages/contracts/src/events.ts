@@ -25,8 +25,6 @@ export const EventType = {
   DeviationRecorded: 'deviation.recorded',
   ProposalCreated: 'proposal.created',
   ProposalResolved: 'proposal.resolved',
-  ProviderPaused: 'provider.paused',
-  ProviderResumed: 'provider.resumed',
   RecoveryStep: 'recovery.step',
   SettingsChanged: 'settings.changed',
   PersonaSaved: 'persona.saved',

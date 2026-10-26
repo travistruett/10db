@@ -76,7 +76,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
     group: SettingsGroup.App,
     label: 'Accounts',
     planned:
-      "Each billing account with its kind, verified identity and this month's usage against its cap, and the sign-in steps for subscriptions. The accounts plan fills it.",
+      "Each billing account with its kind, verified identity and this month's usage against its cap, and the sign-in steps for subscriptions. A later accounts plan fills it; until then accounts are created through the daemon's API (see the README).",
   },
   {
     key: SettingsSectionKey.Models,

@@ -11,6 +11,7 @@ import type { ConnectionResolver, DaemonConnection } from '../daemon/connection'
 import { DaemonProvider, type DaemonIntervals } from '../daemon/provider';
 import { createAppRouter, type AppRouter } from '../router';
 import { cssVariablesResolver, theme } from '../theme';
+import { DEFAULT_ACCOUNT } from './fixtures';
 
 /** The daemon every UI test talks to, through MSW. */
 export const TEST_CONNECTION: DaemonConnection = {
@@ -42,6 +43,7 @@ export function baseHandlers(
     http.get(daemonUrl('/events/head', base), () =>
       HttpResponse.json(EventsHead.parse({ seq: opts.headSeq ?? 0 })),
     ),
+    http.get(daemonUrl('/accounts', base), () => HttpResponse.json([DEFAULT_ACCOUNT])),
     http.get(daemonUrl('/projects', base), () => HttpResponse.json([])),
     http.get(daemonUrl('/workstreams', base), () => HttpResponse.json([])),
     http.get(daemonUrl('/inbox', base), () => HttpResponse.json([])),

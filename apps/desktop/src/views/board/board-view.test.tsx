@@ -6,6 +6,7 @@ import { baseHandlers, daemonUrl, eventStream, renderApp, server } from '../../t
 import {
   batchDto,
   boardColumnDto,
+  DEFAULT_ACCOUNT,
   projectDto,
   projectViewDto,
   taskDto,
@@ -55,6 +56,11 @@ describe('BoardView', () => {
     type('Repository path', '/repos/demo', dialog);
     type('Gate command', 'make gate', dialog);
     type('Areas', 'api: src/api/**\nui: src/ui/**, src/shared/**', dialog);
+    expect(
+      await within(dialog).findByDisplayValue(
+        'Claude plan · builder@example.com (Claude subscription)',
+      ),
+    ).toBeTruthy();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Create project' }));
 
     await waitFor(() => {
@@ -68,10 +74,10 @@ describe('BoardView', () => {
         { name: 'api', globs: ['src/api/**'] },
         { name: 'ui', globs: ['src/ui/**', 'src/shared/**'] },
       ],
-      billingMode: 'subscription',
+      accountId: DEFAULT_ACCOUNT.id,
+      delivery: 'local',
       handoffPct: 40,
       nudgePct: 50,
-      delivery: 'local',
     });
     await waitFor(() => {
       expect(screen.queryByRole('dialog')).toBeNull();

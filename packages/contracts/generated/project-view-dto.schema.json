@@ -123,14 +123,6 @@
     "usageHandoffAt": {
       "type": "number"
     },
-    "billingMode": {
-      "type": "string",
-      "enum": [
-        "subscription",
-        "api_key",
-        "bedrock"
-      ]
-    },
     "model": {
       "type": "string"
     },
@@ -349,7 +341,6 @@
     "moveBackAt",
     "fallbackAccountId",
     "usageHandoffAt",
-    "billingMode",
     "model",
     "effort",
     "handoffPct",

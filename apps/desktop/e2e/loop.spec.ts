@@ -95,6 +95,11 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   // The agent's question reaches the inbox; answer it from the keyboard.
   await open(page, 'Inbox');
   await expect(page.getByText(QUESTION)).toBeVisible();
+  // The fake's first probe recorded the default account's identity and said so in a card; that card
+  // sits above the question until it is dismissed.
+  await expect(page.getByText('Claude plan runs as builder@example.com')).toBeVisible();
+  await page.getByRole('button', { name: 'Dismiss' }).click();
+  await expect(page.getByText('Claude plan runs as builder@example.com')).toBeHidden();
   await expectAccessible(page, 'inbox, question, dark');
   await page.getByRole('heading', { name: 'Inbox', level: 2 }).click();
   await page.keyboard.press('2');

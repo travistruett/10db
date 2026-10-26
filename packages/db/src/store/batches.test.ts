@@ -242,7 +242,6 @@ describe('project delivery', () => {
         maxLanes: 1,
         provider: 'claude',
         accountId: account.id,
-        billingMode: 'subscription',
         model: 'sonnet',
         effort: 'medium',
         handoffPct: 40,

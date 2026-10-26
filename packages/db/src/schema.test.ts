@@ -45,7 +45,6 @@ function seedProjectAndWorkstreams() {
       maxLanes: 2,
       provider: 'claude',
       accountId,
-      billingMode: 'subscription',
       model: 'sonnet',
       effort: 'medium',
       handoffPct: 40,
