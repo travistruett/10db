@@ -1,6 +1,11 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { ACCOUNT_CARD_DETAIL, AccountCardChoice, MCP_APPROVAL_DETAIL } from '@10db/contracts';
+import {
+  ACCOUNT_CARD_DETAIL,
+  AccountCardChoice,
+  MCP_APPROVAL_DETAIL,
+  type AccountId,
+} from '@10db/contracts';
 import {
   acquireLease,
   activeClaims,
@@ -12,7 +17,10 @@ import {
   listInbox,
   listSessions,
   patchAccount,
+  patchProject,
   schema,
+  seedAccount,
+  transitionWorkstream,
 } from '@10db/db';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RESULT_NUDGE } from '../briefing';
@@ -1540,6 +1548,182 @@ describe('accounts', () => {
     expect(engine.startGate.waiting(engine.project.accountId)).toBe(0);
     // A leaked holder would leave this acquire pending forever.
     (await engine.startGate.acquire(engine.project.accountId))();
+  });
+});
+
+describe('moving accounts', () => {
+  /** A second subscription, confirmed, so a session on it is ready and reports what it expects. */
+  const secondPlan = () => {
+    const account = seedAccount(engine.store, {
+      kind: 'claude_subscription',
+      label: 'Second plan',
+    });
+    engine.state.write((ctx) =>
+      patchAccount(ctx, account.id, { expectedIdentity: 'second@example.com' }),
+    );
+    return account;
+  };
+  const moveTo = (accountId: AccountId) =>
+    engine.state.write((ctx) => patchProject(ctx, engine.project.id, { accountId }));
+  /** What the scheduler does once the new account isn't paused. */
+  const requeue = (id: Parameters<typeof getWorkstream>[1]) =>
+    engine.state.write((ctx) => transitionWorkstream(ctx, id, { to: 'QUEUED', fence: null }));
+  const accountsOf = (id: Parameters<typeof getWorkstream>[1]) =>
+    listSessions(engine.store.db, id).map((s) => s.accountId);
+
+  it('starts a fresh session from the handoff when the project moved off the account its conversation ran on', async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        [
+          {
+            do: 'mcp',
+            tool: 'write_handoff',
+            args: handoffArgs('op-move-0001', 'Write the second file'),
+          },
+          { do: 'rate_limit', status: 'rejected', resetsInSeconds: 600 },
+        ],
+        [write('src/api/b.txt'), commit('op-move-0002', ['src/api/b.txt']), turn],
+      ],
+    });
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id)).toMatchObject({
+      state: 'PAUSED_LIMIT',
+      nextAction: { kind: 'resume' },
+    });
+
+    const second = secondPlan();
+    moveTo(second.id);
+    requeue(workstream.id);
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(accountsOf(workstream.id)).toEqual([engine.project.accountId, second.id]);
+    expect(engine.adapter.prompts[1]).toMatchObject({ resume: null });
+    expect(engine.adapter.prompts[1]?.prompt).toContain('Next action: Write the second file');
+  });
+
+  it("brings the builder's answer to a fresh session after the project moved", async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        [askShip, turn],
+        [write('src/api/a.txt'), commit('op-moveask-01', ['src/api/a.txt']), turn],
+      ],
+    });
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    const card = await waitFor(openCard);
+    engine.clock.advance(10 * 60_000);
+    await engine.runner.idle();
+    expect(ws(workstream.id).nextAction).toMatchObject({ kind: 'answer', inboxId: card.id });
+
+    moveTo(secondPlan().id);
+    engine.inbox.answer(card.id, { choice: 'Yes' });
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(engine.adapter.prompts[1]).toMatchObject({ resume: null });
+    expect(engine.adapter.prompts[1]?.prompt).toContain('Answer: Yes');
+    expect(engine.adapter.prompts[1]?.prompt).toContain('inspect git status first');
+  });
+
+  it('keeps the gate failure a lane was fixing when the project moved', async () => {
+    engine = await createTestEngine(
+      {
+        Alpha: [
+          [turn],
+          [
+            {
+              do: 'mcp',
+              tool: 'write_handoff',
+              args: handoffArgs('op-movefix-00', 'Create src/api/fixed.txt'),
+            },
+            { do: 'rate_limit', status: 'rejected', resetsInSeconds: 600 },
+          ],
+          [write('src/api/fixed.txt'), commit('op-movefix-01', ['src/api/fixed.txt']), turn],
+        ],
+      },
+      { gateCommand: 'test -f src/api/fixed.txt || { echo MISSING-FIXED-FILE; exit 2; }' },
+    );
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).nextAction).toMatchObject({ kind: 'fix' });
+    // The test clock is frozen: the fix session's handoff is written after the gate failure.
+    engine.clock.advance(1_000);
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id)).toMatchObject({
+      state: 'PAUSED_LIMIT',
+      nextAction: { kind: 'resume' },
+    });
+
+    moveTo(secondPlan().id);
+    requeue(workstream.id);
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(engine.adapter.prompts[2]).toMatchObject({ resume: null });
+    expect(engine.adapter.prompts[2]?.prompt).toContain('MISSING-FIXED-FILE');
+    expect(engine.adapter.prompts[2]?.prompt).toContain('Next action: Create src/api/fixed.txt');
+  });
+
+  it("runs a lane's next session on the account its project moved to while the first one ran", async () => {
+    const moved: { to: AccountId | null } = { to: null };
+    engine = await createTestEngine(
+      {
+        Alpha: [
+          [
+            { do: 'context', percentage: 75 },
+            { do: 'await_message', contains: 'write_handoff' },
+            {
+              do: 'mcp',
+              tool: 'write_handoff',
+              args: handoffArgs('op-movelane-1', 'Write the second file'),
+            },
+            turn,
+          ],
+          [write('src/api/b.txt'), commit('op-movelane-2', ['src/api/b.txt']), turn],
+        ],
+      },
+      {},
+      {
+        // The builder moves the project while the first session runs; it ends on the old account.
+        afterSession: () => {
+          if (moved.to === null) {
+            moved.to = secondPlan().id;
+            moveTo(moved.to);
+          }
+          return Promise.resolve();
+        },
+      },
+    );
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('DONE');
+    // What each session was launched on, and what its row records, are the same account.
+    const launchedOn = engine.adapter.prompts.map((p) => p.accountId);
+    expect(launchedOn).toEqual([engine.project.accountId, moved.to]);
+    expect(accountsOf(workstream.id)).toEqual(launchedOn);
+  });
+
+  it('runs on the account the project moved to while the lane waited for its start', async () => {
+    engine = await createTestEngine({
+      Alpha: [[write('src/api/a.txt'), commit('op-movegate-1', ['src/api/a.txt']), turn]],
+    });
+    const release = await engine.startGate.acquire(engine.project.accountId);
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await waitFor(() => engine.startGate.waiting(engine.project.accountId) === 1);
+    const second = secondPlan();
+    moveTo(second.id);
+    release();
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(engine.adapter.prompts.map((p) => p.accountId)).toEqual([second.id]);
+    expect(accountsOf(workstream.id)).toEqual([second.id]);
   });
 });
 

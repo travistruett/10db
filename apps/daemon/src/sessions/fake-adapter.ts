@@ -7,6 +7,7 @@ import {
   AccountKind,
   AccountProblem,
   Provider,
+  type AccountId,
   type AccountRefusal,
   type SessionId,
 } from '@10db/contracts';
@@ -132,6 +133,7 @@ export class FakeAdapter implements SessionAdapter {
     title: string;
     prompt: string;
     resume: string | null;
+    accountId: AccountId;
   }[] = [];
 
   /** What a session reports for its account, over what it expects; tests set it to stage a mismatch. */
@@ -179,6 +181,7 @@ export class FakeAdapter implements SessionAdapter {
       title,
       prompt: spec.prompt,
       resume: spec.resumeProviderSessionId,
+      accountId: spec.account.accountId,
     });
 
     const channel = createChannel<SessionEvent>();

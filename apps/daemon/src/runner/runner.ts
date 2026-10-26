@@ -62,6 +62,7 @@ import {
   type WriteContext,
 } from '@10db/db';
 import {
+  briefedFromHandoff,
   buildContextPack,
   buildSessionPrompt,
   compactionReinjection,
@@ -102,7 +103,7 @@ import { advanceSteps, failStep, moveAfter, sendBackSteps, type StepEntry } from
 import type { GateRunner } from '../verify';
 import { findClaimed } from '../watcher';
 import type { LiveSessions } from './live-sessions';
-import { nextActionAfterCrash } from './next-action';
+import { nextActionAfterCrash, nextActionOnAnotherAccount } from './next-action';
 
 /**
  * A continuation session starts with the briefing already in context. If that baseline is near or over
@@ -166,6 +167,10 @@ export interface Runner {
 
 type Outcome =
   | { readonly kind: 'handoff'; readonly handoffId: HandoffId }
+  | {
+      /** The project moved while the lane waited for its start slot. */
+      readonly kind: 'moved';
+    }
   | { readonly kind: 'step_done'; readonly withoutHandoff: boolean }
   | {
       readonly kind: 'parked';
@@ -208,7 +213,7 @@ type Outcome =
       readonly providerSessionId: string | null;
     };
 
-type Terminal = Exclude<Outcome, { kind: 'handoff' } | { kind: 'step_done' }>;
+type Terminal = Exclude<Outcome, { kind: 'handoff' } | { kind: 'moved' } | { kind: 'step_done' }>;
 
 const PERMISSION_ANSWER_TEXT: Readonly<Record<string, string>> = {
   [PermissionChoice.AllowOnce]:
@@ -248,7 +253,8 @@ function permissionAnswer(item: InboxItemDto): {
 
 interface Control {
   readonly fence: number;
-  readonly accountId: AccountId;
+  /** The account of the lane's current session, or of its next one: read from the project before each session, so a move applies at the lane's next session. */
+  accountId: AccountId;
   stopReason: StopReason | null;
   handle: SessionHandle | null;
   /** Set while the gate runs; aborting it kills the gate's process group. */
@@ -300,6 +306,37 @@ export function createRunner(opts: RunnerOptions): Runner {
   function freshAction(reader: DbReader, id: WorkstreamId): NextAction {
     const latest = latestHandoffForStep(reader, getWorkstreamRow(reader, id));
     return latest ? { kind: 'continue_from_handoff', handoffId: latest.id } : { kind: 'start' };
+  }
+
+  /**
+   * A conversation lives in the config directory of the account its session ran on, so once the
+   * project has moved the lane can't resume it: its next action becomes a fresh start on the
+   * project's account (accounts spec §6).
+   */
+  function leaveOtherAccount(id: WorkstreamId, ctl: Control): void {
+    const row = getWorkstreamRow(db, id);
+    const action = row.nextAction;
+    const resumeId =
+      action.kind === 'resume' || action.kind === 'answer' ? action.providerSessionId : null;
+    if (resumeId === null) return;
+    const ranOn = getSessionByProviderId(db, id, resumeId)?.accountId;
+    if (ranOn === undefined || ranOn === ctl.accountId) return;
+    // The lane's latest gate run failed and none has passed since: it was fixing that failure.
+    const lastGate = listEvidence(db, id)
+      .filter((e) => e.kind === 'gate')
+      .at(-1);
+    const nextAction = nextActionOnAnotherAccount(
+      action,
+      latestHandoffForStep(db, row),
+      lastGate && lastGate.exitCode !== 0 ? lastGate.id : null,
+    );
+    opts.state.write((ctx) => {
+      patchWorkstream(ctx, id, ctl.fence, { nextAction });
+    });
+    opts.logger.info(
+      { workstreamId: id, from: ranOn, to: ctl.accountId },
+      'the project moved accounts; the lane starts a fresh session',
+    );
   }
 
   function cancelNow(id: WorkstreamId, fence: number | null): void {
@@ -735,6 +772,7 @@ export function createRunner(opts: RunnerOptions): Runner {
   }
 
   async function runSession(id: WorkstreamId, ctl: Control): Promise<Outcome> {
+    leaveOtherAccount(id, ctl);
     const row = getWorkstreamRow(db, id);
     const project = getProject(db, row.projectId);
     const task = getTask(db, row.taskId);
@@ -758,6 +796,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     const permission =
       answeredItem?.kind === InboxKind.Permission ? permissionAnswer(answeredItem) : null;
     const contextPack = buildContextPack(db, getWorkstream(db, id));
+    const evidence = action.kind === 'fix' ? getEvidence(db, action.evidenceId) : null;
     const prompt = buildSessionPrompt({
       task,
       claims: claims(),
@@ -777,7 +816,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       priorResults,
       previousResult: readOnly ? step.result : null,
       revisedBy: reviser ? { role: reviser.role, personaName: reviser.personaName } : null,
-      evidence: action.kind === 'fix' ? getEvidence(db, action.evidenceId) : null,
+      evidence,
       recovery:
         action.kind === 'resume'
           ? { reason: action.reason, lastOp: latestToolOp(db, id)?.opId ?? null }
@@ -806,11 +845,11 @@ export function createRunner(opts: RunnerOptions): Runner {
     const mcpNote = skippedServersNote(projectMcp);
     // A resumed session continues its conversation, so it keeps whether that conversation began from
     // a briefing and the briefing's baseline. A fresh session is briefed only when its prompt carries
-    // the handoff, which only a continuation's does.
+    // the handoff.
     const resumed = resumeId ? getSessionByProviderId(db, id, resumeId) : undefined;
     const briefed = resumeId
       ? (resumed?.briefed ?? false)
-      : action.kind === 'continue_from_handoff' && contextPack.handoff !== null;
+      : briefedFromHandoff(action, contextPack.handoff, evidence);
     const inheritedBaselinePct = resumed?.briefingBaselinePct ?? null;
     // A subscription's sessions start one at a time until the OAuth refresh race is ruled out.
     const releaseStart =
@@ -822,6 +861,11 @@ export function createRunner(opts: RunnerOptions): Runner {
       releaseStart();
       return { kind: 'stopped', reason: stopping, providerSessionId: resumeId };
     }
+    // The project moved while this lane waited for its start: give the slot back and start over there.
+    if (getProject(db, row.projectId).accountId !== ctl.accountId) {
+      releaseStart();
+      return { kind: 'moved' };
+    }
     let session: ReturnType<typeof insertSession>;
     try {
       session = opts.state.write((ctx) => {
@@ -831,6 +875,7 @@ export function createRunner(opts: RunnerOptions): Runner {
           model: row.model,
           effort: row.effort,
           mode: 'managed',
+          accountId: ctl.accountId,
           mcpTokenHash: hash,
           briefed,
           briefingBaselinePct: inheritedBaselinePct,
@@ -1429,6 +1474,8 @@ export function createRunner(opts: RunnerOptions): Runner {
           return;
         }
         const lane = getProject(db, getWorkstreamRow(db, id).projectId);
+        // A running session finished on the account it started on; the next one runs where the project is now.
+        ctl.accountId = lane.accountId;
         // The scheduler checked before the launch; a lane checks again before each further session (accounts spec §6).
         const block = opts.accounts.blocked(getAccountRow(db, ctl.accountId), lane.id);
         if (block) {
@@ -1441,7 +1488,7 @@ export function createRunner(opts: RunnerOptions): Runner {
           return;
         }
         const outcome = await runSession(id, ctl);
-        if (outcome.kind === 'handoff') continue;
+        if (outcome.kind === 'handoff' || outcome.kind === 'moved') continue;
         if (outcome.kind === 'step_done') {
           const finished = getWorkstreamRow(db, id);
           const readOnly = currentStep(finished).role !== StepRole.Implement;

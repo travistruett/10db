@@ -125,24 +125,67 @@ function renderKnowledge(pack: ContextPack): string {
   return `Recorded decisions:\n${bullets(lines)}${omitted}`;
 }
 
+/**
+ * Whether a fresh session starts from the step's latest handoff: a continuation, an answer with no
+ * conversation to resume, and a fix whose handoff was written after its gate failed, which is a fix
+ * session that was cut off, by a move to another account for one.
+ */
+export function briefedFromHandoff(
+  action: NextAction,
+  handoff: HandoffDto | null,
+  evidence: EvidenceDto | null,
+): boolean {
+  if (handoff === null) return false;
+  switch (action.kind) {
+    case 'continue_from_handoff':
+      return true;
+    case 'answer':
+      return action.providerSessionId === null;
+    case 'fix':
+      return evidence !== null && handoff.createdAt > evidence.createdAt;
+    case 'start':
+    case 'resume':
+    case 'uncommitted':
+    case 'verify':
+    case 'revise':
+      return false;
+  }
+}
+
+const fromHandoff = (handoff: HandoffDto): string =>
+  `Continue from the handoff below. Do not redo finished work.\n\nHandoff:\n${renderHandoff(handoff)}`;
+
 function actionSection(input: PromptInput): string {
   switch (input.action.kind) {
     case 'start':
       return 'Begin.';
     case 'continue_from_handoff':
       return input.handoff
-        ? `Continue from the handoff below. Do not redo finished work.\n\nHandoff:\n${renderHandoff(input.handoff)}`
+        ? fromHandoff(input.handoff)
         : 'Continue the task; the previous session left no handoff, so inspect git status first.';
     case 'resume':
       return `10db resumed this session after an interruption (${input.recovery?.reason ?? input.action.reason}). Inspect git status before continuing. Last acknowledged 10db operation: ${input.recovery?.lastOp ?? 'none'}. If a tool call may not have completed, retry it with the same opId.`;
-    case 'answer':
-      return input.answer
+    case 'answer': {
+      const answer = input.answer
         ? `The builder answered your question.\nQuestion: ${input.answer.question}\nAnswer: ${input.answer.answer}${input.answer.note ? `\nNote: ${input.answer.note}` : ''}\nContinue.`
         : 'The builder answered your question; continue.';
-    case 'fix':
-      return input.evidence
+      if (input.action.providerSessionId !== null) return answer;
+      // No conversation to resume: the session starts from the handoff, as a continuation would.
+      const brief =
+        input.handoff && briefedFromHandoff(input.action, input.handoff, input.evidence)
+          ? fromHandoff(input.handoff)
+          : 'The previous session left no handoff, so inspect git status first.';
+      return `${brief}\n\n${answer}`;
+    }
+    case 'fix': {
+      const gate = input.evidence
         ? `The gate failed (exit ${String(input.evidence.exitCode)} from \`${input.evidence.command}\`). Fix the cause, commit, and end your turn.\n\nGate output (end):\n\`\`\`\n${input.evidence.summary}\n\`\`\``
         : 'The gate failed. Run it, fix the cause, commit, and end your turn.';
+      // A fix session that was cut off left a handoff after the failure; the next one starts from it.
+      return input.handoff && briefedFromHandoff(input.action, input.handoff, input.evidence)
+        ? `${fromHandoff(input.handoff)}\n\n${gate}`
+        : gate;
+    }
     case 'uncommitted':
       return `Your step ended with changes in your claims that are not committed:\n${bullets(input.action.paths)}\nCommit each one through mcp__10db__commit, naming every path, then end your turn. 10db runs the gate once they are committed.`;
     case 'verify':

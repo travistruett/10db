@@ -111,6 +111,65 @@ describe('buildSessionPrompt', () => {
     expect(prompt).toContain('src/ui/badge.tsx');
   });
 
+  it('briefs a fix from a handoff written after the gate failed, and not from an older one', () => {
+    const failed = {
+      id: mintId('Evidence'),
+      workstreamId: handoff.workstreamId,
+      kind: 'gate' as const,
+      command: 'make gate',
+      exitCode: 2,
+      summary: 'FAIL badge.test.ts',
+      logPath: null,
+      commitShas: [],
+    };
+    const fix = { kind: 'fix' as const, evidenceId: failed.id };
+    const before = new Date(Date.parse(handoff.createdAt) - 60_000).toISOString();
+    const after = new Date(Date.parse(handoff.createdAt) + 60_000).toISOString();
+    const cutOff = buildSessionPrompt({
+      ...base,
+      handoff,
+      evidence: { ...failed, createdAt: before },
+      action: fix,
+    });
+    expect(cutOff).toContain('Write the render test');
+    expect(cutOff).toContain('FAIL badge.test.ts');
+    expect(
+      buildSessionPrompt({
+        ...base,
+        handoff,
+        evidence: { ...failed, createdAt: after },
+        action: fix,
+      }),
+    ).not.toContain('Write the render test');
+  });
+
+  it("briefs a fresh session from the handoff before the builder's answer", () => {
+    const answer = { question: 'Color?', answer: 'Teal', note: null };
+    const fresh = buildSessionPrompt({
+      ...base,
+      handoff,
+      answer,
+      action: { kind: 'answer', inboxId: mintId('InboxItem'), providerSessionId: null },
+    });
+    expect(fresh).toContain('Write the render test');
+    expect(fresh.indexOf('Write the render test')).toBeLessThan(fresh.indexOf('Answer: Teal'));
+    const resumed = buildSessionPrompt({
+      ...base,
+      handoff,
+      answer,
+      action: { kind: 'answer', inboxId: mintId('InboxItem'), providerSessionId: 'p1' },
+    });
+    expect(resumed).toContain('Answer: Teal');
+    expect(resumed).not.toContain('Write the render test');
+    expect(
+      buildSessionPrompt({
+        ...base,
+        answer,
+        action: { kind: 'answer', inboxId: mintId('InboxItem'), providerSessionId: null },
+      }),
+    ).toContain('inspect git status first');
+  });
+
   it('carries the answer, the gate output or the recovery note', () => {
     expect(
       buildSessionPrompt({

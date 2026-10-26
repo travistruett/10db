@@ -3,6 +3,7 @@ import {
   isMetered,
   mintId,
   NotFoundError,
+  type AccountId,
   type Effort,
   type Provider,
   type SessionId,
@@ -11,6 +12,7 @@ import {
 } from '@10db/contracts';
 import { and, asc, count, desc, eq, isNull, sql } from 'drizzle-orm';
 import * as schema from '../schema';
+import { getAccountRow } from './accounts';
 import type { DbReader, WriteContext } from './store';
 
 export type SessionRow = typeof schema.sessions.$inferSelect;
@@ -26,6 +28,20 @@ export interface NewSession {
   readonly briefed?: boolean;
   /** Copied from the session a resumed session continues; see `sessions.briefingBaselinePct`. */
   readonly briefingBaselinePct?: number | null;
+  /** The account the session launches on; absent, the project's current account. */
+  readonly accountId?: AccountId;
+}
+
+function projectOwner(ctx: WriteContext, workstreamId: WorkstreamId) {
+  const owner = ctx.tx
+    .select({ accountId: schema.projects.accountId, kind: schema.accounts.kind })
+    .from(schema.workstreams)
+    .innerJoin(schema.projects, eq(schema.projects.id, schema.workstreams.projectId))
+    .innerJoin(schema.accounts, eq(schema.accounts.id, schema.projects.accountId))
+    .where(eq(schema.workstreams.id, workstreamId))
+    .get();
+  if (!owner) throw new NotFoundError('workstream', workstreamId);
+  return owner;
 }
 
 export function insertSession(ctx: WriteContext, input: NewSession): SessionRow {
@@ -34,14 +50,11 @@ export function insertSession(ctx: WriteContext, input: NewSession): SessionRow 
     .from(schema.sessions)
     .where(eq(schema.sessions.workstreamId, input.workstreamId))
     .get();
-  const owner = ctx.tx
-    .select({ accountId: schema.projects.accountId, kind: schema.accounts.kind })
-    .from(schema.workstreams)
-    .innerJoin(schema.projects, eq(schema.projects.id, schema.workstreams.projectId))
-    .innerJoin(schema.accounts, eq(schema.accounts.id, schema.projects.accountId))
-    .where(eq(schema.workstreams.id, input.workstreamId))
-    .get();
-  if (!owner) throw new NotFoundError('workstream', input.workstreamId);
+  // A project can move while a session waits for its start, so the runner names the account it launched on.
+  const owner =
+    input.accountId === undefined
+      ? projectOwner(ctx, input.workstreamId)
+      : { accountId: input.accountId, kind: getAccountRow(ctx.tx, input.accountId).kind };
   const row: SessionRow = {
     id: mintId('Session'),
     ...input,

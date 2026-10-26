@@ -298,6 +298,28 @@ describe('projects on accounts', () => {
 });
 
 describe('usage', () => {
+  it('records the account a session launches on, which a move may have made differ from the project', () => {
+    const project = seedProject(store);
+    const key = apiKey();
+    const session = store.write((ctx) => {
+      const task = insertTask(ctx, project.id, {
+        title: 'launched before the move',
+        acceptanceCriteria: ['x'],
+        areas: ['api'],
+      });
+      return insertSession(ctx, {
+        workstreamId: insertWorkstream(ctx, task.id).id,
+        accountId: key.id,
+        provider: 'claude',
+        model: 'sonnet',
+        effort: 'medium',
+        mode: 'managed',
+        mcpTokenHash: 'hash-launched',
+      });
+    }).value;
+    expect(session).toMatchObject({ accountId: key.id, costUsd: 0 });
+  });
+
   it('records the account a session ran on, and no dollars on a subscription', () => {
     const project = seedProject(store);
     const session = spend(

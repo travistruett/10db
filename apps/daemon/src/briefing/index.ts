@@ -1,5 +1,6 @@
 export { buildContextPack } from './context-pack';
 export {
+  briefedFromHandoff,
   buildSessionPrompt,
   compactionReinjection,
   HANDOFF_FIRM_NUDGE,
