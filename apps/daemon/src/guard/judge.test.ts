@@ -741,7 +741,6 @@ describe('rm -r arguments beyond a plain path', () => {
     '.g(i)t',
     '(.git|y)',
     '***/p*',
-    '{~,x}/y',
     '~+/x',
     '~root/x',
     '=ls',
@@ -751,14 +750,23 @@ describe('rm -r arguments beyond a plain path', () => {
     '.*/x',
     '.gi?',
     '.g*',
-    '.{git,x}',
     '.gi[st]',
     'dist/*/',
     'dist/[ab]',
-    'dist/*.{o,a}',
     '"my dir"',
   ])('denies rm -rf %s', (arg) => {
     expect(run(`rm -rf ${arg}`)).toEqual(unjudged);
+  });
+
+  it.each([
+    [
+      'a brace list whose first path leaves the repo',
+      '{~,x}/y',
+      'rm -r of ~/y reaches outside the repository (or is the repository itself).',
+    ],
+    ['a brace list that expands to .git', '.{git,x}', 'rm -r of a .git path is never allowed.'],
+  ])('denies rm -rf %s as the path a brace expands to', (_name, arg, reason) => {
+    expect(run(`rm -rf ${arg}`)).toEqual({ decision: 'deny', reason });
   });
 
   it('denies an escaped .git as a .git path: the parser resolves the escape as the shell does', () => {
@@ -845,12 +853,17 @@ describe('rm -r arguments beyond a plain path', () => {
     expect(run(command)).toEqual({ decision: 'deny', reason });
   });
 
-  it.each(['rm -rf build', 'rm -rf -- dist', 'rm -rf dist/*', 'rm -rf dist/*.o', 'rm -r build -f'])(
-    'still allows %s',
-    (command) => {
-      expect(run(command)).toEqual({ decision: 'allow' });
-    },
-  );
+  it.each([
+    'rm -rf build',
+    'rm -rf -- dist',
+    'rm -rf dist/*',
+    'rm -rf dist/*.o',
+    'rm -r build -f',
+    'rm -rf dist/*.{o,a}',
+    'rm -rf dist/{a,b}',
+  ])('still allows %s', (command) => {
+    expect(run(command)).toEqual({ decision: 'allow' });
+  });
 
   const unread = {
     decision: 'deny',
@@ -917,8 +930,32 @@ describe('rm -r arguments beyond a plain path', () => {
     ['a brace group that reads the sign-in', '{cat ~/.claude.json}'],
     ['a brace group opened as a word', '{ cat ~/.claude.json}'],
     ['a brace group after a command', '{ rm -rf build; cat ~/.claude.json}'],
+    ['an ampersand clobber before rm', '>&| x rm -rf .git'],
+    ['an ampersand clobber before sudo', '>&! x sudo ls'],
+    ['a doubled ampersand clobber', '>>&| x sudo ls'],
+    ['a doubled ampersand bang clobber', '>>&! x sudo ls'],
+    ['an ampersand-first append clobber', '&>>| x sudo ls'],
+    ['a descriptor ampersand clobber', '2>&| x sudo ls'],
+    ['an ampersand clobber inside a git push', 'git push origin feat >&| x --force'],
+    ['an ampersand bang clobber joined to the target', 'git push origin feat >&!x --force'],
+    ['a brace expansion that opens a group', '{ cat ~/.claude.json{,}}'],
+    ['a brace expansion inside a joined group', '{env{,} rm -rf .git}'],
+    ['a group whose close is a here-doc delimiter line', '{\ncat ~/.claude.json}'],
+    ['a shell here-doc body with a joined brace', "/bin/bash <<'EOF'\n{rm -rf .git}\nEOF"],
+    ['a here-doc fed through a wrapper to bash', "env bash <<'EOF'\n{rm -rf .git}\nEOF"],
+    ['a here-doc piped into a shell', "cat <<'EOF' | tee x | sh\n{rm -rf .git}\nEOF"],
+    ['a data here-doc piped into a shell', "python3 - <<'EOF' | sh\n{rm -rf .git}\nEOF"],
   ])('denies %s as words the guard cannot read', (_name, command) => {
     expect(run(command)).toEqual(unread);
+  });
+
+  it.each([
+    ['a brace list hiding the sign-in', 'cat {~/.claude.json,}'],
+    ['a brace list splitting env', 'env{,} rm -rf .git'],
+    ['a brace list splitting nice', '{nice,} rm -rf .git'],
+    ['a brace list splitting env before sudo', 'env{,} sudo ls'],
+  ])('denies %s, which brace expansion reveals', (_name, command) => {
+    expect(run(command).decision).toBe('deny');
   });
 
   it.each([
@@ -972,6 +1009,19 @@ describe('rm -r arguments beyond a plain path', () => {
     'echo file.{ts,js}',
     "git log --format='%h {x}'",
     'find dist -name x -exec rm {} +',
+    'a >&2 | b',
+    'mkdir -p src/{a,b}',
+    'echo {1..3}',
+    'git show stash@{0}',
+    'xargs -I{} echo {}',
+    "cat <<'EOF'\n{ x\nEOF}\nEOF",
+    'cat <<EOF\n{\n}\nEOF',
+    "node <<'EOF'\nconsole.log({a: 1});\nEOF",
+    "python3 - <<'EOF'\nd = {'a': 1}\nprint(d)\nEOF",
+    'cat > a.json <<\'EOF\'\n{"a": 1}\nEOF',
+    'jq . <<\'EOF\'\n{"a":1}\nEOF',
+    "cat > a.ts <<'EOF'\nimport { x } from './y';\nEOF",
+    "tee a.md <<'EOF'\nSet {name} here.\nEOF",
   ])('allows %s', (command) => {
     expect(run(command)).toEqual({ decision: 'allow' });
   });

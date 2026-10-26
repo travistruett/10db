@@ -1,5 +1,6 @@
 import { basename } from 'node:path';
 import { decodeAnsiC } from './ansi-c';
+import { expandBraceWord } from './braces';
 
 export interface ShellSegment {
   /** The segment's text with quotes kept and comments and line continuations left out. */
@@ -15,12 +16,18 @@ export interface ShellSegment {
    * `$(…)`, backtick, `<(…)` and `>(…)` substitutions, and its here-documents.
    */
   readonly nested: readonly string[];
+  /** The bodies of the segment's here-documents, which run as shell only when their reader does. */
+  readonly hereDocuments: readonly HereDocumentBody[];
   /**
    * The words are the ones the shell passes. False when an ANSI-C escape the scanner does not
-   * decode keeps its `$'…'` text, or a lone `{` or `}` stands in the middle of a command, where zsh
-   * may read it as a group.
+   * decode keeps its `$'…'` text, or a clobber redirection hides the command.
    */
   readonly wordsCertain: boolean;
+  /**
+   * False when a brace in a word may open or close a zsh group (L4). It is separate because a
+   * here-document body that does not run as shell carries braces as data, not as group syntax.
+   */
+  readonly bracesCertain: boolean;
 }
 
 /** A command split into the segments it runs. */
@@ -41,24 +48,33 @@ interface Scan extends ShellParse {
   readonly closed: boolean;
 }
 
+/** A here-document's body and whether its delimiter was quoted (so the shell leaves it literal). */
+export interface HereDocumentBody {
+  readonly body: string;
+  readonly quoted: boolean;
+}
+
 interface HereDocument {
   readonly delimiter: string;
   /** `<<-`: tabs before the closing line are ignored. */
   readonly tabs: boolean;
-  /** The nested scripts of the segment that reads it. */
-  readonly into: string[];
+  /** A quoted delimiter (`<<'EOF'`): the shell performs no expansion or substitution in the body. */
+  readonly quoted: boolean;
+  /** The here-document bodies of the segment that reads it. */
+  readonly into: HereDocumentBody[];
 }
 
 /** The delimiter of a here-document whose `<<` ends just before `at`, with quotes and escapes removed. */
 function hereDocumentDelimiter(
   command: string,
   at: number,
-): { delimiter: string; tabs: boolean } | null {
+): { delimiter: string; tabs: boolean; quoted: boolean } | null {
   let i = at;
   const tabs = command.charAt(i) === '-';
   if (tabs) i += 1;
   while (command.charAt(i) === ' ' || command.charAt(i) === '\t') i += 1;
   let delimiter = '';
+  let quoted = false;
   let quote: string | null = null;
   for (; i < command.length; i += 1) {
     const ch = command.charAt(i);
@@ -67,8 +83,10 @@ function hereDocumentDelimiter(
       else delimiter += ch;
     } else if (ch === "'" || ch === '"') {
       quote = ch;
+      quoted = true;
     } else if (ch === '\\') {
       delimiter += command.charAt(i + 1);
+      quoted = true;
       i += 1;
     } else if (/[\s;&|<>()]/.test(ch)) {
       break;
@@ -76,7 +94,7 @@ function hereDocumentDelimiter(
       delimiter += ch;
     }
   }
-  return delimiter === '' ? null : { delimiter, tabs };
+  return delimiter === '' ? null : { delimiter, tabs, quoted };
 }
 
 /**
@@ -101,7 +119,7 @@ function readHereDocuments(command: string, at: number, pending: readonly HereDo
       line = newline + 1;
     }
     if (closing === -1) return resume;
-    doc.into.push(command.slice(resume, line));
+    doc.into.push({ body: command.slice(resume, line), quoted: doc.quoted });
     resume = closing + 1;
   }
   return resume;
@@ -135,15 +153,20 @@ function scan(command: string, from: number, substitution: boolean): Scan {
   const pending: HereDocument[] = [];
   let certain = true;
   let wordsCertain = true;
+  let bracesCertain = true;
   let opened = 0;
   let raw = '';
   let word = '';
   let inWord = false;
   let words: string[] = [];
   let nested: string[] = [];
+  let hereDocuments: HereDocumentBody[] = [];
   let quote: "'" | '"' | null = null;
   // The previous character, when it was neither quoted nor escaped.
   let lastPlain = '';
+  // Whether the previous plain character was part of an output redirection operator (`>` or a
+  // redirection `&`), so a `!` or `|` after it is a zsh clobber, not a word or a pipe.
+  let lastRedirect = false;
 
   // Where in the current word an ANSI-C escape decoded to a newline.
   let decodedNewlines: number[] = [];
@@ -164,32 +187,48 @@ function scan(command: string, from: number, substitution: boolean): Scan {
       certain = false;
       wordsCertain = false;
     }
-    // zsh may read a brace in a word as a group boundary, where bash keeps it. A `${…}` parameter
-    // expansion's braces are blanked first. The word is uncertain when it holds an unmatched brace
-    // (a `{` that opens a group, or a `}` that closes one opened earlier), or when a balanced
-    // `{…}` stands in command position, where zsh runs it as a one-word group (`{pwd}`). A brace
-    // expansion (a `,` or `..` between the braces) and a balanced `{…}` in an argument (`find {}`,
-    // `echo {x}`) are literal in both shells. A lone brace token is handled above.
-    const braces = wordMask.replace(/\$\{[^{}]*\}/g, (m) => '\0'.repeat(m.length));
+    // zsh may read a brace in a word as a group boundary, where bash keeps it. The `${…}` parameter
+    // expansions and the brace expansions (a `,` or `..` between the braces) are blanked first, as
+    // the shell reads them as data, not a group. What remains is uncertain when it holds an
+    // unmatched brace (a `{` that opens a group, or a `}` that closes one opened earlier), or a
+    // balanced `{…}` in command position, which zsh runs as a one-word group (`{pwd}`).
+    let braces = wordMask.replace(/\$\{[^{}]*\}/g, (m) => '\0'.repeat(m.length));
+    for (let prev = ''; braces !== prev;) {
+      prev = braces;
+      braces = braces.replace(/\{[^{}]*(?:,|\.\.)[^{}]*\}/, (m) => '\0'.repeat(m.length));
+    }
     let pairs = braces.replace(/[^{}]/g, '');
     for (let prev = ''; pairs !== prev;) {
       prev = pairs;
       pairs = pairs.replace('{}', '');
     }
-    const expansion = /\{[^{}]*(?:,|\.\.)[^{}]*\}/.test(braces);
     const atCommand = words.every((w) => GROUP_LEADERS.has(w));
     const unmatchedClose = (pairs.match(/\}/g) ?? []).length;
     // A `}` that closes an open group, where the word's real end is hidden.
     const closesGroup = unmatchedClose > 0 && openGroups > 0;
     if (closesGroup) openGroups = Math.max(0, openGroups - unmatchedClose);
-    if (
-      !expansion &&
-      (pairs.includes('{') || (atCommand && braces.startsWith('{')) || closesGroup)
-    ) {
+    if (pairs.includes('{') || (atCommand && braces.startsWith('{')) || closesGroup) {
       certain = false;
-      wordsCertain = false;
+      bracesCertain = false;
     }
-    if (word !== '') words.push(word);
+    if (word !== '') {
+      // Brace expansion turns one word into several; each is judged on its own. Only an unquoted
+      // brace expands, so a word whose braces or commas were all quoted stays whole. Over the
+      // caps the expansion is unread, and the word is uncertain.
+      const literalBraces = Array.from(
+        word,
+        (ch, at) => '{},'.includes(ch) && wordMask[at] !== ch,
+      ).every((quoted) => !quoted);
+      const expanded = literalBraces && word.includes('{') ? expandBraceWord(word) : [word];
+      if (expanded === null) {
+        certain = false;
+        wordsCertain = false;
+        words.push(word);
+      } else {
+        // An empty alternative drops out: `{nice,}` leaves `nice`, so the next word is the command.
+        words.push(...expanded.filter((w) => w !== ''));
+      }
+    }
     word = '';
     wordMask = '';
     inWord = false;
@@ -200,12 +239,23 @@ function scan(command: string, from: number, substitution: boolean): Scan {
     const text = raw.trim();
     if (text !== '') {
       const subshells = parens.filter((p): p is number => p !== null);
-      segments.push({ raw: text, words, separator, subshells, nested, wordsCertain });
+      segments.push({
+        raw: text,
+        words,
+        separator,
+        subshells,
+        nested,
+        hereDocuments,
+        wordsCertain,
+        bracesCertain,
+      });
     }
     raw = '';
     words = [];
     nested = [];
+    hereDocuments = [];
     wordsCertain = true;
+    bracesCertain = true;
   };
   // Where a lone `{` or `}` opens or closes a group: no word yet, or only reserved words a command
   // may follow, or after `function name`.
@@ -229,7 +279,9 @@ function scan(command: string, from: number, substitution: boolean): Scan {
     const ch = command.charAt(i);
     const next = command.charAt(i + 1);
     const before = lastPlain;
+    const afterRedirect: boolean = lastRedirect;
     lastPlain = '';
+    lastRedirect = false;
     if (quote === "'") {
       raw += ch;
       if (ch === "'") quote = null;
@@ -326,23 +378,24 @@ function scan(command: string, from: number, substitution: boolean): Scan {
       before !== '<'
     ) {
       const doc = hereDocumentDelimiter(command, i + 2);
-      if (doc) pending.push({ ...doc, into: nested });
+      if (doc) pending.push({ ...doc, into: hereDocuments });
       append('<<');
       i += 1;
       continue;
     }
-    // zsh's clobber operators `>!`, `>>!`, `&>!`, `2>!` and `>|`: a `!` or `|` straight after a `>`
-    // belongs to the redirection, not a word or a pipe, and bash does not read it, so the segment
-    // is uncertain. The `|` must not split into a pipe.
-    if ((ch === '!' || ch === '|') && before === '>') {
+    // zsh's clobber operators (`>!`, `>>!`, `&>!`, `2>!`, `>|`, and the `&` forms `>&!`, `>>&|`,
+    // `2>&|`): a `!` or `|` straight after an output redirection operator (a `>`, or a `&` that is
+    // part of one) belongs to the redirection, not a word or a pipe. bash does not read it, so the
+    // segment is uncertain, and the `|` must not split into a pipe.
+    const clobber: boolean = (ch === '!' || ch === '|') && (before === '>' || afterRedirect);
+    if (clobber) {
       certain = false;
       wordsCertain = false;
     }
     // A lone `&` backgrounds the command before it; `>&`, `<&` and `&>` are redirections, and a
-    // `>|` clobber is not a pipe.
-    const redirection =
-      (ch === '&' && (before === '>' || before === '<' || next === '>')) ||
-      (ch === '|' && before === '>');
+    // clobber `|` is not a pipe.
+    const redirection: boolean =
+      (ch === '&' && (before === '>' || before === '<' || next === '>')) || (ch === '|' && clobber);
     if (SEPARATORS.has(ch) && !redirection) {
       flush(ch);
       continue;
@@ -395,8 +448,9 @@ function scan(command: string, from: number, substitution: boolean): Scan {
         flush('');
         continue;
       }
+      // A lone brace out of command position is group syntax, relaxed for here-document data.
       certain = false;
-      wordsCertain = false;
+      bracesCertain = false;
     }
     raw += ch;
     if (ch === ' ' || ch === '\t') {
@@ -404,6 +458,9 @@ function scan(command: string, from: number, substitution: boolean): Scan {
     } else {
       addWord(ch, true);
       lastPlain = ch;
+      // A `>`, or a `&` that is part of a redirection, is an output redirection operator, so a `!`
+      // or `|` right after it is a clobber.
+      lastRedirect = ch === '>' || (ch === '&' && redirection);
     }
   }
   flush('');

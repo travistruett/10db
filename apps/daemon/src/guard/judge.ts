@@ -341,8 +341,8 @@ function directoriesNamed(segments: readonly ShellSegment[]): Dir[] {
   return segments.flatMap((segment) => {
     const { words } = commandOf(segment);
     const head = words[0] ?? '';
-    const scripts =
-      head === 'eval' ? [words.slice(1).join(' '), ...segment.nested] : segment.nested;
+    const nested = [...segment.nested, ...segment.hereDocuments.map((h) => h.body)];
+    const scripts = head === 'eval' ? [words.slice(1).join(' '), ...nested] : nested;
     const own = DIRECTORY_CHANGES.has(head) ? [changedDirectory(segment.raw, words, null)] : [];
     return [...own, ...scripts.flatMap((script) => directoriesNamed(parseShell(script).segments))];
   });
@@ -364,11 +364,32 @@ function firstRefusal(dirs: readonly Dir[], refusal: (dir: Dir) => string | null
  * loop, a function, a parenthesis that is not a subshell), every segment may run from the start or
  * any directory a `cd` in the command names.
  */
+/**
+ * Commands that read a here-document as data, not as shell. A here-document is judged as shell by
+ * default (so a brace in it may open a zsh group); only when its reader is one of these, and the
+ * segment does not pipe onward, are its braces relaxed to data (`console.log({a: 1})`, a JSON file).
+ */
+const DATA_READERS: ReadonlySet<string> = new Set([
+  'cat',
+  'tee',
+  'python',
+  'python3',
+  'node',
+  'jq',
+  'ruby',
+  'perl',
+  'sqlite3',
+  'psql',
+  'git',
+]);
+
 function judgeShell(
   input: GuardInput,
   command: string,
   depth = 0,
   start: readonly Dir[] = [input.repoPath],
+  // A here-document body that does not run as shell carries braces as data, not as group syntax.
+  bracesAsData = false,
 ): GuardVerdict {
   const parse = parseShell(command);
   const segments = parse.segments.map((segment) => ({ segment, ...commandOf(segment) }));
@@ -408,24 +429,37 @@ function judgeShell(
     const piped = previousSeparator === '|';
     previousSeparator = segment.separator;
     if (!segment.wordsCertain) return deny(UNREAD_WORDS);
+    if (!bracesAsData && !segment.bracesCertain) return deny(UNREAD_WORDS);
     if (hiddenByRedirection) return deny(HIDDEN_BY_REDIRECTION);
     if (head === 'sudo') return deny('sudo is never allowed.');
     if (hiddenByEnv)
       return deny(
         'env -S, or an env option not spelled in full, hides the command it runs. Run the command itself instead.',
       );
-    // Substitutions and here-documents run where the segment runs.
+    const scripts = [...segment.nested, ...segment.hereDocuments.map((h) => h.body)];
+    // Substitutions always run as shell.
     for (const body of segment.nested) {
       const verdict = judgeShell(input, body, depth, dirs);
+      if (verdict.decision === 'deny') return verdict;
+    }
+    // A here-document is shell by default; its braces are data only when a known data reader takes
+    // it and the segment does not pipe onward (a redirect to a file is fine), so an interpreter
+    // reached through a wrapper or a pipeline is still judged as shell. A quoted delimiter the data
+    // reader reads is pure literal data, so it is judged only by the text checks below; an unquoted
+    // one still has its substitutions run by the shell.
+    const bodyIsData = DATA_READERS.has(head) && segment.separator !== '|';
+    for (const { body, quoted } of segment.hereDocuments) {
+      if (bodyIsData && quoted) continue;
+      const verdict = judgeShell(input, body, depth, dirs, bodyIsData);
       if (verdict.decision === 'deny') return verdict;
     }
     const accountRule =
       keychainRefusal(words) ??
       envDumpRefusal(segment.words, words) ??
       secretReferenceRefusal(segment.raw) ??
-      scriptRefusal(head, [segment.raw, ...segment.nested].join('\n')) ??
+      scriptRefusal(head, [segment.raw, ...scripts].join('\n')) ??
       firstRefusal(dirs, (dir) =>
-        segmentPathRefusal(segment.raw, words, dir, input.protectedPaths, segment.nested),
+        segmentPathRefusal(segment.raw, words, dir, input.protectedPaths, scripts),
       );
     if (accountRule) return deny(accountRule);
     if (SHELLS.has(head)) {

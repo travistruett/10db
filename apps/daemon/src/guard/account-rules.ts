@@ -12,6 +12,7 @@ import {
 } from 'node:path';
 import { SECRET_VARIABLES } from '../environment';
 import { abbreviates } from './git-rules';
+import { expandBraceWord } from './braces';
 import {
   isOverLongPath,
   isWithin,
@@ -572,11 +573,17 @@ export function segmentPathRefusal(
   const destination = destinationIndex(command, words);
   for (const [index, word] of words.entries()) {
     const reach = { contains: walks && index !== destination };
-    const tail = word.includes('=') ? word.slice(word.indexOf('=') + 1).split(':') : [];
-    const candidates = word.startsWith('-') ? tail : [word, ...tail];
-    for (const candidate of candidates) {
-      const refusal = reachRefusal(candidate, cwd, paths, reach);
-      if (refusal) return refusal;
+    // Brace expansion turns one word into several paths, as the shell does, so a path hidden in a
+    // brace (`{~/.claude.json,}`) is judged. A `~` the braces reveal is expanded too; a word with
+    // no brace keeps its spelling, so a quoted `~` mention stays unexpanded as before.
+    const pieces = word.includes('{') ? (expandBraceWord(word) ?? [word]).map(expandTilde) : [word];
+    for (const piece of pieces) {
+      const tail = piece.includes('=') ? piece.slice(piece.indexOf('=') + 1).split(':') : [];
+      const candidates = piece.startsWith('-') ? tail : [piece, ...tail];
+      for (const candidate of candidates) {
+        const refusal = reachRefusal(candidate, cwd, paths, reach);
+        if (refusal) return refusal;
+      }
     }
     if (code) {
       const text = expandEmbedded(word);
