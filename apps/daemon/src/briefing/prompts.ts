@@ -57,6 +57,16 @@ export const HANDOFF_FIRM_NUDGE =
 export const HANDOFF_NUDGE_READ_ONLY =
   '10db: your context is filling up. Call mcp__10db__write_handoff with what you have found so far and end your turn. Do not start new checks.';
 
+export const HANDOFF_NUDGE_ACCOUNT =
+  '10db: this account is near its usage limit and the project is moving to another one. The next session starts from your handoff, not this conversation, so finish the step you are on, commit everything, then call the write_handoff tool with the six-part handoff and end your turn. Do not start new work.';
+
+/** The account nudge for a read-only step, which has nothing to commit. */
+export const HANDOFF_NUDGE_ACCOUNT_READ_ONLY =
+  '10db: this account is near its usage limit and the project is moving to another one. The next session starts from your handoff, not this conversation, so call mcp__10db__write_handoff with what you have found so far and end your turn. Do not start new checks.';
+
+export const HANDOFF_FIRM_NUDGE_ACCOUNT =
+  '10db: this account is about to reach its usage limit. Call write_handoff now and end your turn.';
+
 /** Sent when a read-only step ends its turn without recording its result in this session. */
 export const RESULT_NUDGE =
   '10db: this step is not finished until you call mcp__10db__complete_step with your result (and, for a review, a verdict). Call it now, then end your turn.';

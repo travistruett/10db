@@ -53,7 +53,13 @@ describe('mapSdkMessage', () => {
 
   it('turns an assistant rate_limit error into a rejected rate limit', () => {
     expect(mapSdkMessage(assistantMessage([], 'rate_limit'), ctx)).toEqual([
-      { type: 'rate_limit', status: 'rejected', resetsAt: null },
+      {
+        type: 'rate_limit',
+        status: 'rejected',
+        resetsAt: null,
+        utilization: null,
+        limitType: null,
+      },
     ]);
   });
 
@@ -84,8 +90,39 @@ describe('mapSdkMessage', () => {
     expect(
       mapSdkMessage(rateLimitEvent({ status: 'allowed_warning', resetsAt: 1_791_000_000 }), ctx),
     ).toEqual([
-      { type: 'rate_limit', status: 'allowed_warning', resetsAt: new Date(1_791_000_000_000) },
+      {
+        type: 'rate_limit',
+        status: 'allowed_warning',
+        resetsAt: new Date(1_791_000_000_000),
+        utilization: null,
+        limitType: null,
+      },
     ]);
+  });
+
+  it('carries the utilization and the limit type, and drops a utilization outside 0 to 1', () => {
+    expect(
+      mapSdkMessage(
+        rateLimitEvent({
+          status: 'allowed_warning',
+          resetsAt: 1_791_000_000,
+          utilization: 0.96,
+          rateLimitType: 'five_hour',
+        }),
+        ctx,
+      ),
+    ).toEqual([
+      {
+        type: 'rate_limit',
+        status: 'allowed_warning',
+        resetsAt: new Date(1_791_000_000_000),
+        utilization: 0.96,
+        limitType: 'five_hour',
+      },
+    ]);
+    expect(
+      mapSdkMessage(rateLimitEvent({ status: 'allowed_warning', utilization: 96 }), ctx),
+    ).toEqual([expect.objectContaining({ utilization: null })]);
   });
 
   it('treats spending extra usage as a rejected limit, so lanes pause instead of billing overage', () => {
@@ -99,7 +136,15 @@ describe('mapSdkMessage', () => {
         }),
         ctx,
       ),
-    ).toEqual([{ type: 'rate_limit', status: 'rejected', resetsAt: new Date(1_791_500_000_000) }]);
+    ).toEqual([
+      {
+        type: 'rate_limit',
+        status: 'rejected',
+        resetsAt: new Date(1_791_500_000_000),
+        utilization: null,
+        limitType: null,
+      },
+    ]);
   });
 
   it('maps a compact boundary to compacted', () => {

@@ -16,6 +16,7 @@ import {
 import type { AccountRow, Json } from '@10db/db';
 import { signInCommand } from '../environment';
 import type { CapStatus } from './cap';
+import type { UsageReport } from './usage-reports';
 
 export interface AccountCard {
   readonly title: string;
@@ -119,6 +120,94 @@ export function usageLimitCard(
       })),
       { label: AccountCardChoice.Later, description: `Wait for ${account.label}` },
     ],
+  };
+}
+
+export const USAGE_HIGH_CARD = 'usage_high';
+export const MOVED_CARD = 'moved';
+
+const LIMIT_NAMES: Readonly<Record<string, string>> = {
+  five_hour: '5-hour limit',
+  seven_day: 'weekly limit',
+  seven_day_opus: 'weekly Opus limit',
+  seven_day_sonnet: 'weekly Sonnet limit',
+  seven_day_overage_included: 'weekly limit',
+  overage: 'extra-usage limit',
+};
+
+/** How a card names the limit a session reported; one 10db hasn't seen reads as the usage limit. */
+export function limitName(limitType: string | null): string {
+  return (limitType === null ? undefined : LIMIT_NAMES[limitType]) ?? 'usage limit';
+}
+
+/** "is at 96% of its 5-hour limit", or "reached its 5-hour limit" at the limit itself. */
+function standing(report: UsageReport): string {
+  const limit = limitName(report.limitType);
+  if (report.status === 'rejected' || report.utilization === null) return `reached its ${limit}`;
+  return `is at ${String(Math.round(report.utilization * 100))}% of its ${limit}`;
+}
+
+function usageDetail(report: UsageReport): Record<string, Json> {
+  return {
+    usage: {
+      limitType: report.limitType,
+      utilization: report.utilization,
+      resetsAt: report.resetsAt?.toISOString() ?? null,
+    },
+  };
+}
+
+/** The project had no usable fallback when it crossed its threshold: the builder picks where it goes. */
+export function usageHighCard(
+  project: ProjectDto,
+  account: AccountRow,
+  targets: readonly AccountDto[],
+  report: UsageReport,
+): AccountCard {
+  const moves = targets.map((t) => ({ choice: `Move to ${offered(t)}`, accountId: t.id }));
+  const only = targets.length === 1 ? targets[0] : undefined;
+  const where = only ? only.label : 'another account';
+  const resets = report.resetsAt ? ` It resets at ${report.resetsAt.toISOString()}.` : '';
+  return {
+    title:
+      moves.length > 0
+        ? `${account.label} ${standing(report)}: hand off and move ${project.name} to ${where}?`
+        : `${account.label} ${standing(report)}`,
+    body: `A session on ${account.label} reported that it ${standing(report)}.${resets} ${
+      moves.length > 0
+        ? `Moving asks each lane of ${project.name} on ${account.label} to hand off, then runs its next sessions on the account you pick, and 10db asks whether to move back once the limit resets.`
+        : `No other account can take ${project.name} now, so it stays on ${account.label} until the limit.`
+    }`,
+    foldKey: accountFoldKey(account.id, USAGE_HIGH_CARD),
+    detail: detail(account, null, null, null, { moves, ...usageDetail(report) }),
+    ...(moves.length > 0
+      ? {
+          options: [
+            ...moves.map((m) => ({
+              label: m.choice,
+              description: `Hand off and run ${project.name} there`,
+            })),
+            { label: AccountCardChoice.Later, description: `Stay on ${account.label} for now` },
+          ],
+        }
+      : {}),
+  };
+}
+
+/** 10db moved the project to its fallback on its own; the card says what and why, and holds no work. */
+export function movedCard(
+  project: ProjectDto,
+  account: AccountRow,
+  fallback: AccountDto,
+  report: UsageReport,
+): AccountCard {
+  const handedOff =
+    report.status === 'rejected' ? '' : ' after asking its running lanes to hand off';
+  return {
+    title: `${project.name} moved to ${fallback.label}: ${account.label} ${standing(report)}`,
+    body: `A session on ${account.label} reported that it ${standing(report)}. ${project.name} names ${accountDisplayName(fallback)} as its fallback, so 10db moved it there${handedOff}. Each lane's next session runs on ${fallback.label} from its latest handoff; work neither committed nor handed off stays behind. 10db asks whether to move back once ${account.label}'s limit resets.`,
+    foldKey: accountFoldKey(account.id, MOVED_CARD),
+    detail: detail(account, null, null, null, usageDetail(report)),
   };
 }
 

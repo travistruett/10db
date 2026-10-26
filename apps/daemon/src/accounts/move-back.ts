@@ -5,6 +5,7 @@ import type { StateStore } from '../events';
 import type { InboxService } from '../inbox';
 import { moveBackCard } from './cards';
 import { usageLimitEnd, type AccountPauses } from './pauses';
+import type { UsageReports } from './usage-reports';
 
 export interface MoveBack {
   /**
@@ -23,6 +24,8 @@ export function createMoveBack(opts: {
   readonly clock: Clock;
   readonly inbox: InboxService;
   readonly pauses: Pick<AccountPauses, 'pausedFor'>;
+  /** Usage the account the project left still reports. */
+  readonly reports: Pick<UsageReports, 'stillHigh'>;
   /** How long a usage limit with no reported reset lasts: the runtime's default pause. */
   readonly defaultPauseMs: number;
 }): MoveBack {
@@ -65,6 +68,12 @@ export function createMoveBack(opts: {
         setMoveBack(ctx, projectId, { accountId: from.id, at: stillLimited.toISOString() }),
       );
       schedule(projectId, stillLimited);
+      return;
+    }
+    // A session on the account it left still reports usage past the project's threshold: ask later.
+    const high = opts.reports.stillHigh(from.id, project.usageHandoffAt);
+    if (high !== null) {
+      schedule(projectId, high);
       return;
     }
     const card = moveBackCard(project, from, getAccountRow(db, project.accountId));

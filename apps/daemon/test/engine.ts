@@ -36,14 +36,18 @@ import {
 import { readDefaultPersonas } from '@10db/harness';
 import {
   createAccountCardAnswers,
+  createAccountLimits,
   createAccountMoves,
   createAccountPauses,
   createAccountRuntime,
   createMoveBack,
   createStartGate,
+  createUsageReports,
+  type AccountLimits,
   type AccountMoves,
   type AccountRuntime,
   type StartGate,
+  type UsageReport,
 } from '../src/accounts';
 import { ManualClock } from '../src/clock';
 import { createLauncher, secretFingerprint, type Keychain } from '../src/environment';
@@ -81,6 +85,8 @@ export interface TestEngine {
   readonly moves: AccountMoves;
   readonly keychain: Keychain;
   readonly rateLimited: { accountId: AccountId; resetsAt: Date | null }[];
+  /** Every usage report the runner passed on, before the limits acted on it. */
+  readonly usageReports: { accountId: AccountId; report: UsageReport }[];
   readonly startGate: StartGate;
   /** The account each ended session reported to the account runtime. */
   readonly sessionsEnded: { accountId: AccountId; projectId: ProjectId }[];
@@ -118,6 +124,7 @@ export async function createTestEngine(
   const git = createGit();
   const keychain = createMemoryKeychain();
   const rateLimited: { accountId: AccountId; resetsAt: Date | null }[] = [];
+  const usageReports: { accountId: AccountId; report: UsageReport }[] = [];
   const prepared: { accountId: AccountId; projectId: ProjectId }[] = [];
   const sessionsEnded: { accountId: AccountId; projectId: ProjectId }[] = [];
   const startGate = createStartGate();
@@ -146,11 +153,15 @@ export async function createTestEngine(
     pauses,
     defaultPauseMs: 30 * 60_000,
   });
+  const usageReportBook = createUsageReports({ clock, staleMs: 30 * 60_000 });
+  // Built after the moves, which tell it when a project moved.
+  let limits: AccountLimits | null = null;
   const moveBack = createMoveBack({
     state,
     clock,
     inbox,
     pauses,
+    reports: usageReportBook,
     defaultPauseMs: 30 * 60_000,
   });
   const moves = createAccountMoves({
@@ -158,8 +169,14 @@ export async function createTestEngine(
     inbox,
     pauses,
     moveBack,
-    onMoved: () => undefined,
+    handOff: (projectId, accountId, reason) => {
+      runner?.handOff(projectId, accountId, reason);
+    },
+    onMoved: (projectId) => {
+      limits?.forget(projectId);
+    },
   });
+  limits = createAccountLimits({ state, inbox, pauses, moves, reports: usageReportBook });
   answerAccountCard = createAccountCardAnswers({
     resume: (id) => {
       pauses.resume(id);
@@ -219,6 +236,10 @@ export async function createTestEngine(
       prepare: (account, projectId) => {
         prepared.push({ accountId: account.id, projectId });
       },
+      usageReported: (accountId, report) => {
+        usageReports.push({ accountId, report });
+        limits.usageReported(accountId, report);
+      },
     },
     startGate,
     onLaneFreed: () => undefined,
@@ -255,6 +276,7 @@ export async function createTestEngine(
     moves,
     keychain,
     rateLimited,
+    usageReports,
     startGate,
     prepared,
     sessionsEnded,

@@ -210,6 +210,15 @@ export function archiveAccount(ctx: WriteContext, id: AccountId): AccountDto {
     throw new ConflictError(
       `Move ${bound.map((p) => `"${p.name}"`).join(', ')} to another account before archiving "${row.label}"`,
     );
+  const fallbackFor = ctx.tx
+    .select({ name: schema.projects.name })
+    .from(schema.projects)
+    .where(eq(schema.projects.fallbackAccountId, id))
+    .all();
+  if (fallbackFor.length > 0)
+    throw new ConflictError(
+      `Clear "${row.label}" as the fallback of ${fallbackFor.map((p) => `"${p.name}"`).join(', ')} before archiving it`,
+    );
   ctx.tx
     .update(schema.accounts)
     .set({ archived: true, updatedAt: ctx.now })

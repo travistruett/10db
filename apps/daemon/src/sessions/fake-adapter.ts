@@ -86,6 +86,8 @@ export const FakeStep = z.discriminatedUnion('do', [
     do: z.literal('rate_limit'),
     status: z.enum(['allowed', 'allowed_warning', 'rejected']),
     resetsInSeconds: z.number().nullable(),
+    utilization: z.number().optional(),
+    limitType: z.string().optional(),
   }),
   z.object({ do: z.literal('compact') }),
   z.object({ do: z.literal('crash'), message: z.string() }),
@@ -127,6 +129,8 @@ export interface FakeObservation {
 export class FakeAdapter implements SessionAdapter {
   readonly provider = Provider.Claude;
   readonly observations: FakeObservation[] = [];
+  /** Every message the runner sent a session, in order. */
+  readonly sent: { sessionId: SessionId; text: string }[] = [];
   readonly prompts: {
     sessionId: SessionId;
     sequence: number;
@@ -160,6 +164,7 @@ export class FakeAdapter implements SessionAdapter {
   }
 
   start(spec: SessionSpec): SessionHandle {
+    const sent = this.sent;
     const { model: reportedModel, ...override } = this.seen(spec);
     const refusal = checkAccount(spec.account, { ...expectedSeen(spec.account), ...override });
     if (refusal) {
@@ -373,6 +378,8 @@ export class FakeAdapter implements SessionAdapter {
               step.resetsInSeconds === null
                 ? null
                 : new Date(Date.now() + step.resetsInSeconds * 1000),
+            utilization: step.utilization ?? null,
+            limitType: step.limitType ?? null,
           });
           if (step.status === 'rejected') {
             end('rate_limited', 'usage limit reached');
@@ -443,6 +450,7 @@ export class FakeAdapter implements SessionAdapter {
     return {
       events: channel,
       send(text) {
+        sent.push({ sessionId: spec.sessionId, text });
         messages.push(text);
         messageWaiter?.();
         messageWaiter = null;

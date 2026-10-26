@@ -27,6 +27,7 @@ import { HARNESS_PLUGIN_DIR, readDefaultPersonas } from '@10db/harness';
 import { WebSocketServer } from 'ws';
 import {
   createAccountCardAnswers,
+  createAccountLimits,
   createAccountMoves,
   createAccountPauses,
   createAccountPreparer,
@@ -34,6 +35,8 @@ import {
   createAccountService,
   createMoveBack,
   createStartGate,
+  createUsageReports,
+  type AccountLimits,
 } from '../accounts';
 import { createApp } from '../api';
 import { createBenchmarkSync, type BenchmarkSync } from '../benchmarks';
@@ -336,11 +339,18 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     pauses: accountPauses,
     defaultPauseMs: opts.defaultPauseMs ?? DEFAULTS.defaultPauseMs,
   });
+  const reports = createUsageReports({
+    clock,
+    staleMs: opts.defaultPauseMs ?? DEFAULTS.defaultPauseMs,
+  });
+  // Built after the moves, which tell it when a project moved.
+  let accountLimits: AccountLimits | null = null;
   const moveBack = createMoveBack({
     state,
     clock,
     inbox,
     pauses: accountPauses,
+    reports,
     defaultPauseMs: opts.defaultPauseMs ?? DEFAULTS.defaultPauseMs,
   });
   const moves = createAccountMoves({
@@ -348,10 +358,15 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     inbox,
     pauses: accountPauses,
     moveBack,
-    onMoved: () => {
+    handOff: (projectId, accountId, reason) => {
+      runner?.handOff(projectId, accountId, reason);
+    },
+    onMoved: (projectId) => {
+      accountLimits?.forget(projectId);
       scheduler?.requestTick();
     },
   });
+  accountLimits = createAccountLimits({ state, inbox, pauses: accountPauses, moves, reports });
   answerAccountCard = createAccountCardAnswers({
     resume: (id) => {
       accountPauses.resume(id);
@@ -420,6 +435,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       ...accounts,
       prepare: (account, projectId) => {
         preparer.prepare(account, projectId);
+      },
+      usageReported: (accountId, report) => {
+        accountLimits.usageReported(accountId, report);
       },
     },
     onLaneFreed: () => {

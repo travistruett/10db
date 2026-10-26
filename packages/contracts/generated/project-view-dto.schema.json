@@ -109,6 +109,20 @@
         }
       ]
     },
+    "fallbackAccountId": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^acc_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "usageHandoffAt": {
+      "type": "number"
+    },
     "billingMode": {
       "type": "string",
       "enum": [
@@ -333,6 +347,8 @@
     "accountId",
     "movedFromAccountId",
     "moveBackAt",
+    "fallbackAccountId",
+    "usageHandoffAt",
     "billingMode",
     "model",
     "effort",

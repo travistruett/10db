@@ -14,6 +14,10 @@ import {
   Month,
   needsSecret,
   parseAccountSettings,
+  ProjectPatch,
+  USAGE_HANDOFF_AT,
+  USAGE_HANDOFF_MAX,
+  USAGE_HANDOFF_MIN,
 } from './index';
 
 describe('AccountInput', () => {
@@ -205,6 +209,14 @@ describe('account kinds', () => {
 });
 
 describe('the other account schemas', () => {
+  it('keeps a project usage threshold below the limit itself', () => {
+    expect([USAGE_HANDOFF_MIN, USAGE_HANDOFF_AT, USAGE_HANDOFF_MAX]).toEqual([0.5, 0.95, 0.99]);
+    expect(ProjectPatch.safeParse({ usageHandoffAt: 0.8 }).success).toBe(true);
+    expect(ProjectPatch.safeParse({ usageHandoffAt: 1 }).success).toBe(false);
+    expect(ProjectPatch.safeParse({ usageHandoffAt: 0.3 }).success).toBe(false);
+    expect(ProjectPatch.parse({ fallbackAccountId: null })).toEqual({ fallbackAccountId: null });
+  });
+
   it('parses a card that offers moves', () => {
     const detail = {
       accountId: mintId('Account'),

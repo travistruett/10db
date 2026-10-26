@@ -7,7 +7,10 @@ import {
   buildContextPack,
   buildSessionPrompt,
   compactionReinjection,
+  HANDOFF_FIRM_NUDGE_ACCOUNT,
   HANDOFF_NUDGE,
+  HANDOFF_NUDGE_ACCOUNT,
+  HANDOFF_NUDGE_ACCOUNT_READ_ONLY,
   HANDOFF_NUDGE_READ_ONLY,
   renderHandoff,
 } from './index';
@@ -381,6 +384,17 @@ describe('buildSessionPrompt for flow steps', () => {
   it('gives read-only steps a handoff nudge that asks for no commit', () => {
     expect(HANDOFF_NUDGE_READ_ONLY).toContain('mcp__10db__write_handoff');
     expect(HANDOFF_NUDGE_READ_ONLY).not.toContain('commit');
+  });
+
+  it('asks for a handoff before an account move in its own words, with no commit in a read-only step', () => {
+    expect(HANDOFF_NUDGE_ACCOUNT).toMatch(/near its usage limit/);
+    expect(HANDOFF_NUDGE_ACCOUNT).toMatch(/starts from your handoff, not this conversation/);
+    expect(HANDOFF_NUDGE_ACCOUNT).toMatch(/commit everything/);
+    expect(HANDOFF_NUDGE_ACCOUNT).toContain('write_handoff');
+    expect(HANDOFF_NUDGE_ACCOUNT_READ_ONLY).toMatch(/near its usage limit/);
+    expect(HANDOFF_NUDGE_ACCOUNT_READ_ONLY).not.toMatch(/commit/);
+    expect(HANDOFF_FIRM_NUDGE_ACCOUNT).toMatch(/usage limit/);
+    expect(HANDOFF_FIRM_NUDGE_ACCOUNT).toContain('write_handoff');
   });
 
   it('keeps the implement rules for an implement step', () => {

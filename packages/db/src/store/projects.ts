@@ -5,6 +5,7 @@ import {
   Delivery,
   EventType,
   InvalidError,
+  isMetered,
   mintId,
   NotFoundError,
   ProjectInput,
@@ -32,6 +33,26 @@ function accountFor(ctx: WriteContext, named: AccountId | undefined): AccountId 
   return id;
 }
 
+/**
+ * A fallback is another account than the project's own, not archived, and capped when metered:
+ * 10db moves work onto it without asking, and only the cap bounds that spend.
+ */
+function checkFallback(
+  ctx: WriteContext,
+  accountId: AccountId,
+  fallbackId: AccountId | null,
+): void {
+  if (fallbackId === null) return;
+  if (fallbackId === accountId)
+    throw new InvalidError("A project's fallback is another account than its own");
+  const fallback = getAccountRow(ctx.tx, fallbackId);
+  if (fallback.archived) throw new InvalidError(`Account "${fallback.label}" is archived`);
+  if (isMetered(fallback.kind) && fallback.monthlyCapUsd === null)
+    throw new InvalidError(
+      `Set a monthly cap on "${fallback.label}" before making it a fallback: 10db moves work onto it without asking`,
+    );
+}
+
 export function insertProject(ctx: WriteContext, input: ProjectInput): ProjectDto {
   const config = ProjectInput.parse(input);
   if (config.flowId) getFlow(ctx.tx, config.flowId);
@@ -43,10 +64,12 @@ export function insertProject(ctx: WriteContext, input: ProjectInput): ProjectDt
   if (existing)
     throw new ConflictError(`Project "${existing.name}" already uses ${config.repoPath}`);
   const { accountId: named, ...rest } = config;
+  const accountId = accountFor(ctx, named);
+  checkFallback(ctx, accountId, rest.fallbackAccountId);
   const row: ProjectDto = {
     id: mintId('Project'),
     ...rest,
-    accountId: accountFor(ctx, named),
+    accountId,
     movedFromAccountId: null,
     moveBackAt: null,
     provider: Provider.Claude,
@@ -99,6 +122,8 @@ export function patchProject(ctx: WriteContext, id: ProjectId, patch: ProjectPat
     changes.prTitlePrefix === undefined ? current.prTitlePrefix : changes.prTitlePrefix;
   if (delivery === Delivery.PullRequest && prefix === null)
     throw new InvalidError('Pull request delivery needs a PR title prefix such as feat(app)');
+  if (changes.fallbackAccountId !== undefined)
+    checkFallback(ctx, changes.accountId ?? current.accountId, changes.fallbackAccountId);
   const moving = changes.accountId !== undefined && changes.accountId !== current.accountId;
   if (changes.accountId !== undefined && moving) {
     // Work in flight moves too: each lane's next session runs on the new account.

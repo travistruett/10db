@@ -8,5 +8,7 @@ export { monthOf, monthWindow, usageWindow } from './month';
 export type { AccountCard } from './cards';
 export { createAccountService, type AccountService } from './service';
 export { createAccountMoves, MoveCause, type AccountMoves } from './moves';
+export { createUsageReports, type UsageReport } from './usage-reports';
+export { createAccountLimits, type AccountLimits } from './limits';
 export { createMoveBack, type MoveBack } from './move-back';
 export { accountFoldKey, MOVE_BACK_CARD } from './cards';

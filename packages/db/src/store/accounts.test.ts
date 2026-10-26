@@ -410,3 +410,45 @@ describe('usage', () => {
     expect(accountSpendUsd(store.db, other.id, OCTOBER)).toBe(0);
   });
 });
+
+describe('fallback accounts', () => {
+  it.each<{ name: string; fallback: () => AccountId; message: RegExp }>([
+    {
+      name: 'its own account',
+      fallback: () => defaultAccountId(store.db) ?? mintId('Account'),
+      message: /another account than its own/,
+    },
+    {
+      name: 'an archived account',
+      fallback: () => {
+        const old = apiKey('Old key', 100);
+        store.write((ctx) => archiveAccount(ctx, old.id));
+        return old.id;
+      },
+      message: /archived/,
+    },
+    {
+      name: 'a metered account with no monthly cap',
+      fallback: () => apiKey('Uncapped', null).id,
+      message: /Set a monthly cap on "Uncapped"/,
+    },
+  ])('refuses a fallback that is $name', ({ fallback, message }) => {
+    const project = seedProject(store);
+    const id = fallback();
+    expect(() =>
+      store.write((ctx) => patchProject(ctx, project.id, { fallbackAccountId: id })),
+    ).toThrow(message);
+  });
+
+  it('keeps the fallback while the project runs on it, and refuses to archive it', () => {
+    const fallback = apiKey('Bedrock', 200);
+    const project = seedProject(store, { fallbackAccountId: fallback.id });
+    expect(project).toMatchObject({ fallbackAccountId: fallback.id, usageHandoffAt: 0.95 });
+    store.write((ctx) => patchProject(ctx, project.id, { accountId: fallback.id }));
+    expect(getProject(store.db, project.id).fallbackAccountId).toBe(fallback.id);
+    store.write((ctx) => patchProject(ctx, project.id, { accountId: project.accountId }));
+    expect(() => store.write((ctx) => archiveAccount(ctx, fallback.id))).toThrow(
+      /fallback of "demo"/,
+    );
+  });
+});

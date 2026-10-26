@@ -28,6 +28,8 @@ export function projectDto(overrides: Partial<ProjectDto> = {}): ProjectDto {
     accountId: mintId('Account'),
     movedFromAccountId: null,
     moveBackAt: null,
+    fallbackAccountId: null,
+    usageHandoffAt: 0.95,
     billingMode: 'subscription',
     model: 'sonnet',
     effort: 'medium',

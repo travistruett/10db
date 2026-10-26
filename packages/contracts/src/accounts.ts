@@ -58,6 +58,12 @@ export const DEFAULT_ACCOUNT_LANE_CAP = 4;
 /** The seeded account's label: what it is, the builder's Claude plan. Who pays for it is `payer`. */
 export const DEFAULT_ACCOUNT_LABEL = 'Claude plan';
 
+/** The share of its account's usage limit at which a project hands off: to its fallback, or by asking. */
+export const USAGE_HANDOFF_AT = 0.95;
+/** The range a project's threshold may take; the desktop's "Hand off at" field checks the same one. */
+export const USAGE_HANDOFF_MIN = 0.5;
+export const USAGE_HANDOFF_MAX = 0.99;
+
 /** How pickers and card options name an account: its label, and its recorded identity beside it. */
 export function accountDisplayName(account: {
   readonly label: string;
@@ -326,6 +332,14 @@ export const AccountCardDetail = z.object({
   moves: z.array(z.object({ choice: z.string(), accountId: AccountId })).optional(),
   /** A move-back card: its move is the builder returning the project, not a move for a limit. */
   moveBack: z.boolean().optional(),
+  /** What a session reported about the account's usage limit, for a card about it. */
+  usage: z
+    .object({
+      limitType: z.string().nullable(),
+      utilization: z.number().nullable(),
+      resetsAt: z.iso.datetime().nullable(),
+    })
+    .optional(),
 });
 export type AccountCardDetail = z.infer<typeof AccountCardDetail>;
 

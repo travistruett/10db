@@ -1216,6 +1216,8 @@ describe('createClaudeAdapter', () => {
       type: 'rate_limit',
       status: 'rejected',
       resetsAt: new Date(1_791_000_000_000),
+      utilization: null,
+      limitType: null,
     });
   });
 
@@ -1228,6 +1230,8 @@ describe('createClaudeAdapter', () => {
       type: 'rate_limit',
       status: 'rejected',
       resetsAt: new Date(1_791_000_000_000),
+      utilization: null,
+      limitType: null,
     });
     expect(events.at(-1)).toEqual({ type: 'ended', reason: 'rate_limited', message: null });
   });

@@ -54,6 +54,8 @@ describe('ProjectInput', () => {
       nudgePct: 50,
       humanWaitMinutes: 10,
       billingMode: 'subscription',
+      fallbackAccountId: null,
+      usageHandoffAt: 0.95,
     });
     expect(parsed.hazards.map((h) => h.name)).toEqual(['migrations', 'deps', 'harness']);
     expect(parsed.allowedCommands).toEqual([]);

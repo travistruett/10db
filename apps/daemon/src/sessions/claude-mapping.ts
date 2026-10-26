@@ -88,7 +88,13 @@ export function mapSdkMessage(
       }
     }
     if (msg.error === 'rate_limit')
-      events.push({ type: 'rate_limit', status: 'rejected', resetsAt: null });
+      events.push({
+        type: 'rate_limit',
+        status: 'rejected',
+        resetsAt: null,
+        utilization: null,
+        limitType: null,
+      });
     return events;
   }
   if (msg.type === 'result') {
@@ -107,11 +113,18 @@ export function mapSdkMessage(
     const info = msg.rate_limit_info;
     // Spending extra usage costs money a subscription run never asked for, so it pauses like a hard limit.
     const overage = info.isUsingOverage === true;
+    // A share of the limit; a value outside 0 to 1 is a shape 10db hasn't seen, so no threshold fires on it.
+    const utilization =
+      info.utilization !== undefined && info.utilization >= 0 && info.utilization <= 1
+        ? info.utilization
+        : null;
     return [
       {
         type: 'rate_limit',
         status: overage ? 'rejected' : info.status,
         resetsAt: resetsAtToDate(overage ? (info.overageResetsAt ?? info.resetsAt) : info.resetsAt),
+        utilization,
+        limitType: info.rateLimitType ?? null,
       },
     ];
   }

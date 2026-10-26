@@ -1,6 +1,6 @@
 {
-  "id": "8e5ac8a6-c108-4f20-8468-30183b60ec9a",
-  "prevId": "fd462500-bd8b-4a25-9a22-3c3bd7be813c",
+  "id": "4fed30a8-2e3d-445f-87f2-4049c780bdec",
+  "prevId": "fec19517-2484-4f38-8f09-51a6fd2fe046",
   "version": "6",
   "dialect": "sqlite",
   "tables": {
@@ -1771,6 +1771,21 @@
           "notNull": false,
           "autoincrement": false
         },
+        "fallback_account_id": {
+          "name": "fallback_account_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "usage_handoff_at": {
+          "name": "usage_handoff_at",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0.95
+        },
         "billing_mode": {
           "name": "billing_mode",
           "type": "text",
@@ -1901,6 +1916,19 @@
           "tableFrom": "projects",
           "columnsFrom": [
             "moved_from_account_id"
+          ],
+          "tableTo": "accounts",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "projects_fallback_account_id_accounts_id_fk": {
+          "name": "projects_fallback_account_id_accounts_id_fk",
+          "tableFrom": "projects",
+          "columnsFrom": [
+            "fallback_account_id"
           ],
           "tableTo": "accounts",
           "columnsTo": [

@@ -23,7 +23,7 @@ import {
   transitionWorkstream,
 } from '@10db/db';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { RESULT_NUDGE } from '../briefing';
+import { HANDOFF_NUDGE, HANDOFF_NUDGE_ACCOUNT, RESULT_NUDGE } from '../briefing';
 import { createLauncher } from '../environment';
 import type { SessionHandle } from '../sessions';
 import { createMemoryKeychain, handoffArgs, waitFor } from '../../test/fixtures';
@@ -1884,6 +1884,58 @@ describe('moving accounts', () => {
     await engine.runner.idle();
     expect(ws(workstream.id).state).toBe('DONE');
     expect(engine.adapter.prompts[1]?.resume).toBe(first);
+  });
+});
+
+describe('usage thresholds', () => {
+  it('asks a lane on the account to hand off once, in the account words, and runs its next session on the fallback', async () => {
+    const nearLimit = (utilization: number) => ({
+      do: 'rate_limit' as const,
+      status: 'allowed_warning' as const,
+      resetsInSeconds: 3600,
+      utilization,
+      limitType: 'five_hour',
+    });
+    engine = await createTestEngine({
+      Alpha: [
+        [
+          nearLimit(0.96),
+          { do: 'await_message', contains: 'near its usage limit' },
+          nearLimit(0.97),
+          {
+            do: 'mcp',
+            tool: 'write_handoff',
+            args: handoffArgs('op-usage-0001', 'Write the second file'),
+          },
+          turn,
+        ],
+        [write('src/api/b.txt'), commit('op-usage-0002', ['src/api/b.txt']), turn],
+      ],
+    });
+    const fallback = seedAccount(engine.store, {
+      kind: 'claude_subscription',
+      label: 'Second plan',
+    });
+    engine.state.write((ctx) =>
+      patchAccount(ctx, fallback.id, { expectedIdentity: 'second@example.com' }),
+    );
+    engine.state.write((ctx) =>
+      patchProject(ctx, engine.project.id, { fallbackAccountId: fallback.id }),
+    );
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(transitions(workstream.id).filter((t) => t === 'RUNNING->HANDING_OFF')).toHaveLength(1);
+    const sent = engine.adapter.sent.map((s) => s.text);
+    expect(sent.filter((text) => text === HANDOFF_NUDGE_ACCOUNT)).toHaveLength(1);
+    expect(sent).not.toContain(HANDOFF_NUDGE);
+    expect(listSessions(engine.store.db, workstream.id).map((s) => s.accountId)).toEqual([
+      engine.project.accountId,
+      fallback.id,
+    ]);
+    expect(engine.adapter.prompts[1]?.prompt).toContain('Next action: Write the second file');
+    expect(engine.usageReports.map((r) => r.report.utilization)).toEqual([0.96, 0.97]);
   });
 });
 

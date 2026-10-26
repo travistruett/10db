@@ -2,6 +2,7 @@ import {
   ACCOUNT_CARD_DETAIL,
   AccountCardChoice,
   AccountCardDetail,
+  AccountPauseReason,
   ConflictError,
   InvalidError,
   type AccountId,
@@ -50,7 +51,13 @@ export function createAccountCardAnswers(deps: {
         target.accountId,
         card.data.moveBack === true
           ? { cause: MoveCause.Builder }
-          : { cause: MoveCause.UsageLimit, resetsAt: null },
+          : {
+              cause: MoveCause.UsageLimit,
+              resetsAt: card.data.usage?.resetsAt ? new Date(card.data.usage.resetsAt) : null,
+              // The usage-limit card's lanes were stopped by the pause; a threshold card's still run.
+              handOff: card.data.reason !== AccountPauseReason.UsageLimit,
+              answersLimitCard: card.data.reason === AccountPauseReason.UsageLimit,
+            },
         item.id,
       );
   };

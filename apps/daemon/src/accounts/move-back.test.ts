@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ManualClock, type Timer } from '../clock';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createInboxService } from '../inbox';
-import { createAccountPauses, createMoveBack, type MoveBack } from './index';
+import { createAccountPauses, createMoveBack, createUsageReports, type MoveBack } from './index';
 
 /** Refuses a delay Node would silently turn into 1 ms. */
 class StrictClock extends ManualClock {
@@ -40,7 +40,14 @@ beforeEach(() => {
     stopAccount: () => Promise.resolve(),
     onResume: () => undefined,
   });
-  moveBack = createMoveBack({ state, clock, inbox, pauses, defaultPauseMs: 30 * 60_000 });
+  moveBack = createMoveBack({
+    state,
+    clock,
+    inbox,
+    pauses,
+    reports: createUsageReports({ clock, staleMs: 30 * 60_000 }),
+    defaultPauseMs: 30 * 60_000,
+  });
 });
 afterEach(() => {
   moveBack.stop();

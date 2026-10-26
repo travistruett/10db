@@ -11,8 +11,10 @@ import {
   type ProjectId,
 } from '@10db/contracts';
 import {
+  archiveAccount,
   createTestStore,
   findOpenByFoldKey,
+  getAccount,
   getAccountRow,
   getProject,
   listInbox,
@@ -32,6 +34,7 @@ import {
   createAccountPauses,
   createAccountRuntime,
   createMoveBack,
+  createUsageReports,
   MOVE_BACK_CARD,
   MoveCause,
   type AccountMoves,
@@ -39,7 +42,7 @@ import {
   type AccountRuntime,
   type MoveBack,
 } from './index';
-import { recordedCard } from './cards';
+import { recordedCard, usageHighCard } from './cards';
 
 const DEFAULT_PAUSE_MS = 30 * 60_000;
 
@@ -62,6 +65,7 @@ let moveBack: MoveBack;
 let moves: AccountMoves;
 let answerCard: (item: InboxItemDto, answer: InboxAnswer) => void;
 let ticks: number;
+let handOffs: { projectId: ProjectId; accountId: AccountId }[];
 let project: ProjectDto;
 let plan: AccountId;
 let second: AccountDto;
@@ -76,12 +80,22 @@ function build(): void {
     onResume: () => undefined,
   });
   runtime = createAccountRuntime({ state, clock, inbox, pauses, defaultPauseMs: DEFAULT_PAUSE_MS });
-  moveBack = createMoveBack({ state, clock, inbox, pauses, defaultPauseMs: DEFAULT_PAUSE_MS });
+  moveBack = createMoveBack({
+    state,
+    clock,
+    inbox,
+    pauses,
+    reports: createUsageReports({ clock, staleMs: DEFAULT_PAUSE_MS }),
+    defaultPauseMs: DEFAULT_PAUSE_MS,
+  });
   moves = createAccountMoves({
     state,
     inbox,
     pauses,
     moveBack,
+    handOff: (projectId, accountId) => {
+      handOffs.push({ projectId, accountId });
+    },
     onMoved: () => {
       ticks += 1;
     },
@@ -111,6 +125,7 @@ beforeEach(() => {
     },
   });
   ticks = 0;
+  handOffs = [];
   build();
   project = seedProject(store);
   plan = project.accountId;
@@ -207,7 +222,11 @@ describe('moving a project', () => {
   });
 
   it('asks after the default pause, and says so, when nobody reported when the limit resets', () => {
-    moves.move(project.id, second.id, { cause: MoveCause.UsageLimit, resetsAt: null });
+    moves.move(project.id, second.id, {
+      cause: MoveCause.UsageLimit,
+      resetsAt: null,
+      handOff: false,
+    });
     expect(getProject(state.db, project.id)).toMatchObject({
       movedFromAccountId: plan,
       moveBackAt: null,
@@ -253,6 +272,46 @@ describe('moving a project', () => {
       ),
     ).toThrow(InvalidError);
     expect(getProject(state.db, project.id).accountId).toBe(second.id);
+  });
+
+  it('nudges no lane when the move is refused', () => {
+    const old = seedAccount(store, { kind: 'claude_subscription', label: 'Old plan' });
+    state.write((ctx) => archiveAccount(ctx, old.id));
+    expect(() =>
+      moves.move(project.id, old.id, {
+        cause: MoveCause.UsageLimit,
+        resetsAt: null,
+        handOff: true,
+      }),
+    ).toThrow(InvalidError);
+    expect(handOffs).toEqual([]);
+    expect(getProject(state.db, project.id).accountId).toBe(plan);
+  });
+
+  it('moves a project when its threshold card is answered, though no usage limit is in force', () => {
+    const report = {
+      status: 'allowed_warning',
+      utilization: 0.96,
+      limitType: 'five_hour',
+      resetsAt: null,
+    } as const;
+    const asked = inbox.flag({
+      projectId: project.id,
+      workstreamId: null,
+      ...usageHighCard(
+        project,
+        getAccountRow(state.db, plan),
+        [getAccount(state.db, second.id)],
+        report,
+      ),
+    });
+    expect(pauses.pausedFor(plan)).toBeNull();
+    inbox.answer(asked.id, { choice: 'Move to Second plan (needs sign-in)' });
+    expect(getProject(state.db, project.id)).toMatchObject({
+      accountId: second.id,
+      movedFromAccountId: plan,
+    });
+    expect(handOffs).toEqual([{ projectId: project.id, accountId: plan }]);
   });
 
   it('withdraws an open move-back card when the project moves again', () => {

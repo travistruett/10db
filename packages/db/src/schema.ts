@@ -59,6 +59,7 @@ import type {
   WorkstreamState,
   WorkstreamStep,
 } from '@10db/contracts';
+import { USAGE_HANDOFF_AT } from '@10db/contracts';
 import { sql } from 'drizzle-orm';
 import {
   index,
@@ -133,6 +134,12 @@ export const projects = sqliteTable('projects', {
     .references(() => accounts.id),
   /** When that limit resets, as the pause or the session reported it; null when nobody said. */
   moveBackAt: text('move_back_at'),
+  /** The account 10db moves the project to on its own near its account's usage limit. */
+  fallbackAccountId: text('fallback_account_id')
+    .$type<AccountId>()
+    .references(() => accounts.id),
+  /** The share of the account's usage limit at which the project hands off. */
+  usageHandoffAt: real('usage_handoff_at').notNull().default(USAGE_HANDOFF_AT),
   billingMode: text('billing_mode').$type<BillingMode>().notNull(),
   model: text('model').notNull(),
   effort: text('effort').$type<Effort>().notNull(),

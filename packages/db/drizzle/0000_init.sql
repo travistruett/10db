@@ -262,6 +262,8 @@ CREATE TABLE `projects` (
 	`account_id` text NOT NULL,
 	`moved_from_account_id` text,
 	`move_back_at` text,
+	`fallback_account_id` text,
+	`usage_handoff_at` real DEFAULT 0.95 NOT NULL,
 	`billing_mode` text NOT NULL,
 	`model` text NOT NULL,
 	`effort` text NOT NULL,
@@ -278,6 +280,7 @@ CREATE TABLE `projects` (
 	`updated_at` text NOT NULL,
 	FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`moved_from_account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`fallback_account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`flow_id`) REFERENCES `flows`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint

@@ -73,6 +73,10 @@ export type SessionEvent =
       readonly type: 'rate_limit';
       readonly status: 'allowed' | 'allowed_warning' | 'rejected';
       readonly resetsAt: Date | null;
+      /** The share of the limit used, 0 to 1; null when Claude Code didn't report one. */
+      readonly utilization: number | null;
+      /** Which limit: `five_hour`, `seven_day` and the rest; null when Claude Code didn't say. */
+      readonly limitType: string | null;
     }
   | { readonly type: 'compacted'; readonly trigger: 'manual' | 'auto' }
   | {

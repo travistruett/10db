@@ -18,6 +18,7 @@ import {
   type InboxTarget,
   type NextAction,
   type ProjectDto,
+  type ProjectId,
   type SessionId,
   type WorkstreamId,
   type WorkstreamStep,
@@ -67,11 +68,20 @@ import {
   buildSessionPrompt,
   compactionReinjection,
   HANDOFF_FIRM_NUDGE,
+  HANDOFF_FIRM_NUDGE_ACCOUNT,
   HANDOFF_NUDGE,
+  HANDOFF_NUDGE_ACCOUNT,
+  HANDOFF_NUDGE_ACCOUNT_READ_ONLY,
   HANDOFF_NUDGE_READ_ONLY,
   RESULT_NUDGE,
 } from '../briefing';
-import { unready, type AccountPreparer, type AccountRuntime, type StartGate } from '../accounts';
+import {
+  unready,
+  type AccountLimits,
+  type AccountPreparer,
+  type AccountRuntime,
+  type StartGate,
+} from '../accounts';
 import type { Clock, Timer } from '../clock';
 import { batchCardFields } from '../delivery';
 import type { StateStore } from '../events';
@@ -145,7 +155,8 @@ export interface RunnerOptions {
   readonly launcher: Pick<Launcher, 'projectEnv' | 'session'>;
   /** Usage limits, refusals and the monthly cap, per account. */
   readonly accounts: Pick<AccountRuntime, 'blocked' | 'rateLimited' | 'refused' | 'sessionEnded'> &
-    Pick<AccountPreparer, 'prepare'>;
+    Pick<AccountPreparer, 'prepare'> &
+    Pick<AccountLimits, 'usageReported'>;
   /** One start at a time on a subscription account. */
   readonly startGate: StartGate;
   onLaneFreed(): void;
@@ -162,6 +173,12 @@ export interface Runner {
   stopAccount(accountId: AccountId, reason: StopReason): Promise<void>;
   stopAll(reason: StopReason): Promise<void>;
   isRunning(id: WorkstreamId): boolean;
+  /**
+   * Asks the project's lanes whose session runs on the account to hand off; a lane already asked isn't
+   * asked again. A lane between sessions, or waiting for its start slot, needs no nudge: its next
+   * session runs where the project is now.
+   */
+  handOff(projectId: ProjectId, accountId: AccountId, reason: string): void;
   idle(): Promise<void>;
   deliverParkedAnswer(target: InboxTarget, item: InboxItemDto): void;
 }
@@ -252,12 +269,30 @@ function permissionAnswer(item: InboxItemDto): {
   };
 }
 
+/** Why a session is asked to hand off: its context filled, or its account neared its usage limit. */
+type HandoffCause = 'context' | 'account';
+
+/** What a session is told when asked to hand off, by why it is asked. */
+const NUDGES: Readonly<
+  Record<HandoffCause, { readonly edit: string; readonly readOnly: string; readonly firm: string }>
+> = {
+  context: { edit: HANDOFF_NUDGE, readOnly: HANDOFF_NUDGE_READ_ONLY, firm: HANDOFF_FIRM_NUDGE },
+  account: {
+    edit: HANDOFF_NUDGE_ACCOUNT,
+    readOnly: HANDOFF_NUDGE_ACCOUNT_READ_ONLY,
+    firm: HANDOFF_FIRM_NUDGE_ACCOUNT,
+  },
+};
+
 interface Control {
   readonly fence: number;
+  readonly projectId: ProjectId;
   /** The account of the lane's current session, or of its next one: read from the project before each session, so a move applies at the lane's next session. */
   accountId: AccountId;
   stopReason: StopReason | null;
   handle: SessionHandle | null;
+  /** Set while a session runs: asks it to hand off once. */
+  requestHandoff: ((cause: HandoffCause, reason: string) => void) | null;
   /** Set while the gate runs; aborting it kills the gate's process group. */
   gateAbort: AbortController | null;
   /** Set while a session runs; ends its inbox waits so later answers go to the card. */
@@ -269,6 +304,8 @@ interface Control {
 interface SessionState {
   providerSessionId: string | null;
   handoffRequested: boolean;
+  /** Why the session was asked to hand off, so a firm nudge uses the same words. */
+  handoffCause: HandoffCause;
   /**
    * The first context reading of the conversation's briefing, which its handoff margin is measured
    * from: inherited by a resumed session, taken at the first reading of a briefed session that has
@@ -912,6 +949,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     const st: SessionState = {
       providerSessionId: resumeId,
       handoffRequested: false,
+      handoffCause: 'context',
       briefingBaselinePct: inheritedBaselinePct,
       awaitingBriefingBaseline: briefed && inheritedBaselinePct === null,
       firmSent: false,
@@ -1028,6 +1066,18 @@ export function createRunner(opts: RunnerOptions): Runner {
       throw error;
     }
     ctl.handle = handle;
+    /** Asks the session to hand off, once: its context filled, or its account neared its usage limit. */
+    const requestHandoff = (cause: HandoffCause, reason: string): void => {
+      if (st.handoffRequested || st.outcome) return;
+      st.handoffRequested = true;
+      st.handoffCause = cause;
+      opts.state.write((ctx) => {
+        if (getWorkstreamRow(ctx.tx, id).state === S.Running)
+          transitionWorkstream(ctx, id, { to: S.HandingOff, fence: ctl.fence, reason });
+      });
+      handle.send(readOnly ? NUDGES[cause].readOnly : NUDGES[cause].edit);
+    };
+    ctl.requestHandoff = requestHandoff;
 
     let outcome: Outcome;
     try {
@@ -1045,8 +1095,18 @@ export function createRunner(opts: RunnerOptions): Runner {
               if (action.kind === 'answer')
                 patchWorkstream(ctx, id, ctl.fence, { nextAction: freshAction(ctx.tx, id) });
               const current = getWorkstreamRow(ctx.tx, id).state;
-              if (current === S.Starting || current === S.HandingOff)
+              if (current === S.Starting) {
                 transitionWorkstream(ctx, id, { to: S.Running, fence: ctl.fence });
+                // Asked to hand off before it reported starting: the board shows it handing off, not running.
+                if (st.handoffRequested)
+                  transitionWorkstream(ctx, id, {
+                    to: S.HandingOff,
+                    fence: ctl.fence,
+                    reason: 'asked to hand off while starting',
+                  });
+              } else if (current === S.HandingOff && !st.handoffRequested) {
+                transitionWorkstream(ctx, id, { to: S.Running, fence: ctl.fence });
+              }
             });
             break;
           }
@@ -1089,24 +1149,14 @@ export function createRunner(opts: RunnerOptions): Runner {
                     st.briefingBaselinePct + HANDOFF_BASELINE_MARGIN_PCT,
                   );
             if (!st.handoffRequested && event.percentage >= handoffAt) {
-              st.handoffRequested = true;
-              opts.state.write((ctx) => {
-                if (getWorkstreamRow(ctx.tx, id).state === S.Running) {
-                  transitionWorkstream(ctx, id, {
-                    to: S.HandingOff,
-                    fence: ctl.fence,
-                    reason: `context at ${String(event.percentage)}%`,
-                  });
-                }
-              });
-              handle.send(readOnly ? HANDOFF_NUDGE_READ_ONLY : HANDOFF_NUDGE);
+              requestHandoff('context', `context at ${String(event.percentage)}%`);
             } else if (
               st.handoffRequested &&
               !st.firmSent &&
               event.percentage >= project.nudgePct
             ) {
               st.firmSent = true;
-              handle.send(HANDOFF_FIRM_NUDGE);
+              handle.send(NUDGES[st.handoffCause].firm);
             }
             break;
           }
@@ -1125,6 +1175,18 @@ export function createRunner(opts: RunnerOptions): Runner {
             handle.send(compactionReinjection(buildContextPack(db, getWorkstream(db, id))));
             break;
           case 'rate_limit':
+            // Logged without any identity: what a Max plan reports here is not yet verified.
+            log.info(
+              { status: event.status, utilization: event.utilization, limitType: event.limitType },
+              'usage reported',
+            );
+            // First, so a project that moves to its fallback is off the account before the pause raises cards.
+            opts.accounts.usageReported(ctl.accountId, {
+              status: event.status,
+              utilization: event.utilization,
+              limitType: event.limitType,
+              resetsAt: event.resetsAt,
+            });
             if (event.status === 'rejected' && !st.outcome) {
               st.outcome = {
                 kind: 'paused',
@@ -1151,7 +1213,7 @@ export function createRunner(opts: RunnerOptions): Runner {
               await handle.stop();
             } else if (st.handoffRequested && !st.firmSent) {
               st.firmSent = true;
-              handle.send(HANDOFF_FIRM_NUDGE);
+              handle.send(NUDGES[st.handoffCause].firm);
             } else if (
               readOnly &&
               currentStep(getWorkstreamRow(db, id)).result?.sessionId !== session.id &&
@@ -1190,6 +1252,12 @@ export function createRunner(opts: RunnerOptions): Runner {
                     until: null,
                     providerSessionId: st.providerSessionId,
                   };
+                  opts.accounts.usageReported(ctl.accountId, {
+                    status: 'rejected',
+                    utilization: null,
+                    limitType: null,
+                    resetsAt: null,
+                  });
                   opts.accounts.rateLimited(ctl.accountId, null, project.id);
                   break;
                 case SessionEndReason.AccountRefused:
@@ -1237,6 +1305,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       if (!sawEnded) await handle.stop().catch(() => undefined);
       opts.live.unregister(session.id);
       ctl.handle = null;
+      ctl.requestHandoff = null;
       ctl.endWaits = null;
       // Every exit ends the session row and frees the workstream's session slot, so a parked answer
       // is delivered, the lane is freed and the session's MCP token stops working.
@@ -1582,11 +1651,14 @@ export function createRunner(opts: RunnerOptions): Runner {
   const runner: Runner = {
     launch(id, fence) {
       if (active.has(id)) return;
+      const workstream = getWorkstreamRow(db, id);
       const ctl: Control = {
         fence,
-        accountId: getProject(db, getWorkstreamRow(db, id).projectId).accountId,
+        projectId: workstream.projectId,
+        accountId: getProject(db, workstream.projectId).accountId,
         stopReason: null,
         handle: null,
+        requestHandoff: null,
         gateAbort: null,
         endWaits: null,
         done: Promise.resolve(),
@@ -1625,6 +1697,11 @@ export function createRunner(opts: RunnerOptions): Runner {
       await Promise.all([...active.keys()].map((id) => runner.stop(id, reason)));
     },
     isRunning: (id) => active.has(id),
+    handOff(projectId, accountId, reason) {
+      for (const c of active.values())
+        if (c.projectId === projectId && c.accountId === accountId)
+          c.requestHandoff?.('account', reason);
+    },
     idle: () => (active.size === 0 ? Promise.resolve() : new Promise((r) => idleWaiters.push(r))),
     deliverParkedAnswer(target, item) {
       const row = getWorkstreamRow(db, target.workstreamId);

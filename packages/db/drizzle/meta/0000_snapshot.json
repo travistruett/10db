@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "fd462500-bd8b-4a25-9a22-3c3bd7be813c",
+  "id": "fec19517-2484-4f38-8f09-51a6fd2fe046",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "aa_models": {
@@ -1771,6 +1771,21 @@
           "notNull": false,
           "autoincrement": false
         },
+        "fallback_account_id": {
+          "name": "fallback_account_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "usage_handoff_at": {
+          "name": "usage_handoff_at",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0.95
+        },
         "billing_mode": {
           "name": "billing_mode",
           "type": "text",
@@ -1902,6 +1917,19 @@
           "tableTo": "accounts",
           "columnsFrom": [
             "moved_from_account_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "projects_fallback_account_id_accounts_id_fk": {
+          "name": "projects_fallback_account_id_accounts_id_fk",
+          "tableFrom": "projects",
+          "tableTo": "accounts",
+          "columnsFrom": [
+            "fallback_account_id"
           ],
           "columnsTo": [
             "id"

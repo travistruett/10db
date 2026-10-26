@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { USAGE_HANDOFF_AT, USAGE_HANDOFF_MAX, USAGE_HANDOFF_MIN } from './accounts';
 import { AllowedCommands } from './allowed-commands';
 import { BranchName, PrTitlePrefix } from './git-names';
 import {
@@ -88,6 +89,8 @@ export const DEFAULT_HAZARDS: readonly HazardDef[] = [
   },
 ];
 
+const UsageHandoffAt = z.number().min(USAGE_HANDOFF_MIN).max(USAGE_HANDOFF_MAX);
+
 export const ProjectInput = z
   .object({
     name: z.string().min(1),
@@ -115,6 +118,14 @@ export const ProjectInput = z
     prTitlePrefix: PrTitlePrefix.nullable().default(null),
     /** The account that pays; absent means the default account. */
     accountId: AccountId.optional(),
+    /**
+     * The account 10db moves the project to on its own near its account's usage limit. Claude Code
+     * reports usage short of the limit only for a subscription, so on a keyed account only the hard
+     * limit moves it.
+     */
+    fallbackAccountId: AccountId.nullable().default(null),
+    /** The share of the account's usage limit at which the project hands off. */
+    usageHandoffAt: UsageHandoffAt.default(USAGE_HANDOFF_AT),
     /** Command prefixes a lane runs without a permission card, beyond the gate command. */
     allowedCommands: AllowedCommands.default([]),
   })
@@ -146,6 +157,8 @@ export const ProjectDto = z.object({
    * back. Null with a `movedFromAccountId` when nobody said; 10db then asks after its default pause.
    */
   moveBackAt: Timestamp.nullable(),
+  fallbackAccountId: AccountId.nullable(),
+  usageHandoffAt: z.number(),
   billingMode: z.enum(BillingMode),
   model: z.string(),
   effort: z.enum(Effort),
@@ -180,6 +193,8 @@ export const ProjectPatch = z
     prTitlePrefix: PrTitlePrefix.nullable(),
     /** Moves the project to another account; work in flight follows at each lane's next session. */
     accountId: AccountId,
+    fallbackAccountId: AccountId.nullable(),
+    usageHandoffAt: UsageHandoffAt,
     allowedCommands: AllowedCommands,
   })
   .partial()
