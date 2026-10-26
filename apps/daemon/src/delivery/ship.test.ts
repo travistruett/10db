@@ -16,7 +16,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { waitFor } from '../../test/fixtures';
 import { alive } from '../../test/orphan-gate';
-import { installPrePushHook } from '../../test/pre-push-hook';
+import { installPrePushHook, writePrePushHook } from '../../test/pre-push-hook';
 import { GhError } from '../github';
 
 /** The repo's template, as a repository commits it at `.github/pull_request_template.md`. */
@@ -66,6 +66,11 @@ async function finishAll(batch: BatchDto) {
   return getBatch(h.store.db, batch.id);
 }
 
+/** The batch's lines in daemon.log, oldest first. */
+function batchLines(batchId: string) {
+  return h.logs.lines().filter((line) => line['batchId'] === batchId);
+}
+
 describe('shipping', () => {
   it('closes a batch with no commits beyond its base, pushing nothing', async () => {
     h = createDeliveryHarness();
@@ -74,6 +79,82 @@ describe('shipping', () => {
     expect(shipped.state).toBe('CLOSED');
     expect(onOrigin(batch.branch)).toBeNull();
     expect(h.gh.prCreates()).toEqual([]);
+    expect(batchLines(batch.id)).toMatchObject([
+      { msg: 'batch branch cut' },
+      { msg: 'batch closed', reason: 'no commits beyond the base' },
+    ]);
+  });
+
+  it('logs the cut, each gate run, the push, the pull request and the ship result, in order', async () => {
+    h = createDeliveryHarness();
+    const base = h.git$('rev-parse', 'HEAD');
+    const { batch } = await openBatch('Add greetings', 'Alpha', 'Beta');
+    h.commit('src/api/alpha.txt');
+    h.commit('src/ui/beta.txt');
+    const shipped = await finishAll(batch);
+    const lines = batchLines(batch.id);
+    expect(lines.map((line) => line['msg'])).toEqual([
+      'batch branch cut',
+      'gate started',
+      'gate finished',
+      'git push finished',
+      'gh pr create finished',
+      'batch shipped',
+    ]);
+    const [cut, started, finished, push, pr, done] = lines;
+    expect(cut).toMatchObject({ branch: batch.branch, baseSha: base });
+    expect(started).toMatchObject({ command: 'true' });
+    expect(String(started?.['logPath'])).toContain(join(h.dataDir, 'logs', 'gate'));
+    expect(finished).toMatchObject({
+      exitCode: 0,
+      timedOut: false,
+      aborted: false,
+      logPath: started?.['logPath'],
+    });
+    expect(typeof finished?.['durationMs']).toBe('number');
+    expect(push).toMatchObject({ branch: batch.branch });
+    expect(typeof push?.['durationMs']).toBe('number');
+    expect(pr).toMatchObject({
+      repo: 'acme/widgets',
+      baseBranch: 'main',
+      branch: batch.branch,
+      prUrl: 'https://github.com/acme/widgets/pull/1',
+    });
+    expect(done).toMatchObject({ prUrl: shipped.prUrl });
+  });
+
+  it("logs the pre-push hook's output with the push's duration", async () => {
+    h = createDeliveryHarness();
+    const { batch } = await openBatch('Greetings', 'Alpha');
+    h.commit('src/api/alpha.txt');
+    writePrePushHook(h.repo, 'echo "hook: 3 checks passed"; echo "hook: lint warns" >&2');
+    await finishAll(batch);
+    const push = batchLines(batch.id).find((line) => line['msg'] === 'git push finished');
+    expect(typeof push?.['durationMs']).toBe('number');
+    expect(String(push?.['output'])).toContain('hook: 3 checks passed');
+    expect(String(push?.['output'])).toContain('hook: lint warns');
+  });
+
+  it('logs a failed push with its duration, kind and output, then the batch as not shipped', async () => {
+    h = createDeliveryHarness();
+    const { batch } = await openBatch('Greetings', 'Alpha');
+    h.commit('src/api/alpha.txt');
+    h.teammatePush(batch.branch ?? '', 'src/api/theirs.txt');
+    const ended = await finishAll(batch);
+    expect(ended.state).toBe('FAILED');
+    const lines = batchLines(batch.id);
+    expect(lines.map((line) => line['msg'])).toEqual([
+      'batch branch cut',
+      'gate started',
+      'gate finished',
+      'git push failed',
+      'batch not shipped',
+    ]);
+    const [, , , push, notShipped] = lines;
+    expect(push).toMatchObject({ branch: batch.branch, kind: 'rejected' });
+    expect(typeof push?.['durationMs']).toBe('number');
+    expect(String(push?.['output'])).toContain('rejected');
+    expect(notShipped).toMatchObject({ failure: 'push_rejected' });
   });
 
   it('pushes the branch, opens one PR titled with the prefix and records its URL', async () => {
@@ -219,6 +300,10 @@ describe('shipping', () => {
     expect(ended).toMatchObject({ state: 'FAILED', failure: row.failure });
     expect(h.only(h.cards()).title).toContain(row.title);
     expect(h.gh.prCreates()).toEqual([]);
+    expect(batchLines(batch.id).at(-1)).toMatchObject({
+      msg: 'batch not shipped',
+      failure: row.failure,
+    });
     if (
       row.failure !== 'push_rejected' &&
       row.failure !== 'gh_unavailable' &&

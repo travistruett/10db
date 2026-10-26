@@ -68,6 +68,7 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
     patchTask: track('patchTask'),
     stepPlan: track('stepPlan'),
     startBatch: track('startBatch'),
+    listBatches: track('listBatches'),
     shipBatch: track('shipBatch'),
     abandonBatch: track('abandonBatch'),
     moveTask: track('moveTask'),
@@ -583,6 +584,20 @@ describe('batch routes', () => {
     method: 'POST',
     headers: { Authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+
+  it("answers a project's batches through the service, and refuses a malformed project id", async () => {
+    const path = `/projects/${batch.projectId}/batches`;
+    const ok = await app(stubServices({ listBatches: () => [batch] })).request(path, {
+      headers: { Authorization: `Bearer ${TOKEN}` },
+    });
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toEqual([batch]);
+    const bad = await app().request('/projects/not-a-project/batches', {
+      headers: { Authorization: `Bearer ${TOKEN}` },
+    });
+    expect(bad.status).toBe(400);
+    expect(reached).toEqual([]);
   });
 
   it('answers 202 with the batch for a batch start, and 400 for an empty one', async () => {

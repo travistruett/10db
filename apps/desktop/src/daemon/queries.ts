@@ -42,6 +42,7 @@ export const queryKeys = {
   accounts: ['accounts'],
   projects: ['projects'],
   tasks: (projectId: ProjectId) => ['tasks', projectId] as const,
+  batches: (projectId: ProjectId) => ['batches', projectId] as const,
   boardColumns: (projectId: ProjectId) => ['board-columns', projectId] as const,
   workstreams: (active: boolean) => ['workstreams', { active }] as const,
   inbox: ['inbox'],
@@ -53,6 +54,7 @@ export const queryKeys = {
 const AccountList = z.array(AccountDto);
 const ProjectList = z.array(ProjectViewDto);
 const TaskList = z.array(TaskDto);
+const BatchList = z.array(BatchDto);
 const WorkstreamList = z.array(WorkstreamDto);
 const BoardColumnList = z.array(BoardColumnDto);
 const FlowList = z.array(FlowDto);
@@ -91,6 +93,22 @@ export function useTasks(projectId: ProjectId | null) {
         ? readJson(
             await client.projects[':projectId'].tasks.$get({ param: { projectId } }),
             TaskList,
+          )
+        : [],
+    enabled: projectId !== null,
+  });
+}
+
+/** Every batch of the project, newest first; the board lists them and finds each shipped pull request. */
+export function useBatches(projectId: ProjectId | null) {
+  const { client } = useDaemon();
+  return useQuery({
+    queryKey: projectId ? queryKeys.batches(projectId) : ['batches', 'none'],
+    queryFn: async () =>
+      projectId
+        ? readJson(
+            await client.projects[':projectId'].batches.$get({ param: { projectId } }),
+            BatchList,
           )
         : [],
     enabled: projectId !== null,
@@ -182,6 +200,7 @@ export function useStartTask() {
         queryClient.invalidateQueries({ queryKey: ['tasks'] }),
         queryClient.invalidateQueries({ queryKey: ['workstreams'] }),
         queryClient.invalidateQueries({ queryKey: queryKeys.projects }),
+        queryClient.invalidateQueries({ queryKey: ['batches'] }),
       ]),
   });
 }
@@ -210,6 +229,7 @@ export function useAbandonBatch() {
 function invalidateBatchViews(queryClient: QueryClient): Promise<unknown> {
   return Promise.all([
     queryClient.invalidateQueries({ queryKey: queryKeys.projects }),
+    queryClient.invalidateQueries({ queryKey: ['batches'] }),
     queryClient.invalidateQueries({ queryKey: ['workstreams'] }),
     queryClient.invalidateQueries({ queryKey: ['tasks'] }),
   ]);

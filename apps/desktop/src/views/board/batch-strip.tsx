@@ -8,45 +8,13 @@ import {
   type BatchDto,
   type WorkstreamDto,
 } from '@10db/contracts';
-import {
-  Alert,
-  Anchor,
-  Badge,
-  Button,
-  Code,
-  Group,
-  Paper,
-  Stack,
-  Text,
-  type MantineColor,
-} from '@mantine/core';
-import { useState } from 'react';
+import { Alert, Badge, Button, Code, Group, Paper, Stack, Text } from '@mantine/core';
 import { useAbandonBatch, useShipBatch } from '../../daemon/queries';
-import { isTauri, openInBrowser } from '../../desktop/tauri';
 import { StateBadge } from '../factory/state-badge';
+import { BATCH_COLORS, BATCH_LABELS } from './batch-labels';
+import { PullRequestLink } from './pull-request-link';
 
 const B = BatchState;
-
-/** DESIGN.md status colors: blue in progress, red failed, green shipped, gray idle or over. */
-const BATCH_COLORS: Readonly<Record<BatchState, MantineColor>> = {
-  [B.Cutting]: 'blue',
-  [B.Open]: 'blue',
-  [B.Shipping]: 'blue',
-  [B.Shipped]: 'green',
-  [B.Closed]: 'gray',
-  [B.Failed]: 'red',
-  [B.Abandoned]: 'gray',
-};
-
-const BATCH_LABELS: Readonly<Record<BatchState, string>> = {
-  [B.Cutting]: 'Cutting branch',
-  [B.Open]: 'Open',
-  [B.Shipping]: 'Shipping',
-  [B.Shipped]: 'Shipped',
-  [B.Closed]: 'Closed: no changes',
-  [B.Failed]: 'Not shipped',
-  [B.Abandoned]: 'Abandoned',
-};
 
 const FAILURE_LABELS: Readonly<Record<BatchFailure, string>> = {
   [BatchFailure.WrongBranch]: 'The checkout is not on the batch branch',
@@ -74,8 +42,6 @@ export function BatchStrip({
   const canShipAnyway = batch.state === B.Open && readiness === ShipReadiness.ShipAnyway;
   const canAbandon = batch.state === B.Open || batch.state === B.Failed;
   const error = ship.error ?? abandon.error;
-  const [openFailure, setOpenFailure] = useState<string | null>(null);
-  const prUrl = batch.prUrl;
   // Each action clears the other's error first, so the strip shows only the latest action's refusal.
   const shipBatch = () => {
     abandon.reset();
@@ -95,27 +61,7 @@ export function BatchStrip({
             {BATCH_LABELS[batch.state]}
           </Badge>
           {batch.branch ? <Code>{batch.branch}</Code> : null}
-          {prUrl ? (
-            <Anchor
-              href={prUrl}
-              target="_blank"
-              rel="noreferrer"
-              size="sm"
-              onClick={(event) => {
-                // A browser opens the tab itself; the desktop app's webview would follow nothing.
-                if (!isTauri()) return;
-                event.preventDefault();
-                setOpenFailure(null);
-                openInBrowser(prUrl).catch((failure: unknown) => {
-                  setOpenFailure(
-                    `Couldn't open ${prUrl}: ${failure instanceof Error ? failure.message : String(failure)}`,
-                  );
-                });
-              }}
-            >
-              Pull request
-            </Anchor>
-          ) : null}
+          {batch.prUrl ? <PullRequestLink url={batch.prUrl} /> : null}
         </Group>
         {batch.failure ? (
           <Text size="sm" c="red">
@@ -135,11 +81,6 @@ export function BatchStrip({
         {error ? (
           <Alert color="red" variant="light">
             {error.message}
-          </Alert>
-        ) : null}
-        {openFailure ? (
-          <Alert color="red" variant="light">
-            {openFailure}
           </Alert>
         ) : null}
         {batch.state === B.Failed || canShipAnyway || canAbandon ? (
