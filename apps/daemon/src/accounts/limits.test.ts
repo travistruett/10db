@@ -1,6 +1,7 @@
 import {
   ACCOUNT_CARD_DETAIL,
   AccountCardChoice,
+  ConflictError,
   type AccountDto,
   type AccountId,
   type InboxAnswer,
@@ -14,6 +15,7 @@ import {
   getProject,
   listInbox,
   patchAccount,
+  recordAccountSecret,
   seedAccount,
   seedProject,
   type Store,
@@ -169,9 +171,9 @@ describe('usage thresholds', () => {
     limits.usageReported(plan, report(0.98));
     expect(openCards()).toEqual([]);
 
-    // The window reset and usage climbed again: a new crossing.
-    limits.usageReported(plan, report(0.2));
-    limits.usageReported(plan, report(0.95));
+    // The window reset (a later reset time) and usage climbed again: a new crossing.
+    limits.usageReported(plan, { ...report(0.2), resetsAt: inMinutes(420) });
+    limits.usageReported(plan, { ...report(0.95), resetsAt: inMinutes(420) });
     const [again] = openCards();
     if (!again) throw new Error('no card asked again');
     inbox.answer(again.id, { choice: 'Move to Second plan · second@example.com' });
@@ -212,6 +214,8 @@ describe('usage thresholds', () => {
       monthlyCapUsd: 50,
     });
     const third = seedAccount(store, { kind: 'claude_subscription', label: 'Third plan' });
+    // With its secret set the key is ready, so only the missing cap keeps it from taking the project.
+    state.write((ctx) => recordAccountSecret(ctx, key.id, 'fingerprint'));
     const capless = busy(seedProject(store, { name: 'capless', fallbackAccountId: key.id }));
     state.write((ctx) => patchAccount(ctx, key.id, { monthlyCapUsd: null }));
     const held = busy(seedProject(store, { name: 'held', fallbackAccountId: second.id }));
@@ -227,7 +231,7 @@ describe('usage thresholds', () => {
     ]);
     // The builder may still pick them, and each option says what it needs first.
     expect(asked[0]?.options.map((o) => o.label)).toEqual([
-      'Move to Client key (needs a secret)',
+      'Move to Client key',
       'Move to Third plan (needs sign-in)',
       'Later',
     ]);
@@ -251,6 +255,49 @@ describe('usage thresholds', () => {
     expect(getProject(state.db, early.id).accountId).toBe(early.accountId);
     limits.usageReported(early.accountId, report(0.85));
     expect(getProject(state.db, early.id).accountId).toBe(second.id);
+  });
+
+  it('raises a new card for a second automatic move, not the first one left open', () => {
+    const project = busy(seedProject(store, { fallbackAccountId: second.id }));
+    const plan = project.accountId;
+    limits.usageReported(plan, report(0.96));
+    const [first] = openCards();
+    moves.move(project.id, plan, { cause: MoveCause.Builder });
+    limits.usageReported(plan, report(0.97));
+    expect(getProject(state.db, project.id).accountId).toBe(second.id);
+    const open = openCards();
+    expect(open).toHaveLength(1);
+    expect(open[0]?.id).not.toBe(first?.id);
+  });
+
+  it('closes a threshold card when usage falls back in a new window, so a late answer is refused', () => {
+    const project = busy(seedProject(store));
+    const plan = project.accountId;
+    limits.usageReported(plan, report(0.96));
+    const [stale] = openCards();
+    if (!stale) throw new Error('no card asked');
+    limits.usageReported(plan, { ...report(0.2), resetsAt: inMinutes(420) });
+    expect(openCards()).toEqual([]);
+    expect(() =>
+      inbox.answer(stale.id, { choice: 'Move to Second plan · second@example.com' }),
+    ).toThrow(ConflictError);
+    expect(getProject(state.db, project.id).accountId).toBe(plan);
+    limits.usageReported(plan, { ...report(0.95), resetsAt: inMinutes(420) });
+    const [fresh] = openCards();
+    expect(fresh?.id).not.toBe(stale.id);
+  });
+
+  it('does not ask again when a concurrent session reports a lower share in the same window', () => {
+    const project = busy(seedProject(store));
+    const plan = project.accountId;
+    limits.usageReported(plan, report(0.96));
+    const [asked] = openCards();
+    if (!asked) throw new Error('no card asked');
+    inbox.answer(asked.id, { choice: AccountCardChoice.Later });
+    limits.usageReported(plan, report(0.94));
+    limits.usageReported(plan, report(0.96));
+    expect(openCards()).toEqual([]);
+    expect(getProject(state.db, project.id).accountId).toBe(plan);
   });
 
   it('holds the move back while the account it left still reports usage past the threshold', () => {

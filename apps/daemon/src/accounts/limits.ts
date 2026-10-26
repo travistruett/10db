@@ -1,8 +1,15 @@
 import type { AccountId, ProjectId } from '@10db/contracts';
-import { getAccountRow } from '@10db/db';
+import { findOpenByFoldKey, getAccountRow } from '@10db/db';
 import type { StateStore } from '../events';
 import type { InboxService } from '../inbox';
-import { movedCard, usageHighCard, type AccountCard } from './cards';
+import {
+  accountFoldKey,
+  MOVED_CARD,
+  movedCard,
+  USAGE_HIGH_CARD,
+  usageHighCard,
+  type AccountCard,
+} from './cards';
 import {
   MoveCause,
   moveTargets,
@@ -18,7 +25,8 @@ export interface AccountLimits {
    * A session on the account reported its usage limit. Each project on the account with work in
    * flight that is past its threshold hands its lanes off and moves to its fallback, or the builder is
    * asked; at the limit itself one with a fallback moves at once. A crossing acts once per project and
-   * limit until usage drops back or the project moves.
+   * limit until the limit's window resets (another reset time, or a lower share with none reported)
+   * or the project moves; a lower share from a concurrent session in the same window changes nothing.
    */
   usageReported(accountId: AccountId, report: UsageReport): void;
   /** The project moved: the crossings it met on the account it left no longer hold. */
@@ -33,9 +41,17 @@ export function createAccountLimits(opts: {
   readonly reports: Pick<UsageReports, 'record'>;
 }): AccountLimits {
   const db = opts.state.db;
-  /** Per project, the `account:limit` keys past its threshold: in memory, so a restart may ask once more. */
-  const crossed = new Map<ProjectId, Set<string>>();
+  /**
+   * Per project, the `account:limit` keys past its threshold, each with the reset time of the window it
+   * crossed in (null when none was reported): in memory, so a restart may ask once more.
+   */
+  const crossed = new Map<ProjectId, Map<string, number | null>>();
   const isPaused = (id: AccountId): boolean => opts.pauses.pausedFor(id) !== null;
+  /** Closes the project's open card of this kind on the account, so the next one is raised afresh. */
+  const withdraw = (projectId: ProjectId, accountId: AccountId, about: string): void => {
+    const open = findOpenByFoldKey(db, projectId, accountFoldKey(accountId, about));
+    if (open) opts.inbox.withdraw(open.id);
+  };
   const raise = (projectId: ProjectId, card: AccountCard): void => {
     opts.inbox.flag({
       projectId,
@@ -57,15 +73,26 @@ export function createAccountLimits(opts: {
       for (const project of projectsWithWork(db, accountId)) {
         if (!atLimit) {
           if (report.utilization === null) continue;
-          const keys = crossed.get(project.id) ?? new Set<string>();
+          const marks = crossed.get(project.id) ?? new Map<string, number | null>();
           const key = `${accountId}:${report.limitType ?? ''}`;
+          const window = report.resetsAt?.getTime() ?? null;
+          const crossedBefore = marks.has(key);
+          const markedWindow = marks.get(key) ?? null;
+          const unknownWindow = window === null || markedWindow === null;
           if (report.utilization < project.usageHandoffAt) {
-            keys.delete(key);
+            // Usage only falls when its window resets: a different reset time, or none reported to say.
+            if (crossedBefore && (unknownWindow || markedWindow !== window)) {
+              marks.delete(key);
+              withdraw(project.id, accountId, USAGE_HIGH_CARD);
+            }
             continue;
           }
-          if (keys.has(key)) continue;
-          keys.add(key);
-          crossed.set(project.id, keys);
+          if (crossedBefore && (unknownWindow || markedWindow === window)) {
+            if (window !== null) marks.set(key, window);
+            continue;
+          }
+          marks.set(key, window);
+          crossed.set(project.id, marks);
         }
         const fallback = usableFallback(db, project, isPaused);
         if (fallback) {
@@ -75,6 +102,8 @@ export function createAccountLimits(opts: {
             resetsAt: report.resetsAt,
             handOff: !atLimit,
           });
+          // A card from an earlier move would absorb this one: each move says so afresh.
+          withdraw(project.id, accountId, MOVED_CARD);
           raise(project.id, movedCard(project, account, fallback, report));
         } else if (!atLimit) {
           raise(

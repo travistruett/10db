@@ -10,6 +10,7 @@ import {
   acquireLease,
   activeClaims,
   getAccount,
+  getProject,
   getTask,
   getWorkstream,
   listEventsAfter,
@@ -23,7 +24,13 @@ import {
   transitionWorkstream,
 } from '@10db/db';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { HANDOFF_NUDGE, HANDOFF_NUDGE_ACCOUNT, RESULT_NUDGE } from '../briefing';
+import {
+  HANDOFF_FIRM_NUDGE,
+  HANDOFF_FIRM_NUDGE_ACCOUNT,
+  HANDOFF_NUDGE,
+  HANDOFF_NUDGE_ACCOUNT,
+  RESULT_NUDGE,
+} from '../briefing';
 import { createLauncher } from '../environment';
 import type { SessionHandle } from '../sessions';
 import { createMemoryKeychain, handoffArgs, waitFor } from '../../test/fixtures';
@@ -1936,6 +1943,60 @@ describe('usage thresholds', () => {
     ]);
     expect(engine.adapter.prompts[1]?.prompt).toContain('Next action: Write the second file');
     expect(engine.usageReports.map((r) => r.report.utilization)).toEqual([0.96, 0.97]);
+  });
+
+  it('nudges a lane once however often it is asked, then firmly in the account words', async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        [
+          { do: 'await_message', contains: 'near its usage limit' },
+          // The turn ends with no handoff written: the firm nudge follows.
+          turn,
+          { do: 'await_message', contains: 'about to reach its usage limit' },
+          {
+            do: 'mcp',
+            tool: 'write_handoff',
+            args: handoffArgs('op-usage-0003', 'Write the second file'),
+          },
+          turn,
+        ],
+        [write('src/api/b.txt'), commit('op-usage-0004', ['src/api/b.txt']), turn],
+      ],
+    });
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await waitFor(() => engine.adapter.prompts.length === 1);
+    const { accountId, id: projectId } = engine.project;
+    engine.runner.handOff(projectId, accountId, 'first');
+    engine.runner.handOff(projectId, accountId, 'second');
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('DONE');
+    const sent = engine.adapter.sent.map((m) => m.text);
+    expect(sent.filter((text) => text === HANDOFF_NUDGE_ACCOUNT)).toHaveLength(1);
+    expect(sent.filter((text) => text === HANDOFF_FIRM_NUDGE_ACCOUNT)).toHaveLength(1);
+    expect(sent).not.toContain(HANDOFF_NUDGE);
+    expect(sent).not.toContain(HANDOFF_FIRM_NUDGE);
+  });
+
+  it('moves a project with a fallback when a session ends rate limited with no report', async () => {
+    engine = await createTestEngine({
+      Alpha: [[{ do: 'end', reason: 'rate_limited' }]],
+    });
+    const fallback = seedAccount(engine.store, {
+      kind: 'claude_subscription',
+      label: 'Second plan',
+    });
+    engine.state.write((ctx) =>
+      patchAccount(ctx, fallback.id, { expectedIdentity: 'second@example.com' }),
+    );
+    engine.state.write((ctx) =>
+      patchProject(ctx, engine.project.id, { fallbackAccountId: fallback.id }),
+    );
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(engine.usageReports.map((r) => r.report.status)).toEqual(['rejected']);
+    expect(getProject(engine.store.db, engine.project.id).accountId).toBe(fallback.id);
   });
 });
 

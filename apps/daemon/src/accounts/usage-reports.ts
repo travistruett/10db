@@ -14,31 +14,49 @@ export interface UsageReport {
 export interface UsageReports {
   record(accountId: AccountId, report: UsageReport): void;
   /**
-   * When to look again if the account's latest report has its usage at or past `threshold`; null
-   * when it hasn't, when that window has reset, or when nothing was heard for `staleMs`.
+   * When to look again if any limit of the account has its latest report at or past `threshold`: the
+   * last of their resets. Null when none has, when those windows have reset, or when nothing was
+   * heard for `staleMs`.
    */
   stillHigh(accountId: AccountId, threshold: number): Date | null;
 }
 
-/** The latest report with a utilization per account, in memory: what running sessions said lately. */
+interface Heard {
+  readonly report: UsageReport;
+  readonly at: Date;
+}
+
+/**
+ * The latest report with a utilization per account and limit type, in memory: what running sessions
+ * said lately. Each limit keeps its own, so a report of one never hides another.
+ */
 export function createUsageReports(opts: {
   readonly clock: Clock;
   readonly staleMs: number;
 }): UsageReports {
-  const latest = new Map<AccountId, { readonly report: UsageReport; readonly at: Date }>();
+  const latest = new Map<AccountId, Map<string, Heard>>();
   return {
     record(accountId, report) {
-      if (report.utilization !== null) latest.set(accountId, { report, at: opts.clock.now() });
+      if (report.utilization === null) return;
+      const byLimit = latest.get(accountId) ?? new Map<string, Heard>();
+      byLimit.set(report.limitType ?? '', { report, at: opts.clock.now() });
+      latest.set(accountId, byLimit);
     },
     stillHigh(accountId, threshold) {
-      const seen = latest.get(accountId);
       const now = opts.clock.now();
-      const utilization = seen?.report.utilization ?? null;
-      if (!seen || utilization === null || utilization < threshold) return null;
-      if (now.getTime() - seen.at.getTime() >= opts.staleMs) return null;
-      if (seen.report.resetsAt !== null)
-        return seen.report.resetsAt > now ? seen.report.resetsAt : null;
-      return new Date(now.getTime() + opts.staleMs);
+      let last: Date | null = null;
+      for (const { report, at } of latest.get(accountId)?.values() ?? []) {
+        if (report.utilization === null || report.utilization < threshold) continue;
+        if (now.getTime() - at.getTime() >= opts.staleMs) continue;
+        const until =
+          report.resetsAt === null
+            ? new Date(now.getTime() + opts.staleMs)
+            : report.resetsAt > now
+              ? report.resetsAt
+              : null;
+        if (until !== null && (last === null || until > last)) last = until;
+      }
+      return last;
     },
   };
 }

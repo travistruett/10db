@@ -440,6 +440,19 @@ describe('fallback accounts', () => {
     ).toThrow(message);
   });
 
+  it('accepts the fallback again while the project runs on it, when it did not change', () => {
+    const fallback = apiKey('Bedrock', 200);
+    const project = seedProject(store, { fallbackAccountId: fallback.id });
+    store.write((ctx) => patchProject(ctx, project.id, { accountId: fallback.id }));
+    store.write((ctx) =>
+      patchProject(ctx, project.id, { fallbackAccountId: fallback.id, usageHandoffAt: 0.9 }),
+    );
+    expect(getProject(store.db, project.id)).toMatchObject({
+      fallbackAccountId: fallback.id,
+      usageHandoffAt: 0.9,
+    });
+  });
+
   it('keeps the fallback while the project runs on it, and refuses to archive it', () => {
     const fallback = apiKey('Bedrock', 200);
     const project = seedProject(store, { fallbackAccountId: fallback.id });

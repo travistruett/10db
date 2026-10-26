@@ -13,6 +13,18 @@ import {
 } from '@10db/contracts';
 import { MoveCause, type MoveWhy } from './moves';
 
+/** Whether a card with this pause reason is the usage-limit card, raised after the pause stopped its lanes. */
+function raisedByUsageLimit(reason: AccountPauseReason | null): boolean {
+  if (reason === null) return false;
+  switch (reason) {
+    case AccountPauseReason.UsageLimit:
+      return true;
+    case AccountPauseReason.MonthlyCap:
+    case AccountPauseReason.Refused:
+      return false;
+  }
+}
+
 /** Acts on an account card's answer before the inbox records it; other cards pass through untouched. */
 export function createAccountCardAnswers(deps: {
   resume(accountId: AccountId): void;
@@ -44,6 +56,7 @@ export function createAccountCardAnswers(deps: {
     }
     if (answer.choice === AccountCardChoice.Resume) deps.resume(card.data.accountId);
     if (answer.choice === AccountCardChoice.Stay) deps.stay(item.projectId);
+    const limitCard = raisedByUsageLimit(card.data.reason);
     const target = card.data.moves?.find((m) => m.choice === answer.choice);
     if (target)
       deps.move(
@@ -55,8 +68,8 @@ export function createAccountCardAnswers(deps: {
               cause: MoveCause.UsageLimit,
               resetsAt: card.data.usage?.resetsAt ? new Date(card.data.usage.resetsAt) : null,
               // The usage-limit card's lanes were stopped by the pause; a threshold card's still run.
-              handOff: card.data.reason !== AccountPauseReason.UsageLimit,
-              answersLimitCard: card.data.reason === AccountPauseReason.UsageLimit,
+              handOff: !limitCard,
+              answersLimitCard: limitCard,
             },
         item.id,
       );

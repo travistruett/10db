@@ -122,7 +122,11 @@ export function patchProject(ctx: WriteContext, id: ProjectId, patch: ProjectPat
     changes.prTitlePrefix === undefined ? current.prTitlePrefix : changes.prTitlePrefix;
   if (delivery === Delivery.PullRequest && prefix === null)
     throw new InvalidError('Pull request delivery needs a PR title prefix such as feat(app)');
-  if (changes.fallbackAccountId !== undefined)
+  // Re-saving the fallback the project already has asks nothing again, even while it runs on it.
+  if (
+    changes.fallbackAccountId !== undefined &&
+    changes.fallbackAccountId !== current.fallbackAccountId
+  )
     checkFallback(ctx, changes.accountId ?? current.accountId, changes.fallbackAccountId);
   const moving = changes.accountId !== undefined && changes.accountId !== current.accountId;
   if (changes.accountId !== undefined && moving) {

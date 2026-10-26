@@ -293,7 +293,7 @@ describe('moving a project', () => {
       status: 'allowed_warning',
       utilization: 0.96,
       limitType: 'five_hour',
-      resetsAt: null,
+      resetsAt: inMinutes(60),
     } as const;
     const asked = inbox.flag({
       projectId: project.id,
@@ -310,6 +310,7 @@ describe('moving a project', () => {
     expect(getProject(state.db, project.id)).toMatchObject({
       accountId: second.id,
       movedFromAccountId: plan,
+      moveBackAt: inMinutes(60).toISOString(),
     });
     expect(handOffs).toEqual([{ projectId: project.id, accountId: plan }]);
   });

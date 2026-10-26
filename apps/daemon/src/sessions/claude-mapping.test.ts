@@ -125,6 +125,14 @@ describe('mapSdkMessage', () => {
     ).toEqual([expect.objectContaining({ utilization: null })]);
   });
 
+  it('ignores a utilization or a limit type of the wrong type, which the SDK types do not guarantee', () => {
+    // Claude Code's payload is not verified against its types: a string that would coerce is no share.
+    const odd = { status: 'allowed_warning', utilization: '0.96', rateLimitType: 5 };
+    expect(
+      mapSdkMessage(rateLimitEvent(odd as unknown as Parameters<typeof rateLimitEvent>[0]), ctx),
+    ).toEqual([expect.objectContaining({ utilization: null, limitType: null })]);
+  });
+
   it('treats spending extra usage as a rejected limit, so lanes pause instead of billing overage', () => {
     expect(
       mapSdkMessage(

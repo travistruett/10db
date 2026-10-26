@@ -103,7 +103,7 @@ export const FakeStep = z.discriminatedUnion('do', [
     ]),
   }),
   z.object({ do: z.literal('hang') }),
-  z.object({ do: z.literal('end') }),
+  z.object({ do: z.literal('end'), reason: z.enum(['completed', 'rate_limited']).optional() }),
 ]);
 export type FakeStep = z.infer<typeof FakeStep>;
 
@@ -406,7 +406,7 @@ export class FakeAdapter implements SessionAdapter {
           await untilStopped;
           return 'halt';
         case 'end':
-          end('completed', null);
+          end(step.reason ?? 'completed', null);
           return 'halt';
       }
     };

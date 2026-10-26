@@ -115,16 +115,18 @@ export function mapSdkMessage(
     const overage = info.isUsingOverage === true;
     // A share of the limit; a value outside 0 to 1 is a shape 10db hasn't seen, so no threshold fires on it.
     const utilization =
-      info.utilization !== undefined && info.utilization >= 0 && info.utilization <= 1
+      typeof info.utilization === 'number' && info.utilization >= 0 && info.utilization <= 1
         ? info.utilization
         : null;
+    // Claude Code's payload is not checked against its types, so a limit type is a string or nothing.
+    const limitType = typeof info.rateLimitType === 'string' ? info.rateLimitType : null;
     return [
       {
         type: 'rate_limit',
         status: overage ? 'rejected' : info.status,
         resetsAt: resetsAtToDate(overage ? (info.overageResetsAt ?? info.resetsAt) : info.resetsAt),
         utilization,
-        limitType: info.rateLimitType ?? null,
+        limitType,
       },
     ];
   }
