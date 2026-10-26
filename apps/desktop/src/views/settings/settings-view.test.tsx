@@ -143,11 +143,67 @@ describe('SettingsView', () => {
     expect(await screen.findByText('Between 50% and 99%')).toBeTruthy();
     expect(patched).toEqual([]);
 
+    fireEvent.change(field, { target: { value: '40' } });
+    fireEvent.blur(field);
+    expect(await screen.findByText('Between 50% and 99%')).toBeTruthy();
+    expect(patched).toEqual([]);
+
     fireEvent.change(field, { target: { value: '90' } });
     fireEvent.blur(field);
     await waitFor(() => {
       expect(patched).toEqual([{ usageHandoffAt: 0.9 }]);
     });
+  });
+
+  it("offers the project's other accounts as its fallback, never its own", async () => {
+    const project = projectDto();
+    const client = accountDto({ label: 'Client key', kind: 'anthropic_api_key' });
+    server.use(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/accounts'), () => HttpResponse.json([DEFAULT_ACCOUNT, client])),
+      ...baseHandlers(),
+    );
+    renderApp('/settings/areas');
+    fireEvent.click(await screen.findByRole('link', { name: /Billing/ }));
+    const fallback = await screen.findByRole('combobox', { name: 'Fallback account' });
+    fireEvent.click(fallback);
+    const labelId = fallback instanceof HTMLInputElement ? fallback.labels?.[0]?.id : undefined;
+    const listbox = screen
+      .getAllByRole('listbox', { hidden: true })
+      .find((l) => l.getAttribute('aria-labelledby') === labelId);
+    expect(listbox).toBeDefined();
+    // The account list loads after the section opens.
+    await within(listbox ?? document.body).findByRole('option', { hidden: true });
+    const names = within(listbox ?? document.body)
+      .getAllByRole('option', { hidden: true })
+      .map((o) => o.textContent);
+    expect(names).toEqual(['Client key (Anthropic API key)']);
+  });
+
+  it("shows each project's own threshold after the project changes, and saves nothing on blur", async () => {
+    const a = projectDto({ name: 'Alpha', usageHandoffAt: 0.9 });
+    const b = projectDto({ name: 'Beta', usageHandoffAt: 0.95 });
+    const patched: unknown[] = [];
+    server.use(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([a, b])),
+      http.patch(daemonUrl('/projects/:projectId'), async ({ request }) => {
+        patched.push(await request.json());
+        return HttpResponse.json(b);
+      }),
+      ...baseHandlers(),
+    );
+    renderApp('/settings/areas');
+    fireEvent.click(await screen.findByRole('link', { name: /Billing/ }));
+    expect(await screen.findByRole('textbox', { name: 'Hand off at' })).toHaveProperty(
+      'value',
+      '90%',
+    );
+    await pick(screen.getByRole('combobox', { name: 'Project' }), 'Beta');
+    await waitFor(() => {
+      expect(screen.getByRole('textbox', { name: 'Hand off at' })).toHaveProperty('value', '95%');
+    });
+    fireEvent.blur(screen.getByRole('textbox', { name: 'Hand off at' }));
+    expect(patched).toEqual([]);
   });
 
   it('changes the keep-awake mode', async () => {

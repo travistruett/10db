@@ -47,7 +47,7 @@ export function SectionBody({
       return (
         <>
           {heading}
-          {project ? <ProjectBilling project={project} /> : <NoProject />}
+          {project ? <ProjectBilling key={project.id} project={project} /> : <NoProject />}
         </>
       );
     case SettingsSectionKey.KeepAwake:
