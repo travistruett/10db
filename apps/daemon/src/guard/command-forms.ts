@@ -21,15 +21,29 @@ const RUNNERS: readonly (readonly string[])[] = [
   ['yarn', 'dlx'],
 ];
 
-/** The command's words without flags or flag values: `pnpm --filter x add zod` → `pnpm add zod`. */
-function withoutFlags(words: readonly string[]): string[] {
-  const out: string[] = [];
+/** A word that is neither a flag nor a flag value, with its index in the command. */
+interface PlainWord {
+  readonly word: string;
+  readonly at: number;
+}
+
+/**
+ * The words that are neither flags nor flag values, each with its index in `words`: in
+ * `pnpm --filter x add zod` they are `pnpm`, `add` and `zod`, at 0, 3 and 4.
+ */
+export function plainWords(words: readonly string[]): PlainWord[] {
+  const out: PlainWord[] = [];
   for (let i = 0; i < words.length; i += 1) {
     const w = words[i] ?? '';
-    if (!w.startsWith('-')) out.push(w);
+    if (!w.startsWith('-')) out.push({ word: w, at: i });
     else if (VALUE_FLAGS.has(w)) i += 1;
   }
   return out;
+}
+
+/** The command's words without flags or flag values: `pnpm --filter x add zod` → `pnpm add zod`. */
+function withoutFlags(words: readonly string[]): string[] {
+  return plainWords(words).map((p) => p.word);
 }
 
 export function startsWithWords(words: readonly string[], prefix: readonly string[]): boolean {

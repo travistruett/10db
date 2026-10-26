@@ -1,10 +1,4 @@
-import {
-  isCommandRunner,
-  packageToolProgramIndex,
-  ToolAccess,
-  type PermissionRuleDto,
-  type ProjectDto,
-} from '@10db/contracts';
+import { ToolAccess, type PermissionRuleDto, type ProjectDto } from '@10db/contracts';
 import { join } from 'node:path';
 import { z } from 'zod';
 import {
@@ -15,6 +9,7 @@ import {
   stripCommandPrefixes,
 } from '../guard';
 import { isLiteralSegment, plainSegments, type PlainSegment } from './plain-segments';
+import { runsOtherCommands, runsUnnamedProgram } from './runner-forms';
 
 /** Allow rules injected into every managed session. The guard still checks claims. */
 export function baseAllowedTools(project: Pick<ProjectDto, 'gateCommand'>): string[] {
@@ -140,26 +135,14 @@ export function matchesAllowedTool(
   });
 }
 
-/** Bun runs the file it names as well as a package, so every bun command keeps its whole words. */
-const FILE_RUNNERS: ReadonlySet<string> = new Set(['bun']);
 const SUBCOMMAND = /^[A-Za-z][A-Za-z0-9_-]*$/;
-
-/**
- * Whether the words run another program, so "always allow" keeps them whole. The package tools that
- * name a program come from @10db/contracts, the same list allowed-commands reads. Names are compared
- * without case: a case-insensitive file system runs `PNPM` as `pnpm`.
- */
-function runsOtherCommands(words: readonly string[]): boolean {
-  const [first = ''] = words;
-  const name = first.toLowerCase();
-  return isCommandRunner(name) || FILE_RUNNERS.has(name) || packageToolProgramIndex(words) !== null;
-}
 
 /**
  * The pattern stored by "always allow": the program plus its subcommand when the second word is
  * one, otherwise the segment's whole words, so the rule never covers more than what was shown.
- * Null when the command has a substitution, expansion or redirection, or runs through a wrapper
- * with a command-carrying flag: such a command can only be allowed once.
+ * Null when the command has a substitution, expansion or redirection, runs through a wrapper
+ * with a command-carrying flag, or runs a program it does not name (see runsUnnamedProgram):
+ * such a command can only be allowed once.
  */
 export function commandPrefix(command: string): string | null {
   const segments = splitCommand(command);
@@ -167,7 +150,7 @@ export function commandPrefix(command: string): string | null {
   if (first === undefined || !segments.every(isLiteralSegment)) return null;
   const words = stripCommandPrefixes(first.words);
   const [head, second] = words;
-  if (head === undefined) return null;
+  if (head === undefined || runsUnnamedProgram(words)) return null;
   if (second === undefined) return head;
   if (!runsOtherCommands(words) && SUBCOMMAND.test(second)) return `${head} ${second}`;
   return words.join(' ');
@@ -182,7 +165,8 @@ export function matchPermissionRule(
     if (rule.toolName !== req.toolName) return false;
     if (req.toolName !== 'Bash') return rule.pattern === null;
     const pattern = rule.pattern;
-    if (pattern === null) return false;
+    // A pattern whose words name no program, such as a bare runner, covers nothing, even one stored earlier.
+    if (pattern === null || runsUnnamedProgram(pattern.split(' '))) return false;
     const command = stringField(req.input, 'command');
     const segments = command === null ? null : plainSegments(command);
     return segments?.every((s) => startsWithWords(s.line, pattern)) === true;
