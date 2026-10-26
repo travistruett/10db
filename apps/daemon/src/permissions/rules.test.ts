@@ -246,6 +246,15 @@ describe('commandPrefix', () => {
     ["grep -rn 'foo bar' src", null],
     ["git -C 'my dir' status", null],
     ["git 'a b'", null],
+    ["rm -rf '~'", null],
+    ["rm -f 'a*'", null],
+    ["rm -f '{a,b}'", null],
+    ["ls '[ab]'", null],
+    ['git log --oneline -5', 'git log'],
+    [
+      'pnpm --filter @10db/daemon exec vitest run src/x.test.ts',
+      'pnpm --filter @10db/daemon exec vitest run src/x.test.ts',
+    ],
     ["rm -f $'a\\nb'", null],
   ])('%s -> %j', (command, prefix) => {
     expect(commandPrefix(command)).toBe(prefix);
@@ -309,6 +318,8 @@ describe('matchPermissionRule', () => {
     ['control: a here-document hidden in an expansion', 'echo', 'echo ${x:-a <<EOF}', false],
     ['control: a here-document word with a bracket', 'cat', 'cat x[<<EOF', false],
     ['control: a here-string attached to a word', 'cat', 'cat<<<$(id)', false],
+    ['a legacy rule stored from a quoted hash', 'rm -f #', 'rm -f ~/.zshrc', false],
+    ['a legacy rule stored from a quoted brace', 'rm -f }', 'rm -f x', false],
     ['an ANSI-C escape is uncertain', 'git', "$'gi\\t'", false],
     [
       'a stored pattern of several segments',
