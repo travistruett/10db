@@ -45,7 +45,7 @@ import {
   setRoutingRules,
   setTeam,
 } from '@10db/db';
-import type { AccountService } from '../accounts';
+import { MoveCause, type AccountMoves, type AccountService } from '../accounts';
 import { syncWarning, type BenchmarkSync } from '../benchmarks';
 import type { ApiServices } from '../api';
 import type { BatchStarter, Shipper } from '../delivery';
@@ -71,6 +71,7 @@ export function createServices(deps: {
   readonly starter: BatchStarter;
   readonly shipper: Shipper;
   readonly accounts: AccountService;
+  readonly moves: Pick<AccountMoves, 'move'>;
 }): ApiServices {
   const db = deps.state.db;
   return {
@@ -144,12 +145,11 @@ export function createServices(deps: {
     benchmarkStatus: () => deps.benchmarks.status(),
     syncBenchmarks: () => deps.benchmarks.sync(),
     listAaModels: () => listAaModels(db),
-    patchProject(id, patch) {
-      const project = deps.state.write((ctx) => patchProject(ctx, id, patch));
-      // Work waiting on the old account's state is looked at again.
-      if (patch.accountId !== undefined) deps.scheduler.requestTick();
-      return project;
-    },
+    patchProject: (id, patch) =>
+      patch.accountId === undefined
+        ? deps.state.write((ctx) => patchProject(ctx, id, patch))
+        : // The account through the move, with the other fields in the same write.
+          deps.moves.move(id, patch.accountId, { cause: MoveCause.Builder }, { patch }),
     listAccounts: () => deps.accounts.list(),
     createAccount: (input) => deps.accounts.create(input),
     patchAccount: (id, patch) => deps.accounts.patch(id, patch),

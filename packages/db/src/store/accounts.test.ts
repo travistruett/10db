@@ -25,12 +25,14 @@ import {
   insertWorkstream,
   listAccounts,
   listEventsAfter,
+  listMoveBacks,
   patchAccount,
   patchProject,
   recordAccountSecret,
   seedAccount,
   seedDefaultAccount,
   seedProject,
+  setMoveBack,
   TEST_ACCOUNT_EMAIL,
   transitionWorkstream,
   updateSessionUsage,
@@ -238,6 +240,28 @@ describe('accounts', () => {
 });
 
 describe('projects on accounts', () => {
+  it('remembers the account a project left for its usage limit until it moves again', () => {
+    const project = seedProject(store);
+    const key = apiKey();
+    const at = new Date(2026, 9, 15, 13).toISOString();
+    store.write((ctx) => {
+      patchProject(ctx, project.id, { accountId: key.id });
+      setMoveBack(ctx, project.id, { accountId: project.accountId, at });
+    });
+    expect(getProject(store.db, project.id)).toMatchObject({
+      accountId: key.id,
+      movedFromAccountId: project.accountId,
+      moveBackAt: at,
+    });
+    expect(listMoveBacks(store.db).map((p) => p.id)).toEqual([project.id]);
+    store.write((ctx) => patchProject(ctx, project.id, { accountId: apiKey('Other').id }));
+    expect(getProject(store.db, project.id)).toMatchObject({
+      movedFromAccountId: null,
+      moveBackAt: null,
+    });
+    expect(listMoveBacks(store.db)).toEqual([]);
+  });
+
   it('binds a new project to the default account, or the one it names', () => {
     const plain = seedProject(store);
     expect(plain.accountId).toBe(defaultAccountId(store.db));

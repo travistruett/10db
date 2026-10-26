@@ -143,6 +143,8 @@ describe('the preparer', () => {
       confirm: (_id, identity) => {
         confirmed.push(identity);
       },
+      move: () => undefined,
+      stay: () => undefined,
     });
     if (!card) throw new Error('no confirm card');
     answers(card, { choice: AccountCardChoice.Confirm });

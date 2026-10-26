@@ -7,3 +7,6 @@ export { createAccountRuntime, type AccountRuntime } from './runtime';
 export { monthOf, monthWindow, usageWindow } from './month';
 export type { AccountCard } from './cards';
 export { createAccountService, type AccountService } from './service';
+export { createAccountMoves, MoveCause, type AccountMoves } from './moves';
+export { createMoveBack, type MoveBack } from './move-back';
+export { accountFoldKey, MOVE_BACK_CARD } from './cards';

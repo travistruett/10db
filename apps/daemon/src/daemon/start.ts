@@ -27,10 +27,12 @@ import { HARNESS_PLUGIN_DIR, readDefaultPersonas } from '@10db/harness';
 import { WebSocketServer } from 'ws';
 import {
   createAccountCardAnswers,
+  createAccountMoves,
   createAccountPauses,
   createAccountPreparer,
   createAccountRuntime,
   createAccountService,
+  createMoveBack,
   createStartGate,
 } from '../accounts';
 import { createApp } from '../api';
@@ -334,6 +336,22 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     pauses: accountPauses,
     defaultPauseMs: opts.defaultPauseMs ?? DEFAULTS.defaultPauseMs,
   });
+  const moveBack = createMoveBack({
+    state,
+    clock,
+    inbox,
+    pauses: accountPauses,
+    defaultPauseMs: opts.defaultPauseMs ?? DEFAULTS.defaultPauseMs,
+  });
+  const moves = createAccountMoves({
+    state,
+    inbox,
+    pauses: accountPauses,
+    moveBack,
+    onMoved: () => {
+      scheduler?.requestTick();
+    },
+  });
   answerAccountCard = createAccountCardAnswers({
     resume: (id) => {
       accountPauses.resume(id);
@@ -342,6 +360,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       state.write((ctx) => patchAccount(ctx, id, { expectedIdentity: identity }));
       accounts.saved(id, answering);
       scheduler?.requestTick();
+    },
+    move: (projectId, to, why, answering) => {
+      moves.move(projectId, to, why, { answering });
+    },
+    stay: (projectId) => {
+      moves.stay(projectId);
     },
   });
   const startGate = createStartGate();
@@ -443,6 +467,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     cleanShutdown,
   });
   accountPauses.restore();
+  // A move back that came due reads the pauses.
+  moveBack.restore();
   await recoverBatches({
     state,
     git,
@@ -476,6 +502,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       bus,
       runner: createdRunner,
       scheduler: createdScheduler,
+      moves,
       inbox,
       keepAwake,
       systemCheck: opts.systemCheck ?? noSystemCheck,
@@ -549,6 +576,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       await deliveryJobs.stop();
       benchmarks.stop();
       accountPauses.stop();
+      moveBack.stop();
       nightly.cancel();
       unsubscribeLanes();
       watcher?.stop();

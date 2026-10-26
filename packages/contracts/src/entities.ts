@@ -139,6 +139,13 @@ export const ProjectDto = z.object({
   maxLanes: z.int(),
   provider: z.enum(Provider),
   accountId: AccountId,
+  /** The account the project left for its usage limit; 10db offers to move it back once that limit resets. */
+  movedFromAccountId: AccountId.nullable(),
+  /**
+   * When that limit resets, as the pause or the session reported it: when 10db asks about the move
+   * back. Null with a `movedFromAccountId` when nobody said; 10db then asks after its default pause.
+   */
+  moveBackAt: Timestamp.nullable(),
   billingMode: z.enum(BillingMode),
   model: z.string(),
   effort: z.enum(Effort),

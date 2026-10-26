@@ -8,13 +8,18 @@ import {
   type InboxAnswer,
   type InboxItemId,
   type InboxItemDto,
+  type ProjectId,
 } from '@10db/contracts';
+import { MoveCause, type MoveWhy } from './moves';
 
 /** Acts on an account card's answer before the inbox records it; other cards pass through untouched. */
 export function createAccountCardAnswers(deps: {
   resume(accountId: AccountId): void;
   /** `answering` is the card being answered, which the inbox closes itself. */
   confirm(accountId: AccountId, identity: string, answering: InboxItemId): void;
+  /** Moves the project as `PATCH` does; `answering` is the card being answered. */
+  move(projectId: ProjectId, to: AccountId, why: MoveWhy, answering: InboxItemId): void;
+  stay(projectId: ProjectId): void;
 }): (item: InboxItemDto, answer: InboxAnswer) => void {
   return (item, answer) => {
     const card = AccountCardDetail.safeParse(item.detail?.[ACCOUNT_CARD_DETAIL]);
@@ -35,5 +40,16 @@ export function createAccountCardAnswers(deps: {
       deps.confirm(card.data.accountId, card.data.seenIdentity, item.id);
     }
     if (answer.choice === AccountCardChoice.Resume) deps.resume(card.data.accountId);
+    if (answer.choice === AccountCardChoice.Stay) deps.stay(item.projectId);
+    const target = card.data.moves?.find((m) => m.choice === answer.choice);
+    if (target)
+      deps.move(
+        item.projectId,
+        target.accountId,
+        card.data.moveBack === true
+          ? { cause: MoveCause.Builder }
+          : { cause: MoveCause.UsageLimit, resetsAt: null },
+        item.id,
+      );
   };
 }

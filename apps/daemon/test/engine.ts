@@ -36,9 +36,12 @@ import {
 import { readDefaultPersonas } from '@10db/harness';
 import {
   createAccountCardAnswers,
+  createAccountMoves,
   createAccountPauses,
   createAccountRuntime,
+  createMoveBack,
   createStartGate,
+  type AccountMoves,
   type AccountRuntime,
   type StartGate,
 } from '../src/accounts';
@@ -75,6 +78,7 @@ export interface TestEngine {
   /** The daemon's data directory, which the guard protects. */
   readonly dataDir: string;
   readonly accounts: AccountRuntime;
+  readonly moves: AccountMoves;
   readonly keychain: Keychain;
   readonly rateLimited: { accountId: AccountId; resetsAt: Date | null }[];
   readonly startGate: StartGate;
@@ -142,6 +146,20 @@ export async function createTestEngine(
     pauses,
     defaultPauseMs: 30 * 60_000,
   });
+  const moveBack = createMoveBack({
+    state,
+    clock,
+    inbox,
+    pauses,
+    defaultPauseMs: 30 * 60_000,
+  });
+  const moves = createAccountMoves({
+    state,
+    inbox,
+    pauses,
+    moveBack,
+    onMoved: () => undefined,
+  });
   answerAccountCard = createAccountCardAnswers({
     resume: (id) => {
       pauses.resume(id);
@@ -149,6 +167,12 @@ export async function createTestEngine(
     confirm: (id, identity, answering) => {
       state.write((ctx) => patchAccount(ctx, id, { expectedIdentity: identity }));
       accounts.saved(id, answering);
+    },
+    move: (projectId, to, why, answering) => {
+      moves.move(projectId, to, why, { answering });
+    },
+    stay: (projectId) => {
+      moves.stay(projectId);
     },
   });
   const guarded = protectedPaths({ dataDir: data.path, home: homedir(), loginConfigDir: null });
@@ -228,6 +252,7 @@ export async function createTestEngine(
     repoPath: repo.path,
     dataDir: data.path,
     accounts,
+    moves,
     keychain,
     rateLimited,
     startGate,
@@ -274,6 +299,7 @@ export async function createTestEngine(
     },
     retry: (id) => retryWorkstream(state, id),
     async close() {
+      moveBack.stop();
       await created.stopAll('shutdown');
       server.close();
       close();

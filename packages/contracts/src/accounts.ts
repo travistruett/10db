@@ -322,9 +322,22 @@ export const AccountCardDetail = z.object({
   problem: z.enum(AccountProblem).nullable(),
   /** The identity a Confirm answer would record. */
   seenIdentity: z.string().nullable(),
+  /** Each option that moves the project, and the account it moves it to. */
+  moves: z.array(z.object({ choice: z.string(), accountId: AccountId })).optional(),
+  /** A move-back card: its move is the builder returning the project, not a move for a limit. */
+  moveBack: z.boolean().optional(),
 });
 export type AccountCardDetail = z.infer<typeof AccountCardDetail>;
 
-/** The options on an account card: confirm a seen identity, try the account again after a fix, or wait. */
-export const AccountCardChoice = { Confirm: 'Confirm', Resume: 'Resume', Later: 'Later' } as const;
+/**
+ * The options on an account card: confirm a seen identity, try the account again after a fix, move a
+ * project back or keep it where it is, or wait.
+ */
+export const AccountCardChoice = {
+  Confirm: 'Confirm',
+  Resume: 'Resume',
+  Later: 'Later',
+  MoveBack: 'Move back',
+  Stay: 'Stay',
+} as const;
 export type AccountCardChoice = ValueOf<typeof AccountCardChoice>;

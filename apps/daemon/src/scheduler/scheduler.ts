@@ -105,6 +105,9 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
     const open = new Set<AccountId>();
     // Accounts that can't start a session yet: the preparer is asked once per account per tick.
     const notReady = new Set<AccountId>();
+    // Account and project pairs found blocked this tick: each project is asked once, so it gets its
+    // own card, and a project with several queued lanes isn't asked again.
+    const blockedThisTick = new Set<string>();
     let launched = 0;
     for (const ws of listWorkstreams(db, { states: [WorkstreamState.Queued] })) {
       if (global >= opts.caps.global) break;
@@ -119,9 +122,13 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
         notReady.add(account.id);
         continue;
       }
-      // A held account is asked once per project with work: each project gets its own cap card.
       if (!open.has(account.id)) {
-        if (opts.accounts.blocked(account, project.id) !== null) continue;
+        const asked = `${account.id}:${project.id}`;
+        if (blockedThisTick.has(asked)) continue;
+        if (opts.accounts.blocked(account, project.id) !== null) {
+          blockedThisTick.add(asked);
+          continue;
+        }
         open.add(account.id);
       }
       if ((byProject.get(project.id) ?? 0) >= project.maxLanes) continue;

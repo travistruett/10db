@@ -30,7 +30,7 @@ import {
 } from '../accounts';
 import { ManualClock } from '../clock';
 import { createEventBus, createStateStore, type StateStore } from '../events';
-import { createInboxService } from '../inbox';
+import { createInboxService, type InboxService } from '../inbox';
 import { silentLogger } from '../log';
 import { createScheduler } from './index';
 
@@ -39,6 +39,7 @@ let close: () => void;
 let state: StateStore;
 let clock: ManualClock;
 let launched: { id: WorkstreamId; fence: number }[];
+let inbox: InboxService;
 let pauses: AccountPauses;
 let accounts: AccountRuntime;
 let running: Set<WorkstreamId>;
@@ -51,7 +52,7 @@ beforeEach(() => {
   clock = new ManualClock(new Date(2026, 9, 20, 12));
   ({ store, close } = createTestStore(() => clock.now()));
   state = createStateStore(store, createEventBus());
-  const inbox = createInboxService({ state, onParkedAnswer: () => undefined });
+  inbox = createInboxService({ state, onParkedAnswer: () => undefined });
   pauses = createAccountPauses({
     state,
     clock,
@@ -449,6 +450,44 @@ describe('accounts', () => {
     accounts.rateLimited(key.id, null, held.project.id);
     expect(await scheduler().tick()).toBe(1);
     expect(launched.map((l) => l.id)).toEqual([free.workstream.id]);
+  });
+
+  it('raises the usage-limit card once per pause for a project whose work queued during it', async () => {
+    const key = metered('Client key');
+    const idle = seedProject(store, { name: 'idle', accountId: key.id });
+    // The limit hits while the project has no work: the pause raises no card for it.
+    accounts.rateLimited(key.id, null, idle.id);
+    const limitCards = () =>
+      listInbox(state.db, { states: ['OPEN'] }).filter(
+        (c) => c.projectId === idle.id && c.title === 'Client key usage limit reached',
+      );
+    expect(limitCards()).toEqual([]);
+
+    add(idle, ['api']);
+    await scheduler().tick();
+    expect(limitCards()).toHaveLength(1);
+    expect(limitCards()[0]?.options.map((o) => o.label)).toEqual([
+      'Continue on Claude plan · builder@example.com',
+      'Later',
+    ]);
+    await scheduler().tick();
+    expect(limitCards()).toHaveLength(1);
+
+    const [card] = limitCards();
+    if (!card) throw new Error('no usage-limit card');
+    inbox.answer(card.id, { choice: 'Later' });
+    await scheduler().tick();
+    expect(limitCards()).toEqual([]);
+
+    // The next pause is a new one: the waiting work raises the card again.
+    pauses.resume(key.id);
+    pauses.pause(
+      key.id,
+      { reason: 'usage_limit', until: new Date(clock.now().getTime() + 60_000) },
+      { projectId: idle.id, card: null },
+    );
+    await scheduler().tick();
+    expect(limitCards()).toHaveLength(1);
   });
 
   it('launches nothing on a metered account at its monthly cap, and launches under it', async () => {

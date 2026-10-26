@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "a6c63611-80eb-4c83-aef6-96e473725b66",
+  "id": "fd462500-bd8b-4a25-9a22-3c3bd7be813c",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "aa_models": {
@@ -1757,6 +1757,20 @@
           "notNull": true,
           "autoincrement": false
         },
+        "moved_from_account_id": {
+          "name": "moved_from_account_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "move_back_at": {
+          "name": "move_back_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "billing_mode": {
           "name": "billing_mode",
           "type": "text",
@@ -1875,6 +1889,19 @@
           "tableTo": "accounts",
           "columnsFrom": [
             "account_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "projects_moved_from_account_id_accounts_id_fk": {
+          "name": "projects_moved_from_account_id_accounts_id_fk",
+          "tableFrom": "projects",
+          "tableTo": "accounts",
+          "columnsFrom": [
+            "moved_from_account_id"
           ],
           "columnsTo": [
             "id"

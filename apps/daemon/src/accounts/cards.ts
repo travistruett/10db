@@ -4,10 +4,14 @@ import {
   AccountKind,
   AccountPauseReason,
   AccountProblem,
+  accountDisplayName,
   BedrockSettings,
+  needsSecret,
+  type AccountDto,
   type AccountId,
   type AccountRefusal,
   type InboxOption,
+  type ProjectDto,
 } from '@10db/contracts';
 import type { AccountRow, Json } from '@10db/db';
 import { signInCommand } from '../environment';
@@ -33,8 +37,11 @@ function detail(
   reason: AccountPauseReason | null,
   problem: AccountProblem | null,
   seenIdentity: string | null,
+  extra: Record<string, Json> = {},
 ): Record<string, Json> {
-  return { [ACCOUNT_CARD_DETAIL]: { accountId: account.id, reason, problem, seenIdentity } };
+  return {
+    [ACCOUNT_CARD_DETAIL]: { accountId: account.id, reason, problem, seenIdentity, ...extra },
+  };
 }
 
 function signInAgain(account: AccountRow): string {
@@ -69,12 +76,83 @@ export function fixFor(account: AccountRow, problem: AccountProblem): string {
   }
 }
 
-export function usageLimitCard(account: AccountRow, until: Date): AccountCard {
+/** The fold key part of the card that offers a project the way back. */
+export const MOVE_BACK_CARD = 'available';
+
+/** What an account still needs before work can run on it; a move there waits until it has it. */
+function stillNeeds(account: AccountDto): string {
+  if (account.kind === AccountKind.ClaudeSubscription && account.expectedIdentity === null)
+    return ' (needs sign-in)';
+  if (needsSecret(account.kind, account.settings) && !account.secretSet) return ' (needs a secret)';
+  return '';
+}
+
+/** How an option names an account the project could move to. */
+const offered = (account: AccountDto): string =>
+  `${accountDisplayName(account)}${stillNeeds(account)}`;
+
+/**
+ * A usage limit paused every lane on the account. The card offers to continue the project on each
+ * account it could move to now (accounts spec §6); a lane in flight starts there from its handoff.
+ */
+export function usageLimitCard(
+  account: AccountRow,
+  until: Date,
+  project: ProjectDto,
+  targets: readonly AccountDto[],
+): AccountCard {
+  const moves = targets.map((t) => ({ choice: `Continue on ${offered(t)}`, accountId: t.id }));
   return {
     title: `${account.label} usage limit reached`,
-    body: `Every lane on ${account.label} is paused until ${until.toISOString()}. Work resumes automatically.`,
+    body: `Every lane on ${account.label} is paused until ${until.toISOString()}. Work resumes automatically.${
+      moves.length > 0
+        ? ` Or continue ${project.name} on another account now: each lane's next session runs there from its latest handoff, and 10db asks whether to move it back once ${account.label} is available again.`
+        : ''
+    }`,
     foldKey: accountFoldKey(account.id, AccountPauseReason.UsageLimit),
-    detail: detail(account, AccountPauseReason.UsageLimit, null, null),
+    detail: detail(account, AccountPauseReason.UsageLimit, null, null, { moves }),
+    ...(moves.length > 0
+      ? {
+          options: [
+            ...moves.map((m) => ({
+              label: m.choice,
+              description: `Move ${project.name} there until ${account.label} is available again`,
+            })),
+            { label: AccountCardChoice.Later, description: `Wait for ${account.label}` },
+          ],
+        }
+      : {}),
+  };
+}
+
+/** The account a project left for its usage limit is free again; nothing moves until the builder says so. */
+export function moveBackCard(
+  project: ProjectDto,
+  from: AccountRow,
+  current: AccountRow,
+): AccountCard {
+  const reset =
+    project.moveBackAt === null
+      ? "10db doesn't know whether that limit has reset, because Claude Code didn't say when it would"
+      : 'that limit has reset';
+  return {
+    title: `${from.label} is available again: move ${project.name} back?`,
+    body: `${project.name} moved to ${current.label} when ${from.label} reached its usage limit, and ${reset}. Move it back, and each lane's next session runs on ${from.label} from its latest handoff; or stay on ${current.label}.`,
+    foldKey: accountFoldKey(from.id, MOVE_BACK_CARD),
+    detail: detail(from, null, null, null, {
+      moves: [{ choice: AccountCardChoice.MoveBack, accountId: from.id }],
+      moveBack: true,
+    }),
+    options: [
+      {
+        label: AccountCardChoice.MoveBack,
+        description: `Run ${project.name} on ${accountDisplayName(from)} again`,
+      },
+      {
+        label: AccountCardChoice.Stay,
+        description: `Keep ${project.name} on ${accountDisplayName(current)}`,
+      },
+    ],
   };
 }
 

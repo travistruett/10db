@@ -3,14 +3,22 @@ import {
   type AccountId,
   type AccountRefusal,
   type InboxItemId,
+  type ProjectDto,
   type ProjectId,
 } from '@10db/contracts';
-import { findOpenByFoldKey, getAccountRow, listProjects, type AccountRow } from '@10db/db';
+import {
+  findOpenByFoldKey,
+  getAccountRow,
+  getProject,
+  listProjects,
+  type AccountRow,
+} from '@10db/db';
 import type { Clock } from '../clock';
 import type { StateStore } from '../events';
 import type { InboxService } from '../inbox';
 import { capStatus } from './cap';
 import { accountFoldKey, capCard, refusedCard, usageLimitCard } from './cards';
+import { moveTargets, projectsWithWork } from './moves';
 import type { AccountPause, AccountPauses } from './pauses';
 import { unready } from './readiness';
 import { closeSettledCards } from './stale-cards';
@@ -59,10 +67,35 @@ export function createAccountRuntime(opts: {
     });
   }
 
+  /** The usage-limit card in one project, offering the accounts that project could move to now. */
+  function raiseLimitCard(account: AccountRow, until: Date, project: ProjectDto): void {
+    const isPaused = (id: AccountId): boolean => opts.pauses.pausedFor(id) !== null;
+    const card = usageLimitCard(account, until, project, moveTargets(db, project, isPaused));
+    const item = opts.inbox.flag({
+      projectId: project.id,
+      workstreamId: null,
+      title: card.title,
+      body: card.body,
+      detail: card.detail,
+      foldKey: card.foldKey,
+      ...(card.options ? { options: card.options } : {}),
+    });
+    // A card still open folds this one in. The cards of one account's projects all show the pause in
+    // force, so one that was raised for an earlier, shorter limit is rewritten.
+    if (item.body !== card.body) opts.inbox.reword(item.id, card.body);
+  }
+
   return {
     blocked(account, projectId) {
       const paused = opts.pauses.pausedFor(account.id);
       if (paused) {
+        // Work that queued while the account was paused for its usage limit: its project hears once per pause.
+        if (
+          paused.reason === AccountPauseReason.UsageLimit &&
+          paused.until !== null &&
+          opts.pauses.firstCard(account.id, projectId)
+        )
+          raiseLimitCard(account, paused.until, getProject(db, projectId));
         switch (paused.reason) {
           case AccountPauseReason.MonthlyCap:
             ensureCapCard(account, projectId, paused);
@@ -92,8 +125,23 @@ export function createAccountRuntime(opts: {
       opts.pauses.pause(
         accountId,
         { reason: AccountPauseReason.UsageLimit, until },
-        { projectId, card: usageLimitCard(getAccountRow(db, accountId), until) },
+        { projectId, card: null },
       );
+      // One card per project with work on the account (accounts spec §6), not only the one that reported.
+      const account = getAccountRow(db, accountId);
+      const ends = opts.pauses.pausedFor(accountId)?.until ?? until;
+      const foldKey = accountFoldKey(accountId, AccountPauseReason.UsageLimit);
+      const carded = listProjects(db).filter(
+        (p) => p.accountId === accountId && findOpenByFoldKey(db, p.id, foldKey),
+      );
+      const projects = new Map(
+        [...projectsWithWork(db, accountId), ...carded].map((p) => [p.id, p]),
+      );
+      for (const project of projects.values()) {
+        // Recorded, so the scheduler's blocked check doesn't card the project again during this pause.
+        opts.pauses.firstCard(accountId, project.id);
+        raiseLimitCard(account, ends, project);
+      }
     },
     refused(account, projectId, refusal) {
       opts.pauses.pause(

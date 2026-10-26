@@ -205,6 +205,34 @@ describe('the monthly cap', () => {
 });
 
 describe('refusals and usage limits', () => {
+  it('raises the usage-limit card, with the move, in each project with work on the account', () => {
+    const other = seedProject(store, { name: 'other', accountId: key.id });
+    seedProject(store, { name: 'idle', accountId: key.id });
+    seedWorkstream(store, { project });
+    seedWorkstream(store, { project: other });
+    runtime.rateLimited(key.id, null, project.id);
+    const cards = openCards().filter((c) => c.title === 'Client key usage limit reached');
+    expect(cards.map((c) => c.projectId).sort()).toEqual([project.id, other.id].sort());
+    for (const card of cards)
+      expect(card.options.map((o) => o.label)).toEqual([
+        'Continue on Claude plan · builder@example.com',
+        'Later',
+      ]);
+  });
+
+  it("shows every project's card the pause in force, not the time of the limit it first met", () => {
+    const other = seedProject(store, { name: 'other', accountId: key.id });
+    seedWorkstream(store, { project });
+    seedWorkstream(store, { project: other });
+    runtime.rateLimited(key.id, new Date(clock.now().getTime() + 10 * 60_000), project.id);
+    // Another project's session meets the same limit, which resets later: one pause, one end.
+    const later = new Date(clock.now().getTime() + 90 * 60_000);
+    runtime.rateLimited(key.id, later, other.id);
+    const cards = openCards().filter((c) => c.title === 'Client key usage limit reached');
+    expect(cards).toHaveLength(2);
+    for (const card of cards) expect(card.body).toContain(later.toISOString());
+  });
+
   it('pauses a refused account with no end, outranking a usage limit, until it is saved', () => {
     runtime.refused(row(), project.id, {
       problem: 'secret_changed',
@@ -270,6 +298,8 @@ describe('refusals and usage limits', () => {
         pauses.resume(id);
       },
       confirm: () => undefined,
+      move: () => undefined,
+      stay: () => undefined,
     });
     const item = openCards()[0];
     if (!item) throw new Error('the refusal raised no card');

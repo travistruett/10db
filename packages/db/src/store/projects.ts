@@ -47,6 +47,8 @@ export function insertProject(ctx: WriteContext, input: ProjectInput): ProjectDt
     id: mintId('Project'),
     ...rest,
     accountId: accountFor(ctx, named),
+    movedFromAccountId: null,
+    moveBackAt: null,
     provider: Provider.Claude,
     createdAt: ctx.now,
     updatedAt: ctx.now,
@@ -97,18 +99,52 @@ export function patchProject(ctx: WriteContext, id: ProjectId, patch: ProjectPat
     changes.prTitlePrefix === undefined ? current.prTitlePrefix : changes.prTitlePrefix;
   if (delivery === Delivery.PullRequest && prefix === null)
     throw new InvalidError('Pull request delivery needs a PR title prefix such as feat(app)');
-  if (changes.accountId !== undefined && changes.accountId !== current.accountId) {
+  const moving = changes.accountId !== undefined && changes.accountId !== current.accountId;
+  if (changes.accountId !== undefined && moving) {
     // Work in flight moves too: each lane's next session runs on the new account.
     const account = getAccountRow(ctx.tx, changes.accountId);
     if (account.archived) throw new InvalidError(`Account "${account.label}" is archived`);
   }
   ctx.tx
     .update(schema.projects)
-    .set({ ...changes, updatedAt: ctx.now })
+    // Any move forgets an earlier move back; a move for a usage limit records its own after this write.
+    .set({
+      ...changes,
+      ...(moving ? { movedFromAccountId: null, moveBackAt: null } : {}),
+      updatedAt: ctx.now,
+    })
     .where(eq(schema.projects.id, id))
     .run();
   ctx.emit({ type: EventType.ProjectChanged, entityType: 'project', entityId: id });
   return getProject(ctx.tx, id);
+}
+
+/**
+ * Records the account a project left for its usage limit and when that limit resets (null when nobody
+ * said); a null record forgets it.
+ */
+export function setMoveBack(
+  ctx: WriteContext,
+  id: ProjectId,
+  moveBack: { readonly accountId: AccountId; readonly at: string | null } | null,
+): ProjectDto {
+  getProject(ctx.tx, id);
+  ctx.tx
+    .update(schema.projects)
+    .set({
+      movedFromAccountId: moveBack?.accountId ?? null,
+      moveBackAt: moveBack?.at ?? null,
+      updatedAt: ctx.now,
+    })
+    .where(eq(schema.projects.id, id))
+    .run();
+  ctx.emit({ type: EventType.ProjectChanged, entityType: 'project', entityId: id });
+  return getProject(ctx.tx, id);
+}
+
+/** The projects 10db is to offer the way back to an account they left. */
+export function listMoveBacks(db: DbReader): ProjectDto[] {
+  return listProjects(db).filter((p) => p.movedFromAccountId !== null);
 }
 
 /** `GET /projects`: each project with the batch its view shows. */

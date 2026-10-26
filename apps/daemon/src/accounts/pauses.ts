@@ -34,11 +34,16 @@ export interface AccountPauses {
     pause: AccountPause,
     at: {
       readonly projectId: ProjectId;
-      readonly card: AccountCard;
+      readonly card: AccountCard | null;
       readonly data?: Record<string, Json>;
     },
   ): void;
   pausedFor(accountId: AccountId): AccountPause | null;
+  /**
+   * Whether the account's current pause has yet to card this project; true once per pause and project.
+   * In memory, so a restart during a pause may card a project once more.
+   */
+  firstCard(accountId: AccountId, projectId: ProjectId): boolean;
   resume(accountId: AccountId): void;
   /** Re-arms pauses persisted before a restart. */
   restore(): void;
@@ -70,6 +75,8 @@ export function createAccountPauses(opts: {
 }): AccountPauses {
   const paused = new Map<AccountId, AccountPause>();
   const timers = new Map<AccountId, Timer>();
+  // The projects each account's current pause has carded; a new pause starts a new record.
+  const carded = new Map<AccountId, Set<ProjectId>>();
 
   function arm(id: AccountId, pause: AccountPause): void {
     timers.get(id)?.cancel();
@@ -106,6 +113,7 @@ export function createAccountPauses(opts: {
     timers.delete(id);
     const was = paused.get(id);
     paused.delete(id);
+    carded.delete(id);
     opts.state.write((ctx) => {
       deleteAppSetting(ctx, settingKey(id));
       for (const ws of listWorkstreams(ctx.tx, { states: [WorkstreamState.PausedLimit] })) {
@@ -130,6 +138,8 @@ export function createAccountPauses(opts: {
   return {
     pause(id, pause, at) {
       const held = current(id);
+      // A pause that outlasts the current one is the same pause; a pause on a free account is new.
+      if (!held) carded.set(id, new Set());
       const armed = !held || outlasts(pause, held);
       if (armed) {
         arm(id, pause);
@@ -153,17 +163,20 @@ export function createAccountPauses(opts: {
           }
         });
       }
-      const item = opts.inbox.flag({
-        projectId: at.projectId,
-        workstreamId: null,
-        title: at.card.title,
-        body: at.card.body,
-        detail: at.card.detail,
-        foldKey: at.card.foldKey,
-        ...(at.card.options ? { options: at.card.options } : {}),
-      });
-      // A card still open from an earlier pause folds this one in; it shows the pause in force.
-      if (armed && item.body !== at.card.body) opts.inbox.reword(item.id, at.card.body);
+      const card = at.card;
+      if (card) {
+        const item = opts.inbox.flag({
+          projectId: at.projectId,
+          workstreamId: null,
+          title: card.title,
+          body: card.body,
+          detail: card.detail,
+          foldKey: card.foldKey,
+          ...(card.options ? { options: card.options } : {}),
+        });
+        // A card still open from an earlier pause folds this one in; it shows the pause in force.
+        if (armed && item.body !== card.body) opts.inbox.reword(item.id, card.body);
+      }
       // Only a usage limit stops running sessions; a capped or refused account lets them finish.
       switch (pause.reason) {
         case AccountPauseReason.UsageLimit:
@@ -175,6 +188,13 @@ export function createAccountPauses(opts: {
       }
     },
     pausedFor: (id) => current(id),
+    firstCard(id, projectId) {
+      const projects = carded.get(id) ?? new Set<ProjectId>();
+      carded.set(id, projects);
+      if (projects.has(projectId)) return false;
+      projects.add(projectId);
+      return true;
+    },
     resume(id) {
       if (paused.has(id)) resume(id);
     },

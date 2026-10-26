@@ -205,6 +205,17 @@ describe('account kinds', () => {
 });
 
 describe('the other account schemas', () => {
+  it('parses a card that offers moves', () => {
+    const detail = {
+      accountId: mintId('Account'),
+      reason: 'usage_limit',
+      problem: null,
+      seenIdentity: null,
+      moves: [{ choice: 'Continue on Second plan', accountId: mintId('Account') }],
+    };
+    expect(AccountCardDetail.parse(detail)).toEqual(detail);
+  });
+
   it('refuses an empty patch, and an expected identity that is blank', () => {
     expect(AccountPatch.safeParse({}).success).toBe(false);
     expect(AccountPatch.safeParse({ expectedIdentity: ' ' }).success).toBe(false);

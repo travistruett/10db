@@ -1,6 +1,6 @@
 {
-  "id": "5ce4f85e-4bd6-4710-96bb-044c3d29f8a9",
-  "prevId": "a6c63611-80eb-4c83-aef6-96e473725b66",
+  "id": "8e5ac8a6-c108-4f20-8468-30183b60ec9a",
+  "prevId": "fd462500-bd8b-4a25-9a22-3c3bd7be813c",
   "version": "6",
   "dialect": "sqlite",
   "tables": {
@@ -1757,6 +1757,20 @@
           "notNull": true,
           "autoincrement": false
         },
+        "moved_from_account_id": {
+          "name": "moved_from_account_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "move_back_at": {
+          "name": "move_back_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "billing_mode": {
           "name": "billing_mode",
           "type": "text",
@@ -1874,6 +1888,19 @@
           "tableFrom": "projects",
           "columnsFrom": [
             "account_id"
+          ],
+          "tableTo": "accounts",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "projects_moved_from_account_id_accounts_id_fk": {
+          "name": "projects_moved_from_account_id_accounts_id_fk",
+          "tableFrom": "projects",
+          "columnsFrom": [
+            "moved_from_account_id"
           ],
           "tableTo": "accounts",
           "columnsTo": [

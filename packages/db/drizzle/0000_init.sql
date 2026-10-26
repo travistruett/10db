@@ -260,6 +260,8 @@ CREATE TABLE `projects` (
 	`max_lanes` integer NOT NULL,
 	`provider` text NOT NULL,
 	`account_id` text NOT NULL,
+	`moved_from_account_id` text,
+	`move_back_at` text,
 	`billing_mode` text NOT NULL,
 	`model` text NOT NULL,
 	`effort` text NOT NULL,
@@ -275,6 +277,7 @@ CREATE TABLE `projects` (
 	`created_at` text NOT NULL,
 	`updated_at` text NOT NULL,
 	FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`moved_from_account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`flow_id`) REFERENCES `flows`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint

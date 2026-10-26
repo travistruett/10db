@@ -127,6 +127,12 @@ export const projects = sqliteTable('projects', {
     .$type<AccountId>()
     .notNull()
     .references(() => accounts.id),
+  /** The account the project left for its usage limit; 10db offers to move it back once that limit resets. */
+  movedFromAccountId: text('moved_from_account_id')
+    .$type<AccountId>()
+    .references(() => accounts.id),
+  /** When that limit resets, as the pause or the session reported it; null when nobody said. */
+  moveBackAt: text('move_back_at'),
   billingMode: text('billing_mode').$type<BillingMode>().notNull(),
   model: text('model').notNull(),
   effort: text('effort').$type<Effort>().notNull(),

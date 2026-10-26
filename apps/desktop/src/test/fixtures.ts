@@ -26,6 +26,8 @@ export function projectDto(overrides: Partial<ProjectDto> = {}): ProjectDto {
     maxLanes: 2,
     provider: 'claude',
     accountId: mintId('Account'),
+    movedFromAccountId: null,
+    moveBackAt: null,
     billingMode: 'subscription',
     model: 'sonnet',
     effort: 'medium',
