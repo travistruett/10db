@@ -235,4 +235,15 @@ describe('toolchainReads', () => {
     expect(list).not.toContain('/h');
     expect(list).not.toContain('/h/.docker');
   });
+
+  it.skipIf(process.platform !== 'darwin')('drops a case-variant spelling of home', () => {
+    expect(toolchainReads('/Users/t', '/users/t:/USERS/T/')).not.toContain('/users/t');
+    expect(toolchainReads('/Users/t', '/users/t')).toEqual(toolchainReads('/Users/t', ''));
+  });
+
+  it('drops a differently normalized spelling of home', () => {
+    const nfd = '/h/cafe\u0301';
+    const nfc = '/h/caf\u00e9';
+    expect(toolchainReads(nfc, nfd)).toEqual(toolchainReads(nfc, ''));
+  });
 });

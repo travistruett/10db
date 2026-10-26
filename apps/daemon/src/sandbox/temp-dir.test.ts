@@ -86,7 +86,11 @@ describe('lane temp directory', () => {
     const dir = createLaneTempDir(root);
     const outside = join(root, 'outside');
     mkdirSync(outside, { mode: 0o500 });
-    symlinkSync(outside, join(dir, 'link'));
+    // The link sits inside a locked directory, so the first removal cannot unlink it and the unlock
+    // walk has to meet it.
+    mkdirSync(join(dir, 'locked'));
+    symlinkSync(outside, join(dir, 'locked', 'link'));
+    chmodSync(join(dir, 'locked'), 0o555);
     removeLaneTempDir(dir, root);
     expect(existsSync(dir)).toBe(false);
     expect(statSync(outside).mode & 0o777).toBe(0o500);

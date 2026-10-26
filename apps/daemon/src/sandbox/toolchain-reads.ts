@@ -1,5 +1,5 @@
 import { delimiter, isAbsolute, join, resolve } from 'node:path';
-import { homeProtectedReads, isEqualOrUnder } from './protected-reads';
+import { homeProtectedReads, isEqualOrUnder, pathsEqual } from './protected-reads';
 
 const FIXED_UNDER_HOME = [
   ['.local', 'share', 'mise'],
@@ -24,7 +24,7 @@ export function toolchainReads(home: string, path: string): string[] {
     .split(delimiter)
     .filter((entry) => entry !== '' && isAbsolute(entry))
     .map((entry) => resolve(entry))
-    .filter((entry) => entry !== home && isEqualOrUnder(entry, home));
+    .filter((entry) => !pathsEqual(entry, home) && isEqualOrUnder(entry, home));
   const all = [...FIXED_UNDER_HOME.map((parts) => join(home, ...parts)), ...fromPath];
   return [
     ...new Set(

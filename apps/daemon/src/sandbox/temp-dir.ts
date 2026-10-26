@@ -1,4 +1,14 @@
-import { chmodSync, lstatSync, mkdtempSync, readdirSync, realpathSync, rmSync } from 'node:fs';
+import {
+  chmodSync,
+  closeSync,
+  constants,
+  fchmodSync,
+  mkdtempSync,
+  openSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+} from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 
 /** Where lane temp directories live; the sandbox's Unix socket path limit needs a short prefix. */
@@ -46,7 +56,7 @@ export function removeLaneTempDir(dir: string, root: string = LANE_TEMP_ROOT): v
     rmSync(dir, { recursive: true, force: true });
   } catch {
     try {
-      unlockTree(dir);
+      unlockTree(dir, realpathSync(dir));
       rmSync(dir, { recursive: true, force: true });
     } catch {
       throw new SandboxTempDirError('Could not remove the lane temp directory');
@@ -54,10 +64,24 @@ export function removeLaneTempDir(dir: string, root: string = LANE_TEMP_ROOT): v
   }
 }
 
-/** Makes every directory under `dir` owner-writable so a lane's read-only directory can be removed. */
-function unlockTree(dir: string): void {
-  // lstat, never stat: a link the lane planted must not lead the walk out of the directory.
-  if (!lstatSync(dir).isDirectory()) return;
-  chmodSync(dir, 0o700);
-  for (const entry of readdirSync(dir)) unlockTree(join(dir, entry));
+/**
+ * Makes every directory under `dir` owner-writable so a lane's read-only directory can be removed.
+ * A lane process may still be running and can swap a directory for a link mid-walk, so each
+ * directory is opened without following links and changed through its descriptor, and a directory
+ * whose real path is no longer where the walk expects it is skipped.
+ */
+function unlockTree(dir: string, expected: string): void {
+  let fd: number;
+  try {
+    fd = openSync(dir, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+  } catch {
+    return; // gone, or no longer a directory
+  }
+  try {
+    if (realpathSync(dir) !== expected) return;
+    fchmodSync(fd, 0o700);
+    for (const entry of readdirSync(dir)) unlockTree(join(dir, entry), join(expected, entry));
+  } finally {
+    closeSync(fd);
+  }
 }

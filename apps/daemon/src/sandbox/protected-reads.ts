@@ -1,6 +1,11 @@
 import { join, resolve } from 'node:path';
 import { foldPathCase } from '../guard';
 
+/** True when two paths name the same place, comparing spellings the way the file system does. */
+export function pathsEqual(a: string, b: string): boolean {
+  return foldPathCase(a) === foldPathCase(b);
+}
+
 /** True when `path` is `root` or lies under it, comparing spellings the way the file system does. */
 export function isEqualOrUnder(path: string, root: string): boolean {
   const p = foldPathCase(path);
