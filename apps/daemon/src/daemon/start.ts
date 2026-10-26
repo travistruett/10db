@@ -8,6 +8,7 @@ import {
   EventType,
   PROTOCOL_VERSION,
   type InboxAnswer,
+  type PermissionMode,
   type InboxItemDto,
   type SystemCheckDto,
   type WorkstreamId,
@@ -99,6 +100,8 @@ export interface DaemonOptions {
   /** An adapter, or a factory that gets the daemon's logger (the Claude adapter logs into daemon.log). */
   readonly adapter: SessionAdapter | ((logger: Logger) => SessionAdapter);
   readonly logLevel: LogLevel;
+  /** `auto` runs every project's lanes in auto mode (the dev switch); otherwise each project decides. */
+  readonly permissionModeOverride?: PermissionMode;
   /** better_sqlite3.node for bundled runs; source runs leave it unset. */
   readonly sqliteBinding?: string;
   readonly clock?: Clock;
@@ -434,6 +437,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     logger,
     dataDir: opts.dataDir,
     live,
+    ...(opts.permissionModeOverride ? { permissionModeOverride: opts.permissionModeOverride } : {}),
     limits,
     mcpUrl: () => mcpUrl,
     launcher,

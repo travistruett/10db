@@ -102,6 +102,13 @@
       "items": {
         "type": "string"
       }
+    },
+    "permissionMode": {
+      "type": "string",
+      "enum": [
+        "default",
+        "auto"
+      ]
     }
   }
 }

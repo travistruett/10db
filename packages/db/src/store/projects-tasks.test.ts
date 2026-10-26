@@ -84,6 +84,16 @@ describe('projects', () => {
     expect(getProject(store.db, project.id).allowedCommands).toEqual([]);
   });
 
+  it('starts a project in the default permission mode and keeps a patched one', () => {
+    const project = seedProject(store);
+    expect(getProject(store.db, project.id).permissionMode).toBe('default');
+    store.write((ctx) => patchProject(ctx, project.id, { permissionMode: 'auto' }));
+    expect(getProject(store.db, project.id).permissionMode).toBe('auto');
+    expect(
+      seedProject(store, { repoPath: '/tmp/auto-mode', permissionMode: 'auto' }).permissionMode,
+    ).toBe('auto');
+  });
+
   it('replaces the allowed commands on a patch and leaves the other fields alone', () => {
     const project = seedProject(store, { allowedCommands: ['pnpm test'] });
     const patched = store.write((ctx) =>

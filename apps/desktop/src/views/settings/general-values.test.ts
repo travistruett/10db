@@ -24,6 +24,11 @@ describe('checkGeneral', () => {
       change: { budgetCeiling: 2.5 },
       expected: { ok: true, patch: { budgetCeiling: 2.5 } },
     },
+    {
+      name: 'auto mode',
+      change: { permissionMode: 'auto' },
+      expected: { ok: true, patch: { permissionMode: 'auto' } },
+    },
     { name: 'a flow', change: { flowId }, expected: { ok: true, patch: { flowId } } },
     {
       name: 'the lane cap and wait',

@@ -10,6 +10,7 @@ import {
   WorkstreamState as S,
   AccountKind,
   AccountProblem,
+  PermissionMode,
   type AccountId,
   type AccountRefusal,
   type HandoffId,
@@ -154,6 +155,11 @@ export interface RunnerOptions {
   readonly logger: Logger;
   readonly dataDir: string;
   readonly live: LiveSessions;
+  /**
+   * Forces auto mode on for every project (the dev switch); `default` leaves each project to its own
+   * setting, read when each session starts.
+   */
+  readonly permissionModeOverride?: PermissionMode;
   readonly limits: RunnerLimits;
   mcpUrl(): string;
   /** Builds each session's launch, and the env the gate runs in. */
@@ -1037,6 +1043,10 @@ export function createRunner(opts: RunnerOptions): Runner {
         model: launch.model,
         effort: row.effort,
         resumeProviderSessionId: resumeId,
+        permissionMode:
+          opts.permissionModeOverride === PermissionMode.Auto
+            ? PermissionMode.Auto
+            : project.permissionMode,
         env: launch.env,
         account: launch.expect,
         projectMcpServers: projectMcp.servers,

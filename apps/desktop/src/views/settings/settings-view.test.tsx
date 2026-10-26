@@ -266,6 +266,46 @@ describe('SettingsView', () => {
     expect(await screen.findByText('Saved.')).toBeTruthy();
   });
 
+  it('shows the permissions control with the project mode and a note that auto mode is no boundary', async () => {
+    const project = projectDto({ permissionMode: 'auto' });
+    server.use(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
+      ...baseHandlers(),
+    );
+    renderApp('/settings/general');
+    const group = await screen.findByRole('radiogroup', { name: 'Permissions' });
+    expect(within(group).getByRole<HTMLInputElement>('radio', { name: /Auto mode/ }).checked).toBe(
+      true,
+    );
+    expect(
+      within(group).getByRole<HTMLInputElement>('radio', { name: /Ask for each command/ }).checked,
+    ).toBe(false);
+    expect(group.getAttribute('aria-describedby')).toBeTruthy();
+    expect(await screen.findByText(/Auto mode is not a security boundary/)).toBeTruthy();
+  });
+
+  it('saves the permission mode as a patch', async () => {
+    const project = projectDto({ name: 'demo', gateCommand: 'make gate' });
+    const patched: unknown[] = [];
+    server.use(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
+      http.patch(daemonUrl('/projects/:projectId'), async ({ request }) => {
+        patched.push(await request.json());
+        return HttpResponse.json({ ...project, permissionMode: 'auto' });
+      }),
+      ...baseHandlers(),
+    );
+    renderApp('/settings/general');
+    fireEvent.click(await screen.findByRole('radio', { name: /Auto mode/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => {
+      expect(patched).toEqual([{ permissionMode: 'auto' }]);
+    });
+    expect(await screen.findByText('Saved.')).toBeTruthy();
+  });
+
   it('saves the extra allowed commands, one per line', async () => {
     const project = projectDto({ name: 'demo', gateCommand: 'make gate' });
     const patched: unknown[] = [];

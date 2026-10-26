@@ -14,7 +14,6 @@ import {
 import { Provider, type AccountRefusal } from '@10db/contracts';
 import { z } from 'zod';
 import { systemClock, type Clock } from '../clock';
-import type { LanePermissionMode } from '../env';
 import type { Logger } from '../log';
 import {
   checkAccount,
@@ -68,8 +67,6 @@ export interface ClaudeAdapterOptions {
   readonly claudePath: string;
   /** The injected harness plugin directory. */
   readonly pluginDir: string;
-  /** How lane sessions decide permission prompts; `default` when omitted. */
-  readonly permissionMode?: LanePermissionMode;
   readonly logger: Logger;
   /** The SDK's query(); tests pass a scripted one. */
   readonly query?: QueryFn;
@@ -80,7 +77,6 @@ export interface ClaudeAdapterOptions {
 }
 
 interface QueryDeps {
-  readonly permissionMode: LanePermissionMode;
   readonly claudePath: string;
   readonly pluginDir: string;
   readonly abortController: AbortController;
@@ -176,7 +172,7 @@ export function buildQueryOptions(spec: SessionSpec, deps: QueryDeps): Options {
     settings: { autoCompactEnabled: true },
     plugins: [{ type: 'local', path: deps.pluginDir }],
     allowedTools: [...spec.allowedTools],
-    permissionMode: deps.permissionMode,
+    permissionMode: spec.permissionMode,
     canUseTool: async (toolName, input, options) => {
       if (!(await deps.billingVerified) || deps.isRefused())
         return { behavior: 'deny', message: BILLING_UNVERIFIED, interrupt: true };
@@ -345,7 +341,6 @@ function startSession(
   const q = runQuery({
     prompt: input,
     options: buildQueryOptions(spec, {
-      permissionMode: opts.permissionMode ?? 'default',
       claudePath: opts.claudePath,
       pluginDir: opts.pluginDir,
       abortController,

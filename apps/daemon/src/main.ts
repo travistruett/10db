@@ -70,7 +70,6 @@ async function chooseAdapter(): Promise<SessionAdapter | ((logger: Logger) => Se
     createClaudeAdapter({
       claudePath,
       pluginDir: resolveHarnessDir(),
-      permissionMode: env.TENDB_LANE_PERMISSION_MODE,
       logger: logger.child({ component: 'claude' }),
     });
 }
@@ -81,6 +80,7 @@ try {
     dataDir,
     port: env.TENDB_PORT,
     adapter: await chooseAdapter(),
+    permissionModeOverride: env.TENDB_LANE_PERMISSION_MODE,
     logLevel: env.TENDB_LOG_LEVEL,
     migrationsDir: resolveMigrationsDir(),
     harnessDir: resolveHarnessDir(),

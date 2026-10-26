@@ -68,6 +68,7 @@ describe.skipIf(!live)('Claude adapter, live', () => {
       model: launch.model,
       effort: 'low',
       resumeProviderSessionId: null,
+      permissionMode: 'default',
       env: launch.env,
       account: launch.expect,
       projectMcpServers: {},

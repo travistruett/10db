@@ -424,6 +424,13 @@ describe('team, routing and benchmark routes', () => {
       service: 'patchProject',
     },
     {
+      name: 'PATCH /projects/:id with a permission mode',
+      method: 'PATCH',
+      path: `/projects/${projectId}`,
+      body: { permissionMode: 'auto' },
+      service: 'patchProject',
+    },
+    {
       name: 'GET /projects/:id/team',
       method: 'GET',
       path: `/projects/${projectId}/team`,
@@ -512,6 +519,12 @@ describe('team, routing and benchmark routes', () => {
       method: 'PATCH',
       path: `/projects/${projectId}`,
       body: { budgetCeiling: -1 },
+    },
+    {
+      name: 'an unknown permission mode',
+      method: 'PATCH',
+      path: `/projects/${projectId}`,
+      body: { permissionMode: 'yolo' },
     },
     {
       name: 'an allowed command with a flag',

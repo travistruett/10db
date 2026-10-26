@@ -108,7 +108,9 @@ export interface TestEngine {
 export async function createTestEngine(
   book: FakeScriptBook,
   project: Partial<ProjectInput> = {},
-  runnerOverrides: Partial<Pick<RunnerOptions, 'afterSession' | 'logger' | 'launcher'>> = {},
+  runnerOverrides: Partial<
+    Pick<RunnerOptions, 'afterSession' | 'logger' | 'launcher' | 'permissionModeOverride'>
+  > = {},
   setup: { readonly account?: AccountInput; readonly secret?: string } = {},
 ): Promise<TestEngine> {
   const repo = createTempRepo();

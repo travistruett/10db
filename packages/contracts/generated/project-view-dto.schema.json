@@ -190,6 +190,13 @@
         "type": "string"
       }
     },
+    "permissionMode": {
+      "type": "string",
+      "enum": [
+        "default",
+        "auto"
+      ]
+    },
     "createdAt": {
       "type": "string",
       "format": "date-time",
@@ -352,6 +359,7 @@
     "baseBranch",
     "prTitlePrefix",
     "allowedCommands",
+    "permissionMode",
     "createdAt",
     "updatedAt"
   ]
