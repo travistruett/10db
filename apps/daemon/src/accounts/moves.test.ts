@@ -381,6 +381,40 @@ describe('moving a project', () => {
     },
   );
 
+  it.each<[string, AccountPause, () => void]>([
+    [
+      'its monthly cap',
+      { reason: 'monthly_cap', until: new Date(2026, 10, 1) },
+      () => {
+        clock.advance(new Date(2026, 10, 1).getTime() - clock.now().getTime());
+      },
+    ],
+    [
+      'a refusal',
+      { reason: 'refused', until: null },
+      () => {
+        pauses.resume(plan);
+        clock.advance(DEFAULT_PAUSE_MS);
+      },
+    ],
+  ])(
+    'asks to move back only once the pause holding an account held by %s lifts',
+    (_name, held, lift) => {
+      const back = () =>
+        findOpenByFoldKey(state.db, project.id, accountFoldKey(plan, MOVE_BACK_CARD));
+      pauses.pause(plan, held, { projectId: project.id, card: null });
+      runtime.rateLimited(plan, inMinutes(60), project.id);
+      inbox.answer(limitCard().id, { choice: CONTINUE });
+      // Past the usage limit's reset and the default pause, the account the project left is still held.
+      clock.advance(60 * 60_000);
+      clock.advance(DEFAULT_PAUSE_MS);
+      expect(back()).toBeUndefined();
+
+      lift();
+      expect(back()?.title).toBe('Claude plan is available again: move demo back?');
+    },
+  );
+
   it('closes a limit card when its pause ends, so a later answer moves nothing', () => {
     runtime.rateLimited(plan, inMinutes(60), project.id);
     const stale = limitCard();

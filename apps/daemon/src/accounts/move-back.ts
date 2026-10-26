@@ -61,13 +61,16 @@ export function createMoveBack(opts: {
       opts.state.write((ctx) => setMoveBack(ctx, projectId, null));
       return;
     }
-    const stillLimited = usageLimitEnd(opts.pauses.pausedFor(from.id));
-    if (stillLimited !== null && stillLimited > opts.clock.now()) {
-      // The limit was met again after the move: ask when it really ends.
-      opts.state.write((ctx) =>
-        setMoveBack(ctx, projectId, { accountId: from.id, at: stillLimited.toISOString() }),
-      );
-      schedule(projectId, stillLimited);
+    const held = opts.pauses.pausedFor(from.id);
+    if (held) {
+      // The account it left is still paused: its usage limit met again after the move, its monthly cap
+      // or a refusal. Ask when that pause ends, or after the default pause when it has no end.
+      const limitEnds = usageLimitEnd(held);
+      if (limitEnds !== null)
+        opts.state.write((ctx) =>
+          setMoveBack(ctx, projectId, { accountId: from.id, at: limitEnds.toISOString() }),
+        );
+      schedule(projectId, held.until ?? new Date(opts.clock.now().getTime() + opts.defaultPauseMs));
       return;
     }
     // A session on the account it left still reports usage past the project's threshold: ask later.
