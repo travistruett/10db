@@ -97,7 +97,7 @@ beforeEach(() => {
       limits.forget(projectId);
     },
   });
-  limits = createAccountLimits({ state, inbox, pauses, moves, reports });
+  limits = createAccountLimits({ state, clock, inbox, pauses, moves, reports });
   answerCard = createAccountCardAnswers({
     resume: () => undefined,
     confirm: () => undefined,
@@ -172,8 +172,9 @@ describe('usage thresholds', () => {
     expect(openCards()).toEqual([]);
 
     // The window reset (a later reset time) and usage climbed again: a new crossing.
-    limits.usageReported(plan, { ...report(0.2), resetsAt: inMinutes(420) });
-    limits.usageReported(plan, { ...report(0.95), resetsAt: inMinutes(420) });
+    clock.advance(121 * 60_000);
+    limits.usageReported(plan, report(0.2));
+    limits.usageReported(plan, report(0.95));
     const [again] = openCards();
     if (!again) throw new Error('no card asked again');
     inbox.answer(again.id, { choice: 'Move to Second plan · second@example.com' });
@@ -276,15 +277,46 @@ describe('usage thresholds', () => {
     limits.usageReported(plan, report(0.96));
     const [stale] = openCards();
     if (!stale) throw new Error('no card asked');
-    limits.usageReported(plan, { ...report(0.2), resetsAt: inMinutes(420) });
+    clock.advance(121 * 60_000);
+    limits.usageReported(plan, report(0.2));
     expect(openCards()).toEqual([]);
     expect(() =>
       inbox.answer(stale.id, { choice: 'Move to Second plan · second@example.com' }),
     ).toThrow(ConflictError);
     expect(getProject(state.db, project.id).accountId).toBe(plan);
-    limits.usageReported(plan, { ...report(0.95), resetsAt: inMinutes(420) });
+    limits.usageReported(plan, report(0.95));
     const [fresh] = openCards();
     expect(fresh?.id).not.toBe(stale.id);
+  });
+
+  it('keeps the card while another limit of the account is still crossed', () => {
+    const project = busy(seedProject(store));
+    const plan = project.accountId;
+    limits.usageReported(plan, report(0.96));
+    limits.usageReported(plan, {
+      ...report(0.97),
+      limitType: 'seven_day',
+      resetsAt: inMinutes(5000),
+    });
+    expect(openCards()).toHaveLength(1);
+    // The 5-hour window resets and usage falls; the weekly limit is still high.
+    clock.advance(121 * 60_000);
+    limits.usageReported(plan, report(0.2));
+    expect(openCards()).toHaveLength(1);
+  });
+
+  it('counts a shifted reset time inside one window as the same crossing', () => {
+    const project = busy(seedProject(store));
+    const plan = project.accountId;
+    limits.usageReported(plan, report(0.96));
+    const [asked] = openCards();
+    if (!asked) throw new Error('no card asked');
+    inbox.answer(asked.id, { choice: AccountCardChoice.Later });
+    limits.usageReported(plan, {
+      ...report(0.96),
+      resetsAt: new Date(inMinutes(120).getTime() + 5_000),
+    });
+    expect(openCards()).toEqual([]);
   });
 
   it('does not ask again when a concurrent session reports a lower share in the same window', () => {

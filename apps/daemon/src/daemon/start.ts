@@ -366,7 +366,14 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       scheduler?.requestTick();
     },
   });
-  accountLimits = createAccountLimits({ state, inbox, pauses: accountPauses, moves, reports });
+  accountLimits = createAccountLimits({
+    state,
+    clock,
+    inbox,
+    pauses: accountPauses,
+    moves,
+    reports,
+  });
   answerAccountCard = createAccountCardAnswers({
     resume: (id) => {
       accountPauses.resume(id);

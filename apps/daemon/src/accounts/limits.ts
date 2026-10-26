@@ -1,5 +1,6 @@
 import type { AccountId, ProjectId } from '@10db/contracts';
 import { findOpenByFoldKey, getAccountRow } from '@10db/db';
+import type { Clock } from '../clock';
 import type { StateStore } from '../events';
 import type { InboxService } from '../inbox';
 import {
@@ -35,6 +36,7 @@ export interface AccountLimits {
 
 export function createAccountLimits(opts: {
   readonly state: StateStore;
+  readonly clock: Pick<Clock, 'now'>;
   readonly inbox: InboxService;
   readonly pauses: Pick<AccountPauses, 'pausedFor'>;
   readonly moves: Pick<AccountMoves, 'move'>;
@@ -79,15 +81,19 @@ export function createAccountLimits(opts: {
           const crossedBefore = marks.has(key);
           const markedWindow = marks.get(key) ?? null;
           const unknownWindow = window === null || markedWindow === null;
+          // Reset times may shift a little between reports: a window is over once its time has passed.
+          const windowOver = markedWindow !== null && markedWindow <= opts.clock.now().getTime();
           if (report.utilization < project.usageHandoffAt) {
-            // Usage only falls when its window resets: a different reset time, or none reported to say.
-            if (crossedBefore && (unknownWindow || markedWindow !== window)) {
+            // Usage only falls when its window resets: it passed, or no reset time says otherwise.
+            if (crossedBefore && (unknownWindow || windowOver)) {
               marks.delete(key);
-              withdraw(project.id, accountId, USAGE_HIGH_CARD);
+              // Cards of every limit of the account share one, so it stays while another is crossed.
+              const another = [...marks.keys()].some((k) => k.startsWith(`${accountId}:`));
+              if (!another) withdraw(project.id, accountId, USAGE_HIGH_CARD);
             }
             continue;
           }
-          if (crossedBefore && (unknownWindow || markedWindow === window)) {
+          if (crossedBefore && (unknownWindow || !windowOver)) {
             if (window !== null) marks.set(key, window);
             continue;
           }

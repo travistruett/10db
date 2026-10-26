@@ -176,7 +176,7 @@ export async function createTestEngine(
       limits?.forget(projectId);
     },
   });
-  limits = createAccountLimits({ state, inbox, pauses, moves, reports: usageReportBook });
+  limits = createAccountLimits({ state, clock, inbox, pauses, moves, reports: usageReportBook });
   answerAccountCard = createAccountCardAnswers({
     resume: (id) => {
       pauses.resume(id);
