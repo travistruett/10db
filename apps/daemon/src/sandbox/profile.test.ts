@@ -136,14 +136,44 @@ describe('buildLaneProfile', () => {
     expect(profile.credentials.envVars).toEqual([{ name: 'GH_TOKEN', mode: 'deny' }]);
   });
 
-  it.each<[string, Partial<LaneProfileInput>, string]>([
-    ['a glob in a secret file', { secretFiles: ['/r/.env*'] }, 'filesystem.denyRead'],
-    ['a relative read-list path', { readList: ['rel/x'] }, 'filesystem.allowRead'],
-    ['a brace in an extra write', { extraWrites: ['/r/{a,b}'] }, 'filesystem.allowWrite'],
-    ['a glob in a denied write', { denyWrites: ['/r/.git/*'] }, 'filesystem.denyWrite'],
-    ['a URL as a domain', { allowedDomains: ['https://x'] }, 'network.allowedDomains'],
-    ['a bad env name', { deniedEnvNames: ['A=B'] }, 'credentials.envVars'],
-  ])('refuses %s', (_name, overrides, field) => {
+  it.each<[string, Partial<LaneProfileInput>, string, string]>([
+    [
+      'a glob in a secret file',
+      { secretFiles: ['/r/.env*'] },
+      'filesystem.denyRead',
+      "a path can't be used in the sandbox profile: /r/.env* (glob characters, `\\` or a newline)",
+    ],
+    [
+      'a relative read-list path',
+      { readList: ['rel/x'] },
+      'filesystem.allowRead',
+      "a path can't be used in the sandbox profile: rel/x (not a normalized absolute path)",
+    ],
+    [
+      'a brace in an extra write',
+      { extraWrites: ['/r/{a,b}'] },
+      'filesystem.allowWrite',
+      "a path can't be used in the sandbox profile: /r/{a,b} (glob characters, `\\` or a newline)",
+    ],
+    [
+      'a glob in a denied write',
+      { denyWrites: ['/r/.git/*'] },
+      'filesystem.denyWrite',
+      "a path can't be used in the sandbox profile: /r/.git/* (glob characters, `\\` or a newline)",
+    ],
+    [
+      'a URL as a domain',
+      { allowedDomains: ['https://x'] },
+      'network.allowedDomains',
+      "a host can't be used in the sandbox profile: https://x (not a lower-case host or *. wildcard)",
+    ],
+    [
+      'a bad env name',
+      { deniedEnvNames: ['A=B'] },
+      'credentials.envVars',
+      "an env name can't be used in the sandbox profile: A=B",
+    ],
+  ])('refuses %s, naming the value and the field', (_name, overrides, field, message) => {
     let thrown: unknown;
     try {
       buildLaneProfile(input(overrides));
@@ -151,7 +181,8 @@ describe('buildLaneProfile', () => {
       thrown = error;
     }
     expect(thrown).toBeInstanceOf(SandboxProfileError);
-    expect(thrown).toHaveProperty('message', expect.stringContaining(field));
+    expect(thrown).toHaveProperty('message', message);
+    expect(thrown).toHaveProperty('field', expect.stringContaining(field));
   });
 
   it.each<[string, string]>([

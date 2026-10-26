@@ -19,7 +19,9 @@ import { createGit } from '../git';
 import {
   createLaneSandbox,
   fileAccessJudge,
+  readAccess,
   SandboxProfileError,
+  SandboxTempDirError,
   type LaneSandbox,
   type LaneSessionInput,
 } from './index';
@@ -351,6 +353,18 @@ describe('createLaneSandbox', () => {
     expect(existsSync(file)).toBe(false);
   });
 
+  it('still removes the temp dir when removing the env file fails, then reports that failure', async () => {
+    const session = await sandbox().forSession(input());
+    const file = session.spec.env['CLAUDE_ENV_FILE'] ?? '';
+    // A directory in the env file's place cannot be removed as a file.
+    rmSync(file);
+    mkdirSync(file);
+    expect(() => {
+      session.dispose();
+    }).toThrow(new SandboxTempDirError('Could not remove the lane env file'));
+    expect(existsSync(session.tmpDir)).toBe(false);
+  });
+
   it('removes the env file and the temp dir when the profile is refused', async () => {
     await expect(
       sandbox().forSession(input({ env: { PATH: '/usr/bin', 'A=B': 'x' } })),
@@ -372,11 +386,20 @@ describe('createLaneSandbox', () => {
     'refuses the lane with a profile error for a secret file named %s, removing the temp dir it made',
     async (name) => {
       // Claude Code drops the whole sandbox, silently, over a pattern character in a path.
-      writeIn(checkout, name);
+      const file = writeIn(checkout, name);
       await expect(sandbox().forSession(input())).rejects.toThrow(SandboxProfileError);
+      await expect(sandbox().forSession(input())).rejects.toThrow(file);
       expect(readdirSync(tmpRoot)).toEqual([]);
     },
   );
+
+  it('names the secret file a refusal is about, and why', async () => {
+    const file = writeIn(checkout, '.env[1]');
+    await expect(sandbox().forSession(input())).rejects.toMatchObject({
+      name: 'SandboxProfileError',
+      message: `a path can't be used in the sandbox profile: ${file} (glob characters, \`\\\` or a newline)`,
+    });
+  });
 
   it.skipIf(process.platform !== 'darwin')(
     'lists a secret file whatever the case of its name, as the file system folds it',
@@ -402,7 +425,7 @@ describe('createLaneSandbox', () => {
       chmodSync(locked, 0o000);
       try {
         await expect(sandbox().forSession(input())).rejects.toThrow(
-          /secretFiles: cannot list apps\/locked/,
+          "a directory in the checkout can't be listed: apps/locked",
         );
         expect(readdirSync(tmpRoot)).toEqual([]);
       } finally {
@@ -438,6 +461,46 @@ describe('createLaneSandbox', () => {
     }
   });
 
+  it('denies a .env link and the file it points to, by both paths, with no card', async () => {
+    const outside = join(root, 'outside');
+    mkdirSync(outside);
+    const target = writeIn(outside, 'prod.env', 'SECRET=1');
+    const link = join(checkout, '.env');
+    symlinkSync(target, link);
+    const session = await sandbox().forSession(input());
+    try {
+      const { denyRead } = session.spec.settings.filesystem;
+      expect(denyRead).toEqual(expect.arrayContaining([link, target]));
+      expect(session.spec.disallowedTools).toEqual(
+        expect.arrayContaining([`Read(/${link})`, `Read(/${target})`]),
+      );
+      const judge = fileAccessJudge(session.fileAccess);
+      for (const path of ['.env', link, target]) {
+        // The broker refuses a protected read with no card; it cards only `ask`.
+        expect(readAccess(path, session.fileAccess).access, path).toBe('protected');
+        expect(judge.read('Read', { file_path: path }), path).not.toBe('ok');
+      }
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it.each([
+    ['a dangling .env link', (dir: string) => join(dir, 'missing.env')],
+    ['a .env link in a loop', (dir: string) => join(dir, '.env')],
+  ])('skips %s, which reads nothing', async (_name, targetIn) => {
+    symlinkSync(targetIn(checkout), join(checkout, '.env'));
+    const session = await sandbox().forSession(input());
+    try {
+      expect(session.spec.settings.filesystem.denyRead.filter((p) => p.includes('env'))).toEqual(
+        [],
+      );
+      expect(session.fileAccess.secretFiles).toEqual([]);
+    } finally {
+      session.dispose();
+    }
+  });
+
   it('gives each session of a project its own temp dir', async () => {
     const lanes = sandbox();
     const first = await lanes.forSession(input());
@@ -453,17 +516,17 @@ describe('createLaneSandbox', () => {
 });
 
 describe('secretFilesIn', () => {
-  const failing = (dir: string, code: string) => (path: string) => {
-    if (path === dir) throw Object.assign(new Error(`${code}: ${path}`), { code });
-    return readdirSync(path, { withFileTypes: true });
-  };
+  const failing = (dir: string, code: string) => (path: string) =>
+    path === dir
+      ? Promise.reject(Object.assign(new Error(`${code}: ${path}`), { code }))
+      : Promise.resolve(readdirSync(path, { withFileTypes: true }));
 
   it.each(['ENOENT', 'ENOTDIR'])(
     'skips a directory that vanished during the walk (%s), which hides nothing',
-    (code) => {
+    async (code) => {
       const kept = writeIn(checkout, 'apps/a/.env');
       writeIn(checkout, 'apps/gone/.env');
-      expect(secretFilesIn(checkout, failing(join(checkout, 'apps', 'gone'), code))).toEqual([
+      expect(await secretFilesIn(checkout, failing(join(checkout, 'apps', 'gone'), code))).toEqual([
         kept,
       ]);
     },
@@ -471,11 +534,26 @@ describe('secretFilesIn', () => {
 
   it.each(['EACCES', 'EPERM', 'EIO'])(
     'refuses on any other listing error (%s), naming the directory by its relative path',
-    (code) => {
+    async (code) => {
       writeIn(checkout, 'apps/odd/.env');
-      expect(() => secretFilesIn(checkout, failing(join(checkout, 'apps', 'odd'), code))).toThrow(
-        new SandboxProfileError('secretFiles', 'cannot list apps/odd'),
+      await expect(
+        secretFilesIn(checkout, failing(join(checkout, 'apps', 'odd'), code)),
+      ).rejects.toThrow(
+        new SandboxProfileError(
+          'secretFiles',
+          "a directory in the checkout can't be listed: apps/odd",
+        ),
       );
     },
   );
+
+  it('lets the event loop run while it walks', async () => {
+    const deepest = writeIn(checkout, 'a/b/c/d/e/.env');
+    const order: string[] = [];
+    setImmediate(() => order.push('event loop'));
+    const found = await secretFilesIn(checkout);
+    order.push('walk done');
+    expect(found).toEqual([deepest]);
+    expect(order).toEqual(['event loop', 'walk done']);
+  });
 });

@@ -22,16 +22,22 @@ export const SYSTEM_READS = [
   '/etc',
 ] as const;
 
-/** An invalid profile. Names the field, never a value. */
+/**
+ * An invalid profile. `field` names the profile field; the message says what is wrong for the
+ * builder, naming the path, host or variable name at fault (never a variable's value).
+ */
 export class SandboxProfileError extends Error {
   override readonly name = 'SandboxProfileError';
   readonly field: string;
 
-  constructor(field: string, code: string) {
-    super(`Invalid lane sandbox profile: ${field}: ${code}`);
+  constructor(field: string, problem: string) {
+    super(problem);
     this.field = field;
   }
 }
+
+/** The value a validation issue is about, when it is text. */
+const shown = (input: unknown): string => (typeof input === 'string' ? input : '');
 
 // Claude Code drops the whole sandbox, without an error, on a value it can't parse, so a path
 // carries no pattern characters and a domain is a plain host or a `*.` wildcard.
@@ -42,12 +48,24 @@ const sandboxPath = z
       path.startsWith('/') &&
       !path.startsWith('//') &&
       path === posix.normalize(path) &&
-      (path === '/' || !path.endsWith('/')) &&
-      !/[*?[\]{}\\\n]/.test(path),
-    'not a plain normalized absolute path',
-  );
-const sandboxDomain = z.string().regex(/^(\*\.)?[a-z0-9.-]+$/);
-const envName = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/);
+      (path === '/' || !path.endsWith('/')),
+    {
+      error: (issue) =>
+        `a path can't be used in the sandbox profile: ${shown(issue.input)} (not a normalized absolute path)`,
+      abort: true,
+    },
+  )
+  .refine((path) => !/[*?[\]{}\\\n]/.test(path), {
+    error: (issue) =>
+      `a path can't be used in the sandbox profile: ${shown(issue.input)} (glob characters, \`\\\` or a newline)`,
+  });
+const sandboxDomain = z.string().regex(/^(\*\.)?[a-z0-9.-]+$/, {
+  error: (issue) =>
+    `a host can't be used in the sandbox profile: ${shown(issue.input)} (not a lower-case host or *. wildcard)`,
+});
+const envName = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/, {
+  error: (issue) => `an env name can't be used in the sandbox profile: ${shown(issue.input)}`,
+});
 
 /** True for a value every path field of the profile accepts. */
 export function isSandboxPath(value: string): boolean {
@@ -110,7 +128,7 @@ export function buildLaneProfile(input: LaneProfileInput): LaneSandboxSettings {
   try {
     checkout = realpathSync(input.checkout);
   } catch {
-    throw new SandboxProfileError('checkout', 'unreadable');
+    throw new SandboxProfileError('checkout', "the checkout can't be read");
   }
   const denied = [...input.protectedReads, ...input.secretFiles];
   const isAllowed = (path: string): boolean => !denied.some((root) => isEqualOrUnder(path, root));
@@ -149,7 +167,10 @@ export function buildLaneProfile(input: LaneProfileInput): LaneSandboxSettings {
   const parsed = LaneSandboxSettingsSchema.safeParse(candidate);
   if (!parsed.success) {
     const issue = parsed.error.issues[0];
-    throw new SandboxProfileError(issue?.path.join('.') ?? 'profile', issue?.code ?? 'invalid');
+    throw new SandboxProfileError(
+      issue?.path.join('.') ?? 'profile',
+      issue?.message ?? "the sandbox profile can't be built",
+    );
   }
   return parsed.data;
 }

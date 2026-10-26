@@ -2729,7 +2729,10 @@ describe('lane sandbox', () => {
   });
 
   it.each([
-    ['SandboxProfileError', () => new SandboxProfileError('checkout', 'unreadable')],
+    [
+      'SandboxProfileError',
+      () => new SandboxProfileError('checkout', "the checkout can't be read"),
+    ],
     [
       'SandboxTempDirError',
       () => new SandboxTempDirError('Could not create the lane temp directory'),

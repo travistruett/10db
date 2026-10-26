@@ -1,4 +1,5 @@
-import { readdirSync, realpathSync, type Dirent } from 'node:fs';
+import { realpathSync, type Dirent } from 'node:fs';
+import { readdir, realpath } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import type { PermissionRuleDto, ProjectDto } from '@10db/contracts';
 import { foldPathCase } from '../guard';
@@ -14,7 +15,12 @@ import {
 } from './profile';
 import { isEqualOrUnder, protectedReads } from './protected-reads';
 import { createLaneEnvFile, removeLaneEnvFile } from './env-file';
-import { createLaneTempDir, LANE_TEMP_ROOT, removeLaneTempDir } from './temp-dir';
+import {
+  createLaneTempDir,
+  LANE_TEMP_ROOT,
+  removeLaneTempDir,
+  SandboxTempDirError,
+} from './temp-dir';
 import { toolchainReads } from './toolchain-reads';
 
 /** What a sandboxed session hands Claude Code on top of its ordinary options. */
@@ -73,8 +79,8 @@ const UNWALKED_DIRECTORIES: ReadonlySet<string> = new Set(['node_modules', '.git
 /** Listing errors that mean the directory is gone, so it can hide no secret file. */
 const VANISHED: ReadonlySet<string> = new Set(['ENOENT', 'ENOTDIR']);
 
-type ListDirectory = (dir: string) => Dirent[];
-const listDirectory: ListDirectory = (dir) => readdirSync(dir, { withFileTypes: true });
+type ListDirectory = (dir: string) => Promise<Dirent[]>;
+const listDirectory: ListDirectory = (dir) => readdir(dir, { withFileTypes: true });
 
 function errorCode(error: unknown): string | null {
   return error instanceof Error && 'code' in error && typeof error.code === 'string'
@@ -83,39 +89,92 @@ function errorCode(error: unknown): string | null {
 }
 
 /**
- * Every `.env*` file, or link, under `root`, by real path; directories in `UNWALKED_DIRECTORIES`
- * and links are not entered. A directory that vanished mid-walk is skipped; one that can't be
- * listed for any other reason could hide a secret file, so the walk refuses, naming it.
+ * The paths a `.env*` entry names: the file itself, or a link and the real path it leads to. A
+ * link that can't be resolved (dangling, or a loop) leads to nothing to read, so it names none.
  */
-export function secretFilesIn(root: string, list: ListDirectory = listDirectory): string[] {
-  const found: string[] = [];
+async function secretPathsOf(path: string, entry: Dirent): Promise<string[]> {
+  if (!entry.isSymbolicLink()) return [path];
+  try {
+    return [path, await realpath(path)];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Every `.env*` file under `root`, and every `.env*` link with the real path it leads to;
+ * directories in `UNWALKED_DIRECTORIES` and links are not entered. The walk is asynchronous, as a
+ * checkout can hold a large build tree. A directory that vanished mid-walk is skipped; one that
+ * can't be listed for any other reason could hide a secret file, so the walk refuses, naming it.
+ */
+export async function secretFilesIn(
+  root: string,
+  list: ListDirectory = listDirectory,
+): Promise<string[]> {
+  const found = new Set<string>();
   const pending = [root];
   for (let dir = pending.pop(); dir !== undefined; dir = pending.pop()) {
     let entries: Dirent[];
     try {
-      entries = list(dir);
+      entries = await list(dir);
     } catch (error) {
       const code = errorCode(error);
       if (code !== null && VANISHED.has(code)) continue;
-      throw new SandboxProfileError('secretFiles', `cannot list ${relative(root, dir) || '.'}`);
+      throw new SandboxProfileError(
+        'secretFiles',
+        `a directory in the checkout can't be listed: ${relative(root, dir) || '.'}`,
+      );
     }
     for (const entry of entries) {
       const path = join(dir, entry.name);
       if (entry.isDirectory()) {
         if (!UNWALKED_DIRECTORIES.has(entry.name)) pending.push(path);
       } else if (foldPathCase(entry.name).startsWith(SECRET_FILE_PREFIX)) {
-        found.push(path);
+        for (const secret of await secretPathsOf(path, entry)) found.add(secret);
       }
     }
   }
-  return found.sort();
+  return [...found].sort();
+}
+
+/**
+ * Removes a session's env file and temp dir. Both are attempted even when the first fails; the
+ * first failure is then thrown.
+ */
+function removeLaneFiles(envFile: string | null, tmpDir: string, tmpRoot: string): void {
+  const removals: (() => void)[] = [
+    ...(envFile === null
+      ? []
+      : [
+          () => {
+            removeLaneEnvFile(envFile, tmpRoot);
+          },
+        ]),
+    () => {
+      removeLaneTempDir(tmpDir, tmpRoot);
+    },
+  ];
+  const failures: Error[] = [];
+  for (const remove of removals) {
+    try {
+      remove();
+    } catch (error) {
+      failures.push(
+        error instanceof Error
+          ? error
+          : new SandboxTempDirError('Could not remove the lane temp files'),
+      );
+    }
+  }
+  const [first] = failures;
+  if (first !== undefined) throw first;
 }
 
 function realCheckoutOf(checkout: string): string {
   try {
     return realpathSync(checkout);
   } catch {
-    throw new SandboxProfileError('checkout', 'unreadable');
+    throw new SandboxProfileError('checkout', "the checkout can't be read");
   }
 }
 
@@ -142,7 +201,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
   return {
     async forSession(input) {
       const checkout = realCheckoutOf(input.project.repoPath);
-      const secretFiles = secretFilesIn(checkout);
+      const secretFiles = await secretFilesIn(checkout);
       const { gitDir, commonDir } = await deps.gitDirs(checkout);
       const linkedWorktree = !isEqualOrUnder(commonDir, checkout);
       const protectedList = protectedReads({
@@ -244,14 +303,12 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           dispose() {
             if (disposed) return;
             disposed = true;
-            removeLaneEnvFile(ownEnvFile, tmpRoot);
-            removeLaneTempDir(tmpDir, tmpRoot);
+            removeLaneFiles(ownEnvFile, tmpDir, tmpRoot);
           },
         };
       } catch (error) {
         try {
-          if (envFile !== null) removeLaneEnvFile(envFile, tmpRoot);
-          removeLaneTempDir(tmpDir, tmpRoot);
+          removeLaneFiles(envFile, tmpDir, tmpRoot);
         } catch {
           // The error that stopped the session is the one to report.
         }
