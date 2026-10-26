@@ -2,7 +2,9 @@
 
 **Status:** design approved section by section on 2026-10-17. Amended on 2026-10-23 with the six amendments
 the accounts plan (`docs/superpowers/plans/2026-10-22-10db-09-accounts.md`) found and Travis accepted, the
-default account's "Claude plan" label, and moving a project between accounts with work in flight.
+default account's "Claude plan" label, and moving a project between accounts with work in flight. Amended on 2026-10-25: the lane sandbox
+(`2026-10-25-10db-lane-sandbox-design.md`) replaces the guard as what keeps a session from other accounts'
+credentials (§1, §3 "Practical isolation", §8).
 **Extends:** `2026-10-13-10db-factory-loop-design.md`. It replaces that spec's per-project **billing mode**
 (§6 "Environment", §4 `projects`) and its **per-provider concurrency cap** (§5.2 point 7) with accounts.
 **Builds on:** M2a (plan 06), which is still in review: model profiles, AA scores and the router.
@@ -37,7 +39,7 @@ wrong one. Examples:
    that account.
 3. The builder can see each account's tokens and dollars this month, broken down by project.
 4. A metered account stops starting sessions at its monthly cap.
-5. One project's sessions can't casually read another account's credentials.
+5. One project's sessions can't read another account's credentials; the lane sandbox enforces it.
 6. A project moves to another account with work in flight, and the work carries on there from its latest
    handoff. Near its account's usage limit (on a Claude subscription) or at the limit itself (on any
    account), a project with work in flight moves on its own to a fallback account the builder named.
@@ -51,7 +53,8 @@ automatically to a builder-named fallback account (§6).
 - routing one project across several accounts at once: a project is on exactly one account at a time;
 - carrying a conversation itself across accounts (a spike, §11); a moved lane continues from its handoff;
 - Codex accounts (the kinds are reserved, not built);
-- OS-level isolation between accounts (separate macOS users or sandboxes).
+- a separate macOS user per account. Lanes run in a kernel sandbox instead (the lane sandbox spec), which is
+  what keeps a session from other accounts' credentials.
 
 ## 2. Prior art
 
@@ -83,7 +86,7 @@ These get numbers when they are recorded in `docs/architecture/decisions.md`.
 | A **metered account** (API key, Bedrock or gateway) may carry `monthlyCapUsd`. Before starting a session, the scheduler compares the account's calendar-month spend with the cap. At or over the cap, the account's lanes go to `PAUSED_LIMIT`, with one card per project that meets it. A session already running finishes, and the card shows any overshoot. Subscriptions have no dollar cap.          | Simple and enough: "stop me at $500". Stopping a session mid-run would lose work.                                                                   |
 | Usage is recorded per session (`accountId`, tokens in, out and cached, and `costUsd` for metered kinds, as the SDK reports them). Account usage is a query over sessions, not a second ledger.                                                                                                                                                                                 | One source of truth.                                                                                                                                |
 | The router stays **model-level**. An account may list the aliases it offers, and the router considers only those. The project budget ceiling still compares AA's cost per task, whatever the account kind.                                                                                                                                                                     | AA scores describe models. On a subscription, AA cost still tracks how fast a model burns quota. Real dollars are governed by the monthly cap.      |
-| **Practical isolation.** A session gets only its own account's env and config directory. In every step kind, the guard refuses Keychain commands (`security`, plus `osascript` keychain access), any tool or shell path under 10db's data directory (including `accounts/`), and commands that print secret-bearing env (`env`, `printenv`, `set`, `export -p`, `declare -x`). | This stops agent mistakes and casual misuse, not deliberately malicious code. Separate macOS users stay possible later without changing the schema. |
+| **Isolation between accounts is the lane sandbox's.** A session gets only its own account's env and config directory. Its Bash children get no account variable, and the kernel denies them the Keychain, 10db's data directory and every config directory; the file tools follow the same policy through the broker and deny rules (lane sandbox spec D1, D2, D5, D8). Until that ships, the guard's Keychain, env-dump and path rules stay as interim policy (lane sandbox spec D12). | Shell-text rules can't be a boundary: each of four fix rounds opened new bypasses (accounts plan Task 7). Every agent harness that takes a position puts the boundary in an OS sandbox (`docs/architecture/03-trust-boundaries.md`). Separate macOS users stay possible later without changing the schema. |
 | **Accounts start fresh.** The schema is pre-release, with no published release and no users. On first start, the daemon seeds one `claude_subscription` account, the **default account**, labelled "Claude plan", for the builder's current login, and binds new projects to it by default. The builder can rename it. | Nothing exists to migrate (see §9). A label says what the account is; who pays is `payer`, and a company may pay for the builder's plan. |
 | An account is **shown by its label and, once recorded, its identity**: "Claude plan · you@example.com" in every picker and card option. A card's title uses the label alone. | The same label can hide two logins; the identity says which one runs. |
 | A project **moves to another account with work in flight**. A running session finishes on the account it started on; each lane's next session runs on the project's account at that moment. A lane whose next action would resume a conversation from another account starts a fresh session instead, briefed from the step's latest handoff; the builder's answer and a gate failure it was fixing still reach it. Committed work and the batch branch carry over; context neither committed nor handed off is lost. | Claude Code keeps a conversation in its account's config directory, so it can't be resumed on another account; the handoff is the continuity 10db already has. |
@@ -225,7 +228,8 @@ only on a Claude subscription account). Every picker shows an account's identity
 - Table tests: each account kind's launch spec, including a missing secret refusing the session and the
   model map.
 - Identity, key-source and model mismatches refuse the session, using the fake adapter.
-- Guard refusal tables: Keychain commands, data-directory paths and env dumps, in every step kind.
+- Guard tables: the structured path checks on the file tools, and the permission matcher failing closed on an
+  uncertain parse. The kernel boundary is tested by the lane sandbox plan.
 - Scheduler: the per-account lane cap, a pause scoped to one account, and the monthly cap across a month
   rollover on an injected clock.
 - API: a secret never appears in any response.
