@@ -100,14 +100,18 @@ const offered = (account: AccountDto): string =>
  */
 export function usageLimitCard(
   account: AccountRow,
-  until: Date,
+  until: Date | null,
   project: ProjectDto,
   targets: readonly AccountDto[],
 ): AccountCard {
   const moves = targets.map((t) => ({ choice: `Continue on ${offered(t)}`, accountId: t.id }));
+  const paused =
+    until === null
+      ? 'until the account is fixed.'
+      : `until ${until.toISOString()}. Work resumes automatically.`;
   return {
     title: `${account.label} usage limit reached`,
-    body: `Every lane on ${account.label} is paused until ${until.toISOString()}. Work resumes automatically.${
+    body: `Every lane on ${account.label} is paused ${paused}${
       moves.length > 0
         ? ` Or continue ${project.name} on another account now: each lane's next session runs there from its latest handoff, and 10db asks whether to move it back once ${account.label} is available again.`
         : ''

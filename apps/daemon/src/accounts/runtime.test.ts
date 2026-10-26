@@ -274,14 +274,16 @@ describe('refusals and usage limits', () => {
     expect(card?.body).toContain(later.toISOString());
   });
 
-  it("names the usage limit's own end on a card, not the end of a cap or refusal pause", () => {
+  it('names the end of a cap pause that outlasts the usage limit on its card', () => {
     seedWorkstream(store, { project });
     seedSpend(store, project, 5);
-    expect(runtime.blocked(row(), project.id)?.reason).toBe('monthly_cap');
+    const cap = runtime.blocked(row(), project.id);
+    expect(cap?.reason).toBe('monthly_cap');
     const reset = new Date(clock.now().getTime() + 60_000);
     runtime.rateLimited(key.id, reset, project.id);
     const card = openCards().find((c) => c.title === 'Client key usage limit reached');
-    expect(card?.body).toContain(reset.toISOString());
+    expect(card?.body).toContain(`paused until ${cap?.until?.toISOString() ?? 'no end'}.`);
+    expect(card?.body).not.toContain(reset.toISOString());
   });
 
   it('leaves a usage-limit pause alone when the account is saved', () => {

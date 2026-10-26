@@ -67,8 +67,11 @@ export function createAccountRuntime(opts: {
     });
   }
 
-  /** The usage-limit card in one project, offering the accounts that project could move to now. */
-  function raiseLimitCard(account: AccountRow, until: Date, project: ProjectDto): void {
+  /**
+   * The usage-limit card in one project, offering the accounts that project could move to now. `until`
+   * is when the pause in force ends, null for a refusal that ends when the account is fixed.
+   */
+  function raiseLimitCard(account: AccountRow, until: Date | null, project: ProjectDto): void {
     const isPaused = (id: AccountId): boolean => opts.pauses.pausedFor(id) !== null;
     const card = usageLimitCard(account, until, project, moveTargets(db, project, isPaused));
     const item = opts.inbox.flag({
@@ -132,8 +135,9 @@ export function createAccountRuntime(opts: {
       );
       // One card per project with work on the account (accounts spec §6), not only the one that reported.
       const account = getAccountRow(db, accountId);
-      // A usage limit's own end; a cap or refusal pause holding the account has another.
-      const ends = usageLimitEnd(opts.pauses.pausedFor(accountId)) ?? until;
+      // The pause in force: a cap or refusal pause that outlasts the usage limit keeps the account.
+      const held = opts.pauses.pausedFor(accountId);
+      const ends = held ? held.until : until;
       const foldKey = accountFoldKey(accountId, AccountPauseReason.UsageLimit);
       const carded = listProjects(db).filter(
         (p) => p.accountId === accountId && findOpenByFoldKey(db, p.id, foldKey),

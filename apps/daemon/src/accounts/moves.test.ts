@@ -43,6 +43,7 @@ import {
   type MoveBack,
 } from './index';
 import { recordedCard, usageHighCard } from './cards';
+import type { AccountPause } from './pauses';
 
 const DEFAULT_PAUSE_MS = 30 * 60_000;
 
@@ -351,6 +352,32 @@ describe('moving a project', () => {
     inbox.answer(limitCard().id, { choice: CONTINUE });
     expect(getProject(state.db, project.id).accountId).toBe(second.id);
   });
+
+  it.each<[string, AccountPause, string]>([
+    [
+      'its monthly cap',
+      { reason: 'monthly_cap', until: new Date(2026, 10, 1) },
+      `paused until ${new Date(2026, 10, 1).toISOString()}`,
+    ],
+    ['a refusal', { reason: 'refused', until: null }, 'paused until the account is fixed'],
+  ])(
+    'moves a project off an account held by %s when it hits its usage limit',
+    (_name, held, shown) => {
+      pauses.pause(plan, held, { projectId: project.id, card: null });
+      runtime.rateLimited(plan, inMinutes(60), project.id);
+      // The card shows the pause in force, which outlasts the usage limit.
+      const limit = limitCard();
+      expect(limit.body).toContain(shown);
+      expect(limit.body).not.toContain(inMinutes(60).toISOString());
+
+      inbox.answer(limit.id, { choice: CONTINUE });
+      expect(getProject(state.db, project.id)).toMatchObject({
+        accountId: second.id,
+        movedFromAccountId: plan,
+      });
+      expect(openCards().map((c) => c.id)).not.toContain(limit.id);
+    },
+  );
 
   it('closes a limit card when its pause ends, so a later answer moves nothing', () => {
     runtime.rateLimited(plan, inMinutes(60), project.id);
