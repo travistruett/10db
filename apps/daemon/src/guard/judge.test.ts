@@ -1350,9 +1350,10 @@ describe('account isolation', () => {
       'cp -r with --target-directory naming the destination',
       () => 'cp -r --target-directory /tmp ~',
     ],
-    ['the user name from $USER', () => `cat /Users/$USER/.claude.json`],
-    ['the user name from ${USER}', () => 'cat /Users/${USER}/.claude.json'],
-    ['the user name from $LOGNAME', () => 'cat /Users/$LOGNAME/.claude.json'],
+    // The parent of the real home, not a literal /Users, so the row holds on Linux CI too.
+    ['the user name from $USER', () => `cat ${dirname(homedir())}/$USER/.claude.json`],
+    ['the user name from ${USER}', () => `cat ${dirname(homedir())}/\${USER}/.claude.json`],
+    ['the user name from $LOGNAME', () => `cat ${dirname(homedir())}/$LOGNAME/.claude.json`],
     ['a brace glob over the sign-in file', () => 'cat ~/.claude{,.json}'],
     ['a brace glob over the default directory', () => 'cat ~/.{claude,x}.json'],
     ['ruby reading a credential', () => `ruby -e 'puts ENV["ANTHROPIC_API_KEY"]'`],
