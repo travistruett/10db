@@ -94,18 +94,31 @@ describe('readAccess', () => {
       expected: 'protected',
     },
     {
-      name: 'a case variant of a protected file',
+      name: 'a case variant under a protected root that does not exist yet',
       darwinOnly: true,
-      path: () => '~/.CLAUDE.json',
+      path: () => join(root, 'FUTURE', 'secret', 'x'),
+      context: () => ({ protectedReads: [join(root, 'future', 'secret')] }),
       expected: 'protected',
     },
     {
-      name: 'a decomposed spelling of a protected directory',
-      darwinOnly: true,
-      setup: () => mkdirSync(join(home, 'Documents', 'résumé'), { recursive: true }),
-      path: () => join(home, 'Documents', 'résumé', 'x'),
-      context: () => ({ protectedReads: [join(home, 'Documents', 'résumé')] }),
+      name: 'a decomposed spelling under a protected root that does not exist yet',
+      path: () => join(root, 'future', 're\u0301sume\u0301', 'x'),
+      context: () => ({ protectedReads: [join(root, 'future', 'r\u00e9sum\u00e9')] }),
       expected: 'protected',
+    },
+    {
+      name: 'a link whose target is climbed out of with ..',
+      setup: () => {
+        mkdirSync(join(configDir, 'sub'), { recursive: true });
+        symlinkSync(join(configDir, 'sub'), join(checkout, 'lnk'));
+      },
+      path: () => `${checkout}/lnk/../x`,
+      expected: 'protected',
+    },
+    {
+      name: 'a plain .. inside the checkout',
+      path: () => `${checkout}/src/../src/a.ts`,
+      expected: 'inside',
     },
     { name: 'a sibling by relative path', path: () => '../other/secret', expected: 'ask' },
     { name: 'a file under the home directory', path: () => '~/.ssh/id_rsa', expected: 'ask' },
@@ -174,6 +187,24 @@ describe('readPathsOf', () => {
 });
 
 describe('writeAccess', () => {
+  it.skipIf(process.platform !== 'darwin')(
+    'flags a case variant of a missing protected tail',
+    () => {
+      expect(writeAccess('.claude/HOOKS/new.sh', context()).access).toBe('claude-protected');
+    },
+  );
+
+  it('flags a .. taken after a link into .git', () => {
+    symlinkSync(join(checkout, '.git', 'hooks'), join(checkout, 'lnk'));
+    const result = writeAccess(`${checkout}/lnk/../config`, context());
+    expect(result.access).toBe('git-internal');
+    expect(result.realPath).toBe(join(checkout, '.git', 'config'));
+  });
+
+  it('leaves a plain .. alone', () => {
+    expect(writeAccess('src/../README.md', context()).access).toBe('ok');
+  });
+
   it('flags .git internals', () => {
     expect(writeAccess('.git/config', context()).access).toBe('git-internal');
   });
@@ -258,4 +289,73 @@ describe('fileAccessJudge in the guard', () => {
     });
     expect(fileAccessJudge(context()).write('.claude/settings.json')).toBe('ok');
   });
+});
+
+describe('directory-scoped reads', () => {
+  const judge = () => fileAccessJudge(context());
+  const contains = (path: string) => ({
+    refuse: `${path} contains protected paths; 10db never lets a lane search or list it.`,
+  });
+  const rows: {
+    name: string;
+    tool: string;
+    input: unknown;
+    expected: 'ok' | { refuse: string };
+  }[] = [
+    {
+      name: 'Grep over home',
+      tool: 'Grep',
+      input: { pattern: '.', path: '~' },
+      expected: contains('~'),
+    },
+    {
+      name: 'Grep over /',
+      tool: 'Grep',
+      input: { pattern: '.', path: '/' },
+      expected: contains('/'),
+    },
+    {
+      name: 'Glob based at home',
+      tool: 'Glob',
+      input: { pattern: '*.json', path: '~' },
+      expected: contains('~'),
+    },
+    { name: 'LS of home', tool: 'LS', input: { path: '~' }, expected: contains('~') },
+    {
+      name: 'Grep over a checkout subdir',
+      tool: 'Grep',
+      input: { pattern: '.', path: 'src' },
+      expected: 'ok',
+    },
+    {
+      name: 'absolute pattern with a leading glob',
+      tool: 'Glob',
+      input: { pattern: '/*/x/*' },
+      expected: contains('/'),
+    },
+    {
+      name: 'pattern opening with a brace',
+      tool: 'Glob',
+      input: { pattern: '{../../home,src}/*' },
+      expected: contains('/'),
+    },
+    {
+      name: 'pattern climbing after a glob',
+      tool: 'Glob',
+      input: { pattern: 'src/*/../../../x' },
+      expected: contains('/'),
+    },
+    {
+      name: 'Grep glob climbing out',
+      tool: 'Grep',
+      input: { pattern: 'p', glob: 'src/*/../../../x' },
+      expected: contains('/'),
+    },
+    { name: 'ordinary pattern', tool: 'Glob', input: { pattern: 'src/**/*.ts' }, expected: 'ok' },
+  ];
+  for (const row of rows) {
+    it(row.name, () => {
+      expect(judge().read(row.tool, row.input)).toEqual(row.expected);
+    });
+  }
 });
