@@ -134,6 +134,9 @@ export function createApp(deps: ApiDeps) {
     .post('/projects/:projectId/mcp-servers/review', (c) =>
       c.json(deps.services.reviewProjectMcp(ProjectId.parse(c.req.param('projectId')))),
     )
+    .get('/projects/:projectId/batches', (c) =>
+      c.json(deps.services.listBatches(ProjectId.parse(c.req.param('projectId')))),
+    )
     .post(
       '/projects/:projectId/batches',
       validator('json', (value): BatchStartInput => BatchStartInput.parse(value)),

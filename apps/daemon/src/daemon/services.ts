@@ -23,6 +23,7 @@ import {
   insertTask,
   latestEventSeq,
   listAaModels,
+  listBatches,
   listBoardColumns,
   listEventsAfter,
   listFlows,
@@ -98,6 +99,8 @@ export function createServices(deps: {
       return { kind: 'workstream', workstream };
     },
     startBatch: (projectId, input) => deps.starter.startBatch(projectId, input),
+    // The store lists oldest first; the API answers newest first.
+    listBatches: (projectId) => listBatches(db, { projectId }).reverse(),
     shipBatch: (id) => deps.shipper.ship(id),
     abandonBatch: (id) => deps.shipper.abandon(id),
     listFlows: () => listFlows(db),
