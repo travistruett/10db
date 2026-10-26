@@ -7,6 +7,7 @@ import { tempDir } from '../../test/fixtures';
 import {
   classifyPath,
   type FileAccessJudge,
+  hazardFor,
   judgeToolUse,
   protectedPaths,
   resolveInRepo,
@@ -2491,5 +2492,27 @@ describe('account isolation before the data directory exists', () => {
     const verdict = run(command());
     expect(verdict.decision).toBe('deny');
     expect(verdict.decision === 'deny' ? verdict.reason : '').toMatch(/data directory/);
+  });
+});
+
+describe('hazardFor agrees with the guard on which commands need a hazard claim', () => {
+  it.each([
+    { command: 'pnpm add x', hazard: 'deps' },
+    { command: "sh -c 'pnpm add x'", hazard: 'deps' },
+    { command: 'eval "pnpm add x"', hazard: 'deps' },
+    { command: 'find . -exec pnpm add x \\;', hazard: 'deps' },
+    { command: 'npx pnpm add x', hazard: 'deps' },
+    { command: 'env X=1 pnpm add x', hazard: 'deps' },
+    { command: 'echo "$(pnpm add x)"', hazard: 'deps' },
+    { command: 'pnpm db:migrate', hazard: 'migrations' },
+    { command: 'pnpm test', hazard: null },
+    { command: "sh -c 'pnpm test'", hazard: null },
+    { command: 'echo pnpm add x', hazard: null },
+  ])('$command', ({ command, hazard }) => {
+    expect(hazardFor(command, DEFAULT_HAZARDS)).toBe(hazard);
+    const verdict = judge('Bash', { command });
+    expect(verdict.decision === 'deny' && verdict.reason.includes('hazard claim')).toBe(
+      hazard !== null,
+    );
   });
 });

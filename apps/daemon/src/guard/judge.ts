@@ -287,12 +287,12 @@ function rmVerdict(
   return null;
 }
 
-const shellQuote = (word: string): string => `'${word.replaceAll("'", "'\\''")}'`;
+export const shellQuote = (word: string): string => `'${word.replaceAll("'", "'\\''")}'`;
 
 const SHELL_C_FLAG = /^-[a-zA-Z]*c[a-zA-Z]*$/;
 
 /** The scripts a shell's words hand it: a `-c` argument and a `<<<` here-string. */
-function shellScripts(words: readonly string[]): string[] {
+export function shellScripts(words: readonly string[]): string[] {
   const flag = words.findIndex((w) => SHELL_C_FLAG.test(w));
   const here = words.findIndex((w) => w.startsWith('<<<'));
   const hereWord = words[here];
@@ -312,7 +312,7 @@ const union = (...lists: readonly (readonly Dir[])[]): Dir[] => [...new Set(list
 const DIRECTORY_CHANGES: ReadonlySet<string> = new Set(['cd', 'pushd', 'popd']);
 
 /** The command a segment runs, past reserved words, assignments and wrappers. */
-function commandOf(segment: ShellSegment): {
+export function commandOf(segment: ShellSegment): {
   readonly words: string[];
   /** The command word as written, before its path is dropped: `$(…)` when a substitution runs. */
   readonly commandWord: string;
