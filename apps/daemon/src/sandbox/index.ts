@@ -9,3 +9,10 @@ export {
 } from './profile';
 export { protectedReads } from './protected-reads';
 export { toolchainReads } from './toolchain-reads';
+export { packageCacheEnv, projectCacheDir } from './package-cache';
+export {
+  createLaneTempDir,
+  MAX_SANDBOX_TMP_BYTES,
+  removeLaneTempDir,
+  SandboxTempDirError,
+} from './temp-dir';
