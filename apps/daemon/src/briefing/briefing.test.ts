@@ -193,6 +193,28 @@ describe('buildSessionPrompt', () => {
     expect(at('FAIL badge.test.ts')).toBeLessThan(at('Answer: Teal'));
   });
 
+  it('gives a resumed answer no gate text even when evidence is passed', () => {
+    const prompt = buildSessionPrompt({
+      ...base,
+      handoff,
+      answer: { question: 'Color?', answer: 'Teal', note: null },
+      evidence: {
+        id: mintId('Evidence'),
+        workstreamId: handoff.workstreamId,
+        kind: 'gate',
+        command: 'make gate',
+        exitCode: 2,
+        summary: 'FAIL badge.test.ts',
+        logPath: null,
+        commitShas: [],
+        createdAt: handoff.createdAt,
+      },
+      action: { kind: 'answer', inboxId: mintId('InboxItem'), providerSessionId: 'p1' },
+    });
+    expect(prompt).toContain('Answer: Teal');
+    expect(prompt).not.toContain('FAIL badge.test.ts');
+  });
+
   it('carries the answer, the gate output or the recovery note', () => {
     expect(
       buildSessionPrompt({

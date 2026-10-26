@@ -12,7 +12,6 @@ import {
   AccountProblem,
   type AccountId,
   type AccountRefusal,
-  type EvidenceId,
   type HandoffId,
   type InboxItemDto,
   type InboxItemId,
@@ -104,6 +103,7 @@ import { advanceSteps, failStep, moveAfter, sendBackSteps, type StepEntry } from
 import type { GateRunner } from '../verify';
 import { findClaimed } from '../watcher';
 import type { LiveSessions } from './live-sessions';
+import { failedGateEvidence } from './failed-gate';
 import { nextActionAfterCrash, nextActionOnAnotherAccount } from './next-action';
 
 /**
@@ -309,14 +309,6 @@ export function createRunner(opts: RunnerOptions): Runner {
     return latest ? { kind: 'continue_from_handoff', handoffId: latest.id } : { kind: 'start' };
   }
 
-  /** The lane's latest gate run failed and none has passed since: the evidence it is fixing. */
-  function failedGateEvidence(id: WorkstreamId): EvidenceId | null {
-    const lastGate = listEvidence(db, id)
-      .filter((e) => e.kind === 'gate')
-      .at(-1);
-    return lastGate && lastGate.exitCode !== 0 ? lastGate.id : null;
-  }
-
   /**
    * A conversation lives in the config directory of the account its session ran on, so once the
    * project has moved the lane can't resume it: its next action becomes a fresh start on the
@@ -337,7 +329,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     return nextActionOnAnotherAccount(
       action,
       latestHandoffForStep(db, row),
-      failedGateEvidence(id),
+      failedGateEvidence(db, id),
     );
   }
 
@@ -790,7 +782,14 @@ export function createRunner(opts: RunnerOptions): Runner {
     const readOnly = step.tools === ToolAccess.ReadOnly;
     const baseHead = row.baseHead ?? (await opts.git.head(project.repoPath));
     // A stop that landed while the head was read finds no handle to stop, so it is honoured here.
-    if (ctl.stopReason) return { kind: 'stopped', reason: ctl.stopReason, providerSessionId: null };
+    // A stop before any session launched leaves the saved action as it is, so the provider session it
+    // names stays the one the lane resumes.
+    const savedResumeId =
+      row.nextAction.kind === 'resume' || row.nextAction.kind === 'answer'
+        ? row.nextAction.providerSessionId
+        : null;
+    if (ctl.stopReason)
+      return { kind: 'stopped', reason: ctl.stopReason, providerSessionId: savedResumeId };
     // So does a move: the account the lane read before the await may not be the project's now.
     if (getProject(db, row.projectId).accountId !== ctl.accountId) return { kind: 'moved' };
     const answeredItem = action.kind === 'answer' ? getInboxItem(db, action.inboxId) : null;
@@ -805,7 +804,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       action.kind === 'fix'
         ? action.evidenceId
         : action.kind === 'answer' && action.providerSessionId === null
-          ? failedGateEvidence(id)
+          ? failedGateEvidence(db, id)
           : null;
     const evidence = evidenceId ? getEvidence(db, evidenceId) : null;
     const prompt = buildSessionPrompt({
@@ -870,7 +869,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     const stopping = stopRequested(ctl);
     if (stopping) {
       releaseStart();
-      return { kind: 'stopped', reason: stopping, providerSessionId: resumeId };
+      return { kind: 'stopped', reason: stopping, providerSessionId: savedResumeId };
     }
     // The project moved while this lane waited for its start: give the slot back and start over there.
     if (getProject(db, row.projectId).accountId !== ctl.accountId) {

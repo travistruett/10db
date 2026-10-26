@@ -1819,17 +1819,7 @@ describe('moving accounts', () => {
   it('lets a running session finish on its account when the project moves, and runs the next on the new one', async () => {
     engine = await createTestEngine({
       Alpha: [
-        [
-          askShip,
-          { do: 'context', percentage: 75 },
-          { do: 'await_message', contains: 'write_handoff' },
-          {
-            do: 'mcp',
-            tool: 'write_handoff',
-            args: handoffArgs('op-moverun-01', 'Write the second file'),
-          },
-          turn,
-        ],
+        [askShip, { do: 'rate_limit', status: 'rejected', resetsInSeconds: 600 }],
         [write('src/api/b.txt'), commit('op-moverun-02', ['src/api/b.txt']), turn],
       ],
     });
@@ -1839,15 +1829,61 @@ describe('moving accounts', () => {
     const card = await waitFor(openCard);
     const second = secondPlan();
     moveTo(second.id);
-    // The session is still running on the account it started on.
-    expect(engine.runner.isRunning(workstream.id)).toBe(true);
+    // The running session isn't stopped by the move; it ends on the account it started on.
     expect(engine.adapter.prompts).toHaveLength(1);
     engine.inbox.answer(card.id, { choice: 'Yes' });
+    await engine.runner.idle();
+    expect(engine.rateLimited.map((r) => r.accountId)).toEqual([home]);
+    expect(engine.sessionsEnded.map((e) => e.accountId)).toEqual([home]);
+    expect(ws(workstream.id).state).toBe('PAUSED_LIMIT');
+
+    requeue(workstream.id);
+    engine.launch(workstream.id);
     await engine.runner.idle();
     expect(ws(workstream.id).state).toBe('DONE');
     expect(engine.adapter.prompts.map((p) => p.accountId)).toEqual([home, second.id]);
     expect(accountsOf(workstream.id)).toEqual([home, second.id]);
-    expect(engine.rateLimited).toEqual([]);
+    expect(engine.sessionsEnded.map((e) => e.accountId)).toEqual([home, second.id]);
+  });
+
+  it('resumes the conversation when the lane was stopped waiting for the new account and the project moves back', async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        [
+          { do: 'mcp', tool: 'write_handoff', args: handoffArgs('op-movestop-1', 'Write b') },
+          { do: 'rate_limit', status: 'rejected', resetsInSeconds: 600 },
+        ],
+        [write('src/api/b.txt'), commit('op-movestop-2', ['src/api/b.txt']), turn],
+      ],
+    });
+    const home = engine.project.accountId;
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    const first = listSessions(engine.store.db, workstream.id)[0]?.providerSessionId;
+
+    const second = secondPlan();
+    const hold = await engine.startGate.acquire(second.id);
+    moveTo(second.id);
+    requeue(workstream.id);
+    engine.launch(workstream.id);
+    await waitFor(() => engine.startGate.waiting(second.id) === 1);
+    // The new account hits its usage limit: its lanes are stopped, this one before any session ran there.
+    const stopped = engine.runner.stopAccount(second.id, 'paused');
+    hold();
+    await stopped;
+    await engine.runner.idle();
+    expect(ws(workstream.id)).toMatchObject({
+      state: 'PAUSED_LIMIT',
+      nextAction: { kind: 'resume', providerSessionId: first },
+    });
+
+    moveTo(home);
+    requeue(workstream.id);
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(engine.adapter.prompts[1]?.resume).toBe(first);
   });
 });
 

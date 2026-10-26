@@ -13,6 +13,7 @@ import {
   createTestStore,
   getWorkstream,
   getWorkstreamRow,
+  insertEvidence,
   insertHandoff,
   insertSession,
   listEventsAfter,
@@ -318,6 +319,35 @@ describe('recoverOnStartup', () => {
     expect(getWorkstream(state.db, ws.workstream.id)).toMatchObject({
       state: 'QUEUED',
       recoveryAttempts: 3,
+    });
+  });
+
+  it('brings a restarted fix session back as a fix, not from the handoff', async () => {
+    const ws = inState(['STARTING', 'RUNNING']);
+    const failed = state.write((ctx) =>
+      insertEvidence(ctx, {
+        workstreamId: ws.workstream.id,
+        kind: 'gate',
+        command: 'make gate',
+        exitCode: 2,
+        summary: 'FAIL badge.test.ts',
+        logPath: null,
+        commitShas: [],
+      }),
+    );
+    state.write((ctx) => {
+      patchWorkstream(ctx, ws.workstream.id, null, {
+        nextAction: {
+          kind: 'resume',
+          providerSessionId: 'provider-1',
+          reason: 'the account resumed',
+        },
+      });
+    });
+    await recover();
+    expect(getWorkstream(state.db, ws.workstream.id).nextAction).toEqual({
+      kind: 'fix',
+      evidenceId: failed.id,
     });
   });
 

@@ -78,6 +78,8 @@ export interface TestEngine {
   readonly keychain: Keychain;
   readonly rateLimited: { accountId: AccountId; resetsAt: Date | null }[];
   readonly startGate: StartGate;
+  /** The account each ended session reported to the account runtime. */
+  readonly sessionsEnded: { accountId: AccountId; projectId: ProjectId }[];
   /** What the runner asked the preparer; the engine has no scheduler. */
   readonly prepared: { accountId: AccountId; projectId: ProjectId }[];
   addTask(
@@ -113,6 +115,7 @@ export async function createTestEngine(
   const keychain = createMemoryKeychain();
   const rateLimited: { accountId: AccountId; resetsAt: Date | null }[] = [];
   const prepared: { accountId: AccountId; projectId: ProjectId }[] = [];
+  const sessionsEnded: { accountId: AccountId; projectId: ProjectId }[] = [];
   const startGate = createStartGate();
   let runner: Runner | null = null;
   let answerAccountCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
@@ -185,6 +188,10 @@ export async function createTestEngine(
       rateLimited: (accountId, resetsAt) => {
         rateLimited.push({ accountId, resetsAt });
       },
+      sessionEnded: (account, projectId) => {
+        sessionsEnded.push({ accountId: account.id, projectId });
+        accounts.sessionEnded(account, projectId);
+      },
       prepare: (account, projectId) => {
         prepared.push({ accountId: account.id, projectId });
       },
@@ -225,6 +232,7 @@ export async function createTestEngine(
     rateLimited,
     startGate,
     prepared,
+    sessionsEnded,
     addTask(title, areas = ['api'], dependsOn = [], plan) {
       const criteria = Array.from({ length: plan?.criteria ?? 1 }, (_, i) =>
         i === 0 ? 'it works' : `criterion ${String(i + 1)}`,

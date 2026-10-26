@@ -27,7 +27,7 @@ import type { StateStore } from '../events';
 import type { Git } from '../git';
 import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
-import { nextActionAfterCrash } from '../runner';
+import { failedGateEvidence, nextActionAfterCrash } from '../runner';
 import { failStep } from '../team';
 import type { ProcessTerminator } from './processes';
 
@@ -110,10 +110,14 @@ export async function recoverOnStartup(opts: {
       .catch(() => []);
     const lastOp = latestToolOp(db, ws.id);
     const attempts = opts.cleanShutdown ? row.recoveryAttempts : row.recoveryAttempts + 1;
+    // A resume that was fixing a gate failure comes back as the fix, so the failure isn't dropped.
+    const failedGate = row.nextAction.kind === 'resume' ? failedGateEvidence(db, ws.id) : null;
     const nextAction: NextAction =
       row.state === S.Verifying || row.nextAction.kind === 'verify'
         ? { kind: 'verify' }
-        : nextActionAfterCrash(row.nextAction, providerSessionId, latestHandoffForStep(db, row));
+        : failedGate
+          ? { kind: 'fix', evidenceId: failedGate }
+          : nextActionAfterCrash(row.nextAction, providerSessionId, latestHandoffForStep(db, row));
     // A waiting workstream has no edge to FAILED, and it never ran a session this boot.
     const failed = !waiting && attempts > opts.maxRecoveryAttempts;
     opts.state.write((ctx) => {
