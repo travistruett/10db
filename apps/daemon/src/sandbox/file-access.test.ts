@@ -132,7 +132,15 @@ describe('readAccess', () => {
         symlinkSync('a', join(checkout, 'b'));
       },
       path: () => join(checkout, 'a'),
-      expected: 'ask',
+      expected: 'protected',
+    },
+    {
+      name: 'a .. after a missing part, reached through a link',
+      setup: () => {
+        symlinkSync(join(configDir, 'projects'), join(checkout, 'lk'));
+      },
+      path: () => `${checkout}/lk/missing/../../x`,
+      expected: 'protected',
     },
     {
       name: 'an ordinary link to a checkout directory',
@@ -264,6 +272,20 @@ describe('writeAccess', () => {
     });
   });
 
+  it('refuses a .. after a missing part, reached through a link into .git', () => {
+    symlinkSync(join(checkout, '.git', 'hooks'), join(checkout, 'lk'));
+    expect(writeAccess('lk/missing/../../config', context()).access).toBe('unresolvable');
+    expect(fileAccessJudge(context()).write('lk/missing/../../config')).toEqual({
+      refuse: 'lk/missing/../../config cannot be resolved to one real path; 10db refuses it.',
+    });
+  });
+
+  it('refuses a link loop', () => {
+    symlinkSync('b', join(checkout, 'a'));
+    symlinkSync('a', join(checkout, 'b'));
+    expect(writeAccess('a', context()).access).toBe('unresolvable');
+  });
+
   it('leaves a plain .. alone', () => {
     expect(writeAccess('src/../README.md', context()).access).toBe('ok');
   });
@@ -367,7 +389,7 @@ describe('directory-scoped reads', () => {
     name: string;
     tool: string;
     input: unknown;
-    expected: 'ok' | { refuse: string } | { within: string };
+    expected: string | { refuse: string } | { within: string };
   }[] = [
     {
       name: 'Grep over home',
@@ -413,6 +435,59 @@ describe('directory-scoped reads', () => {
       expected: { within: 'protected path' },
     },
     {
+      name: 'a brace that expands to .., by its exact refusal',
+      tool: 'Glob',
+      input: { pattern: 'src/deep/{.,.}./{.,.}./{.,.}./{.,.}./home/.claude/projects/*/*' },
+      expected:
+        'src/deep/../../../../home/.claude/projects is a protected path; 10db never lets a lane read it.',
+    },
+    {
+      name: 'an escaped comma and dot that climb',
+      tool: 'Glob',
+      input: {
+        pattern: 'src/deep/{\\,.\\}../{\\,.\\}../{\\,.\\}../{\\,.\\}../home/.claude/projects/*/*',
+      },
+      expected: contains('/'),
+    },
+    {
+      name: 'an escaped dot that climbs',
+      tool: 'Glob',
+      input: { pattern: '.\\../q' },
+      expected: contains('/'),
+    },
+    {
+      name: 'a braced escape that climbs',
+      tool: 'Glob',
+      input: { pattern: '{\\,.\\}../q' },
+      expected: contains('/'),
+    },
+    {
+      name: 'exactly the cap of alternatives',
+      tool: 'Glob',
+      input: {
+        pattern: `src/{${Array.from({ length: 64 }, (_, i) => `a${String(i)}`).join(',')}}/*`,
+      },
+      expected: 'ok',
+    },
+    {
+      name: 'twenty thousand empty braces',
+      tool: 'Glob',
+      input: { pattern: `${'{}'.repeat(20000)}/*` },
+      expected: contains('/'),
+    },
+    {
+      name: 'twenty thousand single braces',
+      tool: 'Glob',
+      input: { pattern: `src/${'{a}'.repeat(20000)}/*` },
+      expected: contains('/'),
+    },
+    {
+      name: 'five thousand nested braces',
+      tool: 'Glob',
+      input: { pattern: `src/${'{'.repeat(5000)}a${'}'.repeat(5000)}/*` },
+      expected: contains('/'),
+    },
+    {
       name: 'braced directories',
       tool: 'Glob',
       input: { pattern: '{src,tests}/**/*.ts' },
@@ -454,12 +529,34 @@ describe('directory-scoped reads', () => {
   ];
   for (const row of rows) {
     it(row.name, () => {
+      const started = performance.now();
       const verdict = judge().read(row.tool, row.input);
-      if (typeof row.expected === 'object' && 'within' in row.expected) {
+      expect(performance.now() - started).toBeLessThan(100);
+      if (typeof row.expected === 'string' && row.expected !== 'ok') {
+        expect(verdict).toEqual({ refuse: row.expected });
+      } else if (typeof row.expected === 'object' && 'within' in row.expected) {
         expect(verdict === 'ok' ? 'ok' : verdict.refuse).toContain(row.expected.within);
       } else {
         expect(verdict).toEqual(row.expected);
       }
     });
   }
+});
+
+describe('the judge at its boundary', () => {
+  it('turns an unexpected error into a refusal', () => {
+    const broken = {
+      ...context(),
+      get checkout(): string {
+        throw new Error('boom');
+      },
+    };
+    const judge = fileAccessJudge(broken);
+    expect(judge.read('Read', { file_path: 'src/a.ts' })).toEqual({
+      refuse: 'src/a.ts could not be judged; 10db refuses it.',
+    });
+    expect(judge.write('src/a.ts')).toEqual({
+      refuse: 'src/a.ts could not be judged; 10db refuses it.',
+    });
+  });
 });

@@ -1,5 +1,11 @@
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { foldPathCase, realPathOf, stringField, type FileAccessJudge } from '../guard';
+import {
+  foldPathCase,
+  PathResolutionError,
+  realPathOf,
+  stringField,
+  type FileAccessJudge,
+} from '../guard';
 import { isEqualOrUnder, pathsEqual } from './protected-reads';
 
 export interface FileAccessContext {
@@ -15,9 +21,17 @@ export interface FileAccessContext {
 
 /** `contains-protected` is a directory-scoped read of a path that has a protected path under it. */
 export type ReadAccess = 'inside' | 'allowed' | 'protected' | 'contains-protected' | 'ask';
-export type WriteAccess = 'ok' | 'git-internal' | 'claude-protected';
+/** `unresolvable` is a path that no single real path can be named for (a link loop, `..` past a missing part). */
+export type WriteAccess = 'ok' | 'git-internal' | 'claude-protected' | 'unresolvable';
+
+/** A file-tool judgment that could not be made; the judge refuses the call. */
+export class FileAccessError extends Error {
+  override readonly name = 'FileAccessError';
+}
 
 const GLOB_CHARACTERS = /[*?[{]/;
+const MAX_PATTERN_LENGTH = 1024;
+const MAX_BRACE_GROUPS = 32;
 
 const CLAUDE_PROTECTED_IN_CHECKOUT = [
   '.claude/settings.json',
@@ -59,17 +73,25 @@ function plainPath(path: string, ctx: FileAccessContext): string {
   return resolve(ctx.checkout, expandHome(path, ctx.home));
 }
 
-/** Where the kernel would open `path`: links resolve as they are met, and `..` follows them. */
-function kernelPath(path: string, ctx: FileAccessContext): string | null {
-  const raw = expandHome(path, ctx.home);
-  return tryRealPath(isAbsolute(raw) ? raw : `${ctx.checkout}${sep}${raw}`);
+/** The real path of a tool input's path, or null when it cannot be examined; a path with no single real path throws. */
+function strictRealPath(p: string): string | null {
+  try {
+    return realPathOf(p);
+  } catch (error) {
+    if (error instanceof PathResolutionError) throw error;
+    return null;
+  }
 }
 
-/** The real paths a tool input could name: the text read lexically, and as the kernel reads it. */
+/**
+ * The real paths a tool input could name: the text read lexically, and as the kernel reads it.
+ * Throws a `PathResolutionError` when either reading has no single real path.
+ */
 function candidates(path: string, ctx: FileAccessContext): string[] {
   const plain = plainPath(path, ctx);
-  const lexical = tryRealPath(plain) ?? plain;
-  const kernel = kernelPath(path, ctx);
+  const lexical = strictRealPath(plain) ?? plain;
+  const raw = expandHome(path, ctx.home);
+  const kernel = strictRealPath(isAbsolute(raw) ? raw : `${ctx.checkout}${sep}${raw}`);
   return kernel === null || pathsEqual(kernel, lexical) ? [lexical] : [lexical, kernel];
 }
 
@@ -128,7 +150,16 @@ export function readAccess(
   tree = false,
 ): { access: ReadAccess; realPath: string } {
   let best: { access: ReadAccess; realPath: string } | null = null;
-  for (const real of candidates(path, ctx)) {
+  let reals: string[];
+  try {
+    reals = candidates(path, ctx);
+  } catch (error) {
+    if (error instanceof PathResolutionError) {
+      return { access: 'protected', realPath: plainPath(path, ctx) };
+    }
+    throw error;
+  }
+  for (const real of reals) {
     const access = tryRealPath(real) === null ? 'ask' : judgeRead(real, ctx, tree);
     if (best === null || READ_STRICTNESS[access] > READ_STRICTNESS[best.access]) {
       best = { access, realPath: real };
@@ -208,6 +239,10 @@ function patternPrefix(pattern: string, base: string): string | null {
  * alternatives, a `..` after a glob character) is judged as the root.
  */
 function patternPaths(pattern: string, base: string): string[] {
+  // A backslash escapes characters the expansion below does not model, and a long or deeply
+  // braced pattern is not worth expanding: neither is judged by its prefix.
+  if (pattern.includes('\\') || pattern.length > MAX_PATTERN_LENGTH) return [sep];
+  if (pattern.split('{').length - 1 > MAX_BRACE_GROUPS) return [sep];
   const alternatives = expandBraces(pattern);
   if (alternatives === null) return [sep];
   const prefixes = alternatives.map((alternative) => patternPrefix(alternative, base));
@@ -255,6 +290,7 @@ const WRITE_STRICTNESS: Record<WriteAccess, number> = {
   ok: 0,
   'claude-protected': 2,
   'git-internal': 4,
+  unresolvable: 4,
 };
 
 function judgeWrite(real: string, ctx: FileAccessContext): WriteAccess {
@@ -275,7 +311,16 @@ export function writeAccess(
 ): { access: WriteAccess; realPath: string; viaLink: boolean } {
   const baseline = withoutLinks(plainPath(path, ctx), ctx);
   let best: { access: WriteAccess; realPath: string; viaLink: boolean; rank: number } | null = null;
-  for (const real of candidates(path, ctx)) {
+  let reals: string[];
+  try {
+    reals = candidates(path, ctx);
+  } catch (error) {
+    if (error instanceof PathResolutionError) {
+      return { access: 'unresolvable', realPath: plainPath(path, ctx), viaLink: false };
+    }
+    throw error;
+  }
+  for (const real of reals) {
     const access = judgeWrite(real, ctx);
     const viaLink = !pathsEqual(real, baseline);
     const rank = WRITE_STRICTNESS[access] + (access === 'claude-protected' && viaLink ? 1 : 0);
@@ -289,28 +334,45 @@ export function writeAccess(
 export function fileAccessJudge(ctx: FileAccessContext): FileAccessJudge {
   return {
     read(toolName, input) {
-      for (const path of readPathsOf(toolName, input)) {
-        const { access } = readAccess(path, ctx, toolName !== 'Read');
-        if (access === 'protected') {
-          return { refuse: `${path} is a protected path; 10db never lets a lane read it.` };
+      let path = toolName;
+      try {
+        for (path of readPathsOf(toolName, input)) {
+          const { access } = readAccess(path, ctx, toolName !== 'Read');
+          if (access === 'protected') {
+            return { refuse: `${path} is a protected path; 10db never lets a lane read it.` };
+          }
+          if (access === 'contains-protected') {
+            return {
+              refuse: `${path} contains protected paths; 10db never lets a lane search or list it.`,
+            };
+          }
         }
-        if (access === 'contains-protected') {
-          return {
-            refuse: `${path} contains protected paths; 10db never lets a lane search or list it.`,
-          };
-        }
+        return 'ok';
+      } catch (error) {
+        return { refuse: refusalFor(path, error) };
       }
-      return 'ok';
     },
     write(path) {
-      const result = writeAccess(path, ctx);
-      if (result.access === 'git-internal') {
-        return { refuse: '.git/ internals are never edited; use the commit tool.' };
+      try {
+        const result = writeAccess(path, ctx);
+        if (result.access === 'git-internal') {
+          return { refuse: '.git/ internals are never edited; use the commit tool.' };
+        }
+        if (result.access === 'unresolvable') {
+          return { refuse: `${path} cannot be resolved to one real path; 10db refuses it.` };
+        }
+        if (result.access === 'claude-protected' && result.viaLink) {
+          return { refuse: `Edit ${result.realPath} by its own path, not through a link.` };
+        }
+        return 'ok';
+      } catch (error) {
+        return { refuse: refusalFor(path, error) };
       }
-      if (result.access === 'claude-protected' && result.viaLink) {
-        return { refuse: `Edit ${result.realPath} by its own path, not through a link.` };
-      }
-      return 'ok';
     },
   };
+}
+
+/** An unexpected failure while judging is a refusal, never an error thrown into the hook. */
+function refusalFor(path: string, cause: unknown): string {
+  return new FileAccessError(`${path} could not be judged; 10db refuses it.`, { cause }).message;
 }

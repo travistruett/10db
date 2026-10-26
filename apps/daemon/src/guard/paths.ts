@@ -66,26 +66,45 @@ export function realPathOf(p: string): string {
   return resolveThroughLinks(p);
 }
 
-/** A path that cannot be examined (not a directory, no permission) is treated as outside. */
+/**
+ * The repo-relative paths a file path names, read both ways: as the kernel opens it (links resolve
+ * as they are met, and `..` follows them), and with `..` collapsed as text first. Inside only when
+ * both readings are inside; a path that cannot be examined (not a directory, no permission, a link
+ * loop, `..` past a missing part) is treated as outside.
+ */
+export function resolveInRepoReadings(
+  repoPath: string,
+  filePath: string,
+): { inside: true; rels: string[] } | { inside: false } {
+  try {
+    const root = realpathSync.native(repoPath);
+    const base = resolve(repoPath);
+    const readings = [
+      resolveThroughLinks(isAbsolute(filePath) ? filePath : `${base}${sep}${filePath}`),
+      resolveThroughLinks(resolve(base, filePath)),
+    ];
+    const rels: string[] = [];
+    for (const target of readings) {
+      const rel = relative(root, target);
+      if (rel === '' || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+        return { inside: false };
+      }
+      if (!rels.includes(rel)) rels.push(rel);
+    }
+    return { inside: true, rels };
+  } catch {
+    return { inside: false };
+  }
+}
+
+/** The path relative to the repo when every reading of `filePath` is inside it (see `resolveInRepoReadings`). */
 export function resolveInRepo(
   repoPath: string,
   filePath: string,
 ): { inside: true; rel: string } | { inside: false } {
-  try {
-    const root = realpathSync.native(repoPath);
-    // Joined as text, never `resolve`d: a `..` must apply to where a link leads, not to its name.
-    const base = resolve(repoPath);
-    const target = resolveThroughLinks(
-      isAbsolute(filePath) ? filePath : `${base}${sep}${filePath}`,
-    );
-    const rel = relative(root, target);
-    if (rel === '' || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
-      return { inside: false };
-    }
-    return { inside: true, rel };
-  } catch {
-    return { inside: false };
-  }
+  const where = resolveInRepoReadings(repoPath, filePath);
+  const [rel] = where.inside ? where.rels : [];
+  return rel === undefined ? { inside: false } : { inside: true, rel };
 }
 
 /** Folds a path's spelling the way the file system does: Unicode NFC, and lowercase where case is folded. */

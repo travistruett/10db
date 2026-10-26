@@ -559,6 +559,55 @@ describe('resolveInRepo', () => {
   });
 });
 
+describe('paths that climb out of a link', () => {
+  const own = tempDir('guard-climb-link');
+  beforeAll(() => {
+    mkdirSync(join(own.path, '.git', 'hooks'), { recursive: true });
+    mkdirSync(join(own.path, '.git', 'objects'), { recursive: true });
+    mkdirSync(join(own.path, 'src', 'api'), { recursive: true });
+    writeFileSync(join(own.path, '.git', 'config'), '');
+    writeFileSync(join(own.path, 'README.md'), '');
+    symlinkSync('.git/hooks', join(own.path, 'a'));
+    symlinkSync('../../.git/hooks', join(own.path, 'src', 'api', 'lnk'));
+  });
+  afterAll(() => {
+    own.cleanup();
+  });
+  const run = (toolName: string, toolInput: unknown) =>
+    judgeToolUse({
+      toolName,
+      toolInput,
+      repoPath: own.path,
+      areas: AREAS,
+      hazards: DEFAULT_HAZARDS,
+      claims: [{ kind: 'area', name: 'api' }],
+      readOnly: false,
+    });
+
+  it('denies rm -rf of a path that reaches .git through a link', () => {
+    expect(run('Bash', { command: 'rm -rf a/../objects' })).toEqual({
+      decision: 'deny',
+      reason: 'rm -r of a .git path is never allowed.',
+    });
+  });
+
+  it('denies an edit whose text is claimed but whose kernel reading is .git', () => {
+    expect(run('Edit', { file_path: 'src/api/lnk/../x.ts' }).decision).toBe('deny');
+  });
+
+  it('denies an edit of a path that reaches .git/config through a link', () => {
+    expect(run('Edit', { file_path: 'a/../config' }).decision).toBe('deny');
+  });
+
+  it('still allows a plain .. inside an area', () => {
+    expect(run('Edit', { file_path: 'src/api/../api/a.ts' })).toEqual({ decision: 'allow' });
+  });
+
+  it('still allows rm -rf of an ordinary directory through a plain ..', () => {
+    expect(run('Bash', { command: 'rm -rf src/api/../api' })).toEqual({ decision: 'allow' });
+  });
+});
+
 describe('classifyPath', () => {
   it('lists the areas and hazards a path falls in', () => {
     expect(classifyPath('src/api/package.json', AREAS, DEFAULT_HAZARDS)).toEqual({

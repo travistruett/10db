@@ -1,11 +1,11 @@
 import { homedir } from 'node:os';
-import { isAbsolute, resolve, sep } from 'node:path';
+import { sep } from 'node:path';
 import { ClaimKind, Delivery, type AreaDef, type HazardDef } from '@10db/contracts';
 import { z } from 'zod';
 import { commandForms, startsWithWords } from './command-forms';
 import { ghVerdict } from './gh-rules';
 import { gitVerdict } from './git-rules';
-import { classifyPath, resolveInRepo } from './paths';
+import { classifyPath, foldPathCase, resolveInRepoReadings } from './paths';
 import { readOnlyShellRefusal } from './read-only';
 import { splitCommand, stripCommandPrefixes } from './shell-words';
 
@@ -65,23 +65,32 @@ function claimed(input: GuardInput, kind: ClaimKind, name: string): boolean {
   return input.claims.some((c) => c.kind === kind && c.name === name);
 }
 
-function judgeFile(input: GuardInput, filePath: string): GuardVerdict {
-  const where = resolveInRepo(input.repoPath, filePath);
-  if (!where.inside)
-    return deny(`${filePath} is outside the repository. Edit files inside ${input.repoPath} only.`);
-  const hit = classifyPath(where.rel, input.areas, input.hazards);
+function judgeRelative(input: GuardInput, rel: string): GuardVerdict {
+  const hit = classifyPath(rel, input.areas, input.hazards);
   const missingHazard = hit.hazards.find((h) => !claimed(input, ClaimKind.Hazard, h));
   if (missingHazard) {
     return deny(
-      `${where.rel} is in the "${missingHazard}" hazard. Call the request_claim tool with kind "hazard" and name "${missingHazard}" first.`,
+      `${rel} is in the "${missingHazard}" hazard. Call the request_claim tool with kind "hazard" and name "${missingHazard}" first.`,
     );
   }
   if (hit.hazards.length > 0) return ALLOW;
   if (hit.areas.some((a) => claimed(input, ClaimKind.Area, a))) return ALLOW;
   const which = hit.areas.length > 0 ? `area "${hit.areas.join('", "')}"` : 'no area';
   return deny(
-    `${where.rel} is outside your claims (it is in ${which}). Call the request_claim tool for the area you need.`,
+    `${rel} is outside your claims (it is in ${which}). Call the request_claim tool for the area you need.`,
   );
+}
+
+/** Every reading of the path (as the kernel opens it, and with `..` collapsed) must be allowed. */
+function judgeFile(input: GuardInput, filePath: string): GuardVerdict {
+  const where = resolveInRepoReadings(input.repoPath, filePath);
+  if (!where.inside)
+    return deny(`${filePath} is outside the repository. Edit files inside ${input.repoPath} only.`);
+  for (const rel of where.rels) {
+    const verdict = judgeRelative(input, rel);
+    if (verdict.decision === 'deny') return verdict;
+  }
+  return ALLOW;
 }
 
 function isRecursiveRm(words: readonly string[]): boolean {
@@ -100,13 +109,10 @@ function rmVerdict(
     if (arg.includes('$')) return deny(`rm -r of ${arg} uses a variable the guard cannot resolve.`);
     if (arg.split('/').includes('.git')) return deny('rm -r of a .git path is never allowed.');
     const expanded = arg.startsWith('~') ? arg.replace(/^~/, homedir()) : arg;
-    const where = resolveInRepo(
-      input.repoPath,
-      isAbsolute(expanded) ? expanded : resolve(input.repoPath, expanded),
-    );
+    const where = resolveInRepoReadings(input.repoPath, expanded);
     if (!where.inside)
       return deny(`rm -r of ${arg} reaches outside the repository (or is the repository itself).`);
-    if (where.rel.split(sep).includes('.git'))
+    if (where.rels.some((rel) => rel.split(sep).some((part) => foldPathCase(part) === '.git')))
       return deny('rm -r of a .git path is never allowed.');
   }
   return null;
