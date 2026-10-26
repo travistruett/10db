@@ -602,3 +602,68 @@ describe('permission broker without a storable pattern', () => {
     expect(searchDecisions(state.db, ws.project.id, 'allow', 5)).toEqual([]);
   });
 });
+
+describe('permission cards store scoped rules', () => {
+  function permissionCard(
+    ws: ReturnType<typeof seedWorkstream>,
+    toolName: string,
+    summary: string,
+  ): InboxItemDto {
+    const { item } = inbox.ask({
+      projectId: ws.project.id,
+      workstreamId: ws.workstream.id,
+      sessionId: mintId('Session'),
+      kind: 'permission',
+      title: `Allow ${toolName}?`,
+      body: summary,
+      options: [
+        { label: 'allow_once', description: '' },
+        { label: 'allow_project', description: '' },
+        { label: 'deny', description: '' },
+      ],
+      recommendation: null,
+      category: 'environment',
+      urgency: 'normal',
+      detail: { toolName, summary },
+      signal: new AbortController().signal,
+    });
+    return item;
+  }
+
+  it.each([
+    {
+      name: 'a host is stored lower-cased',
+      toolName: 'SandboxNetworkAccess',
+      summary: 'Registry.NPMJS.org',
+      stored: { toolName: 'SandboxNetworkAccess', pattern: 'registry.npmjs.org' },
+    },
+    {
+      name: 'a Grep approval is stored as Read, on the path',
+      toolName: 'Grep',
+      summary: '/work/other',
+      stored: { toolName: 'Read', pattern: '/work/other' },
+    },
+    {
+      name: 'an Edit approval is stored for the tool and the one path',
+      toolName: 'Edit',
+      summary: '/work/repo/.vscode/settings.json',
+      stored: { toolName: 'Edit', pattern: '/work/repo/.vscode/settings.json' },
+    },
+  ])('$name', ({ toolName, summary, stored }) => {
+    const ws = seedWorkstream(base);
+    inbox.answer(permissionCard(ws, toolName, summary).id, { choice: 'allow_project' });
+    expect(listPermissionRules(state.db, ws.project.id, ws.workstream.id)).toEqual([
+      expect.objectContaining({ ...stored, workstreamId: null }),
+    ]);
+  });
+
+  it.each([
+    { name: 'a glob path', toolName: 'Read', summary: '/work/*' },
+    { name: 'a relative path', toolName: 'Edit', summary: 'src/a.ts' },
+  ])('stores nothing for $name', ({ toolName, summary }) => {
+    const ws = seedWorkstream(base);
+    inbox.answer(permissionCard(ws, toolName, summary).id, { choice: 'allow_project' });
+    expect(listPermissionRules(state.db, ws.project.id, ws.workstream.id)).toEqual([]);
+    expect(searchDecisions(state.db, ws.project.id, 'allow', 5)).toEqual([]);
+  });
+});

@@ -102,7 +102,7 @@ import {
 } from '../inbox';
 import type { Logger } from '../log';
 import { mintSessionToken } from '../mcp';
-import { allowedToolsFor, commandPrefix } from '../permissions';
+import { allowedToolsFor, storableRule } from '../permissions';
 import { escalateStep, offeredProfiles } from '../routing';
 import {
   ProjectMcpError,
@@ -252,12 +252,12 @@ const PERMISSION_ANSWER_TEXT: Readonly<Record<string, string>> = {
   [PermissionChoice.Deny]: 'denied. Do not retry it; find another way or ask with ask_human.',
 };
 
-/** An allow choice with no stored rule behind it (a one-time allow, or a Bash command with no safe prefix) lets the first identical call through. */
+/** An allow choice with no stored rule behind it (a one-time allow, or a call with no safe rule to store) lets the first identical call through. */
 function needsOneTimeAllowance(choice: string, toolName: string, summary: string): boolean {
   if (choice === PermissionChoice.AllowOnce) return true;
   const stored =
     choice === PermissionChoice.AllowWorkstream || choice === PermissionChoice.AllowProject;
-  return stored && toolName === 'Bash' && commandPrefix(summary) === null;
+  return stored && storableRule(toolName, summary) === undefined;
 }
 
 /** A permission card answered while the workstream was parked, as prompt text plus any one-time allowance. */
