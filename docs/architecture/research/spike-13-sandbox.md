@@ -73,7 +73,7 @@ from disabled setting source userSettings`; the session loads `settingSources: [
 ```
 PASS control: without the sandbox, the canary is readable: «canary:secret»
 PASS engage: the session ran under the sandbox config: success
-PASS engage: a write to ~ failed: touch: /Users/travistruett/.10db-spike13-write-probe: Operation not permitted
+PASS engage: a write to ~ failed: touch: ~/.10db-spike13-write-probe: Operation not permitted
 PASS engage: a write in the cwd worked: wrote-cwd
 INFO engage: /tmp write: {"exists":false,"output":"touch: /tmp/s13-tmp-write: Operation not permitted\ntmp-write-denied"}
 INFO engage: $TMPDIR write: wrote-tmpdir
@@ -206,7 +206,7 @@ permission settings`, with no `canUseTool` call and no hook call.
 ### Evidence
 
 ```
-CALL Read {"file_path":"/Users/travistruett/.10db-spike13-canary/secret.txt"} [canUseTool,hook] → 1	«canary:secret»
+CALL Read {"file_path":"~/.10db-spike13-canary/secret.txt"} [canUseTool,hook] → 1	«canary:secret»
 ASKED Read ... reason=Path is outside allowed working directories → allow
 INFO read-denyread-only: the Read tool ignores sandbox.filesystem.denyRead: true
 PASS read-disallowed-rule: the Read tool is denied: <tool_use_error>File is in a directory that is denied by your permission settings.</tool_use_error>
@@ -397,12 +397,13 @@ fullB test.log:   Test Files  2 failed | 136 passed | 1 skipped (139)   Tests  7
 No configuration passed the whole gate. This one passed seven of nine steps (the run set `autoAllowBashIfSandboxed`
 at its default; the `false` is the recommendation from check 8, not part of the gate run). The two that failed are
 not fixable from `Options.sandbox`: `ps` cannot be executed, and a git repository cannot be created under the
-cwd. Either the gate's `test` and `e2e` steps run outside the lane's sandbox (the daemon's verification step is the natural place), or the tests that need `ps` and the e2e repo move out of the lane's reach.
+cwd. Either the gate's `test` and `e2e` steps run outside the lane's sandbox (the daemon's verification step is the natural place), or the tests that need `ps` and the e2e repo move out of the lane's reach. `../03-trust-boundaries.md` rules out running them unsandboxed: the gate runs code a lane wrote, so it needs a sandbox of its own (R2 there).
 
 Other findings that shape the config:
 
-- A lane commits in its worktree; whether a commit from a linked worktree works (its gitdir sits outside the cwd)
-  is the `worktree` subcommand and has not been run.
+- Lanes run in the project's shared checkout (decision 13), so `.git` sits inside the cwd and its `hooks` and
+  `config` are protected paths. A commit from a linked worktree, whose gitdir sits outside the cwd, matters
+  once worktrees arrive; that is the `worktree` subcommand and has not been run.
 - Repos created under `$TMPDIR` work, so the test suites' fixture repositories are fine.
 - `gh` cannot read the Keychain token in the sandbox. That is the intended containment, and the daemon, not the
   lane, runs `gh`.

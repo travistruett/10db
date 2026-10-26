@@ -22,6 +22,7 @@ const PUBLIC_RESEARCH = [
   'spike-10-bg-daemon.md',
   'spike-11-tauri-first-window.md',
   'spike-12-accounts.md',
+  'spike-13-sandbox.md',
 ];
 
 describe('docs/architecture', () => {
