@@ -636,16 +636,21 @@ describe('a path decided by its collapsed reading', () => {
   });
 });
 
-describe('rm -r of an argument the shell expands', () => {
+describe('rm -r arguments beyond a plain path', () => {
   const own = tempDir('guard-rm-glob');
+  const away = tempDir('guard-rm-away');
   beforeAll(() => {
     mkdirSync(join(own.path, '.git', 'objects'), { recursive: true });
     mkdirSync(join(own.path, 'dist', 'a'), { recursive: true });
-    mkdirSync(join(own.path, 'many'), { recursive: true });
-    for (let i = 0; i <= 1000; i += 1) writeFileSync(join(own.path, 'many', String(i)), '');
+    mkdirSync(join(own.path, 'build'), { recursive: true });
+    mkdirSync(join(own.path, 'src'), { recursive: true });
+    mkdirSync(join(away.path, 'pkg'), { recursive: true });
+    symlinkSync(away.path, join(own.path, 'dist', 'lk2'));
+    writeFileSync(join(own.path, 'a'.repeat(200)), '');
   });
   afterAll(() => {
     own.cleanup();
+    away.cleanup();
   });
   const run = (command: string) =>
     judgeToolUse({
@@ -657,43 +662,72 @@ describe('rm -r of an argument the shell expands', () => {
       claims: [],
       readOnly: false,
     });
-  const gitDenied = { decision: 'deny', reason: 'rm -r of a .git path is never allowed.' };
+  const unjudged = {
+    decision: 'deny',
+    reason: 'rm -r argument uses shell syntax the guard does not judge; name the paths.',
+  };
 
   it.each([
-    ['a question mark', 'rm -rf .gi?'],
-    ['a star', 'rm -rf .g*'],
-    ['a brace list', 'rm -rf .{git,x}'],
-    ['a backslash escape', 'rm -rf .gi\\t'],
-    ['a class', 'rm -rf .gi[st]'],
-    ['a leading star, with dotfiles matched', 'rm -rf *'],
-    ['a star below the root', 'rm -rf */objects'],
-  ])('denies %s that reaches .git', (_name, command) => {
-    expect(run(command)).toEqual(gitDenied);
+    '.gi(t|x)',
+    '.g(i)t',
+    '(.git|y)',
+    '***/p*',
+    '{~,x}/y',
+    '~+/x',
+    '~root/x',
+    '=ls',
+    '*/dist',
+    '**/node_modules',
+    '.?/x',
+    '.*/x',
+    '.gi?',
+    '.g*',
+    '.{git,x}',
+    '.gi\\t',
+    '.gi[st]',
+    'dist/*/',
+    'dist/[ab]',
+    'dist/*.{o,a}',
+    'src/*/../x',
+    '"my dir"',
+  ])('denies rm -rf %s', (arg) => {
+    expect(run(`rm -rf ${arg}`)).toEqual(unjudged);
   });
 
-  it.each(['.?/x', '.*/x', '.[.]/x'])('denies %s, which the shell can expand to ../x', (arg) => {
-    expect(run(`rm -rf ${arg}`)).toEqual({
+  it('denies a wildcard with more than four wildcards quickly, without listing', () => {
+    const started = performance.now();
+    expect(run('rm -rf *a*a*a*a*a*ab')).toEqual(unjudged);
+    expect(performance.now() - started).toBeLessThan(100);
+  });
+
+  it('denies a wildcard in a directory that holds .git', () => {
+    expect(run('rm -rf *')).toEqual({
       decision: 'deny',
-      reason: `rm -r of ${arg} reaches outside the repository (or is the repository itself).`,
+      reason: 'rm -r of * could reach the .git beside it; name the paths.',
     });
   });
 
-  it('denies an expansion past the match cap', () => {
-    expect(run('rm -rf many/*')).toEqual({
-      decision: 'deny',
-      reason: 'rm -r of many/* expands to paths the guard cannot judge.',
-    });
+  it.each(["rm -rf '>' .git", 'rm -rf ">x" .git', "rm -rf '2>/x/../..'"])(
+    'denies %s, whose quoted word only looks like a redirection',
+    (command) => {
+      expect(run(command).decision).toBe('deny');
+    },
+  );
+
+  it('denies a wildcard whose directory is outside the repository', () => {
+    expect(run('rm -rf dist/lk2/*').decision).toBe('deny');
   });
 
-  it('denies a brace sequence the guard does not expand', () => {
-    expect(run('rm -rf .{f..h}it')).toEqual({
-      decision: 'deny',
-      reason: 'rm -r of .{f..h}it expands to paths the guard cannot judge.',
-    });
-  });
-
-  it('allows a glob that matches only ordinary paths', () => {
-    expect(run('rm -rf dist/*')).toEqual({ decision: 'allow' });
+  it.each([
+    'rm -rf dist',
+    'rm -rf dist/*',
+    'rm -rf build/*.o',
+    'rm -rf build/a?c*',
+    'rm -rf src/../dist',
+    'rm -rf src/../dist/*',
+    'rm -rf build 2>/dev/null',
+  ])('allows %s', (command) => {
+    expect(run(command)).toEqual({ decision: 'allow' });
   });
 });
 

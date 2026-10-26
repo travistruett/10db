@@ -1,5 +1,6 @@
+import { lstatSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { sep } from 'node:path';
+import { join, sep } from 'node:path';
 import { ClaimKind, Delivery, type AreaDef, type HazardDef } from '@10db/contracts';
 import { z } from 'zod';
 import { commandForms, startsWithWords } from './command-forms';
@@ -10,10 +11,10 @@ import {
   foldPathCase,
   isOverLongPath,
   OVER_LONG_PATH_REFUSAL,
+  realPathOf,
   resolveInRepoReadings,
 } from './paths';
 import { readOnlyShellRefusal } from './read-only';
-import { shellGlobMatches } from './shell-glob';
 import { splitCommand, stripCommandPrefixes } from './shell-words';
 
 export interface GuardInput {
@@ -105,48 +106,133 @@ function isRecursiveRm(words: readonly string[]): boolean {
   return words.some((w) => w === '--recursive' || /^-[a-zA-Z]*[rR]/.test(w));
 }
 
-/** Characters that make the shell expand a word into paths. */
-const SHELL_GLOB_CHARACTERS = /[*?[\]{}\\]/;
+/** A plain path: these characters only, after an optional `~` or `~/` at the very start. */
+const PLAIN_PATH = /^(?:~(?=\/|$))?[A-Za-z0-9_\-./@+%,:]*$/;
+/** A last segment with wildcards: no leading `.`, no character but these and `*` and `?`. */
+const WILDCARD_SEGMENT = /^[A-Za-z0-9_\-*?][A-Za-z0-9_\-.*?]*$/;
+const MAX_WILDCARDS = 4;
+/** A redirection word, such as `2>/dev/null` or a bare `>` whose target is the next word. */
+const REDIRECTION = /^\d*(?:&>>?|>\||>>?&?|<&?)/;
+/** Text that can quote or escape a word, which the parser drops: a word in such a segment may only look like a redirection. */
+const QUOTING = /['"\\`]/;
+const UNJUDGED_RM = 'rm -r argument uses shell syntax the guard does not judge; name the paths.';
 
 function hasGitPart(path: string): boolean {
   return path.split(sep).some((part) => foldPathCase(part) === '.git');
 }
 
-/** Judges one path an `rm -r` of `arg` would remove: it must be inside the repository, not `.git`. */
-function rmPathVerdict(input: GuardInput, arg: string, path: string): GuardVerdict | null {
-  if (hasGitPart(path)) return deny('rm -r of a .git path is never allowed.');
+function expandTilde(path: string): string {
+  return path.startsWith('~') ? path.replace(/^~/, homedir()) : path;
+}
+
+/**
+ * Judges one plain path an `rm -r` of `arg` would remove: it must be inside the repository and not
+ * `.git`, on every reading. Its repo-relative readings when it passes.
+ */
+function rmPath(
+  input: GuardInput,
+  arg: string,
+  path: string,
+): { verdict: GuardVerdict } | { rels: string[] } {
+  if (hasGitPart(path)) return { verdict: deny('rm -r of a .git path is never allowed.') };
   const where = resolveInRepoReadings(input.repoPath, path);
   if (!where.inside)
-    return deny(`rm -r of ${arg} reaches outside the repository (or is the repository itself).`);
-  if (where.rels.some(hasGitPart)) return deny('rm -r of a .git path is never allowed.');
+    return {
+      verdict: deny(
+        `rm -r of ${arg} reaches outside the repository (or is the repository itself).`,
+      ),
+    };
+  if (where.rels.some(hasGitPart))
+    return { verdict: deny('rm -r of a .git path is never allowed.') };
+  return { rels: where.rels };
+}
+
+function holdsGit(directory: string): boolean {
+  try {
+    lstatSync(join(directory, '.git'));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isDirectory(path: string): boolean {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Judges a plain directory followed by one wildcard segment (`dist/*`, `build/*.o`). Nothing is
+ * listed or matched: the directory must be inside the repository and hold no `.git` entry, since
+ * `dotglob` or `GLOB_DOTS` set in the same command would let the wildcard reach it.
+ */
+function rmWildcard(input: GuardInput, arg: string): GuardVerdict | null {
+  const cut = arg.lastIndexOf('/');
+  const prefix = cut === -1 ? '' : arg.slice(0, Math.max(cut, 1));
+  const segment = arg.slice(cut + 1);
+  const wildcards = segment.replace(/[^*?]/g, '').length;
+  if (!WILDCARD_SEGMENT.test(segment) || wildcards === 0 || wildcards > MAX_WILDCARDS)
+    return deny(UNJUDGED_RM);
+  if (!PLAIN_PATH.test(prefix)) return deny(UNJUDGED_RM);
+  let root: string;
+  try {
+    root = realPathOf(input.repoPath);
+  } catch {
+    return deny(`rm -r of ${arg} cannot be judged: the repository cannot be resolved.`);
+  }
+  let directories = [root];
+  if (prefix !== '') {
+    const target = rmPath(input, arg, expandTilde(prefix));
+    if ('verdict' in target) return target.verdict;
+    directories = target.rels.map((rel) => join(root, rel));
+  }
+  for (const directory of directories) {
+    if (!isDirectory(directory))
+      return deny(`rm -r of ${arg} needs ${prefix} to be a directory in the repository.`);
+    if (holdsGit(directory))
+      return deny(`rm -r of ${arg} could reach the .git beside it; name the paths.`);
+  }
   return null;
 }
 
 /**
- * Judges each argument of an `rm -r` as written and, when the shell could expand it, every path it
- * could expand to. The parser drops quotes, so a quoted wildcard is expanded too.
+ * Judges each argument of an `rm -r`. An argument is judged only as a plain path or as a plain
+ * directory followed by one wildcard segment; any other shell syntax (grouping, braces, classes,
+ * escapes, `~user`, `=cmd`, deeper wildcards) is refused, and the lane names the paths instead.
+ * Quotes are not a special case: the parser drops them and the same rules apply.
  */
 function rmVerdict(
   input: GuardInput,
   words: readonly string[],
   afterCd: boolean,
+  segment: { readonly raw: string; readonly separator: string },
 ): GuardVerdict | null {
   if (!isRecursiveRm(words)) return null;
   if (afterCd)
     return deny('rm -r after cd is not allowed: the working directory is not the repository.');
-  for (const arg of words.slice(1).filter((w) => !w.startsWith('-'))) {
+  // A `(` straight after the arguments is zsh glob grouping, never a subshell.
+  if (segment.separator === '(') return deny(UNJUDGED_RM);
+  const redirections = !QUOTING.test(segment.raw);
+  const args = words.slice(1).filter((w) => !w.startsWith('-'));
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index] ?? '';
+    const redirection = redirections ? REDIRECTION.exec(arg) : null;
+    if (redirection) {
+      if (redirection[0] === arg) index += 1;
+      continue;
+    }
     if (isOverLongPath(arg)) return deny(OVER_LONG_PATH_REFUSAL);
     if (arg.includes('$')) return deny(`rm -r of ${arg} uses a variable the guard cannot resolve.`);
-    const expanded = arg.startsWith('~') ? arg.replace(/^~/, homedir()) : arg;
-    const literal = rmPathVerdict(input, arg, expanded);
-    if (literal) return literal;
-    if (!SHELL_GLOB_CHARACTERS.test(arg)) continue;
-    const matches = shellGlobMatches(expanded, input.repoPath);
-    if (matches === null) return deny(`rm -r of ${arg} expands to paths the guard cannot judge.`);
-    for (const match of matches) {
-      const verdict = rmPathVerdict(input, arg, match);
-      if (verdict) return verdict;
+    if (PLAIN_PATH.test(arg)) {
+      const target = rmPath(input, arg, expandTilde(arg));
+      if ('verdict' in target) return target.verdict;
+      continue;
     }
+    const verdict = rmWildcard(input, arg);
+    if (verdict) return verdict;
   }
   return null;
 }
@@ -184,7 +270,7 @@ function judgeShell(input: GuardInput, command: string, depth = 0): GuardVerdict
       if (verdict) return deny(verdict.deny);
     }
     if (head === 'rm') {
-      const verdict = rmVerdict(input, words, afterCd);
+      const verdict = rmVerdict(input, words, afterCd, segment);
       if (verdict) return verdict;
     }
     if (head === 'cd' || head === 'pushd') afterCd = true;
