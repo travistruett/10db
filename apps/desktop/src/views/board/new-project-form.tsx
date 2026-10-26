@@ -1,4 +1,11 @@
-import { AccountId, BranchName, Delivery, PrTitlePrefix, type ProjectDto } from '@10db/contracts';
+import {
+  AccountId,
+  BranchName,
+  Delivery,
+  PermissionMode,
+  PrTitlePrefix,
+  type ProjectDto,
+} from '@10db/contracts';
 import {
   Alert,
   Button,
@@ -13,6 +20,7 @@ import {
 import { useState, type SyntheticEvent } from 'react';
 import { useAccounts, useCreateProject } from '../../daemon/queries';
 import { accountOptions } from '../settings/account-kind-label';
+import { PermissionModeField } from '../settings/permission-mode-field';
 import { parseAreas } from './areas-text';
 
 /** Starting heuristics (spec §15); the daemon validates the final values. */
@@ -43,6 +51,7 @@ export function NewProjectForm({
   const [delivery, setDelivery] = useState<Delivery>(Delivery.Local);
   const [baseBranch, setBaseBranch] = useState('main');
   const [prTitlePrefix, setPrTitlePrefix] = useState('');
+  const [permissionMode, setPermissionMode] = useState<PermissionMode>(PermissionMode.Default);
   const [formError, setFormError] = useState<string | null>(null);
 
   const submit = (event: SyntheticEvent<HTMLFormElement>): void => {
@@ -76,6 +85,7 @@ export function NewProjectForm({
         handoffPct,
         nudgePct: nudgeFor(handoffPct),
         delivery,
+        permissionMode,
         ...(pullRequests
           ? { baseBranch: baseBranch.trim(), prTitlePrefix: prTitlePrefix.trim() }
           : {}),
@@ -188,6 +198,7 @@ export function NewProjectForm({
             setHandoffPct(typeof value === 'number' ? value : '');
           }}
         />
+        <PermissionModeField value={permissionMode} onChange={setPermissionMode} />
         {error ? (
           <Alert color="red" title="Couldn't create the project">
             {error}

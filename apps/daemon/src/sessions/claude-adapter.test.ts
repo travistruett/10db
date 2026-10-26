@@ -45,6 +45,7 @@ function spec(overrides: Partial<SessionSpec> = {}): SessionSpec {
     model: 'sonnet',
     effort: 'medium',
     resumeProviderSessionId: null,
+    permissionMode: 'default',
     env: { PATH: '/usr/bin:/bin', CLAUDE_AGENT_SDK_CLIENT_APP: '10db/0.1.0' },
     account: {
       accountId: mintId('Account'),
@@ -227,7 +228,6 @@ async function callHook(record: Record_, toolName: string) {
 const BILLING_PREFLIGHT_MS = 15_000;
 
 const deps = {
-  permissionMode: 'default' as const,
   claudePath: '/usr/local/bin/claude',
   pluginDir: '/harness',
   abortController: new AbortController(),
@@ -298,11 +298,11 @@ describe('buildQueryOptions', () => {
     });
   });
 
-  it.each<[string, Parameters<typeof buildQueryOptions>[1]['permissionMode'], string]>([
+  it.each<[string, SessionSpec['permissionMode'], string]>([
     ['default', 'default', 'default'],
     ['auto', 'auto', 'auto'],
   ])('uses the %s lane permission mode', (_name, mode, expected) => {
-    const options = buildQueryOptions(spec(), { ...deps, permissionMode: mode });
+    const options = buildQueryOptions(spec({ permissionMode: mode }), deps);
     expect(options.permissionMode).toBe(expected);
     // The guard and the broker stay wired in either mode.
     expect(options.canUseTool).toBeTypeOf('function');
@@ -356,7 +356,7 @@ describe('buildQueryOptions', () => {
   });
 
   it.each<['default' | 'auto']>([['auto'], ['default']])(
-    'passes the %s lane permission mode from the adapter options to claude',
+    'passes the %s lane permission mode from the session to claude',
     async (mode) => {
       const fake = fakeQuery({
         messages: [initMessage(), resultMessage({ input: 1, output: 1, costUsd: 0 })],
@@ -366,9 +366,8 @@ describe('buildQueryOptions', () => {
         pluginDir: '/harness',
         logger: silentLogger,
         query: fake.query,
-        permissionMode: mode,
       });
-      await collect(adapter.start(spec()).events);
+      await collect(adapter.start(spec({ permissionMode: mode })).events);
       expect(fake.record.options?.permissionMode).toBe(mode);
     },
   );

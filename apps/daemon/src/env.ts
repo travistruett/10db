@@ -1,3 +1,4 @@
+import { PermissionMode } from '@10db/contracts';
 import { z } from 'zod';
 
 export const LogLevel = {
@@ -9,9 +10,6 @@ export const LogLevel = {
   Trace: 'trace',
 } as const;
 export type LogLevel = (typeof LogLevel)[keyof typeof LogLevel];
-
-export const LanePermissionMode = { Default: 'default', Auto: 'auto' } as const;
-export type LanePermissionMode = (typeof LanePermissionMode)[keyof typeof LanePermissionMode];
 
 const DaemonEnv = z.object({
   TENDB_DATA_DIR: z.string().min(1).optional(),
@@ -30,9 +28,9 @@ const DaemonEnv = z.object({
     .optional(),
   // Absolute path to the claude binary; otherwise it is found on the login shell's PATH.
   TENDB_CLAUDE_PATH: z.string().startsWith('/').optional(),
-  // How lane sessions decide permission prompts: `auto` lets Claude Code's classifier approve routine
-  // calls. The guard's refusals still apply first and escalated calls still become cards.
-  TENDB_LANE_PERMISSION_MODE: z.enum(LanePermissionMode).default(LanePermissionMode.Default),
+  // Dev override: `auto` runs every project's lanes in Claude Code's auto mode, whatever the project's own
+  // setting says. The guard's refusals still apply first and escalated calls still become cards.
+  TENDB_LANE_PERMISSION_MODE: z.enum(PermissionMode).default(PermissionMode.Default),
   // Set by the desktop shell: the daemon runs its normal shutdown when stdin reaches EOF, which is how
   // it learns the shell died without a clean Quit.
   TENDB_PARENT_STDIN: z.enum(['0', '1']).optional(),

@@ -5,6 +5,7 @@ import {
   mintId,
   NextAction,
   ProjectInput,
+  ProjectPatch,
   TaskId,
   WorkstreamId,
 } from './index';
@@ -73,6 +74,33 @@ describe('ProjectInput', () => {
     expect(ProjectInput.safeParse({ ...base, allowedCommands: ['pnpm --run'] }).success).toBe(
       false,
     );
+  });
+
+  it.each([
+    ['absent', undefined, 'default'],
+    ['default', 'default', 'default'],
+    ['auto', 'auto', 'auto'],
+  ])('reads a %s permission mode as %s', (_name, given, expected) => {
+    const parsed = ProjectInput.parse({
+      name: 'demo',
+      repoPath: '/tmp/demo',
+      gateCommand: 'make gate',
+      areas: [{ name: 'src', globs: ['src/**'] }],
+      ...(given === undefined ? {} : { permissionMode: given }),
+    });
+    expect(parsed.permissionMode).toBe(expected);
+  });
+
+  it('rejects an unknown permission mode on create and on patch', () => {
+    const base = {
+      name: 'demo',
+      repoPath: '/tmp/demo',
+      gateCommand: 'make gate',
+      areas: [{ name: 'src', globs: ['src/**'] }],
+    };
+    expect(ProjectInput.safeParse({ ...base, permissionMode: 'yolo' }).success).toBe(false);
+    expect(ProjectPatch.safeParse({ permissionMode: 'yolo' }).success).toBe(false);
+    expect(ProjectPatch.parse({ permissionMode: 'auto' })).toEqual({ permissionMode: 'auto' });
   });
 
   it('rejects a nudge threshold at or below the handoff threshold', () => {

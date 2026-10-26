@@ -1344,6 +1344,41 @@ describe('runner', () => {
   });
 });
 
+describe('lane permission mode', () => {
+  it.each([
+    ['a default project', 'default', undefined, 'default'],
+    ['an auto project', 'auto', undefined, 'auto'],
+    ['an auto override on a default project', 'default', 'auto', 'auto'],
+    ['an auto override on an auto project', 'auto', 'auto', 'auto'],
+    ['a default override on an auto project', 'auto', 'default', 'auto'],
+  ] as const)(
+    'starts the session of %s in %s mode',
+    async (_name, projectMode, override, expected) => {
+      engine = await createTestEngine(
+        { Alpha: [[turn]] },
+        { permissionMode: projectMode },
+        override ? { permissionModeOverride: override } : {},
+      );
+      const { workstream } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+      expect(engine.adapter.prompts.map((p) => p.permissionMode)).toEqual([expected]);
+    },
+  );
+
+  it('reads the project mode when each session starts, so a change applies at the next session', async () => {
+    engine = await createTestEngine({ Alpha: [[turn]], Beta: [[turn]] });
+    const first = engine.addTask('Alpha');
+    engine.launch(first.workstream.id);
+    await engine.runner.idle();
+    engine.state.write((ctx) => patchProject(ctx, engine.project.id, { permissionMode: 'auto' }));
+    const second = engine.addTask('Beta');
+    engine.launch(second.workstream.id);
+    await engine.runner.idle();
+    expect(engine.adapter.prompts.map((p) => p.permissionMode)).toEqual(['default', 'auto']);
+  });
+});
+
 describe('accounts', () => {
   it('pauses the account and sends no prompt when the identity differs, then resumes after Resume', async () => {
     engine = await createTestEngine({ Alpha: [[turn]] });

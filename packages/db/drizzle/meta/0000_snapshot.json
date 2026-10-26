@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "2df27d43-8a2c-4e4d-9b0f-026ca132fecb",
+  "id": "3ec64117-4e82-4b95-b3e4-cad16c533286",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "aa_models": {
@@ -1785,6 +1785,14 @@
           "notNull": true,
           "autoincrement": false,
           "default": 0.95
+        },
+        "permission_mode": {
+          "name": "permission_mode",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'default'"
         },
         "model": {
           "name": "model",

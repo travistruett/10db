@@ -76,6 +76,7 @@ describe('BoardView', () => {
       ],
       accountId: DEFAULT_ACCOUNT.id,
       delivery: 'local',
+      permissionMode: 'default',
       handoffPct: 40,
       nudgePct: 50,
     });
@@ -83,6 +84,32 @@ describe('BoardView', () => {
       expect(screen.queryByRole('dialog')).toBeNull();
     });
     expect(await screen.findByText('No tasks yet.')).toBeTruthy();
+  });
+
+  it('creates a project in auto mode when the builder picks it', async () => {
+    const posted: unknown[] = [];
+    serve(
+      http.post(daemonUrl('/projects'), async ({ request }) => {
+        posted.push(await request.json());
+        return HttpResponse.json(projectDto(), { status: 201 });
+      }),
+    );
+    renderApp('/board');
+    fireEvent.click(await screen.findByRole('button', { name: 'New project' }));
+    const dialog = await screen.findByRole('dialog', { name: 'New project' });
+    type('Name', 'demo', dialog);
+    type('Repository path', '/repos/demo', dialog);
+    type('Gate command', 'make gate', dialog);
+    type('Areas', 'src: src/**', dialog);
+    expect(
+      within(dialog).getByRole<HTMLInputElement>('radio', { name: /Ask for each command/ }).checked,
+    ).toBe(true);
+    fireEvent.click(within(dialog).getByRole('radio', { name: /Auto mode/ }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Create project' }));
+    await waitFor(() => {
+      expect(posted).toHaveLength(1);
+    });
+    expect(posted[0]).toMatchObject({ permissionMode: 'auto' });
   });
 
   it('creates a pull-request project with its base branch and title prefix, and requires the prefix', async () => {

@@ -138,6 +138,7 @@ export class FakeAdapter implements SessionAdapter {
     prompt: string;
     resume: string | null;
     accountId: AccountId;
+    permissionMode: SessionSpec['permissionMode'];
   }[] = [];
 
   /** What a session reports for its account, over what it expects; tests set it to stage a mismatch. */
@@ -187,6 +188,7 @@ export class FakeAdapter implements SessionAdapter {
       prompt: spec.prompt,
       resume: spec.resumeProviderSessionId,
       accountId: spec.account.accountId,
+      permissionMode: spec.permissionMode,
     });
 
     const channel = createChannel<SessionEvent>();
