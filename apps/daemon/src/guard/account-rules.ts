@@ -24,11 +24,11 @@ import {
 /**
  * Two kinds of rule live here. The shell-text rules (Keychain commands, environment dumps, secret
  * references and protected paths in shell text) are interim policy that keeps a cooperative agent
- * from casual reads; text matching cannot see everything a shell does. The lane sandbox is designed
- * but not built: once it is, the kernel sandbox is the lane boundary and these rules go.
- * `pathRefusal`, `protectedPaths` and `isOwnToolResult` are the resolved-path check on the file
- * tools, which the sandbox design keeps as part of the file-tool boundary
- * (`docs/architecture/03-trust-boundaries.md`).
+ * from casual reads; text matching cannot see everything a shell does. With `TENDB_LANE_SANDBOX`
+ * on, the kernel sandbox is the lane boundary and these rules are a tripwire in front of it; they go
+ * once the sandbox is the only mode. `pathRefusal`, `protectedPaths` and `isOwnToolResult` are the
+ * resolved-path check on the file tools, which the sandbox design keeps as part of the file-tool
+ * boundary (`docs/architecture/03-trust-boundaries.md`).
  */
 
 const KEYCHAIN = 'Keychain commands are never run by agents: 10db keeps account secrets there.';
