@@ -109,7 +109,10 @@ export async function createTestEngine(
   book: FakeScriptBook,
   project: Partial<ProjectInput> = {},
   runnerOverrides: Partial<
-    Pick<RunnerOptions, 'afterSession' | 'logger' | 'launcher' | 'permissionModeOverride'>
+    Pick<
+      RunnerOptions,
+      'afterSession' | 'logger' | 'launcher' | 'permissionModeOverride' | 'laneSandbox'
+    >
   > = {},
   setup: { readonly account?: AccountInput; readonly secret?: string } = {},
 ): Promise<TestEngine> {

@@ -23,6 +23,7 @@ const PUBLIC_RESEARCH = [
   'spike-11-tauri-first-window.md',
   'spike-12-accounts.md',
   'spike-13-sandbox.md',
+  'spike-14-sandbox-policy.md',
 ];
 
 describe('docs/architecture', () => {

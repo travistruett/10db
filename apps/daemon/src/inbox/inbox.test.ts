@@ -1,5 +1,9 @@
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   ConflictError,
+  DEFAULT_HAZARDS,
   EventType,
   InvalidError,
   mintId,
@@ -13,6 +17,7 @@ import {
   getInboxItem,
   getProposal,
   insertInboxItem,
+  insertPermissionRule,
   insertProposal,
   insertSource,
   listEventsAfter,
@@ -26,6 +31,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { seedWorkstream } from '../../test/fixtures';
 import { createEventBus, createStateStore, type StateStore } from '../events';
+import { protectedReads, type FileAccessContext } from '../sandbox';
 import {
   createInboxService,
   createPermissionBroker,
@@ -600,5 +606,592 @@ describe('permission broker without a storable pattern', () => {
     expect(await pending).toEqual({ behavior: 'allow' });
     expect(listPermissionRules(state.db, ws.project.id, ws.workstream.id)).toEqual([]);
     expect(searchDecisions(state.db, ws.project.id, 'allow', 5)).toEqual([]);
+  });
+});
+
+describe('permission cards store scoped rules', () => {
+  function permissionCard(
+    ws: ReturnType<typeof seedWorkstream>,
+    toolName: string,
+    summary: string,
+  ): InboxItemDto {
+    const { item } = inbox.ask({
+      projectId: ws.project.id,
+      workstreamId: ws.workstream.id,
+      sessionId: mintId('Session'),
+      kind: 'permission',
+      title: `Allow ${toolName}?`,
+      body: summary,
+      options: [
+        { label: 'allow_once', description: '' },
+        { label: 'allow_project', description: '' },
+        { label: 'deny', description: '' },
+      ],
+      recommendation: null,
+      category: 'environment',
+      urgency: 'normal',
+      detail: { toolName, summary },
+      signal: new AbortController().signal,
+    });
+    return item;
+  }
+
+  it.each([
+    {
+      name: 'a host is stored lower-cased',
+      toolName: 'SandboxNetworkAccess',
+      summary: 'Registry.NPMJS.org',
+      stored: { toolName: 'SandboxNetworkAccess', pattern: 'registry.npmjs.org' },
+    },
+    {
+      name: 'a Grep approval is stored as Read, on the path',
+      toolName: 'Grep',
+      summary: '/work/other',
+      stored: { toolName: 'Read', pattern: '/work/other' },
+    },
+    {
+      name: 'an Edit approval is stored for the tool and the one path',
+      toolName: 'Edit',
+      summary: '/work/repo/.vscode/settings.json',
+      stored: { toolName: 'Edit', pattern: '/work/repo/.vscode/settings.json' },
+    },
+  ])('$name', ({ toolName, summary, stored }) => {
+    const ws = seedWorkstream(base);
+    inbox.answer(permissionCard(ws, toolName, summary).id, { choice: 'allow_project' });
+    expect(listPermissionRules(state.db, ws.project.id, ws.workstream.id)).toEqual([
+      expect.objectContaining({ ...stored, workstreamId: null }),
+    ]);
+  });
+
+  it.each([{ name: 'a glob path', toolName: 'Read', summary: '/work/*' }])(
+    'stores nothing for $name',
+    ({ toolName, summary }) => {
+      const ws = seedWorkstream(base);
+      inbox.answer(permissionCard(ws, toolName, summary).id, { choice: 'allow_project' });
+      expect(listPermissionRules(state.db, ws.project.id, ws.workstream.id)).toEqual([]);
+      expect(searchDecisions(state.db, ws.project.id, 'allow', 5)).toEqual([]);
+    },
+  );
+});
+
+describe('permission broker in a sandboxed lane', () => {
+  const PNPM_BODY =
+    "pnpm 12 can't install inside the lane sandbox yet. Approving lets the command run; it will fail on pnpm's store lock. Run it yourself, or use npm.";
+  const HOST_BODY =
+    'The command was refused. Allow the host for the project and the next session gets it; allow once only reaches a session that is still running.';
+
+  let root: string;
+  let fileAccess: FileAccessContext;
+  let controller: AbortController;
+  const settle = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
+
+  beforeEach(() => {
+    root = realpathSync(mkdtempSync(join(tmpdir(), '10db-broker-')));
+    const home = join(root, 'home');
+    const checkout = join(root, 'work', 'repo');
+    const configDir = join(home, '.claude');
+    mkdirSync(join(checkout, 'src'), { recursive: true });
+    mkdirSync(join(root, 'work', 'other'), { recursive: true });
+    mkdirSync(join(root, 'work', 'listed'), { recursive: true });
+    mkdirSync(join(configDir, 'projects', 'x', 'own-id', 'tool-results'), { recursive: true });
+    mkdirSync(join(configDir, 'projects', 'x', 'other-id', 'tool-results'), { recursive: true });
+    writeFileSync(join(configDir, 'projects', 'x', 'own-id', 'tool-results', 'a.txt'), '');
+    writeFileSync(join(configDir, 'projects', 'x', 'other-id', 'tool-results', 'a.txt'), '');
+    writeFileSync(join(home, '.claude.json'), '{}');
+    writeFileSync(join(root, 'work', 'other', 'notes.txt'), '');
+    writeFileSync(join(root, 'work', 'listed', 'notes.txt'), '');
+    symlinkSync(join(root, 'work', 'other'), join(checkout, 'link-out'));
+    fileAccess = {
+      checkout,
+      home,
+      protectedReads: protectedReads({
+        home,
+        dataDir: join(root, 'data'),
+        configDirs: [configDir],
+      }),
+      readList: [join(root, 'work', 'listed')],
+      configDir,
+      providerSessionId: 'own-id',
+    };
+    controller = new AbortController();
+  });
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  function sandboxed(ws: ReturnType<typeof seedWorkstream>, sandbox = true) {
+    return createPermissionBroker(
+      { state, inbox },
+      {
+        projectId: ws.project.id,
+        workstreamId: ws.workstream.id,
+        sessionId: mintId('Session'),
+        observer: { onWaitStart: () => undefined, onWaitEnd: () => undefined },
+        signal: controller.signal,
+        ...(sandbox ? { sandbox: { fileAccess, hazards: DEFAULT_HAZARDS } } : {}),
+      },
+    );
+  }
+  const request = (toolName: string, input: Record<string, unknown>, escalated = false) => ({
+    toolName,
+    input,
+    toolUseId: 't1',
+    escalated,
+    signal: new AbortController().signal,
+  });
+  const openCards = () => listInbox(state.db, { states: ['OPEN'] });
+  function onlyOpenCard(): InboxItemDto {
+    const [card, ...rest] = openCards();
+    if (!card || rest.length > 0) throw new Error('expected exactly one open card');
+    return card;
+  }
+
+  it('allows a sandboxed non-hazard command without a card', async () => {
+    const ws = seedWorkstream(base);
+    expect(await sandboxed(ws)(request('Bash', { command: 'pnpm test' }))).toEqual({
+      behavior: 'allow',
+    });
+    expect(openCards()).toEqual([]);
+  });
+
+  it('cards a hazard command', async () => {
+    const ws = seedWorkstream(base);
+    const pending = sandboxed(ws)(request('Bash', { command: 'npm install zod' }));
+    const card = onlyOpenCard();
+    expect(card.detail).toEqual({ toolName: 'Bash', summary: 'npm install zod' });
+    expect(card.body).toBe('npm install zod');
+    inbox.answer(card.id, { choice: 'allow_once' });
+    expect(await pending).toEqual({ behavior: 'allow' });
+  });
+
+  it("explains pnpm's store lock on a pnpm hazard card", () => {
+    const ws = seedWorkstream(base);
+    void sandboxed(ws)(request('Bash', { command: 'pnpm add zod' })).catch(() => undefined);
+    const card = onlyOpenCard();
+    expect(card.body).toBe(`pnpm add zod\n\n${PNPM_BODY}`);
+    expect(card.detail).toEqual({ toolName: 'Bash', summary: 'pnpm add zod' });
+  });
+
+  it('keeps two different pnpm commands on two cards', () => {
+    const first = seedWorkstream(base);
+    const second = seedWorkstream(base, { project: first.project, title: 'Beta' });
+    void sandboxed(first)(request('Bash', { command: 'pnpm add zod' })).catch(() => undefined);
+    void sandboxed(second)(request('Bash', { command: 'pnpm add evil-pkg' })).catch(
+      () => undefined,
+    );
+    expect(
+      openCards()
+        .map((card) => card.detail?.['summary'])
+        .sort(),
+    ).toEqual(['pnpm add evil-pkg', 'pnpm add zod']);
+  });
+
+  it('cards a hazard hidden in sh -c', () => {
+    const ws = seedWorkstream(base);
+    void sandboxed(ws)(request('Bash', { command: "sh -c 'pnpm add x'" })).catch(() => undefined);
+    expect(onlyOpenCard().kind).toBe('permission');
+  });
+
+  it('cards a command the shell parser cannot read with certainty', () => {
+    const ws = seedWorkstream(base);
+    void sandboxed(ws)(request('Bash', { command: 'echo "unclosed' })).catch(() => undefined);
+    expect(onlyOpenCard().kind).toBe('permission');
+  });
+
+  it('cards an escalated call, even one that is not a hazard (defensive: auto mode is off under the sandbox)', () => {
+    const ws = seedWorkstream(base);
+    void sandboxed(ws)(request('Bash', { command: 'pnpm test' }, true)).catch(() => undefined);
+    expect(onlyOpenCard().kind).toBe('permission');
+  });
+
+  it('denies an unlisted host at once and raises one card', async () => {
+    const ws = seedWorkstream(base);
+    const decide = sandboxed(ws);
+    const first = await decide(request('SandboxNetworkAccess', { host: 'example.com' }));
+    const second = await decide(request('SandboxNetworkAccess', { host: 'Example.com' }));
+    for (const decision of [first, second]) {
+      expect(decision).toEqual({
+        behavior: 'deny',
+        message:
+          '10db asked the builder about example.com. Retry after the card is answered, or work without it.',
+      });
+    }
+    const card = onlyOpenCard();
+    expect(card).toMatchObject({
+      kind: 'permission',
+      title: 'Allow network access to example.com?',
+      body: HOST_BODY,
+      detail: { toolName: 'SandboxNetworkAccess', summary: 'example.com' },
+    });
+    expect(card.options.map((o) => o.label)).toEqual(['allow_once', 'allow_project', 'deny']);
+  });
+
+  it('denies a network ask that names no host, with no card', async () => {
+    const ws = seedWorkstream(base);
+    const decision = await sandboxed(ws)(request('SandboxNetworkAccess', {}));
+    expect(decision.behavior).toBe('deny');
+    expect(openCards()).toEqual([]);
+  });
+
+  it('lets exactly the next request for the host through after allow once', async () => {
+    const ws = seedWorkstream(base);
+    const decide = sandboxed(ws);
+    const ask = request('SandboxNetworkAccess', { host: 'example.com' });
+    expect((await decide(ask)).behavior).toBe('deny');
+    inbox.answer(onlyOpenCard().id, { choice: 'allow_once' });
+    await settle();
+    expect(await decide(ask)).toEqual({ behavior: 'allow' });
+    expect((await decide(ask)).behavior).toBe('deny');
+    expect(openCards()).toEqual([]);
+    expect(listPermissionRules(state.db, ws.project.id, ws.workstream.id)).toEqual([]);
+  });
+
+  it('keeps the allowance to the host and the session it was given for', async () => {
+    const ws = seedWorkstream(base);
+    const decide = sandboxed(ws);
+    await decide(request('SandboxNetworkAccess', { host: 'example.com' }));
+    inbox.answer(onlyOpenCard().id, { choice: 'allow_once' });
+    await settle();
+    expect((await decide(request('SandboxNetworkAccess', { host: 'evil.com' }))).behavior).toBe(
+      'deny',
+    );
+    expect(
+      (await sandboxed(ws)(request('SandboxNetworkAccess', { host: 'example.com' }))).behavior,
+    ).toBe('deny');
+  });
+
+  it('stores the host for the project on allow project, for this session and the next', async () => {
+    const ws = seedWorkstream(base);
+    const decide = sandboxed(ws);
+    const ask = request('SandboxNetworkAccess', { host: 'Registry.NPMJS.org' });
+    expect((await decide(ask)).behavior).toBe('deny');
+    inbox.answer(onlyOpenCard().id, { choice: 'allow_project' });
+    await settle();
+    expect(await decide(ask)).toEqual({ behavior: 'allow' });
+    expect(await sandboxed(ws)(ask)).toEqual({ behavior: 'allow' });
+    expect(searchDecisions(state.db, ws.project.id, 'registry.npmjs.org', 5)).toEqual([
+      expect.objectContaining({
+        question: 'Allow SandboxNetworkAccess (registry.npmjs.org) in this project?',
+        choice: 'Always allow',
+      }),
+    ]);
+    expect(
+      (await decide(request('SandboxNetworkAccess', { host: 'evil.npmjs.org' }))).behavior,
+    ).toBe('deny');
+  });
+
+  it('never lets an unscoped network rule allow a host', async () => {
+    const ws = seedWorkstream(base);
+    base.write((ctx) =>
+      insertPermissionRule(ctx, {
+        projectId: ws.project.id,
+        workstreamId: null,
+        toolName: 'SandboxNetworkAccess',
+        pattern: null,
+        sourceInboxId: null,
+      }),
+    );
+    const decision = await sandboxed(ws)(request('SandboxNetworkAccess', { host: 'example.com' }));
+    expect(decision.behavior).toBe('deny');
+    expect(onlyOpenCard().detail).toEqual({
+      toolName: 'SandboxNetworkAccess',
+      summary: 'example.com',
+    });
+  });
+
+  it('allows a host with a stored rule, with no card', async () => {
+    const ws = seedWorkstream(base);
+    base.write((ctx) =>
+      insertPermissionRule(ctx, {
+        projectId: ws.project.id,
+        workstreamId: null,
+        toolName: 'SandboxNetworkAccess',
+        pattern: 'registry.npmjs.org',
+        sourceInboxId: null,
+      }),
+    );
+    const decision = await sandboxed(ws)(
+      request('SandboxNetworkAccess', { host: 'Registry.NPMJS.org' }),
+    );
+    expect(decision).toEqual({ behavior: 'allow' });
+    expect(openCards()).toEqual([]);
+  });
+
+  it('never lets a denied host card allow later requests', async () => {
+    const ws = seedWorkstream(base);
+    const decide = sandboxed(ws);
+    const ask = request('SandboxNetworkAccess', { host: 'example.com' });
+    await decide(ask);
+    inbox.answer(onlyOpenCard().id, { choice: 'deny' });
+    await settle();
+    expect((await decide(ask)).behavior).toBe('deny');
+    expect(openCards()).toEqual([]);
+  });
+
+  it('leaves no unhandled rejection when the session ends with a host card open', async () => {
+    const ws = seedWorkstream(base);
+    await sandboxed(ws)(request('SandboxNetworkAccess', { host: 'example.com' }));
+    controller.abort();
+    await settle();
+    expect(openCards()).toHaveLength(1);
+  });
+
+  it('refuses a protected read with no card', async () => {
+    const ws = seedWorkstream(base);
+    const decide = sandboxed(ws);
+    for (const [tool, input] of [
+      ['Read', { file_path: join(fileAccess.home, '.claude.json') }],
+      ['Grep', { pattern: 'x', path: fileAccess.home }],
+      ['Glob', { pattern: '*', path: join(fileAccess.home, '.claude') }],
+      ['LS', { path: join(fileAccess.configDir, 'projects', 'x', 'other-id') }],
+    ] as const) {
+      expect((await decide(request(tool, input))).behavior, tool).toBe('deny');
+    }
+    expect(openCards()).toEqual([]);
+  });
+
+  it("keeps reading the session's own saved tool results", async () => {
+    const ws = seedWorkstream(base);
+    const own = join(fileAccess.configDir, 'projects', 'x', 'own-id', 'tool-results', 'a.txt');
+    expect(await sandboxed(ws)(request('Read', { file_path: own }))).toEqual({ behavior: 'allow' });
+    expect(openCards()).toEqual([]);
+  });
+
+  it('allows a read inside the checkout, including one through a link that stays inside', async () => {
+    const ws = seedWorkstream(base);
+    const decide = sandboxed(ws);
+    expect((await decide(request('Read', { file_path: 'src/a.ts' }))).behavior).toBe('allow');
+    expect((await decide(request('LS', {}))).behavior).toBe('allow');
+    expect(openCards()).toEqual([]);
+  });
+
+  it('allows a read-list path', async () => {
+    const ws = seedWorkstream(base);
+    const file = join(root, 'work', 'listed', 'notes.txt');
+    expect(await sandboxed(ws)(request('Read', { file_path: file }))).toEqual({
+      behavior: 'allow',
+    });
+    expect(openCards()).toEqual([]);
+  });
+
+  it('cards a read outside the checkout, naming the real path, and stores the grant for every read tool', async () => {
+    const ws = seedWorkstream(base);
+    const decide = sandboxed(ws);
+    const other = join(root, 'work', 'other');
+    // Reached through a link inside the checkout: the card names where it lands.
+    const pending = decide(
+      request('Grep', { pattern: 'x', path: join(fileAccess.checkout, 'link-out') }),
+    );
+    const card = onlyOpenCard();
+    expect(card.body).toBe(other);
+    expect(card.detail).toEqual({ toolName: 'Grep', summary: other });
+    inbox.answer(card.id, { choice: 'allow_project' });
+    expect(await pending).toEqual({ behavior: 'allow' });
+    expect(listPermissionRules(state.db, ws.project.id, ws.workstream.id)).toEqual([
+      expect.objectContaining({ toolName: 'Read', pattern: other }),
+    ]);
+    expect((await decide(request('Read', { file_path: join(other, 'notes.txt') }))).behavior).toBe(
+      'allow',
+    );
+    expect((await decide(request('Glob', { pattern: '*.txt', path: other }))).behavior).toBe(
+      'allow',
+    );
+    expect(openCards()).toEqual([]);
+  });
+
+  it('cards a read that mixes an inside path with an outside one, naming the outside one', () => {
+    const ws = seedWorkstream(base);
+    const outside = join(root, 'work', 'other');
+    void sandboxed(ws)(request('Glob', { pattern: join(outside, '*.txt'), path: '.' })).catch(
+      () => undefined,
+    );
+    expect(onlyOpenCard().body).toBe(outside);
+  });
+
+  it('names every path a read needs asking about in the card body', () => {
+    const ws = seedWorkstream(base);
+    const a = join(root, 'work', 'other');
+    const b = join(root, 'work', 'elsewhere');
+    mkdirSync(b);
+    void sandboxed(ws)(request('Glob', { pattern: `${a}/*.txt`, path: b })).catch(() => undefined);
+    const card = onlyOpenCard();
+    expect(card.body).toContain(a);
+    expect(card.body).toContain(b);
+    expect(card.detail?.['summary']).toBe(b);
+  });
+
+  it('does not let an old unscoped Read or Edit rule cover a sandboxed card', () => {
+    const ws = seedWorkstream(base);
+    for (const toolName of ['Read', 'Edit']) {
+      base.write((ctx) =>
+        insertPermissionRule(ctx, {
+          projectId: ws.project.id,
+          workstreamId: null,
+          toolName,
+          pattern: null,
+          sourceInboxId: null,
+        }),
+      );
+    }
+    const decide = sandboxed(ws);
+    void decide(request('Edit', { file_path: '.claude/hooks/x' })).catch(() => undefined);
+    void decide(request('Read', { file_path: join(root, 'work', 'other', 'notes.txt') })).catch(
+      () => undefined,
+    );
+    expect(openCards()).toHaveLength(2);
+  });
+
+  it.each<{ name: string; toolName: string; input: Record<string, unknown>; fails?: boolean }>([
+    { name: 'a Read with no file path', toolName: 'Read', input: {} },
+    { name: 'an Edit with no file path', toolName: 'Edit', input: { old_string: 'a' } },
+    {
+      name: 'an Edit whose path judging fails',
+      toolName: 'Edit',
+      input: { file_path: 'src/a.ts' },
+      fails: true,
+    },
+  ])(
+    'denies $name with no card, even with an old unscoped rule stored',
+    async ({ toolName, input, fails }) => {
+      const ws = seedWorkstream(base);
+      base.write((ctx) =>
+        insertPermissionRule(ctx, {
+          projectId: ws.project.id,
+          workstreamId: null,
+          toolName,
+          pattern: null,
+          sourceInboxId: null,
+        }),
+      );
+      if (fails === true) {
+        // An unexpected failure while judging: reading the context throws.
+        const { checkout, protectedReads: reads, readList, configDir } = fileAccess;
+        fileAccess = {
+          checkout,
+          protectedReads: reads,
+          readList,
+          configDir,
+          providerSessionId: 'own-id',
+          get home(): string {
+            throw new Error('the context could not be read');
+          },
+        };
+      }
+      expect(await sandboxed(ws)(request(toolName, input))).toEqual({
+        behavior: 'deny',
+        message: "10db could not judge this call's path.",
+      });
+      expect(openCards()).toEqual([]);
+    },
+  );
+
+  it('cards an edit with the real path and stores a rule for that one path', async () => {
+    const ws = seedWorkstream(base);
+    const decide = sandboxed(ws);
+    const vscode = join(fileAccess.checkout, '.vscode', 'settings.json');
+    const pending = decide(request('Edit', { file_path: '.vscode/settings.json' }));
+    const card = onlyOpenCard();
+    expect(card.detail).toEqual({ toolName: 'Edit', summary: vscode });
+    inbox.answer(card.id, { choice: 'allow_project' });
+    expect(await pending).toEqual({ behavior: 'allow' });
+    expect((await decide(request('Edit', { file_path: vscode }))).behavior).toBe('allow');
+    void decide(request('Edit', { file_path: '.claude/hooks/x' })).catch(() => undefined);
+    expect(onlyOpenCard().detail).toEqual({
+      toolName: 'Edit',
+      summary: join(fileAccess.checkout, '.claude', 'hooks', 'x'),
+    });
+  });
+
+  it('asks about every other tool as it always did', () => {
+    const ws = seedWorkstream(base);
+    void sandboxed(ws)(request('WebFetch', { url: 'https://example.com' })).catch(() => undefined);
+    expect(onlyOpenCard()).toMatchObject({
+      title: 'Allow WebFetch?',
+      body: '{"url":"https://example.com"}',
+    });
+  });
+
+  it('without sandbox context, behaves as before', () => {
+    const ws = seedWorkstream(base);
+    const decide = sandboxed(ws, false);
+    void decide(request('Bash', { command: 'pnpm test' })).catch(() => undefined);
+    void decide(request('Read', { file_path: join(fileAccess.home, '.claude.json') })).catch(
+      () => undefined,
+    );
+    void decide(request('SandboxNetworkAccess', { host: 'example.com' })).catch(() => undefined);
+    expect(openCards().map((card) => [card.title, card.body])).toEqual([
+      ['Allow Bash?', 'pnpm test'],
+      ['Allow Read?', JSON.stringify({ file_path: join(fileAccess.home, '.claude.json') })],
+      ['Allow SandboxNetworkAccess?', '{"host":"example.com"}'],
+    ]);
+  });
+});
+
+describe('permission broker without a sandbox keeps its network cards', () => {
+  it('stores an unscoped network rule on always allow, which then allows with no card', async () => {
+    const ws = seedWorkstream(base);
+    const decide = createPermissionBroker(
+      { state, inbox },
+      {
+        projectId: ws.project.id,
+        workstreamId: ws.workstream.id,
+        sessionId: mintId('Session'),
+        observer: { onWaitStart: () => undefined, onWaitEnd: () => undefined },
+        signal: new AbortController().signal,
+      },
+    );
+    const request = (host: string) => ({
+      toolName: 'SandboxNetworkAccess',
+      input: { host },
+      toolUseId: 't1',
+      escalated: false,
+      signal: new AbortController().signal,
+    });
+    const pending = decide(request('example.com'));
+    const [card] = listInbox(state.db, { states: ['OPEN'] });
+    if (!card) throw new Error('expected a card');
+    inbox.answer(card.id, { choice: 'allow_project' });
+    expect(await pending).toEqual({ behavior: 'allow' });
+    expect(listPermissionRules(state.db, ws.project.id, ws.workstream.id)).toEqual([
+      expect.objectContaining({ toolName: 'SandboxNetworkAccess', pattern: null }),
+    ]);
+    expect(await decide(request('other.example'))).toEqual({ behavior: 'allow' });
+    expect(listInbox(state.db, { states: ['OPEN'] })).toEqual([]);
+  });
+});
+
+describe('permission broker without a sandbox keeps its Read and Edit cards', () => {
+  it.each([
+    ['Read', { file_path: '/etc/hosts' }],
+    ['Edit', { file_path: 'src/a.ts', old_string: 'a', new_string: 'b' }],
+  ])('offers always-allow on a %s card and stores the unscoped rule', async (toolName, input) => {
+    const ws = seedWorkstream(base);
+    const decide = createPermissionBroker(
+      { state, inbox },
+      {
+        projectId: ws.project.id,
+        workstreamId: ws.workstream.id,
+        sessionId: mintId('Session'),
+        observer: { onWaitStart: () => undefined, onWaitEnd: () => undefined },
+        signal: new AbortController().signal,
+      },
+    );
+    const pending = decide({
+      toolName,
+      input,
+      toolUseId: 't1',
+      escalated: false,
+      signal: new AbortController().signal,
+    });
+    const [card] = listInbox(state.db, { states: ['OPEN'] });
+    if (!card) throw new Error('expected a card');
+    expect(card.options.find((o) => o.label === 'allow_project')?.description).toBe(
+      'Always allow in this project (records a decision)',
+    );
+    inbox.answer(card.id, { choice: 'allow_project' });
+    expect(await pending).toEqual({ behavior: 'allow' });
+    expect(listPermissionRules(state.db, ws.project.id, ws.workstream.id)).toEqual([
+      expect.objectContaining({ toolName, pattern: null }),
+    ]);
   });
 });

@@ -1,7 +1,9 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
   ACCOUNT_CARD_DETAIL,
+  ToolAccess,
   AccountCardChoice,
   MCP_APPROVAL_DETAIL,
   type AccountId,
@@ -32,7 +34,17 @@ import {
   RESULT_NUDGE,
 } from '../briefing';
 import { createLauncher, KeychainError } from '../environment';
-import type { SessionHandle } from '../sessions';
+import { createGit } from '../git';
+import { allowedToolsFor } from '../permissions';
+import {
+  createLaneSandbox,
+  SandboxProfileError,
+  SandboxTempDirError,
+  type LaneSandbox,
+  type LaneSession,
+  type LaneSessionInput,
+} from '../sandbox';
+import type { SessionEvent, SessionHandle, SessionSpec } from '../sessions';
 import { createMemoryKeychain, handoffArgs, waitFor } from '../../test/fixtures';
 import { createTestEngine, type TestEngine } from '../../test/engine';
 import { captureLogs } from '../../test/log-capture';
@@ -2570,5 +2582,262 @@ describe('the session guard', () => {
     await start([read(() => results('someone-else'))]);
     await waitFor(() => denials().length > 0);
     expect(String(denials()[0]?.detail['reason'])).toContain('sign-in');
+  });
+});
+
+describe('lane sandbox', () => {
+  const lanesGit = createGit();
+  /** A real lane sandbox over a short temp root and a temp home, recording each session it makes. */
+  interface SandboxProbe {
+    readonly laneSandbox: LaneSandbox;
+    readonly inputs: LaneSessionInput[];
+    readonly sessions: LaneSession[];
+    readonly home: string;
+    readonly tmpRoot: string;
+  }
+  let probeRoot: string | null = null;
+  afterEach(() => {
+    if (probeRoot !== null) rmSync(probeRoot, { recursive: true, force: true });
+    probeRoot = null;
+  });
+  const sandboxProbe = (fail?: () => never): SandboxProbe => {
+    probeRoot = realpathSync(mkdtempSync('/tmp/sbr-'));
+    const home = join(probeRoot, 'h');
+    const tmpRoot = join(probeRoot, 't');
+    mkdirSync(home);
+    mkdirSync(tmpRoot);
+    const real = createLaneSandbox({
+      home,
+      dataDir: join(probeRoot, 'd'),
+      loopback: false,
+      loginConfigDir: null,
+      tmpRoot,
+      gitDirs: (path) => lanesGit.gitDirs(path),
+    });
+    const inputs: LaneSessionInput[] = [];
+    const sessions: LaneSession[] = [];
+    return {
+      laneSandbox: {
+        async forSession(input) {
+          inputs.push(input);
+          if (fail) fail();
+          const session = await real.forSession(input);
+          sessions.push(session);
+          return session;
+        },
+      },
+      inputs,
+      sessions,
+      home,
+      tmpRoot,
+    };
+  };
+  /** Every spec the fake adapter is started with. */
+  const recordSpecs = (): SessionSpec[] => {
+    const specs: SessionSpec[] = [];
+    engine.adapter.seen = (spec) => {
+      specs.push(spec);
+      return {};
+    };
+    return specs;
+  };
+  const hostCall = (host: string) => ({
+    do: 'tool' as const,
+    toolName: 'SandboxNetworkAccess',
+    input: { host },
+  });
+
+  it('runs the session under its profile in default mode, with checkout-scoped reads and the sandbox briefing', async () => {
+    const probe = sandboxProbe();
+    engine = await createTestEngine(
+      { Alpha: [[turn]] },
+      { permissionMode: 'auto' },
+      { laneSandbox: probe.laneSandbox, permissionModeOverride: 'auto' },
+    );
+    const specs = recordSpecs();
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+
+    const [laneSession] = probe.sessions;
+    const [spec] = specs;
+    const [session] = listSessions(engine.store.db, workstream.id);
+    expect(spec?.sandbox).toBe(laneSession?.spec);
+    expect(spec?.permissionMode).toBe('default');
+    expect(spec?.allowedTools).toContain(`Read(/${realpathSync(engine.repoPath)}/**)`);
+    expect(spec?.allowedTools).not.toContain('Read');
+    expect(spec?.prompt).toContain('a bare `mktemp` fails in the sandbox');
+    expect(probe.inputs[0]).toMatchObject({
+      project: { id: engine.project.id, repoPath: engine.repoPath },
+      env: spec?.env,
+      rules: [],
+      resumeProviderSessionId: null,
+      configDir: join(homedir(), '.claude'),
+    });
+    // The id Claude Code named at `started` is the one the file tools judge by.
+    expect(laneSession?.fileAccess.providerSessionId).toBe(session?.providerSessionId);
+    // The session ended, so its temp dir is gone.
+    expect(readdirSync(probe.tmpRoot)).toEqual([]);
+    expect(ws(workstream.id).state).toBe('DONE');
+  });
+
+  it.each([
+    ['null', { laneSandbox: null }],
+    ['absent', {}],
+  ])(
+    'with the lane sandbox %s, a session gets no sandbox and the unscoped tools',
+    async (_name, overrides) => {
+      engine = await createTestEngine({ Alpha: [[turn]] }, { permissionMode: 'auto' }, overrides);
+      const specs = recordSpecs();
+      const { workstream } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+      expect(specs[0]?.sandbox).toBeNull();
+      expect(specs[0]?.allowedTools).toEqual(allowedToolsFor(engine.project, ToolAccess.Edit));
+      expect(specs[0]?.permissionMode).toBe('auto');
+      expect(specs[0]?.prompt).not.toContain('mktemp');
+    },
+  );
+
+  it("judges the session's file tools by real path, keeping its own saved tool results readable", async () => {
+    const probe = sandboxProbe();
+    engine = await createTestEngine(
+      { Alpha: [[{ do: 'hang' }]] },
+      {},
+      { laneSandbox: probe.laneSandbox },
+    );
+    const specs = recordSpecs();
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    const providerId = await waitFor(
+      () => listSessions(engine.store.db, workstream.id)[0]?.providerSessionId ?? undefined,
+    );
+    const [spec] = specs;
+    if (!spec) throw new Error('the session was not started');
+    const results = (id: string) =>
+      join(homedir(), '.claude', 'projects', 'slug', id, 'tool-results', 'out.txt');
+    const read = (path: string) =>
+      spec.preToolUse({ toolName: 'Read', input: { file_path: path } });
+    expect(read(results(providerId))).toEqual({ decision: 'allow' });
+    expect(read(results('someone-else'))).toMatchObject({ decision: 'deny' });
+    // Not one of the guard's own protected paths: only the sandbox's file-access judge refuses it.
+    expect(read(join(probe.home, 'Library', 'Keychains', 'login.keychain-db'))).toMatchObject({
+      decision: 'deny',
+    });
+    await engine.runner.cancel(workstream.id);
+    expect(readdirSync(probe.tmpRoot)).toEqual([]);
+  });
+
+  it.each([
+    [
+      'SandboxProfileError',
+      () => new SandboxProfileError('checkout', "the checkout can't be read"),
+    ],
+    [
+      'SandboxTempDirError',
+      () => new SandboxTempDirError('Could not create the lane temp directory'),
+    ],
+  ])(
+    'fails the workstream at once when the sandbox refuses with a %s, writing no session',
+    async (_name, error) => {
+      const probe = sandboxProbe(() => {
+        throw error();
+      });
+      engine = await createTestEngine({ Alpha: [[turn]] }, {}, { laneSandbox: probe.laneSandbox });
+      const { workstream } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+
+      const row = ws(workstream.id);
+      expect(row.state).toBe('FAILED');
+      expect(row.failureReason).toMatch(/^The lane sandbox could not start: /);
+      expect(listSessions(engine.store.db, workstream.id)).toEqual([]);
+      expect(engine.adapter.prompts).toEqual([]);
+      expect(transitions(workstream.id).filter((t) => t.endsWith('->RECOVERING'))).toEqual([]);
+      const cards = listInbox(engine.store.db, { states: ['OPEN'] });
+      expect(cards.map((card) => card.kind)).toEqual(['flag']);
+      expect(cards[0]?.body).toMatch(/^The lane sandbox could not start: /);
+      // A leaked start slot would leave this acquire pending forever.
+      (await engine.startGate.acquire(engine.project.accountId))();
+    },
+  );
+
+  it('leaves no temp dir behind when the adapter throws on start', async () => {
+    const probe = sandboxProbe();
+    engine = await createTestEngine({ Alpha: [[turn]] }, {}, { laneSandbox: probe.laneSandbox });
+    engine.adapter.start = () => {
+      throw new Error('spawn failed');
+    };
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(probe.sessions).toHaveLength(1);
+    expect(readdirSync(probe.tmpRoot)).toEqual([]);
+    (await engine.startGate.acquire(engine.project.accountId))();
+  });
+
+  it('fails at once, without retrying, when Claude Code cannot start the sandbox', async () => {
+    const probe = sandboxProbe();
+    engine = await createTestEngine({ Alpha: [[turn]] }, {}, { laneSandbox: probe.laneSandbox });
+    const refusal = 'The lane sandbox could not start: Error processing settings: ENOTDIR';
+    async function* refused(): AsyncGenerator<SessionEvent> {
+      yield await Promise.resolve({ type: 'ended', reason: 'sandbox_refused', message: refusal });
+    }
+    vi.spyOn(engine.adapter, 'start').mockImplementation(() => ({
+      events: refused(),
+      send: () => undefined,
+      stop: () => Promise.resolve(),
+    }));
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id)).toMatchObject({ state: 'FAILED', failureReason: refusal });
+    expect(transitions(workstream.id).filter((t) => t.endsWith('->RECOVERING'))).toEqual([]);
+    expect(readdirSync(probe.tmpRoot)).toEqual([]);
+  });
+
+  it("refuses a host the project hasn't allowed and asks once, and a host card answered AllowProject after the session ended is a stored rule the next session's broker allows", async () => {
+    const probe = sandboxProbe();
+    const host = 'registry.example.org';
+    engine = await createTestEngine(
+      {
+        Alpha: [[hostCall(host), hostCall(host), turn]],
+        Beta: [[hostCall(host), turn]],
+      },
+      {},
+      { laneSandbox: probe.laneSandbox },
+    );
+    const first = engine.addTask('Alpha');
+    engine.launch(first.workstream.id);
+    await engine.runner.idle();
+    expect(ws(first.workstream.id).state).toBe('DONE');
+    const outcomes = (title: string) =>
+      engine.adapter.observations
+        .filter((o) => o.title === title && o.detail['toolName'] === 'SandboxNetworkAccess')
+        .map((o) => o.kind);
+    expect(outcomes('Alpha')).toEqual(['tool_denied', 'tool_denied']);
+    // The lane never waited on the card.
+    expect(transitions(first.workstream.id).filter((t) => t.endsWith('->WAITING_HUMAN'))).toEqual(
+      [],
+    );
+    const hostCards = listInbox(engine.store.db, { states: ['OPEN'] }).filter(
+      (card) => card.kind === 'permission',
+    );
+    expect(hostCards.map((card) => card.title)).toEqual([`Allow network access to ${host}?`]);
+
+    const [card] = hostCards;
+    if (!card) throw new Error('no host card');
+    engine.inbox.answer(card.id, { choice: 'allow_project' });
+
+    const second = engine.addTask('Beta');
+    engine.launch(second.workstream.id);
+    await engine.runner.idle();
+    expect(outcomes('Beta')).toEqual(['tool_allowed']);
+    expect(probe.inputs[1]?.rules).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ toolName: 'SandboxNetworkAccess', pattern: host }),
+      ]),
+    );
+    expect(probe.sessions[1]?.spec.settings.network.allowedDomains).toEqual([host]);
   });
 });

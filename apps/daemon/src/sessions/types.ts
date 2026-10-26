@@ -8,6 +8,7 @@ import type {
 } from '@10db/contracts';
 import type { AccountExpectation } from '../environment';
 import type { GuardVerdict } from '../guard';
+import type { LaneSandboxSpec } from '../sandbox';
 import type { SeenAccount } from './account-check';
 import type { ProjectMcpServer } from './project-mcp';
 
@@ -44,6 +45,11 @@ export interface SessionSpec {
   /** The repo's approved MCP servers, already expanded; passed next to 10db's server. */
   readonly projectMcpServers: Readonly<Record<string, ProjectMcpServer>>;
   readonly allowedTools: readonly string[];
+  /**
+   * The lane sandbox: Claude Code runs the session's commands under its profile, loads no settings
+   * file and asks before every call no allow rule covers. Null or absent, the session runs unsandboxed.
+   */
+  readonly sandbox?: LaneSandboxSpec | null;
   readonly mcp: {
     readonly url: string;
     readonly token: string;
@@ -64,6 +70,8 @@ export const SessionEndReason = {
   BillingRefused: 'billing_refused',
   /** Claude Code is not the account it should be, or its credentials failed; the account is paused. */
   AccountRefused: 'account_refused',
+  /** Claude Code could not start the session's sandbox; trying again cannot change that. */
+  SandboxRefused: 'sandbox_refused',
 } as const;
 export type SessionEndReason = (typeof SessionEndReason)[keyof typeof SessionEndReason];
 

@@ -1,15 +1,18 @@
 import { ToolAccess, type PermissionRuleDto, type ProjectDto } from '@10db/contracts';
-import { join } from 'node:path';
+import { isAbsolute } from 'node:path';
 import { z } from 'zod';
 import {
   EQUALS_EXPANSION,
+  foldPathCase,
   parseShell,
+  realPathOf,
   READ_COMMANDS,
   resolveInRepo,
   splitCommand,
   stringField,
   stripCommandPrefixes,
 } from '../guard';
+import { isSandboxDomain } from '../sandbox';
 import { isLiteralSegment, plainSegments, type PlainSegment } from './plain-segments';
 import { runsOtherCommands, runsUnnamedProgram } from './runner-forms';
 
@@ -35,7 +38,10 @@ export function baseAllowedTools(project: Pick<ProjectDto, 'gateCommand'>): stri
   ];
 }
 
-const WRITE_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
+/** The sandbox's ask to reach a host; a stored rule for it names the host. */
+const NETWORK_TOOL = 'SandboxNetworkAccess';
+/** Tools that write a file; a stored rule for one names the real path it may write. */
+const WRITE_TOOLS: ReadonlySet<string> = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 
 /**
  * A read-only step drops the file-writing tools and the gate, and may run the read
@@ -46,8 +52,9 @@ const WRITE_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 export function allowedToolsFor(
   project: Pick<ProjectDto, 'gateCommand' | 'allowedCommands'>,
   tools: ToolAccess,
+  opts: { readonly sandboxed?: { readonly checkout: string } } = {},
 ): string[] {
-  const base = baseAllowedTools(project);
+  const base = scopedReads(baseAllowedTools(project), opts.sandboxed?.checkout);
   if (tools === ToolAccess.Edit)
     return [...base, ...project.allowedCommands.map((command) => `Bash(${command}:*)`)];
   const gate = `Bash(${project.gateCommand})`;
@@ -57,9 +64,37 @@ export function allowedToolsFor(
   ];
 }
 
-const ToolInput = z.record(z.string(), z.unknown());
-/** Tools that only read; the base allow covers them inside the repository. */
+/** The tools that only read; the base allow covers them inside the repository. */
 const READ_TOOLS = new Set(['Read', 'Glob', 'Grep', 'LS']);
+
+/**
+ * Claude Code's spelling of "this directory and everything under it": `//` stands for the
+ * filesystem root, so the absolute path's own leading slash is the second one.
+ */
+function scopeOf(realCheckout: string): string {
+  return `/${realCheckout}/**`;
+}
+
+/** The real path of the checkout, as given when it cannot be resolved. */
+function realCheckoutOf(checkout: string): string {
+  try {
+    return realPathOf(checkout);
+  } catch {
+    return checkout;
+  }
+}
+
+/**
+ * A sandboxed lane may read only its checkout without a card, so each bare read tool becomes an
+ * entry scoped to the checkout's real path. Without a checkout the list is unchanged.
+ */
+function scopedReads(tools: string[], checkout: string | undefined): string[] {
+  if (checkout === undefined) return tools;
+  const scope = scopeOf(realCheckoutOf(checkout));
+  return tools.map((tool) => (READ_TOOLS.has(tool) ? `${tool}(${scope})` : tool));
+}
+
+const ToolInput = z.record(z.string(), z.unknown());
 /** Input fields of the read tools that name a place on disk. */
 const PATH_FIELDS = ['file_path', 'notebook_path', 'path', 'pattern'];
 
@@ -93,7 +128,7 @@ function bashEntryMatches(entry: string, segments: readonly PlainSegment[]): boo
 
 /** The repository root itself resolves as outside, so a child probe stands in for it. */
 function inRepoOrIsRepo(repoPath: string, value: string): boolean {
-  return resolveInRepo(repoPath, value).inside || resolveInRepo(repoPath, join(value, '_')).inside;
+  return resolveInRepo(repoPath, value).inside || resolveInRepo(repoPath, `${value}/_`).inside;
 }
 
 /** Whether every path a read tool names resolves inside the repository; no path means the repository. */
@@ -107,6 +142,9 @@ function readsInsideRepo(input: unknown, repoPath: string): boolean {
     return !value.startsWith('~') && inRepoOrIsRepo(repoPath, value);
   });
 }
+
+/** `Read(//<dir>/**)` and its Glob, Grep and LS forms: the tool and the directory it is scoped to. */
+const SCOPED_READ = /^(Read|Glob|Grep|LS)\(\/(\/.+)\/\*\*\)$/;
 
 function mcpEntryMatches(entry: string, toolName: string): boolean {
   const server = entry.slice('mcp__'.length, -'__*'.length);
@@ -137,6 +175,10 @@ export function matchesAllowedTool(
   return allowed.some((entry) => {
     if (entry.startsWith('Bash(')) return false;
     if (READ_TOOLS.has(toolName) && entry === toolName) return readsInsideRepo(input, repoPath);
+    const scoped = SCOPED_READ.exec(entry);
+    if (scoped !== null) {
+      return scoped[1] === toolName && readsInsideRepo(input, scoped[2] ?? '');
+    }
     if (entry.startsWith('mcp__') && entry.endsWith('__*')) return mcpEntryMatches(entry, toolName);
     return entry.endsWith('*') ? toolName.startsWith(entry.slice(0, -1)) : toolName === entry;
   });
@@ -188,19 +230,94 @@ function storable(pattern: string, words: readonly string[]): string | null {
   return same ? pattern : null;
 }
 
-/** The stored rule that permits the call, if any; a Bash pattern must cover every plain segment. */
+/**
+ * The stored rule that permits the call, if any: a Bash pattern must cover every plain segment, a
+ * file rule's pattern every real path in `paths`, and a network rule's pattern the host. A sandboxed
+ * lane passes `paths` (empty for a host), and there an unscoped file or network rule matches
+ * nothing; without it an unscoped rule allows its tool, as it always has.
+ */
 export function matchPermissionRule(
   req: { readonly toolName: string; readonly input: unknown },
   rules: readonly PermissionRuleDto[],
+  paths?: { readonly realPaths: readonly string[] },
 ): PermissionRuleDto | undefined {
   return rules.find((rule) => {
+    const { pattern } = rule;
+    if (req.toolName === NETWORK_TOOL) {
+      if (rule.toolName !== req.toolName) return false;
+      if (pattern === null) return paths === undefined;
+      const host = stringField(req.input, 'host');
+      return host !== null && host.toLowerCase() === pattern;
+    }
+    if (pattern !== null && READ_TOOLS.has(req.toolName)) {
+      const real = paths?.realPaths ?? [];
+      return (
+        rule.toolName === 'Read' &&
+        real.length > 0 &&
+        real.every((path) => isEqualOrUnder(path, pattern))
+      );
+    }
     if (rule.toolName !== req.toolName) return false;
-    if (req.toolName !== 'Bash') return rule.pattern === null;
-    const pattern = rule.pattern;
+    if (req.toolName !== 'Bash') {
+      if (pattern === null) {
+        // With real paths in hand (a sandboxed lane) an unscoped file rule covers no path.
+        const fileTool = READ_TOOLS.has(req.toolName) || WRITE_TOOLS.has(req.toolName);
+        return !(paths !== undefined && fileTool);
+      }
+      const real = paths?.realPaths ?? [];
+      return (
+        WRITE_TOOLS.has(req.toolName) &&
+        real.length === 1 &&
+        foldPathCase(real[0] ?? '') === foldPathCase(pattern)
+      );
+    }
     // A pattern whose words name no program, such as a bare runner, covers nothing, even one stored earlier.
     if (pattern === null || runsUnnamedProgram(pattern.split(' '))) return false;
     const command = stringField(req.input, 'command');
     const segments = command === null ? null : plainSegments(command);
     return segments?.every((s) => startsWithWords(s.words, pattern)) === true;
   });
+}
+
+const GLOB_CHARACTER = /[*?[\]{}]/;
+
+/** The rule a card's "allow" choices store, or undefined when the call can only be allowed once. */
+export interface StorableRule {
+  readonly toolName: string;
+  readonly pattern: string | null;
+}
+
+/**
+ * The rule "always allow" stores for a card, from its tool and its canonical summary: the command
+ * for Bash, the host for the sandbox's network asks, the real absolute path for the file tools.
+ * One approval of any read tool is stored as `Read`, so it covers Grep, Glob and LS of the path
+ * too. A path with a glob character or one that is not absolute can only be allowed once.
+ */
+export function storableRule(toolName: string, summary: string): StorableRule | undefined {
+  if (toolName === 'Bash') {
+    const pattern = commandPrefix(summary);
+    return pattern === null ? undefined : { toolName, pattern };
+  }
+  if (toolName === NETWORK_TOOL) {
+    // A sandboxed lane's summary is the host. Any other summary (the JSON input a lane without the
+    // sandbox shows) stores no pattern, as it always has.
+    const host = summary.toLowerCase();
+    return { toolName, pattern: isSandboxDomain(host) ? host : null };
+  }
+  const reads = READ_TOOLS.has(toolName);
+  // An absolute path is a sandboxed lane's summary; any other summary is the unscoped form a lane
+  // without the sandbox has always had, which stores no pattern.
+  if ((reads || WRITE_TOOLS.has(toolName)) && isAbsolute(summary)) {
+    return GLOB_CHARACTER.test(summary)
+      ? undefined
+      : { toolName: reads ? 'Read' : toolName, pattern: summary };
+  }
+  return { toolName, pattern: null };
+}
+
+/** True when `path` is `root` or lies under it, spelled the way the file system folds case. */
+function isEqualOrUnder(path: string, root: string): boolean {
+  const p = foldPathCase(path);
+  const r = foldPathCase(root);
+  return p === r || p.startsWith(r.endsWith('/') ? r : `${r}/`);
 }

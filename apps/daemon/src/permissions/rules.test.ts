@@ -1,7 +1,8 @@
+import { mkdirSync, realpathSync, symlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { mintId, type PermissionRuleDto } from '@10db/contracts';
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { tempDir } from '../../test/fixtures';
 import {
   allowedToolsFor,
@@ -9,11 +10,18 @@ import {
   commandPrefix,
   matchesAllowedTool,
   matchPermissionRule,
+  storableRule,
 } from './index';
 
 const repo = tempDir('permissions-repo');
+const away = tempDir('permissions-away');
+beforeAll(() => {
+  mkdirSync(join(away.path, 'sub'));
+  symlinkSync(join(away.path, 'sub'), join(repo.path, 'L'));
+});
 afterAll(() => {
   repo.cleanup();
+  away.cleanup();
 });
 
 const allowed = baseAllowedTools({ gateCommand: 'make gate' });
@@ -184,8 +192,34 @@ describe('matchesAllowedTool: read tools stay inside the repo', () => {
     ['LS inside', 'LS', { path: repo.path }, true],
     ['LS outside', 'LS', { path: '/' }, false],
     ['LS with a non-object input', 'LS', 'x', false],
+    ['LS of a link that leads out, then its parent', 'LS', { path: 'L/..' }, false],
   ])('%s', (_name, tool, input, expected) => {
     expect(matchesAllowedTool(tool, input, allowed, repo.path)).toBe(expected);
+  });
+});
+
+describe('matchesAllowedTool: scoped read entries', () => {
+  const dir = realpathSync(repo.path);
+  const scoped = [`Read(/${dir}/**)`, `Glob(/${dir}/**)`, `Grep(/${dir}/**)`, `LS(/${dir}/**)`];
+  it.each<[string, string, unknown, boolean]>([
+    ['Read inside', 'Read', { file_path: join(dir, 'a.ts') }, true],
+    ['Read outside', 'Read', { file_path: join(homedir(), '.ssh/id_rsa') }, false],
+    ['Glob inside', 'Glob', { pattern: '*.ts', path: dir }, true],
+    ['Glob outside', 'Glob', { pattern: '*', path: '/etc' }, false],
+    ['Grep inside', 'Grep', { pattern: 'x' }, true],
+    ['Grep outside', 'Grep', { pattern: 'x', path: '/etc' }, false],
+    ['LS inside', 'LS', { path: dir }, true],
+    ['LS outside', 'LS', { path: '/' }, false],
+    ['Edit is not a read entry', 'Edit', { file_path: join(dir, 'a.ts') }, false],
+  ])('%s', (_name, tool, input, expected) => {
+    // The repo path argument is somewhere else: the scope comes from the entry.
+    expect(matchesAllowedTool(tool, input, scoped, '/nowhere')).toBe(expected);
+  });
+
+  it('does not let the Read entry cover a Grep call', () => {
+    expect(matchesAllowedTool('Grep', { pattern: 'x' }, [`Read(/${dir}/**)`], '/nowhere')).toBe(
+      false,
+    );
   });
 });
 
@@ -392,6 +426,120 @@ describe('matchPermissionRule', () => {
   it('matches a tool rule without a pattern', () => {
     expect(match('WebFetch', {}, [rule('WebFetch', null)])).toBe(true);
     expect(match('WebSearch', {}, [rule('WebFetch', null)])).toBe(false);
+  });
+
+  it('lets a network rule without a pattern allow every host outside the sandbox, as it always did', () => {
+    expect(
+      match('SandboxNetworkAccess', { host: 'evil.com' }, [rule('SandboxNetworkAccess', null)]),
+    ).toBe(true);
+    expect(match('SandboxNetworkAccess', { host: 'evil.com' }, [rule('WebFetch', null)])).toBe(
+      false,
+    );
+  });
+
+  describe('with real paths', () => {
+    const rulesFor = (...rules: PermissionRuleDto[]) => rules;
+    const matchPaths = (
+      toolName: string,
+      input: unknown,
+      rules: PermissionRuleDto[],
+      realPaths: string[],
+    ): boolean => matchPermissionRule({ toolName, input }, rules, { realPaths }) !== undefined;
+
+    it.each<[string, string, unknown, string | null, boolean]>([
+      [
+        'a host rule matches the host in any case',
+        'SandboxNetworkAccess',
+        { host: 'Registry.NPMJS.org' },
+        'registry.npmjs.org',
+        true,
+      ],
+      [
+        'a host rule does not match another host',
+        'SandboxNetworkAccess',
+        { host: 'evil.com' },
+        'registry.npmjs.org',
+        false,
+      ],
+      [
+        'a host rule does not match a suffix of the host',
+        'SandboxNetworkAccess',
+        { host: 'x.registry.npmjs.org' },
+        'registry.npmjs.org',
+        false,
+      ],
+      [
+        'a host rule does not match without a host',
+        'SandboxNetworkAccess',
+        {},
+        'registry.npmjs.org',
+        false,
+      ],
+      [
+        'a host rule without a pattern matches nothing',
+        'SandboxNetworkAccess',
+        { host: 'evil.com' },
+        null,
+        false,
+      ],
+    ])('%s', (_name, tool, input, pattern, expected) => {
+      expect(matchPaths(tool, input, rulesFor(rule('SandboxNetworkAccess', pattern)), [])).toBe(
+        expected,
+      );
+    });
+
+    it.each<[string, string, string[], boolean]>([
+      ['Read of the path itself', 'Read', ['/p/a'], true],
+      ['Read under the path', 'Read', ['/p/a/b/c'], true],
+      ['Read of a sibling that shares the prefix', 'Read', ['/p/ab'], false],
+      ['Read of the parent', 'Read', ['/p'], false],
+      ['Grep under the path', 'Grep', ['/p/a/x'], true],
+      ['Glob under the path, every path covered', 'Glob', ['/p/a/x', '/p/a/y'], true],
+      ['Glob with one path outside', 'Glob', ['/p/a/x', '/q'], false],
+      ['LS under the path', 'LS', ['/p/a'], true],
+      ['Read with no path', 'Read', [], false],
+    ])('a Read rule on /p/a: %s', (_name, tool, realPaths, expected) => {
+      expect(matchPaths(tool, {}, rulesFor(rule('Read', '/p/a')), realPaths)).toBe(expected);
+    });
+
+    it('a patterned Read rule matches nothing without real paths', () => {
+      expect(match('Read', { file_path: '/p/a' }, [rule('Read', '/p/a')])).toBe(false);
+    });
+
+    it.each<[string, string, string[], boolean]>([
+      ['the same tool on the same path', 'Edit', ['/r/.vscode/settings.json'], true],
+      ['the same tool on another path', 'Edit', ['/r/.claude/hooks/x'], false],
+      ['a path under it', 'Edit', ['/r/.vscode/settings.json/x'], false],
+      ['another tool on the same path', 'Write', ['/r/.vscode/settings.json'], false],
+      ['no real path', 'Edit', [], false],
+      ['two real paths', 'Edit', ['/r/.vscode/settings.json', '/r/.vscode/settings.json'], false],
+    ])('an Edit rule on one file: %s', (_name, tool, realPaths, expected) => {
+      expect(
+        matchPaths(tool, {}, rulesFor(rule('Edit', '/r/.vscode/settings.json')), realPaths),
+      ).toBe(expected);
+    });
+
+    it.each<[string, string, string[]]>([
+      ['a Read rule without a pattern allows nothing outside the checkout', 'Read', ['/outside/x']],
+      [
+        'an Edit rule without a pattern allows no edit of a protected path',
+        'Edit',
+        ['/r/.claude/hooks/x'],
+      ],
+      [
+        'a Write rule without a pattern allows no edit of a protected path',
+        'Write',
+        ['/r/.claude/hooks/x'],
+      ],
+    ])('%s', (_name, tool, realPaths) => {
+      expect(matchPaths(tool, {}, rulesFor(rule(tool, null)), realPaths)).toBe(false);
+      expect(match(tool, {}, [rule(tool, null)])).toBe(true);
+    });
+
+    it('a Read rule without a pattern still covers only a Read', () => {
+      expect(match('Read', {}, [rule('Read', null)])).toBe(true);
+      expect(match('Grep', {}, [rule('Read', null)])).toBe(false);
+    });
   });
 
   it('never lets a Bash rule without a pattern cover commands', () => {
@@ -636,5 +784,115 @@ describe('allowedToolsFor', () => {
 
   it('gives an edit step exactly the base list', () => {
     expect(allowedToolsFor(project, 'edit')).toEqual(baseAllowedTools(project));
+  });
+
+  it('scopes the read tools to the real checkout when sandboxed', () => {
+    const checkout = realpathSync(repo.path);
+    const scope = `/${checkout}/**`;
+    const sandboxed = { sandboxed: { checkout: repo.path } };
+    expect(allowedToolsFor(project, 'edit', sandboxed)).toEqual(
+      baseAllowedTools(project).map((entry) =>
+        ['Read', 'Glob', 'Grep', 'LS'].includes(entry) ? `${entry}(${scope})` : entry,
+      ),
+    );
+    const readOnly = allowedToolsFor(project, 'read_only', sandboxed);
+    for (const tool of ['Read', 'Glob', 'Grep', 'LS']) {
+      expect(readOnly).toContain(`${tool}(${scope})`);
+      expect(readOnly).not.toContain(tool);
+    }
+  });
+
+  it('names the real path when the checkout is reached through a link', () => {
+    const linked = join(away.path, 'via');
+    symlinkSync(repo.path, linked);
+    const real = realpathSync(repo.path);
+    expect(allowedToolsFor(project, 'edit', { sandboxed: { checkout: linked } })).toContain(
+      `Read(/${real}/**)`,
+    );
+  });
+
+  it('leaves the list alone without the option', () => {
+    expect(allowedToolsFor(project, 'edit', {})).toEqual(allowedToolsFor(project, 'edit'));
+  });
+});
+
+describe('storableRule', () => {
+  it.each<[string, string, string, { toolName: string; pattern: string | null } | undefined]>([
+    [
+      'a Bash command takes its prefix',
+      'Bash',
+      'pnpm test --run',
+      { toolName: 'Bash', pattern: 'pnpm test' },
+    ],
+    ['a Bash command with no safe prefix stores nothing', 'Bash', 'echo $HOME', undefined],
+    [
+      'a host is lower-cased',
+      'SandboxNetworkAccess',
+      'Registry.NPMJS.org',
+      { toolName: 'SandboxNetworkAccess', pattern: 'registry.npmjs.org' },
+    ],
+    [
+      'a network summary in JSON, from a lane without the sandbox, stores no pattern',
+      'SandboxNetworkAccess',
+      '{"host":"example.com"}',
+      { toolName: 'SandboxNetworkAccess', pattern: null },
+    ],
+    [
+      'a host with a port stores no pattern',
+      'SandboxNetworkAccess',
+      'example.com:8443',
+      { toolName: 'SandboxNetworkAccess', pattern: null },
+    ],
+    ['Read keeps its path', 'Read', '/a/b.ts', { toolName: 'Read', pattern: '/a/b.ts' }],
+    ['Grep is stored as Read', 'Grep', '/a/b', { toolName: 'Read', pattern: '/a/b' }],
+    ['Glob is stored as Read', 'Glob', '/a/b', { toolName: 'Read', pattern: '/a/b' }],
+    ['LS is stored as Read', 'LS', '/a/b', { toolName: 'Read', pattern: '/a/b' }],
+    [
+      'a JSON summary stores what it always did',
+      'Grep',
+      '{"pattern":"x"}',
+      { toolName: 'Grep', pattern: null },
+    ],
+    [
+      'a relative read path is the unscoped form',
+      'Read',
+      'a/b.ts',
+      { toolName: 'Read', pattern: null },
+    ],
+    ['a read path with a glob stores nothing', 'Read', '/a/*', undefined],
+    ['a read path with a brace stores nothing', 'Read', '/a/{b,c}', undefined],
+    ['Edit keeps its tool and path', 'Edit', '/a/b.ts', { toolName: 'Edit', pattern: '/a/b.ts' }],
+    [
+      'Write keeps its tool and path',
+      'Write',
+      '/a/b.ts',
+      { toolName: 'Write', pattern: '/a/b.ts' },
+    ],
+    [
+      'MultiEdit keeps its tool and path',
+      'MultiEdit',
+      '/a/b',
+      { toolName: 'MultiEdit', pattern: '/a/b' },
+    ],
+    [
+      'NotebookEdit keeps its tool and path',
+      'NotebookEdit',
+      '/a/b.ipynb',
+      { toolName: 'NotebookEdit', pattern: '/a/b.ipynb' },
+    ],
+    [
+      'an edit summary in JSON stores what it always did',
+      'Edit',
+      '{"file_path":"b.ts"}',
+      { toolName: 'Edit', pattern: null },
+    ],
+    [
+      'any other tool has no pattern',
+      'WebFetch',
+      '{"url":"x"}',
+      { toolName: 'WebFetch', pattern: null },
+    ],
+  ])('%s', (_name, toolName, summary, expected) => {
+    expect(storableRule(toolName, summary)).toEqual(expected);
   });
 });

@@ -35,7 +35,7 @@ import {
   type WriteContext,
 } from '@10db/db';
 import type { StateStore } from '../events';
-import { commandPrefix } from '../permissions';
+import { storableRule } from '../permissions';
 import { applyMcpApproval } from './mcp-approval';
 import { taskFieldsFromProposal } from './proposal-task';
 
@@ -112,21 +112,22 @@ interface Waiter {
 /**
  * A permission card's choice becomes rules in the answer's own transaction, so the choice holds even
  * when the asking session was parked before the builder answered. A Bash command with no storable
- * prefix gets no rule: the choice then behaves as allow-once.
+ * prefix, and a sandboxed file path that holds a glob character, get no rule: the choice then
+ * behaves as allow-once.
  */
 function applyPermissionChoice(ctx: WriteContext, item: InboxItemDto, answer: InboxAnswer): void {
   const toolName = item.detail?.['toolName'];
   const summary = item.detail?.['summary'];
   if (typeof toolName !== 'string' || typeof summary !== 'string') return;
-  const pattern = toolName === 'Bash' ? commandPrefix(summary) : null;
-  if (toolName === 'Bash' && pattern === null) return;
+  const rule = storableRule(toolName, summary);
+  if (rule === undefined) return;
   if (answer.choice === PermissionChoice.AllowWorkstream) {
     for (const target of item.targets) {
       insertPermissionRule(ctx, {
         projectId: item.projectId,
         workstreamId: target.workstreamId,
-        toolName,
-        pattern,
+        toolName: rule.toolName,
+        pattern: rule.pattern,
         sourceInboxId: item.id,
       });
     }
@@ -135,14 +136,14 @@ function applyPermissionChoice(ctx: WriteContext, item: InboxItemDto, answer: In
     insertPermissionRule(ctx, {
       projectId: item.projectId,
       workstreamId: null,
-      toolName,
-      pattern,
+      toolName: rule.toolName,
+      pattern: rule.pattern,
       sourceInboxId: item.id,
     });
     const sourceId = insertSource(ctx, 'inbox_answer', { inboxId: item.id });
     insertDecision(ctx, {
       projectId: item.projectId,
-      question: `Allow ${toolName}${pattern ? ` (${pattern})` : ''} in this project?`,
+      question: `Allow ${rule.toolName}${rule.pattern ? ` (${rule.pattern})` : ''} in this project?`,
       choice: 'Always allow',
       rationale: answer.note ?? 'Allowed for the project from the inbox',
       decidedBy: 'me',

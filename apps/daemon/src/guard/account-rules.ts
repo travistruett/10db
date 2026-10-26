@@ -12,16 +12,23 @@ import {
 } from 'node:path';
 import { SECRET_VARIABLES } from '../environment';
 import { abbreviates } from './git-rules';
-import { isWithin } from './paths';
+import { expandBraceWord } from './braces';
+import {
+  isOverLongPath,
+  isWithin,
+  isWithinOnEveryReading,
+  OVER_LONG_PATH_REFUSAL,
+  realPathReadings,
+} from './paths';
 
 /**
  * Two kinds of rule live here. The shell-text rules (Keychain commands, environment dumps, secret
  * references and protected paths in shell text) are interim policy that keeps a cooperative agent
- * from casual reads; text matching cannot see everything a shell does. The lane sandbox is designed
- * but not built: once it is, the kernel sandbox is the lane boundary and these rules go.
- * `pathRefusal`, `protectedPaths` and `isOwnToolResult` are the resolved-path check on the file
- * tools, which the sandbox design keeps as part of the file-tool boundary
- * (`docs/architecture/03-trust-boundaries.md`).
+ * from casual reads; text matching cannot see everything a shell does. With `TENDB_LANE_SANDBOX`
+ * on, the kernel sandbox is the lane boundary and these rules are a tripwire in front of it; they go
+ * once the sandbox is the only mode. `pathRefusal`, `protectedPaths` and `isOwnToolResult` are the
+ * resolved-path check on the file tools, which the sandbox design keeps as part of the file-tool
+ * boundary (`docs/architecture/03-trust-boundaries.md`).
  */
 
 const KEYCHAIN = 'Keychain commands are never run by agents: 10db keeps account secrets there.';
@@ -188,46 +195,59 @@ function expandTilde(text: string): string {
 
 const WORD_BREAK = new Set([' ', '\t', '\n', '<', '>', '(', ')', '|', ';', '&', '`']);
 
+/** A word as the shell passes it, with a mask that blanks every quoted, escaped or expanded character. */
+interface ShellWord {
+  readonly text: string;
+  /** `text` with each character the shell does not read as syntax replaced by NUL. */
+  readonly mask: string;
+}
+
 /**
  * The words of a shell segment as the shell would pass them on: quotes removed, escapes resolved,
  * `$HOME` outside single quotes and a leading `~` outside any quotes expanded, and a redirection or
- * substitution starting a new word. A `~` inside quotes stays a `~`.
+ * substitution starting a new word. A `~` inside quotes stays a `~`. Each word carries a mask that
+ * keeps only its literal characters, so brace expansion reads a quoted brace or comma as text.
  */
-function shellWords(raw: string): string[] {
-  const words: string[] = [];
+function shellWords(raw: string): ShellWord[] {
+  const words: ShellWord[] = [];
   let word = '';
+  let mask = '';
   let open = false;
   let quote: "'" | '"' | null = null;
+  const add = (text: string, literal: boolean): void => {
+    word += text;
+    mask += literal ? text : '\0'.repeat(text.length);
+    open = true;
+  };
   const flush = (): void => {
-    if (open) words.push(word);
+    if (open) words.push({ text: word, mask });
     word = '';
+    mask = '';
     open = false;
   };
   for (let i = 0; i < raw.length; i += 1) {
     const ch = raw.charAt(i);
     if (quote === "'") {
       if (ch === "'") quote = null;
-      else word += ch;
+      else add(ch, false);
       continue;
     }
     if (ch === '\\') {
-      word += raw.charAt(i + 1);
-      open = true;
+      add(raw.charAt(i + 1), false);
       i += 1;
       continue;
     }
     if (ch === '$') {
       const variable = userVariable(raw.slice(i));
       if (variable) {
-        word += variable.value;
-        open = true;
+        add(variable.value, false);
         i += variable.length - 1;
         continue;
       }
     }
     if (quote === '"') {
       if (ch === '"') quote = null;
-      else word += ch;
+      else add(ch, false);
       continue;
     }
     if (ch === "'" || ch === '"') {
@@ -242,14 +262,12 @@ function shellWords(raw: string): string[] {
     if (ch === '~' && (word === '' || /[=:]$/.test(word))) {
       const named = /^~([A-Za-z0-9_.-]*)(?=\/|$|[\s:;|&<>()])/.exec(raw.slice(i));
       if (named) {
-        word += homeOf(named[1] ?? '');
-        open = true;
+        add(homeOf(named[1] ?? ''), false);
         i += named[0].length - 1;
         continue;
       }
     }
-    word += ch;
-    open = true;
+    add(ch, true);
   }
   flush();
   return words;
@@ -295,14 +313,18 @@ function writtenWithin(protectedPath: ProtectedPath, target: string): boolean {
   });
 }
 
-/** The target is the protected path, inside it, or (for a family) a file named like it plus a suffix. */
+/**
+ * The target is the protected path, inside it, or (for a family) a file named like it plus a
+ * suffix, on any reading: as written, through its links as the kernel opens it, or with `..`
+ * collapsed first.
+ */
 function touches(protectedPath: ProtectedPath, target: string): boolean {
   if (isWithin(protectedPath.path, target) || writtenWithin(protectedPath, target)) return true;
   if (!protectedPath.family) return false;
-  const beside = resolve(target);
-  return (
-    lower(dirname(beside)) === lower(dirname(protectedPath.path)) &&
-    lower(basename(beside)).startsWith(`${lower(basename(protectedPath.path))}.`)
+  return [resolve(target), ...realPathReadings(target).paths].some(
+    (beside) =>
+      lower(dirname(beside)) === lower(dirname(protectedPath.path)) &&
+      lower(basename(beside)).startsWith(`${lower(basename(protectedPath.path))}.`),
   );
 }
 
@@ -335,7 +357,7 @@ function throughLinks(pattern: string): string {
  * descends into any directory the pattern names.
  */
 function globReaches(pattern: string, protectedPath: ProtectedPath, walking: boolean): boolean {
-  return [pattern, throughLinks(pattern)].some((candidate) => {
+  return [resolve(pattern), throughLinks(pattern)].some((candidate) => {
     const pat = lower(candidate);
     const patternSegments = pat.split('/');
     const star = patternSegments.indexOf('**');
@@ -366,19 +388,39 @@ interface Reach {
   readonly contains: boolean;
 }
 
+const unresolved = (word: string): string =>
+  `${word} cannot be resolved here: a .. after a wildcard, or after a part that does not exist yet, could reach a protected path. Name the path plainly.`;
+
+/** Whether a `..` follows a part with a wildcard. */
+function climbsAfterGlob(word: string): boolean {
+  const parts = word.split('/');
+  const glob = parts.findIndex((part) => GLOB_CHARACTERS.test(part));
+  return glob !== -1 && parts.slice(glob + 1).includes('..');
+}
+
+/** The word with `base` before it and its `..` kept, so each reading of it can be judged. */
+function written(word: string, base: string): string {
+  return isAbsolute(word) ? word : `${base}${sep}${word}`;
+}
+
 function reachRefusal(
   word: string,
   base: string | null,
   paths: readonly ProtectedPath[],
   reach: Reach,
 ): string | null {
-  const target = base === null && !isAbsolute(word) ? null : resolve(base ?? '/', word);
+  const target = base === null && !isAbsolute(word) ? null : written(word, base ?? '/');
   if (target === null) {
     // The working directory is unknown after a `cd` the guard cannot follow: a word that names a
     // protected path's last component is refused.
     const segments = lower(word).split('/');
     return paths.find((p) => segments.includes(lower(basename(p.path))))?.refusal ?? null;
   }
+  // A `..` after a wildcard, or after a part that does not exist yet (a link the command makes
+  // first may stand there), climbs from a place the guard cannot name.
+  if (paths.length > 0 && isOverLongPath(target)) return OVER_LONG_PATH_REFUSAL;
+  if (paths.length > 0 && (climbsAfterGlob(word) || !realPathReadings(target).complete))
+    return unresolved(word);
   const glob = GLOB_CHARACTERS.test(word);
   for (const p of paths) {
     if (glob ? globReaches(target, p, reach.contains) : touches(p, target) || namesPath(word, p))
@@ -539,14 +581,26 @@ export function segmentPathRefusal(
   const walks = walksDirectories(command);
   const code = runsQuotedCode(command);
   const words = shellWords(raw);
-  const destination = destinationIndex(command, words);
-  for (const [index, word] of words.entries()) {
+  const destination = destinationIndex(
+    command,
+    words.map((w) => w.text),
+  );
+  for (const [index, { text: word, mask }] of words.entries()) {
     const reach = { contains: walks && index !== destination };
-    const tail = word.includes('=') ? word.slice(word.indexOf('=') + 1).split(':') : [];
-    const candidates = word.startsWith('-') ? tail : [word, ...tail];
-    for (const candidate of candidates) {
-      const refusal = reachRefusal(candidate, cwd, paths, reach);
-      if (refusal) return refusal;
+    // Brace expansion turns one word into several paths, as the shell does, so a path hidden in a
+    // brace (`{~/.claude.json,}`) is judged. Only an unquoted brace opens an expansion, and a quoted
+    // brace or comma inside one is literal text. A `~` the braces reveal is expanded too; a word
+    // with no brace keeps its spelling, so a quoted `~` mention stays unexpanded as before.
+    const pieces = mask.includes('{')
+      ? (expandBraceWord(word, mask) ?? [word]).map(expandTilde)
+      : [word];
+    for (const piece of pieces) {
+      const tail = piece.includes('=') ? piece.slice(piece.indexOf('=') + 1).split(':') : [];
+      const candidates = piece.startsWith('-') ? tail : [piece, ...tail];
+      for (const candidate of candidates) {
+        const refusal = reachRefusal(candidate, cwd, paths, reach);
+        if (refusal) return refusal;
+      }
     }
     if (code) {
       const text = expandEmbedded(word);
@@ -574,25 +628,31 @@ export function changedDirectory(
   cwd: string | null,
 ): string | null {
   if (command[0] === 'popd') return null;
-  const words = shellWords(raw);
+  const words = shellWords(raw).map((w) => w.text);
   const target = words[words.findIndex((w) => commandName(w) === command[0]) + 1];
   if (target === undefined) return command[0] === 'cd' ? homedir() : null;
   if (target.startsWith('-') || /[$`*?[{]/.test(target)) return null;
   return cwd === null && !isAbsolute(target) ? null : resolve(cwd ?? '/', target);
 }
 
-/** Whether a session's own saved tool output is what `value` names (Claude Code points the model at it). */
+/**
+ * Whether a session's own saved tool output is what `value` names, on every reading (Claude Code
+ * points the model at it).
+ */
 export function isOwnToolResult(
   session: { readonly configDir: string; readonly providerSessionId: string | null },
   value: string,
   baseDir: string,
 ): boolean {
   if (session.providerSessionId === null) return false;
-  const target = resolve(baseDir, expandTilde(value));
-  const parts = relative(session.configDir, target).split(sep);
+  const path = written(expandTilde(value), baseDir);
+  const parts = relative(session.configDir, resolve(path)).split(sep);
   const [projects, slug, id, results] = parts;
   if (projects !== 'projects' || slug === undefined || id !== session.providerSessionId)
     return false;
   if (results !== 'tool-results' || parts.includes('..')) return false;
-  return isWithin(join(session.configDir, 'projects', slug, id, 'tool-results'), target);
+  return isWithinOnEveryReading(
+    join(session.configDir, 'projects', slug, id, 'tool-results'),
+    path,
+  );
 }

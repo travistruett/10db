@@ -7,6 +7,8 @@ describe('loadEnv', () => {
       TENDB_PORT: 4317,
       TENDB_LOG_LEVEL: 'info',
       TENDB_LANE_PERMISSION_MODE: 'default',
+      TENDB_LANE_SANDBOX: 'off',
+      TENDB_LANE_SANDBOX_LOOPBACK: 'off',
     });
   });
 
@@ -25,6 +27,8 @@ describe('loadEnv', () => {
       TENDB_PORT: 4317,
       TENDB_LOG_LEVEL: 'info',
       TENDB_LANE_PERMISSION_MODE: 'default',
+      TENDB_LANE_SANDBOX: 'off',
+      TENDB_LANE_SANDBOX_LOOPBACK: 'off',
     });
   });
 
@@ -51,6 +55,33 @@ describe('loadEnv', () => {
       expect(() => loadEnv({ TENDB_LANE_PERMISSION_MODE: value })).toThrow(
         'TENDB_LANE_PERMISSION_MODE',
       );
+    },
+  );
+
+  it.each<[string, Record<string, string>, string, string]>([
+    ['unset', {}, 'off', 'off'],
+    ['both on', { TENDB_LANE_SANDBOX: 'on', TENDB_LANE_SANDBOX_LOOPBACK: 'on' }, 'on', 'on'],
+    ['both off', { TENDB_LANE_SANDBOX: 'off', TENDB_LANE_SANDBOX_LOOPBACK: 'off' }, 'off', 'off'],
+    ['empty', { TENDB_LANE_SANDBOX: '', TENDB_LANE_SANDBOX_LOOPBACK: '' }, 'off', 'off'],
+  ])('reads the lane sandbox switches when they are %s', (_name, source, sandbox, loopback) => {
+    const env = loadEnv(source);
+    expect(env.TENDB_LANE_SANDBOX).toBe(sandbox);
+    expect(env.TENDB_LANE_SANDBOX_LOOPBACK).toBe(loopback);
+  });
+
+  it.each(['TENDB_LANE_SANDBOX', 'TENDB_LANE_SANDBOX_LOOPBACK'])(
+    'rejects %s=yes, naming the variable and never the value',
+    (variable) => {
+      let thrown: unknown;
+      try {
+        loadEnv({ [variable]: 'yes' });
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown).toBeInstanceOf(EnvError);
+      if (!(thrown instanceof EnvError)) return;
+      expect(thrown.issues).toContain(`${variable}: invalid_value`);
+      expect(thrown.message).not.toContain('yes');
     },
   );
 

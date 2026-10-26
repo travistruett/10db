@@ -4,4 +4,5 @@ export {
   commandPrefix,
   matchesAllowedTool,
   matchPermissionRule,
+  storableRule,
 } from './rules';

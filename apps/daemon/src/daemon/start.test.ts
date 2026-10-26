@@ -1,5 +1,16 @@
-import { existsSync, fstatSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import {
+  existsSync,
+  fstatSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
+import { homedir } from 'node:os';
+import { dirname, join } from 'node:path';
 import {
   BenchmarkStatusDto,
   BoardColumnDto,
@@ -25,7 +36,7 @@ import { apiClient, quickFlowId } from '../../test/api-client';
 import { createTempRepo, tempDir, waitFor, waitForAsync } from '../../test/fixtures';
 import { ManualClock } from '../clock';
 import type { CaffeinateSpawner } from '../keep-awake';
-import { FakeAdapter, type FakeScriptBook } from '../sessions';
+import { FakeAdapter, type FakeScriptBook, type SessionSpec } from '../sessions';
 import { AlreadyRunningError, readRuntimeInfo, startDaemon, type RunningDaemon } from './index';
 
 /** No real caffeinate and no file watcher in daemon tests that are not about them. */
@@ -203,6 +214,108 @@ describe('startDaemon', () => {
       );
     } finally {
       repo.cleanup();
+    }
+  });
+
+  it.each([
+    ['null', { laneSandbox: null }],
+    ['absent', {}],
+  ] as const)('runs lanes unsandboxed when the lane sandbox is %s', async (_name, sandbox) => {
+    const repo = createTempRepo();
+    try {
+      const adapter = new FakeAdapter({ Alpha: [[{ do: 'turn_complete' }]] });
+      const specs: SessionSpec[] = [];
+      adapter.seen = (spec) => {
+        specs.push(spec);
+        return {};
+      };
+      const running = await startDaemon({
+        dataDir: dir.path,
+        port: 0,
+        adapter,
+        logLevel: 'warn',
+        ...sandbox,
+        ...QUIET,
+      });
+      daemon = running;
+      const api = apiClient(running.url, running.token);
+      const project = await api.post('/projects', ProjectDto, {
+        name: 'demo',
+        repoPath: repo.path,
+        gateCommand: 'true',
+        flowId: await quickFlowId(api),
+        areas: [{ name: 'src', globs: ['src/**'] }],
+      });
+      const task = await api.post(`/projects/${project.id}/tasks`, TaskDto, {
+        title: 'Alpha',
+        acceptanceCriteria: ['it works'],
+        areas: ['src'],
+      });
+      await api.post(`/tasks/${task.id}/start`, z.unknown());
+      await waitFor(() => specs.length > 0);
+      expect(specs[0]?.sandbox).toBeNull();
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it('runs lanes under a lane sandbox built from its own data dir, home and git when the sandbox is on', async () => {
+    const repo = createTempRepo();
+    // A short root: the lane temp directory's whole path must fit the sandbox's limit.
+    const tmpRoot = realpathSync(mkdtempSync('/tmp/sbd-'));
+    let cache: string | null = null;
+    try {
+      const adapter = new FakeAdapter({ Alpha: [[{ do: 'turn_complete' }]] });
+      const specs: SessionSpec[] = [];
+      adapter.seen = (spec) => {
+        specs.push(spec);
+        return {};
+      };
+      const running = await startDaemon({
+        dataDir: dir.path,
+        port: 0,
+        adapter,
+        logLevel: 'warn',
+        laneSandbox: { loopback: false, tmpRoot },
+        ...QUIET,
+      });
+      daemon = running;
+      const api = apiClient(running.url, running.token);
+      const project = await api.post('/projects', ProjectDto, {
+        name: 'demo',
+        repoPath: repo.path,
+        gateCommand: 'true',
+        flowId: await quickFlowId(api),
+        areas: [{ name: 'src', globs: ['src/**'] }],
+      });
+      cache = join(homedir(), 'Library', 'Caches', '10db', 'projects', project.id);
+      const task = await api.post(`/projects/${project.id}/tasks`, TaskDto, {
+        title: 'Alpha',
+        acceptanceCriteria: ['it works'],
+        areas: ['src'],
+      });
+      await api.post(`/tasks/${task.id}/start`, z.unknown());
+      await waitForAsync(async () =>
+        (await api.get('/workstreams?active=false', z.array(WorkstreamDto))).some(
+          (w) => w.taskId === task.id && w.state === 'DONE',
+        ),
+      );
+      const sandbox = specs[0]?.sandbox;
+      expect(specs[0]?.permissionMode).toBe('default');
+      expect(sandbox?.settings.filesystem.allowRead).toContain(realpathSync(repo.path));
+      expect(sandbox?.settings.filesystem.denyRead).toEqual(
+        expect.arrayContaining([dir.path, join(homedir(), '.claude.json')]),
+      );
+      expect(sandbox?.settings.network).not.toHaveProperty('allowLocalBinding');
+      expect(sandbox?.env['npm_config_cache']).toBe(join(cache, 'npm'));
+      const laneTmp = sandbox?.env['CLAUDE_CODE_TMPDIR'] ?? '';
+      expect(dirname(laneTmp)).toBe(tmpRoot);
+      // The session ended, so its temp dir is gone.
+      expect(readdirSync(tmpRoot)).toEqual([]);
+    } finally {
+      repo.cleanup();
+      rmSync(tmpRoot, { recursive: true, force: true });
+      if (cache !== null) rmSync(cache, { recursive: true, force: true });
     }
   });
 

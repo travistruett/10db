@@ -54,6 +54,8 @@ const STOP_GRACE_MS = 5_000;
 /** How long a halting hook answer has to reach claude before the process is closed under it. */
 const HALT_GRACE_MS = 1_000;
 const STDERR_LOG_CHARS = 2_000;
+/** What Claude Code's error says when it rejects the settings it was started with, the sandbox among them. */
+const SANDBOX_SETTINGS_ERROR = 'Error processing settings';
 const BILLING_UNVERIFIED =
   'The billing check for this session did not pass, so 10db allows no tools in it.';
 
@@ -154,25 +156,57 @@ function isClassifierEscalation(options: unknown): boolean {
   );
 }
 
+/** A tool can write the project's settings mid-session, where no billing check would look again. */
+function settingsRecheckHooks(deps: QueryDeps): NonNullable<Options['hooks']> {
+  return {
+    PostToolUse: [{ hooks: [() => Promise.resolve(deps.recheckSettings('A tool changed'))] }],
+    PostToolUseFailure: [
+      { hooks: [() => Promise.resolve(deps.recheckSettings('A tool changed'))] },
+    ],
+    // Writers that are not tool calls: a background command, a repo MCP server, a dev server.
+    ConfigChange: [
+      {
+        hooks: [
+          (hookInput) =>
+            Promise.resolve(
+              hookInput.hook_event_name === 'ConfigChange' &&
+                hookInput.source === 'project_settings'
+                ? deps.recheckSettings('Something changed')
+                : {},
+            ),
+        ],
+      },
+    ],
+  };
+}
+
 export function buildQueryOptions(spec: SessionSpec, deps: QueryDeps): Options {
+  const sandbox = spec.sandbox ?? null;
   return {
     cwd: spec.cwd,
     model: spec.model,
     effort: spec.effort,
     ...(spec.resumeProviderSessionId ? { resume: spec.resumeProviderSessionId } : {}),
-    env: { ...spec.env },
+    env: sandbox ? { ...spec.env, ...sandbox.env } : { ...spec.env },
     pathToClaudeCodeExecutable: deps.claudePath,
     // Never 'user' or 'local': user hooks and plugins stay out (spec §3), and settings.local.json can switch billing.
-    settingSources: ['project'],
+    // A sandboxed session loads no settings file at all, so the repo can't loosen its sandbox or its permissions.
+    settingSources: sandbox ? [] : ['project'],
     // Claude Code reads no MCP config itself. No `mcpServers` here either: the SDK would put them on claude's
     // command line, readable by any local account. They arrive over the control channel (setMcpServers).
     strictMcpConfig: true,
     // Set explicitly: the builder's own autoCompactEnabled: false (global ~/.claude.json) reaches the session despite
     // settingSources. Compaction stays on as the emergency fallback.
-    settings: { autoCompactEnabled: true },
+    settings: sandbox
+      ? { autoCompactEnabled: true, permissions: { ask: [...sandbox.askRules] } }
+      : { autoCompactEnabled: true },
+    ...(sandbox
+      ? { sandbox: sandbox.settings, disallowedTools: [...sandbox.disallowedTools] }
+      : {}),
     plugins: [{ type: 'local', path: deps.pluginDir }],
     allowedTools: [...spec.allowedTools],
-    permissionMode: spec.permissionMode,
+    // Auto mode's classifier would approve calls the sandbox's cards are meant to ask about.
+    permissionMode: sandbox ? 'default' : spec.permissionMode,
     canUseTool: async (toolName, input, options) => {
       if (!(await deps.billingVerified) || deps.isRefused())
         return { behavior: 'deny', message: BILLING_UNVERIFIED, interrupt: true };
@@ -203,25 +237,7 @@ export function buildQueryOptions(spec: SessionSpec, deps: QueryDeps): Options {
           ],
         },
       ],
-      // A tool can write the project's settings mid-session, where no billing check would look again.
-      PostToolUse: [{ hooks: [() => Promise.resolve(deps.recheckSettings('A tool changed'))] }],
-      PostToolUseFailure: [
-        { hooks: [() => Promise.resolve(deps.recheckSettings('A tool changed'))] },
-      ],
-      // Writers that are not tool calls: a background command, a repo MCP server, a dev server.
-      ConfigChange: [
-        {
-          hooks: [
-            (hookInput) =>
-              Promise.resolve(
-                hookInput.hook_event_name === 'ConfigChange' &&
-                  hookInput.source === 'project_settings'
-                  ? deps.recheckSettings('Something changed')
-                  : {},
-              ),
-          ],
-        },
-      ],
+      ...(sandbox ? {} : settingsRecheckHooks(deps)),
     },
     abortController: deps.abortController,
     spawnClaudeCodeProcess: (options) => spawnClaude(options, deps),
@@ -263,8 +279,11 @@ function startSession(
   const graceMs = opts.stopGraceMs ?? STOP_GRACE_MS;
   const clock = opts.clock ?? systemClock;
   const log = opts.logger.child({ sessionId: spec.sessionId, workstreamId: spec.workstreamId });
-  const fixHint =
-    "Check the project's account and any env block in the repo's .claude/settings.json.";
+  const sandboxed = (spec.sandbox ?? null) !== null;
+  // A sandboxed session loads no settings file, so only the account can be at fault.
+  const fixHint = sandboxed
+    ? "Check the project's account."
+    : "Check the project's account and any env block in the repo's .claude/settings.json.";
   const events = createChannel<SessionEvent>();
   const input = createChannel<SDKUserMessage>();
   const abortController = new AbortController();
@@ -328,7 +347,7 @@ function startSession(
   };
 
   // The repo's committed settings can re-point the endpoint or credentials, which no account check would show.
-  const settingsProblem = projectSettingsBillingProblem(spec.cwd);
+  const settingsProblem = sandboxed ? null : projectSettingsBillingProblem(spec.cwd);
   if (settingsProblem) {
     const message = `Billing check failed: ${settingsProblem}. No prompt was sent. ${fixHint}`;
     log.error({ reason: message }, 'claude session refused');
@@ -576,9 +595,16 @@ function startSession(
       }
       end(endReason(), failure);
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       if (failure) end(failureReason, failure);
       else if (stopRequested) end('stopped', null);
-      else end('error', error instanceof Error ? error.message : String(error));
+      else if (sandboxed && !started && message.includes(SANDBOX_SETTINGS_ERROR)) {
+        log.error({ reason: message }, 'claude session sandbox refused');
+        end(
+          SessionEndReason.SandboxRefused,
+          `The lane sandbox could not start: ${message.split('\n')[0] ?? message}`,
+        );
+      } else end('error', message);
     }
   };
   void pump();

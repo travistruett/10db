@@ -3,6 +3,17 @@ import { dirname, isAbsolute, join, matchesGlob, parse, relative, resolve, sep }
 import type { AreaDef, HazardDef } from '@10db/contracts';
 
 const MAX_LINK_HOPS = 40;
+const MAX_PATH_LENGTH = 4096;
+const MAX_PATH_PARTS = 1024;
+
+/** The refusal for a path too long to judge; it does not repeat the path. */
+export const OVER_LONG_PATH_REFUSAL =
+  'A path over 4096 characters or 1024 parts is never judged; 10db refuses it.';
+
+/** Whether `p` is longer than any path the judges resolve, in characters or in parts. */
+export function isOverLongPath(p: string): boolean {
+  return p.length > MAX_PATH_LENGTH || p.split(sep).length > MAX_PATH_PARTS;
+}
 
 /** Whether the file system folds case, so `PACKAGE.JSON` and `package.json` are the same file. */
 const CASE_INSENSITIVE = process.platform === 'darwin' || process.platform === 'win32';
@@ -11,65 +22,156 @@ function isMissing(error: unknown): boolean {
   return error instanceof Error && 'code' in error && error.code === 'ENOENT';
 }
 
+/** A path cannot be resolved the way the kernel would: a link loop, or `..` past a missing part. */
+export class PathResolutionError extends Error {
+  override readonly name = 'PathResolutionError';
+}
+
 /**
- * Resolves `p` to the path it really names, without requiring it to exist. Every existing
- * component is resolved (symlinks, including dangling ones, are followed through their targets),
- * and the part that does not exist yet is appended as written. A symlinked parent or a link to a
- * file that has not been created therefore cannot hide where a write would land.
+ * Resolves `p` the way the kernel opens it, without requiring it to exist. A resolved directory
+ * and a stack of the components that remain (the next one on top) are kept: `.` is skipped, `..`
+ * goes to the resolved directory's parent, and a link's target components go on top of the stack
+ * (an absolute target restarts at its root). A link, even a dangling one, is therefore followed
+ * through its target, and a `..` inside a link target applies to where the link really leads.
+ * Components after the first missing one are appended as written; a `..` among them throws, as the
+ * kernel would fail it. A path that cannot be examined (EACCES, ENOTDIR) or loops through links
+ * throws, and so does one longer than `isOverLongPath` allows.
  */
-function resolveThroughLinks(p: string, hops = 0): string {
-  if (hops > MAX_LINK_HOPS) return p;
-  const { root } = parse(p);
-  const parts = p.slice(root.length).split(sep).filter(Boolean);
-  let current = root;
-  for (const [index, part] of parts.entries()) {
-    const next = join(current, part);
+function resolveThroughLinks(p: string): string {
+  if (isOverLongPath(p)) throw new PathResolutionError('a path is too long to resolve');
+  let directory = parse(p).root;
+  const stack = p.slice(directory.length).split(sep).reverse();
+  let hops = 0;
+  for (let part = stack.pop(); part !== undefined; part = stack.pop()) {
+    if (part === '' || part === '.') continue;
+    if (part === '..') {
+      directory = dirname(directory);
+      continue;
+    }
+    const next = join(directory, part);
     let isLink: boolean;
     try {
       isLink = lstatSync(next).isSymbolicLink();
     } catch (error) {
       if (!isMissing(error)) throw error;
-      return join(realpathSync.native(current), ...parts.slice(index));
+      const tail = [part, ...stack.reverse()].filter((name) => name !== '' && name !== '.');
+      if (tail.includes('..')) {
+        throw new PathResolutionError(`${p} climbs with .. past a part that does not exist`);
+      }
+      return join(realpathSync.native(directory), ...tail);
     }
-    if (isLink) {
-      const target = resolve(dirname(next), readlinkSync(next));
-      return resolveThroughLinks(resolve(target, ...parts.slice(index + 1)), hops + 1);
+    if (!isLink) {
+      directory = next;
+      continue;
     }
-    current = next;
+    hops += 1;
+    if (hops > MAX_LINK_HOPS) throw new PathResolutionError(`${p} passes through too many links`);
+    const target = readlinkSync(next);
+    if (isAbsolute(target)) directory = parse(target).root;
+    stack.push(...target.slice(parse(target).root.length).split(sep).reverse());
   }
-  return realpathSync.native(current);
+  return realpathSync.native(directory);
 }
 
-const fold = (text: string): string => (CASE_INSENSITIVE ? text.toLowerCase() : text);
+/** The real path `p` names, following links through every existing component; `p` need not exist. Throws when a component cannot be examined (EACCES, ENOTDIR), a `..` follows a missing part, links loop, or `p` is too long. */
+export function realPathOf(p: string): string {
+  return resolveThroughLinks(p);
+}
 
-/** A path that cannot be examined (not a directory, no permission) is treated as outside. */
-export function resolveInRepo(
+/**
+ * The repo-relative paths a file path names, read both ways: as the kernel opens it (links resolve
+ * as they are met, and `..` follows them), and with `..` collapsed as text first. Inside only when
+ * both readings are inside; a path that cannot be examined (not a directory, no permission, a link
+ * loop, `..` past a missing part) is treated as outside.
+ */
+export function resolveInRepoReadings(
   repoPath: string,
   filePath: string,
-): { inside: true; rel: string } | { inside: false } {
+): { inside: true; rels: string[] } | { inside: false } {
   try {
     const root = realpathSync.native(repoPath);
-    const target = resolveThroughLinks(resolve(repoPath, filePath));
-    const rel = relative(root, target);
-    if (rel === '' || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
-      return { inside: false };
+    const base = resolve(repoPath);
+    const readings = [
+      resolveThroughLinks(isAbsolute(filePath) ? filePath : `${base}${sep}${filePath}`),
+      resolveThroughLinks(resolve(base, filePath)),
+    ];
+    const rels: string[] = [];
+    for (const target of readings) {
+      const rel = relative(root, target);
+      if (rel === '' || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+        return { inside: false };
+      }
+      if (!rels.includes(rel)) rels.push(rel);
     }
-    return { inside: true, rel };
+    return { inside: true, rels };
   } catch {
     return { inside: false };
   }
 }
 
-/** Whether `target` is `dir` itself (a file counts) or inside it, following links as a write would; a path that can't be read contains nothing. */
-export function isWithin(dir: string, target: string): boolean {
-  try {
-    const root = fold(realpathSync.native(dir));
-    const resolved = fold(resolveThroughLinks(resolve(target)));
-    const rel = relative(root, resolved);
-    return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
-  } catch {
-    return false;
+/** The path relative to the repo when every reading of `filePath` is inside it (see `resolveInRepoReadings`). */
+export function resolveInRepo(
+  repoPath: string,
+  filePath: string,
+): { inside: true; rel: string } | { inside: false } {
+  const where = resolveInRepoReadings(repoPath, filePath);
+  const [rel] = where.inside ? where.rels : [];
+  return rel === undefined ? { inside: false } : { inside: true, rel };
+}
+
+/** Folds a path's spelling the way the file system does: Unicode NFC, and lowercase where case is folded. */
+export function foldPathCase(text: string): string {
+  const composed = text.normalize('NFC');
+  return CASE_INSENSITIVE ? composed.toLowerCase() : composed;
+}
+
+const fold = foldPathCase;
+
+/**
+ * The real paths an absolute path names on each reading that resolves: as the kernel opens it, and
+ * with `..` collapsed as text first. `complete` is false when a reading cannot be resolved (a `..`
+ * after a missing part, a link loop, a part that cannot be examined).
+ */
+export function realPathReadings(p: string): {
+  readonly paths: string[];
+  readonly complete: boolean;
+} {
+  const paths: string[] = [];
+  let complete = true;
+  for (const reading of [p, resolve(p)]) {
+    try {
+      const real = resolveThroughLinks(reading);
+      if (!paths.includes(real)) paths.push(real);
+    } catch {
+      complete = false;
+    }
   }
+  return { paths, complete };
+}
+
+function contains(root: string, path: string): boolean {
+  const rel = relative(fold(root), fold(path));
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
+}
+
+/**
+ * Whether `target` is `dir` itself (a file counts) or inside it on some reading of each (see
+ * `realPathReadings`), following links as a write would. Pass `target` with its `..` as written.
+ */
+export function isWithin(dir: string, target: string): boolean {
+  const roots = realPathReadings(dir).paths;
+  return realPathReadings(target).paths.some((path) => roots.some((root) => contains(root, path)));
+}
+
+/** Whether every reading of `target` is inside `dir`; false when a reading cannot be resolved. */
+export function isWithinOnEveryReading(dir: string, target: string): boolean {
+  const roots = realPathReadings(dir).paths;
+  const readings = realPathReadings(target);
+  return (
+    readings.complete &&
+    readings.paths.length > 0 &&
+    readings.paths.every((path) => roots.some((root) => contains(root, path)))
+  );
 }
 
 export function classifyPath(
