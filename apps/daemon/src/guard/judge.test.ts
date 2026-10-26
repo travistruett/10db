@@ -357,6 +357,16 @@ describe('shell commands', () => {
       decision: 'deny',
     },
     { name: 'env unsetting a variable named S', command: 'env -uS git status', decision: 'allow' },
+    {
+      name: 'env with an abbreviated long option',
+      command: "env --uns X bash -c 'rm -rf ~'",
+      decision: 'deny',
+    },
+    { name: 'env with an unknown long option', command: 'env --frob git status', decision: 'deny' },
+    { name: 'env -u', command: 'env -u FOO git status', decision: 'allow' },
+    { name: 'env --unset in full', command: 'env --unset FOO git status', decision: 'allow' },
+    { name: 'env --unset= in full', command: 'env --unset=FOO git status', decision: 'allow' },
+    { name: 'env ending its options', command: 'env -- git status', decision: 'allow' },
     { name: 'pnpm add', command: 'pnpm add zod', decision: 'deny' },
     { name: 'pnpm add with -w', command: 'pnpm -w add zod', decision: 'deny' },
     {

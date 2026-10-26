@@ -22,7 +22,7 @@ import {
   findExecCommands,
   leadingWords,
   parseShell,
-  runsEnvSplitString,
+  hidesEnvCommand,
   stripCommandPrefixes,
   type ShellSegment,
 } from './shell-words';
@@ -155,15 +155,15 @@ function commandOf(segment: ShellSegment): {
   readonly words: string[];
   readonly negated: boolean;
   readonly outOfOrder: boolean;
-  /** env runs a split string, a command the guard cannot see. */
-  readonly splitString: boolean;
+  /** env hides the command it runs: a split string, or a long option not spelled in full. */
+  readonly hiddenByEnv: boolean;
 } {
   const leading = leadingWords(segment.words);
   return {
     words: stripCommandPrefixes(leading.command, { lookThroughRunners: true }),
     negated: leading.negated,
     outOfOrder: leading.outOfOrder,
-    splitString: runsEnvSplitString(leading.command),
+    hiddenByEnv: hidesEnvCommand(leading.command),
   };
 }
 
@@ -218,7 +218,7 @@ function judgeShell(
   // The subshells the previous segment ran in, each with what was possible outside it.
   const subshells: { readonly id: number; readonly possible: Dir[] }[] = [];
   let previousSeparator = '';
-  for (const { segment, words, negated, splitString } of segments) {
+  for (const { segment, words, negated, hiddenByEnv } of segments) {
     if (ordered) {
       let left = false;
       while (
@@ -242,8 +242,10 @@ function judgeShell(
     const piped = previousSeparator === '|';
     previousSeparator = segment.separator;
     if (head === 'sudo') return deny('sudo is never allowed.');
-    if (splitString)
-      return deny('env -S runs a command the guard cannot read. Run the command itself instead.');
+    if (hiddenByEnv)
+      return deny(
+        'env -S, or an env option not spelled in full, hides the command it runs. Run the command itself instead.',
+      );
     // Substitutions and here-documents run where the segment runs.
     for (const body of segment.nested) {
       const verdict = judgeShell(input, body, depth, dirs);

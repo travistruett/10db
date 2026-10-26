@@ -390,7 +390,7 @@ const wrapper = (valueFlags: readonly string[] = [], positionals = 0): Wrapper =
 
 /** Wrappers that run the rest of the line. */
 const WRAPPERS: ReadonlyMap<string, Wrapper> = new Map([
-  ['env', wrapper(['-u', '-C', '-S', '-P', '--unset', '--chdir'])],
+  ['env', wrapper(['-u', '-C', '-S', '-P', '--unset', '--chdir', '--split-string'])],
   ['command', wrapper()],
   ['nohup', wrapper()],
   ['time', wrapper(['-f', '-o', '--format', '--output'])],
@@ -480,16 +480,35 @@ export function stripCommandPrefixes(
 
 /** env's flags that take a value, so a letter after one in a cluster is part of that value. */
 const ENV_VALUE_LETTERS: ReadonlySet<string> = new Set(['u', 'C', 'P']);
+/** GNU env's long options, spelled in full. */
+const ENV_LONG_OPTIONS: ReadonlySet<string> = new Set([
+  '--ignore-environment',
+  '--null',
+  '--unset',
+  '--chdir',
+  '--split-string',
+  '--block-signal',
+  '--default-signal',
+  '--ignore-signal',
+  '--list-signal-handling',
+  '--debug',
+  '--help',
+  '--version',
+]);
 
 /**
- * Whether env's flag is its split string: `-S`, attached or in a cluster such as `-iS`, or
- * `--split-string`, abbreviated as GNU env allows. `-uS` unsets a variable named S.
+ * Whether an env word is a long option not spelled in full. GNU env takes any unique abbreviation,
+ * so in `env --uns X git status` X is a value, not the program; 10db reads none of them. `--` only
+ * ends the options.
  */
+export function isUnknownEnvLongFlag(flag: string): boolean {
+  if (!flag.startsWith('--') || flag === '--') return false;
+  return !ENV_LONG_OPTIONS.has(flag.split('=')[0] ?? flag);
+}
+
+/** Whether env's flag is its split string: `-S`, attached or in a cluster such as `-iS`, or `--split-string`. */
 function isSplitString(flag: string): boolean {
-  if (flag.startsWith('--')) {
-    const name = flag.split('=')[0] ?? flag;
-    return name.length > 2 && '--split-string'.startsWith(name);
-  }
+  if (flag.startsWith('--')) return (flag.split('=')[0] ?? flag) === '--split-string';
   for (const letter of flag.slice(1)) {
     if (letter === 'S') return true;
     if (ENV_VALUE_LETTERS.has(letter)) return false;
@@ -498,11 +517,13 @@ function isSplitString(flag: string): boolean {
 }
 
 /**
- * Whether the command runs through env with a split string, which env splits into words and runs
- * as a command of its own the guard never reads.
+ * Whether env hides the command it runs: a split string, which env splits into a command of its own,
+ * or a long option not spelled in full, after which the guard can't tell a value from the program.
  */
-export function runsEnvSplitString(words: readonly string[]): boolean {
-  return prefixes(words, true).flags.some((f) => f.wrapper === 'env' && isSplitString(f.flag));
+export function hidesEnvCommand(words: readonly string[]): boolean {
+  return prefixes(words, true).flags.some(
+    (f) => f.wrapper === 'env' && (isSplitString(f.flag) || isUnknownEnvLongFlag(f.flag)),
+  );
 }
 
 const FIND_EXEC = new Set(['-exec', '-execdir', '-ok', '-okdir']);

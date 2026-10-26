@@ -1,5 +1,6 @@
 import {
   flagSpan,
+  isUnknownEnvLongFlag,
   parseShell,
   splitCommand,
   stripCommandPrefixes,
@@ -58,6 +59,8 @@ function namesLongFlag(flag: string, long: string): boolean {
 }
 
 function hasUnsafeFlag(name: string, flag: string): boolean {
+  // An abbreviated env option may take the next word as its value, so what runs is unknown.
+  if (name === 'env' && isUnknownEnvLongFlag(flag)) return true;
   const unsafe = UNSAFE_WRAPPER_FLAGS.get(name) ?? [];
   const letters = clusterLetters(name, flag);
   return unsafe.some((u) =>

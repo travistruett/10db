@@ -2,6 +2,7 @@ export { judgeToolUse, stringField, type GuardVerdict } from './judge';
 export { classifyPath, resolveInRepo } from './paths';
 export {
   flagSpan,
+  isUnknownEnvLongFlag,
   parseShell,
   splitCommand,
   stripCommandPrefixes,
