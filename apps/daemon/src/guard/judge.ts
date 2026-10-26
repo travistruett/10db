@@ -341,7 +341,7 @@ function directoriesNamed(segments: readonly ShellSegment[]): Dir[] {
   return segments.flatMap((segment) => {
     const { words } = commandOf(segment);
     const head = words[0] ?? '';
-    const nested = [...segment.nested, ...segment.hereDocuments.map((h) => h.body)];
+    const nested = [...segment.nested, ...segment.hereDocuments];
     const scripts = head === 'eval' ? [words.slice(1).join(' '), ...nested] : nested;
     const own = DIRECTORY_CHANGES.has(head) ? [changedDirectory(segment.raw, words, null)] : [];
     return [...own, ...scripts.flatMap((script) => directoriesNamed(parseShell(script).segments))];
@@ -365,9 +365,10 @@ function firstRefusal(dirs: readonly Dir[], refusal: (dir: Dir) => string | null
  * any directory a `cd` in the command names.
  */
 /**
- * Commands that read a here-document as data, not as shell. A here-document is judged as shell by
- * default (so a brace in it may open a zsh group); only when its reader is one of these, and the
- * segment does not pipe onward, are its braces relaxed to data (`console.log({a: 1})`, a JSON file).
+ * Commands that read a here-document as data, not as shell. A here-document body is always judged
+ * as shell; only when its reader is one of these, and the segment's output is not forwarded to
+ * another command, is the brace-group rule relaxed, so `console.log({a: 1})` or a JSON file passes.
+ * `psql` and `sqlite3` are not here: their meta-commands (`\!`, `.shell`) run shell.
  */
 const DATA_READERS: ReadonlySet<string> = new Set([
   'cat',
@@ -378,19 +379,28 @@ const DATA_READERS: ReadonlySet<string> = new Set([
   'jq',
   'ruby',
   'perl',
-  'sqlite3',
-  'psql',
   'git',
 ]);
+
+interface NestedScript {
+  /** The script is a here-document body read as data, so a brace in it is not group syntax. */
+  readonly bracesAsData?: boolean;
+  /**
+   * The script's output reaches another command (a `$(…)` or process substitution body), so a
+   * here-document a data reader takes in it may still run as shell elsewhere.
+   */
+  readonly forwarded?: boolean;
+}
 
 function judgeShell(
   input: GuardInput,
   command: string,
   depth = 0,
   start: readonly Dir[] = [input.repoPath],
-  // A here-document body that does not run as shell carries braces as data, not as group syntax.
-  bracesAsData = false,
+  nested: NestedScript = {},
 ): GuardVerdict {
+  const bracesAsData = nested.bracesAsData === true;
+  const forwarded = nested.forwarded === true;
   const parse = parseShell(command);
   const segments = parse.segments.map((segment) => ({ segment, ...commandOf(segment) }));
   const ordered = parse.certain && !segments.some((s) => s.outOfOrder);
@@ -436,28 +446,34 @@ function judgeShell(
       return deny(
         'env -S, or an env option not spelled in full, hides the command it runs. Run the command itself instead.',
       );
-    const scripts = [...segment.nested, ...segment.hereDocuments.map((h) => h.body)];
-    // Substitutions always run as shell.
+    const scripts = [...segment.nested, ...segment.hereDocuments];
+    // Substitutions always run as shell, and their output reaches this command line.
     for (const body of segment.nested) {
-      const verdict = judgeShell(input, body, depth, dirs);
+      const verdict = judgeShell(input, body, depth, dirs, { forwarded: true });
       if (verdict.decision === 'deny') return verdict;
     }
-    // A here-document is shell by default; its braces are data only when a known data reader takes
-    // it and the segment does not pipe onward (a redirect to a file is fine), so an interpreter
-    // reached through a wrapper or a pipeline is still judged as shell. A quoted delimiter the data
-    // reader reads is pure literal data, so it is judged only by the text checks below; an unquoted
-    // one still has its substitutions run by the shell.
-    const bodyIsData = DATA_READERS.has(head) && segment.separator !== '|';
-    for (const { body, quoted } of segment.hereDocuments) {
-      if (bodyIsData && quoted) continue;
-      const verdict = judgeShell(input, body, depth, dirs, bodyIsData);
+    // A here-document body is always judged as shell. Its braces are data only when a known data
+    // reader takes it and the segment's output is not forwarded (a pipe, a process substitution, a
+    // group or subshell that is piped, a substitution body), so an interpreter reached through a
+    // wrapper or a pipeline, or a body that reaches a shell through the reader's output, is still
+    // judged with the brace-group rule.
+    const bodyIsData = DATA_READERS.has(head) && !segment.outputForwarded && !forwarded;
+    for (const body of segment.hereDocuments) {
+      const verdict = judgeShell(input, body, depth, dirs, {
+        bracesAsData: bracesAsData || bodyIsData,
+        forwarded,
+      });
       if (verdict.decision === 'deny') return verdict;
     }
+    // The brace-expanded words are checked as well as the text: `$ANTHRO{PIC,}_API_KEY` names a
+    // credential only once expanded.
+    const expanded = segment.words.join(' ');
     const accountRule =
       keychainRefusal(words) ??
       envDumpRefusal(segment.words, words) ??
       secretReferenceRefusal(segment.raw) ??
-      scriptRefusal(head, [segment.raw, ...scripts].join('\n')) ??
+      secretReferenceRefusal(expanded) ??
+      scriptRefusal(head, [segment.raw, expanded, ...scripts].join('\n')) ??
       firstRefusal(dirs, (dir) =>
         segmentPathRefusal(segment.raw, words, dir, input.protectedPaths, scripts),
       );

@@ -195,46 +195,59 @@ function expandTilde(text: string): string {
 
 const WORD_BREAK = new Set([' ', '\t', '\n', '<', '>', '(', ')', '|', ';', '&', '`']);
 
+/** A word as the shell passes it, with a mask that blanks every quoted, escaped or expanded character. */
+interface ShellWord {
+  readonly text: string;
+  /** `text` with each character the shell does not read as syntax replaced by NUL. */
+  readonly mask: string;
+}
+
 /**
  * The words of a shell segment as the shell would pass them on: quotes removed, escapes resolved,
  * `$HOME` outside single quotes and a leading `~` outside any quotes expanded, and a redirection or
- * substitution starting a new word. A `~` inside quotes stays a `~`.
+ * substitution starting a new word. A `~` inside quotes stays a `~`. Each word carries a mask that
+ * keeps only its literal characters, so brace expansion reads a quoted brace or comma as text.
  */
-function shellWords(raw: string): string[] {
-  const words: string[] = [];
+function shellWords(raw: string): ShellWord[] {
+  const words: ShellWord[] = [];
   let word = '';
+  let mask = '';
   let open = false;
   let quote: "'" | '"' | null = null;
+  const add = (text: string, literal: boolean): void => {
+    word += text;
+    mask += literal ? text : '\0'.repeat(text.length);
+    open = true;
+  };
   const flush = (): void => {
-    if (open) words.push(word);
+    if (open) words.push({ text: word, mask });
     word = '';
+    mask = '';
     open = false;
   };
   for (let i = 0; i < raw.length; i += 1) {
     const ch = raw.charAt(i);
     if (quote === "'") {
       if (ch === "'") quote = null;
-      else word += ch;
+      else add(ch, false);
       continue;
     }
     if (ch === '\\') {
-      word += raw.charAt(i + 1);
-      open = true;
+      add(raw.charAt(i + 1), false);
       i += 1;
       continue;
     }
     if (ch === '$') {
       const variable = userVariable(raw.slice(i));
       if (variable) {
-        word += variable.value;
-        open = true;
+        add(variable.value, false);
         i += variable.length - 1;
         continue;
       }
     }
     if (quote === '"') {
       if (ch === '"') quote = null;
-      else word += ch;
+      else add(ch, false);
       continue;
     }
     if (ch === "'" || ch === '"') {
@@ -249,14 +262,12 @@ function shellWords(raw: string): string[] {
     if (ch === '~' && (word === '' || /[=:]$/.test(word))) {
       const named = /^~([A-Za-z0-9_.-]*)(?=\/|$|[\s:;|&<>()])/.exec(raw.slice(i));
       if (named) {
-        word += homeOf(named[1] ?? '');
-        open = true;
+        add(homeOf(named[1] ?? ''), false);
         i += named[0].length - 1;
         continue;
       }
     }
-    word += ch;
-    open = true;
+    add(ch, true);
   }
   flush();
   return words;
@@ -570,13 +581,19 @@ export function segmentPathRefusal(
   const walks = walksDirectories(command);
   const code = runsQuotedCode(command);
   const words = shellWords(raw);
-  const destination = destinationIndex(command, words);
-  for (const [index, word] of words.entries()) {
+  const destination = destinationIndex(
+    command,
+    words.map((w) => w.text),
+  );
+  for (const [index, { text: word, mask }] of words.entries()) {
     const reach = { contains: walks && index !== destination };
     // Brace expansion turns one word into several paths, as the shell does, so a path hidden in a
-    // brace (`{~/.claude.json,}`) is judged. A `~` the braces reveal is expanded too; a word with
-    // no brace keeps its spelling, so a quoted `~` mention stays unexpanded as before.
-    const pieces = word.includes('{') ? (expandBraceWord(word) ?? [word]).map(expandTilde) : [word];
+    // brace (`{~/.claude.json,}`) is judged. Only an unquoted brace opens an expansion, and a quoted
+    // brace or comma inside one is literal text. A `~` the braces reveal is expanded too; a word
+    // with no brace keeps its spelling, so a quoted `~` mention stays unexpanded as before.
+    const pieces = mask.includes('{')
+      ? (expandBraceWord(word, mask) ?? [word]).map(expandTilde)
+      : [word];
     for (const piece of pieces) {
       const tail = piece.includes('=') ? piece.slice(piece.indexOf('=') + 1).split(':') : [];
       const candidates = piece.startsWith('-') ? tail : [piece, ...tail];
@@ -611,7 +628,7 @@ export function changedDirectory(
   cwd: string | null,
 ): string | null {
   if (command[0] === 'popd') return null;
-  const words = shellWords(raw);
+  const words = shellWords(raw).map((w) => w.text);
   const target = words[words.findIndex((w) => commandName(w) === command[0]) + 1];
   if (target === undefined) return command[0] === 'cd' ? homedir() : null;
   if (target.startsWith('-') || /[$`*?[{]/.test(target)) return null;

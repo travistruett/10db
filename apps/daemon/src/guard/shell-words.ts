@@ -16,18 +16,27 @@ export interface ShellSegment {
    * `$(…)`, backtick, `<(…)` and `>(…)` substitutions, and its here-documents.
    */
   readonly nested: readonly string[];
-  /** The bodies of the segment's here-documents, which run as shell only when their reader does. */
-  readonly hereDocuments: readonly HereDocumentBody[];
+  /**
+   * The bodies of the segment's here-documents. Each is judged as shell; a data reader only relaxes
+   * the brace-group rule for it.
+   */
+  readonly hereDocuments: readonly string[];
   /**
    * The words are the ones the shell passes. False when an ANSI-C escape the scanner does not
    * decode keeps its `$'…'` text, or a clobber redirection hides the command.
    */
   readonly wordsCertain: boolean;
   /**
-   * False when a brace in a word may open or close a zsh group (L4). It is separate because a
+   * False when a brace in a word may open or close a zsh group. It is separate because a
    * here-document body that does not run as shell carries braces as data, not as group syntax.
    */
   readonly bracesCertain: boolean;
+  /**
+   * The segment's output may reach another command: it pipes onward, it holds a `>(…)` or `<(…)`
+   * process substitution, or it sits in a group or subshell whose close is followed by a pipe or a
+   * process substitution. A here-document it reads as data may then run as shell elsewhere.
+   */
+  readonly outputForwarded: boolean;
 }
 
 /** A command split into the segments it runs. */
@@ -48,33 +57,24 @@ interface Scan extends ShellParse {
   readonly closed: boolean;
 }
 
-/** A here-document's body and whether its delimiter was quoted (so the shell leaves it literal). */
-export interface HereDocumentBody {
-  readonly body: string;
-  readonly quoted: boolean;
-}
-
 interface HereDocument {
   readonly delimiter: string;
   /** `<<-`: tabs before the closing line are ignored. */
   readonly tabs: boolean;
-  /** A quoted delimiter (`<<'EOF'`): the shell performs no expansion or substitution in the body. */
-  readonly quoted: boolean;
   /** The here-document bodies of the segment that reads it. */
-  readonly into: HereDocumentBody[];
+  readonly into: string[];
 }
 
 /** The delimiter of a here-document whose `<<` ends just before `at`, with quotes and escapes removed. */
 function hereDocumentDelimiter(
   command: string,
   at: number,
-): { delimiter: string; tabs: boolean; quoted: boolean } | null {
+): { delimiter: string; tabs: boolean } | null {
   let i = at;
   const tabs = command.charAt(i) === '-';
   if (tabs) i += 1;
   while (command.charAt(i) === ' ' || command.charAt(i) === '\t') i += 1;
   let delimiter = '';
-  let quoted = false;
   let quote: string | null = null;
   for (; i < command.length; i += 1) {
     const ch = command.charAt(i);
@@ -83,10 +83,8 @@ function hereDocumentDelimiter(
       else delimiter += ch;
     } else if (ch === "'" || ch === '"') {
       quote = ch;
-      quoted = true;
     } else if (ch === '\\') {
       delimiter += command.charAt(i + 1);
-      quoted = true;
       i += 1;
     } else if (/[\s;&|<>()]/.test(ch)) {
       break;
@@ -94,7 +92,7 @@ function hereDocumentDelimiter(
       delimiter += ch;
     }
   }
-  return delimiter === '' ? null : { delimiter, tabs, quoted };
+  return delimiter === '' ? null : { delimiter, tabs };
 }
 
 /**
@@ -119,7 +117,7 @@ function readHereDocuments(command: string, at: number, pending: readonly HereDo
       line = newline + 1;
     }
     if (closing === -1) return resume;
-    doc.into.push({ body: command.slice(resume, line), quoted: doc.quoted });
+    doc.into.push(command.slice(resume, line));
     resume = closing + 1;
   }
   return resume;
@@ -154,13 +152,20 @@ function scan(command: string, from: number, substitution: boolean): Scan {
   let certain = true;
   let wordsCertain = true;
   let bracesCertain = true;
+  // The segment holds a `>(…)` or `<(…)`, so what it reads or writes reaches another command.
+  let processSubstitution = false;
+  // The index of the first segment inside each open group or parenthesis, innermost last.
+  const groupStarts: number[] = [];
+  const parenStarts: number[] = [];
+  // Segment index ranges inside a group or subshell whose output is piped or substituted.
+  const forwardedRanges: [number, number][] = [];
   let opened = 0;
   let raw = '';
   let word = '';
   let inWord = false;
   let words: string[] = [];
   let nested: string[] = [];
-  let hereDocuments: HereDocumentBody[] = [];
+  let hereDocuments: string[] = [];
   let quote: "'" | '"' | null = null;
   // The previous character, when it was neither quoted nor escaped.
   let lastPlain = '';
@@ -213,13 +218,10 @@ function scan(command: string, from: number, substitution: boolean): Scan {
     }
     if (word !== '') {
       // Brace expansion turns one word into several; each is judged on its own. Only an unquoted
-      // brace expands, so a word whose braces or commas were all quoted stays whole. Over the
-      // caps the expansion is unread, and the word is uncertain.
-      const literalBraces = Array.from(
-        word,
-        (ch, at) => '{},'.includes(ch) && wordMask[at] !== ch,
-      ).every((quoted) => !quoted);
-      const expanded = literalBraces && word.includes('{') ? expandBraceWord(word) : [word];
+      // brace opens an expansion, and a quoted or escaped brace, comma or dot inside one is
+      // literal text, as the shell reads it. Over the caps the expansion is unread, and the word
+      // is uncertain.
+      const expanded = wordMask.includes('{') ? expandBraceWord(word, wordMask) : [word];
       if (expanded === null) {
         certain = false;
         wordsCertain = false;
@@ -248,6 +250,7 @@ function scan(command: string, from: number, substitution: boolean): Scan {
         hereDocuments,
         wordsCertain,
         bracesCertain,
+        outputForwarded: separator === '|' || processSubstitution,
       });
     }
     raw = '';
@@ -256,7 +259,23 @@ function scan(command: string, from: number, substitution: boolean): Scan {
     hereDocuments = [];
     wordsCertain = true;
     bracesCertain = true;
+    processSubstitution = false;
   };
+  // Whether the rest of the line after a group's or subshell's close at `at` pipes its output on or
+  // sends it to a process substitution. A `||` is not a pipe; reading one as such only refuses more.
+  const forwardsAfter = (at: number): boolean => {
+    const tail = command.slice(at + 1).split(/[\n;]/, 1)[0] ?? '';
+    return /(?<!\|)\|(?!\|)|[<>]\(/.test(tail);
+  };
+  const closeRange = (start: number | undefined, at: number): void => {
+    if (start !== undefined && forwardsAfter(at)) forwardedRanges.push([start, segments.length]);
+  };
+  const withForwarding = (): ShellSegment[] =>
+    segments.map((segment, index) =>
+      forwardedRanges.some(([start, end]) => start <= index && index < end)
+        ? { ...segment, outputForwarded: true }
+        : segment,
+    );
   // Where a lone `{` or `}` opens or closes a group: no word yet, or only reserved words a command
   // may follow, or after `function name`.
   const commandPosition = (): boolean =>
@@ -266,8 +285,10 @@ function scan(command: string, from: number, substitution: boolean): Scan {
     raw += text;
     addWord(text, false);
   };
-  // A substitution's body runs as commands; its text stays in the word.
+  // A substitution's body runs as commands; its text stays in the word. A process substitution
+  // (`>(…)`, `<(…)`, where `at` is its parenthesis) forwards the segment's output or input.
   const substitute = (at: number, bodyStart: number): number => {
+    if (command.charAt(at) === '(') processSubstitution = true;
     const inner = scan(command, bodyStart, true);
     if (!inner.closed) certain = false;
     nested.push(command.slice(bodyStart, inner.closed ? inner.end - 1 : inner.end));
@@ -417,11 +438,13 @@ function scan(command: string, from: number, substitution: boolean): Scan {
         flush('(');
         opened += 1;
         parens.push(opened);
+        parenStarts.push(segments.length);
       } else {
         // A function's `()`, an array or a case pattern: not a subshell.
         certain = false;
         flush('(');
         parens.push(null);
+        parenStarts.push(segments.length);
       }
       continue;
     }
@@ -429,9 +452,10 @@ function scan(command: string, from: number, substitution: boolean): Scan {
       if (parens.length > 0) {
         flush(')');
         parens.pop();
+        closeRange(parenStarts.pop(), i);
       } else if (substitution) {
         flush('');
-        return { segments, certain, end: i + 1, closed: true };
+        return { segments: withForwarding(), certain, end: i + 1, closed: true };
       } else {
         // A case pattern's `)`, or one with nothing to close.
         certain = false;
@@ -446,6 +470,8 @@ function scan(command: string, from: number, substitution: boolean): Scan {
         if (ch === '{') openGroups += 1;
         else openGroups = Math.max(0, openGroups - 1);
         flush('');
+        if (ch === '{') groupStarts.push(segments.length);
+        else closeRange(groupStarts.pop(), i);
         continue;
       }
       // A lone brace out of command position is group syntax, relaxed for here-document data.
@@ -465,7 +491,7 @@ function scan(command: string, from: number, substitution: boolean): Scan {
   }
   flush('');
   if (parens.length > 0 || quote !== null) certain = false;
-  return { segments, certain, end: command.length, closed: false };
+  return { segments: withForwarding(), certain, end: command.length, closed: false };
 }
 
 /** The segments a command runs, in order, each with the scripts nested in it. */
