@@ -82,18 +82,45 @@ describe('lane temp directory', () => {
     expect(existsSync(dir)).toBe(false);
   });
 
+  it.each<[string, number]>([
+    ['no permissions', 0o000],
+    ['write and search only', 0o300],
+  ])('removes a directory the lane left with %s, holding a file', (_name, mode) => {
+    const dir = createLaneTempDir(root);
+    const locked = join(dir, 'x');
+    mkdirSync(locked);
+    writeFileSync(join(locked, 'f'), 'x');
+    chmodSync(locked, mode);
+    removeLaneTempDir(dir, root);
+    expect(existsSync(dir)).toBe(false);
+  });
+
+  it('removes a lane temp directory that is itself read-only', () => {
+    const dir = createLaneTempDir(root);
+    mkdirSync(join(dir, 'a', 'b'), { recursive: true });
+    writeFileSync(join(dir, 'a', 'b', 'f'), 'x');
+    chmodSync(join(dir, 'a', 'b'), 0o555);
+    chmodSync(join(dir, 'a'), 0o555);
+    chmodSync(dir, 0o555);
+    removeLaneTempDir(dir, root);
+    expect(existsSync(dir)).toBe(false);
+  });
+
   it('does not follow a link out of the directory while unlocking', () => {
     const dir = createLaneTempDir(root);
     const outside = join(root, 'outside');
-    mkdirSync(outside, { mode: 0o500 });
+    mkdirSync(outside);
+    writeFileSync(join(outside, 'keep'), 'x');
+    chmodSync(outside, 0o500);
     // The link sits inside a locked directory, so the first removal cannot unlink it and the unlock
     // walk has to meet it.
     mkdirSync(join(dir, 'locked'));
     symlinkSync(outside, join(dir, 'locked', 'link'));
-    chmodSync(join(dir, 'locked'), 0o555);
+    chmodSync(join(dir, 'locked'), 0o000);
     removeLaneTempDir(dir, root);
     expect(existsSync(dir)).toBe(false);
     expect(statSync(outside).mode & 0o777).toBe(0o500);
+    expect(existsSync(join(outside, 'keep'))).toBe(true);
     chmodSync(outside, 0o700);
   });
 

@@ -1,14 +1,5 @@
-import {
-  chmodSync,
-  closeSync,
-  constants,
-  fchmodSync,
-  mkdtempSync,
-  openSync,
-  readdirSync,
-  realpathSync,
-  rmSync,
-} from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { chmodSync, existsSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 
 /** Where lane temp directories live; the sandbox's Unix socket path limit needs a short prefix. */
@@ -47,41 +38,29 @@ export function createLaneTempDir(root: string = LANE_TEMP_ROOT): string {
   }
 }
 
-/** Removes a directory made by `createLaneTempDir`; refuses any other path. */
+/** The system tools that walk a lane's tree without following links; see `removeLaneTempDir`. */
+const TOOL_ENV = { PATH: '/usr/bin:/bin' };
+
+function runTool(tool: string, args: readonly string[]): void {
+  execFileSync(tool, args, { env: TOOL_ENV, stdio: 'pipe' });
+}
+
+/**
+ * Removes a directory made by `createLaneTempDir`; refuses any other path. A lane can leave
+ * directories it made unreadable or read-only, and a lane process may still be running and swap
+ * a directory for a link mid-removal, so the daemon never walks the tree itself: `chmod -R` and
+ * `rm -rf` walk it by directory descriptor and never follow a link.
+ */
 export function removeLaneTempDir(dir: string, root: string = LANE_TEMP_ROOT): void {
   if (dirname(dir) !== root || !basename(dir).startsWith(PREFIX)) {
     throw new SandboxTempDirError('Not a lane temp directory');
   }
+  if (!existsSync(dir)) return;
   try {
-    rmSync(dir, { recursive: true, force: true });
+    runTool('/bin/chmod', ['-R', '--', 'u+rwx', dir]);
+    runTool('/bin/rm', ['-rf', '--', dir]);
   } catch {
-    try {
-      unlockTree(dir, realpathSync(dir));
-      rmSync(dir, { recursive: true, force: true });
-    } catch {
-      throw new SandboxTempDirError('Could not remove the lane temp directory');
-    }
+    throw new SandboxTempDirError('Could not remove the lane temp directory');
   }
-}
-
-/**
- * Makes every directory under `dir` owner-writable so a lane's read-only directory can be removed.
- * A lane process may still be running and can swap a directory for a link mid-walk, so each
- * directory is opened without following links and changed through its descriptor, and a directory
- * whose real path is no longer where the walk expects it is skipped.
- */
-function unlockTree(dir: string, expected: string): void {
-  let fd: number;
-  try {
-    fd = openSync(dir, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
-  } catch {
-    return; // gone, or no longer a directory
-  }
-  try {
-    if (realpathSync(dir) !== expected) return;
-    fchmodSync(fd, 0o700);
-    for (const entry of readdirSync(dir)) unlockTree(join(dir, entry), join(expected, entry));
-  } finally {
-    closeSync(fd);
-  }
+  if (existsSync(dir)) throw new SandboxTempDirError('Could not remove the lane temp directory');
 }
