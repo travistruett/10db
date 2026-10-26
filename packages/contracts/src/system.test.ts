@@ -26,6 +26,7 @@ describe('SystemCheckDto', () => {
     };
     const report = {
       loginEnv: { source: 'login_shell', warning: null },
+      claudeCode: { verifiedOn: '2.1.302', warning: null },
       tools: [],
       benchmarkSync: warning,
     };
