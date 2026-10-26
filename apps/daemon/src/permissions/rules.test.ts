@@ -359,3 +359,80 @@ describe('allowedToolsFor', () => {
     expect(allowedToolsFor(project, 'edit')).toEqual(baseAllowedTools(project));
   });
 });
+
+describe('matchesAllowedTool: cosmetic forms of an allowed command', () => {
+  const listed = allowedToolsFor(
+    { gateCommand: 'make gate', allowedCommands: ['pnpm exec vitest', 'pnpm exec'] },
+    'edit',
+  );
+  const narrow = allowedToolsFor(
+    { gateCommand: 'make gate', allowedCommands: ['pnpm exec vitest'] },
+    'edit',
+  );
+
+  it.each<[string, string, boolean]>([
+    ['the plain command', 'pnpm exec vitest run a.test.ts', true],
+    ['pnpm -s before the subcommand', 'pnpm -s exec vitest run a.test.ts', true],
+    ['pnpm --silent before the subcommand', 'pnpm --silent exec vitest run a.test.ts', true],
+    ['a trailing echo of the exit code', 'pnpm exec vitest run a.test.ts; echo $?', true],
+    ['a quoted exit-code echo', 'pnpm exec vitest run a.test.ts; echo "exit $?"', true],
+    ['both forms together', 'pnpm -s exec vitest run a.test.ts; echo "typecheck exit $?"', true],
+    ['an echo of plain words', 'pnpm exec vitest run; echo done', true],
+    ['an echo of a variable', 'pnpm exec vitest run; echo $HOME', false],
+    ['an echo of a substitution', 'pnpm exec vitest run; echo $(id)', false],
+    ['an echo of a backtick substitution', 'pnpm exec vitest run; echo `id`', false],
+    ['an echo redirected to a file', 'pnpm exec vitest run; echo "$?" > f', false],
+    ['an echo of an exit code and a variable', 'pnpm exec vitest run; echo "$? $HOME"', false],
+    ['an echo followed by another command', 'pnpm exec vitest run; echo $?; rm -rf x', false],
+    ['an echo joined by &&', 'pnpm exec vitest run && echo $?', false],
+    ['an echo joined by ||', 'pnpm exec vitest run || echo $?', false],
+    ['an echo joined by a pipe', 'pnpm exec vitest run | echo $?', false],
+    ['an echo that is not first on its line', 'pnpm exec vitest run; ls; echo $?', false],
+    ['a command that is not listed with the echo', 'pnpm exec vitest run; curl x; echo $?', false],
+    ['a lone exit-code echo', 'echo $?', false],
+  ])('%s: %s -> %s', (_name, command, expected) => {
+    expect(matchesAllowedTool('Bash', bash(command), listed, repo.path)).toBe(expected);
+  });
+
+  it.each<[string, string, boolean]>([
+    ['pnpm -s with an unlisted subcommand', 'pnpm -s add evil', false],
+    ['pnpm -s with a listed program', 'pnpm -s exec vitest run', true],
+    ['pnpm -s exec of another program', 'pnpm -s exec evil', false],
+    ['a flag after the subcommand', 'pnpm exec -s vitest', false],
+  ])('against the narrow prefix, %s: %s -> %s', (_name, command, expected) => {
+    expect(matchesAllowedTool('Bash', bash(command), narrow, repo.path)).toBe(expected);
+  });
+
+  it('keeps pnpm -s add evil out of the broad pnpm exec prefix', () => {
+    expect(matchesAllowedTool('Bash', bash('pnpm -s add evil'), listed, repo.path)).toBe(false);
+  });
+
+  it('matches an exact rule with a trailing echo of the exit code', () => {
+    expect(matchesAllowedTool('Bash', bash('make gate; echo $?'), allowed, repo.path)).toBe(true);
+  });
+});
+
+describe('cosmetic forms in stored rules', () => {
+  it.each<[string, string | null]>([
+    ['pnpm -s test', 'pnpm test'],
+    ['pnpm test; echo "exit $?"', 'pnpm test'],
+    ['pnpm -s exec vitest run; echo $?', 'pnpm exec vitest run'],
+    ['pnpm test; echo $HOME', null],
+  ])('commandPrefix of %s is %s', (command, expected) => {
+    expect(commandPrefix(command)).toBe(expected);
+  });
+
+  it('matches a stored pnpm test rule against the silent form with an echo', () => {
+    const rule: PermissionRuleDto = {
+      id: mintId('PermissionRule'),
+      projectId: mintId('Project'),
+      workstreamId: null,
+      toolName: 'Bash',
+      pattern: 'pnpm test',
+      sourceInboxId: null,
+      createdAt: '2026-10-13T12:00:00.000Z',
+    };
+    const req = { toolName: 'Bash', input: { command: 'pnpm -s test --run; echo $?' } };
+    expect(matchPermissionRule(req, [rule])).toBe(rule);
+  });
+});

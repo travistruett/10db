@@ -14,7 +14,13 @@ import {
   stringField,
   stripCommandPrefixes,
 } from '../guard';
-import { isLiteralSegment, plainSegments, type PlainSegment } from './plain-segments';
+import {
+  isLiteralSegment,
+  plainSegments,
+  withoutExitStatusEcho,
+  withoutSilentFlag,
+  type PlainSegment,
+} from './plain-segments';
 
 /** Allow rules injected into every managed session. The guard still checks claims. */
 export function baseAllowedTools(project: Pick<ProjectDto, 'gateCommand'>): string[] {
@@ -158,14 +164,15 @@ function runsOtherCommands(words: readonly string[]): boolean {
 /**
  * The pattern stored by "always allow": the program plus its subcommand when the second word is
  * one, otherwise the segment's whole words, so the rule never covers more than what was shown.
- * Null when the command has a substitution, expansion or redirection, or runs through a wrapper
+ * pnpm's silent flag and a last segment that only echoes the exit status are left out, as the matcher
+ * leaves them out. Null when the command has a substitution, expansion or redirection, or runs through a wrapper
  * with a command-carrying flag: such a command can only be allowed once.
  */
 export function commandPrefix(command: string): string | null {
-  const segments = splitCommand(command);
+  const segments = withoutExitStatusEcho(splitCommand(command));
   const first = segments[0];
   if (first === undefined || !segments.every(isLiteralSegment)) return null;
-  const words = stripCommandPrefixes(first.words);
+  const words = withoutSilentFlag(stripCommandPrefixes(first.words));
   const [head, second] = words;
   if (head === undefined) return null;
   if (second === undefined) return head;

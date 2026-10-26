@@ -27,6 +27,7 @@ import {
 import { TENDB_MCP_SERVER } from './project-mcp';
 import { projectSettingsBillingProblem } from './project-settings';
 import {
+  LanePermissionMode,
   SessionEndReason,
   type SessionAdapter,
   type SessionEvent,
@@ -54,6 +55,8 @@ export interface ClaudeAdapterOptions {
   readonly claudePath: string;
   /** The injected harness plugin directory. */
   readonly pluginDir: string;
+  /** How lane sessions decide permission prompts; `default` when omitted. */
+  readonly permissionMode?: LanePermissionMode;
   readonly logger: Logger;
   /** The SDK's query(); tests pass a scripted one. */
   readonly query?: QueryFn;
@@ -64,6 +67,7 @@ export interface ClaudeAdapterOptions {
 }
 
 interface QueryDeps {
+  readonly permissionMode: LanePermissionMode;
   readonly claudePath: string;
   readonly pluginDir: string;
   readonly abortController: AbortController;
@@ -141,7 +145,7 @@ export function buildQueryOptions(spec: SessionSpec, deps: QueryDeps): Options {
     settings: { autoCompactEnabled: true },
     plugins: [{ type: 'local', path: deps.pluginDir }],
     allowedTools: [...spec.allowedTools],
-    permissionMode: 'default',
+    permissionMode: deps.permissionMode,
     canUseTool: async (toolName, input, options) => {
       if (!(await deps.billingVerified) || deps.isRefused())
         return { behavior: 'deny', message: BILLING_UNVERIFIED, interrupt: true };
@@ -300,6 +304,7 @@ function startSession(
   const q = runQuery({
     prompt: input,
     options: buildQueryOptions(spec, {
+      permissionMode: opts.permissionMode ?? LanePermissionMode.Default,
       claudePath: opts.claudePath,
       pluginDir: opts.pluginDir,
       abortController,

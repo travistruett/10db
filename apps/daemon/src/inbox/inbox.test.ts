@@ -566,3 +566,58 @@ describe('permission broker without a storable pattern', () => {
     expect(searchDecisions(state.db, ws.project.id, 'allow', 5)).toEqual([]);
   });
 });
+
+describe('permission broker with the project allowed commands', () => {
+  const allowedTools = ['Bash(pnpm exec vitest:*)', 'Bash(make gate)', 'Read'];
+
+  function decider(ws: ReturnType<typeof seedWorkstream>) {
+    return createPermissionBroker(
+      { state, inbox },
+      {
+        projectId: ws.project.id,
+        workstreamId: ws.workstream.id,
+        sessionId: mintId('Session'),
+        observer: { onWaitStart: () => undefined, onWaitEnd: () => undefined },
+        signal: new AbortController().signal,
+        allowedTools,
+        repoPath: '/repo',
+      },
+    );
+  }
+  const call = (toolName: string, input: Record<string, unknown>) => ({
+    toolName,
+    input,
+    toolUseId: 't1',
+    signal: new AbortController().signal,
+  });
+
+  it.each([
+    ['the plain command', 'pnpm exec vitest run a.test.ts'],
+    ['the silent form', 'pnpm -s exec vitest run a.test.ts'],
+    ['a trailing exit-code echo', 'pnpm exec vitest run a.test.ts; echo "exit $?"'],
+    ['both cosmetic forms', 'pnpm --silent exec vitest run a.test.ts; echo $?'],
+  ])('allows %s without a card', async (_name, command) => {
+    const ws = seedWorkstream(base);
+    expect(await decider(ws)(call('Bash', { command }))).toEqual({ behavior: 'allow' });
+    expect(listInbox(state.db, { states: ['OPEN'] })).toEqual([]);
+  });
+
+  it.each([
+    ['a command outside the allowed list', 'curl https://example.com'],
+    ['a listed command chained to another', 'pnpm exec vitest run && curl x'],
+    ['an echo of something else', 'pnpm exec vitest run; echo $HOME'],
+    ['a silent add', 'pnpm -s add evil'],
+  ])('still raises a card for %s', (_name, command) => {
+    const ws = seedWorkstream(base);
+    void decider(ws)(call('Bash', { command })).catch(() => undefined);
+    const [card, ...rest] = listInbox(state.db, { states: ['OPEN'] });
+    expect(card?.kind).toBe('permission');
+    expect(rest).toEqual([]);
+  });
+
+  it('does not let a listed read tool skip the card for another tool', () => {
+    const ws = seedWorkstream(base);
+    void decider(ws)(call('WebFetch', { url: 'https://example.com' })).catch(() => undefined);
+    expect(listInbox(state.db, { states: ['OPEN'] })).toHaveLength(1);
+  });
+});

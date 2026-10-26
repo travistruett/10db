@@ -217,6 +217,7 @@ async function callHook(record: Record_, toolName: string) {
 const BILLING_PREFLIGHT_MS = 15_000;
 
 const deps = {
+  permissionMode: 'default' as const,
   claudePath: '/usr/local/bin/claude',
   pluginDir: '/harness',
   abortController: new AbortController(),
@@ -285,6 +286,17 @@ describe('buildQueryOptions', () => {
     expect(servers[CLAUDE_MCP_SERVER]).toMatchObject({
       url: 'http://127.0.0.1:4317/mcp',
     });
+  });
+
+  it.each<[string, Parameters<typeof buildQueryOptions>[1]['permissionMode'], string]>([
+    ['default', 'default', 'default'],
+    ['auto', 'auto', 'auto'],
+  ])('uses the %s lane permission mode', (_name, mode, expected) => {
+    const options = buildQueryOptions(spec(), { ...deps, permissionMode: mode });
+    expect(options.permissionMode).toBe(expected);
+    // The guard and the broker stay wired in either mode.
+    expect(options.canUseTool).toBeTypeOf('function');
+    expect(options.hooks?.PreToolUse).toHaveLength(1);
   });
 
   it('resumes when the spec names a provider session', () => {

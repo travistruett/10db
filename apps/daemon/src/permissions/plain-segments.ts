@@ -88,6 +88,44 @@ export function isPlainSegment(segment: ShellSegment): boolean {
   return isLiteralSegment(segment) && !prefixFacts(segment.words).assignment;
 }
 
+const PNPM_SILENT_FLAGS = new Set(['-s', '--silent']);
+
+/** pnpm's global silent flag before the subcommand only changes how much it prints. */
+export function withoutSilentFlag(words: readonly string[]): string[] {
+  const [head, ...rest] = words;
+  if (head !== 'pnpm') return [...words];
+  let skip = 0;
+  while (PNPM_SILENT_FLAGS.has(rest[skip] ?? '')) skip += 1;
+  return [head, ...rest.slice(skip)];
+}
+
+/**
+ * Whether the segment is `echo` whose words carry no expansion but `$?`, so it only prints the exit
+ * status of the command before it. A backtick, a `$(`, any other `$`, a redirection or a backslash
+ * is not cosmetic.
+ */
+function isExitStatusEcho(segment: ShellSegment): boolean {
+  const [head, ...rest] = segment.words;
+  return (
+    head === 'echo' &&
+    segment.separator === '' &&
+    rest.every((word) => !/[$`<>\\]/.test(word.replaceAll('$?', '')))
+  );
+}
+
+/**
+ * The command's segments without a last segment that only echoes the exit status. The echo must
+ * be joined by `;` and nothing may follow it; every other joiner keeps it, so it is judged as any
+ * other command.
+ */
+export function withoutExitStatusEcho(segments: readonly ShellSegment[]): ShellSegment[] {
+  const last = segments.at(-1);
+  const before = segments.at(-2);
+  if (last === undefined || before === undefined) return [...segments];
+  if (before.separator !== ';' || !isExitStatusEcho(last)) return [...segments];
+  return [...segments.slice(0, -2), { ...before, separator: '' }];
+}
+
 export interface PlainSegment {
   /** The command as the shell runs it, with wrappers and path prefixes removed. */
   readonly line: string;
@@ -97,10 +135,10 @@ export interface PlainSegment {
 
 /** The command's segments when every one is plain; null when any segment could do more than it says. */
 export function plainSegments(command: string): PlainSegment[] | null {
-  const segments = splitCommand(command);
+  const segments = withoutExitStatusEcho(splitCommand(command));
   if (segments.length === 0 || !segments.every(isPlainSegment)) return null;
   return segments.map((s) => {
-    const words = stripCommandPrefixes(s.words);
+    const words = withoutSilentFlag(stripCommandPrefixes(s.words));
     return { line: words.join(' '), words, separator: s.separator };
   });
 }

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { LanePermissionMode } from './sessions';
 
 export const LogLevel = {
   Fatal: 'fatal',
@@ -27,6 +28,9 @@ const DaemonEnv = z.object({
     .optional(),
   // Absolute path to the claude binary; otherwise it is found on the login shell's PATH.
   TENDB_CLAUDE_PATH: z.string().startsWith('/').optional(),
+  // How lane sessions decide permission prompts: `auto` lets Claude Code's classifier approve routine
+  // calls. The guard's refusals still apply first and escalated calls still become cards.
+  TENDB_LANE_PERMISSION_MODE: z.enum(LanePermissionMode).default(LanePermissionMode.Default),
   // Set by the desktop shell: the daemon runs its normal shutdown when stdin reaches EOF, which is how
   // it learns the shell died without a clean Quit.
   TENDB_PARENT_STDIN: z.enum(['0', '1']).optional(),
