@@ -70,7 +70,7 @@ export interface TestEngine {
 export async function createTestEngine(
   book: FakeScriptBook,
   project: Partial<ProjectInput> = {},
-  runnerOverrides: Partial<Pick<RunnerOptions, 'afterSession' | 'sessionEnv'>> = {},
+  runnerOverrides: Partial<Pick<RunnerOptions, 'afterSession' | 'sessionEnv' | 'logger'>> = {},
 ): Promise<TestEngine> {
   const repo = createTempRepo();
   const data = tempDir('engine-data');

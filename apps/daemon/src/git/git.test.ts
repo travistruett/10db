@@ -15,7 +15,7 @@ import {
 } from '../../test/fixtures';
 import type { TempDir } from '../../test/fixtures';
 import { alive } from '../../test/orphan-gate';
-import { installPrePushHook } from '../../test/pre-push-hook';
+import { installPrePushHook, writePrePushHook } from '../../test/pre-push-hook';
 import { createGit, GitNetworkError } from './index';
 
 const git = createGit();
@@ -321,6 +321,30 @@ describe('network calls', () => {
     const failure = git.push(remote.repo.path, '10db/x-0a1b2c3d', net);
     await expect(failure).rejects.toMatchObject({ name: 'GitNetworkError', kind: 'rejected' });
     expect(origin('rev-parse', 'refs/heads/10db/x-0a1b2c3d')).toBe(theirs);
+  });
+
+  it('reports how long a push ran and what git and its pre-push hook printed', async () => {
+    await git.switchNewBranch(remote.repo.path, '10db/x-0a1b2c3d', 'main');
+    writePrePushHook(remote.repo.path, 'echo "hook: 3 checks passed"; echo "hook: lint warns" >&2');
+    const run = await git.push(remote.repo.path, '10db/x-0a1b2c3d', net);
+    expect(run.durationMs).toBeGreaterThanOrEqual(0);
+    expect(run.output).toContain('hook: 3 checks passed');
+    expect(run.output).toContain('hook: lint warns');
+  });
+
+  it('gives a rejected push its duration and what git printed', async () => {
+    pushFromElsewhere('10db/x-0a1b2c3d', 'theirs.txt');
+    await git.switchNewBranch(remote.repo.path, '10db/x-0a1b2c3d', 'main');
+    writeFileSync(join(remote.repo.path, 'ours.txt'), 'ours');
+    local('add', 'ours.txt');
+    local('commit', '-q', '-m', 'Add ours');
+    const error: unknown = await git
+      .push(remote.repo.path, '10db/x-0a1b2c3d', net)
+      .catch((caught: unknown) => caught);
+    if (!(error instanceof GitNetworkError)) throw new Error('expected the push to be refused');
+    expect(error.kind).toBe('rejected');
+    expect(error.durationMs).toBeGreaterThanOrEqual(0);
+    expect(error.output).toContain('rejected');
   });
 
   it('times out a fetch that hangs', async () => {

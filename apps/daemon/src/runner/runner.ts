@@ -1153,10 +1153,12 @@ export function createRunner(opts: RunnerOptions): Runner {
     ctl.gateAbort = gateAbort;
     if (ctl.stopReason === 'cancelled' || ctl.stopReason === 'shutdown') gateAbort.abort();
     let recording: Promise<void> = Promise.resolve();
+    const logPath = join(opts.dataDir, 'logs', 'gate', `${id}-${String(run)}.log`);
+    opts.logger.info({ workstreamId: id, command: project.gateCommand, logPath }, 'gate started');
     const result = await opts.gate.run({
       repo: project.repoPath,
       command: project.gateCommand,
-      logPath: join(opts.dataDir, 'logs', 'gate', `${id}-${String(run)}.log`),
+      logPath,
       timeoutMs: opts.limits.gateTimeoutMs,
       // The session environment is complete (login shell plus billing mode); the daemon's own
       // process.env never reaches a project's gate.
@@ -1172,6 +1174,17 @@ export function createRunner(opts: RunnerOptions): Runner {
       },
     });
     ctl.gateAbort = null;
+    opts.logger.info(
+      {
+        workstreamId: id,
+        exitCode: result.exitCode,
+        durationMs: result.durationMs,
+        logPath: result.logPath,
+        timedOut: result.timedOut,
+        aborted: result.aborted,
+      },
+      'gate finished',
+    );
     await recording.catch(() => undefined);
     opts.state.write((ctx) => {
       patchWorkstream(ctx, id, ctl.fence, { gatePid: null, gatePidStart: null });

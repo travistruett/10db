@@ -180,6 +180,10 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
         transitionBatch(w, batchId, { to: BatchState.Open, reason: 'branch cut' });
         for (const [taskId, plan] of plans) insertPlannedWorkstream(w, taskId, plan, batchId);
       });
+      ctx.logger.info(
+        { batchId, projectId: project.id, branch, baseSha, repo },
+        'batch branch cut',
+      );
       ctx.onWorkQueued();
     } catch (error) {
       if (!stopped()) refuse(startCards.notStarted(error));

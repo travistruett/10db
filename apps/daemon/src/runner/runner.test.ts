@@ -17,6 +17,7 @@ import { RESULT_NUDGE } from '../briefing';
 import type { SessionHandle } from '../sessions';
 import { handoffArgs, waitFor } from '../../test/fixtures';
 import { createTestEngine, type TestEngine } from '../../test/engine';
+import { captureLogs } from '../../test/log-capture';
 
 let engine: TestEngine;
 afterEach(async () => {
@@ -71,6 +72,36 @@ const transitions = (id: Parameters<typeof getWorkstream>[1]) =>
     );
 
 describe('runner', () => {
+  it("logs each gate run's start and end, with its exit code, duration and log path", async () => {
+    const logs = captureLogs();
+    engine = await createTestEngine(
+      { Alpha: [[write('src/api/a.txt'), commit('op-alpha-log-1', ['src/api/a.txt']), turn]] },
+      {},
+      { logger: logs.logger },
+    );
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+
+    const [gate] = listEvidence(engine.store.db, workstream.id);
+    const gateLines = logs.lines().filter((line) => String(line['msg']).startsWith('gate '));
+    expect(gateLines.map((line) => line['msg'])).toEqual(['gate started', 'gate finished']);
+    const [started, finished] = gateLines;
+    expect(started).toMatchObject({
+      workstreamId: workstream.id,
+      command: 'true',
+      logPath: gate?.logPath,
+    });
+    expect(finished).toMatchObject({
+      workstreamId: workstream.id,
+      exitCode: 0,
+      logPath: gate?.logPath,
+      timedOut: false,
+      aborted: false,
+    });
+    expect(typeof finished?.['durationMs']).toBe('number');
+  });
+
   it('runs a task to DONE with gate evidence, and the guard blocks an out-of-claim write', async () => {
     engine = await createTestEngine({
       Alpha: [

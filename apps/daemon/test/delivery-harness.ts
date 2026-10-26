@@ -45,6 +45,7 @@ import { seedTeam } from '../src/team';
 import { createGateRunner } from '../src/verify';
 import { measureForTests } from './catalogue';
 import { FakeGh } from './fake-gh';
+import { captureLogs, type LogCapture } from './log-capture';
 import {
   createTempClone,
   createTempRepoWithOrigin,
@@ -84,6 +85,8 @@ export interface DeliveryHarness {
   readonly gh: FakeGh;
   readonly jobs: DeliveryJobs;
   readonly ctx: DeliveryContext;
+  /** The delivery logger's lines: what daemon.log says about cuts, gates, pushes and PRs. */
+  readonly logs: LogCapture;
   readonly starter: BatchStarter;
   readonly shipper: Shipper;
   /** Where the shipper writes PR bodies and gate logs. */
@@ -153,13 +156,14 @@ export function createDeliveryHarness(
     ],
     ...project,
   });
+  const logs = captureLogs();
   const ctx: DeliveryContext = {
     state,
     git,
     gh,
     inbox,
     jobs,
-    logger: silentLogger,
+    logger: logs.logger,
     limits: {
       ...DEFAULT_DELIVERY_LIMITS,
       networkTimeoutMs: opts.networkTimeoutMs ?? 10_000,
@@ -197,6 +201,7 @@ export function createDeliveryHarness(
     gh,
     jobs,
     ctx,
+    logs,
     starter: createBatchStarter(ctx),
     shipper,
     dataDir: data.path,
