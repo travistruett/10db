@@ -180,9 +180,11 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           packageCacheDir: cacheDir,
           allowedDomains: hosts,
           readList,
-          // Read-only: the daemon's unsandboxed git follows a worktree's `commondir`, `gitdir` and
-          // `config.worktree`, so a lane that could write its git dir could aim that git at a
-          // config it wrote. Lanes commit through the daemon.
+          // Read-only common dir: the daemon's unsandboxed git follows a worktree's `commondir`,
+          // `gitdir` and `config.worktree`. Claude Code opens the worktree's own git dir for writing
+          // anyway and denies `commondir` and `config.worktree` there; `denyWrites` closes `gitdir`.
+          // `HEAD` and `index` stay writable, so the daemon's git must check them. Lanes commit
+          // through the daemon.
           // The env file is read to set up each command's shell, in case that happens in the sandbox.
           extraReads: [envFile, ...(linkedWorktree ? [commonDir] : [])],
           extraWrites: [],

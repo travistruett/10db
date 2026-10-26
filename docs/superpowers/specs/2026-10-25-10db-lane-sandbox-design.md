@@ -99,7 +99,7 @@ These get numbers when they are recorded in `docs/architecture/decisions.md`.
   with `Operation not permitted`, the lane reports it, and the builder adds the path in Settings.
 - **Package caches are per project.** A lane writes only the checkout and its temp directory, so npm's cache and
   pnpm's store, state and cache directories live under `~/Library/Caches/10db/projects/<project id>` (the
-  builder's choice), not in the shared `~/.npm` or `~/Library/pnpm`. npm installs with its cache there. pnpm 12's
+  builder's choice), not in the shared `~/.npm` or `~/Library/pnpm`. npm's cache env points there (built); an install with that cache is unmeasured, though spike 14 check 9 measured one with the cache in the checkout. pnpm 12's
   `add` still fails on its store lock inside the sandbox (spike 14 check 9; where pnpm takes the lock is
   unknown), so a pnpm dependency change can't run in a lane yet. Its hazard card says so.
 - **A project with server tests turns loopback on** (D15), and accepts what that opens. A project whose tests read
@@ -109,7 +109,7 @@ These get numbers when they are recorded in `docs/architecture/decisions.md`.
 
 ## 5. Sequencing
 
-Slice 1, **built** (§7), is steps D1–D4 and part of D5, D8, D14 and D15 of the plan below, behind a switch.
+Slice 1, **built** (§7), is D1–D4, D8 and D14, and part of D5 and D15, of the plan below, behind a switch.
 
 1. **Accounts first.** The accounts branch finishes with a re-scoped guard task in place of the rest of Task 7:
    - the permission matcher fails closed on an uncertain parse, and an escaped space no longer joins words;
@@ -166,6 +166,11 @@ Slice 1 runs a lane's Bash and file tools under the sandbox when `TENDB_LANE_SAN
 | D4       | built | Behind the switch: `settingSources: []`, and the billing check on the repo's settings file is skipped for sandboxed sessions. The briefing points the lane at `AGENTS.md`. |
 | D5       | partly | Behind the switch, Bash children get an allowlist of names, and every other name, an account's own included, is denied in `credentials.envVars`. The claude process keeps the login environment, and the gate's environment is designed. |
 | D8       | built | Behind the switch. A Grep, Glob or LS of a directory that holds a protected root is refused with no card, which narrows this decision's "anything else goes to the broker". |
+| D10      | stands | The claude process stays outside the sandbox; the file tools' boundary is software (threat model §7). |
 | D14      | partly | Built for lanes (see D14). The gate's directory is designed. |
 | D15      | partly | Loopback is the daemon-wide `TENDB_LANE_SANDBOX_LOOPBACK` switch, off by default. The per-project Settings form is designed. |
 | D6, D7, D9, D11, D12, D13, D16, D17, D18 | designed | The gate and repo MCP servers under `srt`, the safe reader, the guard's retirement, the daemon's git pinning, the secret scan, the CI card and the takeover rule. |
+
+Not closed by slice 1: `.git/` files nobody probed in an ordinary checkout, such as `.git/info/attributes`, which can
+select an already configured filter driver for the daemon's unsandboxed git. D13 closes them. Re-run the live test
+after each Claude Code or SDK upgrade.
