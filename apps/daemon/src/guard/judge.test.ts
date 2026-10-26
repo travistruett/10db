@@ -960,6 +960,45 @@ describe('rm -r arguments beyond a plain path', () => {
       'a here-doc in a command substitution that eval runs',
       'eval "$(cat <<\'EOF\'\n{rm -rf .git}\nEOF\n)"',
     ],
+    [
+      'a here-doc in an if whose fi is redirected to a process substitution',
+      "if true; then cat <<'EOF'\n{rm -rf .git}\nEOF\nfi > >(zsh)",
+    ],
+    [
+      'a here-doc in a for whose done is redirected to a process substitution',
+      "while false; do :; done; for i in 1; do tee <<'EOF'\n{rm -rf .git}\nEOF\ndone > >(zsh)",
+    ],
+    [
+      'a here-doc in a for whose done is piped',
+      "for i in 1; do cat <<'EOF'\n{rm -rf .git}\nEOF\ndone | zsh",
+    ],
+    [
+      'a here-doc in an if whose fi is piped',
+      "if true; then cat <<'EOF'\n{rm -rf .git}\nEOF\nfi | zsh",
+    ],
+    [
+      'a here-doc after an earlier process substitution',
+      "true > >(zsh); cat <<'EOF'\n{rm -rf .git}\nEOF",
+    ],
+    ['a here-doc after a coproc', "coproc zsh; cat <<'EOF'\n{rm -rf .git}\nEOF"],
+    [
+      'a here-doc in a group piped after a line continuation',
+      "{ cat <<'EOF'\n{rm -rf .git}\nEOF\n} \\\n| zsh",
+    ],
+    [
+      'a here-doc in a group piped after a redirection and a newline',
+      "{ cat <<'EOF'\n{rm -rf .git}\nEOF\n} 2>/dev/null |\nzsh",
+    ],
+    [
+      'a here-doc in a command substitution that sh -c runs',
+      'sh -c "$(cat <<\'EOF\'\n{rm -rf .git}\nEOF\n)"',
+    ],
+    [
+      'a here-doc in a command substitution piped into a shell',
+      'echo "$(cat <<\'EOF\'\n{rm -rf .git}\nEOF\n)" | zsh',
+    ],
+    ['a zero-padded sequence, which only zsh pads', 'echo {01..10}'],
+    ['a stepped sequence, which bash 3.2 keeps literal', 'echo {1..5..2}'],
     ['a psql here-doc, whose meta-commands run shell', "psql <<'EOF'\n{rm -rf .git}\nEOF"],
     [
       'a sqlite3 here-doc, whose meta-commands run shell',
@@ -982,7 +1021,23 @@ describe('rm -r arguments beyond a plain path', () => {
     ['a brace list hiding the sign-in beside a quoted brace', "cat {~/.claude.json,'{'}"],
     ['a brace list hiding the sign-in beside a quoted close', "cat {~/.claude.json,'}'}"],
     ['a cp source hidden beside a quoted brace', "cp {~/.claude.json,'{'} x"],
+    ['a brace list hiding the sign-in after an astral character', 'cat {~/.claude.json,😀}'],
+    ['a brace list splitting sudo beside an astral character', 'env {sudo,ls,😀}'],
+    ['a brace list splitting rm beside an astral character', 'env {rm,-rf,.git,😀}'],
   ])('denies %s, which brace expansion reveals', (_name, command) => {
+    expect(run(command).decision).toBe('deny');
+  });
+
+  it.each([
+    [
+      'a here-doc in a command substitution run as the command',
+      '"$(cat <<\'EOF\'\n{rm -rf .git}\nEOF\n)"',
+    ],
+    [
+      'a here-doc after an exec to a process substitution',
+      "exec 3> >(zsh); cat <<'EOF' >&3\n{rm -rf .git}\nEOF",
+    ],
+  ])('denies %s', (_name, command) => {
     expect(run(command).decision).toBe('deny');
   });
 
@@ -1094,6 +1149,15 @@ describe('rm -r arguments beyond a plain path', () => {
     "git log --format='{%h,%s}'",
     'for i in {1..100}; do echo $i; done',
     'echo {a..z}',
+    'echo {0..3}',
+    'curl -s -X POST localhost:3000/api -d "$(cat <<\'EOF\'\n{ "name": "x" }\nEOF\n)"',
+    'node -e "$(cat <<\'EOF\'\nconst x = { a: 1 };\nconsole.log(x);\nEOF\n)"',
+    'jq -n --argjson x "$(cat <<\'EOF\'\n{ "a": 1 }\nEOF\n)" \'$x\'',
+    'echo "$(cat <<\'EOF\'\n{\n}\nEOF\n)"',
+    '{ cat <<\'EOF\'\n{ "a": 1 }\nEOF\n} > out.json',
+    "( cat <<'EOF'\nconst x = { a: 1 };\nEOF\n) > a.ts",
+    "cat <<'EOF' > a.ts || echo failed\nconst x = { a: 1 };\nEOF",
+    "{ cat <<'EOF'\nconst x = { a: 1 };\nEOF\n} || true",
   ])('allows %s', (command) => {
     expect(run(command)).toEqual({ decision: 'allow' });
   });

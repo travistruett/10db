@@ -27,6 +27,7 @@ import {
 } from './paths';
 import { readOnlyShellRefusal } from './read-only';
 import {
+  commandName,
   findExecCommands,
   leadingWords,
   parseShell,
@@ -313,6 +314,8 @@ const DIRECTORY_CHANGES: ReadonlySet<string> = new Set(['cd', 'pushd', 'popd']);
 /** The command a segment runs, past reserved words, assignments and wrappers. */
 function commandOf(segment: ShellSegment): {
   readonly words: string[];
+  /** The command word as written, before its path is dropped: `$(…)` when a substitution runs. */
+  readonly commandWord: string;
   readonly negated: boolean;
   readonly outOfOrder: boolean;
   /** env hides the command it runs: a split string, or a long option not spelled in full. */
@@ -321,11 +324,15 @@ function commandOf(segment: ShellSegment): {
   readonly hiddenByRedirection: boolean;
 } {
   const leading = leadingWords(segment.words);
+  const command = stripCommandPrefixes(leading.command, {
+    lookThroughRunners: true,
+    skipRedirections: true,
+    keepCommandPath: true,
+  });
+  const head = command[0];
   return {
-    words: stripCommandPrefixes(leading.command, {
-      lookThroughRunners: true,
-      skipRedirections: true,
-    }),
+    words: head === undefined ? command : [commandName(head), ...command.slice(1)],
+    commandWord: head ?? '',
     negated: leading.negated,
     outOfOrder: leading.outOfOrder,
     hiddenByEnv: hidesEnvCommand(leading.command),
@@ -382,12 +389,46 @@ const DATA_READERS: ReadonlySet<string> = new Set([
   'git',
 ]);
 
+/** Commands that run a substitution's output as shell. */
+const SHELL_RUNNERS: ReadonlySet<string> = new Set([
+  ...SHELLS,
+  'dash',
+  'ksh',
+  'eval',
+  'source',
+  '.',
+]);
+/** Reserved words that close a loop or a conditional; piped, the body's output reaches the pipe. */
+const BODY_CLOSERS: ReadonlySet<string> = new Set(['done', 'fi', 'esac']);
+const ANGLE = /[<>]/;
+
+/**
+ * Whether the command, its substitutions and here-documents included, sets output up to reach
+ * another process in a way one segment does not show: a `>(…)` or `<(…)` anywhere, an `exec` with
+ * a redirection, a `coproc`, or a loop or conditional whose close pipes onward. Then no
+ * here-document in the whole command is data.
+ */
+function forwardsOutput(segments: readonly ShellSegment[]): boolean {
+  return segments.some((segment) => {
+    const exec = segment.words.findIndex((w) => commandName(w) === 'exec');
+    return (
+      segment.processSubstitution ||
+      segment.words.includes('coproc') ||
+      (exec !== -1 && segment.words.slice(exec + 1).some((w) => ANGLE.test(w))) ||
+      (BODY_CLOSERS.has(segment.words[0] ?? '') && segment.separator === '|') ||
+      [...segment.nested, ...segment.hereDocuments].some((body) =>
+        forwardsOutput(parseShell(body).segments),
+      )
+    );
+  });
+}
+
 interface NestedScript {
   /** The script is a here-document body read as data, so a brace in it is not group syntax. */
   readonly bracesAsData?: boolean;
   /**
-   * The script's output reaches another command (a `$(…)` or process substitution body), so a
-   * here-document a data reader takes in it may still run as shell elsewhere.
+   * The script's output reaches a shell (a substitution a shell runs, or a command that forwards
+   * output), so a here-document a data reader takes in it may still run as shell elsewhere.
    */
   readonly forwarded?: boolean;
 }
@@ -400,8 +441,8 @@ function judgeShell(
   nested: NestedScript = {},
 ): GuardVerdict {
   const bracesAsData = nested.bracesAsData === true;
-  const forwarded = nested.forwarded === true;
   const parse = parseShell(command);
+  const forwarded = nested.forwarded === true || forwardsOutput(parse.segments);
   const segments = parse.segments.map((segment) => ({ segment, ...commandOf(segment) }));
   const ordered = parse.certain && !segments.some((s) => s.outOfOrder);
   const named = ordered ? [] : directoriesNamed(parse.segments);
@@ -415,7 +456,8 @@ function judgeShell(
   // The subshells the previous segment ran in, each with what was possible outside it.
   const subshells: { readonly id: number; readonly possible: Dir[] }[] = [];
   let previousSeparator = '';
-  for (const { segment, words, negated, hiddenByEnv, hiddenByRedirection } of segments) {
+  for (const [index, entry] of segments.entries()) {
+    const { segment, words, commandWord, negated, hiddenByEnv, hiddenByRedirection } = entry;
     if (ordered) {
       let left = false;
       while (
@@ -447,16 +489,25 @@ function judgeShell(
         'env -S, or an env option not spelled in full, hides the command it runs. Run the command itself instead.',
       );
     const scripts = [...segment.nested, ...segment.hereDocuments];
-    // Substitutions always run as shell, and their output reaches this command line.
+    // Substitutions always run as shell. Their output reaches a shell when the substitution is the
+    // command, the command is a shell runner, or the segment pipes into one; a data here-document
+    // inside one keeps its relaxed brace rule otherwise (`curl -d "$(cat <<EOF …)"`).
+    const nextHead = segments[index + 1]?.words[0] ?? '';
+    const runsSubstitutions =
+      /\$\(|`/.test(commandWord) ||
+      SHELL_RUNNERS.has(head) ||
+      (segment.separator === '|' && SHELL_RUNNERS.has(nextHead));
     for (const body of segment.nested) {
-      const verdict = judgeShell(input, body, depth, dirs, { forwarded: true });
+      const verdict = judgeShell(input, body, depth, dirs, {
+        forwarded: forwarded || runsSubstitutions,
+      });
       if (verdict.decision === 'deny') return verdict;
     }
     // A here-document body is always judged as shell. Its braces are data only when a known data
-    // reader takes it and the segment's output is not forwarded (a pipe, a process substitution, a
-    // group or subshell that is piped, a substitution body), so an interpreter reached through a
-    // wrapper or a pipeline, or a body that reaches a shell through the reader's output, is still
-    // judged with the brace-group rule.
+    // reader takes it and its output is not forwarded (a pipe, a process substitution, a group or
+    // subshell that is piped, a substitution a shell runs, or anything `forwardsOutput` finds in
+    // the whole command), so an interpreter reached through a wrapper or a pipeline, or a body
+    // that reaches a shell through the reader's output, is still judged with the brace-group rule.
     const bodyIsData = DATA_READERS.has(head) && !segment.outputForwarded && !forwarded;
     for (const body of segment.hereDocuments) {
       const verdict = judgeShell(input, body, depth, dirs, {

@@ -80,40 +80,35 @@ function firstGroup(text: string): { before: string; body: string; after: string
   return null;
 }
 
-/** A `{n..m}` numeric or `{a..z}` letter sequence body, with an optional step. */
-const SEQUENCE = /^(?:-?\d+\.\.-?\d+|[A-Za-z]\.\.[A-Za-z])(?:\.\.\d+)?$/;
+/**
+ * A `{n..m}` numeric or `{a..z}` letter sequence body that both shells expand the same way. A step
+ * (`{1..9..2}`) and a zero-padded end (`{01..10}`) are left out: bash 3.2 keeps the first literal
+ * and never pads, while zsh expands both, so neither is read the same way.
+ */
+const INTEGER = '-?(?:0|[1-9]\\d*)';
+const SEQUENCE = new RegExp(`^(?:${INTEGER}\\.\\.${INTEGER}|[A-Za-z]\\.\\.[A-Za-z])$`);
+const NUMERIC_SEQUENCE = new RegExp(`^(${INTEGER})\\.\\.(${INTEGER})$`);
+const LETTER_SEQUENCE = /^([A-Za-z])\.\.([A-Za-z])$/;
 
 /**
- * The alternatives of a `{n..m}` or `{a..z}` sequence (with an optional step), the way bash expands
- * it. The count is computed before anything is allocated, so a sequence past `cap` costs nothing;
- * it is null then, and when an end is not a safe integer.
+ * The alternatives of a `{n..m}` or `{a..z}` sequence, the way both shells expand it. The count is
+ * computed before anything is allocated, so a sequence past `cap` costs nothing; it is null then,
+ * and when an end is not a safe integer.
  */
 function expandSequence(body: string, cap: number): string[] | null {
-  const numeric = /^(-?\d+)\.\.(-?\d+)(?:\.\.(-?\d+))?$/.exec(body);
-  const letter = /^([A-Za-z])\.\.([A-Za-z])(?:\.\.(\d+))?$/.exec(body);
-  const range = (
-    from: number,
-    to: number,
-    step: number,
-    render: (code: number) => string,
-  ): string[] | null => {
-    if (!Number.isSafeInteger(from) || !Number.isSafeInteger(to) || !Number.isSafeInteger(step))
-      return null;
-    const by = Math.max(1, Math.abs(step));
-    const count = Math.floor(Math.abs(to - from) / by) + 1;
+  const numeric = NUMERIC_SEQUENCE.exec(body);
+  const letter = LETTER_SEQUENCE.exec(body);
+  const range = (from: number, to: number, render: (code: number) => string): string[] | null => {
+    if (!Number.isSafeInteger(from) || !Number.isSafeInteger(to)) return null;
+    const count = Math.abs(to - from) + 1;
     if (count > cap) return null;
     const direction = from <= to ? 1 : -1;
-    return Array.from({ length: count }, (_, index) => render(from + direction * index * by));
+    return Array.from({ length: count }, (_, index) => render(from + direction * index));
   };
-  if (numeric) {
-    return range(Number(numeric[1]), Number(numeric[2]), Number(numeric[3] ?? '1'), String);
-  }
+  if (numeric) return range(Number(numeric[1]), Number(numeric[2]), String);
   if (letter) {
-    return range(
-      (letter[1] ?? '').charCodeAt(0),
-      (letter[2] ?? '').charCodeAt(0),
-      Number(letter[3] ?? '1'),
-      (code) => String.fromCharCode(code),
+    return range((letter[1] ?? '').charCodeAt(0), (letter[2] ?? '').charCodeAt(0), (code) =>
+      String.fromCharCode(code),
     );
   }
   return null;
@@ -154,8 +149,10 @@ function expandMarked(word: string, loneSequence: boolean): string[] | null {
     if (sequence.some((piece) => `${group.before}${piece}`.startsWith('-'))) return null;
     pieces = sequence;
   } else {
-    // zsh reads a sequence whose dots are quoted (`{1'..'3}`) while bash keeps it literal.
-    if (SEQUENCE.test(restoreLiterals(group.body))) return null;
+    // A body with `..` that is not a sequence the function models exactly is unread, never
+    // literal: a stepped or zero-padded sequence, a malformed one (`{1..}`), or one whose dots are
+    // quoted (`{1'..'3}`, which zsh expands and bash keeps).
+    if (restoreLiterals(group.body).includes('..')) return null;
     // A single-element or malformed brace is literal; a nested brace in it is not modelled.
     if (group.body.includes('{')) return null;
     const rest = expandMarked(group.after, loneSequence);
@@ -173,22 +170,23 @@ function expandMarked(word: string, loneSequence: boolean): string[] | null {
 }
 
 /**
- * Expands one shell word's brace expressions the way bash does: comma lists (nested and empty
- * alternatives included) and `{n..m}`/`{a..z}` sequences, with its step. `mask` is the word with
- * every quoted or escaped character blanked to NUL: a brace, comma or dot blanked there is literal
- * text, never brace syntax, as the shell reads it. A single-element or malformed brace (`{0}`,
- * `{}`, `stash@{0}`) stays literal, as both shells leave it. Null when the expansion runs past the
- * caps (64 alternatives, or 4096 for a lone sequence with no other brace group in the word), a
- * sequence yields a word starting with `-`, or a literal brace holds a nested brace the function
- * does not model. zsh does not expand every sequence; bash's expansion is the superset, so the
- * guard judges that.
+ * Expands one shell word's brace expressions the way both shells do: comma lists (nested and empty
+ * alternatives included) and plain `{n..m}`/`{a..z}` sequences. `mask` is the word with every
+ * quoted or escaped character blanked to NUL: a brace, comma or dot blanked there is literal text,
+ * never brace syntax, as the shell reads it. A single-element or malformed brace without `..`
+ * (`{0}`, `{}`, `stash@{0}`) stays literal, as both shells leave it. Null when the expansion runs
+ * past the caps (64 alternatives, or 4096 for a lone sequence with no other brace group in the
+ * word), a sequence yields a word starting with `-`, a body holds a `..` the function does not
+ * model exactly, or a literal brace holds a nested brace.
  */
 export function expandBraceWord(word: string, mask: string = word): string[] | null {
   // A word that already holds a stand-in cannot be told apart from its quoted form.
   if (HOLDS_STAND_IN.test(word)) return null;
-  const marked = Array.from(word, (ch, at) =>
-    mask.charAt(at) === ch ? ch : (STAND_INS.get(ch) ?? ch),
-  ).join('');
+  // Positions are UTF-16 units, as the mask counts them (an astral character is two).
+  const marked = Array.from({ length: word.length }, (_, at) => {
+    const ch = word.charAt(at);
+    return mask.charAt(at) === ch ? ch : (STAND_INS.get(ch) ?? ch);
+  }).join('');
   const groups = marked.split('{').length - 1;
   if (groups > MAX_BRACE_GROUPS) return null;
   const loneSequence = groups === 1 && SEQUENCE.test(firstGroup(marked)?.body ?? '');

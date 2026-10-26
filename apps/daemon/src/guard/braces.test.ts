@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { expandBraceWord } from './braces';
 
 /**
- * One row per brace form. `words` is what bash expands the word to; `null` means the expansion runs
- * past the caps and is unread. A single-element or malformed brace stays literal, as both shells
- * leave it. Checked by hand with `printf '<%s>' <word>` under bash and zsh.
+ * One row per brace form. `words` is what bash expands the word to; `null` means the expansion is
+ * unread: past the caps, or a `..` body the two shells read differently (bash 3.2 keeps a stepped
+ * sequence literal and never zero-pads, zsh expands both). A single-element or malformed brace
+ * without `..` stays literal, as both shells leave it. Checked by hand with `printf '<%s>' <word>`
+ * under `/bin/bash` 3.2 and `/bin/zsh -f` 5.9.
  */
 const ROWS: { name: string; word: string; words: string[] | null }[] = [
   { name: 'a plain word', word: 'README.md', words: ['README.md'] },
@@ -15,14 +17,24 @@ const ROWS: { name: string; word: string; words: string[] | null }[] = [
   { name: 'a nested list', word: '{a,{b,c}}', words: ['a', 'b', 'c'] },
   { name: 'a numeric sequence', word: '{1..3}', words: ['1', '2', '3'] },
   { name: 'a descending sequence', word: '{3..1}', words: ['3', '2', '1'] },
-  { name: 'a stepped sequence', word: '{1..5..2}', words: ['1', '3', '5'] },
+  { name: 'a stepped sequence, literal in bash 3.2', word: '{1..5..2}', words: null },
+  { name: 'a sequence with a + step', word: '{1..3..+1}', words: null },
+  { name: 'a sequence with a - step', word: '{1..3..-1}', words: null },
+  { name: 'a letter sequence with a - step', word: '{a..e..-1}', words: null },
+  { name: 'a zero-padded sequence, padded only by zsh', word: '{01..10}', words: null },
+  { name: 'a sequence padded at its end', word: '{10..01}', words: null },
+  { name: 'a negative zero-padded sequence', word: '{-01..1}', words: null },
+  { name: 'a sequence from zero', word: '{0..3}', words: ['0', '1', '2', '3'] },
+  { name: 'a sequence with a zero step', word: '{1..5..0}', words: null },
+  { name: 'a letter sequence with a letter step', word: '{a..b..c}', words: null },
+  { name: 'a sequence with no end', word: '{1..}', words: null },
   { name: 'a letter sequence', word: '{a..c}', words: ['a', 'b', 'c'] },
   { name: 'a single-element brace stays literal', word: 'stash@{0}', words: ['stash@{0}'] },
   { name: 'an empty brace stays literal', word: '{}', words: ['{}'] },
   { name: 'a flag with an empty brace', word: '-I{}', words: ['-I{}'] },
   { name: 'an unbalanced open stays whole', word: '{rm', words: ['{rm'] },
   { name: 'an unbalanced close stays whole', word: 'a}', words: ['a}'] },
-  { name: 'a malformed sequence stays literal', word: '{a..}', words: ['{a..}'] },
+  { name: 'a malformed sequence is unread', word: '{a..}', words: null },
   {
     name: 'a sequence of 65',
     word: '{1..65}',
@@ -40,11 +52,14 @@ const ROWS: { name: string; word: string; words: string[] | null }[] = [
 
 /**
  * The word as written and its mask: the same text with every quoted or escaped character blanked to
- * NUL, so only the braces, commas and dots the shell reads as brace syntax remain.
+ * NUL, so only the braces, commas and dots the shell reads as brace syntax remain. Positions are
+ * UTF-16 units, as the scanner's mask counts them.
  */
 const masked = (word: string, quotedAt: readonly number[]): { word: string; mask: string } => ({
   word,
-  mask: Array.from(word, (ch, at) => (quotedAt.includes(at) ? '\0' : ch)).join(''),
+  mask: Array.from({ length: word.length }, (_, at) =>
+    quotedAt.includes(at) ? '\0' : word.charAt(at),
+  ).join(''),
 });
 
 /** Rows whose quoted characters (checked under bash and zsh) are literal, never brace syntax. */
@@ -87,6 +102,17 @@ const MASKED_ROWS: { name: string; word: string; mask: string; words: string[] |
   },
   // zsh reads `{1'..'3}` as a sequence while bash keeps it literal, so it is unread.
   { name: 'a sequence with quoted dots', ...masked('{1..3}', [2, 3]), words: null },
+  // An astral character is two UTF-16 units; the braces after it still line up with the mask.
+  {
+    name: 'a list after an astral character',
+    ...masked('{😀,a}', []),
+    words: ['😀', 'a'],
+  },
+  {
+    name: 'a quoted brace after an astral alternative',
+    ...masked('{a,😀,{}', [6]),
+    words: ['a', '😀', '{'],
+  },
 ];
 
 describe('expandBraceWord', () => {

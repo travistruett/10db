@@ -33,10 +33,12 @@ export interface ShellSegment {
   readonly bracesCertain: boolean;
   /**
    * The segment's output may reach another command: it pipes onward, it holds a `>(…)` or `<(…)`
-   * process substitution, or it sits in a group or subshell whose close is followed by a pipe or a
-   * process substitution. A here-document it reads as data may then run as shell elsewhere.
+   * process substitution, or it sits in a group or subshell whose close the scanner read a pipe
+   * after. A here-document it reads as data may then run as shell elsewhere.
    */
   readonly outputForwarded: boolean;
+  /** The segment holds a `>(…)` or `<(…)`, which hands what it writes or reads to another command. */
+  readonly processSubstitution: boolean;
 }
 
 /** A command split into the segments it runs. */
@@ -157,7 +159,10 @@ function scan(command: string, from: number, substitution: boolean): Scan {
   // The index of the first segment inside each open group or parenthesis, innermost last.
   const groupStarts: number[] = [];
   const parenStarts: number[] = [];
-  // Segment index ranges inside a group or subshell whose output is piped or substituted.
+  // Segment index ranges of the groups and subshells closed since the last separator: the next
+  // separator the scanner reads decides whether their output is piped.
+  let pendingCloses: [number, number][] = [];
+  // Segment index ranges inside a group or subshell whose output is piped.
   const forwardedRanges: [number, number][] = [];
   let opened = 0;
   let raw = '';
@@ -251,8 +256,14 @@ function scan(command: string, from: number, substitution: boolean): Scan {
         wordsCertain,
         bracesCertain,
         outputForwarded: separator === '|' || processSubstitution,
+        processSubstitution,
       });
     }
+    // The separator the scanner reads after a group or subshell closed decides whether that
+    // group's output is piped. Quotes and line continuations were already read, so `} \<newline>|`
+    // is a pipe and `} '|'` is not. An empty separator is another close or the end.
+    if (separator === '|') forwardedRanges.push(...pendingCloses);
+    if (separator !== '') pendingCloses = [];
     raw = '';
     words = [];
     nested = [];
@@ -261,14 +272,8 @@ function scan(command: string, from: number, substitution: boolean): Scan {
     bracesCertain = true;
     processSubstitution = false;
   };
-  // Whether the rest of the line after a group's or subshell's close at `at` pipes its output on or
-  // sends it to a process substitution. A `||` is not a pipe; reading one as such only refuses more.
-  const forwardsAfter = (at: number): boolean => {
-    const tail = command.slice(at + 1).split(/[\n;]/, 1)[0] ?? '';
-    return /(?<!\|)\|(?!\|)|[<>]\(/.test(tail);
-  };
-  const closeRange = (start: number | undefined, at: number): void => {
-    if (start !== undefined && forwardsAfter(at)) forwardedRanges.push([start, segments.length]);
+  const closeRange = (start: number | undefined): void => {
+    if (start !== undefined) pendingCloses.push([start, segments.length]);
   };
   const withForwarding = (): ShellSegment[] =>
     segments.map((segment, index) =>
@@ -452,7 +457,7 @@ function scan(command: string, from: number, substitution: boolean): Scan {
       if (parens.length > 0) {
         flush(')');
         parens.pop();
-        closeRange(parenStarts.pop(), i);
+        closeRange(parenStarts.pop());
       } else if (substitution) {
         flush('');
         return { segments: withForwarding(), certain, end: i + 1, closed: true };
@@ -471,7 +476,7 @@ function scan(command: string, from: number, substitution: boolean): Scan {
         else openGroups = Math.max(0, openGroups - 1);
         flush('');
         if (ch === '{') groupStarts.push(segments.length);
-        else closeRange(groupStarts.pop(), i);
+        else closeRange(groupStarts.pop());
         continue;
       }
       // A lone brace out of command position is group syntax, relaxed for here-document data.
@@ -606,7 +611,7 @@ const RUNNER_WRAPPERS: ReadonlyMap<string, Wrapper> = new Map([
 ]);
 
 /** A command's name as the shell would run it: `/usr/bin/git` and `\git` are both `git`. */
-function commandName(word: string): string {
+export function commandName(word: string): string {
   return basename(word.replace(/^\\+/, ''));
 }
 
