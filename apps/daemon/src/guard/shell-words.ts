@@ -147,14 +147,51 @@ function scan(command: string, from: number, substitution: boolean): Scan {
 
   // Where in the current word an ANSI-C escape decoded to a newline.
   let decodedNewlines: number[] = [];
+  // The word's characters, with every quoted, escaped or decoded one blanked to NUL, so only the
+  // literal `{ } , ..` the shell reads as brace syntax remain.
+  let wordMask = '';
+  // Brace groups opened by a lone `{` in command position and not yet closed. A `}` ending a word
+  // closes one, which hides where that word really ends.
+  let openGroups = 0;
+  const addWord = (text: string, literal: boolean): void => {
+    word += text;
+    wordMask += literal ? text : '\0'.repeat(text.length);
+    inWord = true;
+  };
   const flushWord = (): void => {
     // A decoded newline is only read the same way at the end of a word (`IFS=$'\n'`).
     if (decodedNewlines.some((at) => at < word.length - 1)) {
       certain = false;
       wordsCertain = false;
     }
+    // zsh may read a brace in a word as a group boundary, where bash keeps it. A `${…}` parameter
+    // expansion's braces are blanked first. The word is uncertain when it holds an unmatched brace
+    // (a `{` that opens a group, or a `}` that closes one opened earlier), or when a balanced
+    // `{…}` stands in command position, where zsh runs it as a one-word group (`{pwd}`). A brace
+    // expansion (a `,` or `..` between the braces) and a balanced `{…}` in an argument (`find {}`,
+    // `echo {x}`) are literal in both shells. A lone brace token is handled above.
+    const braces = wordMask.replace(/\$\{[^{}]*\}/g, (m) => '\0'.repeat(m.length));
+    let pairs = braces.replace(/[^{}]/g, '');
+    for (let prev = ''; pairs !== prev;) {
+      prev = pairs;
+      pairs = pairs.replace('{}', '');
+    }
+    const expansion = /\{[^{}]*(?:,|\.\.)[^{}]*\}/.test(braces);
+    const atCommand = words.every((w) => GROUP_LEADERS.has(w));
+    const unmatchedClose = (pairs.match(/\}/g) ?? []).length;
+    // A `}` that closes an open group, where the word's real end is hidden.
+    const closesGroup = unmatchedClose > 0 && openGroups > 0;
+    if (closesGroup) openGroups = Math.max(0, openGroups - unmatchedClose);
+    if (
+      !expansion &&
+      (pairs.includes('{') || (atCommand && braces.startsWith('{')) || closesGroup)
+    ) {
+      certain = false;
+      wordsCertain = false;
+    }
     if (word !== '') words.push(word);
     word = '';
+    wordMask = '';
     inWord = false;
     decodedNewlines = [];
   };
@@ -177,8 +214,7 @@ function scan(command: string, from: number, substitution: boolean): Scan {
     (words.every((w) => GROUP_LEADERS.has(w)) || (words.length === 2 && words[0] === 'function'));
   const append = (text: string): void => {
     raw += text;
-    word += text;
-    inWord = true;
+    addWord(text, false);
   };
   // A substitution's body runs as commands; its text stays in the word.
   const substitute = (at: number, bodyStart: number): number => {
@@ -197,7 +233,7 @@ function scan(command: string, from: number, substitution: boolean): Scan {
     if (quote === "'") {
       raw += ch;
       if (ch === "'") quote = null;
-      else word += ch;
+      else addWord(ch, false);
       continue;
     }
     if (ch === '\\') {
@@ -212,8 +248,7 @@ function scan(command: string, from: number, substitution: boolean): Scan {
         continue;
       }
       raw += ch + next;
-      word += next;
-      inWord = true;
+      addWord(next, false);
       i += 1;
       continue;
     }
@@ -235,7 +270,7 @@ function scan(command: string, from: number, substitution: boolean): Scan {
     if (quote === '"') {
       raw += ch;
       if (ch === '"') quote = null;
-      else word += ch;
+      else addWord(ch, false);
       continue;
     }
     if (ch === '$' && next === "'") {
@@ -252,13 +287,13 @@ function scan(command: string, from: number, substitution: boolean): Scan {
         certain = false;
         wordsCertain = false;
         raw += text;
-        word += text;
+        addWord(text, false);
       } else {
         // Permission rules match plain text only, so any real escape keeps them away.
         if (ansi.escapes) certain = false;
         decodedNewlines.push(...ansi.newlines.map((at) => word.length + at));
         raw += `'${ansi.text.replaceAll("'", "'\\''")}'`;
-        word += ansi.text;
+        addWord(ansi.text, false);
       }
       inWord = true;
       i = end;
@@ -296,8 +331,18 @@ function scan(command: string, from: number, substitution: boolean): Scan {
       i += 1;
       continue;
     }
-    // A lone `&` backgrounds the command before it; `>&`, `<&` and `&>` are redirections.
-    const redirection = ch === '&' && (before === '>' || before === '<' || next === '>');
+    // zsh's clobber operators `>!`, `>>!`, `&>!`, `2>!` and `>|`: a `!` or `|` straight after a `>`
+    // belongs to the redirection, not a word or a pipe, and bash does not read it, so the segment
+    // is uncertain. The `|` must not split into a pipe.
+    if ((ch === '!' || ch === '|') && before === '>') {
+      certain = false;
+      wordsCertain = false;
+    }
+    // A lone `&` backgrounds the command before it; `>&`, `<&` and `&>` are redirections, and a
+    // `>|` clobber is not a pipe.
+    const redirection =
+      (ch === '&' && (before === '>' || before === '<' || next === '>')) ||
+      (ch === '|' && before === '>');
     if (SEPARATORS.has(ch) && !redirection) {
       flush(ch);
       continue;
@@ -345,6 +390,8 @@ function scan(command: string, from: number, substitution: boolean): Scan {
     // starts. Anywhere else bash passes them as words, while zsh may still read a group there.
     if ((ch === '{' || ch === '}') && !inWord && /^[\s;]?$/.test(next)) {
       if (commandPosition()) {
+        if (ch === '{') openGroups += 1;
+        else openGroups = Math.max(0, openGroups - 1);
         flush('');
         continue;
       }
@@ -355,8 +402,7 @@ function scan(command: string, from: number, substitution: boolean): Scan {
     if (ch === ' ' || ch === '\t') {
       flushWord();
     } else {
-      word += ch;
-      inWord = true;
+      addWord(ch, true);
       lastPlain = ch;
     }
   }

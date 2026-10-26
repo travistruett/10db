@@ -28,9 +28,13 @@ const SIMPLE: Readonly<Record<string, string>> = {
   '?': '?',
 };
 const QUOTES = new Set(['\\', "'", '"']);
-/** The most hex digits `\x`, `\u` and `\U` take. */
-const HEX_DIGITS: Readonly<Record<string, number>> = { x: 2, u: 4, U: 8 };
-const MAX_BYTE = 0o377;
+/** The most hex digits `\u` and `\U` take. */
+const UNICODE_DIGITS: Readonly<Record<string, number>> = { u: 4, U: 8 };
+/**
+ * A `\x` or `\nnn` byte at or above this is uncertain: both shells emit the raw byte, while a code
+ * point above U+007F is a different string. Below it the two agree.
+ */
+const ASCII_MAX = 0x7f;
 const MAX_CODE_POINT = 0x10ffff;
 
 /** One escape after its backslash: the character it decodes to and how many characters it used. */
@@ -41,37 +45,33 @@ function escape(body: string, at: number): { char: string; length: number } | nu
   const octal = /^[0-7]{1,3}/.exec(body.slice(at));
   if (octal) {
     const value = Number.parseInt(octal[0], 8);
-    // bash keeps only the low byte of a larger value; another shell may not.
-    if (value > MAX_BYTE) return null;
-    // `\0` followed by three more octal digits reads differently in zsh.
-    if (
-      octal[0].startsWith('0') &&
-      /^[0-7]/.test(body.slice(at + octal[0].length)) &&
-      octal[0].length === 3
-    )
-      return null;
+    // A byte of 0x80 or more is a raw byte in both shells, not the code point of that value.
+    if (value > ASCII_MAX) return null;
     return { char: String.fromCharCode(value), length: octal[0].length };
   }
-  const digits = HEX_DIGITS[letter];
-  if (digits !== undefined) {
-    const hex = new RegExp(`^[0-9a-fA-F]{1,${String(digits)}}`).exec(body.slice(at + 1));
+  if (letter === 'x') {
+    const hex = /^[0-9a-fA-F]{1,2}/.exec(body.slice(at + 1));
+    if (!hex) return null;
+    // Same raw-byte split as octal.
+    if (Number.parseInt(hex[0], 16) > ASCII_MAX) return null;
+    return { char: String.fromCharCode(Number.parseInt(hex[0], 16)), length: 1 + hex[0].length };
+  }
+  const unicode = UNICODE_DIGITS[letter];
+  if (unicode !== undefined) {
+    const hex = new RegExp(`^[0-9a-fA-F]{1,${String(unicode)}}`).exec(body.slice(at + 1));
     if (!hex) return null;
     const value = Number.parseInt(hex[0], 16);
     if (value > MAX_CODE_POINT || (value >= 0xd800 && value <= 0xdfff)) return null;
     return { char: String.fromCodePoint(value), length: 1 + hex[0].length };
   }
-  if (letter === 'c') {
-    const control = body.charAt(at + 1);
-    if (control === '' || control === '\\' || control.charCodeAt(0) > 0x7f) return null;
-    const value = control === '?' ? 0x7f : control.toUpperCase().charCodeAt(0) & 0x1f;
-    return { char: String.fromCharCode(value), length: 2 };
-  }
+  // `\cX` is a control character in bash but the two characters `cX` in zsh, so it is never exact.
   return null;
 }
 
 /**
- * Decodes the body of an ANSI-C `$'…'` word (between the quotes) with bash's escape set: `\a \b
- * \e \E \f \n \r \t \v \\ \' \" \?`, `\nnn` octal, `\xHH`, `\uHHHH`, `\UHHHHHHHH` and `\cX`.
+ * Decodes the body of an ANSI-C `$'…'` word (between the quotes) with the escape set bash and zsh
+ * read the same way: `\a \b \e \E \f \n \r \t \v \\ \' \" \?`, `\nnn` octal and `\xHH` below 0x80,
+ * and `\uHHHH`/`\UHHHHHHHH`. `\cX` and a higher byte are left undecoded, so the word is not exact.
  */
 export function decodeAnsiC(body: string): AnsiCText {
   let text = '';

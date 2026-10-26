@@ -814,7 +814,6 @@ describe('rm -r arguments beyond a plain path', () => {
   it.each([
     ['a redirection whose target hides an option', 'rm -rf > -x .git'],
     ['a numbered redirection', 'rm -rf 2> -o ../victim'],
-    ['a clobber redirection', 'rm -rf >| -- .git'],
     ['a redirection of both streams', 'rm -rf &> -x ~'],
     ['a redirection joined to its target', 'rm -rf build 2>/dev/null'],
     ['a double star', 'rm -rf dist/**'],
@@ -895,6 +894,29 @@ describe('rm -r arguments beyond a plain path', () => {
     ['a zsh short if whose group closes without ;', 'if true { rm -rf .git }'],
     ['a zsh short if whose group closes after ;', 'if true { rm -rf .git; }'],
     ['a lone { before a force flag', 'git push { --force'],
+    ['a control escape before a force flag', "git push origin feat --for$'\\ce'"],
+    ['a control escape inside the sign-in path', "cat ~/.$'\\cl'aude.json"],
+    ['a control escape in a cp source', "cp ~/.$'\\cl'aude.json x"],
+    ['a bare control escape', "echo $'\\cA'"],
+    ['a two-byte hex escape above 0x7f', "cat jose$'\\xc3\\xa9'/.git"],
+    ['a two-byte octal escape above 0x7f', "cat jose$'\\303\\251'/.git"],
+    ['an octal byte of 0x80', "echo $'\\200'"],
+    ['a zsh clobber before rm', '>! x rm -rf .git'],
+    ['a zsh append clobber before sudo', '>>! x sudo ls'],
+    ['a zsh both-streams clobber before sudo', '&>! x sudo ls'],
+    ['a zsh descriptor clobber before sudo', '2>! x sudo ls'],
+    ['a zsh pipe clobber before rm', '>| x rm -rf .git'],
+    ['a zsh pipe clobber joined before git', '>|x git push origin feat --force'],
+    ['a zsh pipe clobber inside a git push', 'git push origin feat >|x --force'],
+    ['a zsh pipe clobber before a double dash', 'rm -rf >| -- .git'],
+    ['a named descriptor before rm', '{fd}>x rm -rf .git'],
+    ['a named descriptor before git', '{fd}<x git push --force'],
+    ['a brace joined to rm', '{rm -rf .git}'],
+    ['a brace joined to git', '{git push origin feat -f}'],
+    ['a brace joined to sudo', '{sudo ls}'],
+    ['a brace group that reads the sign-in', '{cat ~/.claude.json}'],
+    ['a brace group opened as a word', '{ cat ~/.claude.json}'],
+    ['a brace group after a command', '{ rm -rf build; cat ~/.claude.json}'],
   ])('denies %s as words the guard cannot read', (_name, command) => {
     expect(run(command)).toEqual(unread);
   });
@@ -921,8 +943,6 @@ describe('rm -r arguments beyond a plain path', () => {
     ["a redirection in place of env -u's value", 'env -u >x FOO rm -rf .git'],
     ["a redirection in place of nice -n's value", 'nice -n >x 5 rm -rf .git'],
     ["a redirection before timeout's duration", 'timeout >x 5 rm -rf .git'],
-    ['a named descriptor before rm', '{fd}>x rm -rf .git'],
-    ['a named descriptor before git', '{fd}<x git push --force'],
     ['a redirection joined to the command name', 'a>b rm -rf .git'],
   ])('denies %s as a redirection that hides the command', (_name, command) => {
     expect(run(command)).toEqual(hiddenByRedirection);
@@ -947,7 +967,10 @@ describe('rm -r arguments beyond a plain path', () => {
     "IFS=$'\\n' read -r x",
     "printf $'a\\tb\\n'",
     "grep $'\\t' file",
-    "echo $'\\e[1m\\cA\\?\\a'",
+    "echo $'\\e[1m\\?\\a'",
+    'git status | head',
+    'echo file.{ts,js}',
+    "git log --format='%h {x}'",
     'find dist -name x -exec rm {} +',
   ])('allows %s', (command) => {
     expect(run(command)).toEqual({ decision: 'allow' });
