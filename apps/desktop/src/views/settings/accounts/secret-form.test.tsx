@@ -20,15 +20,31 @@ afterEach(() => {
   for (const spy of spies) spy.mockRestore();
 });
 
+/**
+ * React DOM keeps the last value it saw in a tracker on the input node (`_valueTracker`). It is
+ * internal, so it is read through `Reflect` and narrowed rather than cast.
+ */
+function trackedValue(input: HTMLInputElement): string | null {
+  const tracker: unknown = Reflect.get(input, '_valueTracker');
+  if (typeof tracker !== 'object' || tracker === null || !('getValue' in tracker)) return null;
+  const read: unknown = tracker.getValue;
+  if (typeof read !== 'function') return null;
+  const value: unknown = Reflect.apply(read, tracker, []);
+  return typeof value === 'string' ? value : null;
+}
+
 function assertNoSecret(queryClient: ReturnType<typeof renderApp>['queryClient']) {
   expect(screen.queryByDisplayValue(PASTED)).toBeNull();
   expect(document.body.innerHTML).not.toContain(PASTED);
+  for (const input of document.querySelectorAll<HTMLInputElement>('input[name="secret"]')) {
+    expect(trackedValue(input)).not.toBe(PASTED);
+  }
   expect(
     JSON.stringify(
       queryClient
         .getQueryCache()
         .getAll()
-        .map((q) => q.state),
+        .map((q) => ({ key: q.queryKey, hash: q.queryHash, state: q.state })),
     ),
   ).not.toContain(PASTED);
   expect(
@@ -39,11 +55,8 @@ function assertNoSecret(queryClient: ReturnType<typeof renderApp>['queryClient']
         .map((m) => m.state),
     ),
   ).not.toContain(PASTED);
-  for (const spy of spies) {
-    for (const call of spy.mock.calls) {
-      expect(JSON.stringify(call)).not.toContain(PASTED);
-    }
-  }
+  // The form has no reason to log; a silent spy would also hide React's own warnings.
+  for (const spy of spies) expect(spy).not.toHaveBeenCalled();
 }
 
 interface Served {
@@ -138,13 +151,19 @@ describe('SecretForm', () => {
 
   it('shows the daemon’s refusal and keeps no secret', async () => {
     const message = 'No Keychain is available to this daemon, so account:acc_… was not written';
-    const { queryClient, dialog } = await openGateway(() =>
+    const { bodies, queryClient, dialog } = await openGateway(() =>
       HttpResponse.json({ error: 'conflict', message }, { status: 409 }),
     );
     await within(dialog).findByText('No secret yet');
     paste(dialog, PASTED);
     expect(await within(dialog).findByText(message)).toBeTruthy();
     expect(field(dialog).value).toBe('');
+    assertNoSecret(queryClient);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save secret' }));
+    expect(
+      await within(dialog).findByText('Too small: expected string to have >=8 characters'),
+    ).toBeTruthy();
+    expect(bodies).toHaveLength(1);
     assertNoSecret(queryClient);
   });
 
@@ -163,10 +182,58 @@ describe('SecretForm', () => {
     const { bodies, dialog } = await openGateway((_body, set) => HttpResponse.json(set()));
     await within(dialog).findByText('No secret yet');
     paste(dialog, 'short');
-    expect(await within(dialog).findByRole('alert')).toBeTruthy();
-    expect(within(dialog).getByRole('alert').textContent).not.toContain('short');
+    expect((await within(dialog).findByRole('alert')).textContent).toBe(
+      'Too small: expected string to have >=8 characters',
+    );
     expect(bodies).toEqual([]);
     expect(field(dialog).value).toBe('');
+    expect(spies.every((spy) => spy.mock.calls.length === 0)).toBe(true);
+  });
+
+  it('refreshes the list and says so when the answer is not understood', async () => {
+    const { queryClient, dialog } = await openGateway((_body, set) => {
+      set();
+      return HttpResponse.json({ unexpected: true });
+    });
+    await within(dialog).findByText('No secret yet');
+    paste(dialog, PASTED);
+    expect(
+      await within(dialog).findByText(
+        "The daemon answered in a form this version of 10db doesn't understand; check the badge before pasting again.",
+      ),
+    ).toBeTruthy();
+    await waitFor(() => {
+      expect(within(dialog).getByText('Secret set')).toBeTruthy();
+    });
+    assertNoSecret(queryClient);
+  });
+
+  it('sends one request when submitted twice while the first is in flight', async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { bodies, queryClient, dialog } = await openGateway(async (_body, set) => {
+      await gate;
+      return HttpResponse.json(set());
+    });
+    await within(dialog).findByText('No secret yet');
+    paste(dialog, PASTED);
+    await waitFor(() => {
+      expect(bodies).toHaveLength(1);
+    });
+    fireEvent.change(field(dialog), { target: { value: PASTED } });
+    fireEvent.submit(field(dialog));
+    expect(bodies).toHaveLength(1);
+    expect(
+      within(dialog).getByRole('button', { name: 'Save secret' }).hasAttribute('data-loading'),
+    ).toBe(true);
+    release();
+    await waitFor(() => {
+      expect(within(dialog).getByText('Secret set')).toBeTruthy();
+    });
+    expect(bodies).toHaveLength(1);
+    assertNoSecret(queryClient);
   });
 
   it('keeps no secret when the drawer closes mid-request', async () => {

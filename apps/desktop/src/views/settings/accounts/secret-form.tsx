@@ -7,6 +7,7 @@ import {
 import { Alert, Badge, Button, Stack, TextInput } from '@mantine/core';
 import { useQueryClient } from '@tanstack/react-query';
 import { useState, type SubmitEvent } from 'react';
+import { ZodError } from 'zod';
 import { accountKeys } from '../../../daemon/account-queries';
 import { sendAccountSecret } from '../../../daemon/account-secret';
 import { DaemonRequestError } from '../../../daemon/client';
@@ -20,6 +21,15 @@ type SecretFormState =
   | { readonly kind: 'failed'; readonly message: string };
 
 const UNREACHABLE = "Couldn't reach the daemon; paste the secret again to retry";
+const NOT_UNDERSTOOD =
+  "The daemon answered in a form this version of 10db doesn't understand; check the badge before pasting again.";
+
+function failureMessage(error: unknown): string {
+  if (error instanceof DaemonRequestError) return error.message;
+  // The answer arrived but failed its schema: the Keychain write may still have happened.
+  if (error instanceof ZodError) return NOT_UNDERSTOOD;
+  return UNREACHABLE;
+}
 
 function secretLabel(kind: SupportedAccountKind): string {
   switch (kind) {
@@ -49,6 +59,12 @@ export function SecretForm({ account }: { readonly account: AccountDto }) {
     const form = event.currentTarget;
     const entered = new FormData(form).get('secret');
     form.reset();
+    // reset() restores the default without going through the value setter, so React DOM's own copy of
+    // the last value (its value tracker) would keep the secret; setting the property replaces it.
+    const field = form.elements.namedItem('secret');
+    if (field instanceof HTMLInputElement) field.value = '';
+    // A second submit while one is in flight is dropped, after its field has been cleared too.
+    if (state.kind === 'saving') return;
     const parsed = AccountSecretInput.safeParse({
       secret: typeof entered === 'string' ? entered : '',
     });
@@ -62,13 +78,12 @@ export function SecretForm({ account }: { readonly account: AccountDto }) {
     setState({ kind: 'saving' });
     try {
       await sendAccountSecret(client, account.id, parsed.data);
-      await queryClient.invalidateQueries({ queryKey: accountKeys.all });
       setState({ kind: 'saved' });
     } catch (error) {
-      setState({
-        kind: 'failed',
-        message: error instanceof DaemonRequestError ? error.message : UNREACHABLE,
-      });
+      setState({ kind: 'failed', message: failureMessage(error) });
+    } finally {
+      // The daemon may have written the secret even when its answer was unusable.
+      await queryClient.invalidateQueries({ queryKey: accountKeys.all });
     }
   }
 
