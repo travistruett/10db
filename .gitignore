@@ -38,5 +38,6 @@ apps/desktop/src-tauri/resources/
 
 # Local dev daemon state and the shared dev UI token (scripts/dev.sh).
 /.dev/
+apps/desktop/.e2e/
 apps/desktop/test-results/
 apps/desktop/playwright-report/
