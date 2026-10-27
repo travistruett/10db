@@ -1,26 +1,45 @@
-import { accountDisplayName, AccountKind, type AccountId } from '@10db/contracts';
+import { accountDisplayName, AccountKind, type AccountDto, type AccountId } from '@10db/contracts';
 import { Drawer, Stack, Text, Title } from '@mantine/core';
 import { useAccounts } from '../../../daemon/account-queries';
 import { IdentityCheck } from './identity-check';
 import { SignInSteps } from './sign-in-steps';
 import { UsageByProject } from './usage-by-project';
 
+function AccountDrawerBody({ account }: { readonly account: AccountDto }) {
+  return (
+    <Stack gap="lg">
+      <Stack gap="xs">
+        <Title order={4}>Identity</Title>
+        {account.kind === AccountKind.ClaudeSubscription ? <SignInSteps account={account} /> : null}
+        <IdentityCheck account={account} />
+      </Stack>
+      <Stack gap="xs">
+        <Title order={4}>Usage this month</Title>
+        <UsageByProject accountId={account.id} />
+      </Stack>
+    </Stack>
+  );
+}
+
 /**
- * One account's identity, sign-in and usage. Render it with `key={accountId}` so a check made for
- * another account never carries over.
+ * One account's identity, sign-in and usage. The drawer stays mounted so Mantine returns focus to the
+ * opener and plays the exit transition; `accountId` keeps the last account while it closes. The body
+ * is keyed by account so a check made for another account never carries over.
  */
 export function AccountDrawer({
   accountId,
+  opened,
   onClose,
 }: {
-  readonly accountId: AccountId;
+  readonly accountId: AccountId | null;
+  readonly opened: boolean;
   readonly onClose: () => void;
 }) {
   const accounts = useAccounts();
   const account = accounts.data?.find((a) => a.id === accountId);
   return (
     <Drawer
-      opened
+      opened={opened}
       onClose={onClose}
       position="right"
       size="md"
@@ -28,19 +47,7 @@ export function AccountDrawer({
       closeButtonProps={{ 'aria-label': 'Close' }}
     >
       {account ? (
-        <Stack gap="lg">
-          <Stack gap="xs">
-            <Title order={4}>Identity</Title>
-            {account.kind === AccountKind.ClaudeSubscription ? (
-              <SignInSteps account={account} />
-            ) : null}
-            <IdentityCheck account={account} />
-          </Stack>
-          <Stack gap="xs">
-            <Title order={4}>Usage this month</Title>
-            <UsageByProject accountId={account.id} />
-          </Stack>
-        </Stack>
+        <AccountDrawerBody key={account.id} account={account} />
       ) : (
         <Text c="dimmed">This account is no longer listed.</Text>
       )}

@@ -31,6 +31,7 @@ export function SignInSteps({ account }: { readonly account: AccountDto }) {
             {({ copied, copy }) => (
               <Tooltip label={copied ? 'Copied' : 'Copy command'} withArrow>
                 <ActionIcon
+                  size="md"
                   variant="subtle"
                   color={copied ? 'teal' : 'gray'}
                   aria-label={copied ? 'Copied' : 'Copy command'}

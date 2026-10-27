@@ -1,28 +1,65 @@
-import { AccountKind, type AccountDto, type AccountIdentityDto } from '@10db/contracts';
+import {
+  AccountKind,
+  AccountProblem,
+  type AccountDto,
+  type AccountIdentityDto,
+} from '@10db/contracts';
 import { Alert, Button, Stack, Text } from '@mantine/core';
 import { useCheckAccountIdentity, usePatchAccount } from '../../../daemon/account-queries';
 
-/** What confirming the probe's result would record, and the button's wording. Null: nothing to offer. */
-function identityOffer(
-  account: AccountDto,
-  result: AccountIdentityDto,
-): { readonly label: string; readonly value: string; readonly replaces: boolean } | null {
+interface Offer {
+  readonly label: string;
+  readonly value: string;
+  /** Set when confirming replaces a different recorded identity. */
+  readonly replaces: boolean;
+}
+
+/**
+ * What confirming the probe's result would record. It follows the daemon's refusal, never a local
+ * comparison: only a refusal that waits on the builder's say-so (unconfirmed, or a different login)
+ * offers its seen identity. Null: nothing to offer.
+ */
+function identityOffer(account: AccountDto, result: AccountIdentityDto): Offer | null {
+  const { refusal } = result;
   if (account.kind === AccountKind.ClaudeSubscription) {
-    const { email } = result;
-    if (email === null || email === account.expectedIdentity) return null;
-    return {
-      label: `Confirm ${email}`,
-      value: email,
-      replaces: account.expectedIdentity !== null,
-    };
+    if (refusal?.seenIdentity == null) return null;
+    if (refusal.problem === AccountProblem.Unconfirmed)
+      return {
+        label: `Confirm ${refusal.seenIdentity}`,
+        value: refusal.seenIdentity,
+        replaces: false,
+      };
+    if (refusal.problem === AccountProblem.IdentityMismatch)
+      return {
+        label: `Confirm ${refusal.seenIdentity}`,
+        value: refusal.seenIdentity,
+        replaces: account.expectedIdentity !== null,
+      };
+    return null;
   }
   // A gateway never takes an expected identity; the daemon refuses it.
   if (account.kind === AccountKind.AnthropicApiKey || account.kind === AccountKind.Bedrock) {
     const { organization } = result;
-    if (organization === null || account.expectedIdentity !== null) return null;
+    if (refusal !== null || organization === null || account.expectedIdentity !== null) return null;
     return { label: `Require ${organization}`, value: organization, replaces: false };
   }
   return null;
+}
+
+/** Waiting on the builder is yellow; a refusal that needs a fix is red. */
+function refusalColor(problem: AccountProblem): 'yellow' | 'red' {
+  switch (problem) {
+    case AccountProblem.Unconfirmed:
+    case AccountProblem.SignedOut:
+    case AccountProblem.SecretMissing:
+    case AccountProblem.KeychainUnavailable:
+      return 'yellow';
+    case AccountProblem.IdentityMismatch:
+    case AccountProblem.WrongCredentials:
+    case AccountProblem.SecretChanged:
+    case AccountProblem.CannotBill:
+      return 'red';
+  }
 }
 
 /**
@@ -41,6 +78,7 @@ export function IdentityCheck({ account }: { readonly account: AccountDto }) {
   return (
     <Stack gap="xs">
       <Button
+        size="md"
         variant="default"
         loading={check.isPending}
         onClick={() => {
@@ -66,13 +104,14 @@ export function IdentityCheck({ account }: { readonly account: AccountDto }) {
             <Text size="sm">Organization: {result.organization}</Text>
           )}
           {refusal === null ? null : (
-            <Alert color={refusal.problem === 'unconfirmed' ? 'yellow' : 'red'} role="alert">
+            <Alert color={refusalColor(refusal.problem)} role="alert">
               {refusal.message}
             </Alert>
           )}
           {offer === null ? null : (
             <Stack gap={4} align="flex-start">
               <Button
+                size="md"
                 loading={patch.isPending}
                 onClick={() => {
                   patch.mutate(

@@ -1,7 +1,8 @@
-import { AccountId, mintId, type AccountDto, type AccountUsageDto } from '@10db/contracts';
+import { AccountDto, AccountId, AccountPatch, mintId, type AccountUsageDto } from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { accountKeys } from '../../../daemon/account-queries';
 import {
   accountDto,
   accountIdentityDto,
@@ -13,7 +14,9 @@ import { baseHandlers, daemonUrl, renderApp, server } from '../../../test/daemon
 
 interface Served {
   readonly patches: { id: string; body: unknown }[];
-  identityCalls: string[];
+  readonly identityCalls: string[];
+  readonly accountListCalls: number;
+  readonly queryClient: ReturnType<typeof renderApp>['queryClient'];
 }
 
 function serve(
@@ -22,12 +25,19 @@ function serve(
     identity?: Record<string, ReturnType<typeof accountIdentityDto>>;
     identityStatus?: { status: number; message: string };
     usage?: Record<string, AccountUsageDto>;
+    /** Holds the identity answer until it resolves. */
+    identityGate?: Promise<void>;
   } = {},
 ): Served {
-  const served: Served = { patches: [], identityCalls: [] };
+  const patches: Served['patches'] = [];
+  const identityCalls: string[] = [];
+  let accountListCalls = 0;
   const live = [...accounts];
   server.use(
-    http.get(daemonUrl('/accounts'), () => HttpResponse.json(live)),
+    http.get(daemonUrl('/accounts'), () => {
+      accountListCalls += 1;
+      return HttpResponse.json(live);
+    }),
     http.get(daemonUrl('/accounts/:accountId/usage'), ({ params }) =>
       HttpResponse.json(
         opts.usage?.[String(params['accountId'])] ??
@@ -37,9 +47,10 @@ function serve(
     http.get(daemonUrl('/accounts/:accountId/signin'), ({ params }) =>
       HttpResponse.json(accountSignInDto({ accountId: AccountId.parse(params['accountId']) })),
     ),
-    http.get(daemonUrl('/accounts/:accountId/identity'), ({ params }) => {
+    http.get(daemonUrl('/accounts/:accountId/identity'), async ({ params }) => {
       const id = String(params['accountId']);
-      served.identityCalls.push(id);
+      identityCalls.push(id);
+      await opts.identityGate;
       if (opts.identityStatus)
         return HttpResponse.json(
           { message: opts.identityStatus.message },
@@ -49,19 +60,26 @@ function serve(
     }),
     http.patch(daemonUrl('/accounts/:accountId'), async ({ params, request }) => {
       const id = String(params['accountId']);
-      const body = (await request.json()) as Record<string, unknown>;
-      served.patches.push({ id, body });
+      const body = AccountPatch.parse(await request.json());
+      patches.push({ id, body });
       const index = live.findIndex((a) => a.id === id);
       const current = live[index];
       if (!current) return HttpResponse.json({ message: 'no such account' }, { status: 404 });
-      const next = { ...current, ...body };
+      const next = AccountDto.parse({ ...current, ...body });
       live[index] = next;
       return HttpResponse.json(next);
     }),
     ...baseHandlers(),
   );
-  renderApp('/settings/accounts');
-  return served;
+  const { queryClient } = renderApp('/settings/accounts');
+  return {
+    patches,
+    identityCalls,
+    queryClient,
+    get accountListCalls() {
+      return accountListCalls;
+    },
+  };
 }
 
 async function openDrawer(label: string) {
@@ -72,8 +90,12 @@ async function openDrawer(label: string) {
 
 const writeText = vi.fn<(text: string) => Promise<void>>(() => Promise.resolve());
 
+const originalClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+
 afterEach(() => {
   writeText.mockClear();
+  if (originalClipboard) Object.defineProperty(navigator, 'clipboard', originalClipboard);
+  else Reflect.deleteProperty(navigator, 'clipboard');
 });
 
 describe('AccountDrawer', () => {
@@ -101,7 +123,13 @@ describe('AccountDrawer', () => {
   it('does not ask for the identity until Check sign-in is clicked', async () => {
     const served = serve([DEFAULT_ACCOUNT, accountDto({ label: 'Fresh login' })]);
     const dialog = await openDrawer('Fresh login');
-    await within(dialog).findByRole('button', { name: 'Check sign-in' });
+    expect(
+      await within(dialog).findByText('CLAUDE_CONFIG_DIR=/data/accounts/a/claude claude'),
+    ).toBeTruthy();
+    expect(await within(dialog).findByText('No sessions this month')).toBeTruthy();
+    const before = served.accountListCalls;
+    await served.queryClient.invalidateQueries({ queryKey: accountKeys.all });
+    expect(served.accountListCalls).toBeGreaterThan(before);
     expect(served.identityCalls).toEqual([]);
   });
 
@@ -142,7 +170,7 @@ describe('AccountDrawer', () => {
 
   it('warns that a different recorded identity will be replaced', async () => {
     const account = accountDto({ label: 'Switched', expectedIdentity: 'old@example.com' });
-    serve([DEFAULT_ACCOUNT, account], {
+    const served = serve([DEFAULT_ACCOUNT, account], {
       identity: {
         [account.id]: accountIdentityDto({
           accountId: account.id,
@@ -163,7 +191,12 @@ describe('AccountDrawer', () => {
     expect(
       within(dialog).getByText('Sessions on this account will run as new@example.com from now on.'),
     ).toBeTruthy();
-    expect(within(dialog).getByRole('button', { name: 'Confirm new@example.com' })).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm new@example.com' }));
+    await waitFor(() => {
+      expect(served.patches).toEqual([
+        { id: account.id, body: { expectedIdentity: 'new@example.com' } },
+      ]);
+    });
   });
 
   it('shows a matching identity without offering Confirm', async () => {
@@ -222,8 +255,24 @@ describe('AccountDrawer', () => {
     const b = accountDto({ label: 'Account B', id: mintId('Account') });
     serve([DEFAULT_ACCOUNT, a, b], {
       identity: {
-        [a.id]: accountIdentityDto({ accountId: a.id, email: 'a@example.com' }),
-        [b.id]: accountIdentityDto({ accountId: b.id, email: 'b@example.com' }),
+        [a.id]: accountIdentityDto({
+          accountId: a.id,
+          email: 'a@example.com',
+          refusal: {
+            problem: 'unconfirmed',
+            message: 'No identity recorded yet.',
+            seenIdentity: 'a@example.com',
+          },
+        }),
+        [b.id]: accountIdentityDto({
+          accountId: b.id,
+          email: 'b@example.com',
+          refusal: {
+            problem: 'unconfirmed',
+            message: 'No identity recorded yet.',
+            seenIdentity: 'b@example.com',
+          },
+        }),
       },
     });
     const dialogA = await openDrawer('Account A');
@@ -315,5 +364,105 @@ describe('AccountDrawer', () => {
     serve([DEFAULT_ACCOUNT]);
     const dialog = await openDrawer('Claude plan');
     expect(await within(dialog).findByText('No sessions this month')).toBeTruthy();
+  });
+
+  it.each([
+    { problem: 'wrong_credentials', message: 'Wrong credentials.' },
+    { problem: 'signed_out', message: 'Signed out.' },
+  ] as const)(
+    'offers no Confirm for a $problem refusal even with an email',
+    async ({ problem, message }) => {
+      const account = accountDto({ label: 'Refused' });
+      serve([DEFAULT_ACCOUNT, account], {
+        identity: {
+          [account.id]: accountIdentityDto({
+            accountId: account.id,
+            email: 'someone@example.com',
+            refusal: { problem, message, seenIdentity: 'someone@example.com' },
+          }),
+        },
+      });
+      const dialog = await openDrawer('Refused');
+      fireEvent.click(await within(dialog).findByRole('button', { name: 'Check sign-in' }));
+      expect(await within(dialog).findByText(message)).toBeTruthy();
+      expect(within(dialog).queryByRole('button', { name: /^Confirm / })).toBeNull();
+    },
+  );
+
+  it('treats a recorded identity that differs only in case as matching', async () => {
+    const account = accountDto({ label: 'Cased', expectedIdentity: 'Builder@Example.com' });
+    serve([DEFAULT_ACCOUNT, account], {
+      identity: {
+        [account.id]: accountIdentityDto({ accountId: account.id, email: 'builder@example.com' }),
+      },
+    });
+    const dialog = await openDrawer('Cased');
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Check sign-in' }));
+    expect(await within(dialog).findByText('Signed in as builder@example.com')).toBeTruthy();
+    expect(within(dialog).queryByRole('button', { name: /^Confirm / })).toBeNull();
+    expect(within(dialog).queryByText(/will run as/)).toBeNull();
+  });
+
+  it('offers Require for a Bedrock account that reports an organization', async () => {
+    const account = accountDto({ label: 'Cloud', kind: 'bedrock', secretSet: true });
+    const served = serve([DEFAULT_ACCOUNT, account], {
+      identity: {
+        [account.id]: accountIdentityDto({
+          accountId: account.id,
+          email: null,
+          organization: 'Acme',
+          subscription: false,
+        }),
+      },
+    });
+    const dialog = await openDrawer('Cloud');
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Check' }));
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Require Acme' }));
+    await waitFor(() => {
+      expect(served.patches).toEqual([{ id: account.id, body: { expectedIdentity: 'Acme' } }]);
+    });
+  });
+
+  it('says Claude Code is starting while the probe is in flight', async () => {
+    let release: () => void = () => undefined;
+    const identityGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    serve([DEFAULT_ACCOUNT, accountDto({ label: 'Slow' })], { identityGate });
+    const dialog = await openDrawer('Slow');
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Check sign-in' }));
+    expect(
+      await within(dialog).findByText('Starting Claude Code to read the account…'),
+    ).toBeTruthy();
+    release();
+    await waitFor(() => {
+      expect(within(dialog).queryByText('Starting Claude Code to read the account…')).toBeNull();
+    });
+  });
+
+  it.each([
+    {
+      name: 'the Close button',
+      close: (dialog: HTMLElement) => {
+        fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
+      },
+    },
+    {
+      name: 'Escape',
+      close: (dialog: HTMLElement) => {
+        fireEvent.keyDown(dialog, { key: 'Escape' });
+      },
+    },
+  ])('returns focus to the row’s open button after $name', async ({ close }) => {
+    serve([DEFAULT_ACCOUNT]);
+    const table = await screen.findByRole('table', { name: 'Accounts' });
+    const opener = await within(table).findByRole('button', { name: 'Open Claude plan' });
+    opener.focus();
+    fireEvent.click(opener);
+    const dialog = await screen.findByRole('dialog');
+    close(dialog);
+    await waitFor(() => {
+      expect(document.activeElement).toBe(opener);
+    });
   });
 });
