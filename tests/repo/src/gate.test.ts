@@ -126,17 +126,21 @@ describe('scripts/gate.sh', () => {
     }
   });
 
-  it('reports e2e as skipped, not run, inside a sandbox', () => {
-    // A pnpm that fails, so a run that wrongly starts the e2e step fails fast.
+  // A pnpm that fails, so a run that starts the e2e step fails fast: only TENDB_SANDBOX=1, as the
+  // tests' SANDBOXED reads it, skips it.
+  it.each([
+    ['1', 'skips', /^GATE PASS e2e skipped \(sandboxed\) \(\d+s\)$/],
+    ['0', 'runs', /^GATE FAIL: e2e — logs in \.gate\/ \(\d+s\)$/],
+    ['yes', 'runs', /^GATE FAIL: e2e — logs in \.gate\/ \(\d+s\)$/],
+  ])('with TENDB_SANDBOX=%s, %s e2e', (value, _outcome, summary) => {
     const fake = failingCargoDir();
     try {
-      const { status, last } = runGate(sandbox, {
+      const { last } = runGate(sandbox, {
         GATE_STEPS: 'e2e',
-        TENDB_SANDBOX: '1',
+        TENDB_SANDBOX: value,
         PATH: `${fake}:${process.env['PATH'] ?? ''}`,
       });
-      expect(status).toBe(0);
-      expect(last).toMatch(/^GATE PASS e2e skipped \(sandboxed\) \(\d+s\)$/);
+      expect(last).toMatch(summary);
     } finally {
       rmSync(fake, { recursive: true, force: true });
     }
