@@ -22,6 +22,7 @@ import {
   readAccess,
   SandboxProfileError,
   SandboxTempDirError,
+  SYSTEM_READS,
   type LaneSandbox,
   type LaneSessionInput,
 } from './index';
@@ -615,7 +616,14 @@ describe('createLaneSandbox', () => {
       expect(allowRead).toEqual(
         expect.arrayContaining([join(install, 'bin'), join(install, 'lib')]),
       );
-      expect(allowRead.filter((path) => isEqualOrUnder(globalNpmrc, path))).toEqual([]);
+      // Every lane reads the system locations. On Linux they hold this fixture's home, as `/tmp` is
+      // one; on macOS a home is never inside one.
+      const systemReads: readonly string[] = SYSTEM_READS;
+      expect(
+        allowRead.filter(
+          (path) => !systemReads.includes(path) && isEqualOrUnder(globalNpmrc, path),
+        ),
+      ).toEqual([]);
       expect(denyRead).toContain(builtin);
       expect(session.spec.disallowedTools).toContain(`Read(/${builtin})`);
       expect(readAccess(builtin, session.fileAccess).access).toBe('protected');
@@ -676,18 +684,24 @@ describe('createLaneSandbox', () => {
     }
   });
 
-  it('denies the directory a .env link leads to when it holds nothing the lane needs', async () => {
-    const outside = join(root, 'envs');
-    mkdirSync(outside);
-    symlinkSync(outside, join(checkout, '.envs'));
-    const session = await sandbox().forSession(input());
-    try {
-      expect(session.spec.settings.filesystem.denyRead).toContain(outside);
-      expect(session.spec.settings.filesystem.allowRead).toContain(checkout);
-    } finally {
-      session.dispose();
-    }
-  });
+  // The fixture root must lie outside every system read. On macOS `/tmp` leads to `/private/tmp`,
+  // which the system reads leave closed; on Linux `/tmp` is itself a system read, so a link to a
+  // directory in it is refused like a link into `/usr/share`.
+  it.skipIf(process.platform !== 'darwin')(
+    'denies the directory a .env link leads to when it holds nothing the lane needs',
+    async () => {
+      const outside = join(root, 'envs');
+      mkdirSync(outside);
+      symlinkSync(outside, join(checkout, '.envs'));
+      const session = await sandbox().forSession(input());
+      try {
+        expect(session.spec.settings.filesystem.denyRead).toContain(outside);
+        expect(session.spec.settings.filesystem.allowRead).toContain(checkout);
+      } finally {
+        session.dispose();
+      }
+    },
+  );
 
   it.each([
     ['a dangling .env link', (dir: string) => join(dir, 'missing.env')],

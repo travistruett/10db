@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { SandboxProfileError } from './profile';
-import { homeProtectedReads } from './protected-reads';
+import { homeProtectedReads, isEqualOrUnder } from './protected-reads';
 import { SYSTEM_NODE_PREFIXES, toolchainAccess } from './toolchain-reads';
 
 let home: string;
@@ -475,9 +475,10 @@ describe('toolchainAccess secret files', () => {
     // Denied whether or not the file exists yet, since it may appear later.
     for (const prefix of SYSTEM_NODE_PREFIXES)
       expect(secretFiles).toContain(join(prefix, 'etc/npmrc'));
-    expect(
-      secretFiles.filter((path) => path.startsWith('/tmp') || path.startsWith('/private/tmp')),
-    ).toEqual([]);
+    // The home's own cargo and mise files are secret too; here the home is itself a temp dir.
+    const probed = secretFiles.filter((path) => !isEqualOrUnder(path, home));
+    const temp = [tmpdir(), realpathSync(tmpdir()), '/tmp', '/private/tmp'];
+    expect(probed.filter((path) => temp.some((dir) => isEqualOrUnder(path, dir)))).toEqual([]);
     expect(baseSecrets().every((file) => secretFiles.includes(file))).toBe(true);
   });
 });
