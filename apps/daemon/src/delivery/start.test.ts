@@ -14,7 +14,6 @@ import {
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
-import { GhError } from '../github';
 import { batchBranchName } from './index';
 
 let h: DeliveryHarness;
@@ -115,6 +114,18 @@ describe('cutting a branch', () => {
       title: 'the checkout has uncommitted changes',
     },
     {
+      name: 'the repository asks for a filter, as Git LFS does',
+      arrange: (x) => {
+        writeFileSync(
+          join(x.repo, '.gitattributes'),
+          '*.bin filter=lfs diff=lfs merge=lfs -text\n',
+        );
+        x.git$('add', '.gitattributes');
+        x.git$('commit', '-q', '-m', 'lfs');
+      },
+      title: 'uses git filters',
+    },
+    {
       name: 'there is no origin',
       arrange: (x) => {
         x.git$('remote', 'remove', 'origin');
@@ -143,11 +154,11 @@ describe('cutting a branch', () => {
       title: 'gh is signed out',
     },
     {
-      name: 'gh cannot name the repository',
+      name: 'origin is not on github.com',
       arrange: (x) => {
-        x.gh.failNext.set('repoView', new GhError('failed', 'no git remotes point to GitHub'));
+        x.git$('remote', 'set-url', 'origin', 'https://gitlab.com/acme/widgets.git');
       },
-      title: "gh can't find the GitHub repository",
+      title: 'is not a github.com repository',
     },
   ])('refuses when $name: a card, no batch row, HEAD unmoved', async ({ arrange, title }) => {
     const task = h.addTask('Alpha');

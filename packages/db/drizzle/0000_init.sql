@@ -426,6 +426,7 @@ CREATE TABLE `workstreams` (
 	`steps` text DEFAULT '[]' NOT NULL,
 	`step_index` integer DEFAULT 0 NOT NULL,
 	`base_head` text,
+	`branch` text,
 	`lease_owner` text,
 	`lease_expires_at` text,
 	`fence` integer NOT NULL,

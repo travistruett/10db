@@ -1,11 +1,11 @@
-import { chmodSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDecoyRepo } from '../../test/decoy-repo';
 import { createTempRepo, NETWORK_ENV, tempDir } from '../../test/fixtures';
 import { createGh, GhError, systemGhExec, type GhCall, type GhExec } from './index';
 
-const CALL: GhCall = { cwd: '/tmp', env: {}, timeoutMs: 5_000 };
+const CALL: GhCall = { env: {}, timeoutMs: 5_000 };
 
 /** A scripted exec: answers each call with the output for its first two arguments. */
 function scripted(
@@ -37,38 +37,6 @@ describe('createGh', () => {
         }).exec,
       ).authStatus(CALL),
     ).rejects.toMatchObject({ name: 'GhError', kind: 'signed_out' });
-  });
-
-  it.each([
-    {
-      name: 'the owner and name',
-      answer: { exitCode: 0, stdout: '{"nameWithOwner":"acme/widgets"}\n' },
-      expected: 'acme/widgets',
-    },
-    { name: 'output that is not JSON', answer: { exitCode: 0, stdout: 'oops' }, kind: 'failed' },
-    {
-      name: 'a name without an owner',
-      answer: { exitCode: 0, stdout: '{"nameWithOwner":"widgets"}' },
-      kind: 'failed',
-    },
-    {
-      name: 'no GitHub remote',
-      answer: {
-        exitCode: 1,
-        stderr:
-          'none of the git remotes configured for this repository point to a known GitHub host',
-      },
-      kind: 'failed',
-    },
-    {
-      name: 'authentication required',
-      answer: { exitCode: 4, stderr: 'To get started with GitHub CLI, please run:  gh auth login' },
-      kind: 'signed_out',
-    },
-  ])('repoView: $name', async ({ answer, expected, kind }) => {
-    const view = createGh(scripted({ 'repo view': answer }).exec).repoView(CALL);
-    if (kind) await expect(view).rejects.toMatchObject({ kind });
-    else await expect(view).resolves.toBe(expected);
   });
 
   it.each([
@@ -210,14 +178,13 @@ describe('systemGhExec', () => {
     chmodSync(path, 0o755);
   }
   const call = (overrides: Partial<GhCall> = {}): GhCall => ({
-    cwd: bin.path,
     env: { PATH: `${bin.path}:/usr/bin:/bin` },
     timeoutMs: 5_000,
     ...overrides,
   });
 
-  it('turns prompts off whatever the environment says, and runs in the given directory', async () => {
-    fakeGh('echo "$GH_PROMPT_DISABLED $GH_NO_UPDATE_NOTIFIER $GIT_TERMINAL_PROMPT $(pwd) $*"');
+  it('turns prompts off whatever the environment says', async () => {
+    fakeGh('echo "$GH_PROMPT_DISABLED $GH_NO_UPDATE_NOTIFIER $GIT_TERMINAL_PROMPT $*"');
     const env = {
       PATH: `${bin.path}:/usr/bin:/bin`,
       GH_PROMPT_DISABLED: '0',
@@ -225,30 +192,55 @@ describe('systemGhExec', () => {
     };
     const out = await systemGhExec(['auth', 'status'], call({ env }));
     expect(out).toMatchObject({ exitCode: 0 });
-    // macOS resolves /var to /private/var in pwd.
-    expect(out.stdout.trim()).toMatch(
-      new RegExp(`^1 1 0 \\S*${bin.path.split('/').pop() ?? ''} auth status$`),
-    );
+    expect(out.stdout.trim()).toBe('1 1 0 auth status');
   });
 
-  it('runs gh where the git it calls finds the repository it runs in, keeping git settings', async () => {
-    // gh runs git in its working directory to read the remotes. A daemon started from a git hook
-    // may have captured GIT_DIR and friends, which would aim that git at another repository.
-    const repo = createTempRepo();
+  it('runs gh in an empty directory of its own, where no git finds a repository', async () => {
+    fakeGh('pwd; ls -A | wc -l; git rev-parse --git-dir 2>/dev/null || echo no-repository');
+    const env = { ...NETWORK_ENV, PATH: `${bin.path}:${process.env['PATH'] ?? '/usr/bin:/bin'}` };
+    const out = await systemGhExec(['pr', 'view'], call({ env }));
+    const [dir = '', count = '', repo = ''] = out.stdout.trim().split('\n');
+    expect(dir).toMatch(/10db-gh-/);
+    expect(count.trim()).toBe('0');
+    expect(repo).toBe('no-repository');
+  });
+
+  it("drops a hook's repository variables and keeps git settings", async () => {
+    // A daemon started from a git hook may have captured GIT_DIR and friends, which would aim any
+    // git gh runs at another repository.
     const decoy = createDecoyRepo();
     try {
-      fakeGh('git rev-parse --absolute-git-dir; echo "$GIT_SSH_COMMAND"');
+      fakeGh('echo "${GIT_DIR:-none} $GIT_SSH_COMMAND"');
       const env = {
         ...NETWORK_ENV,
         PATH: `${bin.path}:${process.env['PATH'] ?? '/usr/bin:/bin'}`,
         ...decoy.hookVariables,
         GIT_SSH_COMMAND: 'ssh -i key',
       };
-      const out = await systemGhExec(['repo', 'view'], call({ cwd: repo.path, env }));
+      const out = await systemGhExec(['pr', 'view'], call({ env }));
       expect(out).toMatchObject({ exitCode: 0 });
-      expect(out.stdout).toBe(`${join(realpathSync(repo.path), '.git')}\nssh -i key\n`);
+      expect(out.stdout).toBe('none ssh -i key\n');
     } finally {
       decoy.cleanup();
+    }
+  });
+
+  it('turns hooks and fsmonitor off for the git gh runs, keeping the login config', async () => {
+    const repo = createTempRepo();
+    try {
+      fakeGh(
+        `cd '${repo.path}' && git config core.hooksPath; git config core.fsmonitor; git config user.name`,
+      );
+      const env = {
+        ...NETWORK_ENV,
+        PATH: `${bin.path}:${process.env['PATH'] ?? '/usr/bin:/bin'}`,
+        GIT_CONFIG_COUNT: '1',
+        GIT_CONFIG_KEY_0: 'user.name',
+        GIT_CONFIG_VALUE_0: 'builder',
+      };
+      const out = await systemGhExec(['pr', 'view'], call({ env }));
+      expect(out.stdout).toBe('/dev/null\nfalse\nbuilder\n');
+    } finally {
       repo.cleanup();
     }
   });

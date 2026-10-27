@@ -17,6 +17,7 @@ import {
   acquireClaims,
   activeClaims,
   findToolOp,
+  getBatch,
   getProject,
   getTask,
   getWorkstream,
@@ -297,6 +298,13 @@ export function createToolHandlers(
       if (currentStep(getWorkstreamRow(db, workstreamId)).tools === ToolAccess.ReadOnly)
         throw new InvalidError('This step is read-only; only an implement step commits.');
       const { project } = context();
+      // A batch names its branch; other work commits on the branch pinned at its first session.
+      const row = getWorkstreamRow(db, workstreamId);
+      const branch = row.batchId ? getBatch(db, row.batchId).branch : row.branch;
+      if (branch === null)
+        throw new InvalidError(
+          'This work has no branch to commit on: the checkout was on a detached HEAD when its first session started. Ask the builder with ask_human to check out a branch and restart the task.',
+        );
       const claims = activeClaims(db, workstreamId).map((c) => ({ kind: c.kind, name: c.name }));
       for (const path of input.paths) {
         const verdict = judgeToolUse({
@@ -316,6 +324,7 @@ export function createToolHandlers(
         paths: input.paths,
         message: input.message,
         opId: input.opId,
+        branch,
       });
       return deps.state.write((ctx) => {
         ctx.emit({

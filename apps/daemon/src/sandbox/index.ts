@@ -12,6 +12,7 @@ export { packageCacheEnv } from './package-cache';
 export { createLaneEnvFile, removeLaneEnvFile } from './env-file';
 export {
   createLaneTempDir,
+  LANE_TEMP_ROOT,
   MAX_SANDBOX_TMP_BYTES,
   removeLaneTempDir,
   SandboxTempDirError,

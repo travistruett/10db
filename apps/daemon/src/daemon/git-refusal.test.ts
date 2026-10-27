@@ -1,0 +1,227 @@
+import { realpathSync, renameSync } from 'node:fs';
+import { join } from 'node:path';
+import type { InboxItemDto } from '@10db/contracts';
+import { createTestStore, listInbox, seedProject } from '@10db/db';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createTempRepo, isolatedGitEnv, tempDir, type TempDir } from '../../test/fixtures';
+import { execFileSync } from 'node:child_process';
+import { createEventBus, createStateStore, type StateStore } from '../events';
+import { createGit, GitTrustError, memoryPinStore, type Git } from '../git';
+import { createInboxService, type InboxService } from '../inbox';
+import { silentLogger } from '../log';
+import { createProjectPinStore } from './checkout-pins';
+import { createGitCardAnswers, createGitRefusalHandler } from './git-refusal';
+
+let close: () => void;
+let state: StateStore;
+let inbox: InboxService;
+let handle: (error: GitTrustError) => void;
+let repo: TempDir;
+let real: string;
+
+beforeEach(() => {
+  repo = createTempRepo();
+  real = realpathSync(repo.path);
+  const test = createTestStore();
+  close = test.close;
+  // The project names the checkout through a path that is not its real one.
+  seedProject(test.store, { repoPath: `${repo.path}/.` });
+  state = createStateStore(test.store, createEventBus());
+  inbox = createInboxService({ state, onParkedAnswer: () => undefined });
+  handle = createGitRefusalHandler({ db: state.db, inbox, logger: silentLogger });
+});
+afterEach(() => {
+  close();
+  repo.cleanup();
+});
+
+/** A found checkout state, as a refusal records it. */
+const candidate = (gitDir: string, id = '1:2/1:2') => ({
+  gitDir,
+  commonDir: gitDir,
+  id,
+  fetchUrl: null,
+  pushUrl: null,
+});
+
+describe('a refusal of the daemon git', () => {
+  it.each([
+    {
+      name: 'config keys',
+      error: () =>
+        new GitTrustError(real, {
+          kind: 'config',
+          keys: [{ key: 'core.sshcommand', file: `${real}/.git/config` }],
+        }),
+      title: () => `10db won't fetch or push in ${real}: its config sets core.sshcommand`,
+      body: () => `git config --file '${real}/.git/config' --unset-all 'core.sshcommand'`,
+      retrust: false,
+    },
+    {
+      name: 'a replaced git dir',
+      error: () =>
+        new GitTrustError(real, {
+          kind: 'moved',
+          pinned: `${real}/.git`,
+          found: '/elsewhere/.git',
+          candidate: candidate('/elsewhere/.git'),
+        }),
+      title: () =>
+        `10db won't run git in ${real}: its git dir is /elsewhere/.git, not ${real}/.git as 10db recorded`,
+      body: () => 'Trust the checkout as it is now',
+      retrust: true,
+    },
+    {
+      name: 'a moved HEAD before the commit',
+      error: () =>
+        new GitTrustError(real, {
+          kind: 'branch',
+          expected: 'lane',
+          found: 'main',
+          committed: false,
+        }),
+      title: () =>
+        `10db won't commit in ${real}: the checkout is on main, the lane's branch is lane`,
+      body: () => `Switch back to \`lane\` in '${real}'`,
+      retrust: false,
+    },
+    {
+      name: 'a moved HEAD while the commit ran',
+      error: () =>
+        new GitTrustError(real, {
+          kind: 'branch',
+          expected: 'lane',
+          found: 'main',
+          committed: true,
+        }),
+      title: () => `10db committed on lane in ${real}, but HEAD moved to main while it ran`,
+      body: () => 'The commit is on `lane`, where it belongs',
+      retrust: false,
+    },
+    {
+      name: 'a changed origin',
+      error: () =>
+        new GitTrustError(real, {
+          kind: 'origin',
+          direction: 'push',
+          pinned: 'git@github.com:acme/widgets.git',
+          found: 'git@evil.invalid:x.git',
+          candidate: candidate(`${real}/.git`),
+        }),
+      title: () =>
+        `10db won't push in ${real}: origin's push URL is git@evil.invalid:x.git, not git@github.com:acme/widgets.git as 10db recorded`,
+      body: () => 'never one read from config a lane could have written',
+      retrust: true,
+    },
+    {
+      name: 'a filter',
+      error: () =>
+        new GitTrustError(real, { kind: 'filter', paths: [{ path: 'a.bin', filter: 'lfs' }] }),
+      title: () => `10db won't commit or push in ${real}: a.bin needs the lfs filter`,
+      body: () => "A repository that uses Git LFS can't ship through 10db yet",
+      retrust: false,
+    },
+  ])('raises one card on the project for $name', ({ error, title, body, retrust }) => {
+    handle(error());
+    handle(error());
+    const cards = listInbox(state.db);
+    expect(cards).toHaveLength(1);
+    expect(cards[0]?.title).toBe(title());
+    expect(cards[0]?.body).toContain(body());
+    expect(cards[0]?.options.map((o) => o.label) ?? []).toEqual(
+      retrust ? ['Trust the checkout as it is now', 'Later'] : [],
+    );
+  });
+
+  it('keeps one card per checkout and cause, however many keys a lane writes', () => {
+    for (let i = 0; i < 20; i += 1)
+      handle(
+        new GitTrustError(real, {
+          kind: 'config',
+          keys: [{ key: `alias.a${String(i)}`, file: `${real}/.git/config` }],
+        }),
+      );
+    expect(listInbox(state.db)).toHaveLength(1);
+  });
+
+  it('opens a new card for a second move rather than folding it into the first', () => {
+    for (const id of ['1:2/1:2', '3:4/3:4'])
+      handle(
+        new GitTrustError(real, {
+          kind: 'moved',
+          pinned: `${real}/.git`,
+          found: `${real}/.git`,
+          candidate: candidate(`${real}/.git`, id),
+        }),
+      );
+    expect(listInbox(state.db)).toHaveLength(2);
+  });
+
+  it('raises no card for a checkout no project uses', () => {
+    handle(
+      new GitTrustError('/elsewhere', {
+        kind: 'moved',
+        pinned: '/a',
+        found: '/b',
+        candidate: candidate('/b'),
+      }),
+    );
+    expect(listInbox(state.db)).toEqual([]);
+  });
+});
+
+describe("the builder's answer to a re-trust card", () => {
+  let git: Git;
+  let scratch: TempDir;
+  beforeEach(() => {
+    scratch = tempDir('git-refusal');
+    git = createGit({ onRefused: handle, pins: createProjectPinStore(state, memoryPinStore()) });
+  });
+  afterEach(() => {
+    scratch.cleanup();
+  });
+
+  function replaceGitDir(): void {
+    renameSync(join(repo.path, '.git'), join(scratch.path, `old-git-${String(Math.random())}`));
+    execFileSync('git', ['-C', repo.path, 'init', '-q', '-b', 'main'], { env: isolatedGitEnv() });
+  }
+  const card = (): InboxItemDto => {
+    const [only] = listInbox(state.db);
+    if (!only) throw new Error('expected a card');
+    return only;
+  };
+
+  it.each([
+    { choice: 'Later', trusted: false },
+    { choice: 'Trust the checkout as it is now', trusted: true },
+  ])('$choice: re-trusted $trusted', async ({ choice, trusted }) => {
+    await git.head(repo.path);
+    replaceGitDir();
+    await expect(git.currentBranch(repo.path)).rejects.toBeInstanceOf(GitTrustError);
+    await createGitCardAnswers(git)(card(), { choice });
+    if (trusted) expect(await git.currentBranch(repo.path)).toBe('main');
+    else await expect(git.currentBranch(repo.path)).rejects.toBeInstanceOf(GitTrustError);
+  });
+
+  it('refuses again with a new card when the checkout changed after the card was raised', async () => {
+    await git.head(repo.path);
+    replaceGitDir();
+    await expect(git.currentBranch(repo.path)).rejects.toBeInstanceOf(GitTrustError);
+    const first = card();
+    replaceGitDir();
+    await createGitCardAnswers(git)(first, { choice: 'Trust the checkout as it is now' });
+    await expect(git.currentBranch(repo.path)).rejects.toBeInstanceOf(GitTrustError);
+    expect(listInbox(state.db)).toHaveLength(2);
+  });
+
+  it('keeps the pin in the database, so a restarted daemon still refuses', async () => {
+    await git.head(repo.path);
+    replaceGitDir();
+    const restarted = createGit({ pins: createProjectPinStore(state, memoryPinStore()) });
+    const onRefused = vi.fn();
+    const watched = createGit({ onRefused, pins: createProjectPinStore(state, memoryPinStore()) });
+    await expect(restarted.head(repo.path)).rejects.toBeInstanceOf(GitTrustError);
+    await expect(watched.head(repo.path)).rejects.toBeInstanceOf(GitTrustError);
+    expect(onRefused).toHaveBeenCalledOnce();
+  });
+});

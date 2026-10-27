@@ -11,7 +11,7 @@ import {
 import { activeClaims, getProject, getWorkstream, listWorkstreams } from '@10db/db';
 import type { Clock, Timer } from '../clock';
 import type { StateStore } from '../events';
-import type { Git } from '../git';
+import { GitTrustError, type Git } from '../git';
 import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
 import {
@@ -223,7 +223,14 @@ export function createWatcher(deps: {
     }
     // Only what git still sees as changed now. This drops ignored files and directories. It also drops files
     // already committed through 10db's claim-checked commit, whose claims may have been released since the write.
-    const changed = new Set((await deps.git.status(entry.root)).map((s) => s.path));
+    // A checkout git refuses to run in (a lane may have written its config) has a card of its own; its
+    // sensitive paths are still flagged below.
+    const changed = new Set(
+      await deps.git.changedPaths(entry.root, paths).catch((error: unknown) => {
+        if (error instanceof GitTrustError) return [];
+        throw error;
+      }),
+    );
     const project = getProject(db, projectId);
     const reported = paths.filter((rel) => changed.has(rel));
     const { strays, candidates } = straysIn(project, reported, ACTIVE_STATES, null);
@@ -294,7 +301,7 @@ export function createWatcher(deps: {
       const ws = getWorkstream(db, workstreamId);
       const project = getProject(db, ws.projectId);
       if (!existsSync(project.repoPath)) return [];
-      const changed = (await deps.git.status(project.repoPath)).map((s) => s.path);
+      const changed = await deps.git.changedPaths(project.repoPath);
       const { strays, candidates } = straysIn(
         project,
         changed,

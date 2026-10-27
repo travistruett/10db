@@ -181,7 +181,7 @@ describe('createLaneSandbox', () => {
     }
   });
 
-  it("opens a linked worktree's common dir for reading, and never its own git dir for writing", async () => {
+  it("opens a linked worktree's common dir for reading only, and makes its gitfile and both git dirs read-only", async () => {
     const outside = tempDir('lane-worktree');
     try {
       const worktree = join(outside.path, 'wt');
@@ -198,8 +198,14 @@ describe('createLaneSandbox', () => {
         expect(allowRead).toContain(commonDir);
         // The daemon's unsandboxed git follows `commondir`, `gitdir` and `config.worktree` there.
         expect(allowWrite.filter((path) => isEqualOrUnder(path, commonDir))).toEqual([]);
-        // Claude Code opens the worktree's git dir for writing and holds back all but `gitdir`.
-        expect(denyWrite).toEqual([join(commonDir, 'worktrees', 'wt', 'gitdir')]);
+        // Only the daemon writes git state: the worktree's own git dir (HEAD, index, refs), which
+        // Claude Code would otherwise open for writing, and the common dir are both denied.
+        // The gitfile too: the daemon's git follows it until the checkout is pinned.
+        expect(denyWrite).toEqual([
+          join(realpathSync(worktree), '.git'),
+          join(commonDir, 'worktrees', 'wt'),
+          commonDir,
+        ]);
       } finally {
         session.dispose();
       }
@@ -208,13 +214,14 @@ describe('createLaneSandbox', () => {
     }
   });
 
-  it('opens no git dir beyond the checkout for an ordinary repository', async () => {
+  it('opens no git dir beyond the checkout for an ordinary repository, and makes its own read-only', async () => {
     const session = await sandbox().forSession(input());
     try {
       const { allowRead, allowWrite, denyWrite } = session.spec.settings.filesystem;
       expect(allowRead.filter((path) => path.includes('.git'))).toEqual([]);
       expect(allowWrite.filter((path) => path.includes('.git'))).toEqual([]);
-      expect(denyWrite).toEqual([]);
+      // The checkout is writable to Claude Code's sandbox; its git dir is not.
+      expect(denyWrite).toEqual([join(checkout, '.git')]);
     } finally {
       session.dispose();
     }
@@ -257,6 +264,7 @@ describe('createLaneSandbox', () => {
         MISE_SYSTEM_CONFIG_FILE: join(session.tmpDir, 'mise', 'system.toml'),
         CLAUDE_CODE_TMPDIR: session.tmpDir,
         GIT_CONFIG_GLOBAL: '/dev/null',
+        GIT_OPTIONAL_LOCKS: '0',
         CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1',
         CLAUDE_ENV_FILE: join(
           tmpRoot,
@@ -436,7 +444,9 @@ describe('createLaneSandbox', () => {
     try {
       const file = session.spec.env['CLAUDE_ENV_FILE'] ?? '';
       expect(dirname(file)).toBe(tmpRoot);
-      expect(readFileSync(file, 'utf8')).toBe('export GIT_CONFIG_GLOBAL=/dev/null\n');
+      expect(readFileSync(file, 'utf8')).toBe(
+        'export GIT_CONFIG_GLOBAL=/dev/null\nexport GIT_OPTIONAL_LOCKS=0\n',
+      );
       const { allowRead, allowWrite } = session.spec.settings.filesystem;
       expect(allowWrite.filter((path) => isEqualOrUnder(file, path))).toEqual([]);
       expect(allowRead).toContain(file);

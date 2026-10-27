@@ -1,4 +1,4 @@
-import { writeFileSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ConflictError, type BatchDto, type TaskDto } from '@10db/contracts';
 import {
@@ -16,7 +16,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { waitFor } from '../../test/fixtures';
 import { alive } from '../../test/orphan-gate';
-import { installPrePushHook, writePrePushHook } from '../../test/pre-push-hook';
+import { writeHook } from '../../test/git-hooks';
+import { hangingSsh } from '../../test/hanging-ssh';
 import { GhError } from '../github';
 
 /** The repo's template, as a repository commits it at `.github/pull_request_template.md`. */
@@ -123,16 +124,14 @@ describe('shipping', () => {
     expect(done).toMatchObject({ prUrl: shipped.prUrl });
   });
 
-  it("logs the pre-push hook's output with the push's duration", async () => {
+  it("logs the push's output with its duration", async () => {
     h = createDeliveryHarness();
     const { batch } = await openBatch('Greetings', 'Alpha');
     h.commit('src/api/alpha.txt');
-    writePrePushHook(h.repo, 'echo "hook: 3 checks passed"; echo "hook: lint warns" >&2');
     await finishAll(batch);
     const push = batchLines(batch.id).find((line) => line['msg'] === 'git push finished');
     expect(typeof push?.['durationMs']).toBe('number');
-    expect(String(push?.['output'])).toContain('hook: 3 checks passed');
-    expect(String(push?.['output'])).toContain('hook: lint warns');
+    expect(String(push?.['output'])).toContain('[new branch]');
   });
 
   it('logs a failed push with its duration, kind and output, then the batch as not shipped', async () => {
@@ -347,38 +346,40 @@ describe('shipping', () => {
   });
 });
 
-describe("the clone's pre-push hook", () => {
-  it('ships when the hook takes longer than a network call may, but less than the push may', async () => {
-    h = createDeliveryHarness({}, { networkTimeoutMs: 1_000, pushTimeoutMs: 4_000 });
+describe('the push', () => {
+  it("ships without running the clone's pre-push hook, which a lane can write", async () => {
+    h = createDeliveryHarness();
     const { batch } = await openBatch('Greetings', 'Alpha');
     h.commit('src/api/alpha.txt');
-    const hook = installPrePushHook(h.repo, 2);
-    try {
-      const shipped = await finishAll(batch);
-      expect(shipped.state).toBe('SHIPPED');
-      expect(onOrigin(batch.branch)).toBe(h.git$('rev-parse', 'HEAD'));
-    } finally {
-      hook.cleanup();
-    }
+    const ran = join(h.repo, '.git', 'pre-push.ran');
+    const hook = join(h.repo, '.git', 'refuse-push.sh');
+    writeFileSync(hook, `#!/bin/sh\ntouch '${ran}'\nexit 1\n`, { mode: 0o755 });
+    writeHook(join(h.repo, '.git', 'hooks'), ['pre-push'], hook);
+    const shipped = await finishAll(batch);
+    expect(shipped.state).toBe('SHIPPED');
+    expect(existsSync(ran)).toBe(false);
   });
 
-  it('stops a hook that runs past the push timeout with every process it started, and fails the batch saying so', async () => {
-    h = createDeliveryHarness({}, { pushTimeoutMs: 1_000 });
+  it('stops a push that runs past its timeout with every process it started, and fails the batch saying so', async () => {
+    const ssh = hangingSsh(30);
+    h = createDeliveryHarness({}, { pushTimeoutMs: 1_000, networkEnv: ssh.env });
+    // Before the daemon first sees the checkout, which records origin's URLs.
+    // A github.com push URL over ssh, whose ssh is the hanging stand-in.
+    h.git$('remote', 'set-url', '--push', 'origin', 'git@github.com:acme/widgets.git');
     const { batch } = await openBatch('Greetings', 'Alpha');
     h.commit('src/api/alpha.txt');
-    const hook = installPrePushHook(h.repo, 30);
     try {
       const ended = await finishAll(batch);
       expect(ended).toMatchObject({ state: 'FAILED', failure: 'network' });
       const card = h.only(h.cards());
       expect(card.title).toBe('Batch "Greetings" not shipped: git push ran past 1.0 s');
-      expect(card.body).toContain('pre-push hook');
-      const child = await hook.childPid();
+      expect(card.body).toContain('git push was still running after 1.0 s');
+      const child = await ssh.childPid();
       await waitFor(() => !alive(child), 2_000);
       expect(onOrigin(batch.branch)).toBeNull();
       expect(h.gh.prCreates()).toEqual([]);
     } finally {
-      hook.cleanup();
+      ssh.cleanup();
     }
   });
 });

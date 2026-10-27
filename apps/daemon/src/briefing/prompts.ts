@@ -85,7 +85,7 @@ const SANDBOX_RULES = [
 
 const RULES = [
   'Edit only files inside your claims. For anything else, call the request_claim tool first.',
-  'Commit only through the 10db commit tool, naming every path. Never run git commit, add, checkout, reset, stash or push --force.',
+  'Commit only through the 10db commit tool, naming every path. Never run git commit, add, checkout, reset, stash or push: 10db pushes the work when it ships, and the git dir is read-only to you.',
   'Before you end your turn, commit every change in your claims through mcp__10db__commit. A step that ends with changes uncommitted is sent back to you, and no gate runs on it.',
   'When a decision is not yours to make, ask with ask_human (or your question tool). Record routine engineering decisions with record_decision.',
   'If you depart from the plan or a principle, call report_deviation with your reason.',

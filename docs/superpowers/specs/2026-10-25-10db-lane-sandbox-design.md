@@ -181,8 +181,10 @@ the session's temp directory; the plan is `docs/superpowers/plans/2026-10-26-10d
 | D10      | stands | The claude process stays outside the sandbox; the file tools' boundary is software (threat model §7). |
 | D14      | partly | Built for lanes (see D14). The gate's directory is designed. |
 | D15      | built | Loopback is the project's "Let lane commands use localhost" switch in Settings › General, off by default and read before each session. The gate's loopback is designed with the gate profile. |
-| D6, D7, D9, D11, D12, D13, D16, D17, D18 | designed | The gate and repo MCP servers under `srt`, the safe reader, the guard's retirement, the daemon's git pinning, the secret scan, the CI card and the takeover rule. |
+| D13      | built | Decision 129: every daemon git call reads no attributes and passes `core.fsmonitor=false` and `core.hooksPath=/dev/null`, so no hook, filter, driver, fsmonitor or submodule git runs, and `gh` gets the hook and fsmonitor config through `GIT_CONFIG_COUNT`. A git that honours `GIT_ATTR_SOURCE` (2.41 or newer, found by a behaviour probe) is required. Commits stage on a private index and move only their branch by compare and swap. Checkout pins (git dirs and origin's URLs) persist per project, the commit branch is pinned per workstream, and fetch and push go to the pinned URLs. The local-config allowlist before a fetch or push is defense in depth. |
+| D6, D7, D9, D11, D12, D16, D17, D18 | designed | The gate and repo MCP servers under `srt`, the safe reader, the guard's retirement, the secret scan, the CI card and the takeover rule. |
 
 Not closed by slice 1: `.git/` files nobody probed in an ordinary checkout, such as `.git/info/attributes`, which can
-select an already configured filter driver for the daemon's unsandboxed git. D13 closes them. Re-run the live test
+select an already configured filter driver for the daemon's unsandboxed git. D13's git reads no attributes,
+and refuses while `info/attributes` is non-empty. Re-run the live test
 after each Claude Code or SDK upgrade.

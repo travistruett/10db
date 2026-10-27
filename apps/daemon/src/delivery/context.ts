@@ -11,8 +11,8 @@ export interface DeliveryLimits {
   /** Each fetch and gh call. */
   readonly networkTimeoutMs: number;
   /**
-   * The push, which runs the clone's pre-push hook: a hook may run a whole check suite, so it gets
-   * the gate's time, not a network call's. The daemon passes the runner's gate timeout.
+   * The push. It runs no hook, but it uploads every commit of the batch, which on a slow link takes
+   * longer than a fetch of one branch.
    */
   readonly pushTimeoutMs: number;
   /** The shipping gate; the daemon passes the runner's gate timeout. */
@@ -48,8 +48,8 @@ export function pushCall(ctx: DeliveryContext, signal: AbortSignal): NetworkCall
   return { ...networkCall(ctx, signal), timeoutMs: ctx.limits.pushTimeoutMs };
 }
 
-export function ghCall(ctx: DeliveryContext, repoPath: string, signal: AbortSignal): GhCall {
-  return { cwd: repoPath, ...networkCall(ctx, signal) };
+export function ghCall(ctx: DeliveryContext, signal: AbortSignal): GhCall {
+  return networkCall(ctx, signal);
 }
 
 /** Delivery cards belong to the project, not to one workstream. */

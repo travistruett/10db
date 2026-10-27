@@ -1,10 +1,12 @@
 import { execFile } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { z } from 'zod';
-import { withoutGitRepoEnv } from '../git';
+import { withDaemonGitConfig, withoutGitRepoEnv } from '../git';
 
-/** One `gh` call: where it runs, in which environment, for how long, and how to stop it. */
+/** One `gh` call: in which environment, for how long, and how to stop it. */
 export interface GhCall {
-  readonly cwd: string;
   readonly env: Readonly<Record<string, string>>;
   readonly timeoutMs: number;
   readonly signal?: AbortSignal;
@@ -40,7 +42,6 @@ export interface PullRequest {
 /** The host integration (batch delivery spec §7): everything 10db asks GitHub, through the gh CLI. */
 export interface Gh {
   authStatus(call: GhCall): Promise<void>;
-  repoView(call: GhCall): Promise<string>;
   prView(
     input: { readonly repo: string; readonly ref: string },
     call: GhCall,
@@ -78,15 +79,23 @@ const NO_PROMPTS = {
   GIT_TERMINAL_PROMPT: '0',
 } as const;
 
+/**
+ * Runs gh in an empty directory of its own, so it finds no repository and runs no git in a checkout;
+ * every call names its repository with `-R`. Any git it does run gets the daemon's own config and
+ * no hook's `GIT_DIR`.
+ */
 export const systemGhExec: GhExec = (args, call) =>
   new Promise((resolve, reject) => {
+    const cwd = mkdtempSync(join(tmpdir(), '10db-gh-'));
+    const done = (): void => {
+      rmSync(cwd, { recursive: true, force: true });
+    };
     execFile(
       'gh',
       [...args],
       {
-        cwd: call.cwd,
-        // gh runs git in cwd to read the remotes; a hook's GIT_DIR would aim it at another repository.
-        env: { ...withoutGitRepoEnv(call.env), ...NO_PROMPTS },
+        cwd,
+        env: withDaemonGitConfig({ ...withoutGitRepoEnv(call.env), ...NO_PROMPTS }),
         timeout: call.timeoutMs,
         killSignal: 'SIGKILL',
         maxBuffer: MAX_OUTPUT,
@@ -94,6 +103,7 @@ export const systemGhExec: GhExec = (args, call) =>
         ...(call.signal ? { signal: call.signal } : {}),
       },
       (error, stdout, stderr) => {
+        done();
         if (!error) {
           resolve({ exitCode: 0, stdout, stderr });
           return;
@@ -135,7 +145,6 @@ export const systemGhExec: GhExec = (args, call) =>
     );
   });
 
-const RepoView = z.object({ nameWithOwner: z.string().regex(/^[^/\s]+\/[^/\s]+$/) });
 const PrView = z.object({ url: z.url(), state: z.enum(PrState) });
 
 /**
@@ -201,10 +210,6 @@ export function createGh(exec: GhExec = systemGhExec): Gh {
           GhFailure.SignedOut,
           'gh is not signed in. Run gh auth login in a terminal.',
         );
-    },
-    async repoView(call) {
-      const args = ['repo', 'view', '--json', 'nameWithOwner'];
-      return parseOutput(RepoView, args, await ok(args, call)).nameWithOwner;
     },
     async prView({ repo, ref }, call) {
       const args = ['pr', 'view', ref, '-R', repo, '--json', 'url,state'];

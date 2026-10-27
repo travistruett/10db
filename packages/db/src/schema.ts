@@ -320,6 +320,11 @@ export const workstreams = sqliteTable(
       .default(sql`'[]'`),
     stepIndex: integer('step_index').notNull().default(0),
     baseHead: text('base_head'),
+    /**
+     * The branch the workstream commits on, pinned when its first session starts and never read from
+     * HEAD again; a batch's branch takes its place for batch work.
+     */
+    branch: text('branch'),
     leaseOwner: text('lease_owner'),
     leaseExpiresAt: text('lease_expires_at'),
     fence: integer('fence').notNull(),

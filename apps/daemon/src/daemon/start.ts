@@ -68,7 +68,7 @@ import {
   type Keychain,
 } from '../environment';
 import { createEventBus, createStateStore, type StateStore } from '../events';
-import { createGit } from '../git';
+import { createGit, memoryPinStore, resolveGit } from '../git';
 import { createGh, type Gh } from '../github';
 import { createInboxService } from '../inbox';
 import { createKeepAwake, systemCaffeinate, type CaffeinateSpawner } from '../keep-awake';
@@ -83,13 +83,15 @@ import {
   type Runner,
   type RunnerLimits,
 } from '../runner';
-import { createLaneSandbox } from '../sandbox';
+import { createLaneSandbox, LANE_TEMP_ROOT } from '../sandbox';
 import { createScheduler, type Scheduler } from '../scheduler';
 import type { SessionAdapter } from '../sessions';
 import { retryWorkstream, seedTeam } from '../team';
 import { createGateRunner } from '../verify';
 import { CLIENT_APP } from '../version';
 import { createWatcher, systemWatch, type WatchFn } from '../watcher';
+import { createProjectPinStore } from './checkout-pins';
+import { createGitCardAnswers, createGitRefusalHandler } from './git-refusal';
 import { acquireInstanceLock } from './instance-lock';
 import { removeRuntimeFiles, writeRuntimeFiles } from './runtime-files';
 import { createServices } from './services';
@@ -194,6 +196,9 @@ function noSystemCheck(): Promise<SystemCheckDto> {
 }
 
 export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
+  // Before anything runs git: the one git every daemon git call runs, from the login PATH, and only
+  // one that can be told to read no attributes. The daemon's own PATH, from Finder, is /usr/bin.
+  const gitBin = await resolveGit((opts.loginEnv ?? process.env)['PATH'] ?? DEFAULT_SESSION_PATH);
   const clock = opts.clock ?? systemClock;
   const startedAt = clock.now();
   mkdirSync(join(opts.dataDir, 'logs'), { recursive: true });
@@ -262,7 +267,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   });
   benchmarks.start();
   const instanceId = randomUUID();
-  const git = createGit();
   const live = createLiveSessions();
   const limits: RunnerLimits = { ...DEFAULT_RUNNER_LIMITS, ...opts.limits };
   const processes = opts.processes ?? systemProcesses;
@@ -273,6 +277,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   let scheduler: Scheduler | null = null;
   let answerBatchCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerAccountCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
+  let answerGitCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
 
   const inbox = createInboxService({
     state,
@@ -282,8 +287,22 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     onFlagAnswer: (item, answer) => {
       answerBatchCard?.(item, answer);
       answerAccountCard?.(item, answer);
+      answerGitCard?.(item, answer);
     },
   });
+  const git = createGit({
+    onRefused: createGitRefusalHandler({ db: state.db, inbox, logger }),
+    pins: createProjectPinStore(state, memoryPinStore()),
+    bin: gitBin,
+    laneRoots: [opts.laneSandbox?.tmpRoot ?? LANE_TEMP_ROOT],
+  });
+  const answerGit = createGitCardAnswers(git);
+  answerGitCard = (item, answer) => {
+    // A re-trust reads the checkout first; a refusal it meets raises its own card.
+    answerGit(item, answer).catch((error: unknown) => {
+      logger.error({ err: error }, 'could not re-trust a checkout');
+    });
+  };
   const deliveryJobs = createDeliveryJobs(logger.child({ component: 'delivery' }));
   const delivery: DeliveryContext = {
     state,
@@ -294,7 +313,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     logger: logger.child({ component: 'delivery' }),
     limits: {
       ...DEFAULT_DELIVERY_LIMITS,
-      pushTimeoutMs: limits.gateTimeoutMs,
       gateTimeoutMs: limits.gateTimeoutMs,
       ...opts.deliveryLimits,
     },
@@ -552,6 +570,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       starter,
       shipper,
       accounts: accountService,
+      pinCheckout: (repoPath) => {
+        // A checkout git can't read yet is recorded at the first git call that succeeds there.
+        git.gitDirs(repoPath).catch(() => undefined);
+      },
     }),
     upgradeWebSocket,
     onUnexpectedError: (error) => {

@@ -52,6 +52,7 @@ describe('deniedEnvNames', () => {
   it.each([
     'CLAUDE_CODE_TMPDIR',
     'GIT_CONFIG_GLOBAL',
+    'GIT_OPTIONAL_LOCKS',
     'npm_config_cache',
     'pnpm_config_store_dir',
     'TMPDIR',

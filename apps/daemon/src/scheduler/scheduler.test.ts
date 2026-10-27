@@ -30,6 +30,7 @@ import {
 } from '../accounts';
 import { ManualClock } from '../clock';
 import { createEventBus, createStateStore, type StateStore } from '../events';
+import { GitTrustError } from '../git';
 import { createInboxService, type InboxService } from '../inbox';
 import { silentLogger } from '../log';
 import { createScheduler } from './index';
@@ -44,6 +45,8 @@ let pauses: AccountPauses;
 let accounts: AccountRuntime;
 let running: Set<WorkstreamId>;
 let branchOf: Map<string, string | null>;
+/** Checkouts whose git the daemon refuses; their refusal raised its own card. */
+let refusedRepos: Set<string>;
 let branchReads: string[];
 let prepared: { accountId: AccountId; projectId: ProjectId }[];
 let wrongBranch: { batchId: string; current: string | null }[];
@@ -64,6 +67,7 @@ beforeEach(() => {
   launched = [];
   running = new Set();
   branchOf = new Map();
+  refusedRepos = new Set();
   branchReads = [];
   wrongBranch = [];
   prepared = [];
@@ -96,6 +100,21 @@ function scheduler(caps = { global: 4 }) {
     branches: {
       currentBranch: (repo) => {
         branchReads.push(repo);
+        if (refusedRepos.has(repo))
+          return Promise.reject(
+            new GitTrustError(repo, {
+              kind: 'moved',
+              pinned: '/a/.git',
+              found: '/b/.git',
+              candidate: {
+                gitDir: '/b/.git',
+                commonDir: '/b/.git',
+                id: '1:2/1:2',
+                fetchUrl: null,
+                pushUrl: null,
+              },
+            }),
+          );
         return Promise.resolve(branchOf.get(repo) ?? null);
       },
     },
@@ -386,6 +405,14 @@ describe('pull-request delivery', () => {
       { batchId: q.batch.id, current: 'main' },
       { batchId: q.batch.id, current: 'main' },
     ]);
+  });
+
+  it('waits without a wrong-branch card while git refuses the checkout', async () => {
+    const q = inBatch(['OPEN']);
+    refusedRepos.add(q.project.repoPath);
+    await scheduler().tick();
+    expect(launched).toEqual([]);
+    expect(wrongBranch).toEqual([]);
   });
 
   it('never launches pull-request work that has no batch', async () => {

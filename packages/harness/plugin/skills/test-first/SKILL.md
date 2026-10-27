@@ -19,4 +19,4 @@ Never weaken or delete a test to make it pass. If a test is wrong, say why in th
 message. Never skip a failing test without asking with `mcp__10db__ask_human`.
 
 Commit with `mcp__10db__commit`, naming every path. Never run `git commit`, `git add -A`,
-`git stash`, `git checkout` or `git reset`; 10db denies them.
+`git stash`, `git checkout`, `git reset` or `git push`; 10db denies them and pushes for you.

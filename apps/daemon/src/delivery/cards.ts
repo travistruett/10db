@@ -60,6 +60,13 @@ export const startCards = {
     title: `${NOT_STARTED}: the checkout has uncommitted changes`,
     body: `10db cuts a batch branch only from a clean checkout. Commit, stash or discard these paths in ${project.repoPath}, then start again:\n${listPaths(paths)}`,
   }),
+  usesFilters: (
+    project: ProjectDto,
+    filters: readonly { readonly path: string; readonly filter: string }[],
+  ): Card => ({
+    title: `${NOT_STARTED}: ${project.repoPath} uses git filters`,
+    body: `10db commits and pushes files exactly as they are and never runs a filter, so it can't deliver a repository whose attributes ask for one (Git LFS is the usual one):\n${listPaths(filters.map((f) => `${f.path} (${f.filter})`))}\n\nUse local delivery for this project, or ship its changes yourself.`,
+  }),
   noOrigin: (project: ProjectDto): Card => ({
     title: `${NOT_STARTED}: ${project.repoPath} has no remote named origin`,
     body: 'Pull request delivery pushes to origin. Add it with git remote add origin <GitHub URL>, then start again.',
@@ -73,11 +80,10 @@ export const startCards = {
       title: `${NOT_STARTED}: gh auth status failed`,
       body: `${detailOf(error)}\n\nRun gh auth status in a terminal to see why, then start again.`,
     },
-  repoUnknown: (project: ProjectDto, error: unknown): Card =>
-    ghCard(NOT_STARTED, error, 'start again') ?? {
-      title: `${NOT_STARTED}: gh can't find the GitHub repository for ${project.repoPath}`,
-      body: `${detailOf(error)}\n\nPull request delivery needs origin to point at github.com and gh to be signed in to an account that can open pull requests there.`,
-    },
+  repoUnknown: (project: ProjectDto): Card => ({
+    title: `${NOT_STARTED}: origin in ${project.repoPath} is not a github.com repository`,
+    body: 'Pull request delivery opens pull requests on github.com, for the repository origin pushes to, as 10db recorded it with the project. Point origin at github.com (https://github.com/owner/name.git or git@github.com:owner/name.git), answer the card that asks you to trust the new origin, then start again.',
+  }),
   unfinishedDependencies: (blocked: readonly BlockedTask[]): Card => ({
     title: 'Not started: tasks depend on unfinished work',
     body: `${blocked.map((b) => `- ${b.task.title} needs ${b.deps.map((d) => d.title).join(', ')}`).join('\n')}\n\nStart them together, or finish those tasks first.`,
@@ -211,7 +217,7 @@ export const shipCards = {
     failure: BatchFailure.Network,
     card: {
       title: `${notShipped(batch)}: git push ran past ${duration(timeoutMs)}`,
-      body: `git push, or the pre-push hook it runs in this clone, was still running after ${duration(timeoutMs)}, so 10db stopped it and every process it started. Check what the hook runs and why it took so long.\n\n${RETRY}`,
+      body: `git push was still running after ${duration(timeoutMs)}, so 10db stopped it and every process it started. Check that git reaches origin from your login shell (its SSH agent or credential helper).\n\n${RETRY}`,
       detail: { batchId: batch.id },
     },
   }),

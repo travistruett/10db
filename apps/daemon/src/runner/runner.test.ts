@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -15,6 +16,7 @@ import {
   getProject,
   getTask,
   getWorkstream,
+  getWorkstreamRow,
   listEventsAfter,
   listEvidence,
   listInbox,
@@ -45,7 +47,7 @@ import {
   type LaneSessionInput,
 } from '../sandbox';
 import type { SessionEvent, SessionHandle, SessionSpec } from '../sessions';
-import { createMemoryKeychain, handoffArgs, waitFor } from '../../test/fixtures';
+import { createMemoryKeychain, handoffArgs, isolatedGitEnv, waitFor } from '../../test/fixtures';
 import { createTestEngine, type TestEngine } from '../../test/engine';
 import { captureLogs } from '../../test/log-capture';
 
@@ -253,6 +255,46 @@ describe('runner', () => {
     expect(engine.adapter.prompts[1]).toMatchObject({ resume: first?.providerSessionId });
     expect(engine.adapter.prompts[1]?.prompt).toContain('Answer: Yes');
     expect(second?.exitReason).toBe('step_done');
+  });
+
+  it('pins the branch at the first session, so a later session never commits where HEAD moved', async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        [askShip, turn],
+        [write('src/api/a.txt'), commit('op-pin-0001', ['src/api/a.txt']), turn],
+      ],
+    });
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    const card = await waitFor(openCard);
+    engine.clock.advance(10 * 60_000);
+    await engine.runner.idle();
+    expect(getWorkstreamRow(engine.store.db, workstream.id).branch).toBe('main');
+    // While the work waits, something points HEAD at another branch.
+    execFileSync('git', ['-C', engine.repoPath, 'switch', '-q', '-c', 'elsewhere'], {
+      env: isolatedGitEnv(),
+    });
+    const elsewhere = execFileSync('git', ['-C', engine.repoPath, 'rev-parse', 'elsewhere'], {
+      env: isolatedGitEnv(),
+    })
+      .toString()
+      .trim();
+    engine.inbox.answer(card.id, { choice: 'Yes' });
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(getWorkstreamRow(engine.store.db, workstream.id).branch).toBe('main');
+    expect(
+      execFileSync('git', ['-C', engine.repoPath, 'rev-parse', 'elsewhere'], {
+        env: isolatedGitEnv(),
+      })
+        .toString()
+        .trim(),
+    ).toBe(elsewhere);
+    expect(
+      engine.adapter.observations.some((o) =>
+        JSON.stringify(o).includes("the lane's branch is main"),
+      ),
+    ).toBe(true);
   });
 
   it('delivers a live answer to the same session', async () => {

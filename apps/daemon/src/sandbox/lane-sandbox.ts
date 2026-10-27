@@ -261,6 +261,8 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           // An exception to keeping git config variables: the builder's global config can name
           // hooks, credential helpers and includes the sandboxed git would run or read.
           GIT_CONFIG_GLOBAL: '/dev/null',
+          // The git a lane runs reads only: a status never refreshes the index it can't write.
+          GIT_OPTIONAL_LOCKS: '0',
           CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1',
           // Claude Code drops GIT_CONFIG_GLOBAL from a sandboxed command's env; this file sets it back.
           CLAUDE_ENV_FILE: envFile,
@@ -275,16 +277,15 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           toolchainReads: toolchain.reads,
           allowedDomains: hosts,
           readList,
-          // A linked worktree's common dir is read-only: it holds the `config` and `hooks/` the
-          // daemon's unsandboxed git runs. Claude Code opens the worktree's own git dir for writing
-          // anyway, so `HEAD` and `index` stay writable and the daemon's git must check them.
-          // Lanes commit through the daemon.
+          // A linked worktree's common dir is read for the git a lane runs, never written.
           // The env file is read to set up each command's shell, in case that happens in the sandbox.
           extraReads: [envFile, ...(linkedWorktree ? [commonDir] : [])],
           extraWrites: [],
-          // Claude Code opens a linked worktree's git dir for writing and holds back `commondir` and
-          // `config.worktree`, but not `gitdir`, the link git follows from the main repository.
-          denyWrites: linkedWorktree ? [join(gitDir, 'gitdir')] : [],
+          // Only the daemon writes git state, so a lane can't move HEAD or a ref, stage, or plant
+          // config, hooks, alternates or attributes: the git dir is read-only to it, as is a linked
+          // worktree's common dir and its `.git` gitfile, so the gitfile can't be swapped to point
+          // elsewhere. Claude Code would otherwise open them with the checkout.
+          denyWrites: linkedWorktree ? [join(checkout, '.git'), gitDir, commonDir] : [gitDir],
           loopback: input.project.sandboxLoopback,
           deniedEnvNames: deniedEnvNames({ ...input.env, ...env }),
         });

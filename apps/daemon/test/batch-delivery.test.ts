@@ -16,6 +16,7 @@ import { apiClient, quickFlowId } from './api-client';
 import { FakeGh } from './fake-gh';
 import {
   createTempRepoWithOrigin,
+  githubOrigin,
   isolatedGitEnv,
   NETWORK_ENV,
   tempDir,
@@ -48,16 +49,19 @@ const BOOK: FakeScriptBook = {
 let data: { path: string; cleanup(): void };
 let remote: ReturnType<typeof createTempRepoWithOrigin>;
 let gh: FakeGh;
+let network: ReturnType<typeof githubOrigin>;
 let daemon: RunningDaemon | null = null;
 beforeEach(() => {
   data = tempDir('batch-daemon');
   remote = createTempRepoWithOrigin();
+  network = githubOrigin(remote.repo.path, remote.origin.path);
   gh = new FakeGh();
 });
 afterEach(async () => {
   await daemon?.stop();
   daemon = null;
   remote.cleanup();
+  network.cleanup();
   data.cleanup();
 });
 
@@ -76,7 +80,7 @@ async function start(systemCheck?: () => Promise<SystemCheck>) {
     caffeinate: () => null,
     watch: false,
     gh,
-    networkEnv: () => NETWORK_ENV,
+    networkEnv: () => ({ ...NETWORK_ENV, GIT_CONFIG_GLOBAL: network.global }),
     ...(systemCheck ? { systemCheck } : {}),
   });
   const api = apiClient(daemon.url, daemon.token);
