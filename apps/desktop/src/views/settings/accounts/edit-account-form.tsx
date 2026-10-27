@@ -10,16 +10,39 @@ import {
   type AccountFormValues,
 } from './account-form-values';
 
+/** Per field: the builder's value where it differs from `before`, else the `latest` account's. */
+function mergedValues(
+  before: AccountFormValues,
+  edited: AccountFormValues,
+  latest: AccountFormValues,
+): AccountFormValues {
+  const pick = <K extends keyof AccountFormValues>(key: K): AccountFormValues[K] =>
+    JSON.stringify(edited[key]) === JSON.stringify(before[key]) ? latest[key] : edited[key];
+  return {
+    kind: pick('kind'),
+    label: pick('label'),
+    payer: pick('payer'),
+    laneCap: pick('laneCap'),
+    monthlyCapUsd: pick('monthlyCapUsd'),
+    organization: pick('organization'),
+    region: pick('region'),
+    bedrockAuth: pick('bedrockAuth'),
+    awsProfile: pick('awsProfile'),
+    baseUrl: pick('baseUrl'),
+    modelMap: pick('modelMap'),
+    aliases: pick('aliases'),
+  };
+}
+
 /** An account's editable fields. Save sends only what changed and stays off while nothing has. */
 export function EditAccountForm({ account }: { readonly account: AccountDto }) {
   const [values, setValues] = useState<AccountFormValues>(() => formValuesOf(account));
-  // The account the values were last in step with. A change to the account (another window, an event)
-  // replaces the values only when the builder has typed nothing against the previous one.
+  // The account the values were last in step with. When it changes (another window, an event), each
+  // field the builder hasn't touched takes the new account's value and each edited field keeps theirs.
   const [seen, setSeen] = useState(account);
   if (account !== seen) {
-    const before = toAccountPatch(seen, values);
     setSeen(account);
-    if (before.ok && before.patch === null) setValues(formValuesOf(account));
+    setValues(mergedValues(formValuesOf(seen), values, formValuesOf(account)));
   }
   const [errors, setErrors] = useState<Readonly<Record<string, string>>>({});
   const patchAccount = usePatchAccount(account.id);

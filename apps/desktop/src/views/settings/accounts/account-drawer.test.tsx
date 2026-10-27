@@ -620,7 +620,7 @@ describe('AccountDrawer', () => {
     );
   });
 
-  it('keeps the builder’s edits when the account changes remotely', async () => {
+  it('keeps the builder’s edits and takes the rest of a remote change', async () => {
     const account = accountDto({ label: 'Fresh login' });
     const served = serve([DEFAULT_ACCOUNT, account]);
     const dialog = await openDrawer('Fresh login');
@@ -629,12 +629,19 @@ describe('AccountDrawer', () => {
     });
     served.changeRemotely(account.id, { laneCap: 8 });
     await waitFor(() => {
-      expect(served.accountListCalls).toBeGreaterThan(1);
+      expect(within(dialog).getByRole('textbox', { name: 'Lane cap' })).toHaveProperty(
+        'value',
+        '8',
+      );
     });
     expect(within(dialog).getByRole('textbox', { name: 'Label' })).toHaveProperty(
       'value',
       'Mid edit',
     );
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => {
+      expect(served.patches).toEqual([{ id: account.id, body: { label: 'Mid edit' } }]);
+    });
   });
 
   it('archives after a confirmation and closes the drawer', async () => {

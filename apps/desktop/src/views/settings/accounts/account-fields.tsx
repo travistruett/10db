@@ -91,7 +91,7 @@ function ModelMapRows({
               row.alias.trim() === '' ||
               values.modelMap.filter((r) => r.alias.trim() === row.alias.trim()).length > 1
                 ? `Remove row ${String(index + 1)} mapping`
-                : `Remove ${row.alias} mapping`
+                : `Remove ${row.alias.trim()} mapping`
             }
             onClick={() => {
               pendingFocus.current = index < values.modelMap.length - 1 ? index : 'add';
