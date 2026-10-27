@@ -34,4 +34,5 @@ The UI never touches the database; it talks to the daemon over loopback HTTP and
   `E2E_DAEMON_PORT` and `E2E_UI_PORT` to fix them while debugging.
   `pnpm dev` and the Tauri shell keep Vite on 1420.
 - The board (`views/board/`) has human columns (parked tasks, never started) left of the derived system columns. `drop-rules.ts` holds the drag rules and the card menu's equivalent moves; both call `POST /tasks/:taskId/move` or `POST /tasks/:taskId/start`. jsdom can't drive dnd-kit's sensors (no layout): unit tests move cards through the menu, and `e2e/loop.spec.ts` drives a keyboard drag in WebKit.
+- The board's batch sheet (`views/board/batch/`) starts work as the project's delivery mode and current batch allow: in a pull-request project one `POST /projects/:id/batches` (it starts, joins or reopens the batch), in a local one a `POST /tasks/:id/start` per task. Each card's menu keeps its own Start.
 - Settings (`views/settings/`) is one route over `sections.ts`. To fill a planned section, set its `planned` to null and replace its arm in `section-body.tsx`.
