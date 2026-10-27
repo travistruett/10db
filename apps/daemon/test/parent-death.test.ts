@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { tempDir, waitForAsync, type TempDir } from './fixtures';
@@ -25,6 +26,11 @@ function launch(extraEnv: Record<string, string>): ChildProcess {
     env: {
       PATH: process.env['PATH'] ?? '',
       HOME: process.env['HOME'] ?? '',
+      // The test's own temp dir: a sandboxed run can write no other.
+      TMPDIR: tmpdir(),
+      // The child's git must not read the contributor's own config, which a sandbox can't read.
+      GIT_CONFIG_GLOBAL: '/dev/null',
+      GIT_CONFIG_NOSYSTEM: '1',
       TENDB_DATA_DIR: data.path,
       TENDB_PORT: '0',
       TENDB_LOG_LEVEL: 'warn',

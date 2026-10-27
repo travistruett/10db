@@ -126,6 +126,22 @@ describe('scripts/gate.sh', () => {
     }
   });
 
+  it('reports e2e as skipped, not run, inside a sandbox', () => {
+    // A pnpm that fails, so a run that wrongly starts the e2e step fails fast.
+    const fake = failingCargoDir();
+    try {
+      const { status, last } = runGate(sandbox, {
+        GATE_STEPS: 'e2e',
+        TENDB_SANDBOX: '1',
+        PATH: `${fake}:${process.env['PATH'] ?? ''}`,
+      });
+      expect(status).toBe(0);
+      expect(last).toMatch(/^GATE PASS e2e skipped \(sandboxed\) \(\d+s\)$/);
+    } finally {
+      rmSync(fake, { recursive: true, force: true });
+    }
+  });
+
   it('names the failing step and exits non-zero', () => {
     const { status, last } = runGate(sandbox, { GATE_STEPS: 'fail-probe' });
     expect(status).toBe(1);

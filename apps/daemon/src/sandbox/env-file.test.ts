@@ -9,6 +9,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -21,7 +22,7 @@ import {
 let root: string;
 
 beforeEach(() => {
-  root = realpathSync(mkdtempSync('/tmp/sbe-'));
+  root = realpathSync(mkdtempSync(join(tmpdir(), 'sbe-')));
 });
 
 afterEach(() => {

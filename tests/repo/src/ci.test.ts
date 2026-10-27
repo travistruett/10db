@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { parseAllDocuments } from 'yaml';
 import { z } from 'zod';
-import { createThrowawayRepo, fakeGithubToken, type ThrowawayRepo } from './fixtures';
+import { createThrowawayRepo, fakeGithubToken, SANDBOXED, type ThrowawayRepo } from './fixtures';
 import { readRepoFile, repoRoot } from './workspace';
 import {
   parseWorkflow,
@@ -268,17 +268,21 @@ describe('scripts/policy.sh', () => {
     repo.remove();
   });
 
-  it('fails on a secret committed inside the range, with gitleaks reporting it', () => {
-    const { token, body } = fakeGithubToken();
-    repo.stage('config.ts', `export const token = '${token}';\n`);
-    repo.commit('feat(repo): add config');
-    const result = policy(base, repo.gitOutput('rev-parse', 'HEAD'));
-    const output = `${result.stdout}${result.stderr}`;
-    expect(result.status).not.toBe(0);
-    // gitleaks' own finding text, so a missing gitleaks (a non-zero exit too) can't pass this.
-    expect(output).toContain('leaks found: 1');
-    expect(output).not.toContain(body);
-  });
+  // gitleaks can't scan in a sandbox where git is Apple's shim; see SANDBOXED.
+  it.skipIf(SANDBOXED)(
+    'fails on a secret committed inside the range, with gitleaks reporting it',
+    () => {
+      const { token, body } = fakeGithubToken();
+      repo.stage('config.ts', `export const token = '${token}';\n`);
+      repo.commit('feat(repo): add config');
+      const result = policy(base, repo.gitOutput('rev-parse', 'HEAD'));
+      const output = `${result.stdout}${result.stderr}`;
+      expect(result.status).not.toBe(0);
+      // gitleaks' own finding text, so a missing gitleaks (a non-zero exit too) can't pass this.
+      expect(output).toContain('leaks found: 1');
+      expect(output).not.toContain(body);
+    },
+  );
 
   it('passes a clean range through gitleaks, hygiene and the workflow linters', () => {
     repo.stage('notes.md', 'nothing secret here\n');

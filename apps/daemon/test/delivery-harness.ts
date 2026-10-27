@@ -187,7 +187,7 @@ export function createDeliveryHarness(
   const running = new Set<WorkstreamId>();
   const shipper = createShipper({
     ...ctx,
-    gate: createGateRunner(),
+    gate: createGateRunner({ sandbox: null, logger: silentLogger }),
     clock: new ManualClock(),
     dataDir: data.path,
     sessionEnv: () => ({ PATH: '/usr/bin:/bin' }),

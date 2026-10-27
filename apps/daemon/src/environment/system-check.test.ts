@@ -1,7 +1,8 @@
-import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { tempDir } from '../../test/fixtures';
+import { firstExecutable, installCandidates } from '../git';
 import {
   claudeCodeWarning,
   findClaude,
@@ -58,10 +59,9 @@ describe('systemCheck', () => {
       source: 'inherited',
       warning: 'The login shell timed out',
     };
-    const prefixed = (name: string) =>
-      ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin']
-        .map((prefix) => join(prefix, name))
-        .find((p) => existsSync(p));
+    // This machine's own installs win, judged as the daemon judges them: a link to an install
+    // nobody can run, such as one a sandbox can't read, doesn't count.
+    const prefixed = (name: string) => firstExecutable(installCandidates(name));
     const report = await systemCheck(login, resolved, {
       home: join(dir.path, 'home'),
       probe: (path, env) => Promise.resolve(`version of ${path} ${env['PATH'] ?? ''}`),
@@ -105,9 +105,7 @@ describe('findClaude', () => {
     { name: 'the older local install', at: '.claude/local' },
   ])('finds claude in $name when no install prefix has it', ({ at }) => {
     const path = tool(join('home', at), 'claude', 'exit 0');
-    const prefixed = ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin']
-      .map((prefix) => join(prefix, 'claude'))
-      .find((p) => existsSync(p));
+    const prefixed = firstExecutable(installCandidates('claude'));
     expect(findClaude(join(dir.path, 'home'))).toBe(prefixed ?? path);
   });
 });

@@ -85,7 +85,13 @@ import {
   type Runner,
   type RunnerLimits,
 } from '../runner';
-import { createLaneSandbox, LANE_TEMP_ROOT } from '../sandbox';
+import { resolveSandboxRuntime } from '../paths';
+import {
+  createGateSandbox,
+  createLaneSandbox,
+  LANE_TEMP_ROOT,
+  type SandboxRuntime,
+} from '../sandbox';
 import { createScheduler, type Scheduler } from '../scheduler';
 import type { SessionAdapter } from '../sessions';
 import { retryWorkstream, seedTeam } from '../team';
@@ -105,11 +111,12 @@ export interface DaemonOptions {
   readonly adapter: SessionAdapter | ((logger: Logger) => SessionAdapter);
   readonly logLevel: LogLevel;
   /**
-   * The lane sandbox every lane runs under; `tmpRoot` (tests) moves its temp dirs off `/private/tmp`.
-   * Required, so no caller can forget it: null runs lanes unsandboxed, which only fake sessions and
-   * tests ask for, and the Claude adapter refuses such a session.
+   * The sandbox every lane and every gate runs under; `tmpRoot` (tests) moves its temp dirs off
+   * `/private/tmp`, and `runtime` (tests) replaces srt, which runs the gate. Required, so no caller
+   * can forget it: null runs lanes and gates unsandboxed, which only fake sessions and tests ask
+   * for, and the Claude adapter refuses such a session.
    */
-  readonly laneSandbox: { readonly tmpRoot?: string } | null;
+  readonly sandbox: { readonly tmpRoot?: string; readonly runtime?: SandboxRuntime } | null;
   /** better_sqlite3.node for bundled runs; source runs leave it unset. */
   readonly sqliteBinding?: string;
   readonly clock?: Clock;
@@ -300,7 +307,23 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     pins: createProjectPinStore(state, memoryPinStore()),
     bin: gitBin,
     checkouts: () => listProjects(state.db).map((project) => project.repoPath),
-    laneRoots: [opts.laneSandbox?.tmpRoot ?? LANE_TEMP_ROOT],
+    // Where sandboxed lanes and gates make their temp dirs. With no sandbox nothing is made there,
+    // so nothing lane-written lies in it.
+    laneRoots: opts.sandbox ? [opts.sandbox.tmpRoot ?? LANE_TEMP_ROOT] : [],
+  });
+  // Shared by every gate: a task's, at its green run, and a batch's, at ship.
+  const gate = createGateRunner({
+    sandbox: opts.sandbox
+      ? createGateSandbox({
+          home: homedir(),
+          dataDir: opts.dataDir,
+          loginConfigDir: launcher.loginConfigDir(),
+          gitDirs: (repo) => git.gitDirs(repo),
+          ...(opts.sandbox.tmpRoot === undefined ? {} : { tmpRoot: opts.sandbox.tmpRoot }),
+          runtime: opts.sandbox.runtime ?? resolveSandboxRuntime(),
+        })
+      : null,
+    logger: logger.child({ component: 'gate' }),
   });
   const answerGit = createGitCardAnswers(git);
   answerGitCard = (item, answer) => {
@@ -330,7 +353,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const starter = createBatchStarter(delivery);
   const shipper = createShipper({
     ...delivery,
-    gate: createGateRunner(),
+    gate,
     clock,
     dataDir: opts.dataDir,
     sessionEnv: () => launcher.projectEnv(),
@@ -454,13 +477,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     home: homedir(),
     loginConfigDir: launcher.loginConfigDir(),
   });
-  const laneSandbox = opts.laneSandbox
+  const laneSandbox = opts.sandbox
     ? createLaneSandbox({
         home: homedir(),
         dataDir: opts.dataDir,
         loginConfigDir: launcher.loginConfigDir(),
         gitDirs: (repo) => git.gitDirs(repo),
-        ...(opts.laneSandbox.tmpRoot === undefined ? {} : { tmpRoot: opts.laneSandbox.tmpRoot }),
+        ...(opts.sandbox.tmpRoot === undefined ? {} : { tmpRoot: opts.sandbox.tmpRoot }),
       })
     : null;
   const createdRunner = createRunner({
@@ -470,7 +493,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     adapter,
     inbox,
     git,
-    gate: createGateRunner(),
+    gate,
     clock,
     logger,
     dataDir: opts.dataDir,

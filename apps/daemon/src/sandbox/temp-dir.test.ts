@@ -11,6 +11,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import { SANDBOXED } from '../../test/fixtures';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   createLaneTempDir,
@@ -30,7 +31,9 @@ afterEach(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
-describe('lane temp directory', () => {
+// Their root is a short path under the shared `/tmp`, so a temp dir made in it fits Claude Code's
+// 44-byte limit, and no sandbox can write `/tmp`.
+describe.skipIf(SANDBOXED)('lane temp directory', () => {
   it('creates a short private directory', () => {
     const shortRoot = join(root, 'r');
     mkdirSync(shortRoot);

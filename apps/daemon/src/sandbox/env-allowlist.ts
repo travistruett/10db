@@ -26,6 +26,7 @@ const ALLOWED_NAMES: ReadonlySet<string> = new Set([
   'CLAUDE_CODE_TMPDIR',
   'GIT_CONFIG_GLOBAL',
   'GIT_OPTIONAL_LOCKS',
+  'TENDB_SANDBOX',
   'npm_config_cache',
   'npm_config_devdir',
 ]);

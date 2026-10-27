@@ -33,7 +33,14 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { WebSocket } from 'ws';
 import { apiClient, quickFlowId } from '../../test/api-client';
-import { createTempRepo, tempDir, waitFor, waitForAsync } from '../../test/fixtures';
+import {
+  createTempRepo,
+  FAKE_SRT,
+  SANDBOXED,
+  tempDir,
+  waitFor,
+  waitForAsync,
+} from '../../test/fixtures';
 import { ManualClock } from '../clock';
 import type { ResolvedTools } from '../environment';
 import type { CaffeinateSpawner } from '../keep-awake';
@@ -57,7 +64,7 @@ afterEach(async () => {
 describe('startDaemon', () => {
   it('serves health, writes runtime files with a private token, and refuses a second instance', async () => {
     daemon = await startDaemon({
-      laneSandbox: null,
+      sandbox: null,
       dataDir: dir.path,
       port: 0,
       adapter: new FakeAdapter({}),
@@ -74,7 +81,7 @@ describe('startDaemon', () => {
     expect(await projects.json()).toEqual([]);
     await expect(
       startDaemon({
-        laneSandbox: null,
+        sandbox: null,
         dataDir: dir.path,
         port: 0,
         adapter: new FakeAdapter({}),
@@ -88,7 +95,7 @@ describe('startDaemon', () => {
     const repo = createTempRepo();
     try {
       daemon = await startDaemon({
-        laneSandbox: null,
+        sandbox: null,
         dataDir: dir.path,
         port: 0,
         adapter: new FakeAdapter({}),
@@ -119,7 +126,7 @@ describe('startDaemon', () => {
 
   it('answers 400 for a project whose path is not a git repository', async () => {
     daemon = await startDaemon({
-      laneSandbox: null,
+      sandbox: null,
       dataDir: dir.path,
       port: 0,
       adapter: new FakeAdapter({}),
@@ -141,7 +148,7 @@ describe('startDaemon', () => {
 
   it('stops while a UI client is still connected to the event stream', async () => {
     const running = await startDaemon({
-      laneSandbox: null,
+      sandbox: null,
       dataDir: dir.path,
       port: 0,
       adapter: new FakeAdapter({}),
@@ -168,7 +175,7 @@ describe('startDaemon', () => {
 
   it('runs one shutdown however often stop is called (SIGINT, then SIGTERM, then later)', async () => {
     const running = await startDaemon({
-      laneSandbox: null,
+      sandbox: null,
       dataDir: dir.path,
       port: 0,
       adapter: new FakeAdapter({}),
@@ -189,7 +196,7 @@ describe('startDaemon', () => {
       // A fresh data directory: the default account is seeded with no identity; the fake's probe reports builder@example.com.
       const adapter = new FakeAdapter({ Alpha: [[{ do: 'turn_complete' }]] });
       const running = await startDaemon({
-        laneSandbox: null,
+        sandbox: null,
         dataDir: dir.path,
         port: 0,
         adapter,
@@ -235,7 +242,7 @@ describe('startDaemon', () => {
         return {};
       };
       const running = await startDaemon({
-        laneSandbox: null,
+        sandbox: null,
         dataDir: dir.path,
         port: 0,
         adapter,
@@ -264,61 +271,70 @@ describe('startDaemon', () => {
     }
   });
 
-  it('runs lanes under a lane sandbox built from its own data dir, home and git when the sandbox is on', async () => {
-    const repo = createTempRepo();
-    // A short root: the lane temp directory's whole path must fit the sandbox's limit.
-    const tmpRoot = realpathSync(mkdtempSync('/tmp/sbd-'));
-    try {
-      const adapter = new FakeAdapter({ Alpha: [[{ do: 'turn_complete' }]] });
-      const specs: SessionSpec[] = [];
-      adapter.seen = (spec) => {
-        specs.push(spec);
-        return {};
-      };
-      const running = await startDaemon({
-        dataDir: dir.path,
-        port: 0,
-        adapter,
-        logLevel: 'warn',
-        laneSandbox: { tmpRoot },
-        ...QUIET,
-      });
-      daemon = running;
-      const api = apiClient(running.url, running.token);
-      const project = await api.post('/projects', ProjectDto, {
-        name: 'demo',
-        repoPath: repo.path,
-        gateCommand: 'true',
-        flowId: await quickFlowId(api),
-        areas: [{ name: 'src', globs: ['src/**'] }],
-      });
-      const task = await api.post(`/projects/${project.id}/tasks`, TaskDto, {
-        title: 'Alpha',
-        acceptanceCriteria: ['it works'],
-        areas: ['src'],
-      });
-      await api.post(`/tasks/${task.id}/start`, z.unknown());
-      await waitForAsync(async () =>
-        (await api.get('/workstreams?active=false', z.array(WorkstreamDto))).some(
-          (w) => w.taskId === task.id && w.state === 'DONE',
-        ),
-      );
-      const sandbox = specs[0]?.sandbox;
-      expect(sandbox?.settings.filesystem.allowRead).toContain(realpathSync(repo.path));
-      expect(sandbox?.settings.filesystem.denyRead).toEqual(
-        expect.arrayContaining([dir.path, join(homedir(), '.claude.json')]),
-      );
-      expect(sandbox?.settings.network).not.toHaveProperty('allowLocalBinding');
-      const laneTmp = sandbox?.env['CLAUDE_CODE_TMPDIR'] ?? '';
-      expect(sandbox?.env['npm_config_cache']).toBe(join(laneTmp, 'cache', 'npm'));
-      expect(dirname(laneTmp)).toBe(tmpRoot);
-      // The session ended, so its temp dir is gone.
-      expect(readdirSync(tmpRoot)).toEqual([]);
-    } finally {
-      repo.cleanup();
-      rmSync(tmpRoot, { recursive: true, force: true });
-    }
-  });
+  // Its temp root is a short path under the shared `/tmp`, which no sandbox can write.
+  it.skipIf(SANDBOXED)(
+    'runs lanes and gates under the sandbox, built from its own data dir, home and git, when it is on',
+    async () => {
+      const repo = createTempRepo();
+      // A short root: the lane temp directory's whole path must fit the sandbox's limit.
+      const tmpRoot = realpathSync(mkdtempSync('/tmp/sbd-'));
+      try {
+        const adapter = new FakeAdapter({ Alpha: [[{ do: 'turn_complete' }]] });
+        const specs: SessionSpec[] = [];
+        adapter.seen = (spec) => {
+          specs.push(spec);
+          return {};
+        };
+        const running = await startDaemon({
+          dataDir: dir.path,
+          port: 0,
+          adapter,
+          logLevel: 'warn',
+          sandbox: { tmpRoot, runtime: FAKE_SRT },
+          ...QUIET,
+        });
+        daemon = running;
+        const api = apiClient(running.url, running.token);
+        const project = await api.post('/projects', ProjectDto, {
+          name: 'demo',
+          repoPath: repo.path,
+          gateCommand: 'true',
+          flowId: await quickFlowId(api),
+          areas: [{ name: 'src', globs: ['src/**'] }],
+        });
+        const task = await api.post(`/projects/${project.id}/tasks`, TaskDto, {
+          title: 'Alpha',
+          acceptanceCriteria: ['it works'],
+          areas: ['src'],
+        });
+        await api.post(`/tasks/${task.id}/start`, z.unknown());
+        await waitForAsync(async () =>
+          (await api.get('/workstreams?active=false', z.array(WorkstreamDto))).some(
+            (w) => w.taskId === task.id && w.state === 'DONE',
+          ),
+        );
+        const sandbox = specs[0]?.sandbox;
+        expect(sandbox?.settings.filesystem.allowRead).toContain(realpathSync(repo.path));
+        expect(sandbox?.settings.filesystem.denyRead).toEqual(
+          expect.arrayContaining([dir.path, join(homedir(), '.claude.json')]),
+        );
+        expect(sandbox?.settings.network).not.toHaveProperty('allowLocalBinding');
+        const laneTmp = sandbox?.env['CLAUDE_CODE_TMPDIR'] ?? '';
+        expect(sandbox?.env['npm_config_cache']).toBe(join(laneTmp, 'cache', 'npm'));
+        expect(dirname(laneTmp)).toBe(tmpRoot);
+        // The gate ran under srt, with the project's network: no hosts, and nothing off the list.
+        const gateLogs = join(dir.path, 'logs', 'gate');
+        const gateLog = readFileSync(join(gateLogs, readdirSync(gateLogs)[0] ?? ''), 'utf8');
+        expect(gateLog).toContain('fake srt: no sandbox; network {"allowedDomains":[]');
+        expect(gateLog).toContain('"strictAllowlist":true');
+        // The session and the gate ended, so their temp dirs and files are gone.
+        expect(readdirSync(tmpRoot)).toEqual([]);
+      } finally {
+        repo.cleanup();
+        rmSync(tmpRoot, { recursive: true, force: true });
+      }
+    },
+  );
 
   it('waits for an identity probe in flight before it closes the database', async () => {
     const repo = createTempRepo();
@@ -334,7 +350,7 @@ describe('startDaemon', () => {
         return adapter.probeSeen;
       };
       const running = await startDaemon({
-        laneSandbox: null,
+        sandbox: null,
         dataDir: dir.path,
         port: 0,
         adapter,
@@ -376,7 +392,7 @@ describe('startDaemon', () => {
     const book: FakeScriptBook = { Alpha: [[{ do: 'hang' }], [{ do: 'hang' }]] };
     const start = () =>
       startDaemon({
-        laneSandbox: null,
+        sandbox: null,
         dataDir: dir.path,
         port: 0,
         adapter: new FakeAdapter(book),
@@ -437,7 +453,7 @@ describe('startDaemon', () => {
     'lets a dev UI origin through CORS beside $name, and no other',
     async ({ allowedOrigins, base }) => {
       const running = await startDaemon({
-        laneSandbox: null,
+        sandbox: null,
         dataDir: dir.path,
         port: 0,
         adapter: new FakeAdapter({}),
@@ -468,7 +484,7 @@ describe('startDaemon', () => {
     };
     const checkedWith: ResolvedTools[] = [];
     daemon = await startDaemon({
-      laneSandbox: null,
+      sandbox: null,
       dataDir: dir.path,
       port: 0,
       adapter: new FakeAdapter({}),
@@ -516,7 +532,7 @@ describe('startDaemon', () => {
     const closed: string[] = [];
     try {
       daemon = await startDaemon({
-        laneSandbox: null,
+        sandbox: null,
         dataDir: dir.path,
         port: 0,
         adapter: new FakeAdapter({ Alpha: [[{ do: 'hang' }]] }),
@@ -572,7 +588,7 @@ describe('startDaemon', () => {
         }),
       );
       daemon = await startDaemon({
-        laneSandbox: null,
+        sandbox: null,
         dataDir: dir.path,
         port: 0,
         adapter: new FakeAdapter({}),
@@ -628,7 +644,7 @@ describe('startDaemon', () => {
     try {
       writeFileSync(join(repo.path, '.mcp.json'), '{"mcpServers": {');
       daemon = await startDaemon({
-        laneSandbox: null,
+        sandbox: null,
         dataDir: dir.path,
         port: 0,
         adapter: new FakeAdapter({}),
@@ -676,7 +692,7 @@ describe('startDaemon', () => {
         ),
       );
     daemon = await startDaemon({
-      laneSandbox: null,
+      sandbox: null,
       dataDir: dir.path,
       port: 0,
       adapter: new FakeAdapter({}),
@@ -707,7 +723,7 @@ describe('startDaemon', () => {
     const repo = createTempRepo();
     try {
       daemon = await startDaemon({
-        laneSandbox: null,
+        sandbox: null,
         dataDir: dir.path,
         port: 0,
         adapter: new FakeAdapter({}),
@@ -761,7 +777,7 @@ describe('startDaemon', () => {
     const repo = createTempRepo();
     try {
       daemon = await startDaemon({
-        laneSandbox: null,
+        sandbox: null,
         dataDir: dir.path,
         port: 0,
         adapter: new FakeAdapter({}),
@@ -824,7 +840,7 @@ describe('startDaemon', () => {
     const repo = createTempRepo();
     try {
       daemon = await startDaemon({
-        laneSandbox: null,
+        sandbox: null,
         dataDir: dir.path,
         port: 0,
         adapter: new FakeAdapter({}),
@@ -865,7 +881,7 @@ describe('startDaemon', () => {
 
   it('answers 404 for an unknown project on team, routing-rule and candidate routes and 201 on creates', async () => {
     daemon = await startDaemon({
-      laneSandbox: null,
+      sandbox: null,
       dataDir: dir.path,
       port: 0,
       adapter: new FakeAdapter({}),
@@ -938,7 +954,7 @@ describe('startDaemon', () => {
       }).length;
     };
     const running = await startDaemon({
-      laneSandbox: null,
+      sandbox: null,
       dataDir: dir.path,
       port: 0,
       adapter: new FakeAdapter({}),
@@ -966,7 +982,7 @@ describe('startDaemon', () => {
     },
   ])('$name', async ({ shellDir, configDir, warns }) => {
     const running = await startDaemon({
-      laneSandbox: null,
+      sandbox: null,
       dataDir: dir.path,
       port: 0,
       adapter: new FakeAdapter({}),

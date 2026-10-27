@@ -1525,12 +1525,15 @@ export function createRunner(opts: RunnerOptions): Runner {
     const logPath = join(opts.dataDir, 'logs', 'gate', `${id}-${String(run)}.log`);
     opts.logger.info({ workstreamId: id, command: project.gateCommand, logPath }, 'gate started');
     const result = await opts.gate.run({
-      repo: project.repoPath,
+      project,
       command: project.gateCommand,
       logPath,
       timeoutMs: opts.limits.gateTimeoutMs,
       // The project env: the login shell without billing switches, and never the account's credentials.
       env: opts.launcher.projectEnv(),
+      // The hosts and read paths the lane's own sandbox opens.
+      rules: listPermissionRules(db, project.id, id),
+      checkouts: listProjects(db).map((each) => each.repoPath),
       signal: gateAbort.signal,
       onSpawn: (pid) => {
         recording = identify(pid).then((gatePidStart) => {

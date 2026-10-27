@@ -2,6 +2,7 @@
 # Runs every repository check and prints one summary line. Each step's output goes to .gate/<step>.log.
 # GATE_STEPS="lint test" limits the run (used by tests and for quick reruns). GATE_SKIP_RUST=1
 # reports rust as skipped even when cargo is installed (the Ubuntu CI job: no Tauri system libraries).
+# Inside a sandbox (TENDB_SANDBOX=1, as a gate 10db runs has it) e2e is reported as skipped.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 # Logs from an earlier run would otherwise sit beside this run's, and a skipped step leaves none.
@@ -27,7 +28,15 @@ for step in "${steps[@]}"; do
     typecheck) run_step typecheck pnpm -s typecheck ;;
     test) run_step test pnpm -s test ;;
     build) run_step build pnpm -s build ;;
-    e2e) run_step e2e pnpm -s --filter @10db/desktop e2e ;;
+    e2e)
+      # WebKit runs its page, network and GPU processes as XPC services that launchd starts outside
+      # the caller's sandbox, so a sandboxed gate (TENDB_SANDBOX=1) never starts it; CI runs it.
+      if [[ -n "${TENDB_SANDBOX:-}" ]]; then
+        passed+=("e2e skipped (sandboxed)")
+      else
+        run_step e2e pnpm -s --filter @10db/desktop e2e
+      fi
+      ;;
     drift) run_step drift pnpm -s drift ;;
     knip) run_step knip pnpm -s knip ;;
     rust)

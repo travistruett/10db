@@ -26,6 +26,14 @@ export {
   type ReadAccess,
 } from './file-access';
 export {
+  createGateSandbox,
+  DOCKER_REFUSAL,
+  type GateRun,
+  type GateRunInput,
+  type GateSandbox,
+  type SandboxRuntime,
+} from './gate-sandbox';
+export {
   createLaneSandbox,
   type LaneSandbox,
   type LaneSandboxSpec,

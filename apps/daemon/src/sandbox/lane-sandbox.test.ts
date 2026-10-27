@@ -14,7 +14,13 @@ import {
 import { dirname, join } from 'node:path';
 import { mintId } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createTempRepo, isolatedGitEnv, tempDir, type TempDir } from '../../test/fixtures';
+import {
+  createTempRepo,
+  isolatedGitEnv,
+  SANDBOXED,
+  tempDir,
+  type TempDir,
+} from '../../test/fixtures';
 import { createGit } from '../git';
 import {
   createLaneSandbox,
@@ -26,7 +32,8 @@ import {
   type LaneSandbox,
   type LaneSessionInput,
 } from './index';
-import { secretFilesIn, type LaneSandboxDeps } from './lane-sandbox';
+import type { LaneSandboxDeps } from './lane-sandbox';
+import { secretFilesIn } from './project-access';
 import { isEqualOrUnder } from './protected-reads';
 
 const git = createGit();
@@ -89,7 +96,9 @@ afterEach(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
-describe('createLaneSandbox', () => {
+// Their root is a short path under the shared `/tmp`, so a temp dir made in it fits Claude Code's
+// 44-byte limit, and no sandbox can write `/tmp`.
+describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
   it('denies every .env file in the checkout by exact path, skipping node_modules and .git', async () => {
     const env = writeIn(checkout, '.env');
     const local = writeIn(checkout, 'apps/x/.env.local');
@@ -336,6 +345,8 @@ describe('createLaneSandbox', () => {
         CLAUDE_CODE_TMPDIR: session.tmpDir,
         GIT_CONFIG_GLOBAL: '/dev/null',
         GIT_OPTIONAL_LOCKS: '0',
+        XDG_CONFIG_HOME: join(session.tmpDir, 'config'),
+        TENDB_SANDBOX: '1',
         CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1',
         CLAUDE_ENV_FILE: join(
           tmpRoot,
@@ -836,7 +847,8 @@ describe('createLaneSandbox', () => {
   });
 });
 
-describe('secretFilesIn', () => {
+// Its checkout comes from the same `/tmp` fixtures.
+describe.skipIf(SANDBOXED)('secretFilesIn', () => {
   const failing = (dir: string, code: string) => (path: string) =>
     path === dir
       ? Promise.reject(Object.assign(new Error(`${code}: ${path}`), { code }))

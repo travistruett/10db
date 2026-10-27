@@ -57,6 +57,7 @@ describe('deniedEnvNames', () => {
     'pnpm_config_store_dir',
     'TMPDIR',
     'GOPATH',
+    'TENDB_SANDBOX',
   ])('keeps %s', (name) => {
     expect(deniedEnvNames({ [name]: 'v' })).toEqual([]);
   });

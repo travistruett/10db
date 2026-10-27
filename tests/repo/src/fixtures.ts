@@ -18,6 +18,14 @@ const TOKEN_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123
  * A GitHub-token-shaped string that gitleaks flags, built at run time so no source file ever
  * contains a token a scanner would match. Returns the prefixed token and its random body.
  */
+/**
+ * True inside a sandbox (`TENDB_SANDBOX=1`, which every lane and gate command gets). There Apple's
+ * `/usr/bin/git` shim prints an error on every call, as it can't write its cache, and gitleaks takes
+ * any output from git on stderr as a failed scan and reports no leaks; its tests skip there and CI
+ * runs them.
+ */
+export const SANDBOXED = process.env['TENDB_SANDBOX'] === '1';
+
 export function fakeGithubToken(): { token: string; body: string } {
   const body = [...randomBytes(36)]
     .map((byte) => TOKEN_ALPHABET[byte % TOKEN_ALPHABET.length])

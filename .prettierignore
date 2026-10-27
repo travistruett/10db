@@ -21,3 +21,5 @@ CHANGELOG.md
 apps/desktop/src-tauri/tauri.conf.json
 # Append-only log: Prettier would re-pad the whole table on every new row.
 docs/architecture/decisions.md
+# Lanes and gates can't read .env* files, templates included, so Prettier skips this one.
+apps/daemon/.env.example

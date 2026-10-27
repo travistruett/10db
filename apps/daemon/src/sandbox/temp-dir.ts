@@ -38,6 +38,25 @@ export function createLaneTempDir(root: string = LANE_TEMP_ROOT): string {
   }
 }
 
+/**
+ * Runs every removal even when one fails, so one stuck file never leaves the rest behind; the first
+ * failure is then thrown.
+ */
+export function removeAll(removals: readonly (() => void)[]): void {
+  const failures: Error[] = [];
+  for (const remove of removals) {
+    try {
+      remove();
+    } catch (error) {
+      failures.push(
+        error instanceof Error ? error : new SandboxTempDirError('Could not remove a sandbox file'),
+      );
+    }
+  }
+  const [first] = failures;
+  if (first !== undefined) throw first;
+}
+
 /** The system tools that walk a lane's tree without following links; see `removeLaneTempDir`. */
 const TOOL_ENV = { PATH: '/usr/bin:/bin' };
 

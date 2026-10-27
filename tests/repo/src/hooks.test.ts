@@ -6,6 +6,7 @@ import {
   createThrowawayRepo,
   isolatedGitEnvironment,
   fakeGithubToken,
+  SANDBOXED,
   type ThrowawayRepo,
 } from './fixtures';
 import { repoRoot } from './workspace';
@@ -81,15 +82,19 @@ describe('pre-commit in a throwaway repo', () => {
     expect(preCommit('gitleaks').status).toBe(0);
   });
 
-  it('refuses a planted secret, and the report shows a gitleaks finding without the token', () => {
-    const { token, body } = fakeGithubToken();
-    repo.stage('src/config.ts', `export const token = '${token}';\n`);
-    const { status, output } = preCommit('gitleaks');
-    expect(status).not.toBe(0);
-    // A missing gitleaks binary also exits non-zero, so require the scanner's own finding count.
-    expect(output).toContain('leaks found: 1');
-    expect(output).not.toContain(body);
-  });
+  // gitleaks can't scan in a sandbox where git is Apple's shim; see SANDBOXED.
+  it.skipIf(SANDBOXED)(
+    'refuses a planted secret, and the report shows a gitleaks finding without the token',
+    () => {
+      const { token, body } = fakeGithubToken();
+      repo.stage('src/config.ts', `export const token = '${token}';\n`);
+      const { status, output } = preCommit('gitleaks');
+      expect(status).not.toBe(0);
+      // A missing gitleaks binary also exits non-zero, so require the scanner's own finding count.
+      expect(output).toContain('leaks found: 1');
+      expect(output).not.toContain(body);
+    },
+  );
 
   it.each<[string, string, string | Buffer, string]>([
     ['a file under scratch/', 'scratch/notes.md', 'private\n', 'never committed'],

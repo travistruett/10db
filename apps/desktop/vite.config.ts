@@ -4,7 +4,12 @@ import { defineConfig } from 'vite';
 
 // Tauri expects a fixed dev port and serves the build from ../dist.
 export default defineConfig({
-  plugins: [react(), babel({ presets: [reactCompilerPreset()] })],
+  plugins: [
+    react(),
+    // Babel targets what the build targets. Named here, it also never looks for a browserslist
+    // config above the checkout, where a sandbox refuses even a stat.
+    babel({ presets: [reactCompilerPreset()], targets: { safari: '18' } }),
+  ],
   clearScreen: false,
   server: { port: 1420, strictPort: true },
   envPrefix: ['VITE_', 'TAURI_ENV_'],

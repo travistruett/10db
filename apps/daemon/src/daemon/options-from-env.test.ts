@@ -4,12 +4,12 @@ import { daemonOptionsFromEnv } from './options-from-env';
 
 describe('daemonOptionsFromEnv', () => {
   it('sandboxes every lane of a daemon that runs real Claude Code sessions', () => {
-    expect(daemonOptionsFromEnv(loadEnv({})).laneSandbox).toEqual({});
+    expect(daemonOptionsFromEnv(loadEnv({})).sandbox).toEqual({});
   });
 
   it('runs fake sessions, which run no commands, unsandboxed', () => {
     expect(
-      daemonOptionsFromEnv(loadEnv({ TENDB_FAKE_SCRIPTS: '/tmp/book.json' })).laneSandbox,
+      daemonOptionsFromEnv(loadEnv({ TENDB_FAKE_SCRIPTS: '/tmp/book.json' })).sandbox,
     ).toBeNull();
   });
 
@@ -19,7 +19,7 @@ describe('daemonOptionsFromEnv', () => {
     ['TENDB_LANE_PERMISSION_MODE', 'auto'],
   ])('lets no %s=%s turn the sandbox off or choose a permission mode', (name, value) => {
     const options = daemonOptionsFromEnv(loadEnv({ [name]: value }));
-    expect(options.laneSandbox).toEqual({});
+    expect(options.sandbox).toEqual({});
     expect(options).not.toHaveProperty('permissionModeOverride');
   });
 
@@ -37,7 +37,7 @@ describe('daemonOptionsFromEnv', () => {
     ).toEqual({
       port: 0,
       logLevel: 'warn',
-      laneSandbox: {},
+      sandbox: {},
       uiToken: token,
       devUiOrigin: 'http://localhost:51234',
     });

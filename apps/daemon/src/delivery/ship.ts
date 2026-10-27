@@ -22,6 +22,8 @@ import {
   getProject,
   getTask,
   listBatches,
+  listPermissionRules,
+  listProjects,
   listWorkstreams,
   patchBatch,
   releaseClaims,
@@ -127,11 +129,14 @@ export function createShipper(deps: ShipperDeps): Shipper {
     );
     deps.logger.info({ batchId: batch.id, command: project.gateCommand, logPath }, 'gate started');
     const result = await deps.gate.run({
-      repo: project.repoPath,
+      project,
       command: project.gateCommand,
       logPath,
       timeoutMs: deps.limits.gateTimeoutMs,
       env: deps.sessionEnv(project),
+      // The batch spans tasks, so only the project's own hosts and read paths open.
+      rules: listPermissionRules(deps.state.db, project.id, null),
+      checkouts: listProjects(deps.state.db).map((each) => each.repoPath),
       signal,
       onSpawn: (pid) => {
         recording = (deps.identifyProcess?.(pid) ?? Promise.resolve(null)).then((gatePidStart) => {

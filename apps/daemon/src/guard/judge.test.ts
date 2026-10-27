@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import { basename, dirname, join, relative } from 'node:path';
 import { DEFAULT_HAZARDS, type ClaimKind, type Delivery } from '@10db/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { tempDir } from '../../test/fixtures';
+import { SANDBOXED, tempDir } from '../../test/fixtures';
 import {
   classifyPath,
   type FileAccessJudge,
@@ -2082,7 +2082,8 @@ describe('account isolation', () => {
   const D = () => data.path;
   const L = () => login.path;
 
-  it.each<[string, () => string]>([
+  // Some rows resolve paths in the real home, which no sandbox can read.
+  it.skipIf(SANDBOXED).each<[string, () => string]>([
     ['a Keychain read', () => 'security find-generic-password -s 10db -a account:acc_1 -w'],
     ['a Keychain dump by full path', () => '/usr/bin/security dump-keychain'],
     [
@@ -2349,7 +2350,8 @@ describe('account isolation', () => {
     expect(run(command, false)).toEqual({ decision: 'allow' });
   });
 
-  it.each<{ name: string; tool: string; input: () => Record<string, unknown> }>([
+  // Two rows resolve paths in the real home, which no sandbox can read.
+  it.skipIf(SANDBOXED).each<{ name: string; tool: string; input: () => Record<string, unknown> }>([
     { name: 'Read', tool: 'Read', input: () => ({ file_path: join(CONFIG, '.claude.json') }) },
     {
       name: 'Read through a repo link',
