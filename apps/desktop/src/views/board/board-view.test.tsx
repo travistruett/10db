@@ -3,10 +3,10 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse, type RequestHandler, type WebSocketHandler } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, eventStream, renderApp, server } from '../../test/daemon';
+import { DEFAULT_ACCOUNT } from '../../test/account-fixtures';
 import {
   batchDto,
   boardColumnDto,
-  DEFAULT_ACCOUNT,
   projectDto,
   projectViewDto,
   taskDto,

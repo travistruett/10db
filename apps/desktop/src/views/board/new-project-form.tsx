@@ -11,7 +11,8 @@ import {
   TextInput,
 } from '@mantine/core';
 import { useState, type SyntheticEvent } from 'react';
-import { useAccounts, useCreateProject } from '../../daemon/queries';
+import { useAccounts } from '../../daemon/account-queries';
+import { useCreateProject } from '../../daemon/queries';
 import { accountOptions } from '../settings/account-kind-label';
 import { parseAreas } from './areas-text';
 

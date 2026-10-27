@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react';
 import { readJson } from './client';
 import type { DaemonConnection } from './connection';
 import { useDaemon } from './provider';
+import { accountKeys } from './account-queries';
 import { queryKeys } from './queries';
 
 export const STREAM_RETRY_BASE_MS = 500;
@@ -29,7 +30,7 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   handoff: WORK,
   evidence: WORK,
   // An account pause moves workstreams, which send their own events.
-  account: [queryKeys.accounts],
+  account: [accountKeys.all],
   inbox: [queryKeys.inbox, ['workstreams']],
   app_setting: [queryKeys.keepAwake],
   // Step plans, which only the batch sheet shows, follow these; no view reads `person`.

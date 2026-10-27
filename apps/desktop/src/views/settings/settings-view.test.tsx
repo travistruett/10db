@@ -3,7 +3,8 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
-import { accountDto, DEFAULT_ACCOUNT, projectDto } from '../../test/fixtures';
+import { accountDto, DEFAULT_ACCOUNT } from '../../test/account-fixtures';
+import { projectDto } from '../../test/fixtures';
 
 /** Opens a Select and picks an option from its own list (every Select keeps its options in the document). */
 async function pick(select: HTMLElement, option: string): Promise<void> {
