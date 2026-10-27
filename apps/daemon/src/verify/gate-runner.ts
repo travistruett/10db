@@ -152,10 +152,13 @@ function runGroup(
     child.on('close', (code) => {
       clearTimeout(timer);
       signal?.removeEventListener('abort', onAbort);
+      // Whatever the gate left running in its group must not outlive its verdict.
+      killGroup();
       // Said last, so the evidence keeps it however much the gate printed before.
       if (sandboxed?.dockerRefused()) onData(`\n${DOCKER_REFUSAL}\n`);
       endLog(() => {
         resolve({
+          // A gate that died by a signal has no code, and fails.
           exitCode: timedOut ? TIMEOUT_EXIT : aborted ? ABORT_EXIT : (code ?? 1),
           durationMs: Math.round(performance.now() - started),
           tail,

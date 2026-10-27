@@ -95,6 +95,22 @@ describe('gate runner', () => {
     await expectGone(await readPid());
   });
 
+  it('kills what the gate left running in its group before it gives the verdict', async () => {
+    const result = await run(`sleep 30 >/dev/null 2>&1 & echo $! > grandchild.pid`);
+    expect(result).toMatchObject({ exitCode: 0, timedOut: false });
+    await expectGone(await readPid());
+  });
+
+  it.each([
+    ['TERM', 'kill -TERM $$'],
+    ['INT', 'kill -INT $$'],
+    ['KILL', 'kill -KILL $$'],
+  ])('fails a gate that dies by SIG%s', async (_signal, command) => {
+    const result = await run(`echo partial; ${command}`);
+    expect(result.exitCode).not.toBe(0);
+    expect(result.tail).toContain('partial');
+  });
+
   it('kills the process group when aborted, and reports the spawned pid', async () => {
     const abort = new AbortController();
     const pids: number[] = [];
