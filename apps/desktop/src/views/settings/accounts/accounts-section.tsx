@@ -6,6 +6,7 @@ import {
   Code,
   Group,
   Progress,
+  Skeleton,
   Stack,
   Table,
   Text,
@@ -27,12 +28,7 @@ const STATUS_COLOR: Readonly<Record<AccountStatus, string>> = {
 
 function UsageCell({ account }: { readonly account: AccountDto }) {
   const usage = useAccountUsage(account.id);
-  if (usage.isPending)
-    return (
-      <Text size="sm" c="dimmed">
-        …
-      </Text>
-    );
+  if (usage.isPending) return <Skeleton h={20} w={96} aria-label="Loading usage" />;
   if (usage.isError)
     return (
       <Text size="sm" c="dimmed">
@@ -141,7 +137,8 @@ export function AccountsSection({
 }) {
   const accounts = useAccounts();
   if (accounts.isPending) return <Text c="dimmed">Loading accounts…</Text>;
-  if (accounts.isError) return <Text c="red">Accounts could not be loaded.</Text>;
+  if (accounts.isError)
+    return <Text c="red">Accounts could not be loaded. Check that the daemon is running.</Text>;
   const live = accounts.data.filter((a) => !a.archived);
   const archived = accounts.data.filter((a) => a.archived);
   return (

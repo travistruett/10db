@@ -1,4 +1,4 @@
-import type { AccountDto, AccountUsageDto } from '@10db/contracts';
+import { AccountId, type AccountDto, type AccountUsageDto } from '@10db/contracts';
 import { fireEvent, screen, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
@@ -11,7 +11,7 @@ function serve(accounts: AccountDto[], usage: Record<string, AccountUsageDto> = 
     http.get(daemonUrl('/accounts/:accountId/usage'), ({ params }) =>
       HttpResponse.json(
         usage[String(params['accountId'])] ??
-          accountUsageDto({ accountId: accounts[0]?.id ?? DEFAULT_ACCOUNT.id }),
+          accountUsageDto({ accountId: AccountId.parse(params['accountId']) }),
       ),
     ),
     ...baseHandlers(),
@@ -93,7 +93,9 @@ describe('AccountsSection', () => {
     });
     const row = await rowOf('Over key');
     expect(await within(row).findByText('$150.00 of $100.00')).toBeTruthy();
-    expect(within(row).getByRole('progressbar').getAttribute('aria-valuenow')).toBe('100');
+    const bar = within(row).getByRole('progressbar');
+    expect(bar.getAttribute('aria-valuenow')).toBe('100');
+    expect(bar.getAttribute('style')).toContain('orange');
   });
 
   it('puts an archived account only under Archived (1), with its label and kind', async () => {
@@ -106,6 +108,23 @@ describe('AccountsSection', () => {
     fireEvent.click(toggle);
     expect(await screen.findByText('Old client')).toBeTruthy();
     expect(screen.getByText('Gateway')).toBeTruthy();
+  });
+
+  it('shows Usage unavailable on a row whose usage fails and keeps the others', async () => {
+    const broken = accountDto({ label: 'Broken usage' });
+    serve([DEFAULT_ACCOUNT, broken]);
+    server.use(
+      http.get(daemonUrl('/accounts/:accountId/usage'), ({ params }) =>
+        params['accountId'] === broken.id
+          ? new HttpResponse(null, { status: 500 })
+          : HttpResponse.json(accountUsageDto()),
+      ),
+    );
+    const row = await rowOf('Broken usage');
+    expect(await within(row).findByText('Usage unavailable')).toBeTruthy();
+    expect(within(row).queryByText(/\$|tokens/)).toBeNull();
+    const ok = await rowOf('Claude plan');
+    expect(await within(ok).findByText('2K tokens')).toBeTruthy();
   });
 
   it('offers Add account above the table', async () => {

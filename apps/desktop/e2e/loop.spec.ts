@@ -172,7 +172,7 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await expect(addColumn).toBeEnabled();
   await expect(addColumn.locator('.mantine-Button-inner')).toHaveCSS('opacity', '1');
   await expectAccessible(page, 'settings, board columns, dark');
-  await page.getByRole('link', { name: /Accounts/ }).click();
+  await page.getByRole('link', { name: /Team/ }).click();
   await expect(page.getByText('Not built yet')).toBeVisible();
   await open(page, 'Board');
   await expect(page.getByRole('list', { name: 'Exploring tasks' })).toBeAttached();
