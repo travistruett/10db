@@ -1,7 +1,8 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { createRequire } from 'node:module';
+import { dirname, join, resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { readRuntimeInfo } from '../src/daemon';
@@ -100,6 +101,16 @@ describe('the bundled daemon', () => {
       encoding: 'utf8',
     });
     expect(version.trim()).toBe(SRT_VERSION);
+  });
+
+  it("ships srt's Java proxy agent where srt looks first, so it never asks npm for one", () => {
+    // Without it srt runs `npm root -g` outside the sandbox, from the gate's checkout.
+    const jar = join('vendor', 'java-proxy-agent', 'srt-proxy-agent.jar');
+    const packaged = join(
+      dirname(createRequire(import.meta.url).resolve('@anthropic-ai/sandbox-runtime/package.json')),
+      jar,
+    );
+    expect(readFileSync(join(work.path, 'dist', jar))).toEqual(readFileSync(packaged));
   });
 
   it('ships the harness plugin beside the bundle', () => {

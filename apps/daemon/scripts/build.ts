@@ -12,6 +12,7 @@ for (const name of [
   'daemon.mjs',
   'daemon.mjs.map',
   'srt.mjs',
+  'vendor',
   'drizzle',
   'harness',
   'better_sqlite3.node',
@@ -44,6 +45,17 @@ await build({
   ],
   outfile: resolve(outDir, 'srt.mjs'),
 });
+// srt looks for its Java proxy agent beside its own module first. Without it srt runs `npm root -g`,
+// outside the sandbox and from the gate's checkout, to find a global copy.
+cpSync(
+  resolve(
+    dirname(createRequire(import.meta.url).resolve('@anthropic-ai/sandbox-runtime/package.json')),
+    'vendor',
+    'java-proxy-agent',
+    'srt-proxy-agent.jar',
+  ),
+  resolve(outDir, 'vendor', 'java-proxy-agent', 'srt-proxy-agent.jar'),
+);
 cpSync(DB_MIGRATIONS_DIR, resolve(outDir, 'drizzle'), { recursive: true });
 cpSync(HARNESS_PLUGIN_DIR, resolve(outDir, 'harness'), { recursive: true });
 cpSync(sqliteAddonPath(), resolve(outDir, 'better_sqlite3.node'));
