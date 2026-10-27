@@ -178,10 +178,16 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
         ]),
       );
       expect(allowRead).toEqual(expect.arrayContaining([...SYSTEM_READS, checkout, run.tmpDir]));
+      // This home lies in the test's temp dir, which on Linux is under the system read `/tmp` (macOS
+      // resolves it to `/private/tmp`). A real home never is, so only the rest must keep it closed.
+      const systemCover: readonly string[] = SYSTEM_READS.filter((path) =>
+        isEqualOrUnder(home, path),
+      );
+      const profileReads = allowRead.filter((path) => !systemCover.includes(path));
       // Home opens only its toolchain dirs, never whole.
-      expect(allowRead.filter((path) => isEqualOrUnder(home, path))).toEqual([]);
+      expect(profileReads.filter((path) => isEqualOrUnder(home, path))).toEqual([]);
       for (const closed of [join(home, '.ssh'), join(home, '.config'), dataDir]) {
-        const opened = allowRead.filter(
+        const opened = profileReads.filter(
           (path) => isEqualOrUnder(closed, path) || isEqualOrUnder(path, closed),
         );
         expect(opened, closed).toEqual([]);
