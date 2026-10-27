@@ -1,5 +1,6 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -76,7 +77,7 @@ async function withRun(gateInput: GateRunInput, check: (run: GateRun) => void): 
   try {
     check(run);
   } finally {
-    run.dispose();
+    await run.dispose();
   }
 }
 
@@ -343,8 +344,8 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
     expect(dirname(file)).toBe(tmpRoot);
     expect(statSync(file).mode & 0o777).toBe(0o400);
     expect(existsSync(run.tmpDir)).toBe(true);
-    run.dispose();
-    run.dispose();
+    await run.dispose();
+    await run.dispose();
     expect(existsSync(file)).toBe(false);
     expect(existsSync(run.tmpDir)).toBe(false);
     expect(readdirSync(tmpRoot)).toEqual([]);
@@ -382,6 +383,23 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
     }).forRun(input());
     await expect(pending).rejects.toThrow(SandboxProfileError);
     expect(readdirSync(tmpRoot).filter((name) => name.startsWith('10db-'))).toEqual([]);
+  });
+
+  it('removes the temp dir without blocking the event loop', async () => {
+    const run = await sandbox().forRun(input());
+    // A tree a gate left unwritable: removal has to walk and chmod it.
+    const deep = join(run.tmpDir, 'cache', 'a', 'b');
+    mkdirSync(deep, { recursive: true });
+    writeFileSync(join(deep, 'f'), 'x');
+    chmodSync(deep, 0o500);
+    let ticked = false;
+    const disposing = run.dispose();
+    setImmediate(() => {
+      ticked = true;
+    });
+    await disposing;
+    expect(ticked).toBe(true);
+    expect(existsSync(run.tmpDir)).toBe(false);
   });
 
   it('leaves nothing behind when the profile is refused', async () => {

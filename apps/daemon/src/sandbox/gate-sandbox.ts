@@ -10,7 +10,12 @@ import { projectAccess, projectWritableRoots, type ProjectAccessDeps } from './p
 import { isEqualOrUnder } from './protected-reads';
 import { createSealedFile, removeSealedFile, type SealedFileKind } from './sealed-file';
 import { srtSettings } from './srt-settings';
-import { createLaneTempDir, LANE_TEMP_ROOT, removeAll, removeLaneTempDir } from './temp-dir';
+import {
+  createLaneTempDir,
+  LANE_TEMP_ROOT,
+  removeLaneTempDirAsync,
+  SandboxTempDirError,
+} from './temp-dir';
 
 /** What the `docker` on a sandboxed gate's PATH says. */
 export const DOCKER_REFUSAL =
@@ -61,8 +66,11 @@ export interface GateRun {
   readonly commandEnv: Readonly<Record<string, string>>;
   /** True once the command has run `docker`, which no sandboxed gate can use. */
   dockerRefused(): boolean;
-  /** Removes the temp dir and the settings file. Run it once the gate's process group is gone. */
-  dispose(): void;
+  /**
+   * Removes the temp dir and the settings file, off the event loop. Run it once the gate's process
+   * group is gone.
+   */
+  dispose(): Promise<void>;
 }
 
 export interface GateSandbox {
@@ -135,20 +143,26 @@ export function createGateSandbox(deps: GateSandboxDeps): GateSandbox {
       const { checkout, toolchain } = access;
       const tmpDir = createLaneTempDir(tmpRoot);
       let settingsFile: string | null = null;
-      const remove = (): void => {
-        const file = settingsFile;
-        removeAll([
-          ...(file === null
-            ? []
-            : [
-                () => {
-                  removeSealedFile(file, tmpRoot, SETTINGS_FILE);
-                },
-              ]),
-          () => {
-            removeLaneTempDir(tmpDir, tmpRoot);
-          },
-        ]);
+      // Both are removed even when one fails; the first failure is then thrown.
+      const remove = async (): Promise<void> => {
+        const failures: Error[] = [];
+        const record = (error: unknown): void => {
+          failures.push(
+            error instanceof Error
+              ? error
+              : new SandboxTempDirError("Could not remove the gate's sandbox files"),
+          );
+        };
+        if (settingsFile !== null) {
+          try {
+            removeSealedFile(settingsFile, tmpRoot, SETTINGS_FILE);
+          } catch (error) {
+            record(error);
+          }
+        }
+        await removeLaneTempDirAsync(tmpDir, tmpRoot).catch(record);
+        const [first] = failures;
+        if (first !== undefined) throw first;
       };
       try {
         const binDir = join(tmpDir, 'bin');
@@ -195,7 +209,7 @@ export function createGateSandbox(deps: GateSandboxDeps): GateSandbox {
           SETTINGS_FILE,
           JSON.stringify(srtSettings(profile), null, 2),
         );
-        let disposed = false;
+        let disposed: Promise<void> | null = null;
         return {
           file: deps.runtime.node,
           args: [deps.runtime.cli, '--settings', settingsFile, '-c', inner],
@@ -212,17 +226,13 @@ export function createGateSandbox(deps: GateSandboxDeps): GateSandbox {
             }
           },
           dispose() {
-            if (disposed) return;
-            disposed = true;
-            remove();
+            disposed ??= remove();
+            return disposed;
           },
         };
       } catch (error) {
-        try {
-          remove();
-        } catch {
-          // The error that stopped the run is the one to report.
-        }
+        // The error that stopped the run is the one to report.
+        await remove().catch(() => undefined);
         throw error;
       }
     },

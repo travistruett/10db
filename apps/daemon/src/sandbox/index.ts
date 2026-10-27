@@ -15,6 +15,7 @@ export {
   LANE_TEMP_ROOT,
   MAX_SANDBOX_TMP_BYTES,
   removeLaneTempDir,
+  removeLaneTempDirAsync,
   SandboxTempDirError,
 } from './temp-dir';
 export {

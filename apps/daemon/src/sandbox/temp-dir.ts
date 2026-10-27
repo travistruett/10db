@@ -1,6 +1,7 @@
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
+import { promisify } from 'node:util';
 
 /** Where lane temp directories live; the sandbox's Unix socket path limit needs a short prefix. */
 export const LANE_TEMP_ROOT = '/private/tmp';
@@ -64,6 +65,22 @@ function runTool(tool: string, args: readonly string[]): void {
   execFileSync(tool, args, { env: TOOL_ENV, stdio: 'pipe' });
 }
 
+const execTool = promisify(execFile);
+
+/** The steps that remove a lane temp dir: see `removeLaneTempDir`. */
+function removalSteps(dir: string): readonly (readonly [string, readonly string[]])[] {
+  return [
+    ['/bin/chmod', ['-R', '--', 'u+rwx', dir]],
+    ['/bin/rm', ['-rf', '--', dir]],
+  ];
+}
+
+function checkLaneTempDir(dir: string, root: string): void {
+  if (dirname(dir) !== root || !basename(dir).startsWith(PREFIX)) {
+    throw new SandboxTempDirError('Not a lane temp directory');
+  }
+}
+
 /**
  * Removes a directory made by `createLaneTempDir`; refuses any other path. A lane can leave
  * directories it made unreadable or read-only, and a lane process may still be running and swap
@@ -71,13 +88,25 @@ function runTool(tool: string, args: readonly string[]): void {
  * `rm -rf` walk it by directory descriptor and never follow a link.
  */
 export function removeLaneTempDir(dir: string, root: string = LANE_TEMP_ROOT): void {
-  if (dirname(dir) !== root || !basename(dir).startsWith(PREFIX)) {
-    throw new SandboxTempDirError('Not a lane temp directory');
-  }
+  checkLaneTempDir(dir, root);
   if (!existsSync(dir)) return;
   try {
-    runTool('/bin/chmod', ['-R', '--', 'u+rwx', dir]);
-    runTool('/bin/rm', ['-rf', '--', dir]);
+    for (const [tool, args] of removalSteps(dir)) runTool(tool, args);
+  } catch {
+    throw new SandboxTempDirError('Could not remove the lane temp directory');
+  }
+  if (existsSync(dir)) throw new SandboxTempDirError('Could not remove the lane temp directory');
+}
+
+/** `removeLaneTempDir` with the tools run as child processes the event loop doesn't wait on. */
+export async function removeLaneTempDirAsync(
+  dir: string,
+  root: string = LANE_TEMP_ROOT,
+): Promise<void> {
+  checkLaneTempDir(dir, root);
+  if (!existsSync(dir)) return;
+  try {
+    for (const [tool, args] of removalSteps(dir)) await execTool(tool, args, { env: TOOL_ENV });
   } catch {
     throw new SandboxTempDirError('Could not remove the lane temp directory');
   }

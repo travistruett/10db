@@ -211,7 +211,7 @@ export function createGateRunner(options: GateRunnerOptions): GateRunner {
         return await runGroup(sandboxed, request, sandboxed);
       } finally {
         try {
-          sandboxed.dispose();
+          await sandboxed.dispose();
         } catch (error) {
           options.logger.warn(
             { err: error instanceof Error ? error.message : String(error) },

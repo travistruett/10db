@@ -17,6 +17,7 @@ import {
   createLaneTempDir,
   MAX_SANDBOX_TMP_BYTES,
   removeLaneTempDir,
+  removeLaneTempDirAsync,
   SandboxTempDirError,
 } from './index';
 
@@ -70,6 +71,21 @@ describe.skipIf(SANDBOXED)('lane temp directory', () => {
     expect(existsSync(dir)).toBe(true);
     expect(existsSync(other)).toBe(true);
     removeLaneTempDir(dir, root);
+    expect(existsSync(dir)).toBe(false);
+    expect(existsSync(other)).toBe(true);
+  });
+
+  it('removes only its own directories off the event loop too, read-only ones included', async () => {
+    const dir = createLaneTempDir(root);
+    const other = join(root, 'keep');
+    mkdirSync(other);
+    await expect(removeLaneTempDirAsync(other, root)).rejects.toThrow(SandboxTempDirError);
+    await expect(removeLaneTempDirAsync(root, root)).rejects.toThrow(SandboxTempDirError);
+    const locked = join(dir, 'locked');
+    mkdirSync(locked);
+    writeFileSync(join(locked, 'f'), 'x');
+    chmodSync(locked, 0o555);
+    await removeLaneTempDirAsync(dir, root);
     expect(existsSync(dir)).toBe(false);
     expect(existsSync(other)).toBe(true);
   });

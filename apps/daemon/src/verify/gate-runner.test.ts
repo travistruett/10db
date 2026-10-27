@@ -207,6 +207,7 @@ function recordingSandbox(options: { refuse?: Error; dockerRefused?: boolean } =
         dockerRefused: () => options.dockerRefused ?? false,
         dispose: () => {
           disposed += 1;
+          return Promise.resolve();
         },
       };
       return Promise.resolve(run);
