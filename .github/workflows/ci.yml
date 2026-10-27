@@ -67,6 +67,9 @@ jobs:
         with:
           workspaces: apps/desktop/src-tauri
       - run: pnpm install --frozen-lockfile
+      # The gate job runs on Linux, where the real Seatbelt tests skip: run them, with the lane and
+      # gate sandbox's own tests, on macOS.
+      - run: pnpm --filter @10db/daemon exec vitest run test/gate-sandbox.seatbelt.test.ts src/sandbox
       - run: make rust-check
       - run: pnpm --filter @10db/desktop tauri build --no-bundle
 
