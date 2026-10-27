@@ -197,7 +197,7 @@ describe('AddAccountModal', () => {
     fireEvent.click(add);
     type(dialog, 'Alias, row 1', 'sonnet');
     fireEvent.click(add);
-    type(dialog, 'Alias, row 2', 'sonnet');
+    type(dialog, 'Alias, row 2', 'sonnet ');
     expect(within(dialog).getByRole('button', { name: 'Remove row 1 mapping' })).toBeTruthy();
     expect(within(dialog).getByRole('button', { name: 'Remove row 2 mapping' })).toBeTruthy();
     expect(within(dialog).queryByRole('button', { name: 'Remove sonnet mapping' })).toBeNull();

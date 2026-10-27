@@ -201,6 +201,10 @@ export function AccountsSection() {
         onClose={() => {
           setOpened(false);
         }}
+        onArchived={() => {
+          // The row that opened the drawer moves to Archived, so Mantine has nothing to return focus to.
+          returnToAdd.current = true;
+        }}
         onClosed={() => {
           if (!returnToAdd.current) return;
           returnToAdd.current = false;

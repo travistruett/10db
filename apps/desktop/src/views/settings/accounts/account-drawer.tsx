@@ -14,12 +14,18 @@ import { SecretForm } from './secret-form';
 import { SignInSteps } from './sign-in-steps';
 import { UsageByProject } from './usage-by-project';
 
+function noop() {
+  // No caller needs to know.
+}
+
 function AccountDrawerBody({
   account,
   onClose,
+  onArchived,
 }: {
   readonly account: AccountDto;
   readonly onClose: () => void;
+  readonly onArchived: () => void;
 }) {
   return (
     <Stack gap="lg">
@@ -41,7 +47,13 @@ function AccountDrawerBody({
           </Stack>
           <Stack gap="xs">
             <Title order={4}>Archive</Title>
-            <ArchiveAccount account={account} onArchived={onClose} />
+            <ArchiveAccount
+              account={account}
+              onArchived={() => {
+                onArchived();
+                onClose();
+              }}
+            />
           </Stack>
         </>
       )}
@@ -59,12 +71,15 @@ export function AccountDrawer({
   opened,
   onClose,
   onClosed,
+  onArchived,
 }: {
   readonly accountId: AccountId | null;
   readonly opened: boolean;
   readonly onClose: () => void;
   /** Called once the exit transition has finished, after Mantine has returned focus. */
   readonly onClosed?: () => void;
+  /** Called when the account has been archived, just before the drawer closes. */
+  readonly onArchived?: () => void;
 }) {
   const accounts = useAccounts();
   const account = accounts.data?.find((a) => a.id === accountId);
@@ -79,7 +94,12 @@ export function AccountDrawer({
       closeButtonProps={{ 'aria-label': 'Close' }}
     >
       {account ? (
-        <AccountDrawerBody key={account.id} account={account} onClose={onClose} />
+        <AccountDrawerBody
+          key={account.id}
+          account={account}
+          onClose={onClose}
+          onArchived={onArchived ?? noop}
+        />
       ) : (
         <Text c="dimmed">This account is no longer listed.</Text>
       )}

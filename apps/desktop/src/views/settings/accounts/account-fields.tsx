@@ -88,7 +88,8 @@ function ModelMapRows({
             variant="subtle"
             color="gray"
             aria-label={
-              row.alias === '' || values.modelMap.filter((r) => r.alias === row.alias).length > 1
+              row.alias.trim() === '' ||
+              values.modelMap.filter((r) => r.alias.trim() === row.alias.trim()).length > 1
                 ? `Remove row ${String(index + 1)} mapping`
                 : `Remove ${row.alias} mapping`
             }
@@ -145,12 +146,13 @@ export function AccountFields({
   return (
     <Stack gap="md">
       {mode === 'edit' ? (
-        <div>
-          <Text size="sm" fw={500}>
-            Kind
-          </Text>
-          <Text size="md">{ACCOUNT_KIND_LABEL[values.kind]}</Text>
-        </div>
+        <TextInput
+          size="md"
+          label="Kind"
+          description="Fixed when the account is created."
+          readOnly
+          value={ACCOUNT_KIND_LABEL[values.kind]}
+        />
       ) : null}
       <TextInput
         size="md"
@@ -227,7 +229,7 @@ export function AccountFields({
             />
             {mode === 'edit' ? (
               <Text size="xs" c="dimmed">
-                Switching to an AWS profile forgets the stored bearer token. Switching back needs
+                Switching to an AWS profile forgets any stored bearer token. Switching back needs
                 the token pasted again.
               </Text>
             ) : null}

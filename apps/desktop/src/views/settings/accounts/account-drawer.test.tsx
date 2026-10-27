@@ -10,12 +10,15 @@ import {
   accountUsageDto,
   DEFAULT_ACCOUNT,
 } from '../../../test/account-fixtures';
-import { baseHandlers, daemonUrl, renderApp, server } from '../../../test/daemon';
+import { baseHandlers, daemonUrl, eventStream, renderApp, server } from '../../../test/daemon';
+import { daemonEvent } from '../../../test/fixtures';
 
 interface Served {
   readonly patches: { id: string; body: unknown }[];
   readonly identityCalls: string[];
   readonly archives: string[];
+  /** Changes the account on the daemon and tells the open window with an `account.saved` event. */
+  readonly changeRemotely: (id: string, changes: Partial<AccountDto>) => void;
   readonly accountListCalls: number;
   readonly queryClient: ReturnType<typeof renderApp>['queryClient'];
 }
@@ -35,6 +38,7 @@ function serve(
   const patches: Served['patches'] = [];
   const identityCalls: string[] = [];
   const archives: string[] = [];
+  const sockets: { send(data: string): void }[] = [];
   let accountListCalls = 0;
   const live = [...accounts];
   server.use(
@@ -93,6 +97,9 @@ function serve(
       live[index] = next;
       return HttpResponse.json(next);
     }),
+    eventStream.addEventListener('connection', ({ client }) => {
+      sockets.push(client);
+    }),
     ...baseHandlers(),
   );
   const { queryClient } = renderApp('/settings/accounts');
@@ -100,6 +107,17 @@ function serve(
     patches,
     identityCalls,
     archives,
+    changeRemotely: (id, changes) => {
+      const index = live.findIndex((a) => a.id === id);
+      const current = live[index];
+      if (!current) return;
+      live[index] = AccountDto.parse({ ...current, ...changes });
+      sockets[0]?.send(
+        JSON.stringify(
+          daemonEvent({ seq: 1, type: 'account.saved', entityType: 'account', entityId: id }),
+        ),
+      );
+    },
     queryClient,
     get accountListCalls() {
       return accountListCalls;
@@ -497,7 +515,7 @@ describe('AccountDrawer', () => {
     const dialog = await openDrawer('Fresh login');
     const save = await within(dialog).findByRole('button', { name: 'Save changes' });
     expect(save).toHaveProperty('disabled', true);
-    expect(within(dialog).getByText('Claude subscription')).toBeTruthy();
+    expect(within(dialog).getByDisplayValue('Claude subscription')).toBeTruthy();
     fireEvent.change(within(dialog).getByRole('textbox', { name: 'Label' }), {
       target: { value: 'Renamed' },
     });
@@ -568,7 +586,7 @@ describe('AccountDrawer', () => {
     const served = serve([DEFAULT_ACCOUNT, account]);
     const dialog = await openDrawer('Cloud');
     expect(
-      await within(dialog).findByText(/forgets the stored bearer token.*pasted again/),
+      await within(dialog).findByText(/forgets any stored bearer token.*pasted again/),
     ).toBeTruthy();
     expect(within(dialog).queryByRole('textbox', { name: 'Organization' })).toBeNull();
     fireEvent.click(within(dialog).getByRole('radio', { name: 'AWS profile' }));
@@ -581,6 +599,42 @@ describe('AccountDrawer', () => {
         { id: account.id, body: { settings: { region: 'us-west-2', awsProfile: 'client-b' } } },
       ]);
     });
+  });
+
+  it('takes a remote change into a clean form, so Save stays off', async () => {
+    const account = accountDto({ label: 'Fresh login' });
+    const served = serve([DEFAULT_ACCOUNT, account]);
+    const dialog = await openDrawer('Fresh login');
+    const lanes = await within(dialog).findByRole('textbox', { name: 'Lane cap' });
+    expect(lanes).toHaveProperty('value', '4');
+    served.changeRemotely(account.id, { laneCap: 8 });
+    await waitFor(() => {
+      expect(within(dialog).getByRole('textbox', { name: 'Lane cap' })).toHaveProperty(
+        'value',
+        '8',
+      );
+    });
+    expect(within(dialog).getByRole('button', { name: 'Save changes' })).toHaveProperty(
+      'disabled',
+      true,
+    );
+  });
+
+  it('keeps the builder’s edits when the account changes remotely', async () => {
+    const account = accountDto({ label: 'Fresh login' });
+    const served = serve([DEFAULT_ACCOUNT, account]);
+    const dialog = await openDrawer('Fresh login');
+    fireEvent.change(await within(dialog).findByRole('textbox', { name: 'Label' }), {
+      target: { value: 'Mid edit' },
+    });
+    served.changeRemotely(account.id, { laneCap: 8 });
+    await waitFor(() => {
+      expect(served.accountListCalls).toBeGreaterThan(1);
+    });
+    expect(within(dialog).getByRole('textbox', { name: 'Label' })).toHaveProperty(
+      'value',
+      'Mid edit',
+    );
   });
 
   it('archives after a confirmation and closes the drawer', async () => {
@@ -601,6 +655,9 @@ describe('AccountDrawer', () => {
     });
     await waitFor(() => {
       expect(screen.queryByRole('dialog')).toBeNull();
+    });
+    await waitFor(() => {
+      expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Add account' }));
     });
   });
 

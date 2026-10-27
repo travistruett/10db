@@ -1,4 +1,4 @@
-import { accountDisplayName, type AccountDto } from '@10db/contracts';
+import type { AccountDto } from '@10db/contracts';
 import { Alert, Button, Group, Modal, Stack, Text } from '@mantine/core';
 import { useState } from 'react';
 import { useArchiveAccount } from '../../../daemon/account-queries';
@@ -17,7 +17,7 @@ export function ArchiveAccount({
   const [confirming, setConfirming] = useState(false);
   const archive = useArchiveAccount();
   if (account.isDefault) return <Text c="dimmed">The default account can&apos;t be archived.</Text>;
-  const name = accountDisplayName(account);
+  const name = account.label;
   const close = () => {
     setConfirming(false);
     archive.reset();
@@ -25,6 +25,7 @@ export function ArchiveAccount({
   const confirm = async () => {
     try {
       await archive.mutateAsync(account.id);
+      setConfirming(false);
       onArchived();
     } catch {
       // The mutation's error is shown in the modal.

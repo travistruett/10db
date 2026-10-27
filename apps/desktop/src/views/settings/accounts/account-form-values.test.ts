@@ -307,6 +307,19 @@ describe('toAccountPatch', () => {
   }>([
     { name: 'nothing changed', account: subscription, changes: {}, patch: null },
     { name: 'nothing changed on a gateway', account: gateway, changes: {}, patch: null },
+    { name: 'nothing changed on a capped API key', account: apiKey, changes: {}, patch: null },
+    {
+      name: 'nothing changed on a Bedrock profile account',
+      account: bedrockProfile,
+      changes: {},
+      patch: null,
+    },
+    {
+      name: 'nothing changed on a Bedrock bearer account',
+      account: bedrockBearer,
+      changes: {},
+      patch: null,
+    },
     {
       name: 'the label only',
       account: subscription,
