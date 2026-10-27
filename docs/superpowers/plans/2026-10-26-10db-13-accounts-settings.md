@@ -8,7 +8,7 @@
 
 - **Desktop only.** Every route this screen needs is on `main` (plan 09 Task 8): `GET`/`POST /accounts`, `PATCH /accounts/:accountId`, `POST /accounts/:accountId/archive`, `PUT /accounts/:accountId/secret`, `GET /accounts/:accountId/signin`, `/identity` and `/usage`. No daemon, contracts or database change. If a task finds it needs one, it stops and asks Travis.
 - **A new folder `apps/desktop/src/views/settings/accounts/`** holds the screen: the list, the account drawer, the add form, the secret form and their pure helpers. `section-body.tsx` gets one arm and `sections.ts` sets Accounts' `planned` to null, as `apps/desktop/AGENTS.md` describes.
-- **Account hooks live in `apps/desktop/src/daemon/account-queries.ts`**, beside `queries.ts`, so the parallel approval-sheet session's edits to `queries.ts` don't collide with these. `queries.ts` and `events.ts` each get one additive line (decision 7).
+- **Account hooks, query keys and fixtures are scoped to the entity** (decision 7): `apps/desktop/src/daemon/account-queries.ts` and `apps/desktop/src/test/account-fixtures.ts`. The existing account hook and fixtures move there from `queries.ts` and `fixtures.ts`; `events.ts` gets one line.
 - **The secret never passes through TanStack Query or React state.** The secret form is an uncontrolled password field read once from `FormData` on submit, cleared at once, and sent by a plain async function in `apps/desktop/src/daemon/account-secret.ts`. Only a status (`saving`, `saved`, an error message) is kept (decision 2).
 
 **Tech Stack:** React 19, Mantine 9, TanStack Query 5, Testing Library, MSW 3, Playwright WebKit with axe for the end-to-end check. No new dependency.
@@ -17,11 +17,11 @@
 
 **Built on:** `main` at `8d49fbd` (PR #69). Plan 09 reserved the name `10db-12-accounts-settings`; 12 went to the lane sandbox plan, so this is plan 13.
 
-## Open decisions for Travis
+## Travis's decisions
 
-The plan is written against the recommended default in each row.
+Travis decided each row on 2026-10-27. Every row took the recommended default except row 7, which he widened: code is scoped per backend entity.
 
-| # | Question | Recommended default (the plan follows it) | Alternative | Tasks affected |
+| # | Question | Decided | Alternative not taken | Tasks affected |
 |---|---|---|---|---|
 | 1 | How is the screen laid out? | **A table of accounts and a drawer per account.** The table shows label and identity, kind, status ("Ready", "Needs sign-in", "Needs a secret") and this month's usage against the cap. Clicking a row opens a drawer with the account's sign-in or secret, its usage by project, its fields to edit and Archive. "Add account" opens a modal. Archived accounts sit in a collapsed "Archived" list below, read-only. | One card per account, stacked, with everything inline. | 3, 4, 6, 7 |
 | 2 | How is the secret entered and confirmed? | **One write-only password field with no reveal toggle, typed once.** On submit the field is read once and cleared at once, so a failed save needs the secret pasted again; the copy says so. The secret is sent outside TanStack Query (whose mutation cache keeps `variables` for five minutes after a request), and no React state holds it. "Confirmation" is the daemon's answer: the status changes to "Secret set" from `secretSet`, and a **Check** button runs the identity probe so the builder sees the key works. The probe runs only on that click, never automatically. | Type the secret twice; or run the identity probe right after saving. | 5 |
@@ -29,7 +29,7 @@ The plan is written against the recommended default in each row.
 | 4 | How much of an account can be edited here? | **Everything `PATCH /accounts/:id` takes:** label, payer, lane cap, monthly cap (metered kinds; clearing it sends null), Bedrock region and profile-or-bearer-token, gateway base URL, the model map (alias → the channel's model ID, as rows) and the offered aliases. A gateway usually needs a model map (spec §5), so leaving it out would leave most gateways API-only. The add form takes the same fields. | Leave the model map and aliases to the API for now; edit only label, payer and the caps. | 6, 7 |
 | 5 | Does the screen show an account's pause, and each project's fallback and move-back? | **No.** `AccountDto` carries no pause state, so showing it needs a daemon change, which is out of scope for this plan. The fallback and move-back display is its own open item ("the Accounts screen shows each project's fallback…"), left open. The inbox already says why an account paused. | Ask for a daemon change adding the pause reason to `AccountDto` and show it in the status column. | none |
 | 6 | Which month does usage show? | **The daemon's current month** (`GET /usage` with no `month`), labelled from the response's `month` ("October 2026"). The table shows the total; the drawer shows the per-project breakdown. A subscription shows tokens and no dollars; a metered account shows dollars against its cap with a bar that turns orange at the cap (`DESIGN.md`: orange is paused for limits). No month picker. | A month picker in the drawer. | 2, 4 |
-| 7 | Where do the new hooks go, given another session is editing `queries.ts`, `events.ts` and `test/fixtures.ts`? | **A new `daemon/account-queries.ts`** for the hooks and `test/account-fixtures.ts` for the fixtures. `queries.ts` gains one `queryKeys.accountUsage` line; `events.ts` adds `['accounts', 'usage']` to the `session` entry so a finished session refreshes usage. `apps/desktop/AGENTS.md` gets one line naming `account-queries.ts`. | Add everything to `queries.ts` and `fixtures.ts`, as the other hooks are. | 1 |
+| 7 | Where do account hooks, query keys and fixtures live? | **Scoped to the entity, as Orgtools does.** `daemon/account-queries.ts` holds `accountKeys` and every account hook, including the existing `useAccounts`, which moves out of `queries.ts` along with `queryKeys.accounts`. `test/account-fixtures.ts` holds every account fixture, including the existing `accountDto` and `DEFAULT_ACCOUNT`, which move out of `fixtures.ts`. Their importers are re-pointed (`project-billing.tsx` and `new-project-form.tsx` change only their import line). `events.ts` imports `accountKeys`. `apps/desktop/AGENTS.md` states the convention: hooks, keys and fixtures per backend entity. Splitting the rest of `queries.ts` and `fixtures.ts` (projects, tasks, batches, board columns, workstreams, inbox…) is a new open item for after the batch-sheet branch merges. The shared files only lose lines here, so whichever branch merges second has a small rebase. | Only new account code in new files; or split every entity now. | 1, 9 |
 | 8 | What does the end-to-end test cover, given the e2e daemon writes to the real login Keychain? | **Add a subscription, check its sign-in on the fake adapter, confirm the email, add an API-key account and see "Needs a secret", and run axe on the screen and the drawer in dark and light.** No secret is saved end to end: `main.ts` gives the e2e daemon `systemKeychain`, and `main.ts` is off-limits. The secret form is covered by component tests against MSW. | Ask for a daemon change that gives the fake-scripts daemon an in-memory Keychain, and save a secret end to end. | 8 |
 | 9 | Does the Billing section change? | **No.** The project's account and fallback pickers stay as they are. | Link each picker to its account's drawer. | none |
 
@@ -48,7 +48,7 @@ These become rows in `docs/architecture/decisions.md` in Task 9, numbered on fro
 - Read `AGENTS.md`, `apps/desktop/AGENTS.md`, `DESIGN.md`, `.claude/rules/code-style.md` and `.claude/rules/testing.md` before the first task.
 - **Off-limits** (another session is changing them): `apps/daemon/src/sandbox/`, `src/git/`, `src/runner/`, `src/daemon/start.ts`, `src/main.ts`; `apps/desktop/src/views/settings/project-general-form.tsx` and anything about permission mode; `apps/desktop/src/shell/app-layout.tsx`, `shell/daemon-status.tsx`, `src-tauri/src/tray.rs`, `src-tauri/tauri.conf.json`; `docs/architecture/03-trust-boundaries.md`. `project-billing.tsx` stays as it is.
 - **No daemon, contracts or database change.** A task that seems to need one stops and asks Travis.
-- **Shared files** (the approval-sheet session also edits them): `apps/desktop/src/daemon/queries.ts`, `daemon/events.ts`, `test/fixtures.ts`, `apps/desktop/AGENTS.md`, `docs/open-items.md`. Changes there are small and additive: one line each in `queries.ts` and `events.ts`, none in `fixtures.ts`, one line in `AGENTS.md`, the Accounts item in `open-items.md`.
+- **Shared files** (the approval-sheet session also edits them): `apps/desktop/src/daemon/queries.ts`, `daemon/events.ts`, `test/fixtures.ts`, `apps/desktop/AGENTS.md`, `docs/open-items.md`. Changes there stay small: `queries.ts` and `fixtures.ts` only lose their account code (decision 7), `events.ts` gets one line, `AGENTS.md` one bullet, and `open-items.md` the Accounts item plus two new items.
 - New decision rows take the next numbers after the highest row on `origin/main`, with no gaps or repeats, and are renumbered on rebase (Task 9).
 - Daemon calls go through the typed Hono client and `readJson` with the `@10db/contracts` schema. Never a hand-written `fetch`.
 - Mantine components and theme tokens only; Tabler icons at stroke 1.5, 16 in the table and 20 elsewhere; `size="sm"` in the table, `md` in the drawer and modal; sentence case; every view works in light mode.
@@ -71,12 +71,16 @@ These become rows in `docs/architecture/decisions.md` in Task 9, numbered on fro
 
 ```
 apps/desktop/src/
-  daemon/account-queries.ts (+ test)   useAccountUsage, useAccountSignIn, useCreateAccount,
+  daemon/account-queries.ts (+ test)   accountKeys, useAccounts (moved), useAccountUsage, useAccountSignIn, useCreateAccount,
                                         usePatchAccount, useArchiveAccount, useCheckAccountIdentity  (Task 1)
   daemon/account-secret.ts (+ test)    sendAccountSecret: PUT /accounts/:id/secret, outside TanStack  (Task 5)
-  daemon/queries.ts                    + queryKeys.accountUsage                                       (Task 1)
+  daemon/queries.ts                    − queryKeys.accounts, useAccounts, AccountList (moved)         (Task 1)
   daemon/events.ts (+ events.test.tsx) session events also refresh ['accounts', 'usage']              (Task 1)
-  test/account-fixtures.ts             accountUsageDto, accountIdentityDto, accountSignInDto          (Task 1)
+  test/account-fixtures.ts             accountDto, DEFAULT_ACCOUNT (moved), accountUsageDto,
+                                       accountIdentityDto, accountSignInDto                           (Task 1)
+  test/fixtures.ts  test/daemon.tsx    − account fixtures; import them from account-fixtures.ts      (Task 1)
+  views/settings/project-billing.tsx  views/board/new-project-form.tsx
+  views/board/board-view.test.tsx  views/settings/settings-view.test.tsx   import lines only     (Task 1)
   views/settings/
     sections.ts  section-body.tsx  settings-view.test.tsx                                          (Task 3)
     accounts/
@@ -106,25 +110,26 @@ apps/desktop/AGENTS.md                                                          
 **Files:**
 
 - Create: `apps/desktop/src/daemon/account-queries.ts`, `apps/desktop/src/daemon/account-queries.test.tsx`, `apps/desktop/src/test/account-fixtures.ts`
-- Modify: `apps/desktop/src/daemon/queries.ts` (one line), `apps/desktop/src/daemon/events.ts` (one line), `apps/desktop/src/daemon/events.test.tsx`
+- Modify: `apps/desktop/src/daemon/queries.ts` and `apps/desktop/src/test/fixtures.ts` (account code moves out), `apps/desktop/src/daemon/events.ts` (one line), `apps/desktop/src/daemon/events.test.tsx`, and the import line only of `test/daemon.tsx`, `views/settings/project-billing.tsx`, `views/board/new-project-form.tsx`, `views/board/board-view.test.tsx`, `views/settings/settings-view.test.tsx`
 
 **Interfaces:**
 
-- `queryKeys.accountUsage: (id: AccountId) => ['accounts', 'usage', id] as const`. Under the `['accounts']` prefix, so an `account` event refreshes usage too (a cap change changes `monthlyCapUsd`).
-- `INVALIDATIONS.session` becomes `[...WORK, ['accounts', 'usage']]`: a session's usage is recorded when it ends.
+- `accountKeys = { all: ['accounts'], usage: ['accounts', 'usage'], usageOf: (id: AccountId) => ['accounts', 'usage', id] as const }`, replacing `queryKeys.accounts`. Usage sits under the `['accounts']` prefix, so an `account` event refreshes it too (a cap change changes `monthlyCapUsd`).
+- `useAccounts()` moves here unchanged in behaviour; `accountDto` and `DEFAULT_ACCOUNT` move to `test/account-fixtures.ts` unchanged.
+- `INVALIDATIONS.account` uses `accountKeys.all`; `INVALIDATIONS.session` becomes `[...WORK, accountKeys.usage]`: a session's usage is recorded when it ends.
 - `useAccountUsage(id)` → `AccountUsageDto` (no `month`: the daemon's current month).
 - `useAccountSignIn(id, enabled)` → `AccountSignInDto`; enabled only for a subscription.
 - `useCreateAccount()` → `AccountCreatedDto`; invalidates `['accounts']`.
 - `usePatchAccount(id)` → `AccountDto`; invalidates `['accounts']` and `queryKeys.projects` (pickers show labels).
 - `useArchiveAccount()` → `AccountDto`; invalidates `['accounts']`.
 - `useCheckAccountIdentity()`: a mutation whose variable is the `AccountId` (never a secret), answering `AccountIdentityDto`. A mutation, because the probe starts Claude Code and runs only on a click (N3).
-- `test/account-fixtures.ts`: `accountUsageDto`, `accountIdentityDto`, `accountSignInDto`, each `parse`d through its contract like `fixtures.ts`.
+- `test/account-fixtures.ts`: `accountUsageDto`, `accountIdentityDto`, `accountSignInDto`, each `parse`d through its contract like the moved `accountDto`.
 
 - [ ] **Step 1: Write the failing tests.** `account-queries.test.tsx`, through `renderWithDaemon` and a tiny probe component per hook: create posts the body and refetches `/accounts`; patch sends only the patch and refetches `/accounts` and `/projects`; archive posts to `/archive`; usage requests `/accounts/:id/usage` with no `month` query; sign-in is not requested when disabled; identity is requested only when the mutation runs. In `events.test.tsx`, one row: a `session` event refetches an open usage query; an `account` event refetches it too.
 - [ ] **Step 2: Run** `pnpm --filter @10db/desktop exec vitest run src/daemon/account-queries.test.tsx src/daemon/events.test.tsx`. Expected: FAIL (module not found; the session row sees no refetch).
-- [ ] **Step 3: Implement** the hooks after the patterns in `queries.ts`, the key, and the `events.ts` line with a comment ("a session's tokens and dollars are recorded when it ends").
+- [ ] **Step 3: Implement.** First move `useAccounts`, its key and the account fixtures and re-point their importers; run `pnpm --filter @10db/desktop exec vitest run src` and `pnpm --filter @10db/desktop typecheck` to show the move changed nothing (a pure move has no red step). Then the new hooks after the patterns in `queries.ts`, and the `events.ts` line with a comment ("a session's tokens and dollars are recorded when it ends").
 - [ ] **Step 4: Run** the same command. Expected: PASS.
-- [ ] **Step 5: Commit** `feat(desktop): add the account hooks and refresh usage on session events` with the six files.
+- [ ] **Step 5: Commit** in two: `refactor(desktop): scope the account hook and fixtures to their own modules` with the moved and re-pointed files, then `feat(desktop): add the account hooks and refresh usage on session events` with the rest.
 
 ### Task 2: Account status and usage text
 
@@ -281,7 +286,7 @@ apps/desktop/AGENTS.md                                                          
 
 **Files:**
 
-- Modify: `README.md` (## Accounts: replace "Until the Accounts screen ships…" and the curl block with Settings › Accounts steps: add, sign in and confirm, paste a secret; keep one sentence that the same routes exist on the API), `docs/architecture/04-accounts.md` (the `apps/desktop` row: the Accounts screen is built, plan 13), `docs/open-items.md` (tick the Accounts screen item and correct "plan 12" to plan 13; leave the fallback-display item open, and add one: an in-memory Keychain for the fake-scripts daemon so the secret path gets an end-to-end run), `apps/desktop/AGENTS.md` (one line: account hooks live in `daemon/account-queries.ts`; the secret is sent by `daemon/account-secret.ts` and never through TanStack), `docs/architecture/decisions.md` (rows N1–N3, numbered on from `origin/main`'s highest row).
+- Modify: `README.md` (## Accounts: replace "Until the Accounts screen ships…" and the curl block with Settings › Accounts steps: add, sign in and confirm, paste a secret; keep one sentence that the same routes exist on the API), `docs/architecture/04-accounts.md` (the `apps/desktop` row: the Accounts screen is built, plan 13), `docs/open-items.md` (tick the Accounts screen item and correct "plan 12" to plan 13; leave the fallback-display item open, and add two: an in-memory Keychain for the fake-scripts daemon so the secret path gets an end-to-end run; split the rest of `queries.ts` and `fixtures.ts` per entity after the batch-sheet branch merges), `apps/desktop/AGENTS.md` (one bullet: hooks, query keys and fixtures are scoped per backend entity, `daemon/<entity>-queries.ts` and `test/<entity>-fixtures.ts`, with accounts the first; the secret is sent by `daemon/account-secret.ts` and never through TanStack), `docs/architecture/decisions.md` (rows N1–N3, numbered on from `origin/main`'s highest row).
 - [ ] **Step 1: Find the next number.** `git fetch origin main && git show origin/main:docs/architecture/decisions.md | grep -oE '^\| [0-9]+ ' | tr -d '| ' | sort -n | tail -1`. N1–N3 take the three numbers after it. If the branch is later rebased onto a `main` with more rows, renumber them in the rebase (rebases ask Travis first).
 - [ ] **Step 2: Edit** the docs; mark the screen **built**.
 - [ ] **Step 3: Run** `pnpm exec vitest run --project repo`. Expected: PASS (decision numbering, doc structure).
