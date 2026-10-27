@@ -70,7 +70,7 @@ import {
 } from '../environment';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit, memoryPinStore, resolveGit } from '../git';
-import { createGh, type Gh } from '../github';
+import { createGh, createSystemGhExec, resolveGh, type Gh } from '../github';
 import { createInboxService } from '../inbox';
 import { createKeepAwake, systemCaffeinate, type CaffeinateSpawner } from '../keep-awake';
 import { createLogger, fileDestination, rotateLogFile, type Logger } from '../log';
@@ -200,6 +200,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // Before anything runs git: the one git every daemon git call runs, from a fixed install prefix,
   // never a PATH, and only one that can be told to read no attributes.
   const gitBin = await resolveGit();
+  // gh from the same prefixes; a missing one fails each gh call as not installed, as the system check says.
+  const ghBin = resolveGh();
   const clock = opts.clock ?? systemClock;
   const startedAt = clock.now();
   mkdirSync(join(opts.dataDir, 'logs'), { recursive: true });
@@ -309,7 +311,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const delivery: DeliveryContext = {
     state,
     git,
-    gh: opts.gh ?? createGh(),
+    gh: opts.gh ?? createGh(createSystemGhExec({ gh: ghBin, git: gitBin })),
     inbox,
     jobs: deliveryJobs,
     logger: logger.child({ component: 'delivery' }),

@@ -1,9 +1,17 @@
-import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDecoyRepo } from '../../test/decoy-repo';
 import { createTempRepo, NETWORK_ENV, tempDir } from '../../test/fixtures';
-import { createGh, GhError, systemGhExec, type GhCall, type GhExec } from './index';
+import { realGit } from '../../test/git-wrapper';
+import {
+  createGh,
+  createSystemGhExec,
+  GhError,
+  resolveGh,
+  type GhCall,
+  type GhExec,
+} from './index';
 
 const CALL: GhCall = { env: {}, timeoutMs: 5_000 };
 
@@ -163,7 +171,7 @@ describe('createGh', () => {
   });
 });
 
-describe('systemGhExec', () => {
+describe('createSystemGhExec', () => {
   let bin: { path: string; cleanup(): void };
   beforeEach(() => {
     bin = tempDir('gh-bin');
@@ -171,14 +179,18 @@ describe('systemGhExec', () => {
   afterEach(() => {
     bin.cleanup();
   });
-  function fakeGh(script: string): void {
-    mkdirSync(bin.path, { recursive: true });
-    const path = join(bin.path, 'gh');
+  function fakeGh(script: string, dir = bin.path): string {
+    mkdirSync(dir, { recursive: true });
+    const path = join(dir, 'gh');
     writeFileSync(path, `#!/bin/sh\n${script}\n`);
     chmodSync(path, 0o755);
+    return path;
   }
+  /** Runs the fake gh in `bin`, with the git the daemon resolved. */
+  const systemGhExec: GhExec = (args, c) =>
+    createSystemGhExec({ gh: join(bin.path, 'gh'), git: realGit() })(args, c);
   const call = (overrides: Partial<GhCall> = {}): GhCall => ({
-    env: { PATH: `${bin.path}:/usr/bin:/bin` },
+    env: { PATH: '/usr/bin:/bin' },
     timeoutMs: 5_000,
     ...overrides,
   });
@@ -186,7 +198,7 @@ describe('systemGhExec', () => {
   it('turns prompts off whatever the environment says', async () => {
     fakeGh('echo "$GH_PROMPT_DISABLED $GH_NO_UPDATE_NOTIFIER $GIT_TERMINAL_PROMPT $*"');
     const env = {
-      PATH: `${bin.path}:/usr/bin:/bin`,
+      PATH: '/usr/bin:/bin',
       GH_PROMPT_DISABLED: '0',
       GIT_TERMINAL_PROMPT: '1',
     };
@@ -197,7 +209,7 @@ describe('systemGhExec', () => {
 
   it('runs gh in an empty directory of its own, where no git finds a repository', async () => {
     fakeGh('pwd; ls -A | wc -l; git rev-parse --git-dir 2>/dev/null || echo no-repository');
-    const env = { ...NETWORK_ENV, PATH: `${bin.path}:${process.env['PATH'] ?? '/usr/bin:/bin'}` };
+    const env = NETWORK_ENV;
     const out = await systemGhExec(['pr', 'view'], call({ env }));
     const [dir = '', count = '', repo = ''] = out.stdout.trim().split('\n');
     expect(dir).toMatch(/10db-gh-/);
@@ -213,7 +225,6 @@ describe('systemGhExec', () => {
       fakeGh('echo "${GIT_DIR:-none} $GIT_SSH_COMMAND"');
       const env = {
         ...NETWORK_ENV,
-        PATH: `${bin.path}:${process.env['PATH'] ?? '/usr/bin:/bin'}`,
         ...decoy.hookVariables,
         GIT_SSH_COMMAND: 'ssh -i key',
       };
@@ -233,7 +244,6 @@ describe('systemGhExec', () => {
       );
       const env = {
         ...NETWORK_ENV,
-        PATH: `${bin.path}:${process.env['PATH'] ?? '/usr/bin:/bin'}`,
         GIT_CONFIG_COUNT: '1',
         GIT_CONFIG_KEY_0: 'user.name',
         GIT_CONFIG_VALUE_0: 'builder',
@@ -253,16 +263,37 @@ describe('systemGhExec', () => {
     });
   });
 
-  it('reports gh missing from the PATH as not installed', async () => {
-    // An empty directory, not /usr/bin: GitHub's Ubuntu runners ship /usr/bin/gh.
-    const empty = tempDir('no-gh');
-    try {
-      await expect(
-        systemGhExec(['auth', 'status'], call({ env: { PATH: empty.path } })),
-      ).rejects.toMatchObject({ kind: 'not_installed' });
-    } finally {
-      empty.cleanup();
+  it('runs the gh it was given, never one on PATH', async () => {
+    const ran = join(bin.path, 'path-gh-ran');
+    const onPath = join(bin.path, 'on-path');
+    fakeGh(`touch '${ran}'`, onPath);
+    fakeGh('echo given');
+    const out = await systemGhExec(['auth', 'status'], call({ env: { PATH: onPath } }));
+    expect(out.stdout).toBe('given\n');
+    expect(existsSync(ran)).toBe(false);
+  });
+
+  it("puts the resolved git's directory first on gh's PATH, so any git it runs is that one", async () => {
+    const resolved = join(bin.path, 'resolved');
+    const other = join(bin.path, 'other');
+    for (const dir of [resolved, other]) {
+      mkdirSync(dir, { recursive: true });
+      symlinkSync(realGit(), join(dir, 'git'));
     }
+    const gh = fakeGh('command -v git', join(bin.path, 'gh-dir'));
+    const out = await createSystemGhExec({ gh, git: join(resolved, 'git') })(
+      ['pr', 'view'],
+      call({ env: { PATH: `${other}:/usr/bin:/bin` } }),
+    );
+    expect(out.stdout).toBe(`${join(resolved, 'git')}\n`);
+  });
+
+  it('reports a gh found in no install prefix as not installed', async () => {
+    const answer = createSystemGhExec({ gh: null, git: realGit() })(['auth', 'status'], call());
+    await expect(answer).rejects.toMatchObject({ kind: 'not_installed' });
+    await expect(answer).rejects.toThrow(
+      '10db found no gh in /opt/homebrew/bin, /usr/local/bin and /usr/bin.',
+    );
   });
 
   it('times out a gh that hangs', async () => {
@@ -284,4 +315,56 @@ describe('systemGhExec', () => {
       await expect(answer).rejects.toThrow(/^gh pr view printed more than 4 MB/);
     },
   );
+});
+
+describe('resolveGh', () => {
+  let dir: { path: string; cleanup(): void };
+  beforeEach(() => {
+    dir = tempDir('gh-prefixes');
+  });
+  afterEach(() => {
+    dir.cleanup();
+  });
+  function place(sub: string, mode = 0o755): string {
+    mkdirSync(join(dir.path, sub), { recursive: true });
+    const path = join(dir.path, sub, 'gh');
+    writeFileSync(path, '#!/bin/sh\n');
+    chmodSync(path, mode);
+    return path;
+  }
+
+  it.each([
+    {
+      name: 'takes the first executable candidate, skipping one that is not executable',
+      setup: () => {
+        place('a', 0o644);
+        return { candidates: ['a', 'b', 'c'], expected: place('b') };
+      },
+    },
+    {
+      name: 'keeps a link as found, so an upgrade that repoints it changes nothing',
+      setup: () => {
+        const target = place('cellar');
+        mkdirSync(join(dir.path, 'prefix'));
+        const link = join(dir.path, 'prefix', 'gh');
+        symlinkSync(target, link);
+        return { candidates: ['prefix', 'cellar'], expected: link };
+      },
+    },
+    {
+      name: 'finds none when no candidate exists',
+      setup: () => ({ candidates: ['a', 'b'], expected: null }),
+    },
+  ])('$name', ({ setup }) => {
+    const { candidates, expected } = setup();
+    expect(resolveGh(candidates.map((sub) => join(dir.path, sub, 'gh')))).toBe(expected);
+  });
+
+  it('looks only in the fixed install prefixes, never PATH', () => {
+    const onPath = place('path');
+    const found = resolveGh();
+    expect(found).not.toBe(onPath);
+    if (found !== null)
+      expect(['/opt/homebrew/bin/gh', '/usr/local/bin/gh', '/usr/bin/gh']).toContain(found);
+  });
 });

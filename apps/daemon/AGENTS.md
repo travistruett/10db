@@ -64,7 +64,7 @@ The fake adapter (`sessions/fake-adapter.ts`) is the test boundary for Claude Co
   `git/git.ts` reads no attributes (`GIT_ATTR_SOURCE` at the empty tree, `core.attributesFile=/dev/null`) and
   passes `NO_ATTRIBUTES` and `DAEMON_GIT_CONFIG` through `run.ts` (every `GIT_*` dropped but the config-file
   selectors, a 60 s timeout) or `network.ts`; `gh` gets the hook and fsmonitor config through
-  `GIT_CONFIG_COUNT` (`withDaemonGitConfig`). `startDaemon` resolves one git from the fixed prefixes `/opt/homebrew/bin`, `/usr/local/bin` and `/usr/bin` (never a `PATH`, which can lead with a lane-writable dir) with a behaviour probe, keeps its real path, and refuses to start when none passes (`version.ts`); the system check reports git from the same prefixes. `runGit` requires `bin`, so every call runs that git, and once a checkout is pinned, with `GIT_DIR` and `GIT_WORK_TREE` set to the pin, which `pinned()` reads once per operation and passes down. The
+  `GIT_CONFIG_COUNT` (`withDaemonGitConfig`). `startDaemon` resolves one git from the fixed prefixes `/opt/homebrew/bin`, `/usr/local/bin` and `/usr/bin` (never a `PATH`, which can lead with a lane-writable dir) with a behaviour probe, keeps the path it found it at (Homebrew's prefix link, which outlives a `brew upgrade` and its cleanup, where the Cellar path it points to doesn't), and refuses to start when none passes (`version.ts`, prefixes in `install-prefixes.ts`). gh comes from the same prefixes in the same order (`github/resolve-gh.ts`), resolved at start; every gh call runs that path with the resolved git's directory first on its `PATH`, and a missing gh fails each call as not installed. The system check reports git and gh from the same prefixes. `runGit` requires `bin`, so every call runs that git, and once a checkout is pinned, with `GIT_DIR` and `GIT_WORK_TREE` set to the pin, which `pinned()` reads once per operation and passes down. The
   daemon never reads or writes a worktree file itself: `changedPaths` is `status --ignore-submodules=all` on a
   private index, `commit` is `git add -A` on a private `GIT_INDEX_FILE` ending in
   `update-ref --no-deref <branch> <new> <old>`, and a batch's branch is checked out with `read-tree -m -u`;
@@ -74,13 +74,16 @@ The fake adapter (`sessions/fake-adapter.ts`) is the test boundary for Claude Co
   changed origin or a non-empty alternates file is a `GitTrustError`. Its card carries the state it found,
   and only the card's Trust answer re-pins, through `git.retrust(repo, candidate)`, which pins exactly that
   state and refuses anew if the checkout changed since, or with a card offering nothing if a git dir in it lies
-  inside the checkout (other than its `.git`) or a lane temp root. A batch start reads origin's push URL through
+  inside any registered checkout (other than this checkout's own `.git`) or a lane temp root; the same check runs when a
+  checkout is first pinned. A batch start reads origin's push URL through
   `pinnedPushUrl`, which checks it against the pin, so an origin added or changed since registration raises the
   Origin card. A commit's branch is the batch's or `workstreams.branch`, pinned at the first
   session, never HEAD. Fetch and push name the pinned URLs, in the form `git/remote-url.ts` parses (a URL with
   userinfo or anything that doesn't parse cleanly is refused), refuse a local origin inside any registered
   checkout (`checkouts`) or a lane temp root (`laneRoots`), read as written or through a link, and check the
-  local-config allowlist (`git/config-trust.ts`) as defense in depth. They read config with the login env
+  local-config allowlist (`git/config-trust.ts`) as defense in depth. A config file counts as lane-writable when it lies in
+  the git dirs, any registered checkout or a lane temp root, read as written or through a link (`laneWritableRoots`),
+  so a global include into another project's checkout is refused and its programs are never used. They read config with the login env
   (`NetworkCall.env`) and re-emit the builder's credential helpers through `GIT_CONFIG_COUNT`, after an empty
   helper that resets the list. Every refusal reaches `onRefused` (`daemon/git-refusal.ts`),
   which raises one card per checkout, cause and found state. A new git call goes through `git()` in

@@ -340,7 +340,9 @@ Under the lane sandbox (**built**), the design column holds for a lane's Bash:
     fsmonitor config through `GIT_CONFIG_COUNT`. Every call, local and network, runs the one git resolved at
     startup from fixed install prefixes, in order `/opt/homebrew/bin`, `/usr/local/bin` and `/usr/bin`, never
     the login `PATH`, which can name a directory a lane writes (under `pnpm dev`, a checkout's
-    `node_modules/.bin` leads it). It is the first that passes a behaviour probe, kept by its real path: in a
+    `node_modules/.bin` leads it). It is the first that passes a behaviour probe, kept by the path it was found at, which a `brew upgrade` and its
+    cleanup leave in place (the Cellar file a prefix link points to is deleted, the link isn't), and which no lane
+    can write: in a
     scratch repository whose `.gitattributes` selects a filter, `check-attr` under `GIT_ATTR_SOURCE` at the
     empty tree must say `unspecified`. The global `--attr-source`, and `GIT_ATTR_SOURCE` with it, arrived in
     git 2.41; Xcode's git 2.39 fails the probe, and with no git that passes the daemon refuses to start, naming
@@ -375,7 +377,10 @@ Under the lane sandbox (**built**), the design column holds for a lane's Bash:
 - gh runs in an empty directory of its own and always names the repository with `-R`, taken from origin's
   pinned push URL, so it runs no git in a checkout. A batch start checks origin's push URL against the pin
   first, so an origin added or changed since registration raises the Origin card, which offers it for trust.
-  gh itself, and any git it runs, still come from the login `PATH`.
+  gh itself comes from the same fixed prefixes as the daemon's git, in the same order, resolved at startup by the
+  path it was found at; every call runs that path, and the resolved git's directory leads gh's `PATH`, so any git
+  gh runs is the daemon's one git. With no gh in those prefixes, each gh call fails as not installed and the
+  system check reports gh missing.
 - Fetch and push take the builder's credential helpers from its own config (system, global and the login
   environment's `GIT_CONFIG_COUNT` and `GIT_CONFIG_PARAMETERS`), URL-scoped ones such as `gh auth setup-git`'s
   included, read with the login environment the call runs in. They are re-emitted through `GIT_CONFIG_COUNT`,
@@ -392,7 +397,9 @@ Under the lane sandbox (**built**), the design column holds for a lane's Bash:
 - They run with the builder's own transport programs pinned (`credential.helper` reset to the builder's own,
   `core.sshCommand`, `core.askPass`) and `protocol.ext.allow=never`. Before each, the config a
   lane could have written is checked against an allowlist, which refuses `insteadOf`, `pushInsteadOf`,
-  `credential.*`, `http.proxy` and every include. The allowlist is defense in depth, not the boundary: it reads
+  `credential.*`, `http.proxy` and every include. A file counts as lane-writable when git read it at local or
+  worktree scope, or it lies in the git dirs, any registered checkout or a lane temp root, read as written or
+  through a link: a global include into another project's checkout is refused, and no program it names runs. The allowlist is defense in depth, not the boundary: it reads
   config in a process before the one that uses it.
 - A branch whose tree selects a filter isn't pushed: Git LFS needs its pre-push upload, which reads lane-writable
   `.lfsconfig` for where to send objects. 10db refuses with a card and the builder pushes such a branch
@@ -514,8 +521,8 @@ rm -rf dist/*`. The guard judges a command before it runs.
   replaced, or a changed origin, refuses every call with a card. The card holds the state it found; Trust the
   checkout as it is now pins exactly that state, and only if the checkout still matches it, otherwise 10db
   refuses again with a new card. Each found state gets its own card. Restarting the daemon re-trusts nothing.
-  A git dir offered for trust inside the checkout (other than its own `.git`) or in a lane temp root is refused
-  with a card that offers nothing to trust. A non-empty `objects/info/alternates` is refused too.
+  A git dir inside any registered checkout (other than this checkout's own `.git`) or in a lane temp root is refused
+  with a card that offers nothing to trust, when it is offered for trust and when a checkout is first pinned. A non-empty `objects/info/alternates` is refused too.
 - **The builder's own config is trusted.** Signing follows the global `commit.gpgsign`, with the signing
   programs pinned from global config or git's defaults. Local config still sets identity, which names no program.
 - **Files that need a filter are left to the builder.** The daemon commits bytes as they are, so it refuses a

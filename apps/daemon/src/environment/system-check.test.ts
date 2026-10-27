@@ -60,13 +60,17 @@ describe('probeVersion', () => {
 });
 
 describe('systemCheck', () => {
-  it('reports each tool from the login PATH but git, which comes from a fixed install prefix', async () => {
+  it('reports each tool from the login PATH but git and gh, which come from a fixed install prefix', async () => {
     const claude = tool('bin', 'claude', 'exit 0');
-    // A git on the login PATH is never run, not even for its version: a lane could have put it there.
+    // A git or gh on the login PATH is never run, not even for its version: a lane could have put it there.
     tool('bin', 'git', 'exit 0');
-    const git =
-      ['/opt/homebrew/bin/git', '/usr/local/bin/git', '/usr/bin/git'].find((p) => existsSync(p)) ??
-      null;
+    tool('bin', 'gh', 'exit 0');
+    const prefixed = (name: string) =>
+      ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin']
+        .map((prefix) => join(prefix, name))
+        .find((p) => existsSync(p)) ?? null;
+    const git = prefixed('git');
+    const gh = prefixed('gh');
     const login: LoginEnv = {
       vars: { PATH: join(dir.path, 'bin') },
       source: 'inherited',
@@ -92,7 +96,12 @@ describe('systemCheck', () => {
           required: true,
         },
         { name: 'docker', path: null, version: null, required: false },
-        { name: 'gh', path: null, version: null, required: false },
+        {
+          name: 'gh',
+          path: gh,
+          version: gh === null ? null : `version of ${gh} ${join(dir.path, 'bin')}`,
+          required: false,
+        },
       ],
       // The services layer fills this per request; the environment check reports no benchmark warning.
       benchmarkSync: null,

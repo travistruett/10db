@@ -8,7 +8,9 @@ import {
   readlinkSync,
   realpathSync,
   renameSync,
+  rmSync,
   symlinkSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -856,24 +858,59 @@ describe('the checkout is the one pinned for it', () => {
     await expect(git.head(repo.path)).rejects.toBeInstanceOf(GitTrustError);
   });
 
-  it.each([
+  /** Where a lane could write a git dir: the checkout, a lane temp root, another project's checkout. */
+  const WRITABLE_GIT_DIRS = [
     { name: 'inside the checkout', at: () => join(repo.path, 'vendor', 'git') },
     { name: "in a lane's temp root", at: () => join(scratch.path, 'lane-root', 'git') },
-  ])('refuses to re-trust a git dir $name, which a lane could write', async ({ at }) => {
-    const onRefused = vi.fn();
-    const git = createGit({ onRefused, laneRoots: [join(scratch.path, 'lane-root')] });
-    await git.head(repo.path);
-    // The repository's own git dir moves where a lane can write, and `.git` becomes a gitfile to it.
-    mkdirSync(dirname(at()), { recursive: true });
-    renameSync(join(repo.path, '.git'), at());
-    writeFileSync(join(repo.path, '.git'), `gitdir: ${at()}\n`);
-    const { detail } = await refusal(git.head(repo.path));
-    if (detail.kind !== 'moved') throw new Error('expected a moved checkout');
-    const error = await refusal(git.retrust(repo.path, detail.candidate));
-    expect(error.detail).toEqual({ kind: 'writable', gitDir: realpathSync(at()) });
-    expect(onRefused).toHaveBeenLastCalledWith(error);
-    await expect(git.head(repo.path)).rejects.toBeInstanceOf(GitTrustError);
+    {
+      name: "inside another registered project's checkout",
+      at: () => join(scratch.path, 'other-checkout', 'git'),
+    },
+  ];
+  const gitWithRoots = (onRefused: (error: GitTrustError) => void) =>
+    createGit({
+      onRefused,
+      laneRoots: [join(scratch.path, 'lane-root')],
+      checkouts: () => [repo.path, join(scratch.path, 'other-checkout')],
+    });
+
+  it.each(WRITABLE_GIT_DIRS)(
+    'refuses to pin a checkout whose git dir lies $name, which a lane could write',
+    async ({ at }) => {
+      const onRefused = vi.fn();
+      mkdirSync(dirname(at()), { recursive: true });
+      renameSync(join(repo.path, '.git'), at());
+      writeFileSync(join(repo.path, '.git'), `gitdir: ${at()}\n`);
+      const git = gitWithRoots(onRefused);
+      const error = await refusal(git.head(repo.path));
+      expect(error.detail).toEqual({ kind: 'writable', gitDir: realpathSync(at()) });
+      expect(onRefused).toHaveBeenLastCalledWith(error);
+      await expect(git.head(repo.path)).rejects.toBeInstanceOf(GitTrustError);
+    },
+  );
+
+  it('pins a checkout at its own .git when other checkouts are registered', async () => {
+    expect(await gitWithRoots(vi.fn()).currentBranch(repo.path)).toBe('main');
   });
+
+  it.each(WRITABLE_GIT_DIRS)(
+    'refuses to re-trust a git dir $name, which a lane could write',
+    async ({ at }) => {
+      const onRefused = vi.fn();
+      const git = gitWithRoots(onRefused);
+      await git.head(repo.path);
+      // The repository's own git dir moves where a lane can write, and `.git` becomes a gitfile to it.
+      mkdirSync(dirname(at()), { recursive: true });
+      renameSync(join(repo.path, '.git'), at());
+      writeFileSync(join(repo.path, '.git'), `gitdir: ${at()}\n`);
+      const { detail } = await refusal(git.head(repo.path));
+      if (detail.kind !== 'moved') throw new Error('expected a moved checkout');
+      const error = await refusal(git.retrust(repo.path, detail.candidate));
+      expect(error.detail).toEqual({ kind: 'writable', gitDir: realpathSync(at()) });
+      expect(onRefused).toHaveBeenLastCalledWith(error);
+      await expect(git.head(repo.path)).rejects.toBeInstanceOf(GitTrustError);
+    },
+  );
 
   it('pins a checkout by its real path, whatever path names it', async () => {
     const link = join(scratch.path, 'link');
@@ -1165,6 +1202,49 @@ describe('fetch and push', () => {
     ]);
   });
 
+  it.each(
+    (['fetch', 'push'] as const).flatMap((name) =>
+      [
+        { root: "another registered project's checkout", checkouts: true },
+        { root: "a lane's temp root", checkouts: false },
+      ].map((r) => ({ name, ...r })),
+    ),
+  )(
+    'refuses a $name whose global config includes a file in $root, using none of its programs',
+    async ({ name, checkouts }) => {
+      const other = tempDir('other-project');
+      try {
+        const program = marker('program');
+        const included = join(other.path, 'shared.gitconfig');
+        writeFileSync(
+          included,
+          `[core]\n\tsshCommand = ${program.path}\n[credential]\n\thelper = ${program.path}\n`,
+        );
+        const global = join(scratch.path, 'gitconfig');
+        writeFileSync(global, `[include]\n\tpath = ${included}\n`);
+        const git = checkouts
+          ? createGit({ checkouts: () => [remote.repo.path, other.path] })
+          : createGit({ laneRoots: [other.path] });
+        const call = { env: { ...NETWORK_ENV, GIT_CONFIG_GLOBAL: global }, timeoutMs: 10_000 };
+        const error = await refusal(
+          name === 'fetch'
+            ? git.fetch(remote.repo.path, 'main', call)
+            : git.push(remote.repo.path, 'main', call),
+        );
+        expect(error.detail).toEqual({
+          kind: 'config',
+          keys: [
+            { key: 'core.sshcommand', file: included },
+            { key: 'credential.helper', file: included },
+          ],
+        });
+        expect(program.ran()).toBe(false);
+      } finally {
+        other.cleanup();
+      }
+    },
+  );
+
   it('refuses a push to a local origin inside the checkout, where a lane could write its hooks', async () => {
     const inside = join(remote.repo.path, 'nested-origin.git');
     execFileSync('git', ['init', '-q', '--bare', '-b', 'main', inside], { env: isolatedGitEnv() });
@@ -1231,15 +1311,38 @@ describe('resolveGit', () => {
     }
   });
 
-  it('takes the first candidate that passes the probe, as its real path', async () => {
+  it('takes the first candidate that passes the probe, as the path it was found at', async () => {
     const old = oldGit();
     try {
-      const link = join(scratch.path, 'linked-git');
+      // Named git, as a prefix's link is: Xcode's /usr/bin/git picks the tool by the name it runs as.
+      mkdirSync(join(scratch.path, 'prefix'));
+      const link = join(scratch.path, 'prefix', 'git');
       symlinkSync(realGit(), link);
-      expect(await resolveGit([binOf(old.path), link])).toBe(realpathSync(realGit()));
+      expect(await resolveGit([binOf(old.path), link])).toBe(link);
     } finally {
       old.cleanup();
     }
+  });
+
+  it('keeps working after an upgrade replaces the git behind the prefix link and deletes the old one', async () => {
+    // Homebrew's layout: the prefix holds a link into a versioned Cellar directory, and an upgrade
+    // followed by its cleanup repoints the link and removes the old version.
+    const cellar = join(scratch.path, 'Cellar');
+    const version = (name: string): string => {
+      const dir = join(cellar, name);
+      mkdirSync(dir, { recursive: true });
+      const path = join(dir, 'git');
+      writeFileSync(path, `#!/bin/sh\nexec '${realGit()}' "$@"\n`);
+      chmodSync(path, 0o755);
+      return path;
+    };
+    const link = join(scratch.path, 'prefix-git');
+    symlinkSync(version('2.50'), link);
+    const bin = await resolveGit([link]);
+    unlinkSync(link);
+    symlinkSync(version('2.51'), link);
+    rmSync(join(cellar, '2.50'), { recursive: true, force: true });
+    expect(await runGit(scratch.path, ['--version'], { bin })).toMatch(/^git version /);
   });
 
   it('refuses when no candidate exists', async () => {
@@ -1252,9 +1355,7 @@ describe('resolveGit', () => {
     try {
       vi.stubEnv('PATH', wrapper.path);
       const bin = await resolveGit();
-      const prefixes = ['/opt/homebrew/bin/git', '/usr/local/bin/git', '/usr/bin/git'].flatMap(
-        (candidate) => (existsSync(candidate) ? [realpathSync(candidate)] : []),
-      );
+      const prefixes = ['/opt/homebrew/bin/git', '/usr/local/bin/git', '/usr/bin/git'];
       expect(prefixes).toContain(bin);
       expect(existsSync(ran)).toBe(false);
     } finally {

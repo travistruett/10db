@@ -1,6 +1,7 @@
-import { existsSync, realpathSync, statSync } from 'node:fs';
-import { isAbsolute, join, resolve, sep } from 'node:path';
+import { statSync } from 'node:fs';
+import { isAbsolute, join } from 'node:path';
 import { isTrustedKey, type ConfigEntry } from './config-trust';
+import { insideAny } from './lane-writable';
 import type { RefusedKey } from './trust-error';
 
 /** Scopes whose files sit in the checkout's git dir, where a lane could have written them. */
@@ -18,10 +19,6 @@ export function checkoutIdentity(dirs: { gitDir: string; commonDir: string }): s
   return `${id(dirs.gitDir)}/${id(dirs.commonDir)}`;
 }
 
-function real(path: string): string {
-  return existsSync(path) ? realpathSync(path) : resolve(path);
-}
-
 /** The file a `--show-origin` field names, absolute; null for the command line and other sources. */
 function originFile(origin: string, repo: string): string | null {
   if (!origin.startsWith('file:')) return null;
@@ -29,14 +26,10 @@ function originFile(origin: string, repo: string): string | null {
   return isAbsolute(path) ? path : join(repo, path);
 }
 
-function inside(path: string, roots: readonly string[]): boolean {
-  const target = real(path);
-  return roots.some((root) => target === root || target.startsWith(root + sep));
-}
-
 /**
  * True when a lane could have written `entry`: git read it at local or worktree scope, or from a
- * file in the checkout or its git dirs (a global config's include can point there).
+ * file in one of `roots` (a global config's include can point there), read as written or through a
+ * link.
  */
 function laneWritable(
   entry: ConfigEntry,
@@ -45,22 +38,29 @@ function laneWritable(
 ): { writable: boolean; file: string | null } {
   const file = originFile(entry.origin, repo);
   return {
-    writable: CHECKOUT_SCOPES.has(entry.scope) || (file !== null && inside(file, roots)),
+    writable: CHECKOUT_SCOPES.has(entry.scope) || (file !== null && insideAny(file, roots)),
     file,
   };
 }
 
-function rootsOf(repo: string, dirs: { gitDir: string; commonDir: string }): string[] {
-  return [real(repo), real(dirs.gitDir), real(dirs.commonDir)];
+/** Where a lane can write a config file: `laneRoots` (every checkout and lane temp root) and the git dirs. */
+export interface ConfigRoots {
+  readonly repo: string;
+  readonly dirs: { readonly gitDir: string; readonly commonDir: string };
+  readonly laneRoots: readonly string[];
+}
+
+function rootsOf({ dirs, laneRoots }: ConfigRoots): string[] {
+  return [...laneRoots, dirs.gitDir, dirs.commonDir];
 }
 
 /** Keys from a lane-writable file that the daemon's fetch and push do not accept. */
 export function refusedCheckoutKeys(
-  repo: string,
-  dirs: { gitDir: string; commonDir: string },
+  where: ConfigRoots,
   entries: readonly ConfigEntry[],
 ): RefusedKey[] {
-  const roots = rootsOf(repo, dirs);
+  const { repo } = where;
+  const roots = rootsOf(where);
   const refused: RefusedKey[] = [];
   for (const entry of entries) {
     const { writable, file } = laneWritable(entry, repo, roots);
@@ -75,12 +75,12 @@ export function refusedCheckoutKeys(
  * global and the command line, never a file a lane could have written. In git's order, last wins.
  */
 export function trustedValues(
-  repo: string,
-  dirs: { gitDir: string; commonDir: string },
+  where: ConfigRoots,
   entries: readonly ConfigEntry[],
   key: string,
 ): (string | null)[] {
-  const roots = rootsOf(repo, dirs);
+  const { repo } = where;
+  const roots = rootsOf(where);
   return entries
     .filter((entry) => entry.name === key && !laneWritable(entry, repo, roots).writable)
     .map((entry) => entry.value);

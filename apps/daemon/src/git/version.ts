@@ -1,25 +1,14 @@
-import {
-  accessSync,
-  constants,
-  mkdtempSync,
-  realpathSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import {
+  executable,
+  installCandidates,
+  INSTALL_PREFIXES_TEXT as LOOKED_IN,
+} from './install-prefixes';
 import { runGit } from './run';
 
-/**
- * Where the daemon looks for git, in order: Homebrew on Apple silicon, Homebrew on Intel, then the
- * system's. Never the login PATH, which can name a directory a lane writes, such as a checkout's
- * `node_modules/.bin`.
- */
-export const GIT_PREFIXES: readonly string[] = ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin'];
-const GIT_CANDIDATES = GIT_PREFIXES.map((dir) => join(dir, 'git'));
-
-const LOOKED_IN = '/opt/homebrew/bin, /usr/local/bin and /usr/bin';
+const GIT_CANDIDATES = installCandidates('git');
 
 /** No git in the fixed install prefixes can be told to read no attributes. */
 export class GitVersionError extends Error {
@@ -58,25 +47,16 @@ export async function readsNoAttributes(bin: string): Promise<boolean> {
   }
 }
 
-function executable(path: string): boolean {
-  try {
-    accessSync(path, constants.X_OK);
-    return statSync(path).isFile();
-  } catch {
-    return false;
-  }
-}
-
 /**
- * The one git the daemon runs for every call: the real path of the first of `candidates` that reads
- * no attributes when told to. Refuses with a `GitVersionError` naming every git it found when none does.
+ * The one git the daemon runs for every call: the first of `candidates` that reads no attributes when
+ * told to, by the path it was found at. Homebrew's prefix entry is a link into a versioned directory
+ * that an upgrade's cleanup deletes; the link itself lives on, and only the builder can repoint it.
+ * Refuses with a `GitVersionError` naming every git it found when none does.
  */
 export async function resolveGit(candidates: readonly string[] = GIT_CANDIDATES): Promise<string> {
   const found = candidates.filter(executable);
   for (const bin of found) {
-    // The file probed is the file run: a link in a prefix can't later point elsewhere.
-    const real = realpathSync(bin);
-    if (await readsNoAttributes(real)) return real;
+    if (await readsNoAttributes(bin)) return bin;
   }
   throw new GitVersionError(found);
 }

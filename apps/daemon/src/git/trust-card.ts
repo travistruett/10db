@@ -54,7 +54,7 @@ function body(error: GitTrustError): string {
     case GitTrustFailure.Moved:
       return `Something replaced the repository${here} after 10db recorded it; a lane can do that by moving .git. Until you decide, 10db's git won't touch it: lanes in this project can't commit and nothing ships. Check what git rev-parse --git-dir --git-common-dir prints there, and what is in it. ${RETRUST}`;
     case GitTrustFailure.Writable:
-      return `${codeSpan(detail.gitDir)} is inside the checkout or a lane's temp dir, where a lane could plant hooks, config or refs that 10db's git would then use. 10db trusts a git dir only at .git in the checkout or outside every place a lane writes. Move the repository's git dir there${here} (git rev-parse --git-dir --git-common-dir shows where it is now), then retry what stopped.`;
+      return `${codeSpan(detail.gitDir)} is inside a project's checkout or a lane's temp dir, where a lane could plant hooks, config or refs that 10db's git would then use. 10db trusts a git dir only at .git in the checkout or outside every place a lane writes. Move the repository's git dir there${here} (git rev-parse --git-dir --git-common-dir shows where it is now), then retry what stopped.`;
     case GitTrustFailure.Branch:
       return detail.committed
         ? `The commit is on ${codeSpan(detail.expected)}, where it belongs, but the checkout is now on ${detail.found === null ? 'a detached HEAD' : codeSpan(detail.found)}. Switch back to ${codeSpan(detail.expected)}${here} before the lane goes on.`

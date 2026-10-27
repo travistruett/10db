@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { accessSync, constants, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { SystemCheckDto, ToolName } from '@10db/contracts';
-import { GIT_PREFIXES } from '../git';
+import { INSTALL_PREFIXES } from '../git';
 import { ACCOUNT_NAMES_VERIFIED_ON } from './launch';
 import type { LoginEnv } from './login-env';
 
@@ -85,11 +85,13 @@ export async function systemCheck(
 ): Promise<SystemCheckDto> {
   const tools = await Promise.all(
     REQUIRED_TOOLS.map(async (tool) => {
-      // git comes from the prefixes the daemon's own git does, never the login PATH, so no git a
-      // lane put on it runs here either.
+      // git and gh come from the prefixes the daemon runs them from, never the login PATH, so no git
+      // or gh a lane put on it runs here either.
       const path = findOnPath(
         tool.name,
-        tool.name === ToolName.Git ? GIT_PREFIXES.join(':') : login.vars['PATH'],
+        tool.name === ToolName.Git || tool.name === ToolName.Gh
+          ? INSTALL_PREFIXES.join(':')
+          : login.vars['PATH'],
       );
       return {
         name: tool.name,

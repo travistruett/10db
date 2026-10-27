@@ -1,9 +1,9 @@
 import { execFile } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, dirname, join } from 'node:path';
 import { z } from 'zod';
-import { withDaemonGitConfig, withoutGitRepoEnv } from '../git';
+import { INSTALL_PREFIXES_TEXT, withDaemonGitConfig, withoutGitRepoEnv } from '../git';
 
 /** One `gh` call: in which environment, for how long, and how to stop it. */
 export interface GhCall {
@@ -79,71 +79,93 @@ const NO_PROMPTS = {
   GIT_TERMINAL_PROMPT: '0',
 } as const;
 
+/** The binaries a `gh` call runs, as the daemon resolved them at startup. */
+export interface GhTools {
+  /** The gh to run, from a fixed install prefix; null when none is installed there. */
+  readonly gh: string | null;
+  /** The git the daemon runs, whose directory leads gh's PATH. */
+  readonly git: string;
+}
+
+const notInstalled = (): GhError =>
+  new GhError(
+    GhFailure.NotInstalled,
+    `10db found no gh in ${INSTALL_PREFIXES_TEXT}. Install the GitHub CLI (brew install gh) and sign in with gh auth login.`,
+  );
+
 /**
- * Runs gh in an empty directory of its own, so it finds no repository and runs no git in a checkout;
- * every call names its repository with `-R`. Any git it does run gets the daemon's own config and
- * no hook's `GIT_DIR`.
+ * Runs `tools.gh` in an empty directory of its own, so it finds no repository and runs no git in a
+ * checkout; every call names its repository with `-R`. Any git it does run is the daemon's own, first
+ * on its PATH, with the daemon's own config and no hook's `GIT_DIR`.
  */
-export const systemGhExec: GhExec = (args, call) =>
-  new Promise((resolve, reject) => {
-    const cwd = mkdtempSync(join(tmpdir(), '10db-gh-'));
-    const done = (): void => {
-      rmSync(cwd, { recursive: true, force: true });
-    };
-    execFile(
-      'gh',
-      [...args],
-      {
-        cwd,
-        env: withDaemonGitConfig({ ...withoutGitRepoEnv(call.env), ...NO_PROMPTS }),
-        timeout: call.timeoutMs,
-        killSignal: 'SIGKILL',
-        maxBuffer: MAX_OUTPUT,
-        encoding: 'utf8',
-        ...(call.signal ? { signal: call.signal } : {}),
-      },
-      (error, stdout, stderr) => {
-        done();
-        if (!error) {
-          resolve({ exitCode: 0, stdout, stderr });
-          return;
-        }
-        if (call.signal?.aborted) {
-          reject(new GhError(GhFailure.Aborted, 'gh was stopped'));
-          return;
-        }
-        if (error.code === 'ENOENT') {
-          reject(
-            new GhError(
-              GhFailure.NotInstalled,
-              'gh is not installed or not on your login PATH. Install the GitHub CLI (brew install gh) and sign in with gh auth login.',
-            ),
-          );
-          return;
-        }
-        // Node kills a child whose output passes maxBuffer, so this comes before `killed`.
-        if (error.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') {
-          reject(
-            new GhError(
-              GhFailure.Failed,
-              `gh ${args.slice(0, 2).join(' ')} printed more than ${String(MAX_OUTPUT / 1024 / 1024)} MB, so 10db stopped it`,
-            ),
-          );
-          return;
-        }
-        if (error.killed) {
-          reject(
-            new GhError(
-              GhFailure.Timeout,
-              `gh ${args.slice(0, 2).join(' ')} gave no answer within ${String(Math.round(call.timeoutMs / 1000))} s`,
-            ),
-          );
-          return;
-        }
-        resolve({ exitCode: typeof error.code === 'number' ? error.code : 1, stdout, stderr });
-      },
-    );
-  });
+export function createSystemGhExec(tools: GhTools): GhExec {
+  return (args, call) =>
+    new Promise((resolve, reject) => {
+      const { gh } = tools;
+      if (gh === null) {
+        reject(notInstalled());
+        return;
+      }
+      const cwd = mkdtempSync(join(tmpdir(), '10db-gh-'));
+      const done = (): void => {
+        rmSync(cwd, { recursive: true, force: true });
+      };
+      const env = withDaemonGitConfig({ ...withoutGitRepoEnv(call.env), ...NO_PROMPTS });
+      const loginPath = env['PATH'];
+      env['PATH'] = loginPath
+        ? `${dirname(tools.git)}${delimiter}${loginPath}`
+        : dirname(tools.git);
+      execFile(
+        gh,
+        [...args],
+        {
+          cwd,
+          env,
+          timeout: call.timeoutMs,
+          killSignal: 'SIGKILL',
+          maxBuffer: MAX_OUTPUT,
+          encoding: 'utf8',
+          ...(call.signal ? { signal: call.signal } : {}),
+        },
+        (error, stdout, stderr) => {
+          done();
+          if (!error) {
+            resolve({ exitCode: 0, stdout, stderr });
+            return;
+          }
+          if (call.signal?.aborted) {
+            reject(new GhError(GhFailure.Aborted, 'gh was stopped'));
+            return;
+          }
+          // Removed since startup, as an uninstall does.
+          if (error.code === 'ENOENT') {
+            reject(notInstalled());
+            return;
+          }
+          // Node kills a child whose output passes maxBuffer, so this comes before `killed`.
+          if (error.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') {
+            reject(
+              new GhError(
+                GhFailure.Failed,
+                `gh ${args.slice(0, 2).join(' ')} printed more than ${String(MAX_OUTPUT / 1024 / 1024)} MB, so 10db stopped it`,
+              ),
+            );
+            return;
+          }
+          if (error.killed) {
+            reject(
+              new GhError(
+                GhFailure.Timeout,
+                `gh ${args.slice(0, 2).join(' ')} gave no answer within ${String(Math.round(call.timeoutMs / 1000))} s`,
+              ),
+            );
+            return;
+          }
+          resolve({ exitCode: typeof error.code === 'number' ? error.code : 1, stdout, stderr });
+        },
+      );
+    });
+}
 
 const PrView = z.object({ url: z.url(), state: z.enum(PrState) });
 
@@ -196,7 +218,7 @@ function parseOutput<S extends z.ZodType>(
   return parsed.data;
 }
 
-export function createGh(exec: GhExec = systemGhExec): Gh {
+export function createGh(exec: GhExec): Gh {
   async function ok(args: readonly string[], call: GhCall): Promise<string> {
     const out = await exec(args, call);
     if (out.exitCode !== 0) throw failure(args, out);

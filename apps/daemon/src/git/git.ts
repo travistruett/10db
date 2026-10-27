@@ -4,7 +4,12 @@ import { isAbsolute, join, normalize, posix, sep } from 'node:path';
 import { InvalidError } from '@10db/contracts';
 import { resolveInRepo } from '../guard';
 import { memoryPinStore, type CheckoutPin, type PinStore } from './checkout-pin';
-import { checkoutIdentity, refusedCheckoutKeys, trustedValues } from './checkout-trust';
+import {
+  checkoutIdentity,
+  refusedCheckoutKeys,
+  trustedValues,
+  type ConfigRoots,
+} from './checkout-trust';
 import { parseScopedConfig, type ConfigEntry } from './config-trust';
 import { insideAny, samePath } from './lane-writable';
 import { gitNetwork, type NetworkCall, type NetworkRun } from './network';
@@ -325,6 +330,9 @@ export function createGit(opts: GitOptions = {}): Git {
     // Read once per operation: every later call in it runs against this pin.
     let pin = pins.get(real);
     if (!pin) {
+      const writable = writableGitDir(real, dirs);
+      if (writable !== null)
+        throw refusal(real, { kind: GitTrustFailure.Writable, gitDir: writable });
       pin = {
         ...dirs,
         id,
@@ -455,7 +463,7 @@ export function createGit(opts: GitOptions = {}): Git {
     entries: readonly ConfigEntry[],
   ): { config: string[]; flags: string[] } {
     const last = (key: string): string | null | undefined =>
-      trustedValues(c.real, c.dirs, entries, key).at(-1);
+      trustedValues(configRoots(c), entries, key).at(-1);
     if (!isTrue(last('commit.gpgsign') ?? 'false')) return { config: [], flags: [] };
     // Every program signing could run comes from the builder's config or git's default, never
     // from a file a lane could have written.
@@ -525,15 +533,15 @@ export function createGit(opts: GitOptions = {}): Git {
     net: NetworkCall,
   ): Promise<{ config: string[]; env: Record<string, string> }> {
     const entries = await configEntries(c, net.env);
-    const keys = refusedCheckoutKeys(c.real, c.dirs, entries);
+    const keys = refusedCheckoutKeys(configRoots(c), entries);
     if (keys.length > 0) throw refusal(c.real, { kind: GitTrustFailure.Config, keys });
-    const trusted = (key: string) => trustedValues(c.real, c.dirs, entries, key);
+    const trusted = (key: string) => trustedValues(configRoots(c), entries, key);
     // Every helper the builder's own config names, the login environment's included, URL-scoped
     // ones (`gh auth setup-git`'s) too, in git's order, each under its own key.
     const helpers = entries.flatMap((entry): [string, string][] =>
       /^credential\.(.+\.)?helper$/i.test(entry.name) &&
       entry.value !== null &&
-      trustedValues(c.real, c.dirs, [entry], entry.name).length > 0
+      trustedValues(configRoots(c), [entry], entry.name).length > 0
         ? [[entry.name, entry.value]]
         : [],
     );
@@ -557,6 +565,11 @@ export function createGit(opts: GitOptions = {}): Git {
   /** Where a lane can write: every registered checkout, this one included, and the lane temp roots. */
   function laneWritableRoots(real: string): string[] {
     return [real, ...(opts.checkouts?.() ?? []), ...(opts.laneRoots ?? [])];
+  }
+
+  /** Where a config file a lane could have written lies: every lane-writable root and the git dirs. */
+  function configRoots(c: Pinned): ConfigRoots {
+    return { repo: c.real, dirs: c.dirs, laneRoots: laneWritableRoots(c.real) };
   }
 
   /**
@@ -737,13 +750,16 @@ export function createGit(opts: GitOptions = {}): Git {
 
   /**
    * A git dir offered for trust that lies where a lane can write, or null when there is none: one in
-   * the checkout other than its own `.git`, which the lane profile always denies, or in a lane temp
-   * root.
+   * any registered checkout other than this checkout's own `.git`, which its lane profile always
+   * denies, or in a lane temp root.
    */
-  function writableGitDir(real: string, candidate: CheckoutPin): string | null {
-    for (const dir of [candidate.gitDir, candidate.commonDir]) {
+  function writableGitDir(
+    real: string,
+    dirs: { readonly gitDir: string; readonly commonDir: string },
+  ): string | null {
+    for (const dir of [dirs.gitDir, dirs.commonDir]) {
       if (samePath(dir, join(real, '.git'))) continue;
-      if (insideAny(dir, [real, ...(opts.laneRoots ?? [])])) return dir;
+      if (insideAny(dir, laneWritableRoots(real))) return dir;
     }
     return null;
   }
