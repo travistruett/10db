@@ -1,9 +1,17 @@
-import { EventsHead, mintId, type DaemonEvent, type ProjectId } from '@10db/contracts';
+import {
+  EventsHead,
+  mintId,
+  type AccountId,
+  type DaemonEvent,
+  type ProjectId,
+} from '@10db/contracts';
 import { screen, waitFor } from '@testing-library/react';
-import { http, HttpResponse, type HttpHandler } from 'msw';
+import { http, HttpResponse, type HttpHandler, type JsonBodyType } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, eventStream, renderWithDaemon, server } from '../test/daemon';
+import { accountUsageDto, DEFAULT_ACCOUNT } from '../test/account-fixtures';
 import { daemonEvent } from '../test/fixtures';
+import { useAccountUsage } from './account-queries';
 import { eventStreamUrl, useEventStream } from './events';
 import { useBatches, useProjects } from './queries';
 
@@ -27,7 +35,10 @@ function BatchesOf({ projectId }: { readonly projectId: ProjectId }) {
  * Counts fetches of `path` and holds `/events/head` until the first one is served. Without the hold,
  * whether the list fetch or the stream's open-time refetch comes first depends on timing.
  */
-function listBeforeHead(path = '/projects'): {
+function listBeforeHead(
+  path = '/projects',
+  body: JsonBodyType = [],
+): {
   readonly handlers: HttpHandler[];
   readonly fetches: () => number;
 } {
@@ -42,7 +53,7 @@ function listBeforeHead(path = '/projects'): {
       http.get(daemonUrl(path), () => {
         fetches += 1;
         release();
-        return HttpResponse.json([]);
+        return HttpResponse.json(body);
       }),
       http.get(daemonUrl('/events/head'), async () => {
         await listed;
@@ -50,6 +61,12 @@ function listBeforeHead(path = '/projects'): {
       }),
     ],
   };
+}
+
+/** Mounts an account's usage, so a session or account event has a query to refetch. */
+function UsageOf({ accountId }: { readonly accountId: AccountId }) {
+  useAccountUsage(accountId);
+  return null;
 }
 
 describe('useEventStream', () => {
@@ -144,6 +161,48 @@ describe('useEventStream', () => {
       expect(list.fetches()).toBe(3);
     });
   });
+
+  it.each<{ name: string; type: DaemonEvent['type']; entityType: string }>([
+    {
+      name: 'a session, whose tokens and dollars are recorded when it ends',
+      type: 'session.ended',
+      entityType: 'session',
+    },
+    {
+      name: 'an account, whose cap change alters the usage view',
+      type: 'account.saved',
+      entityType: 'account',
+    },
+  ])(
+    'refetches an open usage query when an event about $name arrives',
+    async ({ type, entityType }) => {
+      const usagePath = `/accounts/${DEFAULT_ACCOUNT.id}/usage`;
+      const usage = listBeforeHead(usagePath, accountUsageDto());
+      const sockets: { send(data: string): void }[] = [];
+      server.use(
+        ...usage.handlers,
+        ...baseHandlers(),
+        eventStream.addEventListener('connection', ({ client }) => {
+          sockets.push(client);
+        }),
+      );
+      renderWithDaemon(
+        <>
+          <Stream />
+          <UsageOf accountId={DEFAULT_ACCOUNT.id} />
+        </>,
+      );
+      // The usage fetch, then the first-open refetch; count from there.
+      await waitFor(() => {
+        expect(sockets).toHaveLength(1);
+        expect(usage.fetches()).toBe(2);
+      });
+      sockets[0]?.send(JSON.stringify(daemonEvent({ seq: 1, type, entityType })));
+      await waitFor(() => {
+        expect(usage.fetches()).toBe(3);
+      });
+    },
+  );
 
   it('ignores frames that are not events', async () => {
     const seen: number[] = [];

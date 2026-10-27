@@ -1,4 +1,10 @@
-import { AccountDto, mintId } from '@10db/contracts';
+import {
+  AccountIdentityDto,
+  AccountSignInDto,
+  AccountUsageDto,
+  mintId,
+  AccountDto,
+} from '@10db/contracts';
 
 const AT = '2026-10-13T12:00:00.000Z';
 
@@ -29,3 +35,39 @@ export const DEFAULT_ACCOUNT = accountDto({
   configDir: null,
   isDefault: true,
 });
+
+export function accountUsageDto(overrides: Partial<AccountUsageDto> = {}): AccountUsageDto {
+  return AccountUsageDto.parse({
+    accountId: DEFAULT_ACCOUNT.id,
+    month: '2026-10',
+    total: { tokensIn: 1200, tokensOut: 800, tokensCached: 400, costUsd: null },
+    monthlyCapUsd: null,
+    byProject: [],
+    ...overrides,
+  });
+}
+
+export function accountIdentityDto(
+  overrides: Partial<AccountIdentityDto> = {},
+): AccountIdentityDto {
+  return AccountIdentityDto.parse({
+    accountId: DEFAULT_ACCOUNT.id,
+    email: 'builder@example.com',
+    organization: null,
+    apiProvider: 'firstParty',
+    apiKeySource: null,
+    tokenSource: null,
+    subscription: true,
+    refusal: null,
+    ...overrides,
+  });
+}
+
+export function accountSignInDto(overrides: Partial<AccountSignInDto> = {}): AccountSignInDto {
+  return AccountSignInDto.parse({
+    accountId: DEFAULT_ACCOUNT.id,
+    configDir: '/data/accounts/a/claude',
+    command: 'CLAUDE_CONFIG_DIR=/data/accounts/a/claude claude',
+    ...overrides,
+  });
+}

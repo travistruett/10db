@@ -25,7 +25,8 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   batch: [queryKeys.projects, ['batches'], ...WORK, CANDIDATES],
   // Lanes changing can switch keep-awake on or off.
   workstream: [...WORK, queryKeys.keepAwake, CANDIDATES],
-  session: WORK,
+  // A session's tokens and dollars are recorded when it ends.
+  session: [...WORK, accountKeys.usage],
   claim: [...WORK, CANDIDATES],
   handoff: WORK,
   evidence: WORK,
