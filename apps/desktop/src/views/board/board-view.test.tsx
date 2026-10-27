@@ -352,6 +352,19 @@ describe('BoardView', () => {
     });
   });
 
+  it('keeps each card’s Start beside the Start a batch button', async () => {
+    const project = projectDto();
+    const ready = taskDto({ projectId: project.id, title: 'Alpha', boardStatus: 'ready' });
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([ready])),
+    );
+    renderApp('/board');
+    fireEvent.click(await screen.findByRole('button', { name: 'Actions for Alpha' }));
+    expect(await screen.findByRole('menuitem', { name: 'Start' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Start a batch' })).toBeTruthy();
+  });
+
   it('titles a refused start as a start, not a move', async () => {
     const project = projectDto();
     const alpha = taskDto({ projectId: project.id, title: 'Alpha', boardStatus: 'ready' });

@@ -17,6 +17,7 @@ import { useBatches, useBoardColumns, useTasks, useWorkstreams } from '../../dae
 import { ProjectPicker } from '../../shell/project-picker';
 import { useSelectedProject } from '../../shell/selected-project';
 import { formatAreas } from './areas-text';
+import { BatchSheet } from './batch/batch-sheet';
 import { BatchHistory } from './batch-history';
 import { BatchStrip } from './batch-strip';
 import { BoardColumn } from './board-column';
@@ -167,6 +168,7 @@ export function BoardView() {
   const batches = useBatches(project?.id ?? null);
   const [projectOpen, projectModal] = useDisclosure(false);
   const [taskOpen, taskModal] = useDisclosure(false);
+  const [sheetOpen, sheet] = useDisclosure(false);
 
   const taskList = tasks.data ?? [];
   // Without the columns a parked card has nowhere to go, so it is left out rather than shown in a derived column.
@@ -197,6 +199,11 @@ export function BoardView() {
           {project ? (
             <Button size="sm" onClick={taskModal.open}>
               New task
+            </Button>
+          ) : null}
+          {project ? (
+            <Button size="sm" onClick={sheet.open}>
+              Start a batch
             </Button>
           ) : null}
         </Group>
@@ -270,6 +277,9 @@ export function BoardView() {
           }}
         />
       </Modal>
+      {project ? (
+        <BatchSheet key={project.id} project={project} opened={sheetOpen} onClose={sheet.close} />
+      ) : null}
       {project ? (
         <Modal opened={taskOpen} onClose={taskModal.close} title="New task" size="lg">
           <NewTaskForm

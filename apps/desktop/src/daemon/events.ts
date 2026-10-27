@@ -12,32 +12,34 @@ export const STREAM_RETRY_MAX_MS = 10_000;
 const HEAD_TIMEOUT_MS = 2_000;
 
 const WORK: readonly QueryKey[] = [['workstreams'], ['tasks']];
+/** The batch sheet's proposal: its candidates, claims and step plans follow all of these. */
+const CANDIDATES: QueryKey = ['candidates'];
 
 /** What to refetch when an event about an entity type arrives. */
 export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
-  project: [queryKeys.projects],
-  task: [['tasks']],
-  board_column: [['board-columns']],
+  project: [queryKeys.projects, CANDIDATES],
+  task: [['tasks'], CANDIDATES],
+  board_column: [['board-columns'], CANDIDATES],
   // A batch's state shows on the board's strip and in its list; cancelling an abandoned batch's work moves tasks.
-  batch: [queryKeys.projects, ['batches'], ...WORK],
+  batch: [queryKeys.projects, ['batches'], ...WORK, CANDIDATES],
   // Lanes changing can switch keep-awake on or off.
-  workstream: [...WORK, queryKeys.keepAwake],
+  workstream: [...WORK, queryKeys.keepAwake, CANDIDATES],
   session: WORK,
-  claim: WORK,
+  claim: [...WORK, CANDIDATES],
   handoff: WORK,
   evidence: WORK,
   // An account pause moves workstreams, which send their own events.
   account: [queryKeys.accounts],
   inbox: [queryKeys.inbox, ['workstreams']],
   app_setting: [queryKeys.keepAwake],
-  // No view reads these entity types; the entries make them known.
-  persona: [],
+  // Step plans, which only the batch sheet shows, follow these; no view reads `person`.
+  persona: [CANDIDATES],
   person: [],
-  flow: [queryKeys.flows],
-  model_profile: [],
-  team: [],
-  routing_rules: [],
-  benchmarks: [],
+  flow: [queryKeys.flows, CANDIDATES],
+  model_profile: [CANDIDATES],
+  team: [CANDIDATES],
+  routing_rules: [CANDIDATES],
+  benchmarks: [CANDIDATES],
   // `proposal` (from proposal.resolved) has no view to refresh; the card that resolved it sends its own inbox event.
 };
 

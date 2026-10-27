@@ -5,6 +5,7 @@ import {
   FlowDto,
   InboxItemDto,
   KeepAwakeStatus,
+  PickerProposalDto,
   ProjectDto,
   ProjectViewDto,
   SystemCheckDto,
@@ -24,6 +25,7 @@ import {
   type ProjectPatch,
   type TaskId,
   type TaskInput,
+  type TaskPatch,
   type WorkstreamId,
 } from '@10db/contracts';
 import {
@@ -49,6 +51,7 @@ export const queryKeys = {
   keepAwake: ['keep-awake'],
   system: ['system'],
   flows: ['flows'],
+  candidates: (projectId: ProjectId, size: number) => ['candidates', projectId, size] as const,
 } as const;
 
 const AccountList = z.array(AccountDto);
@@ -377,5 +380,37 @@ export function usePatchProject(projectId: ProjectId) {
         ProjectDto,
       ),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.projects }),
+  });
+}
+
+/** The picker's proposal for the batch sheet: the project's Ready tasks, each with its step plan. */
+export function useCandidates(projectId: ProjectId, size: number, enabled: boolean) {
+  const { client } = useDaemon();
+  return useQuery({
+    queryKey: queryKeys.candidates(projectId, size),
+    queryFn: async () =>
+      readJson(
+        await client.projects[':projectId'].candidates.$get({
+          param: { projectId },
+          query: { size: String(size) },
+        }),
+        PickerProposalDto,
+      ),
+    enabled,
+  });
+}
+
+export function usePatchTask() {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ taskId, patch }: { readonly taskId: TaskId; readonly patch: TaskPatch }) =>
+      readJson(await client.tasks[':taskId'].$patch({ param: { taskId }, json: patch }), TaskDto),
+    // A new flow or risk tag re-plans the task's steps.
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['tasks'] }),
+        queryClient.invalidateQueries({ queryKey: ['candidates'] }),
+      ]),
   });
 }

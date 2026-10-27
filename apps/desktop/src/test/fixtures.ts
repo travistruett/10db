@@ -3,12 +3,15 @@ import {
   BatchDto,
   BoardColumnDto,
   DaemonEvent,
+  FlowDto,
   InboxItemDto,
   mintId,
+  PickerCandidate,
   ProjectDto,
   ProjectViewDto,
   TaskDto,
   WorkstreamDto,
+  WorkstreamStep,
 } from '@10db/contracts';
 
 const AT = '2026-10-13T12:00:00.000Z';
@@ -195,6 +198,70 @@ export function daemonEvent(overrides: Partial<DaemonEvent> = {}): DaemonEvent {
     entityId: mintId('Project'),
     data: {},
     at: AT,
+    ...overrides,
+  });
+}
+
+export function stepDto(overrides: Partial<WorkstreamStep> = {}): WorkstreamStep {
+  return WorkstreamStep.parse({
+    role: 'implement',
+    personaId: null,
+    personaName: 'Implementer',
+    tools: 'edit',
+    score: 'coding',
+    profileId: null,
+    model: 'sonnet',
+    effort: 'high',
+    need: 40,
+    reason: 'cheapest profile at or above 40 coding',
+    overBudget: false,
+    pinned: false,
+    status: 'pending',
+    attempts: 0,
+    startedAt: null,
+    sessionFloor: 0,
+    result: null,
+    ...overrides,
+  });
+}
+
+/** A picker candidate for `task`: proposed, claiming its areas, on the standard flow. */
+export function candidate(
+  task: TaskDto,
+  overrides: Partial<PickerCandidate> = {},
+): PickerCandidate {
+  return PickerCandidate.parse({
+    task,
+    proposed: true,
+    resumed: false,
+    unblocks: 0,
+    claims: task.areas.map((name) => ({ kind: 'area', name })),
+    conflict: null,
+    plan: {
+      flowName: 'standard',
+      steps: [
+        stepDto(),
+        stepDto({
+          role: 'review',
+          personaName: 'Reviewer',
+          tools: 'read_only',
+          score: 'intelligence',
+        }),
+      ],
+      overBudget: [],
+    },
+    planError: null,
+    ...overrides,
+  });
+}
+
+export function flowDto(overrides: Partial<FlowDto> = {}): FlowDto {
+  return FlowDto.parse({
+    id: mintId('Flow'),
+    name: 'quick',
+    steps: [{ role: 'implement', need: 40, skip: [], persona: null }],
+    createdAt: AT,
+    updatedAt: AT,
     ...overrides,
   });
 }
