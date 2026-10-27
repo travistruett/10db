@@ -1,5 +1,6 @@
 import { InboxKind, type InboxItemDto } from '@10db/contracts';
 import { invoke } from '@tauri-apps/api/core';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import {
   isPermissionGranted,
   requestPermission,
@@ -37,6 +38,15 @@ export function updateTray(counts: TrayCounts): void {
   }).catch((error: unknown) => {
     console.warn('10db: could not update the menu bar', error);
   });
+}
+
+/**
+ * Gives the native window the app's color scheme rather than the system's, so the traffic lights, menus
+ * and scrollbars match the app. A no-op in a browser.
+ */
+export async function setWindowTheme(scheme: 'light' | 'dark'): Promise<void> {
+  if (!isTauri()) return;
+  await getCurrentWindow().setTheme(scheme);
 }
 
 let permission: Promise<boolean> | null = null;

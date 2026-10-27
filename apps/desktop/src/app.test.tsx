@@ -15,10 +15,12 @@ const healthy = () =>
   );
 
 describe('App shell', () => {
-  it('shows the daemon as connected when /health answers', async () => {
+  it('shows no daemon status in the header while connected', async () => {
     server.use(...baseHandlers());
-    renderApp();
-    expect(await screen.findByText('Daemon connected')).toBeTruthy();
+    renderApp('/factory');
+    expect(await screen.findByRole('heading', { name: 'Factory' })).toBeTruthy();
+    expect(screen.queryByText(/daemon/i)).toBeNull();
+    expect(screen.queryByRole('img', { name: /daemon/i })).toBeNull();
   });
 
   it('waits on a connecting screen while the daemon is unreachable', async () => {
@@ -39,16 +41,18 @@ describe('App shell', () => {
   it('keeps the view and shows a banner while reconnecting, then clears it', async () => {
     server.use(...baseHandlers());
     renderApp('/factory', { intervals: { healthy: 40, disconnected: 40 } });
-    expect(await screen.findByText('Daemon connected')).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: 'Factory' })).toBeTruthy();
     server.use(http.get(daemonUrl('/health'), () => HttpResponse.error()));
     expect((await screen.findByRole('status')).textContent).toContain(
       'Reconnecting to the daemon…',
     );
+    expect(screen.getByRole('img', { name: 'Reconnecting to the daemon' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'Factory' })).toBeTruthy();
     server.use(healthy());
     await waitFor(() => {
       expect(screen.queryByRole('status')).toBeNull();
     });
+    expect(screen.queryByRole('img', { name: /daemon/i })).toBeNull();
   });
 
   it('warns when a required tool is missing or the login shell could not be read', async () => {

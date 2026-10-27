@@ -21,6 +21,13 @@ The UI never touches the database; it talks to the daemon over loopback HTTP and
 - The app icon's source is `app-icon.svg` ("10" in Geist Bold, "db" in Geist Light, outlined to paths).
   `src-tauri/icons/` is generated from it with `pnpm --filter @10db/desktop tauri icon app-icon.svg`;
   never edit those files by hand.
+- The menu-bar icon is `tray-icon.svg`, the same wordmark in black with no tile. It ships as a template
+  image, which macOS tints to match the menu bar. `src-tauri/tray-icon.png` is generated from it with
+  `pnpm --filter @10db/desktop exec tsx scripts/render-tray-icon.ts`; never edit the PNG by hand.
+- The window has no title bar (`titleBarStyle: Overlay`): the traffic lights sit over the header's left
+  end, `trafficLightPosition` centres them on its 48 px height, and elements marked
+  `data-tauri-drag-region` move the window. The native window's theme follows the app's color scheme
+  (`setWindowTheme`), not the system's.
 - `pnpm --filter @10db/desktop dev:shell` runs the Tauri shell against the daemon and Vite server that
   `pnpm dev` already runs. It sets `TENDB_EXTERNAL_DAEMON=1`, which makes the shell skip its sidecar.
   Run `pnpm --filter @10db/desktop sidecar` once first: `tauri-build` checks the sidecar files exist.
