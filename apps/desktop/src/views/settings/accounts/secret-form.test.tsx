@@ -22,7 +22,8 @@ afterEach(() => {
 
 /**
  * React DOM keeps the last value it saw in a tracker on the input node (`_valueTracker`). It is
- * internal, so it is read through `Reflect` and narrowed rather than cast.
+ * internal, so it is read through `Reflect` and narrowed rather than cast. A missing tracker returns
+ * null, which fails the check on purpose: a renamed internal must not pass silently.
  */
 function trackedValue(input: HTMLInputElement): string | null {
   const tracker: unknown = Reflect.get(input, '_valueTracker');
@@ -37,7 +38,7 @@ function assertNoSecret(queryClient: ReturnType<typeof renderApp>['queryClient']
   expect(screen.queryByDisplayValue(PASTED)).toBeNull();
   expect(document.body.innerHTML).not.toContain(PASTED);
   for (const input of document.querySelectorAll<HTMLInputElement>('input[name="secret"]')) {
-    expect(trackedValue(input)).not.toBe(PASTED);
+    expect(trackedValue(input)).toBe('');
   }
   expect(
     JSON.stringify(
