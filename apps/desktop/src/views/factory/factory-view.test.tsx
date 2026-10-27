@@ -1,4 +1,4 @@
-import type { WorkstreamDto } from '@10db/contracts';
+import { SystemCheckDto, type BenchmarkSyncWarning, type WorkstreamDto } from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse, type RequestHandler, type WebSocketHandler } from 'msw';
 import { describe, expect, it } from 'vitest';
@@ -182,5 +182,58 @@ describe('FactoryView', () => {
     expect(within(row).getByText('Done')).toBeTruthy();
     expect(within(row).queryByRole('button', { name: 'Cancel' })).toBeNull();
     expect(within(row).getAllByText('—')).toHaveLength(2);
+  });
+});
+
+function systemCheck(benchmarkSync: BenchmarkSyncWarning): RequestHandler {
+  return http.get(daemonUrl('/system'), () =>
+    HttpResponse.json(
+      SystemCheckDto.parse({
+        loginEnv: { source: 'login_shell', warning: null },
+        claudeCode: { verifiedOn: '2.1.0', warning: null },
+        tools: [],
+        benchmarkSync,
+      }),
+    ),
+  );
+}
+
+describe('FactoryView benchmark sync note', () => {
+  it.each([
+    {
+      name: 'a used-up daily limit',
+      warning: {
+        outcome: 'rate_limited',
+        message: 'The daily Artificial Analysis limit is used up; retry in 3600 s',
+      },
+    },
+    {
+      name: 'an unreachable server',
+      warning: { outcome: 'failed', message: 'Artificial Analysis answered 503' },
+    },
+  ] satisfies { name: string; warning: BenchmarkSyncWarning }[])(
+    'notes $name as a dimmed line in the header, not an alert',
+    async ({ warning }) => {
+      serve(workstreams([]), systemCheck(warning));
+      renderApp('/factory');
+
+      const note = await screen.findByText(
+        `${warning.message}. Routing uses the last good scores.`,
+      );
+      expect(note.closest('[role="alert"]')).toBeNull();
+      expect(screen.queryByRole('alert')).toBeNull();
+    },
+  );
+
+  it('leaves a refused key to the alert above the view', async () => {
+    serve(
+      workstreams([]),
+      systemCheck({ outcome: 'unauthorized', message: 'Artificial Analysis refused the key' }),
+    );
+    renderApp('/factory');
+
+    const alert = await screen.findByRole('alert');
+    expect(within(alert).getByText('Artificial Analysis refused the key')).toBeTruthy();
+    expect(screen.queryByText(/Routing uses the last good scores\.$/)).toBeNull();
   });
 });
