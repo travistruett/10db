@@ -139,7 +139,14 @@ export function BatchSheet({ project, opened, onClose }: BatchSheetProps) {
   const proposal = useCandidates(project.id, size, opened);
   const mode = sheetMode(project);
   return (
-    <Drawer opened={opened} onClose={onClose} position="right" size="xl" title="Start a batch">
+    <Drawer
+      opened={opened}
+      onClose={onClose}
+      position="right"
+      size="xl"
+      title="Start a batch"
+      closeButtonProps={{ 'aria-label': 'Close' }}
+    >
       <Stack>
         <NumberInput
           label="Batch size"
