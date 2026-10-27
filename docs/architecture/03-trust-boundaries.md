@@ -139,11 +139,18 @@ without it):
   an account's own variables included.
   The claude process itself keeps the login environment until the accounts launcher builds its own (R1).
 - **`GIT_CONFIG_GLOBAL=/dev/null`** is the sandbox env's exception to the daemon's rule that git config variables
-  are kept. Claude Code drops that variable from a sandboxed command's env, and git then dies reading the denied
-  `~/.gitconfig`. So it reaches Bash through `CLAUDE_ENV_FILE`: a per-session file (mode 0400,
-  `<tmp root>/10db-env-<hex>.sh`) outside every writable path, with its exact path in `allowRead`. Allow-reading
-  `~/.gitconfig` was rejected (lane sandbox spec D2): it would hand lanes the builder's identity and `insteadOf`
-  tokens.
+  are kept. Allow-reading `~/.gitconfig` was rejected (lane sandbox spec D2): it would hand lanes the builder's
+  identity and `insteadOf` tokens.
+- **`CLAUDE_ENV_FILE`.** Claude Code strips variables that point a tool at its config or credentials from a
+  sandboxed command's env, `GIT_CONFIG_GLOBAL` and `CARGO_HOME` among them. Without them git dies reading the denied
+  `~/.gitconfig` and cargo falls back to the denied `~/.cargo`. So every variable the sandbox sets for lane commands
+  (the package caches, the mise variables, `GIT_CONFIG_GLOBAL=/dev/null` and `GIT_OPTIONAL_LOCKS=0`) is also
+  written to a per-session file that the shell sources before each command: one `export` per variable, its value
+  in POSIX single quotes, and a name that isn't a shell identifier or a value with a control character refuses
+  the session. The file is created with `wx`, mode 0400, at `<tmp root>/10db-env-<hex>.sh`, outside every
+  writable path, with its exact path in `allowRead`. Claude Code's own `CLAUDE_*` settings stay out of it. The
+  live test checks that each variable reaches a sandboxed command with the daemon's value and that npm, pnpm and
+  cargo use the lane's caches.
 
 Its file tools run inside this process:
 

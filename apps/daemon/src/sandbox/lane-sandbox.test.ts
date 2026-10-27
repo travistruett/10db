@@ -510,14 +510,32 @@ describe('createLaneSandbox', () => {
     }
   });
 
-  it('gives the session an env file outside every writable path that turns git global config off', async () => {
+  it('gives the session an env file outside every writable path that sets each variable for lane commands', async () => {
     const session = await sandbox().forSession(input());
     try {
       const file = session.spec.env['CLAUDE_ENV_FILE'] ?? '';
       expect(dirname(file)).toBe(tmpRoot);
-      expect(readFileSync(file, 'utf8')).toBe(
-        'export GIT_CONFIG_GLOBAL=/dev/null\nexport GIT_OPTIONAL_LOCKS=0\n',
+      // Claude Code strips variables such as CARGO_HOME from a sandboxed command's env; the shell
+      // sources this file before each command. Its own `CLAUDE_*` settings are not for commands.
+      const out = execFileSync('/bin/sh', ['-c', '. "$1" && exec /usr/bin/env -0', 'sh', file], {
+        env: {},
+        encoding: 'utf8',
+      });
+      const sourced = Object.fromEntries(
+        out
+          .split('\0')
+          .filter((entry) => entry !== '')
+          .map((entry) => [
+            entry.slice(0, entry.indexOf('=')),
+            entry.slice(entry.indexOf('=') + 1),
+          ]),
       );
+      const forCommands = Object.entries(session.spec.env).filter(
+        ([name]) => !name.startsWith('CLAUDE_'),
+      );
+      expect(forCommands.map(([name]) => name)).toContain('CARGO_HOME');
+      for (const [name, value] of forCommands) expect(sourced[name], name).toBe(value);
+      expect(Object.keys(sourced).filter((name) => name.startsWith('CLAUDE_'))).toEqual([]);
       const { allowRead, allowWrite } = session.spec.settings.filesystem;
       expect(allowWrite.filter((path) => isEqualOrUnder(file, path))).toEqual([]);
       expect(allowRead).toContain(file);

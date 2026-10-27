@@ -261,7 +261,6 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
       const tmpDir = createLaneTempDir(tmpRoot);
       let envFile: string | null = null;
       try {
-        envFile = createLaneEnvFile(tmpRoot);
         // The lane's own global mise config: the builder's global tool versions and nothing else, so
         // neither its `[env]` nor its age key reaches a lane command.
         const miseConfigDir = join(tmpDir, 'mise');
@@ -270,7 +269,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
         writeFileSync(miseConfigFile, laneMiseConfig(deps.home, input.env), {
           mode: 0o600,
         });
-        const env: Record<string, string> = {
+        const commandEnv: Record<string, string> = {
           // Inside the lane's temp dir: a cache can hold code a later install runs, so no lane
           // shares one, and it goes with the lane.
           ...packageCacheEnv(join(tmpDir, 'cache')),
@@ -279,14 +278,19 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           // mise's system config moves to the lane's dir too, where none exists.
           MISE_SYSTEM_DIR: miseConfigDir,
           MISE_SYSTEM_CONFIG_FILE: join(miseConfigDir, 'system.toml'),
-          CLAUDE_CODE_TMPDIR: tmpDir,
           // An exception to keeping git config variables: the builder's global config can name
           // hooks, credential helpers and includes the sandboxed git would run or read.
           GIT_CONFIG_GLOBAL: '/dev/null',
           // The git a lane runs reads only: a status never refreshes the index it can't write.
           GIT_OPTIONAL_LOCKS: '0',
+        };
+        // Claude Code strips some of these from a sandboxed command's env; the shell sets every one
+        // of them again from this file before each command.
+        envFile = createLaneEnvFile(commandEnv, tmpRoot);
+        const env: Record<string, string> = {
+          ...commandEnv,
+          CLAUDE_CODE_TMPDIR: tmpDir,
           CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1',
-          // Claude Code drops GIT_CONFIG_GLOBAL from a sandboxed command's env; this file sets it back.
           CLAUDE_ENV_FILE: envFile,
         };
         const settings = buildLaneProfile({

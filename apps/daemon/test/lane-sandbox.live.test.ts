@@ -159,6 +159,14 @@ interface LaneRun {
   readonly profile: unknown;
   /** The session's `CLAUDE_ENV_FILE`, and its content and mode once the session ended. */
   readonly envFile: { path: string; content: string; mode: number };
+  readonly tmpDir: string;
+  /** The variables the sandbox sets for lane commands, with the daemon's values. */
+  readonly commandEnv: Readonly<Record<string, string>>;
+}
+
+/** The sandbox's env without Claude Code's own `CLAUDE_*` settings, which are not for commands. */
+function commandEnvOf(env: Readonly<Record<string, string>>): Record<string, string> {
+  return Object.fromEntries(Object.entries(env).filter(([name]) => !name.startsWith('CLAUDE_')));
 }
 
 /**
@@ -171,7 +179,11 @@ async function runLane(opts: {
   readonly checkout: string;
   readonly dataDir: string;
   readonly extraEnv: Readonly<Record<string, string>>;
-  readonly probe: (lane: { tmpDir: string; envFile: string }) => string;
+  readonly probe: (lane: {
+    tmpDir: string;
+    envFile: string;
+    env: Readonly<Record<string, string>>;
+  }) => string;
   readonly prompt: string;
   /** Hosts the project has allowed, as stored rules: the profile lists them. */
   readonly hosts?: readonly string[];
@@ -245,7 +257,10 @@ async function runLane(opts: {
     const lane = laneSession;
     const envFile = lane.spec.env['CLAUDE_ENV_FILE'];
     if (envFile === undefined) throw new Error('the lane has no env file');
-    writeFileSync(join(opts.checkout, 'probe.sh'), opts.probe({ tmpDir: lane.tmpDir, envFile }));
+    writeFileSync(
+      join(opts.checkout, 'probe.sh'),
+      opts.probe({ tmpDir: lane.tmpDir, envFile, env: commandEnvOf(lane.spec.env) }),
+    );
     return await driveSession({ lane, project, workstreamId: workstream.id, envFile });
   } finally {
     laneSession?.dispose();
@@ -353,6 +368,8 @@ async function runLane(opts: {
         content: readFileSync(run.envFile, 'utf8'),
         mode: statSync(run.envFile).mode & 0o777,
       },
+      tmpDir: lane.tmpDir,
+      commandEnv: commandEnvOf(lane.spec.env),
     };
   }
 }
@@ -371,6 +388,19 @@ function report(name: string, run: LaneRun, canaries: readonly Canary[]): void {
     profile: run.profile,
   };
   console.info(`${name}: ${scrub(JSON.stringify(observed, null, 2))}`);
+}
+
+const shellQuote = (value: string): string => `'${value.split("'").join("'\\''")}'`;
+
+/**
+ * Probe lines that report, for each variable, whether the command's env holds it with the
+ * daemon's value: `ENV <name>=match`, `=differs` or `=unset`. Values are never printed.
+ */
+function envProbes(env: Readonly<Record<string, string>>): string[] {
+  return Object.entries(env).map(
+    ([name, value]) =>
+      `if [ -z "\${${name}+set}" ]; then echo 'ENV ${name}=unset'; elif [ "$${name}" = ${shellQuote(value)} ]; then echo 'ENV ${name}=match'; else echo 'ENV ${name}=differs'; fi`,
+  );
 }
 
 function probeLine(output: string, prefix: string): string | undefined {
@@ -446,10 +476,11 @@ describe.skipIf(!live)('lane sandbox, live', () => {
         dataDir,
         extraEnv: { GH_TOKEN: 'fake-gh-token-for-the-live-test' },
         hosts: ['index.crates.io', 'static.crates.io'],
-        probe: ({ tmpDir, envFile }) =>
+        probe: ({ tmpDir, envFile, env }) =>
           [
             `exec > '${tmpDir}/probe-out' 2>&1`,
             'echo "TMPDIR=$TMPDIR"',
+            ...envProbes(env),
             `echo "GH_TOKEN_COUNT=$(env | grep -c '^GH_TOKEN=')"`,
             ...READ_ONLY_GIT_PROBES,
             'echo "OPTIONAL_LOCKS=$GIT_OPTIONAL_LOCKS"',
@@ -457,6 +488,8 @@ describe.skipIf(!live)('lane sandbox, live', () => {
             tryWrite(join(checkout, 'probe-write-control')),
             writeError('PNPM_LOCK_WRITE', pnpmLock),
             writeError('TMP_SIBLING_WRITE', tmpSibling),
+            'echo "NPM_CACHE=$(npm config get cache 2>/dev/null)"',
+            'echo "PNPM_STORE=$(pnpm store path 2>/dev/null)"',
             'echo "CARGO_HOME=$CARGO_HOME"',
             // rustup's proxy runs with only ~/.cargo/bin readable, and cargo fetches into the lane's home.
             'cargo --version > /dev/null; echo "CARGO_VERSION=$?"',
@@ -498,10 +531,19 @@ describe.skipIf(!live)('lane sandbox, live', () => {
       expect.soft(probeLine(run.probeOutput, 'GH_TOKEN_COUNT=')).toBe('GH_TOKEN_COUNT=0');
       expectReadOnlyGitWorks(run.probeOutput);
       expect.soft(probeLine(run.probeOutput, 'OPTIONAL_LOCKS=')).toBe('OPTIONAL_LOCKS=0');
-      // The env file that sets the git variables for every command is the lane's to read, never to change.
+      // Claude Code strips some of the sandbox's variables from a command's env; the env file sets
+      // every one again, and each reaches the command with the daemon's value.
       expect
-        .soft(run.envFile.content)
-        .toBe('export GIT_CONFIG_GLOBAL=/dev/null\nexport GIT_OPTIONAL_LOCKS=0\n');
+        .soft(Object.keys(run.commandEnv))
+        .toEqual(expect.arrayContaining(['CARGO_HOME', 'GIT_CONFIG_GLOBAL', 'npm_config_cache']));
+      for (const name of Object.keys(run.commandEnv))
+        expect.soft(probeLine(run.probeOutput, `ENV ${name}=`), name).toBe(`ENV ${name}=match`);
+      const exported = run.envFile.content
+        .split('\n')
+        .filter((line) => line !== '')
+        .map((line) => /^export ([A-Za-z_][A-Za-z0-9_]*)=/.exec(line)?.[1]);
+      expect.soft(exported).toEqual(Object.keys(run.commandEnv));
+      // The env file is the lane's to read, never to change.
       expect.soft(run.envFile.mode).toBe(0o400);
       expect.soft(probeLine(run.probeOutput, 'CHMOD=')).not.toBe('CHMOD=0');
       // The checkout itself is writable, so a refused git-dir write is the profile's doing.
@@ -513,10 +555,16 @@ describe.skipIf(!live)('lane sandbox, live', () => {
         .soft(probeLine(run.probeOutput, 'TMP_SIBLING_WRITE='))
         .toContain('Operation not permitted');
       expect.soft(existsSync(pnpmLock)).toBe(false);
-      // Each lane's cargo home is in its own temp dir, removed with it.
+      // npm's, pnpm's and cargo's caches are in the lane's own temp dir, removed with it.
+      const cache = join(run.tmpDir, 'cache');
+      expect.soft(probeLine(run.probeOutput, 'NPM_CACHE=')).toBe(`NPM_CACHE=${join(cache, 'npm')}`);
+      // pnpm names its store dir by the store's layout version, under the dir it is given.
+      expect
+        .soft(probeLine(run.probeOutput, 'PNPM_STORE=')?.replace(/\/v\d+$/, ''))
+        .toBe(`PNPM_STORE=${join(cache, 'pnpm-store')}`);
       expect
         .soft(probeLine(run.probeOutput, 'CARGO_HOME='))
-        .toMatch(/^CARGO_HOME=\/private\/tmp\/10db-[^/]+\/cache\/cargo$/);
+        .toBe(`CARGO_HOME=${join(cache, 'cargo')}`);
       expect.soft(probeLine(run.probeOutput, 'CARGO_VERSION=')).toBe('CARGO_VERSION=0');
       expect.soft(probeLine(run.probeOutput, 'CARGO_FETCH=')).toBe('CARGO_FETCH=0');
       expect.soft(probeLine(run.probeOutput, 'CARGO_CRATE=')).toBe('CARGO_CRATE=0');
