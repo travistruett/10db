@@ -1,5 +1,6 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { DaemonEvent, ProjectDto, TaskDto, WorkstreamDto } from '@10db/contracts';
 import Database from 'better-sqlite3';
@@ -60,6 +61,8 @@ function launchDaemon(): ChildProcess {
     env: {
       PATH: process.env['PATH'] ?? '',
       HOME: process.env['HOME'] ?? '',
+      // The test's own temp dir: a sandboxed run can write no other.
+      TMPDIR: tmpdir(),
       // The child's git must not read the contributor's own config (hooks, signing, templates).
       GIT_CONFIG_GLOBAL: '/dev/null',
       GIT_CONFIG_NOSYSTEM: '1',

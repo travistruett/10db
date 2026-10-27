@@ -47,7 +47,13 @@ import {
   type LaneSessionInput,
 } from '../sandbox';
 import type { SessionEvent, SessionHandle, SessionSpec } from '../sessions';
-import { createMemoryKeychain, handoffArgs, isolatedGitEnv, waitFor } from '../../test/fixtures';
+import {
+  createMemoryKeychain,
+  handoffArgs,
+  isolatedGitEnv,
+  SANDBOXED,
+  waitFor,
+} from '../../test/fixtures';
 import { createTestEngine, type TestEngine } from '../../test/engine';
 import { captureLogs } from '../../test/log-capture';
 
@@ -2592,7 +2598,8 @@ describe('the session guard', () => {
   });
 });
 
-describe('lane sandbox', () => {
+// The probe's temp root is a short path under the shared `/tmp`, which no sandbox can write.
+describe.skipIf(SANDBOXED)('lane sandbox', () => {
   const lanesGit = createGit();
   /** A real lane sandbox over a short temp root and a temp home, recording each session it makes. */
   interface SandboxProbe {

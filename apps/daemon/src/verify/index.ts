@@ -1,1 +1,6 @@
-export { createGateRunner, type GateResult, type GateRunner } from './gate-runner';
+export {
+  createGateRunner,
+  type GateRequest,
+  type GateResult,
+  type GateRunner,
+} from './gate-runner';

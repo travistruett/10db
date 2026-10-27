@@ -2,8 +2,8 @@
 
 **Status:** the builder chose the open choices on 2026-10-25 (D2–D5, D15–D17). Reviewed by a plan review and by
 outside reads from Gemini and ChatGPT, whose findings are folded in.
-**Built:** slice 1 (§7). It is always on: every real lane runs under the sandbox, with no switch. Every other
-decision is **designed**.
+**Built:** slice 1 (§7). It is always on: every real lane runs under the sandbox, with no switch. The gate runs
+under `srt` with the same profile (D6, D9, D14, decision 132). Every other decision is **designed**.
 **Threat model:** `docs/architecture/03-trust-boundaries.md`. This spec meets its requirements R1–R10 and its
 §8 open checks name what is still unverified.
 **Research:** `docs/architecture/research/spike-13-sandbox.md`.
@@ -62,7 +62,8 @@ a position on this puts the hard boundary in an OS sandbox:
 - **Protected reads:** 10db's data directory, every account's config directory (the default account's,
   including the login shell's `CLAUDE_CONFIG_DIR`), `~/.claude`, `~/.claude.json`, `~/Library/Keychains` and
   `/usr/bin/security`, and in the checkout the project's secret files (`.env*` and names the project lists, less
-  the exceptions it names). Every profile denies them, whatever a project adds.
+  the exceptions it names). Every profile denies them, whatever a project adds. Denying `/usr/bin/security`
+  doesn't stop it running under srt (the gate); the barrier is the denied `~/Library/Keychains`.
 
 ## 3. Decisions
 
@@ -168,7 +169,9 @@ Slice 1, **built** (§7) and always on, is D1–D4, D8 and D15, and part of D5 a
 Slice 1 runs every real lane's Bash and file tools under the sandbox, always; there is no switch. The daemon's
 and runner's options require the sandbox, and the Claude adapter refuses a session that arrives without one.
 Only fake sessions, which run no commands, go without it. `apps/daemon/src/sandbox/` builds the profile and
-the session's temp directory; the plan is `docs/superpowers/plans/2026-10-26-10db-12-lane-sandbox.md`.
+the session's temp directory; the plan is `docs/superpowers/plans/2026-10-26-10db-12-lane-sandbox.md`. Every gate
+runs under `srt` with the lane profile, built by the same code, in a temp directory of its own (decision 132,
+threat model §4.7).
 
 | Decision | State | Notes |
 | -------- | ----- | ----- |
@@ -176,13 +179,15 @@ the session's temp directory; the plan is `docs/superpowers/plans/2026-10-26-10d
 | D2       | built | The deny-`/` form. Per-project read lists come from stored `Read` rules. Package caches are per lane, in its temp directory. |
 | D3       | built | Hosts: denied at once, one card per host per session, and the card stays open after the session ends. Every lane runs in `default` mode; there is no auto mode and no dev override, so hazards and new hosts reach the broker. |
 | D4       | built | `settingSources: []`, and the billing check on the repo's settings file is skipped for sandboxed sessions. The briefing points the lane at `AGENTS.md`. |
-| D5       | partly | Bash children get an allowlist of names, and every other name, an account's own included, is denied in `credentials.envVars`. The claude process keeps the login environment, and the gate's environment is designed. |
+| D5       | partly | Bash children get an allowlist of names, and every other name, an account's own included, is denied in `credentials.envVars`. The gate gets the same allowlist of the project env, set inside its sandbox. The claude process keeps the login environment. |
 | D8       | built | A Grep, Glob or LS of a directory that holds a protected root is refused with no card, which narrows this decision's "anything else goes to the broker". |
 | D10      | stands | The claude process stays outside the sandbox; the file tools' boundary is software (threat model §7). |
-| D14      | partly | Built for lanes (see D14). The gate's directory is designed. |
-| D15      | built | Loopback is the project's "Let lane commands use localhost" switch in Settings › General, off by default and read before each session. The gate's loopback is designed with the gate profile. |
+| D14      | built  | Lanes (see D14) and the gate: each gate run has its own temp directory under `/private/tmp`, removed after the run, holding its package caches. |
+| D15      | built | Loopback is the project's "Let lane commands use localhost" switch in Settings › General, off by default and read before each session, and before each gate. |
 | D13      | built | Decision 129: every daemon git call reads no attributes and passes `core.fsmonitor=false` and `core.hooksPath=/dev/null`, so no hook, filter, driver, fsmonitor or submodule git runs, and `gh` gets the hook and fsmonitor config through `GIT_CONFIG_COUNT`. A git that honours `GIT_ATTR_SOURCE` (2.41 or newer, found by a behaviour probe) is required. Commits stage on a private index and move only their branch by compare and swap. Checkout pins (git dirs and origin's URLs) persist per project, the commit branch is pinned per workstream, and fetch and push go to the pinned URLs. The local-config allowlist before a fetch or push is defense in depth. |
-| D6, D7, D9, D11, D12, D16, D17, D18 | designed | The gate and repo MCP servers under `srt`, the safe reader, the guard's retirement, the secret scan, the CI card and the takeover rule. |
+| D6       | built  | For the gate (decision 132): the lane profile under `srt`, with the project's hosts and the checkout writable. The daemon's git commands run no hook at all (D13), so nothing of theirs needs the sandbox. |
+| D9       | built  | The tests that need `ps`, the shared `/tmp`, the builder's home or Seatbelt itself skip under `TENDB_SANDBOX=1`, which every lane and gate command gets; the e2e fixture repository lives in the temp directory. WebKit's e2e can't run in the sandbox and skips there (threat model §7). A project's sandbox additions are still designed. |
+| D7, D11, D12, D16, D17, D18 | designed | Repo MCP servers under `srt` (threat model §4.6), the safe reader, the guard's retirement, the secret scan, the CI card and the takeover rule. |
 
 Not closed by slice 1: `.git/` files nobody probed in an ordinary checkout, such as `.git/info/attributes`, which can
 select an already configured filter driver for the daemon's unsandboxed git. D13's git reads no attributes,

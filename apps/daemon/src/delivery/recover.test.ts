@@ -12,7 +12,7 @@ import {
 } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
-import { waitFor } from '../../test/fixtures';
+import { SANDBOXED, waitFor } from '../../test/fixtures';
 import { alive, orphanGateGroup } from '../../test/orphan-gate';
 import { ManualClock } from '../clock';
 import { silentLogger } from '../log';
@@ -166,7 +166,8 @@ describe('recoverBatches', () => {
     },
   );
 
-  it('terminates an orphaned shipping gate before re-running', async () => {
+  // Identifies the process with `ps`, which is setuid: no sandbox can run it.
+  it.skipIf(SANDBOXED)('terminates an orphaned shipping gate before re-running', async () => {
     h = createDeliveryHarness({}, { trigger: false });
     const gate = await orphanGateGroup();
     try {
@@ -197,18 +198,22 @@ describe('recoverBatches', () => {
 });
 
 describe('shutdown while shipping', () => {
-  it('kills the gate, records no result and leaves the batch SHIPPING', async () => {
-    h = createDeliveryHarness({ gateCommand: 'sleep 30' });
-    const batch = await openBatch();
-    for (const ws of listWorkstreams(h.store.db, { batchId: batch.id })) h.settle(ws.id, 'DONE');
-    const pid = await waitFor(() => getBatchRow(h.store.db, batch.id).gatePid ?? undefined);
-    await h.jobs.stop();
-    expect(getBatchRow(h.store.db, batch.id)).toMatchObject({
-      state: 'SHIPPING',
-      gatePid: null,
-      gateExitCode: null,
-    });
-    expect(alive(pid)).toBe(false);
-    expect(onOrigin(batch.branch)).toBeNull();
-  });
+  // Identifies the process with `ps`, which is setuid: no sandbox can run it.
+  it.skipIf(SANDBOXED)(
+    'kills the gate, records no result and leaves the batch SHIPPING',
+    async () => {
+      h = createDeliveryHarness({ gateCommand: 'sleep 30' });
+      const batch = await openBatch();
+      for (const ws of listWorkstreams(h.store.db, { batchId: batch.id })) h.settle(ws.id, 'DONE');
+      const pid = await waitFor(() => getBatchRow(h.store.db, batch.id).gatePid ?? undefined);
+      await h.jobs.stop();
+      expect(getBatchRow(h.store.db, batch.id)).toMatchObject({
+        state: 'SHIPPING',
+        gatePid: null,
+        gateExitCode: null,
+      });
+      expect(alive(pid)).toBe(false);
+      expect(onOrigin(batch.branch)).toBeNull();
+    },
+  );
 });

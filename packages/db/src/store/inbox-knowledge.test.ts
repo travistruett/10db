@@ -224,6 +224,29 @@ describe('permission rules', () => {
         .sort(),
     ).toEqual(expected);
   });
+
+  it("lists only the project-wide rules when no workstream is named, as a batch's gate needs", () => {
+    const mine = seedProject(store);
+    const other = seedProject(store);
+    store.write((ctx) => {
+      for (const [projectId, workstreamId, toolName] of [
+        [mine.id, null, 'SandboxNetworkAccess'],
+        [mine.id, mintId('Workstream'), 'WebFetch'],
+        [other.id, null, 'Bash'],
+      ] as const) {
+        insertPermissionRule(ctx, {
+          projectId,
+          workstreamId,
+          toolName,
+          pattern: null,
+          sourceInboxId: null,
+        });
+      }
+    });
+    expect(listPermissionRules(store.db, mine.id, null).map((r) => r.toolName)).toEqual([
+      'SandboxNetworkAccess',
+    ]);
+  });
 });
 
 describe('knowledge', () => {

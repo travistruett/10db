@@ -27,21 +27,22 @@ export function insertPermissionRule(
   return row;
 }
 
+/** The project's own rules and, when one is named, the workstream's. */
 export function listPermissionRules(
   db: DbReader,
   projectId: ProjectId,
-  workstreamId: WorkstreamId,
+  workstreamId: WorkstreamId | null,
 ): PermissionRuleDto[] {
+  const projectWide = isNull(schema.permissionRules.workstreamId);
   return db
     .select()
     .from(schema.permissionRules)
     .where(
       and(
         eq(schema.permissionRules.projectId, projectId),
-        or(
-          isNull(schema.permissionRules.workstreamId),
-          eq(schema.permissionRules.workstreamId, workstreamId),
-        ),
+        workstreamId === null
+          ? projectWide
+          : or(projectWide, eq(schema.permissionRules.workstreamId, workstreamId)),
       ),
     )
     .orderBy(asc(schema.permissionRules.createdAt), asc(schema.permissionRules.id))

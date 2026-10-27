@@ -218,7 +218,7 @@ export async function createTestEngine(
     adapter,
     inbox,
     git,
-    gate: createGateRunner(),
+    gate: createGateRunner({ sandbox: null, logger: silentLogger }),
     clock,
     logger: silentLogger,
     dataDir: data.path,

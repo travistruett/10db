@@ -15,6 +15,7 @@ export {
   LANE_TEMP_ROOT,
   MAX_SANDBOX_TMP_BYTES,
   removeLaneTempDir,
+  removeLaneTempDirAsync,
   SandboxTempDirError,
 } from './temp-dir';
 export {
@@ -25,6 +26,14 @@ export {
   type FileAccessContext,
   type ReadAccess,
 } from './file-access';
+export {
+  createGateSandbox,
+  DOCKER_REFUSAL,
+  type GateRun,
+  type GateRunInput,
+  type GateSandbox,
+  type SandboxRuntime,
+} from './gate-sandbox';
 export {
   createLaneSandbox,
   type LaneSandbox,

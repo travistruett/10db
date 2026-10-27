@@ -85,7 +85,7 @@ beforeAll(async () => {
   repo = createTempRepo();
   data = tempDir('acceptance-checks');
   daemon = await startDaemon({
-    laneSandbox: null,
+    sandbox: null,
     dataDir: data.path,
     port: 0,
     adapter: new FakeAdapter(BOOK),

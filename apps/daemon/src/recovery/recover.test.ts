@@ -26,7 +26,13 @@ import {
   type Store,
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createTempRepo, isolatedGitEnv, seedWorkstream, waitFor } from '../../test/fixtures';
+import {
+  createTempRepo,
+  isolatedGitEnv,
+  SANDBOXED,
+  seedWorkstream,
+  waitFor,
+} from '../../test/fixtures';
 import { alive, orphanGateGroup } from '../../test/orphan-gate';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit } from '../git';
@@ -184,63 +190,75 @@ function ask(ws: ReturnType<typeof inState>, title: string, signal: AbortSignal)
 }
 
 describe('recoverOnStartup', () => {
-  it('fences a running workstream, kills its orphaned process, and re-queues it to resume', async () => {
-    const orphan = await orphanProcess();
-    const ws = inState(['STARTING', 'RUNNING'], { pid: orphan.pid, pidStart: orphan.startedAt });
-    const { exited } = orphan;
-    const report = await recover();
-    await exited;
+  // Identifies the process with `ps`, which is setuid: no sandbox can run it.
+  it.skipIf(SANDBOXED)(
+    'fences a running workstream, kills its orphaned process, and re-queues it to resume',
+    async () => {
+      const orphan = await orphanProcess();
+      const ws = inState(['STARTING', 'RUNNING'], { pid: orphan.pid, pidStart: orphan.startedAt });
+      const { exited } = orphan;
+      const report = await recover();
+      await exited;
 
-    expect(report.requeued).toEqual([ws.workstream.id]);
-    expect(getWorkstream(state.db, ws.workstream.id)).toMatchObject({
-      state: 'QUEUED',
-      currentSessionId: null,
-      recoveryAttempts: 1,
-      nextAction: { kind: 'resume', providerSessionId: 'provider-1' },
-    });
-    expect(getWorkstreamRow(state.db, ws.workstream.id).leaseOwner).toBeNull();
-    expect(listSessions(state.db, ws.workstream.id)[0]?.exitReason).toBe('daemon_restart');
-    const steps = listEventsAfter(state.db, 0, 1000).filter((e) => e.type === 'recovery.step');
-    expect(steps[0]?.data).toMatchObject({ step: 'reconciled', sessionsEnded: 1 });
-  });
-
-  it('leaves a live process alone when its pid now belongs to something else', async () => {
-    const stranger = await orphanProcess();
-    try {
-      inState(['STARTING', 'RUNNING'], {
-        pid: stranger.pid,
-        pidStart: 'Thu Jan  1 00:00:00 1970',
-      });
-      await recover();
-      expect(await systemProcesses.identify(stranger.pid)).toBe(stranger.startedAt);
-    } finally {
-      stranger.child.kill('SIGKILL');
-    }
-  });
-
-  it('re-runs verification when the daemon died while verifying, killing the whole orphaned gate group', async () => {
-    const gate = await orphanGateGroup();
-    try {
-      const ws = inState(['STARTING', 'RUNNING', 'VERIFYING']);
-      state.write((ctx) => {
-        patchWorkstream(ctx, ws.workstream.id, null, {
-          gatePid: gate.pid,
-          gatePidStart: gate.startedAt,
-        });
-      });
-      await recover();
-      await gate.exited;
-      await waitFor(() => !alive(gate.grandchildPid));
+      expect(report.requeued).toEqual([ws.workstream.id]);
       expect(getWorkstream(state.db, ws.workstream.id)).toMatchObject({
         state: 'QUEUED',
-        nextAction: { kind: 'verify' },
+        currentSessionId: null,
+        recoveryAttempts: 1,
+        nextAction: { kind: 'resume', providerSessionId: 'provider-1' },
       });
-      expect(getWorkstreamRow(state.db, ws.workstream.id).gatePid).toBeNull();
-    } finally {
-      if (alive(gate.grandchildPid)) process.kill(gate.grandchildPid, 'SIGKILL');
-      gate.cleanup();
-    }
-  });
+      expect(getWorkstreamRow(state.db, ws.workstream.id).leaseOwner).toBeNull();
+      expect(listSessions(state.db, ws.workstream.id)[0]?.exitReason).toBe('daemon_restart');
+      const steps = listEventsAfter(state.db, 0, 1000).filter((e) => e.type === 'recovery.step');
+      expect(steps[0]?.data).toMatchObject({ step: 'reconciled', sessionsEnded: 1 });
+    },
+  );
+
+  // Identifies the process with `ps`, which is setuid: no sandbox can run it.
+  it.skipIf(SANDBOXED)(
+    'leaves a live process alone when its pid now belongs to something else',
+    async () => {
+      const stranger = await orphanProcess();
+      try {
+        inState(['STARTING', 'RUNNING'], {
+          pid: stranger.pid,
+          pidStart: 'Thu Jan  1 00:00:00 1970',
+        });
+        await recover();
+        expect(await systemProcesses.identify(stranger.pid)).toBe(stranger.startedAt);
+      } finally {
+        stranger.child.kill('SIGKILL');
+      }
+    },
+  );
+
+  // Identifies the process with `ps`, which is setuid: no sandbox can run it.
+  it.skipIf(SANDBOXED)(
+    're-runs verification when the daemon died while verifying, killing the whole orphaned gate group',
+    async () => {
+      const gate = await orphanGateGroup();
+      try {
+        const ws = inState(['STARTING', 'RUNNING', 'VERIFYING']);
+        state.write((ctx) => {
+          patchWorkstream(ctx, ws.workstream.id, null, {
+            gatePid: gate.pid,
+            gatePidStart: gate.startedAt,
+          });
+        });
+        await recover();
+        await gate.exited;
+        await waitFor(() => !alive(gate.grandchildPid));
+        expect(getWorkstream(state.db, ws.workstream.id)).toMatchObject({
+          state: 'QUEUED',
+          nextAction: { kind: 'verify' },
+        });
+        expect(getWorkstreamRow(state.db, ws.workstream.id).gatePid).toBeNull();
+      } finally {
+        if (alive(gate.grandchildPid)) process.kill(gate.grandchildPid, 'SIGKILL');
+        gate.cleanup();
+      }
+    },
+  );
 
   it('records HEAD, the dirty files and the last acknowledged operation in the recovery event', async () => {
     const ws = inState(['STARTING', 'RUNNING']);
@@ -268,34 +286,42 @@ describe('recoverOnStartup', () => {
     });
   });
 
-  it('leaves a gate group alone when its pid now belongs to something else', async () => {
-    const stranger = await orphanProcess(true);
-    try {
-      const ws = inState(['STARTING', 'RUNNING', 'VERIFYING']);
-      state.write((ctx) => {
-        patchWorkstream(ctx, ws.workstream.id, null, {
-          gatePid: stranger.pid,
-          gatePidStart: 'Thu Jan  1 00:00:00 1970',
+  // Identifies the process with `ps`, which is setuid: no sandbox can run it.
+  it.skipIf(SANDBOXED)(
+    'leaves a gate group alone when its pid now belongs to something else',
+    async () => {
+      const stranger = await orphanProcess(true);
+      try {
+        const ws = inState(['STARTING', 'RUNNING', 'VERIFYING']);
+        state.write((ctx) => {
+          patchWorkstream(ctx, ws.workstream.id, null, {
+            gatePid: stranger.pid,
+            gatePidStart: 'Thu Jan  1 00:00:00 1970',
+          });
         });
+        await recover();
+        expect(await systemProcesses.identify(stranger.pid)).toBe(stranger.startedAt);
+        expect(getWorkstreamRow(state.db, ws.workstream.id).gatePid).toBeNull();
+      } finally {
+        stranger.child.kill('SIGKILL');
+      }
+    },
+  );
+
+  // Identifies the process with `ps`, which is setuid: no sandbox can run it.
+  it.skipIf(SANDBOXED)(
+    'kills the orphaned process of a paused workstream and keeps it paused',
+    async () => {
+      const orphan = await orphanProcess();
+      const ws = inState(['STARTING', 'RUNNING', 'PAUSED_LIMIT'], {
+        pid: orphan.pid,
+        pidStart: orphan.startedAt,
       });
       await recover();
-      expect(await systemProcesses.identify(stranger.pid)).toBe(stranger.startedAt);
-      expect(getWorkstreamRow(state.db, ws.workstream.id).gatePid).toBeNull();
-    } finally {
-      stranger.child.kill('SIGKILL');
-    }
-  });
-
-  it('kills the orphaned process of a paused workstream and keeps it paused', async () => {
-    const orphan = await orphanProcess();
-    const ws = inState(['STARTING', 'RUNNING', 'PAUSED_LIMIT'], {
-      pid: orphan.pid,
-      pidStart: orphan.startedAt,
-    });
-    await recover();
-    await orphan.exited;
-    expect(getWorkstream(state.db, ws.workstream.id).state).toBe('PAUSED_LIMIT');
-  });
+      await orphan.exited;
+      expect(getWorkstream(state.db, ws.workstream.id).state).toBe('PAUSED_LIMIT');
+    },
+  );
 
   it('does not count a clean shutdown as a failed recovery attempt', async () => {
     const ws = inState(['STARTING', 'RUNNING']);

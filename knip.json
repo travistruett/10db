@@ -5,7 +5,8 @@
       "entry": [".claude/hooks/*.mjs", "scripts/**/*.mjs"]
     },
     "apps/daemon": {
-      "entry": ["src/main.ts", "scripts/*.ts"]
+      "entry": ["src/main.ts", "scripts/*.ts", "test/fake-srt.ts"],
+      "ignoreDependencies": ["@anthropic-ai/sandbox-runtime"]
     },
     "apps/desktop": {
       "entry": [

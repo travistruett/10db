@@ -72,7 +72,7 @@ const git = (dir: string, ...args: string[]) =>
 
 async function start(systemCheck?: () => Promise<SystemCheck>) {
   daemon = await startDaemon({
-    laneSandbox: null,
+    sandbox: null,
     dataDir: data.path,
     port: 0,
     adapter: new FakeAdapter(BOOK),
@@ -203,7 +203,7 @@ describe('batch delivery through the daemon', () => {
 
   it('still answers 201 with the workstream in a local project', async () => {
     daemon = await startDaemon({
-      laneSandbox: null,
+      sandbox: null,
       dataDir: data.path,
       port: 0,
       adapter: new FakeAdapter(BOOK),

@@ -14,11 +14,25 @@ import {
   type Store,
 } from '@10db/db';
 import type { Keychain } from '../src/environment';
+import type { SandboxRuntime } from '../src/sandbox';
 
 export interface TempDir {
   path: string;
   cleanup(): void;
 }
+
+/**
+ * True inside a sandbox: every sandboxed command, a lane's or a gate's, gets `TENDB_SANDBOX=1`. A
+ * test that needs what no sandbox gives (a setuid `ps`, the shared `/tmp`, the builder's own home,
+ * Seatbelt itself) skips there and says which; CI and an unsandboxed `make gate` still run it.
+ */
+export const SANDBOXED = process.env['TENDB_SANDBOX'] === '1';
+
+/** srt's stand-in for daemon tests that run no Seatbelt; see `fake-srt.ts`. */
+export const FAKE_SRT: SandboxRuntime = {
+  node: process.execPath,
+  cli: join(import.meta.dirname, 'fake-srt.ts'),
+};
 
 export function tempDir(prefix: string): TempDir {
   const path = mkdtempSync(join(tmpdir(), `10db-${prefix}-`));

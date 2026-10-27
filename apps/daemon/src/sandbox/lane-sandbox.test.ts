@@ -14,7 +14,13 @@ import {
 import { dirname, join } from 'node:path';
 import { mintId } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createTempRepo, isolatedGitEnv, tempDir, type TempDir } from '../../test/fixtures';
+import {
+  createTempRepo,
+  isolatedGitEnv,
+  SANDBOXED,
+  tempDir,
+  type TempDir,
+} from '../../test/fixtures';
 import { createGit } from '../git';
 import {
   createLaneSandbox,
@@ -26,7 +32,8 @@ import {
   type LaneSandbox,
   type LaneSessionInput,
 } from './index';
-import { secretFilesIn, type LaneSandboxDeps } from './lane-sandbox';
+import type { LaneSandboxDeps } from './lane-sandbox';
+import { secretFilesIn } from './project-access';
 import { isEqualOrUnder } from './protected-reads';
 
 const git = createGit();
@@ -89,7 +96,9 @@ afterEach(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
-describe('createLaneSandbox', () => {
+// Their root is a short path under the shared `/tmp`, so a temp dir made in it fits Claude Code's
+// 44-byte limit, and no sandbox can write `/tmp`.
+describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
   it('denies every .env file in the checkout by exact path, skipping node_modules and .git', async () => {
     const env = writeIn(checkout, '.env');
     const local = writeIn(checkout, 'apps/x/.env.local');
@@ -207,6 +216,8 @@ describe('createLaneSandbox', () => {
           join(realpathSync(worktree), '.git'),
           join(commonDir, 'worktrees', 'wt'),
           commonDir,
+          // The main checkout is another registered project here, read-only as a whole.
+          checkout,
         ]);
       } finally {
         session.dispose();
@@ -252,12 +263,33 @@ describe('createLaneSandbox', () => {
           join(checkout, 'nested', '.git'),
           join(realpathSync(other), '.git'),
           realpathSync(otherGit),
+          // Another project is read-only as a whole, not only its git state.
+          join(checkout, 'nested'),
+          realpathSync(other),
         ]);
       } finally {
         session.dispose();
       }
     } finally {
       elsewhere.cleanup();
+    }
+  });
+
+  it('leaves a project nested in another writable to its own lanes', async () => {
+    const nested = join(checkout, 'nested');
+    execFileSync('git', ['init', '-q', '-b', 'main', nested], {
+      env: isolatedGitEnv(),
+      stdio: 'pipe',
+    });
+    const session = await sandbox().forSession(
+      input({ project: { ...input().project, repoPath: nested }, checkouts: [repo.path, nested] }),
+    );
+    try {
+      const { denyWrite } = session.spec.settings.filesystem;
+      expect(denyWrite).toContain(join(checkout, '.git'));
+      expect(denyWrite).not.toContain(checkout);
+    } finally {
+      session.dispose();
     }
   });
 
@@ -336,6 +368,8 @@ describe('createLaneSandbox', () => {
         CLAUDE_CODE_TMPDIR: session.tmpDir,
         GIT_CONFIG_GLOBAL: '/dev/null',
         GIT_OPTIONAL_LOCKS: '0',
+        XDG_CONFIG_HOME: join(session.tmpDir, 'config'),
+        TENDB_SANDBOX: '1',
         CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1',
         CLAUDE_ENV_FILE: join(
           tmpRoot,
@@ -836,7 +870,8 @@ describe('createLaneSandbox', () => {
   });
 });
 
-describe('secretFilesIn', () => {
+// Its checkout comes from the same `/tmp` fixtures.
+describe.skipIf(SANDBOXED)('secretFilesIn', () => {
   const failing = (dir: string, code: string) => (path: string) =>
     path === dir
       ? Promise.reject(Object.assign(new Error(`${code}: ${path}`), { code }))

@@ -43,7 +43,7 @@ afterEach(async () => {
 async function runOnFallback(book: FakeScriptBook) {
   const adapter = new FakeAdapter(book);
   const running = await startDaemon({
-    laneSandbox: null,
+    sandbox: null,
     dataDir: data.path,
     port: 0,
     adapter,
