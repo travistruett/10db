@@ -22,6 +22,7 @@ export const accountKeys = {
   all: ['accounts'],
   usage: ['accounts', 'usage'],
   usageOf: (id: AccountId) => ['accounts', 'usage', id] as const,
+  signInOf: (id: AccountId) => ['accounts', 'signin', id] as const,
 } as const;
 
 const AccountList = z.array(AccountDto);
@@ -51,7 +52,7 @@ export function useAccountUsage(id: AccountId) {
 export function useAccountSignIn(id: AccountId, enabled: boolean) {
   const { client } = useDaemon();
   return useQuery({
-    queryKey: [...accountKeys.all, 'signin', id] as const,
+    queryKey: accountKeys.signInOf(id),
     queryFn: async () =>
       readJson(
         await client.accounts[':accountId'].signin.$get({ param: { accountId: id } }),

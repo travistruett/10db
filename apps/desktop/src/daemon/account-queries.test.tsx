@@ -107,6 +107,7 @@ function SignIn({ id }: { readonly id: AccountId }) {
         enable
       </button>
       <p>{signIn.data ? signIn.data.command : 'no command'}</p>
+      <p data-testid="fetch-status">{signIn.fetchStatus}</p>
     </>
   );
 }
@@ -123,6 +124,7 @@ function Identity({ id }: { readonly id: AccountId }) {
         check
       </button>
       <p>{check.data ? (check.data.email ?? 'no email') : 'unchecked'}</p>
+      <p data-testid="status">{check.status}</p>
     </>
   );
 }
@@ -244,6 +246,8 @@ describe('account hooks', () => {
     );
     renderWithDaemon(<SignIn id={DEFAULT_ACCOUNT.id} />);
     expect(await screen.findByText('no command')).toBeTruthy();
+    // `idle` is the query declining to fetch; without `enabled` it would be `fetching`.
+    expect(screen.getByTestId('fetch-status').textContent).toBe('idle');
     expect(requests).toBe(0);
     fireEvent.click(screen.getByText('enable'));
     expect(await screen.findByText('claude /login')).toBeTruthy();
@@ -252,15 +256,27 @@ describe('account hooks', () => {
 
   it('probes the identity only when the mutation runs', async () => {
     let requests = 0;
+    const { handlers, counts } = listCounts();
     server.use(
+      ...handlers,
       http.get(daemonUrl(`/accounts/${DEFAULT_ACCOUNT.id}/identity`), () => {
         requests += 1;
         return HttpResponse.json(accountIdentityDto({ email: 'seen@example.com' }));
       }),
       ...baseHandlers(),
     );
-    renderWithDaemon(<Identity id={DEFAULT_ACCOUNT.id} />);
+    renderWithDaemon(
+      <>
+        <Listed />
+        <Identity id={DEFAULT_ACCOUNT.id} />
+      </>,
+    );
+    // The sibling list's fetch completing shows the mount-time requests are done.
+    await waitFor(() => {
+      expect(counts['/accounts']).toBe(1);
+    });
     expect(await screen.findByText('unchecked')).toBeTruthy();
+    expect(screen.getByTestId('status').textContent).toBe('idle');
     expect(requests).toBe(0);
     fireEvent.click(screen.getByText('check'));
     expect(await screen.findByText('seen@example.com')).toBeTruthy();

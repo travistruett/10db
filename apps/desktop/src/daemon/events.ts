@@ -1,4 +1,4 @@
-import { DaemonEvent, EventsHead } from '@10db/contracts';
+import { DaemonEvent, EventsHead, type EventType } from '@10db/contracts';
 import { useQueryClient, type QueryKey } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
 import { readJson } from './client';
@@ -25,8 +25,7 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   batch: [queryKeys.projects, ['batches'], ...WORK, CANDIDATES],
   // Lanes changing can switch keep-awake on or off.
   workstream: [...WORK, queryKeys.keepAwake, CANDIDATES],
-  // A session's tokens and dollars are recorded when it ends.
-  session: [...WORK, accountKeys.usage],
+  session: WORK,
   claim: [...WORK, CANDIDATES],
   handoff: WORK,
   evidence: WORK,
@@ -43,6 +42,12 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   routing_rules: [CANDIDATES],
   benchmarks: [CANDIDATES],
   // `proposal` (from proposal.resolved) has no view to refresh; the card that resolved it sends its own inbox event.
+};
+
+/** What to refetch for one event type, on top of its entity type's entries. */
+export const EVENT_INVALIDATIONS: Readonly<Partial<Record<EventType, readonly QueryKey[]>>> = {
+  // A session's tokens and dollars are recorded when it ends, not on its per-tool-call events.
+  'session.ended': [accountKeys.usage],
 };
 
 export function eventStreamUrl(conn: DaemonConnection, after: number): string {
@@ -89,7 +94,10 @@ export function useEventStream(onEvent?: (event: DaemonEvent) => void): void {
       // The daemon sends each seq once; a resend at a reconnect seam is ignored.
       if (lastSeq.current !== null && event.seq <= lastSeq.current) return;
       lastSeq.current = event.seq;
-      for (const queryKey of INVALIDATIONS[event.entityType] ?? [])
+      for (const queryKey of [
+        ...(INVALIDATIONS[event.entityType] ?? []),
+        ...(EVENT_INVALIDATIONS[event.type] ?? []),
+      ])
         void queryClient.invalidateQueries({ queryKey });
       listener.current?.(event);
     }
