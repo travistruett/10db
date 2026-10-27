@@ -1,4 +1,4 @@
-import type { AccountDto } from '@10db/contracts';
+import type { AccountDto, AccountId } from '@10db/contracts';
 import {
   Accordion,
   Badge,
@@ -13,8 +13,10 @@ import {
   UnstyledButton,
 } from '@mantine/core';
 import { IconPlus } from '@tabler/icons-react';
+import { useState } from 'react';
 import { useAccounts, useAccountUsage } from '../../../daemon/account-queries';
 import { ACCOUNT_KIND_LABEL } from '../account-kind-label';
+import { AccountDrawer } from './account-drawer';
 import { ACCOUNT_STATUS_LABEL, AccountStatus, accountStatus } from './account-status';
 import { capShare, formatTokens, formatUsd } from './usage-text';
 
@@ -130,11 +132,8 @@ function ArchivedList({ accounts }: { readonly accounts: readonly AccountDto[] }
 }
 
 /** The app-wide accounts: identity, kind, status and this month's usage. */
-export function AccountsSection({
-  onOpen = () => undefined,
-}: {
-  readonly onOpen?: (account: AccountDto) => void;
-}) {
+export function AccountsSection() {
+  const [selected, setSelected] = useState<AccountId | null>(null);
   const accounts = useAccounts();
   if (accounts.isPending) return <Text c="dimmed">Loading accounts…</Text>;
   if (accounts.isError)
@@ -157,11 +156,26 @@ export function AccountsSection({
         </Table.Thead>
         <Table.Tbody>
           {live.map((a) => (
-            <AccountRow key={a.id} account={a} onOpen={onOpen} />
+            <AccountRow
+              key={a.id}
+              account={a}
+              onOpen={(account) => {
+                setSelected(account.id);
+              }}
+            />
           ))}
         </Table.Tbody>
       </Table>
       {archived.length > 0 ? <ArchivedList accounts={archived} /> : null}
+      {selected === null ? null : (
+        <AccountDrawer
+          key={selected}
+          accountId={selected}
+          onClose={() => {
+            setSelected(null);
+          }}
+        />
+      )}
     </Stack>
   );
 }
