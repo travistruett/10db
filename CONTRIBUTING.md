@@ -123,11 +123,12 @@ files. Fix what it reports rather than skipping it; CI runs the same checks and 
 - Every required check must pass: `gate`, `desktop`, `policy`, `dependency-review` and
   `cargo-deny`. Resolve every conversation before merging. Nobody can bypass these, the
   maintainer included.
-- A pull request also needs an approval from a code owner (`.github/CODEOWNERS`). The maintainer
-  may merge his own pull requests without one, but only once every check passes.
+- While the maintainer is the only person with write access, no approval is required: nobody else
+  can merge, and the required checks are the bar. The code-owner approval rule (`main-review`) is
+  kept but switched off, and is switched on again when anyone else gets write access.
 - The checks run from the pull request's own workflows, so a change to `.github/`, the hook and
-  commit configs, `mise.toml` or the agent rules can change what is checked. The code-owner
-  review covers that for everyone else, and the maintainer reads those diffs in his own pull
+  commit configs, `mise.toml` or the agent rules can change what is checked. Once others have
+  write access the code-owner review covers that for them, and the maintainer reads those diffs in his own pull
   requests before merging.
 
 ## Signed commits
