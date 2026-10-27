@@ -11,6 +11,8 @@ scratch/
 .superpowers/
 spikes/
 .gate/
+# Other checkouts of this repo, each formatted on its own branch.
+.claude/worktrees/
 LICENSE
 # Canonical texts, copied verbatim.
 CODE_OF_CONDUCT.md

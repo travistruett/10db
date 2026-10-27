@@ -1,8 +1,9 @@
 # Personal Claude Code overrides (API-key fallback, local permissions). Never committed.
 .claude/settings.local.json
 
-# Claude Code runtime state.
+# Claude Code runtime state, and the git worktrees it checks out for agents.
 .claude/scheduled_tasks.lock
+.claude/worktrees/
 
 .DS_Store
 

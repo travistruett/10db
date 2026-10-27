@@ -23,6 +23,10 @@ export default defineConfig(
     'scratch/**',
     '.superpowers/**',
     '.gate/**',
+    // Git-ignored dev state: the dev daemon's data and local scratch.
+    '.dev/**',
+    // Other checkouts of this repo, each linted on its own branch.
+    '.claude/worktrees/**',
   ]),
   js.configs.recommended,
   tseslint.configs.strictTypeChecked,

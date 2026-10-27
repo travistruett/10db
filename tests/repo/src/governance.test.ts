@@ -48,10 +48,12 @@ describe('rulesets', () => {
       ['refs/tags/v*'],
       ['refs/tags/v*'],
     ]);
-    expect(rulesets.every((r) => r.enforcement === 'active')).toBe(true);
+    expect(rulesets.filter((r) => r.enforcement !== 'active').map((r) => r.name)).toEqual([
+      'main-review',
+    ]);
   });
 
-  it('protects main with no bypass: PRs, squash, linear, signed, no force push', () => {
+  it('protects main with no bypass: PRs, squash, linear, no force push', () => {
     const main = byName('main-protection');
     expect(main?.bypass_actors).toEqual([]);
     expect(main?.rules.map((r) => r.type).sort()).toEqual([
@@ -59,7 +61,6 @@ describe('rulesets', () => {
       'non_fast_forward',
       'pull_request',
       'required_linear_history',
-      'required_signatures',
       'required_status_checks',
     ]);
     expect(rule(main, 'pull_request')?.parameters).toEqual({
@@ -90,8 +91,9 @@ describe('rulesets', () => {
     expect(checks.every((c) => c.integration_id === 15368)).toBe(true);
   });
 
-  it('keeps the code-owner review in main-review, which only the admin bypasses', () => {
+  it('keeps the code-owner review in main-review, switched off while the maintainer is the only writer', () => {
     const review = byName('main-review');
+    expect(review?.enforcement).toBe('disabled');
     expect(review?.bypass_actors).toEqual([
       { actor_id: 5, actor_type: 'RepositoryRole', bypass_mode: 'pull_request' },
     ]);
