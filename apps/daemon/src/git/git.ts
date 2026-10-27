@@ -752,8 +752,9 @@ export function createGit(opts: GitOptions = {}): Git {
   /**
    * A git dir about to be pinned that lies where a lane can write, or null when there is none: one in
    * any registered checkout or a lane temp root. A dir at or under a registered checkout's own `.git`
-   * directory is exempt, since every lane profile of that checkout denies it (a linked worktree's
-   * common dir is often there), and so is a dir `kept` names: the one already pinned.
+   * directory is exempt: every lane profile denies every registered checkout's `.git` (the lane
+   * sandbox gets the same list), a nested project's included, and a linked worktree's common dir is
+   * often there. So is a dir `kept` names: the one already pinned.
    */
   function writableGitDir(
     real: string,

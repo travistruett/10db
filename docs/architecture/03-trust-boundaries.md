@@ -291,7 +291,8 @@ Under the lane sandbox (**built**), the design column holds for a lane's Bash:
   profile keeps it closed, and the pnpm hazard card says to run the install outside the lane or use npm.
 - **The git dirs are read-only to lanes.** Only the daemon writes git state. Claude Code opens the checkout,
   `.git` included, and a linked worktree's own git dir for writing; the profile denies writes to the checkout's
-  git dir, its common dir and `<checkout>/.git`, file or directory, wherever the git dir lies. A lane can't move HEAD or a
+  git dir, its common dir and `<checkout>/.git`, file or directory, wherever the git dir lies, and to those of
+  every other registered checkout, so a project nested inside this checkout keeps its git state too. A lane can't move HEAD or a
   ref, stage, or plant config, hooks, alternates or attributes. Its read-only git still works: the env sets
   `GIT_OPTIONAL_LOCKS=0`, so `git status` doesn't try to refresh the index, and the live test runs `git status`,
   `git diff` and `git log` with the dirs read-only. Re-run it after each Claude Code or SDK upgrade.

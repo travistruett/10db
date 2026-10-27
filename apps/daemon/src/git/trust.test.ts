@@ -920,6 +920,51 @@ describe('the checkout is the one pinned for it', () => {
     }
   });
 
+  it.each([
+    { name: 'trusts it while the nested project is registered', registered: true },
+    { name: 'refuses it once the nested project is not', registered: false },
+  ])(
+    "for a worktree of a project nested in another's checkout, $name: only then is its .git denied to every lane",
+    async ({ registered }) => {
+      // Project B sits in this checkout, whose lanes can write everything there but a registered
+      // checkout's own .git; the worktree's common dir is B/.git.
+      const nested = join(repo.path, 'nested');
+      execFileSync('git', ['init', '-q', '-b', 'main', nested], { env: isolatedGitEnv() });
+      for (const [key, value] of Object.entries(TEST_REPO_CONFIG))
+        gitIn(nested, 'config', key, value);
+      gitIn(nested, 'commit', '-q', '--allow-empty', '-m', 'b');
+      const outside = tempDir('worktree-of-nested');
+      try {
+        const worktree = join(outside.path, 'wt');
+        gitIn(nested, 'worktree', 'add', '-q', '-b', 'wt', worktree);
+        const pins = memoryPinStore();
+        const git = createGit({
+          pins,
+          checkouts: () => [repo.path, ...(registered ? [nested] : []), worktree],
+        });
+        if (!registered) {
+          expect((await refusal(git.currentBranch(worktree))).detail.kind).toBe('writable');
+          return;
+        }
+        expect(await git.currentBranch(worktree)).toBe('wt');
+        const real = realpathSync(worktree);
+        const pin = pins.get(real);
+        if (!pin) throw new Error('expected the worktree to be pinned');
+        pins.set(real, {
+          ...pin,
+          gitDir: join(scratch.path, 'a'),
+          commonDir: join(scratch.path, 'b'),
+        });
+        const { detail } = await refusal(git.currentBranch(worktree));
+        if (detail.kind !== 'moved') throw new Error('expected a moved checkout');
+        await git.retrust(worktree, detail.candidate);
+        expect(await git.currentBranch(worktree)).toBe('wt');
+      } finally {
+        outside.cleanup();
+      }
+    },
+  );
+
   it('re-trusts a changed origin when the pinned git dir is where it was pinned, even if a lane can now write there', async () => {
     // Pinned before the project around its git dir was registered: a new origin must not leave it
     // on a card that offers nothing.

@@ -229,6 +229,38 @@ describe('createLaneSandbox', () => {
     }
   });
 
+  it("makes every registered checkout's git state read-only, a project nested in this one included", async () => {
+    // Project B sits inside this checkout, so this lane could otherwise write B's .git; project C is
+    // elsewhere, with its git dir apart from its checkout.
+    const nested = join(checkout, 'nested');
+    execFileSync('git', ['init', '-q', '-b', 'main', nested], {
+      env: isolatedGitEnv(),
+      stdio: 'pipe',
+    });
+    const elsewhere = tempDir('lane-other-project');
+    try {
+      const other = join(elsewhere.path, 'c');
+      const otherGit = join(elsewhere.path, 'c-git');
+      execFileSync('git', ['init', '-q', '-b', 'main', `--separate-git-dir=${otherGit}`, other], {
+        env: isolatedGitEnv(),
+        stdio: 'pipe',
+      });
+      const session = await sandbox().forSession(input({ checkouts: [repo.path, nested, other] }));
+      try {
+        expect(session.spec.settings.filesystem.denyWrite).toEqual([
+          join(checkout, '.git'),
+          join(checkout, 'nested', '.git'),
+          join(realpathSync(other), '.git'),
+          realpathSync(otherGit),
+        ]);
+      } finally {
+        session.dispose();
+      }
+    } finally {
+      elsewhere.cleanup();
+    }
+  });
+
   it('makes the .git gitfile read-only when the git dir it names sits inside the checkout', async () => {
     const separate = tempDir('lane-separate');
     try {
@@ -247,7 +279,12 @@ describe('createLaneSandbox', () => {
       const inner = join(real, 'inner-git');
       const session = await sandbox({
         gitDirs: () => Promise.resolve({ gitDir: inner, commonDir: inner }),
-      }).forSession(input({ project: { id: projectId, repoPath: work, sandboxLoopback: false } }));
+      }).forSession(
+        input({
+          project: { id: projectId, repoPath: work, sandboxLoopback: false },
+          checkouts: [work],
+        }),
+      );
       try {
         expect(session.spec.settings.filesystem.denyWrite).toEqual([
           join(real, '.git'),
