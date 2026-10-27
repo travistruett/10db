@@ -1,4 +1,4 @@
-import { AppShell, Badge, Group, NavLink, Text, VisuallyHidden } from '@mantine/core';
+import { AppShell, Badge, Group, NavLink, VisuallyHidden } from '@mantine/core';
 import {
   IconBuildingFactory2,
   IconInbox,
@@ -39,14 +39,13 @@ export function AppLayout() {
   const openCards = useInbox().data?.length ?? 0;
   return (
     <AppShell header={{ height: 48 }} navbar={{ width: 200, breakpoint: 'sm' }} padding="md">
-      <AppShell.Header>
-        <Group h="100%" px="md" justify="space-between">
-          <Text fw={700}>10db</Text>
-          <Group gap="sm">
-            <DaemonStatus />
-            <KeepAwakeControl />
-            <ColorSchemeToggle />
-          </Group>
+      {/* The window has no title bar: macOS draws its traffic lights over the header's left end, and
+          the header's empty space drags the window. */}
+      <AppShell.Header data-tauri-drag-region>
+        <Group h="100%" px="md" gap="sm" justify="flex-end" data-tauri-drag-region>
+          <DaemonStatus />
+          <KeepAwakeControl />
+          <ColorSchemeToggle />
         </Group>
       </AppShell.Header>
       <AppShell.Navbar p="xs">

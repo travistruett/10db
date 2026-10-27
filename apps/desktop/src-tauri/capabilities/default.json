@@ -1,10 +1,12 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Permissions for the main window. The opener may open only GitHub pages, such as a batch's pull request.",
+  "description": "Permissions for the main window. The header drags the window and the window's theme follows the app's color scheme. The opener may open only GitHub pages, such as a batch's pull request.",
   "windows": ["main"],
   "permissions": [
     "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-set-theme",
     "notification:default",
     {
       "identifier": "opener:allow-open-url",

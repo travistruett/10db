@@ -123,7 +123,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<TrayItems> {
             &quit,
         ],
     )?;
-    let mut builder = TrayIconBuilder::with_id(TRAY_ID)
+    let builder = TrayIconBuilder::with_id(TRAY_ID)
         .menu(&menu)
         .show_menu_on_left_click(true)
         .tooltip("10db")
@@ -133,10 +133,11 @@ pub fn build(app: &AppHandle) -> tauri::Result<TrayItems> {
             MENU_QUIT => app.exit(0),
             _ => {}
         });
-    if let Some(icon) = app.default_window_icon() {
-        builder = builder.icon(icon.clone());
-    }
-    let tray = builder.build(app)?;
+    // A template image: macOS tints the black wordmark to match the menu bar, like its neighbours.
+    let tray = builder
+        .icon(tauri::include_image!("tray-icon.png"))
+        .icon_as_template(true)
+        .build(app)?;
     Ok(TrayItems {
         tray,
         lanes,

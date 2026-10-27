@@ -1,15 +1,19 @@
 import { EventType, InboxItemId, LANE_STATES, WorkstreamState } from '@10db/contracts';
+import { useComputedColorScheme } from '@mantine/core';
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import { useEventStream } from '../daemon/events';
 import { useDaemon } from '../daemon/provider';
 import { inboxQueryOptions, useInbox, useKeepAwake, useWorkstreams } from '../daemon/queries';
-import { isTauri, notifyNewCard, updateTray } from './tauri';
+import { isTauri, notifyNewCard, setWindowTheme, updateTray } from './tauri';
 
 /** Workstreams that hold a lane or wait on the builder: what the menu bar counts as running. */
 const BUSY_STATES: readonly WorkstreamState[] = [...LANE_STATES, WorkstreamState.WaitingHuman];
 
-/** The one event stream, the menu-bar counts and new-card notifications. Mounted once by AppLayout. */
+/**
+ * The one event stream, the menu-bar counts, new-card notifications and the native window's theme.
+ * Mounted once by AppLayout.
+ */
 export function useDesktopSync(): void {
   const { client } = useDaemon();
   const queryClient = useQueryClient();
@@ -18,9 +22,17 @@ export function useDesktopSync(): void {
   const inbox = useInbox().data?.length ?? 0;
   const keepAwake = useKeepAwake().data?.active ?? false;
 
+  const scheme = useComputedColorScheme('dark');
+
   useEffect(() => {
     updateTray({ lanes, inbox, keepAwake });
   }, [lanes, inbox, keepAwake]);
+
+  useEffect(() => {
+    setWindowTheme(scheme).catch((error: unknown) => {
+      console.warn('10db: could not set the window theme', error);
+    });
+  }, [scheme]);
 
   async function notifyOpened(id: string): Promise<void> {
     const items = await queryClient.query(inboxQueryOptions(client));

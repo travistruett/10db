@@ -1,7 +1,8 @@
 import { InboxKind, MCP_APPROVAL_DETAIL, McpApprovalChoice, McpTransport } from '@10db/contracts';
-import { describe, expect, it } from 'vitest';
+import { clearMocks, mockIPC, mockWindows } from '@tauri-apps/api/mocks';
+import { afterEach, describe, expect, it } from 'vitest';
 import { inboxItemDto } from '../test/fixtures';
-import { notificationTitle } from './tauri';
+import { notificationTitle, setWindowTheme } from './tauri';
 
 const mcpApproval = inboxItemDto({
   kind: InboxKind.Flag,
@@ -36,5 +37,29 @@ describe('notificationTitle', () => {
     ['an MCP server approval', mcpApproval, '10db needs an MCP server approval'],
   ])('titles %s by its kind', (_name, item, title) => {
     expect(notificationTitle(item)).toBe(title);
+  });
+});
+
+describe('setWindowTheme', () => {
+  afterEach(() => {
+    clearMocks();
+    // clearMocks empties the internals but leaves the object, which is what isTauri looks for.
+    Reflect.deleteProperty(window, '__TAURI_INTERNALS__');
+  });
+
+  it.each(['dark', 'light'] as const)('gives the native window the %s theme', async (scheme) => {
+    mockWindows('main');
+    const calls: { cmd: string; args: unknown }[] = [];
+    mockIPC((cmd, args) => {
+      calls.push({ cmd, args });
+    });
+    await setWindowTheme(scheme);
+    expect(calls.find((call) => call.cmd === 'plugin:window|set_theme')?.args).toMatchObject({
+      value: scheme,
+    });
+  });
+
+  it('does nothing in a plain browser', async () => {
+    await expect(setWindowTheme('dark')).resolves.toBeUndefined();
   });
 });
