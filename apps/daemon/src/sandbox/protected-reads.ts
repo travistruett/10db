@@ -19,13 +19,16 @@ export function homeProtectedReads(home: string): string[] {
     join(home, '.claude'),
     join(home, '.claude.json'),
     join(home, 'Library', 'Keychains'),
+    // Denying the tool doesn't stop it running under srt (the gate); the denied Keychains dir is the
+    // barrier, and this deny only refuses reading the binary where the engine honours it.
     '/usr/bin/security',
   ];
 }
 
 /**
  * Paths a lane's commands can never read: 10db's data, the builder's config dirs, Claude Code's
- * state and credentials, the Keychain and the `security` tool. Absolute (a relative entry is resolved) and deduplicated.
+ * state and credentials, and the Keychain files, with the `security` tool's binary. Absolute (a
+ * relative entry is resolved) and deduplicated.
  */
 export function protectedReads(input: {
   home: string;

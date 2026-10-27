@@ -62,7 +62,8 @@ a position on this puts the hard boundary in an OS sandbox:
 - **Protected reads:** 10db's data directory, every account's config directory (the default account's,
   including the login shell's `CLAUDE_CONFIG_DIR`), `~/.claude`, `~/.claude.json`, `~/Library/Keychains` and
   `/usr/bin/security`, and in the checkout the project's secret files (`.env*` and names the project lists, less
-  the exceptions it names). Every profile denies them, whatever a project adds.
+  the exceptions it names). Every profile denies them, whatever a project adds. Denying `/usr/bin/security`
+  doesn't stop it running under srt (the gate); the barrier is the denied `~/Library/Keychains`.
 
 ## 3. Decisions
 
