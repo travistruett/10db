@@ -30,7 +30,6 @@ function spec(overrides: Partial<SessionSpec> = {}): SessionSpec {
     model: 'sonnet',
     effort: 'medium',
     resumeProviderSessionId: null,
-    permissionMode: 'default',
     env: {},
     account: {
       accountId: mintId('Account'),

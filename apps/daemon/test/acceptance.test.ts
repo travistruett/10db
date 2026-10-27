@@ -105,6 +105,7 @@ beforeAll(async () => {
   repo = createTempRepo();
   data = tempDir('acceptance');
   daemon = await startDaemon({
+    laneSandbox: null,
     dataDir: data.path,
     port: 0,
     adapter,

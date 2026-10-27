@@ -288,6 +288,18 @@ export interface StorableRule {
 }
 
 /**
+ * A host the profile's `allowedDomains` can't list but the broker can still match exactly: a name
+ * with an underscore (`my_service`) or an IPv6 address, bare or bracketed. No port, path or space.
+ */
+const IPV6 = '(?:[0-9a-f]*:){2,}[0-9a-f.]*';
+const LITERAL_HOST = new RegExp(`^(?:[a-z0-9_-]+(?:\\.[a-z0-9_-]+)*|${IPV6}|\\[${IPV6}\\])$`);
+const MAX_HOST_LENGTH = 253;
+
+function isLiteralHost(host: string): boolean {
+  return host.length <= MAX_HOST_LENGTH && LITERAL_HOST.test(host);
+}
+
+/**
  * The rule "always allow" stores for a card, from its tool and its canonical summary: the command
  * for Bash, the host for the sandbox's network asks, the real absolute path for the file tools.
  * One approval of any read tool is stored as `Read`, so it covers Grep, Glob and LS of the path
@@ -302,7 +314,7 @@ export function storableRule(toolName: string, summary: string): StorableRule | 
     // A sandboxed lane's summary is the host. Any other summary (the JSON input a lane without the
     // sandbox shows) stores no pattern, as it always has.
     const host = summary.toLowerCase();
-    return { toolName, pattern: isSandboxDomain(host) ? host : null };
+    return { toolName, pattern: isSandboxDomain(host) || isLiteralHost(host) ? host : null };
   }
   const reads = READ_TOOLS.has(toolName);
   // An absolute path is a sandboxed lane's summary; any other summary is the unscoped form a lane

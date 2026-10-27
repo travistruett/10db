@@ -7,7 +7,7 @@ import {
   protectedReads,
   SandboxProfileError,
   SYSTEM_READS,
-  toolchainReads,
+  toolchainAccess,
   type LaneProfileInput,
 } from './index';
 
@@ -26,8 +26,8 @@ function input(overrides: Partial<LaneProfileInput> = {}): LaneProfileInput {
       configDirs: [join(home, '.config', 'gh')],
     }),
     secretFiles: [join(checkout, '.env')],
-    toolchainReads: toolchainReads(home, ''),
-    packageCacheDir: join(home, 'Library', 'Caches', '10db', 'projects', 'p'),
+    toolchainSecrets: [join(home, '.cargo', 'credentials.toml')],
+    toolchainReads: toolchainAccess(home, {}, [], { systemPrefixes: [] }).reads,
     allowedDomains: ['github.com', '*.npmjs.org'],
     readList: [],
     extraReads: [],
@@ -86,7 +86,7 @@ describe('buildLaneProfile', () => {
     expect(allowRead).toEqual(expect.arrayContaining([...SYSTEM_READS, given.tmpDir]));
     expect(allowRead).toContain(realpathSync(link));
     expect(allowRead).not.toContain(link);
-    expect(allowWrite).toEqual([given.tmpDir, given.packageCacheDir]);
+    expect(allowWrite).toEqual([given.tmpDir]);
   });
 
   it('drops a read-list entry under a protected read', () => {
@@ -215,6 +215,21 @@ describe('buildLaneProfile', () => {
     expect(allowWrite).not.toContain(secret);
   });
 
+  it('denies the toolchain secrets to the commands', () => {
+    expect(buildLaneProfile(input()).filesystem.denyRead).toContain(
+      join(home, '.cargo', 'credentials.toml'),
+    );
+  });
+
+  it("refuses with a toolchain message, not the .env one, when a toolchain secret holds a lane's path", () => {
+    const build = () => buildLaneProfile(input({ toolchainSecrets: [checkout] }));
+    expect(build).toThrow(SandboxProfileError);
+    expect(build).toThrow(
+      /a toolchain file that can hold a registry token, .*, holds .* every lane command needs/,
+    );
+    expect(build).not.toThrow(/\.env/);
+  });
+
   it('refuses a checkout that does not exist', () => {
     expect(() => buildLaneProfile(input({ checkout: join(root, 'missing') }))).toThrow(
       SandboxProfileError,
@@ -245,46 +260,5 @@ describe('protectedReads, relative input', () => {
     const list = protectedReads({ home: '/h', dataDir: 'data', configDirs: ['cfg'] });
     expect(list).toContain(resolve('data'));
     expect(list).toContain(resolve('cfg'));
-  });
-});
-
-describe('toolchainReads', () => {
-  const fixed = (h: string): string[] => [
-    `${h}/.local/share/mise`,
-    `${h}/.config/mise`,
-    `${h}/.local/state/mise`,
-    `${h}/.cache/mise`,
-    `${h}/Library/pnpm`,
-    `${h}/Library/Caches/pnpm`,
-    `${h}/Library/Preferences/pnpm`,
-    `${h}/.cargo`,
-    `${h}/.rustup`,
-  ];
-
-  it.each<[string, string, string[]]>([
-    [
-      'a PATH entry under home, and home itself',
-      `/usr/bin:/h/.local/share/mise/installs/node/26/bin:/h`,
-      ['/h/.local/share/mise/installs/node/26/bin'],
-    ],
-    ['an entry whose parent is not opened', '/h/.docker/bin', ['/h/.docker/bin']],
-    ['an entry under a protected read', '/h/.claude/bin:/h/Library/Keychains', []],
-    ['an empty or relative entry', '::bin', []],
-  ])('lists the fixed dirs plus %s', (_name, path, extra) => {
-    const list = toolchainReads('/h', path);
-    expect(list).toEqual([...fixed('/h'), ...extra.filter((e) => !fixed('/h').includes(e))]);
-    expect(list).not.toContain('/h');
-    expect(list).not.toContain('/h/.docker');
-  });
-
-  it.skipIf(process.platform !== 'darwin')('drops a case-variant spelling of home', () => {
-    expect(toolchainReads('/Users/t', '/users/t:/USERS/T/')).not.toContain('/users/t');
-    expect(toolchainReads('/Users/t', '/users/t')).toEqual(toolchainReads('/Users/t', ''));
-  });
-
-  it('drops a differently normalized spelling of home', () => {
-    const nfd = '/h/cafe\u0301';
-    const nfc = '/h/caf\u00e9';
-    expect(toolchainReads(nfc, nfd)).toEqual(toolchainReads(nfc, ''));
   });
 });

@@ -838,6 +838,48 @@ describe('storableRule', () => {
       { toolName: 'SandboxNetworkAccess', pattern: null },
     ],
     [
+      'a host with an underscore keeps its name',
+      'SandboxNetworkAccess',
+      'My_Service',
+      { toolName: 'SandboxNetworkAccess', pattern: 'my_service' },
+    ],
+    [
+      'a bare IPv6 address keeps its spelling',
+      'SandboxNetworkAccess',
+      'FE80::1',
+      { toolName: 'SandboxNetworkAccess', pattern: 'fe80::1' },
+    ],
+    [
+      'a bracketed IPv6 address keeps its brackets',
+      'SandboxNetworkAccess',
+      '[::1]',
+      { toolName: 'SandboxNetworkAccess', pattern: '[::1]' },
+    ],
+    [
+      'a host with a slash stores no pattern',
+      'SandboxNetworkAccess',
+      'example.com/x',
+      { toolName: 'SandboxNetworkAccess', pattern: null },
+    ],
+    [
+      'a hex-looking host with a port stores no pattern',
+      'SandboxNetworkAccess',
+      'face.bad:8443',
+      { toolName: 'SandboxNetworkAccess', pattern: null },
+    ],
+    [
+      'an unclosed bracket stores no pattern',
+      'SandboxNetworkAccess',
+      '[::1',
+      { toolName: 'SandboxNetworkAccess', pattern: null },
+    ],
+    [
+      'a host with a space stores no pattern',
+      'SandboxNetworkAccess',
+      'example .com',
+      { toolName: 'SandboxNetworkAccess', pattern: null },
+    ],
+    [
       'a host with a port stores no pattern',
       'SandboxNetworkAccess',
       'example.com:8443',

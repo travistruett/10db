@@ -38,7 +38,6 @@ import type {
   ProjectId,
   ProposalId,
   ProposalKind,
-  PermissionMode,
   Provider,
   QuestionCategory,
   RiskTag,
@@ -140,8 +139,8 @@ export const projects = sqliteTable('projects', {
     .references(() => accounts.id),
   /** The share of the account's usage limit at which the project hands off. */
   usageHandoffAt: real('usage_handoff_at').notNull().default(USAGE_HANDOFF_AT),
-  /** How the project's lane sessions decide permission prompts. */
-  permissionMode: text('permission_mode').$type<PermissionMode>().notNull().default('default'),
+  /** Lets the lane's sandboxed commands bind and connect on localhost. */
+  sandboxLoopback: integer('sandbox_loopback', { mode: 'boolean' }).notNull().default(false),
   model: text('model').notNull(),
   effort: text('effort').$type<Effort>().notNull(),
   handoffPct: integer('handoff_pct').notNull(),

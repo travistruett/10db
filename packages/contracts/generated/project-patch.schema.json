@@ -103,12 +103,8 @@
         "type": "string"
       }
     },
-    "permissionMode": {
-      "type": "string",
-      "enum": [
-        "default",
-        "auto"
-      ]
+    "sandboxLoopback": {
+      "type": "boolean"
     }
   }
 }

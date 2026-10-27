@@ -190,12 +190,8 @@
         "type": "string"
       }
     },
-    "permissionMode": {
-      "type": "string",
-      "enum": [
-        "default",
-        "auto"
-      ]
+    "sandboxLoopback": {
+      "type": "boolean"
     },
     "createdAt": {
       "type": "string",
@@ -233,7 +229,7 @@
     "baseBranch",
     "prTitlePrefix",
     "allowedCommands",
-    "permissionMode",
+    "sandboxLoopback",
     "createdAt",
     "updatedAt"
   ]

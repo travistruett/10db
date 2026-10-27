@@ -8,7 +8,6 @@ import {
   EventType,
   PROTOCOL_VERSION,
   type InboxAnswer,
-  type PermissionMode,
   type InboxItemDto,
   type SystemCheckDto,
   type WorkstreamId,
@@ -101,14 +100,12 @@ export interface DaemonOptions {
   /** An adapter, or a factory that gets the daemon's logger (the Claude adapter logs into daemon.log). */
   readonly adapter: SessionAdapter | ((logger: Logger) => SessionAdapter);
   readonly logLevel: LogLevel;
-  /** `auto` runs every project's lanes in auto mode (the dev switch); otherwise each project decides. */
-  readonly permissionModeOverride?: PermissionMode;
   /**
-   * Runs every lane under the lane sandbox, in `default` permission mode; `loopback` lets its
-   * commands bind local ports, and `tmpRoot` (tests) moves its temp dirs off `/private/tmp`. Null
-   * or absent, lanes run unsandboxed.
+   * The lane sandbox every lane runs under; `tmpRoot` (tests) moves its temp dirs off `/private/tmp`.
+   * Required, so no caller can forget it: null runs lanes unsandboxed, which only fake sessions and
+   * tests ask for, and the Claude adapter refuses such a session.
    */
-  readonly laneSandbox?: { readonly loopback: boolean; readonly tmpRoot?: string } | null;
+  readonly laneSandbox: { readonly tmpRoot?: string } | null;
   /** better_sqlite3.node for bundled runs; source runs leave it unset. */
   readonly sqliteBinding?: string;
   readonly clock?: Clock;
@@ -437,7 +434,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     ? createLaneSandbox({
         home: homedir(),
         dataDir: opts.dataDir,
-        loopback: opts.laneSandbox.loopback,
         loginConfigDir: launcher.loginConfigDir(),
         gitDirs: (repo) => git.gitDirs(repo),
         ...(opts.laneSandbox.tmpRoot === undefined ? {} : { tmpRoot: opts.laneSandbox.tmpRoot }),
@@ -455,7 +451,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     logger,
     dataDir: opts.dataDir,
     live,
-    ...(opts.permissionModeOverride ? { permissionModeOverride: opts.permissionModeOverride } : {}),
     limits,
     mcpUrl: () => mcpUrl,
     launcher,

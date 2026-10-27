@@ -1,11 +1,12 @@
-import { realpathSync, type Dirent } from 'node:fs';
+import { mkdirSync, realpathSync, writeFileSync, type Dirent } from 'node:fs';
 import { readdir, realpath } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import type { PermissionRuleDto, ProjectDto } from '@10db/contracts';
 import { foldPathCase } from '../guard';
 import { deniedEnvNames } from './env-allowlist';
 import { claudeProtectedPaths, type FileAccessContext } from './file-access';
-import { packageCacheEnv, projectCacheDir } from './package-cache';
+import { laneMiseConfig, MISE_SYSTEM_DIRS } from './mise-config';
+import { packageCacheEnv } from './package-cache';
 import {
   buildLaneProfile,
   isSandboxDomain,
@@ -21,7 +22,7 @@ import {
   removeLaneTempDir,
   SandboxTempDirError,
 } from './temp-dir';
-import { toolchainReads } from './toolchain-reads';
+import { toolchainAccess } from './toolchain-reads';
 
 /** What a sandboxed session hands Claude Code on top of its ordinary options. */
 export interface LaneSandboxSpec {
@@ -45,7 +46,7 @@ export interface LaneSession {
 }
 
 export interface LaneSessionInput {
-  readonly project: Pick<ProjectDto, 'id' | 'repoPath'>;
+  readonly project: Pick<ProjectDto, 'id' | 'repoPath' | 'sandboxLoopback'>;
   /** The session's launch env, before the sandbox's own is merged over it. */
   readonly env: Readonly<Record<string, string>>;
   /** The project's and the workstream's stored permission rules. */
@@ -53,6 +54,11 @@ export interface LaneSessionInput {
   readonly resumeProviderSessionId: string | null;
   /** The config dir of the account the session runs on, where Claude Code saves its tool results. */
   readonly configDir: string;
+  /**
+   * Every project's checkout. A lane can write its own, so a PATH entry inside any of them is dropped
+   * before the toolchain is read: no lane can change another's profile or refuse its session.
+   */
+  readonly checkouts: readonly string[];
 }
 
 export interface LaneSandbox {
@@ -62,7 +68,6 @@ export interface LaneSandbox {
 export interface LaneSandboxDeps {
   readonly home: string;
   readonly dataDir: string;
-  readonly loopback: boolean;
   readonly loginConfigDir: string | null;
   /** Where temp dirs are made; tests pass a short temp root. */
   readonly tmpRoot?: string;
@@ -70,6 +75,8 @@ export interface LaneSandboxDeps {
   readonly gitDirs: (
     repoPath: string,
   ) => Promise<{ readonly gitDir: string; readonly commonDir: string }>;
+  /** The install prefixes probed for node; tests pass their own. */
+  readonly systemPrefixes?: readonly string[];
 }
 
 const NETWORK_TOOL = 'SandboxNetworkAccess';
@@ -201,26 +208,55 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
   return {
     async forSession(input) {
       const checkout = realCheckoutOf(input.project.repoPath);
-      const secretFiles = await secretFilesIn(checkout);
+      const checkoutSecrets = await secretFilesIn(checkout);
       const { gitDir, commonDir } = await deps.gitDirs(checkout);
       const linkedWorktree = !isEqualOrUnder(commonDir, checkout);
-      const protectedList = protectedReads({
-        home: deps.home,
-        dataDir: deps.dataDir,
-        configDirs: [
-          input.configDir,
-          ...(deps.loginConfigDir === null ? [] : [deps.loginConfigDir]),
-        ],
+      const protectedList = [
+        ...protectedReads({
+          home: deps.home,
+          dataDir: deps.dataDir,
+          configDirs: [
+            input.configDir,
+            ...(deps.loginConfigDir === null ? [] : [deps.loginConfigDir]),
+          ],
+        }),
+        ...MISE_SYSTEM_DIRS,
+      ];
+      const untrustedRoots = [...input.checkouts, tmpRoot].flatMap((path) => {
+        try {
+          return [path, realpathSync(path)];
+        } catch {
+          return [path];
+        }
       });
+      const toolchain = toolchainAccess(deps.home, input.env, protectedList, {
+        untrustedRoots,
+        ...(deps.systemPrefixes === undefined ? {} : { systemPrefixes: deps.systemPrefixes }),
+      });
+      const secretFiles = [...checkoutSecrets, ...toolchain.secretFiles];
       const hosts = storedPatterns(input.rules, NETWORK_TOOL, isSandboxDomain);
       const readList = storedPatterns(input.rules, 'Read', isSandboxPath);
-      const cacheDir = projectCacheDir(deps.home, input.project.id);
       const tmpDir = createLaneTempDir(tmpRoot);
       let envFile: string | null = null;
       try {
         envFile = createLaneEnvFile(tmpRoot);
+        // The lane's own global mise config: the builder's global tool versions and nothing else, so
+        // neither its `[env]` nor its age key reaches a lane command.
+        const miseConfigDir = join(tmpDir, 'mise');
+        mkdirSync(miseConfigDir, { mode: 0o700 });
+        const miseConfigFile = join(miseConfigDir, 'config.toml');
+        writeFileSync(miseConfigFile, laneMiseConfig(deps.home, input.env), {
+          mode: 0o600,
+        });
         const env: Record<string, string> = {
-          ...packageCacheEnv(cacheDir),
+          // Inside the lane's temp dir: a cache can hold code a later install runs, so no lane
+          // shares one, and it goes with the lane.
+          ...packageCacheEnv(join(tmpDir, 'cache')),
+          MISE_CONFIG_DIR: miseConfigDir,
+          MISE_GLOBAL_CONFIG_FILE: miseConfigFile,
+          // mise's system config moves to the lane's dir too, where none exists.
+          MISE_SYSTEM_DIR: miseConfigDir,
+          MISE_SYSTEM_CONFIG_FILE: join(miseConfigDir, 'system.toml'),
           CLAUDE_CODE_TMPDIR: tmpDir,
           // An exception to keeping git config variables: the builder's global config can name
           // hooks, credential helpers and includes the sandboxed git would run or read.
@@ -234,9 +270,9 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           tmpDir,
           home: deps.home,
           protectedReads: protectedList,
-          secretFiles,
-          toolchainReads: toolchainReads(deps.home, input.env['PATH'] ?? ''),
-          packageCacheDir: cacheDir,
+          secretFiles: checkoutSecrets,
+          toolchainSecrets: toolchain.secretFiles,
+          toolchainReads: toolchain.reads,
           allowedDomains: hosts,
           readList,
           // A linked worktree's common dir is read-only: it holds the `config` and `hooks/` the
@@ -249,7 +285,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           // Claude Code opens a linked worktree's git dir for writing and holds back `commondir` and
           // `config.worktree`, but not `gitdir`, the link git follows from the main repository.
           denyWrites: linkedWorktree ? [join(gitDir, 'gitdir')] : [],
-          loopback: deps.loopback,
+          loopback: input.project.sandboxLoopback,
           deniedEnvNames: deniedEnvNames({ ...input.env, ...env }),
         });
         // The config dir and its ancestors stay readable to the file tools, which open the

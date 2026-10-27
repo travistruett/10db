@@ -42,20 +42,22 @@ function sandbox(overrides: { loginConfigDir?: string | null } = {}): LaneSandbo
   return createLaneSandbox({
     home,
     dataDir,
-    loopback: false,
     loginConfigDir: overrides.loginConfigDir ?? null,
     tmpRoot,
     gitDirs: (path) => git.gitDirs(path),
+    // Hermetic: the machine's own install prefixes add no deny.
+    systemPrefixes: [],
   });
 }
 
 function input(overrides: Partial<LaneSessionInput> = {}): LaneSessionInput {
   return {
-    project: { id: projectId, repoPath: repo.path },
+    project: { id: projectId, repoPath: repo.path, sandboxLoopback: false },
     env: { PATH: '/usr/bin:/bin', HOME: home, ANTHROPIC_API_KEY: 'sk-test' },
     rules: [],
     resumeProviderSessionId: null,
     configDir: join(home, '.claude'),
+    checkouts: [repo.path],
     ...overrides,
   };
 }
@@ -105,6 +107,32 @@ describe('createLaneSandbox', () => {
     }
   });
 
+  it("writes only the lane's own temp dir, never a shared cache or pnpm's shared lock directory", async () => {
+    const session = await sandbox().forSession(input());
+    try {
+      expect(session.spec.settings.filesystem.allowWrite).toEqual([session.tmpDir]);
+      expect(session.spec.settings.filesystem.allowWrite.join('\n')).not.toContain(
+        'pnpm-store-operation-locks',
+      );
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it.each([
+    ['off', false, undefined],
+    ['on', true, true],
+  ])("opens localhost when the project's switch is %s", async (_name, sandboxLoopback, binding) => {
+    const session = await sandbox().forSession(
+      input({ project: { id: projectId, repoPath: repo.path, sandboxLoopback } }),
+    );
+    try {
+      expect(session.spec.settings.network.allowLocalBinding).toBe(binding);
+    } finally {
+      session.dispose();
+    }
+  });
+
   it("makes the project's stored hosts its allowed domains, and its stored read paths readable", async () => {
     const shared = join(root, 'shared');
     mkdirSync(shared);
@@ -136,6 +164,9 @@ describe('createLaneSandbox', () => {
       input({
         rules: [
           { toolName: 'SandboxNetworkAccess', pattern: 'example.com:8443' },
+          // The broker matches these hosts itself; the profile can't list them.
+          { toolName: 'SandboxNetworkAccess', pattern: 'my_service' },
+          { toolName: 'SandboxNetworkAccess', pattern: 'fe80::1' },
           { toolName: 'Read', pattern: '/opt/data/*' },
           { toolName: 'Read', pattern: 'relative/path' },
         ],
@@ -159,7 +190,7 @@ describe('createLaneSandbox', () => {
       });
       const commonDir = join(checkout, '.git');
       const session = await sandbox().forSession(
-        input({ project: { id: projectId, repoPath: worktree } }),
+        input({ project: { id: projectId, repoPath: worktree, sandboxLoopback: false } }),
       );
       try {
         const { allowRead, allowWrite, denyWrite } = session.spec.settings.filesystem;
@@ -193,7 +224,7 @@ describe('createLaneSandbox', () => {
     symlinkSync(checkout, link);
     const env = writeIn(checkout, '.env');
     const session = await sandbox().forSession(
-      input({ project: { id: projectId, repoPath: link } }),
+      input({ project: { id: projectId, repoPath: link, sandboxLoopback: false } }),
     );
     try {
       expect(session.spec.settings.filesystem.allowRead).toContain(checkout);
@@ -207,14 +238,22 @@ describe('createLaneSandbox', () => {
   it('gives the session its own temp dir, package caches and an empty global git config', async () => {
     const session = await sandbox().forSession(input());
     try {
-      const cache = join(home, 'Library', 'Caches', '10db', 'projects', projectId);
+      // Package caches can hold code a later install runs, so each lane has its own, removed with it.
+      const cache = join(session.tmpDir, 'cache');
       expect(existsSync(session.tmpDir)).toBe(true);
       expect(dirname(session.tmpDir)).toBe(tmpRoot);
       expect(session.spec.env).toEqual({
         npm_config_cache: join(cache, 'npm'),
+        npm_config_devdir: join(cache, 'node-gyp'),
+        COREPACK_HOME: join(cache, 'corepack'),
         pnpm_config_store_dir: join(cache, 'pnpm-store'),
         pnpm_config_state_dir: join(cache, 'pnpm-state'),
         pnpm_config_cache_dir: join(cache, 'pnpm-cache'),
+        CARGO_HOME: join(cache, 'cargo'),
+        MISE_CONFIG_DIR: join(session.tmpDir, 'mise'),
+        MISE_GLOBAL_CONFIG_FILE: join(session.tmpDir, 'mise', 'config.toml'),
+        MISE_SYSTEM_DIR: join(session.tmpDir, 'mise'),
+        MISE_SYSTEM_CONFIG_FILE: join(session.tmpDir, 'mise', 'system.toml'),
         CLAUDE_CODE_TMPDIR: session.tmpDir,
         GIT_CONFIG_GLOBAL: '/dev/null',
         CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1',
@@ -223,11 +262,73 @@ describe('createLaneSandbox', () => {
           readdirSync(tmpRoot).find((name) => name.startsWith('10db-env-')) ?? '',
         ),
       });
-      expect(session.spec.settings.filesystem.allowWrite).toEqual(
-        expect.arrayContaining([session.tmpDir, cache]),
-      );
+      expect(session.spec.settings.filesystem.allowWrite).toEqual([session.tmpDir]);
     } finally {
       session.dispose();
+    }
+    expect(existsSync(join(session.tmpDir, 'cache'))).toBe(false);
+  });
+
+  it("gives the lane its own global mise config, holding only the builder's tool versions", async () => {
+    writeIn(
+      home,
+      '.config/mise/config.toml',
+      '[tools]\nnode = "26.12.0"\n[env]\nNPM_TOKEN = "secret"\n',
+    );
+    writeIn(home, '.config/mise/age.txt', 'AGE-SECRET-KEY');
+    const session = await sandbox().forSession(input());
+    try {
+      const config = readFileSync(join(session.tmpDir, 'mise', 'config.toml'), 'utf8');
+      expect(config).toContain('node = "26.12.0"');
+      expect(config).not.toContain('secret');
+      const { allowRead, denyRead } = session.spec.settings.filesystem;
+      expect(allowRead.filter((path) => path.startsWith(join(home, '.config')))).toEqual([]);
+      expect(denyRead).toContain(join(home, '.config/mise/age.txt'));
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it("keeps mise's system config from lanes: its dir is denied and mise looks in the lane's own", async () => {
+    const session = await sandbox().forSession(input());
+    try {
+      const { denyRead } = session.spec.settings.filesystem;
+      expect(denyRead).toEqual(expect.arrayContaining(['/etc/mise', '/private/etc/mise']));
+      expect(readAccess('/etc/mise/config.toml', session.fileAccess).access).toBe('protected');
+      expect(existsSync(join(session.tmpDir, 'mise', 'system.toml'))).toBe(false);
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it("drops a PATH entry inside any project's checkout, so a lane can't change another's profile", async () => {
+    const other = join(home, 'other-repo');
+    const bin = join(other, 'node_modules', '.bin');
+    writeIn(bin, 'tool');
+    const env = { PATH: `${bin}:/usr/bin`, HOME: home };
+    const trusted = await sandbox().forSession(input({ env, checkouts: [repo.path] }));
+    const untrusted = await sandbox().forSession(input({ env, checkouts: [repo.path, other] }));
+    try {
+      expect(trusted.spec.settings.filesystem.allowRead).toContain(join(bin, 'tool'));
+      expect(untrusted.spec.settings.filesystem.allowRead).not.toContain(join(bin, 'tool'));
+    } finally {
+      trusted.dispose();
+      untrusted.dispose();
+    }
+  });
+
+  it('gives two sessions of one project two caches, so nothing one writes reaches the other', async () => {
+    const first = await sandbox().forSession(input());
+    const second = await sandbox().forSession(input());
+    try {
+      expect(first.spec.env['CARGO_HOME']).not.toBe(second.spec.env['CARGO_HOME']);
+      expect(first.spec.env['npm_config_cache']).not.toBe(second.spec.env['npm_config_cache']);
+      expect(first.spec.env['pnpm_config_store_dir']).not.toBe(
+        second.spec.env['pnpm_config_store_dir'],
+      );
+    } finally {
+      first.dispose();
+      second.dispose();
     }
   });
 
@@ -485,6 +586,109 @@ describe('createLaneSandbox', () => {
     }
   });
 
+  it.each<[string, () => string]>([
+    ['the checkout', () => '.'],
+    ["the checkout's parent", () => '..'],
+    ['the root', () => '/'],
+    ['a system location', () => '/usr'],
+    ['the home holding the toolchains', () => home],
+  ])('refuses the lane, naming the target, when a .env link leads to %s', async (_name, target) => {
+    symlinkSync(target(), join(checkout, '.env'));
+    const refusal = sandbox().forSession(input());
+    await expect(refusal).rejects.toThrow(SandboxProfileError);
+    await expect(sandbox().forSession(input())).rejects.toThrow(
+      /a \.env\* link in the checkout leads to .*, which holds .* every lane command needs/,
+    );
+    expect(readdirSync(tmpRoot)).toEqual([]);
+  });
+
+  it("opens an nvm install's own dirs but never its etc, and denies npm's builtin npmrc", async () => {
+    const install = join(home, '.nvm/versions/node/v22.1.0');
+    const globalNpmrc = writeIn(install, 'etc/npmrc', '//registry/:_authToken=x');
+    writeIn(home, '.nvm/nvm.sh');
+    writeIn(install, 'bin/node');
+    writeIn(install, 'lib/node_modules/npm/index.js');
+    const builtin = join(install, 'lib/node_modules/npm/npmrc');
+    const session = await sandbox().forSession(input());
+    try {
+      const { allowRead, denyRead } = session.spec.settings.filesystem;
+      expect(allowRead).toEqual(
+        expect.arrayContaining([join(install, 'bin'), join(install, 'lib')]),
+      );
+      expect(allowRead.filter((path) => isEqualOrUnder(globalNpmrc, path))).toEqual([]);
+      expect(denyRead).toContain(builtin);
+      expect(session.spec.disallowedTools).toContain(`Read(/${builtin})`);
+      expect(readAccess(builtin, session.fileAccess).access).toBe('protected');
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it('compares a toolchain read by its real path, refusing a .env link to where it really lives', async () => {
+    const real = join(root, 'real-cargo-bin');
+    mkdirSync(real);
+    mkdirSync(join(home, '.cargo'), { recursive: true });
+    symlinkSync(real, join(home, '.cargo', 'bin'));
+    symlinkSync(real, join(checkout, '.env'));
+    await expect(sandbox().forSession(input())).rejects.toThrow(
+      /a \.env\* link in the checkout leads to .*real-cargo-bin, which holds .* every lane command needs/,
+    );
+    expect(readdirSync(tmpRoot)).toEqual([]);
+  });
+
+  it.each<[string, () => string]>([
+    [
+      'inside a toolchain',
+      () => {
+        const plugins = join(home, '.local', 'state', 'mise', 'tracked-configs');
+        mkdirSync(plugins, { recursive: true });
+        return plugins;
+      },
+    ],
+    ['inside a system location', () => '/usr/share'],
+  ])('refuses the lane when a .env link leads to a directory %s', async (_name, target) => {
+    symlinkSync(target(), join(checkout, '.env'));
+    await expect(sandbox().forSession(input())).rejects.toThrow(
+      /a \.env\* link in the checkout leads to .*, a directory inside .* that lane commands read/,
+    );
+    expect(readdirSync(tmpRoot)).toEqual([]);
+  });
+
+  // macOS reaches `/private/etc` through the `/etc` link; Linux has no such link.
+  it.skipIf(process.platform !== 'darwin')(
+    'refuses the lane when a .env link leads to a directory inside a system location reached through a link',
+    async () => {
+      symlinkSync('/etc/ssh', join(checkout, '.env'));
+      await expect(sandbox().forSession(input())).rejects.toThrow(
+        /a \.env\* link in the checkout leads to .*, a directory inside .* that lane commands read/,
+      );
+    },
+  );
+
+  it('denies a file inside a system location that a .env link leads to, and starts the lane', async () => {
+    symlinkSync('/etc/hosts', join(checkout, '.env'));
+    const session = await sandbox().forSession(input());
+    try {
+      // `/private/etc/hosts` on macOS, `/etc/hosts` on Linux.
+      expect(session.spec.settings.filesystem.denyRead).toContain(realpathSync('/etc/hosts'));
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it('denies the directory a .env link leads to when it holds nothing the lane needs', async () => {
+    const outside = join(root, 'envs');
+    mkdirSync(outside);
+    symlinkSync(outside, join(checkout, '.envs'));
+    const session = await sandbox().forSession(input());
+    try {
+      expect(session.spec.settings.filesystem.denyRead).toContain(outside);
+      expect(session.spec.settings.filesystem.allowRead).toContain(checkout);
+    } finally {
+      session.dispose();
+    }
+  });
+
   it.each([
     ['a dangling .env link', (dir: string) => join(dir, 'missing.env')],
     ['a .env link in a loop', (dir: string) => join(dir, '.env')],
@@ -495,7 +699,10 @@ describe('createLaneSandbox', () => {
       expect(session.spec.settings.filesystem.denyRead.filter((p) => p.includes('env'))).toEqual(
         [],
       );
-      expect(session.fileAccess.secretFiles).toEqual([]);
+      // The machine's own toolchain npmrcs are secret files too; none comes from the checkout.
+      expect(
+        (session.fileAccess.secretFiles ?? []).filter((path) => isEqualOrUnder(path, checkout)),
+      ).toEqual([]);
     } finally {
       session.dispose();
     }

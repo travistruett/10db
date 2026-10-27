@@ -1,6 +1,6 @@
 import { ToolName, type SystemCheckDto } from '@10db/contracts';
 import { SchemaMismatchError } from '@10db/db';
-import { AlreadyRunningError, startDaemon } from './daemon';
+import { AlreadyRunningError, daemonOptionsFromEnv, startDaemon } from './daemon';
 import { loadEnv } from './env';
 import {
   AA_KEY_ACCOUNT,
@@ -77,15 +77,9 @@ async function chooseAdapter(): Promise<SessionAdapter | ((logger: Logger) => Se
 try {
   const sqliteBinding = resolveSqliteBinding(env);
   const daemon = await startDaemon({
+    ...daemonOptionsFromEnv(env),
     dataDir,
-    port: env.TENDB_PORT,
     adapter: await chooseAdapter(),
-    permissionModeOverride: env.TENDB_LANE_PERMISSION_MODE,
-    laneSandbox:
-      env.TENDB_LANE_SANDBOX === 'on'
-        ? { loopback: env.TENDB_LANE_SANDBOX_LOOPBACK === 'on' }
-        : null,
-    logLevel: env.TENDB_LOG_LEVEL,
     migrationsDir: resolveMigrationsDir(),
     harnessDir: resolveHarnessDir(),
     aaKey: () => systemKeychain.read(AA_KEY_ACCOUNT),
@@ -93,8 +87,6 @@ try {
     keychain: systemKeychain,
     systemCheck: check,
     networkEnv: () => buildNetworkEnv(login.vars),
-    ...(env.TENDB_DEV_UI_TOKEN ? { uiToken: env.TENDB_DEV_UI_TOKEN } : {}),
-    ...(env.TENDB_DEV_UI_ORIGIN ? { devUiOrigin: env.TENDB_DEV_UI_ORIGIN } : {}),
     ...(sqliteBinding ? { sqliteBinding } : {}),
   });
   console.log(`10db daemon listening on ${daemon.url} (data: ${dataDir})`);

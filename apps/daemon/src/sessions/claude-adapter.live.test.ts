@@ -27,7 +27,14 @@ describe.skipIf(!live)('Claude adapter, live', () => {
         },
       },
     });
-    const adapter = createClaudeAdapter({ claudePath, pluginDir: HARNESS_PLUGIN_DIR, logger });
+    // This test checks the adapter's own wiring against the real claude, with a prompt that runs no
+    // command; `test/lane-sandbox.live.test.ts` covers the sandboxed session.
+    const adapter = createClaudeAdapter({
+      claudePath,
+      pluginDir: HARNESS_PLUGIN_DIR,
+      logger,
+      allowUnsandboxed: true,
+    });
     // The default account lives where the builder's login does; a probe reads who that is.
     const launcher = createLauncher({
       base: login.vars,
@@ -68,7 +75,6 @@ describe.skipIf(!live)('Claude adapter, live', () => {
       model: launch.model,
       effort: 'low',
       resumeProviderSessionId: null,
-      permissionMode: 'default',
       env: launch.env,
       account: launch.expect,
       projectMcpServers: {},

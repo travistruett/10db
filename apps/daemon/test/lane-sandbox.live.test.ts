@@ -12,7 +12,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { homedir, tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import {
   mintId,
@@ -76,6 +76,11 @@ function initRepo(dir: string): void {
   writeFileSync(join(dir, 'README.md'), '# fixture\n');
   gitIn(dir, 'add', 'README.md');
   gitIn(dir, 'commit', '-q', '-m', 'Initial commit');
+}
+
+/** A probe line that prints the shell's error, if any, from creating `path`. */
+function writeError(label: string, path: string): string {
+  return `echo "${label}=$( (: > '${path}') 2>&1 )"`;
 }
 
 /** Shell that appends the marker to `path` and reports whether the write went through. */
@@ -167,6 +172,8 @@ async function runLane(opts: {
   readonly extraEnv: Readonly<Record<string, string>>;
   readonly probe: (lane: { tmpDir: string; envFile: string }) => string;
   readonly prompt: string;
+  /** Hosts the project has allowed, as stored rules: the profile lists them. */
+  readonly hosts?: readonly string[];
 }): Promise<LaneRun> {
   const login = await captureLoginEnv({ inherited: process.env });
   const claudePath = findOnPath('claude', login.vars['PATH']);
@@ -218,7 +225,6 @@ async function runLane(opts: {
   const laneSandbox = createLaneSandbox({
     home: homedir(),
     dataDir: opts.dataDir,
-    loopback: false,
     loginConfigDir: launcher.loginConfigDir(),
     gitDirs: (repo) => createGit().gitDirs(repo),
   });
@@ -227,9 +233,13 @@ async function runLane(opts: {
     laneSession = await laneSandbox.forSession({
       project,
       env,
-      rules: [],
+      rules: (opts.hosts ?? []).map((host) => ({
+        toolName: 'SandboxNetworkAccess',
+        pattern: host,
+      })),
       resumeProviderSessionId: null,
       configDir,
+      checkouts: [opts.checkout],
     });
     const lane = laneSession;
     const envFile = lane.spec.env['CLAUDE_ENV_FILE'];
@@ -238,10 +248,6 @@ async function runLane(opts: {
     return await driveSession({ lane, project, workstreamId: workstream.id, envFile });
   } finally {
     laneSession?.dispose();
-    rmSync(join(homedir(), 'Library', 'Caches', '10db', 'projects', project.id), {
-      recursive: true,
-      force: true,
-    });
     test.close();
   }
 
@@ -283,7 +289,6 @@ async function runLane(opts: {
       model: launch.model,
       effort: 'low',
       resumeProviderSessionId: null,
-      permissionMode: 'default',
       env,
       account: launch.expect,
       projectMcpServers: {},
@@ -378,6 +383,12 @@ describe.skipIf(!live)('lane sandbox, live', () => {
     const outside = realpathSync(mkdtempSync(join(tmpdir(), '10db-canary-')));
     const otherLaneTmp = createLaneTempDir();
     const shared = `/Users/Shared/10db-canary-${randomUUID()}`;
+    // pnpm 12's fixed lock directory is shared with every lane and the builder's pnpm: never writable.
+    // It is made here when missing, so the probe's write fails on the sandbox, not on a missing dir.
+    const pnpmLockDir = `/private/tmp/pnpm-store-operation-locks-${String(userInfo().uid)}`;
+    mkdirSync(pnpmLockDir, { recursive: true, mode: 0o700 });
+    const pnpmLock = join(pnpmLockDir, `10db-live-${randomUUID()}.lock`);
+    const tmpSibling = `/private/tmp/10db-live-${randomUUID()}`;
     try {
       const checkout = join(root, 'repo');
       initRepo(checkout);
@@ -412,6 +423,7 @@ describe.skipIf(!live)('lane sandbox, live', () => {
         checkout,
         dataDir,
         extraEnv: { GH_TOKEN: 'fake-gh-token-for-the-live-test' },
+        hosts: ['index.crates.io', 'static.crates.io'],
         probe: ({ tmpDir, envFile }) =>
           [
             `exec > '${tmpDir}/probe-out' 2>&1`,
@@ -420,6 +432,15 @@ describe.skipIf(!live)('lane sandbox, live', () => {
             'git status > /dev/null; echo "GIT_STATUS=$?"',
             ...canaries.map((c) => `echo 'CAT ${c.label}'; cat '${c.path}'`),
             tryWrite(join(checkout, 'probe-write-control')),
+            writeError('PNPM_LOCK_WRITE', pnpmLock),
+            writeError('TMP_SIBLING_WRITE', tmpSibling),
+            'echo "CARGO_HOME=$CARGO_HOME"',
+            // rustup's proxy runs with only ~/.cargo/bin readable, and cargo fetches into the lane's home.
+            'cargo --version > /dev/null; echo "CARGO_VERSION=$?"',
+            'mkdir -p "$TMPDIR/fetch-probe/src" && : > "$TMPDIR/fetch-probe/src/lib.rs"',
+            `printf '[package]\\nname = "fetch-probe"\\nversion = "0.1.0"\\nedition = "2021"\\n\\n[dependencies]\\nitoa = "=1.0.11"\\n' > "$TMPDIR/fetch-probe/Cargo.toml"`,
+            'cargo fetch -q --manifest-path "$TMPDIR/fetch-probe/Cargo.toml"; echo "CARGO_FETCH=$?"',
+            'ls "$CARGO_HOME"/registry/cache/*/itoa-1.0.11.crate > /dev/null; echo "CARGO_CRATE=$?"',
             ...gitFiles.map(tryWrite),
             tryWrite(envFile),
             `chmod u+w '${envFile}' 2>/dev/null; echo "CHMOD=$?"`,
@@ -454,6 +475,20 @@ describe.skipIf(!live)('lane sandbox, live', () => {
       expect.soft(probeLine(run.probeOutput, 'CHMOD=')).not.toBe('CHMOD=0');
       // The checkout itself is writable, so a refused git-dir write is the profile's doing.
       expect.soft(readFileSync(join(checkout, 'probe-write-control'), 'utf8')).toContain(MARKER);
+      expect
+        .soft(probeLine(run.probeOutput, 'PNPM_LOCK_WRITE='))
+        .toContain('Operation not permitted');
+      expect
+        .soft(probeLine(run.probeOutput, 'TMP_SIBLING_WRITE='))
+        .toContain('Operation not permitted');
+      expect.soft(existsSync(pnpmLock)).toBe(false);
+      // Each lane's cargo home is in its own temp dir, removed with it.
+      expect
+        .soft(probeLine(run.probeOutput, 'CARGO_HOME='))
+        .toMatch(/^CARGO_HOME=\/private\/tmp\/10db-[^/]+\/cache\/cargo$/);
+      expect.soft(probeLine(run.probeOutput, 'CARGO_VERSION=')).toBe('CARGO_VERSION=0');
+      expect.soft(probeLine(run.probeOutput, 'CARGO_FETCH=')).toBe('CARGO_FETCH=0');
+      expect.soft(probeLine(run.probeOutput, 'CARGO_CRATE=')).toBe('CARGO_CRATE=0');
       for (const file of gitFiles) {
         const written = existsSync(file) && readFileSync(file, 'utf8').includes(MARKER);
         expect.soft(written, `wrote ${file}`).toBe(false);
@@ -470,6 +505,8 @@ describe.skipIf(!live)('lane sandbox, live', () => {
       rmSync(root, { recursive: true, force: true });
       rmSync(outside, { recursive: true, force: true });
       rmSync(shared, { force: true });
+      rmSync(pnpmLock, { force: true });
+      rmSync(tmpSibling, { force: true });
       removeLaneTempDir(otherLaneTmp);
     }
   }, 300_000);

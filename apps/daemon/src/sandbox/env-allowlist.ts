@@ -11,12 +11,22 @@ const ALLOWED_NAMES: ReadonlySet<string> = new Set([
   'PNPM_HOME',
   'CARGO_HOME',
   'RUSTUP_HOME',
+  'NVM_DIR',
+  'NVM_BIN',
+  'NVM_INC',
+  'VOLTA_HOME',
+  'COREPACK_HOME',
+  'XDG_CONFIG_HOME',
+  'XDG_DATA_HOME',
+  'XDG_STATE_HOME',
+  'XDG_CACHE_HOME',
   'JAVA_HOME',
   'GOPATH',
   'GOROOT',
   'CLAUDE_CODE_TMPDIR',
   'GIT_CONFIG_GLOBAL',
   'npm_config_cache',
+  'npm_config_devdir',
 ]);
 
 const ALLOWED_PREFIXES = ['LC_', 'MISE_', 'pnpm_config_'] as const;

@@ -7,8 +7,8 @@ export {
   type LaneProfileInput,
 } from './profile';
 export { protectedReads } from './protected-reads';
-export { toolchainReads } from './toolchain-reads';
-export { packageCacheEnv, projectCacheDir } from './package-cache';
+export { toolchainAccess } from './toolchain-reads';
+export { packageCacheEnv } from './package-cache';
 export { createLaneEnvFile, removeLaneEnvFile } from './env-file';
 export {
   createLaneTempDir,

@@ -21,6 +21,7 @@ import {
   buildQueryOptions,
   CLAUDE_MCP_SERVER,
   createClaudeAdapter,
+  UNSANDBOXED_REFUSAL,
   type QueryFn,
 } from './claude-adapter';
 import {
@@ -46,7 +47,6 @@ function spec(overrides: Partial<SessionSpec> = {}): SessionSpec {
     model: 'sonnet',
     effort: 'medium',
     resumeProviderSessionId: null,
-    permissionMode: 'default',
     env: { PATH: '/usr/bin:/bin', CLAUDE_AGENT_SDK_CLIENT_APP: '10db/0.1.0' },
     account: {
       accountId: mintId('Account'),
@@ -179,6 +179,7 @@ function adapterFor(script: Script, stopGraceMs = 1_000, clock: Clock = systemCl
     pluginDir: '/harness',
     logger: silentLogger,
     query: fake.query,
+    allowUnsandboxed: true,
     stopGraceMs,
     clock,
   });
@@ -325,13 +326,12 @@ describe('buildQueryOptions', () => {
     });
   });
 
-  it.each<[string, SessionSpec['permissionMode'], string]>([
-    ['default', 'default', 'default'],
-    ['auto', 'auto', 'auto'],
-  ])('uses the %s lane permission mode', (_name, mode, expected) => {
-    const options = buildQueryOptions(spec({ permissionMode: mode }), deps);
-    expect(options.permissionMode).toBe(expected);
-    // The guard and the broker stay wired in either mode.
+  it.each<[string, Partial<SessionSpec>]>([
+    ['an unsandboxed', {}],
+    ['a sandboxed', { sandbox: laneSandbox }],
+  ])('runs %s session in default mode, with the guard and the broker wired', (_name, given) => {
+    const options = buildQueryOptions(spec(given), deps);
+    expect(options.permissionMode).toBe('default');
     expect(options.canUseTool).toBeTypeOf('function');
     expect(options.hooks?.PreToolUse).toHaveLength(1);
   });
@@ -355,11 +355,6 @@ describe('buildQueryOptions', () => {
       strictMcpConfig: true,
       plugins: [{ type: 'local', path: '/harness' }],
     });
-  });
-
-  it("with permissionMode 'auto' in the spec, a sandboxed session runs in default", () => {
-    const options = buildQueryOptions(spec({ permissionMode: 'auto', sandbox: laneSandbox }), deps);
-    expect(options.permissionMode).toBe('default');
   });
 
   it('wires no settings re-check into a sandboxed session, which loads no settings file', () => {
@@ -442,23 +437,6 @@ describe('buildQueryOptions', () => {
     );
     expect(canUseTool).toHaveBeenCalledWith(expect.objectContaining({ escalated: expected }));
   });
-
-  it.each<['default' | 'auto']>([['auto'], ['default']])(
-    'passes the %s lane permission mode from the session to claude',
-    async (mode) => {
-      const fake = fakeQuery({
-        messages: [initMessage(), resultMessage({ input: 1, output: 1, costUsd: 0 })],
-      });
-      const adapter = createClaudeAdapter({
-        claudePath: '/usr/local/bin/claude',
-        pluginDir: '/harness',
-        logger: silentLogger,
-        query: fake.query,
-      });
-      await collect(adapter.start(spec({ permissionMode: mode })).events);
-      expect(fake.record.options?.permissionMode).toBe(mode);
-    },
-  );
 
   it('denies tools without asking the spec when billing was not verified', async () => {
     const canUseTool = vi.fn<SessionSpec['canUseTool']>(() =>
@@ -658,6 +636,7 @@ describe('createClaudeAdapter', () => {
       pluginDir: '/harness',
       logger,
       query: fake.query,
+      allowUnsandboxed: true,
     });
     await collect(adapter.start(spec()).events);
     expect(lines.filter((l) => l['msg'] === 'claude session mcp')).toEqual([
@@ -914,6 +893,7 @@ describe('createClaudeAdapter', () => {
       pluginDir: '/harness',
       logger,
       query: fake.query,
+      allowUnsandboxed: true,
     });
     const events = await collect(
       adapter.start(
@@ -958,6 +938,7 @@ describe('createClaudeAdapter', () => {
       pluginDir: '/harness',
       logger,
       query: fake.query,
+      allowUnsandboxed: true,
     });
     const events = await collect(adapter.start(spec()).events);
     expect(events.at(-1)).toMatchObject({ type: 'ended', reason: 'error' });
@@ -1478,6 +1459,37 @@ describe('createClaudeAdapter', () => {
   });
 });
 
+describe('an unsandboxed session', () => {
+  it('is refused before claude starts, unless the adapter was built to allow it', async () => {
+    const fake = fakeQuery({
+      messages: [initMessage(), resultMessage({ input: 1, output: 1, costUsd: 0 })],
+    });
+    const strict = createClaudeAdapter({
+      claudePath: '/usr/local/bin/claude',
+      pluginDir: '/harness',
+      logger: silentLogger,
+      query: fake.query,
+    });
+    const refused = await collect(strict.start(spec()).events);
+    expect(refused).toEqual([{ type: 'ended', reason: 'error', message: UNSANDBOXED_REFUSAL }]);
+    expect(fake.record.options).toBeNull();
+  });
+
+  it('starts a sandboxed session on an adapter that allows no unsandboxed one', async () => {
+    const fake = fakeQuery({
+      messages: [initMessage(), resultMessage({ input: 1, output: 1, costUsd: 0 })],
+    });
+    const strict = createClaudeAdapter({
+      claudePath: '/usr/local/bin/claude',
+      pluginDir: '/harness',
+      logger: silentLogger,
+      query: fake.query,
+    });
+    await collect(strict.start(spec({ sandbox: laneSandbox })).events);
+    expect(fake.record.options?.sandbox).toEqual(laneSandbox.settings);
+  });
+});
+
 describe('the account check', () => {
   it('refuses before the prompt when Claude Code reports another email', async () => {
     const { adapter, record } = adapterFor({
@@ -1606,6 +1618,7 @@ describe('probeAccount', () => {
       pluginDir: '/harness',
       logger: silentLogger,
       query: fake.query,
+      allowUnsandboxed: true,
     });
     const seen = await adapter.probeAccount({
       cwd: '/data',
@@ -1638,6 +1651,7 @@ describe('probeAccount', () => {
       pluginDir: '/h',
       logger: silentLogger,
       query: fake.query,
+      allowUnsandboxed: true,
       clock,
     });
     const probe = adapter.probeAccount({ cwd: '/data', env: {} });

@@ -1,4 +1,4 @@
-import { realpathSync } from 'node:fs';
+import { lstatSync, realpathSync } from 'node:fs';
 import { posix } from 'node:path';
 import { z } from 'zod';
 import { isEqualOrUnder } from './protected-reads';
@@ -107,9 +107,11 @@ export interface LaneProfileInput {
   tmpDir: string;
   home: string;
   protectedReads: readonly string[];
+  /** The checkout's `.env*` files, and the real paths of its `.env*` links. */
   secretFiles: readonly string[];
+  /** Toolchain files that can hold a registry token or a key, from `toolchainAccess`. */
+  toolchainSecrets: readonly string[];
   toolchainReads: readonly string[];
-  packageCacheDir: string;
   allowedDomains: readonly string[];
   readList: readonly string[];
   /** Extra read-only paths, such as a linked worktree's git dirs. */
@@ -122,6 +124,76 @@ export interface LaneProfileInput {
   deniedEnvNames: readonly string[];
 }
 
+/** A path and, when it differs and exists, its real path, so a link and its target compare alike. */
+function spellings(path: string): string[] {
+  try {
+    const real = realpathSync(path);
+    return real === path ? [path] : [path, real];
+  } catch {
+    return [path];
+  }
+}
+
+/** A directory itself, not a link to one: a `.env*` link is listed beside the real path it leads to. */
+function isDirectory(path: string): boolean {
+  try {
+    return lstatSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A `.env*` link to a directory denies the directory. Denying one that holds what lane commands
+ * read, or one inside a toolchain or system location, would leave a lane whose commands fail with no
+ * reason given, so the session is refused, naming the link's target. The checkout, the toolchains and
+ * the lane's own paths compare by both their spelling and their real path. The system reads compare as
+ * written: `/tmp`, `/var` and `/etc` reopen only their links, not what lies under `/private`.
+ */
+function refuseSecretsOverNeeds(
+  secrets: readonly string[],
+  needed: readonly string[],
+  toolchains: readonly string[],
+): void {
+  const neededSpellings = [...SYSTEM_READS, ...needed.flatMap(spellings)];
+  const rootSpellings = [...SYSTEM_READS, ...toolchains.flatMap(spellings)];
+  for (const secret of secrets) {
+    const held = neededSpellings.find((path) => isEqualOrUnder(path, secret));
+    if (held !== undefined)
+      throw new SandboxProfileError(
+        'secretFiles',
+        `a .env* link in the checkout leads to ${secret}, which holds ${held} that every lane command needs; remove the link or point it at a file`,
+      );
+    if (!isDirectory(secret)) continue;
+    const inside = rootSpellings.find((root) => isEqualOrUnder(secret, root));
+    if (inside !== undefined)
+      throw new SandboxProfileError(
+        'secretFiles',
+        `a .env* link in the checkout leads to ${secret}, a directory inside ${inside} that lane commands read; remove the link or point it at a file`,
+      );
+  }
+}
+
+/**
+ * A toolchain secret that holds what lane commands read would leave a lane that fails with no reason
+ * given. `toolchainAccess` already keeps such paths out of the toolchain reads, so this can only meet
+ * the checkout, the temp dir or an extra read, and refuses the session naming both.
+ */
+function refuseToolchainSecretsOverNeeds(
+  secrets: readonly string[],
+  needed: readonly string[],
+): void {
+  const neededSpellings = needed.flatMap(spellings);
+  for (const secret of secrets) {
+    const held = neededSpellings.find((path) => isEqualOrUnder(path, secret));
+    if (held !== undefined)
+      throw new SandboxProfileError(
+        'toolchainSecrets',
+        `a toolchain file that can hold a registry token, ${secret}, holds ${held} that every lane command needs; move it`,
+      );
+  }
+}
+
 /** Builds the lane's sandbox settings from one input and validates them before they reach Claude Code. */
 export function buildLaneProfile(input: LaneProfileInput): LaneSandboxSettings {
   let checkout: string;
@@ -130,18 +202,14 @@ export function buildLaneProfile(input: LaneProfileInput): LaneSandboxSettings {
   } catch {
     throw new SandboxProfileError('checkout', "the checkout can't be read");
   }
-  const denied = [...input.protectedReads, ...input.secretFiles];
+  const laneReads = [input.tmpDir, checkout, ...input.toolchainReads, ...input.extraReads];
+  refuseSecretsOverNeeds(input.secretFiles, laneReads, input.toolchainReads);
+  refuseToolchainSecretsOverNeeds(input.toolchainSecrets, laneReads);
+  const needed = [...SYSTEM_READS, ...laneReads];
+  const denied = [...input.protectedReads, ...input.secretFiles, ...input.toolchainSecrets];
   const isAllowed = (path: string): boolean => !denied.some((root) => isEqualOrUnder(path, root));
-  const readable = [
-    ...SYSTEM_READS,
-    input.tmpDir,
-    checkout,
-    ...input.toolchainReads,
-    input.packageCacheDir,
-    ...input.readList,
-    ...input.extraReads,
-  ].filter(isAllowed);
-  const writable = [input.tmpDir, input.packageCacheDir, ...input.extraWrites].filter(isAllowed);
+  const readable = [...needed, ...input.readList].filter(isAllowed);
+  const writable = [input.tmpDir, ...input.extraWrites].filter(isAllowed);
   const candidate: LaneSandboxSettings = {
     enabled: true,
     failIfUnavailable: true,
@@ -149,7 +217,7 @@ export function buildLaneProfile(input: LaneProfileInput): LaneSandboxSettings {
     allowAppleEvents: false,
     autoAllowBashIfSandboxed: false,
     filesystem: {
-      denyRead: ['/', ...input.protectedReads, ...input.secretFiles],
+      denyRead: ['/', ...input.protectedReads, ...input.secretFiles, ...input.toolchainSecrets],
       allowRead: readable,
       allowWrite: writable,
       denyWrite: [...input.denyWrites],

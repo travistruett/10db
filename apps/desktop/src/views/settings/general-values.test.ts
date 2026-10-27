@@ -25,9 +25,9 @@ describe('checkGeneral', () => {
       expected: { ok: true, patch: { budgetCeiling: 2.5 } },
     },
     {
-      name: 'auto mode',
-      change: { permissionMode: 'auto' },
-      expected: { ok: true, patch: { permissionMode: 'auto' } },
+      name: 'localhost on',
+      change: { sandboxLoopback: true },
+      expected: { ok: true, patch: { sandboxLoopback: true } },
     },
     { name: 'a flow', change: { flowId }, expected: { ok: true, patch: { flowId } } },
     {

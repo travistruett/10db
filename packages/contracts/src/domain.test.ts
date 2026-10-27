@@ -77,30 +77,22 @@ describe('ProjectInput', () => {
   });
 
   it.each([
-    ['absent', undefined, 'default'],
-    ['default', 'default', 'default'],
-    ['auto', 'auto', 'auto'],
-  ])('reads a %s permission mode as %s', (_name, given, expected) => {
+    ['absent', {}, false],
+    ['on', { sandboxLoopback: true }, true],
+  ])('reads the localhost switch when it is %s', (_name, given, expected) => {
     const parsed = ProjectInput.parse({
       name: 'demo',
       repoPath: '/tmp/demo',
       gateCommand: 'make gate',
       areas: [{ name: 'src', globs: ['src/**'] }],
-      ...(given === undefined ? {} : { permissionMode: given }),
+      ...given,
     });
-    expect(parsed.permissionMode).toBe(expected);
+    expect(parsed.sandboxLoopback).toBe(expected);
   });
 
-  it('rejects an unknown permission mode on create and on patch', () => {
-    const base = {
-      name: 'demo',
-      repoPath: '/tmp/demo',
-      gateCommand: 'make gate',
-      areas: [{ name: 'src', globs: ['src/**'] }],
-    };
-    expect(ProjectInput.safeParse({ ...base, permissionMode: 'yolo' }).success).toBe(false);
-    expect(ProjectPatch.safeParse({ permissionMode: 'yolo' }).success).toBe(false);
-    expect(ProjectPatch.parse({ permissionMode: 'auto' })).toEqual({ permissionMode: 'auto' });
+  it('patches the localhost switch and rejects a non-boolean one', () => {
+    expect(ProjectPatch.parse({ sandboxLoopback: true })).toEqual({ sandboxLoopback: true });
+    expect(ProjectPatch.safeParse({ sandboxLoopback: 'on' }).success).toBe(false);
   });
 
   it('rejects a nudge threshold at or below the handoff threshold', () => {
