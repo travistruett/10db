@@ -1,7 +1,7 @@
 import { lstatSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { isAbsolute, join, sep } from 'node:path';
-import { ClaimKind, Delivery, type AreaDef, type HazardDef } from '@10db/contracts';
+import { ClaimKind, type AreaDef, type Delivery, type HazardDef } from '@10db/contracts';
 import { z } from 'zod';
 import {
   changedDirectory,
@@ -539,7 +539,7 @@ function judgeShell(
       }
     }
     if (head === 'git') {
-      const verdict = gitVerdict(words, input.delivery ?? Delivery.Local);
+      const verdict = gitVerdict(words);
       if (verdict) return deny(verdict.deny);
     }
     if (head === 'gh') {

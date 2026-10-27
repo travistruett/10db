@@ -30,6 +30,7 @@ import { unready, type AccountPreparer, type AccountRuntime } from '../accounts'
 import type { Clock, Timer } from '../clock';
 import { batchLaunchVerdict, LaunchVerdict } from '../delivery';
 import type { StateStore } from '../events';
+import { GitTrustError } from '../git';
 import type { Logger } from '../log';
 
 export interface SchedulerOptions {
@@ -185,8 +186,14 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
       if (project.delivery === Delivery.PullRequest) repos.set(project.id, project.repoPath);
     }
     const out = new Map<ProjectId, string | null>();
-    for (const [id, repo] of repos)
-      out.set(id, await opts.branches.currentBranch(repo).catch(() => null));
+    for (const [id, repo] of repos) {
+      try {
+        out.set(id, await opts.branches.currentBranch(repo));
+      } catch (error) {
+        // A checkout git refuses has a card of its own: its work waits, with no wrong-branch card.
+        if (!(error instanceof GitTrustError)) out.set(id, null);
+      }
+    }
     return out;
   }
 

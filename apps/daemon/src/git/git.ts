@@ -1,169 +1,58 @@
-import { execFile, spawn } from 'node:child_process';
-import { isAbsolute, normalize, sep } from 'node:path';
-import { promisify } from 'node:util';
+import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { isAbsolute, join, normalize, posix, sep } from 'node:path';
 import { InvalidError } from '@10db/contracts';
-import { z } from 'zod';
 import { resolveInRepo } from '../guard';
-import { withoutGitRepoEnv } from './repo-env';
+import { memoryPinStore, type CheckoutPin, type PinStore } from './checkout-pin';
+import {
+  checkoutIdentity,
+  refusedCheckoutKeys,
+  trustedValues,
+  type ConfigRoots,
+} from './checkout-trust';
+import { parseScopedConfig, type ConfigEntry } from './config-trust';
+import { insideAny, isPlainDirectory, samePath, surelyInside } from './lane-writable';
+import { gitNetwork, type NetworkCall, type NetworkRun } from './network';
+import { localRemotePath, parseRemoteUrl } from './remote-url';
+import { GitError, runGit, type RunOptions } from './run';
+import { GitTrustError, GitTrustFailure, type GitTrustDetail } from './trust-error';
+import { embeddedRepository, GitMode, isGitComponent } from './worktree-files';
 
-const run = promisify(execFile);
-
-const Sha = z.string().regex(/^[0-9a-f]{40}$/);
 const OP_TRAILER = '10db-Op';
 const OP_SEARCH_DEPTH = 200;
-
-class GitError extends Error {
-  override readonly name = 'GitError';
-  readonly args: readonly string[];
-  readonly stderr: string;
-  constructor(args: readonly string[], stderr: string) {
-    super(`git ${args.join(' ')} failed: ${stderr.trim().slice(0, 500)}`);
-    this.args = args;
-    this.stderr = stderr;
-  }
-}
-
-/** How a network call is made: in the login environment, bounded in time, stoppable. */
-export interface NetworkCall {
-  readonly env: Readonly<Record<string, string>>;
-  readonly timeoutMs: number;
-  readonly signal?: AbortSignal;
-}
-
-export const GitNetworkFailure = {
-  Timeout: 'timeout',
-  Rejected: 'rejected',
-  Aborted: 'aborted',
-  Failed: 'failed',
-} as const;
-export type GitNetworkFailure = (typeof GitNetworkFailure)[keyof typeof GitNetworkFailure];
-
-/** What a fetch or push did: how long git ran, and what it and its hooks printed, the end of it. */
-export interface NetworkRun {
-  readonly durationMs: number;
-  readonly output: string;
-}
-
-/** A fetch or push that did not complete; `detail` is git's own message, trimmed. */
-export class GitNetworkError extends Error {
-  override readonly name = 'GitNetworkError';
-  readonly kind: GitNetworkFailure;
-  readonly detail: string;
-  readonly durationMs: number;
-  readonly output: string;
-  constructor(kind: GitNetworkFailure, args: readonly string[], detail: string, run: NetworkRun) {
-    super(`git ${args.join(' ')}: ${kind}${detail ? `: ${detail}` : ''}`);
-    this.kind = kind;
-    this.detail = detail;
-    this.durationMs = run.durationMs;
-    this.output = run.output;
-  }
-}
-
-/** Prompts are off whatever the environment says: nobody can answer one. */
-const NO_PROMPTS = { GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never', LC_ALL: 'C' } as const;
-const REJECTED = /\[(remote )?rejected\]|failed to push some refs/i;
-
+const OBJECT_ID = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
 /**
- * How much of git's output a run keeps: the end, where git and its hooks say what went wrong. A
- * hook's stdout is kept with stderr, since a hook may print its results to either.
+ * Config on every daemon git call beside `DAEMON_GIT_CONFIG`: no attributes file, git's own checks on
+ * paths that would be `.git` on HFS+ or NTFS, and no submodule recursion.
  */
-const OUTPUT_TAIL = 2000;
-
-/**
- * Runs a fetch or push in a process group of its own. A push runs the clone's pre-push hook, which
- * may start a whole check suite; a timeout or an abort kills the group, so nothing git started
- * outlives it, and the call settles only once git has exited.
- */
-function gitNetwork(repo: string, args: readonly string[], net: NetworkCall): Promise<NetworkRun> {
-  return new Promise((resolve, reject) => {
-    const started = performance.now();
-    const child = spawn('git', ['-C', repo, ...args], {
-      // The login environment may carry a hook's GIT_DIR or GIT_WORK_TREE, which would override -C.
-      env: { ...withoutGitRepoEnv(net.env), ...NO_PROMPTS },
-      detached: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    let stderr = '';
-    let output = '';
-    let timedOut = false;
-    const elapsed = (): number => Math.round(performance.now() - started);
-    child.stdout.on('data', (chunk: Buffer) => {
-      output = (output + chunk.toString('utf8')).slice(-OUTPUT_TAIL);
-    });
-    child.stderr.on('data', (chunk: Buffer) => {
-      const text = chunk.toString('utf8');
-      stderr = (stderr + text).slice(-OUTPUT_TAIL);
-      output = (output + text).slice(-OUTPUT_TAIL);
-    });
-    const killGroup = (): void => {
-      try {
-        if (child.pid !== undefined) process.kill(-child.pid, 'SIGKILL');
-      } catch {
-        // ESRCH: the group already exited.
-      }
-    };
-    // A real timer on purpose: it bounds a real child process, so the injected clock does not apply.
-    const timer = setTimeout(() => {
-      timedOut = true;
-      killGroup();
-    }, net.timeoutMs);
-    if (net.signal?.aborted) killGroup();
-    else net.signal?.addEventListener('abort', killGroup, { once: true });
-    const settle = (): void => {
-      clearTimeout(timer);
-      net.signal?.removeEventListener('abort', killGroup);
-    };
-    child.on('error', (error) => {
-      settle();
-      reject(
-        new GitNetworkError(GitNetworkFailure.Failed, args, error.message, {
-          durationMs: elapsed(),
-          output: output.trim(),
-        }),
-      );
-    });
-    child.on('close', (code) => {
-      settle();
-      const detail = stderr.trim();
-      const run: NetworkRun = { durationMs: elapsed(), output: output.trim() };
-      if (net.signal?.aborted)
-        reject(new GitNetworkError(GitNetworkFailure.Aborted, args, '', run));
-      else if (timedOut)
-        reject(
-          new GitNetworkError(
-            GitNetworkFailure.Timeout,
-            args,
-            `still running after ${String(Math.round(net.timeoutMs / 1000))} s; stopped with every process it started`,
-            run,
-          ),
-        );
-      else if (code === 0) resolve(run);
-      else
-        reject(
-          new GitNetworkError(
-            REJECTED.test(detail) ? GitNetworkFailure.Rejected : GitNetworkFailure.Failed,
-            args,
-            detail,
-            run,
-          ),
-        );
-    });
-  });
-}
+const NO_ATTRIBUTES: readonly string[] = [
+  '-c',
+  'core.attributesFile=/dev/null',
+  '-c',
+  'core.protectHFS=true',
+  '-c',
+  'core.protectNTFS=true',
+  '-c',
+  'submodule.recurse=false',
+];
 
 export interface Git {
-  /** The checked-out branch; null when HEAD is detached. */
+  /** The branch HEAD names; null when HEAD is detached. */
   currentBranch(repo: string): Promise<string | null>;
   /** The URL of remote `name`; null when the repository has no such remote. */
   remoteUrl(repo: string, name: string): Promise<string | null>;
-  /** Updates `origin/<branch>` from origin; the checkout is untouched. */
+  /**
+   * origin's push URL as pinned with the checkout, in its parsed form, after checking origin's push
+   * URL is still that one. One added or changed since is refused with a card offering it for trust.
+   */
+  pinnedPushUrl(repo: string): Promise<string>;
+  /** Updates `origin/<branch>` from origin's recorded fetch URL; the checkout is untouched. */
   fetch(repo: string, branch: string, net: NetworkCall): Promise<NetworkRun>;
   /** Creates `name` at `startPoint` and checks it out, with no upstream. */
   switchNewBranch(repo: string, name: string, startPoint: string): Promise<void>;
   /**
-   * Pushes `branch` to the same name on origin and sets it as upstream; never forced. Resolves with
-   * how long the push ran and what it printed, the pre-push hook's output included.
+   * Pushes `branch` to the same name at origin's recorded push URL, never forced, and records it as
+   * the branch's upstream. Resolves with how long the push ran and what it printed.
    */
   push(repo: string, branch: string, net: NetworkCall): Promise<NetworkRun>;
   head(repo: string): Promise<string>;
@@ -172,67 +61,72 @@ export interface Git {
    * directory except in a linked worktree, whose common dir is the main repository's.
    */
   gitDirs(repo: string): Promise<{ gitDir: string; commonDir: string }>;
-  status(repo: string): Promise<{ code: string; path: string }[]>;
+  /**
+   * Paths whose worktree content differs from HEAD, and untracked paths git doesn't ignore, sorted.
+   * With `only`, just those of `only`. Read without running git's status: no filter, fsmonitor or
+   * submodule runs.
+   */
+  changedPaths(repo: string, only?: readonly string[]): Promise<string[]>;
   /** Committed and uncommitted changes since `base`, sorted and unique. */
   changedFilesSince(repo: string, base: string): Promise<string[]>;
-  commitsSince(repo: string, base: string): Promise<string[]>;
+  /** Commits on `tip` (HEAD unless named) since `base`, oldest first. */
+  commitsSince(repo: string, base: string, tip?: string): Promise<string[]>;
+  /** Filters the tree at `rev`, or the checkout's own attributes, ask for; empty when none. */
+  filtersIn(repo: string, rev: string): Promise<{ path: string; filter: string }[]>;
+  /**
+   * Commits `paths` on `branch` without touching HEAD: the tree is the branch's tip with those
+   * paths as the worktree has them, and the branch moves only if nothing moved it meanwhile.
+   */
   commit(input: {
     repo: string;
     paths: readonly string[];
     message: string;
     opId: string;
+    branch: string;
   }): Promise<{ sha: string; alreadyCommitted: boolean }>;
+  /**
+   * Pins `candidate`, the state a refusal card showed the builder, if the checkout still matches it;
+   * otherwise refuses again with what it found. The builder's choice only.
+   */
+  retrust(repo: string, candidate: CheckoutPin): Promise<void>;
 }
 
-async function git(repo: string, args: readonly string[]): Promise<string> {
-  try {
-    const { stdout } = await run('git', ['-C', repo, ...args], {
-      // -C names the repository; an inherited GIT_DIR or GIT_WORK_TREE would override it.
-      // No optional locks: a read such as status would otherwise refresh the index under
-      // index.lock, and a commit that runs meanwhile fails with "index.lock: File exists".
-      env: {
-        ...withoutGitRepoEnv(process.env),
-        GIT_TERMINAL_PROMPT: '0',
-        GIT_OPTIONAL_LOCKS: '0',
-        LC_ALL: 'C',
-      },
-      maxBuffer: 16 * 1024 * 1024,
-    });
-    return stdout;
-  } catch (error) {
-    const stderr =
-      typeof error === 'object' && error !== null && 'stderr' in error
-        ? String(error.stderr)
-        : String(error);
-    const stdout =
-      typeof error === 'object' && error !== null && 'stdout' in error ? String(error.stdout) : '';
-    throw new GitError(args, `${stderr}\n${stdout}`);
-  }
+export interface GitOptions {
+  /** Called with every refusal, so the builder hears of it whoever called. */
+  onRefused?(error: GitTrustError): void;
+  /** Where pins persist; the default lasts as long as this `Git`. */
+  pins?: PinStore;
+  /** The git to run for every call, as `resolveGit` found it; `git` on PATH otherwise. */
+  bin?: string;
+  /** Every registered project's checkout, read when it is needed: a lane in any of them can write it. */
+  checkouts?: () => readonly string[];
+  /** Directories a lane can write besides the checkouts, such as the lane temp root. */
+  laneRoots?: readonly string[];
 }
 
-async function revParseHead(repo: string): Promise<string> {
-  return Sha.parse((await git(repo, ['rev-parse', 'HEAD'])).trim());
+/** Where a git call works: the checkout's real path and the variables that point git at its git dir. */
+interface Site {
+  readonly real: string;
+  readonly env: Readonly<Record<string, string>>;
 }
 
-async function status(repo: string): Promise<{ code: string; path: string }[]> {
-  // A repository's own config can name a core.fsmonitor program that git would run on every status.
-  const out = await git(repo, [
-    '-c',
-    'core.fsmonitor=false',
-    'status',
-    '--porcelain=v1',
-    '-z',
-    '--untracked-files=all',
-  ]);
-  const fields = out.split('\0').filter(Boolean);
-  const entries: { code: string; path: string }[] = [];
-  for (let i = 0; i < fields.length; i++) {
-    const entry = fields[i] ?? '';
-    entries.push({ code: entry.slice(0, 2), path: entry.slice(3) });
-    // A rename or copy is followed by its source path as a bare field with no status code.
-    if (entry.startsWith('R') || entry.startsWith('C') || entry[1] === 'R' || entry[1] === 'C') i++;
-  }
-  return entries;
+/** A checkout after its pin check, held for one operation: git runs in the pinned git dir. */
+interface Pinned extends Site {
+  readonly dirs: { readonly gitDir: string; readonly commonDir: string };
+  readonly pin: CheckoutPin;
+}
+
+/** A checkout as git finds it on its own, for reading what it is now, before or beside its pin. */
+const observed = (real: string): Site => ({ real, env: {} });
+
+/** `entries` as `GIT_CONFIG_COUNT` and its pairs, which keep a key holding `=` whole, unlike `-c`. */
+function configEnv(entries: readonly (readonly [string, string])[]): Record<string, string> {
+  const env: Record<string, string> = { GIT_CONFIG_COUNT: String(entries.length) };
+  entries.forEach(([key, value], i) => {
+    env[`GIT_CONFIG_KEY_${String(i)}`] = key;
+    env[`GIT_CONFIG_VALUE_${String(i)}`] = value;
+  });
+  return env;
 }
 
 /** Lexical checks first, then the guard's symlink-aware check, so `link/x` can't commit outside the repo. */
@@ -250,10 +144,75 @@ function checkPaths(repo: string, paths: readonly string[]): string[] {
   });
 }
 
-export function createGit(): Git {
-  const locks = new Map<string, Promise<unknown>>();
+/** `message` with the op trailer, joined to a trailer block the message already ends with. */
+export function withOpTrailer(message: string, opId: string): string {
+  const body = message.replace(/\s+$/, '');
+  const paragraphs = body.split(/\n[ \t]*\n/);
+  const last = paragraphs.at(-1) ?? '';
+  const endsInTrailers =
+    paragraphs.length > 1 && last.split('\n').every((line) => /^[A-Za-z0-9-]+: \S/.test(line));
+  return `${body}${endsInTrailers ? '\n' : '\n\n'}${OP_TRAILER}: ${opId}\n`;
+}
 
-  /** Runs `fn` after every earlier locked call for the same repo has settled. */
+function isTrue(value: string | null | undefined): boolean {
+  return value === null || ['true', 'yes', 'on', '1'].includes((value ?? '').toLowerCase());
+}
+
+/** `ls-tree -r -z` output as entries. */
+function parseTree(out: string): { mode: string; oid: string; path: string }[] {
+  return out
+    .split('\0')
+    .filter(Boolean)
+    .map((record) => {
+      const tab = record.indexOf('\t');
+      const [mode = '', , oid = ''] = record.slice(0, tab).split(' ');
+      return { mode, oid, path: record.slice(tab + 1) };
+    });
+}
+
+/** `filter=<name>` settings in one attributes file's text. */
+function filtersInAttributes(text: string): string[] {
+  const names: string[] = [];
+  for (const line of text.split('\n')) {
+    const trimmed = line.trim();
+    if (trimmed === '' || trimmed.startsWith('#')) continue;
+    for (const token of trimmed.split(/\s+/).slice(1)) {
+      const match = /^filter=(.+)$/.exec(token);
+      if (match?.[1]) names.push(match[1]);
+    }
+  }
+  return names;
+}
+
+function readIfPresent(path: string): string {
+  try {
+    return readFileSync(path, 'utf8');
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * The daemon's git (lane sandbox spec D13). It never runs a filter, an attribute-selected driver,
+ * fsmonitor, a hook or a submodule's git in the working tree: commits are plumbing over a private
+ * index, changes are found by hashing files the daemon reads itself, every call passes
+ * `DAEMON_GIT_CONFIG` and a cleaned environment, and the one checkout it makes (a batch's new
+ * branch) reads no attributes from the tree. Every call first checks that the checkout's git dirs
+ * are the ones pinned for it and that it borrows no objects. Fetch and push go only to the URLs
+ * pinned with it, with the builder's own transport config.
+ */
+export function createGit(opts: GitOptions = {}): Git {
+  const locks = new Map<string, Promise<unknown>>();
+  const pins = opts.pins ?? memoryPinStore();
+  const bin = opts.bin ?? 'git';
+
+  function refusal(repo: string, detail: GitTrustDetail): GitTrustError {
+    const error = new GitTrustError(repo, detail);
+    opts.onRefused?.(error);
+    return error;
+  }
+
+  /** Runs `fn` after every earlier locked call for the same checkout has settled. */
   function withRepoLock<T>(repo: string, fn: () => Promise<T>): Promise<T> {
     const previous = locks.get(repo) ?? Promise.resolve();
     const next = previous.then(fn, fn);
@@ -264,118 +223,664 @@ export function createGit(): Git {
     return next;
   }
 
-  async function findCommitByOp(repo: string, opId: string): Promise<string | null> {
-    const out = await git(repo, [
+  /** Each checkout's empty tree, as an attribute source that gives git no attributes at all. */
+  const emptyTrees = new Map<string, string>();
+  async function emptyTree(site: Site): Promise<string> {
+    const known = emptyTrees.get(site.real);
+    if (known) return known;
+    const oid = (
+      await runGit(site.real, ['hash-object', '-t', 'tree', '--stdin'], { env: site.env, bin })
+    ).trim();
+    emptyTrees.set(site.real, oid);
+    return oid;
+  }
+
+  /**
+   * Every daemon git call reads no attributes, from the tree, the worktree or an attributes file, so
+   * no filter, driver or line-ending conversion is selected whatever config names. Paths are checked
+   * as git does on HFS+ and NTFS, and no submodule is recursed into. Once a checkout is pinned, git
+   * runs in the pinned git dir with the checkout as its work tree, so it never reads the `.git`
+   * gitfile again, which a lane could swap between two calls.
+   */
+  async function git(site: Site, args: readonly string[], run: Omit<RunOptions, 'bin'> = {}) {
+    return runGit(site.real, args, {
+      ...run,
+      bin,
+      env: { ...site.env, GIT_ATTR_SOURCE: await emptyTree(site), ...run.env },
+      config: [...NO_ATTRIBUTES, ...(run.config ?? [])],
+    });
+  }
+
+  async function readGitDirs(real: string): Promise<{ gitDir: string; commonDir: string }> {
+    // Without --path-format a common dir is printed relative to the working directory.
+    const out = await git(observed(real), [
+      'rev-parse',
+      '--absolute-git-dir',
+      '--path-format=absolute',
+      '--git-common-dir',
+    ]);
+    const [gitDir = '', commonDir = ''] = out.split('\n');
+    if (!isAbsolute(gitDir) || !isAbsolute(commonDir)) {
+      throw new GitError(['rev-parse'], 'git named no absolute git dirs', null);
+    }
+    return { gitDir: realpathSync(gitDir), commonDir: realpathSync(commonDir) };
+  }
+
+  /** origin's URL as git would use it, credentials and all; null when there is no origin. */
+  async function originUrl(site: Site, push: boolean): Promise<string | null> {
+    try {
+      const out = await git(site, ['remote', 'get-url', ...(push ? ['--push'] : []), 'origin']);
+      return out.trim();
+    } catch (error) {
+      if (error instanceof GitError && /no such remote/i.test(error.stderr)) return null;
+      throw error;
+    }
+  }
+
+  /**
+   * origin's URL as pins hold it: the parsed form, or null when there is no origin or its URL is
+   * one the daemon refuses (credentials in it, or anything that doesn't parse cleanly).
+   */
+  async function pinnableUrl(site: Site, push: boolean): Promise<string | null> {
+    const url = await originUrl(site, push);
+    if (url === null) return null;
+    const parsed = parseRemoteUrl(url);
+    return parsed.ok ? parsed.url : null;
+  }
+
+  /** The checkout as it is now, in the shape of a pin. */
+  async function observe(real: string): Promise<CheckoutPin> {
+    const dirs = await readGitDirs(real);
+    return {
+      ...dirs,
+      id: checkoutIdentity(dirs),
+      fetchUrl: await pinnableUrl(observed(real), false),
+      pushUrl: await pinnableUrl(observed(real), true),
+    };
+  }
+
+  /** A refusal for a checkout that differs from `pin` in its git dirs or origin. */
+  function mismatch(real: string, pin: CheckoutPin, now: CheckoutPin): GitTrustError {
+    if (now.id !== pin.id || now.gitDir !== pin.gitDir || now.commonDir !== pin.commonDir)
+      return refusal(real, {
+        kind: GitTrustFailure.Moved,
+        pinned: pin.gitDir,
+        found: now.gitDir,
+        candidate: now,
+      });
+    const direction = now.fetchUrl === pin.fetchUrl ? 'push' : 'fetch';
+    return refusal(real, {
+      kind: GitTrustFailure.Origin,
+      direction,
+      pinned: direction === 'fetch' ? pin.fetchUrl : pin.pushUrl,
+      found: direction === 'fetch' ? now.fetchUrl : now.pushUrl,
+      candidate: now,
+    });
+  }
+
+  /**
+   * The checkout's real path, git dirs and pin, after checking they match the pin (recorded now when
+   * there is none), that the object store borrows from no other repository, and that no attributes
+   * file sits in the git dirs, where the attribute source can't switch it off.
+   */
+  async function pinned(repo: string): Promise<Pinned> {
+    const real = realpathSync(repo);
+    const dirs = await readGitDirs(real);
+    const id = checkoutIdentity(dirs);
+    // Read once per operation: every later call in it runs against this pin.
+    let pin = pins.get(real);
+    if (!pin) {
+      const writable = writableGitDir(real, dirs);
+      if (writable !== null)
+        throw refusal(real, { kind: GitTrustFailure.Writable, gitDir: writable });
+      pin = {
+        ...dirs,
+        id,
+        fetchUrl: await pinnableUrl(observed(real), false),
+        pushUrl: await pinnableUrl(observed(real), true),
+      };
+      pins.set(real, pin);
+    } else if (pin.id !== id || pin.gitDir !== dirs.gitDir || pin.commonDir !== dirs.commonDir) {
+      throw mismatch(real, pin, await observe(real));
+    }
+    for (const name of ['alternates', 'http-alternates']) {
+      const file = join(dirs.commonDir, 'objects', 'info', name);
+      if (readIfPresent(file).trim() !== '')
+        throw refusal(real, { kind: GitTrustFailure.Alternates, file });
+    }
+    for (const dir of new Set([dirs.gitDir, dirs.commonDir])) {
+      const file = join(dir, 'info', 'attributes');
+      if (readIfPresent(file).trim() !== '')
+        throw refusal(real, { kind: GitTrustFailure.Attributes, file });
+    }
+    return { real, dirs, pin, env: { GIT_DIR: pin.gitDir, GIT_WORK_TREE: real } };
+  }
+
+  /** The checkout's config as git reads it; with `login`, as a fetch or push in that environment would. */
+  async function configEntries(
+    c: Pinned,
+    login?: Readonly<Record<string, string>>,
+  ): Promise<ConfigEntry[]> {
+    return parseScopedConfig(
+      await git(c, ['config', '--list', '--show-scope', '--show-origin', '-z'], {
+        ...(login ? { login } : {}),
+      }),
+    );
+  }
+
+  async function currentBranch(c: Pinned): Promise<string | null> {
+    try {
+      const ref = (await git(c, ['symbolic-ref', '-q', 'HEAD'])).trim();
+      return ref.startsWith('refs/heads/') ? ref.slice('refs/heads/'.length) : null;
+    } catch (error) {
+      if (error instanceof GitError && error.exitCode === 1) return null;
+      throw error;
+    }
+  }
+
+  async function revParse(c: Pinned, rev: string): Promise<string | null> {
+    try {
+      const oid = (await git(c, ['rev-parse', '--verify', '-q', rev])).trim();
+      return OBJECT_ID.test(oid) ? oid : null;
+    } catch (error) {
+      if (error instanceof GitError && error.exitCode === 1) return null;
+      throw error;
+    }
+  }
+
+  /** Runs `fn` with a private index file seeded from `tip` (empty when null), removed afterwards. */
+  async function withPrivateIndex<T>(
+    c: Pinned,
+    tip: string | null,
+    fn: (env: { GIT_INDEX_FILE: string; GIT_LITERAL_PATHSPECS: string }) => Promise<T>,
+  ): Promise<T> {
+    const dir = mkdtempSync(join(tmpdir(), '10db-index-'));
+    const env = { GIT_INDEX_FILE: join(dir, 'index'), GIT_LITERAL_PATHSPECS: '1' };
+    try {
+      await git(c, tip === null ? ['read-tree', '--empty'] : ['read-tree', tip], { env });
+      return await fn(env);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  async function changes(c: Pinned, only?: readonly string[]): Promise<string[]> {
+    if (only?.length === 0) return [];
+    const tip = await revParse(c, 'HEAD^{commit}');
+    // Against a private index seeded from HEAD, so the checkout's own index is never refreshed, and
+    // with no attributes, so git compares bytes as they are.
+    const out = await withPrivateIndex(c, tip, (env) =>
+      git(
+        c,
+        [
+          'status',
+          '--porcelain=v1',
+          '-z',
+          '--untracked-files=all',
+          '--ignore-submodules=all',
+          '--no-renames',
+          '--',
+          ...(only ?? []),
+        ],
+        { env },
+      ),
+    );
+    const paths = out
+      .split('\0')
+      .filter(Boolean)
+      .map((entry) => entry.slice(3));
+    return [...new Set(paths)].sort();
+  }
+
+  async function findCommitByOp(c: Pinned, tip: string, opId: string): Promise<string | null> {
+    const out = await git(c, [
       'log',
+      '--no-show-signature',
       '-n',
       String(OP_SEARCH_DEPTH),
       `--format=%H%x1f%(trailers:key=${OP_TRAILER},valueonly,separator=%x2c)%x1e`,
+      tip,
     ]);
     for (const record of out.split('\x1e')) {
       const [sha, ops] = record.trim().split('\x1f');
       if (
         sha &&
+        OBJECT_ID.test(sha) &&
         ops
           ?.split(',')
           .map((o) => o.trim())
           .includes(opId)
       ) {
-        return Sha.parse(sha);
+        return sha;
       }
+    }
+    return null;
+  }
+
+  /** `-c` pins and flags that sign a commit only as the builder's own config says. */
+  function signing(
+    c: Pinned,
+    entries: readonly ConfigEntry[],
+  ): { config: string[]; flags: string[] } {
+    const last = (key: string): string | null | undefined =>
+      trustedValues(configRoots(c), entries, key).at(-1);
+    if (!isTrue(last('commit.gpgsign') ?? 'false')) return { config: [], flags: [] };
+    // Every program signing could run comes from the builder's config or git's default, never
+    // from a file a lane could have written.
+    const pinnedKeys: [string, string][] = [
+      ['gpg.format', last('gpg.format') ?? 'openpgp'],
+      ['gpg.program', last('gpg.program') ?? 'gpg'],
+      ['gpg.openpgp.program', last('gpg.openpgp.program') ?? last('gpg.program') ?? 'gpg'],
+      ['gpg.x509.program', last('gpg.x509.program') ?? 'gpgsm'],
+      ['gpg.ssh.program', last('gpg.ssh.program') ?? 'ssh-keygen'],
+      ['gpg.ssh.defaultKeyCommand', last('gpg.ssh.defaultkeycommand') ?? 'false'],
+    ];
+    const key = last('user.signingkey');
+    return {
+      config: pinnedKeys.flatMap(([k, v]) => ['-c', `${k}=${v}`]),
+      flags: [key ? `-S${key}` : '-S'],
+    };
+  }
+
+  /**
+   * Paths whose worktree attributes ask for a filter. The commit stores bytes as they are, which for
+   * such a path (a Git LFS file, say) is not what the repository expects, so it is refused. Reading
+   * attributes runs no program; this is the one call that reads them, so it leaves `GIT_ATTR_SOURCE`
+   * unset. It still runs the resolved git in the pinned git dir, against the commit's private index.
+   */
+  async function filteredPaths(
+    c: Pinned,
+    index: { GIT_INDEX_FILE: string; GIT_LITERAL_PATHSPECS: string },
+    paths: readonly string[],
+  ): Promise<{ path: string; filter: string }[]> {
+    if (paths.length === 0) return [];
+    const out = await runGit(c.real, ['check-attr', '-z', '--stdin', 'filter'], {
+      bin,
+      input: `${paths.join('\0')}\0`,
+      env: { ...c.env, ...index },
+      config: [...NO_ATTRIBUTES],
+    });
+    const fields = out.split('\0');
+    const found: { path: string; filter: string }[] = [];
+    for (let i = 0; i + 2 < fields.length; i += 3) {
+      const value = fields[i + 2] ?? '';
+      if (!['unspecified', 'unset'].includes(value))
+        found.push({ path: fields[i] ?? '', filter: value });
+    }
+    return found;
+  }
+
+  async function filters(c: Pinned, rev: string): Promise<{ path: string; filter: string }[]> {
+    const found: { path: string; filter: string }[] = [];
+    const tip = await revParse(c, `${rev}^{commit}`);
+    if (tip) {
+      for (const entry of parseTree(await git(c, ['ls-tree', '-r', '-z', '--full-tree', tip]))) {
+        if (posix.basename(entry.path) !== '.gitattributes' || entry.mode === GitMode.Gitlink)
+          continue;
+        const text = await git(c, ['cat-file', 'blob', entry.oid]);
+        for (const filter of filtersInAttributes(text)) found.push({ path: entry.path, filter });
+      }
+    }
+    return found;
+  }
+
+  /**
+   * The config a fetch or push runs with, read as git in the login environment reads it: the
+   * allowlist checked, transport programs pinned as `-c` arguments, and credential helpers in `env`.
+   */
+  async function networkConfig(
+    c: Pinned,
+    net: NetworkCall,
+  ): Promise<{ config: string[]; env: Record<string, string> }> {
+    const entries = await configEntries(c, net.env);
+    const keys = refusedCheckoutKeys(configRoots(c), entries);
+    if (keys.length > 0) throw refusal(c.real, { kind: GitTrustFailure.Config, keys });
+    const trusted = (key: string) => trustedValues(configRoots(c), entries, key);
+    // Every helper the builder's own config names, the login environment's included, URL-scoped
+    // ones (`gh auth setup-git`'s) too, in git's order, each under its own key.
+    const helpers = entries.flatMap((entry): [string, string][] =>
+      /^credential\.(.+\.)?helper$/i.test(entry.name) &&
+      entry.value !== null &&
+      trustedValues(configRoots(c), [entry], entry.name).length > 0
+        ? [[entry.name, entry.value]]
+        : [],
+    );
+    return {
+      config: [
+        ...NO_ATTRIBUTES,
+        '-c',
+        `core.sshCommand=${trusted('core.sshcommand').at(-1) ?? 'ssh'}`,
+        '-c',
+        `core.askPass=${trusted('core.askpass').at(-1) ?? ''}`,
+        '-c',
+        'protocol.ext.allow=never',
+      ],
+      // Through the environment, which git reads before any `-c`: an empty helper first resets the
+      // list, URL-scoped helpers included, then only the builder's own helpers follow. A key there
+      // stays whole even when a URL in it holds `=`.
+      env: configEnv([['credential.helper', ''], ...helpers]),
+    };
+  }
+
+  /** Where a lane can write: every registered checkout, this one included, and the lane temp roots. */
+  function laneWritableRoots(real: string): string[] {
+    return [real, ...(opts.checkouts?.() ?? []), ...(opts.laneRoots ?? [])];
+  }
+
+  /** Where a config file a lane could have written lies: every lane-writable root and the git dirs. */
+  function configRoots(c: Pinned): ConfigRoots {
+    return { repo: c.real, dirs: c.dirs, laneRoots: laneWritableRoots(c.real) };
+  }
+
+  /**
+   * The pinned URL the network call uses, after checking origin's URL now parses cleanly, carries no
+   * credentials and is the one pinned. The raw config string never reaches the network call.
+   */
+  async function pinnedUrl(c: Pinned, direction: 'fetch' | 'push'): Promise<string> {
+    const { real, pin } = c;
+    const pinnedValue = direction === 'fetch' ? pin.fetchUrl : pin.pushUrl;
+    const current = await originUrl(c, direction === 'push');
+    const parsed = current === null ? null : parseRemoteUrl(current);
+    if (parsed?.ok === false)
+      throw refusal(real, { kind: GitTrustFailure.Remote, direction, why: parsed.why });
+    const found = parsed?.url ?? null;
+    if (pinnedValue === null || found !== pinnedValue)
+      throw refusal(real, {
+        kind: GitTrustFailure.Origin,
+        direction,
+        pinned: pinnedValue,
+        found,
+        candidate: await observe(real),
+      });
+    const local = localRemotePath(pinnedValue);
+    if (local !== null && insideAny(local, laneWritableRoots(real)))
+      throw refusal(real, {
+        kind: GitTrustFailure.Remote,
+        direction,
+        why: "is inside a checkout or a lane's temp dir, where a lane could write its hooks",
+      });
+    return pinnedValue;
+  }
+
+  /**
+   * Creates `name` at `startPoint` and checks it out: `update-ref` makes the branch only if it is
+   * new, and `read-tree -m -u` moves the clean checkout to it. Git checks every path it writes and
+   * writes nothing beyond a link; with no attributes, no filter runs, and `read-tree` runs no hook.
+   */
+  async function switchCheckout(c: Pinned, name: string, startPoint: string): Promise<void> {
+    const target = await revParse(c, `${startPoint}^{commit}`);
+    if (target === null) throw new InvalidError(`${startPoint} names no commit`);
+    if ((await changes(c)).length > 0)
+      throw new InvalidError(
+        `${c.real} has uncommitted changes; 10db switches only a clean checkout`,
+      );
+    const from = await revParse(c, 'HEAD^{commit}');
+    const ref = `refs/heads/${name}`;
+    try {
+      // The zero old value creates the branch only if it doesn't exist yet.
+      await git(c, ['update-ref', '--no-deref', ref, target, '0'.repeat(target.length)]);
+    } catch (error) {
+      if (!(error instanceof GitError)) throw error;
+      throw new InvalidError(`A branch named ${name} already exists, or the name is not valid`);
+    }
+    try {
+      await git(c, ['read-tree', '-m', '-u', ...(from ? [from] : []), target]);
+    } catch (error) {
+      await git(c, ['update-ref', '-d', ref, target]).catch(() => undefined);
+      if (!(error instanceof GitError)) throw error;
+      throw new InvalidError(`10db could not check out ${startPoint}: ${error.message}`);
+    }
+    await git(c, ['symbolic-ref', 'HEAD', ref]);
+  }
+
+  /** The index entries a commit covers, from a private index after `git add`; refused if unsafe. */
+  async function stage(
+    c: Pinned,
+    env: { GIT_INDEX_FILE: string; GIT_LITERAL_PATHSPECS: string },
+    named: readonly string[],
+    tip: string,
+  ): Promise<string[]> {
+    const { real } = c;
+    for (const name of named) {
+      const embedded = embeddedRepository(real, name);
+      if (embedded !== null)
+        throw refusal(real, { kind: GitTrustFailure.Embedded, path: embedded });
+    }
+    try {
+      await git(c, ['add', '-A', '--', ...named], { env });
+    } catch (error) {
+      if (!(error instanceof GitError)) throw error;
+      if (/pathspec .* did not match/i.test(error.stderr))
+        throw new InvalidError(
+          `No file or change at ${named.join(', ')}: a path must exist or have been deleted since the last commit`,
+        );
+      throw new InvalidError(`10db could not stage ${named.join(', ')}: ${error.message}`);
+    }
+    const changed = (
+      await git(c, ['diff-index', '--cached', '--name-only', '-z', '--no-renames', tip], { env })
+    )
+      .split('\0')
+      .filter(Boolean);
+    // Nothing staged: `ls-files` with no path would list the whole index, submodules and all.
+    if (changed.length === 0) return [];
+    // What this commit changes may not be a submodule or name a git dir; submodules already in the
+    // tree stay as they are.
+    for (const record of (await git(c, ['ls-files', '-s', '-z', '--', ...changed], { env }))
+      .split('\0')
+      .filter(Boolean)) {
+      const [mode = ''] = record.split(' ');
+      const path = record.slice(record.indexOf('\t') + 1);
+      if (mode === GitMode.Gitlink || path.split('/').some(isGitComponent))
+        throw refusal(real, { kind: GitTrustFailure.Embedded, path });
+    }
+    return changed;
+  }
+
+  async function commit(input: {
+    repo: string;
+    paths: readonly string[];
+    message: string;
+    opId: string;
+    branch: string;
+  }): Promise<{ sha: string; alreadyCommitted: boolean }> {
+    const named = checkPaths(input.repo, input.paths);
+    // The pin is read inside the lock: a re-trust or a swapped .git while it waited counts.
+    return withRepoLock(realpathSync(input.repo), async () => {
+      const c = await pinned(input.repo);
+      const { real } = c;
+      const ref = `refs/heads/${input.branch}`;
+      try {
+        const target = (await git(c, ['symbolic-ref', '-q', ref])).trim();
+        if (target !== '')
+          throw refusal(real, { kind: GitTrustFailure.Ref, ref, reason: 'symbolic' });
+      } catch (error) {
+        if (!(error instanceof GitError && error.exitCode === 1)) throw error;
+      }
+      const tip = await revParse(c, `${ref}^{commit}`);
+      if (tip === null) throw new InvalidError(`Branch ${input.branch} does not exist`);
+      const head = await currentBranch(c);
+      if (head !== input.branch)
+        throw refusal(real, {
+          kind: GitTrustFailure.Branch,
+          expected: input.branch,
+          found: head,
+          committed: false,
+        });
+      const existing = await findCommitByOp(c, tip, input.opId);
+      if (existing) return { sha: existing, alreadyCommitted: true };
+      const tree = await withPrivateIndex(c, tip, async (env) => {
+        const changed = await stage(c, env, named, tip);
+        const filtered = await filteredPaths(c, env, changed);
+        if (filtered.length > 0)
+          throw refusal(real, { kind: GitTrustFailure.Filter, paths: filtered });
+        return (await git(c, ['write-tree'], { env })).trim();
+      });
+      if (tree === (await revParse(c, `${tip}^{tree}`)))
+        throw new InvalidError(`Nothing to commit in ${named.join(', ')}`);
+      const sign = signing(c, await configEntries(c));
+      const sha = (
+        await git(c, ['commit-tree', ...sign.flags, tree, '-p', tip], {
+          input: withOpTrailer(input.message, input.opId),
+          config: sign.config,
+        })
+      ).trim();
+      try {
+        // Compare and swap on the branch itself, never through HEAD or a symbolic ref.
+        await git(c, ['update-ref', '--no-deref', '-m', `10db: ${input.opId}`, ref, sha, tip]);
+      } catch (error) {
+        if (!(error instanceof GitError)) throw error;
+        throw refusal(real, { kind: GitTrustFailure.Ref, ref, reason: 'raced' });
+      }
+      if ((await currentBranch(c)) === input.branch) {
+        // The checkout's own index follows the commit, so the builder's git status shows the
+        // committed paths as committed. Another git holding index.lock just leaves it stale.
+        await git(c, ['reset', '-q', sha, '--', ...named], {
+          env: { GIT_LITERAL_PATHSPECS: '1' },
+        }).catch(() => undefined);
+      } else {
+        refusal(real, {
+          kind: GitTrustFailure.Branch,
+          expected: input.branch,
+          found: await currentBranch(c),
+          committed: true,
+        });
+      }
+      return { sha, alreadyCommitted: false };
+    });
+  }
+
+  /**
+   * A git dir about to be pinned that lies where a lane can write, or null when there is none: one in
+   * any registered checkout or a lane temp root. A dir at or under a registered checkout's own `.git`
+   * directory is exempt: every lane profile denies every registered checkout's `.git` (the lane
+   * sandbox gets the same list), a nested project's included, and a linked worktree's common dir is
+   * often there. So is a dir `kept` names: the one already pinned.
+   */
+  function writableGitDir(
+    real: string,
+    dirs: { readonly gitDir: string; readonly commonDir: string },
+    kept: readonly string[] = [],
+  ): string | null {
+    const dotGits = [real, ...(opts.checkouts?.() ?? [])].map((checkout) => join(checkout, '.git'));
+    for (const dir of new Set([dirs.gitDir, dirs.commonDir])) {
+      if (kept.includes(dir)) continue;
+      if (samePath(dir, join(real, '.git'))) continue;
+      if (dotGits.some((dotGit) => isPlainDirectory(dotGit) && surelyInside(dir, dotGit))) continue;
+      if (insideAny(dir, laneWritableRoots(real))) return dir;
     }
     return null;
   }
 
   return {
     async currentBranch(repo) {
-      const name = (await git(repo, ['branch', '--show-current'])).trim();
-      return name === '' ? null : name;
+      return currentBranch(await pinned(repo));
     },
     async remoteUrl(repo, name) {
+      const c = await pinned(repo);
       try {
-        return (await git(repo, ['remote', 'get-url', name])).trim();
+        return (await git(c, ['remote', 'get-url', name])).trim();
       } catch (error) {
         if (error instanceof GitError && /no such remote/i.test(error.stderr)) return null;
         throw error;
       }
     },
-    fetch: (repo, branch, net) =>
-      gitNetwork(
-        repo,
-        ['fetch', '--no-tags', 'origin', `+refs/heads/${branch}:refs/remotes/origin/${branch}`],
+    async pinnedPushUrl(repo) {
+      return pinnedUrl(await pinned(repo), 'push');
+    },
+    async fetch(repo, branch, net) {
+      const c = await pinned(repo);
+      const network = await networkConfig(c, net);
+      const url = await pinnedUrl(c, 'fetch');
+      return gitNetwork(
+        c.real,
+        network.config,
+        [
+          'fetch',
+          '--no-tags',
+          '--no-recurse-submodules',
+          '--',
+          url,
+          `+refs/heads/${branch}:refs/remotes/origin/${branch}`,
+        ],
         net,
-      ),
+        { bin, env: { ...c.env, ...network.env } },
+      );
+    },
     async switchNewBranch(repo, name, startPoint) {
-      await withRepoLock(repo, () => git(repo, ['switch', '--no-track', '-c', name, startPoint]));
+      await withRepoLock(realpathSync(repo), async () => {
+        await switchCheckout(await pinned(repo), name, startPoint);
+      });
     },
-    push: (repo, branch, net) =>
-      gitNetwork(repo, ['push', '-u', 'origin', `refs/heads/${branch}:refs/heads/${branch}`], net),
-    head: revParseHead,
+    async push(repo, branch, net) {
+      const c = await pinned(repo);
+      const needed = await filters(c, `refs/heads/${branch}`);
+      if (needed.length > 0) throw refusal(c.real, { kind: GitTrustFailure.Filter, paths: needed });
+      const network = await networkConfig(c, net);
+      const url = await pinnedUrl(c, 'push');
+      const sha = await revParse(c, `refs/heads/${branch}^{commit}`);
+      if (sha === null) throw new InvalidError(`Branch ${branch} does not exist`);
+      const run = await gitNetwork(
+        c.real,
+        network.config,
+        ['push', '--recurse-submodules=no', '--', url, `refs/heads/${branch}:refs/heads/${branch}`],
+        net,
+        { bin, env: { ...c.env, ...network.env } },
+      );
+      // What `push -u origin` records, written by the daemon since the push named a URL.
+      await git(c, ['update-ref', `refs/remotes/origin/${branch}`, sha]);
+      await git(c, ['config', `branch.${branch}.remote`, 'origin']);
+      await git(c, ['config', `branch.${branch}.merge`, `refs/heads/${branch}`]);
+      return run;
+    },
+    async head(repo) {
+      const sha = await revParse(await pinned(repo), 'HEAD^{commit}');
+      if (sha === null) throw new GitError(['rev-parse', 'HEAD'], 'HEAD names no commit', null);
+      return sha;
+    },
     async gitDirs(repo) {
-      // Without --path-format a common dir is printed relative to the working directory.
-      const out = await git(repo, [
-        'rev-parse',
-        '--absolute-git-dir',
-        '--path-format=absolute',
-        '--git-common-dir',
-      ]);
-      const [gitDir = '', commonDir = ''] = out.split('\n');
-      if (!isAbsolute(gitDir) || !isAbsolute(commonDir)) {
-        throw new GitError(['rev-parse'], 'git named no absolute git dirs');
-      }
-      return { gitDir, commonDir };
+      return (await pinned(repo)).dirs;
     },
-    status,
+    async changedPaths(repo, only) {
+      return changes(await pinned(repo), only);
+    },
     async changedFilesSince(repo, base) {
-      const committed = (await git(repo, ['diff', '--name-only', `${base}..HEAD`]))
-        .split('\n')
+      const c = await pinned(repo);
+      const working = await changes(c);
+      const committed = (
+        await git(c, ['diff-tree', '-r', '--name-only', '--no-renames', '-z', base, 'HEAD'])
+      )
+        .split('\0')
         .filter(Boolean);
-      const working = (await status(repo)).map((s) => s.path);
       return [...new Set([...committed, ...working])].sort();
     },
-    async commitsSince(repo, base) {
-      return (await git(repo, ['rev-list', '--reverse', `${base}..HEAD`]))
+    async commitsSince(repo, base, tip = 'HEAD') {
+      return (await git(await pinned(repo), ['rev-list', '--reverse', `${base}..${tip}`]))
         .split('\n')
         .filter(Boolean);
     },
-    // async, so a rejected path becomes a rejected promise rather than a synchronous throw.
-    async commit({ repo, paths, message, opId }) {
-      const clean = checkPaths(repo, paths);
-      return withRepoLock(repo, async () => {
-        const existing = await findCommitByOp(repo, opId);
-        if (existing) return { sha: existing, alreadyCommitted: true };
-        try {
-          await git(repo, ['add', '-A', '--', ...clean]);
-        } catch (error) {
-          if (error instanceof GitError && /pathspec .* did not match/i.test(error.stderr)) {
-            throw new InvalidError(
-              `No file or change at ${clean.join(', ')}: a path must exist or have been deleted since the last commit`,
-            );
-          }
-          throw error;
-        }
-        try {
-          await git(repo, [
-            'commit',
-            '-q',
-            '-m',
-            message,
-            '--trailer',
-            `${OP_TRAILER}: ${opId}`,
-            '--',
-            ...clean,
-          ]);
-        } catch (error) {
-          if (
-            error instanceof GitError &&
-            /nothing (added )?to commit|no changes added/i.test(error.stderr)
-          ) {
-            throw new InvalidError(`Nothing to commit in ${clean.join(', ')}`);
-          }
-          throw error;
-        }
-        return { sha: await revParseHead(repo), alreadyCommitted: false };
-      });
+    async filtersIn(repo, rev) {
+      return filters(await pinned(repo), rev);
+    },
+    commit,
+    async retrust(repo, candidate) {
+      const real = realpathSync(repo);
+      const current = pins.get(real);
+      const writable = writableGitDir(
+        real,
+        candidate,
+        current ? [current.gitDir, current.commonDir] : [],
+      );
+      if (writable !== null)
+        throw refusal(real, { kind: GitTrustFailure.Writable, gitDir: writable });
+      const now = await observe(real);
+      const same =
+        now.id === candidate.id &&
+        now.gitDir === candidate.gitDir &&
+        now.commonDir === candidate.commonDir &&
+        now.fetchUrl === candidate.fetchUrl &&
+        now.pushUrl === candidate.pushUrl;
+      if (!same) throw mismatch(real, candidate, now);
+      pins.set(real, candidate);
     },
   };
 }

@@ -28,6 +28,7 @@ import {
   patchBatch,
   transitionBatch,
 } from '@10db/db';
+import { githubRepoOf } from '../github';
 import { insertPlannedWorkstream, planForStart } from '../team';
 import { batchBranchName } from './branch-name';
 import { forTasks, startCards, wrongBranchCard, type Card } from './cards';
@@ -125,18 +126,26 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
         refuse(startCards.lanesRunning(project, lanes));
         return;
       }
-      const dirty = await ctx.git.status(project.repoPath);
+      const filters = await ctx.git.filtersIn(project.repoPath, 'HEAD');
+      if (filters.length > 0) {
+        refuse(startCards.usesFilters(project, filters));
+        return;
+      }
+      const dirty = await ctx.git.changedPaths(project.repoPath);
       if (dirty.length > 0) {
-        refuse(
-          startCards.dirtyCheckout(
-            project,
-            dirty.map((d) => d.path),
-          ),
-        );
+        refuse(startCards.dirtyCheckout(project, dirty));
         return;
       }
       if ((await ctx.git.remoteUrl(project.repoPath, 'origin')) === null) {
         refuse(startCards.noOrigin(project));
+        return;
+      }
+      // The repository gh is told about comes from origin's pinned push URL, never from gh reading
+      // the checkout's remotes. An origin added or changed since the pin is refused here with a card
+      // that offers it for trust.
+      const repo = githubRepoOf(await ctx.git.pinnedPushUrl(project.repoPath));
+      if (repo === null) {
+        refuse(startCards.repoUnknown(project));
         return;
       }
       try {
@@ -145,18 +154,11 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
         if (!stopped()) refuse(startCards.fetchFailed(batch.baseBranch, error));
         return;
       }
-      const call = ghCall(ctx, project.repoPath, signal);
+      const call = ghCall(ctx, signal);
       try {
         await ctx.gh.authStatus(call);
       } catch (error) {
         if (!stopped()) refuse(startCards.ghUnavailable(error));
-        return;
-      }
-      let repo: string;
-      try {
-        repo = await ctx.gh.repoView(call);
-      } catch (error) {
-        if (!stopped()) refuse(startCards.repoUnknown(project, error));
         return;
       }
       const unmerged = await unmergedDependencies({
@@ -216,7 +218,7 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
         refuse(wrongBranchCard(batch, current, project.repoPath, 'not_joined'));
         return;
       }
-      const call = ghCall(ctx, project.repoPath, signal);
+      const call = ghCall(ctx, signal);
       const unmerged = await unmergedDependencies({
         db,
         gh: ctx.gh,

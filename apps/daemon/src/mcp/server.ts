@@ -3,6 +3,7 @@ import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/
 import { DomainError, McpToolInputs, McpToolName } from '@10db/contracts';
 import { getLiveSessionByTokenHash } from '@10db/db';
 import { z } from 'zod';
+import { GitTrustError } from '../git';
 import { ParkedError } from '../inbox';
 import { hashToken } from './tokens';
 import { createToolHandlers, TOOL_DESCRIPTIONS, type McpDeps } from './tools';
@@ -12,6 +13,9 @@ function errorText(error: unknown, deps: McpDeps, tool: string, args: unknown): 
   if (error instanceof ParkedError)
     return '10db parked this session until the builder answers. Do not ask again: the answer arrives in the prompt of the session that resumes this work. End your turn now.';
   if (error instanceof DomainError) return error.message;
+  // The builder already has a card about it, and only the builder can put the checkout right.
+  if (error instanceof GitTrustError)
+    return `${error.message}. The builder has a card about it. Don't work around it: end your turn now.`;
   if (error instanceof z.ZodError)
     return `Invalid input: ${error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')}`;
   const opId = z.object({ opId: z.string() }).safeParse(args);

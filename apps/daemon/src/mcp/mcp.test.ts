@@ -43,6 +43,8 @@ let inbox: InboxService;
 let server: ReturnType<typeof serve>;
 let url: string;
 const git = createGit();
+/** The branch each test's workstream was pinned to at its first session, as the runner records it. */
+let workstreamBranch: string | null = 'main';
 
 interface LogEntry {
   readonly obj: object;
@@ -64,6 +66,7 @@ const JsonObject = z.record(z.string(), z.unknown());
 
 beforeEach(async () => {
   logged.length = 0;
+  workstreamBranch = 'main';
   repo = createTempRepo();
   const test = createTestStore();
   close = test.close;
@@ -105,7 +108,10 @@ async function seedSession(areas = ['api']) {
       requests: areas.map((name) => ({ kind: 'area' as const, name })),
       leaseExpiresAt: ctx.now,
     });
-    patchWorkstream(ctx, seeded.workstream.id, null, { baseHead: head });
+    patchWorkstream(ctx, seeded.workstream.id, null, {
+      baseHead: head,
+      ...(workstreamBranch === null ? {} : { branch: workstreamBranch }),
+    });
     return insertSession(ctx, {
       workstreamId: seeded.workstream.id,
       provider: 'claude',
@@ -268,6 +274,7 @@ describe('MCP tools', () => {
       paths: ['src/api/b.ts'],
       message: 'Add b',
       opId: 'op-crashed-01',
+      branch: 'main',
     });
     const viaTool = await s.call('commit', {
       opId: 'op-crashed-01',
@@ -276,6 +283,36 @@ describe('MCP tools', () => {
     });
     expect(viaTool.json).toEqual({ sha: direct.sha, alreadyCommitted: true });
     expect(commitCount()).toBe(2);
+  });
+
+  it("refuses a commit once the checkout left the session's branch, and tells the lane why", async () => {
+    const s = await seedSession();
+    execFileSync('git', ['-C', repo.path, 'switch', '-q', '-c', 'elsewhere'], {
+      env: isolatedGitEnv(),
+    });
+    writeRepoFile('src/api/e.ts', 'export {}\n');
+    const result = await s.call('commit', {
+      opId: 'op-commit-moved',
+      paths: ['src/api/e.ts'],
+      message: 'e',
+    });
+    expect(result.isError).toBe(true);
+    expect(result.text).toContain("the checkout is on elsewhere, the lane's branch is main");
+    expect(commitCount()).toBe(1);
+  });
+
+  it('refuses a commit for work pinned to no branch, its first session having found HEAD detached', async () => {
+    workstreamBranch = null;
+    const s = await seedSession();
+    writeRepoFile('src/api/f.ts', 'export {}\n');
+    const result = await s.call('commit', {
+      opId: 'op-commit-nobr',
+      paths: ['src/api/f.ts'],
+      message: 'f',
+    });
+    expect(result.isError).toBe(true);
+    expect(result.text).toContain('detached');
+    expect(commitCount()).toBe(1);
   });
 
   it('refuses to commit a path outside the claims', async () => {

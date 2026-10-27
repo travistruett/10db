@@ -1,8 +1,6 @@
-import { Delivery } from '@10db/contracts';
-
 export type GitVerdict = { readonly deny: string } | null;
 
-/** Verbs that only read. Everything not listed here (and not `push` or `branch`) is refused. */
+/** Verbs that only read. Everything not listed here (and not `branch`) is refused. */
 const READ_ONLY_GIT = new Set([
   'status',
   'diff',
@@ -19,10 +17,8 @@ const READ_ONLY_GIT = new Set([
   'rev-list',
 ]);
 const BRANCH_LISTING = new Set(['-a', '-r', '--list', '-v', '-vv', '--show-current']);
-const PROTECTED_BRANCHES = new Set(['main', 'master']);
 /** Global options that point git at another repository or change what config says. */
 const REDIRECTING_OPTIONS = ['--git-dir', '--work-tree', '--namespace', '--config-env'];
-const DANGEROUS_PUSH_FLAGS = new Set(['--delete', '--mirror', '--all', '--prune']);
 
 /** Git accepts any unambiguous abbreviation of a long option, so `--open=x` means `--open-files-in-pager=x`. */
 export function abbreviates(arg: string, option: string): boolean {
@@ -48,32 +44,12 @@ function readOnlySideEffects(verb: string, args: readonly string[]): GitVerdict 
   return null;
 }
 
-function pushVerdict(args: readonly string[]): GitVerdict {
-  for (const a of args) {
-    const shortGroup = /^-[a-zA-Z]+$/.test(a) && /[fd]/.test(a);
-    if (shortGroup || a.startsWith('--force') || DANGEROUS_PUSH_FLAGS.has(a)) {
-      return { deny: 'Force pushes, remote deletes, mirrors and push --all are never allowed.' };
-    }
-    if (!a.startsWith('-') && (a.startsWith('+') || a.startsWith(':'))) {
-      return { deny: 'Force pushes and remote deletes are never allowed.' };
-    }
-  }
-  const targets = args
-    .filter((a) => !a.startsWith('-'))
-    .slice(1)
-    .map((ref) => (ref.split(':').at(-1) ?? ref).replace(/^refs\//, '').replace(/^heads\//, ''));
-  if (targets.some((t) => PROTECTED_BRANCHES.has(t))) {
-    return { deny: 'Pushing to a protected branch is never allowed.' };
-  }
-  return null;
-}
-
 /**
- * Git in a managed session is an allowlist: read-only verbs, branch listing and a checked
- * `push`. Anything else changes the shared checkout or its config; commits go through the
- * 10db commit tool.
+ * Git in a managed session is an allowlist: read-only verbs and branch listing. Anything else
+ * changes the shared checkout, its config or a remote; commits go through the 10db commit tool,
+ * and only the daemon pushes, to the URL pinned for the project.
  */
-export function gitVerdict(words: readonly string[], delivery: Delivery): GitVerdict {
+export function gitVerdict(words: readonly string[]): GitVerdict {
   let i = 1;
   while (i < words.length && (words[i] ?? '').startsWith('-')) {
     const flag = words[i] ?? '';
@@ -99,11 +75,8 @@ export function gitVerdict(words: readonly string[], delivery: Delivery): GitVer
       ? null
       : { deny: 'Creating or deleting branches is not allowed in the shared checkout.' };
   }
-  if (verb === 'push')
-    return delivery === Delivery.PullRequest
-      ? { deny: '10db pushes when the batch ships; agents do not push in pull-request projects.' }
-      : pushVerdict(args);
+  if (verb === 'push') return { deny: 'Lanes never push; 10db pushes the work when it ships.' };
   return {
-    deny: `git ${verb} is not allowed. Only read-only git and push are allowed; commit through the 10db commit tool.`,
+    deny: `git ${verb} is not allowed. Only read-only git is allowed; commit through the 10db commit tool.`,
   };
 }

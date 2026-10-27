@@ -1,2 +1,10 @@
-export { createGit, GitNetworkError, GitNetworkFailure, type Git, type NetworkCall } from './git';
+export { CheckoutPin, memoryPinStore, type PinStore } from './checkout-pin';
+export { withDaemonGitConfig } from './daemon-config';
+export { createGit, type Git } from './git';
+export { GitNetworkError, GitNetworkFailure, type NetworkCall } from './network';
 export { GIT_REPO_ENV_VARS, withoutGitRepoEnv } from './repo-env';
+export { XCODE_SELECTORS } from './run';
+export { trustCard } from './trust-card';
+export { GitTrustError, GitTrustFailure } from './trust-error';
+export { firstExecutable, installCandidates, INSTALL_PREFIXES_TEXT } from './install-prefixes';
+export { GitVersionError, resolveGit } from './version';

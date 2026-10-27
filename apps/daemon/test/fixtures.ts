@@ -107,6 +107,30 @@ export function createTempRepoWithOrigin(): { repo: TempDir; origin: TempDir; cl
   };
 }
 
+/** The origin a delivery test pins: the repository `FakeGh` answers for. */
+export const GITHUB_ORIGIN = 'https://github.com/acme/widgets.git';
+
+/**
+ * Points `repo`'s origin at `GITHUB_ORIGIN`, as the daemon pins it and gh is told it, and returns a
+ * global config file that sends that URL to the local bare `origin`. Network calls and a test's own
+ * pushes read it through `GIT_CONFIG_GLOBAL`; the daemon's local git does not, so it pins github.com.
+ */
+export function githubOrigin(repo: string, origin: string): { global: string; cleanup(): void } {
+  execFileSync('git', ['-C', repo, 'remote', 'set-url', 'origin', GITHUB_ORIGIN], {
+    env: isolatedGitEnv(),
+    stdio: 'pipe',
+  });
+  const dir = tempDir('network-config');
+  const global = join(dir.path, 'gitconfig');
+  writeFileSync(global, `[url "${origin}"]\n\tinsteadOf = ${GITHUB_ORIGIN}\n`);
+  return {
+    global,
+    cleanup: () => {
+      dir.cleanup();
+    },
+  };
+}
+
 /** A clone of `origin` with a teammate's identity, for a test that moves origin from elsewhere. */
 export function createTempClone(origin: string): TempDir {
   const dir = tempDir('clone');

@@ -14,7 +14,8 @@ import {
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
-import { GhError } from '../github';
+import { GITHUB_ORIGIN } from '../../test/fixtures';
+import { GitTrustFailure } from '../git';
 import { batchBranchName } from './index';
 
 let h: DeliveryHarness;
@@ -115,6 +116,18 @@ describe('cutting a branch', () => {
       title: 'the checkout has uncommitted changes',
     },
     {
+      name: 'the repository asks for a filter, as Git LFS does',
+      arrange: (x) => {
+        writeFileSync(
+          join(x.repo, '.gitattributes'),
+          '*.bin filter=lfs diff=lfs merge=lfs -text\n',
+        );
+        x.git$('add', '.gitattributes');
+        x.git$('commit', '-q', '-m', 'lfs');
+      },
+      title: 'uses git filters',
+    },
+    {
       name: 'there is no origin',
       arrange: (x) => {
         x.git$('remote', 'remove', 'origin');
@@ -143,11 +156,11 @@ describe('cutting a branch', () => {
       title: 'gh is signed out',
     },
     {
-      name: 'gh cannot name the repository',
+      name: 'origin is not on github.com',
       arrange: (x) => {
-        x.gh.failNext.set('repoView', new GhError('failed', 'no git remotes point to GitHub'));
+        x.git$('remote', 'set-url', 'origin', 'https://gitlab.com/acme/widgets.git');
       },
-      title: "gh can't find the GitHub repository",
+      title: 'is not a github.com repository',
     },
   ])('refuses when $name: a card, no batch row, HEAD unmoved', async ({ arrange, title }) => {
     const task = h.addTask('Alpha');
@@ -162,6 +175,25 @@ describe('cutting a branch', () => {
     expect(h.git$('rev-parse', 'HEAD')).toBe(head);
     expect(h.git$('branch', '--show-current')).toBe(branch);
     expect(listWorkstreams(h.store.db, {}).filter((w) => w.taskId === task.id)).toEqual([]);
+  });
+
+  it('raises the origin card when origin is added after the checkout was pinned, and starts once it is trusted', async () => {
+    h.git$('remote', 'remove', 'origin');
+    // The first daemon git call pins the checkout, with no origin.
+    await h.git.head(h.repo);
+    h.git$('remote', 'add', 'origin', GITHUB_ORIGIN);
+    const task = h.addTask('Alpha');
+    h.starter.startBatch(h.project.id, { title: 'Greetings', taskIds: [task.id] });
+    await h.jobs.idle();
+    expect(listBatches(h.store.db)).toEqual([]);
+    const refusal = h.only(h.gitRefusals);
+    if (refusal.detail.kind !== GitTrustFailure.Origin)
+      throw new Error(`expected an origin refusal, got ${refusal.detail.kind}`);
+    expect(refusal.detail).toMatchObject({ direction: 'push', pinned: null, found: GITHUB_ORIGIN });
+    await h.git.retrust(h.repo, refusal.detail.candidate);
+    h.starter.startBatch(h.project.id, { title: 'Greetings', taskIds: [task.id] });
+    await h.jobs.idle();
+    expect(listBatches(h.store.db)).toHaveLength(1);
   });
 
   it('gives two simultaneous starts one batch and one branch', async () => {

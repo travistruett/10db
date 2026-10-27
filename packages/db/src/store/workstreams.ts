@@ -47,6 +47,7 @@ export interface WorkstreamPatch {
   readonly failureReason?: string | null;
   readonly lastActivityAt?: string | null;
   readonly baseHead?: string;
+  readonly branch?: string;
   readonly gatePid?: number | null;
   readonly gatePidStart?: string | null;
   /** Mutable because drizzle's `.set()` takes the column's own type. */
@@ -169,6 +170,7 @@ export function insertWorkstream(
     steps: [],
     stepIndex: 0,
     baseHead: null,
+    branch: null,
     leaseOwner: null,
     leaseExpiresAt: null,
     fence: 0,

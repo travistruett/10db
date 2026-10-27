@@ -75,10 +75,10 @@ describe('App shell', () => {
       ...baseHandlers(),
     );
     renderApp('/factory');
-    expect(await screen.findByText('claude was not found on your login PATH')).toBeTruthy();
+    expect(await screen.findByText('claude was not found where 10db looks for it')).toBeTruthy();
     expect(screen.getByText(/The login shell timed out after 10 s/)).toBeTruthy();
     // docker is optional, so its absence is not an alert.
-    expect(screen.queryByText('docker was not found on your login PATH')).toBeNull();
+    expect(screen.queryByText('docker was not found where 10db looks for it')).toBeNull();
   });
 
   it('warns when Claude Code is newer than the account checks were verified on', async () => {

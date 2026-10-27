@@ -25,7 +25,9 @@ describe('lane env file', () => {
   it('holds only the export that turns git global config off, read-only to its owner', () => {
     const file = createLaneEnvFile(root);
     expect(dirname(file)).toBe(root);
-    expect(readFileSync(file, 'utf8')).toBe('export GIT_CONFIG_GLOBAL=/dev/null\n');
+    expect(readFileSync(file, 'utf8')).toBe(
+      'export GIT_CONFIG_GLOBAL=/dev/null\nexport GIT_OPTIONAL_LOCKS=0\n',
+    );
     expect(statSync(file).mode & 0o777).toBe(0o400);
   });
 

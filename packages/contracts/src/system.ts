@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { InboxItemId, ProjectId } from './ids';
 import { KeepAwakeMode } from './states';
 
-/** The tools the system check looks for on the login PATH. */
+/** The tools the system check looks for: on the login PATH, but git in the daemon's fixed install prefixes. */
 export const ToolName = { Claude: 'claude', Git: 'git', Docker: 'docker', Gh: 'gh' } as const;
 export type ToolName = (typeof ToolName)[keyof typeof ToolName];
 

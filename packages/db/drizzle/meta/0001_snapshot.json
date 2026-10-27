@@ -1,6 +1,6 @@
 {
-  "id": "fa54ffb9-db77-4e56-9302-fe233c090fc1",
-  "prevId": "4ff3f228-ec53-4b75-8d7a-f474c3887d7f",
+  "id": "7589afcf-3345-43ad-8be8-e87accb95068",
+  "prevId": "64770257-01d9-4d69-aa83-e76d9e8a693f",
   "version": "6",
   "dialect": "sqlite",
   "tables": {
@@ -2959,6 +2959,13 @@
         },
         "base_head": {
           "name": "base_head",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "branch": {
+          "name": "branch",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

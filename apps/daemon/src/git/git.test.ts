@@ -1,5 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import {
+  chmodSync,
+  mkdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -22,7 +24,7 @@ import {
 } from '../../test/fixtures';
 import type { TempDir } from '../../test/fixtures';
 import { alive } from '../../test/orphan-gate';
-import { installPrePushHook, writePrePushHook } from '../../test/pre-push-hook';
+import { HANGING_SSH_URL, hangingSsh } from '../../test/hanging-ssh';
 import { createGit, GitNetworkError } from './index';
 
 const git = createGit();
@@ -55,10 +57,11 @@ describe('commit', () => {
       paths: ['a.txt'],
       message: 'Add a',
       opId: 'op-commit-a1',
+      branch: 'main',
     });
     expect(sha).toMatch(/^[0-9a-f]{40}$/);
     expect(alreadyCommitted).toBe(false);
-    expect((await git.status(repo.path)).map((s) => s.path)).toEqual(['b.txt']);
+    expect(await git.changedPaths(repo.path)).toEqual(['b.txt']);
   });
 
   it('returns the original commit when the same operation is retried', async () => {
@@ -68,6 +71,7 @@ describe('commit', () => {
       paths: ['a.txt'],
       message: 'Add a',
       opId: 'op-retry-001',
+      branch: 'main',
     });
     write('a.txt', 'changed after the first commit');
     const retry = await git.commit({
@@ -75,6 +79,7 @@ describe('commit', () => {
       paths: ['a.txt'],
       message: 'Add a',
       opId: 'op-retry-001',
+      branch: 'main',
     });
     expect(retry).toEqual({ sha: first.sha, alreadyCommitted: true });
     expect(commitCount()).toBe(2);
@@ -91,6 +96,7 @@ describe('commit', () => {
       paths: ['a.txt'],
       message: 'Add a',
       opId: 'op-crash-001',
+      branch: 'main',
     });
     expect(retry).toEqual({ sha, alreadyCommitted: true });
     expect(commitCount()).toBe(2);
@@ -103,6 +109,7 @@ describe('commit', () => {
       paths: ['a.txt'],
       message: 'Add a',
       opId: 'op-distinct-1',
+      branch: 'main',
     });
     write('b.txt', 'b');
     const second = await git.commit({
@@ -110,6 +117,7 @@ describe('commit', () => {
       paths: ['b.txt'],
       message: 'Add b',
       opId: 'op-distinct-2',
+      branch: 'main',
     });
     expect(second.alreadyCommitted).toBe(false);
     expect(second.sha).not.toBe(first.sha);
@@ -117,7 +125,13 @@ describe('commit', () => {
 
   it.each([['../escape.txt'], ['/etc/hosts'], ['']])('rejects the path %j', async (path) => {
     await expect(
-      git.commit({ repo: repo.path, paths: [path], message: 'x', opId: 'op-badpath-1' }),
+      git.commit({
+        repo: repo.path,
+        paths: [path],
+        message: 'x',
+        opId: 'op-badpath-1',
+        branch: 'main',
+      }),
     ).rejects.toThrow(InvalidError);
   });
 
@@ -132,6 +146,7 @@ describe('commit', () => {
           paths: ['link/x.ts'],
           message: 'x',
           opId: 'op-symlink-1',
+          branch: 'main',
         }),
       ).rejects.toThrow(InvalidError);
     } finally {
@@ -141,7 +156,13 @@ describe('commit', () => {
 
   it('reports nothing to commit as an InvalidError', async () => {
     await expect(
-      git.commit({ repo: repo.path, paths: ['README.md'], message: 'x', opId: 'op-nothing-1' }),
+      git.commit({
+        repo: repo.path,
+        paths: ['README.md'],
+        message: 'x',
+        opId: 'op-nothing-1',
+        branch: 'main',
+      }),
     ).rejects.toThrow(/Nothing to commit/);
   });
 
@@ -152,16 +173,29 @@ describe('commit', () => {
       paths: ['README.md'],
       message: 'Remove readme',
       opId: 'op-delete-01',
+      branch: 'main',
     });
-    expect(await git.status(repo.path)).toEqual([]);
+    expect(await git.changedPaths(repo.path)).toEqual([]);
   });
 
   it('serializes concurrent commits in one repo', async () => {
     write('x.txt', 'x');
     write('y.txt', 'y');
     const [x, y] = await Promise.all([
-      git.commit({ repo: repo.path, paths: ['x.txt'], message: 'x', opId: 'op-parallel-x' }),
-      git.commit({ repo: repo.path, paths: ['y.txt'], message: 'y', opId: 'op-parallel-y' }),
+      git.commit({
+        repo: repo.path,
+        paths: ['x.txt'],
+        message: 'x',
+        opId: 'op-parallel-x',
+        branch: 'main',
+      }),
+      git.commit({
+        repo: repo.path,
+        paths: ['y.txt'],
+        message: 'y',
+        opId: 'op-parallel-y',
+        branch: 'main',
+      }),
     ]);
     expect(x.sha).not.toBe(y.sha);
     expect(commitCount()).toBe(3);
@@ -177,6 +211,7 @@ describe('history queries', () => {
       paths: ['a.txt'],
       message: 'a',
       opId: 'op-history-1',
+      branch: 'main',
     });
     write('b.txt', 'b');
     expect(await git.changedFilesSince(repo.path, base)).toEqual(['a.txt', 'b.txt']);
@@ -206,48 +241,97 @@ describe('gitDirs', () => {
   });
 });
 
-describe('status', () => {
+describe('changedPaths', () => {
   it.each([
     {
       name: 'a modified file',
       arrange: () => {
         write('README.md', 'edited');
       },
-      expected: [{ code: ' M', path: 'README.md' }],
+      expected: ['README.md'],
     },
     {
       name: 'an untracked file',
       arrange: () => {
         write('new.txt', 'n');
       },
-      expected: [{ code: '??', path: 'new.txt' }],
+      expected: ['new.txt'],
     },
     {
-      name: 'a staged rename, reported once under its new path',
+      name: 'a deleted file',
+      arrange: () => {
+        rmSync(join(repo.path, 'README.md'));
+      },
+      expected: ['README.md'],
+    },
+    {
+      name: 'a staged rename, as the old path gone and the new one added',
       arrange: () => {
         rawGit('mv', 'README.md', 'DOC.md');
       },
-      expected: [{ code: 'R ', path: 'DOC.md' }],
+      expected: ['DOC.md', 'README.md'],
+    },
+    {
+      name: 'a file made executable',
+      arrange: () => {
+        chmodSync(join(repo.path, 'README.md'), 0o755);
+      },
+      expected: ['README.md'],
+    },
+    {
+      name: 'a file swapped for a link',
+      arrange: () => {
+        rmSync(join(repo.path, 'README.md'));
+        symlinkSync('/etc/hosts', join(repo.path, 'README.md'));
+      },
+      expected: ['README.md'],
     },
     {
       name: 'a path containing a space',
       arrange: () => {
         write('with space.txt', 's');
       },
-      expected: [{ code: '??', path: 'with space.txt' }],
+      expected: ['with space.txt'],
+    },
+    {
+      name: 'nothing for an ignored file',
+      arrange: () => {
+        write('.git/info/exclude', 'build/\n');
+        mkdirSync(join(repo.path, 'build'));
+        write('build/out.js', 'x');
+      },
+      expected: [],
+    },
+    {
+      name: 'nothing for a file only touched',
+      arrange: () => {
+        const later = new Date(Date.now() + 60_000);
+        utimesSync(join(repo.path, 'README.md'), later, later);
+      },
+      expected: [],
     },
   ])('reports $name', async ({ arrange, expected }) => {
     arrange();
-    expect(await git.status(repo.path)).toEqual(expected);
+    expect(await git.changedPaths(repo.path)).toEqual(expected);
   });
 
-  // A status that refreshed the index would hold index.lock, and a lane's commit running then fails.
+  it('reports only the paths it is asked about', async () => {
+    write('README.md', 'edited');
+    write('new.txt', 'n');
+    write('other.txt', 'o');
+    expect(await git.changedPaths(repo.path, ['new.txt', 'README.md', 'gone.txt'])).toEqual([
+      'README.md',
+      'new.txt',
+    ]);
+  });
+
+  // A read that refreshed the index would hold index.lock, and a lane's commit running then fails.
   it('leaves a stale index unwritten', async () => {
     const index = join(repo.path, '.git', 'index');
     const later = new Date(Date.now() + 60_000);
     utimesSync(join(repo.path, 'README.md'), later, later);
     const before = readFileSync(index);
-    expect(await git.status(repo.path)).toEqual([]);
+    expect(await git.changedPaths(repo.path)).toEqual([]);
     expect(readFileSync(index).equals(before)).toBe(true);
   });
 });
@@ -331,7 +415,7 @@ describe('network calls', () => {
     await expect(failure).rejects.toMatchObject({ kind: 'failed' });
   });
 
-  it('pushes a branch and sets its upstream, and pushing it again changes nothing', async () => {
+  it('pushes a branch and records its upstream, and pushing it again changes nothing', async () => {
     await git.switchNewBranch(remote.repo.path, '10db/x-0a1b2c3d', 'main');
     writeFileSync(join(remote.repo.path, 'x.txt'), 'x');
     local('add', 'x.txt');
@@ -355,13 +439,11 @@ describe('network calls', () => {
     expect(origin('rev-parse', 'refs/heads/10db/x-0a1b2c3d')).toBe(theirs);
   });
 
-  it('reports how long a push ran and what git and its pre-push hook printed', async () => {
+  it('reports how long a push ran and what git printed', async () => {
     await git.switchNewBranch(remote.repo.path, '10db/x-0a1b2c3d', 'main');
-    writePrePushHook(remote.repo.path, 'echo "hook: 3 checks passed"; echo "hook: lint warns" >&2');
     const run = await git.push(remote.repo.path, '10db/x-0a1b2c3d', net);
     expect(run.durationMs).toBeGreaterThanOrEqual(0);
-    expect(run.output).toContain('hook: 3 checks passed');
-    expect(run.output).toContain('hook: lint warns');
+    expect(run.output).toContain('[new branch]');
   });
 
   it('gives a rejected push its duration and what git printed', async () => {
@@ -380,7 +462,7 @@ describe('network calls', () => {
   });
 
   it('times out a fetch that hangs', async () => {
-    local('remote', 'set-url', 'origin', 'ssh://git@example.invalid/hang.git');
+    local('remote', 'set-url', 'origin', 'git@example.invalid:hang.git');
     // ssh is replaced by a command that hangs; git appends the host and command as arguments.
     const hang = {
       env: { ...NETWORK_ENV, GIT_SSH_COMMAND: 'sleep 5; true', GIT_SSH_VARIANT: 'simple' },
@@ -391,26 +473,28 @@ describe('network calls', () => {
     });
   });
 
-  it('stops a push whose pre-push hook runs past its timeout, with every process the hook started', async () => {
+  it('stops a push that runs past its timeout, with every process its transport started', async () => {
+    // Set before the daemon's first call there, which records origin's URLs.
+    local('remote', 'set-url', '--push', 'origin', HANGING_SSH_URL);
     await git.switchNewBranch(remote.repo.path, '10db/x-0a1b2c3d', 'main');
-    const hook = installPrePushHook(remote.repo.path, 30);
+    const ssh = hangingSsh(30);
     try {
       const push = git.push(remote.repo.path, '10db/x-0a1b2c3d', {
-        env: NETWORK_ENV,
+        env: { ...NETWORK_ENV, ...ssh.env },
         timeoutMs: 1_000,
       });
       const timedOut = expect(push).rejects.toMatchObject({ kind: 'timeout' });
-      const child = await hook.childPid();
+      const child = await ssh.childPid();
       await timedOut;
       await waitFor(() => !alive(child), 2_000);
       expect(() => origin('rev-parse', '--verify', '-q', 'refs/heads/10db/x-0a1b2c3d')).toThrow();
     } finally {
-      hook.cleanup();
+      ssh.cleanup();
     }
   });
 
   it('stops a fetch when its signal aborts', async () => {
-    local('remote', 'set-url', 'origin', 'ssh://git@example.invalid/hang.git');
+    local('remote', 'set-url', 'origin', 'git@example.invalid:hang.git');
     const controller = new AbortController();
     const call = {
       env: { ...NETWORK_ENV, GIT_SSH_COMMAND: 'sleep 5; true', GIT_SSH_VARIANT: 'simple' },
@@ -478,14 +562,20 @@ describe('git hook variables in the daemon environment', () => {
       name: 'status reads',
       act: async () => {
         write('new.txt', 'n');
-        expect(await git.status(repo.path)).toEqual([{ code: '??', path: 'new.txt' }]);
+        expect(await git.changedPaths(repo.path)).toEqual(['new.txt']);
       },
     },
     {
       name: 'commit writes to',
       act: async () => {
         write('a.txt', 'a');
-        await git.commit({ repo: repo.path, paths: ['a.txt'], message: 'a', opId: 'op-hook-1' });
+        await git.commit({
+          repo: repo.path,
+          paths: ['a.txt'],
+          message: 'a',
+          opId: 'op-hook-1',
+          branch: 'main',
+        });
         expect(commitCount()).toBe(2);
       },
     },

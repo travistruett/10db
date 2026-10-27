@@ -833,6 +833,15 @@ export function createRunner(opts: RunnerOptions): Runner {
     );
     const reviser = action.kind === 'revise' ? row.steps[action.reviewStep] : undefined;
     const readOnly = step.tools === ToolAccess.ReadOnly;
+    // Work with no batch commits on one branch for its whole life: the one HEAD names as its first
+    // session starts. A lane that switches branches later can't move its commits elsewhere.
+    if (row.batchId === null && row.branch === null) {
+      const branch = await opts.git.currentBranch(project.repoPath);
+      if (branch !== null)
+        opts.state.write((ctx) => {
+          patchWorkstream(ctx, id, ctl.fence, { branch });
+        });
+    }
     const baseHead = row.baseHead ?? (await opts.git.head(project.repoPath));
     // A stop that landed while the head was read finds no handle to stop, so it is honoured here.
     // A stop before any session launched leaves the saved action as it is, so the provider session it
@@ -1451,7 +1460,7 @@ export function createRunner(opts: RunnerOptions): Runner {
   /** The paths in the claims the workstream holds right now that git reports as changed. */
   async function claimedChanges(row: WorkstreamRow): Promise<string[]> {
     const project = getProject(db, row.projectId);
-    const changed = (await opts.git.status(project.repoPath)).map((s) => s.path);
+    const changed = await opts.git.changedPaths(project.repoPath);
     const claims = activeClaims(db, row.id).map((c) => ({ kind: c.kind, name: c.name }));
     return findClaimed(changed, project, claims).sort();
   }

@@ -25,6 +25,7 @@ const ALLOWED_NAMES: ReadonlySet<string> = new Set([
   'GOROOT',
   'CLAUDE_CODE_TMPDIR',
   'GIT_CONFIG_GLOBAL',
+  'GIT_OPTIONAL_LOCKS',
   'npm_config_cache',
   'npm_config_devdir',
 ]);

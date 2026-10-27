@@ -35,6 +35,7 @@ import { WebSocket } from 'ws';
 import { apiClient, quickFlowId } from '../../test/api-client';
 import { createTempRepo, tempDir, waitFor, waitForAsync } from '../../test/fixtures';
 import { ManualClock } from '../clock';
+import type { ResolvedTools } from '../environment';
 import type { CaffeinateSpawner } from '../keep-awake';
 import { FakeAdapter, type FakeScriptBook, type SessionSpec } from '../sessions';
 import { AlreadyRunningError, readRuntimeInfo, startDaemon, type RunningDaemon } from './index';
@@ -465,6 +466,7 @@ describe('startDaemon', () => {
       tools: [{ name: 'git', path: '/usr/bin/git', version: 'git version 2.50.1', required: true }],
       benchmarkSync: null,
     };
+    const checkedWith: ResolvedTools[] = [];
     daemon = await startDaemon({
       laneSandbox: null,
       dataDir: dir.path,
@@ -473,7 +475,10 @@ describe('startDaemon', () => {
       logLevel: 'warn',
       uiToken: token,
       caffeinate: recordingCaffeinate(spawned),
-      systemCheck: () => Promise.resolve(check),
+      systemCheck: (resolved) => {
+        checkedWith.push(resolved);
+        return Promise.resolve(check);
+      },
       watch: false,
     });
     expect(daemon.token).toBe(token);
@@ -494,6 +499,14 @@ describe('startDaemon', () => {
     );
     expect(head.seq).toBeGreaterThan(0);
     expect(await (await fetch(`${daemon.url}/system`, { headers })).json()).toEqual(check);
+    // The check reports the git and gh the daemon resolved, from the install prefixes.
+    const prefixed = (name: string) =>
+      ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin']
+        .map((prefix) => join(prefix, name))
+        .filter((path) => existsSync(path));
+    expect(checkedWith).toHaveLength(1);
+    expect(prefixed('git')).toContain(checkedWith[0]?.git);
+    expect([...prefixed('gh'), null]).toContain(checkedWith[0]?.gh);
   });
 
   it('holds keep-awake and watches the repo while a lane runs, and lets go when it is cancelled', async () => {

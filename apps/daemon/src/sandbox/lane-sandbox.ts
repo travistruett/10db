@@ -1,4 +1,4 @@
-import { mkdirSync, realpathSync, writeFileSync, type Dirent } from 'node:fs';
+import { existsSync, mkdirSync, realpathSync, writeFileSync, type Dirent } from 'node:fs';
 import { readdir, realpath } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import type { PermissionRuleDto, ProjectDto } from '@10db/contracts';
@@ -202,6 +202,27 @@ function storedPatterns(
 /** Claude Code's spelling of an absolute path in a permission rule: `//` stands for the root. */
 const ruleScope = (path: string): string => `/${path}`;
 
+/**
+ * `<checkout>/.git`, the git dir and the common dir of every registered checkout but `own`. A checkout
+ * whose git dirs can't be read now still gets its `.git` denied, and one that is gone is skipped.
+ */
+async function otherCheckoutsGitState(
+  own: string,
+  checkouts: readonly string[],
+  gitDirs: LaneSandboxDeps['gitDirs'],
+): Promise<string[]> {
+  // A checkout that is gone has nothing to protect.
+  const real = checkouts.flatMap((path) => (existsSync(path) ? [realpathSync(path)] : []));
+  const others = [...new Set(real)].filter((path) => path !== own);
+  const denies = await Promise.all(
+    others.map(async (other) => {
+      const dirs = await gitDirs(other).catch(() => null);
+      return [join(other, '.git'), ...(dirs ? [dirs.gitDir, dirs.commonDir] : [])];
+    }),
+  );
+  return denies.flat();
+}
+
 /** Builds each lane session's sandbox: one profile, one temp dir and one file-tool context. */
 export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
   const tmpRoot = deps.tmpRoot ?? LANE_TEMP_ROOT;
@@ -211,6 +232,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
       const checkoutSecrets = await secretFilesIn(checkout);
       const { gitDir, commonDir } = await deps.gitDirs(checkout);
       const linkedWorktree = !isEqualOrUnder(commonDir, checkout);
+      const otherGitState = await otherCheckoutsGitState(checkout, input.checkouts, deps.gitDirs);
       const protectedList = [
         ...protectedReads({
           home: deps.home,
@@ -261,6 +283,8 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           // An exception to keeping git config variables: the builder's global config can name
           // hooks, credential helpers and includes the sandboxed git would run or read.
           GIT_CONFIG_GLOBAL: '/dev/null',
+          // The git a lane runs reads only: a status never refreshes the index it can't write.
+          GIT_OPTIONAL_LOCKS: '0',
           CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1',
           // Claude Code drops GIT_CONFIG_GLOBAL from a sandboxed command's env; this file sets it back.
           CLAUDE_ENV_FILE: envFile,
@@ -275,16 +299,17 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           toolchainReads: toolchain.reads,
           allowedDomains: hosts,
           readList,
-          // A linked worktree's common dir is read-only: it holds the `config` and `hooks/` the
-          // daemon's unsandboxed git runs. Claude Code opens the worktree's own git dir for writing
-          // anyway, so `HEAD` and `index` stay writable and the daemon's git must check them.
-          // Lanes commit through the daemon.
+          // A linked worktree's common dir is read for the git a lane runs, never written.
           // The env file is read to set up each command's shell, in case that happens in the sandbox.
           extraReads: [envFile, ...(linkedWorktree ? [commonDir] : [])],
           extraWrites: [],
-          // Claude Code opens a linked worktree's git dir for writing and holds back `commondir` and
-          // `config.worktree`, but not `gitdir`, the link git follows from the main repository.
-          denyWrites: linkedWorktree ? [join(gitDir, 'gitdir')] : [],
+          // Only the daemon writes git state, so a lane can't move HEAD or a ref, stage, or plant
+          // config, hooks, alternates or attributes: the git dir and the common dir are read-only to
+          // it, and so is `<checkout>/.git`, file or directory, wherever the git dir lies, so a gitfile
+          // can't be swapped to point elsewhere. Claude Code would otherwise open them with the checkout.
+          // Every other registered checkout's are denied too: one nested in this checkout would
+          // otherwise be writable here, and the daemon's git trusts a git dir under any of them.
+          denyWrites: [...new Set([join(checkout, '.git'), gitDir, commonDir, ...otherGitState])],
           loopback: input.project.sandboxLoopback,
           deniedEnvNames: deniedEnvNames({ ...input.env, ...env }),
         });

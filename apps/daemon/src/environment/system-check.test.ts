@@ -1,10 +1,10 @@
-import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { tempDir } from '../../test/fixtures';
 import {
   claudeCodeWarning,
-  findOnPath,
+  findClaude,
   markGhRequired,
   probeVersion,
   systemCheck,
@@ -27,19 +27,6 @@ function tool(subdir: string, name: string, script: string, mode = 0o755): strin
   return path;
 }
 
-describe('findOnPath', () => {
-  it('returns the first executable match and skips non-executable files and empty entries', () => {
-    tool('a', 'git', 'exit 0', 0o644);
-    const second = tool('b', 'git', 'exit 0');
-    expect(findOnPath('git', `::${join(dir.path, 'a')}:${join(dir.path, 'b')}`)).toBe(second);
-  });
-
-  it('returns null when nothing matches or PATH is unset', () => {
-    expect(findOnPath('claude', join(dir.path, 'nowhere'))).toBeNull();
-    expect(findOnPath('claude', undefined)).toBeNull();
-  });
-});
-
 describe('probeVersion', () => {
   it('returns the first non-empty line of --version', async () => {
     const path = tool('bin', 'claude', 'echo; echo "2.1.299 (Claude Code)"; echo extra');
@@ -60,52 +47,82 @@ describe('probeVersion', () => {
 });
 
 describe('systemCheck', () => {
-  it('reports each tool from the login PATH, with the login-env status', async () => {
-    const claude = tool('bin', 'claude', 'exit 0');
-    const git = tool('bin', 'git', 'exit 0');
+  it('reports the git and gh the daemon resolved, and claude and docker from install prefixes and their own install dirs, never the login PATH', async () => {
+    // Every tool is also on the login PATH, where a lane could have put it: none of those is run.
+    for (const name of ['claude', 'git', 'gh', 'docker']) tool('bin', name, 'exit 0');
+    const claude = tool('home/.local/bin', 'claude', 'exit 0');
+    const docker = tool('home/.docker/bin', 'docker', 'exit 0');
+    const resolved = { git: '/resolved/bin/git', gh: '/resolved/bin/gh' };
     const login: LoginEnv = {
       vars: { PATH: join(dir.path, 'bin') },
       source: 'inherited',
       warning: 'The login shell timed out',
     };
-    const report = await systemCheck(login, (path, env) =>
-      Promise.resolve(`version of ${path} ${env['PATH'] ?? ''}`),
-    );
+    const prefixed = (name: string) =>
+      ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin']
+        .map((prefix) => join(prefix, name))
+        .find((p) => existsSync(p));
+    const report = await systemCheck(login, resolved, {
+      home: join(dir.path, 'home'),
+      probe: (path, env) => Promise.resolve(`version of ${path} ${env['PATH'] ?? ''}`),
+    });
+    const version = (path: string) => `version of ${path} ${join(dir.path, 'bin')}`;
+    const claudePath = prefixed('claude') ?? claude;
+    const dockerPath = prefixed('docker') ?? docker;
     expect(report).toEqual({
       loginEnv: { source: 'inherited', warning: 'The login shell timed out' },
       claudeCode: { verifiedOn: '2.1.302', warning: null },
       tools: [
-        {
-          name: 'claude',
-          path: claude,
-          version: `version of ${claude} ${join(dir.path, 'bin')}`,
-          required: true,
-        },
-        {
-          name: 'git',
-          path: git,
-          version: `version of ${git} ${join(dir.path, 'bin')}`,
-          required: true,
-        },
-        { name: 'docker', path: null, version: null, required: false },
-        { name: 'gh', path: null, version: null, required: false },
+        { name: 'claude', path: claudePath, version: version(claudePath), required: true },
+        { name: 'git', path: resolved.git, version: version(resolved.git), required: true },
+        { name: 'docker', path: dockerPath, version: version(dockerPath), required: false },
+        { name: 'gh', path: resolved.gh, version: version(resolved.gh), required: false },
       ],
       // The services layer fills this per request; the environment check reports no benchmark warning.
       benchmarkSync: null,
     });
   });
+
+  it('reports gh missing when the daemon resolved none', async () => {
+    const login: LoginEnv = { vars: {}, source: 'login_shell', warning: null };
+    const report = await systemCheck(
+      login,
+      { git: '/resolved/bin/git', gh: null },
+      { home: join(dir.path, 'home'), probe: () => Promise.resolve('1.0.0') },
+    );
+    expect(report.tools.find((t) => t.name === 'gh')).toEqual({
+      name: 'gh',
+      path: null,
+      version: null,
+      required: false,
+    });
+  });
+});
+
+describe('findClaude', () => {
+  it.each([
+    { name: "Claude Code's native install", at: '.local/bin' },
+    { name: 'the older local install', at: '.claude/local' },
+  ])('finds claude in $name when no install prefix has it', ({ at }) => {
+    const path = tool(join('home', at), 'claude', 'exit 0');
+    const prefixed = ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin']
+      .map((prefix) => join(prefix, 'claude'))
+      .find((p) => existsSync(p));
+    expect(findClaude(join(dir.path, 'home'))).toBe(prefixed ?? path);
+  });
 });
 
 describe('systemCheck version warning', () => {
   it('warns when the installed claude has a newer major version', async () => {
-    tool('bin', 'claude', 'exit 0');
-    const login: LoginEnv = {
-      vars: { PATH: join(dir.path, 'bin') },
-      source: 'login_shell',
-      warning: null,
-    };
-    const report = await systemCheck(login, (path) =>
-      Promise.resolve(path.endsWith('claude') ? '3.0.0 (Claude Code)' : null),
+    tool('home/.local/bin', 'claude', 'exit 0');
+    const login: LoginEnv = { vars: {}, source: 'login_shell', warning: null };
+    const report = await systemCheck(
+      login,
+      { git: '/usr/bin/git', gh: null },
+      {
+        home: join(dir.path, 'home'),
+        probe: (path) => Promise.resolve(path.endsWith('claude') ? '3.0.0 (Claude Code)' : null),
+      },
     );
     expect(report.claudeCode.warning).toContain('3.0.0');
   });

@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "4ff3f228-ec53-4b75-8d7a-f474c3887d7f",
+  "id": "64770257-01d9-4d69-aa83-e76d9e8a693f",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "aa_models": {
@@ -2959,6 +2959,13 @@
         },
         "base_head": {
           "name": "base_head",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "branch": {
+          "name": "branch",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

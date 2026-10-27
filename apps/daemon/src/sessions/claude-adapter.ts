@@ -65,7 +65,7 @@ export type QueryFn = (params: {
 }) => Query;
 
 export interface ClaudeAdapterOptions {
-  /** The builder's installed claude, found on the login PATH. */
+  /** The builder's installed claude, from `findClaude` or `TENDB_CLAUDE_PATH`. */
   readonly claudePath: string;
   /** The injected harness plugin directory. */
   readonly pluginDir: string;

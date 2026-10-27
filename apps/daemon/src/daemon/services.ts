@@ -73,6 +73,8 @@ export function createServices(deps: {
   readonly shipper: Shipper;
   readonly accounts: AccountService;
   readonly moves: Pick<AccountMoves, 'move'>;
+  /** Records a new project's checkout as the daemon trusts it (lane sandbox spec D13). */
+  readonly pinCheckout: (repoPath: string) => void;
 }): ApiServices {
   const db = deps.state.db;
   return {
@@ -82,7 +84,9 @@ export function createServices(deps: {
       if (!existsSync(join(config.repoPath, '.git'))) {
         throw new InvalidError(`${config.repoPath} is not a git repository`);
       }
-      return deps.state.write((ctx) => insertProject(ctx, config));
+      const project = deps.state.write((ctx) => insertProject(ctx, config));
+      deps.pinCheckout(project.repoPath);
+      return project;
     },
     listTasks: (projectId) => listTasks(db, projectId),
     createTask(projectId, input) {

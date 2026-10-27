@@ -7,9 +7,10 @@ const PREFIX = '10db-env-';
 
 /**
  * Claude Code drops `GIT_CONFIG_GLOBAL` from a sandboxed command's env, and git then dies on the
- * denied `~/.gitconfig`; the shell sets it again from this file before each command.
+ * denied `~/.gitconfig`; the shell sets it again from this file before each command, with
+ * `GIT_OPTIONAL_LOCKS=0` so a status never tries to refresh the index the lane can't write.
  */
-const CONTENT = 'export GIT_CONFIG_GLOBAL=/dev/null\n';
+const CONTENT = 'export GIT_CONFIG_GLOBAL=/dev/null\nexport GIT_OPTIONAL_LOCKS=0\n';
 
 /**
  * Writes one session's `CLAUDE_ENV_FILE`, read-only (mode 0400), beside the lane temp dirs and

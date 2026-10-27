@@ -16,8 +16,11 @@
   Every lane runs under the lane sandbox (**built**, always on, with no switch): the kernel sandbox holds for a
   lane's Bash and its children. Claude Code's permission rules, the broker and the guard's resolved-path check
   hold for the file tools. Every lane runs in Claude Code's `default` permission mode; there is no auto mode. Still
-  **designed** only: the claude process's own environment, the gate and the daemon's git hooks under a sandbox,
-  repo MCP servers under a sandbox, the daemon's git pinning, the safe reader, the secret scan and the CI card.
+  **designed** only: the claude process's own environment, the gate under a sandbox, repo MCP servers under a
+  sandbox, the safe reader, the secret scan and the CI card. The daemon's own git runs nothing from the
+  checkout: no hook, filter, attribute-selected driver, fsmonitor or submodule git, because every call reads no
+  attributes and turns hooks and fsmonitor off. It commits only on the workstream's pinned branch, in the
+  checkout pinned for the project, and pushes only to the URL pinned with it (D13, **built**).
 
   Every row below says whether its enforcement is **built** or only **designed**. The research behind it is
   `research/spike-13-sandbox.md`.
@@ -286,14 +289,13 @@ Under the lane sandbox (**built**), the design column holds for a lane's Bash:
   pnpm 12.13.0 under a Seatbelt profile fails with `ERR_PNPM_STORE_DIR_OPEN_OPERATION_LOCK` without that
   directory and installs with it). That directory is shared with every lane and the builder's own pnpm, so the
   profile keeps it closed, and the pnpm hazard card says to run the install outside the lane or use npm.
-- **A linked worktree.** Claude Code opens the worktree's own git dir for writing even though the profile leaves
-  it out of `allowWrite`. It denies `commondir` and `config.worktree` there, and the worktree's `.git` gitfile.
-  10db adds an exact `denyWrite` on `<gitDir>/gitdir`, which the live run found writable. `HEAD`, `index` and new
-  files in that git dir stay writable, as an ordinary checkout's do; the daemon's branch and index checks are
-  D13's (designed). The common dir is read-only in the profile: `config` and `hooks/` were measured denied, and
-  refs and objects are unmeasured. In an ordinary checkout Claude Code denies `.git/config`, `.git/hooks`,
-  `.git/commondir` and `.git/config.worktree` (measured live, Claude Code 2.1.310). Re-run the live test after
-  each Claude Code or SDK upgrade; nothing else enforces these.
+- **The git dirs are read-only to lanes.** Only the daemon writes git state. Claude Code opens the checkout,
+  `.git` included, and a linked worktree's own git dir for writing; the profile denies writes to the checkout's
+  git dir, its common dir and `<checkout>/.git`, file or directory, wherever the git dir lies, and to those of
+  every other registered checkout, so a project nested inside this checkout keeps its git state too. A lane can't move HEAD or a
+  ref, stage, or plant config, hooks, alternates or attributes. Its read-only git still works: the env sets
+  `GIT_OPTIONAL_LOCKS=0`, so `git status` doesn't try to refresh the index, and the live test runs `git status`,
+  `git diff` and `git log` with the dirs read-only. Re-run it after each Claude Code or SDK upgrade.
 - **The profile is validated.** An invalid value drops the sandbox without an error (spike 14 check 11), so the
   daemon builds the profile from paths, host names and variable names only, checks it against a strict schema
   before the session starts, and `apps/daemon/test/lane-sandbox.live.test.ts` (run with `TENDB_LIVE_CLAUDE=1`,
@@ -329,26 +331,85 @@ Under the lane sandbox (**built**), the design column holds for a lane's Bash:
   environment:
   - on `main` that includes the API key in `api_key` billing mode;
   - `feat/accounts` drops account credentials but keeps `GH_TOKEN`, AWS keys and the SSH agent.
-- **Today, the hooks:**
-  - the daemon's `git add`, `commit` and `switch` run the checkout's hooks with the daemon's own environment.
-    Here that is lefthook, which reads `lefthook.yml`;
-  - its `git push` runs the pre-push hook (`make check`) with the login environment.
-- **All of this is code a lane can write, run with no sandbox.** A lane that edits `lefthook.yml` and then calls
-  `commit` runs code as the builder.
-- **Design:** R2, R6 and R9:
-  - all of it runs inside a kernel sandbox with the lane's read policy;
-  - it gets no credentials, and only the network the project's tests need;
-  - no git command the daemon runs takes an executable from the repo's config.
+- **The daemon's git, built (D13):** it runs no hook, filter, attribute-selected driver, fsmonitor or submodule
+  git. The surface is switched off, not checked for, and git itself handles every path:
+  - every call reads no attributes (`GIT_ATTR_SOURCE` at the empty tree, `core.attributesFile=/dev/null`), so
+    no filter, driver or line-ending conversion is selected whatever config names. It passes
+    `core.hooksPath=/dev/null`, `core.fsmonitor=false`, `submodule.recurse=false`, `core.protectHFS` and
+    `core.protectNTFS`, drops every `GIT_*` variable but the global and system config selectors (and, for
+    fetch and push, the builder's ssh and askpass ones), and is killed after 60 s. `gh` gets the hook and
+    fsmonitor config through `GIT_CONFIG_COUNT`. Every call, local and network, runs the one git resolved at
+    startup from fixed install prefixes, in order `/opt/homebrew/bin`, `/usr/local/bin` and `/usr/bin`, never
+    the login `PATH`, which can name a directory a lane writes (under `pnpm dev`, a checkout's
+    `node_modules/.bin` leads it). It is the first that passes a behaviour probe, kept by the path it was found at, which a `brew upgrade` and its
+    cleanup leave in place (the Cellar file a prefix link points to is deleted, the link isn't), and which no lane
+    can write: in a
+    scratch repository whose `.gitattributes` selects a filter, `check-attr` under `GIT_ATTR_SOURCE` at the
+    empty tree must say `unspecified`. The global `--attr-source`, and `GIT_ATTR_SOURCE` with it, arrived in
+    git 2.41; Xcode's git 2.39 fails the probe, and with no git that passes the daemon refuses to start, naming
+    the gits it found and how to install one. `DEVELOPER_DIR`, `SDKROOT` and `TOOLCHAINS` are dropped from every
+    git call, the probe's included, and from gh: they steer Xcode's `/usr/bin/git` shim to another git per
+    spawn. `runGit` takes the binary as a required argument, gh runs with that git's directory first on its
+    `PATH`, and the system check reports the git and gh the daemon resolved, so no daemon process runs a git
+    found on the login `PATH`. claude and docker are looked for the same way: the install prefixes, then
+    their own install directories in home (`~/.local/bin` and `~/.claude/local` for claude, `~/.docker/bin`
+    for docker), which no lane writes; `TENDB_CLAUDE_PATH` overrides claude's;
+  - once a checkout is pinned, every call runs with `GIT_DIR` at the pinned git dir and `GIT_WORK_TREE` at the
+    checkout, so git never reads the `.git` gitfile again and a linked worktree's `commondir` comes from the
+    read-only git dir; a lane can't swap the gitfile between two calls, and the profile denies writes to it.
+    The pin is read once per operation and every call in it uses that one. `check-attr` for the filter refusal,
+    the one call that reads attributes, runs the same git in the same git dir;
+  - an attributes file in the git dir (`info/attributes`) is the one source that setting can't switch off, so
+    a non-empty one refuses every call with a card;
+  - a commit stages with `git add -A` on a private `GIT_INDEX_FILE` seeded from the branch tip (git writes
+    nothing through a link and checks every path), refuses a changed gitlink or `.git`-like name, then runs
+    `write-tree`, `commit-tree` and `update-ref --no-deref <branch> <new> <old>`. HEAD is never touched;
+  - changes are found with `status --ignore-submodules=all` against a private index seeded from HEAD, so the
+    checkout's own index is never refreshed;
+  - a batch's new branch is made with `update-ref` and checked out with `read-tree -m -u`, which runs no hook;
+  - a gitlink, a directory that holds `.git`, or a path whose attributes name a filter is refused with a card,
+    never committed. The pre-push hook never runs; the shipping gate checks a batch before its push.
+- **The gate is code a lane can write, run with no sandbox.** A lane that edits the Makefile runs code as the
+  builder when the gate runs.
+- **Design:** R2 and R6: the gate runs inside a kernel sandbox with the lane's read policy, with no credentials
+  and only the network the project's tests need.
 
 ### 4.8 The daemon's network git and `gh`
 
 - `gh` runs with the login environment, and its token is in the Keychain. Arguments are arrays and flags are
   fixed. Output is zod-parsed, and a PR URL must name the batch's repository.
-- Push and fetch use `origin` from the checkout's `.git/config`, which a lane can write. A rewritten URL sends
-  the batch branch, and the builder's credentials, wherever the lane chose. `core.sshCommand` and `insteadOf`
-  come from the same file.
-- **Design:** R9. The daemon pushes to the remote URL recorded when the batch started, and takes no program from
-  the checkout's config.
+- Lanes never push, in any delivery mode: the guard refuses `git push`. The daemon pushes, and only when a batch
+  ships.
+- gh runs in an empty directory of its own and always names the repository with `-R`, taken from origin's
+  pinned push URL, so it runs no git in a checkout. A batch start checks origin's push URL against the pin
+  first, so an origin added or changed since registration raises the Origin card, which offers it for trust.
+  gh itself comes from the same fixed prefixes as the daemon's git, in the same order, resolved at startup by the
+  path it was found at; every call runs that path, and the resolved git's directory leads gh's `PATH`, so any git
+  gh runs is the daemon's one git. With no gh in those prefixes, each gh call fails as not installed and the
+  system check reports gh missing.
+- Fetch and push take the builder's credential helpers from its own config (system, global and the login
+  environment's `GIT_CONFIG_COUNT` and `GIT_CONFIG_PARAMETERS`), URL-scoped ones such as `gh auth setup-git`'s
+  included, read with the login environment the call runs in. They are re-emitted through `GIT_CONFIG_COUNT`,
+  after an empty helper that resets the list, so a URL holding `=` stays whole, and `--` goes before the URL.
+  A local or `file:` origin inside any registered checkout or a lane's temp root, read as written or through
+  a link, is refused: its receive-pack hooks would run unsandboxed.
+- Push and fetch go only to origin's fetch and push URLs as the daemon recorded them with the project's pin, in
+  the form a strict parser printed, named explicitly; the config string itself never reaches the network call.
+  A URL with userinfo (a user, password or token), or one that doesn't parse cleanly (`@`, `?`, `#`, a backslash,
+  whitespace or a control character in a scheme URL), is refused with a card pointing at `gh auth`, a credential
+  helper or ssh; an scp-style `git@host:path` is fine. If origin's URL changes, fetch and push refuse with a card
+  until the builder re-trusts the checkout (D13, built). URL userinfo is also masked in every git error and log
+  line, after the whole text is read and before it is cut short.
+- They run with the builder's own transport programs pinned (`credential.helper` reset to the builder's own,
+  `core.sshCommand`, `core.askPass`) and `protocol.ext.allow=never`. Before each, the config a
+  lane could have written is checked against an allowlist, which refuses `insteadOf`, `pushInsteadOf`,
+  `credential.*`, `http.proxy` and every include. A file counts as lane-writable when git read it at local or
+  worktree scope, or it lies in the git dirs, any registered checkout or a lane temp root, read as written or
+  through a link: a global include into another project's checkout is refused, and no program it names runs. The allowlist is defense in depth, not the boundary: it reads
+  config in a process before the one that uses it.
+- A branch whose tree selects a filter isn't pushed: Git LFS needs its pre-push upload, which reads lane-writable
+  `.lfsconfig` for where to send objects. 10db refuses with a card and the builder pushes such a branch
+  themselves; a batch can't start in such a repository either.
 
 ### 4.9 GitHub
 
@@ -367,18 +428,18 @@ Under the lane sandbox (**built**), the design column holds for a lane's Bash:
 
 ## 5. What the daemon reads, runs or sends for a lane
 
-| Surface                                                                                                            | Worst outcome today                                                                                                                                                                                                                                                           | Protection today                                                                             | Design        |
-| ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ------------- |
-| The data directory: `ui-token`, `daemon.json`, `10db.sqlite`, `logs/`, `delivery/`                                 | **A lane reads `ui-token` and calls the API:** it answers its own cards, sets a gate command (unsandboxed code), or approves its own MCP server. **A link planted at `delivery/<batch>-pr-body.md` or a gate log path** makes the daemon overwrite a file the link points to. | `feat/accounts`: the guard's text rules                                                      | R3, R5, R8    |
-| `.github/pull_request_template.md` (`delivery/pr-template.ts`)                                                     | Links are followed, with no size cap and no check for a regular file. A lane commits the template as a link to a credential file, and its text goes into the PR body on GitHub. A FIFO blocks the daemon.                                                                     | none                                                                                         | R8            |
-| `.mcp.json`, `.claude/settings.json` (`sessions/repo-config-file.ts`)                                              | `O_NOFOLLOW` covers the last path component only, so a linked `.claude/` directory is followed. The text is only parsed, never forwarded.                                                                                                                                     | regular file, 256 KiB cap, no link on the last component, zod                                | R8            |
-| `git add` and `git commit` through the MCP `commit` tool; `git switch` when a batch starts                         | The checkout's hooks run: lefthook, from a lane-editable `lefthook.yml`, as the builder.                                                                                                                                                                                      | none                                                                                         | R2, R9        |
-| Git config keys that name programs: `core.hooksPath`, `core.fsmonitor`, `core.sshCommand`, filter and diff drivers | The daemon's git calls run them. Only `git status` turns `core.fsmonitor` off.                                                                                                                                                                                                | the guard refuses the lane's own `git config` and `git -c`, but not an Edit of `.git/config` | R9            |
-| `git push` (`git/git.ts`)                                                                                          | The pre-push hook runs `make check` with the login environment, and the push goes to whatever URL `.git/config` names.                                                                                                                                                        | never forced; fixed refspec; prompts off                                                     | R2, R9        |
-| The gate (`verify/gate-runner.ts`)                                                                                 | Lane-written tests and Makefile targets run with the login environment.                                                                                                                                                                                                       | own process group, timeout                                                                   | R1, R2        |
-| MCP tool inputs (`mcp/tools.ts`)                                                                                   | All are zod-parsed. Only `commit` names paths, and they are checked as writes within claims, links resolved. No tool makes the daemon read a path.                                                                                                                            | as described                                                                                 | as is         |
-| Text a lane writes: handoffs, evidence, proposals, decisions                                                       | It reaches later lanes' prompts and the builder's screen. An accepted proposal's text becomes a task, and then a PR body.                                                                                                                                                     | rendered as data; a builder's accept                                                         | accepted (§7) |
-| The PR body (`delivery/pr-text.ts`)                                                                                | It is built from records, never from logs or diffs; the template row above is the exception.                                                                                                                                                                                  | as described                                                                                 | R8            |
+| Surface                                                                                                            | Worst outcome today                                                                                                                                                                                                                                                           | Protection today                                                                                                      | Design        |
+| ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | ------------- |
+| The data directory: `ui-token`, `daemon.json`, `10db.sqlite`, `logs/`, `delivery/`                                 | **A lane reads `ui-token` and calls the API:** it answers its own cards, sets a gate command (unsandboxed code), or approves its own MCP server. **A link planted at `delivery/<batch>-pr-body.md` or a gate log path** makes the daemon overwrite a file the link points to. | `feat/accounts`: the guard's text rules                                                                               | R3, R5, R8    |
+| `.github/pull_request_template.md` (`delivery/pr-template.ts`)                                                     | Links are followed, with no size cap and no check for a regular file. A lane commits the template as a link to a credential file, and its text goes into the PR body on GitHub. A FIFO blocks the daemon.                                                                     | none                                                                                                                  | R8            |
+| `.mcp.json`, `.claude/settings.json` (`sessions/repo-config-file.ts`)                                              | `O_NOFOLLOW` covers the last path component only, so a linked `.claude/` directory is followed. The text is only parsed, never forwarded.                                                                                                                                     | regular file, 256 KiB cap, no link on the last component, zod                                                         | R8            |
+| `git add` and `git commit` through the MCP `commit` tool; `git switch` when a batch starts                         | No hook, filter or submodule git runs. A commit lands only on its workstream's pinned branch, in the pinned checkout.                                                                                                                                                         | plumbing commit over a private index; compare and swap on the branch; persisted pins (D13)                            | R9            |
+| Git config keys that name programs: `core.hooksPath`, `core.fsmonitor`, `core.sshCommand`, filter and diff drivers | None run in the daemon's git. A filter in the builder's global config can still run in the builder's own git.                                                                                                                                                                 | plumbing that reads no such key; transport programs pinned from global config for fetch and push; the allowlist (D13) | R9            |
+| `git push` (`git/git.ts`)                                                                                          | The push goes to origin's URL as pinned with the project. A branch that needs Git LFS is refused.                                                                                                                                                                             | never forced; fixed refspec; prompts off; no pre-push hook; pinned URL (D13)                                          | R9            |
+| The gate (`verify/gate-runner.ts`)                                                                                 | Lane-written tests and Makefile targets run with the login environment.                                                                                                                                                                                                       | own process group, timeout                                                                                            | R1, R2        |
+| MCP tool inputs (`mcp/tools.ts`)                                                                                   | All are zod-parsed. Only `commit` names paths, and they are checked as writes within claims, links resolved. No tool makes the daemon read a path.                                                                                                                            | as described                                                                                                          | as is         |
+| Text a lane writes: handoffs, evidence, proposals, decisions                                                       | It reaches later lanes' prompts and the builder's screen. An accepted proposal's text becomes a task, and then a PR body.                                                                                                                                                     | rendered as data; a builder's accept                                                                                  | accepted (§7) |
+| The PR body (`delivery/pr-text.ts`)                                                                                | It is built from records, never from logs or diffs; the template row above is the exception.                                                                                                                                                                                  | as described                                                                                                          | R8            |
 
 ## 6. Requirements
 
@@ -391,11 +452,11 @@ guard task tests each one.
 | R2  | **Every process whose code a lane can choose runs inside a kernel sandbox that denies the protected reads.** That covers Bash and its children, the gate, the hooks of the daemon's git commands and stdio repo MCP servers. A repo hook in settings is refused (R7).                                                                                                                                                                                       | partly: Bash and its children. The gate, the daemon's git hooks and repo MCP servers are designed                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | R3  | **The sandbox reads only what the project needs.** Every user-data root is denied (`/Users`, `/Volumes`, the shared temp roots), then the checkout, the toolchains, the caches and the lane's own temp directory are allowed again. The protected reads are always denied, including the checkout's `.env*` files unless the project names an exception. A deny list can't name every secret on a machine; an allow list can protect secrets nobody listed. | partly: lanes only. The project's `.env*` exceptions and the gate's read policy are designed                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | R4  | **The file tools follow the same read policy**, and never write `.git/` internals. Claude Code's permission deny rules enforce it, along with the broker for reads outside the checkout and the guard's check of the path after resolving links, so a link in the checkout can't point a read elsewhere.                                                                                                                                                    | built. Claude Code's file-tool `Read(...)` deny rules leave out the session's own config directory and its ancestors (every account 10db creates has `<data>/accounts/<id>/claude`, so its config directory is under the data directory; only the seeded default account uses the login's config directory, `~/.claude` unless `CLAUDE_CONFIG_DIR` says otherwise), so the session's own saved tool results stay readable; the guard, the broker and the kernel still hold them. The config directory is computed once per session and shared by the guard and the file-access judge |
-| R5  | **A lane can't reach 10db's controls.** The UI token, the database and the logs sit in the denied data directory, and no token is in any lane's environment. A session's MCP token already dies with the session (built).                                                                                                                                                                                                                                   | partly: the data directory is a protected read for Bash and the file tools. Missing: the gate and the daemon's git hooks run lane-written code unsandboxed, so they can read it                                                                                                                                                                                                                                                                                                                                                                                                      |
+| R5  | **A lane can't reach 10db's controls.** The UI token, the database and the logs sit in the denied data directory, and no token is in any lane's environment. A session's MCP token already dies with the session (built).                                                                                                                                                                                                                                   | partly: the data directory is a protected read for Bash and the file tools. Missing: the gate and the gate runs lane-written code unsandboxed, so it can read it. The daemon's git runs no hook, filter or submodule git (D13)                                                                                                                                                                                                                                                                                                                                                       |
 | R6  | **Lane network goes through the sandbox's proxy.** The project's allowed domains open directly; every other host is a card or a refusal. Loopback is off unless the project turns it on. The gate gets loopback, when on, and nothing else.                                                                                                                                                                                                                 | partly: lanes only. The gate's network is designed                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | R7  | **Repo settings can't widen a lane.** Nothing from the repo's Claude Code settings reaches a lane: no hook, allow rule, `env` or sandbox block.                                                                                                                                                                                                                                                                                                             | built                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | R8  | **The daemon reads repo files only through the safe reader.** That means a regular file, under a size cap, with no link on any path component. Files it writes in its data directory never follow a link.                                                                                                                                                                                                                                                   | partly                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| R9  | **No git command the daemon runs executes code from the checkout outside the sandbox.** Lanes can't write `.git/config` or `.git/hooks`. Hooks run inside the sandbox or not at all. Config keys that name programs or rewrite URLs are turned off or refused. A push goes to the remote URL recorded when the batch started.                                                                                                                               | no                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| R9  | **No git command the daemon runs executes code from the checkout outside the sandbox.** Lanes can't write `.git/config` or `.git/hooks`. Hooks run inside the sandbox or not at all. Config keys that name programs or rewrite URLs are turned off or refused. A push goes to the remote URL recorded when the batch started.                                                                                                                               | partly: the daemon's own git (D13). Its commits and change checks are plumbing that runs no hook, filter or submodule git; the checkout's git dirs and origin's URLs are pinned per project in the database, and a commit moves only its workstream's branch by compare and swap. Fetch and push go to the pinned URLs, never one with credentials in it; lanes never push, and the git dirs are read-only to them                                                                                                                                                                   |
 | R10 | **The sandbox never replaces a card the project's policy asks for.** Hazard commands, such as a dependency change, still reach the builder. With `autoAllowBashIfSandboxed` on, no Bash call reaches `canUseTool` (spike 13 check 8), so the amendment settles how hazards get their cards.                                                                                                                                                                 | built. Every lane runs in `default` permission mode, so hazards reach the broker                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | R11 | **Each lane and each gate run has its own temp directory**, and no profile can read or write another's.                                                                                                                                                                                                                                                                                                                                                     | partly: lanes only. The gate's run is designed                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | R12 | **What leaves for GitHub is checked by the daemon.** It scans every batch for secrets with its own configuration before the push, and stops with a card when a batch changes CI workflows.                                                                                                                                                                                                                                                                  | no                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
@@ -457,11 +518,26 @@ rm -rf dist/*`. The guard judges a command before it runs.
 - **pnpm 12 can't install in a lane.** Its store lock lives in a fixed directory shared with every lane and
   the builder's own pnpm (§4.4). Opening it would let one lane hold, replace or break the locks another lane or
   the builder relies on, so it stays closed until pnpm can be told where to lock. npm installs in a lane.
-- **A lane can move its own HEAD,** in an ordinary checkout or a linked worktree, and the daemon's unsandboxed
-  `git add` and `git commit` run the repo's hooks and filters. This is **designed**, not built: D13 must pin the
-  daemon's git. It records `git rev-parse --absolute-git-dir --git-common-dir` at session start and checks it
-  again before every daemon git call, checks the branch before it commits, and neutralizes the hooks and filters
-  it doesn't trust.
+- **A commit's branch never comes from HEAD.** It is the batch's, or the one pinned in the database when the
+  workstream's first session started, and `update-ref` moves only that ref, by compare and swap, without following
+  a symbolic ref. A commit while HEAD is elsewhere is refused; HEAD moved during one (by the builder, since a lane
+  can't write it) is reported on a card, and the commit stays on its branch.
+- **The checkout pin persists.** When a project is registered, the daemon records its checkout's git dir and
+  common dir (device and inode) and origin's URLs in the database, keyed by real path. A `.git` moved aside and
+  replaced, or a changed origin, refuses every call with a card. The card holds the state it found; Trust the
+  checkout as it is now pins exactly that state, and only if the checkout still matches it, otherwise 10db
+  refuses again with a new card. Each found state gets its own card. Restarting the daemon re-trusts nothing.
+  A git dir inside any registered checkout (other than this checkout's own `.git`) or in a lane temp root is refused
+  with a card that offers nothing to trust, when it is offered for trust and when a checkout is first pinned. A
+  dir at or under a registered checkout's own `.git` directory is exempt, as every lane profile of that
+  checkout denies it (a linked worktree's common dir often lies there), and a re-trust checks only dirs that
+  differ from the current pin, so a changed origin never leaves a checkout on a card that offers nothing. A
+  commit or a branch switch reads the pin inside the checkout's lock, after any operation it waited on. A non-empty `objects/info/alternates` is refused too.
+- **The builder's own config is trusted.** Signing follows the global `commit.gpgsign`, with the signing
+  programs pinned from global config or git's defaults. Local config still sets identity, which names no program.
+- **Files that need a filter are left to the builder.** The daemon commits bytes as they are, so it refuses a
+  path whose attributes name a filter, and a batch in a repository that uses one (Git LFS). Files whose
+  attributes ask for line-ending conversion are committed unconverted.
 - **Sandboxed `git` prints two cache errors per call.** `/usr/bin/git`'s xcrun shim can't write its cache under
   the sandbox. The errors are harmless.
 - **Merged code.** Review is the boundary (§1).

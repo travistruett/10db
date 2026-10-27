@@ -288,7 +288,7 @@ describe('shell commands', () => {
     { name: 'read-only git diff', command: 'git diff HEAD~1 -- src', decision: 'allow' },
     { name: 'read-only git log', command: 'git log --oneline -5', decision: 'allow' },
     { name: 'listing branches', command: 'git branch', decision: 'allow' },
-    { name: 'push a feature branch', command: 'git push origin feat/x', decision: 'allow' },
+    { name: 'push a feature branch', command: 'git push origin feat/x', decision: 'deny' },
     { name: 'test runner', command: 'pnpm vitest run', decision: 'allow' },
     { name: 'rm -rf inside the repo', command: 'rm -rf build', decision: 'allow' },
     { name: 'direct commit', command: "git commit -m 'x'", decision: 'deny' },
@@ -443,7 +443,7 @@ describe('shell commands', () => {
     { name: 'push --all', command: 'git push --all origin', decision: 'deny' },
     { name: 'push --delete', command: 'git push --delete origin feat', decision: 'deny' },
     { name: 'push +refspec', command: 'git push origin +feat', decision: 'deny' },
-    { name: 'push -u', command: 'git push -u origin feat', decision: 'allow' },
+    { name: 'push -u', command: 'git push -u origin feat', decision: 'deny' },
     { name: 'pnpm -r publish', command: 'pnpm -r publish', decision: 'deny' },
     { name: 'pnpm --filter publish', command: 'pnpm --filter x publish', decision: 'deny' },
     { name: 'npx vercel deploy --prod', command: 'npx vercel deploy --prod', decision: 'deny' },
@@ -1211,10 +1211,7 @@ describe('rm -r arguments beyond a plain path', () => {
   });
 
   it.each([
-    [
-      '>x git push --force',
-      'Force pushes, remote deletes, mirrors and push --all are never allowed.',
-    ],
+    ['>x git push --force', 'Lanes never push; 10db pushes the work when it ships.'],
     ['>x sudo ls', 'sudo is never allowed.'],
   ])('judges %s as the command after the redirection', (command, reason) => {
     expect(run(command)).toEqual({ decision: 'deny', reason });
@@ -1607,25 +1604,25 @@ describe('delivery and gh', () => {
     {
       name: 'push a feature branch',
       command: 'git push origin feat/x',
-      local: 'allow',
+      local: 'deny',
       pullRequest: 'deny',
     },
     {
       name: 'push -u HEAD',
       command: 'git push -u origin HEAD',
-      local: 'allow',
+      local: 'deny',
       pullRequest: 'deny',
     },
     {
       name: 'push behind git -C',
       command: 'git -C . push origin feat/x',
-      local: 'allow',
+      local: 'deny',
       pullRequest: 'deny',
     },
     {
       name: 'push inside sh -c',
       command: "sh -c 'git push origin feat/x'",
-      local: 'allow',
+      local: 'deny',
       pullRequest: 'deny',
     },
     {
@@ -1931,7 +1928,7 @@ describe('delivery and gh', () => {
     expect(run(command, 'pull_request')).toBe(pullRequest);
   });
 
-  it('tells an agent in a pull-request project that 10db pushes', () => {
+  it('tells an agent that 10db pushes, whatever the delivery', () => {
     const verdict = judgeToolUse({
       toolName: 'Bash',
       toolInput: { command: 'git push origin feat/x' },
@@ -1945,12 +1942,12 @@ describe('delivery and gh', () => {
     });
     expect(verdict).toEqual({
       decision: 'deny',
-      reason: '10db pushes when the batch ships; agents do not push in pull-request projects.',
+      reason: 'Lanes never push; 10db pushes the work when it ships.',
     });
   });
 
-  it('treats a missing delivery as local', () => {
-    expect(bash('git push origin feat/x').decision).toBe('allow');
+  it('refuses a push with no delivery given', () => {
+    expect(bash('git push origin feat/x').decision).toBe('deny');
   });
 });
 

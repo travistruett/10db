@@ -17,6 +17,7 @@ import {
   DB_MIGRATIONS_DIR,
   deleteAppSetting,
   getAppSetting,
+  listProjects,
   migrateDatabase,
   openDatabase,
   patchAccount,
@@ -66,10 +67,11 @@ import {
   REQUIRED_TOOLS,
   unavailableKeychain,
   type Keychain,
+  type ResolvedTools,
 } from '../environment';
 import { createEventBus, createStateStore, type StateStore } from '../events';
-import { createGit } from '../git';
-import { createGh, type Gh } from '../github';
+import { createGit, memoryPinStore, resolveGit } from '../git';
+import { createGh, createSystemGhExec, resolveGh, type Gh } from '../github';
 import { createInboxService } from '../inbox';
 import { createKeepAwake, systemCaffeinate, type CaffeinateSpawner } from '../keep-awake';
 import { createLogger, fileDestination, rotateLogFile, type Logger } from '../log';
@@ -83,13 +85,15 @@ import {
   type Runner,
   type RunnerLimits,
 } from '../runner';
-import { createLaneSandbox } from '../sandbox';
+import { createLaneSandbox, LANE_TEMP_ROOT } from '../sandbox';
 import { createScheduler, type Scheduler } from '../scheduler';
 import type { SessionAdapter } from '../sessions';
 import { retryWorkstream, seedTeam } from '../team';
 import { createGateRunner } from '../verify';
 import { CLIENT_APP } from '../version';
 import { createWatcher, systemWatch, type WatchFn } from '../watcher';
+import { createProjectPinStore } from './checkout-pins';
+import { createGitCardAnswers, createGitRefusalHandler } from './git-refusal';
 import { acquireInstanceLock } from './instance-lock';
 import { removeRuntimeFiles, writeRuntimeFiles } from './runtime-files';
 import { createServices } from './services';
@@ -141,7 +145,8 @@ export interface DaemonOptions {
   /** A fixed UI token (dev and Playwright); otherwise a random one per start. */
   readonly uiToken?: string;
   readonly caffeinate?: CaffeinateSpawner;
-  readonly systemCheck?: () => Promise<SystemCheckDto>;
+  /** The system check, given the git and gh the daemon resolved so it reports the ones it runs. */
+  readonly systemCheck?: (resolved: ResolvedTools) => Promise<SystemCheckDto>;
   /** `false` turns the file watcher off (tests that don't need it). */
   readonly watch?: WatchFn | false;
 }
@@ -194,6 +199,11 @@ function noSystemCheck(): Promise<SystemCheckDto> {
 }
 
 export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
+  // Before anything runs git: the one git every daemon git call runs, from a fixed install prefix,
+  // never a PATH, and only one that can be told to read no attributes.
+  const gitBin = await resolveGit();
+  // gh from the same prefixes; a missing one fails each gh call as not installed, as the system check says.
+  const ghBin = resolveGh();
   const clock = opts.clock ?? systemClock;
   const startedAt = clock.now();
   mkdirSync(join(opts.dataDir, 'logs'), { recursive: true });
@@ -262,7 +272,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   });
   benchmarks.start();
   const instanceId = randomUUID();
-  const git = createGit();
   const live = createLiveSessions();
   const limits: RunnerLimits = { ...DEFAULT_RUNNER_LIMITS, ...opts.limits };
   const processes = opts.processes ?? systemProcesses;
@@ -273,6 +282,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   let scheduler: Scheduler | null = null;
   let answerBatchCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerAccountCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
+  let answerGitCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
 
   const inbox = createInboxService({
     state,
@@ -282,19 +292,33 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     onFlagAnswer: (item, answer) => {
       answerBatchCard?.(item, answer);
       answerAccountCard?.(item, answer);
+      answerGitCard?.(item, answer);
     },
   });
+  const git = createGit({
+    onRefused: createGitRefusalHandler({ db: state.db, inbox, logger }),
+    pins: createProjectPinStore(state, memoryPinStore()),
+    bin: gitBin,
+    checkouts: () => listProjects(state.db).map((project) => project.repoPath),
+    laneRoots: [opts.laneSandbox?.tmpRoot ?? LANE_TEMP_ROOT],
+  });
+  const answerGit = createGitCardAnswers(git);
+  answerGitCard = (item, answer) => {
+    // A re-trust reads the checkout first; a refusal it meets raises its own card.
+    answerGit(item, answer).catch((error: unknown) => {
+      logger.error({ err: error }, 'could not re-trust a checkout');
+    });
+  };
   const deliveryJobs = createDeliveryJobs(logger.child({ component: 'delivery' }));
   const delivery: DeliveryContext = {
     state,
     git,
-    gh: opts.gh ?? createGh(),
+    gh: opts.gh ?? createGh(createSystemGhExec({ gh: ghBin, git: gitBin })),
     inbox,
     jobs: deliveryJobs,
     logger: logger.child({ component: 'delivery' }),
     limits: {
       ...DEFAULT_DELIVERY_LIMITS,
-      pushTimeoutMs: limits.gateTimeoutMs,
       gateTimeoutMs: limits.gateTimeoutMs,
       ...opts.deliveryLimits,
     },
@@ -547,11 +571,16 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       moves,
       inbox,
       keepAwake,
-      systemCheck: opts.systemCheck ?? noSystemCheck,
+      systemCheck: () =>
+        opts.systemCheck ? opts.systemCheck({ git: gitBin, gh: ghBin }) : noSystemCheck(),
       benchmarks,
       starter,
       shipper,
       accounts: accountService,
+      pinCheckout: (repoPath) => {
+        // A checkout git can't read yet is recorded at the first git call that succeeds there.
+        git.gitDirs(repoPath).catch(() => undefined);
+      },
     }),
     upgradeWebSocket,
     onUnexpectedError: (error) => {

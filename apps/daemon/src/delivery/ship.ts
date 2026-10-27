@@ -163,7 +163,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
     return result.aborted ? null : result;
   }
 
-  /** Logs the push's duration and output, landed or refused, so the pre-push hook's output is on record. */
+  /** Logs the push's duration and output, landed or refused, so what git printed is on record. */
   async function pushBranch(
     batch: BatchDto,
     project: ProjectDto,
@@ -229,7 +229,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
         title: prTitle(project.prTitlePrefix, batch.title),
         bodyFile: file,
       },
-      ghCall(deps, project.repoPath, signal),
+      ghCall(deps, signal),
     );
     deps.logger.info(
       {
@@ -264,19 +264,16 @@ export function createShipper(deps: ShipperDeps): Shipper {
         });
         return;
       }
-      const dirty = await deps.git.status(project.repoPath);
+      const dirty = await deps.git.changedPaths(project.repoPath);
       if (dirty.length > 0) {
-        fail(
-          batch,
-          shipCards.dirtyCheckout(
-            batch,
-            dirty.map((d) => d.path),
-          ),
-        );
+        fail(batch, shipCards.dirtyCheckout(batch, dirty));
         return;
       }
       // 1. Nothing beyond the base: nothing to push.
-      if ((await deps.git.commitsSince(project.repoPath, baseSha)).length === 0) {
+      if (
+        (await deps.git.commitsSince(project.repoPath, baseSha, `refs/heads/${branch}`)).length ===
+        0
+      ) {
         const reason = 'no commits beyond the base';
         deps.state.write((w) => transitionBatch(w, batchId, { to: BatchState.Closed, reason }));
         deps.logger.info({ batchId, reason }, 'batch closed');
@@ -299,10 +296,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
       await pushBranch(batch, project, branch, signal);
       // 4. Any PR for the branch, in any state; create one only when there is none.
       step = 'gh pr view';
-      const existing = await deps.gh.prView(
-        { repo, ref: branch },
-        ghCall(deps, project.repoPath, signal),
-      );
+      const existing = await deps.gh.prView({ repo, ref: branch }, ghCall(deps, signal));
       step = 'gh pr create';
       const prUrl = existing?.url ?? (await createPr(batch, project, { repo, branch }, signal));
       // 5. Record it.

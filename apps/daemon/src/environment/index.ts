@@ -21,10 +21,11 @@ export { BILLING_SWITCH_VARS, NESTED_SESSION_VARS, stripBillingSwitches } from '
 export { buildNetworkEnv } from './network-env';
 export {
   claudeCodeWarning,
-  findOnPath,
+  findClaude,
   markGhRequired,
   probeVersion,
   REQUIRED_TOOLS,
   systemCheck,
+  type ResolvedTools,
 } from './system-check';
 export { SECRET_VARIABLES } from './secret-variables';

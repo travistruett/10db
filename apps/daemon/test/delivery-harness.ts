@@ -37,7 +37,7 @@ import {
   type Shipper,
 } from '../src/delivery';
 import { createEventBus, createStateStore, type EventBus, type StateStore } from '../src/events';
-import { createGit, type Git } from '../src/git';
+import { createGit, type Git, type GitTrustError } from '../src/git';
 import { createInboxService, type InboxService } from '../src/inbox';
 import { silentLogger } from '../src/log';
 import { systemProcesses } from '../src/recovery';
@@ -49,6 +49,7 @@ import { captureLogs, type LogCapture } from './log-capture';
 import {
   createTempClone,
   createTempRepoWithOrigin,
+  githubOrigin,
   isolatedGitEnv,
   NETWORK_ENV,
   tempDir,
@@ -75,13 +76,14 @@ function pathBetween(from: WorkstreamState, to: WorkstreamState): WorkstreamStat
     throw new Error(`no path from ${from} to ${to}`);
   return path;
 }
-
 export interface DeliveryHarness {
   readonly store: Store;
   readonly bus: EventBus;
   readonly state: StateStore;
   readonly inbox: InboxService;
   readonly git: Git;
+  /** Every refusal the daemon's git raised, as its card handler would hear of it. */
+  readonly gitRefusals: GitTrustError[];
   readonly gh: FakeGh;
   readonly jobs: DeliveryJobs;
   readonly ctx: DeliveryContext;
@@ -128,17 +130,23 @@ export function createDeliveryHarness(
     readonly gateTimeoutMs?: number;
     readonly networkTimeoutMs?: number;
     readonly pushTimeoutMs?: number;
+    /** Added to the network calls' environment, such as an ssh command for a hanging transport. */
+    readonly networkEnv?: Readonly<Record<string, string>>;
     readonly trigger?: boolean;
   } = {},
 ): DeliveryHarness {
   const remote = createTempRepoWithOrigin();
+  // origin is github.com, as the daemon pins it and gh is told it; network calls and the test's
+  // own pushes go to the local bare repository instead.
+  const network = githubOrigin(remote.repo.path, remote.origin.path);
   const { store, close } = createTestStore();
   const bus = createEventBus();
   const state = createStateStore(store, bus);
   seedTeam(state, readDefaultPersonas());
   measureForTests(state);
   const inbox = createInboxService({ state, onParkedAnswer: () => undefined });
-  const git = createGit();
+  const gitRefusals: GitTrustError[] = [];
+  const git = createGit({ onRefused: (error) => gitRefusals.push(error) });
   const gh = new FakeGh();
   const jobs = createDeliveryJobs(silentLogger);
   const ticks = { count: 0 };
@@ -170,7 +178,7 @@ export function createDeliveryHarness(
       pushTimeoutMs: opts.pushTimeoutMs ?? 20_000,
       gateTimeoutMs: opts.gateTimeoutMs ?? 20_000,
     },
-    networkEnv: () => NETWORK_ENV,
+    networkEnv: () => ({ ...NETWORK_ENV, GIT_CONFIG_GLOBAL: network.global, ...opts.networkEnv }),
     onWorkQueued: () => {
       ticks.count += 1;
     },
@@ -189,7 +197,10 @@ export function createDeliveryHarness(
   const unsubscribe =
     opts.trigger === false ? () => undefined : subscribeShipTrigger(bus, store.db, shipper);
   const run = (dir: string, args: string[]): string =>
-    execFileSync('git', ['-C', dir, ...args], { env: isolatedGitEnv(), stdio: 'pipe' })
+    execFileSync('git', ['-C', dir, ...args], {
+      env: { ...isolatedGitEnv(), GIT_CONFIG_GLOBAL: network.global },
+      stdio: 'pipe',
+    })
       .toString()
       .trim();
   return {
@@ -198,6 +209,7 @@ export function createDeliveryHarness(
     state,
     inbox,
     git,
+    gitRefusals,
     gh,
     jobs,
     ctx,
@@ -265,6 +277,7 @@ export function createDeliveryHarness(
       close();
       data.cleanup();
       remote.cleanup();
+      network.cleanup();
     },
   };
 }

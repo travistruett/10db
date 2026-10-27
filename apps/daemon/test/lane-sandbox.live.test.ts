@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -26,7 +27,7 @@ import { HARNESS_PLUGIN_DIR } from '@10db/harness';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { loadEnv } from '../src/env';
-import { captureLoginEnv, createLauncher, findOnPath, systemKeychain } from '../src/environment';
+import { captureLoginEnv, createLauncher, findClaude, systemKeychain } from '../src/environment';
 import { createEventBus, createStateStore } from '../src/events';
 import { createGit } from '../src/git';
 import { judgeToolUse, protectedPaths } from '../src/guard';
@@ -176,8 +177,8 @@ async function runLane(opts: {
   readonly hosts?: readonly string[];
 }): Promise<LaneRun> {
   const login = await captureLoginEnv({ inherited: process.env });
-  const claudePath = findOnPath('claude', login.vars['PATH']);
-  if (!claudePath) throw new Error('claude is not on the login PATH');
+  const claudePath = findClaude();
+  if (!claudePath) throw new Error('claude is not installed where 10db looks for it');
   const logger = createLogger({ level: 'warn', destination: { write: () => undefined } });
   const adapter = createClaudeAdapter({ claudePath, pluginDir: HARNESS_PLUGIN_DIR, logger });
   const launcher = createLauncher({
@@ -377,6 +378,18 @@ function probeLine(output: string, prefix: string): string | undefined {
 }
 
 // Runs real Claude Code on the builder's default account, through the logged-in claude; never in CI.
+/** The read-only git a lane runs, which must work with the git dir read-only to it. */
+const READ_ONLY_GIT_PROBES = [
+  'git status > /dev/null; echo "GIT_STATUS=$?"',
+  'git diff > /dev/null; echo "GIT_DIFF=$?"',
+  'git log -1 > /dev/null; echo "GIT_LOG=$?"',
+];
+
+function expectReadOnlyGitWorks(output: string): void {
+  for (const name of ['GIT_STATUS', 'GIT_DIFF', 'GIT_LOG'])
+    expect.soft(probeLine(output, `${name}=`), name).toBe(`${name}=0`);
+}
+
 describe.skipIf(!live)('lane sandbox, live', () => {
   it('holds every canary in an ordinary checkout and keeps the git dir read-only', async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), '10db-live-')));
@@ -416,9 +429,18 @@ describe.skipIf(!live)('lane sandbox, live', () => {
           sandbox: { filesystem: { allowRead: ['/Users'] } },
         }),
       );
-      const gitFiles = ['config', 'hooks/pre-commit', 'commondir', 'config.worktree'].map((f) =>
-        join(checkout, '.git', f),
-      );
+      // Only the daemon writes git state: none of the git dir, its refs and HEAD included.
+      const gitFiles = [
+        'config',
+        'hooks/pre-commit',
+        'commondir',
+        'config.worktree',
+        'HEAD',
+        'index',
+        'refs/heads/main',
+        'info/attributes',
+        'objects/info/alternates',
+      ].map((f) => join(checkout, '.git', f));
       const run = await runLane({
         checkout,
         dataDir,
@@ -429,7 +451,8 @@ describe.skipIf(!live)('lane sandbox, live', () => {
             `exec > '${tmpDir}/probe-out' 2>&1`,
             'echo "TMPDIR=$TMPDIR"',
             `echo "GH_TOKEN_COUNT=$(env | grep -c '^GH_TOKEN=')"`,
-            'git status > /dev/null; echo "GIT_STATUS=$?"',
+            ...READ_ONLY_GIT_PROBES,
+            'echo "OPTIONAL_LOCKS=$GIT_OPTIONAL_LOCKS"',
             ...canaries.map((c) => `echo 'CAT ${c.label}'; cat '${c.path}'`),
             tryWrite(join(checkout, 'probe-write-control')),
             writeError('PNPM_LOCK_WRITE', pnpmLock),
@@ -442,6 +465,11 @@ describe.skipIf(!live)('lane sandbox, live', () => {
             'cargo fetch -q --manifest-path "$TMPDIR/fetch-probe/Cargo.toml"; echo "CARGO_FETCH=$?"',
             'ls "$CARGO_HOME"/registry/cache/*/itoa-1.0.11.crate > /dev/null; echo "CARGO_CRATE=$?"',
             ...gitFiles.map(tryWrite),
+            // A hard link is a second name for the same file: neither one into the git dir nor one
+            // to a protected file outside the checkout may be made.
+            `ln '${join(checkout, '.git', 'HEAD')}' '${join(checkout, 'hl-head')}' 2>&1; echo "HARDLINK_GIT=$?"`,
+            `printf '${MARKER}' >> '${join(checkout, 'hl-head')}' 2>&1`,
+            `ln '${canaries[0]?.path ?? '/nonexistent'}' '${join(checkout, 'hl-canary')}' 2>&1; echo "HARDLINK_CANARY=$?"`,
             tryWrite(envFile),
             `chmod u+w '${envFile}' 2>/dev/null; echo "CHMOD=$?"`,
             'curl -sS -m 5 -o /dev/null https://example.com:443/; echo "CURL=$?"',
@@ -468,9 +496,12 @@ describe.skipIf(!live)('lane sandbox, live', () => {
       }
       expect.soft(probeLine(run.probeOutput, 'TMPDIR=')).toMatch(/^TMPDIR=\/private\/tmp\/10db-/);
       expect.soft(probeLine(run.probeOutput, 'GH_TOKEN_COUNT=')).toBe('GH_TOKEN_COUNT=0');
-      expect.soft(probeLine(run.probeOutput, 'GIT_STATUS=')).toBe('GIT_STATUS=0');
-      // The env file that sets GIT_CONFIG_GLOBAL for every command is the lane's to read, never to change.
-      expect.soft(run.envFile.content).toBe('export GIT_CONFIG_GLOBAL=/dev/null\n');
+      expectReadOnlyGitWorks(run.probeOutput);
+      expect.soft(probeLine(run.probeOutput, 'OPTIONAL_LOCKS=')).toBe('OPTIONAL_LOCKS=0');
+      // The env file that sets the git variables for every command is the lane's to read, never to change.
+      expect
+        .soft(run.envFile.content)
+        .toBe('export GIT_CONFIG_GLOBAL=/dev/null\nexport GIT_OPTIONAL_LOCKS=0\n');
       expect.soft(run.envFile.mode).toBe(0o400);
       expect.soft(probeLine(run.probeOutput, 'CHMOD=')).not.toBe('CHMOD=0');
       // The checkout itself is writable, so a refused git-dir write is the profile's doing.
@@ -493,6 +524,9 @@ describe.skipIf(!live)('lane sandbox, live', () => {
         const written = existsSync(file) && readFileSync(file, 'utf8').includes(MARKER);
         expect.soft(written, `wrote ${file}`).toBe(false);
       }
+      expect.soft(probeLine(run.probeOutput, 'HARDLINK_GIT=')).not.toBe('HARDLINK_GIT=0');
+      expect.soft(probeLine(run.probeOutput, 'HARDLINK_CANARY=')).not.toBe('HARDLINK_CANARY=0');
+      expect.soft(existsSync(join(checkout, 'hl-canary'))).toBe(false);
       const reads = run.calls.filter((c) => c.name === 'Read');
       const spaceRead = reads.find((c) => pathOf(c.input) === spaceNamed.path);
       expect.soft(spaceRead?.isError, 'Read of the space-named canary').toBe(true);
@@ -511,7 +545,7 @@ describe.skipIf(!live)('lane sandbox, live', () => {
     }
   }, 300_000);
 
-  it("keeps a linked worktree's gitfile and git dirs read-only", async () => {
+  it("keeps a linked worktree's gitfile and both git dirs read-only, and git still reads", async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), '10db-live-')));
     try {
       const main = join(root, 'repo');
@@ -526,8 +560,12 @@ describe.skipIf(!live)('lane sandbox, live', () => {
         join(gitDir, 'commondir'),
         join(gitDir, 'gitdir'),
         join(gitDir, 'config.worktree'),
+        join(gitDir, 'HEAD'),
+        join(gitDir, 'index'),
         join(main, '.git', 'config'),
         join(main, '.git', 'hooks', 'pre-commit'),
+        join(main, '.git', 'refs', 'heads', 'lane'),
+        join(main, '.git', 'objects', 'info', 'alternates'),
       ];
       const run = await runLane({
         checkout,
@@ -536,9 +574,13 @@ describe.skipIf(!live)('lane sandbox, live', () => {
         probe: ({ tmpDir }) =>
           [
             `exec > '${tmpDir}/probe-out' 2>&1`,
-            'git status > /dev/null; echo "GIT_STATUS=$?"',
+            ...READ_ONLY_GIT_PROBES,
             tryWrite(join(checkout, 'probe-write-control')),
             ...targets.map(tryWrite),
+            // The gitfile replaced outright, three ways, rather than appended to.
+            `mv '${join(checkout, '.git')}' '${join(checkout, 'moved-gitfile')}' 2>&1; echo "GITFILE_MV=$?"`,
+            `rm -f '${join(checkout, '.git')}' 2>&1; echo "GITFILE_RM=$?"`,
+            `ln -sf '${root}' '${join(checkout, '.git')}' 2>&1; echo "GITFILE_LN=$?"`,
             '',
           ].join('\n'),
         prompt: [
@@ -549,12 +591,16 @@ describe.skipIf(!live)('lane sandbox, live', () => {
       report('linked-worktree', run, []);
 
       expect(run.events.at(-1)).toMatchObject({ type: 'ended', reason: 'stopped' });
-      expect.soft(probeLine(run.probeOutput, 'GIT_STATUS=')).toBe('GIT_STATUS=0');
+      expectReadOnlyGitWorks(run.probeOutput);
       expect.soft(readFileSync(join(checkout, 'probe-write-control'), 'utf8')).toContain(MARKER);
       for (const file of targets) {
         const written = existsSync(file) && readFileSync(file, 'utf8').includes(MARKER);
         expect.soft(written, `wrote ${file}`).toBe(false);
       }
+      for (const name of ['GITFILE_MV', 'GITFILE_RM', 'GITFILE_LN'])
+        expect.soft(probeLine(run.probeOutput, `${name}=`), name).not.toBe(`${name}=0`);
+      expect.soft(lstatSync(join(checkout, '.git')).isFile()).toBe(true);
+      expect.soft(readFileSync(join(checkout, '.git'), 'utf8')).toBe(`gitdir: ${gitDir}\n`);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

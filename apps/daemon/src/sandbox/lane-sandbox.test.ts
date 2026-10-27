@@ -26,7 +26,7 @@ import {
   type LaneSandbox,
   type LaneSessionInput,
 } from './index';
-import { secretFilesIn } from './lane-sandbox';
+import { secretFilesIn, type LaneSandboxDeps } from './lane-sandbox';
 import { isEqualOrUnder } from './protected-reads';
 
 const git = createGit();
@@ -39,13 +39,15 @@ let tmpRoot: string;
 let repo: TempDir;
 let checkout: string;
 
-function sandbox(overrides: { loginConfigDir?: string | null } = {}): LaneSandbox {
+function sandbox(
+  overrides: { loginConfigDir?: string | null; gitDirs?: LaneSandboxDeps['gitDirs'] } = {},
+): LaneSandbox {
   return createLaneSandbox({
     home,
     dataDir,
     loginConfigDir: overrides.loginConfigDir ?? null,
     tmpRoot,
-    gitDirs: (path) => git.gitDirs(path),
+    gitDirs: overrides.gitDirs ?? ((path) => git.gitDirs(path)),
     // Hermetic: the machine's own install prefixes add no deny.
     systemPrefixes: [],
   });
@@ -181,7 +183,7 @@ describe('createLaneSandbox', () => {
     }
   });
 
-  it("opens a linked worktree's common dir for reading, and never its own git dir for writing", async () => {
+  it("opens a linked worktree's common dir for reading only, and makes its gitfile and both git dirs read-only", async () => {
     const outside = tempDir('lane-worktree');
     try {
       const worktree = join(outside.path, 'wt');
@@ -198,8 +200,14 @@ describe('createLaneSandbox', () => {
         expect(allowRead).toContain(commonDir);
         // The daemon's unsandboxed git follows `commondir`, `gitdir` and `config.worktree` there.
         expect(allowWrite.filter((path) => isEqualOrUnder(path, commonDir))).toEqual([]);
-        // Claude Code opens the worktree's git dir for writing and holds back all but `gitdir`.
-        expect(denyWrite).toEqual([join(commonDir, 'worktrees', 'wt', 'gitdir')]);
+        // Only the daemon writes git state: the worktree's own git dir (HEAD, index, refs), which
+        // Claude Code would otherwise open for writing, and the common dir are both denied.
+        // The gitfile too: the daemon's git follows it until the checkout is pinned.
+        expect(denyWrite).toEqual([
+          join(realpathSync(worktree), '.git'),
+          join(commonDir, 'worktrees', 'wt'),
+          commonDir,
+        ]);
       } finally {
         session.dispose();
       }
@@ -208,15 +216,85 @@ describe('createLaneSandbox', () => {
     }
   });
 
-  it('opens no git dir beyond the checkout for an ordinary repository', async () => {
+  it('opens no git dir beyond the checkout for an ordinary repository, and makes its own read-only', async () => {
     const session = await sandbox().forSession(input());
     try {
       const { allowRead, allowWrite, denyWrite } = session.spec.settings.filesystem;
       expect(allowRead.filter((path) => path.includes('.git'))).toEqual([]);
       expect(allowWrite.filter((path) => path.includes('.git'))).toEqual([]);
-      expect(denyWrite).toEqual([]);
+      // The checkout is writable to Claude Code's sandbox; its git dir is not.
+      expect(denyWrite).toEqual([join(checkout, '.git')]);
     } finally {
       session.dispose();
+    }
+  });
+
+  it("makes every registered checkout's git state read-only, a project nested in this one included", async () => {
+    // Project B sits inside this checkout, so this lane could otherwise write B's .git; project C is
+    // elsewhere, with its git dir apart from its checkout.
+    const nested = join(checkout, 'nested');
+    execFileSync('git', ['init', '-q', '-b', 'main', nested], {
+      env: isolatedGitEnv(),
+      stdio: 'pipe',
+    });
+    const elsewhere = tempDir('lane-other-project');
+    try {
+      const other = join(elsewhere.path, 'c');
+      const otherGit = join(elsewhere.path, 'c-git');
+      execFileSync('git', ['init', '-q', '-b', 'main', `--separate-git-dir=${otherGit}`, other], {
+        env: isolatedGitEnv(),
+        stdio: 'pipe',
+      });
+      const session = await sandbox().forSession(input({ checkouts: [repo.path, nested, other] }));
+      try {
+        expect(session.spec.settings.filesystem.denyWrite).toEqual([
+          join(checkout, '.git'),
+          join(checkout, 'nested', '.git'),
+          join(realpathSync(other), '.git'),
+          realpathSync(otherGit),
+        ]);
+      } finally {
+        session.dispose();
+      }
+    } finally {
+      elsewhere.cleanup();
+    }
+  });
+
+  it('makes the .git gitfile read-only when the git dir it names sits inside the checkout', async () => {
+    const separate = tempDir('lane-separate');
+    try {
+      const work = join(separate.path, 'work');
+      execFileSync(
+        'git',
+        ['init', '-q', '-b', 'main', `--separate-git-dir=${join(work, 'inner-git')}`, work],
+        {
+          env: isolatedGitEnv(),
+          stdio: 'pipe',
+        },
+      );
+      const real = realpathSync(work);
+      // The daemon's git refuses to pin such a checkout; the profile still denies its git dir, as it
+      // would for one pinned before the rule.
+      const inner = join(real, 'inner-git');
+      const session = await sandbox({
+        gitDirs: () => Promise.resolve({ gitDir: inner, commonDir: inner }),
+      }).forSession(
+        input({
+          project: { id: projectId, repoPath: work, sandboxLoopback: false },
+          checkouts: [work],
+        }),
+      );
+      try {
+        expect(session.spec.settings.filesystem.denyWrite).toEqual([
+          join(real, '.git'),
+          join(real, 'inner-git'),
+        ]);
+      } finally {
+        session.dispose();
+      }
+    } finally {
+      separate.cleanup();
     }
   });
 
@@ -257,6 +335,7 @@ describe('createLaneSandbox', () => {
         MISE_SYSTEM_CONFIG_FILE: join(session.tmpDir, 'mise', 'system.toml'),
         CLAUDE_CODE_TMPDIR: session.tmpDir,
         GIT_CONFIG_GLOBAL: '/dev/null',
+        GIT_OPTIONAL_LOCKS: '0',
         CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1',
         CLAUDE_ENV_FILE: join(
           tmpRoot,
@@ -436,7 +515,9 @@ describe('createLaneSandbox', () => {
     try {
       const file = session.spec.env['CLAUDE_ENV_FILE'] ?? '';
       expect(dirname(file)).toBe(tmpRoot);
-      expect(readFileSync(file, 'utf8')).toBe('export GIT_CONFIG_GLOBAL=/dev/null\n');
+      expect(readFileSync(file, 'utf8')).toBe(
+        'export GIT_CONFIG_GLOBAL=/dev/null\nexport GIT_OPTIONAL_LOCKS=0\n',
+      );
       const { allowRead, allowWrite } = session.spec.settings.filesystem;
       expect(allowWrite.filter((path) => isEqualOrUnder(file, path))).toEqual([]);
       expect(allowRead).toContain(file);

@@ -104,10 +104,7 @@ export async function recoverOnStartup(opts: {
     }
 
     const head = await opts.git.head(project.repoPath).catch(() => 'unknown');
-    const dirty = await opts.git
-      .status(project.repoPath)
-      .then((s) => s.map((x) => x.path))
-      .catch(() => []);
+    const dirty = await opts.git.changedPaths(project.repoPath).catch(() => []);
     const lastOp = latestToolOp(db, ws.id);
     const attempts = opts.cleanShutdown ? row.recoveryAttempts : row.recoveryAttempts + 1;
     // A resume that was fixing a gate failure comes back as the fix, so the failure isn't dropped.
