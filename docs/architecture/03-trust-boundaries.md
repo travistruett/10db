@@ -346,8 +346,13 @@ Under the lane sandbox (**built**), the design column holds for a lane's Bash:
     scratch repository whose `.gitattributes` selects a filter, `check-attr` under `GIT_ATTR_SOURCE` at the
     empty tree must say `unspecified`. The global `--attr-source`, and `GIT_ATTR_SOURCE` with it, arrived in
     git 2.41; Xcode's git 2.39 fails the probe, and with no git that passes the daemon refuses to start, naming
-    the gits it found and how to install one. `runGit` takes the binary as a required argument, and the system
-    check reports git from the same prefixes, so no daemon process runs a git found on a `PATH`;
+    the gits it found and how to install one. `DEVELOPER_DIR`, `SDKROOT` and `TOOLCHAINS` are dropped from every
+    git call, the probe's included, and from gh: they steer Xcode's `/usr/bin/git` shim to another git per
+    spawn. `runGit` takes the binary as a required argument, gh runs with that git's directory first on its
+    `PATH`, and the system check reports the git and gh the daemon resolved, so no daemon process runs a git
+    found on the login `PATH`. claude and docker are looked for the same way: the install prefixes, then
+    their own install directories in home (`~/.local/bin` and `~/.claude/local` for claude, `~/.docker/bin`
+    for docker), which no lane writes; `TENDB_CLAUDE_PATH` overrides claude's;
   - once a checkout is pinned, every call runs with `GIT_DIR` at the pinned git dir and `GIT_WORK_TREE` at the
     checkout, so git never reads the `.git` gitfile again and a linked worktree's `commondir` comes from the
     read-only git dir; a lane can't swap the gitfile between two calls, and the profile denies writes to it.
@@ -522,7 +527,11 @@ rm -rf dist/*`. The guard judges a command before it runs.
   checkout as it is now pins exactly that state, and only if the checkout still matches it, otherwise 10db
   refuses again with a new card. Each found state gets its own card. Restarting the daemon re-trusts nothing.
   A git dir inside any registered checkout (other than this checkout's own `.git`) or in a lane temp root is refused
-  with a card that offers nothing to trust, when it is offered for trust and when a checkout is first pinned. A non-empty `objects/info/alternates` is refused too.
+  with a card that offers nothing to trust, when it is offered for trust and when a checkout is first pinned. A
+  dir at or under a registered checkout's own `.git` directory is exempt, as every lane profile of that
+  checkout denies it (a linked worktree's common dir often lies there), and a re-trust checks only dirs that
+  differ from the current pin, so a changed origin never leaves a checkout on a card that offers nothing. A
+  commit or a branch switch reads the pin inside the checkout's lock, after any operation it waited on. A non-empty `objects/info/alternates` is refused too.
 - **The builder's own config is trusted.** Signing follows the global `commit.gpgsign`, with the signing
   programs pinned from global config or git's defaults. Local config still sets identity, which names no program.
 - **Files that need a filter are left to the builder.** The daemon commits bytes as they are, so it refuses a

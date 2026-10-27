@@ -255,6 +255,18 @@ describe('createSystemGhExec', () => {
     }
   });
 
+  it.each(['DEVELOPER_DIR', 'SDKROOT', 'TOOLCHAINS'])(
+    "drops %s, so any git gh runs through Xcode's shim is the one the daemon probed",
+    async (name) => {
+      fakeGh(`echo "\${${name}-unset}"`);
+      const out = await systemGhExec(
+        ['pr', 'view'],
+        call({ env: { ...NETWORK_ENV, [name]: '/nonexistent/Xcode.app' } }),
+      );
+      expect(out.stdout).toBe('unset\n');
+    },
+  );
+
   it('returns a non-zero exit with its stderr', async () => {
     fakeGh('echo "HTTP 502" >&2; exit 3');
     expect(await systemGhExec(['pr', 'view'], call())).toMatchObject({

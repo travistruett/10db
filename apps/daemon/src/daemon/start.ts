@@ -67,6 +67,7 @@ import {
   REQUIRED_TOOLS,
   unavailableKeychain,
   type Keychain,
+  type ResolvedTools,
 } from '../environment';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit, memoryPinStore, resolveGit } from '../git';
@@ -144,7 +145,8 @@ export interface DaemonOptions {
   /** A fixed UI token (dev and Playwright); otherwise a random one per start. */
   readonly uiToken?: string;
   readonly caffeinate?: CaffeinateSpawner;
-  readonly systemCheck?: () => Promise<SystemCheckDto>;
+  /** The system check, given the git and gh the daemon resolved so it reports the ones it runs. */
+  readonly systemCheck?: (resolved: ResolvedTools) => Promise<SystemCheckDto>;
   /** `false` turns the file watcher off (tests that don't need it). */
   readonly watch?: WatchFn | false;
 }
@@ -569,7 +571,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       moves,
       inbox,
       keepAwake,
-      systemCheck: opts.systemCheck ?? noSystemCheck,
+      systemCheck: () =>
+        opts.systemCheck ? opts.systemCheck({ git: gitBin, gh: ghBin }) : noSystemCheck(),
       benchmarks,
       starter,
       shipper,

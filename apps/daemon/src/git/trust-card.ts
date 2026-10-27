@@ -95,8 +95,9 @@ function foldSuffix(error: GitTrustError): string {
       return `:${detail.direction}:${detail.found ?? ''}`;
     case GitTrustFailure.Remote:
       return `:${detail.direction}`;
-    case GitTrustFailure.Config:
     case GitTrustFailure.Writable:
+      return `:${detail.gitDir}`;
+    case GitTrustFailure.Config:
     case GitTrustFailure.Branch:
     case GitTrustFailure.Ref:
     case GitTrustFailure.Alternates:

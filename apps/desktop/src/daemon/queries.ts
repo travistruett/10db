@@ -147,7 +147,7 @@ export function useKeepAwake() {
   });
 }
 
-/** The daemon's startup check: login-env status and the tools on the login PATH. It changes only on restart. */
+/** The daemon's startup check: login-env status and the tools the daemon runs. It changes only on restart. */
 export function useSystemCheck() {
   const { client } = useDaemon();
   return useQuery({

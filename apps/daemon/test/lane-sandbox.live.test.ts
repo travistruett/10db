@@ -27,7 +27,7 @@ import { HARNESS_PLUGIN_DIR } from '@10db/harness';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { loadEnv } from '../src/env';
-import { captureLoginEnv, createLauncher, findOnPath, systemKeychain } from '../src/environment';
+import { captureLoginEnv, createLauncher, findClaude, systemKeychain } from '../src/environment';
 import { createEventBus, createStateStore } from '../src/events';
 import { createGit } from '../src/git';
 import { judgeToolUse, protectedPaths } from '../src/guard';
@@ -177,8 +177,8 @@ async function runLane(opts: {
   readonly hosts?: readonly string[];
 }): Promise<LaneRun> {
   const login = await captureLoginEnv({ inherited: process.env });
-  const claudePath = findOnPath('claude', login.vars['PATH']);
-  if (!claudePath) throw new Error('claude is not on the login PATH');
+  const claudePath = findClaude();
+  if (!claudePath) throw new Error('claude is not installed where 10db looks for it');
   const logger = createLogger({ level: 'warn', destination: { write: () => undefined } });
   const adapter = createClaudeAdapter({ claudePath, pluginDir: HARNESS_PLUGIN_DIR, logger });
   const launcher = createLauncher({

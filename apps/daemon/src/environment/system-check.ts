@@ -1,8 +1,8 @@
 import { execFile } from 'node:child_process';
-import { accessSync, constants, statSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { SystemCheckDto, ToolName } from '@10db/contracts';
-import { INSTALL_PREFIXES } from '../git';
+import { firstExecutable, installCandidates } from '../git';
 import { ACCOUNT_NAMES_VERIFIED_ON } from './launch';
 import type { LoginEnv } from './login-env';
 
@@ -24,19 +24,32 @@ export function markGhRequired(check: SystemCheckDto, needed: boolean): SystemCh
   };
 }
 
-/** The first executable file called `name` on `pathVar`, like `command -v`. */
-export function findOnPath(name: string, pathVar: string | undefined): string | null {
-  for (const dir of (pathVar ?? '').split(':')) {
-    if (!dir) continue;
-    const candidate = join(dir, name);
-    try {
-      accessSync(candidate, constants.X_OK);
-      if (statSync(candidate).isFile()) return candidate;
-    } catch {
-      // Not here; keep looking.
-    }
-  }
-  return null;
+/**
+ * Where claude is looked for: the install prefixes, then Claude Code's own install directories in
+ * `home`. Never the login PATH, which can lead with a directory a lane writes.
+ */
+function claudeCandidates(home: string): string[] {
+  return [
+    ...installCandidates('claude'),
+    join(home, '.local', 'bin', 'claude'),
+    join(home, '.claude', 'local', 'claude'),
+  ];
+}
+
+/** The claude the daemon runs sessions with, or null when none is installed where it looks. */
+export function findClaude(home: string = homedir()): string | null {
+  return firstExecutable(claudeCandidates(home));
+}
+
+/** Docker Desktop links docker into `/usr/local/bin`, or into `~/.docker/bin` for a user install. */
+function findDocker(home: string): string | null {
+  return firstExecutable([...installCandidates('docker'), join(home, '.docker', 'bin', 'docker')]);
+}
+
+/** The git and gh the daemon resolved at startup and runs for every call. */
+export interface ResolvedTools {
+  readonly git: string;
+  readonly gh: string | null;
 }
 
 export type VersionProbe = (
@@ -81,18 +94,28 @@ export function claudeCodeWarning(version: string | null): string | null {
 
 export async function systemCheck(
   login: LoginEnv,
-  probe: VersionProbe = probeVersion,
+  resolved: ResolvedTools,
+  opts: { readonly home?: string; readonly probe?: VersionProbe } = {},
 ): Promise<SystemCheckDto> {
+  const home = opts.home ?? homedir();
+  const probe = opts.probe ?? probeVersion;
+  // Each tool is the one the daemon runs, found where no lane writes, so no tool a lane put on the
+  // login PATH runs here, not even for its version.
+  const pathOf = (name: ToolName): string | null => {
+    switch (name) {
+      case ToolName.Claude:
+        return findClaude(home);
+      case ToolName.Git:
+        return resolved.git;
+      case ToolName.Gh:
+        return resolved.gh;
+      case ToolName.Docker:
+        return findDocker(home);
+    }
+  };
   const tools = await Promise.all(
     REQUIRED_TOOLS.map(async (tool) => {
-      // git and gh come from the prefixes the daemon runs them from, never the login PATH, so no git
-      // or gh a lane put on it runs here either.
-      const path = findOnPath(
-        tool.name,
-        tool.name === ToolName.Git || tool.name === ToolName.Gh
-          ? INSTALL_PREFIXES.join(':')
-          : login.vars['PATH'],
-      );
+      const path = pathOf(tool.name);
       return {
         name: tool.name,
         path,

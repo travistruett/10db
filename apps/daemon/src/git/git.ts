@@ -11,7 +11,7 @@ import {
   type ConfigRoots,
 } from './checkout-trust';
 import { parseScopedConfig, type ConfigEntry } from './config-trust';
-import { insideAny, samePath } from './lane-writable';
+import { insideAny, isPlainDirectory, samePath, surelyInside } from './lane-writable';
 import { gitNetwork, type NetworkCall, type NetworkRun } from './network';
 import { localRemotePath, parseRemoteUrl } from './remote-url';
 import { GitError, runGit, type RunOptions } from './run';
@@ -684,9 +684,10 @@ export function createGit(opts: GitOptions = {}): Git {
     branch: string;
   }): Promise<{ sha: string; alreadyCommitted: boolean }> {
     const named = checkPaths(input.repo, input.paths);
-    const c = await pinned(input.repo);
-    const { real } = c;
-    return withRepoLock(real, async () => {
+    // The pin is read inside the lock: a re-trust or a swapped .git while it waited counts.
+    return withRepoLock(realpathSync(input.repo), async () => {
+      const c = await pinned(input.repo);
+      const { real } = c;
       const ref = `refs/heads/${input.branch}`;
       try {
         const target = (await git(c, ['symbolic-ref', '-q', ref])).trim();
@@ -749,16 +750,21 @@ export function createGit(opts: GitOptions = {}): Git {
   }
 
   /**
-   * A git dir offered for trust that lies where a lane can write, or null when there is none: one in
-   * any registered checkout other than this checkout's own `.git`, which its lane profile always
-   * denies, or in a lane temp root.
+   * A git dir about to be pinned that lies where a lane can write, or null when there is none: one in
+   * any registered checkout or a lane temp root. A dir at or under a registered checkout's own `.git`
+   * directory is exempt, since every lane profile of that checkout denies it (a linked worktree's
+   * common dir is often there), and so is a dir `kept` names: the one already pinned.
    */
   function writableGitDir(
     real: string,
     dirs: { readonly gitDir: string; readonly commonDir: string },
+    kept: readonly string[] = [],
   ): string | null {
-    for (const dir of [dirs.gitDir, dirs.commonDir]) {
+    const dotGits = [real, ...(opts.checkouts?.() ?? [])].map((checkout) => join(checkout, '.git'));
+    for (const dir of new Set([dirs.gitDir, dirs.commonDir])) {
+      if (kept.includes(dir)) continue;
       if (samePath(dir, join(real, '.git'))) continue;
+      if (dotGits.some((dotGit) => isPlainDirectory(dotGit) && surelyInside(dir, dotGit))) continue;
       if (insideAny(dir, laneWritableRoots(real))) return dir;
     }
     return null;
@@ -800,8 +806,9 @@ export function createGit(opts: GitOptions = {}): Git {
       );
     },
     async switchNewBranch(repo, name, startPoint) {
-      const c = await pinned(repo);
-      await withRepoLock(c.real, () => switchCheckout(c, name, startPoint));
+      await withRepoLock(realpathSync(repo), async () => {
+        await switchCheckout(await pinned(repo), name, startPoint);
+      });
     },
     async push(repo, branch, net) {
       const c = await pinned(repo);
@@ -856,7 +863,12 @@ export function createGit(opts: GitOptions = {}): Git {
     commit,
     async retrust(repo, candidate) {
       const real = realpathSync(repo);
-      const writable = writableGitDir(real, candidate);
+      const current = pins.get(real);
+      const writable = writableGitDir(
+        real,
+        candidate,
+        current ? [current.gitDir, current.commonDir] : [],
+      );
       if (writable !== null)
         throw refusal(real, { kind: GitTrustFailure.Writable, gitDir: writable });
       const now = await observe(real);

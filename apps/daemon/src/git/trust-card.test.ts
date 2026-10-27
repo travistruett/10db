@@ -51,3 +51,12 @@ describe('the config card', () => {
       if (line.startsWith('- ')) expect(line).toMatch(/^- `.*` in `.*`$/);
   });
 });
+
+describe('the writable card', () => {
+  it('folds only cards about the same git dir', () => {
+    const card = (gitDir: string) =>
+      trustCard(new GitTrustError('/repo', { kind: 'writable', gitDir })).foldKey;
+    expect(card('/repo/vendor/git')).toBe(card('/repo/vendor/git'));
+    expect(card('/repo/vendor/git')).not.toBe(card('/tmp/lane/git'));
+  });
+});

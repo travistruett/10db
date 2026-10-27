@@ -34,6 +34,12 @@ export const NO_PROMPTS = {
   LC_ALL: 'C',
 } as const;
 
+/**
+ * Variables that make Xcode's `/usr/bin/git` shim pick another git on each spawn: dropped, so the git
+ * that passed the probe is the git that runs.
+ */
+export const XCODE_SELECTORS: readonly string[] = ['DEVELOPER_DIR', 'SDKROOT', 'TOOLCHAINS'];
+
 /** Config given on the command line through the environment: `GIT_CONFIG_COUNT` and its pairs, and `-c`'s. */
 const COMMAND_CONFIG = /^GIT_CONFIG_(COUNT|PARAMETERS|KEY_\d+|VALUE_\d+)$/;
 
@@ -44,7 +50,7 @@ function keep(
 ): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [name, value] of Object.entries(env)) {
-    if (value === undefined) continue;
+    if (value === undefined || XCODE_SELECTORS.includes(name)) continue;
     if (name.startsWith('GIT_') && !kept.includes(name) && !keptPattern?.test(name)) continue;
     out[name] = value;
   }

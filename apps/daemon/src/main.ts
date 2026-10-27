@@ -1,4 +1,4 @@
-import { ToolName, type SystemCheckDto } from '@10db/contracts';
+import type { SystemCheckDto } from '@10db/contracts';
 import { SchemaMismatchError } from '@10db/db';
 import { AlreadyRunningError, daemonOptionsFromEnv, startDaemon } from './daemon';
 import { loadEnv } from './env';
@@ -6,9 +6,11 @@ import {
   AA_KEY_ACCOUNT,
   buildNetworkEnv,
   captureLoginEnv,
+  findClaude,
   systemCheck,
   systemKeychain,
   type LoginEnv,
+  type ResolvedTools,
 } from './environment';
 import type { Logger } from './log';
 import {
@@ -36,7 +38,7 @@ process.on('uncaughtException', (error) => {
 });
 
 const CLAUDE_MISSING =
-  'Claude Code was not found on your login PATH. Install it, then restart 10db.';
+  'Claude Code was not found in /opt/homebrew/bin, /usr/local/bin, /usr/bin or ~/.local/bin, where 10db looks for it (never your PATH, where a lane could put one). Install it, or set TENDB_CLAUDE_PATH, then restart 10db.';
 
 const env = loadEnv(process.env);
 const dataDir = resolveDataDir(env);
@@ -56,14 +58,12 @@ const login: LoginEnv = env.TENDB_FAKE_SCRIPTS
 if (login.warning) console.warn(`10db daemon: ${login.warning}`);
 
 let checked: Promise<SystemCheckDto> | null = null;
-const check = (): Promise<SystemCheckDto> => (checked ??= systemCheck(login));
+const check = (resolved: ResolvedTools): Promise<SystemCheckDto> =>
+  (checked ??= systemCheck(login, resolved));
 
-async function chooseAdapter(): Promise<SessionAdapter | ((logger: Logger) => SessionAdapter)> {
+function chooseAdapter(): SessionAdapter | ((logger: Logger) => SessionAdapter) {
   if (env.TENDB_FAKE_SCRIPTS) return new FakeAdapter(loadFakeScriptBook(env.TENDB_FAKE_SCRIPTS));
-  const claudePath =
-    env.TENDB_CLAUDE_PATH ??
-    (await check()).tools.find((t) => t.name === ToolName.Claude)?.path ??
-    null;
+  const claudePath = env.TENDB_CLAUDE_PATH ?? findClaude();
   if (!claudePath) return createUnavailableAdapter(CLAUDE_MISSING);
   // Through the daemon's own logger: one shared daemon.log, which the live acceptance checks read.
   return (logger) =>
@@ -79,7 +79,7 @@ try {
   const daemon = await startDaemon({
     ...daemonOptionsFromEnv(env),
     dataDir,
-    adapter: await chooseAdapter(),
+    adapter: chooseAdapter(),
     migrationsDir: resolveMigrationsDir(),
     harnessDir: resolveHarnessDir(),
     aaKey: () => systemKeychain.read(AA_KEY_ACCOUNT),

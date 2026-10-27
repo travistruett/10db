@@ -1,3 +1,4 @@
+import { lstatSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { foldPathCase, realPathOf } from '../guard';
 
@@ -30,4 +31,27 @@ export function insideAny(path: string, roots: readonly string[]): boolean {
   if (paths === null) return true;
   const rootPaths = roots.flatMap((root) => readings(root) ?? [resolve(root)]);
   return paths.some((p) => rootPaths.some((root) => equalOrUnder(p, root)));
+}
+
+/**
+ * True only when `path`, read either way, lies at or under `root` as the kernel opens it: a link in
+ * the path that leads out, or a path that can't be resolved, counts as outside. For an exception to a
+ * refusal, where `insideAny` decides a refusal.
+ */
+export function surelyInside(path: string, root: string): boolean {
+  try {
+    const real = realPathOf(root);
+    return [realPathOf(path), realPathOf(resolve(path))].every((p) => equalOrUnder(p, real));
+  } catch {
+    return false;
+  }
+}
+
+/** True when `path` is a directory itself, not a link to one. */
+export function isPlainDirectory(path: string): boolean {
+  try {
+    return lstatSync(path).isDirectory();
+  } catch {
+    return false;
+  }
 }

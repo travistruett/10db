@@ -893,6 +893,51 @@ describe('the checkout is the one pinned for it', () => {
     expect(await gitWithRoots(vi.fn()).currentBranch(repo.path)).toBe('main');
   });
 
+  it("pins and re-trusts a linked worktree whose common dir is another registered checkout's .git", async () => {
+    // That .git is denied to every lane of the checkout it belongs to, and no other lane writes there.
+    const outside = tempDir('worktree-of-registered');
+    try {
+      const worktree = join(outside.path, 'wt');
+      rawGit('worktree', 'add', '-q', '-b', 'wt', worktree);
+      const pins = memoryPinStore();
+      const git = createGit({ pins, checkouts: () => [repo.path, worktree] });
+      expect(await git.currentBranch(worktree)).toBe('wt');
+      // A pin that names other git dirs makes the worktree's own a candidate the re-trust checks.
+      const real = realpathSync(worktree);
+      const pin = pins.get(real);
+      if (!pin) throw new Error('expected the worktree to be pinned');
+      pins.set(real, {
+        ...pin,
+        gitDir: join(scratch.path, 'a'),
+        commonDir: join(scratch.path, 'b'),
+      });
+      const { detail } = await refusal(git.currentBranch(worktree));
+      if (detail.kind !== 'moved') throw new Error('expected a moved checkout');
+      await git.retrust(worktree, detail.candidate);
+      expect(await git.currentBranch(worktree)).toBe('wt');
+    } finally {
+      outside.cleanup();
+    }
+  });
+
+  it('re-trusts a changed origin when the pinned git dir is where it was pinned, even if a lane can now write there', async () => {
+    // Pinned before the project around its git dir was registered: a new origin must not leave it
+    // on a card that offers nothing.
+    const other = join(scratch.path, 'other-checkout');
+    const at = join(other, 'git');
+    mkdirSync(other);
+    renameSync(join(repo.path, '.git'), at);
+    writeFileSync(join(repo.path, '.git'), `gitdir: ${at}\n`);
+    const pins = memoryPinStore();
+    await createGit({ pins }).head(repo.path);
+    const git = createGit({ pins, checkouts: () => [repo.path, other] });
+    rawGit('remote', 'add', 'origin', 'https://github.com/acme/widgets.git');
+    const { detail } = await refusal(git.pinnedPushUrl(repo.path));
+    if (detail.kind !== 'origin') throw new Error('expected a changed origin');
+    await git.retrust(repo.path, detail.candidate);
+    expect(await git.pinnedPushUrl(repo.path)).toBe('https://github.com/acme/widgets.git');
+  });
+
   it.each(WRITABLE_GIT_DIRS)(
     'refuses to re-trust a git dir $name, which a lane could write',
     async ({ at }) => {
@@ -1245,6 +1290,29 @@ describe('fetch and push', () => {
     },
   );
 
+  it.each(
+    (['fetch', 'push'] as const).flatMap((name) =>
+      ['DEVELOPER_DIR', 'SDKROOT', 'TOOLCHAINS'].map((variable) => ({ name, variable })),
+    ),
+  )('never hands $variable from the login env to a $name', async ({ name, variable }) => {
+    const seen = join(scratch.path, 'xcode-env');
+    const wrapper = gitWrapper(`echo "\${${variable}-unset}" >> '${seen}'\nexec "$GIT" "$@"`);
+    try {
+      const git = createGit({ bin: join(wrapper.path.split(':')[0] ?? '', 'git') });
+      const call = {
+        env: { ...NETWORK_ENV, [variable]: '/nonexistent/Xcode.app' },
+        timeoutMs: 10_000,
+      };
+      await (name === 'fetch'
+        ? git.fetch(remote.repo.path, 'main', call)
+        : git.push(remote.repo.path, 'main', call));
+      const values = readFileSync(seen, 'utf8').split('\n').filter(Boolean);
+      expect(new Set(values)).toEqual(new Set(['unset']));
+    } finally {
+      wrapper.cleanup();
+    }
+  });
+
   it('refuses a push to a local origin inside the checkout, where a lane could write its hooks', async () => {
     const inside = join(remote.repo.path, 'nested-origin.git');
     execFileSync('git', ['init', '-q', '--bare', '-b', 'main', inside], { env: isolatedGitEnv() });
@@ -1379,6 +1447,82 @@ describe('every git the daemon spawns', () => {
       wrapper.cleanup();
     }
   });
+
+  it('reads the pin inside the lock, so a commit queued behind another sees a .git replaced meanwhile', async () => {
+    const git = createGit();
+    await git.head(repo.path);
+    const flag = join(scratch.path, 'replaced');
+    const aside = join(scratch.path, 'old-git');
+    const config = Object.entries(TEST_REPO_CONFIG)
+      .map(
+        ([key, value]) =>
+          `env -u GIT_DIR -u GIT_WORK_TREE "$GIT" -C '${repo.path}' config ${key} ${value}`,
+      )
+      .join('; ');
+    // While the first commit holds the lock, its commit-tree replaces .git, as a lane could have.
+    const wrapper = gitWrapper(
+      `case " $* " in *" commit-tree "*) if [ ! -e '${flag}' ]; then touch '${flag}'; mv '${join(repo.path, '.git')}' '${aside}'; env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE "$GIT" init -q -b main '${repo.path}'; ${config}; fi;; esac\nexec "$GIT" "$@"`,
+    );
+    try {
+      vi.stubEnv('PATH', wrapper.path);
+      write('b.txt', 'b');
+      const first = commitA(git, 'op-lock-1');
+      const second = git.commit({
+        repo: repo.path,
+        paths: ['b.txt'],
+        message: 'b',
+        opId: 'op-lock-2',
+        branch: 'main',
+      });
+      await first.catch(() => undefined);
+      const error = await refusal(second);
+      vi.unstubAllEnvs();
+      expect(existsSync(flag)).toBe(true);
+      expect(error.detail.kind).toBe('moved');
+    } finally {
+      vi.unstubAllEnvs();
+      wrapper.cleanup();
+    }
+  });
+
+  it("runs check-attr in the pinned git dir, on the commit's private index", async () => {
+    const seen = join(scratch.path, 'check-attr-env');
+    const wrapper = gitWrapper(
+      `case " $* " in *" check-attr "*) printf '%s\\n%s\\n' "$GIT_DIR" "$GIT_INDEX_FILE" > '${seen}';; esac\nexec "$GIT" "$@"`,
+    );
+    try {
+      const git = createGit({ bin: join(wrapper.path.split(':')[0] ?? '', 'git') });
+      await commitA(git);
+      const [gitDir = '', index = ''] = readFileSync(seen, 'utf8').split('\n');
+      expect(gitDir).toBe(join(realpathSync(repo.path), '.git'));
+      expect(index).not.toBe('');
+      expect(index).not.toBe(join(gitDir, 'index'));
+    } finally {
+      wrapper.cleanup();
+    }
+  });
+
+  it.each(['DEVELOPER_DIR', 'SDKROOT', 'TOOLCHAINS'])(
+    "never hands %s to git, so Xcode's shim runs the git that was probed",
+    async (name) => {
+      const seen = join(scratch.path, 'xcode-env');
+      const wrapper = gitWrapper(`echo "\${${name}-unset}" >> '${seen}'\nexec "$GIT" "$@"`);
+      try {
+        const bin = join(wrapper.path.split(':')[0] ?? '', 'git');
+        const git = createGit({ bin });
+        vi.stubEnv(name, '/nonexistent/Xcode.app');
+        await resolveGit([bin]);
+        await git.head(repo.path);
+        vi.unstubAllEnvs();
+        const values = readFileSync(seen, 'utf8').split('\n').filter(Boolean);
+        expect(values.length).toBeGreaterThan(0);
+        expect(new Set(values)).toEqual(new Set(['unset']));
+      } finally {
+        vi.unstubAllEnvs();
+        wrapper.cleanup();
+      }
+    },
+  );
 
   it('reads the pin once per operation, not on every git call', async () => {
     const store = memoryPinStore();

@@ -27,9 +27,11 @@ export function SystemAlert() {
           key={tool.name}
           color="red"
           icon={icon}
-          title={`${tool.name} was not found on your login PATH`}
+          title={`${tool.name} was not found where 10db looks for it`}
         >
-          Install it, then restart 10db. Sessions can't start until it is found.
+          10db runs it only from /opt/homebrew/bin, /usr/local/bin or /usr/bin (claude also from
+          ~/.local/bin), never from your PATH, where a lane could put one. Install it there, then
+          restart 10db. Sessions can't start until it is found.
         </Alert>
       ))}
       {warning && (

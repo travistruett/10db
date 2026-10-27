@@ -26,7 +26,7 @@ import {
   type LaneSandbox,
   type LaneSessionInput,
 } from './index';
-import { secretFilesIn } from './lane-sandbox';
+import { secretFilesIn, type LaneSandboxDeps } from './lane-sandbox';
 import { isEqualOrUnder } from './protected-reads';
 
 const git = createGit();
@@ -39,13 +39,15 @@ let tmpRoot: string;
 let repo: TempDir;
 let checkout: string;
 
-function sandbox(overrides: { loginConfigDir?: string | null } = {}): LaneSandbox {
+function sandbox(
+  overrides: { loginConfigDir?: string | null; gitDirs?: LaneSandboxDeps['gitDirs'] } = {},
+): LaneSandbox {
   return createLaneSandbox({
     home,
     dataDir,
     loginConfigDir: overrides.loginConfigDir ?? null,
     tmpRoot,
-    gitDirs: (path) => git.gitDirs(path),
+    gitDirs: overrides.gitDirs ?? ((path) => git.gitDirs(path)),
     // Hermetic: the machine's own install prefixes add no deny.
     systemPrefixes: [],
   });
@@ -239,11 +241,14 @@ describe('createLaneSandbox', () => {
           stdio: 'pipe',
         },
       );
-      const session = await sandbox().forSession(
-        input({ project: { id: projectId, repoPath: work, sandboxLoopback: false } }),
-      );
+      const real = realpathSync(work);
+      // The daemon's git refuses to pin such a checkout; the profile still denies its git dir, as it
+      // would for one pinned before the rule.
+      const inner = join(real, 'inner-git');
+      const session = await sandbox({
+        gitDirs: () => Promise.resolve({ gitDir: inner, commonDir: inner }),
+      }).forSession(input({ project: { id: projectId, repoPath: work, sandboxLoopback: false } }));
       try {
-        const real = realpathSync(work);
         expect(session.spec.settings.filesystem.denyWrite).toEqual([
           join(real, '.git'),
           join(real, 'inner-git'),
