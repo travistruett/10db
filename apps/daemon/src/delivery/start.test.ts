@@ -14,6 +14,8 @@ import {
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
+import { GITHUB_ORIGIN } from '../../test/fixtures';
+import { GitTrustFailure } from '../git';
 import { batchBranchName } from './index';
 
 let h: DeliveryHarness;
@@ -173,6 +175,25 @@ describe('cutting a branch', () => {
     expect(h.git$('rev-parse', 'HEAD')).toBe(head);
     expect(h.git$('branch', '--show-current')).toBe(branch);
     expect(listWorkstreams(h.store.db, {}).filter((w) => w.taskId === task.id)).toEqual([]);
+  });
+
+  it('raises the origin card when origin is added after the checkout was pinned, and starts once it is trusted', async () => {
+    h.git$('remote', 'remove', 'origin');
+    // The first daemon git call pins the checkout, with no origin.
+    await h.git.head(h.repo);
+    h.git$('remote', 'add', 'origin', GITHUB_ORIGIN);
+    const task = h.addTask('Alpha');
+    h.starter.startBatch(h.project.id, { title: 'Greetings', taskIds: [task.id] });
+    await h.jobs.idle();
+    expect(listBatches(h.store.db)).toEqual([]);
+    const refusal = h.only(h.gitRefusals);
+    if (refusal.detail.kind !== GitTrustFailure.Origin)
+      throw new Error(`expected an origin refusal, got ${refusal.detail.kind}`);
+    expect(refusal.detail).toMatchObject({ direction: 'push', pinned: null, found: GITHUB_ORIGIN });
+    await h.git.retrust(h.repo, refusal.detail.candidate);
+    h.starter.startBatch(h.project.id, { title: 'Greetings', taskIds: [task.id] });
+    await h.jobs.idle();
+    expect(listBatches(h.store.db)).toHaveLength(1);
   });
 
   it('gives two simultaneous starts one batch and one branch', async () => {

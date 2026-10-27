@@ -141,9 +141,9 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
         return;
       }
       // The repository gh is told about comes from origin's pinned push URL, never from gh reading
-      // the checkout's remotes.
-      const pushUrl = await ctx.git.pinnedPushUrl(project.repoPath);
-      const repo = pushUrl === null ? null : githubRepoOf(pushUrl);
+      // the checkout's remotes. An origin added or changed since the pin is refused here with a card
+      // that offers it for trust.
+      const repo = githubRepoOf(await ctx.git.pinnedPushUrl(project.repoPath));
       if (repo === null) {
         refuse(startCards.repoUnknown(project));
         return;

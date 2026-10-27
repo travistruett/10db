@@ -856,6 +856,25 @@ describe('the checkout is the one pinned for it', () => {
     await expect(git.head(repo.path)).rejects.toBeInstanceOf(GitTrustError);
   });
 
+  it.each([
+    { name: 'inside the checkout', at: () => join(repo.path, 'vendor', 'git') },
+    { name: "in a lane's temp root", at: () => join(scratch.path, 'lane-root', 'git') },
+  ])('refuses to re-trust a git dir $name, which a lane could write', async ({ at }) => {
+    const onRefused = vi.fn();
+    const git = createGit({ onRefused, laneRoots: [join(scratch.path, 'lane-root')] });
+    await git.head(repo.path);
+    // The repository's own git dir moves where a lane can write, and `.git` becomes a gitfile to it.
+    mkdirSync(dirname(at()), { recursive: true });
+    renameSync(join(repo.path, '.git'), at());
+    writeFileSync(join(repo.path, '.git'), `gitdir: ${at()}\n`);
+    const { detail } = await refusal(git.head(repo.path));
+    if (detail.kind !== 'moved') throw new Error('expected a moved checkout');
+    const error = await refusal(git.retrust(repo.path, detail.candidate));
+    expect(error.detail).toEqual({ kind: 'writable', gitDir: realpathSync(at()) });
+    expect(onRefused).toHaveBeenLastCalledWith(error);
+    await expect(git.head(repo.path)).rejects.toBeInstanceOf(GitTrustError);
+  });
+
   it('pins a checkout by its real path, whatever path names it', async () => {
     const link = join(scratch.path, 'link');
     symlinkSync(repo.path, link);
@@ -1087,34 +1106,63 @@ describe('fetch and push', () => {
     }
   });
 
+  /**
+   * The credential config a fetch runs with, in git's order, as `git config --get-regexp` prints it
+   * with the fetch's own arguments and environment.
+   */
+  async function fetchCredentials(env: Readonly<Record<string, string>>): Promise<string[]> {
+    const out = join(scratch.path, 'credentials');
+    const wrapper = gitWrapper(
+      [
+        'dump() {',
+        '  n=0; for a in "$@"; do [ "$a" = fetch ] && break; n=$((n+1)); done',
+        '  i=0; for a in "$@"; do shift; [ "$i" -lt "$n" ] && set -- "$@" "$a"; i=$((i+1)); done',
+        `  "$GIT" "$@" config --get-regexp '^credential\\.' > '${out}'`,
+        '}',
+        'case " $* " in *" fetch "*) dump "$@";; esac',
+        'exec "$GIT" "$@"',
+      ].join('\n'),
+    );
+    try {
+      await createGit({ bin: join(wrapper.path.split(':')[0] ?? '', 'git') }).fetch(
+        remote.repo.path,
+        'main',
+        { env: { ...NETWORK_ENV, ...env }, timeoutMs: 10_000 },
+      );
+    } finally {
+      wrapper.cleanup();
+    }
+    return readFileSync(out, 'utf8').split('\n').filter(Boolean);
+  }
+
   it("keeps the builder's URL-scoped credential helpers after resetting the list", async () => {
     const global = join(scratch.path, 'gitconfig');
     writeFileSync(
       global,
       '[credential]\n\thelper = osxkeychain\n[credential "https://github.com"]\n\thelper = !gh auth git-credential\n',
     );
-    const argv = join(scratch.path, 'argv');
-    const wrapper = gitWrapper(
-      `case " $* " in *" fetch "*) printf '%s\\n' "$@" > '${argv}';; esac\nexec "$GIT" "$@"`,
-    );
-    try {
-      vi.stubEnv('GIT_CONFIG_GLOBAL', global);
-      vi.stubEnv('PATH', wrapper.path);
-      await createGit().fetch(remote.repo.path, 'main', {
-        env: { ...NETWORK_ENV, GIT_CONFIG_GLOBAL: global, PATH: wrapper.path },
-        timeoutMs: 10_000,
-      });
-    } finally {
-      vi.unstubAllEnvs();
-      wrapper.cleanup();
-    }
-    const args = readFileSync(argv, 'utf8').split('\n');
-    const reset = args.indexOf('credential.helper=');
-    expect(reset).toBeGreaterThan(-1);
-    expect(args.indexOf('credential.helper=osxkeychain')).toBeGreaterThan(reset);
+    expect(await fetchCredentials({ GIT_CONFIG_GLOBAL: global })).toEqual([
+      'credential.helper osxkeychain',
+      'credential.https://github.com.helper !gh auth git-credential',
+      'credential.helper ',
+      'credential.helper osxkeychain',
+      'credential.https://github.com.helper !gh auth git-credential',
+    ]);
+  });
+
+  it("keeps the login environment's own credential helpers, a URL holding = included", async () => {
     expect(
-      args.indexOf('credential.https://github.com.helper=!gh auth git-credential'),
-    ).toBeGreaterThan(reset);
+      await fetchCredentials({
+        GIT_CONFIG_COUNT: '1',
+        GIT_CONFIG_KEY_0: 'credential.https://host.example/a=b.helper',
+        GIT_CONFIG_VALUE_0: 'store',
+        GIT_CONFIG_PARAMETERS: "'credential.https://p.example.helper'='cache'",
+      }),
+    ).toEqual([
+      'credential.helper ',
+      'credential.https://host.example/a=b.helper store',
+      'credential.https://p.example.helper cache',
+    ]);
   });
 
   it('refuses a push to a local origin inside the checkout, where a lane could write its hooks', async () => {
@@ -1123,6 +1171,30 @@ describe('fetch and push', () => {
     local('remote', 'set-url', 'origin', inside);
     const error = await refusal(createGit().push(remote.repo.path, 'main', net));
     expect(error.detail).toMatchObject({ kind: 'remote', direction: 'push' });
+  });
+
+  it.each([
+    { name: 'another registered checkout', root: 'checkout' },
+    { name: 'a lane root named through a link', root: 'link' },
+  ])('refuses a push to a local origin inside $name', async ({ root }) => {
+    const other = tempDir('other-checkout');
+    try {
+      const inside = join(other.path, 'origin.git');
+      execFileSync('git', ['init', '-q', '--bare', '-b', 'main', inside], {
+        env: isolatedGitEnv(),
+      });
+      local('remote', 'set-url', 'origin', inside);
+      const link = join(scratch.path, 'lane-root');
+      symlinkSync(other.path, link);
+      const git =
+        root === 'checkout'
+          ? createGit({ checkouts: () => [other.path] })
+          : createGit({ laneRoots: [link] });
+      const error = await refusal(git.push(remote.repo.path, 'main', net));
+      expect(error.detail).toMatchObject({ kind: 'remote', direction: 'push' });
+    } finally {
+      other.cleanup();
+    }
   });
 
   it('refuses to push a branch whose tree selects a filter, which would leave Git LFS objects behind', async () => {
@@ -1145,31 +1217,78 @@ describe('fetch and push', () => {
 describe('resolveGit', () => {
   /** A git that ignores GIT_ATTR_SOURCE, as git before 2.41 does. */
   const oldGit = () => gitWrapper('unset GIT_ATTR_SOURCE\nexec "$GIT" "$@"');
-  const dirOf = (path: string) => path.split(':')[0] ?? '';
+  const binOf = (path: string) => join(path.split(':')[0] ?? '', 'git');
 
-  it('refuses when no git on the path reads no attributes when told to, naming the one it found', async () => {
+  it('refuses when no candidate reads no attributes when told to, naming the one it found', async () => {
     const old = oldGit();
     try {
-      const error: unknown = await resolveGit(dirOf(old.path)).catch((caught: unknown) => caught);
+      const error: unknown = await resolveGit([binOf(old.path)]).catch((caught: unknown) => caught);
       expect(error).toBeInstanceOf(GitVersionError);
-      expect(String(error)).toContain(join(dirOf(old.path), 'git'));
+      expect(String(error)).toContain(binOf(old.path));
+      expect(String(error)).toContain('brew install git');
     } finally {
       old.cleanup();
     }
   });
 
-  it('takes the first git on the path that passes the probe, skipping one that fails it', async () => {
+  it('takes the first candidate that passes the probe, as its real path', async () => {
     const old = oldGit();
     try {
-      const real = dirname(realGit());
-      expect(await resolveGit(`${dirOf(old.path)}:${real}`)).toBe(join(real, 'git'));
+      const link = join(scratch.path, 'linked-git');
+      symlinkSync(realGit(), link);
+      expect(await resolveGit([binOf(old.path), link])).toBe(realpathSync(realGit()));
     } finally {
       old.cleanup();
     }
   });
 
-  it('refuses a path with no git on it', async () => {
-    await expect(resolveGit(scratch.path)).rejects.toBeInstanceOf(GitVersionError);
+  it('refuses when no candidate exists', async () => {
+    await expect(resolveGit([join(scratch.path, 'git')])).rejects.toBeInstanceOf(GitVersionError);
+  });
+
+  it('never runs or takes a git on PATH, only one in a fixed install prefix', async () => {
+    const ran = join(scratch.path, 'path-git-ran');
+    const wrapper = gitWrapper(`touch '${ran}'\nexec "$GIT" "$@"`);
+    try {
+      vi.stubEnv('PATH', wrapper.path);
+      const bin = await resolveGit();
+      const prefixes = ['/opt/homebrew/bin/git', '/usr/local/bin/git', '/usr/bin/git'].flatMap(
+        (candidate) => (existsSync(candidate) ? [realpathSync(candidate)] : []),
+      );
+      expect(prefixes).toContain(bin);
+      expect(existsSync(ran)).toBe(false);
+    } finally {
+      vi.unstubAllEnvs();
+      wrapper.cleanup();
+    }
+  });
+});
+
+describe('every git the daemon spawns', () => {
+  it('runs check-attr with the resolved git, never a git on PATH', async () => {
+    const ran = join(scratch.path, 'path-git-ran');
+    const bin = realGit();
+    const wrapper = gitWrapper(`touch '${ran}'\nexec "$GIT" "$@"`);
+    try {
+      vi.stubEnv('PATH', wrapper.path);
+      await commitA(createGit({ bin }));
+      expect(existsSync(ran)).toBe(false);
+    } finally {
+      vi.unstubAllEnvs();
+      wrapper.cleanup();
+    }
+  });
+
+  it('reads the pin once per operation, not on every git call', async () => {
+    const store = memoryPinStore();
+    const get = vi.fn((path: string) => store.get(path));
+    const git = createGit({ pins: { ...store, get } });
+    await git.head(repo.path);
+    for (const act of [() => git.changedPaths(repo.path), () => commitA(git)]) {
+      get.mockClear();
+      await act();
+      expect(get).toHaveBeenCalledTimes(1);
+    }
   });
 });
 
@@ -1177,14 +1296,13 @@ describe('runGit', () => {
   it('stops a git call that runs past its timeout', async () => {
     const wrapper = gitWrapper('sleep 5\nexec "$GIT" "$@"');
     try {
-      vi.stubEnv('PATH', wrapper.path);
-      const error: unknown = await runGit(repo.path, ['status'], { timeoutMs: 200 }).catch(
-        (caught: unknown) => caught,
-      );
+      const error: unknown = await runGit(repo.path, ['status'], {
+        timeoutMs: 200,
+        bin: join(wrapper.path.split(':')[0] ?? '', 'git'),
+      }).catch((caught: unknown) => caught);
       expect(error).toBeInstanceOf(GitError);
       expect(String(error)).toContain('still running after 0.2 s');
     } finally {
-      vi.unstubAllEnvs();
       wrapper.cleanup();
     }
   });

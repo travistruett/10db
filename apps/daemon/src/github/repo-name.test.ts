@@ -5,6 +5,8 @@ describe('githubRepoOf', () => {
   it.each([
     ['https://github.com/acme/widgets.git', 'acme/widgets'],
     ['https://github.com/acme/widgets', 'acme/widgets'],
+    ['https://github.com/acme/widgets.git/', 'acme/widgets'],
+    ['git@github.com:acme/widgets.GIT', 'acme/widgets'],
     ['git@github.com:acme/widgets.git', 'acme/widgets'],
     ['ssh://git@github.com/acme/widgets.git', 'acme/widgets'],
     ['https://gitlab.com/acme/widgets.git', null],

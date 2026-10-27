@@ -14,9 +14,10 @@ export function githubRepoOf(url: string): string | null {
     if (parsed.hostname.toLowerCase() === 'github.com') path = parsed.pathname.replace(/^\//, '');
   }
   if (path === null) return null;
+  // A trailing slash first, so `name.git/` loses both; git and GitHub read `.GIT` as `.git`.
   const [owner, name, ...rest] = path
-    .replace(/\.git$/, '')
     .replace(/\/$/, '')
+    .replace(/\.git$/i, '')
     .split('/');
   return rest.length === 0 && owner && name && PART.test(owner) && PART.test(name)
     ? `${owner}/${name}`

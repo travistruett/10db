@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { tempDir } from '../../test/fixtures';
@@ -60,9 +60,13 @@ describe('probeVersion', () => {
 });
 
 describe('systemCheck', () => {
-  it('reports each tool from the login PATH, with the login-env status', async () => {
+  it('reports each tool from the login PATH but git, which comes from a fixed install prefix', async () => {
     const claude = tool('bin', 'claude', 'exit 0');
-    const git = tool('bin', 'git', 'exit 0');
+    // A git on the login PATH is never run, not even for its version: a lane could have put it there.
+    tool('bin', 'git', 'exit 0');
+    const git =
+      ['/opt/homebrew/bin/git', '/usr/local/bin/git', '/usr/bin/git'].find((p) => existsSync(p)) ??
+      null;
     const login: LoginEnv = {
       vars: { PATH: join(dir.path, 'bin') },
       source: 'inherited',
@@ -84,7 +88,7 @@ describe('systemCheck', () => {
         {
           name: 'git',
           path: git,
-          version: `version of ${git} ${join(dir.path, 'bin')}`,
+          version: git === null ? null : `version of ${git} ${join(dir.path, 'bin')}`,
           required: true,
         },
         { name: 'docker', path: null, version: null, required: false },

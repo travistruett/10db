@@ -282,10 +282,10 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           extraReads: [envFile, ...(linkedWorktree ? [commonDir] : [])],
           extraWrites: [],
           // Only the daemon writes git state, so a lane can't move HEAD or a ref, stage, or plant
-          // config, hooks, alternates or attributes: the git dir is read-only to it, as is a linked
-          // worktree's common dir and its `.git` gitfile, so the gitfile can't be swapped to point
-          // elsewhere. Claude Code would otherwise open them with the checkout.
-          denyWrites: linkedWorktree ? [join(checkout, '.git'), gitDir, commonDir] : [gitDir],
+          // config, hooks, alternates or attributes: the git dir and the common dir are read-only to
+          // it, and so is `<checkout>/.git`, file or directory, wherever the git dir lies, so a gitfile
+          // can't be swapped to point elsewhere. Claude Code would otherwise open them with the checkout.
+          denyWrites: [...new Set([join(checkout, '.git'), gitDir, commonDir])],
           loopback: input.project.sandboxLoopback,
           deniedEnvNames: deniedEnvNames({ ...input.env, ...env }),
         });

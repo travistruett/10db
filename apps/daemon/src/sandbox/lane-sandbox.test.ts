@@ -227,6 +227,35 @@ describe('createLaneSandbox', () => {
     }
   });
 
+  it('makes the .git gitfile read-only when the git dir it names sits inside the checkout', async () => {
+    const separate = tempDir('lane-separate');
+    try {
+      const work = join(separate.path, 'work');
+      execFileSync(
+        'git',
+        ['init', '-q', '-b', 'main', `--separate-git-dir=${join(work, 'inner-git')}`, work],
+        {
+          env: isolatedGitEnv(),
+          stdio: 'pipe',
+        },
+      );
+      const session = await sandbox().forSession(
+        input({ project: { id: projectId, repoPath: work, sandboxLoopback: false } }),
+      );
+      try {
+        const real = realpathSync(work);
+        expect(session.spec.settings.filesystem.denyWrite).toEqual([
+          join(real, '.git'),
+          join(real, 'inner-git'),
+        ]);
+      } finally {
+        session.dispose();
+      }
+    } finally {
+      separate.cleanup();
+    }
+  });
+
   it('builds the profile from the real path of a checkout opened through a link', async () => {
     const link = join(root, 'link');
     symlinkSync(checkout, link);

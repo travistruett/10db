@@ -34,14 +34,18 @@ export const NO_PROMPTS = {
   LC_ALL: 'C',
 } as const;
 
+/** Config given on the command line through the environment: `GIT_CONFIG_COUNT` and its pairs, and `-c`'s. */
+const COMMAND_CONFIG = /^GIT_CONFIG_(COUNT|PARAMETERS|KEY_\d+|VALUE_\d+)$/;
+
 function keep(
   env: Readonly<Record<string, string | undefined>>,
   kept: readonly string[],
+  keptPattern?: RegExp,
 ): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [name, value] of Object.entries(env)) {
     if (value === undefined) continue;
-    if (name.startsWith('GIT_') && !kept.includes(name)) continue;
+    if (name.startsWith('GIT_') && !kept.includes(name) && !keptPattern?.test(name)) continue;
     out[name] = value;
   }
   return out;
@@ -53,6 +57,23 @@ export function localGitEnv(extra: Readonly<Record<string, string>> = {}): Recor
     ...keep(process.env, KEPT_LOCAL),
     // No optional locks: a read would otherwise refresh the index under index.lock, and a commit
     // running at that moment fails with "index.lock: File exists".
+    GIT_OPTIONAL_LOCKS: '0',
+    ...NO_PROMPTS,
+    ...extra,
+  };
+}
+
+/**
+ * The environment of a local call that reads the config a fetch or push in `login` would see: the
+ * login environment's config selectors and its command-line config, then `extra`. The network call
+ * itself drops that command-line config and is handed what it needs of it explicitly.
+ */
+function loginConfigEnv(
+  login: Readonly<Record<string, string>>,
+  extra: Readonly<Record<string, string>> = {},
+): Record<string, string> {
+  return {
+    ...keep(login, KEPT_NETWORK, COMMAND_CONFIG),
     GIT_OPTIONAL_LOCKS: '0',
     ...NO_PROMPTS,
     ...extra,
@@ -92,8 +113,13 @@ export interface RunOptions {
   readonly config?: readonly string[];
   /** Defaults to `GIT_TIMEOUT_MS`. */
   readonly timeoutMs?: number;
-  /** The git to run, an absolute path once the daemon has resolved it; `git` on PATH otherwise. */
-  readonly bin?: string;
+  /** The git to run: the absolute path `resolveGit` found, never a name looked up on PATH. */
+  readonly bin: string;
+  /**
+   * Run in this login environment instead of the daemon's own, keeping its command-line config, so
+   * a config read sees what a fetch or push in it would.
+   */
+  readonly login?: Readonly<Record<string, string>>;
 }
 
 /**
@@ -101,17 +127,13 @@ export interface RunOptions {
  * Resolves with stdout as bytes; rejects with a `GitError` on a non-zero exit, a timeout or too much
  * output.
  */
-function runGitBytes(
-  repo: string,
-  args: readonly string[],
-  opts: RunOptions = {},
-): Promise<Buffer> {
+function runGitBytes(repo: string, args: readonly string[], opts: RunOptions): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const child = spawn(
-      opts.bin ?? 'git',
+      opts.bin,
       ['-C', repo, ...(opts.config ?? []), ...daemonGitArgs(), ...args],
       {
-        env: localGitEnv(opts.env),
+        env: opts.login ? loginConfigEnv(opts.login, opts.env) : localGitEnv(opts.env),
         stdio: ['pipe', 'pipe', 'pipe'],
       },
     );
@@ -156,7 +178,7 @@ function runGitBytes(
 export async function runGit(
   repo: string,
   args: readonly string[],
-  opts: RunOptions = {},
+  opts: RunOptions,
 ): Promise<string> {
   return (await runGitBytes(repo, args, opts)).toString('utf8');
 }

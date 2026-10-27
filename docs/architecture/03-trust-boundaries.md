@@ -291,7 +291,7 @@ Under the lane sandbox (**built**), the design column holds for a lane's Bash:
   profile keeps it closed, and the pnpm hazard card says to run the install outside the lane or use npm.
 - **The git dirs are read-only to lanes.** Only the daemon writes git state. Claude Code opens the checkout,
   `.git` included, and a linked worktree's own git dir for writing; the profile denies writes to the checkout's
-  git dir and, in a linked worktree, to the worktree's git dir and the common dir. A lane can't move HEAD or a
+  git dir, its common dir and `<checkout>/.git`, file or directory, wherever the git dir lies. A lane can't move HEAD or a
   ref, stage, or plant config, hooks, alternates or attributes. Its read-only git still works: the env sets
   `GIT_OPTIONAL_LOCKS=0`, so `git status` doesn't try to refresh the index, and the live test runs `git status`,
   `git diff` and `git log` with the dirs read-only. Re-run it after each Claude Code or SDK upgrade.
@@ -337,14 +337,20 @@ Under the lane sandbox (**built**), the design column holds for a lane's Bash:
     `core.hooksPath=/dev/null`, `core.fsmonitor=false`, `submodule.recurse=false`, `core.protectHFS` and
     `core.protectNTFS`, drops every `GIT_*` variable but the global and system config selectors (and, for
     fetch and push, the builder's ssh and askpass ones), and is killed after 60 s. `gh` gets the hook and
-    fsmonitor config through `GIT_CONFIG_COUNT`. Every call, local and network, runs the one git resolved from
-    the login `PATH` at startup, the first that passes a behaviour probe: in a scratch repository whose
-    `.gitattributes` selects a filter, `check-attr` under `GIT_ATTR_SOURCE` at the empty tree must say
-    `unspecified`. The global `--attr-source`, and `GIT_ATTR_SOURCE` with it, arrived in git 2.41; Xcode's
-    git 2.39 fails the probe, and with no git that passes the daemon refuses to start, naming what it found;
+    fsmonitor config through `GIT_CONFIG_COUNT`. Every call, local and network, runs the one git resolved at
+    startup from fixed install prefixes, in order `/opt/homebrew/bin`, `/usr/local/bin` and `/usr/bin`, never
+    the login `PATH`, which can name a directory a lane writes (under `pnpm dev`, a checkout's
+    `node_modules/.bin` leads it). It is the first that passes a behaviour probe, kept by its real path: in a
+    scratch repository whose `.gitattributes` selects a filter, `check-attr` under `GIT_ATTR_SOURCE` at the
+    empty tree must say `unspecified`. The global `--attr-source`, and `GIT_ATTR_SOURCE` with it, arrived in
+    git 2.41; Xcode's git 2.39 fails the probe, and with no git that passes the daemon refuses to start, naming
+    the gits it found and how to install one. `runGit` takes the binary as a required argument, and the system
+    check reports git from the same prefixes, so no daemon process runs a git found on a `PATH`;
   - once a checkout is pinned, every call runs with `GIT_DIR` at the pinned git dir and `GIT_WORK_TREE` at the
     checkout, so git never reads the `.git` gitfile again and a linked worktree's `commondir` comes from the
-    read-only git dir; a lane can't swap the gitfile between two calls, and the profile denies writes to it;
+    read-only git dir; a lane can't swap the gitfile between two calls, and the profile denies writes to it.
+    The pin is read once per operation and every call in it uses that one. `check-attr` for the filter refusal,
+    the one call that reads attributes, runs the same git in the same git dir;
   - an attributes file in the git dir (`info/attributes`) is the one source that setting can't switch off, so
     a non-empty one refuses every call with a card;
   - a commit stages with `git add -A` on a private `GIT_INDEX_FILE` seeded from the branch tip (git writes
@@ -367,10 +373,15 @@ Under the lane sandbox (**built**), the design column holds for a lane's Bash:
 - Lanes never push, in any delivery mode: the guard refuses `git push`. The daemon pushes, and only when a batch
   ships.
 - gh runs in an empty directory of its own and always names the repository with `-R`, taken from origin's
-  pinned push URL, so it runs no git in a checkout.
-- Fetch and push take the builder's credential helpers from global config, URL-scoped ones such as
-  `gh auth setup-git`'s included, after resetting the list, and put `--` before the URL. A local or `file:`
-  origin inside the checkout or a lane's temp root is refused: its receive-pack hooks would run unsandboxed.
+  pinned push URL, so it runs no git in a checkout. A batch start checks origin's push URL against the pin
+  first, so an origin added or changed since registration raises the Origin card, which offers it for trust.
+  gh itself, and any git it runs, still come from the login `PATH`.
+- Fetch and push take the builder's credential helpers from its own config (system, global and the login
+  environment's `GIT_CONFIG_COUNT` and `GIT_CONFIG_PARAMETERS`), URL-scoped ones such as `gh auth setup-git`'s
+  included, read with the login environment the call runs in. They are re-emitted through `GIT_CONFIG_COUNT`,
+  after an empty helper that resets the list, so a URL holding `=` stays whole, and `--` goes before the URL.
+  A local or `file:` origin inside any registered checkout or a lane's temp root, read as written or through
+  a link, is refused: its receive-pack hooks would run unsandboxed.
 - Push and fetch go only to origin's fetch and push URLs as the daemon recorded them with the project's pin, in
   the form a strict parser printed, named explicitly; the config string itself never reaches the network call.
   A URL with userinfo (a user, password or token), or one that doesn't parse cleanly (`@`, `?`, `#`, a backslash,
@@ -378,8 +389,8 @@ Under the lane sandbox (**built**), the design column holds for a lane's Bash:
   helper or ssh; an scp-style `git@host:path` is fine. If origin's URL changes, fetch and push refuse with a card
   until the builder re-trusts the checkout (D13, built). URL userinfo is also masked in every git error and log
   line, after the whole text is read and before it is cut short.
-- They run with the builder's own transport programs pinned on the command line (`credential.helper` reset to
-  the global ones, `core.sshCommand`, `core.askPass`) and `protocol.ext.allow=never`. Before each, the config a
+- They run with the builder's own transport programs pinned (`credential.helper` reset to the builder's own,
+  `core.sshCommand`, `core.askPass`) and `protocol.ext.allow=never`. Before each, the config a
   lane could have written is checked against an allowlist, which refuses `insteadOf`, `pushInsteadOf`,
   `credential.*`, `http.proxy` and every include. The allowlist is defense in depth, not the boundary: it reads
   config in a process before the one that uses it.
@@ -503,7 +514,8 @@ rm -rf dist/*`. The guard judges a command before it runs.
   replaced, or a changed origin, refuses every call with a card. The card holds the state it found; Trust the
   checkout as it is now pins exactly that state, and only if the checkout still matches it, otherwise 10db
   refuses again with a new card. Each found state gets its own card. Restarting the daemon re-trusts nothing.
-  A non-empty `objects/info/alternates` is refused too.
+  A git dir offered for trust inside the checkout (other than its own `.git`) or in a lane temp root is refused
+  with a card that offers nothing to trust. A non-empty `objects/info/alternates` is refused too.
 - **The builder's own config is trusted.** Signing follows the global `commit.gpgsign`, with the signing
   programs pinned from global config or git's defaults. Local config still sets identity, which names no program.
 - **Files that need a filter are left to the builder.** The daemon commits bytes as they are, so it refuses a

@@ -5,6 +5,8 @@ export const GitTrustFailure = {
   Config: 'config',
   /** The checkout's git dir or common dir is not the one the daemon pinned. */
   Moved: 'moved',
+  /** A git dir offered for trust lies where a lane can write: in the checkout or a lane temp dir. */
+  Writable: 'writable',
   /** HEAD is not on the branch the commit is for. */
   Branch: 'branch',
   /** The branch ref is a symbolic ref, or moved while the commit ran. */
@@ -39,6 +41,7 @@ export type GitTrustDetail =
       /** The checkout as it was found, which the builder's Trust answer pins if it still holds. */
       readonly candidate: CheckoutPin;
     }
+  | { readonly kind: typeof GitTrustFailure.Writable; readonly gitDir: string }
   | {
       readonly kind: typeof GitTrustFailure.Branch;
       readonly expected: string;
@@ -79,6 +82,8 @@ function describe(repo: string, detail: GitTrustDetail): string {
       return `10db won't fetch or push in ${repo}: its config sets ${detail.keys.map((k) => k.key).join(', ')}`;
     case GitTrustFailure.Moved:
       return `10db won't run git in ${repo}: its git dir is ${detail.found}, not ${detail.pinned} as 10db recorded`;
+    case GitTrustFailure.Writable:
+      return `10db won't trust ${repo}: its git dir ${detail.gitDir} lies where a lane can write`;
     case GitTrustFailure.Branch: {
       const on = detail.found ?? 'a detached HEAD';
       return detail.committed

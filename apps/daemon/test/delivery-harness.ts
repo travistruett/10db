@@ -37,7 +37,7 @@ import {
   type Shipper,
 } from '../src/delivery';
 import { createEventBus, createStateStore, type EventBus, type StateStore } from '../src/events';
-import { createGit, type Git } from '../src/git';
+import { createGit, type Git, type GitTrustError } from '../src/git';
 import { createInboxService, type InboxService } from '../src/inbox';
 import { silentLogger } from '../src/log';
 import { systemProcesses } from '../src/recovery';
@@ -82,6 +82,8 @@ export interface DeliveryHarness {
   readonly state: StateStore;
   readonly inbox: InboxService;
   readonly git: Git;
+  /** Every refusal the daemon's git raised, as its card handler would hear of it. */
+  readonly gitRefusals: GitTrustError[];
   readonly gh: FakeGh;
   readonly jobs: DeliveryJobs;
   readonly ctx: DeliveryContext;
@@ -143,7 +145,8 @@ export function createDeliveryHarness(
   seedTeam(state, readDefaultPersonas());
   measureForTests(state);
   const inbox = createInboxService({ state, onParkedAnswer: () => undefined });
-  const git = createGit();
+  const gitRefusals: GitTrustError[] = [];
+  const git = createGit({ onRefused: (error) => gitRefusals.push(error) });
   const gh = new FakeGh();
   const jobs = createDeliveryJobs(silentLogger);
   const ticks = { count: 0 };
@@ -206,6 +209,7 @@ export function createDeliveryHarness(
     state,
     inbox,
     git,
+    gitRefusals,
     gh,
     jobs,
     ctx,

@@ -17,6 +17,7 @@ import {
   DB_MIGRATIONS_DIR,
   deleteAppSetting,
   getAppSetting,
+  listProjects,
   migrateDatabase,
   openDatabase,
   patchAccount,
@@ -196,9 +197,9 @@ function noSystemCheck(): Promise<SystemCheckDto> {
 }
 
 export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
-  // Before anything runs git: the one git every daemon git call runs, from the login PATH, and only
-  // one that can be told to read no attributes. The daemon's own PATH, from Finder, is /usr/bin.
-  const gitBin = await resolveGit((opts.loginEnv ?? process.env)['PATH'] ?? DEFAULT_SESSION_PATH);
+  // Before anything runs git: the one git every daemon git call runs, from a fixed install prefix,
+  // never a PATH, and only one that can be told to read no attributes.
+  const gitBin = await resolveGit();
   const clock = opts.clock ?? systemClock;
   const startedAt = clock.now();
   mkdirSync(join(opts.dataDir, 'logs'), { recursive: true });
@@ -294,6 +295,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     onRefused: createGitRefusalHandler({ db: state.db, inbox, logger }),
     pins: createProjectPinStore(state, memoryPinStore()),
     bin: gitBin,
+    checkouts: () => listProjects(state.db).map((project) => project.repoPath),
     laneRoots: [opts.laneSandbox?.tmpRoot ?? LANE_TEMP_ROOT],
   });
   const answerGit = createGitCardAnswers(git);
