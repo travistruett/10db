@@ -517,7 +517,8 @@ describe('createLaneSandbox', () => {
       expect(dirname(file)).toBe(tmpRoot);
       // Claude Code strips variables such as CARGO_HOME from a sandboxed command's env; the shell
       // sources this file before each command. Its own `CLAUDE_*` settings are not for commands.
-      const out = execFileSync('/bin/sh', ['-c', '. "$1" && exec /usr/bin/env -0', 'sh', file], {
+      const out = execFileSync('/bin/sh', [], {
+        input: `${readFileSync(file, 'utf8')}exec /usr/bin/env -0\n`,
         env: {},
         encoding: 'utf8',
       });

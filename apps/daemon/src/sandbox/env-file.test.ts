@@ -28,9 +28,10 @@ afterEach(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
-/** The variables `/bin/sh` holds after sourcing `file` in an otherwise empty env. */
+/** The variables `/bin/sh` holds after running `file`'s content in an otherwise empty env. */
 function sourced(file: string): Record<string, string> {
-  const out = execFileSync('/bin/sh', ['-c', '. "$1" && exec /usr/bin/env -0', 'sh', file], {
+  const out = execFileSync('/bin/sh', [], {
+    input: `${readFileSync(file, 'utf8')}exec /usr/bin/env -0\n`,
     env: {},
     encoding: 'utf8',
   });
