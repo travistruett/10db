@@ -54,23 +54,19 @@ the Claude Code login you already use (`claude /login`, in `CLAUDE_CONFIG_DIR` i
 10db records its email the first time a task runs, tells you in the inbox which email it recorded
 ("Claude plan runs as …"), and refuses any session that reports a different one.
 
-Until the Accounts screen ships, add other accounts through the daemon's API, with the token in
-`~/Library/Application Support/10db/ui-token` and the port in `daemon.json` beside it:
+Add and manage accounts in Settings › Accounts:
 
-```sh
-T=$(cat ~/Library/Application\ Support/10db/ui-token)
-P=$(jq .port ~/Library/Application\ Support/10db/daemon.json)
-# A second Claude subscription: 10db prints the sign-in command for its own config directory.
-curl -s -H "Authorization: Bearer $T" -H 'content-type: application/json' \
-  -d '{"kind":"claude_subscription","label":"Company A"}' http://127.0.0.1:$P/accounts
-# A client's API key, capped at $500 a month; the key goes to your login Keychain, never to 10db's database.
-curl -s -H "Authorization: Bearer $T" -H 'content-type: application/json' \
-  -d '{"kind":"anthropic_api_key","label":"Client B","monthlyCapUsd":500}' http://127.0.0.1:$P/accounts
-curl -s -X PUT -H "Authorization: Bearer $T" -H 'content-type: application/json' \
-  -d '{"secret":"sk-ant-…"}' http://127.0.0.1:$P/accounts/<id>/secret
-```
+- **Add account** asks for a kind and a label (a metered account also takes a monthly cap). A second Claude
+  subscription shows the sign-in command for its own config directory: run it in a terminal, then press
+  **Check sign-in**. 10db shows the email it found, and **Confirm** records it as the account's identity.
+- A keyed account (an Anthropic API key) takes its secret in a password field. The secret goes to your login
+  Keychain, never to 10db's database, and the screen forgets it as soon as it is sent.
+- Select an account to edit its label, caps and settings, or to archive it. The table shows each account's kind,
+  verified identity and this month's usage against its cap.
 
-After you sign a new subscription in, 10db asks you in the inbox to confirm the email it found. Pick a
+The same routes exist on the daemon's API (`/accounts`).
+
+The inbox also asks you to confirm the email it found after a new subscription signs in. Pick a
 project's account in Settings, Billing. Sessions on an account run under its own lane cap and usage limits; a
 metered account stops starting sessions at its monthly cap until the next month or a raised cap.
 `GET /accounts/<id>/usage?month=YYYY-MM` shows its tokens and dollars per project.

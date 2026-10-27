@@ -11,6 +11,7 @@ The UI never touches the database; it talks to the daemon over loopback HTTP and
 - One event stream (`useEventStream`) invalidates queries by entity type (`INVALIDATIONS`). Don't poll lists.
 - `pnpm dev` (`scripts/dev.sh`) shares one random token, kept in `.dev/ui-token`, between the daemon and Vite.
 - MSW 3 intercepts jsdom's `WebSocket` as is; no extra environment option is needed.
+- Hooks, query keys and fixtures are scoped per backend entity (`daemon/<entity>-queries.ts`, `test/<entity>-fixtures.ts`), accounts first. An account secret is sent by `daemon/account-secret.ts`, never through TanStack Query, and never kept in UI state.
 - Server state lives in TanStack Query; routes are code-based TanStack Router in `src/router.tsx`.
 - Mantine components and theme tokens only; see `DESIGN.md`. Use the Mantine MCP server for
   component docs (pinned to our Mantine version).
