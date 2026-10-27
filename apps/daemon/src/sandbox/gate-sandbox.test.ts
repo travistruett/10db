@@ -13,7 +13,7 @@ import {
 } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createTempRepo, SANDBOXED, type TempDir } from '../../test/fixtures';
+import { createTempRepo, isolatedGitEnv, SANDBOXED, type TempDir } from '../../test/fixtures';
 import { createGit } from '../git';
 import {
   createGateSandbox,
@@ -171,6 +171,21 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
     } finally {
       other.cleanup();
     }
+  });
+
+  it('makes another project read-only as a whole, one nested in this checkout included', async () => {
+    const nested = join(checkout, 'nested');
+    execFileSync('git', ['init', '-q', '-b', 'main', nested], {
+      env: isolatedGitEnv(),
+      stdio: 'pipe',
+    });
+    await withRun(input({ checkouts: [repo.path, nested] }), (run) => {
+      const { filesystem } = settingsOf(run);
+      expect(filesystem['allowWrite']).toEqual([run.tmpDir, checkout]);
+      expect(filesystem['denyWrite']).toEqual(
+        expect.arrayContaining([nested, join(nested, '.git')]),
+      );
+    });
   });
 
   it('reads what lanes read: no home, no ~/.ssh, no ~/.config, no data dir, no .env file', async () => {

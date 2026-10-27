@@ -119,8 +119,9 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           extraReads: [envFile, ...access.gitReads],
           // Claude Code opens the checkout for writing itself.
           extraWrites: [],
-          // Claude Code would otherwise open the checkout's git state with the checkout.
-          denyWrites: access.gitState,
+          // Claude Code would otherwise open the checkout's git state with the checkout, and a
+          // project nested in it.
+          denyWrites: [...access.gitState, ...access.otherCheckouts],
           loopback: input.project.sandboxLoopback,
           deniedEnvNames: deniedEnvNames({ ...input.env, ...env }),
         });

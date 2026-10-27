@@ -216,6 +216,8 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
           join(realpathSync(worktree), '.git'),
           join(commonDir, 'worktrees', 'wt'),
           commonDir,
+          // The main checkout is another registered project here, read-only as a whole.
+          checkout,
         ]);
       } finally {
         session.dispose();
@@ -261,12 +263,33 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
           join(checkout, 'nested', '.git'),
           join(realpathSync(other), '.git'),
           realpathSync(otherGit),
+          // Another project is read-only as a whole, not only its git state.
+          join(checkout, 'nested'),
+          realpathSync(other),
         ]);
       } finally {
         session.dispose();
       }
     } finally {
       elsewhere.cleanup();
+    }
+  });
+
+  it('leaves a project nested in another writable to its own lanes', async () => {
+    const nested = join(checkout, 'nested');
+    execFileSync('git', ['init', '-q', '-b', 'main', nested], {
+      env: isolatedGitEnv(),
+      stdio: 'pipe',
+    });
+    const session = await sandbox().forSession(
+      input({ project: { ...input().project, repoPath: nested }, checkouts: [repo.path, nested] }),
+    );
+    try {
+      const { denyWrite } = session.spec.settings.filesystem;
+      expect(denyWrite).toContain(join(checkout, '.git'));
+      expect(denyWrite).not.toContain(checkout);
+    } finally {
+      session.dispose();
     }
   });
 

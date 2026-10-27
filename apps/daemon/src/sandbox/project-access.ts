@@ -27,6 +27,12 @@ export interface ProjectAccess {
    * `<checkout>/.git`, and those of every other registered checkout.
    */
   readonly gitState: readonly string[];
+  /**
+   * Every other registered checkout that isn't this one's ancestor, read-only as a whole: one nested
+   * in this checkout would otherwise be writable here. An ancestor stays out, or this checkout would
+   * be read-only too; the profile never opens it for writing anyway.
+   */
+  readonly otherCheckouts: readonly string[];
 }
 
 export interface ProjectAccessDeps {
@@ -146,18 +152,20 @@ function storedPatterns(
   return [...new Set(patterns)];
 }
 
+/** The real paths of every registered checkout but `own`; one that is gone has nothing to protect. */
+function otherCheckoutsOf(own: string, checkouts: readonly string[]): string[] {
+  const real = checkouts.flatMap((path) => (existsSync(path) ? [realpathSync(path)] : []));
+  return [...new Set(real)].filter((path) => path !== own);
+}
+
 /**
- * `<checkout>/.git`, the git dir and the common dir of every registered checkout but `own`. A checkout
- * whose git dirs can't be read now still gets its `.git` denied, and one that is gone is skipped.
+ * `<checkout>/.git`, the git dir and the common dir of each of `others`. A checkout whose git dirs
+ * can't be read now still gets its `.git` denied.
  */
 async function otherCheckoutsGitState(
-  own: string,
-  checkouts: readonly string[],
+  others: readonly string[],
   gitDirs: ProjectAccessDeps['gitDirs'],
 ): Promise<string[]> {
-  // A checkout that is gone has nothing to protect.
-  const real = checkouts.flatMap((path) => (existsSync(path) ? [realpathSync(path)] : []));
-  const others = [...new Set(real)].filter((path) => path !== own);
   const denies = await Promise.all(
     others.map(async (other) => {
       const dirs = await gitDirs(other).catch(() => null);
@@ -187,7 +195,8 @@ export async function projectAccess(
   const checkoutSecrets = await secretFilesIn(checkout);
   const { gitDir, commonDir } = await deps.gitDirs(checkout);
   const linkedWorktree = !isEqualOrUnder(commonDir, checkout);
-  const otherGitState = await otherCheckoutsGitState(checkout, input.checkouts, deps.gitDirs);
+  const others = otherCheckoutsOf(checkout, input.checkouts);
+  const otherGitState = await otherCheckoutsGitState(others, deps.gitDirs);
   const protectedList = [
     ...protectedReads({
       home: deps.home,
@@ -219,5 +228,6 @@ export async function projectAccess(
     // nested in this checkout would otherwise be writable here, and the daemon's git trusts a git
     // dir under any of them.
     gitState: [...new Set([join(checkout, '.git'), gitDir, commonDir, ...otherGitState])],
+    otherCheckouts: others.filter((other) => !isEqualOrUnder(checkout, other)),
   };
 }

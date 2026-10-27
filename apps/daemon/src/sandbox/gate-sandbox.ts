@@ -173,7 +173,7 @@ export function createGateSandbox(deps: GateSandboxDeps): GateSandbox {
           extraReads: access.gitReads,
           // srt opens nothing for writing by itself, unlike Claude Code, which opens the checkout.
           extraWrites: [checkout],
-          denyWrites: [...access.gitState, ...SRT_SHARED_TEMP],
+          denyWrites: [...access.gitState, ...access.otherCheckouts, ...SRT_SHARED_TEMP],
           loopback: input.project.sandboxLoopback,
           deniedEnvNames: [],
         });
