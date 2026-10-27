@@ -88,9 +88,24 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
     page.getByRole('list', { name: 'Ready tasks' }).getByRole('listitem', { name: OTHER }),
   ).toBeVisible();
 
-  const card = page.getByRole('listitem', { name: TASK });
-  await card.getByRole('button', { name: `Actions for ${TASK}` }).click();
-  await page.getByRole('menuitem', { name: 'Start' }).click();
+  // Start through the batch sheet. The project delivers locally, so it starts each ticked task.
+  await page.getByRole('button', { name: 'Start a batch' }).click();
+  const sheet = page.getByRole('dialog', { name: 'Start a batch' });
+  // Planning the other task put it at the top of Ready, so board order proposes it. Both claim the
+  // only area, so the picker leaves this task out and says why.
+  await expect(sheet.getByRole('checkbox', { name: OTHER })).toBeChecked();
+  await expect(sheet.getByRole('checkbox', { name: TASK })).not.toBeChecked();
+  await expect(
+    sheet.getByText(`Area greeting is shared with ${OTHER}, picked before it`),
+  ).toBeVisible();
+  await expect(sheet.getByRole('table', { name: `Steps for ${TASK}` })).toBeVisible();
+  // The drawer fades in as it slides; axe would measure contrast mid-fade.
+  await expect(sheet).toHaveCSS('opacity', '1');
+  await expectAccessible(page, 'batch sheet, dark');
+  await sheet.getByRole('checkbox', { name: OTHER }).uncheck();
+  await sheet.getByRole('checkbox', { name: TASK }).check();
+  await sheet.getByRole('button', { name: 'Start 1 task' }).click();
+  await expect(sheet).toBeHidden();
 
   // The agent's question reaches the inbox; answer it from the keyboard.
   await open(page, 'Inbox');
@@ -169,6 +184,15 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
     await open(page, view);
     await expectAccessible(page, `${view.toLowerCase()}, light`);
   }
+  // The other task is still ready, so the sheet proposes it; close it without starting anything.
+  await open(page, 'Board');
+  await page.getByRole('button', { name: 'Start a batch' }).click();
+  const lightSheet = page.getByRole('dialog', { name: 'Start a batch' });
+  await expect(lightSheet.getByRole('checkbox', { name: OTHER })).toBeChecked();
+  await expect(lightSheet).toHaveCSS('opacity', '1');
+  await expectAccessible(page, 'batch sheet, light');
+  await page.keyboard.press('Escape');
+  await expect(lightSheet).toBeHidden();
   await open(page, 'Settings');
   await page.getByRole('link', { name: /Board columns/ }).click();
   await expect(page.getByRole('table', { name: 'Human columns' })).toBeVisible();
