@@ -13,7 +13,7 @@ import {
   UnstyledButton,
 } from '@mantine/core';
 import { IconPlus } from '@tabler/icons-react';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useAccounts, useAccountUsage } from '../../../daemon/account-queries';
 import { ACCOUNT_KIND_LABEL } from '../account-kind-label';
 import { AccountDrawer } from './account-drawer';
@@ -137,6 +137,10 @@ export function AccountsSection() {
   const [selected, setSelected] = useState<AccountId | null>(null);
   const [opened, setOpened] = useState(false);
   const [adding, setAdding] = useState(false);
+  const addButton = useRef<HTMLButtonElement>(null);
+  // The Create button that opened a new account's drawer is gone by the time the drawer closes, so
+  // Mantine has nothing to return focus to.
+  const returnToAdd = useRef(false);
   const accounts = useAccounts();
   if (accounts.isPending) return <Text c="dimmed">Loading accounts…</Text>;
   if (accounts.isError)
@@ -147,6 +151,7 @@ export function AccountsSection() {
     <Stack maw={880}>
       <Group justify="flex-end">
         <Button
+          ref={addButton}
           leftSection={<IconPlus size={16} stroke={1.5} />}
           onClick={() => {
             setAdding(true);
@@ -170,6 +175,7 @@ export function AccountsSection() {
               key={a.id}
               account={a}
               onOpen={(account) => {
+                returnToAdd.current = false;
                 setSelected(account.id);
                 setOpened(true);
               }}
@@ -184,6 +190,7 @@ export function AccountsSection() {
           setAdding(false);
         }}
         onCreated={(id) => {
+          returnToAdd.current = true;
           setSelected(id);
           setOpened(true);
         }}
@@ -193,6 +200,11 @@ export function AccountsSection() {
         opened={opened}
         onClose={() => {
           setOpened(false);
+        }}
+        onClosed={() => {
+          if (!returnToAdd.current) return;
+          returnToAdd.current = false;
+          addButton.current?.focus();
         }}
       />
     </Stack>

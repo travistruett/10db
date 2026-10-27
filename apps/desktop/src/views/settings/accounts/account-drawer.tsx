@@ -38,10 +38,13 @@ export function AccountDrawer({
   accountId,
   opened,
   onClose,
+  onClosed,
 }: {
   readonly accountId: AccountId | null;
   readonly opened: boolean;
   readonly onClose: () => void;
+  /** Called once the exit transition has finished, after Mantine has returned focus. */
+  readonly onClosed?: () => void;
 }) {
   const accounts = useAccounts();
   const account = accounts.data?.find((a) => a.id === accountId);
@@ -49,6 +52,7 @@ export function AccountDrawer({
     <Drawer
       opened={opened}
       onClose={onClose}
+      {...(onClosed ? { onExitTransitionEnd: onClosed } : {})}
       position="right"
       size="md"
       title={account ? accountDisplayName(account) : 'Account'}

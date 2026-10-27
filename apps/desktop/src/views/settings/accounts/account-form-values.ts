@@ -77,14 +77,13 @@ function settingsOf(values: AccountFormValues): Record<string, unknown> {
 }
 
 function inputOf(values: AccountFormValues): Record<string, unknown> {
-  const laneCap = values.laneCap.trim();
   const cap = values.monthlyCapUsd.trim();
   const organization = values.organization.trim();
   return {
     kind: values.kind,
     label: values.label,
     payer: values.payer,
-    ...(laneCap === '' ? {} : { laneCap: Number(laneCap) }),
+    laneCap: Number(values.laneCap.trim()),
     ...(isMetered(values.kind) && cap !== '' ? { monthlyCapUsd: Number(cap) } : {}),
     ...(values.kind !== AccountKind.Gateway && isMetered(values.kind) && organization !== ''
       ? { expectedIdentity: organization }
@@ -93,33 +92,58 @@ function inputOf(values: AccountFormValues): Record<string, unknown> {
   };
 }
 
-/** Zod words a bad alias as an invalid record key, which tells the builder nothing. */
-const MODEL_ALIAS_MESSAGE = 'Use a lowercase model alias such as sonnet';
+/** Errors with no field of their own show in the modal's alert under this key. */
+export const FORM_ERROR = 'form';
 
-const BASE_URL_MESSAGE = 'Enter an https URL with no credentials, query or fragment';
+/** What to do about each field, in the builder's words; zod's own text is for developers. */
+const FIELD_MESSAGE: Readonly<Record<string, string>> = {
+  label: 'Enter a label of up to 80 characters',
+  payer: 'Keep the payer under 200 characters',
+  laneCap: 'Enter a whole number from 1 to 16',
+  monthlyCapUsd: 'Enter a dollar amount above zero, or leave it empty',
+  organization: 'Enter an organization of up to 200 characters, or leave it empty',
+  region: 'Enter an AWS region such as us-west-2',
+  awsProfile: 'Enter an AWS profile name: letters, digits, dots, dashes or underscores',
+  baseUrl: 'Enter an https URL with no credentials, query or fragment',
+  modelMap: 'Enter a lowercase alias such as sonnet and a model ID for each row',
+  aliases: 'Use lowercase aliases such as sonnet',
+};
+const DUPLICATE_ALIAS_MESSAGE = 'Each alias can appear once';
+const EMPTY_LABEL_MESSAGE = 'Enter a label';
 
-function messageOf(field: string, issue: { code: string; message: string }): string {
-  if (field === 'modelMap' && issue.code === 'invalid_key') return MODEL_ALIAS_MESSAGE;
-  if (field === 'baseUrl') return BASE_URL_MESSAGE;
-  return issue.message;
+function messageOf(
+  field: string,
+  issue: { readonly code: string; readonly message: string },
+  values: AccountFormValues,
+): string {
+  if (field === 'label' && values.label.trim() === '') return EMPTY_LABEL_MESSAGE;
+  return FIELD_MESSAGE[field] ?? issue.message;
 }
 
-/** The form field a zod issue at `path` belongs to. */
+/** The form field a zod issue at `path` belongs to; a path with none maps to `FORM_ERROR`. */
 function fieldOf(path: readonly PropertyKey[]): string {
   const [head, second] = path;
-  if (head === 'settings') return typeof second === 'string' ? second : 'settings';
-  if (head === 'expectedIdentity') return 'organization';
-  return typeof head === 'string' ? head : 'kind';
+  const name = head === 'settings' ? second : head;
+  if (name === 'expectedIdentity') return 'organization';
+  return typeof name === 'string' && name in FIELD_MESSAGE ? name : FORM_ERROR;
 }
 
-/** The values as the zod output, defaults filled, or each failing field's first message. */
+function hasDuplicateAlias(values: AccountFormValues): boolean {
+  const aliases = values.modelMap.map((r) => r.alias.trim()).filter((a) => a !== '');
+  return new Set(aliases).size < aliases.length;
+}
+
+/** The values as the zod output, defaults filled, or each failing field's message. */
 export function toAccountInput(values: AccountFormValues): AccountFormResult {
   const parsed = AccountInput.safeParse(inputOf(values));
-  if (parsed.success) return { ok: true, input: parsed.data };
   const errors: Record<string, string> = {};
-  for (const issue of parsed.error.issues) {
-    const field = fieldOf(issue.path);
-    errors[field] ??= messageOf(field, issue);
+  if (hasDuplicateAlias(values)) errors['modelMap'] = DUPLICATE_ALIAS_MESSAGE;
+  if (parsed.success && Object.keys(errors).length === 0) return { ok: true, input: parsed.data };
+  if (!parsed.success) {
+    for (const issue of parsed.error.issues) {
+      const field = fieldOf(issue.path);
+      errors[field] ??= messageOf(field, issue, values);
+    }
   }
   return { ok: false, errors };
 }

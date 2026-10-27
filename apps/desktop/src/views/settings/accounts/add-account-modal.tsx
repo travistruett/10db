@@ -8,7 +8,12 @@ import { useState, type SubmitEvent } from 'react';
 import { useCreateAccount } from '../../../daemon/account-queries';
 import { ACCOUNT_KIND_LABEL } from '../account-kind-label';
 import { AccountFields } from './account-fields';
-import { emptyAccountForm, toAccountInput, type AccountFormValues } from './account-form-values';
+import {
+  emptyAccountForm,
+  FORM_ERROR,
+  toAccountInput,
+  type AccountFormValues,
+} from './account-form-values';
 
 const KIND_OPTIONS = SUPPORTED_ACCOUNT_KINDS.map((kind) => ({
   value: kind,
@@ -66,6 +71,11 @@ function AddAccountForm({
           }}
         />
         <AccountFields values={values} onChange={setValues} errors={errors} mode="create" />
+        {errors[FORM_ERROR] ? (
+          <Alert color="red" role="alert">
+            {errors[FORM_ERROR]}
+          </Alert>
+        ) : null}
         {create.isError ? (
           <Alert color="red" role="alert">
             {create.error.message}
@@ -95,7 +105,13 @@ export function AddAccountModal({
   readonly onCreated: (id: AccountId) => void;
 }) {
   return (
-    <Modal opened={opened} onClose={onClose} title="Add account" size="md">
+    <Modal
+      opened={opened}
+      onClose={onClose}
+      title="Add account"
+      size="md"
+      closeButtonProps={{ 'aria-label': 'Close' }}
+    >
       <AddAccountForm onClose={onClose} onCreated={onCreated} />
     </Modal>
   );

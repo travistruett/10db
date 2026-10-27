@@ -10,6 +10,7 @@ import {
   TextInput,
 } from '@mantine/core';
 import { IconPlus, IconTrash } from '@tabler/icons-react';
+import { useEffect, useId, useRef } from 'react';
 import type { AccountFormValues } from './account-form-values';
 
 export type AccountFormMode = 'create' | 'edit';
@@ -25,11 +26,29 @@ function ModelMapRows({
   readonly onChange: (next: AccountFormValues) => void;
   readonly error: string | undefined;
 }) {
+  const errorId = useId();
+  const container = useRef<HTMLDivElement>(null);
+  const addButton = useRef<HTMLButtonElement>(null);
+  // Which control takes focus once the rows it belongs to have rendered.
+  const pendingFocus = useRef<number | 'add' | null>(null);
+  useEffect(() => {
+    const target = pendingFocus.current;
+    if (target === null) return;
+    pendingFocus.current = null;
+    if (target === 'add') addButton.current?.focus();
+    else
+      container.current
+        ?.querySelector<HTMLInputElement>(`[data-alias-row="${String(target)}"]`)
+        ?.focus();
+  });
   const setRow = (index: number, row: { alias: string; modelId: string }) => {
     onChange({ ...values, modelMap: values.modelMap.map((r, i) => (i === index ? row : r)) });
   };
+  const invalid = error
+    ? { withAria: false, 'aria-invalid': true, 'aria-describedby': errorId }
+    : {};
   return (
-    <Stack gap="xs">
+    <Stack gap="xs" ref={container}>
       <div>
         <Text size="sm" fw={500}>
           Model map
@@ -43,9 +62,11 @@ function ModelMapRows({
         <Group key={index} gap="xs" wrap="nowrap" align="flex-start">
           <TextInput
             size="md"
-            aria-label="Alias"
+            aria-label={`Alias, row ${String(index + 1)}`}
+            data-alias-row={index}
             placeholder="sonnet"
             value={row.alias}
+            {...invalid}
             onChange={(e) => {
               setRow(index, { ...row, alias: e.currentTarget.value });
             }}
@@ -53,9 +74,10 @@ function ModelMapRows({
           <TextInput
             size="md"
             style={{ flex: 1 }}
-            aria-label="Model ID"
+            aria-label={`Model ID, row ${String(index + 1)}`}
             placeholder="anthropic/claude-sonnet"
             value={row.modelId}
+            {...invalid}
             onChange={(e) => {
               setRow(index, { ...row, modelId: e.currentTarget.value });
             }}
@@ -64,8 +86,13 @@ function ModelMapRows({
             size={36}
             variant="subtle"
             color="gray"
-            aria-label={`Remove ${row.alias === '' ? 'blank' : row.alias} mapping`}
+            aria-label={
+              row.alias === ''
+                ? `Remove row ${String(index + 1)} mapping`
+                : `Remove ${row.alias} mapping`
+            }
             onClick={() => {
+              pendingFocus.current = index < values.modelMap.length - 1 ? index : 'add';
               onChange({ ...values, modelMap: values.modelMap.filter((_, i) => i !== index) });
             }}
           >
@@ -74,21 +101,22 @@ function ModelMapRows({
         </Group>
       ))}
       {error ? (
-        <Text size="xs" c="red" role="alert">
+        <Text id={errorId} size="xs" c="red" role="alert">
           {error}
         </Text>
       ) : null}
       <Group>
         <Button
+          ref={addButton}
           size="sm"
           variant="subtle"
           leftSection={<IconPlus size={16} stroke={1.5} />}
-          aria-label="Add model mapping"
           onClick={() => {
+            pendingFocus.current = values.modelMap.length;
             onChange({ ...values, modelMap: [...values.modelMap, { alias: '', modelId: '' }] });
           }}
         >
-          Add mapping
+          Add model mapping
         </Button>
       </Group>
     </Stack>

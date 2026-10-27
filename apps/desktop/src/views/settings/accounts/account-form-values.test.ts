@@ -39,7 +39,7 @@ describe('toAccountInput', () => {
       },
     },
     {
-      name: 'an API key with an empty cap omits it',
+      name: 'an API key with an empty cap sends no cap (null)',
       values: form('anthropic_api_key', { label: 'K' }),
       input: {
         kind: 'anthropic_api_key',
@@ -117,16 +117,23 @@ describe('toAccountInput', () => {
     expect(toAccountInput(values)).toEqual({ ok: true, input });
   });
 
-  it.each<{ name: string; values: AccountFormValues; errors: Record<string, RegExp> }>([
+  it.each<{ name: string; values: AccountFormValues; errors: Record<string, string> }>([
     {
       name: 'a gateway URL with credentials, onto baseUrl',
       values: form('gateway', { label: 'G', baseUrl: 'https://u:p@gw.example.com' }),
-      errors: { baseUrl: /no credentials/ },
+      errors: { baseUrl: 'Enter an https URL with no credentials, query or fragment' },
     },
     {
       name: 'a bad region, onto region',
       values: form('bedrock', { label: 'B', region: 'nowhere', awsProfile: 'p' }),
-      errors: { region: /AWS region/ },
+      errors: { region: 'Enter an AWS region such as us-west-2' },
+    },
+    {
+      name: 'a bad AWS profile, onto awsProfile',
+      values: form('bedrock', { label: 'B', region: 'us-west-2', awsProfile: 'bad profile' }),
+      errors: {
+        awsProfile: 'Enter an AWS profile name: letters, digits, dots, dashes or underscores',
+      },
     },
     {
       name: 'a capitalised alias, onto modelMap',
@@ -134,23 +141,76 @@ describe('toAccountInput', () => {
         label: 'S',
         modelMap: [{ alias: 'Sonnet', modelId: 'x' }],
       }),
-      errors: { modelMap: /model alias/ },
+      errors: { modelMap: 'Enter a lowercase alias such as sonnet and a model ID for each row' },
+    },
+    {
+      name: 'a blank model ID, onto modelMap',
+      values: form('claude_subscription', {
+        label: 'S',
+        modelMap: [{ alias: 'sonnet', modelId: '' }],
+      }),
+      errors: { modelMap: 'Enter a lowercase alias such as sonnet and a model ID for each row' },
+    },
+    {
+      name: 'a duplicate alias, onto modelMap',
+      values: form('claude_subscription', {
+        label: 'S',
+        modelMap: [
+          { alias: 'sonnet', modelId: 'a' },
+          { alias: 'sonnet', modelId: 'b' },
+        ],
+      }),
+      errors: { modelMap: 'Each alias can appear once' },
+    },
+    {
+      name: 'a capitalised offered alias, onto aliases',
+      values: form('claude_subscription', { label: 'S', aliases: ['Sonnet'] }),
+      errors: { aliases: 'Use lowercase aliases such as sonnet' },
     },
     {
       name: 'an empty label, onto label',
       values: form('claude_subscription', {}),
-      errors: { label: /.+/ },
+      errors: { label: 'Enter a label' },
     },
     {
       name: 'a lane cap of zero, onto laneCap',
       values: form('claude_subscription', { label: 'S', laneCap: '0' }),
-      errors: { laneCap: /.+/ },
+      errors: { laneCap: 'Enter a whole number from 1 to 16' },
+    },
+    {
+      name: 'an empty lane cap, onto laneCap',
+      values: form('claude_subscription', { label: 'S', laneCap: '' }),
+      errors: { laneCap: 'Enter a whole number from 1 to 16' },
+    },
+    {
+      name: 'a fractional lane cap, onto laneCap',
+      values: form('claude_subscription', { label: 'S', laneCap: '2.5' }),
+      errors: { laneCap: 'Enter a whole number from 1 to 16' },
+    },
+    {
+      name: 'a non-numeric monthly cap, onto monthlyCapUsd',
+      values: form('anthropic_api_key', { label: 'K', monthlyCapUsd: 'lots' }),
+      errors: { monthlyCapUsd: 'Enter a dollar amount above zero, or leave it empty' },
+    },
+    {
+      name: 'a zero monthly cap, onto monthlyCapUsd',
+      values: form('anthropic_api_key', { label: 'K', monthlyCapUsd: '0' }),
+      errors: { monthlyCapUsd: 'Enter a dollar amount above zero, or leave it empty' },
+    },
+    {
+      name: 'a payer over 200 characters, onto payer',
+      values: form('claude_subscription', { label: 'S', payer: 'x'.repeat(201) }),
+      errors: { payer: 'Keep the payer under 200 characters' },
+    },
+    {
+      name: 'an organization over 200 characters, onto organization',
+      values: form('anthropic_api_key', { label: 'K', organization: 'x'.repeat(201) }),
+      errors: { organization: 'Enter an organization of up to 200 characters, or leave it empty' },
     },
   ])('refuses $name', ({ values, errors }) => {
     const result = toAccountInput(values);
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    for (const [field, message] of Object.entries(errors))
-      expect(result.errors[field]).toMatch(message);
+    expect(result.errors).toEqual(errors);
   });
 });

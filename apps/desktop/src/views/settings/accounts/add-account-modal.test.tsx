@@ -106,8 +106,8 @@ describe('AddAccountModal', () => {
     type(dialog, 'Label', 'Router');
     type(dialog, 'Base URL', 'https://gw.example.com/v1');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Add model mapping' }));
-    type(dialog, 'Alias', 'sonnet');
-    type(dialog, 'Model ID', 'anthropic/claude-sonnet');
+    type(dialog, 'Alias, row 1', 'sonnet');
+    type(dialog, 'Model ID, row 1', 'anthropic/claude-sonnet');
     const tags = within(dialog).getByRole('combobox', { name: 'Offered aliases' });
     tags.focus();
     fireEvent.change(tags, { target: { value: 'sonnet' } });
@@ -143,6 +143,67 @@ describe('AddAccountModal', () => {
     type(dialog, 'Base URL', 'http://gw.example.com');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Create' }));
     expect(await within(dialog).findByText(/https URL/)).toBeTruthy();
+    expect(posts).toEqual([]);
+  });
+
+  it('names the modal’s close button', async () => {
+    serve();
+    fireEvent.click(await screen.findByRole('button', { name: 'Add account' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Add account' });
+    expect(within(dialog).getByRole('button', { name: 'Close' })).toBeTruthy();
+  });
+
+  it('returns focus to Add account when the new account’s drawer closes', async () => {
+    serve();
+    const add = await screen.findByRole('button', { name: 'Add account' });
+    const dialog = await openModal('Claude subscription');
+    type(dialog, 'Label', 'Company A');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Create' }));
+    const drawer = await screen.findByRole('dialog', { name: /Company A/ });
+    fireEvent.keyDown(drawer, { key: 'Escape' });
+    await waitFor(() => {
+      expect(document.activeElement).toBe(add);
+    });
+  });
+
+  it('moves focus through the model map rows as they are added and removed', async () => {
+    serve();
+    const dialog = await openModal('Claude subscription');
+    const add = within(dialog).getByRole('button', { name: 'Add model mapping' });
+    fireEvent.click(add);
+    expect(document.activeElement).toBe(
+      within(dialog).getByRole('textbox', { name: 'Alias, row 1' }),
+    );
+    type(dialog, 'Alias, row 1', 'sonnet');
+    fireEvent.click(add);
+    expect(document.activeElement).toBe(
+      within(dialog).getByRole('textbox', { name: 'Alias, row 2' }),
+    );
+    expect(within(dialog).getByRole('textbox', { name: 'Model ID, row 2' })).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove sonnet mapping' }));
+    expect(document.activeElement).toBe(
+      within(dialog).getByRole('textbox', { name: 'Alias, row 1' }),
+    );
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove row 1 mapping' }));
+    expect(document.activeElement).toBe(add);
+  });
+
+  it('ties a model map error to its rows', async () => {
+    const { posts } = serve();
+    const dialog = await openModal('Claude subscription');
+    type(dialog, 'Label', 'Company A');
+    const add = within(dialog).getByRole('button', { name: 'Add model mapping' });
+    fireEvent.click(add);
+    fireEvent.click(add);
+    for (const row of ['1', '2']) {
+      type(dialog, `Alias, row ${row}`, 'sonnet');
+      type(dialog, `Model ID, row ${row}`, 'x');
+    }
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Create' }));
+    const message = await within(dialog).findByText('Each alias can appear once');
+    const alias = within(dialog).getByRole('textbox', { name: 'Alias, row 1' });
+    expect(alias.getAttribute('aria-invalid')).toBe('true');
+    expect(alias.getAttribute('aria-describedby')).toBe(message.id);
     expect(posts).toEqual([]);
   });
 });
