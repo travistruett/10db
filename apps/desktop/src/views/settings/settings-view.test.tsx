@@ -53,10 +53,10 @@ describe('SettingsView', () => {
 
   it('says what a planned section will hold and which plan fills it', async () => {
     server.use(...baseHandlers());
-    renderApp('/settings/accounts');
-    expect(await screen.findByRole('heading', { name: 'Accounts', level: 3 })).toBeTruthy();
+    renderApp('/settings/team');
+    expect(await screen.findByRole('heading', { name: 'Team', level: 3 })).toBeTruthy();
     expect(screen.getByText(/Not built yet/)).toBeTruthy();
-    expect(screen.getByText(/accounts plan/)).toBeTruthy();
+    expect(screen.getByText(/team editor plan/)).toBeTruthy();
   });
 
   it('asks for a project before showing a project section', async () => {

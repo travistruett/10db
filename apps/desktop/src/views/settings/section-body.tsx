@@ -1,5 +1,6 @@
 import type { ProjectDto } from '@10db/contracts';
 import { Text, Title } from '@mantine/core';
+import { AccountsSection } from './accounts/accounts-section';
 import { BoardColumnsSection } from './board-columns-section';
 import { KeepAwakeSection } from './keep-awake-section';
 import { PlannedSection } from './planned-section';
@@ -57,9 +58,15 @@ export function SectionBody({
           <KeepAwakeSection />
         </>
       );
+    case SettingsSectionKey.Accounts:
+      return (
+        <>
+          {heading}
+          <AccountsSection />
+        </>
+      );
     case SettingsSectionKey.Team:
     case SettingsSectionKey.RoutingRules:
-    case SettingsSectionKey.Accounts:
     case SettingsSectionKey.Models:
     case SettingsSectionKey.PersonasAndFlows:
       return (

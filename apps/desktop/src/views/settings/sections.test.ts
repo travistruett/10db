@@ -28,7 +28,7 @@ describe('settings sections', () => {
     { key: 'keep-awake', planned: false },
     { key: 'team', planned: true },
     { key: 'routing-rules', planned: true },
-    { key: 'accounts', planned: true },
+    { key: 'accounts', planned: false },
     { key: 'models', planned: true },
     { key: 'personas-and-flows', planned: true },
   ])('marks $key planned: $planned', ({ key, planned }) => {
