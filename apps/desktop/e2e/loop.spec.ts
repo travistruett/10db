@@ -226,6 +226,12 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await expect(page.locator('html')).toHaveAttribute('data-mantine-color-scheme', 'light');
   for (const view of VIEWS) {
     await open(page, view);
+    if (view === 'Settings') {
+      // Axe must not scan rows that are still loading.
+      await expect(
+        page.getByRole('row', { name: /Client B/ }).getByText('Needs a secret'),
+      ).toBeVisible();
+    }
     await expectAccessible(page, `${view.toLowerCase()}, light`);
   }
   // The other task is still ready, so the sheet proposes it; close it without starting anything.

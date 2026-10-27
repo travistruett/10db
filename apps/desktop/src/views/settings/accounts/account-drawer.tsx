@@ -6,6 +6,7 @@ import {
   type AccountId,
 } from '@10db/contracts';
 import { Drawer, Stack, Text, Title } from '@mantine/core';
+import { useState } from 'react';
 import { useAccounts } from '../../../daemon/account-queries';
 import { ArchiveAccount } from './archive-account';
 import { EditAccountForm } from './edit-account-form';
@@ -22,8 +23,12 @@ function AccountDrawerBody({
   account,
   onClose,
   onArchived,
+  confirmingArchive,
+  onConfirmingArchiveChange,
 }: {
   readonly account: AccountDto;
+  readonly confirmingArchive: boolean;
+  readonly onConfirmingArchiveChange: (confirming: boolean) => void;
   readonly onClose: () => void;
   readonly onArchived: () => void;
 }) {
@@ -49,6 +54,8 @@ function AccountDrawerBody({
             <Title order={4}>Archive</Title>
             <ArchiveAccount
               account={account}
+              confirming={confirmingArchive}
+              onConfirmingChange={onConfirmingArchiveChange}
               onArchived={() => {
                 onArchived();
                 onClose();
@@ -82,11 +89,15 @@ export function AccountDrawer({
   readonly onArchived?: () => void;
 }) {
   const accounts = useAccounts();
+  // Mantine's Modal and Drawer both listen for Escape on the window, so the drawer must sit it out
+  // while the archive confirmation is open.
+  const [confirmingArchive, setConfirmingArchive] = useState(false);
   const account = accounts.data?.find((a) => a.id === accountId);
   return (
     <Drawer
       opened={opened}
       onClose={onClose}
+      closeOnEscape={!confirmingArchive}
       {...(onClosed ? { onExitTransitionEnd: onClosed } : {})}
       position="right"
       size="md"
@@ -97,6 +108,8 @@ export function AccountDrawer({
         <AccountDrawerBody
           key={account.id}
           account={account}
+          confirmingArchive={confirmingArchive}
+          onConfirmingArchiveChange={setConfirmingArchive}
           onClose={onClose}
           onArchived={onArchived ?? noop}
         />

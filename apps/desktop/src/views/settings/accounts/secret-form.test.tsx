@@ -122,6 +122,7 @@ describe('SecretForm', () => {
       expect(within(dialog).getByText('Secret set')).toBeTruthy();
     });
     expect(bodies).toEqual([{ secret: PASTED }]);
+    expect(within(dialog).getByText('Secret saved to your login Keychain.')).toBeTruthy();
     expect(within(dialog).getByRole('button', { name: 'Replace secret' })).toBeTruthy();
     expect(field(dialog).value).toBe('');
     assertNoSecret(queryClient);

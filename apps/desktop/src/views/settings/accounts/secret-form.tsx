@@ -4,7 +4,7 @@ import {
   type AccountDto,
   type SupportedAccountKind,
 } from '@10db/contracts';
-import { Alert, Badge, Button, Stack, TextInput } from '@mantine/core';
+import { Alert, Badge, Button, Stack, Text, TextInput } from '@mantine/core';
 import { useQueryClient } from '@tanstack/react-query';
 import { useState, type SubmitEvent } from 'react';
 import { ZodError } from 'zod';
@@ -106,6 +106,9 @@ export function SecretForm({ account }: { readonly account: AccountDto }) {
           spellCheck={false}
           autoCapitalize="off"
         />
+        {state.kind === 'saved' ? (
+          <Text size="sm">Secret saved to your login Keychain.</Text>
+        ) : null}
         {state.kind === 'failed' ? (
           <Alert color="red" role="alert" w="100%">
             {state.message}

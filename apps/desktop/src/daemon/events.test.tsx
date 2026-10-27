@@ -63,12 +63,12 @@ function listBeforeHead(
   };
 }
 
-/** Mounts an account's usage, so a session or account event has a query to refetch. */
 function AccountList() {
   useAccounts();
   return null;
 }
 
+/** Mounts an account's usage, so a session or account event has a query to refetch. */
 function UsageOf({ accountId }: { readonly accountId: AccountId }) {
   useAccountUsage(accountId);
   return null;

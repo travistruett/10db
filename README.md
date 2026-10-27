@@ -59,10 +59,11 @@ Add and manage accounts in Settings › Accounts:
 - **Add account** asks for a kind and a label (a metered account also takes a monthly cap). A second Claude
   subscription shows the sign-in command for its own config directory: run it in a terminal, then press
   **Check sign-in**. 10db shows the email it found, and **Confirm** records it as the account's identity.
-- A keyed account (an Anthropic API key) takes its secret in a password field. The secret goes to your login
-  Keychain, never to 10db's database, and the screen forgets it as soon as it is sent.
+- A keyed account (an Anthropic API key, a gateway's token or Bedrock on a bearer token) takes its secret in a
+  password field. The secret goes to your login Keychain, never to 10db's database, and the screen forgets it as
+  soon as it is sent. After a check, a keyed API-key or Bedrock account can **Require** the organization it found.
 - Select an account to edit its label, caps and settings, or to archive it. The table shows each account's kind,
-  verified identity and this month's usage against its cap.
+  recorded identity and this month's usage against its cap.
 
 The same routes exist on the daemon's API (`/accounts`).
 

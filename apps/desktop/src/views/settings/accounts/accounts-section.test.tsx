@@ -1,7 +1,8 @@
 import { AccountId, type AccountDto, type AccountUsageDto } from '@10db/contracts';
-import { fireEvent, screen, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
+import { accountKeys } from '../../../daemon/account-queries';
 import { accountDto, accountUsageDto, DEFAULT_ACCOUNT } from '../../../test/account-fixtures';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../../test/daemon';
 
@@ -16,7 +17,7 @@ function serve(accounts: AccountDto[], usage: Record<string, AccountUsageDto> = 
     ),
     ...baseHandlers(),
   );
-  renderApp('/settings/accounts');
+  return renderApp('/settings/accounts');
 }
 
 async function rowOf(label: string) {
@@ -130,5 +131,27 @@ describe('AccountsSection', () => {
   it('offers Add account above the table', async () => {
     serve([DEFAULT_ACCOUNT]);
     expect(await screen.findByRole('button', { name: 'Add account' })).toBeTruthy();
+  });
+
+  it('keeps the table, the open drawer and an edit in progress when a refetch fails', async () => {
+    const { queryClient } = serve([DEFAULT_ACCOUNT, accountDto({ label: 'Client key' })]);
+    const table = await screen.findByRole('table', { name: 'Accounts' });
+    fireEvent.click(await within(table).findByRole('button', { name: 'Open Client key' }));
+    const dialog = await screen.findByRole('dialog', { name: /Client key/ });
+    const label = await within(dialog).findByRole('textbox', { name: 'Label' });
+    fireEvent.change(label, { target: { value: 'Mid edit' } });
+    server.use(http.get(daemonUrl('/accounts'), () => new HttpResponse(null, { status: 500 })));
+    await queryClient.refetchQueries({ queryKey: accountKeys.all });
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      'Accounts could not be loaded. Check that the daemon is running.',
+    );
+    await waitFor(() => {
+      expect(queryClient.getQueryState(accountKeys.all)?.status).toBe('error');
+    });
+    expect(screen.getByRole('table', { name: 'Accounts' })).toBeTruthy();
+    expect(screen.getByRole('dialog', { name: /Client key/ })).toBeTruthy();
+    expect(
+      within(screen.getByRole('dialog')).getByRole('textbox', { name: 'Label' }),
+    ).toHaveProperty('value', 'Mid edit');
   });
 });

@@ -1,31 +1,35 @@
 import type { AccountDto } from '@10db/contracts';
 import { Alert, Button, Group, Modal, Stack, Text } from '@mantine/core';
-import { useState } from 'react';
 import { useArchiveAccount } from '../../../daemon/account-queries';
 
 /**
  * Archiving an account after a confirmation. The default account offers none: the daemon refuses it.
  * A refused archive shows the daemon's reason, which names the projects to move first.
+ * The confirmation's open state belongs to the caller, so the drawer around it can ignore the
+ * Escape that closes the confirmation.
  */
 export function ArchiveAccount({
   account,
+  confirming,
+  onConfirmingChange,
   onArchived,
 }: {
   readonly account: AccountDto;
+  readonly confirming: boolean;
+  readonly onConfirmingChange: (confirming: boolean) => void;
   readonly onArchived: () => void;
 }) {
-  const [confirming, setConfirming] = useState(false);
   const archive = useArchiveAccount();
   if (account.isDefault) return <Text c="dimmed">The default account can&apos;t be archived.</Text>;
   const name = account.label;
   const close = () => {
-    setConfirming(false);
+    onConfirmingChange(false);
     archive.reset();
   };
   const confirm = async () => {
     try {
       await archive.mutateAsync(account.id);
-      setConfirming(false);
+      onConfirmingChange(false);
       onArchived();
     } catch {
       // The mutation's error is shown in the modal.
@@ -38,7 +42,7 @@ export function ArchiveAccount({
         variant="outline"
         color="red"
         onClick={() => {
-          setConfirming(true);
+          onConfirmingChange(true);
         }}
       >
         Archive account

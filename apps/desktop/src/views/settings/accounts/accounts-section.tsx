@@ -1,6 +1,7 @@
 import type { AccountDto, AccountId } from '@10db/contracts';
 import {
   Accordion,
+  Alert,
   Badge,
   Button,
   Code,
@@ -143,12 +144,19 @@ export function AccountsSection() {
   const returnToAdd = useRef(false);
   const accounts = useAccounts();
   if (accounts.isPending) return <Text c="dimmed">Loading accounts…</Text>;
-  if (accounts.isError)
+  // A failed background refetch also sets isError while the last list is still here; that must not
+  // replace the table, the open drawer and an edit in progress.
+  if (accounts.data === undefined)
     return <Text c="red">Accounts could not be loaded. Check that the daemon is running.</Text>;
   const live = accounts.data.filter((a) => !a.archived);
   const archived = accounts.data.filter((a) => a.archived);
   return (
     <Stack maw={880}>
+      {accounts.isError ? (
+        <Alert color="red" role="alert">
+          Accounts could not be loaded. Check that the daemon is running.
+        </Alert>
+      ) : null}
       <Group justify="flex-end">
         <Button
           ref={addButton}

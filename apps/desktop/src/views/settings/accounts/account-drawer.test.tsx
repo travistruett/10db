@@ -668,6 +668,28 @@ describe('AccountDrawer', () => {
     });
   });
 
+  it('closes only the confirmation on Escape, keeping the drawer and sending nothing', async () => {
+    const account = accountDto({ label: 'Old client' });
+    const served = serve([DEFAULT_ACCOUNT, account]);
+    const dialog = await openDrawer('Old client');
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Archive account' }));
+    await screen.findByRole('dialog', { name: 'Archive Old client?' });
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Archive Old client?' })).toBeNull();
+    });
+    // A drawer closed by the same keypress would be gone once its exit transition has run.
+    await expect(
+      waitFor(
+        () => {
+          expect(screen.queryByRole('dialog', { name: /Old client/ })).toBeNull();
+        },
+        { timeout: 1000 },
+      ),
+    ).rejects.toThrow();
+    expect(served.archives).toEqual([]);
+  });
+
   it('shows the daemon’s reason when an archive is refused, and keeps the drawer open', async () => {
     const account = accountDto({ label: 'In use' });
     serve([DEFAULT_ACCOUNT, account], {
