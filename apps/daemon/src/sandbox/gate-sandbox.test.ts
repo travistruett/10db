@@ -8,6 +8,7 @@ import {
   realpathSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -332,6 +333,40 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
     expect(existsSync(file)).toBe(false);
     expect(existsSync(run.tmpDir)).toBe(false);
     expect(readdirSync(tmpRoot)).toEqual([]);
+  });
+
+  it.each([
+    ['cli', 'in the checkout', (): Partial<typeof RUNTIME> => ({ cli: join(checkout, 'srt.mjs') })],
+    [
+      'cli',
+      'linked from outside into the checkout',
+      (): Partial<typeof RUNTIME> => {
+        writeFileSync(join(checkout, 'srt.mjs'), '');
+        symlinkSync(join(checkout, 'srt.mjs'), join(root, 'srt.mjs'));
+        return { cli: join(root, 'srt.mjs') };
+      },
+    ],
+    [
+      'node',
+      'linked from the temp root',
+      (): Partial<typeof RUNTIME> => {
+        symlinkSync(process.execPath, join(tmpRoot, 'node'));
+        return { node: join(tmpRoot, 'node') };
+      },
+    ],
+  ])("refuses srt's %s %s: a project could swap it", async (_what, _where, place) => {
+    const runtime = { ...RUNTIME, ...place() };
+    const pending = createGateSandbox({
+      home,
+      dataDir,
+      loginConfigDir: null,
+      tmpRoot,
+      gitDirs: (path) => git.gitDirs(path),
+      systemPrefixes: [],
+      runtime,
+    }).forRun(input());
+    await expect(pending).rejects.toThrow(SandboxProfileError);
+    expect(readdirSync(tmpRoot).filter((name) => name.startsWith('10db-'))).toEqual([]);
   });
 
   it('leaves nothing behind when the profile is refused', async () => {

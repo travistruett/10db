@@ -1,12 +1,13 @@
-import { chmodSync, lstatSync, mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { PermissionRuleDto, ProjectDto } from '@10db/contracts';
 import { prepareCommandEnv } from './command-env';
 import { deniedEnvNames } from './env-allowlist';
 import { shellAssignments } from './env-file';
 import { singleQuoted } from './posix-quote';
-import { buildLaneProfile } from './profile';
-import { projectAccess, type ProjectAccessDeps } from './project-access';
+import { buildLaneProfile, SandboxProfileError } from './profile';
+import { projectAccess, projectWritableRoots, type ProjectAccessDeps } from './project-access';
+import { isEqualOrUnder } from './protected-reads';
 import { createSealedFile, removeSealedFile, type SealedFileKind } from './sealed-file';
 import { srtSettings } from './srt-settings';
 import { createLaneTempDir, LANE_TEMP_ROOT, removeAll, removeLaneTempDir } from './temp-dir';
@@ -80,6 +81,25 @@ function allowlisted(env: Readonly<Record<string, string>>): Record<string, stri
   return Object.fromEntries(Object.entries(env).filter(([name]) => !denied.has(name)));
 }
 
+/**
+ * Refuses an srt host or node that a project could write, as written or through a link: both run
+ * outside the sandbox, so one a project swapped would run its code unsandboxed.
+ */
+function checkRuntime(runtime: SandboxRuntime, writable: readonly string[]): void {
+  for (const [what, path] of [
+    ['node', runtime.node],
+    ['command line', runtime.cli],
+  ] as const) {
+    const spellings = existsSync(path) ? [path, realpathSync(path)] : [path];
+    if (spellings.some((spelling) => writable.some((root) => isEqualOrUnder(spelling, root)))) {
+      throw new SandboxProfileError(
+        'runtime',
+        `srt's ${what} lies where a project can write: ${path}`,
+      );
+    }
+  }
+}
+
 /** A `docker` that refuses, first on the gate's PATH, and records that the gate asked for it. */
 function writeDockerShim(binDir: string, marker: string): void {
   mkdirSync(binDir, { mode: 0o700 });
@@ -101,6 +121,7 @@ export function createGateSandbox(deps: GateSandboxDeps): GateSandbox {
   const tmpRoot = deps.tmpRoot ?? LANE_TEMP_ROOT;
   return {
     async forRun(input) {
+      checkRuntime(deps.runtime, projectWritableRoots(input.checkouts, tmpRoot));
       const access = await projectAccess(
         { ...deps, tmpRoot },
         {

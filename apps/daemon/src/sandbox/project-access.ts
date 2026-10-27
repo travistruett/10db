@@ -167,6 +167,17 @@ async function otherCheckoutsGitState(
   return denies.flat();
 }
 
+/** Every registered checkout and the sandbox temp root, as written and resolved: what a project can write. */
+export function projectWritableRoots(checkouts: readonly string[], tmpRoot: string): string[] {
+  return [...checkouts, tmpRoot].flatMap((path) => {
+    try {
+      return [path, realpathSync(path)];
+    } catch {
+      return [path];
+    }
+  });
+}
+
 /** Reads what one project's sandboxes are built from; nothing is created. */
 export async function projectAccess(
   deps: ProjectAccessDeps,
@@ -188,13 +199,7 @@ export async function projectAccess(
     }),
     ...MISE_SYSTEM_DIRS,
   ];
-  const untrustedRoots = [...input.checkouts, deps.tmpRoot].flatMap((path) => {
-    try {
-      return [path, realpathSync(path)];
-    } catch {
-      return [path];
-    }
-  });
+  const untrustedRoots = projectWritableRoots(input.checkouts, deps.tmpRoot);
   const toolchain = toolchainAccess(deps.home, input.env, protectedList, {
     untrustedRoots,
     ...(deps.systemPrefixes === undefined ? {} : { systemPrefixes: deps.systemPrefixes }),
