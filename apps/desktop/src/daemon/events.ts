@@ -1,9 +1,10 @@
-import { DaemonEvent, EventsHead } from '@10db/contracts';
+import { DaemonEvent, EventsHead, type EventType } from '@10db/contracts';
 import { useQueryClient, type QueryKey } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
 import { readJson } from './client';
 import type { DaemonConnection } from './connection';
 import { useDaemon } from './provider';
+import { accountKeys } from './account-queries';
 import { queryKeys } from './queries';
 
 export const STREAM_RETRY_BASE_MS = 500;
@@ -29,7 +30,7 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   handoff: WORK,
   evidence: WORK,
   // An account pause moves workstreams, which send their own events.
-  account: [queryKeys.accounts],
+  account: [accountKeys.all],
   inbox: [queryKeys.inbox, ['workstreams']],
   app_setting: [queryKeys.keepAwake],
   // Step plans, which only the batch sheet shows, follow these; no view reads `person`.
@@ -41,6 +42,12 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   routing_rules: [CANDIDATES],
   benchmarks: [CANDIDATES],
   // `proposal` (from proposal.resolved) has no view to refresh; the card that resolved it sends its own inbox event.
+};
+
+/** What to refetch for one event type, on top of its entity type's entries. */
+export const EVENT_INVALIDATIONS: Readonly<Partial<Record<EventType, readonly QueryKey[]>>> = {
+  // A session's tokens and dollars are recorded when it ends, not on its per-tool-call events.
+  'session.ended': [accountKeys.usage],
 };
 
 export function eventStreamUrl(conn: DaemonConnection, after: number): string {
@@ -87,7 +94,10 @@ export function useEventStream(onEvent?: (event: DaemonEvent) => void): void {
       // The daemon sends each seq once; a resend at a reconnect seam is ignored.
       if (lastSeq.current !== null && event.seq <= lastSeq.current) return;
       lastSeq.current = event.seq;
-      for (const queryKey of INVALIDATIONS[event.entityType] ?? [])
+      for (const queryKey of [
+        ...(INVALIDATIONS[event.entityType] ?? []),
+        ...(EVENT_INVALIDATIONS[event.type] ?? []),
+      ])
         void queryClient.invalidateQueries({ queryKey });
       listener.current?.(event);
     }

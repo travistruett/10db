@@ -3,7 +3,8 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
-import { accountDto, DEFAULT_ACCOUNT, projectDto } from '../../test/fixtures';
+import { accountDto, DEFAULT_ACCOUNT } from '../../test/account-fixtures';
+import { projectDto } from '../../test/fixtures';
 
 /** Opens a Select and picks an option from its own list (every Select keeps its options in the document). */
 async function pick(select: HTMLElement, option: string): Promise<void> {
@@ -52,10 +53,10 @@ describe('SettingsView', () => {
 
   it('says what a planned section will hold and which plan fills it', async () => {
     server.use(...baseHandlers());
-    renderApp('/settings/accounts');
-    expect(await screen.findByRole('heading', { name: 'Accounts', level: 3 })).toBeTruthy();
+    renderApp('/settings/team');
+    expect(await screen.findByRole('heading', { name: 'Team', level: 3 })).toBeTruthy();
     expect(screen.getByText(/Not built yet/)).toBeTruthy();
-    expect(screen.getByText(/accounts plan/)).toBeTruthy();
+    expect(screen.getByText(/team editor plan/)).toBeTruthy();
   });
 
   it('asks for a project before showing a project section', async () => {

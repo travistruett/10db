@@ -11,7 +11,7 @@ import type { ConnectionResolver, DaemonConnection } from '../daemon/connection'
 import { DaemonProvider, type DaemonIntervals } from '../daemon/provider';
 import { createAppRouter, type AppRouter } from '../router';
 import { cssVariablesResolver, theme } from '../theme';
-import { DEFAULT_ACCOUNT } from './fixtures';
+import { DEFAULT_ACCOUNT } from './account-fixtures';
 
 /** The daemon every UI test talks to, through MSW. */
 export const TEST_CONNECTION: DaemonConnection = {

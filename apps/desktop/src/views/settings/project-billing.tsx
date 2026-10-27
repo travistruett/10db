@@ -1,7 +1,8 @@
 import { AccountId, USAGE_HANDOFF_MAX, USAGE_HANDOFF_MIN, type ProjectDto } from '@10db/contracts';
 import { Alert, NumberInput, Select, Stack, Text } from '@mantine/core';
 import { useState } from 'react';
-import { useAccounts, usePatchProject } from '../../daemon/queries';
+import { useAccounts } from '../../daemon/account-queries';
+import { usePatchProject } from '../../daemon/queries';
 import { accountOptions } from './account-kind-label';
 
 const MIN_PCT = Math.round(USAGE_HANDOFF_MIN * 100);
