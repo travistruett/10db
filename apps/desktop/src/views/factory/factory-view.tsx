@@ -14,6 +14,7 @@ import {
 } from '@mantine/core';
 import { useState } from 'react';
 import { useCancelWorkstream, useRetryWorkstream, useWorkstreams } from '../../daemon/queries';
+import { BenchmarkSyncNote } from './benchmark-sync-note';
 import { ContextGauge } from './context-gauge';
 import { RelativeTime } from './relative-time';
 import { StateBadge } from './state-badge';
@@ -32,7 +33,10 @@ export function FactoryView() {
   return (
     <Stack>
       <Group justify="space-between">
-        <Title order={2}>Factory</Title>
+        <Group gap="md">
+          <Title order={2}>Factory</Title>
+          <BenchmarkSyncNote />
+        </Group>
         <Switch
           label="Show finished"
           checked={showFinished}

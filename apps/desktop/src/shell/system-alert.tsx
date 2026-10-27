@@ -1,17 +1,20 @@
 import { Alert, Stack } from '@mantine/core';
 import { IconAlertTriangle } from '@tabler/icons-react';
 import { useSystemCheck } from '../daemon/queries';
+import { syncNeedsBuilder } from './benchmark-sync-urgency';
 
 /**
- * What the daemon found that stops or degrades work: a missing tool, an unreadable login shell, or a failed
- * Artificial Analysis sync. Routing keeps the last good scores through a failed sync, so the alert says so.
+ * What the daemon found that stops or degrades work until the builder acts: a missing tool, an unreadable login
+ * shell, or an Artificial Analysis key that was refused. A sync failure that clears itself is a note in the
+ * Factory header instead.
  */
 export function SystemAlert() {
   const check = useSystemCheck().data;
   if (!check) return null;
   const missing = check.tools.filter((tool) => tool.required && tool.path === null);
   const warning = check.loginEnv.warning;
-  const benchmarkSync = check.benchmarkSync;
+  const benchmarkSync =
+    check.benchmarkSync && syncNeedsBuilder(check.benchmarkSync) ? check.benchmarkSync : null;
   const versionWarning = check.claudeCode.warning;
   if (missing.length === 0 && !warning && !benchmarkSync && !versionWarning) return null;
   const icon = <IconAlertTriangle size={20} stroke={1.5} />;
@@ -40,12 +43,9 @@ export function SystemAlert() {
         </Alert>
       )}
       {benchmarkSync && (
-        <Alert
-          color="yellow"
-          icon={icon}
-          title={`Artificial Analysis sync failed (${benchmarkSync.outcome})`}
-        >
-          {`${benchmarkSync.message}. Routing uses the last good scores until a sync succeeds.`}
+        <Alert color="yellow" icon={icon} title={benchmarkSync.message}>
+          Replace the key in the Keychain; the next sync reads it. Routing uses the last good scores
+          until a sync succeeds.
         </Alert>
       )}
       {versionAlert}
