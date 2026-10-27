@@ -930,7 +930,12 @@ describe('the checkout is the one pinned for it', () => {
       // checkout's own .git; the worktree's common dir is B/.git.
       const nested = join(repo.path, 'nested');
       execFileSync('git', ['init', '-q', '-b', 'main', nested], { env: isolatedGitEnv() });
-      for (const [key, value] of Object.entries(TEST_REPO_CONFIG))
+      // Its own identity: test repositories read no global config, and CI's machine has none.
+      for (const [key, value] of [
+        ...Object.entries(TEST_REPO_CONFIG),
+        ['user.name', 'nested'] as const,
+        ['user.email', 'nested@10db.invalid'] as const,
+      ])
         gitIn(nested, 'config', key, value);
       gitIn(nested, 'commit', '-q', '--allow-empty', '-m', 'b');
       const outside = tempDir('worktree-of-nested');
