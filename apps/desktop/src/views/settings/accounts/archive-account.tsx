@@ -1,5 +1,6 @@
 import type { AccountDto } from '@10db/contracts';
 import { Alert, Button, Group, Modal, Stack, Text } from '@mantine/core';
+import { useEffect } from 'react';
 import { useArchiveAccount } from '../../../daemon/account-queries';
 
 /**
@@ -20,6 +21,14 @@ export function ArchiveAccount({
   readonly onArchived: () => void;
 }) {
   const archive = useArchiveAccount();
+  // The caller keeps the flag, so it must not outlive this component (the account was archived
+  // elsewhere, or the drawer moved to another account).
+  useEffect(
+    () => () => {
+      onConfirmingChange(false);
+    },
+    [onConfirmingChange],
+  );
   if (account.isDefault) return <Text c="dimmed">The default account can&apos;t be archived.</Text>;
   const name = account.label;
   const close = () => {

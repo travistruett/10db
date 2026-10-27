@@ -61,7 +61,7 @@ Add and manage accounts in Settings › Accounts:
   **Check sign-in**. 10db shows the email it found, and **Confirm** records it as the account's identity.
 - A keyed account (an Anthropic API key, a gateway's token or Bedrock on a bearer token) takes its secret in a
   password field. The secret goes to your login Keychain, never to 10db's database, and the screen forgets it as
-  soon as it is sent. After a check, a keyed API-key or Bedrock account can **Require** the organization it found.
+  soon as it is sent. After a check, an API-key or Bedrock account that reports an organization can **Require** it.
 - Select an account to edit its label, caps and settings, or to archive it. The table shows each account's kind,
   recorded identity and this month's usage against its cap.
 

@@ -10,8 +10,16 @@ import {
   accountUsageDto,
   DEFAULT_ACCOUNT,
 } from '../../../test/account-fixtures';
-import { baseHandlers, daemonUrl, eventStream, renderApp, server } from '../../../test/daemon';
+import {
+  baseHandlers,
+  daemonUrl,
+  eventStream,
+  renderApp,
+  renderWithDaemon,
+  server,
+} from '../../../test/daemon';
 import { daemonEvent } from '../../../test/fixtures';
+import { AccountDrawer } from './account-drawer';
 
 interface Served {
   readonly patches: { id: string; body: unknown }[];
@@ -670,24 +678,53 @@ describe('AccountDrawer', () => {
 
   it('closes only the confirmation on Escape, keeping the drawer and sending nothing', async () => {
     const account = accountDto({ label: 'Old client' });
-    const served = serve([DEFAULT_ACCOUNT, account]);
-    const dialog = await openDrawer('Old client');
+    const archives: string[] = [];
+    const onClose = vi.fn();
+    server.use(
+      http.get(daemonUrl('/accounts'), () => HttpResponse.json([DEFAULT_ACCOUNT, account])),
+      http.get(daemonUrl('/accounts/:accountId/usage'), ({ params }) =>
+        HttpResponse.json(accountUsageDto({ accountId: AccountId.parse(params['accountId']) })),
+      ),
+      http.post(daemonUrl('/accounts/:accountId/archive'), ({ params }) => {
+        archives.push(String(params['accountId']));
+        return new HttpResponse(null, { status: 500 });
+      }),
+      ...baseHandlers(),
+    );
+    renderWithDaemon(<AccountDrawer accountId={account.id} opened onClose={onClose} />);
+    const dialog = await screen.findByRole('dialog', { name: /Old client/ });
     fireEvent.click(await within(dialog).findByRole('button', { name: 'Archive account' }));
     await screen.findByRole('dialog', { name: 'Archive Old client?' });
     fireEvent.keyDown(document.body, { key: 'Escape' });
     await waitFor(() => {
       expect(screen.queryByRole('dialog', { name: 'Archive Old client?' })).toBeNull();
     });
-    // A drawer closed by the same keypress would be gone once its exit transition has run.
-    await expect(
-      waitFor(
-        () => {
-          expect(screen.queryByRole('dialog', { name: /Old client/ })).toBeNull();
-        },
-        { timeout: 1000 },
-      ),
-    ).rejects.toThrow();
-    expect(served.archives).toEqual([]);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(archives).toEqual([]);
+  });
+
+  it('forgets an open confirmation when its account is archived elsewhere', async () => {
+    const first = accountDto({ label: 'First client' });
+    const second = accountDto({ label: 'Second client' });
+    const served = serve([DEFAULT_ACCOUNT, first, second]);
+    const dialog = await openDrawer('First client');
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Archive account' }));
+    await screen.findByRole('dialog', { name: 'Archive First client?' });
+    served.changeRemotely(first.id, { archived: true });
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Archive First client?' })).toBeNull();
+    });
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: /First client/ })).toBeNull();
+    });
+    const next = await openDrawer('Second client');
+    expect(within(next).getByRole('button', { name: 'Archive account' })).toBeTruthy();
+    expect(screen.queryByRole('dialog', { name: 'Archive Second client?' })).toBeNull();
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: /Second client/ })).toBeNull();
+    });
   });
 
   it('shows the daemon’s reason when an archive is refused, and keeps the drawer open', async () => {
