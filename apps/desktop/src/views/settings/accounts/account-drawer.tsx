@@ -1,7 +1,14 @@
-import { accountDisplayName, AccountKind, type AccountDto, type AccountId } from '@10db/contracts';
+import {
+  accountDisplayName,
+  AccountKind,
+  needsSecret,
+  type AccountDto,
+  type AccountId,
+} from '@10db/contracts';
 import { Drawer, Stack, Text, Title } from '@mantine/core';
 import { useAccounts } from '../../../daemon/account-queries';
 import { IdentityCheck } from './identity-check';
+import { SecretForm } from './secret-form';
 import { SignInSteps } from './sign-in-steps';
 import { UsageByProject } from './usage-by-project';
 
@@ -11,6 +18,7 @@ function AccountDrawerBody({ account }: { readonly account: AccountDto }) {
       <Stack gap="xs">
         <Title order={4}>Identity</Title>
         {account.kind === AccountKind.ClaudeSubscription ? <SignInSteps account={account} /> : null}
+        {needsSecret(account.kind, account.settings) ? <SecretForm account={account} /> : null}
         <IdentityCheck account={account} />
       </Stack>
       <Stack gap="xs">
