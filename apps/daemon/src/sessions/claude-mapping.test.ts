@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import { SANDBOXED } from '../../test/fixtures';
+import { sandboxedMcpServer } from '../../test/sandboxed-mcp';
 import {
   contextEvent,
   mapSdkMessage,
   resetsAtToDate,
-  STDIO_LAUNCHER,
   SUMMARY_CHARS,
   toHookOutput,
   toolBrief,
@@ -21,6 +22,7 @@ import {
   textBlock,
   toolUseBlock,
 } from './claude-test-support';
+import type { SessionMcpServer } from './types';
 
 const ctx = { pid: 4242 };
 
@@ -255,20 +257,31 @@ describe('permission and hook translation', () => {
 });
 
 describe('toSdkMcpServer', () => {
-  it('launches a stdio server through env -i, so it gets exactly the env 10db built', () => {
-    const config = toSdkMcpServer({
-      type: 'stdio',
-      command: 'npx',
-      args: ['-y', 'x'],
-      env: { PATH: '/usr/bin:/bin', HOME: '/h' },
-    });
-    expect(config).toEqual({
-      type: 'stdio',
-      command: STDIO_LAUNCHER,
-      args: ['-i', 'PATH=/usr/bin:/bin', 'HOME=/h', 'npx', '-y', 'x'],
-    });
-    // No `env` block: Claude Code would merge it over the session environment instead of replacing it.
-    expect(config).not.toHaveProperty('env');
+  // The sandboxed launch is made under a short root in the shared `/tmp`, which no sandbox can write.
+  it.skipIf(SANDBOXED)(
+    'hands Claude Code a stdio server only as its sandboxed launch, with no env block',
+    async () => {
+      const made = await sandboxedMcpServer({ command: 'npx', args: ['-y', 'x'], env: {} });
+      try {
+        const config = toSdkMcpServer(made.server);
+        expect(config).toEqual({
+          type: 'stdio',
+          command: '/usr/bin/env',
+          args: [...made.server.args],
+        });
+        // No `env` block: Claude Code would merge it over the session environment.
+        expect(config).not.toHaveProperty('env');
+      } finally {
+        made.cleanup();
+      }
+    },
+  );
+
+  it('takes no stdio server that skipped the sandbox', () => {
+    const unsandboxed = { type: 'stdio', command: 'npx', args: ['-y', 'x'], env: {} } as const;
+    // @ts-expect-error a stdio server reaches a session only through the lane sandbox
+    const server: SessionMcpServer = unsandboxed;
+    expect(server.type).toBe('stdio');
   });
 
   it('passes HTTP and SSE servers with their expanded headers, leaving out a block the repo did not declare', () => {

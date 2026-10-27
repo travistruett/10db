@@ -12,7 +12,8 @@ import { readRepoConfigFile, RepoConfigFileError } from './repo-config-file';
 /** 10db's own MCP server in every managed session. A repo server with this name never replaces it. */
 export const TENDB_MCP_SERVER = '10db';
 /**
- * The only session variables a stdio server gets without naming them in its config. Measured:
+ * The session variables a stdio server gets without naming them in its config, besides what its
+ * sandbox adds (the lane allowlist, its own temp dir and caches). Measured:
  * `npx -y @mantine/mcp-server` downloads, starts and lists its tools with these two alone. macOS adds
  * `__CF_USER_TEXT_ENCODING` inside the process itself under `env -i`; it is not a session variable.
  */
@@ -70,14 +71,31 @@ export type ProjectMcpServer =
       readonly type: 'stdio';
       readonly command: string;
       readonly args: readonly string[];
-      /** The server's whole environment: nothing else from the session reaches it. */
+      /** PATH, HOME and the approved variables; the lane sandbox adds its allowlist and nothing else. */
       readonly env: Readonly<Record<string, string>>;
     }
-  | {
-      readonly type: 'http' | 'sse';
-      readonly url: string;
-      readonly headers: Readonly<Record<string, string>> | null;
-    };
+  | RemoteMcpServer;
+
+/** A repo-declared http or sse server: Claude Code connects to it, so no process needs a sandbox. */
+export interface RemoteMcpServer {
+  readonly type: 'http' | 'sse';
+  readonly url: string;
+  readonly headers: Readonly<Record<string, string>> | null;
+}
+
+/** The approved servers by how they reach a session: a stdio one only through the lane sandbox. */
+export function splitProjectMcp(servers: Readonly<Record<string, ProjectMcpServer>>): {
+  readonly stdio: Readonly<Record<string, Extract<ProjectMcpServer, { type: 'stdio' }>>>;
+  readonly remote: Readonly<Record<string, RemoteMcpServer>>;
+} {
+  const stdio: Record<string, Extract<ProjectMcpServer, { type: 'stdio' }>> = {};
+  const remote: Record<string, RemoteMcpServer> = {};
+  for (const [name, server] of Object.entries(servers)) {
+    if (server.type === 'stdio') stdio[name] = server;
+    else remote[name] = server;
+  }
+  return { stdio, remote };
+}
 
 /** One server as the repo declares it, before approval or expansion. */
 export interface RepoMcpServer {
@@ -273,7 +291,7 @@ function expandMap(
   );
 }
 
-/** One approved server, expanded. A stdio server gets PATH, HOME and its declared `env`, and nothing else. */
+/** One approved server, expanded. A stdio server gets PATH, HOME and its declared `env`, plus its sandbox's allowlist. */
 function resolveServer(server: RepoMcpServer, scope: ExpandScope): ProjectMcpServer {
   const { name, declared } = server;
   if ('command' in declared) {
@@ -340,12 +358,19 @@ export function resolveProjectMcp(input: {
   return { servers, warnings: input.repo.warnings, pending, denied, failures };
 }
 
-/** A line for the session's prompt when repo servers are left out, so the agent doesn't hunt for their tools. */
-export function skippedServersNote(mcp: ProjectMcp): string | null {
+/**
+ * A line for the session's prompt when repo servers are left out, so the agent doesn't hunt for their
+ * tools. `unsandboxed` names approved stdio servers left out because the session has no lane sandbox.
+ */
+export function skippedServersNote(
+  mcp: ProjectMcp,
+  unsandboxed: readonly string[] = [],
+): string | null {
   const skipped = [
     ...mcp.pending.map((r) => `${r.name} (waiting for the builder's approval)`),
     ...mcp.denied.map((name) => `${name} (denied by the builder)`),
     ...mcp.failures.map((f) => `${f.name} (its config can't be used as written)`),
+    ...unsandboxed.map((name) => `${name} (it runs only in the lane sandbox, which is off)`),
   ];
   if (skipped.length === 0) return null;
   return (

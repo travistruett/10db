@@ -311,18 +311,21 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     // so nothing lane-written lies in it.
     laneRoots: opts.sandbox ? [opts.sandbox.tmpRoot ?? LANE_TEMP_ROOT] : [],
   });
+  // srt, which runs every gate and every repo stdio MCP server.
+  const runtime = opts.sandbox ? (opts.sandbox.runtime ?? resolveSandboxRuntime()) : null;
   // Shared by every gate: a task's, at its green run, and a batch's, at ship.
   const gate = createGateRunner({
-    sandbox: opts.sandbox
-      ? createGateSandbox({
-          home: homedir(),
-          dataDir: opts.dataDir,
-          loginConfigDir: launcher.loginConfigDir(),
-          gitDirs: (repo) => git.gitDirs(repo),
-          ...(opts.sandbox.tmpRoot === undefined ? {} : { tmpRoot: opts.sandbox.tmpRoot }),
-          runtime: opts.sandbox.runtime ?? resolveSandboxRuntime(),
-        })
-      : null,
+    sandbox:
+      opts.sandbox && runtime
+        ? createGateSandbox({
+            home: homedir(),
+            dataDir: opts.dataDir,
+            loginConfigDir: launcher.loginConfigDir(),
+            gitDirs: (repo) => git.gitDirs(repo),
+            ...(opts.sandbox.tmpRoot === undefined ? {} : { tmpRoot: opts.sandbox.tmpRoot }),
+            runtime,
+          })
+        : null,
     logger: logger.child({ component: 'gate' }),
   });
   const answerGit = createGitCardAnswers(git);
@@ -477,15 +480,17 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     home: homedir(),
     loginConfigDir: launcher.loginConfigDir(),
   });
-  const laneSandbox = opts.sandbox
-    ? createLaneSandbox({
-        home: homedir(),
-        dataDir: opts.dataDir,
-        loginConfigDir: launcher.loginConfigDir(),
-        gitDirs: (repo) => git.gitDirs(repo),
-        ...(opts.sandbox.tmpRoot === undefined ? {} : { tmpRoot: opts.sandbox.tmpRoot }),
-      })
-    : null;
+  const laneSandbox =
+    opts.sandbox && runtime
+      ? createLaneSandbox({
+          home: homedir(),
+          dataDir: opts.dataDir,
+          loginConfigDir: launcher.loginConfigDir(),
+          gitDirs: (repo) => git.gitDirs(repo),
+          ...(opts.sandbox.tmpRoot === undefined ? {} : { tmpRoot: opts.sandbox.tmpRoot }),
+          runtime,
+        })
+      : null;
   const createdRunner = createRunner({
     protectedPaths: guarded,
     laneSandbox,

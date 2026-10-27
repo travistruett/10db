@@ -3,9 +3,16 @@ import { prepareCommandEnv } from './command-env';
 import { deniedEnvNames } from './env-allowlist';
 import { createLaneEnvFile, removeLaneEnvFile } from './env-file';
 import { claudeProtectedPaths, type FileAccessContext } from './file-access';
+import {
+  sandboxMcpServers,
+  type McpSandboxes,
+  type SandboxedMcpServer,
+  type StdioMcpServer,
+} from './mcp-sandbox';
 import { buildLaneProfile, type LaneSandboxSettings } from './profile';
 import { projectAccess, type ProjectAccessDeps } from './project-access';
 import { isEqualOrUnder } from './protected-reads';
+import type { SandboxRuntime } from './srt-launch';
 import { createLaneTempDir, LANE_TEMP_ROOT, removeAll, removeLaneTempDir } from './temp-dir';
 
 /** What a sandboxed session hands Claude Code on top of its ordinary options. */
@@ -24,8 +31,10 @@ export interface LaneSession {
   /** A live view: `providerSessionId` follows `setProviderSession`. */
   readonly fileAccess: FileAccessContext;
   readonly tmpDir: string;
+  /** The repo's approved stdio servers, each launched under srt in a sandbox of its own. */
+  readonly mcpServers: Readonly<Record<string, SandboxedMcpServer>>;
   setProviderSession(id: string): void;
-  /** Removes the temp dir. Run it once the lane process is gone. */
+  /** Removes the temp dirs and files, the servers' too. Run it once the lane process is gone. */
   dispose(): void;
 }
 
@@ -43,6 +52,8 @@ export interface LaneSessionInput {
    * before the toolchain is read: no lane can change another's profile or refuse its session.
    */
   readonly checkouts: readonly string[];
+  /** The repo's approved stdio MCP servers, expanded: each runs under srt, never as written. */
+  readonly mcpServers: Readonly<Record<string, StdioMcpServer>>;
 }
 
 export interface LaneSandbox {
@@ -52,6 +63,8 @@ export interface LaneSandbox {
 export interface LaneSandboxDeps extends Omit<ProjectAccessDeps, 'tmpRoot'> {
   /** Where temp dirs are made; tests pass a short temp root. */
   readonly tmpRoot?: string;
+  /** srt, which runs the repo's stdio MCP servers. */
+  readonly runtime: SandboxRuntime;
 }
 
 /** Removes a session's env file and temp dir; see `removeAll`. */
@@ -93,6 +106,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
       const secretFiles = [...access.checkoutSecrets, ...toolchain.secretFiles];
       const tmpDir = createLaneTempDir(tmpRoot);
       let envFile: string | null = null;
+      let mcp: McpSandboxes | null = null;
       try {
         const commandEnv = prepareCommandEnv(tmpDir, deps.home, input.env);
         // Claude Code strips some of these from a sandboxed command's env; the shell sets every one
@@ -130,6 +144,16 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
         const deniedToFileTools = protectedList.filter(
           (path) => !isEqualOrUnder(input.configDir, path),
         );
+        mcp = sandboxMcpServers({
+          access,
+          home: deps.home,
+          tmpRoot,
+          runtime: deps.runtime,
+          loopback: input.project.sandboxLoopback,
+          env: input.env,
+          checkouts: input.checkouts,
+          servers: input.mcpServers,
+        });
         const claudeProtected = claudeProtectedPaths(checkout);
         const spec: LaneSandboxSpec = {
           settings,
@@ -165,23 +189,44 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           },
         };
         const ownEnvFile = envFile;
+        const ownMcp = mcp;
         let disposed = false;
         return {
           spec,
           fileAccess,
           tmpDir,
+          mcpServers: ownMcp.servers,
           setProviderSession(id) {
             providerSessionId = id;
           },
           dispose() {
             if (disposed) return;
             disposed = true;
-            removeLaneFiles(ownEnvFile, tmpDir, tmpRoot);
+            removeAll([
+              () => {
+                ownMcp.dispose();
+              },
+              () => {
+                removeLaneFiles(ownEnvFile, tmpDir, tmpRoot);
+              },
+            ]);
           },
         };
       } catch (error) {
         try {
-          removeLaneFiles(envFile, tmpDir, tmpRoot);
+          const made = mcp;
+          removeAll([
+            ...(made === null
+              ? []
+              : [
+                  () => {
+                    made.dispose();
+                  },
+                ]),
+            () => {
+              removeLaneFiles(envFile, tmpDir, tmpRoot);
+            },
+          ]);
         } catch {
           // The error that stopped the session is the one to report.
         }

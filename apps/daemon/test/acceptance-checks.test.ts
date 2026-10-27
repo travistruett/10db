@@ -394,7 +394,7 @@ describe('runAcceptanceChecks', () => {
 });
 
 describe('checkServerEnv', () => {
-  // What `ps -E` showed for `env -i PATH=… HOME=… npx -y @mantine/mcp-server@9.7.2`.
+  // What `ps -E` showed for `env -i PATH=… HOME=… npx -y @mantine/mcp-server@9.7.2`, before its sandbox.
   const MEASURED = [
     '_',
     '__CF_USER_TEXT_ENCODING',
@@ -413,6 +413,21 @@ describe('checkServerEnv', () => {
 
   it('passes PATH, HOME and the keys npm and macOS add', () => {
     expect(checkServerEnv('mantine', MEASURED)).toMatchObject({ ok: true });
+  });
+
+  it('passes the lane allowlist and the variables its sandbox sets', () => {
+    const sandboxed = [
+      ...MEASURED,
+      'LANG',
+      'TMPDIR',
+      'TENDB_SANDBOX',
+      'GIT_CONFIG_GLOBAL',
+      'XDG_CONFIG_HOME',
+      'MISE_CONFIG_DIR',
+      'CARGO_HOME',
+      'pnpm_config_store_dir',
+    ];
+    expect(checkServerEnv('mantine', sandboxed)).toMatchObject({ ok: true });
   });
 
   it.each([

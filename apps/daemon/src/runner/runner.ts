@@ -118,6 +118,7 @@ import {
   resolveProjectMcp,
   SessionEndReason,
   skippedServersNote,
+  splitProjectMcp,
   type ProjectMcp,
   type RepoMcp,
   type SessionAdapter,
@@ -919,7 +920,12 @@ export function createRunner(opts: RunnerOptions): Runner {
     // The repo's MCP servers expand from the project env: an account's credential never reaches them.
     // A file 10db can't parse fails here too.
     const projectMcp = readProjectMcp(project, id, opts.launcher.projectEnv());
-    const mcpNote = skippedServersNote(projectMcp);
+    // A stdio server runs only under the lane sandbox; with none, it is left out and named.
+    const mcpServers = splitProjectMcp(projectMcp.servers);
+    const mcpNote = skippedServersNote(
+      projectMcp,
+      opts.laneSandbox ? [] : Object.keys(mcpServers.stdio),
+    );
     // A resumed session continues its conversation, so it keeps whether that conversation began from
     // a briefing and the briefing's baseline. A fresh session is briefed only when its prompt carries
     // the handoff.
@@ -945,6 +951,7 @@ export function createRunner(opts: RunnerOptions): Runner {
           resumeProviderSessionId: resumeId,
           configDir,
           checkouts: listProjects(db).map((each) => each.repoPath),
+          mcpServers: mcpServers.stdio,
         });
       } catch (error) {
         releaseStart();
@@ -1100,7 +1107,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         resumeProviderSessionId: resumeId,
         env: launch.env,
         account: launch.expect,
-        projectMcpServers: projectMcp.servers,
+        projectMcpServers: { ...mcpServers.remote, ...laneSession?.mcpServers },
         sandbox: laneSession?.spec ?? null,
         allowedTools: allowedToolsFor(
           project,

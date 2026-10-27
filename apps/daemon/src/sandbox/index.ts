@@ -32,8 +32,9 @@ export {
   type GateRun,
   type GateRunInput,
   type GateSandbox,
-  type SandboxRuntime,
 } from './gate-sandbox';
+export type { SandboxedMcpServer, StdioMcpServer } from './mcp-sandbox';
+export type { SandboxRuntime } from './srt-launch';
 export {
   createLaneSandbox,
   type LaneSandbox,

@@ -103,10 +103,10 @@ describe('MCP approval cards', () => {
       'Sets: NODE_OPTIONS="--require ./.tools/x.js", PATH=./.tools:/usr/bin:/bin',
     );
     expect(card.body).toContain('Its env block replaces PATH');
-    expect(card.body).not.toContain('It gets PATH and HOME');
+    expect(card.body).not.toContain('It gets the variables lane commands get');
   });
 
-  it('says a stdio server gets PATH and HOME when its env block touches neither', () => {
+  it('says what a stdio server gets and that it runs in the sandbox, with no network, when its env block touches neither PATH nor HOME', () => {
     const project = seedProject(store);
     const card = requestMcpApproval(
       inbox,
@@ -122,7 +122,13 @@ describe('MCP approval cards', () => {
       }),
     );
     expect(card.body).toContain('Sets: LEVEL=info');
-    expect(card.body).toContain('It gets PATH and HOME, plus what its env block sets');
+    expect(card.body).toContain(
+      'It gets the variables lane commands get, with no credentials, plus what its env block sets.',
+    );
+    expect(card.body).toContain(
+      'It runs in a sandbox: it reads what lane commands read, writes only its own temp dir and reaches no host',
+    );
+    expect(card.body).toContain("such as npx -y for a package the repo doesn't install");
     expect(card.body).not.toContain('replaces');
   });
 

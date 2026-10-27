@@ -33,6 +33,7 @@ import { createGit } from '../src/git';
 import { judgeToolUse, protectedPaths } from '../src/guard';
 import { createInboxService, createPermissionBroker } from '../src/inbox';
 import { createLogger } from '../src/log';
+import { resolveSandboxRuntime } from '../src/paths';
 import { allowedToolsFor } from '../src/permissions';
 import {
   createLaneSandbox,
@@ -40,6 +41,7 @@ import {
   fileAccessJudge,
   removeLaneTempDir,
   type LaneSession,
+  type StdioMcpServer,
 } from '../src/sandbox';
 import { createClaudeAdapter, type SessionEvent } from '../src/sessions';
 import { isolatedGitEnv, seedWorkstream, TEST_REPO_CONFIG } from './fixtures';
@@ -187,6 +189,10 @@ async function runLane(opts: {
   readonly prompt: string;
   /** Hosts the project has allowed, as stored rules: the profile lists them. */
   readonly hosts?: readonly string[];
+  /** Approved repo stdio servers, launched under srt as the runner launches them. */
+  readonly mcpServers?: Readonly<Record<string, StdioMcpServer>>;
+  /** Tools allowed without a card on top of the lane's own, such as a repo server's. */
+  readonly extraAllowedTools?: readonly string[];
 }): Promise<LaneRun> {
   const login = await captureLoginEnv({ inherited: process.env });
   const claudePath = findClaude();
@@ -240,6 +246,7 @@ async function runLane(opts: {
     dataDir: opts.dataDir,
     loginConfigDir: launcher.loginConfigDir(),
     gitDirs: (repo) => createGit().gitDirs(repo),
+    runtime: resolveSandboxRuntime(),
   });
   let laneSession: LaneSession | null = null;
   try {
@@ -253,6 +260,7 @@ async function runLane(opts: {
       resumeProviderSessionId: null,
       configDir,
       checkouts: [opts.checkout],
+      mcpServers: opts.mcpServers ?? {},
     });
     const lane = laneSession;
     const envFile = lane.spec.env['CLAUDE_ENV_FILE'];
@@ -307,11 +315,14 @@ async function runLane(opts: {
       resumeProviderSessionId: null,
       env,
       account: launch.expect,
-      projectMcpServers: {},
+      projectMcpServers: lane.mcpServers,
       sandbox: lane.spec,
-      allowedTools: allowedToolsFor(run.project, ToolAccess.Edit, {
-        sandboxed: { checkout: opts.checkout },
-      }),
+      allowedTools: [
+        ...allowedToolsFor(run.project, ToolAccess.Edit, {
+          sandboxed: { checkout: opts.checkout },
+        }),
+        ...(opts.extraAllowedTools ?? []),
+      ],
       // Nothing listens here; the session runs without 10db's tools.
       mcp: { url: 'http://127.0.0.1:9/mcp', token: 'unused', toolTimeoutMs: 5_000 },
       preToolUse: (req) => {
@@ -406,6 +417,55 @@ function envProbes(env: Readonly<Record<string, string>>): string[] {
 function probeLine(output: string, prefix: string): string | undefined {
   return output.split('\n').find((line) => line.startsWith(prefix));
 }
+
+/**
+ * A stdio MCP server with one tool, `check`, which reports what it could reach. Newline-delimited
+ * JSON-RPC, as Claude Code speaks it over stdio.
+ */
+const MCP_PROBE_SERVER = `
+import { readFileSync, writeFileSync } from 'node:fs';
+import { connect } from 'node:net';
+import { join } from 'node:path';
+import { createInterface } from 'node:readline';
+const [canary, mark] = process.argv.slice(2);
+const attempt = (fn) => { try { fn(); return 'ok'; } catch { return 'denied'; } };
+const reach = () => new Promise((resolve) => {
+  const socket = connect(443, '1.1.1.1');
+  socket.setTimeout(5000, () => { socket.destroy(); resolve('denied'); });
+  socket.on('connect', () => { socket.destroy(); resolve('ok'); });
+  socket.on('error', () => resolve('denied'));
+});
+const send = (message) => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', ...message }) + '\\n');
+for await (const line of createInterface({ input: process.stdin })) {
+  const request = JSON.parse(line);
+  if (request.id === undefined) continue;
+  if (request.method === 'initialize') {
+    send({ id: request.id, result: {
+      protocolVersion: request.params.protocolVersion,
+      capabilities: { tools: {} },
+      serverInfo: { name: 'probe', version: '1.0.0' },
+    } });
+  } else if (request.method === 'tools/list') {
+    send({ id: request.id, result: { tools: [{
+      name: 'check',
+      description: 'Reports what this server can reach.',
+      inputSchema: { type: 'object', properties: {} },
+    }] } });
+  } else if (request.method === 'tools/call') {
+    const text = [
+      mark,
+      'canary=' + attempt(() => readFileSync(canary)),
+      'write-checkout=' + attempt(() => writeFileSync('mcp-wrote', 'x')),
+      'gh-token=' + (process.env.GH_TOKEN === undefined ? 'unset' : 'set'),
+      'network=' + (await reach()),
+      'write-temp=' + attempt(() => writeFileSync(join(process.env.TMPDIR, 'x'), 'x')),
+    ].join(' ');
+    send({ id: request.id, result: { content: [{ type: 'text', text }] } });
+  } else {
+    send({ id: request.id, error: { code: -32601, message: 'method not found' } });
+  }
+}
+`;
 
 // Runs real Claude Code on the builder's default account, through the logged-in claude; never in CI.
 /** The read-only git a lane runs, which must work with the git dir read-only to it. */
@@ -649,6 +709,52 @@ describe.skipIf(!live)('lane sandbox, live', () => {
         expect.soft(probeLine(run.probeOutput, `${name}=`), name).not.toBe(`${name}=0`);
       expect.soft(lstatSync(join(checkout, '.git')).isFile()).toBe(true);
       expect.soft(readFileSync(join(checkout, '.git'), 'utf8')).toBe(`gitdir: ${gitDir}\n`);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 300_000);
+
+  it('runs an approved repo stdio MCP server under srt, and Claude Code calls its tool through it', async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), '10db-live-')));
+    try {
+      const checkout = join(root, 'repo');
+      initRepo(checkout);
+      const dataDir = join(root, 'data');
+      mkdirSync(dataDir);
+      // Under the user's temp dir, which no sandbox profile opens.
+      const canary = plant('mcp-outside', join(root, 'canary'));
+      const mark = `MARK-${randomUUID()}`;
+      writeFileSync(join(checkout, 'mcp-probe.mjs'), MCP_PROBE_SERVER);
+      const run = await runLane({
+        checkout,
+        dataDir,
+        extraEnv: { GH_TOKEN: `ghp_${randomUUID()}` },
+        probe: () => 'true\n',
+        mcpServers: {
+          probe: { command: 'node', args: ['mcp-probe.mjs', canary.path, mark], env: {} },
+        },
+        extraAllowedTools: ['mcp__probe__check'],
+        prompt: [
+          'This is a sandbox check. Call the MCP tool mcp__probe__check once, with no arguments, and nothing else.',
+          'Then reply with the single word: done',
+        ].join('\n'),
+      });
+      report('mcp-server', run, [canary]);
+
+      expect(run.events.at(-1)).toMatchObject({ type: 'ended', reason: 'stopped' });
+      const check = run.calls.find((call) => call.name === 'mcp__probe__check');
+      expect(check?.isError).toBe(false);
+      expect(run.transcript).toContain(mark);
+      expect(run.transcript).not.toContain(canary.token);
+      for (const probe of [
+        'canary=denied',
+        'write-checkout=denied',
+        'gh-token=unset',
+        'network=denied',
+        'write-temp=ok',
+      ])
+        expect.soft(run.transcript, probe).toContain(probe);
+      expect(existsSync(join(checkout, 'mcp-wrote'))).toBe(false);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

@@ -16,6 +16,7 @@ import { mintId } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   createTempRepo,
+  FAKE_SRT,
   isolatedGitEnv,
   SANDBOXED,
   tempDir,
@@ -57,6 +58,7 @@ function sandbox(
     gitDirs: overrides.gitDirs ?? ((path) => git.gitDirs(path)),
     // Hermetic: the machine's own install prefixes add no deny.
     systemPrefixes: [],
+    runtime: FAKE_SRT,
   });
 }
 
@@ -68,6 +70,7 @@ function input(overrides: Partial<LaneSessionInput> = {}): LaneSessionInput {
     resumeProviderSessionId: null,
     configDir: join(home, '.claude'),
     checkouts: [repo.path],
+    mcpServers: {},
     ...overrides,
   };
 }
