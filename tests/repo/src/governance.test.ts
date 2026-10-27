@@ -53,7 +53,7 @@ describe('rulesets', () => {
     ]);
   });
 
-  it('protects main with no bypass: PRs, squash, linear, signed, no force push', () => {
+  it('protects main with no bypass: PRs, squash, linear, no force push', () => {
     const main = byName('main-protection');
     expect(main?.bypass_actors).toEqual([]);
     expect(main?.rules.map((r) => r.type).sort()).toEqual([
@@ -61,7 +61,6 @@ describe('rulesets', () => {
       'non_fast_forward',
       'pull_request',
       'required_linear_history',
-      'required_signatures',
       'required_status_checks',
     ]);
     expect(rule(main, 'pull_request')?.parameters).toEqual({
