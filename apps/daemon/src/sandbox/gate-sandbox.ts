@@ -157,12 +157,17 @@ export function createGateSandbox(deps: GateSandboxDeps): GateSandbox {
           deniedEnvNames: [],
         });
         // Set inside the sandbox, after srt's own variables: `env` there replaces PATH and drops
-        // the host's temp variable, and the command never sees the host's env otherwise.
+        // the host's temp variable, and the command never sees the host's env otherwise. srt exits
+        // 0 when its own child dies by TERM or INT, so the command is never that child: the shell
+        // srt starts waits for it and exits with a status, and its traps turn a TERM or INT it is
+        // sent itself (from the gate's own group or from srt) into a failing one.
         const inner = [
-          'exec /usr/bin/env -u CLAUDE_CODE_TMPDIR',
+          "trap 'exit 143' TERM; trap 'exit 130' INT;",
+          '/usr/bin/env -u CLAUDE_CODE_TMPDIR',
           ...shellAssignments(commandEnv),
           '/bin/sh -c',
           singleQuoted(input.command),
+          '; exit $?',
         ].join(' ');
         settingsFile = createSealedFile(
           tmpRoot,

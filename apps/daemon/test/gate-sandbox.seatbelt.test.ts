@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:net';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -212,6 +212,40 @@ describe.skipIf(!SEATBELT)('the gate under the sandbox (Seatbelt)', () => {
       ),
     ).toEqual({ loopback: 'ok' });
   }, 120_000);
+
+  // srt exits 0 when its own child dies by TERM or INT: none of these may pass.
+  it.each([
+    ['the gate kills its own group with TERM', 'echo partial; kill -TERM 0; sleep 5'],
+    ['the gate kills itself with INT', 'echo partial; kill -INT $$'],
+    ['the gate kills itself with TERM', 'echo partial; kill -TERM $$'],
+  ])(
+    'fails when %s',
+    async (_name, command) => {
+      const result = await run(command);
+      expect(result.exitCode, result.tail).not.toBe(0);
+      expect(result.tail).toContain('partial');
+    },
+    60_000,
+  );
+
+  it('fails a gate whose srt is sent SIGTERM from outside', async () => {
+    const started = join(checkout, `started-${randomBytes(4).toString('hex')}`);
+    let srt = 0;
+    const pending = run(`touch ${started}; sleep 3; echo finished`, {
+      onSpawn: (pid) => {
+        srt = pid;
+      },
+    });
+    const deadline = Date.now() + 30_000;
+    while (!existsSync(started)) {
+      if (Date.now() > deadline) throw new Error('the gate never started');
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    process.kill(srt, 'SIGTERM');
+    const result = await pending;
+    rmSync(started, { force: true });
+    expect(result.exitCode, result.tail).not.toBe(0);
+  }, 60_000);
 
   it('fails a gate that needs Docker, and its evidence says why', async () => {
     const result = await run('docker ps');

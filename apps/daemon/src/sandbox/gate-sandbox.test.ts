@@ -93,14 +93,24 @@ function settingsOf(run: GateRun): {
 }
 
 /** Runs the command srt would run inside the sandbox, here without one: its env and shell setup. */
-function runInner(run: GateRun): { stdout: string; stderr: string; status: number | null } {
+function runInner(run: GateRun): {
+  stdout: string;
+  stderr: string;
+  status: number | null;
+  signal: NodeJS.Signals | null;
+} {
   const inner = run.args[run.args.indexOf('-c') + 1] ?? '';
   const result = spawnSync('/bin/bash', ['-c', inner], {
     cwd: run.cwd,
     env: run.env,
     encoding: 'utf8',
   });
-  return { stdout: result.stdout, stderr: result.stderr, status: result.status };
+  return {
+    stdout: result.stdout,
+    stderr: result.stderr,
+    status: result.status,
+    signal: result.signal,
+  };
 }
 
 beforeEach(() => {
@@ -286,6 +296,19 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
     await expect(sandbox().forRun(input({ env }))).rejects.toThrow(/LANG/);
     await expect(sandbox().forRun(input({ env }))).rejects.not.toThrow(/secret/);
     expect(readdirSync(tmpRoot)).toEqual([]);
+  });
+
+  // srt exits 0 when its own child dies by TERM or INT, so that child must never be the command.
+  it.each([
+    ['TERM', 143],
+    ['INT', 130],
+  ])('exits non-zero, never by signal, when the command dies by SIG%s', async (signal, code) => {
+    await withRun(input({ command: `echo partial; kill -${signal} $$` }), (run) => {
+      const result = runInner(run);
+      expect(result.stdout).toBe('partial\n');
+      expect(result.signal).toBeNull();
+      expect(result.status).toBe(code);
+    });
   });
 
   it('refuses Docker: its CLI says so, and the run records that the gate wanted it', async () => {
