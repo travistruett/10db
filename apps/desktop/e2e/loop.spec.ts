@@ -158,7 +158,7 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
     'Done cards stay where they finished; they can’t be dragged',
   );
 
-  // Settings: add a human column, and a planned section says it is not built yet.
+  // Settings: add a human column, a planned section says it is not built yet, and accounts work.
   await open(page, 'Settings');
   await expectAccessible(page, 'settings, general, dark');
   await page.getByRole('link', { name: /Board columns/ }).click();
@@ -174,6 +174,50 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await expectAccessible(page, 'settings, board columns, dark');
   await page.getByRole('link', { name: /Team/ }).click();
   await expect(page.getByText('Not built yet')).toBeVisible();
+
+  // Accounts: the default account is Ready only because the loop above already ran a task; the first
+  // session's probe recorded its identity (the fake adapter reports builder@example.com).
+  await page.getByRole('link', { name: /Accounts/ }).click();
+  const accounts = page.getByRole('table', { name: 'Accounts' });
+  await expect(accounts.getByRole('row', { name: /Claude plan/ }).getByText('Ready')).toBeVisible();
+  await expectAccessible(page, 'settings, accounts, dark');
+
+  // A second subscription: its drawer names the config directory to sign in to.
+  await page.getByRole('button', { name: 'Add account' }).click();
+  const addAccount = page.getByRole('dialog', { name: 'Add account' });
+  await addAccount.getByRole('textbox', { name: 'Label' }).fill('Company A');
+  await addAccount.getByRole('button', { name: 'Create' }).click();
+  await expect(addAccount).toBeHidden();
+  const drawer = page.getByRole('dialog', { name: 'Company A' });
+  await expect(drawer.getByText(/CLAUDE_CONFIG_DIR=.* claude \/login/)).toBeVisible();
+  await drawer.getByRole('button', { name: 'Check sign-in' }).click();
+  await drawer.getByRole('button', { name: 'Confirm builder@example.com' }).click();
+  await expect(drawer).toHaveAccessibleName('Company A · builder@example.com');
+  await expect(drawer.getByRole('button', { name: 'Confirm builder@example.com' })).toBeHidden();
+  await expectAccessible(page, 'settings, accounts drawer, dark');
+  await drawer.getByRole('button', { name: 'Close' }).click();
+  await expect(drawer).toBeHidden();
+  const companyA = accounts.getByRole('row', { name: /Company A/ });
+  await expect(companyA).toContainText('builder@example.com');
+  await expect(companyA.getByText('Ready')).toBeVisible();
+
+  // An API key account starts without a secret. Saving one would write the login Keychain, so the
+  // end to end run stops at "No secret yet".
+  await page.getByRole('button', { name: 'Add account' }).click();
+  await addAccount.getByLabel('Kind').click();
+  await page.getByRole('option', { name: 'Anthropic API key' }).click();
+  await addAccount.getByRole('textbox', { name: 'Label' }).fill('Client B');
+  await addAccount.getByRole('textbox', { name: 'Monthly cap (USD)' }).fill('500');
+  await addAccount.getByRole('button', { name: 'Create' }).click();
+  await expect(addAccount).toBeHidden();
+  const clientB = page.getByRole('dialog', { name: /Client B/ });
+  await expect(clientB.getByText('No secret yet')).toBeVisible();
+  await clientB.getByRole('button', { name: 'Close' }).click();
+  await expect(clientB).toBeHidden();
+  await expect(
+    accounts.getByRole('row', { name: /Client B/ }).getByText('Needs a secret'),
+  ).toBeVisible();
+
   await open(page, 'Board');
   await expect(page.getByRole('list', { name: 'Exploring tasks' })).toBeAttached();
 
@@ -197,4 +241,7 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await page.getByRole('link', { name: /Board columns/ }).click();
   await expect(page.getByRole('table', { name: 'Human columns' })).toBeVisible();
   await expectAccessible(page, 'settings, board columns, light');
+  await page.getByRole('link', { name: /Accounts/ }).click();
+  await expect(page.getByRole('table', { name: 'Accounts' })).toBeVisible();
+  await expectAccessible(page, 'settings, accounts, light');
 });
