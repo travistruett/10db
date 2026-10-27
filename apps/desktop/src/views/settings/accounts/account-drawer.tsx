@@ -7,12 +7,20 @@ import {
 } from '@10db/contracts';
 import { Drawer, Stack, Text, Title } from '@mantine/core';
 import { useAccounts } from '../../../daemon/account-queries';
+import { ArchiveAccount } from './archive-account';
+import { EditAccountForm } from './edit-account-form';
 import { IdentityCheck } from './identity-check';
 import { SecretForm } from './secret-form';
 import { SignInSteps } from './sign-in-steps';
 import { UsageByProject } from './usage-by-project';
 
-function AccountDrawerBody({ account }: { readonly account: AccountDto }) {
+function AccountDrawerBody({
+  account,
+  onClose,
+}: {
+  readonly account: AccountDto;
+  readonly onClose: () => void;
+}) {
   return (
     <Stack gap="lg">
       <Stack gap="xs">
@@ -25,12 +33,24 @@ function AccountDrawerBody({ account }: { readonly account: AccountDto }) {
         <Title order={4}>Usage this month</Title>
         <UsageByProject accountId={account.id} />
       </Stack>
+      {account.archived ? null : (
+        <>
+          <Stack gap="xs">
+            <Title order={4}>Settings</Title>
+            <EditAccountForm account={account} />
+          </Stack>
+          <Stack gap="xs">
+            <Title order={4}>Archive</Title>
+            <ArchiveAccount account={account} onArchived={onClose} />
+          </Stack>
+        </>
+      )}
     </Stack>
   );
 }
 
 /**
- * One account's identity, sign-in and usage. The drawer stays mounted so Mantine returns focus to the
+ * One account's identity, sign-in, usage, settings and archive. The drawer stays mounted so Mantine returns focus to the
  * opener and plays the exit transition; `accountId` keeps the last account while it closes. The body
  * is keyed by account so a check made for another account never carries over.
  */
@@ -59,7 +79,7 @@ export function AccountDrawer({
       closeButtonProps={{ 'aria-label': 'Close' }}
     >
       {account ? (
-        <AccountDrawerBody key={account.id} account={account} />
+        <AccountDrawerBody key={account.id} account={account} onClose={onClose} />
       ) : (
         <Text c="dimmed">This account is no longer listed.</Text>
       )}

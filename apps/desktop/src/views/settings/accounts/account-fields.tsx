@@ -11,6 +11,7 @@ import {
 } from '@mantine/core';
 import { IconPlus, IconTrash } from '@tabler/icons-react';
 import { useEffect, useId, useRef } from 'react';
+import { ACCOUNT_KIND_LABEL } from '../account-kind-label';
 import type { AccountFormValues } from './account-form-values';
 
 export type AccountFormMode = 'create' | 'edit';
@@ -143,6 +144,14 @@ export function AccountFields({
     };
   return (
     <Stack gap="md">
+      {mode === 'edit' ? (
+        <div>
+          <Text size="sm" fw={500}>
+            Kind
+          </Text>
+          <Text size="md">{ACCOUNT_KIND_LABEL[values.kind]}</Text>
+        </div>
+      ) : null}
       <TextInput
         size="md"
         label="Label"
@@ -216,6 +225,12 @@ export function AccountFields({
                 onChange({ ...values, bedrockAuth: next === 'bearer' ? 'bearer' : 'profile' });
               }}
             />
+            {mode === 'edit' ? (
+              <Text size="xs" c="dimmed">
+                Switching to an AWS profile forgets the stored bearer token. Switching back needs
+                the token pasted again.
+              </Text>
+            ) : null}
           </Stack>
           {values.bedrockAuth === 'profile' ? (
             <TextInput

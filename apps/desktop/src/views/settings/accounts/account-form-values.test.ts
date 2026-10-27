@@ -1,5 +1,13 @@
+import type { AccountDto } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
-import { emptyAccountForm, toAccountInput, type AccountFormValues } from './account-form-values';
+import { accountDto } from '../../../test/account-fixtures';
+import {
+  emptyAccountForm,
+  formValuesOf,
+  toAccountInput,
+  toAccountPatch,
+  type AccountFormValues,
+} from './account-form-values';
 
 function form(
   kind: AccountFormValues['kind'],
@@ -228,5 +236,183 @@ describe('toAccountInput', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.errors).toEqual(errors);
+  });
+});
+
+const subscription = accountDto({ label: 'Company A', payer: 'Acme' });
+const apiKey = accountDto({ kind: 'anthropic_api_key', label: 'Key', monthlyCapUsd: 500 });
+const bedrockProfile = accountDto({
+  kind: 'bedrock',
+  label: 'Cloud',
+  settings: { region: 'us-west-2', awsProfile: 'client-b' },
+});
+const bedrockBearer = accountDto({
+  kind: 'bedrock',
+  label: 'Cloud',
+  secretSet: true,
+  settings: { region: 'us-west-2', awsProfile: null },
+});
+const gateway = accountDto({
+  kind: 'gateway',
+  label: 'Router',
+  settings: {
+    baseUrl: 'https://gw.example.com/v1',
+    modelMap: { sonnet: 'anthropic/claude-sonnet' },
+    aliases: ['sonnet'],
+  },
+});
+
+describe('formValuesOf', () => {
+  it.each<{ name: string; account: AccountDto; values: Partial<AccountFormValues> }>([
+    {
+      name: 'a subscription',
+      account: subscription,
+      values: { label: 'Company A', payer: 'Acme' },
+    },
+    { name: 'an API key with a cap', account: apiKey, values: { monthlyCapUsd: '500' } },
+    {
+      name: 'Bedrock on a profile',
+      account: bedrockProfile,
+      values: { region: 'us-west-2', bedrockAuth: 'profile', awsProfile: 'client-b' },
+    },
+    {
+      name: 'Bedrock on a bearer token',
+      account: bedrockBearer,
+      values: { region: 'us-west-2', bedrockAuth: 'bearer', awsProfile: '' },
+    },
+    {
+      name: 'a gateway with a model map and aliases',
+      account: gateway,
+      values: {
+        baseUrl: 'https://gw.example.com/v1',
+        modelMap: [{ alias: 'sonnet', modelId: 'anthropic/claude-sonnet' }],
+        aliases: ['sonnet'],
+      },
+    },
+  ])('reads $name', ({ account, values }) => {
+    expect(formValuesOf(account)).toMatchObject({
+      kind: account.kind,
+      laneCap: '4',
+      ...values,
+    });
+  });
+});
+
+describe('toAccountPatch', () => {
+  it.each<{
+    name: string;
+    account: AccountDto;
+    changes: Partial<AccountFormValues>;
+    patch: unknown;
+  }>([
+    { name: 'nothing changed', account: subscription, changes: {}, patch: null },
+    { name: 'nothing changed on a gateway', account: gateway, changes: {}, patch: null },
+    {
+      name: 'the label only',
+      account: subscription,
+      changes: { label: 'Renamed' },
+      patch: { label: 'Renamed' },
+    },
+    {
+      name: 'the lane cap',
+      account: subscription,
+      changes: { laneCap: '6' },
+      patch: { laneCap: 6 },
+    },
+    {
+      name: 'the payer cleared',
+      account: subscription,
+      changes: { payer: '' },
+      patch: { payer: '' },
+    },
+    {
+      name: 'the monthly cap cleared sends null, not 0',
+      account: apiKey,
+      changes: { monthlyCapUsd: '' },
+      patch: { monthlyCapUsd: null },
+    },
+    {
+      name: 'a monthly cap set on an API key',
+      account: accountDto({ kind: 'anthropic_api_key', label: 'Key' }),
+      changes: { monthlyCapUsd: '250' },
+      patch: { monthlyCapUsd: 250 },
+    },
+    {
+      name: 'a cap typed on a subscription is never sent',
+      account: subscription,
+      changes: { monthlyCapUsd: '10' },
+      patch: null,
+    },
+    {
+      name: 'Bedrock from a profile to a bearer token sends the whole settings with a null profile',
+      account: bedrockProfile,
+      changes: { bedrockAuth: 'bearer' },
+      patch: { settings: { region: 'us-west-2', awsProfile: null } },
+    },
+    {
+      name: 'Bedrock from a bearer token to a profile sends the whole settings with the profile',
+      account: bedrockBearer,
+      changes: { bedrockAuth: 'profile', awsProfile: 'client-b' },
+      patch: { settings: { region: 'us-west-2', awsProfile: 'client-b' } },
+    },
+    {
+      name: 'a model map row added sends the whole settings',
+      account: gateway,
+      changes: {
+        modelMap: [
+          { alias: 'sonnet', modelId: 'anthropic/claude-sonnet' },
+          { alias: 'haiku', modelId: 'anthropic/claude-haiku' },
+        ],
+      },
+      patch: {
+        settings: {
+          baseUrl: 'https://gw.example.com/v1',
+          modelMap: { sonnet: 'anthropic/claude-sonnet', haiku: 'anthropic/claude-haiku' },
+          aliases: ['sonnet'],
+        },
+      },
+    },
+    {
+      name: 'a label and a setting together',
+      account: subscription,
+      changes: { label: 'Renamed', modelMap: [{ alias: 'sonnet', modelId: 'x' }] },
+      patch: { label: 'Renamed', settings: { modelMap: { sonnet: 'x' } } },
+    },
+  ])('sends $name', ({ account, changes, patch }) => {
+    expect(toAccountPatch(account, { ...formValuesOf(account), ...changes })).toEqual({
+      ok: true,
+      patch,
+    });
+  });
+
+  it.each<{
+    name: string;
+    account: AccountDto;
+    changes: Partial<AccountFormValues>;
+    errors: Record<string, string>;
+  }>([
+    {
+      name: 'an empty label',
+      account: subscription,
+      changes: { label: '  ' },
+      errors: { label: 'Enter a label' },
+    },
+    {
+      name: 'a monthly cap over the limit',
+      account: apiKey,
+      changes: { monthlyCapUsd: '2000000' },
+      errors: {
+        monthlyCapUsd: 'Enter a dollar amount above zero and up to $1,000,000, or leave it empty',
+      },
+    },
+    {
+      name: 'a bad region',
+      account: bedrockProfile,
+      changes: { region: 'nowhere' },
+      errors: { region: 'Enter an AWS region such as us-west-2' },
+    },
+  ])('refuses $name', ({ account, changes, errors }) => {
+    const result = toAccountPatch(account, { ...formValuesOf(account), ...changes });
+    expect(result).toEqual({ ok: false, errors });
   });
 });

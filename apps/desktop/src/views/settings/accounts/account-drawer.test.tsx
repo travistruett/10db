@@ -15,6 +15,7 @@ import { baseHandlers, daemonUrl, renderApp, server } from '../../../test/daemon
 interface Served {
   readonly patches: { id: string; body: unknown }[];
   readonly identityCalls: string[];
+  readonly archives: string[];
   readonly accountListCalls: number;
   readonly queryClient: ReturnType<typeof renderApp>['queryClient'];
 }
@@ -27,10 +28,13 @@ function serve(
     usage?: Record<string, AccountUsageDto>;
     /** Holds the identity answer until it resolves. */
     identityGate?: Promise<void>;
+    patchRefusal?: { status: number; message: string };
+    archiveRefusal?: { status: number; message: string };
   } = {},
 ): Served {
   const patches: Served['patches'] = [];
   const identityCalls: string[] = [];
+  const archives: string[] = [];
   let accountListCalls = 0;
   const live = [...accounts];
   server.use(
@@ -62,10 +66,30 @@ function serve(
       const id = String(params['accountId']);
       const body = AccountPatch.parse(await request.json());
       patches.push({ id, body });
+      if (opts.patchRefusal)
+        return HttpResponse.json(
+          { message: opts.patchRefusal.message },
+          { status: opts.patchRefusal.status },
+        );
       const index = live.findIndex((a) => a.id === id);
       const current = live[index];
       if (!current) return HttpResponse.json({ message: 'no such account' }, { status: 404 });
       const next = AccountDto.parse({ ...current, ...body });
+      live[index] = next;
+      return HttpResponse.json(next);
+    }),
+    http.post(daemonUrl('/accounts/:accountId/archive'), ({ params }) => {
+      const id = String(params['accountId']);
+      archives.push(id);
+      if (opts.archiveRefusal)
+        return HttpResponse.json(
+          { message: opts.archiveRefusal.message },
+          { status: opts.archiveRefusal.status },
+        );
+      const index = live.findIndex((a) => a.id === id);
+      const current = live[index];
+      if (!current) return HttpResponse.json({ message: 'no such account' }, { status: 404 });
+      const next = AccountDto.parse({ ...current, archived: true });
       live[index] = next;
       return HttpResponse.json(next);
     }),
@@ -75,6 +99,7 @@ function serve(
   return {
     patches,
     identityCalls,
+    archives,
     queryClient,
     get accountListCalls() {
       return accountListCalls;
@@ -464,5 +489,140 @@ describe('AccountDrawer', () => {
     await waitFor(() => {
       expect(document.activeElement).toBe(opener);
     });
+  });
+
+  it('saves exactly the fields that changed and the row shows the new label', async () => {
+    const account = accountDto({ label: 'Fresh login' });
+    const served = serve([DEFAULT_ACCOUNT, account]);
+    const dialog = await openDrawer('Fresh login');
+    const save = await within(dialog).findByRole('button', { name: 'Save changes' });
+    expect(save).toHaveProperty('disabled', true);
+    expect(within(dialog).getByText('Claude subscription')).toBeTruthy();
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'Label' }), {
+      target: { value: 'Renamed' },
+    });
+    expect(save).toHaveProperty('disabled', false);
+    fireEvent.click(save);
+    await waitFor(() => {
+      expect(served.patches).toEqual([{ id: account.id, body: { label: 'Renamed' } }]);
+    });
+    expect(await screen.findByRole('button', { name: 'Open Renamed', hidden: true })).toBeTruthy();
+    await waitFor(() => {
+      expect(within(dialog).getByRole('button', { name: 'Save changes' })).toHaveProperty(
+        'disabled',
+        true,
+      );
+    });
+  });
+
+  it('shows the plain-word message for an invalid field without sending anything', async () => {
+    const served = serve([DEFAULT_ACCOUNT, accountDto({ label: 'Fresh login' })]);
+    const dialog = await openDrawer('Fresh login');
+    fireEvent.change(await within(dialog).findByRole('textbox', { name: 'Label' }), {
+      target: { value: '' },
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save changes' }));
+    expect(await within(dialog).findByText('Enter a label')).toBeTruthy();
+    expect(served.patches).toEqual([]);
+  });
+
+  it('shows the daemon’s message when a patch is refused', async () => {
+    serve([DEFAULT_ACCOUNT, accountDto({ label: 'Fresh login' })], {
+      patchRefusal: { status: 409, message: 'An account labelled "Taken" already exists' },
+    });
+    const dialog = await openDrawer('Fresh login');
+    fireEvent.change(await within(dialog).findByRole('textbox', { name: 'Label' }), {
+      target: { value: 'Taken' },
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save changes' }));
+    expect(
+      await within(dialog).findByText('An account labelled "Taken" already exists'),
+    ).toBeTruthy();
+  });
+
+  it('clears a monthly cap by sending null', async () => {
+    const account = accountDto({
+      label: 'Metered',
+      kind: 'anthropic_api_key',
+      secretSet: true,
+      monthlyCapUsd: 500,
+    });
+    const served = serve([DEFAULT_ACCOUNT, account]);
+    const dialog = await openDrawer('Metered');
+    fireEvent.change(await within(dialog).findByRole('textbox', { name: 'Monthly cap (USD)' }), {
+      target: { value: '' },
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => {
+      expect(served.patches).toEqual([{ id: account.id, body: { monthlyCapUsd: null } }]);
+    });
+  });
+
+  it('says what switching a Bedrock account to a profile does to the stored token', async () => {
+    const account = accountDto({
+      label: 'Cloud',
+      kind: 'bedrock',
+      secretSet: true,
+      settings: { region: 'us-west-2', awsProfile: null },
+    });
+    const served = serve([DEFAULT_ACCOUNT, account]);
+    const dialog = await openDrawer('Cloud');
+    expect(
+      await within(dialog).findByText(/forgets the stored bearer token.*pasted again/),
+    ).toBeTruthy();
+    expect(within(dialog).queryByRole('textbox', { name: 'Organization' })).toBeNull();
+    fireEvent.click(within(dialog).getByRole('radio', { name: 'AWS profile' }));
+    fireEvent.change(within(dialog).getByRole('textbox', { name: 'AWS profile' }), {
+      target: { value: 'client-b' },
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => {
+      expect(served.patches).toEqual([
+        { id: account.id, body: { settings: { region: 'us-west-2', awsProfile: 'client-b' } } },
+      ]);
+    });
+  });
+
+  it('archives after a confirmation and closes the drawer', async () => {
+    const account = accountDto({ label: 'Old client' });
+    const served = serve([DEFAULT_ACCOUNT, account]);
+    const dialog = await openDrawer('Old client');
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Archive account' }));
+    const confirm = await screen.findByRole('dialog', { name: 'Archive Old client?' });
+    expect(
+      within(confirm).getByText(
+        "Old client stops taking projects. Archived accounts can't be restored.",
+      ),
+    ).toBeTruthy();
+    expect(served.archives).toEqual([]);
+    fireEvent.click(within(confirm).getByRole('button', { name: 'Archive account' }));
+    await waitFor(() => {
+      expect(served.archives).toEqual([account.id]);
+    });
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+  });
+
+  it('shows the daemon’s reason when an archive is refused, and keeps the drawer open', async () => {
+    const account = accountDto({ label: 'In use' });
+    serve([DEFAULT_ACCOUNT, account], {
+      archiveRefusal: { status: 409, message: 'Move "Demo" to another account before archiving' },
+    });
+    const dialog = await openDrawer('In use');
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Archive account' }));
+    const confirm = await screen.findByRole('dialog', { name: 'Archive In use?' });
+    fireEvent.click(within(confirm).getByRole('button', { name: 'Archive account' }));
+    expect(
+      await within(confirm).findByText('Move "Demo" to another account before archiving'),
+    ).toBeTruthy();
+    expect(screen.getByRole('dialog', { name: (n) => n.startsWith('In use') })).toBeTruthy();
+  });
+
+  it('offers no Archive for the default account and says why', async () => {
+    serve([DEFAULT_ACCOUNT]);
+    const dialog = await openDrawer('Claude plan');
+    expect(await within(dialog).findByText("The default account can't be archived.")).toBeTruthy();
+    expect(within(dialog).queryByRole('button', { name: 'Archive account' })).toBeNull();
   });
 });

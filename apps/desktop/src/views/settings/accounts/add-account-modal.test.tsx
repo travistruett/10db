@@ -91,7 +91,9 @@ describe('AddAccountModal', () => {
     type(dialog, 'AWS profile', 'client-b');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Create' }));
     const drawer = await screen.findByRole('dialog', { name: /Client B/ });
-    expect(within(drawer).queryByLabelText(/secret|token|key/i, { selector: 'input' })).toBeNull();
+    expect(
+      within(drawer).queryByLabelText(/secret|token|key/i, { selector: 'input[type="password"]' }),
+    ).toBeNull();
     expect(posts).toEqual([
       expect.objectContaining({
         kind: 'bedrock',

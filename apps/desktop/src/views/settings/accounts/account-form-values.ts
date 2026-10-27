@@ -1,8 +1,11 @@
 import {
   AccountInput,
   AccountKind,
+  AccountPatch,
   isMetered,
+  parseAccountSettings,
   type AccountConfig,
+  type AccountDto,
   type SupportedAccountKind,
 } from '@10db/contracts';
 
@@ -148,4 +151,74 @@ export function toAccountInput(values: AccountFormValues): AccountFormResult {
     }
   }
   return { ok: false, errors };
+}
+
+/** The values an account's edit form starts from. The organization is edited by the identity check, not here. */
+export function formValuesOf(account: AccountDto): AccountFormValues {
+  const settings = account.settings;
+  return {
+    kind: account.kind,
+    label: account.label,
+    payer: account.payer,
+    laneCap: String(account.laneCap),
+    monthlyCapUsd: account.monthlyCapUsd === null ? '' : String(account.monthlyCapUsd),
+    organization: '',
+    region: 'region' in settings ? settings.region : '',
+    bedrockAuth: 'awsProfile' in settings && settings.awsProfile === null ? 'bearer' : 'profile',
+    awsProfile: 'awsProfile' in settings ? (settings.awsProfile ?? '') : '',
+    baseUrl: 'baseUrl' in settings ? settings.baseUrl : '',
+    modelMap: Object.entries(settings.modelMap ?? {}).map(([alias, modelId]) => ({
+      alias,
+      modelId,
+    })),
+    aliases: settings.aliases ?? [],
+  };
+}
+
+export type AccountPatchResult =
+  | {
+      /** Null when nothing changed. */
+      readonly ok: true;
+      readonly patch: AccountPatch | null;
+    }
+  | { readonly ok: false; readonly errors: Readonly<Record<string, string>> };
+
+/** Settings as a string that ignores key order and an empty model map, which the daemon treats as none. */
+function settingsKey(settings: unknown): string {
+  return JSON.stringify(settings, (_key, value: unknown) => {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return value;
+    const entries = Object.entries(value).sort(([a], [b]) => a.localeCompare(b));
+    return Object.fromEntries(entries.filter(([k, v]) => !(k === 'modelMap' && isEmpty(v))));
+  });
+}
+
+function isEmpty(value: unknown): boolean {
+  return typeof value === 'object' && value !== null && Object.keys(value).length === 0;
+}
+
+/**
+ * What to send to change `account` into `values`: only the fields that differ, with the settings whole
+ * when any setting differs, as `PATCH` requires. A cleared monthly cap is `null`; a subscription never
+ * sends a cap. The patch is null when nothing changed.
+ */
+export function toAccountPatch(account: AccountDto, values: AccountFormValues): AccountPatchResult {
+  const checked = toAccountInput(values);
+  if (!checked.ok) return checked;
+  const input = checked.input;
+  const settings = parseAccountSettings(account.kind, input.settings);
+  const monthlyCap = 'monthlyCapUsd' in input ? input.monthlyCapUsd : null;
+  const changes = {
+    ...(input.label !== account.label ? { label: input.label } : {}),
+    ...(input.payer !== account.payer ? { payer: input.payer } : {}),
+    ...(input.laneCap !== account.laneCap ? { laneCap: input.laneCap } : {}),
+    ...(isMetered(account.kind) && monthlyCap !== account.monthlyCapUsd
+      ? { monthlyCapUsd: monthlyCap }
+      : {}),
+    ...(settingsKey(settings) !== settingsKey(account.settings) ? { settings } : {}),
+  };
+  if (Object.keys(changes).length === 0) return { ok: true, patch: null };
+  const patch = AccountPatch.safeParse(changes);
+  return patch.success
+    ? { ok: true, patch: patch.data }
+    : { ok: false, errors: { [FORM_ERROR]: 'Those changes were not accepted' } };
 }
