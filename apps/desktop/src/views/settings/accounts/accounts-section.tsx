@@ -17,6 +17,7 @@ import { useState } from 'react';
 import { useAccounts, useAccountUsage } from '../../../daemon/account-queries';
 import { ACCOUNT_KIND_LABEL } from '../account-kind-label';
 import { AccountDrawer } from './account-drawer';
+import { AddAccountModal } from './add-account-modal';
 import { ACCOUNT_STATUS_LABEL, AccountStatus, accountStatus } from './account-status';
 import { capShare, formatTokens, formatUsd } from './usage-text';
 
@@ -135,6 +136,7 @@ function ArchivedList({ accounts }: { readonly accounts: readonly AccountDto[] }
 export function AccountsSection() {
   const [selected, setSelected] = useState<AccountId | null>(null);
   const [opened, setOpened] = useState(false);
+  const [adding, setAdding] = useState(false);
   const accounts = useAccounts();
   if (accounts.isPending) return <Text c="dimmed">Loading accounts…</Text>;
   if (accounts.isError)
@@ -144,7 +146,14 @@ export function AccountsSection() {
   return (
     <Stack maw={880}>
       <Group justify="flex-end">
-        <Button leftSection={<IconPlus size={16} stroke={1.5} />}>Add account</Button>
+        <Button
+          leftSection={<IconPlus size={16} stroke={1.5} />}
+          onClick={() => {
+            setAdding(true);
+          }}
+        >
+          Add account
+        </Button>
       </Group>
       <Table aria-label="Accounts" verticalSpacing="xs">
         <Table.Thead>
@@ -169,6 +178,16 @@ export function AccountsSection() {
         </Table.Tbody>
       </Table>
       {archived.length > 0 ? <ArchivedList accounts={archived} /> : null}
+      <AddAccountModal
+        opened={adding}
+        onClose={() => {
+          setAdding(false);
+        }}
+        onCreated={(id) => {
+          setSelected(id);
+          setOpened(true);
+        }}
+      />
       <AccountDrawer
         accountId={selected}
         opened={opened}
