@@ -8,6 +8,9 @@ function form(
   return { ...emptyAccountForm(kind), ...changes };
 }
 
+const MONTHLY_CAP_MESSAGE =
+  'Enter a dollar amount above zero and up to $1,000,000, or leave it empty';
+
 describe('toAccountInput', () => {
   it.each<{ name: string; values: AccountFormValues; input: unknown }>([
     {
@@ -190,17 +193,30 @@ describe('toAccountInput', () => {
     {
       name: 'a non-numeric monthly cap, onto monthlyCapUsd',
       values: form('anthropic_api_key', { label: 'K', monthlyCapUsd: 'lots' }),
-      errors: { monthlyCapUsd: 'Enter a dollar amount above zero, or leave it empty' },
+      errors: { monthlyCapUsd: MONTHLY_CAP_MESSAGE },
     },
     {
       name: 'a zero monthly cap, onto monthlyCapUsd',
       values: form('anthropic_api_key', { label: 'K', monthlyCapUsd: '0' }),
-      errors: { monthlyCapUsd: 'Enter a dollar amount above zero, or leave it empty' },
+      errors: { monthlyCapUsd: MONTHLY_CAP_MESSAGE },
+    },
+    {
+      name: 'a monthly cap over $1,000,000, onto monthlyCapUsd',
+      values: form('anthropic_api_key', { label: 'K', monthlyCapUsd: '1000001' }),
+      errors: { monthlyCapUsd: MONTHLY_CAP_MESSAGE },
+    },
+    {
+      name: 'a model ID over 200 characters, onto modelMap with its own message',
+      values: form('claude_subscription', {
+        label: 'S',
+        modelMap: [{ alias: 'sonnet', modelId: 'x'.repeat(201) }],
+      }),
+      errors: { modelMap: 'Keep each model ID up to 200 characters' },
     },
     {
       name: 'a payer over 200 characters, onto payer',
       values: form('claude_subscription', { label: 'S', payer: 'x'.repeat(201) }),
-      errors: { payer: 'Keep the payer under 200 characters' },
+      errors: { payer: 'Keep the payer up to 200 characters' },
     },
     {
       name: 'an organization over 200 characters, onto organization',

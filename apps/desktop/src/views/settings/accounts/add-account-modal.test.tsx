@@ -188,6 +188,19 @@ describe('AddAccountModal', () => {
     expect(document.activeElement).toBe(add);
   });
 
+  it('names Remove buttons by row when two rows share an alias', async () => {
+    serve();
+    const dialog = await openModal('Claude subscription');
+    const add = within(dialog).getByRole('button', { name: 'Add model mapping' });
+    fireEvent.click(add);
+    type(dialog, 'Alias, row 1', 'sonnet');
+    fireEvent.click(add);
+    type(dialog, 'Alias, row 2', 'sonnet');
+    expect(within(dialog).getByRole('button', { name: 'Remove row 1 mapping' })).toBeTruthy();
+    expect(within(dialog).getByRole('button', { name: 'Remove row 2 mapping' })).toBeTruthy();
+    expect(within(dialog).queryByRole('button', { name: 'Remove sonnet mapping' })).toBeNull();
+  });
+
   it('ties a model map error to its rows', async () => {
     const { posts } = serve();
     const dialog = await openModal('Claude subscription');

@@ -87,7 +87,7 @@ function ModelMapRows({
             variant="subtle"
             color="gray"
             aria-label={
-              row.alias === ''
+              row.alias === '' || values.modelMap.filter((r) => r.alias === row.alias).length > 1
                 ? `Remove row ${String(index + 1)} mapping`
                 : `Remove ${row.alias} mapping`
             }

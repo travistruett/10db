@@ -98,9 +98,9 @@ export const FORM_ERROR = 'form';
 /** What to do about each field, in the builder's words; zod's own text is for developers. */
 const FIELD_MESSAGE: Readonly<Record<string, string>> = {
   label: 'Enter a label of up to 80 characters',
-  payer: 'Keep the payer under 200 characters',
+  payer: 'Keep the payer up to 200 characters',
   laneCap: 'Enter a whole number from 1 to 16',
-  monthlyCapUsd: 'Enter a dollar amount above zero, or leave it empty',
+  monthlyCapUsd: 'Enter a dollar amount above zero and up to $1,000,000, or leave it empty',
   organization: 'Enter an organization of up to 200 characters, or leave it empty',
   region: 'Enter an AWS region such as us-west-2',
   awsProfile: 'Enter an AWS profile name: letters, digits, dots, dashes or underscores',
@@ -110,6 +110,7 @@ const FIELD_MESSAGE: Readonly<Record<string, string>> = {
 };
 const DUPLICATE_ALIAS_MESSAGE = 'Each alias can appear once';
 const EMPTY_LABEL_MESSAGE = 'Enter a label';
+const MODEL_ID_LENGTH_MESSAGE = 'Keep each model ID up to 200 characters';
 
 function messageOf(
   field: string,
@@ -117,6 +118,7 @@ function messageOf(
   values: AccountFormValues,
 ): string {
   if (field === 'label' && values.label.trim() === '') return EMPTY_LABEL_MESSAGE;
+  if (field === 'modelMap' && issue.code === 'too_big') return MODEL_ID_LENGTH_MESSAGE;
   return FIELD_MESSAGE[field] ?? issue.message;
 }
 
