@@ -1,21 +1,20 @@
-import { chmodSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ProjectId } from '@10db/contracts';
 
-/** Env that moves npm's and pnpm's caches and stores into `cacheDir`, off the shared ones. */
+/**
+ * Env that moves npm's cache, node-gyp's headers, corepack's package managers, pnpm's store and
+ * dirs, and cargo's home into `cacheDir`, off the shared ones under home, which a lane can't write.
+ * Moving `CARGO_HOME` leaves rustup's `cargo` on PATH and its toolchains in `RUSTUP_HOME`; cargo no
+ * longer reads `~/.cargo/config.toml` or its credentials, and `cargo install` puts binaries in the
+ * cache, off PATH.
+ */
 export function packageCacheEnv(cacheDir: string): Record<string, string> {
   return {
     npm_config_cache: join(cacheDir, 'npm'),
+    npm_config_devdir: join(cacheDir, 'node-gyp'),
+    COREPACK_HOME: join(cacheDir, 'corepack'),
     pnpm_config_store_dir: join(cacheDir, 'pnpm-store'),
     pnpm_config_state_dir: join(cacheDir, 'pnpm-state'),
     pnpm_config_cache_dir: join(cacheDir, 'pnpm-cache'),
+    CARGO_HOME: join(cacheDir, 'cargo'),
   };
-}
-
-/** The project's own package cache directory, created private (mode 0700). */
-export function projectCacheDir(home: string, projectId: ProjectId): string {
-  const dir = join(home, 'Library', 'Caches', '10db', 'projects', projectId);
-  mkdirSync(dir, { recursive: true, mode: 0o700 });
-  chmodSync(dir, 0o700);
-  return dir;
 }

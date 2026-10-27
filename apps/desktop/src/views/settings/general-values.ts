@@ -3,7 +3,6 @@ import {
   AllowedCommands,
   BranchName,
   Delivery,
-  type PermissionMode,
   PrTitlePrefix,
   type FlowId,
   type ProjectDto,
@@ -27,7 +26,7 @@ export interface GeneralValues {
   readonly prTitlePrefix: string;
   /** One command prefix per line; blank lines are ignored. */
   readonly allowedCommands: string;
-  readonly permissionMode: PermissionMode;
+  readonly sandboxLoopback: boolean;
 }
 
 export type GeneralErrors = Partial<Record<keyof GeneralValues, string>>;
@@ -49,7 +48,7 @@ export function generalValues(project: ProjectDto): GeneralValues {
     baseBranch: project.baseBranch,
     prTitlePrefix: project.prTitlePrefix ?? '',
     allowedCommands: project.allowedCommands.join('\n'),
-    permissionMode: project.permissionMode,
+    sandboxLoopback: project.sandboxLoopback,
   };
 }
 
@@ -123,8 +122,8 @@ export function checkGeneral(project: ProjectDto, values: GeneralValues): Genera
   if (prTitlePrefix !== project.prTitlePrefix) patch.prTitlePrefix = prTitlePrefix;
   if (!sameCommands(allowed.commands, project.allowedCommands))
     patch.allowedCommands = allowed.commands;
-  if (values.permissionMode !== project.permissionMode)
-    patch.permissionMode = values.permissionMode;
+  if (values.sandboxLoopback !== project.sandboxLoopback)
+    patch.sandboxLoopback = values.sandboxLoopback;
   return { ok: true, patch: Object.keys(patch).length > 0 ? patch : null };
 }
 

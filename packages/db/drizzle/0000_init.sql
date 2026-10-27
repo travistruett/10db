@@ -264,7 +264,7 @@ CREATE TABLE `projects` (
 	`move_back_at` text,
 	`fallback_account_id` text,
 	`usage_handoff_at` real DEFAULT 0.95 NOT NULL,
-	`permission_mode` text DEFAULT 'default' NOT NULL,
+	`sandbox_loopback` integer DEFAULT false NOT NULL,
 	`model` text NOT NULL,
 	`effort` text NOT NULL,
 	`handoff_pct` integer NOT NULL,

@@ -1387,41 +1387,6 @@ describe('runner', () => {
   });
 });
 
-describe('lane permission mode', () => {
-  it.each([
-    ['a default project', 'default', undefined, 'default'],
-    ['an auto project', 'auto', undefined, 'auto'],
-    ['an auto override on a default project', 'default', 'auto', 'auto'],
-    ['an auto override on an auto project', 'auto', 'auto', 'auto'],
-    ['a default override on an auto project', 'auto', 'default', 'auto'],
-  ] as const)(
-    'starts the session of %s in %s mode',
-    async (_name, projectMode, override, expected) => {
-      engine = await createTestEngine(
-        { Alpha: [[turn]] },
-        { permissionMode: projectMode },
-        override ? { permissionModeOverride: override } : {},
-      );
-      const { workstream } = engine.addTask('Alpha');
-      engine.launch(workstream.id);
-      await engine.runner.idle();
-      expect(engine.adapter.prompts.map((p) => p.permissionMode)).toEqual([expected]);
-    },
-  );
-
-  it('reads the project mode when each session starts, so a change applies at the next session', async () => {
-    engine = await createTestEngine({ Alpha: [[turn]], Beta: [[turn]] });
-    const first = engine.addTask('Alpha');
-    engine.launch(first.workstream.id);
-    await engine.runner.idle();
-    engine.state.write((ctx) => patchProject(ctx, engine.project.id, { permissionMode: 'auto' }));
-    const second = engine.addTask('Beta');
-    engine.launch(second.workstream.id);
-    await engine.runner.idle();
-    expect(engine.adapter.prompts.map((p) => p.permissionMode)).toEqual(['default', 'auto']);
-  });
-});
-
 describe('accounts', () => {
   it('pauses the account and sends no prompt when the identity differs, then resumes after Resume', async () => {
     engine = await createTestEngine({ Alpha: [[turn]] });
@@ -2609,7 +2574,6 @@ describe('lane sandbox', () => {
     const real = createLaneSandbox({
       home,
       dataDir: join(probeRoot, 'd'),
-      loopback: false,
       loginConfigDir: null,
       tmpRoot,
       gitDirs: (path) => lanesGit.gitDirs(path),
@@ -2649,11 +2613,7 @@ describe('lane sandbox', () => {
 
   it('runs the session under its profile in default mode, with checkout-scoped reads and the sandbox briefing', async () => {
     const probe = sandboxProbe();
-    engine = await createTestEngine(
-      { Alpha: [[turn]] },
-      { permissionMode: 'auto' },
-      { laneSandbox: probe.laneSandbox, permissionModeOverride: 'auto' },
-    );
+    engine = await createTestEngine({ Alpha: [[turn]] }, {}, { laneSandbox: probe.laneSandbox });
     const specs = recordSpecs();
     const { workstream } = engine.addTask('Alpha');
     engine.launch(workstream.id);
@@ -2663,12 +2623,11 @@ describe('lane sandbox', () => {
     const [spec] = specs;
     const [session] = listSessions(engine.store.db, workstream.id);
     expect(spec?.sandbox).toBe(laneSession?.spec);
-    expect(spec?.permissionMode).toBe('default');
     expect(spec?.allowedTools).toContain(`Read(/${realpathSync(engine.repoPath)}/**)`);
     expect(spec?.allowedTools).not.toContain('Read');
     expect(spec?.prompt).toContain('a bare `mktemp` fails in the sandbox');
     expect(probe.inputs[0]).toMatchObject({
-      project: { id: engine.project.id, repoPath: engine.repoPath },
+      project: { id: engine.project.id, repoPath: engine.repoPath, sandboxLoopback: false },
       env: spec?.env,
       rules: [],
       resumeProviderSessionId: null,
@@ -2687,17 +2646,38 @@ describe('lane sandbox', () => {
   ])(
     'with the lane sandbox %s, a session gets no sandbox and the unscoped tools',
     async (_name, overrides) => {
-      engine = await createTestEngine({ Alpha: [[turn]] }, { permissionMode: 'auto' }, overrides);
+      engine = await createTestEngine({ Alpha: [[turn]] }, {}, overrides);
       const specs = recordSpecs();
       const { workstream } = engine.addTask('Alpha');
       engine.launch(workstream.id);
       await engine.runner.idle();
       expect(specs[0]?.sandbox).toBeNull();
       expect(specs[0]?.allowedTools).toEqual(allowedToolsFor(engine.project, ToolAccess.Edit));
-      expect(specs[0]?.permissionMode).toBe('auto');
       expect(specs[0]?.prompt).not.toContain('mktemp');
     },
   );
+
+  it("reads the project's localhost switch when each session starts, so a change applies at the next one", async () => {
+    const probe = sandboxProbe();
+    engine = await createTestEngine(
+      { Alpha: [[turn]], Beta: [[turn]] },
+      {},
+      { laneSandbox: probe.laneSandbox },
+    );
+    const specs = recordSpecs();
+    const first = engine.addTask('Alpha');
+    engine.launch(first.workstream.id);
+    await engine.runner.idle();
+    engine.state.write((ctx) => patchProject(ctx, engine.project.id, { sandboxLoopback: true }));
+    const second = engine.addTask('Beta');
+    engine.launch(second.workstream.id);
+    await engine.runner.idle();
+    expect(probe.inputs.map((input) => input.project.sandboxLoopback)).toEqual([false, true]);
+    expect(specs.map((spec) => spec.sandbox?.settings.network.allowLocalBinding)).toEqual([
+      undefined,
+      true,
+    ]);
+  });
 
   it("judges the session's file tools by real path, keeping its own saved tool results readable", async () => {
     const probe = sandboxProbe();

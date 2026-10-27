@@ -188,13 +188,6 @@ export type ProfileSource = ValueOf<typeof ProfileSource>;
 export const Delivery = { Local: 'local', PullRequest: 'pull_request' } as const;
 export type Delivery = ValueOf<typeof Delivery>;
 
-/**
- * How a project's lane sessions decide permission prompts. `default` turns what no rule allows into a
- * card; `auto` lets Claude Code's classifier approve routine calls. The guard still runs first.
- */
-export const PermissionMode = { Default: 'default', Auto: 'auto' } as const;
-export type PermissionMode = ValueOf<typeof PermissionMode>;
-
 /** A batch's lifecycle (batch delivery spec §4). */
 export const BatchState = {
   Cutting: 'CUTTING',

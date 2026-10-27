@@ -73,7 +73,7 @@ export function projectDto(overrides: Partial<ProjectDto> = {}): ProjectDto {
     baseBranch: 'main',
     prTitlePrefix: null,
     allowedCommands: [],
-    permissionMode: 'default',
+    sandboxLoopback: false,
     createdAt: AT,
     updatedAt: AT,
     ...overrides,

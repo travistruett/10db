@@ -10,7 +10,6 @@ import {
   WorkstreamState as S,
   AccountKind,
   AccountProblem,
-  PermissionMode,
   type AccountId,
   type AccountRefusal,
   type HandoffId,
@@ -49,6 +48,7 @@ import {
   latestToolOp,
   listModelProfiles,
   listPermissionRules,
+  listProjects,
   listSessions,
   listEvidence,
   markSessionStarted,
@@ -163,11 +163,6 @@ export interface RunnerOptions {
   readonly logger: Logger;
   readonly dataDir: string;
   readonly live: LiveSessions;
-  /**
-   * Forces auto mode on for every project (the dev switch); `default` leaves each project to its own
-   * setting, read when each session starts.
-   */
-  readonly permissionModeOverride?: PermissionMode;
   readonly limits: RunnerLimits;
   mcpUrl(): string;
   /** Builds each session's launch, and the env the gate runs in. */
@@ -183,11 +178,8 @@ export interface RunnerOptions {
   readonly afterSession?: (workstreamId: WorkstreamId) => Promise<void>;
   /** The OS start time of a pid, stored beside it so recovery can tell a reused PID apart. */
   identifyProcess?(pid: number): Promise<string | null>;
-  /**
-   * Runs every lane session under the lane sandbox, in `default` permission mode whatever the
-   * project or the override says. Null or absent, sessions run unsandboxed.
-   */
-  readonly laneSandbox?: LaneSandbox | null;
+  /** Runs every lane session under the lane sandbox; null (fake sessions and tests) runs none. */
+  readonly laneSandbox: LaneSandbox | null;
 }
 
 export interface Runner {
@@ -943,6 +935,7 @@ export function createRunner(opts: RunnerOptions): Runner {
           rules: listPermissionRules(db, project.id, id),
           resumeProviderSessionId: resumeId,
           configDir,
+          checkouts: listProjects(db).map((each) => each.repoPath),
         });
       } catch (error) {
         releaseStart();
@@ -1096,12 +1089,6 @@ export function createRunner(opts: RunnerOptions): Runner {
         model: launch.model,
         effort: row.effort,
         resumeProviderSessionId: resumeId,
-        // Auto mode's classifier would answer the calls the sandbox's cards exist to ask about.
-        permissionMode: laneSession
-          ? PermissionMode.Default
-          : opts.permissionModeOverride === PermissionMode.Auto
-            ? PermissionMode.Auto
-            : project.permissionMode,
         env: launch.env,
         account: launch.expect,
         projectMcpServers: projectMcp.servers,

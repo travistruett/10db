@@ -23,6 +23,19 @@ describe('deniedEnvNames', () => {
   });
 
   it.each([
+    'NVM_DIR',
+    'NVM_BIN',
+    'NVM_INC',
+    'VOLTA_HOME',
+    'CARGO_HOME',
+    'RUSTUP_HOME',
+    'COREPACK_HOME',
+    'npm_config_devdir',
+  ])('keeps the version-manager variable %s', (name) => {
+    expect(deniedEnvNames({ [name]: '/h/x' })).toEqual([]);
+  });
+
+  it.each([
     'MISE_GITHUB_TOKEN',
     'pnpm_config__authToken',
     'MISE_SECRET',

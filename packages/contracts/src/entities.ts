@@ -23,7 +23,6 @@ import {
   EvidenceKind,
   InboxKind,
   InboxState,
-  PermissionMode,
   Provider,
   QuestionCategory,
   RiskTag,
@@ -127,8 +126,11 @@ export const ProjectInput = z
     usageHandoffAt: UsageHandoffAt.default(USAGE_HANDOFF_AT),
     /** Command prefixes a lane runs without a permission card, beyond the gate command. */
     allowedCommands: AllowedCommands.default([]),
-    /** How the project's lane sessions decide permission prompts; read when each session starts. */
-    permissionMode: z.enum(PermissionMode).default(PermissionMode.Default),
+    /**
+     * Lets the lane's sandboxed commands bind and connect on localhost, which opens every local port
+     * to the lane; read when each session starts.
+     */
+    sandboxLoopback: z.boolean().default(false),
   })
   .refine((p) => p.nudgePct > p.handoffPct, {
     message: 'nudgePct must be above handoffPct',
@@ -171,7 +173,7 @@ export const ProjectDto = z.object({
   baseBranch: z.string(),
   prTitlePrefix: z.string().nullable(),
   allowedCommands: z.array(z.string()),
-  permissionMode: z.enum(PermissionMode),
+  sandboxLoopback: z.boolean(),
   createdAt: Timestamp,
   updatedAt: Timestamp,
 });
@@ -197,7 +199,7 @@ export const ProjectPatch = z
     fallbackAccountId: AccountId.nullable(),
     usageHandoffAt: UsageHandoffAt,
     allowedCommands: AllowedCommands,
-    permissionMode: z.enum(PermissionMode),
+    sandboxLoopback: z.boolean(),
   })
   .partial()
   .refine((p) => Object.keys(p).length > 0, { message: 'Change at least one field' });

@@ -424,10 +424,10 @@ describe('team, routing and benchmark routes', () => {
       service: 'patchProject',
     },
     {
-      name: 'PATCH /projects/:id with a permission mode',
+      name: 'PATCH /projects/:id with the localhost switch',
       method: 'PATCH',
       path: `/projects/${projectId}`,
-      body: { permissionMode: 'auto' },
+      body: { sandboxLoopback: true },
       service: 'patchProject',
     },
     {
@@ -521,10 +521,10 @@ describe('team, routing and benchmark routes', () => {
       body: { budgetCeiling: -1 },
     },
     {
-      name: 'an unknown permission mode',
+      name: 'a localhost switch that is not a boolean',
       method: 'PATCH',
       path: `/projects/${projectId}`,
-      body: { permissionMode: 'yolo' },
+      body: { sandboxLoopback: 'on' },
     },
     {
       name: 'an allowed command with a flag',

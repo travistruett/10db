@@ -84,14 +84,14 @@ describe('projects', () => {
     expect(getProject(store.db, project.id).allowedCommands).toEqual([]);
   });
 
-  it('starts a project in the default permission mode and keeps a patched one', () => {
+  it('starts a project without localhost and keeps a patched switch', () => {
     const project = seedProject(store);
-    expect(getProject(store.db, project.id).permissionMode).toBe('default');
-    store.write((ctx) => patchProject(ctx, project.id, { permissionMode: 'auto' }));
-    expect(getProject(store.db, project.id).permissionMode).toBe('auto');
+    expect(getProject(store.db, project.id).sandboxLoopback).toBe(false);
+    store.write((ctx) => patchProject(ctx, project.id, { sandboxLoopback: true }));
+    expect(getProject(store.db, project.id).sandboxLoopback).toBe(true);
     expect(
-      seedProject(store, { repoPath: '/tmp/auto-mode', permissionMode: 'auto' }).permissionMode,
-    ).toBe('auto');
+      seedProject(store, { repoPath: '/tmp/loopback', sandboxLoopback: true }).sandboxLoopback,
+    ).toBe(true);
   });
 
   it('replaces the allowed commands on a patch and leaves the other fields alone', () => {

@@ -76,6 +76,22 @@ export interface ClaudeAdapterOptions {
   readonly stopGraceMs?: number;
   /** Times the preflight and the stop grace periods; tests pass a ManualClock. */
   readonly clock?: Clock;
+  /**
+   * Lets a session with no lane sandbox start. Only tests that script the SDK set it: the daemon
+   * sandboxes every real session, and this adapter refuses one that arrives without a sandbox.
+   */
+  readonly allowUnsandboxed?: true;
+}
+
+export const UNSANDBOXED_REFUSAL =
+  '10db refused to start Claude Code without the lane sandbox. This is a bug in 10db; nothing ran.';
+
+/** A session that ends at once with `message`, before claude is spawned. */
+function refusedSession(message: string): SessionHandle {
+  const events = createChannel<SessionEvent>();
+  events.push({ type: 'ended', reason: 'error', message });
+  events.end();
+  return { events, send: () => undefined, stop: () => Promise.resolve() };
 }
 
 interface QueryDeps {
@@ -139,8 +155,10 @@ export function buildMcpServers(spec: SessionSpec): Record<string, McpServerConf
 }
 
 /**
- * What Claude Code adds to a permission request when auto mode's classifier blocked the call and
- * handed it to a person. The SDK passes these fields at runtime but its typings omit them.
+ * What Claude Code adds to a permission request when it says the call needs a person. Its auto mode
+ * classifier sets them, and lanes never run in auto mode, so the check is defensive: a marked call
+ * still becomes a card that no stored rule answers. The SDK passes these fields at runtime but its
+ * typings omit them.
  */
 const EscalationFields = z.looseObject({
   requiresUserInteraction: z.boolean().optional(),
@@ -205,8 +223,9 @@ export function buildQueryOptions(spec: SessionSpec, deps: QueryDeps): Options {
       : {}),
     plugins: [{ type: 'local', path: deps.pluginDir }],
     allowedTools: [...spec.allowedTools],
-    // Auto mode's classifier would approve calls the sandbox's cards are meant to ask about.
-    permissionMode: sandbox ? 'default' : spec.permissionMode,
+    // What no allow rule covers reaches canUseTool; auto mode's classifier would approve calls the
+    // cards exist to ask about.
+    permissionMode: 'default',
     canUseTool: async (toolName, input, options) => {
       if (!(await deps.billingVerified) || deps.isRefused())
         return { behavior: 'deny', message: BILLING_UNVERIFIED, interrupt: true };
@@ -691,7 +710,10 @@ export function createClaudeAdapter(opts: ClaudeAdapterOptions): SessionAdapter 
   const runQuery: QueryFn = opts.query ?? ((params) => sdkQuery(params));
   return {
     provider: Provider.Claude,
-    start: (spec) => startSession(spec, opts, runQuery),
+    start: (spec) =>
+      (spec.sandbox ?? null) === null && opts.allowUnsandboxed !== true
+        ? refusedSession(UNSANDBOXED_REFUSAL)
+        : startSession(spec, opts, runQuery),
     probeAccount: (probe) => probeAccount(probe, opts, runQuery),
   };
 }

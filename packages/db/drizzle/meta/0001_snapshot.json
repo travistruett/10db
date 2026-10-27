@@ -1,6 +1,6 @@
 {
-  "id": "af9395c7-ff3f-49c4-a15c-5bee4d7d38d3",
-  "prevId": "3ec64117-4e82-4b95-b3e4-cad16c533286",
+  "id": "fa54ffb9-db77-4e56-9302-fe233c090fc1",
+  "prevId": "4ff3f228-ec53-4b75-8d7a-f474c3887d7f",
   "version": "6",
   "dialect": "sqlite",
   "tables": {
@@ -1786,13 +1786,13 @@
           "autoincrement": false,
           "default": 0.95
         },
-        "permission_mode": {
-          "name": "permission_mode",
-          "type": "text",
+        "sandbox_loopback": {
+          "name": "sandbox_loopback",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": "'default'"
+          "default": false
         },
         "model": {
           "name": "model",

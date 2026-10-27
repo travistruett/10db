@@ -109,10 +109,7 @@ export async function createTestEngine(
   book: FakeScriptBook,
   project: Partial<ProjectInput> = {},
   runnerOverrides: Partial<
-    Pick<
-      RunnerOptions,
-      'afterSession' | 'logger' | 'launcher' | 'permissionModeOverride' | 'laneSandbox'
-    >
+    Pick<RunnerOptions, 'afterSession' | 'logger' | 'launcher' | 'laneSandbox'>
   > = {},
   setup: { readonly account?: AccountInput; readonly secret?: string } = {},
 ): Promise<TestEngine> {
@@ -215,6 +212,7 @@ export async function createTestEngine(
   // serve() on a TCP port always reports an AddressInfo once listening.
   const mcpUrl = `http://127.0.0.1:${String((server.address() as AddressInfo).port)}/mcp`;
   const created = createRunner({
+    laneSandbox: null,
     protectedPaths: guarded,
     state,
     adapter,

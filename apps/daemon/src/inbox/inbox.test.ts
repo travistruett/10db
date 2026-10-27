@@ -438,7 +438,7 @@ describe('permission broker', () => {
     expect(decision.behavior === 'deny' && decision.message).toContain('use the vendored docs');
   });
 
-  it('allows a call a stored rule covers, but raises a card when the classifier escalated it', async () => {
+  it('allows a call a stored rule covers, but raises a card when Claude Code escalated it', async () => {
     const ws = seedWorkstream(base);
     const decide = broker(ws);
     const first = decide(request('Bash', { command: 'pnpm test' }));
@@ -676,7 +676,7 @@ describe('permission cards store scoped rules', () => {
 
 describe('permission broker in a sandboxed lane', () => {
   const PNPM_BODY =
-    "pnpm 12 can't install inside the lane sandbox yet. Approving lets the command run; it will fail on pnpm's store lock. Run it yourself, or use npm.";
+    "pnpm 12 locks its store in a /tmp directory shared with every lane and your own pnpm, which a lane can't write. Approving lets the command run, and it will fail on that lock. Run it yourself, or use npm.";
   const HOST_BODY =
     'The command was refused. Allow the host for the project and the next session gets it; allow once only reaches a session that is still running.';
 
@@ -764,7 +764,7 @@ describe('permission broker in a sandboxed lane', () => {
     expect(await pending).toEqual({ behavior: 'allow' });
   });
 
-  it("explains pnpm's store lock on a pnpm hazard card", () => {
+  it("explains pnpm's shared store lock on a pnpm hazard card", () => {
     const ws = seedWorkstream(base);
     void sandboxed(ws)(request('Bash', { command: 'pnpm add zod' })).catch(() => undefined);
     const card = onlyOpenCard();
@@ -798,7 +798,7 @@ describe('permission broker in a sandboxed lane', () => {
     expect(onlyOpenCard().kind).toBe('permission');
   });
 
-  it('cards an escalated call, even one that is not a hazard (defensive: auto mode is off under the sandbox)', () => {
+  it('cards an escalated call, even one that is not a hazard', () => {
     const ws = seedWorkstream(base);
     void sandboxed(ws)(request('Bash', { command: 'pnpm test' }, true)).catch(() => undefined);
     expect(onlyOpenCard().kind).toBe('permission');
@@ -879,6 +879,19 @@ describe('permission broker in a sandboxed lane', () => {
       (await decide(request('SandboxNetworkAccess', { host: 'evil.npmjs.org' }))).behavior,
     ).toBe('deny');
   });
+
+  it.each([['my_service'], ['fe80::1']])(
+    'stores %s, which the profile cannot list, and lets the next session reach it with no card',
+    async (host) => {
+      const ws = seedWorkstream(base);
+      const ask = request('SandboxNetworkAccess', { host });
+      expect((await sandboxed(ws)(ask)).behavior).toBe('deny');
+      inbox.answer(onlyOpenCard().id, { choice: 'allow_project' });
+      await settle();
+      expect(await sandboxed(ws)(ask)).toEqual({ behavior: 'allow' });
+      expect(openCards()).toEqual([]);
+    },
+  );
 
   it('never lets an unscoped network rule allow a host', async () => {
     const ws = seedWorkstream(base);

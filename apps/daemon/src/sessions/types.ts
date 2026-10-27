@@ -1,11 +1,4 @@
-import type {
-  AccountRefusal,
-  Effort,
-  PermissionMode,
-  Provider,
-  SessionId,
-  WorkstreamId,
-} from '@10db/contracts';
+import type { AccountRefusal, Effort, Provider, SessionId, WorkstreamId } from '@10db/contracts';
 import type { AccountExpectation } from '../environment';
 import type { GuardVerdict } from '../guard';
 import type { LaneSandboxSpec } from '../sandbox';
@@ -37,8 +30,6 @@ export interface SessionSpec {
   readonly model: string;
   readonly effort: Effort;
   readonly resumeProviderSessionId: string | null;
-  /** How the session decides permission prompts: `auto` lets Claude Code's classifier approve routine calls. */
-  readonly permissionMode: PermissionMode;
   readonly env: Readonly<Record<string, string>>;
   /** The account the session must prove it is, before its prompt (accounts spec §5). */
   readonly account: AccountExpectation;

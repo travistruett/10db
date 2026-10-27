@@ -48,6 +48,7 @@ async function start(opts: { keychain?: Keychain; adapter?: FakeAdapter; tickMs?
   const keychain = opts.keychain ?? createMemoryKeychain();
   const adapter = opts.adapter ?? new FakeAdapter({});
   daemon = await startDaemon({
+    laneSandbox: null,
     dataDir: data.path,
     port: 0,
     adapter,
