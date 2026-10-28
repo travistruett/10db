@@ -48,7 +48,6 @@ import {
   latestToolOp,
   listModelProfiles,
   listPermissionRules,
-  listProjects,
   listSessions,
   listEvidence,
   markSessionStarted,
@@ -85,7 +84,7 @@ import {
   type StartGate,
 } from '../accounts';
 import type { Clock, Timer } from '../clock';
-import { batchCardFields } from '../delivery';
+import { allCheckouts, batchCardFields, checkoutOf, projectAtCheckout } from '../delivery';
 import type { StateStore } from '../events';
 import {
   AccountLaunchError,
@@ -611,12 +610,13 @@ export function createRunner(opts: RunnerOptions): Runner {
    */
   function readProjectMcp(
     project: ProjectDto,
+    checkout: string,
     id: WorkstreamId,
     env: Readonly<Record<string, string>>,
   ): ProjectMcp {
     let repo: RepoMcp;
     try {
-      repo = readRepoMcp(project.repoPath);
+      repo = readRepoMcp(checkout);
     } catch (error) {
       if (error instanceof ProjectMcpError) {
         opts.inbox.flag({
@@ -829,6 +829,7 @@ export function createRunner(opts: RunnerOptions): Runner {
   async function runSession(id: WorkstreamId, ctl: Control): Promise<Outcome> {
     const row = getWorkstreamRow(db, id);
     const project = getProject(db, row.projectId);
+    const checkout = checkoutOf(db, row);
     const task = getTask(db, row.taskId);
     const fresh = actionOnAnotherAccount(id, ctl, row);
     const action = fresh ?? row.nextAction;
@@ -844,13 +845,13 @@ export function createRunner(opts: RunnerOptions): Runner {
     // Work with no batch commits on one branch for its whole life: the one HEAD names as its first
     // session starts. A lane that switches branches later can't move its commits elsewhere.
     if (row.batchId === null && row.branch === null) {
-      const branch = await opts.git.currentBranch(project.repoPath);
+      const branch = await opts.git.currentBranch(checkout);
       if (branch !== null)
         opts.state.write((ctx) => {
           patchWorkstream(ctx, id, ctl.fence, { branch });
         });
     }
-    const baseHead = row.baseHead ?? (await opts.git.head(project.repoPath));
+    const baseHead = row.baseHead ?? (await opts.git.head(checkout));
     // A stop that landed while the head was read finds no handle to stop, so it is honoured here.
     // A stop before any session launched leaves the saved action as it is, so the provider session it
     // names stays the one the lane resumes.
@@ -926,7 +927,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     }
     // The repo's MCP servers expand from the project env: an account's credential never reaches them.
     // A file 10db can't parse fails here too.
-    const projectMcp = readProjectMcp(project, id, opts.launcher.projectEnv());
+    const projectMcp = readProjectMcp(project, checkout, id, opts.launcher.projectEnv());
     const mcpServers = splitProjectMcp(projectMcp.servers);
     // A resumed session continues its conversation, so it keeps whether that conversation began from
     // a briefing and the briefing's baseline. A fresh session is briefed only when its prompt carries
@@ -947,12 +948,12 @@ export function createRunner(opts: RunnerOptions): Runner {
     if (opts.laneSandbox) {
       try {
         laneSession = await opts.laneSandbox.forSession({
-          project,
+          project: projectAtCheckout(project, checkout),
           env: launch.env,
           rules: listPermissionRules(db, project.id, id),
           resumeProviderSessionId: resumeId,
           configDir,
-          checkouts: listProjects(db).map((each) => each.repoPath),
+          checkouts: allCheckouts(db),
           mcpServers: mcpServers.stdio,
         });
       } catch (error) {
@@ -1110,7 +1111,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         sessionId: session.id,
         workstreamId: id,
         sequence: session.sequence,
-        cwd: project.repoPath,
+        cwd: checkout,
         prompt: mcpNote ? `${prompt}\n\n${mcpNote}` : prompt,
         model: launch.model,
         effort: row.effort,
@@ -1122,14 +1123,14 @@ export function createRunner(opts: RunnerOptions): Runner {
         allowedTools: allowedToolsFor(
           project,
           step.tools,
-          laneSession ? { sandboxed: { checkout: project.repoPath } } : {},
+          laneSession ? { sandboxed: { checkout } } : {},
         ),
         mcp: { url: opts.mcpUrl(), token, toolTimeoutMs: (project.humanWaitMinutes + 5) * 60_000 },
         preToolUse: (req) =>
           judgeToolUse({
             toolName: req.toolName,
             toolInput: req.input,
-            repoPath: project.repoPath,
+            repoPath: checkout,
             areas: project.areas,
             hazards: project.hazards,
             claims: claims(),
@@ -1477,7 +1478,7 @@ export function createRunner(opts: RunnerOptions): Runner {
   /** The paths in the claims the workstream holds right now that git reports as changed. */
   async function claimedChanges(row: WorkstreamRow): Promise<string[]> {
     const project = getProject(db, row.projectId);
-    const changed = await opts.git.changedPaths(project.repoPath);
+    const changed = await opts.git.changedPaths(checkoutOf(db, row));
     const claims = activeClaims(db, row.id).map((c) => ({ kind: c.kind, name: c.name }));
     return findClaimed(changed, project, claims).sort();
   }
@@ -1524,6 +1525,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     }
     const row = getWorkstreamRow(db, id);
     const project = getProject(db, row.projectId);
+    const checkout = checkoutOf(db, row);
     const uncommitted = await claimedChanges(row);
     // A cancel that landed while git was read must not be overwritten by a send-back.
     if (stopRequested(ctl) === 'cancelled') {
@@ -1542,7 +1544,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     const logPath = join(opts.dataDir, 'logs', 'gate', `${id}-${String(run)}.log`);
     opts.logger.info({ workstreamId: id, command: project.gateCommand, logPath }, 'gate started');
     const result = await opts.gate.run({
-      project,
+      project: projectAtCheckout(project, checkout),
       command: project.gateCommand,
       logPath,
       timeoutMs: opts.limits.gateTimeoutMs,
@@ -1550,7 +1552,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       env: opts.launcher.projectEnv(),
       // The hosts and read paths the lane's own sandbox opens.
       rules: listPermissionRules(db, project.id, id),
-      checkouts: listProjects(db).map((each) => each.repoPath),
+      checkouts: allCheckouts(db),
       signal: gateAbort.signal,
       onSpawn: (pid) => {
         recording = identify(pid).then((gatePidStart) => {
@@ -1583,8 +1585,8 @@ export function createRunner(opts: RunnerOptions): Runner {
     }
     // Shutdown killed the gate: record nothing. The workstream stays VERIFYING and recovery re-runs it.
     if (result.aborted) return;
-    const head = await opts.git.head(project.repoPath);
-    const commitShas = await opts.git.commitsSince(project.repoPath, row.baseHead ?? head);
+    const head = await opts.git.head(checkout);
+    const commitShas = await opts.git.commitsSince(checkout, row.baseHead ?? head);
     // A cancel that landed while git was read must not be overwritten by the verdict.
     if (stopRequested(ctl) === 'cancelled') {
       cancelNow(id, ctl.fence);

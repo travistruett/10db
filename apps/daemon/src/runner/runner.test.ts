@@ -17,6 +17,7 @@ import {
   getTask,
   getWorkstream,
   getWorkstreamRow,
+  insertBatch,
   listEventsAfter,
   listEvidence,
   listInbox,
@@ -25,6 +26,7 @@ import {
   patchProject,
   schema,
   seedAccount,
+  transitionBatch,
   transitionWorkstream,
 } from '@10db/db';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -37,6 +39,8 @@ import {
 } from '../briefing';
 import { createLauncher, KeychainError } from '../environment';
 import { createGit } from '../git';
+import { silentLogger } from '../log';
+import { createGateRunner, type GateRequest } from '../verify';
 import { allowedToolsFor } from '../permissions';
 import {
   createLaneSandbox,
@@ -47,13 +51,14 @@ import {
   type LaneSession,
   type LaneSessionInput,
 } from '../sandbox';
-import type { SessionEvent, SessionHandle, SessionSpec } from '../sessions';
+import type { FakeScriptBook, SessionEvent, SessionHandle, SessionSpec } from '../sessions';
 import {
   createMemoryKeychain,
   FAKE_SRT,
   handoffArgs,
   isolatedGitEnv,
   SANDBOXED,
+  tempDir,
   waitFor,
 } from '../../test/fixtures';
 import { createTestEngine, type TestEngine } from '../../test/engine';
@@ -2977,5 +2982,100 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
       ]),
     );
     expect(probe.sessions[1]?.spec.settings.network.allowedDomains).toEqual([host]);
+  });
+  describe('in a worktree batch', () => {
+    /** A project whose batch has a real worktree made by git, as the daemon's cut would leave it. */
+    function worktreeBatch() {
+      const worktrees = tempDir('runner-worktrees');
+      const path = join(worktrees.path, 'wt');
+      execFileSync(
+        'git',
+        ['-C', engine.repoPath, 'worktree', 'add', '-q', '-b', 'batch/one', path],
+        {
+          env: isolatedGitEnv(),
+          stdio: 'pipe',
+        },
+      );
+      const batch = engine.state.write((ctx) => {
+        const inserted = insertBatch(ctx, {
+          projectId: engine.project.id,
+          title: 'Greetings',
+          baseBranch: 'main',
+          worktreePath: realpathSync(path),
+        });
+        return transitionBatch(ctx, inserted.id, {
+          to: 'OPEN',
+          patch: { branch: 'batch/one', baseSha: 'x' },
+        });
+      });
+      return {
+        batch,
+        path: realpathSync(path),
+        cleanup: () => {
+          worktrees.cleanup();
+        },
+      };
+    }
+    const realGate = createGateRunner({ sandbox: null, logger: silentLogger });
+    let cleanups: (() => void)[] = [];
+    afterEach(() => {
+      for (const cleanup of cleanups) cleanup();
+      cleanups = [];
+    });
+    const gateRequests: GateRequest[] = [];
+    const recordingGate = {
+      run: (request: GateRequest) => {
+        gateRequests.push(request);
+        return realGate.run(request);
+      },
+    };
+
+    /** Runs one task in a worktree batch; the script is built once the main checkout's path exists. */
+    async function run(script: (main: string) => FakeScriptBook['Alpha']) {
+      const probe = sandboxProbe();
+      gateRequests.length = 0;
+      const book: FakeScriptBook = {};
+      engine = await createTestEngine(
+        book,
+        { workspaceMode: 'worktree', delivery: 'pull_request', prTitlePrefix: 'feat(app)' },
+        { laneSandbox: probe.laneSandbox, gate: recordingGate },
+      );
+      book['Alpha'] = script(realpathSync(engine.repoPath));
+      const specs = recordSpecs();
+      const made = worktreeBatch();
+      cleanups.push(made.cleanup);
+      const { workstream } = engine.addTask('Alpha', ['api'], [], undefined, made.batch.id);
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+      return { probe, specs, workstream, ...made };
+    }
+
+    it('the session runs in the worktree', async () => {
+      const { specs, path } = await run(() => [[turn]]);
+      expect(specs.map((spec) => spec.cwd)).toEqual([path]);
+    });
+
+    it('the lane sandbox gets the worktree as the checkout and every checkout in checkouts', async () => {
+      const { probe, specs, path } = await run(() => [[turn]]);
+      expect(probe.inputs[0]?.project.repoPath).toBe(path);
+      expect(probe.inputs[0]?.checkouts).toEqual([engine.repoPath, path]);
+      expect(specs[0]?.allowedTools).toContain(`Read(/${realpathSync(path)}/**)`);
+    });
+
+    it('the gate runs in the worktree', async () => {
+      const { workstream, path } = await run(() => [
+        [write('src/api/a.txt'), commit('op-wt-gate-1', ['src/api/a.txt']), turn],
+      ]);
+      expect(ws(workstream.id).state).toBe('DONE');
+      expect(gateRequests.map((request) => request.project.repoPath)).toEqual([path]);
+      expect(gateRequests[0]?.checkouts).toEqual([engine.repoPath, path]);
+    });
+
+    it('a write outside the worktree is denied', async () => {
+      await run((main) => [[write(join(main, 'src/api/outside.txt')), turn]]);
+      const denied = engine.adapter.observations.filter((o) => o.kind === 'denied_by_guard');
+      expect(denied).toHaveLength(1);
+      expect(String(denied[0]?.detail['reason'])).toContain('outside');
+    });
   });
 });

@@ -23,7 +23,6 @@ import {
   getTask,
   listBatches,
   listPermissionRules,
-  listProjects,
   listWorkstreams,
   patchBatch,
   releaseClaims,
@@ -35,6 +34,7 @@ import type { Clock } from '../clock';
 import { GitNetworkError, GitNetworkFailure } from '../git';
 import type { GateResult, GateRunner } from '../verify';
 import { shipCards, wrongBranchCard, type ShipFailure } from './cards';
+import { allCheckouts } from './checkout';
 import { ghCall, pushCall, raise, type DeliveryContext, type DeliveryLimits } from './context';
 import { prBody, prTitle } from './pr-text';
 import { readPrTemplate } from './pr-template';
@@ -136,7 +136,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
       env: deps.sessionEnv(project),
       // The batch spans tasks, so only the project's own hosts and read paths open.
       rules: listPermissionRules(deps.state.db, project.id, null),
-      checkouts: listProjects(deps.state.db).map((each) => each.repoPath),
+      checkouts: allCheckouts(deps.state.db),
       signal,
       onSpawn: (pid) => {
         recording = (deps.identifyProcess?.(pid) ?? Promise.resolve(null)).then((gatePidStart) => {

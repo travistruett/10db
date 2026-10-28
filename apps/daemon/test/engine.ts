@@ -3,6 +3,7 @@ import { homedir } from 'node:os';
 import { serve } from '@hono/node-server';
 import type {
   AccountId,
+  BatchId,
   AccountInput,
   InboxAnswer,
   InboxItemDto,
@@ -97,6 +98,7 @@ export interface TestEngine {
     areas?: string[],
     dependsOn?: TaskDto['id'][],
     plan?: { flow: string; riskTags?: RiskTag[]; criteria?: number },
+    batchId?: BatchId,
   ): { task: TaskDto; workstream: WorkstreamDto };
   /** Does what the scheduler does: claims, lease, STARTING, then launch. */
   launch(id: WorkstreamId): void;
@@ -109,7 +111,7 @@ export async function createTestEngine(
   book: FakeScriptBook,
   project: Partial<ProjectInput> = {},
   runnerOverrides: Partial<
-    Pick<RunnerOptions, 'afterSession' | 'logger' | 'launcher' | 'laneSandbox'>
+    Pick<RunnerOptions, 'afterSession' | 'logger' | 'launcher' | 'laneSandbox' | 'gate'>
   > = {},
   setup: { readonly account?: AccountInput; readonly secret?: string } = {},
 ): Promise<TestEngine> {
@@ -283,7 +285,7 @@ export async function createTestEngine(
     startGate,
     prepared,
     sessionsEnded,
-    addTask(title, areas = ['api'], dependsOn = [], plan) {
+    addTask(title, areas = ['api'], dependsOn = [], plan, batchId) {
       const criteria = Array.from({ length: plan?.criteria ?? 1 }, (_, i) =>
         i === 0 ? 'it works' : `criterion ${String(i + 1)}`,
       );
@@ -301,7 +303,7 @@ export async function createTestEngine(
       );
       const workstream = plan
         ? startTaskWithPlan(state, task.id)
-        : state.write((ctx) => insertWorkstream(ctx, task.id));
+        : state.write((ctx) => insertWorkstream(ctx, task.id, { batchId: batchId ?? null }));
       return { task, workstream };
     },
     launch(id) {
