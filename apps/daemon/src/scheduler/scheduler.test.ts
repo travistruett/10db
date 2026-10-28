@@ -570,7 +570,7 @@ describe('worktree batches', () => {
   });
 
   /** One OPEN worktree batch per entry, each with one QUEUED workstream claiming `claim`. */
-  function worktrees(claims: string[], opts: { cutting?: boolean } = {}) {
+  function worktrees(claims: string[], opts: { cutting?: boolean; noBase?: boolean } = {}) {
     const project = seedProject(store, {
       delivery: 'pull_request',
       prTitlePrefix: 'feat(app)',
@@ -596,7 +596,10 @@ describe('worktree batches', () => {
         });
         if (opts.cutting) return b;
         transitionBatch(ctx, b.id, { to: 'OPEN' });
-        patchBatch(ctx, b.id, { branch: `${BRANCH}-${String(i)}`, baseSha: 'a'.repeat(40) });
+        patchBatch(ctx, b.id, {
+          branch: `${BRANCH}-${String(i)}`,
+          ...(opts.noBase ? {} : { baseSha: 'a'.repeat(40) }),
+        });
         return b;
       });
       branchOf.set(dir.path, `${BRANCH}-${String(i)}`);
@@ -606,7 +609,7 @@ describe('worktree batches', () => {
       return { project, batch, workstream, path: dir.path };
     });
   }
-  function worktree(claim: string, opts: { cutting?: boolean } = {}) {
+  function worktree(claim: string, opts: { cutting?: boolean; noBase?: boolean } = {}) {
     const [only] = worktrees([claim], opts);
     if (!only) throw new Error('no worktree batch');
     return only;
@@ -670,6 +673,14 @@ describe('worktree batches', () => {
     expect(launched).toEqual([]);
     expect(wrongBranch).toEqual([{ batchId: q.batch.id, current: 'main' }]);
     expect(wrongBranchAt).toEqual([q.path]);
+  });
+
+  it('reads nothing for an open batch with no base', async () => {
+    worktree('ui', { noBase: true });
+    await scheduler().tick();
+    expect(branchReads).toEqual([]);
+    expect(launched).toEqual([]);
+    expect(missing).toEqual([]);
   });
 
   it('reads nothing for a cutting batch', async () => {

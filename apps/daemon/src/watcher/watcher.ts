@@ -180,7 +180,7 @@ export function createWatcher(deps: {
 
   /**
    * Strays among `paths` against the claims of the workstreams in `claimStates`, plus any in `alsoHeldBy`.
-   * Area claims count from the batch's workstreams in a worktree and from the project's otherwise; hazard
+   * Area claims count from the batch's workstreams in a worktree and from the project's workstreams outside any worktree in the main checkout; hazard
    * claims always count from the project's, since a hazard is shared across worktrees.
    */
   function straysIn(
@@ -190,8 +190,7 @@ export function createWatcher(deps: {
     claimStates: readonly WorkstreamState[],
     alsoHeldBy: WorkstreamId | null,
   ): { strays: string[]; candidates: WorkstreamId[] } {
-    const inScope = (ws: { readonly batchId: BatchId | null }) =>
-      batchId === null || ws.batchId === batchId;
+    const inScope = (ws: { readonly batchId: BatchId | null }) => worktreeBatchOf(ws) === batchId;
     const holders = listWorkstreams(db, { states: claimStates, projectId: project.id });
     const ids = holders.map((ws) => ws.id);
     const areaHolders = new Set(holders.filter(inScope).map((ws) => ws.id));
@@ -223,9 +222,10 @@ export function createWatcher(deps: {
       projectId: project.id,
     }).map((ws) => ({
       id: ws.id,
-      running: LANE_STATES.includes(ws.state),
+      // A lane in another checkout holds its claims but isn't writing here, so a write into them is foreign.
+      running: LANE_STATES.includes(ws.state) && worktreeBatchOf(ws) === batchId,
       claims: activeClaims(db, ws.id)
-        .filter((c) => c.kind === ClaimKind.Hazard || batchId === null || ws.batchId === batchId)
+        .filter((c) => c.kind === ClaimKind.Hazard || worktreeBatchOf(ws) === batchId)
         .map((c) => ({ kind: c.kind, name: c.name })),
     }));
     const foreign = findForeignClaimWrites(paths, project, holders);

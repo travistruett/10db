@@ -656,7 +656,7 @@ describe('worktree checkouts', () => {
   });
 
   it('counts a hazard claim held in another batch as held, and names its holder on a foreign write', async () => {
-    const holder = inWorktree('Alpha', 'harness', WorkstreamState.WaitingHuman);
+    const holder = inWorktree('Alpha', 'harness');
     const writer = inWorktree('Beta', 'api');
     watcher.sync();
     writeAt(writer.path, 'AGENTS.md');
@@ -669,6 +669,19 @@ describe('worktree checkouts', () => {
       body: `${writer.path}: AGENTS.md`,
     });
     expect(open[0]?.detail).toMatchObject({ claimedBy: [holder.workstream.id] });
+  });
+
+  it("does not let a worktree batch's area claim excuse a write in the main checkout", async () => {
+    const shared = running('Alpha', ['api']);
+    inWorktree('Beta', 'ui');
+    watcher.sync();
+    touch('src/ui/x.ts');
+    emit('src/ui/x.ts');
+    await watcher.flush();
+    const open = flags();
+    expect(open).toHaveLength(1);
+    expect(open[0]).toMatchObject({ title: 'Write outside every claim', body: 'src/ui/x.ts' });
+    expect(open[0]?.detail).toMatchObject({ candidates: [shared.workstream.id] });
   });
 
   it('reads the worktree at a step end, scoped to its batch', async () => {
