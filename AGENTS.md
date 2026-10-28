@@ -45,8 +45,8 @@ A local macOS control plane that runs Claude Code sessions as a software factory
   `git worktree add ../10db-worktrees/<name> -b <branch> origin/main`. Never put one inside the
   checkout, where the linters, tests and gate would read it too. Remove it once its PR merges.
   The worktrees 10db makes for its own lanes live under `~/.10db/worktrees/`.
-- Commit messages are Conventional Commits with a required scope, for example
-  `fix(daemon): close the db on shutdown`. Scopes: `daemon`, `desktop`, `contracts`, `db`,
+- Commit messages are Conventional Commits with an optional scope, for example
+  `fix(daemon): close the db on shutdown` or `fix: close the db on shutdown`. Allowed scopes: `daemon`, `desktop`, `contracts`, `db`,
   `harness`, `repo`, `ci`, `docs`, `deps`. The subject starts lowercase. `commitlint.config.js`
   is the source of truth.
 - Name every path, in one command: `git add path/a path/b && git commit -m '...'`. A commit in its
