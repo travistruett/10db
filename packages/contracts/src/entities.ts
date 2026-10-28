@@ -28,6 +28,7 @@ import {
   RiskTag,
   TaskStatus,
   Urgency,
+  WorkspaceMode,
   WorkstreamState,
 } from './states';
 import { WorkstreamStep } from './steps';
@@ -88,6 +89,21 @@ export const DEFAULT_HAZARDS: readonly HazardDef[] = [
   },
 ];
 
+/** One directory name copied into a worktree: no `/`, not `.`, `..` or `.git`, no NUL, 1-255 chars. */
+export const WorktreeSeedName = z
+  .string()
+  .min(1)
+  .max(255)
+  .refine((n) => !n.includes('/') && !n.includes('\0') && !['.', '..', '.git'].includes(n), {
+    message: 'Name one directory: no slash, ".", ".." or ".git"',
+  });
+export type WorktreeSeedName = z.infer<typeof WorktreeSeedName>;
+
+/** The ignored directories a worktree borrows from the main checkout unless a project says otherwise. */
+export const DEFAULT_WORKTREE_SEED = ['node_modules'] as const;
+
+const WorktreeSeed = z.array(WorktreeSeedName).max(32);
+
 const UsageHandoffAt = z.number().min(USAGE_HANDOFF_MIN).max(USAGE_HANDOFF_MAX);
 
 export const ProjectInput = z
@@ -131,6 +147,10 @@ export const ProjectInput = z
      * to the lane; read when each session starts.
      */
     sandboxLoopback: z.boolean().default(false),
+    /** Where tasks work: the one checkout, or a git worktree per started task (pull request delivery only). */
+    workspaceMode: z.enum(WorkspaceMode).default(WorkspaceMode.Shared),
+    /** Ignored directories of the main checkout a new worktree gets copies of. */
+    worktreeSeed: WorktreeSeed.default(() => [...DEFAULT_WORKTREE_SEED]),
   })
   .refine((p) => p.nudgePct > p.handoffPct, {
     message: 'nudgePct must be above handoffPct',
@@ -139,7 +159,14 @@ export const ProjectInput = z
   .refine((p) => p.delivery !== Delivery.PullRequest || p.prTitlePrefix !== null, {
     message: 'Pull request delivery needs a PR title prefix such as feat(app)',
     path: ['prTitlePrefix'],
-  });
+  })
+  .refine(
+    (p) => p.workspaceMode !== WorkspaceMode.Worktree || p.delivery === Delivery.PullRequest,
+    {
+      message: 'A worktree per task needs pull request delivery',
+      path: ['workspaceMode'],
+    },
+  );
 export type ProjectInput = z.input<typeof ProjectInput>;
 export type ProjectConfig = z.output<typeof ProjectInput>;
 
@@ -174,6 +201,8 @@ export const ProjectDto = z.object({
   prTitlePrefix: z.string().nullable(),
   allowedCommands: z.array(z.string()),
   sandboxLoopback: z.boolean(),
+  workspaceMode: z.enum(WorkspaceMode),
+  worktreeSeed: z.array(z.string()),
   createdAt: Timestamp,
   updatedAt: Timestamp,
 });
@@ -200,6 +229,8 @@ export const ProjectPatch = z
     usageHandoffAt: UsageHandoffAt,
     allowedCommands: AllowedCommands,
     sandboxLoopback: z.boolean(),
+    workspaceMode: z.enum(WorkspaceMode),
+    worktreeSeed: WorktreeSeed,
   })
   .partial()
   .refine((p) => Object.keys(p).length > 0, { message: 'Change at least one field' });

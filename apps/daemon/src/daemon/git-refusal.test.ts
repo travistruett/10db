@@ -1,7 +1,7 @@
 import { realpathSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import type { InboxItemDto } from '@10db/contracts';
-import { createTestStore, listInbox, seedProject } from '@10db/db';
+import { createTestStore, insertBatch, listInbox, listProjects, seedProject } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTempRepo, isolatedGitEnv, tempDir, type TempDir } from '../../test/fixtures';
 import { execFileSync } from 'node:child_process';
@@ -167,6 +167,42 @@ describe('a refusal of the daemon git', () => {
       }),
     );
     expect(listInbox(state.db)).toEqual([]);
+  });
+});
+
+describe('a worktree under the worktree root with no pin', () => {
+  it("raises the unpinned card on its batch's project and nothing else", async () => {
+    const root = tempDir('worktrees');
+    try {
+      const path = join(root.path, 'wt');
+      execFileSync('git', ['-C', repo.path, 'worktree', 'add', '-q', '-b', 'wt', path], {
+        env: isolatedGitEnv(),
+        stdio: 'pipe',
+      });
+      const [seeded] = listProjects(state.db);
+      if (!seeded) throw new Error('expected a project');
+      state.write((ctx) => {
+        insertBatch(ctx, {
+          projectId: seeded.id,
+          title: 'wt',
+          baseBranch: 'main',
+          worktreePath: realpathSync(path),
+        });
+      });
+      const git = createGit({
+        worktreeRoot: root.path,
+        onRefused: handle,
+        pins: createProjectPinStore(state, memoryPinStore()),
+      });
+      await expect(git.currentBranch(path)).rejects.toMatchObject({
+        detail: { kind: 'unpinned' },
+      });
+      expect(listInbox(state.db)).toEqual([
+        expect.objectContaining({ projectId: seeded.id, kind: 'flag' }),
+      ]);
+    } finally {
+      root.cleanup();
+    }
   });
 });
 

@@ -17,12 +17,17 @@ import {
   findUnfinishedBatch,
   getBatch,
   getBatchRow,
+  clearWorktreePath,
+  findBatchByWorktreePath,
   getProject,
+  getWorkstream,
   insertBatch,
   insertTask,
   insertWorkstream,
   latestDoneWorkstream,
   listBatches,
+  listLiveWorktrees,
+  listUnfinishedBatches,
   listProjectViews,
   listWorkstreams,
   patchBatch,
@@ -215,6 +220,136 @@ describe('batches', () => {
         transitionWorkstream(ctx, ws.id, { to, fence: null });
     });
     expect(latestDoneWorkstream(store.db, task.id)?.batchId).toBe(batch.id);
+  });
+});
+
+describe('worktree batches', () => {
+  const worktreeProject = () =>
+    seedProject(store, {
+      delivery: 'pull_request',
+      prTitlePrefix: 'feat(app)',
+      workspaceMode: 'worktree',
+    });
+  const newWorktree = (projectId: ProjectId, title: string, path = `/wt/${title}`) =>
+    store.write((ctx) =>
+      insertBatch(ctx, { projectId, title, baseBranch: 'main', worktreePath: path }),
+    ).value;
+
+  it('a project holds one unfinished shared batch and any number of worktree batches', () => {
+    const worktree = worktreeProject();
+    const a = newWorktree(worktree.id, 'A');
+    const b = newWorktree(worktree.id, 'B');
+    expect([a.worktreePath, b.worktreePath]).toEqual(['/wt/A', '/wt/B']);
+    const shared = prProject();
+    newBatch(shared.id, 'First');
+    expect(() => newBatch(shared.id, 'Second')).toThrow(ConflictError);
+  });
+
+  it('the unique index refuses a second unfinished shared batch but not a worktree one', () => {
+    const project = prProject();
+    const raw = (path: string | null) =>
+      store.db.$client
+        .prepare(
+          `INSERT INTO batches (id, project_id, title, state, base_branch, worktree_path, created_at, updated_at)
+           VALUES (?, ?, 'raw', 'OPEN', 'main', ?, ?, ?)`,
+        )
+        .run(mintId('Batch'), project.id, path, AT, AT);
+    raw(null);
+    raw('/wt/one');
+    raw('/wt/two');
+    expect(() => raw(null)).toThrow(/UNIQUE constraint failed: batches\.project_id/);
+  });
+
+  it('findUnfinishedBatch ignores worktree batches, open or shipped', () => {
+    const project = worktreeProject();
+    const open = newWorktree(project.id, 'Open');
+    const done = newWorktree(project.id, 'Done');
+    move(done.id, 'OPEN', 'SHIPPING', 'SHIPPED');
+    expect(findUnfinishedBatch(store.db, project.id)).toBeUndefined();
+    expect(open.worktreePath).not.toBeNull();
+  });
+
+  it('listUnfinishedBatches answers every unfinished batch, newest first', () => {
+    const project = worktreeProject();
+    const a = newWorktree(project.id, 'A');
+    const b = newWorktree(project.id, 'B');
+    const done = newWorktree(project.id, 'Done');
+    move(done.id, 'OPEN', 'SHIPPING', 'CLOSED');
+    expect(listUnfinishedBatches(store.db, project.id).map((x) => x.id)).toEqual([b.id, a.id]);
+    expect(listProjectViews(store.db).find((p) => p.id === project.id)?.openBatches).toHaveLength(
+      2,
+    );
+  });
+
+  it('currentBatch is the newest unfinished batch, else the latest', () => {
+    const shared = prProject();
+    const only = newBatch(shared.id);
+    expect(currentBatch(store.db, shared.id)?.id).toBe(only.id);
+
+    const many = worktreeProject();
+    newWorktree(many.id, 'A');
+    newWorktree(many.id, 'B');
+    const newest = newWorktree(many.id, 'C');
+    expect(currentBatch(store.db, many.id)?.id).toBe(newest.id);
+
+    const finished = worktreeProject();
+    newWorktree(finished.id, 'A');
+    const latest = newWorktree(finished.id, 'B');
+    for (const batch of listUnfinishedBatches(store.db, finished.id))
+      move(batch.id, 'OPEN', 'SHIPPING', 'CLOSED');
+    expect(currentBatch(store.db, finished.id)?.id).toBe(latest.id);
+  });
+
+  it('listLiveWorktrees keeps an ABANDONED batch whose path is set and drops a cleared one', () => {
+    const project = worktreeProject();
+    const kept = newWorktree(project.id, 'Kept');
+    const cleared = newWorktree(project.id, 'Cleared');
+    move(kept.id, 'OPEN', 'ABANDONED');
+    move(cleared.id, 'OPEN', 'ABANDONED');
+    store.write((ctx) => clearWorktreePath(ctx, cleared.id));
+    newBatch(prProject().id);
+    expect(listLiveWorktrees(store.db).map((b) => b.id)).toEqual([kept.id]);
+  });
+
+  it('findBatchByWorktreePath matches the stored path exactly', () => {
+    const project = worktreeProject();
+    const batch = newWorktree(project.id, 'A', '/wt/exact');
+    expect(findBatchByWorktreePath(store.db, '/wt/exact')?.id).toBe(batch.id);
+    expect(findBatchByWorktreePath(store.db, '/wt/exact/')).toBeUndefined();
+    expect(findBatchByWorktreePath(store.db, '/wt/exac')).toBeUndefined();
+  });
+
+  it('clearWorktreePath clears the path and emits batch.updated', () => {
+    const batch = newWorktree(worktreeProject().id, 'A');
+    const { value, events } = store.write((ctx) => clearWorktreePath(ctx, batch.id));
+    expect(value.worktreePath).toBeNull();
+    expect(getBatch(store.db, batch.id).worktreePath).toBeNull();
+    expect(events.map((e) => [e.type, e.entityId, e.data])).toEqual([
+      ['batch.updated', batch.id, { changed: ['worktreePath'] }],
+    ]);
+  });
+
+  it('deleteCuttingBatch cancels and detaches the workstreams of a cutting batch', () => {
+    const project = worktreeProject();
+    const batch = newWorktree(project.id, 'A');
+    const tasks = [addTask(project.id, 'T1'), addTask(project.id, 'T2')];
+    const streams = tasks.map(
+      (task) => store.write((ctx) => insertWorkstream(ctx, task.id, { batchId: batch.id })).value,
+    );
+    const { events } = store.write((ctx) => {
+      deleteCuttingBatch(ctx, batch.id, 'refused');
+    });
+    expect(listBatches(store.db)).toEqual([]);
+    for (const ws of streams) {
+      const after = getWorkstream(store.db, ws.id);
+      expect(after.state).toBe('CANCELLED');
+      expect(after.batchId).toBeNull();
+    }
+    expect(events.filter((e) => e.type === 'workstream.changed')).toHaveLength(2);
+    for (const task of tasks) {
+      const again = store.write((ctx) => insertWorkstream(ctx, task.id));
+      expect(again.value.state).toBe('QUEUED');
+    }
   });
 });
 

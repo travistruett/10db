@@ -1,6 +1,7 @@
+import { mintId, WorkspaceMode } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { silentLogger } from '../log';
-import { createDeliveryJobs } from './index';
+import { createDeliveryJobs, jobKey, JobQueue } from './index';
 
 const tick = () => new Promise<void>((r) => setImmediate(r));
 
@@ -69,5 +70,34 @@ describe('delivery jobs', () => {
     });
     await jobs.idle();
     expect(ranAfterStop).toBe(false);
+  });
+
+  it("a cut queue job runs while the same project's ship queue job waits", async () => {
+    const project = { id: mintId('Project'), workspaceMode: WorkspaceMode.Worktree };
+    const jobs = createDeliveryJobs(silentLogger);
+    const order: string[] = [];
+    let release = (): void => undefined;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    jobs.run(jobKey(project, JobQueue.Ship), async () => {
+      await gate;
+      order.push('ship');
+    });
+    jobs.run(jobKey(project, JobQueue.Cut), () => {
+      order.push('cut');
+      return Promise.resolve();
+    });
+    await tick();
+    expect(order).toEqual(['cut']);
+    release();
+    await jobs.idle();
+    expect(order).toEqual(['cut', 'ship']);
+  });
+
+  it('jobKey keeps one queue in shared mode', () => {
+    const project = { id: mintId('Project'), workspaceMode: WorkspaceMode.Shared };
+    expect(jobKey(project, JobQueue.Cut)).toBe(project.id);
+    expect(jobKey(project, JobQueue.Ship)).toBe(project.id);
   });
 });

@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from 'node:child_process';
-import { writeFileSync } from 'node:fs';
+import { realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   mintId,
@@ -9,7 +9,10 @@ import {
 } from '@10db/contracts';
 import {
   acquireLease,
+  insertBatch,
+  insertTask,
   insertToolOp,
+  insertWorkstream,
   createTestStore,
   getWorkstream,
   getWorkstreamRow,
@@ -21,6 +24,7 @@ import {
   listSessions,
   markSessionStarted,
   patchWorkstream,
+  seedProject,
   transitionWorkstream,
   updateInboxItem,
   type Store,
@@ -31,6 +35,7 @@ import {
   isolatedGitEnv,
   SANDBOXED,
   seedWorkstream,
+  tempDir,
   waitFor,
 } from '../../test/fixtures';
 import { alive, orphanGateGroup } from '../../test/orphan-gate';
@@ -284,6 +289,66 @@ describe('recoverOnStartup', () => {
       dirtyFiles: ['scratch.txt'],
       lastOpId: 'op-last',
     });
+  });
+
+  it('reads head and changes from the worktree of a worktree batch', async () => {
+    const outside = tempDir('recover-worktree');
+    try {
+      const worktree = join(outside.path, 'wt');
+      const env = isolatedGitEnv();
+      execFileSync('git', ['-C', repo.path, 'worktree', 'add', '-q', '-b', 'batch/one', worktree], {
+        env,
+        stdio: 'pipe',
+      });
+      const wtGit = (...args: string[]) =>
+        execFileSync('git', ['-C', worktree, ...args], { env, stdio: 'pipe' })
+          .toString()
+          .trim();
+      wtGit(
+        '-c',
+        'user.name=t',
+        '-c',
+        'user.email=t@t.invalid',
+        'commit',
+        '-q',
+        '--allow-empty',
+        '-m',
+        'on the branch',
+      );
+      const project = seedProject(base, { repoPath: repo.path });
+      const batch = state.write((ctx) =>
+        insertBatch(ctx, {
+          projectId: project.id,
+          title: 'Greetings',
+          baseBranch: 'main',
+          worktreePath: realpathSync(worktree),
+        }),
+      );
+      const task = state.write((ctx) =>
+        insertTask(ctx, project.id, {
+          title: 'Alpha',
+          acceptanceCriteria: ['it works'],
+          areas: ['api'],
+        }),
+      );
+      const workstream = state.write((ctx) =>
+        insertWorkstream(ctx, task.id, { batchId: batch.id }),
+      );
+      state.write((ctx) => {
+        for (const to of ['STARTING', 'RUNNING'] as const)
+          transitionWorkstream(ctx, workstream.id, { to, fence: null });
+      });
+      writeFileSync(join(worktree, 'scratch.txt'), 'uncommitted\n');
+      writeFileSync(join(repo.path, 'main-only.txt'), 'in the main checkout\n');
+      await recover();
+      const step = listEventsAfter(state.db, 0, 1000).find((e) => e.type === 'recovery.step');
+      expect(step?.data).toMatchObject({
+        head: wtGit('rev-parse', 'HEAD'),
+        dirtyFiles: ['scratch.txt'],
+      });
+    } finally {
+      outside.cleanup();
+    }
   });
 
   // Identifies the process with `ps`, which is setuid: no sandbox can run it.

@@ -1,6 +1,25 @@
+import { WorkspaceMode, type ProjectDto } from '@10db/contracts';
 import type { Logger } from '../log';
 
-/** Background delivery work. Jobs with the same key (a project) run one at a time, in order. */
+/** Which of a project's job queues a job runs in. */
+export const JobQueue = { Cut: 'cut', Ship: 'ship' } as const;
+export type JobQueue = (typeof JobQueue)[keyof typeof JobQueue];
+
+/**
+ * A worktree project's cuts and joins run in one queue and its ships and cleanup in another, so
+ * a cut never waits behind a shipping gate. A shared project keeps one queue: its cut switches the
+ * checkout a ship reads.
+ */
+export function jobKey(project: Pick<ProjectDto, 'id' | 'workspaceMode'>, queue: JobQueue): string {
+  switch (project.workspaceMode) {
+    case WorkspaceMode.Shared:
+      return project.id;
+    case WorkspaceMode.Worktree:
+      return `${project.id}:${queue}`;
+  }
+}
+
+/** Background delivery work. Jobs with the same key (a project's queue) run one at a time, in order. */
 export interface DeliveryJobs {
   run(key: string, job: (signal: AbortSignal) => Promise<void>): void;
   /** Settles once no job is queued or running. */

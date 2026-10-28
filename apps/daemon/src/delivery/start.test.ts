@@ -29,7 +29,9 @@ afterEach(() => {
 
 /** Starts the tasks as one batch and waits for the background cut. */
 async function started(title: string, ...tasks: TaskDto[]) {
-  const batch = h.starter.startBatch(h.project.id, { title, taskIds: tasks.map((t) => t.id) });
+  const batch = h.only(
+    h.starter.startBatch(h.project.id, { title, taskIds: tasks.map((t) => t.id) }),
+  );
   await h.jobs.idle();
   return getBatch(h.store.db, batch.id);
 }
@@ -71,10 +73,12 @@ describe('cutting a branch', () => {
     // A teammate's commit lands on origin/main after this clone last fetched, so only a fetch sees it.
     const upstream = h.teammatePush('main', 'src/api/upstream.txt');
 
-    const request = h.starter.startBatch(h.project.id, {
-      title: 'Greetings',
-      taskIds: [alpha.id, beta.id],
-    });
+    const request = h.only(
+      h.starter.startBatch(h.project.id, {
+        title: 'Greetings',
+        taskIds: [alpha.id, beta.id],
+      }),
+    );
     expect(request.state).toBe('CUTTING');
     await h.jobs.idle();
 
@@ -268,6 +272,32 @@ describe('joining a batch', () => {
     expect(getBatch(h.store.db, batch.id)).toMatchObject({ state: 'OPEN', failure: null });
     expect(listWorkstreams(h.store.db, { batchId: batch.id }).map((w) => w.taskId)).toContain(
       fix.id,
+    );
+  });
+
+  it('refuses a batchId that is not the unfinished batch, and joins the one that is', async () => {
+    const beta = h.addTask('Beta', { areas: ['ui'] });
+    expect(() =>
+      h.starter.startBatch(h.project.id, {
+        title: 'Fix',
+        taskIds: [beta.id],
+        batchId: mintId('Batch'),
+      }),
+    ).toThrow(ConflictError);
+    const batch = await started('Greetings', h.addTask('Alpha'));
+    expect(() =>
+      h.starter.startBatch(h.project.id, {
+        title: 'Fix',
+        taskIds: [beta.id],
+        batchId: mintId('Batch'),
+      }),
+    ).toThrow(ConflictError);
+    expect(
+      h.starter.startBatch(h.project.id, { title: 'Fix', taskIds: [beta.id], batchId: batch.id }),
+    ).toEqual([batch]);
+    await h.jobs.idle();
+    expect(listWorkstreams(h.store.db, { batchId: batch.id }).map((w) => w.taskId)).toContain(
+      beta.id,
     );
   });
 

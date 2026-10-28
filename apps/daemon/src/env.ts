@@ -27,6 +27,8 @@ const DaemonEnv = z.object({
     .optional(),
   // Absolute path to the claude binary; otherwise it is found on the login shell's PATH.
   TENDB_CLAUDE_PATH: z.string().startsWith('/').optional(),
+  // Where worktrees are made for worktree-mode projects. Absolute: `~` is not expanded.
+  TENDB_WORKTREE_ROOT: z.string().startsWith('/').optional(),
   // Set by the desktop shell: the daemon runs its normal shutdown when stdin reaches EOF, which is how
   // it learns the shell died without a clean Quit.
   TENDB_PARENT_STDIN: z.enum(['0', '1']).optional(),

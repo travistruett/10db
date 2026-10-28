@@ -29,6 +29,40 @@ describe('checkGeneral', () => {
       change: { sandboxLoopback: true },
       expected: { ok: true, patch: { sandboxLoopback: true } },
     },
+    {
+      name: 'a worktree per task',
+      change: { delivery: 'pull_request', prTitlePrefix: 'feat(app)', workspaceMode: 'worktree' },
+      expected: {
+        ok: true,
+        patch: { delivery: 'pull_request', prTitlePrefix: 'feat(app)', workspaceMode: 'worktree' },
+      },
+    },
+    {
+      name: 'a new seed, trimmed and without blanks',
+      change: { worktreeSeed: [' node_modules ', '.venv', ''] },
+      expected: { ok: true, patch: { worktreeSeed: ['node_modules', '.venv'] } },
+    },
+    {
+      name: 'a seed name with a slash',
+      change: { worktreeSeed: ['a/b'] },
+      expected: {
+        ok: false,
+        errors: { worktreeSeed: 'Name one directory: no slash, ".", ".." or ".git"' },
+      },
+    },
+    {
+      name: 'more seed names than the contract allows',
+      change: { worktreeSeed: Array.from({ length: 33 }, (_, i) => `d${String(i)}`) },
+      expected: { ok: false, errors: { worktreeSeed: expect.any(String) as string } },
+    },
+    {
+      name: 'a worktree per task in local delivery',
+      change: { workspaceMode: 'worktree' },
+      expected: {
+        ok: false,
+        errors: { workspaceMode: 'A worktree per task needs pull request delivery' },
+      },
+    },
     { name: 'a flow', change: { flowId }, expected: { ok: true, patch: { flowId } } },
     {
       name: 'the lane cap and wait',

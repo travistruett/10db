@@ -4,10 +4,27 @@ import {
   BranchName,
   Delivery,
   PrTitlePrefix,
+  ProjectPatch,
+  WorkspaceMode,
   type FlowId,
   type ProjectDto,
-  type ProjectPatch,
 } from '@10db/contracts';
+
+/**
+ * The seed names trimmed and without blanks, or the contract's message for the first rule they
+ * break (a name that is not one directory, or more names than a project may seed).
+ */
+export function checkSeedNames(names: readonly string[]): {
+  readonly names: string[];
+  readonly error: string | null;
+} {
+  const trimmed = names.map((name) => name.trim()).filter((name) => name !== '');
+  const checked = ProjectPatch.safeParse({ worktreeSeed: trimmed });
+  return {
+    names: trimmed,
+    error: checked.success ? null : (checked.error.issues[0]?.message ?? 'Check the seed names'),
+  };
+}
 
 /** The General form's fields; an emptied number field is ''. */
 export interface GeneralValues {
@@ -27,6 +44,9 @@ export interface GeneralValues {
   /** One command prefix per line; blank lines are ignored. */
   readonly allowedCommands: string;
   readonly sandboxLoopback: boolean;
+  readonly workspaceMode: WorkspaceMode;
+  /** Directory names; blanks are dropped on save. */
+  readonly worktreeSeed: readonly string[];
 }
 
 export type GeneralErrors = Partial<Record<keyof GeneralValues, string>>;
@@ -49,6 +69,8 @@ export function generalValues(project: ProjectDto): GeneralValues {
     prTitlePrefix: project.prTitlePrefix ?? '',
     allowedCommands: project.allowedCommands.join('\n'),
     sandboxLoopback: project.sandboxLoopback,
+    workspaceMode: project.workspaceMode,
+    worktreeSeed: project.worktreeSeed,
   };
 }
 
@@ -100,6 +122,11 @@ export function checkGeneral(project: ProjectDto, values: GeneralValues): Genera
     !PrTitlePrefix.safeParse(prefix).success
   )
     errors.prTitlePrefix = 'Enter a PR title prefix such as feat(app)';
+  if (values.workspaceMode === WorkspaceMode.Worktree && values.delivery !== Delivery.PullRequest)
+    errors.workspaceMode = 'A worktree per task needs pull request delivery';
+  const checkedSeed = checkSeedNames(values.worktreeSeed);
+  if (checkedSeed.error !== null) errors.worktreeSeed = checkedSeed.error;
+  const seed = checkedSeed.names;
   if (Object.keys(errors).length > 0) return { ok: false, errors };
 
   const patch: { -readonly [K in keyof ProjectPatch]: ProjectPatch[K] } = {};
@@ -124,6 +151,8 @@ export function checkGeneral(project: ProjectDto, values: GeneralValues): Genera
     patch.allowedCommands = allowed.commands;
   if (values.sandboxLoopback !== project.sandboxLoopback)
     patch.sandboxLoopback = values.sandboxLoopback;
+  if (values.workspaceMode !== project.workspaceMode) patch.workspaceMode = values.workspaceMode;
+  if (!sameCommands(seed, project.worktreeSeed)) patch.worktreeSeed = seed;
   return { ok: true, patch: Object.keys(patch).length > 0 ? patch : null };
 }
 

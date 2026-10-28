@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -12,16 +12,21 @@ import {
   createTestStore,
   endSession,
   getWorkstream,
+  insertBatch,
   insertSession,
+  insertTask,
+  insertWorkstream,
   listInbox,
   patchWorkstream,
   schema,
+  seedProject,
+  transitionBatch,
   type Store,
 } from '@10db/db';
-import type { WorkstreamStep } from '@10db/contracts';
+import type { ProjectDto, WorkstreamStep } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { createTempRepo, isolatedGitEnv, seedWorkstream } from '../../test/fixtures';
+import { createTempRepo, isolatedGitEnv, seedWorkstream, tempDir } from '../../test/fixtures';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit } from '../git';
 import { protectedPaths } from '../guard';
@@ -93,10 +98,39 @@ afterEach(() => {
   repo.cleanup();
 });
 
-async function seedSession(areas = ['api']) {
-  const seeded = seedWorkstream(base, { repoPath: repo.path, areas });
+/** A workstream in a batch whose worktree is `worktree`, on the branch git made it with. */
+function seedWorktreeWorkstream(
+  worktree: string,
+  branch: string,
+  areas: string[],
+  existing?: ProjectDto,
+) {
+  const project = existing ?? seedProject(base, { repoPath: repo.path });
+  const batch = state.write((ctx) => {
+    const inserted = insertBatch(ctx, {
+      projectId: project.id,
+      title: 'Greetings',
+      baseBranch: 'main',
+      worktreePath: worktree,
+    });
+    return transitionBatch(ctx, inserted.id, { to: 'OPEN', patch: { branch, baseSha: 'x' } });
+  });
+  const task = state.write((ctx) =>
+    insertTask(ctx, project.id, { title: 'Alpha', acceptanceCriteria: ['it works'], areas }),
+  );
+  const workstream = state.write((ctx) => insertWorkstream(ctx, task.id, { batchId: batch.id }));
+  return { project, task, workstream, areaScope: batch.id };
+}
+
+async function seedSession(
+  areas = ['api'],
+  worktree?: { path: string; branch: string; project?: ProjectDto },
+) {
+  const seeded = worktree
+    ? seedWorktreeWorkstream(worktree.path, worktree.branch, areas, worktree.project)
+    : { ...seedWorkstream(base, { repoPath: repo.path, areas }), areaScope: undefined };
   const { token, hash } = mintSessionToken();
-  const head = execFileSync('git', ['-C', repo.path, 'rev-parse', 'HEAD'], {
+  const head = execFileSync('git', ['-C', worktree?.path ?? repo.path, 'rev-parse', 'HEAD'], {
     env: isolatedGitEnv(),
   })
     .toString()
@@ -107,10 +141,11 @@ async function seedSession(areas = ['api']) {
       workstreamId: seeded.workstream.id,
       requests: areas.map((name) => ({ kind: 'area' as const, name })),
       leaseExpiresAt: ctx.now,
+      ...(seeded.areaScope ? { areaScope: seeded.areaScope } : {}),
     });
     patchWorkstream(ctx, seeded.workstream.id, null, {
       baseHead: head,
-      ...(workstreamBranch === null ? {} : { branch: workstreamBranch }),
+      ...(workstreamBranch === null || worktree ? {} : { branch: workstreamBranch }),
     });
     return insertSession(ctx, {
       workstreamId: seeded.workstream.id,
@@ -172,6 +207,112 @@ describe('MCP auth', () => {
       body: '{}',
     });
     expect(after.status).toBe(401);
+  });
+});
+
+describe('MCP tools in a worktree batch', () => {
+  let outside: { path: string; cleanup(): void };
+  let worktree: string;
+  beforeEach(() => {
+    outside = tempDir('mcp-worktree');
+    worktree = join(outside.path, 'wt');
+    execFileSync('git', ['-C', repo.path, 'worktree', 'add', '-q', '-b', 'batch/one', worktree], {
+      env: isolatedGitEnv(),
+      stdio: 'pipe',
+    });
+    worktree = realpathSync(worktree);
+  });
+  afterEach(() => {
+    outside.cleanup();
+  });
+  const worktreeCount = () =>
+    Number(
+      execFileSync('git', ['-C', worktree, 'rev-list', '--count', 'HEAD'], {
+        env: isolatedGitEnv(),
+      })
+        .toString()
+        .trim(),
+    );
+
+  it('commit commits on its branch in the worktree and leaves the main checkout alone', async () => {
+    const s = await seedSession(['api'], { path: worktree, branch: 'batch/one' });
+    const mainState = () => ({
+      head: execFileSync('git', ['-C', repo.path, 'rev-parse', 'HEAD'], { env: isolatedGitEnv() })
+        .toString()
+        .trim(),
+      status: execFileSync('git', ['-C', repo.path, 'status', '--porcelain'], {
+        env: isolatedGitEnv(),
+      }).toString(),
+    });
+    const before = mainState();
+    mkdirSync(join(worktree, 'src/api'), { recursive: true });
+    writeFileSync(join(worktree, 'src/api/a.ts'), 'export {}\n');
+    const result = await s.call('commit', {
+      opId: 'op-wt-commit-1',
+      paths: ['src/api/a.ts'],
+      message: 'Add a',
+    });
+    expect(result.isError).toBe(false);
+    expect(worktreeCount()).toBe(2);
+    expect(commitCount()).toBe(1);
+    expect(mainState()).toEqual(before);
+    const branches = execFileSync('git', ['-C', repo.path, 'branch', '--list', 'batch/one'], {
+      env: isolatedGitEnv(),
+    }).toString();
+    expect(branches).toContain('batch/one');
+  });
+
+  it('write_handoff reads changes from the worktree', async () => {
+    const s = await seedSession(['api'], { path: worktree, branch: 'batch/one' });
+    mkdirSync(join(worktree, 'src/api'), { recursive: true });
+    writeFileSync(join(worktree, 'src/api/c.ts'), 'export {}\n');
+    await s.call('commit', { opId: 'op-wt-commit-2', paths: ['src/api/c.ts'], message: 'Add c' });
+    const handoff = {
+      objective: { task: 'Alpha', acceptanceCriteria: ['it works'], nonGoals: [] },
+      progress: { done: ['c'], notDone: ['d'], nextAction: 'Write d' },
+      codeState: { uncommittedSummary: '' },
+      reasoning: { decisions: [], tradeOffs: [], rejected: [] },
+      validation: { checks: [], environmentProblems: [] },
+      continuity: { blockers: [], pendingQuestions: [], backgroundJobs: [], notes: '' },
+    };
+    await s.call('write_handoff', { opId: 'op-wt-handoff-1', ...handoff });
+    const ctx = await s.call('get_context', {});
+    expect(ctx.json).toMatchObject({ handoff: { gitChangedFiles: ['src/api/c.ts'] } });
+  });
+
+  const claimRows: { name: string; claim: string; secondGranted: boolean }[] = [
+    { name: 'an area is exclusive only within its batch', claim: 'ui', secondGranted: true },
+    { name: 'a hazard stays exclusive across batches', claim: 'migrations', secondGranted: false },
+  ];
+
+  it.each(claimRows)('request_claim: $name', async ({ claim, secondGranted }) => {
+    const other = join(outside.path, 'wt2');
+    execFileSync('git', ['-C', repo.path, 'worktree', 'add', '-q', '-b', 'batch/two', other], {
+      env: isolatedGitEnv(),
+      stdio: 'pipe',
+    });
+    const a = await seedSession(['api'], { path: worktree, branch: 'batch/one' });
+    const b = await seedSession(['api'], {
+      path: realpathSync(other),
+      branch: 'batch/two',
+      project: a.project,
+    });
+    const first = await a.call('request_claim', {
+      opId: 'op-wt-claim-a',
+      kind: 'area',
+      name: claim,
+      reason: 'shared badge',
+    });
+    expect(first.json).toMatchObject({ granted: true });
+    const second = await b.call('request_claim', {
+      opId: 'op-wt-claim-b',
+      kind: 'area',
+      name: claim,
+      reason: 'shared badge',
+    });
+    expect(second.json).toMatchObject(
+      secondGranted ? { granted: true } : { granted: false, heldBy: a.workstream.id },
+    );
   });
 });
 

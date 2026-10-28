@@ -1,5 +1,5 @@
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import type { Git } from '../git';
+import type { Logger } from '../log';
 
 /** A section of the PR body: its `## heading` and the markdown under it. */
 export interface PrSection {
@@ -10,17 +10,35 @@ export interface PrSection {
 /** Where GitHub reads the repository's pull request template. */
 export const PR_TEMPLATE_PATH = '.github/pull_request_template.md';
 
+/** A larger template is not used: the PR body is not the place for it. */
+export const MAX_PR_TEMPLATE_BYTES = 64 * 1024;
+
 /**
- * The repository's pull request template, or null when it has none. Shipping reads it from the
- * checkout, which it has checked is on the batch branch.
+ * The repository's pull request template in the commit being shipped, or null when it has none. It
+ * is read through git from the commit, never from the checkout a lane writes, so a template that is
+ * a link (or lies under one) is no template, and so is one over `MAX_PR_TEMPLATE_BYTES`.
  */
-export function readPrTemplate(repoPath: string): string | null {
-  try {
-    return readFileSync(join(repoPath, PR_TEMPLATE_PATH), 'utf8');
-  } catch (error) {
-    if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT')
+export async function readPrTemplate(
+  git: Pick<Git, 'fileAt'>,
+  repo: string,
+  rev: string,
+  logger: Logger,
+): Promise<string | null> {
+  const found = await git.fileAt(repo, rev, PR_TEMPLATE_PATH, MAX_PR_TEMPLATE_BYTES);
+  switch (found.kind) {
+    case 'file':
+      return found.text;
+    case 'missing':
       return null;
-    throw error;
+    case 'not_regular':
+      logger.warn({ path: PR_TEMPLATE_PATH, mode: found.mode, rev }, 'pr template not a file');
+      return null;
+    case 'too_large':
+      logger.warn(
+        { path: PR_TEMPLATE_PATH, bytes: found.bytes, maxBytes: MAX_PR_TEMPLATE_BYTES, rev },
+        'pr template too large',
+      );
+      return null;
   }
 }
 

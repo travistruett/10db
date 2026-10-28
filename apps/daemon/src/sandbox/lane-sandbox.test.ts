@@ -22,6 +22,7 @@ import {
   tempDir,
   type TempDir,
 } from '../../test/fixtures';
+import { projectAtCheckout } from '../delivery';
 import { createGit } from '../git';
 import {
   createLaneSandbox,
@@ -222,6 +223,50 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
           // The main checkout is another registered project here, read-only as a whole.
           checkout,
         ]);
+      } finally {
+        session.dispose();
+      }
+    } finally {
+      outside.cleanup();
+    }
+  });
+
+  it("denies a worktree batch's lane the main checkout, a sibling worktree, its git dir, its gitfile and the common dir, and reads the common dir", async () => {
+    const outside = tempDir('lane-worktrees');
+    try {
+      const add = (name: string) => {
+        const path = join(outside.path, name);
+        execFileSync('git', ['-C', checkout, 'worktree', 'add', '-q', '-b', name, path], {
+          env: isolatedGitEnv(),
+          stdio: 'pipe',
+        });
+        return realpathSync(path);
+      };
+      const wtA = add('a');
+      const wtB = add('b');
+      const commonDir = join(checkout, '.git');
+      const session = await sandbox().forSession(
+        input({
+          project: projectAtCheckout(input().project, wtA),
+          checkouts: [checkout, wtA, wtB],
+        }),
+      );
+      try {
+        const { allowRead, allowWrite, denyWrite } = session.spec.settings.filesystem;
+        expect(denyWrite).toEqual(
+          expect.arrayContaining([
+            checkout,
+            wtB,
+            join(wtA, '.git'),
+            join(commonDir, 'worktrees', 'a'),
+            commonDir,
+          ]),
+        );
+        // The checkout itself is writable through the session's cwd, not an allowWrite entry.
+        expect(denyWrite).not.toContain(wtA);
+        expect(allowWrite).not.toContain(checkout);
+        expect(allowWrite).not.toContain(wtB);
+        expect(allowRead).toContain(commonDir);
       } finally {
         session.dispose();
       }

@@ -1,8 +1,8 @@
-import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { isAbsolute, join, normalize, posix, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, normalize, posix, resolve, sep } from 'node:path';
 import { InvalidError } from '@10db/contracts';
-import { resolveInRepo } from '../guard';
+import { realPathOf, resolveInRepo } from '../guard';
 import { memoryPinStore, type CheckoutPin, type PinStore } from './checkout-pin';
 import {
   checkoutIdentity,
@@ -11,12 +11,14 @@ import {
   type ConfigRoots,
 } from './checkout-trust';
 import { parseScopedConfig, type ConfigEntry } from './config-trust';
-import { insideAny, isPlainDirectory, samePath, surelyInside } from './lane-writable';
+import { equalOrUnder, insideAny, isPlainDirectory, samePath, surelyInside } from './lane-writable';
+import { comparablePath, existsAsEntry } from './path-entries';
 import { gitNetwork, type NetworkCall, type NetworkRun } from './network';
 import { localRemotePath, parseRemoteUrl } from './remote-url';
 import { GitError, runGit, type RunOptions } from './run';
 import { GitTrustError, GitTrustFailure, type GitTrustDetail } from './trust-error';
 import { embeddedRepository, GitMode, isGitComponent } from './worktree-files';
+import { lockedBatchId, parseWorktreeList, type WorktreeEntry } from './worktree-list';
 
 const OP_TRAILER = '10db-Op';
 const OP_SEARCH_DEPTH = 200;
@@ -35,6 +37,42 @@ const NO_ATTRIBUTES: readonly string[] = [
   '-c',
   'submodule.recurse=false',
 ];
+
+/** `removeWorktree` was asked to remove a path that is not a worktree 10db made. */
+export class WorktreeNotOursError extends Error {
+  override readonly name = 'WorktreeNotOursError';
+  readonly path: string;
+  /** Why it is not one, as the builder reads it. */
+  readonly why: string;
+  constructor(path: string, why: string) {
+    super(`10db won't remove ${path}: ${why}`);
+    this.path = path;
+    this.why = why;
+  }
+}
+
+export interface AddWorktreeInput {
+  readonly repo: string;
+  readonly path: string;
+  readonly branch: string;
+  /** Create `branch` here (CAS from nothing); null when it already exists (a Retry). */
+  readonly startPoint: string | null;
+  readonly lockReason: string;
+}
+
+/** What `fileAt` found at a path of a commit. */
+export type FileAt =
+  | { readonly kind: 'file'; readonly text: string }
+  | { readonly kind: 'missing' }
+  /** A link, a submodule, a directory: anything but a regular file's blob. */
+  | { readonly kind: 'not_regular'; readonly mode: string }
+  | { readonly kind: 'too_large'; readonly bytes: number };
+
+/** The modes git stores a regular file with. */
+const REGULAR_FILE_MODES: readonly string[] = ['100644', '100755'];
+
+/** One `ls-tree --long -z` entry: mode, type, object, size (`-` for a tree), then the path. */
+const LS_TREE_ENTRY = /^(\d{6}) (\w+) ([0-9a-f]+) +(\S+)\t([\s\S]*)$/;
 
 export interface Git {
   /** The branch HEAD names; null when HEAD is detached. */
@@ -89,6 +127,37 @@ export interface Git {
    * otherwise refuses again with what it found. The builder's choice only.
    */
   retrust(repo: string, candidate: CheckoutPin): Promise<void>;
+  /**
+   * Makes a locked worktree of `repo` at `input.path` (under the worktree root) on `input.branch`,
+   * pins it, and fills it from the branch with no hook or filter. Resolves with the worktree's HEAD.
+   * The main checkout's HEAD, index and files are not touched. On failure nothing is left behind.
+   */
+  addWorktree(input: AddWorktreeInput): Promise<string>;
+  /**
+   * Removes a 10db worktree of `repo` at `path` and its pin; 'absent' when git lists none and
+   * nothing is there. Anything else at `path`, or a path outside the worktree root, is refused.
+   */
+  removeWorktree(repo: string, path: string): Promise<'removed' | 'absent'>;
+  listWorktrees(repo: string): Promise<WorktreeEntry[]>;
+  /**
+   * Uncommitted changes in the 10db worktree of `repo` at `path`, read through `repo`'s pin, so a
+   * worktree no batch names (and so with no pin of its own) can be read. The worktree must be a
+   * directory under the worktree root, listed by git, locked by 10db, with its git dir inside
+   * `repo`'s worktrees; anything else is refused with `WorktreeNotOursError`.
+   */
+  worktreeChanges(repo: string, path: string): Promise<string[]>;
+  /** Drops the entries of worktrees whose directory is gone, but not a locked one. */
+  pruneWorktrees(repo: string): Promise<void>;
+  /** `update-ref -d refs/heads/<branch> <sha>`: true when deleted, false when missing or moved. */
+  deleteBranchIfAt(repo: string, branch: string, sha: string): Promise<boolean>;
+  /** Ignored directories of the checkout, top-level and nested, without the trailing `/`. */
+  ignoredDirectories(repo: string): Promise<string[]>;
+  /**
+   * The text of `path` in commit `rev`, read from the object store, never from the worktree, so no
+   * link is followed: a path that is a link, or lies under one, is `not_regular` or `missing`. A
+   * blob over `maxBytes` is not read.
+   */
+  fileAt(repo: string, rev: string, path: string, maxBytes: number): Promise<FileAt>;
 }
 
 export interface GitOptions {
@@ -102,6 +171,11 @@ export interface GitOptions {
   checkouts?: () => readonly string[];
   /** Directories a lane can write besides the checkouts, such as the lane temp root. */
   laneRoots?: readonly string[];
+  /**
+   * Where 10db makes worktrees. Git refuses a path at or under it that holds no worktree 10db made,
+   * and only paths under it are added or removed as worktrees.
+   */
+  worktreeRoot?: string;
 }
 
 /** Where a git call works: the checkout's real path and the variables that point git at its git dir. */
@@ -182,6 +256,17 @@ function filtersInAttributes(text: string): string[] {
     }
   }
   return names;
+}
+
+/** True when the `commondir` file in a linked worktree's git dir resolves to `commonDir`. */
+function namesCommonDir(gitDir: string, commonDir: string): boolean {
+  const named = readIfPresent(join(gitDir, 'commondir')).trim();
+  if (named === '') return false;
+  try {
+    return samePath(realpathSync(resolve(gitDir, named)), commonDir);
+  } catch {
+    return false;
+  }
 }
 
 function readIfPresent(path: string): string {
@@ -329,6 +414,9 @@ export function createGit(opts: GitOptions = {}): Git {
     const id = checkoutIdentity(dirs);
     // Read once per operation: every later call in it runs against this pin.
     let pin = pins.get(real);
+    if (!pin && opts.worktreeRoot && surelyInside(real, opts.worktreeRoot)) {
+      throw refusal(real, { kind: GitTrustFailure.Unpinned });
+    }
     if (!pin) {
       const writable = writableGitDir(real, dirs);
       if (writable !== null)
@@ -771,6 +859,224 @@ export function createGit(opts: GitOptions = {}): Git {
     return null;
   }
 
+  /** The git dir a worktree's `.git` file names, real; the file must be a regular file. */
+  function readGitfile(worktree: string): string {
+    const file = join(worktree, '.git');
+    const text = lstatSync(file).isFile() ? readFileSync(file, 'utf8') : '';
+    const match = /^gitdir: (\/[^\n]+)\n?$/.exec(text);
+    if (!match?.[1]) throw new InvalidError(`${file} is not a gitfile`);
+    return realpathSync(match[1]);
+  }
+
+  /** `path` with its parent read through links and its last component kept as written. */
+  function withRealParent(path: string): string {
+    const abs = resolve(path);
+    try {
+      return join(realpathSync(dirname(abs)), basename(abs));
+    } catch {
+      return abs;
+    }
+  }
+
+  /** `path` with its nearest existing ancestor read through links, so a missing tail still compares. */
+  function realisticPath(path: string): string {
+    let head = resolve(path);
+    const tail: string[] = [];
+    for (;;) {
+      try {
+        return join(realpathSync(head), ...tail);
+      } catch {
+        const parent = dirname(head);
+        if (parent === head) return resolve(path);
+        tail.unshift(basename(head));
+        head = parent;
+      }
+    }
+  }
+
+  async function addWorktree(input: AddWorktreeInput): Promise<string> {
+    const root = opts.worktreeRoot;
+    if (!root) throw new InvalidError('No worktree root is configured');
+    return withRepoLock(realpathSync(input.repo), async () => {
+      const main = await pinned(input.repo);
+      if (existsAsEntry(input.path)) throw new InvalidError(`${input.path} already exists`);
+      // Checked before anything is created, so a parent outside the root is never made.
+      if (!equalOrUnder(realisticPath(dirname(input.path)), realisticPath(root)))
+        throw new InvalidError(`${input.path} is not under 10db's worktree root`);
+      mkdirSync(dirname(input.path), { recursive: true, mode: 0o700 });
+      const target = join(realpathSync(dirname(input.path)), basename(input.path));
+      if (!surelyInside(dirname(target), root))
+        throw new InvalidError(`${target} is not under 10db's worktree root`);
+      const ref = `refs/heads/${input.branch}`;
+      let made: string | null = null;
+      if (input.startPoint !== null) {
+        const sha = await revParse(main, `${input.startPoint}^{commit}`);
+        if (sha === null) throw new InvalidError(`${input.startPoint} names no commit`);
+        try {
+          // The zero old value creates the branch only if it doesn't exist yet.
+          await git(main, ['update-ref', '--no-deref', ref, sha, '0'.repeat(sha.length)]);
+        } catch (error) {
+          if (!(error instanceof GitError)) throw error;
+          throw new InvalidError(
+            `A branch named ${input.branch} already exists, or the name is not valid`,
+          );
+        }
+        made = sha;
+      } else if ((await revParse(main, `${ref}^{commit}`)) === null) {
+        throw new InvalidError(`Branch ${input.branch} does not exist`);
+      }
+      let added = false;
+      try {
+        // No checkout: no file is written and no post-checkout hook runs; read-tree fills it.
+        await git(main, [
+          'worktree',
+          'add',
+          '--no-checkout',
+          '--lock',
+          '--reason',
+          input.lockReason,
+          '--',
+          target,
+          input.branch,
+        ]);
+        added = true;
+        const gitDir = readGitfile(target);
+        if (!surelyInside(gitDir, join(main.dirs.commonDir, 'worktrees')))
+          throw new InvalidError(
+            `git put ${target}'s git dir at ${gitDir}, outside the repository's worktrees`,
+          );
+        // The one call made before the worktree is pinned: it names the git dir it just read.
+        const commonDir = realpathSync(
+          (
+            await runGit(target, ['rev-parse', '--path-format=absolute', '--git-common-dir'], {
+              bin,
+              env: {
+                GIT_DIR: gitDir,
+                GIT_WORK_TREE: target,
+                GIT_ATTR_SOURCE: await emptyTree(main),
+              },
+              config: [...NO_ATTRIBUTES],
+            })
+          ).trim(),
+        );
+        const dirs = { gitDir, commonDir };
+        const mainDirs = { gitDir: main.dirs.commonDir, commonDir: main.dirs.commonDir };
+        if (checkoutIdentity({ gitDir: commonDir, commonDir }) !== checkoutIdentity(mainDirs))
+          throw new InvalidError(`${target} does not share ${input.repo}'s repository`);
+        const pin: CheckoutPin = {
+          ...dirs,
+          id: checkoutIdentity(dirs),
+          fetchUrl: main.pin.fetchUrl,
+          pushUrl: main.pin.pushUrl,
+        };
+        pins.set(target, pin);
+        const wt: Pinned = {
+          real: target,
+          dirs,
+          pin,
+          env: { GIT_DIR: gitDir, GIT_WORK_TREE: target },
+        };
+        await git(wt, ['read-tree', '-m', '-u', 'HEAD']);
+        const head = await revParse(wt, 'HEAD^{commit}');
+        if (head === null) throw new InvalidError(`${target} has no HEAD commit`);
+        return head;
+      } catch (error) {
+        // Leave nothing behind: the entry, its directory, its pin and a branch this call made.
+        if (added) {
+          await git(main, ['worktree', 'remove', '--force', '--force', '--', target]).catch(
+            () => undefined,
+          );
+          rmSync(target, { recursive: true, force: true });
+        }
+        pins.delete(target);
+        if (made !== null) await git(main, ['update-ref', '-d', ref, made]).catch(() => undefined);
+        throw error;
+      }
+    });
+  }
+
+  async function listWorktrees(main: Pinned): Promise<WorktreeEntry[]> {
+    return parseWorktreeList(await git(main, ['worktree', 'list', '--porcelain', '-z']));
+  }
+
+  async function removeWorktree(repo: string, path: string): Promise<'removed' | 'absent'> {
+    const target = withRealParent(path);
+    const root = opts.worktreeRoot;
+    if (!root) throw new WorktreeNotOursError(path, 'no worktree root is configured');
+    let present: ReturnType<typeof lstatSync> | null = null;
+    try {
+      present = lstatSync(target);
+    } catch {
+      present = null;
+    }
+    let inside: boolean;
+    if (present) {
+      inside = surelyInside(target, root);
+    } else {
+      try {
+        inside = equalOrUnder(target, realPathOf(root));
+      } catch {
+        inside = false;
+      }
+    }
+    if (!inside || samePath(target, realisticPath(root)))
+      throw new WorktreeNotOursError(path, "it is not under 10db's worktree root");
+    if (present && !present.isDirectory())
+      throw new WorktreeNotOursError(path, 'it is a link or a file, not a worktree directory');
+    return withRepoLock(realpathSync(repo), async () => {
+      const main = await pinned(repo);
+      const entry = (await listWorktrees(main)).find((e) =>
+        samePath(comparablePath(e.path), target),
+      );
+      if (!entry) {
+        if (present) throw new WorktreeNotOursError(path, 'git lists no worktree there');
+        pins.delete(target);
+        return 'absent';
+      }
+      if (lockedBatchId(entry) === null)
+        throw new WorktreeNotOursError(path, 'the worktree is not locked by 10db');
+      await git(main, ['worktree', 'remove', '--force', '--force', '--', target]);
+      pins.delete(target);
+      return 'removed';
+    });
+  }
+
+  async function worktreeChanges(repo: string, path: string): Promise<string[]> {
+    const root = opts.worktreeRoot;
+    if (!root) throw new WorktreeNotOursError(path, 'no worktree root is configured');
+    const target = withRealParent(path);
+    if (!isPlainDirectory(target))
+      throw new WorktreeNotOursError(path, 'it is not a worktree directory');
+    if (!surelyInside(target, root) || samePath(target, realisticPath(root)))
+      throw new WorktreeNotOursError(path, "it is not under 10db's worktree root");
+    const main = await pinned(repo);
+    const entry = (await listWorktrees(main)).find((e) => samePath(comparablePath(e.path), target));
+    if (!entry) throw new WorktreeNotOursError(path, 'git lists no worktree there');
+    if (lockedBatchId(entry) === null)
+      throw new WorktreeNotOursError(path, 'the worktree is not locked by 10db');
+    let gitDir: string;
+    try {
+      gitDir = readGitfile(target);
+    } catch {
+      throw new WorktreeNotOursError(path, 'its .git is not a gitfile');
+    }
+    // A linked worktree's git dir is a direct child of the repository's `worktrees` directory.
+    if (!samePath(dirname(gitDir), join(main.dirs.commonDir, 'worktrees')))
+      throw new WorktreeNotOursError(path, "its git dir is not one of the repository's worktrees");
+    // Git reads refs through the git dir's `commondir` file even when GIT_COMMON_DIR is set, so the
+    // file must name the repository the main checkout's pin vouches for.
+    if (!namesCommonDir(gitDir, main.dirs.commonDir))
+      throw new WorktreeNotOursError(path, "its git dir names another repository's common dir");
+    if (readIfPresent(join(gitDir, 'info', 'attributes')).trim() !== '')
+      throw new WorktreeNotOursError(path, 'its git dir holds an attributes file');
+    return changes({
+      real: target,
+      dirs: { gitDir, commonDir: main.dirs.commonDir },
+      pin: main.pin,
+      env: { GIT_DIR: gitDir, GIT_COMMON_DIR: main.dirs.commonDir, GIT_WORK_TREE: target },
+    });
+  }
+
   return {
     async currentBranch(repo) {
       return currentBranch(await pinned(repo));
@@ -862,6 +1168,56 @@ export function createGit(opts: GitOptions = {}): Git {
       return filters(await pinned(repo), rev);
     },
     commit,
+    addWorktree,
+    removeWorktree,
+    worktreeChanges,
+    async listWorktrees(repo) {
+      return listWorktrees(await pinned(repo));
+    },
+    async pruneWorktrees(repo) {
+      await git(await pinned(repo), ['worktree', 'prune']);
+    },
+    async deleteBranchIfAt(repo, branch, sha) {
+      const c = await pinned(repo);
+      try {
+        await git(c, ['update-ref', '-d', `refs/heads/${branch}`, sha]);
+        return true;
+      } catch (error) {
+        if (error instanceof GitError) return false;
+        throw error;
+      }
+    },
+    async fileAt(repo, rev, path, maxBytes) {
+      const c = await pinned(repo);
+      const out = await git(c, ['ls-tree', '-z', '--long', '--full-tree', rev, '--', path], {
+        env: { GIT_LITERAL_PATHSPECS: '1' },
+      });
+      const entry = out
+        .split('\0')
+        .map((line) => LS_TREE_ENTRY.exec(line))
+        .find((match) => match?.[5] === path);
+      if (!entry) return { kind: 'missing' };
+      const [, mode = '', type, oid = '', size = ''] = entry;
+      if (type !== 'blob' || !REGULAR_FILE_MODES.includes(mode))
+        return { kind: 'not_regular', mode };
+      const bytes = Number(size);
+      if (!Number.isSafeInteger(bytes) || bytes > maxBytes) return { kind: 'too_large', bytes };
+      return { kind: 'file', text: await git(c, ['cat-file', 'blob', oid]) };
+    },
+    async ignoredDirectories(repo) {
+      const out = await git(await pinned(repo), [
+        'ls-files',
+        '-z',
+        '--others',
+        '--ignored',
+        '--exclude-standard',
+        '--directory',
+      ]);
+      return out
+        .split('\0')
+        .filter((entry) => entry.endsWith('/'))
+        .map((entry) => entry.slice(0, -1));
+    },
     async retrust(repo, candidate) {
       const real = realpathSync(repo);
       const current = pins.get(real);

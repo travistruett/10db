@@ -105,6 +105,22 @@
     },
     "sandboxLoopback": {
       "type": "boolean"
+    },
+    "workspaceMode": {
+      "type": "string",
+      "enum": [
+        "shared",
+        "worktree"
+      ]
+    },
+    "worktreeSeed": {
+      "maxItems": 32,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 255
+      }
     }
   }
 }

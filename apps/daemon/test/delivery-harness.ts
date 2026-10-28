@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
   InboxKind,
@@ -93,6 +93,8 @@ export interface DeliveryHarness {
   readonly shipper: Shipper;
   /** Where the shipper writes PR bodies and gate logs. */
   readonly dataDir: string;
+  /** The daemon's worktree root (its hashed level), a real path not made until the first cut. */
+  readonly worktreeRoot: string;
   /** Workstreams whose runner is live, as the shipper's `isRunning` sees them. */
   readonly running: Set<WorkstreamId>;
   readonly project: ProjectDto;
@@ -146,7 +148,9 @@ export function createDeliveryHarness(
   measureForTests(state);
   const inbox = createInboxService({ state, onParkedAnswer: () => undefined });
   const gitRefusals: GitTrustError[] = [];
-  const git = createGit({ onRefused: (error) => gitRefusals.push(error) });
+  const worktrees = tempDir('worktrees');
+  const worktreeRoot = join(realpathSync(worktrees.path), 'level');
+  const git = createGit({ onRefused: (error) => gitRefusals.push(error), worktreeRoot });
   const gh = new FakeGh();
   const jobs = createDeliveryJobs(silentLogger);
   const ticks = { count: 0 };
@@ -182,6 +186,7 @@ export function createDeliveryHarness(
     onWorkQueued: () => {
       ticks.count += 1;
     },
+    worktreeRoot,
   };
   const data = tempDir('delivery-data');
   const running = new Set<WorkstreamId>();
@@ -217,6 +222,7 @@ export function createDeliveryHarness(
     starter: createBatchStarter(ctx),
     shipper,
     dataDir: data.path,
+    worktreeRoot,
     running,
     project: seeded,
     repo: remote.repo.path,
@@ -276,6 +282,7 @@ export function createDeliveryHarness(
       unsubscribe();
       close();
       data.cleanup();
+      worktrees.cleanup();
       remote.cleanup();
       network.cleanup();
     },

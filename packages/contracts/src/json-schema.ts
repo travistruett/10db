@@ -1,5 +1,11 @@
 import { z } from 'zod';
-import { BatchDto, BatchStartInput, ProjectViewDto, TaskStartResult } from './batches';
+import {
+  BatchDto,
+  BatchStartInput,
+  BatchStartResult,
+  ProjectViewDto,
+  TaskStartResult,
+} from './batches';
 import {
   AccountCreatedDto,
   AccountDto,
@@ -76,6 +82,7 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'handoff-input': HandoffInput,
   'batch-dto': BatchDto,
   'batch-start-input': BatchStartInput,
+  'batch-start-result': BatchStartResult,
   'project-view-dto': ProjectViewDto,
   'task-start-result': TaskStartResult,
   'project-dto': ProjectDto,

@@ -22,7 +22,7 @@ import {
   releaseClaims,
   transitionWorkstream,
 } from '@10db/db';
-import { batchCardFields } from '../delivery';
+import { batchCardFields, checkoutOf } from '../delivery';
 import type { StateStore } from '../events';
 import type { Git } from '../git';
 import type { InboxService } from '../inbox';
@@ -103,8 +103,9 @@ export async function recoverOnStartup(opts: {
       continue;
     }
 
-    const head = await opts.git.head(project.repoPath).catch(() => 'unknown');
-    const dirty = await opts.git.changedPaths(project.repoPath).catch(() => []);
+    const checkout = checkoutOf(db, row);
+    const head = await opts.git.head(checkout).catch(() => 'unknown');
+    const dirty = await opts.git.changedPaths(checkout).catch(() => []);
     const lastOp = latestToolOp(db, ws.id);
     const attempts = opts.cleanShutdown ? row.recoveryAttempts : row.recoveryAttempts + 1;
     // A resume that was fixing a gate failure comes back as the fix, so the failure isn't dropped.

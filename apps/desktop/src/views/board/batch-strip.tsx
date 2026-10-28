@@ -5,13 +5,29 @@ import {
   latestPerTask,
   shipReadiness,
   ShipReadiness,
+  WorkspaceMode,
   type BatchDto,
   type WorkstreamDto,
 } from '@10db/contracts';
-import { Alert, Badge, Button, Code, Group, Paper, Stack, Text } from '@mantine/core';
+import {
+  ActionIcon,
+  Alert,
+  Badge,
+  Button,
+  Code,
+  CopyButton,
+  Group,
+  Paper,
+  Stack,
+  Text,
+  Tooltip,
+} from '@mantine/core';
+import { useDisclosure } from '@mantine/hooks';
+import { IconCheck, IconCopy } from '@tabler/icons-react';
 import { useAbandonBatch, useShipBatch } from '../../daemon/queries';
 import { StateBadge } from '../factory/state-badge';
 import { BATCH_COLORS, BATCH_LABELS } from './batch-labels';
+import { AddFixTask } from './batch/add-fix-task';
 import { PullRequestLink } from './pull-request-link';
 
 const B = BatchState;
@@ -30,9 +46,11 @@ const FAILURE_LABELS: Readonly<Record<BatchFailure, string>> = {
 export function BatchStrip({
   batch,
   workstreams,
+  workspaceMode = WorkspaceMode.Shared,
 }: {
   readonly batch: BatchDto;
   readonly workstreams: readonly WorkstreamDto[];
+  readonly workspaceMode?: WorkspaceMode;
 }) {
   const ship = useShipBatch();
   const abandon = useAbandonBatch();
@@ -41,6 +59,8 @@ export function BatchStrip({
   const readiness = shipReadiness(members.map((w) => w.state));
   const canShipAnyway = batch.state === B.Open && readiness === ShipReadiness.ShipAnyway;
   const canAbandon = batch.state === B.Open || batch.state === B.Failed;
+  const canAddFix = workspaceMode === WorkspaceMode.Worktree && canAbandon;
+  const [fixOpen, fix] = useDisclosure(false);
   const error = ship.error ?? abandon.error;
   // Each action clears the other's error first, so the strip shows only the latest action's refusal.
   const shipBatch = () => {
@@ -63,6 +83,30 @@ export function BatchStrip({
           {batch.branch ? <Code>{batch.branch}</Code> : null}
           {batch.prUrl ? <PullRequestLink url={batch.prUrl} /> : null}
         </Group>
+        {batch.worktreePath ? (
+          <Group gap="xs" wrap="nowrap">
+            <Code style={{ wordBreak: 'break-all' }}>{batch.worktreePath}</Code>
+            <CopyButton value={batch.worktreePath}>
+              {({ copied, copy }) => (
+                <Tooltip label={copied ? 'Copied' : 'Copy worktree path'} withArrow>
+                  <ActionIcon
+                    size="sm"
+                    variant="subtle"
+                    color={copied ? 'teal' : 'gray'}
+                    aria-label="Copy worktree path"
+                    onClick={copy}
+                  >
+                    {copied ? (
+                      <IconCheck size={16} stroke={1.5} />
+                    ) : (
+                      <IconCopy size={16} stroke={1.5} />
+                    )}
+                  </ActionIcon>
+                </Tooltip>
+              )}
+            </CopyButton>
+          </Group>
+        ) : null}
         {batch.failure ? (
           <Text size="sm" c="red">
             {FAILURE_LABELS[batch.failure]}
@@ -83,7 +127,7 @@ export function BatchStrip({
             {error.message}
           </Alert>
         ) : null}
-        {batch.state === B.Failed || canShipAnyway || canAbandon ? (
+        {batch.state === B.Failed || canShipAnyway || canAbandon || canAddFix ? (
           <Group gap="xs">
             {batch.state === B.Failed ? (
               <Button size="xs" loading={ship.isPending} onClick={shipBatch}>
@@ -93,6 +137,11 @@ export function BatchStrip({
             {canShipAnyway ? (
               <Button size="xs" variant="light" loading={ship.isPending} onClick={shipBatch}>
                 Ship anyway
+              </Button>
+            ) : null}
+            {canAddFix ? (
+              <Button size="xs" variant="light" onClick={fix.open}>
+                Add a fix task
               </Button>
             ) : null}
             {canAbandon ? (
@@ -109,6 +158,9 @@ export function BatchStrip({
           </Group>
         ) : null}
       </Stack>
+      {canAddFix ? (
+        <AddFixTask batch={batch} workstreams={workstreams} opened={fixOpen} onClose={fix.close} />
+      ) : null}
     </Paper>
   );
 }

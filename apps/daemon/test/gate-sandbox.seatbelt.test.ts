@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:net';
@@ -14,7 +15,7 @@ import {
   type GateResult,
   type GateRunner,
 } from '../src/verify';
-import { createTempRepo, type TempDir } from './fixtures';
+import { createTempRepo, isolatedGitEnv, tempDir, type TempDir } from './fixtures';
 
 /**
  * The gate under the real sandbox: srt and Seatbelt, with the profile the daemon builds. Runs in
@@ -195,6 +196,54 @@ describe.skipIf(!SEATBELT)('the gate under the sandbox (Seatbelt)', () => {
       'write-temp': 'ok',
       'own-env': 'ok',
     });
+  }, 120_000);
+
+  it("can't write the main checkout or a sibling worktree from a gate in a worktree", async () => {
+    const worktrees = tempDir('gate-worktrees');
+    try {
+      const env = isolatedGitEnv();
+      const add = (name: string) => {
+        const path = join(worktrees.path, name);
+        execFileSync('git', ['-C', checkout, 'worktree', 'add', '-q', '-b', name, path], {
+          env,
+          stdio: 'pipe',
+        });
+        return realpathSync(path);
+      };
+      const mine = add('mine');
+      const sibling = add('sibling');
+      // The git probes would succeed with no sandbox, so a denial below is the sandbox's.
+      const control = add('control');
+      execFileSync(
+        '/bin/sh',
+        ['-c', `printf x >> .git && touch "$(sed -n 's/^gitdir: //p' .git)/probe"`],
+        { cwd: control, env, stdio: 'pipe' },
+      );
+      const seen = await probe(
+        {
+          'write-main': `touch ${join(checkout, 'probe')}`,
+          'write-sibling': `touch ${join(sibling, 'probe')}`,
+          'write-gitfile': 'printf x >> .git',
+          'write-own-git-dir': `touch "$(sed 's/^gitdir: //' .git)/probe"`,
+          'write-common-dir': `touch ${join(checkout, '.git', 'probe')}`,
+          'write-worktree': 'touch inside && rm inside',
+        },
+        {
+          project: { repoPath: mine, sandboxLoopback: false },
+          checkouts: [checkout, mine, sibling],
+        },
+      );
+      expect(seen).toEqual({
+        'write-main': 'denied',
+        'write-sibling': 'denied',
+        'write-gitfile': 'denied',
+        'write-own-git-dir': 'denied',
+        'write-common-dir': 'denied',
+        'write-worktree': 'ok',
+      });
+    } finally {
+      worktrees.cleanup();
+    }
   }, 120_000);
 
   it("reaches the project's allowed hosts through the proxy, and localhost only when it is on", async () => {

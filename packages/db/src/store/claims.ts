@@ -2,6 +2,7 @@ import {
   ClaimKind,
   EventType,
   mintId,
+  type BatchId,
   type ProjectDto,
   type ProjectId,
   type TaskDto,
@@ -41,9 +42,17 @@ export function claimRequestsForTask(
   }));
 }
 
+/** An area is exclusive within its batch when it has one, else within the project; a hazard within the project. */
+function scopeOf(
+  request: ClaimRequest,
+  input: { readonly projectId: ProjectId; readonly areaScope?: BatchId },
+): ProjectId | BatchId {
+  return request.kind === ClaimKind.Area ? (input.areaScope ?? input.projectId) : input.projectId;
+}
+
 function activeHolder(
   db: DbReader,
-  projectId: ProjectId,
+  scope: ProjectId | BatchId,
   request: ClaimRequest,
 ): ClaimRow | undefined {
   return db
@@ -51,7 +60,7 @@ function activeHolder(
     .from(schema.claims)
     .where(
       and(
-        eq(schema.claims.projectId, projectId),
+        eq(schema.claims.scope, scope),
         eq(schema.claims.kind, request.kind),
         eq(schema.claims.name, request.name),
         isNull(schema.claims.releasedAt),
@@ -68,12 +77,14 @@ export function acquireClaims(
     readonly workstreamId: WorkstreamId;
     readonly requests: readonly ClaimRequest[];
     readonly leaseExpiresAt: string;
+    /** The batch whose areas these are; absent, areas are scoped to the project. */
+    readonly areaScope?: BatchId;
   },
 ): AcquireResult {
   const toInsert: ClaimRequest[] = [];
   const unique = new Map(input.requests.map((r) => [`${r.kind}:${r.name}`, r]));
   for (const request of unique.values()) {
-    const holder = activeHolder(ctx.tx, input.projectId, request);
+    const holder = activeHolder(ctx.tx, scopeOf(request, input), request);
     if (holder && holder.workstreamId !== input.workstreamId) {
       return {
         ok: false,
@@ -89,6 +100,7 @@ export function acquireClaims(
       .values({
         id,
         projectId: input.projectId,
+        scope: scopeOf(request, input),
         workstreamId: input.workstreamId,
         kind: request.kind,
         name: request.name,

@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
-import { shellQuote, trustCard } from './trust-card';
+import { shellQuote, trustCard, worktreeRemovalCommand } from './trust-card';
 import { GitTrustError } from './trust-error';
 
 const NASTY = [
@@ -58,5 +58,57 @@ describe('the writable card', () => {
       trustCard(new GitTrustError('/repo', { kind: 'writable', gitDir })).foldKey;
     expect(card('/repo/vendor/git')).toBe(card('/repo/vendor/git'));
     expect(card('/repo/vendor/git')).not.toBe(card('/tmp/lane/git'));
+  });
+});
+
+describe('the unpinned card', () => {
+  const card = (repo: string) => trustCard(new GitTrustError(repo, { kind: 'unpinned' }));
+
+  it('offers no Trust and says how to remove the worktree', () => {
+    const { body, candidate } = card('/root/ab/bat_1');
+    expect(candidate).toBeNull();
+    expect(body).toContain(
+      "git -C '/root/ab/bat_1' worktree remove --force --force '/root/ab/bat_1'",
+    );
+  });
+
+  it.each([
+    ['a backtick', '/root/a`touch x`'],
+    ['a newline', '/root/a\nb'],
+    ['a space', '/root/a b'],
+  ])('puts no command to paste in the card for a path with %s', (_name, path) => {
+    const { body } = card(path);
+    expect(body).not.toContain("git -C '");
+    expect(body).toContain('git worktree remove --force --force run in ');
+  });
+
+  it('folds one card per path', () => {
+    expect(card('/root/a').foldKey).toBe(card('/root/a').foldKey);
+    expect(card('/root/a').foldKey).not.toBe(card('/root/b').foldKey);
+  });
+});
+
+describe('worktreeRemovalCommand', () => {
+  it.each([
+    {
+      name: 'both paths plain: a command that runs from anywhere',
+      checkout: '/repo',
+      path: '/root/ab/bat_1',
+      shown: "git -C '/repo' worktree remove --force --force '/root/ab/bat_1'",
+    },
+    {
+      name: 'a checkout with a space: typed, each path a code span',
+      checkout: '/my repo',
+      path: '/root/ab/bat_1',
+      shown: 'git worktree remove --force --force run in `/my repo`, naming `/root/ab/bat_1`',
+    },
+    {
+      name: 'a path with a backtick: typed, each path a code span',
+      checkout: '/repo',
+      path: '/root/a`x`',
+      shown: 'git worktree remove --force --force run in `/repo`, naming `` /root/a`x` ``',
+    },
+  ])('$name', ({ checkout, path, shown }) => {
+    expect(worktreeRemovalCommand(checkout, path)).toBe(shown);
   });
 });

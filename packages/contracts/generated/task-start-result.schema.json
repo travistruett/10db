@@ -586,6 +586,12 @@
             }
           ]
         },
+        "worktreePath": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "createdAt": {
           "type": "string",
           "format": "date-time",
@@ -610,6 +616,7 @@
         "gateExitCode",
         "gateLogPath",
         "failure",
+        "worktreePath",
         "createdAt",
         "updatedAt"
       ]

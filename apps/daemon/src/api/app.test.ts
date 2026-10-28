@@ -1,4 +1,5 @@
 import {
+  BatchStartResult,
   ConflictError,
   HealthResponse,
   mintId,
@@ -545,6 +546,12 @@ describe('team, routing and benchmark routes', () => {
       body: { allowedCommands: ['node'] },
     },
     {
+      name: 'a PATCH /projects/:id seed name with a slash',
+      method: 'PATCH',
+      path: `/projects/${projectId}`,
+      body: { worktreeSeed: ['node_modules/.cache'] },
+    },
+    {
       name: 'a flow with no implement step',
       method: 'POST',
       path: '/flows',
@@ -577,6 +584,7 @@ describe('batch routes', () => {
     gateExitCode: null,
     gateLogPath: null,
     failure: null,
+    worktreePath: null,
     createdAt: '2026-10-21T12:00:00.000Z',
     updatedAt: '2026-10-21T12:00:00.000Z',
   } as const;
@@ -600,15 +608,16 @@ describe('batch routes', () => {
     expect(reached).toEqual([]);
   });
 
-  it('answers 202 with the batch for a batch start, and 400 for an empty one', async () => {
-    const services = stubServices({ startBatch: () => batch });
+  it('POST /projects/:id/batches answers an array: 202 with every batch the start made, 400 for an empty start', async () => {
+    const second = { ...batch, id: mintId('Batch'), title: 'Farewells' };
+    const services = stubServices({ startBatch: () => [batch, second] });
     const path = `/projects/${batch.projectId}/batches`;
     const ok = await app(services).request(
       path,
-      post(path, { title: 'Greetings', taskIds: [mintId('Task')] }),
+      post(path, { title: 'Greetings', taskIds: [mintId('Task'), mintId('Task')] }),
     );
     expect(ok.status).toBe(202);
-    expect(await ok.json()).toEqual(batch);
+    expect(BatchStartResult.parse(await ok.json())).toEqual([batch, second]);
     expect(
       (await app(services).request(path, post(path, { title: 'x', taskIds: [] }))).status,
     ).toBe(400);

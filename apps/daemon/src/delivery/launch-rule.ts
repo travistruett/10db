@@ -1,6 +1,6 @@
 import { BatchState, type BatchDto } from '@10db/contracts';
 import type { InboxService } from '../inbox';
-import { wrongBranchCard } from './cards';
+import { worktreeCards, wrongBranchCard } from './cards';
 import { raise } from './context';
 
 export const LaunchVerdict = {
@@ -31,4 +31,9 @@ export function flagWrongBranch(
   repoPath: string,
 ): void {
   raise(inbox, batch.projectId, wrongBranchCard(batch, current, repoPath, 'waits'));
+}
+
+/** One folded card while an open batch's work waits for a worktree that is gone. */
+export function flagWorktreeMissing(inbox: InboxService, batch: BatchDto, path: string): void {
+  raise(inbox, batch.projectId, worktreeCards.missing(batch, path, 'waits'));
 }

@@ -20,7 +20,12 @@ import {
   acquireClaims,
   claimRequestsForTask,
   createTestStore,
+  insertBatch,
+  insertTask,
+  insertWorkstream,
   listInbox,
+  patchBatch,
+  transitionBatch,
   releaseClaims,
   seedProject,
   transitionWorkstream,
@@ -31,6 +36,7 @@ import {
   isolatedGitEnv,
   seedWorkstream,
   tempDir,
+  type TempDir,
   waitFor,
 } from '../../test/fixtures';
 import { ManualClock, systemClock } from '../clock';
@@ -544,5 +550,147 @@ describe('watcher on the real file system', () => {
     } finally {
       real.stop();
     }
+  });
+});
+
+describe('worktree checkouts', () => {
+  let dirs: TempDir[];
+  beforeEach(() => {
+    dirs = [];
+  });
+  afterEach(() => {
+    for (const dir of dirs) dir.cleanup();
+  });
+
+  /** A real git worktree of the project's checkout, its OPEN batch and one workstream claiming `claim`. */
+  function inWorktree(
+    title: string,
+    claim: string,
+    workstreamState: WorkstreamState = WorkstreamState.Running,
+  ) {
+    const dir = tempDir('worktree');
+    dirs.push(dir);
+    const path = join(dir.path, 'wt');
+    execFileSync('git', ['-C', repo.path, 'worktree', 'add', '-q', '-b', `b-${title}`, path], {
+      env: isolatedGitEnv(),
+      stdio: 'pipe',
+    });
+    const task = state.write((ctx) =>
+      insertTask(ctx, project.id, { title, acceptanceCriteria: ['x'], areas: [claim] }),
+    );
+    const batch = state.write((ctx) => {
+      const b = insertBatch(ctx, {
+        projectId: project.id,
+        title,
+        baseBranch: 'main',
+        worktreePath: path,
+      });
+      transitionBatch(ctx, b.id, { to: 'OPEN' });
+      patchBatch(ctx, b.id, { branch: `b-${title}`, baseSha: 'a'.repeat(40) });
+      return b;
+    });
+    const workstream = state.write((ctx) => insertWorkstream(ctx, task.id, { batchId: batch.id }));
+    state.write((ctx) => {
+      acquireClaims(ctx, {
+        projectId: project.id,
+        workstreamId: workstream.id,
+        requests: claimRequestsForTask(task, project),
+        leaseExpiresAt: '2999-01-01T00:00:00.000Z',
+        areaScope: batch.id,
+      });
+      transitionWorkstream(ctx, workstream.id, { to: WorkstreamState.Starting, fence: null });
+      transitionWorkstream(ctx, workstream.id, { to: WorkstreamState.Running, fence: null });
+      if (workstreamState !== WorkstreamState.Running)
+        transitionWorkstream(ctx, workstream.id, { to: workstreamState, fence: null });
+    });
+    return { path, batch, task, workstream };
+  }
+  const writeAt = (root: string, rel: string) => {
+    mkdirSync(dirname(join(root, rel)), { recursive: true });
+    writeFileSync(join(root, rel), 'x');
+    fake.open.get(root)?.onChange(rel);
+  };
+
+  it('watches each live worktree with work in it and stops when its work ends', () => {
+    const a = inWorktree('Alpha', 'api');
+    const b = inWorktree('Beta', 'ui');
+    watcher.sync();
+    expect([...fake.open.keys()].sort()).toEqual([a.path, b.path].sort());
+    state.write((ctx) =>
+      transitionWorkstream(ctx, a.workstream.id, { to: WorkstreamState.Cancelled, fence: null }),
+    );
+    watcher.sync();
+    expect([...fake.open.keys()]).toEqual([b.path]);
+    expect(fake.closed).toEqual([a.path]);
+  });
+
+  it("judges a write in a worktree by its batch's areas", async () => {
+    const a = inWorktree('Alpha', 'ui');
+    const b = inWorktree('Beta', 'api');
+    watcher.sync();
+    writeAt(a.path, 'src/ui/x.ts');
+    writeAt(b.path, 'src/ui/x.ts');
+    await watcher.flush();
+    const open = flags();
+    expect(open).toHaveLength(1);
+    expect(open[0]).toMatchObject({
+      title: 'Write outside every claim',
+      body: `${b.path}: src/ui/x.ts`,
+      targets: [{ workstreamId: b.workstream.id, sessionId: null }],
+    });
+    expect(open[0]?.detail).toMatchObject({ path: 'src/ui/x.ts', candidates: [b.workstream.id] });
+  });
+
+  it('raises two cards when two worktrees write the same stray path', async () => {
+    const a = inWorktree('Alpha', 'api');
+    const b = inWorktree('Beta', 'api');
+    watcher.sync();
+    writeAt(a.path, 'docs/stray.md');
+    writeAt(b.path, 'docs/stray.md');
+    await watcher.flush();
+    expect(
+      flags()
+        .map((f) => f.body)
+        .sort(),
+    ).toEqual([`${a.path}: docs/stray.md`, `${b.path}: docs/stray.md`].sort());
+  });
+
+  it('counts a hazard claim held in another batch as held, and names its holder on a foreign write', async () => {
+    const holder = inWorktree('Alpha', 'harness');
+    const writer = inWorktree('Beta', 'api');
+    watcher.sync();
+    writeAt(writer.path, 'AGENTS.md');
+    writeAt(writer.path, 'src/api/ok.ts');
+    await watcher.flush();
+    const open = flags();
+    expect(open).toHaveLength(1);
+    expect(open[0]).toMatchObject({
+      title: "Write inside another workstream's claim",
+      body: `${writer.path}: AGENTS.md`,
+    });
+    expect(open[0]?.detail).toMatchObject({ claimedBy: [holder.workstream.id] });
+  });
+
+  it("does not let a worktree batch's area claim excuse a write in the main checkout", async () => {
+    const shared = running('Alpha', ['api']);
+    inWorktree('Beta', 'ui');
+    watcher.sync();
+    touch('src/ui/x.ts');
+    emit('src/ui/x.ts');
+    await watcher.flush();
+    const open = flags();
+    expect(open).toHaveLength(1);
+    expect(open[0]).toMatchObject({ title: 'Write outside every claim', body: 'src/ui/x.ts' });
+    expect(open[0]?.detail).toMatchObject({ candidates: [shared.workstream.id] });
+  });
+
+  it('reads the worktree at a step end, scoped to its batch', async () => {
+    const a = inWorktree('Alpha', 'ui');
+    inWorktree('Beta', 'api');
+    mkdirSync(join(a.path, 'src/ui'), { recursive: true });
+    writeFileSync(join(a.path, 'src/ui/x.ts'), 'x');
+    writeFileSync(join(a.path, 'src/api.ts'), 'x');
+    expect(await watcher.stepEnd(a.workstream.id)).toEqual(['src/api.ts']);
+    expect(flags().map((f) => f.body)).toEqual([`${a.path}: src/api.ts`]);
   });
 });

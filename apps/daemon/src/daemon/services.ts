@@ -58,6 +58,7 @@ import type { Runner } from '../runner';
 import type { Scheduler } from '../scheduler';
 import { ProjectMcpError, readRepoMcp, type RepoMcp } from '../sessions';
 import { proposeCandidates, resolveStepPlan, retryWorkstream, startTaskWithPlan } from '../team';
+import { checkoutConflictsWithRoot } from './worktree-root';
 
 /** The HTTP layer's view of the daemon: reads go to the database, writes go through the state store. */
 export function createServices(deps: {
@@ -73,6 +74,8 @@ export function createServices(deps: {
   readonly shipper: Shipper;
   readonly accounts: AccountService;
   readonly moves: Pick<AccountMoves, 'move'>;
+  /** Where worktrees are made; a project's checkout may not overlap it. */
+  readonly worktreeRoot: string;
   /** Records a new project's checkout as the daemon trusts it (lane sandbox spec D13). */
   readonly pinCheckout: (repoPath: string) => void;
 }): ApiServices {
@@ -83,6 +86,11 @@ export function createServices(deps: {
       const config = ProjectInput.parse(input);
       if (!existsSync(join(config.repoPath, '.git'))) {
         throw new InvalidError(`${config.repoPath} is not a git repository`);
+      }
+      if (checkoutConflictsWithRoot(deps.worktreeRoot, config.repoPath)) {
+        throw new InvalidError(
+          `${config.repoPath} overlaps the worktree root ${deps.worktreeRoot}: a checkout may not contain it or lie inside it. Set TENDB_WORKTREE_ROOT to a directory elsewhere.`,
+        );
       }
       const project = deps.state.write((ctx) => insertProject(ctx, config));
       deps.pinCheckout(project.repoPath);
@@ -118,6 +126,7 @@ export function createServices(deps: {
     },
     retryWorkstream(id) {
       const ws = retryWorkstream(deps.state, id);
+      if (ws.batchId !== null) deps.starter.reopen(ws.batchId);
       deps.scheduler.requestTick();
       return ws;
     },

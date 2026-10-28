@@ -23,6 +23,8 @@ export const GitTrustFailure = {
   Filter: 'filter',
   /** A path is a submodule or holds an embedded repository, whose own git the daemon never runs. */
   Embedded: 'embedded',
+  /** A path under 10db's worktree root that 10db made no worktree at. */
+  Unpinned: 'unpinned',
 } as const;
 export type GitTrustFailure = (typeof GitTrustFailure)[keyof typeof GitTrustFailure];
 
@@ -74,7 +76,8 @@ export type GitTrustDetail =
       readonly kind: typeof GitTrustFailure.Filter;
       readonly paths: readonly { readonly path: string; readonly filter: string }[];
     }
-  | { readonly kind: typeof GitTrustFailure.Embedded; readonly path: string };
+  | { readonly kind: typeof GitTrustFailure.Embedded; readonly path: string }
+  | { readonly kind: typeof GitTrustFailure.Unpinned };
 
 function describe(repo: string, detail: GitTrustDetail): string {
   switch (detail.kind) {
@@ -109,6 +112,8 @@ function describe(repo: string, detail: GitTrustDetail): string {
         .join(', ')}${detail.paths.length > 3 ? ', …' : ''}`;
     case GitTrustFailure.Embedded:
       return `10db won't commit ${detail.path} in ${repo}: it is a submodule or holds a repository of its own`;
+    case GitTrustFailure.Unpinned:
+      return `10db won't run git in ${repo}: it lies under 10db's worktree root, but 10db made no worktree there`;
   }
 }
 

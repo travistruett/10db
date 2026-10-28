@@ -11,6 +11,7 @@ import {
   ProjectInput,
   ProjectPatch,
   Provider,
+  WorkspaceMode,
   type AccountId,
   type ProjectDto,
   type ProjectId,
@@ -19,7 +20,7 @@ import {
 import { and, asc, eq, inArray } from 'drizzle-orm';
 import * as schema from '../schema';
 import { defaultAccountId, getAccountRow } from './accounts';
-import { currentBatch, findUnfinishedBatch } from './batches';
+import { currentBatch, findUnfinishedBatch, listUnfinishedBatches } from './batches';
 import { insertBoardColumn } from './board-columns';
 import { getFlow } from './flows';
 import type { DbReader, WriteContext } from './store';
@@ -122,6 +123,16 @@ export function patchProject(ctx: WriteContext, id: ProjectId, patch: ProjectPat
     changes.prTitlePrefix === undefined ? current.prTitlePrefix : changes.prTitlePrefix;
   if (delivery === Delivery.PullRequest && prefix === null)
     throw new InvalidError('Pull request delivery needs a PR title prefix such as feat(app)');
+  const workspaceMode = changes.workspaceMode ?? current.workspaceMode;
+  if (workspaceMode === WorkspaceMode.Worktree && delivery !== Delivery.PullRequest)
+    throw new InvalidError('A worktree per task needs pull request delivery');
+  if (workspaceMode !== current.workspaceMode) {
+    const [open] = listUnfinishedBatches(ctx.tx, id);
+    if (open)
+      throw new ConflictError(
+        `Batch "${open.title}" is still ${open.state.toLowerCase()}; finish it before changing ${current.name}'s workspace mode`,
+      );
+  }
   // Re-saving the fallback the project already has asks nothing again, even while it runs on it.
   if (
     changes.fallbackAccountId !== undefined &&
@@ -178,5 +189,9 @@ export function listMoveBacks(db: DbReader): ProjectDto[] {
 
 /** `GET /projects`: each project with the batch its view shows. */
 export function listProjectViews(db: DbReader): ProjectViewDto[] {
-  return listProjects(db).map((p) => ({ ...p, currentBatch: currentBatch(db, p.id) }));
+  return listProjects(db).map((p) => ({
+    ...p,
+    currentBatch: currentBatch(db, p.id),
+    openBatches: listUnfinishedBatches(db, p.id),
+  }));
 }

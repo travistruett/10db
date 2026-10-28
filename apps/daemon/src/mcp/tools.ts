@@ -36,6 +36,7 @@ import {
 } from '@10db/db';
 import type { z } from 'zod';
 import { buildContextPack } from '../briefing';
+import { checkoutOf, claimScopeOf } from '../delivery';
 import type { StateStore } from '../events';
 import type { Git } from '../git';
 import { judgeToolUse, type ProtectedPath } from '../guard';
@@ -256,14 +257,17 @@ export function createToolHandlers(
         );
       }
       // The claim shares the workstream's lease, which the scheduler's heartbeat renews.
-      const outcome = deps.state.write((ctx) =>
-        acquireClaims(ctx, {
+      const outcome = deps.state.write((ctx) => {
+        const row = getWorkstreamRow(ctx.tx, workstreamId);
+        const areaScope = claimScopeOf(ctx.tx, row);
+        return acquireClaims(ctx, {
           projectId: project.id,
           workstreamId,
           requests: [{ kind, name: input.name }],
-          leaseExpiresAt: getWorkstreamRow(ctx.tx, workstreamId).leaseExpiresAt ?? ctx.now,
-        }),
-      );
+          leaseExpiresAt: row.leaseExpiresAt ?? ctx.now,
+          ...(areaScope ? { areaScope } : {}),
+        });
+      });
       if (outcome.ok) {
         const claim = outcome.claims.find((c) => c.kind === kind && c.name === input.name);
         if (!claim) throw new InvalidError('Claim was granted but not found');
@@ -297,7 +301,8 @@ export function createToolHandlers(
       if (done !== undefined) return McpToolOutputs.commit.parse(done);
       if (currentStep(getWorkstreamRow(db, workstreamId)).tools === ToolAccess.ReadOnly)
         throw new InvalidError('This step is read-only; only an implement step commits.');
-      const { project } = context();
+      const { project, workstream } = context();
+      const checkout = checkoutOf(db, workstream);
       // A batch names its branch; other work commits on the branch pinned at its first session.
       const row = getWorkstreamRow(db, workstreamId);
       const branch = row.batchId ? getBatch(db, row.batchId).branch : row.branch;
@@ -310,7 +315,7 @@ export function createToolHandlers(
         const verdict = judgeToolUse({
           toolName: 'Write',
           toolInput: { file_path: path },
-          repoPath: project.repoPath,
+          repoPath: checkout,
           areas: project.areas,
           hazards: project.hazards,
           claims,
@@ -320,7 +325,7 @@ export function createToolHandlers(
         if (verdict.decision === 'deny') throw new InvalidError(verdict.reason);
       }
       const result = await deps.git.commit({
-        repo: project.repoPath,
+        repo: checkout,
         paths: input.paths,
         message: input.message,
         opId: input.opId,
@@ -398,13 +403,13 @@ export function createToolHandlers(
     write_handoff: async ({ opId, ...content }) => {
       const done = prior(opId, McpToolName.WriteHandoff);
       if (done !== undefined) return McpToolOutputs.write_handoff.parse(done);
-      const { project } = context();
       const row = getWorkstreamRow(db, workstreamId);
-      const head = await deps.git.head(project.repoPath);
+      const checkout = checkoutOf(db, row);
+      const head = await deps.git.head(checkout);
       const base = row.baseHead ?? head;
       const [changed, commits] = await Promise.all([
-        deps.git.changedFilesSince(project.repoPath, base),
-        deps.git.commitsSince(project.repoPath, base),
+        deps.git.changedFilesSince(checkout, base),
+        deps.git.commitsSince(checkout, base),
       ]);
       return deps.state.write((ctx) => {
         const handoff = insertHandoff(ctx, {

@@ -1,6 +1,6 @@
 import { BatchFailure, type BatchDto, type ProjectDto, type TaskId } from '@10db/contracts';
 import type { Json } from '@10db/db';
-import { GitNetworkError } from '../git';
+import { GitNetworkError, worktreeRemovalCommand } from '../git';
 import { GhError } from '../github';
 import type { GateResult } from '../verify';
 import type { BlockedTask, UnmergedDependency } from './deps';
@@ -113,6 +113,89 @@ export const startCards = {
   }),
 };
 
+/** What delivery tells the builder about a batch's worktree. */
+export const worktreeCards = {
+  pathExists: (batch: BatchDto, path: string): Card => ({
+    title: `${NOT_STARTED}: ${path} already exists`,
+    body: `10db makes the worktree for "${batch.title}" at a path nothing holds yet, and never writes into a directory it didn't make. Move or remove ${path}, then start again.`,
+  }),
+  seedFailed: (batch: BatchDto, error: unknown): Card => ({
+    title: `${NOT_STARTED}: 10db couldn't seed the worktree for "${batch.title}"`,
+    body: `${detailOf(error)}\n\n10db copies the checkout's ignored directories named in the project's worktree seed (node_modules unless you changed it) into each new worktree, and one entry could not be read or written. The worktree and its branch were removed. Fix the entry's permissions, or take its directory out of the seed, then start again.`,
+  }),
+  missing: (batch: BatchDto, path: string, outcome: 'waits' | 'failed'): Card => {
+    const branch = batch.branch ?? '(not cut)';
+    const detail = { batchId: batch.id };
+    switch (outcome) {
+      case 'waits':
+        return {
+          title: `Batch "${batch.title}" waits: its worktree ${path} is missing`,
+          body: `Nothing in the batch starts without its worktree. Abandon the batch on its strip, or restart 10db, which fails the batch so Retry can make the worktree again from ${branch}.`,
+          foldKey: `worktree-missing:${batch.id}`,
+          detail,
+        };
+      case 'failed':
+        return {
+          title: `Batch "${batch.title}" failed: its worktree ${path} is missing`,
+          body: `10db restarted and found no worktree at ${path}, so nothing in the batch runs. Press Retry on the batch strip to make it again from ${branch}, or abandon the batch there.`,
+          detail,
+        };
+    }
+  },
+  /** `main` is the project's main checkout, where the removal command runs. */
+  keptDirty: (batch: BatchDto, main: string, path: string, paths: readonly string[]): Card => ({
+    title: `Batch "${batch.title}" abandoned: uncommitted changes kept in ${path}`,
+    body: `10db never throws away uncommitted work, so it kept the worktree with these changes:\n${listPaths(paths)}\n\nCopy what you need, then remove it with ${worktreeRemovalCommand(main, path)}.`,
+    foldKey: `worktree-kept:${batch.id}`,
+    detail: { batchId: batch.id },
+  }),
+  /**
+   * `paths` is null when git couldn't read the worktree, which counts as changed. `main` is the
+   * project's main checkout, where the removal command runs.
+   */
+  orphanKept: (main: string, path: string, paths: readonly string[] | null): Card => ({
+    title:
+      paths === null
+        ? `10db kept ${path}: it can't be read`
+        : `10db kept ${path}: it has uncommitted changes`,
+    body: `No batch uses this worktree any more, but ${
+      paths === null
+        ? "10db couldn't read it, so it may hold uncommitted work"
+        : `it holds uncommitted changes:\n${listPaths(paths)}`
+    }\n\n10db never throws away uncommitted work. Copy what you need, then remove it with ${worktreeRemovalCommand(main, path)}.`,
+    foldKey: `worktree-orphan:${path}`,
+  }),
+  leftBehind: (batch: BatchDto, path: string): Card => ({
+    title: `10db left ${path} in place`,
+    body: `The worktree path of batch "${batch.title}" holds a directory git doesn't list as a worktree, so 10db didn't remove it and no longer treats it as the batch's. Look inside, then delete it yourself if nothing there is needed.`,
+    detail: { batchId: batch.id },
+  }),
+  inTheWay: (batch: BatchDto, path: string, reason: string): Card => ({
+    title: `Batch "${batch.title}" not retried: ${path} is in the way`,
+    body: `10db makes the worktree whole on ${batch.branch ?? '(not cut)'} before a retry, and won't remove what is at ${path}: ${reason}. Look inside; if nothing there is needed, delete it, then press Retry on the batch strip.`,
+    foldKey: `worktree-in-the-way:${batch.id}`,
+    detail: { batchId: batch.id },
+  }),
+  notReopened: (batch: BatchDto, error: unknown): Card => ({
+    title: `Batch "${batch.title}" not reopened: ${detailOf(error)}`,
+    body: `10db makes the worktree whole on ${batch.branch ?? '(not cut)'} before the batch reopens, and couldn't. Fix the cause, then press Retry on the batch strip.`,
+    detail: { batchId: batch.id },
+  }),
+  notWhole: (
+    batch: BatchDto,
+    path: string,
+    found: string | null,
+    paths: readonly string[],
+  ): Card => {
+    const branch = batch.branch ?? '(not cut)';
+    return {
+      title: `Batch "${batch.title}" not retried: its worktree is on ${found ?? 'a detached HEAD'}, with uncommitted changes`,
+      body: `10db makes the worktree whole on ${branch} before a retry and won't throw away changes. Commit or discard these in ${path}, or run git switch ${branch} there, then press Retry on the batch strip:\n${listPaths(paths)}`,
+      detail: { batchId: batch.id },
+    };
+  },
+};
+
 /**
  * A refused start's card names its tasks (and the batch it tried to join), so a client can tell a
  * refused start from a join that is still on its way: a joined task gets a workstream instead.
@@ -181,11 +264,12 @@ export interface ShipFailure {
 }
 
 export const shipCards = {
-  dirtyCheckout: (batch: BatchDto, paths: readonly string[]): ShipFailure => ({
+  /** `checkout` names a worktree the changes are in; the shared checkout is not named. */
+  dirtyCheckout: (batch: BatchDto, paths: readonly string[], checkout?: string): ShipFailure => ({
     failure: BatchFailure.DirtyCheckout,
     card: {
       title: `${notShipped(batch)}: the checkout has uncommitted changes`,
-      body: `10db ships only a clean branch. Commit these with a fix task in the batch, or discard them, then retry:\n${listPaths(paths)}\n\n${RETRY}`,
+      body: `10db ships only a clean branch. Commit these with a fix task in the batch, or discard them${checkout === undefined ? '' : ` in ${checkout}`}, then retry:\n${listPaths(paths)}\n\n${RETRY}`,
       detail: { batchId: batch.id },
     },
   }),

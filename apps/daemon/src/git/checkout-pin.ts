@@ -1,3 +1,4 @@
+import type { BatchId } from '@10db/contracts';
 import { z } from 'zod';
 
 /**
@@ -13,6 +14,9 @@ export const CheckoutPin = z.object({
   pushUrl: z.string().min(1).nullable(),
 });
 export type CheckoutPin = z.infer<typeof CheckoutPin>;
+
+/** The app setting a batch's worktree pin is kept under. */
+export const worktreePinKey = (batchId: BatchId): string => `checkout_pin.${batchId}`;
 
 /** Where pins live, keyed by the checkout's real path. */
 export interface PinStore {

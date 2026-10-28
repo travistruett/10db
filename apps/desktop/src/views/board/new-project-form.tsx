@@ -1,4 +1,12 @@
-import { AccountId, BranchName, Delivery, PrTitlePrefix, type ProjectDto } from '@10db/contracts';
+import {
+  AccountId,
+  BranchName,
+  DEFAULT_WORKTREE_SEED,
+  Delivery,
+  PrTitlePrefix,
+  WorkspaceMode,
+  type ProjectDto,
+} from '@10db/contracts';
 import {
   Alert,
   Button,
@@ -14,6 +22,8 @@ import { useState, type SyntheticEvent } from 'react';
 import { useAccounts } from '../../daemon/account-queries';
 import { useCreateProject } from '../../daemon/queries';
 import { accountOptions } from '../settings/account-kind-label';
+import { checkSeedNames } from '../settings/general-values';
+import { WorkspaceFields } from '../settings/workspace-fields';
 import { parseAreas } from './areas-text';
 
 /** Starting heuristics (spec §15); the daemon validates the final values. */
@@ -44,6 +54,8 @@ export function NewProjectForm({
   const [delivery, setDelivery] = useState<Delivery>(Delivery.Local);
   const [baseBranch, setBaseBranch] = useState('main');
   const [prTitlePrefix, setPrTitlePrefix] = useState('');
+  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>(WorkspaceMode.Shared);
+  const [worktreeSeed, setWorktreeSeed] = useState<string[]>([...DEFAULT_WORKTREE_SEED]);
   const [formError, setFormError] = useState<string | null>(null);
 
   const submit = (event: SyntheticEvent<HTMLFormElement>): void => {
@@ -66,6 +78,13 @@ export function NewProjectForm({
       setFormError('Enter the base branch, such as main');
       return;
     }
+    const worktrees = pullRequests && workspaceMode === WorkspaceMode.Worktree;
+    const checkedSeed = checkSeedNames(worktreeSeed);
+    const seed = checkedSeed.names;
+    if (worktrees && checkedSeed.error !== null) {
+      setFormError(checkedSeed.error);
+      return;
+    }
     setFormError(null);
     create.mutate(
       {
@@ -80,6 +99,7 @@ export function NewProjectForm({
         ...(pullRequests
           ? { baseBranch: baseBranch.trim(), prTitlePrefix: prTitlePrefix.trim() }
           : {}),
+        ...(worktrees ? { workspaceMode, worktreeSeed: seed } : {}),
       },
       {
         onSuccess: (project) => {
@@ -173,6 +193,14 @@ export function NewProjectForm({
               value={prTitlePrefix}
               onChange={(e) => {
                 setPrTitlePrefix(e.currentTarget.value);
+              }}
+            />
+            <WorkspaceFields
+              workspaceMode={workspaceMode}
+              worktreeSeed={worktreeSeed}
+              onChange={(change) => {
+                if (change.workspaceMode !== undefined) setWorkspaceMode(change.workspaceMode);
+                if (change.worktreeSeed !== undefined) setWorktreeSeed(change.worktreeSeed);
               }}
             />
           </>

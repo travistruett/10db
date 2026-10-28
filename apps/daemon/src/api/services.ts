@@ -72,8 +72,11 @@ export interface ApiServices {
   listTasks(projectId: ProjectId): TaskDto[];
   createTask(projectId: ProjectId, input: TaskInput): TaskDto;
   startTask(taskId: TaskId): TaskStarted;
-  /** Starts the tasks as a batch, or adds them to the project's open or failed batch. */
-  startBatch(projectId: ProjectId, input: BatchStartInput): BatchDto;
+  /**
+   * Starts the tasks and answers every batch the start made or joined: one in shared mode (new, or
+   * the project's open or failed batch), one per dependency group in worktree mode.
+   */
+  startBatch(projectId: ProjectId, input: BatchStartInput): BatchDto[];
   /** Every batch of the project, newest first: a finished task's pull request can sit in an old batch. */
   listBatches(projectId: ProjectId): BatchDto[];
   /** Ship anyway (from OPEN) or Retry (from FAILED). */

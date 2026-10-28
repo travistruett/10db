@@ -2,13 +2,15 @@ import { realpathSync } from 'node:fs';
 import type { ProjectDto } from '@10db/contracts';
 import {
   deleteAppSetting,
+  findBatchByWorktreePath,
   getAppSetting,
+  getProject,
   listProjects,
   setAppSetting,
   type DbReader,
 } from '@10db/db';
 import type { StateStore } from '../events';
-import { CheckoutPin, type PinStore } from '../git';
+import { CheckoutPin, worktreePinKey, type PinStore } from '../git';
 
 function realOrNull(path: string): string | null {
   try {
@@ -18,44 +20,57 @@ function realOrNull(path: string): string | null {
   }
 }
 
-/** The project whose checkout is at `repo`, a real path; undefined when none is. */
+/** The project whose checkout is at `repo`, a real path, or whose batch has a worktree there. */
 export function projectAt(db: DbReader, repo: string): ProjectDto | undefined {
-  return listProjects(db).find((project) => realOrNull(project.repoPath) === repo);
+  return pinOwner(db, repo)?.project;
 }
 
-const key = (project: ProjectDto) => `checkout_pin.${project.id}`;
+const projectPinKey = (project: ProjectDto): string => `checkout_pin.${project.id}`;
+
+/** Who a pin at `repo` belongs to, and the setting that holds it. */
+function pinOwner(
+  db: DbReader,
+  repo: string,
+): { readonly project: ProjectDto; readonly key: string } | undefined {
+  const project = listProjects(db).find((candidate) => realOrNull(candidate.repoPath) === repo);
+  if (project) return { project, key: projectPinKey(project) };
+  const batch = findBatchByWorktreePath(db, repo);
+  if (!batch) return undefined;
+  return { project: getProject(db, batch.projectId), key: worktreePinKey(batch.id) };
+}
 
 /**
- * Pins that persist in the database, one per project, so a restart keeps trusting only what the
- * builder trusted. A checkout no project uses keeps its pin in `fallback`.
+ * Pins that persist in the database, one per project checkout and one per batch worktree, so a
+ * restart keeps trusting only what the builder trusted. A checkout no project or batch uses keeps
+ * its pin in `fallback`.
  */
 export function createProjectPinStore(state: StateStore, fallback: PinStore): PinStore {
   return {
     get(repo) {
-      const project = projectAt(state.db, repo);
-      if (!project) return fallback.get(repo);
+      const owner = pinOwner(state.db, repo);
+      if (!owner) return fallback.get(repo);
       // The stored value is JSON read back from the database: a boundary, so parse it.
-      const parsed = CheckoutPin.safeParse(getAppSetting(state.db, key(project)));
+      const parsed = CheckoutPin.safeParse(getAppSetting(state.db, owner.key));
       return parsed.success ? parsed.data : undefined;
     },
     set(repo, pin) {
-      const project = projectAt(state.db, repo);
-      if (!project) {
+      const owner = pinOwner(state.db, repo);
+      if (!owner) {
         fallback.set(repo, pin);
         return;
       }
       state.write((ctx) => {
-        setAppSetting(ctx, key(project), { ...pin });
+        setAppSetting(ctx, owner.key, { ...pin });
       });
     },
     delete(repo) {
-      const project = projectAt(state.db, repo);
-      if (!project) {
+      const owner = pinOwner(state.db, repo);
+      if (!owner) {
         fallback.delete(repo);
         return;
       }
       state.write((ctx) => {
-        deleteAppSetting(ctx, key(project));
+        deleteAppSetting(ctx, owner.key);
       });
     },
   };

@@ -42,6 +42,16 @@ describe('sheetMode', () => {
         reason: 'Fix the login is shipping; start once it has shipped',
       },
     },
+    {
+      name: 'worktree mode always starts new work',
+      project: projectViewDto({
+        delivery: 'pull_request',
+        prTitlePrefix: 'feat(app)',
+        workspaceMode: 'worktree',
+        currentBatch: batchDto({ title, state: 'SHIPPING' }),
+      }),
+      expected: { kind: 'worktrees' },
+    },
   ])('answers $name', ({ project, expected }) => {
     expect(sheetMode(project)).toEqual(expected);
   });
@@ -54,6 +64,7 @@ describe('submitLabel', () => {
     { mode: { kind: 'new_batch' }, count: 2, label: 'Start a batch of 2 tasks' },
     { mode: { kind: 'join', title }, count: 1, label: 'Add 1 task to Fix the login' },
     { mode: { kind: 'fix', title }, count: 2, label: 'Add 2 fix tasks to Fix the login' },
+    { mode: { kind: 'worktrees' }, count: 3, label: 'Start 3 tasks in worktrees' },
     {
       mode: { kind: 'busy', title, reason: 'Fix the login is shipping; start once it has shipped' },
       count: 1,

@@ -96,6 +96,8 @@ the URL recorded for it. If anything about the checkout changed underneath it, i
 |                                             | Touch another project, another agent's files, or 10db's own data |
 |                                             | Make the checks pass by crashing or being killed                 |
 
+Worktree mode, where each task works in its own git worktree, adds no process outside the sandbox: the daemon's worktree git calls run under the same config as its other git calls, and the seed copy of ignored directories runs nothing.
+
 ## How we check it
 
 - **A live test against the real Claude Code.** It starts real agent sessions and has them try to break out:

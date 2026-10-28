@@ -1,10 +1,12 @@
 import {
   BoardStatus,
   TaskStatus,
+  WorkspaceMode,
   WorkstreamState,
   type BatchDto,
   type BatchId,
   type ProjectId,
+  type ProjectViewDto,
   type TaskDto,
   type TaskId,
   type WorkstreamDto,
@@ -160,6 +162,33 @@ function BoardColumns({
   );
 }
 
+/** Worktree mode shows every open batch in the daemon's order, newest first; shared mode shows the one current batch. */
+function BatchStrips({
+  project,
+  workstreams,
+}: {
+  readonly project: ProjectViewDto;
+  readonly workstreams: readonly WorkstreamDto[];
+}) {
+  if (project.workspaceMode === WorkspaceMode.Worktree && project.openBatches.length > 0) {
+    return project.openBatches.map((batch) => (
+      <BatchStrip
+        key={batch.id}
+        batch={batch}
+        workstreams={workstreams}
+        workspaceMode={project.workspaceMode}
+      />
+    ));
+  }
+  return project.currentBatch ? (
+    <BatchStrip
+      batch={project.currentBatch}
+      workstreams={workstreams}
+      workspaceMode={project.workspaceMode}
+    />
+  ) : null;
+}
+
 export function BoardView() {
   const { projects, project, select } = useSelectedProject();
   const tasks = useTasks(project?.id ?? null);
@@ -250,9 +279,7 @@ export function BoardView() {
           {formatAreas(project.areas)}
         </Text>
       ) : null}
-      {project?.currentBatch ? (
-        <BatchStrip batch={project.currentBatch} workstreams={workstreams.data ?? []} />
-      ) : null}
+      {project ? <BatchStrips project={project} workstreams={workstreams.data ?? []} /> : null}
       {project && batchList.length > 0 ? <BatchHistory batches={batchList} /> : null}
 
       {project && tasks.isSuccess && taskList.length === 0 ? (

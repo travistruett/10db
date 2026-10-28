@@ -34,6 +34,8 @@ export interface DeliveryContext {
   readonly jobs: DeliveryJobs;
   readonly logger: Logger;
   readonly limits: DeliveryLimits;
+  /** Where this daemon makes worktrees: the data dir's hashed level, made at the first worktree cut. */
+  readonly worktreeRoot: string;
   /** The login environment network calls run in (environment/buildNetworkEnv). */
   networkEnv(): Readonly<Record<string, string>>;
   /** Asks the scheduler to look for work: a batch opened, grew or reopened. */

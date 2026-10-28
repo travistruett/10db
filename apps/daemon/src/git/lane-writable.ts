@@ -11,7 +11,7 @@ function readings(path: string): string[] | null {
   }
 }
 
-function equalOrUnder(path: string, root: string): boolean {
+export function equalOrUnder(path: string, root: string): boolean {
   const p = foldPathCase(path);
   const r = foldPathCase(root);
   return p === r || p.startsWith(r.endsWith('/') ? r : `${r}/`);

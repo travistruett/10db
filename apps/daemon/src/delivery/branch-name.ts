@@ -5,11 +5,12 @@ export const MAX_SLUG = 40;
 const ID_SUFFIX = 8;
 
 /**
- * `10db/<slug>-<last 8 hex of the batch id>` (batch delivery spec §5). The slug keeps ASCII letters
- * and digits only, so a title can't put an option, a ref expression or shell text into the name.
+ * `text` as a slug of ASCII letters and digits joined by single dashes, cut to MAX_SLUG at a word
+ * boundary; `fallback` when nothing is left. It can't hold an option, a ref expression, a path
+ * separator or shell text.
  */
-export function batchBranchName(title: string, id: BatchId): string {
-  const slug = title
+export function slugOf(text: string, fallback: string): string {
+  const slug = text
     .normalize('NFKD')
     // Drop the combining marks NFKD split off (`Ü` → `U`); \p{M} stays readable where a range of
     // literal combining characters would not.
@@ -17,7 +18,12 @@ export function batchBranchName(title: string, id: BatchId): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
-  return `${BRANCH_PREFIX}${capSlug(slug) || 'batch'}-${id.slice(-ID_SUFFIX)}`;
+  return capSlug(slug) || fallback;
+}
+
+/** `10db/<slug>-<last 8 hex of the batch id>` (batch delivery spec §5). */
+export function batchBranchName(title: string, id: BatchId): string {
+  return `${BRANCH_PREFIX}${slugOf(title, 'batch')}-${id.slice(-ID_SUFFIX)}`;
 }
 
 /**

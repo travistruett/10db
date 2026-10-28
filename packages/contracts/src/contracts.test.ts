@@ -28,6 +28,12 @@ describe('HealthResponse', () => {
   });
 });
 
+describe('PROTOCOL_VERSION', () => {
+  it('is 4: the batch start answer became an array', () => {
+    expect(PROTOCOL_VERSION).toBe(4);
+  });
+});
+
 describe('generated JSON Schema', () => {
   it('matches the committed files byte for byte', () => {
     for (const [file, text] of renderJsonSchemas()) {

@@ -432,6 +432,48 @@ describe('SettingsView', () => {
     expect(await screen.findByText(/has unfinished work/)).toBeTruthy();
   });
 
+  it('saves the workspace mode and the seed', async () => {
+    const project = projectDto({ delivery: 'pull_request', prTitlePrefix: 'feat(app)' });
+    const patched: unknown[] = [];
+    server.use(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
+      http.patch(daemonUrl('/projects/:projectId'), async ({ request }) => {
+        patched.push(await request.json());
+        return HttpResponse.json(project);
+      }),
+      ...baseHandlers(),
+    );
+    renderApp('/settings/general');
+    expect(screen.queryByText('Seed from the main checkout')).toBeNull();
+    fireEvent.click(await screen.findByRole('radio', { name: 'A worktree per task' }));
+    expect(screen.getAllByText('Seed from the main checkout').length).toBeGreaterThan(0);
+    expect(
+      screen.getByText('Ignored directories cloned into each new worktree, by name'),
+    ).toBeTruthy();
+    const seed = screen.getByRole('combobox', { name: 'Seed from the main checkout' });
+    seed.focus();
+    fireEvent.change(seed, { target: { value: '.venv' } });
+    fireEvent.blur(seed);
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => {
+      expect(patched).toEqual([
+        { workspaceMode: 'worktree', worktreeSeed: ['node_modules', '.venv'] },
+      ]);
+    });
+  });
+
+  it('hides the workspace choice for local delivery', async () => {
+    server.use(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([projectDto()])),
+      http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
+      ...baseHandlers(),
+    );
+    renderApp('/settings/general');
+    await screen.findByLabelText('Gate command');
+    expect(screen.queryByRole('radio', { name: 'A worktree per task' })).toBeNull();
+  });
+
   it('keeps what the builder typed and picks up other fields when the project changes mid-edit', async () => {
     const first = projectDto({ name: 'demo', gateCommand: 'make gate' });
     let current = first;

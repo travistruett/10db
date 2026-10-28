@@ -16,6 +16,7 @@ const batch = (overrides: Partial<BatchDto>): BatchDto => ({
   gateExitCode: null,
   gateLogPath: null,
   failure: null,
+  worktreePath: null,
   createdAt: AT,
   updatedAt: AT,
   ...overrides,

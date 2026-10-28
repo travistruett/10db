@@ -32,6 +32,17 @@ function codeSpan(value: string): string {
   return longest > 0 ? `${fence} ${shown} ${fence}` : `${fence}${shown}${fence}`;
 }
 
+/**
+ * How the builder removes the locked worktree at `path`, as git run in `checkout` (the main checkout,
+ * or a linked worktree of the same repository), so it works wherever it is pasted: a command to paste
+ * when both paths are plain, otherwise the command to type, naming each path as a code span.
+ */
+export function worktreeRemovalCommand(checkout: string, path: string): string {
+  return PASTE_SAFE.test(checkout) && PASTE_SAFE.test(path)
+    ? `git -C ${shellQuote(checkout)} worktree remove --force --force ${shellQuote(path)}`
+    : `git worktree remove --force --force run in ${codeSpan(checkout)}, naming ${codeSpan(path)}`;
+}
+
 function body(error: GitTrustError): string {
   const { repo, detail } = error;
   const here = PASTE_SAFE.test(repo) ? ` in ${shellQuote(repo)}` : ` in ${codeSpan(repo)}`;
@@ -79,6 +90,9 @@ function body(error: GitTrustError): string {
         )}\n\nCommit them, or push the branch, yourself. A repository that uses Git LFS can't ship through 10db yet.`;
     case GitTrustFailure.Embedded:
       return `${codeSpan(detail.path)} is a submodule or holds a repository of its own, whose git would run its own config and hooks. 10db never commits one; commit it yourself if it belongs in the change.`;
+    case GitTrustFailure.Unpinned:
+      // The main checkout isn't known here; git run in a linked worktree removes that worktree too.
+      return `10db runs git under its worktree root only in worktrees it made, and it made none at ${codeSpan(repo)}. Nothing there is trusted and nothing there ships. If it is not yours, remove it with ${worktreeRemovalCommand(repo, repo)}.`;
   }
 }
 
@@ -104,6 +118,7 @@ function foldSuffix(error: GitTrustError): string {
     case GitTrustFailure.Attributes:
     case GitTrustFailure.Filter:
     case GitTrustFailure.Embedded:
+    case GitTrustFailure.Unpinned:
       return '';
   }
 }

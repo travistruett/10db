@@ -34,6 +34,12 @@ function ModeNote({ mode }: { readonly mode: SheetMode }) {
           done.
         </Text>
       );
+    case 'worktrees':
+      return (
+        <Text size="sm" c="dimmed">
+          Each task gets its own worktree, branch and pull request.
+        </Text>
+      );
     case 'join':
       return <Text size="sm">{`These tasks join ${mode.title}, on its branch.`}</Text>;
     case 'fix':
