@@ -8,3 +8,4 @@ export { subscribeShipTrigger } from './trigger';
 export { batchCardFields, createBatchCardAnswers } from './batch-card';
 export { batchLaunchVerdict, flagWrongBranch, LaunchVerdict } from './launch-rule';
 export { recoverBatches } from './recover';
+export { seedDirs, seedWorktree, type SeedResult } from './worktree-seed';

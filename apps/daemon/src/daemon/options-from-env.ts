@@ -4,7 +4,7 @@ import type { DaemonOptions } from './start';
 /** The daemon options the entry point takes from its environment. */
 export type EnvDaemonOptions = Pick<
   DaemonOptions,
-  'port' | 'logLevel' | 'sandbox' | 'uiToken' | 'devUiOrigin'
+  'port' | 'logLevel' | 'sandbox' | 'uiToken' | 'devUiOrigin' | 'worktreeRoot'
 >;
 
 /**
@@ -18,6 +18,7 @@ export function daemonOptionsFromEnv(env: DaemonEnv): EnvDaemonOptions {
     logLevel: env.TENDB_LOG_LEVEL,
     sandbox: env.TENDB_FAKE_SCRIPTS ? null : {},
     ...(env.TENDB_DEV_UI_TOKEN ? { uiToken: env.TENDB_DEV_UI_TOKEN } : {}),
+    ...(env.TENDB_WORKTREE_ROOT ? { worktreeRoot: env.TENDB_WORKTREE_ROOT } : {}),
     ...(env.TENDB_DEV_UI_ORIGIN ? { devUiOrigin: env.TENDB_DEV_UI_ORIGIN } : {}),
   };
 }

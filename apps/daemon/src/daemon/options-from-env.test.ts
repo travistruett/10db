@@ -42,4 +42,11 @@ describe('daemonOptionsFromEnv', () => {
       devUiOrigin: 'http://localhost:51234',
     });
   });
+
+  it('passes TENDB_WORKTREE_ROOT as worktreeRoot, and omits it when unset', () => {
+    expect(daemonOptionsFromEnv(loadEnv({ TENDB_WORKTREE_ROOT: '/var/wt' })).worktreeRoot).toBe(
+      '/var/wt',
+    );
+    expect(daemonOptionsFromEnv(loadEnv({}))).not.toHaveProperty('worktreeRoot');
+  });
 });

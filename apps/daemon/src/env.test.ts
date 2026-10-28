@@ -63,6 +63,12 @@ describe('loadEnv', () => {
   it.each([
     ['a short dev token', { TENDB_DEV_UI_TOKEN: 'short-secret-value' }, 'TENDB_DEV_UI_TOKEN'],
     ['a relative claude path', { TENDB_CLAUDE_PATH: 'bin/claude' }, 'TENDB_CLAUDE_PATH'],
+    ['a relative worktree root', { TENDB_WORKTREE_ROOT: 'worktrees' }, 'TENDB_WORKTREE_ROOT'],
+    [
+      'a worktree root with a home shorthand',
+      { TENDB_WORKTREE_ROOT: '~/wt' },
+      'TENDB_WORKTREE_ROOT',
+    ],
   ])('rejects %s without echoing it', (_name, source, variable) => {
     expect(() => loadEnv(source)).toThrow(variable);
     expect(() => loadEnv(source)).not.toThrow(String(Object.values(source)[0]));

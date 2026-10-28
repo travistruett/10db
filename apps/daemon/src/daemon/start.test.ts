@@ -10,6 +10,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
@@ -37,6 +38,7 @@ import { apiClient, quickFlowId } from '../../test/api-client';
 import {
   createTempRepo,
   FAKE_SRT,
+  isolatedGitEnv,
   SANDBOXED,
   tempDir,
   waitFor,
@@ -47,6 +49,7 @@ import type { ResolvedTools } from '../environment';
 import type { CaffeinateSpawner } from '../keep-awake';
 import { FakeAdapter, type FakeScriptBook, type SessionSpec } from '../sessions';
 import { AlreadyRunningError, readRuntimeInfo, startDaemon, type RunningDaemon } from './index';
+import { WorktreeRootError, worktreeRootFor } from './worktree-root';
 
 /** No real caffeinate and no file watcher in daemon tests that are not about them. */
 const QUIET = { caffeinate: () => null, watch: false } as const;
@@ -145,6 +148,80 @@ describe('startDaemon', () => {
       }),
     });
     expect(res.status).toBe(400);
+  });
+
+  describe('the worktree root', () => {
+    const project = (repoPath: string) =>
+      JSON.stringify({
+        name: 'demo',
+        repoPath,
+        gateCommand: 'true',
+        areas: [{ name: 'src', globs: ['src/**'] }],
+      });
+    const post = (running: RunningDaemon, body: string) =>
+      fetch(`${running.url}/projects`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${running.token}`, 'content-type': 'application/json' },
+        body,
+      });
+    const options = (worktreeRoot: string) =>
+      ({
+        sandbox: null,
+        dataDir: dir.path,
+        port: 0,
+        adapter: new FakeAdapter({}),
+        logLevel: 'warn',
+        worktreeRoot,
+        ...QUIET,
+      }) as const;
+
+    it('refuses to start when the worktree root lies inside a registered checkout', async () => {
+      const repo = createTempRepo();
+      try {
+        daemon = await startDaemon(options(tempDir('wt').path));
+        expect((await post(daemon, project(repo.path))).status).toBe(201);
+        await daemon.stop();
+        daemon = null;
+        await expect(startDaemon(options(join(repo.path, '.wt')))).rejects.toThrow(
+          WorktreeRootError,
+        );
+        // The refused start released the instance lock and the database.
+        daemon = await startDaemon(options(tempDir('wt').path));
+      } finally {
+        repo.cleanup();
+      }
+    });
+
+    it('answers 400 for a checkout the worktree root lies under', async () => {
+      const repo = createTempRepo();
+      try {
+        daemon = await startDaemon(options(join(repo.path, '.wt')));
+        const res = await post(daemon, project(repo.path));
+        expect(res.status).toBe(400);
+        expect(await res.text()).toContain('worktree root');
+      } finally {
+        repo.cleanup();
+      }
+    });
+
+    it('answers 400 for a checkout that lies under the worktree root', async () => {
+      const base = tempDir('wt');
+      const root = worktreeRootFor(base.path, dir.path);
+      const inside = join(root, 'repo');
+      mkdirSync(inside, { recursive: true });
+      execFileSync('git', ['-C', inside, 'init', '-q', '-b', 'main'], {
+        env: isolatedGitEnv(),
+        stdio: 'pipe',
+      });
+      try {
+        daemon = await startDaemon(options(base.path));
+        const res = await post(daemon, project(inside));
+        expect(res.status).toBe(400);
+        expect(await res.text()).toContain('worktree root');
+      } finally {
+        base.cleanup();
+      }
+    });
   });
 
   it('stops while a UI client is still connected to the event stream', async () => {

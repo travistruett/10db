@@ -104,6 +104,7 @@ import { createGitCardAnswers, createGitRefusalHandler } from './git-refusal';
 import { acquireInstanceLock } from './instance-lock';
 import { removeRuntimeFiles, writeRuntimeFiles } from './runtime-files';
 import { createServices } from './services';
+import { assertWorktreeRootAllowed, DEFAULT_WORKTREE_BASE, worktreeRootFor } from './worktree-root';
 
 export interface DaemonOptions {
   readonly dataDir: string;
@@ -118,6 +119,11 @@ export interface DaemonOptions {
    * for, and the Claude adapter refuses such a session.
    */
   readonly sandbox: { readonly tmpRoot?: string; readonly runtime?: SandboxRuntime } | null;
+  /**
+   * Where worktrees are made: a base directory, under which a level named after the data dir is
+   * added. Defaults to `~/.10db/worktrees`. Nothing is created there until the first worktree is cut.
+   */
+  readonly worktreeRoot?: string;
   /** better_sqlite3.node for bundled runs; source runs leave it unset. */
   readonly sqliteBinding?: string;
   readonly clock?: Clock;
@@ -249,6 +255,24 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   }
   migrateDatabase(db, migrationsDir);
 
+  // Where this daemon's worktrees live, as a real path. A root that could hold lane-written files or
+  // the daemon's own is refused before anything else starts.
+  const sandboxTempRoot = opts.sandbox ? (opts.sandbox.tmpRoot ?? LANE_TEMP_ROOT) : null;
+  let worktreeRoot: string;
+  try {
+    worktreeRoot = worktreeRootFor(opts.worktreeRoot ?? DEFAULT_WORKTREE_BASE, opts.dataDir);
+    assertWorktreeRootAllowed(worktreeRoot, {
+      checkouts: listProjects(db).map((project) => project.repoPath),
+      dataDir: opts.dataDir,
+      tempRoot: sandboxTempRoot,
+    });
+  } catch (error) {
+    db.$client.close();
+    lock.release();
+    await closeLog();
+    throw error;
+  }
+
   const bus = createEventBus((error) => {
     logger.error({ err: error }, 'event listener failed');
   });
@@ -310,14 +334,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     checkouts: () => listProjects(state.db).map((project) => project.repoPath),
     // Where sandboxed lanes and gates make their temp dirs. With no sandbox nothing is made there,
     // so nothing lane-written lies in it.
-    laneRoots: opts.sandbox ? [opts.sandbox.tmpRoot ?? LANE_TEMP_ROOT] : [],
+    laneRoots: [...(sandboxTempRoot === null ? [] : [sandboxTempRoot]), worktreeRoot],
+    worktreeRoot,
   });
   // srt, which runs every gate and every repo stdio MCP server.
   const runtime = opts.sandbox ? (opts.sandbox.runtime ?? resolveSandboxRuntime()) : null;
   // Before any session or gate starts: what a crashed run left in the temp root is stale.
-  const tempRoot = opts.sandbox
-    ? claimSandboxTempRoot(opts.sandbox.tmpRoot ?? LANE_TEMP_ROOT)
-    : null;
+  const tempRoot = sandboxTempRoot === null ? null : claimSandboxTempRoot(sandboxTempRoot);
   if (tempRoot && (tempRoot.removed > 0 || tempRoot.failed > 0 || tempRoot.sharedWith !== null)) {
     logger.info(
       { removed: tempRoot.removed, failed: tempRoot.failed, sharedWith: tempRoot.sharedWith },
@@ -616,6 +639,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       starter,
       shipper,
       accounts: accountService,
+      worktreeRoot,
       pinCheckout: (repoPath) => {
         // A checkout git can't read yet is recorded at the first git call that succeeds there.
         git.gitDirs(repoPath).catch(() => undefined);
