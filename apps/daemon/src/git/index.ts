@@ -2,7 +2,7 @@ export { CheckoutPin, memoryPinStore, worktreePinKey, type PinStore } from './ch
 export { equalOrUnder, samePath, surelyInside } from './lane-writable';
 export { comparablePath, existsAsEntry } from './path-entries';
 export { withDaemonGitConfig } from './daemon-config';
-export { createGit, WorktreeNotOursError, type AddWorktreeInput, type Git } from './git';
+export { createGit, WorktreeNotOursError, type Git } from './git';
 export { GitNetworkError, GitNetworkFailure, type NetworkCall } from './network';
 export { GIT_REPO_ENV_VARS, withoutGitRepoEnv } from './repo-env';
 export { XCODE_SELECTORS } from './run';
