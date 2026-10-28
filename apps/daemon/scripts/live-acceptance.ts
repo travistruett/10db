@@ -16,6 +16,7 @@ import {
   InboxItemDto,
   MCP_APPROVAL_DETAIL,
   McpApprovalChoice,
+  McpHost,
   McpServerReview,
   McpServerStatusDto,
   McpTransport,
@@ -69,7 +70,8 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
  * The repo's own MCP server, passed through to every session once approved: the public Mantine docs
- * server, read from 10db's own .mcp.json so the run always uses the pinned version. It needs no credentials.
+ * server, read from 10db's own .mcp.json so the run always uses the pinned version, with the hosts
+ * 10db's own .10db/mcp-hosts.json names for it. It needs no credentials.
  */
 const REPO_MCP_SERVER = 'mantine';
 const OwnMcp = z.object({
@@ -80,6 +82,16 @@ const ownServer = OwnMcp.parse(JSON.parse(readFileSync(join(root, '.mcp.json'), 
 if (!ownServer) throw new Error(`10db's .mcp.json declares no ${REPO_MCP_SERVER} server`);
 const REPO_MCP_COMMAND = { command: ownServer.command, args: ownServer.args };
 const REPO_MCP_CONFIG = { mcpServers: { [REPO_MCP_SERVER]: REPO_MCP_COMMAND } };
+const OwnHosts = z.object({
+  servers: z.record(z.string(), z.object({ hosts: z.array(McpHost) })),
+});
+const REPO_MCP_HOSTS = [
+  ...(OwnHosts.parse(JSON.parse(readFileSync(join(root, '.10db', 'mcp-hosts.json'), 'utf8')))
+    .servers[REPO_MCP_SERVER]?.hosts ?? []),
+].sort();
+if (REPO_MCP_HOSTS.length === 0)
+  throw new Error(`10db's .10db/mcp-hosts.json names no host for ${REPO_MCP_SERVER}`);
+const REPO_MCP_HOSTS_FILE = { servers: { [REPO_MCP_SERVER]: { hosts: REPO_MCP_HOSTS } } };
 
 const TASKS = [
   {
@@ -171,6 +183,11 @@ function makeRepo(): void {
     `for f in $(find src -name "*.md"); do [ -s "$f" ] || { echo "empty: $f"; exit 1; }; done\necho "check ok"\n`,
   );
   writeFileSync(join(repo, '.mcp.json'), `${JSON.stringify(REPO_MCP_CONFIG, null, 2)}\n`);
+  mkdirSync(join(repo, '.10db'));
+  writeFileSync(
+    join(repo, '.10db', 'mcp-hosts.json'),
+    `${JSON.stringify(REPO_MCP_HOSTS_FILE, null, 2)}\n`,
+  );
   git('init', '-q', '-b', 'main');
   // Every test repository sets these two keys (.claude/rules/testing.md). Without them git leaves a
   // detached `git maintenance run --auto` writing under `.git` after a commit returns.
@@ -181,6 +198,7 @@ function makeRepo(): void {
   git(
     'add',
     '.mcp.json',
+    '.10db/mcp-hosts.json',
     'AGENTS.md',
     'check.sh',
     'reference/sorting.txt',
@@ -256,6 +274,7 @@ async function approveRepoMcp(projectId: string): Promise<void> {
     headers: [],
     variables: [],
     sensitive: [],
+    hosts: REPO_MCP_HOSTS,
   };
   const shownOf = (r: McpServerReview | undefined) =>
     r && {
@@ -268,6 +287,7 @@ async function approveRepoMcp(projectId: string): Promise<void> {
       headers: r.headers,
       variables: r.variables,
       sensitive: r.sensitive,
+      hosts: r.hosts,
     };
   if (
     others.length > 0 ||
@@ -291,7 +311,9 @@ async function approveRepoMcp(projectId: string): Promise<void> {
     JSON.stringify(shownOf(stored.data)) !== JSON.stringify(expected) ||
     !card.body.split('\n').includes(runs)
   ) {
-    throw new Error(`the approval card doesn't show exactly "${runs}" with no variables`);
+    throw new Error(
+      `the approval card doesn't show exactly "${runs}" with no variables and the hosts ${REPO_MCP_HOSTS.join(', ')}`,
+    );
   }
   await api(InboxItemDto, `/inbox/${card.id}/answer`, {
     method: 'POST',
@@ -490,7 +512,7 @@ async function main(): Promise<void> {
       'Claude Code': claudeCodeVersion(logText),
       Node: process.version,
       'Handoff threshold': '5% (nudge 6%)',
-      'Repo MCP server': `${REPO_MCP_SERVER} (${REPO_MCP_COMMAND.args.join(' ')}, from the repo's .mcp.json, approved through its card)`,
+      'Repo MCP server': `${REPO_MCP_SERVER} (${REPO_MCP_COMMAND.args.join(' ')}, from the repo's .mcp.json, reaching ${REPO_MCP_HOSTS.join(' and ')}, approved through its card)`,
       'Session baseline context': baseline
         ? `${String(baseline.min)}–${String(baseline.max)}% (first reading of ${String(baseline.sessions)} session(s))`
         : 'not measured',

@@ -71,8 +71,10 @@
 - [ ] Accounts: an in-memory Keychain for the fake-scripts daemon, so the secret form gets an end-to-end run.
 - [ ] Desktop: split the rest of `apps/desktop/src/daemon/queries.ts` and `test/fixtures.ts` per entity, as accounts already is; deferred until no big branches are in flight.
 - [x] Sandbox: run approved repo stdio MCP servers under srt (decision 133, threat model §4.6), with srt measured to keep a stdio server's stdout clean.
-- [ ] Sandbox: let an MCP approval name the hosts its stdio server may reach, so a server that fetches its package at start (`npx -y`) or calls a web API can run; until then it reaches no host (decision 133).
-- [ ] Live acceptance: `make live-acceptance` approves `npx -y @mantine/mcp-server`, which can't download its package under the MCP sandbox, so its "repo MCP server connected" check fails; install the package in the disposable repo, or wait for approvals that name hosts.
+- [x] Sandbox: let an MCP approval name the hosts its stdio server may reach, so a server that fetches its package at start (`npx -y`) or calls a web API can run (`decisions/2026-10-27-mcp-approval-hosts.md`, `.10db/mcp-hosts.json`).
+- [ ] Settings: show and edit a project's MCP servers and the hosts each may reach in 10db, writing `.mcp.json` and `.10db/mcp-hosts.json` for the builder, so neither file is maintained by hand.
+- [ ] MCP: recommend MCP servers for a project (search, or suggestions from the repo), each with the hosts it needs, for the builder to add and approve.
+- [ ] Live acceptance: run `make live-acceptance` once to confirm its "repo MCP server connected" check passes, now that the disposable repo names `mantine`'s hosts from 10db's own `.10db/mcp-hosts.json` (measured outside the run: `npx -y @mantine/mcp-server` downloads and answers `initialize` under the MCP sandbox).
 - [ ] Sandbox: Playwright's WebKit can't run in a sandboxed gate (its XPC services start outside the sandbox), so 10db's e2e runs only in CI and an unsandboxed `make gate`. Measure Chromium under srt before any project relies on browser tests in its gate.
 - [ ] Sandbox: a project's sandbox additions in Settings (read paths, hosts, `.env*` exceptions such as `.env.example`), for lanes and the gate alike (D9, R3).
 - [ ] Sandbox: each gate run downloads and rebuilds its cargo crates (its `CARGO_HOME` goes with its temp dir). A cache shared between runs needs a fetch that runs inside a sandbox, never outside one.
