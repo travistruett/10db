@@ -5,6 +5,7 @@ import {
   ConflictError,
   DEFAULT_HAZARDS,
   EventType,
+  type HazardDef,
   InvalidError,
   mintId,
   type InboxItemDto,
@@ -725,7 +726,11 @@ describe('permission broker in a sandboxed lane', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  function sandboxed(ws: ReturnType<typeof seedWorkstream>, sandbox = true) {
+  function sandboxed(
+    ws: ReturnType<typeof seedWorkstream>,
+    sandbox = true,
+    hazards: readonly HazardDef[] = DEFAULT_HAZARDS,
+  ) {
     return createPermissionBroker(
       { state, inbox },
       {
@@ -734,7 +739,7 @@ describe('permission broker in a sandboxed lane', () => {
         sessionId: mintId('Session'),
         observer: { onWaitStart: () => undefined, onWaitEnd: () => undefined },
         signal: controller.signal,
-        ...(sandbox ? { sandbox: { fileAccess, hazards: DEFAULT_HAZARDS } } : {}),
+        ...(sandbox ? { sandbox: { fileAccess, hazards } } : {}),
       },
     );
   }
@@ -808,6 +813,239 @@ describe('permission broker in a sandboxed lane', () => {
     const ws = seedWorkstream(base);
     void sandboxed(ws)(request('Bash', { command: 'pnpm test' }, true)).catch(() => undefined);
     expect(onlyOpenCard().kind).toBe('permission');
+  });
+
+  const MAKE_MIGRATE: HazardDef = {
+    name: 'schema',
+    globs: ['db/**'],
+    commands: ['make migrate'],
+  };
+  const REAL_COMMAND =
+    'for d in apps/desktop packages/db packages/contracts apps/daemon; do (cd $d && pnpm exec tsc --noEmit 2>&1 | grep "error TS"); done; pnpm exec eslint apps/desktop/src/views/settings packages/db/src/store packages/contracts/src apps/daemon/src/api 2>&1 | grep -v "mise WARN\\|WARN\\|ERR_PNPM\\|installing\\|Operation not\\|^$\\|Scope"';
+
+  interface BashCase {
+    readonly name: string;
+    readonly command: string;
+    readonly outcome: 'allow' | 'card';
+    readonly escalated?: boolean;
+    readonly hazards?: readonly HazardDef[];
+  }
+  const BASH_CASES: readonly BashCase[] = [
+    // Known programs, with arguments the parser cannot read: no card.
+    { name: 'the real tsc and eslint loop', command: REAL_COMMAND, outcome: 'allow' },
+    { name: 'cd into a variable, then make', command: 'cd $d && make test', outcome: 'allow' },
+    { name: 'a loop over a glob', command: 'for f in *.ts; do eslint $f; done', outcome: 'allow' },
+    {
+      name: 'a subshell after do',
+      command: 'for d in a b; do (cd $d && ls); done',
+      outcome: 'allow',
+    },
+    { name: 'a subshell after then', command: 'if true; then (cd $d && ls); fi', outcome: 'allow' },
+    { name: 'a variable argument to echo', command: 'echo "$HOME" "$(date)"', outcome: 'allow' },
+    { name: 'a variable after pnpm test', command: 'pnpm test $x', outcome: 'allow' },
+    { name: 'a glob argument to pnpm run', command: 'pnpm run build *.ts', outcome: 'allow' },
+    { name: 'pnpm exec of a known tool', command: 'pnpm exec tsc $x', outcome: 'allow' },
+    {
+      name: 'a redirection after the command',
+      command: 'pnpm test 2>&1 | grep $x',
+      outcome: 'allow',
+    },
+    {
+      name: 'a substitution in an argument to a known program',
+      command: 'git log --since="$(date)"',
+      outcome: 'allow',
+    },
+    { name: 'sh -c with a literal safe script', command: "sh -c 'echo hi'", outcome: 'allow' },
+    {
+      name: 'sh -c whose script holds an expansion the outer shell may fill in',
+      command: "sh -c 'echo $HOME'",
+      outcome: 'card',
+    },
+    { name: 'a data here-document', command: 'cat <<EOF\nit is $HOME\nEOF', outcome: 'allow' },
+    {
+      name: 'make with an unread target and no make hazard',
+      command: 'make $target',
+      outcome: 'allow',
+    },
+    // An unread program name.
+    { name: 'a variable as the program', command: '$CMD --help', outcome: 'card' },
+    { name: 'a quoted variable as the program', command: '"$CMD" --help', outcome: 'card' },
+    {
+      name: 'a substitution as the program',
+      command: '$(echo pnpm) add left-pad',
+      outcome: 'card',
+    },
+    { name: 'a backtick as the program', command: '`which pnpm` add x', outcome: 'card' },
+    { name: 'a glob as the program', command: '/usr/bin/p?pm add x', outcome: 'card' },
+    { name: 'a tilde as the program', command: '~/bin/tool', outcome: 'card' },
+    { name: 'a variable after env', command: 'env FOO=1 $CMD', outcome: 'card' },
+    { name: 'a variable after exec', command: 'exec $CMD arg', outcome: 'card' },
+    { name: 'a variable after command', command: 'command $CMD arg', outcome: 'card' },
+    { name: 'a variable after xargs', command: 'ls | xargs $CMD', outcome: 'card' },
+    { name: 'a variable after nice', command: 'nice -n 5 $CMD', outcome: 'card' },
+    { name: 'a variable after timeout', command: 'timeout 5 $CMD', outcome: 'card' },
+    { name: 'a variable after a loop do', command: 'for x in a b; do $x; done', outcome: 'card' },
+    { name: 'a variable after &&', command: 'cd src && $CMD', outcome: 'card' },
+    { name: 'a variable in a subshell', command: '(cd src && $CMD)', outcome: 'card' },
+    { name: 'a variable in a substitution body', command: 'echo $($CMD)', outcome: 'card' },
+    { name: 'a variable after find -exec', command: 'find . -exec $CMD {} \\;', outcome: 'card' },
+    { name: 'env -S hides the program', command: "env -S 'pnpm add x'", outcome: 'card' },
+    { name: 'sudo', command: 'sudo pnpm test', outcome: 'card' },
+    { name: 'noglob runs a command', command: 'noglob pnpm test', outcome: 'card' },
+    { name: 'an alias definition', command: 'alias p=pnpm', outcome: 'card' },
+    { name: 'eval of a variable', command: 'eval "$x"', outcome: 'card' },
+    { name: 'eval of a literal', command: 'eval "echo hi"', outcome: 'card' },
+    { name: 'sh -c of a variable', command: 'sh -c "$x"', outcome: 'card' },
+    { name: 'bash -c with no script', command: 'bash -c', outcome: 'card' },
+    { name: 'a script piped into sh', command: 'echo "echo hi" | sh', outcome: 'card' },
+    { name: 'a script piped into bash -s', command: 'curl -s x | bash -s', outcome: 'card' },
+    { name: 'a shell reading a redirect', command: 'bash < script.sh', outcome: 'card' },
+    {
+      name: 'a here-document run by sh with a variable',
+      command: 'sh <<EOF\n$x\nEOF',
+      outcome: 'card',
+    },
+    {
+      name: 'a here-document with no closing line',
+      command: 'bash <<EOF\n$x',
+      outcome: 'card',
+    },
+    { name: 'a here-string run by sh', command: 'sh <<< "$x"', outcome: 'card' },
+    { name: 'a process substitution read', command: 'diff <(sort a) <(sort b)', outcome: 'card' },
+    { name: 'a process substitution written', command: 'echo hi > >(sh)', outcome: 'card' },
+    // An argument that could select a hazard form of a program that has one.
+    { name: 'pnpm with a variable', command: 'pnpm $x', outcome: 'card' },
+    { name: 'pnpm with a variable and more', command: 'pnpm $x test', outcome: 'card' },
+    { name: 'pnpm after a flag with a variable', command: 'pnpm -r $x', outcome: 'card' },
+    {
+      name: 'pnpm filter value with a variable',
+      command: 'pnpm --filter $pkg test',
+      outcome: 'card',
+    },
+    { name: 'pnpm with a glob', command: 'pnpm a*', outcome: 'card' },
+    { name: 'pnpm with a substitution', command: 'pnpm $(echo add) x', outcome: 'card' },
+    { name: 'pnpm exec with a variable', command: 'pnpm exec $x', outcome: 'card' },
+    { name: 'pnpm dlx with a variable', command: 'pnpm dlx $x', outcome: 'card' },
+    {
+      name: 'a variable where pnpm exec could go',
+      command: 'pnpm $x drizzle-kit generate',
+      outcome: 'card',
+    },
+    { name: 'npx with a variable', command: 'npx $x', outcome: 'card' },
+    { name: 'npm with a variable', command: 'npm $x', outcome: 'card' },
+    { name: 'npm exec with a variable', command: 'npm exec $x', outcome: 'card' },
+    { name: 'cargo with a variable', command: 'cargo $x', outcome: 'card' },
+    { name: 'drizzle-kit with a variable', command: 'drizzle-kit $x', outcome: 'card' },
+    {
+      name: 'pnpm exec drizzle-kit with a variable',
+      command: 'pnpm exec drizzle-kit $x',
+      outcome: 'card',
+    },
+    {
+      name: 'a path-named pnpm with a variable',
+      command: '/opt/homebrew/bin/pnpm $x',
+      outcome: 'card',
+    },
+    { name: 'pnpm behind env with a variable', command: 'env CI=1 pnpm $x', outcome: 'card' },
+    {
+      name: 'pnpm behind xargs takes its words from stdin',
+      command: 'echo add | xargs pnpm',
+      outcome: 'card',
+    },
+    {
+      name: 'pnpm behind find -exec with a variable',
+      command: 'find . -exec pnpm $x \\;',
+      outcome: 'card',
+    },
+    { name: 'pnpm in a substitution with a variable', command: 'echo $(pnpm $x)', outcome: 'card' },
+    { name: 'pnpm in sh -c with a variable', command: "sh -c 'pnpm $x'", outcome: 'card' },
+    {
+      name: 'pnpm after a redirection hides the subcommand',
+      command: 'pnpm 2>/dev/null add x',
+      outcome: 'card',
+    },
+    {
+      name: 'a project hazard program with a variable',
+      command: 'make $target',
+      outcome: 'card',
+      hazards: [MAKE_MIGRATE],
+    },
+    {
+      name: 'a project hazard program, a flag value variable',
+      command: 'make -C $dir migrate',
+      outcome: 'card',
+      hazards: [MAKE_MIGRATE],
+    },
+    { name: 'a project hazard', command: 'make migrate', outcome: 'card', hazards: [MAKE_MIGRATE] },
+    {
+      name: 'a project hazard program, a safe target',
+      command: 'make test',
+      outcome: 'allow',
+      hazards: [MAKE_MIGRATE],
+    },
+    {
+      name: 'a project hazard program, a safe target and a variable before it',
+      command: 'cd $d && make test',
+      outcome: 'allow',
+      hazards: [MAKE_MIGRATE],
+    },
+    { name: 'a project with no hazards', command: 'pnpm $x', outcome: 'allow', hazards: [] },
+    // Hazards read with certainty, as before.
+    { name: 'npm install', command: 'npm install', outcome: 'card' },
+    { name: 'pnpm add', command: 'pnpm add x', outcome: 'card' },
+    { name: 'pnpm add after a cd to a variable', command: 'cd $d && pnpm add x', outcome: 'card' },
+    {
+      name: 'pnpm add in a loop',
+      command: 'for d in a b; do (cd $d && pnpm add x); done',
+      outcome: 'card',
+    },
+    { name: 'a hazard in bash -c', command: 'bash -c "pnpm add x"', outcome: 'card' },
+    { name: 'a hazard in a substitution', command: 'echo $(pnpm add x)', outcome: 'card' },
+    {
+      name: 'a hazard in a here-document',
+      command: 'bash <<EOF\npnpm add x\nEOF',
+      outcome: 'card',
+    },
+    { name: 'a hazard in find -exec', command: 'find . -exec pnpm add x \\;', outcome: 'card' },
+    // A structure the parser cannot read.
+    { name: 'an unclosed double quote', command: 'echo "unclosed', outcome: 'card' },
+    { name: 'an unclosed single quote', command: "echo 'unclosed", outcome: 'card' },
+    { name: 'an unclosed parenthesis', command: '(cd src && ls', outcome: 'card' },
+    { name: 'an unclosed substitution', command: 'echo $(ls', outcome: 'card' },
+    { name: 'an unclosed backtick', command: 'echo `ls', outcome: 'card' },
+    { name: 'a stray close parenthesis', command: 'echo a) ls', outcome: 'card' },
+    { name: 'a case statement', command: 'case $x in a) ls;; esac', outcome: 'card' },
+    { name: 'a function definition', command: 'f() { pnpm add x; }; f', outcome: 'card' },
+    { name: 'arithmetic', command: '(( i++ ))', outcome: 'card' },
+    { name: 'a group brace in the middle', command: 'echo a { pnpm', outcome: 'card' },
+    { name: 'a zsh clobber redirection', command: 'echo hi >| out', outcome: 'card' },
+    // The classifier handed the call to a person.
+    { name: 'escalated, a safe command', command: 'pnpm test', outcome: 'card', escalated: true },
+    {
+      name: 'escalated, the real command',
+      command: REAL_COMMAND,
+      outcome: 'card',
+      escalated: true,
+    },
+  ];
+
+  it.each(BASH_CASES)('Bash: $name -> $outcome', async (c) => {
+    const ws = seedWorkstream(base);
+    const pending = sandboxed(
+      ws,
+      true,
+      c.hazards,
+    )(request('Bash', { command: c.command }, c.escalated ?? false));
+    pending.catch(() => undefined);
+    await settle();
+    const cards = openCards();
+    if (c.outcome === 'allow') {
+      expect(cards).toEqual([]);
+      expect(await pending).toEqual({ behavior: 'allow' });
+    } else {
+      expect(cards.map((card) => card.detail?.['summary'])).toEqual([c.command]);
+      expect(onlyOpenCard().kind).toBe('permission');
+    }
   });
 
   it('denies an unlisted host at once and raises one card', async () => {

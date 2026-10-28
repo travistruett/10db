@@ -1,0 +1,470 @@
+import { DEFAULT_HAZARDS, type HazardDef } from '@10db/contracts';
+import { describe, expect, it } from 'vitest';
+import { firstUnread, UnreadReason } from './unread-commands';
+
+const MAKE_MIGRATE: HazardDef = { name: 'schema', globs: ['db/**'], commands: ['make migrate'] };
+const MAKE_AND_NPM_LINK: HazardDef = {
+  name: 'links',
+  globs: [],
+  commands: ['make deploy', 'npm link'],
+};
+
+interface Row {
+  readonly name: string;
+  readonly command: string;
+  /** The reason it is unread, or null when every command is read and none can be a hazard. */
+  readonly reason: UnreadReason | null;
+  readonly hazards?: readonly HazardDef[];
+}
+
+const ROWS: readonly Row[] = [
+  // Read: the programs are known and no argument can select a hazard form.
+  { name: 'a plain command', command: 'ls -la', reason: null },
+  { name: 'cd into a variable, then make', command: 'cd $d && make test', reason: null },
+  { name: 'a loop over a glob', command: 'for f in *.ts; do eslint $f; done', reason: null },
+  {
+    name: 'a loop over a substitution',
+    command: 'for f in $(ls); do eslint $f; done',
+    reason: null,
+  },
+  { name: 'a subshell after do', command: 'for d in a; do (cd $d && ls); done', reason: null },
+  { name: 'select', command: 'select x in a b; do ls $x; done', reason: null },
+  { name: 'a test bracket with a variable', command: '[ -f $f ] && ls $f', reason: null },
+  { name: 'a double bracket', command: '[[ -f $f ]] && ls $f', reason: null },
+  { name: 'pnpm test with a variable', command: 'pnpm test $x', reason: null },
+  { name: 'pnpm run with a variable', command: 'pnpm run $script', reason: null },
+  { name: 'pnpm exec of a known tool with a variable', command: 'pnpm exec tsc $x', reason: null },
+  {
+    name: 'pnpm exec of a known tool, redirected',
+    command: 'pnpm exec tsc 2>&1 | grep x',
+    reason: null,
+  },
+  { name: 'git with a substitution', command: 'git log --since="$(date)"', reason: null },
+  { name: 'an assignment alone', command: 'X=$(date)', reason: null },
+  { name: 'an assignment before a command', command: 'CI=1 pnpm test', reason: null },
+  { name: 'a path to a program', command: './scripts/build.sh $x', reason: null },
+  { name: 'env wrapping a known program', command: 'env CI=1 pnpm test $x', reason: null },
+  { name: 'a quoted plain program', command: "'ls' $x", reason: null },
+  { name: 'a pipeline of known programs', command: 'cat $f | grep $x | wc -l', reason: null },
+  { name: 'a substitution of a known program', command: 'echo $(date)', reason: null },
+  { name: 'sh -c of a literal script', command: "sh -c 'echo hi'", reason: null },
+  { name: 'a shell run on a file', command: 'bash scripts/build.sh $x', reason: null },
+  { name: 'sh -c of a literal pnpm test', command: "sh -c 'pnpm test'", reason: null },
+  {
+    name: 'find -exec of a known program',
+    command: 'find . -name x -exec ls {} \\;',
+    reason: null,
+  },
+  { name: 'a data here-document', command: 'cat <<EOF\n$HOME and $x\nEOF', reason: null },
+  {
+    name: 'a data here-document with a known substitution',
+    command: 'cat <<EOF\n$(date)\nEOF',
+    reason: null,
+  },
+  {
+    name: 'a data here-document with prose',
+    command: "git commit -F - <<'EOF'\nfix the thing, don't $x\nEOF",
+    reason: null,
+  },
+  {
+    name: 'a data here-document with an unread substitution',
+    command: 'cat <<EOF\n$($CMD)\nEOF',
+    reason: UnreadReason.CommandName,
+  },
+  {
+    name: 'a data here-document with an unread backtick',
+    command: 'cat <<EOF\n`$CMD`\nEOF',
+    reason: UnreadReason.CommandName,
+  },
+  {
+    name: 'a data here-document with a hazard substitution',
+    command: 'cat <<EOF\n$(pnpm $x)\nEOF',
+    reason: UnreadReason.HazardForm,
+  },
+  { name: 'arithmetic', command: 'echo $((1+2))', reason: null },
+  {
+    name: 'a data here-document with an apostrophe before a substitution',
+    command: "cat <<EOF\ndon't $(date)\nEOF",
+    reason: UnreadReason.Structure,
+  },
+  {
+    name: 'a here-document of a literal script for sh',
+    command: 'sh <<EOF\necho hi\nEOF',
+    reason: null,
+  },
+  { name: 'a hazard program with a literal safe subcommand', command: 'pnpm test', reason: null },
+  {
+    name: 'a hazard program with a literal safe subcommand and flags',
+    command: 'pnpm -r --filter x test',
+    reason: null,
+  },
+  {
+    name: 'no hazards at all, an unread subcommand',
+    command: 'pnpm $x',
+    reason: null,
+    hazards: [],
+  },
+  {
+    name: 'a custom hazard program, a safe target',
+    command: 'make test',
+    reason: null,
+    hazards: [MAKE_MIGRATE],
+  },
+  {
+    name: 'a program of a custom hazard that is not that program',
+    command: 'cargo $x',
+    reason: null,
+    hazards: [MAKE_MIGRATE],
+  },
+  // The structure is not read.
+  { name: 'an unclosed quote', command: 'echo "x', reason: UnreadReason.Structure },
+  { name: 'an unclosed substitution', command: 'echo $(ls', reason: UnreadReason.Structure },
+  { name: 'an unclosed subshell', command: '(ls', reason: UnreadReason.Structure },
+  { name: 'a case statement', command: 'case $x in a) ls;; esac', reason: UnreadReason.Structure },
+  { name: 'a function definition', command: 'f() { ls; }', reason: UnreadReason.Structure },
+  { name: 'a nested unclosed quote', command: "sh -c 'echo \"x'", reason: UnreadReason.Structure },
+  { name: 'arithmetic', command: '(( i++ ))', reason: UnreadReason.Structure },
+  // Process substitution.
+  {
+    name: 'process substitution read',
+    command: 'diff <(ls a) <(ls b)',
+    reason: UnreadReason.ProcessSubstitution,
+  },
+  {
+    name: 'process substitution written',
+    command: 'ls > >(cat)',
+    reason: UnreadReason.ProcessSubstitution,
+  },
+  // The program is not named in plain text.
+  { name: 'a variable', command: '$CMD --help', reason: UnreadReason.CommandName },
+  { name: 'a braced variable', command: '${CMD} --help', reason: UnreadReason.CommandName },
+  { name: 'a substitution', command: '$(echo pnpm) add x', reason: UnreadReason.CommandName },
+  { name: 'a backtick', command: '`which pnpm` add x', reason: UnreadReason.CommandName },
+  { name: 'a glob', command: 'p* add x', reason: UnreadReason.CommandName },
+  {
+    name: 'a question mark glob',
+    command: '/usr/bin/p?pm add x',
+    reason: UnreadReason.CommandName,
+  },
+  { name: 'a bracket glob', command: 'p[n]pm add x', reason: UnreadReason.CommandName },
+  { name: 'a tilde', command: '~/bin/tool', reason: UnreadReason.CommandName },
+  { name: 'an equals expansion', command: '=pnpm add x', reason: UnreadReason.CommandName },
+  {
+    name: 'a variable in the directory of the program',
+    command: '$DIR/bin/tool',
+    reason: UnreadReason.CommandName,
+  },
+  {
+    name: 'a program with a space in its name',
+    command: "'my tool' x",
+    reason: UnreadReason.CommandName,
+  },
+  { name: 'after env', command: 'env X=1 $CMD', reason: UnreadReason.CommandName },
+  { name: 'after env -i', command: 'env -i $CMD', reason: UnreadReason.CommandName },
+  { name: 'after exec', command: 'exec $CMD', reason: UnreadReason.CommandName },
+  { name: 'after command', command: 'command $CMD', reason: UnreadReason.CommandName },
+  { name: 'after nohup', command: 'nohup $CMD', reason: UnreadReason.CommandName },
+  { name: 'after time', command: 'time $CMD', reason: UnreadReason.CommandName },
+  { name: 'after xargs', command: 'ls | xargs -n1 $CMD', reason: UnreadReason.CommandName },
+  { name: 'after nice', command: 'nice -n 5 $CMD', reason: UnreadReason.CommandName },
+  { name: 'after timeout', command: 'timeout 5 $CMD', reason: UnreadReason.CommandName },
+  { name: 'after stdbuf', command: 'stdbuf -o0 $CMD', reason: UnreadReason.CommandName },
+  {
+    name: 'after several wrappers',
+    command: 'env X=1 nice time $CMD',
+    reason: UnreadReason.CommandName,
+  },
+  { name: 'after a leading assignment', command: 'X=1 $CMD', reason: UnreadReason.CommandName },
+  { name: 'after a loop do', command: 'for x in a; do $x; done', reason: UnreadReason.CommandName },
+  { name: 'after then', command: 'if true; then $x; fi', reason: UnreadReason.CommandName },
+  { name: 'after while', command: 'while $x; do ls; done', reason: UnreadReason.CommandName },
+  { name: 'after a negation', command: '! $x', reason: UnreadReason.CommandName },
+  { name: 'after &&', command: 'ls && $CMD', reason: UnreadReason.CommandName },
+  { name: 'after ||', command: 'ls || $CMD', reason: UnreadReason.CommandName },
+  { name: 'after a pipe', command: 'ls | $CMD', reason: UnreadReason.CommandName },
+  { name: 'after a semicolon', command: 'ls; $CMD', reason: UnreadReason.CommandName },
+  { name: 'after a newline', command: 'ls\n$CMD', reason: UnreadReason.CommandName },
+  { name: 'after a background &', command: 'ls & $CMD', reason: UnreadReason.CommandName },
+  { name: 'in a subshell', command: '(cd a && $CMD)', reason: UnreadReason.CommandName },
+  { name: 'in a substitution', command: 'echo $($CMD)', reason: UnreadReason.CommandName },
+  { name: 'in a backtick substitution', command: 'echo `$CMD`', reason: UnreadReason.CommandName },
+  { name: 'in a quoted substitution', command: 'echo "$($CMD)"', reason: UnreadReason.CommandName },
+  { name: 'in sh -c', command: "sh -c '$CMD'", reason: UnreadReason.Script },
+  { name: 'in find -exec', command: 'find . -exec $CMD {} \\;', reason: UnreadReason.CommandName },
+  {
+    name: 'in a here-document for sh',
+    command: "sh <<'EOF'\n$CMD\nEOF",
+    reason: UnreadReason.Script,
+  },
+  { name: 'env -S', command: "env -S 'ls -l'", reason: UnreadReason.CommandName },
+  {
+    name: 'env with a long option not spelled in full',
+    command: 'env --uns X ls',
+    reason: UnreadReason.CommandName,
+  },
+  { name: 'a redirection after a wrapper', command: 'env >x ls', reason: UnreadReason.CommandName },
+  { name: 'sudo', command: 'sudo ls', reason: UnreadReason.CommandName },
+  { name: 'doas', command: 'doas ls', reason: UnreadReason.CommandName },
+  { name: 'su', command: 'su -c ls', reason: UnreadReason.CommandName },
+  { name: 'noglob', command: 'noglob ls', reason: UnreadReason.CommandName },
+  { name: 'nocorrect', command: 'nocorrect ls', reason: UnreadReason.CommandName },
+  { name: 'coproc', command: 'coproc ls', reason: UnreadReason.CommandName },
+  { name: 'repeat', command: 'repeat 3 ls', reason: UnreadReason.CommandName },
+  { name: 'foreach', command: 'foreach x (a b); ls; end', reason: UnreadReason.Structure },
+  { name: 'alias', command: 'alias p=pnpm', reason: UnreadReason.CommandName },
+  // A script that is not read.
+  { name: 'eval of a variable', command: 'eval "$x"', reason: UnreadReason.Script },
+  { name: 'eval of a literal', command: 'eval ls', reason: UnreadReason.Script },
+  { name: 'sh -c of a variable', command: 'sh -c "$x"', reason: UnreadReason.Script },
+  {
+    name: 'sh -c with a substitution',
+    command: 'sh -c "echo $(date)"',
+    reason: UnreadReason.Script,
+  },
+  { name: 'sh -c with a backtick', command: 'sh -c "echo `date`"', reason: UnreadReason.Script },
+  { name: 'bash -c with no script', command: 'bash -c', reason: UnreadReason.Script },
+  { name: 'zsh -c of a variable', command: 'zsh -c "$x"', reason: UnreadReason.Script },
+  { name: 'dash -c of a variable', command: 'dash -c "$x"', reason: UnreadReason.Script },
+  { name: 'a combined -lc flag', command: 'bash -lc "$x"', reason: UnreadReason.Script },
+  { name: 'a script piped into sh', command: 'echo ls | sh', reason: UnreadReason.Script },
+  {
+    name: 'a script piped into bash -s',
+    command: 'echo ls | bash -s',
+    reason: UnreadReason.Script,
+  },
+  {
+    name: 'a script piped into bash with a file operand',
+    command: 'echo ls | bash -o pipefail x.sh',
+    reason: UnreadReason.Script,
+  },
+  {
+    name: 'a script piped through a group into sh',
+    command: 'echo ls | { sh; }',
+    reason: UnreadReason.Script,
+  },
+  { name: 'a bare shell', command: 'bash', reason: UnreadReason.Script },
+  { name: 'a shell reading a redirect', command: 'bash < x.sh', reason: UnreadReason.Script },
+  { name: 'a here-string with a variable', command: 'sh <<< "$x"', reason: UnreadReason.Script },
+  {
+    name: 'a here-document with a variable',
+    command: 'sh <<EOF\n$x\nEOF',
+    reason: UnreadReason.Script,
+  },
+  {
+    name: 'a here-document with no closing line',
+    command: 'bash <<EOF\n$x',
+    reason: UnreadReason.CommandName,
+  },
+  {
+    name: 'sh -c nested past the limit',
+    command: 'sh -c "sh -c \'sh -c \\"sh -c ls\\"\'"',
+    reason: UnreadReason.Script,
+  },
+  {
+    name: 'find -exec sh -c of a variable',
+    command: 'find . -exec sh -c "$x" \\;',
+    reason: UnreadReason.Script,
+  },
+  // An argument that could select a hazard form.
+  { name: 'pnpm with a variable', command: 'pnpm $x', reason: UnreadReason.HazardForm },
+  {
+    name: 'pnpm with a variable and more',
+    command: 'pnpm $x test',
+    reason: UnreadReason.HazardForm,
+  },
+  { name: 'pnpm after a flag', command: 'pnpm -r $x', reason: UnreadReason.HazardForm },
+  {
+    name: 'pnpm with a flag value variable',
+    command: 'pnpm --filter $p test',
+    reason: UnreadReason.HazardForm,
+  },
+  {
+    name: 'pnpm with a flag holding a variable',
+    command: 'pnpm --filter=$p test',
+    reason: UnreadReason.HazardForm,
+  },
+  { name: 'pnpm with a glob', command: 'pnpm a*', reason: UnreadReason.HazardForm },
+  { name: 'pnpm with a question mark', command: 'pnpm ad?', reason: UnreadReason.HazardForm },
+  { name: 'pnpm with a bracket', command: 'pnpm a[d]d', reason: UnreadReason.HazardForm },
+  {
+    name: 'pnpm with a substitution',
+    command: 'pnpm $(echo add) x',
+    reason: UnreadReason.HazardForm,
+  },
+  { name: 'pnpm with a backtick', command: 'pnpm `echo add` x', reason: UnreadReason.HazardForm },
+  { name: 'pnpm with a quoted variable', command: 'pnpm "$x"', reason: UnreadReason.HazardForm },
+  { name: 'pnpm with a tilde', command: 'pnpm ~x', reason: UnreadReason.HazardForm },
+  { name: 'pnpm exec with a variable', command: 'pnpm exec $x', reason: UnreadReason.HazardForm },
+  {
+    name: 'pnpm exec after a flag with a variable',
+    command: 'pnpm -r exec $x',
+    reason: UnreadReason.HazardForm,
+  },
+  { name: 'pnpm dlx with a variable', command: 'pnpm dlx $x', reason: UnreadReason.HazardForm },
+  {
+    name: 'a variable where exec could go',
+    command: 'pnpm $x drizzle-kit generate',
+    reason: UnreadReason.HazardForm,
+  },
+  {
+    name: 'pnpm exec drizzle-kit with a variable',
+    command: 'pnpm exec drizzle-kit $x',
+    reason: UnreadReason.HazardForm,
+  },
+  {
+    name: 'npx drizzle-kit with a variable',
+    command: 'npx drizzle-kit $x',
+    reason: UnreadReason.HazardForm,
+  },
+  { name: 'npx with a variable', command: 'npx $x', reason: UnreadReason.HazardForm },
+  { name: 'npm with a variable', command: 'npm $x', reason: UnreadReason.HazardForm },
+  { name: 'npm exec with a variable', command: 'npm exec $x', reason: UnreadReason.HazardForm },
+  { name: 'cargo with a variable', command: 'cargo $x', reason: UnreadReason.HazardForm },
+  {
+    name: 'drizzle-kit with a variable',
+    command: 'drizzle-kit $x',
+    reason: UnreadReason.HazardForm,
+  },
+  {
+    name: 'yarn dlx drizzle-kit with a variable',
+    command: 'yarn dlx drizzle-kit $x',
+    reason: UnreadReason.HazardForm,
+  },
+  {
+    name: 'pnpm by path with a variable',
+    command: '/opt/homebrew/bin/pnpm $x',
+    reason: UnreadReason.HazardForm,
+  },
+  { name: 'pnpm behind env', command: 'env CI=1 pnpm $x', reason: UnreadReason.HazardForm },
+  { name: 'pnpm behind command', command: 'command pnpm $x', reason: UnreadReason.HazardForm },
+  { name: 'pnpm behind exec', command: 'exec pnpm $x', reason: UnreadReason.HazardForm },
+  { name: 'pnpm behind nice', command: 'nice pnpm $x', reason: UnreadReason.HazardForm },
+  { name: 'pnpm behind timeout', command: 'timeout 5 pnpm $x', reason: UnreadReason.HazardForm },
+  {
+    name: 'pnpm behind xargs, taking its words from input',
+    command: 'echo add | xargs pnpm',
+    reason: UnreadReason.HazardForm,
+  },
+  {
+    name: 'pnpm behind xargs with a flag',
+    command: 'echo add | xargs -n1 pnpm',
+    reason: UnreadReason.HazardForm,
+  },
+  {
+    name: 'pnpm in find -exec',
+    command: 'find . -exec pnpm $x \\;',
+    reason: UnreadReason.HazardForm,
+  },
+  { name: 'pnpm in a substitution', command: 'echo $(pnpm $x)', reason: UnreadReason.HazardForm },
+  { name: 'pnpm in a subshell', command: '(cd a && pnpm $x)', reason: UnreadReason.HazardForm },
+  {
+    name: 'pnpm in a loop',
+    command: 'for d in a; do pnpm $x; done',
+    reason: UnreadReason.HazardForm,
+  },
+  { name: 'pnpm in sh -c', command: "sh -c 'pnpm $x'", reason: UnreadReason.Script },
+  {
+    name: 'pnpm in sh -c, spelled out',
+    command: "sh -c 'pnpm add x'",
+    reason: UnreadReason.HazardForm,
+  },
+  {
+    name: 'pnpm in a here-document for sh',
+    command: 'sh <<EOF\npnpm add x\nEOF',
+    reason: UnreadReason.HazardForm,
+  },
+  {
+    name: 'pnpm in dash -c, which hazardHit does not follow',
+    command: "dash -c 'pnpm add x'",
+    reason: UnreadReason.HazardForm,
+  },
+  {
+    name: 'pnpm after a redirection hides the subcommand',
+    command: 'pnpm 2>/dev/null add x',
+    reason: UnreadReason.HazardForm,
+  },
+  {
+    name: 'pnpm after a redirection with a target',
+    command: 'pnpm >out add x',
+    reason: UnreadReason.HazardForm,
+  },
+  { name: 'pnpm add', command: 'pnpm add x', reason: UnreadReason.HazardForm },
+  { name: 'npm install', command: 'npm install', reason: UnreadReason.HazardForm },
+  {
+    name: 'cd to a variable, then pnpm add',
+    command: 'cd $d && pnpm add x',
+    reason: UnreadReason.HazardForm,
+  },
+  {
+    name: 'drizzle-kit generate',
+    command: 'drizzle-kit generate',
+    reason: UnreadReason.HazardForm,
+  },
+  {
+    name: 'pnpm exec drizzle-kit generate',
+    command: 'pnpm exec drizzle-kit generate',
+    reason: UnreadReason.HazardForm,
+  },
+  // A project's own hazard commands.
+  {
+    name: 'a custom hazard',
+    command: 'make migrate',
+    reason: UnreadReason.HazardForm,
+    hazards: [MAKE_MIGRATE],
+  },
+  {
+    name: 'a custom hazard program with a variable',
+    command: 'make $target',
+    reason: UnreadReason.HazardForm,
+    hazards: [MAKE_MIGRATE],
+  },
+  {
+    name: 'a custom hazard program with a flag value variable',
+    command: 'make -C $dir migrate',
+    reason: UnreadReason.HazardForm,
+    hazards: [MAKE_MIGRATE],
+  },
+  {
+    name: 'a custom hazard behind a runner',
+    command: 'pnpm exec make $t',
+    reason: UnreadReason.HazardForm,
+    hazards: [MAKE_MIGRATE],
+  },
+  {
+    name: 'a runner could reach a custom hazard',
+    command: 'pnpm $x',
+    reason: UnreadReason.HazardForm,
+    hazards: [MAKE_MIGRATE],
+  },
+  {
+    name: 'a second custom hazard',
+    command: 'npm link',
+    reason: UnreadReason.HazardForm,
+    hazards: [MAKE_AND_NPM_LINK],
+  },
+  {
+    name: 'a second custom hazard with a variable',
+    command: 'npm $x',
+    reason: UnreadReason.HazardForm,
+    hazards: [MAKE_AND_NPM_LINK],
+  },
+  {
+    name: 'a custom hazard program, another target',
+    command: 'make test',
+    reason: null,
+    hazards: [MAKE_AND_NPM_LINK],
+  },
+];
+
+describe('firstUnread', () => {
+  it.each(ROWS)('$name: $command', ({ command, reason, hazards }) => {
+    expect(firstUnread(command, hazards ?? DEFAULT_HAZARDS)?.reason ?? null).toBe(reason);
+  });
+
+  it('names the part it could not read', () => {
+    expect(firstUnread('ls && $CMD --help', DEFAULT_HAZARDS)).toEqual({
+      reason: UnreadReason.CommandName,
+      text: '$CMD',
+    });
+  });
+});

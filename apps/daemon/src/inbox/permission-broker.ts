@@ -13,7 +13,7 @@ import {
 import { listPermissionRules } from '@10db/db';
 import { z } from 'zod';
 import type { StateStore } from '../events';
-import { hazardHit, parseShell, stringField } from '../guard';
+import { firstUnread, hazardHit, stringField } from '../guard';
 import { matchPermissionRule, storableRule } from '../permissions';
 import { readAccess, readPathsOf, writeAccess, type FileAccessContext } from '../sandbox';
 import type { ToolDecision, ToolRequest } from '../sessions';
@@ -252,7 +252,11 @@ export function createPermissionBroker(
     };
   }
 
-  /** A sandboxed Bash command runs without a card unless it is a hazard or the parser cannot read it. */
+  /**
+   * A sandboxed Bash command runs without a card unless it is a hazard or something unread could
+   * make it one: a program 10db cannot name, a script it cannot read, or an argument that could
+   * select a hazard form. An unread argument to a program with no hazard form does not matter.
+   */
   function judgeBash(
     req: ToolRequest,
     sandbox: NonNullable<BrokerContext['sandbox']>,
@@ -260,7 +264,9 @@ export function createPermissionBroker(
     const command = req.input['command'];
     if (typeof command !== 'string') return { summary: summarize(req) };
     const hit = hazardHit(command, sandbox.hazards);
-    if (hit === null && parseShell(command).certain && !req.escalated) return { behavior: 'allow' };
+    if (hit === null && !req.escalated && firstUnread(command, sandbox.hazards) === null) {
+      return { behavior: 'allow' };
+    }
     return hit?.name === 'deps' && hit.words[0] === 'pnpm'
       ? { summary: command, body: `${command}\n\n${PNPM_CARD_BODY}` }
       : { summary: command };

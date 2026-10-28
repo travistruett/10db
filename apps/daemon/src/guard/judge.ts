@@ -289,7 +289,7 @@ function rmVerdict(
 
 export const shellQuote = (word: string): string => `'${word.replaceAll("'", "'\\''")}'`;
 
-const SHELL_C_FLAG = /^-[a-zA-Z]*c[a-zA-Z]*$/;
+export const SHELL_C_FLAG = /^-[a-zA-Z]*c[a-zA-Z]*$/;
 
 /** The scripts a shell's words hand it: a `-c` argument and a `<<<` here-string. */
 export function shellScripts(words: readonly string[]): string[] {

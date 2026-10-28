@@ -438,8 +438,12 @@ function scan(command: string, from: number, substitution: boolean): Scan {
     if (ch === '(') {
       if (before === '<' || before === '>') {
         i = substitute(i, i + 1);
-      } else if (raw.trim() === '') {
-        // `((` is arithmetic, where `<<` shifts instead of opening a here-document.
+      } else if (
+        raw.trim() === '' ||
+        (word === '' && words.length > 0 && words.every((w) => BEFORE_COMMAND.has(w)))
+      ) {
+        // A parenthesis where a command starts (after `do`, `then`, `&&` and the like) opens a
+        // subshell. `((` is arithmetic, where `<<` shifts instead of opening a here-document.
         if (next === '(') certain = false;
         flush('(');
         opened += 1;
@@ -539,7 +543,7 @@ const REDIRECTION_WORD = /^(?:\d+|&)?(?:<<<|<<-?|<>|<&|>>|>\||>&|<|>)/;
  * How many words a redirection at `at` takes: none when the word is not one, one when its target is
  * attached (`2>/dev/null`), two when the target is the next word (`> out`).
  */
-function redirectionSpan(words: readonly string[], at: number): number {
+export function redirectionSpan(words: readonly string[], at: number): number {
   const word = words[at] ?? '';
   const operator = REDIRECTION_WORD.exec(word);
   if (!operator) return 0;
