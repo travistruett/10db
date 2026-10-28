@@ -386,6 +386,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     onWorkQueued: () => {
       scheduler?.requestTick();
     },
+    worktreeRoot,
   };
   const starter = createBatchStarter(delivery);
   const shipper = createShipper({

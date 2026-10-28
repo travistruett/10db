@@ -36,6 +36,7 @@ import type { GateResult, GateRunner } from '../verify';
 import { shipCards, wrongBranchCard, type ShipFailure } from './cards';
 import { allCheckouts } from './checkout';
 import { ghCall, pushCall, raise, type DeliveryContext, type DeliveryLimits } from './context';
+import { jobKey, JobQueue } from './jobs';
 import { prBody, prTitle } from './pr-text';
 import { readPrTemplate } from './pr-template';
 
@@ -93,7 +94,8 @@ export function createShipper(deps: ShipperDeps): Shipper {
   const db = deps.state.db;
 
   function resume(batchId: BatchId): void {
-    deps.jobs.run(getBatch(db, batchId).projectId, (signal) => shipSteps(batchId, signal));
+    const project = getProject(db, getBatch(db, batchId).projectId);
+    deps.jobs.run(jobKey(project, JobQueue.Ship), (signal) => shipSteps(batchId, signal));
   }
 
   function fail(batch: BatchDto, outcome: ShipFailure): void {

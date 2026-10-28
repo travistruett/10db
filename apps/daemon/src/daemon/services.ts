@@ -113,7 +113,12 @@ export function createServices(deps: {
       deps.scheduler.requestTick();
       return { kind: 'workstream', workstream };
     },
-    startBatch: (projectId, input) => deps.starter.startBatch(projectId, input),
+    startBatch(projectId, input) {
+      // The HTTP answer stays one batch until the API answers the list.
+      const [batch] = deps.starter.startBatch(projectId, input);
+      if (!batch) throw new InvalidError('The start made no batch');
+      return batch;
+    },
     // The store lists oldest first; the API answers newest first.
     listBatches: (projectId) => listBatches(db, { projectId }).reverse(),
     shipBatch: (id) => deps.shipper.ship(id),

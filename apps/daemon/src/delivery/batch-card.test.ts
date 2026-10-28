@@ -29,10 +29,12 @@ afterEach(() => {
 async function failedInBatch(beta: 'WAITING_HUMAN' | 'DONE') {
   const alpha = h.addTask('Alpha');
   const other = h.addTask('Beta', { areas: ['ui'] });
-  const started = h.starter.startBatch(h.project.id, {
-    title: 'Greetings',
-    taskIds: [alpha.id, other.id],
-  });
+  const started = h.only(
+    h.starter.startBatch(h.project.id, {
+      title: 'Greetings',
+      taskIds: [alpha.id, other.id],
+    }),
+  );
   await h.jobs.idle();
   h.commit('src/ui/beta.txt');
   const [a, b] = listWorkstreams(h.store.db, { batchId: started.id });

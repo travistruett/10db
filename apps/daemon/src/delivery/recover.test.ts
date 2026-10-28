@@ -38,7 +38,9 @@ const recover = () =>
 /** An open batch of one task with one commit on its branch. */
 async function openBatch(): Promise<BatchDto> {
   const task = h.addTask('Alpha');
-  const started = h.starter.startBatch(h.project.id, { title: 'Greetings', taskIds: [task.id] });
+  const started = h.only(
+    h.starter.startBatch(h.project.id, { title: 'Greetings', taskIds: [task.id] }),
+  );
   await h.jobs.idle();
   h.commit('src/api/alpha.txt');
   return getBatch(h.store.db, started.id);

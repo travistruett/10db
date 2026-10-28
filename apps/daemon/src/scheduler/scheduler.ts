@@ -139,6 +139,9 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
         if (!branches.has(project.id)) continue;
         const current = branches.get(project.id) ?? null;
         const batch = ws.batchId ? getBatch(db, ws.batchId) : null;
+        // A batch in its own worktree is never on the main checkout's branch: its work waits here,
+        // and the wrong-branch card speaks only of the main checkout.
+        if (batch && batch.worktreePath !== null) continue;
         const verdict = batchLaunchVerdict(batch, current);
         if (verdict === LaunchVerdict.WrongBranch && batch && !warned.has(batch.id)) {
           warned.add(batch.id);

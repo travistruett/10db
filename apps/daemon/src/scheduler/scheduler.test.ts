@@ -415,6 +415,15 @@ describe('pull-request delivery', () => {
     expect(wrongBranch).toEqual([]);
   });
 
+  it('waits without a wrong-branch card for a batch in its own worktree', async () => {
+    const q = inBatch(['OPEN']);
+    state.write((ctx) => patchBatch(ctx, q.batch.id, { worktreePath: '/worktrees/greetings' }));
+    branchOf.set(q.project.repoPath, 'main');
+    await scheduler().tick();
+    expect(launched).toEqual([]);
+    expect(wrongBranch).toEqual([]);
+  });
+
   it('never launches pull-request work that has no batch', async () => {
     const project = seedProject(store, { delivery: 'pull_request', prTitlePrefix: 'feat(app)' });
     add(project, ['api']);

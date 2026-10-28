@@ -1,7 +1,11 @@
-export { batchBranchName } from './branch-name';
+export { batchBranchName, slugOf } from './branch-name';
+export { groupByDependency, type TaskGroup } from './grouping';
+export { worktreePathFor } from './worktree-path';
+export { cutWorktree, worktreeLockReason } from './worktree-cut';
 export { DEFAULT_DELIVERY_LIMITS, type DeliveryContext, type DeliveryLimits } from './context';
-export { createDeliveryJobs, type DeliveryJobs } from './jobs';
+export { createDeliveryJobs, jobKey, JobQueue, type DeliveryJobs } from './jobs';
 export { createBatchStarter, type BatchStarter } from './start';
+export { worktreeCards } from './cards';
 export { prBody, prTitle } from './pr-text';
 export { createShipper, type Shipper } from './ship';
 export { subscribeShipTrigger } from './trigger';

@@ -45,7 +45,9 @@ afterEach(() => {
 async function openBatch(title: string, ...titles: string[]) {
   const areas = ['api', 'ui'];
   const tasks: TaskDto[] = titles.map((t, i) => h.addTask(t, { areas: [areas[i % 2] ?? 'api'] }));
-  const started = h.starter.startBatch(h.project.id, { title, taskIds: tasks.map((t) => t.id) });
+  const started = h.only(
+    h.starter.startBatch(h.project.id, { title, taskIds: tasks.map((t) => t.id) }),
+  );
   await h.jobs.idle();
   const batch = getBatch(h.store.db, started.id);
   return { batch, workstreams: listWorkstreams(h.store.db, { batchId: batch.id }) };
@@ -186,10 +188,12 @@ describe('shipping', () => {
       description: 'Greets the builder, per decision 36.',
       acceptanceCriteria: ['It greets.'],
     });
-    const started = h.starter.startBatch(h.project.id, {
-      title: 'Add greetings',
-      taskIds: [alpha.id],
-    });
+    const started = h.only(
+      h.starter.startBatch(h.project.id, {
+        title: 'Add greetings',
+        taskIds: [alpha.id],
+      }),
+    );
     await h.jobs.idle();
     const batch = getBatch(h.store.db, started.id);
     h.commit('.github/pull_request_template.md', PR_TEMPLATE);
