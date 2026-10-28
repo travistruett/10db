@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Runs every repository check and prints one summary line. Each step's output goes to .gate/<step>.log.
+# Runs every repository check and prints one summary line, which gives each step's seconds in the order
+# the steps ran. Each step's output goes to .gate/<step>.log.
 # GATE_STEPS="lint test" limits the run (used by tests and for quick reruns). GATE_SKIP_RUST=1
 # reports rust as skipped even when cargo is installed (the Ubuntu CI job: no Tauri system libraries).
 # Inside a sandbox (TENDB_SANDBOX=1, as a gate 10db runs has it; any other value runs it) e2e is
@@ -13,13 +14,15 @@ mkdir -p .gate
 ALL_STEPS=(format lint typecheck test build e2e drift knip rust)
 read -r -a steps <<< "${GATE_STEPS:-${ALL_STEPS[*]}}"
 start=$SECONDS
-passed=()
+# One entry per step, passed or failed: "lint 31s" or "rust skipped".
+steps_run=()
 failed=()
 
 run_step() {
-  local name=$1
+  local name=$1 began=$SECONDS
   shift
-  if "$@" > ".gate/$name.log" 2>&1; then passed+=("$name"); else failed+=("$name"); fi
+  "$@" > ".gate/$name.log" 2>&1 || failed+=("$name")
+  steps_run+=("$name $((SECONDS - began))s")
 }
 
 for step in "${steps[@]}"; do
@@ -33,7 +36,7 @@ for step in "${steps[@]}"; do
       # WebKit runs its page, network and GPU processes as XPC services that launchd starts outside
       # the caller's sandbox, so a sandboxed gate (TENDB_SANDBOX=1) never starts it; CI runs it.
       if [[ "${TENDB_SANDBOX:-}" == 1 ]]; then
-        passed+=("e2e skipped (sandboxed)")
+        steps_run+=("e2e skipped (sandboxed)")
       else
         run_step e2e pnpm -s --filter @10db/desktop e2e
       fi
@@ -44,7 +47,7 @@ for step in "${steps[@]}"; do
       if [[ -z "${GATE_SKIP_RUST:-}" ]] && command -v cargo > /dev/null 2>&1; then
         run_step rust make -s rust-check
       else
-        passed+=("rust skipped")
+        steps_run+=("rust skipped")
       fi
       ;;
     fail-probe) run_step fail-probe false ;;
@@ -53,9 +56,15 @@ for step in "${steps[@]}"; do
 done
 
 elapsed=$((SECONDS - start))
+breakdown=
+# bash 3.2 treats expanding an empty array as unbound under set -u.
+if ((${#steps_run[@]})); then
+  breakdown=$(printf '%s · ' "${steps_run[@]}")
+  breakdown=${breakdown% · }
+fi
 if ((${#failed[@]} == 0)); then
-  echo "GATE PASS ${passed[*]} (${elapsed}s)"
+  echo "GATE PASS $breakdown (${elapsed}s)"
 else
-  echo "GATE FAIL: ${failed[*]} — logs in .gate/ (${elapsed}s)"
+  echo "GATE FAIL: ${failed[*]} — logs in .gate/${breakdown:+; $breakdown} (${elapsed}s)"
   exit 1
 fi
