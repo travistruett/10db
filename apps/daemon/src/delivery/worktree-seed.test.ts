@@ -172,6 +172,27 @@ describe('seedWorktree', () => {
     expect(existsSync(join(tmp.path, 'elsewhere', 'node_modules'))).toBe(false);
   });
 
+  it('skips a seed dir whose parent path passes through a link that leads out of the worktree', async () => {
+    mkdirSync(join(from, 'apps', 'web', 'node_modules'), { recursive: true });
+    writeFileSync(join(from, 'apps', 'web', 'node_modules', 'a'), 'a');
+    const outside = join(tmp.path, 'outside');
+    mkdirSync(join(outside, 'web'), { recursive: true });
+    symlinkSync(outside, join(to, 'apps'));
+    const result = await seedWorktree({ from, to, dirs: ['apps/web/node_modules'], signal });
+    expect(result).toEqual({ files: 0, links: 0, skipped: ['apps/web/node_modules'] });
+    expect(existsSync(join(outside, 'web', 'node_modules'))).toBe(false);
+  });
+
+  it('seeds through a link that stays inside the worktree', async () => {
+    mkdirSync(join(from, 'apps', 'web', 'node_modules'), { recursive: true });
+    writeFileSync(join(from, 'apps', 'web', 'node_modules', 'a'), 'a');
+    mkdirSync(join(to, 'real', 'web'), { recursive: true });
+    symlinkSync(join(to, 'real'), join(to, 'apps'));
+    const result = await seedWorktree({ from, to, dirs: ['apps/web/node_modules'], signal });
+    expect(result.files).toBe(1);
+    expect(readFileSync(join(to, 'real', 'web', 'node_modules', 'a'), 'utf8')).toBe('a');
+  });
+
   it('refuses a destination that already exists', async () => {
     mkdirSync(join(from, 'node_modules'));
     mkdirSync(join(to, 'node_modules'));

@@ -1,6 +1,7 @@
 import { constants } from 'node:fs';
 import { chmod, copyFile, lstat, mkdir, readdir, readlink, symlink } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { foldPathCase, realPathOf } from '../guard';
 
 /** File clones in flight at once; directories are walked one at a time. */
 const CLONE_CONCURRENCY = 16;
@@ -31,9 +32,16 @@ export interface SeedResult {
   readonly skipped: readonly string[];
 }
 
-async function isPlainDirectory(path: string): Promise<boolean> {
+/**
+ * True when `parent` is a directory itself (not a link) whose real path lies at or under `root`, so
+ * a link higher up in the worktree, such as a tracked `apps -> /x`, can't lead a copy out of it.
+ */
+async function isDirectoryInside(parent: string, root: string): Promise<boolean> {
   try {
-    return (await lstat(path)).isDirectory();
+    if (!(await lstat(parent)).isDirectory()) return false;
+    const real = foldPathCase(realPathOf(parent));
+    const top = foldPathCase(root);
+    return real === top || real.startsWith(top.endsWith('/') ? top : `${top}/`);
   } catch {
     return false;
   }
@@ -44,7 +52,8 @@ async function isPlainDirectory(path: string): Promise<boolean> {
  * them yet. This only copies data: regular files are cloned (copy-on-write where the volume has it),
  * links are copied as links and never followed, and nothing from the source runs. Any entry that
  * cannot be read or written fails the whole seed after every clone in flight has finished, so the
- * caller removes a worktree that is not whole. Rejects with the signal's reason when it aborts.
+ * caller removes a worktree that is not whole (directories made so far keep their widened mode
+ * then, since the caller removes the worktree). Rejects with the signal's reason when it aborts.
  */
 export async function seedWorktree(input: {
   readonly from: string;
@@ -107,8 +116,9 @@ export async function seedWorktree(input: {
 
   let walkFailure: { readonly error: unknown } | null = null;
   try {
+    const realTo = realPathOf(input.to);
     for (const dir of input.dirs) {
-      if (!(await isPlainDirectory(dirname(join(input.to, dir))))) {
+      if (!(await isDirectoryInside(dirname(join(input.to, dir)), realTo))) {
         skipped.push(dir);
         continue;
       }
@@ -122,6 +132,9 @@ export async function seedWorktree(input: {
   if (walkFailure) throw walkFailure.error;
   input.signal.throwIfAborted();
   // Children before parents, so a parent without search permission doesn't hide its children.
-  for (const { path, mode } of directories.reverse()) await chmod(path, mode);
+  // A directory that was swapped for a link meanwhile is left alone: chmod follows links.
+  for (const { path, mode } of directories.reverse()) {
+    if ((await lstat(path)).isDirectory()) await chmod(path, mode);
+  }
   return { files, links, skipped };
 }
