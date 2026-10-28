@@ -22,9 +22,9 @@ import { AddAccountModal } from './add-account-modal';
 import { ACCOUNT_STATUS_LABEL, AccountStatus, accountStatus } from './account-status';
 import { capShare, formatTokens, formatUsd } from './usage-text';
 
-/** Waiting on a human is yellow; teal, the primary colour, marks an account that can run. */
+/** Waiting on a human is yellow; green, the done colour, marks an account that can run. */
 const STATUS_COLOR: Readonly<Record<AccountStatus, string>> = {
-  [AccountStatus.Ready]: 'teal',
+  [AccountStatus.Ready]: 'green',
   [AccountStatus.NeedsSignIn]: 'yellow',
   [AccountStatus.NeedsSecret]: 'yellow',
   [AccountStatus.Archived]: 'gray',
@@ -53,7 +53,7 @@ function UsageCell({ account }: { readonly account: AccountDto }) {
       <Progress
         size="sm"
         value={Math.min(share.pct, 100)}
-        color={share.reached ? 'orange' : 'teal'}
+        color={share.reached ? 'orange' : 'blue'}
         aria-label={`${account.label} spend against its cap`}
       />
     </Stack>

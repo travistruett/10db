@@ -91,7 +91,7 @@ export function SecretForm({ account }: { readonly account: AccountDto }) {
     <form onSubmit={(event) => void submit(event)}>
       <Stack gap="xs" align="flex-start">
         {account.secretSet ? (
-          <Badge color="teal">Secret set</Badge>
+          <Badge color="green">Secret set</Badge>
         ) : (
           <Badge color="yellow">No secret yet</Badge>
         )}
