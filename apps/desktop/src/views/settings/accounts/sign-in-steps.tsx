@@ -33,7 +33,7 @@ export function SignInSteps({ account }: { readonly account: AccountDto }) {
                 <ActionIcon
                   size="md"
                   variant="subtle"
-                  color={copied ? 'teal' : 'gray'}
+                  color={copied ? 'green' : 'gray'}
                   aria-label={copied ? 'Copied' : 'Copy command'}
                   onClick={copy}
                 >

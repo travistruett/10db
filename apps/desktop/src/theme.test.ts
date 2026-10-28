@@ -1,79 +1,140 @@
-import { darken, DEFAULT_THEME, isLightColor, mergeMantineTheme } from '@mantine/core';
+import { DEFAULT_THEME, defaultCssVariablesResolver, mergeMantineTheme } from '@mantine/core';
 import { describe, expect, it } from 'vitest';
-import { AA_CONTRAST, contrastRatio, cssVariablesResolver, theme } from './theme';
+import {
+  SelenizedDark,
+  SelenizedLight,
+  type SelenizedAccent,
+  type SelenizedVariant,
+} from './selenized';
+import { cssVariablesResolver, theme } from './theme';
 
-// The pairs Mantine 9 renders, resolved with 10db's theme. The E2E's axe run checks the real pages.
+// The variables Mantine 9 renders with 10db's theme: its defaults, then 10db's resolver on top.
 const resolved = mergeMantineTheme(DEFAULT_THEME, theme);
-const vars = cssVariablesResolver(resolved);
-const palettes = Object.entries(resolved.colors);
-const shade = (ref: string): string => {
-  const match = /^var\(--mantine-color-([a-z]+)-(\d)\)$/.exec(ref);
-  const color = match ? resolved.colors[match[1] ?? '']?.[Number(match[2])] : ref;
-  if (color === undefined) throw new Error(`unknown color ${ref}`);
-  return color;
-};
+const defaults = defaultCssVariablesResolver(resolved);
+const overrides = cssVariablesResolver(resolved);
+const Scheme = { Light: 'light', Dark: 'dark' } as const;
+type Scheme = (typeof Scheme)[keyof typeof Scheme];
+const VARIANT: Record<Scheme, SelenizedVariant> = { light: SelenizedLight, dark: SelenizedDark };
 
-describe('theme contrast (WCAG AA)', () => {
-  it('reads dimmed text at AA on the body in both schemes', () => {
-    expect(
-      contrastRatio(shade(vars.light['--mantine-color-dimmed'] ?? ''), resolved.white),
-    ).toBeGreaterThanOrEqual(AA_CONTRAST);
-    expect(
-      contrastRatio(shade(vars.dark['--mantine-color-dimmed'] ?? ''), resolved.colors.dark[7]),
-    ).toBeGreaterThanOrEqual(AA_CONTRAST);
-  });
+function table(scheme: Scheme): Record<string, string> {
+  return {
+    ...defaults.variables,
+    ...defaults[scheme],
+    ...overrides.variables,
+    ...overrides[scheme],
+  };
+}
 
-  // `c="red"` (a failure reason in the Factory table, a batch's failure on the strip) is
-  // var(--mantine-color-red-text): the filled shade in the light scheme, shade 4 in the dark one.
-  it('reads red status text at AA on the body and on a hovered table row in both schemes', () => {
-    const red = resolved.colors.red;
-    const lightShade =
-      typeof resolved.primaryShade === 'number'
-        ? resolved.primaryShade
-        : resolved.primaryShade.light;
-    for (const background of [resolved.white, resolved.colors.gray[1]])
-      expect(contrastRatio(red[lightShade], background)).toBeGreaterThanOrEqual(AA_CONTRAST);
-    for (const background of [resolved.colors.dark[7], resolved.colors.dark[6]])
-      expect(contrastRatio(red[4], background)).toBeGreaterThanOrEqual(AA_CONTRAST);
-  });
+function cssVar(scheme: Scheme, name: string): string {
+  const variables = table(scheme);
+  let value = variables[name];
+  for (let match = /^var\((--[a-z0-9-]+)\)$/.exec(value ?? ''); match;) {
+    value = variables[match[1] ?? ''];
+    match = /^var\((--[a-z0-9-]+)\)$/.exec(value ?? '');
+  }
+  if (value === undefined) throw new Error(`${name} is not defined in the ${scheme} scheme`);
+  return value;
+}
 
-  it.each(palettes)('reads %s light-variant text at AA in both schemes', (name, shades) => {
-    const lightText = vars.light[`--mantine-color-${name}-light-color`] ?? '';
-    // The background, then the hover background (a hovered NavLink or light Button).
-    expect(contrastRatio(lightText, shades[1])).toBeGreaterThanOrEqual(AA_CONTRAST);
-    expect(contrastRatio(lightText, shades[2])).toBeGreaterThanOrEqual(AA_CONTRAST);
-    // Mantine's dark scheme: shade 0 on shade 9 darkened by half.
-    expect(contrastRatio(shades[0], darken(shades[9], 0.5))).toBeGreaterThanOrEqual(AA_CONTRAST);
-  });
+function values(variant: SelenizedVariant): string[] {
+  const { accents, ...surfaces } = variant;
+  return [
+    ...Object.values(surfaces),
+    ...Object.values(accents).flatMap(({ base, bright }) => [base, bright]),
+  ];
+}
 
-  it.each(palettes)(
-    'reads text on filled %s at AA, with the color autoContrast picks',
-    (_name, shades) => {
-      for (const scheme of ['light', 'dark'] as const) {
-        const shadeIndex =
-          typeof resolved.primaryShade === 'number'
-            ? resolved.primaryShade
-            : resolved.primaryShade[scheme];
-        const fill = shades[shadeIndex];
-        const text = isLightColor(fill, resolved.luminanceThreshold)
-          ? resolved.black
-          : resolved.white;
-        expect(contrastRatio(text, fill)).toBeGreaterThanOrEqual(AA_CONTRAST);
-      }
+const HUES: readonly (readonly [string, SelenizedAccent])[] = [
+  ['red', 'red'],
+  ['pink', 'magenta'],
+  ['grape', 'magenta'],
+  ['violet', 'violet'],
+  ['indigo', 'violet'],
+  ['blue', 'blue'],
+  ['cyan', 'cyan'],
+  ['teal', 'cyan'],
+  ['green', 'green'],
+  ['lime', 'green'],
+  ['yellow', 'yellow'],
+  ['orange', 'orange'],
+];
+
+describe('theme palette (Selenized, exactly)', () => {
+  // A scale's numbered shades are shared by both schemes; everything else belongs to one.
+  const isShade = (name: string) =>
+    /-\d$/.test(name) || name === '--mantine-color-white' || name === '--mantine-color-black';
+  const colorVariables = (scheme: Scheme) =>
+    Object.keys(table(scheme)).filter(
+      (name) =>
+        /^--mantine-(primary-)?color-/.test(name) &&
+        name !== '--mantine-color-scheme' &&
+        !isShade(name),
+    );
+
+  it.each([Scheme.Light, Scheme.Dark])(
+    'resolves every %s color variable to a value from its Selenized variant',
+    (scheme) => {
+      const allowed = values(VARIANT[scheme]);
+      const strays = colorVariables(scheme)
+        .map((name) => `${name}: ${cssVar(scheme, name)}`)
+        .filter((entry) => !allowed.includes(entry.split(': ')[1] ?? ''));
+      expect(strays).toEqual([]);
     },
   );
 
-  // A Button keeps its text color on hover, and the pointer rests on a button after a click.
-  it.each(palettes)('reads text on hovered filled %s at AA in both schemes', (name, shades) => {
-    const text = isLightColor(shades[9], resolved.luminanceThreshold)
-      ? resolved.black
-      : resolved.white;
-    for (const scheme of ['light', 'dark'] as const) {
-      // Mantine's own hover is shade 8 when the fill is shade 9.
-      const hover = shade(
-        vars[scheme][`--mantine-color-${name}-filled-hover`] ?? `var(--mantine-color-${name}-8)`,
-      );
-      expect(contrastRatio(text, hover)).toBeGreaterThanOrEqual(AA_CONTRAST);
+  it('builds every scale from Selenized values', () => {
+    const allowed = [...values(SelenizedLight), ...values(SelenizedDark)];
+    const strays = Object.entries(defaults.variables)
+      .filter(([name]) => name.startsWith('--mantine-color-') && isShade(name))
+      .filter(([, value]) => !allowed.includes(value));
+    expect(strays).toEqual([]);
+  });
+
+  it.each([
+    ['light body', Scheme.Light, '--mantine-color-body', SelenizedLight.bg0],
+    ['light text', Scheme.Light, '--mantine-color-text', SelenizedLight.fg0],
+    ['light bright text', Scheme.Light, '--mantine-color-bright', SelenizedLight.fg1],
+    ['light dimmed text', Scheme.Light, '--mantine-color-dimmed', SelenizedLight.dim0],
+    ['light control', Scheme.Light, '--mantine-color-default', SelenizedLight.bg1],
+    ['light border', Scheme.Light, '--mantine-color-default-border', SelenizedLight.bg2],
+    ['dark body', Scheme.Dark, '--mantine-color-body', SelenizedDark.bg0],
+    ['dark text', Scheme.Dark, '--mantine-color-text', SelenizedDark.fg0],
+    ['dark bright text', Scheme.Dark, '--mantine-color-bright', SelenizedDark.fg1],
+    ['dark dimmed text', Scheme.Dark, '--mantine-color-dimmed', SelenizedDark.dim0],
+    ['dark control', Scheme.Dark, '--mantine-color-default', SelenizedDark.bg1],
+    ['dark border', Scheme.Dark, '--mantine-color-default-border', SelenizedDark.bg2],
+  ])('paints the %s with its Selenized value', (_case, scheme, name, expected) => {
+    expect(cssVar(scheme, name)).toBe(expected);
+  });
+
+  it.each(HUES)('draws %s as Selenized %s in each scheme', (name, accent) => {
+    for (const scheme of [Scheme.Light, Scheme.Dark]) {
+      const { base, bright, bg1 } = {
+        ...VARIANT[scheme].accents[accent],
+        bg1: VARIANT[scheme].bg1,
+      };
+      expect(cssVar(scheme, `--mantine-color-${name}-filled`)).toBe(base);
+      expect(cssVar(scheme, `--mantine-color-${name}-filled-hover`)).toBe(bright);
+      expect(cssVar(scheme, `--mantine-color-${name}-text`)).toBe(base);
+      // A light ThemeIcon, Badge or Alert: the accent itself on bg_1.
+      expect(cssVar(scheme, `--mantine-color-${name}-light-color`)).toBe(base);
+      expect(cssVar(scheme, `--mantine-color-${name}-light`)).toBe(bg1);
     }
+  });
+
+  it('makes Selenized blue the primary color', () => {
+    for (const scheme of [Scheme.Light, Scheme.Dark])
+      expect(cssVar(scheme, '--mantine-primary-color-filled')).toBe(
+        VARIANT[scheme].accents.blue.base,
+      );
+  });
+
+  it('writes on a filled color in the body color, like reverse video', () => {
+    const colors = resolved.variantColorResolver({
+      color: 'green',
+      variant: 'filled',
+      theme: resolved,
+    });
+    expect(colors.color).toBe('var(--mantine-color-body)');
   });
 });

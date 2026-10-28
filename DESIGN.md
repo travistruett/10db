@@ -7,8 +7,17 @@ favors legibility and calm over decoration.
   in dense lists and 20 elsewhere.
 - **Color scheme:** dark by default; light is a toggle and must be equally usable. Never hard-code
   colors; use theme tokens (`var(--mantine-color-…)`) so both schemes work.
-- **Primary color:** teal. Status colors: blue = running, yellow = waiting on a human, orange =
-  paused (limits), red = failed or flagged, green = done, gray = queued or cancelled.
+- **Palette:** [Selenized](https://github.com/jan-warchol/selenized): Selenized dark paints the
+  dark scheme and Selenized light the light one (`apps/desktop/src/theme.ts`), with every value
+  exactly as Selenized defines it: never mixed, lightened or darkened, and never adjusted to reach a
+  contrast ratio. Text is fg_0, bright text fg_1 and dimmed text dim_0, on bg_0; controls and
+  light-variant backgrounds are bg_1, hovering on bg_2. An accent is drawn in its base value and
+  hovers in its bright one; text on a filled accent is bg_0, as in reverse video. Every Mantine hue
+  maps to a Selenized accent (teal is cyan, pink and grape are magenta, indigo is violet, lime is
+  green), so no stock Mantine color appears.
+- **Primary color:** blue. Status colors: blue = running, yellow = waiting on a human, orange =
+  paused (limits), red = failed or flagged, green = done or ready, gray = queued or cancelled.
+  Green is the only "OK" color; don't use cyan or teal for success.
 - **Type:** system font stack; monospace for IDs, paths, commands and logs.
 - **Density:** `size="sm"` controls in lists and tables; `md` in forms and dialogs.
 - **Board cards:** compact `Paper`s with a drag handle (Tabler grip-vertical; disabled, with a tooltip saying why, in In progress, Blocked and Done) and an actions menu. Human columns sit left of the locked system columns, which show a lock icon. Columns scroll horizontally on narrow windows.
@@ -19,4 +28,5 @@ favors legibility and calm over decoration.
   `xs` line with an icon in the header of the view it affects.
 - **Copy:** sentence case; say what happened and what to do next.
 - **Accessibility:** jsx-a11y strict passes; every interactive control is reachable by keyboard and
-  has a visible focus ring; axe runs in Playwright tests (M1b).
+  has a visible focus ring; axe runs in Playwright tests (M1b) with every rule but `color-contrast`,
+  since contrast is whatever Selenized gives.
