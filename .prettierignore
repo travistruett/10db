@@ -18,6 +18,7 @@ LICENSE
 CODE_OF_CONDUCT.md
 # release-please writes these in its own format: JSON.stringify layout and * bullets.
 CHANGELOG.md
+.release-please-manifest.json
 apps/desktop/src-tauri/tauri.conf.json
 # Append-only log: Prettier would re-pad the whole table on every new row.
 docs/architecture/decisions.md

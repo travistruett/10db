@@ -65,7 +65,10 @@ describe('files release-please rewrites', () => {
     '.release-please-manifest.json',
     'apps/desktop/src-tauri/tauri.conf.json',
   ])('%s stays Prettier-clean after release-please re-serializes it', async (path) => {
-    const rewritten = `${JSON.stringify(JSON.parse(readRepoFile(path)), null, 2)}\n`;
+    // release-please keeps the file's own indentation, so a one-line file comes back compact.
+    const text = readRepoFile(path);
+    const indent = /^\{\n([ \t]+)/.exec(text)?.[1] ?? '';
+    const rewritten = `${JSON.stringify(JSON.parse(text), null, indent)}\n`;
     expect(await prettierClean(path, rewritten), `${path}: list it in .prettierignore`).toBe(true);
   });
 
