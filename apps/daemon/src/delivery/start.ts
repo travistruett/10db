@@ -7,6 +7,7 @@ import {
   Delivery,
   InvalidError,
   mintId,
+  NotFoundError,
   TaskStatus,
   WorkspaceMode,
   type BatchDto,
@@ -27,7 +28,6 @@ import {
   getTask,
   getWorkstreamRow,
   insertBatch,
-  listBatches,
   listWorkstreams,
   patchBatch,
   transitionBatch,
@@ -130,8 +130,7 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
       (group): Plans => new Map(group.tasks.map((t) => [t.id, planForStart(db, t.id)])),
     );
     // The stored path is the one git makes the worktree at, so the pin store finds the batch by it.
-    mkdirSync(ctx.worktreeRoot, { recursive: true, mode: 0o700 });
-    const root = realpathSync(ctx.worktreeRoot);
+    const root = madeWorktreeRoot();
     return groups.map((group, i) => {
       const groupPlans = plans[i] ?? new Map<TaskId, StepPlanDto>();
       const batch = ctx.state.write((w) => {
@@ -153,14 +152,25 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
     });
   }
 
+  /** The worktree root, made owner-only when missing, as a real path. */
+  function madeWorktreeRoot(): string {
+    try {
+      mkdirSync(ctx.worktreeRoot, { recursive: true, mode: 0o700 });
+      return realpathSync(ctx.worktreeRoot);
+    } catch (error) {
+      throw new InvalidError(
+        `10db can't make its worktree root ${ctx.worktreeRoot}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
   /** A fix task joins the OPEN worktree batch it names; a FAILED one waits for reopening. */
   function joinWorktree(
     project: ProjectDto,
     batchId: BatchId,
     tasks: readonly TaskDto[],
   ): BatchDto {
-    const batch = listBatches(db, { projectId: project.id }).find((b) => b.id === batchId);
-    if (!batch) throw new ConflictError(`Batch ${batchId} is not a batch of ${project.name}`);
+    const batch = batchOf(project, batchId);
     if (batch.state !== BatchState.Open)
       throw new ConflictError(
         `Batch "${batch.title}" is ${batch.state.toLowerCase()}; add fix tasks to it once it is open`,
@@ -174,6 +184,20 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
     ctx.jobs.run(jobKey(project, JobQueue.Cut), (signal) =>
       join(batchId, tasks, plans, inBatch, signal),
     );
+    return batch;
+  }
+
+  /** The project's batch `batchId`; any other id, one naming no batch included, is a conflict. */
+  function batchOf(project: ProjectDto, batchId: BatchId): BatchDto {
+    const conflict = new ConflictError(`Batch ${batchId} is not a batch of ${project.name}`);
+    let batch: BatchDto;
+    try {
+      batch = getBatch(db, batchId);
+    } catch (error) {
+      if (error instanceof NotFoundError) throw conflict;
+      throw error;
+    }
+    if (batch.projectId !== project.id) throw conflict;
     return batch;
   }
 

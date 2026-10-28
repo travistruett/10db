@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
-import { ConflictError, type BatchDto, type TaskDto } from '@10db/contracts';
+import { ConflictError, InvalidError, mintId, type BatchDto, type TaskDto } from '@10db/contracts';
 import {
   findBatchByWorktreePath,
   getBatch,
@@ -26,7 +26,7 @@ import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery
 import { isolatedGitEnv } from '../../test/fixtures';
 import { hangingSsh } from '../../test/hanging-ssh';
 import { parseWorktreeList, type WorktreeEntry } from '../git';
-import { batchBranchName } from './index';
+import { batchBranchName, createBatchStarter } from './index';
 
 let h: DeliveryHarness;
 beforeEach(() => {
@@ -175,6 +175,35 @@ describe('starting in worktree mode', () => {
     const third = await startedOne(h.addTask('Gamma'));
     expect(third.state).toBe('OPEN');
     expect(listBatches(h.store.db).map((b) => b.state)).toEqual(['SHIPPING', 'OPEN', 'OPEN']);
+  });
+
+  it('keeps an OPEN batch and its worktree when asking for work throws', async () => {
+    const starter = createBatchStarter({
+      ...h.ctx,
+      onWorkQueued: () => {
+        throw new Error('the scheduler is gone');
+      },
+    });
+    const batch = starter.startTask(h.addTask('Alpha').id);
+    await h.jobs.idle();
+    const now = getBatch(h.store.db, batch.id);
+    expect(now.state).toBe('OPEN');
+    expect(existsSync(pathOf(now))).toBe(true);
+    expect(locked()).toHaveLength(1);
+    expect(branches10db()).toEqual([`refs/heads/${now.branch ?? ''}`]);
+    expect(h.cards()).toEqual([]);
+  });
+
+  it('refuses a start whose worktree root cannot be made, naming the root, and writes nothing', () => {
+    const file = join(h.dataDir, 'not-a-directory');
+    writeFileSync(file, '');
+    const root = join(file, 'level');
+    const starter = createBatchStarter({ ...h.ctx, worktreeRoot: root });
+    const alpha = h.addTask('Alpha');
+    expect(() => starter.startTask(alpha.id)).toThrow(InvalidError);
+    expect(() => starter.startTask(alpha.id)).toThrow(root);
+    expect(listBatches(h.store.db)).toEqual([]);
+    expect(listWorkstreams(h.store.db, {})).toEqual([]);
   });
 
   it('leaves a dirty main checkout on another branch exactly as it was', async () => {
@@ -428,6 +457,17 @@ describe('fix tasks in worktree mode', () => {
     await h.jobs.idle();
     expect(listWorkstreams(h.store.db, {}).map((w) => w.taskId)).not.toContain(fix.id);
     expect(getBatch(h.store.db, batch.id).state).toBe('FAILED');
+  });
+
+  it('refuses a batchId that names no batch', () => {
+    const fix = h.addTask('Fix', { areas: ['ui'] });
+    expect(() =>
+      h.starter.startBatch(h.project.id, {
+        title: 'Fix',
+        taskIds: [fix.id],
+        batchId: mintId('Batch'),
+      }),
+    ).toThrow(ConflictError);
   });
 
   it("refuses a batchId of another project's batch", async () => {

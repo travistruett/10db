@@ -68,10 +68,10 @@ export async function cutWorktree(
       'could not undo a refused worktree cut',
     );
   };
-  // An object, so the catch-all reads what a refusal set, not a narrowed `false`.
-  const refusal = { started: false };
+  // An object, so the catch-all reads what the steps set, not a narrowed `false`.
+  const progress = { refused: false, opened: false };
   const refuse = async (card: Card): Promise<void> => {
-    refusal.started = true;
+    progress.refused = true;
     if (made.worktree) await ctx.git.removeWorktree(main, path).catch(log);
     if (made.branch && made.base)
       await ctx.git.deleteBranchIfAt(main, branch, made.base).catch(log);
@@ -170,14 +170,16 @@ export async function cutWorktree(
       patchBatch(w, batchId, { branch, baseSha, repo });
       transitionBatch(w, batchId, { to: BatchState.Open, reason: 'worktree cut' });
     });
+    progress.opened = true;
     ctx.logger.info(
       { batchId, projectId: project.id, branch, baseSha, repo, path },
       'batch worktree cut',
     );
     ctx.onWorkQueued();
   } catch (error) {
-    // A refusal that threw is not refused again; the job's log records it.
-    if (refusal.started) throw error;
+    // An OPEN batch keeps its worktree, and a refusal that threw doesn't run twice: the job's log
+    // records either error.
+    if (progress.refused || progress.opened) throw error;
     if (!stopped()) await refuse(startCards.notStarted(error));
   }
 }
