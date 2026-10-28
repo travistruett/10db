@@ -1,6 +1,6 @@
 # Decisions
 
-Append-only. A row that replaces an earlier one says "Supersedes N" in its Why column.
+Closed at 133. A new decision is its own file in [`decisions/`](decisions/README.md) (`decisions/2026-10-27-one-file-per-decision.md`). These rows are never edited or renumbered and are still cited by number; a row that replaced an earlier one says "Supersedes N" in its Why column.
 
 ## Repository governance
 

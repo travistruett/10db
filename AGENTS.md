@@ -25,8 +25,10 @@ A local macOS control plane that runs Claude Code sessions as a software factory
 
 - Code style: `.claude/rules/code-style.md`. Testing: `.claude/rules/testing.md`. Both bind Codex too.
 - Import workspace packages by name through their entry point only. Packages never import apps.
-- Pin every dependency exactly, latest stable when added. A held-back pin gets a row in
-  `docs/architecture/decisions.md` saying why.
+- Pin every dependency exactly, latest stable when added. A held-back pin gets a decision saying
+  why.
+- A design decision is its own file in `docs/architecture/decisions/` (its README gives the format).
+  The numbered log `decisions.md` is closed; never add a row to it.
 - Generated files are never edited by hand: `packages/contracts/generated/`,
   `packages/db/drizzle/`. `make gate` fails when they drift. The exception is a
   `drizzle-kit generate --custom` migration: it is authored by hand once and its SQL never changes.
