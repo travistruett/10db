@@ -8,7 +8,7 @@
     "dev": "vite",
     "build": "vite build",
     "sidecar": "tsx scripts/prepare-sidecar.ts",
-    "dev:shell": "TENDB_EXTERNAL_DAEMON=1 tauri dev --config '{\"build\":{\"beforeDevCommand\":\"\"}}'",
+    "dev:shell": "TENDB_EXTERNAL_DAEMON=1 TENDB_DATA_DIR=\"${TENDB_DATA_DIR:-$(cd ../.. && pwd)/.dev/data}\" tauri dev --config src-tauri/tauri.dev.conf.json",
     "tauri": "tauri"
   },
   "dependencies": {
