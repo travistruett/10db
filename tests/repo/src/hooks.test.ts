@@ -49,7 +49,8 @@ describe('commitlint', () => {
     ['the release-please title', 'chore(repo): release 0.1.0', true],
     ['a Renovate title', 'chore(deps): update dependency vite to v8.3.5', true],
     ['no type', 'Add the health endpoint', false],
-    ['no scope', 'feat: add the health endpoint', false],
+    ['no scope', 'feat: add the health endpoint', true],
+    ['no type or scope', 'add the health endpoint', false],
     ['a scope off the list', 'feat(web): add the health endpoint', false],
     ['a capitalized subject', 'feat(daemon): Add the health endpoint', false],
   ])('%s', (_name, message, valid) => {

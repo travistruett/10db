@@ -89,11 +89,11 @@ Follow these steps in order on a new computer. Each one says how to check it wor
 
 ## Commits
 
-Commits follow [Conventional Commits](https://www.conventionalcommits.org): `type(scope): subject`,
+Commits follow [Conventional Commits](https://www.conventionalcommits.org): `type(scope): subject` (the `(scope)` is optional),
 with a lowercase subject, for example `fix(daemon): close the database on shutdown`. The
 `commit-msg` hook runs commitlint, and CI checks the pull request title the same way.
 
-The scope is required and comes from this list:
+When a scope is given it comes from this list; the type is always required:
 
 | Scope       | Covers                                                      |
 | ----------- | ----------------------------------------------------------- |
