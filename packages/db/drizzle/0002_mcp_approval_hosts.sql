@@ -1,0 +1,1 @@
+ALTER TABLE `mcp_server_approvals` ADD `hosts` text DEFAULT '[]' NOT NULL;

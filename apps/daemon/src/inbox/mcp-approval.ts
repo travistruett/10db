@@ -37,6 +37,37 @@ function word(text: string): string {
 const assignment = (entry: { name: string; value: string }): string =>
   `${word(entry.name)}=${word(entry.value)}`;
 
+/** A host as the card names it: a wildcard says what it covers. */
+function shownHost(host: string): string {
+  if (!host.startsWith('*.')) return word(host);
+  const domain = word(host.slice(2));
+  return `*.${domain} (every subdomain of ${domain}, not ${domain} itself)`;
+}
+
+/** "a", "a and b", "a, b and c". */
+function listed(items: readonly string[]): string {
+  const last = items.at(-1) ?? '';
+  return items.length < 2 ? last : `${items.slice(0, -1).join(', ')} and ${last}`;
+}
+
+/** What the sandbox lets a stdio server reach, and where an approved token can go. */
+function networkLine(hosts: readonly string[]): string {
+  const sandbox =
+    'It runs in a sandbox: it reads what lane commands read, writes only its own temp dir and';
+  if (hosts.length > 0) {
+    return (
+      `${sandbox} reaches only ${listed(hosts.map(shownHost))}, never localhost. ` +
+      'Whatever it is given, an approved token included, can leave over the network only to those hosts, ' +
+      'and through what its tools return to the session.'
+    );
+  }
+  return (
+    `${sandbox} reaches no host, not even localhost. A server that downloads its package when it starts, ` +
+    "such as npx -y for a package the repo doesn't install, can't start there unless the repo's " +
+    '.10db/mcp-hosts.json names the hosts it needs.'
+  );
+}
+
 function approvalBody(review: McpServerReview): string {
   const lines = [
     `The repo's .mcp.json declares "${visible(review.name)}" (${review.transport}). Sessions in this project run without it until you approve it.`,
@@ -51,7 +82,7 @@ function approvalBody(review: McpServerReview): string {
       replaced.length > 0
         ? `Its env block replaces ${replaced.join(' and ')}, so what it runs is looked up and started as shown above. Otherwise it gets the variables lane commands get, with no credentials.`
         : 'It gets the variables lane commands get, with no credentials, plus what its env block sets.',
-      "It runs in a sandbox: it reads what lane commands read, writes only its own temp dir and reaches no host, not even localhost. A server that downloads its package when it starts, such as npx -y for a package the repo doesn't install, can't start there.",
+      networkLine(review.hosts),
     );
   } else {
     lines.push(`Connects to: ${word(review.url ?? '')}`);
@@ -65,7 +96,11 @@ function approvalBody(review: McpServerReview): string {
   );
   if (review.sensitive.length > 0)
     lines.push(`These look like credentials: ${review.sensitive.join(', ')}`);
-  lines.push('The approval covers this exact config. Any change to it asks again.');
+  lines.push(
+    review.transport === McpTransport.Stdio && review.hosts.length > 0
+      ? 'The approval covers this exact config and these hosts. Any change to either asks again.'
+      : 'The approval covers this exact config. Any change to it asks again.',
+  );
   return lines.join('\n');
 }
 
@@ -114,6 +149,7 @@ export function applyMcpApproval(ctx: WriteContext, item: InboxItemDto, answer: 
     configHash: review.data.configHash,
     verdict: approve ? McpVerdict.Approved : McpVerdict.Denied,
     variables: approve ? review.data.variables : [],
+    hosts: approve ? review.data.hosts : [],
     sourceInboxId: item.id,
   });
 }

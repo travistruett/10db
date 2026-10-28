@@ -84,6 +84,15 @@
         "type": "string"
       }
     },
+    "hosts": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 253,
+        "pattern": "^(?:\\*\\.)?(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+(?!(?:[0-9]+|0x[0-9a-f]*)$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"
+      }
+    },
     "verdict": {
       "type": "string",
       "enum": [

@@ -309,6 +309,7 @@ describe('buildQueryOptions', () => {
         command: 'npx',
         args: ['-y', '@mantine/mcp-server@9.7.2'],
         env: {},
+        hosts: [],
       });
       try {
         const servers = buildMcpServers(

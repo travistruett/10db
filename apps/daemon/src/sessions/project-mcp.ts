@@ -7,6 +7,9 @@ import {
   type McpServerReview,
 } from '@10db/contracts';
 import { z } from 'zod';
+import { describeIssues } from './config-issues';
+import { MCP_HOSTS_FILE, McpHostsFileError, readMcpHosts } from './mcp-hosts-file';
+import { McpServerName } from './mcp-server-name';
 import { readRepoConfigFile, RepoConfigFileError } from './repo-config-file';
 
 /** 10db's own MCP server in every managed session. A repo server with this name never replaces it. */
@@ -24,8 +27,6 @@ const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 /** Names that look like credentials: 10db's billing, Claude Code's and AWS's, and anything named like a secret. */
 const SENSITIVE_NAME = /^(?:ANTHROPIC_|CLAUDE_|AWS_)|TOKEN|SECRET|PASSWORD|API_?KEY|CREDENTIAL/i;
 
-/** A server name: it ends up in tool names (`mcp__<name>__*`) and on the approval card. */
-const SERVER_NAME = /^[A-Za-z0-9_-]{1,64}$/;
 /** An HTTP header name is an RFC 9110 token. */
 const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
 
@@ -57,10 +58,7 @@ const RemoteServer = z.strictObject({
   headers: HeaderMap.optional(),
 });
 const McpFile = z.strictObject({
-  mcpServers: z.record(
-    z.string().regex(SERVER_NAME, 'must be 1 to 64 letters, digits, "_" or "-"'),
-    z.union([StdioServer, RemoteServer]),
-  ),
+  mcpServers: z.record(McpServerName, z.union([StdioServer, RemoteServer])),
 });
 type DeclaredServer = z.infer<typeof StdioServer> | z.infer<typeof RemoteServer>;
 
@@ -72,6 +70,8 @@ export type ProjectMcpServer =
       readonly args: readonly string[];
       /** PATH, HOME and the approved variables; the lane sandbox adds its allowlist and nothing else. */
       readonly env: Readonly<Record<string, string>>;
+      /** The hosts its approval names: its sandbox reaches these and no others. */
+      readonly hosts: readonly string[];
     }
   | RemoteMcpServer;
 
@@ -114,6 +114,7 @@ export interface RepoMcp {
 export interface McpApproval {
   readonly verdict: McpVerdict;
   readonly variables: readonly string[];
+  readonly hosts: readonly string[];
 }
 
 export interface ProjectMcp {
@@ -154,8 +155,7 @@ function parseMcpFile(path: string, text: string): z.infer<typeof McpFile> {
   }
   const parsed = McpFile.safeParse(json);
   if (!parsed.success) {
-    const issues = parsed.error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`);
-    throw new ProjectMcpError(`${path} is not a valid MCP config: ${issues.join('; ')}`);
+    throw new ProjectMcpError(`${path} is not a valid MCP config: ${describeIssues(parsed.error)}`);
   }
   return parsed.data;
 }
@@ -163,14 +163,19 @@ function parseMcpFile(path: string, text: string): z.infer<typeof McpFile> {
 const sortedEntries = (map: Readonly<Record<string, string>> | undefined): [string, string][] =>
   Object.entries(map ?? {}).sort(([a], [b]) => a.localeCompare(b));
 
-/** The config as 10db hashes it: defaults filled in and maps sorted, before any expansion. */
-function normalized(server: DeclaredServer): unknown {
+/**
+ * The config as 10db hashes it: defaults filled in and maps sorted, before any expansion. A stdio
+ * server's hosts are part of it, so naming another host asks again; a server with none hashes as if
+ * the field were absent, so its approval stands.
+ */
+function normalized(server: DeclaredServer, hosts: readonly string[]): unknown {
   return 'command' in server
     ? {
         transport: McpTransport.Stdio,
         command: server.command,
         args: server.args ?? [],
         env: sortedEntries(server.env),
+        ...(hosts.length > 0 ? { hosts } : {}),
       }
     : { transport: server.type, url: server.url, headers: sortedEntries(server.headers) };
 }
@@ -186,7 +191,7 @@ const entriesOf = (map: Readonly<Record<string, string>> | undefined): McpConfig
   sortedEntries(map).map(([name, value]) => ({ name, value }));
 
 /** What the builder sees on the approval card, and the hash the approval is keyed on. */
-function reviewOf(name: string, server: DeclaredServer): McpServerReview {
+function reviewOf(name: string, server: DeclaredServer, hosts: readonly string[]): McpServerReview {
   const stdio = 'command' in server;
   const values = stdio
     ? [server.command, ...(server.args ?? []), ...Object.values(server.env ?? {})]
@@ -195,7 +200,7 @@ function reviewOf(name: string, server: DeclaredServer): McpServerReview {
   return {
     name,
     configHash: createHash('sha256')
-      .update(JSON.stringify(normalized(server)))
+      .update(JSON.stringify(normalized(server, hosts)))
       .digest('hex'),
     transport: stdio ? McpTransport.Stdio : server.type,
     command: stdio ? server.command : null,
@@ -205,6 +210,7 @@ function reviewOf(name: string, server: DeclaredServer): McpServerReview {
     headers: stdio ? [] : entriesOf(server.headers),
     variables,
     sensitive: variables.filter((v) => SENSITIVE_NAME.test(v)),
+    hosts: [...hosts],
   };
 }
 
@@ -223,14 +229,44 @@ function reservedName(name: string): boolean {
   return name.startsWith(TENDB_MCP_SERVER) || name.includes('__');
 }
 
+function readHosts(repoPath: string): ReadonlyMap<string, readonly string[]> {
+  try {
+    return readMcpHosts(repoPath);
+  } catch (error) {
+    if (error instanceof McpHostsFileError) throw new ProjectMcpError(error.message);
+    throw error;
+  }
+}
+
+/** A warning for each server the hosts file names that 10db doesn't run as a stdio server. */
+function strayHosts(
+  hosts: ReadonlyMap<string, readonly string[]>,
+  servers: readonly RepoMcpServer[],
+): string[] {
+  return [...hosts.keys()].flatMap((name) => {
+    const server = servers.find((s) => s.name === name);
+    if (server?.review.transport === McpTransport.Stdio) return [];
+    const declared =
+      server === undefined
+        ? "which the repo's .mcp.json doesn't declare, or declares in a way 10db ignores"
+        : `which the repo's .mcp.json declares as an ${server.review.transport} server`;
+    return [
+      `The repo's ${MCP_HOSTS_FILE} names hosts for "${name}", ${declared}. Only a stdio server's ` +
+        'sandbox opens hosts, so these are ignored. Remove the entry, or fix the server name.',
+    ];
+  });
+}
+
 /**
- * The repo's `.mcp.json`, parsed and reviewed, but not yet approved or expanded. A missing file means no
- * servers. An unreadable or invalid file throws, so it is never silently ignored.
+ * The repo's `.mcp.json`, parsed and reviewed with the hosts `.10db/mcp-hosts.json` names, but not yet
+ * approved or expanded. A missing file means no servers, or no hosts. An unreadable or invalid file
+ * throws, so it is never silently ignored.
  */
 export function readRepoMcp(repoPath: string): RepoMcp {
   const path = join(repoPath, PROJECT_MCP_FILE);
   const text = readMcpFile(path);
-  if (text === null) return { servers: [], warnings: [] };
+  const hosts = readHosts(repoPath);
+  if (text === null) return { servers: [], warnings: strayHosts(hosts, []) };
   const file = parseMcpFile(path, text);
   const servers: RepoMcpServer[] = [];
   const warnings: string[] = [];
@@ -251,9 +287,10 @@ export function readRepoMcp(repoPath: string): RepoMcp {
       );
       continue;
     }
-    servers.push({ name, declared, review: reviewOf(name, declared) });
+    const named = 'command' in declared ? (hosts.get(name) ?? []) : [];
+    servers.push({ name, declared, review: reviewOf(name, declared, named) });
   }
-  return { servers, warnings };
+  return { servers, warnings: [...warnings, ...strayHosts(hosts, servers)] };
 }
 
 interface ExpandScope {
@@ -310,9 +347,14 @@ function expandMap(
 
 /**
  * One approved server, expanded. A stdio server gets PATH, HOME and its declared `env`, plus its
- * sandbox's allowlist; its command and args hold no `${` (`readRepoMcp`), so they pass as written.
+ * sandbox's allowlist, and the hosts its approval names; its command and args hold no `${`
+ * (`readRepoMcp`), so they pass as written.
  */
-function resolveServer(server: RepoMcpServer, scope: ExpandScope): ProjectMcpServer {
+function resolveServer(
+  server: RepoMcpServer,
+  scope: ExpandScope,
+  hosts: readonly string[],
+): ProjectMcpServer {
   const { name, declared } = server;
   if ('command' in declared) {
     const { command } = declared;
@@ -332,6 +374,7 @@ function resolveServer(server: RepoMcpServer, scope: ExpandScope): ProjectMcpSer
       command,
       args: [...(declared.args ?? [])],
       env: { ...base, ...expandMap(declared.env ?? {}, scope, name, 'env') },
+      hosts: [...hosts],
     };
   }
   return {
@@ -363,10 +406,11 @@ export function resolveProjectMcp(input: {
       denied.push(server.name);
     } else {
       try {
-        servers[server.name] = resolveServer(server, {
-          env: input.env,
-          approved: new Set(approval.variables),
-        });
+        servers[server.name] = resolveServer(
+          server,
+          { env: input.env, approved: new Set(approval.variables) },
+          approval.hosts,
+        );
       } catch (error) {
         if (!(error instanceof ProjectMcpError)) throw error;
         failures.push({ name: server.name, message: error.message });

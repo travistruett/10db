@@ -261,7 +261,12 @@ describe('toSdkMcpServer', () => {
   it.skipIf(SANDBOXED)(
     'hands Claude Code a stdio server only as its sandboxed launch, with no env block',
     async () => {
-      const made = await sandboxedMcpServer({ command: 'npx', args: ['-y', 'x'], env: {} });
+      const made = await sandboxedMcpServer({
+        command: 'npx',
+        args: ['-y', 'x'],
+        env: {},
+        hosts: [],
+      });
       try {
         const config = toSdkMcpServer(made.server);
         // env -i with a system PATH, then srt's host with its sealed settings, then the command inside.
@@ -278,8 +283,9 @@ describe('toSdkMcpServer', () => {
             '--settings',
             expect.stringMatching(/\/10db-mcp-[0-9a-f]+\.json$/),
             '-c',
+            // srt's proxy variables, by name only, then the sealed env file.
             expect.stringMatching(
-              /^exec \/usr\/bin\/env -i \/bin\/sh -c '\. "\$0" && exec "\$@"' '[^']+\/10db-mcp-[0-9a-f]+\.sh' 'npx' '-y' 'x'$/,
+              /^exec \/usr\/bin\/env -i (?:[A-Za-z_]+="\$[A-Za-z_]+" )+\/bin\/sh -c '\. "\$0" && exec "\$@"' '[^']+\/10db-mcp-[0-9a-f]+\.sh' 'npx' '-y' 'x'$/,
             ),
           ],
         });
@@ -303,7 +309,12 @@ describe('toSdkMcpServer', () => {
       // @ts-expect-error a stdio server reaches a session only through the lane sandbox
       const plain: SessionMcpServer = unsandboxed;
       expect(toSdkMcpServer(plain)).not.toHaveProperty('command');
-      const made = await sandboxedMcpServer({ command: 'npx', args: ['-y', 'x'], env: {} });
+      const made = await sandboxedMcpServer({
+        command: 'npx',
+        args: ['-y', 'x'],
+        env: {},
+        hosts: [],
+      });
       try {
         // eslint-disable-next-line @typescript-eslint/no-misused-spread -- the copy is the bypass under test
         const copy = { ...made.server, args: ['-c', 'npx -y x'] };
