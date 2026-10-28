@@ -8,10 +8,13 @@ favors legibility and calm over decoration.
 - **Color scheme:** dark by default; light is a toggle and must be equally usable. Never hard-code
   colors; use theme tokens (`var(--mantine-color-…)`) so both schemes work.
 - **Palette:** [Selenized](https://github.com/jan-warchol/selenized): Selenized dark paints the
-  dark scheme and Selenized light the light one (`apps/desktop/src/theme.ts`). Every Mantine hue
+  dark scheme and Selenized light the light one (`apps/desktop/src/theme.ts`), with every value
+  exactly as Selenized defines it: never mixed, lightened or darkened, and never adjusted to reach a
+  contrast ratio. Text is fg_0, bright text fg_1 and dimmed text dim_0, on bg_0; controls and
+  light-variant backgrounds are bg_1, hovering on bg_2. An accent is drawn in its base value and
+  hovers in its bright one; text on a filled accent is bg_0, as in reverse video. Every Mantine hue
   maps to a Selenized accent (teal is cyan, pink and grape are magenta, indigo is violet, lime is
-  green), so no stock Mantine color appears. Filled components use the light variant's accent in
-  both schemes; status text in the dark scheme uses the dark variant's bright accent.
+  green), so no stock Mantine color appears.
 - **Primary color:** blue. Status colors: blue = running, yellow = waiting on a human, orange =
   paused (limits), red = failed or flagged, green = done or ready, gray = queued or cancelled.
   Green is the only "OK" color; don't use cyan or teal for success.
@@ -25,4 +28,5 @@ favors legibility and calm over decoration.
   `xs` line with an icon in the header of the view it affects.
 - **Copy:** sentence case; say what happened and what to do next.
 - **Accessibility:** jsx-a11y strict passes; every interactive control is reachable by keyboard and
-  has a visible focus ring; axe runs in Playwright tests (M1b).
+  has a visible focus ring; axe runs in Playwright tests (M1b) with every rule but `color-contrast`,
+  since contrast is whatever Selenized gives.
