@@ -212,11 +212,19 @@ describe.skipIf(!SEATBELT)('the gate under the sandbox (Seatbelt)', () => {
       };
       const mine = add('mine');
       const sibling = add('sibling');
+      // The git probes would succeed with no sandbox, so a denial below is the sandbox's.
+      const control = add('control');
+      execFileSync(
+        '/bin/sh',
+        ['-c', `printf x >> .git && touch "$(sed -n 's/^gitdir: //p' .git)/probe"`],
+        { cwd: control, env, stdio: 'pipe' },
+      );
       const seen = await probe(
         {
           'write-main': `touch ${join(checkout, 'probe')}`,
           'write-sibling': `touch ${join(sibling, 'probe')}`,
-          'write-own-git': 'touch .git/probe',
+          'write-gitfile': 'printf x >> .git',
+          'write-own-git-dir': `touch "$(sed 's/^gitdir: //' .git)/probe"`,
           'write-common-dir': `touch ${join(checkout, '.git', 'probe')}`,
           'write-worktree': 'touch inside && rm inside',
         },
@@ -228,7 +236,8 @@ describe.skipIf(!SEATBELT)('the gate under the sandbox (Seatbelt)', () => {
       expect(seen).toEqual({
         'write-main': 'denied',
         'write-sibling': 'denied',
-        'write-own-git': 'denied',
+        'write-gitfile': 'denied',
+        'write-own-git-dir': 'denied',
         'write-common-dir': 'denied',
         'write-worktree': 'ok',
       });

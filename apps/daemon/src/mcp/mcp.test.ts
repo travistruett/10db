@@ -227,6 +227,15 @@ describe('MCP tools in a worktree batch', () => {
 
   it('commit commits on its branch in the worktree and leaves the main checkout alone', async () => {
     const s = await seedSession(['api'], { path: worktree, branch: 'batch/one' });
+    const mainState = () => ({
+      head: execFileSync('git', ['-C', repo.path, 'rev-parse', 'HEAD'], { env: isolatedGitEnv() })
+        .toString()
+        .trim(),
+      status: execFileSync('git', ['-C', repo.path, 'status', '--porcelain'], {
+        env: isolatedGitEnv(),
+      }).toString(),
+    });
+    const before = mainState();
     mkdirSync(join(worktree, 'src/api'), { recursive: true });
     writeFileSync(join(worktree, 'src/api/a.ts'), 'export {}\n');
     const result = await s.call('commit', {
@@ -237,6 +246,7 @@ describe('MCP tools in a worktree batch', () => {
     expect(result.isError).toBe(false);
     expect(worktreeCount()).toBe(2);
     expect(commitCount()).toBe(1);
+    expect(mainState()).toEqual(before);
     const branches = execFileSync('git', ['-C', repo.path, 'branch', '--list', 'batch/one'], {
       env: isolatedGitEnv(),
     }).toString();
