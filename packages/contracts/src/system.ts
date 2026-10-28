@@ -43,6 +43,30 @@ export type McpTransport = (typeof McpTransport)[keyof typeof McpTransport];
 
 const ConfigHash = z.string().regex(/^[0-9a-f]{64}$/);
 
+const HOST_LABEL = '[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?';
+/** Two or more lower-case labels, the last not all digits, so an IPv4 address never passes as a name. */
+const HOST_NAME = new RegExp(`^(?:${HOST_LABEL}\\.)+(?=[a-z0-9-]*[a-z-])${HOST_LABEL}$`);
+
+/**
+ * A host a repo stdio MCP server's approval names: a DNS name, or `*.` and a name of two or more
+ * labels, which srt matches as every subdomain of it. No IP address, port or `localhost` name: the
+ * server's sandbox never reaches loopback, where other sandboxes' proxies listen.
+ */
+export const McpHost = z
+  .string()
+  .max(253)
+  .refine(
+    (value) => {
+      const name = value.startsWith('*.') ? value.slice(2) : value;
+      return HOST_NAME.test(name) && name !== 'localhost' && !name.endsWith('.localhost');
+    },
+    {
+      message:
+        'must be a lower-case host name such as registry.npmjs.org, or *. and a domain such as *.example.org; no IP address, port or localhost',
+    },
+  );
+export type McpHost = z.infer<typeof McpHost>;
+
 /** One `env` or `headers` entry as the repo wrote it: the value keeps its `${NAME}` references, never an expanded value. */
 export const McpConfigEntry = z.object({ name: z.string(), value: z.string() });
 export type McpConfigEntry = z.infer<typeof McpConfigEntry>;
@@ -69,6 +93,11 @@ export const McpServerReview = z.object({
   variables: z.array(z.string()),
   /** The referenced names that look like credentials: shown as a warning on the card. */
   sensitive: z.array(z.string()),
+  /**
+   * stdio: the hosts `.10db/mcp-hosts.json` names for it, sorted, and part of `configHash`. Approving
+   * opens exactly these. A card raised before hosts existed has none.
+   */
+  hosts: z.array(McpHost).default([]),
 });
 export type McpServerReview = z.infer<typeof McpServerReview>;
 
@@ -87,6 +116,8 @@ export const McpApprovalDto = z.object({
   verdict: z.enum(McpVerdict),
   /** The variables the approval lets 10db expand into this server. Empty when denied. */
   variables: z.array(z.string()),
+  /** The hosts the approval lets this server reach. Empty when denied. */
+  hosts: z.array(McpHost),
   sourceInboxId: InboxItemId.nullable(),
   /** When the verdict was last recorded; a later answer for the same config replaces it. */
   updatedAt: z.iso.datetime(),

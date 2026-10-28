@@ -83,6 +83,14 @@
       "items": {
         "type": "string"
       }
+    },
+    "hosts": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 253
+      }
     }
   },
   "required": [

@@ -84,6 +84,14 @@
         "type": "string"
       }
     },
+    "hosts": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 253
+      }
+    },
     "verdict": {
       "type": "string",
       "enum": [

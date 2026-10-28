@@ -575,6 +575,7 @@ export const mcpServerApprovals = sqliteTable(
     configHash: text('config_hash').notNull(),
     verdict: text('verdict').$type<McpVerdict>().notNull(),
     variables: text('variables', { mode: 'json' }).$type<string[]>().notNull(),
+    hosts: text('hosts', { mode: 'json' }).$type<string[]>().notNull().default([]),
     sourceInboxId: text('source_inbox_id').$type<InboxItemId>(),
     /** A later answer for the same config replaces the verdict, so this is when it last changed. */
     updatedAt: updatedAt(),

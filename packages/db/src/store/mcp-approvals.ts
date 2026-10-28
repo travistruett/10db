@@ -8,7 +8,12 @@ export function recordMcpApproval(
   ctx: WriteContext,
   input: Omit<McpApprovalDto, 'updatedAt'>,
 ): McpApprovalDto {
-  const row: McpApprovalDto = { ...input, variables: [...input.variables], updatedAt: ctx.now };
+  const row: McpApprovalDto = {
+    ...input,
+    variables: [...input.variables],
+    hosts: [...input.hosts],
+    updatedAt: ctx.now,
+  };
   ctx.tx
     .insert(schema.mcpServerApprovals)
     .values(row)
@@ -21,6 +26,7 @@ export function recordMcpApproval(
       set: {
         verdict: row.verdict,
         variables: row.variables,
+        hosts: row.hosts,
         sourceInboxId: row.sourceInboxId,
         updatedAt: row.updatedAt,
       },
