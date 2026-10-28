@@ -50,6 +50,14 @@ function failingCargoDir(): string {
   return dir;
 }
 
+/** A directory holding a `pnpm` that takes a second and passes, so a step's time is above zero. */
+function slowPnpmDir(): string {
+  const dir = mkdtempSync(join(tmpdir(), '10db-slow-pnpm-'));
+  writeFileSync(join(dir, 'pnpm'), '#!/bin/sh\nsleep 1\n');
+  chmodSync(join(dir, 'pnpm'), 0o755);
+  return dir;
+}
+
 /**
  * The checkout's `.gate/` logs with their modification times. `make gate` writes `test.log` while
  * this file runs, so that one log is left out.
@@ -78,8 +86,33 @@ describe('scripts/gate.sh', () => {
   it('prints one PASS summary line when the selected steps pass', () => {
     const { status, last } = runGate(sandbox, { GATE_STEPS: 'format' });
     expect(status).toBe(0);
-    expect(last).toMatch(/^GATE PASS format \(\d+s\)$/);
+    expect(last).toMatch(/^GATE PASS format \d+s \(\d+s\)$/);
   }, 60_000);
+
+  it("records each step's seconds", () => {
+    const slow = slowPnpmDir();
+    try {
+      const { status, last } = runGate(sandbox, {
+        GATE_STEPS: 'format',
+        PATH: `${slow}:${process.env['PATH'] ?? ''}`,
+      });
+      expect(status).toBe(0);
+      expect(last).toMatch(/^GATE PASS format [1-9]\d*s \([1-9]\d*s\)$/);
+    } finally {
+      rmSync(slow, { recursive: true, force: true });
+    }
+  });
+
+  it('lists every step in the order it ran, failed ones with their seconds too', () => {
+    const { status, last } = runGate(sandbox, {
+      GATE_STEPS: 'rust fail-probe',
+      GATE_SKIP_RUST: '1',
+    });
+    expect(status).toBe(1);
+    expect(last).toMatch(
+      /^GATE FAIL: fail-probe — logs in \.gate\/; rust skipped · fail-probe \d+s \(\d+s\)$/,
+    );
+  });
 
   it('reports rust as skipped, not failed, when cargo is missing', () => {
     // A PATH without cargo but with node and pnpm.
@@ -130,8 +163,8 @@ describe('scripts/gate.sh', () => {
   // tests' SANDBOXED reads it, skips it.
   it.each([
     ['1', 'skips', /^GATE PASS e2e skipped \(sandboxed\) \(\d+s\)$/],
-    ['0', 'runs', /^GATE FAIL: e2e — logs in \.gate\/ \(\d+s\)$/],
-    ['yes', 'runs', /^GATE FAIL: e2e — logs in \.gate\/ \(\d+s\)$/],
+    ['0', 'runs', /^GATE FAIL: e2e — logs in \.gate\/; e2e \d+s \(\d+s\)$/],
+    ['yes', 'runs', /^GATE FAIL: e2e — logs in \.gate\/; e2e \d+s \(\d+s\)$/],
   ])('with TENDB_SANDBOX=%s, %s e2e', (value, _outcome, summary) => {
     const fake = failingCargoDir();
     try {
@@ -149,7 +182,7 @@ describe('scripts/gate.sh', () => {
   it('names the failing step and exits non-zero', () => {
     const { status, last } = runGate(sandbox, { GATE_STEPS: 'fail-probe' });
     expect(status).toBe(1);
-    expect(last).toMatch(/^GATE FAIL: fail-probe — logs in \.gate\/ \(\d+s\)$/);
+    expect(last).toMatch(/^GATE FAIL: fail-probe — logs in \.gate\/; fail-probe \d+s \(\d+s\)$/);
   });
 
   it("writes nothing under the checkout's .gate/", () => {
