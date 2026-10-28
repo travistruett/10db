@@ -40,6 +40,11 @@ A local macOS control plane that runs Claude Code sessions as a software factory
 
 - Work on a branch and open a PR to `main`. Nobody pushes to `main`. PRs are squash-merged, and the
   PR title becomes the commit, so it must be a Conventional Commit too.
+- Sessions running in parallel each work in their own worktree, never in a shared checkout. A
+  worktree made by hand goes in `10db-worktrees/` beside the checkout:
+  `git worktree add ../10db-worktrees/<name> -b <branch> origin/main`. Never put one inside the
+  checkout, where the linters, tests and gate would read it too. Remove it once its PR merges.
+  The worktrees 10db makes for its own lanes live under `~/.10db/worktrees/`.
 - Commit messages are Conventional Commits with a required scope, for example
   `fix(daemon): close the db on shutdown`. Scopes: `daemon`, `desktop`, `contracts`, `db`,
   `harness`, `repo`, `ci`, `docs`, `deps`. The subject starts lowercase. `commitlint.config.js`
