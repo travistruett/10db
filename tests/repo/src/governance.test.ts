@@ -147,6 +147,10 @@ describe('repository settings', () => {
     });
   });
 
+  it('lets a merge be queued to land once its required checks pass', () => {
+    expect(settings.repository['allow_auto_merge']).toBe(true);
+  });
+
   it('turns on secret scanning, push protection, private reporting and Dependabot alerts', () => {
     expect(settings.repository['security_and_analysis']).toEqual({
       secret_scanning: { status: 'enabled' },
