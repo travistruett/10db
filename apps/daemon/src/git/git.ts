@@ -146,6 +146,12 @@ export interface Git {
    * `repo`'s worktrees; anything else is refused with `WorktreeNotOursError`.
    */
   worktreeChanges(repo: string, path: string): Promise<string[]>;
+  /**
+   * The git-ignored files of the 10db worktree of `repo` at `path`, checked as `worktreeChanges`
+   * checks it: each file outside a directory the ignore rules match, such as a hand-made `.env`, and
+   * none inside one, such as `node_modules/` or `dist/`.
+   */
+  worktreeIgnoredFiles(repo: string, path: string): Promise<string[]>;
   /** Drops the entries of worktrees whose directory is gone, but not a locked one. */
   pruneWorktrees(repo: string): Promise<void>;
   /** `update-ref -d refs/heads/<branch> <sha>`: true when deleted, false when missing or moved. */
@@ -927,18 +933,23 @@ export function createGit(opts: GitOptions = {}): Git {
       }
       let added = false;
       try {
-        // No checkout: no file is written and no post-checkout hook runs; read-tree fills it.
-        await git(main, [
-          'worktree',
-          'add',
-          '--no-checkout',
-          '--lock',
-          '--reason',
-          input.lockReason,
-          '--',
-          target,
-          input.branch,
-        ]);
+        // No checkout: no file is written and no post-checkout hook runs; read-tree fills it. The
+        // gitfile must be absolute, which a builder's `worktree.useRelativePaths=true` would undo.
+        await git(
+          main,
+          [
+            'worktree',
+            'add',
+            '--no-checkout',
+            '--lock',
+            '--reason',
+            input.lockReason,
+            '--',
+            target,
+            input.branch,
+          ],
+          { config: ['-c', 'worktree.useRelativePaths=false'] },
+        );
         added = true;
         const gitDir = readGitfile(target);
         if (!surelyInside(gitDir, join(main.dirs.commonDir, 'worktrees')))
@@ -1041,7 +1052,11 @@ export function createGit(opts: GitOptions = {}): Git {
     });
   }
 
-  async function worktreeChanges(repo: string, path: string): Promise<string[]> {
+  /**
+   * The 10db worktree of `repo` at `path`, read through `repo`'s pin, once it has passed every check
+   * `worktreeChanges` names.
+   */
+  async function lockedWorktree(repo: string, path: string): Promise<Pinned> {
     const root = opts.worktreeRoot;
     if (!root) throw new WorktreeNotOursError(path, 'no worktree root is configured');
     const target = withRealParent(path);
@@ -1069,12 +1084,32 @@ export function createGit(opts: GitOptions = {}): Git {
       throw new WorktreeNotOursError(path, "its git dir names another repository's common dir");
     if (readIfPresent(join(gitDir, 'info', 'attributes')).trim() !== '')
       throw new WorktreeNotOursError(path, 'its git dir holds an attributes file');
-    return changes({
+    return {
       real: target,
       dirs: { gitDir, commonDir: main.dirs.commonDir },
       pin: main.pin,
       env: { GIT_DIR: gitDir, GIT_COMMON_DIR: main.dirs.commonDir, GIT_WORK_TREE: target },
-    });
+    };
+  }
+
+  async function worktreeChanges(repo: string, path: string): Promise<string[]> {
+    return changes(await lockedWorktree(repo, path));
+  }
+
+  async function worktreeIgnoredFiles(repo: string, path: string): Promise<string[]> {
+    const out = await git(await lockedWorktree(repo, path), [
+      'ls-files',
+      '-z',
+      '--others',
+      '--ignored',
+      '--exclude-standard',
+      '--directory',
+    ]);
+    // With --directory a directory the ignore rules match is listed once, ending in `/`.
+    return out
+      .split('\0')
+      .filter((entry) => entry !== '' && !entry.endsWith('/'))
+      .sort();
   }
 
   return {
@@ -1171,6 +1206,7 @@ export function createGit(opts: GitOptions = {}): Git {
     addWorktree,
     removeWorktree,
     worktreeChanges,
+    worktreeIgnoredFiles,
     async listWorktrees(repo) {
       return listWorktrees(await pinned(repo));
     },

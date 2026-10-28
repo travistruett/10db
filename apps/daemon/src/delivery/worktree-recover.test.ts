@@ -512,6 +512,18 @@ describe('sweepWorktrees', () => {
       pinKept: false,
     },
     {
+      name: 'a 10db-locked orphan holding only ignored build output',
+      entry: () => {
+        const path = worktreeAt(under('built'), ours(mintId('Batch')));
+        writeFileSync(join(h.repo, '.git', 'info', 'exclude'), 'dist/\n');
+        mkdirSync(join(path, 'dist'));
+        writeFileSync(join(path, 'dist', 'out.js'), 'built\n');
+        return path;
+      },
+      removed: true,
+      pinKept: false,
+    },
+    {
       name: 'a 10db-locked orphan whose directory was deleted',
       entry: () => {
         const path = worktreeAt(under('deleted'), ours(mintId('Batch')));
@@ -623,6 +635,15 @@ describe('sweepWorktrees', () => {
       },
       shown: '- notes.txt',
       why: 'it has uncommitted changes',
+    },
+    {
+      name: 'a git-ignored file 10db did not seed',
+      change: (path) => {
+        writeFileSync(join(h.repo, '.git', 'info', 'exclude'), '.env\n');
+        writeFileSync(join(path, '.env'), 'mine\n');
+      },
+      shown: '- .env',
+      why: 'it holds git-ignored files',
     },
     {
       name: 'a git file git cannot read',

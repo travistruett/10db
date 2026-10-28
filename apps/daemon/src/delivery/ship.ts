@@ -39,7 +39,7 @@ import { ghCall, pushCall, raise, type DeliveryContext, type DeliveryLimits } fr
 import { jobKey, JobQueue } from './jobs';
 import { prBody, prTitle } from './pr-text';
 import { readPrTemplate } from './pr-template';
-import { abandonWorktree, retireWorktree } from './worktree-cleanup';
+import { retireWorktree } from './worktree-cleanup';
 import { ensureWorktreeWhole, reopenWorktreeBatch } from './worktree-repair';
 
 export interface ShipperDeps extends DeliveryContext {
@@ -485,7 +485,9 @@ export function createShipper(deps: ShipperDeps): Shipper {
       raise(deps.inbox, batch.projectId, shipCards.abandoned(abandoned, done));
       if (abandoned.worktreePath !== null) {
         const project = getProject(db, batch.projectId);
-        deps.jobs.run(jobKey(project, JobQueue.Ship), () => abandonWorktree(deps, batchId));
+        deps.jobs.run(jobKey(project, JobQueue.Ship), async () => {
+          await retireWorktree(deps, batchId);
+        });
       }
       return abandoned;
     },

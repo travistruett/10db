@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
+import { existsSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { equalOrUnder } from '../git';
 import { realPathOf } from '../guard';
 
@@ -11,12 +12,23 @@ export class WorktreeRootError extends Error {
   override readonly name = 'WorktreeRootError';
 }
 
+/** Refuses a root under a file, where no worktree can be made. */
+function assertMakeable(root: string): void {
+  let existing = resolve(root);
+  while (!existsSync(existing) && dirname(existing) !== existing) existing = dirname(existing);
+  if (!statSync(existing).isDirectory())
+    throw new WorktreeRootError(
+      `The worktree root ${root} can't be made: ${existing} is not a directory. Set TENDB_WORKTREE_ROOT to a directory.`,
+    );
+}
+
 /**
  * `<base>/<first 8 hex of sha256 of the data dir's real path>`, as a real path: the deepest existing
  * ancestor resolved through its links, the rest appended, so a worktree's path and the key git pins
  * it under never differ by a link such as `/var` and `/private/var`.
  */
 export function worktreeRootFor(base: string, dataDir: string): string {
+  assertMakeable(base);
   const level = createHash('sha256').update(realPathOf(dataDir)).digest('hex').slice(0, 8);
   return realPathOf(join(resolve(base), level));
 }
@@ -24,7 +36,7 @@ export function worktreeRootFor(base: string, dataDir: string): string {
 /**
  * Refuses a root at or under a checkout, the data dir or the lane temp root, by real path even
  * before it exists: a lane could write into the root there, or the daemon's own files would lie in
- * a place it hands to git as a worktree.
+ * a place it hands to git as a worktree. Refuses one under a file too.
  */
 export function assertWorktreeRootAllowed(
   root: string,
@@ -34,6 +46,7 @@ export function assertWorktreeRootAllowed(
     readonly tempRoot: string | null;
   },
 ): void {
+  assertMakeable(root);
   const real = realPathOf(root);
   const places = [
     ...forbidden.checkouts.map((path) => ({ kind: 'a registered checkout', path })),

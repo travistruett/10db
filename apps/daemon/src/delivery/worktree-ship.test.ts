@@ -18,7 +18,6 @@ import { createGit, parseWorktreeList, type GitTrustError } from '../git';
 import { createInboxService } from '../inbox';
 import { retryWorkstream } from '../team';
 import {
-  abandonWorktree,
   batchCardFields,
   createBatchCardAnswers,
   ensureWorktreeWhole,
@@ -474,7 +473,11 @@ describe('Abandon of a worktree batch', () => {
     writeFileSync(join(wt, 'notes.txt'), 'not committed\n');
     h.state.write((c) => transitionBatch(c, batch.id, { to: 'ABANDONED' }));
 
-    expect(await retireWorktree(h.ctx, batch.id)).toEqual({ kind: 'kept', paths: ['notes.txt'] });
+    expect(await retireWorktree(h.ctx, batch.id)).toEqual({
+      kind: 'kept',
+      reason: 'changes',
+      paths: ['notes.txt'],
+    });
 
     expect(getBatch(h.store.db, batch.id).worktreePath).toBe(wt);
     expect(worktreePaths()).toEqual([realpathSync(h.repo), wt]);
@@ -487,11 +490,104 @@ describe('Abandon of a worktree batch', () => {
     h.state.write((c) => transitionBatch(c, batch.id, { to: 'ABANDONED' }));
     const { ctx, refusals } = unpinned();
 
-    await abandonWorktree(ctx, batch.id);
+    await retireWorktree(ctx, batch.id);
 
     expect(refusals.map((r) => r.detail.kind)).toEqual(['unpinned']);
     expect(getBatch(h.store.db, batch.id).worktreePath).toBe(wt);
     expect(worktreePaths()).toEqual([realpathSync(h.repo), wt]);
     expect(existsSync(join(wt, 'README.md'))).toBe(true);
+  });
+});
+
+describe('a finished worktree with git-ignored files', () => {
+  /** Ignores these patterns in every worktree of the repository, with nothing to commit. */
+  const ignore = (...patterns: string[]) => {
+    writeFileSync(join(h.repo, '.git', 'info', 'exclude'), `${patterns.join('\n')}\n`);
+  };
+  const write = (dir: string, files: readonly string[]) => {
+    for (const file of files) {
+      mkdirSync(dirname(join(dir, file)), { recursive: true });
+      writeFileSync(join(dir, file), 'local\n');
+    }
+  };
+  const keptTitle = (batch: BatchDto) =>
+    `10db kept the worktree of "${batch.title}": it holds git-ignored files`;
+
+  it.each<{
+    name: string;
+    to: 'CLOSED' | 'ABANDONED';
+    patterns?: string[];
+    files: string[];
+    /** The files the card lists; null when the worktree goes. */
+    kept: string[] | null;
+  }>([
+    { name: 'a hand-made .env', to: 'CLOSED', files: ['.env'], kept: ['.env'] },
+    {
+      name: 'a local file in a directory git does not track',
+      to: 'ABANDONED',
+      files: ['apps/web/.env.local'],
+      kept: ['apps/web/.env.local'],
+    },
+    {
+      name: 'only build output in an ignored directory',
+      to: 'CLOSED',
+      files: ['dist/out.js'],
+      kept: null,
+    },
+    {
+      name: 'only the seeded node_modules',
+      to: 'ABANDONED',
+      files: ['node_modules/x/i.js'],
+      kept: null,
+    },
+    {
+      name: 'files of the seeded node_modules ignored one by one',
+      to: 'CLOSED',
+      patterns: ['*.js'],
+      files: ['node_modules/x/i.js'],
+      kept: null,
+    },
+  ])('$name: kept $kept', async ({ to, patterns, files, kept }) => {
+    ignore(...(patterns ?? ['.env', '.env.*', 'dist/', 'node_modules/']));
+    const { batch } = await opened();
+    const wt = pathOf(batch);
+    write(wt, files);
+    h.state.write((c) => {
+      if (to === 'CLOSED') transitionBatch(c, batch.id, { to: 'SHIPPING' });
+      transitionBatch(c, batch.id, { to });
+    });
+
+    const outcome = await retireWorktree(h.ctx, batch.id);
+
+    if (kept === null) {
+      expect(outcome).toEqual({ kind: 'retired' });
+      expect(getBatch(h.store.db, batch.id).worktreePath).toBeNull();
+      expect(worktreePaths()).toEqual([realpathSync(h.repo)]);
+      expect(h.cards()).toEqual([]);
+      return;
+    }
+    expect(outcome).toEqual({ kind: 'kept', reason: 'ignored', paths: kept });
+    expect(getBatch(h.store.db, batch.id).worktreePath).toBe(wt);
+    expect(worktreePaths()).toEqual([realpathSync(h.repo), wt]);
+    for (const file of files) expect(readFileSync(join(wt, file), 'utf8')).toBe('local\n');
+    const card = h.only(h.cards());
+    expect(card.title).toBe(keptTitle(batch));
+    for (const file of kept) expect(card.body).toContain(`- ${file}`);
+    expect(card.body).toContain(`git -C '${h.repo}' worktree remove --force --force '${wt}'`);
+  });
+
+  it("keeps a shipped batch's worktree that holds a .env, and raises one card however often it retires", async () => {
+    ignore('.env');
+    const { batch, ws } = await opened();
+    const wt = pathOf(batch);
+    await commitIn(batch, 'src/api/alpha.txt');
+    write(wt, ['.env']);
+    h.settle(ws.id, 'DONE');
+    h.shipper.checkBatch(batch.id);
+    await h.jobs.idle();
+    expect(getBatch(h.store.db, batch.id)).toMatchObject({ state: 'SHIPPED', worktreePath: wt });
+    await retireWorktree(h.ctx, batch.id);
+    expect(worktreePaths()).toEqual([realpathSync(h.repo), wt]);
+    expect(h.only(h.cards()).title).toBe(keptTitle(batch));
   });
 });
