@@ -27,6 +27,15 @@ checklist is in [CONTRIBUTING.md](CONTRIBUTING.md#set-up).
 Working rules for people and agents are in [AGENTS.md](AGENTS.md); how to contribute is in
 [CONTRIBUTING.md](CONTRIBUTING.md).
 
+## Security
+
+10db assumes any agent might be steered by something it read, so nothing an agent can influence runs
+outside a sandbox. Every agent command, every check run before shipping and every repository tool server
+runs in the macOS kernel sandbox: it reads only its project and toolchains, writes only its checkout and
+its own temporary folder, gets no credentials and reaches only the project's allowed hosts. 10db's own git
+runs no repository code, and agents can't touch `.git` or push. How it works, how it is tested and what it
+doesn't cover: [docs/security.md](docs/security.md).
+
 ## Deliver through pull requests
 
 A project delivers `local` by default: sessions commit on whatever branch the checkout has. Choose
@@ -38,8 +47,8 @@ the change while the project has unfinished work), and 10db instead:
    [`gh`](https://cli.github.com) 2.40 or later is installed and signed in (`gh auth login`);
 2. runs the batch's tasks on that branch, and adds tasks you start while it is open;
 3. when every task is done or cancelled, runs the gate on the clean branch, pushes it and opens one pull
-   request titled `<prefix>: <batch title>`. The push runs your clone's pre-push hook, with the gate's
-   time limit (30 minutes by default); a fetch or a `gh` call gets 2 minutes. Merging stays with you.
+   request titled `<prefix>: <batch title>`. The push runs no hook or other code from the repository and
+   has a 30-minute limit; a fetch or a `gh` call gets 2 minutes. Merging stays with you.
 
 Every refusal (a dirty checkout, the wrong branch, no `origin`, `gh` missing or signed out, a failed gate, a
 rejected push) is an inbox card that says what to fix; nothing is pushed. A failed task's card offers Retry and
