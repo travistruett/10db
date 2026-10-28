@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, watch as fsWatch } from 'node:fs';
+import { existsSync, watch as fsWatch } from 'node:fs';
 import { join, sep } from 'node:path';
 import {
   ACTIVE_STATES,
@@ -14,7 +14,7 @@ import { activeClaims, getBatch, getProject, getWorkstream, listWorkstreams } fr
 import type { Clock, Timer } from '../clock';
 import { checkoutOf } from '../delivery';
 import type { StateStore } from '../events';
-import { GitTrustError, type Git } from '../git';
+import { existsAsEntry, GitTrustError, type Git } from '../git';
 import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
 import {
@@ -58,16 +58,6 @@ export const systemWatch: WatchFn = (root, onChange, onError) => {
     },
   };
 };
-
-/** True for anything at the path, including a symlink whose target is missing. */
-function existsAsEntry(path: string): boolean {
-  try {
-    lstatSync(path);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 export interface Watcher {
   /** Watches every checkout (a project's, or a batch's worktree) with active work and stops watching the rest. */

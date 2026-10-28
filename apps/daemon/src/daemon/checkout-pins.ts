@@ -9,9 +9,8 @@ import {
   setAppSetting,
   type DbReader,
 } from '@10db/db';
-import { worktreePinKey } from '../delivery';
 import type { StateStore } from '../events';
-import { CheckoutPin, type PinStore } from '../git';
+import { CheckoutPin, worktreePinKey, type PinStore } from '../git';
 
 function realOrNull(path: string): string | null {
   try {
@@ -25,8 +24,6 @@ function realOrNull(path: string): string | null {
 export function projectAt(db: DbReader, repo: string): ProjectDto | undefined {
   return pinOwner(db, repo)?.project;
 }
-
-export { worktreePinKey };
 
 const projectPinKey = (project: ProjectDto): string => `checkout_pin.${project.id}`;
 

@@ -6,8 +6,9 @@ import { slugOf } from './branch-name';
 const PROJECT_ID_SUFFIX = 6;
 
 /**
- * `<root>/<project slug>-<last 6 hex of the project id>/<branch leaf>` (W4). Every part is a slug or
- * hex, so the path can't leave `root`.
+ * `<root>/<project slug>-<last 6 hex of the project id>/<branch leaf>`: one directory per project, so
+ * two projects with the same slug never share one. Every part is a slug or hex, so the path can't
+ * leave `root`.
  */
 export function worktreePathFor(
   root: string,

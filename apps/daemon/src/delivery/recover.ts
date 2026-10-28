@@ -11,15 +11,14 @@ import {
   transitionBatch,
 } from '@10db/db';
 import type { StateStore } from '../events';
-import { WorktreeNotOursError, type Git } from '../git';
+import { existsAsEntry, WorktreeNotOursError, worktreePinKey, type Git } from '../git';
 import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
 import { batchCheckout } from './checkout';
 import { startCards, worktreeCards, wrongBranchCard, type Card } from './cards';
 import { raise, type DeliveryContext } from './context';
 import type { Shipper } from './ship';
-import { abandonWorktree, retireWorktree, worktreePinKey } from './worktree-cleanup';
-import { existsAsEntry } from './worktree-cut';
+import { abandonWorktree, retireWorktree } from './worktree-cleanup';
 import { removeIfEmptyDirectory } from './worktree-leftover';
 import { sweepWorktrees } from './worktree-sweep';
 

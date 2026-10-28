@@ -121,8 +121,9 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
   }
 
   /**
-   * W3: one batch per dependency group, each inserted CUTTING with its worktree path and its
-   * workstreams QUEUED in its own transaction, once every group passed the request's checks.
+   * One batch per dependency group, so tasks that build on each other share a worktree and the rest
+   * run apart: each inserted CUTTING with its worktree path and its workstreams QUEUED in its own
+   * transaction, once every group passed the request's checks.
    */
   function startWorktrees(project: ProjectDto, tasks: readonly TaskDto[]): BatchDto[] {
     const groups = groupByDependency(tasks);

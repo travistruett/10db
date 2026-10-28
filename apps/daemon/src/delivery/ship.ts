@@ -121,7 +121,10 @@ export function createShipper(deps: ShipperDeps): Shipper {
     if (card) raise(deps.inbox, batch.projectId, card);
   }
 
-  /** W12: a shipped or closed batch's worktree goes, in the ship queue, after the state is recorded. */
+  /**
+   * A shipped or closed batch's worktree goes, in the ship queue, after the state is recorded, so a
+   * crash between the two leaves recovery a finished batch to clean up rather than a half-shipped one.
+   */
   async function retire(batchId: BatchId): Promise<void> {
     await retireWorktree(deps, batchId).catch((error: unknown) => {
       deps.logger.warn(

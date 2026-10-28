@@ -101,7 +101,7 @@ function cuttingRow(): { batch: BatchDto; path: string; branch: string } {
   return { batch, path: pathOf(batch), branch: batchBranchName(batch.title, batch.id) };
 }
 
-/** What W5's `worktree add` leaves: a locked entry on the branch, pinned, with no files yet. */
+/** What a cut's `worktree add` leaves: a locked entry on the branch, pinned, with no files yet. */
 function addedWorktree(batch: BatchDto, path: string, branch: string): void {
   h.state.write((c) => {
     setAppSetting(c, `checkout_pin.${batch.id}`, { kept: true });

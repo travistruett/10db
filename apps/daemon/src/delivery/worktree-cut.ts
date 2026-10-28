@@ -1,4 +1,3 @@
-import { lstatSync } from 'node:fs';
 import {
   BatchState,
   InvalidError,
@@ -14,7 +13,7 @@ import {
   patchBatch,
   transitionBatch,
 } from '@10db/db';
-import { WORKTREE_LOCK_PREFIX } from '../git';
+import { existsAsEntry, WORKTREE_LOCK_PREFIX } from '../git';
 import { githubRepoOf } from '../github';
 import { batchBranchName } from './branch-name';
 import { forTasks, startCards, worktreeCards, type Card } from './cards';
@@ -28,19 +27,9 @@ export type Plans = ReadonlyMap<TaskId, StepPlanDto>;
 /** The lock reason on a batch's worktree: the marker the startup sweep looks for. */
 export const worktreeLockReason = (id: BatchId): string => `${WORKTREE_LOCK_PREFIX}${id}`;
 
-/** True when anything, a link or a file included, is at `path`. */
-export function existsAsEntry(path: string): boolean {
-  try {
-    lstatSync(path);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /**
- * Cutting a worktree (worktree mode spec §5): the checks in order, then the branch and worktree
- * (W5), then the seed (W10), then OPEN. A refusal removes what this cut made, deletes the CUTTING row
+ * Cutting a worktree (worktree mode spec §5): the checks in order, then the branch and a locked
+ * worktree on it, then the seed of ignored directories, then OPEN. A refusal removes what this cut made, deletes the CUTTING row
  * with its workstreams cancelled, and raises a card naming the tasks. A shutdown leaves the row for
  * startup recovery. The main checkout's branch, index and files are never read or written here.
  */

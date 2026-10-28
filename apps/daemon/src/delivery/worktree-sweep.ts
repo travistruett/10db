@@ -4,20 +4,21 @@ import { BatchId, Delivery, NotFoundError, type BatchDto, type ProjectDto } from
 import { deleteAppSetting, getBatch, listProjects } from '@10db/db';
 import type { StateStore } from '../events';
 import {
+  comparablePath,
   equalOrUnder,
+  existsAsEntry,
   lockedBatchId,
   samePath,
   surelyInside,
   type Git,
   type WorktreeEntry,
+  worktreePinKey,
 } from '../git';
 import { realPathOf } from '../guard';
 import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
 import { worktreeCards } from './cards';
 import { raise } from './context';
-import { worktreePinKey } from './worktree-cleanup';
-import { existsAsEntry } from './worktree-cut';
 
 export interface SweepDeps {
   readonly state: StateStore;
@@ -37,15 +38,6 @@ interface Orphan {
 
 const message = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
-
-/** A path as the file system names it, or resolved as text once nothing is there. */
-function comparable(path: string): string {
-  try {
-    return realpathSync(path);
-  } catch {
-    return resolve(path);
-  }
-}
 
 /** True when `path` lies under `root`, not at it: by real path, or as text once the directory is gone. */
 function underRoot(path: string, root: string): boolean {
@@ -80,7 +72,7 @@ function orphanOf(state: StateStore, entry: WorktreeEntry, root: string): Orphan
   const parsed = BatchId.safeParse(lockedBatchId(entry));
   if (!parsed.success || !underRoot(entry.path, root)) return null;
   const live = findBatch(state, parsed.data)?.worktreePath ?? null;
-  if (live !== null && samePath(comparable(live), comparable(entry.path))) return null;
+  if (live !== null && samePath(comparablePath(live), comparablePath(entry.path))) return null;
   return { batchId: parsed.data, ownsPin: live === null };
 }
 
@@ -132,12 +124,13 @@ async function sweepProject(deps: SweepDeps, project: ProjectDto): Promise<strin
 }
 
 /**
- * W12 at startup: in each pull_request project's main checkout, remove every worktree under `root`
- * locked `10db <batch id>` whose batch is gone or whose `worktree_path` is cleared or different, then
- * prune. An orphan with uncommitted changes, or one git can't read, is kept and named on a card. An
- * unmarked entry, another lock reason and anything outside `root` are never touched. A project or an
- * entry git refuses is logged and skipped (a trust refusal raises its own card), so startup goes on.
- * Resolves with the paths removed.
+ * At startup, so no crash leaves a worktree behind for good: in each pull_request project's main
+ * checkout, remove every worktree under `root` locked `10db <batch id>` whose batch is gone or
+ * whose `worktree_path` is cleared or different, then prune. An orphan with uncommitted changes, or
+ * one git can't read, is kept and named on a card. An unmarked entry, another lock reason and
+ * anything outside `root` are never touched. A project or an entry git refuses is logged and
+ * skipped (a trust refusal raises its own card), so startup goes on. Resolves with the paths
+ * removed.
  */
 export async function sweepWorktrees(deps: SweepDeps): Promise<string[]> {
   const swept: string[] = [];

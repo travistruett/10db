@@ -12,6 +12,7 @@ import {
 } from './checkout-trust';
 import { parseScopedConfig, type ConfigEntry } from './config-trust';
 import { equalOrUnder, insideAny, isPlainDirectory, samePath, surelyInside } from './lane-writable';
+import { comparablePath, existsAsEntry } from './path-entries';
 import { gitNetwork, type NetworkCall, type NetworkRun } from './network';
 import { localRemotePath, parseRemoteUrl } from './remote-url';
 import { GitError, runGit, type RunOptions } from './run';
@@ -255,15 +256,6 @@ function filtersInAttributes(text: string): string[] {
     }
   }
   return names;
-}
-
-/** A path as the file system names it, or resolved as text once nothing is there. */
-function comparable(path: string): string {
-  try {
-    return realpathSync(path);
-  } catch {
-    return resolve(path);
-  }
 }
 
 /** True when the `commondir` file in a linked worktree's git dir resolves to `commonDir`. */
@@ -867,15 +859,6 @@ export function createGit(opts: GitOptions = {}): Git {
     return null;
   }
 
-  function entryExists(path: string): boolean {
-    try {
-      lstatSync(path);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
   /** The git dir a worktree's `.git` file names, real; the file must be a regular file. */
   function readGitfile(worktree: string): string {
     const file = join(worktree, '.git');
@@ -916,7 +899,7 @@ export function createGit(opts: GitOptions = {}): Git {
     if (!root) throw new InvalidError('No worktree root is configured');
     return withRepoLock(realpathSync(input.repo), async () => {
       const main = await pinned(input.repo);
-      if (entryExists(input.path)) throw new InvalidError(`${input.path} already exists`);
+      if (existsAsEntry(input.path)) throw new InvalidError(`${input.path} already exists`);
       // Checked before anything is created, so a parent outside the root is never made.
       if (!equalOrUnder(realisticPath(dirname(input.path)), realisticPath(root)))
         throw new InvalidError(`${input.path} is not under 10db's worktree root`);
@@ -1042,7 +1025,9 @@ export function createGit(opts: GitOptions = {}): Git {
       throw new WorktreeNotOursError(path, 'it is a link or a file, not a worktree directory');
     return withRepoLock(realpathSync(repo), async () => {
       const main = await pinned(repo);
-      const entry = (await listWorktrees(main)).find((e) => samePath(comparable(e.path), target));
+      const entry = (await listWorktrees(main)).find((e) =>
+        samePath(comparablePath(e.path), target),
+      );
       if (!entry) {
         if (present) throw new WorktreeNotOursError(path, 'git lists no worktree there');
         pins.delete(target);
@@ -1065,7 +1050,7 @@ export function createGit(opts: GitOptions = {}): Git {
     if (!surelyInside(target, root) || samePath(target, realisticPath(root)))
       throw new WorktreeNotOursError(path, "it is not under 10db's worktree root");
     const main = await pinned(repo);
-    const entry = (await listWorktrees(main)).find((e) => samePath(comparable(e.path), target));
+    const entry = (await listWorktrees(main)).find((e) => samePath(comparablePath(e.path), target));
     if (!entry) throw new WorktreeNotOursError(path, 'git lists no worktree there');
     if (lockedBatchId(entry) === null)
       throw new WorktreeNotOursError(path, 'the worktree is not locked by 10db');

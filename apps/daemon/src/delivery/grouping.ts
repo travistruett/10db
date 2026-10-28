@@ -6,7 +6,7 @@ export interface TaskGroup {
 }
 
 /**
- * W3: tasks linked by a dependency inside the set, directly or through others in it, share a group.
+ * Tasks linked by a dependency inside the set, directly or through others in it, share a group.
  * Groups come in the order of their first task, and tasks keep the set's order within a group. A
  * group is titled after its first task in set order with no dependency inside the set.
  */

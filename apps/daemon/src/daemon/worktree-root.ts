@@ -1,19 +1,14 @@
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { foldPathCase, realPathOf } from '../guard';
+import { equalOrUnder } from '../git';
+import { realPathOf } from '../guard';
 
 /** Where worktrees go unless `TENDB_WORKTREE_ROOT` says otherwise. */
 export const DEFAULT_WORKTREE_BASE = join(homedir(), '.10db', 'worktrees');
 
 export class WorktreeRootError extends Error {
   override readonly name = 'WorktreeRootError';
-}
-
-function equalOrUnder(path: string, root: string): boolean {
-  const p = foldPathCase(path);
-  const r = foldPathCase(root);
-  return p === r || p.startsWith(r.endsWith('/') ? r : `${r}/`);
 }
 
 /**

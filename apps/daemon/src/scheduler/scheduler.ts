@@ -1,4 +1,3 @@
-import { lstatSync } from 'node:fs';
 import {
   BatchState,
   Delivery,
@@ -30,18 +29,8 @@ import { unready, type AccountPreparer, type AccountRuntime } from '../accounts'
 import type { Clock, Timer } from '../clock';
 import { batchLaunchVerdict, claimScopeOf, LaunchVerdict } from '../delivery';
 import type { StateStore } from '../events';
-import { GitTrustError } from '../git';
+import { existsAsEntry, GitTrustError } from '../git';
 import type { Logger } from '../log';
-
-/** True for anything at the path, including a link whose target is gone. */
-function existsAsEntry(path: string): boolean {
-  try {
-    lstatSync(path);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 export interface SchedulerOptions {
   readonly state: StateStore;

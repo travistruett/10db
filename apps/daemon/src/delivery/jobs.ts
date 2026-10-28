@@ -6,7 +6,7 @@ export const JobQueue = { Cut: 'cut', Ship: 'ship' } as const;
 export type JobQueue = (typeof JobQueue)[keyof typeof JobQueue];
 
 /**
- * W13: a worktree project's cuts and joins run in one queue and its ships and cleanup in another, so
+ * A worktree project's cuts and joins run in one queue and its ships and cleanup in another, so
  * a cut never waits behind a shipping gate. A shared project keeps one queue: its cut switches the
  * checkout a ship reads.
  */

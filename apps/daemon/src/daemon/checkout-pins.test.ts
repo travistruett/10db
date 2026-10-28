@@ -12,7 +12,8 @@ import {
 import { tempDir } from '../../test/fixtures';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { memoryPinStore, type CheckoutPin, type PinStore } from '../git';
-import { createProjectPinStore, projectAt, worktreePinKey } from './checkout-pins';
+import { worktreePinKey } from '../git';
+import { createProjectPinStore, projectAt } from './checkout-pins';
 
 const pin = (id: string): CheckoutPin => ({
   gitDir: `/g/${id}`,

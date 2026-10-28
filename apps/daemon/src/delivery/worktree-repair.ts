@@ -2,11 +2,11 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { BatchState, InvalidError, type BatchDto, type BatchId } from '@10db/contracts';
 import { getBatch, getProject, transitionBatch, type WriteContext } from '@10db/db';
-import { GitTrustError, WorktreeNotOursError } from '../git';
+import { existsAsEntry, GitTrustError, WorktreeNotOursError } from '../git';
 import { worktreeCards } from './cards';
 import { raise, type DeliveryContext } from './context';
 import { jobKey, JobQueue } from './jobs';
-import { existsAsEntry, worktreeLockReason } from './worktree-cut';
+import { worktreeLockReason } from './worktree-cut';
 import { withWorktreeLock } from './worktree-lock';
 import { seedDirs, seedWorktree } from './worktree-seed';
 
@@ -18,7 +18,8 @@ const message = (error: unknown): string =>
 
 /**
  * Spec §5 Retry: keep a whole worktree (there, pinned, with an index, on the batch branch), else
- * replace it from the existing branch (W5 without update-ref, plus the seed). Refuses with a card
+ * replace it from the existing branch (a new locked worktree on it, with no new branch, plus the
+ * seed). Refuses with a card
  * over a worktree on another branch, or a detached one, with uncommitted changes, over one git can't
  * read the branch or changes of, and over anything git doesn't list as 10db's; refuses, without
  * removing anything, a worktree git won't trust (the trust card explains). Uncommitted work is never
