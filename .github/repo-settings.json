@@ -26,5 +26,15 @@
   },
   "forkPullRequestApproval": {
     "approval_policy": "first_time_contributors"
+  },
+  "environments": {
+    "release-bot": {
+      "reviewers": [],
+      "deploymentPolicies": [{ "name": "main", "type": "branch" }]
+    },
+    "release": {
+      "reviewers": ["travistruett"],
+      "deploymentPolicies": [{ "name": "v*", "type": "tag" }]
+    }
   }
 }

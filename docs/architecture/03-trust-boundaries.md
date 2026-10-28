@@ -523,8 +523,9 @@ Under the lane sandbox (**built**), the design column holds for a lane's Bash:
   same repository gets the repository's secrets.
   - 10db's repository keeps none at repository level.
   - `release-bot`'s secrets are limited to `main` by a deployment-branch policy.
-  - The `release` environment that `release.yml` names doesn't exist yet. It needs the same policy before
-    its signing secrets are added.
+  - `release`, which holds the Apple signing secrets, deploys only from `v*` tags, and every run waits for
+    the builder's approval.
+  - `.github/repo-settings.json` declares both environments and `make github-settings` applies them.
   - A project 10db works on must keep its CI secrets in environments limited to protected branches. That is
     the builder's setup; 10db can't enforce it.
 - **In the design**, a batch that changes `.github/workflows/**` or `.github/actions/**` stops for a card before the
