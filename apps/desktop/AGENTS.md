@@ -32,6 +32,16 @@ The UI never touches the database; it talks to the daemon over loopback HTTP and
 - `pnpm --filter @10db/desktop dev:shell` runs the Tauri shell against the daemon and Vite server that
   `pnpm dev` already runs. It sets `TENDB_EXTERNAL_DAEMON=1`, which makes the shell skip its sidecar.
   Run `pnpm --filter @10db/desktop sidecar` once first: `tauri-build` checks the sidecar files exist.
+  `src-tauri/tauri.dev.conf.json` (passed by `dev:shell` only, never by a release build) gives that shell its own
+  identifier (`app.10db.desktop.dev`) and product name ("10db Dev"), so it runs beside the installed release app
+  instead of being folded into it by the single-instance plugin. `dev:shell` also defaults `TENDB_DATA_DIR` to the
+  checkout's `.dev/data`, so the dev window never reads the release app's `~/Library/Application Support/10db`.
+  The data directory comes from `TENDB_DATA_DIR`, not from the identifier. `tests/repo` fails if the two configs
+  share an identifier or product name.
+- Factory and preview: the installed release app is the factory; it manages the 10db repo and runs its tasks.
+  `pnpm dev` (its own `.dev/data`) with `dev:shell` or http://localhost:1420 is the preview: it renders the
+  checkout with live reload and never runs tasks. While a task holds the checkout (Your folder / shared mode),
+  don't hand-edit it; work in a worktree under `../10db-worktrees/`.
 - `pnpm --filter @10db/desktop e2e` drives the Vite app in Playwright's WebKit, the WKWebView engine,
   against the real daemon on the fake adapter. It is not the Tauri window. `make live-acceptance` runs the daemon as a plain node process with the browser UI, so the Tauri window (sidecar, tray, close-to-tray, webview) has no scripted coverage and is checked by hand.
   `make setup` installs the browser. Each run picks free ports for its daemon and Vite server
