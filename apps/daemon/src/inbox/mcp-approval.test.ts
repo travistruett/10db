@@ -30,8 +30,22 @@ const review = (overrides: Partial<McpServerReview> = {}): McpServerReview => ({
   headers: [{ name: 'Authorization', value: 'Bearer ${DOCS_TOKEN}' }],
   variables: ['DOCS_TOKEN'],
   sensitive: ['DOCS_TOKEN'],
+  hosts: [],
   ...overrides,
 });
+
+const npx = (overrides: Partial<McpServerReview> = {}): McpServerReview =>
+  review({
+    name: 'mantine',
+    transport: 'stdio',
+    command: 'npx',
+    args: ['-y', '@mantine/mcp-server@9.7.2'],
+    url: null,
+    headers: [],
+    variables: [],
+    sensitive: [],
+    ...overrides,
+  });
 
 describe('MCP approval cards', () => {
   it('shows exactly what would be contacted and which variables it reads, as a project-wide card', () => {
@@ -129,7 +143,25 @@ describe('MCP approval cards', () => {
       'It runs in a sandbox: it reads what lane commands read, writes only its own temp dir and reaches no host, not even localhost.',
     );
     expect(card.body).toContain("such as npx -y for a package the repo doesn't install");
+    expect(card.body).toContain('.10db/mcp-hosts.json');
     expect(card.body).not.toContain('replaces');
+  });
+
+  it('names the hosts a stdio server may reach, and says a token can leave only through them', () => {
+    const project = seedProject(store);
+    const card = requestMcpApproval(
+      inbox,
+      project.id,
+      npx({ hosts: ['*.example.org', 'registry.npmjs.org'] }),
+    );
+    expect(card.body).toContain(
+      'It runs in a sandbox: it reads what lane commands read, writes only its own temp dir and reaches only *.example.org (every subdomain of example.org) and registry.npmjs.org, never localhost.',
+    );
+    expect(card.body).toContain(
+      'Whatever it is given, an approved token included, can leave only through those hosts.',
+    );
+    expect(card.body).toContain('The approval covers this exact config and these hosts.');
+    expect(card.body).not.toContain('reaches no host');
   });
 
   // The card must say what will run, whatever text the repo supplies.
@@ -212,6 +244,46 @@ describe('MCP approval cards', () => {
     expect(
       requestMcpApproval(inbox, project.id, review({ configHash: 'd'.repeat(64) })).id,
     ).not.toBe(first.id);
+  });
+
+  it("records approval with the card's hosts, and a denial with none", () => {
+    const project = seedProject(store);
+    const hosts = ['registry.npmjs.org'];
+    const approve = requestMcpApproval(inbox, project.id, npx({ hosts }));
+    inbox.answer(approve.id, { choice: 'approve' });
+    expect(getMcpApproval(store.db, project.id, 'mantine', 'c'.repeat(64))).toMatchObject({
+      verdict: 'approved',
+      hosts,
+    });
+    const deny = requestMcpApproval(inbox, project.id, npx({ hosts, configHash: 'd'.repeat(64) }));
+    inbox.answer(deny.id, { choice: 'deny' });
+    expect(getMcpApproval(store.db, project.id, 'mantine', 'd'.repeat(64))).toMatchObject({
+      verdict: 'denied',
+      hosts: [],
+    });
+  });
+
+  it('records no host from a card raised before hosts existed', () => {
+    const project = seedProject(store);
+    // The detail as stored before reviews carried hosts.
+    const older: Record<string, unknown> = { ...npx() };
+    delete older['hosts'];
+    const card = inbox.flag({
+      projectId: project.id,
+      workstreamId: null,
+      title: 'Run the repo\'s MCP server "mantine"?',
+      body: 'older card',
+      options: [
+        { label: 'approve', description: 'Run it' },
+        { label: 'deny', description: 'Leave it out' },
+      ],
+      detail: { [MCP_APPROVAL_DETAIL]: older },
+    });
+    inbox.answer(card.id, { choice: 'approve' });
+    expect(getMcpApproval(store.db, project.id, 'mantine', 'c'.repeat(64))).toMatchObject({
+      verdict: 'approved',
+      hosts: [],
+    });
   });
 
   it("records approval with the card's variables, in the answer's transaction", () => {

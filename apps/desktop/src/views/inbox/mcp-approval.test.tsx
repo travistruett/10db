@@ -22,6 +22,7 @@ const review = (overrides: Partial<McpServerReview> = {}): McpServerReview => ({
   headers: [],
   variables: [],
   sensitive: [],
+  hosts: [],
   ...overrides,
 });
 
@@ -66,6 +67,20 @@ describe('MCP approval card', () => {
     expect(screen.queryByText(/Environment it gets/)).toBeNull();
     expect(screen.getByRole('radio', { name: /Approve for this project/ })).toBeTruthy();
     expect(screen.getByRole('radio', { name: /Deny/ })).toBeTruthy();
+  });
+
+  it.each([
+    [
+      'the hosts it may reach',
+      ['*.example.org', 'registry.npmjs.org'],
+      '*.example.org\nregistry.npmjs.org',
+    ],
+    ['that it reaches none', [], 'No host'],
+  ])('says, for a stdio server, %s', async (_name, hosts, shown) => {
+    serveInbox([card(review({ hosts }))]);
+    renderApp('/inbox');
+    expect(await screen.findByText('Reaches these hosts')).toBeTruthy();
+    expect(screen.getByText(shown, { normalizer: (text) => text })).toBeTruthy();
   });
 
   it('warns about credential-like variables', async () => {

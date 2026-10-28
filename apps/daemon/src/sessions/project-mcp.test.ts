@@ -1,4 +1,4 @@
-import { symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { McpServerReview } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -39,6 +39,12 @@ function writeMcp(content: unknown): void {
   writeFileSync(join(repo.path, '.mcp.json'), text);
 }
 
+function writeHosts(content: unknown): void {
+  const text = typeof content === 'string' ? content : JSON.stringify(content);
+  mkdirSync(join(repo.path, '.10db'), { recursive: true });
+  writeFileSync(join(repo.path, '.10db', 'mcp-hosts.json'), text);
+}
+
 /** Verdicts by server name; a server not listed has none. */
 function resolve(verdicts: Record<string, McpApproval>) {
   return resolveProjectMcp({
@@ -47,7 +53,11 @@ function resolve(verdicts: Record<string, McpApproval>) {
     approvalFor: (review) => verdicts[review.name] ?? null,
   });
 }
-const approved = (...variables: string[]): McpApproval => ({ verdict: 'approved', variables });
+const approved = (...variables: string[]): McpApproval => ({
+  verdict: 'approved',
+  variables,
+  hosts: [],
+});
 const envKeys = (server: { type: string; env?: Readonly<Record<string, string>> } | undefined) =>
   Object.keys(server?.env ?? {}).sort();
 
@@ -237,6 +247,128 @@ describe('readRepoMcp', () => {
   });
 });
 
+describe('the hosts a stdio server may reach (.10db/mcp-hosts.json)', () => {
+  const MANTINE = { command: 'npx', args: ['-y', '@mantine/mcp-server@9.7.2'] };
+  const review = () => readRepoMcp(repo.path).servers[0]?.review;
+
+  it('names no host without the file, and keeps the hash an approval made before hosts existed', () => {
+    writeMcp({ mcpServers: { mantine: MANTINE } });
+    expect(review()).toMatchObject({
+      hosts: [],
+      configHash: 'c20abd91cf3ffa2de6f7faba0fb24c6c301dd88ae905027cf8ef90655a75a03c',
+    });
+  });
+
+  it('puts the hosts on the review, sorted and once each, and in the hash', () => {
+    writeMcp({ mcpServers: { mantine: MANTINE } });
+    const bare = review()?.configHash;
+    writeHosts({ servers: { mantine: { hosts: ['registry.npmjs.org', '*.example.org'] } } });
+    const named = review();
+    expect(named?.hosts).toEqual(['*.example.org', 'registry.npmjs.org']);
+    expect(named?.configHash).not.toBe(bare);
+    writeHosts({
+      servers: { mantine: { hosts: ['*.example.org', 'registry.npmjs.org', '*.example.org'] } },
+    });
+    expect(review()?.configHash).toBe(named?.configHash);
+    writeHosts({ servers: { mantine: { hosts: ['registry.npmjs.org'] } } });
+    expect(review()?.configHash).not.toBe(named?.configHash);
+    writeHosts({ servers: { mantine: { hosts: [] } } });
+    expect(review()?.configHash).toBe(bare);
+  });
+
+  it.each([
+    ['broken JSON', '{"servers": {', /is not valid JSON/],
+    ['no servers key', { mantine: { hosts: [] } }, /servers/],
+    ['an unknown field', { servers: { mantine: { hosts: [], ports: [443] } } }, /servers\.mantine/],
+    [
+      'an IP address',
+      { servers: { mantine: { hosts: ['127.0.0.1'] } } },
+      /servers\.mantine\.hosts\.0/,
+    ],
+    ['localhost', { servers: { mantine: { hosts: ['localhost'] } } }, /servers\.mantine\.hosts\.0/],
+    ['a URL', { servers: { mantine: { hosts: ['https://registry.npmjs.org'] } } }, /hosts\.0/],
+    [
+      'a wildcard over a top-level domain',
+      { servers: { mantine: { hosts: ['*.org'] } } },
+      /hosts\.0/,
+    ],
+    [
+      'more than 64 hosts',
+      {
+        servers: {
+          mantine: { hosts: Array.from({ length: 65 }, (_, i) => `h${String(i)}.example.org`) },
+        },
+      },
+      /servers\.mantine\.hosts/,
+    ],
+  ])('rejects %s, naming the file', (_name, content, message) => {
+    writeMcp({ mcpServers: { mantine: MANTINE } });
+    writeHosts(content);
+    const error = readFailure();
+    expect(error).toBeInstanceOf(ProjectMcpError);
+    expect(String(error)).toContain('mcp-hosts.json');
+    expect(String(error)).toMatch(message);
+  });
+
+  it('refuses the file as a link, and a .10db that is a link, without reading either', () => {
+    writeMcp({ mcpServers: { mantine: MANTINE } });
+    mkdirSync(join(repo.path, '.10db'));
+    symlinkSync('/dev/zero', join(repo.path, '.10db', 'mcp-hosts.json'));
+    expect(readFailure()).toBeInstanceOf(ProjectMcpError);
+    expect(String(readFailure())).toContain('regular file');
+
+    const elsewhere = tempDir('project-mcp-elsewhere');
+    try {
+      writeFileSync(
+        join(elsewhere.path, 'mcp-hosts.json'),
+        JSON.stringify({ servers: { mantine: { hosts: ['registry.npmjs.org'] } } }),
+      );
+      repo.cleanup();
+      repo = tempDir('project-mcp');
+      writeMcp({ mcpServers: { mantine: MANTINE } });
+      symlinkSync(elsewhere.path, join(repo.path, '.10db'));
+      expect(readFailure()).toBeInstanceOf(ProjectMcpError);
+      expect(String(readFailure())).toContain('.10db must be a directory, not a link');
+    } finally {
+      elsewhere.cleanup();
+    }
+  });
+
+  it('ignores hosts for a server .mcp.json does not declare as stdio, with a warning each', () => {
+    writeMcp({
+      mcpServers: { mantine: MANTINE, docs: { type: 'http', url: 'https://docs.example/mcp' } },
+    });
+    writeHosts({
+      servers: {
+        docs: { hosts: ['docs.example'] },
+        gone: { hosts: ['registry.npmjs.org'] },
+      },
+    });
+    const mcp = readRepoMcp(repo.path);
+    expect(mcp.servers.map((s) => [s.name, s.review.hosts])).toEqual([
+      ['mantine', []],
+      ['docs', []],
+    ]);
+    expect(mcp.warnings).toEqual([
+      expect.stringContaining(
+        'names hosts for "docs", which the repo\'s .mcp.json declares as an http server',
+      ),
+      expect.stringContaining(
+        'names hosts for "gone", which the repo\'s .mcp.json doesn\'t declare',
+      ),
+    ]);
+  });
+
+  it('gives an approved stdio server the hosts on its approval, and only those', () => {
+    writeMcp({ mcpServers: { mantine: MANTINE } });
+    writeHosts({ servers: { mantine: { hosts: ['registry.npmjs.org'] } } });
+    const mcp = resolve({
+      mantine: { verdict: 'approved', variables: [], hosts: ['registry.npmjs.org'] },
+    });
+    expect(mcp.servers['mantine']).toMatchObject({ type: 'stdio', hosts: ['registry.npmjs.org'] });
+  });
+});
+
 describe('resolveProjectMcp', () => {
   it('leaves a server with no verdict out of the session and lists it for approval', () => {
     writeMcp({
@@ -263,6 +395,7 @@ describe('resolveProjectMcp', () => {
       command: 'bin/tool',
       args: ['--level', 'info'],
       env: { PATH: '/usr/bin:/bin', HOME: '/h', LEVEL: 'debug' },
+      hosts: [],
     });
     expect(envKeys(tools)).toEqual(['HOME', 'LEVEL', 'PATH']);
   });
@@ -339,7 +472,7 @@ describe('resolveProjectMcp', () => {
 
   it('leaves a denied server out, without asking again', () => {
     writeMcp({ mcpServers: { mantine: { command: 'npx' } } });
-    expect(resolve({ mantine: { verdict: 'denied', variables: [] } })).toMatchObject({
+    expect(resolve({ mantine: { verdict: 'denied', variables: [], hosts: [] } })).toMatchObject({
       servers: {},
       pending: [],
       denied: ['mantine'],
@@ -379,7 +512,7 @@ describe('resolveProjectMcp', () => {
       },
     });
     const note = skippedServersNote(
-      resolve({ b: { verdict: 'denied', variables: [] }, c: approved(), d: approved() }),
+      resolve({ b: { verdict: 'denied', variables: [], hosts: [] }, c: approved(), d: approved() }),
     );
     expect(note).toContain(
       "a (waiting for the builder's approval); b (denied by the builder); c (its config can't be used as written)",
