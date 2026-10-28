@@ -97,8 +97,8 @@ describe('SettingsView', () => {
       ...baseHandlers(),
     );
     renderApp('/settings/areas');
-    expect(await screen.findByText('src/api/**')).toBeTruthy();
-    expect(screen.getByText('pnpm add')).toBeTruthy();
+    expect(await screen.findByDisplayValue('src/api/**')).toBeTruthy();
+    expect(screen.getByDisplayValue('pnpm add')).toBeTruthy();
     fireEvent.click(screen.getByRole('link', { name: /Billing/ }));
     const picker = await screen.findByRole('combobox', { name: 'Account' });
     // The account list loads after the section opens.
