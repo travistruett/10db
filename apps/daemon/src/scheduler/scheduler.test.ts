@@ -1,3 +1,4 @@
+import { rmSync } from 'node:fs';
 import type { AccountId, BatchState, ProjectId, WorkstreamId } from '@10db/contracts';
 import {
   countLanes,
@@ -15,13 +16,14 @@ import {
   insertWorkstream,
   patchBatch,
   releaseClaims,
+  schema,
   seedProject,
   transitionBatch,
   transitionWorkstream,
   type Store,
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { seedSpend } from '../../test/fixtures';
+import { seedSpend, tempDir, type TempDir } from '../../test/fixtures';
 import {
   createAccountPauses,
   createAccountRuntime,
@@ -50,6 +52,8 @@ let refusedRepos: Set<string>;
 let branchReads: string[];
 let prepared: { accountId: AccountId; projectId: ProjectId }[];
 let wrongBranch: { batchId: string; current: string | null }[];
+let wrongBranchAt: string[];
+let missing: { batchId: string; path: string }[];
 
 beforeEach(() => {
   clock = new ManualClock(new Date(2026, 9, 20, 12));
@@ -70,6 +74,8 @@ beforeEach(() => {
   refusedRepos = new Set();
   branchReads = [];
   wrongBranch = [];
+  wrongBranchAt = [];
+  missing = [];
   prepared = [];
 });
 afterEach(() => {
@@ -118,8 +124,12 @@ function scheduler(caps = { global: 4 }) {
         return Promise.resolve(branchOf.get(repo) ?? null);
       },
     },
-    onWrongBranch: (batch, current) => {
+    onWrongBranch: (batch, current, checkout) => {
       wrongBranch.push({ batchId: batch.id, current });
+      wrongBranchAt.push(checkout);
+    },
+    onWorktreeMissing: (batch, path) => {
+      missing.push({ batchId: batch.id, path });
     },
   });
 }
@@ -546,5 +556,127 @@ describe('accounts', () => {
     const under = queue({ accountId: roomy.id });
     seedSpend(store, under.project, 4.99);
     expect(await scheduler().tick()).toBe(1);
+  });
+});
+
+describe('worktree batches', () => {
+  const BRANCH = '10db/greetings-0a1b2c3d';
+  let dirs: TempDir[];
+  beforeEach(() => {
+    dirs = [];
+  });
+  afterEach(() => {
+    for (const dir of dirs) dir.cleanup();
+  });
+
+  /** One OPEN worktree batch per entry, each with one QUEUED workstream claiming `claim`. */
+  function worktrees(claims: string[], opts: { cutting?: boolean } = {}) {
+    const project = seedProject(store, {
+      delivery: 'pull_request',
+      prTitlePrefix: 'feat(app)',
+      maxLanes: 3,
+      hazards: [{ name: 'docker', globs: ['docker/**'], commands: [] }],
+    });
+    return claims.map((claim, i) => {
+      const dir = tempDir('worktree');
+      dirs.push(dir);
+      const task = state.write((ctx) =>
+        insertTask(ctx, project.id, {
+          title: `t${String(i)}`,
+          acceptanceCriteria: ['x'],
+          areas: [claim],
+        }),
+      );
+      const batch = state.write((ctx) => {
+        const b = insertBatch(ctx, {
+          projectId: project.id,
+          title: `Batch ${String(i)}`,
+          baseBranch: 'main',
+          worktreePath: dir.path,
+        });
+        if (opts.cutting) return b;
+        transitionBatch(ctx, b.id, { to: 'OPEN' });
+        patchBatch(ctx, b.id, { branch: `${BRANCH}-${String(i)}`, baseSha: 'a'.repeat(40) });
+        return b;
+      });
+      branchOf.set(dir.path, `${BRANCH}-${String(i)}`);
+      const workstream = state.write((ctx) =>
+        insertWorkstream(ctx, task.id, { batchId: batch.id }),
+      );
+      return { project, batch, workstream, path: dir.path };
+    });
+  }
+  function worktree(claim: string, opts: { cutting?: boolean } = {}) {
+    const [only] = worktrees([claim], opts);
+    if (!only) throw new Error('no worktree batch');
+    return only;
+  }
+  const activeClaims = (name: string) =>
+    store.db
+      .select()
+      .from(schema.claims)
+      .all()
+      .filter((c) => c.name === name && c.releasedAt === null);
+
+  it("launches three batches' work in one tick with the same area claimed", async () => {
+    worktrees(['ui', 'ui', 'ui']);
+    expect(await scheduler({ global: 4 }).tick()).toBe(3);
+    const held = activeClaims('ui');
+    expect(held).toHaveLength(3);
+    expect(new Set(held.map((c) => c.scope)).size).toBe(3);
+  });
+
+  it('a hazard still serializes them', async () => {
+    worktrees(['docker', 'docker', 'docker']);
+    expect(await scheduler({ global: 4 }).tick()).toBe(1);
+  });
+
+  it('waits with one folded card while a worktree is missing', async () => {
+    const q = worktree('ui');
+    rmSync(q.path, { recursive: true });
+    const s = scheduler();
+    await s.tick();
+    await s.tick();
+    expect(missing).toEqual([{ batchId: q.batch.id, path: q.path }]);
+    expect(launched).toEqual([]);
+    expect(branchReads).toEqual([]);
+  });
+
+  it('reports a missing worktree again after the batch left OPEN and reopened', async () => {
+    const q = worktree('ui');
+    rmSync(q.path, { recursive: true });
+    const s = scheduler();
+    await s.tick();
+    state.write((ctx) => transitionBatch(ctx, q.batch.id, { to: 'FAILED' }));
+    await s.tick();
+    state.write((ctx) => transitionBatch(ctx, q.batch.id, { to: 'OPEN' }));
+    await s.tick();
+    expect(missing).toHaveLength(2);
+  });
+
+  it('waits without a card while a worktree is unpinned', async () => {
+    const q = worktree('ui');
+    refusedRepos.add(q.path);
+    await scheduler().tick();
+    expect(launched).toEqual([]);
+    expect(missing).toEqual([]);
+    expect(wrongBranch).toEqual([]);
+  });
+
+  it('waits on another branch and names the worktree', async () => {
+    const q = worktree('ui');
+    branchOf.set(q.path, 'main');
+    await scheduler().tick();
+    expect(launched).toEqual([]);
+    expect(wrongBranch).toEqual([{ batchId: q.batch.id, current: 'main' }]);
+    expect(wrongBranchAt).toEqual([q.path]);
+  });
+
+  it('reads nothing for a cutting batch', async () => {
+    worktree('ui', { cutting: true });
+    await scheduler().tick();
+    expect(branchReads).toEqual([]);
+    expect(launched).toEqual([]);
+    expect(missing).toEqual([]);
   });
 });

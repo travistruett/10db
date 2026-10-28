@@ -2,14 +2,17 @@ import { existsSync, lstatSync, watch as fsWatch } from 'node:fs';
 import { join, sep } from 'node:path';
 import {
   ACTIVE_STATES,
+  ClaimKind,
   LANE_STATES,
   WorkstreamState,
+  type BatchId,
   type ProjectDto,
   type ProjectId,
   type WorkstreamId,
 } from '@10db/contracts';
-import { activeClaims, getProject, getWorkstream, listWorkstreams } from '@10db/db';
+import { activeClaims, getBatch, getProject, getWorkstream, listWorkstreams } from '@10db/db';
 import type { Clock, Timer } from '../clock';
+import { checkoutOf } from '../delivery';
 import type { StateStore } from '../events';
 import { GitTrustError, type Git } from '../git';
 import type { InboxService } from '../inbox';
@@ -67,7 +70,7 @@ function existsAsEntry(path: string): boolean {
 }
 
 export interface Watcher {
-  /** Watches every project with active work and stops watching the rest. */
+  /** Watches every checkout (a project's, or a batch's worktree) with active work and stops watching the rest. */
   sync(): void;
   /** Diffs git status against the claims after a session; returns the strays it flagged. */
   stepEnd(workstreamId: WorkstreamId): Promise<string[]>;
@@ -88,37 +91,59 @@ export function createWatcher(deps: {
   const db = deps.state.db;
   const watch = deps.watch ?? systemWatch;
   const batchMs = deps.batchMs ?? WATCH_BATCH_MS;
+  // Keyed by the checkout's path. `batchId` is set for a batch's worktree, null for a project's own checkout.
   const watched = new Map<
-    ProjectId,
-    { readonly root: string; readonly handle: { close(): void } }
+    string,
+    {
+      readonly projectId: ProjectId;
+      readonly batchId: BatchId | null;
+      readonly root: string;
+      readonly handle: { close(): void };
+    }
   >();
-  const pending = new Map<ProjectId, Set<string>>();
+  const pending = new Map<string, Set<string>>();
   let timer: Timer | null = null;
   let chain: Promise<void> = Promise.resolve();
   let stopped = false;
 
-  const activeIn = (projectId: ProjectId) =>
-    listWorkstreams(db, { states: WATCHED_STATES, projectId });
-
-  function unwatch(projectId: ProjectId): void {
-    watched.get(projectId)?.handle.close();
-    watched.delete(projectId);
-    pending.delete(projectId);
+  /** The batch a workstream works in when that batch has its own worktree. */
+  function worktreeBatchOf(ws: { readonly batchId: BatchId | null }): BatchId | null {
+    if (ws.batchId === null) return null;
+    return getBatch(db, ws.batchId).worktreePath === null ? null : ws.batchId;
   }
 
-  function enqueue(projectId: ProjectId, rel: string): void {
+  function unwatch(root: string): void {
+    watched.get(root)?.handle.close();
+    watched.delete(root);
+    pending.delete(root);
+  }
+
+  function enqueue(root: string, rel: string): void {
     if (stopped || rel === '' || isAlwaysIgnored(rel)) return;
-    const set = pending.get(projectId) ?? new Set<string>();
+    const set = pending.get(root) ?? new Set<string>();
     set.add(rel);
-    pending.set(projectId, set);
+    pending.set(root, set);
     timer ??= deps.clock.setTimeout(() => {
       timer = null;
       void flush();
     }, batchMs);
   }
 
+  /** Where a write happened: fold keys scope to the batch in a worktree, and its cards name the path. */
+  interface Site {
+    readonly scope: string;
+    readonly worktree: string | null;
+  }
+
+  const siteOf = (project: ProjectDto, batchId: BatchId | null, root: string): Site =>
+    batchId === null ? { scope: project.id, worktree: null } : { scope: batchId, worktree: root };
+
+  const labelled = (site: Site, rel: string): string =>
+    site.worktree === null ? rel : `${site.worktree}: ${rel}`;
+
   function raise(
     project: ProjectDto,
+    site: Site,
     strays: readonly string[],
     candidates: readonly WorkstreamId[],
     owner: WorkstreamId | null,
@@ -132,9 +157,9 @@ export function createWatcher(deps: {
         projectId: project.id,
         workstreamId,
         title: 'Write outside every claim',
-        body: rel,
+        body: labelled(site, rel),
         detail: { path: rel, candidates: [...candidates] },
-        foldKey: strayFoldKey(project.id, rel),
+        foldKey: strayFoldKey(site.scope, rel),
       });
     };
     sensitive.forEach(single);
@@ -144,35 +169,54 @@ export function createWatcher(deps: {
         projectId: project.id,
         workstreamId,
         title: `${String(ordinary.length)} writes outside every claim`,
-        body: `${listed.join('\n')}\n…and ${String(ordinary.length - listed.length)} more`,
+        body: `${listed.map((rel) => labelled(site, rel)).join('\n')}\n…and ${String(ordinary.length - listed.length)} more`,
         detail: { count: ordinary.length, paths: listed, candidates: [...candidates] },
-        foldKey: bulkFoldKey(project.id),
+        foldKey: bulkFoldKey(site.scope),
       });
       return;
     }
     ordinary.forEach(single);
   }
 
-  /** Strays among `paths` against the claims of the workstreams in `claimStates`, plus any in `alsoHeldBy`. */
+  /**
+   * Strays among `paths` against the claims of the workstreams in `claimStates`, plus any in `alsoHeldBy`.
+   * Area claims count from the batch's workstreams in a worktree and from the project's otherwise; hazard
+   * claims always count from the project's, since a hazard is shared across worktrees.
+   */
   function straysIn(
     project: ProjectDto,
+    batchId: BatchId | null,
     paths: readonly string[],
     claimStates: readonly WorkstreamState[],
     alsoHeldBy: WorkstreamId | null,
   ): { strays: string[]; candidates: WorkstreamId[] } {
-    const active = activeIn(project.id);
-    const holders = listWorkstreams(db, { states: claimStates, projectId: project.id }).map(
-      (ws) => ws.id,
+    const inScope = (ws: { readonly batchId: BatchId | null }) =>
+      batchId === null || ws.batchId === batchId;
+    const holders = listWorkstreams(db, { states: claimStates, projectId: project.id });
+    const ids = holders.map((ws) => ws.id);
+    const areaHolders = new Set(holders.filter(inScope).map((ws) => ws.id));
+    if (alsoHeldBy) {
+      areaHolders.add(alsoHeldBy);
+      if (!ids.includes(alsoHeldBy)) ids.push(alsoHeldBy);
+    }
+    const claims = ids.flatMap((id) =>
+      activeClaims(db, id)
+        .filter((c) => c.kind === ClaimKind.Hazard || areaHolders.has(id))
+        .map((c) => ({ kind: c.kind, name: c.name })),
     );
-    if (alsoHeldBy && !holders.includes(alsoHeldBy)) holders.push(alsoHeldBy);
-    const claims = holders.flatMap((id) =>
-      activeClaims(db, id).map((c) => ({ kind: c.kind, name: c.name })),
-    );
-    return { strays: findStrays(paths, project, claims), candidates: active.map((ws) => ws.id) };
+    const candidates = listWorkstreams(db, { states: WATCHED_STATES, projectId: project.id })
+      .filter(inScope)
+      .map((ws) => ws.id);
+    return { strays: findStrays(paths, project, claims), candidates };
   }
 
   /** Writes inside a claim whose holder isn't running, attributed to the sessions that are. */
-  function raiseForeign(project: ProjectDto, paths: readonly string[]): void {
+  function raiseForeign(
+    project: ProjectDto,
+    site: Site,
+    batchId: BatchId | null,
+    paths: readonly string[],
+  ): void {
     if (paths.length === 0) return;
     const holders: ClaimHolder[] = listWorkstreams(db, {
       states: ACTIVE_STATES,
@@ -180,7 +224,9 @@ export function createWatcher(deps: {
     }).map((ws) => ({
       id: ws.id,
       running: LANE_STATES.includes(ws.state),
-      claims: activeClaims(db, ws.id).map((c) => ({ kind: c.kind, name: c.name })),
+      claims: activeClaims(db, ws.id)
+        .filter((c) => c.kind === ClaimKind.Hazard || batchId === null || ws.batchId === batchId)
+        .map((c) => ({ kind: c.kind, name: c.name })),
     }));
     const foreign = findForeignClaimWrites(paths, project, holders);
     if (foreign.length === 0) return;
@@ -192,9 +238,9 @@ export function createWatcher(deps: {
         projectId: project.id,
         workstreamId,
         title: "Write inside another workstream's claim",
-        body: path,
+        body: labelled(site, path),
         detail: { path, candidates: running, claimedBy },
-        foldKey: strayFoldKey(project.id, path),
+        foldKey: strayFoldKey(site.scope, path),
       });
     };
     sensitive.forEach(single);
@@ -204,21 +250,22 @@ export function createWatcher(deps: {
         projectId: project.id,
         workstreamId,
         title: `${String(ordinary.length)} writes inside another workstream's claim`,
-        body: `${listed.join('\n')}\n…and ${String(ordinary.length - listed.length)} more`,
+        body: `${listed.map((rel) => labelled(site, rel)).join('\n')}\n…and ${String(ordinary.length - listed.length)} more`,
         detail: { count: ordinary.length, paths: listed, candidates: running },
-        foldKey: foreignBulkFoldKey(project.id),
+        foldKey: foreignBulkFoldKey(site.scope),
       });
       return;
     }
     ordinary.forEach(single);
   }
 
-  async function processBatch(projectId: ProjectId, paths: readonly string[]): Promise<void> {
-    const entry = watched.get(projectId);
+  async function processBatch(root: string, paths: readonly string[]): Promise<void> {
+    const entry = watched.get(root);
     if (!entry) return;
+    const { projectId, batchId } = entry;
     if (!existsSync(entry.root)) {
       deps.logger.warn({ projectId }, 'the watched repository is gone; stopped watching it');
-      unwatch(projectId);
+      unwatch(root);
       return;
     }
     // Only what git still sees as changed now. This drops ignored files and directories. It also drops files
@@ -233,15 +280,18 @@ export function createWatcher(deps: {
     );
     const project = getProject(db, projectId);
     const reported = paths.filter((rel) => changed.has(rel));
-    const { strays, candidates } = straysIn(project, reported, ACTIVE_STATES, null);
+    const site = siteOf(project, batchId, entry.root);
+    const { strays, candidates } = straysIn(project, batchId, reported, ACTIVE_STATES, null);
     // Ignored or unreported paths that can change what runs are flagged whatever the claims say.
     const hidden = paths.filter(
       (rel) => !changed.has(rel) && isSensitivePath(rel) && existsAsEntry(join(entry.root, rel)),
     );
-    raise(project, [...strays, ...hidden], candidates, null);
+    raise(project, site, [...strays, ...hidden], candidates, null);
     const outside = new Set(strays);
     raiseForeign(
       project,
+      site,
+      batchId,
       reported.filter((rel) => !outside.has(rel)),
     );
   }
@@ -249,11 +299,11 @@ export function createWatcher(deps: {
   async function processPending(): Promise<void> {
     const batches = [...pending.entries()].map(([id, set]) => [id, [...set].sort()] as const);
     pending.clear();
-    for (const [projectId, paths] of batches) {
+    for (const [root, paths] of batches) {
       try {
-        await processBatch(projectId, paths);
+        await processBatch(root, paths);
       } catch (error) {
-        deps.logger.warn({ projectId, err: String(error) }, 'watcher batch failed');
+        deps.logger.warn({ root, err: String(error) }, 'watcher batch failed');
       }
     }
   }
@@ -268,31 +318,32 @@ export function createWatcher(deps: {
   return {
     sync() {
       if (stopped) return;
-      const wanted = new Map<ProjectId, string>();
+      const wanted = new Map<string, { projectId: ProjectId; batchId: BatchId | null }>();
       for (const ws of listWorkstreams(db, { states: WATCHED_STATES })) {
-        if (!wanted.has(ws.projectId))
-          wanted.set(ws.projectId, getProject(db, ws.projectId).repoPath);
+        const root = checkoutOf(db, ws);
+        if (!wanted.has(root))
+          wanted.set(root, { projectId: ws.projectId, batchId: worktreeBatchOf(ws) });
       }
-      for (const projectId of [...watched.keys()]) if (!wanted.has(projectId)) unwatch(projectId);
-      for (const [projectId, root] of wanted) {
-        if (watched.has(projectId) || !existsSync(root)) continue;
+      for (const root of [...watched.keys()]) if (!wanted.has(root)) unwatch(root);
+      for (const [root, { projectId, batchId }] of wanted) {
+        if (watched.has(root) || !existsSync(root)) continue;
         try {
           const handle = watch(
             root,
             (rel) => {
-              enqueue(projectId, rel);
+              enqueue(root, rel);
             },
             (error) => {
               deps.logger.warn(
-                { projectId, err: error.message },
+                { projectId, root, err: error.message },
                 'file watcher failed; it restarts on the next lane change',
               );
-              unwatch(projectId);
+              unwatch(root);
             },
           );
-          watched.set(projectId, { root, handle });
+          watched.set(root, { projectId, batchId, root, handle });
         } catch (error) {
-          deps.logger.warn({ projectId, err: String(error) }, 'could not watch the repository');
+          deps.logger.warn({ projectId, root, err: String(error) }, 'could not watch the checkout');
         }
       }
     },
@@ -300,15 +351,18 @@ export function createWatcher(deps: {
     async stepEnd(workstreamId) {
       const ws = getWorkstream(db, workstreamId);
       const project = getProject(db, ws.projectId);
-      if (!existsSync(project.repoPath)) return [];
-      const changed = await deps.git.changedPaths(project.repoPath);
+      const root = checkoutOf(db, ws);
+      if (!existsSync(root)) return [];
+      const batchId = worktreeBatchOf(ws);
+      const changed = await deps.git.changedPaths(root);
       const { strays, candidates } = straysIn(
         project,
+        batchId,
         changed,
         STEP_END_CLAIM_STATES,
         workstreamId,
       );
-      raise(project, strays, candidates, workstreamId);
+      raise(project, siteOf(project, batchId, root), strays, candidates, workstreamId);
       return strays;
     },
 
@@ -318,7 +372,7 @@ export function createWatcher(deps: {
       stopped = true;
       timer?.cancel();
       timer = null;
-      for (const projectId of [...watched.keys()]) unwatch(projectId);
+      for (const root of [...watched.keys()]) unwatch(root);
     },
   };
 }

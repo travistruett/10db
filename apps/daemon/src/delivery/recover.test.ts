@@ -115,6 +115,7 @@ describe('recoverBatches', () => {
       accounts: { blocked: () => null, isPaused: () => false, prepare: () => undefined },
       branches: h.git,
       onWrongBranch: () => undefined,
+      onWorktreeMissing: () => undefined,
     });
     expect(await scheduler.tick()).toBe(0);
     await scheduler.idle();

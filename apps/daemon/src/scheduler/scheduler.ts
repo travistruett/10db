@@ -1,3 +1,4 @@
+import { lstatSync } from 'node:fs';
 import {
   BatchState,
   Delivery,
@@ -6,7 +7,6 @@ import {
   type BatchDto,
   type BatchId,
   type AccountId,
-  type ProjectId,
   type WorkstreamId,
 } from '@10db/contracts';
 import {
@@ -33,6 +33,16 @@ import type { StateStore } from '../events';
 import { GitTrustError } from '../git';
 import type { Logger } from '../log';
 
+/** True for anything at the path, including a link whose target is gone. */
+function existsAsEntry(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export interface SchedulerOptions {
   readonly state: StateStore;
   readonly runner: {
@@ -47,10 +57,12 @@ export interface SchedulerOptions {
   readonly leaseMs: number;
   readonly tickMs: number;
   readonly logger: Logger;
-  /** Reads the checkout's branch; asked once per tick for each pull-request project with queued work. */
+  /** Reads a checkout's branch; asked once per tick for each checkout with queued pull-request work. */
   readonly branches: { currentBranch(repo: string): Promise<string | null> };
-  /** An open batch's work waits because the checkout is on another branch. */
-  readonly onWrongBranch: (batch: BatchDto, current: string | null, repoPath: string) => void;
+  /** An open batch's work waits because its checkout (its worktree, when it has one) is on another branch. */
+  readonly onWrongBranch: (batch: BatchDto, current: string | null, checkout: string) => void;
+  /** An open batch's work waits because its worktree is gone. */
+  readonly onWorktreeMissing: (batch: BatchDto, path: string) => void;
 }
 
 export interface Scheduler {
@@ -63,6 +75,12 @@ export interface Scheduler {
   stop(): void;
 }
 
+/** What one tick read: each checkout's branch, and the worktrees that were not on disk. */
+interface CheckoutSnapshot {
+  readonly branches: ReadonlyMap<string, string | null>;
+  readonly missing: ReadonlySet<string>;
+}
+
 export function createScheduler(opts: SchedulerOptions): Scheduler {
   const db = opts.state.db;
   let timer: Timer | null = null;
@@ -70,12 +88,15 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
   let started = false;
   // Batches whose work is waiting for its branch and already reported, so a tick doesn't repeat the card.
   const warned = new Set<BatchId>();
+  // Batches whose work is waiting for a missing worktree and already reported.
+  const warnedMissing = new Set<BatchId>();
 
   /** Forgets a reported batch once it is no longer OPEN, so one that reopens is reported again. */
   function pruneWarned(): void {
-    if (warned.size === 0) return;
+    if (warned.size === 0 && warnedMissing.size === 0) return;
     const open = new Set(listBatches(db, { states: [BatchState.Open] }).map((b) => b.id));
     for (const id of warned) if (!open.has(id)) warned.delete(id);
+    for (const id of warnedMissing) if (!open.has(id)) warnedMissing.delete(id);
   }
 
   // A runner can write PAUSED_LIMIT after the pause's reset timer already fired, so the timer
@@ -97,7 +118,7 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
     }
   }
 
-  function launchQueued(branches: ReadonlyMap<ProjectId, string | null>): number {
+  function launchQueued(snapshot: CheckoutSnapshot): number {
     const lanes = countLanes(db);
     let global = lanes.global;
     const byProject = new Map(lanes.byProject);
@@ -134,18 +155,25 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
       }
       if ((byProject.get(project.id) ?? 0) >= project.maxLanes) continue;
       if ((byAccount.get(account.id) ?? 0) >= account.laneCap) continue;
+      const batch = ws.batchId ? getBatch(db, ws.batchId) : null;
       if (project.delivery === Delivery.PullRequest) {
+        const checkout = batch?.worktreePath ?? project.repoPath;
+        // A worktree that isn't on disk holds the batch's work with one card; it never launches.
+        if (batch && snapshot.missing.has(checkout)) {
+          if (!warnedMissing.has(batch.id)) {
+            warnedMissing.add(batch.id);
+            opts.onWorktreeMissing(batch, checkout);
+          }
+          continue;
+        }
+        if (batch) warnedMissing.delete(batch.id);
         // Read after this tick's branch snapshot: wait for the next tick rather than guess.
-        if (!branches.has(project.id)) continue;
-        const current = branches.get(project.id) ?? null;
-        const batch = ws.batchId ? getBatch(db, ws.batchId) : null;
-        // A batch in its own worktree is never on the main checkout's branch: its work waits here,
-        // and the wrong-branch card speaks only of the main checkout.
-        if (batch && batch.worktreePath !== null) continue;
+        if (!snapshot.branches.has(checkout)) continue;
+        const current = snapshot.branches.get(checkout) ?? null;
         const verdict = batchLaunchVerdict(batch, current);
         if (verdict === LaunchVerdict.WrongBranch && batch && !warned.has(batch.id)) {
           warned.add(batch.id);
-          opts.onWrongBranch(batch, current, project.repoPath);
+          opts.onWrongBranch(batch, current, checkout);
         }
         if (verdict !== LaunchVerdict.Launch) continue;
         if (batch) warned.delete(batch.id);
@@ -161,6 +189,8 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
           workstreamId: ws.id,
           requests: claimRequestsForTask(task, project),
           leaseExpiresAt: leaseUntil,
+          // A worktree batch's areas belong to the batch; hazards stay project-wide.
+          ...(batch?.worktreePath ? { areaScope: batch.id } : {}),
         });
         if (!claimed.ok) return null;
         const f = acquireLease(ctx, ws.id, opts.instanceId, leaseUntil);
@@ -181,23 +211,36 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
     return launched;
   }
 
-  /** The checkout's branch for each pull-request project with queued work, read once per tick. */
-  async function branchSnapshot(): Promise<Map<ProjectId, string | null>> {
-    const repos = new Map<ProjectId, string>();
+  /**
+   * The branch of each checkout with queued pull-request work, read once per tick. A worktree is read only
+   * while its batch is open and cut, so work in a batch still being cut waits without touching disk.
+   */
+  async function branchSnapshot(): Promise<CheckoutSnapshot> {
+    const checkouts = new Set<string>();
+    const missing = new Set<string>();
     for (const ws of listWorkstreams(db, { states: [WorkstreamState.Queued] })) {
       const project = getProject(db, ws.projectId);
-      if (project.delivery === Delivery.PullRequest) repos.set(project.id, project.repoPath);
+      if (project.delivery !== Delivery.PullRequest) continue;
+      const batch = ws.batchId ? getBatch(db, ws.batchId) : null;
+      if (batch?.worktreePath == null) {
+        checkouts.add(project.repoPath);
+        continue;
+      }
+      if (batch.state !== BatchState.Open || batch.branch === null || batch.baseSha === null)
+        continue;
+      if (existsAsEntry(batch.worktreePath)) checkouts.add(batch.worktreePath);
+      else missing.add(batch.worktreePath);
     }
-    const out = new Map<ProjectId, string | null>();
-    for (const [id, repo] of repos) {
+    const branches = new Map<string, string | null>();
+    for (const path of checkouts) {
       try {
-        out.set(id, await opts.branches.currentBranch(repo));
+        branches.set(path, await opts.branches.currentBranch(path));
       } catch (error) {
         // A checkout git refuses has a card of its own: its work waits, with no wrong-branch card.
-        if (!(error instanceof GitTrustError)) out.set(id, null);
+        if (!(error instanceof GitTrustError)) branches.set(path, null);
       }
     }
-    return out;
+    return { branches, missing };
   }
 
   let chain: Promise<unknown> = Promise.resolve();

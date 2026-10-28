@@ -54,6 +54,7 @@ import {
   createDeliveryJobs,
   createShipper,
   DEFAULT_DELIVERY_LIMITS,
+  flagWorktreeMissing,
   flagWrongBranch,
   recoverBatches,
   subscribeShipTrigger,
@@ -576,8 +577,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     leaseMs: opts.leaseMs ?? DEFAULTS.leaseMs,
     tickMs: opts.tickMs ?? DEFAULTS.tickMs,
     branches: git,
-    onWrongBranch: (batch, current, repoPath) => {
-      flagWrongBranch(inbox, batch, current, repoPath);
+    onWrongBranch: (batch, current, checkout) => {
+      flagWrongBranch(inbox, batch, current, checkout);
+    },
+    onWorktreeMissing: (batch, path) => {
+      flagWorktreeMissing(inbox, batch, path);
     },
   });
   scheduler = createdScheduler;

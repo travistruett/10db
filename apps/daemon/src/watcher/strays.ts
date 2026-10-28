@@ -1,4 +1,4 @@
-import { ClaimKind, type ProjectDto, type ProjectId, type WorkstreamId } from '@10db/contracts';
+import { ClaimKind, type ProjectDto, type WorkstreamId } from '@10db/contracts';
 import { classifyPath } from '../guard';
 
 /** More strays than this in one batch become a single card. */
@@ -38,16 +38,17 @@ export function isAlwaysIgnored(rel: string): boolean {
   return inGitDir && !isSensitivePath(rel);
 }
 
-export function strayFoldKey(projectId: ProjectId, rel: string): string {
-  return `stray-write:${projectId}:${rel}`;
+/** `scope` is the project's id in a shared checkout and the batch's id in a worktree. */
+export function strayFoldKey(scope: string, rel: string): string {
+  return `stray-write:${scope}:${rel}`;
 }
 
-export function bulkFoldKey(projectId: ProjectId): string {
-  return `stray-write:${projectId}:bulk`;
+export function bulkFoldKey(scope: string): string {
+  return `stray-write:${scope}:bulk`;
 }
 
-export function foreignBulkFoldKey(projectId: ProjectId): string {
-  return `stray-write:${projectId}:bulk-foreign`;
+export function foreignBulkFoldKey(scope: string): string {
+  return `stray-write:${scope}:bulk-foreign`;
 }
 
 /** Whether a held claim covers the path: one of its areas or hazards is held. */
