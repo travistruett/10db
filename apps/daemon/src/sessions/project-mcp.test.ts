@@ -359,6 +359,16 @@ describe('the hosts a stdio server may reach (.10db/mcp-hosts.json)', () => {
     ]);
   });
 
+  it('reads the file without a .mcp.json too, so a broken one is never silently ignored', () => {
+    writeHosts({ servers: { mantine: { hosts: ['registry.npmjs.org'] } } });
+    expect(readRepoMcp(repo.path)).toEqual({
+      servers: [],
+      warnings: [expect.stringContaining('names hosts for "mantine"')],
+    });
+    writeHosts('{');
+    expect(readFailure()).toBeInstanceOf(ProjectMcpError);
+  });
+
   it('gives an approved stdio server the hosts on its approval, and only those', () => {
     writeMcp({ mcpServers: { mantine: MANTINE } });
     writeHosts({ servers: { mantine: { hosts: ['registry.npmjs.org'] } } });

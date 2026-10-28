@@ -41,7 +41,7 @@ const assignment = (entry: { name: string; value: string }): string =>
 function shownHost(host: string): string {
   if (!host.startsWith('*.')) return word(host);
   const domain = word(host.slice(2));
-  return `*.${domain} (every subdomain of ${domain})`;
+  return `*.${domain} (every subdomain of ${domain}, not ${domain} itself)`;
 }
 
 /** "a", "a and b", "a, b and c". */

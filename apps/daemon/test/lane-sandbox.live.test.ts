@@ -731,7 +731,12 @@ describe.skipIf(!live)('lane sandbox, live', () => {
         extraEnv: { GH_TOKEN: `ghp_${randomUUID()}` },
         probe: () => 'true\n',
         mcpServers: {
-          probe: { command: 'node', args: ['mcp-probe.mjs', canary.path, mark], env: {} },
+          probe: {
+            command: 'node',
+            args: ['mcp-probe.mjs', canary.path, mark],
+            env: {},
+            hosts: [],
+          },
         },
         extraAllowedTools: ['mcp__probe__check'],
         prompt: [

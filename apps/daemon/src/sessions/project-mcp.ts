@@ -269,9 +269,9 @@ function strayHosts(
 export function readRepoMcp(repoPath: string): RepoMcp {
   const path = join(repoPath, PROJECT_MCP_FILE);
   const text = readMcpFile(path);
-  if (text === null) return { servers: [], warnings: [] };
-  const file = parseMcpFile(path, text);
   const hosts = readHosts(repoPath);
+  if (text === null) return { servers: [], warnings: strayHosts(hosts, []) };
+  const file = parseMcpFile(path, text);
   const servers: RepoMcpServer[] = [];
   const warnings: string[] = [];
   for (const [name, declared] of Object.entries(file.mcpServers)) {

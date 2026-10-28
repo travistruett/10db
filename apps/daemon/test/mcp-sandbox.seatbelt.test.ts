@@ -46,6 +46,30 @@ const reach = (port, host) => new Promise((resolve) => {
   socket.on('connect', () => { socket.destroy(); resolve('ok'); });
   socket.on('error', () => resolve('denied'));
 });
+// A CONNECT through srt's proxy, as any proxy-aware client sends it. "denied" is srt's allowlist
+// refusal; "ok" is any other answer, a failed lookup of an .invalid name included: the policy let it by.
+const through = (host) => new Promise((resolve) => {
+  const raw = process.env.HTTPS_PROXY;
+  if (raw === undefined || raw === '') return resolve('no proxy');
+  const proxy = new URL(raw);
+  const user = decodeURIComponent(proxy.username);
+  const auth = user === '' ? '' :
+    'Proxy-Authorization: Basic ' + Buffer.from(user + ':' + decodeURIComponent(proxy.password)).toString('base64') + '\\r\\n';
+  const socket = connect(Number(proxy.port), proxy.hostname);
+  let head = '';
+  const done = (result) => { socket.destroy(); resolve(result); };
+  socket.setTimeout(15000, () => done('timeout'));
+  socket.on('connect', () => socket.write('CONNECT ' + host + ':443 HTTP/1.1\\r\\nHost: ' + host + ':443\\r\\n' + auth + '\\r\\n'));
+  socket.on('data', (chunk) => {
+    head += chunk;
+    if (!head.includes('\\r\\n')) return;
+    const status = head.split('\\r\\n')[0];
+    if (head.includes('blocked-by-allowlist')) return done('denied');
+    done(/ 407 /.test(status) ? status : 'ok');
+  });
+  socket.on('error', (error) => done('error: ' + error.code));
+  socket.on('close', () => done(head === '' ? 'closed' : head.split('\\r\\n')[0]));
+});
 // The test names sealed files only once the sandbox has made them, so they come with the request.
 const probes = async (files) => ({
   'home-canary': attempt(() => readFileSync(canary)),
@@ -65,6 +89,10 @@ const probes = async (files) => ({
   'write-temp': attempt(() => writeFileSync(join(process.env.TMPDIR, 'inside'), 'x')),
   'approved-env': process.env.PROBE_APPROVED === 'yes' ? 'ok' : 'denied',
   'own-env-file': attempt(() => readFileSync(files.ownEnv)),
+  'proxy-approved': await through('approved.invalid'),
+  'proxy-wildcard': await through('a.wild.invalid'),
+  'proxy-wildcard-apex': await through('wild.invalid'),
+  'proxy-other': await through('other.invalid'),
 });
 // Claude Code stops a server with TERM to srt, which passes it on; the mark says it arrived.
 process.on('SIGTERM', () => {
@@ -94,7 +122,8 @@ const InitializeResponse = z.strictObject({
     instructions: z.string(),
   }),
 });
-const Probes = z.record(z.string(), z.enum(['ok', 'denied']));
+/** Each probe's answer: "ok", "denied", or what a proxy probe got instead, to say why it failed. */
+const Probes = z.record(z.string(), z.string());
 
 const listen = (server: Server): Promise<void> =>
   new Promise((resolve, reject) => {
@@ -150,9 +179,23 @@ describe.skipIf(!SEATBELT)('a repo stdio MCP server under the sandbox (Seatbelt)
           command: 'node',
           args: ['probe-server.mjs', canary, homeProbe, join(root, 'outside'), String(webPort)],
           env: { PROBE_APPROVED: 'yes' },
+          // .invalid names never resolve, so the proxy answers the same online or off.
+          hosts: ['approved.invalid', '*.wild.invalid'],
+        },
+        // The same probe, approved with no host.
+        bare: {
+          command: 'node',
+          args: ['probe-server.mjs', canary, homeProbe, join(root, 'outside'), String(webPort)],
+          env: {},
+          hosts: [],
         },
         // Another server, whose sealed env file the probe tries to read.
-        sibling: { command: 'node', args: ['-e', ''], env: { SIBLING_TOKEN: `sib-${token}` } },
+        sibling: {
+          command: 'node',
+          args: ['-e', ''],
+          env: { SIBLING_TOKEN: `sib-${token}` },
+          hosts: [],
+        },
       },
     });
     // It reads the toolchain and walks the checkout, which takes a while on a loaded machine.
@@ -268,9 +311,28 @@ describe.skipIf(!SEATBELT)('a repo stdio MCP server under the sandbox (Seatbelt)
       'write-temp': 'ok',
       'approved-env': 'ok',
       'own-env-file': 'ok',
+      // Its approved hosts, through srt's proxy and nothing else; a wildcard covers subdomains only.
+      'proxy-approved': 'ok',
+      'proxy-wildcard': 'ok',
+      'proxy-wildcard-apex': 'denied',
+      'proxy-other': 'denied',
     });
     expect(existsSync(join(checkout, 'inside'))).toBe(false);
     expect(existsSync(homeProbe)).toBe(false);
+  }, 60_000);
+
+  it('refuses every host to a server approved with none', async () => {
+    const server = session.mcpServers['bare'];
+    if (server === undefined) throw new Error('the lane sandbox made no server');
+    const lines = await initialize(server);
+    const response = InitializeResponse.parse(JSON.parse(lines[0] ?? ''));
+    expect(Probes.parse(JSON.parse(response.result.instructions))).toMatchObject({
+      'other-host': 'denied',
+      loopback: 'denied',
+      'proxy-approved': 'denied',
+      'proxy-wildcard': 'denied',
+      'proxy-other': 'denied',
+    });
   }, 60_000);
 
   it('passes the TERM Claude Code sends srt on to the server', async () => {

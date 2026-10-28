@@ -29,6 +29,23 @@ const ENV_FILE: SealedFileKind = {
   suffix: '.sh',
   what: 'an MCP server env file',
 };
+/**
+ * The variables srt points its child at its proxy with, the only way out to an approved host. The
+ * inner `env -i` keeps them, by name: their URLs hold srt's proxy token, which srt itself puts on
+ * `env`'s command line for the instant before it execs, and this hand-on is no longer than that.
+ */
+const SRT_PROXY_ENV = [
+  'HTTP_PROXY',
+  'HTTPS_PROXY',
+  'http_proxy',
+  'https_proxy',
+  'ALL_PROXY',
+  'all_proxy',
+  'NO_PROXY',
+  'no_proxy',
+  'GRPC_PROXY',
+  'grpc_proxy',
+] as const;
 
 /** A repo stdio server as its approval allows it: command, arguments and approved variables, expanded. */
 export interface StdioMcpServer {
@@ -36,6 +53,8 @@ export interface StdioMcpServer {
   readonly args: readonly string[];
   /** The variables the approval covers, expanded; the sandbox adds the lane allowlist. */
   readonly env: Readonly<Record<string, string>>;
+  /** The hosts the approval names: the only ones its sandbox reaches. */
+  readonly hosts: readonly string[];
 }
 
 /** A command and its arguments, as Claude Code starts a stdio server. */
@@ -93,9 +112,10 @@ export interface McpSandboxes {
 }
 
 /**
- * One server's sandbox: its own temp dir, the only path it writes; the lanes' reads; no host at all,
- * since an approval names none, and no loopback. Its env is the lane allowlist and its approved
- * variables, sourced inside the sandbox from a sealed file, so no value is on a command line. The
+ * One server's sandbox: its own temp dir, the only path it writes; the lanes' reads; the hosts its
+ * approval names and no others, the project's included, and no loopback. Its env is the lane allowlist,
+ * its approved variables and srt's proxy variables; the approved ones are sourced inside the sandbox
+ * from a sealed file, so no approved value is on a command line. The
  * command is srt's own child, so srt's TERM reaches it when Claude Code stops the server; no verdict
  * reads its exit status.
  */
@@ -113,6 +133,8 @@ function sandboxOne(
     ...allowlisted(input.env),
     TMPDIR: tmpDir,
     ...prepareCommandEnv(tmpDir, input.home, input.env),
+    // Node's own fetch takes srt's proxy only when told to; other clients read the proxy variables.
+    NODE_USE_ENV_PROXY: '1',
     ...server.env,
   };
   const envFile = createSealedFile(
@@ -133,7 +155,7 @@ function sandboxOne(
     secretFiles: access.checkoutSecrets,
     toolchainSecrets: access.toolchain.secretFiles,
     toolchainReads: access.toolchain.reads,
-    allowedDomains: [],
+    allowedDomains: server.hosts,
     readList: access.readList,
     extraReads: [envFile, ...access.gitReads],
     extraWrites: [],
@@ -152,7 +174,9 @@ function sandboxOne(
     removeSealedFile(settingsFile, tmpRoot, SETTINGS_FILE);
   });
   const inner = [
-    'exec /usr/bin/env -i /bin/sh -c',
+    'exec /usr/bin/env -i',
+    ...SRT_PROXY_ENV.map((name) => `${name}="$${name}"`),
+    '/bin/sh -c',
     singleQuoted('. "$0" && exec "$@"'),
     singleQuoted(envFile),
     ...[server.command, ...server.args].map(singleQuoted),

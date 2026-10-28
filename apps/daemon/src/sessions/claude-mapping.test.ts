@@ -261,7 +261,12 @@ describe('toSdkMcpServer', () => {
   it.skipIf(SANDBOXED)(
     'hands Claude Code a stdio server only as its sandboxed launch, with no env block',
     async () => {
-      const made = await sandboxedMcpServer({ command: 'npx', args: ['-y', 'x'], env: {} });
+      const made = await sandboxedMcpServer({
+        command: 'npx',
+        args: ['-y', 'x'],
+        env: {},
+        hosts: [],
+      });
       try {
         const config = toSdkMcpServer(made.server);
         // env -i with a system PATH, then srt's host with its sealed settings, then the command inside.
@@ -303,7 +308,12 @@ describe('toSdkMcpServer', () => {
       // @ts-expect-error a stdio server reaches a session only through the lane sandbox
       const plain: SessionMcpServer = unsandboxed;
       expect(toSdkMcpServer(plain)).not.toHaveProperty('command');
-      const made = await sandboxedMcpServer({ command: 'npx', args: ['-y', 'x'], env: {} });
+      const made = await sandboxedMcpServer({
+        command: 'npx',
+        args: ['-y', 'x'],
+        env: {},
+        hosts: [],
+      });
       try {
         // eslint-disable-next-line @typescript-eslint/no-misused-spread -- the copy is the bypass under test
         const copy = { ...made.server, args: ['-c', 'npx -y x'] };

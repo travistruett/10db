@@ -155,7 +155,7 @@ describe('MCP approval cards', () => {
       npx({ hosts: ['*.example.org', 'registry.npmjs.org'] }),
     );
     expect(card.body).toContain(
-      'It runs in a sandbox: it reads what lane commands read, writes only its own temp dir and reaches only *.example.org (every subdomain of example.org) and registry.npmjs.org, never localhost.',
+      'It runs in a sandbox: it reads what lane commands read, writes only its own temp dir and reaches only *.example.org (every subdomain of example.org, not example.org itself) and registry.npmjs.org, never localhost.',
     );
     expect(card.body).toContain(
       'Whatever it is given, an approved token included, can leave only through those hosts.',
@@ -266,8 +266,7 @@ describe('MCP approval cards', () => {
   it('records no host from a card raised before hosts existed', () => {
     const project = seedProject(store);
     // The detail as stored before reviews carried hosts.
-    const older: Record<string, unknown> = { ...npx() };
-    delete older['hosts'];
+    const older = Object.fromEntries(Object.entries(npx()).filter(([key]) => key !== 'hosts'));
     const card = inbox.flag({
       projectId: project.id,
       workstreamId: null,
