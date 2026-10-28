@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDecoyRepo } from './decoy-repo';
 import {
+  buildRepoTemplate,
   createTempClone,
   createTempRepo,
   createTempRepoWithOrigin,
@@ -85,6 +86,53 @@ describe('createTempRepo', () => {
       expect(gitIn(path, 'config', 'user.name')).toBe('10db test');
     } finally {
       repo?.cleanup();
+      decoy.cleanup();
+    }
+  });
+});
+
+describe('createTempRepo copies', () => {
+  it('give each repository its own objects and refs', () => {
+    const first = createTempRepo();
+    const second = createTempRepo();
+    try {
+      gitIn(first.path, 'commit', '-q', '--allow-empty', '-m', 'only in the first');
+      expect(gitIn(first.path, 'rev-list', '--count', 'HEAD')).toBe('2');
+      expect(gitIn(second.path, 'rev-list', '--count', 'HEAD')).toBe('1');
+    } finally {
+      first.cleanup();
+      second.cleanup();
+    }
+  });
+});
+
+describe('buildRepoTemplate', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('builds its own repository when git hook variables point at another one', () => {
+    const decoy = createDecoyRepo();
+    let template: TempDir | undefined;
+    try {
+      const before = decoy.snapshot();
+      for (const [name, value] of Object.entries(decoy.hookVariables)) vi.stubEnv(name, value);
+      let failure: unknown;
+      try {
+        template = buildRepoTemplate();
+      } catch (error) {
+        failure = error;
+      }
+      vi.unstubAllEnvs();
+
+      expect(decoy.snapshot()).toEqual(before);
+      expect(failure).toBeUndefined();
+      const path = template?.path ?? '';
+      expect(gitIn(path, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('main');
+      expect(gitIn(path, 'rev-list', '--count', 'HEAD')).toBe('1');
+      expect(gitIn(path, 'config', 'maintenance.auto')).toBe('false');
+    } finally {
+      template?.cleanup();
       decoy.cleanup();
     }
   });
