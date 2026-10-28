@@ -6,6 +6,10 @@ serves agents over MCP, and runs Claude Code sessions.
 - `src/env.ts` is the only module that parses or validates environment variables; `src/main.ts`
   hands it `process.env`. Every variable is in `.env.example` with a comment. Errors name variables
   and problems, never values.
+- `TENDB_BENCHMARKS=off` keeps a daemon from reading the Artificial Analysis key and from calling AA
+  (`aaKeyReaderFromEnv`: the sync records `no_key`). Only the installed app's daemon syncs; the e2e web
+  server, the live acceptance daemon and `scripts/dev.sh` set it, and `tests/repo/src/benchmarks-off.test.ts`
+  checks they do. A new launcher of a throwaway daemon sets it too.
 - `src/api/` is typechecked by the desktop app too (it imports `AppType`). Code there must not import
   `node:*` modules or `@10db/db`; receive services through the `ApiServices` interface (passed in `ApiDeps`).
 - The package entry (`src/index.ts`) exports types only.

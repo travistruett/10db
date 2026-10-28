@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { loadEnv } from '../env';
-import { daemonOptionsFromEnv } from './options-from-env';
+import { aaKeyReaderFromEnv, daemonOptionsFromEnv } from './options-from-env';
 
 describe('daemonOptionsFromEnv', () => {
   it('sandboxes every lane of a daemon that runs real Claude Code sessions', () => {
@@ -49,4 +49,21 @@ describe('daemonOptionsFromEnv', () => {
     );
     expect(daemonOptionsFromEnv(loadEnv({}))).not.toHaveProperty('worktreeRoot');
   });
+
+  it.each([
+    ['absent', {}, 'real-key'],
+    ['on', { TENDB_BENCHMARKS: 'on' }, 'real-key'],
+    ['off', { TENDB_BENCHMARKS: 'off' }, null],
+  ])(
+    'reads the benchmark key from the keychain when TENDB_BENCHMARKS is %s',
+    (_name, source, expected) => {
+      let reads = 0;
+      const reader = aaKeyReaderFromEnv(loadEnv(source), () => {
+        reads += 1;
+        return 'real-key';
+      });
+      expect(reader()).toBe(expected);
+      expect(reads).toBe(expected === null ? 0 : 1);
+    },
+  );
 });

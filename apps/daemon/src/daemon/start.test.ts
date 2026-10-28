@@ -45,10 +45,17 @@ import {
   waitForAsync,
 } from '../../test/fixtures';
 import { ManualClock } from '../clock';
+import { loadEnv } from '../env';
 import type { ResolvedTools } from '../environment';
 import type { CaffeinateSpawner } from '../keep-awake';
 import { FakeAdapter, type FakeScriptBook, type SessionSpec } from '../sessions';
-import { AlreadyRunningError, readRuntimeInfo, startDaemon, type RunningDaemon } from './index';
+import {
+  AlreadyRunningError,
+  aaKeyReaderFromEnv,
+  readRuntimeInfo,
+  startDaemon,
+  type RunningDaemon,
+} from './index';
 import { WorktreeRootError, worktreeRootFor } from './worktree-root';
 
 /** No real caffeinate and no file watcher in daemon tests that are not about them. */
@@ -826,6 +833,41 @@ describe('startDaemon', () => {
     expect(await api.get('/benchmarks/status', BenchmarkStatusDto)).toMatchObject({
       outcome: 'ok',
     });
+  });
+
+  it('with TENDB_BENCHMARKS=off never reads the benchmark key and makes no Artificial Analysis request', async () => {
+    let keyReads = 0;
+    const requests: string[] = [];
+    daemon = await startDaemon({
+      sandbox: null,
+      dataDir: dir.path,
+      port: 0,
+      adapter: new FakeAdapter({}),
+      logLevel: 'warn',
+      ...QUIET,
+      aaKey: aaKeyReaderFromEnv(loadEnv({ TENDB_BENCHMARKS: 'off' }), () => {
+        keyReads += 1;
+        return 'aa-test-key';
+      }),
+      fetch: (input) => {
+        requests.push(
+          typeof input === 'string' ? input : input instanceof URL ? input.href : input.url,
+        );
+        return Promise.reject(new Error('no request expected'));
+      },
+    });
+    const api = apiClient(daemon.url, daemon.token);
+    await waitForAsync(async () =>
+      (await api.get('/benchmarks/status', BenchmarkStatusDto)).outcome === 'no_key'
+        ? true
+        : undefined,
+    );
+    expect(await api.get('/benchmarks/status', BenchmarkStatusDto)).toMatchObject({
+      keyConfigured: false,
+      outcome: 'no_key',
+    });
+    expect(keyReads).toBe(0);
+    expect(requests).toEqual([]);
   });
 
   it('seeds the team, reports no AA key, plans on hand-set scores, and refuses an over-budget start', async () => {

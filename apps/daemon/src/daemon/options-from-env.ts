@@ -8,6 +8,14 @@ export type EnvDaemonOptions = Pick<
 >;
 
 /**
+ * The reader the benchmark sync gets for the Artificial Analysis key. With `TENDB_BENCHMARKS=off` it
+ * never calls `read`, so the sync records `no_key` and makes no request.
+ */
+export function aaKeyReaderFromEnv(env: DaemonEnv, read: () => string | null): () => string | null {
+  return env.TENDB_BENCHMARKS === 'off' ? () => null : read;
+}
+
+/**
  * Every real lane and gate runs under the sandbox, and nothing in the environment turns it off. Fake
  * sessions (`TENDB_FAKE_SCRIPTS`) run no commands and write nothing a gate runs, so they and their
  * gates run without it.
