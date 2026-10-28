@@ -2,18 +2,18 @@
 
 - **Status:** Locked
 - **Scope:** How finished work leaves the machine: `local` delivery, and `pull_request` delivery with one branch and one pull request per batch.
-- **Summary:** The design is `docs/superpowers/specs/2026-10-21-10db-batch-delivery-design.md`; its decisions and the plan's are rows 78–86 of `decisions.md`. Changes are new rows that name what they supersede.
+- **Summary:** The design is `docs/superpowers/specs/2026-10-21-10db-batch-delivery-design.md`; its decisions and the plan's are rows 78–86 of `decisions.md`. Changes are new rows that name what they supersede. Worktree mode (**built**) is `docs/superpowers/specs/2026-10-27-10db-worktree-mode-design.md`, with its decisions in `decisions/2026-10-27-worktree-*.md`; the sections above describe shared mode, and the one below what differs.
 
 ## Where it lives
 
-| Module                                         | Job                                                                                                                                    |
-| ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/db` `batches`                        | one row per batch; a partial unique index allows one unfinished batch (`CUTTING`, `OPEN`, `SHIPPING`, `FAILED`) per project            |
-| `apps/daemon/src/delivery/`                    | starting (cut, join, dependency checks), shipping, the ship trigger, Ship anyway, Retry, Abandon, the launch rule and startup recovery |
-| `apps/daemon/src/git/`                         | `currentBranch`, `remoteUrl`, `fetch`, `switchNewBranch`, `push`                                                                       |
-| `apps/daemon/src/github/`                      | the `Gh` interface over the `gh` CLI                                                                                                   |
-| `apps/daemon/src/guard/`                       | agents never push in `pull_request` projects, and run only an allowlist of read-only `gh` commands                                     |
-| `apps/desktop/src/views/board/batch-strip.tsx` | the batch strip on the board; Settings' General form and the new-project form hold the delivery fields                                 |
+| Module                                         | Job                                                                                                                                                                                     |
+| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/db` `batches`                        | one row per batch; a partial unique index allows one unfinished batch (`CUTTING`, `OPEN`, `SHIPPING`, `FAILED`) per project                                                             |
+| `apps/daemon/src/delivery/`                    | starting (cut, join, dependency checks), shipping, the ship trigger, Ship anyway, Retry, Abandon, the launch rule, startup recovery, and worktree mode (`worktree-*.ts`, `checkout.ts`) |
+| `apps/daemon/src/git/`                         | `currentBranch`, `remoteUrl`, `fetch`, `switchNewBranch`, `push`                                                                                                                        |
+| `apps/daemon/src/github/`                      | the `Gh` interface over the `gh` CLI                                                                                                                                                    |
+| `apps/daemon/src/guard/`                       | agents never push in `pull_request` projects, and run only an allowlist of read-only `gh` commands                                                                                      |
+| `apps/desktop/src/views/board/batch-strip.tsx` | the batch strip on the board; Settings' General form and the new-project form hold the delivery fields                                                                                  |
 
 Settings shows the base branch and the PR title prefix in either delivery, because it checks both fields whatever the delivery and an error must never be hidden; the new-project form shows them only for pull requests.
 
@@ -43,6 +43,19 @@ At startup, after workstream recovery and before the scheduler starts:
 - An orphaned shipping gate is killed by its pid and start time.
 - An `OPEN` or `SHIPPING` batch whose branch is not checked out fails with a wrong-branch card.
 - A `SHIPPING` batch re-runs shipping from the first step, and an `OPEN` batch whose members all settled ships.
+
+## Worktree mode
+
+**Built.** A `pull_request` project with `workspace_mode = worktree` gives each started task its own git worktree and branch, cut from `origin/<base branch>`, and ships it alone as its own pull request. The project's shared mode is unchanged. Decisions: `decisions/2026-10-27-worktree-mode-per-project.md` and its siblings named below.
+
+- **The mode.** `projects.workspace_mode` (`shared` or `worktree`) changes only while the project has no unfinished batch; `worktree` needs `pull_request` delivery. A batch is one task, or one dependency-linked group, with `batches.worktree_path` set; the unique index allows one unfinished shared batch or any number of worktree batches. A start of several tasks makes a batch per task, grouping tasks linked by a dependency (`delivery/grouping.ts`); a task start never joins, and a fix task is added with `batchId` to an `OPEN` or `FAILED` batch. Starting while another batch is `CUTTING` or `SHIPPING` is allowed. Every group's request-time checks pass before any group is inserted, and each group's `CUTTING` row and its `QUEUED` workstreams are inserted together, so a second start of the same task is refused while its cut runs.
+- **Where worktrees live.** `<base>/<8 hex of the data dir's hash>/<project slug>-<6 hex>/<branch leaf>`, under `~/.10db/worktrees` or `TENDB_WORKTREE_ROOT` (`decisions/2026-10-27-worktree-root.md`). The root is refused when it overlaps a checkout, the data dir or the lane temp root.
+- **The cut** (`delivery/worktree-cut.ts`), each refusal deleting the `CUTTING` row and removing what was made: `origin` exists and its push URL matches the pin and names a GitHub repo; a fetch of the base branch; `gh` installed and signed in; dependencies merged on the base; the base tree uses no filters; nothing exists at the worktree path. Not checked: lanes running in the project, the main checkout's branch or cleanliness. Then the branch (`update-ref`), `worktree add --no-checkout --lock`, the pin, `read-tree -m -u`, the seed copy of ignored directories by clone (`worktree-seed.ts`), and one transaction that sets `branch`, `base_sha` and `repo` and moves to `OPEN` (`decisions/2026-10-27-worktree-creation-and-pin.md`, `worktree-seed-by-clone.md`). A worktree is never refreshed from the base (`worktree-never-rebased.md`).
+- **`checkoutOf`.** `delivery/checkout.ts` answers where a workstream works: its batch's worktree, else the project's checkout. The launch rule holds work until the batch is `OPEN` with `branch` and `base_sha` set and the worktree exists, is pinned and is on the branch; a missing worktree is one folded card naming the path (`worktree-checkout-of.md`). Area claims are scoped to the batch, hazards to the project (`worktree-claims-scope.md`).
+- **Two queues.** Per project, cuts, joins and reopens run one at a time in one queue, ships and cleanup in another, and lanes run in parallel (`worktree-delivery-queues.md`).
+- **Ship and after ship.** The shipping steps run with the worktree as the checkout: step 0, the commit count, the gate and the PR template read it, and the push runs in the main checkout. The template is read from the shipped commit through git, and a link or a file over 64 KiB is no template, in both modes (`pr-template-from-commit.md`). `SHIPPED` and `CLOSED` remove the worktree after recording the state and clear `worktree_path`; `CLOSED` deletes its branch while the tip is still `base_sha`.
+- **Retry and Abandon.** Retry of a `FAILED` batch first makes its worktree whole (kept if present, pinned, on the branch and holding an `index`; otherwise rebuilt from the existing branch) in a cut-queue job, then reopens it; a worktree with uncommitted changes on another branch is never replaced, a card names it instead. Abandon removes a clean worktree and keeps one with uncommitted changes, with a card naming the path.
+- **Recovery and the sweep.** At startup a `CUTTING` worktree batch has its worktree removed if git lists it (an unlisted directory only when empty) before its row and pin are deleted; an `OPEN` or `SHIPPING` batch whose worktree is missing, unpinned or on another branch fails with a card naming the path; a finished batch whose `worktree_path` is still set has its removal re-run. The sweep removes only worktrees under this daemon's hashed level locked `10db bat_...` whose batch is gone or cleared, then prunes (`worktree-removal-and-sweep.md`).
 
 ## Guard
 

@@ -53,7 +53,14 @@
 - [ ] AA: a real sync confirmed the free API's slugs and its `page` query parameter match the catalogue's and the client's. Still open: AA's index versions may shift scores between syncs, and 10db's needs and floors are absolute index points. The status flags a major-version change (AA says scores are comparable within a major version); patch versions aren't reported, so they can't be detected. AA's free API gives no Coding or Agentic Index for some models; those roles route on Intelligence (decision 66) until it does. The sync status lists the profiles routing can't use (`unmeasuredProfiles`) and the score kinds missing from the rest (`missingScores`).
 - [ ] M2a read-only shell: a read-only step's shell accepts only plain words and simple quoting, so unquoted globs, ~, $, braces and backslashes are refused (quote them), and so is any `=` at the start of a word or right after `=` or `:`, quoted or not (for example `'==='` or `'a:=b'`), so reviewers use the Grep tool for those. Revisit if real reviews hit it.
 - [ ] M2a read-only shell: aliases and functions in the user's shell configuration can rewrite plain words, which the read-only grammar cannot see; check whether Claude Code's Bash tool loads them.
-- [ ] Batch delivery: worktrees and one PR per task (workspace_mode = worktree), the spec's expected fast-follow (batch delivery spec §9).
+- [x] Batch delivery: worktrees and one PR per task (workspace_mode = worktree), the spec's expected fast-follow (batch delivery spec §9). Built: `docs/superpowers/specs/2026-10-27-10db-worktree-mode-design.md`, `docs/architecture/02-batch-delivery.md`.
+- [ ] Worktree mode: a port block per worktree (hazards still serialize the shared ports, spec §11).
+- [ ] Worktree mode: a setup command run in the lane sandbox, so a worktree whose lockfile is newer than the main checkout's install can install without the builder.
+- [ ] Worktree mode: seeding ignored files such as `.env`; `worktree_seed` names directories only.
+- [ ] Worktree mode: parallel ships behind a limit (one ship runs at a time per project now).
+- [ ] Worktree mode: rebasing or updating an unmerged pull request (a worktree is cut once and never refreshed).
+- [ ] Worktree mode: a per-task mode choice, and dropping the unused `tasks.workspace_mode` column.
+- [ ] Worktree mode: a `WorktreeRootError` at start (a bad `TENDB_WORKTREE_ROOT`, or a checkout containing `~/.10db`) is not mapped to a stop-restart exit code, so the desktop supervisor restarts into it.
 - [ ] Batch delivery: an after-ship action per batch or task (auto_merge with gh pr merge --auto --squash, or a project deploy command), spec §9.
 - [ ] Batch delivery: stacked batches, rebasing or updating an unmerged PR, and hosts other than GitHub (spec §9).
 - [ ] Batch delivery: agents' gh api is GET only, so read-only GraphQL queries (always POST) are denied too; allow them if a persona needs them.

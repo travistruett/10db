@@ -547,6 +547,17 @@ Under the lane sandbox (**built**), the design column holds for a lane's Bash:
   push, and every batch is scanned for secrets first (R12).
 - **The boundary** for what reaches `main` is pull request review and the builder's merge.
 
+### 4.10 A worktree is one more checkout
+
+**Built.** In a worktree-mode project (`decisions/2026-10-27-worktree-lane-sandbox.md`) a batch's lanes, gate and MCP servers run in a git worktree under the daemon's worktree root. No rule above changes; the worktree is a checkout the existing rules already describe.
+
+- **Its pin is made at creation and keyed by batch.** The daemon makes the worktree, so nothing is pinned on first use: the new worktree's git dir must lie under the project's pinned common dir and its common dir must be the project's, by device and inode, before any lane exists. The pin is stored as `checkout_pin.<batch id>` and found by the batch's `worktree_path`. A path at or under the root with no pin is refused with `GitTrustFailure.Unpinned`, so a directory someone else put there never gets a git call.
+- **The root is lane-writable for config trust.** The hashed worktree root is among the lane-writable roots, so a config file or local origin inside a worktree counts as one a lane could have written (`laneWritableRoots`). A worktree's `.git` is a file, so no exemption for a `.git` directory applies to it.
+- **The profile a worktree lane gets** is the one a lane of any checkout gets with the worktree as its checkout: the main checkout and every sibling worktree are other registered checkouts, read-only as a whole; the worktree's own git dir, its gitfile and the common dir are read-only (decisions 130 and 131). Every live worktree (a batch with `worktree_path` set) joins the checkouts handed to the lane, gate and MCP sandboxes.
+- **The seed copy** (`delivery/worktree-seed.ts`) reads the main checkout, which no worktree lane can write, copies links as links without following them, skips FIFOs, sockets and devices, refuses to leave the worktree through a link, and runs nothing. A seed name is a directory name, checked when saved.
+- **Removal** touches only a directory under the root that git lists as the project's worktree and that carries a `10db ` lock reason, and never one with uncommitted changes (`decisions/2026-10-27-worktree-removal-and-sweep.md`).
+- **The pull request template** is read from the shipped commit through git, not from the checkout (`decisions/2026-10-27-pr-template-from-commit.md`).
+
 ## 5. What the daemon reads, runs or sends for a lane
 
 | Surface                                                                                                            | Worst outcome today                                                                                                                                                                                                                                                           | Protection today                                                                                                      | Design        |
