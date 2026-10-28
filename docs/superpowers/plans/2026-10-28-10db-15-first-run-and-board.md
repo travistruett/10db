@@ -400,7 +400,7 @@ This plan was written against `main` at `b2e20d1` plus the spec. Where a file, s
 
 - [ ] **Step 1: Write the failing test** with the plugin's `open` mocked at the module boundary: `returns the picked path`; `returns null on cancel`; `canChooseFolder is false outside Tauri`.
 - [ ] **Step 2: Run** → FAIL.
-- [ ] **Step 3: Implement.** Pick the npm and crate versions: the latest stable at least as old as the repo's supply-chain minimum age (`pnpm-workspace.yaml` or `.npmrc` names it); the npm and Rust versions must match. If that isn't the latest, write `docs/architecture/decisions/2026-10-28-dialog-plugin-pin.md` saying why.
+- [ ] **Step 3: Implement.** Pick the npm and crate versions: the latest stable at least as old as the repo's supply-chain minimum age (`pnpm-workspace.yaml` or `.npmrc` names it); the npm and Rust versions must match. If that isn't the latest, write a new decision file in `docs/architecture/decisions/` (slug `dialog-plugin-pin`) saying why.
 - [ ] **Step 4: Run** desktop tests and `make rust-check` → PASS.
 - [ ] **Step 5: Commit** `feat(desktop): choose a project folder in the native panel`.
 
@@ -530,9 +530,9 @@ Starts after PR 1 and queue task 0 have merged.
 
 ### Task 24: Docs
 
-**Files (PR 1):** `apps/desktop/AGENTS.md` (the board: whole-card drag, Space and Enter, the drawer; the first run and `views/project-setup/`; Settings' sidebar and `setting-row.tsx`; e2e seeds its project through the API), `apps/daemon/AGENTS.md` (`folders/`; inspection never pins or raises cards), `docs/architecture/03-trust-boundaries.md` (inspection's reads and the residual: the repository proposes the gate command, the builder accepts it, it runs only under the gate sandbox), `docs/open-items.md` (spec §13's items), a decision file `docs/architecture/decisions/2026-10-28-folder-inspection.md` (F3, F4).
+**Files (PR 1):** `apps/desktop/AGENTS.md` (the board: whole-card drag, Space and Enter, the drawer; the first run and `views/project-setup/`; Settings' sidebar and `setting-row.tsx`; e2e seeds its project through the API), `apps/daemon/AGENTS.md` (`folders/`; inspection never pins or raises cards), `docs/architecture/03-trust-boundaries.md` (inspection's reads and the residual: the repository proposes the gate command, the builder accepts it, it runs only under the gate sandbox), `docs/open-items.md` (spec §13's items), a new decision file in `docs/architecture/decisions/` (slug `folder-inspection`; F3, F4).
 
-**Files (PR 2):** `docs/architecture/01-factory-loop.md` (the check wait in the lifecycle), `docs/architecture/02-batch-delivery.md` (ship without a gate), a decision file `docs/architecture/decisions/2026-10-28-optional-gate.md` (F5, F6, citing the spec's open question 2).
+**Files (PR 2):** `docs/architecture/01-factory-loop.md` (the check wait in the lifecycle), `docs/architecture/02-batch-delivery.md` (ship without a gate), a new decision file in `docs/architecture/decisions/` (slug `optional-gate`; F5, F6, citing the spec's open question 2).
 
 - [ ] **Step 1:** Write each, citing decisions by path.
 - [ ] **Step 2: Run** `make gate` → `GATE PASS` (the repo tests check cited decision files exist).
