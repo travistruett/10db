@@ -51,7 +51,7 @@ const add = (name: string, branch = `10db/${name}`, startPoint: string | null = 
     path: at(name),
     branch,
     startPoint,
-    lockReason: '10db bat_test',
+    lockReason: '10db bat_0a1',
   });
 const listed = async () => (await git.listWorktrees(main())).map((e) => e.path);
 
@@ -80,7 +80,7 @@ describe('addWorktree', () => {
     const head = await add('a', '10db/a-1');
     expect(head).toBe(raw(main(), 'rev-parse', 'main'));
     const entry = (await git.listWorktrees(main())).find((e) => e.path === real(at('a')));
-    expect(entry?.locked).toBe('10db bat_test');
+    expect(entry?.locked).toBe('10db bat_0a1');
     expect(entry?.branch).toBe('10db/a-1');
     expect(await git.currentBranch(at('a'))).toBe('10db/a-1');
     expect(readFileSync(join(at('a'), 'README.md'), 'utf8')).toBe('# fixture\n');
@@ -99,6 +99,19 @@ describe('addWorktree', () => {
     await expect(add('a', 'dup')).rejects.toBeInstanceOf(InvalidError);
     expect(await listed()).toEqual([real(main())]);
     expect(existsSync(at('a'))).toBe(false);
+  });
+
+  it('creates nothing when the path and its missing parent lie outside the root', async () => {
+    await expect(
+      git.addWorktree({
+        repo: main(),
+        path: join(elsewhere.path, 'missing', 'deeper', 'a'),
+        branch: 'b',
+        startPoint: 'main',
+        lockReason: '10db bat_0a1',
+      }),
+    ).rejects.toBeInstanceOf(InvalidError);
+    expect(existsSync(join(elsewhere.path, 'missing'))).toBe(false);
   });
 
   it('refuses a missing branch when no start point is given', async () => {
@@ -120,7 +133,7 @@ describe('addWorktree', () => {
         path: join(elsewhere.path, 'a'),
         branch: 'b',
         startPoint: 'main',
-        lockReason: '10db bat_test',
+        lockReason: '10db bat_0a1',
       }),
     ).rejects.toBeInstanceOf(InvalidError);
     expect(raw(main(), 'branch', '--list', 'b')).toBe('');
@@ -140,7 +153,7 @@ describe('a path under the worktree root', () => {
     raw(main(), 'worktree', 'add', '-q', '-b', 'foreign', join(root.path, 'foreign'));
     const error = await git.currentBranch(join(root.path, 'foreign')).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(GitTrustError);
-    expect((error as GitTrustError).detail.kind).toBe(GitTrustFailure.Unpinned);
+    expect(error).toMatchObject({ detail: { kind: GitTrustFailure.Unpinned } });
     expect(refused.map((e) => e.detail.kind)).toEqual([GitTrustFailure.Unpinned]);
   });
 
@@ -151,7 +164,7 @@ describe('a path under the worktree root', () => {
     writeFileSync(join(at('a'), '.git'), bGitfile);
     const error = await git.currentBranch(at('a')).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(GitTrustError);
-    expect((error as GitTrustError).detail.kind).toBe(GitTrustFailure.Moved);
+    expect(error).toMatchObject({ detail: { kind: GitTrustFailure.Moved } });
   });
 });
 
@@ -210,10 +223,29 @@ describe('removeWorktree', () => {
     expect(existsSync(join(at('a'), 'README.md'))).toBe(true);
   });
 
-  it('refuses the root itself', async () => {
-    await expect(git.removeWorktree(main(), root.path)).rejects.toBeInstanceOf(
+  it('refuses the root itself, even when it is a locked worktree and named by its real path', async () => {
+    raw(
+      main(),
+      'worktree',
+      'add',
+      '-q',
+      '--lock',
+      '--reason',
+      '10db bat_root',
+      '-b',
+      'r',
+      root.path,
+    );
+    await expect(git.removeWorktree(main(), real(root.path))).rejects.toBeInstanceOf(
       WorktreeNotOursError,
     );
+    expect(await listed()).toContain(real(root.path));
+  });
+
+  it("refuses a lock that isn't a 10db batch's", async () => {
+    raw(main(), 'worktree', 'add', '-q', '--lock', '--reason', '10db nothing', '-b', 'l', at('l'));
+    await expect(git.removeWorktree(main(), at('l'))).rejects.toBeInstanceOf(WorktreeNotOursError);
+    expect(await listed()).toContain(real(at('l')));
   });
 
   it('refuses when no worktree root is configured', async () => {

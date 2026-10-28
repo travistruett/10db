@@ -17,7 +17,7 @@ import { localRemotePath, parseRemoteUrl } from './remote-url';
 import { GitError, runGit, type RunOptions } from './run';
 import { GitTrustError, GitTrustFailure, type GitTrustDetail } from './trust-error';
 import { embeddedRepository, GitMode, isGitComponent } from './worktree-files';
-import { parseWorktreeList, WORKTREE_LOCK_PREFIX, type WorktreeEntry } from './worktree-list';
+import { lockedBatchId, parseWorktreeList, type WorktreeEntry } from './worktree-list';
 
 const OP_TRAILER = '10db-Op';
 const OP_SEARCH_DEPTH = 200;
@@ -845,12 +845,31 @@ export function createGit(opts: GitOptions = {}): Git {
     }
   }
 
+  /** `path` with its nearest existing ancestor read through links, so a missing tail still compares. */
+  function realisticPath(path: string): string {
+    let head = resolve(path);
+    const tail: string[] = [];
+    for (;;) {
+      try {
+        return join(realpathSync(head), ...tail);
+      } catch {
+        const parent = dirname(head);
+        if (parent === head) return resolve(path);
+        tail.unshift(basename(head));
+        head = parent;
+      }
+    }
+  }
+
   async function addWorktree(input: AddWorktreeInput): Promise<string> {
     const root = opts.worktreeRoot;
     if (!root) throw new InvalidError('No worktree root is configured');
     return withRepoLock(realpathSync(input.repo), async () => {
       const main = await pinned(input.repo);
       if (entryExists(input.path)) throw new InvalidError(`${input.path} already exists`);
+      // Checked before anything is created, so a parent outside the root is never made.
+      if (!equalOrUnder(realisticPath(dirname(input.path)), realisticPath(root)))
+        throw new InvalidError(`${input.path} is not under 10db's worktree root`);
       mkdirSync(dirname(input.path), { recursive: true, mode: 0o700 });
       const target = join(realpathSync(dirname(input.path)), basename(input.path));
       if (!surelyInside(dirname(target), root))
@@ -873,6 +892,7 @@ export function createGit(opts: GitOptions = {}): Git {
       } else if ((await revParse(main, `${ref}^{commit}`)) === null) {
         throw new InvalidError(`Branch ${input.branch} does not exist`);
       }
+      let added = false;
       try {
         // No checkout: no file is written and no post-checkout hook runs; read-tree fills it.
         await git(main, [
@@ -886,6 +906,7 @@ export function createGit(opts: GitOptions = {}): Git {
           target,
           input.branch,
         ]);
+        added = true;
         const gitDir = readGitfile(target);
         if (!surelyInside(gitDir, join(main.dirs.commonDir, 'worktrees')))
           throw new InvalidError(
@@ -928,10 +949,12 @@ export function createGit(opts: GitOptions = {}): Git {
         return head;
       } catch (error) {
         // Leave nothing behind: the entry, its directory, its pin and a branch this call made.
-        await git(main, ['worktree', 'remove', '--force', '--force', '--', target]).catch(
-          () => undefined,
-        );
-        rmSync(target, { recursive: true, force: true });
+        if (added) {
+          await git(main, ['worktree', 'remove', '--force', '--force', '--', target]).catch(
+            () => undefined,
+          );
+          rmSync(target, { recursive: true, force: true });
+        }
         pins.delete(target);
         if (made !== null) await git(main, ['update-ref', '-d', ref, made]).catch(() => undefined);
         throw error;
@@ -963,7 +986,7 @@ export function createGit(opts: GitOptions = {}): Git {
         inside = false;
       }
     }
-    if (!inside || samePath(target, root))
+    if (!inside || samePath(target, realisticPath(root)))
       throw new WorktreeNotOursError(path, "it is not under 10db's worktree root");
     if (present && !present.isDirectory())
       throw new WorktreeNotOursError(path, 'it is a link or a file, not a worktree directory');
@@ -982,7 +1005,7 @@ export function createGit(opts: GitOptions = {}): Git {
         pins.delete(target);
         return 'absent';
       }
-      if (!entry.locked?.startsWith(WORKTREE_LOCK_PREFIX))
+      if (lockedBatchId(entry) === null)
         throw new WorktreeNotOursError(path, 'the worktree is not locked by 10db');
       await git(main, ['worktree', 'remove', '--force', '--force', '--', target]);
       pins.delete(target);

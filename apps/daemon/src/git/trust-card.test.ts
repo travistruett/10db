@@ -70,8 +70,14 @@ describe('the unpinned card', () => {
     expect(body).toContain("git worktree remove --force --force '/root/ab/bat_1'");
   });
 
-  it('quotes a path that holds a quote', () => {
-    expect(card("/root/it's").body).toContain(`--force --force ${shellQuote("/root/it's")}`);
+  it.each([
+    ['a backtick', '/root/a`touch x`'],
+    ['a newline', '/root/a\nb'],
+    ['a space', '/root/a b'],
+  ])('puts no command to paste in the card for a path with %s', (_name, path) => {
+    const { body } = card(path);
+    expect(body).not.toContain("git worktree remove --force --force '");
+    expect(body).toContain('git worktree remove --force --force, naming ');
   });
 
   it('folds one card per path', () => {
