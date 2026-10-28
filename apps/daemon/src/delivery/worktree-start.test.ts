@@ -445,20 +445,6 @@ describe('fix tasks in worktree mode', () => {
     expect(card.body).toContain(pathOf(batch));
   });
 
-  it('a fix task with batchId naming a FAILED worktree batch answers 409 until reopening exists', async () => {
-    const batch = await startedOne(h.addTask('Alpha'));
-    h.state.write((c) =>
-      transitionBatch(c, batch.id, { to: 'FAILED', patch: { failure: 'gate_failed' } }),
-    );
-    const fix = h.addTask('Fix', { areas: ['ui'] });
-    expect(() =>
-      h.starter.startBatch(h.project.id, { title: 'Fix', taskIds: [fix.id], batchId: batch.id }),
-    ).toThrow(ConflictError);
-    await h.jobs.idle();
-    expect(listWorkstreams(h.store.db, {}).map((w) => w.taskId)).not.toContain(fix.id);
-    expect(getBatch(h.store.db, batch.id).state).toBe('FAILED');
-  });
-
   it('refuses a batchId that names no batch', () => {
     const fix = h.addTask('Fix', { areas: ['ui'] });
     expect(() =>

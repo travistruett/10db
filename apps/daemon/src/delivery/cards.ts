@@ -153,6 +153,11 @@ export const worktreeCards = {
     body: `The worktree path of batch "${batch.title}" holds a directory git doesn't list as a worktree, so 10db didn't remove it and no longer treats it as the batch's. Look inside, then delete it yourself if nothing there is needed.`,
     detail: { batchId: batch.id },
   }),
+  notReopened: (batch: BatchDto, error: unknown): Card => ({
+    title: `Batch "${batch.title}" not reopened: ${detailOf(error)}`,
+    body: `10db makes the worktree whole on ${batch.branch ?? '(not cut)'} before the batch reopens, and couldn't. Fix the cause, then press Retry on the batch strip.`,
+    detail: { batchId: batch.id },
+  }),
   notWhole: (
     batch: BatchDto,
     path: string,
@@ -236,11 +241,12 @@ export interface ShipFailure {
 }
 
 export const shipCards = {
-  dirtyCheckout: (batch: BatchDto, paths: readonly string[]): ShipFailure => ({
+  /** `checkout` names a worktree the changes are in; the shared checkout is not named. */
+  dirtyCheckout: (batch: BatchDto, paths: readonly string[], checkout?: string): ShipFailure => ({
     failure: BatchFailure.DirtyCheckout,
     card: {
       title: `${notShipped(batch)}: the checkout has uncommitted changes`,
-      body: `10db ships only a clean branch. Commit these with a fix task in the batch, or discard them, then retry:\n${listPaths(paths)}\n\n${RETRY}`,
+      body: `10db ships only a clean branch. Commit these with a fix task in the batch, or discard them${checkout === undefined ? '' : ` in ${checkout}`}, then retry:\n${listPaths(paths)}\n\n${RETRY}`,
       detail: { batchId: batch.id },
     },
   }),

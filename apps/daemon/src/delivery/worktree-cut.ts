@@ -29,7 +29,7 @@ export type Plans = ReadonlyMap<TaskId, StepPlanDto>;
 export const worktreeLockReason = (id: BatchId): string => `${WORKTREE_LOCK_PREFIX}${id}`;
 
 /** True when anything, a link or a file included, is at `path`. */
-function existsAsEntry(path: string): boolean {
+export function existsAsEntry(path: string): boolean {
   try {
     lstatSync(path);
     return true;

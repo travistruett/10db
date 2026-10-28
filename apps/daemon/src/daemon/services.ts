@@ -131,6 +131,7 @@ export function createServices(deps: {
     },
     retryWorkstream(id) {
       const ws = retryWorkstream(deps.state, id);
+      if (ws.batchId !== null) deps.starter.reopen(ws.batchId);
       deps.scheduler.requestTick();
       return ws;
     },

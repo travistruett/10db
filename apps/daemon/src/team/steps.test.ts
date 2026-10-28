@@ -167,6 +167,31 @@ describe('retryWorkstream in a batch', () => {
     expect(getBatch(state.db, batch.id).state).toBe(after);
   });
 
+  it('retryWorkstream leaves a FAILED worktree batch FAILED and re-queues the workstream', () => {
+    const task = addTask();
+    const batch = state.write((ctx) => {
+      const b = insertBatch(ctx, {
+        projectId: project.id,
+        title: 'B',
+        baseBranch: 'main',
+        worktreePath: '/worktrees/b',
+      });
+      transitionBatch(ctx, b.id, { to: 'OPEN' });
+      return b;
+    });
+    const ws = state.write((ctx) => insertWorkstream(ctx, task.id, { batchId: batch.id }));
+    state.write((ctx) => {
+      for (const s of ['STARTING', 'RUNNING', 'FAILED'] as const)
+        transitionWorkstream(ctx, ws.id, { to: s, fence: null });
+      transitionBatch(ctx, batch.id, { to: 'FAILED', patch: { failure: 'gate_failed' } });
+    });
+    expect(retryWorkstream(state, ws.id).state).toBe('QUEUED');
+    expect(getBatch(state.db, batch.id)).toMatchObject({
+      state: 'FAILED',
+      failure: 'gate_failed',
+    });
+  });
+
   it('retries a workstream with no batch as before', () => {
     const ws = state.write((ctx) => insertWorkstream(ctx, addTask().id));
     state.write((ctx) => {

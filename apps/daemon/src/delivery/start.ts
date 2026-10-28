@@ -43,6 +43,7 @@ import { groupByDependency } from './grouping';
 import { jobKey, JobQueue } from './jobs';
 import { cutWorktree, type Plans } from './worktree-cut';
 import { worktreePathFor } from './worktree-path';
+import { reopenWhenWhole, reopenWorktreeBatch } from './worktree-repair';
 
 export interface BatchStarter {
   /**
@@ -58,6 +59,11 @@ export interface BatchStarter {
    * the open batch. In worktree mode it never joins.
    */
   startTask(taskId: TaskId): BatchDto;
+  /**
+   * After a workstream Retry: a FAILED worktree batch reopens in the cut queue once its worktree is
+   * whole. Any other batch is left as it is.
+   */
+  reopen(batchId: BatchId): void;
 }
 
 export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
@@ -164,14 +170,14 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
     }
   }
 
-  /** A fix task joins the OPEN worktree batch it names; a FAILED one waits for reopening. */
+  /** A fix task joins the OPEN worktree batch it names, or reopens the FAILED one it names. */
   function joinWorktree(
     project: ProjectDto,
     batchId: BatchId,
     tasks: readonly TaskDto[],
   ): BatchDto {
     const batch = batchOf(project, batchId);
-    if (batch.state !== BatchState.Open)
+    if (batch.state !== BatchState.Open && batch.state !== BatchState.Failed)
       throw new ConflictError(
         `Batch "${batch.title}" is ${batch.state.toLowerCase()}; add fix tasks to it once it is open`,
       );
@@ -324,6 +330,8 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
   ): Promise<void> {
     const batch = getBatch(db, batchId);
     const project = getProject(db, batch.projectId);
+    // A FAILED worktree batch reopens once its worktree is whole, which replaces the branch check.
+    const reopening = batch.state === BatchState.Failed && batch.worktreePath !== null;
     // Every refusal names the tasks it refused; the API already answered 202 for them.
     const refuse = (card: Card): void => {
       raise(ctx.inbox, project.id, forTasks(card, plans.keys()));
@@ -335,11 +343,13 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
       return;
     }
     try {
-      const checkout = batchCheckout(db, batch);
-      const current = await ctx.git.currentBranch(checkout);
-      if (current !== batch.branch) {
-        refuse(wrongBranchCard(batch, current, checkout, 'not_joined'));
-        return;
+      if (!reopening) {
+        const checkout = batchCheckout(db, batch);
+        const current = await ctx.git.currentBranch(checkout);
+        if (current !== batch.branch) {
+          refuse(wrongBranchCard(batch, current, checkout, 'not_joined'));
+          return;
+        }
       }
       const call = ghCall(ctx, signal);
       const unmerged = await unmergedDependencies({
@@ -358,9 +368,21 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
         refuse(startCards.joinInterrupted(batch));
         return;
       }
+      if (reopening) {
+        const opened = await reopenWhenWhole(ctx, batchId, 'a fix task joined', signal, (w) => {
+          for (const [taskId, plan] of plans) insertPlannedWorkstream(w, taskId, plan, batchId);
+        });
+        if (!opened)
+          refuse(
+            stopped()
+              ? startCards.joinInterrupted(batch)
+              : startCards.notJoined(batch, 'the batch did not reopen'),
+          );
+        return;
+      }
       ctx.state.write((w) => {
         const now = getBatch(w.tx, batchId);
-        // A worktree batch reopens only once its worktree is whole again, which a join doesn't check.
+        // A worktree batch reopens only once its worktree is whole again, which `reopening` does.
         if (now.state === BatchState.Failed && now.worktreePath === null)
           transitionBatch(w, batchId, {
             to: BatchState.Open,
@@ -384,6 +406,11 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
       const [batch] = startBatch(task.projectId, { title: task.title, taskIds: [taskId] });
       if (!batch) throw new InvalidError(`Task ${task.title} did not start`);
       return batch;
+    },
+    reopen(batchId) {
+      const batch = getBatch(db, batchId);
+      if (batch.state === BatchState.Failed && batch.worktreePath !== null)
+        reopenWorktreeBatch(ctx, batchId, 'a workstream was retried');
     },
   };
 }

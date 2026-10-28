@@ -33,12 +33,14 @@ import {
 import type { Clock } from '../clock';
 import { GitNetworkError, GitNetworkFailure } from '../git';
 import type { GateResult, GateRunner } from '../verify';
-import { shipCards, wrongBranchCard, type ShipFailure } from './cards';
-import { allCheckouts } from './checkout';
+import { shipCards, wrongBranchCard, type Card, type ShipFailure } from './cards';
+import { allCheckouts, projectAtCheckout } from './checkout';
 import { ghCall, pushCall, raise, type DeliveryContext, type DeliveryLimits } from './context';
 import { jobKey, JobQueue } from './jobs';
 import { prBody, prTitle } from './pr-text';
 import { readPrTemplate } from './pr-template';
+import { abandonWorktree, retireWorktree } from './worktree-cleanup';
+import { ensureWorktreeWhole, reopenWorktreeBatch } from './worktree-repair';
 
 export interface ShipperDeps extends DeliveryContext {
   readonly gate: GateRunner;
@@ -99,21 +101,34 @@ export function createShipper(deps: ShipperDeps): Shipper {
   }
 
   function fail(batch: BatchDto, outcome: ShipFailure): void {
+    failWith(batch, outcome.failure, outcome.card.title, outcome.card);
+  }
+
+  /** SHIPPING → FAILED; `card` is null when the step that refused raised its own. */
+  function failWith(
+    batch: BatchDto,
+    failure: BatchFailure,
+    reason: string,
+    card: Card | null,
+  ): void {
     const moved = deps.state.write((w) => {
       if (getBatch(w.tx, batch.id).state !== BatchState.Shipping) return false;
-      transitionBatch(w, batch.id, {
-        to: BatchState.Failed,
-        patch: { failure: outcome.failure },
-        reason: outcome.card.title,
-      });
+      transitionBatch(w, batch.id, { to: BatchState.Failed, patch: { failure }, reason });
       return true;
     });
     if (!moved) return;
-    deps.logger.warn(
-      { batchId: batch.id, failure: outcome.failure, title: outcome.card.title },
-      'batch not shipped',
-    );
-    raise(deps.inbox, batch.projectId, outcome.card);
+    deps.logger.warn({ batchId: batch.id, failure, title: reason }, 'batch not shipped');
+    if (card) raise(deps.inbox, batch.projectId, card);
+  }
+
+  /** W12: a shipped or closed batch's worktree goes, in the ship queue, after the state is recorded. */
+  async function retire(batchId: BatchId): Promise<void> {
+    await retireWorktree(deps, batchId).catch((error: unknown) => {
+      deps.logger.warn(
+        { batchId, err: error instanceof Error ? error.message : String(error) },
+        'batch worktree not removed',
+      );
+    });
   }
 
   /** Runs the project gate on the batch branch, recording its process group for recovery. */
@@ -199,11 +214,11 @@ export function createShipper(deps: ShipperDeps): Shipper {
     }
   }
 
-  /** `target` is the batch's repo and branch, which step 0 checked are set. */
+  /** `target` is the batch's repo and branch, which step 0 checked are set; `checkout` is where it was built. */
   async function createPr(
     batch: BatchDto,
     project: ProjectDto,
-    target: { readonly repo: string; readonly branch: string },
+    target: { readonly repo: string; readonly branch: string; readonly checkout: string },
     signal: AbortSignal,
   ): Promise<string> {
     const tasks = members(db, batch.id).map((w) => {
@@ -215,7 +230,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
         state: w.state,
       };
     });
-    const sha = await deps.git.head(project.repoPath);
+    const sha = await deps.git.head(target.checkout);
     const file = join(deps.dataDir, 'delivery', `${batch.id}-pr-body.md`);
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(
@@ -225,7 +240,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
         tasks,
         gate: { command: project.gateCommand },
         ci: { repo: target.repo, sha },
-        template: readPrTemplate(project.repoPath),
+        template: readPrTemplate(target.checkout),
       }),
     );
     const prUrl = await deps.gh.prCreate(
@@ -251,7 +266,11 @@ export function createShipper(deps: ShipperDeps): Shipper {
     return prUrl;
   }
 
-  /** Batch delivery spec §6, steps 0–5. Each step is safe to repeat, so a restart runs them all again. */
+  /**
+   * Batch delivery spec §6, steps 0–5, in the batch's worktree when it has one (made whole first) and
+   * in the project's checkout otherwise; the push always runs in the project's checkout, whose pin
+   * holds the origin the builder trusted. Each step is safe to repeat, so a restart runs them all again.
+   */
   async function shipSteps(batchId: BatchId, signal: AbortSignal): Promise<void> {
     const batch = getBatch(db, batchId);
     // A function, so the check in the catch below is not narrowed away by this one.
@@ -259,36 +278,45 @@ export function createShipper(deps: ShipperDeps): Shipper {
     // Queued before shutdown: leave it SHIPPING for recovery.
     if (stopped() || batch.state !== BatchState.Shipping) return;
     const project = getProject(db, batch.projectId);
-    const { branch, baseSha, repo } = batch;
-    let step = 'checking the branch';
+    const { branch, baseSha, repo, worktreePath } = batch;
+    const checkout = worktreePath ?? project.repoPath;
+    let step = 'making the worktree whole';
     try {
+      // A worktree that is missing, half made or switched away is made whole from the branch first.
+      if (worktreePath !== null) {
+        const whole = await ensureWorktreeWhole(deps, batch, signal);
+        if (stopped()) return;
+        if (whole === 'refused') {
+          failWith(batch, BatchFailure.WrongBranch, 'its worktree could not be made whole', null);
+          return;
+        }
+      }
       // 0. The branch and a clean checkout.
-      const current = await deps.git.currentBranch(project.repoPath);
+      step = 'checking the branch';
+      const current = await deps.git.currentBranch(checkout);
       if (branch === null || baseSha === null || repo === null || current !== branch) {
         fail(batch, {
           failure: BatchFailure.WrongBranch,
-          card: wrongBranchCard(batch, current, project.repoPath, 'not_shipped'),
+          card: wrongBranchCard(batch, current, checkout, 'not_shipped'),
         });
         return;
       }
-      const dirty = await deps.git.changedPaths(project.repoPath);
+      const dirty = await deps.git.changedPaths(checkout);
       if (dirty.length > 0) {
-        fail(batch, shipCards.dirtyCheckout(batch, dirty));
+        fail(batch, shipCards.dirtyCheckout(batch, dirty, worktreePath ?? undefined));
         return;
       }
       // 1. Nothing beyond the base: nothing to push.
-      if (
-        (await deps.git.commitsSince(project.repoPath, baseSha, `refs/heads/${branch}`)).length ===
-        0
-      ) {
+      if ((await deps.git.commitsSince(checkout, baseSha, `refs/heads/${branch}`)).length === 0) {
         const reason = 'no commits beyond the base';
         deps.state.write((w) => transitionBatch(w, batchId, { to: BatchState.Closed, reason }));
         deps.logger.info({ batchId, reason }, 'batch closed');
+        if (worktreePath !== null) await retire(batchId);
         return;
       }
       // 2. The gate, on the branch as it will be pushed.
       step = 'the gate';
-      const gate = await runGate(batch, project, signal);
+      const gate = await runGate(batch, projectAtCheckout(project, checkout), signal);
       if (gate === null) return;
       if (gate.timedOut) {
         fail(batch, shipCards.gateTimedOut(batch, deps.limits.gateTimeoutMs, gate.logPath));
@@ -305,7 +333,8 @@ export function createShipper(deps: ShipperDeps): Shipper {
       step = 'gh pr view';
       const existing = await deps.gh.prView({ repo, ref: branch }, ghCall(deps, signal));
       step = 'gh pr create';
-      const prUrl = existing?.url ?? (await createPr(batch, project, { repo, branch }, signal));
+      const prUrl =
+        existing?.url ?? (await createPr(batch, project, { repo, branch, checkout }, signal));
       // 5. Record it.
       deps.state.write((w) =>
         transitionBatch(w, batchId, {
@@ -315,6 +344,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
         }),
       );
       deps.logger.info({ batchId, branch, prUrl }, 'batch shipped');
+      if (worktreePath !== null) await retire(batchId);
     } catch (error) {
       // Shutdown: leave SHIPPING; recovery re-runs from step 0.
       if (stopped()) return;
@@ -367,7 +397,12 @@ export function createShipper(deps: ShipperDeps): Shipper {
       }
       case BatchState.Failed: {
         if (unfinished) {
-          // Never ship unfinished work: resume it; the batch ships itself when it settles.
+          // Never ship unfinished work: resume it; the batch ships itself when it settles. A
+          // worktree batch reopens once its worktree is whole, in the cut queue.
+          if (batch.worktreePath !== null) {
+            reopenWorktreeBatch(deps, batchId, 'retried with unfinished work');
+            return batch;
+          }
           const reopened = deps.state.write((w) =>
             transitionBatch(w, batchId, {
               to: BatchState.Open,
@@ -445,6 +480,10 @@ export function createShipper(deps: ShipperDeps): Shipper {
         .filter((m) => m.state === WorkstreamState.Done)
         .map((m) => m.taskTitle);
       raise(deps.inbox, batch.projectId, shipCards.abandoned(abandoned, done));
+      if (abandoned.worktreePath !== null) {
+        const project = getProject(db, batch.projectId);
+        deps.jobs.run(jobKey(project, JobQueue.Ship), () => abandonWorktree(deps, batchId));
+      }
       return abandoned;
     },
   };

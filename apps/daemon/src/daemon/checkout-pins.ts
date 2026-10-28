@@ -1,5 +1,5 @@
 import { realpathSync } from 'node:fs';
-import type { BatchId, ProjectDto } from '@10db/contracts';
+import type { ProjectDto } from '@10db/contracts';
 import {
   deleteAppSetting,
   findBatchByWorktreePath,
@@ -9,6 +9,7 @@ import {
   setAppSetting,
   type DbReader,
 } from '@10db/db';
+import { worktreePinKey } from '../delivery';
 import type { StateStore } from '../events';
 import { CheckoutPin, type PinStore } from '../git';
 
@@ -25,8 +26,7 @@ export function projectAt(db: DbReader, repo: string): ProjectDto | undefined {
   return pinOwner(db, repo)?.project;
 }
 
-/** The app setting a worktree's pin is kept under. */
-export const worktreePinKey = (batchId: BatchId): string => `checkout_pin.${batchId}`;
+export { worktreePinKey };
 
 const projectPinKey = (project: ProjectDto): string => `checkout_pin.${project.id}`;
 

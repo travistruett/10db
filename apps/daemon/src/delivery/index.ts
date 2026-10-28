@@ -2,6 +2,8 @@ export { batchBranchName, slugOf } from './branch-name';
 export { groupByDependency, type TaskGroup } from './grouping';
 export { worktreePathFor } from './worktree-path';
 export { cutWorktree, worktreeLockReason } from './worktree-cut';
+export { abandonWorktree, retireWorktree, worktreePinKey } from './worktree-cleanup';
+export { ensureWorktreeWhole, reopenWorktreeBatch, type Wholeness } from './worktree-repair';
 export { DEFAULT_DELIVERY_LIMITS, type DeliveryContext, type DeliveryLimits } from './context';
 export { createDeliveryJobs, jobKey, JobQueue, type DeliveryJobs } from './jobs';
 export { createBatchStarter, type BatchStarter } from './start';

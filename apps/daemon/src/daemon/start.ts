@@ -401,7 +401,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   });
   answerBatchCard = createBatchCardAnswers({
     retry: (id) => {
-      retryWorkstream(state, id);
+      const retried = retryWorkstream(state, id);
+      if (retried.batchId !== null) starter.reopen(retried.batchId);
       scheduler?.requestTick();
     },
     shipper,
