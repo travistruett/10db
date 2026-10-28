@@ -7,6 +7,7 @@ import {
   type WorkstreamStep,
 } from '@10db/contracts';
 import type { Floor } from './floors';
+import { strongerDefault } from './role-defaults';
 
 export interface RouteInput {
   readonly provider: Provider;
@@ -110,7 +111,7 @@ export function route(input: RouteInput): RouteChoice {
     profile: best,
     score: kind,
     overBudget,
-    reason: `cheapest profile at or above ${String(minimum)} ${kind}${fellBack}${floor}${budget}`,
+    reason: `by score: cheapest profile at or above ${String(minimum)} ${kind}${fellBack}${floor}${budget}`,
   };
 }
 
@@ -120,6 +121,32 @@ export interface EscalateInput {
   readonly profiles: readonly ModelProfileDto[];
   /** Why the step is being retried, as a phrase: "the gate failed". */
   readonly why: string;
+}
+
+/** With nothing measured to escalate by, one rung up the role defaults' ladder; the ceiling has no costs to apply. */
+function climbRoleDefaults(
+  step: WorkstreamStep,
+  here: ModelProfileDto,
+  input: EscalateInput,
+): { readonly step: WorkstreamStep; readonly escalated: boolean } {
+  const current = `${step.model}@${step.effort}`;
+  const next = strongerDefault(input.provider, here, input.profiles);
+  if (!next)
+    return {
+      step: { ...step, reason: `kept ${current} after ${input.why}: no stronger model offered` },
+      escalated: false,
+    };
+  return {
+    escalated: true,
+    step: {
+      ...step,
+      profileId: next.id,
+      model: next.model,
+      effort: next.effort,
+      overBudget: false,
+      reason: `escalated from ${current} after ${input.why}: the next stronger model, by role default`,
+    },
+  };
 }
 
 /** One profile up the step's own score (spec §5.2.5); a pinned step, the top, or the ceiling keeps it. */
@@ -135,6 +162,12 @@ export function escalateStep(
     };
   const here = input.profiles.find((p) => p.id === step.profileId);
   const hereScore = here ? score(here, step.score) : null;
+  if (
+    here &&
+    hereScore === null &&
+    measured(input.profiles, input.provider, step.score).length === 0
+  )
+    return climbRoleDefaults(step, here, input);
   if (here && hereScore === null)
     return {
       step: {

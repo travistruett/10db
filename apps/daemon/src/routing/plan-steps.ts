@@ -15,14 +15,14 @@ import {
 } from '@10db/contracts';
 import { DEFAULT_PERSONA_FOR } from './catalogue';
 import { higherFloor, stepFloor } from './floors';
-import { route, UnmeasuredError } from './router';
+import { roleDefault } from './role-defaults';
+import { NoProfileError, route, UnmeasuredError } from './router';
 import { skipReason, type TaskShape } from './skip-rules';
 
 export interface PlanInput {
   readonly flow: FlowDto;
   readonly task: TaskShape;
-  /** The project's model and effort run a step nothing is measured for. */
-  readonly project: Pick<ProjectDto, 'provider' | 'budgetCeiling' | 'model' | 'effort'>;
+  readonly project: Pick<ProjectDto, 'provider' | 'budgetCeiling'>;
   /** Personas that may play a role: archived ones are left out by the caller. */
   readonly personas: readonly PersonaDto[];
   readonly bindings: readonly TeamBinding[];
@@ -90,12 +90,13 @@ function routedStep(
     persona && persona.minimumScore !== null
       ? { minimum: persona.minimumScore, why: `${persona.key} minimum` }
       : { minimum: 0, why: null };
+  const floor = higherFloor(stepFloor(def.role, input.task.riskTags), personaFloor);
   try {
     const choice = route({
       provider: input.project.provider,
       role: def.role,
       need: def.need,
-      floor: higherFloor(stepFloor(def.role, input.task.riskTags), personaFloor),
+      floor,
       budgetCeiling: input.project.budgetCeiling,
       profiles: input.profiles,
     });
@@ -111,14 +112,24 @@ function routedStep(
     };
   } catch (error) {
     if (!(error instanceof UnmeasuredError)) throw error;
+    const fallback = roleDefault({
+      provider: input.project.provider,
+      role: def.role,
+      floor: floor.minimum > def.need ? floor.why : null,
+      profiles: input.profiles,
+    });
+    if (!fallback)
+      throw new NoProfileError(
+        `No enabled ${input.project.provider} profile the account offers is one of Claude Code's models`,
+      );
     return {
       ...base,
-      profileId: null,
-      model: input.project.model,
-      effort: input.project.effort,
-      reason: `no profile has ${article(error.kind)} ${error.kind} score to compare on yet: runs on the project's model (sync Artificial Analysis to route by score)`,
+      profileId: fallback.profile.id,
+      model: fallback.profile.model,
+      effort: fallback.profile.effort,
+      reason: `${fallback.reason}; no profile has ${article(error.kind)} ${error.kind} score to compare on yet (sync Artificial Analysis to route by score)`,
       overBudget: false,
-      pinned: true,
+      pinned: false,
     };
   }
 }
