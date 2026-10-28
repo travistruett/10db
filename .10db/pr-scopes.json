@@ -1,0 +1,50 @@
+{
+  "scopes": {
+    "daemon": ["apps/daemon"],
+    "desktop": ["apps/desktop"],
+    "contracts": ["packages/contracts"],
+    "db": ["packages/db"],
+    "harness": ["packages/harness"],
+    "repo": [
+      ".10db",
+      ".claude",
+      ".codex",
+      ".editorconfig",
+      ".gitattributes",
+      ".gitignore",
+      ".mcp.json",
+      ".prettierignore",
+      ".vscode",
+      "AGENTS.md",
+      "Makefile",
+      "commitlint.config.js",
+      "deny.toml",
+      "eslint.config.js",
+      "knip.json",
+      "lefthook.yml",
+      "mise.lock",
+      "mise.toml",
+      "package.json",
+      "pnpm-workspace.yaml",
+      "prettier.config.js",
+      "release-please-config.json",
+      "renovate.json",
+      "rust-toolchain.toml",
+      "scripts",
+      "tests",
+      "tsconfig.base.json",
+      "tsconfig.json",
+      "vitest.config.ts"
+    ],
+    "ci": [".github"],
+    "extra": ["nope"],
+    "docs": [
+      "docs",
+      "CODE_OF_CONDUCT.md",
+      "CONTRIBUTING.md",
+      "DESIGN.md",
+      "README.md",
+      "SECURITY.md"
+    ]
+  }
+}

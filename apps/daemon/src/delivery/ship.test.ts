@@ -10,6 +10,7 @@ import {
   getTask,
   getWorkstream,
   listWorkstreams,
+  schema,
   transitionBatch,
 } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -217,6 +218,60 @@ describe('shipping', () => {
     h.commit('src/api/alpha.txt');
     await finishAll(batch);
     expect(h.gh.prCreates().map((c) => c.title)).toEqual([`feat(app): say "hi" and $(whoami)`]);
+  });
+
+  it.each<{ name: string; title: string; tasks: string[]; paths: string[]; expected: string }>([
+    {
+      name: 'one scope, a feature',
+      title: 'Add greetings',
+      tasks: ['Alpha'],
+      paths: ['src/api/alpha.txt', 'src/api/beta.txt'],
+      expected: 'feat(api): add greetings',
+    },
+    {
+      name: 'two scopes, so none',
+      title: 'Add greetings',
+      tasks: ['Alpha', 'Beta'],
+      paths: ['src/api/alpha.txt', 'src/ui/beta.txt'],
+      expected: 'feat: add greetings',
+    },
+    {
+      name: 'a path no scope covers, so none',
+      title: 'Add greetings',
+      tasks: ['Alpha'],
+      paths: ['src/api/alpha.txt', 'notes.txt'],
+      expected: 'feat: add greetings',
+    },
+    {
+      name: 'one scope, a fix',
+      title: 'Fix the greeting',
+      tasks: ['Fix the greeting'],
+      paths: ['src/ui/beta.txt'],
+      expected: 'fix(ui): fix the greeting',
+    },
+  ])('titles the PR from the work with no project prefix: $name', async (row) => {
+    h = createDeliveryHarness();
+    // Pull request delivery still requires a prefix when a project is saved; the title is derived
+    // once a project has none.
+    h.store.write((ctx) => ctx.tx.update(schema.projects).set({ prTitlePrefix: null }).run());
+    h.teammatePush(
+      'main',
+      '.10db/pr-scopes.json',
+      '{"scopes":{"api":["src/api"],"ui":["src/ui"]}}\n',
+    );
+    const { batch } = await openBatch(row.title, ...row.tasks);
+    for (const path of row.paths) h.commit(path);
+    await finishAll(batch);
+    expect(h.gh.prCreates().map((c) => c.title)).toEqual([row.expected]);
+  });
+
+  it('titles the PR with no scope when the repo lists none and the project has no prefix', async () => {
+    h = createDeliveryHarness();
+    h.store.write((ctx) => ctx.tx.update(schema.projects).set({ prTitlePrefix: null }).run());
+    const { batch } = await openBatch('Add greetings', 'Alpha');
+    h.commit('src/api/alpha.txt');
+    await finishAll(batch);
+    expect(h.gh.prCreates().map((c) => c.title)).toEqual(['feat: add greetings']);
   });
 
   it('records an existing PR for the branch instead of opening a second one', async () => {

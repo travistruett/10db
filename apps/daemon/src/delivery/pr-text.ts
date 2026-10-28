@@ -1,10 +1,38 @@
 import { WorkstreamState, type BatchId } from '@10db/contracts';
 import { fillTemplate } from './pr-template';
 
-/** `<prefix>: <title>` with the title's first letter lowercased: commitlint wants a lowercase subject. */
-export function prTitle(prefix: string | null, title: string): string {
-  const subject = `${title.charAt(0).toLowerCase()}${title.slice(1)}`;
-  return prefix === null ? subject : `${prefix}: ${subject}`;
+/** Conventional Commits' longest header, as this repo's commitlint and `config-conventional` set it. */
+const MAX_HEADER = 100;
+
+/** A title whose first word is fix, fixes or fixed. */
+const FIX_TITLE = /^fix(?:es|ed)?\b/i;
+
+/**
+ * The Conventional Commit type and scope a pull request's title opens with: `fix` when every task is a
+ * fix, otherwise `feat`, so a feature that carries its own review fixes is still a feature; the scope
+ * when there is one.
+ */
+export function titlePrefix(
+  tasks: readonly { readonly title: string }[],
+  scope: string | null,
+): string {
+  const type =
+    tasks.length > 0 && tasks.every((task) => FIX_TITLE.test(task.title.trim())) ? 'fix' : 'feat';
+  return scope === null ? type : `${type}(${scope})`;
+}
+
+/**
+ * `<prefix>: <title>` as commitlint wants a header: the title's first letter lowercased, no trailing
+ * full stop, and no longer than `MAX_HEADER`, cut at a word.
+ */
+export function prTitle(prefix: string, title: string): string {
+  const trimmed = title.trim().replace(/\.+$/, '');
+  const subject = `${trimmed.charAt(0).toLowerCase()}${trimmed.slice(1)}`;
+  const room = MAX_HEADER - prefix.length - 2;
+  if (subject.length <= room) return `${prefix}: ${subject}`;
+  const space = subject.lastIndexOf(' ', room);
+  const cut = (space > 0 ? subject.slice(0, space) : subject.slice(0, room)).replace(/[\s.]+$/, '');
+  return `${prefix}: ${cut}`;
 }
 
 /** One task of the batch, as the PR body shows it. */
