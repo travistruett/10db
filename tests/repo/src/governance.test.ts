@@ -134,6 +134,7 @@ describe('repository settings', () => {
     privateVulnerabilityReporting: boolean;
     workflowPermissions: Record<string, unknown>;
     forkPullRequestApproval: { approval_policy: string };
+    environments: Record<string, unknown>;
   };
 
   it('allows squash merges only, titled by the PR, and deletes merged branches', () => {
@@ -162,6 +163,13 @@ describe('repository settings', () => {
     });
     expect(settings.forkPullRequestApproval.approval_policy).toBe('first_time_contributors');
   });
+
+  it('holds every release run for the builder, from v* tags only, and the bot to main', () => {
+    expect(settings.environments).toEqual({
+      'release-bot': { reviewers: [], deploymentPolicies: [{ name: 'main', type: 'branch' }] },
+      release: { reviewers: ['travistruett'], deploymentPolicies: [{ name: 'v*', type: 'tag' }] },
+    });
+  });
 });
 
 describe('scripts/github-settings.mjs against a fake gh', () => {
@@ -180,11 +188,24 @@ describe('scripts/github-settings.mjs against a fake gh', () => {
       .filter((line) => /^api --method (POST|PUT) repos\/owner\/10db\/rulesets/.test(line))
       .map((line) => (JSON.parse(line.slice(line.indexOf('{'))) as { name: string }).name);
 
+  /** The body the script sent with the first call to `method path`. */
+  const sentBody = (method: string, path: string): unknown => {
+    const line = readFileSync(join(dir, 'calls.log'), 'utf8')
+      .split('\n')
+      .find((l) => l.startsWith(`api --method ${method} ${path} `));
+    return line === undefined ? undefined : JSON.parse(line.slice(line.indexOf('{')));
+  };
+
   /**
-   * Runs the script with a `gh` on PATH that logs each call; the live repo has `existing` rulesets.
+   * Runs the script with a `gh` on PATH that logs each call; the live repo has `existing` rulesets
+   * and, per environment, the deployment policies in `policies`. Every user's id is 42.
    * A call whose arguments or body contain `failOn` fails with exit code 1.
    */
-  function runWith(existing: { id: number; name: string }[], failOn = '') {
+  function runWith(
+    existing: { id: number; name: string }[],
+    failOn = '',
+    policies: Record<string, { id: number; name: string; type: string }[]> = {},
+  ) {
     writeFileSync(
       join(dir, 'gh'),
       [
@@ -198,6 +219,11 @@ describe('scripts/github-settings.mjs against a fake gh', () => {
         '  process.exit(1);',
         '}',
         "if (args[0] === 'repo') console.log('owner/10db');",
+        "else if (args[2] === 'GET' && args[3].startsWith('users/')) console.log('{\"id\":42}');",
+        "else if (args[2] === 'GET' && args[3].endsWith('/deployment-branch-policies')) {",
+        `  const live = ${JSON.stringify(policies)}[args[3].split('/')[4]] ?? [];`,
+        '  console.log(JSON.stringify({ branch_policies: live }));',
+        '}',
         `else if (args[2] === 'GET') console.log(${JSON.stringify(JSON.stringify(existing))});`,
       ].join('\n'),
     );
@@ -230,6 +256,42 @@ describe('scripts/github-settings.mjs against a fake gh', () => {
       'api --method PUT repos/owner/10db/private-vulnerability-reporting',
       'api --method PUT repos/owner/10db/actions/permissions/workflow',
       'api --method PUT repos/owner/10db/actions/permissions/fork-pr-contributor-approval',
+      'api --method PUT repos/owner/10db/environments/release-bot',
+      'api --method GET repos/owner/10db/environments/release-bot/deployment-branch-policies',
+      'api --method POST repos/owner/10db/environments/release-bot/deployment-branch-policies',
+      'api --method GET users/travistruett',
+      'api --method PUT repos/owner/10db/environments/release',
+      'api --method GET repos/owner/10db/environments/release/deployment-branch-policies',
+      'api --method POST repos/owner/10db/environments/release/deployment-branch-policies',
+    ]);
+  });
+
+  it('makes the builder the release reviewer and lets each environment deploy only from its refs', () => {
+    expect(runWith([]).status).toBe(0);
+    expect(sentBody('PUT', 'repos/owner/10db/environments/release')).toEqual({
+      prevent_self_review: false,
+      reviewers: [{ type: 'User', id: 42 }],
+      deployment_branch_policy: { protected_branches: false, custom_branch_policies: true },
+    });
+    expect(sentBody('PUT', 'repos/owner/10db/environments/release-bot')).toMatchObject({
+      reviewers: null,
+    });
+    expect(
+      sentBody('POST', 'repos/owner/10db/environments/release/deployment-branch-policies'),
+    ).toEqual({ name: 'v*', type: 'tag' });
+  });
+
+  it('keeps a live deployment policy the file lists and deletes the rest', () => {
+    const live = {
+      release: [
+        { id: 5, name: 'v*', type: 'tag' },
+        { id: 6, name: 'main', type: 'branch' },
+      ],
+    };
+    expect(runWith([], '', live).status).toBe(0);
+    expect(calls().filter((call) => call.includes('environments/release/deployment'))).toEqual([
+      'api --method GET repos/owner/10db/environments/release/deployment-branch-policies',
+      'api --method DELETE repos/owner/10db/environments/release/deployment-branch-policies/6',
     ]);
   });
 

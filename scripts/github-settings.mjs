@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 // Applies .github/repo-settings.json and every .github/rulesets/*.json to this checkout's GitHub
 // repository through the gh CLI: main-protection, main-review, tags-create and tags-immutable.
-// Rulesets go first (tags-immutable before tags-create), then the repository settings. A failed
+// Rulesets go first (tags-immutable before tags-create), then the repository settings, then the
+// release-bot and release environments with their reviewers and deployment policies. A failed
 // call doesn't stop the rest: the script finishes, lists every failure and exits non-zero.
-// Idempotent: rulesets are matched by name and replaced, and each setting is a PUT or PATCH of the
-// whole value, so a second run changes nothing. Run it by hand (`make github-settings`) with admin
+// Idempotent: rulesets are matched by name and replaced, each setting is a PUT or PATCH of the
+// whole value, and an environment's live deployment policies are matched to the file's, the rest
+// deleted, so a second run changes nothing. Run it by hand (`make github-settings`) with admin
 // rights; CI never runs it.
 import { execFileSync } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
@@ -17,7 +19,7 @@ const readJson = (path) => JSON.parse(readFileSync(join(root, path), 'utf8'));
 
 /**
  * Calls `gh api` and returns the parsed response, or null when the body is empty.
- * @param {'GET' | 'POST' | 'PUT' | 'PATCH'} method
+ * @param {'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'} method
  * @param {string} path
  * @param {unknown} [body]
  */
@@ -110,10 +112,40 @@ attempt('fork pull request approval', () => {
   );
 });
 
+/** @typedef {{ name: string, type: 'branch' | 'tag' }} DeploymentPolicy */
+/** @type {Record<string, { reviewers: string[], deploymentPolicies: DeploymentPolicy[] }>} */
+const environments = settings.environments;
+const samePolicy = (/** @type {DeploymentPolicy} */ a, /** @type {DeploymentPolicy} */ b) =>
+  a.name === b.name && a.type === b.type;
+for (const [name, environment] of Object.entries(environments)) {
+  attempt(`environment "${name}"`, () => {
+    const reviewers = environment.reviewers.map((login) => ({
+      type: 'User',
+      id: api('GET', `users/${login}`).id,
+    }));
+    const path = `repos/${repo}/environments/${name}`;
+    api('PUT', path, {
+      // A rerun of a failed release is the reviewer's own run, and they must still approve it.
+      prevent_self_review: false,
+      reviewers: reviewers.length > 0 ? reviewers : null,
+      deployment_branch_policy: { protected_branches: false, custom_branch_policies: true },
+    });
+    /** @type {(DeploymentPolicy & { id: number })[]} */
+    const live = api('GET', `${path}/deployment-branch-policies`)?.branch_policies ?? [];
+    for (const policy of environment.deploymentPolicies)
+      if (!live.some((l) => samePolicy(l, policy)))
+        api('POST', `${path}/deployment-branch-policies`, policy);
+    for (const policy of live)
+      if (!environment.deploymentPolicies.some((p) => samePolicy(p, policy)))
+        api('DELETE', `${path}/deployment-branch-policies/${String(policy.id)}`);
+    console.log(`${repo}: environment "${name}" applied`);
+  });
+}
+
 if (failures.length > 0) {
   console.error(`${repo}: ${String(failures.length)} step(s) failed:`);
   for (const failure of failures) console.error(`  ${failure}`);
   process.exitCode = 1;
 } else {
-  console.log(`${repo}: rulesets, repository, security and Actions settings applied`);
+  console.log(`${repo}: rulesets, repository, security, Actions and environment settings applied`);
 }
