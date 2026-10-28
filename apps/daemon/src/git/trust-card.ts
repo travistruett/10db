@@ -32,6 +32,16 @@ function codeSpan(value: string): string {
   return longest > 0 ? `${fence} ${shown} ${fence}` : `${fence}${shown}${fence}`;
 }
 
+/**
+ * The command that removes the locked worktree at `path`, to paste when `path` is plain; otherwise
+ * the command to type, naming `path` as a code span.
+ */
+export function worktreeRemovalCommand(path: string): string {
+  return PASTE_SAFE.test(path)
+    ? `git worktree remove --force --force ${shellQuote(path)}`
+    : `git worktree remove --force --force, naming ${codeSpan(path)}`;
+}
+
 /** How the builder removes a worktree that isn't theirs: a command to paste only when `repo` is plain. */
 function removal(repo: string): string {
   if (PASTE_SAFE.test(repo))

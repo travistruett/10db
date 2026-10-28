@@ -138,6 +138,13 @@ export interface Git {
    */
   removeWorktree(repo: string, path: string): Promise<'removed' | 'absent'>;
   listWorktrees(repo: string): Promise<WorktreeEntry[]>;
+  /**
+   * Uncommitted changes in the 10db worktree of `repo` at `path`, read through `repo`'s pin, so a
+   * worktree no batch names (and so with no pin of its own) can be read. The worktree must be a
+   * directory under the worktree root, listed by git, locked by 10db, with its git dir inside
+   * `repo`'s worktrees; anything else is refused with `WorktreeNotOursError`.
+   */
+  worktreeChanges(repo: string, path: string): Promise<string[]>;
   /** Drops the entries of worktrees whose directory is gone, but not a locked one. */
   pruneWorktrees(repo: string): Promise<void>;
   /** `update-ref -d refs/heads/<branch> <sha>`: true when deleted, false when missing or moved. */
@@ -248,6 +255,15 @@ function filtersInAttributes(text: string): string[] {
     }
   }
   return names;
+}
+
+/** A path as the file system names it, or resolved as text once nothing is there. */
+function comparable(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return resolve(path);
+  }
 }
 
 function readIfPresent(path: string): string {
@@ -1015,13 +1031,6 @@ export function createGit(opts: GitOptions = {}): Git {
       throw new WorktreeNotOursError(path, 'it is a link or a file, not a worktree directory');
     return withRepoLock(realpathSync(repo), async () => {
       const main = await pinned(repo);
-      const comparable = (p: string): string => {
-        try {
-          return realpathSync(p);
-        } catch {
-          return resolve(p);
-        }
-      };
       const entry = (await listWorktrees(main)).find((e) => samePath(comparable(e.path), target));
       if (!entry) {
         if (present) throw new WorktreeNotOursError(path, 'git lists no worktree there');
@@ -1033,6 +1042,38 @@ export function createGit(opts: GitOptions = {}): Git {
       await git(main, ['worktree', 'remove', '--force', '--force', '--', target]);
       pins.delete(target);
       return 'removed';
+    });
+  }
+
+  async function worktreeChanges(repo: string, path: string): Promise<string[]> {
+    const root = opts.worktreeRoot;
+    if (!root) throw new WorktreeNotOursError(path, 'no worktree root is configured');
+    const target = withRealParent(path);
+    if (!isPlainDirectory(target))
+      throw new WorktreeNotOursError(path, 'it is not a worktree directory');
+    if (!surelyInside(target, root) || samePath(target, realisticPath(root)))
+      throw new WorktreeNotOursError(path, "it is not under 10db's worktree root");
+    const main = await pinned(repo);
+    const entry = (await listWorktrees(main)).find((e) => samePath(comparable(e.path), target));
+    if (!entry) throw new WorktreeNotOursError(path, 'git lists no worktree there');
+    if (lockedBatchId(entry) === null)
+      throw new WorktreeNotOursError(path, 'the worktree is not locked by 10db');
+    let gitDir: string;
+    try {
+      gitDir = readGitfile(target);
+    } catch {
+      throw new WorktreeNotOursError(path, 'its .git is not a gitfile');
+    }
+    if (!surelyInside(gitDir, join(main.dirs.commonDir, 'worktrees')))
+      throw new WorktreeNotOursError(path, "its git dir is outside the repository's worktrees");
+    if (readIfPresent(join(gitDir, 'info', 'attributes')).trim() !== '')
+      throw new WorktreeNotOursError(path, 'its git dir holds an attributes file');
+    // The main checkout's pin vouches for the repository; the git dir was just checked to be in it.
+    return changes({
+      real: target,
+      dirs: { gitDir, commonDir: main.dirs.commonDir },
+      pin: main.pin,
+      env: { GIT_DIR: gitDir, GIT_WORK_TREE: target },
     });
   }
 
@@ -1129,6 +1170,7 @@ export function createGit(opts: GitOptions = {}): Git {
     commit,
     addWorktree,
     removeWorktree,
+    worktreeChanges,
     async listWorktrees(repo) {
       return listWorktrees(await pinned(repo));
     },

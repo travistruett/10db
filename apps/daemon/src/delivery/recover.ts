@@ -170,6 +170,7 @@ export async function recoverBatches(deps: {
       ...(await sweepWorktrees({
         state: deps.state,
         git: deps.git,
+        inbox: deps.inbox,
         root: deps.worktrees.root,
         logger: deps.logger,
       })),

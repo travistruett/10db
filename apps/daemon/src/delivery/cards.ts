@@ -1,6 +1,6 @@
 import { BatchFailure, type BatchDto, type ProjectDto, type TaskId } from '@10db/contracts';
 import type { Json } from '@10db/db';
-import { GitNetworkError } from '../git';
+import { GitNetworkError, worktreeRemovalCommand } from '../git';
 import { GhError } from '../github';
 import type { GateResult } from '../verify';
 import type { BlockedTask, UnmergedDependency } from './deps';
@@ -147,6 +147,16 @@ export const worktreeCards = {
     body: `10db never throws away uncommitted work, so it kept the worktree with these changes:\n${listPaths(paths)}\n\nCopy what you need, then remove it with git worktree remove --force --force ${path}`,
     foldKey: `worktree-kept:${batch.id}`,
     detail: { batchId: batch.id },
+  }),
+  /** `paths` is null when git couldn't read the worktree, which counts as changed. */
+  orphanKept: (path: string, paths: readonly string[] | null): Card => ({
+    title: `10db kept ${path}: it has uncommitted changes`,
+    body: `No batch uses this worktree any more, but ${
+      paths === null
+        ? "10db couldn't read it, so it may hold uncommitted work"
+        : `it holds uncommitted changes:\n${listPaths(paths)}`
+    }\n\n10db never throws away uncommitted work. Copy what you need, then remove it with ${worktreeRemovalCommand(path)}.`,
+    foldKey: `worktree-orphan:${path}`,
   }),
   leftBehind: (batch: BatchDto, path: string): Card => ({
     title: `10db left ${path} in place`,

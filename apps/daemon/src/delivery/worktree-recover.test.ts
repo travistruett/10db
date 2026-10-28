@@ -11,6 +11,7 @@ import {
   listLiveWorktrees,
   listWorkstreams,
   patchBatch,
+  seedProject,
   setAppSetting,
   transitionBatch,
 } from '@10db/db';
@@ -100,8 +101,11 @@ function cuttingRow(): { batch: BatchDto; path: string; branch: string } {
   return { batch, path: pathOf(batch), branch: batchBranchName(batch.title, batch.id) };
 }
 
-/** What W5's `worktree add` leaves: a locked entry on the branch, with no index or files yet. */
+/** What W5's `worktree add` leaves: a locked entry on the branch, pinned, with no files yet. */
 function addedWorktree(batch: BatchDto, path: string, branch: string): void {
+  h.state.write((c) => {
+    setAppSetting(c, `checkout_pin.${batch.id}`, { kept: true });
+  });
   h.git$(
     'worktree',
     'add',
@@ -467,7 +471,13 @@ describe('recoverBatches with worktrees', () => {
 
 describe('sweepWorktrees', () => {
   const sweep = () =>
-    sweepWorktrees({ state: h.state, git: h.git, root: h.worktreeRoot, logger: silentLogger });
+    sweepWorktrees({
+      state: h.state,
+      git: h.git,
+      inbox: h.inbox,
+      root: h.worktreeRoot,
+      logger: silentLogger,
+    });
 
   /** A worktree on a new branch at `path`, made by hand, locked with `reason` when given. */
   function worktreeAt(path: string, reason?: string): string {
@@ -480,17 +490,36 @@ describe('sweepWorktrees', () => {
   const under = (leaf: string): string => join(h.worktreeRoot, 'widgets-0a1b2c', leaf);
   const ours = (id: BatchId): string => `10db ${id}`;
 
-  it.each<{ name: string; entry: () => string; removed: boolean }>([
+  /** The batch id the entry at `path` is locked with, when it names one. */
+  function lockedId(path: string): string | undefined {
+    const reason = parseWorktreeList(gitIn(h.repo, 'worktree', 'list', '--porcelain', '-z')).find(
+      (e) => comparable(e.path) === comparable(path),
+    )?.locked;
+    return reason?.startsWith('10db bat_') === true ? reason.slice('10db '.length) : undefined;
+  }
+
+  it.each<{
+    name: string;
+    entry: () => string;
+    removed: boolean;
+    /** Whether the pin stored under the lock's batch id survives the sweep. */
+    pinKept: boolean;
+  }>([
     {
       name: 'a 10db-locked orphan whose batch is gone',
+      entry: () => worktreeAt(under('orphan'), ours(mintId('Batch'))),
+      removed: true,
+      pinKept: false,
+    },
+    {
+      name: 'a 10db-locked orphan whose directory was deleted',
       entry: () => {
-        const id = mintId('Batch');
-        h.state.write((c) => {
-          setAppSetting(c, `checkout_pin.${id}`, { kept: true });
-        });
-        return worktreeAt(under('orphan'), ours(id));
+        const path = worktreeAt(under('deleted'), ours(mintId('Batch')));
+        rmSync(path, { recursive: true, force: true });
+        return path;
       },
       removed: true,
+      pinKept: false,
     },
     {
       name: 'a 10db-locked entry whose path was cleared',
@@ -501,8 +530,10 @@ describe('sweepWorktrees', () => {
         return worktreeAt(under('cleared'), ours(batch.id));
       },
       removed: true,
+      pinKept: false,
     },
     {
+      // The pin is the live worktree's, at the batch's own path.
       name: "a 10db-locked entry at another path than its batch's",
       entry: () => {
         const batch = h.state.write((c) =>
@@ -516,6 +547,7 @@ describe('sweepWorktrees', () => {
         return worktreeAt(under('moved'), ours(batch.id));
       },
       removed: true,
+      pinKept: true,
     },
     {
       name: "a live batch's worktree",
@@ -532,39 +564,107 @@ describe('sweepWorktrees', () => {
         return worktreeAt(path, ours(batch.id));
       },
       removed: false,
+      pinKept: true,
     },
     {
       name: 'an unlocked worktree under the root',
       entry: () => worktreeAt(under('unlocked')),
       removed: false,
+      pinKept: true,
     },
     {
       name: "someone else's lock",
       entry: () => worktreeAt(under('mine'), 'mine'),
       removed: false,
+      pinKept: true,
     },
     {
       name: 'outside the root',
       entry: () => worktreeAt(join(realpathSync(elsewhere.path), 'x'), ours(mintId('Batch'))),
       removed: false,
+      pinKept: true,
     },
     {
       name: "under another data dir's level",
       entry: () => worktreeAt(join(dirname(h.worktreeRoot), 'other', 'x'), ours(mintId('Batch'))),
       removed: false,
+      pinKept: true,
     },
-  ])('$name: removed $removed', async ({ entry, removed }) => {
+  ])('$name: removed $removed', async ({ entry, removed, pinKept }) => {
     mkdirSync(h.worktreeRoot, { recursive: true });
     const path = entry();
-    const id = parseWorktreeList(gitIn(h.repo, 'worktree', 'list', '--porcelain', '-z'))
-      .find((e) => comparable(e.path) === comparable(path))
-      ?.locked?.slice('10db '.length);
+    const id = lockedId(path);
+    if (id !== undefined)
+      h.state.write((c) => {
+        setAppSetting(c, `checkout_pin.${id}`, { kept: true });
+      });
     const swept = await sweep();
     expect(swept.map(comparable)).toEqual(removed ? [comparable(path)] : []);
     expect(listed().includes(comparable(path))).toBe(!removed);
-    expect(existsSync(path)).toBe(!removed);
-    if (removed && id !== undefined)
-      expect(getAppSetting(h.store.db, `checkout_pin.${id}`)).toBeUndefined();
+    if (removed) expect(existsSync(path)).toBe(false);
+    if (id !== undefined)
+      expect(getAppSetting(h.store.db, `checkout_pin.${id}`) !== undefined).toBe(pinKept);
+    expect(h.cards()).toEqual([]);
+  });
+
+  it.each<{ name: string; change: (path: string) => void; shown: string }>([
+    {
+      name: 'an edited file',
+      change: (path) => {
+        writeFileSync(join(path, 'README.md'), '# edited, not committed\n');
+      },
+      shown: '- README.md',
+    },
+    {
+      name: 'an untracked file',
+      change: (path) => {
+        writeFileSync(join(path, 'notes.txt'), 'mine\n');
+      },
+      shown: '- notes.txt',
+    },
+    {
+      name: 'a git file git cannot read',
+      change: (path) => {
+        writeFileSync(join(path, '.git'), 'not a gitfile\n');
+      },
+      shown: "10db couldn't read",
+    },
+  ])('keeps an orphan with $name and names it once', async ({ change, shown }) => {
+    mkdirSync(h.worktreeRoot, { recursive: true });
+    const path = worktreeAt(under('dirty'), ours(mintId('Batch')));
+    change(path);
+    expect(await sweep()).toEqual([]);
+    expect(await sweep()).toEqual([]);
+    expect(listed()).toContain(comparable(path));
+    expect(existsSync(path)).toBe(true);
+    const card = h.only(h.cards());
+    expect(card.title).toBe(`10db kept ${path}: it has uncommitted changes`);
+    expect(card.body).toContain(shown);
+    expect(card.body).toContain(`git worktree remove --force --force '${path}'`);
+  });
+
+  it('names a path that is not paste-safe as a code span, not a command', async () => {
+    mkdirSync(h.worktreeRoot, { recursive: true });
+    const path = worktreeAt(under("it's mine"), ours(mintId('Batch')));
+    writeFileSync(join(path, 'notes.txt'), 'mine\n');
+    await sweep();
+    const card = h.only(h.cards());
+    expect(card.body).toContain(`naming \`${path}\``);
+    expect(card.body).not.toContain(`--force --force '`);
+  });
+
+  it("sweeps the other projects when one project's checkout is not a repository", async () => {
+    // Projects are swept in name order: this one comes first.
+    seedProject(h.store, {
+      name: 'aaa-broken',
+      repoPath: realpathSync(elsewhere.path),
+      delivery: 'pull_request',
+      prTitlePrefix: 'feat(app)',
+    });
+    mkdirSync(h.worktreeRoot, { recursive: true });
+    const orphan = worktreeAt(under('orphan'), ours(mintId('Batch')));
+    expect((await sweep()).map(comparable)).toEqual([comparable(orphan)]);
+    expect(existsSync(orphan)).toBe(false);
   });
 
   it('prunes after removing', async () => {
