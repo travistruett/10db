@@ -240,7 +240,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
         tasks,
         gate: { command: project.gateCommand },
         ci: { repo: target.repo, sha },
-        template: readPrTemplate(target.checkout),
+        template: await readPrTemplate(deps.git, target.checkout, sha, deps.logger),
       }),
     );
     const prUrl = await deps.gh.prCreate(

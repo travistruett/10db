@@ -7,6 +7,7 @@ import { worktreeCards } from './cards';
 import { raise, type DeliveryContext } from './context';
 import { jobKey, JobQueue } from './jobs';
 import { existsAsEntry, worktreeLockReason } from './worktree-cut';
+import { withWorktreeLock } from './worktree-lock';
 import { seedDirs, seedWorktree } from './worktree-seed';
 
 /** What `ensureWorktreeWhole` found: a worktree kept, one made again, or a refusal with its card. */
@@ -18,11 +19,20 @@ const message = (error: unknown): string =>
 /**
  * Spec §5 Retry: keep a whole worktree (there, pinned, with an index, on the batch branch), else
  * replace it from the existing branch (W5 without update-ref, plus the seed). Refuses with a card
- * over a worktree on another branch, or a detached one, with uncommitted changes, and over anything
- * git doesn't list as 10db's; refuses, without removing anything, a worktree git won't trust (the
- * trust card explains). Uncommitted work is never thrown away without the builder.
+ * over a worktree on another branch, or a detached one, with uncommitted changes, over one git can't
+ * read the branch or changes of, and over anything git doesn't list as 10db's; refuses, without
+ * removing anything, a worktree git won't trust (the trust card explains). Uncommitted work is never
+ * thrown away without the builder. Holds the batch's worktree lock throughout.
  */
 export async function ensureWorktreeWhole(
+  ctx: DeliveryContext,
+  batch: BatchDto,
+  signal: AbortSignal,
+): Promise<Wholeness> {
+  return withWorktreeLock(batch.id, () => makeWhole(ctx, getBatch(ctx.state.db, batch.id), signal));
+}
+
+async function makeWhole(
   ctx: DeliveryContext,
   batch: BatchDto,
   signal: AbortSignal,
@@ -33,34 +43,38 @@ export async function ensureWorktreeWhole(
     throw new InvalidError(`Batch "${batch.title}" has no worktree branch to make whole`);
   const project = getProject(ctx.state.db, batch.projectId);
   const main = project.repoPath;
+  const inTheWay = (reason: string): Wholeness => {
+    raise(ctx.inbox, batch.projectId, worktreeCards.inTheWay(batch, path, reason));
+    return 'refused';
+  };
   if (existsAsEntry(path)) {
-    // The branch HEAD names when that is not the batch's; undefined on the batch branch or unreadable.
-    let other: { readonly current: string | null } | undefined;
+    let gitDir: string | null = null;
     try {
-      const { gitDir } = await ctx.git.gitDirs(path);
-      const current = await ctx.git.currentBranch(path);
-      if (current === branch && existsSync(join(gitDir, 'index'))) return 'whole';
-      if (current !== branch) other = { current };
+      gitDir = (await ctx.git.gitDirs(path)).gitDir;
     } catch (error) {
       if (error instanceof GitTrustError) return 'refused';
-      // Not readable as a worktree: replaced below, only if git lists it as 10db's.
+      // Not a worktree git can read: replaced below, only if git lists it as 10db's.
       ctx.logger.warn({ batchId: batch.id, path, err: message(error) }, 'worktree unreadable');
     }
-    if (other !== undefined) {
-      let changed: string[];
+    if (gitDir !== null) {
       try {
-        changed = await ctx.git.changedPaths(path);
+        const current = await ctx.git.currentBranch(path);
+        if (current === branch && existsSync(join(gitDir, 'index'))) return 'whole';
+        if (current !== branch) {
+          const changed = await ctx.git.changedPaths(path);
+          if (changed.length > 0) {
+            raise(
+              ctx.inbox,
+              batch.projectId,
+              worktreeCards.notWhole(batch, path, current, changed),
+            );
+            return 'refused';
+          }
+        }
       } catch (error) {
         if (error instanceof GitTrustError) return 'refused';
-        throw error;
-      }
-      if (changed.length > 0) {
-        raise(
-          ctx.inbox,
-          batch.projectId,
-          worktreeCards.notWhole(batch, path, other.current, changed),
-        );
-        return 'refused';
+        // A worktree whose branch or changes git can't read may hold work: never removed unseen.
+        return inTheWay(`git can't read it (${message(error)})`);
       }
     }
   }
@@ -68,10 +82,7 @@ export async function ensureWorktreeWhole(
     await ctx.git.removeWorktree(main, path);
   } catch (error) {
     if (error instanceof GitTrustError) return 'refused';
-    if (error instanceof WorktreeNotOursError) {
-      raise(ctx.inbox, batch.projectId, worktreeCards.leftBehind(batch, path));
-      return 'refused';
-    }
+    if (error instanceof WorktreeNotOursError) return inTheWay(error.why);
     throw error;
   }
   if (signal.aborted) return 'refused';

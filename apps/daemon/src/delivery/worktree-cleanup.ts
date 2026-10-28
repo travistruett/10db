@@ -6,6 +6,7 @@ import { GitTrustError, WorktreeNotOursError } from '../git';
 import { worktreeCards } from './cards';
 import { raise, type DeliveryContext } from './context';
 import { existsAsEntry } from './worktree-cut';
+import { withWorktreeLock } from './worktree-lock';
 
 /** The app setting a worktree's pin is kept under. */
 export const worktreePinKey = (batchId: BatchId): string => `checkout_pin.${batchId}`;
@@ -33,16 +34,42 @@ function removedIfEmpty(ctx: DeliveryContext, path: string): boolean {
   }
 }
 
+/** What `retireWorktree` did. */
+export type Retirement =
+  /** Removed (or found gone), the pin dropped and the path cleared. */
+  | { readonly kind: 'retired' }
+  /** Nothing to do: no path, or a batch whose work may still run. */
+  | { readonly kind: 'nothing' }
+  /** An ABANDONED batch's worktree with uncommitted changes: kept, its path still set. */
+  | { readonly kind: 'kept'; readonly paths: readonly string[] }
+  /** An ABANDONED batch's worktree git won't trust: kept unread (the trust card explains). */
+  | { readonly kind: 'untrusted' };
+
 /**
- * W12/W14 after SHIPPED or CLOSED (and ABANDONED once its worktree is known clean): remove the
- * worktree, delete a CLOSED batch's branch while it is still at its base, then drop the pin and clear
- * `worktree_path` in one transaction. The clear is last, so recovery re-runs every earlier step after
- * a crash. Safe to repeat; a no-op once cleared.
+ * W12/W14 after SHIPPED, CLOSED or ABANDONED: remove the worktree, delete a CLOSED batch's branch
+ * while it is still at its base, then drop the pin and clear `worktree_path` in one transaction. An
+ * ABANDONED batch's worktree is removed only when it is clean, checked here so no caller can remove
+ * uncommitted work. The clear is last, so recovery re-runs every earlier step after a crash. Safe to
+ * repeat; a no-op once cleared. Holds the batch's worktree lock.
  */
-export async function retireWorktree(ctx: DeliveryContext, batchId: BatchId): Promise<void> {
+export async function retireWorktree(ctx: DeliveryContext, batchId: BatchId): Promise<Retirement> {
+  return withWorktreeLock(batchId, () => retire(ctx, batchId));
+}
+
+async function retire(ctx: DeliveryContext, batchId: BatchId): Promise<Retirement> {
   const batch = getBatch(ctx.state.db, batchId);
   const path = batch.worktreePath;
-  if (path === null || !FINISHED.includes(batch.state)) return;
+  if (path === null || !FINISHED.includes(batch.state)) return { kind: 'nothing' };
+  if (batch.state === BatchState.Abandoned && existsAsEntry(path)) {
+    try {
+      const changed = await ctx.git.changedPaths(path);
+      if (changed.length > 0) return { kind: 'kept', paths: changed };
+    } catch (error) {
+      if (!(error instanceof GitTrustError)) throw error;
+      ctx.logger.warn({ batchId, path, err: error.message }, 'abandoned worktree kept');
+      return { kind: 'untrusted' };
+    }
+  }
   const main = getProject(ctx.state.db, batch.projectId).repoPath;
   try {
     await ctx.git.removeWorktree(main, path);
@@ -59,6 +86,7 @@ export async function retireWorktree(ctx: DeliveryContext, batchId: BatchId): Pr
     clearWorktreePath(w, batchId);
   });
   ctx.logger.info({ batchId, path, state: batch.state }, 'batch worktree removed');
+  return { kind: 'retired' };
 }
 
 /**
@@ -66,24 +94,13 @@ export async function retireWorktree(ctx: DeliveryContext, batchId: BatchId): Pr
  * path set, and raise a card naming it. One git won't trust is kept too (the trust card explains).
  */
 export async function abandonWorktree(ctx: DeliveryContext, batchId: BatchId): Promise<void> {
+  const outcome = await retireWorktree(ctx, batchId);
+  if (outcome.kind !== 'kept') return;
   const batch = getBatch(ctx.state.db, batchId);
-  const path = batch.worktreePath;
-  if (path === null) return;
-  if (existsAsEntry(path)) {
-    let changed: string[];
-    try {
-      changed = await ctx.git.changedPaths(path);
-    } catch (error) {
-      if (error instanceof GitTrustError) {
-        ctx.logger.warn({ batchId, path, err: error.message }, 'abandoned worktree kept');
-        return;
-      }
-      throw error;
-    }
-    if (changed.length > 0) {
-      raise(ctx.inbox, batch.projectId, worktreeCards.keptDirty(batch, path, changed));
-      return;
-    }
-  }
-  await retireWorktree(ctx, batchId);
+  if (batch.worktreePath === null) return;
+  raise(
+    ctx.inbox,
+    batch.projectId,
+    worktreeCards.keptDirty(batch, batch.worktreePath, outcome.paths),
+  );
 }

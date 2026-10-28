@@ -41,9 +41,12 @@ const NO_ATTRIBUTES: readonly string[] = [
 export class WorktreeNotOursError extends Error {
   override readonly name = 'WorktreeNotOursError';
   readonly path: string;
+  /** Why it is not one, as the builder reads it. */
+  readonly why: string;
   constructor(path: string, why: string) {
     super(`10db won't remove ${path}: ${why}`);
     this.path = path;
+    this.why = why;
   }
 }
 
@@ -55,6 +58,20 @@ export interface AddWorktreeInput {
   readonly startPoint: string | null;
   readonly lockReason: string;
 }
+
+/** What `fileAt` found at a path of a commit. */
+export type FileAt =
+  | { readonly kind: 'file'; readonly text: string }
+  | { readonly kind: 'missing' }
+  /** A link, a submodule, a directory: anything but a regular file's blob. */
+  | { readonly kind: 'not_regular'; readonly mode: string }
+  | { readonly kind: 'too_large'; readonly bytes: number };
+
+/** The modes git stores a regular file with. */
+const REGULAR_FILE_MODES: readonly string[] = ['100644', '100755'];
+
+/** One `ls-tree --long -z` entry: mode, type, object, size (`-` for a tree), then the path. */
+const LS_TREE_ENTRY = /^(\d{6}) (\w+) ([0-9a-f]+) +(\S+)\t([\s\S]*)$/;
 
 export interface Git {
   /** The branch HEAD names; null when HEAD is detached. */
@@ -127,6 +144,12 @@ export interface Git {
   deleteBranchIfAt(repo: string, branch: string, sha: string): Promise<boolean>;
   /** Ignored directories of the checkout, top-level and nested, without the trailing `/`. */
   ignoredDirectories(repo: string): Promise<string[]>;
+  /**
+   * The text of `path` in commit `rev`, read from the object store, never from the worktree, so no
+   * link is followed: a path that is a link, or lies under one, is `not_regular` or `missing`. A
+   * blob over `maxBytes` is not read.
+   */
+  fileAt(repo: string, rev: string, path: string, maxBytes: number): Promise<FileAt>;
 }
 
 export interface GitOptions {
@@ -1121,6 +1144,23 @@ export function createGit(opts: GitOptions = {}): Git {
         if (error instanceof GitError) return false;
         throw error;
       }
+    },
+    async fileAt(repo, rev, path, maxBytes) {
+      const c = await pinned(repo);
+      const out = await git(c, ['ls-tree', '-z', '--long', '--full-tree', rev, '--', path], {
+        env: { GIT_LITERAL_PATHSPECS: '1' },
+      });
+      const entry = out
+        .split('\0')
+        .map((line) => LS_TREE_ENTRY.exec(line))
+        .find((match) => match?.[5] === path);
+      if (!entry) return { kind: 'missing' };
+      const [, mode = '', type, oid = '', size = ''] = entry;
+      if (type !== 'blob' || !REGULAR_FILE_MODES.includes(mode))
+        return { kind: 'not_regular', mode };
+      const bytes = Number(size);
+      if (!Number.isSafeInteger(bytes) || bytes > maxBytes) return { kind: 'too_large', bytes };
+      return { kind: 'file', text: await git(c, ['cat-file', 'blob', oid]) };
     },
     async ignoredDirectories(repo) {
       const out = await git(await pinned(repo), [

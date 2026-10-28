@@ -153,6 +153,12 @@ export const worktreeCards = {
     body: `The worktree path of batch "${batch.title}" holds a directory git doesn't list as a worktree, so 10db didn't remove it and no longer treats it as the batch's. Look inside, then delete it yourself if nothing there is needed.`,
     detail: { batchId: batch.id },
   }),
+  inTheWay: (batch: BatchDto, path: string, reason: string): Card => ({
+    title: `Batch "${batch.title}" not retried: ${path} is in the way`,
+    body: `10db makes the worktree whole on ${batch.branch ?? '(not cut)'} before a retry, and won't remove what is at ${path}: ${reason}. Look inside; if nothing there is needed, delete it, then press Retry on the batch strip.`,
+    foldKey: `worktree-in-the-way:${batch.id}`,
+    detail: { batchId: batch.id },
+  }),
   notReopened: (batch: BatchDto, error: unknown): Card => ({
     title: `Batch "${batch.title}" not reopened: ${detailOf(error)}`,
     body: `10db makes the worktree whole on ${batch.branch ?? '(not cut)'} before the batch reopens, and couldn't. Fix the cause, then press Retry on the batch strip.`,

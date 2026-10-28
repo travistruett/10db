@@ -14,10 +14,17 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { isolatedGitEnv } from '../../test/fixtures';
-import { parseWorktreeList } from '../git';
+import { createGit, parseWorktreeList, type GitTrustError } from '../git';
 import { createInboxService } from '../inbox';
 import { retryWorkstream } from '../team';
-import { batchCardFields, createBatchCardAnswers, retireWorktree } from './index';
+import {
+  abandonWorktree,
+  batchCardFields,
+  createBatchCardAnswers,
+  ensureWorktreeWhole,
+  retireWorktree,
+  type DeliveryContext,
+} from './index';
 
 let h: DeliveryHarness;
 /** Where the gate writes the directory it ran in. */
@@ -103,6 +110,19 @@ async function failedAfterWork(): Promise<{ batch: BatchDto; ws: WorkstreamDto; 
     transitionBatch(c, batch.id, { to: 'FAILED', patch: { failure: 'gate_failed' } }),
   );
   return { batch, ws, head };
+}
+
+/**
+ * The delivery context with a git that holds no pins, as a daemon that lost a worktree's pin would
+ * run: every read of a worktree under the root is refused as unpinned.
+ */
+function unpinned(): { ctx: DeliveryContext; refusals: GitTrustError[] } {
+  const refusals: GitTrustError[] = [];
+  const git = createGit({
+    worktreeRoot: h.worktreeRoot,
+    onRefused: (error) => refusals.push(error),
+  });
+  return { ctx: { ...h.ctx, git }, refusals };
 }
 
 /** What the builder sees of the main checkout. */
@@ -283,6 +303,54 @@ describe('Retry of a FAILED worktree batch', () => {
     expect(h.gh.prCreates()).toEqual([]);
   });
 
+  it('refuses a directory git does not list at the worktree path, naming it, and leaves it', async () => {
+    const { batch } = await failedAfterWork();
+    const wt = pathOf(batch);
+    h.git$('worktree', 'remove', '--force', '--force', wt);
+    mkdirSync(wt);
+    writeFileSync(join(wt, 'mine.txt'), 'the builder put this here\n');
+
+    h.shipper.ship(batch.id);
+    await h.jobs.idle();
+
+    expect(getBatch(h.store.db, batch.id)).toMatchObject({ state: 'FAILED', worktreePath: wt });
+    const card = h.only(h.cards());
+    expect(card.title).toContain(`${wt} is in the way`);
+    expect(card.body).toContain('git lists no worktree there');
+    expect(card.body).toContain('press Retry');
+    expect(readFileSync(join(wt, 'mine.txt'), 'utf8')).toBe('the builder put this here\n');
+    expect(h.gh.prCreates()).toEqual([]);
+  });
+
+  it('makes one worktree whole once when two repairs of the batch run at once', async () => {
+    const { batch } = await failedAfterWork();
+    const wt = pathOf(batch);
+    rmSync(wt, { recursive: true, force: true });
+    const signal = new AbortController().signal;
+    const outcomes = await Promise.all([
+      ensureWorktreeWhole(h.ctx, batch, signal),
+      ensureWorktreeWhole(h.ctx, batch, signal),
+    ]);
+    expect(outcomes.sort()).toEqual(['replaced', 'whole']);
+    expect(gitIn(wt, 'branch', '--show-current')).toBe(batch.branch);
+    expect(worktreePaths()).toEqual([realpathSync(h.repo), wt]);
+  });
+
+  it('refuses, and removes nothing, when git no longer trusts the worktree', async () => {
+    const { batch } = await failedAfterWork();
+    const wt = pathOf(batch);
+    gitIn(wt, 'switch', '-q', '-c', 'other');
+    writeFileSync(join(wt, 'README.md'), '# the builder was here\n');
+    const { ctx, refusals } = unpinned();
+
+    expect(await ensureWorktreeWhole(ctx, batch, new AbortController().signal)).toBe('refused');
+
+    expect(refusals.map((r) => r.detail.kind)).toEqual(['unpinned']);
+    expect(worktreePaths()).toEqual([realpathSync(h.repo), wt]);
+    expect(readFileSync(join(wt, 'README.md'), 'utf8')).toBe('# the builder was here\n');
+    expect(h.cards()).toEqual([]);
+  });
+
   it('Retry with unfinished work reopens only after the worktree is whole', async () => {
     const { batch, ws } = await opened();
     const wt = pathOf(batch);
@@ -394,8 +462,36 @@ describe('Abandon of a worktree batch', () => {
       worktreePath: wt,
     });
     expect(readFileSync(join(wt, 'notes.txt'), 'utf8')).toBe('not committed\n');
+    expect(worktreePaths()).toEqual([realpathSync(h.repo), wt]);
     const kept = h.cards().find((c) => c.title.includes('uncommitted changes kept'));
     expect(kept?.body).toContain('notes.txt');
     expect(kept?.body).toContain(`git worktree remove --force --force ${wt}`);
+  });
+
+  it('retireWorktree itself keeps an ABANDONED worktree with uncommitted changes', async () => {
+    const { batch } = await opened();
+    const wt = pathOf(batch);
+    writeFileSync(join(wt, 'notes.txt'), 'not committed\n');
+    h.state.write((c) => transitionBatch(c, batch.id, { to: 'ABANDONED' }));
+
+    expect(await retireWorktree(h.ctx, batch.id)).toEqual({ kind: 'kept', paths: ['notes.txt'] });
+
+    expect(getBatch(h.store.db, batch.id).worktreePath).toBe(wt);
+    expect(worktreePaths()).toEqual([realpathSync(h.repo), wt]);
+    expect(readFileSync(join(wt, 'notes.txt'), 'utf8')).toBe('not committed\n');
+  });
+
+  it('keeps a clean worktree git no longer trusts, and removes nothing', async () => {
+    const { batch } = await opened();
+    const wt = pathOf(batch);
+    h.state.write((c) => transitionBatch(c, batch.id, { to: 'ABANDONED' }));
+    const { ctx, refusals } = unpinned();
+
+    await abandonWorktree(ctx, batch.id);
+
+    expect(refusals.map((r) => r.detail.kind)).toEqual(['unpinned']);
+    expect(getBatch(h.store.db, batch.id).worktreePath).toBe(wt);
+    expect(worktreePaths()).toEqual([realpathSync(h.repo), wt]);
+    expect(existsSync(join(wt, 'README.md'))).toBe(true);
   });
 });
