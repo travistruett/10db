@@ -266,6 +266,17 @@ function comparable(path: string): string {
   }
 }
 
+/** True when the `commondir` file in a linked worktree's git dir resolves to `commonDir`. */
+function namesCommonDir(gitDir: string, commonDir: string): boolean {
+  const named = readIfPresent(join(gitDir, 'commondir')).trim();
+  if (named === '') return false;
+  try {
+    return samePath(realpathSync(resolve(gitDir, named)), commonDir);
+  } catch {
+    return false;
+  }
+}
+
 function readIfPresent(path: string): string {
   try {
     return readFileSync(path, 'utf8');
@@ -1064,16 +1075,20 @@ export function createGit(opts: GitOptions = {}): Git {
     } catch {
       throw new WorktreeNotOursError(path, 'its .git is not a gitfile');
     }
-    if (!surelyInside(gitDir, join(main.dirs.commonDir, 'worktrees')))
-      throw new WorktreeNotOursError(path, "its git dir is outside the repository's worktrees");
+    // A linked worktree's git dir is a direct child of the repository's `worktrees` directory.
+    if (!samePath(dirname(gitDir), join(main.dirs.commonDir, 'worktrees')))
+      throw new WorktreeNotOursError(path, "its git dir is not one of the repository's worktrees");
+    // Git reads refs through the git dir's `commondir` file even when GIT_COMMON_DIR is set, so the
+    // file must name the repository the main checkout's pin vouches for.
+    if (!namesCommonDir(gitDir, main.dirs.commonDir))
+      throw new WorktreeNotOursError(path, "its git dir names another repository's common dir");
     if (readIfPresent(join(gitDir, 'info', 'attributes')).trim() !== '')
       throw new WorktreeNotOursError(path, 'its git dir holds an attributes file');
-    // The main checkout's pin vouches for the repository; the git dir was just checked to be in it.
     return changes({
       real: target,
       dirs: { gitDir, commonDir: main.dirs.commonDir },
       pin: main.pin,
-      env: { GIT_DIR: gitDir, GIT_WORK_TREE: target },
+      env: { GIT_DIR: gitDir, GIT_COMMON_DIR: main.dirs.commonDir, GIT_WORK_TREE: target },
     });
   }
 

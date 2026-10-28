@@ -10,9 +10,15 @@ import {
 } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { InvalidError } from '@10db/contracts';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createTempRepoWithOrigin, isolatedGitEnv, tempDir } from '../../test/fixtures';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  createTempRepo,
+  createTempRepoWithOrigin,
+  isolatedGitEnv,
+  tempDir,
+} from '../../test/fixtures';
 import type { TempDir } from '../../test/fixtures';
+import { gitWrapper } from '../../test/git-wrapper';
 import {
   createGit,
   GitTrustError,
@@ -139,6 +145,24 @@ describe('addWorktree', () => {
     expect(raw(main(), 'branch', '--list', 'b')).toBe('');
   });
 
+  it('leaves nothing behind when checking out the new worktree fails', async () => {
+    const wrapper = gitWrapper(
+      `case " $* " in *" read-tree "*" -u "*) echo 'read-tree failed' >&2; exit 1;; esac\nexec "$GIT" "$@"`,
+    );
+    try {
+      vi.stubEnv('PATH', wrapper.path);
+      await expect(add('a', '10db/a-1')).rejects.toThrow();
+    } finally {
+      vi.unstubAllEnvs();
+      wrapper.cleanup();
+    }
+    expect(await listed()).toEqual([real(main())]);
+    expect(existsSync(at('a'))).toBe(false);
+    expect(existsSync(join(main(), '.git', 'worktrees', 'a'))).toBe(false);
+    expect(pins.get(real(at('a')))).toBeUndefined();
+    expect(raw(main(), 'branch', '--list', '10db/a-1')).toBe('');
+  });
+
   it("records the worktree's pin at creation", async () => {
     await add('a');
     const other = createGit({ worktreeRoot: root.path, pins });
@@ -254,6 +278,80 @@ describe('removeWorktree', () => {
       WorktreeNotOursError,
     );
     expect(await listed()).toContain(real(at('a')));
+  });
+});
+
+describe('worktreeChanges', () => {
+  const cleanups: (() => void)[] = [];
+  afterEach(() => {
+    for (const cleanup of cleanups.splice(0)) cleanup();
+  });
+  const gitDirOf = (path: string) =>
+    realpathSync(
+      readFileSync(join(path, '.git'), 'utf8')
+        .replace(/^gitdir: /, '')
+        .trim(),
+    );
+
+  it("lists a worktree's uncommitted changes", async () => {
+    await add('a');
+    writeFileSync(join(at('a'), 'notes.txt'), 'mine\n');
+    await expect(git.worktreeChanges(main(), at('a'))).resolves.toEqual(['notes.txt']);
+  });
+
+  it.each<{ name: string; make: () => Promise<string> }>([
+    {
+      name: "a git dir outside the repository's worktrees",
+      make: async () => {
+        await add('a');
+        const copy = join(elsewhere.path, 'gitdir');
+        execFileSync('cp', ['-R', gitDirOf(at('a')), copy]);
+        writeFileSync(join(at('a'), '.git'), `gitdir: ${copy}\n`);
+        return at('a');
+      },
+    },
+    {
+      name: "a git dir nested deeper than the repository's worktrees",
+      make: async () => {
+        await add('a');
+        const nested = join(gitDirOf(at('a')), 'nested');
+        execFileSync('cp', ['-R', gitDirOf(at('a')), join(elsewhere.path, 'copy')]);
+        execFileSync('mv', [join(elsewhere.path, 'copy'), nested]);
+        writeFileSync(join(at('a'), '.git'), `gitdir: ${nested}\n`);
+        return at('a');
+      },
+    },
+    {
+      name: 'a git dir whose commondir names another repository',
+      make: async () => {
+        await add('a');
+        const other = createTempRepo();
+        cleanups.push(() => {
+          other.cleanup();
+        });
+        writeFileSync(join(gitDirOf(at('a')), 'commondir'), `${join(other.path, '.git')}\n`);
+        return at('a');
+      },
+    },
+    {
+      name: "a worktree 10db didn't lock",
+      make: () => {
+        raw(main(), 'worktree', 'add', '-q', '-b', 'foreign', at('foreign'));
+        return Promise.resolve(at('foreign'));
+      },
+    },
+    {
+      name: "a directory git doesn't list",
+      make: async () => {
+        await add('a');
+        mkdirSync(at('copy'));
+        writeFileSync(join(at('copy'), '.git'), readFileSync(join(at('a'), '.git')));
+        return at('copy');
+      },
+    },
+  ])('refuses $name', async ({ make }) => {
+    const path = await make();
+    await expect(git.worktreeChanges(main(), path)).rejects.toBeInstanceOf(WorktreeNotOursError);
   });
 });
 
