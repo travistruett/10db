@@ -162,7 +162,7 @@ function BoardColumns({
   );
 }
 
-/** Worktree mode shows every open batch, newest first; shared mode shows the one current batch. */
+/** Worktree mode shows every open batch in the daemon's order, newest first; shared mode shows the one current batch. */
 function BatchStrips({
   project,
   workstreams,
@@ -171,10 +171,7 @@ function BatchStrips({
   readonly workstreams: readonly WorkstreamDto[];
 }) {
   if (project.workspaceMode === WorkspaceMode.Worktree && project.openBatches.length > 0) {
-    const newestFirst = project.openBatches.toSorted((a, b) =>
-      b.createdAt.localeCompare(a.createdAt),
-    );
-    return newestFirst.map((batch) => (
+    return project.openBatches.map((batch) => (
       <BatchStrip
         key={batch.id}
         batch={batch}

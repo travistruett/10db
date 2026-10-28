@@ -5,7 +5,6 @@ import {
   Delivery,
   PrTitlePrefix,
   WorkspaceMode,
-  WorktreeSeedName,
   type ProjectDto,
 } from '@10db/contracts';
 import {
@@ -23,6 +22,7 @@ import { useState, type SyntheticEvent } from 'react';
 import { useAccounts } from '../../daemon/account-queries';
 import { useCreateProject } from '../../daemon/queries';
 import { accountOptions } from '../settings/account-kind-label';
+import { checkSeedNames } from '../settings/general-values';
 import { WorkspaceFields } from '../settings/workspace-fields';
 import { parseAreas } from './areas-text';
 
@@ -79,9 +79,10 @@ export function NewProjectForm({
       return;
     }
     const worktrees = pullRequests && workspaceMode === WorkspaceMode.Worktree;
-    const seed = worktreeSeed.map((name) => name.trim()).filter((name) => name !== '');
-    if (worktrees && !seed.every((name) => WorktreeSeedName.safeParse(name).success)) {
-      setFormError('Seed names are single directories: no slash, ".", ".." or ".git"');
+    const checkedSeed = checkSeedNames(worktreeSeed);
+    const seed = checkedSeed.names;
+    if (worktrees && checkedSeed.error !== null) {
+      setFormError(checkedSeed.error);
       return;
     }
     setFormError(null);

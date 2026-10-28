@@ -51,6 +51,11 @@ describe('checkGeneral', () => {
       },
     },
     {
+      name: 'more seed names than the contract allows',
+      change: { worktreeSeed: Array.from({ length: 33 }, (_, i) => `d${String(i)}`) },
+      expected: { ok: false, errors: { worktreeSeed: expect.any(String) as string } },
+    },
+    {
       name: 'a worktree per task in local delivery',
       change: { workspaceMode: 'worktree' },
       expected: {

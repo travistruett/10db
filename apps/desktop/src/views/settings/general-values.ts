@@ -4,14 +4,27 @@ import {
   BranchName,
   Delivery,
   PrTitlePrefix,
+  ProjectPatch,
   WorkspaceMode,
-  WorktreeSeedName,
   type FlowId,
   type ProjectDto,
-  type ProjectPatch,
 } from '@10db/contracts';
 
-const MAX_SEED_NAMES = 32;
+/**
+ * The seed names trimmed and without blanks, or the contract's message for the first rule they
+ * break (a name that is not one directory, or more names than a project may seed).
+ */
+export function checkSeedNames(names: readonly string[]): {
+  readonly names: string[];
+  readonly error: string | null;
+} {
+  const trimmed = names.map((name) => name.trim()).filter((name) => name !== '');
+  const checked = ProjectPatch.safeParse({ worktreeSeed: trimmed });
+  return {
+    names: trimmed,
+    error: checked.success ? null : (checked.error.issues[0]?.message ?? 'Check the seed names'),
+  };
+}
 
 /** The General form's fields; an emptied number field is ''. */
 export interface GeneralValues {
@@ -111,13 +124,9 @@ export function checkGeneral(project: ProjectDto, values: GeneralValues): Genera
     errors.prTitlePrefix = 'Enter a PR title prefix such as feat(app)';
   if (values.workspaceMode === WorkspaceMode.Worktree && values.delivery !== Delivery.PullRequest)
     errors.workspaceMode = 'A worktree per task needs pull request delivery';
-  const seed = values.worktreeSeed.map((name) => name.trim()).filter((name) => name !== '');
-  const badSeed = seed.find((name) => !WorktreeSeedName.safeParse(name).success);
-  if (badSeed !== undefined)
-    errors.worktreeSeed =
-      WorktreeSeedName.safeParse(badSeed).error?.issues[0]?.message ?? 'Check the seed names';
-  else if (seed.length > MAX_SEED_NAMES)
-    errors.worktreeSeed = `Seed at most ${String(MAX_SEED_NAMES)} directories`;
+  const checkedSeed = checkSeedNames(values.worktreeSeed);
+  if (checkedSeed.error !== null) errors.worktreeSeed = checkedSeed.error;
+  const seed = checkedSeed.names;
   if (Object.keys(errors).length > 0) return { ok: false, errors };
 
   const patch: { -readonly [K in keyof ProjectPatch]: ProjectPatch[K] } = {};

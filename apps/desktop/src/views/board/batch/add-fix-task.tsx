@@ -31,8 +31,14 @@ export function AddFixTask({ batch, workstreams, opened, onClose }: AddFixTaskPr
   });
   // The Select offers only IDs from the list, so looking the string up gives back the branded ID without a cast.
   const byId = new Map<string, TaskId>(eligible.map((t) => [t.id, t.id]));
+  // A reopened modal starts empty, so it never posts a task picked earlier.
+  const close = () => {
+    setPicked(null);
+    add.reset();
+    onClose();
+  };
   return (
-    <Modal opened={opened} onClose={onClose} title="Add a fix task">
+    <Modal opened={opened} onClose={close} title="Add a fix task">
       <Stack>
         <Text size="sm" c="dimmed">
           {`The task joins ${batch.title} and works in its worktree.`}
@@ -59,7 +65,7 @@ export function AddFixTask({ batch, workstreams, opened, onClose }: AddFixTaskPr
               if (picked === null) return;
               add.mutate(
                 { batchTitle: batch.title, batchId: batch.id, taskId: picked },
-                { onSuccess: onClose },
+                { onSuccess: close },
               );
             }}
           >

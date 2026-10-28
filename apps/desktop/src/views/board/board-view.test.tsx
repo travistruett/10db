@@ -162,7 +162,7 @@ describe('BoardView', () => {
       prTitlePrefix: 'feat(app)',
       workspaceMode: 'worktree',
       currentBatch: older,
-      openBatches: [older, newer],
+      openBatches: [newer, older],
     });
     serve(
       http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
