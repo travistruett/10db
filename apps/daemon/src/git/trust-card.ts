@@ -79,6 +79,8 @@ function body(error: GitTrustError): string {
         )}\n\nCommit them, or push the branch, yourself. A repository that uses Git LFS can't ship through 10db yet.`;
     case GitTrustFailure.Embedded:
       return `${codeSpan(detail.path)} is a submodule or holds a repository of its own, whose git would run its own config and hooks. 10db never commits one; commit it yourself if it belongs in the change.`;
+    case GitTrustFailure.Unpinned:
+      return `10db runs git under its worktree root only in worktrees it made, and it made none at ${codeSpan(repo)}. Nothing there is trusted and nothing there ships. If it is not yours, git worktree remove --force --force ${shellQuote(repo)} removes it.`;
   }
 }
 
@@ -104,6 +106,7 @@ function foldSuffix(error: GitTrustError): string {
     case GitTrustFailure.Attributes:
     case GitTrustFailure.Filter:
     case GitTrustFailure.Embedded:
+    case GitTrustFailure.Unpinned:
       return '';
   }
 }

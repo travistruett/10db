@@ -60,3 +60,22 @@ describe('the writable card', () => {
     expect(card('/repo/vendor/git')).not.toBe(card('/tmp/lane/git'));
   });
 });
+
+describe('the unpinned card', () => {
+  const card = (repo: string) => trustCard(new GitTrustError(repo, { kind: 'unpinned' }));
+
+  it('offers no Trust and says how to remove the worktree', () => {
+    const { body, candidate } = card('/root/ab/bat_1');
+    expect(candidate).toBeNull();
+    expect(body).toContain("git worktree remove --force --force '/root/ab/bat_1'");
+  });
+
+  it('quotes a path that holds a quote', () => {
+    expect(card("/root/it's").body).toContain(`--force --force ${shellQuote("/root/it's")}`);
+  });
+
+  it('folds one card per path', () => {
+    expect(card('/root/a').foldKey).toBe(card('/root/a').foldKey);
+    expect(card('/root/a').foldKey).not.toBe(card('/root/b').foldKey);
+  });
+});
