@@ -2,8 +2,9 @@
 
 - `NN-*.md`: numbered sections. Each opens with Status (Draft | Locked), Scope and Summary. A
   Locked section changes only through a new decision that says what it supersedes.
-- `decisions.md`: append-only log, `| # | Decision | Why |`. A row that replaces an earlier one
-  says "Supersedes N". Never edit or renumber a row.
+- `decisions/`: one file per decision, `YYYY-MM-DD-<slug>.md`; its README gives the format.
+  `decisions.md` is the numbered log, closed at 133: never edit or renumber a row, and cite one by
+  number.
 - `open-questions.md`: questions with no answer yet, each with who or what can answer it.
 - `proposals/`: changes under discussion. `reviews/`: review reports. `research/`: spike results
   and vendor research, each claim marked VERIFIED (with a source) or UNKNOWN.
