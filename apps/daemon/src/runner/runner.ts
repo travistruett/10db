@@ -622,7 +622,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         opts.inbox.flag({
           projectId: project.id,
           workstreamId: id,
-          title: "The repo's .mcp.json stops sessions from starting",
+          title: "The repo's MCP config stops sessions from starting",
           body: error.message,
           foldKey: `project-mcp-error:${project.id}`,
         });
@@ -638,7 +638,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       opts.inbox.flag({
         projectId: project.id,
         workstreamId: id,
-        title: "Check the repo's .mcp.json",
+        title: "Check the repo's MCP config",
         body: warning,
         foldKey: `project-mcp-warning:${project.id}`,
       });

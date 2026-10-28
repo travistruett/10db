@@ -26,14 +26,58 @@ const PUBLIC_RESEARCH = [
   'spike-14-sandbox-policy.md',
 ];
 
+/** The numbered log is closed: parallel branches collided on the next number. */
+const LAST_NUMBERED_DECISION = 133;
+const DECISION_FILE = /^(\d{4}-\d{2}-\d{2})-[a-z0-9]+(?:-[a-z0-9]+)*\.md$/;
+
+function decisionFiles(): string[] {
+  return readdirSync(join(repoRoot, 'docs/architecture/decisions')).filter(
+    (name) => name !== 'README.md',
+  );
+}
+
 describe('docs/architecture', () => {
-  it('numbers decisions from 1 with no gaps or repeats', () => {
+  it('keeps the numbered decision log closed at 133, numbered from 1 with no gaps or repeats', () => {
     // \s* tolerates column padding, in case the table is ever formatted.
     const numbers = [
       ...readRepoFile('docs/architecture/decisions.md').matchAll(/^\|\s*(\d+)\s*\|/gm),
     ].map((m) => Number(m[1]));
-    expect(numbers.length).toBeGreaterThanOrEqual(20);
-    expect(numbers).toEqual(numbers.map((_, i) => i + 1));
+    expect(
+      numbers,
+      'record a new decision as its own file in docs/architecture/decisions/',
+    ).toEqual(Array.from({ length: LAST_NUMBERED_DECISION }, (_, i) => i + 1));
+  });
+
+  it('names each decision file by its date and a slug', () => {
+    expect(decisionFiles().length).toBeGreaterThan(0);
+    for (const name of decisionFiles()) {
+      expect(name, `docs/architecture/decisions/${name}`).toMatch(DECISION_FILE);
+    }
+  });
+
+  it('gives each decision file a title, its date, a Decision and a Why', () => {
+    for (const name of decisionFiles()) {
+      const path = `docs/architecture/decisions/${name}`;
+      const text = readRepoFile(path);
+      const date = DECISION_FILE.exec(name)?.[1];
+      expect(text, path).toMatch(/^# \S/);
+      expect(text, path).toContain(`- **Date:** ${date ?? 'a date in the file name'}\n`);
+      expect(text, path).toMatch(/^## Decision\n[\s\S]+^## Why\n/m);
+    }
+  });
+
+  it('cites only decision files that exist', () => {
+    const docs = globSync(['**/*.md'], {
+      cwd: repoRoot,
+      exclude: (path) => /(^|\/)(node_modules|target|scratch|\.git)$/.test(path),
+    });
+    const existing = new Set(decisionFiles());
+    for (const path of docs) {
+      for (const match of readRepoFile(path).matchAll(/decisions\/(\d{4}-[a-z0-9-]+\.md)/g)) {
+        const cited = match[1] ?? '';
+        expect(existing.has(cited), `${path} cites decisions/${cited}`).toBe(true);
+      }
+    }
   });
 
   it('keeps the governance decisions G1-G11 in their own table', () => {

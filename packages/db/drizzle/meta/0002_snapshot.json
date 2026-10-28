@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "5b95941a-f872-4cc6-81c8-763a7da0425c",
+  "id": "c6f58495-877c-4828-abae-e2e3fbd16890",
   "prevId": "7589afcf-3345-43ad-8be8-e87accb95068",
   "tables": {
     "aa_models": {
@@ -284,13 +284,6 @@
           "notNull": false,
           "autoincrement": false
         },
-        "worktree_path": {
-          "name": "worktree_path",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "text",
@@ -320,7 +313,7 @@
             "project_id"
           ],
           "isUnique": true,
-          "where": "state IN ('CUTTING', 'OPEN', 'SHIPPING', 'FAILED') AND worktree_path IS NULL"
+          "where": "state IN ('CUTTING', 'OPEN', 'SHIPPING', 'FAILED')"
         }
       },
       "foreignKeys": {
@@ -440,14 +433,6 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
-        },
-        "scope": {
-          "name": "scope",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "''"
         },
         "kind": {
           "name": "kind",
@@ -1260,6 +1245,14 @@
           "notNull": true,
           "autoincrement": false
         },
+        "hosts": {
+          "name": "hosts",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'[]'"
+        },
         "source_inbox_id": {
           "name": "source_inbox_id",
           "type": "text",
@@ -1888,22 +1881,6 @@
           "notNull": true,
           "autoincrement": false,
           "default": "'[]'"
-        },
-        "workspace_mode": {
-          "name": "workspace_mode",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'shared'"
-        },
-        "worktree_seed": {
-          "name": "worktree_seed",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'[\"node_modules\"]'"
         },
         "created_at": {
           "name": "created_at",

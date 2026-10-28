@@ -19,22 +19,29 @@
     {
       "idx": 2,
       "version": "6",
-      "when": 1793166815549,
-      "tag": "0002_worktree_mode",
+      "when": 1793164589706,
+      "tag": "0002_mcp_approval_hosts",
       "breakpoints": true
     },
     {
       "idx": 3,
       "version": "6",
-      "when": 1793166820127,
-      "tag": "0003_claims_scope",
+      "when": 1793200643493,
+      "tag": "0003_worktree_mode",
       "breakpoints": true
     },
     {
       "idx": 4,
       "version": "6",
-      "when": 1793166820488,
-      "tag": "0004_claims_scope_index",
+      "when": 1793200652095,
+      "tag": "0004_claims_scope",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1793200652605,
+      "tag": "0005_claims_scope_index",
       "breakpoints": true
     }
   ]

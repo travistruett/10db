@@ -40,7 +40,25 @@ let tmpRoot: string;
 let repo: TempDir;
 let checkout: string;
 
-const SERVER = { command: 'node', args: ['scripts/mcp.mjs', "it's"], env: { DOCS_TOKEN: 'tok-1' } };
+const SERVER = {
+  command: 'node',
+  args: ['scripts/mcp.mjs', "it's"],
+  env: { DOCS_TOKEN: 'tok-1' },
+  hosts: [],
+};
+/** The variables srt points its child at its proxy with. */
+const SRT_PROXY_NAMES = [
+  'HTTP_PROXY',
+  'HTTPS_PROXY',
+  'http_proxy',
+  'https_proxy',
+  'ALL_PROXY',
+  'all_proxy',
+  'NO_PROXY',
+  'no_proxy',
+  'GRPC_PROXY',
+  'grpc_proxy',
+];
 
 function forSession(
   overrides: Partial<LaneSessionInput> = {},
@@ -108,7 +126,7 @@ afterEach(() => {
 describe.skipIf(SANDBOXED)("a lane session's repo stdio MCP servers", () => {
   it('launches every one through env -i and srt, so Claude Code never starts the command itself', async () => {
     const session = await forSession({
-      mcpServers: { docs: SERVER, other: { command: 'uvx', args: ['x'], env: {} } },
+      mcpServers: { docs: SERVER, other: { command: 'uvx', args: ['x'], env: {}, hosts: [] } },
     });
     try {
       expect(Object.keys(session.mcpServers)).toEqual(['docs', 'other']);
@@ -128,8 +146,9 @@ describe.skipIf(SANDBOXED)("a lane session's repo stdio MCP servers", () => {
           inner,
         ],
       });
-      // The command is srt's own child, with nothing but the sealed file's env.
-      expect(inner).toMatch(/^exec \/usr\/bin\/env -i \/bin\/sh -c /);
+      // The command is srt's own child, with srt's proxy variables and the sealed file's env, and nothing else.
+      const proxy = SRT_PROXY_NAMES.map((name) => `${name}="$${name}"`).join(' ');
+      expect(inner.startsWith(`exec /usr/bin/env -i ${proxy} /bin/sh -c `)).toBe(true);
       expect(inner.endsWith(` 'node' 'scripts/mcp.mjs' 'it'\\''s'`)).toBe(true);
       // Its own temp dir, apart from the lane's and the other server's.
       expect(tmp).not.toBe(session.tmpDir);
@@ -154,6 +173,9 @@ describe.skipIf(SANDBOXED)("a lane session's repo stdio MCP servers", () => {
       for (const secret of ['ANTHROPIC_API_KEY', 'GH_TOKEN', 'AWS_SECRET_ACCESS_KEY'])
         expect(names).not.toContain(secret);
       expect(text).toContain("export DOCS_TOKEN='tok-1'");
+      // Node's own fetch goes through srt's proxy only when told to.
+      expect(text).toContain("export NODE_USE_ENV_PROXY='1'");
+      for (const name of SRT_PROXY_NAMES) expect(names).not.toContain(name);
       expect(text).toContain(`export TMPDIR='${tmp}'`);
     } finally {
       session.dispose();
@@ -209,10 +231,38 @@ describe.skipIf(SANDBOXED)("a lane session's repo stdio MCP servers", () => {
     },
   );
 
+  it("reaches exactly the hosts its approval names, never the project's or localhost", async () => {
+    const hosts = ['*.docs.example', 'api.example.org'];
+    const session = await forSession({
+      project: { id: projectId, repoPath: repo.path, sandboxLoopback: true },
+      mcpServers: { docs: { ...SERVER, hosts }, other: { ...SERVER, hosts: [] } },
+    });
+    try {
+      const { settings, tmp } = launchOf(session, 'docs');
+      expect(settings).toEqual(
+        expect.objectContaining({
+          network: {
+            allowedDomains: hosts,
+            deniedDomains: [],
+            strictAllowlist: true,
+            allowMachLookup: ['com.apple.FSEvents'],
+            allowUnixSockets: [tmp],
+          },
+        }),
+      );
+      // Another server's hosts are its own.
+      expect(launchOf(session, 'other').settings).toMatchObject({
+        network: { allowedDomains: [] },
+      });
+    } finally {
+      session.dispose();
+    }
+  });
+
   it('leaves out a server whose approved value it cannot seal, naming it, and starts the rest', async () => {
     const session = await forSession({
       mcpServers: {
-        broken: { command: 'node', args: ['x.mjs'], env: { DOCS_TOKEN: 'line-one\nline-two' } },
+        broken: { ...SERVER, args: ['x.mjs'], env: { DOCS_TOKEN: 'line-one\nline-two' } },
         docs: SERVER,
       },
     });

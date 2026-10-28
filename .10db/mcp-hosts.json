@@ -1,0 +1,5 @@
+{
+  "servers": {
+    "mantine": { "hosts": ["mantine.dev", "registry.npmjs.org"] }
+  }
+}

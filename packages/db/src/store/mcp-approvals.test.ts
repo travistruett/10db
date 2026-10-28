@@ -23,12 +23,14 @@ describe('MCP server approvals', () => {
       configHash: HASH_A,
       verdict: 'approved' as const,
       variables: ['DOCS_TOKEN'],
+      hosts: ['registry.npmjs.org', '*.example.org'],
       sourceInboxId: null,
     };
     store.write((ctx) => recordMcpApproval(ctx, approval));
     expect(getMcpApproval(store.db, project.id, 'docs', HASH_A)).toMatchObject({
       verdict: 'approved',
       variables: ['DOCS_TOKEN'],
+      hosts: ['registry.npmjs.org', '*.example.org'],
     });
     // A changed config, another server name or another project has no verdict.
     expect(getMcpApproval(store.db, project.id, 'docs', HASH_B)).toBeNull();
@@ -45,12 +47,20 @@ describe('MCP server approvals', () => {
       sourceInboxId: null,
     };
     store.write((ctx) =>
-      recordMcpApproval(ctx, { ...key, verdict: 'approved', variables: ['DOCS_TOKEN'] }),
+      recordMcpApproval(ctx, {
+        ...key,
+        verdict: 'approved',
+        variables: ['DOCS_TOKEN'],
+        hosts: ['registry.npmjs.org'],
+      }),
     );
-    store.write((ctx) => recordMcpApproval(ctx, { ...key, verdict: 'denied', variables: [] }));
+    store.write((ctx) =>
+      recordMcpApproval(ctx, { ...key, verdict: 'denied', variables: [], hosts: [] }),
+    );
     expect(getMcpApproval(store.db, project.id, 'docs', HASH_A)).toMatchObject({
       verdict: 'denied',
       variables: [],
+      hosts: [],
     });
   });
 });

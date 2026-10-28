@@ -73,7 +73,8 @@ their own temporary folder, no credentials, no Docker, and only the project's ne
 read your SSH key finds nothing there. A check that is killed or crashes counts as a failure, never a pass.
 
 The same applies to tool servers ("MCP servers") a repository declares and you approve: each runs in its
-own sandbox, with no network at all and nothing but the values you approved.
+own sandbox, with nothing but the values you approved, and it reaches only the internet hosts its approval
+names (in the repository's `.10db/mcp-hosts.json`, shown on the approval card), or none.
 
 ### 3. 10db's own git can't be tricked
 

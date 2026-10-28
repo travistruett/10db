@@ -2,9 +2,11 @@ import {
   MCP_APPROVAL_DETAIL,
   McpApprovalChoice,
   McpServerReview,
+  McpTransport,
   type InboxItemDto,
 } from '@10db/contracts';
 import { Alert, Code, Stack, Text } from '@mantine/core';
+import type { ReactNode } from 'react';
 
 /** The server under review when `item` is an MCP approval card, else null. */
 export function mcpReview(item: InboxItemDto): McpServerReview | null {
@@ -32,27 +34,31 @@ export function McpApprovalDetails({
   const reads = review.variables.length > 0 ? review.variables.join('\n') : 'Nothing';
   return (
     <Stack gap="xs">
-      <div>
-        <Text size="xs" c="dimmed">
-          What approving runs
-        </Text>
-        <Code block style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-          {body}
-        </Code>
-      </div>
-      <div>
-        <Text size="xs" c="dimmed">
-          Reads these variables from your environment
-        </Text>
-        <Code block style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-          {reads}
-        </Code>
-      </div>
+      <Listing label="What approving runs">{body}</Listing>
+      <Listing label="Reads these variables from your environment">{reads}</Listing>
+      {review.transport === McpTransport.Stdio ? (
+        <Listing label="Reaches these hosts">
+          {review.hosts.length > 0 ? review.hosts.join('\n') : 'No host'}
+        </Listing>
+      ) : null}
       {review.sensitive.length > 0 ? (
         <Alert color="yellow" title="These look like credentials">
           {`Approving passes ${review.sensitive.join(', ')} to this server.`}
         </Alert>
       ) : null}
     </Stack>
+  );
+}
+
+function Listing({ label, children }: { readonly label: string; readonly children: ReactNode }) {
+  return (
+    <div>
+      <Text size="xs" c="dimmed">
+        {label}
+      </Text>
+      <Code block style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+        {children}
+      </Code>
+    </div>
   );
 }

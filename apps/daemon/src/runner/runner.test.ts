@@ -893,6 +893,59 @@ describe('runner', () => {
       expect(flags).toHaveLength(1);
       expect(flags[0]?.body).toContain('is not valid JSON');
     });
+
+    const writeHosts = (content: string) => {
+      mkdirSync(join(engine.repoPath, '.10db'), { recursive: true });
+      writeFileSync(join(engine.repoPath, '.10db', 'mcp-hosts.json'), content);
+    };
+
+    it('asks again when the hosts file names a host for an approved server, with the hosts on the card', async () => {
+      engine = await createTestEngine(BOOK);
+      writeMcp({ mantine: MANTINE });
+      await runTask('Alpha');
+      answerAll('approve');
+      writeHosts(JSON.stringify({ servers: { mantine: { hosts: ['registry.npmjs.org'] } } }));
+      await runTask('Beta');
+      const cards = approvalCards();
+      expect(cards).toHaveLength(1);
+      expect(cards[0]?.detail?.[MCP_APPROVAL_DETAIL]).toMatchObject({
+        name: 'mantine',
+        hosts: ['registry.npmjs.org'],
+      });
+      expect(cards[0]?.body).toContain('reaches only registry.npmjs.org, never localhost');
+    });
+
+    it('fails the session start on a hosts file it cannot parse, with one folded flag naming it', async () => {
+      engine = await createTestEngine({ Alpha: [[turn]] });
+      writeMcp({ mantine: MANTINE });
+      writeHosts(JSON.stringify({ servers: { mantine: { hosts: ['127.0.0.1'] } } }));
+      const { workstream } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+      expect(listSessions(engine.store.db, workstream.id)).toEqual([]);
+      const flags = listInbox(engine.store.db, { states: ['OPEN'] }).filter(
+        (i) => i.kind === 'flag',
+      );
+      expect(flags).toHaveLength(1);
+      expect(flags[0]?.title).toBe("The repo's MCP config stops sessions from starting");
+      expect(flags[0]?.body).toContain('mcp-hosts.json is not a valid MCP hosts file');
+    });
+
+    it('warns about hosts named for a server the repo does not run over stdio, and opens none', async () => {
+      engine = await createTestEngine(BOOK);
+      writeMcp({ docs: DOCS });
+      writeHosts(JSON.stringify({ servers: { docs: { hosts: ['docs.example'] } } }));
+      await runTask('Alpha');
+      expect(approvalCards()[0]?.detail?.[MCP_APPROVAL_DETAIL]).toMatchObject({ hosts: [] });
+      const warnings = listInbox(engine.store.db, { states: ['OPEN'] }).filter(
+        (i) => i.title === "Check the repo's MCP config",
+      );
+      expect(warnings.map((w) => w.body)).toEqual([
+        expect.stringContaining('names hosts for "docs"'),
+      ]);
+    });
   });
 
   it('parks on the card that is still open when two waits overlap and the first is answered', async () => {
@@ -2713,7 +2766,14 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
 
     expect(probe.inputs.map((input) => input.mcpServers)).toEqual([
       {},
-      { mantine: { type: 'stdio', ...mantine, env: { PATH: '/usr/bin:/bin', HOME: '/h' } } },
+      {
+        mantine: {
+          type: 'stdio',
+          ...mantine,
+          env: { PATH: '/usr/bin:/bin', HOME: '/h' },
+          hosts: [],
+        },
+      },
     ]);
     const servers = specs[1]?.projectMcpServers;
     expect(servers?.['docs']).toEqual({ ...docs, headers: null });
