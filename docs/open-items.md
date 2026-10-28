@@ -59,7 +59,18 @@
 - [ ] Worktree mode: seeding ignored files such as `.env`; `worktree_seed` names directories only.
 - [ ] Worktree mode: parallel ships behind a limit (one ship runs at a time per project now).
 - [ ] Worktree mode: rebasing or updating an unmerged pull request (a worktree is cut once and never refreshed).
-- [ ] Worktree mode: a per-task mode choice, and dropping the unused `tasks.workspace_mode` column.
+- [ ] Worktree mode: choose shared or worktree per task, decided when work is broken into tasks. The goal:
+      frontend tasks on different screens run as parallel lanes in the shared checkout, where the builder watches
+      them live in one dev window, and only a task that needs isolation (migrations, the lockfile, contracts, a long
+      daemon change, anything that would break the dev server mid-iteration) gets its own worktree. Areas, hazards
+      and dependencies are the inputs; the planner proposes the lane count and each task's placement, and the
+      builder confirms. Worktrees make rapid UI iteration across screens harder, so a project-wide switch isn't
+      enough. Keep `tasks.workspace_mode` for this rather than dropping it.
+- [ ] Worktree mode: removing a clean leftover worktree also removes its git-ignored files, such as a
+      hand-made `.env`; keep a worktree with ignored files 10db didn't seed, and raise a card, as for one with
+      uncommitted changes.
+- [ ] Worktree mode: with `worktree.useRelativePaths=true` in the builder's global git config (git 2.48+),
+      every worktree cut fails; pass the setting off on the daemon's `git worktree add`.
 - [ ] Worktree mode: a `WorktreeRootError` at start (a bad `TENDB_WORKTREE_ROOT`, or a checkout containing `~/.10db`) is not mapped to a stop-restart exit code, so the desktop supervisor restarts into it.
 - [ ] Batch delivery: an after-ship action per batch or task (auto_merge with gh pr merge --auto --squash, or a project deploy command), spec §9.
 - [ ] Batch delivery: stacked batches, rebasing or updating an unmerged PR, and hosts other than GitHub (spec §9).
