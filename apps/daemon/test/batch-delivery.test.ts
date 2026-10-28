@@ -108,7 +108,7 @@ async function start(systemCheck?: () => Promise<SystemCheck>) {
 describe('batch delivery through the daemon', () => {
   it('ships a two-task batch as one pull request', async () => {
     const { api, project, alpha, beta } = await start();
-    const batch = await api.post(`/projects/${project.id}/batches`, BatchDto, {
+    const [batch] = await api.post(`/projects/${project.id}/batches`, z.tuple([BatchDto]), {
       title: 'Greetings for everyone',
       taskIds: [alpha.id, beta.id],
     });
@@ -146,7 +146,7 @@ describe('batch delivery through the daemon', () => {
   it('keeps a shipped batch listed with its pull request, newest batch first, once the next batch starts', async () => {
     const { api, project, alpha, beta } = await start();
     const listed = () => api.get(`/projects/${project.id}/batches`, z.array(BatchDto));
-    const first = await api.post(`/projects/${project.id}/batches`, BatchDto, {
+    const [first] = await api.post(`/projects/${project.id}/batches`, z.tuple([BatchDto]), {
       title: 'Alpha first',
       taskIds: [alpha.id],
     });
@@ -154,7 +154,7 @@ describe('batch delivery through the daemon', () => {
       const batch = (await listed()).find((b) => b.id === first.id);
       return batch?.state === 'SHIPPED' ? batch : undefined;
     }, 30_000);
-    const second = await api.post(`/projects/${project.id}/batches`, BatchDto, {
+    const [second] = await api.post(`/projects/${project.id}/batches`, z.tuple([BatchDto]), {
       title: 'Beta second',
       taskIds: [beta.id],
     });
