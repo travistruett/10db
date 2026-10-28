@@ -1,4 +1,5 @@
 export { CheckoutPin, memoryPinStore, type PinStore } from './checkout-pin';
+export { equalOrUnder, samePath, surelyInside } from './lane-writable';
 export { withDaemonGitConfig } from './daemon-config';
 export { createGit, WorktreeNotOursError, type AddWorktreeInput, type Git } from './git';
 export { GitNetworkError, GitNetworkFailure, type NetworkCall } from './network';

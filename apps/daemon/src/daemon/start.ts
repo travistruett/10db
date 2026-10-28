@@ -610,6 +610,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     processes,
     shipper,
     logger: logger.child({ component: 'delivery' }),
+    worktrees: { ctx: delivery, root: worktreeRoot },
   });
   const unsubscribeShip = subscribeShipTrigger(bus, state.db, shipper);
 
