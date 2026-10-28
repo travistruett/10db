@@ -577,6 +577,7 @@ describe('batch routes', () => {
     gateExitCode: null,
     gateLogPath: null,
     failure: null,
+    worktreePath: null,
     createdAt: '2026-10-21T12:00:00.000Z',
     updatedAt: '2026-10-21T12:00:00.000Z',
   } as const;

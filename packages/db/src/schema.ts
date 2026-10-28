@@ -54,6 +54,7 @@ import type {
   ToolAccess,
   ToolOpId,
   Urgency,
+  WorkspaceMode,
   WorkstreamId,
   WorkstreamState,
   WorkstreamStep,
@@ -158,13 +159,21 @@ export const projects = sqliteTable('projects', {
     .$type<string[]>()
     .notNull()
     .default(sql`'[]'`),
+  /** Where tasks work: the one checkout, or a git worktree per started task. */
+  workspaceMode: text('workspace_mode').$type<WorkspaceMode>().notNull().default('shared'),
+  /** Ignored directories of the main checkout a new worktree gets copies of. */
+  worktreeSeed: text('worktree_seed', { mode: 'json' })
+    .$type<string[]>()
+    .notNull()
+    .default(sql`'["node_modules"]'`),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
 
 /**
  * One branch and one pull request (batch delivery spec §3). The partial unique index allows one
- * unfinished batch per project; its state list matches UNFINISHED_BATCH_STATES.
+ * unfinished shared batch per project, and any number of worktree batches; its state list matches
+ * UNFINISHED_BATCH_STATES.
  */
 export const batches = sqliteTable(
   'batches',
@@ -188,6 +197,11 @@ export const batches = sqliteTable(
     gatePid: integer('gate_pid'),
     gatePidStart: text('gate_pid_start'),
     failure: text('failure').$type<BatchFailure>(),
+    /**
+     * The real path of the batch's worktree. Set in the CUTTING insert and cleared only once the
+     * batch has finished, so an unfinished row without one is a shared batch.
+     */
+    worktreePath: text('worktree_path'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -195,7 +209,7 @@ export const batches = sqliteTable(
     index('batches_project_idx').on(t.projectId),
     uniqueIndex('batches_one_unfinished')
       .on(t.projectId)
-      .where(sql`state IN ('CUTTING', 'OPEN', 'SHIPPING', 'FAILED')`),
+      .where(sql`state IN ('CUTTING', 'OPEN', 'SHIPPING', 'FAILED') AND worktree_path IS NULL`),
   ],
 );
 
@@ -426,6 +440,14 @@ export const claims = sqliteTable(
       .$type<WorkstreamId>()
       .notNull()
       .references(() => workstreams.id),
+    /**
+     * What the claim is exclusive within: the project, or for an area in a worktree project, the
+     * batch. The default only lets SQLite add the column; every insert writes it.
+     */
+    scope: text('scope')
+      .$type<ProjectId | BatchId>()
+      .notNull()
+      .default(sql`''`),
     kind: text('kind').$type<ClaimKind>().notNull(),
     name: text('name').notNull(),
     exclusive: integer('exclusive', { mode: 'boolean' }).notNull(),
@@ -436,7 +458,7 @@ export const claims = sqliteTable(
   },
   (t) => [
     uniqueIndex('claims_active_unique')
-      .on(t.projectId, t.kind, t.name)
+      .on(t.scope, t.kind, t.name)
       .where(sql`released_at IS NULL`),
     index('claims_workstream_idx').on(t.workstreamId),
   ],

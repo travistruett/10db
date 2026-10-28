@@ -22,6 +22,8 @@ export const BatchDto = z.object({
   gateExitCode: z.int().nullable(),
   gateLogPath: z.string().nullable(),
   failure: z.enum(BatchFailure).nullable(),
+  /** The real path of the batch's worktree; null in shared mode and once the worktree is removed. */
+  worktreePath: z.string().nullable(),
   createdAt: Timestamp,
   updatedAt: Timestamp,
 });
@@ -32,6 +34,8 @@ export const BatchStartInput = z
   .object({
     title: Title,
     taskIds: z.array(TaskId).min(1).max(50),
+    /** Adds the tasks to this open or failed batch instead of starting new ones. */
+    batchId: BatchId.optional(),
   })
   .refine((i) => new Set(i.taskIds).size === i.taskIds.length, {
     message: 'Name each task once',
@@ -39,12 +43,18 @@ export const BatchStartInput = z
   });
 export type BatchStartInput = z.infer<typeof BatchStartInput>;
 
+/** `POST /projects/:projectId/batches` answers 202 with the batches the start made or joined. */
+export const BatchStartResult = z.array(BatchDto);
+export type BatchStartResult = z.infer<typeof BatchStartResult>;
+
 /**
  * `GET /projects`: each project with its unfinished batch, else its latest one. A body without the
  * field reads as no batch, so a client that only knows ProjectDto-shaped answers still parses.
  */
 export const ProjectViewDto = ProjectDto.extend({
   currentBatch: BatchDto.nullable().default(null),
+  /** Every unfinished batch, newest first; a worktree project has one per started task. */
+  openBatches: z.array(BatchDto).default([]),
 });
 export type ProjectViewDto = z.infer<typeof ProjectViewDto>;
 

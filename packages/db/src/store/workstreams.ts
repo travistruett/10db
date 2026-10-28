@@ -242,6 +242,15 @@ export function transitionWorkstream(
   return getWorkstream(ctx.tx, id);
 }
 
+/** Frees every workstream of a batch that is about to be deleted. */
+export function detachFromBatch(ctx: WriteContext, batchId: BatchId): void {
+  ctx.tx
+    .update(schema.workstreams)
+    .set({ batchId: null, updatedAt: ctx.now })
+    .where(eq(schema.workstreams.batchId, batchId))
+    .run();
+}
+
 export function patchWorkstream(
   ctx: WriteContext,
   id: WorkstreamId,

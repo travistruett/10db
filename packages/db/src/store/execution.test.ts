@@ -1,4 +1,4 @@
-import { ConflictError, mintId, WorkstreamState as S } from '@10db/contracts';
+import { ConflictError, mintId, WorkstreamState as S, type BatchId } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   acquireClaims,
@@ -277,6 +277,67 @@ describe('claims', () => {
       }),
     ).value;
     expect(third.ok).toBe(true);
+  });
+});
+
+describe('claims by scope', () => {
+  const lease = '2026-10-13T12:01:00.000Z';
+  const b1 = mintId('Batch');
+  const b2 = mintId('Batch');
+  interface Held {
+    kind: 'area' | 'hazard';
+    name: string;
+    areaScope?: BatchId;
+    otherProject?: boolean;
+  }
+  it.each<{ name: string; first: Held; second: Held; ok: boolean }>([
+    {
+      name: 'the same area in two batches of one project',
+      first: { kind: 'area', name: 'ui', areaScope: b1 },
+      second: { kind: 'area', name: 'ui', areaScope: b2 },
+      ok: true,
+    },
+    {
+      name: 'the same area in one batch',
+      first: { kind: 'area', name: 'ui', areaScope: b1 },
+      second: { kind: 'area', name: 'ui', areaScope: b1 },
+      ok: false,
+    },
+    {
+      name: 'the same hazard in two batches',
+      first: { kind: 'hazard', name: 'docker', areaScope: b1 },
+      second: { kind: 'hazard', name: 'docker', areaScope: b2 },
+      ok: false,
+    },
+    {
+      name: 'the same area with no scope (shared mode, as today)',
+      first: { kind: 'area', name: 'ui' },
+      second: { kind: 'area', name: 'ui' },
+      ok: false,
+    },
+    {
+      name: 'the same area in two projects',
+      first: { kind: 'area', name: 'ui' },
+      second: { kind: 'area', name: 'ui', otherProject: true },
+      ok: true,
+    },
+  ])('$name', ({ first, second, ok }) => {
+    const a = seedWorkstream('A', ['ui']);
+    const b = second.otherProject
+      ? seedWorkstream('B', ['ui'])
+      : seedWorkstream('B', ['ui'], a.project);
+    const take = (held: Held, who: typeof a) =>
+      store.write((ctx) =>
+        acquireClaims(ctx, {
+          projectId: who.project.id,
+          workstreamId: who.ws.id,
+          requests: [{ kind: held.kind, name: held.name }],
+          leaseExpiresAt: lease,
+          ...(held.areaScope ? { areaScope: held.areaScope } : {}),
+        }),
+      ).value;
+    expect(take(first, a).ok).toBe(true);
+    expect(take(second, b).ok).toBe(ok);
   });
 });
 

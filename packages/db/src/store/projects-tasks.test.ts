@@ -11,6 +11,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as schema from '../schema';
 import { seedDefaultAccount } from './accounts';
+import { insertBatch } from './batches';
 import { listEventsAfter } from './events';
 import { getProject, insertProject, listProjects, patchProject } from './projects';
 import type { Store, WriteContext } from './store';
@@ -112,6 +113,73 @@ describe('projects', () => {
       store.write((ctx) => patchProject(ctx, project.id, { allowedCommands: ['pnpm --run'] })),
     ).toThrow();
     expect(getProject(store.db, project.id).allowedCommands).toEqual(['pnpm test']);
+  });
+});
+
+describe('workspace mode', () => {
+  const worktreeConfig = {
+    delivery: 'pull_request',
+    prTitlePrefix: 'feat(app)',
+    workspaceMode: 'worktree',
+  } as const;
+
+  it('insertProject stores the mode and the seed', () => {
+    const project = seedProject(store, {
+      ...worktreeConfig,
+      worktreeSeed: ['node_modules', 'target'],
+    });
+    expect(getProject(store.db, project.id)).toMatchObject({
+      workspaceMode: 'worktree',
+      worktreeSeed: ['node_modules', 'target'],
+    });
+    expect(seedProject(store, { repoPath: '/tmp/plain' })).toMatchObject({
+      workspaceMode: 'shared',
+      worktreeSeed: ['node_modules'],
+    });
+  });
+
+  it('patchProject refuses worktree mode with local delivery', () => {
+    const local = seedProject(store);
+    expect(() =>
+      store.write((ctx) => patchProject(ctx, local.id, { workspaceMode: 'worktree' })),
+    ).toThrow(InvalidError);
+    const worktree = seedProject(store, { ...worktreeConfig, repoPath: '/tmp/wt' });
+    expect(() =>
+      store.write((ctx) => patchProject(ctx, worktree.id, { delivery: 'local' })),
+    ).toThrow(InvalidError);
+    expect(getProject(store.db, worktree.id).delivery).toBe('pull_request');
+  });
+
+  it('patchProject takes both changes together and stores a new seed', () => {
+    const project = seedProject(store, { prTitlePrefix: 'feat(app)' });
+    const patched = store.write((ctx) =>
+      patchProject(ctx, project.id, {
+        delivery: 'pull_request',
+        workspaceMode: 'worktree',
+        worktreeSeed: ['.venv'],
+      }),
+    ).value;
+    expect(patched).toMatchObject({ workspaceMode: 'worktree', worktreeSeed: ['.venv'] });
+  });
+
+  it('patchProject refuses a workspace mode change while the project has an unfinished batch', () => {
+    const project = seedProject(store, {
+      delivery: 'pull_request',
+      prTitlePrefix: 'feat(app)',
+    });
+    const batch = store.write((ctx) =>
+      insertBatch(ctx, { projectId: project.id, title: 'Open one', baseBranch: 'main' }),
+    ).value;
+    let refusal: unknown;
+    try {
+      store.write((ctx) => patchProject(ctx, project.id, { workspaceMode: 'worktree' }));
+    } catch (error) {
+      refusal = error;
+    }
+    expect(refusal).toBeInstanceOf(ConflictError);
+    expect(String(refusal)).toContain('Open one');
+    expect(batch.state).toBe('CUTTING');
+    expect(getProject(store.db, project.id).workspaceMode).toBe('shared');
   });
 });
 

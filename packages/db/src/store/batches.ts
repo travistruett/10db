@@ -3,18 +3,21 @@ import {
   canBatchTransition,
   ConflictError,
   EventType,
+  isTerminal,
   mintId,
   NotFoundError,
   UNFINISHED_BATCH_STATES,
+  WorkstreamState,
   type BatchDto,
   type BatchFailure,
   type BatchId,
   type ProjectId,
 } from '@10db/contracts';
-import { and, asc, desc, eq, inArray, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNotNull, isNull, type SQL } from 'drizzle-orm';
 import type { Json } from '../json';
 import * as schema from '../schema';
 import type { DbReader, WriteContext } from './store';
+import { detachFromBatch, listWorkstreams, transitionWorkstream } from './workstreams';
 
 export type BatchRow = typeof schema.batches.$inferSelect;
 
@@ -28,6 +31,7 @@ export interface BatchPatch {
   readonly gatePid?: number | null;
   readonly gatePidStart?: string | null;
   readonly failure?: BatchFailure | null;
+  readonly worktreePath?: string | null;
 }
 
 /** The gate pid stays internal: only recovery reads it. */
@@ -45,6 +49,7 @@ function toBatchDto(row: BatchRow): BatchDto {
     gateExitCode: row.gateExitCode,
     gateLogPath: row.gateLogPath,
     failure: row.failure,
+    worktreePath: row.worktreePath,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -64,24 +69,38 @@ export function getBatch(db: DbReader, id: BatchId): BatchDto {
   return toBatchDto(getBatchRow(db, id));
 }
 
+const unfinished = inArray(schema.batches.state, [...UNFINISHED_BATCH_STATES]);
+
+/**
+ * The project's unfinished shared batch. A worktree batch holds its path from its CUTTING insert
+ * until it has finished, so an unfinished row without a path is a shared one.
+ */
 export function findUnfinishedBatch(db: DbReader, projectId: ProjectId): BatchDto | undefined {
   const row = db
     .select()
     .from(schema.batches)
     .where(
-      and(
-        eq(schema.batches.projectId, projectId),
-        inArray(schema.batches.state, [...UNFINISHED_BATCH_STATES]),
-      ),
+      and(eq(schema.batches.projectId, projectId), unfinished, isNull(schema.batches.worktreePath)),
     )
     .get();
   return row ? toBatchDto(row) : undefined;
 }
 
-/** The batch a project view shows: the unfinished one, else the latest. */
+/** Every unfinished batch of the project in any mode, newest first. */
+export function listUnfinishedBatches(db: DbReader, projectId: ProjectId): BatchDto[] {
+  return db
+    .select()
+    .from(schema.batches)
+    .where(and(eq(schema.batches.projectId, projectId), unfinished))
+    .orderBy(desc(schema.batches.createdAt), desc(schema.batches.id))
+    .all()
+    .map(toBatchDto);
+}
+
+/** The batch a project view shows: the newest unfinished one, else the latest. */
 export function currentBatch(db: DbReader, projectId: ProjectId): BatchDto | null {
-  const unfinished = findUnfinishedBatch(db, projectId);
-  if (unfinished) return unfinished;
+  const newest = listUnfinishedBatches(db, projectId)[0];
+  if (newest) return newest;
   const latest = db
     .select()
     .from(schema.batches)
@@ -90,6 +109,22 @@ export function currentBatch(db: DbReader, projectId: ProjectId): BatchDto | nul
     .limit(1)
     .get();
   return latest ? toBatchDto(latest) : null;
+}
+
+/** Batches whose worktree path is still set, in any state: the worktrees the daemon still owns. */
+export function listLiveWorktrees(db: DbReader): BatchDto[] {
+  return db
+    .select()
+    .from(schema.batches)
+    .where(isNotNull(schema.batches.worktreePath))
+    .orderBy(asc(schema.batches.createdAt), asc(schema.batches.id))
+    .all()
+    .map(toBatchDto);
+}
+
+export function findBatchByWorktreePath(db: DbReader, path: string): BatchDto | undefined {
+  const row = db.select().from(schema.batches).where(eq(schema.batches.worktreePath, path)).get();
+  return row ? toBatchDto(row) : undefined;
 }
 
 export function listBatches(
@@ -111,16 +146,25 @@ export function listBatches(
 /** A new batch is CUTTING: the row exists before any git side effect (batch delivery spec §5). */
 export function insertBatch(
   ctx: WriteContext,
-  input: { readonly projectId: ProjectId; readonly title: string; readonly baseBranch: string },
+  input: {
+    readonly projectId: ProjectId;
+    readonly title: string;
+    readonly baseBranch: string;
+    readonly id?: BatchId;
+    /** A worktree batch names its worktree here; a shared batch leaves it out and runs alone. */
+    readonly worktreePath?: string;
+  },
 ): BatchDto {
-  const unfinished = findUnfinishedBatch(ctx.tx, input.projectId);
-  if (unfinished) {
-    throw new ConflictError(
-      `Batch "${unfinished.title}" is still ${unfinished.state.toLowerCase()}; a project runs one batch at a time`,
-    );
+  if (input.worktreePath === undefined) {
+    const open = findUnfinishedBatch(ctx.tx, input.projectId);
+    if (open) {
+      throw new ConflictError(
+        `Batch "${open.title}" is still ${open.state.toLowerCase()}; a project runs one batch at a time`,
+      );
+    }
   }
   const row: BatchRow = {
-    id: mintId('Batch'),
+    id: input.id ?? mintId('Batch'),
     projectId: input.projectId,
     title: input.title,
     state: BatchState.Cutting,
@@ -134,6 +178,7 @@ export function insertBatch(
     gatePid: null,
     gatePidStart: null,
     failure: null,
+    worktreePath: input.worktreePath ?? null,
     createdAt: ctx.now,
     updatedAt: ctx.now,
   };
@@ -170,13 +215,26 @@ export function patchBatch(ctx: WriteContext, id: BatchId, patch: BatchPatch): B
   return getBatch(ctx.tx, id);
 }
 
-/** A refused or interrupted cut leaves nothing behind: nothing references a CUTTING row. */
+/** Forgets the worktree of a finished batch, so the daemon stops treating it as live. */
+export function clearWorktreePath(ctx: WriteContext, id: BatchId): BatchDto {
+  return patchBatch(ctx, id, { worktreePath: null });
+}
+
+/**
+ * A refused or interrupted cut leaves nothing behind: its workstreams are cancelled and detached,
+ * so nothing references the row.
+ */
 export function deleteCuttingBatch(ctx: WriteContext, id: BatchId, reason: string): void {
   const row = getBatchRow(ctx.tx, id);
   if (row.state !== BatchState.Cutting)
     throw new ConflictError(
       `Batch "${row.title}" is ${row.state}; only a cutting batch is deleted`,
     );
+  for (const ws of listWorkstreams(ctx.tx, { batchId: id })) {
+    if (!isTerminal(ws.state))
+      transitionWorkstream(ctx, ws.id, { to: WorkstreamState.Cancelled, fence: null, reason });
+  }
+  detachFromBatch(ctx, id);
   ctx.tx.delete(schema.batches).where(eq(schema.batches.id, id)).run();
   emitBatch(ctx, id, { from: BatchState.Cutting, to: null, reason });
 }

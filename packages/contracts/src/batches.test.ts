@@ -6,8 +6,20 @@ import {
   shipReadiness,
   UNFINISHED_BATCH_STATES,
 } from './batch-workflow';
-import { BatchDto, BatchStartInput, TaskStartResult } from './batches';
-import { TaskInput, TaskPatch } from './entities';
+import {
+  BatchDto,
+  BatchStartInput,
+  BatchStartResult,
+  ProjectViewDto,
+  TaskStartResult,
+} from './batches';
+import {
+  DEFAULT_WORKTREE_SEED,
+  ProjectInput,
+  TaskInput,
+  TaskPatch,
+  WorktreeSeedName,
+} from './entities';
 import { BranchName, PrTitlePrefix } from './git-names';
 import { mintId } from './ids';
 import { BatchState as B, WorkstreamState as S, type BatchState } from './states';
@@ -178,11 +190,138 @@ describe('batch schemas', () => {
       gateExitCode: null,
       gateLogPath: null,
       failure: null,
+      worktreePath: null,
       createdAt: '2026-10-21T12:00:00.000Z',
       updatedAt: '2026-10-21T12:00:00.000Z',
     });
     const parsed = TaskStartResult.parse(batch);
     expect('taskId' in parsed).toBe(false);
     expect(parsed).toEqual(batch);
+  });
+});
+
+describe('WorktreeSeedName', () => {
+  it.each([
+    { name: 'a plain directory name', value: 'node_modules', ok: true },
+    { name: "cargo's target", value: 'target', ok: true },
+    { name: 'a dotted name', value: '.venv', ok: true },
+    { name: 'a path', value: 'apps/x', ok: false },
+    { name: 'the current directory', value: '.', ok: false },
+    { name: 'the parent directory', value: '..', ok: false },
+    { name: "git's own directory", value: '.git', ok: false },
+    { name: 'empty', value: '', ok: false },
+    { name: 'a NUL', value: 'a\0b', ok: false },
+    { name: 'over 255 characters', value: 'x'.repeat(256), ok: false },
+  ])('$name', ({ value, ok }) => {
+    expect(WorktreeSeedName.safeParse(value).success).toBe(ok);
+  });
+});
+
+describe('worktree mode contracts', () => {
+  const project = {
+    name: 'App',
+    repoPath: '/tmp/app',
+    gateCommand: 'make gate',
+    areas: [{ name: 'api', globs: ['src/**'] }],
+  };
+
+  it('ProjectInput refuses worktree mode with local delivery', () => {
+    const result = ProjectInput.safeParse({ ...project, workspaceMode: 'worktree' });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues[0]?.path).toEqual(['workspaceMode']);
+  });
+
+  it('ProjectInput takes worktree mode with pull request delivery', () => {
+    const result = ProjectInput.safeParse({
+      ...project,
+      workspaceMode: 'worktree',
+      delivery: 'pull_request',
+      prTitlePrefix: 'feat(app)',
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('ProjectInput defaults to shared and seeds node_modules', () => {
+    const parsed = ProjectInput.parse(project);
+    expect(parsed.workspaceMode).toBe('shared');
+    expect(parsed.worktreeSeed).toEqual([...DEFAULT_WORKTREE_SEED]);
+    expect(parsed.worktreeSeed).toEqual(['node_modules']);
+  });
+
+  it('ProjectInput caps the seed at 32 names', () => {
+    const seed = Array.from({ length: 33 }, (_, i) => `d${String(i)}`);
+    expect(ProjectInput.safeParse({ ...project, worktreeSeed: seed }).success).toBe(false);
+  });
+
+  it('BatchStartInput takes a batchId', () => {
+    const batchId = mintId('Batch');
+    const parsed = BatchStartInput.parse({ title: 'Fix', taskIds: [mintId('Task')], batchId });
+    expect(parsed.batchId).toBe(batchId);
+    expect(BatchStartInput.parse({ title: 'Fix', taskIds: [mintId('Task')] }).batchId).toBe(
+      undefined,
+    );
+  });
+
+  const batch = {
+    id: mintId('Batch'),
+    projectId: mintId('Project'),
+    title: 'Greetings',
+    state: 'OPEN',
+    branch: 'b',
+    baseBranch: 'main',
+    baseSha: 'a'.repeat(40),
+    repo: null,
+    prUrl: null,
+    gateExitCode: null,
+    gateLogPath: null,
+    failure: null,
+    worktreePath: '/tmp/wt/x',
+    createdAt: '2026-10-21T12:00:00.000Z',
+    updatedAt: '2026-10-21T12:00:00.000Z',
+  };
+
+  it('BatchDto carries a nullable worktree path', () => {
+    expect(BatchDto.parse(batch).worktreePath).toBe('/tmp/wt/x');
+    expect(BatchDto.parse({ ...batch, worktreePath: null }).worktreePath).toBe(null);
+  });
+
+  it('BatchStartResult is an array of batches', () => {
+    expect(BatchStartResult.parse([batch, batch])).toHaveLength(2);
+    expect(BatchStartResult.safeParse(batch).success).toBe(false);
+  });
+
+  it('ProjectViewDto without openBatches reads as none', () => {
+    const dto = {
+      id: mintId('Project'),
+      name: 'App',
+      repoPath: '/tmp/app',
+      gateCommand: 'make gate',
+      areas: [],
+      hazards: [],
+      maxLanes: 2,
+      provider: 'claude',
+      accountId: mintId('Account'),
+      movedFromAccountId: null,
+      moveBackAt: null,
+      fallbackAccountId: null,
+      usageHandoffAt: 0.9,
+      model: 'sonnet',
+      effort: 'medium',
+      handoffPct: 40,
+      nudgePct: 50,
+      humanWaitMinutes: 10,
+      flowId: null,
+      budgetCeiling: null,
+      delivery: 'local',
+      baseBranch: 'main',
+      prTitlePrefix: null,
+      allowedCommands: [],
+      sandboxLoopback: false,
+      workspaceMode: 'shared',
+      worktreeSeed: ['node_modules'],
+      createdAt: '2026-10-21T12:00:00.000Z',
+      updatedAt: '2026-10-21T12:00:00.000Z',
+    };
+    expect(ProjectViewDto.parse(dto).openBatches).toEqual([]);
   });
 });

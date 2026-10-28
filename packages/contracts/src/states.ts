@@ -188,6 +188,10 @@ export type ProfileSource = ValueOf<typeof ProfileSource>;
 export const Delivery = { Local: 'local', PullRequest: 'pull_request' } as const;
 export type Delivery = ValueOf<typeof Delivery>;
 
+/** Where a project's tasks work: the one checkout, or a git worktree per started task. */
+export const WorkspaceMode = { Shared: 'shared', Worktree: 'worktree' } as const;
+export type WorkspaceMode = ValueOf<typeof WorkspaceMode>;
+
 /** A batch's lifecycle (batch delivery spec §4). */
 export const BatchState = {
   Cutting: 'CUTTING',

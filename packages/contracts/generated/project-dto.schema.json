@@ -193,6 +193,19 @@
     "sandboxLoopback": {
       "type": "boolean"
     },
+    "workspaceMode": {
+      "type": "string",
+      "enum": [
+        "shared",
+        "worktree"
+      ]
+    },
+    "worktreeSeed": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
     "createdAt": {
       "type": "string",
       "format": "date-time",
@@ -230,6 +243,8 @@
     "prTitlePrefix",
     "allowedCommands",
     "sandboxLoopback",
+    "workspaceMode",
+    "worktreeSeed",
     "createdAt",
     "updatedAt"
   ]
