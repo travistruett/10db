@@ -53,11 +53,17 @@ describe('roleDefault', () => {
       aliases: ['haiku', 'opus'],
       want: 'opus@high',
     },
-    {
-      name: 'every role runs on the one model offered',
-      role: 'plan',
+    ...(['plan', 'plan_review', 'implement', 'review'] as const).map((role) => ({
+      name: `${role} runs on the one model offered`,
+      role,
       aliases: ['haiku'],
       want: 'haiku@high',
+    })),
+    {
+      name: 'qa runs on the one model offered',
+      role: 'qa',
+      aliases: ['haiku'],
+      want: 'haiku@medium',
     },
   ] as const)('$name', ({ role, aliases, want }) => {
     expect(label(pick(role, offeredProfiles(seedCatalogue(), aliases)).profile)).toBe(want);

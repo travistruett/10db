@@ -18,8 +18,9 @@ Each Claude Code model has a tier in `apps/daemon/src/routing/catalogue.ts`, wea
 sonnet balanced, opus and fable strongest. A tier runs the strongest enabled model the account offers in it;
 when it offers none there, the nearest tier, the stronger on a tie. The effort is the role's, or the nearest
 enabled one, the higher on a tie. A floor above the step's need (a risk rule or a persona's minimum score)
-moves the step to the strongest tier, one effort up. A role-default step is not pinned: a retry climbs the
-same ladder, to the next stronger model at the nearest effort, then the next effort on the strongest. When the
+moves the step to the strongest tier, one effort up. A role-default step is not pinned. A retry of any step whose
+profile has no score or no cost on its kind (a role default, or a routed step whose score AA has since dropped)
+climbs the same ladder: the next stronger model at the nearest effort, then the next effort on the strongest. When the
 account offers none of Claude Code's models, the plan is refused (`NoProfileError`).
 
 When scores exist, routing is unchanged: the cheapest measured profile at or above the minimum, within the
