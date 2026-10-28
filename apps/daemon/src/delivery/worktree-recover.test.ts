@@ -646,6 +646,16 @@ describe('sweepWorktrees', () => {
       why: 'it holds git-ignored files',
     },
     {
+      name: 'an untracked file beside a git-ignored one',
+      change: (path) => {
+        writeFileSync(join(h.repo, '.git', 'info', 'exclude'), '.env\n');
+        writeFileSync(join(path, '.env'), 'mine\n');
+        writeFileSync(join(path, 'notes.txt'), 'mine\n');
+      },
+      shown: '- .env',
+      why: 'it has uncommitted changes',
+    },
+    {
       name: 'a git file git cannot read',
       change: (path) => {
         writeFileSync(join(path, '.git'), 'not a gitfile\n');

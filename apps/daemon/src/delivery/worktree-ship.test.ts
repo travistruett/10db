@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import type { BatchDto, WorkstreamDto } from '@10db/contracts';
 import {
   getAppSetting,
@@ -534,6 +534,7 @@ describe('a finished worktree with git-ignored files', () => {
       files: ['dist/out.js'],
       kept: null,
     },
+    { name: "only Finder's .DS_Store", to: 'CLOSED', files: ['src/.DS_Store'], kept: null },
     {
       name: 'only the seeded node_modules',
       to: 'ABANDONED',
@@ -548,7 +549,7 @@ describe('a finished worktree with git-ignored files', () => {
       kept: null,
     },
   ])('$name: kept $kept', async ({ to, patterns, files, kept }) => {
-    ignore(...(patterns ?? ['.env', '.env.*', 'dist/', 'node_modules/']));
+    ignore(...(patterns ?? ['.env', '.env.*', '.DS_Store', 'dist/', 'node_modules/']));
     const { batch } = await opened();
     const wt = pathOf(batch);
     write(wt, files);
@@ -589,5 +590,52 @@ describe('a finished worktree with git-ignored files', () => {
     await retireWorktree(h.ctx, batch.id);
     expect(worktreePaths()).toEqual([realpathSync(h.repo), wt]);
     expect(h.only(h.cards()).title).toBe(keptTitle(batch));
+  });
+
+  it('keeps a worktree whose git dir 10db will not read through, with a card, and removes nothing', async () => {
+    ignore('.env');
+    const { batch } = await opened();
+    const wt = pathOf(batch);
+    write(wt, ['.env']);
+    // `git worktree repair` under `worktree.useRelativePaths=true` leaves a relative gitfile.
+    const gitDir = readFileSync(join(wt, '.git'), 'utf8')
+      .replace(/^gitdir: /, '')
+      .trim();
+    writeFileSync(join(wt, '.git'), `gitdir: ${relative(wt, gitDir)}\n`);
+    h.state.write((c) => {
+      transitionBatch(c, batch.id, { to: 'SHIPPING' });
+      transitionBatch(c, batch.id, { to: 'CLOSED' });
+    });
+
+    expect(await retireWorktree(h.ctx, batch.id)).toEqual({
+      kind: 'kept',
+      reason: 'unreadable',
+      paths: [],
+    });
+
+    expect(getBatch(h.store.db, batch.id).worktreePath).toBe(wt);
+    expect(readFileSync(join(wt, '.env'), 'utf8')).toBe('local\n');
+    const card = h.only(h.cards());
+    expect(card.title).toBe(`10db kept the worktree of "${batch.title}": it can't be read`);
+    expect(card.body).toContain(`git -C '${h.repo}' worktree remove --force --force '${wt}'`);
+  });
+
+  it('lists the git-ignored files beside the uncommitted changes of an abandoned worktree', async () => {
+    ignore('.env');
+    const { batch } = await opened();
+    const wt = pathOf(batch);
+    write(wt, ['.env', 'notes.txt']);
+    h.state.write((c) => transitionBatch(c, batch.id, { to: 'ABANDONED' }));
+
+    expect(await retireWorktree(h.ctx, batch.id)).toMatchObject({
+      kind: 'kept',
+      reason: 'changes',
+      paths: ['notes.txt'],
+    });
+
+    const card = h.only(h.cards());
+    expect(card.title).toContain('uncommitted changes kept');
+    expect(card.body).toContain('- notes.txt');
+    expect(card.body).toContain('- .env');
   });
 });

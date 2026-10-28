@@ -44,10 +44,16 @@ export class WorktreeNotOursError extends Error {
   readonly path: string;
   /** Why it is not one, as the builder reads it. */
   readonly why: string;
-  constructor(path: string, why: string) {
+  /**
+   * True when git lists the worktree as 10db's but its git dir is one 10db won't read through, so
+   * `removeWorktree` would still remove what it holds.
+   */
+  readonly unreadable: boolean;
+  constructor(path: string, why: string, unreadable = false) {
     super(`10db won't remove ${path}: ${why}`);
     this.path = path;
     this.why = why;
+    this.unreadable = unreadable;
   }
 }
 
@@ -1073,17 +1079,25 @@ export function createGit(opts: GitOptions = {}): Git {
     try {
       gitDir = readGitfile(target);
     } catch {
-      throw new WorktreeNotOursError(path, 'its .git is not a gitfile');
+      throw new WorktreeNotOursError(path, 'its .git is not a gitfile', true);
     }
     // A linked worktree's git dir is a direct child of the repository's `worktrees` directory.
     if (!samePath(dirname(gitDir), join(main.dirs.commonDir, 'worktrees')))
-      throw new WorktreeNotOursError(path, "its git dir is not one of the repository's worktrees");
+      throw new WorktreeNotOursError(
+        path,
+        "its git dir is not one of the repository's worktrees",
+        true,
+      );
     // Git reads refs through the git dir's `commondir` file even when GIT_COMMON_DIR is set, so the
     // file must name the repository the main checkout's pin vouches for.
     if (!namesCommonDir(gitDir, main.dirs.commonDir))
-      throw new WorktreeNotOursError(path, "its git dir names another repository's common dir");
+      throw new WorktreeNotOursError(
+        path,
+        "its git dir names another repository's common dir",
+        true,
+      );
     if (readIfPresent(join(gitDir, 'info', 'attributes')).trim() !== '')
-      throw new WorktreeNotOursError(path, 'its git dir holds an attributes file');
+      throw new WorktreeNotOursError(path, 'its git dir holds an attributes file', true);
     return {
       real: target,
       dirs: { gitDir, commonDir: main.dirs.commonDir },

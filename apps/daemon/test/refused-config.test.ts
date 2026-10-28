@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -65,6 +65,14 @@ describe('a worktree root the daemon refuses', () => {
         mkdirSync(elsewhere.path, { recursive: true });
         writeFileSync(file, '');
         return join(file, 'worktrees');
+      },
+    },
+    {
+      name: 'a link to itself',
+      root: () => {
+        mkdirSync(elsewhere.path, { recursive: true });
+        symlinkSync(join(elsewhere.path, 'loop'), join(elsewhere.path, 'loop'));
+        return join(elsewhere.path, 'loop', 'worktrees');
       },
     },
   ])('stops startup with one line naming TENDB_WORKTREE_ROOT for $name', async ({ root }) => {

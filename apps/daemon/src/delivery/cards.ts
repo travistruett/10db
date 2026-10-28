@@ -22,6 +22,13 @@ export function listPaths(paths: readonly string[]): string {
   return [...shown, ...(extra > 0 ? [`- and ${String(extra)} more`] : [])].join('\n');
 }
 
+/** The git-ignored files beside a kept worktree's changes, which its removal command deletes too. */
+function alsoIgnored(ignored: readonly string[]): string {
+  return ignored.length === 0
+    ? ''
+    : `\n\nIt also holds these git-ignored files, which the command removes too:\n${listPaths(ignored)}`;
+}
+
 /** The part of an error a builder can act on. */
 export function detailOf(error: unknown): string {
   if (error instanceof GitNetworkError) return error.detail || error.message;
@@ -143,16 +150,38 @@ export const worktreeCards = {
     }
   },
   /** `main` is the project's main checkout, where the removal command runs. */
-  keptDirty: (batch: BatchDto, main: string, path: string, paths: readonly string[]): Card => ({
+  keptDirty: (
+    batch: BatchDto,
+    main: string,
+    path: string,
+    paths: readonly string[],
+    ignored: readonly string[],
+  ): Card => ({
     title: `Batch "${batch.title}" abandoned: uncommitted changes kept in ${path}`,
-    body: `10db never throws away uncommitted work, so it kept the worktree with these changes:\n${listPaths(paths)}\n\nCopy what you need, then remove it with ${worktreeRemovalCommand(main, path)}.`,
+    body: `10db never throws away uncommitted work, so it kept the worktree with these changes:\n${listPaths(paths)}${alsoIgnored(ignored)}\n\nCopy what you need, then remove it with ${worktreeRemovalCommand(main, path)}.`,
     foldKey: `worktree-kept:${batch.id}`,
     detail: { batchId: batch.id },
   }),
   /** `main` is the project's main checkout, where the removal command runs. */
-  keptIgnored: (batch: BatchDto, main: string, path: string, paths: readonly string[]): Card => ({
-    title: `10db kept the worktree of "${batch.title}": it holds git-ignored files`,
-    body: `The batch is finished, but its worktree ${path} holds git-ignored files 10db didn't put there, such as a hand-made .env, so 10db kept it:\n${listPaths(paths)}\n\nCopy what you need, then remove it with ${worktreeRemovalCommand(main, path)}.`,
+  /**
+   * `paths` is null when 10db won't read the worktree's git dir, so it may hold anything. `main` is
+   * the project's main checkout, where the removal command runs.
+   */
+  keptIgnored: (
+    batch: BatchDto,
+    main: string,
+    path: string,
+    paths: readonly string[] | null,
+  ): Card => ({
+    title:
+      paths === null
+        ? `10db kept the worktree of "${batch.title}": it can't be read`
+        : `10db kept the worktree of "${batch.title}": it holds git-ignored files`,
+    body: `${
+      paths === null
+        ? `The batch is finished, but 10db couldn't read its worktree ${path}, so it may hold files you need, and kept it.`
+        : `The batch is finished, but its worktree ${path} holds git-ignored files 10db didn't put there, such as a hand-made .env, so 10db kept it:\n${listPaths(paths)}`
+    }\n\nCopy what you need, then remove it with ${worktreeRemovalCommand(main, path)}.`,
     foldKey: `worktree-ignored:${batch.id}`,
     detail: { batchId: batch.id },
   }),
@@ -160,7 +189,12 @@ export const worktreeCards = {
    * `paths` is null when git couldn't read the worktree, which counts as changed. `main` is the
    * project's main checkout, where the removal command runs.
    */
-  orphanKept: (main: string, path: string, paths: readonly string[] | null): Card => ({
+  orphanKept: (
+    main: string,
+    path: string,
+    paths: readonly string[] | null,
+    ignored: readonly string[],
+  ): Card => ({
     title:
       paths === null
         ? `10db kept ${path}: it can't be read`
@@ -168,7 +202,7 @@ export const worktreeCards = {
     body: `No batch uses this worktree any more, but ${
       paths === null
         ? "10db couldn't read it, so it may hold uncommitted work"
-        : `it holds uncommitted changes:\n${listPaths(paths)}`
+        : `it holds uncommitted changes:\n${listPaths(paths)}${alsoIgnored(ignored)}`
     }\n\n10db never throws away uncommitted work. Copy what you need, then remove it with ${worktreeRemovalCommand(main, path)}.`,
     foldKey: `worktree-orphan:${path}`,
   }),

@@ -11,10 +11,16 @@ a clean orphan, the daemon lists the worktree's git-ignored files with `git ls-f
 An entry ending in `/` is a directory the ignore rules match as a whole (`node_modules/`, `dist/`, `target/`,
 `.gate/`) and does not count. A file does: a hand-made `.env`, `.claude/settings.local.json`, a
 `mise.local.toml`. Files under a directory named in the project's `worktree_seed`, which 10db copied in, do
-not count either. When any file is left, the worktree is kept with `worktree_path` set, and a card lists the
-files with the same removal command as the other kept-worktree cards (`keptIgnored` for a batch,
-`orphanIgnored` for an orphan). Recovery re-runs the removal at each start, and the card folds. An
-`ABANDONED` worktree with uncommitted changes still gets the uncommitted-changes card first.
+not count, and neither does Finder's `.DS_Store`. When any file is left, the worktree is kept with
+`worktree_path` set, and a card lists the files with the same removal command as the other kept-worktree
+cards (`keptIgnored` for a batch, `orphanIgnored` for an orphan). Recovery re-runs the removal at each
+start, and the card folds.
+
+A worktree git lists as 10db's whose git dir 10db won't read through (a relative gitfile, a git dir outside
+the repository's `worktrees`, a foreign `commondir`, an attributes file) counts as holding files: it is
+kept with a card saying it can't be read, since `removeWorktree` would still remove it. An `ABANDONED`
+worktree or an orphan with uncommitted changes keeps its uncommitted-changes card, which now also lists the
+ignored files, because the removal command on it deletes them too.
 
 ## Why
 
@@ -25,8 +31,8 @@ directories are only hand-made files (`.claude/settings.local.json`), and build 
 directories. A file is therefore the signal and a matched directory is not.
 
 What this misses: a hand-made file inside a directory the ignore rules match as a whole (`scratch/notes.md`
-when `scratch/` is ignored) is still removed. A tool that writes ignored loose files (`*.log`, `.DS_Store`
-from Finder, a `*.tsbuildinfo` outside an ignored directory) keeps its worktree until the builder runs the
+when `scratch/` is ignored) is still removed. A tool that writes ignored loose files (`*.log`, a `*.tsbuildinfo` outside an ignored
+directory) keeps its worktree until the builder runs the
 command on the card. Rejected: keeping a worktree for any ignored entry, which keeps all of them; only
 `.env*` files, which misses other local config; snapshotting the ignored files at cut time, which can't tell
 the builder's files from a lane's.

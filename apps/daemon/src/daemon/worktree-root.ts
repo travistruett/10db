@@ -12,6 +12,22 @@ export class WorktreeRootError extends Error {
   override readonly name = 'WorktreeRootError';
 }
 
+/**
+ * Runs `check` on the root `root`, turning a path it can't resolve (a link loop, a link through a
+ * file, a directory it can't search) into a `WorktreeRootError` too, so startup refuses it as one.
+ */
+function asRootError<T>(root: string, check: () => T): T {
+  try {
+    return check();
+  } catch (error) {
+    if (error instanceof WorktreeRootError) throw error;
+    const why = (error instanceof Error ? error.message : String(error)).replace(/\s+/g, ' ');
+    throw new WorktreeRootError(
+      `The worktree root ${root} can't be used: ${why}. Set TENDB_WORKTREE_ROOT to a directory.`,
+    );
+  }
+}
+
 /** Refuses a root under a file, where no worktree can be made. */
 function assertMakeable(root: string): void {
   let existing = resolve(root);
@@ -28,9 +44,11 @@ function assertMakeable(root: string): void {
  * it under never differ by a link such as `/var` and `/private/var`.
  */
 export function worktreeRootFor(base: string, dataDir: string): string {
-  assertMakeable(base);
-  const level = createHash('sha256').update(realPathOf(dataDir)).digest('hex').slice(0, 8);
-  return realPathOf(join(resolve(base), level));
+  return asRootError(base, () => {
+    assertMakeable(base);
+    const level = createHash('sha256').update(realPathOf(dataDir)).digest('hex').slice(0, 8);
+    return realPathOf(join(resolve(base), level));
+  });
 }
 
 /**
@@ -45,6 +63,15 @@ export function assertWorktreeRootAllowed(
     readonly dataDir: string;
     readonly tempRoot: string | null;
   },
+): void {
+  asRootError(root, () => {
+    assertAllowed(root, forbidden);
+  });
+}
+
+function assertAllowed(
+  root: string,
+  forbidden: Parameters<typeof assertWorktreeRootAllowed>[1],
 ): void {
   assertMakeable(root);
   const real = realPathOf(root);

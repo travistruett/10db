@@ -30,11 +30,12 @@ export type Retirement =
   | { readonly kind: 'nothing' }
   /**
    * Kept, its path still set, with a card: an ABANDONED batch's worktree with uncommitted changes,
-   * or any finished batch's worktree with git-ignored files 10db didn't seed.
+   * any finished batch's worktree with git-ignored files 10db didn't seed, or one git lists as 10db's
+   * whose git dir 10db won't read through (no paths), which may hold either.
    */
   | {
       readonly kind: 'kept';
-      readonly reason: 'changes' | 'ignored';
+      readonly reason: 'changes' | 'ignored' | 'unreadable';
       readonly paths: readonly string[];
     }
   /** An ABANDONED batch's worktree git won't trust: kept unread (the trust card explains). */
@@ -63,7 +64,12 @@ async function retire(ctx: DeliveryContext, batchId: BatchId): Promise<Retiremen
     try {
       const changed = await ctx.git.changedPaths(path);
       if (changed.length > 0) {
-        raise(ctx.inbox, project.id, worktreeCards.keptDirty(batch, main, path, changed));
+        const ignored = await unseededIgnoredFiles(ctx.git, main, path, project.worktreeSeed);
+        raise(
+          ctx.inbox,
+          project.id,
+          worktreeCards.keptDirty(batch, main, path, changed, ignored ?? []),
+        );
         return { kind: 'kept', reason: 'changes', paths: changed };
       }
     } catch (error) {
@@ -73,6 +79,10 @@ async function retire(ctx: DeliveryContext, batchId: BatchId): Promise<Retiremen
     }
   }
   const ignored = await unseededIgnoredFiles(ctx.git, main, path, project.worktreeSeed);
+  if (ignored === null) {
+    raise(ctx.inbox, project.id, worktreeCards.keptIgnored(batch, main, path, null));
+    return { kind: 'kept', reason: 'unreadable', paths: [] };
+  }
   if (ignored.length > 0) {
     raise(ctx.inbox, project.id, worktreeCards.keptIgnored(batch, main, path, ignored));
     return { kind: 'kept', reason: 'ignored', paths: ignored };
@@ -95,23 +105,31 @@ async function retire(ctx: DeliveryContext, batchId: BatchId): Promise<Retiremen
   return { kind: 'retired' };
 }
 
+/** The file Finder writes into every folder it shows, which nobody needs kept. */
+const FINDER_FILE = '.DS_Store';
+
 /**
  * The git-ignored files of the 10db worktree of `main` at `path` that lie in no directory named in
- * the project's seed, which 10db copied in: what a builder or a lane put there and may still need.
- * None when nothing is at `path`, or when git doesn't list it as 10db's (removal then says so).
+ * the project's seed, which 10db copied in, other than Finder's: what a builder or a lane put there
+ * and may still need. None when nothing is at `path`, or when git doesn't list it as 10db's (removal
+ * then refuses it too). Null when git lists it as 10db's but 10db won't read its git dir, which
+ * counts as holding files: removal would still take them.
  */
 export async function unseededIgnoredFiles(
   git: Git,
   main: string,
   path: string,
   seed: readonly string[],
-): Promise<string[]> {
+): Promise<string[] | null> {
   if (!existsAsEntry(path)) return [];
   try {
     const files = await git.worktreeIgnoredFiles(main, path);
-    return files.filter((file) => !file.split('/').some((part) => seed.includes(part)));
+    return files.filter((file) => {
+      const parts = file.split('/');
+      return parts.at(-1) !== FINDER_FILE && !parts.some((part) => seed.includes(part));
+    });
   } catch (error) {
-    if (error instanceof WorktreeNotOursError) return [];
-    throw error;
+    if (!(error instanceof WorktreeNotOursError)) throw error;
+    return error.unreadable ? null : [];
   }
 }

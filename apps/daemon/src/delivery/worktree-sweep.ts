@@ -100,11 +100,24 @@ async function sweepProject(deps: SweepDeps, project: ProjectDto): Promise<strin
     if (orphan === null) continue;
     try {
       const changed = await changesIn(deps, main, entry.path);
-      if (changed === null || changed.length > 0) {
-        raise(deps.inbox, project.id, worktreeCards.orphanKept(main, entry.path, changed));
+      if (changed === null) {
+        raise(deps.inbox, project.id, worktreeCards.orphanKept(main, entry.path, null, []));
         continue;
       }
       const ignored = await unseededIgnoredFiles(deps.git, main, entry.path, project.worktreeSeed);
+      if (changed.length > 0 || ignored === null) {
+        raise(
+          deps.inbox,
+          project.id,
+          worktreeCards.orphanKept(
+            main,
+            entry.path,
+            ignored === null ? null : changed,
+            ignored ?? [],
+          ),
+        );
+        continue;
+      }
       if (ignored.length > 0) {
         raise(deps.inbox, project.id, worktreeCards.orphanIgnored(main, entry.path, ignored));
         continue;

@@ -133,6 +133,26 @@ describe('worktreeRootFor', () => {
     );
   });
 
+  it.each<{ name: string; base: () => string }>([
+    {
+      name: 'a base reached through a link to a place under a file',
+      base: () => {
+        writeFileSync(join(base, 'a-file'), '');
+        symlinkSync(join(base, 'a-file', 'x'), join(base, 'link'));
+        return join(base, 'link', 'wt');
+      },
+    },
+    {
+      name: 'a base through a link to itself',
+      base: () => {
+        symlinkSync(join(base, 'loop'), join(base, 'loop'));
+        return join(base, 'loop', 'wt');
+      },
+    },
+  ])('refuses $name as a worktree root error', ({ base: at }) => {
+    expect(() => worktreeRootFor(at(), made('data'))).toThrow(WorktreeRootError);
+  });
+
   it('returns a real path even when the base is reached through a link', () => {
     const real = made('real-base');
     symlinkSync(real, join(base, 'base-link'));
