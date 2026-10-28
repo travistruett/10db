@@ -283,8 +283,9 @@ describe('toSdkMcpServer', () => {
             '--settings',
             expect.stringMatching(/\/10db-mcp-[0-9a-f]+\.json$/),
             '-c',
+            // srt's proxy variables, by name only, then the sealed env file.
             expect.stringMatching(
-              /^exec \/usr\/bin\/env -i \/bin\/sh -c '\. "\$0" && exec "\$@"' '[^']+\/10db-mcp-[0-9a-f]+\.sh' 'npx' '-y' 'x'$/,
+              /^exec \/usr\/bin\/env -i (?:[A-Za-z_]+="\$[A-Za-z_]+" )+\/bin\/sh -c '\. "\$0" && exec "\$@"' '[^']+\/10db-mcp-[0-9a-f]+\.sh' 'npx' '-y' 'x'$/,
             ),
           ],
         });
