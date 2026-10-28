@@ -36,6 +36,13 @@ misuse decision 133 turned down; here a person writes the registry in the file a
 Travis wants 10db to edit this file for the builder later, and to recommend servers for a project; both are
 open items.
 
+Refusing `localhost` names and IP addresses in the file is the first check, not the only one: a name's DNS
+can point anywhere. srt's proxy resolves an allowed name once, refuses it when an address is loopback,
+unspecified, link-local, multicast, a cloud metadata endpoint or one of this Mac's own, and dials the address
+it checked, so a rebinding answer gains nothing (`resolved-address-guard.js`, on by default and left so).
+Private ranges (RFC 1918, ULA) are not refused, as for lanes and the gate: an approved name that resolves into
+the local network reaches it.
+
 Hosts sitting beside the hash would widen an approval silently when the file changed. Keeping the hash of a
 hostless server unchanged spares every existing approval a second card. The row keeps the hosts so the record
 says what the builder approved, as it does for variables.

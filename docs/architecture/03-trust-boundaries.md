@@ -359,7 +359,9 @@ Under the lane sandbox (**built**), the design column holds for a lane's Bash:
     Unix sockets work only in its temp dir, so Docker's and the SSH agent's stay closed. It reaches the hosts its
     approval names and no others, not the project's: `allowedDomains` is the approval's list under
     `strictAllowlist`, empty when it names none. A host is a DNS name or `*.` and a domain (every subdomain,
-    not the domain itself); IP addresses, ports and `localhost` names are refused when the file is read. It
+    not the domain itself); IP addresses, ports and `localhost` names are refused when the file is read, and
+    srt refuses an allowed name that resolves to loopback, link-local, metadata or this Mac's own addresses,
+    dialing the address it checked. A name that resolves to a private range is let through, as for lanes. It
     never gets loopback, whatever the project's switch: other sandboxes' proxies listen on localhost, and
     through them it could reach hosts its approval doesn't name.
   - **Env.** The lanes' allowlist of the session env (no credentials), the sandbox's own variables
