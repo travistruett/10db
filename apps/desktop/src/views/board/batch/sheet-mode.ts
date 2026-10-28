@@ -1,15 +1,20 @@
-import { BatchState, Delivery, type ProjectViewDto } from '@10db/contracts';
+import { BatchState, Delivery, WorkspaceMode, type ProjectViewDto } from '@10db/contracts';
 
 /** How the sheet starts work, from the project's delivery mode and current batch (delivery spec §5). */
 export type SheetMode =
   | { readonly kind: 'local' }
   | { readonly kind: 'new_batch' }
+  | { readonly kind: 'worktrees' }
   | { readonly kind: 'join'; readonly title: string }
   | { readonly kind: 'fix'; readonly title: string }
   | { readonly kind: 'busy'; readonly title: string; readonly reason: string };
 
-export function sheetMode(project: Pick<ProjectViewDto, 'delivery' | 'currentBatch'>): SheetMode {
+export function sheetMode(
+  project: Pick<ProjectViewDto, 'delivery' | 'currentBatch' | 'workspaceMode'>,
+): SheetMode {
   if (project.delivery === Delivery.Local) return { kind: 'local' };
+  // Each worktree-mode start makes its own batch, so an unfinished one never gets in the way.
+  if (project.workspaceMode === WorkspaceMode.Worktree) return { kind: 'worktrees' };
   const batch = project.currentBatch;
   if (batch === null) return { kind: 'new_batch' };
   const { title } = batch;
@@ -40,6 +45,8 @@ export function submitLabel(mode: SheetMode, count: number): string {
   switch (mode.kind) {
     case 'local':
       return `Start ${tasks(count)}`;
+    case 'worktrees':
+      return `Start ${tasks(count)} in worktrees`;
     case 'new_batch':
       return `Start a batch of ${tasks(count)}`;
     case 'join':

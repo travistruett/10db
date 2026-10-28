@@ -144,6 +144,36 @@ describe('BoardView', () => {
     });
   });
 
+  it('shows one strip per open batch in worktree mode', async () => {
+    const older = batchDto({
+      title: 'Older',
+      worktreePath: '/wt/older',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    });
+    const newer = batchDto({
+      projectId: older.projectId,
+      title: 'Newer',
+      worktreePath: '/wt/newer',
+      createdAt: '2026-01-02T00:00:00.000Z',
+    });
+    const project = projectViewDto({
+      id: older.projectId,
+      delivery: 'pull_request',
+      prTitlePrefix: 'feat(app)',
+      workspaceMode: 'worktree',
+      currentBatch: older,
+      openBatches: [older, newer],
+    });
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([])),
+    );
+    renderApp('/board');
+
+    const paths = (await screen.findAllByText(/^\/wt\//)).map((e) => e.textContent);
+    expect(paths).toEqual(['/wt/newer', '/wt/older']);
+  });
+
   it("keeps a shipped batch's pull request reachable once the next batch starts", async () => {
     const url = 'https://github.com/acme/widgets/pull/1';
     const shipped = batchDto({ title: 'Alpha first', state: 'SHIPPED', prUrl: url });

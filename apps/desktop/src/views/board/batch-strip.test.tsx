@@ -1,10 +1,10 @@
-import type { BatchDto, WorkstreamDto } from '@10db/contracts';
+import { mintId, type BatchDto, type WorkstreamDto } from '@10db/contracts';
 import { clearMocks, mockIPC } from '@tauri-apps/api/mocks';
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { afterEach, describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, renderWithDaemon, server } from '../../test/daemon';
-import { batchDto, workstreamDto } from '../../test/fixtures';
+import { batchDto, taskDto, workstreamDto } from '../../test/fixtures';
 import { BatchStrip } from './batch-strip';
 
 const batch = batchDto();
@@ -188,5 +188,64 @@ describe('BatchStrip pull request link', () => {
     renderWithDaemon(<BatchStrip batch={shipped} workstreams={[]} />);
     fireEvent.click(await screen.findByRole('link', { name: 'Pull request' }));
     expect(await screen.findByText(`Couldn't open ${url}: not allowed`)).toBeTruthy();
+  });
+});
+
+describe('BatchStrip in worktree mode', () => {
+  const path = '/Users/me/.10db/worktrees/abc/bat_1';
+  const open = batchDto({ worktreePath: path });
+
+  it('shows the worktree path', async () => {
+    server.use(...baseHandlers());
+    renderWithDaemon(<BatchStrip batch={open} workstreams={[]} workspaceMode="worktree" />);
+    expect(await screen.findByText(path)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Copy worktree path' })).toBeTruthy();
+  });
+
+  it('offers no fix task on a batch that is shipping', async () => {
+    server.use(...baseHandlers());
+    renderWithDaemon(
+      <BatchStrip
+        batch={batchDto({ state: 'SHIPPING', worktreePath: path })}
+        workstreams={[]}
+        workspaceMode="worktree"
+      />,
+    );
+    await screen.findByText(path);
+    expect(screen.queryByRole('button', { name: 'Add a fix task' })).toBeNull();
+  });
+
+  it('Add a fix task posts the batch id', async () => {
+    const parked = taskDto({ projectId: open.projectId, title: 'Parked', boardColumnId: null });
+    const free = taskDto({ projectId: open.projectId, title: 'Free' });
+    const running = taskDto({ projectId: open.projectId, title: 'Running' });
+    const active = workstreamDto({ taskId: running.id, projectId: open.projectId });
+    const sent: unknown[] = [];
+    server.use(
+      http.get(daemonUrl('/projects/:projectId/tasks'), () =>
+        HttpResponse.json([
+          free,
+          { ...parked, boardColumnId: mintId('BoardColumn') },
+          { ...running, workstreamId: active.id },
+        ]),
+      ),
+      http.post(daemonUrl('/projects/:projectId/batches'), async ({ request }) => {
+        sent.push(await request.json());
+        return HttpResponse.json([open], { status: 202 });
+      }),
+      ...baseHandlers(),
+    );
+    renderWithDaemon(<BatchStrip batch={open} workstreams={[active]} workspaceMode="worktree" />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Add a fix task' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Add a fix task' });
+    const select = await within(dialog).findByLabelText('Task');
+    fireEvent.click(select);
+    const options = await screen.findAllByRole('option', { hidden: true });
+    expect(options.map((o) => o.textContent)).toEqual(['Free']);
+    fireEvent.click(options[0] ?? document.body);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add fix task' }));
+    await waitFor(() => {
+      expect(sent).toEqual([{ title: open.title, taskIds: [free.id], batchId: open.id }]);
+    });
   });
 });

@@ -1,4 +1,4 @@
-import { Delivery, type FlowId, type ProjectDto } from '@10db/contracts';
+import { Delivery, WorkspaceMode, type FlowId, type ProjectDto } from '@10db/contracts';
 import {
   Alert,
   Button,
@@ -20,6 +20,7 @@ import {
   type GeneralErrors,
   type GeneralValues,
 } from './general-values';
+import { WorkspaceFields } from './workspace-fields';
 
 /** Keeps the fields the builder changed and moves the rest to the project's current values. */
 function reseed(current: GeneralValues, seed: GeneralValues, next: GeneralValues): GeneralValues {
@@ -48,8 +49,16 @@ function reseed(current: GeneralValues, seed: GeneralValues, next: GeneralValues
       current.sandboxLoopback === seed.sandboxLoopback
         ? next.sandboxLoopback
         : current.sandboxLoopback,
+    workspaceMode:
+      current.workspaceMode === seed.workspaceMode ? next.workspaceMode : current.workspaceMode,
+    worktreeSeed: sameList(current.worktreeSeed, seed.worktreeSeed)
+      ? next.worktreeSeed
+      : current.worktreeSeed,
   };
 }
+
+const sameList = (a: readonly string[], b: readonly string[]) =>
+  a.length === b.length && a.every((name, i) => name === b[i]);
 
 const asNumber = (value: number | string): number | '' => (typeof value === 'number' ? value : '');
 
@@ -184,9 +193,13 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
         label="Delivery"
         value={values.delivery}
         onChange={(value) => {
-          set({
-            delivery: value === Delivery.PullRequest ? Delivery.PullRequest : Delivery.Local,
-          });
+          const delivery = value === Delivery.PullRequest ? Delivery.PullRequest : Delivery.Local;
+          // A worktree per task needs pull-request delivery, so leaving it returns to the shared checkout.
+          set(
+            delivery === Delivery.PullRequest
+              ? { delivery }
+              : { delivery, workspaceMode: WorkspaceMode.Shared },
+          );
         }}
       >
         <Group mt="xs">
@@ -216,6 +229,14 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
           set({ prTitlePrefix: e.currentTarget.value });
         }}
       />
+      {values.delivery === Delivery.PullRequest ? (
+        <WorkspaceFields
+          workspaceMode={values.workspaceMode}
+          worktreeSeed={values.worktreeSeed}
+          errors={errors}
+          onChange={set}
+        />
+      ) : null}
       <Textarea
         label="Extra allowed commands"
         description="One command per line, such as pnpm test. A lane runs these without a permission card; the guard still checks each one."

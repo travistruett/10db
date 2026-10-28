@@ -67,7 +67,7 @@ function serve(
     http.post(daemonUrl('/projects/:projectId/batches'), async ({ request }) => {
       sent.push({ path: new URL(request.url).pathname, body: await request.json() });
       return HttpResponse.json(
-        project.currentBatch ?? batchDto({ projectId: project.id, state: 'CUTTING' }),
+        [project.currentBatch ?? batchDto({ projectId: project.id, state: 'CUTTING' })],
         { status: 202 },
       );
     }),
@@ -155,6 +155,30 @@ describe('BatchSheet', () => {
       });
     },
   );
+
+  it('starts tasks in worktrees with one request', async () => {
+    const sent = serve(
+      projectViewDto({
+        ...pr(null),
+        workspaceMode: 'worktree',
+        currentBatch: batchDto({ projectId: local.id, title: 'Fix the login', state: 'SHIPPING' }),
+      }),
+      { both: true },
+    );
+    const sheet = await openSheet();
+    expect(within(sheet).queryByLabelText('Batch title')).toBeNull();
+    fireEvent.click(
+      await within(sheet).findByRole('button', { name: 'Start 2 tasks in worktrees' }),
+    );
+    await waitFor(() => {
+      expect(sent).toEqual([
+        {
+          path: `/projects/${local.id}/batches`,
+          body: { title: 'One', taskIds: [one.id, two.id] },
+        },
+      ]);
+    });
+  });
 
   it('refuses a new batch with no title', async () => {
     const sent = serve(pr(null));
