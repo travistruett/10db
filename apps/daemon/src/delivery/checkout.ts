@@ -13,6 +13,19 @@ export function checkoutOf(
   return getProject(db, ws.projectId).repoPath;
 }
 
+/**
+ * The batch whose areas a workstream's claims belong to: its batch when that batch has a worktree, since
+ * each worktree is its own checkout; otherwise none, and its areas are exclusive across the project.
+ * Hazards are always project-wide.
+ */
+export function claimScopeOf(
+  db: DbReader,
+  ws: { readonly batchId: BatchId | null },
+): BatchId | undefined {
+  if (ws.batchId === null) return undefined;
+  return getBatch(db, ws.batchId).worktreePath !== null ? ws.batchId : undefined;
+}
+
 /** Where a batch's work, gate and checks run: its worktree while it has one, else its project's checkout. */
 export function batchCheckout(db: DbReader, batch: BatchDto): string {
   return batch.worktreePath ?? getProject(db, batch.projectId).repoPath;

@@ -36,7 +36,7 @@ import {
 } from '@10db/db';
 import type { z } from 'zod';
 import { buildContextPack } from '../briefing';
-import { checkoutOf } from '../delivery';
+import { checkoutOf, claimScopeOf } from '../delivery';
 import type { StateStore } from '../events';
 import type { Git } from '../git';
 import { judgeToolUse, type ProtectedPath } from '../guard';
@@ -257,14 +257,17 @@ export function createToolHandlers(
         );
       }
       // The claim shares the workstream's lease, which the scheduler's heartbeat renews.
-      const outcome = deps.state.write((ctx) =>
-        acquireClaims(ctx, {
+      const outcome = deps.state.write((ctx) => {
+        const row = getWorkstreamRow(ctx.tx, workstreamId);
+        const areaScope = claimScopeOf(ctx.tx, row);
+        return acquireClaims(ctx, {
           projectId: project.id,
           workstreamId,
           requests: [{ kind, name: input.name }],
-          leaseExpiresAt: getWorkstreamRow(ctx.tx, workstreamId).leaseExpiresAt ?? ctx.now,
-        }),
-      );
+          leaseExpiresAt: row.leaseExpiresAt ?? ctx.now,
+          ...(areaScope ? { areaScope } : {}),
+        });
+      });
       if (outcome.ok) {
         const claim = outcome.claims.find((c) => c.kind === kind && c.name === input.name);
         if (!claim) throw new InvalidError('Claim was granted but not found');

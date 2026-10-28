@@ -23,7 +23,7 @@ import {
   transitionBatch,
   type Store,
 } from '@10db/db';
-import type { WorkstreamStep } from '@10db/contracts';
+import type { ProjectDto, WorkstreamStep } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { createTempRepo, isolatedGitEnv, seedWorkstream, tempDir } from '../../test/fixtures';
@@ -99,8 +99,13 @@ afterEach(() => {
 });
 
 /** A workstream in a batch whose worktree is `worktree`, on the branch git made it with. */
-function seedWorktreeWorkstream(worktree: string, branch: string, areas: string[]) {
-  const project = seedProject(base, { repoPath: repo.path });
+function seedWorktreeWorkstream(
+  worktree: string,
+  branch: string,
+  areas: string[],
+  existing?: ProjectDto,
+) {
+  const project = existing ?? seedProject(base, { repoPath: repo.path });
   const batch = state.write((ctx) => {
     const inserted = insertBatch(ctx, {
       projectId: project.id,
@@ -114,13 +119,16 @@ function seedWorktreeWorkstream(worktree: string, branch: string, areas: string[
     insertTask(ctx, project.id, { title: 'Alpha', acceptanceCriteria: ['it works'], areas }),
   );
   const workstream = state.write((ctx) => insertWorkstream(ctx, task.id, { batchId: batch.id }));
-  return { project, task, workstream };
+  return { project, task, workstream, areaScope: batch.id };
 }
 
-async function seedSession(areas = ['api'], worktree?: { path: string; branch: string }) {
+async function seedSession(
+  areas = ['api'],
+  worktree?: { path: string; branch: string; project?: ProjectDto },
+) {
   const seeded = worktree
-    ? seedWorktreeWorkstream(worktree.path, worktree.branch, areas)
-    : seedWorkstream(base, { repoPath: repo.path, areas });
+    ? seedWorktreeWorkstream(worktree.path, worktree.branch, areas, worktree.project)
+    : { ...seedWorkstream(base, { repoPath: repo.path, areas }), areaScope: undefined };
   const { token, hash } = mintSessionToken();
   const head = execFileSync('git', ['-C', worktree?.path ?? repo.path, 'rev-parse', 'HEAD'], {
     env: isolatedGitEnv(),
@@ -133,6 +141,7 @@ async function seedSession(areas = ['api'], worktree?: { path: string; branch: s
       workstreamId: seeded.workstream.id,
       requests: areas.map((name) => ({ kind: 'area' as const, name })),
       leaseExpiresAt: ctx.now,
+      ...(seeded.areaScope ? { areaScope: seeded.areaScope } : {}),
     });
     patchWorkstream(ctx, seeded.workstream.id, null, {
       baseHead: head,
@@ -269,6 +278,41 @@ describe('MCP tools in a worktree batch', () => {
     await s.call('write_handoff', { opId: 'op-wt-handoff-1', ...handoff });
     const ctx = await s.call('get_context', {});
     expect(ctx.json).toMatchObject({ handoff: { gitChangedFiles: ['src/api/c.ts'] } });
+  });
+
+  const claimRows: { name: string; claim: string; secondGranted: boolean }[] = [
+    { name: 'an area is exclusive only within its batch', claim: 'ui', secondGranted: true },
+    { name: 'a hazard stays exclusive across batches', claim: 'migrations', secondGranted: false },
+  ];
+
+  it.each(claimRows)('request_claim: $name', async ({ claim, secondGranted }) => {
+    const other = join(outside.path, 'wt2');
+    execFileSync('git', ['-C', repo.path, 'worktree', 'add', '-q', '-b', 'batch/two', other], {
+      env: isolatedGitEnv(),
+      stdio: 'pipe',
+    });
+    const a = await seedSession(['api'], { path: worktree, branch: 'batch/one' });
+    const b = await seedSession(['api'], {
+      path: realpathSync(other),
+      branch: 'batch/two',
+      project: a.project,
+    });
+    const first = await a.call('request_claim', {
+      opId: 'op-wt-claim-a',
+      kind: 'area',
+      name: claim,
+      reason: 'shared badge',
+    });
+    expect(first.json).toMatchObject({ granted: true });
+    const second = await b.call('request_claim', {
+      opId: 'op-wt-claim-b',
+      kind: 'area',
+      name: claim,
+      reason: 'shared badge',
+    });
+    expect(second.json).toMatchObject(
+      secondGranted ? { granted: true } : { granted: false, heldBy: a.workstream.id },
+    );
   });
 });
 

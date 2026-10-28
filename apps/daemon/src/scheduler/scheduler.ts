@@ -28,7 +28,7 @@ import {
 } from '@10db/db';
 import { unready, type AccountPreparer, type AccountRuntime } from '../accounts';
 import type { Clock, Timer } from '../clock';
-import { batchLaunchVerdict, LaunchVerdict } from '../delivery';
+import { batchLaunchVerdict, claimScopeOf, LaunchVerdict } from '../delivery';
 import type { StateStore } from '../events';
 import { GitTrustError } from '../git';
 import type { Logger } from '../log';
@@ -183,14 +183,14 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
       // A parked task never launches, whatever its queue holds.
       if (task.boardColumnId !== null) continue;
       const leaseUntil = new Date(opts.clock.now().getTime() + opts.leaseMs).toISOString();
+      const areaScope = claimScopeOf(db, ws);
       const fence = opts.state.write((ctx) => {
         const claimed = acquireClaims(ctx, {
           projectId: project.id,
           workstreamId: ws.id,
           requests: claimRequestsForTask(task, project),
           leaseExpiresAt: leaseUntil,
-          // A worktree batch's areas belong to the batch; hazards stay project-wide.
-          ...(batch?.worktreePath ? { areaScope: batch.id } : {}),
+          ...(areaScope ? { areaScope } : {}),
         });
         if (!claimed.ok) return null;
         const f = acquireLease(ctx, ws.id, opts.instanceId, leaseUntil);
