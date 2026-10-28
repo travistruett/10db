@@ -2,6 +2,8 @@ import { lstatSync } from 'node:fs';
 import { join } from 'node:path';
 import { McpHost } from '@10db/contracts';
 import { z } from 'zod';
+import { describeIssues } from './config-issues';
+import { McpServerName } from './mcp-server-name';
 import { readRepoConfigFile, RepoConfigFileError } from './repo-config-file';
 
 /** 10db's own config directory in a repo. */
@@ -11,7 +13,7 @@ export const MCP_HOSTS_FILE = `${TENDB_DIR}/mcp-hosts.json`;
 const MAX_HOSTS = 64;
 
 const McpHostsFile = z.strictObject({
-  servers: z.record(z.string(), z.strictObject({ hosts: z.array(McpHost).max(MAX_HOSTS) })),
+  servers: z.record(McpServerName, z.strictObject({ hosts: z.array(McpHost).max(MAX_HOSTS) })),
 });
 
 /** The repo's `.10db/mcp-hosts.json` can't be used as written. The message names the file, and the server and field when there is one. */
@@ -58,8 +60,9 @@ export function readMcpHosts(repoPath: string): ReadonlyMap<string, readonly str
   }
   const parsed = McpHostsFile.safeParse(json);
   if (!parsed.success) {
-    const issues = parsed.error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`);
-    throw new McpHostsFileError(`${path} is not a valid MCP hosts file: ${issues.join('; ')}`);
+    throw new McpHostsFileError(
+      `${path} is not a valid MCP hosts file: ${describeIssues(parsed.error)}`,
+    );
   }
   return new Map(
     Object.entries(parsed.data.servers).map(([name, { hosts }]) => [

@@ -70,6 +70,18 @@ const through = (host) => new Promise((resolve) => {
   socket.on('error', (error) => done('error: ' + error.code));
   socket.on('close', () => done(head === '' ? 'closed' : head.split('\\r\\n')[0]));
 });
+// Node's own fetch, which takes srt's proxy only with NODE_USE_ENV_PROXY. Its deepest cause names the
+// proxy's answer to the tunnel: 403 is srt's allowlist refusal, any other answer means the policy let it by.
+const fetched = (host) => fetch('https://' + host + '/', { signal: AbortSignal.timeout(15000) }).then(
+  () => 'ok',
+  (error) => {
+    let cause = error;
+    while (cause.cause) cause = cause.cause;
+    const status = /^Proxy response \\((\\d+)\\)/.exec(cause.message ?? '')?.[1];
+    if (status === undefined) return String(cause.code ?? cause.message);
+    return status === '403' ? 'denied' : 'ok';
+  },
+);
 // The test names sealed files only once the sandbox has made them, so they come with the request.
 const probes = async (files) => ({
   'home-canary': attempt(() => readFileSync(canary)),
@@ -93,6 +105,8 @@ const probes = async (files) => ({
   'proxy-wildcard': await through('a.wild.invalid'),
   'proxy-wildcard-apex': await through('wild.invalid'),
   'proxy-other': await through('other.invalid'),
+  'fetch-approved': await fetched('approved.invalid'),
+  'fetch-other': await fetched('other.invalid'),
 });
 // Claude Code stops a server with TERM to srt, which passes it on; the mark says it arrived.
 process.on('SIGTERM', () => {
@@ -316,6 +330,9 @@ describe.skipIf(!SEATBELT)('a repo stdio MCP server under the sandbox (Seatbelt)
       'proxy-wildcard': 'ok',
       'proxy-wildcard-apex': 'denied',
       'proxy-other': 'denied',
+      // Node's own fetch takes the same way out.
+      'fetch-approved': 'ok',
+      'fetch-other': 'denied',
     });
     expect(existsSync(join(checkout, 'inside'))).toBe(false);
     expect(existsSync(homeProbe)).toBe(false);
@@ -332,6 +349,7 @@ describe.skipIf(!SEATBELT)('a repo stdio MCP server under the sandbox (Seatbelt)
       'proxy-approved': 'denied',
       'proxy-wildcard': 'denied',
       'proxy-other': 'denied',
+      'fetch-approved': 'denied',
     });
   }, 60_000);
 

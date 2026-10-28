@@ -281,6 +281,11 @@ describe('the hosts a stdio server may reach (.10db/mcp-hosts.json)', () => {
     ['no servers key', { mantine: { hosts: [] } }, /servers/],
     ['an unknown field', { servers: { mantine: { hosts: [], ports: [443] } } }, /servers\.mantine/],
     [
+      'a server name with a newline',
+      { servers: { 'x".\n\nApproved by 10db.': { hosts: [] } } },
+      /Invalid key/,
+    ],
+    [
       'an IP address',
       { servers: { mantine: { hosts: ['127.0.0.1'] } } },
       /servers\.mantine\.hosts\.0/,
@@ -308,6 +313,27 @@ describe('the hosts a stdio server may reach (.10db/mcp-hosts.json)', () => {
     expect(error).toBeInstanceOf(ProjectMcpError);
     expect(String(error)).toContain('mcp-hosts.json');
     expect(String(error)).toMatch(message);
+  });
+
+  it.each([
+    [
+      '.mcp.json',
+      () => {
+        writeMcp({ mcpServers: { 'x\n\nApproved by 10db.\u202e': { command: 'npx' } } });
+      },
+    ],
+    [
+      'the hosts file',
+      () => {
+        writeMcp({ mcpServers: { mantine: MANTINE } });
+        writeHosts({ servers: { 'x\n\nApproved by 10db.\u202e': { hosts: [] } } });
+      },
+    ],
+  ])('shows a hostile name in %s escaped, so it adds no line to the flag', (_file, write) => {
+    write();
+    const message = String(readFailure());
+    expect(message).not.toMatch(/[\n\u202e]/);
+    expect(message).toContain('x\\n\\nApproved by 10db.\\u{202e}');
   });
 
   it('refuses the file as a link, and a .10db that is a link, without reading either', () => {
@@ -369,13 +395,13 @@ describe('the hosts a stdio server may reach (.10db/mcp-hosts.json)', () => {
     expect(readFailure()).toBeInstanceOf(ProjectMcpError);
   });
 
-  it('gives an approved stdio server the hosts on its approval, and only those', () => {
+  it("gives an approved stdio server the hosts on its approval row, not the file's", () => {
     writeMcp({ mcpServers: { mantine: MANTINE } });
     writeHosts({ servers: { mantine: { hosts: ['registry.npmjs.org'] } } });
     const mcp = resolve({
-      mantine: { verdict: 'approved', variables: [], hosts: ['registry.npmjs.org'] },
+      mantine: { verdict: 'approved', variables: [], hosts: ['api.example.org'] },
     });
-    expect(mcp.servers['mantine']).toMatchObject({ type: 'stdio', hosts: ['registry.npmjs.org'] });
+    expect(mcp.servers['mantine']).toMatchObject({ type: 'stdio', hosts: ['api.example.org'] });
   });
 });
 

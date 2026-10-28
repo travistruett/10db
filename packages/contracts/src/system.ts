@@ -44,8 +44,15 @@ export type McpTransport = (typeof McpTransport)[keyof typeof McpTransport];
 const ConfigHash = z.string().regex(/^[0-9a-f]{64}$/);
 
 const HOST_LABEL = '[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?';
-/** Two or more lower-case labels, the last not all digits, so an IPv4 address never passes as a name. */
-const HOST_NAME = new RegExp(`^(?:${HOST_LABEL}\\.)+(?=[a-z0-9-]*[a-z-])${HOST_LABEL}$`);
+/**
+ * `*.` or nothing, then two or more lower-case labels. The last label is never one a URL parser reads as
+ * part of an IPv4 address (all digits, or `0x` and hex digits), so no address passes as a name.
+ */
+const HOST = new RegExp(
+  `^(?:\\*\\.)?(?:${HOST_LABEL}\\.)+(?!(?:[0-9]+|0x[0-9a-f]*)$)${HOST_LABEL}$`,
+);
+const HOST_MESSAGE =
+  'must be a lower-case host name such as registry.npmjs.org, or *. and a domain such as *.example.org; no IP address, port or localhost';
 
 /**
  * A host a repo stdio MCP server's approval names: a DNS name, or `*.` and a name of two or more
@@ -55,16 +62,8 @@ const HOST_NAME = new RegExp(`^(?:${HOST_LABEL}\\.)+(?=[a-z0-9-]*[a-z-])${HOST_L
 export const McpHost = z
   .string()
   .max(253)
-  .refine(
-    (value) => {
-      const name = value.startsWith('*.') ? value.slice(2) : value;
-      return HOST_NAME.test(name) && name !== 'localhost' && !name.endsWith('.localhost');
-    },
-    {
-      message:
-        'must be a lower-case host name such as registry.npmjs.org, or *. and a domain such as *.example.org; no IP address, port or localhost',
-    },
-  );
+  .regex(HOST, HOST_MESSAGE)
+  .refine((value) => value !== 'localhost' && !value.endsWith('.localhost'), HOST_MESSAGE);
 export type McpHost = z.infer<typeof McpHost>;
 
 /** One `env` or `headers` entry as the repo wrote it: the value keeps its `${NAME}` references, never an expanded value. */
@@ -95,7 +94,7 @@ export const McpServerReview = z.object({
   sensitive: z.array(z.string()),
   /**
    * stdio: the hosts `.10db/mcp-hosts.json` names for it, sorted, and part of `configHash`. Approving
-   * opens exactly these. A card raised before hosts existed has none.
+   * opens exactly these. A review stored without the field parses with none.
    */
   hosts: z.array(McpHost).default([]),
 });

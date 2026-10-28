@@ -12,7 +12,7 @@
 - **The MCP sandbox opens exactly those hosts** (`allowedDomains`), with `strictAllowlist` on and loopback off as before. The project's hosts are never added.
 - **srt's proxy variables reach the server.** srt points its child at its proxy through `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`, `GRPC_PROXY` and their lower-case forms, whose URLs carry the proxy's token; the launch's inner `env -i` dropped them. It now keeps exactly those names (`NAME="$NAME"`), and the sealed env file sets `NODE_USE_ENV_PROXY=1`. srt itself puts the same values on `env`'s command line for the instant before it execs, so this adds no longer exposure (plan review finding 2: a file in the temp dir was dropped as more machinery for no gain). The server stays srt's own child.
 - **Hosts are validated at the boundary** (`McpHost` in `packages/contracts`): a lower-case DNS name of at least two labels, or `*.` followed by one. IP literals, `localhost` and `*.localhost` names, and a wildcard over a single label (`*.com`) are refused.
-- **The card names the hosts** and says that anything the server is given, an approved token included, can leave only through them. With none, it says the server reaches no host and that `.10db/mcp-hosts.json` is where hosts are named.
+- **The card names the hosts** and says that anything the server is given, an approved token included, can leave over the network only to them, and through what its tools return. With none, it says the server reaches no host and that `.10db/mcp-hosts.json` is where hosts are named.
 
 **Tech stack:** TypeScript, zod 4, Drizzle (SQLite), React + Mantine, vitest, srt 0.0.81 under Seatbelt. No new dependency.
 

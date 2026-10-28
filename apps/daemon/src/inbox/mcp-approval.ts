@@ -57,7 +57,8 @@ function networkLine(hosts: readonly string[]): string {
   if (hosts.length > 0) {
     return (
       `${sandbox} reaches only ${listed(hosts.map(shownHost))}, never localhost. ` +
-      'Whatever it is given, an approved token included, can leave only through those hosts.'
+      'Whatever it is given, an approved token included, can leave over the network only to those hosts, ' +
+      'and through what its tools return to the session.'
     );
   }
   return (

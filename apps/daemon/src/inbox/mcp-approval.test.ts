@@ -158,7 +158,7 @@ describe('MCP approval cards', () => {
       'It runs in a sandbox: it reads what lane commands read, writes only its own temp dir and reaches only *.example.org (every subdomain of example.org, not example.org itself) and registry.npmjs.org, never localhost.',
     );
     expect(card.body).toContain(
-      'Whatever it is given, an approved token included, can leave only through those hosts.',
+      'Whatever it is given, an approved token included, can leave over the network only to those hosts, and through what its tools return to the session.',
     );
     expect(card.body).toContain('The approval covers this exact config and these hosts.');
     expect(card.body).not.toContain('reaches no host');

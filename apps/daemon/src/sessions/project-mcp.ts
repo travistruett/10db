@@ -7,7 +7,9 @@ import {
   type McpServerReview,
 } from '@10db/contracts';
 import { z } from 'zod';
+import { describeIssues } from './config-issues';
 import { MCP_HOSTS_FILE, McpHostsFileError, readMcpHosts } from './mcp-hosts-file';
+import { McpServerName } from './mcp-server-name';
 import { readRepoConfigFile, RepoConfigFileError } from './repo-config-file';
 
 /** 10db's own MCP server in every managed session. A repo server with this name never replaces it. */
@@ -25,8 +27,6 @@ const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 /** Names that look like credentials: 10db's billing, Claude Code's and AWS's, and anything named like a secret. */
 const SENSITIVE_NAME = /^(?:ANTHROPIC_|CLAUDE_|AWS_)|TOKEN|SECRET|PASSWORD|API_?KEY|CREDENTIAL/i;
 
-/** A server name: it ends up in tool names (`mcp__<name>__*`) and on the approval card. */
-const SERVER_NAME = /^[A-Za-z0-9_-]{1,64}$/;
 /** An HTTP header name is an RFC 9110 token. */
 const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
 
@@ -58,10 +58,7 @@ const RemoteServer = z.strictObject({
   headers: HeaderMap.optional(),
 });
 const McpFile = z.strictObject({
-  mcpServers: z.record(
-    z.string().regex(SERVER_NAME, 'must be 1 to 64 letters, digits, "_" or "-"'),
-    z.union([StdioServer, RemoteServer]),
-  ),
+  mcpServers: z.record(McpServerName, z.union([StdioServer, RemoteServer])),
 });
 type DeclaredServer = z.infer<typeof StdioServer> | z.infer<typeof RemoteServer>;
 
@@ -158,8 +155,7 @@ function parseMcpFile(path: string, text: string): z.infer<typeof McpFile> {
   }
   const parsed = McpFile.safeParse(json);
   if (!parsed.success) {
-    const issues = parsed.error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`);
-    throw new ProjectMcpError(`${path} is not a valid MCP config: ${issues.join('; ')}`);
+    throw new ProjectMcpError(`${path} is not a valid MCP config: ${describeIssues(parsed.error)}`);
   }
   return parsed.data;
 }
@@ -169,8 +165,8 @@ const sortedEntries = (map: Readonly<Record<string, string>> | undefined): [stri
 
 /**
  * The config as 10db hashes it: defaults filled in and maps sorted, before any expansion. A stdio
- * server's hosts are part of it, so naming another host asks again; with none, the hash is the one an
- * approval made before hosts existed.
+ * server's hosts are part of it, so naming another host asks again; a server with none hashes as if
+ * the field were absent, so its approval stands.
  */
 function normalized(server: DeclaredServer, hosts: readonly string[]): unknown {
   return 'command' in server

@@ -49,7 +49,15 @@ says what the builder approved, as it does for variables.
 
 srt itself hands its proxy variables, its proxy token among them, to `env` on a command line for the instant
 before `env` execs. Keeping them by name in the inner `env -i` puts them on its command line for the same
-instant and adds no longer exposure; a file in the server's temp dir would have meant a second sealed file
-for no gain. `test/mcp-sandbox.seatbelt.test.ts` measures the policy with `CONNECT` requests to srt's proxy
-for `.invalid` names, so the answer doesn't depend on the network: srt refuses a host off the list with its
-`blocked-by-allowlist` mark before any lookup, and lets a listed one through.
+instant, no longer on a command line than srt's own; a file in the server's temp dir would have meant a
+second sealed file for no gain. The token does live in the server's env, and its children's, for as long as
+it runs, and the server's code can read it. A lane that rewrites that code can have a tool return the token,
+and, where the project's loopback switch lets its Bash reach localhost, use the server's proxy to reach the
+hosts approved for the server only. That gains little: the same lane can already send data out through the
+server code it writes. `test/mcp-sandbox.seatbelt.test.ts` measures the policy with `CONNECT` requests to
+srt's proxy, and with Node's own `fetch`, for `.invalid` names, so the answer doesn't depend on the network:
+srt refuses a host off the list with its `blocked-by-allowlist` mark before any lookup, and lets a listed one
+through.
+
+A wildcard over a public suffix (`*.github.io`, `*.co.uk`) passes the host check, and opens every site anyone
+registers under it; the card spells out what a wildcard covers. A public-suffix check is not built.
