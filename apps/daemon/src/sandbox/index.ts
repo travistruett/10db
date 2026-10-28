@@ -10,6 +10,7 @@ export { protectedReads } from './protected-reads';
 export { toolchainAccess } from './toolchain-reads';
 export { packageCacheEnv } from './package-cache';
 export { createLaneEnvFile, removeLaneEnvFile } from './env-file';
+export { claimSandboxTempRoot } from './stale-files';
 export {
   createLaneTempDir,
   LANE_TEMP_ROOT,
@@ -33,7 +34,7 @@ export {
   type GateRunInput,
   type GateSandbox,
 } from './gate-sandbox';
-export type { SandboxedMcpServer, StdioMcpServer } from './mcp-sandbox';
+export { SandboxedMcpServer, type StdioMcpServer } from './mcp-sandbox';
 export type { SandboxRuntime } from './srt-launch';
 export {
   createLaneSandbox,

@@ -87,6 +87,7 @@ import {
 } from '../runner';
 import { resolveSandboxRuntime } from '../paths';
 import {
+  claimSandboxTempRoot,
   createGateSandbox,
   createLaneSandbox,
   LANE_TEMP_ROOT,
@@ -313,6 +314,16 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   });
   // srt, which runs every gate and every repo stdio MCP server.
   const runtime = opts.sandbox ? (opts.sandbox.runtime ?? resolveSandboxRuntime()) : null;
+  // Before any session or gate starts: what a crashed run left in the temp root is stale.
+  const tempRoot = opts.sandbox
+    ? claimSandboxTempRoot(opts.sandbox.tmpRoot ?? LANE_TEMP_ROOT)
+    : null;
+  if (tempRoot && (tempRoot.removed > 0 || tempRoot.failed > 0 || tempRoot.sharedWith !== null)) {
+    logger.info(
+      { removed: tempRoot.removed, failed: tempRoot.failed, sharedWith: tempRoot.sharedWith },
+      'swept the sandbox temp root',
+    );
+  }
   // Shared by every gate: a task's, at its green run, and a batch's, at ship.
   const gate = createGateRunner({
     sandbox:
@@ -699,6 +710,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         });
       });
       removeRuntimeFiles(opts.dataDir);
+      tempRoot?.release();
       db.$client.close();
       lock.release();
     } finally {

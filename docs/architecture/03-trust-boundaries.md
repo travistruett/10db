@@ -19,7 +19,7 @@
   gate runs under the same kernel sandbox (**built**): srt, with the lanes' read policy, its own temp dir, no
   credentials and only the project's network (§4.7). Every approved repo stdio MCP server runs under it too
   (**built**): srt, one sandbox per server and session, with the lanes' reads, writes only to its own temp dir,
-  no host and no credentials (§4.6). Still **designed** only: the claude process's own environment, the safe
+  no host, no loopback and no credentials (§4.6). Still **designed** only: the claude process's own environment, the safe
   reader, the secret scan and the CI card. The daemon's own git runs nothing from the
   checkout: no hook, filter, attribute-selected driver, fsmonitor or submodule git, because every call reads no
   attributes and turns hooks and fsmonitor off. It commits only on the workstream's pinned branch, in the
@@ -170,7 +170,9 @@ Under the lane sandbox (**built**), the design column holds for the file tools:
   secret file. `ask` rules make Claude Code ask before an Edit or Write of a path it protects from sandboxed Bash.
 - The broker decides reads outside the checkout on the real path. It refuses protected reads with no card and
   asks about the rest, naming every real path that needs asking. Read, Grep and Glob run without a card only
-  inside the checkout and the project's read list.
+  inside the checkout and the project's read list. The sandbox temp root (`/private/tmp`), all but the
+  session's own temp dir, is a protected read: it holds every other session's temp dir and sealed files, an MCP
+  server's approved variables among them.
 - Claude Code applies its own `disallowedTools` deny rules first (live: a Read of a space-named protected
   directory was denied by a rule, and the guard never saw it). For the calls that reach the guard's `PreToolUse`
   hook, it resolves every file-tool path through links, and refuses `.git/` internals and protected real paths. A path it can't resolve exactly is refused: a link loop, `..` past a missing
@@ -340,19 +342,23 @@ Under the lane sandbox (**built**), the design column holds for a lane's Bash:
 <node> <srt.mjs> --settings <sealed file> -c <inner>`, so the session env Claude Code merges into a
     server's never reaches srt's host. srt and node are the daemon's own (`sandboxRuntimeFor`), refused when
     they lie where a project writes. Inside the sandbox, `/usr/bin/env -i /bin/sh -c '. <env file> && exec "$@"'`
-    sets the server's env from a sealed file (mode 0400, beside the temp dirs and outside every one), so no
-    value is on a command line, and execs the command, so srt's TERM reaches it when Claude Code stops it.
-    The gate's signal wrapper isn't used: it exists so a killed gate fails its verdict, and no verdict reads
-    a server's exit status.
-  - **By type.** A session takes a stdio server only as a `SandboxedMcpServer`, a branded type only the
-    sandbox makes. With no lane sandbox (fake sessions, tests) an approved stdio server is left out and named
-    in the prompt.
+    sets the server's env from a sealed file (mode 0400, beside the temp dirs and outside every one), and execs
+    the command, so srt's TERM reaches it when Claude Code stops it. No value is on a command line: a stdio
+    server whose command or args hold `${` is ignored when the config is read, with a card saying values reach
+    it only through its env block. The gate's signal wrapper isn't used: it exists so a killed gate fails its
+    verdict, and no verdict reads a server's exit status.
+  - **By type.** A session takes a stdio server only as a `SandboxedMcpServer`, an object whose launch is a
+    private field and whose constructor takes a key only `mcp-sandbox.ts` holds, so a copy or a look-alike
+    neither typechecks nor carries a launch. With no lane sandbox (fake sessions, tests) an approved stdio
+    server is left out and named in the prompt. A server whose sandbox can't be built (an approved value with
+    a control character) is left out, named in the prompt and on a card, and the session starts.
   - **Profile.** The lanes' reads and protected reads, the session's account config dir included, with the
     `.env*` and toolchain secrets denied. It writes only its own temp dir, not the checkout: a server has no
     reason to write the repo. Every registered checkout's git state and srt's `/tmp/claude` are denied, and
     Unix sockets work only in its temp dir, so Docker's and the SSH agent's stay closed. It reaches no host, not
-    even the project's: an approval names none, so the list is empty under `strictAllowlist`. Loopback follows
-    the project's switch.
+    even the project's: an approval names none, so the list is empty under `strictAllowlist`. It never gets
+    loopback, whatever the project's switch: other sandboxes' proxies listen on localhost, and through them it
+    could reach the project's hosts.
   - **Env.** The lanes' allowlist of the session env (no credentials), the sandbox's own variables
     (`prepareCommandEnv`: package caches in its temp dir, mise, `GIT_CONFIG_GLOBAL=/dev/null`,
     `TENDB_SANDBOX=1`), `TMPDIR`, and `PATH`, `HOME` and the approved variables. srt's proxy variables don't
@@ -364,11 +370,17 @@ Under the lane sandbox (**built**), the design column holds for a lane's Bash:
     failed to connect. Opening a registry for one server waits for approvals that name hosts.
   - **Measured** (`test/mcp-sandbox.seatbelt.test.ts`, macOS, in `make gate` and CI's macOS job): srt adds
     nothing to a server's stdout, whose JSON-RPC `initialize` answer is its only line. Reading a canary in home,
-    home itself and `~/.ssh`, writing home, the checkout, `.git` and outside the temp dir, a direct connection
-    to `1.1.1.1` and one to localhost with the switch off are refused; `GH_TOKEN` and an AWS key don't arrive;
-    reading the checkout, writing its temp dir and its approved variable work.
+    home itself and `~/.ssh`, another server's sealed env file and the lane's `CLAUDE_ENV_FILE`, writing home,
+    the checkout, `.git` and outside the temp dir, a direct connection to `1.1.1.1` and one to localhost with the
+    project's switch on are refused; `GH_TOKEN` and an AWS key don't arrive; reading the checkout and its own
+    env file, writing its temp dir and its approved variable work, and the TERM sent to srt reaches it.
+  - **After a crash.** A daemon that starts sweeps the sandbox temp root before any session or gate starts
+    (`claimSandboxTempRoot`): it removes this user's lane temp dirs (`10db-` and six characters) and sealed
+    files (`10db-env-`, `10db-gate-`, `10db-mcp-`), each by its exact name and its own kind, never following
+    or removing a link. It then marks the root with its pid (`10db-daemon-<pid>`), and a daemon with another
+    data dir that finds a live mark sweeps nothing, since that daemon's sessions may be running.
 - **Residuals:** an approved variable reaches the server and can leave through its tool results (§7); a
-  server that needs a host fails (§7); with loopback on it reaches every localhost port (§7); a server that
+  server that needs a host fails (§7); a server that
   ignores both a closed stdin and TERM after claude dies keeps running, sandboxed, while its temp dir is
   removed; and a daemon run from source inside a project's checkout refuses that project's sessions that have
   an approved stdio server, as srt then lies where a lane writes.
@@ -546,7 +558,7 @@ guard task tests each one.
 | R3  | **The sandbox reads only what the project needs.** Every user-data root is denied (`/Users`, `/Volumes`, the shared temp roots), then the checkout, the toolchains, the caches and the lane's own temp directory are allowed again. The protected reads are always denied, including the checkout's `.env*` files unless the project names an exception. A deny list can't name every secret on a machine; an allow list can protect secrets nobody listed. | partly: lanes and the gate, which share one read policy. The project's `.env*` exceptions are designed                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | R4  | **The file tools follow the same read policy**, and never write `.git/` internals. Claude Code's permission deny rules enforce it, along with the broker for reads outside the checkout and the guard's check of the path after resolving links, so a link in the checkout can't point a read elsewhere.                                                                                                                                                    | built. Claude Code's file-tool `Read(...)` deny rules leave out the session's own config directory and its ancestors (every account 10db creates has `<data>/accounts/<id>/claude`, so its config directory is under the data directory; only the seeded default account uses the login's config directory, `~/.claude` unless `CLAUDE_CONFIG_DIR` says otherwise), so the session's own saved tool results stay readable; the guard, the broker and the kernel still hold them. The config directory is computed once per session and shared by the guard and the file-access judge |
 | R5  | **A lane can't reach 10db's controls.** The UI token, the database and the logs sit in the denied data directory, and no token is in any lane's environment. A session's MCP token already dies with the session (built).                                                                                                                                                                                                                                   | partly: the data directory is a protected read for Bash, the file tools and the gate, whose sandbox opens no home path but the toolchains. Repo stdio MCP servers get the same protected reads (§4.6). The daemon's git runs no hook, filter or submodule git (D13)                                                                                                                                                                                                                                                                                                                  |
-| R6  | **Lane network goes through the sandbox's proxy.** The project's allowed domains open directly; every other host is a card or a refusal. Loopback is off unless the project turns it on. The gate gets the project's stored hosts and loopback, when on, and nothing else.                                                                                                                                                                                  | partly: lanes, the gate and repo stdio MCP servers. The gate's proxy allows only the project's stored hosts (`strictAllowlist`) and loopback only with the project's switch. A repo stdio MCP server reaches no host, and loopback only with the switch (§4.6)                                                                                                                                                                                                                                                                                                                       |
+| R6  | **Lane network goes through the sandbox's proxy.** The project's allowed domains open directly; every other host is a card or a refusal. Loopback is off unless the project turns it on. The gate gets the project's stored hosts and loopback, when on, and nothing else.                                                                                                                                                                                  | partly: lanes, the gate and repo stdio MCP servers. The gate's proxy allows only the project's stored hosts (`strictAllowlist`) and loopback only with the project's switch. A repo stdio MCP server reaches no host and never gets loopback (§4.6)                                                                                                                                                                                                                                                                                                                                  |
 | R7  | **Repo settings can't widen a lane.** Nothing from the repo's Claude Code settings reaches a lane: no hook, allow rule, `env` or sandbox block.                                                                                                                                                                                                                                                                                                             | built                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | R8  | **The daemon reads repo files only through the safe reader.** That means a regular file, under a size cap, with no link on any path component. Files it writes in its data directory never follow a link.                                                                                                                                                                                                                                                   | partly                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | R9  | **No git command the daemon runs executes code from the checkout outside the sandbox.** Lanes can't write `.git/config` or `.git/hooks`. Hooks run inside the sandbox or not at all. Config keys that name programs or rewrite URLs are turned off or refused. A push goes to the remote URL recorded when the batch started.                                                                                                                               | partly: the daemon's own git (D13). Its commits and change checks are plumbing that runs no hook, filter or submodule git; the checkout's git dirs and origin's URLs are pinned per project in the database, and a commit moves only its workstream's branch by compare and swap. Fetch and push go to the pinned URLs, never one with credentials in it; lanes never push, and the git dirs are read-only to them                                                                                                                                                                   |
@@ -566,8 +578,8 @@ guard task tests each one.
   excepted, can leave in a commit. The daemon's scan catches known formats only (R12).
 - **Allowed hosts.** Approving a host approves sending anything there, not only fetching from it. The project's
   code can leave through any allowed host, such as a package registry. Choosing hosts is the builder's call.
-- **Loopback, where a project turns it on.** A sandboxed command, a lane's, the gate's or a repo MCP server's, can then connect to
-  every port on localhost:
+- **Loopback, where a project turns it on.** A sandboxed command, a lane's or the gate's, can then connect to
+  every port on localhost (a repo MCP server never can):
   dev servers, databases, Docker's API when it listens on TCP, a local proxy that bypasses network cards, and
   the daemon (locked by its token). Only unix sockets in the lane's own temp directory are allowed, so Docker's
   socket stays closed. Moving the daemon off loopback is a later hardening. The switch also lets a sandboxed
@@ -649,7 +661,7 @@ rm -rf dist/*`. The guard judges a command before it runs.
   unmeasured.
 - **A gate that needs Docker fails.** It never gets Docker's socket; its evidence says why.
 - **What a repo MCP server is given, it can pass on.** Its approved variables are in its env and, for the
-  session, in its sealed env file. It reads what lanes read, the checkout included, and its tool results reach
+  session, in its sealed env file, which the next daemon start removes if the daemon crashed. It reads what lanes read, the checkout included, and its tool results reach
   the lane's model, so an approved token can leave through the model and a commit. Approving a variable approves
   that.
 - **A repo MCP server that needs a host fails.** Its sandbox reaches no host until approvals can name hosts, so

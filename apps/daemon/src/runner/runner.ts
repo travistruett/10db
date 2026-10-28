@@ -587,6 +587,21 @@ export function createRunner(opts: RunnerOptions): Runner {
     }
   }
 
+  /** A flag for an approved server 10db can't run as written; it folds per server. */
+  function flagMcpFailure(
+    projectId: ProjectId,
+    id: WorkstreamId,
+    failure: { readonly name: string; readonly message: string },
+  ): void {
+    opts.inbox.flag({
+      projectId,
+      workstreamId: id,
+      title: `The repo's MCP server "${failure.name}" can't run as written`,
+      body: failure.message,
+      foldKey: `project-mcp-failure:${projectId}:${failure.name}`,
+    });
+  }
+
   /**
    * The repo's MCP servers for one session. Only servers the builder approved for
    * their exact config are passed; the session starts either way. A server with no verdict gets an approval
@@ -629,15 +644,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       });
     }
     for (const review of mcp.pending) requestMcpApproval(opts.inbox, project.id, review);
-    for (const failure of mcp.failures) {
-      opts.inbox.flag({
-        projectId: project.id,
-        workstreamId: id,
-        title: `The repo's MCP server "${failure.name}" can't run as written`,
-        body: failure.message,
-        foldKey: `project-mcp-failure:${project.id}:${failure.name}`,
-      });
-    }
+    for (const failure of mcp.failures) flagMcpFailure(project.id, id, failure);
     // Names only, never values. The live acceptance check reads this line by its message and field names.
     opts.logger.info(
       {
@@ -920,12 +927,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     // The repo's MCP servers expand from the project env: an account's credential never reaches them.
     // A file 10db can't parse fails here too.
     const projectMcp = readProjectMcp(project, id, opts.launcher.projectEnv());
-    // A stdio server runs only under the lane sandbox; with none, it is left out and named.
     const mcpServers = splitProjectMcp(projectMcp.servers);
-    const mcpNote = skippedServersNote(
-      projectMcp,
-      opts.laneSandbox ? [] : Object.keys(mcpServers.stdio),
-    );
     // A resumed session continues its conversation, so it keeps whether that conversation began from
     // a briefing and the briefing's baseline. A fresh session is briefed only when its prompt carries
     // the handoff.
@@ -966,6 +968,14 @@ export function createRunner(opts: RunnerOptions): Runner {
         throw error;
       }
     }
+    // A stdio server runs only under the lane sandbox; with none, or with a sandbox it can't have,
+    // it is left out and named.
+    const sandboxFailures = laneSession?.mcpFailures ?? [];
+    for (const failure of sandboxFailures) flagMcpFailure(project.id, id, failure);
+    const mcpNote = skippedServersNote(
+      { ...projectMcp, failures: [...projectMcp.failures, ...sandboxFailures] },
+      opts.laneSandbox ? [] : Object.keys(mcpServers.stdio),
+    );
     const dispose = (): void => {
       try {
         laneSession?.dispose();

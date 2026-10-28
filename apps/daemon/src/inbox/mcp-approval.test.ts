@@ -126,7 +126,7 @@ describe('MCP approval cards', () => {
       'It gets the variables lane commands get, with no credentials, plus what its env block sets.',
     );
     expect(card.body).toContain(
-      'It runs in a sandbox: it reads what lane commands read, writes only its own temp dir and reaches no host',
+      'It runs in a sandbox: it reads what lane commands read, writes only its own temp dir and reaches no host, not even localhost.',
     );
     expect(card.body).toContain("such as npx -y for a package the repo doesn't install");
     expect(card.body).not.toContain('replaces');

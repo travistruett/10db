@@ -12,10 +12,9 @@ import { readRepoConfigFile, RepoConfigFileError } from './repo-config-file';
 /** 10db's own MCP server in every managed session. A repo server with this name never replaces it. */
 export const TENDB_MCP_SERVER = '10db';
 /**
- * The session variables a stdio server gets without naming them in its config, besides what its
- * sandbox adds (the lane allowlist, its own temp dir and caches). Measured:
- * `npx -y @mantine/mcp-server` downloads, starts and lists its tools with these two alone. macOS adds
- * `__CF_USER_TEXT_ENCODING` inside the process itself under `env -i`; it is not a session variable.
+ * The session variables a stdio server gets without naming them in its config, so its command is
+ * looked up and run as in the builder's shell. Its sandbox adds the lane allowlist, its own temp dir
+ * and its package caches.
  */
 export const STDIO_BASE_ENV = ['PATH', 'HOME'] as const;
 const PROJECT_MCP_FILE = '.mcp.json';
@@ -209,6 +208,16 @@ function reviewOf(name: string, server: DeclaredServer): McpServerReview {
   };
 }
 
+/**
+ * A stdio server's command and args are on its sandbox's command line, which every local account can
+ * read, so they may hold no `${`: approved values reach it only through its env block.
+ */
+function expandsOnCommandLine(server: DeclaredServer): boolean {
+  return (
+    'command' in server && [server.command, ...(server.args ?? [])].some((v) => v.includes('${'))
+  );
+}
+
 /** 10db's server is `10db` and `mcp__10db__*` is allowed without asking, so no repo name may start with it or contain `__`. */
 function reservedName(name: string): boolean {
   return name.startsWith(TENDB_MCP_SERVER) || name.includes('__');
@@ -231,6 +240,14 @@ export function readRepoMcp(repoPath: string): RepoMcp {
         `The repo's .mcp.json declares a server named "${name}". 10db's own server is "${TENDB_MCP_SERVER}" and its ` +
           `tools are allowed as mcp__${TENDB_MCP_SERVER}__*, so a repo server whose name starts with "${TENDB_MCP_SERVER}" ` +
           'or contains "__" is ignored in managed sessions. Rename it to use it.',
+      );
+      continue;
+    }
+    if (expandsOnCommandLine(declared)) {
+      warnings.push(
+        `The repo's .mcp.json server "${name}" uses "\${" in its command or args. 10db passes values to a stdio ` +
+          'server only through its env block, never on a command line, which other processes on the Mac can read, ' +
+          'so it is ignored in managed sessions. Set the value in its env block and have the server read it there.',
       );
       continue;
     }
@@ -291,15 +308,18 @@ function expandMap(
   );
 }
 
-/** One approved server, expanded. A stdio server gets PATH, HOME and its declared `env`, plus its sandbox's allowlist. */
+/**
+ * One approved server, expanded. A stdio server gets PATH, HOME and its declared `env`, plus its
+ * sandbox's allowlist; its command and args hold no `${` (`readRepoMcp`), so they pass as written.
+ */
 function resolveServer(server: RepoMcpServer, scope: ExpandScope): ProjectMcpServer {
   const { name, declared } = server;
   if ('command' in declared) {
-    const command = expand(declared.command, scope, { server: name, field: 'command' });
-    // 10db launches it as `env -i NAME=value … <command>`, where a leading "-" or an "=" would change the meaning.
-    if (command.startsWith('-') || command.includes('=')) {
+    const { command } = declared;
+    // Its sandbox runs it as `exec "$@"`, where a leading "-" would be read as an option of `exec`.
+    if (command.startsWith('-')) {
       throw new ProjectMcpError(
-        `.mcp.json server "${name}" (command) can't start with "-" or contain "="; point it at a script instead.`,
+        `.mcp.json server "${name}" (command) can't start with "-"; point it at a script instead.`,
       );
     }
     const base = Object.fromEntries(
@@ -310,9 +330,7 @@ function resolveServer(server: RepoMcpServer, scope: ExpandScope): ProjectMcpSer
     return {
       type: 'stdio',
       command,
-      args: (declared.args ?? []).map((arg, i) =>
-        expand(arg, scope, { server: name, field: `args[${String(i)}]` }),
-      ),
+      args: [...(declared.args ?? [])],
       env: { ...base, ...expandMap(declared.env ?? {}, scope, name, 'env') },
     };
   }

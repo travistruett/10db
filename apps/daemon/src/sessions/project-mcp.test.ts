@@ -72,8 +72,8 @@ describe('readRepoMcp', () => {
         mantine: { command: 'npx', args: ['-y', '@mantine/mcp-server@9.7.2'] },
         tools: {
           type: 'stdio',
-          command: '${HOME}/bin/tool',
-          env: { LEVEL: '${LOG_LEVEL:-info}', GH: '${GITHUB_TOKEN}' },
+          command: 'bin/tool',
+          env: { LEVEL: '${LOG_LEVEL:-info}', GH: '${GITHUB_TOKEN}', DIR: '${HOME}/tools' },
         },
         docs: {
           type: 'http',
@@ -97,8 +97,9 @@ describe('readRepoMcp', () => {
       }),
       expect.objectContaining({
         name: 'tools',
-        command: '${HOME}/bin/tool',
+        command: 'bin/tool',
         env: [
+          { name: 'DIR', value: '${HOME}/tools' },
           { name: 'GH', value: '${GITHUB_TOKEN}' },
           { name: 'LEVEL', value: '${LOG_LEVEL:-info}' },
         ],
@@ -116,6 +117,25 @@ describe('readRepoMcp', () => {
       }),
     ]);
   });
+
+  it.each([
+    ['an argument', { command: 'tool', args: ['--token', '${DOCS_TOKEN}'] }],
+    ['an argument with a default', { command: 'tool', args: ['${LOG_LEVEL:-info}'] }],
+    ['the command', { command: '${HOME}/bin/tool' }],
+    ['a literal ${', { command: 'tool', args: ['${1}'] }],
+  ])(
+    'ignores a stdio server that puts ${ in %s, saying values reach it only through env',
+    (_where, server) => {
+      writeMcp({ mcpServers: { tools: server, mantine: { command: 'npx' } } });
+      const mcp = readRepoMcp(repo.path);
+      expect(mcp.servers.map((s) => s.name)).toEqual(['mantine']);
+      expect(mcp.warnings).toEqual([
+        expect.stringContaining(
+          'server "tools" uses "${" in its command or args. 10db passes values to a stdio server only through its env block',
+        ),
+      ]);
+    },
+  );
 
   it.each([
     [
@@ -231,16 +251,16 @@ describe('resolveProjectMcp', () => {
     writeMcp({
       mcpServers: {
         tools: {
-          command: '${HOME}/bin/tool',
-          args: ['--level', '${LOG_LEVEL:-info}'],
-          env: { LEVEL: 'debug' },
+          command: 'bin/tool',
+          args: ['--level', 'info'],
+          env: { LEVEL: '${LOG_LEVEL:-debug}' },
         },
       },
     });
-    const tools = resolve({ tools: approved('HOME', 'LOG_LEVEL') }).servers['tools'];
+    const tools = resolve({ tools: approved('LOG_LEVEL') }).servers['tools'];
     expect(tools).toEqual({
       type: 'stdio',
-      command: '/h/bin/tool',
+      command: 'bin/tool',
       args: ['--level', 'info'],
       env: { PATH: '/usr/bin:/bin', HOME: '/h', LEVEL: 'debug' },
     });
@@ -286,9 +306,9 @@ describe('resolveProjectMcp', () => {
       'ANTHROPIC_API_KEY',
     ],
     [
-      'an argument with a default',
-      { command: 'tool', args: ['${AWS_SECRET_ACCESS_KEY:-none}'] },
-      'args[0]',
+      'a stdio env value with a default',
+      { command: 'tool', env: { KEY: '${AWS_SECRET_ACCESS_KEY:-none}' } },
+      'env.KEY',
       'AWS_SECRET_ACCESS_KEY',
     ],
   ])(
@@ -340,12 +360,7 @@ describe('resolveProjectMcp', () => {
       ['P'],
       'still contains "${" after expansion',
     ],
-    [
-      'a command that env -i would misread',
-      { command: 'A=1' },
-      [],
-      'can\'t start with "-" or contain "="',
-    ],
+    ['a command the shell would read as an option', { command: '-x' }, [], 'can\'t start with "-"'],
   ])('fails only that server for %s', (_name, server, variables, message) => {
     writeMcp({ mcpServers: { docs: server, mantine: { command: 'npx' } } });
     const mcp = resolve({ docs: approved(...variables), mantine: approved() });
@@ -359,7 +374,7 @@ describe('resolveProjectMcp', () => {
       mcpServers: {
         a: { command: 'a' },
         b: { command: 'b' },
-        c: { command: 'c', args: ['${X}'] },
+        c: { command: 'c', env: { X: '${X}' } },
         d: { command: 'd' },
       },
     });

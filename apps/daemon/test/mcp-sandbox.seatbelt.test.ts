@@ -1,6 +1,14 @@
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { createServer, type Server } from 'node:net';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -38,7 +46,8 @@ const reach = (port, host) => new Promise((resolve) => {
   socket.on('connect', () => { socket.destroy(); resolve('ok'); });
   socket.on('error', () => resolve('denied'));
 });
-const probes = async () => ({
+// The test names sealed files only once the sandbox has made them, so they come with the request.
+const probes = async (files) => ({
   'home-canary': attempt(() => readFileSync(canary)),
   'home-listing': attempt(() => readdirSync(home)),
   'ssh-dir': attempt(() => readdirSync(join(home, '.ssh'))),
@@ -49,10 +58,18 @@ const probes = async () => ({
   'gh-token': process.env.GH_TOKEN === undefined ? 'denied' : 'ok',
   'aws-key': process.env.AWS_SECRET_ACCESS_KEY === undefined ? 'denied' : 'ok',
   'other-host': await reach(443, '1.1.1.1'),
-  'loopback-off': await reach(webPort, '127.0.0.1'),
+  'loopback': await reach(webPort, '127.0.0.1'),
+  'other-server-env-file': attempt(() => readFileSync(files.otherServerEnv)),
+  'lane-env-file': attempt(() => readFileSync(files.laneEnv)),
   'read-checkout': attempt(() => readFileSync('probe-server.mjs')),
   'write-temp': attempt(() => writeFileSync(join(process.env.TMPDIR, 'inside'), 'x')),
   'approved-env': process.env.PROBE_APPROVED === 'yes' ? 'ok' : 'denied',
+  'own-env-file': attempt(() => readFileSync(files.ownEnv)),
+});
+// Claude Code stops a server with TERM to srt, which passes it on; the mark says it arrived.
+process.on('SIGTERM', () => {
+  writeFileSync(join(process.env.TMPDIR, 'got-term'), 'x');
+  process.exit(0);
 });
 for await (const line of createInterface({ input: process.stdin })) {
   const request = JSON.parse(line);
@@ -61,7 +78,7 @@ for await (const line of createInterface({ input: process.stdin })) {
     protocolVersion: request.params.protocolVersion,
     capabilities: {},
     serverInfo: { name: 'probe', version: '1.0.0' },
-    instructions: JSON.stringify(await probes()),
+    instructions: JSON.stringify(await probes(request.params.probeFiles)),
   };
   process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: request.id, result }) + '\\n');
 }
@@ -121,7 +138,8 @@ describe.skipIf(!SEATBELT)('a repo stdio MCP server under the sandbox (Seatbelt)
       tmpRoot: join(root, 't'),
       runtime: resolveSandboxRuntime(),
     }).forSession({
-      project: { id: mintId('Project'), repoPath: checkout, sandboxLoopback: false },
+      // The project lets lane commands use localhost; its MCP servers still get none.
+      project: { id: mintId('Project'), repoPath: checkout, sandboxLoopback: true },
       env: sessionEnv(),
       rules: [],
       resumeProviderSessionId: null,
@@ -133,6 +151,8 @@ describe.skipIf(!SEATBELT)('a repo stdio MCP server under the sandbox (Seatbelt)
           args: ['probe-server.mjs', canary, homeProbe, join(root, 'outside'), String(webPort)],
           env: { PROBE_APPROVED: 'yes' },
         },
+        // Another server, whose sealed env file the probe tries to read.
+        sibling: { command: 'node', args: ['-e', ''], env: { SIBLING_TOKEN: `sib-${token}` } },
       },
     });
     // It reads the toolchain and walks the checkout, which takes a while on a loaded machine.
@@ -160,9 +180,27 @@ describe.skipIf(!SEATBELT)('a repo stdio MCP server under the sandbox (Seatbelt)
     };
   }
 
-  /** Starts the server as Claude Code does, sends `initialize`, and returns every stdout line. */
-  async function initialize(server: SandboxedMcpServer): Promise<string[]> {
-    const child = spawn(server.command, server.args, {
+  /** The sealed env file a launch sources inside its sandbox. */
+  function envFileOf(server: SandboxedMcpServer | undefined): string {
+    const inner = server?.launch().args.at(-1) ?? '';
+    const file = /'\. "\$0" && exec "\$@"' '([^']+)'/.exec(inner)?.[1];
+    if (file === undefined) throw new Error(`no env file in ${inner}`);
+    return file;
+  }
+
+  /** The files the probe tries to read: another server's sealed env file, the lane's, and its own. */
+  function probeFiles(): Record<string, string> {
+    return {
+      otherServerEnv: envFileOf(session.mcpServers['sibling']),
+      ownEnv: envFileOf(session.mcpServers['probe']),
+      laneEnv: session.spec.env['CLAUDE_ENV_FILE'] ?? '',
+    };
+  }
+
+  /** Starts the server as Claude Code does and sends `initialize`. */
+  function start(server: SandboxedMcpServer) {
+    const { command, args } = server.launch();
+    const child = spawn(command, args, {
       cwd: checkout,
       env: sessionEnv(),
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -183,9 +221,16 @@ describe.skipIf(!SEATBELT)('a repo stdio MCP server under the sandbox (Seatbelt)
         protocolVersion: '2025-06-18',
         capabilities: {},
         clientInfo: { name: '10db-test', version: '1.0.0' },
+        probeFiles: probeFiles(),
       },
     };
     child.stdin.write(`${JSON.stringify(request)}\n`);
+    return { child, exited, stderr: () => stderr };
+  }
+
+  /** Starts the server, sends `initialize`, closes stdin once answered and returns every stdout line. */
+  async function initialize(server: SandboxedMcpServer): Promise<string[]> {
+    const { child, exited, stderr } = start(server);
     const lines: string[] = [];
     for await (const line of createInterface({ input: child.stdout })) {
       lines.push(line);
@@ -193,7 +238,7 @@ describe.skipIf(!SEATBELT)('a repo stdio MCP server under the sandbox (Seatbelt)
       child.stdin.end();
     }
     const code = await exited;
-    expect(code, stderr).toBe(0);
+    expect(code, stderr()).toBe(0);
     return lines;
   }
 
@@ -215,13 +260,34 @@ describe.skipIf(!SEATBELT)('a repo stdio MCP server under the sandbox (Seatbelt)
       'gh-token': 'denied',
       'aws-key': 'denied',
       'other-host': 'denied',
-      'loopback-off': 'denied',
+      loopback: 'denied',
+      'other-server-env-file': 'denied',
+      'lane-env-file': 'denied',
       // Controls: the probes can succeed, and the approved variable arrives.
       'read-checkout': 'ok',
       'write-temp': 'ok',
       'approved-env': 'ok',
+      'own-env-file': 'ok',
     });
     expect(existsSync(join(checkout, 'inside'))).toBe(false);
     expect(existsSync(homeProbe)).toBe(false);
+  }, 60_000);
+
+  it('passes the TERM Claude Code sends srt on to the server', async () => {
+    const server = session.mcpServers['probe'];
+    if (server === undefined) throw new Error('the lane sandbox made no server');
+    const tmp = server
+      .launch()
+      .args.find((arg) => arg.startsWith('CLAUDE_CODE_TMPDIR='))
+      ?.slice('CLAUDE_CODE_TMPDIR='.length);
+    if (tmp === undefined) throw new Error('no temp dir');
+    const { child, exited } = start(server);
+    // Answered, and stdin left open: only the TERM ends it.
+    for await (const line of createInterface({ input: child.stdout })) {
+      expect(line).toContain('"id":1');
+      child.kill('SIGTERM');
+    }
+    await exited;
+    expect(readFileSync(join(tmp, 'got-term'), 'utf8')).toBe('x');
   }, 60_000);
 });

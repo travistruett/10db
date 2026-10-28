@@ -1,6 +1,7 @@
 import {
   existsSync,
   fstatSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
@@ -327,10 +328,41 @@ describe('startDaemon', () => {
         const gateLog = readFileSync(join(gateLogs, readdirSync(gateLogs)[0] ?? ''), 'utf8');
         expect(gateLog).toContain('fake srt: no sandbox; network {"allowedDomains":[]');
         expect(gateLog).toContain('"strictAllowlist":true');
-        // The session and the gate ended, so their temp dirs and files are gone.
+        // The session and the gate ended, so their temp dirs and files are gone; the daemon's mark stays
+        // until it stops.
+        expect(readdirSync(tmpRoot)).toEqual([`10db-daemon-${String(process.pid)}`]);
+        await running.stop();
         expect(readdirSync(tmpRoot)).toEqual([]);
       } finally {
         repo.cleanup();
+        rmSync(tmpRoot, { recursive: true, force: true });
+      }
+    },
+  );
+
+  // Its temp root is a short path under the shared `/tmp`, which no sandbox can write.
+  it.skipIf(SANDBOXED)(
+    'removes the temp dirs and sealed files a crashed daemon left in its sandbox temp root before any session starts',
+    async () => {
+      const tmpRoot = realpathSync(mkdtempSync('/tmp/sbd-'));
+      try {
+        mkdirSync(join(tmpRoot, '10db-a1B2c3', 'cache'), { recursive: true });
+        for (const name of ['10db-env-0123456789ab.sh', '10db-mcp-0123456789ab.json', 'other.txt'])
+          writeFileSync(join(tmpRoot, name), '', { mode: 0o400 });
+        daemon = await startDaemon({
+          dataDir: dir.path,
+          port: 0,
+          adapter: new FakeAdapter({}),
+          logLevel: 'warn',
+          sandbox: { tmpRoot, runtime: FAKE_SRT },
+          ...QUIET,
+        });
+        expect(readdirSync(tmpRoot).sort()).toEqual(
+          [`10db-daemon-${String(process.pid)}`, 'other.txt'].sort(),
+        );
+      } finally {
+        await daemon?.stop();
+        daemon = null;
         rmSync(tmpRoot, { recursive: true, force: true });
       }
     },

@@ -6,6 +6,7 @@ import { claudeProtectedPaths, type FileAccessContext } from './file-access';
 import {
   sandboxMcpServers,
   type McpSandboxes,
+  type McpSandboxFailure,
   type SandboxedMcpServer,
   type StdioMcpServer,
 } from './mcp-sandbox';
@@ -33,6 +34,8 @@ export interface LaneSession {
   readonly tmpDir: string;
   /** The repo's approved stdio servers, each launched under srt in a sandbox of its own. */
   readonly mcpServers: Readonly<Record<string, SandboxedMcpServer>>;
+  /** Approved stdio servers left out because their sandbox couldn't be built. */
+  readonly mcpFailures: readonly McpSandboxFailure[];
   setProviderSession(id: string): void;
   /** Removes the temp dirs and files, the servers' too. Run it once the lane process is gone. */
   dispose(): void;
@@ -149,7 +152,6 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           home: deps.home,
           tmpRoot,
           runtime: deps.runtime,
-          loopback: input.project.sandboxLoopback,
           env: input.env,
           checkouts: input.checkouts,
           servers: input.mcpServers,
@@ -184,6 +186,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           secretFiles,
           readList,
           configDir: input.configDir,
+          sandboxTemp: { root: tmpRoot, own: tmpDir },
           get providerSessionId() {
             return providerSessionId;
           },
@@ -196,6 +199,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           fileAccess,
           tmpDir,
           mcpServers: ownMcp.servers,
+          mcpFailures: ownMcp.failures,
           setProviderSession(id) {
             providerSessionId = id;
           },

@@ -41,6 +41,7 @@ function context(overrides: Partial<FileAccessContext> = {}): FileAccessContext 
     readList: [],
     configDir,
     providerSessionId: 'own-id',
+    sandboxTemp: { root: join(root, 't'), own: join(root, 't', '10db-ownabc') },
     ...overrides,
   };
 }
@@ -85,6 +86,32 @@ describe('readAccess', () => {
       name: 'a file in the checkout',
       path: () => join(checkout, 'src', 'a.ts'),
       expected: 'inside',
+    },
+    {
+      name: "another session's sealed file in the sandbox temp root",
+      setup: () => {
+        mkdirSync(join(root, 't'));
+        writeFileSync(join(root, 't', '10db-env-0123456789ab.sh'), '');
+      },
+      path: () => join(root, 't', '10db-env-0123456789ab.sh'),
+      expected: 'protected',
+    },
+    {
+      name: "another session's temp dir, reached through a link in the checkout",
+      setup: () => {
+        mkdirSync(join(root, 't', '10db-othabc'), { recursive: true });
+        symlinkSync(join(root, 't', '10db-othabc'), join(checkout, 'other-temp'));
+      },
+      path: () => join(checkout, 'other-temp', 'cache'),
+      expected: 'protected',
+    },
+    {
+      name: 'a file in its own temp dir, judged as any path outside the checkout',
+      setup: () => {
+        mkdirSync(join(root, 't', '10db-ownabc'), { recursive: true });
+      },
+      path: () => join(root, 't', '10db-ownabc', 'out.log'),
+      expected: 'ask',
     },
     {
       name: 'a link in the checkout to a protected file',

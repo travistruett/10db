@@ -22,6 +22,11 @@ export interface FileAccessContext {
   readonly configDir: string;
   /** The id Claude Code knows the session by; null until a start or resume names it. */
   readonly providerSessionId: string | null;
+  /**
+   * Where every sandbox's temp dirs and sealed files are, and this session's own temp dir. Everything
+   * else there is another session's or server's, so it is protected.
+   */
+  readonly sandboxTemp: { readonly root: string; readonly own: string };
 }
 
 /** `contains-protected` is a directory-scoped read of a path that has a protected path under it. */
@@ -144,7 +149,10 @@ const READ_STRICTNESS: Record<ReadAccess, number> = {
 function judgeRead(real: string, ctx: FileAccessContext, tree: boolean): ReadAccess {
   if (isOwnToolResult(real, ctx)) return 'allowed';
   if ((ctx.secretFiles ?? []).some((file) => pathsEqual(real, file))) return 'protected';
-  const roots = ctx.protectedReads.flatMap(spellings);
+  const ownTemp = spellings(ctx.sandboxTemp.own).some((dir) => isEqualOrUnder(real, dir));
+  const roots = [...ctx.protectedReads, ...(ownTemp ? [] : [ctx.sandboxTemp.root])].flatMap(
+    spellings,
+  );
   if (roots.some((root) => isEqualOrUnder(real, root))) return 'protected';
   if (tree && roots.some((root) => isEqualOrUnder(root, real))) return 'contains-protected';
   if (spellings(ctx.checkout).some((root) => isEqualOrUnder(real, root))) return 'inside';

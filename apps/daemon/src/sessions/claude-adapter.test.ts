@@ -328,7 +328,7 @@ describe('buildQueryOptions', () => {
         expect(servers['mantine']).toEqual({
           type: 'stdio',
           command: '/usr/bin/env',
-          args: [...made.server.args],
+          args: made.server.launch().args,
         });
         expect(servers[CLAUDE_MCP_SERVER]).toMatchObject({
           url: 'http://127.0.0.1:4317/mcp',

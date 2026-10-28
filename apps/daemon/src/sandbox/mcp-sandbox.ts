@@ -1,8 +1,7 @@
-import { z } from 'zod';
 import { prepareCommandEnv } from './command-env';
 import { shellAssignments } from './env-file';
 import { singleQuoted } from './posix-quote';
-import { buildLaneProfile } from './profile';
+import { buildLaneProfile, SandboxProfileError } from './profile';
 import { projectWritableRoots, type ProjectAccess } from './project-access';
 import { createSealedFile, removeSealedFile, type SealedFileKind } from './sealed-file';
 import {
@@ -39,44 +38,66 @@ export interface StdioMcpServer {
   readonly env: Readonly<Record<string, string>>;
 }
 
-const SandboxedMcpServerSchema = z
-  .strictObject({
-    type: z.literal('stdio'),
-    command: z.literal(LAUNCHER),
-    args: z.array(z.string()).readonly(),
-  })
-  .brand<'SandboxedMcpServer'>();
+/** A command and its arguments, as Claude Code starts a stdio server. */
+export interface McpLaunch {
+  readonly command: string;
+  readonly args: readonly string[];
+}
+
+/** The constructor's key. Never exported, so no other module can make a `SandboxedMcpServer`. */
+const MADE_HERE: unique symbol = Symbol('SandboxedMcpServer');
 
 /**
- * A repo stdio server's launch under srt, in the shape Claude Code takes. Only this module makes
- * one, so a stdio server reaches Claude Code inside the sandbox or not at all.
+ * A repo stdio server's launch under srt. The launch is a private field, so a copy or a look-alike
+ * carries none and doesn't typecheck as one: a stdio server reaches Claude Code inside the sandbox
+ * or not at all.
  */
-export type SandboxedMcpServer = z.infer<typeof SandboxedMcpServerSchema>;
+export class SandboxedMcpServer {
+  readonly #launch: McpLaunch;
+
+  constructor(key: typeof MADE_HERE, launch: McpLaunch) {
+    if (key !== MADE_HERE) {
+      throw new SandboxProfileError('mcp', 'only the lane sandbox makes a sandboxed MCP server');
+    }
+    this.#launch = { command: launch.command, args: Object.freeze([...launch.args]) };
+  }
+
+  /** What Claude Code runs: a fresh copy each time. */
+  launch(): McpLaunch {
+    return { command: this.#launch.command, args: [...this.#launch.args] };
+  }
+}
 
 export interface McpSandboxInput {
   readonly access: ProjectAccess;
   readonly home: string;
   readonly tmpRoot: string;
   readonly runtime: SandboxRuntime;
-  readonly loopback: boolean;
   /** The session's launch env: only its allowlisted names reach a server. */
   readonly env: Readonly<Record<string, string>>;
   readonly checkouts: readonly string[];
   readonly servers: Readonly<Record<string, StdioMcpServer>>;
 }
 
+/** A server the sandbox couldn't build, left out of the session. The message names no value. */
+export interface McpSandboxFailure {
+  readonly name: string;
+  readonly message: string;
+}
+
 export interface McpSandboxes {
   readonly servers: Readonly<Record<string, SandboxedMcpServer>>;
+  readonly failures: readonly McpSandboxFailure[];
   /** Removes every server's temp dir and files. Run it once the lane process is gone. */
   dispose(): void;
 }
 
 /**
  * One server's sandbox: its own temp dir, the only path it writes; the lanes' reads; no host at all,
- * since an approval names none, and loopback only by the project's switch. Its env is the lane
- * allowlist and its approved variables, sourced inside the sandbox from a sealed file, so no value
- * is on a command line. The command is srt's own child, so srt's TERM reaches it when Claude Code
- * stops the server; no verdict reads its exit status.
+ * since an approval names none, and no loopback. Its env is the lane allowlist and its approved
+ * variables, sourced inside the sandbox from a sealed file, so no value is on a command line. The
+ * command is srt's own child, so srt's TERM reaches it when Claude Code stops the server; no verdict
+ * reads its exit status.
  */
 function sandboxOne(
   server: StdioMcpServer,
@@ -117,7 +138,9 @@ function sandboxOne(
     extraReads: [envFile, ...access.gitReads],
     extraWrites: [],
     denyWrites: [...access.gitState, ...access.otherCheckouts, ...SRT_SHARED_TEMP],
-    loopback: input.loopback,
+    // Never, whatever the project's switch: on localhost listen other sandboxes' proxies, and
+    // through them the hosts an approval withholds.
+    loopback: false,
     deniedEnvNames: [],
   });
   const settingsFile = createSealedFile(
@@ -134,8 +157,7 @@ function sandboxOne(
     singleQuoted(envFile),
     ...[server.command, ...server.args].map(singleQuoted),
   ].join(' ');
-  return SandboxedMcpServerSchema.parse({
-    type: 'stdio',
+  return new SandboxedMcpServer(MADE_HERE, {
     command: LAUNCHER,
     args: [
       '-i',
@@ -152,17 +174,38 @@ function sandboxOne(
   });
 }
 
-/** Sandboxes each of a session's repo stdio servers; with none, makes nothing and checks no srt. */
+/**
+ * Sandboxes each of a session's repo stdio servers; with none, makes nothing and checks no srt. A
+ * server whose profile is refused (an approved value the env file can't hold) is left out and
+ * reported, so it never stops the session or the other servers.
+ */
 export function sandboxMcpServers(input: McpSandboxInput): McpSandboxes {
   const entries = Object.entries(input.servers);
-  if (entries.length === 0) return { servers: {}, dispose: () => undefined };
+  if (entries.length === 0) return { servers: {}, failures: [], dispose: () => undefined };
   checkRuntime(input.runtime, projectWritableRoots(input.checkouts, input.tmpRoot));
   const removals: (() => void)[] = [];
   try {
     const servers: Record<string, SandboxedMcpServer> = {};
-    for (const [name, server] of entries) servers[name] = sandboxOne(server, input, removals);
+    const failures: McpSandboxFailure[] = [];
+    for (const [name, server] of entries) {
+      const own: (() => void)[] = [];
+      try {
+        servers[name] = sandboxOne(server, input, own);
+        removals.push(...own);
+      } catch (error) {
+        try {
+          removeAll(own);
+        } catch {
+          // Whatever stuck goes with the session's dispose.
+          removals.push(...own);
+        }
+        if (!(error instanceof SandboxProfileError)) throw error;
+        failures.push({ name, message: `Its sandbox could not be built: ${error.message}` });
+      }
+    }
     return {
       servers,
+      failures,
       dispose: () => {
         removeAll(removals);
       },

@@ -6,6 +6,7 @@ import type {
   SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
 import type { GuardVerdict } from '../guard';
+import { SandboxedMcpServer } from '../sandbox';
 import type { SessionEvent, SessionMcpServer, ToolDecision } from './types';
 
 export const SUMMARY_CHARS = 200;
@@ -166,13 +167,14 @@ export function userMessage(text: string, priority?: 'now' | 'next' | 'later'): 
 }
 
 /**
- * A repo-declared MCP server in the SDK's shape. A stdio server is already its launch under srt,
- * through `env -i`; it never gets an `env` block, which Claude Code would merge over the session's
- * environment, credentials and all.
+ * A repo-declared MCP server in the SDK's shape. A stdio server is the lane sandbox's own launch
+ * under srt, through `env -i`; it never gets an `env` block, which Claude Code would merge over the
+ * session's environment, credentials and all.
  */
 export function toSdkMcpServer(server: SessionMcpServer): McpServerConfig {
-  if (server.type === 'stdio') {
-    return { type: 'stdio', command: server.command, args: [...server.args] };
+  if (server instanceof SandboxedMcpServer) {
+    const { command, args } = server.launch();
+    return { type: 'stdio', command, args: [...args] };
   }
   return {
     type: server.type,

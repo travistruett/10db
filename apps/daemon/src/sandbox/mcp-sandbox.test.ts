@@ -75,8 +75,9 @@ function forSession(
 
 /** What the session hands Claude Code for `name`, split into its parts. */
 function launchOf(session: LaneSession, name: string) {
-  const server = session.mcpServers[name];
-  if (server === undefined) throw new Error(`no ${name} server`);
+  const made = session.mcpServers[name];
+  if (made === undefined) throw new Error(`no ${name} server`);
+  const server = made.launch();
   const at = server.args.indexOf('--settings');
   const settingsFile = server.args[at + 1] ?? '';
   const inner = server.args.at(-1) ?? '';
@@ -113,7 +114,6 @@ describe.skipIf(SANDBOXED)("a lane session's repo stdio MCP servers", () => {
       expect(Object.keys(session.mcpServers)).toEqual(['docs', 'other']);
       const { server, settingsFile, tmp, inner } = launchOf(session, 'docs');
       expect(server).toEqual({
-        type: 'stdio',
         command: '/usr/bin/env',
         args: [
           '-i',
@@ -178,26 +178,26 @@ describe.skipIf(SANDBOXED)("a lane session's repo stdio MCP servers", () => {
   });
 
   it.each([
-    ['off', false, {}],
-    ['on', true, { allowLocalBinding: true }],
+    ['off', false],
+    ['on', true],
   ])(
-    "reaches no host, not even the project's, with loopback %s by the project's switch",
-    async (_name, loopback, local) => {
+    "reaches no host, not even the project's or localhost, with the project's loopback %s",
+    async (_name, loopback) => {
       const session = await forSession({
         project: { id: projectId, repoPath: repo.path, sandboxLoopback: loopback },
       });
       try {
-        // The lane's own commands still reach the project's hosts.
+        // The lane's own commands still reach the project's hosts, and localhost by its switch.
         expect(session.spec.settings.network.allowedDomains).toEqual(['registry.npmjs.org']);
+        expect(session.spec.settings.network.allowLocalBinding ?? false).toBe(loopback);
         const { settings, tmp } = launchOf(session, 'docs');
-        expect(settings).toMatchObject({ network: { ...local } });
+        // No local binding: loopback would reach other sandboxes' proxies, and through them hosts.
         expect(settings).toEqual(
           expect.objectContaining({
             network: {
               allowedDomains: [],
               deniedDomains: [],
               strictAllowlist: true,
-              ...local,
               allowMachLookup: ['com.apple.FSEvents'],
               allowUnixSockets: [tmp],
             },
@@ -208,6 +208,32 @@ describe.skipIf(SANDBOXED)("a lane session's repo stdio MCP servers", () => {
       }
     },
   );
+
+  it('leaves out a server whose approved value it cannot seal, naming it, and starts the rest', async () => {
+    const session = await forSession({
+      mcpServers: {
+        broken: { command: 'node', args: ['x.mjs'], env: { DOCS_TOKEN: 'line-one\nline-two' } },
+        docs: SERVER,
+      },
+    });
+    try {
+      expect(Object.keys(session.mcpServers)).toEqual(['docs']);
+      expect(session.mcpFailures.map((failure) => failure.name)).toEqual(['broken']);
+      expect(session.mcpFailures[0]?.message).toContain('DOCS_TOKEN');
+      // The value itself is never in the report.
+      expect(JSON.stringify(session.mcpFailures)).not.toContain('line-one');
+      const { settingsFile, tmp, envFile } = launchOf(session, 'docs');
+      // Only the lane's own files and the started server's are left: the failed one's are gone.
+      expect(readdirSync(tmpRoot).sort()).toEqual(
+        [session.tmpDir, settingsFile, tmp, envFile, session.spec.env['CLAUDE_ENV_FILE'] ?? '']
+          .map((path) => path.slice(tmpRoot.length + 1))
+          .sort(),
+      );
+    } finally {
+      session.dispose();
+    }
+    expect(readdirSync(tmpRoot)).toEqual([]);
+  });
 
   it('removes each server temp dir, settings file and env file on dispose', async () => {
     const session = await forSession();

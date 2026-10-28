@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SANDBOXED } from '../../test/fixtures';
+import { FAKE_SRT, SANDBOXED } from '../../test/fixtures';
 import { sandboxedMcpServer } from '../../test/sandboxed-mcp';
 import {
   contextEvent,
@@ -264,25 +264,60 @@ describe('toSdkMcpServer', () => {
       const made = await sandboxedMcpServer({ command: 'npx', args: ['-y', 'x'], env: {} });
       try {
         const config = toSdkMcpServer(made.server);
+        // env -i with a system PATH, then srt's host with its sealed settings, then the command inside.
         expect(config).toEqual({
           type: 'stdio',
           command: '/usr/bin/env',
-          args: [...made.server.args],
+          args: [
+            '-i',
+            'PATH=/usr/bin:/bin:/usr/sbin:/sbin',
+            expect.stringMatching(/^HOME=\//),
+            expect.stringMatching(/^CLAUDE_CODE_TMPDIR=(?:\/private)?\/tmp\/sbx-[^/]+\/t\/10db-/),
+            FAKE_SRT.node,
+            FAKE_SRT.cli,
+            '--settings',
+            expect.stringMatching(/\/10db-mcp-[0-9a-f]+\.json$/),
+            '-c',
+            expect.stringMatching(
+              /^exec \/usr\/bin\/env -i \/bin\/sh -c '\. "\$0" && exec "\$@"' '[^']+\/10db-mcp-[0-9a-f]+\.sh' 'npx' '-y' 'x'$/,
+            ),
+          ],
         });
         // No `env` block: Claude Code would merge it over the session environment.
         expect(config).not.toHaveProperty('env');
+        // Each call hands out its own copy: changing one changes no later launch.
+        if (config.type !== 'stdio') throw new Error('not a stdio config');
+        config.args?.push('--inject');
+        expect(toSdkMcpServer(made.server)).toEqual({ ...config, args: config.args?.slice(0, -1) });
       } finally {
         made.cleanup();
       }
     },
   );
 
-  it('takes no stdio server that skipped the sandbox', () => {
-    const unsandboxed = { type: 'stdio', command: 'npx', args: ['-y', 'x'], env: {} } as const;
-    // @ts-expect-error a stdio server reaches a session only through the lane sandbox
-    const server: SessionMcpServer = unsandboxed;
-    expect(server.type).toBe('stdio');
-  });
+  // The sandboxed launch is made under a short root in the shared `/tmp`, which no sandbox can write.
+  it.skipIf(SANDBOXED)(
+    'takes no stdio server that skipped the sandbox, nor a copy of a sandboxed one with its own arguments',
+    async () => {
+      const unsandboxed = { type: 'stdio', command: 'npx', args: ['-y', 'x'], env: {} } as const;
+      // @ts-expect-error a stdio server reaches a session only through the lane sandbox
+      const plain: SessionMcpServer = unsandboxed;
+      expect(toSdkMcpServer(plain)).not.toHaveProperty('command');
+      const made = await sandboxedMcpServer({ command: 'npx', args: ['-y', 'x'], env: {} });
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-misused-spread -- the copy is the bypass under test
+        const copy = { ...made.server, args: ['-c', 'npx -y x'] };
+        // @ts-expect-error a copy keeps no launch: only the sandbox makes one
+        const copied: SessionMcpServer = copy;
+        // Nothing to run: the launch lives only in the sandbox's own object.
+        const config = toSdkMcpServer(copied);
+        expect(config).not.toHaveProperty('command');
+        expect(config).not.toHaveProperty('args');
+      } finally {
+        made.cleanup();
+      }
+    },
+  );
 
   it('passes HTTP and SSE servers with their expanded headers, leaving out a block the repo did not declare', () => {
     expect(toSdkMcpServer({ type: 'http', url: 'https://d/mcp', headers: { A: 'b' } })).toEqual({
