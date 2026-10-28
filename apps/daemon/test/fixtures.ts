@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ProjectDto, TaskDto, WorkstreamDto } from '@10db/contracts';
@@ -13,6 +13,7 @@ import {
   type SessionRow,
   type Store,
 } from '@10db/db';
+import { inject } from 'vitest';
 import type { Keychain } from '../src/environment';
 import type { SandboxRuntime } from '../src/sandbox';
 
@@ -71,9 +72,12 @@ export const TEST_REPO_CONFIG = {
   'receive.autogc': 'false',
 } as const;
 
-/** A real git repository with one commit on main, for tests that touch git or files. */
-export function createTempRepo(): TempDir {
-  const dir = tempDir('repo');
+/**
+ * Builds the repository `createTempRepo` copies: one commit on main, with `TEST_REPO_CONFIG` and a
+ * test identity. `repo-template.global.ts` builds it once per test run and removes it after.
+ */
+export function buildRepoTemplate(): TempDir {
+  const dir = tempDir('repo-template');
   const env = isolatedGitEnv();
   const git = (...args: string[]) =>
     execFileSync('git', ['-C', dir.path, ...args], { env, stdio: 'pipe' });
@@ -85,6 +89,15 @@ export function createTempRepo(): TempDir {
   writeFileSync(join(dir.path, 'README.md'), '# fixture\n');
   git('add', 'README.md');
   git('commit', '-q', '-m', 'Initial commit');
+  return dir;
+}
+
+/** A real git repository with one commit on main, for tests that touch git or files. */
+export function createTempRepo(): TempDir {
+  const dir = tempDir('repo');
+  // A copy is a few file writes where a build is nine git calls, and the daemon's tests make over a
+  // thousand repositories.
+  cpSync(inject('repoTemplate'), dir.path, { recursive: true });
   return dir;
 }
 

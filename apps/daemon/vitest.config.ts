@@ -6,5 +6,6 @@ export default defineProject({
     environment: 'node',
     testTimeout: 30_000,
     setupFiles: ['../../tests/git-isolation.setup.ts'],
+    globalSetup: ['./test/repo-template.global.ts'],
   },
 });
