@@ -142,20 +142,27 @@ export const worktreeCards = {
         };
     }
   },
-  keptDirty: (batch: BatchDto, path: string, paths: readonly string[]): Card => ({
+  /** `main` is the project's main checkout, where the removal command runs. */
+  keptDirty: (batch: BatchDto, main: string, path: string, paths: readonly string[]): Card => ({
     title: `Batch "${batch.title}" abandoned: uncommitted changes kept in ${path}`,
-    body: `10db never throws away uncommitted work, so it kept the worktree with these changes:\n${listPaths(paths)}\n\nCopy what you need, then remove it with git worktree remove --force --force ${path}`,
+    body: `10db never throws away uncommitted work, so it kept the worktree with these changes:\n${listPaths(paths)}\n\nCopy what you need, then remove it with ${worktreeRemovalCommand(main, path)}.`,
     foldKey: `worktree-kept:${batch.id}`,
     detail: { batchId: batch.id },
   }),
-  /** `paths` is null when git couldn't read the worktree, which counts as changed. */
-  orphanKept: (path: string, paths: readonly string[] | null): Card => ({
-    title: `10db kept ${path}: it has uncommitted changes`,
+  /**
+   * `paths` is null when git couldn't read the worktree, which counts as changed. `main` is the
+   * project's main checkout, where the removal command runs.
+   */
+  orphanKept: (main: string, path: string, paths: readonly string[] | null): Card => ({
+    title:
+      paths === null
+        ? `10db kept ${path}: it can't be read`
+        : `10db kept ${path}: it has uncommitted changes`,
     body: `No batch uses this worktree any more, but ${
       paths === null
         ? "10db couldn't read it, so it may hold uncommitted work"
         : `it holds uncommitted changes:\n${listPaths(paths)}`
-    }\n\n10db never throws away uncommitted work. Copy what you need, then remove it with ${worktreeRemovalCommand(path)}.`,
+    }\n\n10db never throws away uncommitted work. Copy what you need, then remove it with ${worktreeRemovalCommand(main, path)}.`,
     foldKey: `worktree-orphan:${path}`,
   }),
   leftBehind: (batch: BatchDto, path: string): Card => ({

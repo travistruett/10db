@@ -465,7 +465,7 @@ describe('Abandon of a worktree batch', () => {
     expect(worktreePaths()).toEqual([realpathSync(h.repo), wt]);
     const kept = h.cards().find((c) => c.title.includes('uncommitted changes kept'));
     expect(kept?.body).toContain('notes.txt');
-    expect(kept?.body).toContain(`git worktree remove --force --force ${wt}`);
+    expect(kept?.body).toContain(`git -C '${h.repo}' worktree remove --force --force '${wt}'`);
   });
 
   it('retireWorktree itself keeps an ABANDONED worktree with uncommitted changes', async () => {

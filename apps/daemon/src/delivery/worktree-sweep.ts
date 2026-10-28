@@ -108,7 +108,7 @@ async function sweepProject(deps: SweepDeps, project: ProjectDto): Promise<strin
     try {
       const changed = await changesIn(deps, main, entry.path);
       if (changed === null || changed.length > 0) {
-        raise(deps.inbox, project.id, worktreeCards.orphanKept(entry.path, changed));
+        raise(deps.inbox, project.id, worktreeCards.orphanKept(main, entry.path, changed));
         continue;
       }
       const outcome = await deps.git.removeWorktree(main, entry.path);

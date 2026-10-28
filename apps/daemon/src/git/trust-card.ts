@@ -33,20 +33,14 @@ function codeSpan(value: string): string {
 }
 
 /**
- * The command that removes the locked worktree at `path`, to paste when `path` is plain; otherwise
- * the command to type, naming `path` as a code span.
+ * How the builder removes the locked worktree at `path`, as git run in `checkout` (the main checkout,
+ * or a linked worktree of the same repository), so it works wherever it is pasted: a command to paste
+ * when both paths are plain, otherwise the command to type, naming each path as a code span.
  */
-export function worktreeRemovalCommand(path: string): string {
-  return PASTE_SAFE.test(path)
-    ? `git worktree remove --force --force ${shellQuote(path)}`
-    : `git worktree remove --force --force, naming ${codeSpan(path)}`;
-}
-
-/** How the builder removes a worktree that isn't theirs: a command to paste only when `repo` is plain. */
-function removal(repo: string): string {
-  if (PASTE_SAFE.test(repo))
-    return `If it is not yours, git worktree remove --force --force ${shellQuote(repo)} removes it.`;
-  return `If it is not yours, remove it with git worktree remove --force --force, naming ${codeSpan(repo)}.`;
+export function worktreeRemovalCommand(checkout: string, path: string): string {
+  return PASTE_SAFE.test(checkout) && PASTE_SAFE.test(path)
+    ? `git -C ${shellQuote(checkout)} worktree remove --force --force ${shellQuote(path)}`
+    : `git worktree remove --force --force run in ${codeSpan(checkout)}, naming ${codeSpan(path)}`;
 }
 
 function body(error: GitTrustError): string {
@@ -97,7 +91,8 @@ function body(error: GitTrustError): string {
     case GitTrustFailure.Embedded:
       return `${codeSpan(detail.path)} is a submodule or holds a repository of its own, whose git would run its own config and hooks. 10db never commits one; commit it yourself if it belongs in the change.`;
     case GitTrustFailure.Unpinned:
-      return `10db runs git under its worktree root only in worktrees it made, and it made none at ${codeSpan(repo)}. Nothing there is trusted and nothing there ships. ${removal(repo)}`;
+      // The main checkout isn't known here; git run in a linked worktree removes that worktree too.
+      return `10db runs git under its worktree root only in worktrees it made, and it made none at ${codeSpan(repo)}. Nothing there is trusted and nothing there ships. If it is not yours, remove it with ${worktreeRemovalCommand(repo, repo)}.`;
   }
 }
 

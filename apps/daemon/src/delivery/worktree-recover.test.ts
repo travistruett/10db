@@ -607,13 +607,14 @@ describe('sweepWorktrees', () => {
     expect(h.cards()).toEqual([]);
   });
 
-  it.each<{ name: string; change: (path: string) => void; shown: string }>([
+  it.each<{ name: string; change: (path: string) => void; shown: string; why: string }>([
     {
       name: 'an edited file',
       change: (path) => {
         writeFileSync(join(path, 'README.md'), '# edited, not committed\n');
       },
       shown: '- README.md',
+      why: 'it has uncommitted changes',
     },
     {
       name: 'an untracked file',
@@ -621,6 +622,7 @@ describe('sweepWorktrees', () => {
         writeFileSync(join(path, 'notes.txt'), 'mine\n');
       },
       shown: '- notes.txt',
+      why: 'it has uncommitted changes',
     },
     {
       name: 'a git file git cannot read',
@@ -628,8 +630,9 @@ describe('sweepWorktrees', () => {
         writeFileSync(join(path, '.git'), 'not a gitfile\n');
       },
       shown: "10db couldn't read",
+      why: "it can't be read",
     },
-  ])('keeps an orphan with $name and names it once', async ({ change, shown }) => {
+  ])('keeps an orphan with $name and names it once', async ({ change, shown, why }) => {
     mkdirSync(h.worktreeRoot, { recursive: true });
     const path = worktreeAt(under('dirty'), ours(mintId('Batch')));
     change(path);
@@ -638,9 +641,9 @@ describe('sweepWorktrees', () => {
     expect(listed()).toContain(comparable(path));
     expect(existsSync(path)).toBe(true);
     const card = h.only(h.cards());
-    expect(card.title).toBe(`10db kept ${path}: it has uncommitted changes`);
+    expect(card.title).toBe(`10db kept ${path}: ${why}`);
     expect(card.body).toContain(shown);
-    expect(card.body).toContain(`git worktree remove --force --force '${path}'`);
+    expect(card.body).toContain(`git -C '${h.repo}' worktree remove --force --force '${path}'`);
   });
 
   it('names a path that is not paste-safe as a code span, not a command', async () => {
@@ -649,8 +652,8 @@ describe('sweepWorktrees', () => {
     writeFileSync(join(path, 'notes.txt'), 'mine\n');
     await sweep();
     const card = h.only(h.cards());
-    expect(card.body).toContain(`naming \`${path}\``);
-    expect(card.body).not.toContain(`--force --force '`);
+    expect(card.body).toContain(`run in \`${h.repo}\`, naming \`${path}\``);
+    expect(card.body).not.toContain(`git -C '`);
   });
 
   it("sweeps the other projects when one project's checkout is not a repository", async () => {

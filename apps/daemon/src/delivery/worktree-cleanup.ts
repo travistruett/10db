@@ -98,9 +98,10 @@ export async function abandonWorktree(ctx: DeliveryContext, batchId: BatchId): P
   if (outcome.kind !== 'kept') return;
   const batch = getBatch(ctx.state.db, batchId);
   if (batch.worktreePath === null) return;
+  const main = getProject(ctx.state.db, batch.projectId).repoPath;
   raise(
     ctx.inbox,
     batch.projectId,
-    worktreeCards.keptDirty(batch, batch.worktreePath, outcome.paths),
+    worktreeCards.keptDirty(batch, main, batch.worktreePath, outcome.paths),
   );
 }
