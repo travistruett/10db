@@ -40,6 +40,7 @@ import { createGit } from '../git';
 import { allowedToolsFor } from '../permissions';
 import {
   createLaneSandbox,
+  SandboxedMcpServer,
   SandboxProfileError,
   SandboxTempDirError,
   type LaneSandbox,
@@ -49,6 +50,7 @@ import {
 import type { SessionEvent, SessionHandle, SessionSpec } from '../sessions';
 import {
   createMemoryKeychain,
+  FAKE_SRT,
   handoffArgs,
   isolatedGitEnv,
   SANDBOXED,
@@ -780,7 +782,7 @@ describe('runner', () => {
       expect(approvalCards()).toHaveLength(1);
     });
 
-    it('passes an approved server with only PATH, HOME and the variables the builder approved', async () => {
+    it('passes an approved remote server with the variables the builder approved, and no stdio server without a sandbox', async () => {
       engine = await createTestEngine(BOOK, {}, launcherOver(SECRET_ENV));
       writeMcp({ docs: DOCS, mantine: MANTINE });
       await runTask('Alpha');
@@ -798,27 +800,17 @@ describe('runner', () => {
       );
       answerAll('approve');
       const spec = await runTask('Beta');
+      // A stdio server runs only under the lane sandbox, which this engine doesn't have.
       expect(spec.projectMcpServers).toEqual({
         docs: {
           type: 'http',
           url: 'https://docs.example/mcp',
           headers: { Authorization: 'Bearer tok-1' },
         },
-        mantine: {
-          type: 'stdio',
-          command: 'npx',
-          args: MANTINE.args,
-          env: { PATH: '/usr/bin:/bin', HOME: '/h' },
-        },
       });
-      const mantine = spec.projectMcpServers['mantine'];
-      expect(mantine?.type === 'stdio' ? Object.keys(mantine.env).sort() : null).toEqual([
-        'HOME',
-        'PATH',
-      ]);
       for (const secret of ['sk-ant-x', 'oauth-x', 'aws-x'])
         expect(JSON.stringify(spec.projectMcpServers)).not.toContain(secret);
-      expect(spec.prompt).not.toContain('Note from 10db');
+      expect(spec.prompt).toContain('mantine (it runs only in the lane sandbox, which is off)');
     });
 
     it("asks again when the server's config changes, and runs without it meanwhile", async () => {
@@ -855,7 +847,7 @@ describe('runner', () => {
       await runTask('Alpha');
       answerAll('approve');
       const spec = await runTask('Beta');
-      expect(Object.keys(spec.projectMcpServers)).toEqual(['mantine']);
+      expect(Object.keys(spec.projectMcpServers)).toEqual([]);
       const flags = listInbox(engine.store.db, { states: ['OPEN'] }).filter((i) =>
         i.title.includes('"docs"'),
       );
@@ -2626,6 +2618,7 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
       loginConfigDir: null,
       tmpRoot,
       gitDirs: (path) => lanesGit.gitDirs(path),
+      runtime: FAKE_SRT,
     });
     const inputs: LaneSessionInput[] = [];
     const sessions: LaneSession[] = [];
@@ -2687,6 +2680,122 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
     // The session ended, so its temp dir is gone.
     expect(readdirSync(probe.tmpRoot)).toEqual([]);
     expect(ws(workstream.id).state).toBe('DONE');
+  });
+
+  it("hands Claude Code an approved stdio server only as its launch under srt, and removes its sandbox with the session's", async () => {
+    const probe = sandboxProbe();
+    engine = await createTestEngine(
+      { Alpha: [[turn]], Beta: [[turn]] },
+      {},
+      { laneSandbox: probe.laneSandbox, ...launcherOver({ PATH: '/usr/bin:/bin', HOME: '/h' }) },
+    );
+    const mantine = { command: 'npx', args: ['-y', '@mantine/mcp-server@9.7.2'] };
+    const docs = { type: 'http', url: 'https://docs.example/mcp' };
+    writeFileSync(
+      join(engine.repoPath, '.mcp.json'),
+      JSON.stringify({ mcpServers: { mantine, docs } }),
+    );
+    const specs = recordSpecs();
+    const first = engine.addTask('Alpha');
+    engine.launch(first.workstream.id);
+    await engine.runner.idle();
+    for (const card of listInbox(engine.store.db, { states: ['OPEN'] }))
+      if (card.detail?.[MCP_APPROVAL_DETAIL] !== undefined)
+        engine.inbox.answer(card.id, { choice: 'approve' });
+    const second = engine.addTask('Beta');
+    engine.launch(second.workstream.id);
+    await engine.runner.idle();
+
+    expect(probe.inputs.map((input) => input.mcpServers)).toEqual([
+      {},
+      { mantine: { type: 'stdio', ...mantine, env: { PATH: '/usr/bin:/bin', HOME: '/h' } } },
+    ]);
+    const servers = specs[1]?.projectMcpServers;
+    expect(servers?.['docs']).toEqual({ ...docs, headers: null });
+    expect(servers?.['mantine']).toBe(probe.sessions[1]?.mcpServers['mantine']);
+    const mantineServer = servers?.['mantine'];
+    if (!(mantineServer instanceof SandboxedMcpServer)) throw new Error('mantine is not sandboxed');
+    expect(mantineServer.launch().command).toBe('/usr/bin/env');
+    expect(mantineServer.launch().args).toContain(FAKE_SRT.cli);
+    expect(readdirSync(probe.tmpRoot)).toEqual([]);
+  });
+
+  it('puts no approved value on a command line: a server that wants one in its args is ignored, one with it in env gets it sealed', async () => {
+    const probe = sandboxProbe();
+    engine = await createTestEngine(
+      { Alpha: [[turn]], Beta: [[turn]] },
+      {},
+      {
+        laneSandbox: probe.laneSandbox,
+        ...launcherOver({ PATH: '/usr/bin:/bin', HOME: '/h', DOCS_TOKEN: 'tok-on-argv' }),
+      },
+    );
+    const inArgs = { command: 'node', args: ['x.mjs', '--token', '${DOCS_TOKEN}'] };
+    const inEnv = { command: 'node', args: ['x.mjs'], env: { DOCS_TOKEN: '${DOCS_TOKEN}' } };
+    writeFileSync(
+      join(engine.repoPath, '.mcp.json'),
+      JSON.stringify({ mcpServers: { inArgs, inEnv } }),
+    );
+    const specs = recordSpecs();
+    const first = engine.addTask('Alpha');
+    engine.launch(first.workstream.id);
+    await engine.runner.idle();
+    for (const card of listInbox(engine.store.db, { states: ['OPEN'] }))
+      if (card.detail?.[MCP_APPROVAL_DETAIL] !== undefined)
+        engine.inbox.answer(card.id, { choice: 'approve' });
+    const second = engine.addTask('Beta');
+    engine.launch(second.workstream.id);
+    await engine.runner.idle();
+
+    const servers = specs[1]?.projectMcpServers ?? {};
+    expect(Object.keys(servers)).toEqual(['inEnv']);
+    const launch =
+      servers['inEnv'] instanceof SandboxedMcpServer ? servers['inEnv'].launch() : null;
+    expect(launch?.command).toBe('/usr/bin/env');
+    expect(JSON.stringify(launch)).not.toContain('tok-on-argv');
+    expect(
+      listInbox(engine.store.db, { states: ['OPEN'] }).some((item) =>
+        item.body.includes('server "inArgs" uses "${" in its command or args'),
+      ),
+    ).toBe(true);
+  });
+
+  it("starts the session without a stdio server whose sandbox can't be built, and names it in the prompt and a card", async () => {
+    const probe = sandboxProbe();
+    engine = await createTestEngine(
+      { Alpha: [[turn]], Beta: [[turn]] },
+      {},
+      {
+        laneSandbox: probe.laneSandbox,
+        ...launcherOver({ PATH: '/usr/bin:/bin', HOME: '/h', DOCS_TOKEN: 'line-one\nline-two' }),
+      },
+    );
+    const mantine = { command: 'npx', args: ['-y', '@mantine/mcp-server@9.7.2'] };
+    const broken = { command: 'node', args: ['x.mjs'], env: { DOCS_TOKEN: '${DOCS_TOKEN}' } };
+    writeFileSync(
+      join(engine.repoPath, '.mcp.json'),
+      JSON.stringify({ mcpServers: { mantine, broken } }),
+    );
+    const specs = recordSpecs();
+    const first = engine.addTask('Alpha');
+    engine.launch(first.workstream.id);
+    await engine.runner.idle();
+    for (const card of listInbox(engine.store.db, { states: ['OPEN'] }))
+      if (card.detail?.[MCP_APPROVAL_DETAIL] !== undefined)
+        engine.inbox.answer(card.id, { choice: 'approve' });
+    const second = engine.addTask('Beta');
+    engine.launch(second.workstream.id);
+    await engine.runner.idle();
+
+    expect(ws(second.workstream.id).state).toBe('DONE');
+    expect(Object.keys(specs[1]?.projectMcpServers ?? {})).toEqual(['mantine']);
+    expect(specs[1]?.prompt).toContain("broken (its config can't be used as written)");
+    const card = listInbox(engine.store.db, { states: ['OPEN'] }).find(
+      (item) => item.title === `The repo's MCP server "broken" can't run as written`,
+    );
+    expect(card?.body).toContain('DOCS_TOKEN');
+    expect(JSON.stringify(card)).not.toContain('line-one');
+    expect(readdirSync(probe.tmpRoot)).toEqual([]);
   });
 
   it.each([

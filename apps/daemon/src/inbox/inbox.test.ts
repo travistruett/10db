@@ -712,7 +712,13 @@ describe('permission broker in a sandboxed lane', () => {
       readList: [join(root, 'work', 'listed')],
       configDir,
       providerSessionId: 'own-id',
+      sandboxTemp: { root: join(root, 't'), own: join(root, 't', '10db-ownabc') },
     };
+    mkdirSync(join(root, 't', '10db-ownabc'), { recursive: true });
+    mkdirSync(join(root, 't', '10db-othabc'));
+    writeFileSync(join(root, 't', '10db-mcp-0123456789ab.sh'), "export TOKEN='x'\n");
+    writeFileSync(join(root, 't', '10db-othabc', 'notes.txt'), '');
+    writeFileSync(join(root, 't', '10db-ownabc', 'notes.txt'), '');
     controller = new AbortController();
   });
   afterEach(() => {
@@ -963,6 +969,29 @@ describe('permission broker in a sandboxed lane', () => {
     expect(openCards()).toEqual([]);
   });
 
+  it("refuses with no card a read of another session's sealed file or temp dir, and leaves its own temp dir alone", async () => {
+    const ws = seedWorkstream(base);
+    const decide = sandboxed(ws);
+    const temp = join(root, 't');
+    for (const [tool, input] of [
+      ['Read', { file_path: join(temp, '10db-mcp-0123456789ab.sh') }],
+      ['Read', { file_path: join(temp, '10db-othabc', 'notes.txt') }],
+      ['Grep', { pattern: 'x', path: temp }],
+      ['LS', { path: join(temp, '10db-othabc') }],
+    ] as const) {
+      expect(
+        (await decide(request(tool, input))).behavior,
+        `${tool} ${JSON.stringify(input)}`,
+      ).toBe('deny');
+    }
+    expect(openCards()).toEqual([]);
+    // Its own temp dir is judged as before: outside the checkout, so a card.
+    void decide(request('Read', { file_path: join(temp, '10db-ownabc', 'notes.txt') })).catch(
+      () => undefined,
+    );
+    expect(onlyOpenCard().kind).toBe('permission');
+  });
+
   it("keeps reading the session's own saved tool results", async () => {
     const ws = seedWorkstream(base);
     const own = join(fileAccess.configDir, 'projects', 'x', 'own-id', 'tool-results', 'a.txt');
@@ -1078,13 +1107,14 @@ describe('permission broker in a sandboxed lane', () => {
       );
       if (fails === true) {
         // An unexpected failure while judging: reading the context throws.
-        const { checkout, protectedReads: reads, readList, configDir } = fileAccess;
+        const { checkout, protectedReads: reads, readList, configDir, sandboxTemp } = fileAccess;
         fileAccess = {
           checkout,
           protectedReads: reads,
           readList,
           configDir,
           providerSessionId: 'own-id',
+          sandboxTemp,
           get home(): string {
             throw new Error('the context could not be read');
           },

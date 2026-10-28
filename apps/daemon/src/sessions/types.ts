@@ -1,9 +1,9 @@
 import type { AccountRefusal, Effort, Provider, SessionId, WorkstreamId } from '@10db/contracts';
 import type { AccountExpectation } from '../environment';
 import type { GuardVerdict } from '../guard';
-import type { LaneSandboxSpec } from '../sandbox';
+import type { LaneSandboxSpec, SandboxedMcpServer } from '../sandbox';
 import type { SeenAccount } from './account-check';
-import type { ProjectMcpServer } from './project-mcp';
+import type { RemoteMcpServer } from './project-mcp';
 
 export interface ToolRequest {
   readonly toolName: string;
@@ -21,6 +21,9 @@ export type ToolDecision =
   | { readonly behavior: 'allow'; readonly updatedInput?: Record<string, unknown> }
   | { readonly behavior: 'deny'; readonly message: string; readonly interrupt?: boolean };
 
+/** A repo MCP server as a session takes it: a stdio server only as its launch under the lane sandbox. */
+export type SessionMcpServer = SandboxedMcpServer | RemoteMcpServer;
+
 export interface SessionSpec {
   readonly sessionId: SessionId;
   readonly workstreamId: WorkstreamId;
@@ -34,7 +37,7 @@ export interface SessionSpec {
   /** The account the session must prove it is, before its prompt (accounts spec §5). */
   readonly account: AccountExpectation;
   /** The repo's approved MCP servers, already expanded; passed next to 10db's server. */
-  readonly projectMcpServers: Readonly<Record<string, ProjectMcpServer>>;
+  readonly projectMcpServers: Readonly<Record<string, SessionMcpServer>>;
   readonly allowedTools: readonly string[];
   /**
    * The lane sandbox: Claude Code runs the session's commands under its profile, loads no settings

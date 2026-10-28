@@ -87,6 +87,7 @@ import {
 } from '../runner';
 import { resolveSandboxRuntime } from '../paths';
 import {
+  claimSandboxTempRoot,
   createGateSandbox,
   createLaneSandbox,
   LANE_TEMP_ROOT,
@@ -311,18 +312,31 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     // so nothing lane-written lies in it.
     laneRoots: opts.sandbox ? [opts.sandbox.tmpRoot ?? LANE_TEMP_ROOT] : [],
   });
+  // srt, which runs every gate and every repo stdio MCP server.
+  const runtime = opts.sandbox ? (opts.sandbox.runtime ?? resolveSandboxRuntime()) : null;
+  // Before any session or gate starts: what a crashed run left in the temp root is stale.
+  const tempRoot = opts.sandbox
+    ? claimSandboxTempRoot(opts.sandbox.tmpRoot ?? LANE_TEMP_ROOT)
+    : null;
+  if (tempRoot && (tempRoot.removed > 0 || tempRoot.failed > 0 || tempRoot.sharedWith !== null)) {
+    logger.info(
+      { removed: tempRoot.removed, failed: tempRoot.failed, sharedWith: tempRoot.sharedWith },
+      'swept the sandbox temp root',
+    );
+  }
   // Shared by every gate: a task's, at its green run, and a batch's, at ship.
   const gate = createGateRunner({
-    sandbox: opts.sandbox
-      ? createGateSandbox({
-          home: homedir(),
-          dataDir: opts.dataDir,
-          loginConfigDir: launcher.loginConfigDir(),
-          gitDirs: (repo) => git.gitDirs(repo),
-          ...(opts.sandbox.tmpRoot === undefined ? {} : { tmpRoot: opts.sandbox.tmpRoot }),
-          runtime: opts.sandbox.runtime ?? resolveSandboxRuntime(),
-        })
-      : null,
+    sandbox:
+      opts.sandbox && runtime
+        ? createGateSandbox({
+            home: homedir(),
+            dataDir: opts.dataDir,
+            loginConfigDir: launcher.loginConfigDir(),
+            gitDirs: (repo) => git.gitDirs(repo),
+            ...(opts.sandbox.tmpRoot === undefined ? {} : { tmpRoot: opts.sandbox.tmpRoot }),
+            runtime,
+          })
+        : null,
     logger: logger.child({ component: 'gate' }),
   });
   const answerGit = createGitCardAnswers(git);
@@ -477,15 +491,17 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     home: homedir(),
     loginConfigDir: launcher.loginConfigDir(),
   });
-  const laneSandbox = opts.sandbox
-    ? createLaneSandbox({
-        home: homedir(),
-        dataDir: opts.dataDir,
-        loginConfigDir: launcher.loginConfigDir(),
-        gitDirs: (repo) => git.gitDirs(repo),
-        ...(opts.sandbox.tmpRoot === undefined ? {} : { tmpRoot: opts.sandbox.tmpRoot }),
-      })
-    : null;
+  const laneSandbox =
+    opts.sandbox && runtime
+      ? createLaneSandbox({
+          home: homedir(),
+          dataDir: opts.dataDir,
+          loginConfigDir: launcher.loginConfigDir(),
+          gitDirs: (repo) => git.gitDirs(repo),
+          ...(opts.sandbox.tmpRoot === undefined ? {} : { tmpRoot: opts.sandbox.tmpRoot }),
+          runtime,
+        })
+      : null;
   const createdRunner = createRunner({
     protectedPaths: guarded,
     laneSandbox,
@@ -694,6 +710,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         });
       });
       removeRuntimeFiles(opts.dataDir);
+      tempRoot?.release();
       db.$client.close();
       lock.release();
     } finally {

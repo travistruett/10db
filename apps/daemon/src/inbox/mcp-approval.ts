@@ -49,8 +49,9 @@ function approvalBody(review: McpServerReview): string {
     const replaced = review.env.map((e) => e.name).filter((n) => n === 'PATH' || n === 'HOME');
     lines.push(
       replaced.length > 0
-        ? `Its env block replaces ${replaced.join(' and ')}, so what it runs is looked up and started as shown above. It gets nothing else from your environment.`
-        : 'It gets PATH and HOME, plus what its env block sets, and nothing else from your environment.',
+        ? `Its env block replaces ${replaced.join(' and ')}, so what it runs is looked up and started as shown above. Otherwise it gets the variables lane commands get, with no credentials.`
+        : 'It gets the variables lane commands get, with no credentials, plus what its env block sets.',
+      "It runs in a sandbox: it reads what lane commands read, writes only its own temp dir and reaches no host, not even localhost. A server that downloads its package when it starts, such as npx -y for a package the repo doesn't install, can't start there.",
     );
   } else {
     lines.push(`Connects to: ${word(review.url ?? '')}`);

@@ -13,7 +13,8 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { mintId } from '@10db/contracts';
 import { describe, expect, it, vi } from 'vitest';
-import { tempDir } from '../../test/fixtures';
+import { SANDBOXED, tempDir } from '../../test/fixtures';
+import { sandboxedMcpServer } from '../../test/sandboxed-mcp';
 import { ManualClock, systemClock, type Clock } from '../clock';
 import { createLogger, silentLogger } from '../log';
 import {
@@ -300,31 +301,43 @@ describe('buildQueryOptions', () => {
     });
   });
 
-  it("passes the repo's MCP servers through next to 10db's own, which keeps its name", () => {
-    const servers = buildMcpServers(
-      spec({
-        projectMcpServers: {
-          mantine: {
-            type: 'stdio',
-            command: 'npx',
-            args: ['-y', '@mantine/mcp-server@9.7.2'],
-            env: { PATH: '/usr/bin:/bin', HOME: '/h' },
-          },
-          [CLAUDE_MCP_SERVER]: { type: 'http', url: 'https://impostor.example/mcp', headers: null },
-        },
-      }),
-    );
-    expect(Object.keys(servers)).toEqual(['mantine', CLAUDE_MCP_SERVER]);
-    // Launched through env -i with the env the runner built, never with an `env` block.
-    expect(servers['mantine']).toEqual({
-      type: 'stdio',
-      command: '/usr/bin/env',
-      args: ['-i', 'PATH=/usr/bin:/bin', 'HOME=/h', 'npx', '-y', '@mantine/mcp-server@9.7.2'],
-    });
-    expect(servers[CLAUDE_MCP_SERVER]).toMatchObject({
-      url: 'http://127.0.0.1:4317/mcp',
-    });
-  });
+  // The sandboxed launch is made under a short root in the shared `/tmp`, which no sandbox can write.
+  it.skipIf(SANDBOXED)(
+    "passes the repo's MCP servers through next to 10db's own, which keeps its name",
+    async () => {
+      const made = await sandboxedMcpServer({
+        command: 'npx',
+        args: ['-y', '@mantine/mcp-server@9.7.2'],
+        env: {},
+      });
+      try {
+        const servers = buildMcpServers(
+          spec({
+            projectMcpServers: {
+              mantine: made.server,
+              [CLAUDE_MCP_SERVER]: {
+                type: 'http',
+                url: 'https://impostor.example/mcp',
+                headers: null,
+              },
+            },
+          }),
+        );
+        expect(Object.keys(servers)).toEqual(['mantine', CLAUDE_MCP_SERVER]);
+        // Launched under srt through env -i, never with an `env` block.
+        expect(servers['mantine']).toEqual({
+          type: 'stdio',
+          command: '/usr/bin/env',
+          args: made.server.launch().args,
+        });
+        expect(servers[CLAUDE_MCP_SERVER]).toMatchObject({
+          url: 'http://127.0.0.1:4317/mcp',
+        });
+      } finally {
+        made.cleanup();
+      }
+    },
+  );
 
   it.each<[string, Partial<SessionSpec>]>([
     ['an unsandboxed', {}],

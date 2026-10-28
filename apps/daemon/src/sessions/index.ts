@@ -20,6 +20,7 @@ export {
   readRepoMcp,
   resolveProjectMcp,
   skippedServersNote,
+  splitProjectMcp,
   type ProjectMcp,
   type RepoMcp,
 } from './project-mcp';

@@ -52,7 +52,8 @@ describe('stopChild', () => {
 });
 
 // `ps -axo pid=,ppid=`: 10 is the daemon; 11 its claude; 12 and 13 the server's npm and node; 20 is an
-// unrelated Claude Code window with its own copy of the same server (21, 22).
+// unrelated Claude Code window with its own copy of the same server (21, 22). 30 is a second
+// session's srt host, under claude 11, and 31 the server inside its sandbox.
 const TREE = `
     1     0
    10     1
@@ -62,11 +63,13 @@ const TREE = `
    20     1
    21    20
    22    21
+   30    11
+   31    30
 `;
 
 describe('descendantPids', () => {
   it('walks parent links down from the daemon and leaves other trees out', () => {
-    expect([...descendantPids(TREE, 10)].sort()).toEqual([11, 12, 13]);
+    expect([...descendantPids(TREE, 10)].sort()).toEqual([11, 12, 13, 30, 31]);
     expect([...descendantPids(TREE, 99)]).toEqual([]);
   });
 });
@@ -81,12 +84,23 @@ describe('repoServerEnvKeys', () => {
     server(21, 'GITHUB_TOKEN=x HOME=/h PATH=/p'),
   ].join('\n');
 
-  it('merges the keys of the daemon-descended server processes only', () => {
+  it('reads the deepest daemon-descended server process only, never the launcher above it', () => {
     expect(repoServerEnvKeys({ tree: TREE, envListing: listing, daemonPid: 10 })).toEqual([
       'HOME',
       'PATH',
       '_',
-      'npm_command',
+    ]);
+  });
+
+  it("reads the server inside srt, not srt's host, whose command line names the server", () => {
+    const sandboxed = [
+      `30 /usr/local/bin/node /x/srt.mjs --settings /private/tmp/10db-mcp-1.json -c exec /usr/bin/env -i /bin/sh -c '. "$0" && exec "$@"' /private/tmp/10db-mcp-2.sh 'npx' '-y' '@mantine/mcp-server@9.7.2' CLAUDE_CODE_TMPDIR=/private/tmp/10db-a HOME=/h PATH=/usr/bin:/bin`,
+      '31 node /x/node_modules/@mantine/mcp-server/bin.js HOME=/h PATH=/p TMPDIR=/private/tmp/10db-a',
+    ].join('\n');
+    expect(repoServerEnvKeys({ tree: TREE, envListing: sandboxed, daemonPid: 10 })).toEqual([
+      'HOME',
+      'PATH',
+      'TMPDIR',
     ]);
   });
 

@@ -44,15 +44,23 @@ async function terminate(child: ChildProcess, timeoutMs: number): Promise<void> 
   clearTimeout(timer);
 }
 
-/** Every pid below `rootPid`, from `ps -axo pid=,ppid=` output. */
-export function descendantPids(tree: string, rootPid: number): Set<number> {
-  const children = new Map<number, number[]>();
+/** Each pid's parent, from `ps -axo pid=,ppid=` output. */
+function parentPids(tree: string): Map<number, number> {
+  const parents = new Map<number, number>();
   for (const line of tree.split('\n')) {
     const [pid, ppid] = line.trim().split(/\s+/).map(Number);
     if (pid === undefined || ppid === undefined || Number.isNaN(pid) || Number.isNaN(ppid))
       continue;
-    children.set(ppid, [...(children.get(ppid) ?? []), pid]);
+    parents.set(pid, ppid);
   }
+  return parents;
+}
+
+/** Every pid below `rootPid`, from `ps -axo pid=,ppid=` output. */
+export function descendantPids(tree: string, rootPid: number): Set<number> {
+  const children = new Map<number, number[]>();
+  for (const [pid, ppid] of parentPids(tree))
+    children.set(ppid, [...(children.get(ppid) ?? []), pid]);
   const found = new Set<number>();
   const queue = [rootPid];
   for (let next = queue.shift(); next !== undefined; next = queue.shift()) {
@@ -69,8 +77,9 @@ const SERVER_COMMAND = /mantine\/mcp-server|\/\.bin\/mcp-server/;
 
 /**
  * The env keys of the repo server processes that descend from `daemonPid`, from `ps -axww -E -o pid=,command=`
- * output, or null while none runs. Another Claude Code window's copy of the same server is not counted.
- * Keys only: values are never kept.
+ * output, or null while none runs. Only the deepest process of each chain counts: srt's host and npm name the
+ * server on their command lines too, and their env is not the server's. Another Claude Code window's copy of
+ * the same server is not counted. Keys only: values are never kept.
  */
 export function repoServerEnvKeys(input: {
   readonly tree: string;
@@ -78,10 +87,21 @@ export function repoServerEnvKeys(input: {
   readonly daemonPid: number;
 }): string[] | null {
   const mine = descendantPids(input.tree, input.daemonPid);
-  const keys = new Set<string>();
+  const parents = parentPids(input.tree);
+  const servers = new Map<number, string[]>();
   for (const line of input.envListing.split('\n')) {
     const [pid, ...words] = line.trim().split(/\s+/);
-    if (!mine.has(Number(pid)) || !SERVER_COMMAND.test(line)) continue;
+    if (mine.has(Number(pid)) && SERVER_COMMAND.test(line)) servers.set(Number(pid), words);
+  }
+  const launchers = new Set<number>();
+  for (const pid of servers.keys()) {
+    for (let up = parents.get(pid); up !== undefined && mine.has(up); up = parents.get(up)) {
+      launchers.add(up);
+    }
+  }
+  const keys = new Set<string>();
+  for (const [pid, words] of servers) {
+    if (launchers.has(pid)) continue;
     for (const word of words) {
       const key = /^([A-Za-z_][A-Za-z0-9_]*)=/.exec(word)?.[1];
       if (key) keys.add(key);

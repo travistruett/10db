@@ -3,6 +3,7 @@ import { promisify } from 'node:util';
 import Database from 'better-sqlite3';
 import { z } from 'zod';
 import { withoutGitRepoEnv } from '../src/git';
+import { deniedEnvNames } from '../src/sandbox';
 
 const run = promisify(execFile);
 
@@ -42,7 +43,7 @@ export function claudeCodeVersion(logText: string): string {
   return version ?? 'unknown';
 }
 
-/** What 10db passes a stdio server: `env -i PATH=… HOME=…`, and nothing else. */
+/** What the runner passes a stdio server besides its approved variables; its sandbox adds the lane allowlist. */
 const STDIO_ENV_KEYS = ['HOME', 'PATH'];
 /**
  * Keys npm (`npx`) and macOS add to a process started with only PATH and HOME, as measured. None
@@ -53,8 +54,9 @@ const LAUNCHER_KEY = /^(?:npm_\w+|COLOR|EDITOR|INIT_CWD|NODE|PWD|SHLVL|_|__CF_US
 const FORBIDDEN_KEY = /^(?:ANTHROPIC_|CLAUDE|AWS_)/;
 
 /**
- * The environment the running repo server actually had, as `ps -E` showed its keys. Only PATH, HOME and
- * what npm or the OS adds may appear, and never a billing or cloud credential.
+ * The environment the running repo server actually had, as `ps -E` showed its keys. Only PATH, HOME, the
+ * lane allowlist its sandbox sets and what npm or the OS adds may appear, and never a billing or cloud
+ * credential.
  */
 export function checkServerEnv(server: string, keys: readonly string[] | null): AcceptanceCheck {
   if (keys === null)
@@ -64,14 +66,15 @@ export function checkServerEnv(server: string, keys: readonly string[] | null): 
       `no ${server} process was seen while sessions ran, so its env was never read`,
     );
   const forbidden = keys.filter((k) => FORBIDDEN_KEY.test(k));
-  const unexpected = keys.filter((k) => !STDIO_ENV_KEYS.includes(k) && !LAUNCHER_KEY.test(k));
+  const denied = new Set(deniedEnvNames(Object.fromEntries(keys.map((k) => [k, '']))));
+  const unexpected = keys.filter((k) => denied.has(k) && !LAUNCHER_KEY.test(k));
   const missing = STDIO_ENV_KEYS.filter((k) => !keys.includes(k));
   const ok = forbidden.length === 0 && unexpected.length === 0 && missing.length === 0;
   return check(
     'repo MCP server env',
     ok,
     ok
-      ? `${server} ran with ${String(keys.length)} key(s): PATH, HOME and npm's own`
+      ? `${server} ran with ${String(keys.length)} key(s): the lane allowlist and npm's own`
       : `unexpected: ${unexpected.join(', ') || 'none'}; missing: ${missing.join(', ') || 'none'}`,
   );
 }

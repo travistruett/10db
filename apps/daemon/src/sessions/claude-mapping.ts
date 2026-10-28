@@ -6,8 +6,8 @@ import type {
   SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
 import type { GuardVerdict } from '../guard';
-import type { ProjectMcpServer } from './project-mcp';
-import type { SessionEvent, ToolDecision } from './types';
+import { SandboxedMcpServer } from '../sandbox';
+import type { SessionEvent, SessionMcpServer, ToolDecision } from './types';
 
 export const SUMMARY_CHARS = 200;
 const BRIEF_CHARS = 80;
@@ -167,21 +167,14 @@ export function userMessage(text: string, priority?: 'now' | 'next' | 'later'): 
 }
 
 /**
- * Claude Code merges a stdio server's `env` over its own environment, which is the session's: the
- * subscription token, an API key, AWS credentials. So 10db never relies on `env`. It launches the server
- * through `env -i`, which starts from an empty environment and sets only the names given.
+ * A repo-declared MCP server in the SDK's shape. A stdio server is the lane sandbox's own launch
+ * under srt, through `env -i`; it never gets an `env` block, which Claude Code would merge over the
+ * session's environment, credentials and all.
  */
-export const STDIO_LAUNCHER = '/usr/bin/env';
-
-/** A repo-declared MCP server in the SDK's shape. */
-export function toSdkMcpServer(server: ProjectMcpServer): McpServerConfig {
-  if (server.type === 'stdio') {
-    const assignments = Object.entries(server.env).map(([name, value]) => `${name}=${value}`);
-    return {
-      type: 'stdio',
-      command: STDIO_LAUNCHER,
-      args: ['-i', ...assignments, server.command, ...server.args],
-    };
+export function toSdkMcpServer(server: SessionMcpServer): McpServerConfig {
+  if (server instanceof SandboxedMcpServer) {
+    const { command, args } = server.launch();
+    return { type: 'stdio', command, args: [...args] };
   }
   return {
     type: server.type,

@@ -1,14 +1,19 @@
-import { chmodSync, existsSync, lstatSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { chmodSync, lstatSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { PermissionRuleDto, ProjectDto } from '@10db/contracts';
 import { prepareCommandEnv } from './command-env';
-import { deniedEnvNames } from './env-allowlist';
 import { shellAssignments } from './env-file';
 import { singleQuoted } from './posix-quote';
-import { buildLaneProfile, SandboxProfileError } from './profile';
+import { buildLaneProfile } from './profile';
 import { projectAccess, projectWritableRoots, type ProjectAccessDeps } from './project-access';
-import { isEqualOrUnder } from './protected-reads';
 import { createSealedFile, removeSealedFile, type SealedFileKind } from './sealed-file';
+import {
+  allowlisted,
+  checkRuntime,
+  HOST_PATH,
+  SRT_SHARED_TEMP,
+  type SandboxRuntime,
+} from './srt-launch';
 import { srtSettings } from './srt-settings';
 import {
   createLaneTempDir,
@@ -21,25 +26,12 @@ import {
 export const DOCKER_REFUSAL =
   "10db: Docker isn't available to sandboxed gates: a gate never gets the Docker socket.";
 
-/**
- * The PATH of the processes that run outside the sandbox: srt's host, the shell it starts the
- * sandbox from and `env`. System dirs only, never a dir a project can write.
- */
-const HOST_PATH = '/usr/bin:/bin:/usr/sbin:/sbin';
-/** srt's own default temp dir, writable to every srt sandbox: closed, so runs share nothing. */
-const SRT_SHARED_TEMP = ['/tmp/claude', '/private/tmp/claude'];
 const SETTINGS_FILE: SealedFileKind = {
   prefix: '10db-gate-',
   suffix: '.json',
   what: 'the gate sandbox settings file',
 };
 const DOCKER_MARKER = 'docker-refused';
-
-/** Where srt's command-line host is, and the node that runs it. Neither lies where a project writes. */
-export interface SandboxRuntime {
-  readonly node: string;
-  readonly cli: string;
-}
 
 export interface GateRunInput {
   readonly project: Pick<ProjectDto, 'repoPath' | 'sandboxLoopback'>;
@@ -81,31 +73,6 @@ export interface GateSandboxDeps extends Omit<ProjectAccessDeps, 'tmpRoot'> {
   /** Where temp dirs are made; tests pass a short temp root. */
   readonly tmpRoot?: string;
   readonly runtime: SandboxRuntime;
-}
-
-/** The names of `env` a sandboxed command may inherit. */
-function allowlisted(env: Readonly<Record<string, string>>): Record<string, string> {
-  const denied = new Set(deniedEnvNames(env));
-  return Object.fromEntries(Object.entries(env).filter(([name]) => !denied.has(name)));
-}
-
-/**
- * Refuses an srt host or node that a project could write, as written or through a link: both run
- * outside the sandbox, so one a project swapped would run its code unsandboxed.
- */
-function checkRuntime(runtime: SandboxRuntime, writable: readonly string[]): void {
-  for (const [what, path] of [
-    ['node', runtime.node],
-    ['command line', runtime.cli],
-  ] as const) {
-    const spellings = existsSync(path) ? [path, realpathSync(path)] : [path];
-    if (spellings.some((spelling) => writable.some((root) => isEqualOrUnder(spelling, root)))) {
-      throw new SandboxProfileError(
-        'runtime',
-        `srt's ${what} lies where a project can write: ${path}`,
-      );
-    }
-  }
 }
 
 /** A `docker` that refuses, first on the gate's PATH, and records that the gate asked for it. */
