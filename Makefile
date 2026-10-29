@@ -35,10 +35,10 @@ github-settings:
 	node scripts/github-settings.mjs
 
 ## install-app: install 10db as GitHub built it from REF (default main); quit 10db first. Never
-## builds on this Mac; backs up the database and keeps the current app as 10db.app.prev-<stamp>.
+## builds on this Mac; backs up the database and keeps the current app zipped in 10db-previous.
 install-app:
 	@bash scripts/release/install-app.sh "$(INSTALL_REF)"
 
-## rollback-app: put back the app the last install-app replaced; prints the database restore command.
+## rollback-app: swap in the app kept in 10db-previous (run twice to toggle); prints the database restore command.
 rollback-app:
 	@bash scripts/release/rollback-app.sh

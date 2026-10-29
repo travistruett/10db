@@ -7,6 +7,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -22,9 +23,10 @@ const count = (name: string): string =>
 
 /**
  * Stand-ins for the tools install-app.sh and rollback-app.sh drive. They are child processes this
- * repo doesn't own and that reach GitHub, the disk images subsystem or a real running 10db, so
- * every one is replaced; each logs its arguments to `$STUB_LOG` as one line. The *_INTERRUPTS
- * switches send SIGINT to the script that ran the stub, as a Ctrl-C in the terminal would.
+ * repo doesn't own and that reach GitHub, the disk images subsystem, Launch Services or a real
+ * running 10db, so every one is replaced; each logs its arguments to `$STUB_LOG` as one line. The
+ * stand-in ditto and unzip keep a "zip" as a tar file, which every CI image can read. The
+ * *_INTERRUPTS switches send SIGINT to the script that ran the stub, as a Ctrl-C would.
  */
 const STUBS: Record<string, readonly string[]> = {
   gh: [
@@ -75,14 +77,51 @@ const STUBS: Record<string, readonly string[]> = {
     'esac',
   ],
   ditto: [
-    // A partial copy, the second time with a folder rm -rf can't empty.
-    'if [ -n "${STUB_DITTO_FAILS:-}" ]; then',
-    '  mkdir -p "$2/Contents/locked" && touch "$2/Contents/locked/file"',
-    '  [ "$STUB_DITTO_FAILS" != stuck ] || chmod 555 "$2/Contents/locked"',
-    '  exit 1',
+    'case "$1" in',
+    // ditto -c -k --keepParent <bundle> <zip>
+    '  -c) [ -z "${STUB_ZIP_FAILS:-}" ] || exit 1',
+    '    if [ -n "${STUB_ZIP_CORRUPT:-}" ]; then echo junk > "$5"; exit 0; fi',
+    '    tar -cf "$5" -C "$(dirname "$4")" "$(basename "$4")" ;;',
+    // ditto -x -k <zip> <dir>
+    '  -x) [ -z "${STUB_UNPACK_FAILS:-}" ] || exit 1',
+    '    mkdir -p "$4" && tar -xf "$3" -C "$4" ;;',
+    // ditto <bundle> <bundle>: a partial copy on failure, the stuck one with a folder rm -rf can't empty.
+    '  *) if [ -n "${STUB_DITTO_FAILS:-}" ]; then',
+    '      mkdir -p "$2/Contents/locked" && touch "$2/Contents/locked/file"',
+    '      [ "$STUB_DITTO_FAILS" != stuck ] || chmod 555 "$2/Contents/locked"',
+    '      exit 1',
+    '    fi',
+    '    cp -R "$1" "$2"',
+    '    [ -z "${STUB_DITTO_INTERRUPTS:-}" ] || kill -INT "$PPID" ;;',
+    'esac',
+  ],
+  unzip: [
+    'case "$1" in',
+    '  -tq) tar -tf "$2" > /dev/null 2>&1 ;;',
+    '  -Z1) tar -tf "$2" ;;',
+    '  *) exit 3 ;;',
+    'esac',
+  ],
+  lsregister: ['[ -z "${STUB_LSREGISTER_FAILS:-}" ] || exit 1'],
+  // A clock that moves a second on every call, so two reads of it in one run differ.
+  date: [
+    'if [ -n "${STUB_CLOCK:-}" ] && [ "$*" = "-u +%Y%m%dT%H%M%SZ" ]; then',
+    `  ${count('date')}`,
+    '  printf \'20261029T1200%02dZ\\n\' "$n"',
+    '  exit 0',
     'fi',
-    'cp -R "$1" "$2"',
-    '[ -z "${STUB_DITTO_INTERRUPTS:-}" ] || kill -INT "$PPID"',
+    'exec /bin/date "$@"',
+  ],
+  // Fails the first STUB_MV_UNPACK_FAILS moves of a bundle out of an unpack folder.
+  mv: [
+    'case "$1" in',
+    '  */.unpack.*)',
+    '    if [ -n "${STUB_MV_UNPACK_FAILS:-}" ]; then',
+    `      ${count('mv-unpack')}`,
+    '      [ "$n" -gt "$STUB_MV_UNPACK_FAILS" ] || exit 1',
+    '    fi ;;',
+    'esac',
+    'exec /bin/mv "$@"',
   ],
   xattr: ['exit 0'],
 };
@@ -91,6 +130,9 @@ export interface InstalledAppSandbox {
   readonly root: string;
   readonly applications: string;
   readonly dataDir: string;
+  /** Where the zipped previous app is kept: `10db-previous` beside the data directory. */
+  readonly previousDir: string;
+  readonly lsregister: string;
   /** Runs a script under scripts/release/ with the stubs first on PATH. */
   run(
     script: string,
@@ -101,9 +143,15 @@ export interface InstalledAppSandbox {
   calls(): string[];
   /** The marker file inside an app bundle, or null when the bundle has none. */
   marker(appPath: string): string | null;
-  /** Every entry of a directory, sorted. */
+  /** Every entry of a directory, sorted; empty when it does not exist. */
   list(dir: string): string[];
   writeApp(path: string, marker: string): void;
+  /** Writes `<previousDir>/<name>` holding one bundle named `top` with this marker. */
+  writeZip(name: string, top: string, marker: string, options?: { infoPlist?: boolean }): void;
+  /** The marker of the bundle `top` inside `<previousDir>/<name>`. */
+  zipMarker(name: string, top?: string): string;
+  /** Writes a database backup folder `10db-backup-<suffix>` last changed `ageSeconds` ago. */
+  writeBackup(suffix: string, ageSeconds: number): void;
   /** Replaces the apps inside the DMG with these names. */
   setDmgApps(names: readonly string[]): void;
   /** Rewrites SHA256SUMS so it no longer matches the DMG. */
@@ -118,10 +166,12 @@ export function installedAppSandbox(): InstalledAppSandbox {
   const applications = join(root, 'Applications');
   const support = join(root, 'Application Support');
   const dataDir = join(support, '10db');
+  const previousDir = join(support, '10db-previous');
   const artifact = join(root, 'artifact');
   const dmgContents = join(root, 'dmg-contents');
+  const scratch = join(root, 'scratch');
   const log = join(state, 'calls.log');
-  for (const dir of [bin, state, applications, dataDir, artifact, dmgContents]) {
+  for (const dir of [bin, state, applications, dataDir, artifact, dmgContents, scratch]) {
     mkdirSync(dir, { recursive: true });
   }
   for (const [tool, body] of Object.entries(STUBS)) {
@@ -145,10 +195,18 @@ export function installedAppSandbox(): InstalledAppSandbox {
   const sum = createHash('sha256').update(dmg).digest('hex');
   writeFileSync(join(artifact, 'SHA256SUMS'), `${sum}  ${DMG_NAME}\n`);
 
+  const tar = (args: readonly string[]): string => {
+    const result = spawnSync('tar', args, { encoding: 'utf8' });
+    if (result.status !== 0) throw new Error(`tar ${args.join(' ')}: ${result.stderr}`);
+    return result.stdout;
+  };
+
   return {
     root,
     applications,
     dataDir,
+    previousDir,
+    lsregister: join(bin, 'lsregister'),
     run(script, args, env = {}) {
       const result = spawnSync('/bin/bash', [join(repoRoot, 'scripts/release', script), ...args], {
         cwd: root,
@@ -159,6 +217,7 @@ export function installedAppSandbox(): InstalledAppSandbox {
           TMPDIR: root,
           TENDB_INSTALL_APPLICATIONS_DIR: applications,
           TENDB_INSTALL_DATA_DIR: dataDir,
+          TENDB_INSTALL_LSREGISTER: join(bin, 'lsregister'),
           TENDB_INSTALL_POLL_SECONDS: '0',
           STUB_LOG: log,
           STUB_STATE: state,
@@ -176,8 +235,24 @@ export function installedAppSandbox(): InstalledAppSandbox {
       const file = join(appPath, 'Contents', 'marker');
       return existsSync(file) ? readFileSync(file, 'utf8') : null;
     },
-    list: (dir) => readdirSync(dir).sort(),
+    list: (dir) => (existsSync(dir) ? readdirSync(dir).sort() : []),
     writeApp,
+    writeZip(name, top, marker, { infoPlist = true } = {}) {
+      const staging = mkdtempSync(join(scratch, 'zip-'));
+      writeApp(join(staging, top), marker);
+      if (!infoPlist) rmSync(join(staging, top, 'Contents', 'Info.plist'));
+      mkdirSync(previousDir, { recursive: true });
+      tar(['-cf', join(previousDir, name), '-C', staging, top]);
+    },
+    zipMarker: (name, top = '10db.app') =>
+      tar(['-xOf', join(previousDir, name), `${top}/Contents/marker`]),
+    writeBackup(suffix, ageSeconds) {
+      const dir = join(support, `10db-backup-${suffix}`);
+      mkdirSync(dir);
+      writeFileSync(join(dir, '10db.sqlite'), 'backup');
+      const when = Date.now() / 1000 - ageSeconds;
+      utimesSync(dir, when, when);
+    },
     setDmgApps(names) {
       rmSync(dmgContents, { recursive: true, force: true });
       mkdirSync(dmgContents);

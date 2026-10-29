@@ -6,6 +6,7 @@ import { HEAD_SHA, installedAppSandbox, type InstalledAppSandbox } from './insta
 import { repoRoot } from './workspace';
 
 const STAMP = '20261029T101500Z';
+const ZIP = `10db-${STAMP}.zip`;
 
 let box: InstalledAppSandbox;
 beforeEach(() => {
@@ -21,21 +22,23 @@ const app = () => join(box.applications, '10db.app');
 const lock = () => join(box.applications, '.10db-install.lock');
 const support = () => join(box.dataDir, '..');
 const backups = () => box.list(support()).filter((name) => name.startsWith('10db-backup-'));
-const previous = () => box.list(box.applications).filter((name) => name.includes('.prev-'));
+const kept = () => box.list(box.previousDir);
 const gh = () => box.calls().filter((call) => call.startsWith('gh '));
 
-/** The old app is in place, nothing was moved aside and the lock is gone. */
-function expectAppUntouched(): void {
+/** The old app is in place and alone in Applications, no previous app was kept and the lock is gone. */
+function expectAppUntouched(previous: readonly string[] = []): void {
   expect(box.marker(app())).toBe('old build');
-  expect(previous()).toEqual([]);
-  expect(box.list(box.applications)).not.toContain('.10db-install.lock');
+  expect(box.list(box.applications)).toEqual(['10db.app']);
+  expect(kept()).toEqual(previous);
 }
 
 /** As expectAppUntouched, and the database was not backed up either. */
 function expectUntouched(): void {
   expectAppUntouched();
   expect(backups()).toEqual([]);
-  expect(box.calls().filter((call) => /^(sqlite3|hdiutil|ditto|xattr) /.test(call))).toEqual([]);
+  expect(
+    box.calls().filter((call) => /^(sqlite3|hdiutil|ditto|xattr|lsregister) /.test(call)),
+  ).toEqual([]);
 }
 
 describe('install-app.sh arguments', () => {
@@ -108,7 +111,7 @@ describe('install-app.sh refusals', () => {
     expectUntouched();
   });
 
-  it('refuses when 10db is opened during the backup, before moving the app', () => {
+  it('refuses when 10db is opened during the backup, before touching the app', () => {
     const result = install([], { STUB_RUNNING: '57868', STUB_RUNNING_FROM_CALL: '3' });
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('10db is running');
@@ -123,7 +126,7 @@ describe('install-app.sh refusals', () => {
     expect(result.stderr).toContain('ls -d');
     expect(result.stderr).toContain('make rollback-app');
     expect(box.marker(app())).toBe('old build');
-    expect(previous()).toEqual([]);
+    expect(kept()).toEqual([]);
     expect(backups()).toEqual([]);
     expect(box.list(box.applications)).toContain('.10db-install.lock');
   });
@@ -186,6 +189,7 @@ describe('install-app.sh refusals', () => {
     expectAppUntouched();
     expect(backups()).toEqual([]);
   });
+
   it('refuses a TENDB_INSTALL_STAMP that is not a UTC stamp, before anything else', () => {
     const result = install([], { TENDB_INSTALL_STAMP: '2026-10-29' });
     expect(result.status).toBe(1);
@@ -200,6 +204,17 @@ describe('install-app.sh refusals', () => {
     expect(backups()).toEqual([]);
     expectAppUntouched();
   });
+
+  it.each([
+    { name: 'zipping it fails', env: { STUB_ZIP_FAILS: '1' } },
+    { name: 'the zip does not test as whole', env: { STUB_ZIP_CORRUPT: '1' } },
+  ])('leaves the old app in Applications and keeps no zip when $name', ({ env }) => {
+    box.writeZip('10db-20261028T090000Z.zip', '10db.app', 'older build');
+    const result = install([], env);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('zip');
+    expectAppUntouched(['10db-20261028T090000Z.zip']);
+  });
 });
 
 describe('install-app.sh puts the previous app back', () => {
@@ -208,27 +223,44 @@ describe('install-app.sh puts the previous app back', () => {
     { name: 'the DMG will not mount', env: { STUB_ATTACH_FAILS: '1' }, apps: ['10db.app'] },
     { name: 'the DMG holds no app', env: {}, apps: [] },
     { name: 'the DMG holds two apps', env: {}, apps: ['10db.app', 'Other.app'] },
-  ])('when $name', ({ env, apps }) => {
+  ])('from its zip when $name, and keeps the earlier zip', ({ env, apps }) => {
+    box.writeZip('10db-20261028T090000Z.zip', '10db.app', 'older build');
     box.setDmgApps(apps);
     const result = install([], env);
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('put the previous app back');
-    expectAppUntouched();
+    expectAppUntouched(['10db-20261028T090000Z.zip']);
+    expect(box.zipMarker('10db-20261028T090000Z.zip')).toBe('older build');
     expect(backups()).toEqual([`10db-backup-${STAMP}`]);
   });
 
   it.each([
     { name: 'a failed copy', env: { STUB_DITTO_FAILS: '1' }, status: 1 },
     { name: 'a Ctrl-C during the copy', env: { STUB_DITTO_INTERRUPTS: '1' }, status: 130 },
-  ])(
-    'finishes putting the previous app back when a Ctrl-C lands in the cleanup after $name',
-    ({ env, status }) => {
-      const result = install([], { ...env, STUB_DETACH_INTERRUPTS: '1' });
-      expect(result.status).toBe(status);
-      expect(result.stderr).toContain('put the previous app back');
-      expectAppUntouched();
-    },
-  );
+  ])('even when a Ctrl-C lands in the cleanup after $name', ({ env, status }) => {
+    const result = install([], { ...env, STUB_DETACH_INTERRUPTS: '1' });
+    expect(result.status).toBe(status);
+    expect(result.stderr).toContain('put the previous app back');
+    expectAppUntouched();
+  });
+
+  it('registers the restored app and clears its quarantine, as an install would', () => {
+    const result = install([], { STUB_DITTO_FAILS: '1' });
+    expect(result.status).toBe(1);
+    const calls = box.calls();
+    const restored = calls.findIndex((call) => call.startsWith('ditto -x -k '));
+    const after = calls.slice(restored);
+    expect(after).toContain(`xattr -r -s -d com.apple.quarantine ${app()}`);
+    expect(after).toContain(`lsregister -f -R ${app()}`);
+  });
+
+  it('removes the unpack folder and keeps the zip when the restored app cannot be moved into place', () => {
+    const result = install([], { STUB_DITTO_FAILS: '1', STUB_MV_UNPACK_FAILS: '1' });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('could not put the previous app back');
+    expect(kept()).toEqual([ZIP]);
+    expect(box.zipMarker(ZIP)).toBe('old build');
+  });
 
   it('detaches the DMG even when mounting it failed part way', () => {
     install([], { STUB_ATTACH_FAILS: '1' });
@@ -238,10 +270,11 @@ describe('install-app.sh puts the previous app back', () => {
   it('says loudly where the previous app is when the partial copy cannot be removed', () => {
     const result = install([], { STUB_DITTO_FAILS: 'stuck' });
     expect(result.status).toBe(1);
-    const saved = join(box.applications, `10db.app.prev-${STAMP}`);
+    const zip = join(box.previousDir, ZIP);
     expect(result.stderr).toContain('could not put the previous app back');
-    expect(result.stderr).toContain(saved);
-    expect(box.marker(saved)).toBe('old build');
+    expect(result.stderr).toContain(zip);
+    expect(kept()).toEqual([ZIP]);
+    expect(box.zipMarker(ZIP)).toBe('old build');
     expect(box.list(app())).toEqual(['Contents']);
   });
 });
@@ -283,12 +316,57 @@ describe('install-app.sh', () => {
     expect(box.marker(app())).toBe('new build');
   });
 
-  it('backs up the database beside the earlier backups, and keeps the old app under the same stamp', () => {
+  it('keeps the old app as one zip outside Applications, tested before the app is removed', () => {
+    const result = install();
+    expect(result.status).toBe(0);
+    expect(box.list(box.applications)).toEqual(['10db.app']);
+    expect(box.marker(app())).toBe('new build');
+    expect(kept()).toEqual([ZIP]);
+    expect(box.zipMarker(ZIP)).toBe('old build');
+    const zipping = box.calls().findIndex((call) => call.startsWith('ditto -c -k --keepParent '));
+    const testing = box.calls().findIndex((call) => call.startsWith('unzip -tq '));
+    const copying = box.calls().findIndex((call) => /^ditto \/\S*\/10db\.app /.test(call));
+    expect(zipping).toBeGreaterThanOrEqual(0);
+    expect([zipping, testing, copying]).toEqual(
+      [...[zipping, testing, copying]].sort((a, b) => a - b),
+    );
+    expect(result.stdout).toContain(join(box.previousDir, ZIP));
+  });
+
+  it('keeps only the newest previous app, deleting the older zips once the new one is in place', () => {
+    box.writeZip('10db-20261028T090000Z.zip', '10db.app', 'older build');
+    box.writeZip('10db-20261029T171341Z.zip', '10db.app.prev-20261029T171341Z', 'hand-zipped');
+    const result = install();
+    expect(result.status).toBe(0);
+    expect(kept()).toEqual([ZIP]);
+  });
+
+  it('keeps the earlier zip when there is no app to replace', () => {
+    rmSync(app(), { recursive: true });
+    box.writeZip('10db-20261028T090000Z.zip', '10db.app', 'older build');
+    const result = install();
+    expect(result.status).toBe(0);
+    expect(box.marker(app())).toBe('new build');
+    expect(kept()).toEqual(['10db-20261028T090000Z.zip']);
+    expect(result.stdout).not.toContain('Previous app');
+  });
+
+  it('registers the new app with Launch Services, so the Dock and Spotlight open it', () => {
+    expect(install().status).toBe(0);
+    expect(box.calls()).toContain(`lsregister -f -R ${app()}`);
+  });
+
+  it('still installs when Launch Services registration fails, and says so', () => {
+    const result = install([], { STUB_LSREGISTER_FAILS: '1' });
+    expect(result.status).toBe(0);
+    expect(box.marker(app())).toBe('new build');
+    expect(result.stderr).toContain('lsregister');
+  });
+
+  it('backs up the database beside the earlier backups, under the stamp of the kept zip', () => {
     const result = install();
     expect(result.status).toBe(0);
     expect(backups()).toEqual([`10db-backup-${STAMP}`]);
-    expect(previous()).toEqual([`10db.app.prev-${STAMP}`]);
-    expect(box.marker(join(box.applications, `10db.app.prev-${STAMP}`))).toBe('old build');
     const backup = join(support(), `10db-backup-${STAMP}`, '10db.sqlite');
     expect(box.list(join(support(), `10db-backup-${STAMP}`))).toEqual(['10db.sqlite']);
     expect(box.calls()).toContain(
@@ -296,16 +374,82 @@ describe('install-app.sh', () => {
     );
   });
 
+  it('keeps the newest 5 stamped backups by the stamp in their names, and says which it removed', () => {
+    // Names and times disagree on purpose: the name decides.
+    box.writeBackup('20261027T090000Z', 100);
+    box.writeBackup('20261028T090000Z', 6000);
+    box.writeBackup('20261028T100000Z', 5000);
+    box.writeBackup('20261029T080000Z', 4000);
+    box.writeBackup('20261029T090000Z', 3000);
+    box.writeBackup('20261029T100000Z', 2000);
+    box.writeBackup('2113', 7000);
+    box.writeBackup('pre-reset', 8000);
+    const result = install();
+    expect(result.status).toBe(0);
+    expect(backups()).toEqual([
+      '10db-backup-20261028T100000Z',
+      '10db-backup-20261029T080000Z',
+      '10db-backup-20261029T090000Z',
+      '10db-backup-20261029T100000Z',
+      `10db-backup-${STAMP}`,
+      '10db-backup-2113',
+      '10db-backup-pre-reset',
+    ]);
+    expect(result.stdout).toContain('10db-backup-20261027T090000Z');
+    expect(result.stdout).toContain('10db-backup-20261028T090000Z');
+    expect(result.stdout).not.toContain('10db-backup-2113');
+  });
+
+  it("never removes this install's own backup, even when 5 stamped backups sort after it", () => {
+    for (const day of ['30', '31']) {
+      for (const hour of ['01', '02', '03']) box.writeBackup(`202610${day}T${hour}0000Z`, 100);
+    }
+    expect(install().status).toBe(0);
+    expect(backups()).toContain(`10db-backup-${STAMP}`);
+  });
+
+  it('keeps zips the builder named by hand', () => {
+    box.writeZip('10db-before-reset.zip', '10db.app', 'kept by hand');
+    box.writeZip('10db-20261028T090000Z.zip', '10db.app', 'older build');
+    expect(install().status).toBe(0);
+    expect(kept()).toEqual(['10db-20261029T101500Z.zip', '10db-before-reset.zip']);
+  });
+
+  it('warns about another 10db.app copy left in Applications, and leaves it alone', () => {
+    box.writeApp(join(box.applications, '10db.app.prev-0346'), 'left by hand');
+    const result = install();
+    expect(result.status).toBe(0);
+    expect(result.stderr).toContain('10db.app.prev-0346');
+    expect(box.marker(join(box.applications, '10db.app.prev-0346'))).toBe('left by hand');
+  });
+
+  it('refuses an installed 10db.app with no Info.plist, saying to move it aside or roll back', () => {
+    rmSync(join(app(), 'Contents', 'Info.plist'));
+    const result = install();
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('move it aside');
+    expect(result.stderr).toContain('make rollback-app');
+    expect(box.marker(app())).toBe('old build');
+    expect(kept()).toEqual([]);
+  });
+
+  it('removes no backup when the install fails', () => {
+    for (const [i, suffix] of ['a', 'b', 'c', 'd', 'e', 'f'].entries()) {
+      box.writeBackup(suffix, 1000 * (i + 1));
+    }
+    expect(install([], { STUB_DITTO_FAILS: '1' }).status).toBe(1);
+    expect(backups()).toHaveLength(7);
+  });
+
   it('stamps in UTC to the second when no stamp is injected', () => {
     const result = box.run('install-app.sh', []);
     expect(result.status).toBe(0);
     expect(backups()).toEqual([expect.stringMatching(/^10db-backup-\d{8}T\d{6}Z$/)]);
-    expect(previous()).toEqual([`10db.app.prev-${(backups()[0] ?? '').slice(12)}`]);
+    expect(kept()).toEqual([`10db-${(backups()[0] ?? '').slice(12)}.zip`]);
   });
 
-  it('installs the new app and clears quarantine on it alone, without following symlinks', () => {
+  it('clears quarantine on the new app alone, without following symlinks', () => {
     expect(install().status).toBe(0);
-    expect(box.marker(app())).toBe('new build');
     expect(box.calls().filter((call) => call.startsWith('xattr '))).toEqual([
       `xattr -r -s -d com.apple.quarantine ${app()}`,
       `xattr -r -s -l ${app()}`,
@@ -323,15 +467,6 @@ describe('install-app.sh', () => {
     ).toBe(true);
   });
 
-  it('installs on a Mac with no 10db.app yet', () => {
-    rmSync(app(), { recursive: true });
-    const result = install();
-    expect(result.status).toBe(0);
-    expect(box.marker(app())).toBe('new build');
-    expect(previous()).toEqual([]);
-    expect(result.stdout).not.toContain('Previous app');
-  });
-
   it('prints the commit it installed and how to roll back', () => {
     const result = install();
     expect(result.stdout).toContain(HEAD_SHA);
@@ -345,6 +480,53 @@ describe('install-app.sh', () => {
     expect(box.marker(app())).toBe('new build');
   });
 });
+
+// zip_app and unpack_app run macOS's own ditto and unzip, which only a Mac has; elsewhere the
+// stand-ins above cover the scripts.
+describe.skipIf(process.platform !== 'darwin')(
+  'zip_app and unpack_app with the real ditto and unzip',
+  () => {
+    const helpers = (body: string) =>
+      spawnSync(
+        '/bin/bash',
+        [
+          '-c',
+          `set -euo pipefail; script_name=t; . "$1"; ${body}`,
+          '_',
+          join(repoRoot, 'scripts/release/installed-app.sh'),
+        ],
+        {
+          encoding: 'utf8',
+          env: {
+            PATH: '/usr/bin:/bin',
+            HOME: box.root,
+            TMPDIR: box.root,
+            TENDB_INSTALL_APPLICATIONS_DIR: box.applications,
+            TENDB_INSTALL_DATA_DIR: box.dataDir,
+          },
+        },
+      );
+
+    it('zips the installed app, tests the zip and unpacks the same bundle', () => {
+      const zip = join(box.previousDir, ZIP);
+      const result = helpers(
+        `zip_app "${zip}"; bundle="$(unpack_app "${zip}")"; cat "$bundle/Contents/marker"`,
+      );
+      expect(result.stderr).toBe('');
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe('old build');
+      expect(kept().filter((name) => !name.startsWith('.unpack.'))).toEqual([ZIP]);
+    });
+
+    it('refuses to unpack a zip that does not test as whole', () => {
+      mkdirSync(box.previousDir, { recursive: true });
+      const zip = join(box.previousDir, ZIP);
+      const result = helpers(`printf junk > "${zip}"; unpack_app "${zip}"`);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('does not test as a whole zip');
+    });
+  },
+);
 
 describe('the running check', () => {
   const pattern = spawnSync(
