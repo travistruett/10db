@@ -45,6 +45,21 @@ export function openPnpmLockDir(dir: string): void {
  * recursively. Anything that could not be removed is thrown after the rest was tried.
  */
 export function sweepPnpmLockDir(dir: string): void {
+  try {
+    sweep(dir);
+  } catch (error) {
+    throw new SandboxProfileError(
+      'packageInstall',
+      `pnpm's lock directory ${dir} could not be cleared: ${asError(error).message}`,
+    );
+  }
+}
+
+function asError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
+}
+
+function sweep(dir: string): void {
   const aside = `${dir}.sweep-${randomUUID()}`;
   try {
     renameSync(dir, aside);
@@ -63,13 +78,7 @@ export function sweepPnpmLockDir(dir: string): void {
       remove();
     } catch (error) {
       if (isMissing(error)) return;
-      failure ??=
-        error instanceof Error
-          ? error
-          : new SandboxProfileError(
-              'packageInstall',
-              'a lock directory entry could not be removed',
-            );
+      failures.push(asError(error));
     }
   };
   for (const name of readdirSync(aside)) {

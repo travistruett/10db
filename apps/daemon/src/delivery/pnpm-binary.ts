@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { accessSync, closeSync, constants, openSync, readSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { delimiter, isAbsolute, join } from 'node:path';
+import { basename, delimiter, isAbsolute, join } from 'node:path';
 import { promisify } from 'node:util';
 
 const run = promisify(execFile);
@@ -71,7 +71,12 @@ export async function resolvePnpm(
       candidate.split('/').some((part) => VERSION_MANAGER_DIRS.includes(part)),
     );
   const trustworthy = (path: string): boolean =>
-    isAbsolute(path) && executable(path) && outside(path) && !managed(path) && !isScript(path);
+    isAbsolute(path) &&
+    basename(realpathOrSelf(path)) === 'pnpm' &&
+    executable(path) &&
+    outside(path) &&
+    !managed(path) &&
+    !isScript(path);
   const onPath = (name: string): string[] =>
     (env['PATH'] ?? '')
       .split(delimiter)

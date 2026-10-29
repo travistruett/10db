@@ -92,8 +92,10 @@ reproduced by cutting a worktree the way 10db does, seeding it from the main che
   only on that. A link there is unlinked; in a directory, every entry is unlinked (a directory is removed
   only when empty), nothing is followed or removed recursively, and the directory is then removed. The same
   sweep runs before a run starts, for what a crash left, so every install gets a fresh private directory
-  and a replaced path is cleared, not reported. Installs of different projects can overlap; a sweep then moves
-  the directory from under a live pnpm, which loses a lock's mutual exclusion but gives it no path outside.
+  and a replaced path is cleared, not reported. The directory is the builder's own pnpm's as well, so a sweep moves it from under a pnpm
+  the builder runs in a terminal at that moment, and overlapping daemon installs likewise; those lose a
+  lock's mutual exclusion on a shared store for that moment. This is accepted: the lock only guards
+  against concurrent store writes, and the alternative (sweeping in place) is the race this removes.
 - **Cost, stated.** The run's store is empty, so the install downloads the worktree's whole tree each cut
   (about 15 to 25 seconds, 635 packages measured) and the seeded clone is mostly replaced; several cuts at once
   are several downloads, outside the gate slots on purpose. A project whose registry host is not allowed, or an

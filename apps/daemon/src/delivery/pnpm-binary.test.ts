@@ -54,7 +54,7 @@ describe('resolving the pnpm a worktree install runs', () => {
     [
       'a corepack shim',
       () => {
-        script(join(dir('corepack', 'bin'), 'pnpm'));
+        program(join(dir('corepack', 'bin'), 'pnpm'));
       },
     ],
     [
@@ -66,7 +66,13 @@ describe('resolving the pnpm a worktree install runs', () => {
     [
       'an fnm link',
       () => {
-        symlinkSync('/bin/ls', join(dir('fnm', 'bin'), 'pnpm'));
+        program(join(dir('fnm', 'bin'), 'pnpm'));
+      },
+    ],
+    [
+      'a link to a multi-call binary',
+      () => {
+        symlinkSync('/bin/ls', join(dir('multi', 'bin'), 'pnpm'));
       },
     ],
     [
@@ -77,7 +83,7 @@ describe('resolving the pnpm a worktree install runs', () => {
     ],
   ])('refuses %s, and does not fall back to it', async (_name, plant) => {
     plant();
-    const path = ['bin', 'corepack/bin', '.volta/bin', 'fnm/bin', 'asdf/shims']
+    const path = ['bin', 'corepack/bin', '.volta/bin', 'fnm/bin', 'asdf/shims', 'multi/bin']
       .map((part) => join(tmp.path, part))
       .join(':');
     expect(await resolvePnpm({ PATH: path }, [dir('checkout')])).toBeNull();
