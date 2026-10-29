@@ -22,17 +22,19 @@ import {
   useAbandonBatch,
   useBatches,
   useBoardColumns,
+  useCloseTask,
   useRetryWorkstream,
   useTasks,
   useWorkstreams,
 } from '../../daemon/queries';
-import { canRetry } from '../factory/workstream-state';
+import { canClose, canRetry } from '../factory/workstream-state';
 import { FormModal } from '../../shell/form-modal';
 import { useSelectedProject } from '../../shell/selected-project';
 import { SplitButton } from '../../shell/split-button';
 import { SettingsSectionKey } from '../settings/sections';
 import { abandonNote } from './batch/abandon-note';
 import { BatchSheet } from './batch/batch-sheet';
+import { closeNote } from './batch/close-note';
 import { BatchStrip, sharedBatches } from './batch-strip';
 import { BoardColumn } from './board-column';
 import { BoardScroll } from './board-scroll';
@@ -132,6 +134,7 @@ function BoardColumns({
   const actions = useBoardActions(projectId);
   const retry = useRetryWorkstream();
   const abandon = useAbandonBatch();
+  const closeTask = useCloseTask();
   const [showAllDone, setShowAllDone] = useState(false);
   // The task whose details are open, by ID, so the drawer follows the task as the board refetches.
   const [openId, setOpenId] = useState<TaskId | null>(null);
@@ -172,6 +175,11 @@ function BoardColumns({
       {abandon.error ? (
         <Alert color="red" title="Couldn't abandon the batch">
           {abandon.error.message}
+        </Alert>
+      ) : null}
+      {closeTask.error ? (
+        <Alert color="red" title="Couldn't close the task">
+          {closeTask.error.message}
         </Alert>
       ) : null}
       <BoardScroll>
@@ -260,14 +268,26 @@ function BoardColumns({
                   ? {
                       onRetry: () => {
                         abandon.reset();
+                        closeTask.reset();
                         retry.mutate(ws.id);
                       },
+                    }
+                  : {})}
+                {...(ws && canClose(ws.state)
+                  ? {
+                      onCloseTask: () => {
+                        retry.reset();
+                        abandon.reset();
+                        closeTask.mutate(task.id);
+                      },
+                      closeLine: closeNote(batch),
                     }
                   : {})}
                 {...(batch && canAbandon
                   ? {
                       onAbandon: () => {
                         retry.reset();
+                        closeTask.reset();
                         abandon.mutate(batch.id);
                       },
                       abandonRefusal: abandonNote(batch, workstreams).refusal,

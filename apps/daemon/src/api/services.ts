@@ -76,6 +76,13 @@ export interface TaskRemovalServices {
    * TaskHasDependentsError while an open task waits on it.
    */
   removeTask(taskId: TaskId): TaskDto;
+  /**
+   * Closes a task whose latest run failed, as a remove does: it leaves the project's list, its
+   * workstreams stay, and its branch and worktree are untouched. Answering a task already closed is
+   * a no-op. Throws ConflictError for a task whose run didn't fail and TaskHasDependentsError while
+   * an open task waits on it.
+   */
+  closeTask(taskId: TaskId): TaskDto;
 }
 
 /** What the HTTP layer needs from the daemon. Implemented in the daemon module. */
