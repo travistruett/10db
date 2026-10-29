@@ -60,7 +60,7 @@ describe('isSensitivePath', () => {
     ['.git/info', true],
     ['.claudex', false],
     ['.git/information', false],
-    ['.claude/.cc-writes', false],
+    ['.claude/.cc-writes', true],
     ['.claude/.cc-writes/settings.local.json.tmp', false],
     ['.claude/.cc-writesx', true],
     ['.claude/x/.cc-writes', true],

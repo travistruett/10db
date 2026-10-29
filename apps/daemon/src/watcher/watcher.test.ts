@@ -339,6 +339,16 @@ describe('watcher', () => {
     const makeStaging = () => {
       mkdirSync(join(repo.path, staging), { recursive: true, mode: 0o700 });
     };
+    const outside: TempDir[] = [];
+    /** A directory outside the repository for a link to point at, removed after the row. */
+    const outsideDir = (prefix: string): string => {
+      const dir = tempDir(prefix);
+      outside.push(dir);
+      return dir.path;
+    };
+    afterEach(() => {
+      for (const dir of outside.splice(0)) dir.cleanup();
+    });
 
     it.each<{
       name: string;
@@ -397,12 +407,31 @@ describe('watcher', () => {
         name: 'leaves a .claude link flagged though its target holds only the staging directory',
         ignore: '.claude\n',
         setup: () => {
-          const target = tempDir('claude-link').path;
+          const target = outsideDir('claude-link');
           mkdirSync(join(target, '.cc-writes'));
           symlinkSync(target, join(repo.path, '.claude'));
         },
         events: ['.claude'],
         expected: ['.claude'],
+      },
+      {
+        name: 'is flagged as a link, and so is the new .claude holding it',
+        ignore: `${staging}\n`,
+        setup: () => {
+          mkdirSync(join(repo.path, '.claude'));
+          symlinkSync(outsideDir('cc-writes-link'), join(repo.path, staging));
+        },
+        events: ['.claude', staging],
+        expected: ['.claude', staging],
+      },
+      {
+        name: 'is flagged as a file, and so is the new .claude holding it',
+        ignore: `${staging}\n`,
+        setup: () => {
+          touch(staging);
+        },
+        events: ['.claude', staging],
+        expected: ['.claude', staging],
       },
       {
         name: 'is judged against the claims when git reports a file left in it',

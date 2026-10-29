@@ -2,8 +2,8 @@ import { lstatSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 /**
- * What Claude Code writes under a checkout's `.claude/` by itself, which it never reads as config or
- * instructions.
+ * Directories Claude Code writes under a checkout's `.claude/` by itself, and never reads anything in as
+ * config or instructions.
  *
  * `.claude/.cc-writes` is its atomic-write staging directory. Every session start creates it (mode 0700, with
  * `.claude/` if that is missing) and adds `.claude/.cc-writes/` to the user's global gitignore. A settings
@@ -17,8 +17,26 @@ import { join } from 'node:path';
  */
 const CLAUDE_CODE_BOOKKEEPING = ['.claude/.cc-writes'] as const;
 
-export function isClaudeCodeBookkeeping(rel: string): boolean {
-  return CLAUDE_CODE_BOOKKEEPING.some((dir) => rel === dir || rel.startsWith(`${dir}/`));
+/**
+ * A path inside a bookkeeping directory. The directory's own path is not: a link or a file there is not
+ * what Claude Code makes, so only `isBookkeepingAt`, which looks at it, exempts it.
+ */
+export function isInsideClaudeCodeBookkeeping(rel: string): boolean {
+  return CLAUDE_CODE_BOOKKEEPING.some((dir) => rel.startsWith(`${dir}/`));
+}
+
+function isRealDirectory(path: string): boolean {
+  try {
+    return lstatSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/** Whether `rel` under `root` is bookkeeping: inside a bookkeeping directory, or one itself, as a real directory. */
+export function isBookkeepingAt(root: string, rel: string): boolean {
+  if (isInsideClaudeCodeBookkeeping(rel)) return true;
+  return CLAUDE_CODE_BOOKKEEPING.some((dir) => dir === rel) && isRealDirectory(join(root, rel));
 }
 
 /**
@@ -27,11 +45,10 @@ export function isClaudeCodeBookkeeping(rel: string): boolean {
  * and anything written into it later arrives as its own event. An empty or unreadable one counts as not.
  */
 export function holdsOnlyBookkeeping(root: string, rel: string): boolean {
+  if (!isRealDirectory(join(root, rel))) return false;
   try {
-    const path = join(root, rel);
-    if (!lstatSync(path).isDirectory()) return false;
-    const entries = readdirSync(path);
-    return entries.length > 0 && entries.every((name) => isClaudeCodeBookkeeping(`${rel}/${name}`));
+    const entries = readdirSync(join(root, rel));
+    return entries.length > 0 && entries.every((name) => isBookkeepingAt(root, `${rel}/${name}`));
   } catch {
     return false;
   }
