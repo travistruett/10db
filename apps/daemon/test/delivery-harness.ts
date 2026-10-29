@@ -118,7 +118,7 @@ export interface DeliveryHarness {
   git$(...args: string[]): string;
   origin$(...args: string[]): string;
   /** Another clone commits `path` to `branch` on origin, as a teammate would; returns the new SHA. */
-  teammatePush(branch: string, path: string): string;
+  teammatePush(branch: string, path: string, content?: string): string;
   /** Open flag cards, oldest first. */
   cards(): InboxItemDto[];
   /** The single element of `items`; throws on none or several. */
@@ -256,13 +256,13 @@ export function createDeliveryHarness(
     },
     git$: (...args) => run(remote.repo.path, args),
     origin$: (...args) => run(remote.origin.path, args),
-    teammatePush(branch, path) {
+    teammatePush(branch, path, content = `${path}\n`) {
       const other = createTempClone(remote.origin.path);
       try {
         if (branch !== 'main') run(other.path, ['switch', '-q', '-c', branch]);
         const file = join(other.path, path);
         mkdirSync(dirname(file), { recursive: true });
-        writeFileSync(file, `${path}\n`);
+        writeFileSync(file, content);
         run(other.path, ['add', path]);
         run(other.path, ['commit', '-q', '-m', `Add ${path}`]);
         run(other.path, ['push', '-q', 'origin', branch]);

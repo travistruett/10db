@@ -107,6 +107,9 @@ When a scope is given it comes from this list; the type is always required:
 | `docs`      | `docs/` and top-level Markdown                              |
 | `deps`      | dependency updates                                          |
 
+`.10db/pr-scopes.json` lists the same scopes, except `deps`, with the paths each covers, so 10db can scope the
+pull requests it opens; a repo test keeps the two in step.
+
 Trailers such as `Co-Authored-By:` are welcome.
 
 Name every path you stage: `git add path/a path/b`, never `git add -A` or `git add .`. The

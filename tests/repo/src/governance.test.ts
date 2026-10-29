@@ -450,6 +450,22 @@ describe('community files', () => {
     expect(scopes.filter((scope) => !contributing.includes(`\`${scope}\``))).toEqual([]);
   });
 
+  it('maps every commitlint scope but deps to paths that exist, for the titles 10db writes', async () => {
+    const { default: commitlint } = (await import(resolve(repoRoot, 'commitlint.config.js'))) as {
+      default: { rules: Record<string, [number, string, string[]]> };
+    };
+    const allowed = commitlint.rules['scope-enum']?.[2] ?? [];
+    const { scopes } = JSON.parse(readRepoFile('.10db/pr-scopes.json')) as {
+      scopes: Record<string, string[]>;
+    };
+    expect(Object.keys(scopes).sort()).toEqual(allowed.filter((s) => s !== 'deps').sort());
+    expect(
+      Object.values(scopes)
+        .flat()
+        .filter((path) => !existsSync(resolve(repoRoot, path))),
+    ).toEqual([]);
+  });
+
   it('opens Renovate PRs as chore(deps) commits and waits three days after each release', () => {
     const renovate = JSON.parse(readRepoFile('renovate.json')) as Record<string, unknown>;
     expect(renovate['extends']).toEqual(
