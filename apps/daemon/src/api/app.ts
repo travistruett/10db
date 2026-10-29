@@ -9,6 +9,7 @@ import {
   BoardColumnId,
   BoardColumnInput,
   BoardColumnPatch,
+  AreaProposalInput,
   DomainError,
   EventsHead,
   FlowId,
@@ -169,6 +170,11 @@ export function createApp(deps: ApiDeps) {
       '/folders/inspect',
       validator('json', (value): FolderInspectInput => FolderInspectInput.parse(value)),
       async (c) => c.json(await deps.services.inspectFolder(c.req.valid('json').path)),
+    )
+    .post(
+      '/folders/propose-areas',
+      validator('json', (value): AreaProposalInput => AreaProposalInput.parse(value)),
+      async (c) => c.json(await deps.services.proposeAreas(c.req.valid('json').path)),
     )
     .get('/flows', (c) => c.json(deps.services.listFlows()))
     .patch(

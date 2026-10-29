@@ -1,7 +1,9 @@
 import {
+  AreaProposalInput,
   FolderInspectInput,
   FolderRefusalReason,
   SystemCheckDto,
+  type AreaProposalResult,
   type FolderInspection,
   type FolderInspectResult,
 } from '@10db/contracts';
@@ -77,8 +79,22 @@ function system(gh: Gh) {
   });
 }
 
+/** What the daemon proposes for the folder unless a test says otherwise. */
+const PROPOSAL: AreaProposalResult = {
+  ok: true,
+  proposal: {
+    namedBy: 'model',
+    areas: [
+      { name: 'api', globs: ['apps/api/**'], reason: 'The API service.' },
+      { name: 'web', globs: ['apps/web/**', 'apps/web/.*'], reason: 'The web app.' },
+      { name: 'root', globs: ['*', '.*'], reason: 'Files at the top.' },
+    ],
+  },
+};
+
 interface Served {
   readonly inspected: string[];
+  readonly proposed: string[];
   readonly posted: unknown[];
   readonly accountsRequested: () => boolean;
 }
@@ -89,11 +105,14 @@ function serve(
     readonly gh?: Gh;
     readonly accounts?: ReturnType<typeof accountDto>[];
     readonly createStatus?: number;
+    /** The daemon's answer to the area proposal; 'fail' is a server error. A promise holds the answer back. */
+    readonly proposal?: AreaProposalResult | 'fail' | Promise<AreaProposalResult>;
   } = {},
 ): Served {
   let accountsAsked = false; // set by the /accounts handler
   const served: Served = {
     inspected: [],
+    proposed: [],
     posted: [],
     accountsRequested: () => accountsAsked,
   };
@@ -102,6 +121,12 @@ function serve(
     http.post(daemonUrl('/folders/inspect'), async ({ request }) => {
       served.inspected.push(FolderInspectInput.parse(await request.json()).path);
       return HttpResponse.json(result);
+    }),
+    http.post(daemonUrl('/folders/propose-areas'), async ({ request }) => {
+      served.proposed.push(AreaProposalInput.parse(await request.json()).path);
+      const answer = opts.proposal ?? PROPOSAL;
+      if (answer === 'fail') return HttpResponse.json({ error: 'internal' }, { status: 500 });
+      return HttpResponse.json(await answer);
     }),
     http.get(daemonUrl('/system'), () =>
       HttpResponse.json(system(opts.gh ?? { login: 'octocat' })),
@@ -154,6 +179,7 @@ async function openInspected(): Promise<void> {
   await openForm();
   await typePath('/Users/me/widgets');
   await screen.findByRole('textbox', { name: 'Name' });
+  await screen.findByRole('group', { name: 'Area 1' });
 }
 
 /** A text or select input by its name. */
@@ -488,6 +514,7 @@ describe('useProjectSetup', () => {
     await openForm(created);
     await typePath('/Users/me/widgets/sub');
     await screen.findByRole('textbox', { name: 'Name' });
+    await screen.findByRole('group', { name: 'Area 1' });
     fireEvent.click(create());
     await waitFor(() => {
       expect(served.posted).toHaveLength(1);
@@ -496,7 +523,11 @@ describe('useProjectSetup', () => {
       name: 'widgets',
       repoPath: '/Users/me/widgets',
       gateCommand: 'make gate',
-      areas: [{ name: 'repo', globs: ['**'] }],
+      areas: [
+        { name: 'api', globs: ['apps/api/**'] },
+        { name: 'web', globs: ['apps/web/**', 'apps/web/.*'] },
+        { name: 'root', globs: ['*', '.*'] },
+      ],
       handoffPct: 40,
       nudgePct: 50,
       delivery: 'pull_request',
@@ -520,7 +551,11 @@ describe('useProjectSetup', () => {
       name: 'app',
       repoPath: '/Users/me/widgets',
       gateCommand: 'make gate',
-      areas: [{ name: 'repo', globs: ['**'] }],
+      areas: [
+        { name: 'api', globs: ['apps/api/**'] },
+        { name: 'web', globs: ['apps/web/**', 'apps/web/.*'] },
+        { name: 'root', globs: ['*', '.*'] },
+      ],
       handoffPct: 40,
       nudgePct: 50,
       delivery: 'local',
@@ -535,6 +570,161 @@ describe('useProjectSetup', () => {
       expect(screen.getByTestId('error').textContent).toBe(
         "Couldn't create the project: The folder changed.",
       );
+    });
+  });
+});
+
+describe('the areas in the new project', () => {
+  const area = (n: number): HTMLElement => screen.getByRole('group', { name: `Area ${String(n)}` });
+  const nameOf = (n: number): HTMLInputElement => {
+    const el = screen.getByRole('textbox', { name: `Area ${String(n)} name` });
+    if (!(el instanceof HTMLInputElement)) throw new Error('not an input');
+    return el;
+  };
+  const globsOf = (n: number): HTMLTextAreaElement => {
+    const el = screen.getByRole('textbox', { name: `Area ${String(n)} globs` });
+    if (!(el instanceof HTMLTextAreaElement)) throw new Error('not a textarea');
+    return el;
+  };
+  const names = () =>
+    screen
+      .getAllByRole('textbox', { name: /^Area \d+ name$/ })
+      .map((el) => (el instanceof HTMLInputElement ? el.value : ''));
+
+  async function createAndRead(served: Served): Promise<unknown> {
+    fireEvent.click(create());
+    await waitFor(() => {
+      expect(served.posted).toHaveLength(1);
+    });
+    return served.posted[0];
+  }
+
+  it('proposes areas for the repository root, each with its globs and reason', async () => {
+    const served = serve();
+    await openForm();
+    await typePath('/Users/me/widgets/sub');
+    await screen.findByRole('group', { name: 'Area 1' });
+    expect(served.proposed).toEqual(['/Users/me/widgets']);
+    expect(names()).toEqual(['api', 'web', 'root']);
+    expect(globsOf(2).value).toBe('apps/web/**\napps/web/.*');
+    expect(screen.getByText('The API service.')).toBeTruthy();
+    expect(screen.getByText('The web app.')).toBeTruthy();
+  });
+
+  it('waits for the proposal before the project can be created', async () => {
+    let answer: (result: AreaProposalResult) => void = () => undefined;
+    const held = new Promise<AreaProposalResult>((resolve) => {
+      answer = resolve;
+    });
+    serve({ proposal: held });
+    await openForm();
+    await typePath('/Users/me/widgets');
+    await screen.findByRole('textbox', { name: 'Name' });
+    expect(await screen.findByText('Looking for the areas of this repository…')).toBeTruthy();
+    expect(disabled(create())).toBe(true);
+    answer(PROPOSAL);
+    await screen.findByRole('group', { name: 'Area 1' });
+    expect(disabled(create())).toBe(false);
+    expect(screen.queryByText('Looking for the areas of this repository…')).toBeNull();
+  });
+
+  it('creates the project with exactly the areas the builder accepted', async () => {
+    const served = serve();
+    await openInspected();
+
+    fireEvent.change(nameOf(1), { target: { value: 'backend' } });
+    fireEvent.change(globsOf(1), { target: { value: 'apps/api/**\nservices/**' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Remove root' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add area' }));
+    fireEvent.change(nameOf(3), { target: { value: 'docs' } });
+    fireEvent.change(globsOf(3), { target: { value: ' docs/** ' } });
+
+    expect(names()).toEqual(['backend', 'web', 'docs']);
+    expect(await createAndRead(served)).toMatchObject({
+      areas: [
+        { name: 'backend', globs: ['apps/api/**', 'services/**'] },
+        { name: 'web', globs: ['apps/web/**', 'apps/web/.*'] },
+        { name: 'docs', globs: ['docs/**'] },
+      ],
+    });
+  });
+
+  it('merges an area into another, which keeps its name and takes both sets of globs', async () => {
+    const served = serve();
+    await openInspected();
+    fireEvent.click(screen.getByRole('button', { name: 'Merge web' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'api' }));
+    expect(names()).toEqual(['api', 'root']);
+    expect(globsOf(1).value).toBe('apps/api/**\napps/web/**\napps/web/.*');
+    expect(await createAndRead(served)).toMatchObject({
+      areas: [
+        { name: 'api', globs: ['apps/api/**', 'apps/web/**', 'apps/web/.*'] },
+        { name: 'root', globs: ['*', '.*'] },
+      ],
+    });
+  });
+
+  it('holds Create Project back for a bad name, a name used twice, or no glob, and says why', async () => {
+    serve();
+    await openInspected();
+    fireEvent.change(nameOf(2), { target: { value: 'api' } });
+    expect(screen.getAllByText('Another area has this name.')).toHaveLength(2);
+    expect(disabled(create())).toBe(true);
+    fireEvent.change(nameOf(2), { target: { value: 'Web App' } });
+    expect(
+      screen.getByText('Use lowercase letters, digits and hyphens, starting with a letter.'),
+    ).toBeTruthy();
+    fireEvent.change(nameOf(2), { target: { value: 'harness' } });
+    expect(
+      screen.getByText('harness is a hazard of every new project; choose another name.'),
+    ).toBeTruthy();
+    fireEvent.change(nameOf(2), { target: { value: 'web' } });
+    fireEvent.change(globsOf(2), { target: { value: '' } });
+    expect(screen.getByText('Give at least one glob.')).toBeTruthy();
+    expect(disabled(create())).toBe(true);
+    fireEvent.change(globsOf(2), { target: { value: 'apps/web/**' } });
+    expect(disabled(create())).toBe(false);
+  });
+
+  it('will not create a project with no area', async () => {
+    serve();
+    await openInspected();
+    for (const name of ['api', 'web', 'root'])
+      fireEvent.click(screen.getByRole('button', { name: `Remove ${name}` }));
+    expect(screen.getByText('Keep at least one area.')).toBeTruthy();
+    expect(disabled(create())).toBe(true);
+  });
+
+  it('starts from one area over the whole repository when the proposal fails, and says so', async () => {
+    const served = serve({ proposal: 'fail' });
+    await openForm();
+    await typePath('/Users/me/widgets');
+    await screen.findByRole('group', { name: 'Area 1' });
+    expect(screen.getByText(/Couldn't propose areas/)).toBeTruthy();
+    expect(names()).toEqual(['repo']);
+    expect(area(1)).toBeTruthy();
+    expect(await createAndRead(served)).toMatchObject({ areas: [{ name: 'repo', globs: ['**'] }] });
+  });
+
+  it('starts from one area over the whole repository when the daemon declines to propose', async () => {
+    serve({ proposal: { ok: false, message: 'This is a bare repository; choose a checkout.' } });
+    await openForm();
+    await typePath('/Users/me/widgets');
+    await screen.findByRole('group', { name: 'Area 1' });
+    expect(screen.getByText(/This is a bare repository; choose a checkout\./)).toBeTruthy();
+    expect(names()).toEqual(['repo']);
+  });
+
+  it('proposes again for a new folder and drops the edits made to the last one', async () => {
+    const served = serve();
+    await openInspected();
+    fireEvent.change(nameOf(1), { target: { value: 'edited' } });
+    await typePath('/Users/me/other');
+    await waitFor(() => {
+      expect(served.proposed).toEqual(['/Users/me/widgets', '/Users/me/widgets']);
+    });
+    await waitFor(() => {
+      expect(names()).toEqual(['api', 'web', 'root']);
     });
   });
 });

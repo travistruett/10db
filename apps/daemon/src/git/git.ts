@@ -20,7 +20,16 @@ import {
 } from './checkout-trust';
 import { parseScopedConfig, type ConfigEntry } from './config-trust';
 import { equalOrUnder, insideAny, isPlainDirectory, samePath, surelyInside } from './lane-writable';
-import { branchOfRef, firstLine, parseBranches, type RepoFacts, type RepoRefusal } from './inspect';
+import {
+  branchOfRef,
+  parseBranches,
+  parseSurveyLog,
+  refusalOf,
+  SURVEY_COMMIT_MARK,
+  type RepoFacts,
+  type RepoRefusal,
+  type RepoSurvey,
+} from './inspect';
 import { comparablePath, entryAt, existsAsEntry, foldedName, sameEntry } from './path-entries';
 import { gitNetwork, type NetworkCall, type NetworkRun } from './network';
 import { localRemotePath, parseRemoteUrl } from './remote-url';
@@ -312,6 +321,12 @@ export interface Git {
    * looks at raises no card. A repository git won't read is answered, not thrown.
    */
   inspect(path: string): Promise<RepoFacts | RepoRefusal>;
+  /**
+   * The tracked files of HEAD and the files of its latest `maxCommits` commits, read from the object
+   * store as `inspect` reads: unpinned, nothing written, no refusal reaches `onRefused`. Git runs no
+   * program the repository configures: only plumbing and `log` with no external diff or textconv.
+   */
+  survey(path: string, maxCommits: number): Promise<RepoSurvey | RepoRefusal>;
 }
 
 export interface GitOptions {
@@ -1917,17 +1932,38 @@ export function createGit(opts: GitOptions = {}): Git {
           originFetchUrl: url === null || url.trim() === '' ? null : url.trim(),
         };
       } catch (error) {
-        if (
-          error instanceof GitError &&
-          /not a git repository \((?:or any of the parent directories|or any parent up to mount point)/i.test(
-            error.stderr,
-          )
-        )
-          return { refused: 'not_a_repository', message: firstLine(error.stderr) };
-        return {
-          refused: 'unreadable',
-          message: firstLine(error instanceof GitError ? error.stderr : String(error)),
-        };
+        return refusalOf(error);
+      }
+    },
+    async survey(path, maxCommits) {
+      const site = observed(path);
+      try {
+        const bare = (await git(site, ['rev-parse', '--is-bare-repository'])).trim() === 'true';
+        if (bare) return { refused: 'bare_repository', message: 'This is a bare repository.' };
+        const at = observed(
+          realpathSync((await git(site, ['rev-parse', '--show-toplevel'])).trim()),
+        );
+        // An empty repository has no HEAD: it holds no file and has no history.
+        const head = await git(at, ['rev-parse', '-q', '--verify', 'HEAD^{commit}'], {
+          answerExitCodes: [1],
+        });
+        if (head.trim() === '') return { files: [], commits: [] };
+        const tree = await git(at, ['ls-tree', '-r', '-z', '--name-only', 'HEAD']);
+        const log = await git(at, [
+          'log',
+          `--max-count=${String(maxCommits)}`,
+          '--no-merges',
+          '--no-renames',
+          '--no-ext-diff',
+          '--no-textconv',
+          '--name-only',
+          '-z',
+          `--format=${SURVEY_COMMIT_MARK}`,
+          'HEAD',
+        ]);
+        return { files: tree.split('\0').filter((f) => f !== ''), commits: parseSurveyLog(log) };
+      } catch (error) {
+        return refusalOf(error);
       }
     },
     async ignoredDirectories(repo) {

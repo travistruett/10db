@@ -53,7 +53,7 @@ import type { ApiServices, TaskRemovalServices } from '../api';
 import { workstreamChanges, type BatchStarter, type Shipper } from '../delivery';
 import { markGhRequired } from '../environment';
 import type { EventBus, StateStore } from '../events';
-import { inspectFolder } from '../folders';
+import { inspectFolder, proposeAreas, type AreaNamer } from '../folders';
 import type { Git } from '../git';
 import { requestMcpApproval, type InboxService } from '../inbox';
 import type { KeepAwake } from '../keep-awake';
@@ -85,6 +85,8 @@ export function createServices(deps: {
   readonly git: Git;
   /** 10db's own places a project may not be: the data dir, the lane temp root, the worktree root. */
   readonly protectedRoots: readonly string[];
+  /** Names and merges proposed areas; null leaves them named from their paths. */
+  readonly areaNamer: AreaNamer | null;
   /** Records a new project's checkout as the daemon trusts it (lane sandbox spec D13). */
   readonly pinCheckout: (repoPath: string) => void;
 }): ApiServices & TaskRemovalServices {
@@ -231,6 +233,11 @@ export function createServices(deps: {
     inspectFolder: (path) =>
       inspectFolder(
         { git: deps.git, projects: listProjects(db), protectedRoots: deps.protectedRoots },
+        path,
+      ),
+    proposeAreas: (path) =>
+      proposeAreas(
+        { git: deps.git, namer: deps.areaNamer, protectedRoots: deps.protectedRoots },
         path,
       ),
     reviewProjectMcp(projectId) {
