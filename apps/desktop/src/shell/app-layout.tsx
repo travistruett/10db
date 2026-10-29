@@ -1,4 +1,4 @@
-import { AppShell, Badge, Group, NavLink, VisuallyHidden } from '@mantine/core';
+import { AppShell, Badge, Divider, Group, NavLink, VisuallyHidden } from '@mantine/core';
 import {
   IconBuildingFactory2,
   IconInbox,
@@ -12,6 +12,7 @@ import { useDesktopSync } from '../desktop/sync';
 import { ColorSchemeToggle } from './color-scheme-toggle';
 import { DaemonStatus } from './daemon-status';
 import { KeepAwakeControl } from './keep-awake-control';
+import { ProjectSwitcher } from './project-switcher';
 import { ReconnectingBanner } from './reconnecting-banner';
 import { SystemAlert } from './system-alert';
 
@@ -60,6 +61,8 @@ export function AppLayout() {
           '--mantine-color-gray-0': 'var(--mantine-color-default-hover)',
         }}
       >
+        <ProjectSwitcher />
+        <Divider my="xs" />
         {NAV.map(({ to, label, icon: Icon }) => (
           <NavLink
             key={to}

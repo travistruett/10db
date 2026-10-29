@@ -219,7 +219,8 @@ describe('SettingsView', () => {
       'value',
       '90%',
     );
-    await pick(screen.getByRole('combobox', { name: 'Project' }), 'Beta');
+    fireEvent.click(screen.getByRole('button', { name: 'Project: Alpha. Switch project' }));
+    fireEvent.click(await screen.findByRole('option', { name: /Beta/, hidden: true }));
     await waitFor(() => {
       expect(screen.getByRole('textbox', { name: 'Hand off at' })).toHaveProperty('value', '95%');
     });

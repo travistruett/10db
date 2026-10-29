@@ -12,13 +12,11 @@ import {
   type WorkstreamDto,
   type WorkstreamId,
 } from '@10db/contracts';
-import { Alert, Button, Group, Loader, Modal, ScrollArea, Stack, Text, Title } from '@mantine/core';
+import { Alert, Button, Group, Loader, Modal, ScrollArea, Stack, Text } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { useState } from 'react';
 import { useBatches, useBoardColumns, useTasks, useWorkstreams } from '../../daemon/queries';
-import { ProjectPicker } from '../../shell/project-picker';
 import { useSelectedProject } from '../../shell/selected-project';
-import { formatAreas } from './areas-text';
 import { BatchSheet } from './batch/batch-sheet';
 import { BatchHistory } from './batch-history';
 import { BatchStrip } from './batch-strip';
@@ -211,17 +209,8 @@ export function BoardView() {
 
   return (
     <Stack>
-      <Group justify="space-between" align="flex-end">
-        <Title order={2}>Board</Title>
+      <Group justify="flex-end" align="flex-end">
         <Group align="flex-end">
-          {project ? (
-            <ProjectPicker
-              value={project.id}
-              onChange={(id) => {
-                select(id);
-              }}
-            />
-          ) : null}
           <Button variant="default" size="sm" onClick={projectModal.open}>
             New project
           </Button>
@@ -271,13 +260,6 @@ export function BoardView() {
       {projects.isPending ? <Loader size="sm" aria-label="Loading projects" /> : null}
       {projects.isSuccess && !project ? (
         <Text c="dimmed">No projects yet. Create one to start.</Text>
-      ) : null}
-      {project ? (
-        <Text size="sm" c="dimmed" ff="monospace" style={{ whiteSpace: 'pre-wrap' }}>
-          {project.repoPath} · gate: {project.gateCommand}
-          {'\n'}
-          {formatAreas(project.areas)}
-        </Text>
       ) : null}
       {project ? <BatchStrips project={project} workstreams={workstreams.data ?? []} /> : null}
       {project && batchList.length > 0 ? <BatchHistory batches={batchList} /> : null}

@@ -483,7 +483,9 @@ describe('BoardView', () => {
       renderApp('/board');
 
       expect(await screen.findByText('No tasks yet.')).toBeTruthy();
-      expect(screen.getByDisplayValue('first-project')).toBeTruthy();
+      expect(
+        screen.getByRole('button', { name: 'Project: first-project. Switch project' }),
+      ).toBeTruthy();
     } finally {
       window.localStorage.removeItem('tendb.project');
     }
@@ -659,7 +661,7 @@ describe('BoardView', () => {
       http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([idea])),
     );
     const { queryClient } = renderApp('/board');
-    await screen.findByText(/gate: true/);
+    await screen.findByRole('button', { name: `Project: ${project.name}. Switch project` });
     // Wait for the tasks to be in the cache, then check the board still holds back.
     await waitFor(() => {
       expect(queryClient.getQueryState(['tasks', project.id])?.status).toBe('success');
@@ -785,11 +787,24 @@ describe('BoardView', () => {
     expect(within(column).getAllByRole('listitem')).toHaveLength(22);
   });
 
+  it('has no page title or metadata line', async () => {
+    const project = projectDto({ gateCommand: 'make gate-marker' });
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([])),
+    );
+    renderApp('/board');
+    expect(await screen.findByText('No tasks yet.')).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'Board' })).toBeNull();
+    expect(screen.queryByText(/make gate-marker/)).toBeNull();
+  });
+
   it('redirects /tasks to the board', async () => {
     serve();
     const { router } = renderApp('/tasks');
-    expect(await screen.findByRole('heading', { name: 'Board', level: 2 })).toBeTruthy();
-    expect(router.state.location.pathname).toBe('/board');
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/board');
+    });
   });
 
   /** A board whose daemon applies each move, as the real one does, so refetches agree with the UI. */

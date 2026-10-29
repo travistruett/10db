@@ -1,13 +1,9 @@
-import type { ProjectDto, ProjectId } from '@10db/contracts';
 import { Badge, NavLink, Stack, Text } from '@mantine/core';
 import { Link } from '@tanstack/react-router';
-import { ProjectPicker } from '../../shell/project-picker';
 import { SETTINGS_SECTIONS, SettingsGroup, type SettingsSectionKey } from './sections';
 
 export interface SettingsNavProps {
   readonly current: SettingsSectionKey;
-  readonly project: ProjectDto | null;
-  readonly onProject: (id: ProjectId | null) => void;
 }
 
 const GROUP_LABEL: Readonly<Record<SettingsGroup, string>> = {
@@ -15,7 +11,7 @@ const GROUP_LABEL: Readonly<Record<SettingsGroup, string>> = {
   [SettingsGroup.App]: 'App',
 };
 
-export function SettingsNav({ current, project, onProject }: SettingsNavProps) {
+export function SettingsNav({ current }: SettingsNavProps) {
   return (
     <Stack component="nav" aria-label="Settings sections" w={240} gap={4}>
       {Object.values(SettingsGroup).map((group) => (
@@ -23,9 +19,6 @@ export function SettingsNav({ current, project, onProject }: SettingsNavProps) {
           <Text size="xs" fw={700} c="dimmed" tt="uppercase">
             {GROUP_LABEL[group]}
           </Text>
-          {group === SettingsGroup.Project && project ? (
-            <ProjectPicker value={project.id} onChange={onProject} width="100%" />
-          ) : null}
           {SETTINGS_SECTIONS.filter((s) => s.group === group).map((s) => (
             <NavLink
               key={s.key}
