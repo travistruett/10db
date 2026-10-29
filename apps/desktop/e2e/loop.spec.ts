@@ -30,11 +30,18 @@ async function expectView(page: Page, view: (typeof VIEWS)[number]): Promise<voi
     );
     return;
   }
+  if (view === 'Settings') {
+    // Settings has no page title: it takes over the sidebar, led by a way back.
+    await expect(page.getByRole('link', { name: 'Back to Board' })).toBeVisible();
+    return;
+  }
   await expect(page.getByRole('heading', { name: view, level: 2 })).toBeVisible();
 }
 
 async function open(page: Page, view: (typeof VIEWS)[number]): Promise<void> {
-  await page.getByRole('link', { name: new RegExp(`^${view}( \\d+ open cards?)?$`) }).click();
+  await page
+    .getByRole('link', { name: new RegExp(`^(Back to )?${view}( \\d+ open cards?)?$`) })
+    .click();
   await expectView(page, view);
 }
 
@@ -195,17 +202,15 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await expectAccessible(page, 'settings, general, dark');
   await page.getByRole('link', { name: /Board columns/ }).click();
   await page.getByLabel('New column').fill('Exploring');
-  const addColumn = page.getByRole('button', { name: 'Add column' });
+  const addColumn = page.getByRole('button', { name: 'Add Column' });
   await addColumn.click();
   await expect(
-    page.getByRole('table', { name: 'Human columns' }).getByText('Exploring'),
+    page.getByRole('table', { name: 'Board columns' }).getByText('Exploring'),
   ).toBeVisible();
   // Axe reads colors, so let the Add column button leave its loading state and fade its label back in.
   await expect(addColumn).toBeEnabled();
   await expect(addColumn.locator('.mantine-Button-inner')).toHaveCSS('opacity', '1');
   await expectAccessible(page, 'settings, board columns, dark');
-  await page.getByRole('link', { name: /Team/ }).click();
-  await expect(page.getByText('Not built yet')).toBeVisible();
 
   // Accounts: the default account is Ready only because the loop above already ran a task; the first
   // session's probe recorded its identity (the fake adapter reports builder@example.com).
@@ -215,8 +220,8 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await expectAccessible(page, 'settings, accounts, dark');
 
   // A second subscription: its drawer names the config directory to sign in to.
-  await page.getByRole('button', { name: 'Add account' }).click();
-  const addAccount = page.getByRole('dialog', { name: 'Add account' });
+  await page.getByRole('button', { name: 'Add Account' }).click();
+  const addAccount = page.getByRole('dialog', { name: 'Add Account' });
   await addAccount.getByRole('textbox', { name: 'Label' }).fill('Company A');
   await addAccount.getByRole('button', { name: 'Create' }).click();
   await expect(addAccount).toBeHidden();
@@ -235,7 +240,7 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
 
   // An API key account starts without a secret. Saving one would write the login Keychain, so the
   // end to end run stops at "No secret yet".
-  await page.getByRole('button', { name: 'Add account' }).click();
+  await page.getByRole('button', { name: 'Add Account' }).click();
   await addAccount.getByLabel('Kind').click();
   await page.getByRole('option', { name: 'Anthropic API key' }).click();
   await addAccount.getByRole('textbox', { name: 'Label' }).fill('Client B');
@@ -272,7 +277,7 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await expect(lightSheet).toBeHidden();
   await open(page, 'Settings');
   await page.getByRole('link', { name: /Board columns/ }).click();
-  await expect(page.getByRole('table', { name: 'Human columns' })).toBeVisible();
+  await expect(page.getByRole('table', { name: 'Board columns' })).toBeVisible();
   await expectAccessible(page, 'settings, board columns, light');
   await page.getByRole('link', { name: /Accounts/ }).click();
   await expect(page.getByRole('table', { name: 'Accounts' })).toBeVisible();
