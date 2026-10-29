@@ -143,7 +143,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
     signal: AbortSignal,
   ): Promise<GateResult | null> {
     const gateCommand = project.gateCommand;
-    // A project without a gate has no command to run here.
+    // The caller skips the gate step for a project without a gate.
     if (gateCommand === null) throw new InvalidError('This project has no gate command to run');
     let recording: Promise<void> = Promise.resolve();
     const logPath = join(
@@ -302,7 +302,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
       prBody({
         batch,
         tasks,
-        gate: { command: project.gateCommand ?? '' },
+        gate: { command: project.gateCommand },
         ci: { repo: target.repo, sha },
         template: await readPrTemplate(deps.git, target.checkout, sha, deps.logger),
       }),
@@ -378,17 +378,20 @@ export function createShipper(deps: ShipperDeps): Shipper {
         if (worktreePath !== null) await retire(batchId);
         return;
       }
-      // 2. The gate, on the branch as it will be pushed.
-      step = 'the gate';
-      const gate = await runGate(batch, projectAtCheckout(project, checkout), signal);
-      if (gate === null) return;
-      if (gate.timedOut) {
-        fail(batch, shipCards.gateTimedOut(batch, deps.limits.gateTimeoutMs, gate.logPath));
-        return;
-      }
-      if (gate.exitCode !== 0) {
-        fail(batch, shipCards.gateFailed(batch, gate));
-        return;
+      // 2. The gate, on the branch as it will be pushed; a project with none was checked by the
+      // builder, task by task, so this step is skipped.
+      if (project.gateCommand !== null) {
+        step = 'the gate';
+        const gate = await runGate(batch, projectAtCheckout(project, checkout), signal);
+        if (gate === null) return;
+        if (gate.timedOut) {
+          fail(batch, shipCards.gateTimedOut(batch, deps.limits.gateTimeoutMs, gate.logPath));
+          return;
+        }
+        if (gate.exitCode !== 0) {
+          fail(batch, shipCards.gateFailed(batch, gate));
+          return;
+        }
       }
       // 3. Push, never forced.
       step = 'git push';

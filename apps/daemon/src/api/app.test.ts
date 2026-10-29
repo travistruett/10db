@@ -41,6 +41,7 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
     listWorkstreams: () => [],
     cancelWorkstream: none,
     retryWorkstream: none,
+    workstreamChanges: none,
     listInbox: () => [],
     answerInbox: none,
     eventsAfter: () => [] as DaemonEvent[],

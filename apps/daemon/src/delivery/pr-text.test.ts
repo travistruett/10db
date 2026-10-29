@@ -300,6 +300,26 @@ describe('prBody', () => {
     );
   });
 
+  it('says each task was approved in 10db when the project has no gate command', () => {
+    const body = prBody({
+      batch: { id: mintId('Batch') },
+      tasks: [{ title: 'Alpha', description: '', acceptanceCriteria: ['it works'], state: 'DONE' }],
+      gate: { command: null },
+      ci: { repo: 'acme/widgets', sha: SHA },
+      template: null,
+    });
+    expect(body).toContain(
+      [
+        '## How it was checked',
+        '',
+        'No gate command: each task was approved in 10db.',
+        '',
+        `CI run for the pushed head: [0123456](https://github.com/acme/widgets/commit/${SHA}/checks)`,
+      ].join('\n'),
+    );
+    expect(body).not.toContain('Gate, run on the branch');
+  });
+
   it('never says the gate exited 0, since CI is the check the reviewer reads', () => {
     const body = prBody({
       batch: { id: mintId('Batch') },

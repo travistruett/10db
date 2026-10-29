@@ -67,6 +67,19 @@ export interface AddWorktreeInput {
   readonly lockReason: string;
 }
 
+/** What changed between a commit and HEAD: the diff text, cut at a byte cap, and every file's counts. */
+export interface DiffSince {
+  readonly diff: string;
+  /** True when the diff was longer than the cap and was cut. */
+  readonly truncated: boolean;
+  /** Lines added and removed per file; both null for a binary file. */
+  readonly files: readonly {
+    readonly path: string;
+    readonly added: number | null;
+    readonly removed: number | null;
+  }[];
+}
+
 /** What `fileAt` found at a path of a commit. */
 export type FileAt =
   | { readonly kind: 'file'; readonly text: string }
@@ -168,6 +181,12 @@ export interface Git {
   /** Ignored directories of the checkout, top-level and nested, without the trailing `/`. */
   ignoredDirectories(repo: string): Promise<string[]>;
   /**
+   * The unified diff from `base` to HEAD, read with no external diff program and no textconv
+   * filter, cut to at most `maxBytes` of UTF-8 on a character boundary, plus the per-file counts
+   * of the whole change. Renames are shown as a delete and an add.
+   */
+  diffSince(repo: string, base: string, maxBytes: number): Promise<DiffSince>;
+  /**
    * The text of `path` in commit `rev`, read from the object store, never from the worktree, so no
    * link is followed: a path that is a link, or lies under one, is `not_regular` or `missing`. A
    * blob over `maxBytes` is not read.
@@ -251,6 +270,35 @@ export function withOpTrailer(message: string, opId: string): string {
 
 function isTrue(value: string | null | undefined): boolean {
   return value === null || ['true', 'yes', 'on', '1'].includes((value ?? '').toLowerCase());
+}
+
+/** `text` cut to at most `maxBytes` of UTF-8, never inside a multi-byte character. */
+function cutDiff(text: string, maxBytes: number): { diff: string; truncated: boolean } {
+  const bytes = Buffer.from(text, 'utf8');
+  if (bytes.length <= maxBytes) return { diff: text, truncated: false };
+  let end = maxBytes;
+  // A continuation byte (10xxxxxx) at the cut belongs to a character that starts before it.
+  while (end > 0 && ((bytes[end] ?? 0) & 0xc0) === 0x80) end--;
+  return { diff: bytes.subarray(0, end).toString('utf8'), truncated: true };
+}
+
+/** `diff --numstat -z --no-renames` output: `added TAB removed TAB path NUL` per file, `-` for binary. */
+function parseNumstat(out: string): DiffSince['files'][number][] {
+  return out
+    .split('\0')
+    .filter(Boolean)
+    .flatMap((record) => {
+      const match = /^(\d+|-)\t(\d+|-)\t([^]*)$/.exec(record);
+      if (!match) return [];
+      const [, added = '-', removed = '-', path = ''] = match;
+      return [
+        {
+          path,
+          added: added === '-' ? null : Number(added),
+          removed: removed === '-' ? null : Number(removed),
+        },
+      ];
+    });
 }
 
 /** `ls-tree -r -z` output as entries. */
@@ -1237,6 +1285,13 @@ export function createGit(opts: GitOptions = {}): Git {
       return (await git(await pinned(repo), ['rev-list', '--reverse', `${base}..${tip}`]))
         .split('\n')
         .filter(Boolean);
+    },
+    async diffSince(repo, base, maxBytes) {
+      const c = await pinned(repo);
+      const flags = ['--no-ext-diff', '--no-textconv', '--no-renames', '--no-color'];
+      const numstat = await git(c, ['diff', ...flags, '--numstat', '-z', base, 'HEAD', '--']);
+      const text = await git(c, ['diff', ...flags, base, 'HEAD', '--']);
+      return { ...cutDiff(text, maxBytes), files: parseNumstat(numstat) };
     },
     async filtersIn(repo, rev) {
       return filters(await pinned(repo), rev);

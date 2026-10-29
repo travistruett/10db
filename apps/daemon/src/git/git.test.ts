@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   readFileSync,
   realpathSync,
@@ -630,5 +631,71 @@ describe('git hook variables in the daemon environment', () => {
     } finally {
       decoy.cleanup();
     }
+  });
+});
+
+describe('diffSince', () => {
+  const commitAll = (message: string) => {
+    rawGit('add', '-A');
+    rawGit('commit', '-q', '-m', message);
+  };
+
+  it('returns the diff and numstat from the base to HEAD', async () => {
+    const base = rawGit('rev-parse', 'HEAD');
+    write('a.txt', 'one\ntwo\n');
+    writeFileSync(join(repo.path, 'blob.bin'), Buffer.from([0, 1, 2, 3, 0, 255]));
+    commitAll('add files');
+
+    const changes = await git.diffSince(repo.path, base, 512 * 1024);
+
+    expect(changes.truncated).toBe(false);
+    expect(changes.diff).toContain('diff --git a/a.txt b/a.txt');
+    expect(changes.diff).toContain('+two');
+    expect([...changes.files].sort((x, y) => x.path.localeCompare(y.path))).toEqual([
+      { path: 'a.txt', added: 2, removed: 0 },
+      { path: 'blob.bin', added: null, removed: null },
+    ]);
+  });
+
+  it('is empty when nothing changed since the base', async () => {
+    expect(await git.diffSince(repo.path, rawGit('rev-parse', 'HEAD'), 1024)).toEqual({
+      diff: '',
+      truncated: false,
+      files: [],
+    });
+  });
+
+  it('caps the diff at the byte limit, on a character boundary, and flags it', async () => {
+    const base = rawGit('rev-parse', 'HEAD');
+    write('big.txt', `${'é'.repeat(2000)}\n`);
+    write('other.txt', 'x\n');
+    commitAll('big');
+
+    const changes = await git.diffSince(repo.path, base, 1001);
+
+    expect(changes.truncated).toBe(true);
+    expect(Buffer.byteLength(changes.diff)).toBeLessThanOrEqual(1001);
+    expect(changes.diff).not.toContain('�');
+    // The counts cover every file even when the text was cut.
+    expect(changes.files.map((f) => f.path).sort()).toEqual(['big.txt', 'other.txt']);
+  });
+
+  it('does not run a textconv driver or an external diff program', async () => {
+    const base = rawGit('rev-parse', 'HEAD');
+    const textconvMark = join(repo.path, '..', `textconv-ran-${String(process.pid)}`);
+    const externalMark = join(repo.path, '..', `external-ran-${String(process.pid)}`);
+    write('.gitattributes', '*.dat diff=evil\n');
+    write('f.dat', 'payload\n');
+    commitAll('add dat');
+    rawGit('config', 'diff.evil.textconv', `sh -c 'touch ${textconvMark}; cat' --`);
+    rawGit('config', 'diff.external', `sh -c 'touch ${externalMark}' --`);
+    write('f.dat', 'changed\n');
+    commitAll('change dat');
+
+    const changes = await git.diffSince(repo.path, base, 512 * 1024);
+
+    expect(changes.diff).toContain('+changed');
+    expect(existsSync(textconvMark)).toBe(false);
+    expect(existsSync(externalMark)).toBe(false);
   });
 });
