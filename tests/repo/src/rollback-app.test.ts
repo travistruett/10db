@@ -113,6 +113,26 @@ describe('rollback-app.sh refusals', () => {
     expectNothingMoved();
     expect(box.list(box.applications)).not.toContain('.10db-install.lock');
   });
+
+  it('refuses a current 10db.app with no Info.plist, saying to move it aside', () => {
+    rmSync(join(app(), 'Contents', 'Info.plist'));
+    const result = rollback();
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('move it aside');
+    expect(box.marker(app())).toBe('old build');
+    expect(kept()).toEqual([ZIP]);
+  });
+
+  it('puts the current app back, registered and unquarantined, when the kept app cannot be moved in', () => {
+    const result = rollback({ STUB_MV_UNPACK_FAILS: '1' });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('put the current app back');
+    expectNothingMoved();
+    const calls = box.calls();
+    const after = calls.slice(calls.findIndex((call) => call.startsWith('ditto -c -k ')));
+    expect(after).toContain(`xattr -r -s -d com.apple.quarantine ${app()}`);
+    expect(after).toContain(`lsregister -f -R ${app()}`);
+  });
 });
 
 describe('rollback-app.sh', () => {
@@ -181,6 +201,17 @@ describe('rollback-app.sh', () => {
     expect([...lines].sort((a, b) => a - b)).toEqual(lines);
     expect(result.stdout).not.toContain('20261028T211400Z');
     expect(box.calls().filter((call) => call.startsWith('sqlite3 '))).toEqual([]);
+  });
+
+  it('names the safety backup with the stamp of the zip it keeps, so a toggle back finds it', () => {
+    writeBackup(PREVIOUS);
+    const result = rollback({ TENDB_INSTALL_STAMP: '', STUB_CLOCK: '1' });
+    expect(result.status).toBe(0);
+    const [zip, ...others] = kept();
+    expect(others).toEqual([]);
+    const stamp = (zip ?? '').replace(/^10db-|\.zip$/g, '');
+    expect(stamp).toMatch(/^\d{8}T\d{6}Z$/);
+    expect(result.stdout).toContain(`mkdir "${join(support(), `10db-backup-${stamp}`)}"`);
   });
 
   it('says so when no database backup matches', () => {

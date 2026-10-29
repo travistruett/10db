@@ -34,9 +34,10 @@ cleanup() {
   if [ -n "$current_zip" ]; then rm -f "$current_zip.partial"; fi
   if [ "$finished" -eq 0 ] && [ "$removing" -eq 1 ]; then
     rm -rf "$app_path" 2> /dev/null
-    if [ ! -e "$app_path" ] && bundle="$(unpack_app "$current_zip")" && mv "$bundle" "$app_path"; then
-      rmdir "$(dirname "$bundle")" 2> /dev/null
+    if [ ! -e "$app_path" ] && bundle="$(unpack_app "$current_zip")" && move_unpacked "$bundle"; then
       rm -f "$current_zip"
+      clear_quarantine || echo "$script_name: com.apple.quarantine is still set inside $app_path" >&2
+      register_app
       echo "$script_name: put the current app back at $app_path" >&2
     else
       echo "$script_name: could not put the current app back. It is kept in $current_zip; once $app_path is out of the way, run: ditto -x -k \"$current_zip\" \"$apps_dir\"" >&2
@@ -53,24 +54,25 @@ trap 'exit 143' TERM
 trap 'exit 129' HUP
 
 take_lock
+refuse_broken_app "make rollback-app again"
 
 shopt -s nullglob
 zip=""
 for path in "$previous_dir"/10db-*.zip; do
-  candidate="${path##*/10db-}"
-  candidate="${candidate%.zip}"
   # Stamps sort as text in time order.
-  if is_stamp "$candidate" && { [ -z "$zip" ] || [[ "$path" > "$zip" ]]; }; then zip="$path"; fi
+  if [ -n "$(zip_stamp "$path")" ] && { [ -z "$zip" ] || [[ "$path" > "$zip" ]]; }; then zip="$path"; fi
 done
 [ -n "$zip" ] || fail "no previous app is kept in $previous_dir (a zip named 10db-<UTC stamp>.zip), so nothing was moved"
-stamp="${zip##*/10db-}"
-stamp="${stamp%.zip}"
+stamp="$(zip_stamp "$zip")"
+# One stamp for the zip of the app this replaces and the safety backup printed below, so rolling
+# back again finds that backup.
+now="$(new_stamp)"
 
 bundle="$(unpack_app "$zip")" || fail "could not unpack the app in $zip, so nothing was moved"
 stage="$(dirname "$bundle")"
 
 if [ -e "$app_path" ]; then
-  current_zip="$(previous_zip_for "$(new_stamp)")"
+  current_zip="$(previous_zip_for "$now")"
   [ ! -e "$current_zip" ] || fail "$current_zip already exists, so nothing was moved"
   zip_app "$current_zip" || fail "could not zip $app_path to $current_zip and test the zip, so nothing was moved"
   zip_done=1
@@ -78,8 +80,8 @@ if [ -e "$app_path" ]; then
   rm -rf "$app_path"
 fi
 restoring=1
-mv "$bundle" "$app_path"
-clear_quarantine
+move_unpacked "$bundle"
+clear_quarantine || fail "com.apple.quarantine is still set inside $app_path"
 register_app
 if [ -n "$current_zip" ]; then keep_only_zip "$current_zip"; fi
 
@@ -87,7 +89,7 @@ echo "Restored $app_path from $zip."
 if [ -n "$current_zip" ]; then echo "  The app it replaced is kept in $current_zip; run make rollback-app again to go back to it."; fi
 backup="$(backup_file_for "$stamp")"
 if [ -f "$backup" ]; then
-  safety="$(dirname "$(backup_file_for "$(new_stamp)")")"
+  safety="$(dirname "$(backup_file_for "$now")")"
   echo "The database backup taken by that install is $backup."
   echo "10db has written to its database since, and a newer build may have migrated it, which the"
   echo "restored app can't read. To go back to the backup, keep 10db quit and run these. The first two"

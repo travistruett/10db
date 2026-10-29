@@ -79,10 +79,10 @@ cleanup() {
     if [ "$copying" -eq 1 ] || [ "$removing" -eq 1 ]; then rm -rf "$app_path" 2> /dev/null; fi
     if [ "$removing" -eq 1 ]; then
       local bundle=""
-      if [ ! -e "$app_path" ] && bundle="$(unpack_app "$previous_zip")" && mv "$bundle" "$app_path"; then
-        rmdir "$(dirname "$bundle")" 2> /dev/null
+      if [ ! -e "$app_path" ] && bundle="$(unpack_app "$previous_zip")" && move_unpacked "$bundle"; then
         rm -f "$previous_zip"
-        register_app > /dev/null 2>&1
+        clear_quarantine || echo "$script_name: com.apple.quarantine is still set inside $app_path" >&2
+        register_app
         echo "$script_name: put the previous app back at $app_path" >&2
       else
         echo "$script_name: could not put the previous app back. It is kept in $previous_zip; once $app_path is out of the way, run: ditto -x -k \"$previous_zip\" \"$apps_dir\"" >&2
@@ -187,6 +187,7 @@ actual="$(shasum -a 256 "$dmg" | awk '{ print $1 }')"
 take_lock
 # 10db may have been opened while the build ran.
 refuse_while_running
+refuse_broken_app "make install-app again or make rollback-app"
 
 stamp="$(new_stamp)"
 [ ! -e "$(previous_zip_for "$stamp")" ] || fail "$(previous_zip_for "$stamp") already exists"
@@ -231,24 +232,25 @@ fi
 
 # Safe to clear: the app is the builder's own CI build of a named commit, fetched through gh, and
 # its DMG matched the run's SHA256SUMS above.
-clear_quarantine
+clear_quarantine || fail "com.apple.quarantine is still set inside $app_path"
 installed=1
 register_app
 
-# The newest backups by time last changed, whatever their names: backups made by hand are named
-# with hours and minutes only.
+# Only backups these scripts made, 10db-backup-<UTC stamp>, newest first by that stamp; backups
+# named by hand are never removed and don't count. This install's own backup always stays.
 prune_backups() {
-  local prefix path count=0 removed=""
+  local prefix path newest_first="" count=0 removed=""
   prefix="$(dirname "$data_dir")/$(basename "$data_dir")-backup-"
-  local found=("$prefix"*)
-  [ "${#found[@]}" -gt "$backups_kept" ] || return 0
+  for path in "$prefix"*; do
+    [ -d "$path" ] && is_stamp "${path#"$prefix"}" || continue
+    newest_first="$path"$'\n'"$newest_first"
+  done
   while IFS= read -r path; do
-    case "$path" in "$prefix"*) ;; *) continue ;; esac
-    [ -d "$path" ] || continue
+    [ -n "$path" ] || continue
     count=$((count + 1))
-    [ "$count" -gt "$backups_kept" ] || continue
+    [ "$count" -gt "$backups_kept" ] && [ "$path" != "$backup_dir" ] || continue
     rm -rf "$path" && removed="$removed $(basename "$path")"
-  done <<< "$(ls -1dt -- "${found[@]}")"
+  done <<< "$newest_first"
   [ -z "$removed" ] || echo "  Removed older database backups, keeping the newest $backups_kept:$removed"
 }
 
@@ -259,4 +261,8 @@ if [ -n "$previous_zip" ]; then
   echo "  Previous app:     $previous_zip"
 fi
 prune_backups
+# Launch Services may send the Dock icon to any other copy of the app left in Applications.
+for leftover in "$app_path".*; do
+  echo "$script_name: $leftover is another copy of 10db in Applications, which the Dock icon may open; zip it or delete it" >&2
+done
 echo "Open 10db to start it. To go back to the previous app: quit 10db, then run make rollback-app."

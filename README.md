@@ -24,10 +24,12 @@ Status: under construction. The design is in
 - The build is unsigned, so install it only this way. Gatekeeper refuses a copy opened from a download, and the
   Keychain may ask for access again after an update.
 - The database is backed up first, to `~/Library/Application Support/10db-backup-<stamp>/10db.sqlite`; the stamp
-  is the UTC time, such as `20261029T101500Z`. Only the newest 5 backups are kept: each install deletes older ones.
+  is the UTC time, such as `20261029T101500Z`. Each install keeps the newest 5 of the backups it made and deletes
+  older ones; a backup you named yourself is never deleted.
 - The app it replaced is kept as one zip, `~/Library/Application Support/10db-previous/10db-<stamp>.zip`, with
   the same stamp. Nothing else is left in `/Applications`, so the Dock, Launchpad and Spotlight open the new
-  app. Each install keeps only the newest zip.
+  app; the install warns about any other `10db.app.*` copy there, which the Dock icon may still open. Each
+  install keeps only its newest zip; a zip you named yourself stays.
 - `make rollback-app` unzips that app into place and keeps the one it replaces as the zip, so running it again
   toggles back. It changes no data: it prints the commands that save the current database and restore the
   matching backup.

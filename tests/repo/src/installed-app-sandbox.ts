@@ -103,6 +103,26 @@ const STUBS: Record<string, readonly string[]> = {
     'esac',
   ],
   lsregister: ['[ -z "${STUB_LSREGISTER_FAILS:-}" ] || exit 1'],
+  // A clock that moves a second on every call, so two reads of it in one run differ.
+  date: [
+    'if [ -n "${STUB_CLOCK:-}" ] && [ "$*" = "-u +%Y%m%dT%H%M%SZ" ]; then',
+    `  ${count('date')}`,
+    '  printf \'20261029T1200%02dZ\\n\' "$n"',
+    '  exit 0',
+    'fi',
+    'exec /bin/date "$@"',
+  ],
+  // Fails the first STUB_MV_UNPACK_FAILS moves of a bundle out of an unpack folder.
+  mv: [
+    'case "$1" in',
+    '  */.unpack.*)',
+    '    if [ -n "${STUB_MV_UNPACK_FAILS:-}" ]; then',
+    `      ${count('mv-unpack')}`,
+    '      [ "$n" -gt "$STUB_MV_UNPACK_FAILS" ] || exit 1',
+    '    fi ;;',
+    'esac',
+    'exec /bin/mv "$@"',
+  ],
   xattr: ['exit 0'],
 };
 

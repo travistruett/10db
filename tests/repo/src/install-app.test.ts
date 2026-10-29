@@ -244,6 +244,24 @@ describe('install-app.sh puts the previous app back', () => {
     expectAppUntouched();
   });
 
+  it('registers the restored app and clears its quarantine, as an install would', () => {
+    const result = install([], { STUB_DITTO_FAILS: '1' });
+    expect(result.status).toBe(1);
+    const calls = box.calls();
+    const restored = calls.findIndex((call) => call.startsWith('ditto -x -k '));
+    const after = calls.slice(restored);
+    expect(after).toContain(`xattr -r -s -d com.apple.quarantine ${app()}`);
+    expect(after).toContain(`lsregister -f -R ${app()}`);
+  });
+
+  it('removes the unpack folder and keeps the zip when the restored app cannot be moved into place', () => {
+    const result = install([], { STUB_DITTO_FAILS: '1', STUB_MV_UNPACK_FAILS: '1' });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('could not put the previous app back');
+    expect(kept()).toEqual([ZIP]);
+    expect(box.zipMarker(ZIP)).toBe('old build');
+  });
+
   it('detaches the DMG even when mounting it failed part way', () => {
     install([], { STUB_ATTACH_FAILS: '1' });
     expect(box.calls().some((call) => call.startsWith('hdiutil detach'))).toBe(true);
@@ -356,24 +374,63 @@ describe('install-app.sh', () => {
     );
   });
 
-  it('keeps the newest 5 backups after installing, and says which it removed', () => {
-    box.writeBackup('2113', 6000);
-    box.writeBackup('20261028T090000Z', 5000);
-    box.writeBackup('20261028T100000Z', 4000);
-    box.writeBackup('2205', 3000);
-    box.writeBackup('20261029T080000Z', 2000);
-    box.writeBackup('20261029T090000Z', 1000);
+  it('keeps the newest 5 stamped backups by the stamp in their names, and says which it removed', () => {
+    // Names and times disagree on purpose: the name decides.
+    box.writeBackup('20261027T090000Z', 100);
+    box.writeBackup('20261028T090000Z', 6000);
+    box.writeBackup('20261028T100000Z', 5000);
+    box.writeBackup('20261029T080000Z', 4000);
+    box.writeBackup('20261029T090000Z', 3000);
+    box.writeBackup('20261029T100000Z', 2000);
+    box.writeBackup('2113', 7000);
+    box.writeBackup('pre-reset', 8000);
     const result = install();
     expect(result.status).toBe(0);
     expect(backups()).toEqual([
       '10db-backup-20261028T100000Z',
       '10db-backup-20261029T080000Z',
       '10db-backup-20261029T090000Z',
+      '10db-backup-20261029T100000Z',
       `10db-backup-${STAMP}`,
-      '10db-backup-2205',
+      '10db-backup-2113',
+      '10db-backup-pre-reset',
     ]);
-    expect(result.stdout).toContain('10db-backup-2113');
+    expect(result.stdout).toContain('10db-backup-20261027T090000Z');
     expect(result.stdout).toContain('10db-backup-20261028T090000Z');
+    expect(result.stdout).not.toContain('10db-backup-2113');
+  });
+
+  it("never removes this install's own backup, even when 5 stamped backups sort after it", () => {
+    for (const day of ['30', '31']) {
+      for (const hour of ['01', '02', '03']) box.writeBackup(`202610${day}T${hour}0000Z`, 100);
+    }
+    expect(install().status).toBe(0);
+    expect(backups()).toContain(`10db-backup-${STAMP}`);
+  });
+
+  it('keeps zips the builder named by hand', () => {
+    box.writeZip('10db-before-reset.zip', '10db.app', 'kept by hand');
+    box.writeZip('10db-20261028T090000Z.zip', '10db.app', 'older build');
+    expect(install().status).toBe(0);
+    expect(kept()).toEqual(['10db-20261029T101500Z.zip', '10db-before-reset.zip']);
+  });
+
+  it('warns about another 10db.app copy left in Applications, and leaves it alone', () => {
+    box.writeApp(join(box.applications, '10db.app.prev-0346'), 'left by hand');
+    const result = install();
+    expect(result.status).toBe(0);
+    expect(result.stderr).toContain('10db.app.prev-0346');
+    expect(box.marker(join(box.applications, '10db.app.prev-0346'))).toBe('left by hand');
+  });
+
+  it('refuses an installed 10db.app with no Info.plist, saying to move it aside or roll back', () => {
+    rmSync(join(app(), 'Contents', 'Info.plist'));
+    const result = install();
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('move it aside');
+    expect(result.stderr).toContain('make rollback-app');
+    expect(box.marker(app())).toBe('old build');
+    expect(kept()).toEqual([]);
   });
 
   it('removes no backup when the install fails', () => {
@@ -423,6 +480,53 @@ describe('install-app.sh', () => {
     expect(box.marker(app())).toBe('new build');
   });
 });
+
+// zip_app and unpack_app run macOS's own ditto and unzip, which only a Mac has; elsewhere the
+// stand-ins above cover the scripts.
+describe.skipIf(process.platform !== 'darwin')(
+  'zip_app and unpack_app with the real ditto and unzip',
+  () => {
+    const helpers = (body: string) =>
+      spawnSync(
+        '/bin/bash',
+        [
+          '-c',
+          `set -euo pipefail; script_name=t; . "$1"; ${body}`,
+          '_',
+          join(repoRoot, 'scripts/release/installed-app.sh'),
+        ],
+        {
+          encoding: 'utf8',
+          env: {
+            PATH: '/usr/bin:/bin',
+            HOME: box.root,
+            TMPDIR: box.root,
+            TENDB_INSTALL_APPLICATIONS_DIR: box.applications,
+            TENDB_INSTALL_DATA_DIR: box.dataDir,
+          },
+        },
+      );
+
+    it('zips the installed app, tests the zip and unpacks the same bundle', () => {
+      const zip = join(box.previousDir, ZIP);
+      const result = helpers(
+        `zip_app "${zip}"; bundle="$(unpack_app "${zip}")"; cat "$bundle/Contents/marker"`,
+      );
+      expect(result.stderr).toBe('');
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe('old build');
+      expect(kept().filter((name) => !name.startsWith('.unpack.'))).toEqual([ZIP]);
+    });
+
+    it('refuses to unpack a zip that does not test as whole', () => {
+      mkdirSync(box.previousDir, { recursive: true });
+      const zip = join(box.previousDir, ZIP);
+      const result = helpers(`printf junk > "${zip}"; unpack_app "${zip}"`);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('does not test as a whole zip');
+    });
+  },
+);
 
 describe('the running check', () => {
   const pattern = spawnSync(

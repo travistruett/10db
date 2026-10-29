@@ -10,13 +10,17 @@
 (`~/Library/Application Support/10db-previous/`), using the stamp of that install's database backup. It
 removes the app from `/Applications` only once `unzip -tq` passes and the zip lists
 `10db.app/Contents/Info.plist`. A failure after that unpacks the zip back into place. Once the new app is
-installed, it registers it with `lsregister -f -R`, deletes every other kept zip and keeps the newest 5
-`10db-backup-*` folders by time last changed.
+installed, it registers it with `lsregister -f -R`. It then deletes the other zips it made
+(`10db-<UTC stamp>.zip`). It keeps the newest 5 `10db-backup-<UTC stamp>` folders, ordered by the stamp in
+the name, and never deletes the backup it just made. Zips and backups named by hand are never deleted and
+don't count. It warns about any other `/Applications/10db.app.*` copy, which Launch Services may still open.
+It refuses a `10db.app` that has no `Contents/Info.plist`.
 
 `make rollback-app` unpacks the newest `10db-<stamp>.zip`, which holds one bundle with a `Contents/Info.plist`
 under any name, so a zip made by hand works too. It zips the app it replaces in its place, so a second run
-toggles back. Then it moves the unpacked bundle to `/Applications/10db.app`, clears its quarantine and
-registers it. The lock, the running check, the cleanup that ignores a second Ctrl-C and the printed database
+toggles back; the safety backup it prints uses that zip's stamp, so rolling back again finds it. Then it
+moves the unpacked bundle to `/Applications/10db.app`, clears its quarantine and registers it, as every
+path that puts an app back does. The lock, the running check, the cleanup that ignores a second Ctrl-C and the printed database
 restore commands are unchanged.
 
 ## Why

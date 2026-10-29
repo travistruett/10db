@@ -115,6 +115,27 @@ unpack_app() {
   echo "$found"
 }
 
+# Moves a bundle unpack_app printed into place, then removes its unpack folder whether or not the
+# move worked; the zip it came from stays.
+move_unpacked() {
+  local stage
+  stage="$(dirname "$1")"
+  case "$stage" in "$previous_dir"/.unpack.*) ;; *) return 1 ;; esac
+  if mv "$1" "$app_path"; then
+    rm -rf "$stage"
+    return 0
+  fi
+  rm -rf "$stage"
+  return 1
+}
+
+# Refuses an app in place that has no Info.plist: it is no whole app to zip and keep.
+refuse_broken_app() {
+  if [ -e "$app_path" ] && [ ! -f "$app_path/Contents/Info.plist" ]; then
+    fail "$app_path has no Contents/Info.plist, so it is not a whole app: move it aside, out of Applications, then run $1"
+  fi
+}
+
 # Points the Dock, Launchpad and Spotlight at the app now in place.
 register_app() {
   "$lsregister" -f -R "$app_path" \
@@ -122,19 +143,29 @@ register_app() {
 }
 
 # The app is unsigned, so Gatekeeper refuses any copy that carries com.apple.quarantine. This clears
-# it on the installed app alone, without following symlinks out of the bundle.
+# it on the installed app alone, without following symlinks out of the bundle. Returns 1 when it
+# is still set, so a cleanup can report it without stopping.
 clear_quarantine() {
   local attributes
-  xattr -r -s -d com.apple.quarantine "$app_path"
-  attributes="$(xattr -r -s -l "$app_path")"
-  case "$attributes" in *com.apple.quarantine*) fail "com.apple.quarantine is still set inside $app_path" ;; esac
+  xattr -r -s -d com.apple.quarantine "$app_path" || return 1
+  attributes="$(xattr -r -s -l "$app_path")" || return 1
+  case "$attributes" in *com.apple.quarantine*) return 1 ;; esac
 }
 
-# Deletes every kept zip but $1. Called only once $1 is tested and the app swap has finished.
+# The stamp in a name these scripts made, 10db-<stamp>.zip, or nothing for any other name.
+zip_stamp() {
+  local name="${1##*/}"
+  name="${name#10db-}"
+  name="${name%.zip}"
+  if [ "${1##*/}" = "10db-$name.zip" ] && is_stamp "$name"; then echo "$name"; fi
+}
+
+# Deletes every kept zip these scripts made but $1; zips named by hand stay. Called only once $1 is
+# tested and the app swap has finished.
 keep_only_zip() {
   local zip
   for zip in "$previous_dir"/10db-*.zip; do
-    [ -e "$zip" ] || continue
-    [ "$zip" = "$1" ] || rm -f "$zip"
+    [ -e "$zip" ] && [ "$zip" != "$1" ] && [ -n "$(zip_stamp "$zip")" ] || continue
+    rm -f "$zip"
   done
 }
