@@ -181,6 +181,17 @@ describe('cutting a branch', () => {
     expect(listWorkstreams(h.store.db, {}).filter((w) => w.taskId === task.id)).toEqual([]);
   });
 
+  it('names the files in the way, in plain words, when the checkout has uncommitted changes', async () => {
+    const task = h.addTask('Alpha');
+    writeFileSync(join(h.repo, 'scratch.txt'), 'uncommitted\n');
+    h.starter.startBatch(h.project.id, { title: 'Greetings', taskIds: [task.id] });
+    await h.jobs.idle();
+    const card = h.only(h.cards());
+    expect(card.body).toContain('switches your checkout to a new branch to start');
+    expect(card.body).toContain('These files have changes that are in the way:\n- scratch.txt');
+    expect(card.body).toContain(h.repo);
+  });
+
   it('raises the origin card when origin is added after the checkout was pinned, and starts once it is trusted', async () => {
     h.git$('remote', 'remove', 'origin');
     // The first daemon git call pins the checkout, with no origin.

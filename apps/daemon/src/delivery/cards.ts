@@ -66,7 +66,7 @@ export const startCards = {
   }),
   dirtyCheckout: (project: ProjectDto, paths: readonly string[]): Card => ({
     title: `${NOT_STARTED}: the checkout has uncommitted changes`,
-    body: `10db cuts a batch branch only from a clean checkout. Commit, stash or discard these paths in ${project.repoPath}, then start again:\n${listPaths(paths)}`,
+    body: `10db switches your checkout to a new branch to start, so it needs nothing uncommitted. These files have changes that are in the way:\n${listPaths(paths)}\n\nCommit, stash or discard them in ${project.repoPath}, then start again.`,
   }),
   usesFilters: (
     project: ProjectDto,

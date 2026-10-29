@@ -1,4 +1,9 @@
-import { PICK_MAX, type PickerProposalDto, type ProjectViewDto } from '@10db/contracts';
+import {
+  batchBranchStem,
+  PICK_MAX,
+  type PickerProposalDto,
+  type ProjectViewDto,
+} from '@10db/contracts';
 import {
   Alert,
   Button,
@@ -76,14 +81,23 @@ function Choices({ project, mode, proposal, onStarted }: ChoicesProps) {
   return (
     <Stack>
       {mode.kind === 'new_batch' ? (
-        <TextInput
-          label="Batch title"
-          description="The pull request's title, after the project's prefix."
-          value={batchTitle}
-          onChange={(e) => {
-            setTitle(e.currentTarget.value);
-          }}
-        />
+        <>
+          <TextInput
+            label="Batch title"
+            description="The pull request's title, after the project's prefix."
+            value={batchTitle}
+            onChange={(e) => {
+              setTitle(e.currentTarget.value);
+            }}
+          />
+          <Text size="sm">
+            Starting switches your checkout to a new branch,{' '}
+            <Code>{`${batchBranchStem(batchTitle)}-…`}</Code>, cut from{' '}
+            <Code>{`origin/${project.baseBranch}`}</Code> (the … is a short id added when it
+            starts). Your checkout must be clean, with nothing uncommitted. It stays on that branch
+            until you switch it.
+          </Text>
+        </>
       ) : null}
       {proposal.candidates.map((c) => (
         <BatchCandidate

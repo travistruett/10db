@@ -105,9 +105,17 @@ const rows: readonly Row[] = [
     name: 'Where tasks work',
     project: pullRequests,
     label: 'Where tasks work',
-    line: 'Tasks change files in your checkout, so you can watch them land in your editor and dev server.',
+    line: 'Your folder: tasks change files in your checkout, so you can watch them land in your editor and dev server. While tasks run, 10db switches this checkout to a new branch cut from the base branch, and it needs the checkout clean (no uncommitted changes) to start. 10db does not switch it back: it stays on that branch until you switch it.',
     change: () => fireEvent.click(screen.getByRole('radio', { name: 'Separate copies' })),
     sent: { workspaceMode: 'worktree' },
+  },
+  {
+    name: 'Where tasks work, Separate copies',
+    project: worktrees,
+    label: 'Where tasks work',
+    line: 'Separate copies: each task works in its own copy of the repository under ~/.10db/worktrees, so any tasks can run together. Your checkout is left alone. You see the work in its pull request.',
+    change: () => fireEvent.click(screen.getByRole('radio', { name: 'Your folder' })),
+    sent: { workspaceMode: 'shared' },
   },
   {
     name: "Copy into each task's copy",
