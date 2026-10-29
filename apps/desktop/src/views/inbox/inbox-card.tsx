@@ -14,6 +14,7 @@ import {
   UnstyledButton,
 } from '@mantine/core';
 import type { KeyboardEvent, RefObject } from 'react';
+import { ExternalLink } from '../board/pull-request-link';
 import { CheckCard } from './check-card';
 import { isDismissable } from './inbox-rows';
 import { McpApprovalDetails, mcpReview } from './mcp-approval';
@@ -57,6 +58,17 @@ function CardBody({ item }: { readonly item: InboxItemDto }) {
       {item.body}
     </Text>
   );
+}
+
+/**
+ * The link a flag card offers (`detail.link`, such as a failing check): only an https address, since
+ * the daemon's text is not trusted to be a link. The desktop app opens github.com only; the card's
+ * body holds the address regardless.
+ */
+function cardLink(item: InboxItemDto): string | null {
+  if (item.kind !== InboxKind.Flag) return null;
+  const link = item.detail?.['link'];
+  return typeof link === 'string' && link.startsWith('https://') ? link : null;
 }
 
 // Destructured: reading `props.x` in render, with a ref among the props, trips react-hooks/refs.
@@ -158,6 +170,7 @@ export function InboxCard({
     }
   };
   const hasOptions = item.options.length > 0;
+  const link = cardLink(item);
 
   return (
     <Paper withBorder p="md" shadow="xs" {...{ [SELECTED_CARD_ATTRIBUTE]: true }}>
@@ -172,6 +185,7 @@ export function InboxCard({
         ) : (
           <CardBody item={item} />
         )}
+        {link === null ? null : <ExternalLink url={link} label="Open on GitHub" />}
         {hasOptions ? (
           <Radio.Group value={choice} onChange={onChoose} aria-label="Answer">
             <Stack gap="xs">
