@@ -1893,3 +1893,50 @@ describe('a check card', () => {
     expect(checked).toHaveLength(1);
   });
 });
+
+describe('a flag with a fold key', () => {
+  function refusal() {
+    const ws = seedWorkstream(base);
+    return {
+      projectId: ws.project.id,
+      workstreamId: null,
+      title: 'Batch not started: the checkout has uncommitted changes',
+      body: 'Nothing was pushed.',
+      foldKey: 'start-refused:one',
+    };
+  }
+  const inboxEvents = (id: string) =>
+    listEventsAfter(state.db, 0, 1000).filter(
+      (e) => e.type === EventType.InboxChanged && e.entityId === id,
+    );
+
+  it('keeps one open card when it is raised again, and says nothing of the repeat', () => {
+    const input = refusal();
+    const first = inbox.flag(input);
+    const before = inboxEvents(first.id).length;
+    const second = inbox.flag({ ...input, body: 'Something else.' });
+    expect(second.id).toBe(first.id);
+    expect(second.body).toBe('Nothing was pushed.');
+    expect(listInbox(state.db, { states: ['OPEN'] })).toHaveLength(1);
+    expect(inboxEvents(first.id)).toHaveLength(before);
+  });
+
+  it('rewrites the open card and tells the board when the repeat asks to refresh it', () => {
+    const input = { ...refusal(), refresh: true };
+    const first = inbox.flag(input);
+    const before = inboxEvents(first.id).length;
+    const second = inbox.flag({ ...input, body: 'b.txt is in the way.', detail: { n: 2 } });
+    expect(second.id).toBe(first.id);
+    expect(second.body).toBe('b.txt is in the way.');
+    expect(second.detail).toEqual({ n: 2 });
+    expect(listInbox(state.db, { states: ['OPEN'] })).toHaveLength(1);
+    expect(inboxEvents(first.id)).toHaveLength(before + 1);
+  });
+
+  it('opens a new card once the first was dismissed', () => {
+    const input = refusal();
+    const first = inbox.flag(input);
+    inbox.answer(first.id, { choice: 'dismiss' });
+    expect(inbox.flag(input).id).not.toBe(first.id);
+  });
+});

@@ -222,9 +222,10 @@ export function useStartTask() {
   return useMutation({
     mutationFn: async (taskId: TaskId) =>
       readJson(await client.tasks[':taskId'].start.$post({ param: { taskId } }), TaskStartResult),
-    // A pull-request start also changes the project's batch.
+    // A pull-request start also changes the project's batch, and a refused one raises an Inbox card.
     onSuccess: () =>
       Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.inbox }),
         queryClient.invalidateQueries({ queryKey: ['tasks'] }),
         queryClient.invalidateQueries({ queryKey: ['workstreams'] }),
         queryClient.invalidateQueries({ queryKey: queryKeys.projects }),

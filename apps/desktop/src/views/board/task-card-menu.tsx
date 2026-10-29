@@ -17,6 +17,8 @@ export function canStart(task: TaskDto, latest: WorkstreamState | undefined): bo
 export interface TaskCardMenuProps {
   readonly task: TaskDto;
   readonly latest: WorkstreamState | undefined;
+  /** A Start for this task is out; asking again would only repeat it. */
+  readonly starting?: boolean;
   /** Title of an unfinished dependency parked in a human column, which would keep a started task queued for ever. */
   readonly parkedDependency: string | null;
   readonly moves: readonly MenuMove[];
@@ -33,6 +35,7 @@ export interface TaskCardMenuProps {
 export function TaskCardMenu({
   task,
   latest,
+  starting = false,
   parkedDependency,
   moves,
   onMove,
@@ -67,10 +70,12 @@ export function TaskCardMenu({
         ))}
         {moves.length > 0 && canStart(task, latest) ? <Menu.Divider /> : null}
         {canStart(task, latest) ? (
-          <Menu.Item disabled={parkedDependency !== null} onClick={onStart}>
-            {parkedDependency === null
-              ? 'Start'
-              : `Start (${parkedDependency} is parked; move it to Backlog or Ready first)`}
+          <Menu.Item disabled={starting || parkedDependency !== null} onClick={onStart}>
+            {starting
+              ? 'Starting…'
+              : parkedDependency === null
+                ? 'Start'
+                : `Start (${parkedDependency} is parked; move it to Backlog or Ready first)`}
           </Menu.Item>
         ) : null}
         {onRetry || onAbandon ? <Menu.Divider /> : null}
