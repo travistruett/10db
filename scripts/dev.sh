@@ -10,6 +10,8 @@ if [ ! -s "$token_file" ]; then
 fi
 token=$(cat "$token_file")
 export TENDB_DEV_UI_TOKEN="$token" VITE_DAEMON_TOKEN="$token"
+# The browser UI and the dev window both load the page from Vite on port 1420.
+export TENDB_DEV_UI_ORIGIN=http://localhost:1420
 # Only the installed app calls Artificial Analysis; this daemon restarts on every file change.
 export TENDB_BENCHMARKS=off
 export TENDB_DATA_DIR="${TENDB_DATA_DIR:-$PWD/.dev/data}"

@@ -561,16 +561,58 @@ describe('startDaemon', () => {
       return { stop: () => undefined, exited: new Promise<void>(() => undefined) };
     };
 
+  /** The status the event stream's upgrade answers for `origin`: 101 when the socket opens. */
+  const upgradeStatus = (url: string, origin: string): Promise<number> =>
+    new Promise((resolve, reject) => {
+      const client = new WebSocket(url, { origin });
+      client.once('open', () => {
+        client.close();
+        resolve(101);
+      });
+      client.once('unexpected-response', (request, response) => {
+        resolve(response.statusCode ?? 0);
+        request.destroy();
+      });
+      client.on('error', reject);
+    });
+
   it.each([
-    { name: 'the built-in origins', allowedOrigins: undefined, base: 'http://localhost:1420' },
     {
-      name: 'the origins it is given',
+      name: 'no dev UI origin',
+      allowedOrigins: undefined,
+      devUiOrigin: undefined,
+      accepted: ['tauri://localhost', 'http://tauri.localhost'],
+      refused: [
+        'http://localhost:1420',
+        'http://127.0.0.1:1420',
+        'http://[::1]:1420',
+        'https://evil.example',
+      ],
+    },
+    {
+      name: 'the Vite origin opted in',
+      allowedOrigins: undefined,
+      devUiOrigin: 'http://localhost:1420',
+      accepted: ['tauri://localhost', 'http://localhost:1420'],
+      refused: ['http://localhost:1421', 'http://127.0.0.1:1420', 'https://evil.example'],
+    },
+    {
+      name: 'an IPv6 loopback origin opted in',
+      allowedOrigins: undefined,
+      devUiOrigin: 'http://[::1]:51234',
+      accepted: ['tauri://localhost', 'http://[::1]:51234'],
+      refused: ['http://localhost:51234', 'http://localhost:1420'],
+    },
+    {
+      name: 'a dev UI origin beside the origins it is given',
       allowedOrigins: ['http://localhost:3000'],
-      base: 'http://localhost:3000',
+      devUiOrigin: 'http://localhost:51234',
+      accepted: ['http://localhost:3000', 'http://localhost:51234'],
+      refused: ['tauri://localhost', 'http://localhost:51235'],
     },
   ])(
-    'lets a dev UI origin through CORS beside $name, and no other',
-    async ({ allowedOrigins, base }) => {
+    'with $name, accepts only its origins over CORS and the event stream, and still asks for the token',
+    async ({ allowedOrigins, devUiOrigin, accepted, refused }) => {
       const running = await startDaemon({
         sandbox: null,
         dataDir: dir.path,
@@ -578,17 +620,27 @@ describe('startDaemon', () => {
         adapter: new FakeAdapter({}),
         logLevel: 'warn',
         ...(allowedOrigins ? { allowedOrigins } : {}),
-        devUiOrigin: 'http://localhost:51234',
+        ...(devUiOrigin ? { devUiOrigin } : {}),
         ...QUIET,
       });
       daemon = running;
-      const allowedOrigin = async (origin: string): Promise<string | null> =>
+      const corsOrigin = async (origin: string): Promise<string | null> =>
         (await fetch(`${running.url}/health`, { headers: { Origin: origin } })).headers.get(
           'access-control-allow-origin',
         );
-      expect(await allowedOrigin('http://localhost:51234')).toBe('http://localhost:51234');
-      expect(await allowedOrigin(base)).toBe(base);
-      expect(await allowedOrigin('http://localhost:51235')).toBeNull();
+      const stream = `ws://127.0.0.1:${String(running.port)}/events/stream?after=0`;
+      for (const origin of accepted) {
+        expect(await corsOrigin(origin), origin).toBe(origin);
+        expect(await upgradeStatus(`${stream}&token=${running.token}`, origin), origin).toBe(101);
+        // An accepted origin is not a credential.
+        const noToken = await fetch(`${running.url}/projects`, { headers: { Origin: origin } });
+        expect(noToken.status, origin).toBe(401);
+        expect(await upgradeStatus(`${stream}&token=wrong`, origin), origin).toBe(401);
+      }
+      for (const origin of refused) {
+        expect(await corsOrigin(origin), origin).toBeNull();
+        expect(await upgradeStatus(`${stream}&token=${running.token}`, origin), origin).toBe(403);
+      }
     },
   );
 

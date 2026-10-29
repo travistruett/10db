@@ -75,10 +75,23 @@ Follow these steps in order on a new computer. Each one says how to check it wor
     `pnpm dev` running, run `pnpm --filter @10db/desktop sidecar` once, then run
     `pnpm --filter @10db/desktop dev:shell` in a second terminal. The window is "10db Dev"
     (identifier `app.10db.desktop.dev`) and keeps its data under `.dev/data`, so it runs
-    beside an installed 10db without touching the release app's data. It uses the daemon and UI that
+    beside an installed 10db without touching the installed app's data. It uses the daemon and UI that
     `pnpm dev` already runs, so stopping `pnpm dev` stops them for the window too. The first
     `dev:shell` compiles the Rust shell and takes a few minutes. The installed app runs 10db's
     tasks; the dev window only previews your checkout.
+
+    **Hot-reload the UI over your real 10db.** `pnpm dev:factory` serves your checkout's UI with
+    live reload against the installed app's projects and Inbox:
+
+    | When                             | Run                                                              |
+    | -------------------------------- | ---------------------------------------------------------------- |
+    | Once, and after each Mac restart | `pnpm dev:factory:enable`, then quit 10db (⌘Q) and open it again |
+    | Every time                       | `pnpm dev:factory`, then open http://localhost:1420              |
+    | To turn it off                   | `pnpm dev:factory:disable`, then quit and reopen 10db            |
+
+    The gotchas and the desktop-window variant are in the README's
+    [Hot-reload the UI over your real 10db](README.md#hot-reload-the-ui-over-your-real-10db).
+
 12. **Optional tools.** [Claude Code](https://claude.com/claude-code) and the
     [Codex CLI](https://github.com/openai/codex) for AI-assisted work; both read the rules in
     `AGENTS.md`.

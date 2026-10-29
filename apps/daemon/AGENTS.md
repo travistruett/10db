@@ -15,6 +15,8 @@ serves agents over MCP, and runs Claude Code sessions.
   `node:*` modules or `@10db/db`; receive services through the `ApiServices` interface (passed in `ApiDeps`).
 - The package entry (`src/index.ts`) exports types only.
 - Listen on `127.0.0.1` only.
+- Browser origins: only the Tauri webview's are built in. `TENDB_DEV_UI_ORIGIN` opts one loopback http origin in
+  (`decisions/2026-10-29-dev-ui-over-the-factory.md`); a launcher of a daemon a browser UI talks to sets it.
 - `pnpm --filter @10db/daemon build [outDir]` bundles everything into `dist/daemon.mjs`, bundles srt's
   command line (`@anthropic-ai/sandbox-runtime`) into `srt.mjs`, copies srt's Java proxy agent to
   `vendor/java-proxy-agent/srt-proxy-agent.jar`, where srt looks before it runs `npm root -g` unsandboxed from

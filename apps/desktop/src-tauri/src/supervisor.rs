@@ -29,10 +29,10 @@ const STOP_TIMEOUT: Duration = Duration::from_secs(30);
 const POLL_INTERVAL: Duration = Duration::from_millis(200);
 const SIDECAR_LOG: &str = "sidecar.log";
 /// Development and test settings of the daemon; a value in the shell's own environment must not
-/// reach the packaged daemon (an extra browser origin, a fixed UI token, scripted sessions, a
-/// live-Claude test run, an addon path that only fits another layout).
-const DEV_ONLY_VARS: [&str; 5] = [
-    "TENDB_DEV_UI_ORIGIN",
+/// reach the packaged daemon (a fixed UI token, scripted sessions, a live-Claude test run, an addon
+/// path that only fits another layout). `TENDB_DEV_UI_ORIGIN` is not among them: it is how the
+/// builder opts a loopback dev UI in to the installed app's daemon, which still asks for its token.
+const DEV_ONLY_VARS: [&str; 4] = [
     "TENDB_DEV_UI_TOKEN",
     "TENDB_FAKE_SCRIPTS",
     "TENDB_LIVE_CLAUDE",
@@ -352,7 +352,6 @@ mod tests {
             Some(Some(std::ffi::OsStr::new("1")))
         );
         for name in [
-            "TENDB_DEV_UI_ORIGIN",
             "TENDB_DEV_UI_TOKEN",
             "TENDB_FAKE_SCRIPTS",
             "TENDB_LIVE_CLAUDE",
@@ -361,5 +360,8 @@ mod tests {
             // `Some(None)` is an explicit removal from the inherited environment.
             assert_eq!(value(name), Some(None), "{name} must be removed");
         }
+        // The builder's opt-in to a live dev UI over the factory's daemon is inherited untouched;
+        // the daemon itself accepts only a loopback http origin.
+        assert_eq!(value("TENDB_DEV_UI_ORIGIN"), None);
     }
 }
