@@ -3,6 +3,7 @@ import {
   BatchState,
   type BatchDto,
   type BatchId,
+  type FailingCheckDto,
   type ProjectDto,
   type TaskId,
 } from '@10db/contracts';
@@ -515,4 +516,72 @@ export const checkoutCards = {
       `10db could not switch it back to ${placeName(place)}`,
       `Batch "${batch.title}" ${ended(batch)}. ${detailOf(error)}\n\nOnce that is fixed, switch back with ${checkoutSwitchCommand(project.repoPath, place)}.`,
     ),
+};
+
+/** The fold keys of a shipped pull request's cards. */
+export const prCardKey = {
+  checks: (batchId: BatchId): string => `pr-checks:${batchId}`,
+  closed: (batchId: BatchId): string => `pr-closed:${batchId}`,
+  /** One per daemon: gh being unavailable is the same problem for every pull request. */
+  ghUnavailable: 'pr-watch-gh',
+} as const;
+
+/** The batch's pull request; the cards carry it as `detail.link` so the desktop can open it. */
+function prDetail(batch: BatchDto, link: string): Record<string, Json> {
+  return { batchId: batch.id, prUrl: batch.prUrl, link };
+}
+
+/** What the pull request watch tells the builder about a shipped pull request. */
+export const prCards = {
+  /** `failing` is never empty; the first check's link leads the body and is the card's link. */
+  checksFailed: (batch: BatchDto, failing: readonly FailingCheckDto[]): Card => {
+    const prUrl = batch.prUrl ?? '(no pull request)';
+    const first = failing[0];
+    const more = failing.length - 1;
+    const link = first?.url ?? prUrl;
+    return {
+      title: `Pull request checks failed for "${batch.title}": ${first?.name ?? 'a check'}${more > 0 ? ` and ${String(more)} more` : ''}`,
+      body: [
+        link,
+        `Failing:\n${failing.map((c) => `- ${c.name}${c.url ? `: ${c.url}` : ' (no link)'}`).join('\n')}`,
+        `Pull request: ${prUrl}`,
+        `Open the link to see why it failed, then fix it on the branch ${batch.branch ?? '(none)'} and push. 10db withdraws this card when the checks pass or the pull request merges.`,
+      ].join('\n\n'),
+      foldKey: prCardKey.checks(batch.id),
+      detail: prDetail(batch, link),
+    };
+  },
+  closed: (batch: BatchDto): Card => {
+    const prUrl = batch.prUrl ?? '(no pull request)';
+    return {
+      title: `Pull request closed without merging: "${batch.title}"`,
+      body: `${prUrl}\n\nThe batch's tasks stay done, but their code is not on ${batch.baseBranch}. The branch ${batch.branch ?? '(none)'} is kept. Reopen the pull request on GitHub to merge it, or ship the work again from a new batch.`,
+      foldKey: prCardKey.closed(batch.id),
+      detail: prDetail(batch, prUrl),
+    };
+  },
+  /** `batch` is the first one whose status turned unknown. */
+  ghUnavailable: (batch: BatchDto, error: unknown): Card => {
+    const kind = error instanceof GhError ? error.kind : null;
+    const until =
+      'Until then the status of shipped pull requests stays unknown here. Nothing else is affected, and 10db keeps checking.';
+    const base = { foldKey: prCardKey.ghUnavailable, detail: prDetail(batch, batch.prUrl ?? '') };
+    if (kind === 'signed_out')
+      return {
+        ...base,
+        title: 'Pull request status unknown: gh is signed out',
+        body: `10db reads your pull requests' checks and merge state with gh. Run gh auth login in a terminal. ${until}`,
+      };
+    if (kind === 'not_installed')
+      return {
+        ...base,
+        title: 'Pull request status unknown: gh is not installed',
+        body: `10db reads your pull requests' checks and merge state with gh. Install the GitHub CLI (brew install gh) and sign in with gh auth login. ${until}`,
+      };
+    return {
+      ...base,
+      title: 'Pull request status unknown: gh could not reach GitHub',
+      body: `gh couldn't reach GitHub: ${detailOf(error)}\n\nCheck your connection and run gh auth status in a terminal to see why. ${until}`,
+    };
+  },
 };
