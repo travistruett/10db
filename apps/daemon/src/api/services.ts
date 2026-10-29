@@ -23,6 +23,7 @@ import type {
   FlowId,
   FlowInput,
   FlowPatch,
+  FolderInspectResult,
   InboxAnswer,
   InboxItemDto,
   InboxItemId,
@@ -100,13 +101,16 @@ export interface ApiServices {
   answerInbox(id: InboxItemId, answer: InboxAnswer): InboxItemDto;
   eventsAfter(afterSeq: number, limit: number): DaemonEvent[];
   subscribe(listener: (event: DaemonEvent) => void): () => void;
-  systemCheck(): Promise<SystemCheckDto>;
+  /** The system check; `recheck` probes the tools and gh's login again instead of answering from the last probe. */
+  systemCheck(options: { readonly recheck: boolean }): Promise<SystemCheckDto>;
   keepAwake(): KeepAwakeStatus;
   setKeepAwake(mode: KeepAwakeMode): KeepAwakeStatus;
   /** The newest event seq (0 when there are none). */
   eventsHead(): number;
   /** Each server in the project's `.mcp.json` and its verdict; raises an approval card for each one with none. */
   reviewProjectMcp(projectId: ProjectId): McpServerStatusDto[];
+  /** What a new project is prefilled from for the folder at `path`, or why it can't be one. */
+  inspectFolder(path: string): Promise<FolderInspectResult>;
   listPersonas(): PersonaDto[];
   createPersona(input: PersonaInput): PersonaDto;
   patchPersona(id: PersonaId, patch: PersonaPatch): PersonaDto;

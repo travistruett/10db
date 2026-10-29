@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { GhError, PrState, type Gh, type PullRequest } from '../src/github';
 
-export type GhMethod = 'authStatus' | 'repoView' | 'prView' | 'prCreate';
+export type GhMethod = 'authStatus' | 'authLogin' | 'repoView' | 'prView' | 'prCreate';
 export interface PrCreateCall {
   readonly repo: string;
   readonly base: string;
@@ -39,6 +39,14 @@ export class FakeGh implements Gh {
   // Each method omits the GhCall it ignores; a shorter parameter list still implements Gh.
   authStatus(): Promise<void> {
     return this.call('authStatus', {}, () => undefined);
+  }
+
+  authLogin(): Promise<string | null> {
+    if (this.auth === 'signed_out') {
+      this.calls.push({ method: 'authLogin', args: {} });
+      return Promise.resolve(null);
+    }
+    return this.call('authLogin', {}, () => 'octocat');
   }
 
   repoView(): Promise<string> {
