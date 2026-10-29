@@ -6,7 +6,6 @@ import { join } from 'node:path';
 import { serve } from '@hono/node-server';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import {
   acquireClaims,
   createTestStore,
@@ -160,8 +159,7 @@ async function seedSession(
   const transport = new StreamableHTTPClientTransport(new URL(url), {
     requestInit: { headers: { Authorization: `Bearer ${token}` } },
   });
-  // `sessionId?: string` on the SDK class doesn't fit `Transport` under exactOptionalPropertyTypes.
-  await client.connect(transport as Transport);
+  await client.connect(transport);
   const call = async (name: string, args: Record<string, unknown>) => {
     const result = await client.callTool({ name, arguments: args });
     const text = ToolContent.parse(result.content)

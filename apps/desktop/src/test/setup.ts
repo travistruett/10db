@@ -15,20 +15,18 @@ afterAll(() => {
   server.close();
 });
 
-// jsdom has no matchMedia or ResizeObserver; Mantine reads both.
+// jsdom has no matchMedia or ResizeObserver; Mantine reads both. Mantine never calls the deprecated
+// addListener and removeListener, so the stub leaves them out.
 Object.defineProperty(window, 'matchMedia', {
   writable: true,
-  value: (query: string): MediaQueryList =>
-    ({
-      matches: false,
-      media: query,
-      onchange: null,
-      addEventListener: () => undefined,
-      removeEventListener: () => undefined,
-      addListener: () => undefined,
-      removeListener: () => undefined,
-      dispatchEvent: () => false,
-    }) satisfies MediaQueryList,
+  value: (query: string): Omit<MediaQueryList, 'addListener' | 'removeListener'> => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+    dispatchEvent: () => false,
+  }),
 });
 
 class ResizeObserverStub implements ResizeObserver {
