@@ -5,7 +5,7 @@
 
 ## Decision
 
-`ProjectInput`, `ProjectPatch`, `ProjectDto` and the `projects` table lose `model` and `effort`. The
+`ProjectInput`, `ProjectDto` and the `projects` table lose `model` and `effort`. The
 migration `0006_drop_project_model_effort` drops both columns; the migration baseline is not regenerated
 (`v0.1.0` is released). `PROTOCOL_VERSION` goes to 5, since a field leaves the API.
 

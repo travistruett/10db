@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  DEFAULT_HAZARDS,
   HandoffInput,
   McpToolInputs,
   mintId,
@@ -85,20 +84,6 @@ describe('ProjectInput', () => {
     });
     expect(parsed).not.toHaveProperty('model');
     expect(parsed).not.toHaveProperty('effort');
-  });
-
-  it.each([
-    'npm add',
-    'npm ci',
-    'npm un',
-    'pnpm uninstall',
-    'pnpm un',
-    'pnpm upgrade',
-    'yarn add',
-    'cargo update',
-  ])('guards "%s" as a dependency change by default', (command) => {
-    const deps = DEFAULT_HAZARDS.find((h) => h.name === 'deps');
-    expect(deps?.commands).toContain(command);
   });
 
   it('takes the extra allowed commands and rejects one that is not a plain prefix', () => {

@@ -121,6 +121,57 @@ describe('BoardView', () => {
     });
   });
 
+  it('creates a pull-request project with no title prefix', async () => {
+    const posted: unknown[] = [];
+    serve(
+      http.post(daemonUrl('/projects'), async ({ request }) => {
+        posted.push(await request.json());
+        return HttpResponse.json(projectDto(), { status: 201 });
+      }),
+    );
+    renderApp('/board');
+    fireEvent.click(await screen.findByRole('button', { name: 'New project' }));
+    const dialog = await screen.findByRole('dialog', { name: 'New project' });
+    type('Name', 'shop', dialog);
+    type('Repository path', '/repos/shop', dialog);
+    type('Gate command', 'make gate', dialog);
+    type('Areas', 'api: src/api/**', dialog);
+    fireEvent.click(within(dialog).getByRole('radio', { name: 'One pull request per batch' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Create project' }));
+    await waitFor(() => {
+      expect(posted).toHaveLength(1);
+    });
+    expect(posted[0]).toMatchObject({ delivery: 'pull_request' });
+    expect(posted[0]).not.toHaveProperty('prTitlePrefix');
+  });
+
+  it('ignores a leftover invalid prefix once delivery is back to local', async () => {
+    const posted: unknown[] = [];
+    serve(
+      http.post(daemonUrl('/projects'), async ({ request }) => {
+        posted.push(await request.json());
+        return HttpResponse.json(projectDto(), { status: 201 });
+      }),
+    );
+    renderApp('/board');
+    fireEvent.click(await screen.findByRole('button', { name: 'New project' }));
+    const dialog = await screen.findByRole('dialog', { name: 'New project' });
+    type('Name', 'shop', dialog);
+    type('Repository path', '/repos/shop', dialog);
+    type('Gate command', 'make gate', dialog);
+    type('Areas', 'api: src/api/**', dialog);
+    fireEvent.click(within(dialog).getByRole('radio', { name: 'One pull request per batch' }));
+    type('PR title prefix', 'Feature', dialog);
+    fireEvent.click(
+      within(dialog).getByRole('radio', { name: 'Commits on the checked-out branch' }),
+    );
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Create project' }));
+    await waitFor(() => {
+      expect(posted).toHaveLength(1);
+    });
+    expect(posted[0]).toMatchObject({ delivery: 'local' });
+  });
+
   it("shows the project's batch and retries a failed one", async () => {
     const batch = batchDto({ state: 'FAILED', failure: 'push_rejected' });
     const project = projectViewDto({

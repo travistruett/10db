@@ -70,7 +70,11 @@ export function NewProjectForm({
       return;
     }
     const pullRequests = delivery === Delivery.PullRequest;
-    if (prTitlePrefix.trim() !== '' && !PrTitlePrefix.safeParse(prTitlePrefix.trim()).success) {
+    if (
+      pullRequests &&
+      prTitlePrefix.trim() !== '' &&
+      !PrTitlePrefix.safeParse(prTitlePrefix.trim()).success
+    ) {
       setFormError('Enter a PR title prefix such as feat(app)');
       return;
     }
