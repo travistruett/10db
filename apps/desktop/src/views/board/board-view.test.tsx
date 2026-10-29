@@ -82,7 +82,9 @@ describe('BoardView', () => {
     await waitFor(() => {
       expect(screen.queryByRole('dialog')).toBeNull();
     });
-    expect(await screen.findByText('No tasks yet.')).toBeTruthy();
+    expect(
+      await screen.findByRole('button', { name: 'Project: demo. Switch project' }),
+    ).toBeTruthy();
   });
 
   it('creates a pull-request project with its base branch and title prefix, and requires the prefix', async () => {
@@ -355,7 +357,7 @@ describe('BoardView', () => {
     });
   });
 
-  it('keeps each card’s Start beside the Start a batch button', async () => {
+  it('keeps each card’s Start beside the Start Ready Tasks item', async () => {
     const project = projectDto();
     const ready = taskDto({ projectId: project.id, title: 'Alpha', boardStatus: 'ready' });
     serve(
@@ -365,7 +367,10 @@ describe('BoardView', () => {
     renderApp('/board');
     fireEvent.click(await screen.findByRole('button', { name: 'Actions for Alpha' }));
     expect(await screen.findByRole('menuitem', { name: 'Start' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Start a batch' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'More board actions' }));
+    expect(
+      await screen.findByRole('menuitem', { name: /Start Ready Tasks/, hidden: true }),
+    ).toBeTruthy();
   });
 
   it('titles a refused start as a start, not a move', async () => {
@@ -482,9 +487,8 @@ describe('BoardView', () => {
       );
       renderApp('/board');
 
-      expect(await screen.findByText('No tasks yet.')).toBeTruthy();
       expect(
-        screen.getByRole('button', { name: 'Project: first-project. Switch project' }),
+        await screen.findByRole('button', { name: 'Project: first-project. Switch project' }),
       ).toBeTruthy();
     } finally {
       window.localStorage.removeItem('tendb.project');
@@ -530,11 +534,11 @@ describe('BoardView', () => {
     );
     renderApp('/board');
 
-    fireEvent.click(await screen.findByRole('button', { name: 'New task' }));
-    const dialog = await screen.findByRole('dialog', { name: 'New task' });
+    fireEvent.click(await screen.findByRole('button', { name: 'New Task' }));
+    const dialog = await screen.findByRole('dialog', { name: 'New Task' });
     type('Title', 'Beta', dialog);
     type('Acceptance criteria', 'It works\n\nIt is tested\n', dialog);
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Create task' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Create Task' }));
 
     await waitFor(() => {
       expect(posted).toHaveLength(1);
@@ -787,6 +791,64 @@ describe('BoardView', () => {
     expect(within(column).getAllByRole('listitem')).toHaveLength(22);
   });
 
+  it('shows no "No tasks yet" line', async () => {
+    const project = projectDto();
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([])),
+    );
+    renderApp('/board');
+    expect(await screen.findByRole('button', { name: 'New Task' })).toBeTruthy();
+    expect(screen.queryByText('No tasks yet.')).toBeNull();
+  });
+
+  it('disables Start Ready Tasks with "Nothing in Ready" when Ready is empty', async () => {
+    const project = projectDto();
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([])),
+    );
+    renderApp('/board');
+    fireEvent.click(await screen.findByRole('button', { name: 'More board actions' }));
+    const item = await screen.findByRole('menuitem', { name: /Start Ready Tasks/, hidden: true });
+    expect(item.hasAttribute('disabled') || item.getAttribute('data-disabled') === 'true').toBe(
+      true,
+    );
+    expect(within(item).getByText('Nothing in Ready')).toBeTruthy();
+  });
+
+  it('shows "2 ready" on Start Ready Tasks and opens the batch sheet', async () => {
+    const project = projectDto();
+    const tasks = [
+      taskDto({ projectId: project.id, title: 'Alpha', boardStatus: 'ready' }),
+      taskDto({ projectId: project.id, title: 'Beta', boardStatus: 'ready' }),
+    ];
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json(tasks)),
+    );
+    renderApp('/board');
+    fireEvent.click(await screen.findByRole('button', { name: 'More board actions' }));
+    const item = await screen.findByRole('menuitem', { name: /Start Ready Tasks/, hidden: true });
+    expect(within(item).getByText('2 ready')).toBeTruthy();
+    fireEvent.click(item);
+    expect(await screen.findByRole('dialog', { name: 'Start a batch' })).toBeTruthy();
+  });
+
+  it('opens Settings at Board columns from Add Column', async () => {
+    const project = projectDto();
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([])),
+    );
+    const { router } = renderApp('/board');
+    fireEvent.click(await screen.findByRole('button', { name: 'More board actions' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Add Column/, hidden: true }));
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/settings/board-columns');
+    });
+  });
+
   it('has no page title or metadata line', async () => {
     const project = projectDto({ gateCommand: 'make gate-marker' });
     serve(
@@ -794,7 +856,7 @@ describe('BoardView', () => {
       http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([])),
     );
     renderApp('/board');
-    expect(await screen.findByText('No tasks yet.')).toBeTruthy();
+    expect(await screen.findByRole('button', { name: 'New Task' })).toBeTruthy();
     expect(screen.queryByRole('heading', { name: 'Board' })).toBeNull();
     expect(screen.queryByText(/make gate-marker/)).toBeNull();
   });

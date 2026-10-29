@@ -105,7 +105,7 @@ export function NewTaskForm({ project, tasks, onCreated }: NewTaskFormProps) {
         ) : null}
         <Group justify="flex-end">
           <Button type="submit" loading={create.isPending}>
-            Create task
+            Create Task
           </Button>
         </Group>
       </Stack>

@@ -12,11 +12,16 @@ import {
   type WorkstreamDto,
   type WorkstreamId,
 } from '@10db/contracts';
-import { Alert, Button, Group, Loader, Modal, ScrollArea, Stack, Text } from '@mantine/core';
+import { Alert, Button, Group, Loader, Menu, Modal, ScrollArea, Stack, Text } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
+import { IconColumns, IconPlayerPlay, IconPlus } from '@tabler/icons-react';
+import { useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
 import { useBatches, useBoardColumns, useTasks, useWorkstreams } from '../../daemon/queries';
+import { FormModal } from '../../shell/form-modal';
 import { useSelectedProject } from '../../shell/selected-project';
+import { SplitButton } from '../../shell/split-button';
+import { SettingsSectionKey } from '../settings/sections';
 import { BatchSheet } from './batch/batch-sheet';
 import { BatchHistory } from './batch-history';
 import { BatchStrip } from './batch-strip';
@@ -59,6 +64,9 @@ function shippedPullRequest(
 
 const isDone = (column: LayoutColumn) =>
   column.key.kind === 'system' && column.key.status === BoardStatus.Done;
+
+const isReady = (column: LayoutColumn) =>
+  column.key.kind === 'system' && column.key.status === BoardStatus.Ready;
 
 interface BoardColumnsProps {
   readonly projectId: ProjectId;
@@ -193,6 +201,7 @@ export function BoardView() {
   const columns = useBoardColumns(project?.id ?? null);
   const workstreams = useWorkstreams({ active: false });
   const batches = useBatches(project?.id ?? null);
+  const navigate = useNavigate();
   const [projectOpen, projectModal] = useDisclosure(false);
   const [taskOpen, taskModal] = useDisclosure(false);
   const [sheetOpen, sheet] = useDisclosure(false);
@@ -206,6 +215,7 @@ export function BoardView() {
   const batchById = new Map(batchList.map((b) => [b.id, b]));
   const peers = new Map(taskList.map((t) => [t.id, t]));
   const started = startedDependents(taskList, workstreamById);
+  const readyCount = layout.find(isReady)?.tasks.length ?? 0;
 
   return (
     <Stack>
@@ -215,14 +225,41 @@ export function BoardView() {
             New project
           </Button>
           {project ? (
-            <Button size="sm" onClick={taskModal.open}>
-              New task
-            </Button>
-          ) : null}
-          {project ? (
-            <Button size="sm" onClick={sheet.open}>
-              Start a batch
-            </Button>
+            <SplitButton
+              leftSection={<IconPlus size={16} stroke={1.5} />}
+              onClick={taskModal.open}
+              menuLabel="More board actions"
+              menu={
+                <>
+                  <Menu.Item
+                    leftSection={<IconPlayerPlay size={16} stroke={1.5} />}
+                    disabled={readyCount === 0}
+                    onClick={sheet.open}
+                  >
+                    {/* The count shares the label's baseline; as a right section it centers on a different box. */}
+                    <Group justify="space-between" align="baseline" wrap="nowrap" gap="md">
+                      <span>Start Ready Tasks…</span>
+                      <Text span size="xs" c="dimmed">
+                        {readyCount === 0 ? 'Nothing in Ready' : `${String(readyCount)} ready`}
+                      </Text>
+                    </Group>
+                  </Menu.Item>
+                  <Menu.Item
+                    leftSection={<IconColumns size={16} stroke={1.5} />}
+                    onClick={() => {
+                      void navigate({
+                        to: '/settings/$section',
+                        params: { section: SettingsSectionKey.BoardColumns },
+                      });
+                    }}
+                  >
+                    Add Column…
+                  </Menu.Item>
+                </>
+              }
+            >
+              New Task
+            </SplitButton>
           ) : null}
         </Group>
       </Group>
@@ -264,9 +301,6 @@ export function BoardView() {
       {project ? <BatchStrips project={project} workstreams={workstreams.data ?? []} /> : null}
       {project && batchList.length > 0 ? <BatchHistory batches={batchList} /> : null}
 
-      {project && tasks.isSuccess && taskList.length === 0 ? (
-        <Text c="dimmed">No tasks yet.</Text>
-      ) : null}
       {project && tasks.isSuccess && (columns.data !== undefined || columns.isError) ? (
         <BoardColumns
           projectId={project.id}
@@ -290,14 +324,14 @@ export function BoardView() {
         <BatchSheet key={project.id} project={project} opened={sheetOpen} onClose={sheet.close} />
       ) : null}
       {project ? (
-        <Modal opened={taskOpen} onClose={taskModal.close} title="New task" size="lg">
+        <FormModal opened={taskOpen} onClose={taskModal.close} title="New Task" actions={null}>
           <NewTaskForm
             key={project.id}
             project={project}
             tasks={taskList}
             onCreated={taskModal.close}
           />
-        </Modal>
+        </FormModal>
       ) : null}
     </Stack>
   );

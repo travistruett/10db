@@ -53,11 +53,11 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
 
   // Create two tasks; the only area is preselected. The first never runs.
   for (const title of [OTHER, TASK]) {
-    await page.getByRole('button', { name: 'New task' }).click();
-    const taskDialog = page.getByRole('dialog', { name: 'New task' });
+    await page.getByRole('button', { name: 'New Task' }).click();
+    const taskDialog = page.getByRole('dialog', { name: 'New Task' });
     await taskDialog.getByLabel('Title').fill(title);
     await taskDialog.getByLabel('Acceptance criteria').fill('src/greeting/hello.txt exists');
-    await taskDialog.getByRole('button', { name: 'Create task' }).click();
+    await taskDialog.getByRole('button', { name: 'Create Task' }).click();
     await expect(taskDialog).toBeHidden();
   }
 
@@ -94,7 +94,8 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   ).toBeVisible();
 
   // Start through the batch sheet. The project delivers locally, so it starts each ticked task.
-  await page.getByRole('button', { name: 'Start a batch' }).click();
+  await page.getByRole('button', { name: 'More board actions' }).click();
+  await page.getByRole('menuitem', { name: /Start Ready Tasks/ }).click();
   const sheet = page.getByRole('dialog', { name: 'Start a batch' });
   // Planning the other task put it at the top of Ready, so board order proposes it. Both claim the
   // only area, so the picker leaves this task out and says why.
@@ -235,7 +236,8 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   }
   // The other task is still ready, so the sheet proposes it; close it without starting anything.
   await open(page, 'Board');
-  await page.getByRole('button', { name: 'Start a batch' }).click();
+  await page.getByRole('button', { name: 'More board actions' }).click();
+  await page.getByRole('menuitem', { name: /Start Ready Tasks/ }).click();
   const lightSheet = page.getByRole('dialog', { name: 'Start a batch' });
   await expect(lightSheet.getByRole('checkbox', { name: OTHER })).toBeChecked();
   await expect(lightSheet).toHaveCSS('opacity', '1');
