@@ -938,3 +938,29 @@ describe('storableRule', () => {
     expect(storableRule(toolName, summary)).toEqual(expected);
   });
 });
+
+describe('commandPrefix: a flag whose value the guard cannot place', () => {
+  it.each([
+    'pnpm --package foo dlx bash',
+    'pnpm --package foo dlx',
+    'pnpm --prefix d exec',
+    'pnpm --prefix d exec bash',
+    'pnpm --config c exec bash',
+    'pnpm -p d exec bash',
+    'yarn --prefix d dlx',
+    'yarn -C d dlx bash',
+  ])('%s is allowed once only', (command) => {
+    expect(commandPrefix(command)).toBeNull();
+  });
+});
+
+describe('commandPrefix: a crafted command', () => {
+  it('finishes within a deadline and is allowed once only', () => {
+    const flags = Array.from({ length: 30 }, (_, i) => `--f${String(i)} v${String(i)}`).join(' ');
+    const nested = Array.from({ length: 12 }, () => `pnpm ${flags} exec`).join(' ');
+    const started = performance.now();
+    const prefix = commandPrefix(nested);
+    expect(performance.now() - started).toBeLessThan(2000);
+    expect(prefix).toBeNull();
+  });
+});

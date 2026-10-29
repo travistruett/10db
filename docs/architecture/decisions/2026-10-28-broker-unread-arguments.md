@@ -31,16 +31,27 @@ could hide one:
   quoted (`<<'EOF'`, `<<"EOF"`, `<<\EOF`), as in `git commit -m "$(cat <<'EOF' … EOF)"`.
 - **Hazard form.** For the known program, the arguments the parser could read are compared with the project's
   hazard commands (and each of them behind `pnpm exec`, `pnpm dlx`, `npm exec`, `npx`, `yarn dlx`). Every
-  argument that has an expansion, substitution, glob or tilde is treated as any number of words. If the line
+  argument that has an expansion, substitution, glob or tilde is treated as any number of words, unless
+  it is entirely quoted and holds no `$@`, `$*`, `${a[@]}` or zsh `${=x}` or `${(@)x}`: that is exactly one word. It counts as
+  one only where a flag's value slot swallows it (`pnpm --filter "$pkg" test`, `--filter="$pkg"`); anywhere
+  else it could be a flag or the subcommand and is unread (`pnpm "$x" add left-pad`). If the line
   could then start like a hazard command, it is unread: `pnpm $x` could be `pnpm add`, `pnpm exec $x` could be
   `pnpm exec drizzle-kit generate`, `cargo $x` could be `cargo add`, `make $target` could be `make migrate`
   when a project lists it. A word that stands in a flag's value slot counts twice, since it could also add a
   word. `xargs` adds one unread word, since it appends its input. Redirections are dropped before the
   comparison, so `pnpm 2>/dev/null add x`, which `hazardHit` does not see, is a card. The patterns come from the
   hazards passed in, never from a list of programs.
+- **Flags and runners.** `hazardHit` and this scan read a command's plain words the same way
+  (`apps/daemon/src/guard/command-forms.ts`). For `npm`, `pnpm`, `yarn`, `cargo` and `git` the value-taking flags
+  are listed per program (`pnpm --reporter silent add x`, `git -C dir add x`), `cargo +toolchain` is skipped,
+  and a flag in neither the value nor the boolean list, followed by a word, is read both ways (`npm -p install x`
+  is `npm install x`, or `npm x`), so either reading can be a hazard. Other programs keep one shared list of
+  value flags. `mise x --` and `mise exec --`, `corepack pnpm` or `pnpm@9` (and `npm`, `npx`, `yarn`), `arch -<arch>` (an `arch` flag it does not know is unread) and
+  `script -q /dev/null` are looked through like `env` and `nice`: the command they run is the one matched.
 
 An unread argument to a program that has no hazard form is allowed: `cd $d`, `eslint $f`, `grep "$x"`, `make
-test` when no hazard names `make`. So is `pnpm test $x`, whose first word cannot become a hazard's.
+test` when no hazard names `make`. So is `pnpm test $x`, whose first word cannot become a hazard's, and
+`pnpm --filter "$pkg" test`, where the quoted value fills the flag's slot.
 
 The parser also reads a parenthesis after `do`, `then`, `else`, `elif`, `if`, `while`, `until` or `!` as a
 subshell, as it already read one after `&&`. It used to call it uncertain, so every `for … do (cd $d && …);
@@ -73,31 +84,40 @@ The scan reads the command's text with these rules, and nothing more:
   and so is an option word with an expansion on a declaring builtin (`declare -$f x`). `$#`, `$?`, `$$`, `$!` and
   `${#name}` count as numbers.
 - Any word of any segment, an assignment alone included, with a `$` or backtick inside `[…]`, `$[…]`,
-  `${…[…]}`, `${…:offset…}` or `$((…))` is unread, and so is any `$` or backtick in the words of `declare`,
-  `typeset`, `local`, `export`, `readonly`, `let`, `read`, `unset`, `getopts` and `printf -v`. Over-flagging is
-  accepted: a card is the safe default.
+  `${…[…]}`, `${…:offset…}` or `$((…))` is unread, and so is any `$` or backtick in the words of `let`,
+  `read`, `unset`, `getopts` and `printf -v`, and in the option words and names of `declare`, `typeset`,
+  `local`, `export` and `readonly`. The value of a plain scalar assignment there (`export NAME=$value`,
+  `local dir=$1`) is stored as written and is allowed, as in bash 3.2 and zsh, unless the command has an array
+  option (`-a`, `-A`: bash may read the value as a compound assignment). Over-flagging is accepted: a card is
+  the safe default.
 - Arithmetic is read only when it is numeric (`apps/daemon/src/guard/arithmetic-words.ts`): bash evaluates a bare
   name there as the variable it names, and its value again, so a name is as unread as `$n`. An arithmetic
   expansion, `$[…]`, a subscript on an assigned or expanded name (`@` and `*` aside), a `${a:off:len}` offset, the
   operands of `let` and of a test's `-eq`-style operators, the name after `-v`, and the values given to
-  `declare -i` are unread unless every operand is a number or an operator. Every subscript and offset in a `${…}` is checked, whatever the prefix. A script that declares an integer attribute anywhere (`declare`, `typeset`, `local`, `export`, `readonly` with `-i`, or `integer`, through runners, nested scripts and substitutions) is unread as a whole, and so is one that declares a nameref (`-n`) or expands a variable by another's name (`${!name}`; the name-listing forms `${!prefix*}`, `${!prefix@}` and `${!a[@]}` are read). `[ "$#" -eq 0 ]` therefore earns
-  a card.
+  `declare -i` are unread unless every operand is a number or an operator. Every subscript and offset in a `${…}` is checked, whatever the prefix. A script that declares an integer attribute anywhere (`declare`, `typeset`, `local`, `export`, `readonly` with `-i`, or `integer`, through runners, nested scripts and substitutions) is unread as a whole, and so is one that declares a nameref (`-n`) or expands a variable by another's name (`${!name}`; the name-listing forms `${!prefix*}`, `${!prefix@}` and `${!a[@]}` are read).
 - The shell keywords the scan skips (`for`, `select`, `done`, `fi`, `esac`) are judged on the word as written, so
   `./done` and `$D/fi` are programs.
 
 Known gaps, deliberately left for follow-ups. The sandbox bounds all of them; none is a new capability:
 
-- **Runners.** A hazard behind a runner the scan does not look through: `arch -arm64 pnpm add x`,
-  `script -q /dev/null pnpm add x`, `mise x -- pnpm add x`, `corepack pnpm add x`, `git rebase --exec`,
-  `git -c alias.x='!…'`, `GIT_PAGER=… git -p log`, a symlinked binary.
-- **Per-program flag values.** Flags that take a value, in `apps/daemon/src/guard/command-forms.ts`: `npm -p
-install x`, `pnpm --reporter silent add x`, `cargo +stable add serde`.
+- **Runners.** A hazard behind a runner the scan does not look through: `git rebase --exec`,
+  `git -c alias.x='!…'`, `GIT_PAGER=… git -p log`, `mise x -c 'cmd'` and `mise x tool cmd` with no `--`, a symlinked
+  binary. Linux's `script -c 'cmd'` is not looked through either.
+- **Flag values.** A program with no table in `command-forms.ts` shares one list of value flags. An unquoted
+  expansion in a flag's value slot (`pnpm --filter $pkg test`, `--filter=$pkg`) still counts as any number of
+  words, since it may split.
+- **Arithmetic on names.** `n=$((n+1))`, `${arr[$i]}` and `[[ $n -gt 3 ]]` stay cards, and so do `trap '…' EXIT` and
+  `source ~/…`.
+- **Array attributes.** A variable that is an array (declared with `-a` or `-A`, here or outside the command) may
+  make a later declaration or assignment evaluate a value's subscripts; only a declaration that carries the array
+  option itself is flagged.
 - **Directory changes** inside a substitution or subshell are not tracked for `.` and `source`; only a `cd`,
   `pushd` or `popd` that starts a segment of the script is.
 - **An integer attribute inherited from outside the command**, such as an exported integer variable: a plain
   assignment to one is not flagged.
-- **Here-document bodies** skip the arithmetic, indirect-expansion and transform checks; only their substitutions are
-  scanned, and a quoted body not at all.
+- **Here-document bodies** read by a program that is not a shell skip the arithmetic and transform checks (`$((n))`,
+  `${a[n]}`, `${a:$n}`, `${x@P}`); their substitutions, integer declarations and indirect expansions are scanned,
+  and a quoted body is not read at all.
 - **Prompt variables** (`PS0`, `PS1`, `PS2`, `PS4`, `PROMPT_COMMAND`) assigned in a script that also turns on tracing
   (`set -x`, `bash -x`) are not flagged.
 - **Review findings L1 and L3**, minor, recorded in PR #95.

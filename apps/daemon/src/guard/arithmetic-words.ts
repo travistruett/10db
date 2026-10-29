@@ -128,10 +128,16 @@ export function evaluatesUnread(head: string, words: readonly string[]): boolean
   }
   if (DECLARING.has(head)) {
     const integer = declaresInteger(head, words);
+    // `declare -a x=$y` may read the value as a compound assignment, whose subscripts evaluate.
+    const array = args.some((word) => /^[-+][a-zA-Z]*[aA]/.test(word));
     return args.some((word) => {
       if (word.startsWith('-')) return EXPANSION.test(word);
-      if (integer && word.includes('=') && !isNumericExpression(valueOf(word))) return true;
-      return EXPANSION.test(word) || !safeNames(word.split('=')[0] ?? word);
+      const assigned = word.includes('=');
+      if (integer && assigned && !isNumericExpression(valueOf(word))) return true;
+      // The name decides what the shell evaluates; a plain scalar's value is stored as written.
+      const name = word.split('=')[0] ?? word;
+      if (EXPANSION.test(name) || !safeNames(name)) return true;
+      return array && assigned && EXPANSION.test(valueOf(word));
     });
   }
   return false;

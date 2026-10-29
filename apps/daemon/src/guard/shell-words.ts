@@ -8,6 +8,12 @@ export interface ShellSegment {
   readonly raw: string;
   /** Words with quotes removed and escapes resolved. */
   readonly words: string[];
+  /**
+   * Parallel to `words`: the shell passes the word as exactly one word, whatever it expands to.
+   * True for a word with no unquoted expansion, substitution or glob character, and none of
+   * `$@`, `$*` or `${a[@]}` inside its quotes, so `"$pkg"` is one word and `$pkg` and `"$@"` are not.
+   */
+  readonly singleWords: boolean[];
   /** The operator that ended the segment: `&&`, `||`, `;`, `|`, `&`, `(`, `)`, newline, or empty at the end. */
   readonly separator: string;
   /** The subshells around the segment, outermost first, each numbered in the order it opens. */
@@ -141,6 +147,33 @@ function readHereDocuments(command: string, at: number, pending: readonly HereDo
 
 const SEPARATORS: ReadonlySet<string> = new Set([';', '|', '&']);
 
+/**
+ * The only expansions known to give exactly one word inside double quotes: `$name`, `${name}`, a
+ * positional or special parameter, and `${#name}`. Anything else (`$@`, `${a[@]}`, zsh's `${=x}` or
+ * `${(@)x}`, `${x:-…}`) may split or produce several words.
+ */
+const ONE_WORD_EXPANSION =
+  /^\$(?:[A-Za-z_]\w*|\d|[#?$!-]|\{[A-Za-z_]\w*\}|\{\d+\}|\{#[A-Za-z_]\w*\})/;
+
+/** Whether every expansion in a quoted word is one that gives exactly one word. */
+function onlyOneWordExpansions(word: string): boolean {
+  for (let i = 0; i < word.length; i += 1) {
+    if (word.charAt(i) !== '$' && word.charAt(i) !== '`') continue;
+    // A substitution gives one word inside quotes.
+    if (word.charAt(i) === '`' || word.charAt(i + 1) === '(') continue;
+    const match = ONE_WORD_EXPANSION.exec(word.slice(i));
+    if (match === null) return false;
+    // zsh reads `$a[@]` and `$a[(…)…]` as a subscript, which can give several words.
+    if (/^\$(?:[A-Za-z_]\w*|\d)$/.test(match[0]) && word.charAt(i + match[0].length) === '[')
+      return false;
+    i += match[0].length - 1;
+  }
+  return true;
+}
+
+/** A character in unquoted text that makes the shell split or expand the word. */
+const SPLITTING = /[$*?[]/;
+
 /** Reserved words a command may follow and still run, in this shell (`time` is a wrapper). */
 const BEFORE_COMMAND: ReadonlySet<string> = new Set([
   '!',
@@ -183,6 +216,9 @@ function scan(command: string, from: number, substitution: boolean): Scan {
   let word = '';
   let inWord = false;
   let words: string[] = [];
+  let singleWords: boolean[] = [];
+  // An unquoted substitution is in the word, so its result is split into words.
+  let split = false;
   let nested: string[] = [];
   let hereDocuments: string[] = [];
   let quotedHereDocuments: boolean[] = [];
@@ -247,11 +283,20 @@ function scan(command: string, from: number, substitution: boolean): Scan {
         certain = false;
         wordsCertain = false;
         words.push(word);
+        singleWords.push(false);
       } else {
         // An empty alternative drops out: `{nice,}` leaves `nice`, so the next word is the command.
-        words.push(...expanded.filter((w) => w !== ''));
+        const kept = expanded.filter((w) => w !== '');
+        words.push(...kept);
+        const one =
+          !split &&
+          !parameters.includes('{') &&
+          !SPLITTING.test(wordMask.replaceAll('\0', '')) &&
+          onlyOneWordExpansions(word);
+        singleWords.push(...kept.map(() => one));
       }
     }
+    split = false;
     word = '';
     wordMask = '';
     inWord = false;
@@ -266,6 +311,7 @@ function scan(command: string, from: number, substitution: boolean): Scan {
         raw: text,
         words,
         separator,
+        singleWords,
         subshells,
         nested,
         hereDocuments,
@@ -283,6 +329,7 @@ function scan(command: string, from: number, substitution: boolean): Scan {
     if (separator !== '') pendingCloses = [];
     raw = '';
     words = [];
+    singleWords = [];
     nested = [];
     hereDocuments = [];
     quotedHereDocuments = [];
@@ -312,6 +359,7 @@ function scan(command: string, from: number, substitution: boolean): Scan {
   // (`>(…)`, `<(…)`, where `at` is its parenthesis) forwards the segment's output or input.
   const substitute = (at: number, bodyStart: number): number => {
     if (command.charAt(at) === '(') processSubstitution = true;
+    if (quote === null) split = true;
     const inner = scan(command, bodyStart, true);
     if (!inner.closed) certain = false;
     nested.push(command.slice(bodyStart, inner.closed ? inner.end - 1 : inner.end));
@@ -358,6 +406,7 @@ function scan(command: string, from: number, substitution: boolean): Scan {
         j += command.charAt(j) === '\\' ? 2 : 1;
       if (j >= command.length) certain = false;
       const end = Math.min(j, command.length);
+      if (quote === null) split = true;
       nested.push(command.slice(i + 1, end).replace(/\\([`$\\])/g, '$1'));
       append(command.slice(i, end + 1));
       i = end;
@@ -630,7 +679,51 @@ const RUNNER_WRAPPERS: ReadonlyMap<string, Wrapper> = new Map([
   ['caffeinate', wrapper(['-t', '-w'])],
   ['stdbuf', wrapper(['-i', '-o', '-e'])],
   ['builtin', wrapper()],
+  // `arch -arm64 [-e VAR=value] [-d VAR] program`, and macOS `script [-aeFkqr] [-t time] file program`.
+  ['arch', wrapper(['-e', '-d', '-arch'])],
+  ['script', wrapper(['-t'], 1)],
 ]);
+
+/** arch's own flags; any other flag before the program may change which program runs. */
+const ARCH_FLAGS: ReadonlySet<string> = new Set([
+  '-32',
+  '-64',
+  '-arm64',
+  '-arm64e',
+  '-x86_64',
+  '-x86_64h',
+  '-i386',
+  '-ppc',
+  '-ppc64',
+  '-c',
+  '-d',
+  '-e',
+  '-arch',
+  '-h',
+]);
+
+/** Package managers `corepack` runs by name: `corepack pnpm add x` runs `pnpm add x`. */
+const COREPACK_PROGRAMS: ReadonlySet<string> = new Set([
+  'pnpm',
+  'pnpx',
+  'yarn',
+  'yarnpkg',
+  'npm',
+  'npx',
+]);
+
+/**
+ * Where the command `mise exec` (or `mise x`) runs starts, after its tools and options and the
+ * `--` that ends them; -1 when the words are not that form, or a `-c` string is the command.
+ */
+function miseCommandAt(words: readonly string[], at: number): number {
+  const subcommand = words[at + 1];
+  if (subcommand !== 'x' && subcommand !== 'exec') return -1;
+  const separator = words.indexOf('--', at + 2);
+  if (separator === -1) return -1;
+  const own = words.slice(at + 2, separator);
+  return own.some((w) => w === '-c' || w.startsWith('--command')) ? -1 : separator + 1;
+}
 
 /** A command's name as the shell would run it: `/usr/bin/git` and `\git` are both `git`. */
 export function commandName(word: string): string {
@@ -666,6 +759,8 @@ interface Prefixes {
    * value, or a word holds a `<` or `>` that is not a redirection the guard reads.
    */
   readonly hidden: boolean;
+  /** `corepack` ran the command, so its name may carry an `@version`. */
+  readonly corepack?: boolean;
 }
 
 /**
@@ -683,6 +778,7 @@ function prefixes(
   const angled = (from: number, to: number): boolean =>
     skipRedirections && words.slice(from, to).some((w) => ANGLE.test(w));
   let wrappers = 0;
+  let corepack = false;
   let i = 0;
   while (i < words.length) {
     const w = words[i] ?? '';
@@ -696,12 +792,32 @@ function prefixes(
       return { at: i, flags, hidden: true };
     } else if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(w)) {
       i += 1;
+    } else if (lookThroughRunners && name === 'mise' && miseCommandAt(words, i) !== -1) {
+      const start = miseCommandAt(words, i);
+      if (angled(i, start)) return { at: i, flags, hidden: true };
+      wrappers += 1;
+      i = start;
+    } else if (
+      lookThroughRunners &&
+      name === 'corepack' &&
+      COREPACK_PROGRAMS.has(commandName(words[i + 1] ?? '').replace(/@.*$/, ''))
+    ) {
+      wrappers += 1;
+      corepack = true;
+      i += 1;
     } else if (wrapped) {
       wrappers += 1;
       i += 1;
       while (i < words.length && (words[i] ?? '').startsWith('-')) {
         const flag = words[i] ?? '';
-        const span = flagSpan(flag, wrapped.valueFlags);
+        if (name === 'arch' && !ARCH_FLAGS.has(flag)) return { at: i, flags, hidden: true };
+        // arch's flags are whole words: `-arm64e` is not `-arm64` and `-e`.
+        const span =
+          name === 'arch'
+            ? wrapped.valueFlags.has(flag)
+              ? 2
+              : 1
+            : flagSpan(flag, wrapped.valueFlags);
         if (angled(i, i + span)) return { at: i, flags, hidden: true };
         flags.push({ wrapper: name, flag, value: span === 2 ? (words[i + 1] ?? null) : null });
         i += span;
@@ -712,7 +828,7 @@ function prefixes(
       break;
     }
   }
-  return { at: i, flags, hidden: false };
+  return { at: i, flags, hidden: false, corepack };
 }
 
 /**
@@ -756,12 +872,14 @@ export function stripCommandPrefixes(
     readonly skipRedirections?: boolean;
   } = {},
 ): string[] {
-  const at = prefixes(
+  const found = prefixes(
     words,
     options.lookThroughRunners === true,
     options.skipRedirections === true,
-  ).at;
-  const rest = words.slice(at);
+  );
+  const rest = words.slice(found.at);
+  // `corepack pnpm@9 add x` runs pnpm.
+  if (found.corepack === true && rest[0] !== undefined) rest[0] = rest[0].replace(/@.*$/, '');
   const head = rest[0];
   if (head === undefined || options.keepCommandPath === true) return rest;
   return [commandName(head), ...rest.slice(1)];
