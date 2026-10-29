@@ -1,5 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+import { claudeIsInstalled } from './claude-is-installed';
 import { daemonUrl } from './daemon-url';
 import { E2E_REPO, E2E_TOKEN } from './paths';
 
@@ -41,6 +42,7 @@ for (const scheme of ['dark', 'light'] as const) {
     request,
   }) => {
     await ensureProject(request);
+    await claudeIsInstalled(page);
     await page.addInitScript((value) => {
       window.localStorage.setItem('mantine-color-scheme-value', value);
     }, scheme);

@@ -200,7 +200,7 @@ listed by git as a worktree of the project's repository, before `git worktree re
 | `apps/daemon/src/scheduler/` | the launch rule per batch, not per project; area claims scoped by W9 |
 | `apps/daemon/src/daemon/` | the worktree root (env, refusal at start), the sweep at startup; the root joins `createGit`'s lane roots (`laneRoots`) and every live worktree (W14) joins the `checkouts` handed to the lane, gate and MCP sandboxes; `checkout-pins.ts` and `git-refusal.ts` resolve a worktree path to its project (W6) |
 | `apps/daemon/src/watcher/` | one watch per live checkout; holders by scope (W9) |
-| `apps/desktop` | the project form's workspace mode and seed; one strip per open batch with its worktree path; "Add a fix task" |
+| `apps/desktop` | the project form's workspace mode and seed; one compact strip per open batch (the worktree path is in the copy button's tooltip); "Add a fix task" |
 | docs | `02-batch-delivery.md`, `03-trust-boundaries.md` (worktree as a checkout), `docs/security.md` (one line), `docs/open-items.md`, and the decisions in the format `main` uses |
 
 ## 9. Security

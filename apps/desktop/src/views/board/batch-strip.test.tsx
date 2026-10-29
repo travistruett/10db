@@ -195,11 +195,26 @@ describe('BatchStrip in worktree mode', () => {
   const path = '/Users/me/.10db/worktrees/abc/bat_1';
   const open = batchDto({ worktreePath: path });
 
-  it('shows the worktree path', async () => {
+  it('keeps the worktree path behind the copy button, not in its own row', async () => {
     server.use(...baseHandlers());
     renderWithDaemon(<BatchStrip batch={open} workstreams={[]} workspaceMode="worktree" />);
-    expect(await screen.findByText(path)).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Copy worktree path' })).toBeTruthy();
+    expect(await screen.findByRole('button', { name: 'Copy worktree path' })).toBeTruthy();
+    expect(screen.queryByText(path)).toBeNull();
+  });
+
+  it('keeps the actions on the title line and counts unsettled tasks instead of listing them', async () => {
+    const running = workstreamDto({
+      projectId: open.projectId,
+      batchId: open.id,
+      taskTitle: 'Still going',
+      state: 'RUNNING',
+    });
+    server.use(...baseHandlers());
+    renderWithDaemon(<BatchStrip batch={open} workstreams={[running]} workspaceMode="worktree" />);
+    expect(await screen.findByText('1 unsettled')).toBeTruthy();
+    expect(screen.queryByText('Still going')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Abandon' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Add a fix task' })).toBeTruthy();
   });
 
   it('offers no fix task on a batch that is shipping', async () => {
@@ -211,7 +226,7 @@ describe('BatchStrip in worktree mode', () => {
         workspaceMode="worktree"
       />,
     );
-    await screen.findByText(path);
+    await screen.findByRole('button', { name: 'Copy worktree path' });
     expect(screen.queryByRole('button', { name: 'Add a fix task' })).toBeNull();
   });
 

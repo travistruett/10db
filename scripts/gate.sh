@@ -4,7 +4,8 @@
 # GATE_STEPS="lint test" limits the run (used by tests and for quick reruns). GATE_SKIP_RUST=1
 # reports rust as skipped even when cargo is installed (the Ubuntu CI job: no Tauri system libraries).
 # Inside a sandbox (TENDB_SANDBOX=1, as a gate 10db runs has it; any other value runs it) e2e is
-# reported as skipped.
+# reported as skipped. With CI set, each failing step's last 150 log lines are printed before the
+# summary line.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 # Logs from an earlier run would otherwise sit beside this run's, and a skipped step leaves none.
@@ -56,6 +57,15 @@ for step in "${steps[@]}"; do
 done
 
 elapsed=$((SECONDS - start))
+# CI keeps no .gate/ directory, so a failing step's log is printed there, before the summary line.
+if [[ -n "${CI:-}" ]]; then
+  for name in ${failed[@]+"${failed[@]}"}; do
+    [[ -f ".gate/$name.log" ]] || continue
+    echo "::group::$name log (last 150 lines)"
+    tail -n 150 ".gate/$name.log"
+    echo "::endgroup::"
+  done
+fi
 breakdown=
 # bash 3.2 treats expanding an empty array as unbound under set -u.
 if ((${#steps_run[@]})); then
