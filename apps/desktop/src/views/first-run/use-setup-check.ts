@@ -54,8 +54,10 @@ export function useSetupCheck(entered: boolean): SetupCheck {
   }, [entered, accountId, claudeFound, round, probe]);
 
   const result = identity.data?.accountId === accountId ? identity.data : null;
-  const failure =
-    system.error?.message ?? recheck.error?.message ?? accounts.error?.message ?? null;
+  // A failed refetch keeps the last good answer on screen; only the lack of any answer is an error.
+  const toolsFailure =
+    system.data === undefined ? (system.error?.message ?? recheck.error?.message ?? null) : null;
+  const failure = toolsFailure ?? accounts.error?.message ?? null;
   const failed: SetupRow | null = failure === null ? null : { mark: 'bad', detail: failure };
   const claude = failed
     ? { ...failed, runsAs: null, canAddLogin: false }
@@ -68,8 +70,8 @@ export function useSetupCheck(entered: boolean): SetupCheck {
 
   return {
     claude,
-    git: failed ?? gitRow(gitTool),
-    gh: failed ?? ghRow(ghTool),
+    git: toolsFailure === null ? gitRow(gitTool) : { mark: 'bad', detail: toolsFailure },
+    gh: toolsFailure === null ? ghRow(ghTool) : { mark: 'bad', detail: toolsFailure },
     canContinue: claudeFound && gitTool?.path != null,
     runsAs: claude.runsAs,
     recheckAgents: () => {
