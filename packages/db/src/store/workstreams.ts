@@ -16,7 +16,7 @@ import {
   type TaskId,
   type WorkstreamDto,
   type WorkstreamId,
-  type Effort,
+  Effort,
   type WorkstreamStep,
 } from '@10db/contracts';
 import { and, asc, count, desc, eq, inArray, isNotNull, or, type SQL } from 'drizzle-orm';
@@ -120,10 +120,20 @@ export function listWorkstreams(
     .map((r) => toDto(db, r));
 }
 
+/**
+ * The model and effort a workstream shows before a plan's first step sets them; routing picks the
+ * real ones per step.
+ */
+const UNPLANNED_MODEL = { model: 'sonnet', effort: Effort.Medium } as const;
+
+/** `first` is the model and effort of the plan's first step; absent, the workstream shows a placeholder. */
 export function insertWorkstream(
   ctx: WriteContext,
   taskId: TaskId,
-  opts: { readonly batchId?: BatchId | null } = {},
+  opts: {
+    readonly batchId?: BatchId | null;
+    readonly first?: { readonly model: string; readonly effort: Effort };
+  } = {},
 ): WorkstreamDto {
   const task = getTask(ctx.tx, taskId);
   if (task.status !== TaskStatus.Open)
@@ -165,8 +175,8 @@ export function insertWorkstream(
     nextAction: { kind: 'start' },
     attempt: 0,
     recoveryAttempts: 0,
-    model: project.model,
-    effort: project.effort,
+    model: (opts.first ?? UNPLANNED_MODEL).model,
+    effort: (opts.first ?? UNPLANNED_MODEL).effort,
     steps: [],
     stepIndex: 0,
     baseHead: null,

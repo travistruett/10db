@@ -123,19 +123,6 @@
     "usageHandoffAt": {
       "type": "number"
     },
-    "model": {
-      "type": "string"
-    },
-    "effort": {
-      "type": "string",
-      "enum": [
-        "low",
-        "medium",
-        "high",
-        "xhigh",
-        "max"
-      ]
-    },
     "handoffPct": {
       "type": "integer",
       "minimum": -9007199254740991,
@@ -493,8 +480,6 @@
     "moveBackAt",
     "fallbackAccountId",
     "usageHandoffAt",
-    "model",
-    "effort",
     "handoffPct",
     "nudgePct",
     "humanWaitMinutes",

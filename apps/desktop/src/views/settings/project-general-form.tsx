@@ -207,7 +207,7 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
         {showPrFields ? (
           <SettingRow
             label="Pull request title"
-            description="Starts every title, as a commit type and scope: feat(desktop)."
+            description="Optional. Starts every title, as a commit type and scope: feat(desktop). Left empty, 10db writes <type>(<scope>): <subject> from the batch's tasks and the paths it changed."
           >
             <TextInput
               aria-label="Pull request title"

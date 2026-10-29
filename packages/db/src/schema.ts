@@ -142,8 +142,6 @@ export const projects = sqliteTable('projects', {
   usageHandoffAt: real('usage_handoff_at').notNull().default(USAGE_HANDOFF_AT),
   /** Lets the lane's sandboxed commands bind and connect on localhost. */
   sandboxLoopback: integer('sandbox_loopback', { mode: 'boolean' }).notNull().default(false),
-  model: text('model').notNull(),
-  effort: text('effort').$type<Effort>().notNull(),
   handoffPct: integer('handoff_pct').notNull(),
   nudgePct: integer('nudge_pct').notNull(),
   humanWaitMinutes: integer('human_wait_minutes').notNull(),
