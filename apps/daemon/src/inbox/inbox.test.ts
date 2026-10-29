@@ -913,6 +913,93 @@ describe('permission broker in a sandboxed lane', () => {
     { name: 'a here-string run by sh', command: 'sh <<< "$x"', outcome: 'card' },
     { name: 'a process substitution read', command: 'diff <(sort a) <(sort b)', outcome: 'card' },
     { name: 'a process substitution written', command: 'echo hi > >(sh)', outcome: 'card' },
+    // Declarations store a plain name's value as written; a name or an array option can evaluate.
+    { name: 'export of a variable value', command: 'export NAME=$value', outcome: 'allow' },
+    {
+      name: 'export of a path built from variables',
+      command: 'export PATH="$HOME/.local/bin:$PATH"',
+      outcome: 'allow',
+    },
+    { name: 'local of a positional', command: 'local dir=$1', outcome: 'allow' },
+    {
+      name: 'a declaration with an array option and a variable value',
+      command: 'declare -a list=$value',
+      outcome: 'card',
+    },
+    {
+      name: 'a declaration whose name is a variable',
+      command: 'export "$name=1"',
+      outcome: 'card',
+    },
+    {
+      name: 'export after an integer declaration',
+      command: 'declare -i n; export NAME=$n',
+      outcome: 'card',
+    },
+    {
+      name: 'a quoted numeric parameter in [[',
+      command: '[[ "$#" -gt 0 ]] && ls',
+      outcome: 'allow',
+    },
+    // A fully double-quoted expansion is one word.
+    {
+      name: 'pnpm filter with a quoted value',
+      command: 'pnpm --filter "$pkg" test',
+      outcome: 'allow',
+    },
+    {
+      name: 'pnpm filter= with a quoted value',
+      command: 'pnpm --filter="$pkg" test',
+      outcome: 'allow',
+    },
+    { name: 'pnpm -F with a quoted value', command: 'pnpm -F "$p" test', outcome: 'allow' },
+    {
+      name: 'a loop of pnpm filters',
+      command: 'for p in daemon desktop; do pnpm --filter "@10db/$p" test; done',
+      outcome: 'allow',
+    },
+    { name: 'a quoted word could be the subcommand', command: 'pnpm "$x"', outcome: 'card' },
+    { name: 'all positional parameters', command: 'pnpm "$@"', outcome: 'card' },
+    { name: 'every array element', command: 'pnpm "${args[@]}"', outcome: 'card' },
+    {
+      name: 'a quoted filter, then a hazard in plain view',
+      command: 'pnpm --filter "$pkg" add zod',
+      outcome: 'card',
+    },
+    // Flags that take a value are per program.
+    { name: 'npm -p before install', command: 'npm -p install x', outcome: 'card' },
+    {
+      name: 'pnpm --reporter before add',
+      command: 'pnpm --reporter silent add x',
+      outcome: 'card',
+    },
+    { name: 'cargo toolchain before add', command: 'cargo +stable add serde', outcome: 'card' },
+    { name: 'pnpm --reporter value', command: 'pnpm --reporter silent test', outcome: 'allow' },
+    { name: 'pnpm --filter value named add', command: 'pnpm --filter add test', outcome: 'allow' },
+    {
+      name: 'an unknown npm flag before install',
+      command: 'npm --frobnicate install',
+      outcome: 'card',
+    },
+    // Runners the scan reads through.
+    { name: 'mise x runs a hazard', command: 'mise x -- pnpm add x', outcome: 'card' },
+    {
+      name: 'mise exec runs a hazard',
+      command: 'mise exec node@22 -- pnpm add x',
+      outcome: 'card',
+    },
+    { name: 'corepack runs a hazard', command: 'corepack pnpm add x', outcome: 'card' },
+    { name: 'arch runs a hazard', command: 'arch -arm64 pnpm add x', outcome: 'card' },
+    { name: 'script runs a hazard', command: 'script -q /dev/null pnpm add x', outcome: 'card' },
+    { name: 'mise exec runs a safe command', command: 'mise exec -- pnpm test', outcome: 'allow' },
+    { name: 'corepack runs a safe command', command: 'corepack pnpm test', outcome: 'allow' },
+    { name: 'arch runs a safe command', command: 'arch -arm64 pnpm test', outcome: 'allow' },
+    {
+      name: 'script runs a safe command',
+      command: 'script -q /dev/null pnpm test',
+      outcome: 'allow',
+    },
+    { name: 'mise x runs a variable program', command: 'mise x -- $CMD', outcome: 'card' },
     // An argument that could select a hazard form of a program that has one.
     { name: 'pnpm with a variable', command: 'pnpm $x', outcome: 'card' },
     { name: 'pnpm with a variable and more', command: 'pnpm $x test', outcome: 'card' },
@@ -1152,7 +1239,6 @@ describe('permission broker in a sandboxed lane', () => {
     { name: 'a subscript expansion', command: 'echo ${a[$n]}', outcome: 'card' },
     { name: 'a substring offset', command: 'echo ${a:$n:1}', outcome: 'card' },
     { name: 'old-style arithmetic', command: 'echo $[1+$n]', outcome: 'card' },
-    { name: 'export of a variable value', command: 'export FOO=$n', outcome: 'card' },
     { name: 'a bare name in arithmetic', command: 'echo $((n))', outcome: 'card' },
     { name: 'let on a name', command: 'let n', outcome: 'card' },
     { name: 'a test of a name', command: '[[ n -eq 1 ]]', outcome: 'card' },

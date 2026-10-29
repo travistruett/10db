@@ -7,7 +7,7 @@ import {
   evaluatesUnread,
   unreadArithmeticIn,
 } from './arithmetic-words';
-import { plainWords, RUNNERS } from './command-forms';
+import { plainWordReadings, RUNNERS } from './command-forms';
 import { commandOf, SHELL_C_FLAG, shellQuote, shellScripts } from './judge';
 import {
   commandName,
@@ -47,6 +47,8 @@ const MAX_DEPTH = 3;
 
 /** Stands for an argument the shell expands, which may become any number of words. */
 const UNREAD_WORD = '\u0000';
+/** Stands for a quoted expansion, which the shell passes as exactly one word, whatever it holds. */
+const ONE_WORD = '\u0001';
 
 /** A program name the shell runs as written: a path or a name of plain characters, or a test bracket. */
 const PLAIN_PROGRAM = /^(?:[A-Za-z0-9_@+%,:./-]+|\[\[?)$/;
@@ -104,16 +106,25 @@ function hazardPatterns(hazards: readonly HazardDef[]): string[][] {
 
 /**
  * Whether the words may start with the pattern once each unread word is read as whatever fits. An
- * unread word reached before the pattern ends can supply the rest of it.
+ * unread word reached before the pattern ends can supply the rest of it. A one-word stand-in is
+ * either a flag, which a hazard command may follow, or one word of the pattern.
  */
-function mayStartWith(words: readonly string[], pattern: readonly string[]): boolean {
-  for (let at = 0; at < pattern.length; at += 1) {
-    const word = words[at];
-    if (word === undefined) return false;
-    if (word === UNREAD_WORD) return true;
-    if (word !== pattern[at]) return false;
+function mayStartWith(
+  words: readonly string[],
+  pattern: readonly string[],
+  at = 0,
+  in_ = 0,
+): boolean {
+  if (in_ >= pattern.length) return true;
+  const word = words[at];
+  if (word === undefined) return false;
+  if (word === UNREAD_WORD) return true;
+  if (word === ONE_WORD) {
+    return (
+      mayStartWith(words, pattern, at + 1, in_) || mayStartWith(words, pattern, at + 1, in_ + 1)
+    );
   }
-  return true;
+  return word === pattern[in_] && mayStartWith(words, pattern, at + 1, in_ + 1);
 }
 
 /** The words of a command's arguments without its redirections and their targets. */
@@ -205,6 +216,21 @@ interface Scanner {
 const DIRECTORY_CHANGES: ReadonlySet<string> = new Set(['cd', 'pushd', 'popd']);
 
 /**
+ * What one argument stands for in the comparison with a hazard command: itself, or, when it has an
+ * expansion, a stand-in. A fully quoted expansion is one word, or a flag when it starts with `-`
+ * (`--filter="$p"` is a flag with its value attached); any other expansion may become any number of
+ * words. A stand-in for a flag's value counts twice, since it could also add a word.
+ */
+function argumentWords(word: string, single: boolean, replaced: boolean): string[] {
+  if (replaced) return [UNREAD_WORD, UNREAD_WORD];
+  if (!EXPANDING.test(word)) return [word];
+  if (!single) return [UNREAD_WORD, UNREAD_WORD];
+  if (!word.startsWith('-')) return [ONE_WORD];
+  const prefix = word.slice(0, word.search(EXPANDING));
+  return [prefix.includes('=') ? prefix : `${prefix}=`];
+}
+
+/**
  * Whether the command's words, with every unread word free to become anything, could be a hazard.
  * An unread word counts twice: it may stand in a flag's value slot, which the comparison skips, and
  * still add a word of its own.
@@ -215,16 +241,34 @@ function mayBeHazard(
   scanner: Scanner,
   xargs: XargsOptions | null,
 ): boolean {
-  const [program = '', ...rest] = words;
+  const program = words[0] ?? '';
   // A replace string stands for the input in every argument that holds it.
   const replaced = xargs?.replace != null;
-  const arguments_ = withoutRedirections(rest).flatMap((word) =>
-    replaced || EXPANDING.test(word) ? [UNREAD_WORD, UNREAD_WORD] : [word],
-  );
+  const offset = segment.singleWords.length - words.length;
+  const arguments_: string[] = [];
+  for (let at = 1; at < words.length;) {
+    const span = redirectionSpan(words, at);
+    if (span > 0) {
+      at += span;
+      continue;
+    }
+    const word = words[at] ?? '';
+    arguments_.push(
+      ...argumentWords(word, !replaced && segment.singleWords[offset + at] === true, replaced),
+    );
+    at += 1;
+  }
+  // corepack runs the program it is given, which an expansion hides.
+  const first = arguments_[0];
+  if (commandName(program) === 'corepack' && (first === UNREAD_WORD || first === ONE_WORD)) {
+    return scanner.patterns.length > 0;
+  }
   // xargs appends the words it reads from its input to the command it runs.
   if (segment.words.some((word) => commandName(word) === 'xargs')) arguments_.push(UNREAD_WORD);
-  const bare = plainWords([commandName(program), ...arguments_]).map((plain) => plain.word);
-  return scanner.patterns.some((pattern) => mayStartWith(bare, pattern));
+  return plainWordReadings([commandName(program), ...arguments_]).some((reading) => {
+    const bare = reading.map((plain) => plain.word);
+    return scanner.patterns.some((pattern) => mayStartWith(bare, pattern));
+  });
 }
 
 function scanShell(
