@@ -119,7 +119,7 @@ function BoardColumns({
     return kind === 'move' || kind === 'start';
   };
   return (
-    <Stack flex={1} mih={COLUMNS_MIN_HEIGHT} data-testid="board-columns">
+    <Stack flex="1 1 0px" mih={COLUMNS_MIN_HEIGHT} data-testid="board-columns">
       {actions.notice ? (
         <Alert color="yellow" withCloseButton onClose={actions.dismiss}>
           {actions.notice}
@@ -286,7 +286,7 @@ export function BoardView() {
   const readyCount = layout.find(isReady)?.tasks.length ?? 0;
 
   return (
-    <Stack h="calc(100dvh - var(--app-shell-header-offset, 0px) - 2 * var(--mantine-spacing-md))">
+    <Stack flex="1 1 0px">
       <Group justify="flex-end" align="flex-end">
         <Group align="flex-end">
           {project ? (
@@ -365,6 +365,7 @@ export function BoardView() {
           mah={ABOVE_COLUMNS_MAX_HEIGHT}
           type="auto"
           offsetScrollbars="present"
+          style={{ flexShrink: 0 }}
           data-testid="board-above-columns"
         >
           <Stack gap="sm">

@@ -102,7 +102,8 @@ export function AppLayout() {
           </>
         )}
       </AppShell.Navbar>
-      <AppShell.Main>
+      {/* A column, so a view can take the height the alerts above it leave rather than assume it. */}
+      <AppShell.Main style={{ display: 'flex', flexDirection: 'column' }}>
         {status.kind === 'reconnecting' && <ReconnectingBanner since={status.since} />}
         <SystemAlert />
         <Outlet />

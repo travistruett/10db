@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { z } from 'zod';
+import { claudeIsInstalled } from './claude-is-installed';
 import { daemonUrl } from './daemon-url';
 import { DESKTOP_DIR, E2E_DATA, E2E_DIR, E2E_TOKEN } from './paths';
 
@@ -98,6 +99,39 @@ async function seedProject(request: Page['request']): Promise<string> {
   return projectId;
 }
 
+/** The columns' minimum height, as the Board declares it. */
+const COLUMNS_MIN_HEIGHT = 320;
+
+/** Puts a banner of this height above the Board, as a system alert does, and waits for it to lay out. */
+async function addBannerAbove(page: Page, height: number): Promise<void> {
+  await page.evaluate((px: number) => {
+    const banner = document.createElement('div');
+    banner.dataset['testid'] = 'test-banner';
+    banner.style.cssText = `flex: none; height: ${String(px)}px; background: #888;`;
+    document.querySelector('main')?.prepend(banner);
+  }, height);
+  await expect(page.getByTestId('test-banner')).toBeVisible();
+}
+
+async function boxOf(page: Page, testId: string) {
+  const box = await page.getByTestId(testId).boundingBox();
+  expect(box).not.toBeNull();
+  if (!box) throw new Error(`${testId} has no box`);
+  return box;
+}
+
+/** How far below the window's bottom edge the columns' minimum height reaches; negative when it fits. */
+async function overflowOfMinimum(page: Page): Promise<number> {
+  const viewport = page.viewportSize();
+  if (!viewport) throw new Error('no viewport');
+  const columns = await boxOf(page, 'board-columns');
+  return columns.y + COLUMNS_MIN_HEIGHT - viewport.height;
+}
+
+function columnHeader(page: Page) {
+  return page.getByTestId('board-columns').getByText('Running', { exact: true }).first();
+}
+
 async function expectColumnsUsable(page: Page): Promise<void> {
   const columns = page.getByTestId('board-columns');
   const above = page.getByTestId('board-above-columns');
@@ -105,26 +139,20 @@ async function expectColumnsUsable(page: Page): Promise<void> {
   await expect(above).toBeVisible();
 
   const viewport = page.viewportSize();
-  const columnsBox = await columns.boundingBox();
-  const aboveBox = await above.boundingBox();
   expect(viewport).not.toBeNull();
-  expect(columnsBox).not.toBeNull();
-  expect(aboveBox).not.toBeNull();
-  if (!viewport || !columnsBox || !aboveBox) return;
+  if (!viewport) return;
 
-  expect(columnsBox.height).toBeGreaterThanOrEqual(320);
-  // In the viewport: the columns' top edge and at least their minimum height are on screen.
-  expect(columnsBox.y).toBeGreaterThanOrEqual(0);
-  expect(columnsBox.y + 320).toBeLessThanOrEqual(viewport.height);
+  // The columns are laid out.
+  await expect(page.getByRole('list', { name: 'Ready tasks' })).toBeAttached();
+  expect((await boxOf(page, 'board-columns')).height).toBeGreaterThanOrEqual(COLUMNS_MIN_HEIGHT);
+
   // The strips and history take at most a third of the board, with a little rounding room.
   const boardBox = await above.locator('..').boundingBox();
   expect(boardBox).not.toBeNull();
   if (!boardBox) return;
-  expect(aboveBox.height).toBeLessThanOrEqual(boardBox.height / 3 + 1);
-
-  // A column header is on screen, so the columns are not merely sized but laid out.
-  await expect(page.getByRole('list', { name: 'Ready tasks' })).toBeAttached();
-  await expect(columns.getByText('Running', { exact: true }).first()).toBeInViewport();
+  expect((await boxOf(page, 'board-above-columns')).height).toBeLessThanOrEqual(
+    boardBox.height / 3 + 1,
+  );
 
   // Every strip is reachable: scrolling the region brings each title into view.
   for (const { title } of OPEN_BATCHES) {
@@ -141,10 +169,33 @@ async function expectColumnsUsable(page: Page): Promise<void> {
   await expect(above.getByRole('list', { name: 'Batches' })).toBeHidden();
 }
 
+/** The page can be scrolled until the columns' bottom edge is on screen. */
+async function expectColumnsBottomReachable(page: Page): Promise<void> {
+  const viewport = page.viewportSize();
+  if (!viewport) throw new Error('no viewport');
+  await page.getByTestId('board-columns').scrollIntoViewIfNeeded();
+  await page.evaluate(() => {
+    window.scrollTo(0, document.documentElement.scrollHeight);
+  });
+  const columns = await boxOf(page, 'board-columns');
+  expect(columns.y + columns.height).toBeLessThanOrEqual(viewport.height + 1);
+  expect(columns.height).toBeGreaterThanOrEqual(COLUMNS_MIN_HEIGHT);
+}
+
+/**
+ * `roomy` windows have height to spare for the strips and the columns' minimum on every platform;
+ * a short one may not (Linux's fonts run taller than macOS's), so there only reachability holds.
+ */
 const SIZES = [
-  { width: 1440, height: 900 },
-  { width: 1280, height: 720 },
+  { width: 1440, height: 900, roomy: true },
+  { width: 1280, height: 720, roomy: false },
 ] as const;
+
+/** What the columns' header, hint and footer need above the declared minimum height. */
+const CONTENT_ALLOWANCE = 30;
+
+/** Taller than any real alert stack on its own, so the columns cannot fit beside it. */
+const TALL_BANNER = 300;
 
 test.describe.configure({ mode: 'serial' });
 
@@ -157,17 +208,60 @@ test.describe('the Board with several open batches', () => {
     await request.dispose();
   });
 
+  async function openBoard(page: Page, size: { width: number; height: number }): Promise<void> {
+    await page.setViewportSize(size);
+    await claudeIsInstalled(page);
+    await page.addInitScript((id: string) => {
+      window.localStorage.setItem('tendb.project', JSON.stringify(id));
+    }, projectId);
+    await page.goto('/board');
+    await expect(page.getByTestId('board-columns')).toBeVisible();
+  }
+
   for (const size of SIZES) {
-    test(`keeps the columns visible at ${String(size.width)}x${String(size.height)}`, async ({
+    const label = `${String(size.width)}x${String(size.height)}`;
+
+    test(`keeps the columns visible at ${label}`, async ({ page }) => {
+      await openBoard(page, size);
+      await expectColumnsUsable(page);
+      await expect(columnHeader(page)).toBeInViewport();
+      if (size.roomy) {
+        // Nothing above the Board: it fills the window and the page does not scroll.
+        expect(await overflowOfMinimum(page)).toBeLessThanOrEqual(0);
+        const scrolls = await page.evaluate(
+          () => document.documentElement.scrollHeight - window.innerHeight,
+        );
+        expect(scrolls).toBeLessThanOrEqual(1);
+      }
+      await expectColumnsBottomReachable(page);
+    });
+
+    // A short window may have no room to give back.
+    if (size.roomy) {
+      test(`shrinks to the space an alert leaves at ${label}`, async ({ page }) => {
+        await openBoard(page, size);
+        const slack = -(await overflowOfMinimum(page));
+        expect(slack).toBeGreaterThan(CONTENT_ALLOWANCE);
+        // The minimum height still fits beside the banner (with room for what the columns' own content
+        // needs beyond it), so the Board gives up height instead of overflowing.
+        await addBannerAbove(page, Math.floor(slack - CONTENT_ALLOWANCE));
+        await expectColumnsUsable(page);
+        await expect(columnHeader(page)).toBeInViewport();
+        const columns = await boxOf(page, 'board-columns');
+        expect(columns.y + columns.height).toBeLessThanOrEqual(size.height);
+      });
+    }
+
+    test(`lets the page scroll to the columns' end under a tall alert at ${label}`, async ({
       page,
     }) => {
-      await page.setViewportSize(size);
-      await page.addInitScript((id: string) => {
-        window.localStorage.setItem('tendb.project', JSON.stringify(id));
-      }, projectId);
-      await page.goto('/board');
-      await expect(page.getByTestId('board-columns')).toBeVisible();
+      await openBoard(page, size);
+      await addBannerAbove(page, TALL_BANNER);
       await expectColumnsUsable(page);
+      // The alert pushes the columns below the fold; scrolling the page reaches both ends.
+      await columnHeader(page).scrollIntoViewIfNeeded();
+      await expect(columnHeader(page)).toBeInViewport();
+      await expectColumnsBottomReachable(page);
       if (SHOTS) {
         await page.screenshot({ path: join(SHOTS, `e2e-board-${String(size.width)}.png`) });
       }
