@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -348,6 +348,107 @@ describe("git guard with another session's work already staged", () => {
 
   it('names the staged path in the deny reason', () => {
     expect(runHook(bash("git add a.ts && git commit -m 'x'", dirty)).reason).toContain('other.ts');
+  });
+});
+
+// A checkout laid out as AGENTS.md says: the main checkout `10db/`, an agent's linked worktree in
+// `10db-worktrees/` beside it, and a linked worktree anywhere else. Inside the agent's worktree,
+// discarding named files is that agent's own business; everywhere else it still asks.
+describe('git guard in an agent worktree beside the checkout', () => {
+  let layout: string;
+  let checkout: ThrowawayRepo;
+  let agent: string;
+  let elsewhere: string;
+
+  beforeAll(() => {
+    layout = mkdtempSync(join(tmpdir(), '10db-guard-layout-'));
+    checkout = createThrowawayRepo('10db-guard', join(layout, '10db'));
+    for (const file of ['a.ts', 'b.ts', 'src/c.ts']) checkout.stage(file, 'x\n');
+    checkout.commit('seed');
+    agent = join(layout, '10db-worktrees', 'agent');
+    elsewhere = join(layout, 'elsewhere', 'agent');
+    checkout.git('worktree', 'add', '-q', '-b', 'feat/agent', agent);
+    checkout.git('worktree', 'add', '-q', '-b', 'feat/elsewhere', elsewhere);
+  });
+
+  afterAll(() => {
+    rmSync(layout, { recursive: true, force: true });
+  });
+
+  // CHECKOUT in a command stands for the main checkout's path.
+  const inAgent = (command: string, cwd = agent): Outcome =>
+    runHook(bash(command.replaceAll('CHECKOUT', checkout.dir), cwd)).outcome;
+
+  it.each<[string, string, Outcome]>([
+    ['checkout -- one file', 'git checkout -- a.ts', 'allow'],
+    ['checkout -- two files', 'git checkout -- a.ts src/c.ts', 'allow'],
+    ['checkout a commit -- a file', 'git checkout HEAD -- a.ts', 'allow'],
+    ['checkout -q -- a file', 'git checkout -q -- a.ts', 'allow'],
+    ['restore one file', 'git restore a.ts', 'allow'],
+    ['restore -- a file', 'git restore -- a.ts', 'allow'],
+    ['restore --worktree --staged', 'git restore --worktree --staged a.ts', 'allow'],
+    ['restore -SW', 'git restore -SW a.ts', 'allow'],
+    ['restore --source=', 'git restore --source=HEAD a.ts', 'allow'],
+    ['restore -s with a value', 'git restore -s HEAD -- a.ts', 'allow'],
+    ['restore a deleted file', 'git restore gone.ts', 'allow'],
+    ['stash store', "git stash store -m 'keep' 0123abc", 'allow'],
+    ['stash list', 'git stash list', 'allow'],
+    // Whole-tree, directory and pattern forms still ask.
+    ['checkout -- .', 'git checkout -- .', 'ask'],
+    ['checkout -- a directory', 'git checkout -- src', 'ask'],
+    ['checkout -- a glob', "git checkout -- '*.ts'", 'ask'],
+    ['checkout -- pathspec magic', "git checkout -- ':/a.ts'", 'ask'],
+    ['checkout -- a parent path', 'git checkout -- ../a.ts', 'ask'],
+    ['checkout -- with nothing named', 'git checkout --', 'ask'],
+    ['checkout -f -- a file', 'git checkout -f -- a.ts', 'ask'],
+    ['checkout --pathspec-from-file', 'git checkout --pathspec-from-file=list -- a.ts', 'ask'],
+    ['restore .', 'git restore .', 'ask'],
+    ['restore a directory', 'git restore src', 'ask'],
+    ['restore a glob', "git restore '*.ts'", 'ask'],
+    ['restore with no path', 'git restore', 'ask'],
+    ['restore --patch', 'git restore -p a.ts', 'ask'],
+    ['restore --pathspec-from-file', 'git restore --pathspec-from-file=list', 'ask'],
+    ['stash', 'git stash', 'ask'],
+    ['stash push of a file', 'git stash push a.ts', 'ask'],
+    ['stash pop', 'git stash pop', 'ask'],
+    ['stash drop', 'git stash drop', 'ask'],
+    // A command that reaches another checkout gets no exception.
+    ['cd to the checkout first', 'cd CHECKOUT && git checkout -- a.ts', 'ask'],
+    ['pushd to the checkout first', 'pushd CHECKOUT; git restore a.ts', 'ask'],
+    ['git -C the checkout', 'git -C CHECKOUT restore a.ts', 'ask'],
+    ['git --work-tree', 'git --work-tree=CHECKOUT restore a.ts', 'ask'],
+    ['GIT_DIR prefix', 'GIT_DIR=CHECKOUT/.git git restore a.ts', 'ask'],
+    ['GIT_WORK_TREE exported', 'export GIT_WORK_TREE=CHECKOUT; git restore a.ts', 'ask'],
+    ['env -C', 'env -C CHECKOUT git restore a.ts', 'ask'],
+    ['cd inside bash -c', "bash -c 'cd CHECKOUT && git restore a.ts'", 'ask'],
+    ['cd, then bash -c', "cd CHECKOUT && bash -c 'git restore a.ts'", 'ask'],
+    ['cd inside eval', "eval 'cd CHECKOUT'; git restore a.ts", 'ask'],
+    // Every other rule holds in an agent worktree.
+    ['hard reset', 'git reset --hard HEAD', 'ask'],
+    ['clean', 'git clean -fd', 'ask'],
+    ['branch delete', 'git branch -D feat/x', 'ask'],
+    ['amend', "git commit --amend -m 'x'", 'ask'],
+    ['rebase', 'git rebase main', 'ask'],
+    ['force push', 'git push --force origin feat/agent', 'ask'],
+    ['push to main', 'git push origin HEAD:main', 'ask'],
+    ['commit --no-verify', "git add a.ts && git commit --no-verify -m 'x'", 'deny'],
+    ['add -A', 'git add -A', 'deny'],
+    ['discard alongside a force push', 'git restore a.ts && git push --force', 'ask'],
+  ])('%s', (_name, command, expected) => {
+    expect(inAgent(command)).toBe(expected);
+  });
+
+  it('applies from a subdirectory of the agent worktree', () => {
+    expect(inAgent('git restore c.ts', join(agent, 'src'))).toBe('allow');
+  });
+
+  it.each<[string, string]>([
+    ['checkout -- one file', 'git checkout -- a.ts'],
+    ['restore one file', 'git restore a.ts'],
+    ['stash store', 'git stash store 0123abc'],
+  ])('%s still asks in the main checkout and in a worktree elsewhere', (_name, command) => {
+    expect(inAgent(command, checkout.dir)).toBe('ask');
+    expect(inAgent(command, elsewhere)).toBe('ask');
   });
 });
 

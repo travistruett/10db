@@ -93,6 +93,8 @@ prefix_rule(
     justification = "AGENTS.md Git: clean deletes untracked files that may be another session's.",
 )
 
+# The Claude guard lets single-file discards and `stash store` through inside a worktree in
+# 10db-worktrees/. A prefix rule can't see the directory, so Codex still asks everywhere.
 prefix_rule(
     pattern = ["git", "restore"],
     decision = "prompt",

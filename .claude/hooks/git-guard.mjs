@@ -572,6 +572,90 @@ function currentBranch(cwd) {
 }
 
 /**
+ * True when `cwd` is inside a linked worktree that sits directly in `10db-worktrees/` beside its
+ * main checkout, where AGENTS.md puts the worktrees agents make by hand. False when git can't say.
+ * @param {string} cwd
+ */
+function inAgentWorktree(cwd) {
+  const lines = attempt(() =>
+    gitOutput(cwd, [
+      'rev-parse',
+      '--path-format=absolute',
+      '--show-toplevel',
+      '--git-common-dir',
+    ]).split('\n'),
+  );
+  const [top, common] = lines ?? [];
+  if (!top || !common || posix.basename(common) !== '.git') return false;
+  const checkout = posix.dirname(common);
+  return posix.dirname(top) === posix.join(posix.dirname(checkout), '10db-worktrees');
+}
+
+// Words that make a command act on a directory other than the cwd the guard judged: a change of
+// directory, git's own retargeting options and its repository variables. Matched anywhere in the
+// command, nested scripts and quoted text included, so a match only ever costs a prompt.
+const RETARGETS =
+  /(^|[\s;&|(){}`'"=])(cd|pushd|popd|chdir|-C|--chdir(=\S*)?|--git-dir(=\S*)?|--work-tree(=\S*)?)(?=$|[\s;&|(){}`'"])|\bGIT_(DIR|WORK_TREE|COMMON_DIR|INDEX_FILE|OBJECT_DIRECTORY)\b/;
+
+/**
+ * True when every pathspec names one file: no option, glob, pathspec magic, `.`, directory or
+ * parent path. An empty list is false, since git then takes the whole tree or refuses.
+ * @param {string[]} paths
+ * @param {string} cwd
+ */
+function namesSingleFiles(paths, cwd) {
+  return (
+    paths.length > 0 &&
+    paths.every((p) => {
+      const normal = posix.normalize(p);
+      return (
+        !p.startsWith('-') &&
+        !p.startsWith(':') &&
+        !/[*?[\]\\]/.test(p) &&
+        normal !== '.' &&
+        normal !== '..' &&
+        !normal.startsWith('../') &&
+        !posix.isAbsolute(normal) &&
+        attempt(() => existsSync(join(cwd, p)) && statSync(join(cwd, p)).isDirectory()) !== true
+      );
+    })
+  );
+}
+
+/**
+ * True for the discards an agent may run without asking in its own worktree: `checkout [-q]
+ * [<commit>] -- <file>...`, `restore` of named files with only the options that pick which copy, and
+ * `stash store`, which only adds an entry.
+ * @param {string} verb
+ * @param {string[]} a
+ * @param {string} cwd
+ */
+function isFileDiscard(verb, a, cwd) {
+  if (verb === 'stash') return a[0] === 'store';
+  const dashDash = a.indexOf('--');
+  if (verb === 'checkout') {
+    if (dashDash < 0) return false;
+    const before = a.slice(0, dashDash).filter((x) => x !== '-q' && x !== '--quiet');
+    const commit = before.length === 0 || (before.length === 1 && !before[0].startsWith('-'));
+    return commit && namesSingleFiles(a.slice(dashDash + 1), cwd);
+  }
+  if (verb === 'restore') {
+    const options = dashDash < 0 ? a : a.slice(0, dashDash);
+    /** @type {string[]} */
+    const paths = dashDash < 0 ? [] : a.slice(dashDash + 1);
+    for (let j = 0; j < options.length; j += 1) {
+      const x = options[j];
+      if (x === '-s' || x === '--source') j += 1;
+      else if (/^-[SWq]+$/.test(x) || /^--(source=.+|staged|worktree|quiet)$/.test(x)) continue;
+      else if (x.startsWith('-')) return false;
+      else paths.push(x);
+    }
+    return namesSingleFiles(paths, cwd);
+  }
+  return false;
+}
+
+/**
  * Turns a cwd-relative pathspec into a repository-relative one.
  * @param {string} prefix
  * @param {string} path
@@ -646,9 +730,10 @@ const SEVERITY = { warn: 1, ask: 2, deny: 3 };
  * @typedef {{ decision: 'deny' | 'ask' | 'warn', reason: string }} Verdict
  * @param {string} command
  * @param {string} cwd
+ * @param {string} [whole] the command as the agent ran it, when `command` is a script nested in it
  * @returns {Verdict | null} the most severe verdict any segment earns
  */
-function judge(command, cwd) {
+function judge(command, cwd, whole = command) {
   const segs = segments(command);
   /** @type {Verdict[]} */
   const verdicts = [];
@@ -666,7 +751,7 @@ function judge(command, cwd) {
     const start = commandStart(seg.words);
     const scripts = [nestedCommand(seg.words), ...seg.substitutions, ...stdinScripts(seg, start)];
     for (const inner of scripts) {
-      const verdict = inner === null ? null : judge(inner, cwd);
+      const verdict = inner === null ? null : judge(inner, cwd, whole);
       if (verdict) verdicts.push(verdict);
     }
     if (seg.words.some((w) => HOOK_SKIP.test(w) && !HOOK_SKIP_HARMLESS.test(w))) {
@@ -845,7 +930,12 @@ function judge(command, cwd) {
         (git.verb === 'filter-repo' && !a.includes('--version')) ||
         (git.verb === 'stash' && !['list', 'show'].includes(a[0] ?? '')) ||
         (git.verb === 'tag' && (hasShortFlag(a, 'd') || hasLongOption(a, '--delete')));
-      if (irreversible) {
+      const ownDiscard =
+        ['checkout', 'restore', 'stash'].includes(git.verb) &&
+        isFileDiscard(git.verb, a, cwd) &&
+        !RETARGETS.test(whole) &&
+        inAgentWorktree(cwd);
+      if (irreversible && !ownDiscard) {
         verdicts.push({
           decision: 'ask',
           reason: pushesMain

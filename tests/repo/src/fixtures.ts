@@ -95,9 +95,13 @@ export interface ThrowawayRepo {
   remove(): void;
 }
 
-/** Creates an empty repository on branch `feat/x`. Call `remove` when the test is done. */
-export function createThrowawayRepo(prefix: string): ThrowawayRepo {
-  const dir = mkdtempSync(join(tmpdir(), `${prefix}-`));
+/**
+ * Creates an empty repository on branch `feat/x`, in a new temporary directory or at `at`, which
+ * must not exist yet. Call `remove` when the test is done.
+ */
+export function createThrowawayRepo(prefix: string, at?: string): ThrowawayRepo {
+  const dir = at ?? mkdtempSync(join(tmpdir(), `${prefix}-`));
+  if (at !== undefined) mkdirSync(at, { recursive: true });
   const env = isolatedGitEnvironment();
   const git = (...args: string[]) => {
     execFileSync('git', args, { cwd: dir, env, stdio: 'ignore' });
