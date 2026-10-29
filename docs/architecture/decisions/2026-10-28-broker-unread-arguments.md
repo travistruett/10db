@@ -75,8 +75,7 @@ The scan reads the command's text with these rules, and nothing more:
   name there as the variable it names, and its value again, so a name is as unread as `$n`. An arithmetic
   expansion, `$[…]`, a subscript on an assigned or expanded name (`@` and `*` aside), a `${a:off:len}` offset, the
   operands of `let` and of a test's `-eq`-style operators, the name after `-v`, and the values given to
-  `declare -i` are unread unless every operand is a number or an operator. After a `declare -i`, `typeset -i` or
-  `integer` in a script, a later assignment whose value is not a number is unread. `[ "$#" -eq 0 ]` therefore earns
+  `declare -i` are unread unless every operand is a number or an operator. Every subscript and offset in a `${…}` is checked, whatever the prefix. A script that declares an integer attribute anywhere (`declare`, `typeset`, `local`, `export`, `readonly` with `-i`, or `integer`, through runners, nested scripts and substitutions) is unread as a whole. `[ "$#" -eq 0 ]` therefore earns
   a card.
 - The shell keywords the scan skips (`for`, `select`, `done`, `fi`, `esac`) are judged on the word as written, so
   `./done` and `$D/fi` are programs.
@@ -90,8 +89,8 @@ Known gaps, deliberately left for follow-ups. The sandbox bounds all of them; no
 install x`, `pnpm --reporter silent add x`, `cargo +stable add serde`.
 - **Directory changes** inside a substitution or subshell are not tracked for `.` and `source`; only a `cd`,
   `pushd` or `popd` that starts a segment of the script is.
-- **Integer variables the scan did not see declared** (`declare -i` in another command, an inherited attribute):
-  a plain assignment to one is not flagged.
+- **An integer attribute inherited from outside the command**, such as an exported integer variable: a plain
+  assignment to one is not flagged.
 - **Review findings L1 and L3**, minor, recorded in PR #95.
 
 ## Why

@@ -1161,6 +1161,15 @@ describe('permission broker in a sandboxed lane', () => {
     { name: 'a file test with a variable', command: '[[ -f $f ]]', outcome: 'allow' },
     { name: 'a default value with a variable', command: 'echo ${a:-$b}', outcome: 'allow' },
     { name: 'arithmetic on literals', command: 'echo $((1+2))', outcome: 'allow' },
+    { name: 'a prefixed subscript', command: 'echo ${!a[n]}', outcome: 'card' },
+    { name: 'a positional offset', command: 'echo ${1:n}', outcome: 'card' },
+    { name: 'a second subscript', command: 'echo ${a[1]} ${b[n]}', outcome: 'card' },
+    { name: 'an integer declared, then read', command: 'declare -i n; read a[n]', outcome: 'card' },
+    {
+      name: 'an integer declared behind a runner',
+      command: 'command typeset -i x; x=n',
+      outcome: 'card',
+    },
     // A structure the parser cannot read.
     { name: 'an unclosed double quote', command: 'echo "unclosed', outcome: 'card' },
     { name: 'an unclosed single quote', command: "echo 'unclosed", outcome: 'card' },

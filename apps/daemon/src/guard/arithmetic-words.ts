@@ -32,12 +32,15 @@ export function unreadArithmeticIn(word: string): boolean {
   if (expansion !== null && !isNumericExpression(expansion[1] ?? '')) return true;
   const bracket = /\$\[(.*)\]/s.exec(word);
   if (bracket !== null && !isNumericExpression(bracket[1] ?? '')) return true;
-  const element = /\$\{#?[A-Za-z_]\w*\[([^\]]*)\]/.exec(word);
-  if (element !== null && !safeSubscript(element[1] ?? '')) return true;
+  // Every subscript and offset, whatever the name: `${!a[n]}`, `${#a[n]}`, `${1:n}`, `${a[@]:n}`.
+  for (const match of word.matchAll(/\$\{[^}[]*\[([^\]]*)\]/g)) {
+    if (!safeSubscript(match[1] ?? '')) return true;
+  }
+  for (const match of word.matchAll(/\$\{[^}:]*:(?![-=+?])([^}]*)\}/g)) {
+    if (!isNumericExpression(match[1] ?? '')) return true;
+  }
   const assigned = /^[A-Za-z_]\w*\[([^\]]*)\]\+?=/.exec(word);
   if (assigned !== null && !safeSubscript(assigned[1] ?? '')) return true;
-  const offset = /\$\{[A-Za-z_]\w*:(?![-=+?])([^}]*)\}/.exec(word);
-  if (offset !== null && !isNumericExpression(offset[1] ?? '')) return true;
   // An expansion inside any subscript or offset, whatever the rest says.
   return /\[[^\]]*[$`]/.test(word) || /\$\{[^}]*:(?![-=+?])[^}]*[$`]/.test(word);
 }
@@ -100,9 +103,4 @@ export function evaluatesUnread(head: string, words: readonly string[]): boolean
 /** Whether every subscript in a variable name is safe to evaluate. */
 function safeNames(name: string): boolean {
   return [...name.matchAll(/\[([^\]]*)\]/g)].every((m) => safeSubscript(m[1] ?? ''));
-}
-
-/** Whether an assignment word's value is not a plain number, for a variable that may be an integer. */
-export function assignsUnreadInteger(word: string): boolean {
-  return /^[A-Za-z_]\w*(?:\[[^\]]*\])?\+?=/.test(word) && !isNumericExpression(valueOf(word));
 }

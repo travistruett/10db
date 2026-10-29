@@ -1,11 +1,6 @@
 import { posix } from 'node:path';
 import type { HazardDef } from '@10db/contracts';
-import {
-  assignsUnreadInteger,
-  declaresInteger,
-  evaluatesUnread,
-  unreadArithmeticIn,
-} from './arithmetic-words';
+import { declaresInteger, evaluatesUnread, unreadArithmeticIn } from './arithmetic-words';
 import { plainWords, RUNNERS } from './command-forms';
 import { commandOf, SHELL_C_FLAG, shellQuote, shellScripts } from './judge';
 import {
@@ -198,8 +193,6 @@ interface Scanner {
   readonly moved: boolean;
   /** The script's standard input may be a pipe from an enclosing command. */
   readonly stdin: boolean;
-  /** An earlier command may have given a variable the integer attribute, which evaluates its assignments. */
-  readonly integers: boolean;
 }
 
 /** Programs that change the shell's working directory. */
@@ -308,9 +301,6 @@ function scanSegment(
   if (segment.words.some((word) => unreadArithmeticIn(word))) {
     return { reason: UnreadReason.Script, text };
   }
-  if (scanner.integers && segment.words.some((word) => assignsUnreadInteger(word))) {
-    return { reason: UnreadReason.Script, text };
-  }
   const written = words[0];
   if (written === undefined) return null;
   const head = commandName(written);
@@ -360,19 +350,40 @@ function scanSegment(
     : null;
 }
 
+/** Whether the script, or a script inside it, gives a variable the integer attribute. */
+function declaresIntegerAnywhere(command: string, depth: number): boolean {
+  if (depth > MAX_DEPTH + 1) return true;
+  return parseShell(command).segments.some((segment) => {
+    const words = stripCommandPrefixes(leadingWords(segment.words).command, {
+      lookThroughRunners: true,
+      skipRedirections: true,
+      keepCommandPath: true,
+    });
+    const head = commandName(words[0] ?? '');
+    if (declaresInteger(head, words)) return true;
+    const inner = [
+      ...segment.nested,
+      ...segment.hereDocuments,
+      ...(SHELLS.has(head) ? shellScripts(words) : []),
+      ...(head === 'eval' ? [words.slice(1).join(' ')] : []),
+      ...(head === 'find'
+        ? findExecCommands(words).map((exec) => exec.map(shellQuote).join(' '))
+        : []),
+    ];
+    return inner.some((body) => declaresIntegerAnywhere(body, depth + 1));
+  });
+}
+
 function scanScript(command: string, depth: number, outer: Scanner): Unread | null {
   const parse = parseShell(command);
   if (!parse.certain) return { reason: UnreadReason.Structure, text: command };
   let previous = '';
   let moved = outer.moved;
-  let integers = outer.integers;
   for (const segment of parse.segments) {
-    const found = scanSegment(segment, previous === '|', depth, { ...outer, moved, integers });
+    const found = scanSegment(segment, previous === '|', depth, { ...outer, moved });
     if (found !== null) return found;
     const [first = ''] = leadingWords(segment.words).command;
     if (DIRECTORY_CHANGES.has(commandName(first))) moved = true;
-    const [, ...rest] = leadingWords(segment.words).command;
-    if (declaresInteger(commandName(first), [first, ...rest])) integers = true;
     previous = segment.separator;
   }
   return null;
@@ -390,10 +401,12 @@ function scanScript(command: string, depth: number, outer: Scanner): Unread | nu
  * caller still asks `hazardHit` first.
  */
 export function firstUnread(command: string, hazards: readonly HazardDef[]): Unread | null {
+  // An integer variable evaluates what is assigned to it, here or in a later command, so any
+  // declaration of one makes the whole script unread.
+  if (declaresIntegerAnywhere(command, 0)) return { reason: UnreadReason.Script, text: command };
   return scanScript(command, 0, {
     patterns: hazardPatterns(hazards),
     moved: false,
     stdin: false,
-    integers: false,
   });
 }
