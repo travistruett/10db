@@ -167,6 +167,8 @@ describe('no program from the checkout runs in a daemon git call', () => {
         });
       },
     },
+    { name: 'keptRefs', act: (git) => git.keptRefs(repo.path, 'refs/10db/starts/') },
+    { name: 'deleteKeptRef', act: (git) => git.deleteKeptRef(repo.path, 'refs/10db/starts/x') },
     {
       // After the commits, so main has its own: a merge commit, read-tree -m -u and update-ref.
       name: 'mergeIntoBranch',

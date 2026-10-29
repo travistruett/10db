@@ -13,7 +13,7 @@ import {
 import { parseScopedConfig, type ConfigEntry } from './config-trust';
 import { equalOrUnder, insideAny, isPlainDirectory, samePath, surelyInside } from './lane-writable';
 import { branchOfRef, firstLine, parseBranches, type RepoFacts, type RepoRefusal } from './inspect';
-import { comparablePath, existsAsEntry } from './path-entries';
+import { comparablePath, entryAt, existsAsEntry, foldedName, sameEntry } from './path-entries';
 import { gitNetwork, type NetworkCall, type NetworkRun } from './network';
 import { localRemotePath, parseRemoteUrl } from './remote-url';
 import { GitError, runGit, runGitCapped, type RunOptions } from './run';
@@ -103,8 +103,18 @@ export type BranchMerge =
     }
   /** Both sides changed these files in ways git can't combine; nothing was written. */
   | { readonly kind: 'conflict'; readonly from: string; readonly paths: readonly string[] }
-  /** Uncommitted changes or untracked files lie where the merge would write; nothing was written. */
-  | { readonly kind: 'blocked'; readonly from: string; readonly paths: readonly string[] };
+  /**
+   * Files lie where the merge would write, so nothing was written: `changed` are uncommitted changes
+   * and untracked files git reports at paths it writes; `kept` are files git doesn't track (ignored
+   * ones, or a whole directory, shown with its `/`) at a path the merge adds, or where it needs a
+   * directory. read-tree treats an ignored file as disposable; a hand-made `.env` is not.
+   */
+  | {
+      readonly kind: 'blocked';
+      readonly from: string;
+      readonly changed: readonly string[];
+      readonly kept: readonly string[];
+    };
 
 /** Where `mergedCommit` keeps the commits it makes reachable. */
 const KEPT_REF_PREFIX = 'refs/10db/';
@@ -232,6 +242,10 @@ export interface Git {
    * conflict.
    */
   mergedCommit(input: MergedCommitInput): Promise<string | null>;
+  /** The refs under `prefix`, itself under `refs/10db/`, by full name and sorted. */
+  keptRefs(repo: string, prefix: string): Promise<string[]>;
+  /** Deletes `ref`, under `refs/10db/`, whatever it names; one already gone is no error. */
+  deleteKeptRef(repo: string, ref: string): Promise<void>;
   /** True when commit `ancestor` is in the history of `tip`, `tip` itself included. */
   isAncestor(repo: string, ancestor: string, tip: string): Promise<boolean>;
   /** The blob `path` holds in commit `rev`, read from the object store; null for anything else. */
@@ -976,7 +990,7 @@ export function createGit(opts: GitOptions = {}): Git {
     )
       .split('\0')
       .filter(Boolean);
-    const ignored = (await ignoredInTheWay(c, touched)).sort();
+    const ignored = await untrackedInTheWay(c, head, target, new Set(touched));
     if (ignored.length > 0) return { kind: 'ignored', paths: ignored };
     // The status above read a private index; the merge reads the checkout's own, which a commit
     // made while another git held index.lock left behind. The files are HEAD's, so the index is
@@ -1094,23 +1108,60 @@ export function createGit(opts: GitOptions = {}): Git {
   }
 
   /**
-   * The git-ignored files and directories (as git lists them, a directory with its `/`) that writing
-   * `paths` would overwrite or delete: one at a written path, under one, or holding one. read-tree
-   * treats an ignored file as disposable, and a hand-made `.env` or a build directory is not.
+   * What lies where the merge from `tip` to `head` would put a new file, though git tracks nothing
+   * there: an entry at an added path (a directory with its `/`, when it holds anything git doesn't
+   * track), and a non-directory where an added path needs one. Paths the merge itself deletes or
+   * changes are git's to replace, and so is what an added path finds of one of them on a file system
+   * that folds case or normalization (a rename of `Guide.md` to `GUIDE.md` finds `Guide.md`). An
+   * ignored file under a directory the merge only adds to is no concern.
    */
-  async function ignoredInTheWay(c: Pinned, paths: readonly string[]): Promise<string[]> {
-    if (paths.length === 0) return [];
-    const ignored = (
-      await git(c, ['ls-files', '-z', '--others', '--ignored', '--exclude-standard', '--directory'])
+  async function untrackedInTheWay(
+    c: Pinned,
+    tip: string,
+    head: string,
+    written: ReadonlySet<string>,
+  ): Promise<string[]> {
+    const added = (
+      await git(c, [
+        'diff-tree',
+        '-r',
+        '--name-only',
+        '--no-renames',
+        '--diff-filter=A',
+        '-z',
+        tip,
+        head,
+      ])
     )
       .split('\0')
       .filter(Boolean);
-    return ignored.filter((entry) => {
-      const at = entry.endsWith('/') ? entry.slice(0, -1) : entry;
-      return paths.some(
-        (path) => path === at || path.startsWith(`${at}/`) || at.startsWith(`${path}/`),
+    const fresh = new Set(added);
+    const replaced = new Map<string, string[]>();
+    for (const path of written)
+      if (!fresh.has(path))
+        replaced.set(foldedName(path), [...(replaced.get(foldedName(path)) ?? []), path]);
+    /** True when what is at `rel` is a path the merge replaces itself, by that name or a folded one. */
+    const isReplaced = (rel: string): boolean =>
+      (replaced.get(foldedName(rel)) ?? []).some((other) =>
+        sameEntry(join(c.real, rel), join(c.real, other)),
       );
-    });
+    const found = new Set<string>();
+    for (const path of added) {
+      const entry = entryAt(c.real, path);
+      if (entry !== 'missing' && isReplaced(path)) continue;
+      if (entry === 'directory') {
+        // A tracked directory the merge empties is git's; anything else in it is not.
+        const held = await git(c, ['ls-files', '-z', '--others', '--directory', '--', path], {
+          env: { GIT_LITERAL_PATHSPECS: '1' },
+        });
+        if (held !== '') found.add(`${path}/`);
+      } else if (entry === 'other') {
+        found.add(path);
+      }
+      for (let parent = posix.dirname(path); parent !== '.'; parent = posix.dirname(parent))
+        if (entryAt(c.real, parent) === 'other' && !isReplaced(parent)) found.add(parent);
+    }
+    return [...found].sort();
   }
 
   async function mergedCommit(input: MergedCommitInput): Promise<string | null> {
@@ -1197,12 +1248,12 @@ export function createGit(opts: GitOptions = {}): Git {
         .filter(Boolean)
         .sort();
       const written = new Set(paths);
-      const inTheWay = [
-        ...(await changes(c)).filter((path) => written.has(path)),
-        ...(await ignoredInTheWay(c, paths)),
-      ];
-      if (inTheWay.length > 0)
-        return { kind: 'blocked', from, paths: [...new Set(inTheWay)].sort() };
+      const changed = (await changes(c)).filter((path) => written.has(path));
+      const reported = new Set(changed);
+      const kept = (await untrackedInTheWay(c, tip, head, written)).filter(
+        (path) => !reported.has(path),
+      );
+      if (changed.length > 0 || kept.length > 0) return { kind: 'blocked', from, changed, kept };
       // Fresh stat data, so read-tree doesn't take an unchanged file for an edited one and refuse.
       await git(c, ['update-index', '-q', '--ignore-submodules', '--refresh']).catch(
         () => undefined,
@@ -1705,6 +1756,21 @@ export function createGit(opts: GitOptions = {}): Git {
     commit,
     mergeIntoBranch,
     mergedCommit,
+    async keptRefs(repo, prefix) {
+      if (!prefix.startsWith(KEPT_REF_PREFIX))
+        throw new InvalidError(`${prefix} is not under ${KEPT_REF_PREFIX}`);
+      return (await git(await pinned(repo), ['for-each-ref', '--format=%(refname)', prefix]))
+        .split('\n')
+        .filter(Boolean)
+        .sort();
+    },
+    async deleteKeptRef(repo, ref) {
+      if (!ref.startsWith(KEPT_REF_PREFIX))
+        throw new InvalidError(`${ref} is not under ${KEPT_REF_PREFIX}`);
+      const c = await pinned(repo);
+      if ((await revParse(c, ref)) === null) return;
+      await git(c, ['update-ref', '--no-deref', '-d', ref]);
+    },
     async isAncestor(repo, ancestor, tip) {
       return isAncestor(await pinned(repo), ancestor, tip);
     },

@@ -8,8 +8,8 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname, join } from 'node:path';
-import type { BatchDto, WorkstreamDto } from '@10db/contracts';
+import { basename, dirname, join } from 'node:path';
+import { mintId, type BatchDto, type WorkstreamDto } from '@10db/contracts';
 import { getBatch, getWorkstreamRow, listWorkstreams, patchWorkstream } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
@@ -221,7 +221,11 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
     expect((await updates.beforeGate(batch.id, signal)).kind).toBe('merged');
     const changes = await workstreamChanges({ db: h.store.db, git: h.git }, member(beta.id).id);
     expect(changes.files.map((f) => f.path)).toEqual(['src/ui/beta.txt']);
-    const kept = gitIn(path, 'rev-parse', `refs/10db/starts/${member(beta.id).id}`);
+    const kept = gitIn(
+      path,
+      'rev-parse',
+      `refs/10db/${basename(h.worktreeRoot)}/starts/${member(beta.id).id}`,
+    );
     expect(getWorkstreamRow(h.store.db, member(beta.id).id).baseHead).toBe(kept);
   });
 
@@ -288,7 +292,7 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
           h.teammatePush('main', 'README.md', '# theirs\n');
           writeFileSync(join(pathOf(batch), 'README.md'), '# a lane is still writing\n');
         },
-        note: /^Uncommitted or ignored files are in the way of origin\/main's newer commits \(README\.md\), so this gate ran without them/,
+        note: /^Uncommitted changes in README\.md are in the way of origin\/main's newer commits, so this gate ran without them/,
       },
       {
         name: 'a fetch that fails',
@@ -332,6 +336,121 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
     );
     expect(card.body).toContain('Update branch');
     expect(card.detail).toEqual({ batchId: batch.id, paths: ['README.md'] });
+  });
+
+  it("raises a card for files git doesn't track in the way, tells the fix session to leave them, and withdraws it once the base merges", async () => {
+    h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+    h.commit('.gitignore', 'build/\n');
+    h.git$('push', '-q', 'origin', 'main');
+    const { batch } = await opened();
+    const path = pathOf(batch);
+    await commitOnBatch(batch, 'src/api/alpha.txt');
+    // The worktree holds an ignored build directory; main starts tracking a file of that name.
+    mkdirSync(join(path, 'build'));
+    writeFileSync(join(path, 'build', 'out.js'), 'built\n');
+    h.teammatePush('main', 'build', 'a file now\n');
+    const updates = createBaseUpdates(h.ctx);
+    const blocked = await updates.beforeGate(batch.id, signal);
+    expect(blocked).toEqual({
+      kind: 'not_merged',
+      note: "10db didn't merge origin/main because files in the worktree that git doesn't track are in the way (build/). Don't remove or move them: they may be the builder's, and the builder has a card about them. This gate ran without origin/main's newer commits.",
+    });
+    const card = h.only(h.cards());
+    expect(card.title).toBe(
+      `Batch "Alpha" can't take main: files git doesn't track are in the way`,
+    );
+    expect(card.body).toContain('- build/');
+    expect(card.body).toContain(path);
+    expect(card.detail).toEqual({ batchId: batch.id, paths: ['build/'] });
+    // A second gate meets the same files: still one card.
+    await updates.beforeGate(batch.id, signal);
+    expect(h.cards()).toHaveLength(1);
+    // The builder moves the directory away; the next gate merges and the card goes.
+    rmSync(join(path, 'build'), { recursive: true });
+    expect((await updates.beforeGate(batch.id, signal)).kind).toBe('merged');
+    expect(h.cards()).toEqual([]);
+  });
+
+  it('runs one gate of a batch at a time, and the gates of other batches beside it', async () => {
+    h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+    const updates = createBaseUpdates(h.ctx);
+    const [one, other] = [mintId('Batch'), mintId('Batch')];
+    const order: string[] = [];
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const first = updates.gate(one, signal, async () => {
+      order.push('first starts');
+      await held;
+      order.push('first ends');
+    });
+    const second = updates.gate(one, signal, () => {
+      order.push('second starts');
+      return Promise.resolve();
+    });
+    await updates.gate(other, signal, () => {
+      order.push('other batch starts');
+      return Promise.resolve();
+    });
+    expect(order).toEqual(['first starts', 'other batch starts']);
+    release();
+    await Promise.all([first, second]);
+    expect(order).toEqual(['first starts', 'other batch starts', 'first ends', 'second starts']);
+    // A gate that fails frees the batch for the next.
+    await expect(
+      updates.gate(one, signal, () => Promise.reject(new Error('gate broke'))),
+    ).rejects.toThrow('gate broke');
+    expect(await updates.gate(one, signal, () => Promise.resolve('next'))).toBe('next');
+  });
+
+  it("stops a gate waiting for its batch's turn as soon as its signal aborts, and keeps the turn order", async () => {
+    h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+    const updates = createBaseUpdates(h.ctx);
+    const one = mintId('Batch');
+    const order: string[] = [];
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const running = updates.gate(one, signal, async () => {
+      await held;
+      order.push('running ends');
+    });
+    const stop = new AbortController();
+    const waiting = updates.gate(one, stop.signal, () => {
+      order.push('cancelled one started');
+      return Promise.resolve();
+    });
+    const later = updates.gate(one, signal, () => {
+      order.push('later starts');
+      return Promise.resolve();
+    });
+    stop.abort();
+    // Answered while the gate ahead still runs.
+    expect(await waiting).toBeNull();
+    expect(order).toEqual([]);
+    release();
+    await Promise.all([running, later]);
+    expect(order).toEqual(['running ends', 'later starts']);
+    // Already aborted: nothing runs.
+    expect(await updates.gate(one, stop.signal, () => Promise.resolve('ran'))).toBeNull();
+  });
+
+  it('says the branch was merged but its base not moved when recording the base fails, and still installs', async () => {
+    h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+    withLockfile();
+    const { batch } = await opened();
+    await commitOnBatch(batch, 'src/api/alpha.txt');
+    h.teammatePush('main', 'pnpm-lock.yaml', 'lockfileVersion: 9\npackages: {}\n');
+    const git = { ...h.git, isAncestor: () => Promise.reject(new Error('history unreadable')) };
+    const update = await createBaseUpdates({ ...h.ctx, git }).beforeGate(batch.id, signal);
+    expect(update.kind).toBe('merged');
+    expect(update.kind === 'merged' && update.note).toMatch(
+      /^10db merged origin\/main into this branch but couldn't move the batch's base to it \(history unreadable\)/,
+    );
+    expect(h.pnpm.calls()).toHaveLength(2);
+    expect(getBatch(h.store.db, batch.id).baseSha).toBe(batch.baseSha);
   });
 
   it('withdraws the conflict card once the branch holds the base', async () => {

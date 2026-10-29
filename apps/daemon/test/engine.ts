@@ -237,7 +237,10 @@ export async function createTestEngine(
     git,
     gate: createGateRunner({ sandbox: null, logger: silentLogger }),
     // The engine's repository has no origin to fetch a base from: every branch is up to date.
-    baseUpdates: { beforeGate: () => Promise.resolve({ kind: 'up_to_date', note: null }) },
+    baseUpdates: {
+      beforeGate: () => Promise.resolve({ kind: 'up_to_date', note: null }),
+      gate: (_batchId, _signal, run) => run(),
+    },
     clock,
     logger: silentLogger,
     dataDir: data.path,

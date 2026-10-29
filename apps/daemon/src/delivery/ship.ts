@@ -34,7 +34,7 @@ import {
 import type { Clock } from '../clock';
 import { GitNetworkError, GitNetworkFailure } from '../git';
 import type { GateResult, GateRunner } from '../verify';
-import { createBaseUpdates, gateNote, type BaseUpdate } from './base-update';
+import { gateNote, type BaseUpdate, type BaseUpdates } from './base-update';
 import { shipCards, wrongBranchCard, type Card, type ShipFailure } from './cards';
 import { allCheckouts, projectAtCheckout } from './checkout';
 import { returnCheckout } from './checkout-return';
@@ -48,6 +48,8 @@ import { ensureWorktreeWhole, reopenWorktreeBatch } from './worktree-repair';
 
 export interface ShipperDeps extends DeliveryContext {
   readonly gate: GateRunner;
+  /** The daemon's one set of base updates, shared with the runner, so a batch's gates run in turn. */
+  readonly baseUpdates: BaseUpdates;
   readonly clock: Clock;
   readonly dataDir: string;
   /** The gate runs in the session environment, as a task's gate does. */
@@ -99,7 +101,6 @@ function stepFailure(
 
 export function createShipper(deps: ShipperDeps): Shipper {
   const db = deps.state.db;
-  const baseUpdates = createBaseUpdates(deps);
 
   function resume(batchId: BatchId): void {
     const project = getProject(db, getBatch(db, batchId).projectId);
@@ -401,17 +402,15 @@ export function createShipper(deps: ShipperDeps): Shipper {
       // was checked by the builder, task by task, as it was, so neither runs.
       if (project.gateCommand !== null) {
         step = 'the gate';
-        // Once the gate holds its slot, so no other gate's merge changes the tree under it.
+        // Once the gate holds its slot and no other gate of the batch runs, so no other gate's
+        // merge changes the tree under it.
         const before: { update: BaseUpdate | null } = { update: null };
-        const gate = await runGate(
-          batch,
-          projectAtCheckout(project, checkout),
-          signal,
-          async () => {
-            const update = await baseUpdates.beforeGate(batchId, signal);
+        const gate = await deps.baseUpdates.gate(batchId, signal, () =>
+          runGate(batch, projectAtCheckout(project, checkout), signal, async () => {
+            const update = await deps.baseUpdates.beforeGate(batchId, signal);
             before.update = update;
             return update.kind !== 'aborted';
-          },
+          }),
         );
         if (gate === null) return;
         const update = before.update ?? { kind: 'up_to_date', note: null };

@@ -1,8 +1,9 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { mintId, type BatchDto, type BatchId, type WorkstreamDto } from '@10db/contracts';
 import {
+  clearWorktreePath,
   deleteAppSetting,
   getAppSetting,
   getBatch,
@@ -760,6 +761,29 @@ describe('sweepWorktrees', () => {
     const orphan = worktreeAt(under('orphan'), ours(mintId('Batch')));
     expect((await sweep()).map(comparable)).toEqual([comparable(orphan)]);
     expect(existsSync(orphan)).toBe(false);
+  });
+
+  it('drops the kept start of a task no live worktree batch holds, and keeps the rest', async () => {
+    const live = h.starter.startTask(h.addTask('Live').id);
+    const done = h.starter.startTask(h.addTask('Done', { areas: ['ui'] }).id);
+    await h.jobs.idle();
+    const member = (id: BatchId) => h.only(listWorkstreams(h.store.db, { batchId: id })).id;
+    h.state.write((c) => {
+      transitionBatch(c, done.id, { to: 'SHIPPING' });
+      transitionBatch(c, done.id, { to: 'CLOSED' });
+      clearWorktreePath(c, done.id);
+    });
+    // This daemon's starts live under its own level; another daemon's, such as a dev daemon with its
+    // own data dir on the same repository, are not this sweep's to judge.
+    const mine = (id: string) => `refs/10db/${basename(h.worktreeRoot)}/starts/${id}`;
+    const theirs = `refs/10db/0a1b2c3d/starts/${mintId('Workstream')}`;
+    for (const id of [member(live.id), member(done.id), mintId('Workstream')])
+      h.git$('update-ref', mine(id), 'HEAD');
+    h.git$('update-ref', theirs, 'HEAD');
+    await sweep();
+    expect(h.git$('for-each-ref', '--format=%(refname)', 'refs/10db/').split('\n').sort()).toEqual(
+      [theirs, mine(member(live.id))].sort(),
+    );
   });
 
   it('prunes after removing', async () => {
