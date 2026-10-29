@@ -34,7 +34,7 @@ import {
 import type { Clock } from '../clock';
 import { GitNetworkError, GitNetworkFailure } from '../git';
 import type { GateResult, GateRunner } from '../verify';
-import { createBaseUpdates, gateNote } from './base-update';
+import { createBaseUpdates, gateNote, type BaseUpdate } from './base-update';
 import { shipCards, wrongBranchCard, type Card, type ShipFailure } from './cards';
 import { allCheckouts, projectAtCheckout } from './checkout';
 import { ghCall, pushCall, raise, type DeliveryContext, type DeliveryLimits } from './context';
@@ -139,11 +139,15 @@ export function createShipper(deps: ShipperDeps): Shipper {
     });
   }
 
-  /** Runs the project gate on the batch branch, recording its process group for recovery. */
+  /**
+   * Runs the project gate on the batch branch, recording its process group for recovery.
+   * `beforeStart` runs once the gate holds its slot; a false answer stops it as an abort would.
+   */
   async function runGate(
     batch: BatchDto,
     project: ProjectDto,
     signal: AbortSignal,
+    beforeStart: () => Promise<boolean>,
   ): Promise<GateResult | null> {
     const gateCommand = project.gateCommand;
     // The caller skips the gate step for a project without a gate.
@@ -166,6 +170,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
       rules: listPermissionRules(deps.state.db, project.id, null),
       checkouts: allCheckouts(deps.state.db),
       signal,
+      beforeStart,
       onWaiting: (ahead) => {
         deps.logger.info(
           { batchId: batch.id, ahead },
@@ -385,12 +390,21 @@ export function createShipper(deps: ShipperDeps): Shipper {
       // has it now merged in, so it tests what the pull request would merge. A project with no gate
       // was checked by the builder, task by task, as it was, so neither runs.
       if (project.gateCommand !== null) {
-        step = 'bringing in the base';
-        const update = await baseUpdates.beforeGate(batchId, signal);
-        if (update.kind === 'aborted') return;
         step = 'the gate';
-        const gate = await runGate(batch, projectAtCheckout(project, checkout), signal);
+        // Once the gate holds its slot, so no other gate's merge changes the tree under it.
+        const before: { update: BaseUpdate | null } = { update: null };
+        const gate = await runGate(
+          batch,
+          projectAtCheckout(project, checkout),
+          signal,
+          async () => {
+            const update = await baseUpdates.beforeGate(batchId, signal);
+            before.update = update;
+            return update.kind !== 'aborted';
+          },
+        );
         if (gate === null) return;
+        const update = before.update ?? { kind: 'up_to_date', note: null };
         if (gate.timedOut) {
           fail(batch, shipCards.gateTimedOut(batch, deps.limits.gateTimeoutMs, gate.logPath));
           return;

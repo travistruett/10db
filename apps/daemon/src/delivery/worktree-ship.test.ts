@@ -143,6 +143,7 @@ describe('shipping a worktree batch', () => {
     const head = await commitIn(batch, 'src/api/alpha.txt');
     h.state.write((c) => {
       setAppSetting(c, `checkout_pin.${batch.id}`, { kept: true });
+      setAppSetting(c, `worktree_lockfile.${batch.id}`, 'a lockfile blob');
     });
     // The builder works on in the main checkout meanwhile: another branch, edits not committed.
     h.git$('switch', '-q', '-c', 'mine');
@@ -165,6 +166,7 @@ describe('shipping a worktree batch', () => {
     expect(worktreePaths()).toEqual([realpathSync(h.repo)]);
     expect(existsSync(wt)).toBe(false);
     expect(getAppSetting(h.store.db, `checkout_pin.${batch.id}`)).toBeUndefined();
+    expect(getAppSetting(h.store.db, `worktree_lockfile.${batch.id}`)).toBeUndefined();
     expect(h.git$('branch', '--list', batch.branch ?? '')).toContain(batch.branch ?? '');
     expect(mainCheckout()).toEqual(before);
     expect(h.cards()).toEqual([]);

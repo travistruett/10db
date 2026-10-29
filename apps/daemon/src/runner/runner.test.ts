@@ -3175,13 +3175,27 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
         };
       }
 
-      it("is brought in before every gate, and what kept it out heads a failed gate's evidence and the fix prompt", async () => {
-        const order: string[] = [];
+      /** Records in `order` when a gate is asked for and when its command starts, around `run`. */
+      function watchGates(order: string[]): () => void {
         const gateRun = recordingGate.run;
         recordingGate.run = (request) => {
-          order.push('gate');
-          return gateRun(request);
+          order.push('gate asked');
+          return gateRun({
+            ...request,
+            onSpawn: (pid) => {
+              order.push('gate spawned');
+              request.onSpawn?.(pid);
+            },
+          });
         };
+        return () => {
+          recordingGate.run = gateRun;
+        };
+      }
+
+      it("is brought in once each gate may start, and what kept it out heads a failed gate's evidence and the fix prompt", async () => {
+        const order: string[] = [];
+        const restore = watchGates(order);
         try {
           const { workstream, batch } = await run(
             () => [
@@ -3202,20 +3216,22 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
           await engine.runner.idle();
           expect(ws(workstream.id).state).toBe('DONE');
           expect(engine.adapter.prompts[1]?.prompt).toContain(NOTE);
-          expect(order).toEqual([`base ${batch.id}`, 'gate', `base ${batch.id}`, 'gate']);
+          // Inside the gate's run, which holds its slot, and before its command starts.
+          const once = ['gate asked', `base ${batch.id}`, 'gate spawned'];
+          expect(order).toEqual([...once, ...once]);
         } finally {
-          recordingGate.run = gateRun;
+          restore();
         }
       });
 
       it('runs no gate once shutdown stopped it: the workstream stays verifying for recovery', async () => {
         const order: string[] = [];
-        const { workstream } = await run(
+        const restore = watchGates(order);
+        const { workstream, batch } = await run(
           () => [[write('src/api/a.txt'), commit('op-wt-base-2', ['src/api/a.txt']), turn]],
           { baseUpdates: recordingBaseUpdates({ kind: 'aborted' }, order) },
-        );
-        expect(order).toHaveLength(1);
-        expect(gateRequests).toEqual([]);
+        ).finally(restore);
+        expect(order).toEqual(['gate asked', `base ${batch.id}`]);
         expect(ws(workstream.id)).toMatchObject({
           state: 'VERIFYING',
           nextAction: { kind: 'verify' },

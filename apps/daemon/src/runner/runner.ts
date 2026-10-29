@@ -92,6 +92,7 @@ import {
   checkoutOf,
   gateNote,
   projectAtCheckout,
+  type BaseUpdate,
   type BaseUpdates,
 } from '../delivery';
 import type { StateStore } from '../events';
@@ -1732,25 +1733,23 @@ export function createRunner(opts: RunnerOptions): Runner {
     ctl.gateAbort = gateAbort;
     if (ctl.stopReason === 'cancelled' || ctl.stopReason === 'shutdown') gateAbort.abort();
     // A batch's branch takes its base as origin has it now, so the gate tests what would merge
-    // rather than the base it was cut from. Work outside a batch has no base to take.
-    const base =
-      row.batchId === null
-        ? null
-        : await opts.baseUpdates.beforeGate(row.batchId, gateAbort.signal);
-    if (base?.kind === 'aborted') {
-      ctl.gateAbort = null;
-      if (ctl.stopReason === 'cancelled') cancelNow(id, ctl.fence);
-      // Shutdown: the workstream stays VERIFYING and recovery runs it again.
-      return;
-    }
-    const note = base === null ? null : gateNote(base);
+    // rather than the base it was cut from. It runs once the gate holds its slot, so no other gate's
+    // merge changes the tree under a running gate. Work outside a batch has no base to take.
+    const before: { update: BaseUpdate | null } = { update: null };
+    const batchId = row.batchId;
     let recording: Promise<void> = Promise.resolve();
     const logPath = join(opts.dataDir, 'logs', 'gate', `${id}-${String(run)}.log`);
-    opts.logger.info(
-      { workstreamId: id, command: gateCommand, logPath, base: base?.kind ?? null },
-      'gate started',
-    );
+    opts.logger.info({ workstreamId: id, command: gateCommand, logPath }, 'gate started');
     const result = await opts.gate.run({
+      ...(batchId === null
+        ? {}
+        : {
+            beforeStart: async () => {
+              const update = await opts.baseUpdates.beforeGate(batchId, gateAbort.signal);
+              before.update = update;
+              return update.kind !== 'aborted';
+            },
+          }),
       project: projectAtCheckout(project, checkout),
       command: gateCommand,
       logPath,
@@ -1785,6 +1784,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         logPath: result.logPath,
         timedOut: result.timedOut,
         aborted: result.aborted,
+        base: before.update?.kind ?? null,
       },
       'gate finished',
     );
@@ -1810,7 +1810,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       kind: 'gate' as const,
       command: gateCommand,
       exitCode: result.exitCode,
-      summary: gateSummary(note, result.tail),
+      summary: gateSummary(before.update === null ? null : gateNote(before.update), result.tail),
       logPath: result.logPath,
       commitShas,
     };

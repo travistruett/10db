@@ -5,6 +5,7 @@ import {
   readFileSync,
   realpathSync,
   renameSync,
+  rmSync,
   writeFileSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -13,7 +14,7 @@ import { getBatch, getWorkstreamRow, listWorkstreams, patchWorkstream } from '@1
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { isolatedGitEnv } from '../../test/fixtures';
-import { createBaseUpdates } from './index';
+import { createBaseUpdates, ensureWorktreeWhole, workstreamChanges } from './index';
 
 let h: DeliveryHarness;
 afterEach(() => {
@@ -63,6 +64,14 @@ async function commitOnBatch(batch: BatchDto, path: string, content = `${path}\n
   return sha;
 }
 
+/** A lockfile and seeded packages on main, so a cut installs and records what it installed. */
+function withLockfile(): void {
+  h.commit('.gitignore', 'node_modules/\n');
+  h.commit('pnpm-lock.yaml', 'lockfileVersion: 9\n');
+  h.git$('push', '-q', 'origin', 'main');
+  mkdirSync(join(h.repo, 'node_modules', 'pkg'), { recursive: true });
+}
+
 /** The delivery log's lines with message `msg`. */
 const logged = (msg: string) => h.logs.lines().filter((line) => line['msg'] === msg);
 
@@ -103,6 +112,7 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
     const before = state(pathOf(batch));
     expect(await createBaseUpdates(h.ctx).beforeGate(batch.id, signal)).toEqual({
       kind: 'up_to_date',
+      note: null,
     });
     expect(state(pathOf(batch))).toEqual(before);
     expect(getBatch(h.store.db, batch.id).baseSha).toBe(batch.baseSha);
@@ -142,8 +152,123 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
     const update = await createBaseUpdates(h.ctx).beforeGate(batch.id, signal);
     expect(update).toMatchObject({ kind: 'merged' });
     expect(update.kind === 'merged' && update.note).toMatch(
-      /^10db merged origin\/main into this branch, but the install its lockfile needs failed \(exit 1; log: .+\.log\), so the packages may not match it\.$/,
+      /^The install this branch's lockfile needs failed \(exit 1; log: .+\.log\), so its packages may not match it\.$/,
     );
+  });
+
+  it('installs again at the next gate when the last install failed, and not once one passed', async () => {
+    h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+    withLockfile();
+    const { batch } = await opened();
+    await commitOnBatch(batch, 'src/api/alpha.txt');
+    h.teammatePush('main', 'pnpm-lock.yaml', 'lockfileVersion: 9\npackages: {}\n');
+    h.pnpm.failWith(1, 'ERR_PNPM_FETCH_403');
+    const updates = createBaseUpdates(h.ctx);
+    expect((await updates.beforeGate(batch.id, signal)).kind).toBe('merged');
+    expect(h.pnpm.calls()).toHaveLength(2);
+    h.pnpm.succeed();
+    expect(await updates.beforeGate(batch.id, signal)).toEqual({ kind: 'up_to_date', note: null });
+    expect(h.pnpm.calls()).toHaveLength(3);
+    await updates.beforeGate(batch.id, signal);
+    expect(h.pnpm.calls()).toHaveLength(3);
+  });
+
+  it('installs at the next gate of a worktree made again for Retry', async () => {
+    h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+    withLockfile();
+    const { batch } = await opened();
+    await commitOnBatch(batch, 'src/api/alpha.txt');
+    expect(h.pnpm.calls()).toHaveLength(1);
+    // The repair's install fails, so the worktree it made holds the checkout's older packages.
+    rmSync(pathOf(batch), { recursive: true, force: true });
+    h.pnpm.failWith(1, 'ERR_PNPM_FETCH_403');
+    expect(await ensureWorktreeWhole(h.ctx, batch, signal)).toBe('refused');
+    h.pnpm.succeed();
+    expect(await ensureWorktreeWhole(h.ctx, batch, signal)).toBe('replaced');
+    expect(h.pnpm.calls()).toHaveLength(3);
+    await createBaseUpdates(h.ctx).beforeGate(batch.id, signal);
+    // The repair's own install passed and recorded its lockfile: no install at the gate.
+    expect(h.pnpm.calls()).toHaveLength(3);
+  });
+
+  it('moves the start of a task that began after an earlier merge onto the newly merged base, so its changes are only its own', async () => {
+    h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+    // Two linked tasks share one batch and its worktree.
+    const alpha = h.addTask('Alpha');
+    const beta = h.addTask('Beta', { areas: ['ui'], dependsOn: [alpha.id] });
+    const started = h.only(
+      h.starter.startBatch(h.project.id, { title: 'Pair', taskIds: [alpha.id, beta.id] }),
+    );
+    await h.jobs.idle();
+    const batch = getBatch(h.store.db, started.id);
+    const member = (taskId: string) =>
+      h.only(listWorkstreams(h.store.db, { batchId: batch.id }).filter((w) => w.taskId === taskId));
+    const path = pathOf(batch);
+    const startAt = (id: WorkstreamDto['id'], sha: string) => {
+      h.state.write((c) => {
+        patchWorkstream(c, id, null, { baseHead: sha });
+      });
+    };
+    startAt(member(alpha.id).id, batch.baseSha ?? '');
+    await commitOnBatch(batch, 'src/api/alpha.txt');
+    h.teammatePush('main', 'src/ui/first.txt');
+    const updates = createBaseUpdates(h.ctx);
+    expect((await updates.beforeGate(batch.id, signal)).kind).toBe('merged');
+    // Beta starts on that merge, then commits its own file; main moves on again.
+    startAt(member(beta.id).id, gitIn(path, 'rev-parse', 'HEAD'));
+    await commitOnBatch(batch, 'src/ui/beta.txt');
+    h.teammatePush('main', 'src/ui/second.txt');
+    expect((await updates.beforeGate(batch.id, signal)).kind).toBe('merged');
+    const changes = await workstreamChanges({ db: h.store.db, git: h.git }, member(beta.id).id);
+    expect(changes.files.map((f) => f.path)).toEqual(['src/ui/beta.txt']);
+    const kept = gitIn(path, 'rev-parse', `refs/10db/starts/${member(beta.id).id}`);
+    expect(getWorkstreamRow(h.store.db, member(beta.id).id).baseHead).toBe(kept);
+  });
+
+  it("never moves the batch's base back when the base branch was forced to an older commit", async () => {
+    h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+    h.teammatePush('main', 'src/ui/first.txt');
+    const { batch, ws } = await opened();
+    await commitOnBatch(batch, 'src/api/alpha.txt');
+    h.origin$('update-ref', 'refs/heads/main', h.origin$('rev-parse', 'main~1'));
+    expect((await createBaseUpdates(h.ctx).beforeGate(batch.id, signal)).kind).toBe('up_to_date');
+    expect(getBatch(h.store.db, batch.id).baseSha).toBe(batch.baseSha);
+    expect(getWorkstreamRow(h.store.db, ws.id).baseHead).toBe(batch.baseSha);
+  });
+
+  describe('never throws: what goes wrong is a note', () => {
+    it('when the install throws', async () => {
+      h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+      // A lockfile with no packages to seed, so the cut installs nothing and the gate must.
+      h.commit('pnpm-lock.yaml', 'lockfileVersion: 9\n');
+      h.git$('push', '-q', 'origin', 'main');
+      const { batch } = await opened();
+      const ctx = {
+        ...h.ctx,
+        dependencies: { refresh: () => Promise.reject(new Error('the install blew up')) },
+      };
+      const update = await createBaseUpdates(ctx).beforeGate(batch.id, signal);
+      expect(update.kind).toBe('up_to_date');
+      expect(update.kind === 'up_to_date' && update.note).toMatch(
+        /^10db couldn't run the install this branch's lockfile needs \(the install blew up\)/,
+      );
+    });
+
+    it('when the conflict card cannot be raised', async () => {
+      h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+      const { batch } = await opened();
+      await commitOnBatch(batch, 'README.md', '# ours\n');
+      h.teammatePush('main', 'README.md', '# theirs\n');
+      const inbox = {
+        ...h.ctx.inbox,
+        flag: () => {
+          throw new Error('the inbox is closed');
+        },
+      };
+      const update = await createBaseUpdates({ ...h.ctx, inbox }).beforeGate(batch.id, signal);
+      expect(update.kind).toBe('not_merged');
+      expect(update.kind === 'not_merged' && update.note).toMatch(/^origin\/main conflicts/);
+    });
   });
 
   describe('gates the branch as it is, and says why', () => {
@@ -163,7 +288,7 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
           h.teammatePush('main', 'README.md', '# theirs\n');
           writeFileSync(join(pathOf(batch), 'README.md'), '# a lane is still writing\n');
         },
-        note: /^Uncommitted changes in README\.md are in the way of origin\/main's newer commits, so this gate ran without them/,
+        note: /^Uncommitted or ignored files are in the way of origin\/main's newer commits \(README\.md\), so this gate ran without them/,
       },
       {
         name: 'a fetch that fails',
@@ -202,8 +327,36 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
     const card = h.only(h.cards());
     expect(card.title).toBe('Batch "Alpha" conflicts with main');
     expect(card.body).toContain('- README.md');
-    expect(card.body).toContain(`git -C ${pathOf(batch)} merge origin/main`);
+    expect(card.body).toContain(
+      `git -C '${pathOf(batch)}' -c core.hooksPath=/dev/null merge 'origin/main'`,
+    );
+    expect(card.body).toContain('Update branch');
     expect(card.detail).toEqual({ batchId: batch.id, paths: ['README.md'] });
+  });
+
+  it('withdraws the conflict card once the branch holds the base', async () => {
+    h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+    const { batch } = await opened();
+    await commitOnBatch(batch, 'README.md', '# ours\n');
+    h.teammatePush('main', 'README.md', '# theirs\n');
+    const updates = createBaseUpdates(h.ctx);
+    await updates.beforeGate(batch.id, signal);
+    expect(h.cards()).toHaveLength(1);
+    // The builder merges by hand in the worktree, keeping the batch's side of the conflict.
+    gitIn(
+      pathOf(batch),
+      '-c',
+      'core.hooksPath=/dev/null',
+      'merge',
+      '-q',
+      '-X',
+      'ours',
+      '-m',
+      'Merge main',
+      'origin/main',
+    );
+    expect((await updates.beforeGate(batch.id, signal)).kind).toBe('up_to_date');
+    expect(h.cards()).toEqual([]);
   });
 
   it('does nothing once shutdown has aborted it', async () => {
@@ -245,6 +398,7 @@ describe("a batch in the builder's own checkout (shared mode)", () => {
     await commitOnBatch(batch, 'src/api/alpha.txt');
     expect(await createBaseUpdates(h.ctx).beforeGate(batch.id, signal)).toEqual({
       kind: 'up_to_date',
+      note: null,
     });
   });
 });
