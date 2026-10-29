@@ -1,5 +1,6 @@
 import { ClaimKind, type ProjectDto, type WorkstreamId } from '@10db/contracts';
 import { classifyPath } from '../guard';
+import { isInsideClaudeCodeBookkeeping } from './claude-code-bookkeeping';
 
 /** More strays than this in one batch become a single card. */
 export const STRAY_BULK_THRESHOLD = 50;
@@ -13,8 +14,15 @@ const SENSITIVE_DIRECTORIES = ['.claude', '.codex', '.git/hooks', '.git/info'] a
 const SENSITIVE_FILES = ['.mcp.json', '.git/config'] as const;
 const SENSITIVE_BASENAME = /^\.env(\..+)?$/;
 
-/** A sensitive directory itself counts: moving one into place arrives as a single event for its own path. */
+/**
+ * A sensitive directory itself counts: moving one into place arrives as a single event for its own path.
+ * A path inside Claude Code's own bookkeeping doesn't (`claude-code-bookkeeping.ts`); it is judged like any
+ * other path, so it is dropped while git ignores it and checked against the claims when git reports it. The
+ * bookkeeping directory's own path stays sensitive here, since text can't tell a link or a file there from the
+ * directory; the watcher exempts it after looking.
+ */
 export function isSensitivePath(rel: string): boolean {
+  if (isInsideClaudeCodeBookkeeping(rel)) return false;
   if (SENSITIVE_DIRECTORIES.some((dir) => rel === dir || rel.startsWith(`${dir}/`))) return true;
   if (SENSITIVE_FILES.some((file) => file === rel)) return true;
   return SENSITIVE_BASENAME.test(rel.slice(rel.lastIndexOf('/') + 1));

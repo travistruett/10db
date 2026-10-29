@@ -13,7 +13,7 @@ import {
 import { parseScopedConfig, type ConfigEntry } from './config-trust';
 import { equalOrUnder, insideAny, isPlainDirectory, samePath, surelyInside } from './lane-writable';
 import { branchOfRef, firstLine, parseBranches, type RepoFacts, type RepoRefusal } from './inspect';
-import { comparablePath, existsAsEntry } from './path-entries';
+import { comparablePath, entryAt, existsAsEntry, foldedName, sameEntry } from './path-entries';
 import { gitNetwork, type NetworkCall, type NetworkRun } from './network';
 import { localRemotePath, parseRemoteUrl } from './remote-url';
 import { GitError, runGit, runGitCapped, type RunOptions } from './run';
@@ -88,6 +88,56 @@ export type FileAt =
   | { readonly kind: 'not_regular'; readonly mode: string }
   | { readonly kind: 'too_large'; readonly bytes: number };
 
+/** What `mergeIntoBranch` did; `from` is the commit it was asked to bring in. */
+export type BranchMerge =
+  /** The branch already holds `from`; nothing moved. */
+  | { readonly kind: 'up_to_date'; readonly from: string }
+  /** The branch and its files moved to `head`; `paths` are the files that changed. */
+  | {
+      readonly kind: 'merged';
+      readonly from: string;
+      readonly head: string;
+      /** True when the branch had nothing of its own and now names `from` itself. */
+      readonly fastForward: boolean;
+      readonly paths: readonly string[];
+    }
+  /** Both sides changed these files in ways git can't combine; nothing was written. */
+  | { readonly kind: 'conflict'; readonly from: string; readonly paths: readonly string[] }
+  /**
+   * Files lie where the merge would write, so nothing was written: `changed` are uncommitted changes
+   * and untracked files git reports at paths it writes; `kept` are files git doesn't track (ignored
+   * ones, or a whole directory, shown with its `/`) at a path the merge adds, or where it needs a
+   * directory. read-tree treats an ignored file as disposable; a hand-made `.env` is not.
+   */
+  | {
+      readonly kind: 'blocked';
+      readonly from: string;
+      readonly changed: readonly string[];
+      readonly kept: readonly string[];
+    };
+
+/** Where `mergedCommit` keeps the commits it makes reachable. */
+const KEPT_REF_PREFIX = 'refs/10db/';
+
+export interface MergedCommitInput {
+  readonly repo: string;
+  readonly ours: string;
+  readonly theirs: string;
+  /** A ref under `refs/10db/` that keeps the commit reachable; it is set, whatever it held. */
+  readonly ref: string;
+  readonly message: string;
+}
+
+export interface MergeIntoBranchInput {
+  /** The checkout that has `branch` checked out. */
+  readonly repo: string;
+  readonly branch: string;
+  /** The commit to bring in, such as `refs/remotes/origin/main`. */
+  readonly from: string;
+  /** The merge commit's message. */
+  readonly message: string;
+}
+
 /** The modes git stores a regular file with. */
 const REGULAR_FILE_MODES: readonly string[] = ['100644', '100755'];
 
@@ -129,7 +179,10 @@ export interface Git {
   changedFilesSince(repo: string, base: string): Promise<string[]>;
   /** Files whose committed content differs between `base` and `tip`, sorted; nothing uncommitted. */
   filesChangedBetween(repo: string, base: string, tip: string): Promise<string[]>;
-  /** Commits on `tip` (HEAD unless named) since `base`, oldest first. */
+  /**
+   * Commits on `tip` (HEAD unless named) since `base`, oldest first, following first parents: a merge
+   * that brought another branch in is listed, the commits it brought are not.
+   */
   commitsSince(repo: string, base: string, tip?: string): Promise<string[]>;
   /** Filters the tree at `rev`, or the checkout's own attributes, ask for; empty when none. */
   filtersIn(repo: string, rev: string): Promise<{ path: string; filter: string }[]>;
@@ -144,6 +197,30 @@ export interface Git {
     opId: string;
     branch: string;
   }): Promise<{ sha: string; alreadyCommitted: boolean }>;
+  /**
+   * Brings commit `from` into `branch`, which `repo` must have checked out, running nothing from the
+   * repository: up to date when the branch holds it, a fast-forward when the branch has nothing of
+   * its own, else a merge commit with the branch as first parent, made from `merge-tree`'s tree with
+   * no attributes, so no merge driver runs. The files follow through `read-tree -m -u`, which keeps
+   * uncommitted changes elsewhere. A conflict, or a change in the way, writes nothing. A base whose
+   * tree asks for a filter is refused, as a push of it would be.
+   */
+  mergeIntoBranch(input: MergeIntoBranchInput): Promise<BranchMerge>;
+  /**
+   * The commit that merges `theirs` into `ours`, as `mergeIntoBranch` would make it but unsigned and
+   * kept reachable at `ref` alone: no file, index, HEAD or branch is touched. `ours` when it already
+   * holds `theirs`, `theirs` when `ours` is in its history (both recording nothing), and null on a
+   * conflict.
+   */
+  mergedCommit(input: MergedCommitInput): Promise<string | null>;
+  /** The refs under `prefix`, itself under `refs/10db/`, by full name and sorted. */
+  keptRefs(repo: string, prefix: string): Promise<string[]>;
+  /** Deletes `ref`, under `refs/10db/`, whatever it names; one already gone is no error. */
+  deleteKeptRef(repo: string, ref: string): Promise<void>;
+  /** True when commit `ancestor` is in the history of `tip`, `tip` itself included. */
+  isAncestor(repo: string, ancestor: string, tip: string): Promise<boolean>;
+  /** The blob `path` holds in commit `rev`, read from the object store; null for anything else. */
+  blobAt(repo: string, rev: string, path: string): Promise<string | null>;
   /**
    * Pins `candidate`, the state a refusal card showed the builder, if the checkout still matches it;
    * otherwise refuses again with what it found. The builder's choice only.
@@ -380,6 +457,9 @@ function readIfPresent(path: string): string {
  */
 export function createGit(opts: GitOptions = {}): Git {
   const locks = new Map<string, Promise<unknown>>();
+  // Fetches of one checkout run one at a time, apart from its commits: two at once would race for
+  // the same remote-tracking ref ("cannot lock ref"), and a fetch must not hold up a lane's commit.
+  const fetches = new Map<string, Promise<unknown>>();
   const pins = opts.pins ?? memoryPinStore();
   const bin = opts.bin ?? 'git';
 
@@ -389,15 +469,24 @@ export function createGit(opts: GitOptions = {}): Git {
     return error;
   }
 
-  /** Runs `fn` after every earlier locked call for the same checkout has settled. */
-  function withRepoLock<T>(repo: string, fn: () => Promise<T>): Promise<T> {
-    const previous = locks.get(repo) ?? Promise.resolve();
+  /** Runs `fn` after every earlier call under `key` in `held` has settled. */
+  function serialized<T>(
+    held: Map<string, Promise<unknown>>,
+    key: string,
+    fn: () => Promise<T>,
+  ): Promise<T> {
+    const previous = held.get(key) ?? Promise.resolve();
     const next = previous.then(fn, fn);
-    locks.set(
-      repo,
+    held.set(
+      key,
       next.catch(() => undefined),
     );
     return next;
+  }
+
+  /** Runs `fn` after every earlier locked call for the same checkout has settled. */
+  function withRepoLock<T>(repo: string, fn: () => Promise<T>): Promise<T> {
+    return serialized(locks, repo, fn);
   }
 
   /** Each checkout's empty tree, as an attribute source that gives git no attributes at all. */
@@ -636,6 +725,9 @@ export function createGit(opts: GitOptions = {}): Git {
     const out = await git(c, [
       'log',
       '--no-show-signature',
+      // The branch's own line: a base merged in can carry the trailers of the lane commits a
+      // squash-merged pull request folded in.
+      '--first-parent',
       '-n',
       String(OP_SEARCH_DEPTH),
       `--format=%H%x1f%(trailers:key=${OP_TRAILER},valueonly,separator=%x2c)%x1e`,
@@ -876,6 +968,231 @@ export function createGit(opts: GitOptions = {}): Git {
     return changed;
   }
 
+  /** True when `ref` points at another ref: a write through it would land on the branch it names. */
+  async function isSymbolic(c: Pinned, ref: string): Promise<boolean> {
+    try {
+      return (await git(c, ['symbolic-ref', '-q', ref])).trim() !== '';
+    } catch (error) {
+      if (error instanceof GitError && error.exitCode === 1) return false;
+      throw error;
+    }
+  }
+
+  /** True when commit `ancestor` is reachable from `tip`, `tip` itself included. */
+  async function isAncestor(c: Pinned, ancestor: string, tip: string): Promise<boolean> {
+    try {
+      await git(c, ['merge-base', '--is-ancestor', ancestor, tip]);
+      return true;
+    } catch (error) {
+      if (error instanceof GitError && error.exitCode === 1) return false;
+      throw error;
+    }
+  }
+
+  /**
+   * The tree that merges `theirs` into `ours`, and the files that conflict (none when it merged
+   * cleanly). merge-tree writes objects only: no file, index, ref or hook, and with no attributes no
+   * merge driver. It exits 1 on a conflict, listing the conflicted files after the tree.
+   */
+  async function mergeTree(
+    c: Pinned,
+    ours: string,
+    theirs: string,
+  ): Promise<{ tree: string; conflicted: string[] }> {
+    const [tree = '', ...conflicted] = (
+      await git(
+        c,
+        ['merge-tree', '--write-tree', '--name-only', '--no-messages', '-z', ours, theirs],
+        { answerExitCodes: [1] },
+      )
+    )
+      .split('\0')
+      .filter(Boolean);
+    if (!OBJECT_ID.test(tree)) throw new GitError(['merge-tree'], 'merge-tree named no tree', null);
+    return { tree, conflicted: [...new Set(conflicted)].sort() };
+  }
+
+  /**
+   * What lies where the merge from `tip` to `head` would put a new file, though git tracks nothing
+   * there: an entry at an added path (a directory with its `/`, when it holds anything git doesn't
+   * track), and a non-directory where an added path needs one. Paths the merge itself deletes or
+   * changes are git's to replace, and so is what an added path finds of one of them on a file system
+   * that folds case or normalization (a rename of `Guide.md` to `GUIDE.md` finds `Guide.md`). An
+   * ignored file under a directory the merge only adds to is no concern.
+   */
+  async function untrackedInTheWay(
+    c: Pinned,
+    tip: string,
+    head: string,
+    written: ReadonlySet<string>,
+  ): Promise<string[]> {
+    const added = (
+      await git(c, [
+        'diff-tree',
+        '-r',
+        '--name-only',
+        '--no-renames',
+        '--diff-filter=A',
+        '-z',
+        tip,
+        head,
+      ])
+    )
+      .split('\0')
+      .filter(Boolean);
+    const fresh = new Set(added);
+    const replaced = new Map<string, string[]>();
+    for (const path of written)
+      if (!fresh.has(path))
+        replaced.set(foldedName(path), [...(replaced.get(foldedName(path)) ?? []), path]);
+    /** True when what is at `rel` is a path the merge replaces itself, by that name or a folded one. */
+    const isReplaced = (rel: string): boolean =>
+      (replaced.get(foldedName(rel)) ?? []).some((other) =>
+        sameEntry(join(c.real, rel), join(c.real, other)),
+      );
+    const found = new Set<string>();
+    for (const path of added) {
+      const entry = entryAt(c.real, path);
+      if (entry !== 'missing' && isReplaced(path)) continue;
+      if (entry === 'directory') {
+        // A tracked directory the merge empties is git's; anything else in it is not.
+        const held = await git(c, ['ls-files', '-z', '--others', '--directory', '--', path], {
+          env: { GIT_LITERAL_PATHSPECS: '1' },
+        });
+        if (held !== '') found.add(`${path}/`);
+      } else if (entry === 'other') {
+        found.add(path);
+      }
+      for (let parent = posix.dirname(path); parent !== '.'; parent = posix.dirname(parent))
+        if (entryAt(c.real, parent) === 'other' && !isReplaced(parent)) found.add(parent);
+    }
+    return [...found].sort();
+  }
+
+  async function mergedCommit(input: MergedCommitInput): Promise<string | null> {
+    if (!input.ref.startsWith(KEPT_REF_PREFIX))
+      throw new InvalidError(`${input.ref} is not under ${KEPT_REF_PREFIX}`);
+    return withRepoLock(realpathSync(input.repo), async () => {
+      const c = await pinned(input.repo);
+      const ours = await revParse(c, `${input.ours}^{commit}`);
+      const theirs = await revParse(c, `${input.theirs}^{commit}`);
+      if (ours === null || theirs === null)
+        throw new InvalidError(`${ours === null ? input.ours : input.theirs} names no commit`);
+      if (await isAncestor(c, theirs, ours)) return ours;
+      if (await isAncestor(c, ours, theirs)) return theirs;
+      const { tree, conflicted } = await mergeTree(c, ours, theirs);
+      if (conflicted.length > 0) return null;
+      // Never pushed, so never signed.
+      const sha = (
+        await git(c, ['commit-tree', '--no-gpg-sign', tree, '-p', ours, '-p', theirs], {
+          input: `${input.message}\n`,
+        })
+      ).trim();
+      await git(c, ['update-ref', '--no-deref', '-m', '10db: kept merge', input.ref, sha]);
+      return sha;
+    });
+  }
+
+  /** One fetch of `branch` into `origin/<branch>`, from origin's pinned fetch URL. */
+  async function fetchOnce(repo: string, branch: string, net: NetworkCall): Promise<NetworkRun> {
+    const c = await pinned(repo);
+    const network = await networkConfig(c, net);
+    const url = await pinnedUrl(c, 'fetch');
+    return gitNetwork(
+      c.real,
+      network.config,
+      [
+        'fetch',
+        '--no-tags',
+        '--no-recurse-submodules',
+        '--',
+        url,
+        `+refs/heads/${branch}:refs/remotes/origin/${branch}`,
+      ],
+      net,
+      { bin, env: { ...c.env, ...network.env } },
+    );
+  }
+
+  async function mergeIntoBranch(input: MergeIntoBranchInput): Promise<BranchMerge> {
+    // Inside the checkout's lock, so no commit of the daemon's moves the branch meanwhile.
+    return withRepoLock(realpathSync(input.repo), async () => {
+      const c = await pinned(input.repo);
+      const ref = `refs/heads/${input.branch}`;
+      if (await isSymbolic(c, ref))
+        throw new InvalidError(`${ref} points at another branch, so 10db merges nothing into it`);
+      const tip = await revParse(c, `${ref}^{commit}`);
+      if (tip === null) throw new InvalidError(`Branch ${input.branch} does not exist`);
+      const current = await currentBranch(c);
+      if (current !== input.branch)
+        throw new InvalidError(
+          `${c.real} is on ${current ?? 'a detached HEAD'}, not ${input.branch}, so 10db merges nothing into it`,
+        );
+      const from = await revParse(c, `${input.from}^{commit}`);
+      if (from === null) throw new InvalidError(`${input.from} names no commit`);
+      if (await isAncestor(c, from, tip)) return { kind: 'up_to_date', from };
+      const needed = await filters(c, from);
+      if (needed.length > 0) throw refusal(c.real, { kind: GitTrustFailure.Filter, paths: needed });
+      const fastForward = await isAncestor(c, tip, from);
+      let head = from;
+      if (!fastForward) {
+        const { tree, conflicted } = await mergeTree(c, tip, from);
+        if (conflicted.length > 0) return { kind: 'conflict', from, paths: conflicted };
+        const sign = signing(c, await configEntries(c));
+        head = (
+          await git(c, ['commit-tree', ...sign.flags, tree, '-p', tip, '-p', from], {
+            input: `${input.message}\n`,
+            config: sign.config,
+          })
+        ).trim();
+      }
+      const paths = (
+        await git(c, ['diff-tree', '-r', '--name-only', '--no-renames', '-z', tip, head])
+      )
+        .split('\0')
+        .filter(Boolean)
+        .sort();
+      const written = new Set(paths);
+      const changed = (await changes(c)).filter((path) => written.has(path));
+      const reported = new Set(changed);
+      const kept = (await untrackedInTheWay(c, tip, head, written)).filter(
+        (path) => !reported.has(path),
+      );
+      if (changed.length > 0 || kept.length > 0) return { kind: 'blocked', from, changed, kept };
+      // Fresh stat data, so read-tree doesn't take an unchanged file for an edited one and refuse.
+      await git(c, ['update-index', '-q', '--ignore-submodules', '--refresh']).catch(
+        () => undefined,
+      );
+      try {
+        // Files first, then the branch: a crash between the two leaves the base's changes as
+        // uncommitted edits, never the branch claiming files the checkout doesn't hold.
+        await git(c, ['read-tree', '-m', '-u', tip, head]);
+      } catch (error) {
+        if (!(error instanceof GitError)) throw error;
+        throw new InvalidError(
+          `10db could not write ${input.from} into ${c.real}: ${error.message}`,
+        );
+      }
+      try {
+        // Compare and swap on the branch itself, never through HEAD or a symbolic ref.
+        await git(c, [
+          'update-ref',
+          '--no-deref',
+          '-m',
+          `10db: merge ${input.from}`,
+          ref,
+          head,
+          tip,
+        ]);
+      } catch (error) {
+        await git(c, ['read-tree', '-m', '-u', head, tip]).catch(() => undefined);
+        if (!(error instanceof GitError)) throw error;
+        throw refusal(c.real, { kind: GitTrustFailure.Ref, ref, reason: 'raced' });
+      }
+      return { kind: 'merged', from, head, fastForward, paths };
+    });
+  }
+
   async function commit(input: {
     repo: string;
     paths: readonly string[];
@@ -889,13 +1206,8 @@ export function createGit(opts: GitOptions = {}): Git {
       const c = await pinned(input.repo);
       const { real } = c;
       const ref = `refs/heads/${input.branch}`;
-      try {
-        const target = (await git(c, ['symbolic-ref', '-q', ref])).trim();
-        if (target !== '')
-          throw refusal(real, { kind: GitTrustFailure.Ref, ref, reason: 'symbolic' });
-      } catch (error) {
-        if (!(error instanceof GitError && error.exitCode === 1)) throw error;
-      }
+      if (await isSymbolic(c, ref))
+        throw refusal(real, { kind: GitTrustFailure.Ref, ref, reason: 'symbolic' });
       const tip = await revParse(c, `${ref}^{commit}`);
       if (tip === null) throw new InvalidError(`Branch ${input.branch} does not exist`);
       const head = await currentBranch(c);
@@ -1243,23 +1555,7 @@ export function createGit(opts: GitOptions = {}): Git {
       return pinnedUrl(await pinned(repo), 'push');
     },
     async fetch(repo, branch, net) {
-      const c = await pinned(repo);
-      const network = await networkConfig(c, net);
-      const url = await pinnedUrl(c, 'fetch');
-      return gitNetwork(
-        c.real,
-        network.config,
-        [
-          'fetch',
-          '--no-tags',
-          '--no-recurse-submodules',
-          '--',
-          url,
-          `+refs/heads/${branch}:refs/remotes/origin/${branch}`,
-        ],
-        net,
-        { bin, env: { ...c.env, ...network.env } },
-      );
+      return serialized(fetches, realpathSync(repo), () => fetchOnce(repo, branch, net));
     },
     async switchNewBranch(repo, name, startPoint) {
       await withRepoLock(realpathSync(repo), async () => {
@@ -1325,7 +1621,14 @@ export function createGit(opts: GitOptions = {}): Git {
         .sort();
     },
     async commitsSince(repo, base, tip = 'HEAD') {
-      return (await git(await pinned(repo), ['rev-list', '--reverse', `${base}..${tip}`]))
+      return (
+        await git(await pinned(repo), [
+          'rev-list',
+          '--reverse',
+          '--first-parent',
+          `${base}..${tip}`,
+        ])
+      )
         .split('\n')
         .filter(Boolean);
     },
@@ -1351,6 +1654,39 @@ export function createGit(opts: GitOptions = {}): Git {
       return filters(await pinned(repo), rev);
     },
     commit,
+    mergeIntoBranch,
+    mergedCommit,
+    async keptRefs(repo, prefix) {
+      if (!prefix.startsWith(KEPT_REF_PREFIX))
+        throw new InvalidError(`${prefix} is not under ${KEPT_REF_PREFIX}`);
+      return (await git(await pinned(repo), ['for-each-ref', '--format=%(refname)', prefix]))
+        .split('\n')
+        .filter(Boolean)
+        .sort();
+    },
+    async deleteKeptRef(repo, ref) {
+      if (!ref.startsWith(KEPT_REF_PREFIX))
+        throw new InvalidError(`${ref} is not under ${KEPT_REF_PREFIX}`);
+      const c = await pinned(repo);
+      if ((await revParse(c, ref)) === null) return;
+      await git(c, ['update-ref', '--no-deref', '-d', ref]);
+    },
+    async isAncestor(repo, ancestor, tip) {
+      return isAncestor(await pinned(repo), ancestor, tip);
+    },
+    async blobAt(repo, rev, path) {
+      const c = await pinned(repo);
+      const out = await git(c, ['ls-tree', '-z', '--long', '--full-tree', rev, '--', path], {
+        env: { GIT_LITERAL_PATHSPECS: '1' },
+      });
+      const entry = out
+        .split('\0')
+        .map((line) => LS_TREE_ENTRY.exec(line))
+        .find((match) => match?.[5] === path);
+      if (!entry) return null;
+      const [, mode = '', type, oid = ''] = entry;
+      return type === 'blob' && REGULAR_FILE_MODES.includes(mode) ? oid : null;
+    },
     addWorktree,
     removeWorktree,
     worktreeChanges,

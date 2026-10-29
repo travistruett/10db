@@ -1,11 +1,38 @@
 import { lstatSync, realpathSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 
 /** True for anything at `path`, a file or a link whose target is gone included. */
 export function existsAsEntry(path: string): boolean {
   try {
     lstatSync(path);
     return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * What is at `rel` under `root`, read without following a link there: nothing, a real directory, or
+ * anything else (a file, a link, a link whose target is gone). A path under a file reads as nothing.
+ */
+export function entryAt(root: string, rel: string): 'missing' | 'directory' | 'other' {
+  try {
+    return lstatSync(join(root, rel)).isDirectory() ? 'directory' : 'other';
+  } catch {
+    return 'missing';
+  }
+}
+
+/** A name as a case- and normalization-insensitive file system (macOS's) compares it. */
+export function foldedName(path: string): string {
+  return path.normalize('NFC').toLowerCase();
+}
+
+/** True when `a` and `b` name one entry on disk, a link not followed: the same device and inode. */
+export function sameEntry(a: string, b: string): boolean {
+  try {
+    const [x, y] = [lstatSync(a), lstatSync(b)];
+    return x.dev === y.dev && x.ino === y.ino;
   } catch {
     return false;
   }

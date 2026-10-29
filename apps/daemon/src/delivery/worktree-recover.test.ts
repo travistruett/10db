@@ -1,8 +1,9 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { mintId, type BatchDto, type BatchId, type WorkstreamDto } from '@10db/contracts';
 import {
+  clearWorktreePath,
   deleteAppSetting,
   getAppSetting,
   getBatch,
@@ -524,6 +525,18 @@ describe('sweepWorktrees', () => {
       pinKept: false,
     },
     {
+      name: 'a 10db-locked orphan holding only build info and caches the gate wrote',
+      entry: () => {
+        const path = worktreeAt(under('typechecked'), ours(mintId('Batch')));
+        writeFileSync(join(h.repo, '.git', 'info', 'exclude'), '*.tsbuildinfo\n.eslintcache\n');
+        writeFileSync(join(path, 'tsconfig.tsbuildinfo'), '{}\n');
+        writeFileSync(join(path, '.eslintcache'), '[]\n');
+        return path;
+      },
+      removed: true,
+      pinKept: false,
+    },
+    {
       name: 'a 10db-locked orphan whose directory was deleted',
       entry: () => {
         const path = worktreeAt(under('deleted'), ours(mintId('Batch')));
@@ -619,7 +632,14 @@ describe('sweepWorktrees', () => {
     expect(h.cards()).toEqual([]);
   });
 
-  it.each<{ name: string; change: (path: string) => void; shown: string; why: string }>([
+  it.each<{
+    name: string;
+    change: (path: string) => void;
+    shown: string;
+    /** Text the card leaves out: what the removal command may take without asking. */
+    hidden?: string;
+    why: string;
+  }>([
     {
       name: 'an edited file',
       change: (path) => {
@@ -646,6 +666,17 @@ describe('sweepWorktrees', () => {
       why: 'it holds git-ignored files',
     },
     {
+      name: 'a git-ignored file beside build info',
+      change: (path) => {
+        writeFileSync(join(h.repo, '.git', 'info', 'exclude'), '.env\n*.tsbuildinfo\n');
+        writeFileSync(join(path, '.env'), 'mine\n');
+        writeFileSync(join(path, 'tsconfig.tsbuildinfo'), '{}\n');
+      },
+      shown: '- .env',
+      hidden: 'tsbuildinfo',
+      why: 'it holds git-ignored files',
+    },
+    {
       name: 'an untracked file beside a git-ignored one',
       change: (path) => {
         writeFileSync(join(h.repo, '.git', 'info', 'exclude'), '.env\n');
@@ -656,6 +687,16 @@ describe('sweepWorktrees', () => {
       why: 'it has uncommitted changes',
     },
     {
+      name: 'an untracked file beside build info',
+      change: (path) => {
+        writeFileSync(join(h.repo, '.git', 'info', 'exclude'), '*.tsbuildinfo\n');
+        writeFileSync(join(path, 'tsconfig.tsbuildinfo'), '{}\n');
+        writeFileSync(join(path, 'notes.txt'), 'mine\n');
+      },
+      shown: '- tsconfig.tsbuildinfo',
+      why: 'it has uncommitted changes',
+    },
+    {
       name: 'a git file git cannot read',
       change: (path) => {
         writeFileSync(join(path, '.git'), 'not a gitfile\n');
@@ -663,7 +704,7 @@ describe('sweepWorktrees', () => {
       shown: "10db couldn't read",
       why: "it can't be read",
     },
-  ])('keeps an orphan with $name and names it once', async ({ change, shown, why }) => {
+  ])('keeps an orphan with $name and names it once', async ({ change, shown, hidden, why }) => {
     mkdirSync(h.worktreeRoot, { recursive: true });
     const path = worktreeAt(under('dirty'), ours(mintId('Batch')));
     change(path);
@@ -674,8 +715,29 @@ describe('sweepWorktrees', () => {
     const card = h.only(h.cards());
     expect(card.title).toBe(`10db kept ${path}: ${why}`);
     expect(card.body).toContain(shown);
+    if (hidden !== undefined) expect(card.body).not.toContain(hidden);
     expect(card.body).toContain(`git -C '${h.repo}' worktree remove --force --force '${path}'`);
   });
+
+  it.each<{ name: string; file: string }>([
+    { name: 'git-ignored files', file: '.env' },
+    { name: 'uncommitted changes', file: 'notes.txt' },
+  ])(
+    'withdraws the card for an orphan kept for $name once a sweep removes it',
+    async ({ file }) => {
+      mkdirSync(h.worktreeRoot, { recursive: true });
+      const path = worktreeAt(under('kept'), ours(mintId('Batch')));
+      writeFileSync(join(h.repo, '.git', 'info', 'exclude'), '.env\n');
+      writeFileSync(join(path, file), 'mine\n');
+      expect(await sweep()).toEqual([]);
+      h.only(h.cards());
+
+      rmSync(join(path, file));
+      expect((await sweep()).map(comparable)).toEqual([comparable(path)]);
+
+      expect(h.cards()).toEqual([]);
+    },
+  );
 
   it('names a path that is not paste-safe as a code span, not a command', async () => {
     mkdirSync(h.worktreeRoot, { recursive: true });
@@ -699,6 +761,29 @@ describe('sweepWorktrees', () => {
     const orphan = worktreeAt(under('orphan'), ours(mintId('Batch')));
     expect((await sweep()).map(comparable)).toEqual([comparable(orphan)]);
     expect(existsSync(orphan)).toBe(false);
+  });
+
+  it('drops the kept start of a task no live worktree batch holds, and keeps the rest', async () => {
+    const live = h.starter.startTask(h.addTask('Live').id);
+    const done = h.starter.startTask(h.addTask('Done', { areas: ['ui'] }).id);
+    await h.jobs.idle();
+    const member = (id: BatchId) => h.only(listWorkstreams(h.store.db, { batchId: id })).id;
+    h.state.write((c) => {
+      transitionBatch(c, done.id, { to: 'SHIPPING' });
+      transitionBatch(c, done.id, { to: 'CLOSED' });
+      clearWorktreePath(c, done.id);
+    });
+    // This daemon's starts live under its own level; another daemon's, such as a dev daemon with its
+    // own data dir on the same repository, are not this sweep's to judge.
+    const mine = (id: string) => `refs/10db/${basename(h.worktreeRoot)}/starts/${id}`;
+    const theirs = `refs/10db/0a1b2c3d/starts/${mintId('Workstream')}`;
+    for (const id of [member(live.id), member(done.id), mintId('Workstream')])
+      h.git$('update-ref', mine(id), 'HEAD');
+    h.git$('update-ref', theirs, 'HEAD');
+    await sweep();
+    expect(h.git$('for-each-ref', '--format=%(refname)', 'refs/10db/').split('\n').sort()).toEqual(
+      [theirs, mine(member(live.id))].sort(),
+    );
   });
 
   it('prunes after removing', async () => {

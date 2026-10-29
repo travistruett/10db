@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   BatchDto,
@@ -18,6 +18,7 @@ import { FakeAdapter, type FakeScriptBook } from '../src/sessions';
 import { apiClient, quickFlowId } from './api-client';
 import { FakeGh } from './fake-gh';
 import {
+  createTempClone,
   createTempRepoWithOrigin,
   githubOrigin,
   isolatedGitEnv,
@@ -88,7 +89,7 @@ const git = (dir: string, ...args: string[]) =>
     .toString()
     .trim();
 
-async function start() {
+async function start(gateCommand = 'true') {
   daemon = await startDaemon({
     sandbox: null,
     dataDir: data.path,
@@ -106,7 +107,7 @@ async function start() {
   const project = await api.post('/projects', ProjectDto, {
     name: 'shop',
     repoPath: remote.repo.path,
-    gateCommand: 'true',
+    gateCommand,
     flowId: await quickFlowId(api),
     maxLanes: 3,
     areas: [{ name: 'ui', globs: ['src/ui/**'] }],
@@ -229,6 +230,61 @@ describe('worktree mode through the daemon', () => {
     // The main checkout is exactly as the builder left it.
     expect(snapshot()).toEqual(before);
     expect(before.branch).toBe('refs/heads/mine');
+  }, 90_000);
+
+  it("gates a task's work merged with main as origin has it now, not as it was cut, and ships the merge", async () => {
+    // The gate passes only where a teammate's newer commit on main is in the worktree.
+    const { api, project, tasks } = await start('test -f src/teammate.txt');
+    const alpha = tasks[0];
+    if (!alpha) throw new Error('no task');
+    const [started] = await api.post(`/projects/${project.id}/batches`, BatchStartResult, {
+      title: 'Alpha',
+      taskIds: [alpha.id],
+    });
+    if (!started) throw new Error('no batch');
+
+    // While the lane waits on its question, the teammate's change lands on main.
+    const [question] = await waitForAsync(async () => {
+      const open = (await api.get('/inbox?state=OPEN', z.array(InboxItemDto))).filter(
+        (i) => i.kind === 'question',
+      );
+      return open.length === 1 ? open : undefined;
+    }, 30_000);
+    const teammate = createTempClone(remote.origin.path);
+    let landed: string;
+    try {
+      mkdirSync(join(teammate.path, 'src'), { recursive: true });
+      writeFileSync(join(teammate.path, 'src', 'teammate.txt'), 'later on main\n');
+      git(teammate.path, 'add', 'src/teammate.txt');
+      git(teammate.path, 'commit', '-q', '-m', 'Add the teammate file');
+      git(teammate.path, 'push', '-q', 'origin', 'main');
+      landed = git(teammate.path, 'rev-parse', 'HEAD');
+    } finally {
+      teammate.cleanup();
+    }
+    await api.post(`/inbox/${question?.id ?? ''}/answer`, z.unknown(), { choice: 'Yes' });
+
+    const settled = await waitForAsync(async () => {
+      const batch = (await api.get(`/projects/${project.id}/batches`, z.array(BatchDto))).find(
+        (b) => b.id === started.id,
+      );
+      return batch?.state === 'SHIPPED' || batch?.state === 'FAILED' ? batch : undefined;
+    }, 60_000);
+    expect(settled.state).toBe('SHIPPED');
+    expect(settled.baseSha).toBe(landed);
+
+    // The pushed branch is the lane's commit merged with main: the commit the gate passed on.
+    const tip = git(remote.origin.path, 'rev-parse', `refs/heads/${settled.branch ?? ''}`);
+    const [ownCommit, second] = git(remote.origin.path, 'log', '-1', '--format=%P', tip).split(' ');
+    expect(second).toBe(landed);
+    expect(git(remote.origin.path, 'log', '-1', '--format=%s', ownCommit ?? '')).toBe(
+      `Add ${fileOf('Alpha')}`,
+    );
+    expect(
+      git(remote.origin.path, 'ls-tree', '-r', '--name-only', tip)
+        .split('\n')
+        .filter((f) => f.startsWith('src/')),
+    ).toEqual([fileOf('Alpha'), 'src/teammate.txt'].sort());
   }, 90_000);
 });
 

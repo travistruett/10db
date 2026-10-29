@@ -5,6 +5,7 @@ import { getBatch, getProject, transitionBatch, type WriteContext } from '@10db/
 import { existsAsEntry, GitTrustError, WorktreeNotOursError } from '../git';
 import { worktreeCards } from './cards';
 import { raise, type DeliveryContext } from './context';
+import { recordInstall } from './installed-lockfile';
 import { jobKey, JobQueue } from './jobs';
 import { worktreeLockReason } from './worktree-cut';
 import { withWorktreeLock } from './worktree-lock';
@@ -130,6 +131,7 @@ async function makeWhole(
       await dropUninstalled();
       throw error;
     });
+  await recordInstall(ctx, batch.id, path, installed);
   if (installed.kind === 'failed' || installed.kind === 'aborted') {
     // Without current packages the worktree is not whole: the next Retry makes it again.
     await dropUninstalled();

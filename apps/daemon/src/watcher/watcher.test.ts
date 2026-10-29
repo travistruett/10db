@@ -333,6 +333,132 @@ describe('watcher', () => {
     ).toEqual(['.claude/settings.local.json', '.env']);
   });
 
+  describe("Claude Code's write staging directory", () => {
+    const staging = '.claude/.cc-writes';
+    const staged = `${staging}/settings.local.json.tmp`;
+    const makeStaging = () => {
+      mkdirSync(join(repo.path, staging), { recursive: true, mode: 0o700 });
+    };
+    const outside: TempDir[] = [];
+    /** A directory outside the repository for a link to point at, removed after the row. */
+    const outsideDir = (prefix: string): string => {
+      const dir = tempDir(prefix);
+      outside.push(dir);
+      return dir.path;
+    };
+    afterEach(() => {
+      for (const dir of outside.splice(0)) dir.cleanup();
+    });
+
+    it.each<{
+      name: string;
+      ignore: string;
+      setup: () => void;
+      events: string[];
+      expected: string[];
+    }>([
+      {
+        name: 'is not flagged when a session creates it in an existing .claude, gitignored',
+        ignore: `${staging}/\n`,
+        setup: () => {
+          touch('.claude/settings.json');
+          makeStaging();
+        },
+        events: [staging],
+        expected: [],
+      },
+      {
+        name: 'is not flagged when it creates .claude, which holds nothing else',
+        ignore: '',
+        setup: makeStaging,
+        events: ['.claude', staging],
+        expected: [],
+      },
+      {
+        name: 'leaves the settings file it stages a write for flagged',
+        ignore: `${staging}/\n.claude/settings.local.json\n`,
+        setup: () => {
+          makeStaging();
+          touch('.claude/settings.local.json');
+        },
+        events: [staging, staged, '.claude/settings.local.json'],
+        expected: ['.claude/settings.local.json'],
+      },
+      {
+        name: 'leaves a new .claude flagged when it holds config beside it',
+        ignore: `${staging}/\n.claude/settings.local.json\n`,
+        setup: () => {
+          makeStaging();
+          touch('.claude/settings.local.json');
+        },
+        events: ['.claude', staging],
+        expected: ['.claude'],
+      },
+      {
+        name: 'leaves a new, empty .claude flagged',
+        ignore: '',
+        setup: () => {
+          mkdirSync(join(repo.path, '.claude'));
+        },
+        events: ['.claude'],
+        expected: ['.claude'],
+      },
+      {
+        name: 'leaves a .claude link flagged though its target holds only the staging directory',
+        ignore: '.claude\n',
+        setup: () => {
+          const target = outsideDir('claude-link');
+          mkdirSync(join(target, '.cc-writes'));
+          symlinkSync(target, join(repo.path, '.claude'));
+        },
+        events: ['.claude'],
+        expected: ['.claude'],
+      },
+      {
+        name: 'is flagged as a link, and so is the new .claude holding it',
+        ignore: `${staging}\n`,
+        setup: () => {
+          mkdirSync(join(repo.path, '.claude'));
+          symlinkSync(outsideDir('cc-writes-link'), join(repo.path, staging));
+        },
+        events: ['.claude', staging],
+        expected: ['.claude', staging],
+      },
+      {
+        name: 'is flagged as a file, and so is the new .claude holding it',
+        ignore: `${staging}\n`,
+        setup: () => {
+          touch(staging);
+        },
+        events: ['.claude', staging],
+        expected: ['.claude', staging],
+      },
+      {
+        name: 'is judged against the claims when git reports a file left in it',
+        // Git reads the contributor's `~/.config/git/ignore`, where Claude Code adds this directory, whatever
+        // `GIT_CONFIG_GLOBAL` names; the repository's own rule outranks it.
+        ignore: `!${staging}/\n`,
+        setup: () => {
+          touch(staged);
+        },
+        events: [staging, staged],
+        expected: [staged],
+      },
+    ])('$name', async ({ ignore, setup, events, expected }) => {
+      running();
+      writeFileSync(join(repo.path, '.gitignore'), ignore);
+      setup();
+      watcher.sync();
+      events.forEach(emit);
+      await watcher.flush();
+      expect(
+        flags()
+          .map((f) => f.body)
+          .sort(),
+      ).toEqual(expected);
+    });
+  });
+
   it('flags a write inside the claim of a workstream that is not running', async () => {
     const a = running('Alpha', ['api']);
     const idle = seedWorkstream(base, { project, title: 'Beta', areas: ['ui'] });

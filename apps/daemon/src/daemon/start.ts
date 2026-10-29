@@ -51,6 +51,7 @@ import {
 import { systemClock, type Clock } from '../clock';
 import {
   allCheckouts,
+  createBaseUpdates,
   createBatchCardAnswers,
   createBatchStarter,
   createDeliveryJobs,
@@ -424,9 +425,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     }),
   };
   const starter = createBatchStarter(delivery);
+  // One for the runner and the shipper alike, so a batch's verify and shipping gates run in turn.
+  const baseUpdates = createBaseUpdates(delivery);
   const shipper = createShipper({
     ...delivery,
     gate,
+    baseUpdates,
     clock,
     dataDir: opts.dataDir,
     sessionEnv: () => launcher.projectEnv(),
@@ -570,6 +574,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     inbox,
     git,
     gate,
+    baseUpdates,
     clock,
     logger,
     dataDir: opts.dataDir,
