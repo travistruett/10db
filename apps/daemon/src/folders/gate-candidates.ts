@@ -26,7 +26,10 @@ const PackageJsonSchema = z.looseObject({
   packageManager: z.string().optional(),
 });
 
-const NPM_TEST_PLACEHOLDER = 'echo "Error: no test specified" && exit 1';
+const TEST_PLACEHOLDER = 'echo "Error: no test specified" && exit 1';
+
+const PACKAGE_MANAGERS = ['npm', 'pnpm', 'yarn', 'bun'] as const;
+type PackageManager = (typeof PACKAGE_MANAGERS)[number];
 
 const LOCKFILE_MANAGERS = [
   ['pnpm-lock.yaml', 'pnpm'],
@@ -45,8 +48,9 @@ function makefileTargets(makefile: string): GateCandidate[] {
 function packageManagerOf(
   packageManager: string | undefined,
   lockfiles: readonly string[],
-): string {
-  const named = packageManager?.split('@')[0];
+): PackageManager {
+  // The field is the repo's free text, so only a known name may reach the prefilled command.
+  const named = PACKAGE_MANAGERS.find((manager) => manager === packageManager?.split('@')[0]);
   if (named) return named;
   for (const [lockfile, manager] of LOCKFILE_MANAGERS) {
     if (lockfiles.includes(lockfile)) return manager;
@@ -63,7 +67,7 @@ function packageScripts(packageJson: unknown, lockfiles: readonly string[]): Gat
   for (const name of TARGETS) {
     const body = scripts[name];
     if (body === undefined) continue;
-    if (name === 'test' && manager === 'npm' && body.trim() === NPM_TEST_PLACEHOLDER) continue;
+    if (name === 'test' && body.trim() === TEST_PLACEHOLDER) continue;
     // bun's own `bun test` is a different runner, so bun always goes through `run`.
     const shorthand = name === 'test' && manager !== 'bun';
     candidates.push({

