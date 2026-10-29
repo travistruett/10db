@@ -1,4 +1,5 @@
 import type { ProjectId } from '@10db/contracts';
+import { findOpenByFoldKey } from '@10db/db';
 import type { StateStore } from '../events';
 import type { Git, NetworkCall } from '../git';
 import type { Gh, GhCall } from '../github';
@@ -67,4 +68,17 @@ export function raise(inbox: InboxService, projectId: ProjectId, card: Card): vo
     ...(card.foldKey ? { foldKey: card.foldKey } : {}),
     ...(card.detail ? { detail: card.detail } : {}),
   });
+}
+
+/** Withdraws the project's open cards with these fold keys: what they asked about is gone. */
+export function withdraw(
+  state: StateStore,
+  inbox: InboxService,
+  projectId: ProjectId,
+  foldKeys: readonly string[],
+): void {
+  for (const key of foldKeys) {
+    const open = findOpenByFoldKey(state.db, projectId, key);
+    if (open) inbox.withdraw(open.id);
+  }
 }

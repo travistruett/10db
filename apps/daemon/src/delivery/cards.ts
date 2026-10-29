@@ -1,4 +1,10 @@
-import { BatchFailure, type BatchDto, type ProjectDto, type TaskId } from '@10db/contracts';
+import {
+  BatchFailure,
+  type BatchDto,
+  type BatchId,
+  type ProjectDto,
+  type TaskId,
+} from '@10db/contracts';
 import type { Json } from '@10db/db';
 import { GitNetworkError, worktreeRemovalCommand } from '../git';
 import { GhError } from '../github';
@@ -22,6 +28,14 @@ export function listPaths(paths: readonly string[]): string {
   const extra = paths.length - MAX_LISTED_PATHS;
   return [...shown, ...(extra > 0 ? [`- and ${String(extra)} more`] : [])].join('\n');
 }
+
+/** The fold keys of the cards that name a kept worktree. */
+export const keptWorktreeKey = {
+  batchChanges: (batchId: BatchId): string => `worktree-kept:${batchId}`,
+  batchIgnored: (batchId: BatchId): string => `worktree-ignored:${batchId}`,
+  orphanChanges: (path: string): string => `worktree-orphan:${path}`,
+  orphanIgnored: (path: string): string => `worktree-orphan-ignored:${path}`,
+};
 
 /** The git-ignored files beside a kept worktree's changes, which its removal command deletes too. */
 function alsoIgnored(ignored: readonly string[]): string {
@@ -167,7 +181,7 @@ export const worktreeCards = {
   ): Card => ({
     title: `Batch "${batch.title}" abandoned: uncommitted changes kept in ${path}`,
     body: `10db never throws away uncommitted work, so it kept the worktree with these changes:\n${listPaths(paths)}${alsoIgnored(ignored)}\n\nCopy what you need, then remove it with ${worktreeRemovalCommand(main, path)}.`,
-    foldKey: `worktree-kept:${batch.id}`,
+    foldKey: keptWorktreeKey.batchChanges(batch.id),
     detail: { batchId: batch.id },
   }),
   /** `main` is the project's main checkout, where the removal command runs. */
@@ -190,7 +204,7 @@ export const worktreeCards = {
         ? `The batch is finished, but 10db couldn't read its worktree ${path}, so it may hold files you need, and kept it.`
         : `The batch is finished, but its worktree ${path} holds git-ignored files 10db didn't put there, such as a hand-made .env, so 10db kept it:\n${listPaths(paths)}`
     }\n\nCopy what you need, then remove it with ${worktreeRemovalCommand(main, path)}.`,
-    foldKey: `worktree-ignored:${batch.id}`,
+    foldKey: keptWorktreeKey.batchIgnored(batch.id),
     detail: { batchId: batch.id },
   }),
   /**
@@ -212,13 +226,13 @@ export const worktreeCards = {
         ? "10db couldn't read it, so it may hold uncommitted work"
         : `it holds uncommitted changes:\n${listPaths(paths)}${alsoIgnored(ignored)}`
     }\n\n10db never throws away uncommitted work. Copy what you need, then remove it with ${worktreeRemovalCommand(main, path)}.`,
-    foldKey: `worktree-orphan:${path}`,
+    foldKey: keptWorktreeKey.orphanChanges(path),
   }),
   /** `main` is the project's main checkout, where the removal command runs. */
   orphanIgnored: (main: string, path: string, paths: readonly string[]): Card => ({
     title: `10db kept ${path}: it holds git-ignored files`,
     body: `No batch uses this worktree any more, but it holds git-ignored files 10db didn't put there, such as a hand-made .env:\n${listPaths(paths)}\n\nCopy what you need, then remove it with ${worktreeRemovalCommand(main, path)}.`,
-    foldKey: `worktree-orphan-ignored:${path}`,
+    foldKey: keptWorktreeKey.orphanIgnored(path),
   }),
   leftBehind: (batch: BatchDto, path: string): Card => ({
     title: `10db left ${path} in place`,

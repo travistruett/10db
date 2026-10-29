@@ -604,6 +604,8 @@ describe('a finished worktree with git-ignored files', () => {
     name: string;
     to: 'CLOSED' | 'ABANDONED';
     patterns?: string[];
+    /** Files committed in the worktree before the loose ones are written. */
+    tracked?: string[];
     files: string[];
     /** The files the card lists; null when the worktree goes. */
     kept: string[] | null;
@@ -635,10 +637,54 @@ describe('a finished worktree with git-ignored files', () => {
       files: ['node_modules/x/i.js'],
       kept: null,
     },
-  ])('$name: kept $kept', async ({ to, patterns, files, kept }) => {
+    {
+      name: "only the gate's typecheck build info",
+      to: 'CLOSED',
+      patterns: ['*.tsbuildinfo'],
+      files: ['tsconfig.tsbuildinfo', 'apps/web/tsconfig.tsbuildinfo'],
+      kept: null,
+    },
+    {
+      name: "only a commit hook's eslint cache",
+      to: 'ABANDONED',
+      patterns: ['.eslintcache'],
+      files: ['.eslintcache'],
+      kept: null,
+    },
+    {
+      name: 'a file in an output directory ignored file by file',
+      to: 'CLOSED',
+      patterns: ['*.js'],
+      files: ['dist/out.js'],
+      kept: ['dist/out.js'],
+    },
+    {
+      name: 'a local env file in a tracked directory named like build output',
+      to: 'CLOSED',
+      patterns: ['.env*'],
+      tracked: ['packages/coverage/index.ts'],
+      files: ['packages/coverage/.env.local'],
+      kept: ['packages/coverage/.env.local'],
+    },
+    {
+      name: 'a hand-made .env beside build output',
+      to: 'CLOSED',
+      patterns: ['.env', '*.tsbuildinfo', '.eslintcache'],
+      files: ['.env', 'tsconfig.tsbuildinfo', '.eslintcache'],
+      kept: ['.env'],
+    },
+    {
+      name: 'a log outside any build-output directory',
+      to: 'CLOSED',
+      patterns: ['*.log'],
+      files: ['debug.log'],
+      kept: ['debug.log'],
+    },
+  ])('$name: kept $kept', async ({ to, patterns, tracked, files, kept }) => {
     ignore(...(patterns ?? ['.env', '.env.*', '.DS_Store', 'dist/', 'node_modules/']));
     const { batch } = await opened();
     const wt = pathOf(batch);
+    for (const file of tracked ?? []) await commitIn(batch, file);
     write(wt, files);
     h.state.write((c) => {
       if (to === 'CLOSED') transitionBatch(c, batch.id, { to: 'SHIPPING' });
@@ -660,7 +706,9 @@ describe('a finished worktree with git-ignored files', () => {
     for (const file of files) expect(readFileSync(join(wt, file), 'utf8')).toBe('local\n');
     const card = h.only(h.cards());
     expect(card.title).toBe(keptTitle(batch));
-    for (const file of kept) expect(card.body).toContain(`- ${file}`);
+    for (const file of files)
+      if (kept.includes(file)) expect(card.body).toContain(`- ${file}`);
+      else expect(card.body).not.toContain(file);
     expect(card.body).toContain(`git -C '${h.repo}' worktree remove --force --force '${wt}'`);
   });
 
@@ -707,11 +755,11 @@ describe('a finished worktree with git-ignored files', () => {
     expect(card.body).toContain(`git -C '${h.repo}' worktree remove --force --force '${wt}'`);
   });
 
-  it('lists the git-ignored files beside the uncommitted changes of an abandoned worktree', async () => {
-    ignore('.env');
+  it('lists every git-ignored file its command removes beside the uncommitted changes', async () => {
+    ignore('.env', '*.tsbuildinfo');
     const { batch } = await opened();
     const wt = pathOf(batch);
-    write(wt, ['.env', 'notes.txt']);
+    write(wt, ['.env', 'notes.txt', 'tsconfig.tsbuildinfo']);
     h.state.write((c) => transitionBatch(c, batch.id, { to: 'ABANDONED' }));
 
     expect(await retireWorktree(h.ctx, batch.id)).toMatchObject({
@@ -724,5 +772,35 @@ describe('a finished worktree with git-ignored files', () => {
     expect(card.title).toContain('uncommitted changes kept');
     expect(card.body).toContain('- notes.txt');
     expect(card.body).toContain('- .env');
+    expect(card.body).toContain('- tsconfig.tsbuildinfo');
   });
+
+  it.each<{ name: string; to: 'CLOSED' | 'ABANDONED'; files: string[]; why: string }>([
+    { name: 'git-ignored files', to: 'CLOSED', files: ['.env'], why: 'it holds git-ignored files' },
+    {
+      name: 'uncommitted changes',
+      to: 'ABANDONED',
+      files: ['notes.txt'],
+      why: 'uncommitted changes kept',
+    },
+  ])(
+    'withdraws the card for a worktree kept for $name once the worktree is removed',
+    async ({ to, files, why }) => {
+      ignore('.env');
+      const { batch } = await opened();
+      const wt = pathOf(batch);
+      write(wt, files);
+      h.state.write((c) => {
+        if (to === 'CLOSED') transitionBatch(c, batch.id, { to: 'SHIPPING' });
+        transitionBatch(c, batch.id, { to });
+      });
+      expect((await retireWorktree(h.ctx, batch.id)).kind).toBe('kept');
+      expect(h.only(h.cards()).title).toContain(why);
+
+      for (const file of files) rmSync(join(wt, file));
+      expect(await retireWorktree(h.ctx, batch.id)).toEqual({ kind: 'retired' });
+
+      expect(h.cards()).toEqual([]);
+    },
+  );
 });
