@@ -1,4 +1,4 @@
-import type { CheckoutPin } from './checkout-pin';
+import { identityInodes, type CheckoutPin } from './checkout-pin';
 import { GitTrustFailure, type GitTrustError } from './trust-error';
 
 export interface TrustCard {
@@ -131,7 +131,8 @@ function foldSuffix(error: GitTrustError): string {
   const { detail } = error;
   switch (detail.kind) {
     case GitTrustFailure.Moved:
-      return `:${detail.candidate.id}`;
+      // By inode alone, so a renumbered volume refusing the same state folds into the open card.
+      return `:${identityInodes(detail.candidate.id)}`;
     case GitTrustFailure.Origin:
       return `:${detail.direction}:${detail.found ?? ''}`;
     case GitTrustFailure.Remote:

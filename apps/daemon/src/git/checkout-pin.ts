@@ -15,6 +15,23 @@ export const CheckoutPin = z.object({
 });
 export type CheckoutPin = z.infer<typeof CheckoutPin>;
 
+/** The inodes of an identity's git dir and common dir, without the device numbers. */
+export function identityInodes(id: string): string {
+  return id
+    .split('/')
+    .map((part) => part.slice(part.indexOf(':') + 1))
+    .join('/');
+}
+
+/**
+ * True when two identities name the same git dirs. The device number is left out: macOS renumbers
+ * the Data volume when it remounts it (after an OS update), so a checkout keeps its inodes but not
+ * its device. A `.git` replaced at the same path still gets a new inode.
+ */
+export function sameCheckoutIdentity(a: string, b: string): boolean {
+  return identityInodes(a) === identityInodes(b);
+}
+
 /** The app setting a batch's worktree pin is kept under. */
 export const worktreePinKey = (batchId: BatchId): string => `checkout_pin.${batchId}`;
 

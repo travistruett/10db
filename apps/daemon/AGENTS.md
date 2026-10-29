@@ -98,7 +98,7 @@ The fake adapter (`sessions/fake-adapter.ts`) is the test boundary for Claude Co
   `deleteKeptRef` list and delete only refs there. `commitsSince` and the commit's
   search for a retried operation follow first parents, so a merge's commits are never a task's. Fetches of
   one checkout run one at a time (their own lock, apart from commits). A non-empty `info/attributes` in the git dirs is refused. A
-  checkout's pin (git dir and common dir by device and inode, origin's URLs) is recorded at project
+  checkout's pin (git dir and common dir by inode, origin's URLs; the stored id also holds the device number, which a comparison ignores because macOS renumbers the Data volume when it remounts it) is recorded at project
   registration and kept in `app_settings` (`daemon/checkout-pins.ts`, keyed by real path); a mismatch, a
   changed origin or a non-empty alternates file is a `GitTrustError`. Its card carries the state it found,
   and only the card's Trust answer re-pins, through `git.retrust(repo, candidate)`, which pins exactly that
