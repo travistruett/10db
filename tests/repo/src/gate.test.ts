@@ -176,7 +176,7 @@ describe('scripts/gate.sh', () => {
         expect(status).toBe(1);
         expect(last).toMatch(/^GATE FAIL: rust — /);
         // Before the summary line, which stays the last line.
-        expect(stdout.includes(HOSTS)).toBe(named);
+        expect(stdout.includes(HOSTS), `${stdout}\n--- rust.log\n${log}`).toBe(named);
         expect(log.includes(HOSTS)).toBe(named);
       } finally {
         rmSync(fake, { recursive: true, force: true });
