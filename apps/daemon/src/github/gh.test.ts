@@ -49,6 +49,40 @@ describe('createGh', () => {
 
   it.each([
     {
+      name: 'signed in',
+      answer: { exitCode: 0, stdout: 'octocat\n' },
+      expected: 'octocat',
+    },
+    {
+      name: 'signed out by message',
+      answer: { exitCode: 1, stderr: 'To get started with GitHub CLI, please run:  gh auth login' },
+      expected: null,
+    },
+    {
+      name: 'signed out by exit 4',
+      answer: { exitCode: 4, stderr: '' },
+      expected: null,
+    },
+    {
+      name: 'timeout',
+      answer: new GhError('timeout', 'gh api user gave no answer within 120 s'),
+      kind: 'timeout',
+    },
+    {
+      name: 'a failure that is not a sign-out',
+      answer: { exitCode: 1, stderr: 'dial tcp: no such host' },
+      kind: 'failed',
+    },
+  ])('authLogin: $name', async ({ answer, expected, kind }) => {
+    const { exec, seen } = scripted({ 'api user': answer });
+    const login = createGh(exec).authLogin(CALL);
+    if (kind === undefined) await expect(login).resolves.toBe(expected);
+    else await expect(login).rejects.toMatchObject({ name: 'GhError', kind });
+    expect(seen).toEqual([['api', 'user', '--jq', '.login']]);
+  });
+
+  it.each([
+    {
       name: 'an open PR',
       answer: {
         exitCode: 0,

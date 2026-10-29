@@ -92,10 +92,27 @@ export function claudeCodeWarning(version: string | null): string | null {
   return `Claude Code ${version ?? ''} is a newer major version than ${ACCOUNT_NAMES_VERIFIED_ON}, the version 10db's account checks were verified on. Sessions that report unexpected credentials are refused until the live check is rerun on it.`;
 }
 
+/** Asks gh who is signed in: the login, null when signed out, a throw when it can't tell. */
+export type GhLoginProbe = () => Promise<string | null>;
+
+/** A probe that can't tell (no network, a timeout) leaves the login unknown rather than failing the check. */
+async function signedInAs(ghLogin: GhLoginProbe | undefined): Promise<string | null> {
+  if (!ghLogin) return null;
+  try {
+    return await ghLogin();
+  } catch {
+    return null;
+  }
+}
+
 export async function systemCheck(
   login: LoginEnv,
   resolved: ResolvedTools,
-  opts: { readonly home?: string; readonly probe?: VersionProbe } = {},
+  opts: {
+    readonly home?: string;
+    readonly probe?: VersionProbe;
+    readonly ghLogin?: GhLoginProbe;
+  } = {},
 ): Promise<SystemCheckDto> {
   const home = opts.home ?? homedir();
   const probe = opts.probe ?? probeVersion;
@@ -121,6 +138,7 @@ export async function systemCheck(
         path,
         version: path ? await probe(path, login.vars) : null,
         required: tool.required,
+        signedIn: tool.name === ToolName.Gh && path ? await signedInAs(opts.ghLogin) : null,
       };
     }),
   );

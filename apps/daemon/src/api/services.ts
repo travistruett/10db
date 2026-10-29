@@ -91,7 +91,8 @@ export interface ApiServices {
   answerInbox(id: InboxItemId, answer: InboxAnswer): InboxItemDto;
   eventsAfter(afterSeq: number, limit: number): DaemonEvent[];
   subscribe(listener: (event: DaemonEvent) => void): () => void;
-  systemCheck(): Promise<SystemCheckDto>;
+  /** The system check; `recheck` probes the tools and gh's login again instead of answering from the last probe. */
+  systemCheck(options: { readonly recheck: boolean }): Promise<SystemCheckDto>;
   keepAwake(): KeepAwakeStatus;
   setKeepAwake(mode: KeepAwakeMode): KeepAwakeStatus;
   /** The newest event seq (0 when there are none). */

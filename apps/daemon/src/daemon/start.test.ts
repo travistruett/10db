@@ -35,6 +35,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { WebSocket } from 'ws';
 import { apiClient, quickFlowId } from '../../test/api-client';
+import { FakeGh } from '../../test/fake-gh';
 import {
   createTempRepo,
   FAKE_SRT,
@@ -595,7 +596,15 @@ describe('startDaemon', () => {
     const check: SystemCheckDto = {
       loginEnv: { source: 'login_shell', warning: null },
       claudeCode: { verifiedOn: '2.1.302', warning: null },
-      tools: [{ name: 'git', path: '/usr/bin/git', version: 'git version 2.50.1', required: true }],
+      tools: [
+        {
+          name: 'git',
+          path: '/usr/bin/git',
+          version: 'git version 2.50.1',
+          required: true,
+          signedIn: null,
+        },
+      ],
       benchmarkSync: null,
     };
     const checkedWith: ResolvedTools[] = [];
@@ -692,6 +701,54 @@ describe('startDaemon', () => {
       daemon = null;
       repo.cleanup();
     }
+  });
+
+  describe('the gh login in GET /system', () => {
+    async function systemWith(gh: FakeGh) {
+      daemon = await startDaemon({
+        sandbox: null,
+        dataDir: dir.path,
+        port: 0,
+        adapter: new FakeAdapter({}),
+        logLevel: 'warn',
+        gh,
+        systemCheck: async (_resolved, ghLogin) => ({
+          loginEnv: { source: 'login_shell', warning: null },
+          claudeCode: { verifiedOn: '2.1.302', warning: null },
+          tools: [
+            {
+              name: 'gh',
+              path: '/usr/bin/gh',
+              version: 'gh version 2.0.0',
+              required: false,
+              signedIn: await ghLogin(),
+            },
+          ],
+          benchmarkSync: null,
+        }),
+        ...QUIET,
+      });
+      const api = apiClient(daemon.url, daemon.token);
+      const probes = () => gh.calls.filter((c) => c.method === 'authLogin').length;
+      return { api, probes };
+    }
+
+    it('answers a plain GET after the first from the last probe, and ?recheck=1 asks gh again', async () => {
+      const gh = new FakeGh();
+      const { api, probes } = await systemWith(gh);
+      const login = async (path: string) =>
+        (await api.get(path, SystemCheckDto)).tools.find((t) => t.name === 'gh')?.signedIn;
+
+      expect(await login('/system')).toBe('octocat');
+      expect(probes()).toBe(1);
+      gh.auth = 'signed_out';
+      expect(await login('/system')).toBe('octocat');
+      expect(probes()).toBe(1);
+      expect(await login('/system?recheck=1')).toBeNull();
+      expect(probes()).toBe(2);
+      expect(await login('/system')).toBeNull();
+      expect(probes()).toBe(2);
+    });
   });
 
   it("raises an approval card for each repo MCP server on review, and reports the builder's verdict", async () => {

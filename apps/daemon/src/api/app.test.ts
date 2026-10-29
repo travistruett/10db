@@ -112,6 +112,28 @@ const auth = { headers: { Authorization: `Bearer ${TOKEN}` } };
 const json = { headers: { ...auth.headers, 'content-type': 'application/json' } };
 
 describe('API', () => {
+  it.each([
+    { name: 'no query', query: '', status: 200, recheck: false },
+    { name: 'recheck=1', query: '?recheck=1', status: 200, recheck: true },
+    { name: 'recheck=yes', query: '?recheck=yes', status: 400, recheck: null },
+    { name: 'recheck=0', query: '?recheck=0', status: 400, recheck: null },
+  ])('GET /system with $name answers $status', async ({ query, status, recheck }) => {
+    const asked: boolean[] = [];
+    const services = stubServices({
+      systemCheck: (options) => {
+        asked.push(options.recheck);
+        return Promise.resolve({
+          loginEnv: { source: 'login_shell' as const, warning: null },
+          claudeCode: { verifiedOn: '2.1.302', warning: null },
+          tools: [],
+          benchmarkSync: null,
+        });
+      },
+    });
+    expect((await app(services).request(`/system${query}`, auth)).status).toBe(status);
+    expect(asked).toEqual(recheck === null ? [] : [recheck]);
+  });
+
   it('serves the event head, keep-awake and the system check behind the token', async () => {
     const check = {
       loginEnv: { source: 'login_shell' as const, warning: null },
@@ -122,6 +144,7 @@ describe('API', () => {
           path: '/usr/bin/git',
           version: 'git version 2.50.1',
           required: true,
+          signedIn: null,
         },
       ],
       benchmarkSync: null,

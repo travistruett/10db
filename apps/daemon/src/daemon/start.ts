@@ -68,6 +68,7 @@ import {
   REQUIRED_TOOLS,
   unavailableKeychain,
   type Keychain,
+  type GhLoginProbe,
   type ResolvedTools,
 } from '../environment';
 import { createEventBus, createStateStore, type StateStore } from '../events';
@@ -161,7 +162,10 @@ export interface DaemonOptions {
   readonly uiToken?: string;
   readonly caffeinate?: CaffeinateSpawner;
   /** The system check, given the git and gh the daemon resolved so it reports the ones it runs. */
-  readonly systemCheck?: (resolved: ResolvedTools) => Promise<SystemCheckDto>;
+  readonly systemCheck?: (
+    resolved: ResolvedTools,
+    ghLogin: GhLoginProbe,
+  ) => Promise<SystemCheckDto>;
   /** `false` turns the file watcher off (tests that don't need it). */
   readonly watch?: WatchFn | false;
 }
@@ -208,6 +212,7 @@ function noSystemCheck(): Promise<SystemCheckDto> {
       path: null,
       version: null,
       required: t.required,
+      signedIn: null,
     })),
     benchmarkSync: null,
   });
@@ -641,7 +646,14 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       inbox,
       keepAwake,
       systemCheck: () =>
-        opts.systemCheck ? opts.systemCheck({ git: gitBin, gh: ghBin }) : noSystemCheck(),
+        opts.systemCheck
+          ? opts.systemCheck({ git: gitBin, gh: ghBin }, () =>
+              delivery.gh.authLogin({
+                env: delivery.networkEnv(),
+                timeoutMs: delivery.limits.networkTimeoutMs,
+              }),
+            )
+          : noSystemCheck(),
       benchmarks,
       starter,
       shipper,

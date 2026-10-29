@@ -47,6 +47,8 @@ export interface PullRequest {
 /** The host integration (batch delivery spec §7): everything 10db asks GitHub, through the gh CLI. */
 export interface Gh {
   authStatus(call: GhCall): Promise<void>;
+  /** The signed-in login, or null when gh is signed out. Throws on anything else (no network, a timeout). */
+  authLogin(call: GhCall): Promise<string | null>;
   prView(
     input: { readonly repo: string; readonly ref: string },
     call: GhCall,
@@ -243,6 +245,19 @@ export function createGh(exec: GhExec): Gh {
           GhFailure.SignedOut,
           'gh is not signed in. Run gh auth login in a terminal.',
         );
+    },
+    async authLogin(call) {
+      const args = ['api', 'user', '--jq', '.login'];
+      const out = await exec(args, call);
+      if (
+        out.exitCode === AUTH_REQUIRED_EXIT ||
+        (out.exitCode !== 0 && SIGNED_OUT.test(out.stderr))
+      )
+        return null;
+      if (out.exitCode !== 0) throw failure(args, out);
+      const login = out.stdout.trim();
+      if (login === '') throw new GhError(GhFailure.Failed, 'gh api user printed no login');
+      return login;
     },
     async prView({ repo, ref }, call) {
       const args = ['pr', 'view', ref, '-R', repo, '--json', 'url,state'];

@@ -70,6 +70,7 @@ export function createServices(deps: {
   readonly scheduler: Scheduler;
   readonly inbox: InboxService;
   readonly keepAwake: KeepAwake;
+  /** Probes the tools and gh's login; the services keep its last answer. */
   readonly systemCheck: () => Promise<SystemCheckDto>;
   readonly benchmarks: BenchmarkSync;
   readonly starter: BatchStarter;
@@ -86,6 +87,8 @@ export function createServices(deps: {
   readonly pinCheckout: (repoPath: string) => void;
 }): ApiServices {
   const db = deps.state.db;
+  // The tool check and gh's login are probed on the first request and on a recheck, never otherwise.
+  let lastCheck: Promise<SystemCheckDto> | null = null;
   return {
     listProjects: () => listProjectViews(db),
     createProject(input) {
@@ -144,14 +147,24 @@ export function createServices(deps: {
     },
     eventsAfter: (after, limit) => listEventsAfter(db, after, limit),
     subscribe: (listener) => deps.bus.subscribe(listener),
-    systemCheck: async () => ({
-      ...markGhRequired(
-        await deps.systemCheck(),
-        listProjects(db).some((p) => p.delivery === Delivery.PullRequest),
-      ),
-      // Read per request: the tool check is memoized at start, but a sync can fail or recover at any time.
-      benchmarkSync: syncWarning(deps.benchmarks.status()),
-    }),
+    systemCheck: async ({ recheck }) => {
+      if (recheck || lastCheck === null) {
+        const probing = deps.systemCheck();
+        lastCheck = probing;
+        // A failed probe is not remembered, so the next request tries again.
+        probing.catch(() => {
+          if (lastCheck === probing) lastCheck = null;
+        });
+      }
+      return {
+        ...markGhRequired(
+          await lastCheck,
+          listProjects(db).some((p) => p.delivery === Delivery.PullRequest),
+        ),
+        // Read per request: the tool check is memoized at start, but a sync can fail or recover at any time.
+        benchmarkSync: syncWarning(deps.benchmarks.status()),
+      };
+    },
     keepAwake: () => deps.keepAwake.status(),
     setKeepAwake: (mode) => deps.keepAwake.setMode(mode),
     eventsHead: () => latestEventSeq(db),

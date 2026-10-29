@@ -11,6 +11,8 @@ export const ToolCheck = z.object({
   path: z.string().nullable(),
   version: z.string().nullable(),
   required: z.boolean(),
+  /** gh only: the GitHub login it is signed in as; null when signed out, unprobed or the probe failed. */
+  signedIn: z.string().nullable().default(null),
 });
 export type ToolCheck = z.infer<typeof ToolCheck>;
 
