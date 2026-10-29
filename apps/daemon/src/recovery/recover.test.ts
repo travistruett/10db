@@ -265,6 +265,17 @@ describe('recoverOnStartup', () => {
     },
   );
 
+  it('re-runs verification for a workstream still waiting for a gate slot, which has no gate process to kill', async () => {
+    const ws = inState(['STARTING', 'RUNNING', 'VERIFYING']);
+    expect(getWorkstreamRow(state.db, ws.workstream.id).gatePid).toBeNull();
+    await recover();
+    expect(getWorkstream(state.db, ws.workstream.id)).toMatchObject({
+      state: 'QUEUED',
+      nextAction: { kind: 'verify' },
+    });
+    expect(getWorkstreamRow(state.db, ws.workstream.id).gatePid).toBeNull();
+  });
+
   it('records HEAD, the dirty files and the last acknowledged operation in the recovery event', async () => {
     const ws = inState(['STARTING', 'RUNNING']);
     writeFileSync(join(repo.path, 'scratch.txt'), 'uncommitted\n');

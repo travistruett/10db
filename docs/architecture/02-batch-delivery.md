@@ -40,7 +40,7 @@ CUTTING → OPEN → SHIPPING → SHIPPED | CLOSED | FAILED; FAILED → SHIPPING
 At startup, after workstream recovery and before the scheduler starts:
 
 - Each `CUTTING` row is deleted, which emits `batch.updated` with `to: null`, with a "Batch not started" card. A cut stopped by a shutdown ends here too, because shutdown leaves its row for startup. That card has `detail.batchId` but no `detail.taskIds`, since a `CUTTING` row has no workstreams to name: a client tells that its tasks were refused from the `to: null` event, not from the card.
-- An orphaned shipping gate is killed by its pid and start time.
+- An orphaned shipping gate is killed by its pid and start time. The shipping gate shares the daemon's gate slots with every lane's verify gate (one at a time by default, `TENDB_GATE_SLOTS`): it waits for a slot, then its timeout starts (`decisions/2026-10-28-gate-slots.md`).
 - An `OPEN` or `SHIPPING` batch whose branch is not checked out fails with a wrong-branch card.
 - A `SHIPPING` batch re-runs shipping from the first step, and an `OPEN` batch whose members all settled ships.
 

@@ -97,7 +97,7 @@ import {
 import { createScheduler, type Scheduler } from '../scheduler';
 import type { SessionAdapter } from '../sessions';
 import { retryWorkstream, seedTeam } from '../team';
-import { createGateRunner } from '../verify';
+import { createGateRunner, createGateSlots, limitGates } from '../verify';
 import { CLIENT_APP } from '../version';
 import { createWatcher, systemWatch, type WatchFn } from '../watcher';
 import { createProjectPinStore } from './checkout-pins';
@@ -348,8 +348,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       'swept the sandbox temp root',
     );
   }
-  // Shared by every gate: a task's, at its green run, and a batch's, at ship.
-  const gate = createGateRunner({
+  // Shared by every gate: a task's, at its green run, and a batch's, at ship. One limiter caps them
+  // all, so the machine never runs more than `limits.gateSlots` at once.
+  const gateRunner = createGateRunner({
     sandbox:
       opts.sandbox && runtime
         ? createGateSandbox({
@@ -361,6 +362,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
             runtime,
           })
         : null,
+    logger: logger.child({ component: 'gate' }),
+  });
+  const gate = limitGates(gateRunner, {
+    slots: createGateSlots(limits.gateSlots),
+    clock,
     logger: logger.child({ component: 'gate' }),
   });
   const answerGit = createGitCardAnswers(git);
