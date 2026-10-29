@@ -1,5 +1,5 @@
 import { AccountId, USAGE_HANDOFF_MAX, USAGE_HANDOFF_MIN, type ProjectDto } from '@10db/contracts';
-import { Alert, NumberInput, Select, Stack, Text } from '@mantine/core';
+import { Alert, NumberInput, Select, Stack } from '@mantine/core';
 import { useState } from 'react';
 import { useAccounts } from '../../daemon/account-queries';
 import { usePatchProject } from '../../daemon/queries';
@@ -77,7 +77,6 @@ export function ProjectBilling({ project }: { readonly project: ProjectDto }) {
           {patch.error.message}
         </Alert>
       ) : null}
-      <Text size="sm" c="dimmed">{`Default model: ${project.model}@${project.effort}`}</Text>
     </Stack>
   );
 }

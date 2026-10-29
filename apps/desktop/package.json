@@ -8,7 +8,7 @@
     "dev": "vite",
     "build": "vite build",
     "sidecar": "tsx scripts/prepare-sidecar.ts",
-    "dev:shell": "TENDB_EXTERNAL_DAEMON=1 tauri dev --config '{\"build\":{\"beforeDevCommand\":\"\"}}'",
+    "dev:shell": "TENDB_EXTERNAL_DAEMON=1 TENDB_DATA_DIR=\"${TENDB_DATA_DIR:-$(cd ../.. && pwd)/.dev/data}\" tauri dev --config src-tauri/tauri.dev.conf.json",
     "tauri": "tauri"
   },
   "dependencies": {
@@ -16,16 +16,16 @@
     "@dnd-kit/core": "6.3.1",
     "@dnd-kit/sortable": "10.0.0",
     "@dnd-kit/utilities": "3.2.2",
-    "@mantine/core": "9.7.2",
-    "@mantine/hooks": "9.7.2",
+    "@mantine/core": "9.7.4",
+    "@mantine/hooks": "9.7.4",
     "@tabler/icons-react": "3.49.0",
-    "@tanstack/react-query": "5.104.2",
-    "@tanstack/react-router": "1.170.44",
+    "@tanstack/react-query": "5.104.5",
+    "@tanstack/react-router": "1.170.46",
     "@tauri-apps/api": "2.12.4",
     "@tauri-apps/plugin-notification": "2.7.0",
     "@tauri-apps/plugin-opener": "2.7.2",
     "dayjs": "1.11.23",
-    "hono": "4.13.13",
+    "hono": "4.13.14",
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "zod": "4.6.7"
@@ -33,10 +33,10 @@
   "devDependencies": {
     "@10db/daemon": "workspace:*",
     "@axe-core/playwright": "4.14.0",
-    "@babel/core": "8.0.7",
+    "@babel/core": "8.0.9",
     "@playwright/test": "1.64.1",
     "@rolldown/plugin-babel": "0.2.4",
-    "@tauri-apps/cli": "2.12.2",
+    "@tauri-apps/cli": "2.12.4",
     "@testing-library/dom": "10.4.2",
     "@testing-library/react": "16.3.3",
     "@types/node": "26.6.5",
@@ -44,12 +44,12 @@
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.1.2",
     "babel-plugin-react-compiler": "1.0.0",
-    "jsdom": "30.1.2",
+    "jsdom": "30.1.3",
     "msw": "3.0.3",
-    "postcss": "8.5.30",
+    "postcss": "8.5.31",
     "postcss-preset-mantine": "1.18.0",
     "postcss-simple-vars": "7.0.1",
     "tsx": "4.23.15",
-    "vite": "8.3.4"
+    "vite": "8.3.5"
   }
 }

@@ -50,6 +50,7 @@
 - [ ] Spec §7: a card's owner is stored but nothing filters or notifies by owner yet; the inbox's "mine / teammate" filter is M2b.
 - [ ] Spec §4 model_profiles: the observed stats count steps and escalations only; tokens per step are not recorded yet.
 - [ ] Spec §8: a read-only step keeps its task's area claims while it reviews, so other implementers in that area wait; consider releasing claims for read-only steps and re-acquiring them on a send-back.
+- [ ] Drop the project's `model` and `effort` with a migration, and their place in `ProjectInput`, `ProjectPatch` and the fixtures: routing runs a step with no score on its role default and no longer reads them (`decisions/2026-10-28-routing-role-defaults.md`).
 - [ ] AA: a real sync confirmed the free API's slugs and its `page` query parameter match the catalogue's and the client's. Still open: AA's index versions may shift scores between syncs, and 10db's needs and floors are absolute index points. The status flags a major-version change (AA says scores are comparable within a major version); patch versions aren't reported, so they can't be detected. AA's free API gives no Coding or Agentic Index for some models; those roles route on Intelligence (decision 66) until it does. The sync status lists the profiles routing can't use (`unmeasuredProfiles`) and the score kinds missing from the rest (`missingScores`).
 - [ ] M2a read-only shell: a read-only step's shell accepts only plain words and simple quoting, so unquoted globs, ~, $, braces and backslashes are refused (quote them), and so is any `=` at the start of a word or right after `=` or `:`, quoted or not (for example `'==='` or `'a:=b'`), so reviewers use the Grep tool for those. Revisit if real reviews hit it.
 - [ ] M2a read-only shell: aliases and functions in the user's shell configuration can rewrite plain words, which the read-only grammar cannot see; check whether Claude Code's Bash tool loads them.
@@ -66,12 +67,16 @@
       and dependencies are the inputs; the planner proposes the lane count and each task's placement, and the
       builder confirms. Worktrees make rapid UI iteration across screens harder, so a project-wide switch isn't
       enough. Keep `tasks.workspace_mode` for this rather than dropping it.
-- [ ] Worktree mode: removing a clean leftover worktree also removes its git-ignored files, such as a
-      hand-made `.env`; keep a worktree with ignored files 10db didn't seed, and raise a card, as for one with
-      uncommitted changes.
-- [ ] Worktree mode: with `worktree.useRelativePaths=true` in the builder's global git config (git 2.48+),
-      every worktree cut fails; pass the setting off on the daemon's `git worktree add`.
-- [ ] Worktree mode: a `WorktreeRootError` at start (a bad `TENDB_WORKTREE_ROOT`, or a checkout containing `~/.10db`) is not mapped to a stop-restart exit code, so the desktop supervisor restarts into it.
+- [x] Worktree mode: removing a clean leftover worktree also removed its git-ignored files, such as a
+      hand-made `.env`. Built: a finished or orphaned worktree holding ignored files outside matched
+      directories and the seed is kept with a card (`decisions/2026-10-28-worktree-keeps-ignored-files.md`).
+- [ ] Worktree mode: a hand-made file inside a directory the ignore rules match as a whole (such as
+      `scratch/notes.md`) still goes when its worktree is removed.
+- [x] Worktree mode: with `worktree.useRelativePaths=true` in the builder's git config (git 2.48+), every
+      worktree cut failed. Built: the daemon's `git worktree add` passes the setting off.
+- [x] Worktree mode: a `WorktreeRootError` at start (a bad `TENDB_WORKTREE_ROOT`, or a checkout containing
+      `~/.10db`) made the desktop supervisor restart into it. Built: the daemon exits 4 with one line and the
+      supervisor stops (`decisions/2026-10-28-daemon-refused-config-exit.md`).
 - [ ] Batch delivery: an after-ship action per batch or task (auto_merge with gh pr merge --auto --squash, or a project deploy command), spec §9.
 - [ ] Batch delivery: stacked batches, rebasing or updating an unmerged PR, and hosts other than GitHub (spec §9).
 - [ ] Batch delivery: agents' gh api is GET only, so read-only GraphQL queries (always POST) are denied too; allow them if a persona needs them.

@@ -10,6 +10,8 @@ if [ ! -s "$token_file" ]; then
 fi
 token=$(cat "$token_file")
 export TENDB_DEV_UI_TOKEN="$token" VITE_DAEMON_TOKEN="$token"
+# Only the installed app calls Artificial Analysis; this daemon restarts on every file change.
+export TENDB_BENCHMARKS=off
 export TENDB_DATA_DIR="${TENDB_DATA_DIR:-$PWD/.dev/data}"
 export VITE_DAEMON_URL="${VITE_DAEMON_URL:-http://127.0.0.1:${TENDB_PORT:-4317}}"
 exec pnpm -r --parallel --if-present run dev

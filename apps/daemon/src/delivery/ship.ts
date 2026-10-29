@@ -37,9 +37,10 @@ import { shipCards, wrongBranchCard, type Card, type ShipFailure } from './cards
 import { allCheckouts, projectAtCheckout } from './checkout';
 import { ghCall, pushCall, raise, type DeliveryContext, type DeliveryLimits } from './context';
 import { jobKey, JobQueue } from './jobs';
-import { prBody, prTitle } from './pr-text';
+import { readPrScopes, scopeOf } from './pr-scopes';
+import { prBody, prTitle, titlePrefix } from './pr-text';
 import { readPrTemplate } from './pr-template';
-import { abandonWorktree, retireWorktree } from './worktree-cleanup';
+import { retireWorktree } from './worktree-cleanup';
 import { ensureWorktreeWhole, reopenWorktreeBatch } from './worktree-repair';
 
 export interface ShipperDeps extends DeliveryContext {
@@ -217,11 +218,61 @@ export function createShipper(deps: ShipperDeps): Shipper {
     }
   }
 
-  /** `target` is the batch's repo and branch, which step 0 checked are set; `checkout` is where it was built. */
+  /**
+   * The one scope the repo's `.10db/pr-scopes.json` at the batch's base gives every file the batch
+   * committed, or null. The list is read from the base, which the builder's branch holds, not from
+   * commits a lane made. The scope only labels the title, so a git failure here leaves it off rather
+   * than failing the ship.
+   */
+  async function scopeFor(
+    batch: BatchDto,
+    target: { readonly checkout: string; readonly baseSha: string },
+    sha: string,
+  ): Promise<string | null> {
+    try {
+      const [paths, scopes] = await Promise.all([
+        deps.git.filesChangedBetween(target.checkout, target.baseSha, sha),
+        readPrScopes(deps.git, target.checkout, target.baseSha, deps.logger),
+      ]);
+      return scopeOf(paths, scopes);
+    } catch (error) {
+      deps.logger.warn(
+        { batchId: batch.id, err: error instanceof Error ? error.message : String(error) },
+        'pr scope not read',
+      );
+      return null;
+    }
+  }
+
+  /**
+   * The project's title prefix when it sets one; otherwise the type from the tasks whose work shipped
+   * (every task when none finished) and the batch's scope.
+   */
+  async function prefixFor(
+    batch: BatchDto,
+    project: ProjectDto,
+    tasks: readonly { readonly title: string; readonly state: WorkstreamState }[],
+    target: { readonly checkout: string; readonly baseSha: string },
+    sha: string,
+  ): Promise<string> {
+    if (project.prTitlePrefix !== null) return project.prTitlePrefix;
+    const done = tasks.filter((task) => task.state === WorkstreamState.Done);
+    return titlePrefix(done.length > 0 ? done : tasks, await scopeFor(batch, target, sha));
+  }
+
+  /**
+   * `target` is the batch's repo, branch and base, which step 0 checked are set; `checkout` is where
+   * it was built.
+   */
   async function createPr(
     batch: BatchDto,
     project: ProjectDto,
-    target: { readonly repo: string; readonly branch: string; readonly checkout: string },
+    target: {
+      readonly repo: string;
+      readonly branch: string;
+      readonly baseSha: string;
+      readonly checkout: string;
+    },
     signal: AbortSignal,
   ): Promise<string> {
     const tasks = members(db, batch.id).map((w) => {
@@ -251,7 +302,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
         repo: target.repo,
         base: batch.baseBranch,
         head: target.branch,
-        title: prTitle(project.prTitlePrefix, batch.title),
+        title: prTitle(await prefixFor(batch, project, tasks, target, sha), batch.title),
         bodyFile: file,
       },
       ghCall(deps, signal),
@@ -337,7 +388,8 @@ export function createShipper(deps: ShipperDeps): Shipper {
       const existing = await deps.gh.prView({ repo, ref: branch }, ghCall(deps, signal));
       step = 'gh pr create';
       const prUrl =
-        existing?.url ?? (await createPr(batch, project, { repo, branch, checkout }, signal));
+        existing?.url ??
+        (await createPr(batch, project, { repo, branch, baseSha, checkout }, signal));
       // 5. Record it.
       deps.state.write((w) =>
         transitionBatch(w, batchId, {
@@ -485,7 +537,9 @@ export function createShipper(deps: ShipperDeps): Shipper {
       raise(deps.inbox, batch.projectId, shipCards.abandoned(abandoned, done));
       if (abandoned.worktreePath !== null) {
         const project = getProject(db, batch.projectId);
-        deps.jobs.run(jobKey(project, JobQueue.Ship), () => abandonWorktree(deps, batchId));
+        deps.jobs.run(jobKey(project, JobQueue.Ship), async () => {
+          await retireWorktree(deps, batchId);
+        });
       }
       return abandoned;
     },

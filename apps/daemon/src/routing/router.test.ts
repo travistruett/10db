@@ -1,7 +1,7 @@
 import type { StepRole, WorkstreamStep } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { escalateStep, NoProfileError, route, UnmeasuredError } from './router';
-import { label, testCatalogue } from './test-catalogue';
+import { label, seedCatalogue, testCatalogue } from './test-catalogue';
 
 const none = { minimum: 0, why: null };
 const at = (
@@ -100,7 +100,7 @@ describe('route', () => {
       at('review', 48, { floor: { minimum: 52, why: 'security-sensitive review' }, ceiling: 3 }),
     );
     expect(choice.reason).toBe(
-      'cheapest profile at or above 52 intelligence (floor: security-sensitive review); over the budget ceiling of $3',
+      'by score: cheapest profile at or above 52 intelligence (floor: security-sensitive review); over the budget ceiling of $3',
     );
   });
 
@@ -134,7 +134,7 @@ describe('route when AA lacks the role’s score', () => {
     const choice = route({ ...at('implement', 45), profiles: testCatalogue() });
     expect(choice.score).toBe('coding');
     expect(label(choice.profile)).toBe('big@high');
-    expect(choice.reason).toBe('cheapest profile at or above 45 coding');
+    expect(choice.reason).toBe('by score: cheapest profile at or above 45 coding');
   });
 
   it('compares every candidate on intelligence when one enabled profile lacks the score', () => {
@@ -145,7 +145,7 @@ describe('route when AA lacks the role’s score', () => {
     expect(choice.score).toBe('intelligence');
     expect(label(choice.profile)).toBe('mid@high');
     expect(choice.reason).toBe(
-      'cheapest profile at or above 45 intelligence (AA gives no coding score; compared on intelligence)',
+      'by score: cheapest profile at or above 45 intelligence (AA gives no coding score; compared on intelligence)',
     );
   });
 
@@ -158,7 +158,7 @@ describe('route when AA lacks the role’s score', () => {
       profiles,
     });
     expect(choice.reason).toBe(
-      'cheapest profile at or above 52 intelligence (AA gives no coding score; compared on intelligence) (floor: security-sensitive); over the budget ceiling of $3',
+      'by score: cheapest profile at or above 52 intelligence (AA gives no coding score; compared on intelligence) (floor: security-sensitive); over the budget ceiling of $3',
     );
   });
 
@@ -213,7 +213,7 @@ describe('route when AA lacks the role’s score', () => {
     });
     const choice = route({ ...at('qa', 35), profiles });
     expect(choice.score).toBe('agentic');
-    expect(choice.reason).toBe('cheapest profile at or above 35 agentic');
+    expect(choice.reason).toBe('by score: cheapest profile at or above 35 agentic');
   });
 
   it('falls back when a costed profile has intelligence but not the role’s score', () => {
@@ -257,7 +257,7 @@ describe('escalateStep', () => {
       model: p.model,
       effort: p.effort,
       need: 40,
-      reason: 'cheapest profile at or above 40 coding',
+      reason: 'by score: cheapest profile at or above 40 coding',
       overBudget: false,
       pinned: false,
       status: 'running',
@@ -337,12 +337,12 @@ describe('escalateStep', () => {
     expect(`${result.step.model}@${result.step.effort}`).toBe('mid@high');
   });
 
-  it('names the unmeasured score and the true limit', () => {
+  it('names the true limit, with or without a score to compare on', () => {
     const dropped = profiles.map((p) =>
       label(p) === 'big@high' ? { ...p, scores: { ...p.scores, coding: null } } : p,
     );
     expect(escalateStep(stepOn('big@high'), { ...input(), profiles: dropped }).step.reason).toBe(
-      'kept big@high after the gate failed: its coding score is no longer measured',
+      'kept big@high after the gate failed: no stronger model offered',
     );
     expect(escalateStep(stepOn('big@max'), input(10)).step.reason).toBe(
       'kept big@max after the gate failed: no stronger profile',
@@ -355,6 +355,127 @@ describe('escalateStep', () => {
     );
     expect(escalateStep(stepOn('mid@high'), input(1.5)).step.reason).toBe(
       'kept mid@high after the gate failed: no stronger profile within the budget ceiling of $1.5',
+    );
+  });
+});
+
+describe('escalateStep without scores', () => {
+  const profiles = seedCatalogue();
+  const stepOn = (name: string): WorkstreamStep => {
+    const p = profiles.find((x) => label(x) === name);
+    if (!p) throw new Error(name);
+    return {
+      role: 'implement',
+      personaId: null,
+      personaName: 'Implementer',
+      tools: 'edit',
+      score: 'coding',
+      profileId: p.id,
+      model: p.model,
+      effort: p.effort,
+      need: 40,
+      reason: 'by role default: the balanced model offered',
+      overBudget: false,
+      pinned: false,
+      status: 'running',
+      attempts: 1,
+      startedAt: null,
+      sessionFloor: 0,
+      result: null,
+    };
+  };
+  const escalate = (from: string) =>
+    escalateStep(stepOn(from), {
+      provider: 'claude',
+      budgetCeiling: 1,
+      profiles,
+      why: 'the gate failed',
+    });
+
+  it.each([
+    { name: 'to the next stronger model', from: 'sonnet@high', want: 'opus@high', escalated: true },
+    {
+      name: 'to the next effort on the strongest',
+      from: 'opus@high',
+      want: 'opus@xhigh',
+      escalated: true,
+    },
+    { name: 'nowhere from the top', from: 'opus@max', want: 'opus@max', escalated: false },
+  ])('climbs the role defaults $name', ({ from, want, escalated }) => {
+    const result = escalate(from);
+    expect(`${result.step.model}@${result.step.effort}`).toBe(want);
+    expect(result.escalated).toBe(escalated);
+  });
+
+  it('says the role defaults moved it, or why they could not', () => {
+    expect(escalate('sonnet@high').step).toMatchObject({
+      profileId: profiles.find((p) => label(p) === 'opus@high')?.id,
+      reason:
+        'escalated from sonnet@high after the gate failed: the next stronger model, by role default',
+    });
+    expect(escalate('opus@max').step.reason).toBe(
+      'kept opus@max after the gate failed: no stronger model offered',
+    );
+  });
+});
+
+describe('escalateStep on a profile it cannot compare', () => {
+  const scored = { intelligence: 46, coding: 42, agentic: 40 };
+  const strong = { intelligence: 52, coding: 50, agentic: 48 };
+  it.each([
+    {
+      name: 'a role default whose profile has a score but no cost',
+      profiles: seedCatalogue({ 'sonnet@high': { scores: scored } }),
+      from: 'sonnet@high',
+      want: 'opus@high',
+    },
+    {
+      name: 'a role default after a sync measured only a stronger model',
+      profiles: seedCatalogue({ 'opus@high': { scores: strong, costPerTaskUsd: 2.5 } }),
+      from: 'sonnet@high',
+      want: 'opus@high',
+    },
+    {
+      name: 'a routed step whose profile lost its score',
+      profiles: seedCatalogue({
+        'sonnet@high': { scores: { ...scored, coding: null }, costPerTaskUsd: 0.75 },
+        'opus@high': { scores: strong, costPerTaskUsd: 2.5 },
+      }),
+      from: 'sonnet@high',
+      want: 'opus@high',
+    },
+  ])('climbs the role defaults from $name', ({ profiles, from, want }) => {
+    const here = profiles.find((p) => label(p) === from);
+    if (!here) throw new Error(from);
+    const step: WorkstreamStep = {
+      role: 'implement',
+      personaId: null,
+      personaName: 'Implementer',
+      tools: 'edit',
+      score: 'coding',
+      profileId: here.id,
+      model: here.model,
+      effort: here.effort,
+      need: 40,
+      reason: 'by role default: the balanced model offered',
+      overBudget: false,
+      pinned: false,
+      status: 'running',
+      attempts: 1,
+      startedAt: null,
+      sessionFloor: 0,
+      result: null,
+    };
+    const result = escalateStep(step, {
+      provider: 'claude',
+      budgetCeiling: null,
+      profiles,
+      why: 'the gate failed',
+    });
+    expect(result.escalated).toBe(true);
+    expect(`${result.step.model}@${result.step.effort}`).toBe(want);
+    expect(result.step.reason).toBe(
+      `escalated from ${from} after the gate failed: the next stronger model, by role default`,
     );
   });
 });

@@ -163,6 +163,14 @@ describe('addWorktree', () => {
     expect(raw(main(), 'branch', '--list', '10db/a-1')).toBe('');
   });
 
+  it('writes an absolute gitfile when the repository asks git for relative ones', async () => {
+    // Git 2.48 and later write a relative gitfile under this setting; an older git ignores it.
+    raw(main(), 'config', 'worktree.useRelativePaths', 'true');
+    await add('a');
+    expect(readFileSync(join(at('a'), '.git'), 'utf8')).toMatch(/^gitdir: \//);
+    expect(await git.currentBranch(at('a'))).toBe('10db/a');
+  });
+
   it("records the worktree's pin at creation", async () => {
     await add('a');
     const other = createGit({ worktreeRoot: root.path, pins });
@@ -352,6 +360,39 @@ describe('worktreeChanges', () => {
   ])('refuses $name', async ({ make }) => {
     const path = await make();
     await expect(git.worktreeChanges(main(), path)).rejects.toBeInstanceOf(WorktreeNotOursError);
+  });
+});
+
+describe('worktreeIgnoredFiles', () => {
+  /** Ignores these patterns in every worktree of the repository, with nothing to commit. */
+  const ignore = (...patterns: string[]) => {
+    writeFileSync(join(main(), '.git', 'info', 'exclude'), `${patterns.join('\n')}\n`);
+  };
+
+  it.each<{ name: string; files: string[]; listed: string[] }>([
+    { name: 'an ignored file at the top', files: ['.env'], listed: ['.env'] },
+    {
+      name: 'ignored files in directories git does not track',
+      files: ['apps/web/.env.local', 'src/run.log'],
+      listed: ['apps/web/.env.local', 'src/run.log'],
+    },
+    { name: 'an ignored directory', files: ['dist/out.js', 'node_modules/x/i.js'], listed: [] },
+    { name: 'an untracked file that is not ignored', files: ['notes.txt'], listed: [] },
+  ])('lists $name', async ({ files, listed: expected }) => {
+    ignore('.env', '.env.*', '*.log', 'dist/', 'node_modules/');
+    await add('a');
+    for (const file of files) {
+      mkdirSync(dirname(join(at('a'), file)), { recursive: true });
+      writeFileSync(join(at('a'), file), 'local\n');
+    }
+    await expect(git.worktreeIgnoredFiles(main(), at('a'))).resolves.toEqual(expected);
+  });
+
+  it("refuses a worktree 10db didn't lock", async () => {
+    raw(main(), 'worktree', 'add', '-q', '-b', 'foreign', at('foreign'));
+    await expect(git.worktreeIgnoredFiles(main(), at('foreign'))).rejects.toBeInstanceOf(
+      WorktreeNotOursError,
+    );
   });
 });
 
