@@ -50,6 +50,7 @@ import { DEFAULT_RUNNER_LIMITS } from '../runner';
 import { createGit } from '../git';
 import { silentLogger } from '../log';
 import { createGateRunner, type GateRequest } from '../verify';
+import type { BaseUpdate, BaseUpdates } from '../delivery';
 import { allowedToolsFor } from '../permissions';
 import {
   createLaneSandbox,
@@ -3101,14 +3102,26 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
     };
 
     /** Runs one task in a worktree batch; the script is built once the main checkout's path exists. */
-    async function run(script: (main: string) => FakeScriptBook['Alpha']) {
+    async function run(
+      script: (main: string) => FakeScriptBook['Alpha'],
+      opts: { readonly gateCommand?: string; readonly baseUpdates?: BaseUpdates } = {},
+    ) {
       const probe = sandboxProbe();
       gateRequests.length = 0;
       const book: FakeScriptBook = {};
       engine = await createTestEngine(
         book,
-        { workspaceMode: 'worktree', delivery: 'pull_request', prTitlePrefix: 'feat(app)' },
-        { laneSandbox: probe.laneSandbox, gate: recordingGate },
+        {
+          workspaceMode: 'worktree',
+          delivery: 'pull_request',
+          prTitlePrefix: 'feat(app)',
+          ...(opts.gateCommand ? { gateCommand: opts.gateCommand } : {}),
+        },
+        {
+          laneSandbox: probe.laneSandbox,
+          gate: recordingGate,
+          ...(opts.baseUpdates ? { baseUpdates: opts.baseUpdates } : {}),
+        },
       );
       book['Alpha'] = script(realpathSync(engine.repoPath));
       const specs = recordSpecs();
@@ -3146,6 +3159,69 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
       const denied = engine.adapter.observations.filter((o) => o.kind === 'denied_by_guard');
       expect(denied).toHaveLength(1);
       expect(String(denied[0]?.detail['reason'])).toContain('outside');
+    });
+
+    describe("the batch's base before each gate", () => {
+      const NOTE =
+        'origin/main conflicts with this branch in README.md, so this gate ran without it.';
+
+      /** Base updates that answer `answer` and record each call in `order`, beside the gates. */
+      function recordingBaseUpdates(answer: BaseUpdate, order: string[]): BaseUpdates {
+        return {
+          beforeGate: (batchId) => {
+            order.push(`base ${batchId}`);
+            return Promise.resolve(answer);
+          },
+        };
+      }
+
+      it("is brought in before every gate, and what kept it out heads a failed gate's evidence and the fix prompt", async () => {
+        const order: string[] = [];
+        const gateRun = recordingGate.run;
+        recordingGate.run = (request) => {
+          order.push('gate');
+          return gateRun(request);
+        };
+        try {
+          const { workstream, batch } = await run(
+            () => [
+              [turn],
+              [write('src/api/fixed.txt'), commit('op-wt-base-1', ['src/api/fixed.txt']), turn],
+            ],
+            {
+              gateCommand: 'test -f src/api/fixed.txt || { echo MISSING-FIXED-FILE; exit 2; }',
+              baseUpdates: recordingBaseUpdates({ kind: 'not_merged', note: NOTE }, order),
+            },
+          );
+          expect(ws(workstream.id).state).toBe('QUEUED');
+          const [failed] = listEvidence(engine.store.db, workstream.id);
+          expect(failed?.summary.startsWith(`${NOTE}\n\n`)).toBe(true);
+          expect(failed?.summary).toContain('MISSING-FIXED-FILE');
+
+          engine.launch(workstream.id);
+          await engine.runner.idle();
+          expect(ws(workstream.id).state).toBe('DONE');
+          expect(engine.adapter.prompts[1]?.prompt).toContain(NOTE);
+          expect(order).toEqual([`base ${batch.id}`, 'gate', `base ${batch.id}`, 'gate']);
+        } finally {
+          recordingGate.run = gateRun;
+        }
+      });
+
+      it('runs no gate once shutdown stopped it: the workstream stays verifying for recovery', async () => {
+        const order: string[] = [];
+        const { workstream } = await run(
+          () => [[write('src/api/a.txt'), commit('op-wt-base-2', ['src/api/a.txt']), turn]],
+          { baseUpdates: recordingBaseUpdates({ kind: 'aborted' }, order) },
+        );
+        expect(order).toHaveLength(1);
+        expect(gateRequests).toEqual([]);
+        expect(ws(workstream.id)).toMatchObject({
+          state: 'VERIFYING',
+          nextAction: { kind: 'verify' },
+        });
+        expect(listEvidence(engine.store.db, workstream.id)).toEqual([]);
+      });
     });
   });
 });

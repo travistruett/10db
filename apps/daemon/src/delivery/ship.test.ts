@@ -183,6 +183,29 @@ describe('shipping', () => {
     expect(getBatchRow(h.store.db, batch.id)).toMatchObject({ gatePid: null, gatePidStart: null });
   });
 
+  it("never merges the base into the builder's own checkout: the branch ships as it is", async () => {
+    h = createDeliveryHarness();
+    const { batch } = await openBatch('Add greetings', 'Alpha');
+    const head = h.commit('src/api/alpha.txt');
+    h.teammatePush('main', 'src/ui/teammate.txt');
+    const shipped = await finishAll(batch);
+    expect(shipped.state).toBe('SHIPPED');
+    expect(onOrigin(batch.branch)).toBe(head);
+    expect(h.git$('rev-parse', 'HEAD')).toBe(head);
+    expect(h.git$('status', '--porcelain', '--untracked-files=all')).toBe('');
+  });
+
+  it("says in a failed gate's card how far the builder's own checkout is behind the base", async () => {
+    h = createDeliveryHarness({ gateCommand: 'false' });
+    const { batch } = await openBatch('Add greetings', 'Alpha');
+    h.commit('src/api/alpha.txt');
+    h.teammatePush('main', 'src/ui/teammate.txt');
+    const failed = await finishAll(batch);
+    expect(failed.state).toBe('FAILED');
+    const card = h.only(h.cards().filter((c) => c.title.includes('the gate failed')));
+    expect(card.body).toMatch(/^origin\/main has 1 commit this branch doesn't\./);
+  });
+
   it('ships a batch without a gate step when the project has none', async () => {
     h = createDeliveryHarness({ gateCommand: null });
     const { batch } = await openBatch('Add greetings', 'Alpha');

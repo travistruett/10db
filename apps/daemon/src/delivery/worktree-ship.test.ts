@@ -220,6 +220,74 @@ describe('shipping a worktree batch', () => {
   });
 });
 
+describe("the base, brought into a worktree batch's branch before the shipping gate", () => {
+  /** Ships one finished task's batch and waits for the ship to settle. */
+  async function ship(batch: BatchDto, ws: WorkstreamDto): Promise<BatchDto> {
+    h.settle(ws.id, 'DONE');
+    h.shipper.checkBatch(batch.id);
+    await h.jobs.idle();
+    return getBatch(h.store.db, batch.id);
+  }
+
+  it("gates and pushes the branch merged with main as origin has it now, and reads the PR's base from it", async () => {
+    const { batch, ws } = await opened();
+    const head = await commitIn(batch, 'src/api/alpha.txt');
+    const teammate = h.teammatePush('main', 'src/ui/teammate.txt');
+    // Passes only where main's newer commit is in the worktree.
+    gate('test -f src/ui/teammate.txt');
+
+    const shipped = await ship(batch, ws);
+
+    expect(shipped.state).toBe('SHIPPED');
+    expect(shipped.baseSha).toBe(teammate);
+    const tip = onOrigin(batch.branch) ?? '';
+    expect(h.origin$('log', '-1', '--format=%P', tip)).toBe(`${head} ${teammate}`);
+    expect(h.origin$('ls-tree', '-r', '--name-only', tip).split('\n')).toEqual(
+      expect.arrayContaining(['src/api/alpha.txt', 'src/ui/teammate.txt']),
+    );
+    expect(h.gh.prCreates()).toHaveLength(1);
+    expect(h.cards()).toEqual([]);
+  });
+
+  it('ships the branch as it is when it conflicts with main, with a card saying so', async () => {
+    const { batch, ws } = await opened();
+    const head = await commitIn(batch, 'README.md');
+    h.teammatePush('main', 'README.md', '# theirs\n');
+
+    const shipped = await ship(batch, ws);
+
+    expect(shipped.state).toBe('SHIPPED');
+    expect(onOrigin(batch.branch)).toBe(head);
+    expect(h.only(h.cards()).title).toBe(`Batch "${batch.title}" conflicts with main`);
+  });
+
+  it('names what kept main out in the card of a shipping gate that failed', async () => {
+    const { batch, ws } = await opened();
+    await commitIn(batch, 'README.md');
+    h.teammatePush('main', 'README.md', '# theirs\n');
+    gate('false');
+
+    const failed = await ship(batch, ws);
+
+    expect(failed.state).toBe('FAILED');
+    const card = h.cards().find((c) => c.title.includes('the gate failed'));
+    expect(card?.body).toMatch(/^origin\/main conflicts with this branch in README\.md/);
+    expect(onOrigin(batch.branch)).toBeNull();
+  });
+
+  it('merges nothing for a project with no gate: the builder checked the work as it is', async () => {
+    h.state.write((c) => patchProject(c, h.project.id, { gateCommand: null }));
+    const { batch, ws } = await opened();
+    const head = await commitIn(batch, 'src/api/alpha.txt');
+    h.teammatePush('main', 'src/ui/teammate.txt');
+
+    const shipped = await ship(batch, ws);
+
+    expect(shipped.state).toBe('SHIPPED');
+    expect(onOrigin(batch.branch)).toBe(head);
+  });
+});
+
 describe('Retry of a FAILED worktree batch', () => {
   beforeEach(() => {
     // An ignored node_modules the seed copies into every new worktree.

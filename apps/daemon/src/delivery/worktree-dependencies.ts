@@ -5,7 +5,7 @@ import type { Clock } from '../clock';
 import type { GateRunner } from '../verify';
 
 /** The lockfile that says a project's packages are pnpm's. */
-const PNPM_LOCKFILE = 'pnpm-lock.yaml';
+export const PNPM_LOCKFILE = 'pnpm-lock.yaml';
 
 /**
  * What the builder is told runs. The real command (`installCommand`) also fixes the program, the
