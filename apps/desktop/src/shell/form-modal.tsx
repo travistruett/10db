@@ -8,7 +8,9 @@ import { useHiddenEdges } from './use-hidden-edges';
  * panel's own color barely shows on a modal, whose edges mostly sit over empty panel.
  */
 const scrollShadow = (shown: boolean, direction: 1 | -1) =>
-  shown ? `0 ${String(6 * direction)}px 12px -6px rgb(0 0 0 / 45%)` : 'none';
+  shown
+    ? `0 ${String(6 * direction)}px 12px -6px color-mix(in srgb, var(--mantine-color-black) 45%, transparent)`
+    : 'none';
 
 export interface FormModalProps {
   readonly opened: boolean;

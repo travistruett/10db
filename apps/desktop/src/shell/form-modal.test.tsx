@@ -1,5 +1,5 @@
 import { MantineProvider } from '@mantine/core';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { FormModal } from './form-modal';
 
@@ -47,5 +47,45 @@ describe('FormModal', () => {
     renderModal({ onClose });
     fireEvent.click(await screen.findByRole('button', { name: /close/i }));
     expect(onClose).toHaveBeenCalledOnce();
+  });
+});
+
+describe('FormModal scroll shadow', () => {
+  it('paints the shadow from a theme color, not a literal one', async () => {
+    const stub = vi.fn();
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(callback: () => void) {
+          stub.mockImplementation(callback);
+        }
+        observe() {
+          stub();
+        }
+        unobserve() {
+          return undefined;
+        }
+        disconnect() {
+          return undefined;
+        }
+      },
+    );
+    // Content taller than the panel hides the bottom edge, which shades the footer.
+    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
+      configurable: true,
+      get: () => 500,
+    });
+    try {
+      renderModal({});
+      const footer = (await screen.findByRole('alert')).parentElement;
+      await waitFor(() => {
+        expect(footer?.style.boxShadow).not.toBe('');
+      });
+      expect(footer?.style.boxShadow).toContain('var(--mantine-color-');
+      expect(footer?.style.boxShadow).not.toContain('rgb(');
+    } finally {
+      delete (HTMLElement.prototype as { scrollHeight?: number }).scrollHeight;
+      vi.unstubAllGlobals();
+    }
   });
 });
