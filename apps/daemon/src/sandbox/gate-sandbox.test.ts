@@ -483,6 +483,31 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
       expect(readdirSync(pnpmLockDir)).toEqual(['all-stores.lock']);
     });
 
+    it('removes a hard link to another file, and links left before the run, as well', async () => {
+      mkdirSync(pnpmLockDir, { mode: 0o700 });
+      symlinkSync('/etc/hosts', join(pnpmLockDir, 'stale.lock'));
+      const run = await sandbox().forRun(input({ packageInstall: true }));
+      // Taken before the run starts: the stale link is already gone.
+      expect(readdirSync(pnpmLockDir)).toEqual([]);
+      const target = join(root, 'target');
+      writeFileSync(target, 'x');
+      execFileSync('ln', [target, join(pnpmLockDir, 'hard.lock')]);
+      await run.dispose();
+      expect(readdirSync(pnpmLockDir)).toEqual([]);
+      expect(readFileSync(target, 'utf8')).toBe('x');
+    });
+
+    it('leaves alone a lock directory the run replaced with a link, and says so', async () => {
+      const run = await sandbox().forRun(input({ packageInstall: true }));
+      const victim = join(root, 'victim');
+      mkdirSync(join(victim, 'sub'), { recursive: true });
+      writeFileSync(join(victim, 'file'), 'keep');
+      rmSync(pnpmLockDir, { recursive: true });
+      symlinkSync(victim, pnpmLockDir);
+      await expect(run.dispose()).rejects.toThrow(SandboxProfileError);
+      expect(readdirSync(victim).sort()).toEqual(['file', 'sub']);
+    });
+
     it.each([
       [
         'a link',

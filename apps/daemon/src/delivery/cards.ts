@@ -4,7 +4,7 @@ import { GitNetworkError, worktreeRemovalCommand } from '../git';
 import { GhError } from '../github';
 import type { GateResult } from '../verify';
 import type { BlockedTask, UnmergedDependency } from './deps';
-import { INSTALL_COMMAND, type DependencyRefresh } from './worktree-dependencies';
+import { INSTALL_SUMMARY, type DependencyRefresh } from './worktree-dependencies';
 
 /** A flag card's text. Every delivery card says what to fix (batch delivery spec §1). */
 export interface Card {
@@ -136,7 +136,7 @@ export const worktreeCards = {
     failure: Extract<DependencyRefresh, { readonly kind: 'failed' }>,
   ): Card => ({
     title: `${NOT_STARTED}: 10db couldn't install the dependencies for "${batch.title}"`,
-    body: `${failure.timedOut ? 'The install timed out.' : `The install exited with ${String(failure.exitCode)}.`} Its output ended:\n\n${failure.tail.trim()}\n\nA new worktree's node_modules is copied from the checkout, which can hold older packages than the branch's lockfile names, so 10db runs ${INSTALL_COMMAND} in the worktree under the gate's sandbox. The sandbox reaches only the hosts the project allows: if the output shows a blocked connection (a 403 or a tunnel error from the proxy), allow the package registry's host in the project's network settings. Full log: ${failure.logPath}. The worktree was removed. Fix the cause, then try again.`,
+    body: `${failure.timedOut ? 'The install timed out.' : `The install exited with ${String(failure.exitCode)}.`} Its output ended:\n\n${failure.tail.trim()}\n\nA new worktree's node_modules is copied from the checkout, which can hold older packages than the branch's lockfile names, so 10db runs ${INSTALL_SUMMARY} in the worktree under the gate's sandbox. The sandbox reaches only the hosts the project allows: if the output shows a blocked connection (a 403 or a tunnel error from the proxy), allow the package registry's host in the project's network settings. Full log: ${failure.logPath}. The worktree was removed. Fix the cause, then try again.`,
   }),
   missing: (batch: BatchDto, path: string, outcome: 'waits' | 'failed'): Card => {
     const branch = batch.branch ?? '(not cut)';

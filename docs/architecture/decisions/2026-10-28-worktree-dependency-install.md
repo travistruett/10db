@@ -71,6 +71,32 @@ reproduced by cutting a worktree the way 10db does, seeding it from the main che
   the project's network hosts): `index.crates.io` and `static.crates.io`. With them the step passes (measured
   in the same sandbox, see the pull request).
 
+## Hardening after review
+
+- **The program and its directories are the daemon's, not the repository's.** The pnpm that runs is an
+  absolute path the daemon resolves from the login `PATH` outside every checkout (`delivery/pnpm-binary.ts`; a
+  mise shim is asked from a neutral directory, so the repository's `mise.toml` cannot pick the version).
+  `pnpm_config_manage_package_manager_versions=false`, `COREPACK_ENABLE_STRICT=0` and
+  `COREPACK_ENABLE_AUTO_PIN=0` stop `packageManager` and corepack from switching programs, and
+  `--store-dir "$pnpm_config_store_dir" --modules-dir node_modules --virtual-store-dir node_modules/.pnpm`
+  override whatever `.npmrc` or the workspace file say. Measured with a `package.json` pinning pnpm 9 and an
+  `.npmrc` naming another store and directories: pnpm 12 ran, and it wrote only where the command said.
+  If no pnpm is found the cut is refused with that reason.
+- **The sweep never follows the lock directory.** A run's write grant covers the directory's own path, so
+  a run could replace it with a link. `openPnpmLockDir` records its device and inode; the sweep, which runs
+  outside the sandbox, first checks the path is still that directory and otherwise touches nothing and
+  reports it. It resets the mode to 0700, removes ACLs, looks at every entry with `lstat`, and removes
+  anything that is not a regular file with one name (symbolic links, directories, hard links). It also runs
+  before a run starts, for what a crash left. Each entry is tried on its own.
+- **Cost, stated.** The run's store is empty, so the install downloads the worktree's whole tree each cut
+  (about 15 to 25 seconds, 635 packages measured) and the seeded clone is mostly replaced; several cuts at once
+  are several downloads, outside the gate slots on purpose. A project whose registry host is not allowed, or an
+  offline machine, can no longer cut a pnpm worktree: the card says so. Comparing the lockfile to pnpm's copy
+  in the seed to skip the install was measured unreliable (the files differ in form when current).
+- **Retry** removes the replaced worktree if the install throws, so it never looks whole without its packages.
+- **Not done:** a daemon crash during an install leaves its process and any entry it made in the lock directory
+  until the next install sweeps them; a startup sweep and a recorded process group are a follow-up.
+
 Not done: a lane that changes `package.json` or the lockfile still cannot install in its own sandbox (no lock
 directory, no registry unless allowed), and the gate then reports pnpm's lock error. That needs the same grant
 for lanes, which would open the shared directory to code a lane runs, so it waits for its own decision.

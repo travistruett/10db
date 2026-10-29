@@ -65,9 +65,8 @@ import {
 
 type Settled = 'DONE' | 'FAILED' | 'CANCELLED' | 'WAITING_HUMAN' | 'RUNNING';
 
-/** The shortest run of allowed transitions from `from` to `to`, as the runner would take it. */
 /** A `pnpm` on its own PATH directory, recording calls and failing on request. */
-function fakePnpm(root: string): FakePnpm & { readonly bin: string } {
+function fakePnpm(root: string): FakePnpm {
   const dir = join(root, 'fake-pnpm');
   const bin = join(dir, 'bin');
   const log = join(dir, 'calls.log');
@@ -99,6 +98,7 @@ function fakePnpm(root: string): FakePnpm & { readonly bin: string } {
   };
 }
 
+/** The shortest run of allowed transitions from `from` to `to`, as the runner would take it. */
 function pathBetween(from: WorkstreamState, to: WorkstreamState): WorkstreamState[] {
   const previous = new Map<WorkstreamState, WorkstreamState>();
   const queue: WorkstreamState[] = [from];
@@ -119,6 +119,8 @@ function pathBetween(from: WorkstreamState, to: WorkstreamState): WorkstreamStat
 }
 /** The `pnpm` a worktree's dependency install runs in the harness: it records its calls. */
 export interface FakePnpm {
+  /** The directory holding the `pnpm`. */
+  readonly bin: string;
   /** Each call as `<directory> | <arguments>`, oldest first. */
   calls(): string[];
   /** Makes every later call print `output` and exit with `exitCode`. */
@@ -243,7 +245,8 @@ export function createDeliveryHarness(
       gate: createGateRunner({ sandbox: null, logger: silentLogger }),
       clock: new ManualClock(),
       dataDir: data.path,
-      sessionEnv: () => ({ PATH: `${pnpm.bin}:/usr/bin:/bin` }),
+      sessionEnv: () => ({ PATH: `${pnpm.bin}:/usr/bin:/bin`, pnpm_config_store_dir: pnpm.bin }),
+      resolvePnpm: () => join(pnpm.bin, 'pnpm'),
       rules: () => [],
       checkouts: () => [remote.repo.path],
       timeoutMs: opts.gateTimeoutMs ?? 20_000,

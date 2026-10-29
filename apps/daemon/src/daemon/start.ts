@@ -60,6 +60,7 @@ import {
   flagWorktreeMissing,
   flagWrongBranch,
   recoverBatches,
+  resolvePnpm,
   subscribeShipTrigger,
   type DeliveryContext,
   type DeliveryLimits,
@@ -403,7 +404,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       scheduler?.requestTick();
     },
     worktreeRoot,
-    // Not behind the gate slots: an install is light, and waiting out a long gate would hold the cut.
+    // Not behind the gate slots: waiting out a long gate would hold the cut. Each cut downloads the
+    // worktree's whole tree (the run's store is empty), so several cuts at once are several downloads.
     dependencies: createWorktreeDependencies({
       gate: gateRunner,
       clock,
@@ -412,6 +414,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       rules: (project) => listPermissionRules(state.db, project.id, null),
       checkouts: () => allCheckouts(state.db),
       timeoutMs: limits.gateTimeoutMs,
+      resolvePnpm,
     }),
   };
   const starter = createBatchStarter(delivery);

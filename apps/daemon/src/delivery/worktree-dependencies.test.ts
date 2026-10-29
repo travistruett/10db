@@ -13,7 +13,8 @@ import { tempDir, type TempDir } from '../../test/fixtures';
 import { ManualClock } from '../clock';
 import { silentLogger } from '../log';
 import { createGateRunner, type GateRequest, type GateRunner } from '../verify';
-import { createWorktreeDependencies, INSTALL_COMMAND } from './worktree-dependencies';
+import { resolvePnpm } from './pnpm-binary';
+import { createWorktreeDependencies, installCommand } from './worktree-dependencies';
 
 let tmp: TempDir;
 let worktree: string;
@@ -65,7 +66,12 @@ function dependencies(
     gate,
     clock: new ManualClock(),
     dataDir: join(tmp.path, 'data'),
-    sessionEnv: () => ({ PATH: `${bin}:/usr/bin:/bin`, ...env }),
+    sessionEnv: () => ({
+      PATH: `${bin}:/usr/bin:/bin`,
+      pnpm_config_store_dir: join(tmp.path, 'store'),
+      ...env,
+    }),
+    resolvePnpm: () => join(bin, 'pnpm'),
     rules: () => [{ toolName: 'SandboxNetworkAccess', pattern: 'registry.npmjs.org' }],
     checkouts: () => [join(tmp.path, 'main')],
     timeoutMs,
@@ -109,7 +115,7 @@ describe('refreshing a worktree’s dependencies', () => {
     const result = await refresh(dependencies({ FAKE_PNPM_SAYS: 'done' }));
     expect(result.kind).toBe('installed');
     expect(readFileSync(calls, 'utf8').trim()).toBe(
-      `${realpathSync(worktree)} | install --frozen-lockfile --ignore-scripts --ignore-pnpmfile`,
+      `${realpathSync(worktree)} | install --frozen-lockfile --ignore-scripts --ignore-pnpmfile --store-dir ${join(tmp.path, 'store')} --modules-dir node_modules --virtual-store-dir node_modules/.pnpm`,
     );
     if (result.kind !== 'installed') throw new Error('not installed');
     expect(readFileSync(result.logPath, 'utf8')).toContain('fake pnpm: done');
@@ -122,7 +128,7 @@ describe('refreshing a worktree’s dependencies', () => {
     expect(requests).toHaveLength(1);
     expect(requests[0]).toMatchObject({
       project: { repoPath: worktree, sandboxLoopback: true },
-      command: INSTALL_COMMAND,
+      command: installCommand(join(bin, 'pnpm')),
       packageInstall: true,
       rules: [{ toolName: 'SandboxNetworkAccess', pattern: 'registry.npmjs.org' }],
       checkouts: [join(tmp.path, 'main'), worktree],
@@ -164,4 +170,69 @@ describe('refreshing a worktree’s dependencies', () => {
     const result = await deps.refresh({ batch, project, path: worktree, signal: stop.signal });
     expect(result).toEqual({ kind: 'aborted' });
   });
+
+  it('fails, saying why, when no pnpm outside the checkouts can be found', async () => {
+    fakePnpm();
+    withLockfileAndModules();
+    const deps = createWorktreeDependencies({
+      gate: createGateRunner({ sandbox: null, logger: silentLogger }),
+      clock: new ManualClock(),
+      dataDir: join(tmp.path, 'data'),
+      sessionEnv: () => ({ PATH: bin }),
+      rules: () => [],
+      checkouts: () => [],
+      timeoutMs: 20_000,
+      // The only pnpm on PATH lies in a checkout.
+      resolvePnpm: (env, checkouts) => resolvePnpm(env, [...checkouts, bin]),
+    });
+    const result = await refresh(deps);
+    expect(result.kind).toBe('failed');
+    if (result.kind !== 'failed') return;
+    expect(result.tail).toContain('No pnpm was found');
+    expect(existsSync(calls)).toBe(false);
+  });
+
+  // The real pnpm: what a repository's own files must not decide.
+  it('runs the builder’s pnpm and writes only where the daemon says, whatever the repository asks', async () => {
+    writeFileSync(
+      join(worktree, 'package.json'),
+      '{"name":"pj","version":"1.0.0","packageManager":"pnpm@9.0.0"}\n',
+    );
+    writeFileSync(
+      join(worktree, 'pnpm-lock.yaml'),
+      "lockfileVersion: '9.0'\n\nimporters:\n\n  .: {}\n",
+    );
+    mkdirSync(join(worktree, 'node_modules'));
+    const evil = join(tmp.path, 'evil');
+    writeFileSync(
+      join(worktree, '.npmrc'),
+      `store-dir=${evil}/store\nmodules-dir=evil_modules\nvirtual-store-dir=evil_virtual\n`,
+    );
+    const store = join(tmp.path, 'store');
+    const env = Object.fromEntries(
+      Object.entries(process.env).flatMap(([k, v]) =>
+        v === undefined || k.startsWith('pnpm_config_') ? [] : [[k, v]],
+      ),
+    );
+    const deps = createWorktreeDependencies({
+      gate: createGateRunner({ sandbox: null, logger: silentLogger }),
+      clock: new ManualClock(),
+      dataDir: join(tmp.path, 'data'),
+      sessionEnv: () => ({ ...env, pnpm_config_store_dir: store }),
+      rules: () => [],
+      checkouts: () => [worktree],
+      timeoutMs: 60_000,
+      resolvePnpm,
+    });
+    const result = await refresh(deps);
+    expect(result.kind, JSON.stringify(result)).toBe('installed');
+    if (result.kind !== 'installed') return;
+    // Not the pnpm the package.json pins, and not the repository's store or directories.
+    expect(readFileSync(result.logPath, 'utf8')).not.toContain('9.0.0');
+    expect(existsSync(join(store, 'v11'))).toBe(true);
+    expect(existsSync(evil)).toBe(false);
+    expect(existsSync(join(worktree, 'evil_modules'))).toBe(false);
+    expect(existsSync(join(worktree, 'evil_virtual'))).toBe(false);
+    expect(existsSync(join(worktree, 'node_modules', '.modules.yaml'))).toBe(true);
+  }, 90_000);
 });

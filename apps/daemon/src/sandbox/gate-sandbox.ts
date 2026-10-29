@@ -118,9 +118,11 @@ export function createGateSandbox(deps: GateSandboxDeps): GateSandbox {
         },
       );
       const { checkout, toolchain } = access;
-      const lockDir =
+      const lockPath =
         input.packageInstall === true ? (deps.pnpmLockDir ?? defaultPnpmLockDir()) : null;
-      if (lockDir !== null) openPnpmLockDir(lockDir);
+      const lockDir = lockPath === null ? null : openPnpmLockDir(lockPath);
+      // What an earlier run or a crash left is not trusted either.
+      if (lockDir !== null) sweepPnpmLockDir(lockDir);
       const tmpDir = createLaneTempDir(tmpRoot);
       let settingsFile: string | null = null;
       // Both are removed even when one fails; the first failure is then thrown.
@@ -172,9 +174,9 @@ export function createGateSandbox(deps: GateSandboxDeps): GateSandbox {
           toolchainListings: toolchain.listings,
           allowedDomains: access.hosts,
           readList: access.readList,
-          extraReads: [...access.gitReads, ...(lockDir === null ? [] : [lockDir])],
+          extraReads: [...access.gitReads, ...(lockPath === null ? [] : [lockPath])],
           // srt opens nothing for writing by itself, unlike Claude Code, which opens the checkout.
-          extraWrites: [checkout, ...(lockDir === null ? [] : [lockDir])],
+          extraWrites: [checkout, ...(lockPath === null ? [] : [lockPath])],
           denyWrites: [...access.gitState, ...access.otherCheckouts, ...SRT_SHARED_TEMP],
           loopback: input.project.sandboxLoopback,
           deniedEnvNames: [],

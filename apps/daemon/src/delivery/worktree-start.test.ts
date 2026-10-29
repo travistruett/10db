@@ -258,7 +258,7 @@ describe('installing a new worktree’s dependencies', () => {
     const batch = await startedOne(h.addTask('Alpha'));
     expect(batch.state).toBe('OPEN');
     expect(h.pnpm.calls()).toEqual([
-      `${realpathSync(pathOf(batch))} | install --frozen-lockfile --ignore-scripts --ignore-pnpmfile`,
+      `${realpathSync(pathOf(batch))} | install --frozen-lockfile --ignore-scripts --ignore-pnpmfile --store-dir ${h.pnpm.bin} --modules-dir node_modules --virtual-store-dir node_modules/.pnpm`,
     ]);
     const logged = h.logs.lines().find((line) => line['msg'] === 'worktree dependencies installed');
     expect(logged).toMatchObject({ batchId: batch.id });

@@ -8,17 +8,33 @@ import type { GateRunner } from '../verify';
 const PNPM_LOCKFILE = 'pnpm-lock.yaml';
 
 /**
- * Brings a seeded `node_modules` in line with the worktree's own lockfile. The scripts and the
- * pnpmfile are off: a worktree install runs no code from the repository, and the root `prepare`
- * script (`lefthook install`) would otherwise write git hooks into the main checkout's git
- * directory, which every worktree shares.
+ * What the builder is told runs. The real command (`installCommand`) also fixes the program, the
+ * store and the directories, which the repository's own config could otherwise choose.
  */
-export const INSTALL_COMMAND = [
-  // A blocked registry host answers every request with a refusal; the default retries, a minute apart,
-  // would keep the cut waiting for minutes before it says so.
-  'pnpm_config_fetch_retries=1 pnpm_config_fetch_retry_mintimeout=1000 pnpm_config_fetch_retry_maxtimeout=5000',
-  'pnpm install --frozen-lockfile --ignore-scripts --ignore-pnpmfile',
-].join(' ');
+export const INSTALL_SUMMARY = 'pnpm install --frozen-lockfile --ignore-scripts --ignore-pnpmfile';
+
+const quoted = (text: string): string => `'${text.replaceAll("'", "'\\''")}'`;
+
+/**
+ * Brings a seeded `node_modules` in line with the worktree's own lockfile, with a pnpm the daemon
+ * resolved (`pnpm`, an absolute path outside every checkout). The scripts and the pnpmfile are off: a
+ * worktree install runs no code from the repository, and the root `prepare` script (`lefthook
+ * install`) would otherwise write git hooks into the main checkout's git directory, which every
+ * worktree shares. The repository does not choose the program (`packageManager` and corepack are
+ * switched off) or where pnpm writes (`.npmrc` and workspace settings can name a store, a modules
+ * directory and a virtual store, so all three are given on the command line).
+ */
+export function installCommand(pnpm: string): string {
+  return [
+    // A blocked registry host answers every request with a refusal; the default retries, a minute
+    // apart, would keep the cut waiting for minutes before it says so.
+    'pnpm_config_fetch_retries=1 pnpm_config_fetch_retry_mintimeout=1000 pnpm_config_fetch_retry_maxtimeout=5000',
+    'pnpm_config_manage_package_manager_versions=false COREPACK_ENABLE_STRICT=0 COREPACK_ENABLE_AUTO_PIN=0',
+    quoted(pnpm),
+    'install --frozen-lockfile --ignore-scripts --ignore-pnpmfile',
+    '--store-dir "$pnpm_config_store_dir" --modules-dir node_modules --virtual-store-dir node_modules/.pnpm',
+  ].join(' ');
+}
 
 export type DependencyRefresh =
   /** Nothing to do: the project is not pnpm's, or the seed left no `node_modules`. */
@@ -57,6 +73,8 @@ export interface WorktreeDependenciesDeps {
   /** Every registered checkout and live worktree, which the install can't write. */
   checkouts(): readonly string[];
   readonly timeoutMs: number;
+  /** The absolute path of the pnpm to run, found outside every checkout; null when there is none. */
+  resolvePnpm(env: Readonly<Record<string, string>>, checkouts: readonly string[]): string | null;
 }
 
 /**
@@ -65,7 +83,7 @@ export interface WorktreeDependenciesDeps {
  * types and tests of packages that moved. This runs pnpm's own check-and-repair against the
  * worktree's lockfile under the gate's sandbox (the registry host a project allows, no secret, no
  * write outside the worktree and the run's temp dir), so nothing from the repository runs outside
- * the sandbox. Packages that are already current cost a no-op.
+ * the sandbox.
  */
 export function createWorktreeDependencies(deps: WorktreeDependenciesDeps): WorktreeDependencies {
   return {
@@ -78,14 +96,25 @@ export function createWorktreeDependencies(deps: WorktreeDependenciesDeps): Work
         'install',
         `batch-${batch.id}-${String(deps.clock.now().getTime())}.log`,
       );
+      const env = deps.sessionEnv(project);
+      const checkouts = [...new Set([...deps.checkouts(), path])];
+      const pnpm = deps.resolvePnpm(env, checkouts);
+      if (pnpm === null)
+        return {
+          kind: 'failed',
+          exitCode: 127,
+          timedOut: false,
+          tail: "No pnpm was found on the login shell's PATH outside the project's checkouts.",
+          logPath,
+        };
       const result = await deps.gate.run({
         project: { repoPath: path, sandboxLoopback: project.sandboxLoopback },
-        command: INSTALL_COMMAND,
+        command: installCommand(pnpm),
         logPath,
         timeoutMs: deps.timeoutMs,
-        env: deps.sessionEnv(project),
+        env,
         rules: deps.rules(project),
-        checkouts: [...new Set([...deps.checkouts(), path])],
+        checkouts,
         signal,
         packageInstall: true,
       });
