@@ -423,6 +423,27 @@ describe('git guard in an agent worktree beside the checkout', () => {
     ['cd inside bash -c', "bash -c 'cd CHECKOUT && git restore a.ts'", 'ask'],
     ['cd, then bash -c', "cd CHECKOUT && bash -c 'git restore a.ts'", 'ask'],
     ['cd inside eval', "eval 'cd CHECKOUT'; git restore a.ts", 'ask'],
+    // Only a lone, plain git command gets the exception: anything the shell expands or runs first
+    // could point git somewhere else.
+    [
+      'a directory change spelled through variables',
+      'X=c; Y=d; $X$Y CHECKOUT; git restore a.ts',
+      'ask',
+    ],
+    ['a quoted cd', '"c"d CHECKOUT && git restore a.ts', 'ask'],
+    ['source first', 'source ./there.sh; git restore a.ts', 'ask'],
+    ['dot first', '. ./there.sh && git restore a.ts', 'ask'],
+    ['a leading env assignment', 'FOO=1 git restore a.ts', 'ask'],
+    ['a wrapper', 'command git restore a.ts', 'ask'],
+    ['another command first', 'true && git restore a.ts', 'ask'],
+    ['a substitution anywhere', 'git restore a.ts "$(true)"', 'ask'],
+    // Pathspecs the shell would expand don't count as named files.
+    ['a variable pathspec', 'git restore $F', 'ask'],
+    ['a braced variable pathspec', 'git checkout -- ${F}', 'ask'],
+    ['a backtick pathspec', 'git restore `echo a.ts`', 'ask'],
+    ['a tilde pathspec', 'git restore ~/a.ts', 'ask'],
+    ['a brace-expansion pathspec', 'git restore {a,b}.ts', 'ask'],
+    ['a quoted brace pathspec', "git checkout -- 'x{1}.ts'", 'ask'],
     // Every other rule holds in an agent worktree.
     ['hard reset', 'git reset --hard HEAD', 'ask'],
     ['clean', 'git clean -fd', 'ask'],

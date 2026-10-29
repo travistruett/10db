@@ -598,8 +598,8 @@ const RETARGETS =
   /(^|[\s;&|(){}`'"=])(cd|pushd|popd|chdir|-C|--chdir(=\S*)?|--git-dir(=\S*)?|--work-tree(=\S*)?)(?=$|[\s;&|(){}`'"])|\bGIT_(DIR|WORK_TREE|COMMON_DIR|INDEX_FILE|OBJECT_DIRECTORY)\b/;
 
 /**
- * True when every pathspec names one file: no option, glob, pathspec magic, `.`, directory or
- * parent path. An empty list is false, since git then takes the whole tree or refuses.
+ * True when every pathspec names one file: no option, glob, pathspec magic, expansion syntax
+ * (`$`, backtick, `~`, braces), `.`, directory or parent path. An empty list is false, since git then takes the whole tree or refuses.
  * @param {string[]} paths
  * @param {string} cwd
  */
@@ -611,7 +611,7 @@ function namesSingleFiles(paths, cwd) {
       return (
         !p.startsWith('-') &&
         !p.startsWith(':') &&
-        !/[*?[\]\\]/.test(p) &&
+        !/[*?[\]\\$`{}~]/.test(p) &&
         normal !== '.' &&
         normal !== '..' &&
         !normal.startsWith('../') &&
@@ -930,7 +930,18 @@ function judge(command, cwd, whole = command) {
         (git.verb === 'filter-repo' && !a.includes('--version')) ||
         (git.verb === 'stash' && !['list', 'show'].includes(a[0] ?? '')) ||
         (git.verb === 'tag' && (hasShortFlag(a, 'd') || hasLongOption(a, '--delete')));
+      // The exception holds only for a command that is this one plain git call: no other segment,
+      // wrapper, assignment, substitution, heredoc or `$`, so nothing the shell runs or expands
+      // first can point git at another checkout.
+      const loneGitCall =
+        whole === command &&
+        segs.filter((x) => x.words.length > 0).length === 1 &&
+        seg.words[0] === 'git' &&
+        seg.substitutions.length === 0 &&
+        seg.heredocs.length === 0 &&
+        !/[$`]/.test(whole);
       const ownDiscard =
+        loneGitCall &&
         ['checkout', 'restore', 'stash'].includes(git.verb) &&
         isFileDiscard(git.verb, a, cwd) &&
         !RETARGETS.test(whole) &&
