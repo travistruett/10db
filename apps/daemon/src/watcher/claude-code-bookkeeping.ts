@@ -22,15 +22,16 @@ export function isClaudeCodeBookkeeping(rel: string): boolean {
 }
 
 /**
- * Whether `rel` under `root` is a real directory (not a link) whose entries are all bookkeeping, or that is
- * empty: a `.claude/` a session start created to hold its staging directory. Such a directory can't change
- * what runs, and anything written into it later arrives as its own event. Anything unreadable counts as not.
+ * Whether `rel` under `root` is a real directory (not a link) that holds bookkeeping and nothing else: a
+ * `.claude/` a session start created to hold its staging directory. Such a directory can't change what runs,
+ * and anything written into it later arrives as its own event. An empty or unreadable one counts as not.
  */
 export function holdsOnlyBookkeeping(root: string, rel: string): boolean {
   try {
     const path = join(root, rel);
     if (!lstatSync(path).isDirectory()) return false;
-    return readdirSync(path).every((name) => isClaudeCodeBookkeeping(`${rel}/${name}`));
+    const entries = readdirSync(path);
+    return entries.length > 0 && entries.every((name) => isClaudeCodeBookkeeping(`${rel}/${name}`));
   } catch {
     return false;
   }

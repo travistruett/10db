@@ -385,6 +385,15 @@ describe('watcher', () => {
         expected: ['.claude'],
       },
       {
+        name: 'leaves a new, empty .claude flagged',
+        ignore: '',
+        setup: () => {
+          mkdirSync(join(repo.path, '.claude'));
+        },
+        events: ['.claude'],
+        expected: ['.claude'],
+      },
+      {
         name: 'leaves a .claude link flagged though its target holds only the staging directory',
         ignore: '.claude\n',
         setup: () => {
