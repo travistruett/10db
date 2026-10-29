@@ -791,6 +791,77 @@ describe('BoardView', () => {
     expect(within(column).getAllByRole('listitem')).toHaveLength(22);
   });
 
+  it('an empty column shows its hint and a dashed border', async () => {
+    const project = projectDto();
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([])),
+    );
+    renderApp('/board');
+    const ready = await screen.findByRole('list', { name: 'Ready tasks' });
+    expect(screen.getAllByText('Next up. Start Ready Tasks picks from here.')).toHaveLength(1);
+    const paper = ready.closest('.mantine-Paper-root');
+    expect(paper?.getAttribute('style')).toContain('dashed');
+  });
+
+  it('a column with a card hides its hint and has a solid border', async () => {
+    const project = projectDto();
+    const task = taskDto({ projectId: project.id, title: 'Alpha', boardStatus: 'ready' });
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([task])),
+    );
+    renderApp('/board');
+    const ready = await screen.findByRole('list', { name: 'Ready tasks' });
+    expect(await within(ready).findByRole('listitem', { name: 'Alpha' })).toBeTruthy();
+    expect(screen.queryByText('Next up. Start Ready Tasks picks from here.')).toBeNull();
+    const style = ready.closest('.mantine-Paper-root')?.getAttribute('style');
+    expect(style).toContain('solid');
+    expect(style).not.toContain('dashed');
+  });
+
+  it('the count is a plain number labelled "N tasks"', async () => {
+    const project = projectDto();
+    const tasks = [
+      taskDto({ projectId: project.id, title: 'Alpha', boardStatus: 'ready' }),
+      taskDto({ projectId: project.id, title: 'Beta', boardStatus: 'ready' }),
+    ];
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json(tasks)),
+    );
+    renderApp('/board');
+    const count = await screen.findByLabelText('2 tasks');
+    expect(count.textContent).toBe('2');
+  });
+
+  it('Ready ends in Add Task, which opens New Task', async () => {
+    const project = projectDto();
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([])),
+    );
+    renderApp('/board');
+    const ready = await screen.findByRole('list', { name: 'Ready tasks' });
+    const paper = ready.closest<HTMLElement>('.mantine-Paper-root');
+    if (!paper) throw new Error('Ready has no column');
+    const add = within(paper).getByRole('button', { name: 'Add Task' });
+    expect(screen.getAllByRole('button', { name: 'Add Task' })).toHaveLength(1);
+    fireEvent.click(add);
+    expect(await screen.findByRole('dialog', { name: 'New Task' })).toBeTruthy();
+  });
+
+  it('shows no lock icon on system columns', async () => {
+    const project = projectDto();
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([])),
+    );
+    renderApp('/board');
+    await screen.findByRole('list', { name: 'Ready tasks' });
+    expect(screen.queryByText("Follows the task's state")).toBeNull();
+  });
+
   it('shows no "No tasks yet" line', async () => {
     const project = projectDto();
     serve(

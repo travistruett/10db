@@ -12,7 +12,7 @@ import {
   type WorkstreamDto,
   type WorkstreamId,
 } from '@10db/contracts';
-import { Alert, Button, Group, Loader, Menu, Modal, ScrollArea, Stack, Text } from '@mantine/core';
+import { Alert, Button, Group, Loader, Menu, Modal, Stack, Text } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { IconColumns, IconPlayerPlay, IconPlus } from '@tabler/icons-react';
 import { useNavigate } from '@tanstack/react-router';
@@ -26,6 +26,8 @@ import { BatchSheet } from './batch/batch-sheet';
 import { BatchHistory } from './batch-history';
 import { BatchStrip } from './batch-strip';
 import { BoardColumn } from './board-column';
+import { BoardScroll } from './board-scroll';
+import { columnHint } from './column-hints';
 import { BoardDnd } from './board-dnd';
 import { boardLayout, DONE_LIMIT, type LayoutColumn } from './board-layout';
 import { menuMoves, resolveDrop, startedDependents, type DropTarget } from './drop-rules';
@@ -76,6 +78,8 @@ interface BoardColumnsProps {
   readonly peers: ReadonlyMap<TaskId, Pick<TaskDto, 'title' | 'status' | 'boardColumnId'>>;
   /** For each task, a dependent that has started and waits on it; such a task can't be parked. */
   readonly started: ReadonlyMap<TaskId, string>;
+  /** Opens the New Task form from the foot of Ready. */
+  readonly onAddTask: () => void;
 }
 
 /** The columns and their cards, with drag and drop; split out so the actions hook gets a project. */
@@ -86,6 +90,7 @@ function BoardColumns({
   batchById,
   peers,
   started,
+  onAddTask,
 }: BoardColumnsProps) {
   const actions = useBoardActions(projectId);
   const [showAllDone, setShowAllDone] = useState(false);
@@ -93,7 +98,7 @@ function BoardColumns({
     actions.apply(resolveDrop(layout, taskId, target, started));
   };
   return (
-    <Stack>
+    <Stack flex={1} mih={0}>
       {actions.notice ? (
         <Alert color="yellow" withCloseButton onClose={actions.dismiss}>
           {actions.notice}
@@ -104,66 +109,74 @@ function BoardColumns({
           {actions.failure.error.message}
         </Alert>
       ) : null}
-      <ScrollArea type="auto" offsetScrollbars>
-        <Group align="flex-start" wrap="nowrap" gap="sm">
-          <BoardDnd
-            layout={layout}
-            shown={(column) =>
-              isDone(column) && !showAllDone ? column.tasks.slice(0, DONE_LIMIT) : column.tasks
-            }
-            onDrop={drop}
-            renderColumn={(column, cards, listRef) => (
-              <BoardColumn
-                listRef={listRef}
-                label={column.label}
-                count={column.tasks.length}
-                locked={column.key.kind === 'system'}
-                footer={
-                  isDone(column) && !showAllDone && column.tasks.length > DONE_LIMIT ? (
-                    <Button
-                      variant="subtle"
-                      size="xs"
-                      onClick={() => {
-                        setShowAllDone(true);
-                      }}
-                    >
-                      {`Show all ${String(column.tasks.length)}`}
-                    </Button>
-                  ) : null
+      <BoardScroll>
+        <BoardDnd
+          layout={layout}
+          shown={(column) =>
+            isDone(column) && !showAllDone ? column.tasks.slice(0, DONE_LIMIT) : column.tasks
+          }
+          onDrop={drop}
+          renderColumn={(column, cards, listRef) => (
+            <BoardColumn
+              listRef={listRef}
+              label={column.label}
+              count={column.tasks.length}
+              hint={columnHint(column)}
+              footer={
+                isDone(column) && !showAllDone && column.tasks.length > DONE_LIMIT ? (
+                  <Button
+                    variant="subtle"
+                    size="xs"
+                    onClick={() => {
+                      setShowAllDone(true);
+                    }}
+                  >
+                    {`Show all ${String(column.tasks.length)}`}
+                  </Button>
+                ) : isReady(column) ? (
+                  <Button
+                    variant="default"
+                    size="xs"
+                    fullWidth
+                    style={{ borderStyle: 'dashed' }}
+                    onClick={onAddTask}
+                  >
+                    Add Task
+                  </Button>
+                ) : null
+              }
+            >
+              {cards}
+            </BoardColumn>
+          )}
+          renderCard={(task, handle) => {
+            const ws = task.workstreamId ? workstreamById.get(task.workstreamId) : undefined;
+            return (
+              <TaskCard
+                task={task}
+                workstream={ws && SHOWN_STATES.includes(ws.state) ? ws : undefined}
+                pullRequest={shippedPullRequest(task, ws, batchById)}
+                peers={peers}
+                handle={handle}
+                menu={
+                  <TaskCardMenu
+                    task={task}
+                    latest={ws?.state}
+                    parkedDependency={parkedDependencyOf(task, peers)}
+                    moves={menuMoves(layout, task.id, started)}
+                    onMove={(target) => {
+                      drop(task.id, target);
+                    }}
+                    onStart={() => {
+                      actions.apply({ kind: 'start', taskId: task.id });
+                    }}
+                  />
                 }
-              >
-                {cards}
-              </BoardColumn>
-            )}
-            renderCard={(task, handle) => {
-              const ws = task.workstreamId ? workstreamById.get(task.workstreamId) : undefined;
-              return (
-                <TaskCard
-                  task={task}
-                  workstream={ws && SHOWN_STATES.includes(ws.state) ? ws : undefined}
-                  pullRequest={shippedPullRequest(task, ws, batchById)}
-                  peers={peers}
-                  handle={handle}
-                  menu={
-                    <TaskCardMenu
-                      task={task}
-                      latest={ws?.state}
-                      parkedDependency={parkedDependencyOf(task, peers)}
-                      moves={menuMoves(layout, task.id, started)}
-                      onMove={(target) => {
-                        drop(task.id, target);
-                      }}
-                      onStart={() => {
-                        actions.apply({ kind: 'start', taskId: task.id });
-                      }}
-                    />
-                  }
-                />
-              );
-            }}
-          />
-        </Group>
-      </ScrollArea>
+              />
+            );
+          }}
+        />
+      </BoardScroll>
     </Stack>
   );
 }
@@ -218,7 +231,7 @@ export function BoardView() {
   const readyCount = layout.find(isReady)?.tasks.length ?? 0;
 
   return (
-    <Stack>
+    <Stack h="calc(100dvh - var(--app-shell-header-offset, 0px) - 2 * var(--mantine-spacing-md))">
       <Group justify="flex-end" align="flex-end">
         <Group align="flex-end">
           <Button variant="default" size="sm" onClick={projectModal.open}>
@@ -309,6 +322,7 @@ export function BoardView() {
           batchById={batchById}
           peers={peers}
           started={started}
+          onAddTask={taskModal.open}
         />
       ) : null}
 
