@@ -41,7 +41,7 @@ export function SectionBody({
       return (
         <>
           {heading}
-          {project ? <ProjectAreas project={project} /> : <NoProject />}
+          {project ? <ProjectAreas key={project.id} project={project} /> : <NoProject />}
         </>
       );
     case SettingsSectionKey.Billing:

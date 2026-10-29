@@ -227,6 +227,24 @@ describe('SettingsView', () => {
     expect(patched).toEqual([]);
   });
 
+  it('shows the other project\u2019s areas after switching projects, not the first one\u2019s', async () => {
+    const a = projectDto({ name: 'Alpha', areas: [{ name: 'api', globs: ['src/api/**'] }] });
+    const b = projectDto({ name: 'Beta', areas: [{ name: 'core', globs: ['src/core/**'] }] });
+    server.use(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([a, b])),
+      ...baseHandlers(),
+    );
+    renderApp('/settings/areas');
+    expect(await screen.findByRole('textbox', { name: 'Area 1 name' })).toHaveProperty(
+      'value',
+      'api',
+    );
+    await pick(screen.getByRole('combobox', { name: 'Project' }), 'Beta');
+    await waitFor(() => {
+      expect(screen.getByRole('textbox', { name: 'Area 1 name' })).toHaveProperty('value', 'core');
+    });
+  });
+
   it('changes the keep-awake mode', async () => {
     const put: unknown[] = [];
     server.use(

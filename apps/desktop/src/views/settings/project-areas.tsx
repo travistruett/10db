@@ -63,10 +63,10 @@ function toPatch(
 function PathExamples({ paths }: { readonly paths: string }) {
   return (
     <Stack gap={2}>
-      {lines(paths).map((glob) => {
+      {lines(paths).map((glob, index) => {
         const { words, example } = describePathPattern(glob);
         return (
-          <Text key={glob} size="xs" c="dimmed">
+          <Text key={`${String(index)}-${glob}`} size="xs" c="dimmed">
             <Code>{glob}</Code>
             {` ${words}. Example: ${example}`}
           </Text>

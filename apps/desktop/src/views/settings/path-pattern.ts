@@ -10,6 +10,11 @@ const ANYWHERE = '**/';
 
 /** Explains a path pattern (a glob relative to the project folder) in words, with a path it matches. */
 export function describePathPattern(glob: string): PathPatternText {
+  if (glob === '**') return { words: 'every file in the project', example: exampleOf(glob) };
+  if (glob.startsWith('!')) {
+    const rest = describePathPattern(glob.slice(1));
+    return { words: `everything except ${rest.words}`, example: rest.example };
+  }
   const inside = glob.endsWith(INSIDE);
   const withoutInside = inside ? glob.slice(0, -INSIDE.length) : glob;
   const anywhere = withoutInside.startsWith(ANYWHERE);
@@ -30,11 +35,14 @@ function words(p: {
   if (p.inside && p.anywhere) return `${p.rest}/ in any folder, and everything inside it`;
   if (p.inside) return `${p.rest}/ and everything inside it`;
   if (p.anywhere) return `${p.rest} in any folder`;
+  if (p.dir.includes('**'))
+    return `files matching ${p.last} anywhere under ${p.dir.slice(0, p.dir.indexOf('**')).replace(/\/$/, '')}/`;
+  if (p.dir.includes('*') || p.dir.includes('{')) return `paths matching ${p.rest}`;
   if (p.last.includes('*'))
     return p.dir === ''
       ? `files matching ${p.last} at the top of the project`
       : `files matching ${p.last} directly in ${p.dir}/`;
-  return `${p.rest} at the top of the project`;
+  return p.dir === '' ? `${p.rest} at the top of the project` : `${p.rest} in the project folder`;
 }
 
 function exampleOf(glob: string): string {
