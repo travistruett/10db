@@ -8,8 +8,10 @@ import {
   mintId,
   NotFoundError,
   TaskInput,
+  TaskHasDependentsError,
   TaskMove,
   TaskPatch,
+  TaskStartedError,
   TaskStatus,
   Title,
   WorkstreamState,
@@ -207,19 +209,68 @@ export function getTask(db: DbReader, id: TaskId): TaskDto {
   return toTaskDto(db, row);
 }
 
+/** The project's tasks in board order. A removed (cancelled) task keeps its row but is not listed. */
 export function listTasks(db: DbReader, projectId: ProjectId): TaskDto[] {
   return db
     .select()
     .from(schema.tasks)
-    .where(eq(schema.tasks.projectId, projectId))
+    .where(
+      and(eq(schema.tasks.projectId, projectId), ne(schema.tasks.status, TaskStatus.Cancelled)),
+    )
     .orderBy(asc(schema.tasks.boardOrder), asc(schema.tasks.id))
     .all()
     .map((row) => toTaskDto(db, row));
 }
 
+/**
+ * Removes a task that never started: it keeps its row, history and id, with status cancelled, and
+ * drops out of the project's task list. A task with any workstream, finished or not, goes through
+ * the workstream's own cancel; a task that open tasks wait on is refused. Removing a removed task
+ * answers it again and emits nothing. A task with no workstream holds no claims (claims belong to
+ * workstreams), so there is nothing to release.
+ */
+export function cancelTask(ctx: WriteContext, id: TaskId): TaskDto {
+  const task = getTask(ctx.tx, id);
+  if (task.status === TaskStatus.Cancelled) return task;
+  const run = ctx.tx
+    .select({ id: schema.workstreams.id })
+    .from(schema.workstreams)
+    .where(eq(schema.workstreams.taskId, id))
+    .orderBy(desc(schema.workstreams.createdAt), desc(schema.workstreams.id))
+    .limit(1)
+    .get();
+  if (task.status !== TaskStatus.Open || run)
+    throw new TaskStartedError(task.title, run?.id ?? null);
+  const dependents = ctx.tx
+    .select({ title: schema.tasks.title })
+    .from(schema.taskDeps)
+    .innerJoin(schema.tasks, eq(schema.tasks.id, schema.taskDeps.taskId))
+    .where(and(eq(schema.taskDeps.dependsOnId, id), eq(schema.tasks.status, TaskStatus.Open)))
+    .orderBy(asc(schema.tasks.boardOrder))
+    .all();
+  if (dependents.length > 0)
+    throw new TaskHasDependentsError(
+      task.title,
+      dependents.map((d) => d.title),
+    );
+  ctx.tx
+    .update(schema.tasks)
+    .set({ status: TaskStatus.Cancelled, updatedAt: ctx.now })
+    .where(eq(schema.tasks.id, id))
+    .run();
+  ctx.emit({
+    type: EventType.TaskChanged,
+    entityType: 'task',
+    entityId: id,
+    data: { status: TaskStatus.Cancelled },
+  });
+  return getTask(ctx.tx, id);
+}
+
 export function patchTask(ctx: WriteContext, id: TaskId, patch: TaskPatch): TaskDto {
   const changes = TaskPatch.parse(patch);
-  getTask(ctx.tx, id);
+  if (getTask(ctx.tx, id).status === TaskStatus.Cancelled)
+    throw new ConflictError('A removed task can no longer be edited');
   if (changes.flowId) getFlow(ctx.tx, changes.flowId);
   ctx.tx
     .update(schema.tasks)

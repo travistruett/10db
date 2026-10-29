@@ -31,3 +31,27 @@ export class InvalidError extends DomainError {
     super('invalid', message);
   }
 }
+
+/** A task that has run, or is running, can't be removed from the board; its workstream is cancelled instead. */
+export class TaskStartedError extends DomainError {
+  override readonly name = 'TaskStartedError';
+  constructor(title: string, workstreamId: string | null) {
+    super(
+      'conflict',
+      workstreamId === null
+        ? `Task ${title} is finished and can't be removed`
+        : `Task ${title} has started; cancel its workstream ${workstreamId} instead (POST /workstreams/${workstreamId}/cancel)`,
+    );
+  }
+}
+
+/** A task that open tasks wait on can't be removed: they would wait for ever. */
+export class TaskHasDependentsError extends DomainError {
+  override readonly name = 'TaskHasDependentsError';
+  constructor(title: string, dependents: readonly string[]) {
+    super(
+      'conflict',
+      `Task ${title} can't be removed while ${dependents.join(', ')} wait${dependents.length === 1 ? 's' : ''} on it; remove ${dependents.length === 1 ? 'that task' : 'those tasks'} first`,
+    );
+  }
+}

@@ -625,6 +625,26 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   watcher?.sync();
 
   const token = opts.uiToken ?? randomBytes(32).toString('base64url');
+  const services = createServices({
+    state,
+    bus,
+    runner: createdRunner,
+    scheduler: createdScheduler,
+    moves,
+    inbox,
+    keepAwake,
+    systemCheck: () =>
+      opts.systemCheck ? opts.systemCheck({ git: gitBin, gh: ghBin }) : noSystemCheck(),
+    benchmarks,
+    starter,
+    shipper,
+    accounts: accountService,
+    worktreeRoot,
+    pinCheckout: (repoPath) => {
+      // A checkout git can't read yet is recorded at the first git call that succeeds there.
+      git.gitDirs(repoPath).catch(() => undefined);
+    },
+  });
   const app = createApp({
     startedAt,
     allowedOrigins: [
@@ -632,26 +652,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       ...(opts.devUiOrigin ? [opts.devUiOrigin] : []),
     ],
     token,
-    services: createServices({
-      state,
-      bus,
-      runner: createdRunner,
-      scheduler: createdScheduler,
-      moves,
-      inbox,
-      keepAwake,
-      systemCheck: () =>
-        opts.systemCheck ? opts.systemCheck({ git: gitBin, gh: ghBin }) : noSystemCheck(),
-      benchmarks,
-      starter,
-      shipper,
-      accounts: accountService,
-      worktreeRoot,
-      pinCheckout: (repoPath) => {
-        // A checkout git can't read yet is recorded at the first git call that succeeds there.
-        git.gitDirs(repoPath).catch(() => undefined);
-      },
-    }),
+    services,
+    taskRemoval: services,
     upgradeWebSocket,
     onUnexpectedError: (error) => {
       logger.error({ err: error }, 'unhandled API error');
