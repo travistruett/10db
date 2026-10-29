@@ -524,6 +524,18 @@ describe('sweepWorktrees', () => {
       pinKept: false,
     },
     {
+      name: 'a 10db-locked orphan holding only build info and caches the gate wrote',
+      entry: () => {
+        const path = worktreeAt(under('typechecked'), ours(mintId('Batch')));
+        writeFileSync(join(h.repo, '.git', 'info', 'exclude'), '*.tsbuildinfo\n.eslintcache\n');
+        writeFileSync(join(path, 'tsconfig.tsbuildinfo'), '{}\n');
+        writeFileSync(join(path, '.eslintcache'), '[]\n');
+        return path;
+      },
+      removed: true,
+      pinKept: false,
+    },
+    {
       name: 'a 10db-locked orphan whose directory was deleted',
       entry: () => {
         const path = worktreeAt(under('deleted'), ours(mintId('Batch')));
@@ -619,7 +631,14 @@ describe('sweepWorktrees', () => {
     expect(h.cards()).toEqual([]);
   });
 
-  it.each<{ name: string; change: (path: string) => void; shown: string; why: string }>([
+  it.each<{
+    name: string;
+    change: (path: string) => void;
+    shown: string;
+    /** Text the card leaves out: what the removal command may take without asking. */
+    hidden?: string;
+    why: string;
+  }>([
     {
       name: 'an edited file',
       change: (path) => {
@@ -646,6 +665,17 @@ describe('sweepWorktrees', () => {
       why: 'it holds git-ignored files',
     },
     {
+      name: 'a git-ignored file beside build info',
+      change: (path) => {
+        writeFileSync(join(h.repo, '.git', 'info', 'exclude'), '.env\n*.tsbuildinfo\n');
+        writeFileSync(join(path, '.env'), 'mine\n');
+        writeFileSync(join(path, 'tsconfig.tsbuildinfo'), '{}\n');
+      },
+      shown: '- .env',
+      hidden: 'tsbuildinfo',
+      why: 'it holds git-ignored files',
+    },
+    {
       name: 'an untracked file beside a git-ignored one',
       change: (path) => {
         writeFileSync(join(h.repo, '.git', 'info', 'exclude'), '.env\n');
@@ -663,7 +693,7 @@ describe('sweepWorktrees', () => {
       shown: "10db couldn't read",
       why: "it can't be read",
     },
-  ])('keeps an orphan with $name and names it once', async ({ change, shown, why }) => {
+  ])('keeps an orphan with $name and names it once', async ({ change, shown, hidden, why }) => {
     mkdirSync(h.worktreeRoot, { recursive: true });
     const path = worktreeAt(under('dirty'), ours(mintId('Batch')));
     change(path);
@@ -674,6 +704,7 @@ describe('sweepWorktrees', () => {
     const card = h.only(h.cards());
     expect(card.title).toBe(`10db kept ${path}: ${why}`);
     expect(card.body).toContain(shown);
+    if (hidden !== undefined) expect(card.body).not.toContain(hidden);
     expect(card.body).toContain(`git -C '${h.repo}' worktree remove --force --force '${path}'`);
   });
 

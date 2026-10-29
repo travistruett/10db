@@ -567,6 +567,46 @@ describe('a finished worktree with git-ignored files', () => {
       files: ['node_modules/x/i.js'],
       kept: null,
     },
+    {
+      name: "only the gate's typecheck build info",
+      to: 'CLOSED',
+      patterns: ['*.tsbuildinfo'],
+      files: ['tsconfig.tsbuildinfo', 'apps/web/tsconfig.tsbuildinfo'],
+      kept: null,
+    },
+    {
+      name: "only a commit hook's eslint cache",
+      to: 'ABANDONED',
+      patterns: ['.eslintcache'],
+      files: ['.eslintcache'],
+      kept: null,
+    },
+    {
+      name: 'build output ignored file by file',
+      to: 'CLOSED',
+      patterns: ['*.js', '*.log', '*.info'],
+      files: [
+        'dist/out.js',
+        'src-tauri/target/debug/build.log',
+        'coverage/lcov.info',
+        '.gate/x.log',
+      ],
+      kept: null,
+    },
+    {
+      name: 'a hand-made .env beside build output',
+      to: 'CLOSED',
+      patterns: ['.env', '*.tsbuildinfo', '.eslintcache'],
+      files: ['.env', 'tsconfig.tsbuildinfo', '.eslintcache'],
+      kept: ['.env'],
+    },
+    {
+      name: 'a log outside any build-output directory',
+      to: 'CLOSED',
+      patterns: ['*.log'],
+      files: ['debug.log'],
+      kept: ['debug.log'],
+    },
   ])('$name: kept $kept', async ({ to, patterns, files, kept }) => {
     ignore(...(patterns ?? ['.env', '.env.*', '.DS_Store', 'dist/', 'node_modules/']));
     const { batch } = await opened();
@@ -592,7 +632,9 @@ describe('a finished worktree with git-ignored files', () => {
     for (const file of files) expect(readFileSync(join(wt, file), 'utf8')).toBe('local\n');
     const card = h.only(h.cards());
     expect(card.title).toBe(keptTitle(batch));
-    for (const file of kept) expect(card.body).toContain(`- ${file}`);
+    for (const file of files)
+      if (kept.includes(file)) expect(card.body).toContain(`- ${file}`);
+      else expect(card.body).not.toContain(file);
     expect(card.body).toContain(`git -C '${h.repo}' worktree remove --force --force '${wt}'`);
   });
 

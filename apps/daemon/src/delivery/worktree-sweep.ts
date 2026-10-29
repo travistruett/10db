@@ -146,10 +146,10 @@ async function sweepProject(deps: SweepDeps, project: ProjectDto): Promise<strin
  * At startup, so no crash leaves a worktree behind for good: in each pull_request project's main
  * checkout, remove every worktree under `root` locked `10db <batch id>` whose batch is gone or
  * whose `worktree_path` is cleared or different, then prune. An orphan with uncommitted changes,
- * one git can't read, or one holding git-ignored files 10db didn't seed is kept and named on a card. An unmarked entry, another lock reason and
- * anything outside `root` are never touched. A project or an entry git refuses is logged and
- * skipped (a trust refusal raises its own card), so startup goes on. Resolves with the paths
- * removed.
+ * one git can't read, or one holding git-ignored files 10db didn't seed that are not build output
+ * is kept and named on a card. An unmarked entry, another lock reason and anything outside `root`
+ * are never touched. A project or an entry git refuses is logged and skipped (a trust refusal
+ * raises its own card), so startup goes on. Resolves with the paths removed.
  */
 export async function sweepWorktrees(deps: SweepDeps): Promise<string[]> {
   const swept: string[] = [];

@@ -9,6 +9,7 @@ import {
 } from '../git';
 import { worktreeCards } from './cards';
 import { raise, type DeliveryContext } from './context';
+import { isDisposable } from './disposable-files';
 import { removeIfEmptyDirectory } from './worktree-leftover';
 import { withWorktreeLock } from './worktree-lock';
 
@@ -46,8 +47,8 @@ export type Retirement =
  * worktree, delete a CLOSED batch's branch while it is still at its base, then drop the pin and
  * clear `worktree_path` in one transaction. An ABANDONED batch's worktree is removed only when it
  * is clean, and any finished one only when it holds no git-ignored file outside the seeded
- * directories, such as a hand-made `.env`; both are checked here so no caller can remove them, and
- * a kept worktree raises a card naming what it holds. The clear is last, so recovery re-runs every
+ * directories other than tool output, such as a hand-made `.env`; both are checked here so no
+ * caller can remove them, and a kept worktree raises a card naming what it holds. The clear is last, so recovery re-runs every
  * earlier step after a crash. Safe to repeat; a no-op once cleared. Holds the batch's worktree lock.
  */
 export async function retireWorktree(ctx: DeliveryContext, batchId: BatchId): Promise<Retirement> {
@@ -105,15 +106,13 @@ async function retire(ctx: DeliveryContext, batchId: BatchId): Promise<Retiremen
   return { kind: 'retired' };
 }
 
-/** The file Finder writes into every folder it shows, which nobody needs kept. */
-const FINDER_FILE = '.DS_Store';
-
 /**
  * The git-ignored files of the 10db worktree of `main` at `path` that lie in no directory named in
- * the project's seed, which 10db copied in, other than Finder's: what a builder or a lane put there
- * and may still need. None when nothing is at `path`, or when git doesn't list it as 10db's (removal
- * then refuses it too). Null when git lists it as 10db's but 10db won't read its git dir, which
- * counts as holding files: removal would still take them.
+ * the project's seed, which 10db copied in, and are not tool output a gate or a hook rewrites
+ * (`isDisposable`): what a builder or a lane put there and may still need. None when nothing is at
+ * `path`, or when git doesn't list it as 10db's (removal then refuses it too). Null when git lists
+ * it as 10db's but 10db won't read its git dir, which counts as holding files: removal would still
+ * take them.
  */
 export async function unseededIgnoredFiles(
   git: Git,
@@ -124,10 +123,9 @@ export async function unseededIgnoredFiles(
   if (!existsAsEntry(path)) return [];
   try {
     const files = await git.worktreeIgnoredFiles(main, path);
-    return files.filter((file) => {
-      const parts = file.split('/');
-      return parts.at(-1) !== FINDER_FILE && !parts.some((part) => seed.includes(part));
-    });
+    return files.filter(
+      (file) => !isDisposable(file) && !file.split('/').some((part) => seed.includes(part)),
+    );
   } catch (error) {
     if (!(error instanceof WorktreeNotOursError)) throw error;
     return error.unreadable ? null : [];
