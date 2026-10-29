@@ -16,6 +16,7 @@ import {
   systemCheck,
   systemKeychain,
   type LoginEnv,
+  type GhLoginProbe,
   type ResolvedTools,
 } from './environment';
 import type { Logger } from './log';
@@ -80,9 +81,9 @@ const login: LoginEnv = env.TENDB_FAKE_SCRIPTS
   : await captureLoginEnv({ inherited: process.env });
 if (login.warning) console.warn(`10db daemon: ${login.warning}`);
 
-let checked: Promise<SystemCheckDto> | null = null;
-const check = (resolved: ResolvedTools): Promise<SystemCheckDto> =>
-  (checked ??= systemCheck(login, resolved));
+// The daemon's services keep the last answer and ask again only on a recheck.
+const check = (resolved: ResolvedTools, ghLogin: GhLoginProbe): Promise<SystemCheckDto> =>
+  systemCheck(login, resolved, { ghLogin });
 
 function chooseAdapter(): SessionAdapter | ((logger: Logger) => SessionAdapter) {
   if (env.TENDB_FAKE_SCRIPTS) return new FakeAdapter(loadFakeScriptBook(env.TENDB_FAKE_SCRIPTS));

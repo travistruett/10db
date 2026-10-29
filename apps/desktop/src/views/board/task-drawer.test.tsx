@@ -1,0 +1,283 @@
+import { RiskTag, type TaskPatch } from '@10db/contracts';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { http, HttpResponse } from 'msw';
+import { describe, expect, it } from 'vitest';
+import { baseHandlers, daemonUrl, renderWithDaemon, server } from '../../test/daemon';
+import { flowDto, taskDto, workstreamDto } from '../../test/fixtures';
+import { RISK_LABEL } from './risk-labels';
+import { TaskDrawer } from './task-drawer';
+
+const peers = new Map();
+
+function serve(...overrides: Parameters<typeof server.use>) {
+  server.use(
+    ...overrides,
+    http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
+    ...baseHandlers(),
+  );
+}
+
+interface Opts {
+  readonly task?: Parameters<typeof taskDto>[0];
+  readonly workstream?: ReturnType<typeof workstreamDto>;
+}
+
+function open(opts: Opts = {}): { closed: () => number } {
+  let closes = 0;
+  renderWithDaemon(
+    <TaskDrawer
+      task={taskDto(opts.task)}
+      columnName="Ready"
+      peers={peers}
+      {...(opts.workstream ? { workstream: opts.workstream } : {})}
+      onClose={() => {
+        closes += 1;
+      }}
+    />,
+  );
+  return { closed: () => closes };
+}
+
+async function dialog(): Promise<HTMLElement> {
+  return screen.findByRole('dialog', { name: 'Task' });
+}
+
+async function edit(label: string, value: string): Promise<void> {
+  fireEvent.change(within(await dialog()).getByLabelText(label), { target: { value } });
+}
+
+function discardPrompt(): HTMLElement | null {
+  return screen.queryByText('Discard your changes to this task?');
+}
+
+describe('TaskDrawer', () => {
+  it('shows the title, column, areas and waits-on', async () => {
+    const other = taskDto({ title: 'Set up the repo' });
+    const map = new Map([[other.id, { title: other.title }]]);
+    serve();
+    renderWithDaemon(
+      <TaskDrawer
+        task={taskDto({ title: 'Ship it', areas: ['api', 'ui'], dependsOn: [other.id] })}
+        columnName="Ready"
+        peers={map}
+        onClose={() => undefined}
+      />,
+    );
+    const d = await dialog();
+    expect(within(d).getByLabelText<HTMLInputElement>('Title').value).toBe('Ship it');
+    expect(within(d).getByText('Ready')).toBeTruthy();
+    expect(within(d).getByText('api')).toBeTruthy();
+    expect(within(d).getByText('ui')).toBeTruthy();
+    expect(within(d).getByText('Waits on Set up the repo')).toBeTruthy();
+  });
+
+  it('saves the five fields', async () => {
+    const flow = flowDto({ name: 'quick' });
+    const patched: TaskPatch[] = [];
+    const task = taskDto();
+    server.use(
+      http.get(daemonUrl('/flows'), () => HttpResponse.json([flow])),
+      http.patch(daemonUrl('/tasks/:taskId'), async ({ request }) => {
+        patched.push((await request.json()) as TaskPatch);
+        return HttpResponse.json(task);
+      }),
+      ...baseHandlers(),
+    );
+    const { closed } = open({ task });
+    await edit('Title', '  New title ');
+    await edit('Description', ' Some words ');
+    await edit('Acceptance criteria', ' first \n\n second ');
+    const d = await dialog();
+    fireEvent.click(within(d).getByRole('combobox', { name: 'Flow' }));
+    fireEvent.click(await screen.findByRole('option', { name: /Quick/, hidden: true }));
+    fireEvent.click(within(d).getByLabelText('Risks'));
+    fireEvent.click(
+      await screen.findByRole('option', { name: 'Database migration', hidden: true }),
+    );
+    fireEvent.click(within(d).getByRole('button', { name: 'Save Changes' }));
+
+    await waitFor(() => {
+      expect(patched).toHaveLength(1);
+    });
+    expect(patched[0]).toEqual({
+      title: 'New title',
+      description: 'Some words',
+      acceptanceCriteria: ['first', 'second'],
+      flowId: flow.id,
+      riskTags: [RiskTag.Migration],
+    });
+    await waitFor(() => {
+      expect(closed()).toBe(1);
+    });
+  });
+
+  it('refuses an empty title', async () => {
+    let requests = 0;
+    serve(
+      http.patch(daemonUrl('/tasks/:taskId'), () => {
+        requests += 1;
+        return HttpResponse.json(taskDto());
+      }),
+    );
+    open();
+    await edit('Title', '   ');
+    fireEvent.click(within(await dialog()).getByRole('button', { name: 'Save Changes' }));
+    expect(await screen.findByText('Give the task a title')).toBeTruthy();
+    expect(requests).toBe(0);
+  });
+
+  it('refuses no criteria', async () => {
+    let requests = 0;
+    serve(
+      http.patch(daemonUrl('/tasks/:taskId'), () => {
+        requests += 1;
+        return HttpResponse.json(taskDto());
+      }),
+    );
+    open();
+    await edit('Acceptance criteria', ' \n ');
+    fireEvent.click(within(await dialog()).getByRole('button', { name: 'Save Changes' }));
+    expect(await screen.findByText('Add at least one acceptance criterion')).toBeTruthy();
+    expect(requests).toBe(0);
+  });
+
+  it("shows the daemon's refusal beside Save", async () => {
+    serve(
+      http.patch(daemonUrl('/tasks/:taskId'), () =>
+        HttpResponse.json({ error: 'task is archived' }, { status: 409 }),
+      ),
+    );
+    open();
+    await edit('Title', 'Another');
+    fireEvent.click(within(await dialog()).getByRole('button', { name: 'Save Changes' }));
+    expect(await screen.findByText(/^Couldn't save: /)).toBeTruthy();
+  });
+
+  it('says changes apply next session while a workstream runs', async () => {
+    serve();
+    open({ workstream: workstreamDto({ state: 'RUNNING' }) });
+    expect(await screen.findByText("Changes apply from the task's next session.")).toBeTruthy();
+  });
+
+  it('says nothing about sessions when there is no live workstream', async () => {
+    serve();
+    open({ workstream: workstreamDto({ state: 'DONE' }) });
+    await dialog();
+    expect(screen.queryByText("Changes apply from the task's next session.")).toBeNull();
+  });
+
+  describe('closing', () => {
+    it('with edits asks first; Keep Editing keeps the drawer and the edit', async () => {
+      serve();
+      const { closed } = open();
+      await edit('Title', 'Changed');
+      fireEvent.click(within(await dialog()).getByRole('button', { name: 'Cancel' }));
+
+      expect(await screen.findByText('Discard your changes to this task?')).toBeTruthy();
+      expect(closed()).toBe(0);
+      fireEvent.click(screen.getByRole('button', { name: 'Keep Editing' }));
+      await waitFor(() => {
+        expect(discardPrompt()).toBeNull();
+      });
+      expect(closed()).toBe(0);
+      expect(screen.getByLabelText<HTMLInputElement>('Title').value).toBe('Changed');
+    });
+
+    it('Discard closes the drawer', async () => {
+      serve();
+      const { closed } = open();
+      await edit('Title', 'Changed');
+      fireEvent.click(within(await dialog()).getByRole('button', { name: 'Cancel' }));
+      await screen.findByText('Discard your changes to this task?');
+      fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
+      expect(closed()).toBe(1);
+    });
+
+    it('Escape with edits asks too', async () => {
+      serve();
+      const { closed } = open();
+      await edit('Title', 'Changed');
+      fireEvent.keyDown(await dialog(), { key: 'Escape' });
+      expect(await screen.findByText('Discard your changes to this task?')).toBeTruthy();
+      expect(closed()).toBe(0);
+    });
+
+    it('with no edits closes at once', async () => {
+      serve();
+      const { closed } = open();
+      fireEvent.click(within(await dialog()).getByRole('button', { name: 'Cancel' }));
+      expect(closed()).toBe(1);
+      expect(discardPrompt()).toBeNull();
+    });
+  });
+
+  it('reads risk options in plain words', () => {
+    expect(RISK_LABEL).toEqual({
+      [RiskTag.Security]: 'Security',
+      [RiskTag.Auth]: 'Sign-in and permissions',
+      [RiskTag.Migration]: 'Database migration',
+      [RiskTag.Dependency]: 'Dependencies',
+    });
+  });
+
+  describe('workstream state', () => {
+    it('a failed task shows Failed, its reason and Retry', async () => {
+      serve();
+      open({
+        workstream: workstreamDto({ state: 'FAILED', failureReason: 'The gate failed twice' }),
+      });
+      const d = await dialog();
+      expect(within(d).getByText('Failed')).toBeTruthy();
+      expect(within(d).getByText('The gate failed twice')).toBeTruthy();
+      const retry = within(d).getByRole('button', { name: 'Retry' });
+      expect((retry as HTMLButtonElement).disabled).toBe(false);
+    });
+
+    it('Retry posts /workstreams/:id/retry', async () => {
+      const ws = workstreamDto({ state: 'FAILED', failureReason: 'boom' });
+      const retried: string[] = [];
+      serve(
+        http.post(daemonUrl('/workstreams/:id/retry'), ({ params }) => {
+          retried.push(String(params['id']));
+          return HttpResponse.json({ ...ws, state: 'QUEUED' });
+        }),
+      );
+      open({ workstream: ws });
+      fireEvent.click(within(await dialog()).getByRole('button', { name: 'Retry' }));
+      await waitFor(() => {
+        expect(retried).toEqual([ws.id]);
+      });
+    });
+
+    it('a retry refusal shows beside Retry', async () => {
+      const ws = workstreamDto({ state: 'FAILED', failureReason: 'boom' });
+      serve(
+        http.post(daemonUrl('/workstreams/:id/retry'), () =>
+          HttpResponse.json({ error: 'nope' }, { status: 409 }),
+        ),
+      );
+      open({ workstream: ws });
+      fireEvent.click(within(await dialog()).getByRole('button', { name: 'Retry' }));
+      expect(await screen.findByText(/^Couldn't retry: /)).toBeTruthy();
+    });
+
+    it.each(['DONE', 'CANCELLED'] as const)(
+      'a %s workstream shows no state line',
+      async (state) => {
+        serve();
+        open({ workstream: workstreamDto({ state }) });
+        const d = await dialog();
+        expect(within(d).queryByText(state === 'DONE' ? 'Done' : 'Cancelled')).toBeNull();
+        expect(within(d).queryByRole('button', { name: 'Retry' })).toBeNull();
+      },
+    );
+
+    it('an absent workstream shows no state line', async () => {
+      serve();
+      open();
+      const d = await dialog();
+      expect(within(d).queryByRole('button', { name: 'Retry' })).toBeNull();
+      expect(within(d).queryByText('Failed')).toBeNull();
+    });
+  });
+});

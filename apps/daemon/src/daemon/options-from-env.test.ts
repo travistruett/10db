@@ -43,6 +43,13 @@ describe('daemonOptionsFromEnv', () => {
     });
   });
 
+  it('passes TENDB_GATE_SLOTS as the gate slot limit, and leaves the default when unset', () => {
+    expect(daemonOptionsFromEnv(loadEnv({ TENDB_GATE_SLOTS: '2' })).limits).toEqual({
+      gateSlots: 2,
+    });
+    expect(daemonOptionsFromEnv(loadEnv({}))).not.toHaveProperty('limits');
+  });
+
   it('passes TENDB_WORKTREE_ROOT as worktreeRoot, and omits it when unset', () => {
     expect(daemonOptionsFromEnv(loadEnv({ TENDB_WORKTREE_ROOT: '/var/wt' })).worktreeRoot).toBe(
       '/var/wt',

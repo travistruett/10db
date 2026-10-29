@@ -4,6 +4,7 @@ import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
 import { boardColumnDto, projectDto, taskDto } from '../../test/fixtures';
+import { HUMAN_HINT, SYSTEM_HINT } from '../board/column-hints';
 
 const project = projectDto();
 const icebox = boardColumnDto({ projectId: project.id, name: 'Icebox', position: 0 });
@@ -45,21 +46,49 @@ function serve(
 }
 
 describe('BoardColumnsSection', () => {
-  it('lists the columns in order, the system columns as locked', async () => {
-    serve([icebox, exploring]);
-    const table = await screen.findByRole('table', { name: 'Human columns' });
+  it('lists the state columns after yours, dimmed, with counts and their hint, and no arrows', async () => {
+    serve(
+      [icebox, exploring],
+      [
+        taskDto({ projectId: project.id, title: 'Idea', boardColumnId: icebox.id }),
+        taskDto({
+          projectId: project.id,
+          title: 'Next',
+          boardColumnId: null,
+          boardStatus: 'ready',
+        }),
+      ],
+    );
+    const table = await screen.findByRole('table', { name: 'Board columns' });
     await within(table).findByText('Exploring');
-    expect(
-      within(table)
-        .getAllByRole('row')
-        .slice(1)
-        .map((r) => within(r).getAllByRole('cell')[0]?.textContent),
-    ).toEqual(['Icebox', 'Exploring']);
-    expect(
-      screen.getByText(
-        'Backlog, Ready, In progress, Blocked and Done follow each task’s state and can’t be changed.',
-      ),
-    ).toBeTruthy();
+    const rows = within(table).getAllByRole('row').slice(1);
+    const names = rows.map((r) => within(r).getAllByRole('cell')[1]?.textContent);
+    expect(names).toEqual([
+      `Icebox${HUMAN_HINT}`,
+      `Exploring${HUMAN_HINT}`,
+      `Backlog${SYSTEM_HINT.backlog}`,
+      `Ready${SYSTEM_HINT.ready}`,
+      `In progress${SYSTEM_HINT.in_progress}`,
+      `Blocked${SYSTEM_HINT.blocked}`,
+      `Done${SYSTEM_HINT.done}`,
+    ]);
+    const ready = rows[3];
+    if (!ready) throw new Error('no Ready row');
+    expect(within(ready).getAllByRole('cell')[2]?.textContent).toBe('1');
+    expect(within(ready).queryAllByRole('button')).toEqual([]);
+    expect(ready.getAttribute('style')).toContain('dimmed');
+    expect(within(rows[0] ?? ready).getAllByRole('cell')[2]?.textContent).toBe('1');
+  });
+
+  it('your columns lead with up and down arrows', async () => {
+    serve([icebox, exploring]);
+    const table = await screen.findByRole('table', { name: 'Board columns' });
+    const row = (await within(table).findByText('Exploring')).closest('tr');
+    if (!row) throw new Error('no row');
+    const first = within(row).getAllByRole('cell')[0];
+    if (!first) throw new Error('no first cell');
+    expect(within(first).getByRole('button', { name: 'Move Exploring up' })).toBeTruthy();
+    expect(within(first).getByRole('button', { name: 'Move Exploring down' })).toBeTruthy();
   });
 
   it('adds a column', async () => {
@@ -67,7 +96,7 @@ describe('BoardColumnsSection', () => {
     fireEvent.change(await screen.findByLabelText('New column'), {
       target: { value: 'Needs spec' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Add column' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add Column' }));
     await waitFor(() => {
       expect(sent).toEqual([
         {
@@ -84,7 +113,7 @@ describe('BoardColumnsSection', () => {
     fireEvent.change(await screen.findByLabelText('New column'), {
       target: { value: `Needs spec${' '.repeat(31)}` },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Add column' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add Column' }));
     await waitFor(() => {
       expect(sent).toEqual([
         {
@@ -108,7 +137,7 @@ describe('BoardColumnsSection', () => {
       ),
     );
     fireEvent.change(await screen.findByLabelText('New column'), { target: { value: 'Icebox' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Add column' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add Column' }));
     expect(
       await screen.findByText('This project already has a column named "Icebox"'),
     ).toBeTruthy();
@@ -118,7 +147,7 @@ describe('BoardColumnsSection', () => {
     const sent = serve([icebox, exploring]);
     fireEvent.click(await screen.findByRole('button', { name: 'Rename Icebox' }));
     fireEvent.change(screen.getByLabelText('Name for Icebox'), { target: { value: 'Someday' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save name' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save Name' }));
     expect(screen.getByRole('button', { name: 'Move Icebox up' })).toHaveProperty('disabled', true);
     fireEvent.click(screen.getByRole('button', { name: 'Move Icebox down' }));
     await waitFor(() => {
@@ -137,7 +166,7 @@ describe('BoardColumnsSection', () => {
     const sent = serve([icebox, exploring]);
     fireEvent.click(await screen.findByRole('button', { name: 'Rename Icebox' }));
     fireEvent.change(screen.getByLabelText('Name for Icebox'), { target: { value: typed } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save name' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save Name' }));
     expect(await screen.findByText(message)).toBeTruthy();
     expect(screen.getByLabelText('Name for Icebox').getAttribute('aria-invalid')).toBe('true');
     expect(sent).toEqual([]);
@@ -149,7 +178,7 @@ describe('BoardColumnsSection', () => {
     fireEvent.change(screen.getByLabelText('Name for Icebox'), {
       target: { value: '  Some   day ' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Save name' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save Name' }));
     await waitFor(() => {
       expect(sent).toEqual([
         { method: 'PATCH', path: `/board-columns/${icebox.id}`, body: { name: 'Some day' } },
@@ -162,7 +191,8 @@ describe('BoardColumnsSection', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Delete Exploring' }));
     const dialog = await screen.findByRole('dialog', { name: 'Delete Exploring' });
     expect(within(dialog).queryByLabelText('Move its tasks to')).toBeNull();
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete column' }));
+    expect(within(dialog).getByRole('button', { name: 'Keep It' })).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete Column' }));
     await waitFor(() => {
       expect(sent).toEqual([
         {
@@ -182,13 +212,13 @@ describe('BoardColumnsSection', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Delete Icebox' }));
     const dialog = await screen.findByRole('dialog', { name: 'Delete Icebox' });
     expect(within(dialog).getByText('Icebox holds 1 task. Where should it go?')).toBeTruthy();
-    expect(within(dialog).getByRole('button', { name: 'Delete column' })).toHaveProperty(
+    expect(within(dialog).getByRole('button', { name: 'Delete Column' })).toHaveProperty(
       'disabled',
       true,
     );
     fireEvent.click(within(dialog).getByLabelText('Move its tasks to'));
     fireEvent.click(await screen.findByRole('option', { name: choice, hidden: true }));
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete column' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete Column' }));
     await waitFor(() => {
       expect(sent).toEqual([
         {

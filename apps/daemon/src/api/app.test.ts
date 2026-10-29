@@ -49,6 +49,7 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
     setKeepAwake: none,
     eventsHead: () => 0,
     reviewProjectMcp: none,
+    inspectFolder: none,
     listPersonas: track('listPersonas'),
     createPersona: track('createPersona'),
     patchPersona: track('patchPersona'),
@@ -111,6 +112,28 @@ const auth = { headers: { Authorization: `Bearer ${TOKEN}` } };
 const json = { headers: { ...auth.headers, 'content-type': 'application/json' } };
 
 describe('API', () => {
+  it.each([
+    { name: 'no query', query: '', status: 200, recheck: false },
+    { name: 'recheck=1', query: '?recheck=1', status: 200, recheck: true },
+    { name: 'recheck=yes', query: '?recheck=yes', status: 400, recheck: null },
+    { name: 'recheck=0', query: '?recheck=0', status: 400, recheck: null },
+  ])('GET /system with $name answers $status', async ({ query, status, recheck }) => {
+    const asked: boolean[] = [];
+    const services = stubServices({
+      systemCheck: (options) => {
+        asked.push(options.recheck);
+        return Promise.resolve({
+          loginEnv: { source: 'login_shell' as const, warning: null },
+          claudeCode: { verifiedOn: '2.1.302', warning: null },
+          tools: [],
+          benchmarkSync: null,
+        });
+      },
+    });
+    expect((await app(services).request(`/system${query}`, auth)).status).toBe(status);
+    expect(asked).toEqual(recheck === null ? [] : [recheck]);
+  });
+
   it('serves the event head, keep-awake and the system check behind the token', async () => {
     const check = {
       loginEnv: { source: 'login_shell' as const, warning: null },
@@ -121,6 +144,7 @@ describe('API', () => {
           path: '/usr/bin/git',
           version: 'git version 2.50.1',
           required: true,
+          signedIn: null,
         },
       ],
       benchmarkSync: null,
@@ -279,6 +303,22 @@ describe('API', () => {
     ).toBe(409);
   });
 
+  it('answers 409 with the task named when a patch removes an area a running task holds', async () => {
+    const message = 'Can\'t remove or rename area "api": the running task "Fix login" holds it.';
+    const services = stubServices({
+      patchProject: () => {
+        throw new ConflictError(message);
+      },
+    });
+    const res = await app(services).request(`/projects/${mintId('Project')}`, {
+      method: 'PATCH',
+      ...json,
+      body: JSON.stringify({ areas: [{ name: 'ui', globs: ['src/ui/**'] }] }),
+    });
+    expect(res.status).toBe(409);
+    expect(await res.text()).toContain('Fix login');
+  });
+
   it('answers 500 for an unexpected error and reports that error to the hook', async () => {
     const boom = new Error('boom');
     const seen: unknown[] = [];
@@ -425,6 +465,16 @@ describe('team, routing and benchmark routes', () => {
       service: 'patchProject',
     },
     {
+      name: 'PATCH /projects/:id with new areas and hazards',
+      method: 'PATCH',
+      path: `/projects/${projectId}`,
+      body: {
+        areas: [{ name: 'core', globs: ['src/core/**'] }],
+        hazards: [{ name: 'deps', globs: ['**/package.json'], commands: ['pnpm add'] }],
+      },
+      service: 'patchProject',
+    },
+    {
       name: 'PATCH /projects/:id with the localhost switch',
       method: 'PATCH',
       path: `/projects/${projectId}`,
@@ -520,6 +570,18 @@ describe('team, routing and benchmark routes', () => {
       method: 'PATCH',
       path: `/projects/${projectId}`,
       body: { budgetCeiling: -1 },
+    },
+    {
+      name: 'an area path pattern that goes up a folder',
+      method: 'PATCH',
+      path: `/projects/${projectId}`,
+      body: { areas: [{ name: 'core', globs: ['../core/**'] }] },
+    },
+    {
+      name: 'a hazard path pattern with an unclosed brace',
+      method: 'PATCH',
+      path: `/projects/${projectId}`,
+      body: { hazards: [{ name: 'deps', globs: ['{a,b'], commands: [] }] },
     },
     {
       name: 'a localhost switch that is not a boolean',
@@ -810,5 +872,40 @@ describe('candidate routes', () => {
     const res = await app().request(`/projects/${projectId}/candidates${query}`, auth);
     expect(res.status).toBe(400);
     expect(reached).toEqual([]);
+  });
+});
+
+describe('folder inspection route', () => {
+  it('POST /folders/inspect refuses a relative path with 400', async () => {
+    const res = await app().request('/folders/inspect', {
+      method: 'POST',
+      ...json,
+      body: JSON.stringify({ path: 'relative/dir' }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('POST /folders/inspect answers a refusal as 200 with ok false', async () => {
+    const refusal = {
+      ok: false,
+      reason: 'not_found',
+      message: 'Nothing is at this path.',
+    } as const;
+    const seen: string[] = [];
+    const res = await app(
+      stubServices({
+        inspectFolder: (path) => {
+          seen.push(path);
+          return Promise.resolve(refusal);
+        },
+      }),
+    ).request('/folders/inspect', {
+      method: 'POST',
+      ...json,
+      body: JSON.stringify({ path: '/nowhere' }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual(refusal);
+    expect(seen).toEqual(['/nowhere']);
   });
 });

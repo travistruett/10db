@@ -2,6 +2,7 @@ import type { TaskDto, TaskId } from '@10db/contracts';
 import {
   closestCorners,
   DndContext,
+  DragOverlay,
   KeyboardSensor,
   PointerSensor,
   useDroppable,
@@ -9,6 +10,8 @@ import {
   useSensors,
   type Announcements,
   type DragEndEvent,
+  type DragOverEvent,
+  type DragStartEvent,
 } from '@dnd-kit/core';
 import {
   SortableContext,
@@ -17,83 +20,85 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { ActionIcon, VisuallyHidden } from '@mantine/core';
-import { IconGripVertical } from '@tabler/icons-react';
-import type { ReactNode } from 'react';
+import { Box, VisuallyHidden } from '@mantine/core';
+import { useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { columnKeyId, type LayoutColumn } from './board-layout';
 import { dragRefusal, dropTarget, type DropTarget } from './drop-rules';
-
-function Handle({
-  task,
-  refusal,
-  sortable,
-}: {
-  readonly task: TaskDto;
-  readonly refusal: string | null;
-  readonly sortable: ReturnType<typeof useSortable>;
-}) {
-  // dnd-kit's sortable handle is a bag of refs and listeners the compiler cannot analyze.
-  'use no memo';
-  const reasonId = `drag-reason-${task.id}`;
-  if (refusal)
-    return (
-      <>
-        {/* aria-disabled, not disabled: a keyboard user can focus the handle and hear why it is locked. */}
-        <ActionIcon
-          variant="subtle"
-          size="sm"
-          aria-disabled="true"
-          aria-describedby={reasonId}
-          aria-label={`Can’t drag ${task.title}`}
-          title={refusal}
-          style={{ cursor: 'not-allowed', opacity: 0.5 }}
-        >
-          <IconGripVertical size={16} stroke={1.5} />
-        </ActionIcon>
-        <VisuallyHidden id={reasonId}>{refusal}</VisuallyHidden>
-      </>
-    );
-  /* eslint-disable react-hooks/refs -- useSortable returns ref callbacks and listeners that the lint reads as render-time ref access. */
-  return (
-    <ActionIcon
-      ref={sortable.setActivatorNodeRef}
-      variant="subtle"
-      size="sm"
-      aria-label={`Drag ${task.title}`}
-      style={{ cursor: 'grab' }}
-      {...sortable.attributes}
-      {...sortable.listeners}
-    >
-      <IconGripVertical size={16} stroke={1.5} />
-    </ActionIcon>
-  );
-  /* eslint-enable react-hooks/refs */
-}
 
 function SortableCard({
   task,
   refusal,
+  onOpen,
+  menu,
+  link,
+  summary,
   children,
 }: {
   readonly task: TaskDto;
   readonly refusal: string | null;
-  readonly children: (handle: ReactNode) => ReactNode;
+  readonly onOpen: () => void;
+  readonly menu: ReactNode;
+  readonly link: ReactNode;
+  readonly summary: string;
+  readonly children: ReactNode;
 }) {
   // dnd-kit's sortable handle is a bag of refs and listeners the compiler cannot analyze.
   'use no memo';
   const sortable = useSortable({ id: task.id, disabled: refusal !== null });
+  const reasonId = `drag-reason-${task.id}`;
+  const summaryId = `card-summary-${task.id}`;
   /* eslint-disable react-hooks/refs -- useSortable returns ref callbacks and listeners that the lint reads as render-time ref access. */
   return (
+    // The list item is the sortable node; the card inside it is the one button that drags and opens. A
+    // pointer drag starts only after 4px of movement, so a click still opens. A card that can't move
+    // says why through its description, which a keyboard user hears on focus, after a summary of what
+    // the card shows. The card's menu and pull request link are siblings laid over it, not children: a
+    // button can't hold another control, and their clicks and keys then never reach the card.
     <li
       ref={sortable.setNodeRef}
       aria-label={task.title}
       style={{
+        position: 'relative',
         transform: CSS.Transform.toString(sortable.transform),
         transition: sortable.transition,
-        opacity: sortable.isDragging ? 0.6 : 1,
+        // The card in flight is drawn by the overlay; its place in the list shows as a faint slot.
+        opacity: sortable.isDragging ? 0.3 : 1,
       }}
     >
-      {children(<Handle task={task} refusal={refusal} sortable={sortable} />)}
+      <div
+        ref={sortable.setActivatorNodeRef}
+        {...(refusal ? {} : sortable.attributes)}
+        {...(refusal ? {} : sortable.listeners)}
+        role="button"
+        tabIndex={0}
+        aria-label={task.title}
+        aria-describedby={refusal ? `${summaryId} ${reasonId}` : summaryId}
+        {...(refusal ? { title: refusal } : {})}
+        onClick={onOpen}
+        // Enter opens the details; Space, the sensor's start key, picks the card up. Only a key pressed
+        // on the card itself counts, and not while the card is in flight: there Enter drops it, and the
+        // sensor's listener runs after this one.
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            if (e.target === e.currentTarget && !sortable.isDragging) onOpen();
+          } else if (!refusal) sortable.listeners?.['onKeyDown']?.(e);
+        }}
+        style={{
+          cursor: refusal ? 'pointer' : sortable.isDragging ? 'grabbing' : 'grab',
+          borderRadius: 'var(--mantine-radius-md)',
+        }}
+      >
+        {children}
+      </div>
+      <Box pos="absolute" top={8} right={8}>
+        {menu}
+      </Box>
+      <Box pos="absolute" bottom={8} left={12} right={12}>
+        {link}
+      </Box>
+      <VisuallyHidden id={summaryId}>{summary}</VisuallyHidden>
+      {refusal ? <VisuallyHidden id={reasonId}>{refusal}</VisuallyHidden> : null}
     </li>
   );
   /* eslint-enable react-hooks/refs */
@@ -117,20 +122,67 @@ export interface BoardDndProps {
   readonly shown: (column: LayoutColumn) => readonly TaskDto[];
   /** A card was dropped on a target; the caller resolves it with the drop rules. */
   readonly onDrop: (taskId: TaskId, target: DropTarget) => void;
-  /** Renders a column; `listRef` goes on its `<ul>`, which becomes the column's drop target. */
+  /** Whether dropping the card on the target would do something, by the caller's drop rules. */
+  readonly accepts: (taskId: TaskId, target: DropTarget) => boolean;
+  /**
+   * Renders a column; `listRef` goes on its `<ul>`, which becomes the column's drop target.
+   * `targeted` is true while a dragged card is over the column and the column would take it.
+   */
   readonly renderColumn: (
     column: LayoutColumn,
     cards: ReactNode,
     listRef: (element: HTMLElement | null) => void,
+    targeted: boolean,
   ) => ReactNode;
-  readonly renderCard: (task: TaskDto, handle: ReactNode) => ReactNode;
+  readonly renderCard: (task: TaskDto) => ReactNode;
+  /** The card's actions menu, laid over its corner. */
+  readonly renderMenu: (task: TaskDto) => ReactNode;
+  /** The card's pull request link, laid over its bottom edge; null when it has none. */
+  readonly renderLink: (task: TaskDto) => ReactNode;
+  /** What the card shows besides its title, for a screen reader. */
+  readonly summary: (task: TaskDto) => string;
+  /** A card was clicked, or Enter pressed on it: open its details. */
+  readonly onOpen: (task: TaskDto) => void;
 }
 
 /** One drag-and-drop context for the board; it reports each drop and the caller's drop rules decide what it does. */
-export function BoardDnd({ layout, shown, onDrop, renderColumn, renderCard }: BoardDndProps) {
+export function BoardDnd({
+  layout,
+  shown,
+  onDrop,
+  accepts,
+  renderColumn,
+  renderCard,
+  renderMenu,
+  renderLink,
+  summary,
+  onOpen,
+}: BoardDndProps) {
+  // A drop ends with a click on the card under the pointer; that click isn't an open. The flag clears
+  // on the next macrotask, after the browser has dispatched that click.
+  const justDropped = useRef(false);
+  const open = (task: TaskDto) => {
+    if (!justDropped.current) onOpen(task);
+  };
+  // The card being dragged, drawn in an overlay above every column so no column clips it.
+  const [dragging, setDragging] = useState<TaskDto | null>(null);
+  // The column under a dragged card, when it would take the card; null when nothing is dragged.
+  const [targetKey, setTargetKey] = useState<string | null>(null);
+  const endDrag = () => {
+    setDragging(null);
+    setTargetKey(null);
+    justDropped.current = true;
+    setTimeout(() => {
+      justDropped.current = false;
+    }, 0);
+  };
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+      // Enter is left to open the card's details, but it still ends a drag that is under way.
+      keyboardCodes: { start: ['Space'], cancel: ['Escape'], end: ['Space', 'Enter'] },
+    }),
   );
   const titles = new Map<string, string>(
     layout.flatMap((c) => c.tasks.map((t) => [t.id, t.title] as const)),
@@ -146,7 +198,22 @@ export function BoardDnd({ layout, shown, onDrop, renderColumn, renderCard }: Bo
       over ? `${title(active.id)} was dropped.` : `${title(active.id)} was put back.`,
     onDragCancel: ({ active }) => `Moving ${title(active.id)} was cancelled.`,
   };
+  const taskOf = (id: string | number) =>
+    layout.flatMap((c) => c.tasks).find((t) => t.id === String(id));
+  function handleDragStart({ active }: DragStartEvent) {
+    setDragging(taskOf(active.id) ?? null);
+  }
+  function handleDragOver({ active, over }: DragOverEvent) {
+    const target = dropTarget(layout, over === null ? null : String(over.id));
+    const task = taskOf(active.id);
+    setTargetKey(
+      target !== null && task !== undefined && accepts(task.id, target)
+        ? columnKeyId(target.key)
+        : null,
+    );
+  }
   function handleDragEnd({ active, over }: DragEndEvent) {
+    endDrag();
     const target = dropTarget(layout, over === null ? null : String(over.id));
     if (target === null) return;
     const taskId = layout.flatMap((c) => c.tasks).find((t) => t.id === String(active.id))?.id;
@@ -157,7 +224,10 @@ export function BoardDnd({ layout, shown, onDrop, renderColumn, renderCard }: Bo
     <DndContext
       sensors={sensors}
       collisionDetection={closestCorners}
+      onDragStart={handleDragStart}
+      onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
+      onDragCancel={endDrag}
       accessibility={{ announcements }}
     >
       {layout.map((column) => {
@@ -173,17 +243,33 @@ export function BoardDnd({ layout, shown, onDrop, renderColumn, renderCard }: Bo
                   strategy={verticalListSortingStrategy}
                 >
                   {cards.map((task) => (
-                    <SortableCard key={task.id} task={task} refusal={refusal}>
-                      {(handle) => renderCard(task, handle)}
+                    <SortableCard
+                      key={task.id}
+                      task={task}
+                      refusal={refusal}
+                      menu={renderMenu(task)}
+                      link={renderLink(task)}
+                      summary={summary(task)}
+                      onOpen={() => {
+                        open(task);
+                      }}
+                    >
+                      {renderCard(task)}
                     </SortableCard>
                   ))}
                 </SortableContext>,
                 listRef,
+                targetKey === columnKeyId(column.key),
               )
             }
           </DroppableColumn>
         );
       })}
+      {/* Portaled to the body, so neither a column nor its scroll area clips the card in flight. */}
+      {createPortal(
+        <DragOverlay>{dragging ? renderCard(dragging) : null}</DragOverlay>,
+        document.body,
+      )}
     </DndContext>
   );
 }

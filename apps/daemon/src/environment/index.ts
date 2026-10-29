@@ -26,6 +26,7 @@ export {
   probeVersion,
   REQUIRED_TOOLS,
   systemCheck,
+  type GhLoginProbe,
   type ResolvedTools,
 } from './system-check';
 export { SECRET_VARIABLES } from './secret-variables';

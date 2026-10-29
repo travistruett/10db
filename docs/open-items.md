@@ -41,7 +41,7 @@
 - [x] M2b: the batch approval sheet (plan 07, part B), after the delivery plan's batch contracts.
 - [ ] M2: the PM-agent review (need estimates, optional steps), the Brainstorm panel, the consult step and ⌘K.
 - [ ] M2: Settings editors for team bindings, routing rules, personas, flows and model profiles, the AA key field and the Intelligence-vs-Cost chart (Pareto line, axis picker, AA logo and source link); their sections are slots.
-- [ ] M2: editing a project's areas and hazards (no patch route yet; Settings shows them read-only).
+- [x] M2: editing a project's areas and hazards in Settings (`PATCH /projects/:id`).
 - [ ] Board, designed for later: a per-project manual board setting that lets drags override the system columns; person-linked human columns (board_columns.person_id → people); on-drop behaviors (board_columns.on_drop, e.g. start a consult).
 - [ ] M2c: takeover and the PTY (plan 08).
 - [ ] Idea, after the M2b board: a "Model changes" review tab on a task or PR. Data-model changes (schema, migrations, contract types) are the hardest part of a change to reverse, so review should open on them, not the whole diff. Which paths count as "model" is a setting resolved at layered scopes like VS Code's (account, then project), so other hard-to-reverse areas can be watched the same way. Storage is open: record the matching paths per step and render the diff, or store a link to the forge's diff narrowed to those files. Later: track what reviewers drill into and tune the defaults.

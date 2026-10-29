@@ -12,6 +12,7 @@ import {
 } from './checkout-trust';
 import { parseScopedConfig, type ConfigEntry } from './config-trust';
 import { equalOrUnder, insideAny, isPlainDirectory, samePath, surelyInside } from './lane-writable';
+import { branchOfRef, firstLine, parseBranches, type RepoFacts, type RepoRefusal } from './inspect';
 import { comparablePath, existsAsEntry } from './path-entries';
 import { gitNetwork, type NetworkCall, type NetworkRun } from './network';
 import { localRemotePath, parseRemoteUrl } from './remote-url';
@@ -172,6 +173,12 @@ export interface Git {
    * blob over `maxBytes` is not read.
    */
   fileAt(repo: string, rev: string, path: string, maxBytes: number): Promise<FileAt>;
+  /**
+   * What the repository at or above `path` holds, read as git finds it with no pin: nothing is
+   * written, nothing is pinned and no refusal reaches `onRefused`, so a folder the builder only
+   * looks at raises no card. A repository git won't read is answered, not thrown.
+   */
+  inspect(path: string): Promise<RepoFacts | RepoRefusal>;
 }
 
 export interface GitOptions {
@@ -1271,6 +1278,57 @@ export function createGit(opts: GitOptions = {}): Git {
       const bytes = Number(size);
       if (!Number.isSafeInteger(bytes) || bytes > maxBytes) return { kind: 'too_large', bytes };
       return { kind: 'file', text: await git(c, ['cat-file', 'blob', oid]) };
+    },
+    async inspect(path) {
+      const site = observed(path);
+      /** Output of a call whose exit 1 means "nothing there". */
+      const optional = async (args: readonly string[]): Promise<string | null> => {
+        try {
+          return await git(site, args);
+        } catch (error) {
+          if (error instanceof GitError && error.exitCode === 1) return null;
+          throw error;
+        }
+      };
+      try {
+        const bare = (await git(site, ['rev-parse', '--is-bare-repository'])).trim() === 'true';
+        if (bare) return { refused: 'bare_repository', message: 'This is a bare repository.' };
+        const root = realpathSync((await git(site, ['rev-parse', '--show-toplevel'])).trim());
+        const at = observed(root);
+        const branches = parseBranches(
+          await git(at, [
+            'for-each-ref',
+            '--format=%(refname)',
+            'refs/heads',
+            'refs/remotes/origin',
+          ]),
+        );
+        const originHead = await optional(['symbolic-ref', '-q', 'refs/remotes/origin/HEAD']);
+        const head = await optional(['symbolic-ref', '-q', 'HEAD']);
+        const fromOrigin = originHead === null ? null : branchOfRef(originHead, 'origin');
+        const current = head === null ? null : branchOfRef(head, 'heads');
+        const hasCommits = (name: string | null) =>
+          name !== null && branches.some((b) => b.name === name);
+        const url = await optional(['config', '--get', 'remote.origin.url']);
+        return {
+          root,
+          branches,
+          defaultBranch: hasCommits(fromOrigin) ? fromOrigin : hasCommits(current) ? current : null,
+          originFetchUrl: url === null || url.trim() === '' ? null : url.trim(),
+        };
+      } catch (error) {
+        if (
+          error instanceof GitError &&
+          /not a git repository \((?:or any of the parent directories|or any parent up to mount point)/i.test(
+            error.stderr,
+          )
+        )
+          return { refused: 'not_a_repository', message: firstLine(error.stderr) };
+        return {
+          refused: 'unreadable',
+          message: firstLine(error instanceof GitError ? error.stderr : String(error)),
+        };
+      }
     },
     async ignoredDirectories(repo) {
       const out = await git(await pinned(repo), [

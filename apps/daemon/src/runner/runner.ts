@@ -143,12 +143,16 @@ export interface RunnerLimits {
   readonly maxRecoveryAttempts: number;
   readonly maxFixAttempts: number;
   readonly gateTimeoutMs: number;
+  /** Gates running at once across the whole daemon. */
+  readonly gateSlots: number;
 }
 
 export const DEFAULT_RUNNER_LIMITS: RunnerLimits = {
   maxRecoveryAttempts: 3,
   maxFixAttempts: 3,
   gateTimeoutMs: 30 * 60_000,
+  // One at a time: a gate runs a whole test suite, and several at once overload the machine.
+  gateSlots: 1,
 };
 
 export interface RunnerOptions {
@@ -1554,6 +1558,12 @@ export function createRunner(opts: RunnerOptions): Runner {
       rules: listPermissionRules(db, project.id, id),
       checkouts: allCheckouts(db),
       signal: gateAbort.signal,
+      onWaiting: (ahead) => {
+        opts.logger.info(
+          { workstreamId: id, ahead },
+          'verify gate is waiting for another gate to finish',
+        );
+      },
       onSpawn: (pid) => {
         recording = identify(pid).then((gatePidStart) => {
           if (gatePidStart !== null)
