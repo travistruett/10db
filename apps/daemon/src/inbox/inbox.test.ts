@@ -1089,6 +1089,60 @@ describe('permission broker in a sandboxed lane', () => {
     },
     { name: 'an expanded path ending in done', command: '$D/done add left-pad', outcome: 'card' },
     { name: 'a glob path ending in fi', command: '/x/*/fi add left-pad', outcome: 'card' },
+    { name: 'bash -c with a lone dash', command: 'bash -c - "$CMD"', outcome: 'card' },
+    {
+      name: 'bash -c with a lone dash and a hazard',
+      command: "bash -c - 'pnpm add left-pad'",
+      outcome: 'card',
+    },
+    {
+      name: 'xargs named as an argument, replacing',
+      command: 'echo add | xargs -I X echo xargs; xargs -I X pnpm X left-pad',
+      outcome: 'card',
+    },
+    {
+      name: 'a second xargs wrapper',
+      command: 'echo add | xargs xargs -I X pnpm X left-pad',
+      outcome: 'card',
+    },
+    {
+      name: 'source of a double-slash stdin',
+      command: "source //dev/stdin <<< 'pnpm add left-pad'",
+      outcome: 'card',
+    },
+    { name: 'source of a dotted stdin', command: '. /./dev/stdin <<< "$CMD"', outcome: 'card' },
+    {
+      name: 'source after --',
+      command: "source -- /dev/stdin <<< 'pnpm add left-pad'",
+      outcome: 'card',
+    },
+    {
+      name: 'source fed by a pipe',
+      command: "echo 'pnpm add left-pad' | . /dev/fd/0",
+      outcome: 'card',
+    },
+    { name: 'source of a path with an expansion', command: '. "$F"', outcome: 'card' },
+    {
+      name: 'a test -eq with a substitution in a string',
+      command: "[[ 1 -eq 'a[$(pnpm add x)]' ]]",
+      outcome: 'card',
+    },
+    {
+      name: 'a test -eq with a bare substitution string',
+      command: "[[ 1 -eq '$(pnpm add x)' ]]",
+      outcome: 'card',
+    },
+    { name: 'let with a substitution string', command: "let 'x=$(pnpm add x)'", outcome: 'card' },
+    {
+      name: 'printf -v with a substitution subscript',
+      command: "printf -v 'a[`pnpm add x`]' hi",
+      outcome: 'card',
+    },
+    {
+      name: 'declare -i with a substitution',
+      command: "declare -i 'n=$(pnpm add x)'",
+      outcome: 'card',
+    },
     // A structure the parser cannot read.
     { name: 'an unclosed double quote', command: 'echo "unclosed', outcome: 'card' },
     { name: 'an unclosed single quote', command: "echo 'unclosed", outcome: 'card' },

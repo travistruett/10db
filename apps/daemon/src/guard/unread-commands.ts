@@ -1,3 +1,4 @@
+import { posix } from 'node:path';
 import type { HazardDef } from '@10db/contracts';
 import { plainWords, RUNNERS } from './command-forms';
 import { commandOf, SHELL_C_FLAG, shellQuote, shellScripts } from './judge';
@@ -8,6 +9,7 @@ import {
   parseShell,
   redirectionSpan,
   stripCommandPrefixes,
+  wrapperUse,
   type ShellSegment,
 } from './shell-words';
 import { XARGS_VALUE_FLAGS, XARGS_VALUELESS_LONG_FLAGS } from './xargs-options';
@@ -68,10 +70,34 @@ const OPAQUE: ReadonlySet<string> = new Set([
 ]);
 /** Builtins that run a file the shell reads, which stdin or a here-string makes unreadable. */
 const SOURCING: ReadonlySet<string> = new Set(['.', 'source']);
-/** A source that is a stream or a process's file, not a file in the checkout. */
-const STREAM_SOURCE = /^(?:-|\/dev\/|\/proc\/)/;
 /** A redirection that feeds a command from a file, a descriptor or a here-string. */
 const INPUT_REDIRECTION = /^\d*<(?!<<)|^\d*<<</;
+/** Builtins that evaluate their words as arithmetic, where a substitution in a string runs. */
+const ARITHMETIC: ReadonlySet<string> = new Set([
+  '[[',
+  '[',
+  'test',
+  'let',
+  'read',
+  'printf',
+  'declare',
+  'typeset',
+  'local',
+  'export',
+  'readonly',
+  'unset',
+  'getopts',
+  'ulimit',
+  'umask',
+  'wait',
+  'shift',
+  'exit',
+  'return',
+  'break',
+  'continue',
+]);
+/** A substitution inside a word, which an arithmetic builtin runs even when the word was quoted. */
+const SUBSTITUTION_IN_WORD = /\$\(|`/;
 /** An array subscript with a substitution, which `read`, `[[ -v ]]` and the like evaluate. */
 const SUBSCRIPT_SUBSTITUTION = /\[[^\]]*(?:\$\(|`)/;
 const SHELLS: ReadonlySet<string> = new Set([
@@ -126,47 +152,65 @@ function withoutRedirections(words: readonly string[]): string[] {
   return out;
 }
 
-/** What the xargs in a command line was given that changes which words it runs. */
+/** The file a `.` or `source` reads: the first word after its options, or null when it names none. */
+function sourceOperand(words: readonly string[]): string | null {
+  const rest = withoutRedirections(words.slice(1));
+  const at = rest.findIndex((word) => word === '--' || !/^-./.test(word));
+  if (at === -1) return null;
+  return rest[at] === '--' ? (rest[at + 1] ?? null) : (rest[at] ?? null);
+}
+
+/**
+ * Whether a source operand is a file in or under the working directory, or an absolute path that is
+ * not a device or process file once `.`, `..` and repeated slashes are resolved; a stream, an
+ * expansion or a path that climbs out is not.
+ */
+function isCheckoutFile(operand: string | null): boolean {
+  if (operand === null || operand === '-' || EXPANDING.test(operand)) return false;
+  const path = posix.normalize(operand);
+  if (path.startsWith('..')) return false;
+  return !/^\/(?:dev|proc)(?:\/|$)/.test(path);
+}
+
+/** What the xargs that runs a command was given that changes which words it runs. */
 interface XargsOptions {
   /** The string `-I`, `-i`, `-J` or `--replace` makes xargs swap for each input word. */
   readonly replace: string | null;
-  /** A long flag this scan does not know, which may take a value or change how words are read. */
-  readonly unknownLong: string | null;
+  /** What the scan cannot follow: a long flag it does not know, or more than one xargs. */
+  readonly unreadFlag: string | null;
 }
 
-/** The flags of the first xargs among a segment's words, or null when it has none. */
-function xargsOptions(words: readonly string[]): XargsOptions | null {
-  const start = words.findIndex((word) => commandName(word) === 'xargs');
-  if (start === -1) return null;
+/** The flags of the xargs wrappers a command runs behind, or null when it has none. */
+function xargsOptions(commandWords: readonly string[]): XargsOptions | null {
+  const { count, flags } = wrapperUse(commandWords, 'xargs');
+  if (count === 0) return null;
+  if (count > 1) return { replace: null, unreadFlag: 'xargs' };
   let replace: string | null = null;
-  let unknownLong: string | null = null;
-  for (let at = start + 1; at < words.length; at += 1) {
-    const word = words[at] ?? '';
-    if (word === '--' || !word.startsWith('-') || word === '-') break;
-    if (word.startsWith('--')) {
-      const name = word.split('=')[0] ?? word;
+  let unreadFlag: string | null = null;
+  for (const { flag, value } of flags) {
+    if (flag.startsWith('--')) {
+      const name = flag.split('=')[0] ?? flag;
       if (name === '--replace')
-        replace = word.includes('=') ? word.slice(word.indexOf('=') + 1) : '{}';
-      else if (XARGS_VALUE_FLAGS.includes(name)) at += word.includes('=') ? 0 : 1;
-      else if (!XARGS_VALUELESS_LONG_FLAGS.includes(name)) unknownLong = word;
+        replace = flag.includes('=') ? flag.slice(flag.indexOf('=') + 1) : '{}';
+      else if (!XARGS_VALUE_FLAGS.includes(name) && !XARGS_VALUELESS_LONG_FLAGS.includes(name)) {
+        unreadFlag = flag;
+      }
       continue;
     }
-    for (let i = 1; i < word.length; i += 1) {
-      const letter = word.charAt(i);
-      const rest = word.slice(i + 1);
+    for (let i = 1; i < flag.length; i += 1) {
+      const letter = flag.charAt(i);
+      const rest = flag.slice(i + 1);
       if (letter === 'i') {
         replace = rest === '' ? '{}' : rest;
         break;
       }
       if (XARGS_VALUE_FLAGS.includes(`-${letter}`)) {
-        const value = rest === '' ? (words[at + 1] ?? '') : rest;
-        if (letter === 'I' || letter === 'J') replace = value;
-        if (rest === '') at += 1;
+        if (letter === 'I' || letter === 'J') replace = rest === '' ? (value ?? '') : rest;
         break;
       }
     }
   }
-  return { replace, unknownLong };
+  return { replace, unreadFlag };
 }
 
 interface Scanner {
@@ -207,6 +251,8 @@ function scanShell(
   const withC = words.some((word) => SHELL_C_FLAG.test(word));
   const scripts = shellScripts(words);
   if (withC && scripts.length === 0) return { reason: UnreadReason.Script, text };
+  // A script that reads as an option means the scan and the shell disagree on which word it is.
+  if (scripts.some((script) => /^[-+]/.test(script))) return { reason: UnreadReason.Script, text };
   if (!withC) {
     const operands = words.slice(1).filter((word) => !word.startsWith('-'));
     const readsStdin =
@@ -273,9 +319,9 @@ function scanSegment(
   if (written === undefined) return null;
   const head = commandName(written);
   if (SYNTAX.has(written)) return null;
-  const xargs = xargsOptions(segment.words);
-  if (xargs?.unknownLong != null)
-    return { reason: UnreadReason.CommandName, text: xargs.unknownLong };
+  const xargs = xargsOptions(leadingWords(segment.words).command);
+  if (xargs?.unreadFlag != null)
+    return { reason: UnreadReason.CommandName, text: xargs.unreadFlag };
   const replace = xargs?.replace ?? null;
   if (
     OPAQUE.has(head) ||
@@ -284,13 +330,19 @@ function scanSegment(
   ) {
     return { reason: UnreadReason.CommandName, text: written };
   }
-  if (words.some((word) => SUBSCRIPT_SUBSTITUTION.test(word))) {
+  if (
+    words.some((word) => SUBSCRIPT_SUBSTITUTION.test(word)) ||
+    (ARITHMETIC.has(head) && words.slice(1).some((word) => SUBSTITUTION_IN_WORD.test(word)))
+  ) {
     return { reason: UnreadReason.Script, text };
   }
   if (head === 'eval') return { reason: UnreadReason.Script, text };
   if (SOURCING.has(head)) {
-    const [, source = ''] = words;
-    if (STREAM_SOURCE.test(source) || words.some((word) => INPUT_REDIRECTION.test(word))) {
+    if (
+      piped ||
+      !isCheckoutFile(sourceOperand(words)) ||
+      words.some((w) => INPUT_REDIRECTION.test(w))
+    ) {
       return { reason: UnreadReason.Script, text };
     }
   }

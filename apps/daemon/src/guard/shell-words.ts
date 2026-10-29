@@ -639,7 +639,12 @@ interface Prefixes {
   /** Where the command starts. */
   readonly at: number;
   /** The flags each wrapper was given, by the wrapper's name. */
-  readonly flags: readonly { readonly wrapper: string; readonly flag: string }[];
+  readonly flags: readonly {
+    readonly wrapper: string;
+    readonly flag: string;
+    /** The next word when the flag takes it as its value. */
+    readonly value: string | null;
+  }[];
   /**
    * With `skipRedirections`: a redirection follows a wrapper, where it may stand for a flag's
    * value, or a word holds a `<` or `>` that is not a redirection the guard reads.
@@ -658,7 +663,7 @@ function prefixes(
   lookThroughRunners: boolean,
   skipRedirections = false,
 ): Prefixes {
-  const flags: { wrapper: string; flag: string }[] = [];
+  const flags: { wrapper: string; flag: string; value: string | null }[] = [];
   const angled = (from: number, to: number): boolean =>
     skipRedirections && words.slice(from, to).some((w) => ANGLE.test(w));
   let wrappers = 0;
@@ -682,7 +687,7 @@ function prefixes(
         const flag = words[i] ?? '';
         const span = flagSpan(flag, wrapped.valueFlags);
         if (angled(i, i + span)) return { at: i, flags, hidden: true };
-        flags.push({ wrapper: name, flag });
+        flags.push({ wrapper: name, flag, value: span === 2 ? (words[i + 1] ?? null) : null });
         i += span;
       }
       if (angled(i, i + wrapped.positionals + 1)) return { at: i, flags, hidden: true };
@@ -692,6 +697,24 @@ function prefixes(
     }
   }
   return { at: i, flags, hidden: false };
+}
+
+/**
+ * The wrappers named `name` that run a command, how many there are and the flags each was given
+ * with their values. Looks through the same prefixes `stripCommandPrefixes` does.
+ */
+export function wrapperUse(
+  words: readonly string[],
+  name: string,
+): { readonly count: number; readonly flags: readonly { flag: string; value: string | null }[] } {
+  const found = prefixes(words, true, true);
+  const count = words
+    .slice(0, found.at)
+    .filter((word) => commandName(word) === name && WRAPPERS.has(name)).length;
+  return {
+    count,
+    flags: found.flags.filter((f) => f.wrapper === name),
+  };
 }
 
 /**

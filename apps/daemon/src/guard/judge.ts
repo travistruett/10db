@@ -308,7 +308,7 @@ function commandString(words: readonly string[], flagAt: number): string | undef
     const span = redirectionSpan(words, at);
     if (span > 0) {
       at += span - 1;
-    } else if (word === '--') {
+    } else if (word === '--' || word === '-') {
       return words[at + 1];
     } else if (OPTION_WITH_VALUE.test(word)) {
       at += 1;

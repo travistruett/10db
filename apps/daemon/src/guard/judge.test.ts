@@ -326,6 +326,11 @@ describe('shell commands', () => {
       decision: 'deny',
     },
     {
+      name: 'push in bash -c after a lone dash',
+      command: "bash -c - 'git push --force origin main'",
+      decision: 'deny',
+    },
+    {
       name: 'push in a here-string on fd 0',
       command: "bash /dev/stdin 0<<<'git push --force origin main'",
       decision: 'deny',

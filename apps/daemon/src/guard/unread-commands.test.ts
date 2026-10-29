@@ -32,6 +32,8 @@ const ROWS: readonly Row[] = [
   { name: 'a test bracket with a variable', command: '[ -f $f ] && ls $f', reason: null },
   { name: 'a double bracket', command: '[[ -f $f ]] && ls $f', reason: null },
   { name: 'pnpm test with a variable', command: 'pnpm test $x', reason: null },
+  { name: 'source of a checkout file', command: '. ./env.sh', reason: null },
+  { name: 'a test with a plain number', command: '[[ $n -eq 3 ]]', reason: null },
   {
     name: 'xargs -I into a program with no hazard form',
     command: 'ls | xargs -I {} cat {}',
