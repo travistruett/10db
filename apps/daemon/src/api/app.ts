@@ -21,6 +21,7 @@ import {
   InboxState,
   KeepAwakeInput,
   ModelProfileId,
+  NetworkHostInput,
   Month,
   ModelProfilePatch,
   PersonaId,
@@ -180,6 +181,28 @@ export function createApp(deps: ApiDeps) {
             c.req.valid('json'),
           ),
         ),
+    )
+    .get('/projects/:projectId/network-hosts', (c) =>
+      c.json(deps.services.listNetworkHosts(ProjectId.parse(c.req.param('projectId')))),
+    )
+    .post(
+      '/projects/:projectId/network-hosts',
+      validator('json', (value): NetworkHostInput => NetworkHostInput.parse(value)),
+      (c) => {
+        const { host, created } = deps.services.allowNetworkHost(
+          ProjectId.parse(c.req.param('projectId')),
+          c.req.valid('json').host,
+        );
+        return c.json(host, created ? 201 : 200);
+      },
+    )
+    .delete('/projects/:projectId/network-hosts/:host', (c) =>
+      c.json(
+        deps.services.removeNetworkHost(
+          ProjectId.parse(c.req.param('projectId')),
+          c.req.param('host'),
+        ),
+      ),
     )
     .get('/accounts', (c) => c.json(deps.services.listAccounts()))
     .post(

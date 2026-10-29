@@ -427,6 +427,17 @@ export const PermissionRuleDto = z.object({
 });
 export type PermissionRuleDto = z.infer<typeof PermissionRuleDto>;
 
+/** A host the builder allows a project's sessions and checks to reach: its project-wide network rule. */
+export const NetworkHostDto = z.object({
+  host: z.string(),
+  createdAt: Timestamp,
+});
+export type NetworkHostDto = z.infer<typeof NetworkHostDto>;
+
+/** What the builder types to allow a host; the daemon judges it and answers a refusal in words. */
+export const NetworkHostInput = z.object({ host: z.string() });
+export type NetworkHostInput = z.infer<typeof NetworkHostInput>;
+
 const EvidenceBase = {
   id: EvidenceId,
   workstreamId: WorkstreamId,

@@ -60,6 +60,7 @@ import type { KeepAwake } from '../keep-awake';
 import type { Runner } from '../runner';
 import type { Scheduler } from '../scheduler';
 import { ProjectMcpError, readRepoMcp, type RepoMcp } from '../sessions';
+import { allowNetworkHost, listNetworkHosts, removeNetworkHost } from '../permissions';
 import { proposeCandidates, resolveStepPlan, retryWorkstream, startTaskWithPlan } from '../team';
 import { checkoutConflictsWithRoot } from './worktree-root';
 
@@ -170,6 +171,12 @@ export function createServices(deps: {
     keepAwake: () => deps.keepAwake.status(),
     setKeepAwake: (mode) => deps.keepAwake.setMode(mode),
     eventsHead: () => latestEventSeq(db),
+    listNetworkHosts(projectId) {
+      getProject(db, projectId);
+      return listNetworkHosts(db, projectId);
+    },
+    allowNetworkHost: (projectId, host) => allowNetworkHost(deps.state, projectId, host),
+    removeNetworkHost: (projectId, host) => removeNetworkHost(deps.state, projectId, host),
     listPersonas: () => listPersonas(db, { includeArchived: true }),
     createPersona: (input) => deps.state.write((ctx) => insertPersona(ctx, input)),
     patchPersona: (id, patch) => deps.state.write((ctx) => patchPersona(ctx, id, patch)),

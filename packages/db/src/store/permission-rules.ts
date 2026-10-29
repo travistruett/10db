@@ -48,3 +48,25 @@ export function listPermissionRules(
     .orderBy(asc(schema.permissionRules.createdAt), asc(schema.permissionRules.id))
     .all();
 }
+
+/** Removes the project-wide rules for one tool and pattern, however many copies; answers how many went. */
+export function deleteProjectPermissionRules(
+  ctx: WriteContext,
+  input: {
+    readonly projectId: ProjectId;
+    readonly toolName: string;
+    readonly pattern: string;
+  },
+): number {
+  return ctx.tx
+    .delete(schema.permissionRules)
+    .where(
+      and(
+        eq(schema.permissionRules.projectId, input.projectId),
+        isNull(schema.permissionRules.workstreamId),
+        eq(schema.permissionRules.toolName, input.toolName),
+        eq(schema.permissionRules.pattern, input.pattern),
+      ),
+    )
+    .run().changes;
+}

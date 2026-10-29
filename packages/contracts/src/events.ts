@@ -39,6 +39,7 @@ export const EventType = {
   BatchUpdated: 'batch.updated',
   BoardColumnSaved: 'board_column.saved',
   BoardColumnDeleted: 'board_column.deleted',
+  NetworkHostsChanged: 'network_hosts.changed',
 } as const;
 export type EventType = (typeof EventType)[keyof typeof EventType];
 

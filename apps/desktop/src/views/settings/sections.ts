@@ -2,6 +2,7 @@ export const SettingsSectionKey = {
   General: 'general',
   BoardColumns: 'board-columns',
   Areas: 'areas',
+  NetworkHosts: 'network-hosts',
   Billing: 'billing',
   Team: 'team',
   RoutingRules: 'routing-rules',
@@ -43,6 +44,12 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
     key: SettingsSectionKey.Areas,
     group: SettingsGroup.Project,
     label: 'Areas and hazards',
+    planned: null,
+  },
+  {
+    key: SettingsSectionKey.NetworkHosts,
+    group: SettingsGroup.Project,
+    label: 'Network hosts',
     planned: null,
   },
   {

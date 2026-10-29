@@ -1,3 +1,4 @@
+export { allowNetworkHost, listNetworkHosts, removeNetworkHost } from './network-hosts';
 export {
   allowedToolsFor,
   baseAllowedTools,

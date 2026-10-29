@@ -120,3 +120,4 @@ The fake adapter (`sessions/fake-adapter.ts`) is the test boundary for Claude Co
   for that exact config, resolved per session in `sessions/project-mcp.ts`. Claude Code never reads MCP
   config itself (`strictMcpConfig: true`). A repo stdio server reaches Claude Code only as its launch under srt
   (above); never hand it the session environment.
+- `permissions/network-hosts.ts` is the builder's way to allow a project's hosts ahead of a card: the same project-wide `SandboxNetworkAccess` rules, checked through `storableRule`, and refusing loopback and over-broad patterns (`decisions/2026-10-29-project-network-hosts.md`).
