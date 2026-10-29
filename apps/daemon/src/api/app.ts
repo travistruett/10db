@@ -14,6 +14,7 @@ import {
   FlowId,
   FlowInput,
   FlowPatch,
+  FolderInspectInput,
   HealthResponse,
   InboxAnswer,
   InboxItemId,
@@ -79,6 +80,8 @@ function sameToken(a: string, b: string): boolean {
 }
 
 const Cursor = z.coerce.number().int().min(0).catch(0);
+/** `recheck` is `1` or absent; anything else is a 400. */
+const SystemQuery = z.object({ recheck: z.literal('1').optional() });
 const Limit = z.coerce.number().int().min(1).max(1000).catch(500);
 const StateList = z
   .string()
@@ -160,6 +163,11 @@ export function createApp(deps: ApiDeps) {
     )
     .post('/batches/:batchId/abandon', (c) =>
       c.json(deps.services.abandonBatch(BatchId.parse(c.req.param('batchId')))),
+    )
+    .post(
+      '/folders/inspect',
+      validator('json', (value): FolderInspectInput => FolderInspectInput.parse(value)),
+      async (c) => c.json(await deps.services.inspectFolder(c.req.valid('json').path)),
     )
     .get('/flows', (c) => c.json(deps.services.listFlows()))
     .patch(
@@ -414,7 +422,16 @@ export function createApp(deps: ApiDeps) {
       ),
     )
     .get('/events/head', (c) => c.json(EventsHead.parse({ seq: deps.services.eventsHead() })))
-    .get('/system', async (c) => c.json(SystemCheckDto.parse(await deps.services.systemCheck())))
+    .get(
+      '/system',
+      validator('query', (query): { recheck?: '1' | undefined } => SystemQuery.parse(query)),
+      async (c) =>
+        c.json(
+          SystemCheckDto.parse(
+            await deps.services.systemCheck({ recheck: c.req.valid('query').recheck === '1' }),
+          ),
+        ),
+    )
     .get('/settings/keep-awake', (c) => c.json(deps.services.keepAwake()))
     .put(
       '/settings/keep-awake',

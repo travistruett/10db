@@ -58,6 +58,32 @@ export type AreaDef = z.infer<typeof AreaDef>;
 export const HazardDef = AreaDef.extend({ commands: z.array(z.string().min(1)) });
 export type HazardDef = z.infer<typeof HazardDef>;
 
+/** Brackets and braces in a path pattern must close, in order. */
+function bracketsClose(glob: string): boolean {
+  const open: string[] = [];
+  for (const ch of glob) {
+    if (ch === '[') open.push(']');
+    else if (ch === '{') open.push('}');
+    else if ((ch === ']' || ch === '}') && open.pop() !== ch) return false;
+  }
+  return open.length === 0;
+}
+
+/**
+ * A path pattern the builder writes in Settings: relative to the project folder, `/` between
+ * folders, no `..`, and brackets and braces that close.
+ */
+export const PathPattern = z
+  .string()
+  .min(1)
+  .refine(
+    (g) => !g.startsWith('/') && !/^[A-Za-z]:/.test(g),
+    'must be relative to the project folder',
+  )
+  .refine((g) => !g.includes('\\'), 'use / between folders, not a backslash')
+  .refine((g) => !g.split('/').includes('..'), 'must not go up a folder with ..')
+  .refine(bracketsClose, 'has a [ or { that is never closed');
+
 export const DEFAULT_HAZARDS: readonly HazardDef[] = [
   {
     name: 'migrations',
@@ -223,6 +249,10 @@ export const ProjectPatch = z
     delivery: z.enum(Delivery),
     baseBranch: BranchName,
     prTitlePrefix: PrTitlePrefix.nullable(),
+    /** Replaces the project's areas; one that a running task holds can't be removed or renamed. */
+    areas: z.array(AreaDef.extend({ globs: z.array(PathPattern).min(1) })).min(1),
+    /** Replaces the project's hazards, commands included. */
+    hazards: z.array(HazardDef.extend({ globs: z.array(PathPattern).min(1) })),
     /** Moves the project to another account; work in flight follows at each lane's next session. */
     accountId: AccountId,
     fallbackAccountId: AccountId.nullable(),
@@ -233,7 +263,14 @@ export const ProjectPatch = z
     worktreeSeed: WorktreeSeed,
   })
   .partial()
-  .refine((p) => Object.keys(p).length > 0, { message: 'Change at least one field' });
+  .refine((p) => Object.keys(p).length > 0, { message: 'Change at least one field' })
+  .refine(
+    (p) => {
+      const names = [...(p.areas ?? []), ...(p.hazards ?? [])].map((d) => d.name);
+      return new Set(names).size === names.length;
+    },
+    { message: 'An area or hazard name is used twice', path: ['areas'] },
+  );
 export type ProjectPatch = z.infer<typeof ProjectPatch>;
 
 export const TaskInput = z.object({

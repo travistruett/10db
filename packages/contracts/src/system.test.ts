@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { McpHost, SystemCheckDto } from './index';
 
 describe('SystemCheckDto', () => {
-  it('accepts a report with a missing optional tool', () => {
+  it('accepts a report with a missing optional tool, and a tool with no sign-in reads as not signed in', () => {
     const report = {
       loginEnv: { source: 'login_shell', warning: null },
       claudeCode: { verifiedOn: '2.1.302', warning: null },
@@ -16,7 +16,11 @@ describe('SystemCheckDto', () => {
         { name: 'docker', path: null, version: null, required: false },
       ],
     };
-    expect(SystemCheckDto.parse(report)).toEqual({ ...report, benchmarkSync: null });
+    expect(SystemCheckDto.parse(report)).toEqual({
+      ...report,
+      tools: report.tools.map((tool) => ({ ...tool, signedIn: null })),
+      benchmarkSync: null,
+    });
   });
 
   it('reads a failed Artificial Analysis sync, and refuses an outcome that is not a failure', () => {

@@ -73,10 +73,34 @@ describe('systemCheck', () => {
       loginEnv: { source: 'inherited', warning: 'The login shell timed out' },
       claudeCode: { verifiedOn: '2.1.302', warning: null },
       tools: [
-        { name: 'claude', path: claudePath, version: version(claudePath), required: true },
-        { name: 'git', path: resolved.git, version: version(resolved.git), required: true },
-        { name: 'docker', path: dockerPath, version: version(dockerPath), required: false },
-        { name: 'gh', path: resolved.gh, version: version(resolved.gh), required: false },
+        {
+          name: 'claude',
+          path: claudePath,
+          version: version(claudePath),
+          required: true,
+          signedIn: null,
+        },
+        {
+          name: 'git',
+          path: resolved.git,
+          version: version(resolved.git),
+          required: true,
+          signedIn: null,
+        },
+        {
+          name: 'docker',
+          path: dockerPath,
+          version: version(dockerPath),
+          required: false,
+          signedIn: null,
+        },
+        {
+          name: 'gh',
+          path: resolved.gh,
+          version: version(resolved.gh),
+          required: false,
+          signedIn: null,
+        },
       ],
       // The services layer fills this per request; the environment check reports no benchmark warning.
       benchmarkSync: null,
@@ -95,6 +119,54 @@ describe('systemCheck', () => {
       path: null,
       version: null,
       required: false,
+      signedIn: null,
+    });
+  });
+
+  describe('the gh login', () => {
+    const login: LoginEnv = { vars: {}, source: 'login_shell', warning: null };
+    const run = (ghLogin: () => Promise<string | null>, gh: string | null = '/resolved/bin/gh') =>
+      systemCheck(
+        login,
+        { git: '/resolved/bin/git', gh },
+        { home: join(dir.path, 'home'), probe: () => Promise.resolve('1.0.0'), ghLogin },
+      );
+    const signedIn = (report: Awaited<ReturnType<typeof run>>) =>
+      report.tools.map((t) => [t.name, t.signedIn]);
+
+    it('reports the gh login on the gh row only', async () => {
+      expect(signedIn(await run(() => Promise.resolve('octocat')))).toEqual([
+        ['claude', null],
+        ['git', null],
+        ['docker', null],
+        ['gh', 'octocat'],
+      ]);
+    });
+
+    it('leaves signedIn null when gh is signed out', async () => {
+      expect(
+        (await run(() => Promise.resolve(null))).tools.find((t) => t.name === 'gh')?.signedIn,
+      ).toBeNull();
+    });
+
+    it('leaves signedIn null when the probe throws, keeping the gh row', async () => {
+      const report = await run(() => Promise.reject(new Error('no network')));
+      expect(report.tools.find((t) => t.name === 'gh')).toEqual({
+        name: 'gh',
+        path: '/resolved/bin/gh',
+        version: '1.0.0',
+        required: false,
+        signedIn: null,
+      });
+    });
+
+    it('does not probe when no gh is installed', async () => {
+      let probed = 0;
+      await run(() => {
+        probed += 1;
+        return Promise.resolve('octocat');
+      }, null);
+      expect(probed).toBe(0);
     });
   });
 });
@@ -132,8 +204,14 @@ describe('markGhRequired', () => {
       loginEnv: { source: 'login_shell' as const, warning: null },
       claudeCode: { verifiedOn: '2.1.302', warning: null },
       tools: [
-        { name: 'git' as const, path: '/usr/bin/git', version: '2', required: true },
-        { name: 'gh' as const, path: null, version: null, required: false },
+        {
+          name: 'git' as const,
+          path: '/usr/bin/git',
+          version: '2',
+          required: true,
+          signedIn: null,
+        },
+        { name: 'gh' as const, path: null, version: null, required: false, signedIn: null },
       ],
       benchmarkSync: null,
     };

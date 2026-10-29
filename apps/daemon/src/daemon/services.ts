@@ -53,6 +53,8 @@ import type { ApiServices, TaskRemovalServices } from '../api';
 import type { BatchStarter, Shipper } from '../delivery';
 import { markGhRequired } from '../environment';
 import type { EventBus, StateStore } from '../events';
+import { inspectFolder } from '../folders';
+import type { Git } from '../git';
 import { requestMcpApproval, type InboxService } from '../inbox';
 import type { KeepAwake } from '../keep-awake';
 import type { Runner } from '../runner';
@@ -69,6 +71,7 @@ export function createServices(deps: {
   readonly scheduler: Scheduler;
   readonly inbox: InboxService;
   readonly keepAwake: KeepAwake;
+  /** Probes the tools and gh's login; the services keep its last answer. */
   readonly systemCheck: () => Promise<SystemCheckDto>;
   readonly benchmarks: BenchmarkSync;
   readonly starter: BatchStarter;
@@ -77,10 +80,16 @@ export function createServices(deps: {
   readonly moves: Pick<AccountMoves, 'move'>;
   /** Where worktrees are made; a project's checkout may not overlap it. */
   readonly worktreeRoot: string;
+  /** The daemon's git, for inspecting a folder before it is a project. */
+  readonly git: Git;
+  /** 10db's own places a project may not be: the data dir, the lane temp root, the worktree root. */
+  readonly protectedRoots: readonly string[];
   /** Records a new project's checkout as the daemon trusts it (lane sandbox spec D13). */
   readonly pinCheckout: (repoPath: string) => void;
 }): ApiServices & TaskRemovalServices {
   const db = deps.state.db;
+  // The tool check and gh's login are probed on the first request and on a recheck, never otherwise.
+  let lastCheck: Promise<SystemCheckDto> | null = null;
   return {
     listProjects: () => listProjectViews(db),
     createProject(input) {
@@ -139,14 +148,24 @@ export function createServices(deps: {
     },
     eventsAfter: (after, limit) => listEventsAfter(db, after, limit),
     subscribe: (listener) => deps.bus.subscribe(listener),
-    systemCheck: async () => ({
-      ...markGhRequired(
-        await deps.systemCheck(),
-        listProjects(db).some((p) => p.delivery === Delivery.PullRequest),
-      ),
-      // Read per request: the tool check is memoized at start, but a sync can fail or recover at any time.
-      benchmarkSync: syncWarning(deps.benchmarks.status()),
-    }),
+    systemCheck: async ({ recheck }) => {
+      if (recheck || lastCheck === null) {
+        const probing = deps.systemCheck();
+        lastCheck = probing;
+        // A failed probe is not remembered, so the next request tries again.
+        probing.catch(() => {
+          if (lastCheck === probing) lastCheck = null;
+        });
+      }
+      return {
+        ...markGhRequired(
+          await lastCheck,
+          listProjects(db).some((p) => p.delivery === Delivery.PullRequest),
+        ),
+        // Read per request: the tool check is kept from the first request until a recheck, but a sync can fail or recover at any time.
+        benchmarkSync: syncWarning(deps.benchmarks.status()),
+      };
+    },
     keepAwake: () => deps.keepAwake.status(),
     setKeepAwake: (mode) => deps.keepAwake.setMode(mode),
     eventsHead: () => latestEventSeq(db),
@@ -201,6 +220,11 @@ export function createServices(deps: {
     deleteBoardColumn: (id, del) => deps.state.write((ctx) => deleteBoardColumn(ctx, id, del)),
     stepPlan: (taskId) => resolveStepPlan(db, taskId),
     proposeCandidates: (projectId, size) => proposeCandidates(db, projectId, size),
+    inspectFolder: (path) =>
+      inspectFolder(
+        { git: deps.git, projects: listProjects(db), protectedRoots: deps.protectedRoots },
+        path,
+      ),
     reviewProjectMcp(projectId) {
       const project = getProject(db, projectId);
       let repo: RepoMcp;
