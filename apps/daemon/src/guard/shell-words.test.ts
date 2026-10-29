@@ -79,6 +79,12 @@ describe('which words the shell passes as exactly one word', () => {
       single: [true, false, false],
     },
     {
+      name: 'zsh modifiers and defaults inside quotes',
+      command: 'x "${(s: :)a}" "${a:-b c}" "${a}" "$1" "${#a}"',
+      words: ['x', '${(s: :)a}', '${a:-b c}', '${a}', '$1', '${#a}'],
+      single: [true, false, false, true, true, true],
+    },
+    {
       name: 'a glob',
       command: 'x * "*" \'*\' a?',
       words: ['x', '*', '*', '*', 'a?'],

@@ -42,14 +42,37 @@ function runsAnything(program: string): boolean {
  * way when it is a runner or package tool: `pnpm exec bash` still needs the code that bash runs.
  */
 export function runsUnnamedProgram(raw: readonly string[]): boolean {
+  return runsUnnamed(raw, { budget: READING_BUDGET, memo: new Map() });
+}
+
+/** The most commands one call explores across every reading and every nested runner. */
+const READING_BUDGET = 256;
+
+interface Search {
+  /** Commands left to explore; when it runs out the answer is "unnamed", so no rule is stored. */
+  budget: number;
+  /** The answer for each command already explored, by its words. */
+  readonly memo: Map<string, boolean>;
+}
+
+function runsUnnamed(raw: readonly string[], search: Search): boolean {
   const words = stripCommandPrefixes(raw);
+  const key = words.join('\0');
+  const known = search.memo.get(key);
+  if (known !== undefined) return known;
+  search.budget -= 1;
+  // Out of budget: fail closed.
+  if (search.budget < 0) return true;
   // A flag the guard cannot place may or may not take the next word, so any reading may be unnamed.
-  return plainWordReadings(words).some((plain) => runsUnnamedIn(words, plain));
+  const answer = plainWordReadings(words).some((plain) => runsUnnamedIn(words, plain, search));
+  search.memo.set(key, answer);
+  return answer;
 }
 
 function runsUnnamedIn(
   words: readonly string[],
   plain: ReturnType<typeof plainWordReadings>[number],
+  search: Search,
 ): boolean {
   const bare = plain.map((p) => p.word);
   const [head] = bare;
@@ -61,7 +84,7 @@ function runsUnnamedIn(
     // `yarn workspace <name>` and `yarn workspaces foreach` put one more word before the command they forward.
     const lead = second === 'workspace' || (second === 'workspaces' && third === 'foreach') ? 3 : 2;
     const forwarded = plain[lead];
-    return forwarded === undefined || runsUnnamedProgram([head, ...words.slice(forwarded.at)]);
+    return forwarded === undefined || runsUnnamed([head, ...words.slice(forwarded.at)], search);
   }
   // The position of the program these words run: a runner's first word, or the one a package tool names.
   const named =
@@ -69,5 +92,5 @@ function runsUnnamedIn(
     (isCommandRunner(head) || FILE_RUNNERS.has(head.toLowerCase()) ? 1 : null);
   if (named === null) return false;
   const program = plain[named];
-  return program === undefined || runsUnnamedProgram(words.slice(program.at));
+  return program === undefined || runsUnnamed(words.slice(program.at), search);
 }

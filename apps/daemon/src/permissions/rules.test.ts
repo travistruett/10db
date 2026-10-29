@@ -953,3 +953,14 @@ describe('commandPrefix: a flag whose value the guard cannot place', () => {
     expect(commandPrefix(command)).toBeNull();
   });
 });
+
+describe('commandPrefix: a crafted command', () => {
+  it('finishes within a deadline and is allowed once only', () => {
+    const flags = Array.from({ length: 30 }, (_, i) => `--f${String(i)} v${String(i)}`).join(' ');
+    const nested = Array.from({ length: 12 }, () => `pnpm ${flags} exec`).join(' ');
+    const started = performance.now();
+    const prefix = commandPrefix(nested);
+    expect(performance.now() - started).toBeLessThan(2000);
+    expect(prefix).toBeNull();
+  });
+});

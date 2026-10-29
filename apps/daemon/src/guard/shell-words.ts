@@ -147,8 +147,27 @@ function readHereDocuments(command: string, at: number, pending: readonly HereDo
 
 const SEPARATORS: ReadonlySet<string> = new Set([';', '|', '&']);
 
-/** An expansion that becomes any number of words even inside double quotes: `$@`, `$*`, `${a[@]}`, `${!p*}`. */
-const MULTI_WORD_EXPANSION = /\$[@*]|\$\{[@*!=(]|\[[@*]\]|[@*]\}/;
+/**
+ * The only expansions known to give exactly one word inside double quotes: `$name`, `${name}`, a
+ * positional or special parameter, and `${#name}`. Anything else (`$@`, `${a[@]}`, zsh's `${=x}` or
+ * `${(@)x}`, `${x:-…}`) may split or produce several words.
+ */
+const ONE_WORD_EXPANSION =
+  /^\$(?:[A-Za-z_]\w*|\d|[#?$!-]|\{[A-Za-z_]\w*\}|\{\d+\}|\{#[A-Za-z_]\w*\})/;
+
+/** Whether every expansion in a quoted word is one that gives exactly one word. */
+function onlyOneWordExpansions(word: string): boolean {
+  for (let i = 0; i < word.length; i += 1) {
+    if (word.charAt(i) !== '$' && word.charAt(i) !== '`') continue;
+    // A substitution gives one word inside quotes.
+    if (word.charAt(i) === '`' || word.charAt(i + 1) === '(') continue;
+    const match = ONE_WORD_EXPANSION.exec(word.slice(i));
+    if (match === null) return false;
+    i += match[0].length - 1;
+  }
+  return true;
+}
+
 /** A character in unquoted text that makes the shell split or expand the word. */
 const SPLITTING = /[$*?[]/;
 
@@ -270,7 +289,7 @@ function scan(command: string, from: number, substitution: boolean): Scan {
           !split &&
           !parameters.includes('{') &&
           !SPLITTING.test(wordMask.replaceAll('\0', '')) &&
-          !MULTI_WORD_EXPANSION.test(word);
+          onlyOneWordExpansions(word);
         singleWords.push(...kept.map(() => one));
       }
     }
