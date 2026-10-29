@@ -54,8 +54,14 @@ describe('inboxRows', () => {
       rows: [[question], [sameAsQuestion]],
     },
   ])('groups $name', ({ items, rows }) => {
-    const grouped = inboxRows(items);
-    expect(grouped.map((row) => row.items)).toEqual(rows);
-    expect(grouped.map((row) => row.key)).toEqual(rows.map((row) => row[0]?.id));
+    expect(inboxRows(items).map((row) => row.items)).toEqual(rows);
+  });
+
+  it('keys a card by its id, and identical flags by their text, which outlives any one of them', () => {
+    expect(inboxRows([question])[0]?.key).toBe(question.id);
+    const [both] = inboxRows([a, a2]);
+    const [later] = inboxRows([a2]);
+    expect(both?.key).toBe(later?.key);
+    expect(both?.key).not.toBe(inboxRows([b])[0]?.key);
   });
 });

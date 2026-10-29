@@ -29,6 +29,8 @@ export function InboxShortcuts({ opened, onOpen, onClose }: InboxShortcutsProps)
         title="Keyboard Shortcuts"
         centered
         closeButtonProps={{ 'aria-label': 'Close' }}
+        // Back on the page, not on the ? button, where the Inbox keys would not count.
+        returnFocus={false}
       >
         <Stack gap="xs">
           {SHORTCUTS.map(({ keys, action }) => (

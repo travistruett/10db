@@ -3,7 +3,8 @@ import { useHotkeys, type HotkeyItem } from '@mantine/hooks';
 export interface InboxKeys {
   readonly count: number;
   readonly optionCount: number;
-  readonly onMove: (delta: 1 | -1) => void;
+  /** False when there is no card that way, so the key keeps its default action. */
+  readonly onMove: (delta: 1 | -1) => boolean;
   readonly onChoose: (index: number) => void;
   readonly onNote: () => void;
   readonly onSubmit: () => void;
@@ -47,10 +48,12 @@ export function useInboxKeys(keys: InboxKeys): void {
     scoped(() => {
       if (keys.count > 0) keys.onMove(delta);
     });
+  // An arrow cancels its default (scrolling) only when it moves to another card.
   const arrow =
     (delta: 1 | -1) =>
     (event: KeyboardEvent): void => {
-      if (!onOption(event.target)) move(delta)(event);
+      if (!inScope(event.target) || onOption(event.target) || keys.count === 0) return;
+      if (keys.onMove(delta)) event.preventDefault();
     };
   const hotkeys: HotkeyItem[] = [
     ['j', move(1), { preventDefault: false }],

@@ -1,4 +1,4 @@
-import type { InboxItemDto, InboxItemId } from '@10db/contracts';
+import type { InboxItemDto } from '@10db/contracts';
 import { Alert, Group, Stack, Text, Title } from '@mantine/core';
 import { useQueryClient } from '@tanstack/react-query';
 import { useRef, useState } from 'react';
@@ -17,9 +17,10 @@ function recommended(item: InboxItemDto): string | null {
   return item.options.some((o) => o.label === item.recommendation) ? item.recommendation : null;
 }
 
-/** What the builder has typed or picked on one card. */
+/** What the builder has typed or picked on one row's card. */
 interface Draft {
-  readonly id: InboxItemId;
+  /** The row's key. */
+  readonly id: string;
   readonly choice: string | null;
   readonly note: string;
   readonly error: string | null;
@@ -30,8 +31,13 @@ export function InboxView() {
   const answer = useAnswerInbox();
   const queryClient = useQueryClient();
   const rows = inboxRows(inbox.data ?? []);
-  const [selectedId, setSelectedId] = useState<InboxItemId | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
+  // A failed dismiss belongs to its row, which may not be the open one, so it never touches the draft.
+  const [dismissFailure, setDismissFailure] = useState<{
+    readonly key: string;
+    readonly message: string;
+  } | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
   const noteRef = useRef<HTMLTextAreaElement>(null);
 
@@ -42,45 +48,56 @@ export function InboxView() {
   const selected = selectedRow?.items[0] ?? null;
   // The row shown by position is pinned at once, so a card that sorts in ahead later never takes over the
   // selection, a half-written note or the keys typed after it.
-  if (selected && found === -1) setSelectedId(selected.id);
+  if (selectedRow && found === -1) setSelectedId(selectedRow.key);
   // A draft applies to its own card only, so a card that sorts in ahead never inherits a choice or an error.
-  const own = selected && draft?.id === selected.id ? draft : null;
+  const own = selectedRow && draft?.id === selectedRow.key ? draft : null;
   const choice = own?.choice ?? null;
   const note = own?.note ?? '';
   const error = own?.error ?? null;
   const effectiveChoice = selected ? (choice ?? recommended(selected)) : null;
 
-  const select = (item: InboxItemDto): void => {
-    setSelectedId(item.id);
+  const select = (row: InboxRow): void => {
+    setSelectedId(row.key);
     setDraft(null);
   };
 
-  const patch = (id: InboxItemId, change: Partial<Omit<Draft, 'id'>>): void => {
+  const patch = (id: string, change: Partial<Omit<Draft, 'id'>>): void => {
     setDraft((current) => ({
       ...(current?.id === id ? current : { id, choice: null, note: '', error: null }),
       ...change,
     }));
   };
 
-  const choose = (card: InboxItemDto, picked: string): void => {
-    setSelectedId(card.id);
-    patch(card.id, { choice: picked, error: null });
+  const choose = (row: InboxRow, picked: string): void => {
+    setSelectedId(row.key);
+    patch(row.key, { choice: picked, error: null });
   };
 
-  /** Dismisses every flag of `row`; one already closed elsewhere is skipped. */
+  /**
+   * Dismisses every flag of `row`. One already closed elsewhere is skipped, and the list refetched
+   * so it leaves; any other failure stops there and is shown on the row.
+   */
   const dismiss = (row: InboxRow): void => {
     if (answer.isPending) return;
+    setDismissFailure(null);
     void (async () => {
+      let stale = false;
       for (const item of row.items) {
         try {
           await answer.mutateAsync({ id: item.id, answer: { choice: DISMISS_CHOICE } });
         } catch (failure) {
-          if (failure instanceof DaemonRequestError && failure.status === 409) continue;
-          patch(row.key, { error: failure instanceof Error ? failure.message : String(failure) });
-          return;
+          if (failure instanceof DaemonRequestError && failure.status === 409) {
+            stale = true;
+            continue;
+          }
+          setDismissFailure({
+            key: row.key,
+            message: failure instanceof Error ? failure.message : String(failure),
+          });
+          break;
         }
       }
-      setDraft((current) => (current?.id === row.key ? null : current));
+      if (stale) await queryClient.invalidateQueries({ queryKey: queryKeys.inbox });
     })();
   };
 
@@ -91,9 +108,10 @@ export function InboxView() {
       return;
     }
     const id = selected.id;
+    const key = selectedRow.key;
     const picked = effectiveChoice;
     if (picked === null || !selected.options.some((o) => o.label === picked)) {
-      patch(id, { error: 'Choose an option first (1–4).' });
+      patch(key, { error: 'Choose an option first (1–4).' });
       return;
     }
     const trimmed = note.trim();
@@ -101,14 +119,14 @@ export function InboxView() {
       { id, answer: trimmed === '' ? { choice: picked } : { choice: picked, note: trimmed } },
       {
         onSuccess: () => {
-          setDraft((current) => (current?.id === id ? null : current));
+          setDraft((current) => (current?.id === key ? null : current));
         },
         onError: (failure) => {
           if (failure instanceof DaemonRequestError && failure.status === 409) {
-            patch(id, { error: 'This card was already answered.' });
+            patch(key, { error: 'This card was already answered.' });
             void queryClient.invalidateQueries({ queryKey: queryKeys.inbox });
           } else {
-            patch(id, { error: failure.message });
+            patch(key, { error: failure.message });
           }
         },
       },
@@ -119,15 +137,17 @@ export function InboxView() {
     count: rows.length,
     optionCount: selected?.options.length ?? 0,
     onMove: (delta) => {
-      const next = rows[Math.min(rows.length - 1, Math.max(0, index + delta))]?.items[0];
-      if (next && next.id !== selected?.id) select(next);
+      const next = rows[Math.min(rows.length - 1, Math.max(0, index + delta))];
+      if (!next || next.key === selectedRow?.key) return false;
+      select(next);
+      return true;
     },
     onChoose: (i) => {
       const option = selected?.options[i];
-      if (selected && option) choose(selected, option.label);
+      if (selectedRow && option) choose(selectedRow, option.label);
     },
     onNote: () => {
-      if (selected) setSelectedId(selected.id);
+      if (selectedRow) setSelectedId(selectedRow.key);
       noteRef.current?.focus();
     },
     onSubmit: submit,
@@ -161,30 +181,31 @@ export function InboxView() {
       {rows.length > 0 ? (
         <Stack gap="xs">
           {rows.map((row) => {
-            const item = row.items[0];
+            const open = row.key === selectedRow?.key;
+            const failed = dismissFailure?.key === row.key ? dismissFailure.message : null;
             return (
               <InboxCard
                 key={row.key}
-                item={item}
+                item={row.items[0]}
                 count={row.items.length}
-                selected={item.id === selected?.id}
-                choice={item.id === selected?.id ? effectiveChoice : null}
-                note={item.id === selected?.id ? note : ''}
-                error={item.id === selected?.id ? error : null}
+                selected={open}
+                choice={open ? effectiveChoice : null}
+                note={open ? note : ''}
+                error={open ? (error ?? failed) : failed}
                 pending={answer.isPending && row.items.some((i) => i.id === answer.variables.id)}
                 noteRef={noteRef}
                 onSelect={() => {
-                  select(item);
+                  select(row);
                 }}
                 onChoose={(value) => {
-                  choose(item, value);
+                  choose(row, value);
                 }}
                 onNote={(value) => {
-                  setSelectedId(item.id);
-                  patch(item.id, { note: value });
+                  setSelectedId(row.key);
+                  patch(row.key, { note: value });
                 }}
                 onNoteFocus={() => {
-                  setSelectedId(item.id);
+                  setSelectedId(row.key);
                 }}
                 onSubmit={submit}
                 onDismiss={() => {

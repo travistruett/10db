@@ -456,9 +456,22 @@ describe('InboxView', () => {
       renderApp('/inbox');
       const teal = await screen.findByRole('radio', { name: /Teal/ });
       teal.focus();
-      fireEvent.keyDown(teal, { key: 'ArrowDown' });
-      expect(screen.getByRole('radio', { name: /Red/ })).toBeTruthy();
+      fireEvent.keyDown(teal, { key: 'ArrowDown', code: 'ArrowDown' });
+      await waitFor(() => {
+        expect(document.activeElement).toBe(screen.getByRole('radio', { name: /Red/ }));
+      });
       expect(selectedCard().textContent).toContain('Which badge color?');
+    });
+
+    it('leaves ↑ and ↓ to the page when there is no card to move to', async () => {
+      inbox([color, corners]);
+      renderApp('/inbox');
+      await screen.findByText('Which badge color?');
+      // fireEvent answers false when the default action was cancelled.
+      expect(fireEvent.keyDown(document.body, { key: 'ArrowUp' })).toBe(true);
+      expect(fireEvent.keyDown(document.body, { key: 'ArrowDown' })).toBe(false);
+      expect(await screen.findByRole('radio', { name: /Square/ })).toBeTruthy();
+      expect(fireEvent.keyDown(document.body, { key: 'ArrowDown' })).toBe(true);
     });
 
     it('shows no line of shortcut instructions', async () => {
@@ -482,7 +495,9 @@ describe('InboxView', () => {
       renderApp('/inbox');
       await screen.findByText('Which badge color?');
 
-      fireEvent.click(screen.getByRole('button', { name: 'Keyboard shortcuts' }));
+      const help = screen.getByRole('button', { name: 'Keyboard shortcuts' });
+      help.focus();
+      fireEvent.click(help);
       const list = await screen.findByRole('dialog', { name: 'Keyboard Shortcuts' });
       for (const action of [
         'Move between cards',
@@ -497,6 +512,8 @@ describe('InboxView', () => {
       await waitFor(() => {
         expect(screen.queryByRole('dialog')).toBeNull();
       });
+      // Focus doesn't go back to the ? button, where the Inbox keys would not count.
+      expect(document.activeElement).not.toBe(help);
 
       key('?', { shiftKey: true });
       expect(await screen.findByRole('dialog', { name: 'Keyboard Shortcuts' })).toBeTruthy();
@@ -547,6 +564,79 @@ describe('InboxView', () => {
       await screen.findByText('Write outside every claim');
       const badge = within(selectedCard()).getByText('Flag').closest('.mantine-Badge-root');
       expect(badge?.getAttribute('style')).toContain('yellow');
+    });
+
+    it("keeps the open card's draft when a collapsed flag fails to dismiss, and says so beside it", async () => {
+      const stray = flag('Write outside every claim', 'docs/notes.md');
+      serve(
+        http.get(daemonUrl('/inbox'), () => HttpResponse.json([color, stray])),
+        http.post(daemonUrl('/inbox/:id/answer'), () =>
+          HttpResponse.json({ error: 'internal', message: 'The daemon broke' }, { status: 500 }),
+        ),
+      );
+      renderApp('/inbox');
+      await screen.findByText('Which badge color?');
+      key('2');
+      const note = screen.getByLabelText('Note for the agent (optional)');
+      fireEvent.change(note, { target: { value: 'half written' } });
+
+      const row = screen.getByRole('button', { name: /Write outside every claim/ }).parentElement;
+      if (!row) throw new Error('the flag row has no container');
+      fireEvent.click(within(row).getByRole('button', { name: 'Dismiss' }));
+
+      expect(await within(row).findByText('The daemon broke')).toBeTruthy();
+      expect(screen.getByRole('radio', { name: /Red/ }).getAttribute('aria-checked')).toBe('true');
+      expect(
+        screen.getByLabelText<HTMLTextAreaElement>('Note for the agent (optional)').value,
+      ).toBe('half written');
+    });
+
+    it('keeps a group selected while its flags are dismissed, and shows a failure on it', async () => {
+      const copies = [1, 2, 3].map(() => flag('MCP server failed', 'mantine exited'));
+      const answered: string[] = [];
+      serve(
+        http.get(daemonUrl('/inbox'), () =>
+          HttpResponse.json([color, ...copies].filter((i) => !answered.includes(i.id))),
+        ),
+        http.post(daemonUrl('/inbox/:id/answer'), ({ params }) => {
+          const id = String(params['id']);
+          if (id === copies[1]?.id)
+            return HttpResponse.json(
+              { error: 'internal', message: 'The daemon broke' },
+              { status: 500 },
+            );
+          answered.push(id);
+          return HttpResponse.json({ ...copies.find((c) => c.id === id), state: 'RESOLVED' });
+        }),
+      );
+      renderApp('/inbox');
+      await screen.findByText('Which badge color?');
+      key('j');
+      expect(selectedCard().textContent).toContain('MCP server failed');
+      key('Enter');
+
+      expect(await within(selectedCard()).findByText('The daemon broke')).toBeTruthy();
+      expect(selectedCard().textContent).toContain('×2');
+      expect(answered).toEqual([copies[0]?.id]);
+    });
+
+    it('refreshes the list when a flag was already closed elsewhere', async () => {
+      const stray = flag('Write outside every claim', 'docs/notes.md');
+      let closed = false;
+      serve(
+        http.get(daemonUrl('/inbox'), () => HttpResponse.json(closed ? [] : [stray])),
+        http.post(daemonUrl('/inbox/:id/answer'), () => {
+          closed = true;
+          return HttpResponse.json(
+            { error: 'conflict', message: `Inbox item ${stray.id} is already RESOLVED` },
+            { status: 409 },
+          );
+        }),
+      );
+      renderApp('/inbox');
+      await screen.findByText('Write outside every claim');
+      fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+      expect(await screen.findByText('Nothing needs you right now.')).toBeTruthy();
     });
   });
 });

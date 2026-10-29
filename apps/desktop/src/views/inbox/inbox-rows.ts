@@ -1,9 +1,12 @@
-import { InboxKind, type InboxItemDto, type InboxItemId } from '@10db/contracts';
+import { InboxKind, type InboxItemDto } from '@10db/contracts';
 
 /** One row of the inbox: a card, or identical flags shown together. */
 export interface InboxRow {
-  /** The first item's id, which selection and drafts follow. */
-  readonly key: InboxItemId;
+  /**
+   * What selection and drafts follow: a card's id, or for identical flags their shared text, which
+   * stays the same while members leave the row.
+   */
+  readonly key: string;
   readonly items: readonly [InboxItemDto, ...InboxItemDto[]];
 }
 
@@ -17,7 +20,7 @@ export function isDismissable(item: InboxItemDto): boolean {
  * title and body share a row; every other item has its own.
  */
 export function inboxRows(items: readonly InboxItemDto[]): InboxRow[] {
-  const rows: { key: InboxItemId; items: [InboxItemDto, ...InboxItemDto[]] }[] = [];
+  const rows: { key: string; items: [InboxItemDto, ...InboxItemDto[]] }[] = [];
   const byText = new Map<string, InboxItemDto[]>();
   for (const item of items) {
     if (!isDismissable(item)) {
@@ -30,8 +33,8 @@ export function inboxRows(items: readonly InboxItemDto[]): InboxRow[] {
       same.push(item);
       continue;
     }
-    const row: { key: InboxItemId; items: [InboxItemDto, ...InboxItemDto[]] } = {
-      key: item.id,
+    const row: { key: string; items: [InboxItemDto, ...InboxItemDto[]] } = {
+      key: `flags:${text}`,
       items: [item],
     };
     byText.set(text, row.items);

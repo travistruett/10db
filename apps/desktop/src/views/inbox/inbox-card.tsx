@@ -114,6 +114,11 @@ export function InboxCard({
             )}
           </Group>
         </UnstyledButton>
+        {dismissable && error !== null ? (
+          <Text size="xs" c="red" lineClamp={1}>
+            {error}
+          </Text>
+        ) : null}
         {dismissable ? (
           <Button size="xs" variant="subtle" loading={pending} onClick={onDismiss}>
             Dismiss
