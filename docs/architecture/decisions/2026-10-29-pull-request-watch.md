@@ -36,7 +36,9 @@ _Built:_ the daemon reads every shipped batch's pull request and keeps what it r
   - a status becomes unknown because gh failed: **one card per daemon** (`pr-watch-gh`, raised in the first
     affected project, since fold keys are per project), saying what to do for signed out, not installed or
     any other failure, and that the status stays unknown and nothing else is affected. It is withdrawn after
-    the next round in which every call gh was asked answered; a round that half answers leaves it open.
+    the next round in which every call gh was asked answered; a round that half answers leaves it open. The
+    open-card check and the withdraw look in every project, not only those the round read: the card's project
+    can drop out of the watch (its last pull request merged) while the card is still open.
 - **An unknown read keeps the last known checks.** When gh can't say, `state` becomes `unknown` with its
   reason, but `checks` and `failingChecks` keep what gh last said (`unknown` only if it never said). A failed
   read is therefore not a transition: a failing-checks card the builder dismissed is not raised again when gh

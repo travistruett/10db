@@ -373,6 +373,64 @@ describe('gh unavailable', () => {
     expect(h.cards()).toHaveLength(1);
   });
 
+  it('withdraws the gh card in its own project after that project has no pull request left to read', async () => {
+    setup();
+    const second = seedProject(h.store, { delivery: 'pull_request' });
+    const a = shipped(h.project.id, 'Alpha');
+    const b = shipped(second.id, 'Beta');
+    h.gh.auth = 'signed_out';
+    // Call 1 is Alpha signed out; call 3 is Beta in round 2, after Alpha answered merged.
+    const w = watcher({ ...h.ctx, gh: failingCall(3, new GhError('failed', 'HTTP 502')) });
+    w.start();
+    await w.idle();
+    expect(h.only(h.cards()).projectId).toBe(h.project.id);
+
+    h.gh.auth = 'ok';
+    h.gh.setState(a.prUrl, 'MERGED');
+    await round(w);
+    expect(pr(a.id)).toMatchObject({ state: 'merged' });
+    expect(pr(b.id)).toMatchObject({ state: 'unknown', unknownReason: 'HTTP 502' });
+    expect(h.cards()).toHaveLength(1);
+
+    // Only Beta is read now, in the second project; gh answers, so the card in the first goes.
+    await round(w);
+    expect(pr(b.id)).toMatchObject({ state: 'open', unknownReason: null });
+    expect(h.cards()).toEqual([]);
+
+    h.gh.failNext.set('prStatus', new GhError('failed', 'HTTP 503'));
+    await round(w);
+    expect(pr(b.id)).toMatchObject({ state: 'unknown', unknownReason: 'HTTP 503' });
+    expect(h.only(h.cards()).body).toContain("gh couldn't reach GitHub: HTTP 503");
+  });
+
+  it('raises no second gh card while one is open in a project the round does not read', async () => {
+    setup();
+    const second = seedProject(h.store, { delivery: 'pull_request' });
+    const a = shipped(h.project.id, 'Alpha');
+    const b = shipped(second.id, 'Beta');
+    const c = shipped(second.id, 'Gamma');
+    h.gh.auth = 'signed_out';
+    // Call 1 is Alpha signed out; in round 2 Alpha merges (2), Beta answers (3), Gamma fails (4).
+    const w = watcher({ ...h.ctx, gh: failingCall(4, new GhError('failed', 'HTTP 502')) });
+    w.start();
+    await w.idle();
+    expect(h.only(h.cards()).projectId).toBe(h.project.id);
+
+    h.gh.auth = 'ok';
+    h.gh.setState(a.prUrl, 'MERGED');
+    await round(w);
+    expect(pr(a.id)).toMatchObject({ state: 'merged' });
+    expect(pr(b.id)).toMatchObject({ state: 'open' });
+    expect(pr(c.id)).toMatchObject({ state: 'unknown' });
+    expect(h.cards()).toHaveLength(1);
+
+    // Only the second project is read now; Beta goes unknown, and the first project's card stays the one card.
+    h.gh.failNext.set('prStatus', new GhError('failed', 'HTTP 503'));
+    await round(w);
+    expect(pr(b.id)).toMatchObject({ state: 'unknown', unknownReason: 'HTTP 503' });
+    expect(h.only(h.cards()).projectId).toBe(h.project.id);
+  });
+
   it('does not raise a dismissed failing-checks card again after an offline round', async () => {
     setup();
     const { id, prUrl } = shipped(h.project.id, 'Alpha');

@@ -6,7 +6,12 @@ import {
   type ProjectId,
   type PullRequestStatusDto,
 } from '@10db/contracts';
-import { findOpenByFoldKey, listWatchedPullRequests, recordPullRequestStatus } from '@10db/db';
+import {
+  findOpenByFoldKey,
+  listProjects,
+  listWatchedPullRequests,
+  recordPullRequestStatus,
+} from '@10db/db';
 import type { Clock, Timer } from '../clock';
 import type { EventBus } from '../events';
 import { PrState } from '../github';
@@ -96,7 +101,6 @@ export function createPrWatch(input: {
   async function round(signal: AbortSignal): Promise<void> {
     const batches = listWatchedPullRequests(ctx.state.db);
     if (batches.length === 0) return;
-    const projects = new Set<ProjectId>(batches.map((b) => b.projectId));
     let failure: { readonly error: unknown } | null = null;
     let answered = false;
     let firstUnknown: BatchDto | null = null;
@@ -145,21 +149,23 @@ export function createPrWatch(input: {
       )
         firstUnknown = batch;
     }
-    if (failure !== null && firstUnknown !== null) {
-      // Fold keys are per project, so look in every project the round read.
-      const open = [...projects].some(
-        (id) => findOpenByFoldKey(ctx.state.db, id, prCardKey.ghUnavailable) !== undefined,
-      );
-      if (!open)
-        raise(
-          ctx.inbox,
-          firstUnknown.projectId,
-          prCards.ghUnavailable(firstUnknown, failure.error),
-        );
-    }
+    if (failure !== null && firstUnknown !== null && ghCardProjects().length === 0)
+      raise(ctx.inbox, firstUnknown.projectId, prCards.ghUnavailable(firstUnknown, failure.error));
     // Only a round gh answered in full says gh works again: a half round leaves batches unknown.
     if (answered && failure === null)
-      for (const id of projects) withdraw(ctx.state, ctx.inbox, id, [prCardKey.ghUnavailable]);
+      for (const id of ghCardProjects())
+        withdraw(ctx.state, ctx.inbox, id, [prCardKey.ghUnavailable]);
+  }
+
+  /**
+   * The projects with an open gh card. It is one card per daemon, but fold keys are per project
+   * and the card's project can drop out of the watch (its last pull request merged) while the card
+   * is open, so look in every project, not only the ones this round read.
+   */
+  function ghCardProjects(): ProjectId[] {
+    return listProjects(ctx.state.db)
+      .map((project) => project.id)
+      .filter((id) => findOpenByFoldKey(ctx.state.db, id, prCardKey.ghUnavailable) !== undefined);
   }
 
   function arm(): void {
