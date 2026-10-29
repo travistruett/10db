@@ -1,7 +1,8 @@
 .PHONY: setup gate check rust-check deny github-settings live-acceptance install-app rollback-app
 
 TAURI_DIR := apps/desktop/src-tauri
-REF ?= main
+# install-app takes REF from the make command line only; a REF exported by the shell is ignored.
+INSTALL_REF := $(if $(filter command line,$(origin REF)),$(REF),main)
 
 ## setup: install the pinned tools and dependencies; safe to rerun. INSTALL_RUST=yes|no answers the Rust question.
 setup:
@@ -36,7 +37,7 @@ github-settings:
 ## install-app: install 10db as GitHub built it from REF (default main); quit 10db first. Never
 ## builds on this Mac; backs up the database and keeps the current app as 10db.app.prev-<stamp>.
 install-app:
-	@bash scripts/release/install-app.sh "$(REF)"
+	@bash scripts/release/install-app.sh "$(INSTALL_REF)"
 
 ## rollback-app: put back the app the last install-app replaced; prints the database restore command.
 rollback-app:
