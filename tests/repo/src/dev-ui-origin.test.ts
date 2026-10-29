@@ -13,12 +13,23 @@ describe('daemons a browser UI on port 1420 reaches', () => {
     expect(readRepoFile(path)).toMatch(VITE_ORIGIN);
   });
 
-  it('pnpm dev:factory says how to opt the installed app in', () => {
-    expect(readRepoFile('apps/desktop/scripts/factory-connection.ts')).toContain(
-      'open -a 10db --env TENDB_DEV_UI_ORIGIN=',
+  it('pnpm dev:factory:enable and :disable switch the installed app with launchctl, from the root', () => {
+    const root = readRepoFile('package.json');
+    expect(root).toContain(
+      '"dev:factory:enable": "pnpm --filter @10db/desktop dev:factory:enable"',
     );
-    expect(readRepoFile('apps/desktop/scripts/factory-connection.ts')).toContain(
-      "VITE_ORIGIN = 'http://localhost:1420'",
+    expect(root).toContain(
+      '"dev:factory:disable": "pnpm --filter @10db/desktop dev:factory:disable"',
     );
+    const plan = readRepoFile('apps/desktop/scripts/factory-opt-in.ts');
+    expect(plan).toContain("args: ['setenv', VARIABLE, VITE_ORIGIN]");
+    expect(plan).toContain("const VARIABLE = 'TENDB_DEV_UI_ORIGIN'");
+  });
+
+  it('CONTRIBUTING.md turns it on with pnpm dev:factory:enable, not open --env', () => {
+    const guide = readRepoFile('CONTRIBUTING.md');
+    expect(guide).toContain('pnpm dev:factory:enable');
+    expect(guide).toContain('pnpm dev:factory:disable');
+    expect(guide).not.toContain('open -a 10db --env');
   });
 });

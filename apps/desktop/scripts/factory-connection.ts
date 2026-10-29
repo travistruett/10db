@@ -69,10 +69,10 @@ export async function checkFactoryAcceptsOrigin(url: string, origin: string): Pr
   if (response.headers.get('access-control-allow-origin') === origin) return;
   throw new FactoryConnectionError(
     [
-      `10db's daemon refuses the dev UI's origin (${origin}).`,
-      'Quit 10db from its menu-bar icon (Quit stops running work), then reopen it with:',
-      `  open -a 10db --env TENDB_DEV_UI_ORIGIN=${origin}`,
-      'The setting lasts until 10db quits.',
+      `10db's daemon refuses the dev UI (${origin}). To turn it on:`,
+      '  1. pnpm dev:factory:enable',
+      '  2. Quit 10db (⌘Q) and open it again. Quitting stops running work, so pick your moment.',
+      'Then run pnpm dev:factory again.',
     ].join('\n'),
   );
 }

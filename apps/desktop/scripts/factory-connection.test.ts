@@ -106,12 +106,12 @@ describe('checkFactoryAcceptsOrigin', () => {
   it.each([
     { name: 'no origin opted in', allowed: null },
     { name: 'another origin opted in', allowed: 'http://localhost:5173' },
-  ])('refuses when the daemon has $name, saying how to opt in', async ({ allowed }) => {
+  ])('refuses when the daemon has $name, giving the two steps to opt in', async ({ allowed }) => {
     const url = await listen(allowed);
     const check = checkFactoryAcceptsOrigin(url, VITE_ORIGIN);
     await expect(check).rejects.toThrow(FactoryConnectionError);
     await expect(checkFactoryAcceptsOrigin(url, VITE_ORIGIN)).rejects.toThrow(
-      `open -a 10db --env TENDB_DEV_UI_ORIGIN=${VITE_ORIGIN}`,
+      /1\. pnpm dev:factory:enable\n.*2\. Quit 10db \(⌘Q\) and open it again\./,
     );
   });
 

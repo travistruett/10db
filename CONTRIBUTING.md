@@ -80,26 +80,21 @@ Follow these steps in order on a new computer. Each one says how to check it wor
     `dev:shell` compiles the Rust shell and takes a few minutes. The installed app runs 10db's
     tasks; the dev window only previews your checkout.
 
-    **Live UI over your real data.** To work on the UI against the installed app's projects and
-    Inbox, with hot reload:
-    1. Stop `pnpm dev` (both serve Vite on port 1420).
-    2. Opt the installed app in. Its daemon accepts no browser page until you do. Quit 10db from its
-       menu-bar icon (Quit stops running work), then reopen it with
-       `open -a 10db --env TENDB_DEV_UI_ORIGIN=http://localhost:1420`. The setting lasts until 10db
-       quits; reopen it normally to turn it off.
-    3. Run `pnpm dev:factory` and open http://localhost:1420. It starts no daemon: it reads the
-       port and token the app's daemon wrote to `~/Library/Application Support/10db` and stops with
-       the command from step 2 if that daemon refuses the page. The token changes every time 10db
-       starts, so after a restart run `pnpm dev:factory` again.
-    4. For the desktop window instead of a browser tab, leave `pnpm dev:factory` running and run
-       `TENDB_DATA_DIR="$HOME/Library/Application Support/10db" pnpm --filter @10db/desktop dev:shell`.
-       It reads the token again on every connect, so it follows a restart.
+    **Hot-reload the UI over your real 10db.** `pnpm dev:factory` serves your checkout's UI with
+    live reload against the installed app's projects and Inbox. It starts no daemon of its own.
+    - **Once:** run `pnpm dev:factory:enable`, then quit 10db (⌘Q, or Quit 10db in its menu-bar
+      menu) and open it again. Quitting stops running work, so pick your moment.
+    - **Each time:** run `pnpm dev:factory` and open http://localhost:1420. For the desktop window
+      instead, leave it running and run
+      `TENDB_DATA_DIR="$HOME/Library/Application Support/10db" pnpm --filter @10db/desktop dev:shell`.
+    - **After restarting your Mac:** run `pnpm dev:factory:enable` again, then quit and reopen 10db.
+    - **To turn it off:** run `pnpm dev:factory:disable`, then quit and reopen 10db.
 
-    This UI acts on your real data: what you click starts, moves and removes real tasks. It talks
-    to the installed release's daemon, so it can't preview a UI change that needs a daemon change;
-    it shows a version mismatch when the two differ. Requests still need the daemon's token, and
-    the daemon accepts only `http://localhost`, `http://127.0.0.1` or `http://[::1]` with a port
-    (`docs/architecture/decisions/2026-10-29-dev-ui-over-the-factory.md`).
+    Gotchas: stop `pnpm dev` first, because both serve Vite on port 1420. When 10db restarts its
+    token changes, so run `pnpm dev:factory` again (the desktop window follows on its own). This UI
+    acts on your real data: what you click starts, moves and removes real tasks. It talks to the
+    installed release's daemon, so it can't preview a UI change that needs a daemon change.
+    `docs/architecture/decisions/2026-10-29-dev-ui-over-the-factory.md` says what the switch allows.
 
 12. **Optional tools.** [Claude Code](https://claude.com/claude-code) and the
     [Codex CLI](https://github.com/openai/codex) for AI-assisted work; both read the rules in

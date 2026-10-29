@@ -20,7 +20,7 @@ checklist is in [CONTRIBUTING.md](CONTRIBUTING.md#set-up).
   This includes Rust (about 1 GB). `make setup` does the same and asks before installing Rust.
 - `pnpm dev`: run the daemon and the browser UI with a shared dev token, with state in `.dev/`.
 - `pnpm --filter @10db/desktop dev:shell`: open the Tauri window ("10db Dev", its own app identifier, data in `.dev/data`) against that daemon. It runs beside the installed release app. Run `pnpm --filter @10db/desktop sidecar` once first.
-- `pnpm dev:factory`: serve the checkout's UI with hot reload over the installed app's daemon, your real projects and Inbox, once you reopen 10db with `open -a 10db --env TENDB_DEV_UI_ORIGIN=http://localhost:1420` (CONTRIBUTING.md, step 11).
+- `pnpm dev:factory`: serve the checkout's UI with hot reload over the installed app's daemon, your real projects and Inbox, after `pnpm dev:factory:enable` and a quit and reopen of 10db (CONTRIBUTING.md, step 11).
 - Factory and preview: the installed release app runs 10db's tasks on this repo; `pnpm dev` with `dev:shell` or http://localhost:1420 only previews the checkout and never runs tasks. While a task holds the checkout, don't hand-edit it; use a worktree in `../10db-worktrees/`.
 - `make live-acceptance`: the manual §1.3 run on a Max subscription.
 - `make gate`: every check; prints one summary line with each step's seconds (`GATE PASS format 4s · lint 31s · … (210s)`). Its e2e step needs the WebKit browser that `make setup` installs. It picks free ports for its daemon and UI, so gates in separate worktrees can run at once, beside `pnpm dev`; a port another process takes before the servers bind it fails the run at startup.

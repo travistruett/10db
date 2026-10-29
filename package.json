@@ -20,6 +20,8 @@
     "knip": "knip",
     "dev": "bash scripts/dev.sh",
     "dev:factory": "pnpm --filter @10db/desktop dev:factory",
+    "dev:factory:enable": "pnpm --filter @10db/desktop dev:factory:enable",
+    "dev:factory:disable": "pnpm --filter @10db/desktop dev:factory:disable",
     "gate": "bash scripts/gate.sh",
     "live-acceptance": "bash scripts/live-acceptance.sh"
   },
