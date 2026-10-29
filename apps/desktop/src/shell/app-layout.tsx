@@ -5,7 +5,7 @@ import {
   IconLayoutKanban,
   IconSettings,
 } from '@tabler/icons-react';
-import { Link, Outlet } from '@tanstack/react-router';
+import { Link, Outlet, useRouterState } from '@tanstack/react-router';
 import { useDaemonStatus } from '../daemon/provider';
 import { useInbox } from '../daemon/queries';
 import { useDesktopSync } from '../desktop/sync';
@@ -37,6 +37,7 @@ function InboxBadge({ count }: { readonly count: number }) {
 export function AppLayout() {
   useDesktopSync();
   const status = useDaemonStatus();
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
   const openCards = useInbox().data?.length ?? 0;
   return (
     <AppShell header={{ height: 48 }} navbar={{ width: 200, breakpoint: 'sm' }} padding="md">
@@ -68,6 +69,7 @@ export function AppLayout() {
             key={to}
             component={Link}
             to={to}
+            active={pathname === to || pathname.startsWith(`${to}/`)}
             label={label}
             leftSection={<Icon size={16} stroke={1.5} />}
             rightSection={
