@@ -101,11 +101,21 @@ export const DEFAULT_HAZARDS: readonly HazardDef[] = [
       'pnpm i',
       'pnpm update',
       'pnpm up',
+      'pnpm uninstall',
+      'pnpm un',
+      'pnpm upgrade',
       'npm install',
       'npm i',
+      'npm add',
+      // Installs from the lockfile and changes no manifest, but it deletes node_modules first, which
+      // every lane in a shared checkout reads.
+      'npm ci',
       'npm uninstall',
+      'npm un',
+      'yarn add',
       'cargo add',
       'cargo remove',
+      'cargo update',
     ],
   },
   {
@@ -141,8 +151,6 @@ export const ProjectInput = z
     areas: z.array(AreaDef).min(1),
     hazards: z.array(HazardDef).default(() => [...DEFAULT_HAZARDS]),
     maxLanes: z.int().min(1).max(16).default(2),
-    model: z.string().min(1).default('sonnet'),
-    effort: z.enum(Effort).default(Effort.Medium),
     // Defaults hand off at about 400k tokens on a 1M window (spikes summary). Low minimums let acceptance runs
     // force a handoff on a large context window.
     handoffPct: z.int().min(5).max(95).default(40),
@@ -155,7 +163,10 @@ export const ProjectInput = z
     delivery: z.enum(Delivery).default(Delivery.Local),
     /** The branch on `origin` a batch is cut from and its pull request targets. */
     baseBranch: BranchName.default('main'),
-    /** `pull_request` delivery titles each PR `<prefix>: <batch title>`. */
+    /**
+     * `pull_request` delivery titles each PR `<prefix>: <batch title>`; null derives
+     * `<type>(<scope>): <subject>` from the batch's tasks and the paths it changed.
+     */
     prTitlePrefix: PrTitlePrefix.nullable().default(null),
     /** The account that pays; absent means the default account. */
     accountId: AccountId.optional(),
@@ -182,10 +193,6 @@ export const ProjectInput = z
   .refine((p) => p.nudgePct > p.handoffPct, {
     message: 'nudgePct must be above handoffPct',
     path: ['nudgePct'],
-  })
-  .refine((p) => p.delivery !== Delivery.PullRequest || p.prTitlePrefix !== null, {
-    message: 'Pull request delivery needs a PR title prefix such as feat(app)',
-    path: ['prTitlePrefix'],
   })
   .refine(
     (p) => p.workspaceMode !== WorkspaceMode.Worktree || p.delivery === Delivery.PullRequest,
@@ -216,8 +223,6 @@ export const ProjectDto = z.object({
   moveBackAt: Timestamp.nullable(),
   fallbackAccountId: AccountId.nullable(),
   usageHandoffAt: z.number(),
-  model: z.string(),
-  effort: z.enum(Effort),
   handoffPct: z.int(),
   nudgePct: z.int(),
   humanWaitMinutes: z.int(),

@@ -47,8 +47,15 @@
     {
       "idx": 6,
       "version": "6",
-      "when": 1793244085258,
-      "tag": "0006_cool_nova",
+      "when": 1793244194876,
+      "tag": "0006_drop_project_model_effort",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1793249963024,
+      "tag": "0007_whole_wolfsbane",
       "breakpoints": true
     }
   ]

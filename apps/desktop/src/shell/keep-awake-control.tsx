@@ -21,17 +21,10 @@ export function KeepAwakeControl() {
         </ActionIcon>
       </Menu.Target>
       <Menu.Dropdown>
-        <Menu.Label>Keep the Mac awake</Menu.Label>
         {Object.values(KeepAwakeMode).map((mode) => (
           <Menu.Item
             key={mode}
-            leftSection={
-              status.data?.mode === mode ? (
-                <IconCheck size={14} stroke={1.5} />
-              ) : (
-                <span style={{ width: 14 }} />
-              )
-            }
+            rightSection={status.data?.mode === mode ? <IconCheck size={14} stroke={1.5} /> : null}
             onClick={() => {
               setMode.mutate(mode);
             }}

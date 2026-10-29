@@ -3,7 +3,7 @@
 **Status:** written on 2026-10-28 from the builder's walk through 10db from an empty data dir, without the
 builder present, then revised after a plan-reviewer pass (Fable). Every UI decision here was made with the
 builder during that walk and is logged in `scratch/ux-feedback-2026-10-28.md` (cited as "item N"); where this
-spec makes a call the builder has not made, it is marked **(call)** and listed in §14.
+spec made a call the builder had not, it was listed in §14; the builder has since answered each one.
 **Extends:** `2026-10-13-10db-factory-loop-design.md` §10 (UI) and `2026-10-17-10db-accounts-design.md` (the
 identity check). **Keeps:** the batch delivery, lane sandbox and worktree mode specs unchanged, except the
 optional gate (§9.4), which changes when a task counts as done.
@@ -73,11 +73,11 @@ names don't change.
 | #   | Decision | Why |
 | --- | -------- | --- |
 | F1  | With no projects, the window shows the first run instead of the app shell. It has three steps: Welcome, Check your setup, Add a project. There is no review step. | Item 1, 31. A review step repeated what the user had just chosen. |
-| F2  | "Continue" from Check your setup needs Claude Code and git found. Confirming the login ("Use <email>") is offered but not required. gh is optional. **(call)** | Nothing runs without Claude Code or git. The default account's login doesn't need the builder: the account preparer records it from its first probe and raises an information card (`accounts/preparer.ts`, `recordedCard`), so a first task never stalls on it. "Use <email>" lets the builder say so up front (item 5). Without gh only "Commit directly" is possible, which still works. |
+| F2  | "Continue" from Check your setup needs Claude Code and git found; it shows the login tasks will run as, and asks for no confirmation. gh is optional. | Nothing runs without Claude Code or git. The default account's login doesn't need the builder: the account preparer records it from its first probe and raises an information card (`accounts/preparer.ts`, `recordedCard`), so a first task never stalls on it. Without gh only "Commit directly" is possible, which still works. Decided by the builder (§14). |
 | F3  | The project folder is chosen in the native folder panel (Tauri's dialog plugin) and inspected by the daemon, which reports the repository's root, branches, default branch, remote and candidate gate commands. The browser UI types the path. | Item 16, 17, 21, 22, 25. A web page never gets a picked folder's absolute path. The UI must not guess what a folder holds. |
 | F4  | Inspection reads a few files as data and runs only the daemon's own read-only git, outside the pin and trust machinery; nothing from the repository runs, and it raises no card. | The folder isn't trusted until it is a project; the security rule in `apps/daemon/AGENTS.md` forbids running repository code on the host. A folder the builder may never add must not produce trust cards. |
-| F5  | The gate command is optional. With none, a task whose last step finishes waits for the builder with a "Ready for you to check" card showing its diff, and counts as done only when the builder approves. A pull request then ships without a gate step. **(call)** | Item 18, 25, 32, 109. The agent never judges its own work done; a missing check moves the judgment to the builder instead of failing setup. |
-| F6  | A task waiting for that check is `WAITING_HUMAN` with no session, a new next action `builder_review`, and a targeted Inbox card of a new kind `check`; the workflow gains the edges `VERIFYING → WAITING_HUMAN` and `WAITING_HUMAN → VERIFYING`. No new workstream state. **(call)** | The Board already shows `WAITING_HUMAN` as Blocked ("waiting on you"), and recovery already parks a workstream on a card that targets it. A new state would need the same edges plus a Board column mapping and every exhaustive switch. The existing `review` card is raised after DONE and means something else, so this one is its own kind. |
+| F5  | The gate command is optional. With none, a task whose last step finishes waits for the builder with a "Ready for you to check" card showing its diff, and counts as done only when the builder approves. A pull request then ships without a gate step. | Item 18, 25, 32, 109. The agent never judges its own work done; a missing check moves the judgment to the builder instead of failing setup. |
+| F6  | A task waiting for that check is `WAITING_HUMAN` with no session, a new next action `builder_review`, and a targeted Inbox card of a new kind `check`; the workflow gains the edges `VERIFYING → WAITING_HUMAN` and `WAITING_HUMAN → VERIFYING`. No new workstream state. | The Board already shows `WAITING_HUMAN` as Blocked ("waiting on you"), and recovery already parks a workstream on a card that targets it. A new state would need the same edges plus a Board column mapping and every exhaustive switch. The existing `review` card is raised after DONE and means something else, so this one is its own kind. |
 | F7  | Setup asks for: folder, name (prefilled), gate command (detected), account (only when there is more than one), "When work is finished", and base branch (only under pull requests, chosen from the folder's branches). Everything else takes its default and lives in Settings: one area `repo` over `**`, handoff 40 %, shared workspace, no flow, no budget. | Item 15, 28, 29, 30, 64. Each removed field confused the builder in the walk; none needs an answer before the first task. |
 | F8  | The pull request title prefix is never shown in setup. While `ProjectInput` requires a prefix for pull request delivery (`entities.ts`, the refine), setup sends `feat` with a pull request choice; once queue task 3 lifts that rule, setup sends nothing and Settings shows the prefix as an optional override. | Item 27, 30, 104. One prefix per project mislabels most PRs. |
 | F9  | The first run and the "New Project" modal share one form (`useProjectSetup`): the same fields, submit and errors. The old `new-project-form.tsx` is deleted. | Item 64. Two forms drifted within a day. |
@@ -121,17 +121,19 @@ it).
 | --- | --- | --- | --- |
 | no `claude` where 10db looks (`findClaude`: the install prefixes, `~/.local/bin`, `~/.claude/local`; never the login PATH) | red | "Not found in <the places, as `INSTALL_PREFIXES_TEXT` lists them, plus the two home folders>. Install Claude Code, then recheck." | none |
 | probe running | gray | "Starting Claude Code to read the account…" | none |
-| signed in, login confirmed | green | "Signed in as <email>", plus " · <organization>" unless it is the personal default "<email>'s Organization" (item 14) | Switch Login |
-| signed in, nobody confirmed it yet | yellow | "Signed in as <email>. Should 10db run sessions as this login?" | **Use <email>** (primary), Switch Login |
-| any other refusal | red | the refusal's message | Switch Login |
+| signed in (confirmed or not yet recorded) | green | "Signed in as <email>. Tasks run as this login.", with " · <organization>" after the email unless it is the personal default "<email>'s Organization" (item 14) | Add Another Login |
+| any other refusal | red | the refusal's message | Add Another Login |
 
 The identity probe (`GET /accounts/:id/identity`, **built**) starts Claude Code, so it runs once on entering
-the step and again on Recheck, never on every render. "Use <email>" patches the default account's
-`expectedIdentity` (**built**) and reprobes; it records what the preparer would record on the first task
-anyway (F2). "Switch Login" opens the default account's sign-in steps (`SignInSteps`, **built**) under the
-row, with one line above them: "This changes the login Claude Code uses in your terminal too." The default
-account is `~/.claude`, the terminal's own login (accounts spec §3); a second login for a company project
-is added in Settings → Accounts, and the project form offers it once it exists (item 8).
+the step and again on Recheck, never on every render. Nothing in the first run patches the account: the
+preparer records the default login on the first task (F2). "Add Another Login" opens the existing Add
+Account modal (`accounts/add-account-modal.tsx`, **built**), which adds an account and its sign-in steps
+without touching the default; the first run never offers to switch the default login, which is
+`~/.claude`, the terminal's own (accounts spec §3). Once a second account exists, Add a project shows its
+Account select (item 8); there is no other per-project login choice in the first run.
+
+The footer shows, left of Continue on this step, one dimmed line naming the login tasks will run as: "Tasks
+will run as <email>." (nothing while the probe runs or fails).
 
 **Tools.** git (required): green with its version, or red "Not found in <`INSTALL_PREFIXES_TEXT`>." GitHub
 CLI (optional): green "<version>, signed in as <login>"; yellow "Not signed in. Run `gh auth login` in a
@@ -299,7 +301,9 @@ right. Save sends `PATCH /tasks/:id` (**built**) with the five fields, after che
 non-empty and there is at least one criterion. Areas and dependencies are read-only: there is no patch
 route for them (§13). Saving is allowed while the task runs; a session reads the task when it starts, so
 while a workstream is active the footer's left side says "Changes apply from the task's next session."
-Closing with unsaved edits discards them (§14).
+Closing with unsaved edits (the close button, Escape, Cancel or a click outside) asks first, in a small
+centered modal: "Discard your changes to this task?" with "Keep Editing" (default) and "Discard"; with
+no edits it closes at once.
 
 ### 7.2 New Task
 
@@ -613,22 +617,20 @@ the daemon.
   daemon probe that doesn't exist yet.
 - **A sharpen assist** that rewrites vague criteria (item 49).
 
-## 14. Open questions
+## 14. Decisions on the open questions
 
-1. **F2:** "Continue" doesn't wait for the login to be confirmed, since the daemon records the default
-   login itself. Should the first run still ask for an explicit "Use <email>"?
-2. **F5, F6:** a task waiting for its check holds its areas, so with one `repo` area nothing else in the
-   project starts until the builder answers. Is that acceptable for a project with no gate, or should a
-   waiting task release its claims (and risk a send-back conflicting with work started meanwhile)? And is
-   `WAITING_HUMAN` plus a `check` card right, rather than a dedicated state and column?
-3. **First run and a second login:** should Add a project offer "use a different Claude login for this
-   project" (item 8), or is Settings → Accounts enough?
-4. **The name for a group of tasks:** leaning "Goal" (design note); decided with the shaping design.
-5. **Gate command's label:** "Gate command" stays in the UI with a plain description. Is "gate" itself
-   vocabulary the first run should avoid, like "lane" and "batch"?
-6. **The drawer and unsaved changes:** closing the drawer with edits discards them silently. Ask, or keep
-   them as a draft?
-7. **Detected gate when several match** (a Makefile `gate` and a `pnpm test`): the Makefile wins by the
-   order in §9.2. Is that the right preference?
-8. **"Switch Login" on the default account** changes the terminal's login too. Should the first run offer
-   it at all, or only "Add Another Login" (which creates an account)?
+The builder answered these on 2026-10-28, relayed by the orchestrating session; each answer is folded into
+the sections above.
+
+1. **Confirming the login (F2):** no explicit "Use <email>". The footer shows the login tasks will run as
+   (§4.2).
+2. **A gate-less task waiting for its check (F5, F6):** it holds its areas for now; `WAITING_HUMAN` plus a
+   `check` card, no new state. Revisit with Goals.
+3. **A second login in the first run:** none beyond the Account select that appears once a second account
+   exists; adding one stays in Settings → Accounts and the first run's "Add Another Login".
+4. **The name for a group of tasks:** Goal.
+5. **Gate command's label:** "Gate command", with a plain description.
+6. **The drawer and unsaved changes:** closing with edits asks before discarding (§7.1).
+7. **Several gate candidates:** the Makefile `gate` target wins (§9.2's order).
+8. **Switching the default login:** the first run offers only "Add Another Login", never "Switch Login"
+   (§4.2).

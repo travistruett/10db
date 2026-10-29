@@ -1,7 +1,7 @@
 import { KeepAwakeMode } from '@10db/contracts';
-import { Radio, Stack, Text } from '@mantine/core';
+import { SegmentedControl } from '@mantine/core';
 import { useKeepAwake, useSetKeepAwake } from '../../daemon/queries';
-import { MODE_LABELS } from '../../shell/keep-awake-labels';
+import { SettingRow, SettingsCard } from './setting-row';
 
 const MODES: readonly KeepAwakeMode[] = Object.values(KeepAwakeMode);
 
@@ -9,27 +9,34 @@ function isMode(value: string): value is KeepAwakeMode {
   return MODES.some((m) => m === value);
 }
 
+/** Short labels for the segmented control; the menu in the header spells each out. */
+const SHORT_LABEL: Readonly<Record<KeepAwakeMode, string>> = {
+  [KeepAwakeMode.Off]: 'Never',
+  [KeepAwakeMode.WhileRunning]: 'While tasks run',
+  [KeepAwakeMode.Always]: 'Always',
+};
+
 export function KeepAwakeSection() {
   const status = useKeepAwake();
   const setMode = useSetKeepAwake();
   return (
-    <Stack>
-      <Radio.Group
+    <SettingsCard>
+      <SettingRow
         label="Keep the Mac awake"
-        value={status.data?.mode ?? null}
-        onChange={(value) => {
-          if (isMode(value)) setMode.mutate(value);
-        }}
+        description={
+          status.data?.active ? 'Keeping the Mac awake now.' : 'Not keeping the Mac awake now.'
+        }
       >
-        <Stack gap="xs" mt="xs">
-          {MODES.map((mode) => (
-            <Radio key={mode} value={mode} label={MODE_LABELS[mode]} />
-          ))}
-        </Stack>
-      </Radio.Group>
-      <Text size="sm" c="dimmed">
-        {status.data?.active ? 'Keeping the Mac awake now.' : 'Not keeping the Mac awake now.'}
-      </Text>
-    </Stack>
+        <SegmentedControl
+          aria-label="Keep the Mac awake"
+          fullWidth
+          value={status.data?.mode ?? ''}
+          data={MODES.map((mode) => ({ value: mode, label: SHORT_LABEL[mode] }))}
+          onChange={(value) => {
+            if (isMode(value)) setMode.mutate(value);
+          }}
+        />
+      </SettingRow>
+    </SettingsCard>
   );
 }

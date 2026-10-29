@@ -112,6 +112,31 @@ describe('ProjectInput', () => {
     expect(parsed.allowedCommands).toEqual([]);
   });
 
+  it('accepts pull request delivery with no title prefix', () => {
+    const parsed = ProjectInput.safeParse({
+      name: 'demo',
+      repoPath: '/tmp/demo',
+      gateCommand: 'make gate',
+      areas: [{ name: 'src', globs: ['src/**'] }],
+      delivery: 'pull_request',
+    });
+    expect(parsed.success).toBe(true);
+    expect(parsed.data?.prTitlePrefix).toBeNull();
+  });
+
+  it('drops the project-level model and effort', () => {
+    const parsed = ProjectInput.parse({
+      name: 'demo',
+      repoPath: '/tmp/demo',
+      gateCommand: 'make gate',
+      areas: [{ name: 'src', globs: ['src/**'] }],
+      model: 'opus',
+      effort: 'high',
+    });
+    expect(parsed).not.toHaveProperty('model');
+    expect(parsed).not.toHaveProperty('effort');
+  });
+
   it('takes the extra allowed commands and rejects one that is not a plain prefix', () => {
     const base = {
       name: 'demo',

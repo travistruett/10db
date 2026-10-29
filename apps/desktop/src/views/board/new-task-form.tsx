@@ -1,12 +1,20 @@
 import { TaskStatus, type ProjectDto, type TaskDto } from '@10db/contracts';
-import { Alert, Button, Group, MultiSelect, Stack, Textarea, TextInput } from '@mantine/core';
-import { useState, type SyntheticEvent } from 'react';
+import { Box, Code, List, MultiSelect, Stack, Text, Textarea, TextInput } from '@mantine/core';
+import { useEffect, useId, useState, type SyntheticEvent } from 'react';
 import { useCreateTask } from '../../daemon/queries';
 import { criteriaLines } from './areas-text';
+import { LabelWithHelp } from './field-help';
+
+const CRITERIA_PLACEHOLDER =
+  'One per line, for example:\nSearch shows results in under a second with 10,000 tasks';
 
 export interface NewTaskFormProps {
+  /** The form's `id`: a submit button outside it (the modal footer) points at it with `form`. */
+  readonly formId: string;
   readonly project: ProjectDto;
   readonly tasks: readonly TaskDto[];
+  /** Reports whether a create is in flight and why the last one failed, for the footer to show. */
+  readonly onStatus: (status: { readonly pending: boolean; readonly error: string | null }) => void;
   readonly onCreated: (task: TaskDto) => void;
 }
 
@@ -16,8 +24,10 @@ function initialAreas(project: ProjectDto): string[] {
   return only && rest.length === 0 ? [only.name] : [];
 }
 
-export function NewTaskForm({ project, tasks, onCreated }: NewTaskFormProps) {
+export function NewTaskForm({ formId, project, tasks, onStatus, onCreated }: NewTaskFormProps) {
   const create = useCreateTask(project.id);
+  const criteriaId = useId();
+  const areasId = useId();
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [criteriaText, setCriteriaText] = useState('');
@@ -25,7 +35,8 @@ export function NewTaskForm({ project, tasks, onCreated }: NewTaskFormProps) {
   const [dependsOn, setDependsOn] = useState<string[]>([]);
   const [formError, setFormError] = useState<string | null>(null);
 
-  const areaNames = [...project.areas.map((a) => a.name), ...project.hazards.map((h) => h.name)];
+  // Hazards stay out: an agent asks for one with `request_claim`.
+  const areaNames = project.areas.map((a) => a.name);
   const dependencyOptions = tasks
     .filter((t) => t.status === TaskStatus.Open)
     .map((t) => ({ value: t.id, label: t.title }));
@@ -60,8 +71,13 @@ export function NewTaskForm({ project, tasks, onCreated }: NewTaskFormProps) {
   };
 
   const error = formError ?? create.error?.message ?? null;
+  const pending = create.isPending;
+  useEffect(() => {
+    onStatus({ pending, error });
+  }, [onStatus, pending, error]);
+
   return (
-    <form onSubmit={submit} noValidate>
+    <form id={formId} onSubmit={submit} noValidate>
       <Stack>
         <TextInput
           label="Title"
@@ -73,23 +89,62 @@ export function NewTaskForm({ project, tasks, onCreated }: NewTaskFormProps) {
         <Textarea
           label="Description"
           autosize
-          minRows={2}
+          minRows={1}
+          maxRows={10}
           value={description}
           onChange={(e) => {
             setDescription(e.currentTarget.value);
           }}
         />
-        <Textarea
-          label="Acceptance criteria"
-          description="One per line"
-          autosize
-          minRows={3}
-          value={criteriaText}
-          onChange={(e) => {
-            setCriteriaText(e.currentTarget.value);
-          }}
-        />
-        <MultiSelect label="Areas" data={areaNames} value={areas} onChange={setAreas} searchable />
+        <Box>
+          <LabelWithHelp label="Acceptance criteria" htmlFor={criteriaId}>
+            <Stack gap="xs">
+              <Text size="sm">
+                What must be true when the task is done. The agent works until each one holds, a
+                reviewer agent checks each and asks for a test that proves it, and the project's
+                gate (<Code>{project.gateCommand}</Code>) runs separately.
+              </Text>
+              <List size="sm" spacing={4}>
+                <List.Item>
+                  Instead of "Make search faster", write "Search shows results in under a second
+                  with 10,000 tasks".
+                </List.Item>
+                <List.Item>
+                  Instead of "Fix the login bug", write "Signing in with an expired password says
+                  so, instead of showing a blank page".
+                </List.Item>
+              </List>
+            </Stack>
+          </LabelWithHelp>
+          <Textarea
+            id={criteriaId}
+            placeholder={CRITERIA_PLACEHOLDER}
+            autosize
+            minRows={2}
+            maxRows={12}
+            value={criteriaText}
+            onChange={(e) => {
+              setCriteriaText(e.currentTarget.value);
+            }}
+          />
+        </Box>
+        {areaNames.length > 1 ? (
+          <Box>
+            <LabelWithHelp label="Areas" htmlFor={areasId}>
+              <Text size="sm">
+                The parts of the project this task may change. 10db keeps the agent's edits inside
+                them, and runs tasks in different areas at the same time.
+              </Text>
+            </LabelWithHelp>
+            <MultiSelect
+              id={areasId}
+              data={areaNames}
+              value={areas}
+              onChange={setAreas}
+              searchable
+            />
+          </Box>
+        ) : null}
         <MultiSelect
           label="Depends on"
           data={dependencyOptions}
@@ -98,16 +153,6 @@ export function NewTaskForm({ project, tasks, onCreated }: NewTaskFormProps) {
           searchable
           clearable
         />
-        {error ? (
-          <Alert color="red" title="Couldn't create the task">
-            {error}
-          </Alert>
-        ) : null}
-        <Group justify="flex-end">
-          <Button type="submit" loading={create.isPending}>
-            Create task
-          </Button>
-        </Group>
       </Stack>
     </form>
   );

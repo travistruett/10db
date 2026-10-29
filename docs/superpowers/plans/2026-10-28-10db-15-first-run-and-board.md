@@ -19,7 +19,7 @@
 
 **Plan series:** … `14-worktree-mode`, **`15-first-run-and-board` (this file)**.
 
-This plan was written against `main` at `b2e20d1` plus the spec. Where a file, signature or anchor it names doesn't match the code, trust the code, adapt the step and say so in the task's report.
+This plan was written against `main` at `b2e20d1` plus the spec, and adjusted for the builder's answers (spec §14) on `main` at `542d3bb`. Where a file, signature or anchor it names doesn't match the code, trust the code, adapt the step and say so in the task's report.
 
 ## Decisions made in the plan
 
@@ -34,7 +34,9 @@ This plan was written against `main` at `b2e20d1` plus the spec. Where a file, s
 
 ## Global Constraints
 
-- **Branches and worktrees:** each PR in its own worktree under `../10db-worktrees/` from `origin/main` (root `AGENTS.md`). Never edit, switch or stash `~/Projects/10db` while a 10db task holds it.
+- **Branches and worktrees:** each PR in its own worktree under `../10db-worktrees/` from `origin/main` (root `AGENTS.md`); PR 1 is `feat/desktop-first-run-board` in `../10db-worktrees/first-run-build`. Never edit, switch or stash `~/Projects/10db` while a 10db task holds it.
+- **Gate:** while several sessions share this Mac, run it only through `bash ~/Projects/10db/scratch/tools/gate-one-at-a-time.sh` from the worktree. Per-task checks use the package's own `vitest run` on the files the task touched.
+- **Settings files shared with the areas task:** queue task 0 (branch `10db/edit-a-project-s-areas-and-hazards-in-729ae2e5`) edits `views/settings/project-areas.tsx`, `sections.ts`, `section-body.tsx` and possibly `settings-view.tsx`. Tasks 10–12 change those files only where the task requires, without reformatting or reordering untouched code, so whichever branch lands second merges easily. `project-areas.tsx` is not touched at all.
 - **Commits:** one per task: `git add <paths> && git commit -m '<type>(<scope>): <subject>' -m 'Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>'`. Single quotes. Scopes from `commitlint.config.js` (optional). Run `pnpm format` first. A failing hook leaves the paths staged: fix and rerun. Never `--no-verify`, `LEFTHOOK=0` or `core.hooksPath`.
 - **Tests** (`.claude/rules/testing.md`): red first, noting the failure; desktop tests use MSW through `src/test/daemon.tsx` (`serve`, `renderApp`, `daemonUrl`) and fixtures in `src/test/fixtures.ts`; daemon tests use real git through `createTempRepoWithOrigin`/`createTempRepo` (`apps/daemon/test/fixtures.ts`), `isolatedGitEnv()` on every git call, `FakeAdapter`, `FakeGh`; no sleeps (`waitFor`, `scheduler.idle()`, fake timers in jsdom). Table-driven for gate detection, inspection refusals, Claude row states and the optional-gate runner cases.
 - **Copy** follows the DESIGN.md rules: Title Case for buttons, menu items and names; sentence case for labels, descriptions and messages. The exact strings are the spec's; copy them, don't paraphrase.
@@ -211,7 +213,7 @@ This plan was written against `main` at `b2e20d1` plus the spec. Where a file, s
 
 - [ ] **Step 1: Write the failing tests:**
   - `flow-select.test.tsx`: `flowTitle` table (`quick` → `Quick`, `plan-first` → `Plan First`); `orders flows by step count and shows steps as a byline` ("Build → Review" under Quick).
-  - `task-drawer.test.tsx`: `shows the title, column, areas and waits-on`; `saves the five fields` (the `PATCH /tasks/:id` body is `{ title, description, acceptanceCriteria, flowId, riskTags }` with trimmed lines); `refuses an empty title` ("Give the task a title", no request); `refuses no criteria` ("Add at least one acceptance criterion"); `shows the daemon's refusal beside Save` ("Couldn't save: …"); `says changes apply next session while active` ("Changes apply from the task's next session."); `risk options read in plain words` (the four labels of spec §7.1).
+  - `task-drawer.test.tsx`: `shows the title, column, areas and waits-on`; `saves the five fields` (the `PATCH /tasks/:id` body is `{ title, description, acceptanceCriteria, flowId, riskTags }` with trimmed lines); `refuses an empty title` ("Give the task a title", no request); `refuses no criteria` ("Add at least one acceptance criterion"); `shows the daemon's refusal beside Save` ("Couldn't save: …"); `says changes apply next session while active` ("Changes apply from the task's next session."); `closing with edits asks first` (Cancel after an edit opens "Discard your changes to this task?"; "Keep Editing" keeps the drawer and the edit; "Discard" closes it); `Escape with edits asks too`; `closing with no edits closes at once`; `risk options read in plain words` (the four labels of spec §7.1).
 - [ ] **Step 2: Run** → FAIL.
 - [ ] **Step 3: Implement** per spec §7.1 (520 px right `Drawer` titled "Task", `padding="lg"`; footer sticky at the bottom with the error left and Cancel/"Save Changes" right). Task 8 mounts it from the board.
 - [ ] **Step 4: Run** → PASS.
@@ -442,11 +444,11 @@ This plan was written against `main` at `b2e20d1` plus the spec. Where a file, s
 - Test: `apps/desktop/src/views/first-run/claude-row.test.ts`, `first-run.test.tsx`
 
 **Interfaces:**
-- Produces: `claudeRow(input: { claude: ToolCheck | undefined; probing: boolean; identity: AccountIdentityDto | null; error: string | null }): { mark: 'ok' | 'warn' | 'bad' | 'pending'; detail: string; confirm: string | null }`; `FirstRun({ onCreated })`.
+- Produces: `claudeRow(input: { claude: ToolCheck | undefined; probing: boolean; identity: AccountIdentityDto | null; error: string | null }): { mark: 'ok' | 'bad' | 'pending'; detail: string; runsAs: string | null }` (`runsAs`: the email the footer names, null unless signed in); `FirstRun({ onCreated })`.
 
 - [ ] **Step 1: Write the failing tests:**
-  - `claude-row.test.ts`, a table over spec §4.2's five rows, plus `the personal organization is hidden` and `a real organization is shown`.
-  - `first-run.test.tsx`: `shows the shell while projects load`; `shows the first run only once the list loads empty`; `Welcome → Get Started`; `the probe runs once on entering the step and on Recheck` (identity request count); `Use <email> patches expectedIdentity and reprobes`; `Switch Login shows the sign-in steps with the terminal warning`; `Continue is enabled without confirming` and `disabled without git` and `disabled without Claude Code`; `Recheck on Tools sends recheck=1`; `gh rows: signed in, signed out, missing`; `Create Project lands on /board with the project selected`; `Back returns a step`; `a later step can't be clicked`.
+  - `claude-row.test.ts`, a table over spec §4.2's four rows (signed in counts as `ok` whether or not the identity is recorded yet), plus `the personal organization is hidden` and `a real organization is shown`.
+  - `first-run.test.tsx`: `shows the shell while projects load`; `shows the first run only once the list loads empty`; `Welcome → Get Started`; `the probe runs once on entering the step and on Recheck` (identity request count); `nothing patches the account` (no `PATCH /accounts/:id`); `the footer says "Tasks will run as <email>."`; `Add Another Login opens the Add Account modal`; `there is no Switch Login`; `Continue is enabled once Claude Code and git are found` and `disabled without git` and `disabled without Claude Code`; `Recheck on Tools sends recheck=1`; `gh rows: signed in, signed out, missing`; `Create Project lands on /board with the project selected`; `Back returns a step`; `a later step can't be clicked`.
 - [ ] **Step 2: Run** → FAIL.
 - [ ] **Step 3: Implement** per spec §4 (logo from `app-icon.svg` imported as a URL; left rail 290 px; footer with the error and actions; Title Case actions).
 - [ ] **Step 4: Update e2e:** before `page.goto`, create the project with Playwright's `request.post` to `http://127.0.0.1:${E2E_DAEMON_PORT}/projects` with `Authorization: Bearer ${E2E_TOKEN}` (`e2e/paths.ts`, `e2e/ports.ts`) and the fields it typed before; drop the UI project-creation steps; keep everything after.

@@ -31,8 +31,6 @@ CREATE TABLE `__new_projects` (
 	`fallback_account_id` text,
 	`usage_handoff_at` real DEFAULT 0.95 NOT NULL,
 	`sandbox_loopback` integer DEFAULT false NOT NULL,
-	`model` text NOT NULL,
-	`effort` text NOT NULL,
 	`handoff_pct` integer NOT NULL,
 	`nudge_pct` integer NOT NULL,
 	`human_wait_minutes` integer NOT NULL,
@@ -52,7 +50,7 @@ CREATE TABLE `__new_projects` (
 	FOREIGN KEY (`flow_id`) REFERENCES `flows`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
-INSERT INTO `__new_projects`("id", "name", "repo_path", "gate_command", "areas", "hazards", "max_lanes", "provider", "account_id", "moved_from_account_id", "move_back_at", "fallback_account_id", "usage_handoff_at", "sandbox_loopback", "model", "effort", "handoff_pct", "nudge_pct", "human_wait_minutes", "flow_id", "budget_ceiling", "delivery", "base_branch", "pr_title_prefix", "allowed_commands", "workspace_mode", "worktree_seed", "created_at", "updated_at") SELECT "id", "name", "repo_path", "gate_command", "areas", "hazards", "max_lanes", "provider", "account_id", "moved_from_account_id", "move_back_at", "fallback_account_id", "usage_handoff_at", "sandbox_loopback", "model", "effort", "handoff_pct", "nudge_pct", "human_wait_minutes", "flow_id", "budget_ceiling", "delivery", "base_branch", "pr_title_prefix", "allowed_commands", "workspace_mode", "worktree_seed", "created_at", "updated_at" FROM `projects`;--> statement-breakpoint
+INSERT INTO `__new_projects`("id", "name", "repo_path", "gate_command", "areas", "hazards", "max_lanes", "provider", "account_id", "moved_from_account_id", "move_back_at", "fallback_account_id", "usage_handoff_at", "sandbox_loopback", "handoff_pct", "nudge_pct", "human_wait_minutes", "flow_id", "budget_ceiling", "delivery", "base_branch", "pr_title_prefix", "allowed_commands", "workspace_mode", "worktree_seed", "created_at", "updated_at") SELECT "id", "name", "repo_path", "gate_command", "areas", "hazards", "max_lanes", "provider", "account_id", "moved_from_account_id", "move_back_at", "fallback_account_id", "usage_handoff_at", "sandbox_loopback", "handoff_pct", "nudge_pct", "human_wait_minutes", "flow_id", "budget_ceiling", "delivery", "base_branch", "pr_title_prefix", "allowed_commands", "workspace_mode", "worktree_seed", "created_at", "updated_at" FROM `projects`;--> statement-breakpoint
 DROP TABLE `projects`;--> statement-breakpoint
 ALTER TABLE `__new_projects` RENAME TO `projects`;--> statement-breakpoint
 CREATE UNIQUE INDEX `projects_repo_path_unique` ON `projects` (`repo_path`);

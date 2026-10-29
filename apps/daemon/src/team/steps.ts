@@ -86,14 +86,15 @@ export function insertPlannedWorkstream(
 ): WorkstreamDto {
   const [first] = plan.steps;
   if (!first) throw new InvalidError('The flow resolved to no steps');
-  const ws = insertWorkstream(ctx, taskId, { batchId });
+  const ws = insertWorkstream(ctx, taskId, {
+    batchId,
+    first: { model: first.model, effort: first.effort },
+  });
   patchWorkstream(ctx, ws.id, null, {
     steps: plan.steps.map((s, i) =>
       i === 0 ? { ...s, status: 'running', startedAt: ctx.now } : s,
     ),
     stepIndex: 0,
-    model: first.model,
-    effort: first.effort,
   });
   return getWorkstream(ctx.tx, ws.id);
 }

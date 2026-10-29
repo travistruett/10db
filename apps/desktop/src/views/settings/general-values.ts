@@ -117,10 +117,7 @@ export function checkGeneral(project: ProjectDto, values: GeneralValues): Genera
   const prefix = values.prTitlePrefix.trim();
   if (!BranchName.safeParse(baseBranch).success)
     errors.baseBranch = 'Enter the base branch, such as main';
-  if (
-    (values.delivery === Delivery.PullRequest || prefix !== '') &&
-    !PrTitlePrefix.safeParse(prefix).success
-  )
+  if (prefix !== '' && !PrTitlePrefix.safeParse(prefix).success)
     errors.prTitlePrefix = 'Enter a PR title prefix such as feat(app)';
   if (values.workspaceMode === WorkspaceMode.Worktree && values.delivery !== Delivery.PullRequest)
     errors.workspaceMode = 'A worktree per task needs pull request delivery';

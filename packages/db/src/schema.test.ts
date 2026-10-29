@@ -45,8 +45,6 @@ function seedProjectAndWorkstreams() {
       maxLanes: 2,
       provider: 'claude',
       accountId,
-      model: 'sonnet',
-      effort: 'medium',
       handoffPct: 40,
       nudgePct: 50,
       humanWaitMinutes: 10,

@@ -167,10 +167,6 @@ export function patchProject(ctx: WriteContext, id: ProjectId, patch: ProjectPat
     checkClaimedNames(ctx, id, current, { areas, hazards });
   }
   const delivery = changes.delivery ?? current.delivery;
-  const prefix =
-    changes.prTitlePrefix === undefined ? current.prTitlePrefix : changes.prTitlePrefix;
-  if (delivery === Delivery.PullRequest && prefix === null)
-    throw new InvalidError('Pull request delivery needs a PR title prefix such as feat(app)');
   const workspaceMode = changes.workspaceMode ?? current.workspaceMode;
   if (workspaceMode === WorkspaceMode.Worktree && delivery !== Delivery.PullRequest)
     throw new InvalidError('A worktree per task needs pull request delivery');
