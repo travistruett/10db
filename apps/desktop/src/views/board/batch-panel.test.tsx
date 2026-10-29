@@ -30,10 +30,39 @@ const buttons = () => screen.queryAllByRole('button').map((x) => x.textContent);
 
 describe('BatchPanel', () => {
   it('shows the branch and Abandon, and says what Abandon does in one line', async () => {
-    panel(batch, [member('Alpha', 'RUNNING')]);
+    panel(batch, [member('Alpha', 'QUEUED')]);
     expect(await screen.findByText('10db/greetings-0a1b2c3d')).toBeTruthy();
     expect(buttons()).toEqual(['Abandon']);
-    expect(screen.getByText("Abandon keeps the branch and cancels this task's run.")).toBeTruthy();
+    expect(
+      screen.getByText('Abandon keeps the branch and cancels its unfinished task.'),
+    ).toBeTruthy();
+  });
+
+  it('names how many tasks Abandon cancels when several share the branch', async () => {
+    panel(batch, [member('Alpha', 'QUEUED'), member('Beta', 'QUEUED'), member('Gamma', 'FAILED')]);
+    expect(
+      await screen.findByText('Abandon keeps the branch and cancels its 2 unfinished tasks.'),
+    ).toBeTruthy();
+  });
+
+  it('holds Abandon back while a task is running, and says to cancel it first', async () => {
+    const abandoned: string[] = [];
+    server.use(
+      http.post(daemonUrl('/batches/:batchId/abandon'), ({ params }) => {
+        abandoned.push(String(params['batchId']));
+        return HttpResponse.json({ ...batch, state: 'ABANDONED' });
+      }),
+    );
+    panel(batch, [member('Alpha', 'RUNNING'), member('Beta', 'QUEUED')]);
+    const button = await screen.findByRole('button', { name: 'Abandon' });
+    expect(button.hasAttribute('disabled')).toBe(true);
+    expect(
+      screen.getByText(
+        'Alpha is running: cancel it in Factory first. Abandon keeps the branch and cancels its 2 unfinished tasks.',
+      ),
+    ).toBeTruthy();
+    fireEvent.click(button);
+    expect(abandoned).toEqual([]);
   });
 
   it('links the pull request once it is opened, and not before', async () => {
@@ -57,9 +86,9 @@ describe('BatchPanel', () => {
       buttons: ['Ship anyway', 'Abandon'],
     },
     {
-      name: 'open with work running',
+      name: 'open with work queued',
       batch,
-      workstreams: [member('Alpha', 'RUNNING')],
+      workstreams: [member('Alpha', 'QUEUED')],
       buttons: ['Abandon'],
     },
     {
@@ -134,7 +163,7 @@ describe('BatchPanel', () => {
         return HttpResponse.json({ ...batch, state: 'ABANDONED' });
       }),
     );
-    panel(batch, [member('Alpha', 'RUNNING')]);
+    panel(batch, [member('Alpha', 'QUEUED')]);
     fireEvent.click(await screen.findByRole('button', { name: 'Abandon' }));
     await waitFor(() => {
       expect(abandoned).toEqual([batch.id]);
@@ -150,7 +179,7 @@ describe('BatchPanel', () => {
         ),
       ),
     );
-    panel(batch, [member('Alpha', 'RUNNING')]);
+    panel(batch, [member('Alpha', 'QUEUED')]);
     fireEvent.click(await screen.findByRole('button', { name: 'Abandon' }));
     expect(await screen.findByText('Batch "Greetings" is shipping')).toBeTruthy();
   });

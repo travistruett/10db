@@ -62,11 +62,20 @@ describe('BatchStrip', () => {
         return HttpResponse.json({ ...batch, state: 'ABANDONED' });
       }),
     );
-    strip([member('RUNNING'), member('RUNNING')]);
+    strip([member('QUEUED'), member('FAILED')]);
     fireEvent.click(await screen.findByRole('button', { name: 'Abandon' }));
     await waitFor(() => {
       expect(abandoned).toEqual([batch.id]);
     });
+  });
+
+  it('holds Abandon back while a task on the branch is running', async () => {
+    strip([member('RUNNING'), member('QUEUED')]);
+    const button = await screen.findByRole('button', { name: 'Abandon' });
+    expect(button.hasAttribute('disabled')).toBe(true);
+    expect(
+      screen.getByText('Write the greeting is running: cancel it in Factory first.'),
+    ).toBeTruthy();
   });
 
   it('shows the daemon refusal', async () => {
@@ -78,7 +87,7 @@ describe('BatchStrip', () => {
         ),
       ),
     );
-    strip([member('RUNNING'), member('RUNNING')]);
+    strip([member('QUEUED'), member('FAILED')]);
     fireEvent.click(await screen.findByRole('button', { name: 'Abandon' }));
     expect(await screen.findByText('Batch "Greetings" is shipping')).toBeTruthy();
   });

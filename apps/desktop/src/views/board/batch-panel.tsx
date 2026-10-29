@@ -24,6 +24,7 @@ import { useDisclosure } from '@mantine/hooks';
 import { IconCheck, IconCopy } from '@tabler/icons-react';
 import { useAbandonBatch, useShipBatch } from '../../daemon/queries';
 import { FAILURE_LABELS } from './batch-labels';
+import { abandonNote } from './batch/abandon-note';
 import { AddFixTask } from './batch/add-fix-task';
 import { PullRequestLink } from './pull-request-link';
 
@@ -52,6 +53,7 @@ export function BatchPanel({ batch, workstreams, workspaceMode, gateCommand }: B
     members.some((w) => !isSettled(w.state));
   const canAbandon = batch.state === B.Open || failed;
   const canAddFix = workspaceMode === WorkspaceMode.Worktree && canAbandon;
+  const note = abandonNote(batch, workstreams);
   const error = ship.error ?? abandon.error;
   // Each action clears the other's error first, so the panel shows only the latest action's refusal.
   const shipBatch = () => {
@@ -130,6 +132,7 @@ export function BatchPanel({ batch, workstreams, workspaceMode, gateCommand }: B
               variant="default"
               color="red"
               loading={abandon.isPending}
+              disabled={note.refusal !== null}
               onClick={abandonBatch}
             >
               Abandon
@@ -139,7 +142,7 @@ export function BatchPanel({ batch, workstreams, workspaceMode, gateCommand }: B
       ) : null}
       {canAbandon ? (
         <Text size="xs" c="dimmed">
-          Abandon keeps the branch and cancels this task&apos;s run.
+          {note.line}
         </Text>
       ) : null}
       {error ? (

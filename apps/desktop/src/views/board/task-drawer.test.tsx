@@ -22,6 +22,7 @@ interface Opts {
   readonly workstream?: ReturnType<typeof workstreamDto>;
   readonly batch?: ReturnType<typeof batchDto>;
   readonly gateCommand?: string;
+  readonly workstreams?: ReturnType<typeof workstreamDto>[];
 }
 
 function open(opts: Opts = {}): { closed: () => number } {
@@ -34,6 +35,7 @@ function open(opts: Opts = {}): { closed: () => number } {
       {...(opts.workstream ? { workstream: opts.workstream } : {})}
       {...(opts.batch ? { batch: opts.batch } : {})}
       {...(opts.gateCommand ? { gateCommand: opts.gateCommand } : {})}
+      {...(opts.workstreams ? { workstreams: opts.workstreams } : {})}
       onClose={() => {
         closes += 1;
       }}
@@ -228,7 +230,8 @@ describe('TaskDrawer', () => {
     it('shows the branch, the pull request and Abandon with what Abandon does', async () => {
       serve();
       const batch = batchDto({ prUrl: 'https://github.com/acme/widgets/pull/9' });
-      open({ workstream: workstreamDto({ batchId: batch.id }), batch });
+      const ws = workstreamDto({ batchId: batch.id, state: 'QUEUED' });
+      open({ workstream: ws, batch, workstreams: [ws] });
       const d = await dialog();
       expect(within(d).getByText('10db/greetings-0a1b2c3d')).toBeTruthy();
       expect(within(d).getByRole('link', { name: 'Pull request' }).getAttribute('href')).toBe(
@@ -236,7 +239,7 @@ describe('TaskDrawer', () => {
       );
       expect(within(d).getByRole('button', { name: 'Abandon' })).toBeTruthy();
       expect(
-        within(d).getByText("Abandon keeps the branch and cancels this task's run."),
+        within(d).getByText('Abandon keeps the branch and cancels its unfinished task.'),
       ).toBeTruthy();
     });
 

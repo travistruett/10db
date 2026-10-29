@@ -1,6 +1,7 @@
 import { latestPerTask, WorkstreamState, type BatchDto, type WorkstreamDto } from '@10db/contracts';
-import { Button, Code, Group, Paper, Text } from '@mantine/core';
+import { Button, Code, Group, Paper, Text, Tooltip } from '@mantine/core';
 import { useAbandonBatch } from '../../daemon/queries';
+import { abandonNote } from './batch/abandon-note';
 
 /** The tasks in a batch: each one's latest run, without the cancelled. */
 export function batchTaskCount(batch: BatchDto, workstreams: readonly WorkstreamDto[]): number {
@@ -26,22 +27,31 @@ export function BatchStrip({
   readonly workstreams: readonly WorkstreamDto[];
 }) {
   const abandon = useAbandonBatch();
+  const note = abandonNote(batch, workstreams);
   return (
     <Paper withBorder px="sm" py={4}>
       <Group gap="sm" wrap="nowrap">
         {batch.branch ? <Code>{batch.branch}</Code> : null}
         <Text size="sm">{`${String(batchTaskCount(batch, workstreams))} tasks`}</Text>
-        <Button
-          ml="auto"
-          size="compact-sm"
-          variant="default"
-          loading={abandon.isPending}
-          onClick={() => {
-            abandon.mutate(batch.id);
-          }}
-        >
-          Abandon
-        </Button>
+        {note.refusal ? (
+          <Text size="xs" c="dimmed">
+            {note.refusal}
+          </Text>
+        ) : null}
+        <Tooltip label={note.line} withArrow multiline maw={320}>
+          <Button
+            ml="auto"
+            size="compact-sm"
+            variant="default"
+            loading={abandon.isPending}
+            disabled={note.refusal !== null}
+            onClick={() => {
+              abandon.mutate(batch.id);
+            }}
+          >
+            Abandon
+          </Button>
+        </Tooltip>
       </Group>
       {abandon.error ? (
         <Text size="xs" c="red" role="alert">

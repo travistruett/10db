@@ -59,7 +59,7 @@ export interface Shipper {
   checkBatch(batchId: BatchId): void;
   checkOpenBatches(): void;
   resume(batchId: BatchId): void;
-  /** The batch strip: Ship anyway from OPEN, or Retry from FAILED, which reopens unfinished work. */
+  /** A task drawer on the Board: Ship anyway from OPEN, or Retry from FAILED, which reopens unfinished work. */
   ship(batchId: BatchId): BatchDto;
   /** A failed member's card: ships an open or failed batch whose work is settled, and never reopens one. */
   shipAnyway(batchId: BatchId): BatchDto;

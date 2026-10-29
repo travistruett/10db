@@ -145,14 +145,14 @@ export const worktreeCards = {
       case 'waits':
         return {
           title: `Batch "${batch.title}" waits: its worktree ${path} is missing`,
-          body: `Nothing in the batch starts without its worktree. Abandon the batch on its strip, or restart 10db, which fails the batch so Retry can make the worktree again from ${branch}.`,
+          body: `Nothing in the batch starts without its worktree. Abandon the batch in a task's drawer on the Board, or restart 10db, which fails the batch so Retry can make the worktree again from ${branch}.`,
           foldKey: `worktree-missing:${batch.id}`,
           detail,
         };
       case 'failed':
         return {
           title: `Batch "${batch.title}" failed: its worktree ${path} is missing`,
-          body: `10db restarted and found no worktree at ${path}, so nothing in the batch runs. Press Retry on the batch strip to make it again from ${branch}, or abandon the batch there.`,
+          body: `10db restarted and found no worktree at ${path}, so nothing in the batch runs. Press Retry in a task's drawer on the Board to make it again from ${branch}, or abandon the batch there.`,
           detail,
         };
     }
@@ -227,13 +227,13 @@ export const worktreeCards = {
   }),
   inTheWay: (batch: BatchDto, path: string, reason: string): Card => ({
     title: `Batch "${batch.title}" not retried: ${path} is in the way`,
-    body: `10db makes the worktree whole on ${batch.branch ?? '(not cut)'} before a retry, and won't remove what is at ${path}: ${reason}. Look inside; if nothing there is needed, delete it, then press Retry on the batch strip.`,
+    body: `10db makes the worktree whole on ${batch.branch ?? '(not cut)'} before a retry, and won't remove what is at ${path}: ${reason}. Look inside; if nothing there is needed, delete it, then press Retry in a task's drawer on the Board.`,
     foldKey: `worktree-in-the-way:${batch.id}`,
     detail: { batchId: batch.id },
   }),
   notReopened: (batch: BatchDto, error: unknown): Card => ({
     title: `Batch "${batch.title}" not reopened: ${detailOf(error)}`,
-    body: `10db makes the worktree whole on ${batch.branch ?? '(not cut)'} before the batch reopens, and couldn't. Fix the cause, then press Retry on the batch strip.`,
+    body: `10db makes the worktree whole on ${batch.branch ?? '(not cut)'} before the batch reopens, and couldn't. Fix the cause, then press Retry in a task's drawer on the Board.`,
     detail: { batchId: batch.id },
   }),
   notWhole: (
@@ -245,7 +245,7 @@ export const worktreeCards = {
     const branch = batch.branch ?? '(not cut)';
     return {
       title: `Batch "${batch.title}" not retried: its worktree is on ${found ?? 'a detached HEAD'}, with uncommitted changes`,
-      body: `10db makes the worktree whole on ${branch} before a retry and won't throw away changes. Commit or discard these in ${path}, or run git switch ${branch} there, then press Retry on the batch strip:\n${listPaths(paths)}`,
+      body: `10db makes the worktree whole on ${branch} before a retry and won't throw away changes. Commit or discard these in ${path}, or run git switch ${branch} there, then press Retry in a task's drawer on the Board:\n${listPaths(paths)}`,
       detail: { batchId: batch.id },
     };
   },
@@ -278,20 +278,20 @@ export function wrongBranchCard(
       // The scheduler raises this every time the work waits; one open card per branch is enough.
       return {
         title: `Batch "${batch.title}" waits: ${where}`,
-        body: `Nothing in the batch starts until the checkout is back on its branch. Run git switch ${branch} in ${repoPath}, or abandon the batch on its strip.`,
+        body: `Nothing in the batch starts until the checkout is back on its branch. Run git switch ${branch} in ${repoPath}, or abandon the batch in a task's drawer on the Board.`,
         foldKey: `batch-branch:${batch.id}:${on}`,
         detail,
       };
     case 'failed':
       return {
         title: `Batch "${batch.title}" failed: ${where}`,
-        body: `10db restarted with the checkout off the batch branch, so nothing in the batch runs. Run git switch ${branch} in ${repoPath}, then press Retry on the batch strip; or abandon the batch there.`,
+        body: `10db restarted with the checkout off the batch branch, so nothing in the batch runs. Run git switch ${branch} in ${repoPath}, then press Retry in a task's drawer on the Board; or abandon the batch there.`,
         detail,
       };
     case 'not_shipped':
       return {
         title: `Batch "${batch.title}" not shipped: ${where}`,
-        body: `10db ships only from the batch branch, and pushed nothing. Run git switch ${branch} in ${repoPath}, then press Retry on the batch strip.`,
+        body: `10db ships only from the batch branch, and pushed nothing. Run git switch ${branch} in ${repoPath}, then press Retry in a task's drawer on the Board.`,
         detail,
       };
     case 'not_joined':
@@ -310,7 +310,7 @@ export function duration(ms: number): string {
   if (ms >= 60_000) return `${String(Math.round(ms / 60_000))} min`;
   return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)} s`;
 }
-const RETRY = 'Press Retry on the batch strip to ship again; nothing was merged.';
+const RETRY = "Press Retry in a task's drawer on the Board to ship again; nothing was merged.";
 
 /** A shipping failure: the code the batch records and the card the builder reads. */
 export interface ShipFailure {

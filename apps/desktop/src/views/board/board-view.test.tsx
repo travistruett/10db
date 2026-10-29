@@ -131,7 +131,7 @@ describe('BoardView', () => {
       currentBatch: batch,
     });
     const wss = ['Alpha', 'Beta'].map((taskTitle) =>
-      workstreamDto({ projectId: project.id, batchId: batch.id, taskTitle, state: 'RUNNING' }),
+      workstreamDto({ projectId: project.id, batchId: batch.id, taskTitle, state: 'QUEUED' }),
     );
     const tasks = wss.map((ws) =>
       taskDto({
@@ -1176,6 +1176,38 @@ describe('BoardView', () => {
     await waitFor(() => {
       expect(abandoned).toEqual([batch.id]);
     });
+  });
+
+  it('the card menu holds Abandon back while the task is running', async () => {
+    const batch = batchDto();
+    const project = projectViewDto({ id: batch.projectId, currentBatch: batch });
+    const ws = workstreamDto({
+      projectId: project.id,
+      batchId: batch.id,
+      taskTitle: 'Busy',
+      state: 'RUNNING',
+    });
+    const task = taskDto({
+      id: ws.taskId,
+      projectId: project.id,
+      title: 'Busy',
+      boardStatus: 'in_progress',
+      workstreamId: ws.id,
+    });
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([task])),
+      http.get(daemonUrl('/projects/:projectId/batches'), () => HttpResponse.json([batch])),
+      http.get(daemonUrl('/workstreams'), () => HttpResponse.json([ws])),
+    );
+    renderApp('/board');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Actions for Busy' }));
+    const item = await screen.findByRole('menuitem', {
+      name: 'Abandon (Busy is running: cancel it in Factory first)',
+      hidden: true,
+    });
+    expect(item.hasAttribute('data-disabled')).toBe(true);
   });
 
   it('the card menu opens with its items', async () => {

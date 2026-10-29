@@ -27,7 +27,10 @@ const OPTIONS: readonly InboxOption[] = [
     label: BatchCardChoice.ShipAnyway,
     description: 'Ship the batch without it, once the rest is done or cancelled',
   },
-  { label: BatchCardChoice.Later, description: 'Leave the batch open; decide on its strip later' },
+  {
+    label: BatchCardChoice.Later,
+    description: "Leave the batch open; decide later in the task's drawer",
+  },
 ];
 
 /** The failed-workstream card's options and detail when the workstream runs in a batch (spec §4). */

@@ -24,8 +24,10 @@ export interface TaskCardMenuProps {
   readonly onStart: () => void;
   /** Present when the task's workstream failed and the daemon will retry it. */
   readonly onRetry?: () => void;
-  /** Present when the task's batch is open or not shipped; abandoning keeps the branch and cancels the run. */
+  /** Present when the task's batch is open or not shipped; abandoning keeps the branch and cancels its unfinished tasks. */
   readonly onAbandon?: () => void;
+  /** Why Abandon is held back: a run on the branch is live, and the daemon won't cut it short. */
+  readonly abandonRefusal?: string | null;
 }
 
 export function TaskCardMenu({
@@ -37,6 +39,7 @@ export function TaskCardMenu({
   onStart,
   onRetry,
   onAbandon,
+  abandonRefusal = null,
 }: TaskCardMenuProps) {
   return (
     <Menu position="bottom-end" withinPortal>
@@ -73,8 +76,8 @@ export function TaskCardMenu({
         {onRetry || onAbandon ? <Menu.Divider /> : null}
         {onRetry ? <Menu.Item onClick={onRetry}>Retry</Menu.Item> : null}
         {onAbandon ? (
-          <Menu.Item color="red" onClick={onAbandon}>
-            Abandon
+          <Menu.Item color="red" disabled={abandonRefusal !== null} onClick={onAbandon}>
+            {abandonRefusal === null ? 'Abandon' : `Abandon (${abandonRefusal.replace(/\.$/, '')})`}
           </Menu.Item>
         ) : null}
       </Menu.Dropdown>

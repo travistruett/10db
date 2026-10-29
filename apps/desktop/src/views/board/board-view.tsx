@@ -31,6 +31,7 @@ import { FormModal } from '../../shell/form-modal';
 import { useSelectedProject } from '../../shell/selected-project';
 import { SplitButton } from '../../shell/split-button';
 import { SettingsSectionKey } from '../settings/sections';
+import { abandonNote } from './batch/abandon-note';
 import { BatchSheet } from './batch/batch-sheet';
 import { BatchStrip, sharedBatches } from './batch-strip';
 import { BoardColumn } from './board-column';
@@ -269,6 +270,7 @@ function BoardColumns({
                         retry.reset();
                         abandon.mutate(batch.id);
                       },
+                      abandonRefusal: abandonNote(batch, workstreams).refusal,
                     }
                   : {})}
                 parkedDependency={parkedDependencyOf(task, peers)}

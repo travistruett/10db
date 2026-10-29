@@ -53,8 +53,10 @@ the change while the project has unfinished work), and 10db instead:
 
 Every refusal (a dirty checkout, the wrong branch, no `origin`, `gh` missing or signed out, a failed gate, a
 rejected push) is an inbox card that says what to fix; nothing is pushed. A failed task's card offers Retry and
-Ship anyway, which ships the batch without that task once the rest is done or cancelled. The board's batch strip
-shows the batch and offers Retry (when the batch failed), Ship anyway (when a task failed) and Abandon. 10db
+Ship anyway, which ships the batch without that task once the rest is done or cancelled. A task's drawer on the
+board shows its branch and pull request, why the batch wasn't shipped, and offers Retry (when the batch failed),
+Ship anyway (when a task failed) and Abandon, which keeps the branch and cancels its unfinished tasks once
+nothing on it is running. When several tasks share a branch, one line above the columns names it. 10db
 never force-pushes, and agents can't push, merge or open pull requests themselves.
 
 ## Accounts
