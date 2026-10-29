@@ -30,7 +30,7 @@ import type { Git } from '../git';
 import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
 import {
-  failedGateEvidence,
+  outstandingFixEvidence,
   liveCheckCard,
   nextActionAfterCrash,
   raiseBuilderCheck,
@@ -115,7 +115,7 @@ export async function recoverOnStartup(opts: {
 
     const waiting = row.state === S.WaitingHuman;
     // Work that waits for the builder's check keeps its card; it is not an agent's question to answer.
-    if (waiting && (row.nextAction.kind === 'builder_review' || liveCheckCard(db, ws.id))) {
+    if (waiting && row.nextAction.kind === 'builder_review') {
       // Git is read only when the card has to be raised again, so a restart that finds it touches nothing.
       const facts = liveCheckCard(db, ws.id) ? null : await readCheckFacts(opts.git, db, row);
       // A card that was closed some other way is raised again, so the work is never stranded.
@@ -137,7 +137,10 @@ export async function recoverOnStartup(opts: {
       report.parked.push(ws.id);
       continue;
     }
-    const open = waiting ? openItemsForWorkstream(db, ws.id)[0] : undefined;
+    // A check card is not an agent's question: it is answered by its own handler.
+    const open = waiting
+      ? openItemsForWorkstream(db, ws.id).find((i) => i.kind !== 'check')
+      : undefined;
     if (open) {
       const nextAction: NextAction = { kind: 'answer', inboxId: open.id, providerSessionId };
       opts.state.write((ctx) => {
@@ -153,7 +156,7 @@ export async function recoverOnStartup(opts: {
     const lastOp = latestToolOp(db, ws.id);
     const attempts = opts.cleanShutdown ? row.recoveryAttempts : row.recoveryAttempts + 1;
     // A resume that was fixing a gate failure comes back as the fix, so the failure isn't dropped.
-    const failedGate = row.nextAction.kind === 'resume' ? failedGateEvidence(db, ws.id) : null;
+    const failedGate = row.nextAction.kind === 'resume' ? outstandingFixEvidence(db, row) : null;
     const nextAction: NextAction =
       row.state === S.Verifying || row.nextAction.kind === 'verify'
         ? { kind: 'verify' }

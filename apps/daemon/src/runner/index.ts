@@ -1,5 +1,6 @@
 export { createLiveSessions } from './live-sessions';
-export { failedGateEvidence } from './failed-gate';
+export { outstandingFixEvidence } from './fix-evidence';
+export { applyCheckAnswer } from './check-answer';
 export { nextActionAfterCrash, nextActionOnAnotherAccount } from './next-action';
 export {
   createRunner,

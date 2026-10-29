@@ -19,6 +19,7 @@ import {
   getWorkstreamRow,
   insertEvidence,
   insertHandoff,
+  insertInboxItem,
   insertSession,
   listEventsAfter,
   listInbox,
@@ -721,23 +722,51 @@ describe('recoverOnStartup for a project without a gate command', () => {
     expect(parked).toEqual([]);
   });
 
-  it('checks for the card before the generic answer branch', async () => {
+  it('a stale check card never overwrites a later answer action', async () => {
     const ws = waitingForCheck('OPEN');
-    // A stale `answer` action must not decide: the card's kind does.
+    // The builder's other question moved the work on after the check card was raised.
+    const question = state.write((ctx) =>
+      insertInboxItem(ctx, {
+        projectId: ws.project.id,
+        kind: 'question',
+        title: 'Which name?',
+        body: '',
+        options: [{ label: 'A', description: '' }],
+        recommendation: null,
+        category: 'product',
+        urgency: 'normal',
+        detail: null,
+        foldKey: null,
+        targets: [{ workstreamId: ws.workstream.id, sessionId: null }],
+      }),
+    );
     state.write((ctx) => {
       patchWorkstream(ctx, ws.workstream.id, null, {
-        nextAction: {
-          kind: 'answer',
-          inboxId: ws.card?.id ?? mintId('InboxItem'),
-          providerSessionId: 'p',
-        },
+        nextAction: { kind: 'answer', inboxId: question.id, providerSessionId: 'p' },
       });
     });
     await recover();
-    expect(getWorkstream(state.db, ws.workstream.id).nextAction).toEqual({
-      kind: 'builder_review',
-      inboxId: ws.card?.id,
+    expect(getWorkstream(state.db, ws.workstream.id).nextAction).toMatchObject({
+      kind: 'answer',
+      inboxId: question.id,
     });
+  });
+
+  it('a stale check card beside work that was sent back is left alone', async () => {
+    const ws = waitingForCheck('OPEN');
+    state.write((ctx) => {
+      transitionWorkstream(ctx, ws.workstream.id, {
+        to: 'QUEUED',
+        fence: null,
+        patch: { nextAction: { kind: 'fix', evidenceId: mintId('Evidence') } },
+      });
+    });
+    const before = getWorkstream(state.db, ws.workstream.id);
+    await recover();
+    const after = getWorkstream(state.db, ws.workstream.id);
+    expect(after.state).toBe('QUEUED');
+    expect(after.nextAction).toEqual(before.nextAction);
+    expect(checkCards().map((c) => c.state)).toEqual(['OPEN']);
   });
 
   it('raises the card again, once, when the waiting workstream lost its check card', async () => {

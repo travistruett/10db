@@ -5,7 +5,6 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { serve, upgradeWebSocket, type WebSocketServerLike } from '@hono/node-server';
 import {
-  CheckChoice,
   EventType,
   PROTOCOL_VERSION,
   type InboxAnswer,
@@ -82,6 +81,7 @@ import { protectedPaths } from '../guard';
 import { createMcpHandler } from '../mcp';
 import { recoverOnStartup, systemProcesses, type ProcessTerminator } from '../recovery';
 import {
+  applyCheckAnswer,
   createLiveSessions,
   createRunner,
   DEFAULT_RUNNER_LIMITS,
@@ -328,12 +328,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     onParkedAnswer: (target, item) => {
       runner?.deliverParkedAnswer(target, item);
     },
-    onCheckAnswer: (item, answer) => {
-      for (const target of item.targets) {
-        if (answer.choice === CheckChoice.Approve) runner?.approveCheck(target.workstreamId);
-        else runner?.sendBack(target.workstreamId, answer.note ?? '');
-      }
-    },
+    onCheckAnswer: (ctx, item, answer) =>
+      runner ? applyCheckAnswer(runner, ctx, item, answer) : () => undefined,
     onFlagAnswer: (item, answer) => {
       answerBatchCard?.(item, answer);
       answerAccountCard?.(item, answer);

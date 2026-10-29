@@ -1,7 +1,6 @@
 import type { AddressInfo } from 'node:net';
 import { homedir } from 'node:os';
 import { serve } from '@hono/node-server';
-import { CheckChoice } from '@10db/contracts';
 import type {
   AccountId,
   BatchId,
@@ -60,6 +59,7 @@ import { silentLogger } from '../src/log';
 import { protectedPaths } from '../src/guard';
 import { createMcpHandler } from '../src/mcp';
 import {
+  applyCheckAnswer,
   createLiveSessions,
   createRunner,
   DEFAULT_RUNNER_LIMITS,
@@ -112,7 +112,10 @@ export async function createTestEngine(
   book: FakeScriptBook,
   project: Partial<ProjectInput> = {},
   runnerOverrides: Partial<
-    Pick<RunnerOptions, 'afterSession' | 'logger' | 'launcher' | 'laneSandbox' | 'gate'>
+    Pick<
+      RunnerOptions,
+      'afterSession' | 'logger' | 'launcher' | 'laneSandbox' | 'gate' | 'onLaneFreed'
+    >
   > = {},
   setup: { readonly account?: AccountInput; readonly secret?: string } = {},
 ): Promise<TestEngine> {
@@ -140,12 +143,8 @@ export async function createTestEngine(
     onParkedAnswer: (target, item) => {
       runner?.deliverParkedAnswer(target, item);
     },
-    onCheckAnswer: (item, answer) => {
-      for (const target of item.targets) {
-        if (answer.choice === CheckChoice.Approve) runner?.approveCheck(target.workstreamId);
-        else runner?.sendBack(target.workstreamId, answer.note ?? '');
-      }
-    },
+    onCheckAnswer: (ctx, item, answer) =>
+      runner ? applyCheckAnswer(runner, ctx, item, answer) : () => undefined,
     onFlagAnswer: (item, answer) => {
       answerAccountCard?.(item, answer);
     },

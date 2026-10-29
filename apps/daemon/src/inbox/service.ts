@@ -195,10 +195,11 @@ export function createInboxService(deps: {
   /** Acts on an open flag card's answer before it is recorded; throwing keeps the card open. */
   onFlagAnswer?(item: InboxItemDto, answer: InboxAnswer): void;
   /**
-   * Acts on an open check card's answer before it is recorded; throwing keeps the card open. A check
-   * card closes with its answer and never reaches `onParkedAnswer`.
+   * Acts on an open check card's answer inside the write that closes the card, so the workstream and
+   * the card change together; throwing keeps the card open and changes nothing. The result runs once
+   * that write has committed. A check card closes with its answer and never reaches `onParkedAnswer`.
    */
-  onCheckAnswer?(item: InboxItemDto, answer: InboxAnswer): void;
+  onCheckAnswer?(ctx: WriteContext, item: InboxItemDto, answer: InboxAnswer): () => void;
 }): InboxService {
   const waiters = new Map<InboxItemId, Map<SessionId, Waiter>>();
 
@@ -290,14 +291,15 @@ export function createInboxService(deps: {
         if (answer.choice === CheckChoice.SendBack && (answer.note ?? '').trim() === '') {
           throw new InboxAnswerRefused('Send Back needs a note saying what to change');
         }
-        deps.onCheckAnswer?.(current, answer);
       }
+      let afterCommit: (() => void) | undefined;
       const answered = deps.state.write((ctx) => {
         const item = getInboxItem(ctx.tx, id);
         if (item.state !== InboxState.Open) {
           throw new ConflictError(`Inbox item ${id} is already ${item.state}`);
         }
         assertKnownChoice(item, answer);
+        if (item.kind === InboxKind.Check) afterCommit = deps.onCheckAnswer?.(ctx, item, answer);
         const closesDirectly =
           item.kind !== InboxKind.Question && item.kind !== InboxKind.Permission;
         const updated = updateInboxItem(ctx, id, {
@@ -322,6 +324,7 @@ export function createInboxService(deps: {
         if (item.kind === InboxKind.Flag) applyMcpApproval(ctx, updated, answer);
         return updated;
       });
+      afterCommit?.();
       return answered.state === InboxState.Resolved ? answered : deliver(answered);
     },
 

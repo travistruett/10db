@@ -1,6 +1,7 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import {
+  ConflictError,
   currentStep,
   EventType,
   InboxKind,
@@ -123,12 +124,19 @@ import {
   type SessionAdapter,
   type SessionHandle,
 } from '../sessions';
-import { advanceSteps, failStep, moveAfter, sendBackSteps, type StepEntry } from '../team';
+import {
+  advanceSteps,
+  failStep,
+  moveAfter,
+  sendBackSteps,
+  sendBackTarget,
+  type StepEntry,
+} from '../team';
 import type { GateRunner } from '../verify';
 import { findClaimed } from '../watcher';
 import type { LiveSessions } from './live-sessions';
 import { checkedCommits, raiseBuilderCheck, waitsForCheck } from './builder-check';
-import { failedGateEvidence } from './failed-gate';
+import { outstandingFixEvidence } from './fix-evidence';
 import { nextActionAfterCrash, nextActionOnAnotherAccount } from './next-action';
 
 /**
@@ -187,6 +195,9 @@ export interface RunnerOptions {
   readonly laneSandbox: LaneSandbox | null;
 }
 
+/** What has to happen after the write that changed a workstream has committed. */
+export type AfterCommit = () => void;
+
 export interface Runner {
   launch(id: WorkstreamId, fence: number): void;
   stop(id: WorkstreamId, reason: StopReason): Promise<void>;
@@ -204,15 +215,17 @@ export interface Runner {
   deliverParkedAnswer(target: InboxTarget, item: InboxItemDto): void;
   /**
    * The builder approved the work a gate-less task finished: it is done, with no session and no review
-   * card. A workstream that is not waiting for its check is left as it is.
+   * card. Runs inside the write that closes the card, and throws `ConflictError` for a workstream that
+   * is not waiting for its check. The result runs once that write has committed.
    */
-  approveCheck(id: WorkstreamId): void;
+  approveCheck(ctx: WriteContext, id: WorkstreamId): AfterCommit;
   /**
-   * The builder sent the work back with a note: the workstream is queued to fix it, counted against
-   * the fix attempts like a failed gate, and fails past them. A workstream that is not waiting for its
-   * check is left as it is.
+   * The builder sent the work back with a note: the step that did the work restarts to fix it, counted
+   * against the fix attempts like a failed gate, and the workstream fails past them. Runs inside the
+   * write that closes the card, and throws `ConflictError` for a workstream that is not waiting for its
+   * check. The result runs once that write has committed.
    */
-  sendBack(id: WorkstreamId, note: string): void;
+  sendBack(ctx: WriteContext, id: WorkstreamId, note: string): AfterCommit;
 }
 
 type Outcome =
@@ -398,7 +411,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     return nextActionOnAnotherAccount(
       action,
       latestHandoffForStep(db, row),
-      failedGateEvidence(db, id),
+      outstandingFixEvidence(db, row),
     );
   }
 
@@ -416,32 +429,49 @@ export function createRunner(opts: RunnerOptions): Runner {
     opts.inbox.cancelForWorkstream(id);
   }
 
-  function fail(id: WorkstreamId, fence: number | null, reason: string): void {
-    const row = getWorkstreamRow(db, id);
-    opts.state.write((ctx) => {
-      // A workstream waiting for the builder reaches FAILED through VERIFYING, as it reaches DONE.
-      if (row.state === S.WaitingHuman)
-        transitionWorkstream(ctx, id, { to: S.Verifying, fence, reason });
-      transitionWorkstream(ctx, id, {
-        to: S.Failed,
-        fence,
-        patch: {
-          failureReason: reason,
-          currentSessionId: null,
-          ...(row.steps.length > 0 ? { steps: failStep(row.steps, row.stepIndex) } : {}),
-        },
-        reason,
-      });
-      releaseClaims(ctx, id);
-      clearLease(ctx, id);
+  /** FAILED inside a write the caller owns; `patch` adds to what the failure records. */
+  function failIn(
+    ctx: WriteContext,
+    id: WorkstreamId,
+    fence: number | null,
+    row: WorkstreamRow,
+    reason: string,
+    patch: { readonly nextAction?: NextAction } = {},
+  ): void {
+    // A workstream waiting for the builder reaches FAILED through VERIFYING, as it reaches DONE.
+    if (row.state === S.WaitingHuman)
+      transitionWorkstream(ctx, id, { to: S.Verifying, fence, reason });
+    transitionWorkstream(ctx, id, {
+      to: S.Failed,
+      fence,
+      patch: {
+        ...patch,
+        failureReason: reason,
+        currentSessionId: null,
+        ...(row.steps.length > 0 ? { steps: failStep(row.steps, row.stepIndex) } : {}),
+      },
+      reason,
     });
+    releaseClaims(ctx, id);
+    clearLease(ctx, id);
+  }
+
+  function flagFailed(row: WorkstreamRow, reason: string): void {
     opts.inbox.flag({
       projectId: row.projectId,
-      workstreamId: id,
+      workstreamId: row.id,
       title: `Workstream failed: ${getTask(db, row.taskId).title}`,
       body: reason,
       ...batchCardFields(row),
     });
+  }
+
+  function fail(id: WorkstreamId, fence: number | null, reason: string): void {
+    const row = getWorkstreamRow(db, id);
+    opts.state.write((ctx) => {
+      failIn(ctx, id, fence, row, reason);
+    });
+    flagFailed(row, reason);
   }
 
   /** A step entered now; its floor is the sessions this workstream has run so far. */
@@ -925,7 +955,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       action.kind === 'fix'
         ? action.evidenceId
         : action.kind === 'answer' && action.providerSessionId === null
-          ? failedGateEvidence(db, id)
+          ? outstandingFixEvidence(db, row)
           : null;
     const evidence = evidenceId ? getEvidence(db, evidenceId) : null;
     const prompt = buildSessionPrompt({
@@ -1985,67 +2015,85 @@ export function createRunner(opts: RunnerOptions): Runner {
       );
       opts.onLaneFreed();
     },
-    approveCheck(id) {
-      const row = getWorkstreamRow(db, id);
-      if (!waitsForCheck(row)) return;
+    approveCheck(ctx, id) {
+      const row = getWorkstreamRow(ctx.tx, id);
+      if (!waitsForCheck(row))
+        throw new ConflictError(`Workstream ${id} is not waiting for the builder's check`);
       // The builder just reviewed the work, so there is no review card to raise. No session, no gate.
-      opts.state.write((ctx) => {
-        transitionWorkstream(ctx, id, {
-          to: S.Verifying,
-          fence: null,
-          reason: 'the builder approved the work',
-        });
-        markDone(ctx, id, null, row, 'the builder approved the work');
+      transitionWorkstream(ctx, id, {
+        to: S.Verifying,
+        fence: null,
+        reason: 'the builder approved the work',
       });
+      markDone(ctx, id, null, row, 'the builder approved the work');
+      return () => {
+        opts.onLaneFreed();
+      };
     },
-    sendBack(id, note) {
-      const row = getWorkstreamRow(db, id);
-      if (!waitsForCheck(row)) return;
+    sendBack(ctx, id, note) {
+      const row = getWorkstreamRow(ctx.tx, id);
+      if (!waitsForCheck(row))
+        throw new ConflictError(`Workstream ${id} is not waiting for the builder's check`);
       const attempt = row.attempt + 1;
-      if (attempt > opts.limits.maxFixAttempts) {
-        fail(
-          id,
-          null,
-          `The builder sent the work back ${String(attempt)} times, and the retry limit (${String(opts.limits.maxFixAttempts)}) is used up`,
-        );
-        return;
-      }
-      const sentBackCommits = checkedCommits(db, id);
-      const step = row.steps.length > 0 ? currentStep(row) : null;
-      const up = step ? escalated(row, step, 'the builder sent the work back') : null;
-      opts.state.write((ctx) => {
-        const evidence = insertEvidence(ctx, {
-          workstreamId: id,
-          kind: 'builder',
-          command: null,
-          exitCode: null,
-          summary: note,
-          logPath: null,
-          commitShas: sentBackCommits,
-        });
-        if (up?.moved && step?.profileId)
-          recordProfileOutcome(ctx, step.profileId, { firstPass: false, escalated: true });
-        transitionWorkstream(ctx, id, {
-          to: S.Queued,
-          fence: null,
-          patch: {
-            nextAction: { kind: 'fix', evidenceId: evidence.id },
-            attempt,
-            ...(up && step
-              ? {
-                  steps: row.steps.map((s, i) =>
-                    i === row.stepIndex ? { ...up.step, attempts: s.attempts + 1 } : s,
-                  ),
-                  model: up.step.model,
-                  effort: up.step.effort,
-                }
-              : {}),
-          },
-          reason: 'the builder sent the work back',
-        });
-        clearLease(ctx, id);
+      const evidence = insertEvidence(ctx, {
+        workstreamId: id,
+        kind: 'builder',
+        command: null,
+        exitCode: null,
+        summary: note,
+        logPath: null,
+        commitShas: checkedCommits(ctx.tx, id),
       });
-      opts.onLaneFreed();
+      if (attempt > opts.limits.maxFixAttempts) {
+        const reason = `The builder sent the work back ${String(attempt)} times, and the retry limit (${String(opts.limits.maxFixAttempts)}) is used up. The last note: ${note}`;
+        failIn(ctx, id, null, row, reason, {
+          nextAction: { kind: 'fix', evidenceId: evidence.id },
+        });
+        return () => {
+          flagFailed(row, reason);
+        };
+      }
+      // The step that did the work fixes it, as when a reviewer rejects: the check is raised from the
+      // last step, which may be a read-only review.
+      const targetIndex = row.steps.length > 0 ? sendBackTarget(row.steps, row.stepIndex) : null;
+      const target = targetIndex === null ? undefined : row.steps[targetIndex];
+      const up = target ? escalated(row, target, 'the builder sent the work back') : null;
+      if (up?.moved && target?.profileId)
+        recordProfileOutcome(ctx, target.profileId, { firstPass: false, escalated: true });
+      transitionWorkstream(ctx, id, {
+        to: S.Queued,
+        fence: null,
+        patch: {
+          nextAction: { kind: 'fix', evidenceId: evidence.id },
+          attempt,
+          ...(up && target && targetIndex !== null
+            ? {
+                steps: sendBackSteps(
+                  row.steps,
+                  row.stepIndex,
+                  targetIndex,
+                  up.step,
+                  entryFor(ctx, id),
+                ),
+                stepIndex: targetIndex,
+                model: up.step.model,
+                effort: up.step.effort,
+              }
+            : {}),
+        },
+        reason: 'the builder sent the work back',
+      });
+      if (target && targetIndex !== null)
+        ctx.emit({
+          type: EventType.StepChanged,
+          entityType: 'workstream',
+          entityId: id,
+          data: { stepIndex: targetIndex, role: target.role, sentBackBy: 'builder' },
+        });
+      clearLease(ctx, id);
+      return () => {
+        opts.onLaneFreed();
+      };
     },
   };
   return runner;

@@ -1242,15 +1242,21 @@ describe('permission broker without a sandbox keeps its Read and Edit cards', ()
 
 describe('a check card', () => {
   let checked: { item: InboxItemDto; choice: string; note: string | undefined }[];
+  let committed: string[];
   let checkInbox: InboxService;
 
   beforeEach(() => {
     checked = [];
+    committed = [];
     checkInbox = createInboxService({
       state,
       onParkedAnswer: (target, item) => parked.push({ target, item }),
-      onCheckAnswer: (item, answer) =>
-        checked.push({ item, choice: answer.choice, note: answer.note }),
+      onCheckAnswer: (_ctx, item, answer) => {
+        checked.push({ item, choice: answer.choice, note: answer.note });
+        return () => {
+          committed.push(getInboxItem(state.db, item.id).state);
+        };
+      },
     });
   });
 
@@ -1289,6 +1295,26 @@ describe('a check card', () => {
       [card.id, answer.choice, 'note' in answer ? answer.note : undefined],
     ]);
     expect(parked).toEqual([]);
+  });
+
+  it('runs what the handler returns only after the card is closed', () => {
+    const card = checkCard();
+    checkInbox.answer(card.id, { choice: 'approve' });
+    expect(committed).toEqual(['RESOLVED']);
+  });
+
+  it('a handler that throws leaves the card open and runs nothing after', () => {
+    const card = checkCard();
+    const refusing = createInboxService({
+      state,
+      onParkedAnswer: () => undefined,
+      onCheckAnswer: () => {
+        throw new ConflictError('not waiting');
+      },
+    });
+    expect(() => refusing.answer(card.id, { choice: 'approve' })).toThrow(ConflictError);
+    expect(getInboxItem(state.db, card.id).state).toBe('OPEN');
+    expect(committed).toEqual([]);
   });
 
   it.each([
