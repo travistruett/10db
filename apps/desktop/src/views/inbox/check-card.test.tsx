@@ -64,7 +64,12 @@ interface Served {
 
 function serve(
   diff: () => WorkstreamChangesDto,
-  options: { items?: InboxItemDto[]; answerStatus?: number } = {},
+  options: {
+    items?: InboxItemDto[];
+    answerStatus?: number;
+    keepAfterAnswer?: boolean;
+    holdChanges?: PromiseWithResolvers<undefined>;
+  } = {},
 ): Served {
   const answers: unknown[] = [];
   let items = options.items ?? [card];
@@ -72,9 +77,14 @@ function serve(
   server.use(
     http.get(daemonUrl('/inbox'), () => {
       reads += 1;
-      return HttpResponse.json(answers.length === 0 ? items : []);
+      return HttpResponse.json(
+        answers.length === 0 || options.keepAfterAnswer === true ? items : [],
+      );
     }),
-    http.get(daemonUrl(`/workstreams/${workstreamId}/changes`), () => HttpResponse.json(diff())),
+    http.get(daemonUrl(`/workstreams/${workstreamId}/changes`), async () => {
+      await options.holdChanges?.promise;
+      return HttpResponse.json(diff());
+    }),
     http.get(daemonUrl('/workstreams'), () =>
       HttpResponse.json([workstreamDto({ id: workstreamId, taskId, projectId })]),
     ),
@@ -284,5 +294,73 @@ describe('CheckCard', () => {
     await waitFor(() => {
       expect(served.inboxReads()).toBeGreaterThan(before);
     });
+  });
+
+  it('keeps Approve off while the changes load', async () => {
+    const hold = Promise.withResolvers<undefined>();
+    serve(() => changes(), { holdChanges: hold });
+    renderApp('/inbox');
+    const approve = await screen.findByRole('button', { name: 'Approve' });
+    expect(approve.hasAttribute('disabled')).toBe(true);
+    hold.resolve(undefined);
+    await screen.findByRole('region', { name: 'Diff' });
+    expect(screen.getByRole('button', { name: 'Approve' }).hasAttribute('disabled')).toBe(false);
+  });
+
+  it('says so beside Approve when the changes failed to load, and keeps Approve on', async () => {
+    const { answers } = serve(() => changes());
+    server.use(
+      http.get(daemonUrl(`/workstreams/${workstreamId}/changes`), () =>
+        HttpResponse.json({ error: 'failed', message: 'No worktree' }, { status: 409 }),
+      ),
+    );
+    renderApp('/inbox');
+    await screen.findByText("Couldn't load the changes");
+    expect(await screen.findByText(/did not load/)).toBeTruthy();
+    const approve = screen.getByRole('button', { name: 'Approve' });
+    await waitFor(() => {
+      expect(approve.hasAttribute('disabled')).toBe(false);
+    });
+    fireEvent.click(approve);
+    await waitFor(() => {
+      expect(answers).toEqual([{ choice: 'approve' }]);
+    });
+  });
+
+  it('shows the daemon reason for a 409 when the card is still open', async () => {
+    serve(() => changes(), { answerStatus: 409, keepAfterAnswer: true });
+    renderApp('/inbox');
+    fireEvent.click(await loadedApprove());
+    expect(await screen.findByText('The daemon said no')).toBeTruthy();
+    expect(screen.queryByText('This card was already answered.')).toBeNull();
+  });
+
+  it('does not take focus when the card mounts with a kept note', async () => {
+    serve(() => changes(), { items: [card, other] });
+    renderApp('/inbox');
+    fireEvent.click(await screen.findByRole('button', { name: 'Send Back' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'What needs to change' }), {
+      target: { value: 'Say hello twice' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Which badge color/ }));
+    await screen.findByRole('radio', { name: /Teal/ });
+    fireEvent.click(screen.getByRole('button', { name: /Ready for you to check/ }));
+    const note = await screen.findByRole('textbox', { name: 'What needs to change' });
+    expect(document.activeElement).not.toBe(note);
+  });
+
+  it('Cancel drops the note so selecting the card again does not reopen the panel', async () => {
+    serve(() => changes(), { items: [card, other] });
+    renderApp('/inbox');
+    fireEvent.click(await screen.findByRole('button', { name: 'Send Back' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'What needs to change' }), {
+      target: { value: 'Say hello twice' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(screen.getByRole('button', { name: /Which badge color/ }));
+    await screen.findByRole('radio', { name: /Teal/ });
+    fireEvent.click(screen.getByRole('button', { name: /Ready for you to check/ }));
+    await screen.findByRole('button', { name: 'Send Back' });
+    expect(screen.queryByRole('textbox', { name: 'What needs to change' })).toBeNull();
   });
 });

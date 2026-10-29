@@ -36,8 +36,8 @@ evidence has neither).
 display option spelled out so no config changes the answer), from `baseHead` to one head read once: the head
 on the check card the workstream points at while it waits, else the checkout's head. The diff text is capped
 at 512 KiB, cut on a character boundary, with `truncated` set; the per-file counts always cover every file.
-A batch whose worktree has been removed after it finished answers 409, since the project's checkout holds none
-of a worktree's work.
+Any finished batch with no worktree path, shared or worktree, answers 409: the project's checkout holds none
+of a worktree's work, and a shared batch's changes are not told apart from it once it has finished.
 
 ## Why
 
@@ -63,8 +63,10 @@ filling the response while the file counts still show its size.
 
 - A pinned read of a checkout can still raise a trust card, because the changes route reads the checkout
   through the same pin as every other daemon git call.
-- A check card can show a head older than the work (a restart or a second verify found it live). Raising the
-  check again refreshes it, and the changes route reads the head of the card the workstream points at; until
-  then the card's own text and commit count are as old as its head.
+- A check card can show a head older than the work. A second verify refreshes it; a restart keeps the card as
+  it is, because recovery raises a card only when none is live. The changes route reads the head of the card
+  the workstream points at, so the card's own text and commit count are as old as its head until then.
 - A finished batch without a worktree path may have been shared or worktree; its changes are not shown,
   because the batch does not record which.
+- In shared workspace mode the check diff is `baseHead..HEAD` of the project checkout, so another lane's
+  commits in the same checkout appear in the card.

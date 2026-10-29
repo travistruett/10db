@@ -14,9 +14,9 @@ A project with no gate command has no program to verify finished work, so the bu
 
 - **Waiting.** When the last step is done, the workstream goes `RUNNING → VERIFYING → WAITING_HUMAN` with
   `nextAction.kind = 'builder_review'`, no session and no lease, and one `check` card that targets it and shows
-  its changes. It holds its claims, and so its areas, while it waits. A second verify, or a restart,
-  finds the live card and raises no second one; a card that shows an older head is brought up to the head being
-  checked.
+  its changes. It holds its claims, and so its areas, while it waits. A second verify
+  finds the live card and raises no second one, and brings a card that shows an older head up to the head
+  being checked. A restart does not refresh a stale card: recovery raises a card only when none is live.
 - **Approve.** In the write that resolves the card the workstream goes `WAITING_HUMAN → VERIFYING → DONE`, its
   claims are released and its lane is freed. Only this completes it.
 - **Send back.** A note is required. It is recorded as builder evidence, the card resolves, and the workstream

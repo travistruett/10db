@@ -142,14 +142,18 @@ export function CheckCard({ item, header, note, onNote }: CheckCardProps) {
   const noteRef = useRef<HTMLTextAreaElement>(null);
   const sendBackRef = useRef<HTMLButtonElement>(null);
   const wasSendingBack = useRef(false);
+  // Set by the Send Back button so only a user opening the panel moves focus, not a remount.
+  const openedByUser = useRef(false);
   const workstreamId = item.targets[0]?.workstreamId;
   const detail = CheckDetail.safeParse(item.detail);
   const changes = useWorkstreamChanges(workstreamId, detail.success ? detail.data.head : null);
   const trimmed = note.trim();
 
   useEffect(() => {
-    if (sendingBack) noteRef.current?.focus();
-    else if (wasSendingBack.current) sendBackRef.current?.focus();
+    if (sendingBack) {
+      if (openedByUser.current) noteRef.current?.focus();
+    } else if (wasSendingBack.current) sendBackRef.current?.focus();
+    openedByUser.current = false;
     wasSendingBack.current = sendingBack;
   }, [sendingBack]);
 
@@ -163,8 +167,13 @@ export function CheckCard({ item, header, note, onNote }: CheckCardProps) {
         },
         onError: (failure) => {
           if (failure instanceof DaemonRequestError && failure.status === 409) {
-            setStale(true);
-            void queryClient.invalidateQueries({ queryKey: queryKeys.inbox });
+            // Only a card that left the refetched inbox was answered elsewhere; any other 409
+            // carries the daemon's own reason, which the error line shows.
+            void queryClient.invalidateQueries({ queryKey: queryKeys.inbox }).then(() => {
+              const open = queryClient.getQueryData<InboxItemDto[]>(queryKeys.inbox);
+              if (open !== undefined && !open.some((candidate) => candidate.id === item.id))
+                setStale(true);
+            });
           }
         },
       },
@@ -181,7 +190,9 @@ export function CheckCard({ item, header, note, onNote }: CheckCardProps) {
     ? 'This card was already answered.'
     : answer.isError
       ? answer.error.message
-      : null;
+      : changes.isError
+        ? 'The changes did not load. You can still approve without them.'
+        : null;
   // The diff on screen is the one for this card's head, so Approve waits until it has loaded.
   const loadingChanges = workstreamId !== undefined && changes.isPending;
 
@@ -225,6 +236,8 @@ export function CheckCard({ item, header, note, onNote }: CheckCardProps) {
                 <Button
                   variant="default"
                   onClick={() => {
+                    // A kept note would reopen the panel when the card is selected again.
+                    onNote('');
                     setSendingBack(false);
                   }}
                 >
@@ -246,6 +259,7 @@ export function CheckCard({ item, header, note, onNote }: CheckCardProps) {
                   variant="default"
                   disabled={answer.isPending}
                   onClick={() => {
+                    openedByUser.current = true;
                     setSendingBack(true);
                   }}
                 >

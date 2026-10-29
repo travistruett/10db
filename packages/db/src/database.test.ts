@@ -290,8 +290,8 @@ describe('migrating a database that has a gate command and evidence', () => {
     );
     run(
       `INSERT INTO projects (id, name, repo_path, gate_command, areas, hazards, max_lanes, provider, account_id,
-         model, effort, handoff_pct, nudge_pct, human_wait_minutes, created_at, updated_at)
-       VALUES ('prj_a', 'a', '/tmp/a', 'make gate', '[]', '[]', 2, 'claude', 'acc_x', 'sonnet', 'medium', 40, 50, 10, ?, ?)`,
+         handoff_pct, nudge_pct, human_wait_minutes, created_at, updated_at)
+       VALUES ('prj_a', 'a', '/tmp/a', 'make gate', '[]', '[]', 2, 'claude', 'acc_x', 40, 50, 10, ?, ?)`,
       AT,
       AT,
     );

@@ -327,6 +327,20 @@ describe('GET /workstreams/:id/changes', () => {
       expect(res.status).toBe(200);
     });
 
+    it('reads the project checkout for an open batch with no worktree path', async () => {
+      // A shared batch has no path; the project may have gone to worktree mode only once none was unfinished,
+      // so the state to cover is an open null-path batch under a worktree-mode project.
+      const ws = await batchWorkstream('worktree', null);
+      if (ws.batchId === null) throw new Error('no batch');
+      const batchId = ws.batchId;
+      daemon.state.write((ctx) => {
+        transitionBatch(ctx, batchId, { to: 'OPEN', reason: 'test' });
+      });
+
+      const res = await get(`/workstreams/${ws.id}/changes`);
+      expect(res.status).toBe(200);
+    });
+
     it("reads a worktree batch from the batch's worktree", async () => {
       const worktree = join(repo.path, '..', `worktree-${String(process.pid)}`);
       rawGit('worktree', 'add', '-q', '-b', 'batch-branch', worktree);
