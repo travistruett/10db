@@ -1,5 +1,11 @@
 import { posix } from 'node:path';
 import type { HazardDef } from '@10db/contracts';
+import {
+  assignsUnreadInteger,
+  declaresInteger,
+  evaluatesUnread,
+  unreadArithmeticIn,
+} from './arithmetic-words';
 import { plainWords, RUNNERS } from './command-forms';
 import { commandOf, SHELL_C_FLAG, shellQuote, shellScripts } from './judge';
 import {
@@ -72,54 +78,6 @@ const OPAQUE: ReadonlySet<string> = new Set([
 const SOURCING: ReadonlySet<string> = new Set(['.', 'source']);
 /** A redirection that feeds a command from a file, a descriptor or a here-string. */
 const INPUT_REDIRECTION = /^\d*<(?!<<)|^\d*<<</;
-/** Test operators that evaluate their operands as arithmetic, so `a[$(cmd)]` in one runs. */
-const ARITHMETIC_OPERATOR = /^-(?:eq|ne|lt|le|gt|ge|v|R)$/;
-/** Test builtins, whose arithmetic operators evaluate their operands. */
-const TESTS: ReadonlySet<string> = new Set(['[[', '[', 'test']);
-/** Builtins that evaluate a word as arithmetic or as a variable name with a subscript. */
-const EVALUATING: ReadonlySet<string> = new Set(['let', 'read', 'unset', 'getopts']);
-/** Builtins that declare a variable: its name is evaluated, and its value when the variable is an integer. */
-const DECLARING: ReadonlySet<string> = new Set([
-  'declare',
-  'typeset',
-  'local',
-  'export',
-  'readonly',
-]);
-/** A parameter expansion or backtick, whose value the shell may evaluate as arithmetic. */
-const EXPANSION_IN_WORD = /[$`]/;
-/** An arithmetic expansion that also holds a parameter expansion or a backtick. */
-const EXPANSION_IN_ARITHMETIC = /\$\(\(.*[$`]/s;
-/**
- * A place the shell evaluates as arithmetic whatever the command is: a subscript (`a[$x]`, `$[…]`,
- * `${a[$x]}`), a substring offset (`${a:$x}`) or an arithmetic expansion. An expansion inside any of
- * them can hold a substitution that runs.
- */
-const ARITHMETIC_CONTEXT = new RegExp(
-  [
-    EXPANSION_IN_ARITHMETIC.source,
-    String.raw`\[[^\]]*[$\x60]`,
-    String.raw`\$\{[^}]*:(?![-=+?])[^}]*[$\x60]`,
-  ].join('|'),
-  's',
-);
-
-/** Whether a builtin's words hand an expansion to an arithmetic evaluation. */
-function evaluatesExpansion(head: string, words: readonly string[]): boolean {
-  const args = words.slice(1);
-  if (TESTS.has(head)) {
-    return (
-      args.some((word) => ARITHMETIC_OPERATOR.test(word)) &&
-      args.some((w) => EXPANSION_IN_WORD.test(w))
-    );
-  }
-  if (EVALUATING.has(head)) return args.some((word) => EXPANSION_IN_WORD.test(word));
-  if (head === 'printf') {
-    return args.includes('-v') && args.some((word) => EXPANSION_IN_WORD.test(word));
-  }
-  if (DECLARING.has(head)) return args.some((word) => EXPANSION_IN_WORD.test(word));
-  return false;
-}
 const SHELLS: ReadonlySet<string> = new Set([
   'sh',
   'bash',
@@ -240,6 +198,8 @@ interface Scanner {
   readonly moved: boolean;
   /** The script's standard input may be a pipe from an enclosing command. */
   readonly stdin: boolean;
+  /** An earlier command may have given a variable the integer attribute, which evaluates its assignments. */
+  readonly integers: boolean;
 }
 
 /** Programs that change the shell's working directory. */
@@ -345,7 +305,10 @@ function scanSegment(
     keepCommandPath: true,
   });
   // Before the program is read: an assignment alone, `a[$(cmd)]=1`, has none.
-  if (segment.words.some((word) => ARITHMETIC_CONTEXT.test(word))) {
+  if (segment.words.some((word) => unreadArithmeticIn(word))) {
+    return { reason: UnreadReason.Script, text };
+  }
+  if (scanner.integers && segment.words.some((word) => assignsUnreadInteger(word))) {
     return { reason: UnreadReason.Script, text };
   }
   const written = words[0];
@@ -363,7 +326,7 @@ function scanSegment(
   ) {
     return { reason: UnreadReason.CommandName, text: written };
   }
-  if (evaluatesExpansion(head, words)) {
+  if (evaluatesUnread(head, words)) {
     return { reason: UnreadReason.Script, text };
   }
   if (head === 'eval') return { reason: UnreadReason.Script, text };
@@ -402,11 +365,14 @@ function scanScript(command: string, depth: number, outer: Scanner): Unread | nu
   if (!parse.certain) return { reason: UnreadReason.Structure, text: command };
   let previous = '';
   let moved = outer.moved;
+  let integers = outer.integers;
   for (const segment of parse.segments) {
-    const found = scanSegment(segment, previous === '|', depth, { ...outer, moved });
+    const found = scanSegment(segment, previous === '|', depth, { ...outer, moved, integers });
     if (found !== null) return found;
     const [first = ''] = leadingWords(segment.words).command;
     if (DIRECTORY_CHANGES.has(commandName(first))) moved = true;
+    const [, ...rest] = leadingWords(segment.words).command;
+    if (declaresInteger(commandName(first), [first, ...rest])) integers = true;
     previous = segment.separator;
   }
   return null;
@@ -424,5 +390,10 @@ function scanScript(command: string, depth: number, outer: Scanner): Unread | nu
  * caller still asks `hazardHit` first.
  */
 export function firstUnread(command: string, hazards: readonly HazardDef[]): Unread | null {
-  return scanScript(command, 0, { patterns: hazardPatterns(hazards), moved: false, stdin: false });
+  return scanScript(command, 0, {
+    patterns: hazardPatterns(hazards),
+    moved: false,
+    stdin: false,
+    integers: false,
+  });
 }

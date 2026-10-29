@@ -71,6 +71,13 @@ The scan reads the command's text with these rules, and nothing more:
   `${…[…]}`, `${…:offset…}` or `$((…))` is unread, and so is any `$` or backtick in the words of `declare`,
   `typeset`, `local`, `export`, `readonly`, `let`, `read`, `unset`, `getopts` and `printf -v`. Over-flagging is
   accepted: a card is the safe default.
+- Arithmetic is read only when it is numeric (`apps/daemon/src/guard/arithmetic-words.ts`): bash evaluates a bare
+  name there as the variable it names, and its value again, so a name is as unread as `$n`. An arithmetic
+  expansion, `$[…]`, a subscript on an assigned or expanded name (`@` and `*` aside), a `${a:off:len}` offset, the
+  operands of `let` and of a test's `-eq`-style operators, the name after `-v`, and the values given to
+  `declare -i` are unread unless every operand is a number or an operator. After a `declare -i`, `typeset -i` or
+  `integer` in a script, a later assignment whose value is not a number is unread. `[ "$#" -eq 0 ]` therefore earns
+  a card.
 - The shell keywords the scan skips (`for`, `select`, `done`, `fi`, `esac`) are judged on the word as written, so
   `./done` and `$D/fi` are programs.
 
@@ -83,8 +90,8 @@ Known gaps, deliberately left for follow-ups. The sandbox bounds all of them; no
 install x`, `pnpm --reporter silent add x`, `cargo +stable add serde`.
 - **Directory changes** inside a substitution or subshell are not tracked for `.` and `source`; only a `cd`,
   `pushd` or `popd` that starts a segment of the script is.
-- **Assignments to integer variables.** `declare -i x` and then `x=$n` evaluates `$n` as arithmetic; a plain
-  assignment word is not flagged, since most are not integers.
+- **Integer variables the scan did not see declared** (`declare -i` in another command, an inherited attribute):
+  a plain assignment to one is not flagged.
 - **Review findings L1 and L3**, minor, recorded in PR #95.
 
 ## Why
