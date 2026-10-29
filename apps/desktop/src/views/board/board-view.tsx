@@ -35,6 +35,7 @@ import { NewProjectForm } from './new-project-form';
 import { NewTaskForm } from './new-task-form';
 import { TaskCard } from './task-card';
 import { TaskCardMenu } from './task-card-menu';
+import { columnNameOf, TaskDrawer } from './task-drawer';
 import { useBoardActions } from './use-board-actions';
 
 /** A finished workstream isn't repeated on its card; the task's column already says so. */
@@ -94,8 +95,21 @@ function BoardColumns({
 }: BoardColumnsProps) {
   const actions = useBoardActions(projectId);
   const [showAllDone, setShowAllDone] = useState(false);
+  // The task whose details are open, by ID, so the drawer follows the task as the board refetches.
+  const [openId, setOpenId] = useState<TaskId | null>(null);
+  const openTask = layout.flatMap((c) => c.tasks).find((t) => t.id === openId);
+  const openWorkstream = openTask?.workstreamId
+    ? workstreamById.get(openTask.workstreamId)
+    : undefined;
+  const humanColumns = new Map(
+    layout.flatMap((c) => (c.key.kind === 'human' ? [[c.key.id, c.label] as const] : [])),
+  );
   const drop = (taskId: TaskId, target: DropTarget) => {
     actions.apply(resolveDrop(layout, taskId, target, started));
+  };
+  const accepts = (taskId: TaskId, target: DropTarget) => {
+    const kind = resolveDrop(layout, taskId, target, started).kind;
+    return kind === 'move' || kind === 'start';
   };
   return (
     <Stack flex={1} mih={0}>
@@ -116,9 +130,14 @@ function BoardColumns({
             isDone(column) && !showAllDone ? column.tasks.slice(0, DONE_LIMIT) : column.tasks
           }
           onDrop={drop}
-          renderColumn={(column, cards, listRef) => (
+          accepts={accepts}
+          onOpen={(task) => {
+            setOpenId(task.id);
+          }}
+          renderColumn={(column, cards, listRef, targeted) => (
             <BoardColumn
               listRef={listRef}
+              targeted={targeted}
               label={column.label}
               count={column.tasks.length}
               hint={columnHint(column)}
@@ -149,7 +168,7 @@ function BoardColumns({
               {cards}
             </BoardColumn>
           )}
-          renderCard={(task, handle) => {
+          renderCard={(task) => {
             const ws = task.workstreamId ? workstreamById.get(task.workstreamId) : undefined;
             return (
               <TaskCard
@@ -157,26 +176,40 @@ function BoardColumns({
                 workstream={ws && SHOWN_STATES.includes(ws.state) ? ws : undefined}
                 pullRequest={shippedPullRequest(task, ws, batchById)}
                 peers={peers}
-                handle={handle}
-                menu={
-                  <TaskCardMenu
-                    task={task}
-                    latest={ws?.state}
-                    parkedDependency={parkedDependencyOf(task, peers)}
-                    moves={menuMoves(layout, task.id, started)}
-                    onMove={(target) => {
-                      drop(task.id, target);
-                    }}
-                    onStart={() => {
-                      actions.apply({ kind: 'start', taskId: task.id });
-                    }}
-                  />
-                }
+              />
+            );
+          }}
+          renderMenu={(task) => {
+            const ws = task.workstreamId ? workstreamById.get(task.workstreamId) : undefined;
+            return (
+              <TaskCardMenu
+                task={task}
+                latest={ws?.state}
+                parkedDependency={parkedDependencyOf(task, peers)}
+                moves={menuMoves(layout, task.id, started)}
+                onMove={(target) => {
+                  drop(task.id, target);
+                }}
+                onStart={() => {
+                  actions.apply({ kind: 'start', taskId: task.id });
+                }}
               />
             );
           }}
         />
       </BoardScroll>
+      {openTask ? (
+        <TaskDrawer
+          key={openTask.id}
+          task={openTask}
+          columnName={columnNameOf(openTask, humanColumns)}
+          peers={peers}
+          {...(openWorkstream ? { workstream: openWorkstream } : {})}
+          onClose={() => {
+            setOpenId(null);
+          }}
+        />
+      ) : null}
     </Stack>
   );
 }

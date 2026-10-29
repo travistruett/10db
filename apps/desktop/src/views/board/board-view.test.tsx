@@ -1090,21 +1090,116 @@ describe('BoardView', () => {
     expect(titlesIn(ready)).toEqual(['One', 'Two']);
   });
 
-  it('explains why a running or done card can’t be dragged', async () => {
+  it('a locked card names why on focus', async () => {
     const running = taskDto({ title: 'Running', boardStatus: 'in_progress' });
     const shipped = taskDto({ title: 'Shipped', boardStatus: 'done', status: 'done' });
     boardWith([running, shipped], []);
 
-    const handle = await screen.findByRole('button', { name: 'Can’t drag Shipped' });
-    // Focusable, so a keyboard user reaches the reason; aria-disabled keeps it from acting.
-    expect(handle.getAttribute('aria-disabled')).toBe('true');
-    expect(handle.hasAttribute('disabled')).toBe(false);
-    const described = handle.getAttribute('aria-describedby');
+    const card = await screen.findByRole('button', { name: 'Running' });
+    const described = card.getAttribute('aria-describedby');
     expect(described).not.toBeNull();
     expect(document.getElementById(described ?? '')?.textContent).toBe(
+      'In progress cards follow their workstream; they can’t be dragged',
+    );
+    const done = screen.getByRole('button', { name: 'Shipped' });
+    expect(document.getElementById(done.getAttribute('aria-describedby') ?? '')?.textContent).toBe(
       'Done cards stay where they finished; they can’t be dragged',
     );
-    expect(screen.getByRole('button', { name: 'Can’t drag Running' })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Drag Shipped' })).toBeNull();
+  });
+
+  it('has no drag handle', async () => {
+    boardWith([taskDto({ title: 'One', boardStatus: 'ready' })], []);
+    await screen.findByRole('button', { name: 'One' });
+    expect(screen.queryByRole('button', { name: 'Drag One' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Can’t drag One' })).toBeNull();
+  });
+
+  it('clicking a card opens its details', async () => {
+    boardWith([taskDto({ title: 'One', boardStatus: 'ready' })], []);
+    fireEvent.click(await screen.findByRole('button', { name: 'One' }));
+    const drawer = await screen.findByRole('dialog', { name: 'Task' });
+    expect(within(drawer).getByLabelText<HTMLInputElement>('Title').value).toBe('One');
+  });
+
+  it('Enter on a focused card opens its details', async () => {
+    boardWith([taskDto({ title: 'One', boardStatus: 'ready' })], []);
+    fireEvent.keyDown(await screen.findByRole('button', { name: 'One' }), { key: 'Enter' });
+    expect(await screen.findByRole('dialog', { name: 'Task' })).toBeTruthy();
+  });
+
+  it('Enter or Space on the card menu does not open the card', async () => {
+    boardWith([taskDto({ title: 'One', boardStatus: 'ready' })], []);
+    const menu = await screen.findByRole('button', { name: 'Actions for One' });
+    for (const key of ['Enter', ' ']) fireEvent.keyDown(menu, { key });
+    fireEvent.click(menu);
+    expect(await screen.findByRole('menu')).toBeTruthy();
+    expect(screen.queryByRole('dialog', { name: 'Task' })).toBeNull();
+  });
+
+  it('the card menu opens with its items', async () => {
+    const project = projectDto();
+    const icebox = boardColumnDto({ projectId: project.id });
+    const ready = taskDto({ projectId: project.id, title: 'Go', boardStatus: 'ready' });
+    const idea = taskDto({
+      projectId: project.id,
+      title: 'Idea',
+      boardStatus: 'ready',
+      boardColumnId: icebox.id,
+    });
+    const started: unknown[] = [];
+    const moved: unknown[] = [];
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/board-columns'), () => HttpResponse.json([icebox])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([ready, idea])),
+      http.post(daemonUrl('/tasks/:taskId/start'), ({ params }) => {
+        started.push(params['taskId']);
+        return HttpResponse.json(ready);
+      }),
+      http.post(daemonUrl('/tasks/:taskId/move'), ({ params }) => {
+        moved.push(params['taskId']);
+        return HttpResponse.json(idea);
+      }),
+    );
+    renderApp('/board');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Actions for Go' }));
+    expect(await screen.findByRole('menuitem', { name: 'Start', hidden: true })).toBeTruthy();
+    expect((await screen.findAllByRole('menuitem', { hidden: true })).length).toBeGreaterThan(1);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Start', hidden: true }));
+    await waitFor(() => {
+      expect(started).toEqual([ready.id]);
+    });
+    expect(screen.queryByRole('dialog', { name: 'Task' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for Idea' }));
+    const move = await screen.findByRole('menuitem', { name: 'Move to Ready', hidden: true });
+    fireEvent.click(move);
+    await waitFor(() => {
+      expect(moved).toEqual([idea.id]);
+    });
+    expect(screen.queryByRole('dialog', { name: 'Task' })).toBeNull();
+  });
+
+  it('the card shows areas as labels and the criteria count', async () => {
+    boardWith(
+      [
+        taskDto({
+          title: 'Two',
+          boardStatus: 'ready',
+          areas: ['api', 'ui'],
+          acceptanceCriteria: ['a', 'b'],
+        }),
+        taskDto({ title: 'One', boardStatus: 'ready', boardOrder: 9, acceptanceCriteria: ['a'] }),
+      ],
+      [],
+    );
+    const two = await screen.findByRole('button', { name: 'Two' });
+    expect(within(two).getByText('2 criteria')).toBeTruthy();
+    expect(within(two).getByText('api')).toBeTruthy();
+    expect(within(two).getByText('ui')).toBeTruthy();
+    expect(
+      within(screen.getByRole('button', { name: 'One' })).getByText('1 criterion'),
+    ).toBeTruthy();
   });
 });

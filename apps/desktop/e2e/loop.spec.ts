@@ -77,9 +77,10 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   const ready = page.getByRole('list', { name: 'Ready tasks' });
   await expect(ready.getByRole('listitem')).toHaveCount(2);
   await expect(ready.getByRole('listitem').nth(0)).toHaveAccessibleName(OTHER);
-  const handle = ready.getByRole('button', { name: `Drag ${TASK}` });
-  await handle.focus();
-  await expect(handle).toBeFocused();
+  // The whole card is the drag handle: focus it, pick it up with Space, move, drop with Space.
+  const card = ready.getByRole('button', { name: TASK, exact: true });
+  await card.focus();
+  await expect(card).toBeFocused();
   await page.keyboard.press('Space');
   await page.keyboard.press('ArrowUp');
   await page.keyboard.press('Space');
@@ -169,7 +170,7 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await open(page, 'Board');
   const locked = page
     .getByRole('list', { name: 'Done tasks' })
-    .getByRole('button', { name: `Can’t drag ${TASK}` });
+    .getByRole('button', { name: TASK, exact: true });
   await locked.focus();
   await expect(locked).toBeFocused();
   await expect(locked).toHaveAccessibleDescription(

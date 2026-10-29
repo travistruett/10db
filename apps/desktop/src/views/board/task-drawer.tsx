@@ -1,5 +1,6 @@
 import {
   isTerminal,
+  SYSTEM_COLUMN_LABEL,
   RiskTag,
   type FlowId,
   type TaskDto,
@@ -274,4 +275,14 @@ function WorkstreamLine({ workstream }: { readonly workstream: WorkstreamDto }) 
       ) : null}
     </Stack>
   );
+}
+
+/** A card's column for the drawer: its human column's name, or the state column it follows. */
+export function columnNameOf(
+  task: Pick<TaskDto, 'boardColumnId' | 'boardStatus'>,
+  humanColumns: ReadonlyMap<string, string>,
+): string {
+  return task.boardColumnId === null
+    ? SYSTEM_COLUMN_LABEL[task.boardStatus]
+    : (humanColumns.get(task.boardColumnId) ?? 'Parked');
 }
