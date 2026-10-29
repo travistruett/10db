@@ -72,6 +72,9 @@
       directories and the seed is kept with a card (`decisions/2026-10-28-worktree-keeps-ignored-files.md`).
 - [ ] Worktree mode: a hand-made file inside a directory the ignore rules match as a whole (such as
       `scratch/notes.md`) still goes when its worktree is removed.
+- [x] Worktree mode: a finished worktree was kept for the `tsconfig.tsbuildinfo` the gate's typecheck wrote.
+      Built: build output known by name doesn't keep a worktree
+      (`decisions/2026-10-29-worktree-build-output-not-loose-work.md`).
 - [x] Worktree mode: with `worktree.useRelativePaths=true` in the builder's git config (git 2.48+), every
       worktree cut failed. Built: the daemon's `git worktree add` passes the setting off.
 - [x] Worktree mode: a `WorktreeRootError` at start (a bad `TENDB_WORKTREE_ROOT`, or a checkout containing
