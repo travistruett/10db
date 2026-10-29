@@ -61,9 +61,10 @@ A local macOS control plane that runs Claude Code sessions as a software factory
   `--no-verify`, `LEFTHOOK=0`, `LEFTHOOK_EXCLUDE` or `core.hooksPath`.
 - `commit --amend`, `stash`, `reset --hard/--keep/--merge`, rebases, `clean -f`, `checkout -- .`,
   `branch -D`, force pushes and pushes to `main` ask first. One exception, in the Claude guard
-  and inside a worktree in `10db-worktrees/` only: discarding named files
-  (`git checkout -- <file>`, `git restore <file>`) and `git stash store` don't ask. Directories,
-  globs, `.`, and any command that changes directory or points git elsewhere still ask.
+  and inside a worktree in `10db-worktrees/` only: discarding named tracked files
+  (`git checkout -- <file>`, `git restore <file>`) doesn't ask. It holds only when the command's
+  cwd is in that worktree; `git -C <worktree>`, a `cd` or any other way of pointing git elsewhere
+  turns it off. Directories, globs, `.`, untracked paths and every `stash` still ask.
 - `.claude/hooks/git-guard.mjs` (Claude Code) and `.codex/rules/default.rules` (Codex) enforce
   these rules. The Claude guard fails open; only `TENDB_GIT_GUARD=off` in the environment
   Claude Code starts with disables it. It also asks before `gh pr merge --admin`, `gh api` writes

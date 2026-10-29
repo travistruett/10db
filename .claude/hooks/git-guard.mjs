@@ -5,7 +5,7 @@
 // with. A Bash command can't set it for the hook, and there is no kill-switch file an agent could
 // write.
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { join, posix } from 'node:path';
 
 /**
@@ -573,7 +573,10 @@ function currentBranch(cwd) {
 
 /**
  * True when `cwd` is inside a linked worktree that sits directly in `10db-worktrees/` beside its
- * main checkout, where AGENTS.md puts the worktrees agents make by hand. False when git can't say.
+ * main checkout, where AGENTS.md puts the worktrees agents make by hand. A directory there whose
+ * `.git` file points at the main repository or at another worktree's git directory is not one: the
+ * worktree's own git directory must differ from the common one and name this `.git` file back in
+ * its `gitdir`. False when git can't say.
  * @param {string} cwd
  */
 function inAgentWorktree(cwd) {
@@ -582,11 +585,19 @@ function inAgentWorktree(cwd) {
       'rev-parse',
       '--path-format=absolute',
       '--show-toplevel',
+      '--git-dir',
       '--git-common-dir',
     ]).split('\n'),
   );
-  const [top, common] = lines ?? [];
-  if (!top || !common || posix.basename(common) !== '.git') return false;
+  const [top, gitDir, common] = lines ?? [];
+  if (!top || !gitDir || !common || gitDir === common) return false;
+  if (posix.basename(common) !== '.git') return false;
+  const linked = attempt(
+    () =>
+      realpathSync(readFileSync(join(gitDir, 'gitdir'), 'utf8').trim()) ===
+      realpathSync(join(top, '.git')),
+  );
+  if (linked !== true) return false;
   const checkout = posix.dirname(common);
   return posix.dirname(top) === posix.join(posix.dirname(checkout), '10db-worktrees');
 }
@@ -599,7 +610,10 @@ const RETARGETS =
 
 /**
  * True when every pathspec names one file: no option, glob, pathspec magic, expansion syntax
- * (`$`, backtick, `~`, braces), `.`, directory or parent path. An empty list is false, since git then takes the whole tree or refuses.
+ * (`$`, backtick, `~`, braces), `.`, directory or parent path, and the index holds exactly one
+ * entry under it, the path itself. A tracked file deleted from disk still has its entry; a path
+ * that names a tracked directory, or nothing tracked, does not pass. An empty list is false, since
+ * git then takes the whole tree or refuses.
  * @param {string[]} paths
  * @param {string} cwd
  */
@@ -616,22 +630,37 @@ function namesSingleFiles(paths, cwd) {
         normal !== '..' &&
         !normal.startsWith('../') &&
         !posix.isAbsolute(normal) &&
-        attempt(() => existsSync(join(cwd, p)) && statSync(join(cwd, p)).isDirectory()) !== true
+        attempt(() => existsSync(join(cwd, p)) && statSync(join(cwd, p)).isDirectory()) !== true &&
+        trackedAsOneFile(normal, cwd)
       );
     })
   );
 }
 
 /**
+ * True when the index has exactly one entry under `path` and it is `path` itself. `ls-files`
+ * prints paths relative to `cwd`, as `path` is. False when git can't say.
+ * @param {string} path a normalized, cwd-relative path
+ * @param {string} cwd
+ */
+function trackedAsOneFile(path, cwd) {
+  const entries = attempt(() =>
+    gitOutput(cwd, ['--literal-pathspecs', 'ls-files', '-z', '--', path])
+      .split('\0')
+      .filter(Boolean),
+  );
+  return entries !== null && entries.length === 1 && entries[0] === path;
+}
+
+/**
  * True for the discards an agent may run without asking in its own worktree: `checkout [-q]
- * [<commit>] -- <file>...`, `restore` of named files with only the options that pick which copy, and
- * `stash store`, which only adds an entry.
+ * [<commit>] -- <file>...` and `restore` of named files with only the options that pick which copy.
+ * `stash` is never one: `refs/stash` is shared by every worktree of the repository.
  * @param {string} verb
  * @param {string[]} a
  * @param {string} cwd
  */
 function isFileDiscard(verb, a, cwd) {
-  if (verb === 'stash') return a[0] === 'store';
   const dashDash = a.indexOf('--');
   if (verb === 'checkout') {
     if (dashDash < 0) return false;
@@ -944,7 +973,7 @@ function judge(command, cwd, whole = command) {
         !/[$`]/.test(whole);
       const ownDiscard =
         loneGitCall &&
-        ['checkout', 'restore', 'stash'].includes(git.verb) &&
+        ['checkout', 'restore'].includes(git.verb) &&
         isFileDiscard(git.verb, a, cwd) &&
         !RETARGETS.test(whole) &&
         inAgentWorktree(cwd);

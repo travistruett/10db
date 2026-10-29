@@ -93,8 +93,10 @@ prefix_rule(
     justification = "AGENTS.md Git: clean deletes untracked files that may be another session's.",
 )
 
-# The Claude guard lets single-file discards and `stash store` through inside a worktree in
-# 10db-worktrees/. A prefix rule can't see the directory, so Codex still asks everywhere.
+# Codex asks about every `git restore` and every `git checkout --` or `git checkout -q --`, in any
+# directory: a prefix rule can't see which worktree it runs in, so the Claude guard's exception for
+# named files in a 10db-worktrees/ worktree doesn't apply here. A commit before the `--`
+# (`git checkout HEAD -- <file>`) is a word a prefix rule can't match, so Codex doesn't ask about it.
 prefix_rule(
     pattern = ["git", "restore"],
     decision = "prompt",
@@ -103,6 +105,12 @@ prefix_rule(
 
 prefix_rule(
     pattern = ["git", "checkout", "--"],
+    decision = "prompt",
+    justification = "AGENTS.md Git: checkout -- discards uncommitted work.",
+)
+
+prefix_rule(
+    pattern = ["git", "checkout", ["-q", "--quiet"], "--"],
     decision = "prompt",
     justification = "AGENTS.md Git: checkout -- discards uncommitted work.",
 )

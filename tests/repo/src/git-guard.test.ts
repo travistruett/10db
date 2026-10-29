@@ -359,6 +359,9 @@ describe('git guard in an agent worktree beside the checkout', () => {
   let checkout: ThrowawayRepo;
   let agent: string;
   let elsewhere: string;
+  let replaced: string;
+  let fakeOfCheckout: string;
+  let fakeOfAgent: string;
 
   beforeAll(() => {
     layout = mkdtempSync(join(tmpdir(), '10db-guard-layout-'));
@@ -369,6 +372,25 @@ describe('git guard in an agent worktree beside the checkout', () => {
     elsewhere = join(layout, 'elsewhere', 'agent');
     checkout.git('worktree', 'add', '-q', '-b', 'feat/agent', agent);
     checkout.git('worktree', 'add', '-q', '-b', 'feat/elsewhere', elsewhere);
+    // A tracked file deleted from disk is still one index entry.
+    rmSync(join(agent, 'b.ts'));
+    // A worktree whose tracked directory src/ was replaced on disk by a file named src.
+    replaced = join(layout, '10db-worktrees', 'replaced');
+    checkout.git('worktree', 'add', '-q', '-b', 'feat/replaced', replaced);
+    rmSync(join(replaced, 'src'), { recursive: true });
+    writeFileSync(join(replaced, 'src'), 'X\n');
+    // Directories in 10db-worktrees/ that are not linked worktrees: a `.git` file pointing at the
+    // main checkout's repository, and one pointing at another worktree's git directory.
+    fakeOfCheckout = join(layout, '10db-worktrees', 'fake-checkout');
+    fakeOfAgent = join(layout, '10db-worktrees', 'fake-agent');
+    for (const [dir, gitdir] of [
+      [fakeOfCheckout, join(checkout.dir, '.git')],
+      [fakeOfAgent, join(checkout.dir, '.git', 'worktrees', 'agent')],
+    ] as const) {
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, '.git'), `gitdir: ${gitdir}\n`);
+      writeFileSync(join(dir, 'a.ts'), 'x\n');
+    }
   });
 
   afterAll(() => {
@@ -390,8 +412,10 @@ describe('git guard in an agent worktree beside the checkout', () => {
     ['restore -SW', 'git restore -SW a.ts', 'allow'],
     ['restore --source=', 'git restore --source=HEAD a.ts', 'allow'],
     ['restore -s with a value', 'git restore -s HEAD -- a.ts', 'allow'],
-    ['restore a deleted file', 'git restore gone.ts', 'allow'],
-    ['stash store', "git stash store -m 'keep' 0123abc", 'allow'],
+    ['restore a tracked file deleted from disk', 'git restore b.ts', 'allow'],
+    ['restore an untracked path', 'git restore gone.ts', 'ask'],
+    // refs/stash is shared by every worktree of the repository.
+    ['stash store', "git stash store -m 'keep' 0123abc", 'ask'],
     ['stash list', 'git stash list', 'allow'],
     // Whole-tree, directory and pattern forms still ask.
     ['checkout -- .', 'git checkout -- .', 'ask'],
@@ -466,6 +490,22 @@ describe('git guard in an agent worktree beside the checkout', () => {
     expect(inAgent(command)).toBe(expected);
   });
 
+  it('asks about a path that names a tracked directory replaced by a file on disk', () => {
+    expect(inAgent('git checkout -- src', replaced)).toBe('ask');
+    expect(inAgent('git restore src', replaced)).toBe('ask');
+  });
+
+  it.each<[string, string]>([
+    ['checkout of a commit', 'git checkout HEAD -- a.ts'],
+    ['restore', 'git restore a.ts'],
+  ])(
+    '%s asks in a directory whose .git file points at another repository or worktree',
+    (_name, command) => {
+      expect(inAgent(command, fakeOfCheckout)).toBe('ask');
+      expect(inAgent(command, fakeOfAgent)).toBe('ask');
+    },
+  );
+
   it('applies from a subdirectory of the agent worktree', () => {
     expect(inAgent('git restore c.ts', join(agent, 'src'))).toBe('allow');
   });
@@ -473,7 +513,6 @@ describe('git guard in an agent worktree beside the checkout', () => {
   it.each<[string, string]>([
     ['checkout -- one file', 'git checkout -- a.ts'],
     ['restore one file', 'git restore a.ts'],
-    ['stash store', 'git stash store 0123abc'],
   ])('%s still asks in the main checkout and in a worktree elsewhere', (_name, command) => {
     expect(inAgent(command, checkout.dir)).toBe('ask');
     expect(inAgent(command, elsewhere)).toBe('ask');
