@@ -190,9 +190,11 @@ describe('toolchainAccess reads', () => {
     expect(listings).toEqual([]);
   });
 
-  it('lists nothing at a path the profile cannot hold', () => {
+  it('refuses the session, naming the path, when the installs dir has a name the profile cannot hold', () => {
     mkdirSync(at('we[ird]/installs'), { recursive: true });
-    expect(access({ MISE_DATA_DIR: at('we[ird]') }).listings).toEqual([]);
+    const build = () => access({ MISE_DATA_DIR: at('we[ird]') });
+    expect(build).toThrow(SandboxProfileError);
+    expect(build).toThrow(at('we[ird]/installs'));
   });
 
   it('opens a version linked into another granted read by its real path too', () => {

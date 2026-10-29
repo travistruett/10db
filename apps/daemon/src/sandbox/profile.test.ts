@@ -227,6 +227,8 @@ describe('buildLaneProfile', () => {
       expect(() => listingGrant('/h/we[ird]/installs')).toThrow(SandboxProfileError);
       expect(() => childListingGrant('/h/*/installs')).toThrow(SandboxProfileError);
       expect(() => listingGrant('relative')).toThrow(SandboxProfileError);
+      expect(() => listingGrant('/')).toThrow(SandboxProfileError);
+      expect(() => childListingGrant('/')).toThrow(SandboxProfileError);
     });
 
     it('allows them to be read, with the only pattern characters the profile holds', () => {
@@ -242,6 +244,9 @@ describe('buildLaneProfile', () => {
     });
 
     it.each([
+      ['the root as a child listing', () => '//*'],
+      ['a set with no leading slash', () => '[/]'],
+      ['an empty set', (dir: string) => `${dir.slice(0, -1)}[]`],
       ['a recursive glob', (dir: string) => `${dir}/**`],
       ['a wildcard in the middle', (dir: string) => `${dirname(dirname(dir))}/*/installs`],
       ['a set of several characters', (dir: string) => `${dir}[st]`],
@@ -250,6 +255,30 @@ describe('buildLaneProfile', () => {
     ])('refuses %s as a listing', (_name, pattern) => {
       const build = () => buildLaneProfile(input({ toolchainListings: [pattern(installs())] }));
       expect(build).toThrow(SandboxProfileError);
+    });
+
+    it('drops a listing of a dir that is, or lies under, a secret file or a protected read', () => {
+      const tool = join(installs(), 'node');
+      const kept = [listingGrant(installs()), childListingGrant(installs())];
+      const { allowRead } = buildLaneProfile(
+        input({
+          toolchainListings: [
+            ...kept,
+            listingGrant(tool),
+            childListingGrant(tool),
+            listingGrant(join(home, '.cargo')),
+          ],
+          toolchainSecrets: [tool, join(home, '.cargo', 'credentials.toml')],
+          protectedReads: [join(home, '.cargo')],
+        }),
+      ).filesystem;
+      expect(allowRead).toEqual(expect.arrayContaining(kept));
+      for (const dropped of [
+        listingGrant(tool),
+        childListingGrant(tool),
+        listingGrant(join(home, '.cargo')),
+      ])
+        expect(allowRead).not.toContain(dropped);
     });
 
     it('refuses a pattern in the ordinary read list as before', () => {

@@ -70,19 +70,20 @@ const sandboxPath = z
 const LISTING_SET = /^(.*)\[([^\n])\]$/s;
 const LISTING_CHILDREN = /^(.*)\/\*$/s;
 
-/** The dir a listing pattern opens, or null when `pattern` is no listing. */
+/** The dir a listing pattern opens, or null when `pattern` is not exactly what a grant below emits. */
 function listingDir(pattern: string): string | null {
   const set = LISTING_SET.exec(pattern);
   const dir = set === null ? LISTING_CHILDREN.exec(pattern)?.[1] : `${set[1] ?? ''}${set[2] ?? ''}`;
-  return dir !== undefined && dir !== '' && isSandboxPath(dir) ? dir : null;
+  if (dir === undefined || dir === '' || dir === '/' || !isSandboxPath(dir)) return null;
+  return pattern === listingGrant(dir) || pattern === childListingGrant(dir) ? dir : null;
 }
 
 /** A dir to spell as a listing, or a refusal when the profile can't hold its name. */
 function listedDir(dir: string): string {
-  if (!isSandboxPath(dir))
+  if (dir === '/' || !isSandboxPath(dir))
     throw new SandboxProfileError(
       'toolchainListings',
-      `a toolchain dir can't be listed in the sandbox profile: ${dir} (not a plain absolute path)`,
+      `a toolchain dir can't be listed in the sandbox profile: ${dir} (not a plain absolute path below the root)`,
     );
   return dir;
 }
@@ -271,6 +272,11 @@ export function buildLaneProfile(input: LaneProfileInput): LaneSandboxSettings {
   const readable = [...needed, ...input.readList].filter(isAllowed);
   const writable = [input.tmpDir, ...input.extraWrites].filter(isAllowed);
   refusePatterns(readable);
+  // A listing of a dir that is, or lies under, a denied path opens nothing the deny keeps shut.
+  const listings = input.toolchainListings.filter((pattern) => {
+    const dir = listingDir(pattern);
+    return dir === null || isAllowed(dir);
+  });
   const candidate: LaneSandboxSettings = {
     enabled: true,
     failIfUnavailable: true,
@@ -279,7 +285,7 @@ export function buildLaneProfile(input: LaneProfileInput): LaneSandboxSettings {
     autoAllowBashIfSandboxed: false,
     filesystem: {
       denyRead: ['/', ...input.protectedReads, ...input.secretFiles, ...input.toolchainSecrets],
-      allowRead: [...readable, ...input.toolchainListings],
+      allowRead: [...readable, ...listings],
       allowWrite: writable,
       denyWrite: [...input.denyWrites],
     },

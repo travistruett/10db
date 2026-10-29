@@ -1,5 +1,5 @@
 import type { PermissionRuleDto, ProjectDto } from '@10db/contracts';
-import { prepareCommandEnv, withoutShellOnly } from './command-env';
+import { prepareCommandEnv, withoutTempDirPaths } from './command-env';
 import { deniedEnvNames } from './env-allowlist';
 import { createLaneEnvFile, removeLaneEnvFile } from './env-file';
 import { claudeProtectedPaths, type FileAccessContext } from './file-access';
@@ -32,6 +32,8 @@ export interface LaneSession {
   /** A live view: `providerSessionId` follows `setProviderSession`. */
   readonly fileAccess: FileAccessContext;
   readonly tmpDir: string;
+  /** Every variable the sandboxed shell has: the session env's, and those it leaves out. */
+  readonly commandEnv: Readonly<Record<string, string>>;
   /** The repo's approved stdio servers, each launched under srt in a sandbox of its own. */
   readonly mcpServers: Readonly<Record<string, SandboxedMcpServer>>;
   /** Approved stdio servers left out because their sandbox couldn't be built. */
@@ -116,9 +118,9 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
         // of them again from this file before each command.
         envFile = createLaneEnvFile(commandEnv, tmpRoot);
         // The file carries every variable; the session env, which Claude Code and its own git run
-        // with outside the sandbox, leaves out the ones that are for the sandboxed shell alone.
+        // with outside the sandbox, leaves out those that name a path the lane can write.
         const env: Record<string, string> = {
-          ...withoutShellOnly(commandEnv),
+          ...withoutTempDirPaths(commandEnv, tmpDir),
           CLAUDE_CODE_TMPDIR: tmpDir,
           CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1',
           CLAUDE_ENV_FILE: envFile,
@@ -201,6 +203,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           spec,
           fileAccess,
           tmpDir,
+          commandEnv,
           mcpServers: ownMcp.servers,
           mcpFailures: ownMcp.failures,
           setProviderSession(id) {

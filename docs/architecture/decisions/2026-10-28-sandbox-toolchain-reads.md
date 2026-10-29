@@ -17,11 +17,19 @@
   data dir stays closed apart from `installs` (listing only) and `shims`, and nothing under it, or under its
   state dir, is writable. nvm and volta are unchanged.
 - `prepareCommandEnv` sets `xcrun_db` to `<temp dir>/xcrun_db`, so Apple's xcrun shims (`/usr/bin/git`,
-  `/usr/bin/make`) create their lookup cache inside the temp dir. `xcrun_db` joins the env allowlist. It is for
-  the sandboxed shell alone: a lane's `CLAUDE_ENV_FILE` and a gate's inner env carry it, and a lane's session
-  env, which Claude Code and its own git run with outside the sandbox, does not (`withoutShellOnly`).
+  `/usr/bin/make`) create their lookup cache inside the temp dir. `xcrun_db` joins the env allowlist.
+- A lane's session env, which Claude Code and the git it runs use outside the sandbox, holds no variable whose
+  value is the temp dir or a path in it, except `CLAUDE_CODE_TMPDIR` (`withoutTempDirPaths`). That is
+  `xcrun_db`, mise's config variables (`MISE_CONFIG_DIR`, `MISE_GLOBAL_CONFIG_FILE`, `MISE_SYSTEM_DIR`,
+  `MISE_SYSTEM_CONFIG_FILE`), `XDG_CONFIG_HOME`, `CARGO_HOME` and the npm, pnpm and corepack caches. The
+  sandboxed shell has all of them: a lane's `CLAUDE_ENV_FILE` carries every one, and a gate's inner env does.
+  `LaneSession.commandEnv` is the full set. The same rule would cover a variable added later.
 - `prepareCommandEnv` sets `MISE_LOG_LEVEL=error`.
 - The state dir stays read-only and `MISE_STATE_DIR` is not moved.
+- The listing patterns are held to exactly the two shapes `listingGrant` and `childListingGrant` emit (never the
+  root), only from `toolchainListings`, and a listing of a dir that is or lies under a protected read or secret
+  file is dropped like any other read. An installs dir whose name the profile can't hold refuses the session,
+  naming the path.
 
 ## Why
 
@@ -40,13 +48,21 @@ tests. Two causes, both reproduced under the gate's real profile (macOS, mise 20
   profile as `--settings`: the listing grants worked, a version dir and its `etc/npmrc` stayed denied, and the
   sandbox stayed on). The profile schema holds a pattern only as one of those two shapes, and only from
   `toolchainListings`; any other pattern, in any field, still refuses the profile.
+- Variables that name a path the lane can write are a way to run lane-written code from outside the sandbox.
+  Reproduced with mise: a `config.toml` with `[env] _.source = "<script>"`, read through
+  `MISE_GLOBAL_CONFIG_FILE=<it> ~/.local/share/mise/shims/node --version`, runs the script. `XDG_CONFIG_HOME`
+  is read by git (`git/ignore`, `git/attributes`) and by Claude Code 2.1.312 (`anthropic/active_config`,
+  `anthropic/configs/*.json`, its auth profile dir); cargo reads `config.toml` (`rustc-wrapper`) from
+  `CARGO_HOME`. The session env had carried all of these since lanes got their own temp dir. The unsandboxed
+  Claude Code needs none of them (measured by the live lane test, which passes with them gone), and the shell
+  gets them from the env file.
 - Apple's git and make are xcrun shims. They cache their lookup in `xcrun_db-<random>` in
   `getconf DARWIN_USER_TEMP_DIR` and ignore `TMPDIR`; the sandbox can't write there, so each call printed an
   error and repeated the lookup. `xcrun_db` names the cache file (measured: set, the cache appears at that
   path; unset, nothing is written under the sandbox). xcrun execs whatever the cache names, and the temp dir
   is writable by the lane, so the variable must never reach a process outside the sandbox: Claude Code runs
-  its own git with the session env, so the lane's session env leaves it out and the sandboxed shell sets it
-  from the env file. Turned down: allowing writes to the Darwin temp dir's `xcrun_db*` files (a write grant
+  its own git with the session env, so the lane's session env leaves it out (with the rest, above) and the
+  sandboxed shell sets it from the env file. Turned down: allowing writes to the Darwin temp dir's `xcrun_db*` files (a write grant
   outside the temp dir, and the random suffix needs a pattern the profile can't hold); `DEVELOPER_DIR` plus
   calling `/Library/Developer/CommandLineTools/usr/bin/git` (the daemon drops `DEVELOPER_DIR` from its own git,
   it isn't on the sandbox's env allowlist, and the real binary's path would have to be found and put ahead of

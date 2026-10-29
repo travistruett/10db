@@ -406,8 +406,9 @@ export function toolchainAccess(
     ...miseKeyFiles(mise, env),
   );
   const denied = [...new Set(secretFiles.flatMap(deniedSpellings))].sort();
+  // A dir with a name the profile can't hold refuses the session, naming it, in `listingGrant`.
   const listable = (dir: string): boolean =>
-    safeUnderHome(dir, home, protectedReads) && isSandboxPath(dir) && !touchesMiseConfig(dir);
+    safeUnderHome(dir, home, protectedReads) && !touchesMiseConfig(dir);
   return {
     listings: [...new Set(listed.filter(listable))].flatMap((dir) => [
       listingGrant(dir),

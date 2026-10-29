@@ -2,27 +2,33 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { laneMiseConfig } from './mise-config';
 import { packageCacheEnv } from './package-cache';
+import { isEqualOrUnder } from './protected-reads';
 
 /** Set for every sandboxed command, so a test that can't run in a sandbox can skip. */
 const SANDBOX_MARKER = 'TENDB_SANDBOX';
 
 /**
- * Variables only the sandboxed shell may see. A tool that Claude Code runs itself, outside the
- * sandbox, would follow them into the lane's temp dir and run what a lane wrote there: xcrun execs
- * whatever its cache file names.
+ * `env` without the variables whose value names the lane's temp dir or a path in it. The sandboxed
+ * shell sets all of them, from the env file; Claude Code and the git it runs, outside the sandbox,
+ * get only these. A lane can write its temp dir, so a tool outside the sandbox that read a variable
+ * pointing there would read or run what the lane wrote: mise's `[env] _.source` in its config, the
+ * file xcrun execs, git's and Claude Code's own config under `XDG_CONFIG_HOME`, cargo's
+ * `rustc-wrapper`.
  */
-const SHELL_ONLY_ENV: readonly string[] = ['xcrun_db'];
-
-/** `env` without the variables that are for the sandboxed shell alone. */
-export function withoutShellOnly(env: Readonly<Record<string, string>>): Record<string, string> {
-  return Object.fromEntries(Object.entries(env).filter(([name]) => !SHELL_ONLY_ENV.includes(name)));
+export function withoutTempDirPaths(
+  env: Readonly<Record<string, string>>,
+  tmpDir: string,
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(env).filter(([, value]) => !isEqualOrUnder(value, tmpDir)),
+  );
 }
 
 /**
  * Prepares a sandbox's own temp dir for the commands that run in it, and returns the variables they
  * need on top of the allowlisted env: package caches inside the temp dir, a global mise config of the
  * builder's tool versions only, git with no global config and no optional locks, and the sandbox
- * marker. Lanes and gate runs get the same set; a lane's session env leaves out `withoutShellOnly`'s.
+ * marker. Lanes and gate runs get the same set; a lane's session env leaves out `withoutTempDirPaths`'s.
  */
 export function prepareCommandEnv(
   tmpDir: string,

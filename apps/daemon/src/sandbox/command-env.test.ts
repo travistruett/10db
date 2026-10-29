@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { prepareCommandEnv, withoutShellOnly } from './command-env';
+import { prepareCommandEnv, withoutTempDirPaths } from './command-env';
 import { deniedEnvNames } from './env-allowlist';
 
 let root: string;
@@ -34,12 +34,40 @@ describe('prepareCommandEnv tool-cache variables', () => {
   });
 });
 
-describe('withoutShellOnly', () => {
-  it("drops the variables a tool Claude Code runs itself would follow into the lane's temp dir", () => {
+describe('withoutTempDirPaths', () => {
+  it('keeps only the variables whose value names nothing the lane can write', () => {
     const env = prepareCommandEnv(tmpDir, join(root, 'home'), {});
-    const kept = withoutShellOnly(env);
-    expect(Object.keys(kept)).not.toContain('xcrun_db');
-    expect(kept['GIT_CONFIG_GLOBAL']).toBe('/dev/null');
-    expect(Object.keys(env).filter((name) => !(name in kept))).toEqual(['xcrun_db']);
+    const kept = withoutTempDirPaths(env, tmpDir);
+    // Each of these makes a tool that Claude Code or its git runs outside the sandbox read or exec
+    // what a lane wrote into its temp dir: mise's `[env] _.source`, xcrun's cache, git's and
+    // Claude Code's own config under XDG_CONFIG_HOME, cargo's `rustc-wrapper`.
+    for (const name of [
+      'xcrun_db',
+      'MISE_CONFIG_DIR',
+      'MISE_GLOBAL_CONFIG_FILE',
+      'MISE_SYSTEM_DIR',
+      'MISE_SYSTEM_CONFIG_FILE',
+      'XDG_CONFIG_HOME',
+      'CARGO_HOME',
+      'npm_config_cache',
+    ])
+      expect(Object.keys(kept), name).not.toContain(name);
+    expect(kept).toEqual({
+      MISE_LOG_LEVEL: 'error',
+      GIT_CONFIG_GLOBAL: '/dev/null',
+      GIT_OPTIONAL_LOCKS: '0',
+      TENDB_SANDBOX: '1',
+    });
+  });
+
+  it.each([
+    ['the temp dir itself', (dir: string) => dir, false],
+    ['a file under it', (dir: string) => join(dir, 'a', 'b'), false],
+    ['a sibling that shares its prefix', (dir: string) => `${dir}-other`, true],
+    ['a path elsewhere', () => '/usr/bin', true],
+    ['a value that is no path', () => '1', true],
+  ])('treats %s', (_name, value, kept) => {
+    const result = withoutTempDirPaths({ X: value(tmpDir) }, tmpDir);
+    expect(Object.keys(result)).toEqual(kept ? ['X'] : []);
   });
 });

@@ -402,7 +402,21 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       const cache = join(session.tmpDir, 'cache');
       expect(existsSync(session.tmpDir)).toBe(true);
       expect(dirname(session.tmpDir)).toBe(tmpRoot);
+      // Claude Code and the git it runs itself, outside the sandbox, get no variable that names a
+      // path the lane can write: the sandboxed shell sets those from the env file.
       expect(session.spec.env).toEqual({
+        MISE_LOG_LEVEL: 'error',
+        CLAUDE_CODE_TMPDIR: session.tmpDir,
+        GIT_CONFIG_GLOBAL: '/dev/null',
+        GIT_OPTIONAL_LOCKS: '0',
+        TENDB_SANDBOX: '1',
+        CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1',
+        CLAUDE_ENV_FILE: join(
+          tmpRoot,
+          readdirSync(tmpRoot).find((name) => name.startsWith('10db-env-')) ?? '',
+        ),
+      });
+      expect(session.commandEnv).toEqual({
         npm_config_cache: join(cache, 'npm'),
         npm_config_devdir: join(cache, 'node-gyp'),
         COREPACK_HOME: join(cache, 'corepack'),
@@ -415,16 +429,11 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
         MISE_SYSTEM_DIR: join(session.tmpDir, 'mise'),
         MISE_SYSTEM_CONFIG_FILE: join(session.tmpDir, 'mise', 'system.toml'),
         MISE_LOG_LEVEL: 'error',
-        CLAUDE_CODE_TMPDIR: session.tmpDir,
+        xcrun_db: join(session.tmpDir, 'xcrun_db'),
         GIT_CONFIG_GLOBAL: '/dev/null',
         GIT_OPTIONAL_LOCKS: '0',
         XDG_CONFIG_HOME: join(session.tmpDir, 'config'),
         TENDB_SANDBOX: '1',
-        CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1',
-        CLAUDE_ENV_FILE: join(
-          tmpRoot,
-          readdirSync(tmpRoot).find((name) => name.startsWith('10db-env-')) ?? '',
-        ),
       });
       expect(session.spec.settings.filesystem.allowWrite).toEqual([session.tmpDir]);
     } finally {
@@ -515,10 +524,10 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
     const first = await sandbox().forSession(input());
     const second = await sandbox().forSession(input());
     try {
-      expect(first.spec.env['CARGO_HOME']).not.toBe(second.spec.env['CARGO_HOME']);
-      expect(first.spec.env['npm_config_cache']).not.toBe(second.spec.env['npm_config_cache']);
-      expect(first.spec.env['pnpm_config_store_dir']).not.toBe(
-        second.spec.env['pnpm_config_store_dir'],
+      expect(first.commandEnv['CARGO_HOME']).not.toBe(second.commandEnv['CARGO_HOME']);
+      expect(first.commandEnv['npm_config_cache']).not.toBe(second.commandEnv['npm_config_cache']);
+      expect(first.commandEnv['pnpm_config_store_dir']).not.toBe(
+        second.commandEnv['pnpm_config_store_dir'],
       );
     } finally {
       first.dispose();
@@ -645,10 +654,15 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
             entry.slice(entry.indexOf('=') + 1),
           ]),
       );
-      const forCommands = Object.entries(session.spec.env).filter(
-        ([name]) => !name.startsWith('CLAUDE_'),
+      // Every variable for commands is in the file, those of the session env and those it leaves out.
+      const forCommands = Object.entries(session.commandEnv);
+      expect(forCommands.map(([name]) => name)).toEqual(
+        expect.arrayContaining(['CARGO_HOME', 'xcrun_db', 'MISE_CONFIG_DIR', 'XDG_CONFIG_HOME']),
       );
-      expect(forCommands.map(([name]) => name)).toContain('CARGO_HOME');
+      for (const [name, value] of Object.entries(session.spec.env).filter(
+        ([name]) => !name.startsWith('CLAUDE_'),
+      ))
+        expect(session.commandEnv[name], name).toBe(value);
       for (const [name, value] of forCommands) expect(sourced[name], name).toBe(value);
       expect(Object.keys(sourced).filter((name) => name.startsWith('CLAUDE_'))).toEqual([]);
       const { allowRead, allowWrite } = session.spec.settings.filesystem;
@@ -666,19 +680,21 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
     }
   });
 
-  it("keeps xcrun's cache path out of Claude Code's own env and sets it in the env file for commands", async () => {
+  it("keeps every path the lane can write out of Claude Code's own env, and sets them all in the env file", async () => {
     const session = await sandbox().forSession(input());
     try {
-      // Claude Code runs git outside the sandbox; xcrun execs whatever its cache file names, and a
-      // lane can write the temp dir, so the variable that points xcrun there is for the sandboxed
-      // shell alone.
-      expect(Object.keys(session.spec.env)).not.toContain('xcrun_db');
-      const lanePaths = Object.entries(session.spec.env).filter(
-        ([name, value]) => name !== 'CLAUDE_ENV_FILE' && isEqualOrUnder(value, session.tmpDir),
-      );
-      expect(lanePaths.map(([name]) => name)).not.toContain('xcrun_db');
+      // Claude Code and its git run outside the sandbox with this env. A tool that execs or reads
+      // what a variable names would run what the lane wrote: mise's `[env] _.source`, xcrun's cache
+      // file, git's and Claude Code's config under XDG_CONFIG_HOME, cargo's `rustc-wrapper`.
+      const underTemp = Object.entries(session.spec.env)
+        .filter(([, value]) => isEqualOrUnder(value, session.tmpDir))
+        .map(([name]) => name);
+      expect(underTemp).toEqual(['CLAUDE_CODE_TMPDIR']);
+      for (const name of ['xcrun_db', 'XDG_CONFIG_HOME', 'MISE_GLOBAL_CONFIG_FILE', 'CARGO_HOME'])
+        expect(Object.keys(session.spec.env), name).not.toContain(name);
       const file = readFileSync(session.spec.env['CLAUDE_ENV_FILE'] ?? '', 'utf8');
       expect(file).toContain(`export xcrun_db='${join(session.tmpDir, 'xcrun_db')}'`);
+      expect(file).toContain(`export XDG_CONFIG_HOME='${join(session.tmpDir, 'config')}'`);
     } finally {
       session.dispose();
     }

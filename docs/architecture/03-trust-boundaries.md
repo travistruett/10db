@@ -134,13 +134,19 @@ without it):
   `/Users`) holds for that reason.
 - **Default permission mode.** Every lane runs in `default` mode. Auto mode's classifier would approve calls
   that never reach the broker, so hazards and new hosts would skip their cards.
-- **Environment.** The sandbox adds `CLAUDE_CODE_TMPDIR` (the lane's own temp directory), per-lane package
-  caches (`CARGO_HOME` among them), the lane's own mise config
-  (`MISE_CONFIG_DIR`, `MISE_GLOBAL_CONFIG_FILE`), `MISE_LOG_LEVEL=error`, an empty `XDG_CONFIG_HOME` in its temp
-  dir, `TENDB_SANDBOX=1`, `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` and `CLAUDE_ENV_FILE`. `xcrun_db` (Apple's xcrun
-  cache file, in its temp dir) is set for the sandboxed shell only, in `CLAUDE_ENV_FILE`: xcrun execs whatever
-  the file names, a lane can write the temp dir, and Claude Code runs its own git with the session env outside
-  the sandbox, so the variable never reaches that env. Bash children keep only an allowlist of names
+- **Environment.** The sandbox sets, for lane commands, per-lane package caches (`CARGO_HOME` among them), the
+  lane's own mise config (`MISE_CONFIG_DIR`, `MISE_GLOBAL_CONFIG_FILE`, `MISE_SYSTEM_DIR`,
+  `MISE_SYSTEM_CONFIG_FILE`), `MISE_LOG_LEVEL=error`, `xcrun_db` (Apple's xcrun cache file), an empty
+  `XDG_CONFIG_HOME` in its temp dir and `TENDB_SANDBOX=1`, and for Claude Code `CLAUDE_CODE_TMPDIR` (the
+  lane's own temp directory), `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` and `CLAUDE_ENV_FILE`. **The session env,
+  which the unsandboxed Claude Code and the git it runs use, holds no variable whose value is the temp dir or a
+  path in it, except `CLAUDE_CODE_TMPDIR`** (`withoutTempDirPaths`). A lane can write its temp dir, so a tool
+  outside the sandbox that followed such a variable would read or run what the lane wrote (reproduced: a mise
+  `config.toml` with `[env] _.source = "<script>"` run through `MISE_GLOBAL_CONFIG_FILE`; xcrun execs what
+  `xcrun_db`'s file names; git reads `$XDG_CONFIG_HOME/git/{ignore,attributes}` and Claude Code
+  `$XDG_CONFIG_HOME/anthropic/{active_config,configs/*.json}`; cargo reads `rustc-wrapper` from
+  `$CARGO_HOME/config.toml`). The sandboxed shell has every one of them, from `CLAUDE_ENV_FILE`. Bash children
+  keep only an allowlist of names
   (`PATH`, `HOME`, locale, toolchain and package-cache variables) and nothing that looks like a secret: the
   profile lists every other name in the session's env under `sandbox.credentials.envVars` with `mode: deny`,
   an account's own variables included.
@@ -305,7 +311,8 @@ Under the lane sandbox (**built**), the design column holds for a lane's Bash:
     it set, the cache is created there), so the sandbox points it at `<temp dir>/xcrun_db`, inside the temp dir
     every sandbox already writes. No write is opened anywhere else, and the cache goes with the temp dir. xcrun
     execs the tool the cache names, so only the sandboxed shell gets the variable (the env file and a gate's
-    inner env); a lane's session env, which Claude Code and its git run with outside the sandbox, never does.
+    inner env); a lane's session env, which Claude Code and its git run with outside the sandbox, never does
+    (see Environment).
 - **Registry tokens and keys.** A node install's global `etc/npmrc` is never opened. Denied by exact path, with
   no walk: each version's `etc/npmrc` and npm's builtin `lib/node_modules/npm/npmrc`, by both spellings (a
   version linked into a Homebrew keg keeps its `etc` there); the npmrc files of each `node` on the lane's
