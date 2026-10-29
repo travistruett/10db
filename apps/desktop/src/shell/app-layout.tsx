@@ -48,7 +48,18 @@ export function AppLayout() {
           <ColorSchemeToggle />
         </Group>
       </AppShell.Header>
-      <AppShell.Navbar p="xs">
+      {/* The sidebar sits a Selenized step above the content, so the fills that would match the body
+          (active and hover states, the dark/gray scale steps) move up one step inside it. */}
+      <AppShell.Navbar
+        p="xs"
+        bg="var(--mantine-color-default)"
+        style={{
+          '--mantine-primary-color-light': 'var(--mantine-color-default-hover)',
+          '--mantine-primary-color-light-color': 'var(--mantine-color-bright)',
+          '--mantine-color-dark-6': 'var(--mantine-color-default-hover)',
+          '--mantine-color-gray-0': 'var(--mantine-color-default-hover)',
+        }}
+      >
         {NAV.map(({ to, label, icon: Icon }) => (
           <NavLink
             key={to}

@@ -1,4 +1,11 @@
-import { DEFAULT_THEME, defaultCssVariablesResolver, mergeMantineTheme } from '@mantine/core';
+import {
+  DEFAULT_THEME,
+  defaultCssVariablesResolver,
+  MantineProvider,
+  mergeMantineTheme,
+  NavLink,
+} from '@mantine/core';
+import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import {
   SelenizedDark,
@@ -136,5 +143,38 @@ describe('theme palette (Selenized, exactly)', () => {
       theme: resolved,
     });
     expect(colors.color).toBe('var(--mantine-color-body)');
+  });
+});
+
+function defaultProp(component: string, prop: string): unknown {
+  const props: unknown = theme.components?.[component]?.defaultProps;
+  return typeof props === 'object' && props !== null ? Reflect.get(props, prop) : undefined;
+}
+
+describe('theme component defaults', () => {
+  it('puts the check of Select and MultiSelect on the right', () => {
+    expect(defaultProp('Select', 'checkIconPosition')).toBe('right');
+    expect(defaultProp('MultiSelect', 'checkIconPosition')).toBe('right');
+  });
+
+  it('turns off the Switch thumb indicator', () => {
+    expect(defaultProp('Switch', 'withThumbIndicator')).toBe(false);
+  });
+
+  it('rounds nav links and weights the active label', () => {
+    render(
+      <MantineProvider theme={theme}>
+        <NavLink active label="A" />
+        <NavLink label="B" />
+      </MantineProvider>,
+    );
+    const a = screen.getByText('A');
+    const b = screen.getByText('B');
+    expect(a.style.fontWeight).toBe('600');
+    expect(b.style.fontWeight).not.toBe('600');
+    for (const label of [a, b]) {
+      const root = label.closest('[data-mantine-component], a, button') ?? label;
+      expect(root.getAttribute('style') ?? '').toContain('border-radius: var(--mantine-radius-md)');
+    }
   });
 });
