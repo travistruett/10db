@@ -81,20 +81,16 @@ Follow these steps in order on a new computer. Each one says how to check it wor
     tasks; the dev window only previews your checkout.
 
     **Hot-reload the UI over your real 10db.** `pnpm dev:factory` serves your checkout's UI with
-    live reload against the installed app's projects and Inbox. It starts no daemon of its own.
-    - **Once:** run `pnpm dev:factory:enable`, then quit 10db (⌘Q, or Quit 10db in its menu-bar
-      menu) and open it again. Quitting stops running work, so pick your moment.
-    - **Each time:** run `pnpm dev:factory` and open http://localhost:1420. For the desktop window
-      instead, leave it running and run
-      `TENDB_DATA_DIR="$HOME/Library/Application Support/10db" pnpm --filter @10db/desktop dev:shell`.
-    - **After restarting your Mac:** run `pnpm dev:factory:enable` again, then quit and reopen 10db.
-    - **To turn it off:** run `pnpm dev:factory:disable`, then quit and reopen 10db.
+    live reload against the installed app's projects and Inbox:
 
-    Gotchas: stop `pnpm dev` first, because both serve Vite on port 1420. When 10db restarts its
-    token changes, so run `pnpm dev:factory` again (the desktop window follows on its own). This UI
-    acts on your real data: what you click starts, moves and removes real tasks. It talks to the
-    installed release's daemon, so it can't preview a UI change that needs a daemon change.
-    `docs/architecture/decisions/2026-10-29-dev-ui-over-the-factory.md` says what the switch allows.
+    | When                             | Run                                                              |
+    | -------------------------------- | ---------------------------------------------------------------- |
+    | Once, and after each Mac restart | `pnpm dev:factory:enable`, then quit 10db (⌘Q) and open it again |
+    | Every time                       | `pnpm dev:factory`, then open http://localhost:1420              |
+    | To turn it off                   | `pnpm dev:factory:disable`, then quit and reopen 10db            |
+
+    The gotchas and the desktop-window variant are in the README's
+    [Hot-reload the UI over your real 10db](README.md#hot-reload-the-ui-over-your-real-10db).
 
 12. **Optional tools.** [Claude Code](https://claude.com/claude-code) and the
     [Codex CLI](https://github.com/openai/codex) for AI-assisted work; both read the rules in
