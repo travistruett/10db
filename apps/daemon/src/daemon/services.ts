@@ -10,6 +10,7 @@ import {
 } from '@10db/contracts';
 import {
   cancelTask,
+  closeTask,
   deleteBoardColumn,
   getMcpApproval,
   getProject,
@@ -214,6 +215,7 @@ export function createServices(deps: {
     setRoutingRules: (projectId, input) =>
       deps.state.write((ctx) => setRoutingRules(ctx, projectId, input)),
     removeTask: (id) => deps.state.write((ctx) => cancelTask(ctx, id)),
+    closeTask: (id) => deps.state.write((ctx) => closeTask(ctx, id)),
     patchTask: (id, patch) => deps.state.write((ctx) => patchTask(ctx, id, patch)),
     moveTask: (id, move) => deps.state.write((ctx) => moveTask(ctx, id, move)),
     listBoardColumns(projectId) {

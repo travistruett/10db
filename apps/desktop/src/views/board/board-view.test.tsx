@@ -1278,6 +1278,68 @@ describe('BoardView', () => {
     });
   });
 
+  it('the card menu closes a failed task with a line on its branch, and a refusal names the blockers', async () => {
+    const batch = batchDto();
+    const project = projectViewDto({ id: batch.projectId, currentBatch: batch });
+    const failed = workstreamDto({
+      projectId: project.id,
+      batchId: batch.id,
+      taskTitle: 'Broken',
+      state: 'FAILED',
+    });
+    const fine = workstreamDto({ projectId: project.id, taskTitle: 'Fine', state: 'DONE' });
+    const tasks = [failed, fine].map((ws) =>
+      taskDto({
+        id: ws.taskId,
+        projectId: project.id,
+        title: ws.taskTitle,
+        boardStatus: ws === failed ? 'blocked' : 'done',
+        workstreamId: ws.id,
+      }),
+    );
+    const closed: string[] = [];
+    let refuse = true;
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json(tasks)),
+      http.get(daemonUrl('/projects/:projectId/batches'), () => HttpResponse.json([batch])),
+      http.get(daemonUrl('/workstreams'), () => HttpResponse.json([failed, fine])),
+      http.post(daemonUrl('/tasks/:taskId/close'), ({ params }) => {
+        closed.push(String(params['taskId']));
+        return refuse
+          ? HttpResponse.json(
+              { error: 'conflict', message: "Task Broken can't be closed while Child waits on it" },
+              { status: 409 },
+            )
+          : HttpResponse.json({ ...tasks[0], status: 'cancelled' });
+      }),
+    );
+    renderApp('/board');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Actions for Fine' }));
+    await screen.findByRole('menu', { hidden: true });
+    expect(screen.queryByRole('menuitem', { name: 'Close', hidden: true })).toBeNull();
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for Broken' }));
+    expect(
+      await screen.findByText('Close keeps the branch 10db/greetings-0a1b2c3d as it is.'),
+    ).toBeTruthy();
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Close', hidden: true }));
+    expect(await screen.findByText("Couldn't close the task")).toBeTruthy();
+    expect(screen.getByText("Task Broken can't be closed while Child waits on it")).toBeTruthy();
+
+    refuse = false;
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for Broken' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Close', hidden: true }));
+    await waitFor(() => {
+      expect(closed).toEqual([failed.taskId, failed.taskId]);
+    });
+    await waitFor(() => {
+      expect(screen.queryByText("Couldn't close the task")).toBeNull();
+    });
+  });
+
   it('the card menu holds Abandon back while the task is running', async () => {
     const batch = batchDto();
     const project = projectViewDto({ id: batch.projectId, currentBatch: batch });

@@ -30,6 +30,10 @@ export interface TaskCardMenuProps {
   readonly onAbandon?: () => void;
   /** Why Abandon is held back: a run on the branch is live, and the daemon won't cut it short. */
   readonly abandonRefusal?: string | null;
+  /** Present when the task's run failed; closing takes the task off the Board. */
+  readonly onCloseTask?: () => void;
+  /** The line under Close: what becomes of the task's branch or worktree. */
+  readonly closeLine?: string;
 }
 
 export function TaskCardMenu({
@@ -43,6 +47,8 @@ export function TaskCardMenu({
   onRetry,
   onAbandon,
   abandonRefusal = null,
+  onCloseTask,
+  closeLine,
 }: TaskCardMenuProps) {
   return (
     <Menu position="bottom-end" withinPortal>
@@ -78,8 +84,14 @@ export function TaskCardMenu({
                 : `Start (${parkedDependency} is parked; move it to Backlog or Ready first)`}
           </Menu.Item>
         ) : null}
-        {onRetry || onAbandon ? <Menu.Divider /> : null}
+        {onRetry || onAbandon || onCloseTask ? <Menu.Divider /> : null}
         {onRetry ? <Menu.Item onClick={onRetry}>Retry</Menu.Item> : null}
+        {onCloseTask ? (
+          <>
+            <Menu.Item onClick={onCloseTask}>Close</Menu.Item>
+            {closeLine ? <Menu.Label tt="none">{closeLine}</Menu.Label> : null}
+          </>
+        ) : null}
         {onAbandon ? (
           <Menu.Item color="red" disabled={abandonRefusal !== null} onClick={onAbandon}>
             {abandonRefusal === null ? 'Abandon' : `Abandon (${abandonRefusal.replace(/\.$/, '')})`}
