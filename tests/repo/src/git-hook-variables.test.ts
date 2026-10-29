@@ -198,7 +198,12 @@ describe('the test process environment', () => {
     const names = Object.keys(process.env).filter((name) => name.startsWith('GIT_'));
     expect(names.sort()).toEqual(['GIT_CONFIG_GLOBAL', 'GIT_CONFIG_NOSYSTEM']);
     expect(process.env['GIT_CONFIG_NOSYSTEM']).toBe('1');
-    expect(readFileSync(process.env['GIT_CONFIG_GLOBAL'] ?? '', 'utf8')).toBe('');
+    // The global file only points git's global ignore file at an empty one, in place of
+    // `~/.config/git/ignore`, which git reads whatever `GIT_CONFIG_GLOBAL` names.
+    const global = readFileSync(process.env['GIT_CONFIG_GLOBAL'] ?? '', 'utf8');
+    const ignore = /^\[core\]\n\texcludesFile = (.+)\n$/.exec(global)?.[1];
+    expect(ignore).toBeDefined();
+    expect(readFileSync(ignore ?? '', 'utf8')).toBe('');
   });
 
   // Every entry the root config runs, however it is written: a path to a directory or config file,
