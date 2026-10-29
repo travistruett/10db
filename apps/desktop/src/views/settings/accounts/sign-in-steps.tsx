@@ -23,7 +23,7 @@ export function SignInSteps({ account }: { readonly account: AccountDto }) {
           {signIn.error.message}
         </Text>
       ) : (
-        <Group gap="xs" wrap="nowrap" align="flex-start">
+        <Group gap="xs" wrap="nowrap" align="center">
           <Code block style={{ flex: 1, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
             {signIn.data.command}
           </Code>
