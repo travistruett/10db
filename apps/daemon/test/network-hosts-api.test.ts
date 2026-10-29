@@ -1,5 +1,6 @@
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import {
   DaemonEvent,
   EventType,
@@ -20,6 +21,27 @@ import { createGateSandbox } from '../src/sandbox';
 import { FakeAdapter } from '../src/sessions';
 import { apiClient } from './api-client';
 import { createTempRepo, FAKE_SRT, tempDir } from './fixtures';
+
+/**
+ * The shortest directory this process can create in: `/tmp`, or, where a sandbox denies it, the
+ * nearest writable ancestor of the OS temp dir. Lane temp paths must stay within 44 bytes.
+ */
+function shortWritableDir(): string {
+  const candidates = ['/tmp'];
+  for (let dir = realpathSync(tmpdir()); dir !== dirname(dir); dir = dirname(dir)) {
+    candidates.push(dir);
+  }
+  candidates.sort((a, b) => a.length - b.length);
+  for (const dir of candidates) {
+    try {
+      rmSync(mkdtempSync(join(dir, 'nh-')), { recursive: true });
+      return realpathSync(dir);
+    } catch {
+      // Not writable here; try the next one.
+    }
+  }
+  throw new Error('No writable temp directory');
+}
 
 let data: { path: string; cleanup(): void };
 let repo: { path: string; cleanup(): void };
@@ -291,12 +313,11 @@ describe('network hosts of a project', () => {
     await send('POST', hostsPath(project.id), { host: 'index.crates.io' });
     await send('POST', hostsPath(project.id), { host: 'static.crates.io' });
 
-    const root = realpathSync(mkdtempSync('/tmp/nh-'));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'nh-')));
     try {
       const home = join(root, 'home');
-      const tmpRoot = join(root, 't');
       mkdirSync(home);
-      mkdirSync(tmpRoot);
+      const tmpRoot = shortWritableDir();
       const git = createGit();
       const sandbox = createGateSandbox({
         home,
