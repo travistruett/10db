@@ -48,6 +48,13 @@ jobs:
       - run: bash scripts/gate.sh
       - if: failure()
         run: for f in .gate/*.log; do echo "::group::$f"; cat "$f"; echo "::endgroup::"; done
+      - if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: playwright-test-results
+          path: apps/desktop/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
 
   desktop:
     runs-on: macos-15
