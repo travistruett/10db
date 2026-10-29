@@ -28,7 +28,7 @@ const EVERYTHING: ProposedArea = {
   globs: ['**'],
 };
 
-const refuse =(message: string): AreaProposalResult => ({ ok: false, message });
+const refuse = (message: string): AreaProposalResult => ({ ok: false, message });
 
 function realOrResolved(path: string): string {
   try {
