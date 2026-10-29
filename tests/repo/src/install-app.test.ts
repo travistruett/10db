@@ -104,6 +104,24 @@ describe('install-app.sh refusals', () => {
     expectUntouched();
   });
 
+  const BRIDGE =
+    '57868 /Applications/10db.app/Contents/MacOS/tendb-node /Applications/10db.app/Contents/Resources/daemon/builder-mcp.mjs';
+
+  it('goes on past a builder MCP bridge, which holds no database', () => {
+    const result = install([], { STUB_RUNNING: BRIDGE });
+    expect(result.stderr).not.toContain('10db is running');
+    expect(gh().length).toBeGreaterThan(0);
+  });
+
+  it('refuses when the daemon runs beside a bridge, naming only the daemon', () => {
+    const daemon =
+      '57869 /Applications/10db.app/Contents/MacOS/tendb-node /Applications/10db.app/Contents/Resources/daemon/daemon.mjs';
+    const result = install([], { STUB_RUNNING: `${BRIDGE}\n${daemon}` });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('10db is running (process 57869)');
+    expectUntouched();
+  });
+
   it('refuses when 10db is opened while the build downloads, before backing up', () => {
     const result = install([], { STUB_RUNNING: '57868', STUB_RUNNING_FROM_CALL: '2' });
     expect(result.status).toBe(1);
@@ -534,6 +552,21 @@ describe('the running check', () => {
     ['-c', '. "$1"; printf %s "$app_process_pattern"', '_', 'scripts/release/installed-app.sh'],
     { cwd: repoRoot, encoding: 'utf8', env: { PATH: '/usr/bin:/bin', HOME: '/nonexistent' } },
   ).stdout;
+
+  const bridgePattern = spawnSync(
+    '/bin/bash',
+    ['-c', '. "$1"; printf %s "$bridge_process_pattern"', '_', 'scripts/release/installed-app.sh'],
+    { cwd: repoRoot, encoding: 'utf8', env: { PATH: '/usr/bin:/bin', HOME: '/nonexistent' } },
+  ).stdout;
+
+  it('does not count the builder MCP bridge', () => {
+    const line =
+      '/Applications/10db.app/Contents/MacOS/tendb-node /Applications/10db.app/Contents/Resources/daemon/builder-mcp.mjs';
+    expect(spawnSync('grep', ['-E', '-q', '--', pattern], { input: line }).status).toBe(0);
+    expect(spawnSync('grep', ['-E', '-q', '--', bridgePattern], { input: line }).status).toBe(0);
+    const daemon = line.replace('builder-mcp.mjs', 'daemon.mjs');
+    expect(spawnSync('grep', ['-E', '-q', '--', bridgePattern], { input: daemon }).status).toBe(1);
+  });
 
   it.each([
     { line: '/Applications/10db.app/Contents/MacOS/tendb-desktop', running: true },
