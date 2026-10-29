@@ -217,6 +217,23 @@ describe('history queries', () => {
     expect(await git.changedFilesSince(repo.path, base)).toEqual(['a.txt', 'b.txt']);
     expect(await git.commitsSince(repo.path, base)).toEqual([sha]);
   });
+
+  it('lists the files committed between two commits, not what is uncommitted', async () => {
+    const base = await git.head(repo.path);
+    mkdirSync(join(repo.path, 'dir'));
+    write('dir/a.txt', 'a');
+    write('b.txt', 'b');
+    const { sha } = await git.commit({
+      repo: repo.path,
+      paths: ['dir/a.txt', 'b.txt'],
+      message: 'a and b',
+      opId: 'op-history-2',
+      branch: 'main',
+    });
+    write('c.txt', 'c');
+    expect(await git.filesChangedBetween(repo.path, base, sha)).toEqual(['b.txt', 'dir/a.txt']);
+    expect(await git.filesChangedBetween(repo.path, sha, sha)).toEqual([]);
+  });
 });
 
 describe('gitDirs', () => {

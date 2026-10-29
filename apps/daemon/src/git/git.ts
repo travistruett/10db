@@ -107,6 +107,8 @@ export interface Git {
   changedPaths(repo: string, only?: readonly string[]): Promise<string[]>;
   /** Committed and uncommitted changes since `base`, sorted and unique. */
   changedFilesSince(repo: string, base: string): Promise<string[]>;
+  /** Files whose committed content differs between `base` and `tip`, sorted; nothing uncommitted. */
+  filesChangedBetween(repo: string, base: string, tip: string): Promise<string[]>;
   /** Commits on `tip` (HEAD unless named) since `base`, oldest first. */
   commitsSince(repo: string, base: string, tip?: string): Promise<string[]>;
   /** Filters the tree at `rev`, or the checkout's own attributes, ask for; empty when none. */
@@ -1158,6 +1160,22 @@ export function createGit(opts: GitOptions = {}): Git {
         .split('\0')
         .filter(Boolean);
       return [...new Set([...committed, ...working])].sort();
+    },
+    async filesChangedBetween(repo, base, tip) {
+      return (
+        await git(await pinned(repo), [
+          'diff-tree',
+          '-r',
+          '--name-only',
+          '--no-renames',
+          '-z',
+          base,
+          tip,
+        ])
+      )
+        .split('\0')
+        .filter(Boolean)
+        .sort();
     },
     async commitsSince(repo, base, tip = 'HEAD') {
       return (await git(await pinned(repo), ['rev-list', '--reverse', `${base}..${tip}`]))
