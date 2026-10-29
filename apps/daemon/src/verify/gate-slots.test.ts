@@ -1,8 +1,16 @@
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { tempDir } from '../../test/fixtures';
 import { ManualClock } from '../clock';
 import { silentLogger } from '../log';
 import { createGateSlots, GateSlotLimitError, limitGates } from './gate-slots';
-import type { GateRequest, GateResult, GateRunner } from './gate-runner';
+import {
+  createGateRunner,
+  type GateRequest,
+  type GateResult,
+  type GateRunner,
+} from './gate-runner';
 
 function request(overrides: Partial<GateRequest> = {}): GateRequest {
   return {
@@ -236,6 +244,51 @@ describe('gate slots', () => {
     expect((await gate.run(request({ command: 'late' }))).aborted).toBe(true);
     expect(started.map((r) => r.command)).toEqual(['first']);
     expect(slots.busy).toBe(0);
+  });
+
+  it("runs a gate's beforeStart only once it holds its slot, after the gate ahead has finished", async () => {
+    const dir = tempDir('gate-slot-order');
+    try {
+      const { gate } = limited(1, createGateRunner({ sandbox: null, logger: silentLogger }));
+      const firstDone = join(dir.path, 'first-done');
+      let releaseFirst: () => void = () => undefined;
+      const firstHeld = new Promise<void>((resolve) => {
+        releaseFirst = resolve;
+      });
+      const seen: string[] = [];
+      const gateRequest = (name: string, command: string, before: () => Promise<boolean>) =>
+        request({
+          project: { repoPath: dir.path, sandboxLoopback: false },
+          command,
+          logPath: join(dir.path, `${name}.log`),
+          env: { PATH: '/usr/bin:/bin' },
+          checkouts: [dir.path],
+          beforeStart: before,
+        });
+      const first = gate.run(
+        gateRequest('first', `touch '${firstDone}'`, async () => {
+          seen.push('first before');
+          await firstHeld;
+          return true;
+        }),
+      );
+      const second = gate.run(
+        gateRequest('second', 'true', () => {
+          seen.push(
+            existsSync(firstDone) ? 'second before, first finished' : 'second before, first not',
+          );
+          return Promise.resolve(true);
+        }),
+      );
+      await settle();
+      expect(seen).toEqual(['first before']);
+      releaseFirst();
+      expect((await first).exitCode).toBe(0);
+      expect((await second).exitCode).toBe(0);
+      expect(seen).toEqual(['first before', 'second before, first finished']);
+    } finally {
+      dir.cleanup();
+    }
   });
 
   it.each([[0], [-1], [1.5], [Number.NaN]])('refuses a limit of %s', (limit) => {

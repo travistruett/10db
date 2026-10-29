@@ -10,6 +10,7 @@ import {
 import { looseWork } from './build-output';
 import { keptWorktreeKey, worktreeCards } from './cards';
 import { raise, withdraw, type DeliveryContext } from './context';
+import { installedLockfileKey } from './installed-lockfile';
 import { removeIfEmptyDirectory } from './worktree-leftover';
 import { withWorktreeLock } from './worktree-lock';
 
@@ -102,6 +103,7 @@ async function retire(ctx: DeliveryContext, batchId: BatchId): Promise<Retiremen
     await ctx.git.deleteBranchIfAt(main, batch.branch, batch.baseSha);
   ctx.state.write((w) => {
     deleteAppSetting(w, worktreePinKey(batchId));
+    deleteAppSetting(w, installedLockfileKey(batchId));
     clearWorktreePath(w, batchId);
   });
   withdraw(ctx.state, ctx.inbox, project.id, [

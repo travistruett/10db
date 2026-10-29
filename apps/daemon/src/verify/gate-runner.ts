@@ -42,6 +42,12 @@ export interface GateRequest {
   readonly onWaiting?: (ahead: number) => void;
   /** True for a run that installs packages with pnpm; the sandbox opens pnpm's lock directory for it. */
   readonly packageInstall?: boolean;
+  /**
+   * Runs once the gate may start, after its slot and before its sandbox or command: work that must
+   * not change the checkout under another running gate, such as bringing a batch's base in. A false
+   * answer starts nothing, and the gate reports itself aborted.
+   */
+  readonly beforeStart?: () => Promise<boolean>;
 }
 
 export interface GateRunner {
@@ -196,6 +202,15 @@ function runGroup(
 export function createGateRunner(options: GateRunnerOptions): GateRunner {
   return {
     async run(request) {
+      if (request.beforeStart && !(await request.beforeStart()))
+        return {
+          exitCode: ABORT_EXIT,
+          durationMs: 0,
+          tail: '',
+          logPath: request.logPath,
+          timedOut: false,
+          aborted: true,
+        };
       if (options.sandbox === null) return runGroup(unsandboxed(request), request, null);
       let sandboxed: GateRun;
       try {

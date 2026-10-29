@@ -6,7 +6,7 @@ import {
   type TaskId,
 } from '@10db/contracts';
 import type { Json } from '@10db/db';
-import { GitNetworkError, worktreeRemovalCommand } from '../git';
+import { GitNetworkError, worktreeMergeCommand, worktreeRemovalCommand } from '../git';
 import { GhError } from '../github';
 import type { GateResult } from '../verify';
 import type { BlockedTask, UnmergedDependency } from './deps';
@@ -265,6 +265,20 @@ export const worktreeCards = {
   },
 };
 
+/** The fold key of a batch's conflict-with-its-base card, so a clean merge can withdraw it. */
+export const baseConflictKey = (batchId: BatchId): string => `base-conflict:${batchId}`;
+
+/** What delivery tells the builder when a worktree batch's branch can't take its base before a gate. */
+export const baseCards = {
+  /** `worktree` is the batch's worktree, where the builder can merge by hand. */
+  conflict: (batch: BatchDto, worktree: string, paths: readonly string[]): Card => ({
+    title: `Batch "${batch.title}" conflicts with ${batch.baseBranch}`,
+    body: `${batch.baseBranch} on origin changed these files in ways that conflict with the batch's own changes:\n${listPaths(paths)}\n\nBefore each gate 10db merges ${batch.baseBranch} into the batch's branch, so the gate tests what the pull request would merge. It can't resolve a conflict: a lane commits only its own files and never records a merge. Until the conflict is resolved, the gates test the branch without ${batch.baseBranch}'s newer commits, so a failure they fix still shows.\n\nOnce the pull request is open, resolve it there (GitHub's Update branch, then Resolve conflicts). Or merge it yourself in the worktree: ${worktreeMergeCommand(worktree, batch.baseBranch)}. That command turns the repository's hooks off, because lanes write in the worktree, so the hook config there is theirs to choose. The next gate tests the result, and this card goes once the branch holds ${batch.baseBranch}.`,
+    foldKey: baseConflictKey(batch.id),
+    detail: { batchId: batch.id, paths: paths.slice(0, MAX_LISTED_PATHS) },
+  }),
+};
+
 /**
  * A refused start's card names its tasks (and the batch it tried to join), so a client can tell a
  * refused start from a join that is still on its way: a joined task gets a workstream instead.
@@ -342,11 +356,12 @@ export const shipCards = {
       detail: { batchId: batch.id },
     },
   }),
-  gateFailed: (batch: BatchDto, gate: GateResult): ShipFailure => ({
+  /** `note` says why the gate ran without the batch's base as origin has it, when it did. */
+  gateFailed: (batch: BatchDto, gate: GateResult, note: string | null = null): ShipFailure => ({
     failure: BatchFailure.GateFailed,
     card: {
       title: `${notShipped(batch)}: the gate failed (exit ${String(gate.exitCode)})`,
-      body: `Last output:\n${gate.tail.slice(-1500)}\n\nFull log: ${gate.logPath}\n\nStart a fix task in the batch (it reopens the batch), or ${RETRY.charAt(0).toLowerCase()}${RETRY.slice(1)}`,
+      body: `${note === null ? '' : `${note}\n\n`}Last output:\n${gate.tail.slice(-1500)}\n\nFull log: ${gate.logPath}\n\nStart a fix task in the batch (it reopens the batch), or ${RETRY.charAt(0).toLowerCase()}${RETRY.slice(1)}`,
       detail: { batchId: batch.id },
     },
   }),
