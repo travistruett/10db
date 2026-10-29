@@ -86,7 +86,15 @@ import {
   type StartGate,
 } from '../accounts';
 import type { Clock, Timer } from '../clock';
-import { allCheckouts, batchCardFields, checkoutOf, projectAtCheckout } from '../delivery';
+import {
+  allCheckouts,
+  batchCardFields,
+  checkoutOf,
+  gateNote,
+  projectAtCheckout,
+  type BaseUpdate,
+  type BaseUpdates,
+} from '../delivery';
 import type { StateStore } from '../events';
 import {
   AccountLaunchError,
@@ -173,6 +181,8 @@ export interface RunnerOptions {
   readonly inbox: InboxService;
   readonly git: Git;
   readonly gate: GateRunner;
+  /** Brings a batch's base as origin has it now into its branch before each of its gates. */
+  readonly baseUpdates: BaseUpdates;
   readonly clock: Clock;
   readonly logger: Logger;
   readonly dataDir: string;
@@ -378,6 +388,20 @@ interface SessionState {
 /** Reads the stop reason afresh: a stop can land at any await, which narrowing cannot see. */
 function stopRequested(ctl: { readonly stopReason: StopReason | null }): StopReason | null {
   return ctl.stopReason;
+}
+
+/** The most of a gate's output its evidence keeps, a note on its base included. */
+const GATE_SUMMARY_CHARS = 2000;
+
+/**
+ * A gate's evidence text: the note on why it ran without its base as origin has it, when there is
+ * one, then as much of the end of its output as fits. A fix session reads both.
+ */
+function gateSummary(note: string | null, tail: string): string {
+  if (note === null) return tail.slice(-GATE_SUMMARY_CHARS);
+  const head = `${note}\n\n`;
+  const room = GATE_SUMMARY_CHARS - head.length;
+  return room > 0 ? `${head}${tail.slice(-room)}` : note.slice(0, GATE_SUMMARY_CHARS);
 }
 
 export function createRunner(opts: RunnerOptions): Runner {
@@ -1708,10 +1732,24 @@ export function createRunner(opts: RunnerOptions): Runner {
     const gateAbort = new AbortController();
     ctl.gateAbort = gateAbort;
     if (ctl.stopReason === 'cancelled' || ctl.stopReason === 'shutdown') gateAbort.abort();
+    // A batch's branch takes its base as origin has it now, so the gate tests what would merge
+    // rather than the base it was cut from. It runs once the gate holds its slot, so no other gate's
+    // merge changes the tree under a running gate. Work outside a batch has no base to take.
+    const before: { update: BaseUpdate | null } = { update: null };
+    const batchId = row.batchId;
     let recording: Promise<void> = Promise.resolve();
     const logPath = join(opts.dataDir, 'logs', 'gate', `${id}-${String(run)}.log`);
     opts.logger.info({ workstreamId: id, command: gateCommand, logPath }, 'gate started');
     const result = await opts.gate.run({
+      ...(batchId === null
+        ? {}
+        : {
+            beforeStart: async () => {
+              const update = await opts.baseUpdates.beforeGate(batchId, gateAbort.signal);
+              before.update = update;
+              return update.kind !== 'aborted';
+            },
+          }),
       project: projectAtCheckout(project, checkout),
       command: gateCommand,
       logPath,
@@ -1746,6 +1784,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         logPath: result.logPath,
         timedOut: result.timedOut,
         aborted: result.aborted,
+        base: before.update?.kind ?? null,
       },
       'gate finished',
     );
@@ -1771,7 +1810,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       kind: 'gate' as const,
       command: gateCommand,
       exitCode: result.exitCode,
-      summary: result.tail.slice(-2000),
+      summary: gateSummary(before.update === null ? null : gateNote(before.update), result.tail),
       logPath: result.logPath,
       commitShas,
     };

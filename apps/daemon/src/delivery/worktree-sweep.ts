@@ -17,8 +17,9 @@ import {
 import { realPathOf } from '../guard';
 import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
-import { worktreeCards } from './cards';
-import { raise } from './context';
+import { looseWork } from './build-output';
+import { keptWorktreeKey, worktreeCards } from './cards';
+import { raise, withdraw } from './context';
 import { unseededIgnoredFiles } from './worktree-cleanup';
 
 export interface SweepDeps {
@@ -118,11 +119,16 @@ async function sweepProject(deps: SweepDeps, project: ProjectDto): Promise<strin
         );
         continue;
       }
-      if (ignored.length > 0) {
-        raise(deps.inbox, project.id, worktreeCards.orphanIgnored(main, entry.path, ignored));
+      const loose = looseWork(ignored);
+      if (loose.length > 0) {
+        raise(deps.inbox, project.id, worktreeCards.orphanIgnored(main, entry.path, loose));
         continue;
       }
       const outcome = await deps.git.removeWorktree(main, entry.path);
+      withdraw(deps.state, deps.inbox, project.id, [
+        keptWorktreeKey.orphanChanges(entry.path),
+        keptWorktreeKey.orphanIgnored(entry.path),
+      ]);
       // The row that would key the pin may be gone, so the lock reason's id names it.
       if (orphan.ownsPin)
         deps.state.write((w) => {
@@ -146,10 +152,10 @@ async function sweepProject(deps: SweepDeps, project: ProjectDto): Promise<strin
  * At startup, so no crash leaves a worktree behind for good: in each pull_request project's main
  * checkout, remove every worktree under `root` locked `10db <batch id>` whose batch is gone or
  * whose `worktree_path` is cleared or different, then prune. An orphan with uncommitted changes,
- * one git can't read, or one holding git-ignored files 10db didn't seed is kept and named on a card. An unmarked entry, another lock reason and
- * anything outside `root` are never touched. A project or an entry git refuses is logged and
- * skipped (a trust refusal raises its own card), so startup goes on. Resolves with the paths
- * removed.
+ * one git can't read, or one holding git-ignored files 10db didn't seed that are not build output
+ * is kept and named on a card, which a later removal withdraws. An unmarked entry, another lock reason and anything outside `root`
+ * are never touched. A project or an entry git refuses is logged and skipped (a trust refusal
+ * raises its own card), so startup goes on. Resolves with the paths removed.
  */
 export async function sweepWorktrees(deps: SweepDeps): Promise<string[]> {
   const swept: string[] = [];

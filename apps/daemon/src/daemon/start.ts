@@ -51,6 +51,7 @@ import {
 import { systemClock, type Clock } from '../clock';
 import {
   allCheckouts,
+  createBaseUpdates,
   createBatchCardAnswers,
   createBatchStarter,
   createDeliveryJobs,
@@ -570,6 +571,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     inbox,
     git,
     gate,
+    baseUpdates: createBaseUpdates(delivery),
     clock,
     logger,
     dataDir: opts.dataDir,

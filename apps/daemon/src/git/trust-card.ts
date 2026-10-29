@@ -58,6 +58,18 @@ export function checkoutSwitchCommand(
     : `git switch ${detach}run in ${codeSpan(checkout)}, naming ${codeSpan(target)}`;
 }
 
+/**
+ * How the builder merges origin's `base` into the worktree at `path` by hand, with hooks off: lanes
+ * write in a worktree, so the hook config there (lefthook's, husky's) is theirs to choose. A command to
+ * paste when both values are plain, otherwise the command to type, naming each as a code span.
+ */
+export function worktreeMergeCommand(path: string, base: string): string {
+  const from = `origin/${base}`;
+  return PASTE_SAFE.test(path) && PASTE_SAFE.test(from)
+    ? `git -C ${shellQuote(path)} -c core.hooksPath=/dev/null merge ${shellQuote(from)}`
+    : `git -c core.hooksPath=/dev/null merge run in ${codeSpan(path)}, naming ${codeSpan(from)}`;
+}
+
 function body(error: GitTrustError): string {
   const { repo, detail } = error;
   const here = PASTE_SAFE.test(repo) ? ` in ${shellQuote(repo)}` : ` in ${codeSpan(repo)}`;

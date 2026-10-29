@@ -117,6 +117,11 @@ export interface RunOptions {
   readonly input?: string | Buffer;
   /** Config placed before `DAEMON_GIT_CONFIG`'s, as `-c` arguments. */
   readonly config?: readonly string[];
+  /**
+   * Exit codes besides 0 that resolve with stdout, for a command whose exit code is part of its
+   * answer, such as `merge-tree`'s 1 for a conflict.
+   */
+  readonly answerExitCodes?: readonly number[];
   /** Defaults to `GIT_TIMEOUT_MS`. */
   readonly timeoutMs?: number;
   /** The git to run: the absolute path `resolveGit` found, never a name looked up on PATH. */
@@ -191,7 +196,8 @@ function runGitBytes(
       clearTimeout(timer);
       const stdout = Buffer.concat(out);
       if (failure !== null) reject(new GitError(args, failure, code));
-      else if (capped || code === 0) resolve(stdout);
+      else if (capped || code === 0 || (code !== null && opts.answerExitCodes?.includes(code)))
+        resolve(stdout);
       else reject(new GitError(args, `${stderr}\n${stdout.toString('utf8')}`, code));
     });
   });

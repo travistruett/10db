@@ -90,6 +90,29 @@ async function tolerate(act: Promise<unknown>): Promise<void> {
   });
 }
 
+/**
+ * A branch `side` one commit past `other`, made with plumbing and every hook, monitor, filter and
+ * signature off, so making it runs nothing an act is tested for.
+ */
+function sideBranch(): void {
+  const quiet = ['-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false'];
+  const run = (args: string[], input?: string, extra: Record<string, string> = {}) =>
+    execFileSync('git', ['-C', repo.path, ...quiet, ...args], {
+      env: { ...isolatedGitEnv(), ...extra },
+      input: input ?? '',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
+      .toString()
+      .trim();
+  const blob = run(['hash-object', '-w', '--no-filters', '--stdin'], 'side\n');
+  const index = { GIT_INDEX_FILE: join(scratch.path, 'side-index') };
+  run(['read-tree', 'other'], undefined, index);
+  run(['update-index', '--add', '--cacheinfo', `100644,${blob},side.txt`], undefined, index);
+  const tree = run(['write-tree'], undefined, index);
+  const commit = run(['commit-tree', '--no-gpg-sign', tree, '-p', 'other'], 'side\n');
+  run(['update-ref', 'refs/heads/side', commit]);
+}
+
 const commitA = (git: Git, opId = 'op-trust-a1', branch = 'main') => {
   write('a.txt', `a ${opId}`);
   return git.commit({ repo: repo.path, paths: ['a.txt'], message: 'a', opId, branch });
@@ -132,6 +155,32 @@ describe('no program from the checkout runs in a daemon git call', () => {
     { name: 'commit', act: (git) => commitA(git) },
     { name: 'a retried commit', act: (git) => commitA(git).then(() => commitA(git)) },
     {
+      name: 'mergedCommit',
+      act: (git) => {
+        sideBranch();
+        return git.mergedCommit({
+          repo: repo.path,
+          ours: 'main',
+          theirs: 'side',
+          ref: 'refs/10db/starts/x',
+          message: 'start',
+        });
+      },
+    },
+    {
+      // After the commits, so main has its own: a merge commit, read-tree -m -u and update-ref.
+      name: 'mergeIntoBranch',
+      act: (git) => {
+        sideBranch();
+        return git.mergeIntoBranch({
+          repo: repo.path,
+          branch: 'main',
+          from: 'side',
+          message: 'merge',
+        });
+      },
+    },
+    {
       name: 'switchNewBranch',
       act: (git) => git.switchNewBranch(repo.path, '10db/x-0a1b2c3d', 'other'),
     },
@@ -152,6 +201,8 @@ describe('no program from the checkout runs in a daemon git call', () => {
     'post-index-change',
     'post-checkout',
     'reference-transaction',
+    'pre-merge-commit',
+    'post-merge',
   ];
   it.each([
     {
@@ -827,6 +878,22 @@ describe('the checkout is the one pinned for it', () => {
     { name: 'commitsSince', act: (git: Git, path: string) => git.commitsSince(path, 'HEAD') },
     { name: 'gitDirs', act: (git: Git, path: string) => git.gitDirs(path) },
     { name: 'commit', act: (git: Git) => commitA(git, 'op-swap') },
+    {
+      name: 'mergeIntoBranch',
+      act: (git: Git, path: string) =>
+        git.mergeIntoBranch({ repo: path, branch: 'main', from: 'HEAD', message: 'merge' }),
+    },
+    {
+      name: 'mergedCommit',
+      act: (git: Git, path: string) =>
+        git.mergedCommit({
+          repo: path,
+          ours: 'HEAD',
+          theirs: 'HEAD',
+          ref: 'refs/10db/starts/x',
+          message: 'start',
+        }),
+    },
     {
       name: 'switchNewBranch',
       act: (git: Git, path: string) => git.switchNewBranch(path, '10db/x-0a1b2c3d', 'HEAD'),

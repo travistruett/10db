@@ -90,6 +90,13 @@ Follow these steps in order on a new computer. Each one says how to check it wor
       Add an `allowBuilds` entry for it in `pnpm-workspace.yaml`, `true` only if the package needs
       its script to work.
 
+## Install the app from main
+
+To run 10db itself on your Mac, install GitHub's build of main instead of building the app: quit 10db (⌘Q),
+run `make install-app`, then open 10db. `make rollback-app` puts the previous app back. What each step does,
+and where the backups and the previous app go, is in
+[README.md](README.md#install-the-app-from-main).
+
 ## Commits
 
 Commits follow [Conventional Commits](https://www.conventionalcommits.org): `type(scope): subject` (the `(scope)` is optional),
