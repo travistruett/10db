@@ -738,16 +738,31 @@ describe('recoverOnStartup for a project without a gate command', () => {
     expect(getWorkstream(state.db, ws.workstream.id).state).not.toBe('DONE');
   });
 
-  it('never completes a waiting workstream: no recovery path reaches DONE', async () => {
-    const first = waitingForCheck('OPEN');
-    const rows = [
-      first,
-      waitingForCheck('ANSWERED', undefined, first.project),
-      waitingForCheck('CANCELLED', undefined, first.project),
-    ];
-    await recover();
-    await recover();
-    for (const r of rows)
-      expect(getWorkstream(state.db, r.workstream.id).state).toBe('WAITING_HUMAN');
+  it('reads git only when the card has to be raised again', async () => {
+    const reads: string[] = [];
+    const git = createGit();
+    const watching = {
+      ...git,
+      head: (...args: Parameters<typeof git.head>) => (reads.push('head'), git.head(...args)),
+      commitsSince: (...args: Parameters<typeof git.commitsSince>) => (
+        reads.push('commitsSince'),
+        git.commitsSince(...args)
+      ),
+    };
+    const run = () =>
+      recoverOnStartup({
+        state,
+        inbox,
+        git: watching,
+        processes: systemProcesses,
+        maxRecoveryAttempts: 3,
+        logger: silentLogger,
+      });
+    const kept = waitingForCheck('OPEN');
+    await run();
+    expect(reads).toEqual([]);
+    waitingForCheck('CANCELLED', undefined, kept.project);
+    await run();
+    expect(reads).toEqual(['head', 'commitsSince']);
   });
 });

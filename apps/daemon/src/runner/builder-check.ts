@@ -16,6 +16,11 @@ export interface BuilderCheck {
   readonly commits: readonly string[];
 }
 
+function commitsReady(count: number): string {
+  if (count === 0) return 'No commits were made.';
+  return count === 1 ? '1 commit is ready.' : `${String(count)} commits are ready.`;
+}
+
 /** The live `check` card of a workstream, if the builder has not finished with it. */
 export function liveCheckCard(db: DbReader, workstreamId: WorkstreamId): InboxItemDto | undefined {
   return openItemsForWorkstream(db, workstreamId).find((item) => item.kind === 'check');
@@ -32,7 +37,7 @@ export function raiseBuilderCheck(ctx: WriteContext, check: BuilderCheck): Inbox
     projectId: check.projectId,
     kind: 'check',
     title: `Ready for you to check: ${check.taskTitle}`,
-    body: `${String(check.commits.length)} commit(s) are ready. Approve to finish the task, or send it back with a note.`,
+    body: `${commitsReady(check.commits.length)} Approve to finish the task, or send it back with a note.`,
     options: [
       { label: 'approve', description: 'The work is right' },
       { label: 'send_back', description: 'It needs more work' },

@@ -12,12 +12,14 @@ import {
 import {
   acquireLease,
   activeClaims,
+  countLanes,
   getAccount,
   getProject,
   getTask,
   getWorkstream,
   getWorkstreamRow,
   insertBatch,
+  insertInboxItem,
   listEventsAfter,
   listEvidence,
   listInbox,
@@ -28,6 +30,7 @@ import {
   seedAccount,
   transitionBatch,
   transitionWorkstream,
+  updateInboxItem,
 } from '@10db/db';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -3218,6 +3221,10 @@ describe('without a gate command', () => {
     expect(ws(workstream.id).nextAction).toEqual({ kind: 'start' });
     expect(listEvidence(engine.store.db, workstream.id)).toEqual([]);
     expect(transitions(workstream.id).at(-1)).toBe('VERIFYING->QUEUED');
+    const advance = listEventsAfter(engine.store.db, 0, 1000)
+      .filter((e) => e.type === 'workstream.changed' && e.entityId === workstream.id)
+      .at(-1);
+    expect(advance?.data['reason']).toMatch(/^no gate command; next: /);
     expect(checkCards()).toEqual([]);
   });
 
@@ -3246,6 +3253,87 @@ describe('without a gate command', () => {
     );
     for (let i = 0; i < row.launches; i += 1) await runToWait(workstream.id);
     expectWaitingForTheBuilder(workstream.id, 'Alpha', row.commits);
+    expect(countLanes(engine.store.db).byProject.get(task.projectId) ?? 0).toBe(0);
+    expect(openChecks()[0]?.body).toBe(
+      `${row.commits === 1 ? '1 commit is ready.' : `${String(row.commits)} commits are ready.`} Approve to finish the task, or send it back with a note.`,
+    );
+    neverDone(workstream.id, task.id);
+  });
+
+  it.each([
+    { name: 'a permission card', kind: 'permission' as const, choice: 'allow_once' },
+    { name: 'a question card', kind: 'question' as const, choice: 'Yes' },
+  ])(
+    'an answer to another card targeting a waiting workstream leaves it WAITING_HUMAN with the same next action: $name',
+    async ({ kind, choice }) => {
+      engine = await createTestEngine(
+        { Alpha: [implement('op-nogate-0051')] },
+        { gateCommand: null },
+      );
+      const { task, workstream } = engine.addTask('Alpha');
+      await runToWait(workstream.id);
+      const before = ws(workstream.id);
+      const sessions = engine.adapter.prompts.length;
+      // The step ended before the builder answered this card, so no waiter is left for it.
+      const other = engine.state.write((ctx) =>
+        insertInboxItem(ctx, {
+          projectId: task.projectId,
+          kind,
+          title: 'Late question',
+          body: 'Asked before the step ended',
+          options: [{ label: choice, description: '' }],
+          recommendation: null,
+          category: 'product',
+          urgency: 'normal',
+          detail: null,
+          foldKey: null,
+          targets: [{ workstreamId: workstream.id, sessionId: null }],
+        }),
+      );
+      engine.inbox.answer(other.id, { choice });
+      expect(ws(workstream.id)).toMatchObject({
+        state: 'WAITING_HUMAN',
+        nextAction: before.nextAction,
+      });
+      expect(engine.adapter.prompts).toHaveLength(sessions);
+      expect(openChecks()).toHaveLength(1);
+      neverDone(workstream.id, task.id);
+    },
+  );
+
+  it('an answer to another card redelivered by recovery leaves a waiting workstream WAITING_HUMAN with the same next action', async () => {
+    engine = await createTestEngine(
+      { Alpha: [implement('op-nogate-0052')] },
+      { gateCommand: null },
+    );
+    const { task, workstream } = engine.addTask('Alpha');
+    await runToWait(workstream.id);
+    const before = ws(workstream.id);
+    const sessions = engine.adapter.prompts.length;
+    // Answered, but the daemon stopped before the answer reached its target.
+    engine.state.write((ctx) => {
+      const item = insertInboxItem(ctx, {
+        projectId: task.projectId,
+        kind: 'permission',
+        title: 'Late permission',
+        body: 'Asked before the step ended',
+        options: [{ label: 'allow_once', description: '' }],
+        recommendation: null,
+        category: 'product',
+        urgency: 'normal',
+        detail: null,
+        foldKey: null,
+        targets: [{ workstreamId: workstream.id, sessionId: null }],
+      });
+      updateInboxItem(ctx, item.id, { state: 'ANSWERED', answer: { choice: 'allow_once' } });
+    });
+    const report = await recover();
+    expect(report.redelivered).toHaveLength(1);
+    expect(ws(workstream.id)).toMatchObject({
+      state: 'WAITING_HUMAN',
+      nextAction: before.nextAction,
+    });
+    expect(engine.adapter.prompts).toHaveLength(sessions);
     neverDone(workstream.id, task.id);
   });
 

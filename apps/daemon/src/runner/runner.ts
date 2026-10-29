@@ -1945,6 +1945,9 @@ export function createRunner(opts: RunnerOptions): Runner {
     deliverParkedAnswer(target, item) {
       const row = getWorkstreamRow(db, target.workstreamId);
       if (row.state !== S.WaitingHuman || row.currentSessionId !== null) return;
+      // The workstream waits for the builder's check, not for this card; only the check card's own
+      // answer moves it.
+      if (row.nextAction.kind === 'builder_review') return;
       const providerSessionId =
         row.nextAction.kind === 'answer' ? row.nextAction.providerSessionId : null;
       opts.state.write((ctx) =>
