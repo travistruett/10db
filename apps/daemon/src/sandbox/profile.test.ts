@@ -215,6 +215,22 @@ describe('buildLaneProfile', () => {
     expect(allowWrite).not.toContain(secret);
   });
 
+  it('denies a toolchain secret inside a toolchain read that is open whole, and refuses one that holds it', () => {
+    const installs = join(home, '.local', 'share', 'mise', 'installs');
+    const etc = join(installs, 'node', '26.12.0', 'etc');
+    const { allowRead, denyRead } = buildLaneProfile(
+      input({ toolchainReads: [installs], toolchainSecrets: [etc, join(etc, 'npmrc')] }),
+    ).filesystem;
+    expect(allowRead).toContain(installs);
+    expect(denyRead).toEqual(expect.arrayContaining([etc, join(etc, 'npmrc')]));
+    for (const secret of [installs, join(home, '.local')]) {
+      const build = () =>
+        buildLaneProfile(input({ toolchainReads: [installs], toolchainSecrets: [secret] }));
+      expect(build).toThrow(SandboxProfileError);
+      expect(build).toThrow(/a toolchain file that can hold a registry token/);
+    }
+  });
+
   it('denies the toolchain secrets to the commands', () => {
     expect(buildLaneProfile(input()).filesystem.denyRead).toContain(
       join(home, '.cargo', 'credentials.toml'),

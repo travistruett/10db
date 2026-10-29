@@ -413,6 +413,8 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
         MISE_GLOBAL_CONFIG_FILE: join(session.tmpDir, 'mise', 'config.toml'),
         MISE_SYSTEM_DIR: join(session.tmpDir, 'mise'),
         MISE_SYSTEM_CONFIG_FILE: join(session.tmpDir, 'mise', 'system.toml'),
+        MISE_LOG_LEVEL: 'error',
+        xcrun_db: join(session.tmpDir, 'xcrun_db'),
         CLAUDE_CODE_TMPDIR: session.tmpDir,
         GIT_CONFIG_GLOBAL: '/dev/null',
         GIT_OPTIONAL_LOCKS: '0',
@@ -446,6 +448,32 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       const { allowRead, denyRead } = session.spec.settings.filesystem;
       expect(allowRead.filter((path) => path.startsWith(join(home, '.config')))).toEqual([]);
       expect(denyRead).toContain(join(home, '.config/mise/age.txt'));
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it("lets the lane list mise's installs but keeps every version's etc and npmrc, mise's age key and its data dir closed", async () => {
+    const mise = join(home, '.local', 'share', 'mise');
+    const version = join(mise, 'installs', 'node', '26.12.0');
+    writeIn(version, 'bin/node');
+    writeIn(version, 'etc/npmrc');
+    writeIn(mise, 'downloads/x');
+    writeIn(home, '.config/mise/age.txt');
+    const session = await sandbox().forSession(input());
+    try {
+      const { allowRead, denyRead, allowWrite } = session.spec.settings.filesystem;
+      expect(allowRead).toContain(join(mise, 'installs'));
+      expect(allowRead).not.toContain(mise);
+      expect(allowRead.filter((path) => path.startsWith(join(mise, 'downloads')))).toEqual([]);
+      expect(denyRead).toEqual(
+        expect.arrayContaining([
+          join(version, 'etc'),
+          join(version, 'etc', 'npmrc'),
+          join(home, '.config/mise/age.txt'),
+        ]),
+      );
+      expect(allowWrite).toEqual([session.tmpDir]);
     } finally {
       session.dispose();
     }

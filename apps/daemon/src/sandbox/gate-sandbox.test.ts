@@ -263,12 +263,46 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
         MISE_GLOBAL_CONFIG_FILE: join(run.tmpDir, 'mise', 'config.toml'),
         MISE_SYSTEM_DIR: join(run.tmpDir, 'mise'),
         MISE_SYSTEM_CONFIG_FILE: join(run.tmpDir, 'mise', 'system.toml'),
+        MISE_LOG_LEVEL: 'error',
+        xcrun_db: join(run.tmpDir, 'xcrun_db'),
         GIT_CONFIG_GLOBAL: '/dev/null',
         GIT_OPTIONAL_LOCKS: '0',
         // An empty config home: git and the rest find no config, rather than the builder's.
         XDG_CONFIG_HOME: join(run.tmpDir, 'config'),
         TENDB_SANDBOX: '1',
       });
+    });
+  });
+
+  it("lets the gate list mise's installs but keeps every version's etc and npmrc, mise's age key and its data dir closed", async () => {
+    const mise = join(home, '.local', 'share', 'mise');
+    const version = join(mise, 'installs', 'node', '26.12.0');
+    for (const file of [
+      join(version, 'bin', 'node'),
+      join(version, 'etc', 'npmrc'),
+      join(mise, 'downloads', 'x'),
+      join(home, '.config', 'mise', 'age.txt'),
+    ]) {
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(file, 'x');
+    }
+    await withRun(input(), (run) => {
+      const { filesystem } = settingsOf(run);
+      const allowRead = filesystem['allowRead'] ?? [];
+      const denyRead = filesystem['denyRead'] ?? [];
+      const allowWrite = filesystem['allowWrite'] ?? [];
+      expect(allowRead).toContain(join(mise, 'installs'));
+      expect(allowRead).not.toContain(mise);
+      expect(allowRead.filter((path) => path.startsWith(join(mise, 'downloads')))).toEqual([]);
+      expect(denyRead).toEqual(
+        expect.arrayContaining([
+          join(version, 'etc'),
+          join(version, 'etc', 'npmrc'),
+          join(home, '.config', 'mise', 'age.txt'),
+        ]),
+      );
+      // Nothing under the toolchains is writable: mise's state and installs stay read-only.
+      expect(allowWrite.some((path) => isEqualOrUnder(path, home))).toBe(false);
     });
   });
 

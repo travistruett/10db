@@ -32,6 +32,14 @@ export function prepareCommandEnv(
     // mise's system config moves to the sandbox's own dir too, where none exists.
     MISE_SYSTEM_DIR: miseConfigDir,
     MISE_SYSTEM_CONFIG_FILE: join(miseConfigDir, 'system.toml'),
+    // mise records each config file it loads under its state dir, which a sandbox reads but can't
+    // write, and warns on every command when the write is refused. The warning is the only effect;
+    // errors still show.
+    MISE_LOG_LEVEL: 'error',
+    // Apple's `/usr/bin/git` and `make` are xcrun shims that cache their tool lookup in a file in
+    // the per-user Darwin temp dir, which a sandbox can't write; each call then prints an error and
+    // repeats the lookup. xcrun creates the cache where this names it.
+    xcrun_db: join(tmpDir, 'xcrun_db'),
     // An exception to keeping git config variables: the builder's global config can name hooks,
     // credential helpers and includes the sandboxed git would run or read.
     GIT_CONFIG_GLOBAL: '/dev/null',
