@@ -446,7 +446,7 @@ describe('useProjectSetup', () => {
     });
   });
 
-  it('sends the defaults for a pull-request project', async () => {
+  it('sends the defaults for a pull-request project, with no title prefix', async () => {
     const served = serve();
     const created = vi.fn();
     await openForm(created);
@@ -465,7 +465,6 @@ describe('useProjectSetup', () => {
       nudgePct: 50,
       delivery: 'pull_request',
       baseBranch: 'main',
-      prTitlePrefix: 'feat',
     });
     await waitFor(() => {
       expect(created).toHaveBeenCalledTimes(1);

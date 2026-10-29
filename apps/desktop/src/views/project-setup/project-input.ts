@@ -4,8 +4,6 @@ import { Delivery, type AccountId, type ProjectInput } from '@10db/contracts';
 const REPO_AREA = { name: 'repo', globs: ['**'] };
 const HANDOFF_PCT = 40;
 const NUDGE_PCT = 50;
-/** Pull request delivery needs a prefix; Settings shows it as an override. */
-const PR_TITLE_PREFIX = 'feat';
 
 export interface ProjectChoices {
   readonly name: string;
@@ -29,8 +27,7 @@ export function toProjectInput(choices: ProjectChoices): ProjectInput {
     nudgePct: NUDGE_PCT,
     delivery: choices.delivery,
     ...(choices.accountId === null ? {} : { accountId: choices.accountId }),
-    ...(choices.delivery === Delivery.PullRequest
-      ? { baseBranch: choices.baseBranch.trim(), prTitlePrefix: PR_TITLE_PREFIX }
-      : {}),
+    // The pull request title prefix is left to Settings, where it is an optional override.
+    ...(choices.delivery === Delivery.PullRequest ? { baseBranch: choices.baseBranch.trim() } : {}),
   };
 }

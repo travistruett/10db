@@ -1,6 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
-import { E2E_REPO } from './paths';
+import { E2E_REPO, E2E_TOKEN } from './paths';
+import { daemonUrl } from './daemon-url';
 
 const TASK = 'Write the greeting';
 const OTHER = 'Tidy the readme';
@@ -47,24 +48,27 @@ async function open(page: Page, view: (typeof VIEWS)[number]): Promise<void> {
 
 test.describe.configure({ mode: 'serial' });
 
-test('runs a task from the UI to verified done, and a reload loses nothing', async ({ page }) => {
+test('runs a task from the UI to verified done, and a reload loses nothing', async ({
+  page,
+  request,
+}) => {
+  // The window opens on the first run while there is no project (first-run.spec.ts covers it), so
+  // the project on the disposable repo is created through the API before the page loads.
+  const created = await request.post(`${daemonUrl}/projects`, {
+    headers: { Authorization: `Bearer ${E2E_TOKEN}` },
+    data: {
+      name: 'e2e',
+      repoPath: E2E_REPO,
+      gateCommand:
+        "test -f src/greeting/hello.txt && git diff --quiet HEAD && git log -1 --format=%s | grep -qx 'Add the greeting'",
+      areas: [{ name: 'greeting', globs: ['src/greeting/**'] }],
+      handoffPct: 40,
+      nudgePct: 50,
+      delivery: 'local',
+    },
+  });
+  expect(created.ok()).toBe(true);
   await page.goto('/board');
-  await expect(page.getByText('No projects yet. Create one to start.')).toBeVisible();
-  await expectAccessible(page, 'board, empty, dark');
-
-  // Create the project on the disposable repo.
-  await page.getByRole('button', { name: 'New project' }).click();
-  const projectDialog = page.getByRole('dialog', { name: 'New project' });
-  await projectDialog.getByLabel('Name', { exact: true }).fill('e2e');
-  await projectDialog.getByLabel('Repository path').fill(E2E_REPO);
-  await projectDialog
-    .getByLabel('Gate command')
-    .fill(
-      "test -f src/greeting/hello.txt && git diff --quiet HEAD && git log -1 --format=%s | grep -qx 'Add the greeting'",
-    );
-  await projectDialog.getByLabel('Areas').fill('greeting: src/greeting/**');
-  await projectDialog.getByRole('button', { name: 'Create project' }).click();
-  await expect(projectDialog).toBeHidden();
 
   // A new project starts with an Icebox column for parked work.
   // An empty list has no height, so it is attached rather than visible.
