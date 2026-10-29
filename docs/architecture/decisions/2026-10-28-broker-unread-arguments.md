@@ -75,7 +75,7 @@ The scan reads the command's text with these rules, and nothing more:
   name there as the variable it names, and its value again, so a name is as unread as `$n`. An arithmetic
   expansion, `$[…]`, a subscript on an assigned or expanded name (`@` and `*` aside), a `${a:off:len}` offset, the
   operands of `let` and of a test's `-eq`-style operators, the name after `-v`, and the values given to
-  `declare -i` are unread unless every operand is a number or an operator. Every subscript and offset in a `${…}` is checked, whatever the prefix. A script that declares an integer attribute anywhere (`declare`, `typeset`, `local`, `export`, `readonly` with `-i`, or `integer`, through runners, nested scripts and substitutions) is unread as a whole. `[ "$#" -eq 0 ]` therefore earns
+  `declare -i` are unread unless every operand is a number or an operator. Every subscript and offset in a `${…}` is checked, whatever the prefix. A script that declares an integer attribute anywhere (`declare`, `typeset`, `local`, `export`, `readonly` with `-i`, or `integer`, through runners, nested scripts and substitutions) is unread as a whole, and so is one that declares a nameref (`-n`) or expands a variable by another's name (`${!name}`; the name-listing forms `${!prefix*}`, `${!prefix@}` and `${!a[@]}` are read). `[ "$#" -eq 0 ]` therefore earns
   a card.
 - The shell keywords the scan skips (`for`, `select`, `done`, `fi`, `esac`) are judged on the word as written, so
   `./done` and `$D/fi` are programs.

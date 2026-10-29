@@ -1,6 +1,12 @@
 import { posix } from 'node:path';
 import type { HazardDef } from '@10db/contracts';
-import { declaresInteger, evaluatesUnread, unreadArithmeticIn } from './arithmetic-words';
+import {
+  declaresInteger,
+  declaresNameref,
+  expandsIndirectly,
+  evaluatesUnread,
+  unreadArithmeticIn,
+} from './arithmetic-words';
 import { plainWords, RUNNERS } from './command-forms';
 import { commandOf, SHELL_C_FLAG, shellQuote, shellScripts } from './judge';
 import {
@@ -350,7 +356,10 @@ function scanSegment(
     : null;
 }
 
-/** Whether the script, or a script inside it, gives a variable the integer attribute. */
+/**
+ * Whether the script, or a script inside it, gives a variable the integer attribute or makes a
+ * name refer to another, or expands a variable by another's name.
+ */
 function declaresIntegerAnywhere(command: string, depth: number): boolean {
   if (depth > MAX_DEPTH + 1) return true;
   return parseShell(command).segments.some((segment) => {
@@ -360,7 +369,8 @@ function declaresIntegerAnywhere(command: string, depth: number): boolean {
       keepCommandPath: true,
     });
     const head = commandName(words[0] ?? '');
-    if (declaresInteger(head, words)) return true;
+    if (declaresInteger(head, words) || declaresNameref(head, words)) return true;
+    if (segment.words.some((word) => expandsIndirectly(word))) return true;
     const inner = [
       ...segment.nested,
       ...segment.hereDocuments,
@@ -401,8 +411,8 @@ function scanScript(command: string, depth: number, outer: Scanner): Unread | nu
  * caller still asks `hazardHit` first.
  */
 export function firstUnread(command: string, hazards: readonly HazardDef[]): Unread | null {
-  // An integer variable evaluates what is assigned to it, here or in a later command, so any
-  // declaration of one makes the whole script unread.
+  // An integer or a nameref evaluates what is assigned to it, here or in a later command, and an
+  // indirect expansion looks up a name it holds, so any of them makes the whole script unread.
   if (declaresIntegerAnywhere(command, 0)) return { reason: UnreadReason.Script, text: command };
   return scanScript(command, 0, {
     patterns: hazardPatterns(hazards),

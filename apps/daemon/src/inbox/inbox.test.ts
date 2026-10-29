@@ -1170,6 +1170,9 @@ describe('permission broker in a sandboxed lane', () => {
       command: 'command typeset -i x; x=n',
       outcome: 'card',
     },
+    { name: 'indirect expansion', command: 'echo ${!ref}', outcome: 'card' },
+    { name: 'a nameref', command: 'declare -n r=x; r=1', outcome: 'card' },
+    { name: 'names with a prefix', command: 'echo ${!BASH*}', outcome: 'allow' },
     // A structure the parser cannot read.
     { name: 'an unclosed double quote', command: 'echo "unclosed', outcome: 'card' },
     { name: 'an unclosed single quote', command: "echo 'unclosed", outcome: 'card' },

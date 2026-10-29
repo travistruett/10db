@@ -67,6 +67,21 @@ export function declaresInteger(head: string, words: readonly string[]): boolean
   return DECLARING.has(head) && words.slice(1).some((word) => /^-[a-zA-Z]*i/.test(word));
 }
 
+/** A declaration that makes a name refer to another variable, which later assignments follow. */
+export function declaresNameref(head: string, words: readonly string[]): boolean {
+  return DECLARING.has(head) && words.slice(1).some((word) => /^-[a-zA-Z]*n/.test(word));
+}
+
+/**
+ * Whether a word expands a variable named by another variable's value, `${!name}`. The forms that
+ * list names (`${!prefix*}`, `${!prefix@}`, `${!a[@]}`) name nothing to look up.
+ */
+export function expandsIndirectly(word: string): boolean {
+  return [...word.matchAll(/\$\{!([^}]*)\}/g)].some(
+    (match) => !/^(?:\w+[*@]|\w+\[[@*]\])$/.test(match[1] ?? ''),
+  );
+}
+
 /**
  * Whether a builtin evaluates its words as arithmetic or as a variable name with a subscript, and
  * one of them is not a plain number or name. `printf -v` takes a name, and `let` an expression.
