@@ -516,6 +516,14 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
       expect(readdirSync(victim).sort()).toEqual(['file', 'sub']);
     });
 
+    it('throws a typed error when an entry cannot be removed, after trying the rest', async () => {
+      const run = await sandbox().forRun(input({ packageInstall: true }));
+      mkdirSync(join(pnpmLockDir, 'a', 'b'), { recursive: true });
+      writeFileSync(join(pnpmLockDir, 'a', 'b', 'x'), '');
+      await expect(run.dispose()).rejects.toThrow(SandboxProfileError);
+      expect(existsSync(pnpmLockDir)).toBe(false);
+    });
+
     it.each([
       [
         'a file',
