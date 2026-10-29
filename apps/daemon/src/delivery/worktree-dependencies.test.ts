@@ -9,7 +9,7 @@ import {
 import { join } from 'node:path';
 import { mintId, type BatchDto, type ProjectDto } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { tempDir, type TempDir } from '../../test/fixtures';
+import { SANDBOXED, tempDir, type TempDir } from '../../test/fixtures';
 import { ManualClock } from '../clock';
 import { silentLogger } from '../log';
 import { createGateRunner, type GateRequest, type GateRunner } from '../verify';
@@ -193,46 +193,51 @@ describe('refreshing a worktree’s dependencies', () => {
   });
 
   // The real pnpm: what a repository's own files must not decide.
-  it('runs the builder’s pnpm and writes only where the daemon says, whatever the repository asks', async () => {
-    writeFileSync(
-      join(worktree, 'package.json'),
-      '{"name":"pj","version":"1.0.0","packageManager":"pnpm@9.0.0"}\n',
-    );
-    writeFileSync(
-      join(worktree, 'pnpm-lock.yaml'),
-      "lockfileVersion: '9.0'\n\nimporters:\n\n  .: {}\n",
-    );
-    mkdirSync(join(worktree, 'node_modules'));
-    const evil = join(tmp.path, 'evil');
-    writeFileSync(
-      join(worktree, '.npmrc'),
-      `store-dir=${evil}/store\nmodules-dir=evil_modules\nvirtual-store-dir=evil_virtual\n`,
-    );
-    const store = join(tmp.path, 'store');
-    const env = Object.fromEntries(
-      Object.entries(process.env).flatMap(([k, v]) =>
-        v === undefined || k.startsWith('pnpm_config_') ? [] : [[k, v]],
-      ),
-    );
-    const deps = createWorktreeDependencies({
-      gate: createGateRunner({ sandbox: null, logger: silentLogger }),
-      clock: new ManualClock(),
-      dataDir: join(tmp.path, 'data'),
-      sessionEnv: () => ({ ...env, pnpm_config_store_dir: store }),
-      rules: () => [],
-      checkouts: () => [worktree],
-      timeoutMs: 60_000,
-      resolvePnpm,
-    });
-    const result = await refresh(deps);
-    expect(result.kind, JSON.stringify(result)).toBe('installed');
-    if (result.kind !== 'installed') return;
-    // Not the pnpm the package.json pins, and not the repository's store or directories.
-    expect(readFileSync(result.logPath, 'utf8')).not.toContain('9.0.0');
-    expect(existsSync(join(store, 'v11'))).toBe(true);
-    expect(existsSync(evil)).toBe(false);
-    expect(existsSync(join(worktree, 'evil_modules'))).toBe(false);
-    expect(existsSync(join(worktree, 'evil_virtual'))).toBe(false);
-    expect(existsSync(join(worktree, 'node_modules', '.modules.yaml'))).toBe(true);
-  }, 90_000);
+  // A real install needs pnpm's store lock, which a sandboxed gate (this suite run by 10db) can't open.
+  it.skipIf(SANDBOXED)(
+    'runs the builder’s pnpm and writes only where the daemon says, whatever the repository asks',
+    async () => {
+      writeFileSync(
+        join(worktree, 'package.json'),
+        '{"name":"pj","version":"1.0.0","packageManager":"pnpm@9.0.0"}\n',
+      );
+      writeFileSync(
+        join(worktree, 'pnpm-lock.yaml'),
+        "lockfileVersion: '9.0'\n\nimporters:\n\n  .: {}\n",
+      );
+      mkdirSync(join(worktree, 'node_modules'));
+      const evil = join(tmp.path, 'evil');
+      writeFileSync(
+        join(worktree, '.npmrc'),
+        `store-dir=${evil}/store\nmodules-dir=evil_modules\nvirtual-store-dir=evil_virtual\n`,
+      );
+      const store = join(tmp.path, 'store');
+      const env = Object.fromEntries(
+        Object.entries(process.env).flatMap(([k, v]) =>
+          v === undefined || k.startsWith('pnpm_config_') ? [] : [[k, v]],
+        ),
+      );
+      const deps = createWorktreeDependencies({
+        gate: createGateRunner({ sandbox: null, logger: silentLogger }),
+        clock: new ManualClock(),
+        dataDir: join(tmp.path, 'data'),
+        sessionEnv: () => ({ ...env, pnpm_config_store_dir: store }),
+        rules: () => [],
+        checkouts: () => [worktree],
+        timeoutMs: 60_000,
+        resolvePnpm,
+      });
+      const result = await refresh(deps);
+      expect(result.kind, JSON.stringify(result)).toBe('installed');
+      if (result.kind !== 'installed') return;
+      // Not the pnpm the package.json pins, and not the repository's store or directories.
+      expect(readFileSync(result.logPath, 'utf8')).not.toContain('9.0.0');
+      expect(existsSync(join(store, 'v11'))).toBe(true);
+      expect(existsSync(evil)).toBe(false);
+      expect(existsSync(join(worktree, 'evil_modules'))).toBe(false);
+      expect(existsSync(join(worktree, 'evil_virtual'))).toBe(false);
+      expect(existsSync(join(worktree, 'node_modules', '.modules.yaml'))).toBe(true);
+    },
+    90_000,
+  );
 });
