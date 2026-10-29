@@ -1,7 +1,15 @@
 import { readFileSync } from 'node:fs';
-import { GhError, PrState, type Gh, type PullRequest } from '../src/github';
+import {
+  GhError,
+  PrState,
+  summariseChecks,
+  type CheckRollupItem,
+  type Gh,
+  type PullRequest,
+  type PullRequestStatus,
+} from '../src/github';
 
-export type GhMethod = 'authStatus' | 'authLogin' | 'repoView' | 'prView' | 'prCreate';
+export type GhMethod = 'authStatus' | 'authLogin' | 'repoView' | 'prView' | 'prStatus' | 'prCreate';
 export interface PrCreateCall {
   readonly repo: string;
   readonly base: string;
@@ -18,7 +26,12 @@ export class FakeGh implements Gh {
   readonly calls: { readonly method: GhMethod; readonly args: unknown }[] = [];
   private readonly byRef = new Map<
     string,
-    { pr: { url: string; state: PrState }; body: string; create: PrCreateCall | null }
+    {
+      pr: { url: string; state: PrState };
+      body: string;
+      create: PrCreateCall | null;
+      rollup: readonly CheckRollupItem[];
+    }
   >();
   private next = 1;
 
@@ -60,6 +73,16 @@ export class FakeGh implements Gh {
     });
   }
 
+  prStatus(input: {
+    readonly repo: string;
+    readonly ref: string;
+  }): Promise<PullRequestStatus | null> {
+    return this.call('prStatus', input, () => {
+      const found = this.byRef.get(input.ref);
+      return found ? { ...found.pr, ...summariseChecks(found.rollup) } : null;
+    });
+  }
+
   prCreate(input: {
     readonly repo: string;
     readonly base: string;
@@ -84,6 +107,13 @@ export class FakeGh implements Gh {
     found.pr.state = state;
   }
 
+  /** The checks the PR's rollup shows from now on; a new PR has none. */
+  setChecks(url: string, rollup: readonly CheckRollupItem[]): void {
+    const found = this.byRef.get(url);
+    if (!found) throw new Error(`no PR ${url}`);
+    found.rollup = rollup;
+  }
+
   prCreates(): PrCreateCall[] {
     return [...new Set(this.byRef.values())].flatMap((e) => (e.create ? [e.create] : []));
   }
@@ -94,7 +124,7 @@ export class FakeGh implements Gh {
 
   private add(branch: string, state: PrState, body: string, create: PrCreateCall | null): string {
     const url = `https://github.com/${this.repo}/pull/${String(this.next++)}`;
-    const entry = { pr: { url, state }, body, create };
+    const entry = { pr: { url, state }, body, create, rollup: [] };
     this.byRef.set(branch, entry);
     this.byRef.set(url, entry);
     return url;

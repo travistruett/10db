@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
+import type { FailingCheckDto, PullRequestChecks } from '@10db/contracts';
 import { z } from 'zod';
 import {
   INSTALL_PREFIXES_TEXT,
@@ -44,6 +45,14 @@ export interface PullRequest {
   readonly state: PrState;
 }
 
+/** A pull request's state and checks as GitHub reports them (`unknown` is the watcher's, never gh's). */
+export interface PullRequestStatus {
+  readonly url: string;
+  readonly state: PrState;
+  readonly checks: Exclude<PullRequestChecks, 'unknown'>;
+  readonly failingChecks: FailingCheckDto[];
+}
+
 /** The host integration (batch delivery spec §7): everything 10db asks GitHub, through the gh CLI. */
 export interface Gh {
   authStatus(call: GhCall): Promise<void>;
@@ -53,6 +62,11 @@ export interface Gh {
     input: { readonly repo: string; readonly ref: string },
     call: GhCall,
   ): Promise<PullRequest | null>;
+  /** The pull request's state and checks, or null when there is none. */
+  prStatus(
+    input: { readonly repo: string; readonly ref: string },
+    call: GhCall,
+  ): Promise<PullRequestStatus | null>;
   prCreate(
     input: {
       readonly repo: string;
@@ -195,6 +209,68 @@ function prUrlIn(repo: string) {
   });
 }
 
+/**
+ * One entry of gh's `statusCheckRollup`: a check run (GitHub Actions and apps) or a commit status.
+ * Values are plain strings, so a state GitHub adds later reads as "not failing" rather than breaking the read.
+ */
+const CheckRunItem = z.object({
+  __typename: z.literal('CheckRun'),
+  name: z.string(),
+  status: z.string(),
+  conclusion: z.string().nullish(),
+  detailsUrl: z.string().nullish(),
+});
+const StatusContextItem = z.object({
+  __typename: z.literal('StatusContext'),
+  context: z.string(),
+  state: z.string(),
+  targetUrl: z.string().nullish(),
+});
+const CheckRollupItem = z.discriminatedUnion('__typename', [CheckRunItem, StatusContextItem]);
+export type CheckRollupItem = z.infer<typeof CheckRollupItem>;
+
+const PrStatusView = z.object({
+  url: z.url(),
+  state: z.enum(PrState),
+  statusCheckRollup: z.array(CheckRollupItem).nullish(),
+});
+
+const FAILING_CONCLUSIONS = new Set(['FAILURE', 'TIMED_OUT', 'ACTION_REQUIRED', 'STARTUP_FAILURE']);
+const FAILING_STATES = new Set(['FAILURE', 'ERROR']);
+const PENDING_STATES = new Set(['PENDING', 'EXPECTED']);
+
+/** Only an https link is kept: it ends up in a card and a button. */
+function httpsOrNull(url: string | null | undefined): string | null {
+  return url?.startsWith('https://') && URL.canParse(url) ? url : null;
+}
+
+/**
+ * What a rollup says: failing if any check failed (failing wins over pending), pending if any is
+ * still going or expected, none for an empty rollup, else passing. Cancelled, skipped, neutral and
+ * stale runs don't fail.
+ */
+export function summariseChecks(rollup: readonly CheckRollupItem[]): {
+  checks: Exclude<PullRequestChecks, 'unknown'>;
+  failingChecks: FailingCheckDto[];
+} {
+  const failingChecks: FailingCheckDto[] = [];
+  let pending = false;
+  for (const item of rollup) {
+    if (item.__typename === 'CheckRun') {
+      if (item.status !== 'COMPLETED') pending = true;
+      else if (FAILING_CONCLUSIONS.has(item.conclusion ?? ''))
+        failingChecks.push({ name: item.name, url: httpsOrNull(item.detailsUrl) });
+    } else if (FAILING_STATES.has(item.state)) {
+      failingChecks.push({ name: item.context, url: httpsOrNull(item.targetUrl) });
+    } else if (PENDING_STATES.has(item.state)) {
+      pending = true;
+    }
+  }
+  if (failingChecks.length > 0) return { checks: 'failing', failingChecks };
+  if (pending) return { checks: 'pending', failingChecks };
+  return { checks: rollup.length === 0 ? 'none' : 'passing', failingChecks };
+}
+
 function failure(args: readonly string[], out: GhOutput): GhError {
   if (out.exitCode === AUTH_REQUIRED_EXIT || SIGNED_OUT.test(out.stderr))
     return new GhError(
@@ -272,6 +348,14 @@ export function createGh(exec: GhExec): Gh {
       if (out.exitCode !== 0 && NO_PR.test(out.stderr)) return null;
       if (out.exitCode !== 0) throw failure(args, out);
       return parseOutput(PrView, args, out.stdout);
+    },
+    async prStatus({ repo, ref }, call) {
+      const args = ['pr', 'view', ref, '-R', repo, '--json', 'url,state,statusCheckRollup'];
+      const out = await exec(args, call);
+      if (out.exitCode !== 0 && NO_PR.test(out.stderr)) return null;
+      if (out.exitCode !== 0) throw failure(args, out);
+      const view = parseOutput(PrStatusView, args, out.stdout);
+      return { url: view.url, state: view.state, ...summariseChecks(view.statusCheckRollup ?? []) };
     },
     async prCreate({ repo, base, head, title, bodyFile }, call) {
       const args = [
