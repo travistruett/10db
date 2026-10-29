@@ -39,7 +39,7 @@ scope rather than gaining a wrong one. Turned down:
 - A scope map stored on the project: it would duplicate the repo's own list in 10db's database.
 - `fix` when any task is a fix: a feature with one fix task would be released as a patch.
 
-Pull request delivery no longer requires a prefix when a project is saved (`ProjectInput`, `patchProject` and
-the desktop forms): an empty prefix means the derived title, and the forms' help text says so. Showing the
-proposed title on the Start sheet is a follow-up. Open: a docs-only batch is typed `feat`, which
+Pull request delivery still requires a prefix when a project is saved (`ProjectInput`, `patchProject` and
+the desktop forms), so a derived title appears only once that rule is dropped. That change, and the Start
+sheet showing the proposed title, are follow-ups. Open: a docs-only batch is typed `feat`, which
 release-please reads as a minor bump; a `docs` or `chore` type would need the tasks to say so.
