@@ -307,6 +307,35 @@ describe('the pull request watch', () => {
     expect(h.cards()).toEqual([]);
   });
 
+  it('withdraws the checks card for no checks only when two reads in a row find none', async () => {
+    setup();
+    const { id, prUrl } = shipped(h.project.id, 'Alpha');
+    h.gh.setChecks(prUrl, [run('lint', 'FAILURE')]);
+    const w = watcher();
+    w.start();
+    await w.idle();
+    const card = h.only(h.cards());
+
+    // Right after a push GitHub can list no checks before the new runs appear.
+    h.gh.setChecks(prUrl, []);
+    await round(w);
+    expect(pr(id)).toMatchObject({ checks: 'none' });
+    expect(h.only(h.cards()).id).toBe(card.id);
+
+    // The new run fails: still the one card, linking that run.
+    const rerun = 'https://github.com/acme/widgets/actions/runs/lint-2';
+    h.gh.setChecks(prUrl, [run('lint', 'FAILURE', rerun)]);
+    await round(w);
+    expect(h.only(h.cards())).toMatchObject({ id: card.id, detail: { link: rerun } });
+
+    // None twice in a row: the pull request has no checks now, and the card goes.
+    h.gh.setChecks(prUrl, []);
+    await round(w);
+    expect(h.cards()).toHaveLength(1);
+    await round(w);
+    expect(h.cards()).toEqual([]);
+  });
+
   it('records no checks as none', async () => {
     setup();
     const { id } = shipped(h.project.id, 'Alpha');

@@ -93,7 +93,9 @@ export function createPrWatch(input: {
       next.state === PullRequestState.Merged ||
       next.state === PullRequestState.Closed ||
       next.checks === PullRequestChecks.Passing ||
-      next.checks === PullRequestChecks.None
+      // Right after a push GitHub can list no checks until the new runs appear, so one read of none
+      // is not enough to say the failing checks are gone.
+      (next.checks === PullRequestChecks.None && wasChecks === PullRequestChecks.None)
     ) {
       withdraw(ctx.state, ctx.inbox, batch.projectId, [prCardKey.checks(batch.id)]);
     }
