@@ -3,6 +3,7 @@ import {
   ConflictError,
   HealthResponse,
   mintId,
+  InboxAnswerRefused,
   NotFoundError,
   PROTOCOL_VERSION,
   WorkstreamDto,
@@ -40,6 +41,7 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
     listWorkstreams: () => [],
     cancelWorkstream: none,
     retryWorkstream: none,
+    workstreamChanges: none,
     listInbox: () => [],
     answerInbox: none,
     eventsAfter: () => [] as DaemonEvent[],
@@ -278,6 +280,24 @@ describe('API', () => {
       body: JSON.stringify({ kind: 'nope' }),
     });
     expect(res.status).toBe(400);
+  });
+
+  it('answers 400 with the reason when an inbox answer is refused', async () => {
+    const services = stubServices({
+      answerInbox: () => {
+        throw new InboxAnswerRefused('Send Back needs a note saying what to change');
+      },
+    });
+    const res = await app(services).request(`/inbox/${mintId('InboxItem')}/answer`, {
+      method: 'POST',
+      ...json,
+      body: JSON.stringify({ choice: 'send_back' }),
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      error: 'invalid',
+      message: 'Send Back needs a note saying what to change',
+    });
   });
 
   it('maps domain errors to 404 and 409', async () => {

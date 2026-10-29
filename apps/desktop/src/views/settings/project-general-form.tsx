@@ -145,7 +145,11 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
         </SettingRow>
         <SettingRow
           label="Gate command"
-          description="Checks the work. A task is done only when it passes."
+          description={
+            values.gateCommand.trim() === ''
+              ? 'No automatic check: each finished task waits for you.'
+              : 'Checks the work. A task is done only when it passes.'
+          }
         >
           <TextInput
             aria-label="Gate command"

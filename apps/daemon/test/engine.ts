@@ -59,6 +59,8 @@ import { silentLogger } from '../src/log';
 import { protectedPaths } from '../src/guard';
 import { createMcpHandler } from '../src/mcp';
 import {
+  applyCheckAnswer,
+  RunnerNotStartedError,
   createLiveSessions,
   createRunner,
   DEFAULT_RUNNER_LIMITS,
@@ -111,7 +113,10 @@ export async function createTestEngine(
   book: FakeScriptBook,
   project: Partial<ProjectInput> = {},
   runnerOverrides: Partial<
-    Pick<RunnerOptions, 'afterSession' | 'logger' | 'launcher' | 'laneSandbox' | 'gate'>
+    Pick<
+      RunnerOptions,
+      'afterSession' | 'logger' | 'launcher' | 'laneSandbox' | 'gate' | 'onLaneFreed'
+    >
   > = {},
   setup: { readonly account?: AccountInput; readonly secret?: string } = {},
 ): Promise<TestEngine> {
@@ -138,6 +143,10 @@ export async function createTestEngine(
     state,
     onParkedAnswer: (target, item) => {
       runner?.deliverParkedAnswer(target, item);
+    },
+    onCheckAnswer: (ctx, item, answer) => {
+      if (!runner) throw new RunnerNotStartedError();
+      return applyCheckAnswer(runner, ctx, item, answer);
     },
     onFlagAnswer: (item, answer) => {
       answerAccountCard?.(item, answer);

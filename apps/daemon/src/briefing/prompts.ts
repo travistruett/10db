@@ -1,4 +1,5 @@
 import {
+  EvidenceKind,
   REVIEW_ROLES,
   ToolAccess,
   type ClaimKind,
@@ -178,6 +179,7 @@ export function briefedFromHandoff(
     case 'uncommitted':
     case 'verify':
     case 'revise':
+    case 'builder_review':
       return false;
   }
 }
@@ -186,7 +188,9 @@ const fromHandoff = (handoff: HandoffDto): string =>
   `Continue from the handoff below. Do not redo finished work.\n\nHandoff:\n${renderHandoff(handoff)}`;
 
 const gateFailure = (evidence: EvidenceDto): string =>
-  `The gate failed (exit ${String(evidence.exitCode)} from \`${evidence.command}\`). Fix the cause, commit, and end your turn.\n\nGate output (end):\n\`\`\`\n${evidence.summary}\n\`\`\``;
+  evidence.kind === EvidenceKind.Builder
+    ? `The builder sent the work back: ${evidence.summary}\nAddress it, commit, and end your turn.`
+    : `The gate failed (exit ${String(evidence.exitCode)} from \`${evidence.command}\`). Fix the cause, commit, and end your turn.\n\nGate output (end):\n\`\`\`\n${evidence.summary}\n\`\`\``;
 
 function actionSection(input: PromptInput): string {
   switch (input.action.kind) {
@@ -224,6 +228,8 @@ function actionSection(input: PromptInput): string {
       return `Your step ended with changes in your claims that are not committed:\n${bullets(input.action.paths)}\nCommit each one through mcp__10db__commit, naming every path, then end your turn. 10db runs the gate once they are committed.`;
     case 'verify':
       return 'Verify the work against the acceptance criteria, commit anything outstanding, and end your turn.';
+    case 'builder_review':
+      return 'The builder is checking the work; there is nothing to do until they answer.';
     case 'revise': {
       const by = input.revisedBy
         ? `The ${input.revisedBy.role} step (${input.revisedBy.personaName})`

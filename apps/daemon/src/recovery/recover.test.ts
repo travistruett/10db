@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import {
   mintId,
   type NextAction,
+  type ProjectDto,
   type WorkstreamState,
   type WorkstreamStep,
 } from '@10db/contracts';
@@ -18,6 +19,7 @@ import {
   getWorkstreamRow,
   insertEvidence,
   insertHandoff,
+  insertInboxItem,
   insertSession,
   listEventsAfter,
   listInbox,
@@ -42,6 +44,7 @@ import { alive, orphanGateGroup } from '../../test/orphan-gate';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit } from '../git';
 import { createInboxService, type InboxService } from '../inbox';
+import { raiseBuilderCheck } from '../runner';
 import { silentLogger } from '../log';
 import { recoverOnStartup, systemProcesses } from './index';
 
@@ -640,5 +643,169 @@ describe('recoverOnStartup', () => {
         terminal ? null : 'daemon_restart',
       );
     });
+  });
+});
+
+describe('recoverOnStartup for a project without a gate command', () => {
+  const checkCards = () => listInbox(state.db, {}).filter((i) => i.kind === 'check');
+
+  /** A WAITING_HUMAN workstream of a gate-less project, parked on a check card in `cardState`. */
+  function waitingForCheck(
+    cardState: 'OPEN' | 'ANSWERED' | 'CANCELLED' | null,
+    nextAction: NextAction = { kind: 'start' },
+    existing?: ProjectDto,
+  ) {
+    const project = existing ?? seedProject(base, { repoPath: repo.path, gateCommand: null });
+    const seeded = seedWorkstream(base, { project, title: mintId('Task') });
+    const id = seeded.workstream.id;
+    const card = state.write((ctx) => {
+      for (const to of ['STARTING', 'RUNNING', 'VERIFYING', 'WAITING_HUMAN'] as const)
+        transitionWorkstream(ctx, id, { to, fence: null });
+      const item =
+        cardState === null
+          ? null
+          : raiseBuilderCheck(ctx, {
+              workstreamId: id,
+              projectId: project.id,
+              taskTitle: seeded.task.title,
+              baseHead: 'a'.repeat(40),
+              head: 'b'.repeat(40),
+              commits: ['b'.repeat(40)],
+            });
+      if (item && cardState !== null && cardState !== 'OPEN')
+        updateInboxItem(ctx, item.id, {
+          state: cardState,
+          ...(cardState === 'ANSWERED' ? { answer: { choice: 'approve' } } : {}),
+        });
+      patchWorkstream(ctx, id, null, {
+        nextAction: item ? { kind: 'builder_review', inboxId: item.id } : nextAction,
+      });
+      return item;
+    });
+    return { ...seeded, card };
+  }
+
+  it('parks a waiting workstream on an open check card and keeps it across restarts', async () => {
+    const ws = waitingForCheck('OPEN');
+    for (let i = 0; i < 2; i += 1) {
+      const report = await recover();
+      expect(report.parked).toEqual([ws.workstream.id]);
+      expect(report.requeued).toEqual([]);
+      expect(getWorkstream(state.db, ws.workstream.id)).toMatchObject({
+        state: 'WAITING_HUMAN',
+        currentSessionId: null,
+        nextAction: { kind: 'builder_review', inboxId: ws.card?.id },
+      });
+      expect(checkCards().map((c) => c.id)).toEqual([ws.card?.id]);
+    }
+    expect(parked).toEqual([]);
+  });
+
+  it('closes an answered check card without handing it to a session, then raises it again', async () => {
+    const ws = waitingForCheck('ANSWERED');
+    const first = await recover();
+    expect(first.parked).toEqual([ws.workstream.id]);
+    expect(first.redelivered).toEqual([ws.card?.id]);
+    expect(getWorkstream(state.db, ws.workstream.id)).toMatchObject({
+      state: 'WAITING_HUMAN',
+      nextAction: { kind: 'builder_review', inboxId: ws.card?.id },
+    });
+    expect(checkCards().map((c) => c.state)).toEqual(['RESOLVED']);
+    // The card is closed and the work still waits, so the next restart asks again, once.
+    await recover();
+    const live = checkCards().filter((c) => c.state === 'OPEN');
+    expect(live).toHaveLength(1);
+    expect(getWorkstream(state.db, ws.workstream.id)).toMatchObject({
+      state: 'WAITING_HUMAN',
+      nextAction: { kind: 'builder_review', inboxId: live[0]?.id },
+    });
+    expect(parked).toEqual([]);
+  });
+
+  it('a stale check card never overwrites a later answer action', async () => {
+    const ws = waitingForCheck('OPEN');
+    // The builder's other question moved the work on after the check card was raised.
+    const question = state.write((ctx) =>
+      insertInboxItem(ctx, {
+        projectId: ws.project.id,
+        kind: 'question',
+        title: 'Which name?',
+        body: '',
+        options: [{ label: 'A', description: '' }],
+        recommendation: null,
+        category: 'product',
+        urgency: 'normal',
+        detail: null,
+        foldKey: null,
+        targets: [{ workstreamId: ws.workstream.id, sessionId: null }],
+      }),
+    );
+    state.write((ctx) => {
+      patchWorkstream(ctx, ws.workstream.id, null, {
+        nextAction: { kind: 'answer', inboxId: question.id, providerSessionId: 'p' },
+      });
+    });
+    await recover();
+    expect(getWorkstream(state.db, ws.workstream.id).nextAction).toMatchObject({
+      kind: 'answer',
+      inboxId: question.id,
+    });
+  });
+
+  it('a stale check card beside a workstream waiting on an answer is not raised again', async () => {
+    const ws = waitingForCheck('OPEN');
+    state.write((ctx) => {
+      patchWorkstream(ctx, ws.workstream.id, null, {
+        nextAction: { kind: 'answer', inboxId: mintId('InboxItem'), providerSessionId: 'p' },
+      });
+    });
+    const report = await recover();
+    expect(report.parked).not.toContain(ws.workstream.id);
+    expect(getWorkstream(state.db, ws.workstream.id).nextAction.kind).not.toBe('builder_review');
+    expect(checkCards().map((c) => c.state)).toEqual(['OPEN']);
+  });
+
+  it('raises the card again, once, when the waiting workstream lost its check card', async () => {
+    const ws = waitingForCheck('CANCELLED');
+    for (let i = 0; i < 2; i += 1) {
+      const report = await recover();
+      expect(report.parked).toEqual([ws.workstream.id]);
+      expect(getWorkstream(state.db, ws.workstream.id).state).toBe('WAITING_HUMAN');
+    }
+    const live = checkCards().filter((c) => c.state === 'OPEN');
+    expect(live).toHaveLength(1);
+    expect(getWorkstream(state.db, ws.workstream.id).nextAction).toEqual({
+      kind: 'builder_review',
+      inboxId: live[0]?.id,
+    });
+    expect(getWorkstream(state.db, ws.workstream.id).state).not.toBe('DONE');
+  });
+
+  it('reads git only when the card has to be raised again', async () => {
+    const reads: string[] = [];
+    const git = createGit();
+    const watching = {
+      ...git,
+      head: (...args: Parameters<typeof git.head>) => (reads.push('head'), git.head(...args)),
+      commitsSince: (...args: Parameters<typeof git.commitsSince>) => (
+        reads.push('commitsSince'),
+        git.commitsSince(...args)
+      ),
+    };
+    const run = () =>
+      recoverOnStartup({
+        state,
+        inbox,
+        git: watching,
+        processes: systemProcesses,
+        maxRecoveryAttempts: 3,
+        logger: silentLogger,
+      });
+    const kept = waitingForCheck('OPEN');
+    await run();
+    expect(reads).toEqual([]);
+    waitingForCheck('CANCELLED', undefined, kept.project);
+    await run();
+    expect(reads).toEqual(['head', 'commitsSince']);
   });
 });

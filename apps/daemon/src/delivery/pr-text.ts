@@ -54,7 +54,8 @@ export interface PrBodyTask {
 export function prBody(input: {
   readonly batch: { readonly id: BatchId };
   readonly tasks: readonly PrBodyTask[];
-  readonly gate: { readonly command: string };
+  /** The project's gate command, or null when it has none. */
+  readonly gate: { readonly command: string | null };
   /** The CI run for the head that was pushed: its checks page for the commit. */
   readonly ci: { readonly repo: string; readonly sha: string };
   /** The repo's pull request template, or null when it has none. */
@@ -62,7 +63,7 @@ export function prBody(input: {
 }): string {
   const body = fillTemplate(input.template, [
     { heading: 'What and why', text: whatAndWhy(input.tasks) },
-    { heading: 'How it was checked', text: howChecked(input.gate, input.ci) },
+    { heading: 'How it was checked', text: howChecked(input.gate, input.ci, input.tasks) },
   ]);
   return `${body}\n\n---\n\nShipped by 10db, batch ${input.batch.id}\n`;
 }
@@ -96,10 +97,21 @@ function whatAndWhy(tasks: readonly PrBodyTask[]): string {
  * passed to reach the push.
  */
 function howChecked(
-  gate: { readonly command: string },
+  gate: { readonly command: string | null },
   ci: { readonly repo: string; readonly sha: string },
+  tasks: readonly PrBodyTask[],
 ): string {
   const url = `https://github.com/${ci.repo}/commit/${ci.sha}/checks`;
+  const ciLine = `CI run for the pushed head: [${ci.sha.slice(0, 7)}](${url})`;
+  if (gate.command === null) {
+    // Only a task that finished was approved in 10db; a batch shipped with unfinished work was not.
+    const approved = tasks.every((t) => t.state === WorkstreamState.Done);
+    return [
+      approved ? 'No gate command: each task was approved in 10db.' : 'No gate command.',
+      '',
+      ciLine,
+    ].join('\n');
+  }
   return [
     'Gate, run on the branch before the push:',
     '',
@@ -107,6 +119,6 @@ function howChecked(
     gate.command,
     '```',
     '',
-    `CI run for the pushed head: [${ci.sha.slice(0, 7)}](${url})`,
+    ciLine,
   ].join('\n');
 }

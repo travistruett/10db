@@ -57,7 +57,7 @@ export type GeneralCheck =
 export function generalValues(project: ProjectDto): GeneralValues {
   return {
     name: project.name,
-    gateCommand: project.gateCommand,
+    gateCommand: project.gateCommand ?? '',
     maxLanes: project.maxLanes,
     handoffPct: project.handoffPct,
     nudgePct: project.nudgePct,
@@ -104,7 +104,6 @@ export function checkGeneral(project: ProjectDto, values: GeneralValues): Genera
   const allowed = parseAllowedCommands(values.allowedCommands);
   if (allowed.error !== null) errors.allowedCommands = allowed.error;
   if (name === '') errors.name = 'Enter a name';
-  if (gateCommand === '') errors.gateCommand = 'Enter the gate command';
   if (values.maxLanes === '') errors.maxLanes = 'Enter the lane cap';
   if (values.handoffPct === '') errors.handoffPct = 'Enter the handoff percentage';
   if (values.nudgePct === '') errors.nudgePct = 'Enter the nudge percentage';
@@ -128,7 +127,9 @@ export function checkGeneral(project: ProjectDto, values: GeneralValues): Genera
 
   const patch: { -readonly [K in keyof ProjectPatch]: ProjectPatch[K] } = {};
   if (name !== project.name) patch.name = name;
-  if (gateCommand !== project.gateCommand) patch.gateCommand = gateCommand;
+  // An empty gate is no gate: finished work then waits for the builder's check.
+  const gate = gateCommand === '' ? null : gateCommand;
+  if (gate !== project.gateCommand) patch.gateCommand = gate;
   if (values.maxLanes !== '' && values.maxLanes !== project.maxLanes)
     patch.maxLanes = values.maxLanes;
   if (values.handoffPct !== '' && values.handoffPct !== project.handoffPct)

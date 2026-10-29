@@ -29,8 +29,8 @@ describe('HealthResponse', () => {
 });
 
 describe('PROTOCOL_VERSION', () => {
-  it('is 5: a project no longer carries a model or effort', () => {
-    expect(PROTOCOL_VERSION).toBe(5);
+  it('is 6: a project may have no gate command', () => {
+    expect(PROTOCOL_VERSION).toBe(6);
   });
 });
 

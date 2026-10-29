@@ -81,6 +81,8 @@ import { protectedPaths } from '../guard';
 import { createMcpHandler } from '../mcp';
 import { recoverOnStartup, systemProcesses, type ProcessTerminator } from '../recovery';
 import {
+  applyCheckAnswer,
+  RunnerNotStartedError,
   createLiveSessions,
   createRunner,
   DEFAULT_RUNNER_LIMITS,
@@ -326,6 +328,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     state,
     onParkedAnswer: (target, item) => {
       runner?.deliverParkedAnswer(target, item);
+    },
+    onCheckAnswer: (ctx, item, answer) => {
+      if (!runner) throw new RunnerNotStartedError();
+      return applyCheckAnswer(runner, ctx, item, answer);
     },
     onFlagAnswer: (item, answer) => {
       answerBatchCard?.(item, answer);

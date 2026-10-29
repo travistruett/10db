@@ -755,6 +755,35 @@ describe('allowedToolsFor with the extra allowed commands of a project', () => {
   });
 });
 
+describe('a project with no gate command', () => {
+  it('has no Bash entry for a gate in the base list', () => {
+    const tools = baseAllowedTools({ gateCommand: null });
+    expect(tools.filter((t) => t.startsWith('Bash('))).toEqual([
+      'Bash(git status:*)',
+      'Bash(git diff:*)',
+      'Bash(git log:*)',
+      'Bash(git show:*)',
+      'Bash(pwd)',
+    ]);
+    expect(tools).not.toContain('Bash(null)');
+  });
+
+  it('does not allow a command named after the missing gate in an edit step', () => {
+    const tools = allowedToolsFor({ gateCommand: null, allowedCommands: [] }, 'edit');
+    expect(tools).not.toContain('Bash(null)');
+    expect(matchesAllowedTool('Bash', bash('null'), tools, repo.path)).toBe(false);
+  });
+
+  it('gives a read-only step the same tools as a project with a gate, minus the gate', () => {
+    const withGate = allowedToolsFor(
+      { gateCommand: 'make gate', allowedCommands: [] },
+      'read_only',
+    );
+    const without = allowedToolsFor({ gateCommand: null, allowedCommands: [] }, 'read_only');
+    expect(without).toEqual(withGate);
+  });
+});
+
 describe('allowedToolsFor', () => {
   const project = { gateCommand: 'make gate', allowedCommands: [] };
   it.each([

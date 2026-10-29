@@ -29,7 +29,7 @@ export function baseAllowedTools(project: Pick<ProjectDto, 'gateCommand'>): stri
     'NotebookEdit',
     'TodoWrite',
     'mcp__10db__*',
-    `Bash(${project.gateCommand})`,
+    ...(project.gateCommand === null ? [] : [`Bash(${project.gateCommand})`]),
     'Bash(git status:*)',
     'Bash(git diff:*)',
     'Bash(git log:*)',
@@ -57,7 +57,7 @@ export function allowedToolsFor(
   const base = scopedReads(baseAllowedTools(project), opts.sandboxed?.checkout);
   if (tools === ToolAccess.Edit)
     return [...base, ...project.allowedCommands.map((command) => `Bash(${command}:*)`)];
-  const gate = `Bash(${project.gateCommand})`;
+  const gate = project.gateCommand === null ? null : `Bash(${project.gateCommand})`;
   return [
     ...base.filter((t) => !WRITE_TOOLS.has(t) && t !== gate),
     ...[...READ_COMMANDS].map((c) => `Bash(${c}:*)`),

@@ -101,8 +101,14 @@ export function NewTaskForm({ formId, project, tasks, onStatus, onCreated }: New
             <Stack gap="xs">
               <Text size="sm">
                 What must be true when the task is done. The agent works until each one holds, a
-                reviewer agent checks each and asks for a test that proves it, and the project's
-                gate (<Code>{project.gateCommand}</Code>) runs separately.
+                reviewer agent checks each and asks for a test that proves it
+                {project.gateCommand === null ? (
+                  ', and you check the finished work yourself.'
+                ) : (
+                  <>
+                    , and the project's gate (<Code>{project.gateCommand}</Code>) runs separately.
+                  </>
+                )}
               </Text>
               <List size="sm" spacing={4}>
                 <List.Item>
