@@ -7,8 +7,15 @@
       "minLength": 1
     },
     "gateCommand": {
-      "type": "string",
-      "minLength": 1
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "maxLanes": {
       "type": "integer",

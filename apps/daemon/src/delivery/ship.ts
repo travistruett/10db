@@ -4,6 +4,7 @@ import {
   BatchFailure,
   BatchState,
   ConflictError,
+  InvalidError,
   isTerminal,
   LANE_STATES,
   latestPerTask,
@@ -141,6 +142,9 @@ export function createShipper(deps: ShipperDeps): Shipper {
     project: ProjectDto,
     signal: AbortSignal,
   ): Promise<GateResult | null> {
+    const gateCommand = project.gateCommand;
+    // A project without a gate has no command to run here.
+    if (gateCommand === null) throw new InvalidError('This project has no gate command to run');
     let recording: Promise<void> = Promise.resolve();
     const logPath = join(
       deps.dataDir,
@@ -148,10 +152,10 @@ export function createShipper(deps: ShipperDeps): Shipper {
       'gate',
       `batch-${batch.id}-${String(deps.clock.now().getTime())}.log`,
     );
-    deps.logger.info({ batchId: batch.id, command: project.gateCommand, logPath }, 'gate started');
+    deps.logger.info({ batchId: batch.id, command: gateCommand, logPath }, 'gate started');
     const result = await deps.gate.run({
       project,
-      command: project.gateCommand,
+      command: gateCommand,
       logPath,
       timeoutMs: deps.limits.gateTimeoutMs,
       env: deps.sessionEnv(project),
@@ -298,7 +302,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
       prBody({
         batch,
         tasks,
-        gate: { command: project.gateCommand },
+        gate: { command: project.gateCommand ?? '' },
         ci: { repo: target.repo, sha },
         template: await readPrTemplate(deps.git, target.checkout, sha, deps.logger),
       }),

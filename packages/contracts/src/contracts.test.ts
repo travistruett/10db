@@ -29,8 +29,8 @@ describe('HealthResponse', () => {
 });
 
 describe('PROTOCOL_VERSION', () => {
-  it('is 4: the batch start answer became an array', () => {
-    expect(PROTOCOL_VERSION).toBe(4);
+  it('is 5: a project may have no gate command', () => {
+    expect(PROTOCOL_VERSION).toBe(5);
   });
 });
 

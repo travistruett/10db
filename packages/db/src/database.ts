@@ -98,5 +98,14 @@ export function migrateDatabase(
     throw new StaleSchemaBaselineError(db.$client.name);
   }
   if (applied.length > baseline.length) throw new NewerSchemaError(db.$client.name);
-  migrate(db, { migrationsFolder: migrationsDir });
+  // SQLite rebuilds a table to drop a NOT NULL, and a rebuilt table that others reference can only be
+  // dropped with foreign keys off. The pragma is a no-op inside the migration's transaction, so it is
+  // switched off around it and restored after.
+  const enforced = db.$client.pragma('foreign_keys', { simple: true }) === 1;
+  db.$client.pragma('foreign_keys = OFF');
+  try {
+    migrate(db, { migrationsFolder: migrationsDir });
+  } finally {
+    if (enforced) db.$client.pragma('foreign_keys = ON');
+  }
 }

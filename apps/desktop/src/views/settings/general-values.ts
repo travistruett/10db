@@ -57,7 +57,7 @@ export type GeneralCheck =
 export function generalValues(project: ProjectDto): GeneralValues {
   return {
     name: project.name,
-    gateCommand: project.gateCommand,
+    gateCommand: project.gateCommand ?? '',
     maxLanes: project.maxLanes,
     handoffPct: project.handoffPct,
     nudgePct: project.nudgePct,
@@ -131,7 +131,7 @@ export function checkGeneral(project: ProjectDto, values: GeneralValues): Genera
 
   const patch: { -readonly [K in keyof ProjectPatch]: ProjectPatch[K] } = {};
   if (name !== project.name) patch.name = name;
-  if (gateCommand !== project.gateCommand) patch.gateCommand = gateCommand;
+  if (gateCommand !== (project.gateCommand ?? '')) patch.gateCommand = gateCommand;
   if (values.maxLanes !== '' && values.maxLanes !== project.maxLanes)
     patch.maxLanes = values.maxLanes;
   if (values.handoffPct !== '' && values.handoffPct !== project.handoffPct)

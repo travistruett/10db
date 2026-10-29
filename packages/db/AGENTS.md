@@ -15,7 +15,7 @@ only process that writes the database.
 - **From `v0.1.0` on, migrations are forward-only.** After changing the schema, run
   `pnpm --filter @10db/db generate` and commit the new file under `drizzle/`; never delete or
   regenerate a migration. A `--custom` migration is authored by hand once and never regenerated. A
-  database migrated by a newer build is refused with `NewerSchemaError`, never wiped.
+  database migrated by a newer build is refused with `NewerSchemaError`, never wiped. A migration that drops a NOT NULL is a table rebuild (drizzle-kit writes it); `migrateDatabase` switches `foreign_keys` off around the migrations, because the pragma is a no-op inside their transaction and the rebuild's `DROP TABLE` would otherwise fail on rows that reference the table.
 - Every row has a prefixed UUIDv7 ID (`tsk_<uuidv7>`, sortable by creation) plus `created_at` and
   `updated_at` as ISO text.
   Settings-style tables keyed by a natural key are the first exception; append-only record tables

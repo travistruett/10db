@@ -21,6 +21,7 @@ export function nextActionAfterCrash(
     case 'fix':
     case 'revise':
     case 'uncommitted':
+    case 'builder_review':
       return previous;
     case 'answer':
       return { ...previous, providerSessionId: providerSessionId ?? previous.providerSessionId };
@@ -58,6 +59,7 @@ export function nextActionOnAnotherAccount(
     case 'uncommitted':
     case 'verify':
     case 'revise':
+    case 'builder_review':
       return previous;
   }
 }

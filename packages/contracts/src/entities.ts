@@ -136,7 +136,8 @@ export const ProjectInput = z
   .object({
     name: z.string().min(1),
     repoPath: z.string().startsWith('/'),
-    gateCommand: z.string().min(1),
+    /** The command that checks a task's work; null means the builder checks each finished task. */
+    gateCommand: z.string().min(1).nullable().default(null),
     areas: z.array(AreaDef).min(1),
     hazards: z.array(HazardDef).default(() => [...DEFAULT_HAZARDS]),
     maxLanes: z.int().min(1).max(16).default(2),
@@ -200,7 +201,7 @@ export const ProjectDto = z.object({
   id: ProjectId,
   name: z.string(),
   repoPath: z.string(),
-  gateCommand: z.string(),
+  gateCommand: z.string().nullable(),
   areas: z.array(AreaDef),
   hazards: z.array(HazardDef),
   maxLanes: z.int(),
@@ -238,7 +239,7 @@ export type ProjectDto = z.infer<typeof ProjectDto>;
 export const ProjectPatch = z
   .object({
     name: z.string().min(1),
-    gateCommand: z.string().min(1),
+    gateCommand: z.string().min(1).nullable(),
     maxLanes: z.int().min(1).max(16),
     handoffPct: z.int().min(5).max(95),
     nudgePct: z.int().min(6).max(98),
@@ -337,6 +338,8 @@ export const NextAction = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('verify') }),
   /** Rerun a step a reviewer rejected; the rejecting step's notes are in its result. */
   z.object({ kind: z.literal('revise'), reviewStep: z.int().min(0) }),
+  /** The work is done and the project has no gate: the builder approves it or sends it back. */
+  z.object({ kind: z.literal('builder_review'), inboxId: InboxItemId }),
 ]);
 export type NextAction = z.infer<typeof NextAction>;
 
@@ -412,15 +415,34 @@ export const PermissionRuleDto = z.object({
 });
 export type PermissionRuleDto = z.infer<typeof PermissionRuleDto>;
 
-export const EvidenceDto = z.object({
+const EvidenceBase = {
   id: EvidenceId,
   workstreamId: WorkstreamId,
-  kind: z.enum(EvidenceKind),
-  command: z.string(),
-  exitCode: z.int(),
   summary: z.string(),
   logPath: z.string().nullable(),
   commitShas: z.array(z.string()),
   createdAt: Timestamp,
-});
+};
+
+/** What a check left behind: a gate's or agent's command and exit code, or the builder's note. */
+export const EvidenceDto = z.discriminatedUnion('kind', [
+  z.object({
+    ...EvidenceBase,
+    kind: z.literal(EvidenceKind.Gate),
+    command: z.string(),
+    exitCode: z.int(),
+  }),
+  z.object({
+    ...EvidenceBase,
+    kind: z.literal(EvidenceKind.Agent),
+    command: z.string(),
+    exitCode: z.int(),
+  }),
+  z.object({
+    ...EvidenceBase,
+    kind: z.literal(EvidenceKind.Builder),
+    command: z.null(),
+    exitCode: z.null(),
+  }),
+]);
 export type EvidenceDto = z.infer<typeof EvidenceDto>;

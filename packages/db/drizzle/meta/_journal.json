@@ -43,6 +43,13 @@
       "when": 1793200652605,
       "tag": "0005_claims_scope_index",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1793244085258,
+      "tag": "0006_cool_nova",
+      "breakpoints": true
     }
   ]
 }

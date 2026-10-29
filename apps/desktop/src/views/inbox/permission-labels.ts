@@ -15,6 +15,7 @@ export const KIND_LABELS: Readonly<Record<InboxKind, string>> = {
   [InboxKind.Proposal]: 'Proposal',
   [InboxKind.Review]: 'Review',
   [InboxKind.Flag]: 'Flag',
+  [InboxKind.Check]: 'Check',
 };
 
 function isPermissionChoice(label: string): label is PermissionChoice {

@@ -196,3 +196,73 @@ describe('migrating a v0.1.0 database', () => {
     ).toThrow(/UNIQUE constraint failed: batches\.project_id/);
   });
 });
+
+describe('migrating a database that has a gate command and evidence', () => {
+  const AT = '2026-10-21T12:00:00.000Z';
+
+  /** Every migration but the last, so the one under test runs over rows a real database holds. */
+  function allButLast(): string {
+    const older = join(dir, 'older');
+    cpSync(DB_MIGRATIONS_DIR, older, { recursive: true });
+    const journalPath = join(older, 'meta/_journal.json');
+    const journal = JSON.parse(readFileSync(journalPath, 'utf8')) as {
+      entries: { tag: string }[];
+    };
+    const last = journal.entries.pop();
+    if (last === undefined) throw new Error('no migrations');
+    writeFileSync(journalPath, JSON.stringify(journal, null, 2));
+    rmSync(join(older, `${last.tag}.sql`));
+    return older;
+  }
+
+  it('keeps the rows that point at a project and an evidence row', () => {
+    migrateDatabase(db, allButLast());
+    const run = (sql: string, ...args: string[]): void => {
+      db.$client.prepare(sql).run(...args);
+    };
+    run(
+      `INSERT INTO accounts (id, kind, label, payer, settings, lane_cap, created_at, updated_at)
+       VALUES ('acc_x', 'subscription', 'main', 'me', '{}', 2, ?, ?)`,
+      AT,
+      AT,
+    );
+    run(
+      `INSERT INTO projects (id, name, repo_path, gate_command, areas, hazards, max_lanes, provider, account_id,
+         model, effort, handoff_pct, nudge_pct, human_wait_minutes, created_at, updated_at)
+       VALUES ('prj_a', 'a', '/tmp/a', 'make gate', '[]', '[]', 2, 'claude', 'acc_x', 'sonnet', 'medium', 40, 50, 10, ?, ?)`,
+      AT,
+      AT,
+    );
+    run(
+      `INSERT INTO tasks (id, project_id, title, description, acceptance_criteria, areas, status, board_order,
+         workspace_mode, created_at, updated_at)
+       VALUES ('tsk_a', 'prj_a', 't', '', '[]', '[]', 'queued', 1, 'shared', ?, ?)`,
+      AT,
+      AT,
+    );
+    run(
+      `INSERT INTO workstreams (id, task_id, project_id, state, next_action, attempt, recovery_attempts, model,
+         effort, fence, created_at, updated_at)
+       VALUES ('wst_a', 'tsk_a', 'prj_a', 'QUEUED', '{"kind":"start"}', 0, 0, 'sonnet', 'medium', 0, ?, ?)`,
+      AT,
+      AT,
+    );
+    run(
+      `INSERT INTO evidence (id, workstream_id, kind, command, exit_code, summary, commit_shas, created_at)
+       VALUES ('evd_a', 'wst_a', 'gate', 'make gate', 0, 'ok', '[]', ?)`,
+      AT,
+    );
+    migrateDatabase(db);
+    expect(db.$client.prepare('SELECT gate_command FROM projects').all()).toEqual([
+      { gate_command: 'make gate' },
+    ]);
+    expect(db.$client.prepare('SELECT project_id FROM tasks').all()).toEqual([
+      { project_id: 'prj_a' },
+    ]);
+    expect(db.$client.prepare('SELECT command, exit_code FROM evidence').all()).toEqual([
+      { command: 'make gate', exit_code: 0 },
+    ]);
+    db.$client.prepare('UPDATE projects SET gate_command = NULL').run();
+    expect(db.$client.pragma('foreign_key_check')).toEqual([]);
+  });
+});

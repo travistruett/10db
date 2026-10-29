@@ -4,6 +4,7 @@ import {
   currentStep,
   EventType,
   InboxKind,
+  InvalidError,
   PermissionChoice,
   StepRole,
   ToolAccess,
@@ -1540,16 +1541,19 @@ export function createRunner(opts: RunnerOptions): Runner {
       sendBackUncommitted(id, ctl, row, uncommitted);
       return;
     }
+    const gateCommand = project.gateCommand;
+    // A project without a gate has no command to run here.
+    if (gateCommand === null) throw new InvalidError('This project has no gate command to run');
     const run = listEvidence(db, id).filter((e) => e.kind === 'gate').length + 1;
     const gateAbort = new AbortController();
     ctl.gateAbort = gateAbort;
     if (ctl.stopReason === 'cancelled' || ctl.stopReason === 'shutdown') gateAbort.abort();
     let recording: Promise<void> = Promise.resolve();
     const logPath = join(opts.dataDir, 'logs', 'gate', `${id}-${String(run)}.log`);
-    opts.logger.info({ workstreamId: id, command: project.gateCommand, logPath }, 'gate started');
+    opts.logger.info({ workstreamId: id, command: gateCommand, logPath }, 'gate started');
     const result = await opts.gate.run({
       project: projectAtCheckout(project, checkout),
-      command: project.gateCommand,
+      command: gateCommand,
       logPath,
       timeoutMs: opts.limits.gateTimeoutMs,
       // The project env: the login shell without billing switches, and never the account's credentials.
@@ -1605,7 +1609,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     const evidence = {
       workstreamId: id,
       kind: 'gate' as const,
-      command: project.gateCommand,
+      command: gateCommand,
       exitCode: result.exitCode,
       summary: result.tail.slice(-2000),
       logPath: result.logPath,

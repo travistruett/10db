@@ -30,6 +30,8 @@ describe('workstream state machine', () => {
     [S.Recovering, S.Queued],
     [S.Recovering, S.Failed],
     [S.Failed, S.Queued],
+    [S.Verifying, S.WaitingHuman],
+    [S.WaitingHuman, S.Verifying],
   ])('allows %s -> %s', (from, to) => {
     expect(canTransition(from, to)).toBe(true);
   });
@@ -44,6 +46,13 @@ describe('workstream state machine', () => {
     [S.Recovering, S.Running],
   ])('forbids %s -> %s', (from, to) => {
     expect(canTransition(from, to)).toBe(false);
+  });
+
+  it('has exactly the two builder-check edges beyond the original table', () => {
+    const edges = ALL.flatMap((from) => WORKSTREAM_TRANSITIONS[from].map((to) => `${from}>${to}`));
+    expect(edges).toContain('VERIFYING>WAITING_HUMAN');
+    expect(edges).toContain('WAITING_HUMAN>VERIFYING');
+    expect(edges).toHaveLength(42);
   });
 
   it('lets every non-terminal state be cancelled', () => {
