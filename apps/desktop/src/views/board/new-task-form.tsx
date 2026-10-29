@@ -1,4 +1,4 @@
-import { TaskStatus, type ProjectDto, type TaskDto } from '@10db/contracts';
+import { newTaskRefusal, TaskStatus, type ProjectDto, type TaskDto } from '@10db/contracts';
 import { Box, Code, List, MultiSelect, Stack, Text, Textarea, TextInput } from '@mantine/core';
 import { useEffect, useId, useState, type SyntheticEvent } from 'react';
 import { useCreateTask } from '../../daemon/queries';
@@ -44,12 +44,9 @@ export function NewTaskForm({ formId, project, tasks, onStatus, onCreated }: New
   const submit = (event: SyntheticEvent<HTMLFormElement>): void => {
     event.preventDefault();
     const acceptanceCriteria = criteriaLines(criteriaText);
-    if (acceptanceCriteria.length === 0) {
-      setFormError('Add at least one acceptance criterion');
-      return;
-    }
-    if (areas.length === 0) {
-      setFormError('Choose at least one area');
+    const refusal = newTaskRefusal({ acceptanceCriteria, areas });
+    if (refusal !== null) {
+      setFormError(refusal);
       return;
     }
     setFormError(null);

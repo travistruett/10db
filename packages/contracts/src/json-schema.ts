@@ -17,6 +17,7 @@ import {
   AccountUsageDto,
 } from './accounts';
 import { AaModelDto, BenchmarkStatusDto } from './benchmarks';
+import { BuilderToolInputs, BuilderToolName } from './builder-mcp-tools';
 import {
   BoardColumnDelete,
   BoardColumnDto,
@@ -66,6 +67,13 @@ const mcpSchemas: Record<string, z.ZodType> = Object.fromEntries(
   Object.values(McpToolName).flatMap((tool): [string, z.ZodType][] => [
     [`mcp-${tool.replaceAll('_', '-')}-input`, McpToolInputs[tool]],
     [`mcp-${tool.replaceAll('_', '-')}-output`, McpToolOutputs[tool]],
+  ]),
+);
+
+const builderMcpSchemas: Record<string, z.ZodType> = Object.fromEntries(
+  Object.values(BuilderToolName).map((tool): [string, z.ZodType] => [
+    `builder-mcp-${tool.replaceAll('_', '-')}-input`,
+    BuilderToolInputs[tool],
   ]),
 );
 
@@ -127,6 +135,7 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'team-input': TeamInput,
   'workstream-changes-dto': WorkstreamChangesDto,
   ...mcpSchemas,
+  ...builderMcpSchemas,
 };
 
 /** Renders each registered schema as JSON Schema text, keyed by file name. */
