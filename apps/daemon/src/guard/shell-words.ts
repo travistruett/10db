@@ -148,7 +148,7 @@ function readHereDocuments(command: string, at: number, pending: readonly HereDo
 const SEPARATORS: ReadonlySet<string> = new Set([';', '|', '&']);
 
 /** An expansion that becomes any number of words even inside double quotes: `$@`, `$*`, `${a[@]}`, `${!p*}`. */
-const MULTI_WORD_EXPANSION = /\$[@*]|\$\{[@*!]|\[[@*]\]|[@*]\}/;
+const MULTI_WORD_EXPANSION = /\$[@*]|\$\{[@*!=(]|\[[@*]\]|[@*]\}/;
 /** A character in unquoted text that makes the shell split or expand the word. */
 const SPLITTING = /[$*?[]/;
 
@@ -657,9 +657,9 @@ const RUNNER_WRAPPERS: ReadonlyMap<string, Wrapper> = new Map([
   ['caffeinate', wrapper(['-t', '-w'])],
   ['stdbuf', wrapper(['-i', '-o', '-e'])],
   ['builtin', wrapper()],
-  // `arch -arm64 [-e VAR=value] [-d VAR] program`, and BSD `script [-q] [-F pipe] [-t time] file program`.
+  // `arch -arm64 [-e VAR=value] [-d VAR] program`, and macOS `script [-aeFkqr] [-t time] file program`.
   ['arch', wrapper(['-e', '-d', '-arch'])],
-  ['script', wrapper(['-F', '-t'], 1)],
+  ['script', wrapper(['-t'], 1)],
 ]);
 
 /** arch's own flags; any other flag before the program may change which program runs. */
@@ -789,7 +789,13 @@ function prefixes(
       while (i < words.length && (words[i] ?? '').startsWith('-')) {
         const flag = words[i] ?? '';
         if (name === 'arch' && !ARCH_FLAGS.has(flag)) return { at: i, flags, hidden: true };
-        const span = flagSpan(flag, wrapped.valueFlags);
+        // arch's flags are whole words: `-arm64e` is not `-arm64` and `-e`.
+        const span =
+          name === 'arch'
+            ? wrapped.valueFlags.has(flag)
+              ? 2
+              : 1
+            : flagSpan(flag, wrapped.valueFlags);
         if (angled(i, i + span)) return { at: i, flags, hidden: true };
         flags.push({ wrapper: name, flag, value: span === 2 ? (words[i + 1] ?? null) : null });
         i += span;

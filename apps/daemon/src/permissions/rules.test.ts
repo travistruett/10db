@@ -938,3 +938,18 @@ describe('storableRule', () => {
     expect(storableRule(toolName, summary)).toEqual(expected);
   });
 });
+
+describe('commandPrefix: a flag whose value the guard cannot place', () => {
+  it.each([
+    'pnpm --package foo dlx bash',
+    'pnpm --package foo dlx',
+    'pnpm --prefix d exec',
+    'pnpm --prefix d exec bash',
+    'pnpm --config c exec bash',
+    'pnpm -p d exec bash',
+    'yarn --prefix d dlx',
+    'yarn -C d dlx bash',
+  ])('%s is allowed once only', (command) => {
+    expect(commandPrefix(command)).toBeNull();
+  });
+});

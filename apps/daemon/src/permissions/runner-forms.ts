@@ -4,7 +4,7 @@ import {
   packageToolForwards,
   packageToolProgramIndex,
 } from '@10db/contracts';
-import { plainWords, stripCommandPrefixes } from '../guard';
+import { plainWordReadings, stripCommandPrefixes } from '../guard';
 
 /** Bun runs the file it names as well as a package, so every bun command keeps its whole words. */
 const FILE_RUNNERS: ReadonlySet<string> = new Set(['bun']);
@@ -43,7 +43,14 @@ function runsAnything(program: string): boolean {
  */
 export function runsUnnamedProgram(raw: readonly string[]): boolean {
   const words = stripCommandPrefixes(raw);
-  const plain = plainWords(words);
+  // A flag the guard cannot place may or may not take the next word, so any reading may be unnamed.
+  return plainWordReadings(words).some((plain) => runsUnnamedIn(words, plain));
+}
+
+function runsUnnamedIn(
+  words: readonly string[],
+  plain: ReturnType<typeof plainWordReadings>[number],
+): boolean {
   const bare = plain.map((p) => p.word);
   const [head] = bare;
   if (head === undefined) return true;

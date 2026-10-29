@@ -142,15 +142,6 @@ export function plainWordReadings(words: readonly string[]): PlainWord[][] {
   return readings.reverse();
 }
 
-/**
- * The words that are neither flags nor flag values, each with its index in `words`: in
- * `pnpm --filter x add zod` they are `pnpm`, `add` and `zod`, at 0, 3 and 4. An unknown flag takes
- * no value in this reading.
- */
-export function plainWords(words: readonly string[]): PlainWord[] {
-  return plainWordReadings(words)[0] ?? [];
-}
-
 export function startsWithWords(words: readonly string[], prefix: readonly string[]): boolean {
   return prefix.length > 0 && prefix.every((p, i) => words[i] === p);
 }

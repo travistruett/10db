@@ -73,6 +73,12 @@ describe('which words the shell passes as exactly one word', () => {
       single: [true, true, false, true, false],
     },
     {
+      name: 'zsh splitting and array flags inside quotes',
+      command: 'x "${=a}" "${(@)a}"',
+      words: ['x', '${=a}', '${(@)a}'],
+      single: [true, false, false],
+    },
+    {
       name: 'a glob',
       command: 'x * "*" \'*\' a?',
       words: ['x', '*', '*', '*', 'a?'],

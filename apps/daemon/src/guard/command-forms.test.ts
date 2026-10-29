@@ -105,6 +105,8 @@ const ROWS: readonly Row[] = [
   { name: 'arch -e value', command: 'arch -arm64 -e FOO=1 pnpm add x', hazard: 'deps' },
   { name: 'arch -arch value', command: 'arch -arch arm64 pnpm add x', hazard: 'deps' },
   { name: 'corepack with a version', command: 'corepack pnpm@9 add x', hazard: 'deps' },
+  { name: 'arch -arm64e', command: 'arch -arm64e pnpm add x', hazard: 'deps' },
+  { name: 'script -F takes no value', command: 'script -F /dev/null pnpm add x', hazard: 'deps' },
   { name: 'arch of a safe command', command: 'arch -arm64 pnpm test', hazard: null },
   { name: 'script -q /dev/null', command: 'script -q /dev/null pnpm add x', hazard: 'deps' },
   { name: 'script of a safe command', command: 'script -q /dev/null pnpm test', hazard: null },

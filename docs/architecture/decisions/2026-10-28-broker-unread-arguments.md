@@ -32,7 +32,7 @@ could hide one:
 - **Hazard form.** For the known program, the arguments the parser could read are compared with the project's
   hazard commands (and each of them behind `pnpm exec`, `pnpm dlx`, `npm exec`, `npx`, `yarn dlx`). Every
   argument that has an expansion, substitution, glob or tilde is treated as any number of words, unless
-  it is fully double-quoted and holds no `$@`, `$*` or `${a[@]}`: that is exactly one word. It counts as
+  it is entirely quoted and holds no `$@`, `$*`, `${a[@]}` or zsh `${=x}` or `${(@)x}`: that is exactly one word. It counts as
   one only where a flag's value slot swallows it (`pnpm --filter "$pkg" test`, `--filter="$pkg"`); anywhere
   else it could be a flag or the subcommand and is unread (`pnpm "$x" add left-pad`). If the line
   could then start like a hazard command, it is unread: `pnpm $x` could be `pnpm add`, `pnpm exec $x` could be
@@ -46,7 +46,7 @@ could hide one:
   are listed per program (`pnpm --reporter silent add x`, `git -C dir add x`), `cargo +toolchain` is skipped,
   and a flag in neither the value nor the boolean list, followed by a word, is read both ways (`npm -p install x`
   is `npm install x`, or `npm x`), so either reading can be a hazard. Other programs keep one shared list of
-  value flags. `mise x --` and `mise exec --`, `corepack pnpm` (and `npm`, `npx`, `yarn`), `arch -<arch>` (an `arch` flag it does not know is unread) and
+  value flags. `mise x --` and `mise exec --`, `corepack pnpm` or `pnpm@9` (and `npm`, `npx`, `yarn`), `arch -<arch>` (an `arch` flag it does not know is unread) and
   `script -q /dev/null` are looked through like `env` and `nice`: the command they run is the one matched.
 
 An unread argument to a program that has no hazard form is allowed: `cd $d`, `eslint $f`, `grep "$x"`, `make
