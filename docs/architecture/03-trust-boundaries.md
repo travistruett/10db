@@ -77,7 +77,8 @@ Out of scope:
 
 A policy layer may refuse more than the boundaries, never less. Whatever a card or an allow rule lets through
 still runs inside the boundaries. The guard's shell-text parsing reduces prompts and explains refusals. A way
-past it is a bug in a convenience, not a breach. The parked findings in §9 are judged by that rule. Claims,
+past it is a bug in a convenience, not a breach, and the broker's Bash scan is judged the same way
+(`decisions/2026-10-29-sandbox-is-the-boundary.md`). The parked findings in §9 are judged by that rule. Claims,
 commits only through `commit` and hazard cards are workflow policy too. A lane can run git from an interpreter.
 What a batch carries to GitHub rests on review and the daemon's checks at ship (R12), not on how the commits
 were made.
