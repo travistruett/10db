@@ -57,6 +57,7 @@ import type {
   TaskPatch,
   TeamDto,
   TeamInput,
+  WorkstreamChangesDto,
   WorkstreamDto,
   WorkstreamId,
 } from '@10db/contracts';
@@ -97,6 +98,8 @@ export interface ApiServices {
   listWorkstreams(filter: { readonly active: boolean }): WorkstreamDto[];
   cancelWorkstream(id: WorkstreamId): Promise<WorkstreamDto>;
   retryWorkstream(id: WorkstreamId): WorkstreamDto;
+  /** The diff, commits and file counts of the workstream's work in its checkout, for the builder's check. */
+  workstreamChanges(id: WorkstreamId): Promise<WorkstreamChangesDto>;
   listInbox(filter: { readonly states: readonly InboxState[] | null }): InboxItemDto[];
   answerInbox(id: InboxItemId, answer: InboxAnswer): InboxItemDto;
   eventsAfter(afterSeq: number, limit: number): DaemonEvent[];

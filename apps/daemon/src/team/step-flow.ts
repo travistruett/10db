@@ -7,7 +7,7 @@ type StepMove =
   | { readonly kind: 'no_result' };
 
 /** Where a rejection goes: a plan review back to the plan, review and QA back to the implement step. */
-function sendBackTarget(steps: readonly WorkstreamStep[], index: number): number {
+export function sendBackTarget(steps: readonly WorkstreamStep[], index: number): number {
   const want = steps[index]?.role === StepRole.PlanReview ? StepRole.Plan : StepRole.Implement;
   for (let i = index - 1; i >= 0; i -= 1) if (steps[i]?.role === want) return i;
   return index;
@@ -66,13 +66,14 @@ export function sendBackSteps(
   entry: StepEntry,
 ): WorkstreamStep[] {
   return steps.map((s, i) => {
-    if (i === from) return { ...s, status: StepStatus.Pending };
+    // A step that sends the work back to itself restarts rather than waiting.
     if (i === to) {
       const restarted = { ...entered(target, entry), attempts: s.attempts + 1 };
       return target.tools === ToolAccess.ReadOnly
         ? { ...restarted, result: target.result }
         : restarted;
     }
+    if (i === from) return { ...s, status: StepStatus.Pending };
     return s;
   });
 }

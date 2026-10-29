@@ -63,6 +63,7 @@ const KIND_TITLES: Readonly<Record<InboxKind, string>> = {
   [InboxKind.Proposal]: '10db has a proposal',
   [InboxKind.Review]: '10db has a review for you',
   [InboxKind.Flag]: '10db flagged something',
+  [InboxKind.Check]: '10db has work for you to check',
 };
 
 /** What a new card's notification says first: what kind of card waits, so the builder can judge it unopened. */

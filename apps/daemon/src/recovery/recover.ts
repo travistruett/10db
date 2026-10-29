@@ -21,13 +21,20 @@ import {
   patchWorkstream,
   releaseClaims,
   transitionWorkstream,
+  type DbReader,
+  type WorkstreamRow,
 } from '@10db/db';
 import { batchCardFields, checkoutOf } from '../delivery';
 import type { StateStore } from '../events';
 import type { Git } from '../git';
 import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
-import { failedGateEvidence, nextActionAfterCrash } from '../runner';
+import {
+  outstandingFixEvidence,
+  liveCheckCard,
+  nextActionAfterCrash,
+  raiseBuilderCheck,
+} from '../runner';
 import { failStep } from '../team';
 import type { ProcessTerminator } from './processes';
 
@@ -43,6 +50,20 @@ const KEEP_STATE = new Set<string>([S.Queued, S.PausedLimit]);
 
 /** The most dirty files one recovery event records. */
 const MAX_DIRTY_FILES = 200;
+
+/** What the builder is asked to check, read from the workstream's checkout. */
+async function readCheckFacts(git: Git, db: DbReader, row: WorkstreamRow) {
+  const checkout = checkoutOf(db, row);
+  const head = await git.head(checkout).catch(() => 'unknown');
+  const baseHead = row.baseHead ?? head;
+  const commits = await git.commitsSince(checkout, baseHead).catch(() => []);
+  return { baseHead, head, commits };
+}
+
+/** The facts for a card raised in the instant its predecessor closed, before git was read. */
+function unreadCheckFacts(row: WorkstreamRow) {
+  return { baseHead: row.baseHead ?? 'unknown', head: 'unknown', commits: [] };
+}
 
 /**
  * Runs once at startup, before the scheduler, so no runner races it. Every non-terminal workstream
@@ -93,7 +114,33 @@ export async function recoverOnStartup(opts: {
     if (KEEP_STATE.has(row.state)) continue;
 
     const waiting = row.state === S.WaitingHuman;
-    const open = waiting ? openItemsForWorkstream(db, ws.id)[0] : undefined;
+    // Work that waits for the builder's check keeps its card; it is not an agent's question to answer.
+    if (waiting && row.nextAction.kind === 'builder_review') {
+      // Git is read only when the card has to be raised again, so a restart that finds it touches nothing.
+      const facts = liveCheckCard(db, ws.id) ? null : await readCheckFacts(opts.git, db, row);
+      // A card that was closed some other way is raised again, so the work is never stranded.
+      const card = opts.state.write((ctx) => {
+        const kept =
+          liveCheckCard(ctx.tx, ws.id) ??
+          raiseBuilderCheck(ctx, {
+            workstreamId: ws.id,
+            projectId: project.id,
+            taskTitle: getTask(ctx.tx, row.taskId).title,
+            ...(facts ?? unreadCheckFacts(row)),
+          });
+        patchWorkstream(ctx, ws.id, null, {
+          nextAction: { kind: 'builder_review', inboxId: kept.id },
+        });
+        return kept;
+      });
+      opts.logger.info({ workstreamId: ws.id, inboxId: card.id }, 'still waiting for the builder');
+      report.parked.push(ws.id);
+      continue;
+    }
+    // A check card is not an agent's question: it is answered by its own handler.
+    const open = waiting
+      ? openItemsForWorkstream(db, ws.id).find((i) => i.kind !== 'check')
+      : undefined;
     if (open) {
       const nextAction: NextAction = { kind: 'answer', inboxId: open.id, providerSessionId };
       opts.state.write((ctx) => {
@@ -109,7 +156,7 @@ export async function recoverOnStartup(opts: {
     const lastOp = latestToolOp(db, ws.id);
     const attempts = opts.cleanShutdown ? row.recoveryAttempts : row.recoveryAttempts + 1;
     // A resume that was fixing a gate failure comes back as the fix, so the failure isn't dropped.
-    const failedGate = row.nextAction.kind === 'resume' ? failedGateEvidence(db, ws.id) : null;
+    const failedGate = row.nextAction.kind === 'resume' ? outstandingFixEvidence(db, row) : null;
     const nextAction: NextAction =
       row.state === S.Verifying || row.nextAction.kind === 'verify'
         ? { kind: 'verify' }

@@ -80,6 +80,22 @@ describe('projects', () => {
     ]);
   });
 
+  it('reads a project with no gate command back as null, and clears one that had it', () => {
+    const none = store.write((ctx) =>
+      insertProject(ctx, {
+        name: 'none',
+        repoPath: '/tmp/none',
+        areas: [{ name: 'src', globs: ['src/**'] }],
+      }),
+    ).value;
+    expect(getProject(store.db, none.id).gateCommand).toBeNull();
+    const project = seedProject(store);
+    expect(getProject(store.db, project.id).gateCommand).toBe('true');
+    store.write((ctx) => patchProject(ctx, project.id, { gateCommand: null }));
+    expect(getProject(store.db, project.id).gateCommand).toBeNull();
+    expect(listProjects(store.db).map((p) => p.gateCommand)).toEqual([null, null]);
+  });
+
   it('has no extra allowed commands unless it was given some', () => {
     const project = seedProject(store);
     expect(getProject(store.db, project.id).allowedCommands).toEqual([]);

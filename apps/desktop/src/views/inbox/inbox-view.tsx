@@ -1,4 +1,4 @@
-import type { InboxItemDto } from '@10db/contracts';
+import { InboxKind, type InboxItemDto } from '@10db/contracts';
 import { Alert, Group, Stack, Text, Title } from '@mantine/core';
 import { useQueryClient } from '@tanstack/react-query';
 import { useRef, useState } from 'react';
@@ -38,6 +38,8 @@ export function InboxView() {
     readonly key: string;
     readonly message: string;
   } | null>(null);
+  // A check card's Send Back note, by card, so deselecting the card does not lose it.
+  const [sendBackNotes, setSendBackNotes] = useState<Readonly<Record<string, string>>>({});
   const [helpOpen, setHelpOpen] = useState(false);
   const noteRef = useRef<HTMLTextAreaElement>(null);
 
@@ -102,7 +104,8 @@ export function InboxView() {
   };
 
   const submit = (): void => {
-    if (!selectedRow || !selected || answer.isPending) return;
+    // A check card is answered by its own buttons, never by a key.
+    if (!selectedRow || !selected || selected.kind === InboxKind.Check || answer.isPending) return;
     if (isDismissable(selected)) {
       dismiss(selectedRow);
       return;
@@ -135,7 +138,7 @@ export function InboxView() {
 
   useInboxKeys({
     count: rows.length,
-    optionCount: selected?.options.length ?? 0,
+    optionCount: selected?.kind === InboxKind.Check ? 0 : (selected?.options.length ?? 0),
     onMove: (delta) => {
       const next = rows[Math.min(rows.length - 1, Math.max(0, index + delta))];
       if (!next || next.key === selectedRow?.key) return false;
@@ -203,6 +206,10 @@ export function InboxView() {
                 onNote={(value) => {
                   setSelectedId(row.key);
                   patch(row.key, { note: value });
+                }}
+                sendBackNote={sendBackNotes[row.items[0].id] ?? ''}
+                onSendBackNote={(value) => {
+                  setSendBackNotes((current) => ({ ...current, [row.items[0].id]: value }));
                 }}
                 onNoteFocus={() => {
                   setSelectedId(row.key);

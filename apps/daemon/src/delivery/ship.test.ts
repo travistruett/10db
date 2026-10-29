@@ -183,6 +183,31 @@ describe('shipping', () => {
     expect(getBatchRow(h.store.db, batch.id)).toMatchObject({ gatePid: null, gatePidStart: null });
   });
 
+  it('ships a batch without a gate step when the project has none', async () => {
+    h = createDeliveryHarness({ gateCommand: null });
+    const { batch } = await openBatch('Add greetings', 'Alpha');
+    h.commit('src/api/alpha.txt');
+    const shipped = await finishAll(batch);
+    expect(shipped).toMatchObject({
+      state: 'SHIPPED',
+      prUrl: 'https://github.com/acme/widgets/pull/1',
+      gateExitCode: null,
+      gateLogPath: null,
+      failure: null,
+    });
+    expect(batchLines(batch.id).map((line) => line['msg'])).toEqual([
+      'batch branch cut',
+      'git push finished',
+      'gh pr create finished',
+      'batch shipped',
+    ]);
+    expect(existsSync(join(h.dataDir, 'logs', 'gate'))).toBe(false);
+    expect(onOrigin(batch.branch)).toBe(h.git$('rev-parse', 'HEAD'));
+    const body = h.gh.body(shipped.prUrl ?? '');
+    expect(body).toContain('No gate command: each task was approved in 10db.');
+    expect(body).not.toContain('Gate, run on the branch before the push:');
+  });
+
   it('fills the repo pull request template, with each task and CI for the pushed head', async () => {
     h = createDeliveryHarness();
     const alpha = h.addTask('Alpha', {

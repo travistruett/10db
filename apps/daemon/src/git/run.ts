@@ -131,9 +131,15 @@ export interface RunOptions {
 /**
  * Runs one local git call in `repo` with `DAEMON_GIT_CONFIG`, a cleaned environment and a timeout.
  * Resolves with stdout as bytes; rejects with a `GitError` on a non-zero exit, a timeout or too much
- * output.
+ * output. With `capBytes`, stdout beyond that many bytes is not wanted: the child is killed once it
+ * has printed them, and what it printed so far resolves, whatever the child's exit.
  */
-function runGitBytes(repo: string, args: readonly string[], opts: RunOptions): Promise<Buffer> {
+function runGitBytes(
+  repo: string,
+  args: readonly string[],
+  opts: RunOptions,
+  capBytes?: number,
+): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const child = spawn(
       opts.bin,
@@ -147,6 +153,7 @@ function runGitBytes(repo: string, args: readonly string[], opts: RunOptions): P
     let size = 0;
     let stderr = '';
     let failure: string | null = null;
+    let capped = false;
     const kill = (why: string): void => {
       failure ??= why;
       child.kill('SIGKILL');
@@ -157,6 +164,16 @@ function runGitBytes(repo: string, args: readonly string[], opts: RunOptions): P
       kill(`still running after ${String(timeoutMs / 1000)} s`);
     }, timeoutMs);
     child.stdout.on('data', (chunk: Buffer) => {
+      if (capBytes !== undefined) {
+        if (capped) return;
+        out.push(chunk.subarray(0, capBytes - size));
+        size += chunk.length;
+        if (size >= capBytes) {
+          capped = true;
+          child.kill('SIGKILL');
+        }
+        return;
+      }
       size += chunk.length;
       if (size > MAX_OUTPUT) kill('printed too much');
       else out.push(chunk);
@@ -174,7 +191,7 @@ function runGitBytes(repo: string, args: readonly string[], opts: RunOptions): P
       clearTimeout(timer);
       const stdout = Buffer.concat(out);
       if (failure !== null) reject(new GitError(args, failure, code));
-      else if (code === 0) resolve(stdout);
+      else if (capped || code === 0) resolve(stdout);
       else reject(new GitError(args, `${stderr}\n${stdout.toString('utf8')}`, code));
     });
   });
@@ -187,4 +204,18 @@ export async function runGit(
   opts: RunOptions,
 ): Promise<string> {
   return (await runGitBytes(repo, args, opts)).toString('utf8');
+}
+
+/**
+ * The first `capBytes` bytes of stdout, or all of it when it is shorter. A call that prints more is
+ * killed once it has printed them, so a huge output is never held; the caller sees only that the
+ * result is `capBytes` long.
+ */
+export function runGitCapped(
+  repo: string,
+  args: readonly string[],
+  opts: RunOptions,
+  capBytes: number,
+): Promise<Buffer> {
+  return runGitBytes(repo, args, opts, capBytes);
 }

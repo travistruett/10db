@@ -15,4 +15,5 @@ export {
   LaunchVerdict,
 } from './launch-rule';
 export { recoverBatches } from './recover';
+export { workstreamChanges } from './workstream-changes';
 export { allCheckouts, checkoutOf, claimScopeOf, projectAtCheckout } from './checkout';

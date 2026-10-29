@@ -4,6 +4,7 @@ import {
   BatchFailure,
   BatchState,
   ConflictError,
+  InvalidError,
   isTerminal,
   LANE_STATES,
   latestPerTask,
@@ -141,6 +142,9 @@ export function createShipper(deps: ShipperDeps): Shipper {
     project: ProjectDto,
     signal: AbortSignal,
   ): Promise<GateResult | null> {
+    const gateCommand = project.gateCommand;
+    // The caller skips the gate step for a project without a gate.
+    if (gateCommand === null) throw new InvalidError('This project has no gate command to run');
     let recording: Promise<void> = Promise.resolve();
     const logPath = join(
       deps.dataDir,
@@ -148,10 +152,10 @@ export function createShipper(deps: ShipperDeps): Shipper {
       'gate',
       `batch-${batch.id}-${String(deps.clock.now().getTime())}.log`,
     );
-    deps.logger.info({ batchId: batch.id, command: project.gateCommand, logPath }, 'gate started');
+    deps.logger.info({ batchId: batch.id, command: gateCommand, logPath }, 'gate started');
     const result = await deps.gate.run({
       project,
-      command: project.gateCommand,
+      command: gateCommand,
       logPath,
       timeoutMs: deps.limits.gateTimeoutMs,
       env: deps.sessionEnv(project),
@@ -374,17 +378,20 @@ export function createShipper(deps: ShipperDeps): Shipper {
         if (worktreePath !== null) await retire(batchId);
         return;
       }
-      // 2. The gate, on the branch as it will be pushed.
-      step = 'the gate';
-      const gate = await runGate(batch, projectAtCheckout(project, checkout), signal);
-      if (gate === null) return;
-      if (gate.timedOut) {
-        fail(batch, shipCards.gateTimedOut(batch, deps.limits.gateTimeoutMs, gate.logPath));
-        return;
-      }
-      if (gate.exitCode !== 0) {
-        fail(batch, shipCards.gateFailed(batch, gate));
-        return;
+      // 2. The gate, on the branch as it will be pushed; a project with none was checked by the
+      // builder, task by task, so this step is skipped.
+      if (project.gateCommand !== null) {
+        step = 'the gate';
+        const gate = await runGate(batch, projectAtCheckout(project, checkout), signal);
+        if (gate === null) return;
+        if (gate.timedOut) {
+          fail(batch, shipCards.gateTimedOut(batch, deps.limits.gateTimeoutMs, gate.logPath));
+          return;
+        }
+        if (gate.exitCode !== 0) {
+          fail(batch, shipCards.gateFailed(batch, gate));
+          return;
+        }
       }
       // 3. Push, never forced.
       step = 'git push';

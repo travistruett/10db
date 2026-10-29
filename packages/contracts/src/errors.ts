@@ -34,6 +34,14 @@ export class InvalidError extends DomainError {
   }
 }
 
+/** An answer the card's kind can't accept as given, such as Send Back without a note. */
+export class InboxAnswerRefused extends DomainError {
+  override readonly name = 'InboxAnswerRefused';
+  constructor(message: string) {
+    super('invalid', message);
+  }
+}
+
 /**
  * A task that has run, or is running, can't be removed from the board. A live workstream is
  * cancelled through its own route; one that already ended leaves the task as it is.

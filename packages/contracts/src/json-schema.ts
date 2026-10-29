@@ -41,6 +41,7 @@ import { McpToolInputs, McpToolName, McpToolOutputs } from './mcp-tools';
 import { ModelProfileDto, ModelProfilePatch } from './model-profiles';
 import { PickerProposalDto } from './picker';
 import { StepPlanDto } from './steps';
+import { WorkstreamChangesDto } from './workstream-changes';
 import {
   PersonaDto,
   PersonaInput,
@@ -124,6 +125,7 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'step-plan-dto': StepPlanDto,
   'team-dto': TeamDto,
   'team-input': TeamInput,
+  'workstream-changes-dto': WorkstreamChangesDto,
   ...mcpSchemas,
 };
 

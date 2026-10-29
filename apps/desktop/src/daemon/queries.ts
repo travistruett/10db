@@ -10,6 +10,7 @@ import {
   SystemCheckDto,
   TaskDto,
   TaskStartResult,
+  WorkstreamChangesDto,
   WorkstreamDto,
   type BatchId,
   type BoardColumnDelete,
@@ -29,6 +30,7 @@ import {
 } from '@10db/contracts';
 import {
   queryOptions,
+  skipToken,
   useMutation,
   useQuery,
   useQueryClient,
@@ -46,6 +48,8 @@ export const queryKeys = {
   boardColumns: (projectId: ProjectId) => ['board-columns', projectId] as const,
   workstreams: (active: boolean) => ['workstreams', { active }] as const,
   inbox: ['inbox'],
+  workstreamChanges: (id: WorkstreamId | undefined, head: string | null) =>
+    ['workstream-changes', id, head] as const,
   keepAwake: ['keep-awake'],
   system: ['system'],
   flows: ['flows'],
@@ -131,6 +135,25 @@ export function useWorkstreams(filter: { readonly active: boolean }) {
         await client.workstreams.$get({ query: { active: String(filter.active) } }),
         WorkstreamList,
       ),
+  });
+}
+
+/**
+ * What a workstream changed since it started: the diff a finished, ungated task is checked by. It is
+ * keyed by the head the card names, so a new round never shows the previous round's diff.
+ */
+export function useWorkstreamChanges(id: WorkstreamId | undefined, head: string | null) {
+  const { client } = useDaemon();
+  return useQuery({
+    queryKey: queryKeys.workstreamChanges(id, head),
+    queryFn:
+      id === undefined
+        ? skipToken
+        : async () =>
+            readJson(
+              await client.workstreams[':id'].changes.$get({ param: { id } }),
+              WorkstreamChangesDto,
+            ),
   });
 }
 

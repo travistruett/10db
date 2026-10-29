@@ -84,6 +84,15 @@ describe('NewTaskForm', () => {
     expect(within(card.parentElement ?? card).getByText(/make verify-it/)).toBeTruthy();
   });
 
+  it('the criteria help says the builder checks the work when the project has no gate', async () => {
+    await open(projectDto({ gateCommand: null }));
+
+    fireEvent.mouseEnter(screen.getByRole('button', { name: 'About acceptance criteria' }));
+
+    expect(await screen.findByText(/and you check the finished work yourself\./)).toBeTruthy();
+    expect(screen.queryByText(/gate \(/)).toBeNull();
+  });
+
   it('the description starts at one row', async () => {
     await open(projectDto());
 

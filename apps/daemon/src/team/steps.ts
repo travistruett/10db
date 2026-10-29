@@ -136,7 +136,16 @@ export function retryWorkstream(state: StateStore, id: WorkstreamId): Workstream
         patch: { failure: null },
         reason: 'a workstream was retried',
       });
-    const steps = row.steps.length > 0 ? restartStep(row.steps, row.stepIndex, ctx.now) : row.steps;
+    // A step restarted to act on a note keeps its start, which is how the note stays outstanding for
+    // a session that starts fresh: the note was written after that start.
+    const restarted =
+      row.steps.length > 0 ? restartStep(row.steps, row.stepIndex, ctx.now) : row.steps;
+    const steps =
+      row.nextAction.kind === 'fix'
+        ? restarted.map((s, i) =>
+            i === row.stepIndex ? { ...s, startedAt: row.steps[i]?.startedAt ?? s.startedAt } : s,
+          )
+        : restarted;
     const latest = latestHandoffForStep(ctx.tx, { ...row, steps });
     return transitionWorkstream(ctx, id, {
       to: WorkstreamState.Queued,
@@ -146,9 +155,13 @@ export function retryWorkstream(state: StateStore, id: WorkstreamId): Workstream
         recoveryAttempts: 0,
         failureReason: null,
         steps,
-        nextAction: latest
-          ? { kind: 'continue_from_handoff', handoffId: latest.id }
-          : { kind: 'start' },
+        // Work the builder sent back that ran out of attempts keeps its note for the restarted step.
+        nextAction:
+          row.nextAction.kind === 'fix'
+            ? row.nextAction
+            : latest
+              ? { kind: 'continue_from_handoff', handoffId: latest.id }
+              : { kind: 'start' },
       },
       reason: 'retried by the builder',
     });

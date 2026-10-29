@@ -69,6 +69,17 @@ export class NewerSchemaError extends SchemaMismatchError {
   }
 }
 
+/** A migration left rows that reference a row that does not exist; the schema change is unsafe. */
+export class MigrationIntegrityError extends Error {
+  override readonly name = 'MigrationIntegrityError';
+  readonly violations: number;
+
+  constructor(path: string, violations: number) {
+    super(`${path} has ${String(violations)} dangling foreign key reference(s) after migrating.`);
+    this.violations = violations;
+  }
+}
+
 const AppliedMigration = z.object({ hash: z.string() });
 
 // Drizzle declares `id SERIAL`, which SQLite leaves NULL, so insertion order is the rowid.
@@ -98,5 +109,19 @@ export function migrateDatabase(
     throw new StaleSchemaBaselineError(db.$client.name);
   }
   if (applied.length > baseline.length) throw new NewerSchemaError(db.$client.name);
-  migrate(db, { migrationsFolder: migrationsDir });
+  // SQLite rebuilds a table to drop a NOT NULL, and a rebuilt table that others reference can only be
+  // dropped with foreign keys off. The pragma is a no-op inside the migration's transaction, so it is
+  // switched off around it and restored after.
+  const enforced = db.$client.pragma('foreign_keys', { simple: true }) === 1;
+  db.$client.pragma('foreign_keys = OFF');
+  try {
+    migrate(db, { migrationsFolder: migrationsDir });
+    // With enforcement off a migration can leave a dangling reference unnoticed, so check them all.
+    const violations = db.$client.pragma('foreign_key_check');
+    if (Array.isArray(violations) && violations.length > 0) {
+      throw new MigrationIntegrityError(db.$client.name, violations.length);
+    }
+  } finally {
+    if (enforced) db.$client.pragma('foreign_keys = ON');
+  }
 }

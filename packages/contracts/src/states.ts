@@ -22,6 +22,8 @@ export const InboxKind = {
   Proposal: 'proposal',
   Review: 'review',
   Flag: 'flag',
+  /** A finished task in a project with no gate, waiting for the builder to approve or send it back. */
+  Check: 'check',
 } as const;
 export type InboxKind = ValueOf<typeof InboxKind>;
 
@@ -108,7 +110,7 @@ export const SourceKind = {
 } as const;
 export type SourceKind = ValueOf<typeof SourceKind>;
 
-export const EvidenceKind = { Gate: 'gate', Agent: 'agent' } as const;
+export const EvidenceKind = { Gate: 'gate', Agent: 'agent', Builder: 'builder' } as const;
 export type EvidenceKind = ValueOf<typeof EvidenceKind>;
 
 export const SessionMode = { Managed: 'managed', Terminal: 'terminal' } as const;
