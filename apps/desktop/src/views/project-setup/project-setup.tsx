@@ -31,8 +31,8 @@ interface Prefilled {
 export function useProjectSetup(onCreated: (project: ProjectDto) => void): ProjectSetup {
   const inspect = useInspectFolder();
   const create = useCreateProject();
-  const ghLogin =
-    useSystemCheck().data?.tools.find((t) => t.name === ToolName.Gh)?.signedIn ?? null;
+  const system = useSystemCheck();
+  const ghLogin = system.data?.tools.find((t) => t.name === ToolName.Gh)?.signedIn ?? null;
   const accounts = (useAccounts().data ?? []).filter((a) => !a.archived);
   const [accountChoice, setAccountChoice] = useState<string | null>(null);
   const [typed, setTyped] = useState<Prefilled>({ name: '', gate: '', baseBranch: '' });
@@ -51,6 +51,7 @@ export function useProjectSetup(onCreated: (project: ProjectDto) => void): Proje
           : { kind: 'refused', path: inspect.variables, message: result.message };
 
   const onInspect = (path: string) => {
+    create.reset();
     inspect.mutate(path, {
       onSuccess: (answer) => {
         // A new folder starts from its own prefill, not the last folder's edits.
@@ -66,8 +67,10 @@ export function useProjectSetup(onCreated: (project: ProjectDto) => void): Proje
     });
   };
 
-  const block = inspection === null ? null : pullRequestBlock({ ghLogin, inspection });
-  const delivery = deliveryChoice ?? (block === null ? Delivery.PullRequest : Delivery.Local);
+  // Until the system check answers, gh's login is unknown, so pull requests are not yet ruled out.
+  const block =
+    inspection === null || !system.isSuccess ? null : pullRequestBlock({ ghLogin, inspection });
+  const delivery = block !== null ? Delivery.Local : (deliveryChoice ?? Delivery.PullRequest);
   const accountId =
     accountChoice ?? accounts.find((a) => a.isDefault)?.id ?? accounts[0]?.id ?? null;
   const chooseAccount = accounts.length > 1;

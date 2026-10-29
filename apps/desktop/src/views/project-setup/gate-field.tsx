@@ -29,11 +29,16 @@ export function GateField({ value, candidates, onChange }: GateFieldProps) {
       {candidates.length > 0 ? (
         <Group gap="xs">
           {candidates.map((candidate) => (
-            <Tooltip key={candidate.command} label={GATE_SOURCE_LABEL[candidate.source]}>
+            <Tooltip
+              key={candidate.command}
+              label={GATE_SOURCE_LABEL[candidate.source]}
+              events={{ hover: true, focus: true, touch: false }}
+            >
               <Button
                 size="compact-xs"
                 variant="default"
                 ff="monospace"
+                aria-label={`${candidate.command}, ${GATE_SOURCE_LABEL[candidate.source]}`}
                 onClick={() => {
                   onChange(candidate.command);
                 }}

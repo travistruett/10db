@@ -80,6 +80,7 @@ function system(gh: Gh) {
 interface Served {
   readonly inspected: string[];
   readonly posted: unknown[];
+  readonly accountsRequested: () => boolean;
 }
 
 function serve(
@@ -90,7 +91,12 @@ function serve(
     readonly createStatus?: number;
   } = {},
 ): Served {
-  const served: Served = { inspected: [], posted: [] };
+  let accountsAsked = false; // set by the /accounts handler
+  const served: Served = {
+    inspected: [],
+    posted: [],
+    accountsRequested: () => accountsAsked,
+  };
   const result = opts.result ?? { ok: true, inspection: inspection() };
   server.use(
     http.post(daemonUrl('/folders/inspect'), async ({ request }) => {
@@ -100,7 +106,10 @@ function serve(
     http.get(daemonUrl('/system'), () =>
       HttpResponse.json(system(opts.gh ?? { login: 'octocat' })),
     ),
-    http.get(daemonUrl('/accounts'), () => HttpResponse.json(opts.accounts ?? [DEFAULT_ACCOUNT])),
+    http.get(daemonUrl('/accounts'), () => {
+      accountsAsked = true;
+      return HttpResponse.json(opts.accounts ?? [DEFAULT_ACCOUNT]);
+    }),
     http.post(daemonUrl('/projects'), async ({ request }) => {
       served.posted.push(await request.json());
       if (opts.createStatus !== undefined && opts.createStatus >= 400) {
@@ -263,9 +272,9 @@ describe('useProjectSetup', () => {
     const gate = field('Gate command');
     expect(name.value).toBe('widgets');
     expect(gate.value).toBe('make gate');
-    fireEvent.click(screen.getByRole('button', { name: 'npm test' }));
+    fireEvent.click(screen.getByRole('button', { name: /^npm test/ }));
     expect(gate.value).toBe('npm test');
-    fireEvent.mouseEnter(screen.getByRole('button', { name: 'make gate' }));
+    fireEvent.mouseEnter(screen.getByRole('button', { name: /^make gate/ }));
     expect(await screen.findByText('from Makefile', {}, { timeout: 2000 })).toBeTruthy();
   });
 
@@ -280,6 +289,48 @@ describe('useProjectSetup', () => {
     });
     expect(screen.queryByText('Enter the command that checks the work')).toBeNull();
     expect(disabled(create())).toBe(false);
+  });
+
+  it('asks for a full path instead of sending a relative one', async () => {
+    const served = serve();
+    await openForm();
+    await typePath('~/Projects/app');
+    expect(await screen.findByText('Enter the full path, starting with /')).toBeTruthy();
+    expect(served.inspected).toEqual([]);
+  });
+
+  it('does not inspect the same path twice, so Enter keeps what was edited', async () => {
+    const served = serve();
+    await openInspected();
+    fireEvent.change(field('Name'), { target: { value: 'renamed' } });
+    fireEvent.keyDown(screen.getByRole('textbox', { name: 'Folder path' }), { key: 'Enter' });
+    expect(served.inspected).toEqual(['/Users/me/widgets']);
+    expect(field('Name').value).toBe('renamed');
+  });
+
+  it('a new folder starts again from its own prefill and delivery default', async () => {
+    serve();
+    await openInspected();
+    fireEvent.click(screen.getByRole('radio', { name: /Commit directly/ }));
+    fireEvent.change(field('Name'), { target: { value: 'renamed' } });
+    await typePath('/Users/me/other');
+    await waitFor(() => {
+      expect(field('Name').value).toBe('widgets');
+    });
+    expect(
+      screen.getByRole('radio', { name: /Open a pull request/ }).getAttribute('aria-checked'),
+    ).toBe('true');
+  });
+
+  it('leaves out archived accounts: one active and one archived show no Account', async () => {
+    const served = serve({
+      accounts: [DEFAULT_ACCOUNT, accountDto({ label: 'Old', archived: true })],
+    });
+    await openInspected();
+    await waitFor(() => {
+      expect(served.accountsRequested()).toBe(true);
+    });
+    expect(screen.queryByRole('combobox', { name: 'Account' })).toBeNull();
   });
 
   it('hides Account with a single account', async () => {

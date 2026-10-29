@@ -1,4 +1,14 @@
-import { Anchor, Button, Group, Loader, Paper, Stack, Text, TextInput } from '@mantine/core';
+import {
+  Anchor,
+  Button,
+  Group,
+  Loader,
+  Paper,
+  Stack,
+  Text,
+  TextInput,
+  VisuallyHidden,
+} from '@mantine/core';
 import { useRef, useState } from 'react';
 import { canChooseFolder, chooseFolder } from '../../desktop/choose-folder';
 
@@ -16,9 +26,11 @@ export interface FolderFieldProps {
   readonly onInspect: (path: string) => void;
 }
 
+const withoutTrailingSlashes = (path: string) => path.replace(/\/+$/u, '');
+
 /** The repository's real top level is the one path worth showing; a different pick gets a line saying so. */
 function RootNote({ state }: { readonly state: FolderState }) {
-  if (state.kind !== 'ready' || state.root === state.path) return null;
+  if (state.kind !== 'ready' || state.root === withoutTrailingSlashes(state.path)) return null;
   return (
     <Text size="sm" c="dimmed">
       The repository's top folder.
@@ -28,11 +40,25 @@ function RootNote({ state }: { readonly state: FolderState }) {
 
 function TypedPath({ state, onInspect }: FolderFieldProps) {
   const [text, setText] = useState(state.kind === 'idle' ? '' : state.path);
+  const [typedError, setTypedError] = useState<string | null>(null);
   const inspected = useRef<string | null>(null);
   const inspect = (path: string) => {
+    if (!path.startsWith('/')) {
+      setTypedError('Enter the full path, starting with /');
+      return;
+    }
+    setTypedError(null);
     inspected.current = path;
     onInspect(path);
   };
+  // Blur and Enter both inspect, but not the same path twice: that would reset what the builder edited.
+  const inspectIfNew = (force: boolean) => {
+    const path = text.trim();
+    if (path === '') return;
+    if (force && state.kind === 'refused') inspect(path);
+    else if (path !== inspected.current) inspect(path);
+  };
+  const error = typedError ?? (state.kind === 'refused' ? state.message : null);
   return (
     <Stack gap="xs">
       <TextInput
@@ -40,27 +66,35 @@ function TypedPath({ state, onInspect }: FolderFieldProps) {
         placeholder="/Users/you/Projects/app"
         styles={MONO_INPUT}
         value={text}
-        error={state.kind === 'refused' ? state.message : null}
+        error={error}
         rightSection={state.kind === 'inspecting' ? <Loader size="xs" /> : null}
         onChange={(e) => {
           setText(e.currentTarget.value);
         }}
         onBlur={() => {
-          const path = text.trim();
-          if (path !== '' && path !== inspected.current) inspect(path);
+          inspectIfNew(false);
         }}
         onKeyDown={(e) => {
-          const path = text.trim();
-          if (e.key === 'Enter' && path !== '') inspect(path);
+          if (e.key === 'Enter') inspectIfNew(true);
         }}
       />
-      <RootNote state={state} />
-      {state.kind === 'ready' && state.root !== state.path ? (
-        <Text size="sm" ff="monospace" style={{ wordBreak: 'break-all' }}>
-          {state.root}
-        </Text>
+      <Status inspecting={state.kind === 'inspecting'} />
+      {state.kind === 'ready' && withoutTrailingSlashes(state.path) !== state.root ? (
+        <>
+          <Text size="sm" ff="monospace" style={{ wordBreak: 'break-all' }}>
+            {state.root}
+          </Text>
+          <RootNote state={state} />
+        </>
       ) : null}
     </Stack>
+  );
+}
+
+/** Tells assistive technology that an inspection is running; the loader beside it is only a picture. */
+function Status({ inspecting }: { readonly inspecting: boolean }) {
+  return (
+    <VisuallyHidden role="status">{inspecting ? 'Inspecting the folder…' : ''}</VisuallyHidden>
   );
 }
 
@@ -111,6 +145,7 @@ function ChosenFolder({
           </Group>
         </Paper>
       )}
+      <Status inspecting={state.kind === 'inspecting'} />
       {refused ? (
         <Text size="sm" c="red" role="alert">
           {state.message}

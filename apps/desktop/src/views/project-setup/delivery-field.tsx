@@ -76,6 +76,7 @@ export function DeliveryField({
           label="Base branch"
           description="Pull requests start from and merge into this branch."
           searchable
+          required
           allowDeselect={false}
           data={branches.map((b) => b.name)}
           value={baseBranch === '' ? null : baseBranch}
