@@ -51,6 +51,16 @@ export function ProjectSwitcher({ compact = false }: { readonly compact?: boolea
             leftSection={<ProjectTile name={project?.name ?? '?'} size={compact ? 16 : 24} />}
             rightSection={<IconSelector size={compact ? 12 : 14} stroke={1.5} />}
             fw={600}
+            {...(compact
+              ? {
+                  // A darker outlined well, so it reads as a control among the section links.
+                  fz: 'sm',
+                  py: 6,
+                  mb: 'xs',
+                  bg: 'var(--mantine-color-body)',
+                  bd: '1px solid var(--mantine-color-default-border)',
+                }
+              : {})}
             onClick={() => {
               combobox.toggleDropdown();
             }}

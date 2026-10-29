@@ -151,7 +151,7 @@ export function AccountsSection() {
   const live = accounts.data.filter((a) => !a.archived);
   const archived = accounts.data.filter((a) => a.archived);
   return (
-    <Stack maw={880}>
+    <Stack>
       {accounts.isError ? (
         <Alert color="red" role="alert">
           Accounts could not be loaded. Check that the daemon is running.

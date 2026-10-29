@@ -13,6 +13,7 @@ import { ColorSchemeToggle } from './color-scheme-toggle';
 import { DaemonStatus } from './daemon-status';
 import { KeepAwakeControl } from './keep-awake-control';
 import { ProjectSwitcher } from './project-switcher';
+import { SettingsNav } from '../views/settings/settings-nav';
 import { ReconnectingBanner } from './reconnecting-banner';
 import { SystemAlert } from './system-alert';
 
@@ -38,6 +39,7 @@ export function AppLayout() {
   useDesktopSync();
   const status = useDaemonStatus();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const inSettings = pathname === '/settings' || pathname.startsWith('/settings/');
   const openCards = useInbox().data?.length ?? 0;
   return (
     <AppShell header={{ height: 48 }} navbar={{ width: 200, breakpoint: 'sm' }} padding="md">
@@ -62,21 +64,27 @@ export function AppLayout() {
           '--mantine-color-gray-0': 'var(--mantine-color-default-hover)',
         }}
       >
-        <ProjectSwitcher />
-        <Divider my="xs" />
-        {NAV.map(({ to, label, icon: Icon }) => (
-          <NavLink
-            key={to}
-            component={Link}
-            to={to}
-            active={pathname === to || pathname.startsWith(`${to}/`)}
-            label={label}
-            leftSection={<Icon size={16} stroke={1.5} />}
-            rightSection={
-              to === '/inbox' && openCards > 0 ? <InboxBadge count={openCards} /> : undefined
-            }
-          />
-        ))}
+        {inSettings ? (
+          <SettingsNav />
+        ) : (
+          <>
+            <ProjectSwitcher />
+            <Divider my="xs" />
+            {NAV.map(({ to, label, icon: Icon }) => (
+              <NavLink
+                key={to}
+                component={Link}
+                to={to}
+                active={pathname === to || pathname.startsWith(`${to}/`)}
+                label={label}
+                leftSection={<Icon size={16} stroke={1.5} />}
+                rightSection={
+                  to === '/inbox' && openCards > 0 ? <InboxBadge count={openCards} /> : undefined
+                }
+              />
+            ))}
+          </>
+        )}
       </AppShell.Navbar>
       <AppShell.Main>
         {status.kind === 'reconnecting' && <ReconnectingBanner since={status.since} />}

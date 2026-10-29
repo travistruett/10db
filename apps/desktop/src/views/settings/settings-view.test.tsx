@@ -20,27 +20,54 @@ async function pick(select: HTMLElement, option: string): Promise<void> {
 }
 
 describe('SettingsView', () => {
-  it('opens General from /settings and lists every section in its group', async () => {
+  it('opens General from /settings with no page title and no project picker', async () => {
     server.use(...baseHandlers());
     const { router } = renderApp('/settings');
-    expect(await screen.findByRole('heading', { name: 'Settings', level: 2 })).toBeTruthy();
     await waitFor(() => {
       expect(router.state.location.pathname).toBe('/settings/general');
     });
-    const nav = screen.getByRole('navigation', { name: 'Settings sections' });
+    expect(await screen.findByRole('heading', { name: 'General', level: 3 })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'Settings', level: 2 })).toBeNull();
+    // The one project switcher lives in the sidebar.
+    expect(screen.getAllByRole('button', { name: /Switch project/ })).toHaveLength(1);
+  });
+
+  it('the sidebar shows Back to Board, Project with the switcher, and Global', async () => {
+    server.use(...baseHandlers());
+    renderApp('/settings/general');
+    const nav = await screen.findByRole('navigation', { name: 'Settings sections' });
+    expect(within(nav).getByRole('link', { name: 'Back to Board' })).toBeTruthy();
+    expect(within(nav).getByText('Project')).toBeTruthy();
+    expect(within(nav).getByText('Global')).toBeTruthy();
+    expect(within(nav).getByRole('button', { name: /Switch project/ })).toBeTruthy();
     for (const label of [
       'General',
       'Board columns',
       'Areas and hazards',
       'Billing',
-      'Team',
-      'Routing rules',
       'Keep-awake',
       'Accounts',
-      'Models and benchmarks',
-      'Personas and flows',
     ])
-      expect(within(nav).getByRole('link', { name: new RegExp(label) })).toBeTruthy();
+      expect(within(nav).getByRole('link', { name: label })).toBeTruthy();
+    // The app nav gives way to Settings' own.
+    expect(screen.queryByRole('link', { name: 'Factory' })).toBeNull();
+  });
+
+  it('planned sections are hidden', async () => {
+    server.use(...baseHandlers());
+    renderApp('/settings/general');
+    const nav = await screen.findByRole('navigation', { name: 'Settings sections' });
+    for (const label of ['Team', 'Routing rules', 'Models and benchmarks', 'Personas and flows'])
+      expect(within(nav).queryByRole('link', { name: new RegExp(label) })).toBeNull();
+  });
+
+  it('Back to Board returns to /board', async () => {
+    server.use(...baseHandlers());
+    const { router } = renderApp('/settings/general');
+    fireEvent.click(await screen.findByRole('link', { name: 'Back to Board' }));
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/board');
+    });
   });
 
   it('redirects an unknown section to General', async () => {

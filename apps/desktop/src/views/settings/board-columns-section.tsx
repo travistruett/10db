@@ -147,7 +147,7 @@ export function BoardColumnsSection({ project }: { readonly project: ProjectDto 
   }
 
   return (
-    <Stack maw={640}>
+    <Stack>
       <Text size="sm" c="dimmed">
         Tasks in these columns are parked: 10db never picks or starts them.
       </Text>

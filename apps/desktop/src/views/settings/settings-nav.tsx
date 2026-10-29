@@ -1,41 +1,85 @@
-import { Badge, NavLink, Stack, Text } from '@mantine/core';
-import { Link } from '@tanstack/react-router';
-import { SETTINGS_SECTIONS, SettingsGroup, type SettingsSectionKey } from './sections';
+import { NavLink, Stack, Text } from '@mantine/core';
+import {
+  IconArrowLeft,
+  IconCoffee,
+  IconColumns,
+  IconCoin,
+  IconCpu,
+  IconHierarchy,
+  IconKey,
+  IconMap,
+  IconRoute,
+  IconSettings,
+  IconUsers,
+} from '@tabler/icons-react';
+import { Link, useRouterState } from '@tanstack/react-router';
+import { ProjectSwitcher } from '../../shell/project-switcher';
+import {
+  isSettingsSectionKey,
+  SETTINGS_SECTIONS,
+  SettingsGroup,
+  SettingsSectionKey,
+} from './sections';
 
-export interface SettingsNavProps {
-  readonly current: SettingsSectionKey;
-}
-
-const GROUP_LABEL: Readonly<Record<SettingsGroup, string>> = {
-  [SettingsGroup.Project]: 'Project',
-  [SettingsGroup.App]: 'App',
+const SECTION_ICON: Readonly<Record<SettingsSectionKey, typeof IconSettings>> = {
+  [SettingsSectionKey.General]: IconSettings,
+  [SettingsSectionKey.BoardColumns]: IconColumns,
+  [SettingsSectionKey.Areas]: IconMap,
+  [SettingsSectionKey.Billing]: IconCoin,
+  [SettingsSectionKey.Team]: IconUsers,
+  [SettingsSectionKey.RoutingRules]: IconRoute,
+  [SettingsSectionKey.KeepAwake]: IconCoffee,
+  [SettingsSectionKey.Accounts]: IconKey,
+  [SettingsSectionKey.Models]: IconCpu,
+  [SettingsSectionKey.PersonasAndFlows]: IconHierarchy,
 };
 
-export function SettingsNav({ current }: SettingsNavProps) {
+/**
+ * The sidebar while Settings is open: it takes the app nav's place, with Back at the top, the
+ * selected project's sections and then the ones that apply everywhere. Planned sections stay out.
+ */
+export function SettingsNav() {
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const section = pathname.split('/')[2] ?? '';
+  const current = isSettingsSectionKey(section) ? section : SettingsSectionKey.General;
+
   return (
-    <Stack component="nav" aria-label="Settings sections" w={240} gap={4}>
+    <Stack component="nav" aria-label="Settings sections" gap={2}>
+      <NavLink
+        label="Back to Board"
+        leftSection={<IconArrowLeft size={16} stroke={1.5} />}
+        renderRoot={(props) => <Link {...props} to="/board" />}
+        mb="xs"
+      />
       {Object.values(SettingsGroup).map((group) => (
-        <Stack key={group} gap={4} mb="sm">
-          <Text size="xs" fw={700} c="dimmed" tt="uppercase">
-            {GROUP_LABEL[group]}
+        <Stack key={group} gap={2} mb="sm">
+          {/* Both groups get the same label, so the switcher reads as the first row of Project, and
+              the sections under it as that project's. */}
+          <Text
+            size="xs"
+            fw={600}
+            c="dimmed"
+            px="sm"
+            pt={group === SettingsGroup.Project ? 0 : 'xs'}
+            pb={4}
+          >
+            {group === SettingsGroup.Project ? 'Project' : 'Global'}
           </Text>
-          {SETTINGS_SECTIONS.filter((s) => s.group === group).map((s) => (
-            <NavLink
-              key={s.key}
-              label={s.label}
-              active={s.key === current}
-              rightSection={
-                s.planned ? (
-                  <Badge size="xs" variant="light" color="gray">
-                    Planned
-                  </Badge>
-                ) : undefined
-              }
-              renderRoot={(props) => (
-                <Link {...props} to="/settings/$section" params={{ section: s.key }} />
-              )}
-            />
-          ))}
+          {group === SettingsGroup.Project ? <ProjectSwitcher compact /> : null}
+          {SETTINGS_SECTIONS.filter((s) => s.group === group && s.planned === null).map((s) => {
+            const Icon = SECTION_ICON[s.key];
+            return (
+              <NavLink
+                key={s.key}
+                label={s.label}
+                active={s.key === current}
+                leftSection={<Icon size={16} stroke={1.5} />}
+                renderRoot={(props) => (
+                  <Link {...props} to="/settings/$section" params={{ section: s.key }} />
+                )}
+              />
+            );
+          })}
         </Stack>
       ))}
     </Stack>
