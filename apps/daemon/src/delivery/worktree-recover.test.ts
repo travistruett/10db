@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node
 import { dirname, join, resolve } from 'node:path';
 import { mintId, type BatchDto, type BatchId, type WorkstreamDto } from '@10db/contracts';
 import {
+  clearWorktreePath,
   deleteAppSetting,
   getAppSetting,
   getBatch,
@@ -760,6 +761,24 @@ describe('sweepWorktrees', () => {
     const orphan = worktreeAt(under('orphan'), ours(mintId('Batch')));
     expect((await sweep()).map(comparable)).toEqual([comparable(orphan)]);
     expect(existsSync(orphan)).toBe(false);
+  });
+
+  it('drops the kept start of a task no live worktree batch holds, and keeps the rest', async () => {
+    const live = h.starter.startTask(h.addTask('Live').id);
+    const done = h.starter.startTask(h.addTask('Done', { areas: ['ui'] }).id);
+    await h.jobs.idle();
+    const member = (id: BatchId) => h.only(listWorkstreams(h.store.db, { batchId: id })).id;
+    h.state.write((c) => {
+      transitionBatch(c, done.id, { to: 'SHIPPING' });
+      transitionBatch(c, done.id, { to: 'CLOSED' });
+      clearWorktreePath(c, done.id);
+    });
+    const kept = [member(live.id), member(done.id), mintId('Workstream')];
+    for (const id of kept) h.git$('update-ref', `refs/10db/starts/${id}`, 'HEAD');
+    await sweep();
+    expect(h.git$('for-each-ref', '--format=%(refname)', 'refs/10db/')).toBe(
+      `refs/10db/starts/${member(live.id)}`,
+    );
   });
 
   it('prunes after removing', async () => {

@@ -268,6 +268,9 @@ export const worktreeCards = {
 /** The fold key of a batch's conflict-with-its-base card, so a clean merge can withdraw it. */
 export const baseConflictKey = (batchId: BatchId): string => `base-conflict:${batchId}`;
 
+/** The fold key of a batch's files-in-the-way card, so a clean merge can withdraw it. */
+export const baseKeptKey = (batchId: BatchId): string => `base-kept:${batchId}`;
+
 /** What delivery tells the builder when a worktree batch's branch can't take its base before a gate. */
 export const baseCards = {
   /** `worktree` is the batch's worktree, where the builder can merge by hand. */
@@ -275,6 +278,13 @@ export const baseCards = {
     title: `Batch "${batch.title}" conflicts with ${batch.baseBranch}`,
     body: `${batch.baseBranch} on origin changed these files in ways that conflict with the batch's own changes:\n${listPaths(paths)}\n\nBefore each gate 10db merges ${batch.baseBranch} into the batch's branch, so the gate tests what the pull request would merge. It can't resolve a conflict: a lane commits only its own files and never records a merge. Until the conflict is resolved, the gates test the branch without ${batch.baseBranch}'s newer commits, so a failure they fix still shows.\n\nOnce the pull request is open, resolve it there (GitHub's Update branch, then Resolve conflicts). Or merge it yourself in the worktree: ${worktreeMergeCommand(worktree, batch.baseBranch)}. That command turns the repository's hooks off, because lanes write in the worktree, so the hook config there is theirs to choose. The next gate tests the result, and this card goes once the branch holds ${batch.baseBranch}.`,
     foldKey: baseConflictKey(batch.id),
+    detail: { batchId: batch.id, paths: paths.slice(0, MAX_LISTED_PATHS) },
+  }),
+  /** `worktree` is the batch's worktree, which holds `paths`. */
+  kept: (batch: BatchDto, worktree: string, paths: readonly string[]): Card => ({
+    title: `Batch "${batch.title}" can't take ${batch.baseBranch}: files git doesn't track are in the way`,
+    body: `${batch.baseBranch} on origin adds files where the batch's worktree ${worktree} holds files git doesn't track, most likely ignored ones such as a hand-made .env or a build directory:\n${listPaths(paths)}\n\n10db never overwrites or deletes them, so it didn't merge ${batch.baseBranch}, and the gates test the branch without its newer commits. A fix session is told to leave them. If you don't need them, move or delete them; otherwise leave the merge to the pull request. The next gate tries again, and this card goes once the branch holds ${batch.baseBranch}.`,
+    foldKey: baseKeptKey(batch.id),
     detail: { batchId: batch.id, paths: paths.slice(0, MAX_LISTED_PATHS) },
   }),
 };

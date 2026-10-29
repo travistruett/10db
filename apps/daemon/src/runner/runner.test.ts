@@ -3172,6 +3172,10 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
             order.push(`base ${batchId}`);
             return Promise.resolve(answer);
           },
+          gate: (batchId, run) => {
+            order.push(`batch gate ${batchId}`);
+            return run();
+          },
         };
       }
 
@@ -3216,8 +3220,9 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
           await engine.runner.idle();
           expect(ws(workstream.id).state).toBe('DONE');
           expect(engine.adapter.prompts[1]?.prompt).toContain(NOTE);
-          // Inside the gate's run, which holds its slot, and before its command starts.
-          const once = ['gate asked', `base ${batch.id}`, 'gate spawned'];
+          // One gate of the batch at a time; inside the gate's run, which holds its slot, and before
+          // its command starts.
+          const once = [`batch gate ${batch.id}`, 'gate asked', `base ${batch.id}`, 'gate spawned'];
           expect(order).toEqual([...once, ...once]);
         } finally {
           restore();
@@ -3231,7 +3236,7 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
           () => [[write('src/api/a.txt'), commit('op-wt-base-2', ['src/api/a.txt']), turn]],
           { baseUpdates: recordingBaseUpdates({ kind: 'aborted' }, order) },
         ).finally(restore);
-        expect(order).toEqual(['gate asked', `base ${batch.id}`]);
+        expect(order).toEqual([`batch gate ${batch.id}`, 'gate asked', `base ${batch.id}`]);
         expect(ws(workstream.id)).toMatchObject({
           state: 'VERIFYING',
           nextAction: { kind: 'verify' },

@@ -172,6 +172,16 @@ describe('shipping a worktree batch', () => {
     expect(h.cards()).toEqual([]);
   });
 
+  it("drops its tasks' kept starts on the merged base when the batch's worktree goes", async () => {
+    const { batch, ws } = await opened('Alpha');
+    h.git$('update-ref', `refs/10db/starts/${ws.id}`, 'HEAD');
+    h.settle(ws.id, 'DONE');
+    h.shipper.checkBatch(batch.id);
+    await h.jobs.idle();
+    expect(getBatch(h.store.db, batch.id)).toMatchObject({ state: 'CLOSED', worktreePath: null });
+    expect(h.git$('for-each-ref', '--format=%(refname)', 'refs/10db/')).toBe('');
+  });
+
   it('closes a worktree batch with no commits, removes the worktree and deletes its branch at the base', async () => {
     const { batch, ws } = await opened('Alpha');
     h.settle(ws.id, 'DONE');

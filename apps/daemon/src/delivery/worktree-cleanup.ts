@@ -1,5 +1,11 @@
 import { BatchState, type BatchId } from '@10db/contracts';
-import { clearWorktreePath, deleteAppSetting, getBatch, getProject } from '@10db/db';
+import {
+  clearWorktreePath,
+  deleteAppSetting,
+  getBatch,
+  getProject,
+  listWorkstreams,
+} from '@10db/db';
 import {
   existsAsEntry,
   GitTrustError,
@@ -11,6 +17,7 @@ import { looseWork } from './build-output';
 import { keptWorktreeKey, worktreeCards } from './cards';
 import { raise, withdraw, type DeliveryContext } from './context';
 import { installedLockfileKey } from './installed-lockfile';
+import { startRef } from './start-refs';
 import { removeIfEmptyDirectory } from './worktree-leftover';
 import { withWorktreeLock } from './worktree-lock';
 
@@ -101,6 +108,19 @@ async function retire(ctx: DeliveryContext, batchId: BatchId): Promise<Retiremen
   }
   if (batch.state === BatchState.Closed && batch.branch !== null && batch.baseSha !== null)
     await ctx.git.deleteBranchIfAt(main, batch.branch, batch.baseSha);
+  // The tasks' starts on the merged base mean nothing once their worktree is gone; one git won't
+  // delete is left for the startup sweep.
+  for (const ws of listWorkstreams(ctx.state.db, { batchId }))
+    await ctx.git.deleteKeptRef(main, startRef(ws.id)).catch((error: unknown) => {
+      ctx.logger.warn(
+        {
+          batchId,
+          workstreamId: ws.id,
+          err: error instanceof Error ? error.message : String(error),
+        },
+        'task start not dropped',
+      );
+    });
   ctx.state.write((w) => {
     deleteAppSetting(w, worktreePinKey(batchId));
     deleteAppSetting(w, installedLockfileKey(batchId));

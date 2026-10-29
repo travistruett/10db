@@ -8,9 +8,10 @@ import {
   patchWorkstream,
 } from '@10db/db';
 import type { BranchMerge } from '../git';
-import { baseCards, baseConflictKey, detailOf } from './cards';
+import { baseCards, baseConflictKey, baseKeptKey, detailOf } from './cards';
 import { networkCall, raise, withdraw, type DeliveryContext } from './context';
 import { installedLockfile, recordInstall } from './installed-lockfile';
+import { startRef } from './start-refs';
 import { PNPM_LOCKFILE } from './worktree-dependencies';
 
 /** What happened to a batch's branch before its gate (`decisions/2026-10-29-gate-with-base.md`). */
@@ -34,10 +35,16 @@ export interface BaseUpdates {
    * Fetches the batch's base branch, then brings it into a worktree batch's branch so its gate tests
    * what the pull request would merge, and installs again when the worktree's packages don't match
    * its lockfile. A batch in the builder's own checkout is never merged into: it is only told how far
-   * behind its base it is. The gate runs it once it holds its slot, so no other gate's merge changes
-   * the tree under it. Never throws: whatever kept the base or the install out is the note.
+   * behind its base it is. A gate runs it as its `beforeStart`, inside `gate`, so no other gate's merge
+   * changes the tree under it. Never throws: whatever kept the base or the install out is the note.
    */
   beforeGate(batchId: BatchId, signal: AbortSignal): Promise<BaseUpdate>;
+  /**
+   * Runs `run`, one gate of the batch's at a time: a batch's gates share its checkout, so one gate's
+   * base update must wait until the gate before it has finished, whatever the number of gate slots.
+   * Gates of other batches don't wait.
+   */
+  gate<T>(batchId: BatchId, run: () => Promise<T>): Promise<T>;
 }
 
 /** What a gate's evidence or card says about its base and packages; null when there is nothing. */
@@ -122,7 +129,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
         repo: path,
         ours: start,
         theirs: base,
-        ref: `refs/10db/starts/${id}`,
+        ref: startRef(id),
         message: `10db: where ${id} starts on ${base}`,
       })
       .catch(() => null);
@@ -222,22 +229,48 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
           `${origin} conflicts with this branch in ${named(paths)}, so this gate ran without its newer commits: a failure they fix shows here until the conflict is resolved, which the builder has a card for.`,
         );
       }
-      case 'blocked':
+      case 'blocked': {
+        const { changed, kept } = merged;
+        if (kept.length > 0)
+          tell(batch, () => {
+            raise(ctx.inbox, batch.projectId, baseCards.kept(batch, path, kept));
+          });
         return notMerged(
           batch,
-          `in the way: ${named(merged.paths)}`,
-          `Uncommitted or ignored files are in the way of ${origin}'s newer commits (${named(merged.paths)}), so this gate ran without them.`,
+          `in the way: ${named([...changed, ...kept])}`,
+          joined(
+            changed.length === 0
+              ? null
+              : `Uncommitted changes in ${named(changed)} are in the way of ${origin}'s newer commits, so this gate ran without them.`,
+            kept.length === 0
+              ? null
+              : `10db didn't merge ${origin} because files in the worktree that git doesn't track are in the way (${named(kept)}). Don't remove or move them: they may be the builder's, and the builder has a card about them. This gate ran without ${origin}'s newer commits.`,
+          ) ?? `Files are in the way of ${origin}'s newer commits, so this gate ran without them.`,
         );
+      }
       case 'up_to_date':
       case 'merged':
         break;
     }
-    // The branch holds the base, the builder's own hand merge included: any conflict is over.
-    await moveBase(batch, path, merged.from);
+    // The branch holds the base, the builder's own hand merge included: nothing is in its way.
     tell(batch, () => {
-      withdraw(ctx.state, ctx.inbox, batch.projectId, [baseConflictKey(batch.id)]);
+      withdraw(ctx.state, ctx.inbox, batch.projectId, [
+        baseConflictKey(batch.id),
+        baseKeptKey(batch.id),
+      ]);
     });
-    if (merged.kind === 'up_to_date') return { kind: 'up_to_date', note: null };
+    let unmoved: string | null = null;
+    try {
+      await moveBase(batch, path, merged.from);
+    } catch (error) {
+      ctx.logger.warn({ batchId: batch.id, err: why(error) }, 'batch base not moved');
+      const held =
+        merged.kind === 'merged'
+          ? `10db merged ${origin} into this branch`
+          : `This branch already holds ${origin}`;
+      unmoved = `${held} but couldn't move the batch's base to it (${why(error)}), so this task's changes may still count ${origin}'s as its own.`;
+    }
+    if (merged.kind === 'up_to_date') return { kind: 'up_to_date', note: unmoved };
     ctx.logger.info(
       {
         batchId: batch.id,
@@ -248,7 +281,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
       },
       'base merged into the batch branch',
     );
-    return { kind: 'merged', base: merged.from, head: merged.head, note: null };
+    return { kind: 'merged', base: merged.from, head: merged.head, note: unmoved };
   }
 
   /**
@@ -344,7 +377,23 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     }
   }
 
+  /** Each batch's latest gate, which the next one waits for. */
+  const gates = new Map<BatchId, Promise<unknown>>();
+
   return {
+    gate<T>(batchId: BatchId, run: () => Promise<T>): Promise<T> {
+      const next = (gates.get(batchId) ?? Promise.resolve()).then(run, run);
+      const settled = next.then(
+        () => undefined,
+        () => undefined,
+      );
+      gates.set(batchId, settled);
+      // The last gate of a batch to settle forgets it, so finished batches hold no entry.
+      void settled.then(() => {
+        if (gates.get(batchId) === settled) gates.delete(batchId);
+      });
+      return next;
+    },
     async beforeGate(batchId, signal) {
       // A function, so the check in the catch below is not narrowed away by the one before it.
       const stopped = (): boolean => signal.aborted;

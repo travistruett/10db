@@ -141,7 +141,7 @@ import {
   sendBackTarget,
   type StepEntry,
 } from '../team';
-import type { GateRunner } from '../verify';
+import type { GateRequest, GateRunner } from '../verify';
 import { findClaimed } from '../watcher';
 import type { LiveSessions } from './live-sessions';
 import { checkedCommits, raiseBuilderCheck, waitsForCheck } from './builder-check';
@@ -1740,7 +1740,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     let recording: Promise<void> = Promise.resolve();
     const logPath = join(opts.dataDir, 'logs', 'gate', `${id}-${String(run)}.log`);
     opts.logger.info({ workstreamId: id, command: gateCommand, logPath }, 'gate started');
-    const result = await opts.gate.run({
+    const request: GateRequest = {
       ...(batchId === null
         ? {}
         : {
@@ -1774,7 +1774,12 @@ export function createRunner(opts: RunnerOptions): Runner {
             });
         });
       },
-    });
+    };
+    // One gate of a batch at a time: its gates share the batch's checkout.
+    const result =
+      batchId === null
+        ? await opts.gate.run(request)
+        : await opts.baseUpdates.gate(batchId, () => opts.gate.run(request));
     ctl.gateAbort = null;
     opts.logger.info(
       {
