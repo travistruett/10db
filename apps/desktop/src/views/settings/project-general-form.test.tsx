@@ -89,7 +89,7 @@ const rows: readonly Row[] = [
     name: 'Pull request title',
     project: pullRequests,
     label: 'Pull request title',
-    line: 'Starts every title, as a commit type and scope: feat(desktop).',
+    line: "Optional. Starts every title, as a commit type and scope: feat(desktop). Left empty, 10db writes <type>(<scope>): <subject> from the batch's tasks and the paths it changed.",
     change: () => type('Pull request title', 'fix(app)'),
     sent: { prTitlePrefix: 'fix(app)' },
   },

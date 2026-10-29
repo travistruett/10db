@@ -48,7 +48,7 @@ the change while the project has unfinished work), and 10db instead:
    [`gh`](https://cli.github.com) 2.40 or later is installed and signed in (`gh auth login`);
 2. runs the batch's tasks on that branch, and adds tasks you start while it is open;
 3. when every task is done or cancelled, runs the gate on the clean branch, pushes it and opens one pull
-   request titled `<prefix>: <batch title>`. The push runs no hook or other code from the repository and
+   request titled `<prefix>: <batch title>`, or `<type>(<scope>): <subject>` worked out from the work when the project sets no prefix. The push runs no hook or other code from the repository and
    has a 30-minute limit; a fetch or a `gh` call gets 2 minutes. Merging stays with you.
 
 Every refusal (a dirty checkout, the wrong branch, no `origin`, `gh` missing or signed out, a failed gate, a

@@ -305,8 +305,6 @@ describe('worktree mode contracts', () => {
       moveBackAt: null,
       fallbackAccountId: null,
       usageHandoffAt: 0.9,
-      model: 'sonnet',
-      effort: 'medium',
       handoffPct: 40,
       nudgePct: 50,
       humanWaitMinutes: 10,

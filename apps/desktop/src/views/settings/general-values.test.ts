@@ -110,10 +110,7 @@ describe('checkGeneral', () => {
     {
       name: 'pull-request delivery without a prefix',
       change: { delivery: 'pull_request' },
-      expected: {
-        ok: false,
-        errors: { prTitlePrefix: 'Enter a PR title prefix such as feat(app)' },
-      },
+      expected: { ok: true, patch: { delivery: 'pull_request' } },
     },
     {
       name: 'a prefix that is not a Conventional Commit type',
