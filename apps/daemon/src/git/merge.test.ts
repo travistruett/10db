@@ -133,7 +133,7 @@ describe('mergeIntoBranch', () => {
     const base = onMain({ 'README.md': '# theirs\n', 'src/theirs.txt': 'theirs\n' }, 'theirs');
     write(rel, 'a lane is still writing this\n');
     const before = snapshot();
-    expect(await merge()).toEqual({ kind: 'blocked', from: base, paths: [rel] });
+    expect(await merge()).toEqual({ kind: 'blocked', from: base, changed: [rel], kept: [] });
     expect(snapshot()).toEqual(before);
     expect(read(rel)).toBe('a lane is still writing this\n');
   });
@@ -165,19 +165,51 @@ describe('mergeIntoBranch', () => {
       const from = onMain(base, 'theirs', true);
       for (const rel of ignored) write(rel, 'the builder keeps this\n');
       const before = snapshot();
-      expect(await merge()).toEqual({ kind: 'blocked', from, paths: blocked });
+      expect(await merge()).toEqual({ kind: 'blocked', from, changed: [], kept: blocked });
       expect(snapshot()).toEqual(before);
       for (const rel of ignored) expect(read(rel)).toBe('the builder keeps this\n');
     });
 
-    it('merges past an ignored file the base leaves alone, and keeps it', async () => {
-      onMain({ '.gitignore': 'notes.local\n' }, 'ignore rules');
+    it.each([
+      {
+        name: 'an ignored file the base leaves alone',
+        ignore: 'notes.local\n',
+        ignored: ['notes.local'],
+        base: { 'src/theirs.txt': 'theirs\n' },
+      },
+      {
+        name: 'an ignored directory the base adds a new file to',
+        ignore: 'build/\n',
+        ignored: ['build/out.js', 'build/cache/x.bin'],
+        base: { 'build/new.js': 'theirs\n' },
+      },
+      {
+        name: 'packages a seed copied into a directory the base then starts tracking',
+        ignore: 'node_modules/\n',
+        ignored: ['packages/foo/node_modules/pkg/index.js'],
+        base: { 'packages/foo/package.json': '{}\n' },
+      },
+    ])('merges past $name, and keeps it', async ({ ignore, ignored, base }) => {
+      onMain({ '.gitignore': ignore }, 'ignore rules');
       rawGit('merge', '-q', '--ff-only', 'main');
       commitFiles({ 'src/own.txt': 'own\n' }, 'own');
-      onMain({ 'src/theirs.txt': 'theirs\n' }, 'theirs');
-      write('notes.local', 'kept\n');
+      onMain(base, 'theirs', true);
+      for (const rel of ignored) write(rel, 'kept\n');
       expect((await merge()).kind).toBe('merged');
-      expect(read('notes.local')).toBe('kept\n');
+      for (const rel of ignored) expect(read(rel)).toBe('kept\n');
+      for (const [rel, text] of Object.entries(base)) expect(read(rel)).toBe(text);
+    });
+
+    it('merges a base that turns a tracked file into a directory', async () => {
+      commitFiles({ 'docs/guide': 'a file\n' }, 'a file');
+      rawGit('switch', '-q', 'main');
+      rawGit('merge', '-q', '--ff-only', 'work');
+      rawGit('rm', '-q', '--', 'docs/guide');
+      commitFiles({ 'docs/guide/index.md': 'a directory now\n' }, 'a directory');
+      rawGit('switch', '-q', 'work');
+      commitFiles({ 'src/own.txt': 'own\n' }, 'own');
+      expect((await merge()).kind).toBe('merged');
+      expect(read('docs/guide/index.md')).toBe('a directory now\n');
     });
   });
 
@@ -342,5 +374,34 @@ describe('blobAt and isAncestor', () => {
     const newer = commitFiles({ 'src/own.txt': 'own\n' }, 'own');
     expect(await git.isAncestor(repo.path, older, newer)).toBe(true);
     expect(await git.isAncestor(repo.path, newer, older)).toBe(false);
+  });
+});
+
+describe('the refs 10db keeps', () => {
+  it('lists and deletes refs under refs/10db/, and refuses any other', async () => {
+    rawGit('switch', '-q', '-c', 'work');
+    const ours = commitFiles({ 'src/own.txt': 'own\n' }, 'own');
+    const theirs = onMain({ 'src/theirs.txt': 'theirs\n' }, 'theirs');
+    for (const id of ['ws-1', 'ws-2'])
+      await git.mergedCommit({
+        repo: repo.path,
+        ours,
+        theirs,
+        ref: `refs/10db/starts/${id}`,
+        message: 'start',
+      });
+    expect(await git.keptRefs(repo.path, 'refs/10db/starts/')).toEqual([
+      'refs/10db/starts/ws-1',
+      'refs/10db/starts/ws-2',
+    ]);
+    await git.deleteKeptRef(repo.path, 'refs/10db/starts/ws-1');
+    // Deleting one that is already gone is no error.
+    await git.deleteKeptRef(repo.path, 'refs/10db/starts/ws-1');
+    expect(await git.keptRefs(repo.path, 'refs/10db/starts/')).toEqual(['refs/10db/starts/ws-2']);
+    await expect(git.deleteKeptRef(repo.path, 'refs/heads/main')).rejects.toBeInstanceOf(
+      InvalidError,
+    );
+    await expect(git.keptRefs(repo.path, 'refs/heads/')).rejects.toBeInstanceOf(InvalidError);
+    expect(rawGit('rev-parse', 'main')).toBe(theirs);
   });
 });
