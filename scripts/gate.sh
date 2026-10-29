@@ -25,6 +25,17 @@ run_step() {
   steps_run+=("$name $((SECONDS - began))s")
 }
 
+# cargo reads the crates.io index and downloads crates from two hosts. Inside a sandbox whose network
+# allowlist lacks them, cargo only says "CONNECT tunnel failed, response 403", so a failed rust step
+# whose log says that is told which hosts the allowlist needs.
+rust_network_hint() {
+  [[ " ${failed[*]-} " == *" rust "* ]] || return 0
+  grep -q 'CONNECT tunnel failed' .gate/rust.log || return 0
+  local hint="rust: cargo could not reach crates.io through the sandbox's proxy. Allow index.crates.io and static.crates.io in the sandbox's network allowlist, then rerun."
+  printf '%s\n' "$hint" >> .gate/rust.log
+  printf '%s\n' "$hint"
+}
+
 for step in "${steps[@]}"; do
   case "$step" in
     format) run_step format pnpm -s format:check ;;
@@ -46,6 +57,7 @@ for step in "${steps[@]}"; do
     rust)
       if [[ -z "${GATE_SKIP_RUST:-}" ]] && command -v cargo > /dev/null 2>&1; then
         run_step rust make -s rust-check
+        rust_network_hint
       else
         steps_run+=("rust skipped")
       fi

@@ -118,6 +118,16 @@ async function makeWhole(
     });
     throw error;
   }
+  const installed = await ctx.dependencies.refresh({ batch, project, path, signal });
+  if (installed.kind === 'failed' || installed.kind === 'aborted') {
+    // Without current packages the worktree is not whole: the next Retry makes it again.
+    await ctx.git.removeWorktree(main, path).catch((removal: unknown) => {
+      ctx.logger.warn({ batchId: batch.id, path, err: message(removal) }, 'worktree left unseeded');
+    });
+    if (installed.kind === 'failed')
+      raise(ctx.inbox, batch.projectId, worktreeCards.installFailed(batch, installed));
+    return 'refused';
+  }
   ctx.logger.info({ batchId: batch.id, path, branch }, 'batch worktree made again');
   return 'replaced';
 }

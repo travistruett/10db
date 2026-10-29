@@ -6,6 +6,7 @@ import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
 import type { Card } from './cards';
 import type { DeliveryJobs } from './jobs';
+import type { WorktreeDependencies } from './worktree-dependencies';
 
 export interface DeliveryLimits {
   /** Each fetch and gh call. */
@@ -36,6 +37,8 @@ export interface DeliveryContext {
   readonly limits: DeliveryLimits;
   /** Where this daemon makes worktrees: the data dir's hashed level, made at the first worktree cut. */
   readonly worktreeRoot: string;
+  /** Brings a new worktree's seeded packages in line with its lockfile. */
+  readonly dependencies: WorktreeDependencies;
   /** The login environment network calls run in (environment/buildNetworkEnv). */
   networkEnv(): Readonly<Record<string, string>>;
   /** Asks the scheduler to look for work: a batch opened, grew or reopened. */

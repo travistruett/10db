@@ -6,6 +6,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -34,7 +35,7 @@ function runGate(sandbox: GateSandbox, env: Record<string, string>) {
     env: { ...envWithoutGitVariables(), ...env },
   });
   const lines = result.stdout.trim().split('\n');
-  return { status: result.status, last: lines.at(-1) ?? '' };
+  return { status: result.status, last: lines.at(-1) ?? '', stdout: result.stdout };
 }
 
 /**
@@ -45,6 +46,16 @@ function failingCargoDir(): string {
   const dir = mkdtempSync(join(tmpdir(), '10db-fake-cargo-'));
   for (const tool of ['cargo', 'pnpm']) {
     writeFileSync(join(dir, tool), '#!/bin/sh\nexit 1\n');
+    chmodSync(join(dir, tool), 0o755);
+  }
+  return dir;
+}
+
+/** A directory holding a `cargo` and a `pnpm` that fail after printing `message`, as cargo does when its network is closed. */
+function noisyCargoDir(message: string): string {
+  const dir = mkdtempSync(join(tmpdir(), '10db-noisy-cargo-'));
+  for (const tool of ['cargo', 'pnpm']) {
+    writeFileSync(join(dir, tool), `#!/bin/sh\necho '${message}' >&2\nexit 101\n`);
     chmodSync(join(dir, tool), 0o755);
   }
   return dir;
@@ -141,6 +152,36 @@ describe('scripts/gate.sh', () => {
     } finally {
       rmSync(fake, { recursive: true, force: true });
     }
+  });
+
+  describe('a rust step that cannot reach crates.io', () => {
+    const HOSTS = 'index.crates.io and static.crates.io';
+
+    it.each([
+      [
+        'a closed proxy',
+        'warning: spurious network error: CONNECT tunnel failed, response 403',
+        true,
+      ],
+      ['an unrelated error', 'error: could not compile `shell`', false],
+    ])('%s: names the hosts only when the network is the cause', (_name, message, named) => {
+      const fake = noisyCargoDir(message);
+      try {
+        const { status, last, stdout } = runGate(sandbox, {
+          GATE_STEPS: 'rust',
+          GATE_SKIP_RUST: '',
+          PATH: `${fake}:${process.env['PATH'] ?? ''}`,
+        });
+        const log = readFileSync(join(sandbox.dir, '.gate', 'rust.log'), 'utf8');
+        expect(status).toBe(1);
+        expect(last).toMatch(/^GATE FAIL: rust — /);
+        // Before the summary line, which stays the last line.
+        expect(stdout.includes(HOSTS)).toBe(named);
+        expect(log.includes(HOSTS)).toBe(named);
+      } finally {
+        rmSync(fake, { recursive: true, force: true });
+      }
+    });
   });
 
   it('reports rust as skipped when GATE_SKIP_RUST=1, even with cargo on PATH', () => {

@@ -16,3 +16,4 @@ export {
 } from './launch-rule';
 export { recoverBatches } from './recover';
 export { allCheckouts, checkoutOf, claimScopeOf, projectAtCheckout } from './checkout';
+export { createWorktreeDependencies, type WorktreeDependencies } from './worktree-dependencies';

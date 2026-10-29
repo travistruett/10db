@@ -17,6 +17,7 @@ import {
   DB_MIGRATIONS_DIR,
   deleteAppSetting,
   getAppSetting,
+  listPermissionRules,
   listProjects,
   migrateDatabase,
   openDatabase,
@@ -49,10 +50,12 @@ import {
 } from '../backups';
 import { systemClock, type Clock } from '../clock';
 import {
+  allCheckouts,
   createBatchCardAnswers,
   createBatchStarter,
   createDeliveryJobs,
   createShipper,
+  createWorktreeDependencies,
   DEFAULT_DELIVERY_LIMITS,
   flagWorktreeMissing,
   flagWrongBranch,
@@ -400,6 +403,16 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       scheduler?.requestTick();
     },
     worktreeRoot,
+    // Not behind the gate slots: an install is light, and waiting out a long gate would hold the cut.
+    dependencies: createWorktreeDependencies({
+      gate: gateRunner,
+      clock,
+      dataDir: opts.dataDir,
+      sessionEnv: () => launcher.projectEnv(),
+      rules: (project) => listPermissionRules(state.db, project.id, null),
+      checkouts: () => allCheckouts(state.db),
+      timeoutMs: limits.gateTimeoutMs,
+    }),
   };
   const starter = createBatchStarter(delivery);
   const shipper = createShipper({

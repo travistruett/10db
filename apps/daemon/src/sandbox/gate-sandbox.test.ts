@@ -9,6 +9,7 @@ import {
   realpathSync,
   rmSync,
   statSync,
+  lstatSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -35,6 +36,7 @@ let root: string;
 let home: string;
 let dataDir: string;
 let tmpRoot: string;
+let pnpmLockDir: string;
 let repo: TempDir;
 let checkout: string;
 
@@ -44,6 +46,7 @@ function sandbox(): GateSandbox {
     dataDir,
     loginConfigDir: join(home, '.claude-work'),
     tmpRoot,
+    pnpmLockDir,
     gitDirs: (path) => git.gitDirs(path),
     // Hermetic: the machine's own install prefixes add no deny.
     systemPrefixes: [],
@@ -122,6 +125,7 @@ beforeEach(() => {
   home = join(root, 'home');
   dataDir = join(home, 'Library', 'Application Support', '10db');
   tmpRoot = join(root, 't');
+  pnpmLockDir = join(root, 'pnpm-locks');
   mkdirSync(home);
   mkdirSync(tmpRoot);
   repo = createTempRepo();
@@ -449,5 +453,63 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
     execFileSync('ln', ['-s', dirname(checkout), join(checkout, '.env')]);
     await expect(sandbox().forRun(input())).rejects.toThrow(SandboxProfileError);
     expect(readdirSync(tmpRoot)).toEqual([]);
+  });
+  describe('a run that installs packages', () => {
+    it("opens pnpm's store lock directory, which pnpm puts in the system temp dir whatever TMPDIR says", async () => {
+      await withRun(input({ packageInstall: true }), (run) => {
+        const { filesystem } = settingsOf(run);
+        expect(filesystem['allowWrite']).toEqual([run.tmpDir, checkout, pnpmLockDir]);
+        // pnpm opens its lock files for reading and writing.
+        expect(filesystem['allowRead']).toContain(pnpmLockDir);
+        expect(lstatSync(pnpmLockDir).mode & 0o777).toBe(0o700);
+      });
+    });
+
+    it('leaves the lock directory closed, and alone, for any other run', async () => {
+      await withRun(input(), (run) => {
+        const { filesystem } = settingsOf(run);
+        expect(filesystem['allowWrite']).toEqual([run.tmpDir, checkout]);
+        expect(filesystem['allowRead']).not.toContain(pnpmLockDir);
+        expect(existsSync(pnpmLockDir)).toBe(false);
+      });
+    });
+
+    it('keeps the lock files a run made and removes anything else it left there', async () => {
+      const run = await sandbox().forRun(input({ packageInstall: true }));
+      writeFileSync(join(pnpmLockDir, 'all-stores.lock'), '');
+      symlinkSync('/etc/hosts', join(pnpmLockDir, 'abc.lock'));
+      mkdirSync(join(pnpmLockDir, 'dir.lock'));
+      await run.dispose();
+      expect(readdirSync(pnpmLockDir)).toEqual(['all-stores.lock']);
+    });
+
+    it.each([
+      [
+        'a link',
+        () => {
+          mkdirSync(join(root, 'elsewhere'));
+          symlinkSync(join(root, 'elsewhere'), pnpmLockDir);
+        },
+      ],
+      [
+        'open to other users',
+        () => {
+          mkdirSync(pnpmLockDir, { mode: 0o755 });
+          chmodSync(pnpmLockDir, 0o755);
+        },
+      ],
+      [
+        'a file',
+        () => {
+          writeFileSync(pnpmLockDir, '');
+        },
+      ],
+    ])('refuses a lock directory that is %s, opening nothing', async (_name, plant) => {
+      plant();
+      await expect(sandbox().forRun(input({ packageInstall: true }))).rejects.toThrow(
+        SandboxProfileError,
+      );
+      expect(readdirSync(tmpRoot)).toEqual([]);
+    });
   });
 });

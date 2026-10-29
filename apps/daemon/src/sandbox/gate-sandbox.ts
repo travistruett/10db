@@ -6,6 +6,7 @@ import { shellAssignments } from './env-file';
 import { singleQuoted } from './posix-quote';
 import { buildLaneProfile } from './profile';
 import { projectAccess, projectWritableRoots, type ProjectAccessDeps } from './project-access';
+import { defaultPnpmLockDir, openPnpmLockDir, sweepPnpmLockDir } from './pnpm-lock-dir';
 import { createSealedFile, removeSealedFile, type SealedFileKind } from './sealed-file';
 import {
   allowlisted,
@@ -43,6 +44,13 @@ export interface GateRunInput {
   readonly checkouts: readonly string[];
   /** The gate command, which `/bin/sh -c` runs inside the sandbox. */
   readonly command: string;
+  /**
+   * True for a run that installs packages with pnpm, which locks its store in a directory of the
+   * system temp dir. That directory opens for reading and writing, and what the run leaves in it
+   * other than regular files is removed afterwards. Only a run that executes no repository code (no
+   * install scripts, no pnpmfile) should ask: nothing else in the sandbox may write there.
+   */
+  readonly packageInstall?: boolean;
 }
 
 /** One gate run under the sandbox: the process to spawn, and its own temp dir. */
@@ -72,6 +80,8 @@ export interface GateSandbox {
 export interface GateSandboxDeps extends Omit<ProjectAccessDeps, 'tmpRoot'> {
   /** Where temp dirs are made; tests pass a short temp root. */
   readonly tmpRoot?: string;
+  /** Where pnpm keeps its store locks; tests pass a directory of their own. */
+  readonly pnpmLockDir?: string;
   readonly runtime: SandboxRuntime;
 }
 
@@ -108,6 +118,9 @@ export function createGateSandbox(deps: GateSandboxDeps): GateSandbox {
         },
       );
       const { checkout, toolchain } = access;
+      const lockDir =
+        input.packageInstall === true ? (deps.pnpmLockDir ?? defaultPnpmLockDir()) : null;
+      if (lockDir !== null) openPnpmLockDir(lockDir);
       const tmpDir = createLaneTempDir(tmpRoot);
       let settingsFile: string | null = null;
       // Both are removed even when one fails; the first failure is then thrown.
@@ -123,6 +136,13 @@ export function createGateSandbox(deps: GateSandboxDeps): GateSandbox {
         if (settingsFile !== null) {
           try {
             removeSealedFile(settingsFile, tmpRoot, SETTINGS_FILE);
+          } catch (error) {
+            record(error);
+          }
+        }
+        if (lockDir !== null) {
+          try {
+            sweepPnpmLockDir(lockDir);
           } catch (error) {
             record(error);
           }
@@ -152,9 +172,9 @@ export function createGateSandbox(deps: GateSandboxDeps): GateSandbox {
           toolchainListings: toolchain.listings,
           allowedDomains: access.hosts,
           readList: access.readList,
-          extraReads: access.gitReads,
+          extraReads: [...access.gitReads, ...(lockDir === null ? [] : [lockDir])],
           // srt opens nothing for writing by itself, unlike Claude Code, which opens the checkout.
-          extraWrites: [checkout],
+          extraWrites: [checkout, ...(lockDir === null ? [] : [lockDir])],
           denyWrites: [...access.gitState, ...access.otherCheckouts, ...SRT_SHARED_TEMP],
           loopback: input.project.sandboxLoopback,
           deniedEnvNames: [],
