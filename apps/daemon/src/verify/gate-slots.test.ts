@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ManualClock } from '../clock';
 import { silentLogger } from '../log';
-import { createGateSlots, limitGates } from './gate-slots';
+import { createGateSlots, GateSlotLimitError, limitGates } from './gate-slots';
 import type { GateRequest, GateResult, GateRunner } from './gate-runner';
 
 function request(overrides: Partial<GateRequest> = {}): GateRequest {
@@ -171,7 +171,7 @@ describe('gate slots', () => {
     });
   });
 
-  it('starts the timeout when the gate starts, not when it began waiting', async () => {
+  it('hands the runner the whole timeout once the slot is held, so the wait is not spent', async () => {
     const { runner, started, finish } = controlledRunner();
     const clock = new ManualClock();
     const { gate } = limited(1, runner, clock);
@@ -182,7 +182,7 @@ describe('gate slots', () => {
     finish[0]?.(result());
     await first;
     await settle();
-    // The runner times a gate from the moment it is called, so it must get the whole budget.
+    // The runner times a gate from the moment it is called, after the slot is held.
     expect(started[1]?.timeoutMs).toBe(1_000);
     finish[1]?.(result());
     expect((await second).timedOut).toBe(false);
@@ -223,8 +223,22 @@ describe('gate slots', () => {
     await ship;
   });
 
-  it('starts a fresh limiter with every slot free', () => {
-    // A restart loses the in-memory slots and the gates that held them; none is owed.
-    expect(createGateSlots(1).busy).toBe(0);
+  it('answers every waiter and later caller with an abort once closed', async () => {
+    const { runner, started, finish } = controlledRunner();
+    const { gate, slots } = limited(1, runner);
+    const first = gate.run(request({ command: 'first' }));
+    const waiting = gate.run(request({ command: 'waiting' }));
+    await settle();
+    slots.close();
+    expect((await waiting).aborted).toBe(true);
+    finish[0]?.(result());
+    await first;
+    expect((await gate.run(request({ command: 'late' }))).aborted).toBe(true);
+    expect(started.map((r) => r.command)).toEqual(['first']);
+    expect(slots.busy).toBe(0);
+  });
+
+  it.each([[0], [-1], [1.5], [Number.NaN]])('refuses a limit of %s', (limit) => {
+    expect(() => createGateSlots(limit)).toThrow(GateSlotLimitError);
   });
 });

@@ -16,6 +16,8 @@ export interface GateSlots {
   readonly busy: number;
   /** Gates waiting for one. */
   readonly waiting: number;
+  /** Stops granting slots: every waiter, and every later caller, gets null. For shutdown. */
+  close(): void;
   /**
    * Resolves with a slot, in the order callers asked. `onWait` is called at once, with the number of
    * gates ahead, only when the caller has to wait. Resolves null when `signal` aborts first.
@@ -25,10 +27,21 @@ export interface GateSlots {
 
 interface Waiter {
   readonly grant: (slot: GateSlot) => void;
+  readonly refuse: () => void;
+}
+
+/** A limit that could never grant a slot, so every gate would wait forever. */
+export class GateSlotLimitError extends Error {
+  override readonly name = 'GateSlotLimitError';
+  constructor(limit: number) {
+    super(`gate slots must be a whole number of at least 1, got ${String(limit)}`);
+  }
 }
 
 export function createGateSlots(limit: number): GateSlots {
+  if (!Number.isInteger(limit) || limit < 1) throw new GateSlotLimitError(limit);
   let busy = 0;
+  let closed = false;
   const queue: Waiter[] = [];
 
   function take(): GateSlot {
@@ -52,8 +65,12 @@ export function createGateSlots(limit: number): GateSlots {
     get waiting() {
       return queue.length;
     },
+    close() {
+      closed = true;
+      for (const waiter of queue.splice(0)) waiter.refuse();
+    },
     acquire(signal, onWait) {
-      if (signal?.aborted) return Promise.resolve(null);
+      if (closed || signal?.aborted) return Promise.resolve(null);
       if (busy < limit) return Promise.resolve(take());
       onWait?.(busy + queue.length);
       return new Promise<GateSlot | null>((resolve) => {
@@ -61,6 +78,10 @@ export function createGateSlots(limit: number): GateSlots {
           grant(slot) {
             signal?.removeEventListener('abort', onAbort);
             resolve(slot);
+          },
+          refuse() {
+            signal?.removeEventListener('abort', onAbort);
+            resolve(null);
           },
         };
         const onAbort = (): void => {
@@ -91,10 +112,6 @@ export function limitGates(runner: GateRunner, options: LimitGatesOptions): Gate
     async run(request: GateRequest): Promise<GateResult> {
       const asked = options.clock.now().getTime();
       const slot = await options.slots.acquire(request.signal, (ahead) => {
-        options.logger.info(
-          { logPath: request.logPath, ahead },
-          'gate waiting for another gate to finish',
-        );
         request.onWaiting?.(ahead);
       });
       if (slot === null) {

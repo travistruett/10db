@@ -16,8 +16,8 @@ gate runner from the moment the gate starts, which is after the slot is held, so
 abort while waiting removes the waiter and returns an aborted result without running the gate, which the
 callers already treat as "shutdown or cancel stopped it".
 
-A gate that has to wait says so: the wrapper logs `gate waiting for another gate to finish` with the number of
-gates ahead, and the caller's `onWaiting` hook logs it with the workstream or batch id. The workstream stays
+A gate that has to wait says so: the caller's `onWaiting` hook logs `verify gate is waiting for another gate to
+finish` (or `ship gate ...`) with the workstream or batch id and the number of gates ahead. The workstream stays
 `VERIFYING` and the batch `SHIPPING`; no state, event or contract changed.
 
 ## Why
@@ -39,4 +39,4 @@ verify gate next to a ship gate, recreated the overload.
   daemon log; a UI surface for it can follow when a builder asks.
 - **Recovery.** The slots are memory only. A gate that waits has recorded no `gate_pid`, so recovery has no
   process to kill; it re-queues a `VERIFYING` workstream for a verify and re-runs a `SHIPPING` batch's steps,
-  as for any gate that had not finished. A restart starts with every slot free, so none leaks.
+  as for any gate that had not finished. A restart starts with every slot free, so none leaks. A lane that waits in `VERIFYING` through unclean restarts pays recovery attempts as any `VERIFYING` lane does, so with one slot a long queue plus repeated crashes can fail it without its gate ever running. Shutdown closes the limiter first, so freeing the slot of a gate it kills starts no waiting gate.

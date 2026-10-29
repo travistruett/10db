@@ -130,7 +130,7 @@ export interface DaemonOptions {
   readonly clock?: Clock;
   /** Lane caps across all projects; each account has its own `laneCap`. */
   readonly caps?: { readonly global: number };
-  /** Recovery attempts, fix attempts and the gate timeout; merged over the runner defaults. */
+  /** Recovery attempts, fix attempts, the gate timeout and the gate slots; merged over the runner defaults. */
   readonly limits?: Partial<RunnerLimits>;
   /** How long a lane lease lasts before the scheduler renews it. */
   readonly leaseMs?: number;
@@ -364,8 +364,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         : null,
     logger: logger.child({ component: 'gate' }),
   });
+  const gateSlots = createGateSlots(limits.gateSlots);
   const gate = limitGates(gateRunner, {
-    slots: createGateSlots(limits.gateSlots),
+    slots: gateSlots,
     clock,
     logger: logger.child({ component: 'gate' }),
   });
@@ -719,6 +720,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     try {
       createdScheduler.stop();
       unsubscribeShip();
+      // A gate that waits must not start because shutdown freed the slot of the one it killed.
+      gateSlots.close();
       // Aborts a shipping gate and any git or gh child; the batch stays SHIPPING for recovery.
       await deliveryJobs.stop();
       benchmarks.stop();
