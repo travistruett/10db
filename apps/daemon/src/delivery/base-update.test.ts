@@ -8,7 +8,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { mintId, type BatchDto, type WorkstreamDto } from '@10db/contracts';
 import { getBatch, getWorkstreamRow, listWorkstreams, patchWorkstream } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -221,7 +221,11 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
     expect((await updates.beforeGate(batch.id, signal)).kind).toBe('merged');
     const changes = await workstreamChanges({ db: h.store.db, git: h.git }, member(beta.id).id);
     expect(changes.files.map((f) => f.path)).toEqual(['src/ui/beta.txt']);
-    const kept = gitIn(path, 'rev-parse', `refs/10db/starts/${member(beta.id).id}`);
+    const kept = gitIn(
+      path,
+      'rev-parse',
+      `refs/10db/${basename(h.worktreeRoot)}/starts/${member(beta.id).id}`,
+    );
     expect(getWorkstreamRow(h.store.db, member(beta.id).id).baseHead).toBe(kept);
   });
 
@@ -376,16 +380,16 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
     const held = new Promise<void>((resolve) => {
       release = resolve;
     });
-    const first = updates.gate(one, async () => {
+    const first = updates.gate(one, signal, async () => {
       order.push('first starts');
       await held;
       order.push('first ends');
     });
-    const second = updates.gate(one, () => {
+    const second = updates.gate(one, signal, () => {
       order.push('second starts');
       return Promise.resolve();
     });
-    await updates.gate(other, () => {
+    await updates.gate(other, signal, () => {
       order.push('other batch starts');
       return Promise.resolve();
     });
@@ -394,10 +398,43 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
     await Promise.all([first, second]);
     expect(order).toEqual(['first starts', 'other batch starts', 'first ends', 'second starts']);
     // A gate that fails frees the batch for the next.
-    await expect(updates.gate(one, () => Promise.reject(new Error('gate broke')))).rejects.toThrow(
-      'gate broke',
-    );
-    expect(await updates.gate(one, () => Promise.resolve('next'))).toBe('next');
+    await expect(
+      updates.gate(one, signal, () => Promise.reject(new Error('gate broke'))),
+    ).rejects.toThrow('gate broke');
+    expect(await updates.gate(one, signal, () => Promise.resolve('next'))).toBe('next');
+  });
+
+  it("stops a gate waiting for its batch's turn as soon as its signal aborts, and keeps the turn order", async () => {
+    h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+    const updates = createBaseUpdates(h.ctx);
+    const one = mintId('Batch');
+    const order: string[] = [];
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const running = updates.gate(one, signal, async () => {
+      await held;
+      order.push('running ends');
+    });
+    const stop = new AbortController();
+    const waiting = updates.gate(one, stop.signal, () => {
+      order.push('cancelled one started');
+      return Promise.resolve();
+    });
+    const later = updates.gate(one, signal, () => {
+      order.push('later starts');
+      return Promise.resolve();
+    });
+    stop.abort();
+    // Answered while the gate ahead still runs.
+    expect(await waiting).toBeNull();
+    expect(order).toEqual([]);
+    release();
+    await Promise.all([running, later]);
+    expect(order).toEqual(['running ends', 'later starts']);
+    // Already aborted: nothing runs.
+    expect(await updates.gate(one, stop.signal, () => Promise.resolve('ran'))).toBeNull();
   });
 
   it('says the branch was merged but its base not moved when recording the base fails, and still installs', async () => {

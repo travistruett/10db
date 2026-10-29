@@ -200,6 +200,39 @@ describe('mergeIntoBranch', () => {
       for (const [rel, text] of Object.entries(base)) expect(read(rel)).toBe(text);
     });
 
+    it.each([
+      // A rename to the decomposed (NFD) spelling passes this check too, but git's own read-tree
+      // refuses it on macOS, which folds the two spellings, so it can't be shown merging here.
+      { name: 'only its case', from: 'Guide.md', to: 'GUIDE.md' },
+    ])('merges a base that renames a tracked file by $name', async ({ from, to }) => {
+      onMain({ [from]: 'guide\n' }, 'guide');
+      rawGit('merge', '-q', '--ff-only', 'main');
+      commitFiles({ 'src/own.txt': 'own\n' }, 'own');
+      // Plumbing, so the new name's bytes are exactly as given: git would precompose an NFD argument.
+      const blob = rawGit('rev-parse', `main:${from}`);
+      const index = join(repo.path, '.git', 'rename-index');
+      const plumb = (args: string[], input = '') =>
+        execFileSync('git', ['-C', repo.path, ...args], {
+          env: { ...isolatedGitEnv(), GIT_INDEX_FILE: index },
+          input,
+          stdio: ['pipe', 'pipe', 'pipe'],
+        })
+          .toString()
+          .trim();
+      plumb(['read-tree', 'main']);
+      plumb(
+        ['update-index', '-z', '--index-info'],
+        [`0 ${'0'.repeat(40)}\t${from}`, `100644 ${blob} 0\t${to}`, ''].join('\0'),
+      );
+      const tree = plumb(['write-tree']);
+      const renamed = plumb(['commit-tree', tree, '-p', 'main'], 'rename\n');
+      rawGit('update-ref', 'refs/heads/main', renamed);
+      expect(rawGit('ls-tree', '-r', '-z', '--name-only', 'main').split('\0')).toContain(to);
+      expect((await merge()).kind).toBe('merged');
+      expect(rawGit('ls-files', '-z').split('\0')).toContain(to);
+      expect(rawGit('status', '--porcelain', '--untracked-files=all')).toBe('');
+    });
+
     it('merges a base that turns a tracked file into a directory', async () => {
       commitFiles({ 'docs/guide': 'a file\n' }, 'a file');
       rawGit('switch', '-q', 'main');

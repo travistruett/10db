@@ -395,7 +395,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
         // Once the gate holds its slot and no other gate of the batch runs, so no other gate's
         // merge changes the tree under it.
         const before: { update: BaseUpdate | null } = { update: null };
-        const gate = await deps.baseUpdates.gate(batchId, () =>
+        const gate = await deps.baseUpdates.gate(batchId, signal, () =>
           runGate(batch, projectAtCheckout(project, checkout), signal, async () => {
             const update = await deps.baseUpdates.beforeGate(batchId, signal);
             before.update = update;

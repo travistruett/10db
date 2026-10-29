@@ -42,9 +42,10 @@ export interface BaseUpdates {
   /**
    * Runs `run`, one gate of the batch's at a time: a batch's gates share its checkout, so one gate's
    * base update must wait until the gate before it has finished, whatever the number of gate slots.
-   * Gates of other batches don't wait.
+   * Gates of other batches don't wait. Resolves null, without running `run`, when `signal` aborts
+   * before its turn; the gates behind it keep their order.
    */
-  gate<T>(batchId: BatchId, run: () => Promise<T>): Promise<T>;
+  gate<T>(batchId: BatchId, signal: AbortSignal, run: () => Promise<T>): Promise<T | null>;
 }
 
 /** What a gate's evidence or card says about its base and packages; null when there is nothing. */
@@ -129,7 +130,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
         repo: path,
         ours: start,
         theirs: base,
-        ref: startRef(id),
+        ref: startRef(ctx.worktreeRoot, id),
         message: `10db: where ${id} starts on ${base}`,
       })
       .catch(() => null);
@@ -381,9 +382,25 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
   const gates = new Map<BatchId, Promise<unknown>>();
 
   return {
-    gate<T>(batchId: BatchId, run: () => Promise<T>): Promise<T> {
-      const next = (gates.get(batchId) ?? Promise.resolve()).then(run, run);
-      const settled = next.then(
+    gate<T>(batchId: BatchId, signal: AbortSignal, run: () => Promise<T>): Promise<T | null> {
+      const ahead = gates.get(batchId) ?? Promise.resolve();
+      const turn = new Promise<boolean>((resolve) => {
+        if (signal.aborted) {
+          resolve(false);
+          return;
+        }
+        const onAbort = (): void => {
+          resolve(false);
+        };
+        signal.addEventListener('abort', onAbort, { once: true });
+        void ahead.then(() => {
+          signal.removeEventListener('abort', onAbort);
+          resolve(true);
+        });
+      });
+      const next = turn.then((go) => (go ? run() : null));
+      // The next gate waits for the one ahead too: a gate stopped while waiting holds no turn.
+      const settled = Promise.all([ahead, next]).then(
         () => undefined,
         () => undefined,
       );

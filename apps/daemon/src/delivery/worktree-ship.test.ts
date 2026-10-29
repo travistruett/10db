@@ -1,11 +1,12 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join, relative } from 'node:path';
+import { basename, dirname, join, relative } from 'node:path';
 import type { BatchDto, WorkstreamDto } from '@10db/contracts';
 import {
   getAppSetting,
   getBatch,
   getWorkstream,
+  listInbox,
   listWorkstreams,
   patchProject,
   setAppSetting,
@@ -24,6 +25,8 @@ import {
   retireWorktree,
   type DeliveryContext,
 } from './index';
+import { baseCards } from './cards';
+import { raise } from './context';
 
 let h: DeliveryHarness;
 /** Where the gate writes the directory it ran in. */
@@ -174,7 +177,7 @@ describe('shipping a worktree batch', () => {
 
   it("drops its tasks' kept starts on the merged base when the batch's worktree goes", async () => {
     const { batch, ws } = await opened('Alpha');
-    h.git$('update-ref', `refs/10db/starts/${ws.id}`, 'HEAD');
+    h.git$('update-ref', `refs/10db/${basename(h.worktreeRoot)}/starts/${ws.id}`, 'HEAD');
     h.settle(ws.id, 'DONE');
     h.shipper.checkBatch(batch.id);
     await h.jobs.idle();
@@ -261,7 +264,7 @@ describe("the base, brought into a worktree batch's branch before the shipping g
     expect(h.cards()).toEqual([]);
   });
 
-  it('ships the branch as it is when it conflicts with main, with a card saying so', async () => {
+  it('ships the branch as it is when it conflicts with main; its conflict card goes with the worktree', async () => {
     const { batch, ws } = await opened();
     const head = await commitIn(batch, 'README.md');
     h.teammatePush('main', 'README.md', '# theirs\n');
@@ -270,7 +273,27 @@ describe("the base, brought into a worktree batch's branch before the shipping g
 
     expect(shipped.state).toBe('SHIPPED');
     expect(onOrigin(batch.branch)).toBe(head);
-    expect(h.only(h.cards()).title).toBe(`Batch "${batch.title}" conflicts with main`);
+    // Raised by the shipping gate, then withdrawn with the worktree: the pull request shows it now.
+    const card = h.only(
+      listInbox(h.store.db, {}).filter(
+        (i) => i.title === `Batch "${batch.title}" conflicts with main`,
+      ),
+    );
+    expect(card.state).toBe('CANCELLED');
+    expect(h.cards()).toEqual([]);
+  });
+
+  it("withdraws the batch's base cards when its worktree goes", async () => {
+    const { batch, ws } = await opened();
+    const path = pathOf(batch);
+    raise(h.inbox, h.project.id, baseCards.conflict(batch, path, ['README.md']));
+    raise(h.inbox, h.project.id, baseCards.kept(batch, path, ['build/']));
+    expect(h.cards()).toHaveLength(2);
+    h.settle(ws.id, 'DONE');
+    h.shipper.checkBatch(batch.id);
+    await h.jobs.idle();
+    expect(getBatch(h.store.db, batch.id)).toMatchObject({ state: 'CLOSED', worktreePath: null });
+    expect(h.cards()).toEqual([]);
   });
 
   it('names what kept main out in the card of a shipping gate that failed', async () => {

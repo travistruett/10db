@@ -3172,7 +3172,7 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
             order.push(`base ${batchId}`);
             return Promise.resolve(answer);
           },
-          gate: (batchId, run) => {
+          gate: (batchId, _signal, run) => {
             order.push(`batch gate ${batchId}`);
             return run();
           },
@@ -3227,6 +3227,43 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
         } finally {
           restore();
         }
+      });
+
+      it("cancels a task promptly while its gate waits for its batch's turn", async () => {
+        let entered: () => void = () => undefined;
+        const waiting = new Promise<void>((resolve) => {
+          entered = resolve;
+        });
+        // A sibling's gate holds the batch's turn for as long as this test runs.
+        const behindASibling: BaseUpdates = {
+          beforeGate: () => Promise.resolve({ kind: 'up_to_date', note: null }),
+          gate: (_batchId, gateSignal) =>
+            new Promise((resolve) => {
+              entered();
+              gateSignal.addEventListener('abort', () => {
+                resolve(null);
+              });
+            }),
+        };
+        const probe = sandboxProbe();
+        gateRequests.length = 0;
+        const book: FakeScriptBook = {};
+        engine = await createTestEngine(
+          book,
+          { workspaceMode: 'worktree', delivery: 'pull_request', prTitlePrefix: 'feat(app)' },
+          { laneSandbox: probe.laneSandbox, gate: recordingGate, baseUpdates: behindASibling },
+        );
+        book['Alpha'] = [[write('src/api/a.txt'), commit('op-wt-base-3', ['src/api/a.txt']), turn]];
+        const made = worktreeBatch();
+        cleanups.push(made.cleanup);
+        const { workstream } = engine.addTask('Alpha', ['api'], [], undefined, made.batch.id);
+        engine.launch(workstream.id);
+        await waiting;
+        await engine.runner.cancel(workstream.id);
+        await engine.runner.idle();
+        expect(ws(workstream.id).state).toBe('CANCELLED');
+        expect(gateRequests).toEqual([]);
+        expect(listEvidence(engine.store.db, workstream.id)).toEqual([]);
       });
 
       it('runs no gate once shutdown stopped it: the workstream stays verifying for recovery', async () => {

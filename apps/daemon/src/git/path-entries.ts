@@ -23,6 +23,21 @@ export function entryAt(root: string, rel: string): 'missing' | 'directory' | 'o
   }
 }
 
+/** A name as a case- and normalization-insensitive file system (macOS's) compares it. */
+export function foldedName(path: string): string {
+  return path.normalize('NFC').toLowerCase();
+}
+
+/** True when `a` and `b` name one entry on disk, a link not followed: the same device and inode. */
+export function sameEntry(a: string, b: string): boolean {
+  try {
+    const [x, y] = [lstatSync(a), lstatSync(b)];
+    return x.dev === y.dev && x.ino === y.ino;
+  } catch {
+    return false;
+  }
+}
+
 /** `path` as the file system names it, or resolved as text once nothing is there. */
 export function comparablePath(path: string): string {
   try {

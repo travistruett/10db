@@ -14,7 +14,7 @@ import {
   type Git,
 } from '../git';
 import { looseWork } from './build-output';
-import { keptWorktreeKey, worktreeCards } from './cards';
+import { baseConflictKey, baseKeptKey, keptWorktreeKey, worktreeCards } from './cards';
 import { raise, withdraw, type DeliveryContext } from './context';
 import { installedLockfileKey } from './installed-lockfile';
 import { startRef } from './start-refs';
@@ -111,7 +111,7 @@ async function retire(ctx: DeliveryContext, batchId: BatchId): Promise<Retiremen
   // The tasks' starts on the merged base mean nothing once their worktree is gone; one git won't
   // delete is left for the startup sweep.
   for (const ws of listWorkstreams(ctx.state.db, { batchId }))
-    await ctx.git.deleteKeptRef(main, startRef(ws.id)).catch((error: unknown) => {
+    await ctx.git.deleteKeptRef(main, startRef(ctx.worktreeRoot, ws.id)).catch((error: unknown) => {
       ctx.logger.warn(
         {
           batchId,
@@ -126,9 +126,12 @@ async function retire(ctx: DeliveryContext, batchId: BatchId): Promise<Retiremen
     deleteAppSetting(w, installedLockfileKey(batchId));
     clearWorktreePath(w, batchId);
   });
+  // The base cards name the worktree too; a pull request shows a conflict for itself.
   withdraw(ctx.state, ctx.inbox, project.id, [
     keptWorktreeKey.batchChanges(batchId),
     keptWorktreeKey.batchIgnored(batchId),
+    baseConflictKey(batchId),
+    baseKeptKey(batchId),
   ]);
   ctx.logger.info({ batchId, path, state: batch.state }, 'batch worktree removed');
   return { kind: 'retired' };

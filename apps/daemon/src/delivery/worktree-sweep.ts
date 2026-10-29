@@ -145,11 +145,12 @@ async function sweepProject(deps: SweepDeps, project: ProjectDto): Promise<strin
       deps.logger.warn({ path: entry.path, err: message(error) }, 'orphaned worktree kept');
     }
   }
-  await dropOrphanStarts({ db: deps.state.db, git: deps.git, logger: deps.logger }, main).catch(
-    (error: unknown) => {
-      deps.logger.warn({ projectId: project.id, err: message(error) }, 'task starts not swept');
-    },
-  );
+  await dropOrphanStarts(
+    { db: deps.state.db, git: deps.git, logger: deps.logger, worktreeRoot: deps.root },
+    main,
+  ).catch((error: unknown) => {
+    deps.logger.warn({ projectId: project.id, err: message(error) }, 'task starts not swept');
+  });
   await deps.git.pruneWorktrees(main);
   return swept;
 }

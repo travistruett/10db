@@ -13,7 +13,7 @@ import {
 import { parseScopedConfig, type ConfigEntry } from './config-trust';
 import { equalOrUnder, insideAny, isPlainDirectory, samePath, surelyInside } from './lane-writable';
 import { branchOfRef, firstLine, parseBranches, type RepoFacts, type RepoRefusal } from './inspect';
-import { comparablePath, entryAt, existsAsEntry } from './path-entries';
+import { comparablePath, entryAt, existsAsEntry, foldedName, sameEntry } from './path-entries';
 import { gitNetwork, type NetworkCall, type NetworkRun } from './network';
 import { localRemotePath, parseRemoteUrl } from './remote-url';
 import { GitError, runGit, runGitCapped, type RunOptions } from './run';
@@ -1015,8 +1015,10 @@ export function createGit(opts: GitOptions = {}): Git {
   /**
    * What lies where the merge from `tip` to `head` would put a new file, though git tracks nothing
    * there: an entry at an added path (a directory with its `/`, when it holds anything git doesn't
-   * track), and a non-directory where an added path needs one. Paths the merge itself deletes are
-   * git's to replace. An ignored file under a directory the merge only adds to is no concern.
+   * track), and a non-directory where an added path needs one. Paths the merge itself deletes or
+   * changes are git's to replace, and so is what an added path finds of one of them on a file system
+   * that folds case or normalization (a rename of `Guide.md` to `GUIDE.md` finds `Guide.md`). An
+   * ignored file under a directory the merge only adds to is no concern.
    */
   async function untrackedInTheWay(
     c: Pinned,
@@ -1038,9 +1040,20 @@ export function createGit(opts: GitOptions = {}): Git {
     )
       .split('\0')
       .filter(Boolean);
+    const fresh = new Set(added);
+    const replaced = new Map<string, string[]>();
+    for (const path of written)
+      if (!fresh.has(path))
+        replaced.set(foldedName(path), [...(replaced.get(foldedName(path)) ?? []), path]);
+    /** True when what is at `rel` is a path the merge replaces itself, by that name or a folded one. */
+    const isReplaced = (rel: string): boolean =>
+      (replaced.get(foldedName(rel)) ?? []).some((other) =>
+        sameEntry(join(c.real, rel), join(c.real, other)),
+      );
     const found = new Set<string>();
     for (const path of added) {
       const entry = entryAt(c.real, path);
+      if (entry !== 'missing' && isReplaced(path)) continue;
       if (entry === 'directory') {
         // A tracked directory the merge empties is git's; anything else in it is not.
         const held = await git(c, ['ls-files', '-z', '--others', '--directory', '--', path], {
@@ -1051,7 +1064,7 @@ export function createGit(opts: GitOptions = {}): Git {
         found.add(path);
       }
       for (let parent = posix.dirname(path); parent !== '.'; parent = posix.dirname(parent))
-        if (!written.has(parent) && entryAt(c.real, parent) === 'other') found.add(parent);
+        if (entryAt(c.real, parent) === 'other' && !isReplaced(parent)) found.add(parent);
     }
     return [...found].sort();
   }

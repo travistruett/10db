@@ -141,7 +141,7 @@ import {
   sendBackTarget,
   type StepEntry,
 } from '../team';
-import type { GateRequest, GateRunner } from '../verify';
+import type { GateRequest, GateResult, GateRunner } from '../verify';
 import { findClaimed } from '../watcher';
 import type { LiveSessions } from './live-sessions';
 import { checkedCommits, raiseBuilderCheck, waitsForCheck } from './builder-check';
@@ -388,6 +388,11 @@ interface SessionState {
 /** Reads the stop reason afresh: a stop can land at any await, which narrowing cannot see. */
 function stopRequested(ctl: { readonly stopReason: StopReason | null }): StopReason | null {
   return ctl.stopReason;
+}
+
+/** A gate stopped before it started, while it waited for its batch's turn. */
+function stoppedWaiting(logPath: string): GateResult {
+  return { exitCode: 130, durationMs: 0, tail: '', logPath, timedOut: false, aborted: true };
 }
 
 /** The most of a gate's output its evidence keeps, a note on its base included. */
@@ -1779,7 +1784,8 @@ export function createRunner(opts: RunnerOptions): Runner {
     const result =
       batchId === null
         ? await opts.gate.run(request)
-        : await opts.baseUpdates.gate(batchId, () => opts.gate.run(request));
+        : ((await opts.baseUpdates.gate(batchId, gateAbort.signal, () => opts.gate.run(request))) ??
+          stoppedWaiting(logPath));
     ctl.gateAbort = null;
     opts.logger.info(
       {
