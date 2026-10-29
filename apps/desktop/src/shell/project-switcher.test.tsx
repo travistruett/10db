@@ -110,4 +110,47 @@ describe('ProjectSwitcher', () => {
     fireEvent.click(screen.getByRole('button', { name: 'New Project', ...HIDDEN }));
     expect(await screen.findByRole('dialog', { name: 'New Project' })).toBeTruthy();
   });
+
+  it('creates a project from the modal and switches to it', async () => {
+    const gamma = projectDto({ name: 'gamma', repoPath: '/Users/x/gamma' });
+    let projects = [alpha, beta];
+    serveTwoProjects();
+    server.use(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json(projects)),
+      http.post(daemonUrl('/folders/inspect'), () =>
+        HttpResponse.json({
+          ok: true,
+          inspection: {
+            root: '/Users/x/gamma',
+            suggestedName: 'gamma',
+            branches: [],
+            defaultBranch: null,
+            github: null,
+            gateCandidates: [{ command: 'make gate', source: 'makefile' }],
+          },
+        }),
+      ),
+      http.post(daemonUrl('/projects'), () => {
+        projects = [alpha, beta, gamma];
+        return HttpResponse.json(gamma, { status: 201 });
+      }),
+    );
+    renderApp('/board');
+    await openSwitcher();
+
+    fireEvent.click(screen.getByRole('button', { name: 'New Project', ...HIDDEN }));
+    const dialog = await screen.findByRole('dialog', { name: 'New Project' });
+    const path = within(dialog).getByRole('textbox', { name: 'Folder path' });
+    fireEvent.change(path, { target: { value: '/Users/x/gamma' } });
+    fireEvent.blur(path);
+    await within(dialog).findByRole('textbox', { name: 'Name' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Create Project' }));
+
+    expect(
+      await screen.findByRole('button', { name: 'Project: gamma. Switch project' }),
+    ).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'New Project' })).toBeNull();
+    });
+  });
 });
