@@ -437,6 +437,13 @@ describe('git guard in an agent worktree beside the checkout', () => {
     ['a wrapper', 'command git restore a.ts', 'ask'],
     ['another command first', 'true && git restore a.ts', 'ask'],
     ['a substitution anywhere', 'git restore a.ts "$(true)"', 'ask'],
+    // Any git option before the verb, config above all, can point git elsewhere.
+    ['-c core.worktree', 'git -c core.worktree=CHECKOUT checkout -- a.ts', 'ask'],
+    ['-c include.path', 'git -c include.path=/tmp/x.cfg restore a.ts', 'ask'],
+    ['--config-env', 'git --config-env=core.worktree=HOME restore a.ts', 'ask'],
+    ['--namespace', 'git --namespace n restore a.ts', 'ask'],
+    ['--exec-path', 'git --exec-path=/tmp restore a.ts', 'ask'],
+    ['--no-pager', 'git --no-pager restore a.ts', 'ask'],
     // Pathspecs the shell would expand don't count as named files.
     ['a variable pathspec', 'git restore $F', 'ask'],
     ['a braced variable pathspec', 'git checkout -- ${F}', 'ask'],

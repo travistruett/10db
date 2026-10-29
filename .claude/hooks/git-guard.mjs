@@ -931,12 +931,14 @@ function judge(command, cwd, whole = command) {
         (git.verb === 'stash' && !['list', 'show'].includes(a[0] ?? '')) ||
         (git.verb === 'tag' && (hasShortFlag(a, 'd') || hasLongOption(a, '--delete')));
       // The exception holds only for a command that is this one plain git call: no other segment,
-      // wrapper, assignment, substitution, heredoc or `$`, so nothing the shell runs or expands
-      // first can point git at another checkout.
+      // wrapper, assignment, git option before the verb, substitution, heredoc or `$`, so nothing
+      // the shell runs or expands first, and no config, can point git at another checkout.
       const loneGitCall =
         whole === command &&
         segs.filter((x) => x.words.length > 0).length === 1 &&
         seg.words[0] === 'git' &&
+        seg.words[1] === git.verb &&
+        git.config.length === 0 &&
         seg.substitutions.length === 0 &&
         seg.heredocs.length === 0 &&
         !/[$`]/.test(whole);
