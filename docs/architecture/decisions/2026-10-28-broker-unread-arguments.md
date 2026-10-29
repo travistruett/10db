@@ -91,7 +91,13 @@ install x`, `pnpm --reporter silent add x`, `cargo +stable add serde`.
   `pushd` or `popd` that starts a segment of the script is.
 - **An integer attribute inherited from outside the command**, such as an exported integer variable: a plain
   assignment to one is not flagged.
+- **Here-document bodies** skip the arithmetic, indirect-expansion and transform checks; only their substitutions are scanned.
+- **Prompt variables** (`PS0`, `PS1`, `PS2`, `PS4`, `PROMPT_COMMAND`) assigned in a script that also turns on tracing
+  (`set -x`, `bash -x`) are not flagged.
 - **Review findings L1 and L3**, minor, recorded in PR #95.
+
+The scan is a filter that decides when a card can be skipped, not a security boundary: anything it misses still
+runs inside the lane sandbox.
 
 ## Why
 
