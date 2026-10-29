@@ -18,20 +18,23 @@ only when all of these hold, the git ones read inside the checkout's lock:
 - no workstream in the project has work in hand, counted as Abandon counts it (a lane state, `TAKEN_OVER`, or
   `WAITING_HUMAN` with a live session);
 - HEAD still names the batch's branch;
-- nothing in the checkout is uncommitted (the same private-index status as every other check);
+- nothing in the checkout is uncommitted: the files match HEAD (the same private-index status as every other
+  check) and so does the checkout's own index (`diff-index --cached HEAD`, read-only). An index that differs
+  from HEAD counts as uncommitted whatever made it: staged work the files no longer show, or the entries a
+  daemon commit leaves behind when another git held `index.lock`, which `git status` shows too;
 - the branch or commit to go back to still exists;
-- for a branch, no other worktree has it checked out (`worktree list`), since `symbolic-ref` skips the check
-  `git switch` makes;
-- no git-ignored file or directory (`ls-files --others --ignored --exclude-standard --directory`) lies at,
-  under or above a path that differs between the two commits (`diff-tree`): `read-tree -m -u` treats ignored
-  files as disposable and would overwrite or delete them.
+- for a branch, no other worktree has it checked out (`worktree list`) or is rebasing or bisecting it
+  (`rebase-merge/head-name`, `rebase-apply/head-name` or `BISECT_START` in that worktree's git dir, since such
+  a worktree shows as detached), because `symbolic-ref` skips the check `git switch` makes;
+- nothing git doesn't track lies where the switch writes: the same check `mergeIntoBranch` makes
+  (`untrackedInTheWay`) over the paths `diff-tree` names between the two commits, read after the stat refresh.
+  `read-tree -m -u` treats ignored files as disposable and would overwrite or delete them.
 
-The switch first rebuilds the checkout's own index from HEAD (`read-tree --reset`, then
-`update-index --refresh`), because the status read a private index while the merge reads the real one, which a
-commit made while another git held `index.lock` leaves behind. It then runs `read-tree -m -u` and
-`symbolic-ref HEAD` (or `update-ref --no-deref HEAD` for a commit), exactly as the cut moved it, so nothing from
-the checkout runs (decision 129). If HEAD can't be moved after the files were, `read-tree -m -u` puts the
-batch's files back and the switch back fails.
+The switch refreshes the index's stat data (`update-index -q --ignore-submodules --refresh`, as
+`mergeIntoBranch` does), then runs `read-tree -m -u` and `symbolic-ref HEAD` (or `update-ref --no-deref HEAD` for
+a commit), exactly as the cut moved it, so nothing from the checkout runs (decision 129). If HEAD can't be moved
+after the files were, `read-tree -m -u` puts the batch's files back and the switch back fails; if that fails
+too, the card says the checkout may be half switched.
 
 Otherwise the checkout is left as it is. Every reason but one raises one card per batch
 (`checkout-return:<batch id>`) titled "Your checkout stays on `<branch>`: …" that says why and, where git would
@@ -67,6 +70,6 @@ moving a checkout days after the batch ended, when the builder may be back on th
 
 Rejected: switching back to the branch's commit at cut time (the branch may have moved since, and a branch is
 what the builder was on); stashing uncommitted changes to switch anyway (10db never moves the builder's
-uncommitted work); calling a stale index uncommitted work (its card would name changes `git status` doesn't
-show); keeping the place after a git refusal for the next start to retry; deleting a `CLOSED` batch's empty
+uncommitted work); rebuilding the index from HEAD before the switch (it drops staged work the files no
+longer show); keeping the place after a git refusal for the next start to retry; deleting a `CLOSED` batch's empty
 branch after the switch back, which worktree mode does, left for a later decision.

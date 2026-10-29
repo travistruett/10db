@@ -1,4 +1,12 @@
-import { lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import {
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, normalize, posix, resolve, sep } from 'node:path';
 import { InvalidError } from '@10db/contracts';
@@ -968,38 +976,31 @@ export function createGit(opts: GitOptions = {}): Git {
   ): Promise<SwitchBack> {
     const found = await currentBranch(c);
     if (found !== from) return { kind: 'moved', found };
-    const paths = await changes(c);
+    // What the files hold beyond HEAD, and what the checkout's own index holds beyond it: staged
+    // work the files no longer show, or entries a commit made while another git held index.lock
+    // left behind. Either way the merge below would lose or keep the wrong thing, so 10db leaves it.
+    const paths = [...new Set([...(await changes(c)), ...(await stagedPaths(c))])].sort();
     if (paths.length > 0) return { kind: 'dirty', paths };
     const ref = to.branch === null ? null : `refs/heads/${to.branch}`;
     const target = await revParse(c, `${ref ?? to.sha}^{commit}`);
     if (target === null) return { kind: 'gone' };
-    if (ref !== null) {
-      // `symbolic-ref` skips the check `git switch` makes, so a branch another worktree has out is
-      // refused here, as git would refuse it.
-      const other = (await listWorktrees(c)).find(
-        (e) => e.branch === to.branch && !samePath(comparablePath(e.path), c.real),
-      );
-      if (other) return { kind: 'checked_out', path: comparablePath(other.path) };
+    if (to.branch !== null) {
+      const other = await branchInUseElsewhere(c, to.branch);
+      if (other !== null) return { kind: 'checked_out', path: other };
     }
     const head = await revParse(c, 'HEAD^{commit}');
     if (head === null) return { kind: 'gone' };
-    // `read-tree -m -u` takes ignored files as disposable: it would overwrite or delete any lying
-    // where the switch writes.
-    const touched = (
-      await git(c, ['diff-tree', '-r', '--name-only', '--no-renames', '-z', head, target])
-    )
-      .split('\0')
-      .filter(Boolean);
-    const ignored = await untrackedInTheWay(c, head, target, new Set(touched));
-    if (ignored.length > 0) return { kind: 'ignored', paths: ignored };
-    // The status above read a private index; the merge reads the checkout's own, which a commit
-    // made while another git held index.lock left behind. The files are HEAD's, so the index is
-    // rebuilt from HEAD and refreshed against them; the worktree is not touched.
-    await git(c, ['read-tree', '--reset', head]);
-    await git(c, ['update-index', '-q', '--refresh']).catch((error: unknown) => {
-      // Exit 1 only says some entries still need a refresh; the merge rereads those files.
-      if (!(error instanceof GitError && error.exitCode === 1)) throw error;
-    });
+    // Fresh stat data, so read-tree doesn't take an unchanged file for an edited one and refuse.
+    await git(c, ['update-index', '-q', '--ignore-submodules', '--refresh']).catch(() => undefined);
+    // Read after the refresh, against the files as they are now: `read-tree -m -u` takes what git
+    // doesn't track as disposable where it writes.
+    const written = new Set(
+      (await git(c, ['diff-tree', '-r', '--name-only', '--no-renames', '-z', head, target]))
+        .split('\0')
+        .filter(Boolean),
+    );
+    const inTheWay = await untrackedInTheWay(c, head, target, written);
+    if (inTheWay.length > 0) return { kind: 'ignored', paths: inTheWay };
     try {
       await git(c, ['read-tree', '-m', '-u', head, target]);
     } catch (error) {
@@ -1011,13 +1012,67 @@ export function createGit(opts: GitOptions = {}): Git {
       else await git(c, ['symbolic-ref', 'HEAD', ref]);
     } catch (error) {
       if (!(error instanceof GitError)) throw error;
+      const why = `10db could not point HEAD at ${to.branch ?? to.sha}: ${error.message}`;
       // HEAD still names the batch's branch: put its files back so the two agree.
-      await git(c, ['read-tree', '-m', '-u', target, head]);
-      throw new InvalidError(
-        `10db could not point HEAD at ${to.branch ?? to.sha}: ${error.message}`,
-      );
+      try {
+        await git(c, ['read-tree', '-m', '-u', target, head]);
+      } catch (rollback) {
+        throw new InvalidError(
+          `${why}. Putting the batch's files back failed too (${rollback instanceof Error ? rollback.message : String(rollback)}), so the checkout may be half switched: HEAD names ${from} while its files may be ${to.branch ?? to.sha}'s`,
+        );
+      }
+      throw new InvalidError(why);
     }
     return { kind: 'switched' };
+  }
+
+  /** The paths whose entry in the checkout's own index differs from HEAD's, read without a lock. */
+  async function stagedPaths(c: Pinned): Promise<string[]> {
+    return (
+      await git(c, [
+        'diff-index',
+        '--cached',
+        '--name-only',
+        '--no-renames',
+        '--ignore-submodules=all',
+        '-z',
+        'HEAD',
+      ])
+    )
+      .split('\0')
+      .filter(Boolean);
+  }
+
+  /**
+   * Where `branch` is in use in another worktree of the repository, or null: checked out there, which
+   * `worktree list` shows, or being rebased or bisected there, which leaves that worktree detached
+   * and shows only in its git dir. `symbolic-ref` skips the check `git switch` makes, so this is it.
+   */
+  async function branchInUseElsewhere(c: Pinned, branch: string): Promise<string | null> {
+    const entries = await listWorktrees(c);
+    const self = (path: string): boolean => samePath(comparablePath(path), c.real);
+    const out = entries.find((e) => e.branch === branch && !self(e.path));
+    if (out) return comparablePath(out.path);
+    const ref = `refs/heads/${branch}`;
+    const busy = (gitDir: string): boolean =>
+      ['rebase-merge', 'rebase-apply'].some(
+        (dir) => readIfPresent(join(gitDir, dir, 'head-name')).trim() === ref,
+      ) || readIfPresent(join(gitDir, 'BISECT_START')).trim() === branch;
+    const { commonDir, gitDir } = c.dirs;
+    const linked = join(commonDir, 'worktrees');
+    const names = existsAsEntry(linked) ? readdirSync(linked) : [];
+    for (const name of names) {
+      const dir = join(linked, name);
+      if (samePath(dir, gitDir) || !busy(dir)) continue;
+      // `gitdir` names the worktree's `.git` file.
+      const path = dirname(readIfPresent(join(dir, 'gitdir')).trim());
+      if (!self(path)) return comparablePath(path);
+    }
+    if (!samePath(commonDir, gitDir) && busy(commonDir)) {
+      const main = entries.find((e) => !e.bare);
+      if (main && !self(main.path)) return comparablePath(main.path);
+    }
+    return null;
   }
 
   /** The index entries a commit covers, from a private index after `git add`; refused if unsafe. */

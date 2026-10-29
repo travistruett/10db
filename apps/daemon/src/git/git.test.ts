@@ -561,26 +561,47 @@ describe('switchBack', () => {
       },
     },
     {
-      name: "switches cleanly after a lane's commit of a changed file left the index behind",
+      name: "leaves a checkout whose index a lane's commit of a changed file left behind",
       from: 'main',
       prepare: () => {
         commitFiles({ 'a.txt': 'main' });
       },
       arrange: () => commitWithIndexLocked('a.txt', 'lane'),
-      outcome: { kind: 'switched' },
-      branch: 'main',
+      outcome: { kind: 'dirty', paths: ['a.txt'] },
+      branch: BATCH,
       check: () => {
-        expect(readFileSync(join(repo.path, 'a.txt'), 'utf8')).toBe('main');
+        expect(readFileSync(join(repo.path, 'a.txt'), 'utf8')).toBe('lane');
       },
     },
     {
-      name: "switches cleanly after a lane's commit of a new file left the index behind",
+      name: "leaves a checkout whose index a lane's commit of a new file left behind",
       from: 'main',
       arrange: () => commitWithIndexLocked('b.txt', 'lane'),
-      outcome: { kind: 'switched' },
-      branch: 'main',
+      outcome: { kind: 'dirty', paths: ['b.txt'] },
+      branch: BATCH,
       check: () => {
-        expect(existsSync(join(repo.path, 'b.txt'))).toBe(false);
+        expect(readFileSync(join(repo.path, 'b.txt'), 'utf8')).toBe('lane');
+      },
+    },
+    {
+      name: 'leaves a checkout with staged work its files no longer show, and loses none of it',
+      from: 'main',
+      prepare: () => {
+        commitFiles({ 'a.txt': 'a\n' });
+      },
+      arrange: () => {
+        write('plan.md', 'draft\n');
+        rawGit('add', 'plan.md');
+        rmSync(join(repo.path, 'plan.md'));
+        write('a.txt', 'v2\n');
+        rawGit('add', 'a.txt');
+        write('a.txt', 'a\n');
+      },
+      outcome: { kind: 'dirty', paths: ['a.txt', 'plan.md'] },
+      branch: BATCH,
+      check: () => {
+        expect(rawGit('show', ':plan.md')).toBe('draft');
+        expect(rawGit('show', ':a.txt')).toBe('v2');
       },
     },
   ])('$name', async ({ from, prepare, arrange, outcome, branch, check }) => {
@@ -609,6 +630,36 @@ describe('switchBack', () => {
       const place = await cutFrom('main');
       const other = join(elsewhere.path, 'app-main');
       rawGit('worktree', 'add', '-q', other, 'main');
+      const before = where();
+      expect(await git.switchBack(repo.path, BATCH, place)).toEqual({
+        kind: 'checked_out',
+        path: realpathSync(other),
+      });
+      expect(where()).toEqual(before);
+    } finally {
+      elsewhere.cleanup();
+    }
+  });
+
+  it('leaves a checkout whose branch another worktree is rebasing, as git would', async () => {
+    const elsewhere = tempDir('rebasing-worktree');
+    try {
+      commitFiles({ 'second.txt': 'second' });
+      const place = await cutFrom('main');
+      const other = join(elsewhere.path, 'app-main');
+      rawGit('worktree', 'add', '-q', other, 'main');
+      // A rebase that stops after its first pick leaves the worktree detached, mid-rebase on main.
+      expect(() =>
+        execFileSync('git', ['-C', other, 'rebase', '-q', '--exec', 'false', 'HEAD~1'], {
+          env: isolatedGitEnv(),
+          stdio: 'pipe',
+        }),
+      ).toThrow();
+      expect(
+        execFileSync('git', ['-C', other, 'branch', '--show-current'], { env: isolatedGitEnv() })
+          .toString()
+          .trim(),
+      ).toBe('');
       const before = where();
       expect(await git.switchBack(repo.path, BATCH, place)).toEqual({
         kind: 'checked_out',

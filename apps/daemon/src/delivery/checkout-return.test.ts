@@ -327,6 +327,32 @@ describe('what keeps the checkout where it is', () => {
     }
   });
 
+  it("an index a lane's commit left behind, which reads as uncommitted, never as a false switch", async () => {
+    h = createDeliveryHarness();
+    const batch = await openBatch('ABANDONED');
+    writeFileSync(join(h.repo, 'README.md'), 'by a lane\n');
+    const lock = join(h.repo, '.git', 'index.lock');
+    writeFileSync(lock, '');
+    try {
+      await h.git.commit({
+        repo: h.repo,
+        paths: ['README.md'],
+        message: 'lane',
+        opId: 'op-stale-index',
+        branch: batch.branch ?? '',
+      });
+    } finally {
+      rmSync(lock);
+    }
+    await endLive(batch, 'ABANDONED');
+    expect(where().branch).toBe(batch.branch);
+    const card = h.only(h.cards().filter((c) => c.title.startsWith('Your checkout')));
+    expect(card.title).toBe(
+      `Your checkout stays on ${batch.branch ?? ''}: it has uncommitted changes`,
+    );
+    expect(card.body).toContain('- README.md');
+  });
+
   it('ignored files where the switch would write', async () => {
     h = createDeliveryHarness();
     const batch = await openBatch('ABANDONED');
