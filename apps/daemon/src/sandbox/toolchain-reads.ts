@@ -1,7 +1,7 @@
 import { lstatSync, readdirSync, realpathSync, statSync, type Dirent } from 'node:fs';
 import { basename, delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
 import { miseDirs, miseKeyFiles } from './mise-config';
-import { isSandboxPath, SandboxProfileError } from './profile';
+import { childListingGrant, isSandboxPath, listingGrant, SandboxProfileError } from './profile';
 import { isEqualOrUnder, pathsEqual } from './protected-reads';
 
 /** Home dirs too broad to open whole or to treat as a toolchain's home. */
@@ -27,6 +27,13 @@ interface Layout {
   /** The manager's home, as the builder's environment names it. */
   readonly home: (home: string, env: Readonly<Record<string, string>>) => string;
   readonly installs: readonly string[] | null;
+  /**
+   * True when the manager lists its installs dirs itself (mise scans `installs` and each tool's dir
+   * on every command, shims included). The `installs` dir and each tool dir then open for listing
+   * only, by exact-match pattern: a version is never opened whole, so one installed after the profile
+   * is built stays closed, its `etc` with it.
+   */
+  readonly listsInstalls: boolean;
   /** Paths in the manager's home that its commands and shims read, opened whole when present. */
   readonly open: readonly (readonly string[])[];
   /** Files beside each tool's versions that the manager reads, such as mise's backend record. */
@@ -45,22 +52,31 @@ const LAYOUTS: readonly Layout[] = [
   {
     home: (home, env) => miseDirs(home, env).data,
     installs: ['installs'],
+    listsInstalls: true,
     open: [['shims']],
     toolFiles: ['.mise.backend.toml'],
   },
   {
     home: homeFrom('NVM_DIR', ['.nvm']),
     installs: ['versions'],
+    listsInstalls: false,
     open: [['nvm.sh'], ['alias']],
     toolFiles: [],
   },
   {
     home: homeFrom('VOLTA_HOME', ['.volta']),
     installs: ['tools', 'image'],
+    listsInstalls: false,
     open: [['bin'], ['tools', 'user'], ['layout.v4'], ['layout.v3']],
     toolFiles: [],
   },
-  { home: homeFrom('RUSTUP_HOME', ['.rustup']), installs: null, open: [[]], toolFiles: [] },
+  {
+    home: homeFrom('RUSTUP_HOME', ['.rustup']),
+    installs: null,
+    listsInstalls: false,
+    open: [[]],
+    toolFiles: [],
+  },
 ];
 
 /**
@@ -137,6 +153,8 @@ function npmrcsOf(prefix: string): string[] {
 interface Access {
   readonly reads: string[];
   readonly secretFiles: string[];
+  /** Dirs whose listing opens, and whose contents don't. */
+  readonly listed: string[];
 }
 
 /**
@@ -149,7 +167,7 @@ interface Access {
 function versionsAccess(toolDir: string, granted: readonly string[], untrusted: Untrusted): Access {
   const reads: string[] = [];
   const secretFiles: string[] = [];
-  if (untrusted(toolDir)) return { reads, secretFiles };
+  if (untrusted(toolDir)) return { reads, secretFiles, listed: [] };
   for (const version of listOrEmpty(toolDir)) {
     if (!isDirectoryEntry(toolDir, version)) continue;
     const written = join(toolDir, version.name);
@@ -163,13 +181,14 @@ function versionsAccess(toolDir: string, granted: readonly string[], untrusted: 
     }
     secretFiles.push(...npmrcsOf(written), ...npmrcsOf(real));
   }
-  return { reads, secretFiles };
+  return { reads, secretFiles, listed: [] };
 }
 
 /**
  * What one manager's layout opens: its fixed paths, each tool's files, and its versions by
- * `versionsAccess`. Listing goes two levels down by the manager's own layout; nothing else is walked,
- * and what isn't listed stays closed.
+ * `versionsAccess`. A manager that lists its installs gets the listing of that dir, by its written
+ * path and by its real path inside a granted read. Listing goes two levels down by the manager's own
+ * layout; nothing else is walked, and what isn't listed stays closed.
  */
 function layoutAccess(
   layout: Layout,
@@ -179,12 +198,19 @@ function layoutAccess(
 ): Access {
   const reads: string[] = [];
   const secretFiles: string[] = [];
+  const listed: string[] = [];
   for (const parts of layout.open) {
     const path = join(root, ...parts);
     if (realOrNull(path) !== null && !untrusted(path)) reads.push(...bothSpellings(path));
   }
-  if (layout.installs === null) return { reads, secretFiles };
+  if (layout.installs === null) return { reads, secretFiles, listed };
   const installs = join(root, ...layout.installs);
+  const installsReal = realOrNull(installs);
+  if (layout.listsInstalls && installsReal !== null && !untrusted(installs)) {
+    listed.push(installs);
+    if (installsReal !== installs && granted.some((path) => isEqualOrUnder(installsReal, path)))
+      listed.push(installsReal);
+  }
   for (const tool of listOrEmpty(installs)) {
     if (!isDirectoryEntry(installs, tool)) continue;
     const toolDir = join(installs, tool.name);
@@ -196,7 +222,7 @@ function layoutAccess(
     reads.push(...versions.reads);
     secretFiles.push(...versions.secretFiles);
   }
-  return { reads, secretFiles };
+  return { reads, secretFiles, listed };
 }
 
 /**
@@ -223,7 +249,7 @@ function pathEntryAccess(entry: string, granted: readonly string[], untrusted: U
     reads.push(...opened.reads);
     secretFiles.push(...opened.secretFiles);
   }
-  return { reads, secretFiles };
+  return { reads, secretFiles, listed: [] };
 }
 
 /**
@@ -248,6 +274,16 @@ function systemNpmrcs(prefixes: readonly string[]): string[] {
   });
 }
 
+/** `candidate`, or a refusal when the sandbox profile can't hold its name. */
+function expressible(candidate: string): string {
+  if (!isSandboxPath(candidate))
+    throw new SandboxProfileError(
+      'toolchainReads',
+      `a toolchain file that can hold a registry token has a name the sandbox profile can't hold: ${candidate}; rename or remove it`,
+    );
+  return candidate;
+}
+
 /**
  * The deny entries for one secret file. A missing file is denied, since it may appear later; a
  * regular file is denied; a link is denied by its path and, when it leads to a regular file, by that
@@ -257,14 +293,6 @@ function systemNpmrcs(prefixes: readonly string[]): string[] {
  * locations, which lanes can't write.
  */
 function deniedSpellings(path: string): string[] {
-  const expressible = (candidate: string): string => {
-    if (!isSandboxPath(candidate))
-      throw new SandboxProfileError(
-        'toolchainReads',
-        `a toolchain file that can hold a registry token has a name the sandbox profile can't hold: ${candidate}; rename or remove it`,
-      );
-    return candidate;
-  };
   let isFile: boolean;
   let isLink: boolean;
   try {
@@ -293,6 +321,11 @@ function deniedSpellings(path: string): string[] {
 export interface ToolchainAccess {
   /** What a lane may read of the toolchains, read-only. */
   readonly reads: string[];
+  /**
+   * Patterns that let a command list mise's `installs` dir and see its tool dirs as names, and read
+   * nothing in either. A version installed after the profile is built matches none of them.
+   */
+  readonly listings: string[];
   /** Files that can hold a registry token or a key, under those reads or the install prefixes. */
   readonly secretFiles: string[];
 }
@@ -311,7 +344,8 @@ export interface ToolchainOptions {
  * `versions/node/<version>`, volta's `tools/image/<tool>/<version>`, every entry of each version except
  * `etc`, with the files its shims read), rustup's home whole, and the own files of each PATH entry under
  * home. A home is used only when it lies under home and is neither broad nor protected; a PATH entry in
- * a lane-writable dir is dropped first, so no lane can change another's profile. Secret files: each
+ * a lane-writable dir is dropped first, so no lane can change another's profile. Listings: mise's
+ * `installs` dir and its tool dirs, by name only (it lists them on every command). Secret files: each
  * version's npmrcs, the npmrcs of each node on PATH and of the install prefixes, cargo's credentials and
  * config, and mise's age keys. No read equals or lies under a secret file.
  */
@@ -346,10 +380,12 @@ export function toolchainAccess(
   const granted = [...fixed, ...managerRoots];
   const reads: string[] = [...fixed];
   const secretFiles: string[] = [];
+  const listed: string[] = [];
   for (const { layout, root } of managers) {
     const opened = layoutAccess(layout, root, granted, untrusted);
     reads.push(...opened.reads);
     secretFiles.push(...opened.secretFiles);
+    listed.push(...opened.listed);
   }
   const path = (env['PATH'] ?? '')
     .split(delimiter)
@@ -370,7 +406,14 @@ export function toolchainAccess(
     ...miseKeyFiles(mise, env),
   );
   const denied = [...new Set(secretFiles.flatMap(deniedSpellings))].sort();
+  // A dir with a name the profile can't hold refuses the session, naming it, in `listingGrant`.
+  const listable = (dir: string): boolean =>
+    safeUnderHome(dir, home, protectedReads) && !touchesMiseConfig(dir);
   return {
+    listings: [...new Set(listed.filter(listable))].flatMap((dir) => [
+      listingGrant(dir),
+      childListingGrant(dir),
+    ]),
     reads: [
       ...new Set(
         reads.filter(

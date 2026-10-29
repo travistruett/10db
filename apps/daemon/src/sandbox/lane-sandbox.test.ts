@@ -35,6 +35,7 @@ import {
   type LaneSessionInput,
 } from './index';
 import type { LaneSandboxDeps } from './lane-sandbox';
+import { childListingGrant, listingGrant } from './profile';
 import { secretFilesIn } from './project-access';
 import { isEqualOrUnder } from './protected-reads';
 
@@ -401,7 +402,21 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       const cache = join(session.tmpDir, 'cache');
       expect(existsSync(session.tmpDir)).toBe(true);
       expect(dirname(session.tmpDir)).toBe(tmpRoot);
+      // Claude Code and the git it runs itself, outside the sandbox, get no variable that names a
+      // path the lane can write: the sandboxed shell sets those from the env file.
       expect(session.spec.env).toEqual({
+        MISE_LOG_LEVEL: 'error',
+        CLAUDE_CODE_TMPDIR: session.tmpDir,
+        GIT_CONFIG_GLOBAL: '/dev/null',
+        GIT_OPTIONAL_LOCKS: '0',
+        TENDB_SANDBOX: '1',
+        CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1',
+        CLAUDE_ENV_FILE: join(
+          tmpRoot,
+          readdirSync(tmpRoot).find((name) => name.startsWith('10db-env-')) ?? '',
+        ),
+      });
+      expect(session.commandEnv).toEqual({
         npm_config_cache: join(cache, 'npm'),
         npm_config_devdir: join(cache, 'node-gyp'),
         COREPACK_HOME: join(cache, 'corepack'),
@@ -413,16 +428,12 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
         MISE_GLOBAL_CONFIG_FILE: join(session.tmpDir, 'mise', 'config.toml'),
         MISE_SYSTEM_DIR: join(session.tmpDir, 'mise'),
         MISE_SYSTEM_CONFIG_FILE: join(session.tmpDir, 'mise', 'system.toml'),
-        CLAUDE_CODE_TMPDIR: session.tmpDir,
+        MISE_LOG_LEVEL: 'error',
+        xcrun_db: join(session.tmpDir, 'xcrun_db'),
         GIT_CONFIG_GLOBAL: '/dev/null',
         GIT_OPTIONAL_LOCKS: '0',
         XDG_CONFIG_HOME: join(session.tmpDir, 'config'),
         TENDB_SANDBOX: '1',
-        CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1',
-        CLAUDE_ENV_FILE: join(
-          tmpRoot,
-          readdirSync(tmpRoot).find((name) => name.startsWith('10db-env-')) ?? '',
-        ),
       });
       expect(session.spec.settings.filesystem.allowWrite).toEqual([session.tmpDir]);
     } finally {
@@ -446,6 +457,36 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       const { allowRead, denyRead } = session.spec.settings.filesystem;
       expect(allowRead.filter((path) => path.startsWith(join(home, '.config')))).toEqual([]);
       expect(denyRead).toContain(join(home, '.config/mise/age.txt'));
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it("lets the lane list mise's installs, opening no version whole, and keeps mise's age key and its data dir closed", async () => {
+    const mise = join(home, '.local', 'share', 'mise');
+    const version = join(mise, 'installs', 'node', '26.12.0');
+    writeIn(version, 'bin/node');
+    writeIn(version, 'etc/npmrc');
+    writeIn(mise, 'downloads/x');
+    writeIn(home, '.config/mise/age.txt');
+    const session = await sandbox().forSession(input());
+    try {
+      const { allowRead, denyRead, allowWrite } = session.spec.settings.filesystem;
+      expect(allowRead).toEqual(
+        expect.arrayContaining([
+          listingGrant(join(mise, 'installs')),
+          childListingGrant(join(mise, 'installs')),
+          join(version, 'bin'),
+        ]),
+      );
+      for (const open of [join(mise, 'installs'), join(mise, 'installs', 'node'), version, mise])
+        expect(allowRead).not.toContain(open);
+      expect(allowRead.filter((path) => path.startsWith(join(mise, 'downloads')))).toEqual([]);
+      expect(allowRead.filter((path) => path.startsWith(join(version, 'etc')))).toEqual([]);
+      expect(denyRead).toEqual(
+        expect.arrayContaining([join(version, 'etc/npmrc'), join(home, '.config/mise/age.txt')]),
+      );
+      expect(allowWrite).toEqual([session.tmpDir]);
     } finally {
       session.dispose();
     }
@@ -483,10 +524,10 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
     const first = await sandbox().forSession(input());
     const second = await sandbox().forSession(input());
     try {
-      expect(first.spec.env['CARGO_HOME']).not.toBe(second.spec.env['CARGO_HOME']);
-      expect(first.spec.env['npm_config_cache']).not.toBe(second.spec.env['npm_config_cache']);
-      expect(first.spec.env['pnpm_config_store_dir']).not.toBe(
-        second.spec.env['pnpm_config_store_dir'],
+      expect(first.commandEnv['CARGO_HOME']).not.toBe(second.commandEnv['CARGO_HOME']);
+      expect(first.commandEnv['npm_config_cache']).not.toBe(second.commandEnv['npm_config_cache']);
+      expect(first.commandEnv['pnpm_config_store_dir']).not.toBe(
+        second.commandEnv['pnpm_config_store_dir'],
       );
     } finally {
       first.dispose();
@@ -613,17 +654,47 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
             entry.slice(entry.indexOf('=') + 1),
           ]),
       );
-      const forCommands = Object.entries(session.spec.env).filter(
-        ([name]) => !name.startsWith('CLAUDE_'),
+      // Every variable for commands is in the file, those of the session env and those it leaves out.
+      const forCommands = Object.entries(session.commandEnv);
+      expect(forCommands.map(([name]) => name)).toEqual(
+        expect.arrayContaining(['CARGO_HOME', 'xcrun_db', 'MISE_CONFIG_DIR', 'XDG_CONFIG_HOME']),
       );
-      expect(forCommands.map(([name]) => name)).toContain('CARGO_HOME');
+      for (const [name, value] of Object.entries(session.spec.env).filter(
+        ([name]) => !name.startsWith('CLAUDE_'),
+      ))
+        expect(session.commandEnv[name], name).toBe(value);
       for (const [name, value] of forCommands) expect(sourced[name], name).toBe(value);
       expect(Object.keys(sourced).filter((name) => name.startsWith('CLAUDE_'))).toEqual([]);
       const { allowRead, allowWrite } = session.spec.settings.filesystem;
       expect(allowWrite.filter((path) => isEqualOrUnder(file, path))).toEqual([]);
       expect(allowRead).toContain(file);
-      // Claude Code drops the whole sandbox over a pattern character in a path.
-      expect([...allowRead, ...allowWrite].filter((path) => /[*?[\]{}]/.test(path))).toEqual([]);
+      // Claude Code drops the whole sandbox over a pattern it can't parse: the only ones are the
+      // exact-match listings, which it accepts (measured), and no write path has one.
+      const listings = session.spec.settings.filesystem.allowRead.filter((path) =>
+        /[*?[\]{}]/.test(path),
+      );
+      expect(listings.every((path) => /(\[[^\]]\]|\/\*)$/.test(path))).toBe(true);
+      expect(allowWrite.filter((path) => /[*?[\]{}]/.test(path))).toEqual([]);
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it("keeps every path the lane can write out of Claude Code's own env, and sets them all in the env file", async () => {
+    const session = await sandbox().forSession(input());
+    try {
+      // Claude Code and its git run outside the sandbox with this env. A tool that execs or reads
+      // what a variable names would run what the lane wrote: mise's `[env] _.source`, xcrun's cache
+      // file, git's and Claude Code's config under XDG_CONFIG_HOME, cargo's `rustc-wrapper`.
+      const underTemp = Object.entries(session.spec.env)
+        .filter(([, value]) => isEqualOrUnder(value, session.tmpDir))
+        .map(([name]) => name);
+      expect(underTemp).toEqual(['CLAUDE_CODE_TMPDIR']);
+      for (const name of ['xcrun_db', 'XDG_CONFIG_HOME', 'MISE_GLOBAL_CONFIG_FILE', 'CARGO_HOME'])
+        expect(Object.keys(session.spec.env), name).not.toContain(name);
+      const file = readFileSync(session.spec.env['CLAUDE_ENV_FILE'] ?? '', 'utf8');
+      expect(file).toContain(`export xcrun_db='${join(session.tmpDir, 'xcrun_db')}'`);
+      expect(file).toContain(`export XDG_CONFIG_HOME='${join(session.tmpDir, 'config')}'`);
     } finally {
       session.dispose();
     }

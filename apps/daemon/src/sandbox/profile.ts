@@ -59,6 +59,65 @@ const sandboxPath = z
     error: (issue) =>
       `a path can't be used in the sandbox profile: ${shown(issue.input)} (glob characters, \`\\\` or a newline)`,
   });
+
+/**
+ * The patterns that open a directory's listing and nothing in it. Seatbelt allows `ls D` for an
+ * exact match of D, but srt renders a plain path as a subtree and only a pattern as an exact match.
+ * So the dir is spelled with its last character as a one-character set (`/h/install[s]`), and its
+ * children, each only as a name, as `/h/installs/*`. Claude Code and srt both take these (measured),
+ * and a version dir that appears later stays closed, as it matches neither.
+ */
+const LISTING_SET = /^(.*)\[([^\n])\]$/s;
+const LISTING_CHILDREN = /^(.*)\/\*$/s;
+
+/** The dir a listing pattern opens, or null when `pattern` is not exactly what a grant below emits. */
+function listingDir(pattern: string): string | null {
+  const set = LISTING_SET.exec(pattern);
+  const dir = set === null ? LISTING_CHILDREN.exec(pattern)?.[1] : `${set[1] ?? ''}${set[2] ?? ''}`;
+  if (dir === undefined || dir === '' || dir === '/' || !isSandboxPath(dir)) return null;
+  return pattern === listingGrant(dir) || pattern === childListingGrant(dir) ? dir : null;
+}
+
+/** A dir to spell as a listing, or a refusal when the profile can't hold its name. */
+function listedDir(dir: string): string {
+  if (dir === '/' || !isSandboxPath(dir))
+    throw new SandboxProfileError(
+      'toolchainListings',
+      `a toolchain dir can't be listed in the sandbox profile: ${dir} (not a plain absolute path below the root)`,
+    );
+  return dir;
+}
+
+/** The pattern that lets a command list `dir` itself, and read nothing in it. */
+export function listingGrant(dir: string): string {
+  const named = listedDir(dir);
+  return `${named.slice(0, -1)}[${named.slice(-1)}]`;
+}
+
+/** The pattern that lets a command see each child of `dir` as a name, and read none of them. */
+export function childListingGrant(dir: string): string {
+  return `${listedDir(dir)}/*`;
+}
+
+/** A read entry: a plain path, or one of the listing patterns. */
+const sandboxReadEntry = z.string().superRefine((entry, ctx) => {
+  if (listingDir(entry) !== null) return;
+  const parsed = sandboxPath.safeParse(entry);
+  if (parsed.success) return;
+  for (const issue of parsed.error.issues) ctx.addIssue({ code: 'custom', message: issue.message });
+});
+
+/** Refuses a read that is not a plain path: only `toolchainListings` may hold a pattern. */
+function refusePatterns(reads: readonly string[]): void {
+  reads.forEach((path, index) => {
+    const parsed = sandboxPath.safeParse(path);
+    if (!parsed.success)
+      throw new SandboxProfileError(
+        `filesystem.allowRead.${String(index)}`,
+        parsed.error.issues[0]?.message ?? "the sandbox profile can't be built",
+      );
+  });
+}
 const sandboxDomain = z.string().regex(/^(\*\.)?[a-z0-9.-]+$/, {
   error: (issue) =>
     `a host can't be used in the sandbox profile: ${shown(issue.input)} (not a lower-case host or *. wildcard)`,
@@ -86,7 +145,7 @@ const LaneSandboxSettingsSchema = z.strictObject({
   autoAllowBashIfSandboxed: z.boolean(),
   filesystem: z.strictObject({
     denyRead: z.array(sandboxPath),
-    allowRead: z.array(sandboxPath),
+    allowRead: z.array(sandboxReadEntry),
     allowWrite: z.array(sandboxPath),
     denyWrite: z.array(sandboxPath),
   }),
@@ -112,6 +171,8 @@ export interface LaneProfileInput {
   /** Toolchain files that can hold a registry token or a key, from `toolchainAccess`. */
   toolchainSecrets: readonly string[];
   toolchainReads: readonly string[];
+  /** Toolchain dirs a command may list but not read in, as `listingGrant` and `childListingGrant` spell them. */
+  toolchainListings: readonly string[];
   allowedDomains: readonly string[];
   readList: readonly string[];
   /** Extra read-only paths, such as a linked worktree's git dirs. */
@@ -210,6 +271,12 @@ export function buildLaneProfile(input: LaneProfileInput): LaneSandboxSettings {
   const isAllowed = (path: string): boolean => !denied.some((root) => isEqualOrUnder(path, root));
   const readable = [...needed, ...input.readList].filter(isAllowed);
   const writable = [input.tmpDir, ...input.extraWrites].filter(isAllowed);
+  refusePatterns(readable);
+  // A listing of a dir that is, or lies under, a denied path opens nothing the deny keeps shut.
+  const listings = input.toolchainListings.filter((pattern) => {
+    const dir = listingDir(pattern);
+    return dir === null || isAllowed(dir);
+  });
   const candidate: LaneSandboxSettings = {
     enabled: true,
     failIfUnavailable: true,
@@ -218,7 +285,7 @@ export function buildLaneProfile(input: LaneProfileInput): LaneSandboxSettings {
     autoAllowBashIfSandboxed: false,
     filesystem: {
       denyRead: ['/', ...input.protectedReads, ...input.secretFiles, ...input.toolchainSecrets],
-      allowRead: readable,
+      allowRead: [...readable, ...listings],
       allowWrite: writable,
       denyWrite: [...input.denyWrites],
     },
