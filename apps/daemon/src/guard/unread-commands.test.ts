@@ -34,6 +34,13 @@ const ROWS: readonly Row[] = [
   { name: 'pnpm test with a variable', command: 'pnpm test $x', reason: null },
   { name: 'source of a checkout file', command: '. ./env.sh', reason: null },
   { name: 'a file test with a variable', command: '[[ -f $f ]]', reason: null },
+  { name: 'a quoting transform', command: 'echo ${x@Q} ${x@U}', reason: null },
+  { name: 'a prompt transform', command: 'echo ${x@P}', reason: UnreadReason.Script },
+  {
+    name: 'a declare option from a variable',
+    command: 'declare -$f x',
+    reason: UnreadReason.Script,
+  },
   { name: 'names with a prefix', command: 'echo ${!BASH*} ${!a[@]}', reason: null },
   { name: 'indirect expansion', command: 'echo ${!ref}', reason: UnreadReason.Script },
   {

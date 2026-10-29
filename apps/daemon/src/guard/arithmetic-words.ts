@@ -41,6 +41,10 @@ export function unreadArithmeticIn(word: string): boolean {
   }
   const assigned = /^[A-Za-z_]\w*\[([^\]]*)\]\+?=/.exec(word);
   if (assigned !== null && !safeSubscript(assigned[1] ?? '')) return true;
+  // A transform other than quoting or case: `@P` expands the value as a prompt, which runs substitutions.
+  for (const match of word.matchAll(/\$\{[^}]*@([A-Za-z])\}/g)) {
+    if (!'QUuLa'.includes(match[1] ?? '')) return true;
+  }
   // An expansion inside any subscript or offset, whatever the rest says.
   return /\[[^\]]*[$`]/.test(word) || /\$\{[^}]*:(?![-=+?])[^}]*[$`]/.test(word);
 }
@@ -107,7 +111,7 @@ export function evaluatesUnread(head: string, words: readonly string[]): boolean
   if (DECLARING.has(head)) {
     const integer = declaresInteger(head, words);
     return args.some((word) => {
-      if (word.startsWith('-')) return false;
+      if (word.startsWith('-')) return EXPANSION.test(word);
       if (integer && word.includes('=') && !isNumericExpression(valueOf(word))) return true;
       return EXPANSION.test(word) || !safeNames(word.split('=')[0] ?? word);
     });
