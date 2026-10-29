@@ -3,9 +3,10 @@
 #   install-app.sh [ref]    ref is a branch or tag, default main (`make install-app REF=<ref>`)
 # It takes the unsigned-dmg artifact of the newest successful release-dry-run run for the ref's
 # head commit, or waits for a run of that commit already under way, or starts one and waits for
-# it. Then it checks the DMG against SHA256SUMS, backs up the database, keeps the current app as
-# 10db.app.prev-<stamp>, copies the new app in and clears its quarantine. It refuses while 10db
-# runs and never quits it.
+# it. Then it checks the DMG against SHA256SUMS, backs up the database, zips the current app to
+# 10db-previous/10db-<stamp>.zip beside the data directory, copies the new app in, clears its
+# quarantine and registers it with Launch Services. Only then does it delete older zips and all
+# but the newest 5 database backups. It refuses while 10db runs and never quits it.
 # Exit 0: installed. Exit 1: refused or failed; the previous app is put back, and when it can't be,
 # the last message says where it is. Exit 2: bad argument.
 set -euo pipefail
@@ -50,9 +51,12 @@ gh_err="$work/gh.err"
 mounted=0
 backup_dir=""
 backup_done=0
-moved_to=""
+previous_zip=""
+zip_done=0
+removing=0
 copying=0
 installed=0
+backups_kept=5
 
 detach_dmg() {
   hdiutil detach "$mount" -quiet && return 0
@@ -61,8 +65,8 @@ detach_dmg() {
 }
 
 # Never aborts part way: each step runs whatever the one before it did, and a Ctrl-C while it runs
-# is ignored. The previous app goes back only into an empty place, so it can't end up inside a
-# partial copy.
+# is ignored. The previous app is unpacked from its zip only into an empty place, so it can't end
+# up inside a partial copy; once it is back, its zip goes, leaving the earlier one.
 cleanup() {
   trap '' INT TERM HUP
   set +e
@@ -70,14 +74,21 @@ cleanup() {
   rmdir "$mount" 2> /dev/null
   rm -rf "$work"
   if [ -n "$backup_dir" ] && [ "$backup_done" -eq 0 ]; then rm -rf "$backup_dir"; fi
+  if [ -n "$previous_zip" ]; then rm -f "$previous_zip.partial"; fi
   if [ "$installed" -eq 0 ]; then
-    if [ "$copying" -eq 1 ]; then rm -rf "$app_path" 2> /dev/null; fi
-    if [ -n "$moved_to" ] && [ -e "$moved_to" ]; then
-      if [ ! -e "$app_path" ] && mv "$moved_to" "$app_path"; then
+    if [ "$copying" -eq 1 ] || [ "$removing" -eq 1 ]; then rm -rf "$app_path" 2> /dev/null; fi
+    if [ "$removing" -eq 1 ]; then
+      local bundle=""
+      if [ ! -e "$app_path" ] && bundle="$(unpack_app "$previous_zip")" && mv "$bundle" "$app_path"; then
+        rmdir "$(dirname "$bundle")" 2> /dev/null
+        rm -f "$previous_zip"
+        register_app > /dev/null 2>&1
         echo "$script_name: put the previous app back at $app_path" >&2
       else
-        echo "$script_name: could not put the previous app back. It is at $moved_to; once $app_path is out of the way, run: mv \"$moved_to\" \"$app_path\"" >&2
+        echo "$script_name: could not put the previous app back. It is kept in $previous_zip; once $app_path is out of the way, run: ditto -x -k \"$previous_zip\" \"$apps_dir\"" >&2
       fi
+    elif [ "$zip_done" -eq 1 ]; then
+      rm -f "$previous_zip"
     fi
   fi
   release_lock
@@ -178,7 +189,7 @@ take_lock
 refuse_while_running
 
 stamp="$(new_stamp)"
-[ ! -e "$app_path.prev-$stamp" ] || fail "$app_path.prev-$stamp already exists"
+[ ! -e "$(previous_zip_for "$stamp")" ] || fail "$(previous_zip_for "$stamp") already exists"
 backup=""
 if [ -f "$db_file" ]; then
   backup="$(backup_file_for "$stamp")"
@@ -198,8 +209,11 @@ fi
 refuse_while_running
 
 if [ -e "$app_path" ]; then
-  moved_to="$app_path.prev-$stamp"
-  mv "$app_path" "$moved_to"
+  previous_zip="$(previous_zip_for "$stamp")"
+  zip_app "$previous_zip" || fail "could not zip $app_path to $previous_zip and test the zip, so the app stays in place"
+  zip_done=1
+  removing=1
+  rm -rf "$app_path"
 fi
 
 # Set first: an attach that fails part way may still leave the image mounted.
@@ -215,16 +229,34 @@ else
   echo "$script_name: could not detach the DMG at $mount, even with -force; the app is installed. Eject it in Finder later." >&2
 fi
 
-# The build is unsigned, so Gatekeeper refuses any copy that carries com.apple.quarantine. This
-# clears it on the installed app alone, without following symlinks out of the bundle: the app is
-# the builder's own CI build of a named commit, fetched through gh, and its DMG matched the run's
-# SHA256SUMS above.
-xattr -r -s -d com.apple.quarantine "$app_path"
-attributes="$(xattr -r -s -l "$app_path")"
-case "$attributes" in *com.apple.quarantine*) fail "com.apple.quarantine is still set inside $app_path" ;; esac
+# Safe to clear: the app is the builder's own CI build of a named commit, fetched through gh, and
+# its DMG matched the run's SHA256SUMS above.
+clear_quarantine
 installed=1
+register_app
+
+# The newest backups by time last changed, whatever their names: backups made by hand are named
+# with hours and minutes only.
+prune_backups() {
+  local prefix path count=0 removed=""
+  prefix="$(dirname "$data_dir")/$(basename "$data_dir")-backup-"
+  local found=("$prefix"*)
+  [ "${#found[@]}" -gt "$backups_kept" ] || return 0
+  while IFS= read -r path; do
+    case "$path" in "$prefix"*) ;; *) continue ;; esac
+    [ -d "$path" ] || continue
+    count=$((count + 1))
+    [ "$count" -gt "$backups_kept" ] || continue
+    rm -rf "$path" && removed="$removed $(basename "$path")"
+  done <<< "$(ls -1dt -- "${found[@]}")"
+  [ -z "$removed" ] || echo "  Removed older database backups, keeping the newest $backups_kept:$removed"
+}
 
 echo "Installed 10db from $ref at commit $head (GitHub run $run_id) as $app_path."
 if [ -n "$backup" ]; then echo "  Database backup:  $backup"; fi
-if [ -n "$moved_to" ]; then echo "  Previous app:     $moved_to"; fi
+if [ -n "$previous_zip" ]; then
+  keep_only_zip "$previous_zip"
+  echo "  Previous app:     $previous_zip"
+fi
+prune_backups
 echo "Open 10db to start it. To go back to the previous app: quit 10db, then run make rollback-app."
