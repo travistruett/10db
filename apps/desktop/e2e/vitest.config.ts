@@ -4,6 +4,8 @@ import { defineProject } from 'vitest/config';
 export default defineProject({
   test: {
     name: 'desktop-e2e',
+    // Vitest roots a project at its config's directory; knip roots it at the workspace unless told.
+    root: import.meta.dirname,
     environment: 'node',
     setupFiles: ['../../../tests/git-isolation.setup.ts'],
     include: ['*.test.ts'],

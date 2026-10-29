@@ -2,6 +2,7 @@ import type { SystemCheckDto } from '@10db/contracts';
 import { SchemaMismatchError } from '@10db/db';
 import {
   AlreadyRunningError,
+  aaKeyReaderFromEnv,
   daemonOptionsFromEnv,
   startDaemon,
   WorktreeRootError,
@@ -104,7 +105,7 @@ try {
     adapter: chooseAdapter(),
     migrationsDir: resolveMigrationsDir(),
     harnessDir: resolveHarnessDir(),
-    aaKey: () => systemKeychain.read(AA_KEY_ACCOUNT),
+    aaKey: aaKeyReaderFromEnv(env, () => systemKeychain.read(AA_KEY_ACCOUNT)),
     loginEnv: login.vars,
     keychain: systemKeychain,
     systemCheck: check,

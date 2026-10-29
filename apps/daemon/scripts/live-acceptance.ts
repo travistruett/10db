@@ -233,6 +233,7 @@ function startDaemonProcess(): ChildProcess {
       TENDB_PORT: String(args.port),
       TENDB_DEV_UI_TOKEN: token,
       TENDB_LOG_LEVEL: 'info',
+      TENDB_BENCHMARKS: 'off',
       // The daemon shuts down when this pipe closes, which is how it learns this script died.
       TENDB_PARENT_STDIN: '1',
     },

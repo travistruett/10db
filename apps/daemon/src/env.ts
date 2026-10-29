@@ -32,6 +32,10 @@ const DaemonEnv = z.object({
   // Set by the desktop shell: the daemon runs its normal shutdown when stdin reaches EOF, which is how
   // it learns the shell died without a clean Quit.
   TENDB_PARENT_STDIN: z.enum(['0', '1']).optional(),
+  // `off` keeps the daemon from reading the Artificial Analysis key and from syncing benchmarks. Set
+  // for every daemon that is not the installed app (e2e, live acceptance, `pnpm dev`): the free
+  // quota is shared, and a throwaway daemon with no earlier sync would spend it.
+  TENDB_BENCHMARKS: z.enum(['on', 'off']).optional(),
   // Test only: runs claude-adapter.live.test.ts against the real claude on the builder's subscription.
   TENDB_LIVE_CLAUDE: z.enum(['0', '1']).optional(),
 });

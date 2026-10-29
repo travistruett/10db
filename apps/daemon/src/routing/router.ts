@@ -7,6 +7,7 @@ import {
   type WorkstreamStep,
 } from '@10db/contracts';
 import type { Floor } from './floors';
+import { strongerDefault } from './role-defaults';
 
 export interface RouteInput {
   readonly provider: Provider;
@@ -25,7 +26,10 @@ export interface RouteChoice {
   readonly overBudget: boolean;
 }
 
-/** Profiles are measured, but none of the provider's reaches a step's minimum score. */
+/**
+ * No profile can run a step: measured ones exist but none of the provider's reaches its minimum score, or the
+ * account offers none of Claude Code's models for a role default.
+ */
 export class NoProfileError extends Error {
   override name = 'NoProfileError';
 }
@@ -110,7 +114,7 @@ export function route(input: RouteInput): RouteChoice {
     profile: best,
     score: kind,
     overBudget,
-    reason: `cheapest profile at or above ${String(minimum)} ${kind}${fellBack}${floor}${budget}`,
+    reason: `by score: cheapest profile at or above ${String(minimum)} ${kind}${fellBack}${floor}${budget}`,
   };
 }
 
@@ -122,7 +126,36 @@ export interface EscalateInput {
   readonly why: string;
 }
 
-/** One profile up the step's own score (spec §5.2.5); a pinned step, the top, or the ceiling keeps it. */
+/** One rung up the role defaults' ladder, for a profile with nothing to compare on; the ceiling has no cost to apply. */
+function climbRoleDefaults(
+  step: WorkstreamStep,
+  here: ModelProfileDto,
+  input: EscalateInput,
+): { readonly step: WorkstreamStep; readonly escalated: boolean } {
+  const current = `${step.model}@${step.effort}`;
+  const next = strongerDefault(input.provider, here, input.profiles);
+  if (!next)
+    return {
+      step: { ...step, reason: `kept ${current} after ${input.why}: no stronger model offered` },
+      escalated: false,
+    };
+  return {
+    escalated: true,
+    step: {
+      ...step,
+      profileId: next.id,
+      model: next.model,
+      effort: next.effort,
+      overBudget: false,
+      reason: `escalated from ${current} after ${input.why}: the next stronger model, by role default`,
+    },
+  };
+}
+
+/**
+ * One profile up the step's own score (spec §5.2.5); a pinned step, the top, or the ceiling keeps it. A step
+ * whose profile has no score or cost to compare on climbs the role defaults instead.
+ */
 export function escalateStep(
   step: WorkstreamStep,
   input: EscalateInput,
@@ -134,15 +167,9 @@ export function escalateStep(
       escalated: false,
     };
   const here = input.profiles.find((p) => p.id === step.profileId);
+  if (here && (score(here, step.score) === null || here.costPerTaskUsd === null))
+    return climbRoleDefaults(step, here, input);
   const hereScore = here ? score(here, step.score) : null;
-  if (here && hereScore === null)
-    return {
-      step: {
-        ...step,
-        reason: `kept ${current} after ${input.why}: its ${step.score} score is no longer measured`,
-      },
-      escalated: false,
-    };
   const level = hereScore ?? step.need;
   const stronger = measured(input.profiles, input.provider, step.score).filter(
     (p) => (score(p, step.score) ?? 0) > level,

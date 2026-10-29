@@ -5,18 +5,11 @@
       "entry": [".claude/hooks/*.mjs", "scripts/**/*.mjs"]
     },
     "apps/daemon": {
-      "entry": ["src/main.ts", "scripts/*.ts", "test/fake-srt.ts"],
+      "entry": ["scripts/*.ts", "test/fake-srt.ts"],
       "ignoreDependencies": ["@anthropic-ai/sandbox-runtime"]
     },
     "apps/desktop": {
-      "entry": [
-        "src/main.tsx",
-        "scripts/*.ts",
-        "e2e/playwright.config.ts",
-        "e2e/prepare.ts",
-        "e2e/vitest.config.ts",
-        "e2e/*.spec.ts"
-      ]
+      "entry": ["scripts/*.ts", "e2e/*.spec.ts"]
     },
     "packages/contracts": {
       "entry": ["scripts/*.ts"]
@@ -26,8 +19,7 @@
       "ignore": ["fixtures/**"]
     }
   },
-  "ignore": ["spikes/**", "scratch/**"],
+  "ignore": ["spikes/**"],
   "ignoreBinaries": ["codex", "mkfifo", "rustc"],
-  "ignoreDependencies": ["@typescript/native"],
   "ignoreExportsUsedInFile": true
 }

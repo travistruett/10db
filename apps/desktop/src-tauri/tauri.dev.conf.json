@@ -1,0 +1,7 @@
+{
+  "productName": "10db Dev",
+  "identifier": "app.10db.desktop.dev",
+  "build": {
+    "beforeDevCommand": ""
+  }
+}
