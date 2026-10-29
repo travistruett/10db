@@ -23,7 +23,7 @@ function serve(...overrides: (RequestHandler | WebSocketHandler)[]): void {
   server.use(...overrides);
 }
 
-function type(label: string, value: string, scope: HTMLElement): void {
+function type(label: string | RegExp, value: string, scope: HTMLElement): void {
   fireEvent.change(within(scope).getByLabelText(label), { target: { value } });
 }
 
@@ -536,8 +536,12 @@ describe('BoardView', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'New Task' }));
     const dialog = await screen.findByRole('dialog', { name: 'New Task' });
     type('Title', 'Beta', dialog);
-    type('Acceptance criteria', 'It works\n\nIt is tested\n', dialog);
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Create Task' }));
+    type(/^Acceptance criteria/, 'It works\n\nIt is tested\n', dialog);
+    const create = within(dialog).getByRole('button', { name: 'Create Task' });
+    // The button is in the modal's footer, outside the form, and submits it by id.
+    expect(create.closest('form')).toBeNull();
+    expect(create.getAttribute('form')).toBe(dialog.querySelector('form')?.id);
+    fireEvent.click(create);
 
     await waitFor(() => {
       expect(posted).toHaveLength(1);

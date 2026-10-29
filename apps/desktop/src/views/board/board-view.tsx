@@ -38,6 +38,8 @@ import { TaskCardMenu } from './task-card-menu';
 import { columnNameOf, TaskDrawer } from './task-drawer';
 import { useBoardActions } from './use-board-actions';
 
+const NEW_TASK_FORM_ID = 'new-task-form';
+
 /** A finished workstream isn't repeated on its card; the task's column already says so. */
 const SHOWN_STATES: readonly WorkstreamState[] = Object.values(WorkstreamState).filter(
   (s) => s !== WorkstreamState.Done && s !== WorkstreamState.Cancelled,
@@ -250,6 +252,10 @@ export function BoardView() {
   const navigate = useNavigate();
   const [projectOpen, projectModal] = useDisclosure(false);
   const [taskOpen, taskModal] = useDisclosure(false);
+  const [taskStatus, setTaskStatus] = useState<{ pending: boolean; error: string | null }>({
+    pending: false,
+    error: null,
+  });
   const [sheetOpen, sheet] = useDisclosure(false);
 
   const taskList = tasks.data ?? [];
@@ -371,9 +377,26 @@ export function BoardView() {
         <BatchSheet key={project.id} project={project} opened={sheetOpen} onClose={sheet.close} />
       ) : null}
       {project ? (
-        <FormModal opened={taskOpen} onClose={taskModal.close} title="New Task" actions={null}>
+        <FormModal
+          opened={taskOpen}
+          onClose={taskModal.close}
+          title="New Task"
+          error={taskStatus.error}
+          actions={
+            <>
+              <Button variant="default" onClick={taskModal.close}>
+                Cancel
+              </Button>
+              <Button type="submit" form={NEW_TASK_FORM_ID} loading={taskStatus.pending}>
+                Create Task
+              </Button>
+            </>
+          }
+        >
           <NewTaskForm
             key={project.id}
+            formId={NEW_TASK_FORM_ID}
+            onStatus={setTaskStatus}
             project={project}
             tasks={taskList}
             onCreated={taskModal.close}
