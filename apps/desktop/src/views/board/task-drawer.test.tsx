@@ -3,7 +3,7 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, renderWithDaemon, server } from '../../test/daemon';
-import { flowDto, taskDto, workstreamDto } from '../../test/fixtures';
+import { batchDto, flowDto, taskDto, workstreamDto } from '../../test/fixtures';
 import { RISK_LABEL } from './risk-labels';
 import { TaskDrawer } from './task-drawer';
 
@@ -20,6 +20,8 @@ function serve(...overrides: Parameters<typeof server.use>) {
 interface Opts {
   readonly task?: Parameters<typeof taskDto>[0];
   readonly workstream?: ReturnType<typeof workstreamDto>;
+  readonly batch?: ReturnType<typeof batchDto>;
+  readonly gateCommand?: string;
 }
 
 function open(opts: Opts = {}): { closed: () => number } {
@@ -30,6 +32,8 @@ function open(opts: Opts = {}): { closed: () => number } {
       columnName="Ready"
       peers={peers}
       {...(opts.workstream ? { workstream: opts.workstream } : {})}
+      {...(opts.batch ? { batch: opts.batch } : {})}
+      {...(opts.gateCommand ? { gateCommand: opts.gateCommand } : {})}
       onClose={() => {
         closes += 1;
       }}
@@ -217,6 +221,50 @@ describe('TaskDrawer', () => {
       [RiskTag.Auth]: 'Sign-in and permissions',
       [RiskTag.Migration]: 'Database migration',
       [RiskTag.Dependency]: 'Dependencies',
+    });
+  });
+
+  describe('delivery', () => {
+    it('shows the branch, the pull request and Abandon with what Abandon does', async () => {
+      serve();
+      const batch = batchDto({ prUrl: 'https://github.com/acme/widgets/pull/9' });
+      open({ workstream: workstreamDto({ batchId: batch.id }), batch });
+      const d = await dialog();
+      expect(within(d).getByText('10db/greetings-0a1b2c3d')).toBeTruthy();
+      expect(within(d).getByRole('link', { name: 'Pull request' }).getAttribute('href')).toBe(
+        'https://github.com/acme/widgets/pull/9',
+      );
+      expect(within(d).getByRole('button', { name: 'Abandon' })).toBeTruthy();
+      expect(
+        within(d).getByText("Abandon keeps the branch and cancels this task's run."),
+      ).toBeTruthy();
+    });
+
+    it('says why a ship failed, links the gate log and offers Retry', async () => {
+      serve();
+      const batch = batchDto({
+        state: 'FAILED',
+        failure: 'gate_failed',
+        gateExitCode: 1,
+        gateLogPath: '/data/logs/gate/b.log',
+      });
+      open({
+        workstream: workstreamDto({ state: 'DONE', batchId: batch.id }),
+        batch,
+        gateCommand: 'make gate',
+      });
+      const d = await dialog();
+      expect(within(d).getByText('Not shipped: the gate failed')).toBeTruthy();
+      expect(within(d).getByText('make gate exited with code 1')).toBeTruthy();
+      expect(within(d).getByRole('link', { name: 'Gate log' })).toBeTruthy();
+      expect(within(d).getByRole('button', { name: 'Retry' })).toBeTruthy();
+    });
+
+    it('shows no delivery section for a task with no batch', async () => {
+      serve();
+      open({ workstream: workstreamDto() });
+      const d = await dialog();
+      expect(within(d).queryByRole('button', { name: 'Abandon' })).toBeNull();
     });
   });
 

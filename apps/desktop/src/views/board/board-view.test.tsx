@@ -8,6 +8,7 @@ import {
   boardColumnDto,
   projectDto,
   projectViewDto,
+  stepDto,
   taskDto,
   workstreamDto,
 } from '../../test/fixtures';
@@ -27,32 +28,144 @@ function type(label: string | RegExp, value: string, scope: HTMLElement): void {
 }
 
 describe('BoardView', () => {
-  it("shows the project's batch and retries a failed one", async () => {
-    const batch = batchDto({ state: 'FAILED', failure: 'push_rejected' });
+  it('says a failed ship once, on the card, and retries it from the drawer', async () => {
+    const batch = batchDto({
+      state: 'FAILED',
+      failure: 'gate_failed',
+      gateExitCode: 2,
+      gateLogPath: '/data/logs/gate/b.log',
+    });
     const project = projectViewDto({
       id: batch.projectId,
       delivery: 'pull_request',
       prTitlePrefix: 'feat(app)',
+      gateCommand: 'make gate',
       currentBatch: batch,
+    });
+    const ws = workstreamDto({
+      projectId: project.id,
+      batchId: batch.id,
+      taskTitle: 'Alpha',
+      state: 'DONE',
+    });
+    const alpha = taskDto({
+      id: ws.taskId,
+      projectId: project.id,
+      title: 'Alpha',
+      boardStatus: 'in_progress',
+      workstreamId: ws.id,
     });
     const shipped: string[] = [];
     serve(
       http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
-      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([alpha])),
+      http.get(daemonUrl('/projects/:projectId/batches'), () => HttpResponse.json([batch])),
+      http.get(daemonUrl('/workstreams'), () => HttpResponse.json([ws])),
       http.post(daemonUrl('/batches/:batchId/ship'), ({ params }) => {
         shipped.push(String(params['batchId']));
         return HttpResponse.json({ ...batch, state: 'SHIPPING', failure: null });
       }),
     );
     renderApp('/board');
-    expect(await screen.findByText('git push was rejected')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+
+    expect(await screen.findByText('Not shipped: the gate failed')).toBeTruthy();
+    // The failure is on the card alone: no strip, no NOT SHIPPED panel, no Retry until the drawer opens.
+    expect(screen.queryByTestId('board-above-columns')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Batches (1)' })).toBeNull();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Alpha' }));
+    const drawer = await screen.findByRole('dialog', { name: 'Task' });
+    expect(within(drawer).getByText('make gate exited with code 2')).toBeTruthy();
+    expect(within(drawer).getByRole('link', { name: 'Gate log' })).toBeTruthy();
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Retry' }));
     await waitFor(() => {
       expect(shipped).toEqual([batch.id]);
     });
   });
 
-  it('shows one strip per open batch in worktree mode, keeps the columns usable, and does not repeat them in history', async () => {
+  it('shows nothing above the columns for one running task', async () => {
+    const batch = batchDto();
+    const project = projectViewDto({
+      id: batch.projectId,
+      delivery: 'pull_request',
+      prTitlePrefix: 'feat(app)',
+      currentBatch: batch,
+    });
+    const ws = workstreamDto({
+      projectId: project.id,
+      batchId: batch.id,
+      taskTitle: 'Alpha',
+      state: 'RUNNING',
+      steps: [stepDto(), stepDto()],
+    });
+    const alpha = taskDto({
+      id: ws.taskId,
+      projectId: project.id,
+      title: 'Alpha',
+      boardStatus: 'in_progress',
+      workstreamId: ws.id,
+    });
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([alpha])),
+      http.get(daemonUrl('/projects/:projectId/batches'), () => HttpResponse.json([batch])),
+      http.get(daemonUrl('/workstreams'), () => HttpResponse.json([ws])),
+    );
+    renderApp('/board');
+
+    expect(await screen.findAllByText('Building · step 1 of 2')).toHaveLength(1);
+    expect(screen.queryByTestId('board-above-columns')).toBeNull();
+    expect(screen.queryByText(batch.branch ?? '')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Abandon' })).toBeNull();
+    expect(screen.queryByText('Running')).toBeNull();
+    expect(screen.queryByText('OPEN')).toBeNull();
+  });
+
+  it('shows one line above the columns when several tasks share a branch', async () => {
+    const batch = batchDto();
+    const project = projectViewDto({
+      id: batch.projectId,
+      delivery: 'pull_request',
+      prTitlePrefix: 'feat(app)',
+      currentBatch: batch,
+    });
+    const wss = ['Alpha', 'Beta'].map((taskTitle) =>
+      workstreamDto({ projectId: project.id, batchId: batch.id, taskTitle, state: 'RUNNING' }),
+    );
+    const tasks = wss.map((ws) =>
+      taskDto({
+        id: ws.taskId,
+        projectId: project.id,
+        title: ws.taskTitle,
+        boardStatus: 'in_progress',
+        workstreamId: ws.id,
+      }),
+    );
+    const abandoned: string[] = [];
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json(tasks)),
+      http.get(daemonUrl('/projects/:projectId/batches'), () => HttpResponse.json([batch])),
+      http.get(daemonUrl('/workstreams'), () => HttpResponse.json(wss)),
+      http.post(daemonUrl('/batches/:batchId/abandon'), ({ params }) => {
+        abandoned.push(String(params['batchId']));
+        return HttpResponse.json({ ...batch, state: 'ABANDONED' });
+      }),
+    );
+    renderApp('/board');
+
+    const above = await screen.findByTestId('board-above-columns');
+    expect(within(above).getByText('10db/greetings-0a1b2c3d')).toBeTruthy();
+    expect(within(above).getByText('2 tasks')).toBeTruthy();
+    expect(within(above).queryByText('Alpha')).toBeNull();
+    fireEvent.click(within(above).getByRole('button', { name: 'Abandon' }));
+    await waitFor(() => {
+      expect(abandoned).toEqual([batch.id]);
+    });
+  });
+
+  it('shows no strip for open batches of one task each in worktree mode, and no batch history', async () => {
     const first = batchDto({ title: 'First', worktreePath: '/wt/first' });
     const batches = [first, 'Second', 'Third'].map((b) =>
       typeof b === 'string'
@@ -77,56 +190,11 @@ describe('BoardView', () => {
     );
     renderApp('/board');
 
-    const above = await screen.findByTestId('board-above-columns');
-    expect(above.style.maxHeight).toBe('33%');
-    expect(
-      within(above)
-        .getAllByText(/^(First|Second|Third)$/)
-        .map((e) => e.textContent),
-    ).toEqual(['First', 'Second', 'Third']);
     const columns = await screen.findByTestId('board-columns');
     expect(columns.style.minHeight).toContain('20rem');
-    expect(above.contains(columns)).toBe(false);
-
-    const toggle = await screen.findByRole('button', { name: 'Batches (1)' });
-    expect(toggle.getAttribute('aria-expanded')).toBe('false');
-    fireEvent.click(toggle);
-    const list = await screen.findByRole('list', { name: 'Batches' });
-    expect(
-      within(list)
-        .getAllByRole('listitem')
-        .map((i) => i.getAttribute('aria-label')),
-    ).toEqual(['Done one']);
-  });
-
-  it("keeps a shipped batch's pull request reachable once the next batch starts", async () => {
-    const url = 'https://github.com/acme/widgets/pull/1';
-    const shipped = batchDto({ title: 'Alpha first', state: 'SHIPPED', prUrl: url });
-    const current = batchDto({
-      projectId: shipped.projectId,
-      title: 'Beta second',
-      state: 'OPEN',
-      branch: '10db/beta-second',
-    });
-    const project = projectViewDto({
-      id: shipped.projectId,
-      delivery: 'pull_request',
-      prTitlePrefix: 'feat(app)',
-      currentBatch: current,
-    });
-    serve(
-      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
-      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([])),
-      http.get(daemonUrl('/projects/:projectId/batches'), () =>
-        HttpResponse.json([current, shipped]),
-      ),
-    );
-    renderApp('/board');
-
-    fireEvent.click(await screen.findByRole('button', { name: 'Batches (1)' }));
-    const list = await screen.findByRole('list', { name: 'Batches' });
-    expect(within(list).getByText('Alpha first')).toBeTruthy();
-    expect(within(list).getByRole('link', { name: 'Pull request' }).getAttribute('href')).toBe(url);
+    expect(screen.queryByTestId('board-above-columns')).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Batches/ })).toBeNull();
+    expect(screen.queryByText('Done one')).toBeNull();
   });
 
   it.each([
@@ -253,7 +321,7 @@ describe('BoardView', () => {
   });
 
   it.each([
-    ['RUNNING', 'Running', 'in_progress', false],
+    ['RUNNING', 'Building', 'in_progress', false],
     ['DONE', 'Done', 'ready', false],
     ['FAILED', 'Failed', 'blocked', false],
     ['CANCELLED', 'Cancelled', 'ready', true],
@@ -437,7 +505,7 @@ describe('BoardView', () => {
     const inProgress = screen.getByRole('list', { name: 'In progress tasks' });
     expect(
       await within(within(inProgress).getByRole('listitem', { name: 'Base' })).findByText(
-        'Running',
+        'Building',
       ),
     ).toBeTruthy();
     const nextCard = within(screen.getByRole('list', { name: 'Backlog tasks' })).getByRole(
@@ -1043,6 +1111,71 @@ describe('BoardView', () => {
     expect(describedBy('Running')).toBe(
       'Areas: src. 1 criterion. | In progress cards follow their workstream; they can’t be dragged',
     );
+  });
+
+  it('the card menu retries a failed task and abandons its batch', async () => {
+    const batch = batchDto();
+    const project = projectViewDto({
+      id: batch.projectId,
+      delivery: 'pull_request',
+      prTitlePrefix: 'feat(app)',
+      currentBatch: batch,
+    });
+    const failed = workstreamDto({
+      projectId: project.id,
+      batchId: batch.id,
+      taskTitle: 'Broken',
+      state: 'FAILED',
+    });
+    const fine = workstreamDto({
+      projectId: project.id,
+      batchId: null,
+      taskTitle: 'Fine',
+      state: 'DONE',
+    });
+    const tasks = [failed, fine].map((ws) =>
+      taskDto({
+        id: ws.taskId,
+        projectId: project.id,
+        title: ws.taskTitle,
+        boardStatus: 'blocked',
+        workstreamId: ws.id,
+      }),
+    );
+    const retried: string[] = [];
+    const abandoned: string[] = [];
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json(tasks)),
+      http.get(daemonUrl('/projects/:projectId/batches'), () => HttpResponse.json([batch])),
+      http.get(daemonUrl('/workstreams'), () => HttpResponse.json([failed, fine])),
+      http.post(daemonUrl('/workstreams/:id/retry'), ({ params }) => {
+        retried.push(String(params['id']));
+        return HttpResponse.json({ ...failed, state: 'QUEUED' });
+      }),
+      http.post(daemonUrl('/batches/:batchId/abandon'), ({ params }) => {
+        abandoned.push(String(params['batchId']));
+        return HttpResponse.json({ ...batch, state: 'ABANDONED' });
+      }),
+    );
+    renderApp('/board');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Actions for Fine' }));
+    await screen.findByRole('menu', { hidden: true });
+    expect(screen.queryByRole('menuitem', { name: 'Retry', hidden: true })).toBeNull();
+    expect(screen.queryByRole('menuitem', { name: 'Abandon', hidden: true })).toBeNull();
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for Broken' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Retry', hidden: true }));
+    await waitFor(() => {
+      expect(retried).toEqual([failed.id]);
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for Broken' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Abandon', hidden: true }));
+    await waitFor(() => {
+      expect(abandoned).toEqual([batch.id]);
+    });
   });
 
   it('the card menu opens with its items', async () => {

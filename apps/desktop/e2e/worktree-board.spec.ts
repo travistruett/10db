@@ -129,44 +129,22 @@ async function overflowOfMinimum(page: Page): Promise<number> {
 }
 
 function columnHeader(page: Page) {
-  return page.getByTestId('board-columns').getByText('Running', { exact: true }).first();
+  return page.getByTestId('board-columns').getByText('In progress', { exact: true }).first();
 }
 
 async function expectColumnsUsable(page: Page): Promise<void> {
-  const columns = page.getByTestId('board-columns');
-  const above = page.getByTestId('board-above-columns');
-  await expect(columns).toBeVisible();
-  await expect(above).toBeVisible();
-
-  const viewport = page.viewportSize();
-  expect(viewport).not.toBeNull();
-  if (!viewport) return;
+  await expect(page.getByTestId('board-columns')).toBeVisible();
 
   // The columns are laid out.
   await expect(page.getByRole('list', { name: 'Ready tasks' })).toBeAttached();
   expect((await boxOf(page, 'board-columns')).height).toBeGreaterThanOrEqual(COLUMNS_MIN_HEIGHT);
 
-  // The strips and history take at most a third of the board, with a little rounding room.
-  const boardBox = await above.locator('..').boundingBox();
-  expect(boardBox).not.toBeNull();
-  if (!boardBox) return;
-  expect((await boxOf(page, 'board-above-columns')).height).toBeLessThanOrEqual(
-    boardBox.height / 3 + 1,
-  );
-
-  // Every strip is reachable: scrolling the region brings each title into view.
+  // One task per batch: no strip above the columns, and the batch history is Factory's, not the Board's.
+  await expect(page.getByTestId('board-above-columns')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /^Batches \(\d+\)$/ })).toHaveCount(0);
   for (const { title } of OPEN_BATCHES) {
-    const strip = above.getByText(title, { exact: true });
-    await strip.scrollIntoViewIfNeeded();
-    await expect(strip).toBeInViewport();
+    await expect(page.getByRole('listitem', { name: title })).toBeAttached();
   }
-
-  // The history is collapsed until asked for.
-  const history = above.getByRole('button', { name: /^Batches \(\d+\)$/ });
-  await history.scrollIntoViewIfNeeded();
-  await expect(history).toHaveText('Batches (1)');
-  await expect(history).toHaveAttribute('aria-expanded', 'false');
-  await expect(above.getByRole('list', { name: 'Batches' })).toBeHidden();
 }
 
 /** The page can be scrolled until the columns' bottom edge is on screen. */

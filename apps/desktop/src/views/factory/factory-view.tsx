@@ -13,7 +13,14 @@ import {
   VisuallyHidden,
 } from '@mantine/core';
 import { useState } from 'react';
-import { useCancelWorkstream, useRetryWorkstream, useWorkstreams } from '../../daemon/queries';
+import {
+  useBatches,
+  useCancelWorkstream,
+  useRetryWorkstream,
+  useWorkstreams,
+} from '../../daemon/queries';
+import { useSelectedProject } from '../../shell/selected-project';
+import { BatchHistory } from './batch-history';
 import { BenchmarkSyncNote } from './benchmark-sync-note';
 import { ContextGauge } from './context-gauge';
 import { RelativeTime } from './relative-time';
@@ -27,6 +34,9 @@ export function FactoryView() {
   const cancel = useCancelWorkstream();
   const retry = useRetryWorkstream();
   const [confirming, setConfirming] = useState<WorkstreamId | null>(null);
+  const { project } = useSelectedProject();
+  const batches = useBatches(project?.id ?? null);
+  const batchList = batches.data ?? [];
   const rows = workstreams.data ?? [];
   const confirmingRow = rows.find((ws) => ws.id === confirming);
 
@@ -135,6 +145,13 @@ export function FactoryView() {
           </Table.Tbody>
         </Table>
       ) : null}
+
+      {batches.isError ? (
+        <Alert color="red" title="Couldn't load the batches">
+          {batches.error.message}
+        </Alert>
+      ) : null}
+      {batchList.length > 0 ? <BatchHistory batches={batchList} /> : null}
 
       <Modal
         opened={confirming !== null}

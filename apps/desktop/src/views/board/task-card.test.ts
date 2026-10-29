@@ -1,29 +1,39 @@
-import { mintId } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
-import { taskDto, workstreamDto } from '../../test/fixtures';
+import { batchDto, taskDto, workstreamDto } from '../../test/fixtures';
 import { cardSummary } from './task-card';
 
 describe('cardSummary', () => {
   it.each([
-    { name: 'a running workstream', state: 'RUNNING', said: 'Workstream Running.' },
+    { name: 'a running workstream', state: 'RUNNING', said: 'Building.' },
     {
       name: 'a workstream waiting for a human',
       state: 'WAITING_HUMAN',
-      said: 'Workstream Waiting on you.',
+      said: 'Waiting on you: answer in Inbox.',
     },
-  ] as const)('speaks $name with the label the badge shows', ({ state, said }) => {
+  ] as const)('speaks $name with the line the card shows', ({ state, said }) => {
     const summary = cardSummary(taskDto(), workstreamDto({ state }), new Map());
     expect(summary).toContain(said);
     expect(summary).not.toContain(state);
   });
 
-  it('says a finished task with no gate is ready for the builder to check', () => {
-    const inboxId = mintId('InboxItem');
+  it('names the gate command while the task is checked', () => {
     const summary = cardSummary(
       taskDto(),
-      workstreamDto({ state: 'WAITING_HUMAN', nextAction: { kind: 'builder_review', inboxId } }),
+      workstreamDto({ state: 'VERIFYING' }),
       new Map(),
+      undefined,
+      'make gate',
     );
-    expect(summary).toContain('Ready for you to check.');
+    expect(summary).toContain('Checking: make gate.');
+  });
+
+  it('says finished work whose ship failed is not shipped', () => {
+    const summary = cardSummary(
+      taskDto(),
+      workstreamDto({ state: 'DONE' }),
+      new Map(),
+      batchDto({ state: 'FAILED', failure: 'gate_failed' }),
+    );
+    expect(summary).toContain('Not shipped: the gate failed.');
   });
 });

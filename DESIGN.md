@@ -26,6 +26,11 @@ favors legibility and calm over decoration.
   up. A card that can't move (In progress, Blocked, Done) says why in a tooltip. The card's actions menu
   sits in its corner and keeps its own clicks and keys. Human columns sit left of the system columns;
   columns scroll horizontally on narrow windows.
+- **Card state:** a card says its task's state once, in one plain line with a dot, such as
+  "Checking: make gate" or "Failed: the gate failed". The card's border and the dot take the status color
+  (blue running, yellow waiting on you, orange paused, red failed); queued keeps the plain border. No
+  fill, no left stripe, no pulsing. A card waiting on the builder is the most prominent: a full 2 px
+  yellow border and "Waiting on you: answer in Inbox".
 - **Radius:** `md` everywhere.
 - **Motion:** short eases, 150–200 ms, of opacity, color or shadow, for what appears as a side effect
   (an edge fade, a hint, a scroll shadow) and for drag feedback (the column a card would land in).

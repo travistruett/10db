@@ -1,4 +1,5 @@
 import {
+  BatchState,
   BoardStatus,
   TaskStatus,
   WorkspaceMode,
@@ -17,14 +18,21 @@ import { useDisclosure } from '@mantine/hooks';
 import { IconColumns, IconPlayerPlay, IconPlus } from '@tabler/icons-react';
 import { useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
-import { useBatches, useBoardColumns, useTasks, useWorkstreams } from '../../daemon/queries';
+import {
+  useAbandonBatch,
+  useBatches,
+  useBoardColumns,
+  useRetryWorkstream,
+  useTasks,
+  useWorkstreams,
+} from '../../daemon/queries';
+import { canRetry } from '../factory/workstream-state';
 import { FormModal } from '../../shell/form-modal';
 import { useSelectedProject } from '../../shell/selected-project';
 import { SplitButton } from '../../shell/split-button';
 import { SettingsSectionKey } from '../settings/sections';
 import { BatchSheet } from './batch/batch-sheet';
-import { BatchHistory } from './batch-history';
-import { BatchStrip } from './batch-strip';
+import { BatchStrip, sharedBatches } from './batch-strip';
 import { BoardColumn } from './board-column';
 import { BoardScroll } from './board-scroll';
 import { columnHint } from './column-hints';
@@ -42,13 +50,28 @@ const NEW_TASK_FORM_ID = 'new-task-form';
 
 /** The columns never shrink below this, however many strips sit above them. */
 const COLUMNS_MIN_HEIGHT = 320;
-/** The strips and history together take at most this share of the board's height. */
+/** The strips together take at most this share of the board's height. */
 const ABOVE_COLUMNS_MAX_HEIGHT = '33%';
 
 /** A finished workstream isn't repeated on its card; the task's column already says so. */
 const SHOWN_STATES: readonly WorkstreamState[] = Object.values(WorkstreamState).filter(
   (s) => s !== WorkstreamState.Done && s !== WorkstreamState.Cancelled,
 );
+
+/** Finished work still shows its card line while its batch is being shipped or was not shipped. */
+const UNSHIPPED_BATCH_STATES: readonly BatchState[] = [BatchState.Shipping, BatchState.Failed];
+
+/** The workstream a card says something about: a live or failed one, or finished work that is not shipped. */
+function cardWorkstream(
+  ws: WorkstreamDto | undefined,
+  batch: BatchDto | undefined,
+): WorkstreamDto | undefined {
+  if (!ws) return undefined;
+  if (SHOWN_STATES.includes(ws.state)) return ws;
+  return ws.state === WorkstreamState.Done && batch && UNSHIPPED_BATCH_STATES.includes(batch.state)
+    ? ws
+    : undefined;
+}
 
 /** The first unfinished dependency that sits in a human column, if any. */
 function parkedDependencyOf(
@@ -83,6 +106,9 @@ interface BoardColumnsProps {
   readonly layout: readonly LayoutColumn[];
   readonly workstreamById: ReadonlyMap<WorkstreamId, WorkstreamDto>;
   readonly batchById: ReadonlyMap<BatchId, BatchDto>;
+  /** Every workstream, for the drawer's batch actions. */
+  readonly workstreams: readonly WorkstreamDto[];
+  readonly project: ProjectViewDto;
   readonly peers: ReadonlyMap<TaskId, Pick<TaskDto, 'title' | 'status' | 'boardColumnId'>>;
   /** For each task, a dependent that has started and waits on it; such a task can't be parked. */
   readonly started: ReadonlyMap<TaskId, string>;
@@ -96,11 +122,15 @@ function BoardColumns({
   layout,
   workstreamById,
   batchById,
+  workstreams,
+  project,
   peers,
   started,
   onAddTask,
 }: BoardColumnsProps) {
   const actions = useBoardActions(projectId);
+  const retry = useRetryWorkstream();
+  const abandon = useAbandonBatch();
   const [showAllDone, setShowAllDone] = useState(false);
   // The task whose details are open, by ID, so the drawer follows the task as the board refetches.
   const [openId, setOpenId] = useState<TaskId | null>(null);
@@ -108,6 +138,9 @@ function BoardColumns({
   const openWorkstream = openTask?.workstreamId
     ? workstreamById.get(openTask.workstreamId)
     : undefined;
+  const openBatch = openWorkstream?.batchId ? batchById.get(openWorkstream.batchId) : undefined;
+  const batchOf = (ws: WorkstreamDto | undefined) =>
+    ws?.batchId ? batchById.get(ws.batchId) : undefined;
   const humanColumns = new Map(
     layout.flatMap((c) => (c.key.kind === 'human' ? [[c.key.id, c.label] as const] : [])),
   );
@@ -128,6 +161,16 @@ function BoardColumns({
       {actions.failure ? (
         <Alert color="red" title={actions.failure.title}>
           {actions.failure.error.message}
+        </Alert>
+      ) : null}
+      {retry.error ? (
+        <Alert color="red" title="Couldn't retry the task">
+          {retry.error.message}
+        </Alert>
+      ) : null}
+      {abandon.error ? (
+        <Alert color="red" title="Couldn't abandon the batch">
+          {abandon.error.message}
         </Alert>
       ) : null}
       <BoardScroll>
@@ -177,10 +220,13 @@ function BoardColumns({
           )}
           renderCard={(task) => {
             const ws = task.workstreamId ? workstreamById.get(task.workstreamId) : undefined;
+            const batch = batchOf(ws);
             return (
               <TaskCard
                 task={task}
-                workstream={ws && SHOWN_STATES.includes(ws.state) ? ws : undefined}
+                workstream={cardWorkstream(ws, batch)}
+                batch={batch}
+                gateCommand={project.gateCommand}
                 pullRequest={shippedPullRequest(task, ws, batchById)}
                 peers={peers}
               />
@@ -196,14 +242,35 @@ function BoardColumns({
           }}
           summary={(task) => {
             const ws = task.workstreamId ? workstreamById.get(task.workstreamId) : undefined;
-            return cardSummary(task, ws && SHOWN_STATES.includes(ws.state) ? ws : undefined, peers);
+            const batch = batchOf(ws);
+            return cardSummary(task, cardWorkstream(ws, batch), peers, batch, project.gateCommand);
           }}
           renderMenu={(task) => {
             const ws = task.workstreamId ? workstreamById.get(task.workstreamId) : undefined;
+            const batch = batchOf(ws);
+            const canAbandon =
+              batch !== undefined &&
+              (batch.state === BatchState.Open || batch.state === BatchState.Failed);
             return (
               <TaskCardMenu
                 task={task}
                 latest={ws?.state}
+                {...(ws && canRetry(ws.state)
+                  ? {
+                      onRetry: () => {
+                        abandon.reset();
+                        retry.mutate(ws.id);
+                      },
+                    }
+                  : {})}
+                {...(batch && canAbandon
+                  ? {
+                      onAbandon: () => {
+                        retry.reset();
+                        abandon.mutate(batch.id);
+                      },
+                    }
+                  : {})}
                 parkedDependency={parkedDependencyOf(task, peers)}
                 moves={menuMoves(layout, task.id, started)}
                 onMove={(target) => {
@@ -224,6 +291,10 @@ function BoardColumns({
           columnName={columnNameOf(openTask, humanColumns)}
           peers={peers}
           {...(openWorkstream ? { workstream: openWorkstream } : {})}
+          {...(openBatch ? { batch: openBatch } : {})}
+          workstreams={workstreams}
+          workspaceMode={project.workspaceMode}
+          gateCommand={project.gateCommand}
           onClose={() => {
             setOpenId(null);
           }}
@@ -239,23 +310,6 @@ function stripBatches(project: ProjectViewDto): readonly BatchDto[] {
     return project.openBatches;
   }
   return project.currentBatch ? [project.currentBatch] : [];
-}
-
-function BatchStrips({
-  project,
-  workstreams,
-}: {
-  readonly project: ProjectViewDto;
-  readonly workstreams: readonly WorkstreamDto[];
-}) {
-  return stripBatches(project).map((batch) => (
-    <BatchStrip
-      key={batch.id}
-      batch={batch}
-      workstreams={workstreams}
-      workspaceMode={project.workspaceMode}
-    />
-  ));
 }
 
 export function BoardView() {
@@ -279,8 +333,8 @@ export function BoardView() {
   const workstreamById = new Map((workstreams.data ?? []).map((ws) => [ws.id, ws]));
   const batchList = batches.data ?? [];
   const batchById = new Map(batchList.map((b) => [b.id, b]));
-  const stripIds = new Set((project ? stripBatches(project) : []).map((b) => b.id));
-  const historyBatches = batchList.filter((b) => !stripIds.has(b.id));
+  // A branch gets a line above the columns only while several tasks share it.
+  const strips = project ? sharedBatches(stripBatches(project), workstreams.data ?? []) : [];
   const peers = new Map(taskList.map((t) => [t.id, t]));
   const started = startedDependents(taskList, workstreamById);
   const readyCount = layout.find(isReady)?.tasks.length ?? 0;
@@ -360,7 +414,7 @@ export function BoardView() {
         </Alert>
       ) : null}
       {projects.isPending ? <Loader size="sm" aria-label="Loading projects" /> : null}
-      {project && (stripIds.size > 0 || historyBatches.length > 0) ? (
+      {strips.length > 0 ? (
         <ScrollArea.Autosize
           mah={ABOVE_COLUMNS_MAX_HEIGHT}
           type="auto"
@@ -368,9 +422,10 @@ export function BoardView() {
           style={{ flexShrink: 0 }}
           data-testid="board-above-columns"
         >
-          <Stack gap="sm">
-            <BatchStrips project={project} workstreams={workstreams.data ?? []} />
-            {historyBatches.length > 0 ? <BatchHistory batches={historyBatches} /> : null}
+          <Stack gap="xs">
+            {strips.map((batch) => (
+              <BatchStrip key={batch.id} batch={batch} workstreams={workstreams.data ?? []} />
+            ))}
           </Stack>
         </ScrollArea.Autosize>
       ) : null}
@@ -378,9 +433,11 @@ export function BoardView() {
       {project && tasks.isSuccess && (columns.data !== undefined || columns.isError) ? (
         <BoardColumns
           projectId={project.id}
+          project={project}
           layout={layout}
           workstreamById={workstreamById}
           batchById={batchById}
+          workstreams={workstreams.data ?? []}
           peers={peers}
           started={started}
           onAddTask={taskModal.open}
