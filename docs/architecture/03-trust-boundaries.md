@@ -542,9 +542,20 @@ Under the lane sandbox (**built**), the design column holds for a lane's Bash:
   - a commit stages with `git add -A` on a private `GIT_INDEX_FILE` seeded from the branch tip (git writes
     nothing through a link and checks every path), refuses a changed gitlink or `.git`-like name, then runs
     `write-tree`, `commit-tree` and `update-ref --no-deref <branch> <new> <old>`. HEAD is never touched;
-  - changes are found with `status --ignore-submodules=all` against a private index seeded from HEAD, so the
-    checkout's own index is never refreshed;
+  - changes are found with `status --ignore-submodules=all` against a private index seeded from HEAD, so
+    finding them never refreshes the checkout's own index. The daemon writes that index in three places
+    only: a commit's `reset` of the paths it committed, so the builder's `git status` agrees, and a base
+    merge's `update-index --refresh` and `read-tree -m -u` (below), all under the hook and fsmonitor config;
   - a batch's new branch is made with `update-ref` and checked out with `read-tree -m -u`, which runs no hook;
+  - before each gate of a worktree batch, its base is merged into its branch (`mergeIntoBranch`,
+    `decisions/2026-10-29-gate-with-base.md`): `merge-tree --write-tree`, which writes objects only and, with no
+    attributes, runs no merge driver; `commit-tree` with the branch as first parent, signed only as the
+    builder's own config says; `read-tree -m -u` from the old tip to the merge, after refusing when an
+    uncommitted, untracked or git-ignored file lies where it would write; then the compare-and-swap `update-ref`.
+    It writes the worktree's files and its own index. A task's start on the merged base is a commit
+    `mergedCommit` keeps at `refs/10db/starts/<workstream id>`, unsigned and never pushed, touching no file,
+    index or branch. A base whose tree asks for a filter is refused, as its push would be. The fetch before it
+    runs one at a time per checkout;
   - a gitlink, a directory that holds `.git`, or a path whose attributes name a filter is refused with a card,
     never committed. The pre-push hook never runs; the shipping gate checks a batch before its push.
 - **10db's own gate passes under it** (measured; `make gate` with loopback on and crates.io's two hosts
