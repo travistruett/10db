@@ -1,9 +1,27 @@
 import { z } from 'zod';
 import { ProjectDto, Title, WorkstreamDto } from './entities';
 import { BatchId, ProjectId, TaskId } from './ids';
-import { BatchFailure, BatchState } from './states';
+import { BatchFailure, BatchState, PullRequestChecks, PullRequestState } from './states';
 
 const Timestamp = z.iso.datetime();
+
+/** One failing check of a pull request; `url` is null when GitHub gave none or not an https one. */
+export const FailingCheckDto = z.object({
+  name: z.string(),
+  url: z.string().nullable(),
+});
+export type FailingCheckDto = z.infer<typeof FailingCheckDto>;
+
+/** What the daemon last read of a shipped batch's pull request. */
+export const PullRequestStatusDto = z.object({
+  state: z.enum(PullRequestState),
+  checks: z.enum(PullRequestChecks),
+  failingChecks: z.array(FailingCheckDto),
+  checkedAt: Timestamp,
+  /** Why the state is `unknown`; null otherwise. */
+  unknownReason: z.string().nullable(),
+});
+export type PullRequestStatusDto = z.infer<typeof PullRequestStatusDto>;
 
 /** One batch: one branch and one pull request (batch delivery spec §3). */
 export const BatchDto = z.object({
@@ -19,6 +37,8 @@ export const BatchDto = z.object({
   /** The GitHub `owner/name`, recorded when the branch is cut. */
   repo: z.string().nullable(),
   prUrl: z.string().nullable(),
+  /** The pull request's last read state; null until the daemon has read it (or there is no pull request). */
+  pr: PullRequestStatusDto.nullable().default(null),
   gateExitCode: z.int().nullable(),
   gateLogPath: z.string().nullable(),
   failure: z.enum(BatchFailure).nullable(),
