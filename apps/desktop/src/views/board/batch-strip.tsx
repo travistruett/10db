@@ -72,8 +72,30 @@ export function BatchStrip({
     abandon.mutate(batch.id);
   };
 
+  const compact = workspaceMode === WorkspaceMode.Worktree;
+  const copyWorktree = batch.worktreePath ? (
+    <CopyButton value={batch.worktreePath}>
+      {({ copied, copy }) => (
+        <Tooltip
+          label={copied ? 'Copied' : `Copy worktree path: ${batch.worktreePath ?? ''}`}
+          withArrow
+        >
+          <ActionIcon
+            size="sm"
+            variant="subtle"
+            color={copied ? 'teal' : 'gray'}
+            aria-label="Copy worktree path"
+            onClick={copy}
+          >
+            {copied ? <IconCheck size={16} stroke={1.5} /> : <IconCopy size={16} stroke={1.5} />}
+          </ActionIcon>
+        </Tooltip>
+      )}
+    </CopyButton>
+  ) : null;
+
   return (
-    <Paper withBorder p="sm">
+    <Paper withBorder p={compact ? 'xs' : 'sm'}>
       <Stack gap="xs">
         <Group gap="sm" wrap="wrap">
           <Text fw={600}>{batch.title}</Text>
@@ -82,29 +104,17 @@ export function BatchStrip({
           </Badge>
           {batch.branch ? <Code>{batch.branch}</Code> : null}
           {batch.prUrl ? <PullRequestLink url={batch.prUrl} /> : null}
+          {compact ? copyWorktree : null}
+          {compact && blocking.length > 0 ? (
+            <Text size="xs" c="dimmed">
+              {`${String(blocking.length)} unsettled`}
+            </Text>
+          ) : null}
         </Group>
-        {batch.worktreePath ? (
+        {batch.worktreePath && !compact ? (
           <Group gap="xs" wrap="nowrap">
             <Code style={{ wordBreak: 'break-all' }}>{batch.worktreePath}</Code>
-            <CopyButton value={batch.worktreePath}>
-              {({ copied, copy }) => (
-                <Tooltip label={copied ? 'Copied' : 'Copy worktree path'} withArrow>
-                  <ActionIcon
-                    size="sm"
-                    variant="subtle"
-                    color={copied ? 'teal' : 'gray'}
-                    aria-label="Copy worktree path"
-                    onClick={copy}
-                  >
-                    {copied ? (
-                      <IconCheck size={16} stroke={1.5} />
-                    ) : (
-                      <IconCopy size={16} stroke={1.5} />
-                    )}
-                  </ActionIcon>
-                </Tooltip>
-              )}
-            </CopyButton>
+            {copyWorktree}
           </Group>
         ) : null}
         {batch.failure ? (
@@ -112,7 +122,7 @@ export function BatchStrip({
             {FAILURE_LABELS[batch.failure]}
           </Text>
         ) : null}
-        {blocking.length > 0 ? (
+        {blocking.length > 0 && !compact ? (
           <Stack gap={4}>
             {blocking.map((w) => (
               <Group key={w.id} gap="xs">

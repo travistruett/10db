@@ -1,17 +1,33 @@
 import type { BatchDto } from '@10db/contracts';
-import { Badge, Code, Group, Paper, Stack, Text } from '@mantine/core';
+import { Badge, Button, Code, Collapse, Group, Paper, Stack, Text } from '@mantine/core';
+import { useDisclosure } from '@mantine/hooks';
+import { IconChevronDown, IconChevronRight } from '@tabler/icons-react';
 import { BATCH_COLORS, BATCH_LABELS } from './batch-labels';
 import { PullRequestLink } from './pull-request-link';
 
-/** Every batch of the project, newest first, so a shipped batch's pull request stays one click away. */
+/** Batches with no strip of their own, newest first, so a shipped batch's pull request stays one click away. Collapsed until opened. */
 export function BatchHistory({ batches }: { readonly batches: readonly BatchDto[] }) {
+  const [opened, { toggle }] = useDisclosure(false);
   return (
-    <Paper withBorder p="sm">
-      <Stack gap="xs">
-        <Text size="sm" fw={600}>
-          Batches
-        </Text>
-        <Stack gap={4} role="list" aria-label="Batches">
+    <Paper withBorder px="sm" py={4}>
+      <Button
+        variant="subtle"
+        color="gray"
+        size="compact-sm"
+        aria-expanded={opened}
+        leftSection={
+          opened ? (
+            <IconChevronDown size={16} stroke={1.5} />
+          ) : (
+            <IconChevronRight size={16} stroke={1.5} />
+          )
+        }
+        onClick={toggle}
+      >
+        {`Batches (${String(batches.length)})`}
+      </Button>
+      <Collapse expanded={opened}>
+        <Stack gap={4} role="list" aria-label="Batches" pt="xs">
           {batches.map((batch) => (
             <Group key={batch.id} gap="sm" wrap="wrap" role="listitem" aria-label={batch.title}>
               <Text size="sm">{batch.title}</Text>
@@ -23,7 +39,7 @@ export function BatchHistory({ batches }: { readonly batches: readonly BatchDto[
             </Group>
           ))}
         </Stack>
-      </Stack>
+      </Collapse>
     </Paper>
   );
 }

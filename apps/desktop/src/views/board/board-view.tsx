@@ -12,7 +12,7 @@ import {
   type WorkstreamDto,
   type WorkstreamId,
 } from '@10db/contracts';
-import { Alert, Button, Group, Loader, Menu, Modal, Stack, Text } from '@mantine/core';
+import { Alert, Button, Group, Loader, Menu, Modal, ScrollArea, Stack, Text } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { IconColumns, IconPlayerPlay, IconPlus } from '@tabler/icons-react';
 import { useNavigate } from '@tanstack/react-router';
@@ -40,6 +40,11 @@ import { columnNameOf, TaskDrawer } from './task-drawer';
 import { useBoardActions } from './use-board-actions';
 
 const NEW_TASK_FORM_ID = 'new-task-form';
+
+/** The columns never shrink below this, however many strips sit above them. */
+const COLUMNS_MIN_HEIGHT = 320;
+/** The strips and history together take at most this share of the board's height. */
+const ABOVE_COLUMNS_MAX_HEIGHT = '33%';
 
 /** A finished workstream isn't repeated on its card; the task's column already says so. */
 const SHOWN_STATES: readonly WorkstreamState[] = Object.values(WorkstreamState).filter(
@@ -115,7 +120,7 @@ function BoardColumns({
     return kind === 'move' || kind === 'start';
   };
   return (
-    <Stack flex={1} mih={0}>
+    <Stack flex={1} mih={COLUMNS_MIN_HEIGHT} data-testid="board-columns">
       {actions.notice ? (
         <Alert color="yellow" withCloseButton onClose={actions.dismiss}>
           {actions.notice}
@@ -230,6 +235,13 @@ function BoardColumns({
 }
 
 /** Worktree mode shows every open batch in the daemon's order, newest first; shared mode shows the one current batch. */
+function stripBatches(project: ProjectViewDto): readonly BatchDto[] {
+  if (project.workspaceMode === WorkspaceMode.Worktree && project.openBatches.length > 0) {
+    return project.openBatches;
+  }
+  return project.currentBatch ? [project.currentBatch] : [];
+}
+
 function BatchStrips({
   project,
   workstreams,
@@ -278,6 +290,8 @@ export function BoardView() {
   const workstreamById = new Map((workstreams.data ?? []).map((ws) => [ws.id, ws]));
   const batchList = batches.data ?? [];
   const batchById = new Map(batchList.map((b) => [b.id, b]));
+  const stripIds = new Set((project ? stripBatches(project) : []).map((b) => b.id));
+  const historyBatches = batchList.filter((b) => !stripIds.has(b.id));
   const peers = new Map(taskList.map((t) => [t.id, t]));
   const started = startedDependents(taskList, workstreamById);
   const readyCount = layout.find(isReady)?.tasks.length ?? 0;
@@ -363,8 +377,19 @@ export function BoardView() {
       {projects.isSuccess && !project ? (
         <Text c="dimmed">No projects yet. Create one to start.</Text>
       ) : null}
-      {project ? <BatchStrips project={project} workstreams={workstreams.data ?? []} /> : null}
-      {project && batchList.length > 0 ? <BatchHistory batches={batchList} /> : null}
+      {project && (stripIds.size > 0 || historyBatches.length > 0) ? (
+        <ScrollArea.Autosize
+          mah={ABOVE_COLUMNS_MAX_HEIGHT}
+          type="auto"
+          offsetScrollbars="y"
+          data-testid="board-above-columns"
+        >
+          <Stack gap="sm">
+            <BatchStrips project={project} workstreams={workstreams.data ?? []} />
+            {historyBatches.length > 0 ? <BatchHistory batches={historyBatches} /> : null}
+          </Stack>
+        </ScrollArea.Autosize>
+      ) : null}
 
       {project && tasks.isSuccess && (columns.data !== undefined || columns.isError) ? (
         <BoardColumns

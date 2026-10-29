@@ -195,11 +195,11 @@ describe('BatchStrip in worktree mode', () => {
   const path = '/Users/me/.10db/worktrees/abc/bat_1';
   const open = batchDto({ worktreePath: path });
 
-  it('shows the worktree path', async () => {
+  it('keeps the worktree path behind the copy button, not in its own row', async () => {
     server.use(...baseHandlers());
     renderWithDaemon(<BatchStrip batch={open} workstreams={[]} workspaceMode="worktree" />);
-    expect(await screen.findByText(path)).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Copy worktree path' })).toBeTruthy();
+    expect(await screen.findByRole('button', { name: 'Copy worktree path' })).toBeTruthy();
+    expect(screen.queryByText(path)).toBeNull();
   });
 
   it('offers no fix task on a batch that is shipping', async () => {
@@ -211,7 +211,7 @@ describe('BatchStrip in worktree mode', () => {
         workspaceMode="worktree"
       />,
     );
-    await screen.findByText(path);
+    await screen.findByRole('button', { name: 'Copy worktree path' });
     expect(screen.queryByRole('button', { name: 'Add a fix task' })).toBeNull();
   });
 

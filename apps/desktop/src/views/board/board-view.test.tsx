@@ -199,34 +199,47 @@ describe('BoardView', () => {
     });
   });
 
-  it('shows one strip per open batch in worktree mode', async () => {
-    const older = batchDto({
-      title: 'Older',
-      worktreePath: '/wt/older',
-      createdAt: '2026-01-01T00:00:00.000Z',
-    });
-    const newer = batchDto({
-      projectId: older.projectId,
-      title: 'Newer',
-      worktreePath: '/wt/newer',
-      createdAt: '2026-01-02T00:00:00.000Z',
-    });
+  it('shows one strip per open batch in worktree mode, keeps the columns usable, and does not repeat them in history', async () => {
+    const first = batchDto({ title: 'First', worktreePath: '/wt/first' });
+    const batches = [first, 'Second', 'Third'].map((b) =>
+      typeof b === 'string'
+        ? batchDto({ projectId: first.projectId, title: b, worktreePath: `/wt/${b}` })
+        : b,
+    );
+    const shipped = batchDto({ projectId: first.projectId, title: 'Done one', state: 'SHIPPED' });
     const project = projectViewDto({
-      id: older.projectId,
+      id: first.projectId,
       delivery: 'pull_request',
       prTitlePrefix: 'feat(app)',
       workspaceMode: 'worktree',
-      currentBatch: older,
-      openBatches: [newer, older],
+      currentBatch: first,
+      openBatches: batches,
     });
     serve(
       http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
       http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([])),
+      http.get(daemonUrl('/projects/:projectId/batches'), () =>
+        HttpResponse.json([...batches, shipped]),
+      ),
     );
     renderApp('/board');
 
-    const paths = (await screen.findAllByText(/^\/wt\//)).map((e) => e.textContent);
-    expect(paths).toEqual(['/wt/newer', '/wt/older']);
+    const above = await screen.findByTestId('board-above-columns');
+    expect(above.style.maxHeight).toBe('33%');
+    expect(within(above).getAllByText(/^(First|Second|Third)$/)).toHaveLength(3);
+    const columns = await screen.findByTestId('board-columns');
+    expect(columns.style.minHeight).not.toBe('');
+    expect(above.contains(columns)).toBe(false);
+
+    const toggle = await screen.findByRole('button', { name: 'Batches (1)' });
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(toggle);
+    const list = await screen.findByRole('list', { name: 'Batches' });
+    expect(
+      within(list)
+        .getAllByRole('listitem')
+        .map((i) => i.getAttribute('aria-label')),
+    ).toEqual(['Done one']);
   });
 
   it("keeps a shipped batch's pull request reachable once the next batch starts", async () => {
@@ -253,6 +266,7 @@ describe('BoardView', () => {
     );
     renderApp('/board');
 
+    fireEvent.click(await screen.findByRole('button', { name: 'Batches (1)' }));
     const list = await screen.findByRole('list', { name: 'Batches' });
     expect(within(list).getByText('Alpha first')).toBeTruthy();
     expect(within(list).getByRole('link', { name: 'Pull request' }).getAttribute('href')).toBe(url);
