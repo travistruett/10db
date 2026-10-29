@@ -1,30 +1,44 @@
-# The sandbox is the boundary, the broker is a filter, and CI decides when a repo has one
+# The kernel sandbox is the boundary for lane-chosen code, the broker's scan is a filter, and CI decides when a repo has one
 
 - **Date:** 2026-10-29
+- **Amends:** R10 in `docs/architecture/03-trust-boundaries.md` §6
 
 ## Decision
 
 Three layers that kept being treated as security each get one job.
 
-1. **The kernel sandbox is the security boundary.** The lane sandbox and the gate sandbox stay as strict as
-   they are, and a change to either keeps its adversarial review. The gate keeps running under `srt`: a gate
-   runs tests, and tests are agent-written code. **Built** (`docs/architecture/03-trust-boundaries.md` §3).
+1. **The kernel sandbox is the boundary for every process whose code a lane chooses**: a lane's Bash and its
+   children, the gate and repo MCP servers. The lane sandbox and the gate sandbox stay as strict as they are,
+   and a change to either keeps its adversarial review. The gate keeps running under `srt`: a gate runs
+   tests, and tests are agent-written code. The file tools run in the claude process, outside the kernel
+   sandbox, so their boundary stays what R4 says: Claude Code's permission rules, the broker's decision on
+   reads outside the checkout and the guard's resolved-path check. This decision changes none of that.
+   **Built** (`docs/architecture/03-trust-boundaries.md` §3).
 2. **The broker's Bash scan is a filter, not a boundary.** It decides when a sandboxed command is plainly
    safe and needs no Inbox card. Anything it misses still runs inside the lane sandbox, so the bar for a
-   change to it is "a plain everyday command shouldn't card", not "close every bypass". A command that spells
-   a hazard in plain view keeps its card (`pnpm add x` still cards), as R10 requires. A review finding that
-   is one more shell-parsing way past the scan gets one round of fixes for its class, and the rest are listed
-   as known gaps in the scan's decision (`decisions/2026-10-28-broker-unread-arguments.md`) instead of
-   chased. **Built:** the scan already works this way, and its decision says so. **Designed:** the longer-term
-   direction is to trust the sandbox and card only what it can't stop, such as a new network host or a
-   dependency change. This covers the broker's Bash scan only. Its decision on file-tool reads outside the
-   checkout is part of the file tools' boundary (R4) and is unchanged.
-3. **When a repo has CI, CI's required checks decide whether work ships.** 10db's sandboxed local gate
-   becomes a fast pre-check for such a repo. A repo without CI keeps the local gate, or the builder's check
-   when it has no gate command (`decisions/2026-10-28-optional-gate.md`), as what decides. **Designed:**
-   today a failed ship gate fails the batch before the push (`apps/daemon/src/delivery/ship.ts`), CI or no
-   CI. How a failed pre-check is shown, and when the pull request opens anyway, belongs to the design that
-   builds it.
+   change to it is "a plain everyday command shouldn't card", not "close every bypass".
+   - **Amends R10.** A hazard in plain view keeps its card (`pnpm add x` still cards), as R10 requires. A
+     way to hide a hazard from the scan gets one round of fixes for its class once review finds it. Variants
+     found after that are listed as known gaps in the scan's decision
+     (`decisions/2026-10-28-broker-unread-arguments.md`), not chased.
+   - **Built:** the scan's decision already calls it a filter, not a boundary.
+   - **Decided here, not built:** the one-round rule above.
+   - **Designed:** trusting the sandbox and carding only what it can't stop, such as a new network host or
+     a dependency change.
+   - This covers the Bash scan only. The broker's decision on file-tool reads outside the checkout is part
+     of the file tools' boundary (item 1) and is unchanged.
+3. **When a repo has CI, CI's required checks decide whether work ships.** 10db's sandboxed local gates
+   become fast pre-checks for such a repo. A repo without CI keeps its local gate, or the builder's check
+   when it has no gate command (`decisions/2026-10-28-optional-gate.md`), as what decides. **Designed only.**
+   Today two local gates stop work shipping, CI or no CI:
+   - A task's own verify gate runs after every implement step (decision 61). Each failure counts against
+     `maxFixAttempts`, and past them the workstream fails; its batch ships only if the builder picks Ship
+     anyway.
+   - The ship gate runs on the batch branch, and a failure fails the batch before the push
+     (`apps/daemon/src/delivery/ship.ts`).
+
+   "CI decides" covers both. How a failed pre-check is shown, and when the pull request opens anyway,
+   belongs to the design that builds it.
 
 ## Why
 
