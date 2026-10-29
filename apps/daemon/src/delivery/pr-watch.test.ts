@@ -437,6 +437,37 @@ describe('gh unavailable', () => {
     expect(card.body).toContain('Nothing else is affected');
   });
 
+  it('rewrites the open gh card when gh fails another way, and only then', async () => {
+    setup();
+    const { id } = shipped(h.project.id, 'Alpha');
+    h.gh.failNext.set('prStatus', new GhError('timeout', 'gh pr view gave no answer within 120 s'));
+    const w = watcher();
+    w.start();
+    await w.idle();
+    const first = h.only(h.cards());
+    expect(first.body).toContain(
+      "gh couldn't reach GitHub: gh pr view gave no answer within 120 s",
+    );
+
+    h.gh.auth = 'signed_out';
+    await round(w);
+    expect(pr(id)).toMatchObject({ state: 'unknown', unknownReason: 'gh is not signed in' });
+    const card = h.only(h.cards());
+    expect(card.id).toBe(first.id);
+    expect(card.title).toBe('Pull request status unknown: gh is signed out');
+    expect(card.body).toContain('gh auth login');
+    expect(card.body).not.toContain('gave no answer');
+    expect(card.detail).toEqual(first.detail);
+
+    const writes = () =>
+      listEventsAfter(h.store.db, 0, 10_000).filter(
+        (e) => e.type === 'inbox.changed' && e.entityId === card.id,
+      ).length;
+    const before = writes();
+    await round(w);
+    expect(writes()).toBe(before);
+  });
+
   it('does not raise a second card when a later batch also goes unknown', async () => {
     setup();
     const a = shipped(h.project.id, 'Alpha');
@@ -538,11 +569,14 @@ describe('gh unavailable', () => {
     expect(pr(c.id)).toMatchObject({ state: 'unknown' });
     expect(h.cards()).toHaveLength(1);
 
-    // Only the second project is read now; Beta goes unknown, and the first project's card stays the one card.
+    // Only the second project is read now; Beta goes unknown, and the first project's card stays
+    // the one card, saying how gh fails now.
     h.gh.failNext.set('prStatus', new GhError('failed', 'HTTP 503'));
     await round(w);
     expect(pr(b.id)).toMatchObject({ state: 'unknown', unknownReason: 'HTTP 503' });
-    expect(h.only(h.cards()).projectId).toBe(h.project.id);
+    const card = h.only(h.cards());
+    expect(card.projectId).toBe(h.project.id);
+    expect(card.body).toContain("gh couldn't reach GitHub: HTTP 503");
   });
 
   it('does not raise a dismissed failing-checks card again after an offline round', async () => {

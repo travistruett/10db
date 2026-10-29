@@ -154,12 +154,22 @@ export function createPrWatch(input: {
       )
         firstUnknown = batch;
     }
-    if (failure !== null && firstUnknown !== null && ghCardProjects().length === 0)
-      raise(ctx.inbox, firstUnknown.projectId, prCards.ghUnavailable(firstUnknown, failure.error));
-    // Only a round gh answered in full says gh works again: a half round leaves batches unknown.
-    if (answered && failure === null)
+    if (failure !== null) {
+      const open = ghCardProjects();
+      // An open card says how gh fails now, such as signed out after a timeout.
+      for (const id of open)
+        rewrite(ctx.state, ctx.inbox, id, prCards.ghUnavailableText(failure.error));
+      if (open.length === 0 && firstUnknown !== null)
+        raise(
+          ctx.inbox,
+          firstUnknown.projectId,
+          prCards.ghUnavailable(firstUnknown, failure.error),
+        );
+    } else if (answered) {
+      // Only a round gh answered in full says gh works again: a half round leaves batches unknown.
       for (const id of ghCardProjects())
         withdraw(ctx.state, ctx.inbox, id, [prCardKey.ghUnavailable]);
+    }
   }
 
   /**

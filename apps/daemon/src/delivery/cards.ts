@@ -571,25 +571,30 @@ export const prCards = {
     };
   },
   /** `batch` is the first one whose status turned unknown. */
-  ghUnavailable: (batch: BatchDto, error: unknown): Card => {
+  ghUnavailable: (batch: BatchDto, error: unknown): Card => ({
+    ...prCards.ghUnavailableText(error),
+    detail: prDetail(batch, batch.prUrl ?? ''),
+  }),
+  /** The gh card without its detail: what an open one is rewritten with when gh fails another way. */
+  ghUnavailableText: (error: unknown): Card => {
     const kind = error instanceof GhError ? error.kind : null;
     const until =
       'Until then the status of shipped pull requests stays unknown here. Nothing else is affected, and 10db keeps checking.';
-    const base = { foldKey: prCardKey.ghUnavailable, detail: prDetail(batch, batch.prUrl ?? '') };
+    const foldKey = prCardKey.ghUnavailable;
     if (kind === 'signed_out')
       return {
-        ...base,
+        foldKey,
         title: 'Pull request status unknown: gh is signed out',
         body: `10db reads your pull requests' checks and merge state with gh. Run gh auth login in a terminal. ${until}`,
       };
     if (kind === 'not_installed')
       return {
-        ...base,
+        foldKey,
         title: 'Pull request status unknown: gh is not installed',
         body: `10db reads your pull requests' checks and merge state with gh. Install the GitHub CLI (brew install gh) and sign in with gh auth login. ${until}`,
       };
     return {
-      ...base,
+      foldKey,
       title: 'Pull request status unknown: gh could not reach GitHub',
       body: `gh couldn't reach GitHub: ${detailOf(error)}\n\nCheck your connection and run gh auth status in a terminal to see why. ${until}`,
     };
