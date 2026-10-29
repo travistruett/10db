@@ -71,7 +71,7 @@ function dependencies(
       pnpm_config_store_dir: join(tmp.path, 'store'),
       ...env,
     }),
-    resolvePnpm: () => join(bin, 'pnpm'),
+    resolvePnpm: () => Promise.resolve(join(bin, 'pnpm')),
     rules: () => [{ toolName: 'SandboxNetworkAccess', pattern: 'registry.npmjs.org' }],
     checkouts: () => [join(tmp.path, 'main')],
     timeoutMs,
@@ -188,7 +188,7 @@ describe('refreshing a worktree’s dependencies', () => {
     const result = await refresh(deps);
     expect(result.kind).toBe('failed');
     if (result.kind !== 'failed') return;
-    expect(result.tail).toContain('No pnpm was found');
+    expect(result.tail).toContain('No trustworthy pnpm');
     expect(existsSync(calls)).toBe(false);
   });
 

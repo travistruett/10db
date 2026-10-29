@@ -246,7 +246,7 @@ export function createDeliveryHarness(
       clock: new ManualClock(),
       dataDir: data.path,
       sessionEnv: () => ({ PATH: `${pnpm.bin}:/usr/bin:/bin`, pnpm_config_store_dir: pnpm.bin }),
-      resolvePnpm: () => join(pnpm.bin, 'pnpm'),
+      resolvePnpm: () => Promise.resolve(join(pnpm.bin, 'pnpm')),
       rules: () => [],
       checkouts: () => [remote.repo.path],
       timeoutMs: opts.gateTimeoutMs ?? 20_000,

@@ -1,5 +1,5 @@
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import type { BatchDto, PermissionRuleDto, ProjectDto } from '@10db/contracts';
 import type { Clock } from '../clock';
 import type { GateRunner } from '../verify';
@@ -73,8 +73,11 @@ export interface WorktreeDependenciesDeps {
   /** Every registered checkout and live worktree, which the install can't write. */
   checkouts(): readonly string[];
   readonly timeoutMs: number;
-  /** The absolute path of the pnpm to run, found outside every checkout; null when there is none. */
-  resolvePnpm(env: Readonly<Record<string, string>>, checkouts: readonly string[]): string | null;
+  /** The absolute path of a real pnpm program to run, found outside every checkout; null when none is trustworthy. */
+  resolvePnpm(
+    env: Readonly<Record<string, string>>,
+    checkouts: readonly string[],
+  ): Promise<string | null>;
 }
 
 /**
@@ -98,15 +101,14 @@ export function createWorktreeDependencies(deps: WorktreeDependenciesDeps): Work
       );
       const env = deps.sessionEnv(project);
       const checkouts = [...new Set([...deps.checkouts(), path])];
-      const pnpm = deps.resolvePnpm(env, checkouts);
-      if (pnpm === null)
-        return {
-          kind: 'failed',
-          exitCode: 127,
-          timedOut: false,
-          tail: "No pnpm was found on the login shell's PATH outside the project's checkouts.",
-          logPath,
-        };
+      const pnpm = await deps.resolvePnpm(env, checkouts);
+      if (pnpm === null) {
+        const tail =
+          "No trustworthy pnpm was found on the login shell's PATH: it must be a program outside the project's checkouts, not a script and not a version manager's shim.";
+        mkdirSync(dirname(logPath), { recursive: true });
+        writeFileSync(logPath, `${tail}\n`);
+        return { kind: 'failed', exitCode: 127, timedOut: false, tail, logPath };
+      }
       const result = await deps.gate.run({
         project: { repoPath: path, sandboxLoopback: project.sandboxLoopback },
         command: installCommand(pnpm),

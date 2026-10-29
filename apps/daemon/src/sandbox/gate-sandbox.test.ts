@@ -474,67 +474,66 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
       });
     });
 
-    it('keeps the lock files a run made and removes anything else it left there', async () => {
+    it('removes the lock directory and all it holds after the run, without following a link in it', async () => {
+      const outside = join(root, 'outside');
+      mkdirSync(outside);
+      writeFileSync(join(outside, 'keep'), 'k');
       const run = await sandbox().forRun(input({ packageInstall: true }));
       writeFileSync(join(pnpmLockDir, 'all-stores.lock'), '');
-      symlinkSync('/etc/hosts', join(pnpmLockDir, 'abc.lock'));
+      symlinkSync(outside, join(pnpmLockDir, 'abc.lock'));
       mkdirSync(join(pnpmLockDir, 'dir.lock'));
-      await run.dispose();
-      expect(readdirSync(pnpmLockDir)).toEqual(['all-stores.lock']);
-    });
-
-    it('removes a hard link to another file, and links left before the run, as well', async () => {
-      mkdirSync(pnpmLockDir, { mode: 0o700 });
-      symlinkSync('/etc/hosts', join(pnpmLockDir, 'stale.lock'));
-      const run = await sandbox().forRun(input({ packageInstall: true }));
-      // Taken before the run starts: the stale link is already gone.
-      expect(readdirSync(pnpmLockDir)).toEqual([]);
       const target = join(root, 'target');
       writeFileSync(target, 'x');
       execFileSync('ln', [target, join(pnpmLockDir, 'hard.lock')]);
       await run.dispose();
-      expect(readdirSync(pnpmLockDir)).toEqual([]);
+      expect(existsSync(pnpmLockDir)).toBe(false);
+      expect(readdirSync(root).filter((name) => name.includes('.sweep-'))).toEqual([]);
+      expect(readdirSync(outside)).toEqual(['keep']);
       expect(readFileSync(target, 'utf8')).toBe('x');
     });
 
-    it('leaves alone a lock directory the run replaced with a link, and says so', async () => {
+    it('starts from a fresh directory whatever an earlier run or crash left at the path', async () => {
+      const outside = join(root, 'outside');
+      mkdirSync(outside);
+      writeFileSync(join(outside, 'keep'), 'k');
+      symlinkSync(outside, pnpmLockDir);
+      const run = await sandbox().forRun(input({ packageInstall: true }));
+      expect(lstatSync(pnpmLockDir).isDirectory()).toBe(true);
+      expect(readdirSync(pnpmLockDir)).toEqual([]);
+      await run.dispose();
+      expect(readdirSync(outside)).toEqual(['keep']);
+    });
+
+    it('unlinks a lock directory the run replaced with a link, and follows nothing', async () => {
       const run = await sandbox().forRun(input({ packageInstall: true }));
       const victim = join(root, 'victim');
       mkdirSync(join(victim, 'sub'), { recursive: true });
       writeFileSync(join(victim, 'file'), 'keep');
       rmSync(pnpmLockDir, { recursive: true });
       symlinkSync(victim, pnpmLockDir);
-      await expect(run.dispose()).rejects.toThrow(SandboxProfileError);
+      await run.dispose();
+      expect(existsSync(pnpmLockDir)).toBe(false);
       expect(readdirSync(victim).sort()).toEqual(['file', 'sub']);
     });
 
     it.each([
-      [
-        'a link',
-        () => {
-          mkdirSync(join(root, 'elsewhere'));
-          symlinkSync(join(root, 'elsewhere'), pnpmLockDir);
-        },
-      ],
-      [
-        'open to other users',
-        () => {
-          mkdirSync(pnpmLockDir, { mode: 0o755 });
-          chmodSync(pnpmLockDir, 0o755);
-        },
-      ],
       [
         'a file',
         () => {
           writeFileSync(pnpmLockDir, '');
         },
       ],
-    ])('refuses a lock directory that is %s, opening nothing', async (_name, plant) => {
+      [
+        'open to other users',
+        () => {
+          mkdirSync(pnpmLockDir, { mode: 0o755 });
+        },
+      ],
+    ])('replaces a lock directory path that is %s', async (_name, plant) => {
       plant();
-      await expect(sandbox().forRun(input({ packageInstall: true }))).rejects.toThrow(
-        SandboxProfileError,
-      );
-      expect(readdirSync(tmpRoot)).toEqual([]);
+      const run = await sandbox().forRun(input({ packageInstall: true }));
+      expect(lstatSync(pnpmLockDir).mode & 0o777).toBe(0o700);
+      await run.dispose();
     });
   });
 });

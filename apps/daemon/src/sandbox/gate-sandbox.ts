@@ -120,9 +120,11 @@ export function createGateSandbox(deps: GateSandboxDeps): GateSandbox {
       const { checkout, toolchain } = access;
       const lockPath =
         input.packageInstall === true ? (deps.pnpmLockDir ?? defaultPnpmLockDir()) : null;
-      const lockDir = lockPath === null ? null : openPnpmLockDir(lockPath);
       // What an earlier run or a crash left is not trusted either.
-      if (lockDir !== null) sweepPnpmLockDir(lockDir);
+      if (lockPath !== null) {
+        sweepPnpmLockDir(lockPath);
+        openPnpmLockDir(lockPath);
+      }
       const tmpDir = createLaneTempDir(tmpRoot);
       let settingsFile: string | null = null;
       // Both are removed even when one fails; the first failure is then thrown.
@@ -142,9 +144,9 @@ export function createGateSandbox(deps: GateSandboxDeps): GateSandbox {
             record(error);
           }
         }
-        if (lockDir !== null) {
+        if (lockPath !== null) {
           try {
-            sweepPnpmLockDir(lockDir);
+            sweepPnpmLockDir(lockPath);
           } catch (error) {
             record(error);
           }

@@ -1,5 +1,13 @@
-import { execFileSync } from 'node:child_process';
-import { chmodSync, lstatSync, mkdirSync, readdirSync, realpathSync, rmSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import {
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  realpathSync,
+  renameSync,
+  rmdirSync,
+  unlinkSync,
+} from 'node:fs';
 import { userInfo } from 'node:os';
 import { join } from 'node:path';
 import { SandboxProfileError } from './profile';
@@ -12,18 +20,11 @@ export function defaultPnpmLockDir(): string {
   return join(realpathSync('/tmp'), `pnpm-store-operation-locks-${String(userInfo().uid)}`);
 }
 
-/** The directory as approved: a run may swap it, so a sweep first checks it is still this one. */
-export interface PnpmLockDir {
-  readonly path: string;
-  readonly dev: number;
-  readonly ino: number;
-}
-
 /**
  * Makes pnpm's lock directory when it is missing, and refuses one that is not a plain directory this
- * user alone can use: a run is about to be allowed to write in it. Returns the directory's identity.
+ * user alone can use: a run is about to be allowed to write in it.
  */
-export function openPnpmLockDir(dir: string): PnpmLockDir {
+export function openPnpmLockDir(dir: string): void {
   if (lstatSync(dir, { throwIfNoEntry: false }) === undefined) mkdirSync(dir, { mode: 0o700 });
   const found = lstatSync(dir);
   if (!found.isDirectory() || found.uid !== userInfo().uid || (found.mode & 0o077) !== 0) {
@@ -32,45 +33,61 @@ export function openPnpmLockDir(dir: string): PnpmLockDir {
       `pnpm's lock directory can't be opened to a package install: ${dir} is a link, is not a directory, or is open to other users`,
     );
   }
-  return { path: dir, dev: found.dev, ino: found.ino };
 }
 
 /**
- * Removes everything in pnpm's lock directory that is not a regular file with a single name. A run
- * that could write there might have left a symbolic link for a later pnpm, outside any sandbox, to
- * follow, or a hard link to a file it could read. Every entry is looked at as a link, never followed;
- * pnpm's own lock files are made again when it needs them.
- *
- * The run may also have replaced the directory itself (its write grant covers the path), so nothing
- * is touched unless the path is still the directory that was approved. The directory's mode is set
- * back to private and any ACL a run added is removed. Every entry is tried; the first failure is
- * thrown at the end.
+ * Removes pnpm's lock directory and all it holds. A run that could write there might have swapped the
+ * directory for a link, or left links in it, for a later pnpm outside any sandbox to follow, and the
+ * run's grant covers the directory's own path, so a swap can happen while this runs. So the path is
+ * never looked into: it is first renamed, which moves a link rather than following it, to a name no
+ * run can write beside or guess, and only that name is read. A link there is unlinked; a directory's
+ * entries are unlinked or, for a directory, removed when empty, never followed or removed
+ * recursively. Anything that could not be removed is thrown after the rest was tried.
  */
-export function sweepPnpmLockDir(dir: PnpmLockDir): void {
-  const now = lstatSync(dir.path, { throwIfNoEntry: false });
-  if (!now?.isDirectory() || now.dev !== dir.dev || now.ino !== dir.ino)
-    throw new SandboxProfileError(
-      'packageInstall',
-      `pnpm's lock directory ${dir.path} was replaced during a package install; it was left alone`,
-    );
-  chmodSync(dir.path, 0o700);
-  // macOS only; a run could grant other users access with an ACL, which the mode does not show.
+export function sweepPnpmLockDir(dir: string): void {
+  const aside = `${dir}.sweep-${randomUUID()}`;
   try {
-    execFileSync('/bin/chmod', ['-N', dir.path], { stdio: 'ignore' });
-  } catch {
-    // No ACL support here, or none set.
+    renameSync(dir, aside);
+  } catch (error) {
+    if (isMissing(error)) return;
+    throw error;
   }
-  let failure: Error | null = null;
-  for (const name of readdirSync(dir.path)) {
-    const path = join(dir.path, name);
+  const moved = lstatSync(aside);
+  if (!moved.isDirectory()) {
+    unlinkSync(aside);
+    return;
+  }
+  const failures: Error[] = [];
+  const attempt = (remove: () => void): void => {
     try {
-      const entry = lstatSync(path, { throwIfNoEntry: false });
-      if (entry !== undefined && (!entry.isFile() || entry.nlink > 1))
-        rmSync(path, { recursive: true, force: true });
+      remove();
     } catch (error) {
+      if (isMissing(error)) return;
       failure ??=
-        error instanceof Error ? error : new Error('a lock directory entry could not be swept');
+        error instanceof Error
+          ? error
+          : new SandboxProfileError(
+              'packageInstall',
+              'a lock directory entry could not be removed',
+            );
     }
+  };
+  for (const name of readdirSync(aside)) {
+    const path = join(aside, name);
+    const entry = lstatSync(path, { throwIfNoEntry: false });
+    if (entry === undefined) continue;
+    attempt(() => {
+      if (entry.isDirectory()) rmdirSync(path);
+      else unlinkSync(path);
+    });
   }
-  if (failure !== null) throw failure;
+  attempt(() => {
+    rmdirSync(aside);
+  });
+  const [first] = failures;
+  if (first !== undefined) throw first;
+}
+
+function isMissing(error: unknown): boolean {
+  return error instanceof Error && 'code' in error && error.code === 'ENOENT';
 }
