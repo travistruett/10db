@@ -810,6 +810,32 @@ const ROWS: readonly Row[] = [
     command: "mise exec -- bash -c 'pnpm add x'",
     reason: UnreadReason.HazardForm,
   },
+  {
+    name: 'a quoted word could be a flag that takes the next word',
+    command: 'pnpm "$x" add left-pad',
+    reason: UnreadReason.HazardForm,
+  },
+  {
+    name: 'a quoted word glued to a dash',
+    command: 'pnpm -"$x" add left-pad',
+    reason: UnreadReason.HazardForm,
+  },
+  {
+    name: 'corepack with a version',
+    command: 'corepack pnpm@9 add x',
+    reason: UnreadReason.HazardForm,
+  },
+  { name: 'corepack with a version, safe', command: 'corepack pnpm@9 test', reason: null },
+  {
+    name: 'arch -arch takes a value',
+    command: 'arch -arch arm64 pnpm add x',
+    reason: UnreadReason.HazardForm,
+  },
+  {
+    name: 'arch with a flag it may not know',
+    command: 'arch -frobnicate pnpm test',
+    reason: UnreadReason.CommandName,
+  },
 ];
 
 describe('firstUnread', () => {

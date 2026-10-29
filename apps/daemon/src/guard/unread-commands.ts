@@ -106,25 +106,18 @@ function hazardPatterns(hazards: readonly HazardDef[]): string[][] {
 
 /**
  * Whether the words may start with the pattern once each unread word is read as whatever fits. An
- * unread word reached before the pattern ends can supply the rest of it. A one-word stand-in is
- * either a flag, which a hazard command may follow, or one word of the pattern.
+ * unread word reached before the pattern ends can supply the rest of it. A one-word stand-in that is
+ * still a plain word could be a flag or a word of the pattern, so it is unread too; it only helps
+ * where a flag's value slot swallows it.
  */
-function mayStartWith(
-  words: readonly string[],
-  pattern: readonly string[],
-  at = 0,
-  in_ = 0,
-): boolean {
-  if (in_ >= pattern.length) return true;
-  const word = words[at];
-  if (word === undefined) return false;
-  if (word === UNREAD_WORD) return true;
-  if (word === ONE_WORD) {
-    return (
-      mayStartWith(words, pattern, at + 1, in_) || mayStartWith(words, pattern, at + 1, in_ + 1)
-    );
+function mayStartWith(words: readonly string[], pattern: readonly string[]): boolean {
+  for (let at = 0; at < pattern.length; at += 1) {
+    const word = words[at];
+    if (word === undefined) return false;
+    if (word === UNREAD_WORD || word === ONE_WORD) return true;
+    if (word !== pattern[at]) return false;
   }
-  return word === pattern[in_] && mayStartWith(words, pattern, at + 1, in_ + 1);
+  return true;
 }
 
 /** The words of a command's arguments without its redirections and their targets. */
@@ -217,17 +210,19 @@ const DIRECTORY_CHANGES: ReadonlySet<string> = new Set(['cd', 'pushd', 'popd']);
 
 /**
  * What one argument stands for in the comparison with a hazard command: itself, or, when it has an
- * expansion, a stand-in. A fully quoted expansion is one word, or a flag when it starts with `-`
- * (`--filter="$p"` is a flag with its value attached); any other expansion may become any number of
- * words. A stand-in for a flag's value counts twice, since it could also add a word.
+ * expansion, a stand-in. A fully quoted expansion is one word, which only helps where a flag's value
+ * slot swallows it (`--filter "$p"`); after a literal `--flag=` it is that flag's attached value. Any
+ * other expansion may become any number of words. A stand-in for a flag's value counts twice, since
+ * it could also add a word.
  */
 function argumentWords(word: string, single: boolean, replaced: boolean): string[] {
   if (replaced) return [UNREAD_WORD, UNREAD_WORD];
   if (!EXPANDING.test(word)) return [word];
   if (!single) return [UNREAD_WORD, UNREAD_WORD];
   if (!word.startsWith('-')) return [ONE_WORD];
+  // Only a literal `--flag=` before the expansion makes it that flag's attached value.
   const prefix = word.slice(0, word.search(EXPANDING));
-  return [prefix.includes('=') ? prefix : `${prefix}=`];
+  return prefix.includes('=') ? [prefix] : [UNREAD_WORD, UNREAD_WORD];
 }
 
 /**

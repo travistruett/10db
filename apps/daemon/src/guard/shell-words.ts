@@ -658,8 +658,26 @@ const RUNNER_WRAPPERS: ReadonlyMap<string, Wrapper> = new Map([
   ['stdbuf', wrapper(['-i', '-o', '-e'])],
   ['builtin', wrapper()],
   // `arch -arm64 [-e VAR=value] [-d VAR] program`, and BSD `script [-q] [-F pipe] [-t time] file program`.
-  ['arch', wrapper(['-e', '-d'])],
+  ['arch', wrapper(['-e', '-d', '-arch'])],
   ['script', wrapper(['-F', '-t'], 1)],
+]);
+
+/** arch's own flags; any other flag before the program may change which program runs. */
+const ARCH_FLAGS: ReadonlySet<string> = new Set([
+  '-32',
+  '-64',
+  '-arm64',
+  '-arm64e',
+  '-x86_64',
+  '-x86_64h',
+  '-i386',
+  '-ppc',
+  '-ppc64',
+  '-c',
+  '-d',
+  '-e',
+  '-arch',
+  '-h',
 ]);
 
 /** Package managers `corepack` runs by name: `corepack pnpm add x` runs `pnpm add x`. */
@@ -719,6 +737,8 @@ interface Prefixes {
    * value, or a word holds a `<` or `>` that is not a redirection the guard reads.
    */
   readonly hidden: boolean;
+  /** `corepack` ran the command, so its name may carry an `@version`. */
+  readonly corepack?: boolean;
 }
 
 /**
@@ -736,6 +756,7 @@ function prefixes(
   const angled = (from: number, to: number): boolean =>
     skipRedirections && words.slice(from, to).some((w) => ANGLE.test(w));
   let wrappers = 0;
+  let corepack = false;
   let i = 0;
   while (i < words.length) {
     const w = words[i] ?? '';
@@ -757,15 +778,17 @@ function prefixes(
     } else if (
       lookThroughRunners &&
       name === 'corepack' &&
-      COREPACK_PROGRAMS.has(commandName(words[i + 1] ?? ''))
+      COREPACK_PROGRAMS.has(commandName(words[i + 1] ?? '').replace(/@.*$/, ''))
     ) {
       wrappers += 1;
+      corepack = true;
       i += 1;
     } else if (wrapped) {
       wrappers += 1;
       i += 1;
       while (i < words.length && (words[i] ?? '').startsWith('-')) {
         const flag = words[i] ?? '';
+        if (name === 'arch' && !ARCH_FLAGS.has(flag)) return { at: i, flags, hidden: true };
         const span = flagSpan(flag, wrapped.valueFlags);
         if (angled(i, i + span)) return { at: i, flags, hidden: true };
         flags.push({ wrapper: name, flag, value: span === 2 ? (words[i + 1] ?? null) : null });
@@ -777,7 +800,7 @@ function prefixes(
       break;
     }
   }
-  return { at: i, flags, hidden: false };
+  return { at: i, flags, hidden: false, corepack };
 }
 
 /**
@@ -821,12 +844,14 @@ export function stripCommandPrefixes(
     readonly skipRedirections?: boolean;
   } = {},
 ): string[] {
-  const at = prefixes(
+  const found = prefixes(
     words,
     options.lookThroughRunners === true,
     options.skipRedirections === true,
-  ).at;
-  const rest = words.slice(at);
+  );
+  const rest = words.slice(found.at);
+  // `corepack pnpm@9 add x` runs pnpm.
+  if (found.corepack === true && rest[0] !== undefined) rest[0] = rest[0].replace(/@.*$/, '');
   const head = rest[0];
   if (head === undefined || options.keepCommandPath === true) return rest;
   return [commandName(head), ...rest.slice(1)];

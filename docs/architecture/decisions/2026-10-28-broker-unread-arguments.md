@@ -32,9 +32,9 @@ could hide one:
 - **Hazard form.** For the known program, the arguments the parser could read are compared with the project's
   hazard commands (and each of them behind `pnpm exec`, `pnpm dlx`, `npm exec`, `npx`, `yarn dlx`). Every
   argument that has an expansion, substitution, glob or tilde is treated as any number of words, unless
-  it is fully double-quoted and holds no `$@`, `$*` or `${a[@]}`: that is exactly one word, which may be a
-  flag or one word of the hazard command (`pnpm "$x"` could be `pnpm add`; `pnpm --filter "$pkg" test`
-  cannot). If the line
+  it is fully double-quoted and holds no `$@`, `$*` or `${a[@]}`: that is exactly one word. It counts as
+  one only where a flag's value slot swallows it (`pnpm --filter "$pkg" test`, `--filter="$pkg"`); anywhere
+  else it could be a flag or the subcommand and is unread (`pnpm "$x" add left-pad`). If the line
   could then start like a hazard command, it is unread: `pnpm $x` could be `pnpm add`, `pnpm exec $x` could be
   `pnpm exec drizzle-kit generate`, `cargo $x` could be `cargo add`, `make $target` could be `make migrate`
   when a project lists it. A word that stands in a flag's value slot counts twice, since it could also add a
@@ -46,7 +46,7 @@ could hide one:
   are listed per program (`pnpm --reporter silent add x`, `git -C dir add x`), `cargo +toolchain` is skipped,
   and a flag in neither the value nor the boolean list, followed by a word, is read both ways (`npm -p install x`
   is `npm install x`, or `npm x`), so either reading can be a hazard. Other programs keep one shared list of
-  value flags. `mise x --` and `mise exec --`, `corepack pnpm` (and `npm`, `npx`, `yarn`), `arch -<arch>` and
+  value flags. `mise x --` and `mise exec --`, `corepack pnpm` (and `npm`, `npx`, `yarn`), `arch -<arch>` (an `arch` flag it does not know is unread) and
   `script -q /dev/null` are looked through like `env` and `nice`: the command they run is the one matched.
 
 An unread argument to a program that has no hazard form is allowed: `cd $d`, `eslint $f`, `grep "$x"`, `make
@@ -108,6 +108,9 @@ Known gaps, deliberately left for follow-ups. The sandbox bounds all of them; no
   words, since it may split.
 - **Arithmetic on names.** `n=$((n+1))`, `${arr[$i]}` and `[[ $n -gt 3 ]]` stay cards, and so do `trap '…' EXIT` and
   `source ~/…`.
+- **Array attributes.** A variable that is an array (declared with `-a` or `-A`, here or outside the command) may
+  make a later declaration or assignment evaluate a value's subscripts; only a declaration that carries the array
+  option itself is flagged.
 - **Directory changes** inside a substitution or subshell are not tracked for `.` and `source`; only a `cd`,
   `pushd` or `popd` that starts a segment of the script is.
 - **An integer attribute inherited from outside the command**, such as an exported integer variable: a plain
