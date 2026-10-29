@@ -23,15 +23,19 @@ export function titlePrefix(
 
 /**
  * `<prefix>: <title>` as commitlint wants a header: the title's first letter lowercased, no trailing
- * full stop, and no longer than `MAX_HEADER`, cut at a word.
+ * full stop, and no longer than `MAX_HEADER`, cut at a word. A prefix too long to leave room is the
+ * project's own and goes as written.
  */
 export function prTitle(prefix: string, title: string): string {
-  const trimmed = title.trim().replace(/\.+$/, '');
+  const trimmed = title.trim().replace(/\.+$/, '').trim() || title.trim();
   const subject = `${trimmed.charAt(0).toLowerCase()}${trimmed.slice(1)}`;
   const room = MAX_HEADER - prefix.length - 2;
-  if (subject.length <= room) return `${prefix}: ${subject}`;
+  if (subject.length <= room || room < 1) return `${prefix}: ${subject}`;
   const space = subject.lastIndexOf(' ', room);
-  const cut = (space > 0 ? subject.slice(0, space) : subject.slice(0, room)).replace(/[\s.]+$/, '');
+  const cut = (space > 0 ? subject.slice(0, space) : subject.slice(0, room))
+    // A cut between the halves of a surrogate pair drops the stray half.
+    .replace(/[\uD800-\uDBFF]$/, '')
+    .replace(/[\s.]+$/, '');
   return `${prefix}: ${cut}`;
 }
 

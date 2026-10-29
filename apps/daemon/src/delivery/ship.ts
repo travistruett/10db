@@ -219,21 +219,45 @@ export function createShipper(deps: ShipperDeps): Shipper {
   }
 
   /**
-   * The project's title prefix when it sets one; otherwise the type from the tasks and the one scope
-   * the repo's `.10db/pr-scopes.json` gives every path the batch committed since its base.
+   * The one scope the repo's `.10db/pr-scopes.json` at the batch's base gives every file the batch
+   * committed, or null. The list is read from the base, which the builder's branch holds, not from
+   * commits a lane made. The scope only labels the title, so a git failure here leaves it off rather
+   * than failing the ship.
+   */
+  async function scopeFor(
+    batch: BatchDto,
+    target: { readonly checkout: string; readonly baseSha: string },
+    sha: string,
+  ): Promise<string | null> {
+    try {
+      const [paths, scopes] = await Promise.all([
+        deps.git.filesChangedBetween(target.checkout, target.baseSha, sha),
+        readPrScopes(deps.git, target.checkout, target.baseSha, deps.logger),
+      ]);
+      return scopeOf(paths, scopes);
+    } catch (error) {
+      deps.logger.warn(
+        { batchId: batch.id, err: error instanceof Error ? error.message : String(error) },
+        'pr scope not read',
+      );
+      return null;
+    }
+  }
+
+  /**
+   * The project's title prefix when it sets one; otherwise the type from the tasks whose work shipped
+   * (every task when none finished) and the batch's scope.
    */
   async function prefixFor(
+    batch: BatchDto,
     project: ProjectDto,
-    tasks: readonly { readonly title: string }[],
+    tasks: readonly { readonly title: string; readonly state: WorkstreamState }[],
     target: { readonly checkout: string; readonly baseSha: string },
     sha: string,
   ): Promise<string> {
     if (project.prTitlePrefix !== null) return project.prTitlePrefix;
-    const [paths, scopes] = await Promise.all([
-      deps.git.filesChangedBetween(target.checkout, target.baseSha, sha),
-      readPrScopes(deps.git, target.checkout, sha, deps.logger),
-    ]);
-    return titlePrefix(tasks, scopeOf(paths, scopes));
+    const done = tasks.filter((task) => task.state === WorkstreamState.Done);
+    return titlePrefix(done.length > 0 ? done : tasks, await scopeFor(batch, target, sha));
   }
 
   /**
@@ -278,7 +302,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
         repo: target.repo,
         base: batch.baseBranch,
         head: target.branch,
-        title: prTitle(await prefixFor(project, tasks, target, sha), batch.title),
+        title: prTitle(await prefixFor(batch, project, tasks, target, sha), batch.title),
         bodyFile: file,
       },
       ghCall(deps, signal),

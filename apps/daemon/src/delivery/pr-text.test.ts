@@ -1,8 +1,10 @@
 import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { mintId } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { prBody, prTitle, titlePrefix } from './index';
+import { parsePrScopes, scopeOf } from './pr-scopes';
 
 const REPO_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
 
@@ -63,6 +65,36 @@ describe('titlePrefix', () => {
   });
 });
 
+describe("this repository's scope list", () => {
+  const scopes = parsePrScopes(readFileSync(`${REPO_ROOT}.10db/pr-scopes.json`, 'utf8'));
+
+  it.each([
+    {
+      paths: ['apps/daemon/src/a.ts', 'apps/daemon/AGENTS.md'],
+      expected: 'feat(daemon): add greetings',
+    },
+    { paths: ['apps/desktop/src/a.tsx'], expected: 'feat(desktop): add greetings' },
+    { paths: ['packages/contracts/src/a.ts'], expected: 'feat(contracts): add greetings' },
+    { paths: ['packages/db/src/a.ts'], expected: 'feat(db): add greetings' },
+    { paths: ['packages/harness/a.md'], expected: 'feat(harness): add greetings' },
+    {
+      paths: ['tests/repo/src/a.test.ts', 'Makefile', '.10db/pr-scopes.json'],
+      expected: 'feat(repo): add greetings',
+    },
+    { paths: ['.github/workflows/ci.yml'], expected: 'feat(ci): add greetings' },
+    { paths: ['docs/a.md', 'README.md'], expected: 'feat(docs): add greetings' },
+    { paths: ['apps/daemon/src/a.ts', 'docs/a.md'], expected: 'feat: add greetings' },
+  ])('$paths gives "$expected", which its commitlint passes', ({ paths, expected }) => {
+    const title = prTitle(
+      titlePrefix([task('Add greetings')], scopeOf(paths, scopes)),
+      'Add greetings',
+    );
+    expect(title).toBe(expected);
+    const lint = commitlint(title);
+    expect(lint.status, lint.output).toBe(0);
+  });
+});
+
 describe('prTitle', () => {
   it.each([
     {
@@ -96,6 +128,12 @@ describe('prTitle', () => {
       expected: 'feat: add greetings',
     },
     {
+      name: 'spaces around the title and its full stop dropped',
+      prefix: 'feat',
+      title: '  Add greetings .  ',
+      expected: 'feat: add greetings',
+    },
+    {
       name: 'a project prefix used as written',
       prefix: 'chore(repo)',
       title: 'Tidy the scripts',
@@ -116,7 +154,7 @@ describe('prTitle', () => {
   });
 
   it("gives a title this repository's commitlint refuses when the prefix names an unlisted scope", () => {
-    expect(commitlint(prTitle('feat(dameon)', 'Add greetings')).status).not.toBe(0);
+    expect(commitlint(prTitle('feat(dameon)', 'Add greetings')).status).toBe(1);
   });
 });
 

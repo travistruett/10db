@@ -42,9 +42,9 @@ export function parsePrScopes(text: string): PrScopes | null {
 }
 
 /**
- * The repo's scope list in the commit being shipped, or null when it has none. It is read through git
- * from the commit, as the pull request template is, never from the checkout a lane writes. An invalid
- * file is no list: the title goes without a scope, and the log says why.
+ * The repo's scope list in commit `rev`, or null when it has none. It is read through git from the
+ * commit, as the pull request template is, never from the checkout a lane writes. An invalid file is
+ * no list: the title goes without a scope, and the log says why.
  */
 export async function readPrScopes(
   git: Pick<Git, 'fileAt'>,

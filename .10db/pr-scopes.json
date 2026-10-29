@@ -37,7 +37,6 @@
       "vitest.config.ts"
     ],
     "ci": [".github"],
-    "extra": ["nope"],
     "docs": [
       "docs",
       "CODE_OF_CONDUCT.md",

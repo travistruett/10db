@@ -220,7 +220,19 @@ describe('shipping', () => {
     expect(h.gh.prCreates().map((c) => c.title)).toEqual([`feat(app): say "hi" and $(whoami)`]);
   });
 
-  it.each<{ name: string; title: string; tasks: string[]; paths: string[]; expected: string }>([
+  const SCOPES = '{"scopes":{"api":["src/api"],"ui":["src/ui"]}}\n';
+
+  it.each<{
+    name: string;
+    title: string;
+    tasks: string[];
+    paths: string[];
+    expected: string;
+    /** The list on origin's main before the batch starts; the valid one when absent. */
+    scopes?: string;
+    /** Tasks cancelled rather than done. */
+    cancelled?: string[];
+  }>([
     {
       name: 'one scope, a feature',
       title: 'Add greetings',
@@ -249,19 +261,44 @@ describe('shipping', () => {
       paths: ['src/ui/beta.txt'],
       expected: 'fix(ui): fix the greeting',
     },
+    {
+      name: 'a cancelled feature beside a finished fix, a fix',
+      title: 'Fix the greeting',
+      tasks: ['Add farewells', 'Fix the greeting'],
+      cancelled: ['Add farewells'],
+      paths: ['src/ui/beta.txt'],
+      expected: 'fix(ui): fix the greeting',
+    },
+    {
+      name: 'an invalid list, so none',
+      title: 'Add greetings',
+      tasks: ['Alpha'],
+      scopes: '{"scopes":{"API":["src/api"]}}\n',
+      paths: ['src/api/alpha.txt'],
+      expected: 'feat: add greetings',
+    },
+    {
+      name: 'a list the batch itself rewrites, read from the base',
+      title: 'Add greetings',
+      tasks: ['Alpha'],
+      paths: ['src/ui/beta.txt', '.10db/pr-scopes.json'],
+      expected: 'feat: add greetings',
+    },
   ])('titles the PR from the work with no project prefix: $name', async (row) => {
     h = createDeliveryHarness();
     // Pull request delivery still requires a prefix when a project is saved; the title is derived
     // once a project has none.
     h.store.write((ctx) => ctx.tx.update(schema.projects).set({ prTitlePrefix: null }).run());
-    h.teammatePush(
-      'main',
-      '.10db/pr-scopes.json',
-      '{"scopes":{"api":["src/api"],"ui":["src/ui"]}}\n',
-    );
-    const { batch } = await openBatch(row.title, ...row.tasks);
-    for (const path of row.paths) h.commit(path);
-    await finishAll(batch);
+    h.teammatePush('main', '.10db/pr-scopes.json', row.scopes ?? SCOPES);
+    const { workstreams } = await openBatch(row.title, ...row.tasks);
+    for (const path of row.paths)
+      h.commit(
+        path,
+        path === '.10db/pr-scopes.json' ? '{"scopes":{"ui":["src/ui", ".10db"]}}\n' : undefined,
+      );
+    for (const ws of workstreams)
+      h.settle(ws.id, row.cancelled?.includes(ws.taskTitle) === true ? 'CANCELLED' : 'DONE');
+    await h.jobs.idle();
     expect(h.gh.prCreates().map((c) => c.title)).toEqual([row.expected]);
   });
 
