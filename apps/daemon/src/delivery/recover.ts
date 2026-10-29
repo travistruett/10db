@@ -18,7 +18,7 @@ import { batchCheckout } from './checkout';
 import { startCards, worktreeCards, wrongBranchCard, type Card } from './cards';
 import { raise, type DeliveryContext } from './context';
 import type { Shipper } from './ship';
-import { abandonWorktree, retireWorktree } from './worktree-cleanup';
+import { retireWorktree } from './worktree-cleanup';
 import { removeIfEmptyDirectory } from './worktree-leftover';
 import { sweepWorktrees } from './worktree-sweep';
 
@@ -146,13 +146,16 @@ export async function recoverBatches(deps: {
 
   if (deps.worktrees) {
     // 4. Finished batches whose path is still set: the removal and clear a crash cut short. A dirty
-    // ABANDONED worktree is kept, with its card.
+    // ABANDONED worktree, or a finished one holding git-ignored files 10db didn't seed, is kept, with
+    // its card.
     for (const batch of listLiveWorktrees(db)) {
       try {
-        if (batch.state === BatchState.Shipped || batch.state === BatchState.Closed)
+        if (
+          batch.state === BatchState.Shipped ||
+          batch.state === BatchState.Closed ||
+          batch.state === BatchState.Abandoned
+        )
           await retireWorktree(deps.worktrees.ctx, batch.id);
-        else if (batch.state === BatchState.Abandoned)
-          await abandonWorktree(deps.worktrees.ctx, batch.id);
         else continue;
       } catch (error) {
         deps.logger.warn(

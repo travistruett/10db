@@ -19,6 +19,7 @@ import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
 import { worktreeCards } from './cards';
 import { raise } from './context';
+import { unseededIgnoredFiles } from './worktree-cleanup';
 
 export interface SweepDeps {
   readonly state: StateStore;
@@ -99,8 +100,26 @@ async function sweepProject(deps: SweepDeps, project: ProjectDto): Promise<strin
     if (orphan === null) continue;
     try {
       const changed = await changesIn(deps, main, entry.path);
-      if (changed === null || changed.length > 0) {
-        raise(deps.inbox, project.id, worktreeCards.orphanKept(main, entry.path, changed));
+      if (changed === null) {
+        raise(deps.inbox, project.id, worktreeCards.orphanKept(main, entry.path, null, []));
+        continue;
+      }
+      const ignored = await unseededIgnoredFiles(deps.git, main, entry.path, project.worktreeSeed);
+      if (changed.length > 0 || ignored === null) {
+        raise(
+          deps.inbox,
+          project.id,
+          worktreeCards.orphanKept(
+            main,
+            entry.path,
+            ignored === null ? null : changed,
+            ignored ?? [],
+          ),
+        );
+        continue;
+      }
+      if (ignored.length > 0) {
+        raise(deps.inbox, project.id, worktreeCards.orphanIgnored(main, entry.path, ignored));
         continue;
       }
       const outcome = await deps.git.removeWorktree(main, entry.path);
@@ -126,8 +145,8 @@ async function sweepProject(deps: SweepDeps, project: ProjectDto): Promise<strin
 /**
  * At startup, so no crash leaves a worktree behind for good: in each pull_request project's main
  * checkout, remove every worktree under `root` locked `10db <batch id>` whose batch is gone or
- * whose `worktree_path` is cleared or different, then prune. An orphan with uncommitted changes, or
- * one git can't read, is kept and named on a card. An unmarked entry, another lock reason and
+ * whose `worktree_path` is cleared or different, then prune. An orphan with uncommitted changes,
+ * one git can't read, or one holding git-ignored files 10db didn't seed is kept and named on a card. An unmarked entry, another lock reason and
  * anything outside `root` are never touched. A project or an entry git refuses is logged and
  * skipped (a trust refusal raises its own card), so startup goes on. Resolves with the paths
  * removed.

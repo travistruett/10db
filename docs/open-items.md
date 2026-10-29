@@ -67,12 +67,16 @@
       and dependencies are the inputs; the planner proposes the lane count and each task's placement, and the
       builder confirms. Worktrees make rapid UI iteration across screens harder, so a project-wide switch isn't
       enough. Keep `tasks.workspace_mode` for this rather than dropping it.
-- [ ] Worktree mode: removing a clean leftover worktree also removes its git-ignored files, such as a
-      hand-made `.env`; keep a worktree with ignored files 10db didn't seed, and raise a card, as for one with
-      uncommitted changes.
-- [ ] Worktree mode: with `worktree.useRelativePaths=true` in the builder's global git config (git 2.48+),
-      every worktree cut fails; pass the setting off on the daemon's `git worktree add`.
-- [ ] Worktree mode: a `WorktreeRootError` at start (a bad `TENDB_WORKTREE_ROOT`, or a checkout containing `~/.10db`) is not mapped to a stop-restart exit code, so the desktop supervisor restarts into it.
+- [x] Worktree mode: removing a clean leftover worktree also removed its git-ignored files, such as a
+      hand-made `.env`. Built: a finished or orphaned worktree holding ignored files outside matched
+      directories and the seed is kept with a card (`decisions/2026-10-28-worktree-keeps-ignored-files.md`).
+- [ ] Worktree mode: a hand-made file inside a directory the ignore rules match as a whole (such as
+      `scratch/notes.md`) still goes when its worktree is removed.
+- [x] Worktree mode: with `worktree.useRelativePaths=true` in the builder's git config (git 2.48+), every
+      worktree cut failed. Built: the daemon's `git worktree add` passes the setting off.
+- [x] Worktree mode: a `WorktreeRootError` at start (a bad `TENDB_WORKTREE_ROOT`, or a checkout containing
+      `~/.10db`) made the desktop supervisor restart into it. Built: the daemon exits 4 with one line and the
+      supervisor stops (`decisions/2026-10-28-daemon-refused-config-exit.md`).
 - [ ] Batch delivery: an after-ship action per batch or task (auto_merge with gh pr merge --auto --squash, or a project deploy command), spec §9.
 - [ ] Batch delivery: stacked batches, rebasing or updating an unmerged PR, and hosts other than GitHub (spec §9).
 - [ ] Batch delivery: agents' gh api is GET only, so read-only GraphQL queries (always POST) are denied too; allow them if a persona needs them.

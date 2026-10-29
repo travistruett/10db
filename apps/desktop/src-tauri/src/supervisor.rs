@@ -19,6 +19,9 @@ pub const EXIT_ALREADY_RUNNING: i32 = 2;
 /// The daemon's exit code when its database's migrations disagree with the ones it ships.
 /// Restarting can't fix that, so the supervisor stops.
 pub const EXIT_SCHEMA_MISMATCH: i32 = 3;
+/// The daemon's exit code when it refuses its configuration, such as a bad `TENDB_WORKTREE_ROOT`.
+/// A restart would meet the same setting, so the supervisor stops.
+pub const EXIT_REFUSED_CONFIG: i32 = 4;
 /// How long Quit waits for the daemon to exit before killing it. Its own shutdown stops every live
 /// session, each with up to 5 s for an interrupt and 5 s more after an abort, so this leaves room
 /// for several sessions; killing earlier would orphan `claude` children and leave `daemon.json` behind.
@@ -79,7 +82,9 @@ pub const fn exit_policy(code: Option<i32>, quitting: bool) -> ExitPolicy {
         return ExitPolicy::Stop;
     }
     match code {
-        Some(0 | EXIT_ALREADY_RUNNING | EXIT_SCHEMA_MISMATCH) => ExitPolicy::Stop,
+        Some(0 | EXIT_ALREADY_RUNNING | EXIT_SCHEMA_MISMATCH | EXIT_REFUSED_CONFIG) => {
+            ExitPolicy::Stop
+        }
         _ => ExitPolicy::Restart,
     }
 }
@@ -324,6 +329,11 @@ mod tests {
         // The database needs the builder: a restart would meet the same migrations.
         assert_eq!(
             exit_policy(Some(EXIT_SCHEMA_MISMATCH), false),
+            ExitPolicy::Stop
+        );
+        // A refused setting, such as a bad TENDB_WORKTREE_ROOT, is refused again on every start.
+        assert_eq!(
+            exit_policy(Some(EXIT_REFUSED_CONFIG), false),
             ExitPolicy::Stop
         );
         // Quitting wins over everything.
