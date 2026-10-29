@@ -10,7 +10,7 @@
 | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `packages/db` `batches`                        | one row per batch; a partial unique index allows one unfinished shared batch (`CUTTING`, `OPEN`, `SHIPPING`, `FAILED`, `worktree_path` null) per project; worktree batches are not limited |
 | `apps/daemon/src/delivery/`                    | starting (cut, join, dependency checks), shipping, the ship trigger, Ship anyway, Retry, Abandon, the launch rule, startup recovery, and worktree mode (`worktree-*.ts`, `checkout.ts`)    |
-| `apps/daemon/src/git/`                         | `currentBranch`, `remoteUrl`, `fetch`, `switchNewBranch`, `push`                                                                                                                           |
+| `apps/daemon/src/git/`                         | `currentBranch`, `remoteUrl`, `fetch`, `switchNewBranch`, `switchBack`, `push`                                                                                                             |
 | `apps/daemon/src/github/`                      | the `Gh` interface over the `gh` CLI                                                                                                                                                       |
 | `apps/daemon/src/guard/`                       | agents never push in `pull_request` projects, and run only an allowlist of read-only `gh` commands                                                                                         |
 | `apps/desktop/src/views/board/batch-strip.tsx` | the line above the board for a branch several tasks share; `batch-panel.tsx` is a task drawer's delivery section; Settings' General form and the new-project form hold the delivery fields |
@@ -36,6 +36,10 @@ CUTTING → OPEN → SHIPPING → SHIPPED | CLOSED | FAILED; FAILED → SHIPPING
 - A project with no gate command ships without the gate step: each task was approved by the builder on its `check` card before it counted as `DONE` (`decisions/2026-10-28-optional-gate.md`). The PR body's "How it was checked" section then reads "No gate command: each task was approved in 10db." in place of the gate command block; the CI line stays.
 - Abandon takes an `OPEN` or `FAILED` batch none of whose workstreams is running (in a lane, `TAKEN_OVER`, or `WAITING_HUMAN` with its session still live), cancels its unfinished members and raises a card naming the finished tasks and the local branch that holds their code. The drawer, the card menu and the line above the board hold Abandon back while a run is live and name it, so the refusal never surprises the builder.
 
+## Switching the checkout back
+
+The cut records where it found the checkout (`return_branch`, null when HEAD was detached, and `return_sha`), read under the lock it switches in. Once the batch is `SHIPPED`, `CLOSED` or `ABANDONED`, the project's queue switches the checkout back (`delivery/checkout-return.ts`, `Git.switchBack`): to the branch at its current tip, or detached at the commit, with `read-tree -m -u` as the cut used. It does so only while no lane runs in the project, HEAD still names the batch's branch and nothing is uncommitted. Otherwise the checkout stays where it is: uncommitted changes, a branch or commit that is gone, a running lane or a git failure raise one card per batch ("Your checkout stays on `<branch>`: …") with the command to switch back; a checkout the builder moved off the branch raises none. The place is cleared once handled, except after a git refusal, which recovery retries (`decisions/2026-10-29-shared-checkout-switch-back.md`).
+
 ## Recovery
 
 At startup, after workstream recovery and before the scheduler starts:
@@ -44,6 +48,7 @@ At startup, after workstream recovery and before the scheduler starts:
 - An orphaned shipping gate is killed by its pid and start time.
 - An `OPEN` or `SHIPPING` batch whose branch is not checked out fails with a wrong-branch card.
 - A `SHIPPING` batch re-runs shipping from the first step, and an `OPEN` batch whose members all settled ships.
+- A finished batch whose return place is still set (the daemon stopped between recording the end and the switch back) has its checkout switched back, or left with its card, as above.
 
 ## Worktree mode
 
@@ -66,7 +71,7 @@ At startup, after workstream recovery and before the scheduler starts:
 ## Invariants
 
 - The batch row exists before any git side effect; the branch is checked before every launch and every ship.
-- The daemon switches branches only when no lane runs in the project; agents never do.
+- The daemon switches branches only when no lane runs in the project, to cut a batch's branch and to switch back when it ends; agents never do.
 - The shipping gate shares the daemon's gate slots with every lane's verify gate (one at a time by default, `TENDB_GATE_SLOTS`): it waits for a slot, then its timeout starts (`decisions/2026-10-28-gate-slots.md`).
 - Shipping steps (branch and clean check, commit count, gate, push, find-or-create PR, record) are each safe to repeat; recovery re-runs them from the first.
 - Every network call runs in the login environment with prompts off, a timeout and an abort signal: 2 minutes for a fetch or a `gh` call, and the gate's timeout (30 minutes by default) for the push, which runs the clone's pre-push hook. Fetch and push run in a process group of their own; a timeout or an abort kills the group, so the hook's children stop with git. A push stopped by its timeout fails the batch with a card that says the push or its pre-push hook ran past the limit. The shipping gate's group is killed the same way on its timeout, and by pid and start time at startup if a crash orphaned it.

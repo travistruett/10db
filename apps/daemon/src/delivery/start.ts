@@ -304,10 +304,21 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
       }
       if (stopped()) return;
       const branch = batchBranchName(batch.title, batch.id);
-      await ctx.git.switchNewBranch(project.repoPath, branch, `origin/${batch.baseBranch}`);
+      // Where the checkout was, so it goes back there when the batch ends (returnCheckout).
+      const from = await ctx.git.switchNewBranch(
+        project.repoPath,
+        branch,
+        `origin/${batch.baseBranch}`,
+      );
       const baseSha = await ctx.git.head(project.repoPath);
       ctx.state.write((w) => {
-        patchBatch(w, batchId, { branch, baseSha, repo });
+        patchBatch(w, batchId, {
+          branch,
+          baseSha,
+          repo,
+          returnBranch: from?.branch ?? null,
+          returnSha: from?.sha ?? null,
+        });
         transitionBatch(w, batchId, { to: BatchState.Open, reason: 'branch cut' });
         for (const [taskId, plan] of plans) insertPlannedWorkstream(w, taskId, plan, batchId);
       });

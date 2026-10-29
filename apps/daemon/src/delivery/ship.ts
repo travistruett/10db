@@ -36,6 +36,7 @@ import { GitNetworkError, GitNetworkFailure } from '../git';
 import type { GateResult, GateRunner } from '../verify';
 import { shipCards, wrongBranchCard, type Card, type ShipFailure } from './cards';
 import { allCheckouts, projectAtCheckout } from './checkout';
+import { returnCheckout } from './checkout-return';
 import { ghCall, pushCall, raise, type DeliveryContext, type DeliveryLimits } from './context';
 import { jobKey, JobQueue } from './jobs';
 import { readPrScopes, scopeOf } from './pr-scopes';
@@ -134,6 +135,15 @@ export function createShipper(deps: ShipperDeps): Shipper {
         'batch worktree not removed',
       );
     });
+  }
+
+  /**
+   * After a batch ends, in its project's ship queue: a worktree batch's worktree goes, and a shared
+   * batch's checkout is switched back to where the cut found it.
+   */
+  async function afterEnd(batchId: BatchId, worktreePath: string | null): Promise<void> {
+    if (worktreePath !== null) await retire(batchId);
+    else await returnCheckout(deps, batchId);
   }
 
   /** Runs the project gate on the batch branch, recording its process group for recovery. */
@@ -375,7 +385,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
         const reason = 'no commits beyond the base';
         deps.state.write((w) => transitionBatch(w, batchId, { to: BatchState.Closed, reason }));
         deps.logger.info({ batchId, reason }, 'batch closed');
-        if (worktreePath !== null) await retire(batchId);
+        await afterEnd(batchId, worktreePath);
         return;
       }
       // 2. The gate, on the branch as it will be pushed; a project with none was checked by the
@@ -412,7 +422,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
         }),
       );
       deps.logger.info({ batchId, branch, prUrl }, 'batch shipped');
-      if (worktreePath !== null) await retire(batchId);
+      await afterEnd(batchId, worktreePath);
     } catch (error) {
       // Shutdown: leave SHIPPING; recovery re-runs from step 0.
       if (stopped()) return;
@@ -548,12 +558,10 @@ export function createShipper(deps: ShipperDeps): Shipper {
         .filter((m) => m.state === WorkstreamState.Done)
         .map((m) => m.taskTitle);
       raise(deps.inbox, batch.projectId, shipCards.abandoned(abandoned, done));
-      if (abandoned.worktreePath !== null) {
-        const project = getProject(db, batch.projectId);
-        deps.jobs.run(jobKey(project, JobQueue.Ship), async () => {
-          await retireWorktree(deps, batchId);
-        });
-      }
+      const project = getProject(db, batch.projectId);
+      deps.jobs.run(jobKey(project, JobQueue.Ship), async () => {
+        await afterEnd(batchId, abandoned.worktreePath);
+      });
       return abandoned;
     },
   };

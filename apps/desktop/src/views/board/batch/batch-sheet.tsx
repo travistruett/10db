@@ -94,8 +94,9 @@ function Choices({ project, mode, proposal, onStarted }: ChoicesProps) {
             Starting switches your checkout to a new branch,{' '}
             <Code>{`${batchBranchStem(batchTitle)}-…`}</Code>, cut from{' '}
             <Code>{`origin/${project.baseBranch}`}</Code> (the … is a short id added when it
-            starts). Your checkout must be clean, with nothing uncommitted. It stays on that branch
-            until you switch it.
+            starts). Your checkout must be clean, with nothing uncommitted. When the batch ends,
+            10db switches it back to where it was, unless it has uncommitted changes or you moved
+            it.
           </Text>
         </>
       ) : null}

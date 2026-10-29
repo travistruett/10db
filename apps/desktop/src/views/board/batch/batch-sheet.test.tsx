@@ -167,6 +167,9 @@ describe('BatchSheet', () => {
     expect(within(sheet).getByText('10db/one-…')).toBeTruthy();
     expect(within(sheet).getByText('origin/develop')).toBeTruthy();
     expect(within(sheet).getByText(/Your checkout must be clean/)).toBeTruthy();
+    expect(
+      within(sheet).getByText(/When the batch ends, 10db switches it back to where it was/),
+    ).toBeTruthy();
     fireEvent.change(titleField, { target: { value: 'Greeting and readme' } });
     expect(within(sheet).getByText('10db/greeting-and-readme-…')).toBeTruthy();
   });

@@ -25,6 +25,7 @@ import {
   insertWorkstream,
   latestDoneWorkstream,
   listBatches,
+  listCheckoutReturns,
   listLiveWorktrees,
   listUnfinishedBatches,
   listProjectViews,
@@ -308,6 +309,42 @@ describe('worktree batches', () => {
     store.write((ctx) => clearWorktreePath(ctx, cleared.id));
     newBatch(prProject().id);
     expect(listLiveWorktrees(store.db).map((b) => b.id)).toEqual([kept.id]);
+  });
+
+  it('listCheckoutReturns lists only finished batches that still hold a return place', () => {
+    const project = prProject();
+    const remember = (id: BatchId) =>
+      store.write((ctx) =>
+        patchBatch(ctx, id, { returnBranch: 'main', returnSha: 'a'.repeat(40) }),
+      );
+    const ended: Record<string, BatchId> = {};
+    for (const [title, states] of [
+      ['Shipped', ['OPEN', 'SHIPPING', 'SHIPPED']],
+      ['Closed', ['OPEN', 'SHIPPING', 'CLOSED']],
+      ['Abandoned', ['OPEN', 'ABANDONED']],
+      ['Detached', ['OPEN', 'ABANDONED']],
+      ['Cleared', ['OPEN', 'ABANDONED']],
+      ['Never recorded', ['OPEN', 'ABANDONED']],
+    ] as const) {
+      const batch = newBatch(project.id, title);
+      if (title !== 'Never recorded') remember(batch.id);
+      move(batch.id, ...states);
+      ended[title] = batch.id;
+    }
+    const detached = ended['Detached'];
+    const cleared = ended['Cleared'];
+    if (!detached || !cleared) throw new Error('batches expected');
+    store.write((ctx) => patchBatch(ctx, detached, { returnBranch: null }));
+    store.write((ctx) => patchBatch(ctx, cleared, { returnBranch: null, returnSha: null }));
+    const open = newBatch(project.id, 'Open');
+    remember(open.id);
+    move(open.id, 'OPEN');
+    expect(listCheckoutReturns(store.db).map((b) => [b.title, b.returnBranch])).toEqual([
+      ['Shipped', 'main'],
+      ['Closed', 'main'],
+      ['Abandoned', 'main'],
+      ['Detached', null],
+    ]);
   });
 
   it('findBatchByWorktreePath matches the stored path exactly', () => {

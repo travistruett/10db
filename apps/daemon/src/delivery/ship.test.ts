@@ -86,6 +86,7 @@ describe('shipping', () => {
     expect(batchLines(batch.id)).toMatchObject([
       { msg: 'batch branch cut' },
       { msg: 'batch closed', reason: 'no commits beyond the base' },
+      { msg: 'checkout switched back', branch: batch.branch, to: { branch: 'main' } },
     ]);
   });
 
@@ -104,6 +105,7 @@ describe('shipping', () => {
       'git push finished',
       'gh pr create finished',
       'batch shipped',
+      'checkout switched back',
     ]);
     const [cut, started, finished, push, pr, done] = lines;
     expect(cut).toMatchObject({ branch: batch.branch, baseSha: base });
@@ -171,8 +173,11 @@ describe('shipping', () => {
       gateExitCode: 0,
       failure: null,
     });
-    expect(onOrigin(batch.branch)).toBe(h.git$('rev-parse', 'HEAD'));
-    expect(h.git$('rev-parse', '--abbrev-ref', '@{u}')).toBe(`origin/${batch.branch ?? ''}`);
+    const tip = h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`);
+    expect(onOrigin(batch.branch)).toBe(tip);
+    expect(h.git$('rev-parse', '--abbrev-ref', `${batch.branch ?? ''}@{u}`)).toBe(
+      `origin/${batch.branch ?? ''}`,
+    );
     expect(h.gh.prCreates()).toEqual([
       { repo: 'acme/widgets', base: 'main', head: batch.branch, title: 'feat(app): add greetings' },
     ]);
@@ -200,9 +205,10 @@ describe('shipping', () => {
       'git push finished',
       'gh pr create finished',
       'batch shipped',
+      'checkout switched back',
     ]);
     expect(existsSync(join(h.dataDir, 'logs', 'gate'))).toBe(false);
-    expect(onOrigin(batch.branch)).toBe(h.git$('rev-parse', 'HEAD'));
+    expect(onOrigin(batch.branch)).toBe(h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`));
     const body = h.gh.body(shipped.prUrl ?? '');
     expect(body).toContain('No gate command: each task was approved in 10db.');
     expect(body).not.toContain('Gate, run on the branch before the push:');
@@ -230,7 +236,7 @@ describe('shipping', () => {
     expect(body).toContain('- It greets.');
     expect(body).toContain('## How it was checked');
     expect(body).toContain(
-      `https://github.com/acme/widgets/commit/${h.git$('rev-parse', 'HEAD')}/checks`,
+      `https://github.com/acme/widgets/commit/${h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`)}/checks`,
     );
     expect(body).toContain('## Checklist\n\n- [ ] `make gate` prints `GATE PASS`.');
     expect(body).not.toContain('<!--');

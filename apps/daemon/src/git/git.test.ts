@@ -26,7 +26,7 @@ import {
 import type { TempDir } from '../../test/fixtures';
 import { alive } from '../../test/orphan-gate';
 import { HANGING_SSH_URL, hangingSsh } from '../../test/hanging-ssh';
-import { createGit, GitNetworkError } from './index';
+import { createGit, GitNetworkError, type SwitchBack } from './index';
 
 const git = createGit();
 let repo: TempDir;
@@ -380,6 +380,122 @@ describe('branches and remotes', () => {
       /already exists/,
     );
   });
+
+  it('answers where the checkout was when it switched: a branch and its tip, or a detached commit', async () => {
+    const main = rawGit('rev-parse', 'HEAD');
+    expect(await git.switchNewBranch(repo.path, '10db/a-0a1b2c3d', 'main')).toEqual({
+      branch: 'main',
+      sha: main,
+    });
+    rawGit('checkout', '-q', '--detach', 'main');
+    expect(await git.switchNewBranch(repo.path, '10db/b-0a1b2c3d', 'main')).toEqual({
+      branch: null,
+      sha: main,
+    });
+  });
+});
+
+describe('switchBack', () => {
+  const BATCH = '10db/greetings-0a1b2c3d';
+  /** The checkout as a cut leaves it: on the batch's branch with one commit, switched from `from`. */
+  async function cutFrom(from: 'main' | 'detached') {
+    if (from === 'detached') rawGit('checkout', '-q', '--detach', 'main');
+    const place = await git.switchNewBranch(repo.path, BATCH, 'HEAD');
+    if (place === null) throw new Error('a place expected');
+    write('work.txt', 'work');
+    rawGit('add', 'work.txt');
+    rawGit('commit', '-q', '-m', 'work');
+    return place;
+  }
+  const where = () => ({
+    branch: rawGit('branch', '--show-current'),
+    head: rawGit('rev-parse', 'HEAD'),
+    status: rawGit('status', '--porcelain'),
+  });
+
+  it.each<{
+    name: string;
+    from: 'main' | 'detached';
+    /** What happens to the checkout after the cut. */
+    arrange?: () => void;
+    outcome: SwitchBack;
+    /** Where HEAD ends up: a branch name, or '' when detached. */
+    branch: string;
+  }>([
+    {
+      name: 'switches a clean checkout back to its branch',
+      from: 'main',
+      outcome: { kind: 'switched' },
+      branch: 'main',
+    },
+    {
+      name: 'detaches a clean checkout back at its commit',
+      from: 'detached',
+      outcome: { kind: 'switched' },
+      branch: '',
+    },
+    {
+      name: 'leaves a checkout with an uncommitted change',
+      from: 'main',
+      arrange: () => {
+        write('work.txt', 'more work');
+      },
+      outcome: { kind: 'dirty', paths: ['work.txt'] },
+      branch: BATCH,
+    },
+    {
+      name: 'leaves a checkout with an untracked file',
+      from: 'main',
+      arrange: () => {
+        write('notes.txt', 'mine');
+      },
+      outcome: { kind: 'dirty', paths: ['notes.txt'] },
+      branch: BATCH,
+    },
+    {
+      name: 'leaves a checkout the builder moved to another branch',
+      from: 'main',
+      arrange: () => {
+        rawGit('switch', '-q', '-c', 'elsewhere');
+      },
+      outcome: { kind: 'moved', found: 'elsewhere' },
+      branch: 'elsewhere',
+    },
+    {
+      name: 'leaves a checkout the builder detached',
+      from: 'main',
+      arrange: () => {
+        rawGit('checkout', '-q', '--detach');
+      },
+      outcome: { kind: 'moved', found: null },
+      branch: '',
+    },
+    {
+      name: 'leaves a checkout whose branch was deleted since',
+      from: 'main',
+      arrange: () => {
+        rawGit('branch', '-D', 'main');
+      },
+      outcome: { kind: 'gone' },
+      branch: BATCH,
+    },
+  ])('$name', async ({ from, arrange, outcome, branch }) => {
+    const place = await cutFrom(from);
+    arrange?.();
+    const before = where();
+    expect(await git.switchBack(repo.path, BATCH, place)).toEqual(outcome);
+    const after = where();
+    expect(after.branch).toBe(branch);
+    if (outcome.kind === 'switched') {
+      expect(after.head).toBe(place.sha);
+      expect(after.status).toBe('');
+      expect(existsSync(join(repo.path, 'work.txt'))).toBe(false);
+      // The batch's branch keeps its work.
+      expect(rawGit('show', `${BATCH}:work.txt`)).toBe('work');
+    } else {
+      expect(after).toEqual(before);
+    }
+  });
 });
 
 describe('network calls', () => {
@@ -615,6 +731,17 @@ describe('git hook variables in the daemon environment', () => {
       act: async () => {
         await git.switchNewBranch(repo.path, '10db/hook-0a1b2c3d', 'main');
         expect(rawGit('branch', '--show-current')).toBe('10db/hook-0a1b2c3d');
+      },
+    },
+    {
+      name: 'switchBack writes to',
+      act: async () => {
+        const place = await git.switchNewBranch(repo.path, '10db/hook-0a1b2c3d', 'main');
+        if (place === null) throw new Error('a place expected');
+        expect(await git.switchBack(repo.path, '10db/hook-0a1b2c3d', place)).toEqual({
+          kind: 'switched',
+        });
+        expect(rawGit('branch', '--show-current')).toBe('main');
       },
     },
   ])('$name the repository it is given and leaves the other untouched', async ({ act }) => {
