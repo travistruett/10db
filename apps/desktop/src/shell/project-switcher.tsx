@@ -28,7 +28,8 @@ export function ProjectSwitcher({ compact = false }: { readonly compact?: boolea
 
   const query = search.trim().toLowerCase();
   const shown = (projects.data ?? []).filter(
-    (p) => p.name.toLowerCase().includes(query) || p.repoPath.toLowerCase().includes(query),
+    (p) =>
+      p.name.toLowerCase().includes(query) || tildePath(p.repoPath).toLowerCase().includes(query),
   );
 
   return (

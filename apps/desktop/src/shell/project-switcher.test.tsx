@@ -77,6 +77,12 @@ describe('ProjectSwitcher', () => {
     expect(options).toHaveLength(1);
     expect(within(options[0] ?? document.body).getByText('beta')).toBeTruthy();
 
+    // A fragment found only in a path selects that project; the home folder is not part of the shown path.
+    fireEvent.change(search, { target: { value: '~/a' } });
+    expect(screen.getAllByRole('option', HIDDEN)).toHaveLength(1);
+    fireEvent.change(search, { target: { value: 'x' } });
+    expect(screen.queryAllByRole('option', HIDDEN)).toHaveLength(0);
+
     fireEvent.change(search, { target: { value: 'zzz' } });
     expect(screen.queryAllByRole('option', HIDDEN)).toHaveLength(0);
     expect(screen.getByText('No project matches')).toBeTruthy();

@@ -21,9 +21,21 @@ async function expectAccessible(page: Page, label: string): Promise<void> {
   expect(found).toEqual([]);
 }
 
+/** The Board has no page heading, so its link in the sidebar marks it as the open view. */
+async function expectView(page: Page, view: (typeof VIEWS)[number]): Promise<void> {
+  if (view === 'Board') {
+    await expect(page.getByRole('link', { name: 'Board', exact: true })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    return;
+  }
+  await expect(page.getByRole('heading', { name: view, level: 2 })).toBeVisible();
+}
+
 async function open(page: Page, view: (typeof VIEWS)[number]): Promise<void> {
   await page.getByRole('link', { name: new RegExp(`^${view}( \\d+ open cards?)?$`) }).click();
-  await expect(page.getByRole('heading', { name: view, level: 2 })).toBeVisible();
+  await expectView(page, view);
 }
 
 test.describe.configure({ mode: 'serial' });
@@ -143,7 +155,7 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
 
   // Reopening the window loses nothing: the state comes back from the daemon.
   await page.reload();
-  await expect(page.getByRole('heading', { name: 'Board', level: 2 })).toBeVisible();
+  await expectView(page, 'Board');
   await expect(
     page.getByRole('list', { name: 'Done tasks' }).getByRole('listitem', { name: TASK }),
   ).toBeVisible();
