@@ -208,6 +208,16 @@ describe('InboxView', () => {
     },
     { name: 'offers no link when the detail has none', link: undefined, shown: false },
     { name: 'offers no link that is not https', link: 'javascript:alert(1)', shown: false },
+    {
+      name: 'offers no button for a check off github.com, which the app cannot open',
+      link: 'https://ci.example.com/job/1',
+      shown: false,
+    },
+    {
+      name: 'offers no button for a host that only starts like github.com',
+      link: 'https://github.com.example.net/acme/widgets',
+      shown: false,
+    },
   ])('$name', async ({ link, shown }) => {
     const card = inboxItemDto({
       kind: 'flag',

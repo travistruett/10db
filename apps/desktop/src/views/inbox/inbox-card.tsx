@@ -60,15 +60,18 @@ function CardBody({ item }: { readonly item: InboxItemDto }) {
   );
 }
 
+/** The pages the desktop app's opener may open, as its capability (`opener:allow-open-url`) says. */
+const GITHUB_PAGE = 'https://github.com/';
+
 /**
- * The link a flag card offers (`detail.link`, such as a failing check): only an https address, since
- * the daemon's text is not trusted to be a link. The desktop app opens github.com only; the card's
- * body holds the address regardless.
+ * The page a flag card offers to open (`detail.link`, such as a failing check): a github.com page
+ * only. The daemon's text is not trusted to be a link, and the desktop app opens nothing else, so a
+ * check elsewhere (a third-party CI) gets no button; the card's body holds its address regardless.
  */
 function cardLink(item: InboxItemDto): string | null {
   if (item.kind !== InboxKind.Flag) return null;
   const link = item.detail?.['link'];
-  return typeof link === 'string' && link.startsWith('https://') ? link : null;
+  return typeof link === 'string' && link.startsWith(GITHUB_PAGE) ? link : null;
 }
 
 // Destructured: reading `props.x` in render, with a ref among the props, trips react-hooks/refs.
