@@ -16,8 +16,9 @@ favors legibility and calm over decoration.
   maps to a Selenized accent (teal is cyan, pink and grape are magenta, indigo is violet, lime is
   green), so no stock Mantine color appears.
 - **Primary color:** blue. Status colors: blue = running, yellow = waiting on a human, orange =
-  paused (limits), red = failed or flagged, green = done or ready, gray = queued or cancelled.
-  Green is the only "OK" color; don't use cyan or teal for success.
+  paused (limits), red = failed, green = done or ready, gray = queued or cancelled. Green is the only
+  "OK" color; don't use cyan or teal for success. Every Inbox card waits on the builder, so its kind
+  is yellow, a flag's too: red there would read as an error.
 - **Type:** system font stack; monospace for IDs, paths, commands and logs.
 - **Density:** `size="sm"` controls in lists and tables; `md` in forms and dialogs.
 - **Board cards:** compact `Paper`s that drag from anywhere on the card, with no handle: a pointer drag
