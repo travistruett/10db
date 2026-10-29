@@ -58,6 +58,7 @@ describe('deniedEnvNames', () => {
     'TMPDIR',
     'GOPATH',
     'TENDB_SANDBOX',
+    'xcrun_db',
   ])('keeps %s', (name) => {
     expect(deniedEnvNames({ [name]: 'v' })).toEqual([]);
   });
