@@ -1,5 +1,6 @@
 export {
   DB_MIGRATIONS_DIR,
+  MigrationIntegrityError,
   migrateDatabase,
   NewerSchemaError,
   openDatabase,

@@ -31,6 +31,23 @@ export type NewEvidence =
       readonly exitCode: null;
     });
 
+/** A stored evidence row does not satisfy the evidence contract. */
+export class InvalidEvidenceRowError extends Error {
+  override readonly name = 'InvalidEvidenceRowError';
+  readonly evidenceId: string;
+
+  constructor(evidenceId: string, cause: unknown) {
+    super(`evidence ${evidenceId} is not a valid evidence record`, { cause });
+    this.evidenceId = evidenceId;
+  }
+}
+
+function parseRow(row: { readonly id: string }): EvidenceDto {
+  const parsed = EvidenceDto.safeParse(row);
+  if (!parsed.success) throw new InvalidEvidenceRowError(row.id, parsed.error);
+  return parsed.data;
+}
+
 export function insertEvidence(ctx: WriteContext, input: NewEvidence): EvidenceDto {
   const row: EvidenceDto = {
     id: mintId('Evidence'),
@@ -51,7 +68,7 @@ export function insertEvidence(ctx: WriteContext, input: NewEvidence): EvidenceD
 export function getEvidence(db: DbReader, id: EvidenceId): EvidenceDto {
   const row = db.select().from(schema.evidence).where(eq(schema.evidence.id, id)).get();
   if (!row) throw new NotFoundError('evidence', id);
-  return EvidenceDto.parse(row);
+  return parseRow(row);
 }
 
 export function listEvidence(db: DbReader, workstreamId: WorkstreamId): EvidenceDto[] {
@@ -61,5 +78,5 @@ export function listEvidence(db: DbReader, workstreamId: WorkstreamId): Evidence
     .where(eq(schema.evidence.workstreamId, workstreamId))
     .orderBy(asc(schema.evidence.id))
     .all()
-    .map((row) => EvidenceDto.parse(row));
+    .map(parseRow);
 }

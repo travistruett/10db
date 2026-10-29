@@ -79,6 +79,11 @@ describe('EvidenceDto', () => {
     ],
     ['agent with a command and exit code', { kind: 'agent', command: 'x', exitCode: 1 }, true],
     ['builder with neither', { kind: 'builder', command: null, exitCode: null }, true],
+    [
+      'agent without a command or exit code',
+      { kind: 'agent', command: null, exitCode: null },
+      false,
+    ],
     ['gate without a command', { kind: 'gate', command: null, exitCode: null }, false],
     ['gate without an exit code', { kind: 'gate', command: 'make gate', exitCode: null }, false],
     ['builder with a command', { kind: 'builder', command: 'x', exitCode: 0 }, false],

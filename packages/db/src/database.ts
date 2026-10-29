@@ -69,6 +69,17 @@ export class NewerSchemaError extends SchemaMismatchError {
   }
 }
 
+/** A migration left rows that reference a row that does not exist; the schema change is unsafe. */
+export class MigrationIntegrityError extends Error {
+  override readonly name = 'MigrationIntegrityError';
+  readonly violations: number;
+
+  constructor(path: string, violations: number) {
+    super(`${path} has ${String(violations)} dangling foreign key reference(s) after migrating.`);
+    this.violations = violations;
+  }
+}
+
 const AppliedMigration = z.object({ hash: z.string() });
 
 // Drizzle declares `id SERIAL`, which SQLite leaves NULL, so insertion order is the rowid.
@@ -105,6 +116,11 @@ export function migrateDatabase(
   db.$client.pragma('foreign_keys = OFF');
   try {
     migrate(db, { migrationsFolder: migrationsDir });
+    // With enforcement off a migration can leave a dangling reference unnoticed, so check them all.
+    const violations = db.$client.pragma('foreign_key_check');
+    if (Array.isArray(violations) && violations.length > 0) {
+      throw new MigrationIntegrityError(db.$client.name, violations.length);
+    }
   } finally {
     if (enforced) db.$client.pragma('foreign_keys = ON');
   }

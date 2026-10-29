@@ -274,7 +274,7 @@ export function BoardView() {
       ) : null}
       {project ? (
         <Text size="sm" c="dimmed" ff="monospace" style={{ whiteSpace: 'pre-wrap' }}>
-          {project.repoPath} · gate: {project.gateCommand}
+          {project.repoPath} · gate: {project.gateCommand ?? 'none'}
           {'\n'}
           {formatAreas(project.areas)}
         </Text>

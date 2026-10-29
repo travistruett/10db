@@ -156,6 +156,17 @@ describe('BatchSheet', () => {
     },
   );
 
+  it('says nothing is run for verification when the project has no gate command', async () => {
+    serve(projectViewDto({ ...local, gateCommand: null }));
+    const sheet = await openSheet();
+    expect(
+      await within(sheet).findByText(
+        'Verification: none. Each finished task waits for you to check it.',
+      ),
+    ).toBeTruthy();
+    expect(within(sheet).queryByText(/10db runs/)).toBeNull();
+  });
+
   it('starts tasks in worktrees with one request', async () => {
     const sent = serve(
       projectViewDto({

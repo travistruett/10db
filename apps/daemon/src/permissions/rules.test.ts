@@ -768,14 +768,19 @@ describe('a project with no gate command', () => {
     expect(tools).not.toContain('Bash(null)');
   });
 
-  it('keeps the same read-only tools as a project with a gate, minus the gate', () => {
+  it('does not allow a command named after the missing gate in an edit step', () => {
+    const tools = allowedToolsFor({ gateCommand: null, allowedCommands: [] }, 'edit');
+    expect(tools).not.toContain('Bash(null)');
+    expect(matchesAllowedTool('Bash', bash('null'), tools, repo.path)).toBe(false);
+  });
+
+  it('gives a read-only step the same tools as a project with a gate, minus the gate', () => {
     const withGate = allowedToolsFor(
       { gateCommand: 'make gate', allowedCommands: [] },
       'read_only',
     );
     const without = allowedToolsFor({ gateCommand: null, allowedCommands: [] }, 'read_only');
     expect(without).toEqual(withGate);
-    expect(matchesAllowedTool('Bash', bash('null'), without, repo.path)).toBe(false);
   });
 });
 

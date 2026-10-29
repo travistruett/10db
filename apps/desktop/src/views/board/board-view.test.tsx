@@ -119,6 +119,16 @@ describe('BoardView', () => {
     });
   });
 
+  it('shows gate: none for a project with no gate command', async () => {
+    const project = projectViewDto({ gateCommand: null });
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([])),
+    );
+    renderApp('/board');
+    expect(await screen.findByText(/gate: none/)).toBeTruthy();
+  });
+
   it("shows the project's batch and retries a failed one", async () => {
     const batch = batchDto({ state: 'FAILED', failure: 'push_rejected' });
     const project = projectViewDto({

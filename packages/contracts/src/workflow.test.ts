@@ -48,11 +48,47 @@ describe('workstream state machine', () => {
     expect(canTransition(from, to)).toBe(false);
   });
 
-  it('has exactly the two builder-check edges beyond the original table', () => {
-    const edges = ALL.flatMap((from) => WORKSTREAM_TRANSITIONS[from].map((to) => `${from}>${to}`));
-    expect(edges).toContain('VERIFYING>WAITING_HUMAN');
-    expect(edges).toContain('WAITING_HUMAN>VERIFYING');
-    expect(edges).toHaveLength(42);
+  it('is the original table plus the two builder-check edges', () => {
+    const original: Record<WorkstreamState, readonly WorkstreamState[]> = {
+      [S.Queued]: [S.Starting, S.Cancelled],
+      [S.Starting]: [S.Running, S.Verifying, S.Recovering, S.PausedLimit, S.Failed, S.Cancelled],
+      [S.Running]: [
+        S.HandingOff,
+        S.Verifying,
+        S.WaitingHuman,
+        S.PausedLimit,
+        S.Recovering,
+        S.TakenOver,
+        S.Failed,
+        S.Cancelled,
+      ],
+      [S.HandingOff]: [
+        S.Running,
+        S.Verifying,
+        S.WaitingHuman,
+        S.PausedLimit,
+        S.Recovering,
+        S.Failed,
+        S.Cancelled,
+      ],
+      [S.Verifying]: [S.Done, S.Queued, S.Failed, S.Recovering, S.Cancelled],
+      [S.WaitingHuman]: [S.Running, S.HandingOff, S.Queued, S.Cancelled],
+      [S.PausedLimit]: [S.Queued, S.Cancelled],
+      [S.Recovering]: [S.Queued, S.Failed, S.Cancelled],
+      [S.TakenOver]: [S.Recovering, S.Cancelled],
+      [S.Done]: [],
+      [S.Failed]: [S.Queued],
+      [S.Cancelled]: [],
+    };
+    const sorted = (table: Record<WorkstreamState, readonly WorkstreamState[]>) =>
+      Object.fromEntries(ALL.map((from) => [from, [...table[from]].sort()]));
+    expect(sorted(WORKSTREAM_TRANSITIONS)).toEqual(
+      sorted({
+        ...original,
+        [S.Verifying]: [...original[S.Verifying], S.WaitingHuman],
+        [S.WaitingHuman]: [...original[S.WaitingHuman], S.Verifying],
+      }),
+    );
   });
 
   it('lets every non-terminal state be cancelled', () => {

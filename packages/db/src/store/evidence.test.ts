@@ -1,6 +1,6 @@
 import { EvidenceKind } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { getEvidence, insertEvidence, listEvidence } from './evidence';
+import { getEvidence, insertEvidence, InvalidEvidenceRowError, listEvidence } from './evidence';
 import type { Store } from './store';
 import { insertTask } from './tasks';
 import { createTestStore, seedProject } from './test-support';
@@ -43,5 +43,16 @@ describe('evidence', () => {
     ]);
     const note = listEvidence(store.db, ws.id)[1];
     expect(note && getEvidence(store.db, note.id).summary).toBe('Rename it');
+  });
+
+  it('reports a stored gate row with no command as an invalid evidence row', () => {
+    const ws = seedWorkstream();
+    const base = { workstreamId: ws.id, summary: 'out', logPath: null, commitShas: [] };
+    const gate = store.write((ctx) =>
+      insertEvidence(ctx, { ...base, kind: EvidenceKind.Gate, command: 'make gate', exitCode: 0 }),
+    ).value;
+    store.db.$client.prepare('UPDATE evidence SET command = NULL WHERE id = ?').run(gate.id);
+    expect(() => getEvidence(store.db, gate.id)).toThrow(InvalidEvidenceRowError);
+    expect(() => listEvidence(store.db, ws.id)).toThrow(InvalidEvidenceRowError);
   });
 });
