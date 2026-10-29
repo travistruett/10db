@@ -34,6 +34,7 @@ import {
 import { readDefaultPersonas } from '@10db/harness';
 import { ManualClock } from '../src/clock';
 import {
+  createBaseUpdates,
   createBatchStarter,
   createDeliveryJobs,
   createShipper,
@@ -263,6 +264,7 @@ export function createDeliveryHarness(
   const shipper = createShipper({
     ...ctx,
     gate: createGateRunner({ sandbox: null, logger: silentLogger }),
+    baseUpdates: createBaseUpdates(ctx),
     clock: new ManualClock(),
     dataDir: data.path,
     sessionEnv: () => ({ PATH: '/usr/bin:/bin' }),
