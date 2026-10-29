@@ -1,5 +1,7 @@
 import {
+  ConflictError,
   EventType,
+  InvalidError,
   TaskHasDependentsError,
   TaskStartedError,
   TaskStatus,
@@ -14,7 +16,9 @@ import * as schema from '../schema';
 import { activeClaims } from './claims';
 import { listEventsAfter } from './events';
 import type { Store } from './store';
-import { cancelTask, getTask, insertTask, listTasks } from './tasks';
+import { insertBatch } from './batches';
+import { insertBoardColumn } from './board-columns';
+import { cancelTask, getTask, insertTask, listTasks, moveTask, patchTask } from './tasks';
 import { createTestStore, seedProject } from './test-support';
 import { insertWorkstream, transitionWorkstream } from './workstreams';
 
@@ -139,5 +143,49 @@ describe('cancelTask', () => {
     const base = seedTask(project.id, 'base');
     const child = seedTask(project.id, 'child', [base.id]);
     expect(store.write((ctx) => cancelTask(ctx, child.id)).value.status).toBe(TaskStatus.Cancelled);
+  });
+
+  it('refuses while the project has a batch being cut', () => {
+    const project = seedProject(store);
+    const task = seedTask(project.id);
+    store.write((ctx) =>
+      insertBatch(ctx, { projectId: project.id, title: 'Cutting', baseBranch: 'main' }),
+    );
+    expect(() => store.write((ctx) => cancelTask(ctx, task.id))).toThrow(/being cut/);
+    expect(getTask(store.db, task.id).status).toBe(TaskStatus.Open);
+  });
+
+  it('clears the parked column of a removed task', () => {
+    const project = seedProject(store);
+    const task = seedTask(project.id);
+    const column = store.write((ctx) =>
+      insertBoardColumn(ctx, project.id, { name: 'Later' }),
+    ).value;
+    store.write((ctx) => moveTask(ctx, task.id, { to: column.id, after: null, before: null }));
+    expect(store.write((ctx) => cancelTask(ctx, task.id)).value.boardColumnId).toBeNull();
+  });
+
+  it('refuses a removed task as a new task dependency, and edits or moves of it', () => {
+    const project = seedProject(store);
+    const gone = seedTask(project.id, 'gone');
+    store.write((ctx) => cancelTask(ctx, gone.id));
+    expect(() => seedTask(project.id, 'child', [gone.id])).toThrow(InvalidError);
+    expect(() => store.write((ctx) => patchTask(ctx, gone.id, { title: 'x' }))).toThrow(
+      ConflictError,
+    );
+    expect(() =>
+      store.write((ctx) => moveTask(ctx, gone.id, { to: null, after: null, before: null })),
+    ).toThrow(/removed/);
+  });
+
+  it('names the cancel route only for a live workstream', () => {
+    const project = seedProject(store);
+    const task = seedTask(project.id);
+    const ws = store.write((ctx) => insertWorkstream(ctx, task.id)).value;
+    expect(() => store.write((ctx) => cancelTask(ctx, task.id))).toThrow(
+      `/workstreams/${ws.id}/cancel`,
+    );
+    store.write((ctx) => transitionWorkstream(ctx, ws.id, { to: S.Cancelled, fence: null }));
+    expect(() => store.write((ctx) => cancelTask(ctx, task.id))).toThrow(/already run/);
   });
 });

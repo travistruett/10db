@@ -79,9 +79,7 @@ describe('POST /tasks/:id/remove', () => {
     const project = await seedProject();
     const keep = await seedTask(project.id, 'keep');
     const gone = await seedTask(project.id, 'gone');
-    const head = daemon.state.db.$client.prepare('select max(seq) as seq from events').get() as {
-      seq: number;
-    };
+    const head = await api().get('/events/head', z.object({ seq: z.number() }));
 
     const res = await send('POST', `/tasks/${gone.id}/remove`);
 
@@ -152,7 +150,8 @@ describe('POST /tasks/:id/remove', () => {
     expect(res.status).toBe(409);
     const error = ConflictBody.parse(res.body);
     expect(error.error).toBe('conflict');
-    expect(error.message).toContain(`/workstreams/${started.id}/cancel`);
+    expect(error.message.includes(`/workstreams/${started.id}/cancel`)).toBe(!cancelRun);
+    expect(error.message).toContain(started.id);
     expect((await tasksOf(project.id)).map((t) => [t.id, t.status])).toEqual([[task.id, 'open']]);
   });
 
@@ -170,6 +169,21 @@ describe('POST /tasks/:id/remove', () => {
     const project = await seedProject();
     const task = await seedTask(project.id, 'gone');
     await send('POST', `/tasks/${task.id}/remove`);
+    const other = await seedTask(project.id, 'other');
+    expect(
+      (await send('POST', `/tasks/${task.id}/move`, { to: null, after: other.id, before: null }))
+        .status,
+    ).toBe(409);
+    expect(
+      (
+        await send('POST', `/projects/${project.id}/tasks`, {
+          title: 't',
+          acceptanceCriteria: ['x'],
+          areas: ['src'],
+          dependsOn: [task.id],
+        })
+      ).status,
+    ).toBe(400);
     expect((await send('PATCH', `/tasks/${task.id}`, { title: 'new' })).status).toBe(409);
     expect((await send('POST', `/tasks/${task.id}/start`)).status).toBe(409);
   });

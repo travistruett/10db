@@ -1,3 +1,5 @@
+import type { WorkstreamId } from './ids';
+
 export type DomainErrorCode = 'not_found' | 'conflict' | 'invalid';
 
 /** An error the API maps to an HTTP status; its message is safe to show the builder. */
@@ -32,15 +34,20 @@ export class InvalidError extends DomainError {
   }
 }
 
-/** A task that has run, or is running, can't be removed from the board; its workstream is cancelled instead. */
+/**
+ * A task that has run, or is running, can't be removed from the board. A live workstream is
+ * cancelled through its own route; one that already ended leaves the task as it is.
+ */
 export class TaskStartedError extends DomainError {
   override readonly name = 'TaskStartedError';
-  constructor(title: string, workstreamId: string | null) {
+  constructor(title: string, run: { readonly id: WorkstreamId; readonly live: boolean } | null) {
     super(
       'conflict',
-      workstreamId === null
+      run === null
         ? `Task ${title} is finished and can't be removed`
-        : `Task ${title} has started; cancel its workstream ${workstreamId} instead (POST /workstreams/${workstreamId}/cancel)`,
+        : run.live
+          ? `Task ${title} has started; cancel its workstream ${run.id} instead (POST /workstreams/${run.id}/cancel)`
+          : `Task ${title} has already run (workstream ${run.id}) and can't be removed`,
     );
   }
 }
