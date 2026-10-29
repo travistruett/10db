@@ -96,8 +96,14 @@ function Choices({ project, mode, proposal, onStarted }: ChoicesProps) {
         />
       ))}
       <Text size="sm">
-        Verification: 10db runs <Code>{project.gateCommand}</Code> after each implement step, and
-        review steps must approve.
+        {project.gateCommand === null ? (
+          'Verification: none. Each finished task waits for you to check it.'
+        ) : (
+          <>
+            Verification: 10db runs <Code>{project.gateCommand}</Code> after each implement step,
+            and review steps must approve.
+          </>
+        )}
       </Text>
       {blockers.length > 0 ? (
         <List size="sm" c="yellow">

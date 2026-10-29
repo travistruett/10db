@@ -1,5 +1,6 @@
 export { createLiveSessions } from './live-sessions';
-export { failedGateEvidence } from './failed-gate';
+export { outstandingFixEvidence } from './fix-evidence';
+export { applyCheckAnswer, RunnerNotStartedError } from './check-answer';
 export { nextActionAfterCrash, nextActionOnAnotherAccount } from './next-action';
 export {
   createRunner,
@@ -8,3 +9,4 @@ export {
   type RunnerLimits,
   type RunnerOptions,
 } from './runner';
+export { liveCheckCard, raiseBuilderCheck } from './builder-check';

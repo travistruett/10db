@@ -50,7 +50,7 @@ import {
 import { MoveCause, type AccountMoves, type AccountService } from '../accounts';
 import { syncWarning, type BenchmarkSync } from '../benchmarks';
 import type { ApiServices, TaskRemovalServices } from '../api';
-import type { BatchStarter, Shipper } from '../delivery';
+import { workstreamChanges, type BatchStarter, type Shipper } from '../delivery';
 import { markGhRequired } from '../environment';
 import type { EventBus, StateStore } from '../events';
 import { inspectFolder } from '../folders';
@@ -134,6 +134,7 @@ export function createServices(deps: {
       await deps.runner.cancel(id);
       return getWorkstream(db, id);
     },
+    workstreamChanges: (id) => workstreamChanges({ db, git: deps.git }, id),
     retryWorkstream(id) {
       const ws = retryWorkstream(deps.state, id);
       if (ws.batchId !== null) deps.starter.reopen(ws.batchId);

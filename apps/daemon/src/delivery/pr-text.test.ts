@@ -300,6 +300,47 @@ describe('prBody', () => {
     );
   });
 
+  it('says each task was approved in 10db when the project has no gate command', () => {
+    const body = prBody({
+      batch: { id: mintId('Batch') },
+      tasks: [{ title: 'Alpha', description: '', acceptanceCriteria: ['it works'], state: 'DONE' }],
+      gate: { command: null },
+      ci: { repo: 'acme/widgets', sha: SHA },
+      template: null,
+    });
+    expect(body).toContain(
+      [
+        '## How it was checked',
+        '',
+        'No gate command: each task was approved in 10db.',
+        '',
+        `CI run for the pushed head: [0123456](https://github.com/acme/widgets/commit/${SHA}/checks)`,
+      ].join('\n'),
+    );
+    expect(body).not.toContain('Gate, run on the branch');
+  });
+
+  it.each([
+    { name: 'a task shipped anyway', states: ['DONE', 'FAILED'] },
+    { name: 'a task still queued', states: ['QUEUED'] },
+    { name: 'no tasks done at all', states: ['CANCELLED', 'FAILED'] },
+  ] as const)('does not claim approval for $name when there is no gate command', ({ states }) => {
+    const body = prBody({
+      batch: { id: mintId('Batch') },
+      tasks: states.map((state, i) => ({
+        title: `Task ${String(i)}`,
+        description: '',
+        acceptanceCriteria: [],
+        state,
+      })),
+      gate: { command: null },
+      ci: { repo: 'acme/widgets', sha: SHA },
+      template: null,
+    });
+    expect(body).toContain('## How it was checked\n\nNo gate command.\n\nCI run');
+    expect(body).not.toContain('approved in 10db');
+  });
+
   it('never says the gate exited 0, since CI is the check the reviewer reads', () => {
     const body = prBody({
       batch: { id: mintId('Batch') },

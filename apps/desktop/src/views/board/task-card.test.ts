@@ -1,3 +1,4 @@
+import { mintId } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { taskDto, workstreamDto } from '../../test/fixtures';
 import { cardSummary } from './task-card';
@@ -14,5 +15,15 @@ describe('cardSummary', () => {
     const summary = cardSummary(taskDto(), workstreamDto({ state }), new Map());
     expect(summary).toContain(said);
     expect(summary).not.toContain(state);
+  });
+
+  it('says a finished task with no gate is ready for the builder to check', () => {
+    const inboxId = mintId('InboxItem');
+    const summary = cardSummary(
+      taskDto(),
+      workstreamDto({ state: 'WAITING_HUMAN', nextAction: { kind: 'builder_review', inboxId } }),
+      new Map(),
+    );
+    expect(summary).toContain('Ready for you to check.');
   });
 });

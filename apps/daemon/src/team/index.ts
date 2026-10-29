@@ -7,4 +7,11 @@ export {
   retryWorkstream,
   startTaskWithPlan,
 } from './steps';
-export { advanceSteps, failStep, moveAfter, sendBackSteps, type StepEntry } from './step-flow';
+export {
+  advanceSteps,
+  failStep,
+  moveAfter,
+  sendBackSteps,
+  sendBackTarget,
+  type StepEntry,
+} from './step-flow';

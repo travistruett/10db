@@ -15,6 +15,7 @@ export {
   LaunchVerdict,
 } from './launch-rule';
 export { recoverBatches } from './recover';
+export { workstreamChanges } from './workstream-changes';
 export { allCheckouts, checkoutOf, claimScopeOf, projectAtCheckout } from './checkout';
 export { createWorktreeDependencies, type WorktreeDependencies } from './worktree-dependencies';
 export { resolvePnpm } from './pnpm-binary';

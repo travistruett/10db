@@ -240,6 +240,20 @@ describe('buildSessionPrompt', () => {
     expect(
       buildSessionPrompt({ ...base, evidence, action: { kind: 'fix', evidenceId: evidence.id } }),
     ).toContain('FAIL badge.test.ts');
+    const builder = {
+      ...evidence,
+      kind: 'builder' as const,
+      command: null,
+      exitCode: null,
+      summary: 'Rename the badge prop',
+    };
+    const sentBack = buildSessionPrompt({
+      ...base,
+      evidence: builder,
+      action: { kind: 'fix', evidenceId: builder.id },
+    });
+    expect(sentBack).toContain('The builder sent the work back: Rename the badge prop');
+    expect(sentBack).not.toContain('The gate failed');
     expect(
       buildSessionPrompt({
         ...base,

@@ -1,10 +1,19 @@
-import { cpSync, mkdtempSync, readdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   DB_MIGRATIONS_DIR,
+  MigrationIntegrityError,
   migrateDatabase,
   openDatabase,
   schema,
@@ -97,6 +106,33 @@ describe('migrateDatabase', () => {
   });
 });
 
+describe('a migration that leaves a dangling reference', () => {
+  it('is refused with a typed error', () => {
+    const custom = join(dir, 'dangling');
+    mkdirSync(join(custom, 'meta'), { recursive: true });
+    writeFileSync(
+      join(custom, 'meta/_journal.json'),
+      JSON.stringify({
+        version: '7',
+        dialect: 'sqlite',
+        entries: [{ idx: 0, version: '6', when: 1, tag: '0000_dangling', breakpoints: true }],
+      }),
+    );
+    writeFileSync(
+      join(custom, '0000_dangling.sql'),
+      [
+        'CREATE TABLE parent (id integer PRIMARY KEY);',
+        'CREATE TABLE child (id integer PRIMARY KEY, parent_id integer REFERENCES parent(id));',
+        'INSERT INTO child (id, parent_id) VALUES (1, 99);',
+      ].join('\n--> statement-breakpoint\n'),
+    );
+    expect(() => {
+      migrateDatabase(db, custom);
+    }).toThrow(MigrationIntegrityError);
+    expect(db.$client.pragma('foreign_keys', { simple: true })).toBe(1);
+  });
+});
+
 describe('migrating a v0.1.0 database', () => {
   const AT = '2026-10-21T12:00:00.000Z';
   const projectA = 'prj_a';
@@ -107,6 +143,7 @@ describe('migrating a v0.1.0 database', () => {
     const released = join(dir, 'released');
     cpSync(DB_MIGRATIONS_DIR, released, { recursive: true });
     const journalPath = join(released, 'meta/_journal.json');
+    // A journal this test just copied from the shipped migrations; the shape is known.
     const journal = JSON.parse(readFileSync(journalPath, 'utf8')) as {
       entries: { tag: string }[];
     };
@@ -124,6 +161,12 @@ describe('migrating a v0.1.0 database', () => {
     migrateDatabase(db, releasedMigrations());
     // The rows below stand alone: only the columns under test matter.
     db.$client.pragma('foreign_keys = OFF');
+    db.$client
+      .prepare(
+        `INSERT INTO accounts (id, kind, label, payer, settings, lane_cap, created_at, updated_at)
+         VALUES ('acc_x', 'subscription', 'main', 'me', '{}', 2, ?, ?)`,
+      )
+      .run(AT, AT);
     const project = db.$client.prepare(
       `INSERT INTO projects (id, name, repo_path, gate_command, areas, hazards, max_lanes, provider, account_id,
          model, effort, handoff_pct, nudge_pct, human_wait_minutes, created_at, updated_at)
@@ -131,6 +174,25 @@ describe('migrating a v0.1.0 database', () => {
     );
     project.run(projectA, 'a', '/tmp/a', AT, AT);
     project.run(projectB, 'b', '/tmp/b', AT, AT);
+    for (const [suffix, projectId] of [
+      ['a', projectA],
+      ['b', projectB],
+    ] as const) {
+      db.$client
+        .prepare(
+          `INSERT INTO tasks (id, project_id, title, description, acceptance_criteria, areas, status,
+             board_order, workspace_mode, created_at, updated_at)
+           VALUES (?, ?, 't', '', '[]', '[]', 'ready', 1, 'shared', ?, ?)`,
+        )
+        .run(`tsk_${suffix}`, projectId, AT, AT);
+      db.$client
+        .prepare(
+          `INSERT INTO workstreams (id, task_id, project_id, state, next_action, attempt, recovery_attempts,
+             model, effort, fence, created_at, updated_at)
+           VALUES (?, ?, ?, 'RUNNING', 'none', 1, 0, 'sonnet', 'medium', 1, ?, ?)`,
+        )
+        .run(`wst_${suffix}`, `tsk_${suffix}`, projectId, AT, AT);
+    }
     const claim = db.$client.prepare(
       `INSERT INTO claims (id, project_id, workstream_id, kind, name, exclusive, lease_expires_at, created_at, updated_at)
        VALUES (?, ?, ?, 'hazard', 'docker', 1, ?, ?, ?)`,
@@ -194,5 +256,75 @@ describe('migrating a v0.1.0 database', () => {
         )
         .run(projectA, AT, AT),
     ).toThrow(/UNIQUE constraint failed: batches\.project_id/);
+  });
+});
+
+describe('migrating a database that has a gate command and evidence', () => {
+  const AT = '2026-10-21T12:00:00.000Z';
+
+  /** Every migration but the last, so the one under test runs over rows a real database holds. */
+  function allButLast(): string {
+    const older = join(dir, 'older');
+    cpSync(DB_MIGRATIONS_DIR, older, { recursive: true });
+    const journalPath = join(older, 'meta/_journal.json');
+    const journal = JSON.parse(readFileSync(journalPath, 'utf8')) as {
+      entries: { tag: string }[];
+    };
+    const last = journal.entries.pop();
+    if (last === undefined) throw new Error('no migrations');
+    writeFileSync(journalPath, JSON.stringify(journal, null, 2));
+    rmSync(join(older, `${last.tag}.sql`));
+    return older;
+  }
+
+  it('keeps the rows that point at a project and an evidence row', () => {
+    migrateDatabase(db, allButLast());
+    const run = (sql: string, ...args: string[]): void => {
+      db.$client.prepare(sql).run(...args);
+    };
+    run(
+      `INSERT INTO accounts (id, kind, label, payer, settings, lane_cap, created_at, updated_at)
+       VALUES ('acc_x', 'subscription', 'main', 'me', '{}', 2, ?, ?)`,
+      AT,
+      AT,
+    );
+    run(
+      `INSERT INTO projects (id, name, repo_path, gate_command, areas, hazards, max_lanes, provider, account_id,
+         handoff_pct, nudge_pct, human_wait_minutes, created_at, updated_at)
+       VALUES ('prj_a', 'a', '/tmp/a', 'make gate', '[]', '[]', 2, 'claude', 'acc_x', 40, 50, 10, ?, ?)`,
+      AT,
+      AT,
+    );
+    run(
+      `INSERT INTO tasks (id, project_id, title, description, acceptance_criteria, areas, status, board_order,
+         workspace_mode, created_at, updated_at)
+       VALUES ('tsk_a', 'prj_a', 't', '', '[]', '[]', 'queued', 1, 'shared', ?, ?)`,
+      AT,
+      AT,
+    );
+    run(
+      `INSERT INTO workstreams (id, task_id, project_id, state, next_action, attempt, recovery_attempts, model,
+         effort, fence, created_at, updated_at)
+       VALUES ('wst_a', 'tsk_a', 'prj_a', 'QUEUED', '{"kind":"start"}', 0, 0, 'sonnet', 'medium', 0, ?, ?)`,
+      AT,
+      AT,
+    );
+    run(
+      `INSERT INTO evidence (id, workstream_id, kind, command, exit_code, summary, commit_shas, created_at)
+       VALUES ('evd_a', 'wst_a', 'gate', 'make gate', 0, 'ok', '[]', ?)`,
+      AT,
+    );
+    migrateDatabase(db);
+    expect(db.$client.prepare('SELECT gate_command FROM projects').all()).toEqual([
+      { gate_command: 'make gate' },
+    ]);
+    expect(db.$client.prepare('SELECT project_id FROM tasks').all()).toEqual([
+      { project_id: 'prj_a' },
+    ]);
+    expect(db.$client.prepare('SELECT command, exit_code FROM evidence').all()).toEqual([
+      { command: 'make gate', exit_code: 0 },
+    ]);
+    db.$client.prepare('UPDATE projects SET gate_command = NULL').run();
+    expect(db.$client.pragma('foreign_key_check')).toEqual([]);
   });
 });

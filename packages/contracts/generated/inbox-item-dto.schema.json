@@ -17,7 +17,8 @@
         "permission",
         "proposal",
         "review",
-        "flag"
+        "flag",
+        "check"
       ]
     },
     "state": {

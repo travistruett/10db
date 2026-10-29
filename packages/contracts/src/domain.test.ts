@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  EvidenceDto,
   HandoffInput,
   McpToolInputs,
   mintId,
@@ -38,6 +39,56 @@ describe('ids', () => {
 
   it('rejects an ID minted for another kind', () => {
     expect(WorkstreamId.safeParse(mintId('Task')).success).toBe(false);
+  });
+});
+
+describe('a project with no gate command', () => {
+  const base = {
+    name: 'demo',
+    repoPath: '/tmp/demo',
+    areas: [{ name: 'src', globs: ['src/**'] }],
+  };
+
+  it('ProjectInput accepts no gate command and defaults it to null', () => {
+    expect(ProjectInput.parse(base).gateCommand).toBeNull();
+    expect(ProjectInput.parse({ ...base, gateCommand: null }).gateCommand).toBeNull();
+    expect(ProjectInput.safeParse({ ...base, gateCommand: '' }).success).toBe(false);
+  });
+
+  it('ProjectPatch can clear the gate command', () => {
+    expect(ProjectPatch.parse({ gateCommand: null })).toEqual({ gateCommand: null });
+    expect(ProjectPatch.safeParse({ gateCommand: '' }).success).toBe(false);
+  });
+});
+
+describe('EvidenceDto', () => {
+  const common = {
+    id: mintId('Evidence'),
+    workstreamId: mintId('Workstream'),
+    summary: 'note',
+    logPath: null,
+    commitShas: [],
+    createdAt: '2026-10-28T12:00:00.000Z',
+  };
+
+  it.each([
+    [
+      'gate with a command and exit code',
+      { kind: 'gate', command: 'make gate', exitCode: 0 },
+      true,
+    ],
+    ['agent with a command and exit code', { kind: 'agent', command: 'x', exitCode: 1 }, true],
+    ['builder with neither', { kind: 'builder', command: null, exitCode: null }, true],
+    [
+      'agent without a command or exit code',
+      { kind: 'agent', command: null, exitCode: null },
+      false,
+    ],
+    ['gate without a command', { kind: 'gate', command: null, exitCode: null }, false],
+    ['gate without an exit code', { kind: 'gate', command: 'make gate', exitCode: null }, false],
+    ['builder with a command', { kind: 'builder', command: 'x', exitCode: 0 }, false],
+  ])('%s', (_name, fields, ok) => {
+    expect(EvidenceDto.safeParse({ ...common, ...fields }).success).toBe(ok);
   });
 });
 

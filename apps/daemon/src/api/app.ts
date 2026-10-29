@@ -397,6 +397,9 @@ export function createApp(deps: ApiDeps) {
     .post('/workstreams/:id/retry', (c) =>
       c.json(deps.services.retryWorkstream(WorkstreamId.parse(c.req.param('id')))),
     )
+    .get('/workstreams/:id/changes', async (c) =>
+      c.json(await deps.services.workstreamChanges(WorkstreamId.parse(c.req.param('id')))),
+    )
     .get(
       '/inbox',
       validator('query', (query): { state?: string } =>

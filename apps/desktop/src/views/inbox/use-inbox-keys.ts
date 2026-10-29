@@ -16,9 +16,13 @@ const DIGITS = ['1', '2', '3', '4'] as const;
 /** Marks the selected card, so keys pressed inside it still count. */
 export const SELECTED_CARD_ATTRIBUTE = 'data-inbox-selected';
 
+/** Marks a region that handles its own keys, such as a scrolling diff; the Inbox keys skip it. */
+export const KEYS_IGNORE_ATTRIBUTE = 'data-inbox-keys-ignore';
+
 /** Keys count on the page itself or inside the selected card; a focused link or button elsewhere keeps its own key. */
 function inScope(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return true;
+  if (target.closest(`[${KEYS_IGNORE_ATTRIBUTE}]`) !== null) return false;
   return (
     target === document.body ||
     target === document.documentElement ||

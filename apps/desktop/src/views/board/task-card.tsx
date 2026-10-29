@@ -4,6 +4,9 @@ import { StateBadge } from '../factory/state-badge';
 import { STATE_LABELS } from '../factory/workstream-state';
 import { StepCell } from '../factory/step-cell';
 
+/** The status line of a finished task with no gate: only the builder's Approve completes it. */
+const READY_TO_CHECK = 'Ready for you to check';
+
 export interface TaskCardProps {
   readonly task: TaskDto;
   /** The task's workstream while it is active or failed; a finished one isn't repeated on the card. */
@@ -35,6 +38,7 @@ export function cardSummary(
     waits.length > 0 ? `Waits on ${waits.join(', ')}.` : null,
     task.status === TaskStatus.Cancelled ? 'Cancelled.' : null,
     workstream ? `Workstream ${STATE_LABELS[workstream.state]}.` : null,
+    workstream?.nextAction.kind === 'builder_review' ? `${READY_TO_CHECK}.` : null,
   ]
     .filter((part) => part !== null)
     .join(' ');
@@ -75,7 +79,11 @@ export function TaskCard({ task, workstream, peers, pullRequest }: TaskCardProps
         {workstream ? (
           <Group gap="xs" align="flex-start">
             <StateBadge state={workstream.state} />
-            <StepCell workstream={workstream} />
+            {workstream.nextAction.kind === 'builder_review' ? (
+              <Text size="sm">{READY_TO_CHECK}</Text>
+            ) : (
+              <StepCell workstream={workstream} />
+            )}
           </Group>
         ) : null}
         {/* The pull request link is laid over this space by the board, outside the card's button. */}
