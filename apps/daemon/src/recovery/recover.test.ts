@@ -752,20 +752,16 @@ describe('recoverOnStartup for a project without a gate command', () => {
     });
   });
 
-  it('a stale check card beside work that was sent back is left alone', async () => {
+  it('a stale check card beside a workstream waiting on an answer is not raised again', async () => {
     const ws = waitingForCheck('OPEN');
     state.write((ctx) => {
-      transitionWorkstream(ctx, ws.workstream.id, {
-        to: 'QUEUED',
-        fence: null,
-        patch: { nextAction: { kind: 'fix', evidenceId: mintId('Evidence') } },
+      patchWorkstream(ctx, ws.workstream.id, null, {
+        nextAction: { kind: 'answer', inboxId: mintId('InboxItem'), providerSessionId: 'p' },
       });
     });
-    const before = getWorkstream(state.db, ws.workstream.id);
-    await recover();
-    const after = getWorkstream(state.db, ws.workstream.id);
-    expect(after.state).toBe('QUEUED');
-    expect(after.nextAction).toEqual(before.nextAction);
+    const report = await recover();
+    expect(report.parked).not.toContain(ws.workstream.id);
+    expect(getWorkstream(state.db, ws.workstream.id).nextAction.kind).not.toBe('builder_review');
     expect(checkCards().map((c) => c.state)).toEqual(['OPEN']);
   });
 

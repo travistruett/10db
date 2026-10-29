@@ -2,6 +2,14 @@ import { CheckChoice, InvalidError, type InboxAnswer, type InboxItemDto } from '
 import type { WriteContext } from '@10db/db';
 import type { AfterCommit, Runner } from './runner';
 
+/** A check card was answered before the runner existed; the answer is refused, not dropped. */
+export class RunnerNotStartedError extends Error {
+  override readonly name = 'RunnerNotStartedError';
+  constructor() {
+    super('The runner has not started, so the check cannot be answered yet');
+  }
+}
+
 function choiceOf(answer: InboxAnswer): CheckChoice {
   const known = Object.values(CheckChoice).find((c) => c === answer.choice);
   if (!known) throw new InvalidError(`"${answer.choice}" is not a choice on a check card`);

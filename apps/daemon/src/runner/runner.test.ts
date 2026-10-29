@@ -3565,6 +3565,55 @@ describe('without a gate command', () => {
       ).toHaveLength(1);
     });
 
+    it('past maxFixAttempts on a review flow, the lane is freed and a retry fixes the note', async () => {
+      let freed = 0;
+      engine = await createTestEngine(
+        {
+          Alpha: [
+            implement('op-check-0042'),
+            [approve('op-check-0043'), turn],
+            implement('op-check-0044'),
+          ],
+        },
+        { gateCommand: null },
+        {
+          onLaneFreed: () => {
+            freed += 1;
+          },
+        },
+      );
+      const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+      await runToWait(workstream.id);
+      await runToWait(workstream.id);
+      engine.state.write((ctx) => {
+        patchWorkstream(ctx, workstream.id, null, {
+          attempt: DEFAULT_RUNNER_LIMITS.maxFixAttempts,
+        });
+      });
+      const before = freed;
+      answerCheck('send_back', note);
+      const [evidence] = listEvidence(engine.store.db, workstream.id);
+      expect(freed).toBe(before + 1);
+      expect(ws(workstream.id)).toMatchObject({
+        state: 'FAILED',
+        stepIndex: 0,
+        nextAction: { kind: 'fix', evidenceId: evidence?.id },
+      });
+      expect(ws(workstream.id).steps.map((s) => s.status)).toEqual(['failed', 'pending']);
+      engine.retry(workstream.id);
+      expect(ws(workstream.id)).toMatchObject({
+        state: 'QUEUED',
+        stepIndex: 0,
+        nextAction: { kind: 'fix', evidenceId: evidence?.id },
+      });
+      expect(ws(workstream.id).steps[0]).toMatchObject({ status: 'running', attempts: 0 });
+      await runToWait(workstream.id);
+      expect(engine.adapter.prompts[2]?.prompt).toContain(
+        `The builder sent the work back: ${note}`,
+      );
+      expect(ws(workstream.id)).toMatchObject({ state: 'QUEUED', stepIndex: 1 });
+    });
+
     it('the last send back the limit allows still queues a fix', async () => {
       const { workstream } = await waiting('op-check-0018');
       engine.state.write((ctx) => {
@@ -3820,6 +3869,57 @@ describe('without a gate command', () => {
         await runToWait(workstream.id);
         expect(engine.adapter.prompts[2]).toMatchObject({ resume: null });
         expect(engine.adapter.prompts[2]?.prompt).toContain(sentBack);
+      });
+
+      it('not once the work has been fixed and a reviewer sent it back again', async () => {
+        const reject = {
+          do: 'mcp' as const,
+          tool: 'complete_step',
+          args: { opId: 'op-check-0038', summary: '1. Add a test.', verdict: 'reject' },
+        };
+        engine = await createTestEngine(
+          {
+            Alpha: [
+              implement('op-check-0036'),
+              [
+                {
+                  do: 'mcp',
+                  tool: 'complete_step',
+                  args: { opId: 'op-check-0037', summary: 'Fine.', verdict: 'approve' },
+                },
+                turn,
+              ],
+              implement('op-check-0039'),
+              [reject, turn],
+              [
+                {
+                  do: 'mcp',
+                  tool: 'write_handoff',
+                  args: handoffArgs('op-check-0040', 'Add the test'),
+                },
+                { do: 'rate_limit', status: 'rejected', resetsInSeconds: 600 },
+              ],
+              implement('op-check-0041'),
+            ],
+          },
+          noGate,
+        );
+        const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+        await runToWait(workstream.id);
+        await runToWait(workstream.id);
+        answerCheck('send_back', note);
+        // The test clock is frozen: each step is entered later than the note.
+        engine.clock.advance(1_000);
+        await runToWait(workstream.id);
+        engine.clock.advance(1_000);
+        await runToWait(workstream.id);
+        expect(ws(workstream.id).nextAction).toMatchObject({ kind: 'resume' });
+        moveTo(secondPlan().id);
+        requeue(workstream.id);
+        await runToWait(workstream.id);
+        expect(engine.adapter.prompts[5]).toMatchObject({ resume: null });
+        expect(engine.adapter.prompts[5]?.prompt).not.toContain(sentBack);
+        expect(engine.adapter.prompts[5]?.prompt).toContain('1. Add a test.');
       });
 
       it('after a restart that finds the fix session mid resume', async () => {

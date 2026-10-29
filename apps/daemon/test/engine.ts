@@ -60,6 +60,7 @@ import { protectedPaths } from '../src/guard';
 import { createMcpHandler } from '../src/mcp';
 import {
   applyCheckAnswer,
+  RunnerNotStartedError,
   createLiveSessions,
   createRunner,
   DEFAULT_RUNNER_LIMITS,
@@ -143,8 +144,10 @@ export async function createTestEngine(
     onParkedAnswer: (target, item) => {
       runner?.deliverParkedAnswer(target, item);
     },
-    onCheckAnswer: (ctx, item, answer) =>
-      runner ? applyCheckAnswer(runner, ctx, item, answer) : () => undefined,
+    onCheckAnswer: (ctx, item, answer) => {
+      if (!runner) throw new RunnerNotStartedError();
+      return applyCheckAnswer(runner, ctx, item, answer);
+    },
     onFlagAnswer: (item, answer) => {
       answerAccountCard?.(item, answer);
     },

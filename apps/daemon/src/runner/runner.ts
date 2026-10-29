@@ -7,6 +7,7 @@ import {
   InboxKind,
   PermissionChoice,
   StepRole,
+  StepStatus,
   ToolAccess,
   WorkstreamState as S,
   AccountKind,
@@ -436,7 +437,11 @@ export function createRunner(opts: RunnerOptions): Runner {
     fence: number | null,
     row: WorkstreamRow,
     reason: string,
-    patch: { readonly nextAction?: NextAction } = {},
+    patch: {
+      readonly nextAction?: NextAction;
+      readonly stepIndex?: number;
+      readonly steps?: WorkstreamStep[];
+    } = {},
   ): void {
     // A workstream waiting for the builder reaches FAILED through VERIFYING, as it reaches DONE.
     if (row.state === S.WaitingHuman)
@@ -445,10 +450,10 @@ export function createRunner(opts: RunnerOptions): Runner {
       to: S.Failed,
       fence,
       patch: {
-        ...patch,
         failureReason: reason,
         currentSessionId: null,
         ...(row.steps.length > 0 ? { steps: failStep(row.steps, row.stepIndex) } : {}),
+        ...patch,
       },
       reason,
     });
@@ -2044,18 +2049,32 @@ export function createRunner(opts: RunnerOptions): Runner {
         logPath: null,
         commitShas: checkedCommits(ctx.tx, id),
       });
-      if (attempt > opts.limits.maxFixAttempts) {
-        const reason = `The builder sent the work back ${String(attempt)} times, and the retry limit (${String(opts.limits.maxFixAttempts)}) is used up. The last note: ${note}`;
-        failIn(ctx, id, null, row, reason, {
-          nextAction: { kind: 'fix', evidenceId: evidence.id },
-        });
-        return () => {
-          flagFailed(row, reason);
-        };
-      }
       // The step that did the work fixes it, as when a reviewer rejects: the check is raised from the
       // last step, which may be a read-only review.
       const targetIndex = row.steps.length > 0 ? sendBackTarget(row.steps, row.stepIndex) : null;
+      if (attempt > opts.limits.maxFixAttempts) {
+        const reason = `The builder sent the work back ${String(attempt)} times, and the retry limit (${String(opts.limits.maxFixAttempts)}) is used up. The last note: ${note}`;
+        // The failure sits on the step the work was sent back to, so a retry restarts it with the note.
+        failIn(ctx, id, null, row, reason, {
+          nextAction: { kind: 'fix', evidenceId: evidence.id },
+          ...(targetIndex === null
+            ? {}
+            : {
+                stepIndex: targetIndex,
+                steps: row.steps.map((s, i) =>
+                  i === targetIndex
+                    ? { ...s, status: StepStatus.Failed }
+                    : i === row.stepIndex
+                      ? { ...s, status: StepStatus.Pending }
+                      : s,
+                ),
+              }),
+        });
+        return () => {
+          flagFailed(row, reason);
+          opts.onLaneFreed();
+        };
+      }
       const target = targetIndex === null ? undefined : row.steps[targetIndex];
       const up = target ? escalated(row, target, 'the builder sent the work back') : null;
       if (up?.moved && target?.profileId)

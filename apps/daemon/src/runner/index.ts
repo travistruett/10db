@@ -1,6 +1,6 @@
 export { createLiveSessions } from './live-sessions';
 export { outstandingFixEvidence } from './fix-evidence';
-export { applyCheckAnswer } from './check-answer';
+export { applyCheckAnswer, RunnerNotStartedError } from './check-answer';
 export { nextActionAfterCrash, nextActionOnAnotherAccount } from './next-action';
 export {
   createRunner,

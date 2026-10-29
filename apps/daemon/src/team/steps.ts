@@ -145,9 +145,13 @@ export function retryWorkstream(state: StateStore, id: WorkstreamId): Workstream
         recoveryAttempts: 0,
         failureReason: null,
         steps,
-        nextAction: latest
-          ? { kind: 'continue_from_handoff', handoffId: latest.id }
-          : { kind: 'start' },
+        // Work the builder sent back that ran out of attempts keeps its note for the restarted step.
+        nextAction:
+          row.nextAction.kind === 'fix'
+            ? row.nextAction
+            : latest
+              ? { kind: 'continue_from_handoff', handoffId: latest.id }
+              : { kind: 'start' },
       },
       reason: 'retried by the builder',
     });
