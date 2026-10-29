@@ -255,13 +255,7 @@ export function listTasks(db: DbReader, projectId: ProjectId): TaskDto[] {
 export function cancelTask(ctx: WriteContext, id: TaskId): TaskDto {
   const task = getTask(ctx.tx, id);
   if (task.status === TaskStatus.Cancelled) return task;
-  const run = ctx.tx
-    .select({ id: schema.workstreams.id, state: schema.workstreams.state })
-    .from(schema.workstreams)
-    .where(eq(schema.workstreams.taskId, id))
-    .orderBy(desc(schema.workstreams.createdAt), desc(schema.workstreams.id))
-    .limit(1)
-    .get();
+  const run = latestRun(ctx.tx, id);
   if (task.status !== TaskStatus.Open || run)
     throw new TaskStartedError(
       task.title,
@@ -283,18 +277,64 @@ export function cancelTask(ctx: WriteContext, id: TaskId): TaskDto {
     throw new ConflictError(
       `Batch "${cutting.title}" is being cut; remove ${task.title} once it has started`,
     );
+  refuseWhileOpenDependents(ctx, task, 'remove');
+  return retireTask(ctx, id);
+}
+
+/**
+ * Closes a task whose latest run failed: the same soft remove as `cancelTask`, so it keeps its row,
+ * id and edges and drops out of the project's list. Its workstreams are left as they are, so the
+ * Factory still shows the failed run, and nothing here touches the branch or worktree its batch holds.
+ * A failed run released its claims when it failed. A task whose latest run is anything else is
+ * refused: an unstarted one is removed, a live or cancelled run is cancelled or restarted. A task
+ * that open tasks wait on is refused, naming them. Closing a closed task answers it and emits nothing.
+ */
+export function closeTask(ctx: WriteContext, id: TaskId): TaskDto {
+  const task = getTask(ctx.tx, id);
+  if (task.status === TaskStatus.Cancelled) return task;
+  if (task.status !== TaskStatus.Open)
+    throw new ConflictError(`Task ${task.title} is finished and can't be closed`);
+  if (latestRun(ctx.tx, id)?.state !== WorkstreamState.Failed)
+    throw new ConflictError(
+      `Task ${task.title} hasn't failed, so it can't be closed; a task that never started is removed, and a running one is cancelled in Factory`,
+    );
+  refuseWhileOpenDependents(ctx, task, 'close');
+  return retireTask(ctx, id);
+}
+
+function latestRun(db: DbReader, taskId: TaskId) {
+  return db
+    .select({ id: schema.workstreams.id, state: schema.workstreams.state })
+    .from(schema.workstreams)
+    .where(eq(schema.workstreams.taskId, taskId))
+    .orderBy(desc(schema.workstreams.createdAt), desc(schema.workstreams.id))
+    .limit(1)
+    .get();
+}
+
+/** A cancelled dependency is never done, so an open dependent would wait for ever. */
+function refuseWhileOpenDependents(
+  ctx: WriteContext,
+  task: Pick<TaskDto, 'id' | 'title'>,
+  how: 'remove' | 'close',
+): void {
   const dependents = ctx.tx
     .select({ title: schema.tasks.title })
     .from(schema.taskDeps)
     .innerJoin(schema.tasks, eq(schema.tasks.id, schema.taskDeps.taskId))
-    .where(and(eq(schema.taskDeps.dependsOnId, id), eq(schema.tasks.status, TaskStatus.Open)))
+    .where(and(eq(schema.taskDeps.dependsOnId, task.id), eq(schema.tasks.status, TaskStatus.Open)))
     .orderBy(asc(schema.tasks.boardOrder))
     .all();
   if (dependents.length > 0)
     throw new TaskHasDependentsError(
       task.title,
       dependents.map((d) => d.title),
+      how,
     );
+}
+
+/** The soft remove both routes end in: status cancelled, parked column cleared, one event. */
+function retireTask(ctx: WriteContext, id: TaskId): TaskDto {
   ctx.tx
     .update(schema.tasks)
     .set({ status: TaskStatus.Cancelled, boardColumnId: null, updatedAt: ctx.now })

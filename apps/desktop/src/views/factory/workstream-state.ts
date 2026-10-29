@@ -38,6 +38,11 @@ export function canCancel(state: State): boolean {
   return !isTerminal(state);
 }
 
+/** A task whose latest run failed can be closed (the daemon refuses any other). */
+export function canClose(state: State): boolean {
+  return state === S.Failed;
+}
+
 /** Only a failed workstream can be retried (the daemon refuses anything else). */
 export function canRetry(state: State): boolean {
   return state === S.Failed;
