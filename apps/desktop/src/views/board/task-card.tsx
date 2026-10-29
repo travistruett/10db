@@ -1,16 +1,21 @@
-import { TaskStatus, type TaskDto, type TaskId, type WorkstreamDto } from '@10db/contracts';
-import { Badge, Group, Paper, Stack, Text } from '@mantine/core';
-import { StateBadge } from '../factory/state-badge';
-import { STATE_LABELS } from '../factory/workstream-state';
-import { StepCell } from '../factory/step-cell';
-
-/** The status line of a finished task with no gate: only the builder's Approve completes it. */
-const READY_TO_CHECK = 'Ready for you to check';
+import {
+  TaskStatus,
+  type BatchDto,
+  type TaskDto,
+  type TaskId,
+  type WorkstreamDto,
+} from '@10db/contracts';
+import { Badge, Box, Group, Paper, Stack, Text } from '@mantine/core';
+import { taskState } from './task-state';
 
 export interface TaskCardProps {
   readonly task: TaskDto;
-  /** The task's workstream while it is active or failed; a finished one isn't repeated on the card. */
+  /** The task's workstream while it is active or failed, or finished work that is not shipped yet. */
   readonly workstream: WorkstreamDto | undefined;
+  /** The batch the workstream ships in; it says whether finished work was shipped. */
+  readonly batch?: BatchDto | undefined;
+  /** The project's gate command, named while the task is checked. */
+  readonly gateCommand?: string | null | undefined;
   /** Titles and statuses of the project's tasks, for the dependency marker. */
   readonly peers: ReadonlyMap<TaskId, Pick<TaskDto, 'title' | 'status'>>;
   /** The pull request of the batch that shipped a finished task. */
@@ -29,27 +34,55 @@ export function cardSummary(
   task: TaskDto,
   workstream: WorkstreamDto | undefined,
   peers: TaskCardProps['peers'],
+  batch?: BatchDto,
+  gateCommand: string | null = null,
 ): string {
   const waits = waitsOn(task, peers);
   const criteria = task.acceptanceCriteria.length;
+  const state = taskState(workstream, batch, gateCommand);
   return [
     task.areas.length > 0 ? `Areas: ${task.areas.join(', ')}.` : null,
     criteria > 0 ? `${String(criteria)} ${criteria === 1 ? 'criterion' : 'criteria'}.` : null,
     waits.length > 0 ? `Waits on ${waits.join(', ')}.` : null,
     task.status === TaskStatus.Cancelled ? 'Cancelled.' : null,
-    workstream ? `Workstream ${STATE_LABELS[workstream.state]}.` : null,
-    workstream?.nextAction.kind === 'builder_review' ? `${READY_TO_CHECK}.` : null,
+    state ? `${state.line}.` : null,
   ]
     .filter((part) => part !== null)
     .join(' ');
 }
 
-/** A board card: title, areas, unfinished dependencies, live workstream state (spec §10) and room for a shipped pull request's link. */
-export function TaskCard({ task, workstream, peers, pullRequest }: TaskCardProps) {
+/** A board card: title, areas, unfinished dependencies and, in one line, what the task is doing (spec §10); room for a shipped pull request's link. */
+export function TaskCard({
+  task,
+  workstream,
+  batch,
+  gateCommand = null,
+  peers,
+  pullRequest,
+}: TaskCardProps) {
   const waits = waitsOn(task, peers);
   const criteria = task.acceptanceCriteria.length;
+  const state = taskState(workstream, batch, gateCommand);
+  // Queued keeps the plain border; the other states take their DESIGN.md color as a border, thicker
+  // when the builder's turn: no fill, no stripe, no animation.
+  const colored = state !== null && state.color !== 'gray';
+  const waiting = state?.color === 'yellow';
   return (
-    <Paper withBorder radius="md" p="sm">
+    <Paper
+      withBorder
+      radius="md"
+      p="sm"
+      data-testid="task-card"
+      {...(colored ? { 'data-state-color': state.color } : {})}
+      style={
+        colored
+          ? {
+              borderColor: `var(--mantine-color-${state.color}-filled)`,
+              borderWidth: waiting ? 2 : 1,
+            }
+          : { borderWidth: 1 }
+      }
+    >
       <Stack gap="xs">
         {/* The card's menu sits over the top-right corner, outside this element; the title leaves room. */}
         <Text size="sm" fw={500} pr={28}>
@@ -76,14 +109,23 @@ export function TaskCard({ task, workstream, peers, pullRequest }: TaskCardProps
         {waits.length > 0 ? (
           <Text size="xs" c="dimmed">{`Waits on ${waits.join(', ')}`}</Text>
         ) : null}
-        {workstream ? (
-          <Group gap="xs" align="flex-start">
-            <StateBadge state={workstream.state} />
-            {workstream.nextAction.kind === 'builder_review' ? (
-              <Text size="sm">{READY_TO_CHECK}</Text>
-            ) : (
-              <StepCell workstream={workstream} />
-            )}
+        {state ? (
+          <Group gap={6} wrap="nowrap" align="flex-start">
+            <Box
+              data-testid="state-dot"
+              data-color={state.color}
+              mt={5}
+              w={8}
+              h={8}
+              style={{
+                flex: 'none',
+                borderRadius: '50%',
+                background: `var(--mantine-color-${state.color}-filled)`,
+              }}
+            />
+            <Text size="sm" fw={waiting ? 600 : 400} lineClamp={2}>
+              {state.line}
+            </Text>
           </Group>
         ) : null}
         {/* The pull request link is laid over this space by the board, outside the card's button. */}

@@ -13,7 +13,7 @@
 | `apps/daemon/src/git/`                         | `currentBranch`, `remoteUrl`, `fetch`, `switchNewBranch`, `push`                                                                                                                           |
 | `apps/daemon/src/github/`                      | the `Gh` interface over the `gh` CLI                                                                                                                                                       |
 | `apps/daemon/src/guard/`                       | agents never push in `pull_request` projects, and run only an allowlist of read-only `gh` commands                                                                                         |
-| `apps/desktop/src/views/board/batch-strip.tsx` | the batch strip on the board; Settings' General form and the new-project form hold the delivery fields                                                                                     |
+| `apps/desktop/src/views/board/batch-strip.tsx` | the line above the board for a branch several tasks share; `batch-panel.tsx` is a task drawer's delivery section; Settings' General form and the new-project form hold the delivery fields |
 
 Settings shows the base branch and the PR title prefix in either delivery, because it checks both fields whatever the delivery and an error must never be hidden; the new-project form shows them only for pull requests.
 
@@ -31,10 +31,10 @@ CUTTING → OPEN → SHIPPING → SHIPPED | CLOSED | FAILED; FAILED → SHIPPING
 ## Shipping
 
 - The ship trigger moves an `OPEN` batch to `SHIPPING` when its last member settles (`DONE` or `CANCELLED`); startup runs the same check. A member is a task's latest workstream in the batch.
-- Ship anyway, on a failed member's card or on the strip, ships a batch whose members are all `DONE`, `CANCELLED` or `FAILED`. While any member still runs, waits or is queued, it is refused with the unfinished work named, in an `OPEN` or a `FAILED` batch alike, and it never reopens a batch; a refusal on the card keeps the card open.
-- Retry on a failed member's card runs that workstream again in its batch. Retry on the strip acts on a `FAILED` batch: it ships settled work and otherwise reopens the batch (`FAILED → OPEN`) so the unfinished work runs and the batch ships itself.
+- Ship anyway, on a failed member's card or in a task's drawer, ships a batch whose members are all `DONE`, `CANCELLED` or `FAILED`. While any member still runs, waits or is queued, it is refused with the unfinished work named, in an `OPEN` or a `FAILED` batch alike, and it never reopens a batch; a refusal on the card keeps the card open.
+- Retry on a failed member's card runs that workstream again in its batch. Retry in a task's drawer acts on a `FAILED` batch: it ships settled work and otherwise reopens the batch (`FAILED → OPEN`) so the unfinished work runs and the batch ships itself.
 - A project with no gate command ships without the gate step: each task was approved by the builder on its `check` card before it counted as `DONE` (`decisions/2026-10-28-optional-gate.md`). The PR body's "How it was checked" section then reads "No gate command: each task was approved in 10db." in place of the gate command block; the CI line stays.
-- Abandon takes an `OPEN` or `FAILED` batch none of whose workstreams is running (in a lane, `TAKEN_OVER`, or `WAITING_HUMAN` with its session still live), cancels its unfinished members and raises a card naming the finished tasks and the local branch that holds their code.
+- Abandon takes an `OPEN` or `FAILED` batch none of whose workstreams is running (in a lane, `TAKEN_OVER`, or `WAITING_HUMAN` with its session still live), cancels its unfinished members and raises a card naming the finished tasks and the local branch that holds their code. The drawer, the card menu and the line above the board hold Abandon back while a run is live and name it, so the refusal never surprises the builder.
 
 ## Recovery
 

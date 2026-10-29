@@ -2,6 +2,8 @@ import {
   isTerminal,
   SYSTEM_COLUMN_LABEL,
   RiskTag,
+  WorkspaceMode,
+  type BatchDto,
   type FlowId,
   type TaskDto,
   type TaskId,
@@ -24,6 +26,7 @@ import { usePatchTask, useRetryWorkstream } from '../../daemon/queries';
 import { StateBadge } from '../factory/state-badge';
 import { canRetry } from '../factory/workstream-state';
 import { criteriaLines } from './areas-text';
+import { BatchPanel } from './batch-panel';
 import { FlowSelect } from './flow-select';
 import { RISK_LABEL } from './risk-labels';
 
@@ -37,11 +40,28 @@ export interface TaskDrawerProps {
   readonly peers: ReadonlyMap<TaskId, Pick<TaskDto, 'title'>>;
   /** The task's workstream, when it has one; its state shows above the fields. */
   readonly workstream?: WorkstreamDto;
+  /** The batch the workstream ships in; its branch, pull request and actions show in the drawer. */
+  readonly batch?: BatchDto;
+  /** Every workstream, so the batch knows its members; used for Ship anyway and fix tasks. */
+  readonly workstreams?: readonly WorkstreamDto[];
+  readonly workspaceMode?: WorkspaceMode;
+  /** The project's gate command, named beside a failed gate's exit code. */
+  readonly gateCommand?: string | null;
   readonly onClose: () => void;
 }
 
 /** A task's details: what it is and how it runs, editable where the daemon allows. */
-export function TaskDrawer({ task, columnName, peers, workstream, onClose }: TaskDrawerProps) {
+export function TaskDrawer({
+  task,
+  columnName,
+  peers,
+  workstream,
+  batch,
+  workstreams = [],
+  workspaceMode = WorkspaceMode.Shared,
+  gateCommand = null,
+  onClose,
+}: TaskDrawerProps) {
   const patch = usePatchTask();
   const initialCriteria = task.acceptanceCriteria.join('\n');
   const [title, setTitle] = useState(task.title);
@@ -119,6 +139,14 @@ export function TaskDrawer({ task, columnName, peers, workstream, onClose }: Tas
     >
       <Stack gap="lg">
         {workstream ? <WorkstreamLine workstream={workstream} /> : null}
+        {batch ? (
+          <BatchPanel
+            batch={batch}
+            workstreams={workstreams}
+            workspaceMode={workspaceMode}
+            gateCommand={gateCommand}
+          />
+        ) : null}
         <TextInput
           aria-label="Title"
           size="md"

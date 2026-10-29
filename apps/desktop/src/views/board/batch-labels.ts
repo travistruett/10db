@@ -1,4 +1,4 @@
-import { BatchState } from '@10db/contracts';
+import { BatchFailure, BatchState } from '@10db/contracts';
 import type { MantineColor } from '@mantine/core';
 
 const B = BatchState;
@@ -22,4 +22,15 @@ export const BATCH_LABELS: Readonly<Record<BatchState, string>> = {
   [B.Closed]: 'Closed: no changes',
   [B.Failed]: 'Not shipped',
   [B.Abandoned]: 'Abandoned',
+};
+
+/** Why a batch was not shipped, in plain words. */
+export const FAILURE_LABELS: Readonly<Record<BatchFailure, string>> = {
+  [BatchFailure.WrongBranch]: 'The checkout is not on the batch branch',
+  [BatchFailure.DirtyCheckout]: 'The checkout has uncommitted changes',
+  [BatchFailure.GateFailed]: 'The gate failed',
+  [BatchFailure.GateTimedOut]: 'The gate timed out',
+  [BatchFailure.PushRejected]: 'git push was rejected',
+  [BatchFailure.GhUnavailable]: 'gh is missing or signed out',
+  [BatchFailure.Network]: 'A network step failed',
 };

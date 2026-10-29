@@ -3,7 +3,7 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse, type RequestHandler, type WebSocketHandler } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, eventStream, renderApp, server } from '../../test/daemon';
-import { workstreamDto } from '../../test/fixtures';
+import { batchDto, projectViewDto, workstreamDto } from '../../test/fixtures';
 
 function serve(...overrides: (RequestHandler | WebSocketHandler)[]): void {
   server.use(
@@ -235,5 +235,43 @@ describe('FactoryView benchmark sync note', () => {
     const alert = await screen.findByRole('alert');
     expect(within(alert).getByText('Artificial Analysis refused the key')).toBeTruthy();
     expect(screen.queryByText(/Routing uses the last good scores\.$/)).toBeNull();
+  });
+});
+
+describe('FactoryView batch history', () => {
+  it('lists each batch with its state, branch and pull request, newest first', async () => {
+    const project = projectViewDto();
+    const shipped = batchDto({
+      projectId: project.id,
+      title: 'Alpha first',
+      state: 'SHIPPED',
+      branch: '10db/alpha',
+      prUrl: 'https://github.com/acme/widgets/pull/1',
+    });
+    const open = batchDto({ projectId: project.id, title: 'Beta second', branch: '10db/beta' });
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/batches'), () => HttpResponse.json([open, shipped])),
+      workstreams([]),
+    );
+    renderApp('/factory');
+
+    const list = await screen.findByRole('list', { name: 'Batches' });
+    const items = within(list).getAllByRole('listitem');
+    expect(items.map((i) => i.getAttribute('aria-label'))).toEqual(['Beta second', 'Alpha first']);
+    const alpha = items[1];
+    if (!alpha) throw new Error('Alpha first is not listed');
+    expect(within(alpha).getByText('Shipped')).toBeTruthy();
+    expect(within(alpha).getByText('10db/alpha')).toBeTruthy();
+    expect(within(alpha).getByRole('link', { name: 'Pull request' }).getAttribute('href')).toBe(
+      'https://github.com/acme/widgets/pull/1',
+    );
+  });
+
+  it('shows no Batches section when the project has none', async () => {
+    serve(workstreams([]));
+    renderApp('/factory');
+    await screen.findByText('No workstreams are running.');
+    expect(screen.queryByRole('list', { name: 'Batches' })).toBeNull();
   });
 });
