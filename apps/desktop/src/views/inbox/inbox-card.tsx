@@ -14,12 +14,15 @@ import {
   UnstyledButton,
 } from '@mantine/core';
 import type { KeyboardEvent, RefObject } from 'react';
+import { isDismissable } from './inbox-rows';
 import { McpApprovalDetails, mcpReview } from './mcp-approval';
 import { SELECTED_CARD_ATTRIBUTE } from './use-inbox-keys';
 import { KIND_LABELS, optionLabel } from './permission-labels';
 
 export interface InboxCardProps {
   readonly item: InboxItemDto;
+  /** How many identical flags the row stands for; 1 for any other card. */
+  readonly count: number;
   readonly selected: boolean;
   readonly choice: string | null;
   readonly note: string;
@@ -31,6 +34,8 @@ export interface InboxCardProps {
   readonly onNote: (note: string) => void;
   readonly onNoteFocus: () => void;
   readonly onSubmit: () => void;
+  /** Dismisses the row's flags; only offered for a flag with no options. */
+  readonly onDismiss: () => void;
 }
 
 /** Card text is untrusted (agent and tool output): it is only ever rendered as text. */
@@ -53,6 +58,7 @@ function CardBody({ item }: { readonly item: InboxItemDto }) {
 // Destructured: reading `props.x` in render, with a ref among the props, trips react-hooks/refs.
 export function InboxCard({
   item,
+  count,
   selected,
   choice,
   note,
@@ -64,35 +70,56 @@ export function InboxCard({
   onNote,
   onNoteFocus,
   onSubmit,
+  onDismiss,
 }: InboxCardProps) {
   const review = mcpReview(item);
+  const dismissable = isDismissable(item);
+  // Every card waits on the builder, a flag included: yellow, never the red of a failure.
   const kind = (
-    <Badge
-      size="sm"
-      variant="light"
-      color={item.kind === InboxKind.Flag && !review ? 'red' : 'yellow'}
-    >
+    <Badge size="sm" variant="light" color="yellow">
       {review ? 'MCP server' : KIND_LABELS[item.kind]}
     </Badge>
   );
+  const times =
+    count > 1 ? (
+      <Badge size="sm" variant="default">
+        ×{count}
+      </Badge>
+    ) : null;
 
   if (!selected) {
+    // What a flag is about, such as a path, is its body's first line.
+    const about = item.kind === InboxKind.Flag ? (item.body.split('\n')[0] ?? '') : '';
     return (
-      <UnstyledButton
-        onClick={onSelect}
-        p="sm"
+      <Group
+        gap="xs"
+        wrap="nowrap"
+        pr="xs"
         style={{
           borderRadius: 'var(--mantine-radius-md)',
           border: '1px solid var(--mantine-color-default-border)',
         }}
       >
-        <Group gap="sm" wrap="nowrap">
-          {kind}
-          <Text size="sm" lineClamp={1}>
-            {item.title}
-          </Text>
-        </Group>
-      </UnstyledButton>
+        <UnstyledButton onClick={onSelect} p="sm" style={{ flex: 1, minWidth: 0 }}>
+          <Group gap="sm" wrap="nowrap">
+            {kind}
+            {times}
+            <Text size="sm" lineClamp={1} style={{ flexShrink: 0 }}>
+              {item.title}
+            </Text>
+            {about === '' ? null : (
+              <Text size="sm" c="dimmed" ff="monospace" lineClamp={1}>
+                {about}
+              </Text>
+            )}
+          </Group>
+        </UnstyledButton>
+        {dismissable ? (
+          <Button size="xs" variant="subtle" loading={pending} onClick={onDismiss}>
+            Dismiss
+          </Button>
+        ) : null}
+      </Group>
     );
   }
 
@@ -109,6 +136,7 @@ export function InboxCard({
       <Stack gap="sm">
         <Group gap="sm" wrap="nowrap">
           {kind}
+          {times}
           <Text fw={600}>{item.title}</Text>
         </Group>
         {review ? (
@@ -167,8 +195,17 @@ export function InboxCard({
           </Alert>
         ) : null}
         <Group justify="flex-end">
-          <Button size="sm" loading={pending} onClick={onSubmit}>
-            {hasOptions ? 'Send answer' : 'Dismiss'}
+          <Button
+            size="sm"
+            loading={pending}
+            onClick={onSubmit}
+            rightSection={
+              <Kbd size="xs" aria-hidden>
+                ↵
+              </Kbd>
+            }
+          >
+            {hasOptions ? 'Send answer' : count > 1 ? 'Dismiss All' : 'Dismiss'}
           </Button>
         </Group>
       </Stack>
