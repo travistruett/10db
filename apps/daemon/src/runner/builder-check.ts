@@ -1,8 +1,15 @@
-import type { InboxItemDto, ProjectId, WorkstreamId } from '@10db/contracts';
+import {
+  CheckChoice,
+  WorkstreamState,
+  type InboxItemDto,
+  type ProjectId,
+  type WorkstreamId,
+} from '@10db/contracts';
 import {
   insertInboxItem,
   openItemsForWorkstream,
   type DbReader,
+  type WorkstreamRow,
   type WriteContext,
 } from '@10db/db';
 
@@ -39,8 +46,8 @@ export function raiseBuilderCheck(ctx: WriteContext, check: BuilderCheck): Inbox
     title: `Ready for you to check: ${check.taskTitle}`,
     body: `${commitsReady(check.commits.length)} Approve to finish the task, or send it back with a note.`,
     options: [
-      { label: 'approve', description: 'The work is right' },
-      { label: 'send_back', description: 'It needs more work' },
+      { label: CheckChoice.Approve, description: 'The work is right' },
+      { label: CheckChoice.SendBack, description: 'It needs more work' },
     ],
     recommendation: null,
     category: 'product',
@@ -54,4 +61,19 @@ export function raiseBuilderCheck(ctx: WriteContext, check: BuilderCheck): Inbox
     foldKey: null,
     targets: [{ workstreamId: check.workstreamId, sessionId: null }],
   });
+}
+
+/** The commits the builder was shown on the workstream's live check card. */
+export function checkedCommits(db: DbReader, workstreamId: WorkstreamId): string[] {
+  const commits = liveCheckCard(db, workstreamId)?.detail?.['commits'];
+  return Array.isArray(commits) ? commits.filter((c) => typeof c === 'string') : [];
+}
+
+/** True while the workstream waits on its check card: no session, no lane, only the builder can move it. */
+export function waitsForCheck(row: WorkstreamRow): boolean {
+  return (
+    row.state === WorkstreamState.WaitingHuman &&
+    row.currentSessionId === null &&
+    row.nextAction.kind === 'builder_review'
+  );
 }

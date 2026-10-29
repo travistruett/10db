@@ -1,8 +1,10 @@
 import { createHash } from 'node:crypto';
 import {
+  CheckChoice,
   ConflictError,
   DECISION_CATEGORIES,
   InboxAnswer,
+  InboxAnswerRefused,
   InboxKind,
   InboxState,
   InvalidError,
@@ -105,6 +107,13 @@ function foldKeyFor(
   return createHash('sha256').update(parts.join('\u0000')).digest('hex');
 }
 
+/** A card with options takes one of them as its choice. */
+function assertKnownChoice(item: InboxItemDto, answer: InboxAnswer): void {
+  if (item.options.length > 0 && !item.options.some((o) => o.label === answer.choice)) {
+    throw new InvalidError(`Choose one of: ${item.options.map((o) => o.label).join(', ')}`);
+  }
+}
+
 interface Waiter {
   resolve(answer: InboxAnswer): void;
 }
@@ -185,6 +194,11 @@ export function createInboxService(deps: {
   onParkedAnswer(target: InboxTarget, item: InboxItemDto): void;
   /** Acts on an open flag card's answer before it is recorded; throwing keeps the card open. */
   onFlagAnswer?(item: InboxItemDto, answer: InboxAnswer): void;
+  /**
+   * Acts on an open check card's answer before it is recorded; throwing keeps the card open. A check
+   * card closes with its answer and never reaches `onParkedAnswer`.
+   */
+  onCheckAnswer?(item: InboxItemDto, answer: InboxAnswer): void;
 }): InboxService {
   const waiters = new Map<InboxItemId, Map<SessionId, Waiter>>();
 
@@ -209,6 +223,10 @@ export function createInboxService(deps: {
     if (answer === null) throw new ConflictError(`Inbox item ${item.id} has no answer to deliver`);
     if (item.state === InboxState.Answered) {
       transition(item.id, [InboxState.Answered], InboxState.Delivering);
+    }
+    // The workstream it concerns acted on the answer when it was given; there is nothing to hand on.
+    if (item.kind === InboxKind.Check) {
+      return transition(item.id, [InboxState.Delivering], InboxState.Resolved);
     }
     const live = waiters.get(item.id);
     waiters.delete(item.id);
@@ -266,14 +284,20 @@ export function createInboxService(deps: {
       const current = getInboxItem(deps.state.db, id);
       if (current.kind === InboxKind.Flag && current.state === InboxState.Open)
         deps.onFlagAnswer?.(current, answer);
+      if (current.kind === InboxKind.Check && current.state === InboxState.Open) {
+        assertKnownChoice(current, answer);
+        // Send Back is the builder's note to the agent; without one the agent has nothing to act on.
+        if (answer.choice === CheckChoice.SendBack && (answer.note ?? '').trim() === '') {
+          throw new InboxAnswerRefused('Send Back needs a note saying what to change');
+        }
+        deps.onCheckAnswer?.(current, answer);
+      }
       const answered = deps.state.write((ctx) => {
         const item = getInboxItem(ctx.tx, id);
         if (item.state !== InboxState.Open) {
           throw new ConflictError(`Inbox item ${id} is already ${item.state}`);
         }
-        if (item.options.length > 0 && !item.options.some((o) => o.label === answer.choice)) {
-          throw new InvalidError(`Choose one of: ${item.options.map((o) => o.label).join(', ')}`);
-        }
+        assertKnownChoice(item, answer);
         const closesDirectly =
           item.kind !== InboxKind.Question && item.kind !== InboxKind.Permission;
         const updated = updateInboxItem(ctx, id, {

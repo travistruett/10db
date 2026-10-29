@@ -5,6 +5,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { serve, upgradeWebSocket, type WebSocketServerLike } from '@hono/node-server';
 import {
+  CheckChoice,
   EventType,
   PROTOCOL_VERSION,
   type InboxAnswer,
@@ -326,6 +327,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     state,
     onParkedAnswer: (target, item) => {
       runner?.deliverParkedAnswer(target, item);
+    },
+    onCheckAnswer: (item, answer) => {
+      for (const target of item.targets) {
+        if (answer.choice === CheckChoice.Approve) runner?.approveCheck(target.workstreamId);
+        else runner?.sendBack(target.workstreamId, answer.note ?? '');
+      }
     },
     onFlagAnswer: (item, answer) => {
       answerBatchCard?.(item, answer);

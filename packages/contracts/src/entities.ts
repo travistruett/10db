@@ -378,6 +378,13 @@ export const InboxAnswer = z.object({
 });
 export type InboxAnswer = z.infer<typeof InboxAnswer>;
 
+/** The two answers to a check card: the work is right, or it goes back with a note. */
+export const CheckChoice = {
+  Approve: 'approve',
+  SendBack: 'send_back',
+} as const;
+export type CheckChoice = (typeof CheckChoice)[keyof typeof CheckChoice];
+
 export const InboxTarget = z.object({
   workstreamId: WorkstreamId,
   sessionId: SessionId.nullable(),

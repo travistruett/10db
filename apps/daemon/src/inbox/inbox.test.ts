@@ -5,6 +5,7 @@ import {
   ConflictError,
   DEFAULT_HAZARDS,
   EventType,
+  InboxAnswerRefused,
   InvalidError,
   mintId,
   type InboxItemDto,
@@ -1236,5 +1237,97 @@ describe('permission broker without a sandbox keeps its Read and Edit cards', ()
     expect(listPermissionRules(state.db, ws.project.id, ws.workstream.id)).toEqual([
       expect.objectContaining({ toolName, pattern: null }),
     ]);
+  });
+});
+
+describe('a check card', () => {
+  let checked: { item: InboxItemDto; choice: string; note: string | undefined }[];
+  let checkInbox: InboxService;
+
+  beforeEach(() => {
+    checked = [];
+    checkInbox = createInboxService({
+      state,
+      onParkedAnswer: (target, item) => parked.push({ target, item }),
+      onCheckAnswer: (item, answer) =>
+        checked.push({ item, choice: answer.choice, note: answer.note }),
+    });
+  });
+
+  function checkCard() {
+    const ws = seedWorkstream(base);
+    const card = state.write((ctx) =>
+      insertInboxItem(ctx, {
+        projectId: ws.project.id,
+        kind: 'check',
+        title: 'Ready for you to check: Task',
+        body: '1 commit is ready.',
+        options: [
+          { label: 'approve', description: 'The work is right' },
+          { label: 'send_back', description: 'It needs more work' },
+        ],
+        recommendation: null,
+        category: 'product',
+        urgency: 'normal',
+        detail: { workstreamId: ws.workstream.id },
+        foldKey: null,
+        targets: [{ workstreamId: ws.workstream.id, sessionId: null }],
+      }),
+    );
+    return card;
+  }
+
+  it.each([
+    { name: 'approve', answer: { choice: 'approve' } },
+    { name: 'approve with a note', answer: { choice: 'approve', note: 'fine' } },
+    { name: 'send back with a note', answer: { choice: 'send_back', note: 'Rename it' } },
+  ])('$name reaches onCheckAnswer once and never onParkedAnswer', ({ answer }) => {
+    const card = checkCard();
+    const done = checkInbox.answer(card.id, answer);
+    expect(done.state).toBe('RESOLVED');
+    expect(checked.map((c) => [c.item.id, c.choice, c.note])).toEqual([
+      [card.id, answer.choice, 'note' in answer ? answer.note : undefined],
+    ]);
+    expect(parked).toEqual([]);
+  });
+
+  it.each([
+    { name: 'no note', note: undefined },
+    { name: 'an empty note', note: '' },
+    { name: 'a blank note', note: '  \n ' },
+  ])('send back with $name is refused and leaves the card open', ({ note }) => {
+    const card = checkCard();
+    expect(() =>
+      checkInbox.answer(card.id, { choice: 'send_back', ...(note === undefined ? {} : { note }) }),
+    ).toThrow(InboxAnswerRefused);
+    expect(checked).toEqual([]);
+    expect(getInboxItem(state.db, card.id).state).toBe('OPEN');
+  });
+
+  it('an unknown choice is refused before anything acts', () => {
+    const card = checkCard();
+    expect(() => checkInbox.answer(card.id, { choice: 'ship_it' })).toThrow(InvalidError);
+    expect(checked).toEqual([]);
+    expect(getInboxItem(state.db, card.id).state).toBe('OPEN');
+  });
+
+  it.each(['ANSWERED', 'DELIVERING'] as const)(
+    'a %s card found at startup is closed without reaching onParkedAnswer',
+    (cardState) => {
+      const card = checkCard();
+      state.write((ctx) =>
+        updateInboxItem(ctx, card.id, { state: cardState, answer: { choice: 'approve' } }),
+      );
+      expect(checkInbox.redeliver(card.id).state).toBe('RESOLVED');
+      expect(parked).toEqual([]);
+      expect(checked).toEqual([]);
+    },
+  );
+
+  it('answering a closed card again is a conflict that acts on nothing', () => {
+    const card = checkCard();
+    checkInbox.answer(card.id, { choice: 'approve' });
+    expect(() => checkInbox.answer(card.id, { choice: 'approve' })).toThrow(ConflictError);
+    expect(checked).toHaveLength(1);
   });
 });

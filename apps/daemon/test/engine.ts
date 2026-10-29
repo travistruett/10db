@@ -1,6 +1,7 @@
 import type { AddressInfo } from 'node:net';
 import { homedir } from 'node:os';
 import { serve } from '@hono/node-server';
+import { CheckChoice } from '@10db/contracts';
 import type {
   AccountId,
   BatchId,
@@ -138,6 +139,12 @@ export async function createTestEngine(
     state,
     onParkedAnswer: (target, item) => {
       runner?.deliverParkedAnswer(target, item);
+    },
+    onCheckAnswer: (item, answer) => {
+      for (const target of item.targets) {
+        if (answer.choice === CheckChoice.Approve) runner?.approveCheck(target.workstreamId);
+        else runner?.sendBack(target.workstreamId, answer.note ?? '');
+      }
     },
     onFlagAnswer: (item, answer) => {
       answerAccountCard?.(item, answer);

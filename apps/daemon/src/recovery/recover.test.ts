@@ -684,13 +684,9 @@ describe('recoverOnStartup for a project without a gate command', () => {
     return { ...seeded, card };
   }
 
-  it.each([
-    { name: 'an open check card', cardState: 'OPEN' as const, restarts: 2 },
-    // Answering is delivered by the card's own handler; recovery only leaves the work parked.
-    { name: 'an answered check card', cardState: 'ANSWERED' as const, restarts: 1 },
-  ])('parks a waiting workstream on $name and keeps its card', async ({ cardState, restarts }) => {
-    const ws = waitingForCheck(cardState);
-    for (let i = 0; i < restarts; i += 1) {
+  it('parks a waiting workstream on an open check card and keeps it across restarts', async () => {
+    const ws = waitingForCheck('OPEN');
+    for (let i = 0; i < 2; i += 1) {
       const report = await recover();
       expect(report.parked).toEqual([ws.workstream.id]);
       expect(report.requeued).toEqual([]);
@@ -701,6 +697,28 @@ describe('recoverOnStartup for a project without a gate command', () => {
       });
       expect(checkCards().map((c) => c.id)).toEqual([ws.card?.id]);
     }
+    expect(parked).toEqual([]);
+  });
+
+  it('closes an answered check card without handing it to a session, then raises it again', async () => {
+    const ws = waitingForCheck('ANSWERED');
+    const first = await recover();
+    expect(first.parked).toEqual([ws.workstream.id]);
+    expect(first.redelivered).toEqual([ws.card?.id]);
+    expect(getWorkstream(state.db, ws.workstream.id)).toMatchObject({
+      state: 'WAITING_HUMAN',
+      nextAction: { kind: 'builder_review', inboxId: ws.card?.id },
+    });
+    expect(checkCards().map((c) => c.state)).toEqual(['RESOLVED']);
+    // The card is closed and the work still waits, so the next restart asks again, once.
+    await recover();
+    const live = checkCards().filter((c) => c.state === 'OPEN');
+    expect(live).toHaveLength(1);
+    expect(getWorkstream(state.db, ws.workstream.id)).toMatchObject({
+      state: 'WAITING_HUMAN',
+      nextAction: { kind: 'builder_review', inboxId: live[0]?.id },
+    });
+    expect(parked).toEqual([]);
   });
 
   it('checks for the card before the generic answer branch', async () => {

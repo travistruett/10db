@@ -4,6 +4,9 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
   ACCOUNT_CARD_DETAIL,
+  ConflictError,
+  InboxAnswerRefused,
+  mintId,
   ToolAccess,
   AccountCardChoice,
   MCP_APPROVAL_DETAIL,
@@ -26,6 +29,7 @@ import {
   listSessions,
   patchAccount,
   patchProject,
+  patchWorkstream,
   schema,
   seedAccount,
   transitionBatch,
@@ -42,6 +46,7 @@ import {
 } from '../briefing';
 import { createLauncher, KeychainError } from '../environment';
 import { recoverOnStartup, systemProcesses } from '../recovery';
+import { DEFAULT_RUNNER_LIMITS } from '../runner';
 import { createGit } from '../git';
 import { silentLogger } from '../log';
 import { createGateRunner, type GateRequest } from '../verify';
@@ -3425,5 +3430,214 @@ describe('without a gate command', () => {
     expect(ws(workstream.id).state).toBe('DONE');
     expect(listEvidence(engine.store.db, workstream.id)).toHaveLength(1);
     expect(checkCards()).toEqual([]);
+  });
+
+  describe('answering the check', () => {
+    const note = 'Rename the badge prop';
+    const answerCheck = (choice: string, withNote?: string) => {
+      const [card] = openChecks();
+      if (!card) throw new Error('no open check card');
+      return engine.inbox.answer(card.id, {
+        choice,
+        ...(withNote === undefined ? {} : { note: withNote }),
+      });
+    };
+    const waiting = async (op: string) => {
+      engine = await createTestEngine(
+        { Alpha: [implement(op), [turn], [turn], [turn], [turn], [turn]] },
+        { gateCommand: null },
+      );
+      const added = engine.addTask('Alpha');
+      await runToWait(added.workstream.id);
+      return added;
+    };
+    const doneTransitions = (id: Parameters<typeof ws>[0]) =>
+      transitions(id).filter((t) => t.endsWith('->DONE'));
+    const reviewCards = () => listInbox(engine.store.db, {}).filter((i) => i.kind === 'review');
+
+    it('approve completes with no session started', async () => {
+      const { task, workstream } = await waiting('op-check-0001');
+      const sessions = engine.adapter.prompts.length;
+      answerCheck('approve');
+      await engine.runner.idle();
+      expect(ws(workstream.id)).toMatchObject({ state: 'DONE', currentSessionId: null });
+      expect(getTask(engine.store.db, task.id).status).toBe('done');
+      expect(activeClaims(engine.store.db, workstream.id)).toEqual([]);
+      expect(getWorkstreamRow(engine.store.db, workstream.id).leaseOwner).toBeNull();
+      expect(engine.adapter.prompts).toHaveLength(sessions);
+      expect(checkCards().map((c) => c.state)).toEqual(['RESOLVED']);
+      expect(transitions(workstream.id).slice(-2)).toEqual([
+        'WAITING_HUMAN->VERIFYING',
+        'VERIFYING->DONE',
+      ]);
+      expect(listEvidence(engine.store.db, workstream.id)).toEqual([]);
+    });
+
+    it('approve raises no review card', async () => {
+      const { workstream } = await waiting('op-check-0002');
+      answerCheck('approve');
+      expect(ws(workstream.id).state).toBe('DONE');
+      expect(reviewCards()).toEqual([]);
+    });
+
+    it('with a gate, a finished task still raises its review card', async () => {
+      engine = await createTestEngine({ Alpha: [implement('op-check-0003')] });
+      const { workstream } = engine.addTask('Alpha');
+      await runToWait(workstream.id);
+      expect(ws(workstream.id).state).toBe('DONE');
+      expect(reviewCards()).toHaveLength(1);
+    });
+
+    it.each([
+      { name: 'send back', act: () => answerCheck('send_back', note), state: 'QUEUED' },
+      { name: 'an unanswered card', act: () => undefined, state: 'WAITING_HUMAN' },
+    ])('only Approve completes: $name does not', async ({ act, state }) => {
+      const { task, workstream } = await waiting('op-check-0004');
+      act();
+      expect(ws(workstream.id).state).toBe(state);
+      neverDone(workstream.id, task.id);
+      expect(activeClaims(engine.store.db, workstream.id).length).toBeGreaterThan(0);
+    });
+
+    it('send back records builder evidence and queues a fix', async () => {
+      const { workstream } = await waiting('op-check-0005');
+      const before = getWorkstreamRow(engine.store.db, workstream.id);
+      answerCheck('send_back', note);
+      const [evidence] = listEvidence(engine.store.db, workstream.id);
+      expect(evidence).toMatchObject({
+        kind: 'builder',
+        command: null,
+        exitCode: null,
+        summary: note,
+      });
+      expect(ws(workstream.id)).toMatchObject({
+        state: 'QUEUED',
+        currentSessionId: null,
+        attempt: before.attempt + 1,
+        nextAction: { kind: 'fix', evidenceId: evidence?.id },
+      });
+      expect(checkCards().map((c) => c.state)).toEqual(['RESOLVED']);
+      expect(activeClaims(engine.store.db, workstream.id).length).toBeGreaterThan(0);
+      expect(getWorkstreamRow(engine.store.db, workstream.id).leaseOwner).toBeNull();
+    });
+
+    it('the fix prompt carries the builder note, and the fixed work comes back for a check', async () => {
+      const { task, workstream } = await waiting('op-check-0006');
+      answerCheck('send_back', note);
+      await runToWait(workstream.id);
+      expect(engine.adapter.prompts.at(-1)?.prompt).toContain(
+        `The builder sent the work back: ${note}`,
+      );
+      expect(ws(workstream.id).state).toBe('WAITING_HUMAN');
+      expect(openChecks()).toHaveLength(1);
+      neverDone(workstream.id, task.id);
+    });
+
+    it('past maxFixAttempts a send back fails the workstream', async () => {
+      const { task, workstream } = await waiting('op-check-0007');
+      engine.state.write((ctx) => {
+        patchWorkstream(ctx, workstream.id, null, {
+          attempt: DEFAULT_RUNNER_LIMITS.maxFixAttempts,
+        });
+      });
+      answerCheck('send_back', note);
+      expect(ws(workstream.id)).toMatchObject({ state: 'FAILED' });
+      expect(ws(workstream.id).failureReason).toContain(
+        String(DEFAULT_RUNNER_LIMITS.maxFixAttempts + 1),
+      );
+      expect(activeClaims(engine.store.db, workstream.id)).toEqual([]);
+      expect(getTask(engine.store.db, task.id).status).not.toBe('done');
+      expect(
+        listInbox(engine.store.db, {}).filter((i) => i.title.startsWith('Workstream failed')),
+      ).toHaveLength(1);
+    });
+
+    it('send back without a note is refused and changes nothing', async () => {
+      const { task, workstream } = await waiting('op-check-0008');
+      const before = ws(workstream.id);
+      expect(() => answerCheck('send_back')).toThrow(InboxAnswerRefused);
+      expect(() => answerCheck('send_back', '   ')).toThrow(InboxAnswerRefused);
+      expect(ws(workstream.id)).toEqual(before);
+      expect(openChecks()).toHaveLength(1);
+      expect(listEvidence(engine.store.db, workstream.id)).toEqual([]);
+      neverDone(workstream.id, task.id);
+    });
+
+    it('answering the same card twice completes once', async () => {
+      const { task, workstream } = await waiting('op-check-0009');
+      const [card] = openChecks();
+      answerCheck('approve');
+      expect(() =>
+        engine.inbox.answer(card?.id ?? mintId('InboxItem'), { choice: 'approve' }),
+      ).toThrow(ConflictError);
+      engine.runner.approveCheck(workstream.id);
+      expect(doneTransitions(workstream.id)).toHaveLength(1);
+      expect(ws(workstream.id).state).toBe('DONE');
+      expect(getTask(engine.store.db, task.id).status).toBe('done');
+    });
+
+    it.each([
+      { name: 'queued after a send back', setup: 'send_back' },
+      { name: 'done after an approval', setup: 'approve' },
+    ])('approve or send back on a workstream that is $name does nothing', async ({ setup }) => {
+      const { workstream } = await waiting('op-check-0010');
+      answerCheck(setup, setup === 'send_back' ? note : undefined);
+      const before = ws(workstream.id);
+      const evidence = listEvidence(engine.store.db, workstream.id);
+      const events = listEventsAfter(engine.store.db, 0, 1000).length;
+      engine.runner.approveCheck(workstream.id);
+      engine.runner.sendBack(workstream.id, 'again');
+      expect(ws(workstream.id)).toEqual(before);
+      expect(listEvidence(engine.store.db, workstream.id)).toEqual(evidence);
+      expect(listEventsAfter(engine.store.db, 0, 1000)).toHaveLength(events);
+    });
+
+    it('approve and send back on a workstream that never waited do nothing', async () => {
+      engine = await createTestEngine(
+        { Alpha: [implement('op-check-0011')] },
+        { gateCommand: null },
+      );
+      const { workstream } = engine.addTask('Alpha');
+      const before = ws(workstream.id);
+      engine.runner.approveCheck(workstream.id);
+      engine.runner.sendBack(workstream.id, note);
+      expect(ws(workstream.id)).toEqual(before);
+      expect(listEvidence(engine.store.db, workstream.id)).toEqual([]);
+    });
+
+    it('a restart between completing and closing the card neither loses nor repeats the answer', async () => {
+      const { task, workstream } = await waiting('op-check-0012');
+      // The daemon stopped after the workstream finished and before the card was recorded.
+      engine.runner.approveCheck(workstream.id);
+      expect(openChecks()).toHaveLength(1);
+      await recover();
+      await recover();
+      expect(ws(workstream.id).state).toBe('DONE');
+      answerCheck('approve');
+      expect(openChecks()).toEqual([]);
+      expect(doneTransitions(workstream.id)).toHaveLength(1);
+      expect(getTask(engine.store.db, task.id).status).toBe('done');
+      expect(reviewCards()).toEqual([]);
+    });
+
+    it('a restart between sending back and closing the card records the note once', async () => {
+      const { workstream } = await waiting('op-check-0013');
+      engine.runner.sendBack(workstream.id, note);
+      await recover();
+      answerCheck('send_back', note);
+      expect(listEvidence(engine.store.db, workstream.id)).toHaveLength(1);
+      expect(ws(workstream.id)).toMatchObject({ state: 'QUEUED', attempt: 1 });
+    });
+
+    it('a restart after the answer leaves the approved work done and starts nothing', async () => {
+      const { workstream } = await waiting('op-check-0014');
+      const sessions = engine.adapter.prompts.length;
+      answerCheck('approve');
+      const report = await recover();
+      expect(report.parked).toEqual([]);
+      expect(report.requeued).toEqual([]);
+      expect(ws(workstream.id).state).toBe('DONE');
+      expect(engine.adapter.prompts).toHaveLength(sessions);
+    });
   });
 });
