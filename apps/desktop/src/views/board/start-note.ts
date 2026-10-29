@@ -14,7 +14,11 @@ import { z } from 'zod';
  */
 export type StartAttempt =
   | {
-      readonly phase: 'requesting' | 'waiting';
+      /**
+       * Requesting until the daemon answers, then waiting for the outcome; quiet once the wait has run
+       * past START_ANSWER_MS with no run and no refusal, which some cuts end with.
+       */
+      readonly phase: 'requesting' | 'waiting' | 'quiet';
       /** The task's run when it was asked, so a new run (a start that took) ends the wait. */
       readonly workstreamId: WorkstreamId | null;
       /** When the task's refusal card last changed before the click; a later change is this start's refusal. */
@@ -22,9 +26,12 @@ export type StartAttempt =
     }
   | { readonly phase: 'failed'; readonly reason: string };
 
-/** What a card says about its Start: it is on its way, or it was refused. */
+/** How long a card says Starting… after the daemon took the request, before it stops promising. */
+export const START_ANSWER_MS = 30_000;
+
+/** What a card says about its Start: it is on its way, it was refused, or nothing came back. */
 export interface StartNote {
-  readonly kind: 'starting' | 'refused';
+  readonly kind: 'starting' | 'refused' | 'unanswered';
   /** One plain line for the card. */
   readonly line: string;
   /** Whether an Inbox card holds the details. */
@@ -51,6 +58,11 @@ export function refusalCards(items: readonly InboxItemDto[]): ReadonlyMap<TaskId
 }
 
 const STARTING: StartNote = { kind: 'starting', line: 'Starting…', inbox: false };
+const UNANSWERED: StartNote = {
+  kind: 'unanswered',
+  line: 'No answer yet: check the Inbox',
+  inbox: true,
+};
 
 /**
  * The note for a card that can be started, or null when it has nothing to say: no start asked and no
@@ -74,8 +86,10 @@ export function startNote(input: {
     case 'requesting':
       return STARTING;
     case 'waiting':
+    case 'quiet':
       if (task.workstreamId !== attempt.workstreamId) return null;
-      return card && card.updatedAt !== attempt.seen ? refused(card) : STARTING;
+      if (card && card.updatedAt !== attempt.seen) return refused(card);
+      return attempt.phase === 'waiting' ? STARTING : UNANSWERED;
     case 'failed':
       return { kind: 'refused', line: `Not started: ${attempt.reason}`, inbox: false };
   }

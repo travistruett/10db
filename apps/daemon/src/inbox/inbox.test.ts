@@ -1910,12 +1910,25 @@ describe('a flag with a fold key', () => {
       (e) => e.type === EventType.InboxChanged && e.entityId === id,
     );
 
-  it('keeps one open card when it is raised again, and the board hears of the repeat', () => {
+  it('keeps one open card when it is raised again, and says nothing of the repeat', () => {
     const input = refusal();
     const first = inbox.flag(input);
     const before = inboxEvents(first.id).length;
-    const second = inbox.flag(input);
+    const second = inbox.flag({ ...input, body: 'Something else.' });
     expect(second.id).toBe(first.id);
+    expect(second.body).toBe('Nothing was pushed.');
+    expect(listInbox(state.db, { states: ['OPEN'] })).toHaveLength(1);
+    expect(inboxEvents(first.id)).toHaveLength(before);
+  });
+
+  it('rewrites the open card and tells the board when the repeat asks to refresh it', () => {
+    const input = { ...refusal(), refresh: true };
+    const first = inbox.flag(input);
+    const before = inboxEvents(first.id).length;
+    const second = inbox.flag({ ...input, body: 'b.txt is in the way.', detail: { n: 2 } });
+    expect(second.id).toBe(first.id);
+    expect(second.body).toBe('b.txt is in the way.');
+    expect(second.detail).toEqual({ n: 2 });
     expect(listInbox(state.db, { states: ['OPEN'] })).toHaveLength(1);
     expect(inboxEvents(first.id)).toHaveLength(before + 1);
   });

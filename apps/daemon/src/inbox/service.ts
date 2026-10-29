@@ -75,6 +75,11 @@ export interface InboxService {
     body: string;
     detail?: Record<string, Json>;
     foldKey?: string;
+    /**
+     * A repeat that folds rewrites the open card's body and detail, which tells clients it changed.
+     * Without it a repeat is a silent no-op, which callers that raise on every poll rely on.
+     */
+    refresh?: boolean;
     options?: readonly InboxOption[];
   }): InboxItemDto;
   cancelForWorkstream(workstreamId: WorkstreamId): void;
@@ -332,8 +337,14 @@ export function createInboxService(deps: {
       return deps.state.write((ctx) => {
         if (input.foldKey) {
           const existing = findOpenByFoldKey(ctx.tx, input.projectId, input.foldKey);
-          // The repeat touches the card, so a board that watches for it learns the cause came back.
-          if (existing) return updateInboxItem(ctx, existing.id, {});
+          if (existing && !input.refresh) return existing;
+          // The repeat says what is in the way now, and a board that watches the card learns the
+          // cause came back.
+          if (existing)
+            return updateInboxItem(ctx, existing.id, {
+              body: input.body,
+              ...(input.detail ? { detail: input.detail } : {}),
+            });
         }
         return insertInboxItem(ctx, {
           projectId: input.projectId,

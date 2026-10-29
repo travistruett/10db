@@ -79,6 +79,20 @@ describe('startNote', () => {
       note: { kind: 'starting', line: 'Starting…', inbox: false },
     },
     {
+      name: 'a wait that heard nothing back in time',
+      attempt: { ...requesting, phase: 'quiet' },
+      card: undefined,
+      startable: true,
+      note: { kind: 'unanswered', line: 'No answer yet: check the Inbox', inbox: true },
+    },
+    {
+      name: 'a wait that heard nothing in time, and then a refusal',
+      attempt: { ...requesting, phase: 'quiet' },
+      card: refusal,
+      startable: true,
+      note: { kind: 'refused', line: refusal.title, inbox: true },
+    },
+    {
       name: 'a request the daemon rejected at once',
       attempt: { phase: 'failed', reason: 'Task Alpha is already running' },
       card: undefined,
@@ -107,5 +121,7 @@ describe('startNote', () => {
     const run = taskDto({ ...task, workstreamId: mintId('Workstream') });
     const attempt: StartAttempt = { ...requesting, phase: 'waiting' };
     expect(startNote({ attempt, task: run, startable: true, card: undefined })).toBeNull();
+    const quiet: StartAttempt = { ...requesting, phase: 'quiet' };
+    expect(startNote({ attempt: quiet, task: run, startable: true, card: undefined })).toBeNull();
   });
 });

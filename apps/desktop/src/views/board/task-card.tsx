@@ -25,9 +25,14 @@ export interface TaskCardProps {
   readonly startNote?: StartNote | null | undefined;
 }
 
-/** A start note as a card line: on its way is blue like a running task, refused is red. */
+/**
+ * A start note as a card line: on its way is blue like a running task, refused is red, and no answer
+ * is yellow like a card waiting on the builder in the Inbox.
+ */
+const NOTE_COLOR = { starting: 'blue', refused: 'red', unanswered: 'yellow' } as const;
+
 function noteState(note: StartNote): TaskState {
-  return { line: note.line, color: note.kind === 'starting' ? 'blue' : 'red' };
+  return { line: note.line, color: NOTE_COLOR[note.kind] };
 }
 
 function waitsOn(task: TaskDto, peers: TaskCardProps['peers']): string[] {

@@ -25,6 +25,8 @@ export interface Card {
   readonly body: string;
   /** An open card with the same key is reused instead of raising another. */
   readonly foldKey?: string;
+  /** A repeat that folds rewrites the open card with this one's body and detail. */
+  readonly refresh?: boolean;
   readonly detail?: Record<string, Json>;
 }
 
@@ -307,6 +309,7 @@ export function forTasks(card: Card, taskIds: Iterable<TaskId>): Card {
   return {
     ...card,
     foldKey: card.foldKey ?? `start-refused:${[...ids].sort().join(',')}:${card.title}`,
+    refresh: true,
     detail: { ...card.detail, taskIds: ids },
   };
 }

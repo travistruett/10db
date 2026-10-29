@@ -194,15 +194,22 @@ describe('cutting a branch', () => {
 
   it('keeps one card when the same start is refused again, and a new one once it is dismissed', async () => {
     const task = h.addTask('Alpha');
-    writeFileSync(join(h.repo, 'scratch.txt'), 'uncommitted\n');
+    writeFileSync(join(h.repo, 'a.txt'), 'uncommitted\n');
+    writeFileSync(join(h.repo, 'b.txt'), 'uncommitted\n');
     const refuse = async () => {
       h.starter.startBatch(h.project.id, { title: 'Greetings', taskIds: [task.id] });
       await h.jobs.idle();
     };
     await refuse();
     const first = h.only(h.cards());
+    expect(first.body).toContain('- a.txt\n- b.txt');
+    h.git$('add', 'a.txt');
+    h.git$('commit', '-m', 'a');
     await refuse();
-    expect(h.only(h.cards()).id).toBe(first.id);
+    const again = h.only(h.cards());
+    expect(again.id).toBe(first.id);
+    expect(again.body).toContain('- b.txt');
+    expect(again.body).not.toContain('a.txt');
     h.inbox.answer(first.id, { choice: 'dismiss' });
     await refuse();
     expect(h.only(h.cards()).id).not.toBe(first.id);

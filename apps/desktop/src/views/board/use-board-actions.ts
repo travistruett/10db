@@ -2,7 +2,13 @@ import type { InboxItemDto, ProjectId, TaskDto, TaskId } from '@10db/contracts';
 import { useState } from 'react';
 import { useInbox, useStartTask } from '../../daemon/queries';
 import type { DropAction } from './drop-rules';
-import { refusalCards, startNote, type StartAttempt, type StartNote } from './start-note';
+import {
+  refusalCards,
+  START_ANSWER_MS,
+  startNote,
+  type StartAttempt,
+  type StartNote,
+} from './start-note';
 import { useMoveTask } from './use-move-task';
 
 /** Carries out a drop or a menu move: a placement, a start, or a refusal shown to the builder. */
@@ -35,7 +41,15 @@ export function useBoardActions(projectId: ProjectId) {
     remember(task.id, { phase: 'requesting', ...asked });
     start.mutateAsync(task.id).then(
       () => {
-        remember(task.id, { phase: 'waiting', ...asked });
+        const waiting: StartAttempt = { phase: 'waiting', ...asked };
+        remember(task.id, waiting);
+        // Some cuts end with neither a run nor a card; past this the card stops promising a start.
+        setTimeout(() => {
+          setAttempts((current) => {
+            if (current.get(task.id) !== waiting) return current;
+            return new Map(current).set(task.id, { ...waiting, phase: 'quiet' });
+          });
+        }, START_ANSWER_MS);
       },
       (error: unknown) => {
         remember(task.id, {
