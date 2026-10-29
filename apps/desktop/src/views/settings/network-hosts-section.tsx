@@ -28,7 +28,11 @@ export function NetworkHostsSection({ project }: { readonly project: ProjectDto 
       <Text size="sm" c="dimmed">
         Hosts this project's tasks and checks may reach.
       </Text>
-      {hosts.isSuccess && list.length === 0 ? (
+      {hosts.isError ? (
+        <Text size="sm" c="red" role="alert">
+          Couldn't load the hosts: {hosts.error.message}
+        </Text>
+      ) : hosts.isSuccess && list.length === 0 ? (
         <Text size="sm">No hosts are allowed yet.</Text>
       ) : (
         <List aria-label="Network hosts" listStyleType="none" spacing="xs">

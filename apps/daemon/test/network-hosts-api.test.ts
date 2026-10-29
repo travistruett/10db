@@ -5,6 +5,8 @@ import {
   EventType,
   NetworkHostDto,
   ProjectDto,
+  TaskDto,
+  WorkstreamId,
   mintId,
   type ProjectId,
 } from '@10db/contracts';
@@ -118,6 +120,26 @@ describe('POST /projects/:id/network-hosts: which hosts are accepted', () => {
     { name: 'the IPv6 loopback address', input: '::1', message: /Allow localhost/ },
     { name: 'the bracketed IPv6 loopback address', input: '[::1]', message: /Allow localhost/ },
     { name: 'the unspecified address', input: '0.0.0.0', message: /Allow localhost/ },
+    { name: 'a shortened loopback address', input: '127.1', message: /can't be listed/ },
+    { name: 'a hex loopback address', input: '0x7f.0.0.1', message: /can't be listed/ },
+    { name: 'an octal loopback address', input: '0177.0.0.1', message: /can't be listed/ },
+    { name: 'a whole-number loopback address', input: '2130706433', message: /can't be listed/ },
+    { name: 'a shortened unspecified address', input: '0.0', message: /can't be listed/ },
+    { name: 'a wildcard over addresses', input: '*.0.0', message: /can't be listed/ },
+    { name: 'another 0.x address', input: '0.1.2.3', message: /Allow localhost/ },
+    { name: 'the metadata address', input: '169.254.169.254', message: /link-local/ },
+    { name: 'a wildcard over a shared suffix', input: '*.co.uk', message: /too broad/ },
+    { name: 'a wildcard over a hosting suffix', input: '*.github.io', message: /too broad/ },
+    {
+      name: 'a label over 63 characters',
+      input: `${'a'.repeat(64)}.com`,
+      message: /can't be listed/,
+    },
+    {
+      name: 'a name over 253 characters',
+      input: `${'a.'.repeat(130)}com`,
+      message: /can't be listed/,
+    },
     { name: 'a name with an underscore', input: 'my_service', message: /can't be listed/ },
     { name: 'an IPv6 address', input: 'fe80::1', message: /can't be listed/ },
     { name: 'a URL', input: 'https://index.crates.io', message: /can't be listed/ },
@@ -199,7 +221,7 @@ describe('network hosts of a project', () => {
 
   it("lists a card answer's project rule, and removing the host removes every copy", async () => {
     const project = await seedProject();
-    const rule = (workstreamId: null) =>
+    const rule = (workstreamId: WorkstreamId | null) =>
       daemon.state.write((ctx) =>
         insertPermissionRule(ctx, {
           projectId: project.id,
@@ -211,6 +233,16 @@ describe('network hosts of a project', () => {
       );
     rule(null);
     rule(null);
+    const task = await api().post(`/projects/${project.id}/tasks`, TaskDto, {
+      title: 't',
+      acceptanceCriteria: ['x'],
+      areas: ['src'],
+      dependsOn: [],
+    });
+    const started = z
+      .object({ id: WorkstreamId })
+      .parse((await send('POST', `/tasks/${task.id}/start`, {})).body);
+    rule(started.id);
     daemon.state.write((ctx) =>
       insertPermissionRule(ctx, {
         projectId: project.id,

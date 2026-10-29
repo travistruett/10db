@@ -21,6 +21,40 @@ const NETWORK_TOOL = 'SandboxNetworkAccess';
 
 const LOOPBACK_NAME = /(^|\.)localhost$/;
 const LOOPBACK_V4 = /^(127(\.\d{1,3}){3}|0\.0\.0\.0)$/;
+const DOTTED_QUAD =
+  /^(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)$/;
+/** A last label that reads as a number: the sandbox's proxy would turn `0x7f.1` or `2130706433` into an address. */
+const NUMERIC_LABEL = /^(?:\d+|0x[0-9a-f]*)$/;
+const MAX_HOST_LENGTH = 253;
+const MAX_LABEL_LENGTH = 63;
+/**
+ * Suffixes under which unrelated parties host sites, so a wildcard over one reaches anyone. A short
+ * list, not the public suffix list: it catches the common ones a builder might type.
+ */
+const SHARED_SUFFIXES: ReadonlySet<string> = new Set([
+  'co.uk',
+  'org.uk',
+  'ac.uk',
+  'gov.uk',
+  'com.au',
+  'net.au',
+  'org.au',
+  'co.jp',
+  'co.nz',
+  'co.in',
+  'com.br',
+  'github.io',
+  'gitlab.io',
+  'vercel.app',
+  'netlify.app',
+  'pages.dev',
+  'workers.dev',
+  'herokuapp.com',
+  'appspot.com',
+  'amazonaws.com',
+  'cloudfront.net',
+  'azurewebsites.net',
+]);
 const LOOPBACK_V6 = /^\[?(::1|0*:0*:0*:0*:0*:0*:0*:0*1)\]?$/;
 
 function refusal(message: string): InvalidError {
@@ -46,6 +80,15 @@ export function checkNetworkHost(raw: string): string {
   ) {
     throw refusal(`${host} is this machine: use the project's Allow localhost setting instead.`);
   }
+  if (DOTTED_QUAD.test(host)) {
+    const [first = '', second = ''] = host.split('.');
+    if (first === '127' || first === '0') {
+      throw refusal(`${host} is this machine: use the project's Allow localhost setting instead.`);
+    }
+    if (first === '169' && second === '254') {
+      throw refusal(`${host} is a link-local address, where cloud metadata services listen.`);
+    }
+  }
   const rule = storableRule(NETWORK_TOOL, host);
   const pattern = rule?.pattern ?? null;
   const labels = (pattern ?? '').replace(/^\*\./, '').split('.');
@@ -54,8 +97,21 @@ export function checkNetworkHost(raw: string): string {
       `${host} can't be listed: use a host name such as index.crates.io, or *. and a domain such as *.crates.io.`,
     );
   }
-  if (labels.length < 2) {
-    throw refusal(`${host} is too broad: it covers a whole top-level domain. Name the host.`);
+  const unlistable =
+    host.length > MAX_HOST_LENGTH ||
+    labels.some((label) => label.length > MAX_LABEL_LENGTH) ||
+    // An address is written as four decimal parts, never as a short, hex, octal or whole-number form.
+    (NUMERIC_LABEL.test(labels.at(-1) ?? '') &&
+      (pattern.startsWith('*.') || !DOTTED_QUAD.test(pattern)));
+  if (unlistable) {
+    throw refusal(
+      `${host} can't be listed: write an address as four decimal parts and a name at most 253 characters, with labels of at most 63.`,
+    );
+  }
+  if (labels.length < 2 || (pattern.startsWith('*.') && SHARED_SUFFIXES.has(labels.join('.')))) {
+    throw refusal(
+      `${host} is too broad: it covers a whole top-level domain or a suffix many sites share. Name the host.`,
+    );
   }
   return pattern;
 }
