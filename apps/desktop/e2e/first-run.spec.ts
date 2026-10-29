@@ -1,7 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
-import { z } from 'zod';
-import { daemonUrl } from './daemon-url';
+import { claudeIsInstalled } from './claude-is-installed';
 import { E2E_REPO } from './paths';
 
 // Runs before loop.spec.ts (files run in name order with one worker), which creates the project this
@@ -18,31 +17,6 @@ async function expectAccessible(page: Page, label: string): Promise<void> {
     (v) => `${label}: ${v.id} (${v.help}) on ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`,
   );
   expect(found).toEqual([]);
-}
-
-const SystemAnswer = z.looseObject({
-  tools: z.array(
-    z.looseObject({
-      name: z.string(),
-      path: z.string().nullable(),
-      version: z.string().nullable(),
-    }),
-  ),
-});
-
-/** The Playwright image may have no Claude Code, so the check is answered as if it were found. */
-async function claudeIsInstalled(page: Page): Promise<void> {
-  await page.route(`${daemonUrl}/system*`, async (route) => {
-    const response = await route.fetch();
-    const body = SystemAnswer.parse(await response.json());
-    for (const tool of body.tools) {
-      if (tool.name === 'claude') {
-        tool.path = '/usr/local/bin/claude';
-        tool.version = '2.1.299 (Claude Code)';
-      }
-    }
-    await route.fulfill({ response, json: body });
-  });
 }
 
 for (const scheme of ['dark', 'light'] as const) {

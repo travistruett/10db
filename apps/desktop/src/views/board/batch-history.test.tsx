@@ -1,4 +1,4 @@
-import { screen, within } from '@testing-library/react';
+import { fireEvent, screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { baseHandlers, renderWithDaemon, server } from '../../test/daemon';
 import { batchDto } from '../../test/fixtures';
@@ -22,6 +22,7 @@ describe('BatchHistory', () => {
   it('lists each batch with its state, branch and pull request, in the order given', async () => {
     server.use(...baseHandlers());
     renderWithDaemon(<BatchHistory batches={[second, first]} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Batches (2)' }));
     const list = await screen.findByRole('list', { name: 'Batches' });
     expect(within(list).getAllByRole('listitem')).toHaveLength(2);
 
@@ -34,5 +35,17 @@ describe('BatchHistory', () => {
     expect(shipped.getByText('Shipped')).toBeTruthy();
     expect(shipped.getByText('10db/alpha-first')).toBeTruthy();
     expect(shipped.getByRole('link', { name: 'Pull request' }).getAttribute('href')).toBe(url);
+  });
+
+  it('starts collapsed, with the count on the disclosure', async () => {
+    server.use(...baseHandlers());
+    renderWithDaemon(<BatchHistory batches={[second, first]} />);
+    const toggle = await screen.findByRole('button', { name: 'Batches (2)' });
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByRole('list', { name: 'Batches' })).toBeNull();
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    const list = await screen.findByRole('list', { name: 'Batches' });
+    expect(list.closest('[id]')?.id).toBe(toggle.getAttribute('aria-controls'));
   });
 });

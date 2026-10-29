@@ -72,8 +72,60 @@ export function BatchStrip({
     abandon.mutate(batch.id);
   };
 
+  const compact = workspaceMode === WorkspaceMode.Worktree;
+  const path = batch.worktreePath;
+  const copyWorktree = path ? (
+    <CopyButton value={path}>
+      {({ copied, copy }) => (
+        <Tooltip label={copied ? 'Copied' : `Copy worktree path: ${path}`} withArrow>
+          <ActionIcon
+            size="sm"
+            variant="subtle"
+            color={copied ? 'teal' : 'gray'}
+            aria-label="Copy worktree path"
+            onClick={copy}
+          >
+            {copied ? <IconCheck size={16} stroke={1.5} /> : <IconCopy size={16} stroke={1.5} />}
+          </ActionIcon>
+        </Tooltip>
+      )}
+    </CopyButton>
+  ) : null;
+
+  const actions =
+    batch.state === B.Failed || canShipAnyway || canAbandon || canAddFix ? (
+      <Group gap="xs">
+        {batch.state === B.Failed ? (
+          <Button size="xs" loading={ship.isPending} onClick={shipBatch}>
+            Retry
+          </Button>
+        ) : null}
+        {canShipAnyway ? (
+          <Button size="xs" variant="light" loading={ship.isPending} onClick={shipBatch}>
+            Ship anyway
+          </Button>
+        ) : null}
+        {canAddFix ? (
+          <Button size="xs" variant="light" onClick={fix.open}>
+            Add a fix task
+          </Button>
+        ) : null}
+        {canAbandon ? (
+          <Button
+            size="xs"
+            variant="default"
+            color="red"
+            loading={abandon.isPending}
+            onClick={abandonBatch}
+          >
+            Abandon
+          </Button>
+        ) : null}
+      </Group>
+    ) : null;
+
   return (
-    <Paper withBorder p="sm">
+    <Paper withBorder p={compact ? 'xs' : 'sm'}>
       <Stack gap="xs">
         <Group gap="sm" wrap="wrap">
           <Text fw={600}>{batch.title}</Text>
@@ -82,29 +134,18 @@ export function BatchStrip({
           </Badge>
           {batch.branch ? <Code>{batch.branch}</Code> : null}
           {batch.prUrl ? <PullRequestLink url={batch.prUrl} /> : null}
+          {compact ? copyWorktree : null}
+          {compact ? <Group ml="auto">{actions}</Group> : null}
+          {compact && blocking.length > 0 ? (
+            <Text size="xs" c="dimmed">
+              {`${String(blocking.length)} unsettled`}
+            </Text>
+          ) : null}
         </Group>
-        {batch.worktreePath ? (
+        {batch.worktreePath && !compact ? (
           <Group gap="xs" wrap="nowrap">
             <Code style={{ wordBreak: 'break-all' }}>{batch.worktreePath}</Code>
-            <CopyButton value={batch.worktreePath}>
-              {({ copied, copy }) => (
-                <Tooltip label={copied ? 'Copied' : 'Copy worktree path'} withArrow>
-                  <ActionIcon
-                    size="sm"
-                    variant="subtle"
-                    color={copied ? 'teal' : 'gray'}
-                    aria-label="Copy worktree path"
-                    onClick={copy}
-                  >
-                    {copied ? (
-                      <IconCheck size={16} stroke={1.5} />
-                    ) : (
-                      <IconCopy size={16} stroke={1.5} />
-                    )}
-                  </ActionIcon>
-                </Tooltip>
-              )}
-            </CopyButton>
+            {copyWorktree}
           </Group>
         ) : null}
         {batch.failure ? (
@@ -112,7 +153,7 @@ export function BatchStrip({
             {FAILURE_LABELS[batch.failure]}
           </Text>
         ) : null}
-        {blocking.length > 0 ? (
+        {blocking.length > 0 && !compact ? (
           <Stack gap={4}>
             {blocking.map((w) => (
               <Group key={w.id} gap="xs">
@@ -127,36 +168,7 @@ export function BatchStrip({
             {error.message}
           </Alert>
         ) : null}
-        {batch.state === B.Failed || canShipAnyway || canAbandon || canAddFix ? (
-          <Group gap="xs">
-            {batch.state === B.Failed ? (
-              <Button size="xs" loading={ship.isPending} onClick={shipBatch}>
-                Retry
-              </Button>
-            ) : null}
-            {canShipAnyway ? (
-              <Button size="xs" variant="light" loading={ship.isPending} onClick={shipBatch}>
-                Ship anyway
-              </Button>
-            ) : null}
-            {canAddFix ? (
-              <Button size="xs" variant="light" onClick={fix.open}>
-                Add a fix task
-              </Button>
-            ) : null}
-            {canAbandon ? (
-              <Button
-                size="xs"
-                variant="default"
-                color="red"
-                loading={abandon.isPending}
-                onClick={abandonBatch}
-              >
-                Abandon
-              </Button>
-            ) : null}
-          </Group>
-        ) : null}
+        {compact ? null : actions}
       </Stack>
       {canAddFix ? (
         <AddFixTask batch={batch} workstreams={workstreams} opened={fixOpen} onClose={fix.close} />
