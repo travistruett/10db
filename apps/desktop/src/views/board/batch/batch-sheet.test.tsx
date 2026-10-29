@@ -90,10 +90,10 @@ async function pick(input: HTMLElement, option: string): Promise<void> {
 
 async function openSheet() {
   renderApp('/board');
-  fireEvent.click(
-    await screen.findByRole('button', { name: 'More board actions' }, { timeout: 5000 }),
-  );
-  fireEvent.click(await screen.findByRole('menuitem', { name: /Start Ready Tasks/, hidden: true }));
+  fireEvent.click(await screen.findByRole('button', { name: 'More board actions' }));
+  // The item is disabled until the tasks load, so wait for the count before clicking it.
+  const item = await screen.findByRole('menuitem', { name: /\d+ ready/, hidden: true });
+  fireEvent.click(item);
   return screen.findByRole('dialog', { name: 'Start a batch' });
 }
 
@@ -347,7 +347,7 @@ describe('BatchSheet', () => {
     expect(sent).toEqual([]);
   });
 
-  it('shows why nothing can start when no task is ready', async () => {
+  it('shows why nothing can start when the picker proposes no task', async () => {
     serve(
       local,
       // Start Ready Tasks is only enabled with a task in Ready, so one is there though none is proposed.

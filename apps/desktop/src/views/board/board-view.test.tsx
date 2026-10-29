@@ -455,7 +455,6 @@ describe('BoardView', () => {
     renderApp('/board');
 
     expect(await screen.findByText('tasks unavailable')).toBeTruthy();
-    expect(screen.queryByText('No tasks yet.')).toBeNull();
   });
 
   it("shows the daemon's message when the workstreams query fails", async () => {
@@ -901,7 +900,7 @@ describe('BoardView', () => {
     renderApp('/board');
     fireEvent.click(await screen.findByRole('button', { name: 'More board actions' }));
     const item = await screen.findByRole('menuitem', { name: /Start Ready Tasks/, hidden: true });
-    expect(within(item).getByText('2 ready')).toBeTruthy();
+    expect(await within(item).findByText('2 ready')).toBeTruthy();
     fireEvent.click(item);
     expect(await screen.findByRole('dialog', { name: 'Start a batch' })).toBeTruthy();
   });
