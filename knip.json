@@ -20,7 +20,7 @@
     }
   },
   "ignore": ["spikes/**"],
-  "ignoreBinaries": ["codex", "mkfifo", "rustc"],
+  "ignoreBinaries": ["codex", "make", "mkfifo", "rustc"],
   "ignoreExportsUsedInFile": true,
   "lefthook": {
     "config": ["lefthook.yml"]
