@@ -71,6 +71,31 @@ export function raise(inbox: InboxService, projectId: ProjectId, card: Card): vo
   });
 }
 
+/**
+ * Brings the project's open card with `card`'s fold key in line with `card`: its title and body, and
+ * its detail when `card` has one, so it says what holds now. A dismissed card stays dismissed, and a
+ * card that says this already is not written again.
+ */
+export function rewrite(
+  state: StateStore,
+  inbox: InboxService,
+  projectId: ProjectId,
+  card: Card,
+): void {
+  if (card.foldKey === undefined) return;
+  const open = findOpenByFoldKey(state.db, projectId, card.foldKey);
+  if (open === undefined) return;
+  const same =
+    open.title === card.title &&
+    open.body === card.body &&
+    (card.detail === undefined || JSON.stringify(open.detail) === JSON.stringify(card.detail));
+  if (same) return;
+  inbox.reword(open.id, card.body, {
+    title: card.title,
+    ...(card.detail ? { detail: card.detail } : {}),
+  });
+}
+
 /** Withdraws the project's open cards with these fold keys: what they asked about is gone. */
 export function withdraw(
   state: StateStore,

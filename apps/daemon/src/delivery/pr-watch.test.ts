@@ -36,12 +36,17 @@ function watcher(ctx = h.ctx): PrWatch {
   return w;
 }
 
-const run = (name: string, conclusion: string | null): CheckRollupItem => ({
+/** A check run; its link names the check unless `url` says which run it is. */
+const run = (
+  name: string,
+  conclusion: string | null,
+  url = `https://github.com/acme/widgets/actions/runs/${name}`,
+): CheckRollupItem => ({
   __typename: 'CheckRun',
   name,
   status: conclusion === null ? 'IN_PROGRESS' : 'COMPLETED',
   conclusion,
-  detailsUrl: `https://github.com/acme/widgets/actions/runs/${name}`,
+  detailsUrl: url,
 });
 
 /** A SHIPPED batch with a pull request, as shipping leaves one. */
@@ -165,6 +170,86 @@ describe('the pull request watch', () => {
     h.gh.setChecks(prUrl, [run('build', 'SUCCESS'), run('lint', 'SUCCESS')]);
     await round(w);
     expect(h.cards()).toEqual([]);
+  });
+
+  it('keeps the open card naming the checks that fail now, and a dismissed card dismissed', async () => {
+    setup();
+    const { id, prUrl } = shipped(h.project.id, 'Alpha');
+    h.gh.setChecks(prUrl, [run('lint', 'FAILURE'), run('test', 'FAILURE')]);
+    const w = watcher();
+    w.start();
+    await w.idle();
+    const first = h.only(h.cards());
+    expect(first.title).toBe('Pull request checks failed for "Alpha": lint and 1 more');
+
+    // lint passes now and test still fails: the same card names test and links its run.
+    const testUrl = 'https://github.com/acme/widgets/actions/runs/test';
+    h.gh.setChecks(prUrl, [run('lint', 'SUCCESS'), run('test', 'FAILURE')]);
+    await round(w);
+    const card = h.only(h.cards());
+    expect(card.id).toBe(first.id);
+    expect(card.title).toBe('Pull request checks failed for "Alpha": test');
+    expect(card.body.startsWith(testUrl)).toBe(true);
+    expect(card.body).not.toContain('runs/lint');
+    expect(card.detail).toEqual({ batchId: id, prUrl, link: testUrl });
+
+    // A new commit fails test again, in a new run: the card links that run.
+    const rerun = 'https://github.com/acme/widgets/actions/runs/test-2';
+    h.gh.setChecks(prUrl, [run('test', 'FAILURE', rerun)]);
+    await round(w);
+    expect(h.only(h.cards())).toMatchObject({
+      id: first.id,
+      title: 'Pull request checks failed for "Alpha": test',
+      detail: { link: rerun },
+    });
+
+    // Dismissed, it stays dismissed however the failing checks change.
+    h.inbox.answer(first.id, { choice: 'dismissed' });
+    h.gh.setChecks(prUrl, [run('lint', 'FAILURE'), run('test', 'FAILURE', rerun)]);
+    await round(w);
+    expect(h.cards()).toEqual([]);
+  });
+
+  it('brings the open card up to date when checks fail again after a pending run', async () => {
+    setup();
+    const { prUrl } = shipped(h.project.id, 'Alpha');
+    h.gh.setChecks(prUrl, [run('lint', 'FAILURE')]);
+    const w = watcher();
+    w.start();
+    await w.idle();
+    const first = h.only(h.cards());
+
+    // A push starts the run again: pending leaves the card open.
+    h.gh.setChecks(prUrl, [run('lint', null)]);
+    await round(w);
+    expect(h.only(h.cards()).id).toBe(first.id);
+
+    const rerun = 'https://github.com/acme/widgets/actions/runs/lint-2';
+    h.gh.setChecks(prUrl, [run('lint', 'FAILURE', rerun), run('test', 'FAILURE')]);
+    await round(w);
+    expect(h.only(h.cards())).toMatchObject({
+      id: first.id,
+      title: 'Pull request checks failed for "Alpha": lint and 1 more',
+      detail: { link: rerun },
+    });
+  });
+
+  it('writes the open card only when what it says changes', async () => {
+    setup();
+    const { prUrl } = shipped(h.project.id, 'Alpha');
+    h.gh.setChecks(prUrl, [run('lint', 'FAILURE')]);
+    const w = watcher();
+    w.start();
+    await w.idle();
+    const card = h.only(h.cards());
+    const writes = () =>
+      listEventsAfter(h.store.db, 0, 10_000).filter(
+        (e) => e.type === 'inbox.changed' && e.entityId === card.id,
+      ).length;
+    const before = writes();
+    await round(w);
+    await round(w);
+    expect(writes()).toBe(before);
   });
 
   it('falls back to the pull request link when the failing check has none', async () => {

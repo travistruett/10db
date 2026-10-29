@@ -16,7 +16,7 @@ import type { Clock, Timer } from '../clock';
 import type { EventBus } from '../events';
 import { PrState } from '../github';
 import { prCardKey, prCards, detailOf } from './cards';
-import { ghCall, raise, withdraw, type DeliveryContext } from './context';
+import { ghCall, raise, rewrite, withdraw, type DeliveryContext } from './context';
 
 /** How often the watch reads every followed pull request. */
 const PR_WATCH_INTERVAL_MS = 2 * 60_000;
@@ -84,8 +84,11 @@ export function createPrWatch(input: {
     const wasChecks = before?.checks ?? null;
     const wasState = before?.state ?? null;
     if (next.state === PullRequestState.Open && next.checks === PullRequestChecks.Failing) {
-      if (wasChecks !== PullRequestChecks.Failing)
-        raise(ctx.inbox, batch.projectId, prCards.checksFailed(batch, next.failingChecks));
+      const card = prCards.checksFailed(batch, next.failingChecks);
+      if (wasChecks !== PullRequestChecks.Failing) raise(ctx.inbox, batch.projectId, card);
+      // An open card names the checks that fail now and links their latest runs, however they
+      // changed since it was raised; a dismissed one stays dismissed.
+      rewrite(ctx.state, ctx.inbox, batch.projectId, card);
     } else if (
       next.state === PullRequestState.Merged ||
       next.state === PullRequestState.Closed ||
