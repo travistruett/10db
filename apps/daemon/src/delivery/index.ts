@@ -17,3 +17,5 @@ export {
 export { recoverBatches } from './recover';
 export { workstreamChanges } from './workstream-changes';
 export { allCheckouts, checkoutOf, claimScopeOf, projectAtCheckout } from './checkout';
+export { createWorktreeDependencies } from './worktree-dependencies';
+export { resolvePnpm } from './pnpm-binary';

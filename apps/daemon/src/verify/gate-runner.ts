@@ -40,6 +40,8 @@ export interface GateRequest {
    * gates ahead of it. Never called for a gate that starts at once.
    */
   readonly onWaiting?: (ahead: number) => void;
+  /** True for a run that installs packages with pnpm; the sandbox opens pnpm's lock directory for it. */
+  readonly packageInstall?: boolean;
 }
 
 export interface GateRunner {
@@ -203,6 +205,7 @@ export function createGateRunner(options: GateRunnerOptions): GateRunner {
           rules: request.rules,
           checkouts: request.checkouts,
           command: request.command,
+          ...(request.packageInstall === true ? { packageInstall: true } : {}),
         });
       } catch (error) {
         if (error instanceof SandboxProfileError || error instanceof SandboxTempDirError)

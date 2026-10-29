@@ -244,6 +244,14 @@ describe('gate runner with a sandbox', () => {
     expect(disposed()).toBe(1);
   });
 
+  it('asks the sandbox for a package install only when the request is one', async () => {
+    const { sandbox, inputs } = recordingSandbox();
+    const gate = createGateRunner({ sandbox, logger: silentLogger });
+    await gate.run(request({ command: 'true' }));
+    await gate.run({ ...request({ command: 'true' }), packageInstall: true });
+    expect(inputs.map((input) => input.packageInstall)).toEqual([undefined, true]);
+  });
+
   it('fails the gate, saying why, when its sandbox is refused; nothing runs', async () => {
     const { sandbox } = recordingSandbox({
       refuse: new SandboxProfileError('secretFiles', 'a .env* link leads to /x'),

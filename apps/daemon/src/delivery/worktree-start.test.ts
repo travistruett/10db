@@ -245,6 +245,55 @@ describe('starting in worktree mode', () => {
   });
 });
 
+describe('installing a new worktree’s dependencies', () => {
+  function withPnpmProject(): void {
+    pushed('.gitignore', 'node_modules/\n');
+    pushed('pnpm-lock.yaml', 'lockfileVersion: 9\n');
+    mkdirSync(join(h.repo, 'node_modules', 'pkg'), { recursive: true });
+    writeFileSync(join(h.repo, 'node_modules', 'pkg', 'index.js'), 'module.exports = 1;\n');
+  }
+
+  it('runs the install in the seeded worktree, from its own lockfile, before the batch opens', async () => {
+    withPnpmProject();
+    const batch = await startedOne(h.addTask('Alpha'));
+    expect(batch.state).toBe('OPEN');
+    expect(h.pnpm.calls()).toEqual([
+      `${realpathSync(pathOf(batch))} | install --frozen-lockfile --ignore-scripts --ignore-pnpmfile --store-dir ${h.pnpm.bin} --modules-dir node_modules --virtual-store-dir node_modules/.pnpm`,
+    ]);
+    const logged = h.logs.lines().find((line) => line['msg'] === 'worktree dependencies installed');
+    expect(logged).toMatchObject({ batchId: batch.id });
+  });
+
+  it('runs nothing in a project that is not pnpm’s', async () => {
+    pushed('.gitignore', 'node_modules/\n');
+    mkdirSync(join(h.repo, 'node_modules'), { recursive: true });
+    const batch = await startedOne(h.addTask('Alpha'));
+    expect(batch.state).toBe('OPEN');
+    expect(h.pnpm.calls()).toEqual([]);
+  });
+
+  it('refuses the cut when the install fails, naming the cause, and removes what it made', async () => {
+    withPnpmProject();
+    h.pnpm.failWith(1, 'CONNECT tunnel failed, response 403');
+    const task = h.addTask('Alpha');
+    const batch = h.starter.startTask(task.id);
+    const path = pathOf(batch);
+    await h.jobs.idle();
+    const card = h.only(h.cards());
+    expect(card.title).toContain("couldn't install the dependencies");
+    expect(card.body).toContain('CONNECT tunnel failed, response 403');
+    expect(card.body).toContain('registry');
+    expect(card.body).toContain(
+      'pnpm install --frozen-lockfile --ignore-scripts --ignore-pnpmfile',
+    );
+    expect(card.detail).toMatchObject({ taskIds: [task.id] });
+    expect(listBatches(h.store.db).filter((b) => b.id === batch.id)).toEqual([]);
+    expect(existsSync(path)).toBe(false);
+    expect(worktrees()).toHaveLength(1);
+    expect(branches10db()).toEqual([]);
+  });
+});
+
 describe('refusing a worktree cut', () => {
   it.each<{
     name: string;

@@ -17,6 +17,7 @@ import {
   DB_MIGRATIONS_DIR,
   deleteAppSetting,
   getAppSetting,
+  listPermissionRules,
   listProjects,
   migrateDatabase,
   openDatabase,
@@ -49,14 +50,17 @@ import {
 } from '../backups';
 import { systemClock, type Clock } from '../clock';
 import {
+  allCheckouts,
   createBatchCardAnswers,
   createBatchStarter,
   createDeliveryJobs,
   createShipper,
+  createWorktreeDependencies,
   DEFAULT_DELIVERY_LIMITS,
   flagWorktreeMissing,
   flagWrongBranch,
   recoverBatches,
+  resolvePnpm,
   subscribeShipTrigger,
   type DeliveryContext,
   type DeliveryLimits,
@@ -406,6 +410,18 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       scheduler?.requestTick();
     },
     worktreeRoot,
+    // Not behind the gate slots: waiting out a long gate would hold the cut. Each cut downloads the
+    // worktree's whole tree (the run's store is empty), so several cuts at once are several downloads.
+    dependencies: createWorktreeDependencies({
+      gate: gateRunner,
+      clock,
+      dataDir: opts.dataDir,
+      sessionEnv: () => launcher.projectEnv(),
+      rules: (project) => listPermissionRules(state.db, project.id, null),
+      checkouts: () => allCheckouts(state.db),
+      timeoutMs: limits.gateTimeoutMs,
+      resolvePnpm,
+    }),
   };
   const starter = createBatchStarter(delivery);
   const shipper = createShipper({

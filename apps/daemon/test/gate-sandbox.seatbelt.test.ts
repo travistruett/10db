@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:net';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createGit } from '../src/git';
 import { silentLogger } from '../src/log';
@@ -57,6 +57,7 @@ describe.skipIf(!SEATBELT)('the gate under the sandbox (Seatbelt)', () => {
         loginConfigDir: null,
         gitDirs: (path) => git.gitDirs(path),
         tmpRoot: join(root, 't'),
+        pnpmLockDir: join(root, 'pnpm-locks'),
         runtime: resolveSandboxRuntime(),
       }),
       logger: silentLogger,
@@ -300,5 +301,16 @@ describe.skipIf(!SEATBELT)('the gate under the sandbox (Seatbelt)', () => {
     const result = await run('docker ps');
     expect(result.exitCode).not.toBe(0);
     expect(result.tail.trimEnd().endsWith(DOCKER_REFUSAL)).toBe(true);
+  }, 60_000);
+  it("opens pnpm's lock files to a package install only", async () => {
+    // pnpm opens its lock files read-write; the probe does the same and takes the lock.
+    const lock = join(root, 'pnpm-locks', 'all-stores.lock');
+    const take = `perl -MFcntl=:flock,:DEFAULT -e 'sysopen(my $f, $ARGV[0], O_RDWR|O_CREAT, 0600) or exit 1; flock($f, LOCK_EX|LOCK_NB) or exit 1' '${lock}'`;
+    const install = await run(take, { packageInstall: true });
+    expect(install.exitCode, install.tail).toBe(0);
+    // The directory is removed with whatever the run left in it.
+    expect(existsSync(dirname(lock))).toBe(false);
+    const ordinary = await run(take);
+    expect(ordinary.exitCode, ordinary.tail).not.toBe(0);
   }, 60_000);
 });

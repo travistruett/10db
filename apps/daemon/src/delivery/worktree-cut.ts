@@ -29,7 +29,8 @@ export const worktreeLockReason = (id: BatchId): string => `${WORKTREE_LOCK_PREF
 
 /**
  * Cutting a worktree (worktree mode spec §5): the checks in order, then the branch and a locked
- * worktree on it, then the seed of ignored directories, then OPEN. A refusal removes what this cut made, deletes the CUTTING row
+ * worktree on it, then the seed of ignored directories, then the install that brings the seed in line
+ * with the worktree's lockfile, then OPEN. A refusal removes what this cut made, deletes the CUTTING row
  * with its workstreams cancelled, and raises a card naming the tasks. A shutdown leaves the row for
  * startup recovery. The main checkout's branch, index and files are never read or written here.
  */
@@ -153,6 +154,23 @@ export async function cutWorktree(
     } catch (error) {
       if (!stopped()) await refuse(worktreeCards.seedFailed(batch, error));
       return;
+    }
+    if (stopped()) return;
+    const installed = await ctx.dependencies.refresh({ batch, project, path, signal });
+    switch (installed.kind) {
+      case 'aborted':
+        return;
+      case 'failed':
+        await refuse(worktreeCards.installFailed(batch, installed));
+        return;
+      case 'installed':
+        ctx.logger.info(
+          { batchId, path, logPath: installed.logPath, durationMs: installed.durationMs },
+          'worktree dependencies installed',
+        );
+        break;
+      case 'skipped':
+        break;
     }
     if (stopped()) return;
     ctx.state.write((w) => {

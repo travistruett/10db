@@ -118,6 +118,25 @@ async function makeWhole(
     });
     throw error;
   }
+  const dropUninstalled = async (): Promise<void> => {
+    await ctx.git.removeWorktree(main, path).catch((removal: unknown) => {
+      ctx.logger.warn({ batchId: batch.id, path, err: message(removal) }, 'worktree left unseeded');
+    });
+  };
+  const installed = await ctx.dependencies
+    .refresh({ batch, project, path, signal })
+    .catch(async (error: unknown) => {
+      // A worktree without current packages must not look whole to the next Retry.
+      await dropUninstalled();
+      throw error;
+    });
+  if (installed.kind === 'failed' || installed.kind === 'aborted') {
+    // Without current packages the worktree is not whole: the next Retry makes it again.
+    await dropUninstalled();
+    if (installed.kind === 'failed')
+      raise(ctx.inbox, batch.projectId, worktreeCards.installFailed(batch, installed));
+    return 'refused';
+  }
   ctx.logger.info({ batchId: batch.id, path, branch }, 'batch worktree made again');
   return 'replaced';
 }

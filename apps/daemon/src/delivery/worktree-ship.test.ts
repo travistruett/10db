@@ -335,6 +335,25 @@ describe('Retry of a FAILED worktree batch', () => {
     expect(worktreePaths()).toEqual([realpathSync(h.repo), wt]);
   });
 
+  it('refuses a replaced worktree whose dependency install fails, removing it and naming the cause', async () => {
+    h.commit('pnpm-lock.yaml', 'lockfileVersion: 9\n');
+    h.git$('push', '-q', 'origin', 'main');
+    const { batch } = await failedAfterWork();
+    const wt = pathOf(batch);
+    // The seed needs a node_modules to refresh.
+    writeFileSync(join(h.repo, '.gitignore'), 'node_modules/\n');
+    mkdirSync(join(h.repo, 'node_modules'), { recursive: true });
+    rmSync(wt, { recursive: true, force: true });
+    h.pnpm.failWith(1, 'ERR_PNPM_META_FETCH_FAIL');
+
+    const outcome = await ensureWorktreeWhole(h.ctx, batch, new AbortController().signal);
+
+    expect(outcome).toBe('refused');
+    expect(h.only(h.cards()).body).toContain('ERR_PNPM_META_FETCH_FAIL');
+    expect(existsSync(wt)).toBe(false);
+    expect(worktreePaths()).toEqual([realpathSync(h.repo)]);
+  });
+
   it('refuses, and removes nothing, when git no longer trusts the worktree', async () => {
     const { batch } = await failedAfterWork();
     const wt = pathOf(batch);

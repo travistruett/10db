@@ -1,5 +1,12 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, realpathSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
   InboxKind,
@@ -29,6 +36,7 @@ import {
   createBatchStarter,
   createDeliveryJobs,
   createShipper,
+  createWorktreeDependencies,
   DEFAULT_DELIVERY_LIMITS,
   subscribeShipTrigger,
   type BatchStarter,
@@ -57,6 +65,39 @@ import {
 
 type Settled = 'DONE' | 'FAILED' | 'CANCELLED' | 'WAITING_HUMAN' | 'RUNNING';
 
+/** A `pnpm` on its own PATH directory, recording calls and failing on request. */
+function fakePnpm(root: string): FakePnpm {
+  const dir = join(root, 'fake-pnpm');
+  const bin = join(dir, 'bin');
+  const log = join(dir, 'calls.log');
+  const verdict = join(dir, 'verdict');
+  mkdirSync(bin, { recursive: true });
+  const script = join(bin, 'pnpm');
+  writeFileSync(
+    script,
+    [
+      '#!/bin/sh',
+      `printf '%s | %s\\n' "$PWD" "$*" >> '${log}'`,
+      `if [ -f '${verdict}' ]; then cat '${verdict}'; read -r code < '${verdict}.code'; exit "$code"; fi`,
+      '',
+    ].join('\n'),
+  );
+  chmodSync(script, 0o755);
+  return {
+    bin,
+    calls: () =>
+      existsSync(log)
+        ? readFileSync(log, 'utf8')
+            .split('\n')
+            .filter((line) => line !== '')
+        : [],
+    failWith(exitCode, output) {
+      writeFileSync(verdict, `${output}\n`);
+      writeFileSync(`${verdict}.code`, `${String(exitCode)}\n`);
+    },
+  };
+}
+
 /** The shortest run of allowed transitions from `from` to `to`, as the runner would take it. */
 function pathBetween(from: WorkstreamState, to: WorkstreamState): WorkstreamState[] {
   const previous = new Map<WorkstreamState, WorkstreamState>();
@@ -76,6 +117,16 @@ function pathBetween(from: WorkstreamState, to: WorkstreamState): WorkstreamStat
     throw new Error(`no path from ${from} to ${to}`);
   return path;
 }
+/** The `pnpm` a worktree's dependency install runs in the harness: it records its calls. */
+export interface FakePnpm {
+  /** The directory holding the `pnpm`. */
+  readonly bin: string;
+  /** Each call as `<directory> | <arguments>`, oldest first. */
+  calls(): string[];
+  /** Makes every later call print `output` and exit with `exitCode`. */
+  failWith(exitCode: number, output: string): void;
+}
+
 export interface DeliveryHarness {
   readonly store: Store;
   readonly bus: EventBus;
@@ -102,6 +153,7 @@ export interface DeliveryHarness {
   readonly origin: string;
   /** How many times delivery asked the scheduler to look for work. */
   readonly ticks: { count: number };
+  readonly pnpm: FakePnpm;
   addTask(
     title: string,
     opts?: {
@@ -169,6 +221,8 @@ export function createDeliveryHarness(
     ...project,
   });
   const logs = captureLogs();
+  const data = tempDir('delivery-data');
+  const pnpm = fakePnpm(data.path);
   const ctx: DeliveryContext = {
     state,
     git,
@@ -187,8 +241,17 @@ export function createDeliveryHarness(
       ticks.count += 1;
     },
     worktreeRoot,
+    dependencies: createWorktreeDependencies({
+      gate: createGateRunner({ sandbox: null, logger: silentLogger }),
+      clock: new ManualClock(),
+      dataDir: data.path,
+      sessionEnv: () => ({ PATH: `${pnpm.bin}:/usr/bin:/bin`, pnpm_config_store_dir: pnpm.bin }),
+      resolvePnpm: () => Promise.resolve(join(pnpm.bin, 'pnpm')),
+      rules: () => [],
+      checkouts: () => [remote.repo.path],
+      timeoutMs: opts.gateTimeoutMs ?? 20_000,
+    }),
   };
-  const data = tempDir('delivery-data');
   const running = new Set<WorkstreamId>();
   const shipper = createShipper({
     ...ctx,
@@ -228,6 +291,7 @@ export function createDeliveryHarness(
     repo: remote.repo.path,
     origin: remote.origin.path,
     ticks,
+    pnpm,
     addTask(title, opts = {}) {
       return state.write((c) =>
         insertTask(c, seeded.id, {

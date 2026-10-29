@@ -56,7 +56,7 @@
 - [ ] M2a read-only shell: aliases and functions in the user's shell configuration can rewrite plain words, which the read-only grammar cannot see; check whether Claude Code's Bash tool loads them.
 - [x] Batch delivery: worktrees and one PR per task (workspace_mode = worktree), the spec's expected fast-follow (batch delivery spec §9). Built: `docs/superpowers/specs/2026-10-27-10db-worktree-mode-design.md`, `docs/architecture/02-batch-delivery.md`.
 - [ ] Worktree mode: a port block per worktree (hazards still serialize the shared ports, spec §11).
-- [ ] Worktree mode: a setup command run in the lane sandbox, so a worktree whose lockfile is newer than the main checkout's install can install without the builder.
+- [x] Worktree mode: a worktree whose lockfile is newer than the main checkout's install installs without the builder. Built for pnpm projects: `pnpm install --frozen-lockfile --ignore-scripts --ignore-pnpmfile` under the gate sandbox after the seed (`decisions/2026-10-28-worktree-dependency-install.md`). Not built: a setup command of the project's own, and an install inside a lane.
 - [ ] Worktree mode: seeding ignored files such as `.env`; `worktree_seed` names directories only.
 - [ ] Worktree mode: parallel ships behind a limit (one ship runs at a time per project now).
 - [ ] Worktree mode: rebasing or updating an unmerged pull request (a worktree is cut once and never refreshed).
