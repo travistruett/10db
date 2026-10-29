@@ -5,6 +5,7 @@ import { readJson } from './client';
 import type { DaemonConnection } from './connection';
 import { useDaemon } from './provider';
 import { accountKeys } from './account-queries';
+import { NETWORK_HOSTS_KEY } from './network-host-queries';
 import { queryKeys } from './queries';
 
 export const STREAM_RETRY_BASE_MS = 500;
@@ -21,6 +22,7 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   project: [queryKeys.projects, CANDIDATES],
   task: [['tasks'], CANDIDATES],
   board_column: [['board-columns'], CANDIDATES],
+  network_hosts: [NETWORK_HOSTS_KEY],
   // A batch's state shows on the board's strip and in its list; cancelling an abandoned batch's work moves tasks.
   batch: [queryKeys.projects, ['batches'], ...WORK, CANDIDATES],
   // Lanes changing can switch keep-awake on or off.

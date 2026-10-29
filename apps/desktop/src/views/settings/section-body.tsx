@@ -4,6 +4,7 @@ import { AccountsSection } from './accounts/accounts-section';
 import { BoardColumnsSection } from './board-columns-section';
 import { KeepAwakeSection } from './keep-awake-section';
 import { PlannedSection } from './planned-section';
+import { NetworkHostsSection } from './network-hosts-section';
 import { ProjectAreas } from './project-areas';
 import { ProjectBilling } from './project-billing';
 import { ProjectGeneralForm } from './project-general-form';
@@ -42,6 +43,13 @@ export function SectionBody({
         <>
           {heading}
           {project ? <ProjectAreas key={project.id} project={project} /> : <NoProject />}
+        </>
+      );
+    case SettingsSectionKey.NetworkHosts:
+      return (
+        <>
+          {heading}
+          {project ? <NetworkHostsSection key={project.id} project={project} /> : <NoProject />}
         </>
       );
     case SettingsSectionKey.Billing:

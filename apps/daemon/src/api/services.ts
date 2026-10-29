@@ -32,6 +32,7 @@ import type {
   KeepAwakeStatus,
   McpServerStatusDto,
   ModelProfileDto,
+  NetworkHostDto,
   ModelProfileId,
   ModelProfilePatch,
   PersonaDto,
@@ -114,6 +115,19 @@ export interface ApiServices {
   reviewProjectMcp(projectId: ProjectId): McpServerStatusDto[];
   /** What a new project is prefilled from for the folder at `path`, or why it can't be one. */
   inspectFolder(path: string): Promise<FolderInspectResult>;
+  /** The hosts the project's tasks and checks may reach: its project-wide network rules, one per host. */
+  listNetworkHosts(projectId: ProjectId): NetworkHostDto[];
+  /**
+   * Allows a host as a card's Always allow would. Throws InvalidError with the reason for a host the
+   * sandbox profile can't list, loopback, or a pattern over a whole top-level domain; `created` is
+   * false when the host was already allowed.
+   */
+  allowNetworkHost(
+    projectId: ProjectId,
+    host: string,
+  ): { readonly host: NetworkHostDto; readonly created: boolean };
+  /** Stops allowing a host; throws NotFoundError when it was not allowed. */
+  removeNetworkHost(projectId: ProjectId, host: string): NetworkHostDto;
   listPersonas(): PersonaDto[];
   createPersona(input: PersonaInput): PersonaDto;
   patchPersona(id: PersonaId, patch: PersonaPatch): PersonaDto;

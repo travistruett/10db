@@ -340,6 +340,12 @@ Under the lane sandbox (**built**), the design column holds for a lane's Bash:
   IPv6 address, is stored too, and the broker allows each request for it without a card. The card stays open
   after the session ends. The host arrives bare, with no port and no trailing dot (measured live). Loopback is off unless the project turns on "Let lane
   commands use localhost" (Settings › General, D15), read when each session starts.
+  The builder can also allow a host ahead of a card (Settings › Network hosts, `GET/POST/DELETE
+/projects/:id/network-hosts`). It stores the same project-wide `SandboxNetworkAccess` rule an Allow for the project
+  card stores, so it has the same trust, and a gate's profile lists it too, which is how a gate that reaches a host
+  (cargo: `index.crates.io`, `static.crates.io`) can pass: a gate's denied host raises no card. It refuses what the
+  profile can't list, loopback, `*` and a whole top-level domain
+  (`decisions/2026-10-29-project-network-hosts.md`).
 - **Run.** `autoAllowBashIfSandboxed` is off, so every command Claude Code doesn't treat as read-only reaches the
   broker. It allows the command without a card unless it is a hazard or something unread could make it one
   (`decisions/2026-10-28-broker-unread-arguments.md`): a program it can't name (`$CMD`, a substitution, a glob, a
