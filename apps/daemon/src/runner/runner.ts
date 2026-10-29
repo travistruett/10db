@@ -4,7 +4,6 @@ import {
   currentStep,
   EventType,
   InboxKind,
-  InvalidError,
   PermissionChoice,
   StepRole,
   ToolAccess,
@@ -128,6 +127,7 @@ import { advanceSteps, failStep, moveAfter, sendBackSteps, type StepEntry } from
 import type { GateRunner } from '../verify';
 import { findClaimed } from '../watcher';
 import type { LiveSessions } from './live-sessions';
+import { raiseBuilderCheck } from './builder-check';
 import { failedGateEvidence } from './failed-gate';
 import { nextActionAfterCrash, nextActionOnAnotherAccount } from './next-action';
 
@@ -492,7 +492,11 @@ export function createRunner(opts: RunnerOptions): Runner {
   }
 
   /** After a read-only step's session: the next step in this lane, DONE, a rework, or a failure. */
-  function finishReadOnlyStep(id: WorkstreamId, ctl: Control, row: WorkstreamRow): 'next' | 'stop' {
+  async function finishReadOnlyStep(
+    id: WorkstreamId,
+    ctl: Control,
+    row: WorkstreamRow,
+  ): Promise<'next' | 'stop'> {
     const step = currentStep(row);
     // A sent-back step still holds its earlier result; only one a session of this step recorded counts.
     const floorSession = (sessionId: SessionId) =>
@@ -509,6 +513,22 @@ export function createRunner(opts: RunnerOptions): Runner {
         fail(id, ctl.fence, `The ${step.role} step ended without calling complete_step`);
         return 'stop';
       case 'done': {
+        if (getProject(db, row.projectId).gateCommand === null) {
+          // Nothing checked a read-only approval either: the builder checks what the steps produced.
+          const facts = await checkFacts(row, checkoutOf(db, row));
+          if (stopRequested(ctl) === 'cancelled') {
+            cancelNow(id, ctl.fence);
+            return 'stop';
+          }
+          opts.state.write((ctx) => {
+            countFinished(ctx, step);
+            patchWorkstream(ctx, id, ctl.fence, {
+              steps: advanceSteps(row.steps, row.stepIndex, -1, entryFor(ctx, id)),
+            });
+            waitForBuilder(ctx, id, ctl.fence, row, facts);
+          });
+          return 'stop';
+        }
         const lastGate = listEvidence(db, id)
           .filter((e) => e.kind === 'gate' && e.exitCode === 0)
           .at(-1);
@@ -1518,6 +1538,84 @@ export function createRunner(opts: RunnerOptions): Runner {
     });
   }
 
+  /** The facts the builder checks: where the task began, where it is now, and what it committed. */
+  async function checkFacts(row: WorkstreamRow, checkout: string) {
+    const head = await opts.git.head(checkout);
+    const baseHead = row.baseHead ?? head;
+    return { baseHead, head, commits: await opts.git.commitsSince(checkout, baseHead) };
+  }
+
+  /**
+   * The last step of a task whose project has no gate is done, but nothing has checked it: the
+   * workstream waits for the builder on a `check` card, still holding its claims, with no session and
+   * no lease. Only the builder's answer completes it.
+   */
+  function waitForBuilder(
+    ctx: WriteContext,
+    id: WorkstreamId,
+    fence: number,
+    row: WorkstreamRow,
+    facts: { baseHead: string; head: string; commits: readonly string[] },
+  ): void {
+    const card = raiseBuilderCheck(ctx, {
+      workstreamId: id,
+      projectId: row.projectId,
+      taskTitle: getTask(ctx.tx, row.taskId).title,
+      ...facts,
+    });
+    if (getWorkstreamRow(ctx.tx, id).state !== S.Verifying)
+      transitionWorkstream(ctx, id, { to: S.Verifying, fence, reason: 'steps complete' });
+    transitionWorkstream(ctx, id, {
+      to: S.WaitingHuman,
+      fence,
+      patch: { nextAction: { kind: 'builder_review', inboxId: card.id }, currentSessionId: null },
+      reason: 'no gate command: waiting for the builder to check the work',
+    });
+    clearLease(ctx, id);
+  }
+
+  /** The end of a step in a project with no gate command (spec §9.4). */
+  async function finishWithoutGate(
+    id: WorkstreamId,
+    ctl: Control,
+    row: WorkstreamRow,
+    checkout: string,
+  ): Promise<void> {
+    const facts = await checkFacts(row, checkout);
+    // A cancel that landed while git was read must not be overwritten by the verdict.
+    if (stopRequested(ctl) === 'cancelled') {
+      cancelNow(id, ctl.fence);
+      return;
+    }
+    const step = currentStep(row);
+    const move = moveAfter(row.steps, row.stepIndex);
+    const next = move.kind === 'advance' ? row.steps[move.to] : undefined;
+    opts.state.write((ctx) => {
+      countFinished(ctx, step);
+      if (move.kind === 'advance' && next) {
+        transitionWorkstream(ctx, id, {
+          to: S.Queued,
+          fence: ctl.fence,
+          patch: {
+            nextAction: { kind: 'start' },
+            steps: advanceSteps(row.steps, row.stepIndex, move.to, entryFor(ctx, id)),
+            stepIndex: move.to,
+            model: next.model,
+            effort: next.effort,
+          },
+          reason: `no gate command; next: ${next.role}`,
+        });
+        clearLease(ctx, id);
+        return;
+      }
+      if (row.steps.length > 0)
+        patchWorkstream(ctx, id, ctl.fence, {
+          steps: advanceSteps(row.steps, row.stepIndex, -1, entryFor(ctx, id)),
+        });
+      waitForBuilder(ctx, id, ctl.fence, row, facts);
+    });
+  }
+
   async function verify(id: WorkstreamId, ctl: Control): Promise<void> {
     if (getWorkstreamRow(db, id).state !== S.Verifying) {
       opts.state.write((ctx) =>
@@ -1542,8 +1640,10 @@ export function createRunner(opts: RunnerOptions): Runner {
       return;
     }
     const gateCommand = project.gateCommand;
-    // A project without a gate has no command to run here.
-    if (gateCommand === null) throw new InvalidError('This project has no gate command to run');
+    if (gateCommand === null) {
+      await finishWithoutGate(id, ctl, row, checkout);
+      return;
+    }
     const run = listEvidence(db, id).filter((e) => e.kind === 'gate').length + 1;
     const gateAbort = new AbortController();
     ctl.gateAbort = gateAbort;
@@ -1735,7 +1835,7 @@ export function createRunner(opts: RunnerOptions): Runner {
             });
           }
           if (readOnly) {
-            if (finishReadOnlyStep(id, ctl, finished) === 'next') continue;
+            if ((await finishReadOnlyStep(id, ctl, finished)) === 'next') continue;
             return;
           }
           if (outcome.withoutHandoff) {

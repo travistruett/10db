@@ -38,6 +38,7 @@ import {
   RESULT_NUDGE,
 } from '../briefing';
 import { createLauncher, KeychainError } from '../environment';
+import { recoverOnStartup, systemProcesses } from '../recovery';
 import { createGit } from '../git';
 import { silentLogger } from '../log';
 import { createGateRunner, type GateRequest } from '../verify';
@@ -3137,5 +3138,204 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
       expect(denied).toHaveLength(1);
       expect(String(denied[0]?.detail['reason'])).toContain('outside');
     });
+  });
+});
+
+describe('without a gate command', () => {
+  const approve = (opId: string) => ({
+    do: 'mcp' as const,
+    tool: 'complete_step',
+    args: { opId, summary: 'Looks right.', verdict: 'approve' },
+  });
+  const implement = (opId: string) => [
+    write('src/api/a.txt', opId),
+    commit(opId, ['src/api/a.txt']),
+    turn,
+  ];
+  const checkCards = () => listInbox(engine.store.db, {}).filter((i) => i.kind === 'check');
+  const openChecks = () => checkCards().filter((i) => i.state === 'OPEN');
+  const recover = () =>
+    recoverOnStartup({
+      state: engine.state,
+      inbox: engine.inbox,
+      git: createGit(),
+      processes: systemProcesses,
+      maxRecoveryAttempts: 3,
+      logger: silentLogger,
+    });
+
+  /** Runs the lane to wherever it stops; a workstream that waits stays WAITING_HUMAN. */
+  const runToWait = async (id: Parameters<typeof ws>[0]) => {
+    engine.launch(id);
+    await engine.runner.idle();
+  };
+
+  const expectWaitingForTheBuilder = (
+    id: Parameters<typeof ws>[0],
+    title: string,
+    commits: number,
+  ) => {
+    const [card] = openChecks();
+    expect(openChecks()).toHaveLength(1);
+    expect(ws(id)).toMatchObject({
+      state: 'WAITING_HUMAN',
+      currentSessionId: null,
+      nextAction: { kind: 'builder_review', inboxId: card?.id },
+    });
+    expect(card).toMatchObject({
+      kind: 'check',
+      title: `Ready for you to check: ${title}`,
+      options: [{ label: 'approve' }, { label: 'send_back' }],
+      targets: [{ workstreamId: id }],
+    });
+    const row = getWorkstreamRow(engine.store.db, id);
+    expect(card?.detail).toMatchObject({ workstreamId: id, baseHead: row.baseHead });
+    const detail = card?.detail ?? {};
+    const head = detail['head'];
+    expect(typeof head === 'string' && /^[0-9a-f]{40}$/.test(head)).toBe(true);
+    expect(detail['commits']).toHaveLength(commits);
+    // The task still owns its areas, and no lane is held: no lease, no live runner.
+    expect(activeClaims(engine.store.db, id).length).toBeGreaterThan(0);
+    expect(row.leaseOwner).toBeNull();
+    expect(engine.runner.isRunning(id)).toBe(false);
+    expect(listEvidence(engine.store.db, id)).toEqual([]);
+  };
+
+  const neverDone = (id: Parameters<typeof ws>[0], taskId: Parameters<typeof getTask>[1]) => {
+    expect(ws(id).state).not.toBe('DONE');
+    expect(getTask(engine.store.db, taskId).status).not.toBe('done');
+    expect(listInbox(engine.store.db, {}).filter((i) => i.kind === 'review')).toEqual([]);
+  };
+
+  it('a middle step advances without evidence', async () => {
+    engine = await createTestEngine(
+      { Alpha: [implement('op-nogate-0001'), [approve('op-nogate-0002'), turn]] },
+      { gateCommand: null },
+    );
+    const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+    await runToWait(workstream.id);
+    expect(ws(workstream.id)).toMatchObject({ state: 'QUEUED', stepIndex: 1 });
+    expect(ws(workstream.id).nextAction).toEqual({ kind: 'start' });
+    expect(listEvidence(engine.store.db, workstream.id)).toEqual([]);
+    expect(transitions(workstream.id).at(-1)).toBe('VERIFYING->QUEUED');
+    expect(checkCards()).toEqual([]);
+  });
+
+  it.each([
+    {
+      name: 'an implement step that is the last',
+      flow: undefined,
+      script: [implement('op-nogate-0011')],
+      launches: 1,
+      commits: 1,
+    },
+    {
+      name: 'a review step that is the last',
+      flow: 'standard',
+      script: [implement('op-nogate-0012'), [approve('op-nogate-0013'), turn]],
+      launches: 2,
+      commits: 1,
+    },
+  ])('last step without a gate waits for the builder: $name', async (row) => {
+    engine = await createTestEngine({ Alpha: row.script }, { gateCommand: null });
+    const { task, workstream } = engine.addTask(
+      'Alpha',
+      ['api'],
+      [],
+      row.flow ? { flow: row.flow } : undefined,
+    );
+    for (let i = 0; i < row.launches; i += 1) await runToWait(workstream.id);
+    expectWaitingForTheBuilder(workstream.id, 'Alpha', row.commits);
+    neverDone(workstream.id, task.id);
+  });
+
+  it('a restart while waiting keeps one card and the same next action', async () => {
+    engine = await createTestEngine(
+      { Alpha: [implement('op-nogate-0021')] },
+      { gateCommand: null },
+    );
+    const { task, workstream } = engine.addTask('Alpha');
+    await runToWait(workstream.id);
+    const before = ws(workstream.id);
+    const sessions = engine.adapter.prompts.length;
+    for (let i = 0; i < 2; i += 1) {
+      const report = await recover();
+      expect(report.parked).toEqual([workstream.id]);
+      expect(report.requeued).toEqual([]);
+      expect(ws(workstream.id)).toMatchObject({
+        state: 'WAITING_HUMAN',
+        nextAction: before.nextAction,
+      });
+      expect(openChecks()).toHaveLength(1);
+      expect(openChecks()[0]?.id).toBe(
+        before.nextAction.kind === 'builder_review' ? before.nextAction.inboxId : null,
+      );
+    }
+    // Nothing verified again, nothing started, nothing completed.
+    expect(engine.adapter.prompts).toHaveLength(sessions);
+    expect(listEvidence(engine.store.db, workstream.id)).toEqual([]);
+    neverDone(workstream.id, task.id);
+  });
+
+  it('a crash in VERIFYING with no gate raises the card once', async () => {
+    engine = await createTestEngine({ Alpha: [[turn]] }, { gateCommand: null });
+    const { task, workstream } = engine.addTask('Alpha');
+    engine.state.write((ctx) => {
+      for (const to of ['STARTING', 'RUNNING'] as const)
+        transitionWorkstream(ctx, workstream.id, { to, fence: null });
+      transitionWorkstream(ctx, workstream.id, {
+        to: 'VERIFYING',
+        fence: null,
+        patch: { nextAction: { kind: 'verify' } },
+      });
+    });
+    await recover();
+    expect(ws(workstream.id)).toMatchObject({ state: 'QUEUED', nextAction: { kind: 'verify' } });
+    expect(checkCards()).toEqual([]);
+    await runToWait(workstream.id);
+    expect(ws(workstream.id).state).toBe('WAITING_HUMAN');
+    expect(checkCards()).toHaveLength(1);
+    await recover();
+    await recover();
+    expect(checkCards()).toHaveLength(1);
+    expect(ws(workstream.id).state).toBe('WAITING_HUMAN');
+    neverDone(workstream.id, task.id);
+  });
+
+  it('verifying again beside an open card raises no second one', async () => {
+    engine = await createTestEngine(
+      { Alpha: [implement('op-nogate-0031')] },
+      { gateCommand: null },
+    );
+    const { task, workstream } = engine.addTask('Alpha');
+    await runToWait(workstream.id);
+    const [card] = openChecks();
+    engine.state.write((ctx) =>
+      transitionWorkstream(ctx, workstream.id, {
+        to: 'VERIFYING',
+        fence: null,
+        patch: { nextAction: { kind: 'verify' } },
+      }),
+    );
+    const fence = engine.state.write((ctx) =>
+      acquireLease(ctx, workstream.id, 'test-daemon', new Date(Date.now() + 60_000).toISOString()),
+    );
+    engine.runner.launch(workstream.id, fence);
+    await engine.runner.idle();
+    expect(checkCards()).toHaveLength(1);
+    expect(ws(workstream.id)).toMatchObject({
+      state: 'WAITING_HUMAN',
+      nextAction: { kind: 'builder_review', inboxId: card?.id },
+    });
+    neverDone(workstream.id, task.id);
+  });
+
+  it('with a gate, a finished task still completes on the gate and raises no check', async () => {
+    engine = await createTestEngine({ Alpha: [implement('op-nogate-0041')] });
+    const { workstream } = engine.addTask('Alpha');
+    await runToWait(workstream.id);
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(listEvidence(engine.store.db, workstream.id)).toHaveLength(1);
+    expect(checkCards()).toEqual([]);
   });
 });

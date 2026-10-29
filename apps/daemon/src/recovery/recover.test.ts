@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import {
   mintId,
   type NextAction,
+  type ProjectDto,
   type WorkstreamState,
   type WorkstreamStep,
 } from '@10db/contracts';
@@ -42,6 +43,7 @@ import { alive, orphanGateGroup } from '../../test/orphan-gate';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit } from '../git';
 import { createInboxService, type InboxService } from '../inbox';
+import { raiseBuilderCheck } from '../runner';
 import { silentLogger } from '../log';
 import { recoverOnStartup, systemProcesses } from './index';
 
@@ -640,5 +642,112 @@ describe('recoverOnStartup', () => {
         terminal ? null : 'daemon_restart',
       );
     });
+  });
+});
+
+describe('recoverOnStartup for a project without a gate command', () => {
+  const checkCards = () => listInbox(state.db, {}).filter((i) => i.kind === 'check');
+
+  /** A WAITING_HUMAN workstream of a gate-less project, parked on a check card in `cardState`. */
+  function waitingForCheck(
+    cardState: 'OPEN' | 'ANSWERED' | 'CANCELLED' | null,
+    nextAction: NextAction = { kind: 'start' },
+    existing?: ProjectDto,
+  ) {
+    const project = existing ?? seedProject(base, { repoPath: repo.path, gateCommand: null });
+    const seeded = seedWorkstream(base, { project, title: mintId('Task') });
+    const id = seeded.workstream.id;
+    const card = state.write((ctx) => {
+      for (const to of ['STARTING', 'RUNNING', 'VERIFYING', 'WAITING_HUMAN'] as const)
+        transitionWorkstream(ctx, id, { to, fence: null });
+      const item =
+        cardState === null
+          ? null
+          : raiseBuilderCheck(ctx, {
+              workstreamId: id,
+              projectId: project.id,
+              taskTitle: seeded.task.title,
+              baseHead: 'a'.repeat(40),
+              head: 'b'.repeat(40),
+              commits: ['b'.repeat(40)],
+            });
+      if (item && cardState !== null && cardState !== 'OPEN')
+        updateInboxItem(ctx, item.id, {
+          state: cardState,
+          ...(cardState === 'ANSWERED' ? { answer: { choice: 'approve' } } : {}),
+        });
+      patchWorkstream(ctx, id, null, {
+        nextAction: item ? { kind: 'builder_review', inboxId: item.id } : nextAction,
+      });
+      return item;
+    });
+    return { ...seeded, card };
+  }
+
+  it.each([
+    { name: 'an open check card', cardState: 'OPEN' as const, restarts: 2 },
+    // Answering is delivered by the card's own handler; recovery only leaves the work parked.
+    { name: 'an answered check card', cardState: 'ANSWERED' as const, restarts: 1 },
+  ])('parks a waiting workstream on $name and keeps its card', async ({ cardState, restarts }) => {
+    const ws = waitingForCheck(cardState);
+    for (let i = 0; i < restarts; i += 1) {
+      const report = await recover();
+      expect(report.parked).toEqual([ws.workstream.id]);
+      expect(report.requeued).toEqual([]);
+      expect(getWorkstream(state.db, ws.workstream.id)).toMatchObject({
+        state: 'WAITING_HUMAN',
+        currentSessionId: null,
+        nextAction: { kind: 'builder_review', inboxId: ws.card?.id },
+      });
+      expect(checkCards().map((c) => c.id)).toEqual([ws.card?.id]);
+    }
+  });
+
+  it('checks for the card before the generic answer branch', async () => {
+    const ws = waitingForCheck('OPEN');
+    // A stale `answer` action must not decide: the card's kind does.
+    state.write((ctx) => {
+      patchWorkstream(ctx, ws.workstream.id, null, {
+        nextAction: {
+          kind: 'answer',
+          inboxId: ws.card?.id ?? mintId('InboxItem'),
+          providerSessionId: 'p',
+        },
+      });
+    });
+    await recover();
+    expect(getWorkstream(state.db, ws.workstream.id).nextAction).toEqual({
+      kind: 'builder_review',
+      inboxId: ws.card?.id,
+    });
+  });
+
+  it('raises the card again, once, when the waiting workstream lost its check card', async () => {
+    const ws = waitingForCheck('CANCELLED');
+    for (let i = 0; i < 2; i += 1) {
+      const report = await recover();
+      expect(report.parked).toEqual([ws.workstream.id]);
+      expect(getWorkstream(state.db, ws.workstream.id).state).toBe('WAITING_HUMAN');
+    }
+    const live = checkCards().filter((c) => c.state === 'OPEN');
+    expect(live).toHaveLength(1);
+    expect(getWorkstream(state.db, ws.workstream.id).nextAction).toEqual({
+      kind: 'builder_review',
+      inboxId: live[0]?.id,
+    });
+    expect(getWorkstream(state.db, ws.workstream.id).state).not.toBe('DONE');
+  });
+
+  it('never completes a waiting workstream: no recovery path reaches DONE', async () => {
+    const first = waitingForCheck('OPEN');
+    const rows = [
+      first,
+      waitingForCheck('ANSWERED', undefined, first.project),
+      waitingForCheck('CANCELLED', undefined, first.project),
+    ];
+    await recover();
+    await recover();
+    for (const r of rows)
+      expect(getWorkstream(state.db, r.workstream.id).state).toBe('WAITING_HUMAN');
   });
 });

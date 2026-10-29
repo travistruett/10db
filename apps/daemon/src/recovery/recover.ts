@@ -27,7 +27,12 @@ import type { StateStore } from '../events';
 import type { Git } from '../git';
 import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
-import { failedGateEvidence, nextActionAfterCrash } from '../runner';
+import {
+  failedGateEvidence,
+  liveCheckCard,
+  nextActionAfterCrash,
+  raiseBuilderCheck,
+} from '../runner';
 import { failStep } from '../team';
 import type { ProcessTerminator } from './processes';
 
@@ -93,6 +98,33 @@ export async function recoverOnStartup(opts: {
     if (KEEP_STATE.has(row.state)) continue;
 
     const waiting = row.state === S.WaitingHuman;
+    // Work that waits for the builder's check keeps its card; it is not an agent's question to answer.
+    if (waiting && (row.nextAction.kind === 'builder_review' || liveCheckCard(db, ws.id))) {
+      const checkout = checkoutOf(db, row);
+      const head = await opts.git.head(checkout).catch(() => 'unknown');
+      const baseHead = row.baseHead ?? head;
+      const commits = await opts.git.commitsSince(checkout, baseHead).catch(() => []);
+      // A card that was closed some other way is raised again, so the work is never stranded.
+      const card = opts.state.write((ctx) => {
+        const kept =
+          liveCheckCard(ctx.tx, ws.id) ??
+          raiseBuilderCheck(ctx, {
+            workstreamId: ws.id,
+            projectId: project.id,
+            taskTitle: getTask(ctx.tx, row.taskId).title,
+            baseHead,
+            head,
+            commits,
+          });
+        patchWorkstream(ctx, ws.id, null, {
+          nextAction: { kind: 'builder_review', inboxId: kept.id },
+        });
+        return kept;
+      });
+      opts.logger.info({ workstreamId: ws.id, inboxId: card.id }, 'still waiting for the builder');
+      report.parked.push(ws.id);
+      continue;
+    }
     const open = waiting ? openItemsForWorkstream(db, ws.id)[0] : undefined;
     if (open) {
       const nextAction: NextAction = { kind: 'answer', inboxId: open.id, providerSessionId };
