@@ -2,6 +2,7 @@ import {
   findOpenByFoldKey,
   getBatch,
   insertBatch,
+  listEventsAfter,
   listWorkstreams,
   seedProject,
   transitionBatch,
@@ -66,6 +67,28 @@ function shipped(
 }
 
 const pr = (id: BatchId) => getBatch(h.store.db, id).pr;
+const prEvents = (id: BatchId) =>
+  listEventsAfter(h.store.db, 0, 10_000).filter(
+    (e) =>
+      e.type === 'batch.updated' &&
+      e.entityId === id &&
+      JSON.stringify(e.data) === JSON.stringify({ changed: ['pr'] }),
+  );
+
+/** h.gh, except that the prStatus call numbered `n` (from 1) fails with `error`. */
+function failingCall(n: number, error: GhError): Gh {
+  let count = 0;
+  return {
+    authStatus: () => h.gh.authStatus(),
+    authLogin: () => h.gh.authLogin(),
+    prView: (input) => h.gh.prView(input),
+    prCreate: (input) => h.gh.prCreate(input),
+    prStatus: (input) => {
+      count += 1;
+      return count === n ? Promise.reject(error) : h.gh.prStatus(input);
+    },
+  };
+}
 const polls = () => h.gh.calls.filter((c) => c.method === 'prStatus').length;
 const round = async (w: PrWatch, ms = INTERVAL) => {
   clock.advance(ms);
@@ -208,6 +231,22 @@ describe('the pull request watch', () => {
     expect(pr(id)).toMatchObject({ state: 'open', checks: 'none' });
   });
 
+  it('writes one batch.updated for a status that stays the same over three rounds', async () => {
+    setup();
+    const { id, prUrl } = shipped(h.project.id, 'Alpha');
+    h.gh.setChecks(prUrl, [run('build', null)]);
+    const w = watcher();
+    w.start();
+    await w.idle();
+    const updatedAt = getBatch(h.store.db, id).updatedAt;
+    await round(w);
+    await round(w);
+    expect(polls()).toBe(3);
+    expect(prEvents(id)).toHaveLength(1);
+    expect(getBatch(h.store.db, id).updatedAt).toBe(updatedAt);
+    expect(pr(id)?.checkedAt).toBe(clock.now().toISOString());
+  });
+
   it('marks a pull request GitHub no longer knows as unknown, without a gh card', async () => {
     setup();
     const { id } = shipped(h.project.id, 'Alpha', 'https://github.com/acme/widgets/pull/999');
@@ -296,6 +335,65 @@ describe('gh unavailable', () => {
     expect(pr(b.id)).toMatchObject({ state: 'unknown' });
     expect(pr(a.id)).toMatchObject({ state: 'unknown' });
     expect(h.cards()).toHaveLength(1);
+  });
+
+  it('keeps the gh card open after a round where one call answered and a later one failed', async () => {
+    setup();
+    const a = shipped(h.project.id, 'Alpha');
+    const b = shipped(h.project.id, 'Beta');
+    const w = watcher({ ...h.ctx, gh: failingCall(2, new GhError('failed', 'HTTP 502')) });
+    w.start();
+    await w.idle();
+    expect(pr(a.id)).toMatchObject({ state: 'open' });
+    expect(pr(b.id)).toMatchObject({ state: 'unknown', unknownReason: 'HTTP 502' });
+    const card = h.only(h.cards());
+    expect(card.body).toContain("gh couldn't reach GitHub: HTTP 502");
+
+    // A later round where every call answers withdraws it.
+    await round(w);
+    expect(pr(b.id)).toMatchObject({ state: 'open' });
+    expect(h.cards()).toEqual([]);
+  });
+
+  it('leaves an open gh card alone while a round half answers', async () => {
+    setup();
+    const a = shipped(h.project.id, 'Alpha');
+    const b = shipped(h.project.id, 'Beta');
+    h.gh.auth = 'signed_out';
+    // Call 1 is signed out; call 3 (Beta in the second round) fails after Alpha answered.
+    const w = watcher({ ...h.ctx, gh: failingCall(3, new GhError('failed', 'HTTP 502')) });
+    w.start();
+    await w.idle();
+    expect(h.cards()).toHaveLength(1);
+
+    h.gh.auth = 'ok';
+    await round(w);
+    expect(pr(a.id)).toMatchObject({ state: 'open' });
+    expect(pr(b.id)).toMatchObject({ state: 'unknown' });
+    expect(h.cards()).toHaveLength(1);
+  });
+
+  it('does not raise a dismissed failing-checks card again after an offline round', async () => {
+    setup();
+    const { id, prUrl } = shipped(h.project.id, 'Alpha');
+    h.gh.setChecks(prUrl, [run('build', 'FAILURE')]);
+    const w = watcher();
+    w.start();
+    await w.idle();
+    const card = h.only(h.cards());
+    h.inbox.withdraw(card.id);
+
+    h.gh.failNext.set('prStatus', new GhError('timeout', 'gh pr view gave no answer within 120 s'));
+    await round(w);
+    // Unknown, but the last known checks are kept.
+    expect(pr(id)).toMatchObject({ state: 'unknown', checks: 'failing' });
+    expect(pr(id)?.failingChecks.map((c) => c.name)).toEqual(['build']);
+    const ghCard = h.only(h.cards());
+    expect(ghCard.title).not.toContain('checks failed');
+
+    await round(w);
+    expect(pr(id)).toMatchObject({ state: 'open', checks: 'failing', unknownReason: null });
+    expect(h.cards()).toEqual([]);
   });
 
   it('keeps shipping while prStatus fails', async () => {

@@ -114,6 +114,37 @@ describe('a shipped batch’s pull request status', () => {
     ]);
   });
 
+  it('a read that changes nothing advances checkedAt only: no event, updatedAt kept', () => {
+    const project = seedProject(store, { delivery: 'pull_request' });
+    const id = shipped(project.id, 'one');
+    const failing = [{ name: 'build', url: 'https://github.com/o/r/runs/1' }];
+    store.write((ctx) =>
+      recordPullRequestStatus(ctx, id, status({ checks: 'failing', failingChecks: failing })),
+    );
+    const updatedAt = getBatch(store.db, id).updatedAt;
+
+    const later = '2026-10-29T12:02:00.000Z';
+    const { events, value } = store.write((ctx) =>
+      recordPullRequestStatus(
+        ctx,
+        id,
+        status({ checks: 'failing', failingChecks: failing, checkedAt: later }),
+      ),
+    );
+    expect(events).toEqual([]);
+    expect(value.pr?.checkedAt).toBe(later);
+    expect(getBatch(store.db, id).updatedAt).toBe(updatedAt);
+
+    const again = store.write((ctx) =>
+      recordPullRequestStatus(
+        ctx,
+        id,
+        status({ checks: 'failing', failingChecks: [...failing, { name: 'lint', url: null }] }),
+      ),
+    );
+    expect(again.events.map((e) => e.data)).toEqual([{ changed: ['pr'] }]);
+  });
+
   it('keeps the status in a reopened database', () => {
     const project = seedProject(store, { delivery: 'pull_request' });
     const id = shipped(project.id, 'one');

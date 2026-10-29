@@ -15,6 +15,7 @@ export type FailingCheckDto = z.infer<typeof FailingCheckDto>;
 /** What the daemon last read of a shipped batch's pull request. */
 export const PullRequestStatusDto = z.object({
   state: z.enum(PullRequestState),
+  /** While `state` is `unknown`, the checks (and `failingChecks`) gh last reported; `unknown` if it never did. */
   checks: z.enum(PullRequestChecks),
   failingChecks: z.array(FailingCheckDto),
   checkedAt: Timestamp,

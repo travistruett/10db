@@ -36,11 +36,18 @@ _Built:_ the daemon reads every shipped batch's pull request and keeps what it r
   - a status becomes unknown because gh failed: **one card per daemon** (`pr-watch-gh`, raised in the first
     affected project, since fold keys are per project), saying what to do for signed out, not installed or
     any other failure, and that the status stays unknown and nothing else is affected. It is withdrawn after
-    the next round that gets an answer.
+    the next round in which every call gh was asked answered; a round that half answers leaves it open.
+- **An unknown read keeps the last known checks.** When gh can't say, `state` becomes `unknown` with its
+  reason, but `checks` and `failingChecks` keep what gh last said (`unknown` only if it never said). A failed
+  read is therefore not a transition: a failing-checks card the builder dismissed is not raised again when gh
+  answers after a sleep, a wake or a network flap with the same failing checks.
 - **Every failing check counts.** The rollup does not say which checks are required, so a failing optional
   check raises the card too. This is a known gap; filtering to required checks is a follow-up.
-- Every recorded read writes the batch and emits `batch.updated` with `changed: ['pr']`, so `checkedAt`
-  stays fresh while a pull request waits.
+- **Only a change writes an event.** A read that changes the state, checks, failing checks or unknown reason
+  bumps the batch's `updatedAt` and emits `batch.updated` with `changed: ['pr']`. A read that changes
+  nothing only advances `pr_checked_at`, with no event, so a pull request left open for weeks does not grow
+  the event log every 2 minutes. The desktop sees the new `checkedAt` with the next change or on its next
+  fetch.
 
 _Designed, not built:_ shipping waits for CI, and gates run as pre-checks; the decision "CI decides"
 (`decisions/2026-10-29-sandbox-is-the-boundary.md`) says work is done when CI is green and the pull request

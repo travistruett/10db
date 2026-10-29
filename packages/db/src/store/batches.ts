@@ -264,13 +264,35 @@ export function patchBatch(ctx: WriteContext, id: BatchId, patch: BatchPatch): B
 /** What the PR watcher read of a pull request; stored whole, so a read is never half a status. */
 export type PullRequestStatusInput = PullRequestStatusDto;
 
-/** Stores the latest read of a batch's pull request and tells the UI with `batch.updated {changed:['pr']}`. */
+/** Whether a read says anything the stored status does not, `checkedAt` aside. */
+function prStatusChanged(row: BatchRow, status: PullRequestStatusInput): boolean {
+  return (
+    row.prState !== status.state ||
+    row.prChecks !== status.checks ||
+    row.prUnknownReason !== status.unknownReason ||
+    JSON.stringify(row.prFailingChecks ?? []) !== JSON.stringify(status.failingChecks)
+  );
+}
+
+/**
+ * Stores the latest read of a batch's pull request. A read that changes the status bumps
+ * `updatedAt` and tells the UI with `batch.updated {changed:['pr']}`; one that changes nothing
+ * only advances `checkedAt`, so a poll every two minutes leaves no event row behind.
+ */
 export function recordPullRequestStatus(
   ctx: WriteContext,
   id: BatchId,
   status: PullRequestStatusInput,
 ): BatchDto {
-  getBatchRow(ctx.tx, id);
+  const row = getBatchRow(ctx.tx, id);
+  if (row.prCheckedAt !== null && !prStatusChanged(row, status)) {
+    ctx.tx
+      .update(schema.batches)
+      .set({ prCheckedAt: status.checkedAt })
+      .where(eq(schema.batches.id, id))
+      .run();
+    return getBatch(ctx.tx, id);
+  }
   ctx.tx
     .update(schema.batches)
     .set({

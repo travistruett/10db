@@ -57,11 +57,16 @@ export function createPrWatch(input: {
   let started = false;
   let stopped = false;
 
-  function unknown(now: string, reason: string): PullRequestStatusDto {
+  /**
+   * A read that could not say where the pull request stands. The last known checks are kept, so a
+   * failed read is not a transition: a dismissed failing-checks card stays dismissed when gh
+   * answers again with the same checks.
+   */
+  function unknown(batch: BatchDto, now: string, reason: string): PullRequestStatusDto {
     return {
       state: PullRequestState.Unknown,
-      checks: PullRequestChecks.Unknown,
-      failingChecks: [],
+      checks: batch.pr?.checks ?? PullRequestChecks.Unknown,
+      failingChecks: batch.pr?.failingChecks ?? [],
       checkedAt: now,
       unknownReason: reason.slice(0, MAX_REASON),
     };
@@ -102,7 +107,7 @@ export function createPrWatch(input: {
       if (failure === null) {
         try {
           if (batch.repo === null || batch.prUrl === null) {
-            next = unknown(now, `10db has no repository recorded for "${batch.title}"`);
+            next = unknown(batch, now, `10db has no repository recorded for "${batch.title}"`);
           } else {
             const read = await ctx.gh.prStatus(
               { repo: batch.repo, ref: batch.prUrl },
@@ -111,7 +116,7 @@ export function createPrWatch(input: {
             answered = true;
             next =
               read === null
-                ? unknown(now, `GitHub has no pull request at ${batch.prUrl}`)
+                ? unknown(batch, now, `GitHub has no pull request at ${batch.prUrl}`)
                 : {
                     state: STATE_OF[read.state],
                     checks: read.checks,
@@ -125,11 +130,11 @@ export function createPrWatch(input: {
           if (controller.signal.aborted) return;
           failure = { error };
           logger.warn({ batchId: batch.id, err: detailOf(error) }, 'gh pr view failed');
-          next = unknown(now, detailOf(error));
+          next = unknown(batch, now, detailOf(error));
         }
       } else {
         // One failure ends the round: offline costs one timeout, not one per pull request.
-        next = unknown(now, detailOf(failure.error));
+        next = unknown(batch, now, detailOf(failure.error));
       }
       record(batch, next);
       if (
@@ -152,7 +157,8 @@ export function createPrWatch(input: {
           prCards.ghUnavailable(firstUnknown, failure.error),
         );
     }
-    if (answered)
+    // Only a round gh answered in full says gh works again: a half round leaves batches unknown.
+    if (answered && failure === null)
       for (const id of projects) withdraw(ctx.state, ctx.inbox, id, [prCardKey.ghUnavailable]);
   }
 
