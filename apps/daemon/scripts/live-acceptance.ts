@@ -229,6 +229,8 @@ function startDaemonProcess(): ChildProcess {
       TENDB_DATA_DIR: dataDir,
       TENDB_PORT: String(args.port),
       TENDB_DEV_UI_TOKEN: token,
+      // The browser UI it prints the command for runs on Vite's port.
+      TENDB_DEV_UI_ORIGIN: 'http://localhost:1420',
       TENDB_LOG_LEVEL: 'info',
       TENDB_BENCHMARKS: 'off',
       // The daemon shuts down when this pipe closes, which is how it learns this script died.

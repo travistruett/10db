@@ -165,7 +165,7 @@ describe('recoverBatches', () => {
         prUrl: 'https://github.com/acme/widgets/pull/1',
       });
       expect(h.gh.calls.filter((c) => c.method === 'prCreate')).toHaveLength(1);
-      expect(onOrigin(batch.branch)).toBe(h.git$('rev-parse', 'HEAD'));
+      expect(onOrigin(batch.branch)).toBe(h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`));
     },
   );
 

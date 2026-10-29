@@ -105,7 +105,7 @@ const rows: readonly Row[] = [
     name: 'Where tasks work',
     project: pullRequests,
     label: 'Where tasks work',
-    line: 'Your folder: tasks change files in your checkout, so you can watch them land in your editor and dev server. While tasks run, 10db switches this checkout to a new branch cut from the base branch, and it needs the checkout clean (no uncommitted changes) to start. 10db does not switch it back: it stays on that branch until you switch it.',
+    line: 'Your folder: tasks change files in your checkout, so you can watch them land in your editor and dev server. While tasks run, 10db switches this checkout to a new branch cut from the base branch, and it needs the checkout clean (no uncommitted changes) to start. When the batch ships, closes or is abandoned, 10db switches the checkout back to where it was, as long as it is still on that branch with nothing uncommitted. Otherwise 10db leaves it where it is, and a card says why unless you moved it yourself.',
     change: () => fireEvent.click(screen.getByRole('radio', { name: 'Separate copies' })),
     sent: { workspaceMode: 'worktree' },
   },

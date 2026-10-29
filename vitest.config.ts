@@ -12,6 +12,7 @@ export default defineConfig({
       'apps/daemon',
       'apps/desktop',
       'apps/desktop/e2e',
+      'apps/desktop/scripts',
     ],
   },
 });

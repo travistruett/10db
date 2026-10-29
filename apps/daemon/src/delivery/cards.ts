@@ -1,12 +1,19 @@
 import {
   BatchFailure,
+  BatchState,
   type BatchDto,
   type BatchId,
   type ProjectDto,
   type TaskId,
 } from '@10db/contracts';
 import type { Json } from '@10db/db';
-import { GitNetworkError, worktreeMergeCommand, worktreeRemovalCommand } from '../git';
+import {
+  checkoutSwitchCommand,
+  GitNetworkError,
+  worktreeMergeCommand,
+  worktreeRemovalCommand,
+  type CheckoutPlace,
+} from '../git';
 import { GhError } from '../github';
 import type { GateResult } from '../verify';
 import type { BlockedTask, UnmergedDependency } from './deps';
@@ -421,4 +428,91 @@ export const shipCards = {
         : `Nothing in it finished. The local branch ${batch.branch ?? '(none)'} is kept.`,
     detail: { batchId: batch.id },
   }),
+};
+
+/** The place 10db switches a checkout back to, in words. */
+function placeName(place: CheckoutPlace): string {
+  return place.branch ?? `commit ${place.sha.slice(0, 12)}`;
+}
+
+function ended(batch: BatchDto): string {
+  switch (batch.state) {
+    case BatchState.Shipped:
+      return 'shipped';
+    case BatchState.Closed:
+      return 'closed with nothing to push';
+    case BatchState.Abandoned:
+      return 'was abandoned';
+    // Only a finished batch's checkout is switched back.
+    case BatchState.Cutting:
+    case BatchState.Open:
+    case BatchState.Shipping:
+    case BatchState.Failed:
+      return 'ended';
+  }
+}
+
+/**
+ * Why 10db left a shared batch's checkout on the batch's branch when the batch ended, instead of
+ * switching it back to where the cut found it. One per batch.
+ */
+function leftCard(batch: BatchDto, why: string, body: string): Card {
+  return {
+    title: `Your checkout stays on ${batch.branch ?? '(no branch)'}: ${why}`,
+    body,
+    foldKey: `checkout-return:${batch.id}`,
+    detail: { batchId: batch.id },
+  };
+}
+
+/** The project as these cards name it. */
+type Checkout = Pick<ProjectDto, 'name' | 'repoPath'>;
+
+export const checkoutCards = {
+  dirty: (
+    batch: BatchDto,
+    project: Checkout,
+    place: CheckoutPlace,
+    paths: readonly string[],
+  ): Card =>
+    leftCard(
+      batch,
+      'it has uncommitted changes',
+      `Batch "${batch.title}" ${ended(batch)}. 10db switches your checkout back to ${placeName(place)} when a batch ends, but only when nothing in it is uncommitted, and these files have changes:\n${listPaths(paths)}\n\nCommit, stash or discard them, then switch back with ${checkoutSwitchCommand(project.repoPath, place)}.`,
+    ),
+  ignored: (
+    batch: BatchDto,
+    project: Checkout,
+    place: CheckoutPlace,
+    paths: readonly string[],
+  ): Card =>
+    leftCard(
+      batch,
+      `ignored files are where ${placeName(place)} has files`,
+      `Batch "${batch.title}" ${ended(batch)}. Switching your checkout back to ${placeName(place)} would overwrite or delete these git-ignored files, which git treats as disposable:\n${listPaths(paths)}\n\nMove what you need out of the way, then switch back with ${checkoutSwitchCommand(project.repoPath, place)}.`,
+    ),
+  checkedOut: (batch: BatchDto, place: CheckoutPlace, path: string): Card =>
+    leftCard(
+      batch,
+      `${placeName(place)} is checked out in another worktree`,
+      `Batch "${batch.title}" ${ended(batch)}. 10db switches your checkout back to ${placeName(place)} when a batch ends, but ${placeName(place)} is checked out in the worktree at ${path}, and git checks a branch out in one worktree at a time. Switch that worktree to another branch or remove it, then switch this checkout yourself.`,
+    ),
+  gone: (batch: BatchDto, project: Checkout, place: CheckoutPlace): Card =>
+    leftCard(
+      batch,
+      `${placeName(place)} no longer exists`,
+      `Batch "${batch.title}" ${ended(batch)}. 10db switches your checkout back to where it was when the batch started, ${placeName(place)}, which is gone now. Switch ${project.repoPath} to the branch you want with git switch.`,
+    ),
+  lanesRunning: (batch: BatchDto, project: Checkout, place: CheckoutPlace, lanes: number): Card =>
+    leftCard(
+      batch,
+      `work is running in ${project.name}`,
+      `Batch "${batch.title}" ${ended(batch)}. 10db switches branches only when no work runs in the project, and ${String(lanes)} workstream(s) run now. Once they finish, switch back with ${checkoutSwitchCommand(project.repoPath, place)}.`,
+    ),
+  failed: (batch: BatchDto, project: Checkout, place: CheckoutPlace, error: unknown): Card =>
+    leftCard(
+      batch,
+      `10db could not switch it back to ${placeName(place)}`,
+      `Batch "${batch.title}" ${ended(batch)}. ${detailOf(error)}\n\nOnce that is fixed, switch back with ${checkoutSwitchCommand(project.repoPath, place)}.`,
+    ),
 };

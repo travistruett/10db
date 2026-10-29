@@ -90,7 +90,9 @@ CUTTING → OPEN → SHIPPING → SHIPPED
 - **Waiting workstreams hold the batch open.** `WAITING_HUMAN` and `PAUSED_LIMIT` keep it `OPEN`; the lane is
   already freed after `human_wait_minutes`, so nothing is spent. The batch strip lists what blocks shipping.
 - **CLOSED.** The batch had no commits beyond `base_sha`. Nothing is pushed.
-- **SHIPPED.** The PR exists and `pr_url` is set. The checkout stays on the branch until the next batch cuts.
+- **SHIPPED.** The PR exists and `pr_url` is set. Amended by `decisions/2026-10-29-shared-checkout-switch-back.md`:
+  the checkout is switched back to where the cut found it once the batch is `SHIPPED`, `CLOSED` or `ABANDONED`,
+  when it is clean and still on the branch; otherwise it stays, with a card unless the builder moved it.
 - **FAILED.** Shipping stopped: the checkout was dirty or on the wrong branch, the gate failed or timed out, or a
   network step failed. `failure` says which, and a flag card carries the detail. From here the builder presses
   Retry, starts a fix task or retries a workstream in the batch (both reopen it), or abandons it. **Retry ships

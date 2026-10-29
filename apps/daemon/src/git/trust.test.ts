@@ -186,6 +186,14 @@ describe('no program from the checkout runs in a daemon git call', () => {
       name: 'switchNewBranch',
       act: (git) => git.switchNewBranch(repo.path, '10db/x-0a1b2c3d', 'other'),
     },
+    {
+      name: 'switchBack',
+      act: (git) =>
+        git.switchBack(repo.path, '10db/x-0a1b2c3d', {
+          branch: 'main',
+          sha: rawGit('rev-parse', 'main'),
+        }),
+    },
   ];
   const HOOKS = [
     'pre-commit',
@@ -320,7 +328,7 @@ describe('no program from the checkout runs in a daemon git call', () => {
   ])('$name', async ({ arrange }) => {
     const program = marker('program');
     arrange(program.path);
-    // switchNewBranch comes last: it is the only act that moves HEAD.
+    // switchNewBranch and switchBack come last: they are the only acts that move HEAD.
     for (const { act } of ACTS) await tolerate(act(createGit()));
     expect(program.ran()).toBe(false);
   });
@@ -891,6 +899,11 @@ describe('the checkout is the one pinned for it', () => {
     {
       name: 'switchNewBranch',
       act: (git: Git, path: string) => git.switchNewBranch(path, '10db/x-0a1b2c3d', 'HEAD'),
+    },
+    {
+      name: 'switchBack',
+      act: (git: Git, path: string) =>
+        git.switchBack(path, '10db/x-0a1b2c3d', { branch: 'main', sha: 'HEAD' }),
     },
   ];
 

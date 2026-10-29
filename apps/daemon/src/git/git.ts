@@ -1,4 +1,12 @@
-import { lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import {
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, normalize, posix, resolve, sep } from 'node:path';
 import { InvalidError } from '@10db/contracts';
@@ -144,6 +152,26 @@ const REGULAR_FILE_MODES: readonly string[] = ['100644', '100755'];
 /** One `ls-tree --long -z` entry: mode, type, object, size (`-` for a tree), then the path. */
 const LS_TREE_ENTRY = /^(\d{6}) (\w+) ([0-9a-f]+) +(\S+)\t([\s\S]*)$/;
 
+/** Where a checkout's HEAD was: on `branch` at `sha`, or detached at `sha` when `branch` is null. */
+export interface CheckoutPlace {
+  readonly branch: string | null;
+  readonly sha: string;
+}
+
+/** What `switchBack` did. Every answer but `switched` left the checkout exactly as it found it. */
+export type SwitchBack =
+  | { readonly kind: 'switched' }
+  /** HEAD is no longer on the branch the switch back expected; `found` is where it is (null: detached). */
+  | { readonly kind: 'moved'; readonly found: string | null }
+  /** Uncommitted changes, or untracked files git doesn't ignore. */
+  | { readonly kind: 'dirty'; readonly paths: readonly string[] }
+  /** The branch, or the detached commit, to go back to no longer exists. */
+  | { readonly kind: 'gone' }
+  /** The branch is checked out in the worktree at `path`, so git won't check it out here too. */
+  | { readonly kind: 'checked_out'; readonly path: string }
+  /** Ignored files or directories (ending in `/`) where the switch would write. */
+  | { readonly kind: 'ignored'; readonly paths: readonly string[] };
+
 export interface Git {
   /** The branch HEAD names; null when HEAD is detached. */
   currentBranch(repo: string): Promise<string | null>;
@@ -156,8 +184,17 @@ export interface Git {
   pinnedPushUrl(repo: string): Promise<string>;
   /** Updates `origin/<branch>` from origin's recorded fetch URL; the checkout is untouched. */
   fetch(repo: string, branch: string, net: NetworkCall): Promise<NetworkRun>;
-  /** Creates `name` at `startPoint` and checks it out, with no upstream. */
-  switchNewBranch(repo: string, name: string, startPoint: string): Promise<void>;
+  /**
+   * Creates `name` at `startPoint` and checks it out, with no upstream. Resolves with where HEAD was
+   * just before, read under the same lock, or null when HEAD named no commit.
+   */
+  switchNewBranch(repo: string, name: string, startPoint: string): Promise<CheckoutPlace | null>;
+  /**
+   * Moves the checkout from branch `from` back to `to`, only while HEAD is still on `from` and
+   * nothing in the checkout is uncommitted; otherwise it is left as it is and the answer says why.
+   * A branch is checked out at its current tip; a detached place at its commit.
+   */
+  switchBack(repo: string, from: string, to: CheckoutPlace): Promise<SwitchBack>;
   /**
    * Pushes `branch` to the same name at origin's recorded push URL, never forced, and records it as
    * the branch's upstream. Resolves with how long the push ran and what it printed.
@@ -899,7 +936,11 @@ export function createGit(opts: GitOptions = {}): Git {
    * new, and `read-tree -m -u` moves the clean checkout to it. Git checks every path it writes and
    * writes nothing beyond a link; with no attributes, no filter runs, and `read-tree` runs no hook.
    */
-  async function switchCheckout(c: Pinned, name: string, startPoint: string): Promise<void> {
+  async function switchCheckout(
+    c: Pinned,
+    name: string,
+    startPoint: string,
+  ): Promise<CheckoutPlace | null> {
     const target = await revParse(c, `${startPoint}^{commit}`);
     if (target === null) throw new InvalidError(`${startPoint} names no commit`);
     if ((await changes(c)).length > 0)
@@ -907,6 +948,7 @@ export function createGit(opts: GitOptions = {}): Git {
         `${c.real} has uncommitted changes; 10db switches only a clean checkout`,
       );
     const from = await revParse(c, 'HEAD^{commit}');
+    const fromBranch = await currentBranch(c);
     const ref = `refs/heads/${name}`;
     try {
       // The zero old value creates the branch only if it doesn't exist yet.
@@ -923,6 +965,114 @@ export function createGit(opts: GitOptions = {}): Git {
       throw new InvalidError(`10db could not check out ${startPoint}: ${error.message}`);
     }
     await git(c, ['symbolic-ref', 'HEAD', ref]);
+    return from === null ? null : { branch: fromBranch, sha: from };
+  }
+
+  /** `switchCheckout`'s way back: the same `read-tree -m -u`, then HEAD names the place again. */
+  async function switchBackCheckout(
+    c: Pinned,
+    from: string,
+    to: CheckoutPlace,
+  ): Promise<SwitchBack> {
+    const found = await currentBranch(c);
+    if (found !== from) return { kind: 'moved', found };
+    // What the files hold beyond HEAD, and what the checkout's own index holds beyond it: staged
+    // work the files no longer show, or entries a commit made while another git held index.lock
+    // left behind. Either way the merge below would lose or keep the wrong thing, so 10db leaves it.
+    const paths = [...new Set([...(await changes(c)), ...(await stagedPaths(c))])].sort();
+    if (paths.length > 0) return { kind: 'dirty', paths };
+    const ref = to.branch === null ? null : `refs/heads/${to.branch}`;
+    const target = await revParse(c, `${ref ?? to.sha}^{commit}`);
+    if (target === null) return { kind: 'gone' };
+    if (to.branch !== null) {
+      const other = await branchInUseElsewhere(c, to.branch);
+      if (other !== null) return { kind: 'checked_out', path: other };
+    }
+    const head = await revParse(c, 'HEAD^{commit}');
+    if (head === null) return { kind: 'gone' };
+    // Fresh stat data, so read-tree doesn't take an unchanged file for an edited one and refuse.
+    await git(c, ['update-index', '-q', '--ignore-submodules', '--refresh']).catch(() => undefined);
+    // Read after the refresh, against the files as they are now: `read-tree -m -u` takes what git
+    // doesn't track as disposable where it writes.
+    const written = new Set(
+      (await git(c, ['diff-tree', '-r', '--name-only', '--no-renames', '-z', head, target]))
+        .split('\0')
+        .filter(Boolean),
+    );
+    const inTheWay = await untrackedInTheWay(c, head, target, written);
+    if (inTheWay.length > 0) return { kind: 'ignored', paths: inTheWay };
+    try {
+      await git(c, ['read-tree', '-m', '-u', head, target]);
+    } catch (error) {
+      if (!(error instanceof GitError)) throw error;
+      throw new InvalidError(`10db could not check out ${to.branch ?? to.sha}: ${error.message}`);
+    }
+    try {
+      if (ref === null) await git(c, ['update-ref', '--no-deref', 'HEAD', target]);
+      else await git(c, ['symbolic-ref', 'HEAD', ref]);
+    } catch (error) {
+      if (!(error instanceof GitError)) throw error;
+      const why = `10db could not point HEAD at ${to.branch ?? to.sha}: ${error.message}`;
+      // HEAD still names the batch's branch: put its files back so the two agree.
+      try {
+        await git(c, ['read-tree', '-m', '-u', target, head]);
+      } catch (rollback) {
+        throw new InvalidError(
+          `${why}. Putting the batch's files back failed too (${rollback instanceof Error ? rollback.message : String(rollback)}), so the checkout may be half switched: HEAD names ${from} while its files may be ${to.branch ?? to.sha}'s`,
+        );
+      }
+      throw new InvalidError(why);
+    }
+    return { kind: 'switched' };
+  }
+
+  /** The paths whose entry in the checkout's own index differs from HEAD's, read without a lock. */
+  async function stagedPaths(c: Pinned): Promise<string[]> {
+    return (
+      await git(c, [
+        'diff-index',
+        '--cached',
+        '--name-only',
+        '--no-renames',
+        '--ignore-submodules=all',
+        '-z',
+        'HEAD',
+      ])
+    )
+      .split('\0')
+      .filter(Boolean);
+  }
+
+  /**
+   * Where `branch` is in use in another worktree of the repository, or null: checked out there, which
+   * `worktree list` shows, or being rebased or bisected there, which leaves that worktree detached
+   * and shows only in its git dir. `symbolic-ref` skips the check `git switch` makes, so this is it.
+   */
+  async function branchInUseElsewhere(c: Pinned, branch: string): Promise<string | null> {
+    const entries = await listWorktrees(c);
+    const self = (path: string): boolean => samePath(comparablePath(path), c.real);
+    const out = entries.find((e) => e.branch === branch && !self(e.path));
+    if (out) return comparablePath(out.path);
+    const ref = `refs/heads/${branch}`;
+    const busy = (gitDir: string): boolean =>
+      ['rebase-merge', 'rebase-apply'].some(
+        (dir) => readIfPresent(join(gitDir, dir, 'head-name')).trim() === ref,
+      ) || readIfPresent(join(gitDir, 'BISECT_START')).trim() === branch;
+    const { commonDir, gitDir } = c.dirs;
+    const linked = join(commonDir, 'worktrees');
+    const names = existsAsEntry(linked) ? readdirSync(linked) : [];
+    for (const name of names) {
+      const dir = join(linked, name);
+      if (samePath(dir, gitDir) || !busy(dir)) continue;
+      // `gitdir` names the worktree's `.git` file.
+      const path = dirname(readIfPresent(join(dir, 'gitdir')).trim());
+      if (!self(path)) return comparablePath(path);
+    }
+    if (!samePath(commonDir, gitDir) && busy(commonDir)) {
+      const main = entries.find((e) => !e.bare);
+      if (main && !self(main.path)) return comparablePath(main.path);
+    }
+    return null;
   }
 
   /** The index entries a commit covers, from a private index after `git add`; refused if unsafe. */
@@ -1558,9 +1708,14 @@ export function createGit(opts: GitOptions = {}): Git {
       return serialized(fetches, realpathSync(repo), () => fetchOnce(repo, branch, net));
     },
     async switchNewBranch(repo, name, startPoint) {
-      await withRepoLock(realpathSync(repo), async () => {
-        await switchCheckout(await pinned(repo), name, startPoint);
-      });
+      return withRepoLock(realpathSync(repo), async () =>
+        switchCheckout(await pinned(repo), name, startPoint),
+      );
+    },
+    async switchBack(repo, from, to) {
+      return withRepoLock(realpathSync(repo), async () =>
+        switchBackCheckout(await pinned(repo), from, to),
+      );
     },
     async push(repo, branch, net) {
       const c = await pinned(repo);
