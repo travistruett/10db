@@ -203,6 +203,7 @@ describe('toolchainAccess reads', () => {
     symlinkSync(at('.cargo/bin'), at('.local/share/mise/installs/rust/1.99.1'));
     expect(access().reads).toEqual(
       expect.arrayContaining([
+        at('.local/share/mise/installs/rust/1.99.1'),
         at('.local/share/mise/installs/rust/1.99.1/cargo'),
         at('.cargo/bin/cargo'),
       ]),
@@ -215,6 +216,7 @@ describe('toolchainAccess reads', () => {
     symlinkSync(at('elsewhere/node-22'), at('.local/share/mise/installs/node/22'));
     const { reads } = access();
     expect(reads).toContain(at('.local/share/mise/installs/node/22/bin'));
+    expect(reads).not.toContain(at('.local/share/mise/installs/node/22'));
     expect(reads.filter((path) => path.startsWith(at('elsewhere')))).toEqual([]);
   });
 

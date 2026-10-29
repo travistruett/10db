@@ -1,6 +1,15 @@
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { homedir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -36,6 +45,30 @@ function xcodeToolsInstalled(): boolean {
     return false;
   }
 }
+
+/**
+ * A rust version mise holds as a link to rustup's proxies (`~/.cargo/bin`), the way mise adopts a
+ * rustup-managed rust, or null when the builder has none.
+ */
+function rustupLinkedRust(): string | null {
+  const installs = join(homedir(), '.local', 'share', 'mise', 'installs', 'rust');
+  try {
+    const proxies = realpathSync(join(homedir(), '.cargo', 'bin'));
+    if (!existsSync(join(homedir(), '.rustup', 'settings.toml'))) return null;
+    return (
+      readdirSync(installs)
+        .sort()
+        .reverse()
+        .find(
+          (name) => /^\d+\.\d+\.\d+$/.test(name) && realpathSync(join(installs, name)) === proxies,
+        ) ?? null
+    );
+  } catch {
+    return null;
+  }
+}
+
+const RUSTUP_RUST = rustupLinkedRust();
 
 const FORBIDDEN = /Operation not permitted|couldn't create cache file|mise (WARN|ERROR)/;
 
@@ -225,6 +258,27 @@ describe.skipIf(!SEATBELT)('toolchains under the gate sandbox (Seatbelt)', () =>
       });
       expect(result.exitCode, result.tail).toBe(0);
       expect(result.tail).not.toMatch(FORBIDDEN);
+    },
+    120_000,
+  );
+
+  it.skipIf(onPath('mise') === null || RUSTUP_RUST === null)(
+    "resolves a rust that mise links to the builder's rustup, with cargo's caches in the temp dir",
+    async () => {
+      const version = RUSTUP_RUST ?? '';
+      const result = await run(
+        `mise x 'rust[profile=minimal]@${version}' -- cargo --version && test -L "$CARGO_HOME/bin" && test "$CARGO_HOME" != "$HOME/.cargo"`,
+        homedir(),
+        { ...(process.env as Record<string, string>) },
+      );
+      expect(result.exitCode, result.tail).toBe(0);
+      expect(result.tail).toMatch(/^cargo \d+\.\d+\.\d+/m);
+      expect(result.tail).not.toMatch(FORBIDDEN);
+      expect(
+        lstatSync(
+          join(homedir(), '.local', 'share', 'mise', 'installs', 'rust', version),
+        ).isSymbolicLink(),
+      ).toBe(true);
     },
     120_000,
   );
