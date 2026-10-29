@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readlinkSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -26,6 +26,18 @@ describe('prepareCommandEnv tool-cache variables', () => {
 
   it("keeps mise's logs to errors, as its tracked-config write can't land in the read-only state dir", () => {
     expect(prepareCommandEnv(tmpDir, join(root, 'home'), {})['MISE_LOG_LEVEL']).toBe('error');
+  });
+
+  it("links the cargo home's bin to the builder's rustup proxies, so mise finds its rust installs", () => {
+    const home = join(root, 'home');
+    mkdirSync(join(home, '.cargo', 'bin'), { recursive: true });
+    const env = prepareCommandEnv(tmpDir, home, {});
+    expect(readlinkSync(join(env['CARGO_HOME'] ?? '', 'bin'))).toBe(join(home, '.cargo', 'bin'));
+  });
+
+  it('leaves the cargo home alone when the builder has no ~/.cargo/bin', () => {
+    const env = prepareCommandEnv(tmpDir, join(root, 'bare'), {});
+    expect(existsSync(env['CARGO_HOME'] ?? '')).toBe(false);
   });
 
   it('sets only variables the env allowlist keeps for a sandboxed command', () => {
