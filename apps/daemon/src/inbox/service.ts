@@ -332,7 +332,8 @@ export function createInboxService(deps: {
       return deps.state.write((ctx) => {
         if (input.foldKey) {
           const existing = findOpenByFoldKey(ctx.tx, input.projectId, input.foldKey);
-          if (existing) return existing;
+          // The repeat touches the card, so a board that watches for it learns the cause came back.
+          if (existing) return updateInboxItem(ctx, existing.id, {});
         }
         return insertInboxItem(ctx, {
           projectId: input.projectId,

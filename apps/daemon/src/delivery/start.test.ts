@@ -192,6 +192,33 @@ describe('cutting a branch', () => {
     expect(card.body).toContain(h.repo);
   });
 
+  it('keeps one card when the same start is refused again, and a new one once it is dismissed', async () => {
+    const task = h.addTask('Alpha');
+    writeFileSync(join(h.repo, 'scratch.txt'), 'uncommitted\n');
+    const refuse = async () => {
+      h.starter.startBatch(h.project.id, { title: 'Greetings', taskIds: [task.id] });
+      await h.jobs.idle();
+    };
+    await refuse();
+    const first = h.only(h.cards());
+    await refuse();
+    expect(h.only(h.cards()).id).toBe(first.id);
+    h.inbox.answer(first.id, { choice: 'dismiss' });
+    await refuse();
+    expect(h.only(h.cards()).id).not.toBe(first.id);
+  });
+
+  it('keeps starts of other tasks apart', async () => {
+    const alpha = h.addTask('Alpha');
+    const beta = h.addTask('Beta');
+    writeFileSync(join(h.repo, 'scratch.txt'), 'uncommitted\n');
+    for (const task of [alpha, beta]) {
+      h.starter.startBatch(h.project.id, { title: 'Greetings', taskIds: [task.id] });
+      await h.jobs.idle();
+    }
+    expect(h.cards()).toHaveLength(2);
+  });
+
   it('raises the origin card when origin is added after the checkout was pinned, and starts once it is trusted', async () => {
     h.git$('remote', 'remove', 'origin');
     // The first daemon git call pins the checkout, with no origin.

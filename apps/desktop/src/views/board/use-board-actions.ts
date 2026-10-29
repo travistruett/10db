@@ -1,15 +1,52 @@
-import type { ProjectId } from '@10db/contracts';
+import type { InboxItemDto, ProjectId, TaskDto, TaskId } from '@10db/contracts';
 import { useState } from 'react';
-import { useStartTask } from '../../daemon/queries';
+import { useInbox, useStartTask } from '../../daemon/queries';
 import type { DropAction } from './drop-rules';
+import { refusalCards, startNote, type StartAttempt, type StartNote } from './start-note';
 import { useMoveTask } from './use-move-task';
 
 /** Carries out a drop or a menu move: a placement, a start, or a refusal shown to the builder. */
 export function useBoardActions(projectId: ProjectId) {
   const move = useMoveTask(projectId);
   const start = useStartTask();
+  const inbox = useInbox();
   const [notice, setNotice] = useState<string | null>(null);
-  function apply(action: DropAction): void {
+  // Each task's latest Start, so its card can say it is starting or why it was not.
+  const [attempts, setAttempts] = useState<ReadonlyMap<TaskId, StartAttempt>>(new Map());
+  const cards = refusalCards(inbox.data ?? []);
+  const note = (task: TaskDto, startable: boolean): StartNote | null =>
+    startNote({ attempt: attempts.get(task.id), task, startable, card: cards.get(task.id) });
+
+  function remember(taskId: TaskId, attempt: StartAttempt | null): void {
+    setAttempts((current) => {
+      const next = new Map(current);
+      if (attempt) next.set(taskId, attempt);
+      else next.delete(taskId);
+      return next;
+    });
+  }
+
+  function begin(task: TaskDto, card: InboxItemDto | undefined): void {
+    const asked = {
+      workstreamId: task.workstreamId,
+      // A refusal the daemon repeats folds into the card the builder already has; its change is the sign.
+      seen: card?.updatedAt ?? null,
+    };
+    remember(task.id, { phase: 'requesting', ...asked });
+    start.mutateAsync(task.id).then(
+      () => {
+        remember(task.id, { phase: 'waiting', ...asked });
+      },
+      (error: unknown) => {
+        remember(task.id, {
+          phase: 'failed',
+          reason: error instanceof Error ? error.message : String(error),
+        });
+      },
+    );
+  }
+
+  function apply(action: DropAction, task?: TaskDto): void {
     switch (action.kind) {
       case 'none':
         return;
@@ -18,30 +55,30 @@ export function useBoardActions(projectId: ProjectId) {
         return;
       case 'move':
         setNotice(null);
-        start.reset();
+        remember(action.taskId, null);
         move.mutate(action, {
           onSuccess: () => {
             setNotice(action.note);
           },
         });
         return;
-      case 'start':
+      case 'start': {
+        if (!task) return;
+        // One request at a time per task: a second Start while the first is out would only repeat it.
+        if (note(task, true)?.kind === 'starting') return;
         setNotice(null);
         move.reset();
-        start.mutate(action.taskId);
+        begin(task, cards.get(task.id));
         return;
+      }
     }
   }
-  // Each action clears the other's error, so at most one is set: the latest action's.
-  const failure = move.error
-    ? { title: "Couldn't move the task", error: move.error }
-    : start.error
-      ? { title: "Couldn't start the task", error: start.error }
-      : null;
   return {
     apply,
     notice,
-    failure,
+    /** What a startable task's card says about its Start; null when there is nothing to say. */
+    note,
+    failure: move.error ? { title: "Couldn't move the task", error: move.error } : null,
     dismiss: () => {
       setNotice(null);
     },
