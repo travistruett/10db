@@ -16,15 +16,16 @@ import { repoRoot } from './workspace';
 export const HEAD_SHA = '0123456789abcdef0123456789abcdef01234567';
 export const DMG_NAME = '10db_0.1.0_aarch64.dmg';
 
-/**
- * Stand-ins for the tools install-app.sh and rollback-app.sh drive. They are child processes this
- * repo doesn't own and that reach GitHub, the disk images subsystem or a real running 10db, so
- * every one is replaced; each logs its arguments to `$STUB_LOG` as one line.
- */
 /** Counts calls to a stub in `$STUB_STATE/<name>` and leaves the count in `$n`. */
 const count = (name: string): string =>
   `n=$(( $(cat "$STUB_STATE/${name}" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$STUB_STATE/${name}"`;
 
+/**
+ * Stand-ins for the tools install-app.sh and rollback-app.sh drive. They are child processes this
+ * repo doesn't own and that reach GitHub, the disk images subsystem or a real running 10db, so
+ * every one is replaced; each logs its arguments to `$STUB_LOG` as one line. The *_INTERRUPTS
+ * switches send SIGINT to the script that ran the stub, as a Ctrl-C in the terminal would.
+ */
 const STUBS: Record<string, readonly string[]> = {
   gh: [
     'if [ -n "${STUB_GH_OFFLINE:-}" ]; then echo "error connecting to api.github.com" >&2; exit 1; fi',
@@ -57,6 +58,7 @@ const STUBS: Record<string, readonly string[]> = {
   ],
   sqlite3: [
     '[ -z "${STUB_SQLITE_FAILS:-}" ] || { echo "Error: disk I/O error" >&2; exit 1; }',
+    '[ -z "${STUB_SQLITE_INTERRUPTS:-}" ] || { kill -INT "$PPID"; exit 0; }',
     'case "$2" in',
     '  ".backup \'"*"\'") target=${2#".backup \'"}; cp "$1" "${target%"\'"}" ;;',
     '  *) echo "sqlite3 stub: unexpected $*" >&2; exit 3 ;;',
@@ -67,7 +69,8 @@ const STUBS: Record<string, readonly string[]> = {
     '  attach) [ -z "${STUB_ATTACH_FAILS:-}" ] || exit 1',
     '    while [ "$#" -gt 0 ]; do [ "$1" = -mountpoint ] && mount="$2"; shift; done',
     '    cp -R "$STUB_DMG_CONTENTS/." "$mount" ;;',
-    '  detach) [ -z "${STUB_DETACH_FAILS:-}" ] || exit 16 ;;',
+    '  detach) [ -z "${STUB_DETACH_INTERRUPTS:-}" ] || kill -INT "$PPID"',
+    '    [ -z "${STUB_DETACH_FAILS:-}" ] || exit 16 ;;',
     '  *) exit 3 ;;',
     'esac',
   ],
@@ -79,6 +82,7 @@ const STUBS: Record<string, readonly string[]> = {
     '  exit 1',
     'fi',
     'cp -R "$1" "$2"',
+    '[ -z "${STUB_DITTO_INTERRUPTS:-}" ] || kill -INT "$PPID"',
   ],
   xattr: ['exit 0'],
 };

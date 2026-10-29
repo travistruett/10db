@@ -53,6 +53,7 @@ describe('install-app.sh arguments', () => {
     const result = install(args);
     expect(result.status).toBe(2);
     expect(result.stderr).toContain('usage: install-app.sh');
+    expect(result.stderr).toContain('commit SHA');
     expect(gh()).toEqual([]);
     expectUntouched();
   });
@@ -116,6 +117,8 @@ describe('install-app.sh refusals', () => {
     const result = install();
     expect(result.status).toBe(1);
     expect(result.stderr).toContain(lock());
+    expect(result.stderr).toContain('ls -d');
+    expect(result.stderr).toContain('make rollback-app');
     expect(box.marker(app())).toBe('old build');
     expect(previous()).toEqual([]);
     expect(backups()).toEqual([]);
@@ -180,6 +183,20 @@ describe('install-app.sh refusals', () => {
     expectAppUntouched();
     expect(backups()).toEqual([]);
   });
+  it('refuses a TENDB_INSTALL_STAMP that is not a UTC stamp, before anything else', () => {
+    const result = install([], { TENDB_INSTALL_STAMP: '2026-10-29' });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('TENDB_INSTALL_STAMP');
+    expect(box.calls()).toEqual([]);
+    expectUntouched();
+  });
+
+  it('removes an unfinished backup when interrupted during it, and moves nothing', () => {
+    const result = install([], { STUB_SQLITE_INTERRUPTS: '1' });
+    expect(result.status).toBe(130);
+    expect(backups()).toEqual([]);
+    expectAppUntouched();
+  });
 });
 
 describe('install-app.sh puts the previous app back', () => {
@@ -195,6 +212,24 @@ describe('install-app.sh puts the previous app back', () => {
     expect(result.stderr).toContain('put the previous app back');
     expectAppUntouched();
     expect(backups()).toEqual([`10db-backup-${STAMP}`]);
+  });
+
+  it.each([
+    { name: 'a failed copy', env: { STUB_DITTO_FAILS: '1' }, status: 1 },
+    { name: 'a Ctrl-C during the copy', env: { STUB_DITTO_INTERRUPTS: '1' }, status: 130 },
+  ])(
+    'finishes putting the previous app back when a Ctrl-C lands in the cleanup after $name',
+    ({ env, status }) => {
+      const result = install([], { ...env, STUB_DETACH_INTERRUPTS: '1' });
+      expect(result.status).toBe(status);
+      expect(result.stderr).toContain('put the previous app back');
+      expectAppUntouched();
+    },
+  );
+
+  it('detaches the DMG even when mounting it failed part way', () => {
+    install([], { STUB_ATTACH_FAILS: '1' });
+    expect(box.calls().some((call) => call.startsWith('hdiutil detach'))).toBe(true);
   });
 
   it('says loudly where the previous app is when the partial copy cannot be removed', () => {

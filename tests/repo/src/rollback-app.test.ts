@@ -61,6 +61,7 @@ describe('rollback-app.sh refusals', () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain(lock());
     expectNothingMoved();
+    expect(box.list(box.applications)).toContain('.10db-install.lock');
   });
 
   it('refuses a saved app that is not a whole app bundle', () => {
@@ -79,6 +80,13 @@ describe('rollback-app.sh refusals', () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('10db.app.prev-2359');
     expect(box.marker(app())).toBe('old build');
+  });
+
+  it('refuses a TENDB_INSTALL_STAMP that is not a UTC stamp', () => {
+    const result = rollback([], { TENDB_INSTALL_STAMP: 'now' });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('TENDB_INSTALL_STAMP');
+    expectNothingMoved();
   });
 });
 

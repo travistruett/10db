@@ -18,6 +18,7 @@ cd "$(dirname "$0")/../.."
 
 usage() {
   echo "usage: install-app.sh [branch-or-tag] (default main)" >&2
+  echo "  A name of 7 to 40 hex characters is taken for a commit SHA and refused: GitHub builds only a branch or tag." >&2
   exit 2
 }
 
@@ -47,6 +48,8 @@ work="$(mktemp -d "${TMPDIR:-/tmp}/10db-install.XXXXXX")"
 mount="$(mktemp -d "${TMPDIR:-/tmp}/10db-install-mount.XXXXXX")"
 gh_err="$work/gh.err"
 mounted=0
+backup_dir=""
+backup_done=0
 moved_to=""
 copying=0
 installed=0
@@ -57,13 +60,16 @@ detach_dmg() {
   return 1
 }
 
-# Never aborts part way: each step runs whatever the one before it did. The previous app goes back
-# only into an empty place, so it can't end up inside a partial copy.
+# Never aborts part way: each step runs whatever the one before it did, and a Ctrl-C while it runs
+# is ignored. The previous app goes back only into an empty place, so it can't end up inside a
+# partial copy.
 cleanup() {
+  trap '' INT TERM HUP
   set +e
   if [ "$mounted" -eq 1 ]; then detach_dmg > /dev/null 2>&1; fi
   rmdir "$mount" 2> /dev/null
   rm -rf "$work"
+  if [ -n "$backup_dir" ] && [ "$backup_done" -eq 0 ]; then rm -rf "$backup_dir"; fi
   if [ "$installed" -eq 0 ]; then
     if [ "$copying" -eq 1 ]; then rm -rf "$app_path" 2> /dev/null; fi
     if [ -n "$moved_to" ] && [ -e "$moved_to" ]; then
@@ -77,7 +83,9 @@ cleanup() {
   release_lock
 }
 trap cleanup EXIT
-trap 'exit 130' INT TERM
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
 
 if ! sha="$(gh api "repos/{owner}/{repo}/commits/$ref" --jq .sha 2> "$gh_err")"; then
   grep -q 'No commit found' "$gh_err" && fail "GitHub has no branch or tag named $ref"
@@ -176,11 +184,12 @@ if [ -f "$db_file" ]; then
   backup="$(backup_file_for "$stamp")"
   case "$backup" in *"'"*) fail "the backup path holds a single quote, which sqlite3's .backup can't take: $backup" ;; esac
   mkdir "$(dirname "$backup")" || fail "could not create $(dirname "$backup")"
+  backup_dir="$(dirname "$backup")"
   # SQLite's own backup API: a consistent copy that takes the write-ahead log into account.
   if ! sqlite3 "$db_file" ".backup '$backup'" || [ ! -s "$backup" ]; then
-    rm -rf "$(dirname "$backup")"
     fail "sqlite3 could not back up $db_file, so nothing was moved"
   fi
+  backup_done=1
 else
   echo "There is no database at $db_file yet, so there is nothing to back up."
 fi
@@ -193,14 +202,16 @@ if [ -e "$app_path" ]; then
   mv "$app_path" "$moved_to"
 fi
 
-hdiutil attach -nobrowse -readonly -mountpoint "$mount" "$dmg" > /dev/null
+# Set first: an attach that fails part way may still leave the image mounted.
 mounted=1
+hdiutil attach -nobrowse -readonly -mountpoint "$mount" "$dmg" > /dev/null
 apps=("$mount"/*.app)
 [ "${#apps[@]}" -eq 1 ] || fail "expected one app in the DMG, found ${#apps[@]}"
 copying=1
 ditto "${apps[0]}" "$app_path"
-mounted=0
-if ! detach_dmg; then
+if detach_dmg; then
+  mounted=0
+else
   echo "$script_name: could not detach the DMG at $mount, even with -force; the app is installed. Eject it in Finder later." >&2
 fi
 

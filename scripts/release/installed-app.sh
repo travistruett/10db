@@ -37,6 +37,9 @@ new_stamp() {
   fi
 }
 is_stamp() { [[ "$1" =~ ^[0-9]{8}T[0-9]{6}Z$ ]]; }
+if [ -n "${TENDB_INSTALL_STAMP:-}" ] && ! is_stamp "$TENDB_INSTALL_STAMP"; then
+  fail "TENDB_INSTALL_STAMP is '$TENDB_INSTALL_STAMP', not a UTC stamp such as 20261029T101500Z"
+fi
 
 # Beside the data directory, as the backups made by hand are: ~/Library/Application Support/10db-backup-<stamp>.
 backup_file_for() { echo "$(dirname "$data_dir")/$(basename "$data_dir")-backup-$1/10db.sqlite"; }
@@ -58,7 +61,7 @@ take_lock() {
     return 0
   fi
   [ -e "$lock_dir" ] || fail "could not create $lock_dir; can you write to $apps_dir?"
-  fail "another make install-app or make rollback-app holds $lock_dir. If neither is running, one was interrupted: check that $app_path is the app you want, then remove the lock with rmdir \"$lock_dir\"."
+  fail "another make install-app or make rollback-app holds $lock_dir. If neither is running, one was interrupted: look with ls -d \"$app_path\"*, remove the lock with rmdir \"$lock_dir\", then run make rollback-app if 10db.app is missing or broken."
 }
 release_lock() {
   if [ "$locked" -eq 1 ]; then

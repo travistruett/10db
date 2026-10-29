@@ -19,11 +19,15 @@ script_name=rollback-app.sh
 refuse_while_running
 
 replaced=""
-restored=0
-# Never aborts part way. The current app goes back only into an empty place.
+restoring=0
+# Never aborts part way, and a Ctrl-C while it runs is ignored. The current app goes back only into
+# an empty place. Once the saved app has been moved in, there is nothing to put back.
 cleanup() {
+  trap '' INT TERM HUP
   set +e
-  if [ "$restored" -eq 0 ] && [ -n "$replaced" ] && [ -e "$replaced" ]; then
+  local finished=0
+  if [ "$restoring" -eq 1 ] && [ -e "$app_path" ]; then finished=1; fi
+  if [ "$finished" -eq 0 ] && [ -n "$replaced" ] && [ -e "$replaced" ]; then
     if [ ! -e "$app_path" ] && mv "$replaced" "$app_path"; then
       echo "$script_name: put the current app back at $app_path" >&2
     else
@@ -33,7 +37,9 @@ cleanup() {
   release_lock
 }
 trap cleanup EXIT
-trap 'exit 130' INT TERM
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
 
 take_lock
 
@@ -68,8 +74,8 @@ if [ -e "$app_path" ]; then
   done
   mv "$app_path" "$replaced"
 fi
+restoring=1
 mv "$newest" "$app_path"
-restored=1
 
 echo "Restored $app_path from $newest."
 if [ -n "$replaced" ]; then echo "  The app it replaced: $replaced"; fi
