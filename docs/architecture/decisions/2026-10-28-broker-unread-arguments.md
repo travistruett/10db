@@ -58,6 +58,10 @@ The scan reads the command's text with these rules, and nothing more:
   in a shell's script is unread. An `xargs` long flag the scan does not know is an unread program name.
 - `trap` and `hash` are unread, as is `.` or `source` of a stream or with input redirected in, and any word with
   an array subscript that holds `$(` or a backtick (`read`, `[[ -v ]]`, `printf -v`).
+- A `-c` script that reads as an option, `.` or `source` of anything but a checkout file (a stream, `/dev` or
+  `/proc` once the path is normalized, an expansion, or input piped or redirected in), more than one `xargs`
+  wrapper, and a substitution in any word of an arithmetic-evaluating builtin (`[[`, `test`, `let`, `read`,
+  `printf`, `declare`) are unread.
 - The shell keywords the scan skips (`for`, `select`, `done`, `fi`, `esac`) are judged on the word as written, so
   `./done` and `$D/fi` are programs.
 
