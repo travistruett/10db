@@ -33,7 +33,8 @@ import { boardLayout, DONE_LIMIT, type LayoutColumn } from './board-layout';
 import { menuMoves, resolveDrop, startedDependents, type DropTarget } from './drop-rules';
 import { NewProjectForm } from './new-project-form';
 import { NewTaskForm } from './new-task-form';
-import { TaskCard } from './task-card';
+import { PullRequestLink } from './pull-request-link';
+import { cardSummary, TaskCard } from './task-card';
 import { TaskCardMenu } from './task-card-menu';
 import { columnNameOf, TaskDrawer } from './task-drawer';
 import { useBoardActions } from './use-board-actions';
@@ -180,6 +181,18 @@ function BoardColumns({
                 peers={peers}
               />
             );
+          }}
+          renderLink={(task) => {
+            const url = shippedPullRequest(
+              task,
+              task.workstreamId ? workstreamById.get(task.workstreamId) : undefined,
+              batchById,
+            );
+            return url ? <PullRequestLink url={url} /> : null;
+          }}
+          summary={(task) => {
+            const ws = task.workstreamId ? workstreamById.get(task.workstreamId) : undefined;
+            return cardSummary(task, ws && SHOWN_STATES.includes(ws.state) ? ws : undefined, peers);
           }}
           renderMenu={(task) => {
             const ws = task.workstreamId ? workstreamById.get(task.workstreamId) : undefined;

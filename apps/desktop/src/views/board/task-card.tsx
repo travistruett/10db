@@ -2,7 +2,6 @@ import { TaskStatus, type TaskDto, type TaskId, type WorkstreamDto } from '@10db
 import { Badge, Group, Paper, Stack, Text } from '@mantine/core';
 import { StateBadge } from '../factory/state-badge';
 import { StepCell } from '../factory/step-cell';
-import { PullRequestLink } from './pull-request-link';
 
 export interface TaskCardProps {
   readonly task: TaskDto;
@@ -14,12 +13,35 @@ export interface TaskCardProps {
   readonly pullRequest?: string | undefined;
 }
 
-/** A board card: title, areas, unfinished dependencies, live workstream state (spec §10) and a shipped pull request. */
-export function TaskCard({ task, workstream, peers, pullRequest }: TaskCardProps) {
-  const waits = task.dependsOn.flatMap((id) => {
+function waitsOn(task: TaskDto, peers: TaskCardProps['peers']): string[] {
+  return task.dependsOn.flatMap((id) => {
     const peer = peers.get(id);
     return peer && peer.status !== TaskStatus.Done ? [peer.title] : [];
   });
+}
+
+/** What the card shows besides its title, as a sentence a screen reader can speak. */
+export function cardSummary(
+  task: TaskDto,
+  workstream: WorkstreamDto | undefined,
+  peers: TaskCardProps['peers'],
+): string {
+  const waits = waitsOn(task, peers);
+  const criteria = task.acceptanceCriteria.length;
+  return [
+    task.areas.length > 0 ? `Areas: ${task.areas.join(', ')}.` : null,
+    criteria > 0 ? `${String(criteria)} ${criteria === 1 ? 'criterion' : 'criteria'}.` : null,
+    waits.length > 0 ? `Waits on ${waits.join(', ')}.` : null,
+    task.status === TaskStatus.Cancelled ? 'Cancelled.' : null,
+    workstream ? `Workstream ${workstream.state}.` : null,
+  ]
+    .filter((part) => part !== null)
+    .join(' ');
+}
+
+/** A board card: title, areas, unfinished dependencies, live workstream state (spec §10) and room for a shipped pull request's link. */
+export function TaskCard({ task, workstream, peers, pullRequest }: TaskCardProps) {
+  const waits = waitsOn(task, peers);
   const criteria = task.acceptanceCriteria.length;
   return (
     <Paper withBorder radius="md" p="sm">
@@ -55,11 +77,8 @@ export function TaskCard({ task, workstream, peers, pullRequest }: TaskCardProps
             <StepCell workstream={workstream} />
           </Group>
         ) : null}
-        {pullRequest ? (
-          <Group gap="xs">
-            <PullRequestLink url={pullRequest} />
-          </Group>
-        ) : null}
+        {/* The pull request link is laid over this space by the board, outside the card's button. */}
+        {pullRequest ? <div style={{ height: 20 }} /> : null}
       </Stack>
     </Paper>
   );

@@ -31,25 +31,30 @@ function SortableCard({
   refusal,
   onOpen,
   menu,
+  link,
+  summary,
   children,
 }: {
   readonly task: TaskDto;
   readonly refusal: string | null;
   readonly onOpen: () => void;
   readonly menu: ReactNode;
+  readonly link: ReactNode;
+  readonly summary: string;
   readonly children: ReactNode;
 }) {
   // dnd-kit's sortable handle is a bag of refs and listeners the compiler cannot analyze.
   'use no memo';
   const sortable = useSortable({ id: task.id, disabled: refusal !== null });
   const reasonId = `drag-reason-${task.id}`;
+  const summaryId = `card-summary-${task.id}`;
   /* eslint-disable react-hooks/refs -- useSortable returns ref callbacks and listeners that the lint reads as render-time ref access. */
   return (
     // The list item is the sortable node; the card inside it is the one button that drags and opens. A
     // pointer drag starts only after 4px of movement, so a click still opens. A card that can't move
-    // says why through its description, which a keyboard user hears on focus. The card's menu is a
-    // sibling laid over its corner, not a child: a button can't hold another control, and the menu's
-    // clicks and keys then never reach the card.
+    // says why through its description, which a keyboard user hears on focus, after a summary of what
+    // the card shows. The card's menu and pull request link are siblings laid over it, not children: a
+    // button can't hold another control, and their clicks and keys then never reach the card.
     <li
       ref={sortable.setNodeRef}
       aria-label={task.title}
@@ -68,13 +73,16 @@ function SortableCard({
         role="button"
         tabIndex={0}
         aria-label={task.title}
-        {...(refusal ? { 'aria-describedby': reasonId, title: refusal } : {})}
+        aria-describedby={refusal ? `${summaryId} ${reasonId}` : summaryId}
+        {...(refusal ? { title: refusal } : {})}
         onClick={onOpen}
         // Enter opens the details; Space, the sensor's start key, picks the card up. Only a key pressed
-        // on the card itself counts: the menu's keys are stopped before they get here.
+        // on the card itself counts, and not while the card is in flight: there Enter drops it, and the
+        // sensor's listener runs after this one.
         onKeyDown={(e) => {
-          if (e.key === 'Enter' && e.target === e.currentTarget) onOpen();
-          else if (!refusal) sortable.listeners?.['onKeyDown']?.(e);
+          if (e.key === 'Enter') {
+            if (e.target === e.currentTarget && !sortable.isDragging) onOpen();
+          } else if (!refusal) sortable.listeners?.['onKeyDown']?.(e);
         }}
         style={{
           cursor: refusal ? 'pointer' : sortable.isDragging ? 'grabbing' : 'grab',
@@ -86,6 +94,10 @@ function SortableCard({
       <Box pos="absolute" top={8} right={8}>
         {menu}
       </Box>
+      <Box pos="absolute" bottom={8} left={12} right={12}>
+        {link}
+      </Box>
+      <VisuallyHidden id={summaryId}>{summary}</VisuallyHidden>
       {refusal ? <VisuallyHidden id={reasonId}>{refusal}</VisuallyHidden> : null}
     </li>
   );
@@ -125,6 +137,10 @@ export interface BoardDndProps {
   readonly renderCard: (task: TaskDto) => ReactNode;
   /** The card's actions menu, laid over its corner. */
   readonly renderMenu: (task: TaskDto) => ReactNode;
+  /** The card's pull request link, laid over its bottom edge; null when it has none. */
+  readonly renderLink: (task: TaskDto) => ReactNode;
+  /** What the card shows besides its title, for a screen reader. */
+  readonly summary: (task: TaskDto) => string;
   /** A card was clicked, or Enter pressed on it: open its details. */
   readonly onOpen: (task: TaskDto) => void;
 }
@@ -138,6 +154,8 @@ export function BoardDnd({
   renderColumn,
   renderCard,
   renderMenu,
+  renderLink,
+  summary,
   onOpen,
 }: BoardDndProps) {
   // A drop ends with a click on the card under the pointer; that click isn't an open. The flag clears
@@ -230,6 +248,8 @@ export function BoardDnd({
                       task={task}
                       refusal={refusal}
                       menu={renderMenu(task)}
+                      link={renderLink(task)}
+                      summary={summary(task)}
                       onOpen={() => {
                         open(task);
                       }}

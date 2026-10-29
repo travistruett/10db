@@ -1100,15 +1100,12 @@ describe('BoardView', () => {
     boardWith([running, shipped], []);
 
     const card = await screen.findByRole('button', { name: 'Running' });
-    const described = card.getAttribute('aria-describedby');
-    expect(described).not.toBeNull();
-    expect(document.getElementById(described ?? '')?.textContent).toBe(
-      'In progress cards follow their workstream; they can’t be dragged',
-    );
+    const reasonOf = (button: HTMLElement): string | undefined =>
+      document.getElementById(button.getAttribute('aria-describedby')?.split(' ').at(-1) ?? '')
+        ?.textContent;
+    expect(reasonOf(card)).toBe('In progress cards follow their workstream; they can’t be dragged');
     const done = screen.getByRole('button', { name: 'Shipped' });
-    expect(document.getElementById(done.getAttribute('aria-describedby') ?? '')?.textContent).toBe(
-      'Done cards stay where they finished; they can’t be dragged',
-    );
+    expect(reasonOf(done)).toBe('Done cards stay where they finished; they can’t be dragged');
   });
 
   it('has no drag handle', async () => {
@@ -1138,6 +1135,82 @@ describe('BoardView', () => {
     fireEvent.click(menu);
     expect(await screen.findByRole('menu')).toBeTruthy();
     expect(screen.queryByRole('dialog', { name: 'Task' })).toBeNull();
+  });
+
+  describe('a shipped card with a pull request', () => {
+    const url = 'https://github.com/acme/widgets/pull/1';
+    function shippedCard(): void {
+      const batch = batchDto({ title: 'Alpha first', state: 'SHIPPED', prUrl: url });
+      const project = projectViewDto({
+        id: batch.projectId,
+        delivery: 'pull_request',
+        prTitlePrefix: 'feat(app)',
+        currentBatch: batch,
+      });
+      const ws = workstreamDto({
+        projectId: project.id,
+        batchId: batch.id,
+        taskTitle: 'Alpha',
+        state: 'DONE',
+      });
+      const done = taskDto({
+        projectId: project.id,
+        title: 'Alpha',
+        boardStatus: 'done',
+        status: 'done',
+        boardOrder: 1,
+        workstreamId: ws.id,
+      });
+      serve(
+        http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+        http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([done])),
+        http.get(daemonUrl('/workstreams'), () => HttpResponse.json([ws])),
+        http.get(daemonUrl('/projects/:projectId/batches'), () => HttpResponse.json([batch])),
+      );
+      renderApp('/board');
+    }
+
+    it('keeps the link out of the card button', async () => {
+      shippedCard();
+      const card = await screen.findByRole('button', { name: 'Alpha' });
+      const done = screen.getByRole('list', { name: 'Done tasks' });
+      const link = within(done).getByRole('link', { name: 'Pull request' });
+      expect(card.contains(link)).toBe(false);
+      expect(link.getAttribute('href')).toBe(url);
+    });
+
+    it('opens no details when the link is clicked', async () => {
+      shippedCard();
+      await screen.findByRole('button', { name: 'Alpha' });
+      const done = screen.getByRole('list', { name: 'Done tasks' });
+      fireEvent.click(within(done).getByRole('link', { name: 'Pull request' }));
+      expect(screen.queryByRole('dialog', { name: 'Task' })).toBeNull();
+    });
+  });
+
+  it('describes a card by what it shows and, when locked, why it cannot move', async () => {
+    const dep = taskDto({ title: 'Base', boardStatus: 'ready', boardOrder: 1 });
+    const task = taskDto({
+      title: 'Wired',
+      boardStatus: 'ready',
+      boardOrder: 2,
+      areas: ['api', 'ui'],
+      acceptanceCriteria: ['one', 'two'],
+      dependsOn: [dep.id],
+    });
+    const running = taskDto({ title: 'Running', boardStatus: 'in_progress' });
+    boardWith([dep, task, running], []);
+
+    const describedBy = (name: string): string =>
+      (screen.getByRole('button', { name }).getAttribute('aria-describedby') ?? '')
+        .split(' ')
+        .map((id) => document.getElementById(id)?.textContent ?? '')
+        .join(' | ');
+    await screen.findByRole('button', { name: 'Wired' });
+    expect(describedBy('Wired')).toBe('Areas: api, ui. 2 criteria. Waits on Base.');
+    expect(describedBy('Running')).toBe(
+      'Areas: src. 1 criterion. | In progress cards follow their workstream; they can’t be dragged',
+    );
   });
 
   it('the card menu opens with its items', async () => {

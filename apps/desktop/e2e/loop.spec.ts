@@ -90,6 +90,19 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
     page.getByRole('list', { name: 'Ready tasks' }).getByRole('listitem').nth(0),
   ).toHaveAccessibleName(TASK);
 
+  // Enter ends a keyboard drag without also opening the card's details.
+  const reloaded = page
+    .getByRole('list', { name: 'Ready tasks' })
+    .getByRole('button', { name: TASK, exact: true });
+  await reloaded.focus();
+  await page.keyboard.press('Space');
+  // The card in flight is faded in its list; it is solid again once dropped.
+  const slot = page.getByRole('list', { name: 'Ready tasks' }).getByRole('listitem').first();
+  await expect(slot).toHaveCSS('opacity', '0.3');
+  await page.keyboard.press('Enter');
+  await expect(slot).toHaveCSS('opacity', '1');
+  await expect(page.getByRole('dialog', { name: 'Task' })).toBeHidden();
+
   // Park the other task from its menu and plan it again; parking survives a reload.
   const iceboxList = page.getByRole('list', { name: 'Icebox tasks' });
   await page.getByRole('button', { name: `Actions for ${OTHER}` }).click();
@@ -174,7 +187,7 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await locked.focus();
   await expect(locked).toBeFocused();
   await expect(locked).toHaveAccessibleDescription(
-    'Done cards stay where they finished; they can’t be dragged',
+    /Done cards stay where they finished; they can’t be dragged$/,
   );
 
   // Settings: add a human column, a planned section says it is not built yet, and accounts work.
