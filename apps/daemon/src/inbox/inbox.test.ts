@@ -1007,6 +1007,88 @@ describe('permission broker in a sandboxed lane', () => {
       outcome: 'card',
     },
     { name: 'a hazard in find -exec', command: 'find . -exec pnpm add x \\;', outcome: 'card' },
+    // Bypasses of the unread-argument scan.
+    { name: 'bash -c -e with a variable', command: 'bash -c -e "$CMD"', outcome: 'card' },
+    { name: 'sh -c -- with a variable', command: 'sh -c -- "$CMD"', outcome: 'card' },
+    { name: 'zsh -c -e with a hazard', command: "zsh -c -e 'pnpm add left-pad'", outcome: 'card' },
+    { name: 'bash -c -e with an expansion', command: "bash -c -e 'pnpm $x'", outcome: 'card' },
+    {
+      name: 'bash -c -o x with a hazard',
+      command: "bash -c -o pipefail 'pnpm add left-pad'",
+      outcome: 'card',
+    },
+    {
+      name: 'xargs -I into sh -c',
+      command: "echo 'pnpm add left-pad' | xargs -I X sh -c X",
+      outcome: 'card',
+    },
+    {
+      name: 'xargs -J into sh -c',
+      command: "echo 'pnpm add left-pad' | xargs -J X sh -c X",
+      outcome: 'card',
+    },
+    {
+      name: 'xargs -I replacing an argument',
+      command: 'echo add | xargs -I X pnpm X left-pad',
+      outcome: 'card',
+    },
+    {
+      name: 'xargs -J replacing an argument',
+      command: 'echo left-pad | xargs -J % pnpm add %',
+      outcome: 'card',
+    },
+    {
+      name: 'xargs -I replacing the program',
+      command: 'echo pnpm | xargs -I X X add left-pad',
+      outcome: 'card',
+    },
+    {
+      name: 'xargs with a long value flag',
+      command: 'xargs --max-procs 1 pnpm add left-pad',
+      outcome: 'card',
+    },
+    {
+      name: 'xargs with an unknown long flag',
+      command: 'xargs --frobnicate pnpm test',
+      outcome: 'card',
+    },
+    { name: 'a here-string on fd 3', command: 'bash /dev/fd/3 3<<<"$CMD"', outcome: 'card' },
+    {
+      name: 'a here-string on fd 0',
+      command: "bash /dev/stdin 0<<<'pnpm add left-pad'",
+      outcome: 'card',
+    },
+    { name: 'a second here-string', command: 'bash <<< true <<< "$CMD"', outcome: 'card' },
+    { name: 'trap with a variable', command: 'trap "$CMD" EXIT', outcome: 'card' },
+    { name: 'trap with a hazard', command: "trap 'pnpm add left-pad' EXIT", outcome: 'card' },
+    { name: 'dot of stdin', command: '. /dev/stdin <<< "$CMD"', outcome: 'card' },
+    {
+      name: 'source of stdin',
+      command: "source /dev/stdin <<< 'pnpm add left-pad'",
+      outcome: 'card',
+    },
+    {
+      name: 'hash -p then the name',
+      command: 'hash -p /opt/homebrew/bin/pnpm ls; ls add left-pad',
+      outcome: 'card',
+    },
+    {
+      name: 'hash name=path then the name',
+      command: 'hash ls=/opt/homebrew/bin/pnpm; ls add left-pad',
+      outcome: 'card',
+    },
+    {
+      name: 'read with a subscript substitution',
+      command: "read 'a[$(pnpm add left-pad)]' <<< x",
+      outcome: 'card',
+    },
+    {
+      name: 'a test -v subscript substitution',
+      command: "[[ -v 'a[$(pnpm add left-pad)]' ]]",
+      outcome: 'card',
+    },
+    { name: 'an expanded path ending in done', command: '$D/done add left-pad', outcome: 'card' },
+    { name: 'a glob path ending in fi', command: '/x/*/fi add left-pad', outcome: 'card' },
     // A structure the parser cannot read.
     { name: 'an unclosed double quote', command: 'echo "unclosed', outcome: 'card' },
     { name: 'an unclosed single quote', command: "echo 'unclosed", outcome: 'card' },

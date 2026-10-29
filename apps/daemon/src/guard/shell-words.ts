@@ -1,6 +1,7 @@
 import { basename } from 'node:path';
 import { decodeAnsiC } from './ansi-c';
 import { expandBraceWord } from './braces';
+import { XARGS_VALUE_FLAGS } from './xargs-options';
 
 export interface ShellSegment {
   /** The segment's text with quotes kept and comments and line continuations left out. */
@@ -600,7 +601,7 @@ const WRAPPERS: ReadonlyMap<string, Wrapper> = new Map([
   ['nohup', wrapper()],
   ['time', wrapper(['-f', '-o', '--format', '--output'])],
   ['exec', wrapper(['-a'])],
-  ['xargs', wrapper(['-n', '-I', '-P', '-L', '-s', '-d', '-E', '-a'])],
+  ['xargs', wrapper(XARGS_VALUE_FLAGS)],
 ]);
 
 /**

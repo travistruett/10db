@@ -301,7 +301,10 @@ Under the lane sandbox (**built**), the design column holds for a lane's Bash:
   structure the parser isn't sure of (an open quote, a case, a function), a process substitution, or an argument
   that could select a hazard form of a program that has one (`pnpm $x` could be `pnpm add`, `pnpm exec $x` could be
   `pnpm exec drizzle-kit generate`; the forms come from the project's hazards). An unread argument to any other
-  program (`cd $d`, `eslint $f`) does not earn a card. An approved pnpm 12 install still fails in the sandbox: pnpm takes its store operation lock in a fixed
+  program (`cd $d`, `eslint $f`) does not earn a card. This is a best-effort scan of the command's text, not a
+  proof: a hazard run through a runner the scan does not look through, a per-program flag's value, and a program
+  that runs a hazard on its own are known gaps (the decision names them), and the sandbox bounds what they can
+  do. An approved pnpm 12 install still fails in the sandbox: pnpm takes its store operation lock in a fixed
   `/private/tmp/pnpm-store-operation-locks-<uid>` and ignores `TMPDIR` and its store settings for it (measured:
   pnpm 12.13.0 under a Seatbelt profile fails with `ERR_PNPM_STORE_DIR_OPEN_OPERATION_LOCK` without that
   directory and installs with it). That directory is shared with every lane and the builder's own pnpm, so the

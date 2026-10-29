@@ -48,6 +48,28 @@ done` earned a card. This changes the guard's `certain` flag too, which only eve
 a program does: a script, `node -e` or `make` target that runs a hazard inside it is outside this rule, as it
 was before.
 
+## What the scan covers, and its known gaps
+
+The scan reads the command's text with these rules, and nothing more:
+
+- A shell's `-c` script is the first operand after `-c`, once options (`-e`, `-o x`, `+O x`, `--`) are skipped.
+  Every here-string (`<<<`, on any descriptor) is a script.
+- Under `xargs -I`, `-i`, `-J` or `--replace`, every argument is unread, and the replace string in the program or
+  in a shell's script is unread. An `xargs` long flag the scan does not know is an unread program name.
+- `trap` and `hash` are unread, as is `.` or `source` of a stream or with input redirected in, and any word with
+  an array subscript that holds `$(` or a backtick (`read`, `[[ -v ]]`, `printf -v`).
+- The shell keywords the scan skips (`for`, `select`, `done`, `fi`, `esac`) are judged on the word as written, so
+  `./done` and `$D/fi` are programs.
+
+Known gaps, deliberately left for follow-ups. The sandbox bounds all of them; none is a new capability:
+
+- **Runners.** A hazard behind a runner the scan does not look through: `arch -arm64 pnpm add x`,
+  `script -q /dev/null pnpm add x`, `mise x -- pnpm add x`, `corepack pnpm add x`, `git rebase --exec`,
+  `git -c alias.x='!…'`, `GIT_PAGER=… git -p log`, a symlinked binary.
+- **Per-program flag values.** Flags that take a value, in `apps/daemon/src/guard/command-forms.ts`: `npm -p
+install x`, `pnpm --reporter silent add x`, `cargo +stable add serde`.
+- **Review findings L1 and L3**, minor, recorded in PR #95.
+
 ## Why
 
 A real task ran `for d in …; do (cd $d && pnpm exec tsc --noEmit …); done; pnpm exec eslint … | grep -v …` and

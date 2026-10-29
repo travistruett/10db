@@ -10,6 +10,7 @@ import {
   stripCommandPrefixes,
   type ShellSegment,
 } from './shell-words';
+import { XARGS_VALUE_FLAGS, XARGS_VALUELESS_LONG_FLAGS } from './xargs-options';
 
 /** Why 10db cannot tell, from a command's text, that it runs no hazard. */
 export const UnreadReason = {
@@ -61,7 +62,18 @@ const OPAQUE: ReadonlySet<string> = new Set([
   'foreach',
   'function',
   'alias',
+  // Run text on a signal, or rebind a name to another program, for a later command to meet.
+  'trap',
+  'hash',
 ]);
+/** Builtins that run a file the shell reads, which stdin or a here-string makes unreadable. */
+const SOURCING: ReadonlySet<string> = new Set(['.', 'source']);
+/** A source that is a stream or a process's file, not a file in the checkout. */
+const STREAM_SOURCE = /^(?:-|\/dev\/|\/proc\/)/;
+/** A redirection that feeds a command from a file, a descriptor or a here-string. */
+const INPUT_REDIRECTION = /^\d*<(?!<<)|^\d*<<</;
+/** An array subscript with a substitution, which `read`, `[[ -v ]]` and the like evaluate. */
+const SUBSCRIPT_SUBSTITUTION = /\[[^\]]*(?:\$\(|`)/;
 const SHELLS: ReadonlySet<string> = new Set([
   'sh',
   'bash',
@@ -114,6 +126,49 @@ function withoutRedirections(words: readonly string[]): string[] {
   return out;
 }
 
+/** What the xargs in a command line was given that changes which words it runs. */
+interface XargsOptions {
+  /** The string `-I`, `-i`, `-J` or `--replace` makes xargs swap for each input word. */
+  readonly replace: string | null;
+  /** A long flag this scan does not know, which may take a value or change how words are read. */
+  readonly unknownLong: string | null;
+}
+
+/** The flags of the first xargs among a segment's words, or null when it has none. */
+function xargsOptions(words: readonly string[]): XargsOptions | null {
+  const start = words.findIndex((word) => commandName(word) === 'xargs');
+  if (start === -1) return null;
+  let replace: string | null = null;
+  let unknownLong: string | null = null;
+  for (let at = start + 1; at < words.length; at += 1) {
+    const word = words[at] ?? '';
+    if (word === '--' || !word.startsWith('-') || word === '-') break;
+    if (word.startsWith('--')) {
+      const name = word.split('=')[0] ?? word;
+      if (name === '--replace')
+        replace = word.includes('=') ? word.slice(word.indexOf('=') + 1) : '{}';
+      else if (XARGS_VALUE_FLAGS.includes(name)) at += word.includes('=') ? 0 : 1;
+      else if (!XARGS_VALUELESS_LONG_FLAGS.includes(name)) unknownLong = word;
+      continue;
+    }
+    for (let i = 1; i < word.length; i += 1) {
+      const letter = word.charAt(i);
+      const rest = word.slice(i + 1);
+      if (letter === 'i') {
+        replace = rest === '' ? '{}' : rest;
+        break;
+      }
+      if (XARGS_VALUE_FLAGS.includes(`-${letter}`)) {
+        const value = rest === '' ? (words[at + 1] ?? '') : rest;
+        if (letter === 'I' || letter === 'J') replace = value;
+        if (rest === '') at += 1;
+        break;
+      }
+    }
+  }
+  return { replace, unknownLong };
+}
+
 interface Scanner {
   readonly patterns: readonly (readonly string[])[];
 }
@@ -123,10 +178,17 @@ interface Scanner {
  * An unread word counts twice: it may stand in a flag's value slot, which the comparison skips, and
  * still add a word of its own.
  */
-function mayBeHazard(words: readonly string[], segment: ShellSegment, scanner: Scanner): boolean {
+function mayBeHazard(
+  words: readonly string[],
+  segment: ShellSegment,
+  scanner: Scanner,
+  xargs: XargsOptions | null,
+): boolean {
   const [program = '', ...rest] = words;
+  // A replace string stands for the input in every argument that holds it.
+  const replaced = xargs?.replace != null;
   const arguments_ = withoutRedirections(rest).flatMap((word) =>
-    EXPANDING.test(word) ? [UNREAD_WORD, UNREAD_WORD] : [word],
+    replaced || EXPANDING.test(word) ? [UNREAD_WORD, UNREAD_WORD] : [word],
   );
   // xargs appends the words it reads from its input to the command it runs.
   if (segment.words.some((word) => commandName(word) === 'xargs')) arguments_.push(UNREAD_WORD);
@@ -210,12 +272,32 @@ function scanSegment(
   const written = words[0];
   if (written === undefined) return null;
   const head = commandName(written);
-  if (SYNTAX.has(head)) return null;
-  if (OPAQUE.has(head) || !PLAIN_PROGRAM.test(written)) {
+  if (SYNTAX.has(written)) return null;
+  const xargs = xargsOptions(segment.words);
+  if (xargs?.unknownLong != null)
+    return { reason: UnreadReason.CommandName, text: xargs.unknownLong };
+  const replace = xargs?.replace ?? null;
+  if (
+    OPAQUE.has(head) ||
+    !PLAIN_PROGRAM.test(written) ||
+    (replace !== null && written.includes(replace))
+  ) {
     return { reason: UnreadReason.CommandName, text: written };
   }
+  if (words.some((word) => SUBSCRIPT_SUBSTITUTION.test(word))) {
+    return { reason: UnreadReason.Script, text };
+  }
   if (head === 'eval') return { reason: UnreadReason.Script, text };
+  if (SOURCING.has(head)) {
+    const [, source = ''] = words;
+    if (STREAM_SOURCE.test(source) || words.some((word) => INPUT_REDIRECTION.test(word))) {
+      return { reason: UnreadReason.Script, text };
+    }
+  }
   if (SHELLS.has(head)) {
+    if (replace !== null && words.slice(1).some((word) => word.includes(replace))) {
+      return { reason: UnreadReason.Script, text };
+    }
     const found = scanShell(words, segment, piped, depth, scanner);
     if (found !== null) return found;
   }
@@ -226,7 +308,9 @@ function scanSegment(
       if (found !== null) return found;
     }
   }
-  return mayBeHazard(words, segment, scanner) ? { reason: UnreadReason.HazardForm, text } : null;
+  return mayBeHazard(words, segment, scanner, xargs)
+    ? { reason: UnreadReason.HazardForm, text }
+    : null;
 }
 
 function scanScript(command: string, depth: number, scanner: Scanner): Unread | null {

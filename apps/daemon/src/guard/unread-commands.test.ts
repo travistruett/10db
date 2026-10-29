@@ -32,6 +32,14 @@ const ROWS: readonly Row[] = [
   { name: 'a test bracket with a variable', command: '[ -f $f ] && ls $f', reason: null },
   { name: 'a double bracket', command: '[[ -f $f ]] && ls $f', reason: null },
   { name: 'pnpm test with a variable', command: 'pnpm test $x', reason: null },
+  {
+    name: 'xargs -I into a program with no hazard form',
+    command: 'ls | xargs -I {} cat {}',
+    reason: null,
+  },
+  { name: 'bash -c with options and a plain script', command: "bash -c -e 'ls -la'", reason: null },
+  { name: 'xargs with a GNU value flag', command: 'ls | xargs --max-procs 2 cat', reason: null },
+  { name: 'a path ending in done with no expansion', command: './done ls', reason: null },
   { name: 'pnpm run with a variable', command: 'pnpm run $script', reason: null },
   { name: 'pnpm exec of a known tool with a variable', command: 'pnpm exec tsc $x', reason: null },
   {

@@ -310,6 +310,26 @@ describe('shell commands', () => {
     },
     { name: 'commit after cd', command: "cd src && git commit -m 'x'", decision: 'deny' },
     { name: 'reset inside bash -c', command: 'bash -c "git reset --hard"', decision: 'deny' },
+    {
+      name: 'reset inside bash -c after an option',
+      command: "bash -c -e 'git push --force origin main'",
+      decision: 'deny',
+    },
+    {
+      name: 'reset inside bash -c after --',
+      command: "sh -c -- 'git push --force origin main'",
+      decision: 'deny',
+    },
+    {
+      name: 'reset inside bash -c after -o and its value',
+      command: "bash -c -o pipefail 'git push --force origin main'",
+      decision: 'deny',
+    },
+    {
+      name: 'push in a here-string on fd 0',
+      command: "bash /dev/stdin 0<<<'git push --force origin main'",
+      decision: 'deny',
+    },
     { name: 'checkout in a $() substitution', command: 'echo $(git checkout .)', decision: 'deny' },
     { name: 'stash in a backtick substitution', command: 'echo `git stash`', decision: 'deny' },
     {
