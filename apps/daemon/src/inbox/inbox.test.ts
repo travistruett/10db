@@ -1148,6 +1148,11 @@ describe('permission broker in a sandboxed lane', () => {
     { name: 'declare -i on a variable', command: 'declare -i x=$n', outcome: 'card' },
     { name: 'a relative source after a cd', command: 'cd src && . ./env.sh', outcome: 'card' },
     { name: 'source with an option', command: '. -x ./env.sh', outcome: 'card' },
+    { name: 'a subscripted assignment', command: 'a[$n]=1', outcome: 'card' },
+    { name: 'a subscript expansion', command: 'echo ${a[$n]}', outcome: 'card' },
+    { name: 'a substring offset', command: 'echo ${a:$n:1}', outcome: 'card' },
+    { name: 'old-style arithmetic', command: 'echo $[1+$n]', outcome: 'card' },
+    { name: 'export of a variable value', command: 'export FOO=$n', outcome: 'card' },
     // A structure the parser cannot read.
     { name: 'an unclosed double quote', command: 'echo "unclosed', outcome: 'card' },
     { name: 'an unclosed single quote', command: "echo 'unclosed", outcome: 'card' },

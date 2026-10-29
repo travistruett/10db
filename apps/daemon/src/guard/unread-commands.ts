@@ -78,7 +78,7 @@ const ARITHMETIC_OPERATOR = /^-(?:eq|ne|lt|le|gt|ge|v|R)$/;
 const TESTS: ReadonlySet<string> = new Set(['[[', '[', 'test']);
 /** Builtins that evaluate a word as arithmetic or as a variable name with a subscript. */
 const EVALUATING: ReadonlySet<string> = new Set(['let', 'read', 'unset', 'getopts']);
-/** Builtins that declare a variable: its name is evaluated, and its value with `-i`. */
+/** Builtins that declare a variable: its name is evaluated, and its value when the variable is an integer. */
 const DECLARING: ReadonlySet<string> = new Set([
   'declare',
   'typeset',
@@ -90,11 +90,23 @@ const DECLARING: ReadonlySet<string> = new Set([
 const EXPANSION_IN_WORD = /[$`]/;
 /** An arithmetic expansion that also holds a parameter expansion or a backtick. */
 const EXPANSION_IN_ARITHMETIC = /\$\(\(.*[$`]/s;
+/**
+ * A place the shell evaluates as arithmetic whatever the command is: a subscript (`a[$x]`, `$[…]`,
+ * `${a[$x]}`), a substring offset (`${a:$x}`) or an arithmetic expansion. An expansion inside any of
+ * them can hold a substitution that runs.
+ */
+const ARITHMETIC_CONTEXT = new RegExp(
+  [
+    EXPANSION_IN_ARITHMETIC.source,
+    String.raw`\[[^\]]*[$\x60]`,
+    String.raw`\$\{[^}]*:(?![-=+?])[^}]*[$\x60]`,
+  ].join('|'),
+  's',
+);
 
 /** Whether a builtin's words hand an expansion to an arithmetic evaluation. */
 function evaluatesExpansion(head: string, words: readonly string[]): boolean {
   const args = words.slice(1);
-  if (args.some((word) => EXPANSION_IN_ARITHMETIC.test(word))) return true;
   if (TESTS.has(head)) {
     return (
       args.some((word) => ARITHMETIC_OPERATOR.test(word)) &&
@@ -105,16 +117,9 @@ function evaluatesExpansion(head: string, words: readonly string[]): boolean {
   if (head === 'printf') {
     return args.includes('-v') && args.some((word) => EXPANSION_IN_WORD.test(word));
   }
-  if (DECLARING.has(head)) {
-    const integer = args.some((word) => /^-[a-zA-Z]*i/.test(word));
-    return args.some((word) =>
-      EXPANSION_IN_WORD.test(integer ? word : (word.split('=')[0] ?? word)),
-    );
-  }
+  if (DECLARING.has(head)) return args.some((word) => EXPANSION_IN_WORD.test(word));
   return false;
 }
-/** An array subscript with a substitution, which `read`, `[[ -v ]]` and the like evaluate. */
-const SUBSCRIPT_SUBSTITUTION = /\[[^\]]*(?:\$\(|`)/;
 const SHELLS: ReadonlySet<string> = new Set([
   'sh',
   'bash',
@@ -339,6 +344,10 @@ function scanSegment(
     skipRedirections: true,
     keepCommandPath: true,
   });
+  // Before the program is read: an assignment alone, `a[$(cmd)]=1`, has none.
+  if (segment.words.some((word) => ARITHMETIC_CONTEXT.test(word))) {
+    return { reason: UnreadReason.Script, text };
+  }
   const written = words[0];
   if (written === undefined) return null;
   const head = commandName(written);
@@ -354,7 +363,7 @@ function scanSegment(
   ) {
     return { reason: UnreadReason.CommandName, text: written };
   }
-  if (words.some((word) => SUBSCRIPT_SUBSTITUTION.test(word)) || evaluatesExpansion(head, words)) {
+  if (evaluatesExpansion(head, words)) {
     return { reason: UnreadReason.Script, text };
   }
   if (head === 'eval') return { reason: UnreadReason.Script, text };

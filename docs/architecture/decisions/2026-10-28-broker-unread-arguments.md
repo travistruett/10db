@@ -67,6 +67,10 @@ The scan reads the command's text with these rules, and nothing more:
   script. A test operator that evaluates its operands (`-eq`, `-v`), `let`, `read`, `unset`, `printf -v` and a
   declaration (`declare -i` any word, otherwise the name) with a parameter expansion or backtick are unread, since
   the shell evaluates a variable's value as arithmetic there.
+- Any word of any segment, an assignment alone included, with a `$` or backtick inside `[…]`, `$[…]`,
+  `${…[…]}`, `${…:offset…}` or `$((…))` is unread, and so is any `$` or backtick in the words of `declare`,
+  `typeset`, `local`, `export`, `readonly`, `let`, `read`, `unset`, `getopts` and `printf -v`. Over-flagging is
+  accepted: a card is the safe default.
 - The shell keywords the scan skips (`for`, `select`, `done`, `fi`, `esac`) are judged on the word as written, so
   `./done` and `$D/fi` are programs.
 
@@ -79,6 +83,8 @@ Known gaps, deliberately left for follow-ups. The sandbox bounds all of them; no
 install x`, `pnpm --reporter silent add x`, `cargo +stable add serde`.
 - **Directory changes** inside a substitution or subshell are not tracked for `.` and `source`; only a `cd`,
   `pushd` or `popd` that starts a segment of the script is.
+- **Assignments to integer variables.** `declare -i x` and then `x=$n` evaluates `$n` as arithmetic; a plain
+  assignment word is not flagged, since most are not integers.
 - **Review findings L1 and L3**, minor, recorded in PR #95.
 
 ## Why
