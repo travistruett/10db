@@ -13,6 +13,7 @@ import { ColorSchemeToggle } from './color-scheme-toggle';
 import { DaemonStatus } from './daemon-status';
 import { KeepAwakeControl } from './keep-awake-control';
 import { ProjectSwitcher } from './project-switcher';
+import { inboxRowCount } from '../views/inbox/inbox-rows';
 import { FirstRun } from '../views/first-run/first-run';
 import { SettingsNav } from '../views/settings/settings-nav';
 import { ReconnectingBanner } from './reconnecting-banner';
@@ -42,7 +43,7 @@ export function AppLayout() {
   const status = useDaemonStatus();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const inSettings = pathname === '/settings' || pathname.startsWith('/settings/');
-  const openCards = useInbox().data?.length ?? 0;
+  const openCards = inboxRowCount(useInbox().data ?? []);
   const { projects, select } = useSelectedProject();
   const navigate = useNavigate();
   // The first run replaces the shell only once the list has loaded empty on a live connection; while
