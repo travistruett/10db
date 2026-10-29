@@ -1,31 +1,36 @@
-import { CheckChoice, type InboxItemDto, type WorkstreamId } from '@10db/contracts';
 import {
-  Alert,
-  Button,
-  Code,
-  Group,
-  List,
-  Paper,
-  ScrollArea,
-  Stack,
-  Text,
-  Textarea,
-} from '@mantine/core';
-import { useState, type ReactNode } from 'react';
+  CheckChoice,
+  type InboxItemDto,
+  type WorkstreamChangesDto,
+  type WorkstreamId,
+} from '@10db/contracts';
+import { Alert, Box, Button, Code, Group, List, Paper, Stack, Text, Textarea } from '@mantine/core';
+import { useQueryClient, type UseQueryResult } from '@tanstack/react-query';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { z } from 'zod';
+import { DaemonRequestError } from '../../daemon/client';
 import {
+  queryKeys,
   useAnswerInbox,
   useTasks,
   useWorkstreamChanges,
   useWorkstreams,
 } from '../../daemon/queries';
-import { SELECTED_CARD_ATTRIBUTE } from './use-inbox-keys';
+import { KEYS_IGNORE_ATTRIBUTE } from './use-inbox-keys';
 
 const SHORT_SHA = 7;
+const NOTE_MAX_LENGTH = 4000;
+
+/** The part of a check card's detail the card reads: the head the work reached. */
+const CheckDetail = z.object({ head: z.string() });
 
 export interface CheckCardProps {
   readonly item: InboxItemDto;
   /** The kind badge and title, laid out as on every other expanded card. */
   readonly header: ReactNode;
+  /** The Send Back note, kept by the Inbox so deselecting the card does not lose it. */
+  readonly note: string;
+  readonly onNote: (note: string) => void;
 }
 
 /** The criteria the task set, so the builder checks the work against them. */
@@ -47,8 +52,8 @@ function Criteria({
         Acceptance criteria
       </Text>
       <List size="sm" spacing={2}>
-        {criteria.map((criterion) => (
-          <List.Item key={criterion}>{criterion}</List.Item>
+        {criteria.map((criterion, index) => (
+          <List.Item key={`${String(index)}:${criterion}`}>{criterion}</List.Item>
         ))}
       </List>
     </Stack>
@@ -56,8 +61,7 @@ function Criteria({
 }
 
 /** Commits, changed files with their counts and the diff; all of it is repository text, shown only as text. */
-function Changes({ workstreamId }: { readonly workstreamId: WorkstreamId }) {
-  const changes = useWorkstreamChanges(workstreamId);
+function Changes({ changes }: { readonly changes: UseQueryResult<WorkstreamChangesDto> }) {
   if (changes.isError)
     return (
       <Alert color="red" variant="light" title="Couldn't load the changes">
@@ -105,11 +109,18 @@ function Changes({ workstreamId }: { readonly workstreamId: WorkstreamId }) {
           ))}
         </List>
       </Stack>
-      <ScrollArea.Autosize mah={360} type="auto" offsetScrollbars>
-        <Code block tabIndex={0} aria-label="Diff" style={{ whiteSpace: 'pre' }}>
+      {/* Focusable so the keyboard can scroll it; the Inbox keys leave its arrows alone. */}
+      <Box
+        role="region"
+        aria-label="Diff"
+        tabIndex={0}
+        {...{ [KEYS_IGNORE_ATTRIBUTE]: true }}
+        style={{ maxHeight: 360, overflow: 'auto' }}
+      >
+        <Code block style={{ whiteSpace: 'pre' }}>
           {diff}
         </Code>
-      </ScrollArea.Autosize>
+      </Box>
       {truncated ? (
         <Text size="sm" c="dimmed">
           The diff is longer than we show. The file list above is complete.
@@ -123,86 +134,129 @@ function Changes({ workstreamId }: { readonly workstreamId: WorkstreamId }) {
  * Finished work the project has no gate for: the builder checks the changes and either approves
  * them or sends them back with a note saying what to fix.
  */
-export function CheckCard({ item, header }: CheckCardProps) {
+export function CheckCard({ item, header, note, onNote }: CheckCardProps) {
   const answer = useAnswerInbox();
-  const [sendingBack, setSendingBack] = useState(false);
-  const [note, setNote] = useState('');
+  const queryClient = useQueryClient();
+  const [sendingBack, setSendingBack] = useState(note !== '');
+  const [stale, setStale] = useState(false);
+  const noteRef = useRef<HTMLTextAreaElement>(null);
+  const sendBackRef = useRef<HTMLButtonElement>(null);
+  const wasSendingBack = useRef(false);
   const workstreamId = item.targets[0]?.workstreamId;
+  const detail = CheckDetail.safeParse(item.detail);
+  const changes = useWorkstreamChanges(workstreamId, detail.success ? detail.data.head : null);
   const trimmed = note.trim();
 
+  useEffect(() => {
+    if (sendingBack) noteRef.current?.focus();
+    else if (wasSendingBack.current) sendBackRef.current?.focus();
+    wasSendingBack.current = sendingBack;
+  }, [sendingBack]);
+
+  const respond = (given: { choice: string; note?: string }): void => {
+    setStale(false);
+    answer.mutate(
+      { id: item.id, answer: given },
+      {
+        onSuccess: () => {
+          onNote('');
+        },
+        onError: (failure) => {
+          if (failure instanceof DaemonRequestError && failure.status === 409) {
+            setStale(true);
+            void queryClient.invalidateQueries({ queryKey: queryKeys.inbox });
+          }
+        },
+      },
+    );
+  };
   const approve = (): void => {
-    answer.mutate({ id: item.id, answer: { choice: CheckChoice.Approve } });
+    respond({ choice: CheckChoice.Approve });
   };
   const sendBack = (): void => {
     if (trimmed === '') return;
-    answer.mutate({ id: item.id, answer: { choice: CheckChoice.SendBack, note: trimmed } });
+    respond({ choice: CheckChoice.SendBack, note: trimmed });
   };
+  const failure = stale
+    ? 'This card was already answered.'
+    : answer.isError
+      ? answer.error.message
+      : null;
+  // The diff on screen is the one for this card's head, so Approve waits until it has loaded.
+  const loadingChanges = workstreamId !== undefined && changes.isPending;
 
   return (
-    <Paper withBorder p="md" shadow="xs" {...{ [SELECTED_CARD_ATTRIBUTE]: true }}>
+    // Not the Inbox's selected-card scope: a check card is answered by its buttons, not by the Inbox keys.
+    <Paper withBorder p="md" shadow="xs">
       <Stack gap="sm">
         {header}
         {item.body === '' ? null : <Text size="sm">{item.body}</Text>}
         {workstreamId === undefined ? null : (
           <>
             <Criteria item={item} workstreamId={workstreamId} />
-            <Changes workstreamId={workstreamId} />
+            <Changes changes={changes} />
           </>
         )}
         {sendingBack ? (
           <Textarea
+            ref={noteRef}
             label="What needs to change"
             description="The agent gets this note with the work."
             autosize
             minRows={2}
-            data-autofocus
+            maxLength={NOTE_MAX_LENGTH}
             value={note}
             onChange={(e) => {
-              setNote(e.currentTarget.value);
+              onNote(e.currentTarget.value);
             }}
           />
         ) : null}
-        {answer.isError ? (
-          <Alert color="red" variant="light">
-            {answer.error.message}
-          </Alert>
-        ) : null}
-        <Group justify="flex-end">
-          {sendingBack ? (
-            <>
-              <Button
-                variant="default"
-                onClick={() => {
-                  setSendingBack(false);
-                }}
-              >
-                Cancel
-              </Button>
-              <Button
-                color="red"
-                loading={answer.isPending}
-                disabled={trimmed === ''}
-                onClick={sendBack}
-              >
-                Send It Back
-              </Button>
-            </>
+        <Group justify="space-between" wrap="nowrap" align="flex-start">
+          {failure === null ? (
+            <span />
           ) : (
-            <>
-              <Button
-                variant="default"
-                disabled={answer.isPending}
-                onClick={() => {
-                  setSendingBack(true);
-                }}
-              >
-                Send Back
-              </Button>
-              <Button loading={answer.isPending} onClick={approve}>
-                Approve
-              </Button>
-            </>
+            <Text size="sm" c="red" role="alert">
+              {failure}
+            </Text>
           )}
+          <Group justify="flex-end">
+            {sendingBack ? (
+              <>
+                <Button
+                  variant="default"
+                  onClick={() => {
+                    setSendingBack(false);
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  color="red"
+                  loading={answer.isPending}
+                  disabled={trimmed === ''}
+                  onClick={sendBack}
+                >
+                  Send It Back
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button
+                  ref={sendBackRef}
+                  variant="default"
+                  disabled={answer.isPending}
+                  onClick={() => {
+                    setSendingBack(true);
+                  }}
+                >
+                  Send Back
+                </Button>
+                <Button loading={answer.isPending} disabled={loadingChanges} onClick={approve}>
+                  Approve
+                </Button>
+              </>
+            )}
+          </Group>
         </Group>
       </Stack>
     </Paper>

@@ -45,6 +45,9 @@ export function InboxShortcuts({ opened, onOpen, onClose }: InboxShortcutsProps)
               </Group>
             </Group>
           ))}
+          <Text size="xs" c="dimmed">
+            A check card is answered with its own buttons; these keys leave it alone.
+          </Text>
         </Stack>
       </Modal>
     </>

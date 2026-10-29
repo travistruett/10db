@@ -33,6 +33,9 @@ export interface InboxCardProps {
   readonly onSelect: () => void;
   readonly onChoose: (choice: string) => void;
   readonly onNote: (note: string) => void;
+  /** What the builder typed for sending a check card back; kept while another card is open. */
+  readonly sendBackNote: string;
+  readonly onSendBackNote: (note: string) => void;
   readonly onNoteFocus: () => void;
   readonly onSubmit: () => void;
   /** Dismisses the row's flags; only offered for a flag with no options. */
@@ -69,6 +72,8 @@ export function InboxCard({
   onSelect,
   onChoose,
   onNote,
+  sendBackNote,
+  onSendBackNote,
   onNoteFocus,
   onSubmit,
   onDismiss,
@@ -133,6 +138,8 @@ export function InboxCard({
     return (
       <CheckCard
         item={item}
+        note={sendBackNote}
+        onNote={onSendBackNote}
         header={
           <Group gap="sm" wrap="nowrap">
             {kind}

@@ -297,6 +297,27 @@ describe('useProjectSetup', () => {
     expect(served.posted[0]).toHaveProperty('gateCommand', null);
   });
 
+  it('the no-check line describes the gate input', async () => {
+    serve({ result: { ok: true, inspection: inspection({ gateCandidates: [] }) } });
+    await openInspected();
+    const input = screen.getByRole('textbox', { name: 'Gate command' });
+    const ids = (input.getAttribute('aria-describedby') ?? '').split(' ');
+    const line = screen.getByText(/No check found/);
+    expect(ids.some((id) => id !== '' && document.getElementById(id)?.contains(line))).toBe(true);
+  });
+
+  it('emptying a prefilled gate does not claim no check was found', async () => {
+    serve();
+    await openInspected();
+    fireEvent.change(screen.getByRole('textbox', { name: 'Gate command' }), {
+      target: { value: '' },
+    });
+    expect(screen.queryByText(/No check found/)).toBeNull();
+    expect(
+      screen.getByText("Leave it empty and you'll check each finished task yourself."),
+    ).toBeTruthy();
+  });
+
   it('a gate typed into the input drops the no-check line', async () => {
     serve({ result: { ok: true, inspection: inspection({ gateCandidates: [] }) } });
     await openInspected();
