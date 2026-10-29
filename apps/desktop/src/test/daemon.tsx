@@ -12,6 +12,7 @@ import { DaemonProvider, type DaemonIntervals } from '../daemon/provider';
 import { createAppRouter, type AppRouter } from '../router';
 import { cssVariablesResolver, theme } from '../theme';
 import { DEFAULT_ACCOUNT } from './account-fixtures';
+import { projectViewDto } from './fixtures';
 
 /** The daemon every UI test talks to, through MSW. */
 export const TEST_CONNECTION: DaemonConnection = {
@@ -29,6 +30,9 @@ export function daemonUrl(path: string, base: string = TEST_CONNECTION.url): str
   return `${base}${path}`;
 }
 
+/** The one project a healthy test daemon has; an empty list would show the first run instead of the app. */
+const BASE_PROJECT = projectViewDto();
+
 const STARTED_AT = '2026-10-13T12:00:00.000Z';
 
 /** A healthy, empty daemon. Tests put their own handlers first with `server.use(mine, ...baseHandlers())`. */
@@ -44,7 +48,7 @@ export function baseHandlers(
       HttpResponse.json(EventsHead.parse({ seq: opts.headSeq ?? 0 })),
     ),
     http.get(daemonUrl('/accounts', base), () => HttpResponse.json([DEFAULT_ACCOUNT])),
-    http.get(daemonUrl('/projects', base), () => HttpResponse.json([])),
+    http.get(daemonUrl('/projects', base), () => HttpResponse.json([BASE_PROJECT])),
     http.get(daemonUrl('/projects/:projectId/batches', base), () => HttpResponse.json([])),
     http.get(daemonUrl('/workstreams', base), () => HttpResponse.json([])),
     http.get(daemonUrl('/inbox', base), () => HttpResponse.json([])),

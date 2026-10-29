@@ -92,6 +92,15 @@
 - [ ] Accounts: spike carrying a cut-off conversation to the account a project moved to (`forkSession` and `getSessionMessages` on a per-account config directory, a subscription transcript resumed on Bedrock, thinking blocks, token cost). If it passes, a small follow-up plan resumes that conversation after a move instead of starting fresh from the handoff (accounts spec §11).
 - [ ] Accounts: the Accounts screen shows each project's fallback, the account it moved from and when 10db will ask to move it back.
 - [ ] Accounts: an in-memory Keychain for the fake-scripts daemon, so the secret form gets an end-to-end run.
+- [ ] First run: propose a project's areas from the repository (workspace packages, app folders, screens) instead of one `repo` area over `**`; the folder inspection is where it would go (first-run spec §13).
+- [ ] First run: propose a new task's areas from its description, and edit a task's areas and dependencies in the drawer (needs a task patch route).
+- [ ] First run: the sandbox check as a setup row; 10db checks its sandbox when a lane starts, and a row needs a daemon probe that doesn't exist yet.
+- [ ] First run: Codex as a second agent in the setup check's Agents card.
+- [ ] Settings: the base branch as a Select of the checkout's branches; it needs inspection of an existing project's checkout, so it stays a text input.
+- [ ] Settings: the global Models section, and the fallback model as two selects.
+- [ ] Board: goals and the shaping flow (`scratch/design-note-2026-10-28-starting-work-and-goals.md`), voice capture for a task, and a sharpen assist that rewrites vague acceptance criteria.
+- [ ] Desktop: a written type scale and spacing rhythm in `DESIGN.md`, with one pass over every view.
+- [ ] First run: the native folder panel and the Tauri window are checked by hand; the browser run covers the form and its axe scan (`e2e/first-run.spec.ts`).
 - [ ] Desktop: split the rest of `apps/desktop/src/daemon/queries.ts` and `test/fixtures.ts` per entity, as accounts already is; deferred until no big branches are in flight.
 - [x] Sandbox: run approved repo stdio MCP servers under srt (decision 133, threat model §4.6), with srt measured to keep a stdio server's stdout clean.
 - [x] Sandbox: let an MCP approval name the hosts its stdio server may reach, so a server that fetches its package at start (`npx -y`) or calls a web API can run (`decisions/2026-10-27-mcp-approval-hosts.md`, `.10db/mcp-hosts.json`).

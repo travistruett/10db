@@ -202,6 +202,21 @@ describe('BatchStrip in worktree mode', () => {
     expect(screen.queryByText(path)).toBeNull();
   });
 
+  it('keeps the actions on the title line and counts unsettled tasks instead of listing them', async () => {
+    const running = workstreamDto({
+      projectId: open.projectId,
+      batchId: open.id,
+      taskTitle: 'Still going',
+      state: 'RUNNING',
+    });
+    server.use(...baseHandlers());
+    renderWithDaemon(<BatchStrip batch={open} workstreams={[running]} workspaceMode="worktree" />);
+    expect(await screen.findByText('1 unsettled')).toBeTruthy();
+    expect(screen.queryByText('Still going')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Abandon' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Add a fix task' })).toBeTruthy();
+  });
+
   it('offers no fix task on a batch that is shipping', async () => {
     server.use(...baseHandlers());
     renderWithDaemon(

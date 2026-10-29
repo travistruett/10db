@@ -12,7 +12,7 @@ import {
   type WorkstreamDto,
   type WorkstreamId,
 } from '@10db/contracts';
-import { Alert, Button, Group, Loader, Menu, Modal, ScrollArea, Stack, Text } from '@mantine/core';
+import { Alert, Button, Group, Loader, Menu, ScrollArea, Stack, Text } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { IconColumns, IconPlayerPlay, IconPlus } from '@tabler/icons-react';
 import { useNavigate } from '@tanstack/react-router';
@@ -31,7 +31,6 @@ import { columnHint } from './column-hints';
 import { BoardDnd } from './board-dnd';
 import { boardLayout, DONE_LIMIT, type LayoutColumn } from './board-layout';
 import { menuMoves, resolveDrop, startedDependents, type DropTarget } from './drop-rules';
-import { NewProjectForm } from './new-project-form';
 import { NewTaskForm } from './new-task-form';
 import { PullRequestLink } from './pull-request-link';
 import { cardSummary, TaskCard } from './task-card';
@@ -249,33 +248,23 @@ function BatchStrips({
   readonly project: ProjectViewDto;
   readonly workstreams: readonly WorkstreamDto[];
 }) {
-  if (project.workspaceMode === WorkspaceMode.Worktree && project.openBatches.length > 0) {
-    return project.openBatches.map((batch) => (
-      <BatchStrip
-        key={batch.id}
-        batch={batch}
-        workstreams={workstreams}
-        workspaceMode={project.workspaceMode}
-      />
-    ));
-  }
-  return project.currentBatch ? (
+  return stripBatches(project).map((batch) => (
     <BatchStrip
-      batch={project.currentBatch}
+      key={batch.id}
+      batch={batch}
       workstreams={workstreams}
       workspaceMode={project.workspaceMode}
     />
-  ) : null;
+  ));
 }
 
 export function BoardView() {
-  const { projects, project, select } = useSelectedProject();
+  const { projects, project } = useSelectedProject();
   const tasks = useTasks(project?.id ?? null);
   const columns = useBoardColumns(project?.id ?? null);
   const workstreams = useWorkstreams({ active: false });
   const batches = useBatches(project?.id ?? null);
   const navigate = useNavigate();
-  const [projectOpen, projectModal] = useDisclosure(false);
   const [taskOpen, taskModal] = useDisclosure(false);
   const [taskStatus, setTaskStatus] = useState<{ pending: boolean; error: string | null }>({
     pending: false,
@@ -300,9 +289,6 @@ export function BoardView() {
     <Stack h="calc(100dvh - var(--app-shell-header-offset, 0px) - 2 * var(--mantine-spacing-md))">
       <Group justify="flex-end" align="flex-end">
         <Group align="flex-end">
-          <Button variant="default" size="sm" onClick={projectModal.open}>
-            New project
-          </Button>
           {project ? (
             <SplitButton
               leftSection={<IconPlus size={16} stroke={1.5} />}
@@ -374,14 +360,11 @@ export function BoardView() {
         </Alert>
       ) : null}
       {projects.isPending ? <Loader size="sm" aria-label="Loading projects" /> : null}
-      {projects.isSuccess && !project ? (
-        <Text c="dimmed">No projects yet. Create one to start.</Text>
-      ) : null}
       {project && (stripIds.size > 0 || historyBatches.length > 0) ? (
         <ScrollArea.Autosize
           mah={ABOVE_COLUMNS_MAX_HEIGHT}
           type="auto"
-          offsetScrollbars="y"
+          offsetScrollbars="present"
           data-testid="board-above-columns"
         >
           <Stack gap="sm">
@@ -403,14 +386,6 @@ export function BoardView() {
         />
       ) : null}
 
-      <Modal opened={projectOpen} onClose={projectModal.close} title="New project" size="lg">
-        <NewProjectForm
-          onCreated={(created) => {
-            select(created.id);
-            projectModal.close();
-          }}
-        />
-      </Modal>
       {project ? (
         <BatchSheet key={project.id} project={project} opened={sheetOpen} onClose={sheet.close} />
       ) : null}

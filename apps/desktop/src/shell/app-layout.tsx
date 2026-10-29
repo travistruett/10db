@@ -5,7 +5,7 @@ import {
   IconLayoutKanban,
   IconSettings,
 } from '@tabler/icons-react';
-import { Link, Outlet, useRouterState } from '@tanstack/react-router';
+import { Link, Outlet, useNavigate, useRouterState } from '@tanstack/react-router';
 import { useDaemonStatus } from '../daemon/provider';
 import { useInbox } from '../daemon/queries';
 import { useDesktopSync } from '../desktop/sync';
@@ -13,8 +13,10 @@ import { ColorSchemeToggle } from './color-scheme-toggle';
 import { DaemonStatus } from './daemon-status';
 import { KeepAwakeControl } from './keep-awake-control';
 import { ProjectSwitcher } from './project-switcher';
+import { FirstRun } from '../views/first-run/first-run';
 import { SettingsNav } from '../views/settings/settings-nav';
 import { ReconnectingBanner } from './reconnecting-banner';
+import { useSelectedProject } from './selected-project';
 import { SystemAlert } from './system-alert';
 
 const NAV = [
@@ -41,6 +43,20 @@ export function AppLayout() {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const inSettings = pathname === '/settings' || pathname.startsWith('/settings/');
   const openCards = useInbox().data?.length ?? 0;
+  const { projects, select } = useSelectedProject();
+  const navigate = useNavigate();
+  // The first run replaces the shell only once the list has loaded empty on a live connection; while
+  // it loads, or the daemon connects or reconnects, the shell shows and its banners say why.
+  if (status.kind === 'connected' && projects.isSuccess && projects.data.length === 0) {
+    return (
+      <FirstRun
+        onCreated={(project) => {
+          select(project.id);
+          void navigate({ to: '/board' });
+        }}
+      />
+    );
+  }
   return (
     <AppShell header={{ height: 48 }} navbar={{ width: 200, breakpoint: 'sm' }} padding="md">
       {/* The window has no title bar: macOS draws its traffic lights over the header's left end, and
