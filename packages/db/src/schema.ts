@@ -200,6 +200,13 @@ export const batches = sqliteTable(
      * batch has finished, so an unfinished row without one is a shared batch.
      */
     worktreePath: text('worktree_path'),
+    /**
+     * Where a shared batch's cut found the builder's checkout, so the daemon can switch it back
+     * when the batch ends: the branch it was on, or null when HEAD was detached, and the commit.
+     * Cleared once the switch back is done or declined; a worktree batch never sets them.
+     */
+    returnBranch: text('return_branch'),
+    returnSha: text('return_sha'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

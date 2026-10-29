@@ -32,9 +32,11 @@ export interface BatchPatch {
   readonly gatePidStart?: string | null;
   readonly failure?: BatchFailure | null;
   readonly worktreePath?: string | null;
+  readonly returnBranch?: string | null;
+  readonly returnSha?: string | null;
 }
 
-/** The gate pid stays internal: only recovery reads it. */
+/** The gate pid and the checkout's return place stay internal: only delivery reads them. */
 function toBatchDto(row: BatchRow): BatchDto {
   return {
     id: row.id,
@@ -122,6 +124,28 @@ export function listLiveWorktrees(db: DbReader): BatchDto[] {
     .map(toBatchDto);
 }
 
+/**
+ * Finished batches whose checkout still waits to be switched back, newest first: a batch cut while
+ * the checkout was on an earlier one's branch goes back there before the earlier one goes back.
+ */
+export function listCheckoutReturns(db: DbReader): BatchRow[] {
+  return db
+    .select()
+    .from(schema.batches)
+    .where(
+      and(
+        isNotNull(schema.batches.returnSha),
+        inArray(schema.batches.state, [
+          BatchState.Shipped,
+          BatchState.Closed,
+          BatchState.Abandoned,
+        ]),
+      ),
+    )
+    .orderBy(desc(schema.batches.createdAt), desc(schema.batches.id))
+    .all();
+}
+
 export function findBatchByWorktreePath(db: DbReader, path: string): BatchDto | undefined {
   const row = db.select().from(schema.batches).where(eq(schema.batches.worktreePath, path)).get();
   return row ? toBatchDto(row) : undefined;
@@ -179,6 +203,8 @@ export function insertBatch(
     gatePidStart: null,
     failure: null,
     worktreePath: input.worktreePath ?? null,
+    returnBranch: null,
+    returnSha: null,
     createdAt: ctx.now,
     updatedAt: ctx.now,
   };

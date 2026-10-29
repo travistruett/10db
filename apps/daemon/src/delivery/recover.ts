@@ -6,6 +6,7 @@ import {
   getBatchRow,
   getProject,
   listBatches,
+  listCheckoutReturns,
   listLiveWorktrees,
   patchBatch,
   transitionBatch,
@@ -16,6 +17,7 @@ import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
 import { batchCheckout } from './checkout';
 import { startCards, worktreeCards, wrongBranchCard, type Card } from './cards';
+import { returnCheckout } from './checkout-return';
 import { raise, type DeliveryContext } from './context';
 import type { Shipper } from './ship';
 import { retireWorktree } from './worktree-cleanup';
@@ -39,6 +41,8 @@ export interface BatchRecoveryReport {
   readonly retired: BatchId[];
   /** Worktrees the sweep removed because no batch names them. */
   readonly swept: string[];
+  /** Finished shared batches whose checkout recovery switched back. */
+  readonly switchedBack: BatchId[];
 }
 
 const message = (error: unknown): string =>
@@ -49,8 +53,9 @@ const message = (error: unknown): string =>
  * before the scheduler: a CUTTING row's worktree is removed and the row deleted (a branch the crash
  * left stays, and the next cut uses a new name); an orphaned shipping gate is killed; an unfinished
  * batch whose checkout is missing or off its branch fails; a SHIPPING batch re-runs from step 0; a
- * finished batch's worktree goes; the sweep removes worktrees no batch names; an OPEN batch whose
- * work all settled ships. Without `worktrees`, worktree removal and the sweep are skipped.
+ * finished shared batch's checkout is switched back as its end would have done; a finished batch's
+ * worktree goes; the sweep removes worktrees no batch names; an OPEN batch whose work all settled
+ * ships. Without `worktrees`, worktree removal and the sweep are skipped.
  */
 export async function recoverBatches(deps: {
   readonly state: StateStore;
@@ -69,6 +74,7 @@ export async function recoverBatches(deps: {
     resumed: [],
     retired: [],
     swept: [],
+    switchedBack: [],
   };
 
   /**
@@ -144,8 +150,13 @@ export async function recoverBatches(deps: {
     }
   }
 
+  // 4. Finished shared batches whose checkout was never switched back: the daemon stopped between
+  // recording the end and the switch.
+  for (const batch of listCheckoutReturns(db))
+    if ((await returnCheckout(deps, batch.id)) === 'switched') report.switchedBack.push(batch.id);
+
   if (deps.worktrees) {
-    // 4. Finished batches whose path is still set: the removal and clear a crash cut short. A dirty
+    // 5. Finished batches whose path is still set: the removal and clear a crash cut short. A dirty
     // ABANDONED worktree, or a finished one holding git-ignored files 10db didn't seed, is kept, with
     // its card.
     for (const batch of listLiveWorktrees(db)) {
@@ -167,7 +178,7 @@ export async function recoverBatches(deps: {
       if (getBatch(db, batch.id).worktreePath === null) report.retired.push(batch.id);
     }
 
-    // 5. The sweep, after every removal above, so it only finds what no batch names.
+    // 6. The sweep, after every removal above, so it only finds what no batch names.
     report.swept.push(
       ...(await sweepWorktrees({
         state: deps.state,
@@ -179,7 +190,7 @@ export async function recoverBatches(deps: {
     );
   }
 
-  // 6. OPEN batches whose work all settled ship.
+  // 7. OPEN batches whose work all settled ship.
   deps.shipper.checkOpenBatches();
   deps.logger.info({ ...report }, 'batch recovery complete');
   return report;

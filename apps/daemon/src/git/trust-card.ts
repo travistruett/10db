@@ -44,6 +44,21 @@ export function worktreeRemovalCommand(checkout: string, path: string): string {
 }
 
 /**
+ * The command that switches `checkout` to `place` (a branch, or a commit when `branch` is null), to
+ * paste when every value in it is plain; otherwise the words to type it from.
+ */
+export function checkoutSwitchCommand(
+  checkout: string,
+  place: { readonly branch: string | null; readonly sha: string },
+): string {
+  const target = place.branch ?? place.sha;
+  const detach = place.branch === null ? '--detach ' : '';
+  return PASTE_SAFE.test(checkout) && PASTE_SAFE.test(target)
+    ? `git -C ${shellQuote(checkout)} switch ${detach}${shellQuote(target)}`
+    : `git switch ${detach}run in ${codeSpan(checkout)}, naming ${codeSpan(target)}`;
+}
+
+/**
  * How the builder merges origin's `base` into the worktree at `path` by hand, with hooks off: lanes
  * write in a worktree, so the hook config there (lefthook's, husky's) is theirs to choose. A command to
  * paste when both values are plain, otherwise the command to type, naming each as a code span.

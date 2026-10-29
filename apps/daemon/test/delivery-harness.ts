@@ -65,7 +65,7 @@ import {
   tempDir,
 } from './fixtures';
 
-type Settled = 'DONE' | 'FAILED' | 'CANCELLED' | 'WAITING_HUMAN' | 'RUNNING';
+type Settled = 'DONE' | 'FAILED' | 'CANCELLED' | 'WAITING_HUMAN' | 'RUNNING' | 'TAKEN_OVER';
 
 /** A `pnpm` on its own PATH directory, recording calls and failing on request. */
 function fakePnpm(root: string): FakePnpm {

@@ -1,7 +1,7 @@
 import { BatchDto, mintId } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { batchCardFields } from './batch-card';
-import { shipCards, worktreeCards, wrongBranchCard, type Card } from './cards';
+import { checkoutCards, shipCards, worktreeCards, wrongBranchCard, type Card } from './cards';
 
 const AT = '2026-10-13T12:00:00.000Z';
 const batch = BatchDto.parse({
@@ -57,5 +57,33 @@ describe('batch cards', () => {
     const fields = batchCardFields({ id: mintId('Workstream'), batchId: batch.id });
     const later = fields?.options.find((o) => o.label === 'Later');
     expect(later?.description).toBe("Leave the batch open; decide later in the task's drawer");
+  });
+});
+
+describe('the cards that say why a checkout stays on its branch', () => {
+  const shipped = { ...batch, state: 'SHIPPED' as const, worktreePath: null };
+  it.each([
+    {
+      name: 'a plain path and branch',
+      repoPath: '/Users/me/app',
+      place: { branch: 'main', sha: 'b'.repeat(40) },
+      command: "git -C '/Users/me/app' switch 'main'",
+    },
+    {
+      name: 'a detached commit',
+      repoPath: '/Users/me/app',
+      place: { branch: null, sha: 'b'.repeat(40) },
+      command: `git -C '/Users/me/app' switch --detach '${'b'.repeat(40)}'`,
+    },
+    {
+      name: 'a path with a space, which is never left to the shell to split',
+      repoPath: '/Users/me/My App',
+      place: { branch: 'main', sha: 'b'.repeat(40) },
+      command: 'git switch run in `/Users/me/My App`, naming `main`',
+    },
+  ])('$name', ({ repoPath, place, command }) => {
+    const card = checkoutCards.dirty(shipped, { name: 'App', repoPath }, place, ['a.ts']);
+    expect(card.body).toContain(command);
+    expect(card.body).not.toContain(`-C ${repoPath}`);
   });
 });
