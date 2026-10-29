@@ -64,6 +64,9 @@ describe('loadEnv', () => {
     ['a short dev token', { TENDB_DEV_UI_TOKEN: 'short-secret-value' }, 'TENDB_DEV_UI_TOKEN'],
     ['a relative claude path', { TENDB_CLAUDE_PATH: 'bin/claude' }, 'TENDB_CLAUDE_PATH'],
     ['a relative worktree root', { TENDB_WORKTREE_ROOT: 'worktrees' }, 'TENDB_WORKTREE_ROOT'],
+    ['zero gate slots', { TENDB_GATE_SLOTS: '0' }, 'TENDB_GATE_SLOTS'],
+    ['a fractional gate slot count', { TENDB_GATE_SLOTS: '1.5' }, 'TENDB_GATE_SLOTS'],
+    ['a text gate slot count', { TENDB_GATE_SLOTS: 'two' }, 'TENDB_GATE_SLOTS'],
     [
       'a worktree root with a home shorthand',
       { TENDB_WORKTREE_ROOT: '~/wt' },

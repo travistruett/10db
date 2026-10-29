@@ -112,6 +112,7 @@ The fake adapter (`sessions/fake-adapter.ts`) is the test boundary for Claude Co
   worktree's pin is made at creation, copies the main pin's URLs and is keyed by batch (`checkout_pin.<batch id>`);
   `createGit({ worktreeRoot })` refuses a path at or under the root with no pin as `GitTrustFailure.Unpinned`, and
   `projectAt` resolves a worktree path to its project so refusals raise the project's cards.
+- Gates are limited machine-wide (`verify/gate-slots.ts`, `decisions/2026-10-28-gate-slots.md`): `startDaemon` wraps the one gate runner with `limitGates` over a single `createGateSlots(limits.gateSlots)` (default 1, `TENDB_GATE_SLOTS`), so a lane's verify gate and a batch's ship gate share it. The gate's timeout starts when it gets a slot. A gate that waits calls `GateRequest.onWaiting`; a new place that starts a gate goes through that same runner, never a second one.
 - `keep-awake/` and `watcher/` follow lanes through `workstream.*` events, wired in `daemon/start.ts`.
 - A managed session's MCP servers are 10db's own plus the repo's `.mcp.json` servers the builder approved
   for that exact config, resolved per session in `sessions/project-mcp.ts`. Claude Code never reads MCP

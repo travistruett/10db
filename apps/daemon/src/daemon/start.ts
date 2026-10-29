@@ -97,7 +97,7 @@ import {
 import { createScheduler, type Scheduler } from '../scheduler';
 import type { SessionAdapter } from '../sessions';
 import { retryWorkstream, seedTeam } from '../team';
-import { createGateRunner } from '../verify';
+import { createGateRunner, createGateSlots, limitGates } from '../verify';
 import { CLIENT_APP } from '../version';
 import { createWatcher, systemWatch, type WatchFn } from '../watcher';
 import { createProjectPinStore } from './checkout-pins';
@@ -130,7 +130,7 @@ export interface DaemonOptions {
   readonly clock?: Clock;
   /** Lane caps across all projects; each account has its own `laneCap`. */
   readonly caps?: { readonly global: number };
-  /** Recovery attempts, fix attempts and the gate timeout; merged over the runner defaults. */
+  /** Recovery attempts, fix attempts, the gate timeout and the gate slots; merged over the runner defaults. */
   readonly limits?: Partial<RunnerLimits>;
   /** How long a lane lease lasts before the scheduler renews it. */
   readonly leaseMs?: number;
@@ -348,8 +348,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       'swept the sandbox temp root',
     );
   }
-  // Shared by every gate: a task's, at its green run, and a batch's, at ship.
-  const gate = createGateRunner({
+  // Shared by every gate: a task's, at its green run, and a batch's, at ship. One limiter caps them
+  // all, so the machine never runs more than `limits.gateSlots` at once.
+  const gateRunner = createGateRunner({
     sandbox:
       opts.sandbox && runtime
         ? createGateSandbox({
@@ -361,6 +362,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
             runtime,
           })
         : null,
+    logger: logger.child({ component: 'gate' }),
+  });
+  const gateSlots = createGateSlots(limits.gateSlots);
+  const gate = limitGates(gateRunner, {
+    slots: gateSlots,
+    clock,
     logger: logger.child({ component: 'gate' }),
   });
   const answerGit = createGitCardAnswers(git);
@@ -715,6 +722,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     try {
       createdScheduler.stop();
       unsubscribeShip();
+      // A gate that waits must not start because shutdown freed the slot of the one it killed.
+      gateSlots.close();
       // Aborts a shipping gate and any git or gh child; the batch stays SHIPPING for recovery.
       await deliveryJobs.stop();
       benchmarks.stop();
