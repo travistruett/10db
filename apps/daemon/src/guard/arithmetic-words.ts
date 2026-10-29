@@ -1,3 +1,5 @@
+import { redirectionSpan } from './shell-words';
+
 /**
  * Where the shell evaluates a word as arithmetic. Bash evaluates a bare identifier there as the
  * variable it names, and a variable's value as an expression again, so `n='a[$(cmd)]'; echo $((n))`
@@ -14,9 +16,12 @@ const PLAIN_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 /** A parameter expansion or backtick, whose value the shell may evaluate as arithmetic. */
 const EXPANSION = /[$`]/;
 
+/** Parameters that always hold a number: `$#`, `$?`, `$$`, `$!` and `${#name}` of a name or element. */
+const NUMERIC_PARAMETER = /\$[#?$!]|\$\{#[A-Za-z_]\w*(?:\[[@*]\])?\}/g;
+
 /** Whether an expression holds only numeric literals and operators. */
 export function isNumericExpression(expression: string): boolean {
-  return NUMERIC.test(expression.replace(HEX_LITERAL, '0'));
+  return NUMERIC.test(expression.replace(HEX_LITERAL, '0').replace(NUMERIC_PARAMETER, '0'));
 }
 
 /** A subscript that is safe to evaluate: a number, or `@` and `*` for all elements. */
@@ -71,6 +76,17 @@ export function declaresInteger(head: string, words: readonly string[]): boolean
   return DECLARING.has(head) && words.slice(1).some((word) => /^-[a-zA-Z]*i/.test(word));
 }
 
+/** The words without their redirections and the targets. */
+function withoutRedirections(words: readonly string[]): string[] {
+  const out: string[] = [];
+  for (let at = 0; at < words.length;) {
+    const span = redirectionSpan(words, at);
+    if (span > 0) at += span;
+    else out.push(words[at++] ?? '');
+  }
+  return out;
+}
+
 /** A declaration that makes a name refer to another variable, which later assignments follow. */
 export function declaresNameref(head: string, words: readonly string[]): boolean {
   return DECLARING.has(head) && words.slice(1).some((word) => /^-[a-zA-Z]*n/.test(word));
@@ -91,13 +107,15 @@ export function expandsIndirectly(word: string): boolean {
  * one of them is not a plain number or name. `printf -v` takes a name, and `let` an expression.
  */
 export function evaluatesUnread(head: string, words: readonly string[]): boolean {
-  const args = words.slice(1);
+  const args = withoutRedirections(words.slice(1));
   if (TEST_COMMANDS.has(head)) {
     return args.some((word, at) => {
       const next = args[at + 1] ?? '';
       const previous = args[at - 1] ?? '';
-      if (NUMBER_TESTS.has(word))
-        return !isNumericExpression(previous) || !isNumericExpression(next);
+      // Only `[[` evaluates its operands as arithmetic; `[` and `test` compare integers as text.
+      if (NUMBER_TESTS.has(word)) {
+        return head === '[[' && (!isNumericExpression(previous) || !isNumericExpression(next));
+      }
       return NAME_TESTS.has(word) && !PLAIN_NAME.test(next);
     });
   }

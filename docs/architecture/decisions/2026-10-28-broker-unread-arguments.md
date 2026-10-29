@@ -24,9 +24,11 @@ could hide one:
   `alias`) are unread.
 - **Script.** `eval`; a shell (`sh`, `bash`, `zsh`, `dash`, `ksh`, `fish`, `csh`, `tcsh`) run with `-c` and no
   script, a script that holds `$` or a backtick (the outer shell may fill it in), a script piped or redirected
-  in, a bare shell, a here-document or here-string body with `$` or a backtick; and nesting of `sh -c`,
+  in, a bare shell, a here-string with `$` or a backtick, an unquoted here-document with a substitution; and nesting of `sh -c`,
   `find -exec` or a shell's script deeper than `hazardHit` follows. A script that is plain text is read as
-  shell, here-document bodies run by a shell included. A here-document read by any other program is data.
+  shell, here-document bodies run by a shell included. A here-document read by any other program is data: its
+  substitutions are scanned when the delimiter is unquoted (`<<EOF`), and the body is not read at all when it is
+  quoted (`<<'EOF'`, `<<"EOF"`, `<<\EOF`), as in `git commit -m "$(cat <<'EOF' … EOF)"`.
 - **Hazard form.** For the known program, the arguments the parser could read are compared with the project's
   hazard commands (and each of them behind `pnpm exec`, `pnpm dlx`, `npm exec`, `npx`, `yarn dlx`). Every
   argument that has an expansion, substitution, glob or tilde is treated as any number of words. If the line
@@ -56,17 +58,20 @@ The scan reads the command's text with these rules, and nothing more:
   Every here-string (`<<<`, on any descriptor) is a script.
 - Under `xargs -I`, `-i`, `-J` or `--replace`, every argument is unread, and the replace string in the program or
   in a shell's script is unread. An `xargs` long flag the scan does not know is an unread program name.
-- `trap` and `hash` are unread, as is `.` or `source` of a stream or with input redirected in, and any word with
+- `trap` and `hash` are unread, with the other opaque programs, as is `.` or `source` of a stream or with input redirected in, and any word with
   an array subscript that holds `$(` or a backtick (`read`, `[[ -v ]]`, `printf -v`).
-- A `-c` script that reads as an option, `.` or `source` of anything but a checkout file (a stream, `/dev` or
-  `/proc` once the path is normalized, an expansion, or input piped or redirected in), more than one `xargs`
-  wrapper, and a substitution in any word of an arithmetic-evaluating builtin (`[[`, `test`, `let`, `read`,
-  `printf`, `declare`) are unread.
+- A `-c` script that reads as an option, `.` or `source` of anything but a plain file path (a stream, `/dev` or
+  `/proc` once the path is normalized, any expansion including `~`, or input piped or redirected in; an absolute
+  path outside `/dev` and `/proc` is read), more than one `xargs`
+  wrapper, and the arithmetic uses below are unread.
 - `.` and `source` read a file only when it is a plain path with no option but `--`, no input redirected or
   piped in (including through an enclosing `sh -c`), and, if relative, no earlier `cd`, `pushd` or `popd` in the
-  script. A test operator that evaluates its operands (`-eq`, `-v`), `let`, `read`, `unset`, `printf -v` and a
+  script. The `-eq`-style operators of `[[` (not `[` or `test`, which compare integers as text), the name after `-v`, `let`, `read`, `unset` (redirections aside), `printf -v` and a
   declaration (`declare -i` any word, otherwise the name) with a parameter expansion or backtick are unread, since
   the shell evaluates a variable's value as arithmetic there.
+- A transform other than `Q`, `U`, `u`, `L` or `a` (`${x@P}` expands a prompt, which runs substitutions) is unread,
+  and so is an option word with an expansion on a declaring builtin (`declare -$f x`). `$#`, `$?`, `$$`, `$!` and
+  `${#name}` count as numbers.
 - Any word of any segment, an assignment alone included, with a `$` or backtick inside `[…]`, `$[…]`,
   `${…[…]}`, `${…:offset…}` or `$((…))` is unread, and so is any `$` or backtick in the words of `declare`,
   `typeset`, `local`, `export`, `readonly`, `let`, `read`, `unset`, `getopts` and `printf -v`. Over-flagging is
@@ -91,7 +96,8 @@ install x`, `pnpm --reporter silent add x`, `cargo +stable add serde`.
   `pushd` or `popd` that starts a segment of the script is.
 - **An integer attribute inherited from outside the command**, such as an exported integer variable: a plain
   assignment to one is not flagged.
-- **Here-document bodies** skip the arithmetic, indirect-expansion and transform checks; only their substitutions are scanned.
+- **Here-document bodies** skip the arithmetic, indirect-expansion and transform checks; only their substitutions are
+  scanned, and a quoted body not at all.
 - **Prompt variables** (`PS0`, `PS1`, `PS2`, `PS4`, `PROMPT_COMMAND`) assigned in a script that also turns on tracing
   (`set -x`, `bash -x`) are not flagged.
 - **Review findings L1 and L3**, minor, recorded in PR #95.

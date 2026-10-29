@@ -290,8 +290,10 @@ function scanSegment(
     if (found !== null) return found;
   }
   // A program that takes a here-document as data still has the shell run a substitution in an
-  // unquoted body, and the quoting of the delimiter is not kept.
-  for (const body of segment.hereDocuments) {
+  // unquoted body.
+  for (const [at, body] of segment.hereDocuments.entries()) {
+    // A quoted delimiter means the shell expands nothing in the body, so it is data.
+    if (segment.quotedHereDocuments[at] === true) continue;
     const found = EXECUTED_IN_BODY.test(body) ? scanSubstitutions(body, depth, scanner) : null;
     if (found !== null) return found;
   }
@@ -371,9 +373,13 @@ function declaresIntegerAnywhere(command: string, depth: number): boolean {
     const head = commandName(words[0] ?? '');
     if (declaresInteger(head, words) || declaresNameref(head, words)) return true;
     if (segment.words.some((word) => expandsIndirectly(word))) return true;
+    // A quoted body is data unless a shell reads it.
+    const bodies = SHELLS.has(head)
+      ? segment.hereDocuments
+      : segment.hereDocuments.filter((_, at) => segment.quotedHereDocuments[at] !== true);
     const inner = [
       ...segment.nested,
-      ...segment.hereDocuments,
+      ...bodies,
       ...(SHELLS.has(head) ? shellScripts(words) : []),
       ...(head === 'eval' ? [words.slice(1).join(' ')] : []),
       ...(head === 'find'

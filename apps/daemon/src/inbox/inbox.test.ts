@@ -1175,6 +1175,50 @@ describe('permission broker in a sandboxed lane', () => {
     { name: 'names with a prefix', command: 'echo ${!BASH*}', outcome: 'allow' },
     { name: 'a prompt transform', command: 'echo ${x@P}', outcome: 'card' },
     { name: 'a declare option from a variable', command: 'declare -$f x', outcome: 'card' },
+    {
+      name: 'five thousand nested arithmetic expansions',
+      command: '$(('.repeat(5000),
+      outcome: 'card',
+    },
+    {
+      name: 'a scoped commit message in a quoted heredoc, with a backtick',
+      command:
+        "git commit -m \"$(cat <<'EOF'\nfix(daemon): close the `db` handle (it leaked)\n\nDon't leak.\nEOF\n)\"",
+      outcome: 'allow',
+    },
+    {
+      name: 'a pull request body in a quoted heredoc, with a code fence',
+      command:
+        'gh pr create --title t --body "$(cat <<\'EOF\'\n## Summary\n```ts\nconst a = (1 + 2);\n```\nEOF\n)"',
+      outcome: 'allow',
+    },
+    {
+      name: 'a file written from a quoted heredoc with a template literal',
+      command: "cat > a.ts <<'EOF'\nexport const x = `${!y} ${a[n]} $(echo)`;\nEOF",
+      outcome: 'allow',
+    },
+    {
+      name: 'node reading a quoted heredoc',
+      command: "node - <<'EOF'\nconsole.log(`$(x)`)\nEOF",
+      outcome: 'allow',
+    },
+    {
+      name: 'a quoted heredoc read by bash stays a script',
+      command: "bash <<'EOF'\npnpm add x\nEOF",
+      outcome: 'card',
+    },
+    {
+      name: 'a numeric test with [ and a variable',
+      command: '[ "$#" -eq 0 ] && ls',
+      outcome: 'allow',
+    },
+    { name: 'a numeric test with [[ and $#', command: '[[ $# -eq 0 ]] && ls', outcome: 'allow' },
+    { name: 'read from a file named by a variable', command: 'read -r x < "$f"', outcome: 'allow' },
+    {
+      name: 'read from a here-string of a variable',
+      command: 'IFS=: read -r a b <<< "$PATH"',
+      outcome: 'allow',
+    },
     // A structure the parser cannot read.
     { name: 'an unclosed double quote', command: 'echo "unclosed', outcome: 'card' },
     { name: 'an unclosed single quote', command: "echo 'unclosed", outcome: 'card' },

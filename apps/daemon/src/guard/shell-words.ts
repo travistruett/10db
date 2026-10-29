@@ -23,6 +23,11 @@ export interface ShellSegment {
    */
   readonly hereDocuments: readonly string[];
   /**
+   * Whether each here-document's delimiter was quoted, so the shell expands nothing in its body.
+   * Parallel to `hereDocuments`.
+   */
+  readonly quotedHereDocuments: readonly boolean[];
+  /**
    * The words are the ones the shell passes. False when an ANSI-C escape the scanner does not
    * decode keeps its `$'…'` text, or a clobber redirection hides the command.
    */
@@ -64,21 +69,26 @@ interface HereDocument {
   readonly delimiter: string;
   /** `<<-`: tabs before the closing line are ignored. */
   readonly tabs: boolean;
+  /** Whether the delimiter was quoted or escaped. */
+  readonly quoted: boolean;
   /** The here-document bodies of the segment that reads it. */
   readonly into: string[];
+  /** One flag per body in `into`: whether its delimiter was quoted. */
+  readonly quotedInto: boolean[];
 }
 
 /** The delimiter of a here-document whose `<<` ends just before `at`, with quotes and escapes removed. */
 function hereDocumentDelimiter(
   command: string,
   at: number,
-): { delimiter: string; tabs: boolean } | null {
+): { delimiter: string; tabs: boolean; quoted: boolean } | null {
   let i = at;
   const tabs = command.charAt(i) === '-';
   if (tabs) i += 1;
   while (command.charAt(i) === ' ' || command.charAt(i) === '\t') i += 1;
   let delimiter = '';
   let quote: string | null = null;
+  let quoted = false;
   for (; i < command.length; i += 1) {
     const ch = command.charAt(i);
     if (quote !== null) {
@@ -86,7 +96,9 @@ function hereDocumentDelimiter(
       else delimiter += ch;
     } else if (ch === "'" || ch === '"') {
       quote = ch;
+      quoted = true;
     } else if (ch === '\\') {
+      quoted = true;
       delimiter += command.charAt(i + 1);
       i += 1;
     } else if (/[\s;&|<>()]/.test(ch)) {
@@ -95,7 +107,7 @@ function hereDocumentDelimiter(
       delimiter += ch;
     }
   }
-  return delimiter === '' ? null : { delimiter, tabs };
+  return delimiter === '' ? null : { delimiter, tabs, quoted };
 }
 
 /**
@@ -121,6 +133,7 @@ function readHereDocuments(command: string, at: number, pending: readonly HereDo
     }
     if (closing === -1) return resume;
     doc.into.push(command.slice(resume, line));
+    doc.quotedInto.push(doc.quoted);
     resume = closing + 1;
   }
   return resume;
@@ -172,6 +185,7 @@ function scan(command: string, from: number, substitution: boolean): Scan {
   let words: string[] = [];
   let nested: string[] = [];
   let hereDocuments: string[] = [];
+  let quotedHereDocuments: boolean[] = [];
   let quote: "'" | '"' | null = null;
   // The previous character, when it was neither quoted nor escaped.
   let lastPlain = '';
@@ -255,6 +269,7 @@ function scan(command: string, from: number, substitution: boolean): Scan {
         subshells,
         nested,
         hereDocuments,
+        quotedHereDocuments,
         wordsCertain,
         bracesCertain,
         outputForwarded: separator === '|' || processSubstitution,
@@ -270,6 +285,7 @@ function scan(command: string, from: number, substitution: boolean): Scan {
     words = [];
     nested = [];
     hereDocuments = [];
+    quotedHereDocuments = [];
     wordsCertain = true;
     bracesCertain = true;
     processSubstitution = false;
@@ -406,7 +422,7 @@ function scan(command: string, from: number, substitution: boolean): Scan {
       before !== '<'
     ) {
       const doc = hereDocumentDelimiter(command, i + 2);
-      if (doc) pending.push({ ...doc, into: hereDocuments });
+      if (doc) pending.push({ ...doc, into: hereDocuments, quotedInto: quotedHereDocuments });
       append('<<');
       i += 1;
       continue;

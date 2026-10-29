@@ -110,6 +110,24 @@ interface Ask {
   readonly realPaths?: readonly string[];
 }
 
+/**
+ * A command nested deeply enough to overflow the stack in a shell scanner is one nothing can
+ * read, so a person is asked. The name is checked because the error may come from another realm.
+ */
+function isTooDeep(cause: unknown): boolean {
+  return cause instanceof Error && cause.name === 'RangeError';
+}
+
+/** The result of `read`, or `fallback` when the command is too deeply nested to scan. */
+function unlessTooDeep<T>(read: () => T, fallback: T): T {
+  try {
+    return read();
+  } catch (cause) {
+    if (isTooDeep(cause)) return fallback;
+    throw cause;
+  }
+}
+
 function summarize(req: ToolRequest): string {
   const command = req.input['command'];
   if (req.toolName === 'Bash' && typeof command === 'string') return command;
@@ -164,13 +182,16 @@ export function createPermissionBroker(
     const rules = listPermissionRules(deps.state.db, ctx.projectId, ctx.workstreamId);
     const paths = ask?.realPaths === undefined ? undefined : { realPaths: ask.realPaths };
     // A call the classifier handed to a person is answered by a person, never by a stored grant.
-    if (!req.escalated && matchPermissionRule(req, rules, paths)) return { behavior: 'allow' };
+    if (!req.escalated && unlessTooDeep(() => matchPermissionRule(req, rules, paths), undefined)) {
+      return { behavior: 'allow' };
+    }
     const summary = ask?.summary ?? summarize(req);
     if (!req.escalated && allowOnce?.toolName === req.toolName && allowOnce.summary === summary) {
       allowOnce = null;
       return { behavior: 'allow' };
     }
-    const storable = storableRule(req.toolName, summary) !== undefined;
+    const storable =
+      unlessTooDeep(() => storableRule(req.toolName, summary), undefined) !== undefined;
     const { item, answer } = deps.inbox.ask({
       projectId: ctx.projectId,
       workstreamId: ctx.workstreamId,
@@ -263,10 +284,16 @@ export function createPermissionBroker(
   ): ToolDecision | Ask {
     const command = req.input['command'];
     if (typeof command !== 'string') return { summary: summarize(req) };
-    const hit = hazardHit(command, sandbox.hazards);
-    if (hit === null && !req.escalated && firstUnread(command, sandbox.hazards) === null) {
-      return { behavior: 'allow' };
+    let hit: ReturnType<typeof hazardHit>;
+    let unread: ReturnType<typeof firstUnread>;
+    try {
+      hit = hazardHit(command, sandbox.hazards);
+      unread = firstUnread(command, sandbox.hazards);
+    } catch (cause) {
+      if (isTooDeep(cause)) return { summary: command };
+      throw cause;
     }
+    if (hit === null && !req.escalated && unread === null) return { behavior: 'allow' };
     return hit?.name === 'deps' && hit.words[0] === 'pnpm'
       ? { summary: command, body: `${command}\n\n${PNPM_CARD_BODY}` }
       : { summary: command };
