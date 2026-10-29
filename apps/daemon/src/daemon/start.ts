@@ -162,7 +162,7 @@ export interface DaemonOptions {
   /** The harness plugin folder the default personas are read from. */
   readonly harnessDir?: string;
   readonly allowedOrigins?: readonly string[];
-  /** One more browser origin to accept beside `allowedOrigins` or the built-in ones (dev and Playwright). */
+  /** The one browser origin to accept beside `allowedOrigins` or the webview's (`TENDB_DEV_UI_ORIGIN`). */
   readonly devUiOrigin?: string;
   /** A fixed UI token (dev and Playwright); otherwise a random one per start. */
   readonly uiToken?: string;
@@ -188,11 +188,8 @@ export interface RunningDaemon {
   stop(): Promise<void>;
 }
 
-const UI_ORIGINS = [
-  'http://localhost:1420',
-  'tauri://localhost',
-  'http://tauri.localhost',
-] as const;
+/** The Tauri webview's origins. A browser origin, such as a Vite dev UI, is opted in by `devUiOrigin`. */
+const UI_ORIGINS = ['tauri://localhost', 'http://tauri.localhost'] as const;
 /** Written by stop() after every runner has stopped; its absence at start means the last run crashed. */
 const CLEAN_SHUTDOWN_KEY = 'daemon.clean_shutdown';
 

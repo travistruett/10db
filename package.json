@@ -19,6 +19,7 @@
     "drift": "pnpm -r --if-present run drift",
     "knip": "knip",
     "dev": "bash scripts/dev.sh",
+    "dev:factory": "pnpm --filter @10db/desktop dev:factory",
     "gate": "bash scripts/gate.sh",
     "live-acceptance": "bash scripts/live-acceptance.sh"
   },

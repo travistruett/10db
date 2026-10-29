@@ -18,11 +18,12 @@ const DaemonEnv = z.object({
   TENDB_FAKE_SCRIPTS: z.string().min(1).optional(),
   // Development and Playwright only: a fixed UI bearer token instead of a random one per start.
   TENDB_DEV_UI_TOKEN: z.string().min(32).optional(),
-  // Development and Playwright only: one more browser origin the API accepts, for a Vite server on a
-  // port other than the Tauri dev port. Loopback http origins only, on a port from 1 to 65535.
+  // The one browser origin the API accepts beside the Tauri webview's, opted in by hand: a Vite dev UI,
+  // over a throwaway daemon or the installed app's. Exactly `http://<loopback host>:<port>`, the form a
+  // browser sends in `Origin`: localhost, 127.0.0.1 or [::1], a port from 1 to 65535, nothing after it.
   TENDB_DEV_UI_ORIGIN: z
     .string()
-    .regex(/^http:\/\/(localhost|127\.0\.0\.1):[1-9]\d{0,4}$/)
+    .regex(/^http:\/\/(localhost|127\.0\.0\.1|\[::1\]):[1-9]\d{0,4}$/)
     .refine((origin) => Number(origin.slice(origin.lastIndexOf(':') + 1)) <= 65535)
     .optional(),
   // Absolute path to the claude binary; otherwise it is found on the login shell's PATH.

@@ -44,6 +44,9 @@ describe('loadEnv', () => {
   it.each([
     ['localhost', 'http://localhost:51234'],
     ['the IPv4 loopback', 'http://127.0.0.1:51234'],
+    ['the IPv6 loopback', 'http://[::1]:51234'],
+    ['the Vite port', 'http://localhost:1420'],
+    ['the lowest port', 'http://localhost:1'],
     ['the highest port', 'http://localhost:65535'],
   ])('accepts a dev UI origin on %s', (_name, origin) => {
     expect(loadEnv({ TENDB_DEV_UI_ORIGIN: origin }).TENDB_DEV_UI_ORIGIN).toBe(origin);
@@ -51,13 +54,29 @@ describe('loadEnv', () => {
 
   it.each([
     ['a remote host', 'http://example.com:1420'],
+    ['a host that starts with localhost', 'http://localhost.example.com:1420'],
+    ['another IPv4 loopback address', 'http://127.0.0.2:1420'],
+    ['the unspecified address', 'http://0.0.0.0:1420'],
+    ['another IPv6 address', 'http://[::2]:1420'],
+    ['an unbracketed IPv6 address', 'http://::1:1420'],
+    ['an upper-case host', 'http://LOCALHOST:1420'],
     ['https', 'https://localhost:1420'],
+    ['a scheme other than http', 'tauri://localhost'],
     ['a path', 'http://localhost:1420/app'],
+    ['a trailing slash', 'http://localhost:1420/'],
+    ['a query', 'http://localhost:1420?x=1'],
+    ['a fragment', 'http://localhost:1420#x'],
+    ['credentials', 'http://user@localhost:1420'],
+    ['two origins', 'http://localhost:1420,http://localhost:1421'],
+    ['surrounding space', ' http://localhost:1420'],
     ['no port', 'http://localhost'],
     ['port 0', 'http://localhost:0'],
+    ['a port with a leading zero', 'http://localhost:01420'],
     ['a port above 65535', 'http://localhost:99999'],
-  ])('rejects a dev UI origin with %s', (_name, origin) => {
+  ])('rejects a dev UI origin with %s, naming the variable but not the value', (_name, origin) => {
+    expect(() => loadEnv({ TENDB_DEV_UI_ORIGIN: origin })).toThrow(EnvError);
     expect(() => loadEnv({ TENDB_DEV_UI_ORIGIN: origin })).toThrow('TENDB_DEV_UI_ORIGIN');
+    expect(() => loadEnv({ TENDB_DEV_UI_ORIGIN: origin })).not.toThrow(origin);
   });
 
   it.each([

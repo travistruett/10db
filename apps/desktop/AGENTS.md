@@ -42,6 +42,12 @@ The UI never touches the database; it talks to the daemon over loopback HTTP and
   `pnpm dev` (its own `.dev/data`) with `dev:shell` or http://localhost:1420 is the preview: it renders the
   checkout with live reload and never runs tasks. While a task holds the checkout (Your folder / shared mode),
   don't hand-edit it; work in a worktree under `../10db-worktrees/`.
+- `pnpm dev:factory` (`scripts/factory-ui.ts`) runs Vite over the installed app's daemon instead: it reads that
+  daemon's `daemon.json` and `ui-token` from `~/Library/Application Support/10db`, checks over `/health` that it
+  answers the Vite origin over CORS, and passes `VITE_DAEMON_URL` and `VITE_DAEMON_TOKEN` to Vite. The daemon accepts
+  the page only when the builder opened 10db with `TENDB_DEV_UI_ORIGIN=http://localhost:1420`, which the supervisor
+  passes through (`decisions/2026-10-29-dev-ui-over-the-factory.md`). `scripts/*.test.ts` run in node, in their own
+  vitest project (`scripts/vitest.config.ts`).
 - `pnpm --filter @10db/desktop e2e` drives the Vite app in Playwright's WebKit, the WKWebView engine,
   against the real daemon on the fake adapter. It is not the Tauri window. `make live-acceptance` runs the daemon as a plain node process with the browser UI, so the Tauri window (sidecar, tray, close-to-tray, webview) has no scripted coverage and is checked by hand.
   `make setup` installs the browser. Each run picks free ports for its daemon and Vite server

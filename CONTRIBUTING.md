@@ -79,6 +79,28 @@ Follow these steps in order on a new computer. Each one says how to check it wor
     `pnpm dev` already runs, so stopping `pnpm dev` stops them for the window too. The first
     `dev:shell` compiles the Rust shell and takes a few minutes. The installed app runs 10db's
     tasks; the dev window only previews your checkout.
+
+    **Live UI over your real data.** To work on the UI against the installed app's projects and
+    Inbox, with hot reload:
+    1. Stop `pnpm dev` (both serve Vite on port 1420).
+    2. Opt the installed app in. Its daemon accepts no browser page until you do. Quit 10db from its
+       menu-bar icon (Quit stops running work), then reopen it with
+       `open -a 10db --env TENDB_DEV_UI_ORIGIN=http://localhost:1420`. The setting lasts until 10db
+       quits; reopen it normally to turn it off.
+    3. Run `pnpm dev:factory` and open http://localhost:1420. It starts no daemon: it reads the
+       port and token the app's daemon wrote to `~/Library/Application Support/10db` and stops with
+       the command from step 2 if that daemon refuses the page. The token changes every time 10db
+       starts, so after a restart run `pnpm dev:factory` again.
+    4. For the desktop window instead of a browser tab, leave `pnpm dev:factory` running and run
+       `TENDB_DATA_DIR="$HOME/Library/Application Support/10db" pnpm --filter @10db/desktop dev:shell`.
+       It reads the token again on every connect, so it follows a restart.
+
+    This UI acts on your real data: what you click starts, moves and removes real tasks. It talks
+    to the installed release's daemon, so it can't preview a UI change that needs a daemon change;
+    it shows a version mismatch when the two differ. Requests still need the daemon's token, and
+    the daemon accepts only `http://localhost`, `http://127.0.0.1` or `http://[::1]` with a port
+    (`docs/architecture/decisions/2026-10-29-dev-ui-over-the-factory.md`).
+
 12. **Optional tools.** [Claude Code](https://claude.com/claude-code) and the
     [Codex CLI](https://github.com/openai/codex) for AI-assisted work; both read the rules in
     `AGENTS.md`.
