@@ -4,6 +4,7 @@ export { comparablePath, existsAsEntry } from './path-entries';
 export { withDaemonGitConfig } from './daemon-config';
 export { createGit, WorktreeNotOursError, type Git } from './git';
 export { GitNetworkError, GitNetworkFailure, type NetworkCall } from './network';
+export { type RepoFacts, type RepoRefusal } from './inspect';
 export { GIT_REPO_ENV_VARS, withoutGitRepoEnv } from './repo-env';
 export { XCODE_SELECTORS } from './run';
 export { trustCard, worktreeRemovalCommand } from './trust-card';

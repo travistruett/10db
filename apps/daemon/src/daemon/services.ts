@@ -52,6 +52,8 @@ import type { ApiServices } from '../api';
 import type { BatchStarter, Shipper } from '../delivery';
 import { markGhRequired } from '../environment';
 import type { EventBus, StateStore } from '../events';
+import { inspectFolder } from '../folders';
+import type { Git } from '../git';
 import { requestMcpApproval, type InboxService } from '../inbox';
 import type { KeepAwake } from '../keep-awake';
 import type { Runner } from '../runner';
@@ -76,6 +78,10 @@ export function createServices(deps: {
   readonly moves: Pick<AccountMoves, 'move'>;
   /** Where worktrees are made; a project's checkout may not overlap it. */
   readonly worktreeRoot: string;
+  /** The daemon's git, for inspecting a folder before it is a project. */
+  readonly git: Git;
+  /** 10db's own places a project may not be: the data dir, the lane temp root, the worktree root. */
+  readonly protectedRoots: readonly string[];
   /** Records a new project's checkout as the daemon trusts it (lane sandbox spec D13). */
   readonly pinCheckout: (repoPath: string) => void;
 }): ApiServices {
@@ -199,6 +205,11 @@ export function createServices(deps: {
     deleteBoardColumn: (id, del) => deps.state.write((ctx) => deleteBoardColumn(ctx, id, del)),
     stepPlan: (taskId) => resolveStepPlan(db, taskId),
     proposeCandidates: (projectId, size) => proposeCandidates(db, projectId, size),
+    inspectFolder: (path) =>
+      inspectFolder(
+        { git: deps.git, projects: listProjects(db), protectedRoots: deps.protectedRoots },
+        path,
+      ),
     reviewProjectMcp(projectId) {
       const project = getProject(db, projectId);
       let repo: RepoMcp;

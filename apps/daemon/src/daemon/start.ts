@@ -647,6 +647,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       shipper,
       accounts: accountService,
       worktreeRoot,
+      git,
+      protectedRoots: [
+        opts.dataDir,
+        ...(sandboxTempRoot === null ? [] : [sandboxTempRoot]),
+        worktreeRoot,
+      ],
       pinCheckout: (repoPath) => {
         // A checkout git can't read yet is recorded at the first git call that succeeds there.
         git.gitDirs(repoPath).catch(() => undefined);

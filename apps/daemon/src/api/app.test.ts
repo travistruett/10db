@@ -49,6 +49,7 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
     setKeepAwake: none,
     eventsHead: () => 0,
     reviewProjectMcp: none,
+    inspectFolder: none,
     listPersonas: track('listPersonas'),
     createPersona: track('createPersona'),
     patchPersona: track('patchPersona'),
@@ -810,5 +811,40 @@ describe('candidate routes', () => {
     const res = await app().request(`/projects/${projectId}/candidates${query}`, auth);
     expect(res.status).toBe(400);
     expect(reached).toEqual([]);
+  });
+});
+
+describe('folder inspection route', () => {
+  it('POST /folders/inspect refuses a relative path with 400', async () => {
+    const res = await app().request('/folders/inspect', {
+      method: 'POST',
+      ...json,
+      body: JSON.stringify({ path: 'relative/dir' }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('POST /folders/inspect answers a refusal as 200 with ok false', async () => {
+    const refusal = {
+      ok: false,
+      reason: 'not_found',
+      message: 'Nothing is at this path.',
+    } as const;
+    const seen: string[] = [];
+    const res = await app(
+      stubServices({
+        inspectFolder: (path) => {
+          seen.push(path);
+          return Promise.resolve(refusal);
+        },
+      }),
+    ).request('/folders/inspect', {
+      method: 'POST',
+      ...json,
+      body: JSON.stringify({ path: '/nowhere' }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual(refusal);
+    expect(seen).toEqual(['/nowhere']);
   });
 });

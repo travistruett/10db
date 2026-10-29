@@ -14,6 +14,7 @@ import {
   FlowId,
   FlowInput,
   FlowPatch,
+  FolderInspectInput,
   HealthResponse,
   InboxAnswer,
   InboxItemId,
@@ -157,6 +158,11 @@ export function createApp(deps: ApiDeps) {
     )
     .post('/batches/:batchId/abandon', (c) =>
       c.json(deps.services.abandonBatch(BatchId.parse(c.req.param('batchId')))),
+    )
+    .post(
+      '/folders/inspect',
+      validator('json', (value): FolderInspectInput => FolderInspectInput.parse(value)),
+      async (c) => c.json(await deps.services.inspectFolder(c.req.valid('json').path)),
     )
     .get('/flows', (c) => c.json(deps.services.listFlows()))
     .patch(

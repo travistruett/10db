@@ -23,6 +23,7 @@ import type {
   FlowId,
   FlowInput,
   FlowPatch,
+  FolderInspectResult,
   InboxAnswer,
   InboxItemDto,
   InboxItemId,
@@ -97,6 +98,8 @@ export interface ApiServices {
   eventsHead(): number;
   /** Each server in the project's `.mcp.json` and its verdict; raises an approval card for each one with none. */
   reviewProjectMcp(projectId: ProjectId): McpServerStatusDto[];
+  /** What a new project is prefilled from for the folder at `path`, or why it can't be one. */
+  inspectFolder(path: string): Promise<FolderInspectResult>;
   listPersonas(): PersonaDto[];
   createPersona(input: PersonaInput): PersonaDto;
   patchPersona(id: PersonaId, patch: PersonaPatch): PersonaDto;

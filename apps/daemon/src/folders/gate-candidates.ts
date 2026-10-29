@@ -1,12 +1,7 @@
+import { GateSource } from '@10db/contracts';
 import { z } from 'zod';
 
-export const GateSource = {
-  Makefile: 'makefile',
-  PackageJson: 'package_json',
-  Cargo: 'cargo',
-  Go: 'go',
-} as const;
-export type GateSource = (typeof GateSource)[keyof typeof GateSource];
+export { GateSource };
 
 /** What a folder holds that names a gate command, already read from disk. */
 export interface FolderFiles {

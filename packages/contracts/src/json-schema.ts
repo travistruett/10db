@@ -34,6 +34,7 @@ import {
 } from './entities';
 import { DaemonEvent } from './events';
 import { FlowDto, FlowInput, FlowPatch } from './flows';
+import { FolderInspectInput, FolderInspection, FolderInspectResult } from './folders';
 import { HandoffInput } from './handoff';
 import { HealthResponse } from './health';
 import { McpToolInputs, McpToolName, McpToolOutputs } from './mcp-tools';
@@ -107,6 +108,9 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'flow-dto': FlowDto,
   'flow-input': FlowInput,
   'flow-patch': FlowPatch,
+  'folder-inspect-input': FolderInspectInput,
+  'folder-inspection': FolderInspection,
+  'folder-inspect-result': FolderInspectResult,
   'model-profile-dto': ModelProfileDto,
   'model-profile-patch': ModelProfilePatch,
   'picker-proposal-dto': PickerProposalDto,
