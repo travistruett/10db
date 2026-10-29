@@ -34,6 +34,7 @@ import {
 import type { Clock } from '../clock';
 import { GitNetworkError, GitNetworkFailure } from '../git';
 import type { GateResult, GateRunner } from '../verify';
+import { gateNote, type BaseUpdate, type BaseUpdates } from './base-update';
 import { shipCards, wrongBranchCard, type Card, type ShipFailure } from './cards';
 import { allCheckouts, projectAtCheckout } from './checkout';
 import { ghCall, pushCall, raise, type DeliveryContext, type DeliveryLimits } from './context';
@@ -46,6 +47,8 @@ import { ensureWorktreeWhole, reopenWorktreeBatch } from './worktree-repair';
 
 export interface ShipperDeps extends DeliveryContext {
   readonly gate: GateRunner;
+  /** The daemon's one set of base updates, shared with the runner, so a batch's gates run in turn. */
+  readonly baseUpdates: BaseUpdates;
   readonly clock: Clock;
   readonly dataDir: string;
   /** The gate runs in the session environment, as a task's gate does. */
@@ -72,8 +75,9 @@ function members(db: DbReader, batchId: BatchId): WorkstreamDto[] {
 }
 
 /**
- * Why a shipping step threw. The push is the only git network call in shipping: a rejected or
- * timed-out push has its own card, and any other git or gh failure is `network`.
+ * Why a shipping step threw. The push is the only git network call in shipping that can fail it (the
+ * fetch before the gate only leaves the base out): a rejected or timed-out push has its own card, and
+ * any other git or gh failure is `network`.
  */
 function stepFailure(
   batch: BatchDto,
@@ -136,11 +140,15 @@ export function createShipper(deps: ShipperDeps): Shipper {
     });
   }
 
-  /** Runs the project gate on the batch branch, recording its process group for recovery. */
+  /**
+   * Runs the project gate on the batch branch, recording its process group for recovery.
+   * `beforeStart` runs once the gate holds its slot; a false answer stops it as an abort would.
+   */
   async function runGate(
     batch: BatchDto,
     project: ProjectDto,
     signal: AbortSignal,
+    beforeStart: () => Promise<boolean>,
   ): Promise<GateResult | null> {
     const gateCommand = project.gateCommand;
     // The caller skips the gate step for a project without a gate.
@@ -163,6 +171,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
       rules: listPermissionRules(deps.state.db, project.id, null),
       checkouts: allCheckouts(deps.state.db),
       signal,
+      beforeStart,
       onWaiting: (ahead) => {
         deps.logger.info(
           { batchId: batch.id, ahead },
@@ -378,18 +387,29 @@ export function createShipper(deps: ShipperDeps): Shipper {
         if (worktreePath !== null) await retire(batchId);
         return;
       }
-      // 2. The gate, on the branch as it will be pushed; a project with none was checked by the
-      // builder, task by task, so this step is skipped.
+      // 2. The gate, on the branch as it will be pushed: a worktree batch's with its base as origin
+      // has it now merged in, so it tests what the pull request would merge. A project with no gate
+      // was checked by the builder, task by task, as it was, so neither runs.
       if (project.gateCommand !== null) {
         step = 'the gate';
-        const gate = await runGate(batch, projectAtCheckout(project, checkout), signal);
+        // Once the gate holds its slot and no other gate of the batch runs, so no other gate's
+        // merge changes the tree under it.
+        const before: { update: BaseUpdate | null } = { update: null };
+        const gate = await deps.baseUpdates.gate(batchId, signal, () =>
+          runGate(batch, projectAtCheckout(project, checkout), signal, async () => {
+            const update = await deps.baseUpdates.beforeGate(batchId, signal);
+            before.update = update;
+            return update.kind !== 'aborted';
+          }),
+        );
         if (gate === null) return;
+        const update = before.update ?? { kind: 'up_to_date', note: null };
         if (gate.timedOut) {
           fail(batch, shipCards.gateTimedOut(batch, deps.limits.gateTimeoutMs, gate.logPath));
           return;
         }
         if (gate.exitCode !== 0) {
-          fail(batch, shipCards.gateFailed(batch, gate));
+          fail(batch, shipCards.gateFailed(batch, gate, gateNote(update)));
           return;
         }
       }
@@ -400,9 +420,11 @@ export function createShipper(deps: ShipperDeps): Shipper {
       step = 'gh pr view';
       const existing = await deps.gh.prView({ repo, ref: branch }, ghCall(deps, signal));
       step = 'gh pr create';
+      // The base the branch holds now: a merge before the gate moved it.
+      const base = getBatch(db, batchId).baseSha ?? baseSha;
       const prUrl =
         existing?.url ??
-        (await createPr(batch, project, { repo, branch, baseSha, checkout }, signal));
+        (await createPr(batch, project, { repo, branch, baseSha: base, checkout }, signal));
       // 5. Record it.
       deps.state.write((w) =>
         transitionBatch(w, batchId, {

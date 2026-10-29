@@ -5,6 +5,7 @@ import {
   mkdirSync,
   readFileSync,
   realpathSync,
+  rmSync,
   writeFileSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -33,6 +34,7 @@ import {
 import { readDefaultPersonas } from '@10db/harness';
 import { ManualClock } from '../src/clock';
 import {
+  createBaseUpdates,
   createBatchStarter,
   createDeliveryJobs,
   createShipper,
@@ -95,6 +97,10 @@ function fakePnpm(root: string): FakePnpm {
       writeFileSync(verdict, `${output}\n`);
       writeFileSync(`${verdict}.code`, `${String(exitCode)}\n`);
     },
+    succeed() {
+      rmSync(verdict, { force: true });
+      rmSync(`${verdict}.code`, { force: true });
+    },
   };
 }
 
@@ -125,6 +131,8 @@ export interface FakePnpm {
   calls(): string[];
   /** Makes every later call print `output` and exit with `exitCode`. */
   failWith(exitCode: number, output: string): void;
+  /** Makes every later call succeed again. */
+  succeed(): void;
 }
 
 export interface DeliveryHarness {
@@ -256,6 +264,7 @@ export function createDeliveryHarness(
   const shipper = createShipper({
     ...ctx,
     gate: createGateRunner({ sandbox: null, logger: silentLogger }),
+    baseUpdates: createBaseUpdates(ctx),
     clock: new ManualClock(),
     dataDir: data.path,
     sessionEnv: () => ({ PATH: '/usr/bin:/bin' }),

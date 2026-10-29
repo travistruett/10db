@@ -115,7 +115,13 @@ export async function createTestEngine(
   runnerOverrides: Partial<
     Pick<
       RunnerOptions,
-      'afterSession' | 'logger' | 'launcher' | 'laneSandbox' | 'gate' | 'onLaneFreed'
+      | 'afterSession'
+      | 'logger'
+      | 'launcher'
+      | 'laneSandbox'
+      | 'gate'
+      | 'onLaneFreed'
+      | 'baseUpdates'
     >
   > = {},
   setup: { readonly account?: AccountInput; readonly secret?: string } = {},
@@ -230,6 +236,11 @@ export async function createTestEngine(
     inbox,
     git,
     gate: createGateRunner({ sandbox: null, logger: silentLogger }),
+    // The engine's repository has no origin to fetch a base from: every branch is up to date.
+    baseUpdates: {
+      beforeGate: () => Promise.resolve({ kind: 'up_to_date', note: null }),
+      gate: (_batchId, _signal, run) => run(),
+    },
     clock,
     logger: silentLogger,
     dataDir: data.path,

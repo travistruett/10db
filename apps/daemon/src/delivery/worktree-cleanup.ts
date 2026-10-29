@@ -1,5 +1,11 @@
 import { BatchState, type BatchId } from '@10db/contracts';
-import { clearWorktreePath, deleteAppSetting, getBatch, getProject } from '@10db/db';
+import {
+  clearWorktreePath,
+  deleteAppSetting,
+  getBatch,
+  getProject,
+  listWorkstreams,
+} from '@10db/db';
 import {
   existsAsEntry,
   GitTrustError,
@@ -7,8 +13,11 @@ import {
   worktreePinKey,
   type Git,
 } from '../git';
-import { worktreeCards } from './cards';
-import { raise, type DeliveryContext } from './context';
+import { looseWork } from './build-output';
+import { baseConflictKey, baseKeptKey, keptWorktreeKey, worktreeCards } from './cards';
+import { raise, withdraw, type DeliveryContext } from './context';
+import { installedLockfileKey } from './installed-lockfile';
+import { startRef } from './start-refs';
 import { removeIfEmptyDirectory } from './worktree-leftover';
 import { withWorktreeLock } from './worktree-lock';
 
@@ -46,9 +55,10 @@ export type Retirement =
  * worktree, delete a CLOSED batch's branch while it is still at its base, then drop the pin and
  * clear `worktree_path` in one transaction. An ABANDONED batch's worktree is removed only when it
  * is clean, and any finished one only when it holds no git-ignored file outside the seeded
- * directories, such as a hand-made `.env`; both are checked here so no caller can remove them, and
- * a kept worktree raises a card naming what it holds. The clear is last, so recovery re-runs every
- * earlier step after a crash. Safe to repeat; a no-op once cleared. Holds the batch's worktree lock.
+ * directories other than build output, such as a hand-made `.env`; both are checked here so no
+ * caller can remove them, and a kept worktree raises a card naming what it holds. Removal
+ * withdraws those cards. The clear is last, so recovery re-runs every earlier step after a crash.
+ * Safe to repeat; a no-op once cleared. Holds the batch's worktree lock.
  */
 export async function retireWorktree(ctx: DeliveryContext, batchId: BatchId): Promise<Retirement> {
   return withWorktreeLock(batchId, () => retire(ctx, batchId));
@@ -83,9 +93,10 @@ async function retire(ctx: DeliveryContext, batchId: BatchId): Promise<Retiremen
     raise(ctx.inbox, project.id, worktreeCards.keptIgnored(batch, main, path, null));
     return { kind: 'kept', reason: 'unreadable', paths: [] };
   }
-  if (ignored.length > 0) {
-    raise(ctx.inbox, project.id, worktreeCards.keptIgnored(batch, main, path, ignored));
-    return { kind: 'kept', reason: 'ignored', paths: ignored };
+  const loose = looseWork(ignored);
+  if (loose.length > 0) {
+    raise(ctx.inbox, project.id, worktreeCards.keptIgnored(batch, main, path, loose));
+    return { kind: 'kept', reason: 'ignored', paths: loose };
   }
   try {
     await ctx.git.removeWorktree(main, path);
@@ -97,10 +108,31 @@ async function retire(ctx: DeliveryContext, batchId: BatchId): Promise<Retiremen
   }
   if (batch.state === BatchState.Closed && batch.branch !== null && batch.baseSha !== null)
     await ctx.git.deleteBranchIfAt(main, batch.branch, batch.baseSha);
+  // The tasks' starts on the merged base mean nothing once their worktree is gone; one git won't
+  // delete is left for the startup sweep.
+  for (const ws of listWorkstreams(ctx.state.db, { batchId }))
+    await ctx.git.deleteKeptRef(main, startRef(ctx.worktreeRoot, ws.id)).catch((error: unknown) => {
+      ctx.logger.warn(
+        {
+          batchId,
+          workstreamId: ws.id,
+          err: error instanceof Error ? error.message : String(error),
+        },
+        'task start not dropped',
+      );
+    });
   ctx.state.write((w) => {
     deleteAppSetting(w, worktreePinKey(batchId));
+    deleteAppSetting(w, installedLockfileKey(batchId));
     clearWorktreePath(w, batchId);
   });
+  // The base cards name the worktree too; a pull request shows a conflict for itself.
+  withdraw(ctx.state, ctx.inbox, project.id, [
+    keptWorktreeKey.batchChanges(batchId),
+    keptWorktreeKey.batchIgnored(batchId),
+    baseConflictKey(batchId),
+    baseKeptKey(batchId),
+  ]);
   ctx.logger.info({ batchId, path, state: batch.state }, 'batch worktree removed');
   return { kind: 'retired' };
 }
@@ -110,10 +142,11 @@ const FINDER_FILE = '.DS_Store';
 
 /**
  * The git-ignored files of the 10db worktree of `main` at `path` that lie in no directory named in
- * the project's seed, which 10db copied in, other than Finder's: what a builder or a lane put there
- * and may still need. None when nothing is at `path`, or when git doesn't list it as 10db's (removal
- * then refuses it too). Null when git lists it as 10db's but 10db won't read its git dir, which
- * counts as holding files: removal would still take them.
+ * the project's seed, which 10db copied in, other than Finder's: what its removal command deletes
+ * besides wholly ignored directories. `looseWork` drops the build output among them. None when
+ * nothing is at `path`, or when git doesn't list it as 10db's (removal then refuses it too). Null
+ * when git lists it as 10db's but 10db won't read its git dir, which counts as holding files:
+ * removal would still take them.
  */
 export async function unseededIgnoredFiles(
   git: Git,

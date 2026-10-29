@@ -59,7 +59,7 @@
 - [x] Worktree mode: a worktree whose lockfile is newer than the main checkout's install installs without the builder. Built for pnpm projects: `pnpm install --frozen-lockfile --ignore-scripts --ignore-pnpmfile` under the gate sandbox after the seed (`decisions/2026-10-28-worktree-dependency-install.md`). Not built: a setup command of the project's own, and an install inside a lane.
 - [ ] Worktree mode: seeding ignored files such as `.env`; `worktree_seed` names directories only.
 - [ ] Worktree mode: parallel ships behind a limit (one ship runs at a time per project now).
-- [ ] Worktree mode: rebasing or updating an unmerged pull request (a worktree is cut once and never refreshed).
+- [ ] Worktree mode: updating a pull request after it ships. Before each gate a worktree batch's branch takes its base as origin has it (`decisions/2026-10-29-gate-with-base.md`); once shipped, a pull request that falls behind or conflicts is the builder's.
 - [ ] Worktree mode: choose shared or worktree per task, decided when work is broken into tasks. The goal:
       frontend tasks on different screens run as parallel lanes in the shared checkout, where the builder watches
       them live in one dev window, and only a task that needs isolation (migrations, the lockfile, contracts, a long
@@ -72,6 +72,9 @@
       directories and the seed is kept with a card (`decisions/2026-10-28-worktree-keeps-ignored-files.md`).
 - [ ] Worktree mode: a hand-made file inside a directory the ignore rules match as a whole (such as
       `scratch/notes.md`) still goes when its worktree is removed.
+- [x] Worktree mode: a finished worktree was kept for the `tsconfig.tsbuildinfo` the gate's typecheck wrote.
+      Built: build output known by name doesn't keep a worktree
+      (`decisions/2026-10-29-worktree-build-output-not-loose-work.md`).
 - [x] Worktree mode: with `worktree.useRelativePaths=true` in the builder's git config (git 2.48+), every
       worktree cut failed. Built: the daemon's `git worktree add` passes the setting off.
 - [x] Worktree mode: a `WorktreeRootError` at start (a bad `TENDB_WORKTREE_ROOT`, or a checkout containing

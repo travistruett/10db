@@ -511,6 +511,39 @@ describe('network calls', () => {
     }
   });
 
+  it('runs one fetch of a checkout at a time, so two never race for the same ref', async () => {
+    local('remote', 'set-url', 'origin', HANGING_SSH_URL);
+    const dir = tempDir('fetch-order');
+    try {
+      const log = join(dir.path, 'transport.log');
+      const release = join(dir.path, 'release');
+      // A transport that records when it starts and ends, and holds the fetch until the test lets go.
+      const call = {
+        env: {
+          ...NETWORK_ENV,
+          GIT_SSH_VARIANT: 'simple',
+          GIT_SSH_COMMAND: `echo start >> '${log}'; while [ ! -e '${release}' ]; do sleep 0.05; done; echo end >> '${log}'; exit 1`,
+        },
+        timeoutMs: 10_000,
+      };
+      const entries = () =>
+        existsSync(log) ? readFileSync(log, 'utf8').split('\n').filter(Boolean) : [];
+      const starts = () => entries().filter((line) => line === 'start').length;
+      const both = Promise.allSettled([
+        git.fetch(remote.repo.path, 'main', call),
+        git.fetch(remote.repo.path, 'main', call),
+      ]);
+      await waitFor(() => starts() >= 1);
+      // A second fetch running beside the first starts its transport within this time.
+      await waitFor(() => starts() >= 2, 1_000).catch(() => undefined);
+      writeFileSync(release, '');
+      await both;
+      expect(entries()).toEqual(['start', 'end', 'start', 'end']);
+    } finally {
+      dir.cleanup();
+    }
+  });
+
   it('stops a fetch when its signal aborts', async () => {
     local('remote', 'set-url', 'origin', 'git@example.invalid:hang.git');
     const controller = new AbortController();
