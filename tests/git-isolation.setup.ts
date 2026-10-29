@@ -16,14 +16,10 @@ for (const name of Object.keys(process.env)) {
 
 // Nor may a test read or write the contributor's own config: their signing, hooksPath or identity
 // would reach every commit a test makes. An empty global file, rather than /dev/null, lets a test
-// that runs `git config --global` succeed without touching anything real. Git reads the contributor's
-// global ignore file (`~/.config/git/ignore`) whatever `GIT_CONFIG_GLOBAL` names, so the file names an
-// empty one instead: a path that machine's rules ignore would otherwise pass there and fail on CI.
+// that runs `git config --global` succeed without touching anything real.
 const configDir = mkdtempSync(join(tmpdir(), '10db-git-config-'));
 const globalConfig = join(configDir, 'gitconfig');
-const globalIgnore = join(configDir, 'ignore');
-writeFileSync(globalIgnore, '');
-writeFileSync(globalConfig, `[core]\n\texcludesFile = ${globalIgnore}\n`);
+writeFileSync(globalConfig, '');
 process.env['GIT_CONFIG_NOSYSTEM'] = '1';
 process.env['GIT_CONFIG_GLOBAL'] = globalConfig;
 

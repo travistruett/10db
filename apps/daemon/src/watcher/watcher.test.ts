@@ -406,7 +406,9 @@ describe('watcher', () => {
       },
       {
         name: 'is judged against the claims when git reports a file left in it',
-        ignore: '',
+        // Git reads the contributor's `~/.config/git/ignore`, where Claude Code adds this directory, whatever
+        // `GIT_CONFIG_GLOBAL` names; the repository's own rule outranks it.
+        ignore: `!${staging}/\n`,
         setup: () => {
           touch(staged);
         },
