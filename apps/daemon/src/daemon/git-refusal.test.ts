@@ -64,10 +64,26 @@ describe('a refusal of the daemon git', () => {
           kind: 'moved',
           pinned: `${real}/.git`,
           found: '/elsewhere/.git',
+          pin: candidate(`${real}/.git`),
           candidate: candidate('/elsewhere/.git'),
         }),
       title: () =>
         `10db won't run git in ${real}: its git dir is /elsewhere/.git, not ${real}/.git as 10db recorded`,
+      body: () => 'Trust the checkout as it is now',
+      retrust: true,
+    },
+    {
+      name: 'a git dir replaced at the same path',
+      error: () =>
+        new GitTrustError(real, {
+          kind: 'moved',
+          pinned: `${real}/.git`,
+          found: `${real}/.git`,
+          pin: candidate(`${real}/.git`, '9:100/9:100'),
+          candidate: candidate(`${real}/.git`, '9:200/9:200'),
+        }),
+      title: () =>
+        `10db won't run git in ${real}: ${real}/.git is at the same path but is a different repository now (inode 200, was 100)`,
       body: () => 'Trust the checkout as it is now',
       retrust: true,
     },
@@ -151,6 +167,7 @@ describe('a refusal of the daemon git', () => {
           kind: 'moved',
           pinned: `${real}/.git`,
           found: `${real}/.git`,
+          pin: candidate(`${real}/.git`, '0:0/0:0'),
           candidate: candidate(`${real}/.git`, id),
         }),
       );
@@ -163,6 +180,7 @@ describe('a refusal of the daemon git', () => {
         kind: 'moved',
         pinned: '/a',
         found: '/b',
+        pin: candidate('/a'),
         candidate: candidate('/b'),
       }),
     );

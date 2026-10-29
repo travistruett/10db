@@ -11,7 +11,12 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, normalize, posix, resolve, sep } from 'node:path';
 import { InvalidError } from '@10db/contracts';
 import { realPathOf, resolveInRepo } from '../guard';
-import { memoryPinStore, type CheckoutPin, type PinStore } from './checkout-pin';
+import {
+  memoryPinStore,
+  sameCheckoutIdentity,
+  type CheckoutPin,
+  type PinStore,
+} from './checkout-pin';
 import {
   checkoutIdentity,
   refusedCheckoutKeys,
@@ -624,11 +629,16 @@ export function createGit(opts: GitOptions = {}): Git {
 
   /** A refusal for a checkout that differs from `pin` in its git dirs or origin. */
   function mismatch(real: string, pin: CheckoutPin, now: CheckoutPin): GitTrustError {
-    if (now.id !== pin.id || now.gitDir !== pin.gitDir || now.commonDir !== pin.commonDir)
+    if (
+      !sameCheckoutIdentity(now.id, pin.id) ||
+      now.gitDir !== pin.gitDir ||
+      now.commonDir !== pin.commonDir
+    )
       return refusal(real, {
         kind: GitTrustFailure.Moved,
         pinned: pin.gitDir,
         found: now.gitDir,
+        pin,
         candidate: now,
       });
     const direction = now.fetchUrl === pin.fetchUrl ? 'push' : 'fetch';
@@ -666,7 +676,11 @@ export function createGit(opts: GitOptions = {}): Git {
         pushUrl: await pinnableUrl(observed(real), true),
       };
       pins.set(real, pin);
-    } else if (pin.id !== id || pin.gitDir !== dirs.gitDir || pin.commonDir !== dirs.commonDir) {
+    } else if (
+      !sameCheckoutIdentity(pin.id, id) ||
+      pin.gitDir !== dirs.gitDir ||
+      pin.commonDir !== dirs.commonDir
+    ) {
       throw mismatch(real, pin, await observe(real));
     }
     for (const name of ['alternates', 'http-alternates']) {

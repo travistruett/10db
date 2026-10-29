@@ -1,4 +1,4 @@
-import type { CheckoutPin } from './checkout-pin';
+import { identityInodes, type CheckoutPin } from './checkout-pin';
 
 export const GitTrustFailure = {
   /** A lane-writable config file sets a key the daemon's fetch or push does not accept. */
@@ -40,6 +40,8 @@ export type GitTrustDetail =
       readonly kind: typeof GitTrustFailure.Moved;
       readonly pinned: string;
       readonly found: string;
+      /** The checkout as 10db recorded it. */
+      readonly pin: CheckoutPin;
       /** The checkout as it was found, which the builder's Trust answer pins if it still holds. */
       readonly candidate: CheckoutPin;
     }
@@ -79,12 +81,23 @@ export type GitTrustDetail =
   | { readonly kind: typeof GitTrustFailure.Embedded; readonly path: string }
   | { readonly kind: typeof GitTrustFailure.Unpinned };
 
+/** Why a checkout reads as moved, naming what differs rather than a path that is the same twice. */
+function movedReason(detail: Extract<GitTrustDetail, { kind: 'moved' }>): string {
+  const { pin, candidate } = detail;
+  if (candidate.gitDir !== pin.gitDir)
+    return `its git dir is ${candidate.gitDir}, not ${pin.gitDir} as 10db recorded`;
+  if (candidate.commonDir !== pin.commonDir)
+    return `its common git dir is ${candidate.commonDir}, not ${pin.commonDir} as 10db recorded`;
+  const [now = '', was = ''] = [candidate.id, pin.id].map((id) => identityInodes(id));
+  return `${candidate.gitDir} is at the same path but is a different repository now (inode ${now.split('/')[0] ?? ''}, was ${was.split('/')[0] ?? ''})`;
+}
+
 function describe(repo: string, detail: GitTrustDetail): string {
   switch (detail.kind) {
     case GitTrustFailure.Config:
       return `10db won't fetch or push in ${repo}: its config sets ${detail.keys.map((k) => k.key).join(', ')}`;
     case GitTrustFailure.Moved:
-      return `10db won't run git in ${repo}: its git dir is ${detail.found}, not ${detail.pinned} as 10db recorded`;
+      return `10db won't run git in ${repo}: ${movedReason(detail)}`;
     case GitTrustFailure.Writable:
       return `10db won't trust ${repo}: its git dir ${detail.gitDir} lies where a lane can write`;
     case GitTrustFailure.Branch: {

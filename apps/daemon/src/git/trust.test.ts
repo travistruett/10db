@@ -928,6 +928,48 @@ describe('the checkout is the one pinned for it', () => {
     expect(await restarted.currentBranch(repo.path)).toBe('main');
   });
 
+  /** The pin with every device number swapped for another, as after the volume is remounted. */
+  function renumbered(id: string): string {
+    return id.replace(/(^|\/)\d+:/g, '$1987654321:');
+  }
+
+  it('keeps trusting the checkout after the volume gets a new device number', async () => {
+    const pins = memoryPinStore();
+    const onRefused = vi.fn();
+    await createGit({ pins }).head(repo.path);
+    const real = realpathSync(repo.path);
+    const pin = pins.get(real);
+    if (!pin) throw new Error('expected a pin');
+    expect(renumbered(pin.id)).not.toBe(pin.id);
+    pins.set(real, { ...pin, id: renumbered(pin.id) });
+    const restarted = createGit({ pins, onRefused });
+    await expect(restarted.currentBranch(repo.path)).resolves.toBe('main');
+    expect(onRefused).not.toHaveBeenCalled();
+  });
+
+  it('still refuses a replaced .git when the device number changed too', async () => {
+    const pins = memoryPinStore();
+    await createGit({ pins }).head(repo.path);
+    const real = realpathSync(repo.path);
+    const pin = pins.get(real);
+    if (!pin) throw new Error('expected a pin');
+    pins.set(real, { ...pin, id: renumbered(pin.id) });
+    replaceGitDir();
+    const { detail } = await refusal(createGit({ pins }).currentBranch(repo.path));
+    expect(detail.kind).toBe('moved');
+  });
+
+  it('says what differs when a replaced .git sits at the same path', async () => {
+    const git = createGit();
+    await git.head(repo.path);
+    replaceGitDir();
+    const error = await refusal(git.head(repo.path));
+    const dir = join(realpathSync(repo.path), '.git');
+    expect(error.message).not.toContain(`its git dir is ${dir}, not ${dir}`);
+    expect(error.message).toContain('at the same path but is a different repository now');
+    expect(error.message).toMatch(/inode \d+, was \d+/);
+  });
+
   it('re-trusts only the state the refusal found: a second swap before the answer is refused anew', async () => {
     const onRefused = vi.fn();
     const git = createGit({ onRefused });
