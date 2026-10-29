@@ -71,11 +71,14 @@ Follow these steps in order on a new computer. Each one says how to check it wor
     `GATE PASS`. With Rust installed, the first `make gate` compiles about 400 crates and takes
     several minutes; later runs are fast. `make check` is the fast version for what you changed.
 11. **Run it.** `pnpm dev` starts the daemon (http://127.0.0.1:4317) and the browser UI at
-    http://localhost:1420. For the desktop window (needs Rust), start the daemon alone with
-    `pnpm --filter @10db/daemon dev`, then run `pnpm tauri dev` from `apps/desktop` in a second
-    terminal. `pnpm tauri dev` starts its own copy of the UI on port 1420, so don't run
-    `pnpm dev` at the same time, and keep the daemon terminal open: stopping `pnpm dev` stops the
-    daemon too. The first `pnpm tauri dev` compiles the Rust shell and takes a few minutes.
+    http://localhost:1420, with state in `.dev/`. For the desktop window (needs Rust), leave
+    `pnpm dev` running, run `pnpm --filter @10db/desktop sidecar` once, then run
+    `pnpm --filter @10db/desktop dev:shell` in a second terminal. The window is "10db Dev"
+    (identifier `app.10db.desktop.dev`) and keeps its data under `.dev/data`, so it runs
+    beside an installed 10db without touching the release app's data. It uses the daemon and UI that
+    `pnpm dev` already runs, so stopping `pnpm dev` stops them for the window too. The first
+    `dev:shell` compiles the Rust shell and takes a few minutes. The installed app runs 10db's
+    tasks; the dev window only previews your checkout.
 12. **Optional tools.** [Claude Code](https://claude.com/claude-code) and the
     [Codex CLI](https://github.com/openai/codex) for AI-assisted work; both read the rules in
     `AGENTS.md`.

@@ -554,14 +554,25 @@ describe('the new-machine setup checklist', () => {
       'GATE PASS',
       'pnpm dev',
       'http://localhost:1420',
-      'pnpm --filter @10db/daemon dev',
-      'pnpm tauri dev',
+      'pnpm --filter @10db/desktop sidecar',
+      'pnpm --filter @10db/desktop dev:shell',
+      '10db Dev',
+      'app.10db.desktop.dev',
+      '.dev/data',
+      'beside an installed 10db',
       'ERR_PNPM_IGNORED_BUILDS',
       'allowBuilds',
     ];
     const positions = steps.map((step) => setup.indexOf(step));
     expect(steps.filter((_, i) => positions[i] === -1)).toEqual([]);
     expect(positions).toEqual([...positions].sort((a, b) => a - b));
+  });
+
+  it('runs the dev window through pnpm dev and dev:shell, as README.md and apps/desktop/AGENTS.md do', () => {
+    expect(setup).not.toContain('pnpm tauri dev');
+    for (const doc of ['README.md', 'apps/desktop/AGENTS.md']) {
+      expect(readRepoFile(doc)).toContain('pnpm --filter @10db/desktop dev:shell');
+    }
   });
 
   it('names only make targets and pnpm scripts that exist', () => {
