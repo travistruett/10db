@@ -133,6 +133,28 @@ describe('FirstRun', () => {
     expect(screen.queryByRole('heading', { name: 'Welcome to 10db' })).toBeNull();
   });
 
+  it('does not probe the login before the check step', async () => {
+    const served = serve();
+    renderApp('/');
+    await screen.findByRole('button', { name: 'Get Started' });
+    await waitFor(() => {
+      expect(served.systemRequests.length).toBeGreaterThan(0);
+    });
+    expect(served.identityRequests).toEqual([]);
+  });
+
+  it('shows a failed system check instead of waiting forever', async () => {
+    serve(
+      {},
+      http.get(daemonUrl('/system'), () =>
+        HttpResponse.json({ error: 'internal', message: 'The check failed.' }, { status: 500 }),
+      ),
+    );
+    renderApp('/');
+    await toSetup();
+    expect((await screen.findAllByText('The check failed.')).length).toBeGreaterThan(0);
+  });
+
   it('goes from Welcome to Check your setup with Get Started', async () => {
     serve();
     renderApp('/');
@@ -217,13 +239,14 @@ describe('FirstRun', () => {
     it.each([
       { name: 'without git', tools: [CLAUDE, { ...GIT, path: null, version: null }, GH] },
       { name: 'without Claude Code', tools: [{ ...CLAUDE, path: null, version: null }, GIT, GH] },
-    ])('is disabled $name', async ({ tools }) => {
-      serve({ tools });
+    ])('is disabled $name', async ({ name, tools }) => {
+      const served = serve({ tools });
       renderApp('/');
       await toSetup();
       await waitFor(() => {
         expect(screen.queryByText(/^Looking for/)).toBeNull();
       });
+      if (name === 'without Claude Code') expect(served.identityRequests).toEqual([]);
       expect(next('Continue').hasAttribute('disabled')).toBe(true);
     });
   });

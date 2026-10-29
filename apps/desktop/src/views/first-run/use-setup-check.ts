@@ -26,13 +26,14 @@ function find(tools: readonly ToolCheck[], name: ToolName): ToolCheck | undefine
 /**
  * What the setup check shows: the tools the daemon found and the login Claude Code reports. The login
  * probe starts Claude Code, so it runs once when `entered` first holds and again on each recheck, never
- * on a render. Nothing here changes the account: the preparer records its login on the first task.
+ * on a render. Nothing here changes the default account: the preparer records its login on the first task.
  */
 export function useSetupCheck(entered: boolean): SetupCheck {
   const system = useSystemCheck();
   const recheck = useRecheckSystem();
   const identity = useCheckAccountIdentity();
-  const account = (useAccounts().data ?? []).find((a) => a.isDefault && !a.archived) ?? null;
+  const accounts = useAccounts();
+  const account = (accounts.data ?? []).find((a) => a.isDefault && !a.archived) ?? null;
   const [round, setRound] = useState(0);
   const probed = useRef<string | null>(null);
 
@@ -53,17 +54,22 @@ export function useSetupCheck(entered: boolean): SetupCheck {
   }, [entered, accountId, claudeFound, round, probe]);
 
   const result = identity.data?.accountId === accountId ? identity.data : null;
-  const claude = claudeRow({
-    claude: claudeTool,
-    probing: identity.isPending,
-    identity: result,
-    error: identity.isError ? identity.error.message : null,
-  });
+  const failure =
+    system.error?.message ?? recheck.error?.message ?? accounts.error?.message ?? null;
+  const failed: SetupRow | null = failure === null ? null : { mark: 'bad', detail: failure };
+  const claude = failed
+    ? { ...failed, runsAs: null, canAddLogin: false }
+    : claudeRow({
+        claude: claudeTool,
+        probing: identity.isPending,
+        identity: result,
+        error: identity.isError ? identity.error.message : null,
+      });
 
   return {
     claude,
-    git: gitRow(gitTool),
-    gh: ghRow(ghTool),
+    git: failed ?? gitRow(gitTool),
+    gh: failed ?? ghRow(ghTool),
     canContinue: claudeFound && gitTool?.path != null,
     runsAs: claude.runsAs,
     recheckAgents: () => {

@@ -54,13 +54,14 @@ for (const scheme of ['dark', 'light'] as const) {
     }, scheme);
     await claudeIsInstalled(page);
     await page.goto('/');
+    await expect(page.locator('html')).toHaveAttribute('data-mantine-color-scheme', scheme);
 
     await expect(page.getByRole('heading', { name: 'Welcome to 10db' })).toBeVisible();
     await expectAccessible(page, `welcome, ${scheme}`);
 
     await page.getByRole('button', { name: 'Get Started' }).click();
     await expect(page.getByRole('heading', { name: 'Check your setup' })).toBeVisible();
-    await expect(page.getByText('Starting Claude Code to read the account…')).toBeHidden();
+    await expect(page.getByText(/^Tasks will run as /)).toBeVisible();
     await expectAccessible(page, `check your setup, ${scheme}`);
 
     await page.getByRole('button', { name: 'Continue' }).click();

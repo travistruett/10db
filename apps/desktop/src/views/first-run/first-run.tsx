@@ -93,9 +93,9 @@ function FooterNote({
   readonly runsAs: string | null;
 }) {
   return (
-    <Group gap="xs" wrap="nowrap" role="alert" style={{ minWidth: 0 }}>
+    <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
       {error ? (
-        <>
+        <Group gap="xs" wrap="nowrap" role="alert">
           <IconAlertTriangle
             size={20}
             stroke={1.5}
@@ -105,9 +105,9 @@ function FooterNote({
           <Text size="sm" c="red" lineClamp={2} title={error}>
             {error}
           </Text>
-        </>
+        </Group>
       ) : runsAs ? (
-        <Text size="sm" c="dimmed">
+        <Text size="sm" c="dimmed" role="status">
           Tasks will run as {runsAs}.
         </Text>
       ) : null}
