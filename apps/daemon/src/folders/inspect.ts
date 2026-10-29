@@ -168,10 +168,10 @@ export async function inspectFolder(
   const given = realOrResolved(path);
   if (deps.protectedRoots.some((p) => equalOrUnder(given, realOrResolved(p))))
     return refuse(FolderRefusalReason.ProtectedPath, PROTECTED_MESSAGE);
-  const insideProject = projectRefusal(given, deps.projects, false);
+  const insideProject = projectRefusal(given, deps.projects, true);
   if (insideProject) return insideProject;
 
-  const facts = await deps.git.inspect(path);
+  const facts = await deps.git.inspect(given);
   if ('refused' in facts) {
     const message = facts.refused === 'unreadable' ? facts.message : GIT_MESSAGES[facts.refused];
     return refuse(REASON_BY_GIT[facts.refused], message);

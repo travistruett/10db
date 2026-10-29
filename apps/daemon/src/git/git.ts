@@ -1319,7 +1319,9 @@ export function createGit(opts: GitOptions = {}): Git {
       } catch (error) {
         if (
           error instanceof GitError &&
-          /not a git repository \(or any of the parent directories\)/i.test(error.stderr)
+          /not a git repository \((?:or any of the parent directories|or any parent up to mount point)/i.test(
+            error.stderr,
+          )
         )
           return { refused: 'not_a_repository', message: firstLine(error.stderr) };
         return {

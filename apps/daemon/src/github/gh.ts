@@ -207,6 +207,12 @@ function failure(args: readonly string[], out: GhOutput): GhError {
   );
 }
 
+/** A login is one word of letters, digits, hyphens and underscores; gh prints `null` for none. */
+const GithubLogin = z
+  .string()
+  .regex(/^[A-Za-z0-9_-]{1,100}$/)
+  .refine((login) => login !== 'null');
+
 /** gh's JSON output is a boundary: parse it, and turn a surprise into a GhError. */
 function parseOutput<S extends z.ZodType>(
   schema: S,
@@ -255,9 +261,10 @@ export function createGh(exec: GhExec): Gh {
       )
         return null;
       if (out.exitCode !== 0) throw failure(args, out);
-      const login = out.stdout.trim();
-      if (login === '') throw new GhError(GhFailure.Failed, 'gh api user printed no login');
-      return login;
+      const login = GithubLogin.safeParse(out.stdout.trim());
+      if (!login.success)
+        throw new GhError(GhFailure.Failed, "gh api user printed a login 10db can't read");
+      return login.data;
     },
     async prView({ repo, ref }, call) {
       const args = ['pr', 'view', ref, '-R', repo, '--json', 'url,state'];

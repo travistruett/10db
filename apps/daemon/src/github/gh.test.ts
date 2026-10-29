@@ -64,6 +64,16 @@ describe('createGh', () => {
       expected: null,
     },
     {
+      name: 'no login in the answer',
+      answer: { exitCode: 0, stdout: 'null\n' },
+      kind: 'failed',
+    },
+    {
+      name: 'several lines',
+      answer: { exitCode: 0, stdout: 'octocat\nhubot\n' },
+      kind: 'failed',
+    },
+    {
       name: 'timeout',
       answer: new GhError('timeout', 'gh api user gave no answer within 120 s'),
       kind: 'timeout',

@@ -110,21 +110,22 @@ async function inspect(
   return result;
 }
 
-const READ_ONLY_SUBCOMMANDS = [
-  'hash-object',
-  'rev-parse',
-  'for-each-ref',
-  'symbolic-ref',
-  'config',
+/** Every git call inspection may make, exactly: no write form of these subcommands is listed. */
+const READ_ONLY_CALLS = [
+  'hash-object -t tree --stdin',
+  'rev-parse --is-bare-repository',
+  'rev-parse --show-toplevel',
+  'for-each-ref --format=%(refname) refs/heads refs/remotes/origin',
+  'symbolic-ref -q refs/remotes/origin/HEAD',
+  'symbolic-ref -q HEAD',
+  'config --get remote.origin.url',
 ];
 
-/** The git subcommand of an argv: the first word that is not a `-c <config>` or `-C <dir>` pair. */
-function subcommandOf(argv: readonly string[]): string | undefined {
-  for (let i = 0; i < argv.length; i += 1) {
-    if (argv[i] === '-c' || argv[i] === '-C') i += 1;
-    else return argv[i];
-  }
-  return undefined;
+/** An argv without its leading `-c <config>` and `-C <dir>` pairs. */
+function operandsOf(argv: readonly string[]): string[] {
+  let i = 0;
+  while (argv[i] === '-c' || argv[i] === '-C') i += 2;
+  return argv.slice(i);
 }
 
 /** A git whose binary logs each argv, then runs the real git; a child process the project doesn't own. */
@@ -240,7 +241,7 @@ describe('inspectFolder reads the folder safely', () => {
     expect(calls.length).toBeGreaterThan(0);
     for (const argv of calls) {
       expect(argv.join(' ')).toContain('-c core.fsmonitor=false -c core.hooksPath=/dev/null');
-      expect(READ_ONLY_SUBCOMMANDS).toContain(subcommandOf(argv));
+      expect(READ_ONLY_CALLS).toContain(operandsOf(argv).join(' '));
     }
   });
 
@@ -290,6 +291,20 @@ describe('inspectFolder reads the folder safely', () => {
 });
 
 describe('inspectFolder refusals', () => {
+  it('asks git nothing about a folder that contains a registered checkout', async () => {
+    const repo = track(createTempRepo());
+    const inner = join(repo.path, 'app');
+    mkdirSync(inner);
+    const spy = loggingGit();
+    const got = await inspectFolder(
+      { git: spy.git, projects: [project(realpathSync(inner), 'Widgets')], protectedRoots: [] },
+      repo.path,
+    );
+    expect(got.ok).toBe(false);
+    if (!got.ok) expect(got.reason).toBe(FolderRefusalReason.InsideAProject);
+    expect(spy.calls()).toEqual([]);
+  });
+
   it.each([
     { name: 'a registered checkout', project: true },
     { name: 'a folder under one', project: true, sub: 'src' },

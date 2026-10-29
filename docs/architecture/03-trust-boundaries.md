@@ -99,9 +99,9 @@ were made.
 
 - A Tauri shell and its webview:
   - its CSP allows only loopback;
-  - it has no filesystem, shell or HTTP plugin;
+  - it registers no filesystem, shell or HTTP plugin;
   - its opener is limited to `https://github.com/*`;
-  - its dialog plugin may only open the native folder panel (`dialog:allow-open`), and the picked path goes to the
+  - its dialog plugin is registered with `dialog:allow-open` only, and the call site opens the folder panel; the picked path goes to the
     daemon, which inspects it ([the decision](decisions/2026-10-28-folder-inspection.md)).
 - It reads `ui-token` and `daemon.json` from the data directory and hands them to the webview.
 - It shows text lanes wrote: cards, handoffs, evidence and proposals. The factory spec (§7) renders untrusted

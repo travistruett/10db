@@ -161,7 +161,7 @@ export function createServices(deps: {
           await lastCheck,
           listProjects(db).some((p) => p.delivery === Delivery.PullRequest),
         ),
-        // Read per request: the tool check is memoized at start, but a sync can fail or recover at any time.
+        // Read per request: the tool check is kept from the first request until a recheck, but a sync can fail or recover at any time.
         benchmarkSync: syncWarning(deps.benchmarks.status()),
       };
     },
