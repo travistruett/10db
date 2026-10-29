@@ -584,6 +584,36 @@ describe('InboxView', () => {
       });
     });
 
+    it('says in words how many identical cards a folded row holds', async () => {
+      const copies = [1, 2].map(() => flag('Batch not started', 'no lane free'));
+      inbox([color, ...copies]);
+      renderApp('/inbox');
+      await screen.findByText('Batch not started');
+      expect(screen.getByText('2 identical flags')).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Dismiss All' })).toBeTruthy();
+      key('j');
+      expect(within(selectedCard()).getByText(/2 identical flags are open/)).toBeTruthy();
+    });
+
+    it("never squeezes a row's kind and repeat badges, whatever the title", async () => {
+      const title = 'Batch not started because the project has no free lane left right now '.repeat(
+        4,
+      );
+      const copies = [1, 2].map(() => flag(title, 'no lane free'));
+      inbox([color, ...copies]);
+      renderApp('/inbox');
+      await screen.findByText('Which badge color?');
+      for (const text of ['Flag', '×2']) {
+        const badge = screen.getByText(text).closest('.mantine-Badge-root');
+        expect(badge?.getAttribute('style')).toContain('flex-shrink: 0');
+      }
+      key('j');
+      for (const text of ['Flag', '×2']) {
+        const badge = within(selectedCard()).getByText(text).closest('.mantine-Badge-root');
+        expect(badge?.getAttribute('style')).toContain('flex-shrink: 0');
+      }
+    });
+
     it('does not paint a flag red like an error', async () => {
       inbox([flag('Write outside every claim', 'docs/notes.md')]);
       renderApp('/inbox');
