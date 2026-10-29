@@ -32,7 +32,7 @@ beforeEach(() => {
   close = test.close;
   state = createStateStore(test.store, createEventBus());
   seedTeam(state, readDefaultPersonas());
-  project = seedProject(test.store); // model sonnet, effort medium
+  project = seedProject(test.store);
 });
 afterEach(() => {
   close();
@@ -91,17 +91,18 @@ describe('resolveStepPlan', () => {
 });
 
 describe('startTaskWithPlan', () => {
-  it('stores the plan, starts its first step, and runs on the project’s model before anything is measured', () => {
+  it('stores the plan, starts its first step, and runs on the role defaults before anything is measured', () => {
     const ws = startTaskWithPlan(state, addTask().id);
     expect(ws.steps.map((s) => [s.role, s.status])).toEqual([
       ['implement', 'running'],
       ['review', 'pending'],
     ]);
     expect(ws.steps[0]?.startedAt).not.toBeNull();
+    expect(ws.steps.map((s) => `${s.model}@${s.effort}`)).toEqual(['sonnet@high', 'opus@high']);
     expect(getWorkstream(state.db, ws.id)).toMatchObject({
       stepIndex: 0,
       model: 'sonnet',
-      effort: 'medium',
+      effort: 'high',
     });
   });
 
@@ -111,7 +112,7 @@ describe('startTaskWithPlan', () => {
     state.write((ctx) => patchProject(ctx, project.id, { budgetCeiling: 1 }));
     expect(() => startTaskWithPlan(state, task.id)).toThrow(InvalidError);
     expect(() => startTaskWithPlan(state, task.id)).toThrow(
-      'Step 2 (review, need 48 intelligence) has no profile within the budget ceiling of $1: cheapest profile at or above 48 intelligence; over the budget ceiling of $1',
+      'Step 2 (review, need 48 intelligence) has no profile within the budget ceiling of $1: by score: cheapest profile at or above 48 intelligence; over the budget ceiling of $1',
     );
   });
 

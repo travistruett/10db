@@ -8,14 +8,25 @@ export interface SeedProfile {
   readonly enabled: boolean;
 }
 
-/** Claude Code's model aliases and the AA family each maps to; the slugs only, never AA's data. */
+/** How strong a model is, for routing a step no score can route. */
+export const ModelTier = { Fast: 'fast', Balanced: 'balanced', Strongest: 'strongest' } as const;
+export type ModelTier = (typeof ModelTier)[keyof typeof ModelTier];
+
+/**
+ * Claude Code's model aliases, weakest first, with each one's tier and the AA family it maps to; the
+ * slugs only, never AA's data.
+ */
 const FAMILIES = [
-  { model: 'haiku', aaFamily: 'claude-haiku-5-5', enabled: true },
-  { model: 'sonnet', aaFamily: 'claude-sonnet-5-5', enabled: true },
-  { model: 'opus', aaFamily: 'claude-opus-5-5', enabled: true },
+  { model: 'haiku', tier: ModelTier.Fast, aaFamily: 'claude-haiku-5-5', enabled: true },
+  { model: 'sonnet', tier: ModelTier.Balanced, aaFamily: 'claude-sonnet-5-5', enabled: true },
+  { model: 'opus', tier: ModelTier.Strongest, aaFamily: 'claude-opus-5-5', enabled: true },
   // Off until Claude Code accepts the alias.
-  { model: 'fable', aaFamily: 'claude-fable-5-1', enabled: false },
+  { model: 'fable', tier: ModelTier.Strongest, aaFamily: 'claude-fable-5-1', enabled: false },
 ] as const;
+
+/** Claude Code's models, weakest first, with each one's tier. */
+export const MODEL_TIERS: readonly { readonly model: string; readonly tier: ModelTier }[] =
+  FAMILIES.map(({ model, tier }) => ({ model, tier }));
 
 /** AA lists `max` under the family slug and every other effort as `<family>-<effort>`. */
 export const SEED_PROFILES: readonly SeedProfile[] = FAMILIES.flatMap((family) =>

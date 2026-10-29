@@ -1,4 +1,5 @@
 import { mintId, type ModelProfileDto } from '@10db/contracts';
+import { SEED_PROFILES } from './catalogue';
 
 const NOW = '2026-10-17T12:00:00.000Z';
 
@@ -38,3 +39,25 @@ export function testCatalogue(
 }
 
 export const label = (p: Pick<ModelProfileDto, 'model' | 'effort'>) => `${p.model}@${p.effort}`;
+
+/** The seeded Claude Code profiles with nothing measured: what an account sees before an AA sync. */
+export function seedCatalogue(
+  overrides: Readonly<Record<string, Partial<ModelProfileDto>>> = {},
+): ModelProfileDto[] {
+  return SEED_PROFILES.map((seed) => ({
+    id: mintId('ModelProfile'),
+    ...seed,
+    scores: { intelligence: null, coding: null, agentic: null },
+    costPerTaskUsd: null,
+    outputTokensPerSecond: null,
+    source: 'aa',
+    indexVersion: null,
+    measuredAt: null,
+    stepsRun: 0,
+    firstPassSteps: 0,
+    escalations: 0,
+    createdAt: NOW,
+    updatedAt: NOW,
+    ...overrides[`${seed.model}@${seed.effort}`],
+  }));
+}
