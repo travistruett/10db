@@ -10,6 +10,11 @@ export interface InboxRow {
   readonly items: readonly [InboxItemDto, ...InboxItemDto[]];
 }
 
+/** What the sidebar and the menu bar count: the rows the inbox shows, not the cards folded into them. */
+export function inboxRowCount(items: readonly InboxItemDto[]): number {
+  return inboxRows(items).length;
+}
+
 /** A flag with no options closes on any answer, so it can be dismissed without opening it. */
 export function isDismissable(item: InboxItemDto): boolean {
   return item.kind === InboxKind.Flag && item.options.length === 0;
