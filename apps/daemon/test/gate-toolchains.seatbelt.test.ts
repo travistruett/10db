@@ -267,7 +267,7 @@ describe.skipIf(!SEATBELT)('toolchains under the gate sandbox (Seatbelt)', () =>
     async () => {
       const version = RUSTUP_RUST ?? '';
       const result = await run(
-        `mise x 'rust[profile=minimal]@${version}' -- cargo --version && test -L "$CARGO_HOME/bin" && test "$CARGO_HOME" != "$HOME/.cargo"`,
+        `mise x 'rust[profile=minimal]@${version}' -- cargo --version && test -L "$CARGO_HOME/bin" && mise x 'rust[profile=minimal]@${version}' -- sh -c 'test "$CARGO_HOME" != "$HOME/.cargo"'`,
         homedir(),
         { ...(process.env as Record<string, string>) },
       );

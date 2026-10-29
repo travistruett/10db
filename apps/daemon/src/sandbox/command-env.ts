@@ -1,4 +1,4 @@
-import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { laneMiseConfig } from './mise-config';
 import { packageCacheEnv } from './package-cache';
@@ -29,11 +29,14 @@ export function withoutTempDirPaths(
  * rustup proxies there and counts an install as present only when the link leads to the proxy dir of
  * the `CARGO_HOME` it sees; with `CARGO_HOME` in the temp dir it would take every rust install for
  * missing and try to install it. cargo reads no config, credentials or registry from `bin`, and the
- * sandbox keeps `~/.cargo/bin` read-only, so a `cargo install` here still fails rather than writing.
+ * sandbox keeps `~/.cargo/bin` read-only, so a `cargo install` into the default root fails (use
+ * `--root`). With no `~/.cargo/bin` there is nothing to link and the cargo home stays as it was.
  */
 function linkRustupProxies(cargoHome: string, home: string): void {
+  const proxies = join(home, '.cargo', 'bin');
+  if (!existsSync(proxies)) return;
   mkdirSync(cargoHome, { recursive: true, mode: 0o700 });
-  symlinkSync(join(home, '.cargo', 'bin'), join(cargoHome, 'bin'));
+  symlinkSync(proxies, join(cargoHome, 'bin'));
 }
 
 /**
@@ -53,11 +56,12 @@ export function prepareCommandEnv(
   mkdirSync(miseConfigDir, { mode: 0o700 });
   const miseConfigFile = join(miseConfigDir, 'config.toml');
   writeFileSync(miseConfigFile, laneMiseConfig(home, env), { mode: 0o600 });
-  linkRustupProxies(join(tmpDir, 'cache', 'cargo'), home);
+  const caches = packageCacheEnv(join(tmpDir, 'cache'));
+  linkRustupProxies(caches['CARGO_HOME'] ?? '', home);
   return {
     // Inside the temp dir: a cache can hold code a later install runs, so no two sandboxes share
     // one, and it goes with the temp dir.
-    ...packageCacheEnv(join(tmpDir, 'cache')),
+    ...caches,
     MISE_CONFIG_DIR: miseConfigDir,
     MISE_GLOBAL_CONFIG_FILE: miseConfigFile,
     // mise's system config moves to the sandbox's own dir too, where none exists.

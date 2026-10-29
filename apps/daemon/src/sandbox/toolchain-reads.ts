@@ -107,6 +107,14 @@ function realOrNull(path: string): string | null {
   }
 }
 
+function isLink(path: string): boolean {
+  try {
+    return lstatSync(path).isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
 function listOrEmpty(dir: string): Dirent[] {
   try {
     return readdirSync(dir, { withFileTypes: true });
@@ -176,7 +184,7 @@ function versionsAccess(toolDir: string, granted: readonly string[], untrusted: 
     const realGranted = granted.some((path) => isEqualOrUnder(real, path));
     // A version that is a link (rustup's, for mise's rust) is itself a path the kernel checks
     // before it follows the link, so the link opens by its written path when its target is read.
-    if (real !== written && realGranted) reads.push(written);
+    if (isLink(written) && realGranted) reads.push(written);
     for (const entry of listOrEmpty(real)) {
       if (entry.name === NEVER_OPENED) continue;
       reads.push(join(written, entry.name));

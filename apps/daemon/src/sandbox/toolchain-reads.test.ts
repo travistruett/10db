@@ -220,6 +220,13 @@ describe('toolchainAccess reads', () => {
     expect(reads.filter((path) => path.startsWith(at('elsewhere')))).toEqual([]);
   });
 
+  it('opens no whole version dir when only an ancestor of a plain version is a link', () => {
+    plant('.local/share/mise/store/installs/node/22.11.0/bin/node');
+    symlinkSync(at('.local/share/mise/store/installs'), at('.local/share/mise/installs'));
+    const { reads } = access();
+    expect(reads.filter((path) => path.endsWith('/node/22.11.0'))).toEqual([]);
+  });
+
   it("opens nvm's script, aliases and installs with no marker needed, as Homebrew's nvm leaves none", () => {
     plant('.nvm/alias/default');
     const v22 = nodeInstall('.nvm/versions/node/v22.1.0');

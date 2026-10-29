@@ -28,8 +28,11 @@
 - A mise version that is a link whose real path is a granted read (mise's rust, adopted from rustup, is
   `installs/rust/<version>` linked to `~/.cargo/bin`) opens by its written path as well: the kernel checks the
   link before following it. `prepareCommandEnv` links `<temp dir>/cache/cargo/bin` to `~/.cargo/bin`, since mise
-  counts a rust install as present only when its link leads to `$CARGO_HOME/bin`. `CARGO_HOME` stays in the temp
-  dir; cargo's config, credentials, registry and target caches are unchanged.
+  counts a rust install as present only when its link leads to `$CARGO_HOME/bin`, and only when `~/.cargo/bin`
+  exists. `CARGO_HOME` stays in the temp dir; cargo's config, credentials, registry and target caches are
+  unchanged. Cost: `cargo install` into the default root now fails (`bin` is read-only); it used to land in the
+  temp dir's `bin`. `cargo install --root <dir>` still works. Turned down: leaving `bin` real (mise then can't
+  find rust) and pointing `CARGO_HOME` at `~/.cargo` (opens its config and credentials, shared writes).
 - The state dir stays read-only and `MISE_STATE_DIR` is not moved.
 - The listing patterns are held to exactly the two shapes `listingGrant` and `childListingGrant` emit (never the
   root), only from `toolchainListings`, and a listing of a dir that is or lies under a protected read or secret
