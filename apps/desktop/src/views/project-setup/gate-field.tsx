@@ -26,7 +26,7 @@ export function GateField({ value, candidates, onChange }: GateFieldProps) {
             The command that checks the work, such as your tests. A task counts as done only when it
             passes.
             {empty ? (
-              <Text span display="block" size="sm">
+              <Text span display="block" inherit>
                 {emptyLine}
               </Text>
             ) : null}

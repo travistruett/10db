@@ -20,6 +20,11 @@ import { KEYS_IGNORE_ATTRIBUTE } from './use-inbox-keys';
 
 const SHORT_SHA = 7;
 const NOTE_MAX_LENGTH = 4000;
+/** Light-scheme Code takes the card's own color, so it needs a surface and an edge of its own. */
+const CODE_SURFACE = {
+  background: 'var(--mantine-color-default-hover)',
+  border: '1px solid var(--mantine-color-default-border)',
+} as const;
 
 /** The part of a check card's detail the card reads: the head the work reached. */
 const CheckDetail = z.object({ head: z.string() });
@@ -83,7 +88,9 @@ function Changes({ changes }: { readonly changes: UseQueryResult<WorkstreamChang
         </Text>
         <Group gap="xs">
           {commits.map((sha) => (
-            <Code key={sha}>{sha.slice(0, SHORT_SHA)}</Code>
+            <Code key={sha} style={CODE_SURFACE}>
+              {sha.slice(0, SHORT_SHA)}
+            </Code>
           ))}
         </Group>
       </Stack>
@@ -117,7 +124,7 @@ function Changes({ changes }: { readonly changes: UseQueryResult<WorkstreamChang
         {...{ [KEYS_IGNORE_ATTRIBUTE]: true }}
         style={{ maxHeight: 360, overflow: 'auto' }}
       >
-        <Code block style={{ whiteSpace: 'pre' }}>
+        <Code block style={{ ...CODE_SURFACE, whiteSpace: 'pre' }}>
           {diff}
         </Code>
       </Box>

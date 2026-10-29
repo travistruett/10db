@@ -146,6 +146,17 @@ describe('CheckCard', () => {
     expect(screen.queryByText(/The diff is longer than we show/)).toBeNull();
   });
 
+  it('gives the diff and the commit chips a surface of their own, so they show in the light scheme', async () => {
+    serve(() => changes());
+    renderApp('/inbox');
+    for (const node of [
+      await screen.findByText('1111111'),
+      await screen.findByText(/\+hello world/),
+    ]) {
+      expect(htmlElement(node).style.background).toContain('--mantine-color-default-hover');
+    }
+  });
+
   it('a truncated diff says so', async () => {
     serve(() => changes({ truncated: true }));
     renderApp('/inbox');
