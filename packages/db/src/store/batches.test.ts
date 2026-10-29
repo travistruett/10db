@@ -1,6 +1,5 @@
 import {
   ConflictError,
-  InvalidError,
   mintId,
   UNFINISHED_BATCH_STATES,
   type BatchId,
@@ -377,8 +376,6 @@ describe('project delivery', () => {
         maxLanes: 1,
         provider: 'claude',
         accountId: account.id,
-        model: 'sonnet',
-        effort: 'medium',
         handoffPct: 40,
         nudgePct: 50,
         humanWaitMinutes: 10,
@@ -394,7 +391,6 @@ describe('project delivery', () => {
   });
 
   it.each<{ name: string; input: Partial<ProjectInput> }>([
-    { name: 'pull requests without a prefix', input: { delivery: 'pull_request' } },
     { name: 'a base branch that is an option', input: { baseBranch: '-delete' } },
     {
       name: 'a prefix that is not a Conventional Commit type',
@@ -404,18 +400,27 @@ describe('project delivery', () => {
     expect(() => seedProject(store, input)).toThrow();
   });
 
-  it('refuses a patch that leaves pull request delivery without a prefix', () => {
+  it('lets pull request delivery run with no prefix, and clears one', () => {
     const project = seedProject(store);
-    expect(() =>
-      store.write((ctx) => patchProject(ctx, project.id, { delivery: 'pull_request' })),
-    ).toThrow(InvalidError);
+    const bare = store.write((ctx) =>
+      patchProject(ctx, project.id, { delivery: 'pull_request' }),
+    ).value;
+    expect(bare).toMatchObject({ delivery: 'pull_request', prTitlePrefix: null });
     const patched = store.write((ctx) =>
-      patchProject(ctx, project.id, { delivery: 'pull_request', prTitlePrefix: 'feat(app)' }),
+      patchProject(ctx, project.id, { prTitlePrefix: 'feat(app)' }),
     ).value;
     expect(patched).toMatchObject({ delivery: 'pull_request', prTitlePrefix: 'feat(app)' });
-    expect(() =>
-      store.write((ctx) => patchProject(ctx, project.id, { prTitlePrefix: null })),
-    ).toThrow(InvalidError);
+    const cleared = store.write((ctx) =>
+      patchProject(ctx, project.id, { prTitlePrefix: null }),
+    ).value;
+    expect(cleared).toMatchObject({ delivery: 'pull_request', prTitlePrefix: null });
+  });
+
+  it('creates a pull request project with no prefix', () => {
+    expect(seedProject(store, { delivery: 'pull_request' })).toMatchObject({
+      delivery: 'pull_request',
+      prTitlePrefix: null,
+    });
   });
 
   it.each<{ name: string; arrange: (projectId: ProjectId) => void }>([

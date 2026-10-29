@@ -85,7 +85,7 @@ describe('BoardView', () => {
     expect(await screen.findByText('No tasks yet.')).toBeTruthy();
   });
 
-  it('creates a pull-request project with its base branch and title prefix, and requires the prefix', async () => {
+  it('creates a pull-request project with its base branch and title prefix, and lets the prefix stay empty', async () => {
     const posted: unknown[] = [];
     serve(
       http.post(daemonUrl('/projects'), async ({ request }) => {
@@ -101,13 +101,15 @@ describe('BoardView', () => {
     type('Gate command', 'make gate', dialog);
     type('Areas', 'api: src/api/**', dialog);
     fireEvent.click(within(dialog).getByRole('radio', { name: 'One pull request per batch' }));
+    expect(within(dialog).getByText(/Left empty, 10db writes <type>/)).toBeTruthy();
+    type('Base branch', 'develop', dialog);
+    type('PR title prefix', 'Feature', dialog);
     fireEvent.click(within(dialog).getByRole('button', { name: 'Create project' }));
     expect(
       await within(dialog).findByText('Enter a PR title prefix such as feat(app)'),
     ).toBeTruthy();
     expect(posted).toEqual([]);
     type('PR title prefix', 'feat(app)', dialog);
-    type('Base branch', 'develop', dialog);
     fireEvent.click(within(dialog).getByRole('button', { name: 'Create project' }));
     await waitFor(() => {
       expect(posted).toHaveLength(1);

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  DEFAULT_HAZARDS,
   HandoffInput,
   McpToolInputs,
   mintId,
@@ -59,6 +60,45 @@ describe('ProjectInput', () => {
     });
     expect(parsed.hazards.map((h) => h.name)).toEqual(['migrations', 'deps', 'harness']);
     expect(parsed.allowedCommands).toEqual([]);
+  });
+
+  it('accepts pull request delivery with no title prefix', () => {
+    const parsed = ProjectInput.safeParse({
+      name: 'demo',
+      repoPath: '/tmp/demo',
+      gateCommand: 'make gate',
+      areas: [{ name: 'src', globs: ['src/**'] }],
+      delivery: 'pull_request',
+    });
+    expect(parsed.success).toBe(true);
+    expect(parsed.data?.prTitlePrefix).toBeNull();
+  });
+
+  it('drops the project-level model and effort', () => {
+    const parsed = ProjectInput.parse({
+      name: 'demo',
+      repoPath: '/tmp/demo',
+      gateCommand: 'make gate',
+      areas: [{ name: 'src', globs: ['src/**'] }],
+      model: 'opus',
+      effort: 'high',
+    });
+    expect(parsed).not.toHaveProperty('model');
+    expect(parsed).not.toHaveProperty('effort');
+  });
+
+  it.each([
+    'npm add',
+    'npm ci',
+    'npm un',
+    'pnpm uninstall',
+    'pnpm un',
+    'pnpm upgrade',
+    'yarn add',
+    'cargo update',
+  ])('guards "%s" as a dependency change by default', (command) => {
+    const deps = DEFAULT_HAZARDS.find((h) => h.name === 'deps');
+    expect(deps?.commands).toContain(command);
   });
 
   it('takes the extra allowed commands and rejects one that is not a plain prefix', () => {

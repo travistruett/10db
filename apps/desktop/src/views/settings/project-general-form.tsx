@@ -220,7 +220,7 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
       />
       <TextInput
         label="PR title prefix"
-        description="A Conventional Commit type and scope; titles read feat(app): <batch title>"
+        description="Optional. A Conventional Commit type and scope; titles read feat(app): <batch title>. Left empty, 10db writes <type>(<scope>): <subject> from the batch's tasks and the paths it changed."
         placeholder="feat(app)"
         ff="monospace"
         value={values.prTitlePrefix}

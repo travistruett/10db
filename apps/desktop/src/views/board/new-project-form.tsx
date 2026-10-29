@@ -70,7 +70,7 @@ export function NewProjectForm({
       return;
     }
     const pullRequests = delivery === Delivery.PullRequest;
-    if (pullRequests && !PrTitlePrefix.safeParse(prTitlePrefix.trim()).success) {
+    if (prTitlePrefix.trim() !== '' && !PrTitlePrefix.safeParse(prTitlePrefix.trim()).success) {
       setFormError('Enter a PR title prefix such as feat(app)');
       return;
     }
@@ -97,7 +97,10 @@ export function NewProjectForm({
         nudgePct: nudgeFor(handoffPct),
         delivery,
         ...(pullRequests
-          ? { baseBranch: baseBranch.trim(), prTitlePrefix: prTitlePrefix.trim() }
+          ? {
+              baseBranch: baseBranch.trim(),
+              ...(prTitlePrefix.trim() === '' ? {} : { prTitlePrefix: prTitlePrefix.trim() }),
+            }
           : {}),
         ...(worktrees ? { workspaceMode, worktreeSeed: seed } : {}),
       },
@@ -187,7 +190,7 @@ export function NewProjectForm({
             />
             <TextInput
               label="PR title prefix"
-              description="A Conventional Commit type and scope; titles read feat(app): <batch title>"
+              description="Optional. A Conventional Commit type and scope; titles read feat(app): <batch title>. Left empty, 10db writes <type>(<scope>): <subject> from the batch's tasks and the paths it changed."
               placeholder="feat(app)"
               ff="monospace"
               value={prTitlePrefix}

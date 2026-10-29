@@ -29,8 +29,8 @@ describe('HealthResponse', () => {
 });
 
 describe('PROTOCOL_VERSION', () => {
-  it('is 4: the batch start answer became an array', () => {
-    expect(PROTOCOL_VERSION).toBe(4);
+  it('is 5: a project no longer carries a model or effort', () => {
+    expect(PROTOCOL_VERSION).toBe(5);
   });
 });
 

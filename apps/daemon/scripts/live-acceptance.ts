@@ -10,7 +10,6 @@ import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import {
-  Effort,
   FlowDto,
   HealthResponse,
   InboxItemDto,
@@ -42,8 +41,6 @@ import {
 } from './live-processes';
 
 const Args = z.strictObject({
-  model: z.string().min(1).default('sonnet'),
-  effort: z.enum(Effort).default(Effort.Medium),
   port: z.coerce.number().int().min(1024).max(65535).default(4327),
   timeoutMinutes: z.coerce.number().int().min(5).max(180).default(60),
 });
@@ -407,8 +404,6 @@ async function main(): Promise<void> {
       repoPath: repo,
       gateCommand: 'sh check.sh',
       maxLanes: 3,
-      model: args.model,
-      effort: args.effort,
       // The schema's minimums; Alpha's reference reading carries it past them (spec §1.3 point 2).
       handoffPct: 5,
       nudgePct: 6,
@@ -429,9 +424,7 @@ async function main(): Promise<void> {
     });
     await api(WorkstreamDto, `/tasks/${task.id}/start`, { method: 'POST', body: '{}' });
   }
-  say(
-    `three tasks started (${args.model} @ ${args.effort}); the repo's .mcp.json declares ${REPO_MCP_SERVER}, approved`,
-  );
+  say(`three tasks started; the repo's .mcp.json declares ${REPO_MCP_SERVER}, approved`);
 
   const seen = new Set<string>();
   const deadline = Date.now() + args.timeoutMinutes * 60_000;
@@ -509,7 +502,6 @@ async function main(): Promise<void> {
     manual,
     meta: {
       Date: new Date().toISOString().slice(0, 10),
-      Model: `${args.model} @ ${args.effort}`,
       'Claude Code': claudeCodeVersion(logText),
       Node: process.version,
       'Handoff threshold': '5% (nudge 6%)',
