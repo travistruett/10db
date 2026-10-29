@@ -66,6 +66,16 @@ export type TaskStarted =
   | { readonly kind: 'workstream'; readonly workstream: WorkstreamDto }
   | { readonly kind: 'batch'; readonly batch: BatchDto };
 
+/** Removing a task that hasn't started. */
+export interface TaskRemovalServices {
+  /**
+   * Cancels a task with no workstream and drops it from its project's list; answering a task
+   * already removed is a no-op. Throws TaskStartedError for a task that has run and
+   * TaskHasDependentsError while an open task waits on it.
+   */
+  removeTask(taskId: TaskId): TaskDto;
+}
+
 /** What the HTTP layer needs from the daemon. Implemented in the daemon module. */
 export interface ApiServices {
   listProjects(): ProjectViewDto[];

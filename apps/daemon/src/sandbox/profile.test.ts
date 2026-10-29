@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   buildLaneProfile,
@@ -10,6 +10,7 @@ import {
   toolchainAccess,
   type LaneProfileInput,
 } from './index';
+import { childListingGrant, listingGrant } from './profile';
 
 let root: string;
 let home: string;
@@ -28,6 +29,7 @@ function input(overrides: Partial<LaneProfileInput> = {}): LaneProfileInput {
     secretFiles: [join(checkout, '.env')],
     toolchainSecrets: [join(home, '.cargo', 'credentials.toml')],
     toolchainReads: toolchainAccess(home, {}, [], { systemPrefixes: [] }).reads,
+    toolchainListings: toolchainAccess(home, {}, [], { systemPrefixes: [] }).listings,
     allowedDomains: ['github.com', '*.npmjs.org'],
     readList: [],
     extraReads: [],
@@ -213,6 +215,77 @@ describe('buildLaneProfile', () => {
     ).filesystem;
     expect(allowRead).not.toContain(secret);
     expect(allowWrite).not.toContain(secret);
+  });
+
+  describe('toolchain listings', () => {
+    const installs = () => join(home, '.local', 'share', 'mise', 'installs');
+
+    it('spells a listing as an exact-match pattern: the dir with its last character as a set, or its children', () => {
+      expect(listingGrant('/h/mise/installs')).toBe('/h/mise/install[s]');
+      expect(listingGrant('/h/mise/a.b')).toBe('/h/mise/a.[b]');
+      expect(childListingGrant('/h/mise/installs')).toBe('/h/mise/installs/*');
+      expect(() => listingGrant('/h/we[ird]/installs')).toThrow(SandboxProfileError);
+      expect(() => childListingGrant('/h/*/installs')).toThrow(SandboxProfileError);
+      expect(() => listingGrant('relative')).toThrow(SandboxProfileError);
+      expect(() => listingGrant('/')).toThrow(SandboxProfileError);
+      expect(() => childListingGrant('/')).toThrow(SandboxProfileError);
+    });
+
+    it('allows them to be read, with the only pattern characters the profile holds', () => {
+      const { allowRead } = buildLaneProfile(
+        input({ toolchainListings: [listingGrant(installs()), childListingGrant(installs())] }),
+      ).filesystem;
+      expect(allowRead).toEqual(
+        expect.arrayContaining([listingGrant(installs()), childListingGrant(installs())]),
+      );
+      expect(allowRead).not.toContain(installs());
+      const patterned = allowRead.filter((path) => /[*?[\]{}\\\n]/.test(path));
+      expect(patterned).toEqual([listingGrant(installs()), childListingGrant(installs())]);
+    });
+
+    it.each([
+      ['the root as a child listing', () => '//*'],
+      ['a set with no leading slash', () => '[/]'],
+      ['an empty set', (dir: string) => `${dir.slice(0, -1)}[]`],
+      ['a recursive glob', (dir: string) => `${dir}/**`],
+      ['a wildcard in the middle', (dir: string) => `${dirname(dirname(dir))}/*/installs`],
+      ['a set of several characters', (dir: string) => `${dir}[st]`],
+      ['a brace', (dir: string) => `${dir}{a,b}`],
+      ['a glob with no listing dir', () => '/*'],
+    ])('refuses %s as a listing', (_name, pattern) => {
+      const build = () => buildLaneProfile(input({ toolchainListings: [pattern(installs())] }));
+      expect(build).toThrow(SandboxProfileError);
+    });
+
+    it('drops a listing of a dir that is, or lies under, a secret file or a protected read', () => {
+      const tool = join(installs(), 'node');
+      const kept = [listingGrant(installs()), childListingGrant(installs())];
+      const { allowRead } = buildLaneProfile(
+        input({
+          toolchainListings: [
+            ...kept,
+            listingGrant(tool),
+            childListingGrant(tool),
+            listingGrant(join(home, '.cargo')),
+          ],
+          toolchainSecrets: [tool, join(home, '.cargo', 'credentials.toml')],
+          protectedReads: [join(home, '.cargo')],
+        }),
+      ).filesystem;
+      expect(allowRead).toEqual(expect.arrayContaining(kept));
+      for (const dropped of [
+        listingGrant(tool),
+        childListingGrant(tool),
+        listingGrant(join(home, '.cargo')),
+      ])
+        expect(allowRead).not.toContain(dropped);
+    });
+
+    it('refuses a pattern in the ordinary read list as before', () => {
+      expect(() => buildLaneProfile(input({ readList: [`${installs()}/*`] }))).toThrow(
+        SandboxProfileError,
+      );
+    });
   });
 
   it('denies the toolchain secrets to the commands', () => {

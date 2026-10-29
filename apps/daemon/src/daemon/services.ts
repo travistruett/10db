@@ -9,6 +9,7 @@ import {
   type SystemCheckDto,
 } from '@10db/contracts';
 import {
+  cancelTask,
   deleteBoardColumn,
   getMcpApproval,
   getProject,
@@ -48,7 +49,7 @@ import {
 } from '@10db/db';
 import { MoveCause, type AccountMoves, type AccountService } from '../accounts';
 import { syncWarning, type BenchmarkSync } from '../benchmarks';
-import type { ApiServices } from '../api';
+import type { ApiServices, TaskRemovalServices } from '../api';
 import type { BatchStarter, Shipper } from '../delivery';
 import { markGhRequired } from '../environment';
 import type { EventBus, StateStore } from '../events';
@@ -85,7 +86,7 @@ export function createServices(deps: {
   readonly protectedRoots: readonly string[];
   /** Records a new project's checkout as the daemon trusts it (lane sandbox spec D13). */
   readonly pinCheckout: (repoPath: string) => void;
-}): ApiServices {
+}): ApiServices & TaskRemovalServices {
   const db = deps.state.db;
   // The tool check and gh's login are probed on the first request and on a recheck, never otherwise.
   let lastCheck: Promise<SystemCheckDto> | null = null;
@@ -204,6 +205,7 @@ export function createServices(deps: {
     },
     setRoutingRules: (projectId, input) =>
       deps.state.write((ctx) => setRoutingRules(ctx, projectId, input)),
+    removeTask: (id) => deps.state.write((ctx) => cancelTask(ctx, id)),
     patchTask: (id, patch) => deps.state.write((ctx) => patchTask(ctx, id, patch)),
     moveTask: (id, move) => deps.state.write((ctx) => moveTask(ctx, id, move)),
     listBoardColumns(projectId) {

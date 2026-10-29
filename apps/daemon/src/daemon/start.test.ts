@@ -406,7 +406,9 @@ describe('startDaemon', () => {
         );
         expect(sandbox?.settings.network).not.toHaveProperty('allowLocalBinding');
         const laneTmp = sandbox?.env['CLAUDE_CODE_TMPDIR'] ?? '';
-        expect(sandbox?.env['npm_config_cache']).toBe(join(laneTmp, 'cache', 'npm'));
+        // The caches in the lane's temp dir are for the sandboxed shell alone (its env file).
+        expect(sandbox?.env['npm_config_cache']).toBeUndefined();
+        expect(sandbox?.env['CLAUDE_ENV_FILE']).toBeDefined();
         expect(dirname(laneTmp)).toBe(tmpRoot);
         // The gate ran under srt, with the project's network: no hosts, and nothing off the list.
         const gateLogs = join(dir.path, 'logs', 'gate');
