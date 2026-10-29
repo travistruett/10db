@@ -45,6 +45,7 @@ describe('BatchHistory', () => {
     expect(screen.queryByRole('list', { name: 'Batches' })).toBeNull();
     fireEvent.click(toggle);
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
-    expect(await screen.findByRole('list', { name: 'Batches' })).toBeTruthy();
+    const list = await screen.findByRole('list', { name: 'Batches' });
+    expect(list.closest('[id]')?.id).toBe(toggle.getAttribute('aria-controls'));
   });
 });
