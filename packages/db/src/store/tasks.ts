@@ -33,16 +33,26 @@ export interface BoardStatusInput {
   readonly taskStatus: TaskStatus;
   readonly depsDone: boolean;
   readonly workstreamState: WorkstreamState | null;
+  /** The state of the batch the task's latest run ships in; null when it is in none. */
+  readonly batchState?: BatchState | null;
 }
 
-/** Board column for a task (spec §5.1): Ready means deps done and nothing blocking. */
+/**
+ * Board column for a task (spec §5.1): Ready means deps done and nothing blocking. A finished task
+ * is not Done until its pull request is open: while its batch ships it is In progress, and when the
+ * ship failed it is Blocked, where the builder retries it.
+ */
 export function deriveBoardStatus({
   taskStatus,
   depsDone,
   workstreamState,
+  batchState = null,
 }: BoardStatusInput): BoardStatus {
   switch (taskStatus) {
     case TaskStatus.Done:
+      if (batchState === BatchState.Shipping) return BoardStatus.InProgress;
+      if (batchState === BatchState.Failed) return BoardStatus.Blocked;
+      return BoardStatus.Done;
     case TaskStatus.Cancelled:
       return BoardStatus.Done;
     case TaskStatus.Open:
@@ -180,8 +190,13 @@ function toTaskDto(db: DbReader, row: typeof schema.tasks.$inferSelect): TaskDto
     .where(eq(schema.taskDeps.taskId, row.id))
     .all();
   const latest = db
-    .select({ id: schema.workstreams.id, state: schema.workstreams.state })
+    .select({
+      id: schema.workstreams.id,
+      state: schema.workstreams.state,
+      batchState: schema.batches.state,
+    })
     .from(schema.workstreams)
+    .leftJoin(schema.batches, eq(schema.batches.id, schema.workstreams.batchId))
     .where(eq(schema.workstreams.taskId, row.id))
     .orderBy(desc(schema.workstreams.createdAt), desc(schema.workstreams.id))
     .limit(1)
@@ -203,6 +218,7 @@ function toTaskDto(db: DbReader, row: typeof schema.tasks.$inferSelect): TaskDto
       taskStatus: row.status,
       depsDone: dependenciesDone(db, row.id),
       workstreamState: latest?.state ?? null,
+      batchState: latest?.batchState ?? null,
     }),
     workstreamId: latest?.id ?? null,
     createdAt: row.createdAt,

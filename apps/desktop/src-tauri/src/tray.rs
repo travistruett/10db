@@ -44,14 +44,11 @@ pub fn keep_awake_label(on: bool) -> String {
     label.to_owned()
 }
 
-/// Text beside the menu-bar icon: lanes · cards, or nothing when idle.
+/// Text beside the menu-bar icon. Always none: the wordmark stands alone, and the counts live in the
+/// menu rows. Takes the counts so a later status indicator has somewhere to hook in.
 #[must_use]
-pub fn tray_title(counts: &TrayCounts) -> String {
-    if counts.lanes == 0 && counts.inbox == 0 {
-        String::new()
-    } else {
-        format!("{} · {}", counts.lanes, counts.inbox)
-    }
+pub fn tray_title(_counts: &TrayCounts) -> Option<String> {
+    None
 }
 
 /// The tray and its status rows, kept in managed state so `update_tray` can rewrite them.
@@ -73,9 +70,7 @@ impl TrayItems {
         self.inbox.set_text(inbox_label(counts.inbox))?;
         self.keep_awake
             .set_text(keep_awake_label(counts.keep_awake))?;
-        let title = tray_title(counts);
-        self.tray
-            .set_title(if title.is_empty() { None } else { Some(title) })
+        self.tray.set_title(tray_title(counts))
     }
 }
 
@@ -163,30 +158,18 @@ mod tests {
     }
 
     #[test]
-    fn the_title_is_empty_when_idle() {
-        assert_eq!(
-            tray_title(&TrayCounts {
-                lanes: 0,
-                inbox: 0,
-                keep_awake: true
-            }),
-            ""
-        );
-        assert_eq!(
-            tray_title(&TrayCounts {
-                lanes: 2,
-                inbox: 1,
-                keep_awake: true
-            }),
-            "2 · 1"
-        );
-        assert_eq!(
-            tray_title(&TrayCounts {
-                lanes: 0,
-                inbox: 4,
-                keep_awake: false
-            }),
-            "0 · 4"
-        );
+    fn the_menu_bar_shows_only_the_wordmark() {
+        for (lanes, inbox, keep_awake) in [(0, 0, true), (2, 1, true), (0, 4, false), (3, 0, false)]
+        {
+            assert_eq!(
+                tray_title(&TrayCounts {
+                    lanes,
+                    inbox,
+                    keep_awake
+                }),
+                None,
+                "{lanes} lanes, {inbox} cards"
+            );
+        }
     }
 }
