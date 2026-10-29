@@ -16,7 +16,7 @@ import { branchOfRef, firstLine, parseBranches, type RepoFacts, type RepoRefusal
 import { comparablePath, existsAsEntry } from './path-entries';
 import { gitNetwork, type NetworkCall, type NetworkRun } from './network';
 import { localRemotePath, parseRemoteUrl } from './remote-url';
-import { GitError, runGit, type RunOptions } from './run';
+import { GitError, runGit, runGitCapped, type RunOptions } from './run';
 import { GitTrustError, GitTrustFailure, type GitTrustDetail } from './trust-error';
 import { embeddedRepository, GitMode, isGitComponent } from './worktree-files';
 import { lockedBatchId, parseWorktreeList, type WorktreeEntry } from './worktree-list';
@@ -185,7 +185,7 @@ export interface Git {
    * filter, cut to at most `maxBytes` of UTF-8 on a character boundary, plus the per-file counts
    * of the whole change. Renames are shown as a delete and an add.
    */
-  diffSince(repo: string, base: string, maxBytes: number): Promise<DiffSince>;
+  diffSince(repo: string, base: string, head: string, maxBytes: number): Promise<DiffSince>;
   /**
    * The text of `path` in commit `rev`, read from the object store, never from the worktree, so no
    * link is followed: a path that is a link, or lies under one, is `not_regular` or `missing`. A
@@ -272,10 +272,33 @@ function isTrue(value: string | null | undefined): boolean {
   return value === null || ['true', 'yes', 'on', '1'].includes((value ?? '').toLowerCase());
 }
 
-/** `text` cut to at most `maxBytes` of UTF-8, never inside a multi-byte character. */
-function cutDiff(text: string, maxBytes: number): { diff: string; truncated: boolean } {
-  const bytes = Buffer.from(text, 'utf8');
-  if (bytes.length <= maxBytes) return { diff: text, truncated: false };
+/**
+ * The options of a diff the builder reads: `diff-tree`, which is plumbing and so ignores the UI
+ * settings (`diff.noprefix`, `diff.mnemonicPrefix`, `diff.srcPrefix`, `diff.context`, `diff.orderFile`,
+ * `diff.submodule`), and every option those would set spelled out anyway. A submodule is shown as its
+ * gitlink bump, so no diff is run inside one; no external diff program and no textconv filter runs.
+ */
+const DIFF_FLAGS: readonly string[] = [
+  '-r',
+  '--no-ext-diff',
+  '--no-textconv',
+  '--no-renames',
+  '--no-color',
+  '--src-prefix=a/',
+  '--dst-prefix=b/',
+  '--submodule=short',
+  '--ignore-submodules=none',
+];
+
+/** Config a diff reads whatever plumbing is: how a path with unusual bytes is quoted. */
+const DIFF_CONFIG: readonly string[] = ['-c', 'core.quotePath=true'];
+
+/** The most bytes one UTF-8 character takes. */
+const UTF8_MAX_BYTES = 4;
+
+/** `bytes` cut to at most `maxBytes` of UTF-8, never inside a multi-byte character. */
+function cutDiff(bytes: Buffer, maxBytes: number): { diff: string; truncated: boolean } {
+  if (bytes.length <= maxBytes) return { diff: bytes.toString('utf8'), truncated: false };
   let end = maxBytes;
   // A continuation byte (10xxxxxx) at the cut belongs to a character that starts before it.
   while (end > 0 && ((bytes[end] ?? 0) & 0xc0) === 0x80) end--;
@@ -403,6 +426,26 @@ export function createGit(opts: GitOptions = {}): Git {
       env: { ...site.env, GIT_ATTR_SOURCE: await emptyTree(site), ...run.env },
       config: [...NO_ATTRIBUTES, ...(run.config ?? [])],
     });
+  }
+
+  /** `git`, but stdout is cut at `capBytes` and the call killed once it has printed them. */
+  async function gitCapped(
+    site: Site,
+    args: readonly string[],
+    capBytes: number,
+    run: Omit<RunOptions, 'bin'> = {},
+  ): Promise<Buffer> {
+    return runGitCapped(
+      site.real,
+      args,
+      {
+        ...run,
+        bin,
+        env: { ...site.env, GIT_ATTR_SOURCE: await emptyTree(site), ...run.env },
+        config: [...NO_ATTRIBUTES, ...(run.config ?? [])],
+      },
+      capBytes,
+    );
   }
 
   async function readGitDirs(real: string): Promise<{ gitDir: string; commonDir: string }> {
@@ -1286,11 +1329,22 @@ export function createGit(opts: GitOptions = {}): Git {
         .split('\n')
         .filter(Boolean);
     },
-    async diffSince(repo, base, maxBytes) {
+    async diffSince(repo, base, head, maxBytes) {
       const c = await pinned(repo);
-      const flags = ['--no-ext-diff', '--no-textconv', '--no-renames', '--no-color'];
-      const numstat = await git(c, ['diff', ...flags, '--numstat', '-z', base, 'HEAD', '--']);
-      const text = await git(c, ['diff', ...flags, base, 'HEAD', '--']);
+      const numstat = await git(
+        c,
+        ['diff-tree', ...DIFF_FLAGS, '--numstat', '-z', base, head, '--'],
+        {
+          config: DIFF_CONFIG,
+        },
+      );
+      // A few bytes past the cap are read so a character split by the cap is seen whole.
+      const text = await gitCapped(
+        c,
+        ['diff-tree', ...DIFF_FLAGS, '-p', '--unified=3', base, head, '--'],
+        maxBytes + UTF8_MAX_BYTES,
+        { config: DIFF_CONFIG },
+      );
       return { ...cutDiff(text, maxBytes), files: parseNumstat(numstat) };
     },
     async filtersIn(repo, rev) {

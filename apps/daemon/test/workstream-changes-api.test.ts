@@ -2,10 +2,11 @@ import { execFileSync } from 'node:child_process';
 import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { mintId, ProjectDto, TaskDto, WorkstreamChangesDto, WorkstreamDto } from '@10db/contracts';
-import { patchWorkstream } from '@10db/db';
+import { insertBatch, insertWorkstream, patchWorkstream, transitionWorkstream } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { startDaemon, type RunningDaemon } from '../src/daemon';
+import { raiseBuilderCheck } from '../src/runner';
 import { FakeAdapter } from '../src/sessions';
 import { apiClient } from './api-client';
 import { createTempRepo, isolatedGitEnv, tempDir } from './fixtures';
@@ -107,5 +108,145 @@ describe('GET /workstreams/:id/changes', () => {
 
     const res = await get(`/workstreams/${ws.id}/changes`);
     expect(res.status).toBe(404);
+  });
+
+  it('answers 409 when the base is not a commit of the checkout', async () => {
+    const ws = await startedWorkstream();
+    daemon.state.write((ctx) => {
+      patchWorkstream(ctx, ws.id, null, { baseHead: 'a'.repeat(40) });
+    });
+
+    const res = await get(`/workstreams/${ws.id}/changes`);
+    expect(res.status).toBe(409);
+  });
+
+  it('shows a path with a space and a newline whole', async () => {
+    const ws = await startedWorkstream();
+    const baseHead = rawGit('rev-parse', 'HEAD');
+    daemon.state.write((ctx) => {
+      patchWorkstream(ctx, ws.id, null, { baseHead });
+    });
+    writeFileSync(join(repo.path, 'sp ace\nline.txt'), 'odd\n');
+    rawGit('add', 'sp ace\nline.txt');
+    rawGit('commit', '-q', '-m', 'odd name');
+
+    const changes = await api().get(`/workstreams/${ws.id}/changes`, WorkstreamChangesDto);
+
+    expect(changes.files).toEqual([{ path: 'sp ace\nline.txt', added: 1, removed: 0 }]);
+    expect(changes.diff).toContain('+odd');
+  });
+
+  describe('a workstream that waits for the builder', () => {
+    const waitOnCheck = (wsId: WorkstreamDto['id'], projectId: ProjectDto['id'], head: string) => {
+      daemon.state.write((ctx) => {
+        for (const to of ['RUNNING', 'VERIFYING', 'WAITING_HUMAN'] as const)
+          transitionWorkstream(ctx, wsId, { to, fence: null });
+        const card = raiseBuilderCheck(ctx, {
+          workstreamId: wsId,
+          projectId,
+          taskTitle: 'change things',
+          baseHead: rawGit('rev-parse', 'HEAD~1'),
+          head,
+          commits: [head],
+        });
+        patchWorkstream(ctx, wsId, null, {
+          nextAction: { kind: 'builder_review', inboxId: card.id },
+        });
+      });
+    };
+
+    it('is read at the head its check card showed, not at a later head', async () => {
+      const ws = await startedWorkstream();
+      const baseHead = rawGit('rev-parse', 'HEAD');
+      daemon.state.write((ctx) => {
+        patchWorkstream(ctx, ws.id, null, { baseHead });
+      });
+      writeFileSync(join(repo.path, 'shown.txt'), 'shown\n');
+      rawGit('add', 'shown.txt');
+      rawGit('commit', '-q', '-m', 'shown');
+      const shown = rawGit('rev-parse', 'HEAD');
+      waitOnCheck(ws.id, ws.projectId, shown);
+      writeFileSync(join(repo.path, 'later.txt'), 'later\n');
+      rawGit('add', 'later.txt');
+      rawGit('commit', '-q', '-m', 'later');
+
+      const changes = await api().get(`/workstreams/${ws.id}/changes`, WorkstreamChangesDto);
+
+      expect(changes.head).toBe(shown);
+      expect(changes.commits).toEqual([shown]);
+      expect(changes.files.map((f) => f.path)).toEqual(['shown.txt']);
+      expect(changes.diff).not.toContain('later');
+    });
+  });
+
+  describe('in a batch', () => {
+    /** A workstream of a batch in a project of `mode`, with a fresh base head recorded. */
+    const batchWorkstream = async (mode: 'shared' | 'worktree', worktreePath: string | null) => {
+      const project = await api().post('/projects', ProjectDto, {
+        name: 'batched',
+        repoPath: repo.path,
+        gateCommand: null,
+        areas: [{ name: 'src', globs: ['src/**'] }],
+        ...(mode === 'worktree'
+          ? { delivery: 'pull_request', prTitlePrefix: 'feat(app)', workspaceMode: 'worktree' }
+          : {}),
+      });
+      const task = await api().post(`/projects/${project.id}/tasks`, TaskDto, {
+        title: 'change things',
+        acceptanceCriteria: ['x'],
+        areas: ['src'],
+        dependsOn: [],
+      });
+      const baseHead = rawGit('rev-parse', 'HEAD');
+      return daemon.state.write((ctx) => {
+        const batch = insertBatch(ctx, {
+          projectId: project.id,
+          title: 'batch',
+          baseBranch: 'main',
+          ...(worktreePath === null ? {} : { worktreePath }),
+        });
+        const ws = insertWorkstream(ctx, task.id, { batchId: batch.id });
+        patchWorkstream(ctx, ws.id, null, { baseHead });
+        return ws;
+      });
+    };
+
+    it('answers 409 once the batch worktree is gone, rather than reading the main checkout', async () => {
+      const ws = await batchWorkstream('worktree', null);
+
+      const res = await get(`/workstreams/${ws.id}/changes`);
+      expect(res.status).toBe(409);
+    });
+
+    it('reads a shared batch from the project checkout', async () => {
+      const ws = await batchWorkstream('shared', null);
+
+      const res = await get(`/workstreams/${ws.id}/changes`);
+      expect(res.status).toBe(200);
+    });
+
+    it("reads a worktree batch from the batch's worktree", async () => {
+      const worktree = join(repo.path, '..', `worktree-${String(process.pid)}`);
+      rawGit('worktree', 'add', '-q', '-b', 'batch-branch', worktree);
+      const inWorktree = (...args: string[]) =>
+        execFileSync('git', ['-C', worktree, ...args], {
+          env: isolatedGitEnv(),
+          stdio: ['ignore', 'pipe', 'pipe'],
+        })
+          .toString()
+          .trim();
+      writeFileSync(join(worktree, 'in-worktree.txt'), 'there\n');
+      inWorktree('add', 'in-worktree.txt');
+      inWorktree('commit', '-q', '-m', 'in the worktree');
+      const ws = await batchWorkstream('worktree', worktree);
+
+      try {
+        const changes = await api().get(`/workstreams/${ws.id}/changes`, WorkstreamChangesDto);
+        expect(changes.head).toBe(inWorktree('rev-parse', 'HEAD'));
+        expect(changes.files.map((f) => f.path)).toEqual(['in-worktree.txt']);
+      } finally {
+        rmSync(worktree, { recursive: true, force: true });
+      }
+    });
   });
 });

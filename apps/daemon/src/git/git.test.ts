@@ -639,6 +639,7 @@ describe('diffSince', () => {
     rawGit('add', '-A');
     rawGit('commit', '-q', '-m', message);
   };
+  const headOf = () => rawGit('rev-parse', 'HEAD');
 
   it('returns the diff and numstat from the base to HEAD', async () => {
     const base = rawGit('rev-parse', 'HEAD');
@@ -646,7 +647,7 @@ describe('diffSince', () => {
     writeFileSync(join(repo.path, 'blob.bin'), Buffer.from([0, 1, 2, 3, 0, 255]));
     commitAll('add files');
 
-    const changes = await git.diffSince(repo.path, base, 512 * 1024);
+    const changes = await git.diffSince(repo.path, base, headOf(), 512 * 1024);
 
     expect(changes.truncated).toBe(false);
     expect(changes.diff).toContain('diff --git a/a.txt b/a.txt');
@@ -658,7 +659,7 @@ describe('diffSince', () => {
   });
 
   it('is empty when nothing changed since the base', async () => {
-    expect(await git.diffSince(repo.path, rawGit('rev-parse', 'HEAD'), 1024)).toEqual({
+    expect(await git.diffSince(repo.path, headOf(), headOf(), 1024)).toEqual({
       diff: '',
       truncated: false,
       files: [],
@@ -671,7 +672,7 @@ describe('diffSince', () => {
     write('other.txt', 'x\n');
     commitAll('big');
 
-    const changes = await git.diffSince(repo.path, base, 1001);
+    const changes = await git.diffSince(repo.path, base, headOf(), 1001);
 
     expect(changes.truncated).toBe(true);
     expect(Buffer.byteLength(changes.diff)).toBeLessThanOrEqual(1001);
@@ -680,6 +681,7 @@ describe('diffSince', () => {
     expect(changes.files.map((f) => f.path).sort()).toEqual(['big.txt', 'other.txt']);
   });
 
+  // The plumbing diff already ignores diff drivers it was not asked for; the flags are a second layer.
   it('does not run a textconv driver or an external diff program', async () => {
     const base = rawGit('rev-parse', 'HEAD');
     const textconvMark = join(repo.path, '..', `textconv-ran-${String(process.pid)}`);
@@ -692,10 +694,123 @@ describe('diffSince', () => {
     write('f.dat', 'changed\n');
     commitAll('change dat');
 
-    const changes = await git.diffSince(repo.path, base, 512 * 1024);
+    const changes = await git.diffSince(repo.path, base, headOf(), 512 * 1024);
 
     expect(changes.diff).toContain('+changed');
     expect(existsSync(textconvMark)).toBe(false);
     expect(existsSync(externalMark)).toBe(false);
+  });
+
+  it('diffs the base against the given head, not the checkout head', async () => {
+    const base = headOf();
+    write('one.txt', 'one\n');
+    commitAll('one');
+    const middle = headOf();
+    write('two.txt', 'two\n');
+    commitAll('two');
+
+    const changes = await git.diffSince(repo.path, base, middle, 512 * 1024);
+
+    expect(changes.files.map((f) => f.path)).toEqual(['one.txt']);
+    expect(changes.diff).not.toContain('two.txt');
+  });
+
+  it('reads a diff over the output limit without failing, and stops at the cap', async () => {
+    const base = headOf();
+    const line = `${'x'.repeat(78)}\n`;
+    write('huge.txt', line.repeat(Math.ceil((70 * 1024 * 1024) / line.length)));
+    commitAll('huge');
+
+    const changes = await git.diffSince(repo.path, base, headOf(), 4096);
+
+    expect(changes.truncated).toBe(true);
+    expect(Buffer.byteLength(changes.diff)).toBeLessThanOrEqual(4096);
+    expect(changes.diff).toContain('diff --git a/huge.txt b/huge.txt');
+    expect(changes.files).toEqual([
+      { path: 'huge.txt', added: Math.ceil((70 * 1024 * 1024) / line.length), removed: 0 },
+    ]);
+  }, 60_000);
+
+  it.each([
+    { name: 'diff.noprefix', key: 'diff.noprefix', value: 'true' },
+    { name: 'diff.mnemonicPrefix', key: 'diff.mnemonicPrefix', value: 'true' },
+    { name: 'diff.srcPrefix', key: 'diff.srcPrefix', value: 'before/' },
+    { name: 'diff.dstPrefix', key: 'diff.dstPrefix', value: 'after/' },
+    { name: 'diff.context', key: 'diff.context', value: '0' },
+  ])('is not changed by the checkout config $name', async ({ key, value }) => {
+    write('c.txt', '1\n2\n3\n4\n5\n6\n7\n');
+    commitAll('c');
+    const base = headOf();
+    write('c.txt', '1\n2\n3\nfour\n5\n6\n7\n');
+    commitAll('c2');
+    const plain = await git.diffSince(repo.path, base, headOf(), 512 * 1024);
+
+    rawGit('config', key, value);
+    const configured = await git.diffSince(repo.path, base, headOf(), 512 * 1024);
+
+    expect(plain.diff).toContain('--- a/c.txt\n+++ b/c.txt');
+    expect(configured).toEqual(plain);
+  });
+
+  it('is not changed by diff.orderFile', async () => {
+    const base = headOf();
+    write('a.txt', 'a\n');
+    write('z.txt', 'z\n');
+    commitAll('two files');
+    const plain = await git.diffSince(repo.path, base, headOf(), 512 * 1024);
+    write('order', 'z.txt\na.txt\n');
+    rawGit('config', 'diff.orderFile', join(repo.path, 'order'));
+
+    expect(await git.diffSince(repo.path, base, headOf(), 512 * 1024)).toEqual(plain);
+  });
+
+  it('shows a path with a space and a newline the same whatever core.quotePath says', async () => {
+    const base = headOf();
+    write('sp ace\nline é.txt', 'x\n');
+    commitAll('odd name');
+    const plain = await git.diffSince(repo.path, base, headOf(), 512 * 1024);
+    rawGit('config', 'core.quotePath', 'false');
+
+    const configured = await git.diffSince(repo.path, base, headOf(), 512 * 1024);
+
+    expect(configured).toEqual(plain);
+    expect(plain.files.map((f) => f.path)).toEqual(['sp ace\nline é.txt']);
+  });
+
+  it('runs no program a submodule names when diff.submodule asks for the submodule diff', async () => {
+    const mark = join(repo.path, '..', `submodule-diff-ran-${String(process.pid)}`);
+    mkdirSync(join(repo.path, 'sub'));
+    const inSub = (...args: string[]) =>
+      execFileSync('git', ['-C', join(repo.path, 'sub'), ...args], {
+        env: isolatedGitEnv(),
+        stdio: ['ignore', 'pipe', 'pipe'],
+      })
+        .toString()
+        .trim();
+    inSub('init', '-q');
+    inSub('config', 'user.name', 'T');
+    inSub('config', 'user.email', 't@example.com');
+    inSub('config', 'commit.gpgsign', 'false');
+    inSub('config', 'maintenance.auto', 'false');
+    inSub('config', 'gc.auto', '0');
+    writeFileSync(join(repo.path, 'sub', 's.txt'), 's1\n');
+    inSub('add', 's.txt');
+    inSub('commit', '-q', '-m', 's1');
+    const first = inSub('rev-parse', 'HEAD');
+    rawGit('update-index', '--add', '--cacheinfo', `160000,${first},sub`);
+    rawGit('commit', '-q', '-m', 'add gitlink');
+    const base = headOf();
+    writeFileSync(join(repo.path, 'sub', 's.txt'), 's2\n');
+    inSub('add', 's.txt');
+    inSub('commit', '-q', '-m', 's2');
+    rawGit('update-index', '--cacheinfo', `160000,${inSub('rev-parse', 'HEAD')},sub`);
+    rawGit('commit', '-q', '-m', 'bump gitlink');
+    rawGit('config', 'diff.submodule', 'diff');
+    inSub('config', 'diff.external', `sh -c 'touch ${mark}' --`);
+
+    const changes = await git.diffSince(repo.path, base, headOf(), 512 * 1024);
+
+    expect(changes.diff).toContain('Subproject commit');
+    expect(existsSync(mark)).toBe(false);
   });
 });
