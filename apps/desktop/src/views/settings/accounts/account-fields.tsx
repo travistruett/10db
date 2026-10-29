@@ -118,7 +118,7 @@ function ModelMapRows({
             onChange({ ...values, modelMap: [...values.modelMap, { alias: '', modelId: '' }] });
           }}
         >
-          Add model mapping
+          Add Model Mapping
         </Button>
       </Group>
     </Stack>

@@ -54,7 +54,7 @@ export function ArchiveAccount({
           onConfirmingChange(true);
         }}
       >
-        Archive account
+        Archive Account
       </Button>
       <Modal
         opened={confirming}
@@ -80,7 +80,7 @@ export function ArchiveAccount({
               loading={archive.isPending}
               onClick={() => void confirm()}
             >
-              Archive account
+              Archive Account
             </Button>
           </Group>
         </Stack>

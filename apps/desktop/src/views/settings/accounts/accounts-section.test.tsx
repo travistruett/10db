@@ -128,9 +128,23 @@ describe('AccountsSection', () => {
     expect(await within(ok).findByText('2K tokens')).toBeTruthy();
   });
 
-  it('offers Add account above the table', async () => {
+  it('the This month column is right-aligned', async () => {
     serve([DEFAULT_ACCOUNT]);
-    expect(await screen.findByRole('button', { name: 'Add account' })).toBeTruthy();
+    const header = await screen.findByRole('columnheader', { name: 'This month' });
+    expect(header.style.textAlign).toBe('right');
+    const row = await rowOf('Claude plan');
+    expect(within(row).getAllByRole('cell')[3]?.style.textAlign).toBe('right');
+  });
+
+  it('shows the email as dimmed text under the name, not a code chip', async () => {
+    serve([DEFAULT_ACCOUNT]);
+    const row = await rowOf('Claude plan');
+    expect(within(row).getByText('builder@example.com').tagName).not.toBe('CODE');
+  });
+
+  it('offers Add Account above the table', async () => {
+    serve([DEFAULT_ACCOUNT]);
+    expect(await screen.findByRole('button', { name: 'Add Account' })).toBeTruthy();
   });
 
   it('keeps the table, the open drawer and an edit in progress when a refetch fails', async () => {

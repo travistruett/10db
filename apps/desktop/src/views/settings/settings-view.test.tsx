@@ -7,16 +7,18 @@ import { accountDto, DEFAULT_ACCOUNT } from '../../test/account-fixtures';
 import { projectDto } from '../../test/fixtures';
 
 /** Opens a Select and picks an option from its own list (every Select keeps its options in the document). */
-async function pick(select: HTMLElement, option: string): Promise<void> {
-  fireEvent.click(select);
-  const labelId = select instanceof HTMLInputElement ? select.labels?.[0]?.id : undefined;
-  const listbox = screen
-    .getAllByRole('listbox', { hidden: true })
-    .find((l) => l.getAttribute('aria-labelledby') === labelId);
-  expect(listbox).toBeDefined();
-  fireEvent.click(
-    await within(listbox ?? document.body).findByRole('option', { name: option, hidden: true }),
-  );
+async function pick(field: string, option: RegExp): Promise<void> {
+  const listbox = await waitFor(() => {
+    // Looked up afresh each time: a refetch can replace the field and close its list.
+    const input = screen.getByRole('combobox', { name: field });
+    if (input.getAttribute('aria-expanded') !== 'true') fireEvent.click(input);
+    const found = screen
+      .getAllByRole('listbox', { hidden: true })
+      .find((l) => l.id === input.getAttribute('aria-controls'));
+    expect(found).toBeDefined();
+    return found ?? document.body;
+  });
+  fireEvent.click(await within(listbox).findByRole('option', { name: option, hidden: true }));
 }
 
 describe('SettingsView', () => {
@@ -130,19 +132,16 @@ describe('SettingsView', () => {
     const picker = await screen.findByRole('combobox', { name: 'Account' });
     // The account list loads after the section opens.
     await waitFor(() => {
-      expect(picker).toHaveProperty(
-        'value',
-        'Claude plan · builder@example.com (Claude subscription)',
-      );
+      expect(picker).toHaveProperty('value', 'Claude plan');
     });
-    await pick(picker, 'Client key (Anthropic API key)');
+    await pick('Account', /Client key/);
     await waitFor(() => {
       expect(patched).toEqual([{ accountId: client.id }]);
     });
 
-    const fallback = screen.getByRole('combobox', { name: 'Fallback account' });
+    const fallback = screen.getByRole('combobox', { name: 'Backup account' });
     expect(fallback).toHaveProperty('value', '');
-    await pick(fallback, 'Client key (Anthropic API key)');
+    await pick('Backup account', /Client key/);
     await waitFor(() => {
       expect(patched).toEqual([{ accountId: client.id }, { fallbackAccountId: client.id }]);
     });
@@ -162,9 +161,9 @@ describe('SettingsView', () => {
     );
     renderApp('/settings/areas');
     fireEvent.click(await screen.findByRole('link', { name: /Billing/ }));
-    const field = await screen.findByRole('textbox', { name: 'Hand off at' });
+    const field = await screen.findByRole('textbox', { name: 'Switch at' });
     expect(field).toHaveProperty('value', '95%');
-    expect(screen.getByText(/only on a Claude subscription account/)).toBeTruthy();
+    expect(screen.getByText(/On a Claude plan/)).toBeTruthy();
 
     fireEvent.change(field, { target: { value: '100' } });
     fireEvent.blur(field);
@@ -193,19 +192,18 @@ describe('SettingsView', () => {
     );
     renderApp('/settings/areas');
     fireEvent.click(await screen.findByRole('link', { name: /Billing/ }));
-    const fallback = await screen.findByRole('combobox', { name: 'Fallback account' });
+    const fallback = await screen.findByRole('combobox', { name: 'Backup account' });
     fireEvent.click(fallback);
-    const labelId = fallback instanceof HTMLInputElement ? fallback.labels?.[0]?.id : undefined;
     const listbox = screen
       .getAllByRole('listbox', { hidden: true })
-      .find((l) => l.getAttribute('aria-labelledby') === labelId);
+      .find((l) => l.id === fallback.getAttribute('aria-controls'));
     expect(listbox).toBeDefined();
     // The account list loads after the section opens.
     await within(listbox ?? document.body).findByRole('option', { hidden: true });
     const names = within(listbox ?? document.body)
       .getAllByRole('option', { hidden: true })
       .map((o) => o.textContent);
-    expect(names).toEqual(['Client key (Anthropic API key)']);
+    expect(names).toEqual(['Client keyAnthropic API key']);
   });
 
   it('shows the recorded fallback after 10db moved the project onto it', async () => {
@@ -222,9 +220,9 @@ describe('SettingsView', () => {
     );
     renderApp('/settings/areas');
     fireEvent.click(await screen.findByRole('link', { name: /Billing/ }));
-    const fallback = await screen.findByRole('combobox', { name: 'Fallback account' });
+    const fallback = await screen.findByRole('combobox', { name: 'Backup account' });
     await waitFor(() => {
-      expect(fallback).toHaveProperty('value', 'Client key (Anthropic API key)');
+      expect(fallback).toHaveProperty('value', 'Client key');
     });
   });
 
@@ -242,17 +240,43 @@ describe('SettingsView', () => {
     );
     renderApp('/settings/areas');
     fireEvent.click(await screen.findByRole('link', { name: /Billing/ }));
-    expect(await screen.findByRole('textbox', { name: 'Hand off at' })).toHaveProperty(
+    expect(await screen.findByRole('textbox', { name: 'Switch at' })).toHaveProperty(
       'value',
       '90%',
     );
     fireEvent.click(screen.getByRole('button', { name: 'Project: Alpha. Switch project' }));
     fireEvent.click(await screen.findByRole('option', { name: /Beta/, hidden: true }));
     await waitFor(() => {
-      expect(screen.getByRole('textbox', { name: 'Hand off at' })).toHaveProperty('value', '95%');
+      expect(screen.getByRole('textbox', { name: 'Switch at' })).toHaveProperty('value', '95%');
     });
-    fireEvent.blur(screen.getByRole('textbox', { name: 'Hand off at' }));
+    fireEvent.blur(screen.getByRole('textbox', { name: 'Switch at' }));
     expect(patched).toEqual([]);
+  });
+
+  it('Billing has Account, Backup account and Switch at, and no fallback model', async () => {
+    server.use(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([projectDto()])),
+      ...baseHandlers(),
+    );
+    renderApp('/settings/billing');
+    expect(await screen.findByRole('combobox', { name: 'Account' })).toBeTruthy();
+    expect(screen.getByRole('combobox', { name: 'Backup account' })).toBeTruthy();
+    expect(screen.getByRole('textbox', { name: 'Switch at' })).toBeTruthy();
+    expect(screen.queryByText(/fallback model/i)).toBeNull();
+    expect(screen.queryByText('Fallback account')).toBeNull();
+  });
+
+  it('Keep awake is one row with Never, While tasks run and Always', async () => {
+    server.use(...baseHandlers());
+    renderApp('/settings/keep-awake');
+    const group = await screen.findByRole('radiogroup', { name: 'Keep the Mac awake' });
+    expect(
+      within(group)
+        .getAllByRole('radio')
+        .map((r) => r.getAttribute('value')),
+    ).toEqual(['off', 'while_running', 'always']);
+    expect(within(group).getByText('While tasks run')).toBeTruthy();
+    expect(within(group).getByText('Never')).toBeTruthy();
   });
 
   it('changes the keep-awake mode', async () => {
@@ -265,7 +289,7 @@ describe('SettingsView', () => {
       ...baseHandlers(),
     );
     renderApp('/settings/keep-awake');
-    fireEvent.click(await screen.findByRole('radio', { name: 'Always keep the Mac awake' }));
+    fireEvent.click(await screen.findByRole('radio', { name: 'Always' }));
     await waitFor(() => {
       expect(put).toEqual([{ mode: 'always' }]);
     });

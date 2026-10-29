@@ -4,7 +4,6 @@ import {
   Alert,
   Badge,
   Button,
-  Code,
   Group,
   Progress,
   Skeleton,
@@ -71,30 +70,28 @@ function AccountRow({
   return (
     <Table.Tr>
       <Table.Td>
-        <Group gap="xs" wrap="nowrap">
-          <UnstyledButton
-            aria-label={`Open ${account.label}`}
-            onClick={() => {
-              onOpen(account);
-            }}
-          >
-            <Text size="sm" fw={500}>
-              {account.label}
-            </Text>
-          </UnstyledButton>
-          {account.isDefault ? (
-            <Badge size="sm" variant="light" color="gray">
-              Default
-            </Badge>
-          ) : null}
-        </Group>
-        {account.expectedIdentity === null ? (
+        <Stack gap={4}>
+          <Group gap="xs" wrap="nowrap">
+            <UnstyledButton
+              aria-label={`Open ${account.label}`}
+              onClick={() => {
+                onOpen(account);
+              }}
+            >
+              <Text size="sm" fw={500}>
+                {account.label}
+              </Text>
+            </UnstyledButton>
+            {account.isDefault ? (
+              <Badge size="sm" variant="light" color="gray">
+                Default
+              </Badge>
+            ) : null}
+          </Group>
           <Text size="xs" c="dimmed">
-            No identity yet
+            {account.expectedIdentity ?? 'No identity yet'}
           </Text>
-        ) : (
-          <Code fz="xs">{account.expectedIdentity}</Code>
-        )}
+        </Stack>
       </Table.Td>
       <Table.Td>
         <Text size="sm">{ACCOUNT_KIND_LABEL[account.kind]}</Text>
@@ -104,7 +101,7 @@ function AccountRow({
           {ACCOUNT_STATUS_LABEL[status]}
         </Badge>
       </Table.Td>
-      <Table.Td miw={180}>
+      <Table.Td ta="right">
         <UsageCell account={account} />
       </Table.Td>
     </Table.Tr>
@@ -165,16 +162,19 @@ export function AccountsSection() {
             setAdding(true);
           }}
         >
-          Add account
+          Add Account
         </Button>
       </Group>
-      <Table aria-label="Accounts" verticalSpacing="xs">
+      {/* The account column takes the spare width; the rest are fixed, and usage sits right like any number. */}
+      <Table aria-label="Accounts" verticalSpacing="sm">
         <Table.Thead>
           <Table.Tr>
             <Table.Th>Account</Table.Th>
-            <Table.Th>Kind</Table.Th>
-            <Table.Th>Status</Table.Th>
-            <Table.Th>This month</Table.Th>
+            <Table.Th w={220}>Kind</Table.Th>
+            <Table.Th w={140}>Status</Table.Th>
+            <Table.Th w={220} ta="right">
+              This month
+            </Table.Th>
           </Table.Tr>
         </Table.Thead>
         <Table.Tbody>

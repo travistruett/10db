@@ -56,7 +56,7 @@ function serve(refusal?: { status: number; message: string }): Served {
 }
 
 async function openModal(kindLabel: string) {
-  fireEvent.click(await screen.findByRole('button', { name: 'Add account' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Add Account' }));
   const dialog = await screen.findByRole('dialog', { name: 'Add account' });
   fireEvent.click(within(dialog).getByRole('combobox', { name: 'Kind' }));
   fireEvent.click(await screen.findByRole('option', { name: kindLabel, hidden: true }));
@@ -107,7 +107,7 @@ describe('AddAccountModal', () => {
     const dialog = await openModal('Gateway');
     type(dialog, 'Label', 'Router');
     type(dialog, 'Base URL', 'https://gw.example.com/v1');
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Add model mapping' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add Model Mapping' }));
     type(dialog, 'Alias, row 1', 'sonnet');
     type(dialog, 'Model ID, row 1', 'anthropic/claude-sonnet');
     const tags = within(dialog).getByRole('combobox', { name: 'Offered aliases' });
@@ -150,14 +150,14 @@ describe('AddAccountModal', () => {
 
   it('names the modal’s close button', async () => {
     serve();
-    fireEvent.click(await screen.findByRole('button', { name: 'Add account' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Add Account' }));
     const dialog = await screen.findByRole('dialog', { name: 'Add account' });
     expect(within(dialog).getByRole('button', { name: 'Close' })).toBeTruthy();
   });
 
-  it('returns focus to Add account when the new account’s drawer closes', async () => {
+  it('returns focus to Add Account when the new account’s drawer closes', async () => {
     serve();
-    const add = await screen.findByRole('button', { name: 'Add account' });
+    const add = await screen.findByRole('button', { name: 'Add Account' });
     const dialog = await openModal('Claude subscription');
     type(dialog, 'Label', 'Company A');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Create' }));
@@ -171,7 +171,7 @@ describe('AddAccountModal', () => {
   it('moves focus through the model map rows as they are added and removed', async () => {
     serve();
     const dialog = await openModal('Claude subscription');
-    const add = within(dialog).getByRole('button', { name: 'Add model mapping' });
+    const add = within(dialog).getByRole('button', { name: 'Add Model Mapping' });
     fireEvent.click(add);
     expect(document.activeElement).toBe(
       within(dialog).getByRole('textbox', { name: 'Alias, row 1' }),
@@ -193,7 +193,7 @@ describe('AddAccountModal', () => {
   it('names Remove buttons by row when two rows share an alias', async () => {
     serve();
     const dialog = await openModal('Claude subscription');
-    const add = within(dialog).getByRole('button', { name: 'Add model mapping' });
+    const add = within(dialog).getByRole('button', { name: 'Add Model Mapping' });
     fireEvent.click(add);
     type(dialog, 'Alias, row 1', 'sonnet');
     fireEvent.click(add);
@@ -207,7 +207,7 @@ describe('AddAccountModal', () => {
     const { posts } = serve();
     const dialog = await openModal('Claude subscription');
     type(dialog, 'Label', 'Company A');
-    const add = within(dialog).getByRole('button', { name: 'Add model mapping' });
+    const add = within(dialog).getByRole('button', { name: 'Add Model Mapping' });
     fireEvent.click(add);
     fireEvent.click(add);
     for (const row of ['1', '2']) {
