@@ -64,6 +64,9 @@ describe('loadEnv', () => {
     ['a short dev token', { TENDB_DEV_UI_TOKEN: 'short-secret-value' }, 'TENDB_DEV_UI_TOKEN'],
     ['a relative claude path', { TENDB_CLAUDE_PATH: 'bin/claude' }, 'TENDB_CLAUDE_PATH'],
     ['a relative worktree root', { TENDB_WORKTREE_ROOT: 'worktrees' }, 'TENDB_WORKTREE_ROOT'],
+    ['zero gate slots', { TENDB_GATE_SLOTS: '0' }, 'TENDB_GATE_SLOTS'],
+    ['a fractional gate slot count', { TENDB_GATE_SLOTS: '1.5' }, 'TENDB_GATE_SLOTS'],
+    ['a text gate slot count', { TENDB_GATE_SLOTS: 'two' }, 'TENDB_GATE_SLOTS'],
     [
       'a worktree root with a home shorthand',
       { TENDB_WORKTREE_ROOT: '~/wt' },
@@ -72,6 +75,27 @@ describe('loadEnv', () => {
   ])('rejects %s without echoing it', (_name, source, variable) => {
     expect(() => loadEnv(source)).toThrow(variable);
     expect(() => loadEnv(source)).not.toThrow(String(Object.values(source)[0]));
+  });
+
+  it.each([
+    ['on', 'on'],
+    ['off', 'off'],
+    ['absent', undefined],
+    ['empty, which means unset', undefined],
+  ])('reads TENDB_BENCHMARKS when it is %s', (name, expected) => {
+    const source =
+      name === 'absent' ? {} : { TENDB_BENCHMARKS: name.startsWith('empty') ? '' : name };
+    expect(loadEnv(source).TENDB_BENCHMARKS).toBe(expected);
+  });
+
+  it.each([
+    ['uppercase', 'OFF'],
+    ['a boolean word', 'false'],
+    ['a number', '0'],
+  ])('rejects TENDB_BENCHMARKS as %s, naming the variable and not the value', (_name, value) => {
+    expect(() => loadEnv({ TENDB_BENCHMARKS: value })).toThrow(EnvError);
+    expect(() => loadEnv({ TENDB_BENCHMARKS: value })).toThrow('TENDB_BENCHMARKS');
+    expect(() => loadEnv({ TENDB_BENCHMARKS: value })).not.toThrow(`: ${value}`);
   });
 
   it('never puts a value in the error message', () => {

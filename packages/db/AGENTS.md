@@ -29,3 +29,4 @@ only process that writes the database.
 - The daemon bundle ships its own copy of `drizzle/`; pass its path to `migrateDatabase`.
 - Repositories are synchronous functions over `DbReader` (reads) or `WriteContext` (writes); never open a second connection.
 - `board_columns` holds the builder's human columns; `tasks.board_column_id` set means parked (never started: `insertWorkstream` refuses it), null means planned. `moveTask` refuses to park a task that a started dependent waits on.
+- `cancelTask` removes a task that never started (status `cancelled`, row kept, decision `2026-10-28-remove-unstarted-task.md`); `listTasks` leaves cancelled tasks out, so a reader of the project's tasks never sees one.

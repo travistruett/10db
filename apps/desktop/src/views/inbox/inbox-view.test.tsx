@@ -1,4 +1,4 @@
-import type { InboxItemDto } from '@10db/contracts';
+import { mintId, type InboxItemDto } from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse, type RequestHandler, type WebSocketHandler } from 'msw';
 import { describe, expect, it } from 'vitest';
@@ -31,9 +31,20 @@ function inbox(items: InboxItemDto[]): { answers: { id: string; body: unknown }[
   return { answers };
 }
 
-const key = (k: string): void => {
-  fireEvent.keyDown(document.body, { key: k });
+const key = (k: string, init: { shiftKey?: boolean } = {}): void => {
+  fireEvent.keyDown(document.body, { key: k, ...init });
 };
+
+/** The expanded card. */
+function selectedCard(): HTMLElement {
+  const card = document.querySelector('[data-inbox-selected]');
+  if (!(card instanceof HTMLElement)) throw new Error('no card is expanded');
+  return card;
+}
+
+const project = mintId('Project');
+const flag = (title: string, body: string): InboxItemDto =>
+  inboxItemDto({ kind: 'flag', title, body, options: [], projectId: project });
 
 const color = inboxItemDto({
   kind: 'question',
@@ -65,9 +76,6 @@ describe('InboxView', () => {
     const { answers } = inbox([color, corners]);
     renderApp('/inbox');
     expect(await screen.findByText('Which badge color?')).toBeTruthy();
-    expect(
-      screen.getByText('j/k to move · 1–4 to choose · n to add a note · Enter to send'),
-    ).toBeTruthy();
 
     key('j');
     expect(await screen.findByRole('radio', { name: /Square/ })).toBeTruthy();
@@ -358,11 +366,13 @@ describe('InboxView', () => {
 
       key('1');
       key('Enter');
-      expect(await screen.findByText('docs/shown.md')).toBeTruthy();
+      await waitFor(() => {
+        expect(selectedCard().textContent).toContain('docs/shown.md');
+      });
       current = [late, shown];
       await queryClient.invalidateQueries({ queryKey: queryKeys.inbox });
       await screen.findByText('Write inside another workstream claim');
-      expect(screen.queryByText('src/ui/late.tsx')).toBeNull();
+      expect(selectedCard().textContent).toContain('docs/shown.md');
 
       key('Enter');
       await waitFor(() => {
@@ -425,6 +435,208 @@ describe('InboxView', () => {
       link.focus();
       expect(fireEvent.keyDown(link, { key: 'Enter' })).toBe(true);
       expect(answers).toEqual([]);
+    });
+  });
+
+  describe('shortcuts', () => {
+    it('moves with ↑ and ↓ as well as j and k', async () => {
+      inbox([color, corners]);
+      renderApp('/inbox');
+      await screen.findByText('Which badge color?');
+      key('ArrowDown');
+      expect(await screen.findByRole('radio', { name: /Square/ })).toBeTruthy();
+      key('ArrowUp');
+      expect(await screen.findByRole('radio', { name: /Red/ })).toBeTruthy();
+      key('j');
+      expect(await screen.findByRole('radio', { name: /Square/ })).toBeTruthy();
+    });
+
+    it('leaves ↑ and ↓ to a focused option, which moves between options', async () => {
+      inbox([color, corners]);
+      renderApp('/inbox');
+      const teal = await screen.findByRole('radio', { name: /Teal/ });
+      teal.focus();
+      fireEvent.keyDown(teal, { key: 'ArrowDown', code: 'ArrowDown' });
+      await waitFor(() => {
+        expect(document.activeElement).toBe(screen.getByRole('radio', { name: /Red/ }));
+      });
+      expect(selectedCard().textContent).toContain('Which badge color?');
+    });
+
+    it('leaves ↑ and ↓ to the page when there is no card to move to', async () => {
+      inbox([color, corners]);
+      renderApp('/inbox');
+      await screen.findByText('Which badge color?');
+      // fireEvent answers false when the default action was cancelled.
+      expect(fireEvent.keyDown(document.body, { key: 'ArrowUp' })).toBe(true);
+      expect(fireEvent.keyDown(document.body, { key: 'ArrowDown' })).toBe(false);
+      expect(await screen.findByRole('radio', { name: /Square/ })).toBeTruthy();
+      expect(fireEvent.keyDown(document.body, { key: 'ArrowDown' })).toBe(true);
+    });
+
+    it('shows no line of shortcut instructions', async () => {
+      inbox([color]);
+      renderApp('/inbox');
+      await screen.findByText('Which badge color?');
+      expect(screen.queryByText(/to move/)).toBeNull();
+    });
+
+    it('shows Enter on Send Answer and each option its number key', async () => {
+      inbox([color]);
+      renderApp('/inbox');
+      const send = await screen.findByRole('button', { name: /Send answer/ });
+      expect(within(send).getByText('↵')).toBeTruthy();
+      expect(within(screen.getByRole('radio', { name: /Teal/ })).getByText('1')).toBeTruthy();
+      expect(within(screen.getByRole('radio', { name: /Red/ })).getByText('2')).toBeTruthy();
+    });
+
+    it('lists every shortcut from the ? button and the ? key', async () => {
+      inbox([color]);
+      renderApp('/inbox');
+      await screen.findByText('Which badge color?');
+
+      const help = screen.getByRole('button', { name: 'Keyboard shortcuts' });
+      help.focus();
+      fireEvent.click(help);
+      const list = await screen.findByRole('dialog', { name: 'Keyboard Shortcuts' });
+      for (const action of [
+        'Move between cards',
+        'Choose an option',
+        'Write a note',
+        'Send the answer, or dismiss a flag',
+        'Send from the note',
+        'Show these shortcuts',
+      ])
+        expect(within(list).getByText(action)).toBeTruthy();
+      fireEvent.click(within(list).getByRole('button', { name: 'Close' }));
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog')).toBeNull();
+      });
+      // Focus doesn't go back to the ? button, where the Inbox keys would not count.
+      expect(document.activeElement).not.toBe(help);
+
+      key('?', { shiftKey: true });
+      expect(await screen.findByRole('dialog', { name: 'Keyboard Shortcuts' })).toBeTruthy();
+    });
+  });
+
+  describe('flags', () => {
+    it('shows what a collapsed flag is about', async () => {
+      inbox([color, flag('Write outside every claim', 'docs/notes.md (main checkout)')]);
+      renderApp('/inbox');
+      await screen.findByText('Which badge color?');
+      const row = screen.getByRole('button', { name: /Write outside every claim/ });
+      expect(row.textContent).toContain('docs/notes.md (main checkout)');
+    });
+
+    it('dismisses a collapsed flag from its row without opening it', async () => {
+      const stray = flag('Write outside every claim', 'docs/notes.md');
+      const { answers } = inbox([color, stray]);
+      renderApp('/inbox');
+      await screen.findByText('Which badge color?');
+      fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+      await waitFor(() => {
+        expect(answers).toEqual([{ id: stray.id, body: { choice: 'dismissed' } }]);
+      });
+      expect(selectedCard().textContent).toContain('Which badge color?');
+    });
+
+    it('groups identical flags into one row with a count, and dismisses them together', async () => {
+      const copies = [1, 2, 3].map(() => flag('MCP server failed', 'mantine exited'));
+      const { answers } = inbox([color, ...copies]);
+      renderApp('/inbox');
+      await screen.findByText('Which badge color?');
+      const rows = screen.getAllByRole('button', { name: /MCP server failed/ });
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.textContent).toContain('×3');
+
+      key('j');
+      expect(selectedCard().textContent).toContain('MCP server failed');
+      fireEvent.click(within(selectedCard()).getByRole('button', { name: /Dismiss All/ }));
+      await waitFor(() => {
+        expect(answers).toEqual(copies.map((c) => ({ id: c.id, body: { choice: 'dismissed' } })));
+      });
+    });
+
+    it('does not paint a flag red like an error', async () => {
+      inbox([flag('Write outside every claim', 'docs/notes.md')]);
+      renderApp('/inbox');
+      await screen.findByText('Write outside every claim');
+      const badge = within(selectedCard()).getByText('Flag').closest('.mantine-Badge-root');
+      expect(badge?.getAttribute('style')).toContain('yellow');
+    });
+
+    it("keeps the open card's draft when a collapsed flag fails to dismiss, and says so beside it", async () => {
+      const stray = flag('Write outside every claim', 'docs/notes.md');
+      serve(
+        http.get(daemonUrl('/inbox'), () => HttpResponse.json([color, stray])),
+        http.post(daemonUrl('/inbox/:id/answer'), () =>
+          HttpResponse.json({ error: 'internal', message: 'The daemon broke' }, { status: 500 }),
+        ),
+      );
+      renderApp('/inbox');
+      await screen.findByText('Which badge color?');
+      key('2');
+      const note = screen.getByLabelText('Note for the agent (optional)');
+      fireEvent.change(note, { target: { value: 'half written' } });
+
+      const row = screen.getByRole('button', { name: /Write outside every claim/ }).parentElement;
+      if (!row) throw new Error('the flag row has no container');
+      fireEvent.click(within(row).getByRole('button', { name: 'Dismiss' }));
+
+      expect(await within(row).findByText('The daemon broke')).toBeTruthy();
+      expect(screen.getByRole('radio', { name: /Red/ }).getAttribute('aria-checked')).toBe('true');
+      expect(
+        screen.getByLabelText<HTMLTextAreaElement>('Note for the agent (optional)').value,
+      ).toBe('half written');
+    });
+
+    it('keeps a group selected while its flags are dismissed, and shows a failure on it', async () => {
+      const copies = [1, 2, 3].map(() => flag('MCP server failed', 'mantine exited'));
+      const answered: string[] = [];
+      serve(
+        http.get(daemonUrl('/inbox'), () =>
+          HttpResponse.json([color, ...copies].filter((i) => !answered.includes(i.id))),
+        ),
+        http.post(daemonUrl('/inbox/:id/answer'), ({ params }) => {
+          const id = String(params['id']);
+          if (id === copies[1]?.id)
+            return HttpResponse.json(
+              { error: 'internal', message: 'The daemon broke' },
+              { status: 500 },
+            );
+          answered.push(id);
+          return HttpResponse.json({ ...copies.find((c) => c.id === id), state: 'RESOLVED' });
+        }),
+      );
+      renderApp('/inbox');
+      await screen.findByText('Which badge color?');
+      key('j');
+      expect(selectedCard().textContent).toContain('MCP server failed');
+      key('Enter');
+
+      expect(await within(selectedCard()).findByText('The daemon broke')).toBeTruthy();
+      expect(selectedCard().textContent).toContain('×2');
+      expect(answered).toEqual([copies[0]?.id]);
+    });
+
+    it('refreshes the list when a flag was already closed elsewhere', async () => {
+      const stray = flag('Write outside every claim', 'docs/notes.md');
+      let closed = false;
+      serve(
+        http.get(daemonUrl('/inbox'), () => HttpResponse.json(closed ? [] : [stray])),
+        http.post(daemonUrl('/inbox/:id/answer'), () => {
+          closed = true;
+          return HttpResponse.json(
+            { error: 'conflict', message: `Inbox item ${stray.id} is already RESOLVED` },
+            { status: 409 },
+          );
+        }),
+      );
+      renderApp('/inbox');
+      await screen.findByText('Write outside every claim');
+      fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+      expect(await screen.findByText('Nothing needs you right now.')).toBeTruthy();
     });
   });
 });

@@ -164,11 +164,8 @@ interface LaneRun {
   readonly tmpDir: string;
   /** The variables the sandbox sets for lane commands, with the daemon's values. */
   readonly commandEnv: Readonly<Record<string, string>>;
-}
-
-/** The sandbox's env without Claude Code's own `CLAUDE_*` settings, which are not for commands. */
-function commandEnvOf(env: Readonly<Record<string, string>>): Record<string, string> {
-  return Object.fromEntries(Object.entries(env).filter(([name]) => !name.startsWith('CLAUDE_')));
+  /** The env Claude Code itself, and the git it runs outside the sandbox, are started with. */
+  readonly sessionEnv: Readonly<Record<string, string>>;
 }
 
 /**
@@ -267,7 +264,7 @@ async function runLane(opts: {
     if (envFile === undefined) throw new Error('the lane has no env file');
     writeFileSync(
       join(opts.checkout, 'probe.sh'),
-      opts.probe({ tmpDir: lane.tmpDir, envFile, env: commandEnvOf(lane.spec.env) }),
+      opts.probe({ tmpDir: lane.tmpDir, envFile, env: lane.commandEnv }),
     );
     return await driveSession({ lane, project, workstreamId: workstream.id, envFile });
   } finally {
@@ -380,7 +377,8 @@ async function runLane(opts: {
         mode: statSync(run.envFile).mode & 0o777,
       },
       tmpDir: lane.tmpDir,
-      commandEnv: commandEnvOf(lane.spec.env),
+      commandEnv: lane.commandEnv,
+      sessionEnv: lane.spec.env,
     };
   }
 }
@@ -543,6 +541,8 @@ describe.skipIf(!live)('lane sandbox, live', () => {
             ...envProbes(env),
             `echo "GH_TOKEN_COUNT=$(env | grep -c '^GH_TOKEN=')"`,
             ...READ_ONLY_GIT_PROBES,
+            // Apple's git is an xcrun shim that caches its lookup in the file `xcrun_db` names.
+            `echo "XCRUN_GIT=$(/usr/bin/git --version 2>&1 | tr '\\n' ' ')"`,
             'echo "OPTIONAL_LOCKS=$GIT_OPTIONAL_LOCKS"',
             ...canaries.map((c) => `echo 'CAT ${c.label}'; cat '${c.path}'`),
             tryWrite(join(checkout, 'probe-write-control')),
@@ -598,6 +598,21 @@ describe.skipIf(!live)('lane sandbox, live', () => {
         .toEqual(expect.arrayContaining(['CARGO_HOME', 'GIT_CONFIG_GLOBAL', 'npm_config_cache']));
       for (const name of Object.keys(run.commandEnv))
         expect.soft(probeLine(run.probeOutput, `ENV ${name}=`), name).toBe(`ENV ${name}=match`);
+      // xcrun's cache file is set for the shell alone, and lets Apple's git run with no error.
+      expect.soft(Object.keys(run.commandEnv)).toContain('xcrun_db');
+      expect.soft(probeLine(run.probeOutput, 'ENV xcrun_db=')).toBe('ENV xcrun_db=match');
+      expect.soft(probeLine(run.probeOutput, 'XCRUN_GIT=')).toMatch(/^XCRUN_GIT=git version /);
+      expect.soft(probeLine(run.probeOutput, 'XCRUN_GIT=')).not.toContain("couldn't create cache");
+      // Claude Code and its own git run outside the sandbox with the session env: no variable in it
+      // names a path the lane can write, or a tool there would read or run what the lane wrote.
+      expect.soft(Object.keys(run.sessionEnv)).not.toContain('xcrun_db');
+      expect
+        .soft(
+          Object.entries(run.sessionEnv)
+            .filter(([, value]) => value === run.tmpDir || value.startsWith(`${run.tmpDir}/`))
+            .map(([name]) => name),
+        )
+        .toEqual(['CLAUDE_CODE_TMPDIR']);
       const exported = run.envFile.content
         .split('\n')
         .filter((line) => line !== '')

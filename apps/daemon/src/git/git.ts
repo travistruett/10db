@@ -44,10 +44,16 @@ export class WorktreeNotOursError extends Error {
   readonly path: string;
   /** Why it is not one, as the builder reads it. */
   readonly why: string;
-  constructor(path: string, why: string) {
+  /**
+   * True when git lists the worktree as 10db's but its git dir is one 10db won't read through, so
+   * `removeWorktree` would still remove what it holds.
+   */
+  readonly unreadable: boolean;
+  constructor(path: string, why: string, unreadable = false) {
     super(`10db won't remove ${path}: ${why}`);
     this.path = path;
     this.why = why;
+    this.unreadable = unreadable;
   }
 }
 
@@ -107,6 +113,8 @@ export interface Git {
   changedPaths(repo: string, only?: readonly string[]): Promise<string[]>;
   /** Committed and uncommitted changes since `base`, sorted and unique. */
   changedFilesSince(repo: string, base: string): Promise<string[]>;
+  /** Files whose committed content differs between `base` and `tip`, sorted; nothing uncommitted. */
+  filesChangedBetween(repo: string, base: string, tip: string): Promise<string[]>;
   /** Commits on `tip` (HEAD unless named) since `base`, oldest first. */
   commitsSince(repo: string, base: string, tip?: string): Promise<string[]>;
   /** Filters the tree at `rev`, or the checkout's own attributes, ask for; empty when none. */
@@ -146,6 +154,12 @@ export interface Git {
    * `repo`'s worktrees; anything else is refused with `WorktreeNotOursError`.
    */
   worktreeChanges(repo: string, path: string): Promise<string[]>;
+  /**
+   * The git-ignored files of the 10db worktree of `repo` at `path`, checked as `worktreeChanges`
+   * checks it: each file outside a directory the ignore rules match, such as a hand-made `.env`, and
+   * none inside one, such as `node_modules/` or `dist/`.
+   */
+  worktreeIgnoredFiles(repo: string, path: string): Promise<string[]>;
   /** Drops the entries of worktrees whose directory is gone, but not a locked one. */
   pruneWorktrees(repo: string): Promise<void>;
   /** `update-ref -d refs/heads/<branch> <sha>`: true when deleted, false when missing or moved. */
@@ -927,18 +941,23 @@ export function createGit(opts: GitOptions = {}): Git {
       }
       let added = false;
       try {
-        // No checkout: no file is written and no post-checkout hook runs; read-tree fills it.
-        await git(main, [
-          'worktree',
-          'add',
-          '--no-checkout',
-          '--lock',
-          '--reason',
-          input.lockReason,
-          '--',
-          target,
-          input.branch,
-        ]);
+        // No checkout: no file is written and no post-checkout hook runs; read-tree fills it. The
+        // gitfile must be absolute, which a builder's `worktree.useRelativePaths=true` would undo.
+        await git(
+          main,
+          [
+            'worktree',
+            'add',
+            '--no-checkout',
+            '--lock',
+            '--reason',
+            input.lockReason,
+            '--',
+            target,
+            input.branch,
+          ],
+          { config: ['-c', 'worktree.useRelativePaths=false'] },
+        );
         added = true;
         const gitDir = readGitfile(target);
         if (!surelyInside(gitDir, join(main.dirs.commonDir, 'worktrees')))
@@ -1041,7 +1060,11 @@ export function createGit(opts: GitOptions = {}): Git {
     });
   }
 
-  async function worktreeChanges(repo: string, path: string): Promise<string[]> {
+  /**
+   * The 10db worktree of `repo` at `path`, read through `repo`'s pin, once it has passed every check
+   * `worktreeChanges` names.
+   */
+  async function lockedWorktree(repo: string, path: string): Promise<Pinned> {
     const root = opts.worktreeRoot;
     if (!root) throw new WorktreeNotOursError(path, 'no worktree root is configured');
     const target = withRealParent(path);
@@ -1058,23 +1081,51 @@ export function createGit(opts: GitOptions = {}): Git {
     try {
       gitDir = readGitfile(target);
     } catch {
-      throw new WorktreeNotOursError(path, 'its .git is not a gitfile');
+      throw new WorktreeNotOursError(path, 'its .git is not a gitfile', true);
     }
     // A linked worktree's git dir is a direct child of the repository's `worktrees` directory.
     if (!samePath(dirname(gitDir), join(main.dirs.commonDir, 'worktrees')))
-      throw new WorktreeNotOursError(path, "its git dir is not one of the repository's worktrees");
+      throw new WorktreeNotOursError(
+        path,
+        "its git dir is not one of the repository's worktrees",
+        true,
+      );
     // Git reads refs through the git dir's `commondir` file even when GIT_COMMON_DIR is set, so the
     // file must name the repository the main checkout's pin vouches for.
     if (!namesCommonDir(gitDir, main.dirs.commonDir))
-      throw new WorktreeNotOursError(path, "its git dir names another repository's common dir");
+      throw new WorktreeNotOursError(
+        path,
+        "its git dir names another repository's common dir",
+        true,
+      );
     if (readIfPresent(join(gitDir, 'info', 'attributes')).trim() !== '')
-      throw new WorktreeNotOursError(path, 'its git dir holds an attributes file');
-    return changes({
+      throw new WorktreeNotOursError(path, 'its git dir holds an attributes file', true);
+    return {
       real: target,
       dirs: { gitDir, commonDir: main.dirs.commonDir },
       pin: main.pin,
       env: { GIT_DIR: gitDir, GIT_COMMON_DIR: main.dirs.commonDir, GIT_WORK_TREE: target },
-    });
+    };
+  }
+
+  async function worktreeChanges(repo: string, path: string): Promise<string[]> {
+    return changes(await lockedWorktree(repo, path));
+  }
+
+  async function worktreeIgnoredFiles(repo: string, path: string): Promise<string[]> {
+    const out = await git(await lockedWorktree(repo, path), [
+      'ls-files',
+      '-z',
+      '--others',
+      '--ignored',
+      '--exclude-standard',
+      '--directory',
+    ]);
+    // With --directory a directory the ignore rules match is listed once, ending in `/`.
+    return out
+      .split('\0')
+      .filter((entry) => entry !== '' && !entry.endsWith('/'))
+      .sort();
   }
 
   return {
@@ -1159,6 +1210,22 @@ export function createGit(opts: GitOptions = {}): Git {
         .filter(Boolean);
       return [...new Set([...committed, ...working])].sort();
     },
+    async filesChangedBetween(repo, base, tip) {
+      return (
+        await git(await pinned(repo), [
+          'diff-tree',
+          '-r',
+          '--name-only',
+          '--no-renames',
+          '-z',
+          base,
+          tip,
+        ])
+      )
+        .split('\0')
+        .filter(Boolean)
+        .sort();
+    },
     async commitsSince(repo, base, tip = 'HEAD') {
       return (await git(await pinned(repo), ['rev-list', '--reverse', `${base}..${tip}`]))
         .split('\n')
@@ -1171,6 +1238,7 @@ export function createGit(opts: GitOptions = {}): Git {
     addWorktree,
     removeWorktree,
     worktreeChanges,
+    worktreeIgnoredFiles,
     async listWorktrees(repo) {
       return listWorktrees(await pinned(repo));
     },

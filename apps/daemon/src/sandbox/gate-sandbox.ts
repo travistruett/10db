@@ -149,6 +149,7 @@ export function createGateSandbox(deps: GateSandboxDeps): GateSandbox {
           secretFiles: access.checkoutSecrets,
           toolchainSecrets: toolchain.secretFiles,
           toolchainReads: toolchain.reads,
+          toolchainListings: toolchain.listings,
           allowedDomains: access.hosts,
           readList: access.readList,
           extraReads: access.gitReads,

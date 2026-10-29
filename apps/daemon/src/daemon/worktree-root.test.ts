@@ -1,4 +1,4 @@
-import { mkdirSync, realpathSync, symlinkSync } from 'node:fs';
+import { mkdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { tempDir } from '../../test/fixtures';
@@ -51,6 +51,7 @@ describe('assertWorktreeRootAllowed', () => {
       root: (c) => join(c.repo, 'a', 'b', 'c'),
       ok: false,
     },
+    { name: 'under a file', root: () => join(base, 'a-file', 'abcd1234'), ok: false },
     {
       name: 'a sibling that shares a name prefix',
       root: () => join(base, 'repo-two', 'wt'),
@@ -63,6 +64,7 @@ describe('assertWorktreeRootAllowed', () => {
     const data = made('data');
     const tempRoot = made('lane-tmp');
     made('repo-two');
+    writeFileSync(join(base, 'a-file'), '');
     symlinkSync(repo, join(base, 'link-to-repo'));
     const call = (): void => {
       assertWorktreeRootAllowed(root({ repo, data, tempRoot }), {
@@ -129,6 +131,26 @@ describe('worktreeRootFor', () => {
     expect(worktreeRootFor(join(base, 'wt'), join(base, 'data-link'))).toBe(
       worktreeRootFor(join(base, 'wt'), a),
     );
+  });
+
+  it.each<{ name: string; base: () => string }>([
+    {
+      name: 'a base reached through a link to a place under a file',
+      base: () => {
+        writeFileSync(join(base, 'a-file'), '');
+        symlinkSync(join(base, 'a-file', 'x'), join(base, 'link'));
+        return join(base, 'link', 'wt');
+      },
+    },
+    {
+      name: 'a base through a link to itself',
+      base: () => {
+        symlinkSync(join(base, 'loop'), join(base, 'loop'));
+        return join(base, 'loop', 'wt');
+      },
+    },
+  ])('refuses $name as a worktree root error', ({ base: at }) => {
+    expect(() => worktreeRootFor(at(), made('data'))).toThrow(WorktreeRootError);
   });
 
   it('returns a real path even when the base is reached through a link', () => {

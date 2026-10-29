@@ -16,6 +16,9 @@ const SRT_VERSION = z
   '@anthropic-ai/sandbox-runtime'
 ];
 
+/** A worktree root outside every temp dir; the test cuts no worktree, so it is never created. */
+const BUNDLE_WORKTREE_ROOT = '/var/empty/10db-bundle-test-worktrees';
+
 describe('the bundled daemon', () => {
   let work: TempDir;
 
@@ -46,6 +49,10 @@ describe('the bundled daemon', () => {
         TMPDIR: tmpdir(),
         SHELL: '/bin/sh',
         TENDB_DATA_DIR: dataDir,
+        // The default root is under HOME, which lies in the temp dir; the daemon refuses a worktree
+        // root there when it runs under a sandbox, whose temp root is all a lane can write. This
+        // one is outside it, and the test never cuts a worktree, so nothing is created there.
+        TENDB_WORKTREE_ROOT: BUNDLE_WORKTREE_ROOT,
         TENDB_PORT: '0',
         TENDB_LOG_LEVEL: 'warn',
       },

@@ -35,6 +35,11 @@ export interface GateRequest {
   readonly signal?: AbortSignal;
   /** Receives the process-group leader's pid as soon as it exists. */
   readonly onSpawn?: (pid: number) => void;
+  /**
+   * Called when the gate has to wait for another gate to finish before it starts, with the number of
+   * gates ahead of it. Never called for a gate that starts at once.
+   */
+  readonly onWaiting?: (ahead: number) => void;
 }
 
 export interface GateRunner {

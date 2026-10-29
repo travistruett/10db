@@ -29,6 +29,7 @@ const ALLOWED_NAMES: ReadonlySet<string> = new Set([
   'TENDB_SANDBOX',
   'npm_config_cache',
   'npm_config_devdir',
+  'xcrun_db',
 ]);
 
 const ALLOWED_PREFIXES = ['LC_', 'MISE_', 'pnpm_config_'] as const;

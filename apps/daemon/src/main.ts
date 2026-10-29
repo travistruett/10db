@@ -1,7 +1,13 @@
 import type { SystemCheckDto } from '@10db/contracts';
 import { SchemaMismatchError } from '@10db/db';
-import { AlreadyRunningError, daemonOptionsFromEnv, startDaemon } from './daemon';
-import { loadEnv } from './env';
+import {
+  AlreadyRunningError,
+  aaKeyReaderFromEnv,
+  daemonOptionsFromEnv,
+  startDaemon,
+  WorktreeRootError,
+} from './daemon';
+import { EnvError, loadEnv, type DaemonEnv } from './env';
 import {
   AA_KEY_ACCOUNT,
   buildNetworkEnv,
@@ -40,7 +46,24 @@ process.on('uncaughtException', (error) => {
 const CLAUDE_MISSING =
   'Claude Code was not found in /opt/homebrew/bin, /usr/local/bin, /usr/bin or ~/.local/bin, where 10db looks for it (never your PATH, where a lane could put one). Install it, or set TENDB_CLAUDE_PATH, then restart 10db.';
 
-const env = loadEnv(process.env);
+// The shell's supervisor stops on 4 instead of restarting into configuration a restart can't fix.
+const EXIT_REFUSED_CONFIG = 4;
+
+function refuse(error: EnvError | WorktreeRootError): never {
+  console.error(error.message);
+  process.exit(EXIT_REFUSED_CONFIG);
+}
+
+function environment(): DaemonEnv {
+  try {
+    return loadEnv(process.env);
+  } catch (error) {
+    if (error instanceof EnvError) refuse(error);
+    throw error;
+  }
+}
+
+const env = environment();
 const dataDir = resolveDataDir(env);
 
 // A GUI-launched sidecar inherits a bare PATH; the login shell has the builder's real one. It lives
@@ -82,7 +105,7 @@ try {
     adapter: chooseAdapter(),
     migrationsDir: resolveMigrationsDir(),
     harnessDir: resolveHarnessDir(),
-    aaKey: () => systemKeychain.read(AA_KEY_ACCOUNT),
+    aaKey: aaKeyReaderFromEnv(env, () => systemKeychain.read(AA_KEY_ACCOUNT)),
     loginEnv: login.vars,
     keychain: systemKeychain,
     systemCheck: check,
@@ -115,5 +138,6 @@ try {
     console.error(error.message);
     process.exit(3);
   }
+  if (error instanceof WorktreeRootError) refuse(error);
   throw error;
 }

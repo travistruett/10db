@@ -2,7 +2,6 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import {
   AccountKind,
   AccountProblem,
@@ -273,8 +272,7 @@ export class FakeAdapter implements SessionAdapter {
         const transport = new StreamableHTTPClientTransport(new URL(spec.mcp.url), {
           requestInit: { headers: { Authorization: `Bearer ${spec.mcp.token}` } },
         });
-        // The SDK class declares `sessionId?: string`, which `Transport` rejects under exactOptionalPropertyTypes.
-        await mcp.connect(transport as Transport);
+        await mcp.connect(transport);
       }
       const result = await mcp.callTool({ name: tool, arguments: args }, undefined, {
         timeout: spec.mcp.toolTimeoutMs,
