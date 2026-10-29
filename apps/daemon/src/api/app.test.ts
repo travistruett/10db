@@ -303,6 +303,22 @@ describe('API', () => {
     ).toBe(409);
   });
 
+  it('answers 409 with the task named when a patch removes an area a running task holds', async () => {
+    const message = 'Can\'t remove or rename area "api": the running task "Fix login" holds it.';
+    const services = stubServices({
+      patchProject: () => {
+        throw new ConflictError(message);
+      },
+    });
+    const res = await app(services).request(`/projects/${mintId('Project')}`, {
+      method: 'PATCH',
+      ...json,
+      body: JSON.stringify({ areas: [{ name: 'ui', globs: ['src/ui/**'] }] }),
+    });
+    expect(res.status).toBe(409);
+    expect(await res.text()).toContain('Fix login');
+  });
+
   it('answers 500 for an unexpected error and reports that error to the hook', async () => {
     const boom = new Error('boom');
     const seen: unknown[] = [];
@@ -449,6 +465,16 @@ describe('team, routing and benchmark routes', () => {
       service: 'patchProject',
     },
     {
+      name: 'PATCH /projects/:id with new areas and hazards',
+      method: 'PATCH',
+      path: `/projects/${projectId}`,
+      body: {
+        areas: [{ name: 'core', globs: ['src/core/**'] }],
+        hazards: [{ name: 'deps', globs: ['**/package.json'], commands: ['pnpm add'] }],
+      },
+      service: 'patchProject',
+    },
+    {
       name: 'PATCH /projects/:id with the localhost switch',
       method: 'PATCH',
       path: `/projects/${projectId}`,
@@ -544,6 +570,18 @@ describe('team, routing and benchmark routes', () => {
       method: 'PATCH',
       path: `/projects/${projectId}`,
       body: { budgetCeiling: -1 },
+    },
+    {
+      name: 'an area path pattern that goes up a folder',
+      method: 'PATCH',
+      path: `/projects/${projectId}`,
+      body: { areas: [{ name: 'core', globs: ['../core/**'] }] },
+    },
+    {
+      name: 'a hazard path pattern with an unclosed brace',
+      method: 'PATCH',
+      path: `/projects/${projectId}`,
+      body: { hazards: [{ name: 'deps', globs: ['{a,b'], commands: [] }] },
     },
     {
       name: 'a localhost switch that is not a boolean',
