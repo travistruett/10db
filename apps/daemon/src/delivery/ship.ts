@@ -159,6 +159,12 @@ export function createShipper(deps: ShipperDeps): Shipper {
       rules: listPermissionRules(deps.state.db, project.id, null),
       checkouts: allCheckouts(deps.state.db),
       signal,
+      onWaiting: (ahead) => {
+        deps.logger.info(
+          { batchId: batch.id, ahead },
+          'ship gate is waiting for another gate to finish',
+        );
+      },
       onSpawn: (pid) => {
         recording = (deps.identifyProcess?.(pid) ?? Promise.resolve(null)).then((gatePidStart) => {
           if (gatePidStart !== null)

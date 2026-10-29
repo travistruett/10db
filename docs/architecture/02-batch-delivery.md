@@ -66,6 +66,7 @@ At startup, after workstream recovery and before the scheduler starts:
 
 - The batch row exists before any git side effect; the branch is checked before every launch and every ship.
 - The daemon switches branches only when no lane runs in the project; agents never do.
+- The shipping gate shares the daemon's gate slots with every lane's verify gate (one at a time by default, `TENDB_GATE_SLOTS`): it waits for a slot, then its timeout starts (`decisions/2026-10-28-gate-slots.md`).
 - Shipping steps (branch and clean check, commit count, gate, push, find-or-create PR, record) are each safe to repeat; recovery re-runs them from the first.
 - Every network call runs in the login environment with prompts off, a timeout and an abort signal: 2 minutes for a fetch or a `gh` call, and the gate's timeout (30 minutes by default) for the push, which runs the clone's pre-push hook. Fetch and push run in a process group of their own; a timeout or an abort kills the group, so the hook's children stop with git. A push stopped by its timeout fails the batch with a card that says the push or its pre-push hook ran past the limit. The shipping gate's group is killed the same way on its timeout, and by pid and start time at startup if a crash orphaned it.
 - Every refusal the request can't answer is an inbox card that says what to fix, and nothing is pushed.
