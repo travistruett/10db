@@ -19,7 +19,7 @@ import { storableRule } from '../src/permissions';
 import { createGateSandbox } from '../src/sandbox';
 import { FakeAdapter } from '../src/sessions';
 import { apiClient } from './api-client';
-import { createTempRepo, FAKE_SRT, tempDir } from './fixtures';
+import { createTempRepo, FAKE_SRT, SANDBOXED, tempDir } from './fixtures';
 
 let data: { path: string; cleanup(): void };
 let repo: { path: string; cleanup(): void };
@@ -286,11 +286,13 @@ describe('network hosts of a project', () => {
     },
   );
 
-  it("opens the gate sandbox's allowedDomains to an added host", async () => {
+  // Its temp root is a short path under the shared `/tmp`, which no sandbox can write.
+  it.skipIf(SANDBOXED)("opens the gate sandbox's allowedDomains to an added host", async () => {
     const project = await seedProject();
     await send('POST', hostsPath(project.id), { host: 'index.crates.io' });
     await send('POST', hostsPath(project.id), { host: 'static.crates.io' });
 
+    // A short root: the lane temp directory's whole path must fit the sandbox's limit.
     const root = realpathSync(mkdtempSync('/tmp/nh-'));
     try {
       const home = join(root, 'home');
