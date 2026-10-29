@@ -14,6 +14,8 @@ import { gateCandidates, type FolderFiles } from './gate-candidates';
 /** A file bigger than this counts as absent: a gate is named by a small file. */
 const MAX_FILE_BYTES = 256 * 1024;
 
+const PROTECTED_MESSAGE = '10db keeps its own files here; choose another folder.';
+
 const LOCKFILES = ['pnpm-lock.yaml', 'yarn.lock', 'bun.lock', 'bun.lockb', 'package-lock.json'];
 
 export interface InspectFolderDeps {
@@ -117,7 +119,11 @@ function githubOf(url: string | null): string | null {
 }
 
 /** The refusal a registered project gives `root`, if any. */
-function projectRefusal(root: string, projects: readonly ProjectDto[]): FolderInspectResult | null {
+function projectRefusal(
+  root: string,
+  projects: readonly ProjectDto[],
+  containing: boolean,
+): FolderInspectResult | null {
   for (const project of projects) {
     const checkout = realOrResolved(project.repoPath);
     if (samePath(root, checkout))
@@ -127,7 +133,7 @@ function projectRefusal(root: string, projects: readonly ProjectDto[]): FolderIn
         FolderRefusalReason.InsideAProject,
         `This folder is inside ${project.name}, which is already a project.`,
       );
-    if (equalOrUnder(checkout, root))
+    if (containing && equalOrUnder(checkout, root))
       return refuse(
         FolderRefusalReason.InsideAProject,
         `This folder contains ${project.name}, which is already a project.`,
@@ -157,6 +163,14 @@ export async function inspectFolder(
   if (!kind.isDirectory())
     return refuse(FolderRefusalReason.NotADirectory, 'This is a file, not a folder.');
 
+  // Git reads the folder's own files, so the folders 10db keeps and the projects it runs lanes in
+  // are refused before git is asked anything about them.
+  const given = realOrResolved(path);
+  if (deps.protectedRoots.some((p) => equalOrUnder(given, realOrResolved(p))))
+    return refuse(FolderRefusalReason.ProtectedPath, PROTECTED_MESSAGE);
+  const insideProject = projectRefusal(given, deps.projects, false);
+  if (insideProject) return insideProject;
+
   const facts = await deps.git.inspect(path);
   if ('refused' in facts) {
     const message = facts.refused === 'unreadable' ? facts.message : GIT_MESSAGES[facts.refused];
@@ -165,11 +179,8 @@ export async function inspectFolder(
 
   const root = facts.root;
   if (deps.protectedRoots.some((p) => equalOrUnder(root, realOrResolved(p))))
-    return refuse(
-      FolderRefusalReason.ProtectedPath,
-      '10db keeps its own files here; choose another folder.',
-    );
-  const projectRefused = projectRefusal(root, deps.projects);
+    return refuse(FolderRefusalReason.ProtectedPath, PROTECTED_MESSAGE);
+  const projectRefused = projectRefusal(root, deps.projects, true);
   if (projectRefused) return projectRefused;
 
   const inspection: FolderInspection = {

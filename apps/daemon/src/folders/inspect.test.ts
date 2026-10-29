@@ -110,6 +110,45 @@ async function inspect(
   return result;
 }
 
+const READ_ONLY_SUBCOMMANDS = [
+  'hash-object',
+  'rev-parse',
+  'for-each-ref',
+  'symbolic-ref',
+  'config',
+];
+
+/** The git subcommand of an argv: the first word that is not a `-c <config>` or `-C <dir>` pair. */
+function subcommandOf(argv: readonly string[]): string | undefined {
+  for (let i = 0; i < argv.length; i += 1) {
+    if (argv[i] === '-c' || argv[i] === '-C') i += 1;
+    else return argv[i];
+  }
+  return undefined;
+}
+
+/** A git whose binary logs each argv, then runs the real git; a child process the project doesn't own. */
+function loggingGit() {
+  const dir = track(tempDir('logging-git'));
+  const log = join(dir.path, 'calls.log');
+  const bin = join(dir.path, 'git');
+  writeFileSync(
+    bin,
+    `#!/bin/sh\nfor a in "$@"; do printf '%s\\0' "$a" >> '${log}'; done\nprintf '\\n' >> '${log}'\nexec git "$@"\n`,
+  );
+  chmodSync(bin, 0o755);
+  return {
+    git: createGit({ bin }),
+    calls: (): string[][] =>
+      existsSync(log)
+        ? readFileSync(log, 'utf8')
+            .split('\n')
+            .filter((line) => line !== '')
+            .map((line) => line.split('\0').slice(0, -1))
+        : [],
+  };
+}
+
 function accepted(result: FolderInspectResult) {
   if (!result.ok) throw new Error(`refused: ${result.reason}: ${result.message}`);
   return result.inspection;
@@ -193,28 +232,16 @@ describe('inspectFolder on a repository', () => {
 });
 
 describe('inspectFolder reads the folder safely', () => {
-  it('runs no hook', async () => {
+  it('runs only read-only git subcommands, each with hooks and fsmonitor off', async () => {
     const repo = track(createTempRepo());
-    const out = track(tempDir('hook-out'));
-    const marker = join(out.path, 'ran');
-    const hook = join(repo.path, '.git', 'hooks', 'post-checkout');
-    mkdirSync(join(repo.path, '.git', 'hooks'), { recursive: true });
-    writeFileSync(hook, `#!/bin/sh\ntouch '${marker}'\n`);
-    chmodSync(hook, 0o755);
-    accepted(await inspect(repo.path));
-    expect(existsSync(marker)).toBe(false);
-  });
-
-  it('runs no fsmonitor program', async () => {
-    const repo = track(createTempRepo());
-    const out = track(tempDir('fsmonitor-out'));
-    const marker = join(out.path, 'ran');
-    const script = join(out.path, 'monitor.sh');
-    writeFileSync(script, `#!/bin/sh\ntouch '${marker}'\n`);
-    chmodSync(script, 0o755);
-    gitIn(repo.path, 'config', 'core.fsmonitor', script);
-    accepted(await inspect(repo.path));
-    expect(existsSync(marker)).toBe(false);
+    const spy = loggingGit();
+    accepted(await inspectFolder({ git: spy.git, projects: [], protectedRoots: [] }, repo.path));
+    const calls = spy.calls();
+    expect(calls.length).toBeGreaterThan(0);
+    for (const argv of calls) {
+      expect(argv.join(' ')).toContain('-c core.fsmonitor=false -c core.hooksPath=/dev/null');
+      expect(READ_ONLY_SUBCOMMANDS).toContain(subcommandOf(argv));
+    }
   });
 
   it('refuses a gitfile that points elsewhere, with no card', async () => {
@@ -223,10 +250,8 @@ describe('inspectFolder reads the folder safely', () => {
     const got = await inspect(dir.path);
     expect(got.ok).toBe(false);
     if (!got.ok) {
-      expect([FolderRefusalReason.Unreadable, FolderRefusalReason.NotARepository]).toContain(
-        got.reason,
-      );
-      expect(got.message).not.toBe('');
+      expect(got.reason).toBe(FolderRefusalReason.Unreadable);
+      expect(got.message).toContain('/nonexistent/elsewhere');
     }
   });
 
@@ -265,6 +290,28 @@ describe('inspectFolder reads the folder safely', () => {
 });
 
 describe('inspectFolder refusals', () => {
+  it.each([
+    { name: 'a registered checkout', project: true },
+    { name: 'a folder under one', project: true, sub: 'src' },
+    { name: 'a protected root', project: false },
+    { name: 'a folder under a protected root', project: false, sub: 'src' },
+  ])('asks git nothing about $name', async ({ project: isProject, sub }) => {
+    const repo = track(createTempRepo());
+    const path = sub === undefined ? repo.path : join(repo.path, sub);
+    if (sub !== undefined) mkdirSync(path);
+    const spy = loggingGit();
+    const got = await inspectFolder(
+      {
+        git: spy.git,
+        projects: isProject ? [project(realpathSync(repo.path), 'Widgets')] : [],
+        protectedRoots: isProject ? [] : [repo.path],
+      },
+      path,
+    );
+    expect(got.ok).toBe(false);
+    expect(spy.calls()).toEqual([]);
+  });
+
   it('refuses a path with nothing at it', async () => {
     const dir = track(tempDir('missing'));
     const got = await inspect(join(dir.path, 'nope'));

@@ -1,7 +1,2 @@
-export {
-  gateCandidates,
-  GateSource,
-  type FolderFiles,
-  type GateCandidate,
-} from './gate-candidates';
-export { inspectFolder, type InspectFolderDeps } from './inspect';
+export { gateCandidates, GateSource, type FolderFiles } from './gate-candidates';
+export { inspectFolder } from './inspect';
