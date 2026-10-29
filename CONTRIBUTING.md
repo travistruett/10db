@@ -75,7 +75,7 @@ Follow these steps in order on a new computer. Each one says how to check it wor
     `pnpm dev` running, run `pnpm --filter @10db/desktop sidecar` once, then run
     `pnpm --filter @10db/desktop dev:shell` in a second terminal. The window is "10db Dev"
     (identifier `app.10db.desktop.dev`) and keeps its data under `.dev/data`, so it runs
-    beside an installed 10db without touching the release app's data. It uses the daemon and UI that
+    beside an installed 10db without touching the installed app's data. It uses the daemon and UI that
     `pnpm dev` already runs, so stopping `pnpm dev` stops them for the window too. The first
     `dev:shell` compiles the Rust shell and takes a few minutes. The installed app runs 10db's
     tasks; the dev window only previews your checkout.

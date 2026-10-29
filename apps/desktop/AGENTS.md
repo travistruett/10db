@@ -44,7 +44,9 @@ The UI never touches the database; it talks to the daemon over loopback HTTP and
   don't hand-edit it; work in a worktree under `../10db-worktrees/`.
 - `pnpm dev:factory` (`scripts/factory-ui.ts`) runs Vite over the installed app's daemon instead: it reads that
   daemon's `daemon.json` and `ui-token` from `~/Library/Application Support/10db`, checks over `/health` that it
-  answers the Vite origin over CORS, and passes `VITE_DAEMON_URL` and `VITE_DAEMON_TOKEN` to Vite. The daemon accepts
+  answers the Vite origin over CORS and takes the token (`GET /projects`), and runs Vite with `--no-cors` and
+  `VITE_DAEMON_URL` and `VITE_DAEMON_TOKEN` (`factory-vite.ts`): CORS off keeps other localhost pages from reading the
+  module that inlines the token. The daemon accepts
   the page only when 10db started with `TENDB_DEV_UI_ORIGIN=http://localhost:1420`, which the supervisor passes
   through (`decisions/2026-10-29-dev-ui-over-the-factory.md`). `pnpm dev:factory:enable` and `:disable`
   (`scripts/set-factory-opt-in.ts`, plan in `factory-opt-in.ts`) set and unset it with `launchctl`; they never quit

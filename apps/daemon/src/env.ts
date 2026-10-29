@@ -21,10 +21,14 @@ const DaemonEnv = z.object({
   // The one browser origin the API accepts beside the Tauri webview's, opted in by hand: a Vite dev UI,
   // over a throwaway daemon or the installed app's. Exactly `http://<loopback host>:<port>`, the form a
   // browser sends in `Origin`: localhost, 127.0.0.1 or [::1], a port from 1 to 65535, nothing after it.
+  // Not port 80: a browser leaves the default port out of `Origin`, so it would never match.
   TENDB_DEV_UI_ORIGIN: z
     .string()
     .regex(/^http:\/\/(localhost|127\.0\.0\.1|\[::1\]):[1-9]\d{0,4}$/)
-    .refine((origin) => Number(origin.slice(origin.lastIndexOf(':') + 1)) <= 65535)
+    .refine((origin) => {
+      const port = Number(origin.slice(origin.lastIndexOf(':') + 1));
+      return port <= 65535 && port !== 80;
+    })
     .optional(),
   // Absolute path to the claude binary; otherwise it is found on the login shell's PATH.
   TENDB_CLAUDE_PATH: z.string().startsWith('/').optional(),
@@ -56,6 +60,15 @@ export class EnvError extends Error {
   }
 }
 
+/**
+ * What to do about a refused variable, where the fix is not obvious from its name. A bad
+ * `TENDB_DEV_UI_ORIGIN` stops the installed app's daemon, and `pnpm dev:factory:enable` is how it got there.
+ */
+const REMEDIES: Readonly<Partial<Record<string, string>>> = {
+  TENDB_DEV_UI_ORIGIN:
+    'if pnpm dev:factory:enable or launchctl set it, run pnpm dev:factory:disable, then quit and reopen 10db',
+};
+
 /** The only module in the daemon that parses environment variables; main passes `process.env`. */
 export function loadEnv(source: Readonly<Record<string, string | undefined>>): DaemonEnv {
   // `VAR=` means unset: coercion would turn an empty port into 0 and fail an empty data dir.
@@ -63,7 +76,11 @@ export function loadEnv(source: Readonly<Record<string, string | undefined>>): D
   const parsed = DaemonEnv.safeParse(present);
   if (!parsed.success) {
     throw new EnvError(
-      parsed.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.code}`),
+      parsed.error.issues.map((issue) => {
+        const name = issue.path.join('.');
+        const remedy = REMEDIES[name];
+        return remedy ? `${name}: ${issue.code} (${remedy})` : `${name}: ${issue.code}`;
+      }),
     );
   }
   return parsed.data;

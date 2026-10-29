@@ -48,6 +48,7 @@ describe('loadEnv', () => {
     ['the Vite port', 'http://localhost:1420'],
     ['the lowest port', 'http://localhost:1'],
     ['the highest port', 'http://localhost:65535'],
+    ['port 8080', 'http://localhost:8080'],
   ])('accepts a dev UI origin on %s', (_name, origin) => {
     expect(loadEnv({ TENDB_DEV_UI_ORIGIN: origin }).TENDB_DEV_UI_ORIGIN).toBe(origin);
   });
@@ -73,10 +74,20 @@ describe('loadEnv', () => {
     ['port 0', 'http://localhost:0'],
     ['a port with a leading zero', 'http://localhost:01420'],
     ['a port above 65535', 'http://localhost:99999'],
+    // A browser leaves the default port out of `Origin`, so this would never match a request.
+    ['port 80, which a browser never sends', 'http://localhost:80'],
   ])('rejects a dev UI origin with %s, naming the variable but not the value', (_name, origin) => {
     expect(() => loadEnv({ TENDB_DEV_UI_ORIGIN: origin })).toThrow(EnvError);
     expect(() => loadEnv({ TENDB_DEV_UI_ORIGIN: origin })).toThrow('TENDB_DEV_UI_ORIGIN');
     expect(() => loadEnv({ TENDB_DEV_UI_ORIGIN: origin })).not.toThrow(origin);
+  });
+
+  it('says how to clear a bad dev UI origin, since it stops the installed app daemon', () => {
+    expect(() => loadEnv({ TENDB_DEV_UI_ORIGIN: 'http://example.com:1420' })).toThrow(
+      /TENDB_DEV_UI_ORIGIN: .*run pnpm dev:factory:disable, then quit and reopen 10db/,
+    );
+    // The hint belongs to this variable only.
+    expect(() => loadEnv({ TENDB_PORT: '70000' })).not.toThrow('dev:factory');
   });
 
   it.each([

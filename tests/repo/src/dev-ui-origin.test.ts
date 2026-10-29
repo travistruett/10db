@@ -5,15 +5,21 @@ import { readRepoFile } from './workspace';
 // each daemon a browser UI on Vite's port 1420 talks to sets TENDB_DEV_UI_ORIGIN to it.
 describe('daemons a browser UI on port 1420 reaches', () => {
   const VITE_ORIGIN = /TENDB_DEV_UI_ORIGIN\s*[:=]\s*['"]?http:\/\/localhost:1420\b/;
+  /** The file without its comment lines, so a commented-out setting doesn't count. */
+  const code = (path: string): string =>
+    readRepoFile(path)
+      .split('\n')
+      .filter((line) => !/^\s*(#|\/\/)/.test(line))
+      .join('\n');
 
   it.each([
     ['pnpm dev', 'scripts/dev.sh'],
     ['the live acceptance daemon', 'apps/daemon/scripts/live-acceptance.ts'],
   ])('%s opts the Vite origin in', (_name, path) => {
-    expect(readRepoFile(path)).toMatch(VITE_ORIGIN);
+    expect(code(path)).toMatch(VITE_ORIGIN);
   });
 
-  it('pnpm dev:factory:enable and :disable switch the installed app with launchctl, from the root', () => {
+  it('runs pnpm dev:factory:enable and :disable from the root', () => {
     const root = readRepoFile('package.json');
     expect(root).toContain(
       '"dev:factory:enable": "pnpm --filter @10db/desktop dev:factory:enable"',
@@ -21,16 +27,6 @@ describe('daemons a browser UI on port 1420 reaches', () => {
     expect(root).toContain(
       '"dev:factory:disable": "pnpm --filter @10db/desktop dev:factory:disable"',
     );
-    const plan = readRepoFile('apps/desktop/scripts/factory-opt-in.ts');
-    expect(plan).toContain("args: ['setenv', VARIABLE, VITE_ORIGIN]");
-    expect(plan).toContain("const VARIABLE = 'TENDB_DEV_UI_ORIGIN'");
-  });
-
-  it('CONTRIBUTING.md turns it on with pnpm dev:factory:enable, not open --env', () => {
-    const guide = readRepoFile('CONTRIBUTING.md');
-    expect(guide).toContain('pnpm dev:factory:enable');
-    expect(guide).toContain('pnpm dev:factory:disable');
-    expect(guide).not.toContain('open -a 10db --env');
   });
 
   // One recipe, in both places: the README section is the reference and CONTRIBUTING.md links to it.

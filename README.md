@@ -41,9 +41,9 @@ checklist is in [CONTRIBUTING.md](CONTRIBUTING.md#set-up).
 - `mise install && pnpm install`: install the pinned tools, the dependencies and the git hooks.
   This includes Rust (about 1 GB). `make setup` does the same and asks before installing Rust.
 - `pnpm dev`: run the daemon and the browser UI with a shared dev token, with state in `.dev/`.
-- `pnpm --filter @10db/desktop dev:shell`: open the Tauri window ("10db Dev", its own app identifier, data in `.dev/data`) against that daemon. It runs beside the installed release app. Run `pnpm --filter @10db/desktop sidecar` once first.
+- `pnpm --filter @10db/desktop dev:shell`: open the Tauri window ("10db Dev", its own app identifier, data in `.dev/data`) against that daemon. It runs beside the installed app. Run `pnpm --filter @10db/desktop sidecar` once first.
 - `pnpm dev:factory`: the UI with hot reload over your installed 10db; see [Hot-reload the UI over your real 10db](#hot-reload-the-ui-over-your-real-10db).
-- Factory and preview: the installed release app runs 10db's tasks on this repo; `pnpm dev` with `dev:shell` or http://localhost:1420 only previews the checkout and never runs tasks. While a task holds the checkout, don't hand-edit it; use a worktree in `../10db-worktrees/`.
+- Factory and preview: the installed app runs 10db's tasks on this repo; `pnpm dev` with `dev:shell` or http://localhost:1420 only previews the checkout and never runs tasks. While a task holds the checkout, don't hand-edit it; use a worktree in `../10db-worktrees/`.
 - `make live-acceptance`: the manual §1.3 run on a Max subscription.
 - `make gate`: every check; prints one summary line with each step's seconds (`GATE PASS format 4s · lint 31s · … (210s)`). Its e2e step needs the WebKit browser that `make setup` installs. It picks free ports for its daemon and UI, so gates in separate worktrees can run at once, beside `pnpm dev`; a port another process takes before the servers bind it fails the run at startup.
 - `make check`: the fast check on what you changed.
@@ -68,7 +68,11 @@ For the desktop window instead of a browser tab, leave `pnpm dev:factory` runnin
 - Stop `pnpm dev` first: both use port 1420.
 - If 10db restarts, run `pnpm dev:factory` again (its token changes; the desktop window follows on its own).
 - It acts on your real projects and Inbox: what you click starts, moves and removes real tasks.
-- A change that also needs a daemon change can't be previewed this way: the app's daemon is the installed release's.
+- A change that also needs a daemon change can't be previewed this way: the app's daemon is the build you installed, not your checkout.
+- `launchctl setenv` lasts until you log out or restart, and every app opened after it inherits the value, Terminal,
+  iTerm and editors included, so new shells have `TENDB_DEV_UI_ORIGIN` set too.
+- If 10db stops starting after `TENDB_DEV_UI_ORIGIN` was set by hand to anything but a loopback origin, run
+  `pnpm dev:factory:disable`, then quit and reopen 10db.
 
 Quitting 10db stops running work, so pick your moment. What the switch allows is in
 [the decision](docs/architecture/decisions/2026-10-29-dev-ui-over-the-factory.md).
