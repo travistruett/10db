@@ -62,6 +62,11 @@ The scan reads the command's text with these rules, and nothing more:
   `/proc` once the path is normalized, an expansion, or input piped or redirected in), more than one `xargs`
   wrapper, and a substitution in any word of an arithmetic-evaluating builtin (`[[`, `test`, `let`, `read`,
   `printf`, `declare`) are unread.
+- `.` and `source` read a file only when it is a plain path with no option but `--`, no input redirected or
+  piped in (including through an enclosing `sh -c`), and, if relative, no earlier `cd`, `pushd` or `popd` in the
+  script. A test operator that evaluates its operands (`-eq`, `-v`), `let`, `read`, `unset`, `printf -v` and a
+  declaration (`declare -i` any word, otherwise the name) with a parameter expansion or backtick are unread, since
+  the shell evaluates a variable's value as arithmetic there.
 - The shell keywords the scan skips (`for`, `select`, `done`, `fi`, `esac`) are judged on the word as written, so
   `./done` and `$D/fi` are programs.
 
@@ -72,6 +77,8 @@ Known gaps, deliberately left for follow-ups. The sandbox bounds all of them; no
   `git -c alias.x='!…'`, `GIT_PAGER=… git -p log`, a symlinked binary.
 - **Per-program flag values.** Flags that take a value, in `apps/daemon/src/guard/command-forms.ts`: `npm -p
 install x`, `pnpm --reporter silent add x`, `cargo +stable add serde`.
+- **Directory changes** inside a substitution or subshell are not tracked for `.` and `source`; only a `cd`,
+  `pushd` or `popd` that starts a segment of the script is.
 - **Review findings L1 and L3**, minor, recorded in PR #95.
 
 ## Why

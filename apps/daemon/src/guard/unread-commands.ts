@@ -72,32 +72,47 @@ const OPAQUE: ReadonlySet<string> = new Set([
 const SOURCING: ReadonlySet<string> = new Set(['.', 'source']);
 /** A redirection that feeds a command from a file, a descriptor or a here-string. */
 const INPUT_REDIRECTION = /^\d*<(?!<<)|^\d*<<</;
-/** Builtins that evaluate their words as arithmetic, where a substitution in a string runs. */
-const ARITHMETIC: ReadonlySet<string> = new Set([
-  '[[',
-  '[',
-  'test',
-  'let',
-  'read',
-  'printf',
+/** Test operators that evaluate their operands as arithmetic, so `a[$(cmd)]` in one runs. */
+const ARITHMETIC_OPERATOR = /^-(?:eq|ne|lt|le|gt|ge|v|R)$/;
+/** Test builtins, whose arithmetic operators evaluate their operands. */
+const TESTS: ReadonlySet<string> = new Set(['[[', '[', 'test']);
+/** Builtins that evaluate a word as arithmetic or as a variable name with a subscript. */
+const EVALUATING: ReadonlySet<string> = new Set(['let', 'read', 'unset', 'getopts']);
+/** Builtins that declare a variable: its name is evaluated, and its value with `-i`. */
+const DECLARING: ReadonlySet<string> = new Set([
   'declare',
   'typeset',
   'local',
   'export',
   'readonly',
-  'unset',
-  'getopts',
-  'ulimit',
-  'umask',
-  'wait',
-  'shift',
-  'exit',
-  'return',
-  'break',
-  'continue',
 ]);
-/** A substitution inside a word, which an arithmetic builtin runs even when the word was quoted. */
-const SUBSTITUTION_IN_WORD = /\$\(|`/;
+/** A parameter expansion or backtick, whose value the shell may evaluate as arithmetic. */
+const EXPANSION_IN_WORD = /[$`]/;
+/** An arithmetic expansion that also holds a parameter expansion or a backtick. */
+const EXPANSION_IN_ARITHMETIC = /\$\(\(.*[$`]/s;
+
+/** Whether a builtin's words hand an expansion to an arithmetic evaluation. */
+function evaluatesExpansion(head: string, words: readonly string[]): boolean {
+  const args = words.slice(1);
+  if (args.some((word) => EXPANSION_IN_ARITHMETIC.test(word))) return true;
+  if (TESTS.has(head)) {
+    return (
+      args.some((word) => ARITHMETIC_OPERATOR.test(word)) &&
+      args.some((w) => EXPANSION_IN_WORD.test(w))
+    );
+  }
+  if (EVALUATING.has(head)) return args.some((word) => EXPANSION_IN_WORD.test(word));
+  if (head === 'printf') {
+    return args.includes('-v') && args.some((word) => EXPANSION_IN_WORD.test(word));
+  }
+  if (DECLARING.has(head)) {
+    const integer = args.some((word) => /^-[a-zA-Z]*i/.test(word));
+    return args.some((word) =>
+      EXPANSION_IN_WORD.test(integer ? word : (word.split('=')[0] ?? word)),
+    );
+  }
+  return false;
+}
 /** An array subscript with a substitution, which `read`, `[[ -v ]]` and the like evaluate. */
 const SUBSCRIPT_SUBSTITUTION = /\[[^\]]*(?:\$\(|`)/;
 const SHELLS: ReadonlySet<string> = new Set([
@@ -152,12 +167,13 @@ function withoutRedirections(words: readonly string[]): string[] {
   return out;
 }
 
-/** The file a `.` or `source` reads: the first word after its options, or null when it names none. */
+/** The file a `.` or `source` reads, or null when it names none or follows an option but `--`. */
 function sourceOperand(words: readonly string[]): string | null {
   const rest = withoutRedirections(words.slice(1));
-  const at = rest.findIndex((word) => word === '--' || !/^-./.test(word));
-  if (at === -1) return null;
-  return rest[at] === '--' ? (rest[at + 1] ?? null) : (rest[at] ?? null);
+  const first = rest[0];
+  if (first === '--') return rest[1] ?? null;
+  // An option other than `--` changes how the shell reads the operand, so the scan reads none.
+  return first === undefined || first.startsWith('-') ? null : first;
 }
 
 /**
@@ -215,7 +231,14 @@ function xargsOptions(commandWords: readonly string[]): XargsOptions | null {
 
 interface Scanner {
   readonly patterns: readonly (readonly string[])[];
+  /** An earlier command in the script may have changed the working directory. */
+  readonly moved: boolean;
+  /** The script's standard input may be a pipe from an enclosing command. */
+  readonly stdin: boolean;
 }
+
+/** Programs that change the shell's working directory. */
+const DIRECTORY_CHANGES: ReadonlySet<string> = new Set(['cd', 'pushd', 'popd']);
 
 /**
  * Whether the command's words, with every unread word free to become anything, could be a hazard.
@@ -293,8 +316,9 @@ function scanSegment(
   segment: ShellSegment,
   piped: boolean,
   depth: number,
-  scanner: Scanner,
+  outer: Scanner,
 ): Unread | null {
+  const scanner: Scanner = { ...outer, stdin: outer.stdin || piped };
   const text = segment.raw;
   if (segment.processSubstitution) return { reason: UnreadReason.ProcessSubstitution, text };
   for (const body of segment.nested) {
@@ -330,17 +354,16 @@ function scanSegment(
   ) {
     return { reason: UnreadReason.CommandName, text: written };
   }
-  if (
-    words.some((word) => SUBSCRIPT_SUBSTITUTION.test(word)) ||
-    (ARITHMETIC.has(head) && words.slice(1).some((word) => SUBSTITUTION_IN_WORD.test(word)))
-  ) {
+  if (words.some((word) => SUBSCRIPT_SUBSTITUTION.test(word)) || evaluatesExpansion(head, words)) {
     return { reason: UnreadReason.Script, text };
   }
   if (head === 'eval') return { reason: UnreadReason.Script, text };
   if (SOURCING.has(head)) {
+    const operand = sourceOperand(words);
     if (
-      piped ||
-      !isCheckoutFile(sourceOperand(words)) ||
+      scanner.stdin ||
+      !isCheckoutFile(operand) ||
+      (scanner.moved && !posix.isAbsolute(operand ?? '')) ||
       words.some((w) => INPUT_REDIRECTION.test(w))
     ) {
       return { reason: UnreadReason.Script, text };
@@ -365,13 +388,16 @@ function scanSegment(
     : null;
 }
 
-function scanScript(command: string, depth: number, scanner: Scanner): Unread | null {
+function scanScript(command: string, depth: number, outer: Scanner): Unread | null {
   const parse = parseShell(command);
   if (!parse.certain) return { reason: UnreadReason.Structure, text: command };
   let previous = '';
+  let moved = outer.moved;
   for (const segment of parse.segments) {
-    const found = scanSegment(segment, previous === '|', depth, scanner);
+    const found = scanSegment(segment, previous === '|', depth, { ...outer, moved });
     if (found !== null) return found;
+    const [first = ''] = leadingWords(segment.words).command;
+    if (DIRECTORY_CHANGES.has(commandName(first))) moved = true;
     previous = segment.separator;
   }
   return null;
@@ -389,5 +415,5 @@ function scanScript(command: string, depth: number, scanner: Scanner): Unread | 
  * caller still asks `hazardHit` first.
  */
 export function firstUnread(command: string, hazards: readonly HazardDef[]): Unread | null {
-  return scanScript(command, 0, { patterns: hazardPatterns(hazards) });
+  return scanScript(command, 0, { patterns: hazardPatterns(hazards), moved: false, stdin: false });
 }

@@ -33,7 +33,36 @@ const ROWS: readonly Row[] = [
   { name: 'a double bracket', command: '[[ -f $f ]] && ls $f', reason: null },
   { name: 'pnpm test with a variable', command: 'pnpm test $x', reason: null },
   { name: 'source of a checkout file', command: '. ./env.sh', reason: null },
-  { name: 'a test with a plain number', command: '[[ $n -eq 3 ]]', reason: null },
+  { name: 'a file test with a variable', command: '[[ -f $f ]]', reason: null },
+  { name: 'source of an absolute file after a cd', command: 'cd src; . /abs/env.sh', reason: null },
+  {
+    name: 'a numeric test with a variable',
+    command: '[[ $n -eq 3 ]]',
+    reason: UnreadReason.Script,
+  },
+  { name: 'let with a variable', command: 'let x=$n', reason: UnreadReason.Script },
+  { name: 'declare -i with a variable', command: 'declare -i x=$n', reason: UnreadReason.Script },
+  {
+    name: 'an arithmetic expansion with a variable',
+    command: 'echo $((1+$n))',
+    reason: UnreadReason.CommandName,
+  },
+  {
+    name: 'a relative source after a cd',
+    command: 'cd src; . ./env.sh',
+    reason: UnreadReason.Script,
+  },
+  {
+    name: 'a relative source after a cd in an earlier list',
+    command: 'cd src && ls && . env.sh',
+    reason: UnreadReason.Script,
+  },
+  { name: 'source with an option', command: '. -x ./env.sh', reason: UnreadReason.Script },
+  {
+    name: 'source in a script fed by a pipe',
+    command: 'echo x | sh -c ". ./env.sh"',
+    reason: UnreadReason.Script,
+  },
   {
     name: 'xargs -I into a program with no hazard form',
     command: 'ls | xargs -I {} cat {}',

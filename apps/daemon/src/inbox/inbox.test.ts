@@ -1143,6 +1143,11 @@ describe('permission broker in a sandboxed lane', () => {
       command: "declare -i 'n=$(pnpm add x)'",
       outcome: 'card',
     },
+    { name: 'a numeric test on a variable', command: '[[ $n -eq 3 ]]', outcome: 'card' },
+    { name: 'let on a variable', command: 'let x=$n', outcome: 'card' },
+    { name: 'declare -i on a variable', command: 'declare -i x=$n', outcome: 'card' },
+    { name: 'a relative source after a cd', command: 'cd src && . ./env.sh', outcome: 'card' },
+    { name: 'source with an option', command: '. -x ./env.sh', outcome: 'card' },
     // A structure the parser cannot read.
     { name: 'an unclosed double quote', command: 'echo "unclosed', outcome: 'card' },
     { name: 'an unclosed single quote', command: "echo 'unclosed", outcome: 'card' },
