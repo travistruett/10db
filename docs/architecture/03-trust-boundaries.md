@@ -289,6 +289,12 @@ Under the lane sandbox (**built**), the design column holds for a lane's Bash:
     each tool's `.mise.backend.toml`, nvm's `nvm.sh` and `alias`, volta's `bin`, `tools/user` and layout file.
     What is not listed stays closed: volta's `inventory`. rustup's home opens whole: its
     toolchains hold no registry config.
+  - **A version that is a link** (mise adopts a rustup-managed rust as `installs/rust/<version>` linked to
+    `~/.cargo/bin`) also opens by its written path when its real path is a granted read: the kernel checks the
+    link itself before it follows it, and mise stats it. Because mise counts such an install as present only
+    when the link leads to `$CARGO_HOME/bin`, the sandbox makes `<temp dir>/cache/cargo/bin` a link to
+    `~/.cargo/bin`: mise then finds the install, and cargo still reads no config or credentials and keeps its
+    registry and target caches in the temp dir. `~/.cargo/bin` stays read-only, so a `cargo install` fails.
   - **A manager's home** is the one its variable names (`MISE_DATA_DIR` or `XDG_DATA_HOME`, `NVM_DIR`,
     `VOLTA_HOME`, `RUSTUP_HOME`; mise's state and cache follow `MISE_STATE_DIR`, `MISE_CACHE_DIR` and the XDG
     dirs too), else its default. It needs no marker file, since Homebrew's nvm and volta leave none in it, but

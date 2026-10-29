@@ -107,7 +107,7 @@ function field(dialog: HTMLElement): HTMLInputElement {
 
 function paste(dialog: HTMLElement, value: string) {
   fireEvent.change(field(dialog), { target: { value } });
-  fireEvent.click(within(dialog).getByRole('button', { name: 'Save secret' }));
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Save Secret' }));
 }
 
 describe('SecretForm', () => {
@@ -123,7 +123,7 @@ describe('SecretForm', () => {
     });
     expect(bodies).toEqual([{ secret: PASTED }]);
     expect(within(dialog).getByText('Secret saved to your login Keychain.')).toBeTruthy();
-    expect(within(dialog).getByRole('button', { name: 'Replace secret' })).toBeTruthy();
+    expect(within(dialog).getByRole('button', { name: 'Replace Secret' })).toBeTruthy();
     expect(field(dialog).value).toBe('');
     assertNoSecret(queryClient);
   });
@@ -161,7 +161,7 @@ describe('SecretForm', () => {
     expect(await within(dialog).findByText(message)).toBeTruthy();
     expect(field(dialog).value).toBe('');
     assertNoSecret(queryClient);
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Save secret' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save Secret' }));
     expect(
       await within(dialog).findByText('Too small: expected string to have >=8 characters'),
     ).toBeTruthy();
@@ -228,7 +228,7 @@ describe('SecretForm', () => {
     fireEvent.submit(field(dialog));
     expect(bodies).toHaveLength(1);
     expect(
-      within(dialog).getByRole('button', { name: 'Save secret' }).hasAttribute('data-loading'),
+      within(dialog).getByRole('button', { name: 'Save Secret' }).hasAttribute('data-loading'),
     ).toBe(true);
     release();
     await waitFor(() => {

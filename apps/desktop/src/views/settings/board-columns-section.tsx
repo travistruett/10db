@@ -1,5 +1,7 @@
 import {
   BoardColumnName,
+  BoardStatus,
+  SYSTEM_COLUMN_LABEL,
   type BoardColumnDto,
   type BoardColumnId,
   type ProjectDto,
@@ -15,6 +17,7 @@ import {
   Table,
   Text,
   TextInput,
+  VisuallyHidden,
 } from '@mantine/core';
 import { IconArrowDown, IconArrowUp, IconPencil, IconTrash } from '@tabler/icons-react';
 import { useState } from 'react';
@@ -25,6 +28,7 @@ import {
   usePatchBoardColumn,
   useTasks,
 } from '../../daemon/queries';
+import { HUMAN_HINT, SYSTEM_HINT } from '../board/column-hints';
 
 const PLANNED = 'planned';
 
@@ -74,7 +78,7 @@ function DeleteColumn({
         ) : null}
         <Group justify="flex-end">
           <Button variant="default" onClick={onClose}>
-            Keep it
+            Keep It
           </Button>
           <Button
             color="red"
@@ -85,13 +89,16 @@ function DeleteColumn({
                 remove.mutate({ id: column.id, moveTasksTo }, { onSuccess: onClose });
             }}
           >
-            Delete column
+            Delete Column
           </Button>
         </Group>
       </Stack>
     </Modal>
   );
 }
+
+/** The order work moves through the state columns; it is the board's order and never changes. */
+const SYSTEM_ORDER: readonly BoardStatus[] = Object.values(BoardStatus);
 
 /** The project's human columns: add, rename, reorder, delete. */
 export function BoardColumnsSection({ project }: { readonly project: ProjectDto }) {
@@ -110,6 +117,8 @@ export function BoardColumnsSection({ project }: { readonly project: ProjectDto 
   const list = [...(columns.data ?? [])].sort((a, b) => a.position - b.position);
   const parkedIn = (id: BoardColumnId) =>
     (tasks.data ?? []).filter((t) => t.boardColumnId === id).length;
+  const inState = (status: BoardStatus) =>
+    (tasks.data ?? []).filter((t) => t.boardColumnId === null && t.boardStatus === status).length;
 
   function add() {
     const parsed = BoardColumnName.safeParse(name);
@@ -147,61 +156,33 @@ export function BoardColumnsSection({ project }: { readonly project: ProjectDto 
   }
 
   return (
-    <Stack maw={640}>
+    <Stack>
       <Text size="sm" c="dimmed">
-        Tasks in these columns are parked: 10db never picks or starts them.
+        Tasks in your columns are parked: 10db never picks or starts them. The rest follow each
+        task's state, in the order work moves through them.
       </Text>
-      <Text size="sm" c="dimmed">
-        Backlog, Ready, In progress, Blocked and Done follow each task’s state and can’t be changed.
-      </Text>
-      <Table aria-label="Human columns" verticalSpacing="xs">
+      {/* Your columns first, as on the board, then the state columns: listed so the order matches the
+          board, but fixed, because their order is the order work moves in. */}
+      <Table aria-label="Board columns" verticalSpacing="xs">
         <Table.Thead>
           <Table.Tr>
+            <Table.Th w={72}>
+              <VisuallyHidden>Order</VisuallyHidden>
+            </Table.Th>
             <Table.Th>Name</Table.Th>
-            <Table.Th>Tasks</Table.Th>
-            <Table.Th>Actions</Table.Th>
+            <Table.Th w={100} ta="right">
+              Tasks
+            </Table.Th>
+            <Table.Th w={160} ta="right">
+              <VisuallyHidden>Actions</VisuallyHidden>
+            </Table.Th>
           </Table.Tr>
         </Table.Thead>
         <Table.Tbody>
           {list.map((column, i) => (
             <Table.Tr key={column.id}>
               <Table.Td>
-                {renaming?.id === column.id ? (
-                  <Group gap="xs">
-                    <TextInput
-                      size="sm"
-                      aria-label={`Name for ${column.name}`}
-                      value={renaming.name}
-                      error={renaming.error}
-                      onChange={(e) => {
-                        setRenaming({ ...renaming, name: e.currentTarget.value });
-                      }}
-                    />
-                    <Button
-                      size="xs"
-                      onClick={() => {
-                        rename(column.id, renaming.name);
-                      }}
-                    >
-                      Save name
-                    </Button>
-                  </Group>
-                ) : (
-                  column.name
-                )}
-              </Table.Td>
-              <Table.Td>{parkedIn(column.id)}</Table.Td>
-              <Table.Td>
-                <Group gap={4}>
-                  <ActionIcon
-                    variant="subtle"
-                    aria-label={`Rename ${column.name}`}
-                    onClick={() => {
-                      setRenaming({ id: column.id, name: column.name, error: null });
-                    }}
-                  >
-                    <IconPencil size={16} stroke={1.5} />
-                  </ActionIcon>
+                <Group gap={2} wrap="nowrap">
                   <ActionIcon
                     variant="subtle"
                     aria-label={`Move ${column.name} up`}
@@ -222,6 +203,50 @@ export function BoardColumnsSection({ project }: { readonly project: ProjectDto 
                   >
                     <IconArrowDown size={16} stroke={1.5} />
                   </ActionIcon>
+                </Group>
+              </Table.Td>
+              <Table.Td>
+                {renaming?.id === column.id ? (
+                  <Group gap="xs">
+                    <TextInput
+                      size="sm"
+                      aria-label={`Name for ${column.name}`}
+                      value={renaming.name}
+                      error={renaming.error}
+                      onChange={(e) => {
+                        setRenaming({ ...renaming, name: e.currentTarget.value });
+                      }}
+                    />
+                    <Button
+                      size="xs"
+                      onClick={() => {
+                        rename(column.id, renaming.name);
+                      }}
+                    >
+                      Save Name
+                    </Button>
+                  </Group>
+                ) : (
+                  <>
+                    {column.name}
+                    <Text size="xs" c="dimmed">
+                      {HUMAN_HINT}
+                    </Text>
+                  </>
+                )}
+              </Table.Td>
+              <Table.Td ta="right">{parkedIn(column.id)}</Table.Td>
+              <Table.Td>
+                <Group gap={4} justify="flex-end" wrap="nowrap">
+                  <ActionIcon
+                    variant="subtle"
+                    aria-label={`Rename ${column.name}`}
+                    onClick={() => {
+                      setRenaming({ id: column.id, name: column.name, error: null });
+                    }}
+                  >
+                    <IconPencil size={16} stroke={1.5} />
+                  </ActionIcon>
                   <ActionIcon
                     variant="subtle"
                     color="red"
@@ -237,13 +262,21 @@ export function BoardColumnsSection({ project }: { readonly project: ProjectDto 
               </Table.Td>
             </Table.Tr>
           ))}
+          {SYSTEM_ORDER.map((status) => (
+            <Table.Tr key={status} c="dimmed">
+              <Table.Td />
+              <Table.Td>
+                {SYSTEM_COLUMN_LABEL[status]}
+                <Text size="xs" c="dimmed">
+                  {SYSTEM_HINT[status]}
+                </Text>
+              </Table.Td>
+              <Table.Td ta="right">{inState(status)}</Table.Td>
+              <Table.Td />
+            </Table.Tr>
+          ))}
         </Table.Tbody>
       </Table>
-      {list.length === 0 ? (
-        <Text size="sm" c="dimmed">
-          No human columns. Every task is planned.
-        </Text>
-      ) : null}
       {patch.error ? (
         <Alert color="red" title="Couldn't change the column">
           {patch.error.message}
@@ -259,7 +292,7 @@ export function BoardColumnsSection({ project }: { readonly project: ProjectDto 
           }}
         />
         <Button onClick={add} loading={create.isPending}>
-          Add column
+          Add Column
         </Button>
       </Group>
       {create.error ? (

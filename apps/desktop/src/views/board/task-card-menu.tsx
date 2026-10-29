@@ -35,7 +35,12 @@ export function TaskCardMenu({
   return (
     <Menu position="bottom-end" withinPortal>
       <Menu.Target>
-        <ActionIcon variant="subtle" size="sm" aria-label={`Actions for ${task.title}`}>
+        <ActionIcon
+          variant="subtle"
+          color="gray"
+          size="sm"
+          aria-label={`Actions for ${task.title}`}
+        >
           <IconDots size={16} stroke={1.5} />
         </ActionIcon>
       </Menu.Target>

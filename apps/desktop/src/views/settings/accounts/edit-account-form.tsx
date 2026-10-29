@@ -89,7 +89,7 @@ export function EditAccountForm({ account }: { readonly account: AccountDto }) {
         ) : null}
         <Group justify="flex-end">
           <Button size="md" type="submit" disabled={unchanged} loading={patchAccount.isPending}>
-            Save changes
+            Save Changes
           </Button>
         </Group>
       </Stack>

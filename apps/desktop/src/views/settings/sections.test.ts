@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { isSettingsSectionKey, SETTINGS_SECTIONS, SettingsSectionKey } from './sections';
+import {
+  isSettingsSectionKey,
+  SETTINGS_SECTIONS,
+  SettingsGroup,
+  SettingsSectionKey,
+} from './sections';
 
 describe('settings sections', () => {
   it('lists every key once, project sections first', () => {
@@ -18,6 +23,10 @@ describe('settings sections', () => {
     expect(new Set(SETTINGS_SECTIONS.map((s) => s.key)).size).toBe(
       Object.values(SettingsSectionKey).length,
     );
+  });
+
+  it('names its groups project and global', () => {
+    expect(SettingsGroup).toEqual({ Project: 'project', Global: 'global' });
   });
 
   it.each([
