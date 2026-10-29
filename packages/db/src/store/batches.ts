@@ -124,7 +124,10 @@ export function listLiveWorktrees(db: DbReader): BatchDto[] {
     .map(toBatchDto);
 }
 
-/** Finished batches whose checkout still waits to be switched back, oldest first. */
+/**
+ * Finished batches whose checkout still waits to be switched back, newest first: a batch cut while
+ * the checkout was on an earlier one's branch goes back there before the earlier one goes back.
+ */
 export function listCheckoutReturns(db: DbReader): BatchRow[] {
   return db
     .select()
@@ -139,7 +142,7 @@ export function listCheckoutReturns(db: DbReader): BatchRow[] {
         ]),
       ),
     )
-    .orderBy(asc(schema.batches.createdAt), asc(schema.batches.id))
+    .orderBy(desc(schema.batches.createdAt), desc(schema.batches.id))
     .all();
 }
 

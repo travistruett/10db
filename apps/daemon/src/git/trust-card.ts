@@ -43,6 +43,21 @@ export function worktreeRemovalCommand(checkout: string, path: string): string {
     : `git worktree remove --force --force run in ${codeSpan(checkout)}, naming ${codeSpan(path)}`;
 }
 
+/**
+ * The command that switches `checkout` to `place` (a branch, or a commit when `branch` is null), to
+ * paste when every value in it is plain; otherwise the words to type it from.
+ */
+export function checkoutSwitchCommand(
+  checkout: string,
+  place: { readonly branch: string | null; readonly sha: string },
+): string {
+  const target = place.branch ?? place.sha;
+  const detach = place.branch === null ? '--detach ' : '';
+  return PASTE_SAFE.test(checkout) && PASTE_SAFE.test(target)
+    ? `git -C ${shellQuote(checkout)} switch ${detach}${shellQuote(target)}`
+    : `git switch ${detach}run in ${codeSpan(checkout)}, naming ${codeSpan(target)}`;
+}
+
 function body(error: GitTrustError): string {
   const { repo, detail } = error;
   const here = PASTE_SAFE.test(repo) ? ` in ${shellQuote(repo)}` : ` in ${codeSpan(repo)}`;

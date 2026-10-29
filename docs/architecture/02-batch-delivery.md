@@ -38,7 +38,7 @@ CUTTING → OPEN → SHIPPING → SHIPPED | CLOSED | FAILED; FAILED → SHIPPING
 
 ## Switching the checkout back
 
-The cut records where it found the checkout (`return_branch`, null when HEAD was detached, and `return_sha`), read under the lock it switches in. Once the batch is `SHIPPED`, `CLOSED` or `ABANDONED`, the project's queue switches the checkout back (`delivery/checkout-return.ts`, `Git.switchBack`): to the branch at its current tip, or detached at the commit, with `read-tree -m -u` as the cut used. It does so only while no lane runs in the project, HEAD still names the batch's branch and nothing is uncommitted. Otherwise the checkout stays where it is: uncommitted changes, a branch or commit that is gone, a running lane or a git failure raise one card per batch ("Your checkout stays on `<branch>`: …") with the command to switch back; a checkout the builder moved off the branch raises none. The place is cleared once handled, except after a git refusal, which recovery retries (`decisions/2026-10-29-shared-checkout-switch-back.md`).
+The cut records where it found the checkout (`return_branch`, null when HEAD was detached, and `return_sha`), read under the lock it switches in. Once the batch is `SHIPPED`, `CLOSED` or `ABANDONED`, the project's queue switches the checkout back (`delivery/checkout-return.ts`, `Git.switchBack`): to the branch at its current tip, or detached at the commit. It does so only while no workstream in the project has work in hand (as Abandon counts it), HEAD still names the batch's branch, nothing is uncommitted, the place still exists, no other worktree has the branch checked out, and no git-ignored file lies where the switch would write. It rebuilds the checkout's index from HEAD first, then uses `read-tree -m -u` as the cut did, and puts the batch's files back if HEAD can't then be moved. Otherwise the checkout stays where it is with one card per batch ("Your checkout stays on `<branch>`: …") saying why and, where git would accept it, the command to switch back; a checkout the builder moved off the branch raises no card, only a log line. The place is cleared once handled, so it is tried once (`decisions/2026-10-29-shared-checkout-switch-back.md`).
 
 ## Recovery
 
@@ -48,7 +48,7 @@ At startup, after workstream recovery and before the scheduler starts:
 - An orphaned shipping gate is killed by its pid and start time.
 - An `OPEN` or `SHIPPING` batch whose branch is not checked out fails with a wrong-branch card.
 - A `SHIPPING` batch re-runs shipping from the first step, and an `OPEN` batch whose members all settled ships.
-- A finished batch whose return place is still set (the daemon stopped between recording the end and the switch back) has its checkout switched back, or left with its card, as above.
+- A finished batch whose return place is still set (the daemon stopped between recording the end and the switch back) has its checkout switched back, or left with its card, as above, newest batch first.
 
 ## Worktree mode
 

@@ -108,7 +108,11 @@ export type SwitchBack =
   /** Uncommitted changes, or untracked files git doesn't ignore. */
   | { readonly kind: 'dirty'; readonly paths: readonly string[] }
   /** The branch, or the detached commit, to go back to no longer exists. */
-  | { readonly kind: 'gone' };
+  | { readonly kind: 'gone' }
+  /** The branch is checked out in the worktree at `path`, so git won't check it out here too. */
+  | { readonly kind: 'checked_out'; readonly path: string }
+  /** Ignored files or directories (ending in `/`) where the switch would write. */
+  | { readonly kind: 'ignored'; readonly paths: readonly string[] };
 
 export interface Git {
   /** The branch HEAD names; null when HEAD is detached. */
@@ -877,16 +881,73 @@ export function createGit(opts: GitOptions = {}): Git {
     const ref = to.branch === null ? null : `refs/heads/${to.branch}`;
     const target = await revParse(c, `${ref ?? to.sha}^{commit}`);
     if (target === null) return { kind: 'gone' };
+    if (ref !== null) {
+      // `symbolic-ref` skips the check `git switch` makes, so a branch another worktree has out is
+      // refused here, as git would refuse it.
+      const other = (await listWorktrees(c)).find(
+        (e) => e.branch === to.branch && !samePath(comparablePath(e.path), c.real),
+      );
+      if (other) return { kind: 'checked_out', path: comparablePath(other.path) };
+    }
     const head = await revParse(c, 'HEAD^{commit}');
+    if (head === null) return { kind: 'gone' };
+    // `read-tree -m -u` takes ignored files as disposable: it would overwrite or delete any lying
+    // where the switch writes.
+    const ignored = await ignoredInTheWay(c, head, target);
+    if (ignored.length > 0) return { kind: 'ignored', paths: ignored };
+    // The status above read a private index; the merge reads the checkout's own, which a commit
+    // made while another git held index.lock left behind. The files are HEAD's, so the index is
+    // rebuilt from HEAD and refreshed against them; the worktree is not touched.
+    await git(c, ['read-tree', '--reset', head]);
+    await git(c, ['update-index', '-q', '--refresh']).catch((error: unknown) => {
+      // Exit 1 only says some entries still need a refresh; the merge rereads those files.
+      if (!(error instanceof GitError && error.exitCode === 1)) throw error;
+    });
     try {
-      await git(c, ['read-tree', '-m', '-u', ...(head ? [head] : []), target]);
+      await git(c, ['read-tree', '-m', '-u', head, target]);
     } catch (error) {
       if (!(error instanceof GitError)) throw error;
       throw new InvalidError(`10db could not check out ${to.branch ?? to.sha}: ${error.message}`);
     }
-    if (ref === null) await git(c, ['update-ref', '--no-deref', 'HEAD', target]);
-    else await git(c, ['symbolic-ref', 'HEAD', ref]);
+    try {
+      if (ref === null) await git(c, ['update-ref', '--no-deref', 'HEAD', target]);
+      else await git(c, ['symbolic-ref', 'HEAD', ref]);
+    } catch (error) {
+      if (!(error instanceof GitError)) throw error;
+      // HEAD still names the batch's branch: put its files back so the two agree.
+      await git(c, ['read-tree', '-m', '-u', target, head]);
+      throw new InvalidError(
+        `10db could not point HEAD at ${to.branch ?? to.sha}: ${error.message}`,
+      );
+    }
     return { kind: 'switched' };
+  }
+
+  /**
+   * The ignored files and directories of the checkout that lie at, under or above a path that
+   * differs between `head` and `target`, as `ls-files` names them (a whole ignored directory ends
+   * in `/`).
+   */
+  async function ignoredInTheWay(c: Pinned, head: string, target: string): Promise<string[]> {
+    const touched = (
+      await git(c, ['diff-tree', '-r', '--name-only', '--no-renames', '-z', head, target])
+    )
+      .split('\0')
+      .filter(Boolean);
+    if (touched.length === 0) return [];
+    const ignored = (
+      await git(c, ['ls-files', '-z', '--others', '--ignored', '--exclude-standard', '--directory'])
+    )
+      .split('\0')
+      .filter(Boolean);
+    const within = (path: string, dir: string): boolean =>
+      path === dir || path.startsWith(`${dir}/`);
+    return ignored
+      .filter((entry) => {
+        const path = entry.endsWith('/') ? entry.slice(0, -1) : entry;
+        return touched.some((t) => within(t, path) || within(path, t));
+      })
+      .sort();
   }
 
   /** The index entries a commit covers, from a private index after `git add`; refused if unsafe. */

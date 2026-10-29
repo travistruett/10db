@@ -412,15 +412,45 @@ describe('switchBack', () => {
     head: rawGit('rev-parse', 'HEAD'),
     status: rawGit('status', '--porcelain'),
   });
+  /** Commits `files` on the checked-out branch, as the builder would. */
+  const commitFiles = (files: Record<string, string>) => {
+    for (const [rel, text] of Object.entries(files)) write(rel, text);
+    rawGit('add', '--', ...Object.keys(files));
+    rawGit('commit', '-q', '-m', 'files');
+  };
+  /**
+   * A lane's commit of `rel` through the daemon's own `Git.commit` while another git holds
+   * index.lock, so the checkout's index is left as it was before the commit.
+   */
+  const commitWithIndexLocked = async (rel: string, text: string) => {
+    write(rel, text);
+    const lock = join(repo.path, '.git', 'index.lock');
+    writeFileSync(lock, '');
+    try {
+      await git.commit({
+        repo: repo.path,
+        paths: [rel],
+        message: 'lane',
+        opId: `op-${rel}`,
+        branch: BATCH,
+      });
+    } finally {
+      rmSync(lock);
+    }
+  };
 
   it.each<{
     name: string;
     from: 'main' | 'detached';
+    /** On main, before the cut. */
+    prepare?: () => void;
     /** What happens to the checkout after the cut. */
-    arrange?: () => void;
+    arrange?: () => void | Promise<void>;
     outcome: SwitchBack;
     /** Where HEAD ends up: a branch name, or '' when detached. */
     branch: string;
+    /** More to check once it has run. */
+    check?: () => void;
   }>([
     {
       name: 'switches a clean checkout back to its branch',
@@ -479,9 +509,84 @@ describe('switchBack', () => {
       outcome: { kind: 'gone' },
       branch: BATCH,
     },
-  ])('$name', async ({ from, arrange, outcome, branch }) => {
+    {
+      name: 'leaves an ignored file the switch would overwrite with the tracked one',
+      from: 'main',
+      prepare: () => {
+        commitFiles({ 'cfg.local': 'main' });
+      },
+      arrange: () => {
+        rawGit('rm', '-q', 'cfg.local');
+        commitFiles({ '.gitignore': 'cfg.local\n' });
+        write('cfg.local', 'mine');
+      },
+      outcome: { kind: 'ignored', paths: ['cfg.local'] },
+      branch: BATCH,
+      check: () => {
+        expect(readFileSync(join(repo.path, 'cfg.local'), 'utf8')).toBe('mine');
+      },
+    },
+    {
+      name: 'leaves an ignored directory the switch would replace with a tracked file',
+      from: 'main',
+      prepare: () => {
+        commitFiles({ logs: 'main log' });
+      },
+      arrange: () => {
+        rawGit('rm', '-q', 'logs');
+        commitFiles({ '.gitignore': 'logs/\n' });
+        mkdirSync(join(repo.path, 'logs'));
+        write('logs/keep.txt', 'mine');
+      },
+      outcome: { kind: 'ignored', paths: ['logs/'] },
+      branch: BATCH,
+      check: () => {
+        expect(readFileSync(join(repo.path, 'logs', 'keep.txt'), 'utf8')).toBe('mine');
+      },
+    },
+    {
+      name: 'switches past ignored files the switch does not touch, and keeps them',
+      from: 'main',
+      prepare: () => {
+        commitFiles({ '.gitignore': 'build/\n' });
+      },
+      arrange: () => {
+        mkdirSync(join(repo.path, 'build'));
+        write('build/out.txt', 'built');
+      },
+      outcome: { kind: 'switched' },
+      branch: 'main',
+      check: () => {
+        expect(readFileSync(join(repo.path, 'build', 'out.txt'), 'utf8')).toBe('built');
+      },
+    },
+    {
+      name: "switches cleanly after a lane's commit of a changed file left the index behind",
+      from: 'main',
+      prepare: () => {
+        commitFiles({ 'a.txt': 'main' });
+      },
+      arrange: () => commitWithIndexLocked('a.txt', 'lane'),
+      outcome: { kind: 'switched' },
+      branch: 'main',
+      check: () => {
+        expect(readFileSync(join(repo.path, 'a.txt'), 'utf8')).toBe('main');
+      },
+    },
+    {
+      name: "switches cleanly after a lane's commit of a new file left the index behind",
+      from: 'main',
+      arrange: () => commitWithIndexLocked('b.txt', 'lane'),
+      outcome: { kind: 'switched' },
+      branch: 'main',
+      check: () => {
+        expect(existsSync(join(repo.path, 'b.txt'))).toBe(false);
+      },
+    },
+  ])('$name', async ({ from, prepare, arrange, outcome, branch, check }) => {
+    prepare?.();
     const place = await cutFrom(from);
-    arrange?.();
+    await arrange?.();
     const before = where();
     expect(await git.switchBack(repo.path, BATCH, place)).toEqual(outcome);
     const after = where();
@@ -495,6 +600,37 @@ describe('switchBack', () => {
     } else {
       expect(after).toEqual(before);
     }
+    check?.();
+  });
+
+  it('leaves a checkout whose branch is checked out in another worktree, as git would', async () => {
+    const elsewhere = tempDir('main-worktree');
+    try {
+      const place = await cutFrom('main');
+      const other = join(elsewhere.path, 'app-main');
+      rawGit('worktree', 'add', '-q', other, 'main');
+      const before = where();
+      expect(await git.switchBack(repo.path, BATCH, place)).toEqual({
+        kind: 'checked_out',
+        path: realpathSync(other),
+      });
+      expect(where()).toEqual(before);
+    } finally {
+      elsewhere.cleanup();
+    }
+  });
+
+  it('puts the files back when HEAD cannot be moved, and says why', async () => {
+    const place = await cutFrom('main');
+    const lock = join(repo.path, '.git', 'HEAD.lock');
+    writeFileSync(lock, '');
+    try {
+      await expect(git.switchBack(repo.path, BATCH, place)).rejects.toThrow(InvalidError);
+    } finally {
+      rmSync(lock);
+    }
+    expect(where()).toMatchObject({ branch: BATCH, status: '' });
+    expect(readFileSync(join(repo.path, 'work.txt'), 'utf8')).toBe('work');
   });
 });
 

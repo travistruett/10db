@@ -1,7 +1,20 @@
-import { BatchState, type BatchId } from '@10db/contracts';
-import { countLanes, getBatch, getBatchRow, getProject, patchBatch } from '@10db/db';
+import {
+  BatchState,
+  LANE_STATES,
+  WorkstreamState,
+  type BatchId,
+  type ProjectId,
+} from '@10db/contracts';
+import {
+  getBatch,
+  getBatchRow,
+  getProject,
+  listWorkstreams,
+  patchBatch,
+  type DbReader,
+} from '@10db/db';
 import type { StateStore } from '../events';
-import { GitTrustError, type CheckoutPlace, type Git } from '../git';
+import type { CheckoutPlace, Git } from '../git';
 import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
 import { checkoutCards, type Card } from './cards';
@@ -20,12 +33,10 @@ export type CheckoutReturn =
   /** No place to go back to: a worktree batch, an unfinished one, or one already handled. */
   | 'nothing'
   | 'switched'
-  /** Left as it is: the builder moved it off the batch's branch, so there is nothing to undo. */
+  /** Left as it is: the builder moved it off the batch's branch on purpose, so no card. */
   | 'moved'
   /** Left as it is, with a card saying why. */
-  | 'left'
-  /** git refused the checkout (its trust card says why); the place is kept for the next start. */
-  | 'refused';
+  | 'left';
 
 const FINISHED: readonly BatchState[] = [
   BatchState.Shipped,
@@ -36,12 +47,22 @@ const FINISHED: readonly BatchState[] = [
 const message = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
+/** Workstreams of the project with work in hand, counted as Abandon counts them. */
+function runningIn(db: DbReader, projectId: ProjectId): number {
+  return listWorkstreams(db, { projectId }).filter(
+    (w) =>
+      LANE_STATES.includes(w.state) ||
+      w.state === WorkstreamState.TakenOver ||
+      (w.state === WorkstreamState.WaitingHuman && w.currentSessionId !== null),
+  ).length;
+}
+
 /**
  * After a shared batch ships, closes or is abandoned: switches the builder's checkout back to where
- * the cut found it, but only while it is still on the batch's branch, nothing in it is uncommitted
- * and no lane runs in the project. Otherwise the checkout is left as it is, with a card unless the
- * builder moved it themselves. Either way the place is then forgotten, so it is tried once; only a
- * git refusal keeps it, for startup recovery to try again. Safe to repeat.
+ * the cut found it, but only while it is still on the batch's branch, nothing in it is uncommitted,
+ * no ignored file is in the way and no work runs in the project. Otherwise the checkout is left as
+ * it is, with a card unless the builder moved it themselves. Either way the place is then
+ * forgotten, so it is tried once. Safe to repeat.
  */
 export async function returnCheckout(
   deps: CheckoutReturnDeps,
@@ -65,8 +86,8 @@ export async function returnCheckout(
     return 'left';
   };
 
-  const lanes = countLanes(db).byProject.get(project.id) ?? 0;
-  if (lanes > 0) return leave(checkoutCards.lanesRunning(batch, project, place, lanes));
+  const running = runningIn(db, project.id);
+  if (running > 0) return leave(checkoutCards.lanesRunning(batch, project, place, running));
   try {
     const outcome = await deps.git.switchBack(project.repoPath, row.branch, place);
     switch (outcome.kind) {
@@ -83,14 +104,15 @@ export async function returnCheckout(
         return 'moved';
       case 'dirty':
         return leave(checkoutCards.dirty(batch, project, place, outcome.paths));
+      case 'ignored':
+        return leave(checkoutCards.ignored(batch, project, place, outcome.paths));
+      case 'checked_out':
+        return leave(checkoutCards.checkedOut(batch, place, outcome.path));
       case 'gone':
         return leave(checkoutCards.gone(batch, project, place));
     }
   } catch (error) {
-    if (error instanceof GitTrustError) {
-      deps.logger.warn({ ...log, err: error.message }, 'checkout not switched back');
-      return 'refused';
-    }
+    // A git refusal raised its own trust card, which says why; this one says the checkout stays.
     deps.logger.warn({ ...log, err: message(error) }, 'checkout not switched back');
     return leave(checkoutCards.failed(batch, project, place, error));
   }

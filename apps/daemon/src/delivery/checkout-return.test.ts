@@ -1,4 +1,4 @@
-import { rmSync, writeFileSync } from 'node:fs';
+import { realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { BatchDto } from '@10db/contracts';
 import {
@@ -10,6 +10,7 @@ import {
 } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
+import { tempDir } from '../../test/fixtures';
 import { silentLogger } from '../log';
 import { systemProcesses } from '../recovery';
 import { recoverBatches } from './index';
@@ -139,7 +140,7 @@ function expectCheckout(
     const card = h.only(cards);
     expect(card.title).toMatch(row.card);
     expect(card.body).toContain('- notes.txt');
-    expect(card.body).toContain(`git -C ${h.repo} switch main`);
+    expect(card.body).toContain(`git -C '${h.repo}' switch 'main'`);
   } else expect(cards).toEqual([]);
   // Done or declined, the place is forgotten, so a restart doesn't switch the checkout again.
   expect(getBatchRow(h.store.db, batch.id)).toMatchObject({ returnBranch: null, returnSha: null });
@@ -236,19 +237,37 @@ describe('a batch that ended while the daemon was down', () => {
     expectCheckout(batch, start, row);
   });
 
-  it('keeps the place while git refuses the checkout, and switches back once it is trusted again', async () => {
+  it('leaves the checkout with a card when git refuses it, and does not try again', async () => {
     h = createDeliveryHarness({}, { trigger: false });
-    const start = where();
     const batch = await openBatch('CLOSED');
     endedWhileDown(batch, 'CLOSED');
     const alternates = join(h.repo, '.git', 'objects', 'info', 'alternates');
     writeFileSync(alternates, '/elsewhere/objects\n');
     expect((await recover()).switchedBack).toEqual([]);
     expect(h.gitRefusals.map((e) => e.detail.kind)).toContain('alternates');
-    expect(h.cards().filter((c) => c.title.startsWith('Your checkout'))).toEqual([]);
-    expect(getBatchRow(h.store.db, batch.id).returnBranch).toBe('main');
+    const card = h.only(h.cards().filter((c) => c.title.startsWith('Your checkout')));
+    expect(card.title).toBe(
+      `Your checkout stays on ${batch.branch ?? ''}: 10db could not switch it back to main`,
+    );
+    expect(getBatchRow(h.store.db, batch.id)).toMatchObject({
+      returnBranch: null,
+      returnSha: null,
+    });
     rmSync(alternates);
-    expect((await recover()).switchedBack).toEqual([batch.id]);
+    expect((await recover()).switchedBack).toEqual([]);
+    expect(where().branch).toBe(batch.branch);
+  });
+
+  it('unwinds batches that ended one after another back to where the first found the checkout', async () => {
+    h = createDeliveryHarness({}, { trigger: false });
+    const start = where();
+    const first = await openBatch('CLOSED');
+    endedWhileDown(first, 'CLOSED');
+    // The next batch is cut while the checkout is still on the first one's branch.
+    const second = await openBatch('CLOSED');
+    expect(getBatchRow(h.store.db, second.id).returnBranch).toBe(first.branch);
+    endedWhileDown(second, 'CLOSED');
+    expect((await recover()).switchedBack).toEqual([second.id, first.id]);
     expect(where()).toEqual({ ...start, status: '' });
   });
 
@@ -265,5 +284,63 @@ describe('a batch that ended while the daemon was down', () => {
     expect(card.title).toBe(
       `Your checkout stays on ${batch.branch ?? ''}: work is running in ${h.project.name}`,
     );
+  });
+});
+
+describe('what keeps the checkout where it is', () => {
+  it.each(['RUNNING', 'TAKEN_OVER'] as const)(
+    'a workstream %s in the project when the batch is abandoned',
+    async (state) => {
+      h = createDeliveryHarness();
+      const batch = await openBatch('ABANDONED');
+      const other = h.addTask('Elsewhere', { areas: ['ui'] });
+      const ws = h.state.write((c) => insertWorkstream(c, other.id));
+      h.settle(ws.id, state);
+      await endLive(batch, 'ABANDONED');
+      expect(where().branch).toBe(batch.branch);
+      const card = h.only(h.cards().filter((c) => c.title.startsWith('Your checkout')));
+      expect(card.title).toBe(
+        `Your checkout stays on ${batch.branch ?? ''}: work is running in ${h.project.name}`,
+      );
+    },
+  );
+
+  it('its branch checked out in another worktree, which git would refuse to check out twice', async () => {
+    h = createDeliveryHarness();
+    const elsewhere = tempDir('main-worktree');
+    try {
+      const batch = await openBatch('ABANDONED');
+      const other = join(elsewhere.path, 'app-main');
+      h.git$('worktree', 'add', '-q', other, 'main');
+      await endLive(batch, 'ABANDONED');
+      expect(where().branch).toBe(batch.branch);
+      const card = h.only(h.cards().filter((c) => c.title.startsWith('Your checkout')));
+      expect(card.title).toBe(
+        `Your checkout stays on ${batch.branch ?? ''}: main is checked out in another worktree`,
+      );
+      expect(card.body).toContain(realpathSync(other));
+      // No command to paste: git would refuse it.
+      expect(card.body).not.toContain('git -C');
+    } finally {
+      h.git$('worktree', 'remove', '--force', join(elsewhere.path, 'app-main'));
+      elsewhere.cleanup();
+    }
+  });
+
+  it('ignored files where the switch would write', async () => {
+    h = createDeliveryHarness();
+    const batch = await openBatch('ABANDONED');
+    h.git$('rm', '-q', 'README.md');
+    writeFileSync(join(h.repo, '.gitignore'), 'README.md\n');
+    h.git$('add', '.gitignore');
+    h.git$('commit', '-q', '-m', 'ignore the readme');
+    writeFileSync(join(h.repo, 'README.md'), 'mine\n');
+    await endLive(batch, 'ABANDONED');
+    expect(where().branch).toBe(batch.branch);
+    const card = h.only(h.cards().filter((c) => c.title.startsWith('Your checkout')));
+    expect(card.title).toBe(
+      `Your checkout stays on ${batch.branch ?? ''}: ignored files are where main has files`,
+    );
+    expect(card.body).toContain('- README.md');
   });
 });

@@ -311,7 +311,7 @@ describe('worktree batches', () => {
     expect(listLiveWorktrees(store.db).map((b) => b.id)).toEqual([kept.id]);
   });
 
-  it('listCheckoutReturns lists only finished batches that still hold a return place', () => {
+  it('listCheckoutReturns lists only finished batches that still hold a return place, newest first', () => {
     const project = prProject();
     const remember = (id: BatchId) =>
       store.write((ctx) =>
@@ -340,10 +340,10 @@ describe('worktree batches', () => {
     remember(open.id);
     move(open.id, 'OPEN');
     expect(listCheckoutReturns(store.db).map((b) => [b.title, b.returnBranch])).toEqual([
-      ['Shipped', 'main'],
-      ['Closed', 'main'],
-      ['Abandoned', 'main'],
       ['Detached', null],
+      ['Abandoned', 'main'],
+      ['Closed', 'main'],
+      ['Shipped', 'main'],
     ]);
   });
 
