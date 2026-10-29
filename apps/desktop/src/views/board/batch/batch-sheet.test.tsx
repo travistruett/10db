@@ -159,6 +159,25 @@ describe('BatchSheet', () => {
     },
   );
 
+  it('in Your folder mode, names the branch the checkout switches to before starting', async () => {
+    serve(projectViewDto({ ...pr(null), baseBranch: 'develop' }), { both: true });
+    const sheet = await openSheet();
+    const titleField = await within(sheet).findByLabelText('Batch title');
+    expect(within(sheet).getByText(/Starting switches your checkout to a new branch/)).toBeTruthy();
+    expect(within(sheet).getByText('10db/one-…')).toBeTruthy();
+    expect(within(sheet).getByText('origin/develop')).toBeTruthy();
+    expect(within(sheet).getByText(/Your checkout must be clean/)).toBeTruthy();
+    fireEvent.change(titleField, { target: { value: 'Greeting and readme' } });
+    expect(within(sheet).getByText('10db/greeting-and-readme-…')).toBeTruthy();
+  });
+
+  it('in Separate copies mode, leaves the checkout out of it', async () => {
+    serve(projectViewDto({ ...pr(null), workspaceMode: 'worktree' }), { both: true });
+    const sheet = await openSheet();
+    await within(sheet).findByRole('button', { name: 'Start 2 tasks in worktrees' });
+    expect(within(sheet).queryByText(/switches your checkout/)).toBeNull();
+  });
+
   it('says nothing is run for verification when the project has no gate command', async () => {
     serve(projectViewDto({ ...local, gateCommand: null }));
     const sheet = await openSheet();

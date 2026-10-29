@@ -248,8 +248,8 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
             label="Where tasks work"
             description={
               values.workspaceMode === WorkspaceMode.Worktree
-                ? 'Each task gets its own copy of the repository, so any tasks can run together. You see the work in its pull request.'
-                : 'Tasks change files in your checkout, so you can watch them land in your editor and dev server.'
+                ? 'Separate copies: each task works in its own copy of the repository under ~/.10db/worktrees, so any tasks can run together. Your checkout is left alone. You see the work in its pull request.'
+                : 'Your folder: tasks change files in your checkout, so you can watch them land in your editor and dev server. While tasks run, 10db switches this checkout to a new branch cut from the base branch, and it needs the checkout clean (no uncommitted changes) to start. 10db does not switch it back: it stays on that branch until you switch it.'
             }
           >
             <SegmentedControl
