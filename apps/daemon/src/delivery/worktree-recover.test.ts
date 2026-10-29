@@ -686,6 +686,16 @@ describe('sweepWorktrees', () => {
       why: 'it has uncommitted changes',
     },
     {
+      name: 'an untracked file beside build info',
+      change: (path) => {
+        writeFileSync(join(h.repo, '.git', 'info', 'exclude'), '*.tsbuildinfo\n');
+        writeFileSync(join(path, 'tsconfig.tsbuildinfo'), '{}\n');
+        writeFileSync(join(path, 'notes.txt'), 'mine\n');
+      },
+      shown: '- tsconfig.tsbuildinfo',
+      why: 'it has uncommitted changes',
+    },
+    {
       name: 'a git file git cannot read',
       change: (path) => {
         writeFileSync(join(path, '.git'), 'not a gitfile\n');
@@ -707,6 +717,26 @@ describe('sweepWorktrees', () => {
     if (hidden !== undefined) expect(card.body).not.toContain(hidden);
     expect(card.body).toContain(`git -C '${h.repo}' worktree remove --force --force '${path}'`);
   });
+
+  it.each<{ name: string; file: string }>([
+    { name: 'git-ignored files', file: '.env' },
+    { name: 'uncommitted changes', file: 'notes.txt' },
+  ])(
+    'withdraws the card for an orphan kept for $name once a sweep removes it',
+    async ({ file }) => {
+      mkdirSync(h.worktreeRoot, { recursive: true });
+      const path = worktreeAt(under('kept'), ours(mintId('Batch')));
+      writeFileSync(join(h.repo, '.git', 'info', 'exclude'), '.env\n');
+      writeFileSync(join(path, file), 'mine\n');
+      expect(await sweep()).toEqual([]);
+      h.only(h.cards());
+
+      rmSync(join(path, file));
+      expect((await sweep()).map(comparable)).toEqual([comparable(path)]);
+
+      expect(h.cards()).toEqual([]);
+    },
+  );
 
   it('names a path that is not paste-safe as a code span, not a command', async () => {
     mkdirSync(h.worktreeRoot, { recursive: true });
