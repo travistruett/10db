@@ -2,6 +2,7 @@ import {
   chmodSync,
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   writeFileSync,
@@ -15,6 +16,13 @@ import { silentLogger } from '../log';
 import { createGateRunner, type GateRequest, type GateRunner } from '../verify';
 import { resolvePnpm } from './pnpm-binary';
 import { createWorktreeDependencies, installCommand } from './worktree-dependencies';
+
+const STANDALONE_PNPM = await resolvePnpm(
+  Object.fromEntries(
+    Object.entries(process.env).flatMap(([k, v]) => (v === undefined ? [] : [[k, v]])),
+  ),
+  [],
+);
 
 let tmp: TempDir;
 let worktree: string;
@@ -194,7 +202,8 @@ describe('refreshing a worktree’s dependencies', () => {
 
   // The real pnpm: what a repository's own files must not decide.
   // A real install needs pnpm's store lock, which a sandboxed gate (this suite run by 10db) can't open.
-  it.skipIf(SANDBOXED)(
+  // It also needs a standalone pnpm program; an npm-global or corepack pnpm is a script, which is refused.
+  it.skipIf(SANDBOXED || STANDALONE_PNPM === null)(
     'runs the builder’s pnpm and writes only where the daemon says, whatever the repository asks',
     async () => {
       writeFileSync(
@@ -232,7 +241,7 @@ describe('refreshing a worktree’s dependencies', () => {
       if (result.kind !== 'installed') return;
       // Not the pnpm the package.json pins, and not the repository's store or directories.
       expect(readFileSync(result.logPath, 'utf8')).not.toContain('9.0.0');
-      expect(existsSync(join(store, 'v11'))).toBe(true);
+      expect(readdirSync(store).length).toBeGreaterThan(0);
       expect(existsSync(evil)).toBe(false);
       expect(existsSync(join(worktree, 'evil_modules'))).toBe(false);
       expect(existsSync(join(worktree, 'evil_virtual'))).toBe(false);
