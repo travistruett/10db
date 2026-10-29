@@ -5,6 +5,7 @@ import {
   redirect,
   type RouterHistory,
 } from '@tanstack/react-router';
+import { AppError } from './shell/app-error';
 import { AppLayout } from './shell/app-layout';
 import { ViewBoundary } from './shell/view-boundary';
 import { BoardView } from './views/board/board-view';
@@ -45,7 +46,7 @@ function SettingsPage() {
   );
 }
 
-const rootRoute = createRootRoute({ component: AppLayout });
+const rootRoute = createRootRoute({ component: AppLayout, errorComponent: AppError });
 
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,

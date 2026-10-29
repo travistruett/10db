@@ -23,7 +23,7 @@ function serve(...overrides: (RequestHandler | WebSocketHandler)[]): void {
   server.use(...overrides);
 }
 
-function type(label: string, value: string, scope: HTMLElement): void {
+function type(label: string | RegExp, value: string, scope: HTMLElement): void {
   fireEvent.change(within(scope).getByLabelText(label), { target: { value } });
 }
 
@@ -82,7 +82,9 @@ describe('BoardView', () => {
     await waitFor(() => {
       expect(screen.queryByRole('dialog')).toBeNull();
     });
-    expect(await screen.findByText('No tasks yet.')).toBeTruthy();
+    expect(
+      await screen.findByRole('button', { name: 'Project: demo. Switch project' }),
+    ).toBeTruthy();
   });
 
   it('creates a pull-request project with its base branch and title prefix, and requires the prefix', async () => {
@@ -355,7 +357,7 @@ describe('BoardView', () => {
     });
   });
 
-  it('keeps each card’s Start beside the Start a batch button', async () => {
+  it('keeps each card’s Start beside the Start Ready Tasks item', async () => {
     const project = projectDto();
     const ready = taskDto({ projectId: project.id, title: 'Alpha', boardStatus: 'ready' });
     serve(
@@ -365,7 +367,10 @@ describe('BoardView', () => {
     renderApp('/board');
     fireEvent.click(await screen.findByRole('button', { name: 'Actions for Alpha' }));
     expect(await screen.findByRole('menuitem', { name: 'Start' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Start a batch' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'More board actions' }));
+    expect(
+      await screen.findByRole('menuitem', { name: /Start Ready Tasks/, hidden: true }),
+    ).toBeTruthy();
   });
 
   it('titles a refused start as a start, not a move', async () => {
@@ -450,7 +455,6 @@ describe('BoardView', () => {
     renderApp('/board');
 
     expect(await screen.findByText('tasks unavailable')).toBeTruthy();
-    expect(screen.queryByText('No tasks yet.')).toBeNull();
   });
 
   it("shows the daemon's message when the workstreams query fails", async () => {
@@ -482,8 +486,9 @@ describe('BoardView', () => {
       );
       renderApp('/board');
 
-      expect(await screen.findByText('No tasks yet.')).toBeTruthy();
-      expect(screen.getByDisplayValue('first-project')).toBeTruthy();
+      expect(
+        await screen.findByRole('button', { name: 'Project: first-project. Switch project' }),
+      ).toBeTruthy();
     } finally {
       window.localStorage.removeItem('tendb.project');
     }
@@ -528,11 +533,15 @@ describe('BoardView', () => {
     );
     renderApp('/board');
 
-    fireEvent.click(await screen.findByRole('button', { name: 'New task' }));
-    const dialog = await screen.findByRole('dialog', { name: 'New task' });
+    fireEvent.click(await screen.findByRole('button', { name: 'New Task' }));
+    const dialog = await screen.findByRole('dialog', { name: 'New Task' });
     type('Title', 'Beta', dialog);
     type('Acceptance criteria', 'It works\n\nIt is tested\n', dialog);
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Create task' }));
+    const create = within(dialog).getByRole('button', { name: 'Create Task' });
+    // The button is in the modal's footer, outside the form, and submits it by id.
+    expect(create.closest('form')).toBeNull();
+    expect(create.getAttribute('form')).toBe(dialog.querySelector('form')?.id);
+    fireEvent.click(create);
 
     await waitFor(() => {
       expect(posted).toHaveLength(1);
@@ -659,7 +668,7 @@ describe('BoardView', () => {
       http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([idea])),
     );
     const { queryClient } = renderApp('/board');
-    await screen.findByText(/gate: true/);
+    await screen.findByRole('button', { name: `Project: ${project.name}. Switch project` });
     // Wait for the tasks to be in the cache, then check the board still holds back.
     await waitFor(() => {
       expect(queryClient.getQueryState(['tasks', project.id])?.status).toBe('success');
@@ -785,11 +794,182 @@ describe('BoardView', () => {
     expect(within(column).getAllByRole('listitem')).toHaveLength(22);
   });
 
+  it('an empty column shows its hint and a dashed border', async () => {
+    const project = projectDto();
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([])),
+    );
+    renderApp('/board');
+    const ready = await screen.findByRole('list', { name: 'Ready tasks' });
+    expect(screen.getAllByText('Next up. Start Ready Tasks picks from here.')).toHaveLength(1);
+    const paper = ready.closest('.mantine-Paper-root');
+    expect(paper?.getAttribute('style')).toContain('dashed');
+  });
+
+  it('a column with a card hides its hint and has a solid border', async () => {
+    const project = projectDto();
+    const task = taskDto({ projectId: project.id, title: 'Alpha', boardStatus: 'ready' });
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([task])),
+    );
+    renderApp('/board');
+    const ready = await screen.findByRole('list', { name: 'Ready tasks' });
+    expect(await within(ready).findByRole('listitem', { name: 'Alpha' })).toBeTruthy();
+    expect(screen.queryByText('Next up. Start Ready Tasks picks from here.')).toBeNull();
+    const style = ready.closest('.mantine-Paper-root')?.getAttribute('style');
+    expect(style).toContain('solid');
+    expect(style).not.toContain('dashed');
+  });
+
+  it.each([
+    [1, '1 task'],
+    [2, '2 tasks'],
+  ])('reads a count of %i as "%s" to assistive tech', async (n, spoken) => {
+    const project = projectDto();
+    const tasks = Array.from({ length: n }, (_, i) =>
+      taskDto({ projectId: project.id, title: `T${String(i)}`, boardStatus: 'ready' }),
+    );
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json(tasks)),
+    );
+    renderApp('/board');
+    const ready = await screen.findByRole('list', { name: 'Ready tasks' });
+    const paper = ready.closest<HTMLElement>('.mantine-Paper-root');
+    if (!paper) throw new Error('Ready has no column');
+    const number = within(paper).getByText(String(n), { selector: 'p' });
+    expect(number.textContent).toBe(spoken);
+    expect(number.hasAttribute('aria-label')).toBe(false);
+  });
+
+  it('scrolls the cards in their own region and keeps Show all outside it', async () => {
+    const project = projectDto();
+    const done = Array.from({ length: 22 }, (_, i) =>
+      taskDto({
+        projectId: project.id,
+        title: `Done ${String(i)}`,
+        boardStatus: 'done',
+        status: 'done',
+        boardOrder: i,
+      }),
+    );
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json(done)),
+    );
+    renderApp('/board');
+    const list = await screen.findByRole('list', { name: 'Done tasks' });
+    const cardsViewport = list.closest('[data-scrollbars="y"]');
+    expect(cardsViewport).not.toBeNull();
+    const more = screen.getByRole('button', { name: 'Show all 22' });
+    expect(cardsViewport?.contains(more)).toBe(false);
+  });
+
+  it('Ready ends in Add Task, which opens New Task', async () => {
+    const project = projectDto();
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([])),
+    );
+    renderApp('/board');
+    const ready = await screen.findByRole('list', { name: 'Ready tasks' });
+    const paper = ready.closest<HTMLElement>('.mantine-Paper-root');
+    if (!paper) throw new Error('Ready has no column');
+    const add = within(paper).getByRole('button', { name: 'Add Task' });
+    expect(screen.getAllByRole('button', { name: 'Add Task' })).toHaveLength(1);
+    fireEvent.click(add);
+    expect(await screen.findByRole('dialog', { name: 'New Task' })).toBeTruthy();
+  });
+
+  it('shows no lock icon on system columns', async () => {
+    const project = projectDto();
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([])),
+    );
+    renderApp('/board');
+    await screen.findByRole('list', { name: 'Ready tasks' });
+    expect(screen.queryByText("Follows the task's state")).toBeNull();
+  });
+
+  it('shows no "No tasks yet" line', async () => {
+    const project = projectDto();
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([])),
+    );
+    renderApp('/board');
+    expect(await screen.findByRole('button', { name: 'New Task' })).toBeTruthy();
+    expect(screen.queryByText('No tasks yet.')).toBeNull();
+  });
+
+  it('disables Start Ready Tasks with "Nothing in Ready" when Ready is empty', async () => {
+    const project = projectDto();
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([])),
+    );
+    renderApp('/board');
+    fireEvent.click(await screen.findByRole('button', { name: 'More board actions' }));
+    const item = await screen.findByRole('menuitem', { name: /Start Ready Tasks/, hidden: true });
+    expect(item.hasAttribute('disabled') || item.getAttribute('data-disabled') === 'true').toBe(
+      true,
+    );
+    expect(within(item).getByText('Nothing in Ready')).toBeTruthy();
+  });
+
+  it('shows "2 ready" on Start Ready Tasks and opens the batch sheet', async () => {
+    const project = projectDto();
+    const tasks = [
+      taskDto({ projectId: project.id, title: 'Alpha', boardStatus: 'ready' }),
+      taskDto({ projectId: project.id, title: 'Beta', boardStatus: 'ready' }),
+    ];
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json(tasks)),
+    );
+    renderApp('/board');
+    fireEvent.click(await screen.findByRole('button', { name: 'More board actions' }));
+    const item = await screen.findByRole('menuitem', { name: /Start Ready Tasks/, hidden: true });
+    expect(await within(item).findByText('2 ready')).toBeTruthy();
+    fireEvent.click(item);
+    expect(await screen.findByRole('dialog', { name: 'Start a batch' })).toBeTruthy();
+  });
+
+  it('opens Settings at Board columns from Add Column', async () => {
+    const project = projectDto();
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([])),
+    );
+    const { router } = renderApp('/board');
+    fireEvent.click(await screen.findByRole('button', { name: 'More board actions' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Add Column/, hidden: true }));
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/settings/board-columns');
+    });
+  });
+
+  it('has no page title or metadata line', async () => {
+    const project = projectDto({ gateCommand: 'make gate-marker' });
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([])),
+    );
+    renderApp('/board');
+    expect(await screen.findByRole('button', { name: 'New Task' })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'Board' })).toBeNull();
+    expect(screen.queryByText(/make gate-marker/)).toBeNull();
+  });
+
   it('redirects /tasks to the board', async () => {
     serve();
     const { router } = renderApp('/tasks');
-    expect(await screen.findByRole('heading', { name: 'Board', level: 2 })).toBeTruthy();
-    expect(router.state.location.pathname).toBe('/board');
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/board');
+    });
   });
 
   /** A board whose daemon applies each move, as the real one does, so refetches agree with the UI. */
@@ -914,21 +1094,189 @@ describe('BoardView', () => {
     expect(titlesIn(ready)).toEqual(['One', 'Two']);
   });
 
-  it('explains why a running or done card can’t be dragged', async () => {
+  it('a locked card names why on focus', async () => {
     const running = taskDto({ title: 'Running', boardStatus: 'in_progress' });
     const shipped = taskDto({ title: 'Shipped', boardStatus: 'done', status: 'done' });
     boardWith([running, shipped], []);
 
-    const handle = await screen.findByRole('button', { name: 'Can’t drag Shipped' });
-    // Focusable, so a keyboard user reaches the reason; aria-disabled keeps it from acting.
-    expect(handle.getAttribute('aria-disabled')).toBe('true');
-    expect(handle.hasAttribute('disabled')).toBe(false);
-    const described = handle.getAttribute('aria-describedby');
-    expect(described).not.toBeNull();
-    expect(document.getElementById(described ?? '')?.textContent).toBe(
-      'Done cards stay where they finished; they can’t be dragged',
+    const card = await screen.findByRole('button', { name: 'Running' });
+    const reasonOf = (button: HTMLElement): string | undefined =>
+      document.getElementById(button.getAttribute('aria-describedby')?.split(' ').at(-1) ?? '')
+        ?.textContent;
+    expect(reasonOf(card)).toBe('In progress cards follow their workstream; they can’t be dragged');
+    const done = screen.getByRole('button', { name: 'Shipped' });
+    expect(reasonOf(done)).toBe('Done cards stay where they finished; they can’t be dragged');
+  });
+
+  it('has no drag handle', async () => {
+    boardWith([taskDto({ title: 'One', boardStatus: 'ready' })], []);
+    await screen.findByRole('button', { name: 'One' });
+    expect(screen.queryByRole('button', { name: 'Drag One' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Can’t drag One' })).toBeNull();
+  });
+
+  it('clicking a card opens its details', async () => {
+    boardWith([taskDto({ title: 'One', boardStatus: 'ready' })], []);
+    fireEvent.click(await screen.findByRole('button', { name: 'One' }));
+    const drawer = await screen.findByRole('dialog', { name: 'Task' });
+    expect(within(drawer).getByLabelText<HTMLInputElement>('Title').value).toBe('One');
+  });
+
+  it('Enter on a focused card opens its details', async () => {
+    boardWith([taskDto({ title: 'One', boardStatus: 'ready' })], []);
+    fireEvent.keyDown(await screen.findByRole('button', { name: 'One' }), { key: 'Enter' });
+    expect(await screen.findByRole('dialog', { name: 'Task' })).toBeTruthy();
+  });
+
+  it('Enter or Space on the card menu does not open the card', async () => {
+    boardWith([taskDto({ title: 'One', boardStatus: 'ready' })], []);
+    const menu = await screen.findByRole('button', { name: 'Actions for One' });
+    for (const key of ['Enter', ' ']) fireEvent.keyDown(menu, { key });
+    fireEvent.click(menu);
+    expect(await screen.findByRole('menu')).toBeTruthy();
+    expect(screen.queryByRole('dialog', { name: 'Task' })).toBeNull();
+  });
+
+  describe('a shipped card with a pull request', () => {
+    const url = 'https://github.com/acme/widgets/pull/1';
+    function shippedCard(): void {
+      const batch = batchDto({ title: 'Alpha first', state: 'SHIPPED', prUrl: url });
+      const project = projectViewDto({
+        id: batch.projectId,
+        delivery: 'pull_request',
+        prTitlePrefix: 'feat(app)',
+        currentBatch: batch,
+      });
+      const ws = workstreamDto({
+        projectId: project.id,
+        batchId: batch.id,
+        taskTitle: 'Alpha',
+        state: 'DONE',
+      });
+      const done = taskDto({
+        projectId: project.id,
+        title: 'Alpha',
+        boardStatus: 'done',
+        status: 'done',
+        boardOrder: 1,
+        workstreamId: ws.id,
+      });
+      serve(
+        http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+        http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([done])),
+        http.get(daemonUrl('/workstreams'), () => HttpResponse.json([ws])),
+        http.get(daemonUrl('/projects/:projectId/batches'), () => HttpResponse.json([batch])),
+      );
+      renderApp('/board');
+    }
+
+    it('keeps the link out of the card button', async () => {
+      shippedCard();
+      const card = await screen.findByRole('button', { name: 'Alpha' });
+      const done = screen.getByRole('list', { name: 'Done tasks' });
+      const link = within(done).getByRole('link', { name: 'Pull request' });
+      expect(card.contains(link)).toBe(false);
+      expect(link.getAttribute('href')).toBe(url);
+    });
+
+    it('opens no details when the link is clicked', async () => {
+      shippedCard();
+      await screen.findByRole('button', { name: 'Alpha' });
+      const done = screen.getByRole('list', { name: 'Done tasks' });
+      fireEvent.click(within(done).getByRole('link', { name: 'Pull request' }));
+      expect(screen.queryByRole('dialog', { name: 'Task' })).toBeNull();
+    });
+  });
+
+  it('describes a card by what it shows and, when locked, why it cannot move', async () => {
+    const dep = taskDto({ title: 'Base', boardStatus: 'ready', boardOrder: 1 });
+    const task = taskDto({
+      title: 'Wired',
+      boardStatus: 'ready',
+      boardOrder: 2,
+      areas: ['api', 'ui'],
+      acceptanceCriteria: ['one', 'two'],
+      dependsOn: [dep.id],
+    });
+    const running = taskDto({ title: 'Running', boardStatus: 'in_progress' });
+    boardWith([dep, task, running], []);
+
+    const describedBy = (name: string): string =>
+      (screen.getByRole('button', { name }).getAttribute('aria-describedby') ?? '')
+        .split(' ')
+        .map((id) => document.getElementById(id)?.textContent ?? '')
+        .join(' | ');
+    await screen.findByRole('button', { name: 'Wired' });
+    expect(describedBy('Wired')).toBe('Areas: api, ui. 2 criteria. Waits on Base.');
+    expect(describedBy('Running')).toBe(
+      'Areas: src. 1 criterion. | In progress cards follow their workstream; they can’t be dragged',
     );
-    expect(screen.getByRole('button', { name: 'Can’t drag Running' })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Drag Shipped' })).toBeNull();
+  });
+
+  it('the card menu opens with its items', async () => {
+    const project = projectDto();
+    const icebox = boardColumnDto({ projectId: project.id });
+    const ready = taskDto({ projectId: project.id, title: 'Go', boardStatus: 'ready' });
+    const idea = taskDto({
+      projectId: project.id,
+      title: 'Idea',
+      boardStatus: 'ready',
+      boardColumnId: icebox.id,
+    });
+    const started: unknown[] = [];
+    const moved: unknown[] = [];
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/board-columns'), () => HttpResponse.json([icebox])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([ready, idea])),
+      http.post(daemonUrl('/tasks/:taskId/start'), ({ params }) => {
+        started.push(params['taskId']);
+        return HttpResponse.json(ready);
+      }),
+      http.post(daemonUrl('/tasks/:taskId/move'), ({ params }) => {
+        moved.push(params['taskId']);
+        return HttpResponse.json(idea);
+      }),
+    );
+    renderApp('/board');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Actions for Go' }));
+    expect(await screen.findByRole('menuitem', { name: 'Start', hidden: true })).toBeTruthy();
+    expect((await screen.findAllByRole('menuitem', { hidden: true })).length).toBeGreaterThan(1);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Start', hidden: true }));
+    await waitFor(() => {
+      expect(started).toEqual([ready.id]);
+    });
+    expect(screen.queryByRole('dialog', { name: 'Task' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for Idea' }));
+    const move = await screen.findByRole('menuitem', { name: 'Move to Ready', hidden: true });
+    fireEvent.click(move);
+    await waitFor(() => {
+      expect(moved).toEqual([idea.id]);
+    });
+    expect(screen.queryByRole('dialog', { name: 'Task' })).toBeNull();
+  });
+
+  it('the card shows areas as labels and the criteria count', async () => {
+    boardWith(
+      [
+        taskDto({
+          title: 'Two',
+          boardStatus: 'ready',
+          areas: ['api', 'ui'],
+          acceptanceCriteria: ['a', 'b'],
+        }),
+        taskDto({ title: 'One', boardStatus: 'ready', boardOrder: 9, acceptanceCriteria: ['a'] }),
+      ],
+      [],
+    );
+    const two = await screen.findByRole('button', { name: 'Two' });
+    expect(within(two).getByText('2 criteria')).toBeTruthy();
+    expect(within(two).getByText('api')).toBeTruthy();
+    expect(within(two).getByText('ui')).toBeTruthy();
+    expect(
+      within(screen.getByRole('button', { name: 'One' })).getByText('1 criterion'),
+    ).toBeTruthy();
   });
 });
