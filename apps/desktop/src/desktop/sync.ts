@@ -5,6 +5,7 @@ import { useEffect } from 'react';
 import { useEventStream } from '../daemon/events';
 import { useDaemon } from '../daemon/provider';
 import { inboxQueryOptions, useInbox, useKeepAwake, useWorkstreams } from '../daemon/queries';
+import { inboxRowCount } from '../views/inbox/inbox-rows';
 import { isTauri, notifyNewCard, setWindowTheme, updateTray } from './tauri';
 
 /** Workstreams that hold a lane or wait on the builder: what the menu bar counts as running. */
@@ -19,7 +20,7 @@ export function useDesktopSync(): void {
   const queryClient = useQueryClient();
   const lanes =
     useWorkstreams({ active: true }).data?.filter((w) => BUSY_STATES.includes(w.state)).length ?? 0;
-  const inbox = useInbox().data?.length ?? 0;
+  const inbox = inboxRowCount(useInbox().data ?? []);
   const keepAwake = useKeepAwake().data?.active ?? false;
 
   const scheme = useComputedColorScheme('dark');
