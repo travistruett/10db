@@ -334,14 +334,12 @@ export function deriveAreaCandidates(files: readonly string[]): AreaCandidate[] 
   const owned = new Map<Draft, string[]>(all.map((d) => [d, []]));
   for (const file of files) (owned.get(owner.get(file) ?? leftovers) ?? []).push(file);
 
-  return all.map((draft) => {
+  // A draft that ends up owning no file is no area: it would have no glob, and an area needs one.
+  return all.flatMap((draft): AreaCandidate[] => {
     const mine = owned.get(draft) ?? [];
-    return {
-      kind: draft.kind,
-      label: draft.label,
-      globs: globsOf(draft, root, mine),
-      files: mine.length,
-    };
+    const globs = globsOf(draft, root, mine);
+    if (mine.length === 0 || globs.length === 0) return [];
+    return [{ kind: draft.kind, label: draft.label, globs, files: mine.length }];
   });
 }
 

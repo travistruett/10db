@@ -127,8 +127,34 @@ describe('deriveAreaCandidates', () => {
     expect(covered(top?.globs ?? [], 'tiny/one.txt')).toBe(true);
   });
 
-  it('answers a single area for a repository with no files', () => {
-    expect(deriveAreaCandidates([]).map((c) => c.kind)).toEqual([AreaCandidateKind.Rest]);
+  it('answers no candidate for a repository with no files', () => {
+    expect(deriveAreaCandidates([])).toEqual([]);
+  });
+
+  it('leaves out the top of a repository that holds no file of its own', () => {
+    const tracked = [
+      ...files('packages/a', ['package.json', 'x.ts']),
+      ...files('packages/b', ['package.json', 'y.ts']),
+    ];
+    const candidates = deriveAreaCandidates(tracked);
+    expect(candidates.map((c) => c.label).sort()).toEqual(['packages/a', 'packages/b']);
+  });
+
+  it('gives every candidate a file and a glob when a route group holds no file of its own', () => {
+    const screens = ['decisions', 'memos', 'settings'];
+    const tracked = [
+      'frontend/package.json',
+      'frontend/app/layout.tsx',
+      ...screens.map((s) => `frontend/app/(product)/app/${s}/page.tsx`),
+    ];
+    const candidates = deriveAreaCandidates(tracked);
+    expect(candidates.length).toBeGreaterThan(0);
+    for (const candidate of candidates) {
+      expect(candidate.files, candidate.label).toBeGreaterThan(0);
+      expect(candidate.globs.length, candidate.label).toBeGreaterThan(0);
+    }
+    for (const file of tracked)
+      expect(candidates.filter((c) => covered(c.globs, file)).length, file).toBe(1);
   });
 });
 

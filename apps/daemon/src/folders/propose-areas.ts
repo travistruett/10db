@@ -22,7 +22,13 @@ export interface ProposeAreasDeps {
   readonly protectedRoots: readonly string[];
 }
 
-const refuse = (message: string): AreaProposalResult => ({ ok: false, message });
+const EVERYTHING: ProposedArea = {
+  name: 'repo',
+  reason: 'The repository has no committed files yet, so one area holds them all.',
+  globs: ['**'],
+};
+
+const refuse =(message: string): AreaProposalResult => ({ ok: false, message });
 
 function realOrResolved(path: string): string {
   try {
@@ -73,6 +79,9 @@ export async function proposeAreas(
     );
 
   const candidates = mergeCoupledCandidates(deriveAreaCandidates(survey.files), survey.commits);
+  // A repository with nothing committed yet has no seam to find: one area holds whatever comes.
+  if (candidates.length === 0)
+    return { ok: true, proposal: { areas: [EVERYTHING], namedBy: AreaProposalSource.Structure } };
   const { areas, source } = await named(deps.namer, candidates);
   return { ok: true, proposal: { areas, namedBy: source } };
 }

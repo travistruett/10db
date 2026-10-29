@@ -89,6 +89,42 @@ describe('proposeAreas without a model', () => {
     expect(areas[0]?.globs).toContain('*');
   });
 
+  it('answers one area that holds everything for a repository with no commit', async () => {
+    const repo = track(tempDir('empty'));
+    execFileSync('git', ['init', '-q', '-b', 'main', repo.path], {
+      env: isolatedGitEnv(),
+      stdio: 'pipe',
+    });
+    const { areas } = await proposal(repo.path);
+    expect(areas).toHaveLength(1);
+    expect(areas[0]?.globs).toEqual(['**']);
+  });
+
+  it('proposes the packages of a repository with no file at its top', async () => {
+    const repo = track(tempDir('no-top'));
+    execFileSync('git', ['init', '-q', '-b', 'main', repo.path], {
+      env: isolatedGitEnv(),
+      stdio: 'pipe',
+    });
+    gitIn(repo.path, 'config', 'user.name', 'Test');
+    gitIn(repo.path, 'config', 'user.email', 'test@example.com');
+    gitIn(repo.path, 'config', 'commit.gpgsign', 'false');
+    const paths = [
+      'packages/a/package.json',
+      'packages/a/x.ts',
+      'packages/b/package.json',
+      'packages/b/y.ts',
+    ];
+    for (const path of paths) {
+      mkdirSync(dirname(join(repo.path, path)), { recursive: true });
+      writeFileSync(join(repo.path, path), `${path}\n`);
+    }
+    gitIn(repo.path, 'add', ...paths);
+    gitIn(repo.path, 'commit', '-q', '-m', 'packages');
+    const { areas } = await proposal(repo.path);
+    expect(namesOf(areas)).toEqual(['a', 'b']);
+  });
+
   it('names no area like a default hazard', async () => {
     const repo = repoWith([
       [
