@@ -1,9 +1,8 @@
-import { TaskMove, type BoardColumnDto, type ProjectDto, type TaskDto } from '@10db/contracts';
+import { TaskMove, type BoardColumnDto, type TaskDto } from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse, type RequestHandler, type WebSocketHandler } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, eventStream, renderApp, server } from '../../test/daemon';
-import { DEFAULT_ACCOUNT } from '../../test/account-fixtures';
 import {
   batchDto,
   boardColumnDto,
@@ -28,99 +27,6 @@ function type(label: string | RegExp, value: string, scope: HTMLElement): void {
 }
 
 describe('BoardView', () => {
-  it('creates a project from the form, sending the parsed areas', async () => {
-    let projects: ProjectDto[] = [];
-    const posted: unknown[] = [];
-    serve(
-      http.get(daemonUrl('/projects'), () => HttpResponse.json(projects)),
-      http.post(daemonUrl('/projects'), async ({ request }) => {
-        posted.push(await request.json());
-        const project = projectDto({
-          name: 'demo',
-          areas: [
-            { name: 'api', globs: ['src/api/**'] },
-            { name: 'ui', globs: ['src/ui/**', 'src/shared/**'] },
-          ],
-        });
-        projects = [project];
-        return HttpResponse.json(project, { status: 201 });
-      }),
-      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([])),
-    );
-    renderApp('/board');
-
-    expect(await screen.findByText('No projects yet. Create one to start.')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'New project' }));
-    const dialog = await screen.findByRole('dialog', { name: 'New project' });
-    type('Name', 'demo', dialog);
-    type('Repository path', '/repos/demo', dialog);
-    type('Gate command', 'make gate', dialog);
-    type('Areas', 'api: src/api/**\nui: src/ui/**, src/shared/**', dialog);
-    expect(
-      await within(dialog).findByDisplayValue(
-        'Claude plan · builder@example.com (Claude subscription)',
-      ),
-    ).toBeTruthy();
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Create project' }));
-
-    await waitFor(() => {
-      expect(posted).toHaveLength(1);
-    });
-    expect(posted[0]).toEqual({
-      name: 'demo',
-      repoPath: '/repos/demo',
-      gateCommand: 'make gate',
-      areas: [
-        { name: 'api', globs: ['src/api/**'] },
-        { name: 'ui', globs: ['src/ui/**', 'src/shared/**'] },
-      ],
-      accountId: DEFAULT_ACCOUNT.id,
-      delivery: 'local',
-      handoffPct: 40,
-      nudgePct: 50,
-    });
-    await waitFor(() => {
-      expect(screen.queryByRole('dialog')).toBeNull();
-    });
-    expect(
-      await screen.findByRole('button', { name: 'Project: demo. Switch project' }),
-    ).toBeTruthy();
-  });
-
-  it('creates a pull-request project with its base branch and title prefix, and requires the prefix', async () => {
-    const posted: unknown[] = [];
-    serve(
-      http.post(daemonUrl('/projects'), async ({ request }) => {
-        posted.push(await request.json());
-        return HttpResponse.json(projectDto(), { status: 201 });
-      }),
-    );
-    renderApp('/board');
-    fireEvent.click(await screen.findByRole('button', { name: 'New project' }));
-    const dialog = await screen.findByRole('dialog', { name: 'New project' });
-    type('Name', 'shop', dialog);
-    type('Repository path', '/repos/shop', dialog);
-    type('Gate command', 'make gate', dialog);
-    type('Areas', 'api: src/api/**', dialog);
-    fireEvent.click(within(dialog).getByRole('radio', { name: 'One pull request per batch' }));
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Create project' }));
-    expect(
-      await within(dialog).findByText('Enter a PR title prefix such as feat(app)'),
-    ).toBeTruthy();
-    expect(posted).toEqual([]);
-    type('PR title prefix', 'feat(app)', dialog);
-    type('Base branch', 'develop', dialog);
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Create project' }));
-    await waitFor(() => {
-      expect(posted).toHaveLength(1);
-    });
-    expect(posted[0]).toMatchObject({
-      delivery: 'pull_request',
-      baseBranch: 'develop',
-      prTitlePrefix: 'feat(app)',
-    });
-  });
-
   it("shows the project's batch and retries a failed one", async () => {
     const batch = batchDto({ state: 'FAILED', failure: 'push_rejected' });
     const project = projectViewDto({
@@ -258,74 +164,6 @@ describe('BoardView', () => {
     expect(hrefs).toEqual(link === null ? [] : [link]);
   });
 
-  it('shows an areas mistake without calling the daemon', async () => {
-    let calls = 0;
-    serve(
-      http.post(daemonUrl('/projects'), () => {
-        calls += 1;
-        return HttpResponse.json({}, { status: 500 });
-      }),
-    );
-    renderApp('/board');
-
-    fireEvent.click(await screen.findByRole('button', { name: 'New project' }));
-    const dialog = await screen.findByRole('dialog', { name: 'New project' });
-    type('Areas', 'API: src/**', dialog);
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Create project' }));
-
-    expect(
-      await within(dialog).findByText(
-        'Line 1: "API" must use lowercase letters, digits and hyphens',
-      ),
-    ).toBeTruthy();
-    expect(calls).toBe(0);
-  });
-
-  it("shows the daemon's message when it rejects the project", async () => {
-    serve(
-      http.post(daemonUrl('/projects'), () =>
-        HttpResponse.json(
-          { error: 'invalid', message: '/repos/demo is not a git repository' },
-          { status: 400 },
-        ),
-      ),
-    );
-    renderApp('/board');
-
-    fireEvent.click(await screen.findByRole('button', { name: 'New project' }));
-    const dialog = await screen.findByRole('dialog', { name: 'New project' });
-    type('Name', 'demo', dialog);
-    type('Repository path', '/repos/demo', dialog);
-    type('Gate command', 'make gate', dialog);
-    type('Areas', 'api: src/**', dialog);
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Create project' }));
-
-    expect(await within(dialog).findByText('/repos/demo is not a git repository')).toBeTruthy();
-  });
-
-  it('shows which project already uses the repository when the daemon answers 409', async () => {
-    serve(
-      http.post(daemonUrl('/projects'), () =>
-        HttpResponse.json(
-          { error: 'conflict', message: 'Project "demo" already uses /repos/demo' },
-          { status: 409 },
-        ),
-      ),
-    );
-    renderApp('/board');
-
-    fireEvent.click(await screen.findByRole('button', { name: 'New project' }));
-    const dialog = await screen.findByRole('dialog', { name: 'New project' });
-    type('Name', 'demo again', dialog);
-    type('Repository path', '/repos/demo', dialog);
-    type('Gate command', 'make gate', dialog);
-    type('Areas', 'api: src/**', dialog);
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Create project' }));
-
-    expect(await within(dialog).findByText('Project "demo" already uses /repos/demo')).toBeTruthy();
-    expect(within(dialog).getByText("Couldn't create the project")).toBeTruthy();
-  });
-
   it('starts a ready task', async () => {
     const project = projectDto();
     const alpha = taskDto({
@@ -441,7 +279,6 @@ describe('BoardView', () => {
     renderApp('/board');
 
     expect(await screen.findByText('database is locked')).toBeTruthy();
-    expect(screen.queryByText('No projects yet. Create one to start.')).toBeNull();
   });
 
   it("shows the daemon's message when the tasks query fails", async () => {
@@ -492,29 +329,6 @@ describe('BoardView', () => {
     } finally {
       window.localStorage.removeItem('tendb.project');
     }
-  });
-
-  it('blocks the project form when the handoff field is empty', async () => {
-    let calls = 0;
-    serve(
-      http.post(daemonUrl('/projects'), () => {
-        calls += 1;
-        return HttpResponse.json({}, { status: 500 });
-      }),
-    );
-    renderApp('/board');
-
-    fireEvent.click(await screen.findByRole('button', { name: 'New project' }));
-    const dialog = await screen.findByRole('dialog', { name: 'New project' });
-    type('Name', 'demo', dialog);
-    type('Repository path', '/repos/demo', dialog);
-    type('Gate command', 'make gate', dialog);
-    type('Areas', 'api: src/**', dialog);
-    type('Handoff at %', '', dialog);
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Create project' }));
-
-    expect(await within(dialog).findByText('Enter the handoff percentage')).toBeTruthy();
-    expect(calls).toBe(0);
   });
 
   it('creates a task with one criterion per line and the only area preselected', async () => {

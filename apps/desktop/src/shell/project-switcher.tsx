@@ -3,8 +3,7 @@ import { Box, Button, Combobox, Group, NavLink, Text, useCombobox } from '@manti
 import { useDisclosure } from '@mantine/hooks';
 import { IconCheck, IconPlus, IconSelector } from '@tabler/icons-react';
 import { useState } from 'react';
-import { NewProjectForm } from '../views/board/new-project-form';
-import { FormModal } from './form-modal';
+import { NewProjectModal } from './new-project-modal';
 import { ProjectTile } from './project-tile';
 import { useSelectedProject } from './selected-project';
 
@@ -113,25 +112,14 @@ export function ProjectSwitcher({ compact = false }: { readonly compact?: boolea
           </Combobox.Footer>
         </Combobox.Dropdown>
       </Combobox>
-      {/* Mounted only while open, so each new project starts from an empty form. */}
       {creating ? (
-        <FormModal
-          opened
+        <NewProjectModal
           onClose={creator.close}
-          title="New Project"
-          actions={
-            <Button variant="default" onClick={creator.close}>
-              Cancel
-            </Button>
-          }
-        >
-          <NewProjectForm
-            onCreated={(created) => {
-              select(created.id);
-              creator.close();
-            }}
-          />
-        </FormModal>
+          onCreated={(created) => {
+            select(created.id);
+            creator.close();
+          }}
+        />
       ) : null}
     </>
   );
