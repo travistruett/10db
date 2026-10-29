@@ -1,4 +1,4 @@
-import { Group, Paper, Stack, Text } from '@mantine/core';
+import { Group, Paper, ScrollArea, Stack, Text, VisuallyHidden } from '@mantine/core';
 import type { ReactNode } from 'react';
 
 export interface BoardColumnProps {
@@ -52,8 +52,9 @@ export function BoardColumn({
           <Text fw={600} size="sm">
             {label}
           </Text>
-          <Text size="sm" c="dimmed" aria-label={`${String(count)} tasks`}>
+          <Text size="sm" c="dimmed">
             {count}
+            <VisuallyHidden>{count === 1 ? ' task' : ' tasks'}</VisuallyHidden>
           </Text>
         </Group>
         <Stack gap="xs" p="xs" flex={1} mih={0}>
@@ -62,18 +63,27 @@ export function BoardColumn({
               {hint}
             </Text>
           ) : null}
-          <Stack
-            component="ul"
-            ref={listRef}
-            gap="xs"
-            m={0}
-            p={0}
+          {/* Only the cards scroll; the hint above and the footer below stay in view. */}
+          <ScrollArea
+            type="hover"
+            scrollbars="y"
             flex={1}
-            style={{ listStyle: 'none' }}
-            aria-label={`${label} tasks`}
+            mih={0}
+            styles={{ content: { minHeight: '100%' } }}
           >
-            {children}
-          </Stack>
+            <Stack
+              component="ul"
+              ref={listRef}
+              gap="xs"
+              m={0}
+              p={0}
+              mih="100%"
+              style={{ listStyle: 'none' }}
+              aria-label={`${label} tasks`}
+            >
+              {children}
+            </Stack>
+          </ScrollArea>
           {footer}
         </Stack>
       </Stack>

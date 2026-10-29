@@ -1,6 +1,7 @@
-import { BoardStatus, type BoardColumnId } from '@10db/contracts';
+import { BoardStatus } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import type { LayoutColumn } from './board-layout';
+import { boardColumnDto } from '../../test/fixtures';
 import { columnHint } from './column-hints';
 
 const system = (status: BoardStatus): LayoutColumn => ({
@@ -19,7 +20,7 @@ describe('columnHint', () => {
     [
       'a human column',
       {
-        key: { kind: 'human', id: 'col_1' as BoardColumnId },
+        key: { kind: 'human', id: boardColumnDto().id },
         label: 'Icebox',
         tasks: [],
       } satisfies LayoutColumn,

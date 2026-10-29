@@ -819,19 +819,48 @@ describe('BoardView', () => {
     expect(style).not.toContain('dashed');
   });
 
-  it('the count is a plain number labelled "N tasks"', async () => {
+  it.each([
+    [1, '1 task'],
+    [2, '2 tasks'],
+  ])('reads a count of %i as "%s" to assistive tech', async (n, spoken) => {
     const project = projectDto();
-    const tasks = [
-      taskDto({ projectId: project.id, title: 'Alpha', boardStatus: 'ready' }),
-      taskDto({ projectId: project.id, title: 'Beta', boardStatus: 'ready' }),
-    ];
+    const tasks = Array.from({ length: n }, (_, i) =>
+      taskDto({ projectId: project.id, title: `T${String(i)}`, boardStatus: 'ready' }),
+    );
     serve(
       http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
       http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json(tasks)),
     );
     renderApp('/board');
-    const count = await screen.findByLabelText('2 tasks');
-    expect(count.textContent).toBe('2');
+    const ready = await screen.findByRole('list', { name: 'Ready tasks' });
+    const paper = ready.closest<HTMLElement>('.mantine-Paper-root');
+    if (!paper) throw new Error('Ready has no column');
+    const number = within(paper).getByText(String(n), { selector: 'p' });
+    expect(number.textContent).toBe(spoken);
+    expect(number.hasAttribute('aria-label')).toBe(false);
+  });
+
+  it('scrolls the cards in their own region and keeps Show all outside it', async () => {
+    const project = projectDto();
+    const done = Array.from({ length: 22 }, (_, i) =>
+      taskDto({
+        projectId: project.id,
+        title: `Done ${String(i)}`,
+        boardStatus: 'done',
+        status: 'done',
+        boardOrder: i,
+      }),
+    );
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json(done)),
+    );
+    renderApp('/board');
+    const list = await screen.findByRole('list', { name: 'Done tasks' });
+    const cardsViewport = list.closest('[data-scrollbars="y"]');
+    expect(cardsViewport).not.toBeNull();
+    const more = screen.getByRole('button', { name: 'Show all 22' });
+    expect(cardsViewport?.contains(more)).toBe(false);
   });
 
   it('Ready ends in Add Task, which opens New Task', async () => {
