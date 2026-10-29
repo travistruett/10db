@@ -45,11 +45,14 @@ export interface PullRequest {
   readonly state: PrState;
 }
 
-/** A pull request's state and checks as GitHub reports them (`unknown` is the watcher's, never gh's). */
+/**
+ * A pull request's state and checks as GitHub reports them. The checks are `unknown` only when the
+ * rollup lists an entry 10db can't read and no other check failed or is still running.
+ */
 export interface PullRequestStatus {
   readonly url: string;
   readonly state: PrState;
-  readonly checks: Exclude<PullRequestChecks, 'unknown'>;
+  readonly checks: PullRequestChecks;
   readonly failingChecks: FailingCheckDto[];
 }
 
@@ -229,10 +232,23 @@ const StatusContextItem = z.object({
 const CheckRollupItem = z.discriminatedUnion('__typename', [CheckRunItem, StatusContextItem]);
 export type CheckRollupItem = z.infer<typeof CheckRollupItem>;
 
+/**
+ * A rollup entry 10db can't read: a kind GitHub adds later, or a known kind missing a field. It
+ * stands for a check whose outcome 10db doesn't know.
+ */
+export const UNREADABLE_CHECK = { __typename: 'Unreadable' } as const;
+export type CheckRollupEntry = CheckRollupItem | typeof UNREADABLE_CHECK;
+
+/** Reads one rollup entry on its own, so an entry 10db can't read leaves the rest of the read standing. */
+function rollupEntry(raw: unknown): CheckRollupEntry {
+  const item = CheckRollupItem.safeParse(raw);
+  return item.success ? item.data : UNREADABLE_CHECK;
+}
+
 const PrStatusView = z.object({
   url: z.url(),
   state: z.enum(PrState),
-  statusCheckRollup: z.array(CheckRollupItem).nullish(),
+  statusCheckRollup: z.array(z.unknown().transform(rollupEntry)).nullish(),
 });
 
 const FAILING_CONCLUSIONS = new Set(['FAILURE', 'TIMED_OUT', 'ACTION_REQUIRED', 'STARTUP_FAILURE']);
@@ -245,29 +261,37 @@ function httpsOrNull(url: string | null | undefined): string | null {
 }
 
 /**
- * What a rollup says: failing if any check failed (failing wins over pending), pending if any is
- * still going or expected, none for an empty rollup, else passing. Cancelled, skipped, neutral and
- * stale runs don't fail.
+ * What a rollup says: failing if any check failed (failing wins), pending if any is still going or
+ * expected, unknown if an entry 10db can't read is left, none for an empty rollup, else passing.
+ * Cancelled, skipped, neutral and stale runs don't fail.
  */
-export function summariseChecks(rollup: readonly CheckRollupItem[]): {
-  checks: Exclude<PullRequestChecks, 'unknown'>;
+export function summariseChecks(rollup: readonly CheckRollupEntry[]): {
+  checks: PullRequestChecks;
   failingChecks: FailingCheckDto[];
 } {
   const failingChecks: FailingCheckDto[] = [];
   let pending = false;
+  let unreadable = false;
   for (const item of rollup) {
-    if (item.__typename === 'CheckRun') {
-      if (item.status !== 'COMPLETED') pending = true;
-      else if (FAILING_CONCLUSIONS.has(item.conclusion ?? ''))
-        failingChecks.push({ name: item.name, url: httpsOrNull(item.detailsUrl) });
-    } else if (FAILING_STATES.has(item.state)) {
-      failingChecks.push({ name: item.context, url: httpsOrNull(item.targetUrl) });
-    } else if (PENDING_STATES.has(item.state)) {
-      pending = true;
+    switch (item.__typename) {
+      case 'CheckRun':
+        if (item.status !== 'COMPLETED') pending = true;
+        else if (FAILING_CONCLUSIONS.has(item.conclusion ?? ''))
+          failingChecks.push({ name: item.name, url: httpsOrNull(item.detailsUrl) });
+        break;
+      case 'StatusContext':
+        if (FAILING_STATES.has(item.state))
+          failingChecks.push({ name: item.context, url: httpsOrNull(item.targetUrl) });
+        else if (PENDING_STATES.has(item.state)) pending = true;
+        break;
+      case 'Unreadable':
+        unreadable = true;
+        break;
     }
   }
   if (failingChecks.length > 0) return { checks: 'failing', failingChecks };
   if (pending) return { checks: 'pending', failingChecks };
+  if (unreadable) return { checks: 'unknown', failingChecks };
   return { checks: rollup.length === 0 ? 'none' : 'passing', failingChecks };
 }
 

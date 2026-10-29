@@ -12,7 +12,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { waitFor } from '../../test/fixtures';
 import { ManualClock } from '../clock';
-import { GhError, type CheckRollupItem, type Gh } from '../github';
+import { GhError, UNREADABLE_CHECK, type CheckRollupItem, type Gh } from '../github';
 import { createPrWatch, subscribePrWatch, type PrWatch } from './index';
 
 const INTERVAL = 120_000;
@@ -333,6 +333,20 @@ describe('the pull request watch', () => {
     await round(w);
     expect(h.cards()).toHaveLength(1);
     await round(w);
+    expect(h.cards()).toEqual([]);
+  });
+
+  it('records unknown checks for a rollup entry 10db cannot read, without a card, and reads on', async () => {
+    setup();
+    const a = shipped(h.project.id, 'Alpha');
+    const b = shipped(h.project.id, 'Beta');
+    h.gh.setChecks(a.prUrl, [run('build', 'SUCCESS'), UNREADABLE_CHECK]);
+    h.gh.setChecks(b.prUrl, [run('build', 'SUCCESS')]);
+    const w = watcher();
+    w.start();
+    await w.idle();
+    expect(pr(a.id)).toMatchObject({ state: 'open', checks: 'unknown', unknownReason: null });
+    expect(pr(b.id)).toMatchObject({ state: 'open', checks: 'passing' });
     expect(h.cards()).toEqual([]);
   });
 

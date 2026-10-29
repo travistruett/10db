@@ -15,7 +15,11 @@ export type FailingCheckDto = z.infer<typeof FailingCheckDto>;
 /** What the daemon last read of a shipped batch's pull request. */
 export const PullRequestStatusDto = z.object({
   state: z.enum(PullRequestState),
-  /** While `state` is `unknown`, the checks (and `failingChecks`) gh last reported; `unknown` if it never did. */
+  /**
+   * While `state` is `unknown`, the checks (and `failingChecks`) gh last reported; `unknown` if it
+   * never did. With a known `state`, `unknown` means GitHub listed a check 10db can't read and no
+   * other check failed or is still running.
+   */
   checks: z.enum(PullRequestChecks),
   failingChecks: z.array(FailingCheckDto),
   checkedAt: Timestamp,

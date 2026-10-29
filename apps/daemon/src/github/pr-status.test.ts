@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   createGh,
   summariseChecks,
+  UNREADABLE_CHECK,
+  type CheckRollupEntry,
   type CheckRollupItem,
   type GhCall,
   type GhExec,
@@ -38,7 +40,7 @@ const status = (
 describe('summariseChecks', () => {
   it.each<{
     name: string;
-    rollup: CheckRollupItem[];
+    rollup: CheckRollupEntry[];
     checks: string;
     failing: { name: string; url: string | null }[];
   }>([
@@ -124,6 +126,30 @@ describe('summariseChecks', () => {
         { name: 'b', url: null },
       ],
     },
+    {
+      name: 'an entry 10db cannot read beside passing checks',
+      rollup: [run('build', 'SUCCESS'), UNREADABLE_CHECK],
+      checks: 'unknown',
+      failing: [],
+    },
+    {
+      name: 'only entries 10db cannot read',
+      rollup: [UNREADABLE_CHECK],
+      checks: 'unknown',
+      failing: [],
+    },
+    {
+      name: 'an entry 10db cannot read beside a failing check: failing wins',
+      rollup: [UNREADABLE_CHECK, run('lint', 'FAILURE')],
+      checks: 'failing',
+      failing: [{ name: 'lint', url: 'https://github.com/acme/widgets/actions/runs/lint' }],
+    },
+    {
+      name: 'an entry 10db cannot read beside a running check: pending',
+      rollup: [UNREADABLE_CHECK, run('test', null)],
+      checks: 'pending',
+      failing: [],
+    },
   ])('$name', ({ rollup, checks, failing }) => {
     expect(summariseChecks(rollup)).toEqual({ checks, failingChecks: failing });
   });
@@ -202,14 +228,49 @@ describe('Gh.prStatus', () => {
   });
 
   it.each([
-    ['output that is not JSON', 'not json'],
-    [
-      'an unreadable rollup',
-      JSON.stringify({
+    {
+      name: 'a kind of entry GitHub adds later, beside a passing run',
+      rollup: [
+        { __typename: 'Mystery', name: 'deploy', result: 'BAD' },
+        { __typename: 'CheckRun', name: 'build', status: 'COMPLETED', conclusion: 'SUCCESS' },
+      ],
+      checks: 'unknown',
+      failing: [],
+    },
+    {
+      name: 'a check run missing its name, beside a failing status',
+      rollup: [
+        { __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'FAILURE' },
+        { __typename: 'StatusContext', context: 'ci/x', state: 'ERROR', targetUrl: null },
+      ],
+      checks: 'failing',
+      failing: [{ name: 'ci/x', url: null }],
+    },
+  ])(
+    'reads the state and the rest of the rollup around $name',
+    async ({ rollup, checks, failing }) => {
+      const { gh } = view({
+        exitCode: 0,
+        stdout: JSON.stringify({ url: INPUT.ref, state: 'OPEN', statusCheckRollup: rollup }),
+      });
+      await expect(gh.prStatus(INPUT, CALL)).resolves.toEqual({
         url: INPUT.ref,
         state: 'OPEN',
-        statusCheckRollup: [{ __typename: 'Mystery' }],
-      }),
+        checks,
+        failingChecks: failing,
+      });
+    },
+  );
+
+  it.each([
+    ['output that is not JSON', 'not json'],
+    [
+      'a rollup that is not a list',
+      JSON.stringify({ url: INPUT.ref, state: 'OPEN', statusCheckRollup: { contexts: [] } }),
+    ],
+    [
+      'a state 10db does not know',
+      JSON.stringify({ url: INPUT.ref, state: 'DRAFTED', statusCheckRollup: [] }),
     ],
   ])('fails on %s', async (_name, stdout) => {
     const { gh } = view({ exitCode: 0, stdout });

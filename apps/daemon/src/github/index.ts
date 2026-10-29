@@ -4,6 +4,8 @@ export {
   PrState,
   createSystemGhExec,
   summariseChecks,
+  UNREADABLE_CHECK,
+  type CheckRollupEntry,
   type CheckRollupItem,
   type Gh,
   type GhCall,

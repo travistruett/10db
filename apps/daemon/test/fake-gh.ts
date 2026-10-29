@@ -3,7 +3,7 @@ import {
   GhError,
   PrState,
   summariseChecks,
-  type CheckRollupItem,
+  type CheckRollupEntry,
   type Gh,
   type PullRequest,
   type PullRequestStatus,
@@ -30,7 +30,7 @@ export class FakeGh implements Gh {
       pr: { url: string; state: PrState };
       body: string;
       create: PrCreateCall | null;
-      rollup: readonly CheckRollupItem[];
+      rollup: readonly CheckRollupEntry[];
     }
   >();
   private next = 1;
@@ -108,7 +108,7 @@ export class FakeGh implements Gh {
   }
 
   /** The checks the PR's rollup shows from now on; a new PR has none. */
-  setChecks(url: string, rollup: readonly CheckRollupItem[]): void {
+  setChecks(url: string, rollup: readonly CheckRollupEntry[]): void {
     const found = this.byRef.get(url);
     if (!found) throw new Error(`no PR ${url}`);
     found.rollup = rollup;
