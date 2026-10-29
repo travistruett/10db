@@ -19,6 +19,7 @@ import { batchBranchName } from './branch-name';
 import { forTasks, startCards, worktreeCards, type Card } from './cards';
 import { ghCall, networkCall, raise, type DeliveryContext } from './context';
 import { unmergedDependencies } from './deps';
+import { recordInstall } from './installed-lockfile';
 import { seedDirs, seedWorktree } from './worktree-seed';
 
 /** What a start hands its background job: the plans resolved in the request, by task. */
@@ -157,6 +158,7 @@ export async function cutWorktree(
     }
     if (stopped()) return;
     const installed = await ctx.dependencies.refresh({ batch, project, path, signal });
+    await recordInstall(ctx, batchId, path, installed);
     switch (installed.kind) {
       case 'aborted':
         return;

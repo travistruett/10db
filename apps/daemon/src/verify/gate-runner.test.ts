@@ -82,6 +82,27 @@ describe('gate runner', () => {
     expect(readFileSync(result.logPath, 'utf8')).toContain('checks-ok');
   });
 
+  it('runs beforeStart first, and starts nothing when it answers false', async () => {
+    const ran = join(dir.path, 'ran');
+    const order: string[] = [];
+    const started = await runner.run(
+      request({
+        command: `echo gate >> '${ran}'`,
+        beforeStart: () => {
+          order.push(existsSync(ran) ? 'after the command' : 'before the command');
+          return Promise.resolve(true);
+        },
+      }),
+    );
+    expect(started).toMatchObject({ exitCode: 0, aborted: false });
+    expect(order).toEqual(['before the command']);
+    const stopped = await runner.run(
+      request({ command: `echo gate >> '${ran}'`, beforeStart: () => Promise.resolve(false) }),
+    );
+    expect(stopped).toMatchObject({ aborted: true, timedOut: false });
+    expect(readFileSync(ran, 'utf8')).toBe('gate\n');
+  });
+
   it('records the exit code of a failing gate and stderr', async () => {
     const result = await run('echo broken >&2; exit 3');
     expect(result.exitCode).toBe(3);

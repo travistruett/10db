@@ -5,6 +5,7 @@ import {
   mkdirSync,
   readFileSync,
   realpathSync,
+  rmSync,
   writeFileSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -95,6 +96,10 @@ function fakePnpm(root: string): FakePnpm {
       writeFileSync(verdict, `${output}\n`);
       writeFileSync(`${verdict}.code`, `${String(exitCode)}\n`);
     },
+    succeed() {
+      rmSync(verdict, { force: true });
+      rmSync(`${verdict}.code`, { force: true });
+    },
   };
 }
 
@@ -125,6 +130,8 @@ export interface FakePnpm {
   calls(): string[];
   /** Makes every later call print `output` and exit with `exitCode`. */
   failWith(exitCode: number, output: string): void;
+  /** Makes every later call succeed again. */
+  succeed(): void;
 }
 
 export interface DeliveryHarness {

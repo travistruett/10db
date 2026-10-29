@@ -17,6 +17,7 @@ import type { StateStore } from '../events';
 import { existsAsEntry, GitTrustError, type Git } from '../git';
 import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
+import { holdsOnlyBookkeeping, isBookkeepingAt } from './claude-code-bookkeeping';
 import {
   bulkFoldKey,
   findForeignClaimWrites,
@@ -272,9 +273,16 @@ export function createWatcher(deps: {
     const reported = paths.filter((rel) => changed.has(rel));
     const site = siteOf(project, batchId, entry.root);
     const { strays, candidates } = straysIn(project, batchId, reported, ACTIVE_STATES, null);
-    // Ignored or unreported paths that can change what runs are flagged whatever the claims say.
+    // Ignored or unreported paths that can change what runs are flagged whatever the claims say. Claude Code's
+    // staging directory, as a real directory, is its bookkeeping, and a sensitive directory holding only that is
+    // the `.claude/` a session start made for it.
     const hidden = paths.filter(
-      (rel) => !changed.has(rel) && isSensitivePath(rel) && existsAsEntry(join(entry.root, rel)),
+      (rel) =>
+        !changed.has(rel) &&
+        isSensitivePath(rel) &&
+        existsAsEntry(join(entry.root, rel)) &&
+        !isBookkeepingAt(entry.root, rel) &&
+        !holdsOnlyBookkeeping(entry.root, rel),
     );
     raise(project, site, [...strays, ...hidden], candidates, null);
     const outside = new Set(strays);

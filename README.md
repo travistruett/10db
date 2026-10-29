@@ -10,6 +10,28 @@ blocked work pauses.
 Status: under construction. The design is in
 [docs/superpowers/specs/2026-10-13-10db-factory-loop-design.md](docs/superpowers/specs/2026-10-13-10db-factory-loop-design.md).
 
+## Install the app from main
+
+| When                                 | Run                                                                                  |
+| ------------------------------------ | ------------------------------------------------------------------------------------ |
+| Install or update 10db from main     | quit 10db (⌘Q), then `make install-app`, then open 10db                              |
+| Something's wrong with the new build | quit 10db, then `make rollback-app` (it prints the matching database backup command) |
+
+- GitHub builds it, so nothing compiles on your Mac. `make install-app` reuses the build of main's newest
+  commit, or starts one and waits: the first install of a new commit waits about 15 minutes.
+  If a build of that commit is already running, it waits for it. `make install-app REF=<branch or tag>`
+  installs another ref. It needs `gh` signed in, and it refuses while 10db runs; it never quits 10db for you.
+- The build is unsigned, so install it only this way. Gatekeeper refuses a copy opened from a download, and the
+  Keychain may ask for access again after an update.
+- The database is backed up first, to `~/Library/Application Support/10db-backup-<stamp>/10db.sqlite`; the stamp
+  is the UTC time, such as `20261029T101500Z`. The app it replaced stays beside the new one as
+  `/Applications/10db.app.prev-<stamp>`, with the same stamp.
+- `make rollback-app` puts back the newest `10db.app.prev-<stamp>` and keeps the app it replaces as
+  `/Applications/10db.app.rolled-back-<stamp>`; run it again to step one more build back. It changes no data:
+  it prints the commands that save the current database and restore the matching backup.
+- Saved apps and backups pile up: each saved app takes about 170 MB. Delete the old ones by hand, with 10db quit:
+  `rm -rf /Applications/10db.app.prev-<stamp>` and `~/Library/Application Support/10db-backup-<stamp>`.
+
 ## Develop
 
 Prerequisites: Homebrew, the Xcode Command Line Tools, and [mise](https://mise.jdx.dev) (`brew install mise`)
