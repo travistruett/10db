@@ -8,7 +8,7 @@ export { createBatchStarter, type BatchStarter } from './start';
 export { prBody, prTitle, titlePrefix } from './pr-text';
 export { createShipper, type Shipper } from './ship';
 export { subscribeShipTrigger } from './trigger';
-export { createPrWatch, PR_WATCH_INTERVAL_MS, subscribePrWatch, type PrWatch } from './pr-watch';
+export { createPrWatch, subscribePrWatch, type PrWatch } from './pr-watch';
 export { batchCardFields, createBatchCardAnswers } from './batch-card';
 export {
   batchLaunchVerdict,

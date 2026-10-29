@@ -14,7 +14,7 @@ import { prCardKey, prCards, detailOf } from './cards';
 import { ghCall, raise, withdraw, type DeliveryContext } from './context';
 
 /** How often the watch reads every followed pull request. */
-export const PR_WATCH_INTERVAL_MS = 2 * 60_000;
+const PR_WATCH_INTERVAL_MS = 2 * 60_000;
 
 /** Longest reason kept on a batch: it is shown in the UI. */
 const MAX_REASON = 500;
