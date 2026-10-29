@@ -1969,14 +1969,16 @@ export function createGit(opts: GitOptions = {}): Git {
       if (writable !== null)
         throw refusal(real, { kind: GitTrustFailure.Writable, gitDir: writable });
       const now = await observe(real);
+      // A restart may renumber the volume between the refusal and the answer; the inodes still hold.
       const same =
-        now.id === candidate.id &&
+        sameCheckoutIdentity(now.id, candidate.id) &&
         now.gitDir === candidate.gitDir &&
         now.commonDir === candidate.commonDir &&
         now.fetchUrl === candidate.fetchUrl &&
         now.pushUrl === candidate.pushUrl;
       if (!same) throw mismatch(real, candidate, now);
-      pins.set(real, candidate);
+      // `now` is the candidate's state with the device number the volume has today.
+      pins.set(real, now);
     },
   };
 }

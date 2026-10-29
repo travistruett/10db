@@ -959,6 +959,21 @@ describe('the checkout is the one pinned for it', () => {
     expect(detail.kind).toBe('moved');
   });
 
+  it('takes the Trust answer to a moved card after the volume gets a new device number', async () => {
+    const onRefused = vi.fn();
+    const git = createGit({ onRefused });
+    await git.head(repo.path);
+    replaceGitDir();
+    const { detail } = await refusal(git.head(repo.path));
+    if (detail.kind !== 'moved') throw new Error('expected a moved checkout');
+    onRefused.mockClear();
+    const candidate = { ...detail.candidate, id: renumbered(detail.candidate.id) };
+    expect(candidate.id).not.toBe(detail.candidate.id);
+    await expect(git.retrust(repo.path, candidate)).resolves.toBeUndefined();
+    expect(await git.currentBranch(repo.path)).toBe('main');
+    expect(onRefused).not.toHaveBeenCalled();
+  });
+
   it('says what differs when a replaced .git sits at the same path', async () => {
     const git = createGit();
     await git.head(repo.path);

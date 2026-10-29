@@ -88,8 +88,12 @@ function movedReason(detail: Extract<GitTrustDetail, { kind: 'moved' }>): string
     return `its git dir is ${candidate.gitDir}, not ${pin.gitDir} as 10db recorded`;
   if (candidate.commonDir !== pin.commonDir)
     return `its common git dir is ${candidate.commonDir}, not ${pin.commonDir} as 10db recorded`;
-  const [now = '', was = ''] = [candidate.id, pin.id].map((id) => identityInodes(id));
-  return `${candidate.gitDir} is at the same path but is a different repository now (inode ${now.split('/')[0] ?? ''}, was ${was.split('/')[0] ?? ''})`;
+  // Same paths: name whichever of the git dir and the common dir has a new inode.
+  const [nowGit = '', nowCommon = ''] = identityInodes(candidate.id).split('/');
+  const [wasGit = '', wasCommon = ''] = identityInodes(pin.id).split('/');
+  if (nowGit === wasGit && nowCommon !== wasCommon)
+    return `its common git dir ${candidate.commonDir} is at the same path but is a different repository now (inode ${nowCommon}, was ${wasCommon})`;
+  return `${candidate.gitDir} is at the same path but is a different repository now (inode ${nowGit}, was ${wasGit})`;
 }
 
 function describe(repo: string, detail: GitTrustDetail): string {
