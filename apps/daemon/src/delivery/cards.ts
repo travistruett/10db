@@ -26,6 +26,8 @@ export interface Card {
   readonly body: string;
   /** An open card with the same key is reused instead of raising another. */
   readonly foldKey?: string;
+  /** A repeat that folds rewrites the open card with this one's body and detail. */
+  readonly refresh?: boolean;
   readonly detail?: Record<string, Json>;
 }
 
@@ -300,9 +302,17 @@ export const baseCards = {
 /**
  * A refused start's card names its tasks (and the batch it tried to join), so a client can tell a
  * refused start from a join that is still on its way: a joined task gets a workstream instead.
+ * The same refusal of the same tasks folds into the card still open, so starting again after a
+ * failure does not stack identical cards.
  */
 export function forTasks(card: Card, taskIds: Iterable<TaskId>): Card {
-  return { ...card, detail: { ...card.detail, taskIds: [...taskIds] } };
+  const ids = [...taskIds];
+  return {
+    ...card,
+    foldKey: card.foldKey ?? `start-refused:${[...ids].sort().join(',')}:${card.title}`,
+    refresh: true,
+    detail: { ...card.detail, taskIds: ids },
+  };
 }
 
 /** Where a wrong-branch card comes from, which decides what it tells the builder to do. */
