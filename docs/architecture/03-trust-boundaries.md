@@ -136,9 +136,11 @@ without it):
   that never reach the broker, so hazards and new hosts would skip their cards.
 - **Environment.** The sandbox adds `CLAUDE_CODE_TMPDIR` (the lane's own temp directory), per-lane package
   caches (`CARGO_HOME` among them), the lane's own mise config
-  (`MISE_CONFIG_DIR`, `MISE_GLOBAL_CONFIG_FILE`), `MISE_LOG_LEVEL=error`, `xcrun_db` (Apple's xcrun cache file,
-  in its temp dir), an empty `XDG_CONFIG_HOME` in its temp dir, `TENDB_SANDBOX=1`,
-  `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` and `CLAUDE_ENV_FILE`. Bash children keep only an allowlist of names
+  (`MISE_CONFIG_DIR`, `MISE_GLOBAL_CONFIG_FILE`), `MISE_LOG_LEVEL=error`, an empty `XDG_CONFIG_HOME` in its temp
+  dir, `TENDB_SANDBOX=1`, `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` and `CLAUDE_ENV_FILE`. `xcrun_db` (Apple's xcrun
+  cache file, in its temp dir) is set for the sandboxed shell only, in `CLAUDE_ENV_FILE`: xcrun execs whatever
+  the file names, a lane can write the temp dir, and Claude Code runs its own git with the session env outside
+  the sandbox, so the variable never reaches that env. Bash children keep only an allowlist of names
   (`PATH`, `HOME`, locale, toolchain and package-cache variables) and nothing that looks like a secret: the
   profile lists every other name in the session's env under `sandbox.credentials.envVars` with `mode: deny`,
   an account's own variables included.
@@ -150,7 +152,7 @@ without it):
   sandboxed command's env, `GIT_CONFIG_GLOBAL` and `CARGO_HOME` among them. Without them git dies reading the denied
   `~/.gitconfig` and cargo falls back to the denied `~/.cargo`. So every variable the sandbox sets for lane commands
   (the package caches, the mise variables, `xcrun_db`, `GIT_CONFIG_GLOBAL=/dev/null`, `GIT_OPTIONAL_LOCKS=0`, the empty
-  `XDG_CONFIG_HOME` and `TENDB_SANDBOX=1`) is also written to a per-session file that the shell sources before each command: one `export` per variable, its value
+  `XDG_CONFIG_HOME` and `TENDB_SANDBOX=1`) is written to a per-session file that the shell sources before each command: one `export` per variable, its value
   in POSIX single quotes, and a name that isn't a shell identifier or a value with a control character refuses
   the session. The file is created with `wx`, mode 0400, at `<tmp root>/10db-env-<hex>.sh`, outside every
   writable path, with its exact path in `allowRead`. Claude Code's own `CLAUDE_*` settings stay out of it. The
@@ -234,9 +236,9 @@ Under the lane sandbox (**built**), the design column holds for a lane's Bash:
   lane-writable input, so there is no prefetch. The gate runs under the sandbox too, with caches of its own
   (§4.7). Approved repo stdio MCP servers run under srt too, with only the hosts their approval names and caches of their own (§4.6). npm's cacache index lines carry only a hash of themselves (from the format, not measured),
   and pnpm 12.13.0 replaced a tampered stored file on reuse (measured), but neither cache is shared.
-- **Toolchains.** A lane reads mise's state and cache dirs, mise's `installs` dir whole, `~/.cargo/bin`,
-  rustup's home, each other version manager's installs by its own layout, and the own files of each `PATH`
-  entry under home; all read-only.
+- **Toolchains.** A lane reads mise's state and cache dirs, `~/.cargo/bin`,
+  rustup's home, each version manager's installs by its own layout, and the own files of each `PATH`
+  entry under home; all read-only. It can also list mise's `installs` dir and its tool dirs, by name only.
   - **mise's config dir is never opened.** It can hold the age key (`age.txt`) and a global `config.toml`
     whose `[env]` often holds tokens, and mise's shims would apply that `[env]` to lane commands. Each lane
     gets its own global mise config in its temp dir (`MISE_CONFIG_DIR`, `MISE_GLOBAL_CONFIG_FILE`), holding
@@ -251,18 +253,24 @@ Under the lane sandbox (**built**), the design column holds for a lane's Bash:
     mise's age key and any file a `MISE_*AGE_KEY_FILE` names are denied by exact path. Measured under a
     Seatbelt profile built from the reads: `node`, `npm` and `pnpm` resolve through mise's shims with the lane
     config, and an `[env]` token in the builder's global config doesn't reach the command.
-  - **mise's `installs` dir opens whole; its data dir does not.** mise lists `installs` and each
-    `installs/<tool>` on every command, shims included, and Seatbelt allows a directory listing only for a
-    directory opened with its contents (a path with a glob character would open the listing alone, but Claude
-    Code drops the sandbox for one). Without it every mise call prints `failed to scan installs/<tool>:
-Operation not permitted` per tool and exits (measured with mise 2026.10.11: `mise ls`, and a `cargo` or
-    `pnpm` shim). Each version's `etc` dir is denied by both spellings, with its npmrcs, so opening the dir
-    reopens nothing the per-version entries kept closed; `downloads`, `plugins` and the rest of the data dir
-    stay closed and nothing under it is writable. The state dir stays read-only: mise's write of a
-    `tracked-configs` link for the lane's config fails, which is only a warning, and `MISE_LOG_LEVEL=error`
-    keeps it off every command. Pointing `MISE_STATE_DIR` into the temp dir instead would also hide the
-    builder's `trusted-configs`, so a project's own `mise.toml` would stop being trusted, and let a lane
-    trust its own config.
+  - **mise's `installs` dir and its tool dirs can be listed, by name; no version opens whole, and its data
+    dir stays closed.** mise lists `installs` and each `installs/<tool>` on every command, shims included.
+    Without the listing every mise call prints `failed to scan installs/<tool>: Operation not permitted` per
+    tool and exits (measured with mise 2026.10.11: `mise ls`, and a `cargo` or `pnpm` shim). Seatbelt allows a
+    listing for an exact match of the directory, but srt renders a plain path as a subtree and only a pattern
+    as an exact match, so the listing is granted as two patterns: the dir with its last character as a
+    one-character set (`.../install[s]`) and its children (`.../installs/*`). Neither reaches into a tool
+    dir's versions. Each version's contents open entry by entry (below), from what is installed when the
+    profile is built, so a version installed later, its `etc/npmrc` and `lib/node_modules/npm/npmrc` included,
+    stays closed; the profile writes no deny inside a tree it opened. The patterns are the only ones the
+    profile holds, and only from `toolchainAccess`'s `listings`. Claude Code's sandbox takes them too
+    (measured with Claude Code 2.1.312: the listings worked, a version dir and its `etc/npmrc` stayed denied,
+    and the sandbox stayed on). `downloads`, `plugins` and the rest of the data dir stay closed and nothing
+    under it is writable. The state dir stays read-only: mise's write of a `tracked-configs` link for the
+    lane's config fails, which is only a warning, and `MISE_LOG_LEVEL=error` keeps it, and mise's other
+    warnings, off every command (mise has no setting that mutes one warning; errors still print). Pointing
+    `MISE_STATE_DIR` into the temp dir instead would also hide the builder's `trusted-configs`, so a project's
+    own `mise.toml` would stop being trusted, and let a lane trust its own config.
   - **Other version managers' trees are not opened whole.** For nvm
     (`versions/node/<version>`) and volta (`tools/image/<tool>/<version>`) the daemon lists the installs by the
     manager's own layout, two levels down, and opens every entry of each version except `etc`, by its written
@@ -295,7 +303,9 @@ Operation not permitted` per tool and exits (measured with mise 2026.10.11: `mis
     `couldn't create cache file ... (errno=Operation not permitted)` and repeats the lookup, which made a
     git-heavy test run past its timeout. xcrun reads the variable `xcrun_db` for the file's path (measured: with
     it set, the cache is created there), so the sandbox points it at `<temp dir>/xcrun_db`, inside the temp dir
-    every sandbox already writes. No write is opened anywhere else, and the cache goes with the temp dir.
+    every sandbox already writes. No write is opened anywhere else, and the cache goes with the temp dir. xcrun
+    execs the tool the cache names, so only the sandboxed shell gets the variable (the env file and a gate's
+    inner env); a lane's session env, which Claude Code and its git run with outside the sandbox, never does.
 - **Registry tokens and keys.** A node install's global `etc/npmrc` is never opened. Denied by exact path, with
   no walk: each version's `etc/npmrc` and npm's builtin `lib/node_modules/npm/npmrc`, by both spellings (a
   version linked into a Homebrew keg keeps its `etc` there); the npmrc files of each `node` on the lane's

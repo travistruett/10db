@@ -82,13 +82,14 @@ describe.skipIf(!SEATBELT)('toolchains under the gate sandbox (Seatbelt)', () =>
     probes: Record<string, string>,
     home: string,
     env: Record<string, string>,
+    prelude = '',
   ): Promise<Record<string, 'ok' | 'denied'>> {
-    const script = Object.entries(probes)
+    const script = `${prelude}\n${Object.entries(probes)
       .map(
         ([name, command]) =>
           `if ( ${command} ) >/dev/null 2>&1; then echo "probe ${name} ok"; else echo "probe ${name} denied"; fi`,
       )
-      .join('\n');
+      .join('\n')}`;
     const result = await run(script, home, env);
     expect(result.exitCode, result.tail).toBe(0);
     return Object.fromEntries(
@@ -154,7 +155,7 @@ describe.skipIf(!SEATBELT)('toolchains under the gate sandbox (Seatbelt)', () =>
     expect(seen).toEqual({
       'list-installs': 'ok',
       'list-tool': 'ok',
-      'list-version': 'ok',
+      'list-version': 'denied',
       'read-bin': 'ok',
       'read-lib': 'ok',
       'read-npmrc': 'denied',
@@ -170,6 +171,51 @@ describe.skipIf(!SEATBELT)('toolchains under the gate sandbox (Seatbelt)', () =>
       'write-state': 'denied',
     });
   }, 120_000);
+
+  it("keeps a version installed after the profile is built closed, its etc and npmrc included, though mise's installs list", async () => {
+    const mise = join(fakeHome, '.local', 'share', 'mise');
+    const late = join(mise, 'installs', 'node', '2.0.0');
+    const started = join(checkout, 'started');
+    const go = join(checkout, 'go');
+    // The command starts under the profile built before the version exists, says so, and waits for
+    // the host to install the version before it probes.
+    const prelude = `: > ${started}; n=0; while [ ! -e ${go} ] && [ $n -lt 600 ]; do sleep 0.1; n=$((n+1)); done`;
+    const running = probe(
+      {
+        'list-tool': `ls ${join(mise, 'installs', 'node')}`,
+        'read-late-npmrc': `cat ${join(late, 'etc', 'npmrc')}`,
+        'read-late-etc-other': `cat ${join(late, 'etc', 'other')}`,
+        'read-late-bin': `cat ${join(late, 'bin', 'node')}`,
+        'list-late': `ls ${late}`,
+        'read-early-bin': `cat ${join(mise, 'installs', 'node', '1.0.0', 'bin', 'node')}`,
+      },
+      fakeHome,
+      { PATH: '/usr/bin:/bin:/usr/sbin:/sbin', HOME: fakeHome },
+      prelude,
+    );
+    const deadline = Date.now() + 60_000;
+    while (!existsSync(started) && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    expect(existsSync(started)).toBe(true);
+    for (const [rel, text] of [
+      [join(late, 'bin', 'node'), '#!/bin/sh\n'],
+      [join(late, 'etc', 'npmrc'), `//registry.example/:_authToken=${token}\n`],
+      [join(late, 'etc', 'other'), `other-${token}\n`],
+    ] as const) {
+      mkdirSync(join(rel, '..'), { recursive: true });
+      writeFileSync(rel, text);
+    }
+    writeFileSync(go, '');
+    expect(await running).toEqual({
+      'list-tool': 'ok',
+      'read-late-npmrc': 'denied',
+      'read-late-etc-other': 'denied',
+      'read-late-bin': 'denied',
+      'list-late': 'denied',
+      'read-early-bin': 'ok',
+    });
+  }, 150_000);
 
   it.skipIf(onPath('mise') === null)(
     "resolves the builder's mise installs with no error or warning",

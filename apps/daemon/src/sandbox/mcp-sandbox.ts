@@ -155,6 +155,7 @@ function sandboxOne(
     secretFiles: access.checkoutSecrets,
     toolchainSecrets: access.toolchain.secretFiles,
     toolchainReads: access.toolchain.reads,
+    toolchainListings: access.toolchain.listings,
     allowedDomains: server.hosts,
     readList: access.readList,
     extraReads: [envFile, ...access.gitReads],

@@ -7,10 +7,22 @@ import { packageCacheEnv } from './package-cache';
 const SANDBOX_MARKER = 'TENDB_SANDBOX';
 
 /**
+ * Variables only the sandboxed shell may see. A tool that Claude Code runs itself, outside the
+ * sandbox, would follow them into the lane's temp dir and run what a lane wrote there: xcrun execs
+ * whatever its cache file names.
+ */
+const SHELL_ONLY_ENV: readonly string[] = ['xcrun_db'];
+
+/** `env` without the variables that are for the sandboxed shell alone. */
+export function withoutShellOnly(env: Readonly<Record<string, string>>): Record<string, string> {
+  return Object.fromEntries(Object.entries(env).filter(([name]) => !SHELL_ONLY_ENV.includes(name)));
+}
+
+/**
  * Prepares a sandbox's own temp dir for the commands that run in it, and returns the variables they
  * need on top of the allowlisted env: package caches inside the temp dir, a global mise config of the
  * builder's tool versions only, git with no global config and no optional locks, and the sandbox
- * marker. Lanes and gate runs get the same set.
+ * marker. Lanes and gate runs get the same set; a lane's session env leaves out `withoutShellOnly`'s.
  */
 export function prepareCommandEnv(
   tmpDir: string,

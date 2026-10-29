@@ -1,5 +1,5 @@
 import type { PermissionRuleDto, ProjectDto } from '@10db/contracts';
-import { prepareCommandEnv } from './command-env';
+import { prepareCommandEnv, withoutShellOnly } from './command-env';
 import { deniedEnvNames } from './env-allowlist';
 import { createLaneEnvFile, removeLaneEnvFile } from './env-file';
 import { claudeProtectedPaths, type FileAccessContext } from './file-access';
@@ -115,8 +115,10 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
         // Claude Code strips some of these from a sandboxed command's env; the shell sets every one
         // of them again from this file before each command.
         envFile = createLaneEnvFile(commandEnv, tmpRoot);
+        // The file carries every variable; the session env, which Claude Code and its own git run
+        // with outside the sandbox, leaves out the ones that are for the sandboxed shell alone.
         const env: Record<string, string> = {
-          ...commandEnv,
+          ...withoutShellOnly(commandEnv),
           CLAUDE_CODE_TMPDIR: tmpDir,
           CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1',
           CLAUDE_ENV_FILE: envFile,
@@ -129,6 +131,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           secretFiles: access.checkoutSecrets,
           toolchainSecrets: toolchain.secretFiles,
           toolchainReads: toolchain.reads,
+          toolchainListings: toolchain.listings,
           allowedDomains: access.hosts,
           readList,
           // A linked worktree's common dir is read for the git a lane runs, never written.

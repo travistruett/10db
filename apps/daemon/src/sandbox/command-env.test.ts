@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { prepareCommandEnv } from './command-env';
+import { prepareCommandEnv, withoutShellOnly } from './command-env';
 import { deniedEnvNames } from './env-allowlist';
 
 let root: string;
@@ -31,5 +31,15 @@ describe('prepareCommandEnv tool-cache variables', () => {
   it('sets only variables the env allowlist keeps for a sandboxed command', () => {
     const env = prepareCommandEnv(tmpDir, join(root, 'home'), {});
     expect(deniedEnvNames(env)).toEqual([]);
+  });
+});
+
+describe('withoutShellOnly', () => {
+  it("drops the variables a tool Claude Code runs itself would follow into the lane's temp dir", () => {
+    const env = prepareCommandEnv(tmpDir, join(root, 'home'), {});
+    const kept = withoutShellOnly(env);
+    expect(Object.keys(kept)).not.toContain('xcrun_db');
+    expect(kept['GIT_CONFIG_GLOBAL']).toBe('/dev/null');
+    expect(Object.keys(env).filter((name) => !(name in kept))).toEqual(['xcrun_db']);
   });
 });

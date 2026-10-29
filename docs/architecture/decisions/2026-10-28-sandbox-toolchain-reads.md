@@ -1,4 +1,4 @@
-# The sandbox opens mise's installs dir and moves xcrun's cache into the temp dir
+# The sandbox lists mise's installs by name and moves xcrun's cache into the temp dir
 
 - **Date:** 2026-10-28
 - **Amends:** decision 132 (the gate runs under srt) and the lane sandbox's toolchain reads
@@ -7,14 +7,20 @@
 ## Decision
 
 - mise's `installs` directory (`$MISE_DATA_DIR/installs`, else `$XDG_DATA_HOME/mise/installs`, else
-  `~/.local/share/mise/installs`) is read whole by lanes, gates and MCP servers, when it lies under the
-  builder's home and outside every checkout. Every version's `etc` directory is denied again, by its written and
-  real path, beside the npmrc paths that were already denied. mise's data dir stays closed apart from `installs`
-  and `shims`, and nothing under it, or under its state dir, is writable. nvm and volta are unchanged.
+  `~/.local/share/mise/installs`) can be _listed_ by lanes, gates and MCP servers, when it lies under the
+  builder's home and outside every checkout, and so can each tool dir in it (`installs/<tool>`). Nothing in
+  either opens: a listing shows names. The grants are two exact-match patterns per installs dir (written path,
+  and real path when the dir is a link inside a granted read): the dir with its last character as a
+  one-character set (`.../install[s]`), and its children (`.../installs/*`). Each version's contents open entry
+  by entry, as before, from what is installed when the profile is built; a version installed later matches no
+  pattern and stays closed, its `etc` and npmrc files with it. No deny is written inside an opened tree. mise's
+  data dir stays closed apart from `installs` (listing only) and `shims`, and nothing under it, or under its
+  state dir, is writable. nvm and volta are unchanged.
 - `prepareCommandEnv` sets `xcrun_db` to `<temp dir>/xcrun_db`, so Apple's xcrun shims (`/usr/bin/git`,
-  `/usr/bin/make`) create their lookup cache inside the temp dir. `xcrun_db` joins the env allowlist.
-- `prepareCommandEnv` sets `MISE_LOG_LEVEL=error`, which keeps mise's warning about the tracked-config link it
-  can't write in its read-only state dir off every command.
+  `/usr/bin/make`) create their lookup cache inside the temp dir. `xcrun_db` joins the env allowlist. It is for
+  the sandboxed shell alone: a lane's `CLAUDE_ENV_FILE` and a gate's inner env carry it, and a lane's session
+  env, which Claude Code and its own git run with outside the sandbox, does not (`withoutShellOnly`).
+- `prepareCommandEnv` sets `MISE_LOG_LEVEL=error`.
 - The state dir stays read-only and `MISE_STATE_DIR` is not moved.
 
 ## Why
@@ -23,22 +29,32 @@ The first real run of 10db's own gate in the sandbox failed its rust step on eve
 tests. Two causes, both reproduced under the gate's real profile (macOS, mise 2026.10.11):
 
 - mise reads `installs` and each `installs/<tool>` as directory listings on every command. The profile opened
-  only the entries of each version, and Seatbelt allows a listing for a directory opened with its contents, so
-  `mise ls` and every shim failed with `Operation not permitted`. The listing alone can't be opened: it would
-  take a path with a glob character, which Claude Code's sandbox drops the whole profile for. Opening the dir
-  adds only each version's `etc` and a tool's loose files, and `etc` is denied again. The per-version entries
-  stay listed for versions linked elsewhere, which the kernel judges by their real path.
+  only the entries of each version, so `mise ls` and every shim failed with `Operation not permitted`. A
+  listing needs only a grant on the directory itself, but srt renders a plain path as a subtree (the whole
+  tree below it) and only a pattern as an exact match. Opening `installs` as a plain path was tried first and
+  rejected: it reaches every version installed after the profile is built, `etc/npmrc` and
+  `lib/node_modules/npm/npmrc` included, and denying individual secrets inside an opened tree fails open for
+  any that appear later. The pattern spelling lists the dir and nothing in it (measured under the real srt: the
+  dir and its tool dirs list; a version dir, its `etc/npmrc` and a version created after the run started do not
+  read). Claude Code's sandbox takes the same patterns (measured with Claude Code 2.1.312, `claude -p` with the
+  profile as `--settings`: the listing grants worked, a version dir and its `etc/npmrc` stayed denied, and the
+  sandbox stayed on). The profile schema holds a pattern only as one of those two shapes, and only from
+  `toolchainListings`; any other pattern, in any field, still refuses the profile.
 - Apple's git and make are xcrun shims. They cache their lookup in `xcrun_db-<random>` in
   `getconf DARWIN_USER_TEMP_DIR` and ignore `TMPDIR`; the sandbox can't write there, so each call printed an
   error and repeated the lookup. `xcrun_db` names the cache file (measured: set, the cache appears at that
-  path; unset, nothing is written under the sandbox). Turned down: allowing writes to the Darwin temp dir's
-  `xcrun_db*` files (a write grant outside the temp dir, and the random suffix needs a pattern the profile
-  can't hold); `DEVELOPER_DIR` plus calling `/Library/Developer/CommandLineTools/usr/bin/git` (the daemon
-  drops `DEVELOPER_DIR` from its own git, it isn't on the sandbox's env allowlist, and the real binary's path
-  would have to be found and put ahead of the shims on every `PATH`; not measured); `xcrun -n` (a flag of
-  `xcrun`, which the shims don't take).
+  path; unset, nothing is written under the sandbox). xcrun execs whatever the cache names, and the temp dir
+  is writable by the lane, so the variable must never reach a process outside the sandbox: Claude Code runs
+  its own git with the session env, so the lane's session env leaves it out and the sandboxed shell sets it
+  from the env file. Turned down: allowing writes to the Darwin temp dir's `xcrun_db*` files (a write grant
+  outside the temp dir, and the random suffix needs a pattern the profile can't hold); `DEVELOPER_DIR` plus
+  calling `/Library/Developer/CommandLineTools/usr/bin/git` (the daemon drops `DEVELOPER_DIR` from its own git,
+  it isn't on the sandbox's env allowlist, and the real binary's path would have to be found and put ahead of
+  the shims on every `PATH`; not measured); `xcrun -n` (a flag of `xcrun`, which the shims don't take).
 - mise has no setting that turns off tracking. Its failed link is a warning, not the error that exited: the
   error came from the `installs` listing. Moving `MISE_STATE_DIR` into the temp dir would silence it but hide
   the builder's `trusted-configs`, so a project's `mise.toml` would be untrusted in the sandbox, and a lane
-  could trust its own config. Lowering the log level to errors costs only mise's own warnings, in a sandbox
-  where nobody acts on them.
+  could trust its own config; making `tracked-configs` writable would open a write into the builder's state dir.
+  mise has no setting that mutes one warning, so `MISE_LOG_LEVEL=error` is the narrowest switch there is. It
+  also hides mise's other warnings (a new version being available, a hint), none of which a sandboxed
+  command's reader can act on; mise's errors still print and still fail the command.

@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   buildLaneProfile,
@@ -10,6 +10,7 @@ import {
   toolchainAccess,
   type LaneProfileInput,
 } from './index';
+import { childListingGrant, listingGrant } from './profile';
 
 let root: string;
 let home: string;
@@ -28,6 +29,7 @@ function input(overrides: Partial<LaneProfileInput> = {}): LaneProfileInput {
     secretFiles: [join(checkout, '.env')],
     toolchainSecrets: [join(home, '.cargo', 'credentials.toml')],
     toolchainReads: toolchainAccess(home, {}, [], { systemPrefixes: [] }).reads,
+    toolchainListings: toolchainAccess(home, {}, [], { systemPrefixes: [] }).listings,
     allowedDomains: ['github.com', '*.npmjs.org'],
     readList: [],
     extraReads: [],
@@ -215,20 +217,46 @@ describe('buildLaneProfile', () => {
     expect(allowWrite).not.toContain(secret);
   });
 
-  it('denies a toolchain secret inside a toolchain read that is open whole, and refuses one that holds it', () => {
-    const installs = join(home, '.local', 'share', 'mise', 'installs');
-    const etc = join(installs, 'node', '26.12.0', 'etc');
-    const { allowRead, denyRead } = buildLaneProfile(
-      input({ toolchainReads: [installs], toolchainSecrets: [etc, join(etc, 'npmrc')] }),
-    ).filesystem;
-    expect(allowRead).toContain(installs);
-    expect(denyRead).toEqual(expect.arrayContaining([etc, join(etc, 'npmrc')]));
-    for (const secret of [installs, join(home, '.local')]) {
-      const build = () =>
-        buildLaneProfile(input({ toolchainReads: [installs], toolchainSecrets: [secret] }));
+  describe('toolchain listings', () => {
+    const installs = () => join(home, '.local', 'share', 'mise', 'installs');
+
+    it('spells a listing as an exact-match pattern: the dir with its last character as a set, or its children', () => {
+      expect(listingGrant('/h/mise/installs')).toBe('/h/mise/install[s]');
+      expect(listingGrant('/h/mise/a.b')).toBe('/h/mise/a.[b]');
+      expect(childListingGrant('/h/mise/installs')).toBe('/h/mise/installs/*');
+      expect(() => listingGrant('/h/we[ird]/installs')).toThrow(SandboxProfileError);
+      expect(() => childListingGrant('/h/*/installs')).toThrow(SandboxProfileError);
+      expect(() => listingGrant('relative')).toThrow(SandboxProfileError);
+    });
+
+    it('allows them to be read, with the only pattern characters the profile holds', () => {
+      const { allowRead } = buildLaneProfile(
+        input({ toolchainListings: [listingGrant(installs()), childListingGrant(installs())] }),
+      ).filesystem;
+      expect(allowRead).toEqual(
+        expect.arrayContaining([listingGrant(installs()), childListingGrant(installs())]),
+      );
+      expect(allowRead).not.toContain(installs());
+      const patterned = allowRead.filter((path) => /[*?[\]{}\\\n]/.test(path));
+      expect(patterned).toEqual([listingGrant(installs()), childListingGrant(installs())]);
+    });
+
+    it.each([
+      ['a recursive glob', (dir: string) => `${dir}/**`],
+      ['a wildcard in the middle', (dir: string) => `${dirname(dirname(dir))}/*/installs`],
+      ['a set of several characters', (dir: string) => `${dir}[st]`],
+      ['a brace', (dir: string) => `${dir}{a,b}`],
+      ['a glob with no listing dir', () => '/*'],
+    ])('refuses %s as a listing', (_name, pattern) => {
+      const build = () => buildLaneProfile(input({ toolchainListings: [pattern(installs())] }));
       expect(build).toThrow(SandboxProfileError);
-      expect(build).toThrow(/a toolchain file that can hold a registry token/);
-    }
+    });
+
+    it('refuses a pattern in the ordinary read list as before', () => {
+      expect(() => buildLaneProfile(input({ readList: [`${installs()}/*`] }))).toThrow(
+        SandboxProfileError,
+      );
+    });
   });
 
   it('denies the toolchain secrets to the commands', () => {

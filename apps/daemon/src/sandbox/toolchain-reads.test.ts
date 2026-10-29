@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { SandboxProfileError } from './profile';
+import { childListingGrant, listingGrant, SandboxProfileError } from './profile';
 import { homeProtectedReads, isEqualOrUnder } from './protected-reads';
 import { SYSTEM_NODE_PREFIXES, toolchainAccess } from './toolchain-reads';
 
@@ -120,58 +120,79 @@ describe('toolchainAccess reads', () => {
     expect(reads).not.toContain(real);
   });
 
-  it("opens mise's installs dir whole, so mise can list what is installed, but not its data dir", () => {
+  it("opens the listing of mise's installs dir and of each tool dir, so mise can list what is installed, and nothing of its data dir", () => {
     nodeInstall('.local/share/mise/installs/node/26.12.0');
     plant('.local/share/mise/installs/pnpm/12.13.0/pnpm');
     mkdirSync(at('.local/share/mise/downloads'), { recursive: true });
     plant('.local/share/mise/plugins/x/secret');
-    const { reads } = access();
-    expect(reads).toContain(at('.local/share/mise/installs'));
+    const { reads, listings } = access();
+    const installs = at('.local/share/mise/installs');
+    expect(listings).toEqual([listingGrant(installs), childListingGrant(installs)]);
+    // A listing is not a read: nothing of the installs dir, or of any tool dir, opens whole.
+    expect(reads).not.toContain(installs);
+    expect(reads).not.toContain(join(installs, 'node'));
     expect(reads).not.toContain(at('.local/share/mise'));
-    expect(reads).not.toContain(at('.local/share/mise/downloads'));
     expect(reads.filter((path) => path.startsWith(at('.local/share/mise/plugins')))).toEqual([]);
+    expect(reads.filter((path) => path.startsWith(at('.local/share/mise/downloads')))).toEqual([]);
   });
 
-  it("opens mise's installs dir under the dir MISE_DATA_DIR names, and nothing when it is missing", () => {
+  it('never opens a version, so one installed after the profile is built stays closed', () => {
+    nodeInstall('.local/share/mise/installs/node/26.12.0');
+    const { reads, listings } = access();
+    expect(reads).toContain(at('.local/share/mise/installs/node/26.12.0/bin'));
+    expect(reads).not.toContain(at('.local/share/mise/installs/node/26.12.0'));
+    // The only patterns are the two exact-match listings, so none reaches below a tool dir.
+    expect(listings).toHaveLength(2);
+  });
+
+  it("opens mise's listings under the dir MISE_DATA_DIR names, and nothing when it is missing", () => {
     nodeInstall('mise-data/installs/node/26.12.0');
-    expect(access({ MISE_DATA_DIR: at('mise-data') }).reads).toContain(at('mise-data/installs'));
-    expect(access({ MISE_DATA_DIR: at('absent') }).reads).not.toContain(at('absent/installs'));
+    expect(access({ MISE_DATA_DIR: at('mise-data') }).listings).toEqual([
+      listingGrant(at('mise-data/installs')),
+      childListingGrant(at('mise-data/installs')),
+    ]);
+    expect(access({ MISE_DATA_DIR: at('absent') }).listings).toEqual([]);
   });
 
-  it('opens an installs dir that is a link by its written path, and by its real path only inside a granted read', () => {
+  it('lists an installs dir that is a link by its written path, and by its real path only inside a granted read', () => {
     nodeInstall('.local/share/mise/store/installs/node/26.12.0');
     symlinkSync(at('.local/share/mise/store/installs'), at('.local/share/mise/installs'));
-    expect(access().reads).toEqual(
+    expect(access().listings).toEqual(
       expect.arrayContaining([
-        at('.local/share/mise/installs'),
-        at('.local/share/mise/store/installs'),
+        listingGrant(at('.local/share/mise/installs')),
+        listingGrant(at('.local/share/mise/store/installs')),
+        childListingGrant(at('.local/share/mise/store/installs')),
       ]),
     );
     rmSync(at('.local/share/mise/installs'));
     plant('elsewhere/installs/node/22/bin/node');
     symlinkSync(at('elsewhere/installs'), at('.local/share/mise/installs'));
-    const { reads } = access();
-    expect(reads).toContain(at('.local/share/mise/installs'));
+    const { listings, reads } = access();
+    expect(listings).toContain(listingGrant(at('.local/share/mise/installs')));
+    expect(listings.filter((path) => path.includes(at('elsewhere')))).toEqual([]);
     expect(reads.filter((path) => path.startsWith(at('elsewhere')))).toEqual([]);
   });
 
-  it('opens no installs dir for nvm or volta, which list nothing the shims need', () => {
+  it('lists nothing for nvm or volta, which need no listing', () => {
     nodeInstall('.nvm/versions/node/v22.0.0');
     nodeInstall('.volta/tools/image/node/22.0.0');
-    const { reads } = access();
-    expect(reads).not.toContain(at('.nvm/versions'));
-    expect(reads).not.toContain(at('.volta/tools/image'));
-    expect(reads).not.toContain(at('.volta/tools'));
+    expect(access().listings).toEqual([]);
   });
 
-  it('opens no installs dir of a mise home inside a checkout', () => {
+  it('lists nothing of a mise home inside a checkout', () => {
     const checkout = at('proj');
     nodeInstall('proj/mise/installs/node/26.12.0');
-    const { reads } = access(
+    const { reads, listings } = access(
       { MISE_DATA_DIR: join(checkout, 'mise') },
       { untrustedRoots: [checkout] },
     );
     expect(reads.filter((path) => path.startsWith(checkout))).toEqual([]);
+    expect(listings).toEqual([]);
+  });
+
+  it('lists nothing at a path the profile cannot hold', () => {
+    mkdirSync(at('we[ird]/installs'), { recursive: true });
+    expect(access({ MISE_DATA_DIR: at('we[ird]') }).listings).toEqual([]);
   });
 
   it('opens a version linked into another granted read by its real path too', () => {
@@ -432,35 +453,12 @@ describe('toolchainAccess secret files', () => {
     );
   });
 
-  it("closes each mise version's etc dir, which the open installs dir would otherwise reach, by both spellings", () => {
-    const real = nodeInstall('.local/share/mise/installs/node/26.12.0');
-    symlinkSync('./26.12.0', at('.local/share/mise/installs/node/latest'));
-    const linked = at('.local/share/mise/installs/node/latest');
-    const { secretFiles } = access();
-    expect(secretFiles).toEqual(expect.arrayContaining([join(real, 'etc'), join(linked, 'etc')]));
-    expect(secretFiles).toEqual(
-      expect.arrayContaining([join(real, 'etc/npmrc'), join(linked, 'etc/npmrc')]),
-    );
-  });
-
-  it('closes an etc dir that does not exist yet, as it may appear later', () => {
-    plant('.local/share/mise/installs/pnpm/12.13.0/pnpm');
-    expect(access().secretFiles).toContain(at('.local/share/mise/installs/pnpm/12.13.0/etc'));
-  });
-
-  it("closes no etc dir of nvm's or volta's versions, which stay unopened", () => {
-    nodeInstall('.nvm/versions/node/v22.0.0');
-    const dirs = access().secretFiles.filter((path) => path.endsWith('/etc'));
-    expect(dirs).toEqual([]);
-  });
-
-  it('leaves no read inside a closed etc dir, whatever opens the installs dir', () => {
+  it('closes no etc dir: no version of any manager is opened whole, so nothing reaches its etc', () => {
     nodeInstall('.local/share/mise/installs/node/26.12.0');
+    nodeInstall('.nvm/versions/node/v22.0.0');
     const { reads, secretFiles } = access();
-    const closed = secretFiles.filter((path) => path.endsWith('/etc'));
-    expect(closed.length).toBeGreaterThan(0);
-    for (const dir of closed)
-      expect(reads.filter((path) => path === dir || path.startsWith(`${dir}/`))).toEqual([]);
+    expect(secretFiles.filter((path) => path.endsWith('/etc'))).toEqual([]);
+    expect(reads.filter((path) => /\/etc(\/|$)/.test(path))).toEqual([]);
   });
 
   it('leaves no read that equals or lies under a secret file', () => {

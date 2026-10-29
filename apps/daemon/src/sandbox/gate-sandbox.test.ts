@@ -25,6 +25,7 @@ import {
   type GateRunInput,
   type GateSandbox,
 } from './index';
+import { childListingGrant, listingGrant } from './profile';
 import { isEqualOrUnder } from './protected-reads';
 
 const git = createGit();
@@ -274,7 +275,7 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
     });
   });
 
-  it("lets the gate list mise's installs but keeps every version's etc and npmrc, mise's age key and its data dir closed", async () => {
+  it("lets the gate list mise's installs, opening no version whole, and keeps mise's age key and its data dir closed", async () => {
     const mise = join(home, '.local', 'share', 'mise');
     const version = join(mise, 'installs', 'node', '26.12.0');
     for (const file of [
@@ -291,12 +292,19 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
       const allowRead = filesystem['allowRead'] ?? [];
       const denyRead = filesystem['denyRead'] ?? [];
       const allowWrite = filesystem['allowWrite'] ?? [];
-      expect(allowRead).toContain(join(mise, 'installs'));
-      expect(allowRead).not.toContain(mise);
+      expect(allowRead).toEqual(
+        expect.arrayContaining([
+          listingGrant(join(mise, 'installs')),
+          childListingGrant(join(mise, 'installs')),
+          join(version, 'bin'),
+        ]),
+      );
+      for (const open of [join(mise, 'installs'), join(mise, 'installs', 'node'), version, mise])
+        expect(allowRead).not.toContain(open);
       expect(allowRead.filter((path) => path.startsWith(join(mise, 'downloads')))).toEqual([]);
+      expect(allowRead.filter((path) => path.startsWith(join(version, 'etc')))).toEqual([]);
       expect(denyRead).toEqual(
         expect.arrayContaining([
-          join(version, 'etc'),
           join(version, 'etc', 'npmrc'),
           join(home, '.config', 'mise', 'age.txt'),
         ]),

@@ -35,6 +35,7 @@ import {
   type LaneSessionInput,
 } from './index';
 import type { LaneSandboxDeps } from './lane-sandbox';
+import { childListingGrant, listingGrant } from './profile';
 import { secretFilesIn } from './project-access';
 import { isEqualOrUnder } from './protected-reads';
 
@@ -414,7 +415,6 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
         MISE_SYSTEM_DIR: join(session.tmpDir, 'mise'),
         MISE_SYSTEM_CONFIG_FILE: join(session.tmpDir, 'mise', 'system.toml'),
         MISE_LOG_LEVEL: 'error',
-        xcrun_db: join(session.tmpDir, 'xcrun_db'),
         CLAUDE_CODE_TMPDIR: session.tmpDir,
         GIT_CONFIG_GLOBAL: '/dev/null',
         GIT_OPTIONAL_LOCKS: '0',
@@ -453,7 +453,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
     }
   });
 
-  it("lets the lane list mise's installs but keeps every version's etc and npmrc, mise's age key and its data dir closed", async () => {
+  it("lets the lane list mise's installs, opening no version whole, and keeps mise's age key and its data dir closed", async () => {
     const mise = join(home, '.local', 'share', 'mise');
     const version = join(mise, 'installs', 'node', '26.12.0');
     writeIn(version, 'bin/node');
@@ -463,15 +463,19 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
     const session = await sandbox().forSession(input());
     try {
       const { allowRead, denyRead, allowWrite } = session.spec.settings.filesystem;
-      expect(allowRead).toContain(join(mise, 'installs'));
-      expect(allowRead).not.toContain(mise);
-      expect(allowRead.filter((path) => path.startsWith(join(mise, 'downloads')))).toEqual([]);
-      expect(denyRead).toEqual(
+      expect(allowRead).toEqual(
         expect.arrayContaining([
-          join(version, 'etc'),
-          join(version, 'etc', 'npmrc'),
-          join(home, '.config/mise/age.txt'),
+          listingGrant(join(mise, 'installs')),
+          childListingGrant(join(mise, 'installs')),
+          join(version, 'bin'),
         ]),
+      );
+      for (const open of [join(mise, 'installs'), join(mise, 'installs', 'node'), version, mise])
+        expect(allowRead).not.toContain(open);
+      expect(allowRead.filter((path) => path.startsWith(join(mise, 'downloads')))).toEqual([]);
+      expect(allowRead.filter((path) => path.startsWith(join(version, 'etc')))).toEqual([]);
+      expect(denyRead).toEqual(
+        expect.arrayContaining([join(version, 'etc/npmrc'), join(home, '.config/mise/age.txt')]),
       );
       expect(allowWrite).toEqual([session.tmpDir]);
     } finally {
@@ -650,8 +654,31 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       const { allowRead, allowWrite } = session.spec.settings.filesystem;
       expect(allowWrite.filter((path) => isEqualOrUnder(file, path))).toEqual([]);
       expect(allowRead).toContain(file);
-      // Claude Code drops the whole sandbox over a pattern character in a path.
-      expect([...allowRead, ...allowWrite].filter((path) => /[*?[\]{}]/.test(path))).toEqual([]);
+      // Claude Code drops the whole sandbox over a pattern it can't parse: the only ones are the
+      // exact-match listings, which it accepts (measured), and no write path has one.
+      const listings = session.spec.settings.filesystem.allowRead.filter((path) =>
+        /[*?[\]{}]/.test(path),
+      );
+      expect(listings.every((path) => /(\[[^\]]\]|\/\*)$/.test(path))).toBe(true);
+      expect(allowWrite.filter((path) => /[*?[\]{}]/.test(path))).toEqual([]);
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it("keeps xcrun's cache path out of Claude Code's own env and sets it in the env file for commands", async () => {
+    const session = await sandbox().forSession(input());
+    try {
+      // Claude Code runs git outside the sandbox; xcrun execs whatever its cache file names, and a
+      // lane can write the temp dir, so the variable that points xcrun there is for the sandboxed
+      // shell alone.
+      expect(Object.keys(session.spec.env)).not.toContain('xcrun_db');
+      const lanePaths = Object.entries(session.spec.env).filter(
+        ([name, value]) => name !== 'CLAUDE_ENV_FILE' && isEqualOrUnder(value, session.tmpDir),
+      );
+      expect(lanePaths.map(([name]) => name)).not.toContain('xcrun_db');
+      const file = readFileSync(session.spec.env['CLAUDE_ENV_FILE'] ?? '', 'utf8');
+      expect(file).toContain(`export xcrun_db='${join(session.tmpDir, 'xcrun_db')}'`);
     } finally {
       session.dispose();
     }
