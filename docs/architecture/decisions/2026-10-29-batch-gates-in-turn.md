@@ -8,7 +8,8 @@
 - **One gate of a batch at a time.** The verify gates of a batch's tasks and its shipping gate share the
   batch's checkout, so they run in turn whatever the number of gate slots: `BaseUpdates.gate` serializes them
   per batch, and the runner and the shipper share the daemon's one `BaseUpdates`. A gate waits for its batch's
-  turn before it asks for a slot, so a waiting gate holds none. Gates of other batches run beside it, up to the
+  turn before it asks for a slot, so a waiting gate holds none, and stops as soon as its abort signal fires (a
+  cancel or shutdown), the gates behind it keeping their order. Gates of other batches run beside it, up to the
   slots. Only then does "no other gate's merge changes the tree under a running gate" hold at more than one
   slot.
 - **The base update's time is the slot's.** The fetch, the merge and the install before a gate run inside its
@@ -20,13 +21,18 @@
   (an ignored file, a link, or a directory holding anything untracked, shown with its `/`), and by a
   non-directory where an added path needs a directory. A path the merge itself deletes is git's to replace. An
   ignored file under a directory the base only adds to (a build directory, a seeded `node_modules` beside a
-  newly tracked `package.json`) stops nothing.
+  newly tracked `package.json`) stops nothing. Nor does what an added path finds of a path the base replaces,
+  on a file system that folds case or normalization: a base renaming `Guide.md` to `GUIDE.md` finds the tracked
+  `Guide.md` there on macOS, which is the same entry on disk (same device and inode).
 - **Files git doesn't track in the way are the builder's to judge.** They raise one card per batch, folded by
   `base-kept:<batch id>`, naming them and the worktree, withdrawn with the conflict card once the branch holds
-  the base. The gate's note tells a fix session not to remove or move them.
-- **A task's kept start goes with its worktree.** Retiring a batch's worktree deletes `refs/10db/starts/<id>`
-  for every workstream it ever held, and the startup sweep deletes any whose workstream is gone or whose batch
-  no longer has a worktree.
+  the base, and when the worktree is retired, since both name it. The gate's note tells a fix session not to
+  remove or move them.
+- **A task's kept start is this daemon's, and goes with its worktree.** It is kept at
+  `refs/10db/<level>/starts/<workstream id>`, `<level>` being the hashed data-dir level the daemon's worktree
+  root is named for, so a second daemon on the same repository (a dev daemon with its own data dir) never reads
+  or deletes this one's. Retiring a batch's worktree deletes the ref of every workstream it ever held, and the
+  startup sweep deletes this daemon's refs whose workstream is gone or whose batch no longer has a worktree.
 - **A merge whose base can't be recorded still counts.** When moving the batch's base or a task's start fails
   after the branch took the base, the note says the branch holds the base but its base did not move, and the
   install still runs.

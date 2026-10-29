@@ -554,7 +554,7 @@ Under the lane sandbox (**built**), the design column holds for a lane's Bash:
     uncommitted change at a path it writes, or anything git doesn't track (an ignored file included) at a
     path it adds or where an added path needs a directory; then the compare-and-swap `update-ref`.
     It writes the worktree's files and its own index. A task's start on the merged base is a commit
-    `mergedCommit` keeps at `refs/10db/starts/<workstream id>`, unsigned and never pushed, touching no file,
+    `mergedCommit` keeps at `refs/10db/<level>/starts/<workstream id>`, unsigned and never pushed, touching no file,
     index or branch. A base whose tree asks for a filter is refused, as its push would be. The fetch before it
     runs one at a time per checkout;
   - a gitlink, a directory that holds `.git`, or a path whose attributes name a filter is refused with a card,
