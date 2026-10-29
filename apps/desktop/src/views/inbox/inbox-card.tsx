@@ -14,6 +14,7 @@ import {
   UnstyledButton,
 } from '@mantine/core';
 import type { KeyboardEvent, RefObject } from 'react';
+import { CheckCard } from './check-card';
 import { isDismissable } from './inbox-rows';
 import { McpApprovalDetails, mcpReview } from './mcp-approval';
 import { SELECTED_CARD_ATTRIBUTE } from './use-inbox-keys';
@@ -125,6 +126,21 @@ export function InboxCard({
           </Button>
         ) : null}
       </Group>
+    );
+  }
+
+  if (item.kind === InboxKind.Check) {
+    return (
+      <CheckCard
+        item={item}
+        header={
+          <Group gap="sm" wrap="nowrap">
+            {kind}
+            {times}
+            <Text fw={600}>{item.title}</Text>
+          </Group>
+        }
+      />
     );
   }
 

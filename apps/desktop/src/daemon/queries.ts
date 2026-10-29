@@ -10,6 +10,7 @@ import {
   SystemCheckDto,
   TaskDto,
   TaskStartResult,
+  WorkstreamChangesDto,
   WorkstreamDto,
   type BatchId,
   type BoardColumnDelete,
@@ -46,6 +47,7 @@ export const queryKeys = {
   boardColumns: (projectId: ProjectId) => ['board-columns', projectId] as const,
   workstreams: (active: boolean) => ['workstreams', { active }] as const,
   inbox: ['inbox'],
+  workstreamChanges: (id: WorkstreamId) => ['workstream-changes', id] as const,
   keepAwake: ['keep-awake'],
   system: ['system'],
   flows: ['flows'],
@@ -130,6 +132,19 @@ export function useWorkstreams(filter: { readonly active: boolean }) {
       readJson(
         await client.workstreams.$get({ query: { active: String(filter.active) } }),
         WorkstreamList,
+      ),
+  });
+}
+
+/** What a workstream changed since it started: the diff a finished, ungated task is checked by. */
+export function useWorkstreamChanges(id: WorkstreamId) {
+  const { client } = useDaemon();
+  return useQuery({
+    queryKey: queryKeys.workstreamChanges(id),
+    queryFn: async () =>
+      readJson(
+        await client.workstreams[':id'].changes.$get({ param: { id } }),
+        WorkstreamChangesDto,
       ),
   });
 }

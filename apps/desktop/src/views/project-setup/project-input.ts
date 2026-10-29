@@ -9,6 +9,7 @@ export interface ProjectChoices {
   readonly name: string;
   /** The repository's top level from the inspection, not the path the builder picked. */
   readonly root: string;
+  /** Empty means no gate: the builder checks each finished task. */
   readonly gateCommand: string;
   readonly delivery: Delivery;
   readonly baseBranch: string;
@@ -21,7 +22,7 @@ export function toProjectInput(choices: ProjectChoices): ProjectInput {
   return {
     name: choices.name.trim(),
     repoPath: choices.root,
-    gateCommand: choices.gateCommand.trim(),
+    gateCommand: choices.gateCommand.trim() === '' ? null : choices.gateCommand.trim(),
     areas: [REPO_AREA],
     handoffPct: HANDOFF_PCT,
     nudgePct: NUDGE_PCT,

@@ -75,9 +75,9 @@ describe('checkGeneral', () => {
       expected: { ok: false, errors: { name: 'Enter a name' } },
     },
     {
-      name: 'an empty gate',
-      change: { gateCommand: '' },
-      expected: { ok: false, errors: { gateCommand: 'Enter the gate command' } },
+      name: 'an emptied gate clears it',
+      change: { gateCommand: ' ' },
+      expected: { ok: true, patch: { gateCommand: null } },
     },
     {
       name: 'an empty lane cap',

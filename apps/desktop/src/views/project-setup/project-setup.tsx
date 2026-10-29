@@ -78,7 +78,6 @@ export function useProjectSetup(onCreated: (project: ProjectDto) => void): Proje
   const canSubmit =
     inspection !== null &&
     typed.name.trim() !== '' &&
-    typed.gate.trim() !== '' &&
     (delivery === Delivery.Local || typed.baseBranch !== '');
 
   const submit = () => {

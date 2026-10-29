@@ -278,17 +278,32 @@ describe('useProjectSetup', () => {
     expect(await screen.findByText('from Makefile', {}, { timeout: 2000 })).toBeTruthy();
   });
 
-  it('an empty gate is a field error and Create Project stays disabled', async () => {
-    serve({ result: { ok: true, inspection: inspection({ gateCandidates: [] }) } });
+  it('an empty gate is allowed, says so, and is sent as null', async () => {
+    const served = serve({ result: { ok: true, inspection: inspection({ gateCandidates: [] }) } });
     await openInspected();
     expect(field('Gate command').value).toBe('');
-    expect(screen.getByText('Enter the command that checks the work')).toBeTruthy();
-    expect(disabled(create())).toBe(true);
+    expect(
+      screen.getByText(
+        "No check found. Leave it empty and you'll check each finished task yourself.",
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText('Enter the command that checks the work')).toBeNull();
+    expect(disabled(create())).toBe(false);
+    fireEvent.click(create());
+    await waitFor(() => {
+      expect(served.posted).toHaveLength(1);
+    });
+    expect(served.posted[0]).toMatchObject({ gateCommand: null });
+    expect(served.posted[0]).toHaveProperty('gateCommand', null);
+  });
+
+  it('a gate typed into the input drops the no-check line', async () => {
+    serve({ result: { ok: true, inspection: inspection({ gateCandidates: [] }) } });
+    await openInspected();
     fireEvent.change(screen.getByRole('textbox', { name: 'Gate command' }), {
       target: { value: 'make check' },
     });
-    expect(screen.queryByText('Enter the command that checks the work')).toBeNull();
-    expect(disabled(create())).toBe(false);
+    expect(screen.queryByText(/No check found/)).toBeNull();
   });
 
   it('asks for a full path instead of sending a relative one', async () => {

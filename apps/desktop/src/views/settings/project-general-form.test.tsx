@@ -40,6 +40,7 @@ async function pick(select: HTMLElement, option: string | RegExp): Promise<void>
   );
 }
 
+const NO_CHECK = 'No automatic check: each finished task waits for you.';
 const pullRequests = { delivery: 'pull_request', prTitlePrefix: 'feat(app)' } as const;
 const worktrees = { ...pullRequests, workspaceMode: 'worktree' } as const;
 
@@ -217,6 +218,26 @@ describe('ProjectGeneralForm', () => {
     renderApp('/settings/general');
     await open();
     expect(screen.queryByText("Copy into each task's copy") !== null).toBe(row.shown);
+  });
+
+  it('clears the gate and shows what an empty one means', async () => {
+    const patched = serve(projectDto({ gateCommand: 'make gate' }));
+    renderApp('/settings/general');
+    await open();
+    expect(screen.queryByText(NO_CHECK)).toBeNull();
+    type('Gate command', '');
+    expect(screen.getByText(NO_CHECK)).toBeTruthy();
+    save();
+    await waitFor(() => {
+      expect(patched).toEqual([{ gateCommand: null }]);
+    });
+  });
+
+  it('shows the no-check line for a project that has no gate', async () => {
+    serve(projectDto({ gateCommand: null }));
+    renderApp('/settings/general');
+    await open();
+    expect(screen.getByText(NO_CHECK)).toBeTruthy();
   });
 
   it('Advanced is collapsed with aria-expanded false, its rows hidden, and opens', async () => {
