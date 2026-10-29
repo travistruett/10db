@@ -2,14 +2,13 @@ import { existsSync } from 'node:fs';
 import {
   ConflictError,
   NotFoundError,
-  WorkspaceMode,
+  UNFINISHED_BATCH_STATES,
   WorkstreamState,
   type WorkstreamChangesDto,
   type WorkstreamId,
 } from '@10db/contracts';
 import {
   getBatch,
-  getProject,
   getWorkstreamRow,
   openItemsForWorkstream,
   type DbReader,
@@ -25,11 +24,14 @@ export const MAX_CHANGES_DIFF_BYTES = 512 * 1024;
 /** What the check card holds of the head it showed; the daemon wrote it, but it is read from disk. */
 const CardHead = z.object({ head: z.string().regex(/^[0-9a-f]{40,64}$/) });
 
-/** The head the builder was asked to check, while the workstream waits on that card. */
+/** The head the builder was asked to check, while the workstream waits on the card it points at. */
 function checkedHead(db: DbReader, row: WorkstreamRow): string | null {
   if (row.state !== WorkstreamState.WaitingHuman || row.nextAction.kind !== 'builder_review')
     return null;
-  const card = openItemsForWorkstream(db, row.id).find((item) => item.kind === 'check');
+  const { inboxId } = row.nextAction;
+  const card = openItemsForWorkstream(db, row.id).find(
+    (item) => item.id === inboxId && item.kind === 'check',
+  );
   const parsed = CardHead.safeParse(card?.detail);
   return parsed.success ? parsed.data.head : null;
 }
@@ -47,11 +49,15 @@ export async function workstreamChanges(
   const row = getWorkstreamRow(deps.db, id);
   if (row.baseHead === null)
     throw new ConflictError(`Workstream ${id} has not started work in a checkout yet`);
-  // A worktree batch's work lives in its worktree alone; once that is gone the project's checkout
-  // holds none of it, so reading it would show someone else's changes.
-  if (row.batchId !== null && getBatch(deps.db, row.batchId).worktreePath === null) {
-    if (getProject(deps.db, row.projectId).workspaceMode === WorkspaceMode.Worktree)
-      throw new ConflictError(`The worktree of workstream ${id}'s batch has been removed`);
+  // A worktree's path is cleared only once its batch has finished, so an unfinished batch without
+  // one is a shared batch. A finished batch without a path may have been either, and the project's
+  // checkout holds none of a worktree's work, so reading it would show someone else's changes.
+  if (row.batchId !== null) {
+    const batch = getBatch(deps.db, row.batchId);
+    if (batch.worktreePath === null && !UNFINISHED_BATCH_STATES.includes(batch.state))
+      throw new ConflictError(
+        `The batch of workstream ${id} has finished, so its work is not shown`,
+      );
   }
   const checkout = checkoutOf(deps.db, row);
   if (!existsSync(checkout)) throw new NotFoundError('checkout of workstream', id);

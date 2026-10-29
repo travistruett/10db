@@ -136,7 +136,16 @@ export function retryWorkstream(state: StateStore, id: WorkstreamId): Workstream
         patch: { failure: null },
         reason: 'a workstream was retried',
       });
-    const steps = row.steps.length > 0 ? restartStep(row.steps, row.stepIndex, ctx.now) : row.steps;
+    // A step restarted to act on a note keeps its start, which is how the note stays outstanding for
+    // a session that starts fresh: the note was written after that start.
+    const restarted =
+      row.steps.length > 0 ? restartStep(row.steps, row.stepIndex, ctx.now) : row.steps;
+    const steps =
+      row.nextAction.kind === 'fix'
+        ? restarted.map((s, i) =>
+            i === row.stepIndex ? { ...s, startedAt: row.steps[i]?.startedAt ?? s.startedAt } : s,
+          )
+        : restarted;
     const latest = latestHandoffForStep(ctx.tx, { ...row, steps });
     return transitionWorkstream(ctx, id, {
       to: WorkstreamState.Queued,

@@ -1,12 +1,21 @@
-import { CheckChoice, InvalidError, type InboxAnswer, type InboxItemDto } from '@10db/contracts';
+import {
+  CheckChoice,
+  DomainError,
+  InvalidError,
+  type InboxAnswer,
+  type InboxItemDto,
+} from '@10db/contracts';
 import type { WriteContext } from '@10db/db';
 import type { AfterCommit, Runner } from './runner';
 
-/** A check card was answered before the runner existed; the answer is refused, not dropped. */
-export class RunnerNotStartedError extends Error {
+/**
+ * A check card was answered before the runner existed; the answer is refused, not dropped. It carries
+ * the conflict code, so the API answers 409.
+ */
+export class RunnerNotStartedError extends DomainError {
   override readonly name = 'RunnerNotStartedError';
   constructor() {
-    super('The runner has not started, so the check cannot be answered yet');
+    super('conflict', 'The runner has not started, so the check cannot be answered yet');
   }
 }
 

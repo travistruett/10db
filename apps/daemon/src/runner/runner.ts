@@ -2054,13 +2054,17 @@ export function createRunner(opts: RunnerOptions): Runner {
       const targetIndex = row.steps.length > 0 ? sendBackTarget(row.steps, row.stepIndex) : null;
       if (attempt > opts.limits.maxFixAttempts) {
         const reason = `The builder sent the work back ${String(attempt)} times, and the retry limit (${String(opts.limits.maxFixAttempts)}) is used up. The last note: ${note}`;
-        // The failure sits on the step the work was sent back to, so a retry restarts it with the note.
+        // The failure sits on the step the work was sent back to, so a retry restarts it with the note
+        // on that step's own model and effort.
+        const failedTarget = targetIndex === null ? undefined : row.steps[targetIndex];
         failIn(ctx, id, null, row, reason, {
           nextAction: { kind: 'fix', evidenceId: evidence.id },
-          ...(targetIndex === null
+          ...(targetIndex === null || !failedTarget
             ? {}
             : {
                 stepIndex: targetIndex,
+                model: failedTarget.model,
+                effort: failedTarget.effort,
                 steps: row.steps.map((s, i) =>
                   i === targetIndex
                     ? { ...s, status: StepStatus.Failed }

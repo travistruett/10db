@@ -2,7 +2,15 @@ import { execFileSync } from 'node:child_process';
 import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { mintId, ProjectDto, TaskDto, WorkstreamChangesDto, WorkstreamDto } from '@10db/contracts';
-import { insertBatch, insertWorkstream, patchWorkstream, transitionWorkstream } from '@10db/db';
+import {
+  insertBatch,
+  insertInboxItem,
+  insertWorkstream,
+  patchProject,
+  patchWorkstream,
+  transitionBatch,
+  transitionWorkstream,
+} from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { startDaemon, type RunningDaemon } from '../src/daemon';
@@ -177,6 +185,82 @@ describe('GET /workstreams/:id/changes', () => {
       expect(changes.files.map((f) => f.path)).toEqual(['shown.txt']);
       expect(changes.diff).not.toContain('later');
     });
+
+    it('is read at the head of the card the workstream points at, not another live check card', async () => {
+      const ws = await startedWorkstream();
+      const baseHead = rawGit('rev-parse', 'HEAD');
+      daemon.state.write((ctx) => {
+        patchWorkstream(ctx, ws.id, null, { baseHead });
+      });
+      writeFileSync(join(repo.path, 'pointed.txt'), 'pointed\n');
+      rawGit('add', 'pointed.txt');
+      rawGit('commit', '-q', '-m', 'pointed');
+      const pointed = rawGit('rev-parse', 'HEAD');
+      writeFileSync(join(repo.path, 'other.txt'), 'other\n');
+      rawGit('add', 'other.txt');
+      rawGit('commit', '-q', '-m', 'other');
+      const other = rawGit('rev-parse', 'HEAD');
+      daemon.state.write((ctx) => {
+        // A stale card sits first in line; the card the workstream points at is the second.
+        insertInboxItem(ctx, {
+          projectId: ws.projectId,
+          kind: 'check',
+          title: 'stale',
+          body: 'stale',
+          options: [],
+          recommendation: null,
+          category: 'product',
+          urgency: 'normal',
+          detail: { workstreamId: ws.id, baseHead, head: other, commits: [other] },
+          foldKey: null,
+          targets: [{ workstreamId: ws.id, sessionId: null }],
+        });
+      });
+      waitOnCheck(ws.id, ws.projectId, pointed);
+
+      const changes = await api().get(`/workstreams/${ws.id}/changes`, WorkstreamChangesDto);
+
+      expect(changes.head).toBe(pointed);
+      expect(changes.files.map((f) => f.path)).toEqual(['pointed.txt']);
+    });
+
+    it('raising the check again brings a card that shows an older head to the new one', async () => {
+      const ws = await startedWorkstream();
+      const baseHead = rawGit('rev-parse', 'HEAD');
+      daemon.state.write((ctx) => {
+        patchWorkstream(ctx, ws.id, null, { baseHead });
+      });
+      writeFileSync(join(repo.path, 'first.txt'), 'first\n');
+      rawGit('add', 'first.txt');
+      rawGit('commit', '-q', '-m', 'first');
+      const first = rawGit('rev-parse', 'HEAD');
+      waitOnCheck(ws.id, ws.projectId, first);
+      writeFileSync(join(repo.path, 'second.txt'), 'second\n');
+      rawGit('add', 'second.txt');
+      rawGit('commit', '-q', '-m', 'second');
+      const second = rawGit('rev-parse', 'HEAD');
+      const card = daemon.state.write((ctx) =>
+        raiseBuilderCheck(ctx, {
+          workstreamId: ws.id,
+          projectId: ws.projectId,
+          taskTitle: 'change things',
+          baseHead,
+          head: second,
+          commits: [first, second],
+        }),
+      );
+      daemon.state.write((ctx) => {
+        patchWorkstream(ctx, ws.id, null, {
+          nextAction: { kind: 'builder_review', inboxId: card.id },
+        });
+      });
+
+      const changes = await api().get(`/workstreams/${ws.id}/changes`, WorkstreamChangesDto);
+
+      expect(changes.head).toBe(second);
+      expect(card.detail).toMatchObject({ head: second, commits: [first, second] });
+      expect(card.body).toContain('2 commits');
+    });
   });
 
   describe('in a batch', () => {
@@ -211,8 +295,26 @@ describe('GET /workstreams/:id/changes', () => {
       });
     };
 
-    it('answers 409 once the batch worktree is gone, rather than reading the main checkout', async () => {
+    const finish = (
+      batchId: NonNullable<Awaited<ReturnType<typeof batchWorkstream>>['batchId']>,
+    ) => {
+      daemon.state.write((ctx) => {
+        transitionBatch(ctx, batchId, { to: 'OPEN', reason: 'test' });
+        transitionBatch(ctx, batchId, { to: 'ABANDONED', reason: 'test' });
+      });
+    };
+
+    it.each([
+      { name: 'a worktree project whose batch has finished', mode: 'worktree' as const },
+      {
+        name: 'a project that went back to shared after its batch finished',
+        mode: 'shared' as const,
+      },
+    ])('answers 409 for $name, rather than reading the main checkout', async ({ mode }) => {
       const ws = await batchWorkstream('worktree', null);
+      if (ws.batchId === null) throw new Error('no batch');
+      finish(ws.batchId);
+      daemon.state.write((ctx) => patchProject(ctx, ws.projectId, { workspaceMode: mode }));
 
       const res = await get(`/workstreams/${ws.id}/changes`);
       expect(res.status).toBe(409);

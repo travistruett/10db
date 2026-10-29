@@ -181,7 +181,7 @@ export interface Git {
   /** Ignored directories of the checkout, top-level and nested, without the trailing `/`. */
   ignoredDirectories(repo: string): Promise<string[]>;
   /**
-   * The unified diff from `base` to HEAD, read with no external diff program and no textconv
+   * The unified diff from `base` to `head`, read with no external diff program and no textconv
    * filter, cut to at most `maxBytes` of UTF-8 on a character boundary, plus the per-file counts
    * of the whole change. Renames are shown as a delete and an add.
    */

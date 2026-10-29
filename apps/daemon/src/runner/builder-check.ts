@@ -8,6 +8,7 @@ import {
 import {
   insertInboxItem,
   openItemsForWorkstream,
+  updateInboxItem,
   type DbReader,
   type WorkstreamRow,
   type WriteContext,
@@ -33,18 +34,38 @@ export function liveCheckCard(db: DbReader, workstreamId: WorkstreamId): InboxIt
   return openItemsForWorkstream(db, workstreamId).find((item) => item.kind === 'check');
 }
 
+function checkBody(check: BuilderCheck): string {
+  return `${commitsReady(check.commits.length)} Approve to finish the task, or send it back with a note.`;
+}
+
+function checkDetail(check: BuilderCheck): Record<string, string | string[]> {
+  return {
+    workstreamId: check.workstreamId,
+    baseHead: check.baseHead,
+    head: check.head,
+    commits: [...check.commits],
+  };
+}
+
 /**
  * Asks the builder to check finished work. A workstream has at most one live check card, so a second
- * verify or a restart finds the first and raises nothing new.
+ * verify or a restart finds the first and raises nothing new. A card that shows an older head is
+ * brought up to the head being checked, so the builder never approves work they were not shown.
  */
 export function raiseBuilderCheck(ctx: WriteContext, check: BuilderCheck): InboxItemDto {
   const existing = liveCheckCard(ctx.tx, check.workstreamId);
-  if (existing) return existing;
+  if (existing) {
+    if (existing.detail?.['head'] === check.head) return existing;
+    return updateInboxItem(ctx, existing.id, {
+      body: checkBody(check),
+      detail: checkDetail(check),
+    });
+  }
   return insertInboxItem(ctx, {
     projectId: check.projectId,
     kind: 'check',
     title: `Ready for you to check: ${check.taskTitle}`,
-    body: `${commitsReady(check.commits.length)} Approve to finish the task, or send it back with a note.`,
+    body: checkBody(check),
     options: [
       { label: CheckChoice.Approve, description: 'The work is right' },
       { label: CheckChoice.SendBack, description: 'It needs more work' },
@@ -52,12 +73,7 @@ export function raiseBuilderCheck(ctx: WriteContext, check: BuilderCheck): Inbox
     recommendation: null,
     category: 'product',
     urgency: 'normal',
-    detail: {
-      workstreamId: check.workstreamId,
-      baseHead: check.baseHead,
-      head: check.head,
-      commits: [...check.commits],
-    },
+    detail: checkDetail(check),
     foldKey: null,
     targets: [{ workstreamId: check.workstreamId, sessionId: null }],
   });
