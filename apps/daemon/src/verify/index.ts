@@ -4,3 +4,4 @@ export {
   type GateResult,
   type GateRunner,
 } from './gate-runner';
+export { createGateSlots, limitGates } from './gate-slots';

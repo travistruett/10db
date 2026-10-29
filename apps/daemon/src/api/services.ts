@@ -23,6 +23,7 @@ import type {
   FlowId,
   FlowInput,
   FlowPatch,
+  FolderInspectResult,
   InboxAnswer,
   InboxItemDto,
   InboxItemId,
@@ -65,6 +66,16 @@ export type TaskStarted =
   | { readonly kind: 'workstream'; readonly workstream: WorkstreamDto }
   | { readonly kind: 'batch'; readonly batch: BatchDto };
 
+/** Removing a task that hasn't started. */
+export interface TaskRemovalServices {
+  /**
+   * Cancels a task with no workstream and drops it from its project's list; answering a task
+   * already removed is a no-op. Throws TaskStartedError for a task that has run and
+   * TaskHasDependentsError while an open task waits on it.
+   */
+  removeTask(taskId: TaskId): TaskDto;
+}
+
 /** What the HTTP layer needs from the daemon. Implemented in the daemon module. */
 export interface ApiServices {
   listProjects(): ProjectViewDto[];
@@ -90,13 +101,16 @@ export interface ApiServices {
   answerInbox(id: InboxItemId, answer: InboxAnswer): InboxItemDto;
   eventsAfter(afterSeq: number, limit: number): DaemonEvent[];
   subscribe(listener: (event: DaemonEvent) => void): () => void;
-  systemCheck(): Promise<SystemCheckDto>;
+  /** The system check; `recheck` probes the tools and gh's login again instead of answering from the last probe. */
+  systemCheck(options: { readonly recheck: boolean }): Promise<SystemCheckDto>;
   keepAwake(): KeepAwakeStatus;
   setKeepAwake(mode: KeepAwakeMode): KeepAwakeStatus;
   /** The newest event seq (0 when there are none). */
   eventsHead(): number;
   /** Each server in the project's `.mcp.json` and its verdict; raises an approval card for each one with none. */
   reviewProjectMcp(projectId: ProjectId): McpServerStatusDto[];
+  /** What a new project is prefilled from for the folder at `path`, or why it can't be one. */
+  inspectFolder(path: string): Promise<FolderInspectResult>;
   listPersonas(): PersonaDto[];
   createPersona(input: PersonaInput): PersonaDto;
   patchPersona(id: PersonaId, patch: PersonaPatch): PersonaDto;

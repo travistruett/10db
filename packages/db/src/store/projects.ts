@@ -1,5 +1,6 @@
 import {
   ACTIVE_STATES,
+  ClaimKind,
   ConflictError,
   DEFAULT_BOARD_COLUMN,
   Delivery,
@@ -17,7 +18,7 @@ import {
   type ProjectId,
   type ProjectViewDto,
 } from '@10db/contracts';
-import { and, asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
 import * as schema from '../schema';
 import { defaultAccountId, getAccountRow } from './accounts';
 import { currentBatch, findUnfinishedBatch, listUnfinishedBatches } from './batches';
@@ -93,6 +94,46 @@ export function listProjects(db: DbReader): ProjectDto[] {
   return db.select().from(schema.projects).orderBy(asc(schema.projects.name)).all();
 }
 
+/**
+ * An area or hazard a running task holds must keep its name: a claim names it, and the task's
+ * work depends on it. Its paths may change.
+ */
+function checkClaimedNames(
+  ctx: WriteContext,
+  id: ProjectId,
+  current: ProjectDto,
+  next: {
+    readonly areas: readonly { name: string }[];
+    readonly hazards: readonly { name: string }[];
+  },
+): void {
+  const kept = {
+    [ClaimKind.Area]: new Set(next.areas.map((a) => a.name)),
+    [ClaimKind.Hazard]: new Set(next.hazards.map((h) => h.name)),
+  };
+  const known = {
+    [ClaimKind.Area]: new Set(current.areas.map((a) => a.name)),
+    [ClaimKind.Hazard]: new Set(current.hazards.map((h) => h.name)),
+  };
+  const held = ctx.tx
+    .select({
+      kind: schema.claims.kind,
+      name: schema.claims.name,
+      title: schema.tasks.title,
+    })
+    .from(schema.claims)
+    .innerJoin(schema.workstreams, eq(schema.workstreams.id, schema.claims.workstreamId))
+    .innerJoin(schema.tasks, eq(schema.tasks.id, schema.workstreams.taskId))
+    .where(and(eq(schema.claims.projectId, id), isNull(schema.claims.releasedAt)))
+    .all();
+  for (const claim of held) {
+    if (known[claim.kind].has(claim.name) && !kept[claim.kind].has(claim.name))
+      throw new ConflictError(
+        `Can't remove or rename ${claim.kind} "${claim.name}": the running task "${claim.title}" holds it. Finish or stop that task first.`,
+      );
+  }
+}
+
 export function patchProject(ctx: WriteContext, id: ProjectId, patch: ProjectPatch): ProjectDto {
   const changes = ProjectPatch.parse(patch);
   // A stale flow id answers 404, not a foreign-key failure.
@@ -117,6 +158,13 @@ export function patchProject(ctx: WriteContext, id: ProjectId, patch: ProjectPat
       throw new ConflictError(
         `${current.name} has unfinished work; finish or cancel it before changing its delivery`,
       );
+  }
+  if (changes.areas !== undefined || changes.hazards !== undefined) {
+    const areas = changes.areas ?? current.areas;
+    const hazards = changes.hazards ?? current.hazards;
+    const shared = areas.find((a) => hazards.some((h) => h.name === a.name));
+    if (shared) throw new InvalidError(`"${shared.name}" is both an area and a hazard`);
+    checkClaimedNames(ctx, id, current, { areas, hazards });
   }
   const delivery = changes.delivery ?? current.delivery;
   const prefix =

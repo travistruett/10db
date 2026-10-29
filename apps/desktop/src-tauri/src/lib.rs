@@ -57,6 +57,8 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         // Opens a pull request in the default browser; the webview follows no target="_blank" link.
         .plugin(tauri_plugin_opener::init())
+        // The native folder panel, for choosing a project's checkout.
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![daemon_connection, update_tray])
         .setup(|app| {
             let items = tray::build(app.handle())?;

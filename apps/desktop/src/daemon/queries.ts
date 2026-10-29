@@ -152,8 +152,21 @@ export function useSystemCheck() {
   const { client } = useDaemon();
   return useQuery({
     queryKey: queryKeys.system,
-    queryFn: async () => readJson(await client.system.$get(), SystemCheckDto),
+    queryFn: async () => readJson(await client.system.$get({ query: {} }), SystemCheckDto),
     staleTime: Infinity,
+  });
+}
+
+/** Probes the tools and gh's login again (`GET /system?recheck=1`) and replaces the system query's data with the answer. */
+export function useRecheckSystem() {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () =>
+      readJson(await client.system.$get({ query: { recheck: '1' } }), SystemCheckDto),
+    onSuccess: (check) => {
+      queryClient.setQueryData(queryKeys.system, check);
+    },
   });
 }
 

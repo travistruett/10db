@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "ok": {
+          "type": "boolean",
+          "const": true
+        },
+        "inspection": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "type": "string"
+            },
+            "suggestedName": {
+              "type": "string"
+            },
+            "branches": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "remote": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "name",
+                  "remote"
+                ]
+              }
+            },
+            "defaultBranch": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "github": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "gateCandidates": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "command": {
+                    "type": "string"
+                  },
+                  "source": {
+                    "type": "string",
+                    "enum": [
+                      "makefile",
+                      "package_json",
+                      "cargo",
+                      "go"
+                    ]
+                  }
+                },
+                "required": [
+                  "command",
+                  "source"
+                ]
+              }
+            }
+          },
+          "required": [
+            "root",
+            "suggestedName",
+            "branches",
+            "defaultBranch",
+            "github",
+            "gateCandidates"
+          ]
+        }
+      },
+      "required": [
+        "ok",
+        "inspection"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "ok": {
+          "type": "boolean",
+          "const": false
+        },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "not_found",
+            "not_a_directory",
+            "not_a_repository",
+            "bare_repository",
+            "already_a_project",
+            "inside_a_project",
+            "protected_path",
+            "unreadable"
+          ]
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ok",
+        "reason",
+        "message"
+      ]
+    }
+  ]
+}

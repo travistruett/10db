@@ -126,8 +126,8 @@ describe('SettingsView', () => {
       ...baseHandlers(),
     );
     renderApp('/settings/areas');
-    expect(await screen.findByText('src/api/**')).toBeTruthy();
-    expect(screen.getByText('pnpm add')).toBeTruthy();
+    expect(await screen.findByDisplayValue('src/api/**')).toBeTruthy();
+    expect(screen.getByDisplayValue('pnpm add')).toBeTruthy();
     fireEvent.click(screen.getByRole('link', { name: /Billing/ }));
     const picker = await screen.findByRole('combobox', { name: 'Account' });
     // The account list loads after the section opens.
@@ -277,6 +277,25 @@ describe('SettingsView', () => {
     ).toEqual(['off', 'while_running', 'always']);
     expect(within(group).getByText('While tasks run')).toBeTruthy();
     expect(within(group).getByText('Never')).toBeTruthy();
+  });
+
+  it('shows the other project\u2019s areas after switching projects, not the first one\u2019s', async () => {
+    const a = projectDto({ name: 'Alpha', areas: [{ name: 'api', globs: ['src/api/**'] }] });
+    const b = projectDto({ name: 'Beta', areas: [{ name: 'core', globs: ['src/core/**'] }] });
+    server.use(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([a, b])),
+      ...baseHandlers(),
+    );
+    renderApp('/settings/areas');
+    expect(await screen.findByRole('textbox', { name: 'Area 1 name' })).toHaveProperty(
+      'value',
+      'api',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Project: Alpha. Switch project' }));
+    fireEvent.click(await screen.findByRole('option', { name: /Beta/, hidden: true }));
+    await waitFor(() => {
+      expect(screen.getByRole('textbox', { name: 'Area 1 name' })).toHaveProperty('value', 'core');
+    });
   });
 
   it('changes the keep-awake mode', async () => {
