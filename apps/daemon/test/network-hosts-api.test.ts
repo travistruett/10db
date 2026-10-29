@@ -19,7 +19,7 @@ import { storableRule } from '../src/permissions';
 import { createGateSandbox } from '../src/sandbox';
 import { FakeAdapter } from '../src/sessions';
 import { apiClient } from './api-client';
-import { createTempRepo, FAKE_SRT, tempDir } from './fixtures';
+import { createTempRepo, FAKE_SRT, SANDBOXED, tempDir } from './fixtures';
 
 let data: { path: string; cleanup(): void };
 let repo: { path: string; cleanup(): void };
@@ -286,7 +286,8 @@ describe('network hosts of a project', () => {
     },
   );
 
-  it("opens the gate sandbox's allowedDomains to an added host", async () => {
+  // Builds a gate profile under /tmp, which a sandboxed gate can't write, like createGateSandbox's own tests.
+  it.skipIf(SANDBOXED)("opens the gate sandbox's allowedDomains to an added host", async () => {
     const project = await seedProject();
     await send('POST', hostsPath(project.id), { host: 'index.crates.io' });
     await send('POST', hostsPath(project.id), { host: 'static.crates.io' });
