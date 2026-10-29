@@ -78,7 +78,7 @@ function DeleteColumn({
         ) : null}
         <Group justify="flex-end">
           <Button variant="default" onClick={onClose}>
-            Keep it
+            Keep It
           </Button>
           <Button
             color="red"

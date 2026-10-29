@@ -57,7 +57,7 @@ function serve(refusal?: { status: number; message: string }): Served {
 
 async function openModal(kindLabel: string) {
   fireEvent.click(await screen.findByRole('button', { name: 'Add Account' }));
-  const dialog = await screen.findByRole('dialog', { name: 'Add account' });
+  const dialog = await screen.findByRole('dialog', { name: 'Add Account' });
   fireEvent.click(within(dialog).getByRole('combobox', { name: 'Kind' }));
   fireEvent.click(await screen.findByRole('option', { name: kindLabel, hidden: true }));
   return dialog;
@@ -79,7 +79,7 @@ describe('AddAccountModal', () => {
       { kind: 'claude_subscription', label: 'Company A', payer: '', laneCap: 4, settings: {} },
     ]);
     await waitFor(() => {
-      expect(screen.queryByRole('dialog', { name: 'Add account' })).toBeNull();
+      expect(screen.queryByRole('dialog', { name: 'Add Account' })).toBeNull();
     });
   });
 
@@ -135,7 +135,7 @@ describe('AddAccountModal', () => {
     type(dialog, 'Label', 'Company A');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Create' }));
     expect(await within(dialog).findByText(/already exists/)).toBeTruthy();
-    expect(screen.getByRole('dialog', { name: 'Add account' })).toBeTruthy();
+    expect(screen.getByRole('dialog', { name: 'Add Account' })).toBeTruthy();
   });
 
   it('shows an invalid field’s error and sends nothing', async () => {
@@ -151,7 +151,7 @@ describe('AddAccountModal', () => {
   it('names the modal’s close button', async () => {
     serve();
     fireEvent.click(await screen.findByRole('button', { name: 'Add Account' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Add account' });
+    const dialog = await screen.findByRole('dialog', { name: 'Add Account' });
     expect(within(dialog).getByRole('button', { name: 'Close' })).toBeTruthy();
   });
 

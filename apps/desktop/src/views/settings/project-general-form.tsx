@@ -15,7 +15,7 @@ import {
 } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { IconChevronDown, IconCircleCheck } from '@tabler/icons-react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { usePatchProject } from '../../daemon/queries';
 import {
   checkGeneral,
@@ -85,6 +85,14 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
   const [errors, setErrors] = useState<GeneralErrors>({});
   const [note, setNote] = useState<string | null>(null);
   const [advanced, advancedToggle] = useDisclosure(false);
+  const savedTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  // The confirmation's timer belongs to the latest save and ends with the form.
+  useEffect(
+    () => () => {
+      clearTimeout(savedTimer.current);
+    },
+    [],
+  );
   const set = (change: Partial<GeneralValues>) => {
     setValues((v) => ({ ...v, ...change }));
     setNote(null);
@@ -94,6 +102,10 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
     const checked = checkGeneral(project, values);
     if (!checked.ok) {
       setErrors(checked.errors);
+      // A mistake in a field inside the collapsed card would otherwise stop Save with nothing to see.
+      const { nudgePct, humanWaitMinutes, budgetCeiling, allowedCommands } = checked.errors;
+      if ([nudgePct, humanWaitMinutes, budgetCeiling, allowedCommands].some((e) => e !== undefined))
+        advancedToggle.open();
       return;
     }
     setErrors({});
@@ -105,7 +117,8 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
       onSuccess: () => {
         setNote('Saved');
         // The confirmation fades after a moment; a later edit clears it at once.
-        setTimeout(() => {
+        clearTimeout(savedTimer.current);
+        savedTimer.current = setTimeout(() => {
           setNote((current) => (current === 'Saved' ? null : current));
         }, 4000);
       },
@@ -298,10 +311,7 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
               <IconChevronDown
                 size={14}
                 stroke={1.5}
-                style={{
-                  transform: advanced ? 'rotate(180deg)' : undefined,
-                  transition: 'transform 150ms ease',
-                }}
+                style={{ transform: advanced ? 'rotate(180deg)' : undefined }}
               />
             }
           >

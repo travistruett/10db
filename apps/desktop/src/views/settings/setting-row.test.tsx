@@ -31,6 +31,55 @@ describe('SettingRow', () => {
   });
 });
 
+describe('SettingRow description', () => {
+  it.each([
+    { name: 'a plain input', control: <input aria-label="Field" />, stacked: false },
+    {
+      name: 'a textarea in a stacked row',
+      control: <textarea aria-label="Field" />,
+      stacked: true,
+    },
+    {
+      name: 'a group of radios',
+      control: (
+        <div role="radiogroup" aria-label="Field">
+          <input type="radio" aria-label="One" />
+        </div>
+      ),
+      stacked: false,
+    },
+  ])('links its line to the control: $name', ({ control, stacked }) => {
+    wrap(
+      <SettingRow label="Name" description="What it is called" stacked={stacked}>
+        {control}
+      </SettingRow>,
+    );
+    const target = screen.getByLabelText('Field');
+    const id = target.getAttribute('aria-describedby') ?? '';
+    expect(document.getElementById(id)?.textContent).toBe('What it is called');
+  });
+
+  it('keeps a description the control already has', () => {
+    wrap(
+      <SettingRow label="Name" description="What it is called">
+        <input aria-label="Field" aria-describedby="own" />
+      </SettingRow>,
+    );
+    const ids = (screen.getByLabelText('Field').getAttribute('aria-describedby') ?? '').split(' ');
+    expect(ids).toContain('own');
+    expect(ids).toHaveLength(2);
+  });
+
+  it('adds nothing without a description', () => {
+    wrap(
+      <SettingRow label="Name">
+        <input aria-label="Field" />
+      </SettingRow>,
+    );
+    expect(screen.getByLabelText('Field').hasAttribute('aria-describedby')).toBe(false);
+  });
+});
+
 describe('SettingsCard', () => {
   it('skips null rows without doubling dividers', () => {
     wrap(

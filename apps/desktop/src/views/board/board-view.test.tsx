@@ -536,7 +536,7 @@ describe('BoardView', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'New Task' }));
     const dialog = await screen.findByRole('dialog', { name: 'New Task' });
     type('Title', 'Beta', dialog);
-    type(/^Acceptance criteria/, 'It works\n\nIt is tested\n', dialog);
+    type('Acceptance criteria', 'It works\n\nIt is tested\n', dialog);
     const create = within(dialog).getByRole('button', { name: 'Create Task' });
     // The button is in the modal's footer, outside the form, and submits it by id.
     expect(create.closest('form')).toBeNull();

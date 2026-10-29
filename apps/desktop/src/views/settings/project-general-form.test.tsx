@@ -219,17 +219,66 @@ describe('ProjectGeneralForm', () => {
     expect(screen.queryByText("Copy into each task's copy") !== null).toBe(row.shown);
   });
 
-  it('Advanced is collapsed with aria-expanded false and opens', async () => {
+  it('Advanced is collapsed with aria-expanded false, its rows hidden, and opens', async () => {
     serve(projectDto());
     renderApp('/settings/general');
     await open();
     const advanced = screen.getByRole('button', { name: 'Advanced' });
     expect(advanced.getAttribute('aria-expanded')).toBe('false');
+    // A collapsed card's rows are hidden from the page and from assistive tech alike.
+    expect(screen.queryByRole('switch', { name: 'Allow localhost', hidden: true })).toBeNull();
     fireEvent.click(advanced);
     expect(advanced.getAttribute('aria-expanded')).toBe('true');
+    expect(
+      await screen.findByRole('switch', { name: 'Allow localhost', hidden: true }),
+    ).toBeTruthy();
   });
 
-  it('Saved shows a green check and fades after 4 s', async () => {
+  it.each([
+    { name: 'Allow localhost', line: rows.find((r) => r.name === 'Allow localhost')?.line },
+    {
+      name: 'Spending limit per task',
+      line: rows.find((r) => r.name === 'Spending limit per task')?.line,
+    },
+  ])('$name: its explaining line is the control description', async ({ name, line }) => {
+    serve(projectDto());
+    renderApp('/settings/general');
+    await open();
+    fireEvent.click(screen.getByRole('button', { name: 'Advanced' }));
+    const control = await screen.findByLabelText(name);
+    await waitFor(() => {
+      const ids = (control.getAttribute('aria-describedby') ?? '').split(' ');
+      expect(ids.map((id) => document.getElementById(id)?.textContent)).toContain(line);
+    });
+  });
+
+  it('a mistake in a collapsed Advanced field opens Advanced, shows the error and sends nothing', async () => {
+    const patched = serve(projectDto());
+    renderApp('/settings/general');
+    await open();
+    // Fresh session above Firm reminder is refused, and Firm reminder lives in Advanced.
+    type('Fresh session', '60');
+    expect(screen.getByRole('button', { name: 'Advanced' }).getAttribute('aria-expanded')).toBe(
+      'false',
+    );
+    save();
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Advanced' }).getAttribute('aria-expanded')).toBe(
+        'true',
+      );
+    });
+    const reminder = await screen.findByLabelText('Firm reminder');
+    const described = (reminder.getAttribute('aria-describedby') ?? '').split(' ');
+    expect(described.some((id) => document.getElementById(id)?.textContent)).toBe(true);
+    expect(patched).toEqual([]);
+    // The card stays open once the mistake is fixed.
+    type('Fresh session', '30');
+    expect(screen.getByRole('button', { name: 'Advanced' }).getAttribute('aria-expanded')).toBe(
+      'true',
+    );
+  });
+
+  it('Saved shows a green check and fades after 4 s, counted from the latest save', async () => {
     serve(projectDto());
     renderApp('/settings/general');
     await open();
@@ -240,7 +289,20 @@ describe('ProjectGeneralForm', () => {
     expect(status.textContent).toBe('Saved');
     expect(status.querySelector('svg')).not.toBeNull();
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(4100);
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+    // A second save restarts the 4 s, so the first timer must not hide this note.
+    type('Name', 'Renamed again');
+    save();
+    await waitFor(() => {
+      expect(screen.getByRole('status').textContent).toBe('Saved');
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3500);
+    });
+    expect(screen.getByRole('status').textContent).toBe('Saved');
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(700);
     });
     await waitFor(() => {
       expect(screen.queryByRole('status')).toBeNull();

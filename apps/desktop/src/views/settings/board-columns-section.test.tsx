@@ -191,6 +191,7 @@ describe('BoardColumnsSection', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Delete Exploring' }));
     const dialog = await screen.findByRole('dialog', { name: 'Delete Exploring' });
     expect(within(dialog).queryByLabelText('Move its tasks to')).toBeNull();
+    expect(within(dialog).getByRole('button', { name: 'Keep It' })).toBeTruthy();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Delete Column' }));
     await waitFor(() => {
       expect(sent).toEqual([

@@ -1,6 +1,7 @@
 import { TaskStatus, type TaskDto, type TaskId, type WorkstreamDto } from '@10db/contracts';
 import { Badge, Group, Paper, Stack, Text } from '@mantine/core';
 import { StateBadge } from '../factory/state-badge';
+import { STATE_LABELS } from '../factory/workstream-state';
 import { StepCell } from '../factory/step-cell';
 
 export interface TaskCardProps {
@@ -33,7 +34,7 @@ export function cardSummary(
     criteria > 0 ? `${String(criteria)} ${criteria === 1 ? 'criterion' : 'criteria'}.` : null,
     waits.length > 0 ? `Waits on ${waits.join(', ')}.` : null,
     task.status === TaskStatus.Cancelled ? 'Cancelled.' : null,
-    workstream ? `Workstream ${workstream.state}.` : null,
+    workstream ? `Workstream ${STATE_LABELS[workstream.state]}.` : null,
   ]
     .filter((part) => part !== null)
     .join(' ');

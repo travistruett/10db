@@ -1,6 +1,6 @@
 import { TaskStatus, type ProjectDto, type TaskDto } from '@10db/contracts';
-import { Code, List, MultiSelect, Stack, Text, Textarea, TextInput } from '@mantine/core';
-import { useEffect, useState, type SyntheticEvent } from 'react';
+import { Box, Code, List, MultiSelect, Stack, Text, Textarea, TextInput } from '@mantine/core';
+import { useEffect, useId, useState, type SyntheticEvent } from 'react';
 import { useCreateTask } from '../../daemon/queries';
 import { criteriaLines } from './areas-text';
 import { LabelWithHelp } from './field-help';
@@ -26,6 +26,8 @@ function initialAreas(project: ProjectDto): string[] {
 
 export function NewTaskForm({ formId, project, tasks, onStatus, onCreated }: NewTaskFormProps) {
   const create = useCreateTask(project.id);
+  const criteriaId = useId();
+  const areasId = useId();
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [criteriaText, setCriteriaText] = useState('');
@@ -94,52 +96,54 @@ export function NewTaskForm({ formId, project, tasks, onStatus, onCreated }: New
             setDescription(e.currentTarget.value);
           }}
         />
-        <Textarea
-          label={
-            <LabelWithHelp label="Acceptance criteria">
-              <Stack gap="xs">
-                <Text size="sm">
-                  What must be true when the task is done. The agent works until each one holds, a
-                  reviewer agent checks each and asks for a test that proves it, and the project's
-                  gate (<Code>{project.gateCommand}</Code>) runs separately.
-                </Text>
-                <List size="sm" spacing={4}>
-                  <List.Item>
-                    Instead of "Make search faster", write "Search shows results in under a second
-                    with 10,000 tasks".
-                  </List.Item>
-                  <List.Item>
-                    Instead of "Fix the login bug", write "Signing in with an expired password says
-                    so, instead of showing a blank page".
-                  </List.Item>
-                </List>
-              </Stack>
-            </LabelWithHelp>
-          }
-          placeholder={CRITERIA_PLACEHOLDER}
-          autosize
-          minRows={2}
-          maxRows={12}
-          value={criteriaText}
-          onChange={(e) => {
-            setCriteriaText(e.currentTarget.value);
-          }}
-        />
-        {areaNames.length > 1 ? (
-          <MultiSelect
-            label={
-              <LabelWithHelp label="Areas">
-                <Text size="sm">
-                  The parts of the project this task may change. 10db keeps the agent's edits inside
-                  them, and runs tasks in different areas at the same time.
-                </Text>
-              </LabelWithHelp>
-            }
-            data={areaNames}
-            value={areas}
-            onChange={setAreas}
-            searchable
+        <Box>
+          <LabelWithHelp label="Acceptance criteria" htmlFor={criteriaId}>
+            <Stack gap="xs">
+              <Text size="sm">
+                What must be true when the task is done. The agent works until each one holds, a
+                reviewer agent checks each and asks for a test that proves it, and the project's
+                gate (<Code>{project.gateCommand}</Code>) runs separately.
+              </Text>
+              <List size="sm" spacing={4}>
+                <List.Item>
+                  Instead of "Make search faster", write "Search shows results in under a second
+                  with 10,000 tasks".
+                </List.Item>
+                <List.Item>
+                  Instead of "Fix the login bug", write "Signing in with an expired password says
+                  so, instead of showing a blank page".
+                </List.Item>
+              </List>
+            </Stack>
+          </LabelWithHelp>
+          <Textarea
+            id={criteriaId}
+            placeholder={CRITERIA_PLACEHOLDER}
+            autosize
+            minRows={2}
+            maxRows={12}
+            value={criteriaText}
+            onChange={(e) => {
+              setCriteriaText(e.currentTarget.value);
+            }}
           />
+        </Box>
+        {areaNames.length > 1 ? (
+          <Box>
+            <LabelWithHelp label="Areas" htmlFor={areasId}>
+              <Text size="sm">
+                The parts of the project this task may change. 10db keeps the agent's edits inside
+                them, and runs tasks in different areas at the same time.
+              </Text>
+            </LabelWithHelp>
+            <MultiSelect
+              id={areasId}
+              data={areaNames}
+              value={areas}
+              onChange={setAreas}
+              searchable
+            />
+          </Box>
         ) : null}
         <MultiSelect
           label="Depends on"

@@ -57,7 +57,7 @@ describe('NewTaskForm', () => {
 
     expect(screen.queryByText('Areas')).toBeNull();
     fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Beta' } });
-    fireEvent.change(screen.getByLabelText(/^Acceptance criteria/), { target: { value: 'Works' } });
+    fireEvent.change(screen.getByLabelText('Acceptance criteria'), { target: { value: 'Works' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create Task' }));
 
     await waitFor(() => {
@@ -69,7 +69,7 @@ describe('NewTaskForm', () => {
   it('the criteria placeholder shows an example', async () => {
     await open(projectDto());
 
-    const field = screen.getByLabelText(/^Acceptance criteria/);
+    const field = screen.getByLabelText('Acceptance criteria');
     expect(field.getAttribute('placeholder')).toBe(
       'One per line, for example:\nSearch shows results in under a second with 10,000 tasks',
     );
@@ -78,9 +78,7 @@ describe('NewTaskForm', () => {
   it('the criteria help names the gate command', async () => {
     await open(projectDto({ gateCommand: 'make verify-it' }));
 
-    const icon = screen.getByText('About acceptance criteria').parentElement;
-    if (!icon) throw new Error('expected the help icon');
-    fireEvent.mouseEnter(icon);
+    fireEvent.mouseEnter(screen.getByRole('button', { name: 'About acceptance criteria' }));
 
     const card = await screen.findByText(/make verify-it/);
     expect(within(card.parentElement ?? card).getByText(/make verify-it/)).toBeTruthy();

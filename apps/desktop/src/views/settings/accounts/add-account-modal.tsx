@@ -108,7 +108,7 @@ export function AddAccountModal({
     <Modal
       opened={opened}
       onClose={onClose}
-      title="Add account"
+      title="Add Account"
       size="md"
       closeButtonProps={{ 'aria-label': 'Close' }}
     >

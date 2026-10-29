@@ -75,7 +75,10 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
     await page.getByRole('button', { name: 'New Task' }).click();
     const taskDialog = page.getByRole('dialog', { name: 'New Task' });
     await taskDialog.getByLabel('Title').fill(title);
-    await taskDialog.getByLabel('Acceptance criteria').fill('src/greeting/hello.txt exists');
+    if (title === OTHER) await expectAccessible(page, 'new task, dark');
+    await taskDialog
+      .getByLabel('Acceptance criteria', { exact: true })
+      .fill('src/greeting/hello.txt exists');
     await taskDialog.getByRole('button', { name: 'Create Task' }).click();
     await expect(taskDialog).toBeHidden();
   }
@@ -197,7 +200,7 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
     /Done cards stay where they finished; they can’t be dragged$/,
   );
 
-  // Settings: add a human column, a planned section says it is not built yet, and accounts work.
+  // Settings: add a human column, and accounts work.
   await open(page, 'Settings');
   await expectAccessible(page, 'settings, general, dark');
   await page.getByRole('link', { name: /Board columns/ }).click();
