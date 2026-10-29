@@ -13,7 +13,7 @@ const VALUE_FLAGS = new Set([
 ]);
 
 /** Runners whose remaining words are themselves a command (`pnpm exec drizzle-kit generate`). */
-const RUNNERS: readonly (readonly string[])[] = [
+export const RUNNERS: readonly (readonly string[])[] = [
   ['npx'],
   ['pnpm', 'exec'],
   ['pnpm', 'dlx'],

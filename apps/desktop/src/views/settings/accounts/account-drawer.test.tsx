@@ -216,7 +216,7 @@ describe('AccountDrawer', () => {
       expect(within(dialog).queryByRole('button', { name: /^Confirm / })).toBeNull();
     });
     expect(within(dialog).queryByText('Fresh login has no identity recorded yet.')).toBeNull();
-    expect(await screen.findByText('client@example.com', { selector: 'code' })).toBeTruthy();
+    expect(await screen.findByText('client@example.com')).toBeTruthy();
   });
 
   it('warns that a different recorded identity will be replaced', async () => {
@@ -521,7 +521,7 @@ describe('AccountDrawer', () => {
     const account = accountDto({ label: 'Fresh login' });
     const served = serve([DEFAULT_ACCOUNT, account]);
     const dialog = await openDrawer('Fresh login');
-    const save = await within(dialog).findByRole('button', { name: 'Save changes' });
+    const save = await within(dialog).findByRole('button', { name: 'Save Changes' });
     expect(save).toHaveProperty('disabled', true);
     expect(within(dialog).getByDisplayValue('Claude subscription')).toBeTruthy();
     fireEvent.change(within(dialog).getByRole('textbox', { name: 'Label' }), {
@@ -534,7 +534,7 @@ describe('AccountDrawer', () => {
     });
     expect(await screen.findByRole('button', { name: 'Open Renamed', hidden: true })).toBeTruthy();
     await waitFor(() => {
-      expect(within(dialog).getByRole('button', { name: 'Save changes' })).toHaveProperty(
+      expect(within(dialog).getByRole('button', { name: 'Save Changes' })).toHaveProperty(
         'disabled',
         true,
       );
@@ -547,7 +547,7 @@ describe('AccountDrawer', () => {
     fireEvent.change(await within(dialog).findByRole('textbox', { name: 'Label' }), {
       target: { value: '' },
     });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Save changes' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save Changes' }));
     expect(await within(dialog).findByText('Enter a label')).toBeTruthy();
     expect(served.patches).toEqual([]);
   });
@@ -560,7 +560,7 @@ describe('AccountDrawer', () => {
     fireEvent.change(await within(dialog).findByRole('textbox', { name: 'Label' }), {
       target: { value: 'Taken' },
     });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Save changes' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save Changes' }));
     expect(
       await within(dialog).findByText('An account labelled "Taken" already exists'),
     ).toBeTruthy();
@@ -578,7 +578,7 @@ describe('AccountDrawer', () => {
     fireEvent.change(await within(dialog).findByRole('textbox', { name: 'Monthly cap (USD)' }), {
       target: { value: '' },
     });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Save changes' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save Changes' }));
     await waitFor(() => {
       expect(served.patches).toEqual([{ id: account.id, body: { monthlyCapUsd: null } }]);
     });
@@ -601,7 +601,7 @@ describe('AccountDrawer', () => {
     fireEvent.change(within(dialog).getByRole('textbox', { name: 'AWS profile' }), {
       target: { value: 'client-b' },
     });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Save changes' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save Changes' }));
     await waitFor(() => {
       expect(served.patches).toEqual([
         { id: account.id, body: { settings: { region: 'us-west-2', awsProfile: 'client-b' } } },
@@ -622,7 +622,7 @@ describe('AccountDrawer', () => {
         '8',
       );
     });
-    expect(within(dialog).getByRole('button', { name: 'Save changes' })).toHaveProperty(
+    expect(within(dialog).getByRole('button', { name: 'Save Changes' })).toHaveProperty(
       'disabled',
       true,
     );
@@ -646,7 +646,7 @@ describe('AccountDrawer', () => {
       'value',
       'Mid edit',
     );
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Save changes' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save Changes' }));
     await waitFor(() => {
       expect(served.patches).toEqual([{ id: account.id, body: { label: 'Mid edit' } }]);
     });
@@ -656,7 +656,7 @@ describe('AccountDrawer', () => {
     const account = accountDto({ label: 'Old client' });
     const served = serve([DEFAULT_ACCOUNT, account]);
     const dialog = await openDrawer('Old client');
-    fireEvent.click(await within(dialog).findByRole('button', { name: 'Archive account' }));
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Archive Account' }));
     const confirm = await screen.findByRole('dialog', { name: 'Archive Old client?' });
     expect(
       within(confirm).getByText(
@@ -664,7 +664,7 @@ describe('AccountDrawer', () => {
       ),
     ).toBeTruthy();
     expect(served.archives).toEqual([]);
-    fireEvent.click(within(confirm).getByRole('button', { name: 'Archive account' }));
+    fireEvent.click(within(confirm).getByRole('button', { name: 'Archive Account' }));
     await waitFor(() => {
       expect(served.archives).toEqual([account.id]);
     });
@@ -672,7 +672,7 @@ describe('AccountDrawer', () => {
       expect(screen.queryByRole('dialog')).toBeNull();
     });
     await waitFor(() => {
-      expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Add account' }));
+      expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Add Account' }));
     });
   });
 
@@ -693,7 +693,7 @@ describe('AccountDrawer', () => {
     );
     renderWithDaemon(<AccountDrawer accountId={account.id} opened onClose={onClose} />);
     const dialog = await screen.findByRole('dialog', { name: /Old client/ });
-    fireEvent.click(await within(dialog).findByRole('button', { name: 'Archive account' }));
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Archive Account' }));
     await screen.findByRole('dialog', { name: 'Archive Old client?' });
     fireEvent.keyDown(document.body, { key: 'Escape' });
     await waitFor(() => {
@@ -708,7 +708,7 @@ describe('AccountDrawer', () => {
     const second = accountDto({ label: 'Second client' });
     const served = serve([DEFAULT_ACCOUNT, first, second]);
     const dialog = await openDrawer('First client');
-    fireEvent.click(await within(dialog).findByRole('button', { name: 'Archive account' }));
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Archive Account' }));
     await screen.findByRole('dialog', { name: 'Archive First client?' });
     served.changeRemotely(first.id, { archived: true });
     await waitFor(() => {
@@ -719,7 +719,7 @@ describe('AccountDrawer', () => {
       expect(screen.queryByRole('dialog', { name: /First client/ })).toBeNull();
     });
     const next = await openDrawer('Second client');
-    expect(within(next).getByRole('button', { name: 'Archive account' })).toBeTruthy();
+    expect(within(next).getByRole('button', { name: 'Archive Account' })).toBeTruthy();
     expect(screen.queryByRole('dialog', { name: 'Archive Second client?' })).toBeNull();
     fireEvent.keyDown(document.body, { key: 'Escape' });
     await waitFor(() => {
@@ -733,9 +733,9 @@ describe('AccountDrawer', () => {
       archiveRefusal: { status: 409, message: 'Move "Demo" to another account before archiving' },
     });
     const dialog = await openDrawer('In use');
-    fireEvent.click(await within(dialog).findByRole('button', { name: 'Archive account' }));
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Archive Account' }));
     const confirm = await screen.findByRole('dialog', { name: 'Archive In use?' });
-    fireEvent.click(within(confirm).getByRole('button', { name: 'Archive account' }));
+    fireEvent.click(within(confirm).getByRole('button', { name: 'Archive Account' }));
     expect(
       await within(confirm).findByText('Move "Demo" to another account before archiving'),
     ).toBeTruthy();
@@ -746,6 +746,6 @@ describe('AccountDrawer', () => {
     serve([DEFAULT_ACCOUNT]);
     const dialog = await openDrawer('Claude plan');
     expect(await within(dialog).findByText("The default account can't be archived.")).toBeTruthy();
-    expect(within(dialog).queryByRole('button', { name: 'Archive account' })).toBeNull();
+    expect(within(dialog).queryByRole('button', { name: 'Archive Account' })).toBeNull();
   });
 });

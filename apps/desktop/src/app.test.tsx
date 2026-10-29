@@ -23,6 +23,16 @@ describe('App shell', () => {
     expect(screen.queryByRole('img', { name: /daemon/i })).toBeNull();
   });
 
+  it('weights only the current route’s sidebar label at 600', async () => {
+    server.use(...baseHandlers());
+    renderApp('/factory');
+    expect(await screen.findByRole('heading', { name: 'Factory' })).toBeTruthy();
+    const label = (name: string) =>
+      screen.getByRole('link', { name }).querySelector('.mantine-NavLink-label');
+    expect(label('Factory')).toHaveProperty('style.fontWeight', '600');
+    expect(label('Inbox')).toHaveProperty('style.fontWeight', '');
+  });
+
   it('waits on a connecting screen while the daemon is unreachable', async () => {
     server.use(http.get(daemonUrl('/health'), () => HttpResponse.error()));
     renderApp();

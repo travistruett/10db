@@ -1,6 +1,10 @@
 import {
   createTheme,
   defaultVariantColorsResolver,
+  MultiSelect,
+  NavLink,
+  Select,
+  Switch,
   type CSSVariablesResolver,
   type MantineColorsTuple,
   type VariantColorsResolver,
@@ -108,6 +112,17 @@ export const theme = createTheme({
   variantColorResolver,
   defaultRadius: 'md',
   fontFamilyMonospace: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+  components: {
+    Select: Select.extend({ defaultProps: { checkIconPosition: 'right' } }),
+    MultiSelect: MultiSelect.extend({ defaultProps: { checkIconPosition: 'right' } }),
+    Switch: Switch.extend({ defaultProps: { withThumbIndicator: false } }),
+    NavLink: NavLink.extend({
+      styles: (_theme, props) => ({
+        root: { borderRadius: 'var(--mantine-radius-md)' },
+        label: props.active ? { fontWeight: 600 } : {},
+      }),
+    }),
+  },
 });
 
 /**

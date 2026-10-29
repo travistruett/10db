@@ -12,7 +12,7 @@ export const SettingsSectionKey = {
 } as const;
 export type SettingsSectionKey = (typeof SettingsSectionKey)[keyof typeof SettingsSectionKey];
 
-export const SettingsGroup = { Project: 'project', App: 'app' } as const;
+export const SettingsGroup = { Project: 'project', Global: 'global' } as const;
 export type SettingsGroup = (typeof SettingsGroup)[keyof typeof SettingsGroup];
 
 export interface SettingsSection {
@@ -67,26 +67,26 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   },
   {
     key: SettingsSectionKey.KeepAwake,
-    group: SettingsGroup.App,
+    group: SettingsGroup.Global,
     label: 'Keep-awake',
     planned: null,
   },
   {
     key: SettingsSectionKey.Accounts,
-    group: SettingsGroup.App,
+    group: SettingsGroup.Global,
     label: 'Accounts',
     planned: null,
   },
   {
     key: SettingsSectionKey.Models,
-    group: SettingsGroup.App,
+    group: SettingsGroup.Global,
     label: 'Models and benchmarks',
     planned:
       "The Artificial Analysis key and sync, the model profiles, and the Intelligence-vs-Cost chart with AA's attribution. A later M2 plan fills it.",
   },
   {
     key: SettingsSectionKey.PersonasAndFlows,
-    group: SettingsGroup.App,
+    group: SettingsGroup.Global,
     label: 'Personas and flows',
     planned:
       'The personas, their instructions and pins, and the flows of steps. The team editor plan fills it.',

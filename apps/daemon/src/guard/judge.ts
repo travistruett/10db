@@ -32,6 +32,7 @@ import {
   leadingWords,
   parseShell,
   hidesEnvCommand,
+  redirectionSpan,
   redirectionHidesCommand,
   stripCommandPrefixes,
   type ShellSegment,
@@ -289,21 +290,49 @@ function rmVerdict(
 
 export const shellQuote = (word: string): string => `'${word.replaceAll("'", "'\\''")}'`;
 
-const SHELL_C_FLAG = /^-[a-zA-Z]*c[a-zA-Z]*$/;
+export const SHELL_C_FLAG = /^-[a-zA-Z]*c[a-zA-Z]*$/;
 
-/** The scripts a shell's words hand it: a `-c` argument and a `<<<` here-string. */
+/** A here-string word: `<<<`, optionally on a file descriptor, with or without its text attached. */
+const HERE_STRING = /^\d*<<<(.*)$/s;
+
+/** Shell options whose value is the next word (`-o pipefail`, `+O extglob`), alone or ending a cluster. */
+const OPTION_WITH_VALUE = /^[-+][a-zA-Z]*[oO]$/;
+
+/**
+ * The word a shell runs after its `-c` flag: the first operand once the options between are
+ * skipped, as bash and zsh read them (`bash -c -e 'cmd'`, `sh -c -- 'cmd'`, `bash -c -o x 'cmd'`).
+ */
+function commandString(words: readonly string[], flagAt: number): string | undefined {
+  for (let at = flagAt + 1; at < words.length; at += 1) {
+    const word = words[at] ?? '';
+    const span = redirectionSpan(words, at);
+    if (span > 0) {
+      at += span - 1;
+    } else if (word === '--' || word === '-') {
+      return words[at + 1];
+    } else if (OPTION_WITH_VALUE.test(word)) {
+      at += 1;
+    } else if (!/^[-+]./.test(word)) {
+      return word;
+    }
+  }
+  return undefined;
+}
+
+/** The scripts a shell's words hand it: its `-c` command string and every `<<<` here-string. */
 export function shellScripts(words: readonly string[]): string[] {
   const flag = words.findIndex((w) => SHELL_C_FLAG.test(w));
-  const here = words.findIndex((w) => w.startsWith('<<<'));
-  const hereWord = words[here];
-  return [
-    ...(flag === -1 ? [] : words.slice(flag + 1, flag + 2)),
-    ...(hereWord === undefined
-      ? []
-      : hereWord === '<<<'
-        ? words.slice(here + 1, here + 2)
-        : [hereWord.slice(3)]),
-  ];
+  const command = flag === -1 ? undefined : commandString(words, flag);
+  const scripts = command === undefined ? [] : [command];
+  words.forEach((word, at) => {
+    const here = HERE_STRING.exec(word);
+    if (here === null) return;
+    const text = here[1] ?? '';
+    const next = words[at + 1];
+    if (text !== '') scripts.push(text);
+    else if (next !== undefined) scripts.push(next);
+  });
+  return scripts;
 }
 
 /** A directory a command may run in; null when the guard cannot name it (`cd "$DIR"`). */

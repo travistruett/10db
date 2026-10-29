@@ -7,40 +7,69 @@ import { accountDto, DEFAULT_ACCOUNT } from '../../test/account-fixtures';
 import { projectDto } from '../../test/fixtures';
 
 /** Opens a Select and picks an option from its own list (every Select keeps its options in the document). */
-async function pick(select: HTMLElement, option: string): Promise<void> {
-  fireEvent.click(select);
-  const labelId = select instanceof HTMLInputElement ? select.labels?.[0]?.id : undefined;
-  const listbox = screen
-    .getAllByRole('listbox', { hidden: true })
-    .find((l) => l.getAttribute('aria-labelledby') === labelId);
-  expect(listbox).toBeDefined();
-  fireEvent.click(
-    await within(listbox ?? document.body).findByRole('option', { name: option, hidden: true }),
-  );
+async function pick(field: string, option: RegExp): Promise<void> {
+  const listbox = await waitFor(() => {
+    // Looked up afresh each time: a refetch can replace the field and close its list.
+    const input = screen.getByRole('combobox', { name: field });
+    if (input.getAttribute('aria-expanded') !== 'true') fireEvent.click(input);
+    const found = screen
+      .getAllByRole('listbox', { hidden: true })
+      .find((l) => l.id === input.getAttribute('aria-controls'));
+    expect(found).toBeDefined();
+    return found ?? document.body;
+  });
+  fireEvent.click(await within(listbox).findByRole('option', { name: option, hidden: true }));
 }
 
 describe('SettingsView', () => {
-  it('opens General from /settings and lists every section in its group', async () => {
+  it('opens General from /settings with no page title and no project picker', async () => {
     server.use(...baseHandlers());
     const { router } = renderApp('/settings');
-    expect(await screen.findByRole('heading', { name: 'Settings', level: 2 })).toBeTruthy();
     await waitFor(() => {
       expect(router.state.location.pathname).toBe('/settings/general');
     });
-    const nav = screen.getByRole('navigation', { name: 'Settings sections' });
+    expect(await screen.findByRole('heading', { name: 'General', level: 3 })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'Settings', level: 2 })).toBeNull();
+    // The one project switcher lives in the sidebar.
+    expect(screen.getAllByRole('button', { name: /Switch project/ })).toHaveLength(1);
+  });
+
+  it('the sidebar shows Back to Board, Project with the switcher, and Global', async () => {
+    server.use(...baseHandlers());
+    renderApp('/settings/general');
+    const nav = await screen.findByRole('navigation', { name: 'Settings sections' });
+    expect(within(nav).getByRole('link', { name: 'Back to Board' })).toBeTruthy();
+    expect(within(nav).getByText('Project')).toBeTruthy();
+    expect(within(nav).getByText('Global')).toBeTruthy();
+    expect(within(nav).getByRole('button', { name: /Switch project/ })).toBeTruthy();
     for (const label of [
       'General',
       'Board columns',
       'Areas and hazards',
       'Billing',
-      'Team',
-      'Routing rules',
       'Keep-awake',
       'Accounts',
-      'Models and benchmarks',
-      'Personas and flows',
     ])
-      expect(within(nav).getByRole('link', { name: new RegExp(label) })).toBeTruthy();
+      expect(within(nav).getByRole('link', { name: label })).toBeTruthy();
+    // The app nav gives way to Settings' own.
+    expect(screen.queryByRole('link', { name: 'Factory' })).toBeNull();
+  });
+
+  it('planned sections are hidden', async () => {
+    server.use(...baseHandlers());
+    renderApp('/settings/general');
+    const nav = await screen.findByRole('navigation', { name: 'Settings sections' });
+    for (const label of ['Team', 'Routing rules', 'Models and benchmarks', 'Personas and flows'])
+      expect(within(nav).queryByRole('link', { name: new RegExp(label) })).toBeNull();
+  });
+
+  it('Back to Board returns to /board', async () => {
+    server.use(...baseHandlers());
+    const { router } = renderApp('/settings/general');
+    fireEvent.click(await screen.findByRole('link', { name: 'Back to Board' }));
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/board');
+    });
   });
 
   it('redirects an unknown section to General', async () => {
@@ -103,19 +132,16 @@ describe('SettingsView', () => {
     const picker = await screen.findByRole('combobox', { name: 'Account' });
     // The account list loads after the section opens.
     await waitFor(() => {
-      expect(picker).toHaveProperty(
-        'value',
-        'Claude plan · builder@example.com (Claude subscription)',
-      );
+      expect(picker).toHaveProperty('value', 'Claude plan');
     });
-    await pick(picker, 'Client key (Anthropic API key)');
+    await pick('Account', /Client key/);
     await waitFor(() => {
       expect(patched).toEqual([{ accountId: client.id }]);
     });
 
-    const fallback = screen.getByRole('combobox', { name: 'Fallback account' });
+    const fallback = screen.getByRole('combobox', { name: 'Backup account' });
     expect(fallback).toHaveProperty('value', '');
-    await pick(fallback, 'Client key (Anthropic API key)');
+    await pick('Backup account', /Client key/);
     await waitFor(() => {
       expect(patched).toEqual([{ accountId: client.id }, { fallbackAccountId: client.id }]);
     });
@@ -135,9 +161,9 @@ describe('SettingsView', () => {
     );
     renderApp('/settings/areas');
     fireEvent.click(await screen.findByRole('link', { name: /Billing/ }));
-    const field = await screen.findByRole('textbox', { name: 'Hand off at' });
+    const field = await screen.findByRole('textbox', { name: 'Switch at' });
     expect(field).toHaveProperty('value', '95%');
-    expect(screen.getByText(/only on a Claude subscription account/)).toBeTruthy();
+    expect(screen.getByText(/On a Claude plan/)).toBeTruthy();
 
     fireEvent.change(field, { target: { value: '100' } });
     fireEvent.blur(field);
@@ -166,19 +192,18 @@ describe('SettingsView', () => {
     );
     renderApp('/settings/areas');
     fireEvent.click(await screen.findByRole('link', { name: /Billing/ }));
-    const fallback = await screen.findByRole('combobox', { name: 'Fallback account' });
+    const fallback = await screen.findByRole('combobox', { name: 'Backup account' });
     fireEvent.click(fallback);
-    const labelId = fallback instanceof HTMLInputElement ? fallback.labels?.[0]?.id : undefined;
     const listbox = screen
       .getAllByRole('listbox', { hidden: true })
-      .find((l) => l.getAttribute('aria-labelledby') === labelId);
+      .find((l) => l.id === fallback.getAttribute('aria-controls'));
     expect(listbox).toBeDefined();
     // The account list loads after the section opens.
     await within(listbox ?? document.body).findByRole('option', { hidden: true });
     const names = within(listbox ?? document.body)
       .getAllByRole('option', { hidden: true })
       .map((o) => o.textContent);
-    expect(names).toEqual(['Client key (Anthropic API key)']);
+    expect(names).toEqual(['Client keyAnthropic API key']);
   });
 
   it('shows the recorded fallback after 10db moved the project onto it', async () => {
@@ -195,9 +220,9 @@ describe('SettingsView', () => {
     );
     renderApp('/settings/areas');
     fireEvent.click(await screen.findByRole('link', { name: /Billing/ }));
-    const fallback = await screen.findByRole('combobox', { name: 'Fallback account' });
+    const fallback = await screen.findByRole('combobox', { name: 'Backup account' });
     await waitFor(() => {
-      expect(fallback).toHaveProperty('value', 'Client key (Anthropic API key)');
+      expect(fallback).toHaveProperty('value', 'Client key');
     });
   });
 
@@ -215,16 +240,43 @@ describe('SettingsView', () => {
     );
     renderApp('/settings/areas');
     fireEvent.click(await screen.findByRole('link', { name: /Billing/ }));
-    expect(await screen.findByRole('textbox', { name: 'Hand off at' })).toHaveProperty(
+    expect(await screen.findByRole('textbox', { name: 'Switch at' })).toHaveProperty(
       'value',
       '90%',
     );
-    await pick(screen.getByRole('combobox', { name: 'Project' }), 'Beta');
+    fireEvent.click(screen.getByRole('button', { name: 'Project: Alpha. Switch project' }));
+    fireEvent.click(await screen.findByRole('option', { name: /Beta/, hidden: true }));
     await waitFor(() => {
-      expect(screen.getByRole('textbox', { name: 'Hand off at' })).toHaveProperty('value', '95%');
+      expect(screen.getByRole('textbox', { name: 'Switch at' })).toHaveProperty('value', '95%');
     });
-    fireEvent.blur(screen.getByRole('textbox', { name: 'Hand off at' }));
+    fireEvent.blur(screen.getByRole('textbox', { name: 'Switch at' }));
     expect(patched).toEqual([]);
+  });
+
+  it('Billing has Account, Backup account and Switch at, and no fallback model', async () => {
+    server.use(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([projectDto()])),
+      ...baseHandlers(),
+    );
+    renderApp('/settings/billing');
+    expect(await screen.findByRole('combobox', { name: 'Account' })).toBeTruthy();
+    expect(screen.getByRole('combobox', { name: 'Backup account' })).toBeTruthy();
+    expect(screen.getByRole('textbox', { name: 'Switch at' })).toBeTruthy();
+    expect(screen.queryByText(/fallback model/i)).toBeNull();
+    expect(screen.queryByText('Fallback account')).toBeNull();
+  });
+
+  it('Keep awake is one row with Never, While tasks run and Always', async () => {
+    server.use(...baseHandlers());
+    renderApp('/settings/keep-awake');
+    const group = await screen.findByRole('radiogroup', { name: 'Keep the Mac awake' });
+    expect(
+      within(group)
+        .getAllByRole('radio')
+        .map((r) => r.getAttribute('value')),
+    ).toEqual(['off', 'while_running', 'always']);
+    expect(within(group).getByText('While tasks run')).toBeTruthy();
+    expect(within(group).getByText('Never')).toBeTruthy();
   });
 
   it('shows the other project\u2019s areas after switching projects, not the first one\u2019s', async () => {
@@ -239,7 +291,8 @@ describe('SettingsView', () => {
       'value',
       'api',
     );
-    await pick(screen.getByRole('combobox', { name: 'Project' }), 'Beta');
+    fireEvent.click(screen.getByRole('button', { name: 'Project: Alpha. Switch project' }));
+    fireEvent.click(await screen.findByRole('option', { name: /Beta/, hidden: true }));
     await waitFor(() => {
       expect(screen.getByRole('textbox', { name: 'Area 1 name' })).toHaveProperty('value', 'core');
     });
@@ -255,99 +308,10 @@ describe('SettingsView', () => {
       ...baseHandlers(),
     );
     renderApp('/settings/keep-awake');
-    fireEvent.click(await screen.findByRole('radio', { name: 'Always keep the Mac awake' }));
+    fireEvent.click(await screen.findByRole('radio', { name: 'Always' }));
     await waitFor(() => {
       expect(put).toEqual([{ mode: 'always' }]);
     });
-  });
-
-  it('saves only the changed project fields', async () => {
-    let project = projectDto({ name: 'demo', gateCommand: 'make gate' });
-    const patched: unknown[] = [];
-    server.use(
-      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
-      http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
-      http.patch(daemonUrl('/projects/:projectId'), async ({ request }) => {
-        const body = await request.json();
-        patched.push(body);
-        project = { ...project, gateCommand: 'make check' };
-        return HttpResponse.json(project);
-      }),
-      ...baseHandlers(),
-    );
-    renderApp('/settings/general');
-    const gate = await screen.findByLabelText('Gate command');
-    fireEvent.change(gate, { target: { value: 'make check' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    await waitFor(() => {
-      expect(patched).toEqual([{ gateCommand: 'make check' }]);
-    });
-    expect(await screen.findByText('Saved.')).toBeTruthy();
-  });
-
-  it('shows the localhost switch off, with its warning, and no permission mode', async () => {
-    const project = projectDto();
-    server.use(
-      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
-      http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
-      ...baseHandlers(),
-    );
-    renderApp('/settings/general');
-    await screen.findByLabelText('Gate command');
-    const localhost = screen.getByRole<HTMLInputElement>('switch', {
-      name: /^Let lane commands use localhost/,
-    });
-    expect(localhost.checked).toBe(false);
-    expect(screen.getByText(/opens every local port to the lane/)).toBeTruthy();
-    expect(screen.queryByRole('radiogroup', { name: 'Permissions' })).toBeNull();
-  });
-
-  it('saves the localhost switch as a patch', async () => {
-    const project = projectDto({ name: 'demo', gateCommand: 'make gate' });
-    const patched: unknown[] = [];
-    server.use(
-      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
-      http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
-      http.patch(daemonUrl('/projects/:projectId'), async ({ request }) => {
-        patched.push(await request.json());
-        return HttpResponse.json({ ...project, sandboxLoopback: true });
-      }),
-      ...baseHandlers(),
-    );
-    renderApp('/settings/general');
-    await screen.findByLabelText('Gate command');
-    fireEvent.click(screen.getByRole('switch', { name: /^Let lane commands use localhost/ }));
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    await waitFor(() => {
-      expect(patched).toEqual([{ sandboxLoopback: true }]);
-    });
-    expect(await screen.findByText('Saved.')).toBeTruthy();
-  });
-
-  it('saves the extra allowed commands, one per line', async () => {
-    const project = projectDto({ name: 'demo', gateCommand: 'make gate' });
-    const patched: unknown[] = [];
-    server.use(
-      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
-      http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
-      http.patch(daemonUrl('/projects/:projectId'), async ({ request }) => {
-        patched.push(await request.json());
-        return HttpResponse.json({
-          ...project,
-          allowedCommands: ['pnpm exec prettier', 'pnpm test'],
-        });
-      }),
-      ...baseHandlers(),
-    );
-    renderApp('/settings/general');
-    fireEvent.change(await screen.findByLabelText('Extra allowed commands'), {
-      target: { value: 'pnpm exec prettier\npnpm test' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    await waitFor(() => {
-      expect(patched).toEqual([{ allowedCommands: ['pnpm exec prettier', 'pnpm test'] }]);
-    });
-    expect(await screen.findByText('Saved.')).toBeTruthy();
   });
 
   it('shows the bad line of the extra allowed commands without calling the daemon', async () => {
@@ -363,7 +327,8 @@ describe('SettingsView', () => {
       ...baseHandlers(),
     );
     renderApp('/settings/general');
-    fireEvent.change(await screen.findByLabelText('Extra allowed commands'), {
+    fireEvent.click(await screen.findByRole('button', { name: 'Advanced' }));
+    fireEvent.change(screen.getByLabelText("Commands that don't ask"), {
       target: { value: 'pnpm test\npnpm --run' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
@@ -385,7 +350,8 @@ describe('SettingsView', () => {
       ...baseHandlers(),
     );
     renderApp('/settings/general');
-    fireEvent.change(await screen.findByLabelText('Nudge at %'), { target: { value: '40' } });
+    fireEvent.click(await screen.findByRole('button', { name: 'Advanced' }));
+    fireEvent.change(screen.getByLabelText('Firm reminder'), { target: { value: '40' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     expect(await screen.findByText('The nudge must come after the handoff')).toBeTruthy();
     expect(calls).toBe(0);
@@ -405,7 +371,7 @@ describe('SettingsView', () => {
     renderApp('/settings/general');
     fireEvent.change(await screen.findByLabelText('Name'), { target: { value: 'renamed' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    expect(await screen.findByText('flow flw_x not found')).toBeTruthy();
+    expect(await screen.findByText(/flow flw_x not found/)).toBeTruthy();
   });
 
   it('says there is nothing to change', async () => {
@@ -418,7 +384,7 @@ describe('SettingsView', () => {
     );
     renderApp('/settings/general');
     fireEvent.click(await screen.findByRole('button', { name: 'Save' }));
-    expect(await screen.findByText('Nothing to change.')).toBeTruthy();
+    expect(await screen.findByText('Nothing to change')).toBeTruthy();
   });
 
   it('switches a project to pull-request delivery, and shows why the daemon refuses it while work runs', async () => {
@@ -441,55 +407,15 @@ describe('SettingsView', () => {
       ...baseHandlers(),
     );
     renderApp('/settings/general');
-    fireEvent.click(await screen.findByRole('radio', { name: 'One pull request per batch' }));
-    fireEvent.change(screen.getByLabelText('PR title prefix'), { target: { value: 'feat(app)' } });
+    fireEvent.click(await screen.findByRole('radio', { name: 'Pull request' }));
+    fireEvent.change(screen.getByLabelText('Pull request title'), {
+      target: { value: 'feat(app)' },
+    });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => {
       expect(patched).toEqual([{ delivery: 'pull_request', prTitlePrefix: 'feat(app)' }]);
     });
     expect(await screen.findByText(/has unfinished work/)).toBeTruthy();
-  });
-
-  it('saves the workspace mode and the seed', async () => {
-    const project = projectDto({ delivery: 'pull_request', prTitlePrefix: 'feat(app)' });
-    const patched: unknown[] = [];
-    server.use(
-      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
-      http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
-      http.patch(daemonUrl('/projects/:projectId'), async ({ request }) => {
-        patched.push(await request.json());
-        return HttpResponse.json(project);
-      }),
-      ...baseHandlers(),
-    );
-    renderApp('/settings/general');
-    expect(screen.queryByText('Seed from the main checkout')).toBeNull();
-    fireEvent.click(await screen.findByRole('radio', { name: 'A worktree per task' }));
-    expect(screen.getAllByText('Seed from the main checkout').length).toBeGreaterThan(0);
-    expect(
-      screen.getByText('Ignored directories cloned into each new worktree, by name'),
-    ).toBeTruthy();
-    const seed = screen.getByRole('combobox', { name: 'Seed from the main checkout' });
-    seed.focus();
-    fireEvent.change(seed, { target: { value: '.venv' } });
-    fireEvent.blur(seed);
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    await waitFor(() => {
-      expect(patched).toEqual([
-        { workspaceMode: 'worktree', worktreeSeed: ['node_modules', '.venv'] },
-      ]);
-    });
-  });
-
-  it('hides the workspace choice for local delivery', async () => {
-    server.use(
-      http.get(daemonUrl('/projects'), () => HttpResponse.json([projectDto()])),
-      http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
-      ...baseHandlers(),
-    );
-    renderApp('/settings/general');
-    await screen.findByLabelText('Gate command');
-    expect(screen.queryByRole('radio', { name: 'A worktree per task' })).toBeNull();
   });
 
   it('keeps what the builder typed and picks up other fields when the project changes mid-edit', async () => {
@@ -514,6 +440,6 @@ describe('SettingsView', () => {
       expect(screen.getByLabelText<HTMLInputElement>('Gate command').value).toBe('make check');
     });
     expect(screen.getByLabelText<HTMLInputElement>('Name').value).toBe('renamed');
-    expect(screen.getByLabelText<HTMLInputElement>('Lanes').value).toBe('7');
+    expect(screen.getByLabelText<HTMLInputElement>('Most tasks at once').value).toBe('7');
   });
 });

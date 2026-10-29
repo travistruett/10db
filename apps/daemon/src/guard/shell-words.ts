@@ -1,6 +1,7 @@
 import { basename } from 'node:path';
 import { decodeAnsiC } from './ansi-c';
 import { expandBraceWord } from './braces';
+import { XARGS_VALUE_FLAGS } from './xargs-options';
 
 export interface ShellSegment {
   /** The segment's text with quotes kept and comments and line continuations left out. */
@@ -21,6 +22,11 @@ export interface ShellSegment {
    * the brace-group rule for it.
    */
   readonly hereDocuments: readonly string[];
+  /**
+   * Whether each here-document's delimiter was quoted, so the shell expands nothing in its body.
+   * Parallel to `hereDocuments`.
+   */
+  readonly quotedHereDocuments: readonly boolean[];
   /**
    * The words are the ones the shell passes. False when an ANSI-C escape the scanner does not
    * decode keeps its `$'…'` text, or a clobber redirection hides the command.
@@ -63,21 +69,26 @@ interface HereDocument {
   readonly delimiter: string;
   /** `<<-`: tabs before the closing line are ignored. */
   readonly tabs: boolean;
+  /** Whether the delimiter was quoted or escaped. */
+  readonly quoted: boolean;
   /** The here-document bodies of the segment that reads it. */
   readonly into: string[];
+  /** One flag per body in `into`: whether its delimiter was quoted. */
+  readonly quotedInto: boolean[];
 }
 
 /** The delimiter of a here-document whose `<<` ends just before `at`, with quotes and escapes removed. */
 function hereDocumentDelimiter(
   command: string,
   at: number,
-): { delimiter: string; tabs: boolean } | null {
+): { delimiter: string; tabs: boolean; quoted: boolean } | null {
   let i = at;
   const tabs = command.charAt(i) === '-';
   if (tabs) i += 1;
   while (command.charAt(i) === ' ' || command.charAt(i) === '\t') i += 1;
   let delimiter = '';
   let quote: string | null = null;
+  let quoted = false;
   for (; i < command.length; i += 1) {
     const ch = command.charAt(i);
     if (quote !== null) {
@@ -85,7 +96,9 @@ function hereDocumentDelimiter(
       else delimiter += ch;
     } else if (ch === "'" || ch === '"') {
       quote = ch;
+      quoted = true;
     } else if (ch === '\\') {
+      quoted = true;
       delimiter += command.charAt(i + 1);
       i += 1;
     } else if (/[\s;&|<>()]/.test(ch)) {
@@ -94,7 +107,7 @@ function hereDocumentDelimiter(
       delimiter += ch;
     }
   }
-  return delimiter === '' ? null : { delimiter, tabs };
+  return delimiter === '' ? null : { delimiter, tabs, quoted };
 }
 
 /**
@@ -120,6 +133,7 @@ function readHereDocuments(command: string, at: number, pending: readonly HereDo
     }
     if (closing === -1) return resume;
     doc.into.push(command.slice(resume, line));
+    doc.quotedInto.push(doc.quoted);
     resume = closing + 1;
   }
   return resume;
@@ -171,6 +185,7 @@ function scan(command: string, from: number, substitution: boolean): Scan {
   let words: string[] = [];
   let nested: string[] = [];
   let hereDocuments: string[] = [];
+  let quotedHereDocuments: boolean[] = [];
   let quote: "'" | '"' | null = null;
   // The previous character, when it was neither quoted nor escaped.
   let lastPlain = '';
@@ -254,6 +269,7 @@ function scan(command: string, from: number, substitution: boolean): Scan {
         subshells,
         nested,
         hereDocuments,
+        quotedHereDocuments,
         wordsCertain,
         bracesCertain,
         outputForwarded: separator === '|' || processSubstitution,
@@ -269,6 +285,7 @@ function scan(command: string, from: number, substitution: boolean): Scan {
     words = [];
     nested = [];
     hereDocuments = [];
+    quotedHereDocuments = [];
     wordsCertain = true;
     bracesCertain = true;
     processSubstitution = false;
@@ -405,7 +422,7 @@ function scan(command: string, from: number, substitution: boolean): Scan {
       before !== '<'
     ) {
       const doc = hereDocumentDelimiter(command, i + 2);
-      if (doc) pending.push({ ...doc, into: hereDocuments });
+      if (doc) pending.push({ ...doc, into: hereDocuments, quotedInto: quotedHereDocuments });
       append('<<');
       i += 1;
       continue;
@@ -438,8 +455,12 @@ function scan(command: string, from: number, substitution: boolean): Scan {
     if (ch === '(') {
       if (before === '<' || before === '>') {
         i = substitute(i, i + 1);
-      } else if (raw.trim() === '') {
-        // `((` is arithmetic, where `<<` shifts instead of opening a here-document.
+      } else if (
+        raw.trim() === '' ||
+        (word === '' && words.length > 0 && words.every((w) => BEFORE_COMMAND.has(w)))
+      ) {
+        // A parenthesis where a command starts (after `do`, `then`, `&&` and the like) opens a
+        // subshell. `((` is arithmetic, where `<<` shifts instead of opening a here-document.
         if (next === '(') certain = false;
         flush('(');
         opened += 1;
@@ -539,7 +560,7 @@ const REDIRECTION_WORD = /^(?:\d+|&)?(?:<<<|<<-?|<>|<&|>>|>\||>&|<|>)/;
  * How many words a redirection at `at` takes: none when the word is not one, one when its target is
  * attached (`2>/dev/null`), two when the target is the next word (`> out`).
  */
-function redirectionSpan(words: readonly string[], at: number): number {
+export function redirectionSpan(words: readonly string[], at: number): number {
   const word = words[at] ?? '';
   const operator = REDIRECTION_WORD.exec(word);
   if (!operator) return 0;
@@ -596,7 +617,7 @@ const WRAPPERS: ReadonlyMap<string, Wrapper> = new Map([
   ['nohup', wrapper()],
   ['time', wrapper(['-f', '-o', '--format', '--output'])],
   ['exec', wrapper(['-a'])],
-  ['xargs', wrapper(['-n', '-I', '-P', '-L', '-s', '-d', '-E', '-a'])],
+  ['xargs', wrapper(XARGS_VALUE_FLAGS)],
 ]);
 
 /**
@@ -634,7 +655,12 @@ interface Prefixes {
   /** Where the command starts. */
   readonly at: number;
   /** The flags each wrapper was given, by the wrapper's name. */
-  readonly flags: readonly { readonly wrapper: string; readonly flag: string }[];
+  readonly flags: readonly {
+    readonly wrapper: string;
+    readonly flag: string;
+    /** The next word when the flag takes it as its value. */
+    readonly value: string | null;
+  }[];
   /**
    * With `skipRedirections`: a redirection follows a wrapper, where it may stand for a flag's
    * value, or a word holds a `<` or `>` that is not a redirection the guard reads.
@@ -653,7 +679,7 @@ function prefixes(
   lookThroughRunners: boolean,
   skipRedirections = false,
 ): Prefixes {
-  const flags: { wrapper: string; flag: string }[] = [];
+  const flags: { wrapper: string; flag: string; value: string | null }[] = [];
   const angled = (from: number, to: number): boolean =>
     skipRedirections && words.slice(from, to).some((w) => ANGLE.test(w));
   let wrappers = 0;
@@ -677,7 +703,7 @@ function prefixes(
         const flag = words[i] ?? '';
         const span = flagSpan(flag, wrapped.valueFlags);
         if (angled(i, i + span)) return { at: i, flags, hidden: true };
-        flags.push({ wrapper: name, flag });
+        flags.push({ wrapper: name, flag, value: span === 2 ? (words[i + 1] ?? null) : null });
         i += span;
       }
       if (angled(i, i + wrapped.positionals + 1)) return { at: i, flags, hidden: true };
@@ -687,6 +713,24 @@ function prefixes(
     }
   }
   return { at: i, flags, hidden: false };
+}
+
+/**
+ * The wrappers named `name` that run a command, how many there are and the flags each was given
+ * with their values. Looks through the same prefixes `stripCommandPrefixes` does.
+ */
+export function wrapperUse(
+  words: readonly string[],
+  name: string,
+): { readonly count: number; readonly flags: readonly { flag: string; value: string | null }[] } {
+  const found = prefixes(words, true, true);
+  const count = words
+    .slice(0, found.at)
+    .filter((word) => commandName(word) === name && WRAPPERS.has(name)).length;
+  return {
+    count,
+    flags: found.flags.filter((f) => f.wrapper === name),
+  };
 }
 
 /**

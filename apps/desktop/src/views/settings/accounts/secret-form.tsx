@@ -115,7 +115,7 @@ export function SecretForm({ account }: { readonly account: AccountDto }) {
           </Alert>
         ) : null}
         <Button type="submit" size="md" loading={state.kind === 'saving'}>
-          {account.secretSet ? 'Replace secret' : 'Save secret'}
+          {account.secretSet ? 'Replace Secret' : 'Save Secret'}
         </Button>
       </Stack>
     </form>
