@@ -51,10 +51,10 @@ function failingCargoDir(): string {
   return dir;
 }
 
-/** A directory holding a `cargo` and a `pnpm` that fail after printing `message`, as cargo does when its network is closed. */
+/** A directory holding a `cargo`, a `pnpm` and a `make` (CI's image has none) that fail after printing `message`, as cargo does when its network is closed. */
 function noisyCargoDir(message: string): string {
   const dir = mkdtempSync(join(tmpdir(), '10db-noisy-cargo-'));
-  for (const tool of ['cargo', 'pnpm']) {
+  for (const tool of ['cargo', 'pnpm', 'make']) {
     writeFileSync(join(dir, tool), `#!/bin/sh\necho '${message}' >&2\nexit 101\n`);
     chmodSync(join(dir, tool), 0o755);
   }
