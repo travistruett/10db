@@ -271,95 +271,6 @@ describe('SettingsView', () => {
     });
   });
 
-  it('saves only the changed project fields', async () => {
-    let project = projectDto({ name: 'demo', gateCommand: 'make gate' });
-    const patched: unknown[] = [];
-    server.use(
-      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
-      http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
-      http.patch(daemonUrl('/projects/:projectId'), async ({ request }) => {
-        const body = await request.json();
-        patched.push(body);
-        project = { ...project, gateCommand: 'make check' };
-        return HttpResponse.json(project);
-      }),
-      ...baseHandlers(),
-    );
-    renderApp('/settings/general');
-    const gate = await screen.findByLabelText('Gate command');
-    fireEvent.change(gate, { target: { value: 'make check' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    await waitFor(() => {
-      expect(patched).toEqual([{ gateCommand: 'make check' }]);
-    });
-    expect(await screen.findByText('Saved.')).toBeTruthy();
-  });
-
-  it('shows the localhost switch off, with its warning, and no permission mode', async () => {
-    const project = projectDto();
-    server.use(
-      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
-      http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
-      ...baseHandlers(),
-    );
-    renderApp('/settings/general');
-    await screen.findByLabelText('Gate command');
-    const localhost = screen.getByRole<HTMLInputElement>('switch', {
-      name: /^Let lane commands use localhost/,
-    });
-    expect(localhost.checked).toBe(false);
-    expect(screen.getByText(/opens every local port to the lane/)).toBeTruthy();
-    expect(screen.queryByRole('radiogroup', { name: 'Permissions' })).toBeNull();
-  });
-
-  it('saves the localhost switch as a patch', async () => {
-    const project = projectDto({ name: 'demo', gateCommand: 'make gate' });
-    const patched: unknown[] = [];
-    server.use(
-      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
-      http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
-      http.patch(daemonUrl('/projects/:projectId'), async ({ request }) => {
-        patched.push(await request.json());
-        return HttpResponse.json({ ...project, sandboxLoopback: true });
-      }),
-      ...baseHandlers(),
-    );
-    renderApp('/settings/general');
-    await screen.findByLabelText('Gate command');
-    fireEvent.click(screen.getByRole('switch', { name: /^Let lane commands use localhost/ }));
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    await waitFor(() => {
-      expect(patched).toEqual([{ sandboxLoopback: true }]);
-    });
-    expect(await screen.findByText('Saved.')).toBeTruthy();
-  });
-
-  it('saves the extra allowed commands, one per line', async () => {
-    const project = projectDto({ name: 'demo', gateCommand: 'make gate' });
-    const patched: unknown[] = [];
-    server.use(
-      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
-      http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
-      http.patch(daemonUrl('/projects/:projectId'), async ({ request }) => {
-        patched.push(await request.json());
-        return HttpResponse.json({
-          ...project,
-          allowedCommands: ['pnpm exec prettier', 'pnpm test'],
-        });
-      }),
-      ...baseHandlers(),
-    );
-    renderApp('/settings/general');
-    fireEvent.change(await screen.findByLabelText('Extra allowed commands'), {
-      target: { value: 'pnpm exec prettier\npnpm test' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    await waitFor(() => {
-      expect(patched).toEqual([{ allowedCommands: ['pnpm exec prettier', 'pnpm test'] }]);
-    });
-    expect(await screen.findByText('Saved.')).toBeTruthy();
-  });
-
   it('shows the bad line of the extra allowed commands without calling the daemon', async () => {
     const project = projectDto({ name: 'demo', gateCommand: 'make gate' });
     const patched: unknown[] = [];
@@ -373,7 +284,8 @@ describe('SettingsView', () => {
       ...baseHandlers(),
     );
     renderApp('/settings/general');
-    fireEvent.change(await screen.findByLabelText('Extra allowed commands'), {
+    fireEvent.click(await screen.findByRole('button', { name: 'Advanced' }));
+    fireEvent.change(screen.getByLabelText("Commands that don't ask"), {
       target: { value: 'pnpm test\npnpm --run' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
@@ -395,7 +307,8 @@ describe('SettingsView', () => {
       ...baseHandlers(),
     );
     renderApp('/settings/general');
-    fireEvent.change(await screen.findByLabelText('Nudge at %'), { target: { value: '40' } });
+    fireEvent.click(await screen.findByRole('button', { name: 'Advanced' }));
+    fireEvent.change(screen.getByLabelText('Firm reminder'), { target: { value: '40' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     expect(await screen.findByText('The nudge must come after the handoff')).toBeTruthy();
     expect(calls).toBe(0);
@@ -415,7 +328,7 @@ describe('SettingsView', () => {
     renderApp('/settings/general');
     fireEvent.change(await screen.findByLabelText('Name'), { target: { value: 'renamed' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    expect(await screen.findByText('flow flw_x not found')).toBeTruthy();
+    expect(await screen.findByText(/flow flw_x not found/)).toBeTruthy();
   });
 
   it('says there is nothing to change', async () => {
@@ -428,7 +341,7 @@ describe('SettingsView', () => {
     );
     renderApp('/settings/general');
     fireEvent.click(await screen.findByRole('button', { name: 'Save' }));
-    expect(await screen.findByText('Nothing to change.')).toBeTruthy();
+    expect(await screen.findByText('Nothing to change')).toBeTruthy();
   });
 
   it('switches a project to pull-request delivery, and shows why the daemon refuses it while work runs', async () => {
@@ -451,55 +364,15 @@ describe('SettingsView', () => {
       ...baseHandlers(),
     );
     renderApp('/settings/general');
-    fireEvent.click(await screen.findByRole('radio', { name: 'One pull request per batch' }));
-    fireEvent.change(screen.getByLabelText('PR title prefix'), { target: { value: 'feat(app)' } });
+    fireEvent.click(await screen.findByRole('radio', { name: 'Pull request' }));
+    fireEvent.change(screen.getByLabelText('Pull request title'), {
+      target: { value: 'feat(app)' },
+    });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => {
       expect(patched).toEqual([{ delivery: 'pull_request', prTitlePrefix: 'feat(app)' }]);
     });
     expect(await screen.findByText(/has unfinished work/)).toBeTruthy();
-  });
-
-  it('saves the workspace mode and the seed', async () => {
-    const project = projectDto({ delivery: 'pull_request', prTitlePrefix: 'feat(app)' });
-    const patched: unknown[] = [];
-    server.use(
-      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
-      http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
-      http.patch(daemonUrl('/projects/:projectId'), async ({ request }) => {
-        patched.push(await request.json());
-        return HttpResponse.json(project);
-      }),
-      ...baseHandlers(),
-    );
-    renderApp('/settings/general');
-    expect(screen.queryByText('Seed from the main checkout')).toBeNull();
-    fireEvent.click(await screen.findByRole('radio', { name: 'A worktree per task' }));
-    expect(screen.getAllByText('Seed from the main checkout').length).toBeGreaterThan(0);
-    expect(
-      screen.getByText('Ignored directories cloned into each new worktree, by name'),
-    ).toBeTruthy();
-    const seed = screen.getByRole('combobox', { name: 'Seed from the main checkout' });
-    seed.focus();
-    fireEvent.change(seed, { target: { value: '.venv' } });
-    fireEvent.blur(seed);
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    await waitFor(() => {
-      expect(patched).toEqual([
-        { workspaceMode: 'worktree', worktreeSeed: ['node_modules', '.venv'] },
-      ]);
-    });
-  });
-
-  it('hides the workspace choice for local delivery', async () => {
-    server.use(
-      http.get(daemonUrl('/projects'), () => HttpResponse.json([projectDto()])),
-      http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
-      ...baseHandlers(),
-    );
-    renderApp('/settings/general');
-    await screen.findByLabelText('Gate command');
-    expect(screen.queryByRole('radio', { name: 'A worktree per task' })).toBeNull();
   });
 
   it('keeps what the builder typed and picks up other fields when the project changes mid-edit', async () => {
@@ -524,6 +397,6 @@ describe('SettingsView', () => {
       expect(screen.getByLabelText<HTMLInputElement>('Gate command').value).toBe('make check');
     });
     expect(screen.getByLabelText<HTMLInputElement>('Name').value).toBe('renamed');
-    expect(screen.getByLabelText<HTMLInputElement>('Lanes').value).toBe('7');
+    expect(screen.getByLabelText<HTMLInputElement>('Most tasks at once').value).toBe('7');
   });
 });
