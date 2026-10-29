@@ -85,6 +85,12 @@ describe('which words the shell passes as exactly one word', () => {
       single: [true, false, false, true, true, true],
     },
     {
+      name: 'a zsh subscript on a bare name',
+      command: 'x "$a[@]" "$1[2]" "${a}[@]"',
+      words: ['x', '$a[@]', '$1[2]', '${a}[@]'],
+      single: [true, false, false, true],
+    },
+    {
       name: 'a glob',
       command: 'x * "*" \'*\' a?',
       words: ['x', '*', '*', '*', 'a?'],

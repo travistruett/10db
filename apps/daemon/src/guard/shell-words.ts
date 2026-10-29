@@ -163,6 +163,9 @@ function onlyOneWordExpansions(word: string): boolean {
     if (word.charAt(i) === '`' || word.charAt(i + 1) === '(') continue;
     const match = ONE_WORD_EXPANSION.exec(word.slice(i));
     if (match === null) return false;
+    // zsh reads `$a[@]` and `$a[(…)…]` as a subscript, which can give several words.
+    if (/^\$(?:[A-Za-z_]\w*|\d)$/.test(match[0]) && word.charAt(i + match[0].length) === '[')
+      return false;
     i += match[0].length - 1;
   }
   return true;
