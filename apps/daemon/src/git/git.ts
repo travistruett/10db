@@ -106,6 +106,18 @@ export type BranchMerge =
   /** Uncommitted changes or untracked files lie where the merge would write; nothing was written. */
   | { readonly kind: 'blocked'; readonly from: string; readonly paths: readonly string[] };
 
+/** Where `mergedCommit` keeps the commits it makes reachable. */
+const KEPT_REF_PREFIX = 'refs/10db/';
+
+export interface MergedCommitInput {
+  readonly repo: string;
+  readonly ours: string;
+  readonly theirs: string;
+  /** A ref under `refs/10db/` that keeps the commit reachable; it is set, whatever it held. */
+  readonly ref: string;
+  readonly message: string;
+}
+
 export interface MergeIntoBranchInput {
   /** The checkout that has `branch` checked out. */
   readonly repo: string;
@@ -184,6 +196,17 @@ export interface Git {
    * tree asks for a filter is refused, as a push of it would be.
    */
   mergeIntoBranch(input: MergeIntoBranchInput): Promise<BranchMerge>;
+  /**
+   * The commit that merges `theirs` into `ours`, as `mergeIntoBranch` would make it but unsigned and
+   * kept reachable at `ref` alone: no file, index, HEAD or branch is touched. `ours` when it already
+   * holds `theirs`, `theirs` when `ours` is in its history (both recording nothing), and null on a
+   * conflict.
+   */
+  mergedCommit(input: MergedCommitInput): Promise<string | null>;
+  /** True when commit `ancestor` is in the history of `tip`, `tip` itself included. */
+  isAncestor(repo: string, ancestor: string, tip: string): Promise<boolean>;
+  /** The blob `path` holds in commit `rev`, read from the object store; null for anything else. */
+  blobAt(repo: string, rev: string, path: string): Promise<string | null>;
   /**
    * Pins `candidate`, the state a refusal card showed the builder, if the checkout still matches it;
    * otherwise refuses again with what it found. The builder's choice only.
@@ -420,6 +443,9 @@ function readIfPresent(path: string): string {
  */
 export function createGit(opts: GitOptions = {}): Git {
   const locks = new Map<string, Promise<unknown>>();
+  // Fetches of one checkout run one at a time, apart from its commits: two at once would race for
+  // the same remote-tracking ref ("cannot lock ref"), and a fetch must not hold up a lane's commit.
+  const fetches = new Map<string, Promise<unknown>>();
   const pins = opts.pins ?? memoryPinStore();
   const bin = opts.bin ?? 'git';
 
@@ -429,15 +455,24 @@ export function createGit(opts: GitOptions = {}): Git {
     return error;
   }
 
-  /** Runs `fn` after every earlier locked call for the same checkout has settled. */
-  function withRepoLock<T>(repo: string, fn: () => Promise<T>): Promise<T> {
-    const previous = locks.get(repo) ?? Promise.resolve();
+  /** Runs `fn` after every earlier call under `key` in `held` has settled. */
+  function serialized<T>(
+    held: Map<string, Promise<unknown>>,
+    key: string,
+    fn: () => Promise<T>,
+  ): Promise<T> {
+    const previous = held.get(key) ?? Promise.resolve();
     const next = previous.then(fn, fn);
-    locks.set(
-      repo,
+    held.set(
+      key,
       next.catch(() => undefined),
     );
     return next;
+  }
+
+  /** Runs `fn` after every earlier locked call for the same checkout has settled. */
+  function withRepoLock<T>(repo: string, fn: () => Promise<T>): Promise<T> {
+    return serialized(locks, repo, fn);
   }
 
   /** Each checkout's empty tree, as an attribute source that gives git no attributes at all. */
@@ -676,6 +711,9 @@ export function createGit(opts: GitOptions = {}): Git {
     const out = await git(c, [
       'log',
       '--no-show-signature',
+      // The branch's own line: a base merged in can carry the trailers of the lane commits a
+      // squash-merged pull request folded in.
+      '--first-parent',
       '-n',
       String(OP_SEARCH_DEPTH),
       `--format=%H%x1f%(trailers:key=${OP_TRAILER},valueonly,separator=%x2c)%x1e`,
@@ -937,6 +975,94 @@ export function createGit(opts: GitOptions = {}): Git {
     }
   }
 
+  /**
+   * The tree that merges `theirs` into `ours`, and the files that conflict (none when it merged
+   * cleanly). merge-tree writes objects only: no file, index, ref or hook, and with no attributes no
+   * merge driver. It exits 1 on a conflict, listing the conflicted files after the tree.
+   */
+  async function mergeTree(
+    c: Pinned,
+    ours: string,
+    theirs: string,
+  ): Promise<{ tree: string; conflicted: string[] }> {
+    const [tree = '', ...conflicted] = (
+      await git(
+        c,
+        ['merge-tree', '--write-tree', '--name-only', '--no-messages', '-z', ours, theirs],
+        { answerExitCodes: [1] },
+      )
+    )
+      .split('\0')
+      .filter(Boolean);
+    if (!OBJECT_ID.test(tree)) throw new GitError(['merge-tree'], 'merge-tree named no tree', null);
+    return { tree, conflicted: [...new Set(conflicted)].sort() };
+  }
+
+  /**
+   * The git-ignored files and directories (as git lists them, a directory with its `/`) that writing
+   * `paths` would overwrite or delete: one at a written path, under one, or holding one. read-tree
+   * treats an ignored file as disposable, and a hand-made `.env` or a build directory is not.
+   */
+  async function ignoredInTheWay(c: Pinned, paths: readonly string[]): Promise<string[]> {
+    if (paths.length === 0) return [];
+    const ignored = (
+      await git(c, ['ls-files', '-z', '--others', '--ignored', '--exclude-standard', '--directory'])
+    )
+      .split('\0')
+      .filter(Boolean);
+    return ignored.filter((entry) => {
+      const at = entry.endsWith('/') ? entry.slice(0, -1) : entry;
+      return paths.some(
+        (path) => path === at || path.startsWith(`${at}/`) || at.startsWith(`${path}/`),
+      );
+    });
+  }
+
+  async function mergedCommit(input: MergedCommitInput): Promise<string | null> {
+    if (!input.ref.startsWith(KEPT_REF_PREFIX))
+      throw new InvalidError(`${input.ref} is not under ${KEPT_REF_PREFIX}`);
+    return withRepoLock(realpathSync(input.repo), async () => {
+      const c = await pinned(input.repo);
+      const ours = await revParse(c, `${input.ours}^{commit}`);
+      const theirs = await revParse(c, `${input.theirs}^{commit}`);
+      if (ours === null || theirs === null)
+        throw new InvalidError(`${ours === null ? input.ours : input.theirs} names no commit`);
+      if (await isAncestor(c, theirs, ours)) return ours;
+      if (await isAncestor(c, ours, theirs)) return theirs;
+      const { tree, conflicted } = await mergeTree(c, ours, theirs);
+      if (conflicted.length > 0) return null;
+      // Never pushed, so never signed.
+      const sha = (
+        await git(c, ['commit-tree', '--no-gpg-sign', tree, '-p', ours, '-p', theirs], {
+          input: `${input.message}\n`,
+        })
+      ).trim();
+      await git(c, ['update-ref', '--no-deref', '-m', '10db: kept merge', input.ref, sha]);
+      return sha;
+    });
+  }
+
+  /** One fetch of `branch` into `origin/<branch>`, from origin's pinned fetch URL. */
+  async function fetchOnce(repo: string, branch: string, net: NetworkCall): Promise<NetworkRun> {
+    const c = await pinned(repo);
+    const network = await networkConfig(c, net);
+    const url = await pinnedUrl(c, 'fetch');
+    return gitNetwork(
+      c.real,
+      network.config,
+      [
+        'fetch',
+        '--no-tags',
+        '--no-recurse-submodules',
+        '--',
+        url,
+        `+refs/heads/${branch}:refs/remotes/origin/${branch}`,
+      ],
+      net,
+      { bin, env: { ...c.env, ...network.env } },
+    );
+  }
+
   async function mergeIntoBranch(input: MergeIntoBranchInput): Promise<BranchMerge> {
     // Inside the checkout's lock, so no commit of the daemon's moves the branch meanwhile.
     return withRepoLock(realpathSync(input.repo), async () => {
@@ -959,21 +1085,8 @@ export function createGit(opts: GitOptions = {}): Git {
       const fastForward = await isAncestor(c, tip, from);
       let head = from;
       if (!fastForward) {
-        // merge-tree writes objects only: no file, index, ref or hook, and with no attributes no
-        // merge driver. It exits 1 on a conflict, listing the conflicted files after the tree.
-        const [tree = '', ...conflicted] = (
-          await git(
-            c,
-            ['merge-tree', '--write-tree', '--name-only', '--no-messages', '-z', tip, from],
-            { answerExitCodes: [1] },
-          )
-        )
-          .split('\0')
-          .filter(Boolean);
-        if (!OBJECT_ID.test(tree))
-          throw new GitError(['merge-tree'], 'merge-tree named no tree', null);
-        if (conflicted.length > 0)
-          return { kind: 'conflict', from, paths: [...new Set(conflicted)].sort() };
+        const { tree, conflicted } = await mergeTree(c, tip, from);
+        if (conflicted.length > 0) return { kind: 'conflict', from, paths: conflicted };
         const sign = signing(c, await configEntries(c));
         head = (
           await git(c, ['commit-tree', ...sign.flags, tree, '-p', tip, '-p', from], {
@@ -989,8 +1102,12 @@ export function createGit(opts: GitOptions = {}): Git {
         .filter(Boolean)
         .sort();
       const written = new Set(paths);
-      const inTheWay = (await changes(c)).filter((path) => written.has(path));
-      if (inTheWay.length > 0) return { kind: 'blocked', from, paths: inTheWay };
+      const inTheWay = [
+        ...(await changes(c)).filter((path) => written.has(path)),
+        ...(await ignoredInTheWay(c, paths)),
+      ];
+      if (inTheWay.length > 0)
+        return { kind: 'blocked', from, paths: [...new Set(inTheWay)].sort() };
       // Fresh stat data, so read-tree doesn't take an unchanged file for an edited one and refuse.
       await git(c, ['update-index', '-q', '--ignore-submodules', '--refresh']).catch(
         () => undefined,
@@ -1387,23 +1504,7 @@ export function createGit(opts: GitOptions = {}): Git {
       return pinnedUrl(await pinned(repo), 'push');
     },
     async fetch(repo, branch, net) {
-      const c = await pinned(repo);
-      const network = await networkConfig(c, net);
-      const url = await pinnedUrl(c, 'fetch');
-      return gitNetwork(
-        c.real,
-        network.config,
-        [
-          'fetch',
-          '--no-tags',
-          '--no-recurse-submodules',
-          '--',
-          url,
-          `+refs/heads/${branch}:refs/remotes/origin/${branch}`,
-        ],
-        net,
-        { bin, env: { ...c.env, ...network.env } },
-      );
+      return serialized(fetches, realpathSync(repo), () => fetchOnce(repo, branch, net));
     },
     async switchNewBranch(repo, name, startPoint) {
       await withRepoLock(realpathSync(repo), async () => {
@@ -1503,6 +1604,23 @@ export function createGit(opts: GitOptions = {}): Git {
     },
     commit,
     mergeIntoBranch,
+    mergedCommit,
+    async isAncestor(repo, ancestor, tip) {
+      return isAncestor(await pinned(repo), ancestor, tip);
+    },
+    async blobAt(repo, rev, path) {
+      const c = await pinned(repo);
+      const out = await git(c, ['ls-tree', '-z', '--long', '--full-tree', rev, '--', path], {
+        env: { GIT_LITERAL_PATHSPECS: '1' },
+      });
+      const entry = out
+        .split('\0')
+        .map((line) => LS_TREE_ENTRY.exec(line))
+        .find((match) => match?.[5] === path);
+      if (!entry) return null;
+      const [, mode = '', type, oid = ''] = entry;
+      return type === 'blob' && REGULAR_FILE_MODES.includes(mode) ? oid : null;
+    },
     addWorktree,
     removeWorktree,
     worktreeChanges,

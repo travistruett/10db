@@ -6,7 +6,7 @@ export { createGit, WorktreeNotOursError, type BranchMerge, type Git } from './g
 export { GitNetworkError, GitNetworkFailure, type NetworkCall } from './network';
 export { GIT_REPO_ENV_VARS, withoutGitRepoEnv } from './repo-env';
 export { GitError, XCODE_SELECTORS } from './run';
-export { trustCard, worktreeRemovalCommand } from './trust-card';
+export { trustCard, worktreeMergeCommand, worktreeRemovalCommand } from './trust-card';
 export { GitTrustError, GitTrustFailure } from './trust-error';
 export { firstExecutable, installCandidates, INSTALL_PREFIXES_TEXT } from './install-prefixes';
 export { GitVersionError, resolveGit } from './version';
