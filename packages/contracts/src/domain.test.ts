@@ -64,6 +64,34 @@ describe('a project with no gate command', () => {
   });
 });
 
+describe('a project with a changed-packages check command', () => {
+  const base = {
+    name: 'demo',
+    repoPath: '/tmp/demo',
+    gateCommand: 'make gate',
+    areas: [{ name: 'src', globs: ['src/**'] }],
+  };
+
+  it('ProjectInput defaults it to null and rejects an empty one', () => {
+    expect(ProjectInput.parse(base).changedCheckCommand).toBeNull();
+    expect(
+      ProjectInput.parse({ ...base, changedCheckCommand: 'make check-changed' })
+        .changedCheckCommand,
+    ).toBe('make check-changed');
+    expect(ProjectInput.safeParse({ ...base, changedCheckCommand: '' }).success).toBe(false);
+  });
+
+  it('ProjectPatch can set and clear it', () => {
+    expect(ProjectPatch.parse({ changedCheckCommand: 'make check-changed' })).toEqual({
+      changedCheckCommand: 'make check-changed',
+    });
+    expect(ProjectPatch.parse({ changedCheckCommand: null })).toEqual({
+      changedCheckCommand: null,
+    });
+    expect(ProjectPatch.safeParse({ changedCheckCommand: '' }).success).toBe(false);
+  });
+});
+
 describe('EvidenceDto', () => {
   const common = {
     id: mintId('Evidence'),

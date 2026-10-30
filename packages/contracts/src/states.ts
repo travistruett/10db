@@ -2,6 +2,8 @@ type ValueOf<T> = T[keyof T];
 
 export const WorkstreamState = {
   Queued: 'QUEUED',
+  /** A queued run the builder set aside before it ran: it keeps its batch and worktree and takes no lane. */
+  Held: 'HELD',
   Starting: 'STARTING',
   Running: 'RUNNING',
   HandingOff: 'HANDING_OFF',
@@ -59,6 +61,8 @@ export const BoardStatus = {
   Backlog: 'backlog',
   Ready: 'ready',
   InProgress: 'in_progress',
+  /** Shipped, with its pull request open: not done until the pull request merges. */
+  InReview: 'in_review',
   Blocked: 'blocked',
   Done: 'done',
 } as const;

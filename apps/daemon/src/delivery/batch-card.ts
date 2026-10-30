@@ -52,15 +52,19 @@ export function batchCardFields(row: {
  * promises a ship, and reopening is the strip's Retry.
  */
 export function createBatchCardAnswers(deps: {
-  readonly retry: (id: WorkstreamId) => void;
+  /** Retries the workstream; `note` is the builder's, for the session the retry sends the work to. */
+  readonly retry: (id: WorkstreamId, note?: string) => void;
   readonly shipper: Pick<Shipper, 'shipAnyway'>;
 }): (item: InboxItemDto, answer: InboxAnswer) => void {
   return (item, answer) => {
     // The detail is JSON read back from the database: a boundary, so parse it.
     const card = BatchCardDetail.safeParse(item.detail?.[BATCH_CARD_DETAIL]);
     if (!card.success) return;
-    if (answer.choice === BatchCardChoice.Retry) deps.retry(card.data.workstreamId);
-    else if (answer.choice === BatchCardChoice.ShipAnyway)
+    if (answer.choice === BatchCardChoice.Retry) {
+      const note = answer.note?.trim();
+      if (note) deps.retry(card.data.workstreamId, note);
+      else deps.retry(card.data.workstreamId);
+    } else if (answer.choice === BatchCardChoice.ShipAnyway)
       deps.shipper.shipAnyway(card.data.batchId);
     // Later, or a label the inbox's own option check refuses next: nothing to do.
   };

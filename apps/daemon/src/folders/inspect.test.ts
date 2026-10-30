@@ -172,7 +172,29 @@ describe('inspectFolder on a repository', () => {
       defaultBranch: 'main',
       github: 'acme/widgets',
       gateCandidates: [],
+      registryHosts: [],
     });
+  });
+
+  it('lists the hosts the root’s files name, read from the repository root', async () => {
+    const repo = track(createTempRepo());
+    const asked: string[] = [];
+    const result = await inspectFolder(
+      {
+        git: git(),
+        projects: [],
+        protectedRoots: [],
+        registryHosts: (root) => {
+          asked.push(root);
+          return Promise.resolve([{ host: 'index.crates.io', file: 'Cargo.lock' }]);
+        },
+      },
+      join(repo.path),
+    );
+    expect(accepted(result).registryHosts).toEqual([
+      { host: 'index.crates.io', file: 'Cargo.lock' },
+    ]);
+    expect(asked).toEqual([realpathSync(repo.path)]);
   });
 
   it('answers a subfolder with the root', async () => {

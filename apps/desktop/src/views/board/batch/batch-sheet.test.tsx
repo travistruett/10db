@@ -192,6 +192,21 @@ describe('BatchSheet', () => {
     expect(within(sheet).queryByText(/10db runs/)).toBeNull();
   });
 
+  it('names the changed-packages check for each step and the gate for the push', async () => {
+    serve(
+      projectViewDto({
+        ...local,
+        gateCommand: 'make gate',
+        changedCheckCommand: 'make check-changed',
+      }),
+    );
+    const sheet = await openSheet();
+    const line = await within(sheet).findByText(/Verification: 10db runs/);
+    expect(line.textContent).toBe(
+      'Verification: 10db runs make check-changed after each implement step, and make gate before the push, and review steps must approve.',
+    );
+  });
+
   it('starts tasks in worktrees with one request', async () => {
     const sent = serve(
       projectViewDto({

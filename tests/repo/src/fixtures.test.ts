@@ -70,7 +70,8 @@ describe('createThrowawayRepo', () => {
     expect(failure).toBeUndefined();
     expect(repo?.gitOutput('config', 'core.bare')).toBe('false');
     expect(origin?.gitOutput('log', '--format=%s', 'feat/x')).toBe('chore(repo): first');
-  });
+    // About a dozen git processes; under a loaded gate they outrun vitest's 5s default.
+  }, 30_000);
 
   // Git can leave a detached `git maintenance run --auto` writing objects/maintenance.lock after a
   // commit returns, which a snapshot of .git then trips over or records as a change.

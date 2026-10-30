@@ -1,6 +1,11 @@
-import { cleanup } from '@testing-library/react';
+import { cleanup, configure } from '@testing-library/react';
 import { afterAll, afterEach, beforeAll } from 'vitest';
 import { server } from './daemon';
+
+// findBy* and waitFor give up after 1 s by default, which a busy Mac misses: the gate runs beside
+// other lanes and Docker. A passing query returns as soon as it matches, so a long deadline costs
+// an idle run nothing; only a real failure waits it out.
+configure({ asyncUtilTimeout: 10_000 });
 
 beforeAll(() => {
   // MSW 3 renamed onUnhandledRequest to onUnhandledFrame; it covers requests and WebSocket connections.
