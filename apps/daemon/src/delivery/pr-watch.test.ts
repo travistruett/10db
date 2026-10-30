@@ -80,21 +80,22 @@ const prEvents = (id: BatchId) =>
       JSON.stringify(e.data) === JSON.stringify({ changed: ['pr'] }),
   );
 
-/** h.gh, except that the prStatus call numbered `n` (from 1) fails with `error`. */
-function failingCall(n: number, error: GhError): Gh {
-  let count = 0;
-  return {
-    authStatus: () => h.gh.authStatus(),
-    authLogin: () => h.gh.authLogin(),
-    prView: (input) => h.gh.prView(input),
-    prCreate: (input) => h.gh.prCreate(input),
-    prStatus: (input) => {
-      count += 1;
-      return count === n ? Promise.reject(error) : h.gh.prStatus(input);
-    },
-  };
-}
 const polls = () => h.gh.calls.filter((c) => c.method === 'prStatus').length;
+/** How many times gh was asked for this pull request's status. */
+const reads = (prUrl: string) =>
+  h.gh.calls.filter(
+    (c) => c.method === 'prStatus' && (c.args as { readonly ref: string }).ref === prUrl,
+  ).length;
+const TIMEOUT = 'gh pr view gave no answer within 120 s';
+/** The inbox refuses every new card from now on, as a full disk would. */
+const refuseCards = () => {
+  h.store.db.$client.exec(
+    "CREATE TRIGGER refuse_cards BEFORE INSERT ON inbox_items BEGIN SELECT RAISE(ABORT, 'disk full'); END",
+  );
+};
+const allowCards = () => {
+  h.store.db.$client.exec('DROP TRIGGER refuse_cards');
+};
 const round = async (w: PrWatch, ms = INTERVAL) => {
   clock.advance(ms);
   await w.idle();
@@ -342,6 +343,34 @@ describe('the pull request watch', () => {
     expect(h.cards()).toEqual([]);
   });
 
+  it('counts only reads gh answered toward the two reads of none', async () => {
+    setup();
+    const { id, prUrl } = shipped(h.project.id, 'Alpha');
+    h.gh.setChecks(prUrl, [run('lint', 'FAILURE')]);
+    const w = watcher();
+    w.start();
+    await w.idle();
+    const card = h.only(h.cards());
+    const checksCard = () => findOpenByFoldKey(h.store.db, h.project.id, `pr-checks:${id}`);
+
+    h.gh.setChecks(prUrl, []);
+    await round(w);
+    expect(pr(id)).toMatchObject({ checks: 'none' });
+
+    // Offline: the read keeps the last known checks, none, but it is not a second read of none.
+    h.gh.failNext.set('prStatus', new GhError('timeout', TIMEOUT));
+    await round(w);
+    expect(pr(id)).toMatchObject({ state: 'unknown', checks: 'none' });
+    expect(checksCard()?.id).toBe(card.id);
+
+    // The new run fails: still the one card, and gh answered, so its card goes.
+    h.gh.setChecks(prUrl, [
+      run('lint', 'FAILURE', 'https://github.com/acme/widgets/actions/runs/lint-2'),
+    ]);
+    await round(w);
+    expect(h.only(h.cards()).id).toBe(card.id);
+  });
+
   it('records unknown checks for a rollup entry 10db cannot read, without a card, and reads on', async () => {
     setup();
     const a = shipped(h.project.id, 'Alpha');
@@ -415,7 +444,8 @@ describe('gh unavailable', () => {
     expect(card.projectId).toBe(h.project.id);
     expect(card.body).toContain('gh auth login');
     expect(card.body).toContain('unknown');
-    expect(card.detail).toMatchObject({ batchId: a.id, prUrl: a.prUrl });
+    // No link: the desktop's Open on GitHub would open one pull request, which says nothing about gh.
+    expect(card.detail).toEqual({ batchId: a.id, prUrl: a.prUrl });
 
     await round(w);
     expect(polls()).toBe(2);
@@ -443,6 +473,14 @@ describe('gh unavailable', () => {
       name: 'a timeout',
       error: new GhError('timeout', 'gh pr view gave no answer within 120 s'),
       says: "gh couldn't reach GitHub: gh pr view gave no answer within 120 s",
+    },
+    {
+      name: 'out of reach of GitHub',
+      error: new GhError(
+        'unreachable',
+        'gh pr view failed (exit 1): error connecting to api.github.com',
+      ),
+      says: "gh couldn't reach GitHub: gh pr view failed (exit 1): error connecting to api.github.com",
     },
   ])('says what to do when gh is $name', async ({ error, says }) => {
     setup();
@@ -502,40 +540,125 @@ describe('gh unavailable', () => {
     expect(h.cards()).toHaveLength(1);
   });
 
-  it('keeps the gh card open after a round where one call answered and a later one failed', async () => {
+  it("keeps reading the other pull requests while one pull request's read fails every time", async () => {
     setup();
     const a = shipped(h.project.id, 'Alpha');
     const b = shipped(h.project.id, 'Beta');
-    const w = watcher({ ...h.ctx, gh: failingCall(2, new GhError('failed', 'HTTP 502')) });
+    h.gh.setChecks(b.prUrl, [run('build', 'SUCCESS')]);
+    // gh fails for this pull request alone, round after round; it is the oldest, so it is read first.
+    const saml =
+      'gh pr view failed (exit 1): GraphQL: Resource protected by organization SAML enforcement. (repository)';
+    h.gh.failRead.set(a.prUrl, new GhError('failed', saml));
+    const w = watcher();
     w.start();
     await w.idle();
-    expect(pr(a.id)).toMatchObject({ state: 'open' });
-    expect(pr(b.id)).toMatchObject({ state: 'unknown', unknownReason: 'HTTP 502' });
-    const card = h.only(h.cards());
-    expect(card.body).toContain("gh couldn't reach GitHub: HTTP 502");
+    for (let i = 0; i < 3; i += 1) await round(w);
 
-    // A later round where every call answers withdraws it.
-    await round(w);
-    expect(pr(b.id)).toMatchObject({ state: 'open' });
+    expect(reads(b.prUrl)).toBe(4);
+    expect(pr(b.id)).toMatchObject({ state: 'open', checks: 'passing', unknownReason: null });
+    expect(pr(a.id)).toMatchObject({ state: 'unknown', unknownReason: saml });
+    // gh answered for Beta, so gh itself works: no gh card.
     expect(h.cards()).toEqual([]);
   });
 
-  it('leaves an open gh card alone while a round half answers', async () => {
+  it('withdraws the gh card once gh answers, though one pull request still fails on its own', async () => {
     setup();
     const a = shipped(h.project.id, 'Alpha');
     const b = shipped(h.project.id, 'Beta');
     h.gh.auth = 'signed_out';
-    // Call 1 is signed out; call 3 (Beta in the second round) fails after Alpha answered.
-    const w = watcher({ ...h.ctx, gh: failingCall(3, new GhError('failed', 'HTTP 502')) });
+    const w = watcher();
     w.start();
     await w.idle();
     expect(h.cards()).toHaveLength(1);
 
     h.gh.auth = 'ok';
+    h.gh.failRead.set(b.prUrl, new GhError('failed', 'HTTP 502'));
     await round(w);
-    expect(pr(a.id)).toMatchObject({ state: 'open' });
-    expect(pr(b.id)).toMatchObject({ state: 'unknown' });
+    expect(pr(a.id)).toMatchObject({ state: 'open', unknownReason: null });
+    expect(pr(b.id)).toMatchObject({ state: 'unknown', unknownReason: 'HTTP 502' });
+    expect(h.cards()).toEqual([]);
+
+    h.gh.failRead.delete(b.prUrl);
+    await round(w);
+    expect(pr(b.id)).toMatchObject({ state: 'open', unknownReason: null });
+  });
+
+  it.each([
+    { name: 'is not installed', error: new GhError('not_installed', 'no gh') },
+    { name: 'gives no answer in time', error: new GhError('timeout', TIMEOUT) },
+    {
+      name: 'cannot reach GitHub',
+      error: new GhError(
+        'unreachable',
+        'gh pr view failed (exit 1): Post "https://api.github.com/graphql": dial tcp 140.82.112.6:443: i/o timeout',
+      ),
+    },
+  ])('ends the round at the first read when gh $name', async ({ error }) => {
+    setup();
+    const a = shipped(h.project.id, 'Alpha');
+    const b = shipped(h.project.id, 'Beta');
+    h.gh.failNext.set('prStatus', error);
+    const w = watcher();
+    w.start();
+    await w.idle();
+    // Every later read would fail the same way, or wait as long: one is enough.
+    expect(polls()).toBe(1);
+    for (const x of [a, b])
+      expect(pr(x.id)).toMatchObject({ state: 'unknown', unknownReason: error.message });
     expect(h.cards()).toHaveLength(1);
+  });
+
+  it('raises one gh card when no read in a round answers, after asking for every pull request', async () => {
+    setup();
+    const second = seedProject(h.store, { delivery: 'pull_request' });
+    const a = shipped(h.project.id, 'Alpha');
+    const b = shipped(second.id, 'Beta');
+    // GitHub fails every read, as in an outage. gh reached it, so each is a read of its own.
+    const outage =
+      'gh pr view failed (exit 1): HTTP 502: Bad Gateway (https://api.github.com/graphql)';
+    for (const x of [a, b]) h.gh.failRead.set(x.prUrl, new GhError('failed', outage));
+    const w = watcher();
+    w.start();
+    await w.idle();
+
+    expect(polls()).toBe(2);
+    for (const x of [a, b])
+      expect(pr(x.id)).toMatchObject({ state: 'unknown', unknownReason: outage });
+    const card = h.only(h.cards());
+    expect(card.projectId).toBe(h.project.id);
+    expect(card.body).toContain(`gh couldn't reach GitHub: ${outage}`);
+
+    h.gh.failRead.clear();
+    await round(w);
+    expect(pr(b.id)).toMatchObject({ state: 'open' });
+    expect(h.cards()).toEqual([]);
+  });
+
+  it('starts the next round after the read that ended the last, so one that always times out holds up no other', async () => {
+    setup();
+    const a = shipped(h.project.id, 'Alpha');
+    const b = shipped(h.project.id, 'Beta');
+    const c = shipped(h.project.id, 'Gamma');
+    h.gh.failRead.set(a.prUrl, new GhError('timeout', TIMEOUT));
+    const w = watcher();
+    w.start();
+    await w.idle();
+    // A timeout ends the round: offline, every read would wait as long.
+    expect(polls()).toBe(1);
+    for (const x of [a, b, c])
+      expect(pr(x.id)).toMatchObject({ state: 'unknown', unknownReason: TIMEOUT });
+
+    await round(w);
+    expect(polls()).toBe(4);
+    expect(pr(b.id)).toMatchObject({ state: 'open', unknownReason: null });
+    expect(pr(c.id)).toMatchObject({ state: 'open', unknownReason: null });
+    expect(pr(a.id)).toMatchObject({ state: 'unknown', unknownReason: TIMEOUT });
+    // A read that times out is what gh being offline looks like, so the gh card stays.
+    expect(h.only(h.cards()).body).toContain(`gh couldn't reach GitHub: ${TIMEOUT}`);
+
+    await round(w);
+    expect(reads(b.prUrl)).toBe(2);
+    expect(reads(c.prUrl)).toBe(2);
   });
 
   it('withdraws the gh card in its own project after that project has no pull request left to read', async () => {
@@ -543,21 +666,23 @@ describe('gh unavailable', () => {
     const second = seedProject(h.store, { delivery: 'pull_request' });
     const a = shipped(h.project.id, 'Alpha');
     const b = shipped(second.id, 'Beta');
-    h.gh.auth = 'signed_out';
-    // Call 1 is Alpha signed out; call 3 is Beta in round 2, after Alpha answered merged.
-    const w = watcher({ ...h.ctx, gh: failingCall(3, new GhError('failed', 'HTTP 502')) });
+    for (const x of [a, b]) h.gh.failRead.set(x.prUrl, new GhError('failed', 'HTTP 502'));
+    const w = watcher();
     w.start();
     await w.idle();
     expect(h.only(h.cards()).projectId).toBe(h.project.id);
 
-    h.gh.auth = 'ok';
+    // Alpha answers merged; Beta's read times out, which keeps the card open.
+    h.gh.failRead.delete(a.prUrl);
     h.gh.setState(a.prUrl, 'MERGED');
+    h.gh.failRead.set(b.prUrl, new GhError('timeout', TIMEOUT));
     await round(w);
     expect(pr(a.id)).toMatchObject({ state: 'merged' });
-    expect(pr(b.id)).toMatchObject({ state: 'unknown', unknownReason: 'HTTP 502' });
+    expect(pr(b.id)).toMatchObject({ state: 'unknown', unknownReason: TIMEOUT });
     expect(h.cards()).toHaveLength(1);
 
     // Only Beta is read now, in the second project; gh answers, so the card in the first goes.
+    h.gh.failRead.delete(b.prUrl);
     await round(w);
     expect(pr(b.id)).toMatchObject({ state: 'open', unknownReason: null });
     expect(h.cards()).toEqual([]);
@@ -574,29 +699,30 @@ describe('gh unavailable', () => {
     const a = shipped(h.project.id, 'Alpha');
     const b = shipped(second.id, 'Beta');
     const c = shipped(second.id, 'Gamma');
-    h.gh.auth = 'signed_out';
-    // Call 1 is Alpha signed out; in round 2 Alpha merges (2), Beta answers (3), Gamma fails (4).
-    const w = watcher({ ...h.ctx, gh: failingCall(4, new GhError('failed', 'HTTP 502')) });
+    for (const x of [a, b, c]) h.gh.failRead.set(x.prUrl, new GhError('failed', 'HTTP 502'));
+    const w = watcher();
     w.start();
     await w.idle();
     expect(h.only(h.cards()).projectId).toBe(h.project.id);
 
-    h.gh.auth = 'ok';
+    // Alpha merges and Beta answers; Gamma's read times out, which keeps the card open.
+    h.gh.failRead.clear();
     h.gh.setState(a.prUrl, 'MERGED');
+    h.gh.failRead.set(c.prUrl, new GhError('timeout', TIMEOUT));
     await round(w);
     expect(pr(a.id)).toMatchObject({ state: 'merged' });
     expect(pr(b.id)).toMatchObject({ state: 'open' });
     expect(pr(c.id)).toMatchObject({ state: 'unknown' });
     expect(h.cards()).toHaveLength(1);
 
-    // Only the second project is read now; Beta goes unknown, and the first project's card stays
+    // Only the second project is read now; gh is signed out, and the first project's card stays
     // the one card, saying how gh fails now.
-    h.gh.failNext.set('prStatus', new GhError('failed', 'HTTP 503'));
+    h.gh.auth = 'signed_out';
     await round(w);
-    expect(pr(b.id)).toMatchObject({ state: 'unknown', unknownReason: 'HTTP 503' });
+    expect(pr(b.id)).toMatchObject({ state: 'unknown', unknownReason: 'gh is not signed in' });
     const card = h.only(h.cards());
     expect(card.projectId).toBe(h.project.id);
-    expect(card.body).toContain("gh couldn't reach GitHub: HTTP 503");
+    expect(card.title).toBe('Pull request status unknown: gh is signed out');
   });
 
   it('does not raise a dismissed failing-checks card again after an offline round', async () => {
@@ -677,6 +803,38 @@ describe('restart and stop', () => {
     h.inbox.withdraw(card.id);
     await round(second);
     expect(h.cards()).toEqual([]);
+  });
+
+  it('stores a status only with its card, so a card that could not be written comes with the next read', async () => {
+    setup();
+    const { id, prUrl } = shipped(h.project.id, 'Alpha');
+    h.gh.setChecks(prUrl, [run('build', 'FAILURE')]);
+    refuseCards();
+    const w = watcher();
+    w.start();
+    await w.idle();
+    expect(pr(id)).toBeNull();
+
+    allowCards();
+    await round(w);
+    expect(pr(id)).toMatchObject({ checks: 'failing' });
+    expect(h.only(h.cards()).title).toBe('Pull request checks failed for "Alpha": build');
+  });
+
+  it('stores the unknown statuses gh left only with the gh card', async () => {
+    setup();
+    const { id } = shipped(h.project.id, 'Alpha');
+    h.gh.auth = 'signed_out';
+    refuseCards();
+    const w = watcher();
+    w.start();
+    await w.idle();
+    expect(pr(id)).toBeNull();
+
+    allowCards();
+    await round(w);
+    expect(pr(id)).toMatchObject({ state: 'unknown', unknownReason: 'gh is not signed in' });
+    expect(h.only(h.cards()).title).toBe('Pull request status unknown: gh is signed out');
   });
 
   it('stop aborts the call in flight, records nothing and leaves no timer', async () => {

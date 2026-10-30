@@ -23,6 +23,11 @@ export class FakeGh implements Gh {
   repo = 'acme/widgets';
   /** One error per method, thrown by its next call only. */
   readonly failNext = new Map<GhMethod, GhError>();
+  /**
+   * Status reads of these pull request urls fail with their error, call after call, until removed:
+   * a pull request gh can't read while it reads the others.
+   */
+  readonly failRead = new Map<string, GhError>();
   readonly calls: { readonly method: GhMethod; readonly args: unknown }[] = [];
   private readonly byRef = new Map<
     string,
@@ -35,7 +40,8 @@ export class FakeGh implements Gh {
   >();
   private next = 1;
 
-  private call<T>(method: GhMethod, args: unknown, answer: () => T): Promise<T> {
+  /** `fails` is this call's own failure, after gh's: a signed-out gh fails every call the same way. */
+  private call<T>(method: GhMethod, args: unknown, answer: () => T, fails?: GhError): Promise<T> {
     this.calls.push({ method, args });
     const queued = this.failNext.get(method);
     if (queued) {
@@ -46,6 +52,7 @@ export class FakeGh implements Gh {
       return Promise.reject(new GhError('not_installed', 'gh is not installed'));
     if (this.auth === 'signed_out')
       return Promise.reject(new GhError('signed_out', 'gh is not signed in'));
+    if (fails) return Promise.reject(fails);
     return Promise.resolve(answer());
   }
 
@@ -77,10 +84,15 @@ export class FakeGh implements Gh {
     readonly repo: string;
     readonly ref: string;
   }): Promise<PullRequestStatus | null> {
-    return this.call('prStatus', input, () => {
-      const found = this.byRef.get(input.ref);
-      return found ? { ...found.pr, ...summariseChecks(found.rollup) } : null;
-    });
+    return this.call(
+      'prStatus',
+      input,
+      () => {
+        const found = this.byRef.get(input.ref);
+        return found ? { ...found.pr, ...summariseChecks(found.rollup) } : null;
+      },
+      this.failRead.get(input.ref),
+    );
   }
 
   prCreate(input: {

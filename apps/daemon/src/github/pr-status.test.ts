@@ -219,6 +219,72 @@ describe('Gh.prStatus', () => {
     await expect(gh.prStatus(INPUT, CALL)).resolves.toBeNull();
   });
 
+  // gh looks a URL up by number and prints GitHub's GraphQL error as it came (go-gh's GraphQLError:
+  // "GraphQL: <message> (<path>)"); "no pull requests found" is only its branch lookup's wording.
+  it.each([
+    [
+      'the pull request',
+      'GraphQL: Could not resolve to a PullRequest with the number of 8. (repository.pullRequest)',
+    ],
+    [
+      'its repository, deleted or closed to the account',
+      "GraphQL: Could not resolve to a Repository with the name 'acme/widgets'. (repository)",
+    ],
+  ])('answers null when GitHub cannot find %s', async (_name, stderr) => {
+    const { gh } = view({ exitCode: 1, stderr });
+    await expect(gh.prStatus(INPUT, CALL)).resolves.toBeNull();
+  });
+
+  // gh prints its own line for a DNS failure and Go's error text for any other network failure.
+  it.each([
+    [
+      'a DNS failure',
+      'error connecting to api.github.com\ncheck your internet connection or https://githubstatus.com',
+    ],
+    [
+      'a connection that timed out',
+      'Post "https://api.github.com/graphql": dial tcp 140.82.112.6:443: i/o timeout',
+    ],
+    [
+      'a refused connection',
+      'Post "https://api.github.com/graphql": dial tcp 140.82.112.6:443: connect: connection refused',
+    ],
+    [
+      'a TLS handshake that timed out',
+      'Post "https://api.github.com/graphql": net/http: TLS handshake timeout',
+    ],
+  ])('fails as unreachable on %s', async (_name, stderr) => {
+    const { gh } = view({ exitCode: 1, stderr });
+    await expect(gh.prStatus(INPUT, CALL)).rejects.toMatchObject({
+      name: 'GhError',
+      kind: 'unreachable',
+      message: `gh pr view failed (exit 1): ${stderr}`,
+    });
+  });
+
+  it('fails on a GitHub server error as an answer, not as unreachable', async () => {
+    const { gh } = view({
+      exitCode: 1,
+      stderr: 'HTTP 502: Bad Gateway (https://api.github.com/graphql)',
+    });
+    await expect(gh.prStatus(INPUT, CALL)).rejects.toMatchObject({
+      name: 'GhError',
+      kind: 'failed',
+    });
+  });
+
+  it('fails on any other GitHub error', async () => {
+    const { gh } = view({
+      exitCode: 1,
+      stderr:
+        'GraphQL: Resource protected by organization SAML enforcement. You must grant your OAuth token access to this organization. (repository)',
+    });
+    await expect(gh.prStatus(INPUT, CALL)).rejects.toMatchObject({
+      name: 'GhError',
+      kind: 'failed',
+    });
+  });
+
   it('is signed out on exit 4', async () => {
     const { gh } = view({ exitCode: 4 });
     await expect(gh.prStatus(INPUT, CALL)).rejects.toMatchObject({

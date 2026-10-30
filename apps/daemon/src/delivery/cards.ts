@@ -78,6 +78,7 @@ function ghCard(prefix: string, error: unknown, then: string): Card | null {
       };
     case 'timeout':
     case 'aborted':
+    case 'unreachable':
     case 'failed':
       return null;
   }
@@ -570,10 +571,13 @@ export const prCards = {
       detail: prDetail(batch, prUrl),
     };
   },
-  /** `batch` is the first one whose status turned unknown. */
+  /**
+   * `batch` is the first one whose status turned unknown. The card has no `detail.link`: the desktop
+   * would offer to open that one pull request, and no page there says why gh fails.
+   */
   ghUnavailable: (batch: BatchDto, error: unknown): Card => ({
     ...prCards.ghUnavailableText(error),
-    detail: prDetail(batch, batch.prUrl ?? ''),
+    detail: { batchId: batch.id, prUrl: batch.prUrl },
   }),
   /** The gh card without its detail: what an open one is rewritten with when gh fails another way. */
   ghUnavailableText: (error: unknown): Card => {

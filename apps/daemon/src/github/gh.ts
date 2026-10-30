@@ -23,6 +23,8 @@ export const GhFailure = {
   SignedOut: 'signed_out',
   Timeout: 'timeout',
   Aborted: 'aborted',
+  /** gh ran but never reached GitHub: no DNS, no route, or a connection refused or timed out. */
+  Unreachable: 'unreachable',
   Failed: 'failed',
 } as const;
 export type GhFailure = (typeof GhFailure)[keyof typeof GhFailure];
@@ -65,7 +67,10 @@ export interface Gh {
     input: { readonly repo: string; readonly ref: string },
     call: GhCall,
   ): Promise<PullRequest | null>;
-  /** The pull request's state and checks, or null when there is none. */
+  /**
+   * The pull request's state and checks, or null when GitHub has none there for this account: none
+   * at that number, or its repository is gone or closed to the account.
+   */
   prStatus(
     input: { readonly repo: string; readonly ref: string },
     call: GhCall,
@@ -94,7 +99,20 @@ export type GhExec = (args: readonly string[], call: GhCall) => Promise<GhOutput
 /** gh's documented exit code for "authentication required". */
 const AUTH_REQUIRED_EXIT = 4;
 const NO_PR = /no pull requests found/i;
+/**
+ * GitHub's own answer that a pull request named by URL or number isn't there for this account: gh
+ * looks it up by number and prints the GraphQL error as it came, `GraphQL: Could not resolve to a
+ * PullRequest with the number of 8. (repository.pullRequest)`, or `... to a Repository with the name
+ * 'owner/name'. (repository)` when the repository is gone or closed to the account.
+ */
+const PR_NOT_FOUND = /could not resolve to a (pullrequest|repository)\b/i;
 const SIGNED_OUT = /gh auth login|not logged in/i;
+/**
+ * gh's words when it never reached GitHub: its own line for a DNS failure, or the network error Go
+ * gave it (`dial tcp ...: i/o timeout`, `connection refused`, a TLS handshake that timed out).
+ */
+const UNREACHABLE =
+  /error connecting to|check your internet connection|dial (tcp|udp)|i\/o timeout|connection (refused|reset)|network is unreachable|no route to host|no such host|tls handshake timeout|client\.timeout exceeded/i;
 const MAX_OUTPUT = 4 * 1024 * 1024;
 /** Prompts are off whatever the environment says: nobody can answer one. */
 const NO_PROMPTS = {
@@ -302,7 +320,7 @@ function failure(args: readonly string[], out: GhOutput): GhError {
       'gh is not signed in. Run gh auth login in a terminal.',
     );
   return new GhError(
-    GhFailure.Failed,
+    UNREACHABLE.test(out.stderr) ? GhFailure.Unreachable : GhFailure.Failed,
     `gh ${args.slice(0, 2).join(' ')} failed (exit ${String(out.exitCode)}): ${out.stderr.trim().slice(0, 500)}`,
   );
 }
@@ -376,7 +394,8 @@ export function createGh(exec: GhExec): Gh {
     async prStatus({ repo, ref }, call) {
       const args = ['pr', 'view', ref, '-R', repo, '--json', 'url,state,statusCheckRollup'];
       const out = await exec(args, call);
-      if (out.exitCode !== 0 && NO_PR.test(out.stderr)) return null;
+      if (out.exitCode !== 0 && (NO_PR.test(out.stderr) || PR_NOT_FOUND.test(out.stderr)))
+        return null;
       if (out.exitCode !== 0) throw failure(args, out);
       const view = parseOutput(PrStatusView, args, out.stdout);
       return { url: view.url, state: view.state, ...summariseChecks(view.statusCheckRollup ?? []) };
