@@ -329,7 +329,8 @@ export interface Git {
   /**
    * The tracked files of HEAD and the files of its latest `maxCommits` commits, read from the object
    * store as `inspect` reads: unpinned, nothing written, no refusal reaches `onRefused`. Git runs no
-   * program the repository configures: only plumbing and `log` with no external diff or textconv.
+   * program the repository configures: only plumbing and `log` with no external diff, no textconv
+   * and no signature check.
    */
   survey(path: string, maxCommits: number): Promise<RepoSurvey | RepoRefusal>;
 }
@@ -1965,6 +1966,7 @@ export function createGit(opts: GitOptions = {}): Git {
         const tree = await git(at, ['ls-tree', '-r', '-z', '--name-only', 'HEAD']);
         const log = await git(at, [
           'log',
+          '--no-show-signature',
           `--max-count=${String(maxCommits)}`,
           '--no-merges',
           '--no-renames',

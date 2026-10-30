@@ -13,8 +13,9 @@ hazards changes with it.
 
 - **Signals, read without running the repository.** `Git.survey` reads the tracked files at HEAD
   (`ls-tree -r -z --name-only`) and the files of the latest 400 commits (`log --name-only -z`, no merges, no
-  renames, no external diff, no textconv). That is git's object store only: no file of the checkout is opened, no
-  hook, filter, pager, fsmonitor or `diff.external` the repository configures can run, and the call is unpinned
+  renames, no external diff, no textconv, no signature check). That is git's object store only: no file of the
+  checkout is opened, no hook, filter, pager, fsmonitor, `diff.external` or `gpg.program` the repository
+  configures can run (`trust.test.ts` runs `survey` against each), and the call is unpinned
   like `Git.inspect`, so a folder only being looked at raises no trust card. A commit that changed over 200 files
   is left out of the history.
 - **Candidates from structure** (`area-candidates.ts`, pure). A folder holding a manifest (`package.json`,
@@ -22,8 +23,13 @@ hazards changes with it.
   unit. A framework app with route groups (`app/(group)/…` or `pages/`) is split by group and, where a group
   holds at least three screens, by screen; its other top folders (`lib/`) stand beside them. Other folders with
   at least three files are candidates; what is left (top-level files, small folders) is one more. A repository
-  that is one package is split by its top folders. Together the candidates hold every tracked file. `dir/**`
-  skips dot folders and dotfiles, so each candidate also gets a glob that matches those.
+  that is one package is split by its top folders. Together the candidates hold every tracked file, and each
+  file matches the globs of the candidate that holds it and no other. `dir/**` skips dot folders and dotfiles,
+  so each candidate also gets a glob that matches those. A folder name is taken literally (`literal-glob.ts`):
+  each character glob syntax reads becomes a class that matches only itself, so a Next.js screen `[orgId]` gets
+  `[[]orgId]/**`, not a class matching `o/`. Node's matcher reads a backslash as a separator, never an escape,
+  and a project refuses one, so where no exact glob exists (a backslash, a stray bracket, braces holding a comma
+  or `..`) those characters become `?`, which also matches a name differing only there.
 - **Candidates merged by history.** Two folder or route candidates that changed together in at least four
   commits, and in at least three quarters of the commits of the one that changed less, are merged. A commit that
   touched more than four candidates says nothing about any pair.

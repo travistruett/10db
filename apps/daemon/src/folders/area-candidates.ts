@@ -1,4 +1,5 @@
 import { matchesGlob, posix } from 'node:path';
+import { literalGlob } from './literal-glob';
 
 /** What kind of place a candidate area is, which decides what may merge with it. */
 export const AreaCandidateKind = {
@@ -18,7 +19,7 @@ export interface AreaCandidate {
   readonly kind: AreaCandidateKind;
   /** The path that names the candidate (`.` for the top of the repository). */
   readonly label: string;
-  /** Every file in the candidate matches one of these. */
+  /** Every file in the candidate matches one of these, and no file of another candidate does. */
   readonly globs: readonly string[];
   /** The tracked files it holds. */
   readonly files: number;
@@ -240,7 +241,8 @@ function visitTopOfPackage(root: Dir, drafts: Draft[], leftovers: Draft): void {
   }
 }
 
-const prefixed = (dir: string, glob: string) => (dir === '' ? glob : `${dir}/${glob}`);
+/** `glob` inside the folder `dir`, whose name is taken literally whatever characters it holds. */
+const prefixed = (dir: string, glob: string) => (dir === '' ? glob : `${literalGlob(dir)}/${glob}`);
 
 /** The files directly in `dir` (not below it) and whether any of them is a dotfile. */
 function directGlobs(dir: Dir | undefined): string[] {
@@ -264,7 +266,7 @@ function dotPrefix(file: string, tree: string): string | null {
   if (at === -1) return null;
   return at === parts.length - 1
     ? prefixed(parts.slice(0, at).join('/'), '.*')
-    : `${parts.slice(0, at + 1).join('/')}/**`;
+    : prefixed(parts.slice(0, at + 1).join('/'), '**');
 }
 
 /**

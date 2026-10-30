@@ -1,4 +1,5 @@
 import { matchesGlob } from 'node:path';
+import { PathPattern } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { AreaCandidateKind, deriveAreaCandidates, mergeCoupledCandidates } from './area-candidates';
 
@@ -156,6 +157,88 @@ describe('deriveAreaCandidates', () => {
     for (const file of tracked)
       expect(candidates.filter((c) => covered(c.globs, file)).length, file).toBe(1);
   });
+
+  it("matches a dynamic screen's own files with its globs, and no sibling's", () => {
+    const app = 'frontend/app/(product)/app';
+    const tracked = [
+      'frontend/package.json',
+      'frontend/app/layout.tsx',
+      `${app}/[orgId]/page.tsx`,
+      `${app}/[orgId]/settings/page.tsx`,
+      `${app}/[orgId]/.env.local`,
+      `${app}/o/page.tsx`,
+      `${app}/memos/page.tsx`,
+    ];
+    const candidates = deriveAreaCandidates(tracked);
+    const screen = candidates.find((c) => c.label === `${app}/[orgId]`);
+    expect(screen?.files).toBe(3);
+    for (const file of tracked.filter((f) => f.startsWith(`${app}/[orgId]/`)))
+      expect(covered(screen?.globs ?? [], file), file).toBe(true);
+    expect(covered(screen?.globs ?? [], `${app}/o/page.tsx`)).toBe(false);
+  });
+
+  // Each row holds folders whose names glob syntax reads, beside the folders that syntax would match.
+  it.each([
+    {
+      name: 'Next.js dynamic segments',
+      tracked: [
+        'web/package.json',
+        'web/app/layout.tsx',
+        ...files('web/app/(shop)', ['[id]/page.tsx', 'i/page.tsx', 'd/page.tsx']),
+        ...files('web/app/(shop)', ['[...slug]/page.tsx', '[[...slug]]/page.tsx']),
+        ...files('web/app/(shop)', ['[]/page.tsx', '[id]/.hidden/x.ts', '[id]/.env']),
+      ],
+    },
+    {
+      name: 'wildcards and extglobs',
+      tracked: [
+        ...files('x*y', ['a.ts', 'b.ts', 'c.ts']),
+        ...files('x?y', ['a.ts', 'b.ts', 'c.ts']),
+        ...files('xzy', ['a.ts', 'b.ts', 'c.ts']),
+        ...files('@(x)', ['a.ts', 'b.ts', 'c.ts']),
+        ...files('!(x)', ['a.ts', 'b.ts', 'c.ts']),
+        ...files('+(x)', ['a.ts', 'b.ts', 'c.ts']),
+        ...files('x', ['a.ts', 'b.ts', 'c.ts']),
+        'small*/one.ts',
+        'small?/one.ts',
+        'smallz/one.ts',
+      ],
+    },
+    {
+      name: 'braces, literal and expanding',
+      tracked: [
+        ...files('{{cookiecutter.slug}}', ['a.py', 'b.py', 'c.py']),
+        ...files('{a,b}', ['a.ts', 'b.ts', 'c.ts']),
+        ...files('{1..3}', ['a.ts', 'b.ts', 'c.ts']),
+        ...files('a', ['a.ts', 'b.ts', 'c.ts']),
+        ...files('2', ['a.ts', 'b.ts', 'c.ts']),
+      ],
+    },
+    {
+      name: 'names no exact glob passes as a path pattern',
+      tracked: [
+        ...files('a[b', ['a.ts', 'b.ts', 'c.ts']),
+        ...files('c]d', ['a.ts', 'b.ts', 'c.ts']),
+        ...files('back\\slash', ['a.ts', 'b.ts', 'c.ts']),
+        ...files('c:drive', ['a.ts', 'b.ts', 'c.ts']),
+        ...files('ab', ['a.ts', 'b.ts', 'c.ts']),
+        ...files('cd', ['a.ts', 'b.ts', 'c.ts']),
+      ],
+    },
+  ])(
+    'gives every file to exactly one candidate, with globs a project accepts: $name',
+    ({ tracked }) => {
+      const candidates = deriveAreaCandidates(tracked);
+      for (const file of tracked)
+        expect(
+          candidates.filter((c) => covered(c.globs, file)).map((c) => c.label),
+          file,
+        ).toHaveLength(1);
+      for (const glob of candidates.flatMap((c) => c.globs))
+        expect(PathPattern.safeParse(glob).success, glob).toBe(true);
+      expect(candidates.reduce((sum, c) => sum + c.files, 0)).toBe(tracked.length);
+    },
+  );
 });
 
 describe('mergeCoupledCandidates', () => {
@@ -175,6 +258,13 @@ describe('mergeCoupledCandidates', () => {
     expect(pair?.globs).toContain('beta/**');
     expect(pair?.files).toBe(6);
     expect(merged.some((c) => c.label === 'gamma')).toBe(true);
+  });
+
+  it('merges dynamic screens that nearly always change in the same commits', () => {
+    const candidates = deriveAreaCandidates(folders(['[orgId]', '[teamId]', 'gamma']));
+    const commits = Array.from({ length: 6 }, () => ['[orgId]/a.ts', '[teamId]/b.ts']);
+    const merged = mergeCoupledCandidates(candidates, commits);
+    expect(merged.map((c) => c.label)).toContain('[orgId] + [teamId]');
   });
 
   it('never merges two units, however often they change together', () => {
