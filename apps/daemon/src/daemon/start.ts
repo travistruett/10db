@@ -86,7 +86,7 @@ import { createKeepAwake, systemCaffeinate, type CaffeinateSpawner } from '../ke
 import { createLogger, fileDestination, rotateLogFile, type Logger } from '../log';
 import { protectedPaths } from '../guard';
 import { createBuilderMcpHandler } from '../builder';
-import { createMcpHandler } from '../mcp';
+import { ClaimWaits, createMcpHandler, withdrawStaleClaimWaits } from '../mcp';
 import { recoverOnStartup, systemProcesses, type ProcessTerminator } from '../recovery';
 import {
   applyCheckAnswer,
@@ -328,6 +328,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // references; they are set before anything can fire a callback.
   let runner: Runner | null = null;
   let scheduler: Scheduler | null = null;
+  // A task that starts waiting for a claim may be waiting on one that needs a lane to finish.
+  const claimWaits = new ClaimWaits({
+    onWait: () => {
+      scheduler?.requestTick();
+    },
+  });
   let answerBatchCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerAccountCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerGitCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
@@ -626,6 +632,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     onWorktreeMissing: (batch, path) => {
       flagWorktreeMissing(inbox, batch, path);
     },
+    awaitedHolders: () => claimWaits.awaitedHolders(),
   });
   scheduler = createdScheduler;
 
@@ -642,6 +649,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     logger,
     cleanShutdown,
   });
+  // The previous daemon's claim waits ended with it; their cards would name holders nobody waits for.
+  withdrawStaleClaimWaits(state, inbox);
   accountPauses.restore();
   // A move back that came due reads the pauses.
   moveBack.restore();
@@ -735,6 +744,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       log: logger,
       waitObserverFor: (id) => live.get(id)?.observer,
       sessionSignal: (id) => live.get(id)?.signal,
+      claimWaits,
     }),
   });
   const wss = new WebSocketServer({ noServer: true });

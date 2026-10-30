@@ -131,17 +131,18 @@ describe('advanceSteps, sendBackSteps and restartStep', () => {
     expect(moved[0]).toMatchObject({ status: 'running', result: { summary: 'notes' } });
   });
 
-  it('restarts a failed step clean for a retry, keeping its session floor', () => {
+  it('restarts a failed step clean for a retry, keeping its session floor and setting its retry floor', () => {
     const steps = [
       step('implement'),
       { ...step('review', 'reject'), status: 'failed' as const, attempts: 3, sessionFloor: 5 },
     ];
-    expect(restartStep(steps, 1, NOW)[1]).toMatchObject({
+    expect(restartStep(steps, 1, NOW, 8)[1]).toMatchObject({
       status: 'running',
       attempts: 0,
       result: null,
       startedAt: NOW,
       sessionFloor: 5,
+      retryFloor: 8,
     });
   });
 });
