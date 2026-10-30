@@ -55,6 +55,7 @@ import {
   createBatchCardAnswers,
   createBatchStarter,
   createDeliveryJobs,
+  createPrWatch,
   createShipper,
   createWorktreeDependencies,
   DEFAULT_DELIVERY_LIMITS,
@@ -62,6 +63,7 @@ import {
   flagWrongBranch,
   recoverBatches,
   resolvePnpm,
+  subscribePrWatch,
   subscribeShipTrigger,
   type DeliveryContext,
   type DeliveryLimits,
@@ -149,6 +151,8 @@ export interface DaemonOptions {
   /** The login environment fetch, push and gh run in (main.ts builds it from the login shell). */
   readonly networkEnv?: () => Readonly<Record<string, string>>;
   readonly deliveryLimits?: Partial<DeliveryLimits>;
+  /** How often shipped pull requests are read; defaults to 2 minutes. */
+  readonly prWatchIntervalMs?: number;
   /** How long a provider stays paused when its usage limit gives no reset time. */
   readonly defaultPauseMs?: number;
   /** The environment sessions and gates start from: the captured login shell in production. */
@@ -649,6 +653,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     worktrees: { ctx: delivery, root: worktreeRoot },
   });
   const unsubscribeShip = subscribeShipTrigger(bus, state.db, shipper);
+  // Outside the delivery job queues: a slow or offline gh never holds a cut or a ship.
+  const prWatch = createPrWatch({
+    ctx: delivery,
+    clock,
+    ...(opts.prWatchIntervalMs ? { intervalMs: opts.prWatchIntervalMs } : {}),
+  });
+  const unsubscribePrWatch = subscribePrWatch(bus, prWatch);
 
   // Lanes start and stop through workstream events; keep-awake and the watcher follow them.
   const unsubscribeLanes = bus.subscribe((event) => {
@@ -758,12 +769,15 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   );
   createdScheduler.start();
   createdScheduler.requestTick();
+  prWatch.start();
   logger.info({ port, dataDir: opts.dataDir }, 'daemon started');
 
   async function shutdown(): Promise<void> {
     try {
       createdScheduler.stop();
       unsubscribeShip();
+      unsubscribePrWatch();
+      await prWatch.stop();
       // A gate that waits must not start because shutdown freed the slot of the one it killed.
       gateSlots.close();
       // Aborts a shipping gate and any git or gh child; the batch stays SHIPPING for recovery.
