@@ -41,7 +41,9 @@ for (const scheme of ['dark', 'light'] as const) {
     await page.getByRole('button', { name: 'Continue' }).click();
     await page.getByRole('textbox', { name: 'Folder path' }).fill(E2E_REPO);
     await page.getByRole('textbox', { name: 'Folder path' }).press('Enter');
-    await expect(page.getByRole('textbox', { name: 'Name' })).toBeVisible();
+    // The areas are proposed from the repository's files and history before the form is complete.
+    await expect(page.getByRole('group', { name: 'Area 1' })).toBeVisible();
+    await expect(page.getByRole('textbox', { name: 'Name', exact: true })).toBeVisible();
     await expectAccessible(page, `add a project, ${scheme}`);
   });
 }

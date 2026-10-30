@@ -36,6 +36,9 @@
       "baseBranch": {
         "type": "string"
       },
+      "autoMerge": {
+        "type": "boolean"
+      },
       "baseSha": {
         "type": [
           "string",
@@ -186,6 +189,7 @@
       "state",
       "branch",
       "baseBranch",
+      "autoMerge",
       "baseSha",
       "repo",
       "prUrl",

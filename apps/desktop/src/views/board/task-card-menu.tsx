@@ -2,6 +2,7 @@ import { BoardStatus, TaskStatus, WorkstreamState, type TaskDto } from '@10db/co
 import { ActionIcon, Menu } from '@mantine/core';
 import { IconDots } from '@tabler/icons-react';
 import type { DropTarget, MenuMove } from './drop-rules';
+import type { HoldOption } from './task-hold';
 
 const STARTABLE: readonly BoardStatus[] = [BoardStatus.Ready, BoardStatus.Backlog];
 /**
@@ -11,9 +12,9 @@ const STARTABLE: readonly BoardStatus[] = [BoardStatus.Ready, BoardStatus.Backlo
 const RESTARTABLE: readonly WorkstreamState[] = [WorkstreamState.Cancelled, WorkstreamState.Done];
 
 /**
- * A Backlog task queues until its dependencies finish; a parked task never starts. A failed run
- * shipped anyway whose pull request then closed without merging (`shippedAnywayClosed`) sits in
- * Blocked with nothing to retry, so it starts afresh from there.
+ * A Backlog task queues until its dependencies finish; a parked task never starts; a held one
+ * queues again. A failed run shipped anyway whose pull request then closed without merging
+ * (`shippedAnywayClosed`) sits in Blocked with nothing to retry, so it starts afresh from there.
  */
 export function canStart(
   task: TaskDto,
@@ -21,6 +22,7 @@ export function canStart(
   shippedAnywayClosed = false,
 ): boolean {
   if (task.boardColumnId !== null || task.status !== TaskStatus.Open) return false;
+  if (latest === WorkstreamState.Held) return true;
   if (shippedAnywayClosed && latest === WorkstreamState.Failed)
     return task.boardStatus === BoardStatus.Blocked;
   if (!STARTABLE.includes(task.boardStatus)) return false;
@@ -39,6 +41,13 @@ export interface TaskCardMenuProps {
   readonly moves: readonly MenuMove[];
   readonly onMove: (target: DropTarget) => void;
   readonly onStart: () => void;
+  /** Present when the task waits for a lane; it goes first in line. */
+  readonly onRunNext?: () => void;
+  /** Hold for a started task that has not run, or why it can't be held; absent when there is nothing to hold. */
+  readonly hold?: HoldOption | null;
+  readonly onHold?: () => void;
+  /** Present for a held task: removing it deletes its worktree and branch. */
+  readonly onRemove?: () => void;
   /** Present when the task's workstream failed and the daemon will retry it. */
   readonly onRetry?: () => void;
   /** Present when the task's batch is open or not shipped; abandoning keeps the branch and cancels its unfinished tasks. */
@@ -62,6 +71,10 @@ export function TaskCardMenu({
   moves,
   onMove,
   onStart,
+  onRunNext,
+  hold = null,
+  onHold,
+  onRemove,
   onRetry,
   onAbandon,
   abandonRefusal = null,
@@ -102,6 +115,27 @@ export function TaskCardMenu({
               : parkedDependency === null
                 ? 'Start'
                 : `Start (${parkedDependency} is parked; move it to Backlog or Ready first)`}
+          </Menu.Item>
+        ) : null}
+        {onRunNext ? (
+          <>
+            {moves.length > 0 ? <Menu.Divider /> : null}
+            <Menu.Item onClick={onRunNext}>Run Next</Menu.Item>
+          </>
+        ) : null}
+        {hold ? (
+          <Menu.Item
+            disabled={hold.kind === 'refused'}
+            onClick={() => {
+              if (hold.kind === 'hold') onHold?.();
+            }}
+          >
+            {hold.kind === 'hold' ? 'Hold' : `Hold (${hold.reason.replace(/\.$/, '')})`}
+          </Menu.Item>
+        ) : null}
+        {onRemove ? (
+          <Menu.Item color="red" onClick={onRemove}>
+            Remove
           </Menu.Item>
         ) : null}
         {onRetry || onAbandon || onCloseTask || onReopenTask ? <Menu.Divider /> : null}

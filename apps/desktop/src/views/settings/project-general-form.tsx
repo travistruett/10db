@@ -1,4 +1,4 @@
-import { Delivery, WorkspaceMode, type ProjectDto } from '@10db/contracts';
+import { Delivery, ProjectLanding, WorkspaceMode, type ProjectDto } from '@10db/contracts';
 import {
   Button,
   Collapse,
@@ -31,6 +31,10 @@ function reseed(current: GeneralValues, seed: GeneralValues, next: GeneralValues
   return {
     name: current.name === seed.name ? next.name : current.name,
     gateCommand: current.gateCommand === seed.gateCommand ? next.gateCommand : current.gateCommand,
+    changedCheckCommand:
+      current.changedCheckCommand === seed.changedCheckCommand
+        ? next.changedCheckCommand
+        : current.changedCheckCommand,
     maxLanes: current.maxLanes === seed.maxLanes ? next.maxLanes : current.maxLanes,
     handoffPct: current.handoffPct === seed.handoffPct ? next.handoffPct : current.handoffPct,
     nudgePct: current.nudgePct === seed.nudgePct ? next.nudgePct : current.nudgePct,
@@ -43,6 +47,7 @@ function reseed(current: GeneralValues, seed: GeneralValues, next: GeneralValues
       current.budgetCeiling === seed.budgetCeiling ? next.budgetCeiling : current.budgetCeiling,
     delivery: current.delivery === seed.delivery ? next.delivery : current.delivery,
     baseBranch: current.baseBranch === seed.baseBranch ? next.baseBranch : current.baseBranch,
+    landing: current.landing === seed.landing ? next.landing : current.landing,
     prTitlePrefix:
       current.prTitlePrefix === seed.prTitlePrefix ? next.prTitlePrefix : current.prTitlePrefix,
     allowedCommands:
@@ -161,6 +166,20 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
             }}
           />
         </SettingRow>
+        <SettingRow
+          label="Check after each step"
+          description="Optional. Runs after each step instead of the gate command; the gate command still runs before the push."
+        >
+          <TextInput
+            aria-label="Check after each step"
+            styles={MONO_INPUT}
+            value={values.changedCheckCommand}
+            error={errors.changedCheckCommand}
+            onChange={(e) => {
+              set({ changedCheckCommand: e.currentTarget.value });
+            }}
+          />
+        </SettingRow>
       </SettingsCard>
 
       <SettingsCard title="When work is finished">
@@ -204,6 +223,35 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
               error={errors.baseBranch}
               onChange={(e) => {
                 set({ baseBranch: e.currentTarget.value });
+              }}
+            />
+          </SettingRow>
+        ) : null}
+        {pullRequests ? (
+          <SettingRow
+            label="When checks pass"
+            description={
+              values.landing === ProjectLanding.Merge
+                ? `GitHub merges each pull request into ${values.baseBranch.trim() || 'the base branch'} by itself once its required checks pass. A task can choose another branch, or hold.`
+                : 'Pull requests wait for you to merge them. A task can choose to merge.'
+            }
+          >
+            <SegmentedControl
+              aria-label="When checks pass"
+              fullWidth
+              value={values.landing}
+              data={[
+                {
+                  value: ProjectLanding.Merge,
+                  label: `Merge into ${values.baseBranch.trim() || 'the base branch'}`,
+                },
+                { value: ProjectLanding.Hold, label: 'Hold for my review' },
+              ]}
+              onChange={(value) => {
+                set({
+                  landing:
+                    value === ProjectLanding.Hold ? ProjectLanding.Hold : ProjectLanding.Merge,
+                });
               }}
             />
           </SettingRow>

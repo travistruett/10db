@@ -27,6 +27,19 @@ describe('cardSummary', () => {
     expect(summary).toContain('Checking: make gate.');
   });
 
+  it('says where the work will land, when the project delivers by pull request', () => {
+    const summary = cardSummary(
+      taskDto(),
+      undefined,
+      new Map(),
+      undefined,
+      null,
+      'Merges into feature/x when checks pass',
+    );
+    expect(summary).toContain('Merges into feature/x when checks pass.');
+    expect(cardSummary(taskDto(), undefined, new Map())).not.toContain('Merges');
+  });
+
   it('says finished work whose ship failed is not shipped', () => {
     const summary = cardSummary(
       taskDto(),

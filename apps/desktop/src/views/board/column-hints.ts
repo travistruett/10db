@@ -9,7 +9,7 @@ export const SYSTEM_HINT: Readonly<Record<BoardStatus, string>> = {
   [BoardStatus.InReview]:
     'Pull request open: waiting on its checks and your review. Done once it merges.',
   [BoardStatus.Blocked]:
-    'Waiting on you, paused at a limit, failed, not shipped, or its pull request closed.',
+    'Waiting on you, paused at a limit, held, failed, not shipped, or its pull request closed.',
   [BoardStatus.Done]: 'Finished and merged, or cancelled.',
 };
 

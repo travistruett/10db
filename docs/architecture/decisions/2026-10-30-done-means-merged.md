@@ -27,7 +27,7 @@
   request becomes history.
 - Passing the gate no longer raises a `review` card. Its only answer, accept, did nothing; the builder
   reviews the pull request, and In review shows the task until it merges. The `review` inbox kind stays
-  in the contract for cards already stored. The forward-only data migration `0010_withdraw_review_cards`
+  in the contract for cards already stored. The forward-only data migration `0013_withdraw_review_cards`
   withdraws (state `CANCELLED`) every `review` card still open when a database upgrades, so none is left
   in the Inbox with only an answer that closes it. Answered ones stay as history.
 - A dependent may start once its dependency is done, even while that pull request is still In review,

@@ -96,6 +96,22 @@ describe('projects', () => {
     expect(listProjects(store.db).map((p) => p.gateCommand)).toEqual([null, null]);
   });
 
+  it('has no changed-packages check unless it was given one, and keeps a patched one', () => {
+    const project = seedProject(store);
+    expect(getProject(store.db, project.id).changedCheckCommand).toBeNull();
+    store.write((ctx) =>
+      patchProject(ctx, project.id, { changedCheckCommand: 'make check-changed' }),
+    );
+    expect(getProject(store.db, project.id).changedCheckCommand).toBe('make check-changed');
+    expect(getProject(store.db, project.id).gateCommand).toBe('true');
+    store.write((ctx) => patchProject(ctx, project.id, { changedCheckCommand: null }));
+    expect(getProject(store.db, project.id).changedCheckCommand).toBeNull();
+    expect(
+      seedProject(store, { repoPath: '/tmp/changed', changedCheckCommand: 'make check-changed' })
+        .changedCheckCommand,
+    ).toBe('make check-changed');
+  });
+
   it('has no extra allowed commands unless it was given some', () => {
     const project = seedProject(store);
     expect(getProject(store.db, project.id).allowedCommands).toEqual([]);

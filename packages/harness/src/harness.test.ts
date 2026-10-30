@@ -1,4 +1,12 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -102,5 +110,46 @@ describe('listSkills on a malformed plugin dir', () => {
     const dir = mkdtempSync(join(tmpdir(), 'harness-skills-'));
     dirs.push(dir);
     expect(listSkills(dir)).toEqual([]);
+  });
+});
+
+/**
+ * Sentences that tell an agent to run the gate. 10db runs the gate after each implement step, so a
+ * sentence that says not to, or that 10db runs it, is fine. The daemon's brief test holds the same check.
+ */
+function gateInstructions(text: string): string[] {
+  return text
+    .replace(/\s*\n\s*/g, ' ')
+    .split(/(?<=[.!?:;])\s+/)
+    .filter((s) => !/\bnever\b|\bnot\b|\bdon't\b|10db (already )?r[au]ns?\b/i.test(s))
+    .filter((s) =>
+      /make gate|GATE PASS|\b(re-?)?run\b[^.]*\bgate\b|\bexecute\b[^.]*\bgate\b/i.test(s),
+    );
+}
+
+describe('the gate in the plugin', () => {
+  it.each([
+    ['Run make gate before you end your turn.', true],
+    ['Done means `make gate` printed `GATE PASS`.', true],
+    ['Rerun `make gate` until it passes.', true],
+    ['Run the full gate before you end your turn.', true],
+    ["Run the project's gate command before you say the work is done.", true],
+    ['If you find a problem, fix it, then re-run the gate.', true],
+    ['Never run the full gate: 10db runs it after your step.', false],
+    ['10db already ran the gate; your shell can only read.', false],
+    ['Run only the test you changed.', false],
+  ])('the check reads %j as an instruction to run the gate: %s', (sentence, caught) => {
+    expect(gateInstructions(sentence).length > 0).toBe(caught);
+  });
+
+  const files = [
+    ...SKILL_NAMES.map((name) => join(HARNESS_PLUGIN_DIR, 'skills', name, 'SKILL.md')),
+    ...readdirSync(join(HARNESS_PLUGIN_DIR, 'personas')).map((f) =>
+      join(HARNESS_PLUGIN_DIR, 'personas', f),
+    ),
+  ];
+
+  it.each(files)('%s never tells the agent to run the gate', (file) => {
+    expect(gateInstructions(readFileSync(file, 'utf8'))).toEqual([]);
   });
 });

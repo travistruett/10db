@@ -12,6 +12,8 @@ for (const name of [
   'daemon.mjs',
   'daemon.mjs.map',
   'srt.mjs',
+  'builder-mcp.mjs',
+  'builder-mcp.mjs.map',
   'vendor',
   'drizzle',
   'harness',
@@ -37,6 +39,14 @@ await build({
   outfile: resolve(outDir, 'daemon.mjs'),
   sourcemap: true,
 });
+// The builder's MCP bridge, which a client runs with the app's node. It needs no database: it only
+// forwards calls to the running daemon.
+await build({
+  ...bundle,
+  entryPoints: [resolve(root, 'src/builder-mcp.ts')],
+  outfile: resolve(outDir, 'builder-mcp.mjs'),
+  sourcemap: true,
+});
 // srt's command line, which runs every gate under the sandbox: the app carries its own copy.
 await build({
   ...bundle,
@@ -59,7 +69,7 @@ cpSync(
 cpSync(DB_MIGRATIONS_DIR, resolve(outDir, 'drizzle'), { recursive: true });
 cpSync(HARNESS_PLUGIN_DIR, resolve(outDir, 'harness'), { recursive: true });
 cpSync(sqliteAddonPath(), resolve(outDir, 'better_sqlite3.node'));
-console.log(`Built ${outDir}/daemon.mjs and srt.mjs`);
+console.log(`Built ${outDir}/daemon.mjs, builder-mcp.mjs and srt.mjs`);
 
 /** better-sqlite3 ships one prebuilt addon per platform; @10db/db owns the dependency. */
 function sqliteAddonPath(): string {

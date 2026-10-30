@@ -115,8 +115,15 @@ function Choices({ project, mode, proposal, onStarted }: ChoicesProps) {
           'Verification: none. Each finished task waits for you to check it.'
         ) : (
           <>
-            Verification: 10db runs <Code>{project.gateCommand}</Code> after each implement step,
-            and review steps must approve.
+            Verification: 10db runs{' '}
+            <Code>{project.changedCheckCommand ?? project.gateCommand}</Code> after each implement
+            step
+            {project.changedCheckCommand === null ? null : (
+              <>
+                , and <Code>{project.gateCommand}</Code> before the push
+              </>
+            )}
+            , and review steps must approve.
           </>
         )}
       </Text>

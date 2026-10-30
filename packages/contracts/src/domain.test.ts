@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  DEFAULT_HAZARDS,
   EvidenceDto,
   HandoffInput,
+  hazardScope,
+  HazardScope,
   McpToolInputs,
   mintId,
   NextAction,
@@ -61,6 +64,34 @@ describe('a project with no gate command', () => {
   });
 });
 
+describe('a project with a changed-packages check command', () => {
+  const base = {
+    name: 'demo',
+    repoPath: '/tmp/demo',
+    gateCommand: 'make gate',
+    areas: [{ name: 'src', globs: ['src/**'] }],
+  };
+
+  it('ProjectInput defaults it to null and rejects an empty one', () => {
+    expect(ProjectInput.parse(base).changedCheckCommand).toBeNull();
+    expect(
+      ProjectInput.parse({ ...base, changedCheckCommand: 'make check-changed' })
+        .changedCheckCommand,
+    ).toBe('make check-changed');
+    expect(ProjectInput.safeParse({ ...base, changedCheckCommand: '' }).success).toBe(false);
+  });
+
+  it('ProjectPatch can set and clear it', () => {
+    expect(ProjectPatch.parse({ changedCheckCommand: 'make check-changed' })).toEqual({
+      changedCheckCommand: 'make check-changed',
+    });
+    expect(ProjectPatch.parse({ changedCheckCommand: null })).toEqual({
+      changedCheckCommand: null,
+    });
+    expect(ProjectPatch.safeParse({ changedCheckCommand: '' }).success).toBe(false);
+  });
+});
+
 describe('EvidenceDto', () => {
   const common = {
     id: mintId('Evidence'),
@@ -89,6 +120,33 @@ describe('EvidenceDto', () => {
     ['builder with a command', { kind: 'builder', command: 'x', exitCode: 0 }, false],
   ])('%s', (_name, fields, ok) => {
     expect(EvidenceDto.safeParse({ ...common, ...fields }).success).toBe(ok);
+  });
+});
+
+describe('hazard scope', () => {
+  it('makes AGENTS.md and the lockfile per copy and migrations per project by default', () => {
+    expect(Object.fromEntries(DEFAULT_HAZARDS.map((h) => [h.name, hazardScope(h)]))).toEqual({
+      migrations: HazardScope.Project,
+      deps: HazardScope.Copy,
+      harness: HazardScope.Copy,
+    });
+  });
+
+  it('reads a stored hazard with no scope by its name, and a custom one as per project', () => {
+    const bare = { globs: ['x'], commands: [] };
+    expect(hazardScope({ name: 'harness', ...bare })).toBe(HazardScope.Copy);
+    expect(hazardScope({ name: 'docker', ...bare })).toBe(HazardScope.Project);
+    expect(hazardScope({ name: 'harness', scope: HazardScope.Project, ...bare })).toBe(
+      HazardScope.Project,
+    );
+  });
+
+  it('accepts a scope in a patch and refuses an unknown one', () => {
+    const hazard = { name: 'h', globs: ['a'], commands: [] };
+    expect(ProjectPatch.safeParse({ hazards: [{ ...hazard, scope: 'copy' }] }).success).toBe(true);
+    expect(ProjectPatch.safeParse({ hazards: [{ ...hazard, scope: 'machine' }] }).success).toBe(
+      false,
+    );
   });
 });
 

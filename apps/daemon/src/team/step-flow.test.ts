@@ -1,6 +1,13 @@
 import { mintId, type StepRole, type Verdict, type WorkstreamStep } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
-import { advanceSteps, moveAfter, restartStep, sendBackSteps } from './step-flow';
+import {
+  advanceSteps,
+  clearSendBacks,
+  countSendBack,
+  moveAfter,
+  restartStep,
+  sendBackSteps,
+} from './step-flow';
 
 const NOW = '2026-10-17T12:00:00.000Z';
 const ENTRY = { now: NOW, sessions: 2 };
@@ -21,6 +28,8 @@ const step = (role: StepRole, verdict: Verdict | null | 'none' = 'none'): Workst
   attempts: 0,
   startedAt: null,
   sessionFloor: 0,
+  earlier: [],
+  sentBack: 0,
   result:
     verdict === 'none'
       ? null
@@ -131,17 +140,65 @@ describe('advanceSteps, sendBackSteps and restartStep', () => {
     expect(moved[0]).toMatchObject({ status: 'running', result: { summary: 'notes' } });
   });
 
-  it('restarts a failed step clean for a retry, keeping its session floor', () => {
+  it('restarts a failed step clean for a retry, keeping its session floor and setting its retry floor', () => {
     const steps = [
       step('implement'),
       { ...step('review', 'reject'), status: 'failed' as const, attempts: 3, sessionFloor: 5 },
     ];
-    expect(restartStep(steps, 1, NOW)[1]).toMatchObject({
+    expect(restartStep(steps, 1, NOW, 8)[1]).toMatchObject({
       status: 'running',
       attempts: 0,
       result: null,
       startedAt: NOW,
       sessionFloor: 5,
+      retryFloor: 8,
     });
+  });
+
+  it('keeps a rejection when its step is entered again, so no round is lost', () => {
+    const first = step('implement');
+    const rejected = step('review', 'reject');
+    const sentBack = sendBackSteps([first, rejected], 1, 0, first, ENTRY);
+    // The rejecting step holds its notes for the rework, and files them away once it runs again.
+    expect(sentBack[1]?.earlier).toEqual([]);
+    const again = advanceSteps(sentBack, 0, 1, ENTRY);
+    expect(again[1]).toMatchObject({ result: null, earlier: [rejected.result] });
+  });
+
+  it('files a new round after the ones already kept', () => {
+    const older = step('review', 'reject');
+    const kept = older.result ? [older.result] : [];
+    const newer = { ...step('review', 'reject'), earlier: kept };
+    const rerun = advanceSteps([step('implement'), newer], 0, 1, ENTRY);
+    expect(rerun[1]?.earlier).toEqual([...kept, newer.result]);
+  });
+
+  it('keeps a failed step’s rejection when a retry restarts it', () => {
+    const rejected = { ...step('review', 'reject'), status: 'failed' as const };
+    expect(restartStep([step('implement'), rejected], 1, NOW, 0)[1]).toMatchObject({
+      result: null,
+      earlier: [rejected.result],
+    });
+  });
+
+  it('files a read-only target’s kept result nowhere, since it is still the result', () => {
+    const plan = step('plan', null);
+    const moved = sendBackSteps([plan, step('plan_review', 'reject')], 1, 0, plan, ENTRY);
+    expect(moved[0]?.earlier).toEqual([]);
+  });
+});
+
+describe('countSendBack and clearSendBacks', () => {
+  it('counts each send-back on the step whose rejection sent the work back', () => {
+    const steps = [step('plan'), step('plan_review', 'reject'), step('implement'), step('review')];
+    const twice = countSendBack(countSendBack(steps, 3), 3);
+    expect(countSendBack(twice, 1).map((s) => s.sentBack)).toEqual([0, 1, 0, 2]);
+  });
+
+  it('sets every count to 0 when the attempts start over, keeping the rounds', () => {
+    const rejected = { ...step('review', 'reject'), sentBack: 3 };
+    const cleared = clearSendBacks([{ ...step('plan_review'), sentBack: 1 }, rejected]);
+    expect(cleared.map((s) => s.sentBack)).toEqual([0, 0]);
+    expect(cleared[1]?.result).toEqual(rejected.result);
   });
 });

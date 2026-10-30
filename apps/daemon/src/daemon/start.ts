@@ -1,7 +1,7 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { serve, upgradeWebSocket, type WebSocketServerLike } from '@hono/node-server';
 import {
@@ -85,7 +85,8 @@ import { createInboxService } from '../inbox';
 import { createKeepAwake, systemCaffeinate, type CaffeinateSpawner } from '../keep-awake';
 import { createLogger, fileDestination, rotateLogFile, type Logger } from '../log';
 import { protectedPaths } from '../guard';
-import { createMcpHandler } from '../mcp';
+import { createBuilderMcpHandler } from '../builder';
+import { ClaimWaits, createMcpHandler, withdrawStaleClaimWaits } from '../mcp';
 import { recoverOnStartup, systemProcesses, type ProcessTerminator } from '../recovery';
 import {
   applyCheckAnswer,
@@ -111,9 +112,15 @@ import { createGateRunner, createGateSlots, limitGates } from '../verify';
 import { CLIENT_APP } from '../version';
 import { createWatcher, systemWatch, type WatchFn } from '../watcher';
 import { createProjectPinStore } from './checkout-pins';
-import { createGitCardAnswers, createGitRefusalHandler } from './git-refusal';
+import {
+  createCheckoutTrustedHandler,
+  createGitCardAnswers,
+  createGitRefusalHandler,
+  refusedTrustCheckouts,
+} from './git-refusal';
 import { acquireInstanceLock } from './instance-lock';
-import { removeRuntimeFiles, writeRuntimeFiles } from './runtime-files';
+import { removeRuntimeFiles, writeRuntimeFiles } from '../runtime-files';
+import { createAreaNamer } from './area-namer';
 import { createServices } from './services';
 import { assertWorktreeRootAllowed, DEFAULT_WORKTREE_BASE, worktreeRootFor } from './worktree-root';
 
@@ -326,6 +333,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // references; they are set before anything can fire a callback.
   let runner: Runner | null = null;
   let scheduler: Scheduler | null = null;
+  // A task that starts waiting for a claim may be waiting on one that needs a lane to finish.
+  const claimWaits = new ClaimWaits({
+    onWait: () => {
+      scheduler?.requestTick();
+    },
+  });
   let answerBatchCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerAccountCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerGitCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
@@ -347,6 +360,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   });
   const git = createGit({
     onRefused: createGitRefusalHandler({ db: state.db, inbox, logger }),
+    onTrusted: createCheckoutTrustedHandler({ db: state.db, inbox }),
+    refusedCheckouts: refusedTrustCheckouts(state.db),
     pins: createProjectPinStore(state, memoryPinStore()),
     bin: gitBin,
     checkouts: () => listProjects(state.db).map((project) => project.repoPath),
@@ -439,8 +454,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     isRunning: (id) => runner?.isRunning(id) ?? false,
   });
   answerBatchCard = createBatchCardAnswers({
-    retry: (id) => {
-      const retried = retryWorkstream(state, id);
+    retry: (id, note) => {
+      const retried = retryWorkstream(state, id, note);
       if (retried.batchId !== null) starter.reopen(retried.batchId);
       scheduler?.requestTick();
     },
@@ -624,6 +639,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     onWorktreeMissing: (batch, path) => {
       flagWorktreeMissing(inbox, batch, path);
     },
+    awaitedHolders: () => claimWaits.awaitedHolders(),
   });
   scheduler = createdScheduler;
 
@@ -640,6 +656,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     logger,
     cleanShutdown,
   });
+  // The previous daemon's claim waits ended with it; their cards would name holders nobody waits for.
+  withdrawStaleClaimWaits(state, inbox);
   accountPauses.restore();
   // A move back that came due reads the pauses.
   moveBack.restore();
@@ -695,11 +713,17 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     accounts: accountService,
     worktreeRoot,
     git,
+    branchOnOrigin: (repoPath, branch) =>
+      git.branchOnOrigin(repoPath, branch, {
+        env: delivery.networkEnv(),
+        timeoutMs: delivery.limits.networkTimeoutMs,
+      }),
     protectedRoots: [
       opts.dataDir,
       ...(sandboxTempRoot === null ? [] : [sandboxTempRoot]),
       worktreeRoot,
     ],
+    areaNamer: createAreaNamer({ adapter, launcher, db: state.db, scratchRoot: tmpdir() }),
     pinCheckout: (repoPath) => {
       // A checkout git can't read yet is recorded at the first git call that succeeds there.
       git.gitDirs(repoPath).catch(() => undefined);
@@ -714,6 +738,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     token,
     services,
     taskRemoval: services,
+    builderMcp: createBuilderMcpHandler({ services, log: logger }),
     upgradeWebSocket,
     onUnexpectedError: (error) => {
       logger.error({ err: error }, 'unhandled API error');
@@ -726,6 +751,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       log: logger,
       waitObserverFor: (id) => live.get(id)?.observer,
       sessionSignal: (id) => live.get(id)?.signal,
+      claimWaits,
     }),
   });
   const wss = new WebSocketServer({ noServer: true });

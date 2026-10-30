@@ -7,6 +7,7 @@ import {
   NotFoundError,
   PROTOCOL_VERSION,
   WorkstreamDto,
+  type AreaProposalResult,
   type DaemonEvent,
 } from '@10db/contracts';
 import { defineWebSocketHelper } from 'hono/ws';
@@ -37,6 +38,8 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
     listTasks: () => [],
     createTask: none,
     startTask: none,
+    holdTask: none,
+    runNext: none,
     listFlows: () => [],
     listWorkstreams: () => [],
     cancelWorkstream: none,
@@ -52,6 +55,7 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
     eventsHead: () => 0,
     reviewProjectMcp: none,
     inspectFolder: none,
+    proposeAreas: none,
     listNetworkHosts: none,
     allowNetworkHost: none,
     removeNetworkHost: none,
@@ -111,6 +115,7 @@ function app(
     services,
     upgradeWebSocket: noUpgrade,
     mcp: () => Promise.resolve(new Response('mcp')),
+    builderMcp: () => Promise.resolve(new Response('builder')),
   });
 }
 const auth = { headers: { Authorization: `Bearer ${TOKEN}` } };
@@ -216,6 +221,30 @@ describe('API', () => {
       (await app().request('/projects', { headers: { Authorization: 'Bearer wrong' } })).status,
     ).toBe(401);
     expect((await app().request('/projects', auth)).status).toBe(200);
+  });
+
+  it('serves /builder/mcp to the UI token only', async () => {
+    const post = (headers: Record<string, string>) =>
+      app().request('/builder/mcp', { method: 'POST', headers });
+    expect((await post({})).status).toBe(401);
+    // A managed session's token is not the UI token.
+    expect((await post({ Authorization: 'Bearer lane-session-token' })).status).toBe(401);
+    const ok = await post(auth.headers);
+    expect(ok.status).toBe(200);
+    expect(await ok.text()).toBe('builder');
+  });
+
+  it('answers 501 on /builder/mcp when the daemon has no builder endpoint', async () => {
+    const bare = createApp({
+      onUnexpectedError: () => undefined,
+      startedAt,
+      allowedOrigins: [],
+      token: TOKEN,
+      services: stubServices(),
+      upgradeWebSocket: noUpgrade,
+      mcp: () => Promise.resolve(new Response('mcp')),
+    });
+    expect((await bare.request('/builder/mcp', { method: 'POST', ...auth })).status).toBe(501);
   });
 
   it('takes the token from the query string on the event stream only', async () => {
@@ -326,6 +355,35 @@ describe('API', () => {
     ).toBe(409);
   });
 
+  it.each([
+    { name: 'a note', body: JSON.stringify({ note: 'Reuse the card.' }), note: 'Reuse the card.' },
+    { name: 'a body with no note', body: JSON.stringify({}), note: undefined },
+    { name: 'no body', body: undefined, note: undefined },
+  ])('hands a retry $name to the service', async ({ body, note }) => {
+    const seen: (string | undefined)[] = [];
+    const services = stubServices({
+      retryWorkstream: (_id, noted) => {
+        seen.push(noted);
+        throw new ConflictError('not failed');
+      },
+    });
+    await app(services).request(`/workstreams/${mintId('Workstream')}/retry`, {
+      method: 'POST',
+      ...(body === undefined ? auth : json),
+      ...(body === undefined ? {} : { body }),
+    });
+    expect(seen).toEqual([note]);
+  });
+
+  it('refuses a retry note over 4000 characters', async () => {
+    const res = await app(stubServices({})).request(`/workstreams/${mintId('Workstream')}/retry`, {
+      method: 'POST',
+      ...json,
+      body: JSON.stringify({ note: 'x'.repeat(4001) }),
+    });
+    expect(res.status).toBe(400);
+  });
+
   it('answers 409 with the task named when a patch removes an area a running task holds', async () => {
     const message = 'Can\'t remove or rename area "api": the running task "Fix login" holds it.';
     const services = stubServices({
@@ -374,6 +432,23 @@ describe('API', () => {
     expect((await app(services).request('/inbox', auth)).status).toBe(200);
     expect(seen).toEqual([['OPEN', 'ANSWERED'], null]);
     expect((await app(services).request('/inbox?state=NOPE', auth)).status).toBe(400);
+  });
+
+  it('passes a recent count to the inbox list, and rejects one out of range', async () => {
+    const seen: (number | null)[] = [];
+    const services = stubServices({
+      listInbox: ({ recent }) => {
+        seen.push(recent);
+        return [];
+      },
+    });
+    expect((await app(services).request('/inbox?state=RESOLVED&recent=100', auth)).status).toBe(
+      200,
+    );
+    expect((await app(services).request('/inbox', auth)).status).toBe(200);
+    expect(seen).toEqual([100, null]);
+    for (const bad of ['0', '1001', 'x', '2.5'])
+      expect((await app(services).request(`/inbox?recent=${bad}`, auth)).status).toBe(400);
   });
 
   it('keeps the CORS allow-list', async () => {
@@ -663,6 +738,7 @@ describe('batch routes', () => {
     state: 'CUTTING',
     branch: null,
     baseBranch: 'main',
+    autoMerge: true,
     baseSha: null,
     repo: null,
     prUrl: null,
@@ -729,6 +805,7 @@ describe('batch routes', () => {
     pausedUntil: null,
     failureReason: null,
     lastActivityAt: null,
+    runNextAt: null,
     createdAt: batch.createdAt,
     updatedAt: batch.updatedAt,
   });
@@ -752,6 +829,25 @@ describe('batch routes', () => {
     );
     expect(res.status).toBe(status);
     expect(await res.json()).toEqual(body);
+  });
+
+  it('answers Run Next with the workstream and what it waits on, and refuses a bad task id', async () => {
+    const result = { workstream, waitingOn: ['Fix the gate'] };
+    const services = stubServices({ runNext: () => result });
+    const res = await app(services).request(`/tasks/${mintId('Task')}/run-next`, post(''));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual(result);
+    expect((await app(services).request('/tasks/not-a-task/run-next', post(''))).status).toBe(400);
+  });
+
+  it("answers Run Next on a task that isn't queued with 409", async () => {
+    const services = stubServices({
+      runNext: () => {
+        throw new ConflictError("Task a isn't waiting for a lane");
+      },
+    });
+    const res = await app(services).request(`/tasks/${mintId('Task')}/run-next`, post(''));
+    expect(res.status).toBe(409);
   });
 
   it.each([
@@ -931,5 +1027,42 @@ describe('folder inspection route', () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual(refusal);
     expect(seen).toEqual(['/nowhere']);
+  });
+});
+
+describe('area proposal route', () => {
+  it('POST /folders/propose-areas refuses a relative path with 400', async () => {
+    const res = await app().request('/folders/propose-areas', {
+      method: 'POST',
+      ...json,
+      body: JSON.stringify({ path: 'relative/dir' }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('POST /folders/propose-areas answers the proposal the service makes for the path', async () => {
+    const proposal: AreaProposalResult = {
+      ok: true,
+      proposal: {
+        namedBy: 'structure',
+        areas: [{ name: 'root', globs: ['*'], reason: 'The top of the repository.' }],
+      },
+    };
+    const seen: string[] = [];
+    const res = await app(
+      stubServices({
+        proposeAreas: (path) => {
+          seen.push(path);
+          return Promise.resolve(proposal);
+        },
+      }),
+    ).request('/folders/propose-areas', {
+      method: 'POST',
+      ...json,
+      body: JSON.stringify({ path: '/repo' }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual(proposal);
+    expect(seen).toEqual(['/repo']);
   });
 });

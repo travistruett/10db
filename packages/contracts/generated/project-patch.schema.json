@@ -17,6 +17,17 @@
         }
       ]
     },
+    "changedCheckCommand": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "maxLanes": {
       "type": "integer",
       "minimum": 1,
@@ -71,6 +82,13 @@
       "minLength": 1,
       "maxLength": 200,
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]*$"
+    },
+    "landing": {
+      "type": "string",
+      "enum": [
+        "merge",
+        "hold"
+      ]
     },
     "prTitlePrefix": {
       "anyOf": [
@@ -131,6 +149,13 @@
               "type": "string",
               "minLength": 1
             }
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "copy",
+              "project"
+            ]
           }
         },
         "required": [
