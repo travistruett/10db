@@ -71,9 +71,9 @@ describe('the filter over a sandboxed gate’s stderr', () => {
   it('drops every line of the command srt echoes, which holds the project env', () => {
     const { kept } = filter(
       [
-        "[SandboxDebug] Command string mode (-c): trap 'exit 143' TERM; /usr/bin/env TOKEN='line one",
-        'hunter2 line two',
-        "  last' /bin/sh -c 'cargo test' ; exit $?",
+        "[SandboxDebug] Command string mode (-c): trap 'exit 143' TERM; /usr/bin/env TOKEN='hunter2' /bin/sh -c 'cargo build",
+        '  cargo test --workspace',
+        "  cargo doc' ; exit $?",
         '  indented output of the command',
       ],
       { commandLines: 3 },
