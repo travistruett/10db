@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  DEFAULT_HAZARDS,
   EvidenceDto,
   HandoffInput,
+  hazardScope,
+  HazardScope,
   McpToolInputs,
   mintId,
   NextAction,
@@ -89,6 +92,33 @@ describe('EvidenceDto', () => {
     ['builder with a command', { kind: 'builder', command: 'x', exitCode: 0 }, false],
   ])('%s', (_name, fields, ok) => {
     expect(EvidenceDto.safeParse({ ...common, ...fields }).success).toBe(ok);
+  });
+});
+
+describe('hazard scope', () => {
+  it('makes AGENTS.md and the lockfile per copy and migrations per project by default', () => {
+    expect(Object.fromEntries(DEFAULT_HAZARDS.map((h) => [h.name, hazardScope(h)]))).toEqual({
+      migrations: HazardScope.Project,
+      deps: HazardScope.Copy,
+      harness: HazardScope.Copy,
+    });
+  });
+
+  it('reads a stored hazard with no scope by its name, and a custom one as per project', () => {
+    const bare = { globs: ['x'], commands: [] };
+    expect(hazardScope({ name: 'harness', ...bare })).toBe(HazardScope.Copy);
+    expect(hazardScope({ name: 'docker', ...bare })).toBe(HazardScope.Project);
+    expect(hazardScope({ name: 'harness', scope: HazardScope.Project, ...bare })).toBe(
+      HazardScope.Project,
+    );
+  });
+
+  it('accepts a scope in a patch and refuses an unknown one', () => {
+    const hazard = { name: 'h', globs: ['a'], commands: [] };
+    expect(ProjectPatch.safeParse({ hazards: [{ ...hazard, scope: 'copy' }] }).success).toBe(true);
+    expect(ProjectPatch.safeParse({ hazards: [{ ...hazard, scope: 'machine' }] }).success).toBe(
+      false,
+    );
   });
 });
 

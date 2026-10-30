@@ -19,6 +19,7 @@ import {
 import {
   acquireClaims,
   claimRequestsForTask,
+  copyHazardNames,
   createTestStore,
   insertBatch,
   insertTask,
@@ -723,6 +724,7 @@ describe('worktree checkouts', () => {
         requests: claimRequestsForTask(task, project),
         leaseExpiresAt: '2999-01-01T00:00:00.000Z',
         areaScope: batch.id,
+        copyHazards: copyHazardNames(project),
       });
       transitionWorkstream(ctx, workstream.id, { to: WorkstreamState.Starting, fence: null });
       transitionWorkstream(ctx, workstream.id, { to: WorkstreamState.Running, fence: null });
@@ -781,20 +783,39 @@ describe('worktree checkouts', () => {
     ).toEqual([`${a.path}: docs/stray.md`, `${b.path}: docs/stray.md`].sort());
   });
 
-  it('counts a hazard claim held in another batch as held, and names its holder on a foreign write', async () => {
-    const holder = inWorktree('Alpha', 'harness');
+  it('counts a per-project hazard claim held in another batch as held, and names its holder on a foreign write', async () => {
+    const holder = inWorktree('Alpha', 'migrations');
     const writer = inWorktree('Beta', 'api');
     watcher.sync();
-    writeAt(writer.path, 'AGENTS.md');
+    writeAt(writer.path, 'db/migrations/0001.sql');
     writeAt(writer.path, 'src/api/ok.ts');
     await watcher.flush();
     const open = flags();
     expect(open).toHaveLength(1);
     expect(open[0]).toMatchObject({
       title: "Write inside another workstream's claim",
-      body: `${writer.path}: AGENTS.md`,
+      body: `${writer.path}: db/migrations/0001.sql`,
     });
     expect(open[0]?.detail).toMatchObject({ claimedBy: [holder.workstream.id] });
+  });
+
+  it("judges AGENTS.md in each worktree by that worktree's own claim, with no foreign write", async () => {
+    const holder = inWorktree('Alpha', 'harness');
+    const other = inWorktree('Beta', 'harness');
+    const bystander = inWorktree('Gamma', 'api');
+    watcher.sync();
+    writeAt(holder.path, 'AGENTS.md');
+    writeAt(other.path, 'apps/daemon/AGENTS.md');
+    await watcher.flush();
+    expect(flags()).toEqual([]);
+    writeAt(bystander.path, 'AGENTS.md');
+    await watcher.flush();
+    const open = flags();
+    expect(open).toHaveLength(1);
+    expect(open[0]).toMatchObject({
+      title: 'Write outside every claim',
+      body: `${bystander.path}: AGENTS.md`,
+    });
   });
 
   it("does not let a worktree batch's area claim excuse a write in the main checkout", async () => {

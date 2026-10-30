@@ -138,7 +138,19 @@ export const McpToolOutputs = {
   report_deviation: z.object({ deviationId: DeviationId }),
   request_claim: z.discriminatedUnion('granted', [
     z.object({ granted: z.literal(true), claimId: ClaimId }),
-    z.object({ granted: z.literal(false), heldBy: WorkstreamId.nullable(), inboxId: InboxItemId }),
+    z.object({
+      granted: z.literal(false),
+      heldBy: WorkstreamId.nullable(),
+      inboxId: InboxItemId,
+      /**
+       * True while the wait goes on: the call answers before the session's tool timeout and the agent
+       * calls again with the same opId. False (or absent, in a result recorded before this field) for
+       * a refusal: waiting would deadlock.
+       */
+      waiting: z.boolean().default(false),
+      /** What to do next while waiting; null on a refusal, whose card says it. */
+      instruction: z.string().nullable().default(null),
+    }),
   ]),
   commit: z.object({ sha: z.string().regex(/^[0-9a-f]{40}$/), alreadyCommitted: z.boolean() }),
   record_evidence: z.object({ evidenceId: EvidenceId }),
