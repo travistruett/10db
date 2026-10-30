@@ -15,6 +15,7 @@ import {
 } from '@mantine/core';
 import type { KeyboardEvent, RefObject } from 'react';
 import { ExternalLink } from '../board/pull-request-link';
+import { BatchCardActions } from './batch-card-actions';
 import { CheckCard } from './check-card';
 import { isDismissable } from './inbox-rows';
 import { McpApprovalDetails, mcpReview } from './mcp-approval';
@@ -205,6 +206,7 @@ export function InboxCard({
           <CardBody item={item} />
         )}
         {link === null ? null : <ExternalLink url={link} label="Open on GitHub" />}
+        <BatchCardActions item={item} onDone={onDismiss} />
         {hasOptions ? (
           <Radio.Group value={choice} onChange={onChoose} aria-label="Answer">
             <Stack gap="xs">
