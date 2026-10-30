@@ -40,7 +40,7 @@ export function createBuilderMcpHandler(deps: BuilderMcpDeps): (req: Request) =>
       { capabilities: { tools: {} }, instructions: BUILDER_INSTRUCTIONS },
     );
     mcp.server.setRequestHandler(ListToolsRequestSchema, () => ({ tools: builderToolList() }));
-    mcp.server.setRequestHandler(CallToolRequestSchema, (request) => {
+    mcp.server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { name, arguments: args } = request.params;
       const tool = ToolName.safeParse(name);
       if (!tool.success)
@@ -49,7 +49,8 @@ export function createBuilderMcpHandler(deps: BuilderMcpDeps): (req: Request) =>
           content: [{ type: 'text' as const, text: `Unknown tool: ${name}` }],
         };
       try {
-        const output = tools[tool.data](args ?? {});
+        // Creating or editing a task checks the landing branch on origin, so a handler may be async.
+        const output: unknown = await tools[tool.data](args ?? {});
         return { content: [{ type: 'text' as const, text: JSON.stringify(output) }] };
       } catch (error) {
         return {

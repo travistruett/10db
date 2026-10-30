@@ -1,9 +1,17 @@
-import { newTaskRefusal, TaskStatus, type ProjectDto, type TaskDto } from '@10db/contracts';
+import {
+  Delivery,
+  newTaskRefusal,
+  TaskStatus,
+  type ProjectDto,
+  type TaskDto,
+} from '@10db/contracts';
 import { Box, Code, List, MultiSelect, Stack, Text, Textarea, TextInput } from '@mantine/core';
 import { useEffect, useId, useState, type SyntheticEvent } from 'react';
 import { useCreateTask } from '../../daemon/queries';
 import { criteriaLines } from './areas-text';
 import { LabelWithHelp } from './field-help';
+import { draftFor, landingFromDraft, type LandingDraft } from './landing-draft';
+import { LandingField } from './landing-field';
 
 const CRITERIA_PLACEHOLDER =
   'One per line, for example:\nSearch shows results in under a second with 10,000 tasks';
@@ -33,7 +41,11 @@ export function NewTaskForm({ formId, project, tasks, onStatus, onCreated }: New
   const [criteriaText, setCriteriaText] = useState('');
   const [areas, setAreas] = useState<string[]>(() => initialAreas(project));
   const [dependsOn, setDependsOn] = useState<string[]>([]);
+  const [landing, setLanding] = useState<LandingDraft>(() => draftFor(project));
+  const [landingError, setLandingError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+  // Local delivery commits straight to the checked-out branch: there is no pull request to place.
+  const pullRequests = project.delivery === Delivery.PullRequest;
 
   // Hazards stay out: an agent asks for one with `request_claim`.
   const areaNames = project.areas.map((a) => a.name);
@@ -49,7 +61,14 @@ export function NewTaskForm({ formId, project, tasks, onStatus, onCreated }: New
       setFormError(refusal);
       return;
     }
+    const where = landingFromDraft(landing);
+    if (pullRequests && !where.ok) {
+      setFormError(null);
+      setLandingError(where.error);
+      return;
+    }
     setFormError(null);
+    setLandingError(null);
     create.mutate(
       {
         title: title.trim(),
@@ -58,6 +77,7 @@ export function NewTaskForm({ formId, project, tasks, onStatus, onCreated }: New
         areas,
         // Map back through the task list so the ids keep their branded type.
         dependsOn: tasks.filter((t) => dependsOn.includes(t.id)).map((t) => t.id),
+        ...(pullRequests && where.ok ? { landing: where.landing } : {}),
       },
       {
         onSuccess: (task) => {
@@ -156,6 +176,17 @@ export function NewTaskForm({ formId, project, tasks, onStatus, onCreated }: New
           searchable
           clearable
         />
+        {pullRequests ? (
+          <LandingField
+            baseBranch={project.baseBranch}
+            value={landing}
+            error={landingError}
+            onChange={(draft) => {
+              setLanding(draft);
+              setLandingError(null);
+            }}
+          />
+        ) : null}
       </Stack>
     </form>
   );

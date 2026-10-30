@@ -6,7 +6,9 @@ import {
   InvalidError,
   type McpServerStatusDto,
   ProjectInput,
+  type ProjectDto,
   type SystemCheckDto,
+  type TaskLanding,
 } from '@10db/contracts';
 import {
   cancelTask,
@@ -54,7 +56,7 @@ import type { ApiServices, TaskLookupServices, TaskRemovalServices } from '../ap
 import { workstreamChanges, type BatchStarter, type Shipper } from '../delivery';
 import { markGhRequired } from '../environment';
 import type { EventBus, StateStore } from '../events';
-import { inspectFolder } from '../folders';
+import { inspectFolder, proposeAreas, type AreaNamer } from '../folders';
 import type { Git } from '../git';
 import { requestMcpApproval, type InboxService } from '../inbox';
 import type { KeepAwake } from '../keep-awake';
@@ -84,14 +86,42 @@ export function createServices(deps: {
   readonly worktreeRoot: string;
   /** The daemon's git, for inspecting a folder before it is a project. */
   readonly git: Git;
+  /** Whether origin, for the checkout at `repoPath`, has the branch. Throws when origin can't be asked. */
+  readonly branchOnOrigin: (repoPath: string, branch: string) => Promise<boolean>;
   /** 10db's own places a project may not be: the data dir, the lane temp root, the worktree root. */
   readonly protectedRoots: readonly string[];
+  /** Names and merges proposed areas; null leaves them named from their paths. */
+  readonly areaNamer: AreaNamer | null;
   /** Records a new project's checkout as the daemon trusts it (lane sandbox spec D13). */
   readonly pinCheckout: (repoPath: string) => void;
 }): ApiServices & TaskRemovalServices & TaskLookupServices {
   const db = deps.state.db;
   // The tool check and gh's login are probed on the first request and on a recheck, never otherwise.
   let lastCheck: Promise<SystemCheckDto> | null = null;
+
+  /**
+   * A task that lands in a branch other than its project's base is built from that branch, so it has
+   * to be on origin; refused here, before the task exists, in the words the builder reads.
+   */
+  async function refuseMissingLandingBranch(
+    project: ProjectDto,
+    landing: TaskLanding | undefined,
+  ): Promise<void> {
+    if (landing?.kind !== 'branch' || project.delivery !== Delivery.PullRequest) return;
+    if (landing.branch === project.baseBranch) return;
+    let there: boolean;
+    try {
+      there = await deps.branchOnOrigin(project.repoPath, landing.branch);
+    } catch (error) {
+      throw new InvalidError(
+        `10db couldn't ask origin whether it has ${landing.branch}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    if (!there)
+      throw new InvalidError(
+        `origin has no branch named ${landing.branch}. Create it on origin, or choose another place for this task to land.`,
+      );
+  }
   return {
     listProjects: () => listProjectViews(db),
     createProject(input) {
@@ -109,7 +139,8 @@ export function createServices(deps: {
       return project;
     },
     listTasks: (projectId) => listTasks(db, projectId),
-    createTask(projectId, input) {
+    async createTask(projectId, input) {
+      await refuseMissingLandingBranch(getProject(db, projectId), input.landing);
       const task = deps.state.write((ctx) => insertTask(ctx, projectId, input));
       deps.scheduler.requestTick();
       return task;
@@ -217,7 +248,10 @@ export function createServices(deps: {
     removeTask: (id) => deps.state.write((ctx) => cancelTask(ctx, id)),
     getTask: (id) => getTask(db, id),
     closeTask: (id) => deps.state.write((ctx) => closeTask(ctx, id)),
-    patchTask: (id, patch) => deps.state.write((ctx) => patchTask(ctx, id, patch)),
+    async patchTask(id, patch) {
+      await refuseMissingLandingBranch(getProject(db, getTask(db, id).projectId), patch.landing);
+      return deps.state.write((ctx) => patchTask(ctx, id, patch));
+    },
     moveTask: (id, move) => deps.state.write((ctx) => moveTask(ctx, id, move)),
     listBoardColumns(projectId) {
       getProject(db, projectId);
@@ -234,6 +268,11 @@ export function createServices(deps: {
     inspectFolder: (path) =>
       inspectFolder(
         { git: deps.git, projects: listProjects(db), protectedRoots: deps.protectedRoots },
+        path,
+      ),
+    proposeAreas: (path) =>
+      proposeAreas(
+        { git: deps.git, namer: deps.areaNamer, protectedRoots: deps.protectedRoots },
         path,
       ),
     reviewProjectMcp(projectId) {

@@ -36,7 +36,7 @@ import {
 } from './claude-test-support';
 import { AccountProbeError } from './index';
 import type { LaneSandboxSpec } from '../sandbox';
-import type { SessionEvent, SessionSpec } from './types';
+import { CompletionError, type SessionEvent, type SessionSpec } from './types';
 
 function spec(overrides: Partial<SessionSpec> = {}): SessionSpec {
   return {
@@ -1613,6 +1613,100 @@ describe('the account check', () => {
         costUsd: 0.01,
       },
     ]);
+  });
+});
+
+describe('complete', () => {
+  const ASK = {
+    cwd: '/empty',
+    prompt: 'Name these areas.',
+    model: 'haiku',
+    env: { PATH: '/bin', CLAUDE_CONFIG_DIR: '/data/accounts/a/claude' },
+    account: spec().account,
+  } as const;
+  const answer = (text: string): SDKMessage => ({
+    ...resultMessage({ input: 1, output: 1, costUsd: 0 }),
+    result: text,
+  });
+  const adapterFor_ = (script: Script, clock?: Clock) => {
+    const fake = fakeQuery(script);
+    const adapter = createClaudeAdapter({
+      claudePath: '/c',
+      pluginDir: '/h',
+      logger: silentLogger,
+      query: fake.query,
+      allowUnsandboxed: true,
+      ...(clock ? { clock } : {}),
+    });
+    return { adapter, record: fake.record };
+  };
+
+  it('sends the prompt once, with no tool, no settings and no MCP server, and returns the text', async () => {
+    const { adapter, record } = adapterFor_({ messages: [answer('{"areas":[]}')] });
+    await expect(adapter.complete(ASK)).resolves.toBe('{"areas":[]}');
+    expect(record.inputs).toHaveLength(1);
+    expect(record.inputs[0]?.message.content).toBe('Name these areas.');
+    expect(record.options).toMatchObject({
+      cwd: '/empty',
+      model: 'haiku',
+      env: ASK.env,
+      tools: [],
+      maxTurns: 1,
+      settingSources: [],
+      strictMcpConfig: true,
+      persistSession: false,
+      permissionMode: 'default',
+    });
+    expect(record.options?.abortController?.signal.aborted).toBe(true);
+  });
+
+  it('denies any tool the model asks for', async () => {
+    const { adapter, record } = adapterFor_({ messages: [answer('x')] });
+    await adapter.complete(ASK);
+    await expect(
+      record.options?.canUseTool?.('Bash', { command: 'ls' }, {} as never),
+    ).resolves.toMatchObject({ behavior: 'deny' });
+  });
+
+  it('sends nothing when the account is not the one expected', async () => {
+    const { adapter, record } = adapterFor_({
+      messages: [answer('x')],
+      account: {
+        apiProvider: 'firstParty',
+        subscriptionType: 'Claude Max',
+        email: 'other@example.com',
+      },
+    });
+    await expect(adapter.complete(ASK)).rejects.toThrow(CompletionError);
+    expect(record.inputs).toEqual([]);
+  });
+
+  it('fails when Claude Code ends with an error result', async () => {
+    const failed: SDKMessage = {
+      ...resultMessage({ input: 1, output: 1, costUsd: 0 }),
+      is_error: true,
+      result: 'Rate limited',
+    };
+    const { adapter } = adapterFor_({ messages: [failed] });
+    await expect(adapter.complete(ASK)).rejects.toThrow('Rate limited');
+  });
+
+  it('fails when the stream ends with no result', async () => {
+    const { adapter } = adapterFor_({ messages: [] });
+    await expect(adapter.complete(ASK)).rejects.toThrow(CompletionError);
+  });
+
+  it('gives up when the model does not answer in time', async () => {
+    const clock = new ManualClock();
+    const { adapter, record } = adapterFor_({ messages: [], then: 'hang' }, clock);
+    const asked = adapter.complete(ASK);
+    const failure = expect(asked).rejects.toThrow(CompletionError);
+    await vi.waitFor(() => {
+      expect(record.inputs).toHaveLength(1);
+    });
+    clock.advance(120_000);
+    await failure;
+    expect(record.options?.abortController?.signal.aborted).toBe(true);
   });
 });
 

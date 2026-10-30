@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Runs every repository check and prints one summary line, which gives each step's seconds in the order
+# Runs every repository check and ends with one summary line, which gives each step's seconds in the order
 # the steps ran. Each step's output goes to .gate/<step>.log.
 # GATE_STEPS="lint test" limits the run (used by tests and for quick reruns). GATE_SKIP_RUST=1
 # reports rust as skipped even when cargo is installed (the Ubuntu CI job: no Tauri system libraries).
 # Inside a sandbox (TENDB_SANDBOX=1, as a gate 10db runs has it; any other value runs it) e2e is
-# reported as skipped. With CI set, each failing step's last 150 log lines are printed before the
-# summary line.
+# reported as skipped. Each failing step gets a line naming the command that reruns it and its log
+# ("FAILED lint: pnpm lint (log .gate/lint.log)"), which 10db's fix brief reads; with CI set, each
+# failing step's last 150 log lines come before those lines. The summary line is always last.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 # Logs from an earlier run would otherwise sit beside this run's, and a skipped step leaves none.
@@ -18,11 +19,20 @@ start=$SECONDS
 # One entry per step, passed or failed: "lint 31s" or "rust skipped".
 steps_run=()
 failed=()
+# One "FAILED <step>: <command> (log <path>)" line per failing step.
+failed_lines=()
 
 run_step() {
-  local name=$1 began=$SECONDS
+  local name=$1 began=$SECONDS command
   shift
-  "$@" > ".gate/$name.log" 2>&1 || failed+=("$name")
+  # The rerun command drops -s, which only quiets pnpm and make.
+  command=" $* "
+  command=${command// -s / }
+  command=${command# }
+  if ! "$@" > ".gate/$name.log" 2>&1; then
+    failed+=("$name")
+    failed_lines+=("FAILED $name: ${command% } (log .gate/$name.log)")
+  fi
   steps_run+=("$name $((SECONDS - began))s")
 }
 
@@ -78,6 +88,9 @@ if [[ -n "${CI:-}" ]]; then
     echo "::endgroup::"
   done
 fi
+for line in ${failed_lines[@]+"${failed_lines[@]}"}; do
+  echo "$line"
+done
 breakdown=
 # bash 3.2 treats expanding an empty array as unbound under set -u.
 if ((${#steps_run[@]})); then

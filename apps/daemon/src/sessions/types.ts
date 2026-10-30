@@ -121,8 +121,26 @@ export class AccountProbeError extends Error {
   override readonly name = 'AccountProbeError';
 }
 
+/** One question to a model: no tool, no settings, no project files. */
+export interface CompletionSpec {
+  /** An empty folder of 10db's own: Claude Code starts here and finds nothing to read. */
+  readonly cwd: string;
+  readonly prompt: string;
+  readonly model: string;
+  readonly env: Readonly<Record<string, string>>;
+  /** The account the model must be, checked before the prompt is sent. */
+  readonly account: AccountExpectation;
+}
+
+/** The model gave no answer: it was refused, it failed, or it did not answer in time. */
+export class CompletionError extends Error {
+  override readonly name = 'CompletionError';
+}
+
 export interface SessionAdapter {
   readonly provider: Provider;
+  /** Sends `prompt` to the model once and resolves with its text; rejects with a `CompletionError`. */
+  complete(spec: CompletionSpec): Promise<string>;
   start(spec: SessionSpec): SessionHandle;
   /** Starts Claude Code with no prompt only to read who it is. */
   probeAccount(probe: AccountProbeSpec): Promise<SeenAccount>;

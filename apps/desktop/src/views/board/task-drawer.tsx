@@ -30,6 +30,14 @@ import { criteriaLines } from './areas-text';
 import { closeNote } from './batch/close-note';
 import { BatchPanel } from './batch-panel';
 import { FlowSelect } from './flow-select';
+import {
+  draftOf,
+  landingChanged,
+  landingFromDraft,
+  landingLine,
+  type LandingDraft,
+} from './landing-draft';
+import { LandingField } from './landing-field';
 import { RISK_LABEL } from './risk-labels';
 
 const RISKS: readonly RiskTag[] = Object.values(RiskTag);
@@ -49,6 +57,11 @@ export interface TaskDrawerProps {
   readonly workspaceMode?: WorkspaceMode;
   /** The project's gate command, named beside a failed gate's exit code. */
   readonly gateCommand?: string | null;
+  /**
+   * The project's base branch, when it delivers by pull request: the drawer then says where the
+   * task lands, and lets the builder change it until the task has run.
+   */
+  readonly pullRequestBase?: string;
   readonly onClose: () => void;
 }
 
@@ -62,9 +75,14 @@ export function TaskDrawer({
   workstreams = [],
   workspaceMode = WorkspaceMode.Shared,
   gateCommand = null,
+  pullRequestBase,
   onClose,
 }: TaskDrawerProps) {
   const patch = usePatchTask();
+  const [landing, setLanding] = useState<LandingDraft>(() => draftOf(task.landing));
+  const [landingError, setLandingError] = useState<string | null>(null);
+  // Once the task has run its batch decides where its pull request lands.
+  const landingEditable = task.workstreamId === null;
   const initialCriteria = task.acceptanceCriteria.join('\n');
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description);
@@ -85,7 +103,8 @@ export function TaskDrawer({
     criteria !== initialCriteria ||
     flowId !== task.flowId ||
     risks.length !== task.riskTags.length ||
-    risks.some((r) => !task.riskTags.includes(r));
+    risks.some((r) => !task.riskTags.includes(r)) ||
+    (pullRequestBase !== undefined && landingEditable && landingChanged(task.landing, landing));
 
   // Every way out (close button, Escape, outside click, Cancel) comes through here.
   const requestClose = () => {
@@ -106,7 +125,15 @@ export function TaskDrawer({
       setError(NEW_TASK_NO_CRITERIA);
       return;
     }
+    const changesLanding =
+      pullRequestBase !== undefined && landingEditable && landingChanged(task.landing, landing);
+    const where = landingFromDraft(landing);
+    if (changesLanding && !where.ok) {
+      setLandingError(where.error);
+      return;
+    }
     setError(null);
+    setLandingError(null);
     patch.mutate(
       {
         taskId: task.id,
@@ -116,6 +143,7 @@ export function TaskDrawer({
           acceptanceCriteria: lines,
           flowId,
           riskTags: risks,
+          ...(changesLanding && where.ok ? { landing: where.landing } : {}),
         },
       },
       { onSuccess: onClose },
@@ -216,6 +244,24 @@ export function TaskDrawer({
             setRisks(values.filter(isRisk));
           }}
         />
+        {pullRequestBase === undefined ? null : landingEditable ? (
+          <LandingField
+            baseBranch={pullRequestBase}
+            value={landing}
+            error={landingError}
+            onChange={(draft) => {
+              setLanding(draft);
+              setLandingError(null);
+            }}
+          />
+        ) : (
+          <Stack gap={2}>
+            <Text size="sm" fw={500}>
+              Where it lands
+            </Text>
+            <Text size="sm">{landingLine(task, batch, pullRequestBase)}</Text>
+          </Stack>
+        )}
       </Stack>
       {/* Pinned to the drawer's bottom edge, so Save never scrolls away. */}
       <Group

@@ -9,6 +9,7 @@ import {
   BoardColumnId,
   BoardColumnInput,
   BoardColumnPatch,
+  AreaProposalInput,
   DomainError,
   EventsHead,
   FlowId,
@@ -146,9 +147,12 @@ export function createApp(deps: ApiDeps) {
     .post(
       '/projects/:projectId/tasks',
       validator('json', (value): TaskInput => TaskInput.parse(value)),
-      (c) =>
+      async (c) =>
         c.json(
-          deps.services.createTask(ProjectId.parse(c.req.param('projectId')), c.req.valid('json')),
+          await deps.services.createTask(
+            ProjectId.parse(c.req.param('projectId')),
+            c.req.valid('json'),
+          ),
           201,
         ),
     )
@@ -177,6 +181,11 @@ export function createApp(deps: ApiDeps) {
       '/folders/inspect',
       validator('json', (value): FolderInspectInput => FolderInspectInput.parse(value)),
       async (c) => c.json(await deps.services.inspectFolder(c.req.valid('json').path)),
+    )
+    .post(
+      '/folders/propose-areas',
+      validator('json', (value): AreaProposalInput => AreaProposalInput.parse(value)),
+      async (c) => c.json(await deps.services.proposeAreas(c.req.valid('json').path)),
     )
     .get('/flows', (c) => c.json(deps.services.listFlows()))
     .patch(
@@ -350,8 +359,10 @@ export function createApp(deps: ApiDeps) {
     .patch(
       '/tasks/:taskId',
       validator('json', (value): TaskPatch => TaskPatch.parse(value)),
-      (c) =>
-        c.json(deps.services.patchTask(TaskId.parse(c.req.param('taskId')), c.req.valid('json'))),
+      async (c) =>
+        c.json(
+          await deps.services.patchTask(TaskId.parse(c.req.param('taskId')), c.req.valid('json')),
+        ),
     )
     .post(
       '/tasks/:taskId/move',

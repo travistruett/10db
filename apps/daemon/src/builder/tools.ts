@@ -79,7 +79,7 @@ export function createBuilderTools(
           boardStatus: task.boardStatus,
           boardColumnId: task.boardColumnId,
         })),
-    [BuilderToolName.CreateTask]: (args) => {
+    [BuilderToolName.CreateTask]: async (args) => {
       const { projectId, ...loose } = BuilderToolInputs.create_task.parse(args);
       const trimmed = {
         ...loose,
@@ -89,9 +89,9 @@ export function createBuilderTools(
       };
       const refusal = newTaskRefusal(trimmed);
       if (refusal !== null) throw new DomainError('invalid', refusal);
-      return taskSummary(services.createTask(projectId, TaskInput.parse(trimmed)));
+      return taskSummary(await services.createTask(projectId, TaskInput.parse(trimmed)));
     },
-    [BuilderToolName.EditTask]: (args) => {
+    [BuilderToolName.EditTask]: async (args) => {
       const { taskId, ...changes } = BuilderToolInputs.edit_task.parse(args);
       const patch: Record<string, unknown> = { ...changes };
       if (changes.title !== undefined) patch['title'] = changes.title.trim();
@@ -101,7 +101,7 @@ export function createBuilderTools(
         if (criteria.length === 0) throw new DomainError('invalid', NEW_TASK_NO_CRITERIA);
         patch['acceptanceCriteria'] = criteria;
       }
-      return taskSummary(services.patchTask(taskId, TaskPatch.parse(patch)));
+      return taskSummary(await services.patchTask(taskId, TaskPatch.parse(patch)));
     },
     [BuilderToolName.RemoveTask]: (args) =>
       taskSummary(services.removeTask(BuilderToolInputs.remove_task.parse(args).taskId)),

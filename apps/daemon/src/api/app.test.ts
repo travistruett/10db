@@ -7,6 +7,7 @@ import {
   NotFoundError,
   PROTOCOL_VERSION,
   WorkstreamDto,
+  type AreaProposalResult,
   type DaemonEvent,
 } from '@10db/contracts';
 import { defineWebSocketHelper } from 'hono/ws';
@@ -52,6 +53,7 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
     eventsHead: () => 0,
     reviewProjectMcp: none,
     inspectFolder: none,
+    proposeAreas: none,
     listNetworkHosts: none,
     allowNetworkHost: none,
     removeNetworkHost: none,
@@ -688,6 +690,7 @@ describe('batch routes', () => {
     state: 'CUTTING',
     branch: null,
     baseBranch: 'main',
+    autoMerge: true,
     baseSha: null,
     repo: null,
     prUrl: null,
@@ -956,5 +959,42 @@ describe('folder inspection route', () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual(refusal);
     expect(seen).toEqual(['/nowhere']);
+  });
+});
+
+describe('area proposal route', () => {
+  it('POST /folders/propose-areas refuses a relative path with 400', async () => {
+    const res = await app().request('/folders/propose-areas', {
+      method: 'POST',
+      ...json,
+      body: JSON.stringify({ path: 'relative/dir' }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('POST /folders/propose-areas answers the proposal the service makes for the path', async () => {
+    const proposal: AreaProposalResult = {
+      ok: true,
+      proposal: {
+        namedBy: 'structure',
+        areas: [{ name: 'root', globs: ['*'], reason: 'The top of the repository.' }],
+      },
+    };
+    const seen: string[] = [];
+    const res = await app(
+      stubServices({
+        proposeAreas: (path) => {
+          seen.push(path);
+          return Promise.resolve(proposal);
+        },
+      }),
+    ).request('/folders/propose-areas', {
+      method: 'POST',
+      ...json,
+      body: JSON.stringify({ path: '/repo' }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual(proposal);
+    expect(seen).toEqual(['/repo']);
   });
 });
