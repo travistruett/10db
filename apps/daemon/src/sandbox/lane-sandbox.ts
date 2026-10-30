@@ -1,3 +1,4 @@
+import { realpathSync } from 'node:fs';
 import type { PermissionRuleDto, ProjectDto } from '@10db/contracts';
 import { prepareCommandEnv, withoutTempDirPaths } from './command-env';
 import { deniedEnvNames } from './env-allowlist';
@@ -19,7 +20,7 @@ import {
   type LaneProcessWatch,
   type LaneProcessSetup,
 } from './lane-processes';
-import { cachedProcessTable, systemProcessTable } from './process-table';
+import { cachedProcessTable, systemCwds, systemProcessTable } from './process-table';
 import { isEqualOrUnder } from './protected-reads';
 import type { SandboxRuntime } from './srt-launch';
 import { createLaneTempDir, LANE_TEMP_ROOT, removeAll, removeLaneTempDir } from './temp-dir';
@@ -109,6 +110,15 @@ function removeLaneFiles(envFile: string | null, tmpDir: string, tmpRoot: string
   ]);
 }
 
+/** `path` with its links resolved, as `lsof` reports a working directory; `path` when it can't be. */
+function realPathOr(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
+}
+
 /** Claude Code's spelling of an absolute path in a permission rule: `//` stands for the root. */
 const ruleScope = (path: string): string => `/${path}`;
 
@@ -119,6 +129,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
   const processDeps: LaneProcessSetup = deps.processes ?? {
     table: systemProcessTable,
     sampleTable: cachedProcessTable(systemProcessTable, 500),
+    cwds: systemCwds,
   };
   return {
     async forSession(input) {
@@ -142,7 +153,12 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
       try {
         // Outside every lane-writable dir: it names the processes to stop after a daemon restart.
         ledger = createProcessLedger(tmpRoot);
-        const watch: LaneProcessWatch = createLaneProcessWatch({ ...processDeps, ledger });
+        // A job a command hands to launchd at once is named by working in the checkout or temp dir.
+        const watch: LaneProcessWatch = createLaneProcessWatch({
+          ...processDeps,
+          ledger,
+          places: [...new Set([checkout, tmpDir, realPathOr(tmpDir)])],
+        });
         const commandEnv = prepareCommandEnv(tmpDir, deps.home, input.env);
         // Claude Code strips some of these from a sandboxed command's env; the shell sets every one
         // of them again from this file before each command.
@@ -253,7 +269,8 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
                 removeLaneFiles(ownEnvFile, tmpDir, tmpRoot);
               },
               () => {
-                removeProcessLedger(ownLedger, tmpRoot);
+                // Processes it could not stop stay named for the next daemon start to stop.
+                if (!watch.pending()) removeProcessLedger(ownLedger, tmpRoot);
               },
             ]);
           },

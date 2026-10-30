@@ -373,6 +373,26 @@ describe('writeAccess', () => {
     expect(writeAccess('~/.zshrc', context()).access).toBe('claude-protected');
   });
 
+  it('flags the sandbox temp root: a process ledger there names what the next start signals', () => {
+    const temp = join(root, 't');
+    expect(writeAccess(join(temp, '10db-proc-0123456789ab.json'), context()).access).toBe(
+      'sandbox-temp',
+    );
+    expect(writeAccess(join(temp, '10db-otherxyz', 'a'), context()).access).toBe('sandbox-temp');
+    expect(writeAccess(temp, context()).access).toBe('sandbox-temp');
+  });
+
+  it('flags the temp root through a link', () => {
+    mkdirSync(join(root, 't'), { recursive: true });
+    symlinkSync(join(root, 't'), join(checkout, 'tl'));
+    expect(writeAccess('tl/10db-proc-0123456789ab.json', context()).access).toBe('sandbox-temp');
+  });
+
+  it('allows the session’s own temp dir', () => {
+    const own = join(root, 't', '10db-ownabc', 'scratch.txt');
+    expect(writeAccess(own, context()).access).toBe('ok');
+  });
+
   it('allows ordinary source', () => {
     expect(writeAccess('src/a.ts', context())).toEqual({
       access: 'ok',
@@ -422,6 +442,18 @@ describe('fileAccessJudge in the guard', () => {
       decision: 'deny',
       reason: '.git/ internals are never edited; use the commit tool.',
     });
+  });
+
+  it('refuses a write into the sandbox temp root with no card, but not into the session’s own temp dir', () => {
+    const judge = fileAccessJudge(context());
+    const ledger = join(root, 't', '10db-proc-0123456789ab.json');
+    expect(guard(judge, 'Write', { file_path: ledger, content: '{}' })).toEqual({
+      decision: 'deny',
+      reason: `${ledger} is in 10db's sandbox temp root, outside this session's temp dir; 10db never lets a lane write there.`,
+    });
+    expect(guard(judge, 'Edit', { file_path: ledger }).decision).toBe('deny');
+    const own = join(root, 't', '10db-ownabc', 'scratch.txt');
+    expect(judge.write(own)).toBe('ok');
   });
 
   const overLong = 'A path over 4096 characters or 1024 parts is never judged; 10db refuses it.';

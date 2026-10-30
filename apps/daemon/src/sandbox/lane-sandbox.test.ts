@@ -993,6 +993,9 @@ describe.skipIf(SANDBOXED)('a lane session’s processes', () => {
   const T = 'Thu Oct 30 12:00:00 2026';
   /** Fake processes: a signal ends the process (or the whole group when negative). */
   let rows: { pid: number; ppid: number; pgid: number; startedAt: string }[];
+  /** Working directories, by pid, as `lsof` would report them. */
+  let cwd: Map<number, string>;
+  let tableFails: boolean;
   function withProcesses(): LaneSandbox {
     return createLaneSandbox({
       home,
@@ -1003,7 +1006,14 @@ describe.skipIf(SANDBOXED)('a lane session’s processes', () => {
       systemPrefixes: [],
       runtime: FAKE_SRT,
       processes: {
-        table: () => Promise.resolve(rows.map((r) => ({ ...r }))),
+        table: () =>
+          tableFails
+            ? Promise.reject(new Error('ps failed'))
+            : Promise.resolve(rows.map((r) => ({ ...r }))),
+        cwds: (pids) =>
+          Promise.resolve(
+            new Map(pids.flatMap((pid) => (cwd.has(pid) ? [[pid, cwd.get(pid) ?? '']] : []))),
+          ),
         signal: (target) => {
           const before = rows.length;
           rows = rows.filter((r) => (target < 0 ? r.pgid !== -target : r.pid !== target));
@@ -1022,6 +1032,41 @@ describe.skipIf(SANDBOXED)('a lane session’s processes', () => {
       { pid: 300, ppid: 200, pgid: 300, startedAt: T },
       { pid: 301, ppid: 300, pgid: 300, startedAt: T },
     ];
+    cwd = new Map();
+    tableFails = false;
+  });
+
+  it('stops a job its command handed to launchd at once, working in the checkout or the temp dir', async () => {
+    const session = await withProcesses().forSession(input());
+    try {
+      rows.push(
+        { pid: 600, ppid: 1, pgid: 600, startedAt: T },
+        { pid: 610, ppid: 1, pgid: 610, startedAt: T },
+        { pid: 700, ppid: 1, pgid: 700, startedAt: T },
+      );
+      cwd.set(600, join(realpathSync(repo.path), 'src'));
+      cwd.set(610, realpathSync(session.tmpDir));
+      cwd.set(700, home);
+      await session.trackProcesses({ pid: 200, startedAt: T });
+      await session.endProcesses();
+      expect(rows.map((r) => r.pid)).toEqual([100, 700]);
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it('keeps the ledger when the session’s processes could not be stopped, for the next start', async () => {
+    const session = await withProcesses().forSession(input());
+    await session.trackProcesses({ pid: 200, startedAt: T });
+    tableFails = true;
+    await expect(session.endProcesses()).rejects.toThrow('ps failed');
+    session.dispose();
+    const left = readdirSync(tmpRoot).filter((n) => n.startsWith('10db-proc-'));
+    expect(left).toHaveLength(1);
+    const ledger = JSON.parse(readFileSync(join(tmpRoot, left[0] ?? ''), 'utf8')) as {
+      members: { pid: number }[];
+    };
+    expect(ledger.members.map((m) => m.pid).sort()).toEqual([200, 300, 301]);
   });
 
   it('stops what the session’s commands started when the session ends', async () => {

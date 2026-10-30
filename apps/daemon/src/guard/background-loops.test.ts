@@ -31,6 +31,18 @@ const ENDLESS: readonly (readonly [string, string])[] = [
   ['a node busy loop', "node -e 'for(;;){}' &"],
   ['a perl busy loop', "perl -e '1 while 1' &"],
   ['coproc', 'coproc while :; do :; done'],
+  ['nice with a niceness', 'nice -n 19 yes > /dev/null &'],
+  ['nice with a joined niceness', 'nice -n19 yes > /dev/null &'],
+  ['env with a cleared environment', 'env -i yes &'],
+  ['env unsetting a name, then an assignment', 'env -u HOME A=1 yes &'],
+  ['caffeinate holding the Mac awake', 'caffeinate -i yes &'],
+  ['caffeinate with a timeout value', 'caffeinate -t 60 yes &'],
+  ['stdbuf with a joined mode', 'stdbuf -oL yes &'],
+  ['stdbuf with a separate mode', 'stdbuf -o L yes &'],
+  ['exec with a name', 'exec -a loop yes &'],
+  ['time -p', 'time -p yes &'],
+  ['options ended by a double dash', 'nice -n 5 -- yes &'],
+  ['wrappers stacked with options', 'nohup nice -n 19 env -i yes &'],
 ];
 
 const ALLOWED: readonly (readonly [string, string])[] = [
@@ -54,6 +66,8 @@ const ALLOWED: readonly (readonly [string, string])[] = [
   ['sh -c with a bounded script, backgrounded', "sh -c 'for i in 1 2; do :; done' &"],
   ['&> redirect', 'pnpm test &> out.log'],
   ['a pipe-ampersand', 'pnpm test |& tee out.log'],
+  ['a wrapper with options around a command that ends', 'nice -n 19 pnpm test &'],
+  ['env with options around a command that ends', 'env -i PATH=/bin make &'],
 ];
 
 describe('startsEndlessBackgroundLoop', () => {
@@ -71,6 +85,12 @@ describe('startsEndlessBackgroundLoop', () => {
     startsEndlessBackgroundLoop(command);
     startsEndlessBackgroundLoop('"'.repeat(200_000));
     startsEndlessBackgroundLoop('('.repeat(200_000));
+    // A shell flag the old pattern backtracked over quadratically.
+    startsEndlessBackgroundLoop(`sh -${'c'.repeat(100_000)}X`);
+    // Many C-style fors whose parens never close.
+    startsEndlessBackgroundLoop('for (( '.repeat(50_000));
+    // Many wrappers, each with options.
+    startsEndlessBackgroundLoop('nice -n 1 '.repeat(50_000));
     expect(performance.now() - started).toBeLessThan(2_000);
   });
 

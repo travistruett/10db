@@ -2,7 +2,8 @@ import { randomBytes } from 'node:crypto';
 import { lstatSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { z } from 'zod';
-import type { ProcessRow, ProcessTable } from './process-table';
+import type { CwdReader, ProcessRow, ProcessTable } from './process-table';
+import { isEqualOrUnder } from './protected-reads';
 import { SandboxTempDirError } from './temp-dir';
 
 /**
@@ -14,9 +15,13 @@ import { SandboxTempDirError } from './temp-dir';
  * launchd, so a walk down from the session's pid finds nothing. So the watch samples the tree while
  * the session runs and remembers every process it saw, by pid and start time. It also remembers
  * their process groups: a group outlives its leader, so a process forked after the last sample into
- * a group the watch knows is found too. The memory is a ledger file in the temp root, outside every
- * lane's reach, so a daemon that restarts finds and stops what the last one left. The process
- * environment is never read, and nothing is signalled unless its pid and start time still match.
+ * a group the watch knows is found too. A command that returns at once (`pnpm dev > log 2>&1 &`)
+ * hands its job to launchd before any sample sees its shell, so a child of launchd started since the
+ * session began whose working directory is in the session's checkout or temp dir is the session's
+ * too: its working directory is read (`lsof -d cwd`) once. The memory is a ledger file in the temp
+ * root, which neither a lane's commands nor its file tools may write, so a daemon that restarts finds
+ * and stops what the last one left. The process environment is never read, and nothing is signalled
+ * unless its pid and start time still match.
  */
 
 /** What the watch remembers about one process. */
@@ -48,6 +53,13 @@ export interface LaneProcessDeps {
 export interface LaneProcessWatchDeps extends LaneProcessDeps {
   /** Where the watch writes what it has seen; null keeps it in memory only. */
   readonly ledger: string | null;
+  /** Reads processes' working directories; without it, launchd's children are never named. */
+  readonly cwds?: CwdReader;
+  /**
+   * The session's checkout and temp dir, each spelled as `lsof` reports it (links resolved): a
+   * child of launchd started since the session began that works in one is the session's.
+   */
+  readonly places?: readonly string[];
   /** How often the tree is sampled while the session runs. */
   readonly intervalMs?: number;
   readonly timers?: {
@@ -57,7 +69,7 @@ export interface LaneProcessWatchDeps extends LaneProcessDeps {
 }
 
 /** How a session's processes are read, sampled and signalled: the watch's deps without its ledger. */
-export type LaneProcessSetup = Omit<LaneProcessWatchDeps, 'ledger' | 'onError'>;
+export type LaneProcessSetup = Omit<LaneProcessWatchDeps, 'ledger' | 'onError' | 'places'>;
 
 export interface LaneProcessWatch {
   /** Starts watching under the session's own process, sampling now and then on an interval. */
@@ -67,6 +79,8 @@ export interface LaneProcessWatch {
    * machine's processes cannot be read, having stopped nothing it could not identify.
    */
   end(): Promise<void>;
+  /** True while it remembers processes it has not stopped: tracked, and not ended successfully. */
+  pending(): boolean;
 }
 
 const DEFAULT_INTERVAL_MS = 1_000;
@@ -217,6 +231,7 @@ export function createLaneProcessWatch(deps: LaneProcessWatchDeps): LaneProcessW
   let saved = '';
   /** Whether the session is being watched; `end` clears it while a sample may be in flight. */
   const watching = { on: false };
+  const isWatching = (): boolean => watching.on;
   let timer: { cancel(): void } | null = null;
 
   function persist(): void {
@@ -231,12 +246,64 @@ export function createLaneProcessWatch(deps: LaneProcessWatchDeps): LaneProcessW
     }
   }
 
-  async function sample(): Promise<void> {
+  const places = deps.places ?? [];
+  /** The session's own process's start, in ms; NaN when unknown, and then the time doesn't narrow. */
+  let since = Number.NaN;
+  /** Children of launchd whose working dir was read and found not to be the session's. */
+  let judged = new Set<string>();
+  const rowKey = (row: ProcessRow): string => `${String(row.pid)}@${row.startedAt}`;
+
+  /**
+   * Children of launchd that started since the session began, with their working dir in its
+   * checkout or temp dir: jobs a command left when it returned before any sample saw its shell.
+   * Each is read once; one found not to be the session's is not read again.
+   */
+  async function orphansIn(
+    rows: readonly ProcessRow[],
+    members: readonly ProcessMember[],
+  ): Promise<ProcessMember[]> {
+    if (deps.cwds === undefined || places.length === 0) return [];
+    const guard = protection(rows, ownPid);
+    const mine = new Set(members.map((m) => m.pid));
+    const present = new Set(rows.map(rowKey));
+    // Forget what is gone, so the set stays the size of the machine.
+    judged = new Set([...judged].filter((key) => present.has(key)));
+    const candidates = rows.filter((row) => {
+      if (row.ppid !== 1 || guard.pid(row.pid) || mine.has(row.pid)) return false;
+      if (judged.has(rowKey(row))) return false;
+      const started = Date.parse(row.startedAt);
+      return Number.isNaN(since) || Number.isNaN(started) || started >= since;
+    });
+    if (candidates.length === 0) return [];
+    const dirs = await deps.cwds(candidates.map((row) => row.pid));
+    const found: ProcessMember[] = [];
+    for (const row of candidates) {
+      const dir = dirs.get(row.pid);
+      if (dir !== undefined && places.some((place) => isEqualOrUnder(dir, place))) {
+        found.push({ pid: row.pid, startedAt: row.startedAt, pgid: row.pgid });
+      } else {
+        judged.add(rowKey(row));
+      }
+    }
+    return found;
+  }
+
+  /** Who the session's processes are in `rows`: the known ones and theirs, and launchd's orphans. */
+  async function membersIn(rows: readonly ProcessRow[]): Promise<ProcessMember[]> {
+    const members = findMembers(rows, known, ownPid);
+    const orphans = await orphansIn(rows, members);
+    return orphans.length === 0 ? members : findMembers(rows, [...members, ...orphans], ownPid);
+  }
+
+  async function sample(table: ProcessTable): Promise<void> {
     try {
-      const rows = await sampleTable();
+      const rows = await table();
       if (!watching.on) return;
       // What is gone is forgotten; what is new is remembered.
-      known = findMembers(rows, known, ownPid);
+      const members = await membersIn(rows);
+      // `end` may have run while the working dirs were read.
+      if (!isWatching()) return;
+      known = members;
       persist();
     } catch (error) {
       deps.onError?.(error);
@@ -249,7 +316,7 @@ export function createLaneProcessWatch(deps: LaneProcessWatchDeps): LaneProcessW
     timer?.cancel();
     timer = timers.setTimeout(() => {
       if (!watching.on) return;
-      void sample().then(() => {
+      void sample(sampleTable).then(() => {
         schedule();
       });
     }, interval);
@@ -258,8 +325,10 @@ export function createLaneProcessWatch(deps: LaneProcessWatchDeps): LaneProcessW
   return {
     async track(root) {
       watching.on = true;
+      since = Date.parse(root.startedAt);
       known = [{ pid: root.pid, startedAt: root.startedAt, pgid: 0 }];
-      await sample();
+      // A fresh reading: a shared one may predate the session's process, and would forget it.
+      await sample(deps.table);
       schedule();
     },
     async end() {
@@ -267,10 +336,22 @@ export function createLaneProcessWatch(deps: LaneProcessWatchDeps): LaneProcessW
       timer?.cancel();
       timer = null;
       if (known.length === 0) return;
+      // What a command left since the last sample. A table that can't be read is told of below.
+      try {
+        const rows = await deps.table();
+        const orphans = await orphansIn(rows, findMembers(rows, known, ownPid));
+        if (orphans.length > 0) {
+          known = [...known, ...orphans];
+          persist();
+        }
+      } catch (error) {
+        deps.onError?.(error);
+      }
       await terminateMembers(known, deps);
       known = [];
       persist();
     },
+    pending: () => known.length > 0,
   };
 }
 

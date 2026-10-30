@@ -93,7 +93,7 @@ const PNPM_CARD_BODY =
   "pnpm 12 locks its store in a /tmp directory shared with every lane and your own pnpm, which a lane can't write. Approving lets the command run, and it will fail on that lock. Run it yourself, or use npm.";
 
 const LOOP_CARD_BODY =
-  'This command starts something in the background that never ends (a loop with no exit, `yes`, or the like). It keeps running after the command and the session that started it, using a core until something stops it. 10db stops what a session leaves when the session ends, but a loop like this can still hold the Mac busy for the whole session and make gates and tests fail on timeouts.';
+  'This command starts something in the background that never ends (a loop with no exit, `yes`, or the like). It keeps running after the command and the session that started it, using a core until something stops it. 10db tries to stop what a session leaves when the session ends, but it cannot promise to find all of it (a process that moves out of the checkout and temp dir within a second escapes), and until then a loop like this holds the Mac busy and makes gates and tests fail on timeouts.';
 
 /**
  * What a lane is told when the builder denies a call. It names the call and says the denial covers

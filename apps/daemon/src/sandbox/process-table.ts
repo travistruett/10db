@@ -42,6 +42,45 @@ export const systemProcessTable: ProcessTable = async () => {
   return parseProcessTable(stdout);
 };
 
+/** Reads the working directory of each pid it can; a pid it cannot read (gone, another user's) is left out. */
+export type CwdReader = (pids: readonly number[]) => Promise<ReadonlyMap<number, string>>;
+
+/** Parses `lsof -Fn -d cwd` output: a `p<pid>` line, then the `n<path>` of its working directory. */
+export function parseCwds(output: string): Map<number, string> {
+  const dirs = new Map<number, string>();
+  let pid: number | null = null;
+  for (const line of output.split('\n')) {
+    if (line.startsWith('p')) {
+      const value = Number(line.slice(1));
+      pid = Number.isInteger(value) && value > 0 ? value : null;
+    } else if (line.startsWith('n/') && pid !== null && !dirs.has(pid)) {
+      dirs.set(pid, line.slice(1));
+    }
+  }
+  return dirs;
+}
+
+/** Working directories by `lsof`. Throws when `lsof` cannot run; a pid it could not list is left out. */
+export const systemCwds: CwdReader = async (pids) => {
+  if (pids.length === 0) return new Map();
+  const args = ['-w', '-n', '-P', '-a', '-d', 'cwd', '-Fn', '-p', pids.join(',')];
+  try {
+    const { stdout } = await run('/usr/sbin/lsof', args, {
+      env: { LC_ALL: 'C' },
+      maxBuffer: 16 * 1024 * 1024,
+    });
+    return parseCwds(stdout);
+  } catch (error) {
+    // lsof exits 1 when a pid is gone or can't be listed; what it did list still counts. A failure
+    // to run it at all (no exit code) is thrown.
+    const failed = error as { code?: unknown; stdout?: unknown };
+    if (typeof failed.code === 'number' && typeof failed.stdout === 'string') {
+      return parseCwds(failed.stdout);
+    }
+    throw error;
+  }
+};
+
 /**
  * Shares one reading among callers within `ttlMs`, so many lane sessions sampling together cost one
  * `ps`. A reading in flight is joined, never repeated.

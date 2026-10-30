@@ -24,6 +24,9 @@ class World {
   ];
   readonly signals: { target: number; sig: string }[] = [];
   readonly ignoresTerm = new Set<number>();
+  /** Each process's working directory, as `lsof` would report it. */
+  readonly cwd = new Map<number, string>();
+  cwdReads = 0;
 
   add(pid: number, ppid: number, pgid: number, startedAt = T1): void {
     this.rows.push({ pid, ppid, pgid, startedAt });
@@ -37,6 +40,15 @@ class World {
     return this.rows.some((r) => r.pid === pid);
   }
   readonly table: ProcessTable = () => Promise.resolve(this.rows.map((r) => ({ ...r })));
+  readonly cwds = (pids: readonly number[]): Promise<ReadonlyMap<number, string>> => {
+    this.cwdReads += 1;
+    const found = new Map<number, string>();
+    for (const pid of pids) {
+      const dir = this.cwd.get(pid);
+      if (dir !== undefined && this.has(pid)) found.set(pid, dir);
+    }
+    return Promise.resolve(found);
+  };
   readonly signal = (target: number, sig: NodeJS.Signals): boolean => {
     this.signals.push({ target, sig });
     const hit = this.rows.filter((r) => (target < 0 ? r.pgid === -target : r.pid === target));
@@ -194,6 +206,126 @@ describe('a lane process watch', () => {
     expect(after.members).toEqual([]);
     removeProcessLedger(ledger, dir);
     expect(existsSync(ledger)).toBe(false);
+  });
+
+  describe('a job whose command returned at once, so its shell was never sampled', () => {
+    const WORKTREE = '/Users/me/.10db/worktrees/p/lane';
+    const LANE_TMP = '/private/tmp/10db-abc123';
+    const T2 = 'Thu Oct 30 12:00:07 2026';
+    function setup(): void {
+      world.add(200, DAEMON, DAEMON_GROUP); // claude, in the daemon's group as spawned
+      // `pnpm dev > /dev/null 2>&1 &`: the command's shell (300) forked the job and exited within
+      // milliseconds, before any sample; the job went to launchd.
+      world.add(600, 1, 300, T2);
+      world.cwd.set(600, `${WORKTREE}/apps/web`);
+      world.add(601, 600, 300, T2); // what the job started
+      // `(while :; do :; done) &` from the lane's temp dir.
+      world.add(610, 1, 610, T2);
+      world.cwd.set(610, LANE_TMP);
+      // Not the lane's: a launchd job started meanwhile elsewhere, and one in the worktree from
+      // before the session began.
+      world.add(700, 1, 700, T2);
+      world.cwd.set(700, '/Applications/Other.app');
+      world.add(701, 1, 701, T0);
+      world.cwd.set(701, WORKTREE);
+      // A worktree whose name merely starts with this one's.
+      world.add(702, 1, 702, T2);
+      world.cwd.set(702, `${WORKTREE}-other`);
+    }
+    const watchDeps = (ledger: string | null = null) => ({
+      ...deps(),
+      cwds: world.cwds,
+      places: [WORKTREE, LANE_TMP],
+      ledger,
+    });
+
+    it('stops it when the session ends, by its working directory in the checkout or temp dir', async () => {
+      setup();
+      const watch = createLaneProcessWatch(watchDeps());
+      await watch.track(ROOT);
+      await watch.end();
+      for (const pid of [600, 601, 610]) expect(world.has(pid)).toBe(false);
+      for (const pid of [DAEMON, 700, 701, 702]) expect(world.has(pid)).toBe(true);
+    });
+
+    it('finds one that left between the last sample and the end', async () => {
+      world.add(200, DAEMON, DAEMON_GROUP);
+      const watch = createLaneProcessWatch(watchDeps());
+      await watch.track(ROOT);
+      world.add(600, 1, 300, T2);
+      world.cwd.set(600, WORKTREE);
+      await watch.end();
+      expect(world.has(600)).toBe(false);
+    });
+
+    it('records it in the ledger, so a daemon that dies before the end still has it stopped', async () => {
+      setup();
+      const ledger = createProcessLedger(dir);
+      await createLaneProcessWatch(watchDeps(ledger)).track(ROOT);
+      const seen = JSON.parse(readFileSync(ledger, 'utf8')) as { members: { pid: number }[] };
+      expect(seen.members.map((m) => m.pid)).toEqual(expect.arrayContaining([600, 601, 610]));
+      world.die(200);
+      await reapLaneProcessLedgers(dir, deps({ ownPid: 9999 }));
+      for (const pid of [600, 601, 610]) expect(world.has(pid)).toBe(false);
+      expect(world.has(700)).toBe(true);
+    });
+
+    it('reads each new orphan’s working directory once, not on every sample', async () => {
+      setup();
+      const ticks: (() => void)[] = [];
+      const watch = createLaneProcessWatch({
+        ...watchDeps(),
+        timers: {
+          setTimeout(fn) {
+            ticks.push(fn);
+            return { cancel: () => undefined };
+          },
+        },
+      });
+      await watch.track(ROOT);
+      const after = world.cwdReads;
+      for (let n = 0; n < 3; n += 1) {
+        ticks.shift()?.();
+        await new Promise((r) => setImmediate(r));
+      }
+      expect(world.cwdReads).toBe(after);
+    });
+  });
+
+  it('takes its first sample fresh, not from a shared reading made before the session’s process', async () => {
+    const before = world.rows.map((r) => ({ ...r }));
+    const loops = incident();
+    const watch = createLaneProcessWatch({
+      ...deps(),
+      // A reading from before claude was spawned, as the shared cache can hand out.
+      sampleTable: () => Promise.resolve(before),
+      ledger: null,
+    });
+    await watch.track(ROOT);
+    world.die(200);
+    world.die(300);
+    await watch.end();
+    for (const pid of loops) expect(world.has(pid)).toBe(false);
+  });
+
+  it('says whether it still holds processes it has not stopped', async () => {
+    incident();
+    const failing = { fail: false };
+    const watch = createLaneProcessWatch({
+      ...deps({
+        table: () => (failing.fail ? Promise.reject(new Error('ps failed')) : world.table()),
+      }),
+      ledger: null,
+    });
+    expect(watch.pending()).toBe(false);
+    await watch.track(ROOT);
+    expect(watch.pending()).toBe(true);
+    failing.fail = true;
+    await expect(watch.end()).rejects.toThrow('ps failed');
+    expect(watch.pending()).toBe(true);
+    failing.fail = false;
+    await watch.end();
+    expect(watch.pending()).toBe(false);
   });
 
   it('survives a table it cannot read: it stops nothing and says so', async () => {

@@ -104,24 +104,31 @@ function tokenize(text: string): Token[] {
 }
 
 /** Words that leave the next word still in command position. */
-const PREFIX_WORDS = new Set([
-  '{',
-  '!',
-  'time',
-  'do',
-  'then',
-  'else',
-  'elif',
-  'nohup',
-  'exec',
-  'command',
-  'builtin',
-  'nice',
-  'setsid',
-  'env',
-  'stdbuf',
-  'caffeinate',
+const PREFIX_WORDS = new Set(['{', '!', 'do', 'then', 'else', 'elif']);
+/**
+ * Commands that run the command after their own options: each with the options that take their
+ * value as the next word (`nice -n 19`). Any other word starting with `-` is an option on its own.
+ */
+const WRAPPERS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  ['time', new Set<string>()],
+  ['nohup', new Set<string>()],
+  ['exec', new Set(['-a'])],
+  ['command', new Set<string>()],
+  ['builtin', new Set<string>()],
+  ['nice', new Set(['-n'])],
+  ['setsid', new Set<string>()],
+  ['env', new Set(['-u', '-C', '-P'])],
+  ['stdbuf', new Set(['-i', '-o', '-e'])],
+  ['caffeinate', new Set(['-t', '-w'])],
 ]);
+
+/** A shell's `-c` among its flags (`-c`, `-lc`, `-xc`): a plain character check, linear in the word. */
+function isCommandFlag(word: string): boolean {
+  return /^-[a-z]+$/.test(word) && word.includes('c');
+}
+
+/** How many tokens a `for ((…))` header is read for: enough for any real one, and linear overall. */
+const MAX_FOR_HEADER_TOKENS = 64;
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
 const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh']);
 const INTERPRETERS = new Set(['python', 'python3', 'node', 'perl', 'ruby', 'php', 'awk']);
@@ -156,7 +163,8 @@ function isEndlessCondition(cond: readonly Token[], until: boolean): boolean {
 function isEndlessForParens(tokens: readonly Token[], from: number): boolean {
   let depth = 0;
   let text = '';
-  for (let i = from; i < tokens.length; i += 1) {
+  const end = Math.min(tokens.length, from + MAX_FOR_HEADER_TOKENS);
+  for (let i = from; i < end; i += 1) {
     const token = tokens[i];
     if (token === undefined) break;
     if (token.kind === 'op' && token.value === '(') depth += 1;
@@ -189,18 +197,38 @@ function scan(text: string, depth: number): Scan {
     }
     return args;
   };
+  /** The value-taking options of the wrapper whose options are being read; null outside one. */
+  let wrapperOptions: ReadonlySet<string> | null = null;
   for (let i = 0; i < tokens.length; i += 1) {
     const token = tokens[i];
     if (token === undefined) break;
     if (token.kind === 'op') {
       if (token.value === '&') background = true;
       atCommand = true;
+      wrapperOptions = null;
       continue;
     }
     if (!atCommand) continue;
+    if (wrapperOptions !== null) {
+      if (token.value === '--') {
+        wrapperOptions = null;
+        continue;
+      }
+      if (token.value.length > 1 && token.value.startsWith('-')) {
+        // `nice -n 19`: the value is the next word, never the command.
+        if (wrapperOptions.has(token.value) && tokens[i + 1]?.kind === 'word') i += 1;
+        continue;
+      }
+      wrapperOptions = null;
+    }
     const name = basename(token.value);
     if (token.value === 'coproc') {
       background = true;
+      continue;
+    }
+    const wrapper = WRAPPERS.get(name);
+    if (wrapper !== undefined) {
+      wrapperOptions = wrapper;
       continue;
     }
     if (PREFIX_WORDS.has(token.value) || ASSIGNMENT.test(token.value)) continue;
@@ -230,7 +258,7 @@ function scan(text: string, depth: number): Scan {
       if (reads && !args.some((a) => a.startsWith('count='))) endless = true;
     } else if (SHELLS.has(name)) {
       const args = argsFrom(i + 1);
-      const at = args.findIndex((a) => /^-[a-z]*c[a-z]*$/.test(a));
+      const at = args.findIndex(isCommandFlag);
       const script = at < 0 ? undefined : args[at + 1];
       if (script !== undefined) {
         const nested = scan(script, depth + 1);

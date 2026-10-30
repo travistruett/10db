@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
@@ -8,7 +8,7 @@ import {
   createProcessLedger,
   reapLaneProcessLedgers,
 } from './lane-processes';
-import { systemProcessTable } from './process-table';
+import { systemCwds, systemProcessTable } from './process-table';
 
 /**
  * The real process table and real signals, on processes this test starts: a shell that leaves
@@ -76,6 +76,45 @@ describe('lane processes on the real machine', () => {
     await watch.end();
     const left = (await systemProcessTable()).filter((r) => r.pgid === root.pid);
     expect(left).toEqual([]);
+  });
+
+  it('stops a job a command handed to launchd before any sample, by its working directory', async (ctx) => {
+    if (!psWorks) ctx.skip();
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), 'lp-cwd-')));
+    try {
+      // The session's own process, standing in for claude.
+      const root = spawn('/bin/sleep', ['300'], { detached: true, stdio: 'ignore' });
+      started.push(root);
+      const rootPid = root.pid ?? 0;
+      await until(async () => alive(rootPid));
+      const rootRow = (await systemProcessTable()).find((r) => r.pid === rootPid);
+      if (rootRow === undefined) throw new Error('root not listed');
+      const watch = createLaneProcessWatch({
+        table: systemProcessTable,
+        cwds: systemCwds,
+        places: [dir],
+        ledger: null,
+        graceMs: 3_000,
+      });
+      await watch.track({ pid: rootPid, startedAt: rootRow.startedAt });
+      // `sleep 303 &` from a command that returns at once: its shell is gone before any sample.
+      const shell = spawn('/bin/sh', ['-c', 'sleep 303 > /dev/null 2>&1 &'], {
+        cwd: dir,
+        detached: true,
+        stdio: 'ignore',
+      });
+      started.push(shell);
+      const shellPid = shell.pid ?? 0;
+      await until(async () => !(await alive(shellPid)));
+      const job = async () =>
+        (await systemProcessTable()).filter((r) => r.pgid === shellPid && r.ppid === 1);
+      expect((await job()).length).toBe(1);
+      await watch.end();
+      expect(await job()).toEqual([]);
+      expect(await alive(rootPid)).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('stops what is left once the shell that started it is gone, from the ledger, after a restart', async (ctx) => {
