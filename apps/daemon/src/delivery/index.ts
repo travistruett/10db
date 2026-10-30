@@ -11,7 +11,7 @@ export { subscribeShipTrigger } from './trigger';
 export { createPrWatch, subscribePrWatch, type PrWatch } from './pr-watch';
 export { batchCardFields, createBatchCardAnswers } from './batch-card';
 export { createBranchCardAnswers } from './branch-card';
-export { listStrayBranches, removeMergedBranches } from './branch-sweep';
+export { removeMergedBranches } from './branch-sweep';
 export {
   batchLaunchVerdict,
   flagWorktreeMissing,
