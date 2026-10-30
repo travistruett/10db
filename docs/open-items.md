@@ -66,7 +66,8 @@
       daemon change, anything that would break the dev server mid-iteration) gets its own worktree. Areas, hazards
       and dependencies are the inputs; the planner proposes the lane count and each task's placement, and the
       builder confirms. Worktrees make rapid UI iteration across screens harder, so a project-wide switch isn't
-      enough. Keep `tasks.workspace_mode` for this rather than dropping it.
+      enough. Keep `tasks.workspace_mode` for this rather than dropping it. Designed:
+      `docs/superpowers/specs/2026-10-29-10db-task-placement-design.md`; not built.
 - [x] Worktree mode: removing a clean leftover worktree also removed its git-ignored files, such as a
       hand-made `.env`. Built: a finished or orphaned worktree holding ignored files outside matched
       directories and the seed is kept with a card (`decisions/2026-10-28-worktree-keeps-ignored-files.md`).
