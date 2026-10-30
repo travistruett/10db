@@ -41,6 +41,7 @@ import { ghCall, networkCall, raise, type DeliveryContext } from './context';
 import { unfinishedDependencies, unmergedDependencies, type BlockedTask } from './deps';
 import { groupByDependency } from './grouping';
 import { jobKey, JobQueue } from './jobs';
+import { resolveStartCards } from './stale-cards';
 import { cutWorktree, type Plans } from './worktree-cut';
 import { worktreePathFor } from './worktree-path';
 import { reopenWhenWhole, reopenWorktreeBatch } from './worktree-repair';
@@ -326,6 +327,7 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
         { batchId, projectId: project.id, branch, baseSha, repo },
         'batch branch cut',
       );
+      resolveStartCards(db, ctx.inbox, project.id, plans.keys());
       ctx.onWorkQueued();
     } catch (error) {
       if (!stopped()) refuse(startCards.notStarted(error));
@@ -384,7 +386,8 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
         const opened = await reopenWhenWhole(ctx, batchId, 'a fix task joined', signal, (w) => {
           for (const [taskId, plan] of plans) insertPlannedWorkstream(w, taskId, plan, batchId);
         });
-        if (!opened)
+        if (opened) resolveStartCards(db, ctx.inbox, project.id, plans.keys());
+        else
           refuse(
             stopped()
               ? startCards.joinInterrupted(batch)
@@ -405,6 +408,7 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
           throw new ConflictError(`Batch "${now.title}" is ${now.state.toLowerCase()} now`);
         for (const [taskId, plan] of plans) insertPlannedWorkstream(w, taskId, plan, batchId);
       });
+      resolveStartCards(db, ctx.inbox, project.id, plans.keys());
       ctx.onWorkQueued();
     } catch (error) {
       refuse(stopped() ? startCards.joinInterrupted(batch) : startCards.notJoined(batch, error));

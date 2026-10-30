@@ -322,6 +322,11 @@ export interface Git {
 export interface GitOptions {
   /** Called with every refusal, so the builder hears of it whoever called. */
   onRefused?(error: GitTrustError): void;
+  /**
+   * Called with the real path of a checkout once the builder's Trust answer pinned it, so the cards
+   * that refused it can go.
+   */
+  onTrusted?(repo: string): void;
   /** Where pins persist; the default lasts as long as this `Git`. */
   pins?: PinStore;
   /** The git to run for every call, as `resolveGit` found it; `git` on PATH otherwise. */
@@ -1979,6 +1984,7 @@ export function createGit(opts: GitOptions = {}): Git {
       if (!same) throw mismatch(real, candidate, now);
       // `now` is the candidate's state with the device number the volume has today.
       pins.set(real, now);
+      opts.onTrusted?.(real);
     },
   };
 }

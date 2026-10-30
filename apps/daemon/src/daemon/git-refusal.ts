@@ -1,8 +1,13 @@
-import type { InboxAnswer, InboxItemDto, InboxOption } from '@10db/contracts';
+import {
+  CARD_RESOLVES_WHEN,
+  type InboxAnswer,
+  type InboxItemDto,
+  type InboxOption,
+} from '@10db/contracts';
 import type { DbReader } from '@10db/db';
 import { z } from 'zod';
 import { CheckoutPin, GitTrustError, trustCard, type Git } from '../git';
-import type { InboxService } from '../inbox';
+import { resolveStaleCards, type InboxService } from '../inbox';
 import type { Logger } from '../log';
 import { projectAt } from './checkout-pins';
 
@@ -40,10 +45,30 @@ export function createGitRefusalHandler(deps: {
       ...(card.candidate
         ? {
             options: OPTIONS,
-            detail: { [GIT_TRUST_DETAIL]: { repo: error.repo, candidate: { ...card.candidate } } },
+            detail: {
+              [GIT_TRUST_DETAIL]: { repo: error.repo, candidate: { ...card.candidate } },
+              // Trusting the checkout again, by whichever card, settles every card that offers it.
+              [CARD_RESOLVES_WHEN]: { event: 'checkout_trusted', repo: error.repo },
+            },
           }
         : {}),
     });
+  };
+}
+
+/**
+ * Closes the open cards that offered to trust `repo` once it is trusted: the builder answered one of
+ * them, and the others (an earlier move, a changed origin that was put back) describe a state that no
+ * longer needs a decision.
+ */
+export function createCheckoutTrustedHandler(deps: {
+  readonly db: DbReader;
+  readonly inbox: Pick<InboxService, 'resolve'>;
+}): (repo: string) => void {
+  return (repo) => {
+    resolveStaleCards(deps.db, deps.inbox, null, (when) =>
+      when.event === 'checkout_trusted' && when.repo === repo ? `${repo} is trusted again` : null,
+    );
   };
 }
 

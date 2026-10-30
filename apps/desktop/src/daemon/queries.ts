@@ -48,6 +48,8 @@ export const queryKeys = {
   boardColumns: (projectId: ProjectId) => ['board-columns', projectId] as const,
   workstreams: (active: boolean) => ['workstreams', { active }] as const,
   inbox: ['inbox'],
+  // Under `inbox`, so the events that refresh the open cards refresh these too.
+  inboxResolved: ['inbox', 'resolved'],
   workstreamChanges: (id: WorkstreamId | undefined, head: string | null) =>
     ['workstream-changes', id, head] as const,
   keepAwake: ['keep-awake'],
@@ -160,6 +162,16 @@ export function useWorkstreamChanges(id: WorkstreamId | undefined, head: string 
 export function useInbox() {
   const { client } = useDaemon();
   return useQuery(inboxQueryOptions(client));
+}
+
+/** Resolved cards: the ones the builder answered and the ones 10db closed because their cause was gone. */
+export function useResolvedInbox() {
+  const { client } = useDaemon();
+  return useQuery({
+    queryKey: queryKeys.inboxResolved,
+    queryFn: async () =>
+      readJson(await client.inbox.$get({ query: { state: 'RESOLVED' } }), InboxList),
+  });
 }
 
 export function useKeepAwake() {

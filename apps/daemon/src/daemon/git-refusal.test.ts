@@ -10,7 +10,11 @@ import { createGit, GitTrustError, memoryPinStore, type Git } from '../git';
 import { createInboxService, type InboxService } from '../inbox';
 import { silentLogger } from '../log';
 import { createProjectPinStore } from './checkout-pins';
-import { createGitCardAnswers, createGitRefusalHandler } from './git-refusal';
+import {
+  createCheckoutTrustedHandler,
+  createGitCardAnswers,
+  createGitRefusalHandler,
+} from './git-refusal';
 
 let close: () => void;
 let state: StateStore;
@@ -207,6 +211,50 @@ describe('a refusal of the daemon git', () => {
         }),
       );
     expect(listInbox(state.db)).toHaveLength(1);
+  });
+
+  it('closes the checkout’s re-trust cards by itself, saying why, once the checkout is trusted again', () => {
+    const moved = (id: string) =>
+      new GitTrustError(real, {
+        kind: 'moved',
+        pinned: `${real}/.git`,
+        found: `${real}/.git`,
+        pin: candidate(`${real}/.git`, '0:0/0:0'),
+        candidate: candidate(`${real}/.git`, id),
+      });
+    // Two moves, and a cause trusting the checkout does not touch.
+    handle(moved('1:2/1:2'));
+    handle(moved('3:4/3:4'));
+    handle(
+      new GitTrustError(real, {
+        kind: 'config',
+        keys: [{ key: 'core.sshcommand', file: `${real}/.git/config` }],
+      }),
+    );
+    const [project] = listProjects(state.db);
+    if (!project) throw new Error('expected a project');
+    // Another checkout's card.
+    inbox.flag({
+      projectId: project.id,
+      workstreamId: null,
+      title: 'Elsewhere',
+      body: 'x',
+      detail: { resolvesWhen: { event: 'checkout_trusted', repo: '/elsewhere' } },
+    });
+    expect(listInbox(state.db, { states: ['OPEN'] })).toHaveLength(4);
+
+    createCheckoutTrustedHandler({ db: state.db, inbox })(real);
+
+    const open = listInbox(state.db, { states: ['OPEN'] });
+    expect(open.map((i) => i.title).sort()).toEqual(
+      [`10db won't fetch or push in ${real}: its config sets core.sshcommand`, 'Elsewhere'].sort(),
+    );
+    const resolved = listInbox(state.db, { states: ['RESOLVED'] });
+    expect(resolved).toHaveLength(2);
+    for (const card of resolved)
+      expect(card.detail).toMatchObject({
+        resolution: { by: '10db', reason: `${real} is trusted again` },
+      });
   });
 
   it('raises no card for a checkout no project uses', () => {

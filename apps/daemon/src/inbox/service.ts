@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import {
+  CARD_RESOLUTION,
   CheckChoice,
   ConflictError,
   DECISION_CATEGORIES,
@@ -13,6 +14,7 @@ import {
   ProposalKind,
   QuestionCategory,
   Urgency,
+  type CardResolution,
   type InboxItemDto,
   type InboxItemId,
   type InboxOption,
@@ -94,6 +96,12 @@ export interface InboxService {
   ): void;
   /** Closes an open card whose question a later change made moot; a closed card is left as it was. */
   withdraw(id: InboxItemId): void;
+  /**
+   * Closes an open card as RESOLVED by 10db, because the action it reports as failed has succeeded
+   * since. The reason goes in `detail.resolution`, where the resolved view shows it; a card that is
+   * no longer open is returned as it was.
+   */
+  resolve(id: InboxItemId, reason: string): InboxItemDto;
   redeliver(id: InboxItemId): InboxItemDto;
 }
 
@@ -389,6 +397,18 @@ export function createInboxService(deps: {
       deps.state.write((ctx) => {
         if (getInboxItem(ctx.tx, id).state === InboxState.Open)
           updateInboxItem(ctx, id, { state: InboxState.Cancelled });
+      });
+    },
+
+    resolve(id, reason) {
+      return deps.state.write((ctx) => {
+        const item = getInboxItem(ctx.tx, id);
+        if (item.state !== InboxState.Open) return item;
+        const resolution: CardResolution = { by: '10db', reason };
+        return updateInboxItem(ctx, id, {
+          state: InboxState.Resolved,
+          detail: { ...item.detail, [CARD_RESOLUTION]: resolution },
+        });
       });
     },
 

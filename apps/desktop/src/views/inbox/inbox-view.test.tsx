@@ -670,3 +670,57 @@ describe('InboxView', () => {
     });
   });
 });
+
+describe('the resolved view', () => {
+  const closedBy10db = inboxItemDto({
+    kind: 'flag',
+    state: 'RESOLVED',
+    title: 'Batch not started: 10db will not run git in /repo',
+    body: 'Nothing was pushed.',
+    options: [],
+    detail: { resolution: { by: '10db', reason: 'Alpha started' } },
+    updatedAt: '2026-10-30T10:00:00.000Z',
+  });
+  const answered = inboxItemDto({
+    kind: 'question',
+    state: 'RESOLVED',
+    title: 'Which badge color?',
+    answer: { choice: 'Teal' },
+    updatedAt: '2026-10-30T11:00:00.000Z',
+  });
+
+  function serveBoth(open: InboxItemDto[], resolved: InboxItemDto[]): void {
+    serve(
+      http.get(daemonUrl('/inbox'), ({ request }) =>
+        HttpResponse.json(
+          new URL(request.url).searchParams.get('state') === 'RESOLVED' ? resolved : open,
+        ),
+      ),
+    );
+  }
+
+  it('lists resolved cards, newest first, saying who closed each and why', async () => {
+    serveBoth([color], [closedBy10db, answered]);
+    renderApp('/inbox');
+    await screen.findByText('Which badge color?');
+    fireEvent.click(screen.getByRole('tab', { name: 'Resolved' }));
+
+    const rows = await screen.findAllByTestId('resolved-card');
+    expect(rows.map((row) => row.textContent)).toEqual([
+      expect.stringContaining('Which badge color?'),
+      expect.stringContaining('Batch not started: 10db will not run git in /repo'),
+    ]);
+    expect(rows[0]?.textContent).toContain('Answered: Teal');
+    expect(rows[1]?.textContent).toContain('Resolved by 10db: Alpha started');
+    // The open cards and their keys are not there.
+    expect(screen.queryByRole('button', { name: 'Send Answer' })).toBeNull();
+  });
+
+  it('says so when nothing has been resolved', async () => {
+    serveBoth([color], []);
+    renderApp('/inbox');
+    await screen.findByText('Which badge color?');
+    fireEvent.click(screen.getByRole('tab', { name: 'Resolved' }));
+    expect(await screen.findByText('Nothing has been resolved yet.')).toBeTruthy();
+  });
+});

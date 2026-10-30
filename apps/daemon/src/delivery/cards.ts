@@ -2,6 +2,7 @@ import {
   BatchFailure,
   BatchState,
   type BatchDto,
+  type CardResolvesWhen,
   type BatchId,
   type ProjectDto,
   type TaskId,
@@ -28,6 +29,8 @@ export interface Card {
   /** A repeat that folds rewrites the open card with this one's body and detail. */
   readonly refresh?: boolean;
   readonly detail?: Record<string, Json>;
+  /** What makes the card stale: 10db closes it itself when that happens (CardResolvesWhen). */
+  readonly resolvesWhen?: CardResolvesWhen;
 }
 
 export const MAX_LISTED_PATHS = 20;
@@ -311,6 +314,7 @@ export function forTasks(card: Card, taskIds: Iterable<TaskId>): Card {
     foldKey: card.foldKey ?? `start-refused:${[...ids].sort().join(',')}:${card.title}`,
     refresh: true,
     detail: { ...card.detail, taskIds: ids },
+    ...(ids.length > 0 ? { resolvesWhen: { event: 'tasks_started', taskIds: ids } } : {}),
   };
 }
 

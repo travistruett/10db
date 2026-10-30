@@ -974,6 +974,22 @@ describe('the checkout is the one pinned for it', () => {
     expect(onRefused).not.toHaveBeenCalled();
   });
 
+  it('tells onTrusted which checkout a Trust answer took, and not when it is refused anew', async () => {
+    const onTrusted = vi.fn();
+    const git = createGit({ onTrusted });
+    await git.head(repo.path);
+    replaceGitDir();
+    const { detail } = await refusal(git.head(repo.path));
+    if (detail.kind !== 'moved') throw new Error('expected a moved checkout');
+    replaceGitDir();
+    await refusal(git.retrust(repo.path, detail.candidate));
+    expect(onTrusted).not.toHaveBeenCalled();
+    const { detail: now } = await refusal(git.head(repo.path));
+    if (now.kind !== 'moved') throw new Error('expected a moved checkout');
+    await git.retrust(repo.path, now.candidate);
+    expect(onTrusted).toHaveBeenCalledExactlyOnceWith(realpathSync(repo.path));
+  });
+
   it('says what differs when a replaced .git sits at the same path', async () => {
     const git = createGit();
     await git.head(repo.path);
