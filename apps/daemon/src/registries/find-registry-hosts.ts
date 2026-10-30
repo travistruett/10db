@@ -59,14 +59,11 @@ async function readFormats(
   return found;
 }
 
-/** True when the folder's or the project root's registry settings name a default registry. */
+/** True when the folder's own registry settings name a default registry. */
 async function registryNamed(root: string, folder: string): Promise<boolean> {
-  const folders = folder === '' ? [''] : ['', folder];
-  for (const dir of folders) {
-    for (const name of ['.npmrc', '.yarnrc.yml']) {
-      const text = await readRegularFile(root, join(dir, name));
-      if (text !== null && namesNpmRegistry(text)) return true;
-    }
+  for (const name of ['.npmrc', '.yarnrc.yml']) {
+    const text = await readRegularFile(root, join(folder, name));
+    if (text !== null && namesNpmRegistry(text)) return true;
   }
   return false;
 }
@@ -82,11 +79,16 @@ async function registryNamed(root: string, folder: string): Promise<boolean> {
 export async function findRegistryHosts(root: string): Promise<FoundHost[]> {
   const hosts = new Map<string, string>();
   let folders = 0;
+  // The root's settings hold for every folder, so they are read once, not once per folder.
+  const rootNamed = await registryNamed(root, '');
   const queue: { readonly folder: string; readonly depth: number }[] = [{ folder: '', depth: 0 }];
   for (let next = queue.shift(); next !== undefined; next = queue.shift()) {
     if (folders >= MAX_FOLDERS || hosts.size >= MAX_HOSTS) break;
     folders += 1;
-    const context: FolderContext = { npmRegistryNamed: await registryNamed(root, next.folder) };
+    const context: FolderContext = {
+      npmRegistryNamed:
+        rootNamed || (next.folder !== '' && (await registryNamed(root, next.folder))),
+    };
     const named = [
       ...(await readFormats(root, next.folder, CONFIG_FORMATS, context)),
       ...(await readFormats(root, next.folder, LOCK_FORMATS, context)),

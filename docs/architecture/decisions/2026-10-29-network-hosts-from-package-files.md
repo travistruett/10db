@@ -26,6 +26,16 @@ pnpm: `registry.npmjs.org`; yarn: `registry.yarnpkg.com`; poetry: `pypi.org` and
 `files.pythonhosted.org`; cargo's crates.io: `index.crates.io` and `static.crates.io`; go: `proxy.golang.org` and
 `sum.golang.org`). Each host is reported with the first file that names it, the root's files first.
 
+**In time linear in the files.** The reading runs on the daemon's only thread, and a lane can write the files, so
+every pattern takes time linear in the text it reads; the size cap bounds memory, not a pattern's time. A pattern
+tried at every line start opens with `[ \t]*` or a word, never `\s*`: `\s` matches a line end too, so `^\s*` tried at
+each line of a run of blank lines reads to the end of the run every time. Wherever two repeated parts of a pattern can
+meet, no character matches both, so a failed match never tries another split of the same run. What a pattern can't
+take apart that way is taken apart with string operations: a TOML table header is trimmed and its brackets cut off
+before its name is checked, an `.npmrc` key such as `//host/path/:_authToken` is split at its last `:` and its first
+`/` or `:`, and an INI value is cut off its line rather than matched. The root's `.npmrc` and `.yarnrc.yml` are read
+once per reading, not again for each folder.
+
 **Only the host.** A URL is parsed, and the host name is all that is kept: a user name, password, token, port and path
 never leave `hostOfUrl`. A variable (`${NPM_TOKEN}`) or `%XX` escape (`p%40ss`, `My%20Project`) in those parts
 doesn't hide the host; URL parsing decodes an escape in the host name or refuses the name. A host that still holds a
@@ -64,7 +74,11 @@ command's stderr, so the marker is looked for anywhere in a line and only the te
 the command left without a newline is kept). A one-line message is all that is dropped; a message ending in `{` or `[`
 (the settings srt dumps as JSON) is dropped up to its closing line; and the command line srt echoes (`Command string
 mode (-c): …`, which holds the project env) is dropped for as many lines as it takes (`GateRun.commandLines`), which is
-safe because srt writes it before the command starts. For a gate that failed, the runner reports up to ten hosts in
+safe because srt writes it before the command starts. The filter searches only each new chunk for line ends, so a
+long line costs its length once, and holds at most 2 MiB of a line with no newline: more than any message srt writes,
+whose longest, the echoed command line, the 1 MiB limit on a program's arguments bounds. Past that it passes the
+command's text on and keeps only what may be srt's (from its marker, or the last characters, which may begin one).
+For a gate that failed, the runner reports up to ten hosts in
 `GateResult.blockedHosts` and ends the tail with `10db: The gate was blocked from reaching <host>…`: a host the project
 may be given is sent to the Inbox and Settings › Network hosts, and one it may not (a bare name such as `db`, this
 machine, a pattern) is said to be one that can't be allowed, since no card is raised for it. The verify gate (runner) and
@@ -83,7 +97,8 @@ The builder saw Network hosts as a list they did not know how to fill, and a gat
 `CONNECT tunnel failed, response 403` and nothing said which host. The project's own files already name almost every
 host it needs, and the same files that make the project buildable are the ones the builder is trusting. Reading them
 needs no process, so it adds nothing to the security rule that nothing outside the sandbox acts on lane-writable input;
-the limits are on what is read (no links, a size cap, keyed patterns), what is kept (hosts), and what is allowed
+the limits are on what is read (no links, a size cap, keyed patterns whose time is linear in the text), what is kept
+(hosts), and what is allowed
 (`checkNetworkHost`). A hostile repository can name a host in its lockfile, and adding it allows that host: the
 builder trusts the project's files when they add it, as they do when they run its gate, and Settings lists every host
 with the file that named it so a surprising one can be removed.

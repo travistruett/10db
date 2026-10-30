@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { tempDir, type TempDir } from '../../test/fixtures';
 import { findRegistryHosts } from './index';
+import { CONFIG_FORMATS, LOCK_FORMATS, namesNpmRegistry } from './package-file-formats';
 
 const dirs: TempDir[] = [];
 afterEach(() => {
@@ -95,6 +96,31 @@ const rows: Row[] = [
         '@acme:registry=https://npm.acme.example.com/\n//npm.acme.example.com/:_authToken=${ACME_TOKEN}\n//other.example.com/:_authToken=secret-token\n',
     },
     expected: ['npm.acme.example.com <- .npmrc', 'other.example.com <- .npmrc'],
+  },
+  {
+    name: 'an .npmrc setting for a registry names its host only when its key ends in a setting',
+    files: {
+      '.npmrc':
+        '  //npm.example.com:8443/path/:_authToken=x\n//no-setting.example.com/=x\n//spaced.example.com/:a key=x\n',
+    },
+    expected: ['npm.example.com <- .npmrc'],
+  },
+  {
+    name: 'a registry set in the root .npmrc replaces the default for a package folder’s lockfile',
+    files: {
+      '.npmrc': 'registry=https://npm.corp.example.com/\n',
+      'apps/web/pnpm-lock.yaml': "lockfileVersion: '9.0'\n",
+    },
+    expected: ['npm.corp.example.com <- .npmrc'],
+  },
+  {
+    name: 'a registry set in a package folder replaces the default for that folder only',
+    files: {
+      'apps/a/.npmrc': 'registry=https://npm.a.example.com/\n',
+      'apps/a/pnpm-lock.yaml': "lockfileVersion: '9.0'\n",
+      'apps/b/pnpm-lock.yaml': "lockfileVersion: '9.0'\n",
+    },
+    expected: ['npm.a.example.com <- apps/a/.npmrc', 'registry.npmjs.org <- apps/b/pnpm-lock.yaml'],
   },
   {
     name: '.yarnrc.yml npmRegistryServer',
@@ -233,6 +259,17 @@ const rows: Row[] = [
     ],
   },
   {
+    name: 'a table header with spaces inside its brackets names its table',
+    files: {
+      'pyproject.toml':
+        '[ tool.uv ]\nextra-index-url = ["https://spaced.example.com/simple"]\n[[ tool.uv.index ]]\nurl = "https://spaced-index.example.com/simple"\n[ project.urls ]\nurl = "https://not-an-index.example.org"\n',
+    },
+    expected: [
+      'spaced-index.example.com <- pyproject.toml',
+      'spaced.example.com <- pyproject.toml',
+    ],
+  },
+  {
     name: 'toolchain files',
     files: {
       'rust-toolchain.toml': '[toolchain]\nchannel = "1.90"\n',
@@ -346,6 +383,58 @@ describe('findRegistryHosts', () => {
   });
 
   it('reads nothing from a folder that is not there', async () => {
-    expect(await findRegistryHosts(join(tempDir('none').path, 'missing'))).toEqual([]);
+    const none = tempDir('none');
+    dirs.push(none);
+    expect(await findRegistryHosts(join(none.path, 'missing'))).toEqual([]);
+  });
+});
+
+/** Every file findRegistryHosts reads in a folder: settings files, lockfiles and toolchain files. */
+const FORMATS = [...CONFIG_FORMATS, ...LOCK_FORMATS];
+
+/** What those files name when they hold no URL: each ecosystem's default hosts. */
+const DEFAULT_HOSTS = [
+  'files.pythonhosted.org <- poetry.lock',
+  'nodejs.org <- .nvmrc',
+  'proxy.golang.org <- go.sum',
+  'pypi.org <- poetry.lock',
+  'registry.npmjs.org <- package-lock.json',
+  'registry.yarnpkg.com <- yarn.lock',
+  'static.rust-lang.org <- rust-toolchain.toml',
+  'sum.golang.org <- go.sum',
+];
+
+/**
+ * Text a backtracking pattern can spend time quadratic or worse in its size on, as any package file. A
+ * pattern does its matching on the daemon's only thread, so a slow one stalls the API, every lane's
+ * broker and every gate.
+ */
+const CRAFTED: readonly { readonly name: string; readonly text: string }[] = [
+  { name: 'a run of blank lines', text: '\n'.repeat(200_000) },
+  { name: 'a run of blank Windows lines', text: '\r\n'.repeat(200_000) },
+  { name: 'a table header padded with spaces', text: `[${' '.repeat(50_000)}x\n` },
+  { name: 'an .npmrc key with no colon', text: `//${'a'.repeat(200_000)}\n` },
+  {
+    name: 'a setting whose value holds a lone carriage return',
+    text: `a=${' '.repeat(200_000)}x\ry\n`,
+  },
+];
+
+describe('the package files on crafted text', () => {
+  it.each(CRAFTED)('every format reads $name in time linear in its size', ({ text }) => {
+    const started = performance.now();
+    for (const format of FORMATS) format.hosts(text, { npmRegistryNamed: false });
+    namesNpmRegistry(text);
+    // Each format takes a few milliseconds over these texts; a quadratic one takes seconds.
+    expect(performance.now() - started).toBeLessThan(1_000);
+  });
+
+  it.each(CRAFTED)('findRegistryHosts reads $name in every package file', async ({ text }) => {
+    const root = project(Object.fromEntries(FORMATS.map((format) => [format.path, text])));
+    const started = performance.now();
+    const found = await hostsOf(root);
+    // Reading the files is most of this; a quadratic pattern alone takes far longer.
+    expect(performance.now() - started).toBeLessThan(5_000);
+    expect(found).toEqual(DEFAULT_HOSTS);
   });
 });

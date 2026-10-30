@@ -1,5 +1,14 @@
 import { hostOfUrl } from './host-of-url';
 
+/*
+ * The files are read on the daemon's only thread and a lane may have written them, so every pattern
+ * here takes time linear in the text. Wherever two repeated parts of a pattern can meet, no character
+ * matches both, so a failed match never tries another split of the same run. A pattern run at every
+ * line start of a file (the `m` flag) never opens with `\s*`, which matches a line end too: tried at
+ * each line of a run of blank lines, it would read to the end of the run every time. It opens with
+ * `[ \t]*` or a word.
+ */
+
 /** What a file's reader is told about the folder it lies in. */
 export interface FolderContext {
   /** True when an `.npmrc` or `.yarnrc.yml` in this folder or the project root names a registry. */
@@ -51,9 +60,11 @@ function iniValues(text: string, keys: ReadonlySet<string>): string[] {
       values.push(line.trim());
       continue;
     }
-    const m = /^([\w.-]+)\s*[=:]\s*(.*)$/.exec(line);
-    reading = m?.[1] !== undefined && keys.has(m[1].toLowerCase());
-    if (reading && m?.[2] !== undefined) values.push(m[2].trim());
+    // The value is cut off the line, not matched: in a line holding a lone carriage return, which `.`
+    // stops at, `\s*(.*)$` tries every split of the spaces before the value, reading on each time.
+    const key = /^([\w.-]+)\s*[=:]/.exec(line);
+    reading = key?.[1] !== undefined && keys.has(key[1].toLowerCase());
+    if (reading && key !== null) values.push(line.slice(key[0].length).trim());
   }
   return values.flatMap((value) => value.split(/[\s,]+/)).filter((token) => token !== '');
 }
@@ -75,17 +86,44 @@ function withoutComment(line: string): string {
   return line;
 }
 
-/** Each table of a TOML file: its header's name (`''` before the first) and its lines, without comments. */
-function tomlTables(text: string): { readonly name: string; readonly body: string }[] {
-  const tables = [{ name: '', lines: [] as string[] }];
+/** A table's name as its header holds it: a dotted name of words, quotes and spaces. */
+const TABLE_NAME = /^[\w.\-"' ]+$/;
+
+/**
+ * The name in a TOML table header, `[name]` or `[[name]]`, or null when the line is not one. A header
+ * holds a dotted name only, so an array of arrays on its own line is not one. The spaces around the
+ * name are trimmed off before it is checked: a pattern that weighed where they end against a name
+ * that may hold spaces would backtrack over a line of them.
+ */
+function tableHeader(line: string): string | null {
+  const trimmed = line.trim();
+  const brackets = trimmed.startsWith('[[') && trimmed.endsWith(']]') ? 2 : 1;
+  if (!trimmed.startsWith('[') || !trimmed.endsWith(']') || trimmed.length <= 2 * brackets) {
+    return null;
+  }
+  const name = trimmed.slice(brackets, -brackets).trim();
+  return TABLE_NAME.test(name) ? name : null;
+}
+
+/**
+ * The lines of each table `inTable` chooses, without comments, one body per table: from its header to
+ * the next (`''` names the lines before the first header). Lines of other tables are not kept.
+ */
+function chosenTables(text: string, inTable: (name: string) => boolean): string[] {
+  const bodies: string[] = [];
+  let lines: string[] | null = inTable('') ? [] : null;
   for (const raw of text.split(/\r?\n/)) {
     const line = withoutComment(raw);
-    // A header holds a dotted name only, so an array of arrays on its own line is not one.
-    const header = /^\s*\[{1,2}\s*([\w.\-"' ]+?)\s*\]{1,2}\s*$/.exec(line);
-    if (header?.[1] === undefined) tables.at(-1)?.lines.push(line);
-    else tables.push({ name: header[1], lines: [] });
+    const name = tableHeader(line);
+    if (name === null) {
+      lines?.push(line);
+      continue;
+    }
+    if (lines !== null && lines.length > 0) bodies.push(lines.join('\n'));
+    lines = inTable(name) ? [] : null;
   }
-  return tables.map(({ name, lines }) => ({ name, body: lines.join('\n') }));
+  if (lines !== null && lines.length > 0) bodies.push(lines.join('\n'));
+  return bodies;
 }
 
 const TOML_STRING = String.raw`"[^"\n]*"|'[^'\n]*'`;
@@ -105,9 +143,8 @@ function tomlUrls(
   inTable: (name: string) => boolean,
   keys: ReadonlySet<string>,
 ): string[] {
-  return tomlTables(text)
-    .filter((table) => inTable(table.name))
-    .flatMap((table) => [...table.body.matchAll(TOML_PAIR)])
+  return chosenTables(text, inTable)
+    .flatMap((body) => [...body.matchAll(TOML_PAIR)])
     .flatMap(([, key, value]) =>
       key !== undefined && value !== undefined && keys.has(key)
         ? [...value.matchAll(/"([^"\n]*)"|'([^'\n]*)'/g)].map((m) => m[1] ?? m[2] ?? '')
@@ -122,20 +159,34 @@ const npmDefault = (folder: FolderContext): string[] =>
 
 const NPM_URL = /"resolved"\s*:\s*"([^"]+)"/g;
 const PNPM_URL = /\b(?:tarball|repo)\s*:\s*["']?([^\s"',}]+)/g;
-const YARN_URL = /^\s*resolved:?\s+"?([^"\s]+)/gm;
-const CARGO_SOURCE = /^\s*source\s*=\s*"([^"]+)"/gm;
+const YARN_URL = /^[ \t]*resolved:?[ \t]+"?([^"\s]+)/gm;
+const CARGO_SOURCE = /^[ \t]*source[ \t]*=[ \t]*"([^"\r\n]+)"/gm;
 /** The `.cargo/config.toml` keys that hold a registry, a replaced source or a git URL, in any table. */
 const CARGO_KEYS: ReadonlySet<string> = new Set(['index', 'registry', 'git']);
 const UV_URL = /\b(?:registry|url|git)\s*=\s*"([^"]+)"/g;
-const POETRY_URL = /^url\s*=\s*"([^"]+)"/gm;
-const GEM_REMOTE = /^\s*remote:\s*(\S+)/gm;
-const NPMRC_REGISTRY = /^\s*(?:@[\w.-]+:)?registry\s*=\s*(\S+)/gm;
-/** An `.npmrc` key of the form `//host/path/:setting=`; only the host is read, the value never. */
-const NPMRC_HOST = /^\s*(\/\/[^\s/=:]+)[^\s=]*:[\w-]+\s*=/gm;
+const POETRY_URL = /^url[ \t]*=[ \t]*"([^"\r\n]+)"/gm;
+const GEM_REMOTE = /^[ \t]*remote:[ \t]*(\S+)/gm;
+const NPMRC_REGISTRY = /^[ \t]*(?:@[\w.-]+:)?registry[ \t]*=[ \t]*(\S+)/gm;
+/** The key of an `.npmrc` setting for one registry, `//host/path/:setting=`; its value is never read. */
+const NPMRC_REGISTRY_KEY = /^[ \t]*\/\/([^\s=]+)[ \t]*=/gm;
+/** An `.npmrc` `registry=` with no scope: the registry npm and pnpm fetch every package from. */
+const NPMRC_DEFAULT_REGISTRY = /^[ \t]*registry[ \t]*=[ \t]*\S/m;
 /** Every `npmRegistryServer` of a `.yarnrc.yml`: the top-level one and those under `npmScopes`. */
-const YARNRC_REGISTRY = /^\s*npmRegistryServer\s*:\s*["']?([^"'\s]+)/gm;
+const YARNRC_REGISTRY = /^[ \t]*npmRegistryServer[ \t]*:[ \t]*["']?([^"'\s]+)/gm;
 /** Only an unindented `npmRegistryServer` replaces the default; a scoped one serves its scope alone. */
-const YARNRC_DEFAULT_REGISTRY = /^npmRegistryServer\s*:\s*["']?([^"'\s]+)/gm;
+const YARNRC_DEFAULT_REGISTRY = /^npmRegistryServer[ \t]*:[ \t]*["']?[^"'\s]/m;
+
+/**
+ * The registry an `.npmrc` key such as `//npm.example.com/path/:_authToken` is a setting for, as
+ * `//host`, or null when the key is not of that form. The key is taken apart with string operations:
+ * a pattern that weighed where the host ends against where the setting's name starts would backtrack.
+ */
+function npmrcKeyRegistry(key: string): string | null {
+  const colon = key.lastIndexOf(':');
+  if (colon === -1 || !/^[\w-]+$/.test(key.slice(colon + 1))) return null;
+  const host = key.slice(0, key.search(/[/:]/));
+  return host === '' ? null : `//${host}`;
+}
 
 const PIP_KEYS: ReadonlySet<string> = new Set(['index-url', 'extra-index-url', 'find-links']);
 const PIP_HOST_KEYS: ReadonlySet<string> = new Set(['trusted-host']);
@@ -159,7 +210,10 @@ export const CONFIG_FORMATS: readonly PackageFileFormat[] = [
   {
     path: '.npmrc',
     hosts: (text) =>
-      hostsOfUrls([...captures(text, NPMRC_REGISTRY), ...captures(text, NPMRC_HOST)]),
+      hostsOfUrls([
+        ...captures(text, NPMRC_REGISTRY),
+        ...captures(text, NPMRC_REGISTRY_KEY).flatMap((key) => npmrcKeyRegistry(key) ?? []),
+      ]),
   },
   { path: '.yarnrc.yml', hosts: (text) => hostsOfUrls(captures(text, YARNRC_REGISTRY)) },
   { path: '.cargo/config.toml', hosts: (text) => cargoHosts(tomlUrls(text, anyTable, CARGO_KEYS)) },
@@ -231,8 +285,5 @@ export const LOCK_FORMATS: readonly PackageFileFormat[] = [
  * `registry=` with no scope, or a top-level `npmRegistryServer`. A scoped one doesn't count.
  */
 export function namesNpmRegistry(text: string): boolean {
-  return (
-    captures(text, /^\s*registry\s*=\s*(\S+)/gm).length > 0 ||
-    captures(text, YARNRC_DEFAULT_REGISTRY).length > 0
-  );
+  return NPMRC_DEFAULT_REGISTRY.test(text) || YARNRC_DEFAULT_REGISTRY.test(text);
 }

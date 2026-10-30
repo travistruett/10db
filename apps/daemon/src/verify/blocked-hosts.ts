@@ -12,6 +12,17 @@ const COMMAND_ECHO = 'Command string mode (-c):';
 /** The closing line of a message that opened a block, such as the settings srt dumps as indented JSON. */
 const CLOSERS: Readonly<Record<string, RegExp>> = { '{': /^\}\s*$/, '[': /^\]\s*$/ };
 const MAX_HOSTS = 10;
+/**
+ * Longer than any message srt writes. Its longest is the command line it echoes, which the system's
+ * limit on a program's arguments (1 MiB on macOS) bounds; a partial line held longer than this is the
+ * command's own output.
+ */
+const MAX_HELD_CHARS = 2 * 1024 * 1024;
+
+/** True for the first half of a UTF-16 surrogate pair, which a character beyond U+FFFF takes two units of. */
+function isHighSurrogate(unit: number): boolean {
+  return unit >= 0xd800 && unit <= 0xdbff;
+}
 
 /**
  * Reads a sandboxed gate's stderr for the hosts srt's proxy refused, and keeps srt's debug log out of
@@ -20,9 +31,12 @@ const MAX_HOSTS = 10;
  * once.
  */
 export interface BlockedHostFilter {
-  /** The part of the chunk that is the command's own output, whole lines only. */
+  /**
+   * The part of the chunk that is the command's own output: whole lines, and the start of a line
+   * too long to be held whole.
+   */
   push(chunk: string): string;
-  /** What is left in the buffer when the stream ends. */
+  /** What is left of the last line when the stream ends. */
   end(): string;
   /** The hosts refused so far, lower case, in the order first refused. */
   blocked(): readonly string[];
@@ -38,7 +52,8 @@ export interface BlockedHostFilterOptions {
 
 export function createBlockedHostFilter(options: BlockedHostFilterOptions = {}): BlockedHostFilter {
   const hosts: string[] = [];
-  let buffer = '';
+  /** The line the stream is part way through: everything after its last newline. */
+  let held = '';
   /** Lines still to drop: the rest of an echoed command line. */
   let echoLeft = 0;
   /** The closing line of the open debug block, if one is open. */
@@ -78,16 +93,44 @@ export function createBlockedHostFilter(options: BlockedHostFilterOptions = {}):
     return before === '' ? '' : `${before}${ending}`;
   }
 
+  /**
+   * Lets go of a partial line held too long to be one of srt's messages, so the filter holds a
+   * bounded amount: the command's text is passed on as it comes, up to where srt's message may start.
+   */
+  function release(): string {
+    if (held.length <= MAX_HELD_CHARS) return '';
+    // Inside the echoed command line or a dumped block, every line is srt's, and none is this long.
+    if (echoLeft > 0 || closer !== null) {
+      held = '';
+      return '';
+    }
+    const at = held.indexOf(DEBUG_MARKER);
+    // With no marker yet, the last characters may still begin one; a surrogate pair stays whole.
+    let cut = at === -1 ? held.length - (DEBUG_MARKER.length - 1) : at;
+    if (isHighSurrogate(held.charCodeAt(cut - 1))) cut -= 1;
+    const passed = held.slice(0, cut);
+    held = held.slice(cut);
+    // Text this long from a marker on is no message of srt's: it is dropped, and the rest of its line
+    // is read as a line of its own.
+    if (held.length > MAX_HELD_CHARS) held = '';
+    return passed;
+  }
+
   return {
     push(chunk) {
-      buffer += chunk;
-      const lines = buffer.split(/(?<=\n)/);
-      buffer = lines.at(-1)?.endsWith('\n') === false ? (lines.pop() ?? '') : '';
-      return lines.map(keep).join('');
+      // Only the new chunk is searched for line ends, so a long line costs its length, once.
+      const last = chunk.lastIndexOf('\n');
+      if (last === -1) {
+        held += chunk;
+        return release();
+      }
+      const lines = `${held}${chunk.slice(0, last + 1)}`.split(/(?<=\n)/);
+      held = chunk.slice(last + 1);
+      return lines.map(keep).join('') + release();
     },
     end() {
-      const rest = buffer;
-      buffer = '';
+      const rest = held;
+      held = '';
       return rest === '' ? '' : keep(rest);
     },
     blocked: () => hosts,

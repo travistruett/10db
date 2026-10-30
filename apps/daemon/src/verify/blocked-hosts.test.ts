@@ -89,6 +89,59 @@ describe('the filter over a sandboxed gate’s stderr', () => {
   });
 });
 
+/** A pipe's chunk: stderr arrives this many characters at a time. */
+const CHUNK = 'x'.repeat(64 * 1024);
+const MIB = 1024 * 1024;
+
+describe('the filter over a long line with no newline', () => {
+  // The filter runs on the daemon's only thread, and the gate's command is the lane's code.
+  it('takes time linear in the line, not in the line times the chunks', () => {
+    const f = createBlockedHostFilter();
+    const started = performance.now();
+    for (let i = 0; i < (32 * MIB) / CHUNK.length; i += 1) f.push(CHUNK);
+    f.end();
+    expect(performance.now() - started).toBeLessThan(2_000);
+  });
+
+  it('passes the command’s text on as it comes rather than holding the whole line', () => {
+    const f = createBlockedHostFilter();
+    let kept = 0;
+    for (let i = 0; i < (8 * MIB) / CHUNK.length; i += 1) kept += f.push(CHUNK).length;
+    expect(kept).toBeGreaterThan(4 * MIB);
+    expect(kept + f.end().length).toBe(8 * MIB);
+  });
+
+  it('never splits a character between what it passes on and what it holds back', () => {
+    const f = createBlockedHostFilter();
+    // An emoji is two UTF-16 units; here it straddles where the filter cuts the held line.
+    const line = `${'x'.repeat(3 * MIB - 14)}😀${'x'.repeat(12)}`;
+    const passed = f.push(line);
+    expect(passed.length).toBeGreaterThan(0);
+    expect(/[\uD800-\uDBFF]$/.test(passed)).toBe(false);
+    expect(passed + f.end() === line).toBe(true);
+  });
+
+  it('still reads and drops a debug message that ends the long line', () => {
+    const f = createBlockedHostFilter();
+    let kept = '';
+    for (let i = 0; i < (3 * MIB) / CHUNK.length; i += 1) kept += f.push(CHUNK);
+    kept += f.push('[SandboxDebug] Connection blocked to h.example.com:443\nnext\n') + f.end();
+    expect(f.blocked()).toEqual(['h.example.com']);
+    expect(kept).toBe(`${'x'.repeat(3 * MIB)}\nnext\n`);
+  });
+
+  it('drops a long echoed command line whole, however many chunks it comes in', () => {
+    const f = createBlockedHostFilter();
+    const echo = `[SandboxDebug] Command string mode (-c): /usr/bin/env TOKEN='hunter2' ${'x'.repeat(MIB)}\n`;
+    let kept = '';
+    for (let at = 0; at < echo.length; at += CHUNK.length) {
+      kept += f.push(echo.slice(at, at + CHUNK.length));
+    }
+    kept += f.push('ok\n') + f.end();
+    expect(kept).toBe('ok\n');
+  });
+});
+
 describe('what the gate’s evidence says about blocked hosts', () => {
   it('says nothing when nothing was blocked', () => {
     expect(blockedHostsNote([])).toBe('');
