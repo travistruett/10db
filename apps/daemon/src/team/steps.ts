@@ -2,6 +2,7 @@ import {
   ConflictError,
   BatchState,
   InvalidError,
+  TaskStatus,
   WorkstreamState,
   type BatchId,
   type StepPlanDto,
@@ -121,6 +122,8 @@ export function retryWorkstream(state: StateStore, id: WorkstreamId, note?: stri
   if (row.state !== WorkstreamState.Failed)
     throw new ConflictError('Only a failed workstream can be retried');
   const task = getTask(state.db, row.taskId);
+  if (task.status === TaskStatus.Cancelled)
+    throw new ConflictError(`${task.title} was closed, so its run can't be retried`);
   if (task.boardColumnId !== null)
     throw new ConflictError(
       `${task.title} is parked; move it to Backlog or Ready before retrying it`,

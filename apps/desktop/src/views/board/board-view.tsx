@@ -1,6 +1,7 @@
 import {
   BatchState,
   BoardStatus,
+  Delivery,
   TaskStatus,
   WorkspaceMode,
   WorkstreamState,
@@ -22,17 +23,19 @@ import {
   useAbandonBatch,
   useBatches,
   useBoardColumns,
+  useCloseTask,
   useRetryWorkstream,
   useTasks,
   useWorkstreams,
 } from '../../daemon/queries';
-import { canRetry } from '../factory/workstream-state';
+import { canClose, canRetry } from '../factory/workstream-state';
 import { FormModal } from '../../shell/form-modal';
 import { useSelectedProject } from '../../shell/selected-project';
 import { SplitButton } from '../../shell/split-button';
 import { SettingsSectionKey } from '../settings/sections';
 import { abandonNote } from './batch/abandon-note';
 import { BatchSheet } from './batch/batch-sheet';
+import { closeNote } from './batch/close-note';
 import { BatchStrip, sharedBatches } from './batch-strip';
 import { BoardColumn } from './board-column';
 import { BoardScroll } from './board-scroll';
@@ -40,6 +43,7 @@ import { columnHint } from './column-hints';
 import { BoardDnd } from './board-dnd';
 import { boardLayout, DONE_LIMIT, type LayoutColumn } from './board-layout';
 import { menuMoves, resolveDrop, startedDependents, type DropTarget } from './drop-rules';
+import { landingLine } from './landing-draft';
 import { NewTaskForm } from './new-task-form';
 import { InboxLink } from './inbox-link';
 import { PullRequestLink } from './pull-request-link';
@@ -133,6 +137,7 @@ function BoardColumns({
   const actions = useBoardActions(projectId);
   const retry = useRetryWorkstream();
   const abandon = useAbandonBatch();
+  const closeTask = useCloseTask();
   const [showAllDone, setShowAllDone] = useState(false);
   // The task whose details are open, by ID, so the drawer follows the task as the board refetches.
   const [openId, setOpenId] = useState<TaskId | null>(null);
@@ -143,6 +148,10 @@ function BoardColumns({
   const openBatch = openWorkstream?.batchId ? batchById.get(openWorkstream.batchId) : undefined;
   const batchOf = (ws: WorkstreamDto | undefined) =>
     ws?.batchId ? batchById.get(ws.batchId) : undefined;
+  // Local delivery has no pull request to place.
+  const pullRequests = project.delivery === Delivery.PullRequest;
+  const landingOf = (task: TaskDto, batch: BatchDto | undefined): string | undefined =>
+    pullRequests ? landingLine(task, batch, project.baseBranch) : undefined;
   const humanColumns = new Map(
     layout.flatMap((c) => (c.key.kind === 'human' ? [[c.key.id, c.label] as const] : [])),
   );
@@ -180,6 +189,11 @@ function BoardColumns({
       {abandon.error ? (
         <Alert color="red" title="Couldn't abandon the batch">
           {abandon.error.message}
+        </Alert>
+      ) : null}
+      {closeTask.error ? (
+        <Alert color="red" title="Couldn't close the task">
+          {closeTask.error.message}
         </Alert>
       ) : null}
       <BoardScroll>
@@ -237,6 +251,7 @@ function BoardColumns({
                 batch={batch}
                 gateCommand={project.gateCommand}
                 pullRequest={shippedPullRequest(task, ws, batchById)}
+                landing={landingOf(task, batch)}
                 startNote={noteOf(task)}
                 peers={peers}
               />
@@ -260,6 +275,7 @@ function BoardColumns({
               peers,
               batch,
               project.gateCommand,
+              landingOf(task, batch) ?? null,
               noteOf(task),
             );
           }}
@@ -277,14 +293,26 @@ function BoardColumns({
                   ? {
                       onRetry: () => {
                         abandon.reset();
+                        closeTask.reset();
                         retry.mutate({ id: ws.id });
                       },
+                    }
+                  : {})}
+                {...(ws && canClose(ws.state)
+                  ? {
+                      onCloseTask: () => {
+                        retry.reset();
+                        abandon.reset();
+                        closeTask.mutate(task.id);
+                      },
+                      closeLine: closeNote(batch),
                     }
                   : {})}
                 {...(batch && canAbandon
                   ? {
                       onAbandon: () => {
                         retry.reset();
+                        closeTask.reset();
                         abandon.mutate(batch.id);
                       },
                       abandonRefusal: abandonNote(batch, workstreams).refusal,
@@ -315,6 +343,7 @@ function BoardColumns({
           workstreams={workstreams}
           workspaceMode={project.workspaceMode}
           gateCommand={project.gateCommand}
+          {...(pullRequests ? { pullRequestBase: project.baseBranch } : {})}
           onClose={() => {
             setOpenId(null);
           }}

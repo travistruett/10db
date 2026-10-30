@@ -1,8 +1,9 @@
-import { ProjectPatch, type ProjectDto } from '@10db/contracts';
+import { hazardScope, HazardScope, ProjectPatch, type ProjectDto } from '@10db/contracts';
 import {
   ActionIcon,
   Alert,
   Button,
+  Checkbox,
   Code,
   Group,
   Stack,
@@ -19,6 +20,7 @@ interface AreaDraft {
   readonly paths: string;
 }
 interface HazardDraft extends AreaDraft {
+  readonly perCopy: boolean;
   readonly commands: string;
 }
 
@@ -35,6 +37,7 @@ const hazardDrafts = (project: ProjectDto): HazardDraft[] =>
     name: h.name,
     paths: h.globs.join('\n'),
     commands: h.commands.join('\n'),
+    perCopy: hazardScope(h) === HazardScope.Copy,
   }));
 
 /** The patch for the drafts, or the first thing wrong with them. */
@@ -48,6 +51,7 @@ function toPatch(
       name: h.name.trim(),
       globs: lines(h.paths),
       commands: lines(h.commands),
+      scope: h.perCopy ? HazardScope.Copy : HazardScope.Project,
     })),
   });
   if (parsed.success) return { patch: parsed.data };
@@ -225,8 +229,17 @@ export function ProjectAreas({ project }: { readonly project: ProjectDto }) {
                 ? 'Name this hazard.'
                 : `Only one task at a time may change these files${
                     lines(hazard.commands).length > 0 ? ' or run these commands' : ''
-                  }. Commands go one per line, as the start of a command such as "pnpm add".`}
+                  }${hazard.perCopy ? ' in the same copy of the project' : ''}. Commands go one per line, as the start of a command such as "pnpm add".`}
             </Text>
+            <Checkbox
+              size="xs"
+              aria-label={`Hazard ${String(index + 1)} is held per copy`}
+              label="Held per copy: tasks working in separate copies of the project (worktrees) may change these files at the same time, and a clash is settled when their pull requests merge. Leave it off for something every copy shares, such as a database or a port."
+              checked={hazard.perCopy}
+              onChange={(e) => {
+                setHazard(index, { perCopy: e.currentTarget.checked });
+              }}
+            />
             <PathExamples paths={hazard.paths} />
           </Stack>
         ))}
@@ -234,7 +247,7 @@ export function ProjectAreas({ project }: { readonly project: ProjectDto }) {
           <Button
             variant="light"
             onClick={() => {
-              setHazards((all) => [...all, { name: '', paths: '', commands: '' }]);
+              setHazards((all) => [...all, { name: '', paths: '', commands: '', perCopy: false }]);
             }}
           >
             Add hazard

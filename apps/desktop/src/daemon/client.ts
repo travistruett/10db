@@ -1,3 +1,4 @@
+import { refusalText } from '@10db/contracts';
 import type { AppType } from '@10db/daemon';
 import { hc } from 'hono/client';
 import { z } from 'zod';
@@ -34,8 +35,7 @@ function errorMessage(status: number, body: unknown): string {
   if (!parsed.success) return `The daemon answered HTTP ${String(status)}`;
   const { message, issues, error } = parsed.data;
   if (message) return message;
-  if (issues && issues.length > 0)
-    return issues.map((i) => (i.path ? `${i.path}: ${i.message}` : i.message)).join('; ');
+  if (issues && issues.length > 0) return refusalText(issues);
   return error ?? `The daemon answered HTTP ${String(status)}`;
 }
 

@@ -11,6 +11,7 @@ import {
   type StepRole,
   type TaskDto,
 } from '@10db/contracts';
+import { failedSteps } from './failed-steps';
 
 interface StepBrief {
   readonly index: number;
@@ -85,13 +86,14 @@ const SANDBOX_RULES = [
 ];
 
 const RULES = [
-  'Edit only files inside your claims. For anything else, call the request_claim tool first.',
+  'Edit only files inside your claims. For anything else, call the request_claim tool first. When another task holds the claim, the call waits until it frees; if it answers waiting: true, call it again with the same opId. Do not edit those files without it.',
   'Commit only through the 10db commit tool, naming every path. Never run git commit, add, checkout, reset, stash or push: 10db pushes the work when it ships, and the git dir is read-only to you.',
   'Before you end your turn, commit every change in your claims through mcp__10db__commit. A step that ends with changes uncommitted is sent back to you, and no gate runs on it.',
   'When a decision is not yours to make, ask with ask_human (or your question tool). Record routine engineering decisions with record_decision.',
   'If you depart from the plan or a principle, call report_deviation with your reason.',
   PLAIN_COMMANDS,
-  'When the acceptance criteria are met and committed, end your turn. 10db runs the gate itself.',
+  "Run only the checks for what you changed (the changed packages' tests, typecheck and lint), never the full gate: 10db runs it after your turn ends.",
+  'When the acceptance criteria are met and committed, end your turn.',
   'If 10db asks you to hand off, finish your current step, call write_handoff, and end your turn.',
 ];
 
@@ -187,6 +189,15 @@ export function briefedFromHandoff(
 const fromHandoff = (handoff: HandoffDto): string =>
   `Continue from the handoff below. Do not redo finished work.\n\nHandoff:\n${renderHandoff(handoff)}`;
 
+/** Where to look after a failed gate: each failing step and the command that reruns it, when the output names them. */
+function failedStepsSection(output: string): string {
+  const steps = failedSteps(output);
+  if (steps.length === 0)
+    return 'Its output below says which check failed: rerun only the check that failed while you fix it.';
+  const lines = steps.map((s) => `\`${s.name}\`: rerun \`${s.command}\` (log \`${s.log}\`)`);
+  return `Failing steps; rerun only these while you fix them:\n${bullets(lines)}`;
+}
+
 /** A read-only step (one a retry restarted with the builder's note) has nothing to commit. */
 const gateFailure = (evidence: EvidenceDto, tools: ToolAccess): string =>
   evidence.kind === EvidenceKind.Builder
@@ -195,7 +206,7 @@ const gateFailure = (evidence: EvidenceDto, tools: ToolAccess): string =>
           ? 'Address it, commit, and end your turn.'
           : 'Take it into account, then call mcp__10db__complete_step.'
       }`
-    : `The gate failed (exit ${String(evidence.exitCode)} from \`${evidence.command}\`). Fix the cause, commit, and end your turn.\n\nGate output (end):\n\`\`\`\n${evidence.summary}\n\`\`\``;
+    : `The gate failed (exit ${String(evidence.exitCode)} from \`${evidence.command}\`).\n${failedStepsSection(evidence.summary)}\nFix the cause, commit, and end your turn; 10db runs the gate again.\n\nGate output (end):\n\`\`\`\n${evidence.summary}\n\`\`\``;
 
 function actionSection(input: PromptInput): string {
   switch (input.action.kind) {
@@ -227,7 +238,7 @@ function actionSection(input: PromptInput): string {
     case 'fix': {
       const gate = input.evidence
         ? gateFailure(input.evidence, input.step.tools)
-        : 'The gate failed. Run it, fix the cause, commit, and end your turn.';
+        : "The gate failed and 10db kept no output from it. Run the changed packages' tests, typecheck and lint, fix the cause, commit, and end your turn; 10db runs the gate again.";
       // A fix session that was cut off left a handoff after the failure; the next one starts from it.
       return input.handoff && briefedFromHandoff(input.action, input.handoff, input.evidence)
         ? `${fromHandoff(input.handoff)}\n\n${gate}`

@@ -1,4 +1,4 @@
-import { Delivery, WorkspaceMode, type ProjectDto } from '@10db/contracts';
+import { Delivery, ProjectLanding, WorkspaceMode, type ProjectDto } from '@10db/contracts';
 import {
   Button,
   Collapse,
@@ -43,6 +43,7 @@ function reseed(current: GeneralValues, seed: GeneralValues, next: GeneralValues
       current.budgetCeiling === seed.budgetCeiling ? next.budgetCeiling : current.budgetCeiling,
     delivery: current.delivery === seed.delivery ? next.delivery : current.delivery,
     baseBranch: current.baseBranch === seed.baseBranch ? next.baseBranch : current.baseBranch,
+    landing: current.landing === seed.landing ? next.landing : current.landing,
     prTitlePrefix:
       current.prTitlePrefix === seed.prTitlePrefix ? next.prTitlePrefix : current.prTitlePrefix,
     allowedCommands:
@@ -204,6 +205,35 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
               error={errors.baseBranch}
               onChange={(e) => {
                 set({ baseBranch: e.currentTarget.value });
+              }}
+            />
+          </SettingRow>
+        ) : null}
+        {pullRequests ? (
+          <SettingRow
+            label="When checks pass"
+            description={
+              values.landing === ProjectLanding.Merge
+                ? `GitHub merges each pull request into ${values.baseBranch.trim() || 'the base branch'} by itself once its required checks pass. A task can choose another branch, or hold.`
+                : 'Pull requests wait for you to merge them. A task can choose to merge.'
+            }
+          >
+            <SegmentedControl
+              aria-label="When checks pass"
+              fullWidth
+              value={values.landing}
+              data={[
+                {
+                  value: ProjectLanding.Merge,
+                  label: `Merge into ${values.baseBranch.trim() || 'the base branch'}`,
+                },
+                { value: ProjectLanding.Hold, label: 'Hold for my review' },
+              ]}
+              onChange={(value) => {
+                set({
+                  landing:
+                    value === ProjectLanding.Hold ? ProjectLanding.Hold : ProjectLanding.Merge,
+                });
               }}
             />
           </SettingRow>

@@ -1,7 +1,7 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { serve, upgradeWebSocket, type WebSocketServerLike } from '@hono/node-server';
 import {
@@ -55,6 +55,7 @@ import {
   createBatchCardAnswers,
   createBatchStarter,
   createDeliveryJobs,
+  createPrWatch,
   createShipper,
   createWorktreeDependencies,
   DEFAULT_DELIVERY_LIMITS,
@@ -62,6 +63,7 @@ import {
   flagWrongBranch,
   recoverBatches,
   resolvePnpm,
+  subscribePrWatch,
   subscribeShipTrigger,
   type DeliveryContext,
   type DeliveryLimits,
@@ -83,7 +85,8 @@ import { createInboxService } from '../inbox';
 import { createKeepAwake, systemCaffeinate, type CaffeinateSpawner } from '../keep-awake';
 import { createLogger, fileDestination, rotateLogFile, type Logger } from '../log';
 import { protectedPaths } from '../guard';
-import { createMcpHandler } from '../mcp';
+import { createBuilderMcpHandler } from '../builder';
+import { ClaimWaits, createMcpHandler, withdrawStaleClaimWaits } from '../mcp';
 import { recoverOnStartup, systemProcesses, type ProcessTerminator } from '../recovery';
 import {
   applyCheckAnswer,
@@ -111,7 +114,8 @@ import { createWatcher, systemWatch, type WatchFn } from '../watcher';
 import { createProjectPinStore } from './checkout-pins';
 import { createGitCardAnswers, createGitRefusalHandler } from './git-refusal';
 import { acquireInstanceLock } from './instance-lock';
-import { removeRuntimeFiles, writeRuntimeFiles } from './runtime-files';
+import { removeRuntimeFiles, writeRuntimeFiles } from '../runtime-files';
+import { createAreaNamer } from './area-namer';
 import { createServices } from './services';
 import { assertWorktreeRootAllowed, DEFAULT_WORKTREE_BASE, worktreeRootFor } from './worktree-root';
 
@@ -149,6 +153,8 @@ export interface DaemonOptions {
   /** The login environment fetch, push and gh run in (main.ts builds it from the login shell). */
   readonly networkEnv?: () => Readonly<Record<string, string>>;
   readonly deliveryLimits?: Partial<DeliveryLimits>;
+  /** How often shipped pull requests are read; defaults to 2 minutes. */
+  readonly prWatchIntervalMs?: number;
   /** How long a provider stays paused when its usage limit gives no reset time. */
   readonly defaultPauseMs?: number;
   /** The environment sessions and gates start from: the captured login shell in production. */
@@ -322,6 +328,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // references; they are set before anything can fire a callback.
   let runner: Runner | null = null;
   let scheduler: Scheduler | null = null;
+  // A task that starts waiting for a claim may be waiting on one that needs a lane to finish.
+  const claimWaits = new ClaimWaits({
+    onWait: () => {
+      scheduler?.requestTick();
+    },
+  });
   let answerBatchCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerAccountCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerGitCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
@@ -620,6 +632,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     onWorktreeMissing: (batch, path) => {
       flagWorktreeMissing(inbox, batch, path);
     },
+    awaitedHolders: () => claimWaits.awaitedHolders(),
   });
   scheduler = createdScheduler;
 
@@ -636,6 +649,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     logger,
     cleanShutdown,
   });
+  // The previous daemon's claim waits ended with it; their cards would name holders nobody waits for.
+  withdrawStaleClaimWaits(state, inbox);
   accountPauses.restore();
   // A move back that came due reads the pauses.
   moveBack.restore();
@@ -649,6 +664,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     worktrees: { ctx: delivery, root: worktreeRoot },
   });
   const unsubscribeShip = subscribeShipTrigger(bus, state.db, shipper);
+  // Outside the delivery job queues: a slow or offline gh never holds a cut or a ship.
+  const prWatch = createPrWatch({
+    ctx: delivery,
+    clock,
+    ...(opts.prWatchIntervalMs ? { intervalMs: opts.prWatchIntervalMs } : {}),
+  });
+  const unsubscribePrWatch = subscribePrWatch(bus, prWatch);
 
   // Lanes start and stop through workstream events; keep-awake and the watcher follow them.
   const unsubscribeLanes = bus.subscribe((event) => {
@@ -684,11 +706,17 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     accounts: accountService,
     worktreeRoot,
     git,
+    branchOnOrigin: (repoPath, branch) =>
+      git.branchOnOrigin(repoPath, branch, {
+        env: delivery.networkEnv(),
+        timeoutMs: delivery.limits.networkTimeoutMs,
+      }),
     protectedRoots: [
       opts.dataDir,
       ...(sandboxTempRoot === null ? [] : [sandboxTempRoot]),
       worktreeRoot,
     ],
+    areaNamer: createAreaNamer({ adapter, launcher, db: state.db, scratchRoot: tmpdir() }),
     pinCheckout: (repoPath) => {
       // A checkout git can't read yet is recorded at the first git call that succeeds there.
       git.gitDirs(repoPath).catch(() => undefined);
@@ -703,6 +731,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     token,
     services,
     taskRemoval: services,
+    builderMcp: createBuilderMcpHandler({ services, log: logger }),
     upgradeWebSocket,
     onUnexpectedError: (error) => {
       logger.error({ err: error }, 'unhandled API error');
@@ -715,6 +744,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       log: logger,
       waitObserverFor: (id) => live.get(id)?.observer,
       sessionSignal: (id) => live.get(id)?.signal,
+      claimWaits,
     }),
   });
   const wss = new WebSocketServer({ noServer: true });
@@ -758,12 +788,15 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   );
   createdScheduler.start();
   createdScheduler.requestTick();
+  prWatch.start();
   logger.info({ port, dataDir: opts.dataDir }, 'daemon started');
 
   async function shutdown(): Promise<void> {
     try {
       createdScheduler.stop();
       unsubscribeShip();
+      unsubscribePrWatch();
+      await prWatch.stop();
       // A gate that waits must not start because shutdown freed the slot of the one it killed.
       gateSlots.close();
       // Aborts a shipping gate and any git or gh child; the batch stays SHIPPING for recovery.

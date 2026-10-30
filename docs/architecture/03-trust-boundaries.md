@@ -93,7 +93,7 @@ were made.
   keyed account's secret briefly, read through `/usr/bin/security` when a session starts.
 - It spawns lanes' `claude` processes, the gate, `git`, `gh`, `security`, `caffeinate` and `ps`.
 - It listens on `127.0.0.1` only. Every route needs the UI token except `/health` and `/mcp`, and `/mcp` needs
-  a session's token. CORS limits browsers only, so a local process with the token is a full client.
+  a session's token. `/builder/mcp` needs the UI token (§4.11). CORS limits browsers only, so a local process with the token is a full client.
 - Its risk is being a confused deputy for a lane (§5).
 
 ### 4.2 The desktop app
@@ -631,6 +631,18 @@ Under the lane sandbox (**built**), the design column holds for a lane's Bash:
 - **The dependency install** (`delivery/worktree-dependencies.ts`) runs after the seed, through the gate runner, so under srt with the project's allowed hosts: `pnpm install --frozen-lockfile --ignore-scripts --ignore-pnpmfile`, which runs no repository code. The run (`packageInstall`) alone gets pnpm's lock directory (`<system temp dir>/pnpm-store-operation-locks-<uid>`, which pnpm picks regardless of `TMPDIR`) open for reading and writing; the daemon refuses a lock directory that is a link or not private, and removes whatever a run left there that is not a regular file (`decisions/2026-10-28-worktree-dependency-install.md`).
 - **Removal** touches only a directory under the root that git lists as the project's worktree and that carries a `10db ` lock reason (`decisions/2026-10-27-worktree-removal-and-sweep.md`). Abandon and the startup sweep check for uncommitted changes themselves and keep a worktree that has any, or that git can't read, with a card. `SHIPPED` and `CLOSED` run `git worktree remove --force --force` with no check of their own: they rely on ship step 0's clean check, and so does recovery when it re-runs a removal whose clear did not land. A worktree's changes are read with the git dir checked to be a direct child of the pinned common dir's `worktrees` and its `commondir` file naming that common dir.
 - **The pull request template** is read from the shipped commit through git, not from the checkout (`decisions/2026-10-27-pr-template-from-commit.md`).
+
+### 4.11 The builder's MCP endpoint and its bridge
+
+**Built.** The builder's own MCP clients (Claude Code, Codex, Claude Desktop) list, create, edit, remove, start and park tasks and read the Inbox through `/builder/mcp` ([the decision](decisions/2026-10-29-builder-mcp-endpoint.md); setup in [`docs/builder-mcp.md`](../builder-mcp.md)).
+
+- **It is a UI-token surface.** `/builder/mcp` sits behind the same check as every route but `/health` and `/mcp`. A session's MCP token fails it, the UI token fails `/mcp`, and a lane has neither the UI token (§5) nor the data directory it lives in, so no lane can call it. Its tools are the builder's, not the lane tools of `mcp-tools.ts`; the two name lists are disjoint and a test holds them so.
+- **The bridge is the builder's own process.** `builder-mcp.mjs`, run by a client with the app's `tendb-node`, reads `daemon.json` and `ui-token` from the data directory on each call, so it carries the UI token with the builder's own file permissions and nothing is copied by hand. It sends the token only to `127.0.0.1` on the port `daemon.json` names.
+- **A live pid only.** The bridge reads the token only after `kill(pid, 0)` shows the pid in `daemon.json` is alive; a crashed daemon leaves the file behind. It then reads `daemon.json` again and sends only if the pid and `startedAt` are unchanged. A starting daemon removes the old `daemon.json` before it writes its new token, so a reader that sees the new token finds no `daemon.json` or the new one, never the old one. A crash, a reused pid and a restart between the two reads therefore can't send a new token to the old port, which a lane with loopback allowed could have bound.
+- **Titles only in the Inbox.** `list_inbox` returns each open card's id, kind, project, title and time, and no body, options or detail. Card titles are written by lanes (an `ask_human` question becomes the title), so card text is data a client must not obey, and the instructions say so. The same goes for task titles, descriptions and criteria, which a lane can propose.
+- **What it cannot do.** Answer a card, ship or abandon a batch, change a project, or approve an MCP server stay in the app: those are the controls R5 keeps from agents, and an agent client is one.
+- **Its input is parsed by 10db.** The SDK's validation is not used; a refusal reads as the New Task form's, and an error from inside 10db returns a generic text with the detail in the log.
+- **The bridge exits on nothing it doesn't use.** It reads `TENDB_DATA_DIR` and no other daemon variable, and writes nothing to stdout but protocol messages.
 
 ## 5. What the daemon reads, runs or sends for a lane
 

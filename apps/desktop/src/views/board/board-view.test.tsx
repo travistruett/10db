@@ -251,6 +251,60 @@ describe('BoardView', () => {
     expect(hrefs).toEqual(link === null ? [] : [link]);
   });
 
+  describe('where a task lands', () => {
+    /** One project with a ready task of each landing; `delivery` is the project's. */
+    function serveLandings(delivery: 'pull_request' | 'local') {
+      const project = projectViewDto({ delivery, prTitlePrefix: 'feat(app)', baseBranch: 'main' });
+      const tasks = [
+        taskDto({ projectId: project.id, title: 'Alpha', landing: { kind: 'base' } }),
+        taskDto({
+          projectId: project.id,
+          title: 'Beta',
+          landing: { kind: 'branch', branch: 'feature/x' },
+        }),
+        taskDto({ projectId: project.id, title: 'Gamma', landing: { kind: 'hold' } }),
+      ];
+      serve(
+        http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+        http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json(tasks)),
+        http.get(daemonUrl('/workstreams'), () => HttpResponse.json([])),
+      );
+    }
+
+    it('says on each card where its work will land', async () => {
+      serveLandings('pull_request');
+      renderApp('/board');
+      const lines = await screen.findAllByTestId('landing-line');
+      expect(lines.map((l) => l.textContent)).toEqual([
+        'Merges into main when checks pass',
+        'Merges into feature/x when checks pass',
+        'Held for your review: pull request against main',
+      ]);
+      // A screen reader hears it with the rest of the card.
+      expect(
+        screen.getByText(/criterion\. Merges into feature\/x when checks pass\./),
+      ).toBeTruthy();
+    });
+
+    it('says nothing on a project that commits directly', async () => {
+      serveLandings('local');
+      renderApp('/board');
+      await screen.findByRole('button', { name: 'Alpha' });
+      expect(screen.queryByTestId('landing-line')).toBeNull();
+    });
+
+    it('lets the drawer change it, starting from the task', async () => {
+      serveLandings('pull_request');
+      renderApp('/board');
+      fireEvent.click(await screen.findByRole('button', { name: 'Gamma' }));
+      const drawer = await screen.findByRole('dialog', { name: 'Task' });
+      expect(
+        within(drawer).getByRole<HTMLInputElement>('radio', { name: 'Hold for my review' }).checked,
+      ).toBe(true);
+      expect(within(drawer).getByRole('radio', { name: 'Merge into main' })).toBeTruthy();
+    });
+  });
+
   it('starts a ready task', async () => {
     const project = projectDto();
     const alpha = taskDto({
@@ -1275,6 +1329,68 @@ describe('BoardView', () => {
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Abandon', hidden: true }));
     await waitFor(() => {
       expect(abandoned).toEqual([batch.id]);
+    });
+  });
+
+  it('the card menu closes a failed task with a line on its branch, and a refusal names the blockers', async () => {
+    const batch = batchDto();
+    const project = projectViewDto({ id: batch.projectId, currentBatch: batch });
+    const failed = workstreamDto({
+      projectId: project.id,
+      batchId: batch.id,
+      taskTitle: 'Broken',
+      state: 'FAILED',
+    });
+    const fine = workstreamDto({ projectId: project.id, taskTitle: 'Fine', state: 'DONE' });
+    const tasks = [failed, fine].map((ws) =>
+      taskDto({
+        id: ws.taskId,
+        projectId: project.id,
+        title: ws.taskTitle,
+        boardStatus: ws === failed ? 'blocked' : 'done',
+        workstreamId: ws.id,
+      }),
+    );
+    const closed: string[] = [];
+    let refuse = true;
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json(tasks)),
+      http.get(daemonUrl('/projects/:projectId/batches'), () => HttpResponse.json([batch])),
+      http.get(daemonUrl('/workstreams'), () => HttpResponse.json([failed, fine])),
+      http.post(daemonUrl('/tasks/:taskId/close'), ({ params }) => {
+        closed.push(String(params['taskId']));
+        return refuse
+          ? HttpResponse.json(
+              { error: 'conflict', message: "Task Broken can't be closed while Child waits on it" },
+              { status: 409 },
+            )
+          : HttpResponse.json({ ...tasks[0], status: 'cancelled' });
+      }),
+    );
+    renderApp('/board');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Actions for Fine' }));
+    await screen.findByRole('menu', { hidden: true });
+    expect(screen.queryByRole('menuitem', { name: 'Close', hidden: true })).toBeNull();
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for Broken' }));
+    expect(
+      await screen.findByText('Close keeps the branch 10db/greetings-0a1b2c3d as it is.'),
+    ).toBeTruthy();
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Close', hidden: true }));
+    expect(await screen.findByText("Couldn't close the task")).toBeTruthy();
+    expect(screen.getByText("Task Broken can't be closed while Child waits on it")).toBeTruthy();
+
+    refuse = false;
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for Broken' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Close', hidden: true }));
+    await waitFor(() => {
+      expect(closed).toEqual([failed.taskId, failed.taskId]);
+    });
+    await waitFor(() => {
+      expect(screen.queryByText("Couldn't close the task")).toBeNull();
     });
   });
 

@@ -14,6 +14,8 @@ import {
   UnstyledButton,
 } from '@mantine/core';
 import type { KeyboardEvent, RefObject } from 'react';
+import { ExternalLink } from '../board/pull-request-link';
+import { BatchCardActions } from './batch-card-actions';
 import { CheckCard } from './check-card';
 import { isDismissable } from './inbox-rows';
 import { ReviewRejection, reviewRejection } from '../review/review-rejection';
@@ -58,6 +60,20 @@ function CardBody({ item }: { readonly item: InboxItemDto }) {
       {item.body}
     </Text>
   );
+}
+
+/** The pages the desktop app's opener may open, as its capability (`opener:allow-open-url`) says. */
+const GITHUB_PAGE = 'https://github.com/';
+
+/**
+ * The page a flag card offers to open (`detail.link`, such as a failing check): a github.com page
+ * only. The daemon's text is not trusted to be a link, and the desktop app opens nothing else, so a
+ * check elsewhere (a third-party CI) gets no button; the card's body holds its address regardless.
+ */
+function cardLink(item: InboxItemDto): string | null {
+  if (item.kind !== InboxKind.Flag) return null;
+  const link = item.detail?.['link'];
+  return typeof link === 'string' && link.startsWith(GITHUB_PAGE) ? link : null;
 }
 
 // Destructured: reading `props.x` in render, with a ref among the props, trips react-hooks/refs.
@@ -169,6 +185,7 @@ export function InboxCard({
     }
   };
   const hasOptions = item.options.length > 0;
+  const link = cardLink(item);
 
   return (
     <Paper withBorder p="md" shadow="xs" {...{ [SELECTED_CARD_ATTRIBUTE]: true }}>
@@ -191,6 +208,8 @@ export function InboxCard({
           <CardBody item={item} />
         )}
         {rejection ? <ReviewRejection review={rejection} /> : null}
+        {link === null ? null : <ExternalLink url={link} label="Open on GitHub" />}
+        <BatchCardActions item={item} onDone={onDismiss} />
         {hasOptions ? (
           <Radio.Group value={choice} onChange={onChoose} aria-label="Answer">
             <Stack gap="xs">

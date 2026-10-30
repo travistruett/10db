@@ -234,6 +234,21 @@ export function useStartTask() {
   });
 }
 
+/** Closes a task whose run failed; it leaves the Board, its run stays in Factory. */
+export function useCloseTask() {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (taskId: TaskId) =>
+      readJson(await client.tasks[':taskId'].close.$post({ param: { taskId } }), TaskDto),
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['tasks'] }),
+        queryClient.invalidateQueries({ queryKey: ['candidates'] }),
+      ]),
+  });
+}
+
 export function useShipBatch() {
   const { client } = useDaemon();
   const queryClient = useQueryClient();
