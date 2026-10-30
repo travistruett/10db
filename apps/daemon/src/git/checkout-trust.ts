@@ -9,7 +9,8 @@ const CHECKOUT_SCOPES: ReadonlySet<string> = new Set(['local', 'worktree']);
 
 /**
  * Which directories a checkout's git uses, by identity: device and inode, so a `.git` moved aside
- * and replaced at the same path reads as a different checkout.
+ * and replaced at the same path reads as a different checkout. Compare two identities with
+ * `sameCheckoutIdentity`, never `===`.
  */
 export function checkoutIdentity(dirs: { gitDir: string; commonDir: string }): string {
   const id = (path: string): string => {

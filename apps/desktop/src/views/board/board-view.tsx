@@ -22,17 +22,19 @@ import {
   useAbandonBatch,
   useBatches,
   useBoardColumns,
+  useCloseTask,
   useRetryWorkstream,
   useTasks,
   useWorkstreams,
 } from '../../daemon/queries';
-import { canRetry } from '../factory/workstream-state';
+import { canClose, canRetry } from '../factory/workstream-state';
 import { FormModal } from '../../shell/form-modal';
 import { useSelectedProject } from '../../shell/selected-project';
 import { SplitButton } from '../../shell/split-button';
 import { SettingsSectionKey } from '../settings/sections';
 import { abandonNote } from './batch/abandon-note';
 import { BatchSheet } from './batch/batch-sheet';
+import { closeNote } from './batch/close-note';
 import { BatchStrip, sharedBatches } from './batch-strip';
 import { BoardColumn } from './board-column';
 import { BoardScroll } from './board-scroll';
@@ -41,9 +43,10 @@ import { BoardDnd } from './board-dnd';
 import { boardLayout, DONE_LIMIT, type LayoutColumn } from './board-layout';
 import { menuMoves, resolveDrop, startedDependents, type DropTarget } from './drop-rules';
 import { NewTaskForm } from './new-task-form';
+import { InboxLink } from './inbox-link';
 import { PullRequestLink } from './pull-request-link';
 import { cardSummary, TaskCard } from './task-card';
-import { TaskCardMenu } from './task-card-menu';
+import { canStart, TaskCardMenu } from './task-card-menu';
 import { columnNameOf, TaskDrawer } from './task-drawer';
 import { useBoardActions } from './use-board-actions';
 
@@ -132,6 +135,7 @@ function BoardColumns({
   const actions = useBoardActions(projectId);
   const retry = useRetryWorkstream();
   const abandon = useAbandonBatch();
+  const closeTask = useCloseTask();
   const [showAllDone, setShowAllDone] = useState(false);
   // The task whose details are open, by ID, so the drawer follows the task as the board refetches.
   const [openId, setOpenId] = useState<TaskId | null>(null);
@@ -145,8 +149,15 @@ function BoardColumns({
   const humanColumns = new Map(
     layout.flatMap((c) => (c.key.kind === 'human' ? [[c.key.id, c.label] as const] : [])),
   );
+  const allTasks = new Map(layout.flatMap((c) => c.tasks).map((t) => [t.id, t] as const));
+  // What the card says about a Start: asked and on its way, or refused and why.
+  const noteOf = (task: TaskDto) =>
+    actions.note(
+      task,
+      canStart(task, task.workstreamId ? workstreamById.get(task.workstreamId)?.state : undefined),
+    );
   const drop = (taskId: TaskId, target: DropTarget) => {
-    actions.apply(resolveDrop(layout, taskId, target, started));
+    actions.apply(resolveDrop(layout, taskId, target, started), allTasks.get(taskId));
   };
   const accepts = (taskId: TaskId, target: DropTarget) => {
     const kind = resolveDrop(layout, taskId, target, started).kind;
@@ -172,6 +183,11 @@ function BoardColumns({
       {abandon.error ? (
         <Alert color="red" title="Couldn't abandon the batch">
           {abandon.error.message}
+        </Alert>
+      ) : null}
+      {closeTask.error ? (
+        <Alert color="red" title="Couldn't close the task">
+          {closeTask.error.message}
         </Alert>
       ) : null}
       <BoardScroll>
@@ -229,6 +245,7 @@ function BoardColumns({
                 batch={batch}
                 gateCommand={project.gateCommand}
                 pullRequest={shippedPullRequest(task, ws, batchById)}
+                startNote={noteOf(task)}
                 peers={peers}
               />
             );
@@ -239,12 +256,20 @@ function BoardColumns({
               task.workstreamId ? workstreamById.get(task.workstreamId) : undefined,
               batchById,
             );
-            return url ? <PullRequestLink url={url} /> : null;
+            if (url) return <PullRequestLink url={url} />;
+            return noteOf(task)?.inbox ? <InboxLink /> : null;
           }}
           summary={(task) => {
             const ws = task.workstreamId ? workstreamById.get(task.workstreamId) : undefined;
             const batch = batchOf(ws);
-            return cardSummary(task, cardWorkstream(ws, batch), peers, batch, project.gateCommand);
+            return cardSummary(
+              task,
+              cardWorkstream(ws, batch),
+              peers,
+              batch,
+              project.gateCommand,
+              noteOf(task),
+            );
           }}
           renderMenu={(task) => {
             const ws = task.workstreamId ? workstreamById.get(task.workstreamId) : undefined;
@@ -260,26 +285,39 @@ function BoardColumns({
                   ? {
                       onRetry: () => {
                         abandon.reset();
+                        closeTask.reset();
                         retry.mutate(ws.id);
                       },
+                    }
+                  : {})}
+                {...(ws && canClose(ws.state)
+                  ? {
+                      onCloseTask: () => {
+                        retry.reset();
+                        abandon.reset();
+                        closeTask.mutate(task.id);
+                      },
+                      closeLine: closeNote(batch),
                     }
                   : {})}
                 {...(batch && canAbandon
                   ? {
                       onAbandon: () => {
                         retry.reset();
+                        closeTask.reset();
                         abandon.mutate(batch.id);
                       },
                       abandonRefusal: abandonNote(batch, workstreams).refusal,
                     }
                   : {})}
+                starting={noteOf(task)?.kind === 'starting'}
                 parkedDependency={parkedDependencyOf(task, peers)}
                 moves={menuMoves(layout, task.id, started)}
                 onMove={(target) => {
                   drop(task.id, target);
                 }}
                 onStart={() => {
-                  actions.apply({ kind: 'start', taskId: task.id });
+                  actions.apply({ kind: 'start', taskId: task.id }, task);
                 }}
               />
             );

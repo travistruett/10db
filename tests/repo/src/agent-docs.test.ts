@@ -24,10 +24,16 @@ function repoFiles(): string[] {
 function repoDirs(parent: string): string[] {
   const parentPath = resolve(repoRoot, parent);
   if (!existsSync(parentPath)) return [];
-  return readdirSync(parentPath, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory() && entry.name !== 'node_modules')
-    .map((entry) => `${parent}/${entry.name}`)
-    .sort();
+  return (
+    readdirSync(parentPath, { withFileTypes: true })
+      // Hidden directories (such as an agent harness's untracked .claude) are not apps or packages.
+      .filter(
+        (entry) =>
+          entry.isDirectory() && entry.name !== 'node_modules' && !entry.name.startsWith('.'),
+      )
+      .map((entry) => `${parent}/${entry.name}`)
+      .sort()
+  );
 }
 
 function filesIn(dir: string, extension: string): string[] {

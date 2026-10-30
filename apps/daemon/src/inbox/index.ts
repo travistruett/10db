@@ -1,3 +1,10 @@
 export { requestMcpApproval } from './mcp-approval';
 export { createPermissionBroker, type WaitObserver } from './permission-broker';
-export { createInboxService, ParkedError, type InboxService } from './service';
+export {
+  createInboxService,
+  flagCard,
+  ParkedError,
+  rewordCard,
+  withdrawCard,
+  type InboxService,
+} from './service';

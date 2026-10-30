@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
+import type { FailingCheckDto, PullRequestChecks } from '@10db/contracts';
 import { z } from 'zod';
 import {
   INSTALL_PREFIXES_TEXT,
@@ -22,6 +23,8 @@ export const GhFailure = {
   SignedOut: 'signed_out',
   Timeout: 'timeout',
   Aborted: 'aborted',
+  /** gh ran but never reached GitHub: no DNS, no route, or a connection refused or timed out. */
+  Unreachable: 'unreachable',
   Failed: 'failed',
 } as const;
 export type GhFailure = (typeof GhFailure)[keyof typeof GhFailure];
@@ -44,6 +47,17 @@ export interface PullRequest {
   readonly state: PrState;
 }
 
+/**
+ * A pull request's state and checks as GitHub reports them. The checks are `unknown` only when the
+ * rollup lists an entry 10db can't read and no other check failed or is still running.
+ */
+export interface PullRequestStatus {
+  readonly url: string;
+  readonly state: PrState;
+  readonly checks: PullRequestChecks;
+  readonly failingChecks: FailingCheckDto[];
+}
+
 /** The host integration (batch delivery spec §7): everything 10db asks GitHub, through the gh CLI. */
 export interface Gh {
   authStatus(call: GhCall): Promise<void>;
@@ -53,6 +67,14 @@ export interface Gh {
     input: { readonly repo: string; readonly ref: string },
     call: GhCall,
   ): Promise<PullRequest | null>;
+  /**
+   * The pull request's state and checks, or null when GitHub has none there for this account: none
+   * at that number, or its repository is gone or closed to the account.
+   */
+  prStatus(
+    input: { readonly repo: string; readonly ref: string },
+    call: GhCall,
+  ): Promise<PullRequestStatus | null>;
   prCreate(
     input: {
       readonly repo: string;
@@ -77,7 +99,20 @@ export type GhExec = (args: readonly string[], call: GhCall) => Promise<GhOutput
 /** gh's documented exit code for "authentication required". */
 const AUTH_REQUIRED_EXIT = 4;
 const NO_PR = /no pull requests found/i;
+/**
+ * GitHub's own answer that a pull request named by URL or number isn't there for this account: gh
+ * looks it up by number and prints the GraphQL error as it came, `GraphQL: Could not resolve to a
+ * PullRequest with the number of 8. (repository.pullRequest)`, or `... to a Repository with the name
+ * 'owner/name'. (repository)` when the repository is gone or closed to the account.
+ */
+const PR_NOT_FOUND = /could not resolve to a (pullrequest|repository)\b/i;
 const SIGNED_OUT = /gh auth login|not logged in/i;
+/**
+ * gh's words when it never reached GitHub: its own line for a DNS failure, or the network error Go
+ * gave it (`dial tcp ...: i/o timeout`, `connection refused`, a TLS handshake that timed out).
+ */
+const UNREACHABLE =
+  /error connecting to|check your internet connection|dial (tcp|udp)|i\/o timeout|connection (refused|reset)|network is unreachable|no route to host|no such host|tls handshake timeout|client\.timeout exceeded/i;
 const MAX_OUTPUT = 4 * 1024 * 1024;
 /** Prompts are off whatever the environment says: nobody can answer one. */
 const NO_PROMPTS = {
@@ -195,6 +230,89 @@ function prUrlIn(repo: string) {
   });
 }
 
+/**
+ * One entry of gh's `statusCheckRollup`: a check run (GitHub Actions and apps) or a commit status.
+ * Values are plain strings, so a state GitHub adds later reads as "not failing" rather than breaking the read.
+ */
+const CheckRunItem = z.object({
+  __typename: z.literal('CheckRun'),
+  name: z.string(),
+  status: z.string(),
+  conclusion: z.string().nullish(),
+  detailsUrl: z.string().nullish(),
+});
+const StatusContextItem = z.object({
+  __typename: z.literal('StatusContext'),
+  context: z.string(),
+  state: z.string(),
+  targetUrl: z.string().nullish(),
+});
+const CheckRollupItem = z.discriminatedUnion('__typename', [CheckRunItem, StatusContextItem]);
+export type CheckRollupItem = z.infer<typeof CheckRollupItem>;
+
+/**
+ * A rollup entry 10db can't read: a kind GitHub adds later, or a known kind missing a field. It
+ * stands for a check whose outcome 10db doesn't know.
+ */
+export const UNREADABLE_CHECK = { __typename: 'Unreadable' } as const;
+export type CheckRollupEntry = CheckRollupItem | typeof UNREADABLE_CHECK;
+
+/** Reads one rollup entry on its own, so an entry 10db can't read leaves the rest of the read standing. */
+function rollupEntry(raw: unknown): CheckRollupEntry {
+  const item = CheckRollupItem.safeParse(raw);
+  return item.success ? item.data : UNREADABLE_CHECK;
+}
+
+const PrStatusView = z.object({
+  url: z.url(),
+  state: z.enum(PrState),
+  statusCheckRollup: z.array(z.unknown().transform(rollupEntry)).nullish(),
+});
+
+const FAILING_CONCLUSIONS = new Set(['FAILURE', 'TIMED_OUT', 'ACTION_REQUIRED', 'STARTUP_FAILURE']);
+const FAILING_STATES = new Set(['FAILURE', 'ERROR']);
+const PENDING_STATES = new Set(['PENDING', 'EXPECTED']);
+
+/** Only an https link is kept: it ends up in a card and a button. */
+function httpsOrNull(url: string | null | undefined): string | null {
+  return url?.startsWith('https://') && URL.canParse(url) ? url : null;
+}
+
+/**
+ * What a rollup says: failing if any check failed (failing wins), pending if any is still going or
+ * expected, unknown if an entry 10db can't read is left, none for an empty rollup, else passing.
+ * Cancelled, skipped, neutral and stale runs don't fail.
+ */
+export function summariseChecks(rollup: readonly CheckRollupEntry[]): {
+  checks: PullRequestChecks;
+  failingChecks: FailingCheckDto[];
+} {
+  const failingChecks: FailingCheckDto[] = [];
+  let pending = false;
+  let unreadable = false;
+  for (const item of rollup) {
+    switch (item.__typename) {
+      case 'CheckRun':
+        if (item.status !== 'COMPLETED') pending = true;
+        else if (FAILING_CONCLUSIONS.has(item.conclusion ?? ''))
+          failingChecks.push({ name: item.name, url: httpsOrNull(item.detailsUrl) });
+        break;
+      case 'StatusContext':
+        if (FAILING_STATES.has(item.state))
+          failingChecks.push({ name: item.context, url: httpsOrNull(item.targetUrl) });
+        else if (PENDING_STATES.has(item.state)) pending = true;
+        break;
+      case 'Unreadable':
+        unreadable = true;
+        break;
+    }
+  }
+  if (failingChecks.length > 0) return { checks: 'failing', failingChecks };
+  if (pending) return { checks: 'pending', failingChecks };
+  if (unreadable) return { checks: 'unknown', failingChecks };
+  return { checks: rollup.length === 0 ? 'none' : 'passing', failingChecks };
+}
+
 function failure(args: readonly string[], out: GhOutput): GhError {
   if (out.exitCode === AUTH_REQUIRED_EXIT || SIGNED_OUT.test(out.stderr))
     return new GhError(
@@ -202,7 +320,7 @@ function failure(args: readonly string[], out: GhOutput): GhError {
       'gh is not signed in. Run gh auth login in a terminal.',
     );
   return new GhError(
-    GhFailure.Failed,
+    UNREACHABLE.test(out.stderr) ? GhFailure.Unreachable : GhFailure.Failed,
     `gh ${args.slice(0, 2).join(' ')} failed (exit ${String(out.exitCode)}): ${out.stderr.trim().slice(0, 500)}`,
   );
 }
@@ -272,6 +390,15 @@ export function createGh(exec: GhExec): Gh {
       if (out.exitCode !== 0 && NO_PR.test(out.stderr)) return null;
       if (out.exitCode !== 0) throw failure(args, out);
       return parseOutput(PrView, args, out.stdout);
+    },
+    async prStatus({ repo, ref }, call) {
+      const args = ['pr', 'view', ref, '-R', repo, '--json', 'url,state,statusCheckRollup'];
+      const out = await exec(args, call);
+      if (out.exitCode !== 0 && (NO_PR.test(out.stderr) || PR_NOT_FOUND.test(out.stderr)))
+        return null;
+      if (out.exitCode !== 0) throw failure(args, out);
+      const view = parseOutput(PrStatusView, args, out.stdout);
+      return { url: view.url, state: view.state, ...summariseChecks(view.statusCheckRollup ?? []) };
     },
     async prCreate({ repo, base, head, title, bodyFile }, call) {
       const args = [
