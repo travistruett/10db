@@ -20,6 +20,8 @@ export interface TaskCardProps {
   readonly peers: ReadonlyMap<TaskId, Pick<TaskDto, 'title' | 'status'>>;
   /** The pull request of the batch that shipped a finished task. */
   readonly pullRequest?: string | undefined;
+  /** Where the work will land, for a project that delivers by pull request. */
+  readonly landing?: string | undefined;
 }
 
 function waitsOn(task: TaskDto, peers: TaskCardProps['peers']): string[] {
@@ -36,6 +38,7 @@ export function cardSummary(
   peers: TaskCardProps['peers'],
   batch?: BatchDto,
   gateCommand: string | null = null,
+  landing: string | null = null,
 ): string {
   const waits = waitsOn(task, peers);
   const criteria = task.acceptanceCriteria.length;
@@ -44,6 +47,7 @@ export function cardSummary(
     task.areas.length > 0 ? `Areas: ${task.areas.join(', ')}.` : null,
     criteria > 0 ? `${String(criteria)} ${criteria === 1 ? 'criterion' : 'criteria'}.` : null,
     waits.length > 0 ? `Waits on ${waits.join(', ')}.` : null,
+    landing ? `${landing}.` : null,
     task.status === TaskStatus.Cancelled ? 'Cancelled.' : null,
     state ? `${state.line}.` : null,
   ]
@@ -59,6 +63,7 @@ export function TaskCard({
   gateCommand = null,
   peers,
   pullRequest,
+  landing,
 }: TaskCardProps) {
   const waits = waitsOn(task, peers);
   const criteria = task.acceptanceCriteria.length;
@@ -108,6 +113,11 @@ export function TaskCard({
         </Group>
         {waits.length > 0 ? (
           <Text size="xs" c="dimmed">{`Waits on ${waits.join(', ')}`}</Text>
+        ) : null}
+        {landing ? (
+          <Text size="xs" c="dimmed" data-testid="landing-line">
+            {landing}
+          </Text>
         ) : null}
         {state ? (
           <Group gap={6} wrap="nowrap" align="flex-start">

@@ -30,6 +30,11 @@ describe('checkGeneral', () => {
       expected: { ok: true, patch: { sandboxLoopback: true } },
     },
     {
+      name: 'holding pull requests for review',
+      change: { landing: 'hold' },
+      expected: { ok: true, patch: { landing: 'hold' } },
+    },
+    {
       name: 'a worktree per task',
       change: { delivery: 'pull_request', prTitlePrefix: 'feat(app)', workspaceMode: 'worktree' },
       expected: {

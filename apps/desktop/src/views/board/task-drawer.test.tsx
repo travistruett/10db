@@ -18,6 +18,8 @@ function serve(...overrides: Parameters<typeof server.use>) {
 }
 
 interface Opts {
+  /** The base branch of a project that delivers by pull request. */
+  readonly pullRequestBase?: string;
   readonly task?: Parameters<typeof taskDto>[0];
   readonly workstream?: ReturnType<typeof workstreamDto>;
   readonly batch?: ReturnType<typeof batchDto>;
@@ -36,6 +38,7 @@ function open(opts: Opts = {}): { closed: () => number } {
       {...(opts.batch ? { batch: opts.batch } : {})}
       {...(opts.gateCommand ? { gateCommand: opts.gateCommand } : {})}
       {...(opts.workstreams ? { workstreams: opts.workstreams } : {})}
+      {...(opts.pullRequestBase ? { pullRequestBase: opts.pullRequestBase } : {})}
       onClose={() => {
         closes += 1;
       }}
@@ -114,6 +117,103 @@ describe('TaskDrawer', () => {
     });
     await waitFor(() => {
       expect(closed()).toBe(1);
+    });
+  });
+
+  describe('where the work lands', () => {
+    /** Serves the patch route and records what was sent. */
+    function serveSaves(): TaskPatch[] {
+      const patched: TaskPatch[] = [];
+      serve(
+        http.patch(daemonUrl('/tasks/:taskId'), async ({ request }) => {
+          patched.push((await request.json()) as TaskPatch);
+          return HttpResponse.json(taskDto());
+        }),
+      );
+      return patched;
+    }
+    const choice = async (name: string) =>
+      within(await dialog()).getByRole<HTMLInputElement>('radio', { name });
+    const save = async () =>
+      fireEvent.click(within(await dialog()).getByRole('button', { name: 'Save Changes' }));
+
+    it('starts from the task and names the base branch', async () => {
+      serveSaves();
+      open({ pullRequestBase: 'develop', task: { landing: { kind: 'hold' } } });
+      expect((await choice('Hold for my review')).checked).toBe(true);
+      expect((await choice('Merge into develop')).checked).toBe(false);
+    });
+
+    it('shows the branch a task merges into', async () => {
+      serveSaves();
+      open({
+        pullRequestBase: 'main',
+        task: { landing: { kind: 'branch', branch: 'feature/x' } },
+      });
+      expect((await choice('Merge into another branch')).checked).toBe(true);
+      expect(
+        within(await dialog()).getByLabelText<HTMLInputElement>('Branch to merge into').value,
+      ).toBe('feature/x');
+    });
+
+    it('sends a changed landing with the other fields', async () => {
+      const patched = serveSaves();
+      open({ pullRequestBase: 'main' });
+      fireEvent.click(await choice('Hold for my review'));
+      await save();
+      await waitFor(() => {
+        expect(patched).toHaveLength(1);
+      });
+      expect(patched[0]).toMatchObject({ landing: { kind: 'hold' } });
+    });
+
+    it('sends nothing about it when it did not change', async () => {
+      const patched = serveSaves();
+      open({ pullRequestBase: 'main' });
+      await edit('Title', 'Another');
+      await save();
+      await waitFor(() => {
+        expect(patched).toHaveLength(1);
+      });
+      expect(patched[0]).not.toHaveProperty('landing');
+    });
+
+    it('counts a changed landing as an edit to discard', async () => {
+      serveSaves();
+      open({ pullRequestBase: 'main' });
+      fireEvent.click(await choice('Hold for my review'));
+      fireEvent.click(within(await dialog()).getByRole('button', { name: 'Cancel' }));
+      expect(await screen.findByText('Discard your changes to this task?')).toBeTruthy();
+    });
+
+    it('asks for a branch name before saving', async () => {
+      const patched = serveSaves();
+      open({ pullRequestBase: 'main' });
+      fireEvent.click(await choice('Merge into another branch'));
+      await save();
+      expect(await screen.findByText('Name the branch this task merges into')).toBeTruthy();
+      expect(patched).toEqual([]);
+    });
+
+    it('says where a started task will land, and offers no change', async () => {
+      serveSaves();
+      open({
+        pullRequestBase: 'main',
+        task: { workstreamId: workstreamDto().id },
+        batch: batchDto({ baseBranch: 'release', autoMerge: true }),
+        workstream: workstreamDto({ state: 'RUNNING' }),
+      });
+      const d = await dialog();
+      expect(within(d).getByText('Merges into release when checks pass')).toBeTruthy();
+      expect(within(d).queryByRole('radio')).toBeNull();
+    });
+
+    it('shows nothing for a project that commits directly', async () => {
+      serveSaves();
+      open();
+      await dialog();
+      expect(screen.queryByRole('radio')).toBeNull();
+      expect(screen.queryByText('Where it lands')).toBeNull();
     });
   });
 
