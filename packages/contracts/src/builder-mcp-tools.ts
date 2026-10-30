@@ -56,6 +56,10 @@ export function refusalText(
 
 const CHANGE_NOTHING = 'Change at least one field';
 
+/** An edit names a task and at least one field to change. */
+const changesSomething = (edit: object): boolean =>
+  Object.keys(edit).some((key) => key !== 'taskId');
+
 /**
  * What 10db parses. Arrays that the form refuses when empty are loose here, so 10db words the
  * refusal itself (`newTaskRefusal`), and every other check is the API's own, run afterwards with
@@ -84,9 +88,7 @@ export const BuilderToolInputs = {
       riskTags: z.array(z.string()).optional(),
       flowId: z.string().nullable().optional(),
     })
-    .refine(({ taskId: _taskId, ...changes }) => Object.keys(changes).length > 0, {
-      message: CHANGE_NOTHING,
-    }),
+    .refine(changesSomething, { message: CHANGE_NOTHING }),
   [BuilderToolName.RemoveTask]: z.object({ taskId: TaskId }),
   [BuilderToolName.StartTask]: z.object({ taskId: TaskId }),
   [BuilderToolName.MoveTask]: z
@@ -109,9 +111,7 @@ const AdvertisedInputs: Record<BuilderToolName, z.ZodType> = {
   [BuilderToolName.CreateTask]: TaskInput.extend({ projectId: ProjectId }),
   [BuilderToolName.EditTask]: z
     .object({ taskId: TaskId, ...TaskPatchFields.partial().shape })
-    .refine(({ taskId: _taskId, ...changes }) => Object.keys(changes).length > 0, {
-      message: CHANGE_NOTHING,
-    }),
+    .refine(changesSomething, { message: CHANGE_NOTHING }),
 };
 
 export const BUILDER_INSTRUCTIONS = [

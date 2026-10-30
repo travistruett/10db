@@ -19,7 +19,11 @@ describe('normaliseCriteria', () => {
   it.each([
     { name: 'trims each line', input: ['  a  ', 'b'], expected: ['a', 'b'] },
     { name: 'drops blank lines', input: ['', '   ', 'a'], expected: ['a'] },
-    { name: 'splits a multi-line item, as the form does', input: ['a\n\n b '], expected: ['a', 'b'] },
+    {
+      name: 'splits a multi-line item, as the form does',
+      input: ['a\n\n b '],
+      expected: ['a', 'b'],
+    },
     { name: 'leaves nothing from blanks', input: ['', ' '], expected: [] },
   ])('$name', ({ input, expected }) => {
     expect(normaliseCriteria(input)).toEqual(expected);
@@ -66,14 +70,16 @@ describe('refusalText', () => {
       .object({})
       .refine(() => false, { message: 'Change at least one field' })
       .safeParse({});
-    if (!parsed.success)
-      expect(refusalText(parsed.error.issues)).toBe('Change at least one field');
+    if (!parsed.success) expect(refusalText(parsed.error.issues)).toBe('Change at least one field');
   });
 
   it('takes the API’s string paths too', () => {
-    expect(refusalText([{ path: 'title', message: 'Too small' }, { path: '', message: 'x' }])).toBe(
-      'title: Too small; x',
-    );
+    expect(
+      refusalText([
+        { path: 'title', message: 'Too small' },
+        { path: '', message: 'x' },
+      ]),
+    ).toBe('title: Too small; x');
   });
 });
 

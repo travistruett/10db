@@ -83,6 +83,7 @@ import { createInboxService } from '../inbox';
 import { createKeepAwake, systemCaffeinate, type CaffeinateSpawner } from '../keep-awake';
 import { createLogger, fileDestination, rotateLogFile, type Logger } from '../log';
 import { protectedPaths } from '../guard';
+import { createBuilderMcpHandler } from '../builder';
 import { createMcpHandler } from '../mcp';
 import { recoverOnStartup, systemProcesses, type ProcessTerminator } from '../recovery';
 import {
@@ -703,6 +704,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     token,
     services,
     taskRemoval: services,
+    builderMcp: createBuilderMcpHandler({ services, log: logger }),
     upgradeWebSocket,
     onUnexpectedError: (error) => {
       logger.error({ err: error }, 'unhandled API error');

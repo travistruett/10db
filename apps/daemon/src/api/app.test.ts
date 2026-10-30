@@ -111,6 +111,7 @@ function app(
     services,
     upgradeWebSocket: noUpgrade,
     mcp: () => Promise.resolve(new Response('mcp')),
+    builderMcp: () => Promise.resolve(new Response('builder')),
   });
 }
 const auth = { headers: { Authorization: `Bearer ${TOKEN}` } };
@@ -216,6 +217,30 @@ describe('API', () => {
       (await app().request('/projects', { headers: { Authorization: 'Bearer wrong' } })).status,
     ).toBe(401);
     expect((await app().request('/projects', auth)).status).toBe(200);
+  });
+
+  it('serves /builder/mcp to the UI token only', async () => {
+    const post = (headers: Record<string, string>) =>
+      app().request('/builder/mcp', { method: 'POST', headers });
+    expect((await post({})).status).toBe(401);
+    // A managed session's token is not the UI token.
+    expect((await post({ Authorization: 'Bearer lane-session-token' })).status).toBe(401);
+    const ok = await post(auth.headers);
+    expect(ok.status).toBe(200);
+    expect(await ok.text()).toBe('builder');
+  });
+
+  it('answers 501 on /builder/mcp when the daemon has no builder endpoint', async () => {
+    const bare = createApp({
+      onUnexpectedError: () => undefined,
+      startedAt,
+      allowedOrigins: [],
+      token: TOKEN,
+      services: stubServices(),
+      upgradeWebSocket: noUpgrade,
+      mcp: () => Promise.resolve(new Response('mcp')),
+    });
+    expect((await bare.request('/builder/mcp', { method: 'POST', ...auth })).status).toBe(501);
   });
 
   it('takes the token from the query string on the event stream only', async () => {
