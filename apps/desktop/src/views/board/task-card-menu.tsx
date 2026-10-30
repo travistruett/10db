@@ -17,6 +17,8 @@ export function canStart(task: TaskDto, latest: WorkstreamState | undefined): bo
 export interface TaskCardMenuProps {
   readonly task: TaskDto;
   readonly latest: WorkstreamState | undefined;
+  /** A Start for this task is out; asking again would only repeat it. */
+  readonly starting?: boolean;
   /** Title of an unfinished dependency parked in a human column, which would keep a started task queued for ever. */
   readonly parkedDependency: string | null;
   readonly moves: readonly MenuMove[];
@@ -28,11 +30,16 @@ export interface TaskCardMenuProps {
   readonly onAbandon?: () => void;
   /** Why Abandon is held back: a run on the branch is live, and the daemon won't cut it short. */
   readonly abandonRefusal?: string | null;
+  /** Present when the task's run failed; closing takes the task off the Board. */
+  readonly onCloseTask?: () => void;
+  /** The line under Close: what becomes of the task's branch or worktree. */
+  readonly closeLine?: string;
 }
 
 export function TaskCardMenu({
   task,
   latest,
+  starting = false,
   parkedDependency,
   moves,
   onMove,
@@ -40,6 +47,8 @@ export function TaskCardMenu({
   onRetry,
   onAbandon,
   abandonRefusal = null,
+  onCloseTask,
+  closeLine,
 }: TaskCardMenuProps) {
   return (
     <Menu position="bottom-end" withinPortal>
@@ -67,14 +76,22 @@ export function TaskCardMenu({
         ))}
         {moves.length > 0 && canStart(task, latest) ? <Menu.Divider /> : null}
         {canStart(task, latest) ? (
-          <Menu.Item disabled={parkedDependency !== null} onClick={onStart}>
-            {parkedDependency === null
-              ? 'Start'
-              : `Start (${parkedDependency} is parked; move it to Backlog or Ready first)`}
+          <Menu.Item disabled={starting || parkedDependency !== null} onClick={onStart}>
+            {starting
+              ? 'Starting…'
+              : parkedDependency === null
+                ? 'Start'
+                : `Start (${parkedDependency} is parked; move it to Backlog or Ready first)`}
           </Menu.Item>
         ) : null}
-        {onRetry || onAbandon ? <Menu.Divider /> : null}
+        {onRetry || onAbandon || onCloseTask ? <Menu.Divider /> : null}
         {onRetry ? <Menu.Item onClick={onRetry}>Retry</Menu.Item> : null}
+        {onCloseTask ? (
+          <>
+            <Menu.Item onClick={onCloseTask}>Close</Menu.Item>
+            {closeLine ? <Menu.Label tt="none">{closeLine}</Menu.Label> : null}
+          </>
+        ) : null}
         {onAbandon ? (
           <Menu.Item color="red" disabled={abandonRefusal !== null} onClick={onAbandon}>
             {abandonRefusal === null ? 'Abandon' : `Abandon (${abandonRefusal.replace(/\.$/, '')})`}

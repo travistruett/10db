@@ -200,6 +200,42 @@ describe('InboxView', () => {
     });
   });
 
+  it.each([
+    {
+      name: 'links a flag card to the failing check on GitHub',
+      link: 'https://github.com/acme/widgets/actions/runs/1',
+      shown: true,
+    },
+    { name: 'offers no link when the detail has none', link: undefined, shown: false },
+    { name: 'offers no link that is not https', link: 'javascript:alert(1)', shown: false },
+    {
+      name: 'offers no button for a check off github.com, which the app cannot open',
+      link: 'https://ci.example.com/job/1',
+      shown: false,
+    },
+    {
+      name: 'offers no button for a host that only starts like github.com',
+      link: 'https://github.com.example.net/acme/widgets',
+      shown: false,
+    },
+  ])('$name', async ({ link, shown }) => {
+    const card = inboxItemDto({
+      kind: 'flag',
+      title: 'Pull request checks failed for "Alpha": build',
+      body: 'https://github.com/acme/widgets/actions/runs/1\n\nFailing:\n- build',
+      options: [],
+      detail: link === undefined ? { batchId: 'bat_x' } : { batchId: 'bat_x', link },
+    });
+    inbox([card]);
+    renderApp('/inbox');
+
+    fireEvent.click(await screen.findByText(card.title));
+    await screen.findByText('Failing:', { exact: false });
+    const anchor = screen.queryByRole('link', { name: 'Open on GitHub' });
+    if (shown) expect(anchor?.getAttribute('href')).toBe(link);
+    else expect(anchor).toBeNull();
+  });
+
   it('explains a card answered elsewhere and refreshes the list', async () => {
     let gets = 0;
     serve(
@@ -556,6 +592,36 @@ describe('InboxView', () => {
       await waitFor(() => {
         expect(answers).toEqual(copies.map((c) => ({ id: c.id, body: { choice: 'dismissed' } })));
       });
+    });
+
+    it('says in words how many identical cards a folded row holds', async () => {
+      const copies = [1, 2].map(() => flag('Batch not started', 'no lane free'));
+      inbox([color, ...copies]);
+      renderApp('/inbox');
+      await screen.findByText('Batch not started');
+      expect(screen.getByText('2 identical flags')).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Dismiss All' })).toBeTruthy();
+      key('j');
+      expect(within(selectedCard()).getByText(/2 identical flags are open/)).toBeTruthy();
+    });
+
+    it("never squeezes a row's kind and repeat badges, whatever the title", async () => {
+      const title = 'Batch not started because the project has no free lane left right now '.repeat(
+        4,
+      );
+      const copies = [1, 2].map(() => flag(title, 'no lane free'));
+      inbox([color, ...copies]);
+      renderApp('/inbox');
+      await screen.findByText('Which badge color?');
+      for (const text of ['Flag', '×2']) {
+        const badge = screen.getByText(text).closest('.mantine-Badge-root');
+        expect(badge?.getAttribute('style')).toContain('flex-shrink: 0');
+      }
+      key('j');
+      for (const text of ['Flag', '×2']) {
+        const badge = within(selectedCard()).getByText(text).closest('.mantine-Badge-root');
+        expect(badge?.getAttribute('style')).toContain('flex-shrink: 0');
+      }
     });
 
     it('does not paint a flag red like an error', async () => {

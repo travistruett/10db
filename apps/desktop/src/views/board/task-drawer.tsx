@@ -23,10 +23,11 @@ import {
   TextInput,
 } from '@mantine/core';
 import { useState } from 'react';
-import { usePatchTask, useRetryWorkstream } from '../../daemon/queries';
+import { useCloseTask, usePatchTask, useRetryWorkstream } from '../../daemon/queries';
 import { StateBadge } from '../factory/state-badge';
-import { canRetry } from '../factory/workstream-state';
+import { canClose, canRetry } from '../factory/workstream-state';
 import { criteriaLines } from './areas-text';
+import { closeNote } from './batch/close-note';
 import { BatchPanel } from './batch-panel';
 import { FlowSelect } from './flow-select';
 import { RISK_LABEL } from './risk-labels';
@@ -139,7 +140,14 @@ export function TaskDrawer({
       padding="lg"
     >
       <Stack gap="lg">
-        {workstream ? <WorkstreamLine workstream={workstream} /> : null}
+        {workstream ? (
+          <WorkstreamLine
+            taskId={task.id}
+            workstream={workstream}
+            batch={batch}
+            onClosed={onClose}
+          />
+        ) : null}
         {batch ? (
           <BatchPanel
             batch={batch}
@@ -270,9 +278,20 @@ export function TaskDrawer({
   );
 }
 
-/** The workstream's state, and for a failed one why and a way to retry it. */
-function WorkstreamLine({ workstream }: { readonly workstream: WorkstreamDto }) {
+/** The workstream's state, and for a failed one why, a way to retry it and a way to close its task. */
+function WorkstreamLine({
+  taskId,
+  workstream,
+  batch,
+  onClosed,
+}: {
+  readonly taskId: TaskId;
+  readonly workstream: WorkstreamDto;
+  readonly batch: BatchDto | undefined;
+  readonly onClosed: () => void;
+}) {
   const retry = useRetryWorkstream();
+  const closeTask = useCloseTask();
   const failed = canRetry(workstream.state);
   if (isTerminal(workstream.state) && !failed) {
     return null;
@@ -282,16 +301,32 @@ function WorkstreamLine({ workstream }: { readonly workstream: WorkstreamDto }) 
       <Group justify="space-between" wrap="nowrap">
         <StateBadge state={workstream.state} />
         {failed ? (
-          <Button
-            size="xs"
-            variant="default"
-            loading={retry.isPending}
-            onClick={() => {
-              retry.mutate(workstream.id);
-            }}
-          >
-            Retry
-          </Button>
+          <Group gap="xs" wrap="nowrap">
+            <Button
+              size="xs"
+              variant="default"
+              loading={retry.isPending}
+              onClick={() => {
+                closeTask.reset();
+                retry.mutate(workstream.id);
+              }}
+            >
+              Retry
+            </Button>
+            {canClose(workstream.state) ? (
+              <Button
+                size="xs"
+                variant="default"
+                loading={closeTask.isPending}
+                onClick={() => {
+                  retry.reset();
+                  closeTask.mutate(taskId, { onSuccess: onClosed });
+                }}
+              >
+                Close task
+              </Button>
+            ) : null}
+          </Group>
         ) : null}
       </Group>
       {failed && workstream.failureReason !== null ? (
@@ -299,8 +334,16 @@ function WorkstreamLine({ workstream }: { readonly workstream: WorkstreamDto }) 
           {workstream.failureReason}
         </Text>
       ) : null}
+      {canClose(workstream.state) ? (
+        <Text size="xs" c="dimmed">
+          {closeNote(batch)}
+        </Text>
+      ) : null}
       {retry.error ? (
         <Text size="xs" c="red" role="alert">{`Couldn't retry: ${retry.error.message}`}</Text>
+      ) : null}
+      {closeTask.error ? (
+        <Text size="xs" c="red" role="alert">{`Couldn't close: ${closeTask.error.message}`}</Text>
       ) : null}
     </Stack>
   );
