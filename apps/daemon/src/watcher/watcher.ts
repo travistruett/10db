@@ -18,9 +18,9 @@ import { existsAsEntry, GitTrustError, type Git } from '../git';
 import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
 import {
-  holdsOnlyBookkeeping,
+  bookkeepingAt,
   ignoredBookkeepingWrite,
-  isBookkeepingAt,
+  isInsideClaudeCodeBookkeeping,
 } from './claude-code-bookkeeping';
 import {
   bulkFoldKey,
@@ -254,10 +254,20 @@ export function createWatcher(deps: {
     ordinary.forEach(single);
   }
 
-  /**
-   * Drops the files Claude Code writes for its own bookkeeping, which raise no card, and logs each one so a new
-   * file it starts writing is easy to spot.
-   */
+  /** Logs a path dropped because it is Claude Code's bookkeeping, so the log shows what the list hides. */
+  function logBookkeeping(
+    projectId: ProjectId,
+    root: string,
+    rel: string,
+    entries: readonly { writtenBy: string }[],
+  ): void {
+    deps.logger.info(
+      { projectId, root, path: rel, writtenBy: entries.map((e) => e.writtenBy).join(' ') },
+      'ignored a Claude Code bookkeeping write',
+    );
+  }
+
+  /** Drops the files Claude Code writes for its own bookkeeping, which raise no card, and logs each one. */
   function withoutBookkeeping(
     projectId: ProjectId,
     root: string,
@@ -265,12 +275,7 @@ export function createWatcher(deps: {
   ): string[] {
     return paths.filter((rel) => {
       const ignored = ignoredBookkeepingWrite(root, rel);
-      if (ignored) {
-        deps.logger.info(
-          { projectId, root, path: rel, writtenBy: ignored.writtenBy },
-          'ignored a Claude Code bookkeeping write',
-        );
-      }
+      if (ignored) logBookkeeping(projectId, root, rel, [ignored]);
       return !ignored;
     });
   }
@@ -302,15 +307,16 @@ export function createWatcher(deps: {
     const { strays, candidates } = straysIn(project, batchId, reported, ACTIVE_STATES, null);
     // Ignored or unreported paths that can change what runs are flagged whatever the claims say. Claude Code's
     // staging directory, as a real directory, is its bookkeeping, and a sensitive directory holding only that is
-    // the `.claude/` a session start made for it.
-    const hidden = paths.filter(
-      (rel) =>
-        !changed.has(rel) &&
-        isSensitivePath(rel) &&
-        existsAsEntry(join(entry.root, rel)) &&
-        !isBookkeepingAt(entry.root, rel) &&
-        !holdsOnlyBookkeeping(entry.root, rel),
-    );
+    // the `.claude/` a session start made for it. Each one dropped as bookkeeping is logged.
+    const hidden: string[] = [];
+    for (const rel of paths) {
+      if (changed.has(rel)) continue;
+      if (!isSensitivePath(rel) && !isInsideClaudeCodeBookkeeping(rel)) continue;
+      if (!existsAsEntry(join(entry.root, rel))) continue;
+      const bookkeeping = bookkeepingAt(entry.root, rel);
+      if (bookkeeping.length > 0) logBookkeeping(projectId, entry.root, rel, bookkeeping);
+      else if (isSensitivePath(rel)) hidden.push(rel);
+    }
     raise(project, site, [...strays, ...hidden], candidates, null);
     const outside = new Set(strays);
     raiseForeign(

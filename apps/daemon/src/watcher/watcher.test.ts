@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import {
   chmodSync,
   existsSync,
+  linkSync,
   mkdirSync,
   renameSync,
   rmSync,
@@ -490,6 +491,37 @@ describe('watcher', () => {
       emit(lock);
       await watcher.flush();
       expect(flags()).toEqual([]);
+      expect(bookkeepingLogs()).toEqual([lock]);
+    });
+
+    it('logs the staging directory, and the new .claude holding only it, without a card', async () => {
+      running();
+      mkdirSync(join(repo.path, '.claude/.cc-writes'), { recursive: true, mode: 0o700 });
+      watcher.sync();
+      emit('.claude');
+      emit('.claude/.cc-writes');
+      await watcher.flush();
+      expect(flags()).toEqual([]);
+      expect(bookkeepingLogs()).toEqual(['.claude', '.claude/.cc-writes']);
+      const writtenBy = logged.find((l) => l.obj['path'] === '.claude/.cc-writes')?.obj[
+        'writtenBy'
+      ];
+      expect(writtenBy).toContain('atomic-write staging directory');
+    });
+
+    it.each([
+      { name: 'untracked', ignore: '' },
+      { name: 'gitignored', ignore: '.claude/\n' },
+    ])('still flags the lock as a hard link to the settings, $name', async ({ ignore }) => {
+      running();
+      writeFileSync(join(repo.path, '.gitignore'), ignore);
+      touch('.claude/settings.local.json');
+      linkSync(join(repo.path, '.claude/settings.local.json'), join(repo.path, lock));
+      watcher.sync();
+      emit(lock);
+      await watcher.flush();
+      expect(flags().map((f) => f.body)).toEqual([lock]);
+      expect(bookkeepingLogs()).toEqual([]);
     });
 
     it('raises no card for the lock at the end of a step, and logs it', async () => {
