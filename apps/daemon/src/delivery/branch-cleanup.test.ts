@@ -1,15 +1,24 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { BatchDto, InboxItemDto, WorkstreamDto } from '@10db/contracts';
-import { getBatch, getInboxItem, listWorkstreams, transitionBatch } from '@10db/db';
+import {
+  clearWorktreePath,
+  getBatch,
+  getInboxItem,
+  listWorkstreams,
+  transitionBatch,
+} from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { ManualClock } from '../clock';
 import { PrState } from '../github';
 import { createInboxService, type InboxService } from '../inbox';
+import { silentLogger } from '../log';
+import { systemProcesses } from '../recovery';
 import {
   createBranchCardAnswers,
   createPrWatch,
+  recoverBatches,
   removeMergedBranches,
   type PrWatch,
 } from './index';
@@ -77,6 +86,18 @@ async function shipped(title = 'Alpha'): Promise<{ batch: BatchDto; tip: string;
   expect(exists(done.branch)).toBe(true);
   return { batch: done, tip, prUrl: done.prUrl ?? '' };
 }
+
+/** Startup batch recovery as the daemon runs it, with this test's inbox. */
+const recover = () =>
+  recoverBatches({
+    state: h.state,
+    git: h.git,
+    inbox,
+    processes: systemProcesses,
+    shipper: h.shipper,
+    logger: silentLogger,
+    worktrees: { ctx: { ...h.ctx, inbox }, root: h.worktreeRoot },
+  });
 
 /** A pull request watch that cleans merged branches after each round, as the daemon wires it. */
 function watch(): PrWatch {
@@ -304,6 +325,20 @@ describe('a pull request that merged', () => {
     expect(exists(batch.branch)).toBe(true);
   });
 
+  it('says on the kept-worktree card that the branch stays with the worktree', async () => {
+    const { batch, ws } = await opened();
+    await commitIn(batch, 'src/api/alpha.txt');
+    writeFileSync(join(h.repo, '.git', 'info', 'exclude'), '.env\n');
+    writeFileSync(join(batch.worktreePath ?? '', '.env'), 'SECRET=1\n');
+    h.settle(ws.id, 'DONE');
+    h.shipper.checkBatch(batch.id);
+    await h.jobs.idle();
+    const card = h.only(h.cards().filter((c) => c.title.includes('kept the worktree')));
+    expect(card.body).toContain(
+      `Its branch ${batch.branch ?? ''} is checked out there, so 10db leaves the branch too until the worktree is gone.`,
+    );
+  });
+
   it('never touches a branch it did not make', async () => {
     const { batch, tip, prUrl } = await shipped();
     h.git$('branch', 'feature/mine');
@@ -355,6 +390,51 @@ describe('the sweep at startup', () => {
     expect(card.body).not.toContain(batch.branch ?? '?');
     expect(exists('10db/stray-one')).toBe(true);
     expect(exists('10db/stray-two')).toBe(true);
+  });
+
+  /**
+   * An abandoned batch whose worktree is gone but whose branch was never settled: abandoned by a
+   * daemon before branch cleanup, or in a shared checkout whose settle failed.
+   */
+  async function unsettled(commits: number): Promise<BatchDto> {
+    const { batch, ws } = await opened();
+    for (let i = 0; i < commits; i++) await commitIn(batch, `src/api/${String(i)}.txt`);
+    h.settle(ws.id, 'DONE');
+    await h.git.removeWorktree(h.repo, batch.worktreePath ?? '');
+    h.state.write((w) => {
+      transitionBatch(w, batch.id, { to: 'ABANDONED' });
+      clearWorktreePath(w, batch.id);
+    });
+    expect(exists(batch.branch)).toBe(true);
+    return getBatch(h.store.db, batch.id);
+  }
+
+  it('offers once to delete an abandoned branch that holds commits, and not again after Keep', async () => {
+    const batch = await unsettled(2);
+    await recover();
+    await recover();
+    const card = h.only(cardsAbout(batch.branch));
+    expect(card.title).toBe(`Delete ${batch.branch ?? ''}? It holds 2 commits`);
+    expect(card.options.map((o) => o.label)).toEqual(['Delete Branch', 'Keep']);
+    inbox.answer(card.id, { choice: 'Keep' });
+    await h.jobs.idle();
+    await recover();
+    expect(cardsAbout(batch.branch)).toEqual([]);
+    expect(exists(batch.branch)).toBe(true);
+  });
+
+  it('deletes an abandoned branch that never moved off its base, without a card', async () => {
+    const batch = await unsettled(0);
+    await recover();
+    expect(exists(batch.branch)).toBe(false);
+    expect(h.cards()).toEqual([]);
+  });
+
+  it('leaves an abandoned batch whose branch is gone alone', async () => {
+    const batch = await unsettled(1);
+    h.git$('branch', '-D', batch.branch ?? '');
+    await recover();
+    expect(h.cards()).toEqual([]);
   });
 
   it('raises no card when every 10db branch has a batch, and withdraws an old one', async () => {

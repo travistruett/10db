@@ -138,6 +138,32 @@ export function findOpenByFoldKey(
   return row ? toDto(row) : undefined;
 }
 
+/** The states of a card the builder answered, whether or not the answer has been delivered. */
+const ANSWERED_STATES: InboxState[] = [
+  InboxState.Answered,
+  InboxState.Delivering,
+  InboxState.Resolved,
+];
+
+/**
+ * Whether the builder ever answered a card of the project with this fold key. A card that is still
+ * open, or that was withdrawn or expired unanswered, doesn't count.
+ */
+export function hasAnsweredByFoldKey(db: DbReader, projectId: ProjectId, foldKey: string): boolean {
+  const row = db
+    .select({ id: schema.inboxItems.id })
+    .from(schema.inboxItems)
+    .where(
+      and(
+        eq(schema.inboxItems.projectId, projectId),
+        eq(schema.inboxItems.foldKey, foldKey),
+        inArray(schema.inboxItems.state, ANSWERED_STATES),
+      ),
+    )
+    .get();
+  return row !== undefined;
+}
+
 export function updateInboxItem(
   ctx: WriteContext,
   id: InboxItemId,

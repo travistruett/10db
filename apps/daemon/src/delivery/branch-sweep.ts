@@ -1,8 +1,8 @@
 import { existsSync } from 'node:fs';
 import { BRANCH_PREFIX, BatchState, Delivery, PullRequestState } from '@10db/contracts';
-import { listBatches, listProjects } from '@10db/db';
+import { hasAnsweredByFoldKey, listBatches, listProjects } from '@10db/db';
 import { PrState } from '../github';
-import { removeBranch } from './branch-cleanup';
+import { removeBranch, settleBranch } from './branch-cleanup';
 import { branchCardKey, branchCards, detailOf } from './cards';
 import { ghCall, raise, withdraw, type DeliveryContext } from './context';
 
@@ -52,6 +52,42 @@ export async function removeMergedBranches(
     } catch (error) {
       if (signal.aborted) return;
       ctx.logger.warn({ projectId: project.id, err: detailOf(error) }, 'merged branches not swept');
+    }
+  }
+}
+
+/**
+ * Settles, at startup, the branch of every ABANDONED batch whose worktree is gone and whose branch
+ * is still local: one abandoned before 10db cleaned branches, or in a shared checkout whose settle
+ * failed. Like the end of the batch, it deletes a branch still at its base and offers one holding
+ * commits on a card. A batch whose card the builder answered (Keep, or a Delete Branch git refused)
+ * is left, so Keep holds across restarts; a worktree still kept is left to its own card. Git is
+ * asked once per project unless some batch's branch is still local. It never rejects.
+ */
+export async function settleAbandonedBranches(ctx: DeliveryContext): Promise<void> {
+  for (const project of listProjects(ctx.state.db)) {
+    if (!existsSync(project.repoPath)) continue;
+    const abandoned = listBatches(ctx.state.db, {
+      projectId: project.id,
+      states: [BatchState.Abandoned],
+    }).filter(
+      (b) =>
+        b.worktreePath === null &&
+        b.branch?.startsWith(BRANCH_PREFIX) &&
+        !hasAnsweredByFoldKey(ctx.state.db, project.id, branchCardKey.offer(b.id)),
+    );
+    if (abandoned.length === 0) continue;
+    try {
+      const local = new Set(
+        (await ctx.git.localBranches(project.repoPath, BRANCH_PREFIX)).map((b) => b.name),
+      );
+      for (const batch of abandoned)
+        if (batch.branch !== null && local.has(batch.branch)) await settleBranch(ctx, batch.id);
+    } catch (error) {
+      ctx.logger.warn(
+        { projectId: project.id, err: detailOf(error) },
+        'abandoned branches not settled',
+      );
     }
   }
 }

@@ -240,7 +240,11 @@ export const worktreeCards = {
       paths === null
         ? `The batch is finished, but 10db couldn't read its worktree ${path}, so it may hold files you need, and kept it.`
         : `The batch is finished, but its worktree ${path} holds git-ignored files 10db didn't put there, such as a hand-made .env, so 10db kept it:\n${listPaths(paths)}`
-    }\n\nCopy what you need, then remove it with ${worktreeRemovalCommand(main, path)}.`,
+    }\n\nCopy what you need, then remove it with ${worktreeRemovalCommand(main, path)}.${
+      batch.branch === null
+        ? ''
+        : ` Its branch ${batch.branch} is checked out there, so 10db leaves the branch too until the worktree is gone.`
+    }`,
     foldKey: keptWorktreeKey.batchIgnored(batch.id),
     detail: { batchId: batch.id },
   }),

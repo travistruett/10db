@@ -27,6 +27,15 @@
 - **Answering.** Delete Branch queues the deletion in the project's ship queue and the card closes. A branch
   git won't delete because it is checked out raises a new `branch-offer:<batch>` card saying where, with the
   same two answers. The answer deletes whatever the branch holds: the card said so.
+- **Abandoned before this, or unsettled.** At startup, after finished worktrees are retired,
+  `settleAbandonedBranches` runs `settleBranch` for every `ABANDONED` batch whose `worktree_path` is cleared
+  and whose branch is still local: one abandoned before branch cleanup existed, or in a shared checkout whose
+  settle failed. A batch whose `branch-offer:<batch>` card the builder ever answered (`hasAnsweredByFoldKey`)
+  is skipped, so Keep holds across restarts with no new setting; a card still open just folds. A worktree
+  still kept is left to its own card, and the settle runs when recovery retires it.
+- **A kept worktree.** A finished worktree kept for git-ignored files still has its branch checked out, so
+  `removeBranch` refuses the branch. The kept-worktree card says the branch stays until the worktree is gone;
+  once the builder removes it, the next watch round (merged) or the next startup (abandoned) settles it.
 - **Startup.** `recoverBatches` lists in one card per project (`branches-without-batch`) every local `10db/`
   branch no batch row names, and withdraws it once none is left. Nothing records that 10db made those, so it
   deletes none of them. A crash during a cut can leave one.
