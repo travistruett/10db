@@ -3,6 +3,7 @@ import {
   NEW_TASK_NO_CRITERIA,
   SYSTEM_COLUMN_LABEL,
   RiskTag,
+  TaskStatus,
   WorkspaceMode,
   type BatchDto,
   type FlowId,
@@ -28,12 +29,13 @@ import {
   useHoldTask,
   usePatchTask,
   useRemoveTask,
+  useReopenTask,
   useRetryWorkstream,
   useRunNext,
   useStartTask,
 } from '../../daemon/queries';
 import { StateBadge } from '../factory/state-badge';
-import { canClose, canRetry } from '../factory/workstream-state';
+import { canRetry } from '../factory/workstream-state';
 import { ReviewRoundsList } from '../review/review-rounds-list';
 import { criteriaLines } from './areas-text';
 import { closeNote } from './batch/close-note';
@@ -51,6 +53,7 @@ import { ordinal, runNextNote } from './queue-place';
 import { canRunNext } from './run-next';
 import { RISK_LABEL } from './risk-labels';
 import { holdOption, isHeld, type HoldOption } from './task-hold';
+import { canCloseRun, canRetryRun, pullRequestClosed, shippedAnywayAndClosed } from './task-state';
 
 const RISKS: readonly RiskTag[] = Object.values(RiskTag);
 const isRisk = (value: string): value is RiskTag => RISKS.some((r) => r === value);
@@ -69,6 +72,8 @@ export interface TaskDrawerProps {
   readonly workspaceMode?: WorkspaceMode;
   /** The project's gate command, named beside a failed gate's exit code. */
   readonly gateCommand?: string | null;
+  /** Starts the task afresh: offered when a failed run shipped anyway and its pull request closed. */
+  readonly onStart?: () => void;
   /** A queued task's place in line, counting from 1. */
   readonly place?: number;
   /**
@@ -89,6 +94,7 @@ export function TaskDrawer({
   workstreams = [],
   workspaceMode = WorkspaceMode.Shared,
   gateCommand = null,
+  onStart,
   place,
   pullRequestBase,
   onClose,
@@ -191,6 +197,17 @@ export function TaskDrawer({
             batch={batch}
             place={place}
             onClosed={onClose}
+          />
+        ) : null}
+        {batch && task.status === TaskStatus.Done && pullRequestClosed(batch) ? (
+          <ClosedPullRequest taskId={task.id} batch={batch} onClosed={onClose} />
+        ) : null}
+        {batch && task.status === TaskStatus.Open && shippedAnywayAndClosed(workstream, batch) ? (
+          <ClosedPullRequest
+            taskId={task.id}
+            batch={batch}
+            onClosed={onClose}
+            {...(onStart ? { onStart } : {})}
           />
         ) : null}
         {workstream ? <ReviewRoundsList steps={workstream.steps} /> : null}
@@ -371,6 +388,9 @@ function WorkstreamLine({
   const start = useStartTask();
   const remove = useRemoveTask();
   const failed = canRetry(workstream.state);
+  // A run shipped anyway is not retried; once its pull request closed, the panel below closes it.
+  const retryable = canRetryRun(workstream, batch);
+  const closable = canCloseRun(workstream, batch) && !pullRequestClosed(batch);
   // A parked task never takes a lane, so putting it first would change nothing.
   const queued = canRunNext(task, workstream.state);
   const held = isHeld(workstream);
@@ -443,7 +463,7 @@ function WorkstreamLine({
               </Button>
             </>
           ) : null}
-          {failed ? (
+          {retryable ? (
             <Button
               size="xs"
               variant="default"
@@ -459,7 +479,7 @@ function WorkstreamLine({
               Retry
             </Button>
           ) : null}
-          {canClose(workstream.state) ? (
+          {closable ? (
             <Button
               size="xs"
               variant="default"
@@ -495,7 +515,7 @@ function WorkstreamLine({
           {workstream.failureReason}
         </Text>
       ) : null}
-      {failed ? (
+      {retryable ? (
         <Textarea
           label="Note for the next session (optional)"
           description="The session the retry starts gets this note, and the review’s findings too when a review sent the work back."
@@ -510,7 +530,7 @@ function WorkstreamLine({
           }}
         />
       ) : null}
-      {canClose(workstream.state) ? (
+      {closable ? (
         <Text size="xs" c="dimmed">
           {closeNote(batch)}
         </Text>
@@ -532,6 +552,81 @@ function WorkstreamLine({
       ) : null}
       {closeTask.error ? (
         <Text size="xs" c="red" role="alert">{`Couldn't close: ${closeTask.error.message}`}</Text>
+      ) : null}
+    </Stack>
+  );
+}
+
+/**
+ * A task whose pull request closed without merging goes back to the builder: run it again, or close
+ * it to take it off the Board. A finished task is reopened into Ready; a failed run shipped anyway
+ * is still open, so it is started again (`onStart`) from where it is.
+ */
+function ClosedPullRequest({
+  taskId,
+  batch,
+  onClosed,
+  onStart,
+}: {
+  readonly taskId: TaskId;
+  readonly batch: BatchDto;
+  readonly onClosed: () => void;
+  readonly onStart?: () => void;
+}) {
+  const reopen = useReopenTask();
+  const closeTask = useCloseTask();
+  const error = reopen.error ?? closeTask.error;
+  return (
+    <Stack gap={4}>
+      <Text size="sm" c="red">
+        The pull request closed without merging.
+      </Text>
+      <Group gap="xs" wrap="nowrap">
+        {onStart ? (
+          <Button
+            size="xs"
+            variant="default"
+            onClick={() => {
+              closeTask.reset();
+              onStart();
+              onClosed();
+            }}
+          >
+            Start again
+          </Button>
+        ) : (
+          <Button
+            size="xs"
+            variant="default"
+            loading={reopen.isPending}
+            onClick={() => {
+              closeTask.reset();
+              reopen.mutate(taskId, { onSuccess: onClosed });
+            }}
+          >
+            Reopen task
+          </Button>
+        )}
+        <Button
+          size="xs"
+          variant="default"
+          loading={closeTask.isPending}
+          onClick={() => {
+            reopen.reset();
+            closeTask.mutate(taskId, { onSuccess: onClosed });
+          }}
+        >
+          Close task
+        </Button>
+      </Group>
+      <Text size="xs" c="dimmed">
+        {onStart
+          ? 'Start again runs the task afresh.'
+          : 'Reopen puts the task back in Ready to run again.'}{' '}
+        {closeNote(batch)}
+      </Text>
+      {error ? (
+        <Text size="xs" c="red" role="alert">{`Couldn't update the task: ${error.message}`}</Text>
       ) : null}
     </Stack>
   );

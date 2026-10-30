@@ -48,7 +48,6 @@ import {
   handoffForSession,
   insertDeviation,
   insertEvidence,
-  insertInboxItem,
   insertSession,
   insertSource,
   latestHandoffForStep,
@@ -600,7 +599,11 @@ export function createRunner(opts: RunnerOptions): Runner {
     return { step: result.step, moved: result.escalated };
   }
 
-  /** DONE: the task is done and its claims and lease are released. */
+  /**
+   * DONE: the task is done and its claims and lease are released. No review card is raised: the only
+   * answer one could offer is "looks good", which does nothing. The builder reviews the pull request,
+   * and the Board's In review column shows the task until it merges.
+   */
   function markDone(
     ctx: WriteContext,
     id: WorkstreamId,
@@ -612,31 +615,6 @@ export function createRunner(opts: RunnerOptions): Runner {
     setTaskStatus(ctx, row.taskId, 'done');
     releaseClaims(ctx, id);
     clearLease(ctx, id);
-  }
-
-  /** DONE after a gate (or a read-only approval) and the builder gets a review card (spec §7). */
-  function completeInTx(
-    ctx: WriteContext,
-    id: WorkstreamId,
-    fence: number,
-    row: WorkstreamRow,
-    commitShas: readonly string[],
-    reason: string,
-  ): void {
-    markDone(ctx, id, fence, row, reason);
-    insertInboxItem(ctx, {
-      projectId: row.projectId,
-      kind: 'review',
-      title: `Review: ${getTask(ctx.tx, row.taskId).title}`,
-      body: `Gate passed with ${String(commitShas.length)} commit(s).`,
-      options: [{ label: 'accept', description: 'Looks good' }],
-      recommendation: null,
-      category: 'product',
-      urgency: 'low',
-      detail: { workstreamId: id, commits: [...commitShas] },
-      foldKey: null,
-      targets: [],
-    });
   }
 
   /** After a read-only step's session: the next step in this lane, DONE, a rework, or a failure. */
@@ -696,9 +674,6 @@ export function createRunner(opts: RunnerOptions): Runner {
           });
           return 'stop';
         }
-        const lastGate = listEvidence(db, id)
-          .filter((e) => e.kind === 'gate' && e.exitCode === 0)
-          .at(-1);
         opts.state.write((ctx) => {
           countFinished(ctx, step);
           patchWorkstream(ctx, id, ctl.fence, {
@@ -710,14 +685,7 @@ export function createRunner(opts: RunnerOptions): Runner {
             fence: ctl.fence,
             reason: 'steps complete',
           });
-          completeInTx(
-            ctx,
-            id,
-            ctl.fence,
-            row,
-            lastGate?.commitShas ?? [],
-            `${step.role} approved`,
-          );
+          markDone(ctx, id, ctl.fence, row, `${step.role} approved`);
         });
         return 'stop';
       }
@@ -1969,7 +1937,7 @@ export function createRunner(opts: RunnerOptions): Runner {
           patchWorkstream(ctx, id, ctl.fence, {
             steps: advanceSteps(row.steps, row.stepIndex, -1, entryFor(ctx, id)),
           });
-        completeInTx(ctx, id, ctl.fence, row, commitShas, 'gate passed');
+        markDone(ctx, id, ctl.fence, row, 'gate passed');
       });
       return;
     }

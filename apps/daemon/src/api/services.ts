@@ -88,6 +88,11 @@ export interface TaskRemovalServices {
    * an open task waits on it.
    */
   closeTask(taskId: TaskId): TaskDto;
+  /**
+   * Opens a finished task again after its pull request closed without merging, so it is planned
+   * work once more. Throws ConflictError for any other task.
+   */
+  reopenTask(taskId: TaskId): TaskDto;
 }
 
 /** Reading one task, for the builder's tools that check its state before acting on it. */

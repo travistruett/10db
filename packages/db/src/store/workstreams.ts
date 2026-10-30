@@ -24,7 +24,7 @@ import * as schema from '../schema';
 import { getBoardColumn } from './board-columns';
 import { getProject } from './projects';
 import type { DbReader, WriteContext } from './store';
-import { getTask } from './tasks';
+import { getTask, mergedDespiteFailure } from './tasks';
 
 export class StaleFenceError extends Error {
   override readonly name = 'StaleFenceError';
@@ -299,7 +299,10 @@ export function runNext(
   });
   const waitingOn = task.dependsOn
     .map((id) => getTask(ctx.tx, id))
-    .filter((dependency) => dependency.status !== TaskStatus.Done)
+    .filter(
+      (dependency) =>
+        dependency.status !== TaskStatus.Done && !mergedDespiteFailure(ctx.tx, dependency.id),
+    )
     .map((dependency) => dependency.title);
   return { workstream: getWorkstream(ctx.tx, latest.id), waitingOn };
 }

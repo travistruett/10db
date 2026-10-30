@@ -61,6 +61,8 @@ export const BoardStatus = {
   Backlog: 'backlog',
   Ready: 'ready',
   InProgress: 'in_progress',
+  /** Shipped, with its pull request open: not done until the pull request merges. */
+  InReview: 'in_review',
   Blocked: 'blocked',
   Done: 'done',
 } as const;

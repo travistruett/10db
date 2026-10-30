@@ -9,6 +9,7 @@ import {
   type TaskDto,
 } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { insertBatch, recordPullRequestStatus, transitionBatch } from './batches';
 import { listEventsAfter } from './events';
 import { holdTask, resumeTask } from './holds';
 import { createTestStore, seedProject } from './test-support';
@@ -70,6 +71,38 @@ describe('runNext', () => {
     store.write((ctx) => {
       setTaskStatus(ctx, dep.task.id, TaskStatus.Done);
     });
+    expect(store.write((ctx) => runNext(ctx, waiting.task.id)).value.waitingOn).toEqual([]);
+  });
+
+  it('counts a failed run shipped anyway as done once its pull request merges', () => {
+    const batch = store.write((ctx) =>
+      insertBatch(ctx, { projectId: project.id, title: 'B', baseBranch: 'main' }),
+    ).value;
+    for (const to of ['OPEN', 'SHIPPING'] as const)
+      store.write((ctx) => transitionBatch(ctx, batch.id, { to }));
+    store.write((ctx) =>
+      transitionBatch(ctx, batch.id, {
+        to: 'SHIPPED',
+        patch: { prUrl: 'https://github.com/o/r/pull/7' },
+      }),
+    );
+    const dep = store.write((ctx) =>
+      insertTask(ctx, project.id, { title: 'dep', acceptanceCriteria: ['x'], areas: ['api'] }),
+    ).value;
+    const run = store.write((ctx) => insertWorkstream(ctx, dep.id, { batchId: batch.id })).value;
+    for (const to of [WorkstreamState.Starting, WorkstreamState.Running, WorkstreamState.Failed])
+      store.write((ctx) => transitionWorkstream(ctx, run.id, { to, fence: null }));
+    const waiting = queued('waiting', [dep.id]);
+    expect(store.write((ctx) => runNext(ctx, waiting.task.id)).value.waitingOn).toEqual(['dep']);
+    store.write((ctx) =>
+      recordPullRequestStatus(ctx, batch.id, {
+        state: 'merged',
+        checks: 'passing',
+        failingChecks: [],
+        checkedAt: '2026-10-29T12:00:00.000Z',
+        unknownReason: null,
+      }),
+    );
     expect(store.write((ctx) => runNext(ctx, waiting.task.id)).value.waitingOn).toEqual([]);
   });
 

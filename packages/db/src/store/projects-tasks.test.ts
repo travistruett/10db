@@ -375,9 +375,107 @@ describe('deriveBoardStatus', () => {
       BoardStatus.Done,
     ],
     [
-      'done in a batch whose pull request is open',
+      'done in a shipped batch with no pull request',
       { taskStatus: 'done', depsDone: true, workstreamState: 'DONE', batchState: 'SHIPPED' },
       BoardStatus.Done,
+    ],
+    [
+      'done in a batch whose pull request has not been read yet',
+      {
+        taskStatus: 'done',
+        depsDone: true,
+        workstreamState: 'DONE',
+        batchState: 'SHIPPED',
+        pullRequest: { url: 'https://github.com/o/r/pull/1', state: null },
+      },
+      BoardStatus.InReview,
+    ],
+    [
+      'done in a batch whose pull request is open',
+      {
+        taskStatus: 'done',
+        depsDone: true,
+        workstreamState: 'DONE',
+        batchState: 'SHIPPED',
+        pullRequest: { url: 'https://github.com/o/r/pull/1', state: 'open' },
+      },
+      BoardStatus.InReview,
+    ],
+    [
+      'done in a batch whose pull request status is unknown',
+      {
+        taskStatus: 'done',
+        depsDone: true,
+        workstreamState: 'DONE',
+        batchState: 'SHIPPED',
+        pullRequest: { url: 'https://github.com/o/r/pull/1', state: 'unknown' },
+      },
+      BoardStatus.InReview,
+    ],
+    [
+      'done in a batch whose pull request merged',
+      {
+        taskStatus: 'done',
+        depsDone: true,
+        workstreamState: 'DONE',
+        batchState: 'SHIPPED',
+        pullRequest: { url: 'https://github.com/o/r/pull/1', state: 'merged' },
+      },
+      BoardStatus.Done,
+    ],
+    [
+      'failed but shipped anyway, pull request open',
+      {
+        taskStatus: 'open',
+        depsDone: true,
+        workstreamState: 'FAILED',
+        batchState: 'SHIPPED',
+        pullRequest: { url: 'https://github.com/o/r/pull/1', state: 'open' },
+      },
+      BoardStatus.InReview,
+    ],
+    [
+      'failed but shipped anyway, pull request merged',
+      {
+        taskStatus: 'open',
+        depsDone: true,
+        workstreamState: 'FAILED',
+        batchState: 'SHIPPED',
+        pullRequest: { url: 'https://github.com/o/r/pull/1', state: 'merged' },
+      },
+      BoardStatus.Done,
+    ],
+    [
+      'failed but shipped anyway, pull request closed',
+      {
+        taskStatus: 'open',
+        depsDone: true,
+        workstreamState: 'FAILED',
+        batchState: 'SHIPPED',
+        pullRequest: { url: 'https://github.com/o/r/pull/1', state: 'closed' },
+      },
+      BoardStatus.Blocked,
+    ],
+    [
+      'failed in a shipped batch with no pull request',
+      {
+        taskStatus: 'open',
+        depsDone: true,
+        workstreamState: 'FAILED',
+        batchState: 'SHIPPED',
+      },
+      BoardStatus.Blocked,
+    ],
+    [
+      'done in a batch whose pull request closed without merging',
+      {
+        taskStatus: 'done',
+        depsDone: true,
+        workstreamState: 'DONE',
+        batchState: 'SHIPPED',
+        pullRequest: { url: 'https://github.com/o/r/pull/1', state: 'closed' },
+      },
+      BoardStatus.Blocked,
     ],
     [
       'done in a batch that closed without a pull request',

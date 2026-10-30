@@ -16,11 +16,16 @@ describe('columnHint', () => {
     ['Ready', system(BoardStatus.Ready), 'Next up. Start Ready Tasks picks from here.'],
     ['In progress', system(BoardStatus.InProgress), 'Being worked on now, or being shipped.'],
     [
+      'In review',
+      system(BoardStatus.InReview),
+      'Pull request open: waiting on its checks and your review. Done once it merges.',
+    ],
+    [
       'Blocked',
       system(BoardStatus.Blocked),
-      'Waiting on you, paused at a limit, held, failed, or not shipped.',
+      'Waiting on you, paused at a limit, held, failed, not shipped, or its pull request closed.',
     ],
-    ['Done', system(BoardStatus.Done), 'Finished, or cancelled.'],
+    ['Done', system(BoardStatus.Done), 'Finished and merged, or cancelled.'],
     [
       'a human column',
       {

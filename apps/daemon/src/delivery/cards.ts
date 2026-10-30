@@ -688,7 +688,7 @@ export const prCards = {
     const prUrl = batch.prUrl ?? '(no pull request)';
     return {
       title: `Pull request closed without merging: "${batch.title}"`,
-      body: `${prUrl}\n\nThe batch's tasks stay done, but their code is not on ${batch.baseBranch}. 10db keeps the local branch ${batch.branch ?? '(none)'}.\n\nTo land the work, reopen the pull request on GitHub and merge it there. 10db doesn't follow a reopened pull request, so this card stays until you dismiss it: dismiss it once the pull request merges, or now if you don't want the work.`,
+      body: `${prUrl}\n\nThe batch's tasks are in Blocked on the Board, because their code is not on ${batch.baseBranch}. 10db keeps the local branch ${batch.branch ?? '(none)'}.\n\nOn the Board, reopen a task to run it again, or close it if you don't want the work. To land the existing work instead, reopen the pull request on GitHub and merge it there; 10db doesn't follow a reopened pull request, so close the tasks once it merges.`,
       foldKey: prCardKey.closed(batch.id),
       detail: prDetail(batch, prUrl),
     };
