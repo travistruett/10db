@@ -12,6 +12,9 @@ const ALL = Object.values(S);
 describe('workstream state machine', () => {
   it.each<[WorkstreamState, WorkstreamState]>([
     [S.Queued, S.Starting],
+    [S.Queued, S.Held],
+    [S.Held, S.Queued],
+    [S.Held, S.Cancelled],
     [S.Starting, S.Running],
     [S.Starting, S.Verifying],
     [S.Running, S.HandingOff],
@@ -44,13 +47,20 @@ describe('workstream state machine', () => {
     [S.Done, S.Queued],
     [S.Cancelled, S.Queued],
     [S.Recovering, S.Running],
+    [S.Held, S.Starting],
+    [S.Held, S.Done],
+    [S.Starting, S.Held],
+    [S.Running, S.Held],
+    [S.PausedLimit, S.Held],
+    [S.Failed, S.Held],
   ])('forbids %s -> %s', (from, to) => {
     expect(canTransition(from, to)).toBe(false);
   });
 
-  it('is the original table plus the two builder-check edges', () => {
+  it('is the original table plus the two builder-check edges and the hold edges', () => {
     const original: Record<WorkstreamState, readonly WorkstreamState[]> = {
       [S.Queued]: [S.Starting, S.Cancelled],
+      [S.Held]: [],
       [S.Starting]: [S.Running, S.Verifying, S.Recovering, S.PausedLimit, S.Failed, S.Cancelled],
       [S.Running]: [
         S.HandingOff,
@@ -85,6 +95,8 @@ describe('workstream state machine', () => {
     expect(sorted(WORKSTREAM_TRANSITIONS)).toEqual(
       sorted({
         ...original,
+        [S.Queued]: [...original[S.Queued], S.Held],
+        [S.Held]: [S.Queued, S.Cancelled],
         [S.Verifying]: [...original[S.Verifying], S.WaitingHuman],
         [S.WaitingHuman]: [...original[S.WaitingHuman], S.Verifying],
       }),

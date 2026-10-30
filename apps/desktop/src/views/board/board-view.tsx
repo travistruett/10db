@@ -44,6 +44,7 @@ import { NewTaskForm } from './new-task-form';
 import { PullRequestLink } from './pull-request-link';
 import { cardSummary, TaskCard } from './task-card';
 import { TaskCardMenu } from './task-card-menu';
+import { holdOption, isHeld } from './task-hold';
 import { columnNameOf, TaskDrawer } from './task-drawer';
 import { useBoardActions } from './use-board-actions';
 
@@ -256,6 +257,17 @@ function BoardColumns({
               <TaskCardMenu
                 task={task}
                 latest={ws?.state}
+                hold={holdOption(task, ws)}
+                onHold={() => {
+                  actions.hold(task.id);
+                }}
+                {...(isHeld(ws)
+                  ? {
+                      onRemove: () => {
+                        actions.remove(task.id);
+                      },
+                    }
+                  : {})}
                 {...(ws && canRetry(ws.state)
                   ? {
                       onRetry: () => {

@@ -22,13 +22,20 @@ import {
   TextInput,
 } from '@mantine/core';
 import { useState } from 'react';
-import { usePatchTask, useRetryWorkstream } from '../../daemon/queries';
+import {
+  useHoldTask,
+  usePatchTask,
+  useRemoveTask,
+  useRetryWorkstream,
+  useStartTask,
+} from '../../daemon/queries';
 import { StateBadge } from '../factory/state-badge';
 import { canRetry } from '../factory/workstream-state';
 import { criteriaLines } from './areas-text';
 import { BatchPanel } from './batch-panel';
 import { FlowSelect } from './flow-select';
 import { RISK_LABEL } from './risk-labels';
+import { holdOption, isHeld } from './task-hold';
 
 const RISKS: readonly RiskTag[] = Object.values(RiskTag);
 const isRisk = (value: string): value is RiskTag => RISKS.some((r) => r === value);
@@ -138,7 +145,7 @@ export function TaskDrawer({
       padding="lg"
     >
       <Stack gap="lg">
-        {workstream ? <WorkstreamLine workstream={workstream} /> : null}
+        {workstream ? <WorkstreamLine task={task} workstream={workstream} /> : null}
         {batch ? (
           <BatchPanel
             batch={batch}
@@ -269,30 +276,101 @@ export function TaskDrawer({
   );
 }
 
-/** The workstream's state, and for a failed one why and a way to retry it. */
-function WorkstreamLine({ workstream }: { readonly workstream: WorkstreamDto }) {
+/** The workstream's state; for a failed one why and a way to retry it, and for a queued or held one Hold, Start and Remove. */
+function WorkstreamLine({
+  task,
+  workstream,
+}: {
+  readonly task: TaskDto;
+  readonly workstream: WorkstreamDto;
+}) {
   const retry = useRetryWorkstream();
+  const hold = useHoldTask();
+  const start = useStartTask();
+  const remove = useRemoveTask();
   const failed = canRetry(workstream.state);
+  const holdable = holdOption(task, workstream);
+  const held = isHeld(workstream);
   if (isTerminal(workstream.state) && !failed) {
     return null;
   }
+  const busy = hold.isPending || start.isPending || remove.isPending;
+  const refusal = [hold, start, remove].find((m) => m.error)?.error?.message ?? null;
   return (
     <Stack gap={4}>
       <Group justify="space-between" wrap="nowrap">
         <StateBadge state={workstream.state} />
-        {failed ? (
-          <Button
-            size="xs"
-            variant="default"
-            loading={retry.isPending}
-            onClick={() => {
-              retry.mutate(workstream.id);
-            }}
-          >
-            Retry
-          </Button>
-        ) : null}
+        <Group gap="xs" wrap="nowrap">
+          {holdable ? (
+            <Button
+              size="xs"
+              variant="default"
+              disabled={holdable.kind === 'refused' || busy}
+              loading={hold.isPending}
+              onClick={() => {
+                hold.mutate(task.id);
+              }}
+            >
+              Hold
+            </Button>
+          ) : null}
+          {held ? (
+            <>
+              <Button
+                size="xs"
+                variant="default"
+                disabled={busy}
+                loading={start.isPending}
+                onClick={() => {
+                  start.mutate(task.id);
+                }}
+              >
+                Start
+              </Button>
+              <Button
+                size="xs"
+                variant="default"
+                color="red"
+                disabled={busy}
+                loading={remove.isPending}
+                onClick={() => {
+                  remove.mutate(task.id);
+                }}
+              >
+                Remove
+              </Button>
+            </>
+          ) : null}
+          {failed ? (
+            <Button
+              size="xs"
+              variant="default"
+              loading={retry.isPending}
+              onClick={() => {
+                retry.mutate(workstream.id);
+              }}
+            >
+              Retry
+            </Button>
+          ) : null}
+        </Group>
       </Group>
+      {holdable?.kind === 'refused' ? (
+        <Text size="xs" c="dimmed">
+          {holdable.reason}
+        </Text>
+      ) : null}
+      {held ? (
+        <Text size="xs" c="dimmed">
+          Held: it keeps its worktree and takes no lane. Start it to queue it again, or Remove it to
+          delete its worktree and branch.
+        </Text>
+      ) : null}
+      {refusal !== null ? (
+        <Text size="xs" c="red" role="alert">
+          {refusal}
+        </Text>
+      ) : null}
       {failed && workstream.failureReason !== null ? (
         <Text size="xs" c="dimmed">
           {workstream.failureReason}

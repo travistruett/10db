@@ -6,6 +6,7 @@ import {
   InvalidError,
   type McpServerStatusDto,
   ProjectInput,
+  WorkstreamState,
   type SystemCheckDto,
 } from '@10db/contracts';
 import {
@@ -16,6 +17,7 @@ import {
   getTask,
   getTeam,
   getWorkstream,
+  holdTask,
   insertBoardColumn,
   insertFlow,
   insertPerson,
@@ -23,6 +25,7 @@ import {
   insertProject,
   insertTask,
   latestEventSeq,
+  latestWorkstreamOf,
   listAaModels,
   listBatches,
   listBoardColumns,
@@ -44,6 +47,7 @@ import {
   patchPersona,
   patchProject,
   patchTask,
+  resumeTask,
   setRoutingRules,
   setTeam,
 } from '@10db/db';
@@ -113,7 +117,15 @@ export function createServices(deps: {
       deps.scheduler.requestTick();
       return task;
     },
+    holdTask: (taskId) => deps.state.write((ctx) => holdTask(ctx, taskId)),
     startTask(taskId) {
+      // A held task already has its run, and its batch and worktree if it has them: it only queues again.
+      const held = latestWorkstreamOf(db, taskId);
+      if (held?.state === WorkstreamState.Held) {
+        const workstream = deps.state.write((ctx) => resumeTask(ctx, taskId));
+        deps.scheduler.requestTick();
+        return { kind: 'workstream', workstream };
+      }
       const project = getProject(db, getTask(db, taskId).projectId);
       if (project.delivery === Delivery.PullRequest) {
         const batch = deps.starter.startTask(taskId);

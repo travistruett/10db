@@ -32,6 +32,7 @@
       "type": "string",
       "enum": [
         "QUEUED",
+        "HELD",
         "STARTING",
         "RUNNING",
         "HANDING_OFF",

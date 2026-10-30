@@ -36,6 +36,8 @@ export function taskState(
   switch (workstream.state) {
     case S.Queued:
       return { line: 'Queued', color: 'gray' };
+    case S.Held:
+      return { line: 'Held: not in the queue', color: 'gray' };
     case S.Starting:
     case S.Running:
     case S.HandingOff:

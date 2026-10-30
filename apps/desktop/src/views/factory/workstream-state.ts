@@ -6,6 +6,7 @@ const S = WorkstreamState;
 /** DESIGN.md status colors: blue running, yellow waiting on you, orange paused, red failed, green done, gray idle. */
 export const STATE_COLORS: Readonly<Record<State, MantineColor>> = {
   [S.Queued]: 'gray',
+  [S.Held]: 'gray',
   [S.Starting]: 'blue',
   [S.Running]: 'blue',
   [S.HandingOff]: 'blue',
@@ -21,6 +22,7 @@ export const STATE_COLORS: Readonly<Record<State, MantineColor>> = {
 
 export const STATE_LABELS: Readonly<Record<State, string>> = {
   [S.Queued]: 'Queued',
+  [S.Held]: 'Held',
   [S.Starting]: 'Starting',
   [S.Running]: 'Running',
   [S.HandingOff]: 'Handing off',

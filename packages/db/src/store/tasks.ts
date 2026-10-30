@@ -28,6 +28,7 @@ import { getBoardColumn } from './board-columns';
 import { getFlow } from './flows';
 import { getProject } from './projects';
 import type { DbReader, WriteContext } from './store';
+import { latestWorkstreamOf, transitionWorkstream } from './workstreams';
 
 export interface BoardStatusInput {
   readonly taskStatus: TaskStatus;
@@ -51,6 +52,7 @@ export function deriveBoardStatus({
   if (
     workstreamState === WorkstreamState.WaitingHuman ||
     workstreamState === WorkstreamState.PausedLimit ||
+    workstreamState === WorkstreamState.Held ||
     workstreamState === WorkstreamState.Failed
   ) {
     return BoardStatus.Blocked;
@@ -239,14 +241,10 @@ export function listTasks(db: DbReader, projectId: ProjectId): TaskDto[] {
 export function cancelTask(ctx: WriteContext, id: TaskId): TaskDto {
   const task = getTask(ctx.tx, id);
   if (task.status === TaskStatus.Cancelled) return task;
-  const run = ctx.tx
-    .select({ id: schema.workstreams.id, state: schema.workstreams.state })
-    .from(schema.workstreams)
-    .where(eq(schema.workstreams.taskId, id))
-    .orderBy(desc(schema.workstreams.createdAt), desc(schema.workstreams.id))
-    .limit(1)
-    .get();
-  if (task.status !== TaskStatus.Open || run)
+  const run = latestWorkstreamOf(ctx.tx, id);
+  // A held run never ran, so it goes with its task; any other run belongs to the workstream's own cancel.
+  const held = run?.state === WorkstreamState.Held ? run : undefined;
+  if (task.status !== TaskStatus.Open || (run && !held))
     throw new TaskStartedError(
       task.title,
       run ? { id: run.id, live: !isTerminal(run.state) } : null,
@@ -279,6 +277,12 @@ export function cancelTask(ctx: WriteContext, id: TaskId): TaskDto {
       task.title,
       dependents.map((d) => d.title),
     );
+  if (held)
+    transitionWorkstream(ctx, held.id, {
+      to: WorkstreamState.Cancelled,
+      fence: null,
+      reason: 'removed by the builder',
+    });
   ctx.tx
     .update(schema.tasks)
     .set({ status: TaskStatus.Cancelled, boardColumnId: null, updatedAt: ctx.now })

@@ -15,7 +15,7 @@ describe('columnHint', () => {
     ['Backlog', system(BoardStatus.Backlog), 'Waiting on another task to finish.'],
     ['Ready', system(BoardStatus.Ready), 'Next up. Start Ready Tasks picks from here.'],
     ['In progress', system(BoardStatus.InProgress), 'Being worked on now.'],
-    ['Blocked', system(BoardStatus.Blocked), 'Waiting on you, paused at a limit, or failed.'],
+    ['Blocked', system(BoardStatus.Blocked), 'Waiting on you, paused at a limit, held or failed.'],
     ['Done', system(BoardStatus.Done), 'Finished or cancelled.'],
     [
       'a human column',

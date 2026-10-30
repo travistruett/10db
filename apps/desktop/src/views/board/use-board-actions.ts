@@ -1,6 +1,6 @@
-import type { ProjectId } from '@10db/contracts';
+import type { ProjectId, TaskId } from '@10db/contracts';
 import { useState } from 'react';
-import { useStartTask } from '../../daemon/queries';
+import { useHoldTask, useRemoveTask, useStartTask } from '../../daemon/queries';
 import type { DropAction } from './drop-rules';
 import { useMoveTask } from './use-move-task';
 
@@ -8,7 +8,14 @@ import { useMoveTask } from './use-move-task';
 export function useBoardActions(projectId: ProjectId) {
   const move = useMoveTask(projectId);
   const start = useStartTask();
+  const hold = useHoldTask();
+  const remove = useRemoveTask();
   const [notice, setNotice] = useState<string | null>(null);
+  const all = [move, start, hold, remove];
+  /** Each action clears the others' errors, so at most one is set: the latest action's. */
+  const clearErrorsExcept = (keep: unknown) => {
+    for (const mutation of all) if (mutation !== keep) mutation.reset();
+  };
   function apply(action: DropAction): void {
     switch (action.kind) {
       case 'none':
@@ -18,7 +25,7 @@ export function useBoardActions(projectId: ProjectId) {
         return;
       case 'move':
         setNotice(null);
-        start.reset();
+        clearErrorsExcept(move);
         move.mutate(action, {
           onSuccess: () => {
             setNotice(action.note);
@@ -27,19 +34,34 @@ export function useBoardActions(projectId: ProjectId) {
         return;
       case 'start':
         setNotice(null);
-        move.reset();
+        clearErrorsExcept(start);
         start.mutate(action.taskId);
         return;
     }
   }
-  // Each action clears the other's error, so at most one is set: the latest action's.
   const failure = move.error
     ? { title: "Couldn't move the task", error: move.error }
     : start.error
       ? { title: "Couldn't start the task", error: start.error }
-      : null;
+      : hold.error
+        ? { title: "Couldn't hold the task", error: hold.error }
+        : remove.error
+          ? { title: "Couldn't remove the task", error: remove.error }
+          : null;
   return {
     apply,
+    /** Sets a started task that has not run aside. */
+    hold: (taskId: TaskId) => {
+      setNotice(null);
+      clearErrorsExcept(hold);
+      hold.mutate(taskId);
+    },
+    /** Removes a held task, with its worktree and branch. */
+    remove: (taskId: TaskId) => {
+      setNotice(null);
+      clearErrorsExcept(remove);
+      remove.mutate(taskId);
+    },
     notice,
     failure,
     dismiss: () => {
