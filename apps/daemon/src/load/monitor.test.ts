@@ -51,7 +51,11 @@ beforeEach(() => {
   files = {};
   tempDirs = createLaneTempDirs();
   cleared = 0;
-  monitor = createLoadMonitor({
+  monitor = startMonitor();
+});
+
+function startMonitor(): LoadGuard {
+  return createLoadMonitor({
     state,
     inbox,
     clock,
@@ -65,7 +69,7 @@ beforeEach(() => {
       cleared += 1;
     },
   });
-});
+}
 
 afterEach(() => {
   monitor.stop();
@@ -189,6 +193,47 @@ describe('the overload card', () => {
     load = 1;
     await sampleFor(MINUTE);
     load = 20 * CORES;
+    await sampleFor(5 * MINUTE);
+    expect(openCards()).toHaveLength(1);
+  });
+
+  it('withdraws, when 10db starts again, the card an overload left open before a restart', async () => {
+    const first = seedProject(base, { name: 'first' });
+    const second = seedProject(base, { name: 'second' });
+    load = 20 * CORES;
+    await sampleFor(5 * MINUTE);
+    // An older stale card on another project, and an unrelated flag that must stay.
+    inbox.flag({
+      projectId: second.id,
+      workstreamId: null,
+      title: 'The Mac is overloaded: 10db is holding new lanes and gates',
+      body: 'stale',
+      foldKey: 'machine-overloaded',
+    });
+    inbox.flag({
+      projectId: first.id,
+      workstreamId: null,
+      title: 'Something else',
+      body: 'unrelated',
+      foldKey: 'something-else',
+    });
+    expect(openCards()).toHaveLength(3);
+    // The daemon restarts mid-overload and the load is normal after.
+    monitor.stop();
+    load = 1;
+    monitor = startMonitor();
+    expect(openCards().map((c) => c.title)).toEqual(['Something else']);
+    await sampleFor(10 * MINUTE);
+    expect(openCards().map((c) => c.title)).toEqual(['Something else']);
+  });
+
+  it('raises one card for an overload that is still on after a restart', async () => {
+    seedProject(base);
+    load = 20 * CORES;
+    await sampleFor(5 * MINUTE);
+    monitor.stop();
+    monitor = startMonitor();
+    expect(openCards()).toEqual([]);
     await sampleFor(5 * MINUTE);
     expect(openCards()).toHaveLength(1);
   });

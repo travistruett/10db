@@ -7,6 +7,7 @@ import {
   type WorkstreamId,
 } from '@10db/contracts';
 import {
+  findOpenByFoldKey,
   getBatchRow,
   getWorkstreamRow,
   listBatches,
@@ -19,7 +20,7 @@ import type { Clock } from '../clock';
 import type { StateStore } from '../events';
 import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
-import { overloadCard } from './card';
+import { OVERLOAD_FOLD_KEY, overloadCard } from './card';
 import {
   findCulprits,
   systemProcessSnapshot,
@@ -126,12 +127,28 @@ export interface LoadMonitorOptions extends Partial<
  * The load guard with its card: one card from the moment an overload is declared, reworded as the busy
  * processes change, and withdrawn when it ends. The card sits on the project with the oldest work in
  * flight, or the first project; with no project there is nowhere to put it and only the log says so.
+ * A card left open by an earlier run is withdrawn when the monitor is made.
  */
 export function createLoadMonitor(opts: LoadMonitorOptions): LoadGuard {
   const db = opts.state.db;
   const processes = opts.processes ?? systemProcessSnapshot();
   let card: { readonly id: InboxItemId; body: string } | null = null;
   let cardProject: ProjectId | null = null;
+
+  // A card a run before this one left open, when the daemon restarted mid-overload, would otherwise
+  // say 10db is holding work for good. This guard starts not overloaded and raises a card again if
+  // the overload is still on.
+  for (const project of listProjects(db)) {
+    try {
+      const stale = findOpenByFoldKey(db, project.id, OVERLOAD_FOLD_KEY);
+      if (stale) opts.inbox.withdraw(stale.id);
+    } catch (error) {
+      opts.logger.error(
+        { err: error instanceof Error ? error.message : String(error) },
+        'could not withdraw an overload card left from before a restart',
+      );
+    }
+  }
 
   function projectForCard(): ProjectId | null {
     const oldest = listWorkstreams(db, { states: ACTIVE_STATES })[0];

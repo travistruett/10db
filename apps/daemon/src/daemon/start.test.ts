@@ -825,6 +825,52 @@ describe('startDaemon', () => {
     }
   });
 
+  it('withdraws an overload card left open when 10db restarted mid-overload', async () => {
+    const repo = createTempRepo();
+    const options = (load: number) => ({
+      sandbox: null,
+      dataDir: dir.path,
+      port: 0,
+      adapter: new FakeAdapter({}),
+      logLevel: 'warn' as const,
+      tickMs: 20,
+      ...QUIET,
+      load: {
+        read: () => ({ load, cores: 10 }),
+        processes: {
+          rows: () => Promise.resolve([]),
+          files: () => Promise.resolve(new Map<number, string[]>()),
+        },
+        sampleMs: 20,
+        sustainedMs: 0,
+      },
+    });
+    const overloadCards = async (api: ReturnType<typeof apiClient>) =>
+      (await api.get('/inbox?state=OPEN', z.array(InboxItemDto))).filter((item) =>
+        item.title.startsWith('The Mac is overloaded'),
+      );
+    try {
+      daemon = await startDaemon(options(100));
+      const before = apiClient(daemon.url, daemon.token);
+      await before.post('/projects', ProjectDto, {
+        name: 'demo',
+        repoPath: repo.path,
+        gateCommand: 'true',
+        flowId: await quickFlowId(before),
+        areas: [{ name: 'src', globs: ['src/**'] }],
+      });
+      await waitForAsync(async () => (await overloadCards(before))[0]);
+      await daemon.stop();
+
+      daemon = await startDaemon(options(1));
+      expect(await overloadCards(apiClient(daemon.url, daemon.token))).toEqual([]);
+    } finally {
+      await daemon?.stop();
+      daemon = null;
+      repo.cleanup();
+    }
+  });
+
   describe('the gh login in GET /system', () => {
     async function systemWith(gh: FakeGh) {
       daemon = await startDaemon({
