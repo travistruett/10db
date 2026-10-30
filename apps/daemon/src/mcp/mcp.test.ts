@@ -702,12 +702,13 @@ describe('MCP tools', () => {
     expect(String(first.json?.['instruction'])).toContain('same opId');
     const [card] = openCards();
     expect(first.json?.['inboxId']).toBe(card?.id);
-    // Two retries at once, with the same opId, share the wait: one card, no error, one result.
+    // Two retries at once, with the same opId, share the wait: one card, no error, one result. Their
+    // slice outlasts the test, so a slow machine can't end it before the holder lets go.
+    claimWaitSliceMs = 60_000;
     const retries = [a.call('request_claim', args), a.call('request_claim', args)];
     await new Promise((r) => setTimeout(r, 10));
     expect(openCards()).toHaveLength(1);
     releaseHolder(other);
-    claimWaitSliceMs = 60_000;
     const settled = await Promise.all(retries);
     for (const r of settled) {
       expect(r.isError).toBe(false);
