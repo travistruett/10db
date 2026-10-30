@@ -454,8 +454,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     isRunning: (id) => runner?.isRunning(id) ?? false,
   });
   answerBatchCard = createBatchCardAnswers({
-    retry: (id) => {
-      const retried = retryWorkstream(state, id);
+    retry: (id, note) => {
+      const retried = retryWorkstream(state, id, note);
       if (retried.batchId !== null) starter.reopen(retried.batchId);
       scheduler?.requestTick();
     },

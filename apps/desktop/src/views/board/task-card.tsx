@@ -7,7 +7,7 @@ import {
 } from '@10db/contracts';
 import { Badge, Box, Group, Paper, Stack, Text } from '@mantine/core';
 import type { StartNote } from './start-note';
-import { taskState, type TaskState } from './task-state';
+import { reviewSentBackLine, taskState, type TaskState } from './task-state';
 
 export interface TaskCardProps {
   readonly task: TaskDto;
@@ -57,6 +57,7 @@ export function cardSummary(
   const waits = waitsOn(task, peers);
   const criteria = task.acceptanceCriteria.length;
   const state = startNote ? noteState(startNote) : taskState(workstream, batch, gateCommand);
+  const sentBack = reviewSentBackLine(workstream);
   return [
     task.areas.length > 0 ? `Areas: ${task.areas.join(', ')}.` : null,
     criteria > 0 ? `${String(criteria)} ${criteria === 1 ? 'criterion' : 'criteria'}.` : null,
@@ -64,6 +65,7 @@ export function cardSummary(
     landing ? `${landing}.` : null,
     task.status === TaskStatus.Cancelled ? 'Cancelled.' : null,
     state ? `${state.line}.` : null,
+    sentBack ? `${sentBack}.` : null,
   ]
     .filter((part) => part !== null)
     .join(' ');
@@ -83,6 +85,7 @@ export function TaskCard({
   const waits = waitsOn(task, peers);
   const criteria = task.acceptanceCriteria.length;
   const state = startNote ? noteState(startNote) : taskState(workstream, batch, gateCommand);
+  const sentBack = reviewSentBackLine(workstream);
   // Queued keeps the plain border; the other states take their DESIGN.md color as a border, thicker
   // when the builder's turn: no fill, no stripe, no animation.
   const colored = state !== null && state.color !== 'gray';
@@ -157,6 +160,11 @@ export function TaskCard({
               {state.line}
             </Text>
           </Group>
+        ) : null}
+        {sentBack ? (
+          <Text size="xs" c="dimmed">
+            {sentBack}
+          </Text>
         ) : null}
         {/* The pull request or Inbox link is laid over this space by the board, outside the card's button. */}
         {pullRequest || startNote?.inbox ? <div style={{ height: 20 }} /> : null}

@@ -353,6 +353,35 @@ describe('API', () => {
     ).toBe(409);
   });
 
+  it.each([
+    { name: 'a note', body: JSON.stringify({ note: 'Reuse the card.' }), note: 'Reuse the card.' },
+    { name: 'a body with no note', body: JSON.stringify({}), note: undefined },
+    { name: 'no body', body: undefined, note: undefined },
+  ])('hands a retry $name to the service', async ({ body, note }) => {
+    const seen: (string | undefined)[] = [];
+    const services = stubServices({
+      retryWorkstream: (_id, noted) => {
+        seen.push(noted);
+        throw new ConflictError('not failed');
+      },
+    });
+    await app(services).request(`/workstreams/${mintId('Workstream')}/retry`, {
+      method: 'POST',
+      ...(body === undefined ? auth : json),
+      ...(body === undefined ? {} : { body }),
+    });
+    expect(seen).toEqual([note]);
+  });
+
+  it('refuses a retry note over 4000 characters', async () => {
+    const res = await app(stubServices({})).request(`/workstreams/${mintId('Workstream')}/retry`, {
+      method: 'POST',
+      ...json,
+      body: JSON.stringify({ note: 'x'.repeat(4001) }),
+    });
+    expect(res.status).toBe(400);
+  });
+
   it('answers 409 with the task named when a patch removes an area a running task holds', async () => {
     const message = 'Can\'t remove or rename area "api": the running task "Fix login" holds it.';
     const services = stubServices({

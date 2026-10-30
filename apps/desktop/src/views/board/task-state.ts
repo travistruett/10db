@@ -1,4 +1,11 @@
-import { BatchState, WorkstreamState, type BatchDto, type WorkstreamDto } from '@10db/contracts';
+import {
+  BatchState,
+  FIX_ATTEMPT_LIMIT,
+  rejectionsSentBack,
+  WorkstreamState,
+  type BatchDto,
+  type WorkstreamDto,
+} from '@10db/contracts';
 import type { MantineColor } from '@mantine/core';
 import { FAILURE_LABELS } from './batch-labels';
 
@@ -21,6 +28,18 @@ function building(workstream: WorkstreamDto): string {
   return total > 0
     ? `Building · step ${String(workstream.stepIndex + 1)} of ${String(total)}`
     : 'Building';
+}
+
+/**
+ * How often the review sent the work back, against the limit that fails the task; null when it
+ * never did, or a retry has started the count over.
+ */
+export function reviewSentBackLine(workstream: WorkstreamDto | undefined): string | null {
+  if (!workstream) return null;
+  const sentBack = rejectionsSentBack(workstream);
+  return sentBack > 0
+    ? `Review sent back ${String(sentBack)} of ${String(FIX_ATTEMPT_LIMIT)}`
+    : null;
 }
 
 /**

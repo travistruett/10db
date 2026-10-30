@@ -10,6 +10,9 @@ import {
   ToolAccess,
   AccountCardChoice,
   MCP_APPROVAL_DETAIL,
+  rejectionsSentBack,
+  ReviewCardDetail,
+  reviewRounds,
   type AccountId,
 } from '@10db/contracts';
 import {
@@ -1393,6 +1396,25 @@ describe('runner', () => {
     expect(listInbox(engine.store.db, { states: ['OPEN'] }).map((i) => i.kind)).toEqual(['flag']);
   });
 
+  it('hands the builder’s retry note to the next session after crashes failed the workstream', async () => {
+    const crash = { do: 'crash' as const, message: 'boom' };
+    engine = await createTestEngine({
+      Alpha: [[crash], [crash], [crash], [crash], [turn]],
+    });
+    const { workstream } = engine.addTask('Alpha');
+    for (let i = 0; i < 4; i += 1) {
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+    }
+    expect(ws(workstream.id).state).toBe('FAILED');
+    engine.retry(workstream.id, 'The fixture server needs port 4100.');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(engine.adapter.prompts.at(-1)?.prompt).toContain(
+      'The builder sent the work back: The fixture server needs port 4100.',
+    );
+  });
+
   it('fails at once on a billing refusal, without retrying it as a crash', async () => {
     const refusal =
       "Billing check failed: expected the Claude subscription, got an API key. No prompt was sent. <b>Check</b> the project's billing mode.";
@@ -2484,23 +2506,95 @@ describe('flows', () => {
     expect(step(workstream.id, 1)?.result?.verdict).toBe('approve');
   });
 
-  it('fails after the fix limit when the reviewer keeps rejecting, then retries the review cleanly', async () => {
-    const round = (n: number) => [[turn], [reject(`op-flow-04${String(n)}0`), turn]];
-    engine = await createTestEngine({
-      Alpha: [...[1, 2, 3, 4].flatMap(round), [approve('op-flow-0499'), turn]],
+  describe('when the reviewer keeps rejecting', () => {
+    const FINAL =
+      '1. BLOCKING src/api/a.txt:3 the card hides what the reviewer found.\n   Show it.';
+    const round = (n: number) => [
+      [turn],
+      [reject(`op-flow-04${String(n)}0`, n === 4 ? FINAL : `1. NOTE round ${String(n)}`), turn],
+    ];
+    const failed = async () => {
+      engine = await createTestEngine({
+        Alpha: [
+          ...[1, 2, 3, 4].flatMap(round),
+          // After a retry: the implement step reruns, then the review approves.
+          [turn],
+          [approve('op-flow-0499'), turn],
+        ],
+      });
+      const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+      await until(workstream.id, (s) => s === 'FAILED');
+      return workstream;
+    };
+
+    it('fails after the fix limit with a flag that carries the last review’s findings', async () => {
+      const workstream = await failed();
+      expect(ws(workstream.id)).toMatchObject({
+        state: 'FAILED',
+        failureReason: 'The review step rejected the work and the retry limit (3) is used up',
+      });
+      const card = listInbox(engine.store.db, { states: ['OPEN'] }).find((i) => i.kind === 'flag');
+      const detail = ReviewCardDetail.parse(card?.detail?.['reviewRejection']);
+      expect(detail.at).toBe(ws(workstream.id).steps[1]?.result?.at);
+      expect(detail).toEqual({
+        role: 'review',
+        personaName: 'Reviewer',
+        at: detail.at,
+        findings: [
+          {
+            severity: 'BLOCKING',
+            location: 'src/api/a.txt:3',
+            text: 'BLOCKING src/api/a.txt:3 the card hides what the reviewer found.',
+          },
+        ],
+        summary: FINAL,
+      });
     });
-    const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
-    await until(workstream.id, (s) => s === 'FAILED');
-    expect(ws(workstream.id)).toMatchObject({
-      state: 'FAILED',
-      failureReason: 'The review step rejected the work and the retry limit (3) is used up',
+
+    it('keeps every round the reviewer gave', async () => {
+      const workstream = await failed();
+      expect(reviewRounds(ws(workstream.id).steps).map((r) => r.result.summary)).toEqual([
+        FINAL,
+        '1. NOTE round 3',
+        '1. NOTE round 2',
+        '1. NOTE round 1',
+      ]);
+      expect(rejectionsSentBack(ws(workstream.id))).toBe(3);
     });
-    expect(listInbox(engine.store.db, { states: ['OPEN'] }).map((i) => i.kind)).toContain('flag');
-    // The builder retries: the review starts clean (no stale verdict) and approves.
-    engine.retry(workstream.id);
-    expect(step(workstream.id, 1)).toMatchObject({ status: 'running', result: null, attempts: 0 });
-    await until(workstream.id, (s) => s === 'DONE');
-    expect(ws(workstream.id).state).toBe('DONE');
+
+    it('sends a retry to the implement step with the findings, and the review runs after it', async () => {
+      const workstream = await failed();
+      engine.retry(workstream.id);
+      expect(ws(workstream.id)).toMatchObject({
+        state: 'QUEUED',
+        stepIndex: 0,
+        attempt: 0,
+        nextAction: { kind: 'revise', reviewStep: 1 },
+      });
+      // The review has not run since the retry, so nothing it said before counts.
+      expect(rejectionsSentBack(ws(workstream.id))).toBe(0);
+      expect(reviewRounds(ws(workstream.id).steps)).toHaveLength(4);
+      expect(step(workstream.id, 0)).toMatchObject({ status: 'running', result: null });
+      await until(workstream.id, (s) => s === 'DONE');
+      const prompt = engine.adapter.prompts.at(-2)?.prompt ?? '';
+      expect(prompt).toContain('Your step: 1 of 2, implement');
+      expect(prompt).toContain('rejected the work');
+      expect(prompt).toContain('the card hides what the reviewer found');
+      expect(ws(workstream.id).state).toBe('DONE');
+    });
+
+    it('hands the builder’s note to that implement session with the findings', async () => {
+      const workstream = await failed();
+      engine.retry(workstream.id, 'Use the existing card component.');
+      expect(ws(workstream.id)).toMatchObject({ state: 'QUEUED', stepIndex: 0 });
+      await until(workstream.id, (s) => s === 'DONE');
+      const prompt = engine.adapter.prompts.at(-2)?.prompt ?? '';
+      expect(prompt).toContain('Use the existing card component.');
+      expect(prompt).toContain('the card hides what the reviewer found');
+      expect(
+        listEvidence(engine.store.db, workstream.id).filter((e) => e.kind === 'builder'),
+      ).toMatchObject([{ summary: 'Use the existing card component.' }]);
+    });
   });
 
   it('escalates the implement step when the gate fails', async () => {

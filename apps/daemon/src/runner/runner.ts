@@ -4,8 +4,11 @@ import {
   ConflictError,
   currentStep,
   EventType,
+  FIX_ATTEMPT_LIMIT,
   InboxKind,
+  parseFindings,
   PermissionChoice,
+  REVIEW_CARD_DETAIL,
   REVIEW_ROLES,
   StepRole,
   StepStatus,
@@ -22,6 +25,7 @@ import {
   type NextAction,
   type ProjectDto,
   type ProjectId,
+  type ReviewCardDetail,
   type SessionId,
   type WorkstreamId,
   type WorkstreamStep,
@@ -137,6 +141,7 @@ import {
 } from '../sessions';
 import {
   advanceSteps,
+  countSendBack,
   failStep,
   moveAfter,
   sendBackSteps,
@@ -169,7 +174,7 @@ export interface RunnerLimits {
 
 export const DEFAULT_RUNNER_LIMITS: RunnerLimits = {
   maxRecoveryAttempts: 3,
-  maxFixAttempts: 3,
+  maxFixAttempts: FIX_ATTEMPT_LIMIT,
   gateTimeoutMs: 30 * 60_000,
   // One at a time: a gate runs a whole test suite, and several at once overload the machine.
   gateSlots: 1,
@@ -525,22 +530,32 @@ export function createRunner(opts: RunnerOptions): Runner {
     clearLease(ctx, id);
   }
 
-  function flagFailed(row: WorkstreamRow, reason: string): void {
+  /** The failed card; `review` is the reviewer's rejection that ended the workstream, when one did. */
+  function flagFailed(row: WorkstreamRow, reason: string, review?: ReviewCardDetail): void {
+    const batch = batchCardFields(row);
     opts.inbox.flag({
       projectId: row.projectId,
       workstreamId: row.id,
       title: `Workstream failed: ${getTask(db, row.taskId).title}`,
       body: reason,
-      ...batchCardFields(row),
+      ...(batch ? { options: batch.options } : {}),
+      ...(batch || review
+        ? { detail: { ...batch?.detail, ...(review ? { [REVIEW_CARD_DETAIL]: review } : {}) } }
+        : {}),
     });
   }
 
-  function fail(id: WorkstreamId, fence: number | null, reason: string): void {
+  function fail(
+    id: WorkstreamId,
+    fence: number | null,
+    reason: string,
+    review?: ReviewCardDetail,
+  ): void {
     const row = getWorkstreamRow(db, id);
     opts.state.write((ctx) => {
       failIn(ctx, id, fence, row, reason);
     });
-    flagFailed(row, reason);
+    flagFailed(row, reason, review);
   }
 
   /** A step entered now; its floor is the sessions this workstream has run so far. */
@@ -721,10 +736,20 @@ export function createRunner(opts: RunnerOptions): Runner {
       case 'send_back': {
         const attempt = row.attempt + 1;
         if (attempt > opts.limits.maxFixAttempts) {
+          const result = step.result;
           fail(
             id,
             ctl.fence,
             `The ${step.role} step rejected the work and the retry limit (${String(opts.limits.maxFixAttempts)}) is used up`,
+            result
+              ? {
+                  role: step.role,
+                  personaName: step.personaName,
+                  at: result.at,
+                  findings: parseFindings(result.summary),
+                  summary: result.summary,
+                }
+              : undefined,
           );
           return 'stop';
         }
@@ -736,7 +761,10 @@ export function createRunner(opts: RunnerOptions): Runner {
             recordProfileOutcome(ctx, target.profileId, { firstPass: false, escalated: true });
           patchWorkstream(ctx, id, ctl.fence, {
             attempt,
-            steps: sendBackSteps(row.steps, row.stepIndex, move.to, up.step, entryFor(ctx, id)),
+            steps: countSendBack(
+              sendBackSteps(row.steps, row.stepIndex, move.to, up.step, entryFor(ctx, id)),
+              row.stepIndex,
+            ),
             stepIndex: move.to,
             nextAction: { kind: 'revise', reviewStep: row.stepIndex },
             model: up.step.model,

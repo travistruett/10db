@@ -116,7 +116,7 @@ export interface ApiServices {
   listFlows(): FlowDto[];
   listWorkstreams(filter: { readonly active: boolean }): WorkstreamDto[];
   cancelWorkstream(id: WorkstreamId): Promise<WorkstreamDto>;
-  retryWorkstream(id: WorkstreamId): WorkstreamDto;
+  retryWorkstream(id: WorkstreamId, note?: string): WorkstreamDto;
   /** The diff, commits and file counts of the workstream's work in its checkout, for the builder's check. */
   workstreamChanges(id: WorkstreamId): Promise<WorkstreamChangesDto>;
   /** With `recent`, only that many, the most recently updated first. */

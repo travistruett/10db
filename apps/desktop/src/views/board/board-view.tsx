@@ -294,7 +294,7 @@ function BoardColumns({
                       onRetry: () => {
                         abandon.reset();
                         closeTask.reset();
-                        retry.mutate(ws.id);
+                        retry.mutate({ id: ws.id });
                       },
                     }
                   : {})}

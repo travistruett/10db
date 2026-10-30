@@ -26,6 +26,7 @@ import { useState } from 'react';
 import { useCloseTask, usePatchTask, useRetryWorkstream } from '../../daemon/queries';
 import { StateBadge } from '../factory/state-badge';
 import { canClose, canRetry } from '../factory/workstream-state';
+import { ReviewRoundsList } from '../review/review-rounds-list';
 import { criteriaLines } from './areas-text';
 import { closeNote } from './batch/close-note';
 import { BatchPanel } from './batch-panel';
@@ -176,6 +177,7 @@ export function TaskDrawer({
             onClosed={onClose}
           />
         ) : null}
+        {workstream ? <ReviewRoundsList steps={workstream.steps} /> : null}
         {batch ? (
           <BatchPanel
             batch={batch}
@@ -337,6 +339,7 @@ function WorkstreamLine({
   readonly onClosed: () => void;
 }) {
   const retry = useRetryWorkstream();
+  const [note, setNote] = useState('');
   const closeTask = useCloseTask();
   const failed = canRetry(workstream.state);
   if (isTerminal(workstream.state) && !failed) {
@@ -354,7 +357,10 @@ function WorkstreamLine({
               loading={retry.isPending}
               onClick={() => {
                 closeTask.reset();
-                retry.mutate(workstream.id);
+                const text = note.trim();
+                retry.mutate(
+                  text === '' ? { id: workstream.id } : { id: workstream.id, note: text },
+                );
               }}
             >
               Retry
@@ -379,6 +385,21 @@ function WorkstreamLine({
         <Text size="xs" c="dimmed">
           {workstream.failureReason}
         </Text>
+      ) : null}
+      {failed ? (
+        <Textarea
+          label="Note for the next session (optional)"
+          description="The session the retry starts gets this note, and the review’s findings too when a review sent the work back."
+          size="xs"
+          autosize
+          minRows={1}
+          maxRows={6}
+          maxLength={4000}
+          value={note}
+          onChange={(e) => {
+            setNote(e.currentTarget.value);
+          }}
+        />
       ) : null}
       {canClose(workstream.state) ? (
         <Text size="xs" c="dimmed">

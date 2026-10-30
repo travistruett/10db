@@ -320,8 +320,14 @@ export function useRetryWorkstream() {
   const { client } = useDaemon();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (id: WorkstreamId) =>
-      readJson(await client.workstreams[':id'].retry.$post({ param: { id } }), WorkstreamDto),
+    mutationFn: async ({ id, note }: { readonly id: WorkstreamId; readonly note?: string }) =>
+      readJson(
+        await client.workstreams[':id'].retry.$post({
+          param: { id },
+          json: note ? { note } : {},
+        }),
+        WorkstreamDto,
+      ),
     onSuccess: () =>
       Promise.all([
         queryClient.invalidateQueries({ queryKey: ['workstreams'] }),
