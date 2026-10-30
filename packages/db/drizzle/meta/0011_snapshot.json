@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "70be6c92-ee0f-4876-b98a-088d6e00d59f",
+  "id": "69d5c8b3-125c-4047-8ea3-ed09e46d9d37",
   "prevId": "212f5c5d-1db1-4834-8250-6167423ce4c3",
   "tables": {
     "aa_models": {
@@ -1802,6 +1802,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "changed_check_command": {
+          "name": "changed_check_command",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "areas": {
           "name": "areas",
           "type": "text",
@@ -3141,13 +3148,6 @@
         },
         "last_activity_at": {
           "name": "last_activity_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "run_next_at": {
-          "name": "run_next_at",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
