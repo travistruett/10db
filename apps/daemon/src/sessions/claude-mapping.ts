@@ -7,7 +7,7 @@ import type {
 } from '@anthropic-ai/claude-agent-sdk';
 import type { GuardVerdict } from '../guard';
 import { SandboxedMcpServer } from '../sandbox';
-import type { SessionEvent, SessionMcpServer, ToolDecision } from './types';
+import type { SessionEvent, SessionMcpServer, ToolDecision, TurnResult } from './types';
 
 export const SUMMARY_CHARS = 200;
 const BRIEF_CHARS = 80;
@@ -99,9 +99,17 @@ export function mapSdkMessage(
   }
   if (msg.type === 'result') {
     const usage = msg.usage;
+    const result: TurnResult =
+      msg.subtype === 'error_max_turns'
+        ? 'max_turns'
+        : msg.subtype !== 'success' || msg.is_error
+          ? 'error'
+          : 'success';
     return [
       {
         type: 'turn_complete',
+        // Only a turn that didn't end normally says so; the others stay as they were.
+        ...(result === 'success' ? {} : { result }),
         inputTokens: usage.input_tokens + usage.cache_creation_input_tokens,
         outputTokens: usage.output_tokens,
         cachedTokens: usage.cache_read_input_tokens,

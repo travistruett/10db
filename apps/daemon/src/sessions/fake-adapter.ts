@@ -80,7 +80,10 @@ export const FakeStep = z.discriminatedUnion('do', [
   z.object({ do: z.literal('tool'), toolName: z.string(), input: z.record(z.string(), Json) }),
   z.object({ do: z.literal('mcp'), tool: z.string(), args: z.record(z.string(), Json) }),
   z.object({ do: z.literal('await_message'), contains: z.string() }),
-  z.object({ do: z.literal('turn_complete') }),
+  z.object({
+    do: z.literal('turn_complete'),
+    result: z.enum(['success', 'max_turns', 'error']).optional(),
+  }),
   z.object({
     do: z.literal('rate_limit'),
     status: z.enum(['allowed', 'allowed_warning', 'rejected']),
@@ -363,6 +366,7 @@ export class FakeAdapter implements SessionAdapter {
         case 'turn_complete':
           channel.push({
             type: 'turn_complete',
+            ...(step.result ? { result: step.result } : {}),
             inputTokens: 1000,
             outputTokens: 200,
             cachedTokens: 0,

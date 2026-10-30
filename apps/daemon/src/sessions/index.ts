@@ -14,6 +14,7 @@ export type {
   SessionSpec,
   ToolDecision,
   ToolRequest,
+  TurnResult,
 } from './types';
 export {
   ProjectMcpError,
