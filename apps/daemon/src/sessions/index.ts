@@ -6,7 +6,7 @@ export {
   loadFakeScriptBook,
 } from './fake-adapter';
 export { checkAccount, type SeenAccount } from './account-check';
-export { AccountProbeError, SessionEndReason } from './types';
+export { AccountProbeError, CompletionError, SessionEndReason } from './types';
 export type {
   SessionAdapter,
   SessionEvent,

@@ -1,9 +1,32 @@
 import { z } from 'zod';
 import { ProjectDto, Title, WorkstreamDto } from './entities';
 import { BatchId, ProjectId, TaskId } from './ids';
-import { BatchFailure, BatchState } from './states';
+import { BatchFailure, BatchState, PullRequestChecks, PullRequestState } from './states';
 
 const Timestamp = z.iso.datetime();
+
+/** One failing check of a pull request; `url` is null when GitHub gave none or not an https one. */
+export const FailingCheckDto = z.object({
+  name: z.string(),
+  url: z.string().nullable(),
+});
+export type FailingCheckDto = z.infer<typeof FailingCheckDto>;
+
+/** What the daemon last read of a shipped batch's pull request. */
+export const PullRequestStatusDto = z.object({
+  state: z.enum(PullRequestState),
+  /**
+   * While `state` is `unknown`, the checks (and `failingChecks`) gh last reported; `unknown` if it
+   * never did. With a known `state`, `unknown` means GitHub listed a check 10db can't read and no
+   * other check failed or is still running.
+   */
+  checks: z.enum(PullRequestChecks),
+  failingChecks: z.array(FailingCheckDto),
+  checkedAt: Timestamp,
+  /** Why the state is `unknown`; null otherwise. */
+  unknownReason: z.string().nullable(),
+});
+export type PullRequestStatusDto = z.infer<typeof PullRequestStatusDto>;
 
 /** One batch: one branch and one pull request (batch delivery spec §3). */
 export const BatchDto = z.object({
@@ -13,12 +36,17 @@ export const BatchDto = z.object({
   state: z.enum(BatchState),
   /** Null until the branch is cut. */
   branch: z.string().nullable(),
+  /** The branch it is cut from and its pull request targets: the project's, or the one its tasks named. */
   baseBranch: z.string(),
+  /** True when the pull request merges by itself once its required checks pass. */
+  autoMerge: z.boolean(),
   /** The commit the branch was cut from; null until it is cut. */
   baseSha: z.string().nullable(),
   /** The GitHub `owner/name`, recorded when the branch is cut. */
   repo: z.string().nullable(),
   prUrl: z.string().nullable(),
+  /** The pull request's last read state; null until the daemon has read it (or there is no pull request). */
+  pr: PullRequestStatusDto.nullable().default(null),
   gateExitCode: z.int().nullable(),
   gateLogPath: z.string().nullable(),
   failure: z.enum(BatchFailure).nullable(),

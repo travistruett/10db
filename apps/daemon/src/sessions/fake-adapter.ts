@@ -17,8 +17,10 @@ import { matchesAllowedTool } from '../permissions';
 import { checkAccount, credentialProblem, modelMatches, type SeenAccount } from './account-check';
 import { createChannel } from './channel';
 import {
+  CompletionError,
   SessionEndReason,
   type AccountProbeSpec,
+  type CompletionSpec,
   type SessionAdapter,
   type SessionEvent,
   type SessionHandle,
@@ -153,11 +155,21 @@ export class FakeAdapter implements SessionAdapter {
     apiKeySource: 'none',
   };
   readonly probes: AccountProbeSpec[] = [];
+  /** Every question put to the model by `complete`. */
+  readonly completions: CompletionSpec[] = [];
+  /** What the model answers; the default has none, so a caller falls back to what it can do without. */
+  answer: (ask: CompletionSpec) => Promise<string> = () =>
+    Promise.reject(new CompletionError('The fake adapter has no model to ask.'));
 
   private readonly book: FakeScriptBook;
 
   constructor(book: FakeScriptBook) {
     this.book = book;
+  }
+
+  complete(ask: CompletionSpec): Promise<string> {
+    this.completions.push(ask);
+    return this.answer(ask);
   }
 
   probeAccount(probe: AccountProbeSpec): Promise<SeenAccount> {
