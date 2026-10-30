@@ -8,6 +8,7 @@ import { raise, type DeliveryContext } from './context';
 import { recordInstall } from './installed-lockfile';
 import { jobKey, JobQueue } from './jobs';
 import { worktreeLockReason } from './worktree-cut';
+import { raiseInstallHostCards } from './worktree-dependencies';
 import { withWorktreeLock } from './worktree-lock';
 import { seedDirs, seedWorktree } from './worktree-seed';
 
@@ -135,8 +136,10 @@ async function makeWhole(
   if (installed.kind === 'failed' || installed.kind === 'aborted') {
     // Without current packages the worktree is not whole: the next Retry makes it again.
     await dropUninstalled();
-    if (installed.kind === 'failed')
+    if (installed.kind === 'failed') {
       raise(ctx.inbox, batch.projectId, worktreeCards.installFailed(batch, installed));
+      raiseInstallHostCards(ctx, batch.projectId, installed);
+    }
     return 'refused';
   }
   ctx.logger.info({ batchId: batch.id, path, branch }, 'batch worktree made again');

@@ -179,6 +179,12 @@ export const ProjectInput = z
     repoPath: z.string().startsWith('/'),
     /** The command that checks a task's work; null means the builder checks each finished task. */
     gateCommand: z.string().min(1).nullable().default(null),
+    /**
+     * The command that checks only what a task's diff touched. 10db runs it after each implement
+     * step instead of the gate command; the ship gate still runs the gate command. Null keeps the
+     * gate command for both.
+     */
+    changedCheckCommand: z.string().min(1).nullable().default(null),
     areas: z.array(AreaDef).min(1),
     hazards: z.array(HazardDef).default(() => [...DEFAULT_HAZARDS]),
     maxLanes: z.int().min(1).max(16).default(2),
@@ -242,6 +248,7 @@ export const ProjectDto = z.object({
   name: z.string(),
   repoPath: z.string(),
   gateCommand: z.string().nullable(),
+  changedCheckCommand: z.string().nullable(),
   areas: z.array(AreaDef),
   hazards: z.array(HazardDef),
   maxLanes: z.int(),
@@ -279,6 +286,7 @@ export const ProjectPatch = z
   .object({
     name: z.string().min(1),
     gateCommand: z.string().min(1).nullable(),
+    changedCheckCommand: z.string().min(1).nullable(),
     maxLanes: z.int().min(1).max(16),
     handoffPct: z.int().min(5).max(95),
     nudgePct: z.int().min(6).max(98),
@@ -411,6 +419,8 @@ export const WorkstreamDto = z.object({
   pausedUntil: Timestamp.nullable(),
   failureReason: z.string().nullable(),
   lastActivityAt: Timestamp.nullable(),
+  /** When the builder put it first in line; null for a workstream that waits in the order it started. */
+  runNextAt: Timestamp.nullable(),
   createdAt: Timestamp,
   updatedAt: Timestamp,
 });
@@ -424,6 +434,10 @@ export const InboxAnswer = z.object({
   note: z.string().max(4000).optional(),
 });
 export type InboxAnswer = z.infer<typeof InboxAnswer>;
+
+/** `POST /workstreams/:id/retry`: the builder's note, for the session a retry sends the work to. */
+export const RetryInput = z.object({ note: z.string().max(4000).optional() });
+export type RetryInput = z.infer<typeof RetryInput>;
 
 /** The two answers to a check card: the work is right, or it goes back with a note. */
 export const CheckChoice = {
@@ -465,16 +479,31 @@ export const PermissionRuleDto = z.object({
   toolName: z.string(),
   pattern: z.string().nullable(),
   sourceInboxId: InboxItemId.nullable(),
+  /** The project file whose scan allowed the host (such as `Cargo.lock`); null for any other source. */
+  foundIn: z.string().nullable(),
   createdAt: Timestamp,
 });
 export type PermissionRuleDto = z.infer<typeof PermissionRuleDto>;
 
+/** Where an allowed host came from: a project file's scan, an Inbox card's Allow, or the builder typing it. */
+export const NetworkHostSource = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('file'), file: z.string() }),
+  z.object({ kind: z.literal('card') }),
+  z.object({ kind: z.literal('builder') }),
+]);
+export type NetworkHostSource = z.infer<typeof NetworkHostSource>;
+
 /** A host the builder allows a project's sessions and checks to reach: its project-wide network rule. */
 export const NetworkHostDto = z.object({
   host: z.string(),
+  source: NetworkHostSource,
   createdAt: Timestamp,
 });
 export type NetworkHostDto = z.infer<typeof NetworkHostDto>;
+
+/** A host a project's package files name, and the file that names it (its path from the project root). */
+export const FoundHostDto = z.object({ host: z.string(), file: z.string() });
+export type FoundHostDto = z.infer<typeof FoundHostDto>;
 
 /** What the builder types to allow a host; the daemon judges it and answers a refusal in words. */
 export const NetworkHostInput = z.object({ host: z.string() });

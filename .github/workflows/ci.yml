@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+    # Only pull requests into main: tasks land in the integration branch `next` without CI, and the
+    # one pull request from `next` into main runs it (decisions/2026-10-30-integration-branch.md).
+    branches: [main]
     # edited re-runs the checks when the title changes: squash merge makes the title the commit on
     # main, so policy must lint the current one. Every job runs on every event. A job skipped on
     # edited would count as passing and replace an earlier red result for the same commit.

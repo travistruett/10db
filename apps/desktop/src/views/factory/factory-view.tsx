@@ -118,9 +118,9 @@ export function FactoryView() {
                       <Button
                         size="xs"
                         variant="light"
-                        loading={retry.isPending && retry.variables === ws.id}
+                        loading={retry.isPending && retry.variables.id === ws.id}
                         onClick={() => {
-                          retry.mutate(ws.id);
+                          retry.mutate({ id: ws.id });
                         }}
                       >
                         Retry

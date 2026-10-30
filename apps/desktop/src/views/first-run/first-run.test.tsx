@@ -68,6 +68,7 @@ function serve(
           defaultBranch: 'main',
           github: 'me/widgets',
           gateCandidates: [{ command: 'make gate', source: 'makefile' }],
+          registryHosts: [],
         },
       }),
     ),

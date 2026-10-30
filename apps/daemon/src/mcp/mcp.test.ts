@@ -1137,6 +1137,8 @@ const stepAt = (role: 'implement' | 'review' | 'plan'): WorkstreamStep => ({
   startedAt: null,
   sessionFloor: 0,
   result: null,
+  earlier: [],
+  sentBack: 0,
 });
 
 async function onStep(role: 'implement' | 'review' | 'plan') {

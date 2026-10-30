@@ -36,11 +36,14 @@ import {
 import type { Clock } from '../clock';
 import { GitNetworkError, GitNetworkFailure } from '../git';
 import { PrState } from '../github';
-import type { GateResult, GateRunner } from '../verify';
+import { raiseGateHostCards } from '../inbox';
+import { BlockedRun, type GateResult, type GateRunner } from '../verify';
 import { gateNote, type BaseUpdate, type BaseUpdates } from './base-update';
+import { settleBranch } from './branch-cleanup';
 import { mergeCards, shipCards, wrongBranchCard, type Card, type ShipFailure } from './cards';
 import { allCheckouts, projectAtCheckout } from './checkout';
 import { returnCheckout } from './checkout-return';
+import { resolveShipCards } from './stale-cards';
 import { ghCall, pushCall, raise, type DeliveryContext, type DeliveryLimits } from './context';
 import { readGateFailures, touchedBy, type GateStepFailure } from './gate-failures';
 import { jobKey, JobQueue } from './jobs';
@@ -129,7 +132,12 @@ export function createShipper(deps: ShipperDeps): Shipper {
     });
     if (!moved) return;
     deps.logger.warn({ batchId: batch.id, failure, title: reason }, 'batch not shipped');
-    if (card) raise(deps.inbox, batch.projectId, card);
+    // A later ship of the batch that succeeds makes the card stale.
+    if (card)
+      raise(deps.inbox, batch.projectId, {
+        ...card,
+        resolvesWhen: { event: 'batch_shipped', batchId: batch.id },
+      });
   }
 
   /**
@@ -147,11 +155,21 @@ export function createShipper(deps: ShipperDeps): Shipper {
 
   /**
    * After a batch ends, in its project's ship queue: a worktree batch's worktree goes, and a shared
-   * batch's checkout is switched back to where the cut found it.
+   * batch's checkout is switched back to where the cut found it and its branch settled, which a
+   * worktree batch's removal does itself.
    */
   async function afterEnd(batchId: BatchId, worktreePath: string | null): Promise<void> {
-    if (worktreePath !== null) await retire(batchId);
-    else await returnCheckout(deps, batchId);
+    if (worktreePath !== null) {
+      await retire(batchId);
+      return;
+    }
+    await returnCheckout(deps, batchId);
+    await settleBranch(deps, batchId).catch((error: unknown) => {
+      deps.logger.warn(
+        { batchId, err: error instanceof Error ? error.message : String(error) },
+        'batch branch not settled',
+      );
+    });
   }
 
   /**
@@ -219,7 +237,15 @@ export function createShipper(deps: ShipperDeps): Shipper {
       }),
     );
     // Shutdown killed the gate: record nothing; the batch stays SHIPPING and recovery re-runs it.
-    return result.aborted ? null : result;
+    if (result.aborted) return null;
+    // A host the sandbox blocked is the builder's to allow; the card names it and the gate's tail says so.
+    raiseGateHostCards(deps, {
+      projectId: project.id,
+      run: BlockedRun.Gate,
+      command: gateCommand,
+      hosts: result.blockedHosts,
+    });
+    return result;
   }
 
   /**
@@ -561,6 +587,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
         }),
       );
       deps.logger.info({ batchId, branch, prUrl }, 'batch shipped');
+      resolveShipCards(db, deps.inbox, getBatch(db, batchId));
       await afterEnd(batchId, worktreePath);
     } catch (error) {
       // Shutdown: leave SHIPPING; recovery re-runs from step 0.

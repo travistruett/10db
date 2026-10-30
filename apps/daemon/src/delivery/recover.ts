@@ -15,8 +15,10 @@ import type { StateStore } from '../events';
 import { existsAsEntry, WorktreeNotOursError, worktreePinKey, type Git } from '../git';
 import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
+import { listStrayBranches, settleAbandonedBranches } from './branch-sweep';
 import { batchCheckout } from './checkout';
-import { startCards, worktreeCards, wrongBranchCard, type Card } from './cards';
+import { forTasks, startCards, worktreeCards, wrongBranchCard, type Card } from './cards';
+import { cuttingTasks, forgetCuttingTasks } from './cutting-tasks';
 import { returnCheckout } from './checkout-return';
 import { raise, type DeliveryContext } from './context';
 import type { Shipper } from './ship';
@@ -98,15 +100,21 @@ export async function recoverBatches(deps: {
   // 1. CUTTING rows: what git lists at the worktree path goes; an unlisted directory only when empty.
   for (const batch of listBatches(db, { states: [BatchState.Cutting] })) {
     const left = deps.worktrees ? await removeCutWorktree(deps.worktrees.root, batch) : null;
+    // Read before the delete, which detaches the batch's workstreams.
+    const taskIds = cuttingTasks(db, batch.id);
     deps.state.write((w) => {
       deleteCuttingBatch(w, batch.id, 'the daemon restarted while cutting the branch');
       deleteAppSetting(w, worktreePinKey(batch.id));
+      forgetCuttingTasks(w, batch.id);
     });
-    // The API answered 202 for its tasks; say they didn't start, or what was left at the path.
+    // The API answered 202 for its tasks; say they didn't start (a later start of them closes the
+    // card), or what was left at the path, which only moving it settles.
     raise(
       deps.inbox,
       batch.projectId,
-      left === null ? startCards.cutInterrupted(batch) : worktreeCards.leftBehind(batch, left),
+      left === null
+        ? forTasks(startCards.cutInterrupted(batch), taskIds)
+        : worktreeCards.leftBehind(batch, left),
     );
     report.deleted.push(batch.id);
   }
@@ -188,6 +196,15 @@ export async function recoverBatches(deps: {
         logger: deps.logger,
       })),
     );
+  }
+
+  // 6b. Abandoned batches whose worktree is gone but whose branch was never settled get their branch
+  // deleted or offered, after step 5 retired what it could. Then one card for the 10db branches no
+  // batch names. The branches of merged pull requests go in the pull request watch's first round,
+  // which reads gh.
+  if (deps.worktrees) {
+    await settleAbandonedBranches(deps.worktrees.ctx);
+    await listStrayBranches(deps.worktrees.ctx);
   }
 
   // 7. OPEN batches whose work all settled ship.

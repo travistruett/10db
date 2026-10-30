@@ -31,6 +31,10 @@ function reseed(current: GeneralValues, seed: GeneralValues, next: GeneralValues
   return {
     name: current.name === seed.name ? next.name : current.name,
     gateCommand: current.gateCommand === seed.gateCommand ? next.gateCommand : current.gateCommand,
+    changedCheckCommand:
+      current.changedCheckCommand === seed.changedCheckCommand
+        ? next.changedCheckCommand
+        : current.changedCheckCommand,
     maxLanes: current.maxLanes === seed.maxLanes ? next.maxLanes : current.maxLanes,
     handoffPct: current.handoffPct === seed.handoffPct ? next.handoffPct : current.handoffPct,
     nudgePct: current.nudgePct === seed.nudgePct ? next.nudgePct : current.nudgePct,
@@ -159,6 +163,20 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
             error={errors.gateCommand}
             onChange={(e) => {
               set({ gateCommand: e.currentTarget.value });
+            }}
+          />
+        </SettingRow>
+        <SettingRow
+          label="Check after each step"
+          description="Optional. Runs after each step instead of the gate command; the gate command still runs before the push."
+        >
+          <TextInput
+            aria-label="Check after each step"
+            styles={MONO_INPUT}
+            value={values.changedCheckCommand}
+            error={errors.changedCheckCommand}
+            onChange={(e) => {
+              set({ changedCheckCommand: e.currentTarget.value });
             }}
           />
         </SettingRow>

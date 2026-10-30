@@ -17,6 +17,7 @@ import { DeliveryField } from './delivery-field';
 import { pullRequestBlock } from './delivery-availability';
 import { FolderField, type FolderState } from './folder-field';
 import { GateField } from './gate-field';
+import { RegistryHostsField } from './registry-hosts-field';
 import { toProjectInput } from './project-input';
 
 export interface ProjectSetup {
@@ -167,6 +168,7 @@ export function useProjectSetup(onCreated: (project: ProjectDto) => void): Proje
             />
           ) : null}
           <AreasField drafts={areas} note={areaNote} onChange={setAreas} />
+          <RegistryHostsField hosts={inspection.registryHosts} />
           <DeliveryField
             delivery={delivery}
             onDelivery={setDeliveryChoice}

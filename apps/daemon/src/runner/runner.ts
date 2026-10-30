@@ -4,8 +4,12 @@ import {
   ConflictError,
   currentStep,
   EventType,
+  FIX_ATTEMPT_LIMIT,
   InboxKind,
+  parseFindings,
   PermissionChoice,
+  REVIEW_CARD_DETAIL,
+  REVIEW_ROLES,
   StepRole,
   StepStatus,
   ToolAccess,
@@ -21,6 +25,7 @@ import {
   type NextAction,
   type ProjectDto,
   type ProjectId,
+  type ReviewCardDetail,
   type SessionId,
   type WorkstreamId,
   type WorkstreamStep,
@@ -43,7 +48,6 @@ import {
   handoffForSession,
   insertDeviation,
   insertEvidence,
-  insertInboxItem,
   insertSession,
   insertSource,
   latestHandoffForStep,
@@ -106,6 +110,7 @@ import type { Git } from '../git';
 import { judgeToolUse, type ProtectedPath } from '../guard';
 import {
   createPermissionBroker,
+  raiseGateHostCards,
   requestMcpApproval,
   type InboxService,
   type WaitObserver,
@@ -132,16 +137,18 @@ import {
   type RepoMcp,
   type SessionAdapter,
   type SessionHandle,
+  type TurnResult,
 } from '../sessions';
 import {
   advanceSteps,
+  countSendBack,
   failStep,
   moveAfter,
   sendBackSteps,
   sendBackTarget,
   type StepEntry,
 } from '../team';
-import type { GateRequest, GateResult, GateRunner } from '../verify';
+import { BlockedRun, type GateRequest, type GateResult, type GateRunner } from '../verify';
 import { findClaimed } from '../watcher';
 import type { LiveSessions } from './live-sessions';
 import { checkedCommits, raiseBuilderCheck, waitsForCheck } from './builder-check';
@@ -167,7 +174,7 @@ export interface RunnerLimits {
 
 export const DEFAULT_RUNNER_LIMITS: RunnerLimits = {
   maxRecoveryAttempts: 3,
-  maxFixAttempts: 3,
+  maxFixAttempts: FIX_ATTEMPT_LIMIT,
   gateTimeoutMs: 30 * 60_000,
   // One at a time: a gate runs a whole test suite, and several at once overload the machine.
   gateSlots: 1,
@@ -245,7 +252,12 @@ type Outcome =
       /** The project moved while the lane waited for its start slot. */
       readonly kind: 'moved';
     }
-  | { readonly kind: 'step_done'; readonly withoutHandoff: boolean }
+  | {
+      readonly kind: 'step_done';
+      readonly withoutHandoff: boolean;
+      /** How the session ended, in a plain clause: what a step that records no result is failed with. */
+      readonly ending: string;
+    }
   | {
       readonly kind: 'parked';
       readonly inboxId: InboxItemId;
@@ -373,6 +385,10 @@ interface SessionState {
   firmSent: boolean;
   /** A read-only step that ended its turn without a result is asked once. */
   resultNudged: boolean;
+  /** How the session's last turn ended; null before any turn did. */
+  lastTurn: TurnResult | null;
+  /** The share of its context window the session last reported using. */
+  contextPct: number | null;
   parkedFor: InboxItemId | null;
   /**
    * The cards the session is waiting on, oldest first, with how many waits each has: a folded card can
@@ -385,6 +401,30 @@ interface SessionState {
   outcome: Outcome | null;
 }
 
+/**
+ * How a session ended, as one plain clause: its last turn (normal, at the turn limit, or an error) and
+ * the share of its context it had used. A session that gave no verdict is failed with this, so the card
+ * says whether a retry can help.
+ */
+function describeEnding(st: Pick<SessionState, 'lastTurn' | 'contextPct'>): string {
+  const how =
+    st.lastTurn === null
+      ? 'its session closed before any turn finished'
+      : st.lastTurn === 'max_turns'
+        ? 'its last turn stopped at the turn limit'
+        : st.lastTurn === 'error'
+          ? 'its last turn ended with an error'
+          : 'its last turn ended normally';
+  const context =
+    st.contextPct === null
+      ? ''
+      : `, with ${String(Math.round(st.contextPct))}% of its context used`;
+  return `${how}${context}.`;
+}
+
+/** A review that ends without a verdict is rerun once by itself; a second such ending fails the task. */
+const NO_VERDICT_ENDINGS_ALLOWED = 2;
+
 /** Reads the stop reason afresh: a stop can land at any await, which narrowing cannot see. */
 function stopRequested(ctl: { readonly stopReason: StopReason | null }): StopReason | null {
   return ctl.stopReason;
@@ -392,7 +432,15 @@ function stopRequested(ctl: { readonly stopReason: StopReason | null }): StopRea
 
 /** A gate stopped before it started, while it waited for its batch's turn. */
 function stoppedWaiting(logPath: string): GateResult {
-  return { exitCode: 130, durationMs: 0, tail: '', logPath, timedOut: false, aborted: true };
+  return {
+    exitCode: 130,
+    durationMs: 0,
+    tail: '',
+    logPath,
+    timedOut: false,
+    aborted: true,
+    blockedHosts: [],
+  };
 }
 
 /** The most of a gate's output its evidence keeps, a note on its base included. */
@@ -490,22 +538,32 @@ export function createRunner(opts: RunnerOptions): Runner {
     clearLease(ctx, id);
   }
 
-  function flagFailed(row: WorkstreamRow, reason: string): void {
+  /** The failed card; `review` is the reviewer's rejection that ended the workstream, when one did. */
+  function flagFailed(row: WorkstreamRow, reason: string, review?: ReviewCardDetail): void {
+    const batch = batchCardFields(row);
     opts.inbox.flag({
       projectId: row.projectId,
       workstreamId: row.id,
       title: `Workstream failed: ${getTask(db, row.taskId).title}`,
       body: reason,
-      ...batchCardFields(row),
+      ...(batch ? { options: batch.options } : {}),
+      ...(batch || review
+        ? { detail: { ...batch?.detail, ...(review ? { [REVIEW_CARD_DETAIL]: review } : {}) } }
+        : {}),
     });
   }
 
-  function fail(id: WorkstreamId, fence: number | null, reason: string): void {
+  function fail(
+    id: WorkstreamId,
+    fence: number | null,
+    reason: string,
+    review?: ReviewCardDetail,
+  ): void {
     const row = getWorkstreamRow(db, id);
     opts.state.write((ctx) => {
       failIn(ctx, id, fence, row, reason);
     });
-    flagFailed(row, reason);
+    flagFailed(row, reason, review);
   }
 
   /** A step entered now; its floor is the sessions this workstream has run so far. */
@@ -541,7 +599,11 @@ export function createRunner(opts: RunnerOptions): Runner {
     return { step: result.step, moved: result.escalated };
   }
 
-  /** DONE: the task is done and its claims and lease are released. */
+  /**
+   * DONE: the task is done and its claims and lease are released. No review card is raised: the only
+   * answer one could offer is "looks good", which does nothing. The builder reviews the pull request,
+   * and the Board's In review column shows the task until it merges.
+   */
   function markDone(
     ctx: WriteContext,
     id: WorkstreamId,
@@ -555,36 +617,12 @@ export function createRunner(opts: RunnerOptions): Runner {
     clearLease(ctx, id);
   }
 
-  /** DONE after a gate (or a read-only approval) and the builder gets a review card (spec §7). */
-  function completeInTx(
-    ctx: WriteContext,
-    id: WorkstreamId,
-    fence: number,
-    row: WorkstreamRow,
-    commitShas: readonly string[],
-    reason: string,
-  ): void {
-    markDone(ctx, id, fence, row, reason);
-    insertInboxItem(ctx, {
-      projectId: row.projectId,
-      kind: 'review',
-      title: `Review: ${getTask(ctx.tx, row.taskId).title}`,
-      body: `Gate passed with ${String(commitShas.length)} commit(s).`,
-      options: [{ label: 'accept', description: 'Looks good' }],
-      recommendation: null,
-      category: 'product',
-      urgency: 'low',
-      detail: { workstreamId: id, commits: [...commitShas] },
-      foldKey: null,
-      targets: [],
-    });
-  }
-
   /** After a read-only step's session: the next step in this lane, DONE, a rework, or a failure. */
   async function finishReadOnlyStep(
     id: WorkstreamId,
     ctl: Control,
     row: WorkstreamRow,
+    ending: string,
   ): Promise<'next' | 'stop'> {
     const step = currentStep(row);
     // A sent-back step still holds its earlier result; only one a session of this step recorded counts.
@@ -598,9 +636,27 @@ export function createRunner(opts: RunnerOptions): Runner {
           row.stepIndex,
         );
     switch (move.kind) {
-      case 'no_result':
-        fail(id, ctl.fence, `The ${step.role} step ended without calling complete_step`);
+      case 'no_result': {
+        // Sessions of this step since it started, or since the builder last retried it, that ended
+        // their turn with no verdict: this one included.
+        const floor = Math.max(step.sessionFloor, step.retryFloor ?? 0);
+        const noVerdict = listSessions(db, id).filter(
+          (s) => s.sequence > floor && s.exitReason === 'step_done',
+        ).length;
+        if (REVIEW_ROLES.includes(step.role) && noVerdict < NO_VERDICT_ENDINGS_ALLOWED) {
+          // The first such ending is no judgment of the work: the review runs again, from its handoff when it wrote one.
+          opts.logger.warn(
+            { workstreamId: id, role: step.role, ending },
+            'review ended without a verdict; running it once more',
+          );
+          opts.state.write((ctx) => {
+            patchWorkstream(ctx, id, ctl.fence, { nextAction: freshAction(ctx.tx, id) });
+          });
+          return 'next';
+        }
+        fail(id, ctl.fence, `The ${step.role} step ended without calling complete_step: ${ending}`);
         return 'stop';
+      }
       case 'done': {
         if (getProject(db, row.projectId).gateCommand === null) {
           // Nothing checked a read-only approval either: the builder checks what the steps produced.
@@ -618,9 +674,6 @@ export function createRunner(opts: RunnerOptions): Runner {
           });
           return 'stop';
         }
-        const lastGate = listEvidence(db, id)
-          .filter((e) => e.kind === 'gate' && e.exitCode === 0)
-          .at(-1);
         opts.state.write((ctx) => {
           countFinished(ctx, step);
           patchWorkstream(ctx, id, ctl.fence, {
@@ -632,14 +685,7 @@ export function createRunner(opts: RunnerOptions): Runner {
             fence: ctl.fence,
             reason: 'steps complete',
           });
-          completeInTx(
-            ctx,
-            id,
-            ctl.fence,
-            row,
-            lastGate?.commitShas ?? [],
-            `${step.role} approved`,
-          );
+          markDone(ctx, id, ctl.fence, row, `${step.role} approved`);
         });
         return 'stop';
       }
@@ -667,10 +713,20 @@ export function createRunner(opts: RunnerOptions): Runner {
       case 'send_back': {
         const attempt = row.attempt + 1;
         if (attempt > opts.limits.maxFixAttempts) {
+          const result = step.result;
           fail(
             id,
             ctl.fence,
             `The ${step.role} step rejected the work and the retry limit (${String(opts.limits.maxFixAttempts)}) is used up`,
+            result
+              ? {
+                  role: step.role,
+                  personaName: step.personaName,
+                  at: result.at,
+                  findings: parseFindings(result.summary),
+                  summary: result.summary,
+                }
+              : undefined,
           );
           return 'stop';
         }
@@ -682,7 +738,10 @@ export function createRunner(opts: RunnerOptions): Runner {
             recordProfileOutcome(ctx, target.profileId, { firstPass: false, escalated: true });
           patchWorkstream(ctx, id, ctl.fence, {
             attempt,
-            steps: sendBackSteps(row.steps, row.stepIndex, move.to, up.step, entryFor(ctx, id)),
+            steps: countSendBack(
+              sendBackSteps(row.steps, row.stepIndex, move.to, up.step, entryFor(ctx, id)),
+              row.stepIndex,
+            ),
             stepIndex: move.to,
             nextAction: { kind: 'revise', reviewStep: row.stepIndex },
             model: up.step.model,
@@ -1155,6 +1214,8 @@ export function createRunner(opts: RunnerOptions): Runner {
       awaitingBriefingBaseline: briefed && inheritedBaselinePct === null,
       firmSent: false,
       resultNudged: false,
+      lastTurn: null,
+      contextPct: null,
       parkedFor: null,
       waitingOn: new Map(),
       waitTimer: null,
@@ -1335,6 +1396,7 @@ export function createRunner(opts: RunnerOptions): Runner {
             });
             break;
           case 'context': {
+            st.contextPct = event.percentage;
             if (st.awaitingBriefingBaseline) {
               st.awaitingBriefingBaseline = false;
               st.briefingBaselinePct = event.percentage;
@@ -1410,6 +1472,7 @@ export function createRunner(opts: RunnerOptions): Runner {
             }
             break;
           case 'turn_complete': {
+            st.lastTurn = event.result ?? 'success';
             opts.state.write((ctx) => {
               updateSessionUsage(ctx, session.id, {
                 inputTokens: event.inputTokens,
@@ -1435,7 +1498,11 @@ export function createRunner(opts: RunnerOptions): Runner {
               st.resultNudged = true;
               handle.send(RESULT_NUDGE);
             } else {
-              st.outcome = { kind: 'step_done', withoutHandoff: st.handoffRequested };
+              st.outcome = {
+                kind: 'step_done',
+                withoutHandoff: st.handoffRequested,
+                ending: describeEnding(st),
+              };
               await handle.stop();
             }
             break;
@@ -1509,7 +1576,11 @@ export function createRunner(opts: RunnerOptions): Runner {
                   };
                   break;
                 case SessionEndReason.Completed:
-                  st.outcome = { kind: 'step_done', withoutHandoff: st.handoffRequested };
+                  st.outcome = {
+                    kind: 'step_done',
+                    withoutHandoff: st.handoffRequested,
+                    ending: describeEnding(st),
+                  };
                   break;
               }
             }
@@ -1728,7 +1799,10 @@ export function createRunner(opts: RunnerOptions): Runner {
       sendBackUncommitted(id, ctl, row, uncommitted);
       return;
     }
-    const gateCommand = project.gateCommand;
+    // A project with a changed-packages check has each step checked by it; the ship gate runs the
+    // full gate command before the push. Without a gate command the builder checks, as ever.
+    const gateCommand =
+      project.gateCommand === null ? null : (project.changedCheckCommand ?? project.gateCommand);
     if (gateCommand === null) {
       await finishWithoutGate(id, ctl, row, checkout);
       return;
@@ -1809,6 +1883,13 @@ export function createRunner(opts: RunnerOptions): Runner {
     }
     // Shutdown killed the gate: record nothing. The workstream stays VERIFYING and recovery re-runs it.
     if (result.aborted) return;
+    // A host the sandbox blocked is the builder's to allow; the card names it and the gate's evidence says so.
+    raiseGateHostCards(opts, {
+      projectId: project.id,
+      run: BlockedRun.Gate,
+      command: gateCommand,
+      hosts: result.blockedHosts,
+    });
     const head = await opts.git.head(checkout);
     const commitShas = await opts.git.commitsSince(checkout, row.baseHead ?? head);
     // A cancel that landed while git was read must not be overwritten by the verdict.
@@ -1856,7 +1937,7 @@ export function createRunner(opts: RunnerOptions): Runner {
           patchWorkstream(ctx, id, ctl.fence, {
             steps: advanceSteps(row.steps, row.stepIndex, -1, entryFor(ctx, id)),
           });
-        completeInTx(ctx, id, ctl.fence, row, commitShas, 'gate passed');
+        markDone(ctx, id, ctl.fence, row, 'gate passed');
       });
       return;
     }
@@ -1945,7 +2026,7 @@ export function createRunner(opts: RunnerOptions): Runner {
             });
           }
           if (readOnly) {
-            if ((await finishReadOnlyStep(id, ctl, finished)) === 'next') continue;
+            if ((await finishReadOnlyStep(id, ctl, finished, outcome.ending)) === 'next') continue;
             return;
           }
           if (outcome.withoutHandoff) {

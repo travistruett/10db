@@ -4,6 +4,7 @@ import { dirname } from 'node:path';
 import type { PermissionRuleDto, ProjectDto } from '@10db/contracts';
 import type { Logger } from '../log';
 import { atPriority } from '../priority';
+import { BlockedRun, blockedHostsNote, createBlockedHostFilter } from './blocked-hosts';
 import {
   DOCKER_REFUSAL,
   SandboxProfileError,
@@ -19,6 +20,12 @@ export interface GateResult {
   readonly logPath: string;
   readonly timedOut: boolean;
   readonly aborted: boolean;
+  /**
+   * The hosts the sandbox refused a failed gate, lower case, each once. Empty for a gate that passed,
+   * was stopped, or ran with no sandbox; when it is not, the tail ends saying the gate (or, for a
+   * package install, the install) was blocked.
+   */
+  readonly blockedHosts: readonly string[];
 }
 
 export interface GateRequest {
@@ -41,7 +48,10 @@ export interface GateRequest {
    * gates ahead of it. Never called for a gate that starts at once.
    */
   readonly onWaiting?: (ahead: number) => void;
-  /** True for a run that installs packages with pnpm; the sandbox opens pnpm's lock directory for it. */
+  /**
+   * True for 10db's install of a worktree's packages with pnpm: the sandbox opens pnpm's lock
+   * directory for it, and its output calls it the install, not the gate, when a host was blocked.
+   */
   readonly packageInstall?: boolean;
   /**
    * Runs once the gate may start, after its slot and before its sandbox or command: work that must
@@ -102,6 +112,7 @@ function unstarted(logPath: string, message: string): GateResult {
     tail: text,
     logPath,
     timedOut: false,
+    blockedHosts: [],
     aborted: false,
   };
 }
@@ -133,8 +144,19 @@ function runGroup(
     log.write(chunk);
     tail = (tail + chunk.toString()).slice(-TAIL_BYTES);
   };
+  // Only a sandboxed gate has srt's proxy to refuse a host; its debug log shares the command's stderr.
+  const filter =
+    sandboxed === null ? null : createBlockedHostFilter({ commandLines: sandboxed.commandLines });
   child.stdout.on('data', onData);
-  child.stderr.on('data', onData);
+  if (filter === null) {
+    child.stderr.on('data', onData);
+  } else {
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk: string) => {
+      const kept = filter.push(chunk);
+      if (kept !== '') onData(kept);
+    });
+  }
   const killGroup = (): void => {
     try {
       if (child.pid !== undefined) process.kill(-child.pid, 'SIGKILL');
@@ -170,12 +192,26 @@ function runGroup(
       signal?.removeEventListener('abort', onAbort);
       // Whatever the gate left running in its group must not outlive its verdict.
       killGroup();
+      const rest = filter?.end() ?? '';
+      if (rest !== '') onData(rest);
+      // A gate that died by a signal has no code, and fails.
+      const exitCode = timedOut ? TIMEOUT_EXIT : aborted ? ABORT_EXIT : (code ?? 1);
+      // A gate that passed, timed out or was stopped has nothing to ask about.
+      const blockedHosts =
+        exitCode === 0 || timedOut || aborted ? [] : [...(filter?.blocked() ?? [])];
       // Said last, so the evidence keeps it however much the gate printed before.
       if (sandboxed?.dockerRefused()) onData(`\n${DOCKER_REFUSAL}\n`);
+      if (blockedHosts.length > 0)
+        onData(
+          blockedHostsNote(
+            blockedHosts,
+            request.packageInstall === true ? BlockedRun.Install : BlockedRun.Gate,
+          ),
+        );
       endLog(() => {
         resolve({
-          // A gate that died by a signal has no code, and fails.
-          exitCode: timedOut ? TIMEOUT_EXIT : aborted ? ABORT_EXIT : (code ?? 1),
+          blockedHosts,
+          exitCode,
           durationMs: Math.round(performance.now() - started),
           tail,
           logPath,
@@ -212,6 +248,7 @@ export function createGateRunner(options: GateRunnerOptions): GateRunner {
           tail: '',
           logPath: request.logPath,
           timedOut: false,
+          blockedHosts: [],
           aborted: true,
         };
       if (options.sandbox === null) return runGroup(unsandboxed(request), request, null);

@@ -84,8 +84,13 @@ export function createPrWatch(input: {
   readonly ctx: DeliveryContext;
   readonly clock: Clock;
   readonly intervalMs?: number;
+  /**
+   * Runs at the end of every round, also one that read nothing: the work that follows what the round
+   * learned, such as deleting the branch of a pull request that merged. A rejection is logged.
+   */
+  readonly afterRound?: (signal: AbortSignal) => Promise<void>;
 }): PrWatch {
-  const { ctx, clock } = input;
+  const { ctx, clock, afterRound } = input;
   const intervalMs = input.intervalMs ?? PR_WATCH_INTERVAL_MS;
   const logger = ctx.logger.child({ module: 'pr-watch' });
   const controller = new AbortController();
@@ -257,6 +262,7 @@ export function createPrWatch(input: {
     current = (async () => {
       try {
         await round(controller.signal);
+        await afterRound?.(controller.signal);
       } catch (error) {
         logger.error({ err: detailOf(error) }, 'pull request watch round failed');
       }
