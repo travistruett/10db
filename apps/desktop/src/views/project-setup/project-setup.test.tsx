@@ -302,7 +302,7 @@ describe('useProjectSetup', () => {
     fireEvent.click(screen.getByRole('button', { name: /^npm test/ }));
     expect(gate.value).toBe('npm test');
     fireEvent.mouseEnter(screen.getByRole('button', { name: /^make gate/ }));
-    expect(await screen.findByText('from Makefile', {}, { timeout: 2000 })).toBeTruthy();
+    expect(await screen.findByText('from Makefile')).toBeTruthy();
   });
 
   it('an empty gate is allowed, says so, and is sent as null', async () => {

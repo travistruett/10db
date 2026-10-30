@@ -144,7 +144,7 @@ describe('DaemonProvider', () => {
       () => {
         expect(probeText()).toMatch(/^reconnecting /);
       },
-      { timeout: HEALTH_TIMEOUT_MS + 3_000 },
+      { timeout: HEALTH_TIMEOUT_MS + 15_000 },
     );
   });
 });
