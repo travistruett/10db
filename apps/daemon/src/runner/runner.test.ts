@@ -484,6 +484,42 @@ describe('runner', () => {
     await waitFor(() => ws(workstream.id).state === 'WAITING_HUMAN');
   });
 
+  it('tells every later session of the workstream what the builder denied, with the note', async () => {
+    engine = await createTestEngine(
+      {
+        Alpha: [
+          [
+            shell('pnpm lint'),
+            { do: 'context', percentage: 75 },
+            { do: 'await_message', contains: 'write_handoff' },
+            { do: 'context', percentage: 88 },
+            { do: 'await_message', contains: 'almost full' },
+            {
+              do: 'mcp',
+              tool: 'write_handoff',
+              args: handoffArgs('op-handoff-deny', 'Write the second file'),
+            },
+            turn,
+          ],
+          [write('src/api/b.txt'), commit('op-deny-002', ['src/api/b.txt']), turn],
+        ],
+      },
+      { allowedCommands: ['pnpm exec prettier'] },
+    );
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    const card = await waitFor(openCard);
+    engine.inbox.answer(card.id, { choice: 'deny', note: 'use pnpm exec eslint instead' });
+    await engine.runner.idle();
+
+    expect(ws(workstream.id).state).toBe('DONE');
+    const later = engine.adapter.prompts[1]?.prompt ?? '';
+    expect(later).toContain('The builder denied these calls in this workstream');
+    expect(later).toContain('Bash: pnpm lint');
+    expect(later).toContain('Note from the builder: use pnpm exec eslint instead');
+    expect(engine.adapter.prompts[0]?.prompt).not.toContain('The builder denied');
+  });
+
   it('runs the gate in the session environment, never the daemon process environment', async () => {
     process.env['TENDB_PROBE'] = 'leaked';
     try {

@@ -53,6 +53,7 @@ import {
   listSessions,
   listEvidence,
   markSessionStarted,
+  deniedPermissionsForWorkstream,
   openItemsForWorkstream,
   patchWorkstream,
   recordProfileOutcome,
@@ -294,7 +295,8 @@ const PERMISSION_ANSWER_TEXT: Readonly<Record<string, string>> = {
     'allowed once. Retry the call now; 10db lets this exact call through once.',
   [PermissionChoice.AllowWorkstream]: 'allowed for the rest of this workstream. Retry the call.',
   [PermissionChoice.AllowProject]: 'always allowed in this project. Retry the call.',
-  [PermissionChoice.Deny]: 'denied. Do not retry it; find another way or ask with ask_human.',
+  [PermissionChoice.Deny]:
+    'denied. The denial covers any equivalent: do not retry it, or a variant of it in another form; work without it, or ask with ask_human.',
 };
 
 /** An allow choice with no stored rule behind it (a one-time allow, or a call with no safe rule to store) lets the first identical call through. */
@@ -994,6 +996,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     const evidence = evidenceId ? getEvidence(db, evidenceId) : null;
     const prompt = buildSessionPrompt({
       sandboxed: Boolean(opts.laneSandbox),
+      denials: deniedPermissionsForWorkstream(db, id),
       task,
       claims: claims(),
       action,
@@ -1385,7 +1388,12 @@ export function createRunner(opts: RunnerOptions): Runner {
                 sourceId,
               });
             });
-            handle.send(compactionReinjection(buildContextPack(db, getWorkstream(db, id))));
+            handle.send(
+              compactionReinjection(
+                buildContextPack(db, getWorkstream(db, id)),
+                deniedPermissionsForWorkstream(db, id),
+              ),
+            );
             break;
           case 'rate_limit':
             // Logged without any identity: what a Max plan reports here is not yet verified.

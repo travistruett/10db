@@ -104,6 +104,42 @@ describe('buildSessionPrompt', () => {
     expect(prompt).toContain('commit tool');
   });
 
+  describe('denials', () => {
+    const denials = [
+      { toolName: 'Bash', summary: 'yes > /dev/null &', note: 'no CPU load, please' },
+      { toolName: 'SandboxNetworkAccess', summary: 'example.com', note: null },
+    ];
+
+    it.each<NextAction>([
+      { kind: 'start' },
+      { kind: 'resume', providerSessionId: 'p-1', reason: 'daemon restart' },
+      { kind: 'continue_from_handoff', handoffId: mintId('Handoff') },
+    ])('tells every kind of session ($kind) what the builder denied, with the note', (action) => {
+      const prompt = buildSessionPrompt({ ...base, action, denials });
+      expect(prompt).toContain('The builder denied these calls in this workstream');
+      expect(prompt).toContain('Bash: yes > /dev/null &');
+      expect(prompt).toContain('Note from the builder: no CPU load, please');
+      expect(prompt).toContain('SandboxNetworkAccess: example.com');
+      expect(prompt).toMatch(/equivalent/);
+    });
+
+    it('says nothing when the builder denied nothing', () => {
+      expect(buildSessionPrompt({ ...base, action: { kind: 'start' } })).not.toContain(
+        'The builder denied',
+      );
+      expect(buildSessionPrompt({ ...base, action: { kind: 'start' }, denials: [] })).not.toContain(
+        'The builder denied',
+      );
+    });
+
+    it('repeats them after a compaction', () => {
+      const text = compactionReinjection(packWithDecision, denials);
+      expect(text).toContain('Bash: yes > /dev/null &');
+      expect(text).toContain('no CPU load, please');
+      expect(compactionReinjection(packWithDecision)).not.toContain('denied');
+    });
+  });
+
   it('carries the handoff when continuing', () => {
     const prompt = buildSessionPrompt({
       ...base,
