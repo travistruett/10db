@@ -21,19 +21,34 @@ _Built:_ the daemon reads every shipped batch's pull request and keeps what it r
   `unknown`, unless another check failed (failing) or is still running (pending). The pull request's state is
   still read, the round goes on, and no gh card is raised, since gh answered. Output that is not JSON, a rollup
   that is not a list, or a state 10db doesn't know is a failed read, so the status becomes unknown rather than
-  wrong. Only https links are kept.
+  wrong. Only https links are kept. GitHub's answer that the pull request isn't there for gh's account counts
+  as no pull request. gh looks a URL up by number and prints GitHub's GraphQL error as it came:
+  `Could not resolve to a PullRequest`, or `Could not resolve to a Repository` for a repository that is gone
+  or closed to the account (`no pull requests found` is only its branch lookup's wording). The status becomes
+  unknown with that reason, and no gh card is raised, since gh answered.
 - **When.** `delivery/pr-watch.ts` polls every 2 minutes on the injected clock, once at startup and right
   after a batch becomes SHIPPED, one gh call at a time. A gh call has a 2 minute timeout, so every answer
   arrives within the 5 minutes the task asks for. It runs outside the delivery job queues: a ship or a cut
-  never waits behind a poll, and a slow gh stops nothing else. Any error ends the round and marks the
-  batch and the rest of the round unknown, so an offline round costs one timeout, not one per pull request.
+  never waits behind a poll, and a slow gh stops nothing else.
+- **A failed read.** A failure of gh itself ends the round and marks its pull request and the rest of the
+  round unknown with that failure: gh signed out, not installed, no answer within the timeout, or GitHub out
+  of reach (`unreachable`: gh's line for a DNS failure, or Go's network error, such as a `dial tcp` that
+  timed out, `connection refused` or a TLS handshake timeout, any of which can take nearly as long as the
+  timeout). Every later read would fail the same way or wait as long, so offline costs one wait per round, not
+  one per pull request. Any other failure (`failed`: an error GitHub answered with, such as an organization's
+  SAML enforcement or a 502) marks only its own pull request unknown, with its own reason, and the round goes
+  on: one pull request gh can't read, read first because it is the oldest, never keeps the others unread. The
+  next round starts after the pull request whose failure ended the last one and reads it last, so one whose
+  read always times out holds up no other either.
 - **Which batches.** SHIPPED, with a pull request url, whose state was never read or reads `open` or
   `unknown`. **Merged and closed are final:** a pull request the builder reopens is not followed again.
-  After the upgrade every older SHIPPED batch is read once, and a pull request that was closed unmerged raises
-  its card then. That is true, and it is the only time a card is late.
+  After the upgrade every older SHIPPED batch is read once, and a pull request that was closed unmerged, or
+  is open with failing checks, raises its card then. That is true, and it is the only time a card is late.
 - **Upgrade note, for the release notes.** The first poll after the upgrade reads every older SHIPPED batch
-  at once, and each one whose pull request was closed without merging raises its closed card then. A builder
-  with many such batches sees that many cards together, one per pull request; each is dismissed once read.
+  at once, and nothing was stored for any of them before, so each read is a transition. Each one whose pull
+  request was closed without merging raises its closed card, and each open one whose checks fail raises its
+  failing-checks card. A builder with many such batches sees that many cards together, one per pull request;
+  each is dismissed once read.
 - **Cards fire only on a stored transition,** so a restart, or a card the builder dismissed, never raises
   another:
   - checks become failing: one card naming the first failing check (and "and N more"), with its link first
@@ -49,21 +64,31 @@ _Built:_ the daemon reads every shipped batch's pull request and keeps what it r
     local branch is kept (`pr-closed:<batch>`). Shipped tasks are done and can't start again, so it offers
     what works: reopen and merge the pull request on GitHub, which 10db doesn't follow, then dismiss the card,
     or dismiss it at once if the work isn't wanted;
-  - a status becomes unknown because gh failed: **one card per daemon** (`pr-watch-gh`, raised in the first
-    affected project, since fold keys are per project), saying what to do for signed out, not installed or
-    any other failure, and that the status stays unknown and nothing else is affected. While it is open, a
-    round that fails rewrites its title and body to say how gh fails now (signed out after a timeout, say);
-    its detail stays. It is withdrawn after the next round in which every call gh was asked answered; a round
-    that half answers leaves it open. The open-card check, the rewrite and the withdraw look in every project,
-    not only those the round read: the card's project can drop out of the watch (its last pull request
-    merged) while the card is still open.
+  - gh is down: **one card per daemon** (`pr-watch-gh`), raised when a failure of gh itself ended a round, or
+    when no read in a round answered (each failed on its own, as in a GitHub outage), in the project of the
+    first pull request the round turned unknown, since fold keys are per project. It says what to do for
+    signed out, not installed or any other failure, and that the status stays unknown and nothing else is
+    affected. Its detail names that batch and pull request but has no `link`: no page there says why gh
+    fails. While it is open, a round in which gh is down rewrites its title and body to say how gh fails now
+    (signed out after a timeout, say); its detail stays. It is withdrawn after a round gh answered in which gh
+    itself didn't fail, even if one pull request's read failed on its own: that one shows its own reason, and
+    gh works. The open-card check, the rewrite and the withdraw look in every project, not only those the
+    round read: the card's project can drop out of the watch (its last pull request merged) while the card is
+    still open.
+- **One write.** A read's status and the card its change raises, rewrites or withdraws commit in one
+  transaction (`raiseIn`, `rewriteIn` and `withdrawIn` in `delivery/context.ts`, over the inbox's own writes,
+  `flagCard`, `rewordCard` and `withdrawCard`), so a crash or a failed write never stores a transition
+  without its card: the next read finds nothing stored and raises it then. The unknown statuses a round's
+  failed reads leave are stored at the round's end, in the write that raises or rewrites the gh card.
 - **The desktop link.** A flag card whose `detail.link` is a github.com page shows "Open on GitHub"; those are
   the only pages the app's opener may open (`opener:allow-open-url`). A check hosted elsewhere, such as a
-  third-party CI's status, gets no button, and its address is in the card's text.
+  third-party CI's status, gets no button, and its address is in the card's text. The gh card has no link.
 - **An unknown read keeps the last known checks.** When gh can't say, `state` becomes `unknown` with its
   reason, but `checks` and `failingChecks` keep what gh last said (`unknown` only if it never said). A failed
   read is therefore not a transition: a failing-checks card the builder dismissed is not raised again when gh
-  answers after a sleep, a wake or a network flap with the same failing checks.
+  answers after a sleep, a wake or a network flap with the same failing checks. Nor does it count toward any
+  rule about checks: only a read gh answered withdraws the failing-checks card, so the two reads that find no
+  checks are two answered reads, with nothing but unknown reads between them.
 - **Every failing check counts.** The rollup does not say which checks are required, so a failing optional
   check raises the card too. This is a known gap; filtering to required checks is a follow-up.
 - **Only a change writes an event.** A read that changes the state, checks, failing checks or unknown reason
@@ -82,6 +107,13 @@ reopening tasks when a pull request closes, are follow-ups.
 One batch has one pull request, so the batch row is the natural home, and `BatchDto` already reaches the
 desktop through the project views, the batch list and `batch.updated` events. Storing the status, rather than
 asking gh when the desktop asks, makes it survive a restart and keeps the desktop working with gh offline.
-Raising a card on a stored change is what makes "one card" true across restarts. Polling beats webhooks for a
-local app that has no public address. A separate `prStatus` keeps shipping on its smaller, already-tested
-query.
+Raising a card on a stored change is what makes "one card" true across restarts, and storing the change with
+its card in one write keeps it true across a crash. Polling beats webhooks for a local app that has no public
+address. A separate `prStatus` keeps shipping on its smaller, already-tested query.
+
+Ending a round on every failure let one pull request gh couldn't read (its repository gone, an organization's
+SAML enforcement), read first because it is the oldest, keep every later pull request unknown for good, under
+a gh card that never went. Ending it on no failure would make offline cost one wait per pull request, since
+a connection that times out takes as long for each. So a failure ends the round only when it is about gh
+itself, which every later read would meet too; everything else stays with its own pull request. Telling
+"GitHub out of reach" from "GitHub answered with an error" needs gh's wording, which `github/` alone reads.
