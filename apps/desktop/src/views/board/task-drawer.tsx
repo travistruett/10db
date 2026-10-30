@@ -1,5 +1,6 @@
 import {
   isTerminal,
+  NEW_TASK_NO_CRITERIA,
   SYSTEM_COLUMN_LABEL,
   RiskTag,
   WorkspaceMode,
@@ -121,7 +122,7 @@ export function TaskDrawer({
       return;
     }
     if (lines.length === 0) {
-      setError('Add at least one acceptance criterion');
+      setError(NEW_TASK_NO_CRITERIA);
       return;
     }
     const changesLanding =

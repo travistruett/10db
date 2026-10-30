@@ -18,8 +18,15 @@ function writeAtomically(path: string, content: string, mode: number): void {
   renameSync(tmp, path);
 }
 
-/** `daemon.json` tells the UI where to connect; `ui-token` (0600) holds its bearer token. */
+/**
+ * `daemon.json` tells the UI where to connect; `ui-token` (0600) holds its bearer token.
+ *
+ * A crashed daemon leaves its `daemon.json` behind, so that goes before the new token is written:
+ * a reader that sees the new token then finds no `daemon.json`, or the new one, and never pairs
+ * the new token with the old port.
+ */
 export function writeRuntimeFiles(dataDir: string, info: RuntimeInfo, token: string): void {
+  rmSync(join(dataDir, 'daemon.json'), { force: true });
   writeAtomically(join(dataDir, 'ui-token'), token, 0o600);
   writeAtomically(join(dataDir, 'daemon.json'), `${JSON.stringify(info, null, 2)}\n`, 0o644);
 }
