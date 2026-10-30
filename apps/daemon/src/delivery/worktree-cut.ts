@@ -20,6 +20,7 @@ import { forTasks, startCards, worktreeCards, type Card } from './cards';
 import { ghCall, networkCall, raise, type DeliveryContext } from './context';
 import { unmergedDependencies } from './deps';
 import { recordInstall } from './installed-lockfile';
+import { missingLandingBranch } from './landing';
 import { resolveStartCards } from './stale-cards';
 import { seedDirs, seedWorktree } from './worktree-seed';
 
@@ -88,6 +89,11 @@ export async function cutWorktree(
       return;
     }
     try {
+      const missing = await missingLandingBranch(ctx, project, batch, signal);
+      if (missing) {
+        await refuse(missing);
+        return;
+      }
       await ctx.git.fetch(main, batch.baseBranch, networkCall(ctx, signal));
     } catch (error) {
       if (!stopped()) await refuse(startCards.fetchFailed(batch.baseBranch, error));

@@ -251,6 +251,60 @@ describe('BoardView', () => {
     expect(hrefs).toEqual(link === null ? [] : [link]);
   });
 
+  describe('where a task lands', () => {
+    /** One project with a ready task of each landing; `delivery` is the project's. */
+    function serveLandings(delivery: 'pull_request' | 'local') {
+      const project = projectViewDto({ delivery, prTitlePrefix: 'feat(app)', baseBranch: 'main' });
+      const tasks = [
+        taskDto({ projectId: project.id, title: 'Alpha', landing: { kind: 'base' } }),
+        taskDto({
+          projectId: project.id,
+          title: 'Beta',
+          landing: { kind: 'branch', branch: 'feature/x' },
+        }),
+        taskDto({ projectId: project.id, title: 'Gamma', landing: { kind: 'hold' } }),
+      ];
+      serve(
+        http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+        http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json(tasks)),
+        http.get(daemonUrl('/workstreams'), () => HttpResponse.json([])),
+      );
+    }
+
+    it('says on each card where its work will land', async () => {
+      serveLandings('pull_request');
+      renderApp('/board');
+      const lines = await screen.findAllByTestId('landing-line');
+      expect(lines.map((l) => l.textContent)).toEqual([
+        'Merges into main when checks pass',
+        'Merges into feature/x when checks pass',
+        'Held for your review: pull request against main',
+      ]);
+      // A screen reader hears it with the rest of the card.
+      expect(
+        screen.getByText(/criterion\. Merges into feature\/x when checks pass\./),
+      ).toBeTruthy();
+    });
+
+    it('says nothing on a project that commits directly', async () => {
+      serveLandings('local');
+      renderApp('/board');
+      await screen.findByRole('button', { name: 'Alpha' });
+      expect(screen.queryByTestId('landing-line')).toBeNull();
+    });
+
+    it('lets the drawer change it, starting from the task', async () => {
+      serveLandings('pull_request');
+      renderApp('/board');
+      fireEvent.click(await screen.findByRole('button', { name: 'Gamma' }));
+      const drawer = await screen.findByRole('dialog', { name: 'Task' });
+      expect(
+        within(drawer).getByRole<HTMLInputElement>('radio', { name: 'Hold for my review' }).checked,
+      ).toBe(true);
+      expect(within(drawer).getByRole('radio', { name: 'Merge into main' })).toBeTruthy();
+    });
+  });
+
   it('starts a ready task', async () => {
     const project = projectDto();
     const alpha = taskDto({

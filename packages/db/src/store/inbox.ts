@@ -154,6 +154,7 @@ export function updateInboxItem(
   id: InboxItemId,
   patch: {
     readonly state?: InboxState;
+    readonly title?: string;
     readonly body?: string;
     readonly answer?: InboxAnswer;
     readonly targets?: readonly InboxTarget[];

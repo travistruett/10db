@@ -79,8 +79,13 @@ describe('createGh', () => {
       kind: 'timeout',
     },
     {
-      name: 'a failure that is not a sign-out',
+      name: 'GitHub out of reach, which is not a sign-out',
       answer: { exitCode: 1, stderr: 'dial tcp: no such host' },
+      kind: 'unreachable',
+    },
+    {
+      name: 'a failure that is not a sign-out',
+      answer: { exitCode: 1, stderr: 'HTTP 502' },
       kind: 'failed',
     },
   ])('authLogin: $name', async ({ answer, expected, kind }) => {
@@ -205,6 +210,61 @@ describe('createGh', () => {
         kind: 'failed',
         message: 'gh pr create printed no pull request URL for acme/widgets',
       });
+  });
+
+  it('asks the repository whether it lets pull requests merge by themselves', async () => {
+    const yes = scripted({ 'repo view': { exitCode: 0, stdout: '{"autoMergeAllowed":true}\n' } });
+    await expect(createGh(yes.exec).repoAllowsAutoMerge('acme/widgets', CALL)).resolves.toBe(true);
+    expect(yes.seen[0]).toEqual(['repo', 'view', 'acme/widgets', '--json', 'autoMergeAllowed']);
+    const no = scripted({ 'repo view': { exitCode: 0, stdout: '{"autoMergeAllowed":false}' } });
+    await expect(createGh(no.exec).repoAllowsAutoMerge('acme/widgets', CALL)).resolves.toBe(false);
+    const odd = scripted({ 'repo view': { exitCode: 0, stdout: '{"other":1}' } });
+    await expect(
+      createGh(odd.exec).repoAllowsAutoMerge('acme/widgets', CALL),
+    ).rejects.toMatchObject({ name: 'GhError', kind: 'failed' });
+  });
+
+  it('turns on squash auto-merge for a pull request, naming everything as its own argument', async () => {
+    const { exec, seen } = scripted({ 'pr merge': { exitCode: 0 } });
+    await createGh(exec).prAutoMerge(
+      { repo: 'acme/widgets', url: 'https://github.com/acme/widgets/pull/8' },
+      CALL,
+    );
+    expect(seen[0]).toEqual([
+      'pr',
+      'merge',
+      'https://github.com/acme/widgets/pull/8',
+      '-R',
+      'acme/widgets',
+      '--auto',
+      '--squash',
+    ]);
+  });
+
+  it.each([
+    {
+      name: 'a repository that does not allow it',
+      stderr: 'GraphQL: Auto merge is not allowed for this repository (enablePullRequestAutoMerge)',
+      kind: 'failed',
+    },
+    {
+      name: 'a pull request with nothing to wait for',
+      stderr: 'GraphQL: Pull request Pull request is in clean status (enablePullRequestAutoMerge)',
+      kind: 'failed',
+    },
+    {
+      name: 'a signed-out gh',
+      stderr: 'To get started with GitHub CLI, run: gh auth login',
+      kind: 'signed_out',
+    },
+  ])('refuses auto-merge as a typed error: $name', async ({ stderr, kind }) => {
+    const { exec } = scripted({ 'pr merge': { exitCode: 1, stderr } });
+    await expect(
+      createGh(exec).prAutoMerge(
+        { repo: 'acme/widgets', url: 'https://github.com/acme/widgets/pull/8' },
+        CALL,
+      ),
+    ).rejects.toMatchObject({ name: 'GhError', kind });
   });
 
   it('passes not-installed through from the exec', async () => {

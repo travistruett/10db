@@ -147,6 +147,25 @@ describe('inbox', () => {
     expect(events.map((e) => e.type)).toEqual(['inbox.changed']);
   });
 
+  it('rewrites an open card title, body and detail, keeping its id and fold key', () => {
+    const project = seedProject(store);
+    const item = store.write((ctx) => insertInboxItem(ctx, question(project.id))).value;
+    const { events } = store.write((ctx) => {
+      updateInboxItem(ctx, item.id, {
+        title: 'Which shade?',
+        body: 'Pick again',
+        detail: { n: 2 },
+      });
+    });
+    expect(findOpenByFoldKey(store.db, project.id, 'fold-1')).toMatchObject({
+      id: item.id,
+      title: 'Which shade?',
+      body: 'Pick again',
+      detail: { n: 2 },
+    });
+    expect(events.map((e) => e.type)).toEqual(['inbox.changed']);
+  });
+
   it('rejects an update to a missing item', () => {
     expect(() =>
       store.write((ctx) => updateInboxItem(ctx, mintId('InboxItem'), { state: 'CANCELLED' })),

@@ -43,6 +43,7 @@ import { unfinishedDependencies, unmergedDependencies, type BlockedTask } from '
 import { groupByDependency } from './grouping';
 import { jobKey, JobQueue } from './jobs';
 import { resolveStartCards } from './stale-cards';
+import { joinsLanding, missingLandingBranch, sharedLanding } from './landing';
 import { cutWorktree, type Plans } from './worktree-cut';
 import { worktreePathFor } from './worktree-path';
 import { reopenWhenWhole, reopenWorktreeBatch } from './worktree-repair';
@@ -104,6 +105,9 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
       throw new ConflictError(
         `Batch "${existing.title}" is ${existing.state.toLowerCase()}; start again once it is open or has shipped`,
       );
+    // Refused here, with the request, so nothing is cut for tasks that can't share a pull request.
+    if (existing) joinsLanding(project, existing, tasks);
+    const target = existing ? null : sharedLanding(project, tasks, 'branch');
     const plans: Plans = new Map(tasks.map((t) => [t.id, planForStart(db, t.id)]));
     const inBatch = new Set<TaskId>([
       ...input.taskIds,
@@ -119,7 +123,7 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
       const inserted = insertBatch(w, {
         projectId: project.id,
         title: input.title,
-        baseBranch: project.baseBranch,
+        ...(target ?? { baseBranch: project.baseBranch, autoMerge: true }),
       });
       recordCuttingTasks(w, inserted.id, plans.keys());
       return inserted;
@@ -135,6 +139,9 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
    */
   function startWorktrees(project: ProjectDto, tasks: readonly TaskDto[]): BatchDto[] {
     const groups = groupByDependency(tasks);
+    // Tasks that share a worktree share a pull request, so they must land alike; checked for every
+    // group before any batch is made.
+    const targets = groups.map((group) => sharedLanding(project, group.tasks, 'worktree'));
     refuseUnfinished(
       project.id,
       groups.flatMap((group) =>
@@ -148,13 +155,14 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
     const root = madeWorktreeRoot();
     return groups.map((group, i) => {
       const groupPlans = plans[i] ?? new Map<TaskId, StepPlanDto>();
+      const target = targets[i] ?? { baseBranch: project.baseBranch, autoMerge: true };
       const batch = ctx.state.write((w) => {
         const id = mintId('Batch');
         const inserted = insertBatch(w, {
           id,
           projectId: project.id,
           title: group.title,
-          baseBranch: project.baseBranch,
+          ...target,
           worktreePath: worktreePathFor(root, project, batchBranchName(group.title, id)),
         });
         for (const [taskId, plan] of groupPlans) insertPlannedWorkstream(w, taskId, plan, id);
@@ -190,6 +198,7 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
       throw new ConflictError(
         `Batch "${batch.title}" is ${batch.state.toLowerCase()}; add fix tasks to it once it is open`,
       );
+    joinsLanding(project, batch, tasks);
     const plans: Plans = new Map(tasks.map((t) => [t.id, planForStart(db, t.id)]));
     const inBatch = new Set<TaskId>([
       ...tasks.map((t) => t.id),
@@ -291,6 +300,11 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
         return;
       }
       try {
+        const missing = await missingLandingBranch(ctx, project, batch, signal);
+        if (missing) {
+          refuse(missing);
+          return;
+        }
         await ctx.git.fetch(project.repoPath, batch.baseBranch, networkCall(ctx, signal));
       } catch (error) {
         if (!stopped()) refuse(startCards.fetchFailed(batch.baseBranch, error));

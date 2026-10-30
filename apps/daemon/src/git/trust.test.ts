@@ -1,9 +1,12 @@
 import { execFileSync } from 'node:child_process';
 import {
   chmodSync,
+  closeSync,
+  constants,
   existsSync,
   lstatSync,
   mkdirSync,
+  openSync,
   readFileSync,
   readlinkSync,
   realpathSync,
@@ -168,6 +171,7 @@ describe('no program from the checkout runs in a daemon git call', () => {
       },
     },
     { name: 'keptRefs', act: (git) => git.keptRefs(repo.path, 'refs/10db/starts/') },
+    { name: 'survey', act: (git) => git.survey(repo.path, 50) },
     { name: 'deleteKeptRef', act: (git) => git.deleteKeptRef(repo.path, 'refs/10db/starts/x') },
     {
       // After the commits, so main has its own: a merge commit, read-tree -m -u and update-ref.
@@ -1610,6 +1614,36 @@ describe('fetch and push', () => {
       paths: [{ path: '.gitattributes', filter: 'lfs' }],
     });
     expect(gitIn(remote.origin.path, 'rev-parse', 'refs/heads/main')).toBe(before);
+  });
+});
+
+describe('survey', () => {
+  it('reads no .mailmap from the checkout', async () => {
+    const fifo = join(repo.path, '.mailmap');
+    execFileSync('mkfifo', [fifo]);
+    const surveyed = createGit().survey(repo.path, 50);
+    const first = await Promise.race([
+      surveyed.then(() => 'surveyed'),
+      new Promise((resolve) => {
+        setTimeout(() => {
+          resolve('still reading');
+        }, 5000);
+      }),
+    ]);
+    // A git that opened the FIFO waits for a writer; opening it for writing ends that read.
+    try {
+      closeSync(openSync(fifo, constants.O_WRONLY | constants.O_NONBLOCK));
+    } catch {
+      // No reader has it open: nothing waits on it.
+    }
+    await surveyed;
+    expect(first).toBe('surveyed');
+  });
+
+  it('surveys a checkout that holds a file named HEAD', async () => {
+    write('HEAD', 'not a ref\n');
+    const surveyed = await createGit().survey(repo.path, 50);
+    expect(surveyed).toHaveProperty('commits');
   });
 });
 

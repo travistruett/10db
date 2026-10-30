@@ -37,8 +37,10 @@ import { TENDB_MCP_SERVER } from './project-mcp';
 import { projectSettingsBillingProblem } from './project-settings';
 import {
   AccountProbeError,
+  CompletionError,
   SessionEndReason,
   type AccountProbeSpec,
+  type CompletionSpec,
   type SessionAdapter,
   type SessionEvent,
   type SessionHandle,
@@ -705,6 +707,77 @@ async function probeAccount(
   }
 }
 
+/** How long a one-shot question may take before it is given up on. */
+const COMPLETION_MS = 120_000;
+
+/**
+ * One question to the model: Claude Code starts in an empty folder with no tool, no settings file,
+ * no MCP server and no saved session, proves it is the expected account, and answers in one turn.
+ */
+async function complete(
+  ask: CompletionSpec,
+  opts: ClaudeAdapterOptions,
+  runQuery: QueryFn,
+): Promise<string> {
+  const clock = opts.clock ?? systemClock;
+  const input = createChannel<SDKUserMessage>();
+  const abortController = new AbortController();
+  const q = runQuery({
+    prompt: input,
+    options: {
+      cwd: ask.cwd,
+      env: { ...ask.env },
+      model: ask.model,
+      pathToClaudeCodeExecutable: opts.claudePath,
+      settingSources: [],
+      strictMcpConfig: true,
+      tools: [],
+      maxTurns: 1,
+      persistSession: false,
+      permissionMode: 'default',
+      canUseTool: () =>
+        Promise.resolve({ behavior: 'deny', message: 'A question to the model runs no tools.' }),
+      abortController,
+    },
+  });
+  let timer: { cancel(): void } = { cancel: () => undefined };
+  const timeout = new Promise<never>((_, reject) => {
+    timer = clock.setTimeout(() => {
+      reject(new CompletionError('The model did not answer in time.'));
+    }, COMPLETION_MS);
+  });
+  const answer = (async () => {
+    const info = await q.accountInfo();
+    const refusal = checkAccount(ask.account, seenFrom(info));
+    if (refusal) throw new CompletionError(`${refusal.message}. Nothing was sent.`);
+    input.push(userMessage(ask.prompt));
+    input.end();
+    for await (const message of q) {
+      if (message.type !== 'result') continue;
+      if (message.subtype === 'success' && !message.is_error) return message.result;
+      throw new CompletionError(
+        message.subtype === 'success' ? message.result : `The model stopped: ${message.subtype}.`,
+      );
+    }
+    throw new CompletionError('The model ended without an answer.');
+  })();
+  try {
+    return await Promise.race([answer, timeout]);
+  } catch (error) {
+    throw error instanceof CompletionError
+      ? error
+      : new CompletionError(error instanceof Error ? error.message : 'The model failed.');
+  } finally {
+    timer.cancel();
+    input.end();
+    abortController.abort();
+    void drain(q);
+    // Whichever of the answer and the timeout lost the race must not become an unhandled rejection.
+    answer.catch(() => undefined);
+    timeout.catch(() => undefined);
+  }
+}
+
 /** Runs managed sessions on the builder's installed Claude Code through the Agent SDK (spec §3). */
 export function createClaudeAdapter(opts: ClaudeAdapterOptions): SessionAdapter {
   const runQuery: QueryFn = opts.query ?? ((params) => sdkQuery(params));
@@ -715,5 +788,6 @@ export function createClaudeAdapter(opts: ClaudeAdapterOptions): SessionAdapter 
         ? refusedSession(UNSANDBOXED_REFUSAL)
         : startSession(spec, opts, runQuery),
     probeAccount: (probe) => probeAccount(probe, opts, runQuery),
+    complete: (ask) => complete(ask, opts, runQuery),
   };
 }

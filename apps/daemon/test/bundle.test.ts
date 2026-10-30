@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { readRuntimeInfo } from '../src/daemon';
 import { tempDir, waitForAsync, type TempDir } from './fixtures';
+import { initialize, spawnStdioRpc } from './stdio-rpc';
 
 const daemonRoot = resolve(import.meta.dirname, '..');
 /** The srt version the daemon pins, from its own manifest. */
@@ -82,6 +83,36 @@ describe('the bundled daemon', () => {
       child.kill('SIGTERM');
     }
     expect(await exited).toBe(0);
+  }, 60_000);
+
+  it("ships the builder's MCP bridge, runnable with no node_modules and no daemon", async () => {
+    const appDir = join(work.path, 'bridge-app');
+    cpSync(join(work.path, 'dist'), appDir, { recursive: true });
+    const dataDir = join(work.path, 'empty data');
+    mkdirSync(dataDir);
+    const rpc = spawnStdioRpc(process.execPath, [join(appDir, 'builder-mcp.mjs')], {
+      cwd: work.path,
+      env: {
+        PATH: process.env['PATH'] ?? '/usr/bin:/bin',
+        HOME: work.path,
+        TMPDIR: tmpdir(),
+        TENDB_DATA_DIR: dataDir,
+      },
+    });
+    try {
+      expect(await initialize(rpc)).toMatchObject({
+        result: { serverInfo: { name: '10db-builder' } },
+      });
+      const listed = await rpc.request('tools/list');
+      expect(listed.message.error).toBeUndefined();
+      const called = await rpc.request('tools/call', { name: 'list_flows', arguments: {} });
+      expect(called.id).toBe(3);
+      expect(called.message.id).toBe(3);
+      expect(called.message.error?.message).toContain('10db is not running');
+      expect(rpc.strayStdout).toEqual([]);
+    } finally {
+      await rpc.close();
+    }
   }, 60_000);
 
   it('writes only its own outputs into an existing directory', () => {

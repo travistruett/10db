@@ -16,6 +16,7 @@ import type {
   EventType,
   EvidenceId,
   EvidenceKind,
+  FailingCheckDto,
   FlowId,
   FlowStepDef,
   HandoffId,
@@ -36,7 +37,10 @@ import type {
   PersonId,
   ProfileSource,
   ProjectId,
+  ProjectLanding,
   ProposalId,
+  PullRequestChecks,
+  PullRequestState,
   ProposalKind,
   Provider,
   QuestionCategory,
@@ -50,6 +54,7 @@ import type {
   StepRole,
   SupportedAccountKind,
   TaskId,
+  TaskLanding,
   TaskStatus,
   ToolAccess,
   ToolOpId,
@@ -151,6 +156,8 @@ export const projects = sqliteTable('projects', {
   budgetCeiling: real('budget_ceiling'),
   delivery: text('delivery').$type<Delivery>().notNull().default('local'),
   baseBranch: text('base_branch').notNull().default('main'),
+  /** What a finished task's pull request does unless its task says otherwise. */
+  landing: text('landing').$type<ProjectLanding>().notNull().default('merge'),
   prTitlePrefix: text('pr_title_prefix'),
   /** Command prefixes a lane runs without a permission card, beyond the gate command. */
   allowedCommands: text('allowed_commands', { mode: 'json' })
@@ -184,7 +191,10 @@ export const batches = sqliteTable(
     title: text('title').notNull(),
     state: text('state').$type<BatchState>().notNull(),
     branch: text('branch'),
+    /** The branch the batch is cut from and its pull request targets. */
     baseBranch: text('base_branch').notNull(),
+    /** Whether the pull request merges by itself once its required checks pass. */
+    autoMerge: integer('auto_merge', { mode: 'boolean' }).notNull().default(false),
     baseSha: text('base_sha'),
     /** The GitHub `owner/name` from `gh repo view`, recorded at cut. */
     repo: text('repo'),
@@ -207,6 +217,15 @@ export const batches = sqliteTable(
      */
     returnBranch: text('return_branch'),
     returnSha: text('return_sha'),
+    /**
+     * What the PR watcher last read of the pull request. All null until the first read; the status
+     * is whole once `prCheckedAt` is set. `prUnknownReason` is set only while the state is unknown.
+     */
+    prState: text('pr_state').$type<PullRequestState>(),
+    prChecks: text('pr_checks').$type<PullRequestChecks>(),
+    prFailingChecks: text('pr_failing_checks', { mode: 'json' }).$type<FailingCheckDto[]>(),
+    prCheckedAt: text('pr_checked_at'),
+    prUnknownReason: text('pr_unknown_reason'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -258,6 +277,9 @@ export const tasks = sqliteTable(
     proposalId: text('proposal_id')
       .$type<ProposalId>()
       .references(() => proposals.id),
+    /** Where the work lands: `base`, `branch` (named by `landingBranch`) or `hold`. */
+    landing: text('landing').$type<TaskLanding['kind']>().notNull().default('base'),
+    landingBranch: text('landing_branch'),
     status: text('status').$type<TaskStatus>().notNull(),
     boardOrder: real('board_order').notNull(),
     /** Set: parked in that human column. Null: planned, with its column derived from its state. */
