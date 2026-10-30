@@ -102,6 +102,73 @@ const rows: Row[] = [
     expected: ['yarn.corp.example.com <- .yarnrc.yml'],
   },
   {
+    name: 'a scoped Yarn registry names its own host and leaves the default for every other package',
+    files: {
+      '.yarnrc.yml':
+        'nodeLinker: node-modules\nnpmScopes:\n  corp:\n    npmRegistryServer: "https://npm.corp.example.com"\n',
+      // A Yarn Berry lockfile names no URL, only each package's resolution.
+      'yarn.lock':
+        '__metadata:\n  version: 8\n\n"left-pad@npm:^1.3.0":\n  version: 1.3.0\n  resolution: "left-pad@npm:1.3.0"\n',
+    },
+    expected: ['npm.corp.example.com <- .yarnrc.yml', 'registry.yarnpkg.com <- yarn.lock'],
+  },
+  {
+    name: 'a top-level Yarn registry replaces the default',
+    files: {
+      '.yarnrc.yml': 'npmRegistryServer: "https://yarn.corp.example.com"\n',
+      'yarn.lock': '__metadata:\n  version: 8\n',
+    },
+    expected: ['yarn.corp.example.com <- .yarnrc.yml'],
+  },
+  {
+    name: 'a registry URL with an escaped path, such as an Azure Artifacts feed, names its host',
+    files: {
+      '.npmrc':
+        'registry=https://pkgs.dev.azure.com/acme/My%20Project/_packaging/feed/npm/registry/\n',
+      'package-lock.json':
+        '{"packages":{"node_modules/a":{"resolved":"https://pkgs.dev.azure.com/acme/My%20Project/_packaging/feed/npm/registry/a/-/a-1.tgz"}}}',
+    },
+    expected: ['pkgs.dev.azure.com <- .npmrc'],
+  },
+  {
+    name: 'a registry URL with an escaped password names its host',
+    files: {
+      'pip.conf': '[global]\nindex-url = https://deploy:p%40ss@pypi.corp.example.com/simple\n',
+    },
+    expected: ['pypi.corp.example.com <- pip.conf'],
+  },
+  {
+    name: 'a variable in the user name or password of a registry URL leaves its host to read',
+    files: { '.npmrc': 'registry=https://deploy:${NPM_TOKEN}@npm.corp.example.com/npm/\n' },
+    expected: ['npm.corp.example.com <- .npmrc'],
+  },
+  {
+    name: 'pyproject and uv.toml index arrays and inline tables',
+    files: {
+      'pyproject.toml':
+        '[tool.uv]\nextra-index-url = ["https://extra.corp.example.com/simple"]\nindex = [{ name = "corp", url = "https://inline.corp.example.com/simple" }]\n',
+      'uv.toml':
+        'extra-index-url = [\n  "https://one.corp.example.com/simple", # the first\n  # "https://commented.example.com/simple",\n  \'https://two.corp.example.com/simple\',\n]\n',
+    },
+    expected: [
+      'extra.corp.example.com <- pyproject.toml',
+      'inline.corp.example.com <- pyproject.toml',
+      'one.corp.example.com <- uv.toml',
+      'two.corp.example.com <- uv.toml',
+    ],
+  },
+  {
+    name: '.cargo/config.toml inline tables, such as a mirror that replaces crates.io',
+    files: {
+      '.cargo/config.toml':
+        '[source]\ncrates-io = { replace-with = "corp-mirror" }\ncorp-mirror = { registry = "sparse+https://mirror.corp.example.com/" }\n[registries]\ncorp = { index = "sparse+https://cargo.corp.example.com/index/" } # the corp one\n# old = { index = "sparse+https://old.example.com/index/" }\n',
+    },
+    expected: [
+      'cargo.corp.example.com <- .cargo/config.toml',
+      'mirror.corp.example.com <- .cargo/config.toml',
+    ],
+  },
+  {
     name: '.cargo/config.toml registries and replaced sources',
     files: {
       '.cargo/config.toml':
@@ -234,6 +301,20 @@ describe('findRegistryHosts', () => {
       'npm.corp.example.com',
     ]);
     expect(JSON.stringify(found)).not.toMatch(/s3cr3t|cargo-secret|deploy|8443/);
+  });
+
+  it('keeps only the host of an escaped URL: no password, user name or path', async () => {
+    const root = project({
+      '.npmrc':
+        'registry=https://pkgs.dev.azure.com/acme/My%20Project/_packaging/feed/npm/registry/\n',
+      'pip.conf': '[global]\nindex-url = https://deploy:p%40ss@pypi.corp.example.com/simple\n',
+    });
+    const found = await findRegistryHosts(root);
+    expect(found.map((f) => f.host).sort()).toEqual([
+      'pkgs.dev.azure.com',
+      'pypi.corp.example.com',
+    ]);
+    expect(JSON.stringify(found)).not.toMatch(/p%40ss|p@ss|deploy|acme|My|_packaging|simple/);
   });
 
   it('does not follow a link', async () => {

@@ -18,7 +18,7 @@ import {
 import type { StateStore } from '../events';
 import { isSandboxDomain } from '../sandbox';
 import { writeFoundHosts } from './found-hosts';
-import { storableRule } from './rules';
+import { matchPermissionRule, storableRule } from './rules';
 
 /** The tool name of the sandbox's ask to reach a host; the same rules a card answer stores. */
 const NETWORK_TOOL = 'SandboxNetworkAccess';
@@ -168,7 +168,8 @@ export function allowFoundHosts(
 ): NetworkHostDto[] {
   return state.write((ctx) => {
     getProject(ctx.tx, projectId);
-    const allowed = new Set(listNetworkHosts(ctx.tx, projectId).map((h) => h.host));
+    const rules = listPermissionRules(ctx.tx, projectId, null);
+    const allowed = new Set<string>();
     const added: NetworkHostDto[] = [];
     const kept: FoundHostDto[] = [];
     for (const { host: named, file } of found) {
@@ -179,7 +180,7 @@ export function allowFoundHosts(
         continue;
       }
       kept.push({ host, file });
-      if (allowed.has(host)) continue;
+      if (allowed.has(host) || isHostAllowed(rules, host)) continue;
       allowed.add(host);
       const rule = insertPermissionRule(ctx, {
         projectId,
@@ -216,8 +217,8 @@ export function unallowedFoundHosts(
   found: readonly FoundHostDto[],
 ): FoundHostDto[] {
   getProject(db, projectId);
-  const allowed = new Set(listNetworkHosts(db, projectId).map((h) => h.host));
-  const listed: FoundHostDto[] = [];
+  const rules = listPermissionRules(db, projectId, null);
+  const listed = new Map<string, FoundHostDto>();
   for (const { host: named, file } of found) {
     let host: string;
     try {
@@ -225,11 +226,18 @@ export function unallowedFoundHosts(
     } catch {
       continue;
     }
-    if (allowed.has(host)) continue;
-    allowed.add(host);
-    listed.push({ host, file });
+    if (listed.has(host) || isHostAllowed(rules, host)) continue;
+    listed.set(host, { host, file });
   }
-  return listed;
+  return [...listed.values()];
+}
+
+/** True when a project-wide rule covers the host: its own name, or a `*.` pattern over it. */
+function isHostAllowed(rules: readonly PermissionRuleDto[], host: string): boolean {
+  return (
+    matchPermissionRule({ toolName: NETWORK_TOOL, input: { host } }, rules, { realPaths: [] }) !==
+    undefined
+  );
 }
 
 /** Stores the project-wide rule a card's Always allow would; a host already allowed is answered, not stored again. */

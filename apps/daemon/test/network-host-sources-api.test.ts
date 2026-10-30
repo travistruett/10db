@@ -214,6 +214,18 @@ describe('POST /projects/:id/network-hosts/scan: looking again', () => {
     expect(FoundList.parse(res.body)).toEqual([]);
   });
 
+  it('does not list a host a pattern the builder typed already allows', async () => {
+    const project = await createProject();
+    expect((await send('POST', hostsPath(project.id), { host: '*.crates.io' })).status).toBe(201);
+    writeInRepo('Cargo.lock', CRATES);
+    writeInRepo('Gemfile.lock', 'GEM\n  remote: https://rubygems.org/\n');
+
+    const res = await send('POST', `${hostsPath(project.id)}/scan`);
+
+    // *.crates.io covers index.crates.io and static.crates.io, as the sandbox reads it.
+    expect(FoundList.parse(res.body)).toEqual([{ host: 'rubygems.org', file: 'Gemfile.lock' }]);
+  });
+
   it('lists a host the builder removed again, without allowing it', async () => {
     writeInRepo('Cargo.lock', CRATES);
     const project = await createProject();

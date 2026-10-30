@@ -15,14 +15,21 @@ nothing from the repository and starts no process: a file is read only when the 
 folder under the root's real path (so a link anywhere below the root, such as `.cargo` linked to `~/.cargo`, is never
 followed), is opened with `O_NOFOLLOW`, must be a regular file of at most 16 MiB, and is matched with fixed patterns
 on the keys that hold a registry (a lockfile's `resolved`,
-`tarball`, `source` and `remote` values; never a description or a link to a home page). A lockfile with no URL for its
-packages names the ecosystem's default registry unless an `.npmrc` or `.yarnrc.yml` in its folder or the root names
-one (npm and pnpm: `registry.npmjs.org`; yarn: `registry.yarnpkg.com`; poetry: `pypi.org` and
+`tarball`, `source` and `remote` values; never a description or a link to a home page). A TOML setting is read as a
+string, an array of strings or a value in an inline table, over several lines if need be, with comments left out
+(`extra-index-url = ["…"]`, `corp-mirror = { registry = "…" }`), so a mirror that replaces crates.io is found though
+`Cargo.lock` still names crates.io. A lockfile with no URL for its
+packages names the ecosystem's default registry unless an `.npmrc` or `.yarnrc.yml` in its folder or the root replaces
+it: an unscoped `registry=`, or an unindented `npmRegistryServer`. A scoped registry (`@x:registry=`, or an
+`npmRegistryServer` under `npmScopes`) serves its scope only, so it names its own host and the default stays (npm and
+pnpm: `registry.npmjs.org`; yarn: `registry.yarnpkg.com`; poetry: `pypi.org` and
 `files.pythonhosted.org`; cargo's crates.io: `index.crates.io` and `static.crates.io`; go: `proxy.golang.org` and
 `sum.golang.org`). Each host is reported with the first file that names it, the root's files first.
 
 **Only the host.** A URL is parsed, and the host name is all that is kept: a user name, password, token, port and path
-never leave `hostOfUrl`. A value with a variable to expand names no host, and neither does one whose host holds a `*`
+never leave `hostOfUrl`. A variable (`${NPM_TOKEN}`) or `%XX` escape (`p%40ss`, `My%20Project`) in those parts
+doesn't hide the host; URL parsing decodes an escape in the host name or refuses the name. A host that still holds a
+variable to expand (`https://${HOST}/`) names no host, and neither does one that holds a `*`
 (URL parsing keeps it, but no package manager fetches from a wildcard, and `*.s3.amazonaws.com` would allow every
 bucket): a found host is one concrete name (`checkConcreteHost`), never a pattern. The result of a reading is a list of
 `{ host, file }`; no URL, no line of a file and no setting's value is returned, stored, put on a card or logged. A host
@@ -34,7 +41,11 @@ most 40 hosts are taken.
 lists the hosts before the project is added (`FolderInspection.registryHosts`). Settings › Network hosts shows each
 host's source in words (`Found in Cargo.lock`, `Allowed from a card`, `Added by you`; a host's source is its oldest
 rule's) and has Look Again, `POST /projects/:id/network-hosts/scan`, which reads the files again and answers the hosts
-they name that are not allowed, each with its file. It allows nothing and stores nothing: the page lists them with an
+they name that no rule covers, each with its file. A rule covers a host as the sandbox's `allowedDomains` reads it
+(`matchPermissionRule`, which lane and gate cards use too): its own name, or a `*.` pattern over it, so a typed
+`*.crates.io` covers `index.crates.io` but not `crates.io` or an address. This amends the earlier file, where the
+broker matched a running lane's host exactly: a wildcard the builder adds now covers a running lane's hosts at once too,
+as a concrete host always did. It allows nothing and stores nothing: the page lists them with an
 Allow beside each, and a host is allowed only when the builder presses Allow for it, after seeing its name (the same
 `POST /projects/:id/network-hosts` as typing it, so its source is `Added by you`). A host the builder removed is listed
 again on Look Again, not allowed again. The reading made when the project was added is kept in `app_settings`

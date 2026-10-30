@@ -58,27 +58,64 @@ function iniValues(text: string, keys: ReadonlySet<string>): string[] {
   return values.flatMap((value) => value.split(/[\s,]+/)).filter((token) => token !== '');
 }
 
-/** The URL values of the keys named in the sections named, for a TOML file. */
-function tomlUrls(
-  text: string,
-  sections: ReadonlySet<string>,
-  keys: ReadonlySet<string>,
-): string[] {
-  const urls: string[] = [];
-  let section = '';
-  for (const line of text.split(/\r?\n/)) {
-    const header = /^\s*\[{1,2}\s*([^\]]+?)\s*\]{1,2}\s*(?:#.*)?$/.exec(line);
-    if (header?.[1] !== undefined) {
-      section = header[1];
-      continue;
-    }
-    const m = /^\s*([\w-]+)\s*=\s*["']([^"']+)["']/.exec(line);
-    if (m?.[1] !== undefined && m[2] !== undefined && sections.has(section) && keys.has(m[1])) {
-      urls.push(m[2]);
+/** A TOML line with its `#` comment removed; a `#` inside a quoted string stays. */
+function withoutComment(line: string): string {
+  let quote: string | null = null;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    if (quote !== null) {
+      if (ch === '\\' && quote === '"') i += 1;
+      else if (ch === quote) quote = null;
+    } else if (ch === '"' || ch === "'") {
+      quote = ch;
+    } else if (ch === '#') {
+      return line.slice(0, i);
     }
   }
-  return urls;
+  return line;
 }
+
+/** Each table of a TOML file: its header's name (`''` before the first) and its lines, without comments. */
+function tomlTables(text: string): { readonly name: string; readonly body: string }[] {
+  const tables = [{ name: '', lines: [] as string[] }];
+  for (const raw of text.split(/\r?\n/)) {
+    const line = withoutComment(raw);
+    // A header holds a dotted name only, so an array of arrays on its own line is not one.
+    const header = /^\s*\[{1,2}\s*([\w.\-"' ]+?)\s*\]{1,2}\s*$/.exec(line);
+    if (header?.[1] === undefined) tables.at(-1)?.lines.push(line);
+    else tables.push({ name: header[1], lines: [] });
+  }
+  return tables.map(({ name, lines }) => ({ name, body: lines.join('\n') }));
+}
+
+const TOML_STRING = String.raw`"[^"\n]*"|'[^'\n]*'`;
+/**
+ * A `key = value` pair whose value is a string or an array of strings, over several lines if need be:
+ * at the start of a line, after a dotted key's `.`, or inside an inline table such as
+ * `corp = { index = "…" }` or `index = [{ name = "corp", url = "…" }]`.
+ */
+const TOML_PAIR = new RegExp(
+  String.raw`(?:^|[\s{,.])([\w-]+)\s*=\s*(${TOML_STRING}|\[\s*(?:(?:${TOML_STRING})\s*(?:,\s*)?)*\])`,
+  'g',
+);
+
+/** The string values, or the strings of the array values, of the keys named in the tables chosen. */
+function tomlUrls(
+  text: string,
+  inTable: (name: string) => boolean,
+  keys: ReadonlySet<string>,
+): string[] {
+  return tomlTables(text)
+    .filter((table) => inTable(table.name))
+    .flatMap((table) => [...table.body.matchAll(TOML_PAIR)])
+    .flatMap(([, key, value]) =>
+      key !== undefined && value !== undefined && keys.has(key)
+        ? [...value.matchAll(/"([^"\n]*)"|'([^'\n]*)'/g)].map((m) => m[1] ?? m[2] ?? '')
+        : [],
+    );
+}
+
+const anyTable = (): boolean => true;
 
 const npmDefault = (folder: FolderContext): string[] =>
   folder.npmRegistryNamed ? [] : ['registry.npmjs.org'];
@@ -87,14 +124,18 @@ const NPM_URL = /"resolved"\s*:\s*"([^"]+)"/g;
 const PNPM_URL = /\b(?:tarball|repo)\s*:\s*["']?([^\s"',}]+)/g;
 const YARN_URL = /^\s*resolved:?\s+"?([^"\s]+)/gm;
 const CARGO_SOURCE = /^\s*source\s*=\s*"([^"]+)"/gm;
-const CARGO_URL = /^\s*(?:index|registry|git)\s*=\s*"([^"]+)"/gm;
+/** The `.cargo/config.toml` keys that hold a registry, a replaced source or a git URL, in any table. */
+const CARGO_KEYS: ReadonlySet<string> = new Set(['index', 'registry', 'git']);
 const UV_URL = /\b(?:registry|url|git)\s*=\s*"([^"]+)"/g;
 const POETRY_URL = /^url\s*=\s*"([^"]+)"/gm;
 const GEM_REMOTE = /^\s*remote:\s*(\S+)/gm;
 const NPMRC_REGISTRY = /^\s*(?:@[\w.-]+:)?registry\s*=\s*(\S+)/gm;
 /** An `.npmrc` key of the form `//host/path/:setting=`; only the host is read, the value never. */
 const NPMRC_HOST = /^\s*(\/\/[^\s/=:]+)[^\s=]*:[\w-]+\s*=/gm;
+/** Every `npmRegistryServer` of a `.yarnrc.yml`: the top-level one and those under `npmScopes`. */
 const YARNRC_REGISTRY = /^\s*npmRegistryServer\s*:\s*["']?([^"'\s]+)/gm;
+/** Only an unindented `npmRegistryServer` replaces the default; a scoped one serves its scope alone. */
+const YARNRC_DEFAULT_REGISTRY = /^npmRegistryServer\s*:\s*["']?([^"'\s]+)/gm;
 
 const PIP_KEYS: ReadonlySet<string> = new Set(['index-url', 'extra-index-url', 'find-links']);
 const PIP_HOST_KEYS: ReadonlySet<string> = new Set(['trusted-host']);
@@ -121,8 +162,8 @@ export const CONFIG_FORMATS: readonly PackageFileFormat[] = [
       hostsOfUrls([...captures(text, NPMRC_REGISTRY), ...captures(text, NPMRC_HOST)]),
   },
   { path: '.yarnrc.yml', hosts: (text) => hostsOfUrls(captures(text, YARNRC_REGISTRY)) },
-  { path: '.cargo/config.toml', hosts: (text) => cargoHosts(captures(text, CARGO_URL)) },
-  { path: '.cargo/config', hosts: (text) => cargoHosts(captures(text, CARGO_URL)) },
+  { path: '.cargo/config.toml', hosts: (text) => cargoHosts(tomlUrls(text, anyTable, CARGO_KEYS)) },
+  { path: '.cargo/config', hosts: (text) => cargoHosts(tomlUrls(text, anyTable, CARGO_KEYS)) },
   {
     path: 'pip.conf',
     hosts: (text) => [
@@ -139,9 +180,12 @@ export const CONFIG_FORMATS: readonly PackageFileFormat[] = [
   },
   {
     path: 'pyproject.toml',
-    hosts: (text) => hostsOfUrls(tomlUrls(text, PYPROJECT_SECTIONS, INDEX_KEYS)),
+    hosts: (text) => hostsOfUrls(tomlUrls(text, (t) => PYPROJECT_SECTIONS.has(t), INDEX_KEYS)),
   },
-  { path: 'uv.toml', hosts: (text) => hostsOfUrls(tomlUrls(text, UV_TOML_SECTIONS, INDEX_KEYS)) },
+  {
+    path: 'uv.toml',
+    hosts: (text) => hostsOfUrls(tomlUrls(text, (t) => UV_TOML_SECTIONS.has(t), INDEX_KEYS)),
+  },
 ];
 
 /** The lockfiles and toolchain files. */
@@ -182,10 +226,13 @@ export const LOCK_FORMATS: readonly PackageFileFormat[] = [
   { path: '.node-version', hosts: () => ['nodejs.org'] },
 ];
 
-/** True when the text of an `.npmrc` or `.yarnrc.yml` names a default registry. */
+/**
+ * True when the text of an `.npmrc` or `.yarnrc.yml` names a default registry: an `.npmrc`
+ * `registry=` with no scope, or a top-level `npmRegistryServer`. A scoped one doesn't count.
+ */
 export function namesNpmRegistry(text: string): boolean {
   return (
     captures(text, /^\s*registry\s*=\s*(\S+)/gm).length > 0 ||
-    captures(text, YARNRC_REGISTRY).length > 0
+    captures(text, YARNRC_DEFAULT_REGISTRY).length > 0
   );
 }
