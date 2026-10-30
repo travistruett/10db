@@ -45,6 +45,8 @@ import { menuMoves, resolveDrop, startedDependents, type DropTarget } from './dr
 import { NewTaskForm } from './new-task-form';
 import { InboxLink } from './inbox-link';
 import { PullRequestLink } from './pull-request-link';
+import { queuePlaces } from './queue-place';
+import { canRunNext } from './run-next';
 import { cardSummary, TaskCard } from './task-card';
 import { canStart, TaskCardMenu } from './task-card-menu';
 import { columnNameOf, TaskDrawer } from './task-drawer';
@@ -150,6 +152,8 @@ function BoardColumns({
     layout.flatMap((c) => (c.key.kind === 'human' ? [[c.key.id, c.label] as const] : [])),
   );
   const allTasks = new Map(layout.flatMap((c) => c.tasks).map((t) => [t.id, t] as const));
+  const places = queuePlaces(workstreams);
+  const openPlace = openWorkstream ? places.get(openWorkstream.id) : undefined;
   // What the card says about a Start: asked and on its way, or refused and why.
   const noteOf = (task: TaskDto) =>
     actions.note(
@@ -246,6 +250,7 @@ function BoardColumns({
                 gateCommand={project.gateCommand}
                 pullRequest={shippedPullRequest(task, ws, batchById)}
                 startNote={noteOf(task)}
+                place={ws ? places.get(ws.id) : undefined}
                 peers={peers}
               />
             );
@@ -269,6 +274,7 @@ function BoardColumns({
               batch,
               project.gateCommand,
               noteOf(task),
+              ws ? places.get(ws.id) : undefined,
             );
           }}
           renderMenu={(task) => {
@@ -281,6 +287,16 @@ function BoardColumns({
               <TaskCardMenu
                 task={task}
                 latest={ws?.state}
+                {...(canRunNext(task, ws?.state)
+                  ? {
+                      onRunNext: () => {
+                        retry.reset();
+                        abandon.reset();
+                        closeTask.reset();
+                        actions.runNext(task);
+                      },
+                    }
+                  : {})}
                 {...(ws && canRetry(ws.state)
                   ? {
                       onRetry: () => {
@@ -333,6 +349,7 @@ function BoardColumns({
           {...(openWorkstream ? { workstream: openWorkstream } : {})}
           {...(openBatch ? { batch: openBatch } : {})}
           workstreams={workstreams}
+          {...(openPlace !== undefined ? { place: openPlace } : {})}
           workspaceMode={project.workspaceMode}
           gateCommand={project.gateCommand}
           onClose={() => {

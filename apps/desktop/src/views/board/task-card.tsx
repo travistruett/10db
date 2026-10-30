@@ -23,6 +23,8 @@ export interface TaskCardProps {
   readonly pullRequest?: string | undefined;
   /** A Start asked for and not yet answered, or refused; it takes the place of the task's own line. */
   readonly startNote?: StartNote | null | undefined;
+  /** A queued task's place in line, counting from 1. */
+  readonly place?: number | undefined;
 }
 
 /**
@@ -50,10 +52,11 @@ export function cardSummary(
   batch?: BatchDto,
   gateCommand: string | null = null,
   startNote: StartNote | null = null,
+  place?: number,
 ): string {
   const waits = waitsOn(task, peers);
   const criteria = task.acceptanceCriteria.length;
-  const state = startNote ? noteState(startNote) : taskState(workstream, batch, gateCommand);
+  const state = startNote ? noteState(startNote) : taskState(workstream, batch, gateCommand, place);
   return [
     task.areas.length > 0 ? `Areas: ${task.areas.join(', ')}.` : null,
     criteria > 0 ? `${String(criteria)} ${criteria === 1 ? 'criterion' : 'criteria'}.` : null,
@@ -74,10 +77,11 @@ export function TaskCard({
   peers,
   pullRequest,
   startNote = null,
+  place,
 }: TaskCardProps) {
   const waits = waitsOn(task, peers);
   const criteria = task.acceptanceCriteria.length;
-  const state = startNote ? noteState(startNote) : taskState(workstream, batch, gateCommand);
+  const state = startNote ? noteState(startNote) : taskState(workstream, batch, gateCommand, place);
   // Queued keeps the plain border; the other states take their DESIGN.md color as a border, thicker
   // when the builder's turn: no fill, no stripe, no animation.
   const colored = state !== null && state.color !== 'gray';

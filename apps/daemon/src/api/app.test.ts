@@ -37,6 +37,7 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
     listTasks: () => [],
     createTask: none,
     startTask: none,
+    runNext: none,
     listFlows: () => [],
     listWorkstreams: () => [],
     cancelWorkstream: none,
@@ -728,6 +729,7 @@ describe('batch routes', () => {
     pausedUntil: null,
     failureReason: null,
     lastActivityAt: null,
+    runNextAt: null,
     createdAt: batch.createdAt,
     updatedAt: batch.updatedAt,
   });
@@ -751,6 +753,25 @@ describe('batch routes', () => {
     );
     expect(res.status).toBe(status);
     expect(await res.json()).toEqual(body);
+  });
+
+  it('answers Run Next with the workstream and what it waits on, and refuses a bad task id', async () => {
+    const result = { workstream, waitingOn: ['Fix the gate'] };
+    const services = stubServices({ runNext: () => result });
+    const res = await app(services).request(`/tasks/${mintId('Task')}/run-next`, post(''));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual(result);
+    expect((await app(services).request('/tasks/not-a-task/run-next', post(''))).status).toBe(400);
+  });
+
+  it("answers Run Next on a task that isn't queued with 409", async () => {
+    const services = stubServices({
+      runNext: () => {
+        throw new ConflictError("Task a isn't waiting for a lane");
+      },
+    });
+    const res = await app(services).request(`/tasks/${mintId('Task')}/run-next`, post(''));
+    expect(res.status).toBe(409);
   });
 
   it.each([

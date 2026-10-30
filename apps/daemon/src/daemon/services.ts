@@ -45,6 +45,7 @@ import {
   patchPersona,
   patchProject,
   patchTask,
+  runNext,
   setRoutingRules,
   setTeam,
 } from '@10db/db';
@@ -124,6 +125,11 @@ export function createServices(deps: {
       const workstream = startTaskWithPlan(deps.state, taskId);
       deps.scheduler.requestTick();
       return { kind: 'workstream', workstream };
+    },
+    runNext(taskId) {
+      const result = deps.state.write((ctx) => runNext(ctx, taskId));
+      deps.scheduler.requestTick();
+      return result;
     },
     startBatch: (projectId, input) => deps.starter.startBatch(projectId, input),
     // The store lists oldest first; the API answers newest first.

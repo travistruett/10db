@@ -369,6 +369,8 @@ export const WorkstreamDto = z.object({
   pausedUntil: Timestamp.nullable(),
   failureReason: z.string().nullable(),
   lastActivityAt: Timestamp.nullable(),
+  /** When the builder put it first in line; null for a workstream that waits in the order it started. */
+  runNextAt: Timestamp.nullable(),
   createdAt: Timestamp,
   updatedAt: Timestamp,
 });

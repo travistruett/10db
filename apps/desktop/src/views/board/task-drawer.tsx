@@ -22,13 +22,15 @@ import {
   TextInput,
 } from '@mantine/core';
 import { useState } from 'react';
-import { useCloseTask, usePatchTask, useRetryWorkstream } from '../../daemon/queries';
+import { useCloseTask, usePatchTask, useRetryWorkstream, useRunNext } from '../../daemon/queries';
 import { StateBadge } from '../factory/state-badge';
 import { canClose, canRetry } from '../factory/workstream-state';
 import { criteriaLines } from './areas-text';
 import { closeNote } from './batch/close-note';
 import { BatchPanel } from './batch-panel';
 import { FlowSelect } from './flow-select';
+import { ordinal, runNextNote } from './queue-place';
+import { canRunNext } from './run-next';
 import { RISK_LABEL } from './risk-labels';
 
 const RISKS: readonly RiskTag[] = Object.values(RiskTag);
@@ -48,6 +50,8 @@ export interface TaskDrawerProps {
   readonly workspaceMode?: WorkspaceMode;
   /** The project's gate command, named beside a failed gate's exit code. */
   readonly gateCommand?: string | null;
+  /** A queued task's place in line, counting from 1. */
+  readonly place?: number;
   readonly onClose: () => void;
 }
 
@@ -61,6 +65,7 @@ export function TaskDrawer({
   workstreams = [],
   workspaceMode = WorkspaceMode.Shared,
   gateCommand = null,
+  place,
   onClose,
 }: TaskDrawerProps) {
   const patch = usePatchTask();
@@ -141,9 +146,10 @@ export function TaskDrawer({
       <Stack gap="lg">
         {workstream ? (
           <WorkstreamLine
-            taskId={task.id}
+            task={task}
             workstream={workstream}
             batch={batch}
+            place={place}
             onClosed={onClose}
           />
         ) : null}
@@ -277,28 +283,56 @@ export function TaskDrawer({
   );
 }
 
-/** The workstream's state, and for a failed one why, a way to retry it and a way to close its task. */
+/**
+ * The workstream's state, and for a failed one why, a way to retry it and a way to close its task;
+ * for a queued one, its place in line and a way to put it first.
+ */
 function WorkstreamLine({
-  taskId,
+  task,
   workstream,
   batch,
+  place,
   onClosed,
 }: {
-  readonly taskId: TaskId;
+  readonly task: TaskDto;
   readonly workstream: WorkstreamDto;
   readonly batch: BatchDto | undefined;
+  readonly place: number | undefined;
   readonly onClosed: () => void;
 }) {
+  const taskId = task.id;
   const retry = useRetryWorkstream();
   const closeTask = useCloseTask();
+  const runNext = useRunNext();
   const failed = canRetry(workstream.state);
+  // A parked task never takes a lane, so putting it first would change nothing.
+  const queued = canRunNext(task, workstream.state);
   if (isTerminal(workstream.state) && !failed) {
     return null;
   }
   return (
     <Stack gap={4}>
       <Group justify="space-between" wrap="nowrap">
-        <StateBadge state={workstream.state} />
+        <Group gap="xs" wrap="nowrap">
+          <StateBadge state={workstream.state} />
+          {queued && place !== undefined ? (
+            <Text size="xs" c="dimmed">
+              {place === 1 ? 'next in line' : `${ordinal(place)} in line`}
+            </Text>
+          ) : null}
+        </Group>
+        {queued ? (
+          <Button
+            size="xs"
+            variant="default"
+            loading={runNext.isPending}
+            onClick={() => {
+              runNext.mutate(taskId);
+            }}
+          >
+            Run Next
+          </Button>
+        ) : null}
         {failed ? (
           <Group gap="xs" wrap="nowrap">
             <Button
@@ -337,6 +371,18 @@ function WorkstreamLine({
         <Text size="xs" c="dimmed">
           {closeNote(batch)}
         </Text>
+      ) : null}
+      {runNext.data ? (
+        <Text size="xs" c="dimmed">
+          {runNextNote(task.title, runNext.data.waitingOn)}
+        </Text>
+      ) : null}
+      {runNext.error ? (
+        <Text
+          size="xs"
+          c="red"
+          role="alert"
+        >{`Couldn't run it next: ${runNext.error.message}`}</Text>
       ) : null}
       {retry.error ? (
         <Text size="xs" c="red" role="alert">{`Couldn't retry: ${retry.error.message}`}</Text>

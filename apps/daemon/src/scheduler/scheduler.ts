@@ -2,6 +2,7 @@ import {
   BatchState,
   Delivery,
   isTerminal,
+  queueOrder,
   WorkstreamState,
   type BatchDto,
   type BatchId,
@@ -120,7 +121,8 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
     // own card, and a project with several queued lanes isn't asked again.
     const blockedThisTick = new Set<string>();
     let launched = 0;
-    for (const ws of listWorkstreams(db, { states: [WorkstreamState.Queued] })) {
+    const line = listWorkstreams(db, { states: [WorkstreamState.Queued] }).toSorted(queueOrder);
+    for (const ws of line) {
       if (global >= opts.caps.global) break;
       // A runner that just re-queued this row is still unwinding; launch() would refuse it and
       // leave it STARTING with a lane. Its lane-freed callback ticks again once it has exited.
@@ -186,6 +188,7 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
         transitionWorkstream(ctx, ws.id, {
           to: WorkstreamState.Starting,
           fence: f,
+          patch: { runNextAt: null },
           reason: 'lane granted',
         });
         return f;

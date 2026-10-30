@@ -1,7 +1,8 @@
 import type { InboxItemDto, ProjectId, TaskDto, TaskId } from '@10db/contracts';
 import { useState } from 'react';
-import { useInbox, useStartTask } from '../../daemon/queries';
+import { useInbox, useRunNext, useStartTask } from '../../daemon/queries';
 import type { DropAction } from './drop-rules';
+import { runNextNote } from './queue-place';
 import {
   refusalCards,
   START_ANSWER_MS,
@@ -15,6 +16,7 @@ import { useMoveTask } from './use-move-task';
 export function useBoardActions(projectId: ProjectId) {
   const move = useMoveTask(projectId);
   const start = useStartTask();
+  const runNext = useRunNext();
   const inbox = useInbox();
   const [notice, setNotice] = useState<string | null>(null);
   // Each task's latest Start, so its card can say it is starting or why it was not.
@@ -87,12 +89,27 @@ export function useBoardActions(projectId: ProjectId) {
       }
     }
   }
+  /** Puts a queued task first in line, and says when it will run if it waits on others. */
+  function runNextFor(task: TaskDto): void {
+    setNotice(null);
+    runNext.reset();
+    runNext.mutate(task.id, {
+      onSuccess: ({ waitingOn }) => {
+        setNotice(runNextNote(task.title, waitingOn));
+      },
+    });
+  }
   return {
     apply,
+    runNext: runNextFor,
     notice,
     /** What a startable task's card says about its Start; null when there is nothing to say. */
     note,
-    failure: move.error ? { title: "Couldn't move the task", error: move.error } : null,
+    failure: move.error
+      ? { title: "Couldn't move the task", error: move.error }
+      : runNext.error
+        ? { title: "Couldn't put the task first", error: runNext.error }
+        : null,
     dismiss: () => {
       setNotice(null);
     },

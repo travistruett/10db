@@ -19,6 +19,7 @@ export * from './mcp-tools';
 export * from './model-profiles';
 export * from './picker';
 export { PROTOCOL_VERSION } from './protocol';
+export * from './run-next';
 export * from './states';
 export * from './steps';
 export * from './system';

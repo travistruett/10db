@@ -24,6 +24,8 @@ export interface TaskCardMenuProps {
   readonly moves: readonly MenuMove[];
   readonly onMove: (target: DropTarget) => void;
   readonly onStart: () => void;
+  /** Present when the task waits for a lane; it goes first in line. */
+  readonly onRunNext?: () => void;
   /** Present when the task's workstream failed and the daemon will retry it. */
   readonly onRetry?: () => void;
   /** Present when the task's batch is open or not shipped; abandoning keeps the branch and cancels its unfinished tasks. */
@@ -44,6 +46,7 @@ export function TaskCardMenu({
   moves,
   onMove,
   onStart,
+  onRunNext,
   onRetry,
   onAbandon,
   abandonRefusal = null,
@@ -83,6 +86,12 @@ export function TaskCardMenu({
                 ? 'Start'
                 : `Start (${parkedDependency} is parked; move it to Backlog or Ready first)`}
           </Menu.Item>
+        ) : null}
+        {onRunNext ? (
+          <>
+            {moves.length > 0 ? <Menu.Divider /> : null}
+            <Menu.Item onClick={onRunNext}>Run Next</Menu.Item>
+          </>
         ) : null}
         {onRetry || onAbandon || onCloseTask ? <Menu.Divider /> : null}
         {onRetry ? <Menu.Item onClick={onRetry}>Retry</Menu.Item> : null}

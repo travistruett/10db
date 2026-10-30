@@ -54,6 +54,7 @@ import type {
   TaskDto,
   TaskId,
   TaskInput,
+  RunNextResult,
   TaskMove,
   TaskPatch,
   TeamDto,
@@ -92,6 +93,11 @@ export interface ApiServices {
   listTasks(projectId: ProjectId): TaskDto[];
   createTask(projectId: ProjectId, input: TaskInput): TaskDto;
   startTask(taskId: TaskId): TaskStarted;
+  /**
+   * Puts the started task's queued workstream first in line for the next free lane. Throws
+   * ConflictError for a task whose latest workstream isn't waiting for one.
+   */
+  runNext(taskId: TaskId): RunNextResult;
   /**
    * Starts the tasks and answers every batch the start made or joined: one in shared mode (new, or
    * the project's open or failed batch), one per dependency group in worktree mode.

@@ -355,6 +355,8 @@ export const workstreams = sqliteTable(
     pausedUntil: text('paused_until'),
     failureReason: text('failure_reason'),
     lastActivityAt: text('last_activity_at'),
+    /** When the builder put the queued workstream first in line; cleared once it gets a lane. */
+    runNextAt: text('run_next_at'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

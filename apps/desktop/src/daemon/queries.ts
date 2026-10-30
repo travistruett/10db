@@ -7,6 +7,7 @@ import {
   PickerProposalDto,
   ProjectDto,
   ProjectViewDto,
+  RunNextResult,
   SystemCheckDto,
   TaskDto,
   TaskStartResult,
@@ -230,6 +231,24 @@ export function useStartTask() {
         queryClient.invalidateQueries({ queryKey: ['workstreams'] }),
         queryClient.invalidateQueries({ queryKey: queryKeys.projects }),
         queryClient.invalidateQueries({ queryKey: ['batches'] }),
+      ]),
+  });
+}
+
+/** Puts a queued task first in line for the next free lane. */
+export function useRunNext() {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (taskId: TaskId) =>
+      readJson(
+        await client.tasks[':taskId']['run-next'].$post({ param: { taskId } }),
+        RunNextResult,
+      ),
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['tasks'] }),
+        queryClient.invalidateQueries({ queryKey: ['workstreams'] }),
       ]),
   });
 }
