@@ -569,7 +569,10 @@ describe('Abandon of a worktree batch', () => {
     expect(existsSync(wt)).toBe(false);
     expect(worktreePaths()).toEqual([realpathSync(h.repo)]);
     expect(h.git$('branch', '--list', batch.branch ?? '')).toContain(batch.branch ?? '');
-    expect(h.only(h.cards()).title).toBe('Batch "Alpha" abandoned');
+    expect(h.cards().map((c) => c.title)).toEqual([
+      'Batch "Alpha" abandoned',
+      `Delete ${batch.branch ?? ''}? It holds 1 commit`,
+    ]);
   });
 
   it('keeps a dirty worktree, keeps its path and names it with --force --force', async () => {

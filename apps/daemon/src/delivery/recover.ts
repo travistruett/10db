@@ -15,6 +15,7 @@ import type { StateStore } from '../events';
 import { existsAsEntry, WorktreeNotOursError, worktreePinKey, type Git } from '../git';
 import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
+import { listStrayBranches } from './branch-sweep';
 import { batchCheckout } from './checkout';
 import { startCards, worktreeCards, wrongBranchCard, type Card } from './cards';
 import { returnCheckout } from './checkout-return';
@@ -189,6 +190,10 @@ export async function recoverBatches(deps: {
       })),
     );
   }
+
+  // 6b. One card for the 10db branches no batch names. The branches of merged pull requests go in
+  // the pull request watch's first round, which reads gh.
+  if (deps.worktrees) await listStrayBranches(deps.worktrees.ctx);
 
   // 7. OPEN batches whose work all settled ship.
   deps.shipper.checkOpenBatches();

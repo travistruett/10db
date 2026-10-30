@@ -53,6 +53,7 @@ import {
   allCheckouts,
   createBaseUpdates,
   createBatchCardAnswers,
+  createBranchCardAnswers,
   createBatchStarter,
   createDeliveryJobs,
   createPrWatch,
@@ -62,6 +63,7 @@ import {
   flagWorktreeMissing,
   flagWrongBranch,
   recoverBatches,
+  removeMergedBranches,
   resolvePnpm,
   subscribePrWatch,
   subscribeShipTrigger,
@@ -329,6 +331,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   let answerBatchCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerAccountCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerGitCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
+  let answerBranchCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
 
   const inbox = createInboxService({
     state,
@@ -343,6 +346,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       answerBatchCard?.(item, answer);
       answerAccountCard?.(item, answer);
       answerGitCard?.(item, answer);
+      answerBranchCard?.(item, answer);
     },
   });
   const git = createGit({
@@ -425,6 +429,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       resolvePnpm,
     }),
   };
+  answerBranchCard = createBranchCardAnswers(delivery);
   const starter = createBatchStarter(delivery);
   // One for the runner and the shipper alike, so a batch's verify and shipping gates run in turn.
   const baseUpdates = createBaseUpdates(delivery);
@@ -658,6 +663,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     ctx: delivery,
     clock,
     ...(opts.prWatchIntervalMs ? { intervalMs: opts.prWatchIntervalMs } : {}),
+    // A merged pull request's local branch goes in the round that reads the merge.
+    afterRound: (signal) => removeMergedBranches(delivery, signal),
   });
   const unsubscribePrWatch = subscribePrWatch(bus, prWatch);
 

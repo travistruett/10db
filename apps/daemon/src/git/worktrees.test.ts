@@ -414,6 +414,31 @@ describe('deleteBranchIfAt', () => {
   });
 });
 
+describe('localBranches', () => {
+  it('lists the local branches under a prefix with their tips, sorted, and no others', async () => {
+    const first = raw(main(), 'rev-parse', 'HEAD');
+    raw(main(), 'branch', '10db/b');
+    raw(main(), 'branch', '10db/a');
+    raw(main(), 'branch', 'feature/10db/x');
+    raw(main(), 'branch', '10dbx');
+    raw(main(), 'commit', '-q', '--allow-empty', '-m', 'second');
+    raw(main(), 'update-ref', 'refs/heads/10db/b', raw(main(), 'rev-parse', 'HEAD'));
+    await expect(git.localBranches(main(), '10db/')).resolves.toEqual([
+      { name: '10db/a', sha: first },
+      { name: '10db/b', sha: raw(main(), 'rev-parse', 'HEAD') },
+    ]);
+    await expect(git.localBranches(main(), 'nothing/')).resolves.toEqual([]);
+    before = mainState();
+  });
+
+  it('answers one branch tip, and null for a branch that is not there', async () => {
+    raw(main(), 'branch', '10db/a');
+    await expect(git.branchTip(main(), '10db/a')).resolves.toBe(raw(main(), 'rev-parse', '10db/a'));
+    await expect(git.branchTip(main(), '10db/none')).resolves.toBeNull();
+    before = mainState();
+  });
+});
+
 describe('ignoredDirectories', () => {
   it('lists top-level and nested ignored directories', async () => {
     writeFileSync(join(main(), '.gitignore'), 'node_modules/\n');

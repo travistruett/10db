@@ -297,6 +297,10 @@ export interface Git {
   pruneWorktrees(repo: string): Promise<void>;
   /** `update-ref -d refs/heads/<branch> <sha>`: true when deleted, false when missing or moved. */
   deleteBranchIfAt(repo: string, branch: string, sha: string): Promise<boolean>;
+  /** The local branches whose names start with `prefix`, by name and sorted, each with its tip. */
+  localBranches(repo: string, prefix: string): Promise<{ name: string; sha: string }[]>;
+  /** The commit local branch `branch` is at; null when there is no such branch. */
+  branchTip(repo: string, branch: string): Promise<string | null>;
   /** Ignored directories of the checkout, top-level and nested, without the trailing `/`. */
   ignoredDirectories(repo: string): Promise<string[]>;
   /**
@@ -1875,6 +1879,27 @@ export function createGit(opts: GitOptions = {}): Git {
         if (error instanceof GitError) return false;
         throw error;
       }
+    },
+    async localBranches(repo, prefix) {
+      const out = await git(await pinned(repo), [
+        'for-each-ref',
+        '--format=%(objectname) %(refname)',
+        `refs/heads/${prefix}`,
+      ]);
+      const heads = 'refs/heads/';
+      return out
+        .split('\n')
+        .flatMap((line) => {
+          const [sha = '', ref = ''] = line.split(' ');
+          return OBJECT_ID.test(sha) && ref.startsWith(heads)
+            ? [{ name: ref.slice(heads.length), sha }]
+            : [];
+        })
+        .filter((branch) => branch.name.startsWith(prefix))
+        .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    },
+    async branchTip(repo, branch) {
+      return revParse(await pinned(repo), `refs/heads/${branch}`);
     },
     async fileAt(repo, rev, path, maxBytes) {
       const c = await pinned(repo);

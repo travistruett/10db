@@ -107,7 +107,8 @@ rejected push) is an inbox card that says what to fix; nothing is pushed. A fail
 Ship anyway, which ships the batch without that task once the rest is done or cancelled. A task's drawer on the
 board shows its branch and pull request, why the batch wasn't shipped, and offers Retry (when the batch failed),
 Ship anyway (when a task failed) and Abandon, which keeps the branch and cancels its unfinished tasks once
-nothing on it is running. When several tasks share a branch, one line above the columns names it. 10db
+nothing on it is running. Once a pull request merges, 10db deletes the task's local branch; a pull request
+closed without merging, or an abandoned task whose branch holds commits, gets a card offering to delete it. When several tasks share a branch, one line above the columns names it. 10db
 never force-pushes, and agents can't push, merge or open pull requests themselves.
 
 ## Accounts

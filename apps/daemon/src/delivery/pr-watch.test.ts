@@ -285,12 +285,13 @@ describe('the pull request watch', () => {
     expect(card.body).toContain('main');
     expect(card.body).toContain('10db/Alpha');
     // Shipped tasks are done and can't start again, so the card offers only what works: reopen and
-    // merge on GitHub, which 10db doesn't follow, then dismiss the card.
+    // merge on GitHub, which 10db doesn't follow, or delete the local branch.
     expect(card.body).toContain('reopen the pull request on GitHub and merge it');
     expect(card.body).toContain("10db doesn't follow a reopened pull request");
-    expect(card.body).toContain('dismiss it once the pull request merges');
+    expect(card.body).toContain('keeps the local branch 10db/Alpha until you answer');
     expect(card.body).not.toContain('new batch');
-    expect(card.detail).toEqual({ batchId: id, prUrl, link: prUrl });
+    expect(card.options.map((o) => o.label)).toEqual(['Delete Branch', 'Keep']);
+    expect(card.detail).toEqual({ batchId: id, prUrl, link: prUrl, branchCard: { batchId: id } });
     expect(pr(id)).toMatchObject({ state: 'closed' });
     expect(findOpenByFoldKey(h.store.db, h.project.id, `pr-closed:${id}`)).toBeDefined();
     expect(findOpenByFoldKey(h.store.db, h.project.id, `pr-checks:${id}`)).toBeUndefined();

@@ -68,6 +68,7 @@ function flagOf(projectId: ProjectId, card: Card) {
     ...(card.foldKey ? { foldKey: card.foldKey } : {}),
     ...(card.refresh ? { refresh: true } : {}),
     ...(card.detail ? { detail: card.detail } : {}),
+    ...(card.options ? { options: card.options } : {}),
   };
 }
 

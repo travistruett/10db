@@ -35,6 +35,7 @@ import type { Clock } from '../clock';
 import { GitNetworkError, GitNetworkFailure } from '../git';
 import type { GateResult, GateRunner } from '../verify';
 import { gateNote, type BaseUpdate, type BaseUpdates } from './base-update';
+import { settleBranch } from './branch-cleanup';
 import { shipCards, wrongBranchCard, type Card, type ShipFailure } from './cards';
 import { allCheckouts, projectAtCheckout } from './checkout';
 import { returnCheckout } from './checkout-return';
@@ -143,11 +144,21 @@ export function createShipper(deps: ShipperDeps): Shipper {
 
   /**
    * After a batch ends, in its project's ship queue: a worktree batch's worktree goes, and a shared
-   * batch's checkout is switched back to where the cut found it.
+   * batch's checkout is switched back to where the cut found it and its branch settled, which a
+   * worktree batch's removal does itself.
    */
   async function afterEnd(batchId: BatchId, worktreePath: string | null): Promise<void> {
-    if (worktreePath !== null) await retire(batchId);
-    else await returnCheckout(deps, batchId);
+    if (worktreePath !== null) {
+      await retire(batchId);
+      return;
+    }
+    await returnCheckout(deps, batchId);
+    await settleBranch(deps, batchId).catch((error: unknown) => {
+      deps.logger.warn(
+        { batchId, err: error instanceof Error ? error.message : String(error) },
+        'batch branch not settled',
+      );
+    });
   }
 
   /**
