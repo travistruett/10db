@@ -139,6 +139,9 @@ function BoardColumns({
   const retry = useRetryWorkstream();
   const abandon = useAbandonBatch();
   const closeTask = useCloseTask();
+  // What checks a step, as the daemon picks it: the changed-packages check where the project has one.
+  const stepCheck =
+    project.gateCommand === null ? null : (project.changedCheckCommand ?? project.gateCommand);
   const [showAllDone, setShowAllDone] = useState(false);
   // The task whose details are open, by ID, so the drawer follows the task as the board refetches.
   const [openId, setOpenId] = useState<TaskId | null>(null);
@@ -250,7 +253,7 @@ function BoardColumns({
                 task={task}
                 workstream={cardWorkstream(ws, batch)}
                 batch={batch}
-                gateCommand={project.gateCommand}
+                gateCommand={stepCheck}
                 pullRequest={shippedPullRequest(task, ws, batchById)}
                 landing={landingOf(task, batch)}
                 startNote={noteOf(task)}
@@ -275,7 +278,7 @@ function BoardColumns({
               cardWorkstream(ws, batch),
               peers,
               batch,
-              project.gateCommand,
+              stepCheck,
               landingOf(task, batch) ?? null,
               noteOf(task),
             );

@@ -17,6 +17,17 @@
         }
       ]
     },
+    "changedCheckCommand": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "maxLanes": {
       "type": "integer",
       "minimum": 1,

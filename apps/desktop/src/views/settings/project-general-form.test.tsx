@@ -71,6 +71,13 @@ const rows: readonly Row[] = [
     sent: { gateCommand: 'make check' },
   },
   {
+    name: 'Check after each step',
+    label: 'Check after each step',
+    line: 'Optional. Runs after each step instead of the gate command; the gate command still runs before the push.',
+    change: () => type('Check after each step', 'make check-changed'),
+    sent: { changedCheckCommand: 'make check-changed' },
+  },
+  {
     name: 'Delivery',
     project: pullRequests,
     label: 'Delivery',

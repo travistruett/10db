@@ -17,7 +17,9 @@ import { isLiteralSegment, plainSegments, type PlainSegment } from './plain-segm
 import { runsOtherCommands, runsUnnamedProgram } from './runner-forms';
 
 /** Allow rules injected into every managed session. The guard still checks claims. */
-export function baseAllowedTools(project: Pick<ProjectDto, 'gateCommand'>): string[] {
+export function baseAllowedTools(
+  project: Pick<ProjectDto, 'gateCommand'> & Partial<Pick<ProjectDto, 'changedCheckCommand'>>,
+): string[] {
   return [
     'Read',
     'Glob',
@@ -30,6 +32,7 @@ export function baseAllowedTools(project: Pick<ProjectDto, 'gateCommand'>): stri
     'TodoWrite',
     'mcp__10db__*',
     ...(project.gateCommand === null ? [] : [`Bash(${project.gateCommand})`]),
+    ...(project.changedCheckCommand ? [`Bash(${project.changedCheckCommand})`] : []),
     'Bash(git status:*)',
     'Bash(git diff:*)',
     'Bash(git log:*)',
@@ -50,16 +53,19 @@ const WRITE_TOOLS: ReadonlySet<string> = new Set(['Edit', 'Write', 'MultiEdit', 
  * so `pnpm test` covers `pnpm test --run`; the guard still judges every command first.
  */
 export function allowedToolsFor(
-  project: Pick<ProjectDto, 'gateCommand' | 'allowedCommands'>,
+  project: Pick<ProjectDto, 'gateCommand' | 'allowedCommands'> &
+    Partial<Pick<ProjectDto, 'changedCheckCommand'>>,
   tools: ToolAccess,
   opts: { readonly sandboxed?: { readonly checkout: string } } = {},
 ): string[] {
   const base = scopedReads(baseAllowedTools(project), opts.sandboxed?.checkout);
   if (tools === ToolAccess.Edit)
     return [...base, ...project.allowedCommands.map((command) => `Bash(${command}:*)`)];
-  const gate = project.gateCommand === null ? null : `Bash(${project.gateCommand})`;
+  const gates = [project.gateCommand, project.changedCheckCommand ?? null].flatMap((c) =>
+    c ? [`Bash(${c})`] : [],
+  );
   return [
-    ...base.filter((t) => !WRITE_TOOLS.has(t) && t !== gate),
+    ...base.filter((t) => !WRITE_TOOLS.has(t) && !gates.includes(t)),
     ...[...READ_COMMANDS].map((c) => `Bash(${c}:*)`),
   ];
 }

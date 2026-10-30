@@ -226,6 +226,44 @@ describe('runner', () => {
     expect(states).toContain('HANDING_OFF');
   });
 
+  it("checks a step with the project's changed-packages command, not its gate command", async () => {
+    engine = await createTestEngine(
+      { Alpha: [[write('src/api/a.txt'), commit('op-alpha-chg-1', ['src/api/a.txt']), turn]] },
+      { gateCommand: 'echo FULL-GATE-RAN; exit 3', changedCheckCommand: 'true' },
+    );
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+
+    expect(ws(workstream.id).state).toBe('DONE');
+    const [check] = listEvidence(engine.store.db, workstream.id);
+    expect(check).toMatchObject({ kind: 'gate', command: 'true', exitCode: 0 });
+  });
+
+  it('sends a failed changed-packages check back as a fix with its output', async () => {
+    engine = await createTestEngine(
+      {
+        Alpha: [
+          [turn],
+          [write('src/api/fixed.txt'), commit('op-chg-fix-1', ['src/api/fixed.txt']), turn],
+        ],
+      },
+      {
+        gateCommand: 'true',
+        changedCheckCommand: 'test -f src/api/fixed.txt || { echo MISSING-CHANGED-FILE; exit 2; }',
+      },
+    );
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id)).toMatchObject({ state: 'QUEUED', nextAction: { kind: 'fix' } });
+
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(engine.adapter.prompts[1]?.prompt).toContain('MISSING-CHANGED-FILE');
+  });
+
   it('sends a failed gate back as a fix with the output, then passes', async () => {
     engine = await createTestEngine(
       {

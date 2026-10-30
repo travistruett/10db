@@ -179,6 +179,12 @@ export const ProjectInput = z
     repoPath: z.string().startsWith('/'),
     /** The command that checks a task's work; null means the builder checks each finished task. */
     gateCommand: z.string().min(1).nullable().default(null),
+    /**
+     * The command that checks only what a task's diff touched. 10db runs it after each implement
+     * step instead of the gate command; the ship gate still runs the gate command. Null keeps the
+     * gate command for both.
+     */
+    changedCheckCommand: z.string().min(1).nullable().default(null),
     areas: z.array(AreaDef).min(1),
     hazards: z.array(HazardDef).default(() => [...DEFAULT_HAZARDS]),
     maxLanes: z.int().min(1).max(16).default(2),
@@ -242,6 +248,7 @@ export const ProjectDto = z.object({
   name: z.string(),
   repoPath: z.string(),
   gateCommand: z.string().nullable(),
+  changedCheckCommand: z.string().nullable(),
   areas: z.array(AreaDef),
   hazards: z.array(HazardDef),
   maxLanes: z.int(),
@@ -279,6 +286,7 @@ export const ProjectPatch = z
   .object({
     name: z.string().min(1),
     gateCommand: z.string().min(1).nullable(),
+    changedCheckCommand: z.string().min(1).nullable(),
     maxLanes: z.int().min(1).max(16),
     handoffPct: z.int().min(5).max(95),
     nudgePct: z.int().min(6).max(98),

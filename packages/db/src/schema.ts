@@ -140,6 +140,7 @@ export const projects = sqliteTable('projects', {
   name: text('name').notNull(),
   repoPath: text('repo_path').notNull().unique(),
   gateCommand: text('gate_command'),
+  changedCheckCommand: text('changed_check_command'),
   areas: text('areas', { mode: 'json' }).$type<AreaDef[]>().notNull(),
   hazards: text('hazards', { mode: 'json' }).$type<HazardDef[]>().notNull(),
   maxLanes: integer('max_lanes').notNull(),
