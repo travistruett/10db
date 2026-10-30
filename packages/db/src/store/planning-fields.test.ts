@@ -46,6 +46,7 @@ const step = (role: WorkstreamStep['role'], sessionFloor = 0): WorkstreamStep =>
   startedAt: null,
   sessionFloor,
   result: null,
+  earlier: [],
 });
 
 describe('planning fields', () => {
