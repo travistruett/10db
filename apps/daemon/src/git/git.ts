@@ -190,6 +190,12 @@ export interface Git {
   /** Updates `origin/<branch>` from origin's recorded fetch URL; the checkout is untouched. */
   fetch(repo: string, branch: string, net: NetworkCall): Promise<NetworkRun>;
   /**
+   * Whether origin, at its recorded fetch URL, has a branch named `branch`. Asks only: nothing is
+   * fetched and the checkout is untouched. Throws a GitNetworkError when origin can't be asked, so
+   * an unreachable origin is never taken for a missing branch.
+   */
+  branchOnOrigin(repo: string, branch: string, net: NetworkCall): Promise<boolean>;
+  /**
    * Creates `name` at `startPoint` and checks it out, with no upstream. Resolves with where HEAD was
    * just before, read under the same lock, or null when HEAD named no commit.
    */
@@ -1278,6 +1284,26 @@ export function createGit(opts: GitOptions = {}): Git {
     );
   }
 
+  async function branchOnOriginOnce(
+    repo: string,
+    branch: string,
+    net: NetworkCall,
+  ): Promise<boolean> {
+    const c = await pinned(repo);
+    const network = await networkConfig(c, net);
+    const url = await pinnedUrl(c, 'fetch');
+    const ref = `refs/heads/${branch}`;
+    const run = await gitNetwork(
+      c.real,
+      network.config,
+      ['ls-remote', '--heads', '--', url, ref],
+      net,
+      { bin, env: { ...c.env, ...network.env } },
+    );
+    // Each answer line is `<sha>\t<ref>`; the pattern may match other refs, so compare the name.
+    return run.output.split('\n').some((line) => line.trim().endsWith(`\t${ref}`));
+  }
+
   async function mergeIntoBranch(input: MergeIntoBranchInput): Promise<BranchMerge> {
     // Inside the checkout's lock, so no commit of the daemon's moves the branch meanwhile.
     return withRepoLock(realpathSync(input.repo), async () => {
@@ -1720,6 +1746,9 @@ export function createGit(opts: GitOptions = {}): Git {
     },
     async fetch(repo, branch, net) {
       return serialized(fetches, realpathSync(repo), () => fetchOnce(repo, branch, net));
+    },
+    async branchOnOrigin(repo, branch, net) {
+      return branchOnOriginOnce(repo, branch, net);
     },
     async switchNewBranch(repo, name, startPoint) {
       return withRepoLock(realpathSync(repo), async () =>

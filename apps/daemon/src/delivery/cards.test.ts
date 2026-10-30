@@ -11,6 +11,7 @@ const batch = BatchDto.parse({
   state: 'FAILED',
   branch: '10db/greetings-0a1b2c3d',
   baseBranch: 'main',
+  autoMerge: true,
   baseSha: 'a'.repeat(40),
   repo: 'acme/widgets',
   prUrl: null,
