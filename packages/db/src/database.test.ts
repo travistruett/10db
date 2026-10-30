@@ -259,6 +259,94 @@ describe('migrating a v0.1.0 database', () => {
   });
 });
 
+/** The shipped migrations up to and including `lastTag`, so a later one runs over rows written before it. */
+function migrationsThrough(lastTag: string): string {
+  const older = join(dir, `through-${lastTag}`);
+  cpSync(DB_MIGRATIONS_DIR, older, { recursive: true });
+  const journalPath = join(older, 'meta/_journal.json');
+  // A journal this test just copied from the shipped migrations; the shape is known.
+  const journal = JSON.parse(readFileSync(journalPath, 'utf8')) as {
+    entries: { tag: string }[];
+  };
+  const end = journal.entries.findIndex((e) => e.tag === lastTag);
+  if (end === -1) throw new Error(`no migration ${lastTag}`);
+  for (const later of journal.entries.splice(end + 1)) rmSync(join(older, `${later.tag}.sql`));
+  writeFileSync(journalPath, JSON.stringify(journal, null, 2));
+  return older;
+}
+
+describe('migrating a database that holds Review cards', () => {
+  const AT = '2026-10-21T12:00:00.000Z';
+
+  beforeEach(() => {
+    // The last migration before passing the gate stopped raising a Review card.
+    migrateDatabase(db, migrationsThrough('0009_far_nebula'));
+    const run = (sql: string, ...args: string[]): void => {
+      db.$client.prepare(sql).run(...args);
+    };
+    run(
+      `INSERT INTO accounts (id, kind, label, payer, settings, lane_cap, created_at, updated_at)
+       VALUES ('acc_x', 'subscription', 'main', 'me', '{}', 2, ?, ?)`,
+      AT,
+      AT,
+    );
+    run(
+      `INSERT INTO projects (id, name, repo_path, gate_command, areas, hazards, max_lanes, provider, account_id,
+         handoff_pct, nudge_pct, human_wait_minutes, created_at, updated_at)
+       VALUES ('prj_a', 'a', '/tmp/a', 'make gate', '[]', '[]', 2, 'claude', 'acc_x', 40, 50, 10, ?, ?)`,
+      AT,
+      AT,
+    );
+    const card = db.$client.prepare(
+      `INSERT INTO inbox_items (id, project_id, kind, state, title, body, options, category, urgency, assignee,
+         answer, targets, created_at, updated_at)
+       VALUES (?, 'prj_a', ?, ?, ?, '', ?, 'product', 'low', 'me', ?, '[]', ?, ?)`,
+    );
+    const accept = JSON.stringify([{ label: 'accept', description: 'Looks good' }]);
+    card.run('inb_review_open', 'review', 'OPEN', 'Review: t', accept, null, AT, AT);
+    card.run(
+      'inb_review_answered',
+      'review',
+      'RESOLVED',
+      'Review: u',
+      accept,
+      JSON.stringify({ choice: 'accept' }),
+      AT,
+      AT,
+    );
+    card.run(
+      'inb_question_open',
+      'question',
+      'OPEN',
+      'Which?',
+      JSON.stringify([{ label: 'a', description: '' }]),
+      null,
+      AT,
+      AT,
+    );
+    migrateDatabase(db);
+  });
+
+  function card(id: string): { state: string; updated_at: string } {
+    return db.$client.prepare('SELECT state, updated_at FROM inbox_items WHERE id = ?').get(id) as {
+      state: string;
+      updated_at: string;
+    };
+  }
+
+  it('withdraws an open Review card, whose only answer just closed it', () => {
+    const row = card('inb_review_open');
+    expect(row.state).toBe('CANCELLED');
+    expect(row.updated_at > AT).toBe(true);
+    expect(row.updated_at).toMatch(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/);
+  });
+
+  it('leaves an answered Review card and every other open card as they were', () => {
+    expect(card('inb_review_answered')).toEqual({ state: 'RESOLVED', updated_at: AT });
+    expect(card('inb_question_open')).toEqual({ state: 'OPEN', updated_at: AT });
+  });
+});
+
 describe('migrating a database that has a gate command and evidence', () => {
   const AT = '2026-10-21T12:00:00.000Z';
 

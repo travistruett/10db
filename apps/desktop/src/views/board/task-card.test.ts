@@ -37,11 +37,19 @@ describe('cardSummary', () => {
     expect(summary).toContain('Not shipped: the gate failed.');
   });
 
-  it('waits on a dependency until it is in Done, even one shipped anyway and then merged', () => {
+  it('waits on a run shipped anyway until its pull request merges', () => {
     const dep = taskDto({ title: 'Dep', status: 'open', boardStatus: 'in_review' });
     const task = taskDto({ dependsOn: [dep.id] });
     expect(cardSummary(task, undefined, new Map([[dep.id, dep]]))).toContain('Waits on Dep.');
     const merged = { ...dep, boardStatus: 'done' as const };
     expect(cardSummary(task, undefined, new Map([[dep.id, merged]]))).not.toContain('Waits on');
+  });
+
+  // The daemon starts a task once its dependencies are done; it holds the batch at cut time until
+  // their pull requests merge, so the card has nothing to wait on before then.
+  it('does not wait on a finished dependency whose pull request is still open', () => {
+    const dep = taskDto({ title: 'Dep', status: 'done', boardStatus: 'in_review' });
+    const task = taskDto({ dependsOn: [dep.id] });
+    expect(cardSummary(task, undefined, new Map([[dep.id, dep]]))).not.toContain('Waits on');
   });
 });

@@ -71,6 +71,13 @@
       "when": 1793312894704,
       "tag": "0009_far_nebula",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1793382285291,
+      "tag": "0010_withdraw_review_cards",
+      "breakpoints": true
     }
   ]
 }

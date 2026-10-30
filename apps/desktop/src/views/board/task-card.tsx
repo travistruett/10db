@@ -36,10 +36,16 @@ function noteState(note: StartNote): TaskState {
   return { line: note.line, color: NOTE_COLOR[note.kind] };
 }
 
+/**
+ * The dependencies the task waits on before it can start, by the daemon's rule: one is finished once it
+ * is done, even with its pull request still open, or once a run shipped anyway has merged (in Done).
+ * The daemon holds the task's batch at cut time until the pull requests merge.
+ */
 function waitsOn(task: TaskDto, peers: TaskCardProps['peers']): string[] {
   return task.dependsOn.flatMap((id) => {
     const peer = peers.get(id);
-    return peer && peer.boardStatus !== BoardStatus.Done ? [peer.title] : [];
+    const finished = peer?.status === TaskStatus.Done || peer?.boardStatus === BoardStatus.Done;
+    return peer && !finished ? [peer.title] : [];
   });
 }
 

@@ -27,13 +27,21 @@
   request becomes history.
 - Passing the gate no longer raises a `review` card. Its only answer, accept, did nothing; the builder
   reviews the pull request, and In review shows the task until it merges. The `review` inbox kind stays
-  in the contract for cards already stored.
+  in the contract for cards already stored. The forward-only data migration `0010_withdraw_review_cards`
+  withdraws (state `CANCELLED`) every `review` card still open when a database upgrades, so none is left
+  in the Inbox with only an answer that closes it. Answered ones stay as history.
+- A dependent may start once its dependency is done, even while that pull request is still In review,
+  as before; the cut holds its batch until the dependency's pull request merges (`unmergedDependencies`).
+  A run shipped anyway counts only once its pull request merged. The card says "Waits on" by this same
+  rule.
 
 ## Why
 
 Done used to mean "a pull request exists", although its checks may fail and nobody may merge it. The
 builder agreed that done means CI green and merged. The tracked pull request state already reaches the
-desktop on `BatchDto.pr`, so the column is derived from it with no new stored state and no migration.
+desktop on `BatchDto.pr`, so the column is derived from it with no new stored state and no schema
+change. The one migration only withdraws stored `review` cards: it runs once, before the daemon serves,
+and the desktop refetches the Inbox when it reconnects.
 
 Reopen is a new run of the task rather than a re-follow of the old pull request, because 10db does not
 follow a pull request that GitHub reopens (`decisions/2026-10-29-pull-request-watch.md`).
