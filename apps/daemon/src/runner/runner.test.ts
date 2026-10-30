@@ -14,6 +14,7 @@ import {
   ReviewCardDetail,
   reviewRounds,
   type AccountId,
+  type WorkstreamId,
 } from '@10db/contracts';
 import {
   acquireLease,
@@ -53,7 +54,7 @@ import { DEFAULT_RUNNER_LIMITS } from '../runner';
 import { createGit } from '../git';
 import { silentLogger } from '../log';
 import { createGateRunner, type GateRequest, type GateResult } from '../verify';
-import type { BaseUpdate, BaseUpdates } from '../delivery';
+import type { BaseUpdate, BaseUpdates, MigrationsBase, MigrationsBaseTake } from '../delivery';
 import { allowedToolsFor } from '../permissions';
 import {
   createLaneSandbox,
@@ -3632,6 +3633,55 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
         expect(listEvidence(engine.store.db, workstream.id)).toEqual([]);
       });
     });
+  });
+});
+
+describe('the base before a task that holds the migrations hazard from its start', () => {
+  /** Answers `answer`, recording each ask and how many sessions had started by then. */
+  function recordingMigrationsBase(answer: MigrationsBaseTake) {
+    const asked: { id: WorkstreamId; sessions: number }[] = [];
+    const migrationsBase: MigrationsBase = {
+      take: (id) => {
+        asked.push({ id, sessions: engine.adapter.prompts.length });
+        return Promise.resolve(answer);
+      },
+    };
+    return { asked, migrationsBase };
+  }
+
+  async function run(migrationsBase: MigrationsBase, areas: string[]) {
+    engine = await createTestEngine({ Alpha: [[turn]] }, {}, { migrationsBase });
+    const { workstream } = engine.addTask('Alpha', areas);
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    return workstream;
+  }
+
+  it('is brought in before its first session, which keeps the hazard', async () => {
+    const { asked, migrationsBase } = recordingMigrationsBase({ kind: 'ready' });
+    const workstream = await run(migrationsBase, ['api', 'migrations']);
+    expect(asked).toEqual([{ id: workstream.id, sessions: 0 }]);
+    expect(engine.adapter.prompts[0]?.prompt).toContain(
+      'Your claims: area api, hazard migrations.',
+    );
+  });
+
+  it("gives the hazard back when the branch can't take its base, and the session starts without it", async () => {
+    const { asked, migrationsBase } = recordingMigrationsBase({
+      kind: 'held',
+      inboxId: mintId('InboxItem'),
+      instruction: 'origin/main conflicts with this branch in README.md',
+    });
+    const workstream = await run(migrationsBase, ['api', 'migrations']);
+    expect(asked).toEqual([{ id: workstream.id, sessions: 0 }]);
+    expect(engine.adapter.prompts[0]?.prompt).toContain('Your claims: area api.');
+  });
+
+  it('is not asked for a task without the hazard', async () => {
+    const { asked, migrationsBase } = recordingMigrationsBase({ kind: 'ready' });
+    await run(migrationsBase, ['api']);
+    expect(asked).toEqual([]);
+    expect(engine.adapter.prompts).toHaveLength(1);
   });
 });
 
