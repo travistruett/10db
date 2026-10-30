@@ -112,7 +112,7 @@ import { createWatcher, systemWatch, type WatchFn } from '../watcher';
 import { createProjectPinStore } from './checkout-pins';
 import { createGitCardAnswers, createGitRefusalHandler } from './git-refusal';
 import { acquireInstanceLock } from './instance-lock';
-import { removeRuntimeFiles, writeRuntimeFiles } from './runtime-files';
+import { removeRuntimeFiles, writeRuntimeFiles } from '../runtime-files';
 import { createServices } from './services';
 import { assertWorktreeRootAllowed, DEFAULT_WORKTREE_BASE, worktreeRootFor } from './worktree-root';
 
