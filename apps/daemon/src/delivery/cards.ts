@@ -5,6 +5,7 @@ import {
   type BatchId,
   type FailingCheckDto,
   type ProjectDto,
+  type ProjectId,
   type TaskId,
 } from '@10db/contracts';
 import type { Json } from '@10db/db';
@@ -107,6 +108,10 @@ export const startCards = {
   fetchFailed: (base: string, error: unknown): Card => ({
     title: `${NOT_STARTED}: git fetch origin ${base} failed`,
     body: `${detailOf(error)}\n\nCheck that ${base} exists on origin and that git reaches origin from your login shell (its credential helper or SSH agent), then start again.`,
+  }),
+  branchMissing: (branch: string): Card => ({
+    title: `Not started: origin has no branch named ${branch}`,
+    body: `A task set to merge into ${branch} is built from it, and its pull request targets it, so ${branch} has to exist on origin first. Create it on origin (git push origin <commit>:refs/heads/${branch}), or change where the task lands, then start again.`,
   }),
   ghUnavailable: (error: unknown): Card =>
     ghCard(NOT_STARTED, error, 'start again') ?? {
@@ -440,6 +445,38 @@ export const shipCards = {
         : `Nothing in it finished. The local branch ${batch.branch ?? '(none)'} is kept.`,
     detail: { batchId: batch.id },
   }),
+};
+
+/** The fold key of the project's repository-doesn't-allow-auto-merge card: one stays open at a time. */
+export const autoMergeOffKey = (projectId: ProjectId): string => `auto-merge-off:${projectId}`;
+
+/** What delivery tells the builder when a pull request that should merge by itself can't. */
+export const mergeCards = {
+  /** The repository's own setting is off; every later pull request of the project waits the same way. */
+  notAllowed: (
+    project: Pick<ProjectDto, 'id'>,
+    repo: string,
+    batch: BatchDto,
+    prUrl: string,
+  ): Card => ({
+    title: "This repository doesn't allow auto-merge",
+    body: `GitHub's "Allow auto-merge" setting is off for ${repo}, so a pull request can't merge itself when its checks pass. The pull request for batch "${batch.title}" is open and waits for you to merge it: ${prUrl}\n\nTurn on Allow auto-merge in ${repo}'s settings on GitHub (Settings, General, Pull Requests) and 10db will have later pull requests merge by themselves.`,
+    foldKey: autoMergeOffKey(project.id),
+    detail: { batchId: batch.id },
+  }),
+  /** GitHub turned this one pull request down, or gh could not ask. */
+  refused: (batch: BatchDto, prUrl: string, error: unknown): Card => {
+    const detail = detailOf(error);
+    const nothingToWaitFor = /clean status/i.test(detail)
+      ? `\n\nGitHub says nothing is left for it to wait for, which usually means ${batch.baseBranch} has no required checks, so there is nothing for auto-merge to wait on.`
+      : '';
+    return {
+      title: `Pull request opened but not set to merge by itself: batch "${batch.title}"`,
+      body: `${detail}${nothingToWaitFor}\n\nThe pull request is open and waits for you to merge it: ${prUrl}`,
+      foldKey: `auto-merge-refused:${batch.id}`,
+      detail: { batchId: batch.id },
+    };
+  },
 };
 
 /** The place 10db switches a checkout back to, in words. */

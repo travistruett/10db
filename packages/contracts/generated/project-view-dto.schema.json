@@ -168,6 +168,13 @@
     "baseBranch": {
       "type": "string"
     },
+    "landing": {
+      "type": "string",
+      "enum": [
+        "merge",
+        "hold"
+      ]
+    },
     "prTitlePrefix": {
       "type": [
         "string",
@@ -243,6 +250,9 @@
             },
             "baseBranch": {
               "type": "string"
+            },
+            "autoMerge": {
+              "type": "boolean"
             },
             "baseSha": {
               "type": [
@@ -394,6 +404,7 @@
             "state",
             "branch",
             "baseBranch",
+            "autoMerge",
             "baseSha",
             "repo",
             "prUrl",
@@ -447,6 +458,9 @@
           },
           "baseBranch": {
             "type": "string"
+          },
+          "autoMerge": {
+            "type": "boolean"
           },
           "baseSha": {
             "type": [
@@ -598,6 +612,7 @@
           "state",
           "branch",
           "baseBranch",
+          "autoMerge",
           "baseSha",
           "repo",
           "prUrl",
@@ -632,6 +647,7 @@
     "budgetCeiling",
     "delivery",
     "baseBranch",
+    "landing",
     "prTitlePrefix",
     "allowedCommands",
     "sandboxLoopback",
