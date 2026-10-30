@@ -3,6 +3,7 @@ import { createWriteStream, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { PermissionRuleDto, ProjectDto } from '@10db/contracts';
 import type { Logger } from '../log';
+import { atPriority } from '../priority';
 import { BlockedRun, blockedHostsNote, createBlockedHostFilter } from './blocked-hosts';
 import {
   DOCKER_REFUSAL,
@@ -129,7 +130,9 @@ function runGroup(
   let tail = '';
   let timedOut = false;
   let aborted = false;
-  const child = spawn(target.file, [...target.args], {
+  // Above lane work and below the builder's apps, so a lane can't starve the gate into a timeout.
+  const launch = atPriority('gate', target.file, target.args);
+  const child = spawn(launch.file, [...launch.args], {
     cwd: target.cwd,
     env: target.env,
     detached: true,
