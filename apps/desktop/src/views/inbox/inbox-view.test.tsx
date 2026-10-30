@@ -4,7 +4,7 @@ import { http, HttpResponse, type RequestHandler, type WebSocketHandler } from '
 import { describe, expect, it } from 'vitest';
 import { queryKeys } from '../../daemon/queries';
 import { baseHandlers, daemonUrl, eventStream, renderApp, server } from '../../test/daemon';
-import { inboxItemDto } from '../../test/fixtures';
+import { batchDto, inboxItemDto } from '../../test/fixtures';
 
 function serve(...overrides: (RequestHandler | WebSocketHandler)[]): void {
   server.use(
@@ -63,6 +63,76 @@ const corners = inboxItemDto({
     { label: 'Round', description: '' },
     { label: 'Square', description: '' },
   ],
+});
+
+const FULL_REVIEW =
+  '1. BLOCKING apps/daemon/src/runner/runner.ts:673 the card hides the findings.\n   Trigger: the retry limit.\n2. NOTE the empty state has no test.';
+const rejectedCard = inboxItemDto({
+  kind: 'flag',
+  title: 'Workstream failed: Track each shipped pull request',
+  body: 'The review step rejected the work and the retry limit (3) is used up',
+  options: [
+    { label: 'Retry', description: 'Run this workstream again in its batch' },
+    { label: 'Ship anyway', description: 'Ship the batch without it' },
+    { label: 'Later', description: 'Decide later' },
+  ],
+  detail: {
+    reviewRejection: {
+      role: 'review',
+      personaName: 'Reviewer',
+      at: '2026-10-29T12:00:00.000Z',
+      findings: [
+        {
+          severity: 'BLOCKING',
+          location: 'apps/daemon/src/runner/runner.ts:673',
+          text: 'BLOCKING apps/daemon/src/runner/runner.ts:673 the card hides the findings.',
+        },
+        { severity: 'NOTE', location: null, text: 'NOTE the empty state has no test.' },
+      ],
+      summary: FULL_REVIEW,
+    },
+  },
+});
+
+describe('InboxView review findings', () => {
+  it('shows each finding with its severity and file:line on a failed card', async () => {
+    inbox([rejectedCard]);
+    renderApp('/inbox');
+    await screen.findByText(rejectedCard.title);
+    const card = selectedCard();
+    expect(within(card).getByText('BLOCKING')).toBeTruthy();
+    expect(within(card).getByText('apps/daemon/src/runner/runner.ts:673')).toBeTruthy();
+    expect(within(card).getByText('NOTE')).toBeTruthy();
+  });
+
+  it('keeps the full review one click away', async () => {
+    inbox([rejectedCard]);
+    renderApp('/inbox');
+    await screen.findByText(rejectedCard.title);
+    const card = selectedCard();
+    expect(within(card).queryByText(/Trigger: the retry limit\./)).toBeNull();
+    fireEvent.click(within(card).getByRole('button', { name: 'Show the full review' }));
+    expect(
+      within(card).getByText((text) => text.includes('Trigger: the retry limit.')),
+    ).toBeTruthy();
+  });
+
+  it('sends the note with Retry', async () => {
+    const { answers } = inbox([rejectedCard]);
+    renderApp('/inbox');
+    await screen.findByText(rejectedCard.title);
+    const card = selectedCard();
+    fireEvent.click(within(card).getByRole('radio', { name: /Retry/ }));
+    fireEvent.change(within(card).getByLabelText('Note for the agent (optional)'), {
+      target: { value: 'Reuse the card component.' },
+    });
+    fireEvent.click(within(card).getByRole('button', { name: /Send answer/ }));
+    await waitFor(() => {
+      expect(answers).toEqual([
+        { id: rejectedCard.id, body: { choice: 'Retry', note: 'Reuse the card component.' } },
+      ]);
+    });
+  });
 });
 
 describe('InboxView', () => {
@@ -198,6 +268,117 @@ describe('InboxView', () => {
     await waitFor(() => {
       expect(answers).toEqual([{ id: flag.id, body: { choice: 'dismissed' } }]);
     });
+  });
+
+  it.each([
+    {
+      name: 'links a flag card to the failing check on GitHub',
+      link: 'https://github.com/acme/widgets/actions/runs/1',
+      shown: true,
+    },
+    { name: 'offers no link when the detail has none', link: undefined, shown: false },
+    { name: 'offers no link that is not https', link: 'javascript:alert(1)', shown: false },
+    {
+      name: 'offers no button for a check off github.com, which the app cannot open',
+      link: 'https://ci.example.com/job/1',
+      shown: false,
+    },
+    {
+      name: 'offers no button for a host that only starts like github.com',
+      link: 'https://github.com.example.net/acme/widgets',
+      shown: false,
+    },
+  ])('$name', async ({ link, shown }) => {
+    const card = inboxItemDto({
+      kind: 'flag',
+      title: 'Pull request checks failed for "Alpha": build',
+      body: 'https://github.com/acme/widgets/actions/runs/1\n\nFailing:\n- build',
+      options: [],
+      detail: link === undefined ? { batchId: 'bat_x' } : { batchId: 'bat_x', link },
+    });
+    inbox([card]);
+    renderApp('/inbox');
+
+    fireEvent.click(await screen.findByText(card.title));
+    await screen.findByText('Failing:', { exact: false });
+    const anchor = screen.queryByRole('link', { name: 'Open on GitHub' });
+    if (shown) expect(anchor?.getAttribute('href')).toBe(link);
+    else expect(anchor).toBeNull();
+  });
+
+  it.each([
+    {
+      name: 'links a gate card to its failing step log',
+      logPath: '/wt/.gate/test.log',
+      shown: true,
+    },
+    {
+      name: 'offers no log link for a path that is not absolute',
+      logPath: '../x.log',
+      shown: false,
+    },
+  ])('$name', async ({ logPath, shown }) => {
+    const card = inboxItemDto({
+      kind: 'flag',
+      title: 'Batch "Alpha" not shipped: the gate failed (exit 1) in test',
+      body: 'Failed steps:\n- test: pnpm test',
+      options: [],
+      detail: { batchId: 'bat_x', logPath },
+    });
+    inbox([card]);
+    renderApp('/inbox');
+
+    fireEvent.click(await screen.findByText(card.title));
+    await screen.findByText('Failed steps:', { exact: false });
+    const anchor = screen.queryByRole('link', { name: 'Open the step log' });
+    if (shown) {
+      expect(anchor?.getAttribute('href')).toBe(`file://${logPath}`);
+      expect(anchor?.getAttribute('title')).toBe(logPath);
+    } else expect(anchor).toBeNull();
+  });
+
+  it.each([
+    { button: 'Retry', route: 'ship' },
+    { button: 'Abandon', route: 'abandon' },
+  ])(
+    "$button on a gate card that offers it acts on the card's batch, then dismisses the card",
+    async ({ button, route }) => {
+      const batch = batchDto();
+      const card = inboxItemDto({
+        kind: 'flag',
+        title:
+          'Batch "Alpha" not shipped: the gate failed twice, in tests the batch didn\'t change',
+        body: "This failure looks unrelated to the batch's work.",
+        options: [],
+        detail: { batchId: batch.id, actions: ['retry', 'abandon'] },
+      });
+      const { answers } = inbox([card]);
+      const posted: string[] = [];
+      server.use(
+        http.post(daemonUrl(`/batches/:batchId/${route}`), ({ params }) => {
+          posted.push(String(params['batchId']));
+          return HttpResponse.json(batch);
+        }),
+      );
+      renderApp('/inbox');
+
+      fireEvent.click(await screen.findByText(card.title));
+      fireEvent.click(await screen.findByRole('button', { name: button }));
+      await waitFor(() => {
+        expect(answers).toEqual([{ id: card.id, body: { choice: 'dismissed' } }]);
+      });
+      expect(posted).toEqual([batch.id]);
+    },
+  );
+
+  it('offers no Retry or Abandon on a card that does not ask for them', async () => {
+    const card = flag('Batch "Alpha" not shipped: the gate failed (exit 1)', 'Last output:');
+    inbox([card]);
+    renderApp('/inbox');
+    fireEvent.click(await screen.findByText(card.title));
+    await screen.findByText('Last output:');
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Abandon' })).toBeNull();
   });
 
   it('explains a card answered elsewhere and refreshes the list', async () => {
@@ -668,5 +849,65 @@ describe('InboxView', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
       expect(await screen.findByText('Nothing needs you right now.')).toBeTruthy();
     });
+  });
+});
+
+describe('the resolved view', () => {
+  const closedBy10db = inboxItemDto({
+    kind: 'flag',
+    state: 'RESOLVED',
+    title: 'Batch not started: 10db will not run git in /repo',
+    body: 'Nothing was pushed.',
+    options: [],
+    detail: { resolution: { by: '10db', reason: 'Alpha started' } },
+    updatedAt: '2026-10-30T10:00:00.000Z',
+  });
+  const answered = inboxItemDto({
+    kind: 'question',
+    state: 'RESOLVED',
+    title: 'Which badge color?',
+    answer: { choice: 'Teal' },
+    updatedAt: '2026-10-30T11:00:00.000Z',
+  });
+
+  /** Serves the open and resolved lists; returns the `recent` count each resolved request asked for. */
+  function serveBoth(open: InboxItemDto[], resolved: InboxItemDto[]): (string | null)[] {
+    const recent: (string | null)[] = [];
+    serve(
+      http.get(daemonUrl('/inbox'), ({ request }) => {
+        const params = new URL(request.url).searchParams;
+        if (params.get('state') !== 'RESOLVED') return HttpResponse.json(open);
+        recent.push(params.get('recent'));
+        return HttpResponse.json(resolved);
+      }),
+    );
+    return recent;
+  }
+
+  it('lists resolved cards, newest first, saying who closed each and why', async () => {
+    const recent = serveBoth([color], [closedBy10db, answered]);
+    renderApp('/inbox');
+    await screen.findByText('Which badge color?');
+    fireEvent.click(screen.getByRole('tab', { name: 'Resolved' }));
+
+    const rows = await screen.findAllByTestId('resolved-card');
+    // Only the most recent ones are fetched: the resolved list only grows.
+    expect(recent).toEqual(['100']);
+    expect(rows.map((row) => row.textContent)).toEqual([
+      expect.stringContaining('Which badge color?'),
+      expect.stringContaining('Batch not started: 10db will not run git in /repo'),
+    ]);
+    expect(rows[0]?.textContent).toContain('Answered: Teal');
+    expect(rows[1]?.textContent).toContain('Resolved by 10db: Alpha started');
+    // The open cards and their keys are not there.
+    expect(screen.queryByRole('button', { name: 'Send Answer' })).toBeNull();
+  });
+
+  it('says so when nothing has been resolved', async () => {
+    serveBoth([color], []);
+    renderApp('/inbox');
+    await screen.findByText('Which badge color?');
+    fireEvent.click(screen.getByRole('tab', { name: 'Resolved' }));
+    expect(await screen.findByText('Nothing has been resolved yet.')).toBeTruthy();
   });
 });

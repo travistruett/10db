@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import {
   chmodSync,
   existsSync,
+  linkSync,
   mkdirSync,
   renameSync,
   rmSync,
@@ -19,6 +20,7 @@ import {
 import {
   acquireClaims,
   claimRequestsForTask,
+  copyHazardNames,
   createTestStore,
   insertBatch,
   insertTask,
@@ -43,7 +45,7 @@ import { ManualClock, systemClock } from '../clock';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit } from '../git';
 import { createInboxService, type InboxService } from '../inbox';
-import { silentLogger } from '../log';
+import { silentLogger, type Logger } from '../log';
 import { STRAY_BULK_THRESHOLD } from './strays';
 import { createWatcher, systemWatch, type WatchFn, type Watcher } from './index';
 
@@ -78,6 +80,7 @@ let inbox: InboxService;
 let repo: { path: string; cleanup(): void };
 let project: ProjectDto;
 let clock: ManualClock;
+let logged: { obj: Record<string, unknown>; msg: string | undefined }[];
 let fake: FakeWatch;
 let watcher: Watcher;
 
@@ -89,11 +92,16 @@ beforeEach(() => {
   project = seedProject(base, { repoPath: repo.path });
   clock = new ManualClock();
   fake = fakeWatch();
+  logged = [];
+  const recording: Logger = {
+    ...silentLogger,
+    info: (obj, msg) => logged.push({ obj: obj as Record<string, unknown>, msg }),
+  };
   watcher = createWatcher({
     state,
     inbox,
     git: createGit(),
-    logger: silentLogger,
+    logger: recording,
     clock,
     watch: fake.watch,
     batchMs: 500,
@@ -459,6 +467,101 @@ describe('watcher', () => {
     });
   });
 
+  describe("Claude Code's own bookkeeping files", () => {
+    const lock = '.claude/scheduled_tasks.lock';
+    const bookkeepingLogs = () =>
+      logged.filter((l) => l.msg?.includes('Claude Code bookkeeping')).map((l) => l.obj['path']);
+
+    it.each([
+      { name: 'untracked', ignore: '' },
+      { name: 'gitignored', ignore: '.claude/\n' },
+    ])('raises no card for the lock when it is $name, and logs it', async ({ ignore }) => {
+      running();
+      writeFileSync(join(repo.path, '.gitignore'), ignore);
+      touch(lock);
+      watcher.sync();
+      emit(lock);
+      await watcher.flush();
+      expect(flags()).toEqual([]);
+      expect(bookkeepingLogs()).toEqual([lock]);
+    });
+
+    it('raises no card for the lock when the session ends and removes it', async () => {
+      running();
+      watcher.sync();
+      emit(lock);
+      await watcher.flush();
+      expect(flags()).toEqual([]);
+      expect(bookkeepingLogs()).toEqual([lock]);
+    });
+
+    it('logs the staging directory, and the new .claude holding only it, without a card', async () => {
+      running();
+      mkdirSync(join(repo.path, '.claude/.cc-writes'), { recursive: true, mode: 0o700 });
+      watcher.sync();
+      emit('.claude');
+      emit('.claude/.cc-writes');
+      await watcher.flush();
+      expect(flags()).toEqual([]);
+      expect(bookkeepingLogs()).toEqual(['.claude', '.claude/.cc-writes']);
+      const writtenBy = logged.find((l) => l.obj['path'] === '.claude/.cc-writes')?.obj[
+        'writtenBy'
+      ];
+      expect(writtenBy).toContain('atomic-write staging directory');
+    });
+
+    it.each([
+      { name: 'untracked', ignore: '' },
+      { name: 'gitignored', ignore: '.claude/\n' },
+    ])('still flags the lock as a hard link to the settings, $name', async ({ ignore }) => {
+      running();
+      writeFileSync(join(repo.path, '.gitignore'), ignore);
+      touch('.claude/settings.local.json');
+      linkSync(join(repo.path, '.claude/settings.local.json'), join(repo.path, lock));
+      watcher.sync();
+      emit(lock);
+      await watcher.flush();
+      expect(flags().map((f) => f.body)).toEqual([lock]);
+      expect(bookkeepingLogs()).toEqual([]);
+    });
+
+    it('raises no card for the lock at the end of a step, and logs it', async () => {
+      const { workstream } = running();
+      touch(lock);
+      expect(await watcher.stepEnd(workstream.id)).toEqual([]);
+      expect(flags()).toEqual([]);
+      expect(bookkeepingLogs()).toEqual([lock]);
+    });
+
+    it('still flags the lock as a link', async () => {
+      running();
+      mkdirSync(join(repo.path, '.claude'));
+      symlinkSync(join(repo.path, 'elsewhere'), join(repo.path, lock));
+      watcher.sync();
+      emit(lock);
+      await watcher.flush();
+      expect(flags().map((f) => f.body)).toEqual([lock]);
+    });
+
+    it.each([
+      '.claude/settings.json',
+      '.claude/settings.local.json',
+      '.claude/hooks/pre.sh',
+      '.claude/agents/a.md',
+      '.claude/skills/s/SKILL.md',
+    ])('still flags %s beside the lock', async (rel) => {
+      running();
+      touch(lock);
+      touch(rel);
+      watcher.sync();
+      emit(lock);
+      emit(rel);
+      await watcher.flush();
+      expect(flags().map((f) => f.body)).toEqual([rel]);
+      expect(bookkeepingLogs()).toEqual([lock]);
+    });
+  });
+
   it('flags a write inside the claim of a workstream that is not running', async () => {
     const a = running('Alpha', ['api']);
     const idle = seedWorkstream(base, { project, title: 'Beta', areas: ['ui'] });
@@ -723,6 +826,7 @@ describe('worktree checkouts', () => {
         requests: claimRequestsForTask(task, project),
         leaseExpiresAt: '2999-01-01T00:00:00.000Z',
         areaScope: batch.id,
+        copyHazards: copyHazardNames(project),
       });
       transitionWorkstream(ctx, workstream.id, { to: WorkstreamState.Starting, fence: null });
       transitionWorkstream(ctx, workstream.id, { to: WorkstreamState.Running, fence: null });
@@ -781,20 +885,39 @@ describe('worktree checkouts', () => {
     ).toEqual([`${a.path}: docs/stray.md`, `${b.path}: docs/stray.md`].sort());
   });
 
-  it('counts a hazard claim held in another batch as held, and names its holder on a foreign write', async () => {
-    const holder = inWorktree('Alpha', 'harness');
+  it('counts a per-project hazard claim held in another batch as held, and names its holder on a foreign write', async () => {
+    const holder = inWorktree('Alpha', 'migrations');
     const writer = inWorktree('Beta', 'api');
     watcher.sync();
-    writeAt(writer.path, 'AGENTS.md');
+    writeAt(writer.path, 'db/migrations/0001.sql');
     writeAt(writer.path, 'src/api/ok.ts');
     await watcher.flush();
     const open = flags();
     expect(open).toHaveLength(1);
     expect(open[0]).toMatchObject({
       title: "Write inside another workstream's claim",
-      body: `${writer.path}: AGENTS.md`,
+      body: `${writer.path}: db/migrations/0001.sql`,
     });
     expect(open[0]?.detail).toMatchObject({ claimedBy: [holder.workstream.id] });
+  });
+
+  it("judges AGENTS.md in each worktree by that worktree's own claim, with no foreign write", async () => {
+    const holder = inWorktree('Alpha', 'harness');
+    const other = inWorktree('Beta', 'harness');
+    const bystander = inWorktree('Gamma', 'api');
+    watcher.sync();
+    writeAt(holder.path, 'AGENTS.md');
+    writeAt(other.path, 'apps/daemon/AGENTS.md');
+    await watcher.flush();
+    expect(flags()).toEqual([]);
+    writeAt(bystander.path, 'AGENTS.md');
+    await watcher.flush();
+    const open = flags();
+    expect(open).toHaveLength(1);
+    expect(open[0]).toMatchObject({
+      title: 'Write outside every claim',
+      body: `${bystander.path}: AGENTS.md`,
+    });
   });
 
   it("does not let a worktree batch's area claim excuse a write in the main checkout", async () => {

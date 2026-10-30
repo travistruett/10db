@@ -14,6 +14,7 @@ import {
   TaskPatch,
   TaskStartedError,
   TaskStatus,
+  taskLandingFor,
   Title,
   WorkstreamState,
   type ProjectId,
@@ -21,6 +22,7 @@ import {
   type TaskConfig,
   type TaskDto,
   type TaskId,
+  type TaskLanding,
 } from '@10db/contracts';
 import { and, asc, desc, eq, inArray, max, ne } from 'drizzle-orm';
 import * as schema from '../schema';
@@ -28,6 +30,7 @@ import { getBoardColumn } from './board-columns';
 import { getFlow } from './flows';
 import { getProject } from './projects';
 import type { DbReader, WriteContext } from './store';
+import { transitionWorkstream } from './workstreams';
 
 export interface BoardStatusInput {
   readonly taskStatus: TaskStatus;
@@ -61,12 +64,40 @@ export function deriveBoardStatus({
   if (
     workstreamState === WorkstreamState.WaitingHuman ||
     workstreamState === WorkstreamState.PausedLimit ||
+    workstreamState === WorkstreamState.Held ||
     workstreamState === WorkstreamState.Failed
   ) {
     return BoardStatus.Blocked;
   }
   if (workstreamState !== null && !isTerminal(workstreamState)) return BoardStatus.InProgress;
   return depsDone ? BoardStatus.Ready : BoardStatus.Backlog;
+}
+
+/** The two columns that hold a task's landing. */
+function landingColumns(landing: TaskLanding): {
+  landing: TaskLanding['kind'];
+  landingBranch: string | null;
+} {
+  return {
+    landing: landing.kind,
+    landingBranch: landing.kind === 'branch' ? landing.branch : null,
+  };
+}
+
+function landingOf(row: {
+  landing: TaskLanding['kind'];
+  landingBranch: string | null;
+}): TaskLanding {
+  switch (row.landing) {
+    case 'hold':
+      return { kind: 'hold' };
+    case 'branch':
+      return row.landingBranch === null
+        ? { kind: 'base' }
+        : { kind: 'branch', branch: row.landingBranch };
+    case 'base':
+      return { kind: 'base' };
+  }
 }
 
 export function insertTask(ctx: WriteContext, projectId: ProjectId, input: TaskInput): TaskDto {
@@ -96,7 +127,11 @@ export function insertTask(ctx: WriteContext, projectId: ProjectId, input: TaskI
     if (deps.some((d) => d.status === TaskStatus.Cancelled))
       throw new InvalidError('A removed task cannot be a dependency');
   }
-  return writeTask(ctx, projectId, { ...config, proposalId: null });
+  return writeTask(ctx, projectId, {
+    ...config,
+    landing: config.landing ?? taskLandingFor(project.landing),
+    proposalId: null,
+  });
 }
 
 /**
@@ -113,6 +148,7 @@ export function insertTaskFromProposal(
   },
 ): TaskDto {
   return writeTask(ctx, input.projectId, {
+    landing: taskLandingFor(getProject(ctx.tx, input.projectId).landing),
     title: Title.parse(input.title),
     description: input.description,
     acceptanceCriteria: [],
@@ -128,7 +164,10 @@ export function insertTaskFromProposal(
 function writeTask(
   ctx: WriteContext,
   projectId: ProjectId,
-  config: TaskConfig & { readonly proposalId: ProposalId | null },
+  config: Omit<TaskConfig, 'landing'> & {
+    readonly landing: TaskLanding;
+    readonly proposalId: ProposalId | null;
+  },
 ): TaskDto {
   const order = ctx.tx
     .select({ value: max(schema.tasks.boardOrder) })
@@ -145,6 +184,7 @@ function writeTask(
     riskTags: config.riskTags,
     flowId: config.flowId,
     proposalId: config.proposalId,
+    ...landingColumns(config.landing),
     status: TaskStatus.Open,
     boardOrder: (order?.value ?? 0) + 1,
     workspaceMode: 'shared' as const,
@@ -210,6 +250,7 @@ function toTaskDto(db: DbReader, row: typeof schema.tasks.$inferSelect): TaskDto
     areas: row.areas,
     riskTags: row.riskTags,
     flowId: row.flowId,
+    landing: landingOf(row),
     status: row.status,
     boardOrder: row.boardOrder,
     boardColumnId: row.boardColumnId,
@@ -256,7 +297,9 @@ export function cancelTask(ctx: WriteContext, id: TaskId): TaskDto {
   const task = getTask(ctx.tx, id);
   if (task.status === TaskStatus.Cancelled) return task;
   const run = latestRun(ctx.tx, id);
-  if (task.status !== TaskStatus.Open || run)
+  // A held run never ran, so it goes with its task; any other run belongs to the workstream's own cancel.
+  const held = run?.state === WorkstreamState.Held ? run : undefined;
+  if (task.status !== TaskStatus.Open || (run && !held))
     throw new TaskStartedError(
       task.title,
       run ? { id: run.id, live: !isTerminal(run.state) } : null,
@@ -278,6 +321,12 @@ export function cancelTask(ctx: WriteContext, id: TaskId): TaskDto {
       `Batch "${cutting.title}" is being cut; remove ${task.title} once it has started`,
     );
   refuseWhileOpenDependents(ctx, task, 'remove');
+  if (held)
+    transitionWorkstream(ctx, held.id, {
+      to: WorkstreamState.Cancelled,
+      fence: null,
+      reason: 'removed by the builder',
+    });
   return retireTask(ctx, id);
 }
 
@@ -354,9 +403,27 @@ export function patchTask(ctx: WriteContext, id: TaskId, patch: TaskPatch): Task
   if (getTask(ctx.tx, id).status === TaskStatus.Cancelled)
     throw new ConflictError('A removed task can no longer be edited');
   if (changes.flowId) getFlow(ctx.tx, changes.flowId);
+  const { landing, ...fields } = changes;
+  if (landing !== undefined) {
+    // The branch is cut and the pull request opened for the task's batch, so once the task has run
+    // its landing is its batch's.
+    const started = ctx.tx
+      .select({ id: schema.workstreams.id })
+      .from(schema.workstreams)
+      .where(eq(schema.workstreams.taskId, id))
+      .get();
+    if (started)
+      throw new ConflictError(
+        `${getTask(ctx.tx, id).title} has already started, so where its work lands is fixed`,
+      );
+  }
   ctx.tx
     .update(schema.tasks)
-    .set({ ...changes, updatedAt: ctx.now })
+    .set({
+      ...fields,
+      ...(landing === undefined ? {} : landingColumns(landing)),
+      updatedAt: ctx.now,
+    })
     .where(eq(schema.tasks.id, id))
     .run();
   ctx.emit({ type: EventType.TaskChanged, entityType: 'task', entityId: id });

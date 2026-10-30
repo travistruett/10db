@@ -1,9 +1,9 @@
-import { RiskTag, type TaskPatch } from '@10db/contracts';
+import { mintId, RiskTag, type TaskPatch } from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, renderWithDaemon, server } from '../../test/daemon';
-import { batchDto, flowDto, taskDto, workstreamDto } from '../../test/fixtures';
+import { batchDto, flowDto, stepDto, taskDto, workstreamDto } from '../../test/fixtures';
 import { RISK_LABEL } from './risk-labels';
 import { TaskDrawer } from './task-drawer';
 
@@ -18,6 +18,8 @@ function serve(...overrides: Parameters<typeof server.use>) {
 }
 
 interface Opts {
+  /** The base branch of a project that delivers by pull request. */
+  readonly pullRequestBase?: string;
   readonly task?: Parameters<typeof taskDto>[0];
   readonly workstream?: ReturnType<typeof workstreamDto>;
   readonly batch?: ReturnType<typeof batchDto>;
@@ -36,6 +38,7 @@ function open(opts: Opts = {}): { closed: () => number } {
       {...(opts.batch ? { batch: opts.batch } : {})}
       {...(opts.gateCommand ? { gateCommand: opts.gateCommand } : {})}
       {...(opts.workstreams ? { workstreams: opts.workstreams } : {})}
+      {...(opts.pullRequestBase ? { pullRequestBase: opts.pullRequestBase } : {})}
       onClose={() => {
         closes += 1;
       }}
@@ -114,6 +117,103 @@ describe('TaskDrawer', () => {
     });
     await waitFor(() => {
       expect(closed()).toBe(1);
+    });
+  });
+
+  describe('where the work lands', () => {
+    /** Serves the patch route and records what was sent. */
+    function serveSaves(): TaskPatch[] {
+      const patched: TaskPatch[] = [];
+      serve(
+        http.patch(daemonUrl('/tasks/:taskId'), async ({ request }) => {
+          patched.push((await request.json()) as TaskPatch);
+          return HttpResponse.json(taskDto());
+        }),
+      );
+      return patched;
+    }
+    const choice = async (name: string) =>
+      within(await dialog()).getByRole<HTMLInputElement>('radio', { name });
+    const save = async () =>
+      fireEvent.click(within(await dialog()).getByRole('button', { name: 'Save Changes' }));
+
+    it('starts from the task and names the base branch', async () => {
+      serveSaves();
+      open({ pullRequestBase: 'develop', task: { landing: { kind: 'hold' } } });
+      expect((await choice('Hold for my review')).checked).toBe(true);
+      expect((await choice('Merge into develop')).checked).toBe(false);
+    });
+
+    it('shows the branch a task merges into', async () => {
+      serveSaves();
+      open({
+        pullRequestBase: 'main',
+        task: { landing: { kind: 'branch', branch: 'feature/x' } },
+      });
+      expect((await choice('Merge into another branch')).checked).toBe(true);
+      expect(
+        within(await dialog()).getByLabelText<HTMLInputElement>('Branch to merge into').value,
+      ).toBe('feature/x');
+    });
+
+    it('sends a changed landing with the other fields', async () => {
+      const patched = serveSaves();
+      open({ pullRequestBase: 'main' });
+      fireEvent.click(await choice('Hold for my review'));
+      await save();
+      await waitFor(() => {
+        expect(patched).toHaveLength(1);
+      });
+      expect(patched[0]).toMatchObject({ landing: { kind: 'hold' } });
+    });
+
+    it('sends nothing about it when it did not change', async () => {
+      const patched = serveSaves();
+      open({ pullRequestBase: 'main' });
+      await edit('Title', 'Another');
+      await save();
+      await waitFor(() => {
+        expect(patched).toHaveLength(1);
+      });
+      expect(patched[0]).not.toHaveProperty('landing');
+    });
+
+    it('counts a changed landing as an edit to discard', async () => {
+      serveSaves();
+      open({ pullRequestBase: 'main' });
+      fireEvent.click(await choice('Hold for my review'));
+      fireEvent.click(within(await dialog()).getByRole('button', { name: 'Cancel' }));
+      expect(await screen.findByText('Discard your changes to this task?')).toBeTruthy();
+    });
+
+    it('asks for a branch name before saving', async () => {
+      const patched = serveSaves();
+      open({ pullRequestBase: 'main' });
+      fireEvent.click(await choice('Merge into another branch'));
+      await save();
+      expect(await screen.findByText('Name the branch this task merges into')).toBeTruthy();
+      expect(patched).toEqual([]);
+    });
+
+    it('says where a started task will land, and offers no change', async () => {
+      serveSaves();
+      open({
+        pullRequestBase: 'main',
+        task: { workstreamId: workstreamDto().id },
+        batch: batchDto({ baseBranch: 'release', autoMerge: true }),
+        workstream: workstreamDto({ state: 'RUNNING' }),
+      });
+      const d = await dialog();
+      expect(within(d).getByText('Merges into release when checks pass')).toBeTruthy();
+      expect(within(d).queryByRole('radio')).toBeNull();
+    });
+
+    it('shows nothing for a project that commits directly', async () => {
+      serveSaves();
+      open();
+      await dialog();
+      expect(screen.queryByRole('radio')).toBeNull();
+      expect(screen.queryByText('Where it lands')).toBeNull();
     });
   });
 
@@ -300,6 +400,36 @@ describe('TaskDrawer', () => {
       });
     });
 
+    it('Retry posts the note the builder wrote, and no note when the field is empty', async () => {
+      const ws = workstreamDto({ state: 'FAILED', failureReason: 'boom' });
+      const bodies: unknown[] = [];
+      serve(
+        http.post(daemonUrl('/workstreams/:id/retry'), async ({ request }) => {
+          bodies.push(await request.json());
+          return HttpResponse.json({ ...ws, state: 'QUEUED' });
+        }),
+      );
+      open({ workstream: ws });
+      const d = await dialog();
+      // A gate failure, not a review: the note still reaches the next session, and says so.
+      expect(
+        within(d).getByText(
+          'The session the retry starts gets this note, and the review’s findings too when a review sent the work back.',
+        ),
+      ).toBeTruthy();
+      fireEvent.click(within(d).getByRole('button', { name: 'Retry' }));
+      await waitFor(() => {
+        expect(bodies).toEqual([{}]);
+      });
+      fireEvent.change(within(d).getByLabelText('Note for the next session (optional)'), {
+        target: { value: 'Use the existing card.' },
+      });
+      fireEvent.click(within(d).getByRole('button', { name: 'Retry' }));
+      await waitFor(() => {
+        expect(bodies).toEqual([{}, { note: 'Use the existing card.' }]);
+      });
+    });
+
     it('a retry refusal shows beside Retry', async () => {
       const ws = workstreamDto({ state: 'FAILED', failureReason: 'boom' });
       serve(
@@ -390,6 +520,64 @@ describe('TaskDrawer', () => {
       const d = await dialog();
       expect(within(d).queryByRole('button', { name: 'Retry' })).toBeNull();
       expect(within(d).queryByText('Failed')).toBeNull();
+    });
+  });
+
+  describe('review rounds', () => {
+    const round = (d: HTMLElement, index: number): HTMLElement => {
+      const found = within(d).getAllByTestId('review-round')[index];
+      if (!found) throw new Error(`no round ${String(index)}`);
+      return found;
+    };
+    const result = (verdict: 'approve' | 'reject', at: string, summary: string) => ({
+      summary,
+      verdict,
+      sessionId: mintId('Session'),
+      at,
+    });
+    const reviewed = (state: 'FAILED' | 'DONE') =>
+      workstreamDto({
+        state,
+        steps: [
+          stepDto(),
+          stepDto({
+            role: 'review',
+            personaName: 'Reviewer',
+            tools: 'read_only',
+            earlier: [
+              result('reject', '2026-10-29T10:00:00.000Z', '1. BLOCKING src/a.ts:12 no test.'),
+            ],
+            result: result('approve', '2026-10-29T11:00:00.000Z', 'Looks right.'),
+          }),
+        ],
+      });
+
+    it('lists every round with its verdict and findings, newest first', async () => {
+      serve();
+      open({ workstream: reviewed('DONE') });
+      const d = await dialog();
+      expect(within(d).getAllByTestId('review-round')).toHaveLength(2);
+      expect(within(round(d, 0)).getByText('Approved')).toBeTruthy();
+      expect(within(round(d, 1)).getByText('Sent back')).toBeTruthy();
+      expect(within(round(d, 1)).getByText('BLOCKING')).toBeTruthy();
+      expect(within(round(d, 1)).getByText('src/a.ts:12')).toBeTruthy();
+    });
+
+    it('keeps the full review one click away', async () => {
+      serve();
+      open({ workstream: reviewed('DONE') });
+      const d = await dialog();
+      const sentBack = round(d, 1);
+      expect(within(sentBack).queryByText('1. BLOCKING src/a.ts:12 no test.')).toBeNull();
+      fireEvent.click(within(sentBack).getByRole('button', { name: 'Show the full review' }));
+      expect(within(sentBack).getByText('1. BLOCKING src/a.ts:12 no test.')).toBeTruthy();
+    });
+
+    it('shows no section for a task nobody reviewed', async () => {
+      serve();
+      open({ workstream: workstreamDto({ steps: [stepDto()] }) });
+      await dialog();
+      expect(screen.queryByTestId('review-round')).toBeNull();
     });
   });
 });

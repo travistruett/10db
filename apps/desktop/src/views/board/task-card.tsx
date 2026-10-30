@@ -7,7 +7,7 @@ import {
 } from '@10db/contracts';
 import { Badge, Box, Group, Paper, Stack, Text } from '@mantine/core';
 import type { StartNote } from './start-note';
-import { taskState, type TaskState } from './task-state';
+import { reviewSentBackLine, taskState, type TaskState } from './task-state';
 
 export interface TaskCardProps {
   readonly task: TaskDto;
@@ -21,6 +21,8 @@ export interface TaskCardProps {
   readonly peers: ReadonlyMap<TaskId, Pick<TaskDto, 'title' | 'status'>>;
   /** The pull request of the batch that shipped a finished task. */
   readonly pullRequest?: string | undefined;
+  /** Where the work will land, for a project that delivers by pull request. */
+  readonly landing?: string | undefined;
   /** A Start asked for and not yet answered, or refused; it takes the place of the task's own line. */
   readonly startNote?: StartNote | null | undefined;
 }
@@ -49,17 +51,21 @@ export function cardSummary(
   peers: TaskCardProps['peers'],
   batch?: BatchDto,
   gateCommand: string | null = null,
+  landing: string | null = null,
   startNote: StartNote | null = null,
 ): string {
   const waits = waitsOn(task, peers);
   const criteria = task.acceptanceCriteria.length;
   const state = startNote ? noteState(startNote) : taskState(workstream, batch, gateCommand);
+  const sentBack = reviewSentBackLine(workstream);
   return [
     task.areas.length > 0 ? `Areas: ${task.areas.join(', ')}.` : null,
     criteria > 0 ? `${String(criteria)} ${criteria === 1 ? 'criterion' : 'criteria'}.` : null,
     waits.length > 0 ? `Waits on ${waits.join(', ')}.` : null,
+    landing ? `${landing}.` : null,
     task.status === TaskStatus.Cancelled ? 'Cancelled.' : null,
     state ? `${state.line}.` : null,
+    sentBack ? `${sentBack}.` : null,
   ]
     .filter((part) => part !== null)
     .join(' ');
@@ -73,11 +79,13 @@ export function TaskCard({
   gateCommand = null,
   peers,
   pullRequest,
+  landing,
   startNote = null,
 }: TaskCardProps) {
   const waits = waitsOn(task, peers);
   const criteria = task.acceptanceCriteria.length;
   const state = startNote ? noteState(startNote) : taskState(workstream, batch, gateCommand);
+  const sentBack = reviewSentBackLine(workstream);
   // Queued keeps the plain border; the other states take their DESIGN.md color as a border, thicker
   // when the builder's turn: no fill, no stripe, no animation.
   const colored = state !== null && state.color !== 'gray';
@@ -124,6 +132,11 @@ export function TaskCard({
         {waits.length > 0 ? (
           <Text size="xs" c="dimmed">{`Waits on ${waits.join(', ')}`}</Text>
         ) : null}
+        {landing ? (
+          <Text size="xs" c="dimmed" data-testid="landing-line">
+            {landing}
+          </Text>
+        ) : null}
         {state ? (
           <Group gap={6} wrap="nowrap" align="flex-start">
             <Box
@@ -147,6 +160,11 @@ export function TaskCard({
               {state.line}
             </Text>
           </Group>
+        ) : null}
+        {sentBack ? (
+          <Text size="xs" c="dimmed">
+            {sentBack}
+          </Text>
         ) : null}
         {/* The pull request or Inbox link is laid over this space by the board, outside the card's button. */}
         {pullRequest || startNote?.inbox ? <div style={{ height: 20 }} /> : null}

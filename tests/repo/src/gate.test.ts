@@ -226,6 +226,14 @@ describe('scripts/gate.sh', () => {
     expect(last).toMatch(/^GATE FAIL: fail-probe — logs in \.gate\/; fail-probe \d+s \(\d+s\)$/);
   });
 
+  it('names each failing step with the command that reruns it, above the summary line', () => {
+    const { status, last, stdout } = runGate(sandbox, { GATE_STEPS: 'format fail-probe' });
+    expect(status).toBe(1);
+    expect(stdout).toContain('FAILED fail-probe: false (log .gate/fail-probe.log)\n');
+    expect(stdout).not.toContain('FAILED format');
+    expect(last).toMatch(/^GATE FAIL: fail-probe — /);
+  }, 60_000);
+
   it("writes nothing under the checkout's .gate/", () => {
     const before = checkoutGateLogs();
     runGate(sandbox, { GATE_STEPS: 'format fail-probe' });

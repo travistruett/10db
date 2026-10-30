@@ -246,9 +246,12 @@ plus `created_at` and `updated_at`.
 ```
 QUEUED → STARTING → RUNNING ⇄ HANDING_OFF → VERIFYING → DONE
 side: WAITING_HUMAN · PAUSED_LIMIT · RECOVERING · TAKEN_OVER · FAILED · CANCELLED
+QUEUED ⇄ HELD (a queued run that has not run, set aside by the builder; built)
 ```
 
 - `RUNNING` spans many sessions and steps.
+- `HELD` keeps the run's batch and worktree and takes no lane
+  (`decisions/2026-10-29-hold-a-queued-task.md`). It shows in Blocked.
 - The board shows a derived task status: Backlog, Ready, In progress, Blocked or Done.
 - A task is Ready when its dependencies are `DONE` and it has no open blocking inbox item.
 

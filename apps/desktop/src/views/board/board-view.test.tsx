@@ -275,6 +275,60 @@ describe('BoardView', () => {
     expect(hrefs).toEqual(link === null ? [] : [link]);
   });
 
+  describe('where a task lands', () => {
+    /** One project with a ready task of each landing; `delivery` is the project's. */
+    function serveLandings(delivery: 'pull_request' | 'local') {
+      const project = projectViewDto({ delivery, prTitlePrefix: 'feat(app)', baseBranch: 'main' });
+      const tasks = [
+        taskDto({ projectId: project.id, title: 'Alpha', landing: { kind: 'base' } }),
+        taskDto({
+          projectId: project.id,
+          title: 'Beta',
+          landing: { kind: 'branch', branch: 'feature/x' },
+        }),
+        taskDto({ projectId: project.id, title: 'Gamma', landing: { kind: 'hold' } }),
+      ];
+      serve(
+        http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+        http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json(tasks)),
+        http.get(daemonUrl('/workstreams'), () => HttpResponse.json([])),
+      );
+    }
+
+    it('says on each card where its work will land', async () => {
+      serveLandings('pull_request');
+      renderApp('/board');
+      const lines = await screen.findAllByTestId('landing-line');
+      expect(lines.map((l) => l.textContent)).toEqual([
+        'Merges into main when checks pass',
+        'Merges into feature/x when checks pass',
+        'Held for your review: pull request against main',
+      ]);
+      // A screen reader hears it with the rest of the card.
+      expect(
+        screen.getByText(/criterion\. Merges into feature\/x when checks pass\./),
+      ).toBeTruthy();
+    });
+
+    it('says nothing on a project that commits directly', async () => {
+      serveLandings('local');
+      renderApp('/board');
+      await screen.findByRole('button', { name: 'Alpha' });
+      expect(screen.queryByTestId('landing-line')).toBeNull();
+    });
+
+    it('lets the drawer change it, starting from the task', async () => {
+      serveLandings('pull_request');
+      renderApp('/board');
+      fireEvent.click(await screen.findByRole('button', { name: 'Gamma' }));
+      const drawer = await screen.findByRole('dialog', { name: 'Task' });
+      expect(
+        within(drawer).getByRole<HTMLInputElement>('radio', { name: 'Hold for my review' }).checked,
+      ).toBe(true);
+      expect(within(drawer).getByRole('radio', { name: 'Merge into main' })).toBeTruthy();
+    });
+  });
+
   it('starts a ready task', async () => {
     const project = projectDto();
     const alpha = taskDto({
@@ -1461,5 +1515,173 @@ describe('BoardView', () => {
     expect(
       within(screen.getByRole('button', { name: 'One' })).getByText('1 criterion'),
     ).toBeTruthy();
+  });
+});
+
+describe('BoardView holding a started task', () => {
+  const fresh = { sessionCount: 0, attempt: 0, recoveryAttempts: 0 } as const;
+
+  /** One task with a run in `state`, served with the Hold, Start and Remove routes recording their calls. */
+  function serveRun(
+    state: 'QUEUED' | 'HELD' | 'RUNNING',
+    title = 'Alpha',
+    over: Partial<Parameters<typeof workstreamDto>[0]> = {},
+  ) {
+    const project = projectViewDto();
+    const ws = workstreamDto({ projectId: project.id, taskTitle: title, state, ...fresh, ...over });
+    const task = taskDto({
+      id: ws.taskId,
+      projectId: project.id,
+      title,
+      boardStatus: state === 'HELD' ? 'blocked' : 'in_progress',
+      workstreamId: ws.id,
+    });
+    const calls: string[] = [];
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([task])),
+      http.get(daemonUrl('/workstreams'), () => HttpResponse.json([ws])),
+      http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
+      http.post(daemonUrl('/tasks/:taskId/hold'), ({ params }) => {
+        calls.push(`hold ${String(params['taskId'])}`);
+        return HttpResponse.json({ ...ws, state: 'HELD' });
+      }),
+      http.post(daemonUrl('/tasks/:taskId/start'), ({ params }) => {
+        calls.push(`start ${String(params['taskId'])}`);
+        return HttpResponse.json({ ...ws, state: 'QUEUED' }, { status: 201 });
+      }),
+      http.post(daemonUrl('/tasks/:taskId/remove'), ({ params }) => {
+        calls.push(`remove ${String(params['taskId'])}`);
+        return HttpResponse.json({ ...task, status: 'cancelled' });
+      }),
+    );
+    return { task, ws, calls };
+  }
+
+  it('holds a queued task from its card menu', async () => {
+    const { task, calls } = serveRun('QUEUED');
+    renderApp('/board');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Actions for Alpha' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Hold', hidden: true }));
+    await waitFor(() => {
+      expect(calls).toEqual([`hold ${task.id}`]);
+    });
+  });
+
+  it('holds back Hold on a task that is running, and says why', async () => {
+    const { calls } = serveRun('RUNNING', 'Busy');
+    renderApp('/board');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Actions for Busy' }));
+    const item = await screen.findByRole('menuitem', {
+      name: 'Hold (Busy is running: cancel it in Factory first)',
+      hidden: true,
+    });
+    expect(item.hasAttribute('data-disabled')).toBe(true);
+    fireEvent.click(item);
+    expect(calls).toEqual([]);
+  });
+
+  it('holds back Hold on a queued task that already ran, and says why', async () => {
+    serveRun('QUEUED', 'Again', { sessionCount: 1 });
+    renderApp('/board');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Actions for Again' }));
+    const item = await screen.findByRole('menuitem', {
+      name: 'Hold (Again has already run: cancel it in Factory first)',
+      hidden: true,
+    });
+    expect(item.hasAttribute('data-disabled')).toBe(true);
+  });
+
+  it('shows a held task as held, with Start and Remove in its menu and no Hold', async () => {
+    const { task, calls } = serveRun('HELD');
+    renderApp('/board');
+
+    const blocked = await screen.findByRole('list', { name: 'Blocked tasks' });
+    expect(within(blocked).getByText('Held: not in the queue')).toBeTruthy();
+    fireEvent.click(within(blocked).getByRole('button', { name: 'Actions for Alpha' }));
+    expect(await screen.findByRole('menuitem', { name: 'Remove', hidden: true })).toBeTruthy();
+    expect(screen.queryByRole('menuitem', { name: /^Hold/, hidden: true })).toBeNull();
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Start', hidden: true }));
+    await waitFor(() => {
+      expect(calls).toEqual([`start ${task.id}`]);
+    });
+  });
+
+  it('removes a held task from its card menu', async () => {
+    const { task, calls } = serveRun('HELD');
+    renderApp('/board');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Actions for Alpha' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Remove', hidden: true }));
+    await waitFor(() => {
+      expect(calls).toEqual([`remove ${task.id}`]);
+    });
+  });
+
+  it('shows the daemon’s refusal when a hold is refused', async () => {
+    serveRun('QUEUED');
+    server.use(
+      http.post(daemonUrl('/tasks/:taskId/hold'), () =>
+        HttpResponse.json(
+          { error: 'conflict', message: 'Alpha is running: cancel it in Factory instead' },
+          { status: 409 },
+        ),
+      ),
+    );
+    renderApp('/board');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Actions for Alpha' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Hold', hidden: true }));
+    expect(await screen.findByText("Couldn't hold the task")).toBeTruthy();
+    expect(screen.getByText('Alpha is running: cancel it in Factory instead')).toBeTruthy();
+  });
+
+  it('offers Hold in the drawer of a queued task', async () => {
+    const { task, calls } = serveRun('QUEUED');
+    renderApp('/board');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Alpha' }));
+    const drawer = await screen.findByRole('dialog', { name: 'Task' });
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Hold' }));
+    await waitFor(() => {
+      expect(calls).toEqual([`hold ${task.id}`]);
+    });
+  });
+
+  it('explains in the drawer why a running task can’t be held', async () => {
+    serveRun('RUNNING', 'Busy');
+    renderApp('/board');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Busy' }));
+    const drawer = await screen.findByRole('dialog', { name: 'Task' });
+    const hold = within(drawer).getByRole('button', { name: 'Hold' });
+    expect(hold.hasAttribute('disabled')).toBe(true);
+    expect(within(drawer).getByText('Busy is running: cancel it in Factory first.')).toBeTruthy();
+  });
+
+  it('starts and removes a held task from the drawer', async () => {
+    const { task, calls } = serveRun('HELD');
+    renderApp('/board');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Alpha' }));
+    const drawer = await screen.findByRole('dialog', { name: 'Task' });
+    expect(within(drawer).getByText(/keeps its worktree/)).toBeTruthy();
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Start' }));
+    await waitFor(() => {
+      expect(calls).toEqual([`start ${task.id}`]);
+    });
+    // Both buttons wait while a request is out.
+    await waitFor(() => {
+      expect(within(drawer).getByRole('button', { name: 'Remove' }).hasAttribute('disabled')).toBe(
+        false,
+      );
+    });
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Remove' }));
+    await waitFor(() => {
+      expect(calls).toEqual([`start ${task.id}`, `remove ${task.id}`]);
+    });
   });
 });

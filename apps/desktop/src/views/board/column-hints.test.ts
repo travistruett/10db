@@ -18,7 +18,7 @@ describe('columnHint', () => {
     [
       'Blocked',
       system(BoardStatus.Blocked),
-      'Waiting on you, paused at a limit, failed, or not shipped.',
+      'Waiting on you, paused at a limit, held, failed, or not shipped.',
     ],
     ['Done', system(BoardStatus.Done), 'Finished, or cancelled.'],
     [

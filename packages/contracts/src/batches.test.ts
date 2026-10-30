@@ -184,6 +184,7 @@ describe('batch schemas', () => {
       state: 'CUTTING',
       branch: null,
       baseBranch: 'main',
+      autoMerge: true,
       baseSha: null,
       repo: null,
       prUrl: null,
@@ -269,6 +270,7 @@ describe('worktree mode contracts', () => {
     state: 'OPEN',
     branch: 'b',
     baseBranch: 'main',
+    autoMerge: true,
     baseSha: 'a'.repeat(40),
     repo: null,
     prUrl: null,
@@ -283,6 +285,39 @@ describe('worktree mode contracts', () => {
   it('BatchDto carries a nullable worktree path', () => {
     expect(BatchDto.parse(batch).worktreePath).toBe('/tmp/wt/x');
     expect(BatchDto.parse({ ...batch, worktreePath: null }).worktreePath).toBe(null);
+  });
+
+  it('BatchDto without pr reads as null', () => {
+    expect(BatchDto.parse(batch).pr).toBe(null);
+  });
+
+  it('BatchDto parses a full pull request status', () => {
+    const pr = {
+      state: 'open',
+      checks: 'failing',
+      failingChecks: [
+        { name: 'build', url: 'https://github.com/o/r/runs/1' },
+        { name: 'lint', url: null },
+      ],
+      checkedAt: '2026-10-29T12:00:00.000Z',
+      unknownReason: null,
+    };
+    expect(BatchDto.parse({ ...batch, pr }).pr).toEqual(pr);
+  });
+
+  it.each([
+    ['state', { state: 'draft' }],
+    ['checks', { checks: 'green' }],
+  ])('BatchDto refuses a bad pull request %s', (_name, patch) => {
+    const pr = {
+      state: 'open',
+      checks: 'passing',
+      failingChecks: [],
+      checkedAt: '2026-10-29T12:00:00.000Z',
+      unknownReason: null,
+      ...patch,
+    };
+    expect(BatchDto.safeParse({ ...batch, pr }).success).toBe(false);
   });
 
   it('BatchStartResult is an array of batches', () => {
@@ -313,6 +348,7 @@ describe('worktree mode contracts', () => {
       budgetCeiling: null,
       delivery: 'local',
       baseBranch: 'main',
+      landing: 'merge',
       prTitlePrefix: null,
       allowedCommands: [],
       sandboxLoopback: false,

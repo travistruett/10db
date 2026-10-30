@@ -6,7 +6,11 @@ import { baseHandlers, daemonUrl, renderWithDaemon, server } from '../../test/da
 import { projectDto, taskDto } from '../../test/fixtures';
 import { NewTaskForm } from './new-task-form';
 
-async function open(project: ProjectDto, posted: unknown[] = []): Promise<void> {
+async function open(
+  project: ProjectDto,
+  posted: unknown[] = [],
+  onStatus: (status: { pending: boolean; error: string | null }) => void = () => undefined,
+): Promise<void> {
   server.use(
     http.post(daemonUrl('/projects/:projectId/tasks'), async ({ request }) => {
       posted.push(await request.json());
@@ -21,7 +25,7 @@ async function open(project: ProjectDto, posted: unknown[] = []): Promise<void> 
         formId="new-task"
         project={project}
         tasks={tasks}
-        onStatus={() => undefined}
+        onStatus={onStatus}
         onCreated={() => undefined}
       />
       <button type="submit" form="new-task">
@@ -64,6 +68,120 @@ describe('NewTaskForm', () => {
       expect(posted).toHaveLength(1);
     });
     expect(posted[0]).toMatchObject({ areas: ['repo'] });
+  });
+
+  describe('where the work lands', () => {
+    const pr: Partial<ProjectDto> = {
+      delivery: 'pull_request',
+      areas: [{ name: 'repo', globs: ['**'] }],
+    };
+
+    /** Fills the required fields and presses Create Task. */
+    function create(): void {
+      fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Beta' } });
+      fireEvent.change(screen.getByLabelText('Acceptance criteria'), {
+        target: { value: 'Works' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Create Task' }));
+    }
+    const choice = (name: string) => screen.getByRole<HTMLInputElement>('radio', { name });
+
+    it.each([
+      { name: 'merging project', project: pr, checked: 'Merge into main' },
+      {
+        name: 'holding project',
+        project: { ...pr, landing: 'hold' } satisfies Partial<ProjectDto>,
+        checked: 'Hold for my review',
+      },
+    ])('starts from the project default: $name', async ({ project, checked }) => {
+      await open(projectDto(project));
+      expect(choice(checked).checked).toBe(true);
+      expect(screen.getAllByRole('radio')).toHaveLength(3);
+    });
+
+    it('names the project base branch in the first choice', async () => {
+      await open(projectDto({ ...pr, baseBranch: 'develop' }));
+      expect(choice('Merge into develop').checked).toBe(true);
+    });
+
+    it.each([
+      {
+        name: 'the default',
+        pick: () => undefined,
+        sent: { kind: 'base' },
+      },
+      {
+        name: 'hold',
+        pick: () => fireEvent.click(choice('Hold for my review')),
+        sent: { kind: 'hold' },
+      },
+      {
+        name: 'another branch, named',
+        pick: () => {
+          fireEvent.click(choice('Merge into another branch'));
+          fireEvent.change(screen.getByLabelText('Branch to merge into'), {
+            target: { value: ' feature/search ' },
+          });
+        },
+        sent: { kind: 'branch', branch: 'feature/search' },
+      },
+    ])('sends $name', async ({ pick, sent }) => {
+      const posted: unknown[] = [];
+      await open(projectDto(pr), posted);
+      pick();
+      create();
+      await waitFor(() => {
+        expect(posted).toHaveLength(1);
+      });
+      expect(posted[0]).toMatchObject({ landing: sent });
+    });
+
+    it('asks for the branch before sending anything', async () => {
+      const posted: unknown[] = [];
+      await open(projectDto(pr), posted);
+      fireEvent.click(choice('Merge into another branch'));
+      create();
+      expect(await screen.findByText('Name the branch this task merges into')).toBeTruthy();
+      expect(posted).toEqual([]);
+    });
+
+    it("hands the footer the daemon's reason for refusing a branch", async () => {
+      const statuses: (string | null)[] = [];
+      await open(projectDto(pr), [], (status) => statuses.push(status.error));
+      server.use(
+        http.post(daemonUrl('/projects/:projectId/tasks'), () =>
+          HttpResponse.json(
+            {
+              error: 'invalid',
+              message:
+                'origin has no branch named feature/nope. Create it on origin, or choose another place for this task to land.',
+            },
+            { status: 400 },
+          ),
+        ),
+      );
+      fireEvent.click(choice('Merge into another branch'));
+      fireEvent.change(screen.getByLabelText('Branch to merge into'), {
+        target: { value: 'feature/nope' },
+      });
+      create();
+      await waitFor(() => {
+        expect(statuses).toContain(
+          'origin has no branch named feature/nope. Create it on origin, or choose another place for this task to land.',
+        );
+      });
+    });
+
+    it('offers nothing to a project that commits directly', async () => {
+      const posted: unknown[] = [];
+      await open(projectDto({ areas: [{ name: 'repo', globs: ['**'] }] }), posted);
+      expect(screen.queryByRole('radio')).toBeNull();
+      create();
+      await waitFor(() => {
+        expect(posted).toHaveLength(1);
+      });
+      expect(posted[0]).not.toHaveProperty('landing');
+    });
   });
 
   it('the criteria placeholder shows an example', async () => {

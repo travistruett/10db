@@ -8,6 +8,7 @@ import {
   WorkspaceMode,
   type FlowId,
   type ProjectDto,
+  type ProjectLanding,
 } from '@10db/contracts';
 
 /**
@@ -41,6 +42,8 @@ export interface GeneralValues {
   readonly budgetCeiling: number | '';
   readonly delivery: Delivery;
   readonly baseBranch: string;
+  /** What a finished task's pull request does unless the task says otherwise. */
+  readonly landing: ProjectLanding;
   /** '' means none. */
   readonly prTitlePrefix: string;
   /** One command prefix per line; blank lines are ignored. */
@@ -69,6 +72,7 @@ export function generalValues(project: ProjectDto): GeneralValues {
     budgetCeiling: project.budgetCeiling ?? '',
     delivery: project.delivery,
     baseBranch: project.baseBranch,
+    landing: project.landing,
     prTitlePrefix: project.prTitlePrefix ?? '',
     allowedCommands: project.allowedCommands.join('\n'),
     sandboxLoopback: project.sandboxLoopback,
@@ -149,6 +153,7 @@ export function checkGeneral(project: ProjectDto, values: GeneralValues): Genera
   if (ceiling !== project.budgetCeiling) patch.budgetCeiling = ceiling;
   if (values.delivery !== project.delivery) patch.delivery = values.delivery;
   if (baseBranch !== project.baseBranch) patch.baseBranch = baseBranch;
+  if (values.landing !== project.landing) patch.landing = values.landing;
   const prTitlePrefix = prefix === '' ? null : prefix;
   if (prTitlePrefix !== project.prTitlePrefix) patch.prTitlePrefix = prTitlePrefix;
   if (!sameCommands(allowed.commands, project.allowedCommands))

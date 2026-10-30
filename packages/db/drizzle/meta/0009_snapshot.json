@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "0effd6d7-2c23-4334-8319-a9eb36b38ffd",
+  "id": "9c042416-2951-45b8-a4c1-4fc501cf4c17",
   "prevId": "80941ab5-9378-437c-bf1a-150dafb52cea",
   "tables": {
     "aa_models": {
@@ -300,6 +300,41 @@
         },
         "return_sha": {
           "name": "return_sha",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "pr_state": {
+          "name": "pr_state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "pr_checks": {
+          "name": "pr_checks",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "pr_failing_checks": {
+          "name": "pr_failing_checks",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "pr_checked_at": {
+          "name": "pr_checked_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "pr_unknown_reason": {
+          "name": "pr_unknown_reason",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -1754,13 +1789,6 @@
         },
         "gate_command": {
           "name": "gate_command",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "changed_check_command": {
-          "name": "changed_check_command",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

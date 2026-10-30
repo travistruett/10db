@@ -1939,4 +1939,53 @@ describe('a flag with a fold key', () => {
     inbox.answer(first.id, { choice: 'dismiss' });
     expect(inbox.flag(input).id).not.toBe(first.id);
   });
+
+  it('rewords an open card title with its body, and leaves a dismissed card as it was', () => {
+    const input = refusal();
+    const first = inbox.flag(input);
+    inbox.reword(first.id, 'b.txt is in the way.', { title: 'Batch not started: b.txt' });
+    expect(getInboxItem(state.db, first.id)).toMatchObject({
+      title: 'Batch not started: b.txt',
+      body: 'b.txt is in the way.',
+      state: 'OPEN',
+    });
+
+    inbox.answer(first.id, { choice: 'dismiss' });
+    inbox.reword(first.id, 'c.txt is in the way.', { title: 'Batch not started: c.txt' });
+    expect(getInboxItem(state.db, first.id)).toMatchObject({
+      title: 'Batch not started: b.txt',
+      body: 'b.txt is in the way.',
+    });
+  });
+});
+
+describe('a card 10db closes because its cause is gone', () => {
+  function flag(detail: Record<string, string>) {
+    const ws = seedWorkstream(base);
+    return inbox.flag({
+      projectId: ws.project.id,
+      workstreamId: null,
+      title: 'Batch not started: 10db will not run git',
+      body: 'Nothing was pushed.',
+      detail,
+    });
+  }
+
+  it('is resolved by 10db with the reason, keeping the rest of its detail', () => {
+    const card = flag({ keep: 'me' });
+    const resolved = inbox.resolve(card.id, 'Alpha started');
+    expect(resolved).toMatchObject({
+      state: 'RESOLVED',
+      detail: { keep: 'me', resolution: { by: '10db', reason: 'Alpha started' } },
+    });
+    expect(listInbox(state.db, { states: ['OPEN'] })).toEqual([]);
+    expect(listInbox(state.db, { states: ['RESOLVED'] }).map((i) => i.id)).toEqual([card.id]);
+  });
+
+  it('leaves a card the builder already closed as it was', () => {
+    const card = flag({});
+    inbox.answer(card.id, { choice: 'dismiss' });
+    const again = inbox.resolve(card.id, 'Alpha started');
+    expect(again.detail).toEqual({});
+  });
 });

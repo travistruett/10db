@@ -71,6 +71,13 @@
               "type": "string",
               "minLength": 1
             }
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "copy",
+              "project"
+            ]
           }
         },
         "required": [
@@ -174,6 +181,13 @@
     "baseBranch": {
       "type": "string"
     },
+    "landing": {
+      "type": "string",
+      "enum": [
+        "merge",
+        "hold"
+      ]
+    },
     "prTitlePrefix": {
       "type": [
         "string",
@@ -235,6 +249,7 @@
     "budgetCeiling",
     "delivery",
     "baseBranch",
+    "landing",
     "prTitlePrefix",
     "allowedCommands",
     "sandboxLoopback",

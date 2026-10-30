@@ -2,14 +2,16 @@ import { BoardStatus, TaskStatus, WorkstreamState, type TaskDto } from '@10db/co
 import { ActionIcon, Menu } from '@mantine/core';
 import { IconDots } from '@tabler/icons-react';
 import type { DropTarget, MenuMove } from './drop-rules';
+import type { HoldOption } from './task-hold';
 
 const STARTABLE: readonly BoardStatus[] = [BoardStatus.Ready, BoardStatus.Backlog];
 /** A task whose latest workstream was cancelled can run again; a failed one blocks the task and is retried from the Factory. */
 const RESTARTABLE: readonly WorkstreamState[] = [WorkstreamState.Cancelled];
 
-/** A Backlog task queues until its dependencies finish; a parked task never starts. */
+/** A Backlog task queues until its dependencies finish; a parked task never starts; a held one queues again. */
 export function canStart(task: TaskDto, latest: WorkstreamState | undefined): boolean {
   if (task.boardColumnId !== null) return false;
+  if (task.status === TaskStatus.Open && latest === WorkstreamState.Held) return true;
   if (task.status !== TaskStatus.Open || !STARTABLE.includes(task.boardStatus)) return false;
   return task.workstreamId === null || (latest !== undefined && RESTARTABLE.includes(latest));
 }
@@ -24,6 +26,11 @@ export interface TaskCardMenuProps {
   readonly moves: readonly MenuMove[];
   readonly onMove: (target: DropTarget) => void;
   readonly onStart: () => void;
+  /** Hold for a started task that has not run, or why it can't be held; absent when there is nothing to hold. */
+  readonly hold?: HoldOption | null;
+  readonly onHold?: () => void;
+  /** Present for a held task: removing it deletes its worktree and branch. */
+  readonly onRemove?: () => void;
   /** Present when the task's workstream failed and the daemon will retry it. */
   readonly onRetry?: () => void;
   /** Present when the task's batch is open or not shipped; abandoning keeps the branch and cancels its unfinished tasks. */
@@ -44,6 +51,9 @@ export function TaskCardMenu({
   moves,
   onMove,
   onStart,
+  hold = null,
+  onHold,
+  onRemove,
   onRetry,
   onAbandon,
   abandonRefusal = null,
@@ -82,6 +92,21 @@ export function TaskCardMenu({
               : parkedDependency === null
                 ? 'Start'
                 : `Start (${parkedDependency} is parked; move it to Backlog or Ready first)`}
+          </Menu.Item>
+        ) : null}
+        {hold ? (
+          <Menu.Item
+            disabled={hold.kind === 'refused'}
+            onClick={() => {
+              if (hold.kind === 'hold') onHold?.();
+            }}
+          >
+            {hold.kind === 'hold' ? 'Hold' : `Hold (${hold.reason.replace(/\.$/, '')})`}
+          </Menu.Item>
+        ) : null}
+        {onRemove ? (
+          <Menu.Item color="red" onClick={onRemove}>
+            Remove
           </Menu.Item>
         ) : null}
         {onRetry || onAbandon || onCloseTask ? <Menu.Divider /> : null}

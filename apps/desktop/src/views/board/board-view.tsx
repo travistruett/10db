@@ -1,6 +1,7 @@
 import {
   BatchState,
   BoardStatus,
+  Delivery,
   TaskStatus,
   WorkspaceMode,
   WorkstreamState,
@@ -42,11 +43,13 @@ import { columnHint } from './column-hints';
 import { BoardDnd } from './board-dnd';
 import { boardLayout, DONE_LIMIT, type LayoutColumn } from './board-layout';
 import { menuMoves, resolveDrop, startedDependents, type DropTarget } from './drop-rules';
+import { landingLine } from './landing-draft';
 import { NewTaskForm } from './new-task-form';
 import { InboxLink } from './inbox-link';
 import { PullRequestLink } from './pull-request-link';
 import { cardSummary, TaskCard } from './task-card';
 import { canStart, TaskCardMenu } from './task-card-menu';
+import { holdOption, isHeld } from './task-hold';
 import { columnNameOf, TaskDrawer } from './task-drawer';
 import { useBoardActions } from './use-board-actions';
 
@@ -149,6 +152,10 @@ function BoardColumns({
   const openBatch = openWorkstream?.batchId ? batchById.get(openWorkstream.batchId) : undefined;
   const batchOf = (ws: WorkstreamDto | undefined) =>
     ws?.batchId ? batchById.get(ws.batchId) : undefined;
+  // Local delivery has no pull request to place.
+  const pullRequests = project.delivery === Delivery.PullRequest;
+  const landingOf = (task: TaskDto, batch: BatchDto | undefined): string | undefined =>
+    pullRequests ? landingLine(task, batch, project.baseBranch) : undefined;
   const humanColumns = new Map(
     layout.flatMap((c) => (c.key.kind === 'human' ? [[c.key.id, c.label] as const] : [])),
   );
@@ -248,6 +255,7 @@ function BoardColumns({
                 batch={batch}
                 gateCommand={stepCheck}
                 pullRequest={shippedPullRequest(task, ws, batchById)}
+                landing={landingOf(task, batch)}
                 startNote={noteOf(task)}
                 peers={peers}
               />
@@ -271,6 +279,7 @@ function BoardColumns({
               peers,
               batch,
               stepCheck,
+              landingOf(task, batch) ?? null,
               noteOf(task),
             );
           }}
@@ -284,12 +293,23 @@ function BoardColumns({
               <TaskCardMenu
                 task={task}
                 latest={ws?.state}
+                hold={holdOption(task, ws)}
+                onHold={() => {
+                  actions.hold(task.id);
+                }}
+                {...(isHeld(ws)
+                  ? {
+                      onRemove: () => {
+                        actions.remove(task.id);
+                      },
+                    }
+                  : {})}
                 {...(ws && canRetry(ws.state)
                   ? {
                       onRetry: () => {
                         abandon.reset();
                         closeTask.reset();
-                        retry.mutate(ws.id);
+                        retry.mutate({ id: ws.id });
                       },
                     }
                   : {})}
@@ -338,6 +358,7 @@ function BoardColumns({
           workstreams={workstreams}
           workspaceMode={project.workspaceMode}
           gateCommand={project.gateCommand}
+          {...(pullRequests ? { pullRequestBase: project.baseBranch } : {})}
           onClose={() => {
             setOpenId(null);
           }}

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import {
+  CARD_RESOLUTION,
   CheckChoice,
   ConflictError,
   DECISION_CATEGORIES,
@@ -13,6 +14,7 @@ import {
   ProposalKind,
   QuestionCategory,
   Urgency,
+  type CardResolution,
   type InboxItemDto,
   type InboxItemId,
   type InboxOption,
@@ -64,37 +66,97 @@ interface AskInput {
   readonly signal: AbortSignal;
 }
 
+/** A flag card, as `InboxService.flag` and `flagCard` raise it. */
+interface FlagInput {
+  readonly projectId: ProjectId;
+  readonly workstreamId: WorkstreamId | null;
+  readonly title: string;
+  readonly body: string;
+  readonly detail?: Record<string, Json>;
+  readonly foldKey?: string;
+  /**
+   * A repeat that folds rewrites the open card's body and detail, which tells clients it changed.
+   * Without it a repeat is a silent no-op, which callers that raise on every poll rely on.
+   */
+  readonly refresh?: boolean;
+  readonly options?: readonly InboxOption[];
+}
+
+/** What a reword changes besides the body. */
+interface Rewording {
+  readonly title?: string;
+  readonly options?: readonly InboxOption[];
+  readonly detail?: Record<string, Json>;
+}
+
 export interface InboxService {
   /** Folds into an open identical card; the returned promise never causes an unhandled rejection. */
   ask(input: AskInput): { item: InboxItemDto; answer: Promise<InboxAnswer> };
   answer(id: InboxItemId, answer: InboxAnswer): InboxItemDto;
-  flag(input: {
-    projectId: ProjectId;
-    workstreamId: WorkstreamId | null;
-    title: string;
-    body: string;
-    detail?: Record<string, Json>;
-    foldKey?: string;
-    /**
-     * A repeat that folds rewrites the open card's body and detail, which tells clients it changed.
-     * Without it a repeat is a silent no-op, which callers that raise on every poll rely on.
-     */
-    refresh?: boolean;
-    options?: readonly InboxOption[];
-  }): InboxItemDto;
+  flag(input: FlagInput): InboxItemDto;
   cancelForWorkstream(workstreamId: WorkstreamId): void;
   /**
-   * Rewrites an open card's body (a cap card's running overshoot), and its options and detail when
-   * given, in one write; a closed card is left as it was.
+   * Rewrites an open card's body (a cap card's running overshoot), and its title, options and detail
+   * when given, in one write; a closed card is left as it was.
    */
-  reword(
-    id: InboxItemId,
-    body: string,
-    card?: { readonly options: readonly InboxOption[]; readonly detail: Record<string, Json> },
-  ): void;
+  reword(id: InboxItemId, body: string, card?: Rewording): void;
   /** Closes an open card whose question a later change made moot; a closed card is left as it was. */
   withdraw(id: InboxItemId): void;
+  /**
+   * Closes an open card as RESOLVED by 10db, because the action it reports as failed has succeeded
+   * since. The reason goes in `detail.resolution`, where the resolved view shows it; a card that is
+   * no longer open is returned as it was.
+   */
+  resolve(id: InboxItemId, reason: string): InboxItemDto;
   redeliver(id: InboxItemId): InboxItemDto;
+}
+
+/**
+ * `InboxService.flag`'s write, inside the caller's transaction: a caller that raises a card for a
+ * change it records commits both together, or neither.
+ */
+export function flagCard(ctx: WriteContext, input: FlagInput): InboxItemDto {
+  if (input.foldKey) {
+    const existing = findOpenByFoldKey(ctx.tx, input.projectId, input.foldKey);
+    if (existing && !input.refresh) return existing;
+    // The repeat says what is in the way now, and a board that watches the card learns the
+    // cause came back.
+    if (existing)
+      return updateInboxItem(ctx, existing.id, {
+        body: input.body,
+        ...(input.detail ? { detail: input.detail } : {}),
+      });
+  }
+  return insertInboxItem(ctx, {
+    projectId: input.projectId,
+    kind: InboxKind.Flag,
+    title: input.title,
+    body: input.body,
+    options: input.options ? [...input.options] : [],
+    recommendation: null,
+    category: QuestionCategory.Other,
+    urgency: Urgency.High,
+    detail: input.detail ?? null,
+    foldKey: input.foldKey ?? null,
+    targets: input.workstreamId ? [{ workstreamId: input.workstreamId, sessionId: null }] : [],
+  });
+}
+
+/** `InboxService.reword`'s write, inside the caller's transaction. */
+export function rewordCard(
+  ctx: WriteContext,
+  id: InboxItemId,
+  body: string,
+  card?: Rewording,
+): void {
+  if (getInboxItem(ctx.tx, id).state === InboxState.Open)
+    updateInboxItem(ctx, id, { body, ...card });
+}
+
+/** `InboxService.withdraw`'s write, inside the caller's transaction. */
+export function withdrawCard(ctx: WriteContext, id: InboxItemId): void {
+  if (getInboxItem(ctx.tx, id).state === InboxState.Open)
+    updateInboxItem(ctx, id, { state: InboxState.Cancelled });
 }
 
 /** Identical open questions fold into one card. */
@@ -334,34 +396,7 @@ export function createInboxService(deps: {
     },
 
     flag(input) {
-      return deps.state.write((ctx) => {
-        if (input.foldKey) {
-          const existing = findOpenByFoldKey(ctx.tx, input.projectId, input.foldKey);
-          if (existing && !input.refresh) return existing;
-          // The repeat says what is in the way now, and a board that watches the card learns the
-          // cause came back.
-          if (existing)
-            return updateInboxItem(ctx, existing.id, {
-              body: input.body,
-              ...(input.detail ? { detail: input.detail } : {}),
-            });
-        }
-        return insertInboxItem(ctx, {
-          projectId: input.projectId,
-          kind: InboxKind.Flag,
-          title: input.title,
-          body: input.body,
-          options: input.options ? [...input.options] : [],
-          recommendation: null,
-          category: QuestionCategory.Other,
-          urgency: Urgency.High,
-          detail: input.detail ?? null,
-          foldKey: input.foldKey ?? null,
-          targets: input.workstreamId
-            ? [{ workstreamId: input.workstreamId, sessionId: null }]
-            : [],
-        });
-      });
+      return deps.state.write((ctx) => flagCard(ctx, input));
     },
 
     cancelForWorkstream(workstreamId) {
@@ -380,15 +415,25 @@ export function createInboxService(deps: {
 
     reword(id, body, card) {
       deps.state.write((ctx) => {
-        if (getInboxItem(ctx.tx, id).state === InboxState.Open)
-          updateInboxItem(ctx, id, { body, ...card });
+        rewordCard(ctx, id, body, card);
       });
     },
 
     withdraw(id) {
       deps.state.write((ctx) => {
-        if (getInboxItem(ctx.tx, id).state === InboxState.Open)
-          updateInboxItem(ctx, id, { state: InboxState.Cancelled });
+        withdrawCard(ctx, id);
+      });
+    },
+
+    resolve(id, reason) {
+      return deps.state.write((ctx) => {
+        const item = getInboxItem(ctx.tx, id);
+        if (item.state !== InboxState.Open) return item;
+        const resolution: CardResolution = { by: '10db', reason };
+        return updateInboxItem(ctx, id, {
+          state: InboxState.Resolved,
+          detail: { ...item.detail, [CARD_RESOLUTION]: resolution },
+        });
       });
     },
 
