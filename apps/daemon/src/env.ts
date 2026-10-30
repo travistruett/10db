@@ -69,6 +69,19 @@ const REMEDIES: Readonly<Partial<Record<string, string>>> = {
     'if pnpm dev:factory:enable or launchctl set it, run pnpm dev:factory:disable, then quit and reopen 10db',
 };
 
+/**
+ * The data dir alone. A client starts the builder bridge with its own environment, so the bridge
+ * must not refuse to start over a daemon variable it never uses; `VAR=` means unset here too.
+ */
+export function loadDataDirEnv(
+  source: Readonly<Record<string, string | undefined>>,
+): string | undefined {
+  const value = source['TENDB_DATA_DIR'];
+  const parsed = DaemonEnv.shape.TENDB_DATA_DIR.safeParse(value === '' ? undefined : value);
+  if (!parsed.success) throw new EnvError(['TENDB_DATA_DIR: invalid']);
+  return parsed.data;
+}
+
 /** The only module in the daemon that parses environment variables; main passes `process.env`. */
 export function loadEnv(source: Readonly<Record<string, string | undefined>>): DaemonEnv {
   // `VAR=` means unset: coercion would turn an empty port into 0 and fail an empty data dir.
