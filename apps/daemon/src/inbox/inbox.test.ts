@@ -1939,4 +1939,22 @@ describe('a flag with a fold key', () => {
     inbox.answer(first.id, { choice: 'dismiss' });
     expect(inbox.flag(input).id).not.toBe(first.id);
   });
+
+  it('rewords an open card title with its body, and leaves a dismissed card as it was', () => {
+    const input = refusal();
+    const first = inbox.flag(input);
+    inbox.reword(first.id, 'b.txt is in the way.', { title: 'Batch not started: b.txt' });
+    expect(getInboxItem(state.db, first.id)).toMatchObject({
+      title: 'Batch not started: b.txt',
+      body: 'b.txt is in the way.',
+      state: 'OPEN',
+    });
+
+    inbox.answer(first.id, { choice: 'dismiss' });
+    inbox.reword(first.id, 'c.txt is in the way.', { title: 'Batch not started: c.txt' });
+    expect(getInboxItem(state.db, first.id)).toMatchObject({
+      title: 'Batch not started: b.txt',
+      body: 'b.txt is in the way.',
+    });
+  });
 });

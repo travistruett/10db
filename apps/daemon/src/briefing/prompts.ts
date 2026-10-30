@@ -11,6 +11,7 @@ import {
   type StepRole,
   type TaskDto,
 } from '@10db/contracts';
+import { failedSteps } from './failed-steps';
 
 interface StepBrief {
   readonly index: number;
@@ -91,7 +92,8 @@ const RULES = [
   'When a decision is not yours to make, ask with ask_human (or your question tool). Record routine engineering decisions with record_decision.',
   'If you depart from the plan or a principle, call report_deviation with your reason.',
   PLAIN_COMMANDS,
-  'When the acceptance criteria are met and committed, end your turn. 10db runs the gate itself.',
+  "Run only the checks for what you changed (the changed packages' tests, typecheck and lint), never the full gate: 10db runs it after your turn ends.",
+  'When the acceptance criteria are met and committed, end your turn.',
   'If 10db asks you to hand off, finish your current step, call write_handoff, and end your turn.',
 ];
 
@@ -187,10 +189,19 @@ export function briefedFromHandoff(
 const fromHandoff = (handoff: HandoffDto): string =>
   `Continue from the handoff below. Do not redo finished work.\n\nHandoff:\n${renderHandoff(handoff)}`;
 
+/** Where to look after a failed gate: each failing step and the command that reruns it, when the output names them. */
+function failedStepsSection(output: string): string {
+  const steps = failedSteps(output);
+  if (steps.length === 0)
+    return 'Its output below says which check failed: rerun only the check that failed while you fix it.';
+  const lines = steps.map((s) => `\`${s.name}\`: rerun \`${s.command}\` (log \`${s.log}\`)`);
+  return `Failing steps; rerun only these while you fix them:\n${bullets(lines)}`;
+}
+
 const gateFailure = (evidence: EvidenceDto): string =>
   evidence.kind === EvidenceKind.Builder
     ? `The builder sent the work back: ${evidence.summary}\nAddress it, commit, and end your turn.`
-    : `The gate failed (exit ${String(evidence.exitCode)} from \`${evidence.command}\`). Fix the cause, commit, and end your turn.\n\nGate output (end):\n\`\`\`\n${evidence.summary}\n\`\`\``;
+    : `The gate failed (exit ${String(evidence.exitCode)} from \`${evidence.command}\`).\n${failedStepsSection(evidence.summary)}\nFix the cause, commit, and end your turn; 10db runs the gate again.\n\nGate output (end):\n\`\`\`\n${evidence.summary}\n\`\`\``;
 
 function actionSection(input: PromptInput): string {
   switch (input.action.kind) {
@@ -218,7 +229,7 @@ function actionSection(input: PromptInput): string {
     case 'fix': {
       const gate = input.evidence
         ? gateFailure(input.evidence)
-        : 'The gate failed. Run it, fix the cause, commit, and end your turn.';
+        : "The gate failed and 10db kept no output from it. Run the changed packages' tests, typecheck and lint, fix the cause, commit, and end your turn; 10db runs the gate again.";
       // A fix session that was cut off left a handoff after the failure; the next one starts from it.
       return input.handoff && briefedFromHandoff(input.action, input.handoff, input.evidence)
         ? `${fromHandoff(input.handoff)}\n\n${gate}`

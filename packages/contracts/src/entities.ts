@@ -31,6 +31,7 @@ import {
   WorkspaceMode,
   WorkstreamState,
 } from './states';
+import { DEFAULT_PROJECT_LANDING, ProjectLanding, TaskLanding } from './landing';
 import { WorkstreamStep } from './steps';
 
 const Name = z.string().regex(/^[a-z][a-z0-9-]*$/, 'lowercase letters, digits and hyphens');
@@ -193,6 +194,8 @@ export const ProjectInput = z
     delivery: z.enum(Delivery).default(Delivery.Local),
     /** The branch on `origin` a batch is cut from and its pull request targets. */
     baseBranch: BranchName.default('main'),
+    /** What a finished task's pull request does unless the task says otherwise. */
+    landing: z.enum(ProjectLanding).default(DEFAULT_PROJECT_LANDING),
     /**
      * `pull_request` delivery titles each PR `<prefix>: <batch title>`; null derives
      * `<type>(<scope>): <subject>` from the batch's tasks and the paths it changed.
@@ -260,6 +263,7 @@ export const ProjectDto = z.object({
   budgetCeiling: z.number().nullable(),
   delivery: z.enum(Delivery),
   baseBranch: z.string(),
+  landing: z.enum(ProjectLanding),
   prTitlePrefix: z.string().nullable(),
   allowedCommands: z.array(z.string()),
   sandboxLoopback: z.boolean(),
@@ -284,6 +288,7 @@ export const ProjectPatch = z
     budgetCeiling: z.number().positive().nullable(),
     delivery: z.enum(Delivery),
     baseBranch: BranchName,
+    landing: z.enum(ProjectLanding),
     prTitlePrefix: PrTitlePrefix.nullable(),
     /** Replaces the project's areas; one that a running task holds can't be removed or renamed. */
     areas: z.array(AreaDef.extend({ globs: z.array(PathPattern).min(1) })).min(1),
@@ -317,6 +322,8 @@ export const TaskInput = z.object({
   dependsOn: z.array(TaskId).default([]),
   riskTags: z.array(z.enum(RiskTag)).default([]),
   flowId: FlowId.nullable().default(null),
+  /** Where the work lands; absent starts from what the project does by default. */
+  landing: TaskLanding.optional(),
 });
 export type TaskInput = z.input<typeof TaskInput>;
 export type TaskConfig = z.output<typeof TaskInput>;
@@ -330,6 +337,7 @@ export const TaskDto = z.object({
   areas: z.array(z.string()),
   riskTags: z.array(z.enum(RiskTag)),
   flowId: FlowId.nullable(),
+  landing: TaskLanding,
   status: z.enum(TaskStatus),
   boardOrder: z.number(),
   boardColumnId: BoardColumnId.nullable(),
@@ -348,6 +356,7 @@ export const TaskPatch = z
     acceptanceCriteria: z.array(z.string().min(1)).min(1),
     riskTags: z.array(z.enum(RiskTag)),
     flowId: FlowId.nullable(),
+    landing: TaskLanding,
   })
   .partial()
   .refine((p) => Object.keys(p).length > 0, { message: 'Change at least one field' });

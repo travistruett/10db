@@ -104,10 +104,11 @@ describe('shipping', () => {
       'gate finished',
       'git push finished',
       'gh pr create finished',
+      'auto-merge turned on',
       'batch shipped',
       'checkout switched back',
     ]);
-    const [cut, started, finished, push, pr, done] = lines;
+    const [cut, started, finished, push, pr, , done] = lines;
     expect(cut).toMatchObject({ branch: batch.branch, baseSha: base });
     expect(started).toMatchObject({ command: 'true' });
     expect(String(started?.['logPath'])).toContain(join(h.dataDir, 'logs', 'gate'));
@@ -227,6 +228,7 @@ describe('shipping', () => {
       'batch branch cut',
       'git push finished',
       'gh pr create finished',
+      'auto-merge turned on',
       'batch shipped',
       'checkout switched back',
     ]);
