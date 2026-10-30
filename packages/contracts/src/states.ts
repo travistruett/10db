@@ -240,3 +240,43 @@ export const BatchFailure = {
   Network: 'network',
 } as const;
 export type BatchFailure = ValueOf<typeof BatchFailure>;
+
+/** A goal's lifecycle (goals spec §6). Phase 1 writes only `draft`. */
+export const GoalState = {
+  Draft: 'draft',
+  Running: 'running',
+  Waiting: 'waiting',
+  Paused: 'paused',
+  Done: 'done',
+  Cancelled: 'cancelled',
+} as const;
+export type GoalState = ValueOf<typeof GoalState>;
+
+/** How a goal criterion is proven (goals spec §5). */
+export const CriterionCheck = {
+  Task: 'task',
+  Merged: 'merged',
+  Command: 'command',
+  Accept: 'accept',
+} as const;
+export type CriterionCheck = ValueOf<typeof CriterionCheck>;
+
+export const CriterionState = { Unproven: 'unproven', Proven: 'proven' } as const;
+export type CriterionState = ValueOf<typeof CriterionState>;
+
+/**
+ * What Factory's one line says about a goal or the Ungrouped group (goals spec §8). The daemon
+ * derives it from the first match in this order.
+ */
+export const GoalStatus = {
+  Failed: 'failed',
+  WaitingOnYou: 'waiting_on_you',
+  WaitingOnSomeone: 'waiting_on_someone',
+  Paused: 'paused',
+  Running: 'running',
+  /** Every task is done but a pull request is still open. */
+  Shipping: 'shipping',
+  NotStarted: 'not_started',
+  Done: 'done',
+} as const;
+export type GoalStatus = ValueOf<typeof GoalStatus>;

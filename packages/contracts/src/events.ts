@@ -40,6 +40,8 @@ export const EventType = {
   BoardColumnSaved: 'board_column.saved',
   BoardColumnDeleted: 'board_column.deleted',
   NetworkHostsChanged: 'network_hosts.changed',
+  GoalCreated: 'goal.created',
+  GoalChanged: 'goal.changed',
 } as const;
 export type EventType = (typeof EventType)[keyof typeof EventType];
 

@@ -544,6 +544,31 @@ describe('buildQueryOptions', () => {
   });
 });
 
+// Lane sessions start at the lane tier. Inside a sandbox the background policy itself is refused, so
+// the wrapper is replaced by one that records the tier and runs the program unwrapped.
+const laneTiers = vi.hoisted((): string[] => []);
+vi.mock('../priority', () => ({
+  atPriority: (tier: string, file: string, args: readonly string[]) => {
+    laneTiers.push(tier);
+    return { file, args };
+  },
+}));
+
+describe('lane priority', () => {
+  it('starts claude at the lane tier', async () => {
+    laneTiers.length = 0;
+    const options = buildQueryOptions(spec(), { ...deps });
+    const child = options.spawnClaudeCodeProcess?.({
+      command: '/bin/sh',
+      args: ['-c', 'true'],
+      env: { PATH: '/usr/bin:/bin' },
+      signal: new AbortController().signal,
+    });
+    await new Promise((resolve) => child?.once('exit', resolve));
+    expect(laneTiers).toEqual(['lane']);
+  });
+});
+
 describe('createClaudeAdapter', () => {
   it('emits started, activity, context, turn_complete, then ended exactly once', async () => {
     const { adapter, record } = adapterFor({

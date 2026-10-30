@@ -15,6 +15,7 @@ import { Provider, type AccountRefusal } from '@10db/contracts';
 import { z } from 'zod';
 import { systemClock, type Clock } from '../clock';
 import type { Logger } from '../log';
+import { atPriority } from '../priority';
 import {
   checkAccount,
   checkInitCredentials,
@@ -116,7 +117,9 @@ function spawnClaude(
   deps: Pick<QueryDeps, 'onSpawn' | 'onStderr'>,
 ): SpawnedProcess {
   // The SDK's forwarded signal fires after its graceful stdin-close path, so it is not handed to spawn().
-  const child = spawn(options.command, options.args, {
+  // Background priority for the session and everything it starts: the lane's commands, its repo MCP servers.
+  const launch = atPriority('lane', options.command, options.args);
+  const child = spawn(launch.file, [...launch.args], {
     cwd: options.cwd,
     env: options.env,
     stdio: ['pipe', 'pipe', 'pipe'],
