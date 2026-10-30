@@ -30,6 +30,7 @@ const gate = {
   logPath: '/data/logs/gate/b.log',
   timedOut: false,
   aborted: false,
+  blockedHosts: [],
 };
 
 // Every card that tells the builder to Retry or Abandon a batch from the Board.

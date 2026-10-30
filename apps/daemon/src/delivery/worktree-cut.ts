@@ -22,6 +22,7 @@ import { unmergedDependencies } from './deps';
 import { recordInstall } from './installed-lockfile';
 import { missingLandingBranch } from './landing';
 import { resolveStartCards } from './stale-cards';
+import { raiseInstallHostCards } from './worktree-dependencies';
 import { seedDirs, seedWorktree } from './worktree-seed';
 
 /** What a start hands its background job: the plans resolved in the request, by task. */
@@ -171,6 +172,7 @@ export async function cutWorktree(
         return;
       case 'failed':
         await refuse(worktreeCards.installFailed(batch, installed));
+        raiseInstallHostCards(ctx, project.id, installed);
         return;
       case 'installed':
         ctx.logger.info(

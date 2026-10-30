@@ -1,0 +1,1 @@
+ALTER TABLE `permission_rules` ADD `found_in` text;

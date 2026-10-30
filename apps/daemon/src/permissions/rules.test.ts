@@ -418,6 +418,7 @@ describe('matchPermissionRule', () => {
     toolName,
     pattern,
     sourceInboxId: null,
+    foundIn: null,
     createdAt: '2026-10-13T12:00:00.000Z',
   });
   const match = (toolName: string, input: unknown, rules: PermissionRuleDto[]): boolean =>
@@ -466,6 +467,41 @@ describe('matchPermissionRule', () => {
         'SandboxNetworkAccess',
         { host: 'x.registry.npmjs.org' },
         'registry.npmjs.org',
+        false,
+      ],
+      [
+        'a *. rule matches a subdomain, as the sandbox reads it',
+        'SandboxNetworkAccess',
+        { host: 'Index.Crates.io' },
+        '*.crates.io',
+        true,
+      ],
+      [
+        'a *. rule matches a deeper subdomain',
+        'SandboxNetworkAccess',
+        { host: 'a.b.crates.io' },
+        '*.crates.io',
+        true,
+      ],
+      [
+        'a *. rule does not match the domain itself',
+        'SandboxNetworkAccess',
+        { host: 'crates.io' },
+        '*.crates.io',
+        false,
+      ],
+      [
+        'a *. rule does not match a host that only ends in the same letters',
+        'SandboxNetworkAccess',
+        { host: 'evilcrates.io' },
+        '*.crates.io',
+        false,
+      ],
+      [
+        'a *. rule does not match an address',
+        'SandboxNetworkAccess',
+        { host: '10.0.0.1' },
+        '*.0.1',
         false,
       ],
       [

@@ -68,7 +68,14 @@ import type { KeepAwake } from '../keep-awake';
 import type { Runner } from '../runner';
 import type { Scheduler } from '../scheduler';
 import { ProjectMcpError, readRepoMcp, type RepoMcp } from '../sessions';
-import { allowNetworkHost, listNetworkHosts, removeNetworkHost } from '../permissions';
+import {
+  allowFoundHosts,
+  allowNetworkHost,
+  listNetworkHosts,
+  removeNetworkHost,
+  unallowedFoundHosts,
+} from '../permissions';
+import { findRegistryHosts } from '../registries';
 import { proposeCandidates, resolveStepPlan, retryWorkstream, startTaskWithPlan } from '../team';
 import { checkoutConflictsWithRoot } from './worktree-root';
 
@@ -129,7 +136,7 @@ export function createServices(deps: {
   }
   return {
     listProjects: () => listProjectViews(db),
-    createProject(input) {
+    async createProject(input) {
       const config = ProjectInput.parse(input);
       if (!existsSync(join(config.repoPath, '.git'))) {
         throw new InvalidError(`${config.repoPath} is not a git repository`);
@@ -141,6 +148,8 @@ export function createServices(deps: {
       }
       const project = deps.state.write((ctx) => insertProject(ctx, config));
       deps.pinCheckout(project.repoPath);
+      // The registries the project's own files name are allowed from the start; reading them runs nothing.
+      allowFoundHosts(deps.state, project.id, await findRegistryHosts(project.repoPath));
       return project;
     },
     listTasks: (projectId) => listTasks(db, projectId),
@@ -231,6 +240,11 @@ export function createServices(deps: {
     },
     allowNetworkHost: (projectId, host) => allowNetworkHost(deps.state, projectId, host),
     removeNetworkHost: (projectId, host) => removeNetworkHost(deps.state, projectId, host),
+    async scanNetworkHosts(projectId) {
+      const project = getProject(db, projectId);
+      // Only listed: a lane may have written these files, so the builder allows each host by name.
+      return unallowedFoundHosts(db, projectId, await findRegistryHosts(project.repoPath));
+    },
     listPersonas: () => listPersonas(db, { includeArchived: true }),
     createPersona: (input) => deps.state.write((ctx) => insertPersona(ctx, input)),
     patchPersona: (id, patch) => deps.state.write((ctx) => patchPersona(ctx, id, patch)),
@@ -289,7 +303,12 @@ export function createServices(deps: {
     proposeCandidates: (projectId, size) => proposeCandidates(db, projectId, size),
     inspectFolder: (path) =>
       inspectFolder(
-        { git: deps.git, projects: listProjects(db), protectedRoots: deps.protectedRoots },
+        {
+          git: deps.git,
+          projects: listProjects(db),
+          protectedRoots: deps.protectedRoots,
+          registryHosts: findRegistryHosts,
+        },
         path,
       ),
     proposeAreas: (path) =>

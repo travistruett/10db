@@ -25,6 +25,7 @@ import type {
   FlowInput,
   FlowPatch,
   FolderInspectResult,
+  FoundHostDto,
   InboxAnswer,
   InboxItemDto,
   InboxItemId,
@@ -98,7 +99,8 @@ export interface TaskLookupServices {
 /** What the HTTP layer needs from the daemon. Implemented in the daemon module. */
 export interface ApiServices {
   listProjects(): ProjectViewDto[];
-  createProject(input: ProjectInput): ProjectDto;
+  /** Registers the project and allows the registries its package files name. */
+  createProject(input: ProjectInput): Promise<ProjectDto>;
   listTasks(projectId: ProjectId): TaskDto[];
   /**
    * Throws InvalidError when the task's landing names a branch origin does not have, so the
@@ -169,6 +171,12 @@ export interface ApiServices {
   ): { readonly host: NetworkHostDto; readonly created: boolean };
   /** Stops allowing a host; throws NotFoundError when it was not allowed. */
   removeNetworkHost(projectId: ProjectId, host: string): NetworkHostDto;
+  /**
+   * Reads the project's lockfiles, package manager settings and toolchain files again, as text and
+   * without running anything, and answers the hosts they name that are not allowed, each with its
+   * file. Allows nothing: the builder allows a host by name, after seeing it.
+   */
+  scanNetworkHosts(projectId: ProjectId): Promise<FoundHostDto[]>;
   listPersonas(): PersonaDto[];
   createPersona(input: PersonaInput): PersonaDto;
   patchPersona(id: PersonaId, patch: PersonaPatch): PersonaDto;

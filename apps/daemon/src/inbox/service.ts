@@ -40,6 +40,7 @@ import {
 } from '@10db/db';
 import type { StateStore } from '../events';
 import { storableRule } from '../permissions';
+import { applyGateHostChoice } from './gate-host-card';
 import { applyMcpApproval } from './mcp-approval';
 import { taskFieldsFromProposal } from './proposal-task';
 
@@ -80,6 +81,8 @@ interface FlagInput {
    */
   readonly refresh?: boolean;
   readonly options?: readonly InboxOption[];
+  /** The label of the option the card recommends. */
+  readonly recommendation?: string | null;
 }
 
 /** What a reword changes besides the body. */
@@ -133,7 +136,7 @@ export function flagCard(ctx: WriteContext, input: FlagInput): InboxItemDto {
     title: input.title,
     body: input.body,
     options: input.options ? [...input.options] : [],
-    recommendation: null,
+    recommendation: input.recommendation ?? null,
     category: QuestionCategory.Other,
     urgency: Urgency.High,
     detail: input.detail ?? null,
@@ -388,7 +391,10 @@ export function createInboxService(deps: {
         }
         if (item.kind === InboxKind.Permission) applyPermissionChoice(ctx, updated, answer);
         if (item.kind === InboxKind.Proposal) applyProposalVerdict(ctx, updated, answer);
-        if (item.kind === InboxKind.Flag) applyMcpApproval(ctx, updated, answer);
+        if (item.kind === InboxKind.Flag) {
+          applyMcpApproval(ctx, updated, answer);
+          applyGateHostChoice(ctx, updated, answer);
+        }
         return updated;
       });
       afterCommit?.();
