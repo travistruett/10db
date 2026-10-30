@@ -14,7 +14,7 @@ import {
   type Urgency,
   type WorkstreamId,
 } from '@10db/contracts';
-import { and, asc, eq, inArray, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, sql, type SQL } from 'drizzle-orm';
 import * as schema from '../schema';
 import type { Json } from '../json';
 import { assigneeFor } from './routing-rules';
@@ -103,20 +103,31 @@ export function getInboxItem(db: DbReader, id: InboxItemId): InboxItemDto {
 
 const URGENCY_ORDER = sql`CASE ${schema.inboxItems.urgency} WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END`;
 
+/**
+ * The inbox, most urgent and then oldest first. With `recent`, only that many items instead, the most
+ * recently updated first: for lists that only grow, such as the resolved cards.
+ */
 export function listInbox(
   db: DbReader,
-  filter: { states?: readonly InboxState[]; projectId?: ProjectId } = {},
+  filter: { states?: readonly InboxState[]; projectId?: ProjectId; recent?: number } = {},
 ): InboxItemDto[] {
   const where: SQL[] = [];
   if (filter.states) where.push(inArray(schema.inboxItems.state, [...filter.states]));
   if (filter.projectId) where.push(eq(schema.inboxItems.projectId, filter.projectId));
-  return db
+  const query = db
     .select()
     .from(schema.inboxItems)
-    .where(and(...where))
-    .orderBy(URGENCY_ORDER, asc(schema.inboxItems.createdAt), asc(schema.inboxItems.id))
-    .all()
-    .map(toDto);
+    .where(and(...where));
+  const rows =
+    filter.recent === undefined
+      ? query
+          .orderBy(URGENCY_ORDER, asc(schema.inboxItems.createdAt), asc(schema.inboxItems.id))
+          .all()
+      : query
+          .orderBy(desc(schema.inboxItems.updatedAt), desc(schema.inboxItems.id))
+          .limit(filter.recent)
+          .all();
+  return rows.map(toDto);
 }
 
 export function findOpenByFoldKey(
@@ -143,6 +154,7 @@ export function updateInboxItem(
   id: InboxItemId,
   patch: {
     readonly state?: InboxState;
+    readonly title?: string;
     readonly body?: string;
     readonly answer?: InboxAnswer;
     readonly targets?: readonly InboxTarget[];

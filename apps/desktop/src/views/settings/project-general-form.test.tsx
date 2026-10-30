@@ -71,6 +71,13 @@ const rows: readonly Row[] = [
     sent: { gateCommand: 'make check' },
   },
   {
+    name: 'Check after each step',
+    label: 'Check after each step',
+    line: 'Optional. Runs after each step instead of the gate command; the gate command still runs before the push.',
+    change: () => type('Check after each step', 'make check-changed'),
+    sent: { changedCheckCommand: 'make check-changed' },
+  },
+  {
     name: 'Delivery',
     project: pullRequests,
     label: 'Delivery',
@@ -85,6 +92,22 @@ const rows: readonly Row[] = [
     line: 'Pull requests start from and merge into this branch.',
     change: () => type('Base branch', 'develop'),
     sent: { baseBranch: 'develop' },
+  },
+  {
+    name: 'When checks pass, merging',
+    project: pullRequests,
+    label: 'When checks pass',
+    line: 'GitHub merges each pull request into main by itself once its required checks pass. A task can choose another branch, or hold.',
+    change: () => fireEvent.click(screen.getByRole('radio', { name: 'Hold for my review' })),
+    sent: { landing: 'hold' },
+  },
+  {
+    name: 'When checks pass, holding',
+    project: { ...pullRequests, landing: 'hold' },
+    label: 'When checks pass',
+    line: 'Pull requests wait for you to merge them. A task can choose to merge.',
+    change: () => fireEvent.click(screen.getByRole('radio', { name: 'Merge into main' })),
+    sent: { landing: 'merge' },
   },
   {
     name: 'Pull request title',
@@ -216,6 +239,28 @@ describe('ProjectGeneralForm', () => {
     await open();
     expect(screen.queryByLabelText('Base branch') !== null).toBe(row.shown);
     expect(screen.queryByLabelText('Pull request title') !== null).toBe(row.shown);
+  });
+
+  it.each([
+    { name: 'a local project', project: {}, shown: false },
+    { name: 'a pull-request project', project: pullRequests, shown: true },
+  ])('When checks pass shows only for pull requests: $name', async (row) => {
+    serve(projectDto(row.project));
+    renderApp('/settings/general');
+    await open();
+    expect(screen.queryByText('When checks pass') !== null).toBe(row.shown);
+  });
+
+  it('names the base branch the form shows in the merge choice', async () => {
+    serve(projectDto({ ...pullRequests, baseBranch: 'develop' }));
+    renderApp('/settings/general');
+    await open();
+    expect(screen.getByRole('radio', { name: 'Merge into develop' })).toBeTruthy();
+    expect(
+      screen.getByText(
+        'GitHub merges each pull request into develop by itself once its required checks pass. A task can choose another branch, or hold.',
+      ),
+    ).toBeTruthy();
   });
 
   it.each([

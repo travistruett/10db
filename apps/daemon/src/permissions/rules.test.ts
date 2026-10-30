@@ -820,6 +820,39 @@ describe('a project with no gate command', () => {
   });
 });
 
+describe('a project with a changed-packages check command', () => {
+  const project = {
+    gateCommand: 'make gate',
+    changedCheckCommand: 'make check-changed',
+    allowedCommands: [],
+  };
+
+  it('lets an edit step run it without a card, beside the gate', () => {
+    const tools = allowedToolsFor(project, 'edit');
+    expect(tools).toContain('Bash(make gate)');
+    expect(tools).toContain('Bash(make check-changed)');
+    expect(matchesAllowedTool('Bash', bash('make check-changed'), tools, repo.path)).toBe(true);
+    expect(matchesAllowedTool('Bash', bash('make check-changed --foo'), tools, repo.path)).toBe(
+      false,
+    );
+  });
+
+  it('keeps it out of a read-only step, as the gate is', () => {
+    const tools = allowedToolsFor(project, 'read_only');
+    expect(tools).not.toContain('Bash(make check-changed)');
+    expect(tools).not.toContain('Bash(make gate)');
+  });
+
+  it('adds nothing for a project without one', () => {
+    expect(allowedToolsFor({ gateCommand: 'make gate', allowedCommands: [] }, 'edit')).toEqual(
+      allowedToolsFor(
+        { gateCommand: 'make gate', changedCheckCommand: null, allowedCommands: [] },
+        'edit',
+      ),
+    );
+  });
+});
+
 describe('allowedToolsFor', () => {
   const project = { gateCommand: 'make gate', allowedCommands: [] };
   it.each([

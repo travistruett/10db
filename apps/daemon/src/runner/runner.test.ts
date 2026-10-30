@@ -10,6 +10,9 @@ import {
   ToolAccess,
   AccountCardChoice,
   MCP_APPROVAL_DETAIL,
+  rejectionsSentBack,
+  ReviewCardDetail,
+  reviewRounds,
   type AccountId,
 } from '@10db/contracts';
 import {
@@ -221,6 +224,44 @@ describe('runner', () => {
       .filter((e) => e.type === 'workstream.changed')
       .map((e) => e.data['to']);
     expect(states).toContain('HANDING_OFF');
+  });
+
+  it("checks a step with the project's changed-packages command, not its gate command", async () => {
+    engine = await createTestEngine(
+      { Alpha: [[write('src/api/a.txt'), commit('op-alpha-chg-1', ['src/api/a.txt']), turn]] },
+      { gateCommand: 'echo FULL-GATE-RAN; exit 3', changedCheckCommand: 'true' },
+    );
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+
+    expect(ws(workstream.id).state).toBe('DONE');
+    const [check] = listEvidence(engine.store.db, workstream.id);
+    expect(check).toMatchObject({ kind: 'gate', command: 'true', exitCode: 0 });
+  });
+
+  it('sends a failed changed-packages check back as a fix with its output', async () => {
+    engine = await createTestEngine(
+      {
+        Alpha: [
+          [turn],
+          [write('src/api/fixed.txt'), commit('op-chg-fix-1', ['src/api/fixed.txt']), turn],
+        ],
+      },
+      {
+        gateCommand: 'true',
+        changedCheckCommand: 'test -f src/api/fixed.txt || { echo MISSING-CHANGED-FILE; exit 2; }',
+      },
+    );
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id)).toMatchObject({ state: 'QUEUED', nextAction: { kind: 'fix' } });
+
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(engine.adapter.prompts[1]?.prompt).toContain('MISSING-CHANGED-FILE');
   });
 
   it('sends a failed gate back as a fix with the output, then passes', async () => {
@@ -1458,6 +1499,25 @@ describe('runner', () => {
     expect(listInbox(engine.store.db, { states: ['OPEN'] }).map((i) => i.kind)).toEqual(['flag']);
   });
 
+  it('hands the builder’s retry note to the next session after crashes failed the workstream', async () => {
+    const crash = { do: 'crash' as const, message: 'boom' };
+    engine = await createTestEngine({
+      Alpha: [[crash], [crash], [crash], [crash], [turn]],
+    });
+    const { workstream } = engine.addTask('Alpha');
+    for (let i = 0; i < 4; i += 1) {
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+    }
+    expect(ws(workstream.id).state).toBe('FAILED');
+    engine.retry(workstream.id, 'The fixture server needs port 4100.');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(engine.adapter.prompts.at(-1)?.prompt).toContain(
+      'The builder sent the work back: The fixture server needs port 4100.',
+    );
+  });
+
   it('fails at once on a billing refusal, without retrying it as a crash', async () => {
     const refusal =
       "Billing check failed: expected the Claude subscription, got an API key. No prompt was sent. <b>Check</b> the project's billing mode.";
@@ -2359,21 +2419,179 @@ describe('flows', () => {
     expect(ws(workstream.id).state).toBe('DONE');
   });
 
-  it('ends a review step that never gives a verdict as FAILED with a flag, and marks the step failed', async () => {
-    engine = await createTestEngine({
-      Alpha: [
-        implement('op-flow-0021'),
-        [turn, { do: 'await_message', contains: RESULT_NUDGE }, turn],
-      ],
+  const noVerdict = [turn, { do: 'await_message' as const, contains: RESULT_NUDGE }, turn];
+
+  describe('a review session that ends without a verdict', () => {
+    it('runs the review once more by itself, and the second session can approve', async () => {
+      engine = await createTestEngine({
+        Alpha: [implement('op-flow-0021'), noVerdict, [approve('op-flow-0022'), turn]],
+      });
+      const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+      await until(workstream.id, (s) => s === 'DONE', 2);
+      expect(ws(workstream.id).state).toBe('DONE');
+      expect(step(workstream.id, 1)?.result?.verdict).toBe('approve');
+      expect(listSessions(engine.store.db, workstream.id).map((s) => s.exitReason)).toEqual([
+        'step_done',
+        'step_done',
+        'step_done',
+      ]);
+      expect(listInbox(engine.store.db, { states: ['OPEN'] }).map((i) => i.kind)).not.toContain(
+        'flag',
+      );
     });
-    const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
-    await until(workstream.id, (s) => s === 'FAILED');
-    expect(ws(workstream.id)).toMatchObject({
-      state: 'FAILED',
-      failureReason: 'The review step ended without calling complete_step',
+
+    it('fails only when the rerun ends without a verdict too, and marks the step failed', async () => {
+      engine = await createTestEngine({
+        Alpha: [implement('op-flow-0023'), noVerdict, noVerdict],
+      });
+      const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+      await until(workstream.id, (s) => s === 'FAILED', 2);
+      expect(ws(workstream.id)).toMatchObject({
+        state: 'FAILED',
+        failureReason:
+          'The review step ended without calling complete_step: its last turn ended normally.',
+      });
+      expect(listSessions(engine.store.db, workstream.id)).toHaveLength(3);
+      expect(step(workstream.id, 1)?.status).toBe('failed');
+      expect(listInbox(engine.store.db, { states: ['OPEN'] }).map((i) => i.kind)).toContain('flag');
     });
-    expect(step(workstream.id, 1)?.status).toBe('failed');
-    expect(listInbox(engine.store.db, { states: ['OPEN'] }).map((i) => i.kind)).toContain('flag');
+
+    it('says in the failure how the last session ended: its turn limit and the context it used', async () => {
+      engine = await createTestEngine(
+        {
+          Alpha: [
+            implement('op-flow-0024'),
+            noVerdict,
+            [
+              { do: 'context', percentage: 63 },
+              { do: 'turn_complete', result: 'max_turns' },
+              { do: 'await_message', contains: RESULT_NUDGE },
+              { do: 'turn_complete', result: 'max_turns' },
+            ],
+          ],
+        },
+        { handoffPct: 80, nudgePct: 95 }, // below the line: this session was never asked to hand off
+      );
+      const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+      await until(workstream.id, (s) => s === 'FAILED', 2);
+      expect(ws(workstream.id).failureReason).toBe(
+        'The review step ended without calling complete_step: its last turn stopped at the turn limit, with 63% of its context used.',
+      );
+    });
+
+    it('says when the last turn ended with an error', async () => {
+      engine = await createTestEngine({
+        Alpha: [
+          implement('op-flow-0025'),
+          noVerdict,
+          [
+            { do: 'turn_complete', result: 'error' },
+            { do: 'await_message', contains: RESULT_NUDGE },
+            { do: 'turn_complete', result: 'error' },
+          ],
+        ],
+      });
+      const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+      await until(workstream.id, (s) => s === 'FAILED', 2);
+      expect(ws(workstream.id).failureReason).toBe(
+        'The review step ended without calling complete_step: its last turn ended with an error.',
+      );
+    });
+
+    it('gives a review the builder retried its own rerun again', async () => {
+      engine = await createTestEngine({
+        Alpha: [
+          implement('op-flow-002a'),
+          noVerdict,
+          noVerdict,
+          noVerdict,
+          [approve('op-flow-002b'), turn],
+        ],
+      });
+      const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+      await until(workstream.id, (s) => s === 'FAILED', 3);
+      expect(ws(workstream.id).state).toBe('FAILED');
+      engine.retry(workstream.id);
+      // The retried review ends without a verdict once more: it runs again rather than failing.
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+      expect(ws(workstream.id).state).toBe('DONE');
+      expect(step(workstream.id, 1)?.result?.verdict).toBe('approve');
+      expect(listSessions(engine.store.db, workstream.id)).toHaveLength(5);
+    });
+
+    it('gives each review its own rerun after the work is sent back', async () => {
+      engine = await createTestEngine({
+        Alpha: [
+          implement('op-flow-0026'),
+          noVerdict,
+          [reject('op-flow-0027'), turn],
+          implement('op-flow-0028'),
+          noVerdict,
+          [approve('op-flow-0029'), turn],
+        ],
+      });
+      const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+      await until(workstream.id, (s) => s === 'DONE');
+      expect(ws(workstream.id).state).toBe('DONE');
+    });
+  });
+
+  describe('a review session that runs low on context', () => {
+    const handoff = (opId: string) => ({
+      do: 'mcp' as const,
+      tool: 'write_handoff',
+      args: handoffArgs(opId, 'Check the empty state, then give the verdict'),
+    });
+    const lowOnContext = (opId: string) => [
+      { do: 'context' as const, percentage: 75 },
+      { do: 'await_message' as const, contains: 'write_handoff' },
+      handoff(opId),
+      turn,
+    ];
+
+    it('hands off with its findings so far, and a fresh session continues from them', async () => {
+      engine = await createTestEngine(
+        {
+          Alpha: [
+            implement('op-flow-0141'),
+            lowOnContext('op-flow-0142'),
+            [approve('op-flow-0143'), turn],
+          ],
+        },
+        { handoffPct: 70, nudgePct: 90 },
+      );
+      const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+      await until(workstream.id, (s) => s === 'DONE', 2);
+      expect(ws(workstream.id).state).toBe('DONE');
+      expect(listSessions(engine.store.db, workstream.id).map((s) => s.exitReason)).toEqual([
+        'step_done',
+        'handoff',
+        'step_done',
+      ]);
+      const continued = engine.adapter.prompts[2]?.prompt ?? '';
+      expect(continued).toContain('Continue from the handoff below');
+      expect(continued).toContain('Next action: Check the empty state, then give the verdict');
+      expect(continued).toContain('Your step: 2 of 2, review');
+    });
+
+    it('a rerun after a handoff continues from that handoff', async () => {
+      engine = await createTestEngine(
+        {
+          Alpha: [
+            implement('op-flow-0151'),
+            lowOnContext('op-flow-0152'),
+            noVerdict,
+            [approve('op-flow-0153'), turn],
+          ],
+        },
+        { handoffPct: 70, nudgePct: 90 },
+      );
+      const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+      await until(workstream.id, (s) => s === 'DONE', 2);
+      expect(ws(workstream.id).state).toBe('DONE');
+      expect(engine.adapter.prompts[3]?.prompt).toContain('Continue from the handoff below');
+    });
   });
 
   it('accepts a verdict given after the nudge', async () => {
@@ -2391,23 +2609,95 @@ describe('flows', () => {
     expect(step(workstream.id, 1)?.result?.verdict).toBe('approve');
   });
 
-  it('fails after the fix limit when the reviewer keeps rejecting, then retries the review cleanly', async () => {
-    const round = (n: number) => [[turn], [reject(`op-flow-04${String(n)}0`), turn]];
-    engine = await createTestEngine({
-      Alpha: [...[1, 2, 3, 4].flatMap(round), [approve('op-flow-0499'), turn]],
+  describe('when the reviewer keeps rejecting', () => {
+    const FINAL =
+      '1. BLOCKING src/api/a.txt:3 the card hides what the reviewer found.\n   Show it.';
+    const round = (n: number) => [
+      [turn],
+      [reject(`op-flow-04${String(n)}0`, n === 4 ? FINAL : `1. NOTE round ${String(n)}`), turn],
+    ];
+    const failed = async () => {
+      engine = await createTestEngine({
+        Alpha: [
+          ...[1, 2, 3, 4].flatMap(round),
+          // After a retry: the implement step reruns, then the review approves.
+          [turn],
+          [approve('op-flow-0499'), turn],
+        ],
+      });
+      const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+      await until(workstream.id, (s) => s === 'FAILED');
+      return workstream;
+    };
+
+    it('fails after the fix limit with a flag that carries the last review’s findings', async () => {
+      const workstream = await failed();
+      expect(ws(workstream.id)).toMatchObject({
+        state: 'FAILED',
+        failureReason: 'The review step rejected the work and the retry limit (3) is used up',
+      });
+      const card = listInbox(engine.store.db, { states: ['OPEN'] }).find((i) => i.kind === 'flag');
+      const detail = ReviewCardDetail.parse(card?.detail?.['reviewRejection']);
+      expect(detail.at).toBe(ws(workstream.id).steps[1]?.result?.at);
+      expect(detail).toEqual({
+        role: 'review',
+        personaName: 'Reviewer',
+        at: detail.at,
+        findings: [
+          {
+            severity: 'BLOCKING',
+            location: 'src/api/a.txt:3',
+            text: 'BLOCKING src/api/a.txt:3 the card hides what the reviewer found.',
+          },
+        ],
+        summary: FINAL,
+      });
     });
-    const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
-    await until(workstream.id, (s) => s === 'FAILED');
-    expect(ws(workstream.id)).toMatchObject({
-      state: 'FAILED',
-      failureReason: 'The review step rejected the work and the retry limit (3) is used up',
+
+    it('keeps every round the reviewer gave', async () => {
+      const workstream = await failed();
+      expect(reviewRounds(ws(workstream.id).steps).map((r) => r.result.summary)).toEqual([
+        FINAL,
+        '1. NOTE round 3',
+        '1. NOTE round 2',
+        '1. NOTE round 1',
+      ]);
+      expect(rejectionsSentBack(ws(workstream.id))).toBe(3);
     });
-    expect(listInbox(engine.store.db, { states: ['OPEN'] }).map((i) => i.kind)).toContain('flag');
-    // The builder retries: the review starts clean (no stale verdict) and approves.
-    engine.retry(workstream.id);
-    expect(step(workstream.id, 1)).toMatchObject({ status: 'running', result: null, attempts: 0 });
-    await until(workstream.id, (s) => s === 'DONE');
-    expect(ws(workstream.id).state).toBe('DONE');
+
+    it('sends a retry to the implement step with the findings, and the review runs after it', async () => {
+      const workstream = await failed();
+      engine.retry(workstream.id);
+      expect(ws(workstream.id)).toMatchObject({
+        state: 'QUEUED',
+        stepIndex: 0,
+        attempt: 0,
+        nextAction: { kind: 'revise', reviewStep: 1 },
+      });
+      // The review has not run since the retry, so nothing it said before counts.
+      expect(rejectionsSentBack(ws(workstream.id))).toBe(0);
+      expect(reviewRounds(ws(workstream.id).steps)).toHaveLength(4);
+      expect(step(workstream.id, 0)).toMatchObject({ status: 'running', result: null });
+      await until(workstream.id, (s) => s === 'DONE');
+      const prompt = engine.adapter.prompts.at(-2)?.prompt ?? '';
+      expect(prompt).toContain('Your step: 1 of 2, implement');
+      expect(prompt).toContain('rejected the work');
+      expect(prompt).toContain('the card hides what the reviewer found');
+      expect(ws(workstream.id).state).toBe('DONE');
+    });
+
+    it('hands the builder’s note to that implement session with the findings', async () => {
+      const workstream = await failed();
+      engine.retry(workstream.id, 'Use the existing card component.');
+      expect(ws(workstream.id)).toMatchObject({ state: 'QUEUED', stepIndex: 0 });
+      await until(workstream.id, (s) => s === 'DONE');
+      const prompt = engine.adapter.prompts.at(-2)?.prompt ?? '';
+      expect(prompt).toContain('Use the existing card component.');
+      expect(prompt).toContain('the card hides what the reviewer found');
+      expect(
+        listEvidence(engine.store.db, workstream.id).filter((e) => e.kind === 'builder'),
+      ).toMatchObject([{ summary: 'Use the existing card component.' }]);
+    });
   });
 
   it('escalates the implement step when the gate fails', async () => {
@@ -2521,7 +2811,7 @@ describe('flows', () => {
     });
     await until(workstream.id, (s) => s === 'FAILED');
     expect(ws(workstream.id).failureReason).toBe(
-      'The plan step ended without calling complete_step',
+      'The plan step ended without calling complete_step: its last turn ended normally.',
     );
   });
 

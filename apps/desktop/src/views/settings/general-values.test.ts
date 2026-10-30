@@ -30,6 +30,11 @@ describe('checkGeneral', () => {
       expected: { ok: true, patch: { sandboxLoopback: true } },
     },
     {
+      name: 'holding pull requests for review',
+      change: { landing: 'hold' },
+      expected: { ok: true, patch: { landing: 'hold' } },
+    },
+    {
       name: 'a worktree per task',
       change: { delivery: 'pull_request', prTitlePrefix: 'feat(app)', workspaceMode: 'worktree' },
       expected: {
@@ -78,6 +83,16 @@ describe('checkGeneral', () => {
       name: 'an emptied gate clears it',
       change: { gateCommand: ' ' },
       expected: { ok: true, patch: { gateCommand: null } },
+    },
+    {
+      name: 'a changed-packages check, trimmed',
+      change: { changedCheckCommand: ' make check-changed ' },
+      expected: { ok: true, patch: { changedCheckCommand: 'make check-changed' } },
+    },
+    {
+      name: 'an emptied changed-packages check clears it',
+      change: { changedCheckCommand: ' ' },
+      expected: { ok: true, patch: null },
     },
     {
       name: 'an empty lane cap',

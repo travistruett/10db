@@ -16,6 +16,7 @@ import {
   insertWorkstream,
   patchBatch,
   releaseClaims,
+  runNext,
   schema,
   seedProject,
   transitionBatch,
@@ -82,11 +83,12 @@ afterEach(() => {
   close();
 });
 
-function scheduler(caps = { global: 4 }) {
+function scheduler(caps = { global: 4 }, awaited: ReadonlySet<WorkstreamId> = new Set()) {
   return createScheduler({
     state,
     clock,
     caps,
+    awaitedHolders: () => awaited,
     instanceId: 'daemon-1',
     leaseMs: 60_000,
     tickMs: 2_000,
@@ -112,6 +114,13 @@ function scheduler(caps = { global: 4 }) {
               kind: 'moved',
               pinned: '/a/.git',
               found: '/b/.git',
+              pin: {
+                gitDir: '/a/.git',
+                commonDir: '/a/.git',
+                id: '1:2/1:2',
+                fetchUrl: null,
+                pushUrl: null,
+              },
               candidate: {
                 gitDir: '/b/.git',
                 commonDir: '/b/.git',
@@ -175,6 +184,50 @@ describe('scheduler', () => {
     queue();
     expect(await scheduler({ global: 2 }).tick()).toBe(2);
     expect(launched).toHaveLength(2);
+  });
+
+  describe('run next', () => {
+    const press = (taskId: Parameters<typeof runNext>[1]) => {
+      clock.advance(1_000);
+      state.write((ctx) => runNext(ctx, taskId));
+    };
+
+    it('gives the one free lane to the task the builder put first, not the oldest', async () => {
+      const a = queue();
+      const b = queue();
+      const c = queue();
+      press(c.task.id);
+      expect(await scheduler({ global: 1 }).tick()).toBe(1);
+      expect(launched.map((l) => l.id)).toEqual([c.workstream.id]);
+      // Once it holds a lane it no longer jumps the line: the rest keep the order they started in.
+      expect(getWorkstream(store.db, c.workstream.id).runNextAt).toBeNull();
+      moveWorkstream(c.workstream.id, 'CANCELLED');
+      launched = [];
+      await scheduler({ global: 1 }).tick();
+      expect(launched.map((l) => l.id)).toEqual([a.workstream.id]);
+      expect(getWorkstream(store.db, b.workstream.id).state).toBe('QUEUED');
+    });
+
+    it('takes the latest press first when several tasks were pushed', async () => {
+      const a = queue();
+      const b = queue();
+      queue();
+      press(a.task.id);
+      press(b.task.id);
+      await scheduler({ global: 2 }).tick();
+      expect(launched.map((l) => l.id)).toEqual([b.workstream.id, a.workstream.id]);
+    });
+
+    it('lets the next task run while the pushed one waits for its dependencies', async () => {
+      const first = queue();
+      const blocked = add(first.project, ['ui'], [first.task.id]);
+      const other = queue();
+      press(blocked.task.id);
+      await scheduler({ global: 1 }).tick();
+      // The pushed task isn't ready, so it takes no lane; the dependency it waits on goes first.
+      expect(launched.map((l) => l.id)).toEqual([first.workstream.id]);
+      expect(getWorkstream(store.db, other.workstream.id).state).toBe('QUEUED');
+    });
   });
 
   it('respects a project lane limit and the account lane cap', async () => {
@@ -256,6 +309,20 @@ describe('scheduler', () => {
     moveWorkstream(first.id, 'QUEUED');
     expect(await scheduler().tick()).toBe(0);
     expect(getWorkstream(store.db, first.id).state).toBe('QUEUED');
+  });
+
+  it('launches a queued task a running task waits on for a claim, over every lane cap', async () => {
+    const first = queue({ maxLanes: 2 });
+    const second = add(first.project, ['api']);
+    const holder = add(first.project, ['ui']);
+    state.write((ctx) => patchAccount(ctx, first.project.accountId, { laneCap: 2 }));
+    // Both lanes are held by tasks that wait inside request_claim for a claim the holder keeps.
+    moveWorkstream(first.workstream.id, 'STARTING');
+    moveWorkstream(second.workstream.id, 'STARTING');
+    expect(await scheduler({ global: 2 }).tick()).toBe(0);
+    expect(await scheduler({ global: 2 }, new Set([holder.workstream.id])).tick()).toBe(1);
+    expect(launched.map((l) => l.id)).toEqual([holder.workstream.id]);
+    expect(getWorkstream(store.db, holder.workstream.id).state).toBe('STARTING');
   });
 
   it('waits for dependencies', async () => {
@@ -575,7 +642,10 @@ describe('worktree batches', () => {
       delivery: 'pull_request',
       prTitlePrefix: 'feat(app)',
       maxLanes: 3,
-      hazards: [{ name: 'docker', globs: ['docker/**'], commands: [] }],
+      hazards: [
+        { name: 'docker', globs: ['docker/**'], commands: [] },
+        { name: 'harness', globs: ['AGENTS.md'], commands: [], scope: 'copy' },
+      ],
     });
     return claims.map((claim, i) => {
       const dir = tempDir('worktree');
@@ -632,6 +702,14 @@ describe('worktree batches', () => {
   it('a hazard still serializes them', async () => {
     worktrees(['docker', 'docker', 'docker']);
     expect(await scheduler({ global: 4 }).tick()).toBe(1);
+  });
+
+  it("launches three batches' work in one tick with a per-copy hazard claimed", async () => {
+    worktrees(['harness', 'harness', 'harness']);
+    expect(await scheduler({ global: 4 }).tick()).toBe(3);
+    const held = activeClaims('harness');
+    expect(held).toHaveLength(3);
+    expect(new Set(held.map((c) => c.scope)).size).toBe(3);
   });
 
   it('waits with one folded card while a worktree is missing', async () => {

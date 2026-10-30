@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { FoundHostDto } from './entities';
+import { AreaDef, FoundHostDto } from './entities';
 
 /** Where a candidate gate command was found in a folder. */
 export const GateSource = {
@@ -54,3 +54,43 @@ export const FolderInspectResult = z.discriminatedUnion('ok', [
   z.object({ ok: z.literal(false), reason: z.enum(FolderRefusalReason), message: z.string() }),
 ]);
 export type FolderInspectResult = z.infer<typeof FolderInspectResult>;
+
+/** The folder to propose areas for: a repository's top level, as an absolute path. */
+export const AreaProposalInput = z.object({ path: z.string().startsWith('/') });
+export type AreaProposalInput = z.infer<typeof AreaProposalInput>;
+
+/** An area as proposed: what a project stores, plus why the builder is offered it. */
+export const ProposedArea = AreaDef.extend({
+  /** One line on what the area holds and why it stands alone. */
+  reason: z.string().min(1).max(300),
+});
+export type ProposedArea = z.infer<typeof ProposedArea>;
+
+/**
+ * The globs of one area that holds every file of a repository, for a project nothing was proposed
+ * for. Node's glob matcher, which 10db matches paths with, lets no `*` or `**` match a name that
+ * starts with a dot, so dotfiles and the files below a dot folder have globs of their own. A file
+ * below a second dot name, such as a dotfile in a dot folder, is still left out.
+ */
+export const WHOLE_REPOSITORY_GLOBS: readonly string[] = ['**', '**/.*', '**/.*/**'];
+
+/** Who named and merged the areas. */
+export const AreaProposalSource = {
+  /** A model named and merged the candidates. */
+  Model: 'model',
+  /** The candidates as the repository's structure and history gave them: no model answered. */
+  Structure: 'structure',
+} as const;
+export type AreaProposalSource = (typeof AreaProposalSource)[keyof typeof AreaProposalSource];
+
+export const AreaProposal = z.object({
+  areas: z.array(ProposedArea).min(1),
+  namedBy: z.enum(AreaProposalSource),
+});
+export type AreaProposal = z.infer<typeof AreaProposal>;
+
+export const AreaProposalResult = z.discriminatedUnion('ok', [
+  z.object({ ok: z.literal(true), proposal: AreaProposal }),
+  z.object({ ok: z.literal(false), message: z.string() }),
+]);
+export type AreaProposalResult = z.infer<typeof AreaProposalResult>;

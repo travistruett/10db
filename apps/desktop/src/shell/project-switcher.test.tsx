@@ -131,6 +131,15 @@ describe('ProjectSwitcher', () => {
           },
         }),
       ),
+      http.post(daemonUrl('/folders/propose-areas'), () =>
+        HttpResponse.json({
+          ok: true,
+          proposal: {
+            namedBy: 'structure',
+            areas: [{ name: 'root', globs: ['*', '.*'], reason: 'The top of the repository.' }],
+          },
+        }),
+      ),
       http.post(daemonUrl('/projects'), () => {
         projects = [alpha, beta, gamma];
         return HttpResponse.json(gamma, { status: 201 });
@@ -145,6 +154,7 @@ describe('ProjectSwitcher', () => {
     fireEvent.change(path, { target: { value: '/Users/x/gamma' } });
     fireEvent.blur(path);
     await within(dialog).findByRole('textbox', { name: 'Name' });
+    await within(dialog).findByRole('group', { name: 'Area 1' });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Create Project' }));
 
     expect(

@@ -6,6 +6,7 @@ const S = WorkstreamState;
 /** DESIGN.md status colors: blue running, yellow waiting on you, orange paused, red failed, green done, gray idle. */
 export const STATE_COLORS: Readonly<Record<State, MantineColor>> = {
   [S.Queued]: 'gray',
+  [S.Held]: 'gray',
   [S.Starting]: 'blue',
   [S.Running]: 'blue',
   [S.HandingOff]: 'blue',
@@ -21,6 +22,7 @@ export const STATE_COLORS: Readonly<Record<State, MantineColor>> = {
 
 export const STATE_LABELS: Readonly<Record<State, string>> = {
   [S.Queued]: 'Queued',
+  [S.Held]: 'Held',
   [S.Starting]: 'Starting',
   [S.Running]: 'Running',
   [S.HandingOff]: 'Handing off',
@@ -36,6 +38,11 @@ export const STATE_LABELS: Readonly<Record<State, string>> = {
 
 export function canCancel(state: State): boolean {
   return !isTerminal(state);
+}
+
+/** A task whose latest run failed can be closed (the daemon refuses any other). */
+export function canClose(state: State): boolean {
+  return state === S.Failed;
 }
 
 /** Only a failed workstream can be retried (the daemon refuses anything else). */

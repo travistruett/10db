@@ -1,6 +1,14 @@
-import { BatchState, WorkstreamState, type BatchDto, type WorkstreamDto } from '@10db/contracts';
+import {
+  BatchState,
+  FIX_ATTEMPT_LIMIT,
+  rejectionsSentBack,
+  WorkstreamState,
+  type BatchDto,
+  type WorkstreamDto,
+} from '@10db/contracts';
 import type { MantineColor } from '@mantine/core';
 import { FAILURE_LABELS } from './batch-labels';
+import { ordinal } from './queue-place';
 
 const S = WorkstreamState;
 
@@ -24,6 +32,18 @@ function building(workstream: WorkstreamDto): string {
 }
 
 /**
+ * How often the review sent the work back, against the limit that fails the task; null when it
+ * never did, or a retry has started the count over.
+ */
+export function reviewSentBackLine(workstream: WorkstreamDto | undefined): string | null {
+  if (!workstream) return null;
+  const sentBack = rejectionsSentBack(workstream);
+  return sentBack > 0
+    ? `Review sent back ${String(sentBack)} of ${String(FIX_ATTEMPT_LIMIT)}`
+    : null;
+}
+
+/**
  * What a task is doing right now, from its latest workstream and the batch it ships in. Null when
  * there is nothing to say: no run, a cancelled one, or finished work that is not being shipped.
  */
@@ -31,11 +51,18 @@ export function taskState(
   workstream: WorkstreamDto | undefined,
   batch: BatchDto | undefined,
   gateCommand: string | null,
+  place?: number,
 ): TaskState | null {
   if (!workstream) return null;
   switch (workstream.state) {
     case S.Queued:
-      return { line: 'Queued', color: 'gray' };
+      if (place === undefined) return { line: 'Queued', color: 'gray' };
+      return {
+        line: place === 1 ? 'Queued · next in line' : `Queued · ${ordinal(place)} in line`,
+        color: 'gray',
+      };
+    case S.Held:
+      return { line: 'Held: not in the queue', color: 'gray' };
     case S.Starting:
     case S.Running:
     case S.HandingOff:

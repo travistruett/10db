@@ -72,6 +72,15 @@ function serve(
         },
       }),
     ),
+    http.post(daemonUrl('/folders/propose-areas'), () =>
+      HttpResponse.json({
+        ok: true,
+        proposal: {
+          namedBy: 'structure',
+          areas: [{ name: 'root', globs: ['*', '.*'], reason: 'The top of the repository.' }],
+        },
+      }),
+    ),
     http.get(daemonUrl('/projects'), () =>
       HttpResponse.json(created ? [projectDto({ name: 'widgets' })] : []),
     ),
@@ -303,6 +312,7 @@ describe('FirstRun', () => {
     fireEvent.change(path, { target: { value: '/Users/me/widgets' } });
     fireEvent.blur(path);
     await screen.findByRole('textbox', { name: 'Name' });
+    await screen.findByRole('group', { name: 'Area 1' });
     fireEvent.click(next('Create Project'));
 
     expect(
@@ -330,6 +340,7 @@ describe('FirstRun', () => {
     fireEvent.change(path, { target: { value: '/Users/me/widgets' } });
     fireEvent.blur(path);
     await screen.findByRole('textbox', { name: 'Name' });
+    await screen.findByRole('group', { name: 'Area 1' });
     fireEvent.click(next('Create Project'));
     expect(await screen.findByText("Couldn't create the project: Already a project.")).toBeTruthy();
   });

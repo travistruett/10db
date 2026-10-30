@@ -12,6 +12,7 @@ const task = {
   areas: ['api'],
   riskTags: [],
   flowId: null,
+  landing: { kind: 'base' },
   status: 'open',
   boardOrder: 1,
   boardColumnId: null,

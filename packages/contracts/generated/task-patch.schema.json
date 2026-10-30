@@ -40,6 +40,53 @@
           "type": "null"
         }
       ]
+    },
+    "landing": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "base"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "branch"
+            },
+            "branch": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]*$"
+            }
+          },
+          "required": [
+            "kind",
+            "branch"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "hold"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        }
+      ]
     }
   }
 }

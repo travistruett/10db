@@ -1,9 +1,9 @@
-import type { ProjectId } from '@10db/contracts';
-import { findOpenByFoldKey } from '@10db/db';
+import { CARD_RESOLVES_WHEN, type ProjectId } from '@10db/contracts';
+import { findOpenByFoldKey, type WriteContext } from '@10db/db';
 import type { StateStore } from '../events';
 import type { Git, NetworkCall } from '../git';
 import type { Gh, GhCall } from '../github';
-import type { InboxService } from '../inbox';
+import { flagCard, rewordCard, withdrawCard, type InboxService } from '../inbox';
 import type { Logger } from '../log';
 import type { Card } from './cards';
 import type { DeliveryJobs } from './jobs';
@@ -58,16 +58,66 @@ export function ghCall(ctx: DeliveryContext, signal: AbortSignal): GhCall {
   return networkCall(ctx, signal);
 }
 
-/** Delivery cards belong to the project, not to one workstream. */
-export function raise(inbox: InboxService, projectId: ProjectId, card: Card): void {
-  inbox.flag({
+/** The flag a delivery card raises. */
+function flagOf(projectId: ProjectId, card: Card) {
+  return {
     projectId,
     workstreamId: null,
     title: card.title,
     body: card.body,
     ...(card.foldKey ? { foldKey: card.foldKey } : {}),
+    ...(card.refresh ? { refresh: true } : {}),
+    ...(card.detail || card.resolvesWhen
+      ? {
+          detail: {
+            ...card.detail,
+            ...(card.resolvesWhen ? { [CARD_RESOLVES_WHEN]: card.resolvesWhen } : {}),
+          },
+        }
+      : {}),
+  };
+}
+
+/** Delivery cards belong to the project, not to one workstream. */
+export function raise(inbox: InboxService, projectId: ProjectId, card: Card): void {
+  inbox.flag(flagOf(projectId, card));
+}
+
+/** `raise` inside the caller's write: the card commits with the change that raised it, or neither does. */
+export function raiseIn(write: WriteContext, projectId: ProjectId, card: Card): void {
+  flagCard(write, flagOf(projectId, card));
+}
+
+/**
+ * Brings the project's open card with `card`'s fold key in line with `card`, inside the caller's
+ * write: its title and body, and its detail when `card` has one, so it says what holds now. A
+ * dismissed card stays dismissed, and a card that says this already is not written again.
+ */
+export function rewriteIn(write: WriteContext, projectId: ProjectId, card: Card): void {
+  if (card.foldKey === undefined) return;
+  const open = findOpenByFoldKey(write.tx, projectId, card.foldKey);
+  if (open === undefined) return;
+  const same =
+    open.title === card.title &&
+    open.body === card.body &&
+    (card.detail === undefined || JSON.stringify(open.detail) === JSON.stringify(card.detail));
+  if (same) return;
+  rewordCard(write, open.id, card.body, {
+    title: card.title,
     ...(card.detail ? { detail: card.detail } : {}),
   });
+}
+
+/** `withdraw` inside the caller's write. */
+export function withdrawIn(
+  write: WriteContext,
+  projectId: ProjectId,
+  foldKeys: readonly string[],
+): void {
+  for (const key of foldKeys) {
+    const open = findOpenByFoldKey(write.tx, projectId, key);
+    if (open) withdrawCard(write, open.id);
+  }
 }
 
 /** Withdraws the project's open cards with these fold keys: what they asked about is gone. */

@@ -2,9 +2,17 @@ import { AccountId, Delivery, ToolName, type ProjectDto } from '@10db/contracts'
 import { Stack, TextInput } from '@mantine/core';
 import { useState, type ReactNode } from 'react';
 import { useAccounts } from '../../daemon/account-queries';
-import { useInspectFolder } from '../../daemon/folder-queries';
+import { useInspectFolder, useProposeAreas } from '../../daemon/folder-queries';
 import { useCreateProject, useSystemCheck } from '../../daemon/queries';
 import { AccountSelect } from '../settings/account-select';
+import {
+  areasOf,
+  draftProblems,
+  draftsFromAreas,
+  WHOLE_REPOSITORY,
+  type AreaDraft,
+} from './area-drafts';
+import { AreasField } from './areas-field';
 import { DeliveryField } from './delivery-field';
 import { pullRequestBlock } from './delivery-availability';
 import { FolderField, type FolderState } from './folder-field';
@@ -31,6 +39,7 @@ interface Prefilled {
 /** The state, fields and submit for adding a project; the first run and the New Project modal share it. */
 export function useProjectSetup(onCreated: (project: ProjectDto) => void): ProjectSetup {
   const inspect = useInspectFolder();
+  const propose = useProposeAreas();
   const create = useCreateProject();
   const system = useSystemCheck();
   const ghLogin = system.data?.tools.find((t) => t.name === ToolName.Gh)?.signedIn ?? null;
@@ -38,6 +47,9 @@ export function useProjectSetup(onCreated: (project: ProjectDto) => void): Proje
   const [accountChoice, setAccountChoice] = useState<string | null>(null);
   const [typed, setTyped] = useState<Prefilled>({ name: '', gate: '', baseBranch: '' });
   const [deliveryChoice, setDeliveryChoice] = useState<Delivery | null>(null);
+  // Null until the daemon has proposed areas for the folder, or has failed to.
+  const [areas, setAreas] = useState<AreaDraft[] | null>(null);
+  const [areaNote, setAreaNote] = useState<string | null>(null);
 
   const result = inspect.data;
   const inspection = result?.ok === true ? result.inspection : null;
@@ -51,8 +63,34 @@ export function useProjectSetup(onCreated: (project: ProjectDto) => void): Proje
           ? { kind: 'ready', path: inspect.variables, root: result.inspection.root }
           : { kind: 'refused', path: inspect.variables, message: result.message };
 
+  /** Without a proposal the project still starts, from one area over every file for the builder to split. */
+  const wholeRepository = (why: string) => {
+    setAreas(draftsFromAreas([WHOLE_REPOSITORY]));
+    setAreaNote(
+      `Couldn't propose areas: ${why} One area covers the whole repository; split it here.`,
+    );
+  };
+
+  const proposeFor = (root: string) => {
+    propose.mutate(root, {
+      onSuccess: (answer) => {
+        if (answer.ok) {
+          setAreas(draftsFromAreas(answer.proposal.areas));
+          setAreaNote(null);
+        } else wholeRepository(answer.message);
+      },
+      onError: (error) => {
+        wholeRepository(error.message);
+      },
+    });
+  };
+
   const onInspect = (path: string) => {
     create.reset();
+    // The last folder's proposal and the builder's edits to it belong to that folder only.
+    propose.reset();
+    setAreas(null);
+    setAreaNote(null);
     inspect.mutate(path, {
       onSuccess: (answer) => {
         // A new folder starts from its own prefill, not the last folder's edits.
@@ -63,6 +101,7 @@ export function useProjectSetup(onCreated: (project: ProjectDto) => void): Proje
             gate: answer.inspection.gateCandidates[0]?.command ?? '',
             baseBranch: answer.inspection.defaultBranch ?? '',
           });
+          proposeFor(answer.inspection.root);
         }
       },
     });
@@ -76,13 +115,15 @@ export function useProjectSetup(onCreated: (project: ProjectDto) => void): Proje
     accountChoice ?? accounts.find((a) => a.isDefault)?.id ?? accounts[0]?.id ?? null;
   const chooseAccount = accounts.length > 1;
 
+  const areasReady = areas !== null && areas.length > 0 && draftProblems(areas).rows.size === 0;
   const canSubmit =
     inspection !== null &&
+    areasReady &&
     typed.name.trim() !== '' &&
     (delivery === Delivery.Local || typed.baseBranch !== '');
 
   const submit = () => {
-    if (inspection === null || !canSubmit) return;
+    if (inspection === null || areas === null || !canSubmit) return;
     create.mutate(
       toProjectInput({
         name: typed.name,
@@ -90,6 +131,7 @@ export function useProjectSetup(onCreated: (project: ProjectDto) => void): Proje
         gateCommand: typed.gate,
         delivery,
         baseBranch: typed.baseBranch,
+        areas: areasOf(areas),
         accountId: chooseAccount && accountId !== null ? AccountId.parse(accountId) : null,
       }),
       { onSuccess: onCreated },
@@ -125,6 +167,7 @@ export function useProjectSetup(onCreated: (project: ProjectDto) => void): Proje
               onChange={setAccountChoice}
             />
           ) : null}
+          <AreasField drafts={areas} note={areaNote} onChange={setAreas} />
           <RegistryHostsField hosts={inspection.registryHosts} />
           <DeliveryField
             delivery={delivery}

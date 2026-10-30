@@ -60,13 +60,16 @@ export class TaskStartedError extends DomainError {
   }
 }
 
-/** A task that open tasks wait on can't be removed: they would wait for ever. */
+/**
+ * A task that open tasks wait on can't be removed or closed: they would wait for ever. `how` is the
+ * action the builder tried; the message names the dependents so the builder can deal with them first.
+ */
 export class TaskHasDependentsError extends DomainError {
   override readonly name = 'TaskHasDependentsError';
-  constructor(title: string, dependents: readonly string[]) {
+  constructor(title: string, dependents: readonly string[], how: 'remove' | 'close' = 'remove') {
     super(
       'conflict',
-      `Task ${title} can't be removed while ${dependents.join(', ')} wait${dependents.length === 1 ? 's' : ''} on it; remove ${dependents.length === 1 ? 'that task' : 'those tasks'} first`,
+      `Task ${title} can't be ${how === 'remove' ? 'removed' : 'closed'} while ${dependents.join(', ')} wait${dependents.length === 1 ? 's' : ''} on it; ${how === 'remove' ? 'remove' : 'remove or close'} ${dependents.length === 1 ? 'that task' : 'those tasks'} first`,
     );
   }
 }

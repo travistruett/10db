@@ -96,6 +96,22 @@ describe('projects', () => {
     expect(listProjects(store.db).map((p) => p.gateCommand)).toEqual([null, null]);
   });
 
+  it('has no changed-packages check unless it was given one, and keeps a patched one', () => {
+    const project = seedProject(store);
+    expect(getProject(store.db, project.id).changedCheckCommand).toBeNull();
+    store.write((ctx) =>
+      patchProject(ctx, project.id, { changedCheckCommand: 'make check-changed' }),
+    );
+    expect(getProject(store.db, project.id).changedCheckCommand).toBe('make check-changed');
+    expect(getProject(store.db, project.id).gateCommand).toBe('true');
+    store.write((ctx) => patchProject(ctx, project.id, { changedCheckCommand: null }));
+    expect(getProject(store.db, project.id).changedCheckCommand).toBeNull();
+    expect(
+      seedProject(store, { repoPath: '/tmp/changed', changedCheckCommand: 'make check-changed' })
+        .changedCheckCommand,
+    ).toBe('make check-changed');
+  });
+
   it('has no extra allowed commands unless it was given some', () => {
     const project = seedProject(store);
     expect(getProject(store.db, project.id).allowedCommands).toEqual([]);
@@ -342,6 +358,46 @@ describe('deriveBoardStatus', () => {
       'cancelled run',
       { taskStatus: 'open', depsDone: true, workstreamState: 'CANCELLED' },
       BoardStatus.Ready,
+    ],
+    [
+      'done in a batch that is shipping',
+      { taskStatus: 'done', depsDone: true, workstreamState: 'DONE', batchState: 'SHIPPING' },
+      BoardStatus.InProgress,
+    ],
+    [
+      'done in a batch that failed to ship',
+      { taskStatus: 'done', depsDone: true, workstreamState: 'DONE', batchState: 'FAILED' },
+      BoardStatus.Blocked,
+    ],
+    [
+      'done in a batch that is still open',
+      { taskStatus: 'done', depsDone: true, workstreamState: 'DONE', batchState: 'OPEN' },
+      BoardStatus.Done,
+    ],
+    [
+      'done in a batch whose pull request is open',
+      { taskStatus: 'done', depsDone: true, workstreamState: 'DONE', batchState: 'SHIPPED' },
+      BoardStatus.Done,
+    ],
+    [
+      'done in a batch that closed without a pull request',
+      { taskStatus: 'done', depsDone: true, workstreamState: 'DONE', batchState: 'CLOSED' },
+      BoardStatus.Done,
+    ],
+    [
+      'done with no batch',
+      { taskStatus: 'done', depsDone: true, workstreamState: 'DONE', batchState: null },
+      BoardStatus.Done,
+    ],
+    [
+      'removed from a batch that is shipping',
+      {
+        taskStatus: 'cancelled',
+        depsDone: true,
+        workstreamState: 'CANCELLED',
+        batchState: 'SHIPPING',
+      },
+      BoardStatus.Done,
     ],
   ] as const)('%s', (_name, input, expected) => {
     expect(deriveBoardStatus(input)).toBe(expected);

@@ -22,8 +22,12 @@ lsregister="${TENDB_INSTALL_LSREGISTER:-/System/Library/Frameworks/CoreServices.
 
 # An executable under Contents/MacOS of a 10db.app bundle, wherever it is, or of a copy named
 # 10db.app.<something>: the window (tendb-desktop) and the daemon (tendb-node, running daemon.mjs
-# or srt.mjs). Each of them holds the database.
+# or srt.mjs). Each of them holds the database, except the builder MCP bridge below.
 app_process_pattern='/10db\.app(\.[^/]*)?/Contents/MacOS/'
+# The bridge a builder's MCP client keeps running (tendb-node running builder-mcp.mjs) matches the
+# pattern above but opens no database, and a client keeps it for as long as its session lasts, so
+# it must not hold an install back.
+bridge_process_pattern='/Contents/Resources/daemon/builder-mcp\.mjs'
 
 fail() {
   echo "$script_name: $*" >&2
@@ -50,10 +54,14 @@ backup_file_for() { echo "$(dirname "$data_dir")/$(basename "$data_dir")-backup-
 previous_zip_for() { echo "$previous_dir/10db-$1.zip"; }
 
 refuse_while_running() {
-  local pids status=0
-  pids="$(pgrep -f "$app_process_pattern")" || status=$?
+  local listing pids status=0
+  listing="$(pgrep -lf "$app_process_pattern")" || status=$?
   case "$status" in
-    0) fail "10db is running (process $(echo $pids)). Quit it with ⌘Q, then run this again. This script never quits 10db for you." ;;
+    0)
+      # grep exits 1 when the bridge was the only match; that is not a failure.
+      pids="$(grep -Ev -- "$bridge_process_pattern" <<< "$listing" | awk '{ print $1 }')" || true
+      [ -z "$pids" ] || fail "10db is running (process $(echo $pids)). Quit it with ⌘Q, then run this again. This script never quits 10db for you."
+      ;;
     1) ;;
     *) fail "pgrep could not check whether 10db is running (exit $status)" ;;
   esac

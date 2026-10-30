@@ -8,6 +8,7 @@ import {
   WorkspaceMode,
   type FlowId,
   type ProjectDto,
+  type ProjectLanding,
 } from '@10db/contracts';
 
 /**
@@ -30,6 +31,8 @@ export function checkSeedNames(names: readonly string[]): {
 export interface GeneralValues {
   readonly name: string;
   readonly gateCommand: string;
+  /** '' means none: every step is checked by the gate command. */
+  readonly changedCheckCommand: string;
   readonly maxLanes: number | '';
   readonly handoffPct: number | '';
   readonly nudgePct: number | '';
@@ -39,6 +42,8 @@ export interface GeneralValues {
   readonly budgetCeiling: number | '';
   readonly delivery: Delivery;
   readonly baseBranch: string;
+  /** What a finished task's pull request does unless the task says otherwise. */
+  readonly landing: ProjectLanding;
   /** '' means none. */
   readonly prTitlePrefix: string;
   /** One command prefix per line; blank lines are ignored. */
@@ -58,6 +63,7 @@ export function generalValues(project: ProjectDto): GeneralValues {
   return {
     name: project.name,
     gateCommand: project.gateCommand ?? '',
+    changedCheckCommand: project.changedCheckCommand ?? '',
     maxLanes: project.maxLanes,
     handoffPct: project.handoffPct,
     nudgePct: project.nudgePct,
@@ -66,6 +72,7 @@ export function generalValues(project: ProjectDto): GeneralValues {
     budgetCeiling: project.budgetCeiling ?? '',
     delivery: project.delivery,
     baseBranch: project.baseBranch,
+    landing: project.landing,
     prTitlePrefix: project.prTitlePrefix ?? '',
     allowedCommands: project.allowedCommands.join('\n'),
     sandboxLoopback: project.sandboxLoopback,
@@ -130,6 +137,9 @@ export function checkGeneral(project: ProjectDto, values: GeneralValues): Genera
   // An empty gate is no gate: finished work then waits for the builder's check.
   const gate = gateCommand === '' ? null : gateCommand;
   if (gate !== project.gateCommand) patch.gateCommand = gate;
+  const changedCheck = values.changedCheckCommand.trim();
+  const changed = changedCheck === '' ? null : changedCheck;
+  if (changed !== project.changedCheckCommand) patch.changedCheckCommand = changed;
   if (values.maxLanes !== '' && values.maxLanes !== project.maxLanes)
     patch.maxLanes = values.maxLanes;
   if (values.handoffPct !== '' && values.handoffPct !== project.handoffPct)
@@ -143,6 +153,7 @@ export function checkGeneral(project: ProjectDto, values: GeneralValues): Genera
   if (ceiling !== project.budgetCeiling) patch.budgetCeiling = ceiling;
   if (values.delivery !== project.delivery) patch.delivery = values.delivery;
   if (baseBranch !== project.baseBranch) patch.baseBranch = baseBranch;
+  if (values.landing !== project.landing) patch.landing = values.landing;
   const prTitlePrefix = prefix === '' ? null : prefix;
   if (prTitlePrefix !== project.prTitlePrefix) patch.prTitlePrefix = prTitlePrefix;
   if (!sameCommands(allowed.commands, project.allowedCommands))

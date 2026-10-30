@@ -60,8 +60,25 @@ describe('taskState', () => {
       color: 'red',
     },
     { name: 'a queued run', ws: workstreamDto({ state: 'QUEUED' }), line: 'Queued', color: 'gray' },
+    {
+      name: 'a held run',
+      ws: workstreamDto({ state: 'HELD' }),
+      line: 'Held: not in the queue',
+      color: 'gray',
+    },
   ] as const)('says $name in one line', ({ ws, line, color }) => {
     expect(taskState(ws, undefined, 'make gate')).toEqual({ line, color });
+  });
+
+  it.each([
+    { place: undefined, line: 'Queued' },
+    { place: 1, line: 'Queued · next in line' },
+    { place: 3, line: 'Queued · 3rd in line' },
+  ])('says a queued run in place $place as "$line"', ({ place, line }) => {
+    expect(taskState(workstreamDto({ state: 'QUEUED' }), undefined, null, place)).toEqual({
+      line,
+      color: 'gray',
+    });
   });
 
   it('says Checking alone when the project has no gate command', () => {

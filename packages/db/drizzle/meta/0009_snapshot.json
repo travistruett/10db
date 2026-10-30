@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "a8cf7c5b-a909-4965-b07e-687e17f1ab9f",
+  "id": "9c042416-2951-45b8-a4c1-4fc501cf4c17",
   "prevId": "80941ab5-9378-437c-bf1a-150dafb52cea",
   "tables": {
     "aa_models": {
@@ -300,6 +300,41 @@
         },
         "return_sha": {
           "name": "return_sha",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "pr_state": {
+          "name": "pr_state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "pr_checks": {
+          "name": "pr_checks",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "pr_failing_checks": {
+          "name": "pr_failing_checks",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "pr_checked_at": {
+          "name": "pr_checked_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "pr_unknown_reason": {
+          "name": "pr_unknown_reason",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -1584,13 +1619,6 @@
         },
         "source_inbox_id": {
           "name": "source_inbox_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "found_in": {
-          "name": "found_in",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
