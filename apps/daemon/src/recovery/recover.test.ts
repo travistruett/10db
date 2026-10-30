@@ -121,6 +121,7 @@ const flowStep = (role: 'implement' | 'review', sessionFloor: number): Workstrea
   startedAt: null,
   sessionFloor,
   result: null,
+  earlier: [],
 });
 
 /**

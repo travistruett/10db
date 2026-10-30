@@ -20,6 +20,7 @@ const base: WorkstreamStep = {
   startedAt: null,
   sessionFloor: 0,
   result: null,
+  earlier: [],
 };
 
 describe('WorkstreamStep', () => {

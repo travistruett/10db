@@ -25,6 +25,7 @@ import { useState } from 'react';
 import { usePatchTask, useRetryWorkstream } from '../../daemon/queries';
 import { StateBadge } from '../factory/state-badge';
 import { canRetry } from '../factory/workstream-state';
+import { ReviewRoundsList } from '../review/review-rounds-list';
 import { criteriaLines } from './areas-text';
 import { BatchPanel } from './batch-panel';
 import { FlowSelect } from './flow-select';
@@ -139,6 +140,7 @@ export function TaskDrawer({
     >
       <Stack gap="lg">
         {workstream ? <WorkstreamLine workstream={workstream} /> : null}
+        {workstream ? <ReviewRoundsList steps={workstream.steps} /> : null}
         {batch ? (
           <BatchPanel
             batch={batch}
@@ -272,6 +274,7 @@ export function TaskDrawer({
 /** The workstream's state, and for a failed one why and a way to retry it. */
 function WorkstreamLine({ workstream }: { readonly workstream: WorkstreamDto }) {
   const retry = useRetryWorkstream();
+  const [note, setNote] = useState('');
   const failed = canRetry(workstream.state);
   if (isTerminal(workstream.state) && !failed) {
     return null;
@@ -286,7 +289,8 @@ function WorkstreamLine({ workstream }: { readonly workstream: WorkstreamDto }) 
             variant="default"
             loading={retry.isPending}
             onClick={() => {
-              retry.mutate(workstream.id);
+              const text = note.trim();
+              retry.mutate(text === '' ? { id: workstream.id } : { id: workstream.id, note: text });
             }}
           >
             Retry
@@ -297,6 +301,21 @@ function WorkstreamLine({ workstream }: { readonly workstream: WorkstreamDto }) 
         <Text size="xs" c="dimmed">
           {workstream.failureReason}
         </Text>
+      ) : null}
+      {failed ? (
+        <Textarea
+          label="Note for the next session (optional)"
+          description="A retry after a review sent the work back gives the implementer the review's findings and this note."
+          size="xs"
+          autosize
+          minRows={1}
+          maxRows={6}
+          maxLength={4000}
+          value={note}
+          onChange={(e) => {
+            setNote(e.currentTarget.value);
+          }}
+        />
       ) : null}
       {retry.error ? (
         <Text size="xs" c="red" role="alert">{`Couldn't retry: ${retry.error.message}`}</Text>

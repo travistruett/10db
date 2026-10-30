@@ -33,6 +33,7 @@ import {
   ProjectInput,
   ProjectPatch,
   PROTOCOL_VERSION,
+  RetryInput,
   RoutingRulesInput,
   SystemCheckDto,
   TaskId,
@@ -417,8 +418,19 @@ export function createApp(deps: ApiDeps) {
     .post('/workstreams/:id/cancel', async (c) =>
       c.json(await deps.services.cancelWorkstream(WorkstreamId.parse(c.req.param('id')))),
     )
-    .post('/workstreams/:id/retry', (c) =>
-      c.json(deps.services.retryWorkstream(WorkstreamId.parse(c.req.param('id')))),
+    .post(
+      '/workstreams/:id/retry',
+      // No body is a retry with no note: the validator hands over {} when the request is not JSON.
+      validator('json', (value): RetryInput => RetryInput.parse(value)),
+      (c) => {
+        const { note } = c.req.valid('json');
+        const id = WorkstreamId.parse(c.req.param('id'));
+        return c.json(
+          note === undefined
+            ? deps.services.retryWorkstream(id)
+            : deps.services.retryWorkstream(id, note),
+        );
+      },
     )
     .get('/workstreams/:id/changes', async (c) =>
       c.json(await deps.services.workstreamChanges(WorkstreamId.parse(c.req.param('id')))),

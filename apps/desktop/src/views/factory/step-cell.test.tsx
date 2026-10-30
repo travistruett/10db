@@ -30,6 +30,7 @@ const step = (
   startedAt: null,
   sessionFloor: 0,
   result: null,
+  earlier: [],
 });
 
 function show(ws: ReturnType<typeof workstreamDto>) {

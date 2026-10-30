@@ -13,6 +13,27 @@ export function sendBackTarget(steps: readonly WorkstreamStep[], index: number):
   return index;
 }
 
+/**
+ * Where a retry sends the work when a reviewer's rejection failed the workstream: the step the
+ * rejection goes back to, since reviewing the same code again would reject it again. Null for any
+ * other failure, and when no earlier step can do the rework.
+ */
+export function retryTargetAfterRejection(
+  steps: readonly WorkstreamStep[],
+  index: number,
+): number | null {
+  const step = steps[index];
+  if (
+    !step ||
+    step.role === StepRole.Implement ||
+    step.status !== StepStatus.Failed ||
+    step.result?.verdict !== Verdict.Reject
+  )
+    return null;
+  const to = sendBackTarget(steps, index);
+  return to === index ? null : to;
+}
+
 /** What follows a finished step (spec §5.4). An implement step is finished once its gate passed. */
 export function moveAfter(steps: readonly WorkstreamStep[], index: number): StepMove {
   const step = steps[index];
@@ -31,8 +52,15 @@ export interface StepEntry {
   readonly sessions: number;
 }
 
+/**
+ * A step that runs again drops its result. One that gave a verdict is filed in `earlier` first, so
+ * the builder can read every round a reviewer gave, not only the latest.
+ */
+const withResultFiled = (s: WorkstreamStep): WorkstreamStep =>
+  s.result?.verdict ? { ...s, earlier: [...s.earlier, s.result] } : s;
+
 const entered = (s: WorkstreamStep, entry: StepEntry): WorkstreamStep => ({
-  ...s,
+  ...withResultFiled(s),
   status: StepStatus.Running,
   result: null,
   startedAt: entry.now,
@@ -69,8 +97,9 @@ export function sendBackSteps(
     // A step that sends the work back to itself restarts rather than waiting.
     if (i === to) {
       const restarted = { ...entered(target, entry), attempts: s.attempts + 1 };
+      // A read-only target keeps its result, which is still its latest, so nothing is filed.
       return target.tools === ToolAccess.ReadOnly
-        ? { ...restarted, result: target.result }
+        ? { ...restarted, result: target.result, earlier: target.earlier }
         : restarted;
     }
     if (i === from) return { ...s, status: StepStatus.Pending };
@@ -86,7 +115,13 @@ export function restartStep(
 ): WorkstreamStep[] {
   return steps.map((s, i) =>
     i === index
-      ? { ...s, status: StepStatus.Running, attempts: 0, result: null, startedAt: now }
+      ? {
+          ...withResultFiled(s),
+          status: StepStatus.Running,
+          attempts: 0,
+          result: null,
+          startedAt: now,
+        }
       : s,
   );
 }

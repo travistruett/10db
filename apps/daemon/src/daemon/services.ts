@@ -136,8 +136,8 @@ export function createServices(deps: {
       return getWorkstream(db, id);
     },
     workstreamChanges: (id) => workstreamChanges({ db, git: deps.git }, id),
-    retryWorkstream(id) {
-      const ws = retryWorkstream(deps.state, id);
+    retryWorkstream(id, note) {
+      const ws = retryWorkstream(deps.state, id, note);
       if (ws.batchId !== null) deps.starter.reopen(ws.batchId);
       deps.scheduler.requestTick();
       return ws;

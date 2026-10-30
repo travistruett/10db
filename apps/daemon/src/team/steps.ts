@@ -18,6 +18,7 @@ import {
   getTeam,
   getWorkstream,
   getWorkstreamRow,
+  insertEvidence,
   insertWorkstream,
   latestHandoffForStep,
   getAccount,
@@ -31,7 +32,7 @@ import {
 } from '@10db/db';
 import type { StateStore } from '../events';
 import { DEFAULT_PROJECT_FLOW, NoProfileError, offeredProfiles, planSteps } from '../routing';
-import { restartStep } from './step-flow';
+import { restartStep, retryTargetAfterRejection, sendBackSteps } from './step-flow';
 
 /** What starting this task would run: its flow resolved against the project's team and the catalogue. */
 export function resolveStepPlan(db: DbReader, taskId: TaskId): StepPlanDto {
@@ -110,8 +111,10 @@ export function startTaskWithPlan(state: StateStore, taskId: TaskId): Workstream
  * only. A parked task, or a workstream a newer one replaced, is not retried. In a batch it may retry
  * only while the batch is OPEN or FAILED, and a FAILED batch reopens (batch delivery spec §4), except
  * a worktree batch: it stays FAILED until delivery has made its worktree whole and reopens it.
+ * When a reviewer's rejection failed it, the retry runs the step the rejection goes back to instead,
+ * with the review's notes and the builder's `note` (decisions/2026-10-29-review-findings-on-the-builders-screens.md).
  */
-export function retryWorkstream(state: StateStore, id: WorkstreamId): WorkstreamDto {
+export function retryWorkstream(state: StateStore, id: WorkstreamId, note?: string): WorkstreamDto {
   const row = getWorkstreamRow(state.db, id);
   if (row.state !== WorkstreamState.Failed)
     throw new ConflictError('Only a failed workstream can be retried');
@@ -136,6 +139,45 @@ export function retryWorkstream(state: StateStore, id: WorkstreamId): Workstream
         patch: { failure: null },
         reason: 'a workstream was retried',
       });
+    const reworkAt = retryTargetAfterRejection(row.steps, row.stepIndex);
+    const reworked = reworkAt === null ? undefined : row.steps[reworkAt];
+    if (reworkAt !== null && reworked) {
+      // A reviewer's rejection used the attempts up: the step that did the work runs again, as when
+      // the rejection sent it back, with the review's notes and the builder's note if they gave one.
+      const text = note?.trim() ?? '';
+      const evidence =
+        text === ''
+          ? null
+          : insertEvidence(ctx, {
+              workstreamId: id,
+              kind: 'builder',
+              command: null,
+              exitCode: null,
+              summary: text,
+              logPath: null,
+              commitShas: [],
+            });
+      return transitionWorkstream(ctx, id, {
+        to: WorkstreamState.Queued,
+        fence: null,
+        patch: {
+          attempt: 0,
+          recoveryAttempts: 0,
+          failureReason: null,
+          steps: sendBackSteps(row.steps, row.stepIndex, reworkAt, reworked, {
+            now: ctx.now,
+            sessions: getWorkstream(ctx.tx, id).sessionCount,
+          }),
+          stepIndex: reworkAt,
+          model: reworked.model,
+          effort: reworked.effort,
+          nextAction: evidence
+            ? { kind: 'fix', evidenceId: evidence.id }
+            : { kind: 'revise', reviewStep: row.stepIndex },
+        },
+        reason: 'retried by the builder',
+      });
+    }
     // A step restarted to act on a note keeps its start, which is how the note stays outstanding for
     // a session that starts fresh: the note was written after that start.
     const restarted =

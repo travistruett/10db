@@ -37,6 +37,8 @@ export const WorkstreamStep = z.object({
   /** Sessions the workstream had run when this step started; a handoff from one of them belongs to an earlier step. */
   sessionFloor: z.int().min(0),
   result: StepResult.nullable(),
+  /** Results this step kept when it ran again (a rejection it was sent back for), oldest first. */
+  earlier: z.array(StepResult).default([]),
 });
 export type WorkstreamStep = z.infer<typeof WorkstreamStep>;
 
@@ -98,5 +100,6 @@ export function currentStep(ws: StepPosition): WorkstreamStep {
     startedAt: null,
     sessionFloor: 0,
     result: null,
+    earlier: [],
   };
 }

@@ -383,6 +383,10 @@ export const InboxAnswer = z.object({
 });
 export type InboxAnswer = z.infer<typeof InboxAnswer>;
 
+/** `POST /workstreams/:id/retry`: the builder's note, for the session a retry sends the work to. */
+export const RetryInput = z.object({ note: z.string().max(4000).optional() });
+export type RetryInput = z.infer<typeof RetryInput>;
+
 /** The two answers to a check card: the work is right, or it goes back with a note. */
 export const CheckChoice = {
   Approve: 'approve',

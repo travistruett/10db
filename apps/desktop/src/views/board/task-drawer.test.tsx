@@ -1,9 +1,9 @@
-import { RiskTag, type TaskPatch } from '@10db/contracts';
+import { mintId, RiskTag, type TaskPatch } from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, renderWithDaemon, server } from '../../test/daemon';
-import { batchDto, flowDto, taskDto, workstreamDto } from '../../test/fixtures';
+import { batchDto, flowDto, stepDto, taskDto, workstreamDto } from '../../test/fixtures';
 import { RISK_LABEL } from './risk-labels';
 import { TaskDrawer } from './task-drawer';
 
@@ -300,6 +300,30 @@ describe('TaskDrawer', () => {
       });
     });
 
+    it('Retry posts the note the builder wrote, and no note when the field is empty', async () => {
+      const ws = workstreamDto({ state: 'FAILED', failureReason: 'boom' });
+      const bodies: unknown[] = [];
+      serve(
+        http.post(daemonUrl('/workstreams/:id/retry'), async ({ request }) => {
+          bodies.push(await request.json());
+          return HttpResponse.json({ ...ws, state: 'QUEUED' });
+        }),
+      );
+      open({ workstream: ws });
+      const d = await dialog();
+      fireEvent.click(within(d).getByRole('button', { name: 'Retry' }));
+      await waitFor(() => {
+        expect(bodies).toEqual([{}]);
+      });
+      fireEvent.change(within(d).getByLabelText('Note for the next session (optional)'), {
+        target: { value: 'Use the existing card.' },
+      });
+      fireEvent.click(within(d).getByRole('button', { name: 'Retry' }));
+      await waitFor(() => {
+        expect(bodies).toEqual([{}, { note: 'Use the existing card.' }]);
+      });
+    });
+
     it('a retry refusal shows beside Retry', async () => {
       const ws = workstreamDto({ state: 'FAILED', failureReason: 'boom' });
       serve(
@@ -329,6 +353,64 @@ describe('TaskDrawer', () => {
       const d = await dialog();
       expect(within(d).queryByRole('button', { name: 'Retry' })).toBeNull();
       expect(within(d).queryByText('Failed')).toBeNull();
+    });
+  });
+
+  describe('review rounds', () => {
+    const round = (d: HTMLElement, index: number): HTMLElement => {
+      const found = within(d).getAllByTestId('review-round')[index];
+      if (!found) throw new Error(`no round ${String(index)}`);
+      return found;
+    };
+    const result = (verdict: 'approve' | 'reject', at: string, summary: string) => ({
+      summary,
+      verdict,
+      sessionId: mintId('Session'),
+      at,
+    });
+    const reviewed = (state: 'FAILED' | 'DONE') =>
+      workstreamDto({
+        state,
+        steps: [
+          stepDto(),
+          stepDto({
+            role: 'review',
+            personaName: 'Reviewer',
+            tools: 'read_only',
+            earlier: [
+              result('reject', '2026-10-29T10:00:00.000Z', '1. BLOCKING src/a.ts:12 no test.'),
+            ],
+            result: result('approve', '2026-10-29T11:00:00.000Z', 'Looks right.'),
+          }),
+        ],
+      });
+
+    it('lists every round with its verdict and findings, newest first', async () => {
+      serve();
+      open({ workstream: reviewed('DONE') });
+      const d = await dialog();
+      expect(within(d).getAllByTestId('review-round')).toHaveLength(2);
+      expect(within(round(d, 0)).getByText('Approved')).toBeTruthy();
+      expect(within(round(d, 1)).getByText('Sent back')).toBeTruthy();
+      expect(within(round(d, 1)).getByText('BLOCKING')).toBeTruthy();
+      expect(within(round(d, 1)).getByText('src/a.ts:12')).toBeTruthy();
+    });
+
+    it('keeps the full review one click away', async () => {
+      serve();
+      open({ workstream: reviewed('DONE') });
+      const d = await dialog();
+      const sentBack = round(d, 1);
+      expect(within(sentBack).queryByText('1. BLOCKING src/a.ts:12 no test.')).toBeNull();
+      fireEvent.click(within(sentBack).getByRole('button', { name: 'Show the full review' }));
+      expect(within(sentBack).getByText('1. BLOCKING src/a.ts:12 no test.')).toBeTruthy();
+    });
+
+    it('shows no section for a task nobody reviewed', async () => {
+      serve();
+      open({ workstream: workstreamDto({ steps: [stepDto()] }) });
+      await dialog();
+      expect(screen.queryByTestId('review-round')).toBeNull();
     });
   });
 });

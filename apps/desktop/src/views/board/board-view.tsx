@@ -277,7 +277,7 @@ function BoardColumns({
                   ? {
                       onRetry: () => {
                         abandon.reset();
-                        retry.mutate(ws.id);
+                        retry.mutate({ id: ws.id });
                       },
                     }
                   : {})}

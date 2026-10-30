@@ -21,6 +21,7 @@ const step = (role: StepRole, verdict: Verdict | null | 'none' = 'none'): Workst
   attempts: 0,
   startedAt: null,
   sessionFloor: 0,
+  earlier: [],
   result:
     verdict === 'none'
       ? null
@@ -143,5 +144,37 @@ describe('advanceSteps, sendBackSteps and restartStep', () => {
       startedAt: NOW,
       sessionFloor: 5,
     });
+  });
+
+  it('keeps a rejection when its step is entered again, so no round is lost', () => {
+    const first = step('implement');
+    const rejected = step('review', 'reject');
+    const sentBack = sendBackSteps([first, rejected], 1, 0, first, ENTRY);
+    // The rejecting step holds its notes for the rework, and files them away once it runs again.
+    expect(sentBack[1]?.earlier).toEqual([]);
+    const again = advanceSteps(sentBack, 0, 1, ENTRY);
+    expect(again[1]).toMatchObject({ result: null, earlier: [rejected.result] });
+  });
+
+  it('files a new round after the ones already kept', () => {
+    const older = step('review', 'reject');
+    const kept = older.result ? [older.result] : [];
+    const newer = { ...step('review', 'reject'), earlier: kept };
+    const rerun = advanceSteps([step('implement'), newer], 0, 1, ENTRY);
+    expect(rerun[1]?.earlier).toEqual([...kept, newer.result]);
+  });
+
+  it('keeps a failed step’s rejection when a retry restarts it', () => {
+    const rejected = { ...step('review', 'reject'), status: 'failed' as const };
+    expect(restartStep([step('implement'), rejected], 1, NOW)[1]).toMatchObject({
+      result: null,
+      earlier: [rejected.result],
+    });
+  });
+
+  it('files a read-only target’s kept result nowhere, since it is still the result', () => {
+    const plan = step('plan', null);
+    const moved = sendBackSteps([plan, step('plan_review', 'reject')], 1, 0, plan, ENTRY);
+    expect(moved[0]?.earlier).toEqual([]);
   });
 });
