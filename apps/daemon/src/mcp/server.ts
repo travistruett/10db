@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { GitTrustError } from '../git';
 import { ParkedError } from '../inbox';
 import { hashToken } from './tokens';
+import { ClaimWaits } from './claim-wait';
 import { createToolHandlers, TOOL_DESCRIPTIONS, type McpDeps } from './tools';
 
 function errorText(error: unknown, deps: McpDeps, tool: string, args: unknown): string {
@@ -28,12 +29,14 @@ function errorText(error: unknown, deps: McpDeps, tool: string, args: unknown): 
 
 /** Stateless streamable-HTTP MCP endpoint; the bearer token identifies the calling session. */
 export function createMcpHandler(deps: McpDeps): (req: Request) => Promise<Response> {
+  // Every session's claim waits in one place, so a deadlock check sees the waits of all of them.
+  const claimWaits = new ClaimWaits();
   return async (req) => {
     const token = /^Bearer (.+)$/.exec(req.headers.get('authorization') ?? '')?.[1];
     const session = token ? getLiveSessionByTokenHash(deps.state.db, hashToken(token)) : undefined;
     if (!session) return Response.json({ error: 'unauthorized' }, { status: 401 });
 
-    const handlers = createToolHandlers(deps, session.id, session.workstreamId);
+    const handlers = createToolHandlers(deps, session.id, session.workstreamId, claimWaits);
     const server = new McpServer({ name: '10db', version: '0.1.0' });
     for (const name of Object.values(McpToolName)) {
       const schema = McpToolInputs[name];

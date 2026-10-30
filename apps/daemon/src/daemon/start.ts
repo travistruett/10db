@@ -83,7 +83,7 @@ import { createInboxService } from '../inbox';
 import { createKeepAwake, systemCaffeinate, type CaffeinateSpawner } from '../keep-awake';
 import { createLogger, fileDestination, rotateLogFile, type Logger } from '../log';
 import { protectedPaths } from '../guard';
-import { createMcpHandler } from '../mcp';
+import { createMcpHandler, withdrawStaleClaimWaits } from '../mcp';
 import { recoverOnStartup, systemProcesses, type ProcessTerminator } from '../recovery';
 import {
   applyCheckAnswer,
@@ -636,6 +636,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     logger,
     cleanShutdown,
   });
+  // The previous daemon's claim waits ended with it; their cards would name holders nobody waits for.
+  withdrawStaleClaimWaits(state, inbox);
   accountPauses.restore();
   // A move back that came due reads the pauses.
   moveBack.restore();

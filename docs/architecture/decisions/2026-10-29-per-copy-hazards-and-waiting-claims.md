@@ -48,10 +48,25 @@ changes meanwhile, the card is reworded. The wait ends with an error telling the
 session stops (the card is withdrawn). The scheduler's launch claims already waited: the task stays `QUEUED`
 until its claims are free, with no card.
 
-The one case that still returns `granted: false` is a deadlock: the holder is itself waiting, directly or through
-other waiters, for a claim this task holds. Waiting would never end, so the call returns at once with a "Claim
-deadlock" card naming both tasks, and the agent decides (finish and release, or `ask_human`). The holder's wait is
-known from its open wait card (`detail.waitingFor`, `detail.heldBy`).
+A tool call has a wall-clock limit (the session's MCP `toolTimeoutMs`, `humanWaitMinutes + 5` minutes, so at
+least six), and a wait can be longer. So one call waits at most four minutes (`CLAIM_WAIT_SLICE_MS`) and then
+answers `granted: false, waiting: true` with the holder, the card and an instruction to call again with the same
+opId; nothing is recorded for the opId. The wait itself goes on in the daemon (`ClaimWaits`): one wait per
+claim of a workstream, which every call for that claim joins, whatever its opId, so a retry starts no second wait
+and no second card, and two calls sharing a wait record one result.
+
+The one case that returns `granted: false, waiting: false` is a deadlock: the holder is itself waiting, directly
+or through other waiters, for a claim this task holds. Waiting would never end, so the call returns at once with
+a "Claim deadlock" card naming both tasks, and the agent decides (finish and release, or `ask_human`). It is
+checked when the wait starts and again whenever the holder changes. The waits it reads are the daemon's live
+waits, held in memory, not the cards: dismissing a wait card does not hide its wait, and a wait ends with the
+daemon that ran it. Startup withdraws the wait cards a stopped daemon left (`withdrawStaleClaimWaits`), and a new
+wait rewrites any card left under its fold key.
+
+**Changing a scope.** A claim row keeps the scope it was taken in, so a held hazard whose scope changed would be
+looked for in the other scope and granted to a second task. Saving a project that changes a hazard's scope
+(`hazardScope`, so an unset scope compares as its stock one) is refused while a running task holds it, as a
+rename is: "Finish or stop that task first."
 
 ## Why
 
@@ -66,7 +81,10 @@ shared mode, where the copy is shared); a per-machine lock for installs (it is t
 the store's locks already cover); a wait that parks the session after the human-wait minutes (the card is a flag
 no answer resumes, and a parked session would never be woken when the claim frees, so the wait stays inside the
 tool call and the workstream stays `RUNNING`); pushing the release to the waiter (a poll is one cheap read per
-waiting task, with no new channel between the claims store and the MCP handlers).
+waiting task, with no new channel between the claims store and the MCP handlers); a call that waits until the
+claim frees however long it takes (Claude Code fails it at the tool timeout and the agent carries on without
+the claim); reading waits from the open cards for the deadlock check (the builder can dismiss one, and one
+outlives a crashed daemon).
 
 Not done: the Board's proposal (`picker/pick.ts`) still treats two tasks that name the same hazard as clashing,
 since it does not yet know which batch a pick will join; the builder can still start both. A waiting task shows no

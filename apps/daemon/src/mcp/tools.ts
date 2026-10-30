@@ -41,7 +41,7 @@ import type { Git } from '../git';
 import { judgeToolUse, type ProtectedPath } from '../guard';
 import type { InboxService, WaitObserver } from '../inbox';
 import type { Logger } from '../log';
-import { CLAIM_POLL_MS, claimOrWait } from './claim-wait';
+import { CLAIM_POLL_MS, CLAIM_WAIT_SLICE_MS, ClaimWaits, type ClaimResult } from './claim-wait';
 
 export interface McpDeps {
   readonly protectedPaths: readonly ProtectedPath[];
@@ -53,6 +53,8 @@ export interface McpDeps {
   sessionSignal(sessionId: SessionId): AbortSignal | undefined;
   /** How often a task waiting for a claim looks again; tests shorten it. */
   readonly claimPollMs?: number;
+  /** How long one request_claim call waits before answering "still waiting"; tests shorten it. */
+  readonly claimWaitSliceMs?: number;
 }
 
 type In<K extends McpToolName> = z.output<(typeof McpToolInputs)[K]>;
@@ -72,7 +74,7 @@ export const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
     'Propose a new task, a task change, or a principle. Proposals go to the builder; nothing changes until accepted.',
   report_deviation: 'Report a departure from the plan or a principle, with your signed reason.',
   request_claim:
-    'Ask for an additional area or hazard claim before editing files in it. When another task holds it, this waits until it frees and returns granted: true, so do not carry on without it; the builder sees a card naming the holder and that you are waiting. Returns granted: false only when waiting would deadlock (the holder is waiting for a claim you hold).',
+    'Ask for an additional area or hazard claim before editing files in it. When another task holds it, this waits until it frees and returns granted: true, so do not carry on without it; the builder sees a card naming the holder and that you are waiting. A long wait answers granted: false with waiting: true before the call times out: call again with the same opId to keep waiting. granted: false with waiting: false means waiting would deadlock (the holder is waiting for a claim you hold).',
   commit:
     'Commit the named paths (and only those) under the repository lock. Returns the commit SHA. Retry with the same opId if unsure it completed.',
   record_evidence: 'Attach verification output: a command you ran, its exit code and a summary.',
@@ -86,6 +88,7 @@ export function createToolHandlers(
   deps: McpDeps,
   sessionId: SessionId,
   workstreamId: Parameters<typeof getWorkstream>[1],
+  claimWaits: ClaimWaits = new ClaimWaits(),
 ): ToolHandlers {
   const db = deps.state.db;
   const context = () => {
@@ -259,8 +262,10 @@ export function createToolHandlers(
           `No area or hazard named ${input.name}. Areas: ${areaNames.join(', ')}. Hazards: ${hazardNames.join(', ')}`,
         );
       }
-      // A claim another task holds is waited for, not given up on: the call returns once it is ours.
-      const result = await claimOrWait({
+      // A claim another task holds is waited for, not given up on. Every call for the claim joins the
+      // one wait; a call answers "still waiting" before the session's tool timeout, and is not recorded,
+      // so a retry with the same opId joins the wait again.
+      const wait = claimWaits.join({
         state: deps.state,
         inbox: deps.inbox,
         projectId: project.id,
@@ -271,16 +276,52 @@ export function createToolHandlers(
         signal: deps.sessionSignal(sessionId) ?? new AbortController().signal,
         pollMs: deps.claimPollMs ?? CLAIM_POLL_MS,
       });
-      return deps.state.write((ctx) =>
-        record(
+      let timer: NodeJS.Timeout | undefined;
+      // The slice listens to no signal: a session that stops ends the wait itself, with its error.
+      const slice = new Promise<'slice'>((resolve) => {
+        timer = setTimeout(() => {
+          resolve('slice');
+        }, deps.claimWaitSliceMs ?? CLAIM_WAIT_SLICE_MS);
+      });
+      let result: ClaimResult | 'slice';
+      try {
+        result = await Promise.race([wait.done, slice]);
+      } finally {
+        clearTimeout(timer);
+      }
+      if (result === 'slice') {
+        const { heldBy, inboxId } = wait.state;
+        if (heldBy !== null && inboxId !== null)
+          return {
+            granted: false,
+            waiting: true,
+            heldBy,
+            inboxId,
+            instruction: `Still waiting for ${kind} ${input.name}: task "${getTask(db, getWorkstream(db, heldBy).taskId).title}" holds it. Call request_claim again with the same opId to keep waiting, and edit nothing in it until a call returns granted: true.`,
+          };
+        // The wait ended as the slice did; its result is a moment away.
+        result = await wait.done;
+      }
+      const settled = result;
+      return deps.state.write((ctx) => {
+        // Two calls with the same opId can share one wait; the first records it, the second reads it.
+        const recorded = findToolOp(ctx.tx, workstreamId, input.opId);
+        if (recorded) return McpToolOutputs.request_claim.parse(recorded.result);
+        return record(
           'request_claim',
           input.opId,
-          result.granted
-            ? { granted: true, claimId: result.claim.id }
-            : { granted: false, heldBy: result.heldBy, inboxId: result.inboxId },
+          settled.granted
+            ? { granted: true, claimId: settled.claim.id }
+            : {
+                granted: false,
+                heldBy: settled.heldBy,
+                inboxId: settled.inboxId,
+                waiting: false,
+                instruction: null,
+              },
           ctx,
-        ),
-      );
+        );
+      });
     },
 
     commit: async (input) => {
