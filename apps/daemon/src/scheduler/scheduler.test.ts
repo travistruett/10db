@@ -55,8 +55,11 @@ let prepared: { accountId: AccountId; projectId: ProjectId }[];
 let wrongBranch: { batchId: string; current: string | null }[];
 let wrongBranchAt: string[];
 let missing: { batchId: string; path: string }[];
+/** Whether the Mac is overloaded, as the scheduler's `held` reads it. */
+let held: boolean;
 
 beforeEach(() => {
+  held = false;
   clock = new ManualClock(new Date(2026, 9, 20, 12));
   ({ store, close } = createTestStore(() => clock.now()));
   state = createStateStore(store, createEventBus());
@@ -89,6 +92,7 @@ function scheduler(caps = { global: 4 }, awaited: ReadonlySet<WorkstreamId> = ne
     clock,
     caps,
     awaitedHolders: () => awaited,
+    held: () => held,
     instanceId: 'daemon-1',
     leaseMs: 60_000,
     tickMs: 2_000,
@@ -178,6 +182,17 @@ function moveWorkstream(id: WorkstreamId, to: 'STARTING' | 'FAILED' | 'CANCELLED
 }
 
 describe('scheduler', () => {
+  it('launches nothing while held, queued work and awaited holders alike, and launches it once released', async () => {
+    const waiting = queue();
+    queue();
+    held = true;
+    const s = scheduler({ global: 4 }, new Set([waiting.workstream.id]));
+    expect(await s.tick()).toBe(0);
+    expect(launched).toEqual([]);
+    held = false;
+    expect(await s.tick()).toBe(2);
+  });
+
   it('respects the global cap', async () => {
     queue();
     queue();

@@ -579,11 +579,16 @@ export const shipCards = {
     body: `The shipping gate's first run failed${inSteps(steps)}. ${RERAN}, and it passed, so the batch went on to ship. These tests may be flaky:\n${testLines(steps)}`,
     detail: { batchId: batch.id },
   }),
-  gateTimedOut: (batch: BatchDto, timeoutMs: number, logPath: string): ShipFailure => ({
+  gateTimedOut: (
+    batch: BatchDto,
+    timeoutMs: number,
+    logPath: string,
+    note: string | null = null,
+  ): ShipFailure => ({
     failure: BatchFailure.GateTimedOut,
     card: {
       title: `${notShipped(batch)}: the gate timed out after ${duration(timeoutMs)}`,
-      body: `10db stopped the gate and pushed nothing. Log: ${logPath}\n\n${RETRY}`,
+      body: `${note === null ? '' : `${note}\n\n`}10db stopped the gate and pushed nothing. Log: ${logPath}\n\n${RETRY}`,
       detail: { batchId: batch.id },
     },
   }),

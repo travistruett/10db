@@ -152,7 +152,13 @@ import {
   sendBackTarget,
   type StepEntry,
 } from '../team';
-import { BlockedRun, type GateRequest, type GateResult, type GateRunner } from '../verify';
+import {
+  BlockedRun,
+  type GateRequest,
+  type GateResult,
+  type GateRunner,
+  type Hold,
+} from '../verify';
 import { findClaimed } from '../watcher';
 import type { LiveSessions } from './live-sessions';
 import { checkedCommits, raiseBuilderCheck, waitsForCheck } from './builder-check';
@@ -220,6 +226,19 @@ export interface RunnerOptions {
   identifyProcess?(pid: number): Promise<string | null>;
   /** Runs every lane session under the lane sandbox; null (fake sessions and tests) runs none. */
   readonly laneSandbox: LaneSandbox | null;
+  /**
+   * While the Mac is overloaded no session starts: each one waits here, before anything is built or
+   * launched, and a stop or cancel ends the wait.
+   */
+  readonly hold?: Hold;
+  /**
+   * Told each lane session's temp dir while it runs and when it is gone, so the load guard can name
+   * the lane a busy process left in it belongs to.
+   */
+  readonly laneTempDirs?: {
+    set(id: WorkstreamId, dir: string): void;
+    delete(id: WorkstreamId): void;
+  };
 }
 
 /** What has to happen after the write that changed a workstream has committed. */
@@ -372,6 +391,8 @@ interface Control {
   requestHandoff: ((cause: HandoffCause, reason: string) => void) | null;
   /** Set while the gate runs; aborting it kills the gate's process group. */
   gateAbort: AbortController | null;
+  /** Set while the lane waits for an overloaded Mac to calm down before it starts a session. */
+  holdAbort: AbortController | null;
   /** Set while a session runs; ends its inbox waits so later answers go to the card. */
   endWaits: (() => void) | null;
   done: Promise<void>;
@@ -1045,6 +1066,20 @@ export function createRunner(opts: RunnerOptions): Runner {
       return { kind: 'stopped', reason: ctl.stopReason, providerSessionId: savedResumeId };
     // So does a move: the account the lane read before the await may not be the project's now.
     if (getProject(db, row.projectId).accountId !== ctl.accountId) return { kind: 'moved' };
+    // An overloaded Mac starts no session: wait for it, unless a stop ends the wait first.
+    if (opts.hold) {
+      const holding = new AbortController();
+      ctl.holdAbort = holding;
+      try {
+        await opts.hold.untilClear(holding.signal);
+      } finally {
+        ctl.holdAbort = null;
+      }
+      const stoppedWhileHeld = stopRequested(ctl);
+      if (stoppedWhileHeld)
+        return { kind: 'stopped', reason: stoppedWhileHeld, providerSessionId: savedResumeId };
+      if (getProject(db, row.projectId).accountId !== ctl.accountId) return { kind: 'moved' };
+    }
     const answeredItem = action.kind === 'answer' ? getInboxItem(db, action.inboxId) : null;
     const resumeId =
       action.kind === 'resume' || action.kind === 'answer' ? action.providerSessionId : null;
@@ -1159,7 +1194,9 @@ export function createRunner(opts: RunnerOptions): Runner {
       { ...projectMcp, failures: [...projectMcp.failures, ...sandboxFailures] },
       opts.laneSandbox ? [] : Object.keys(mcpServers.stdio),
     );
+    if (laneSession) opts.laneTempDirs?.set(id, laneSession.tmpDir);
     const dispose = (): void => {
+      opts.laneTempDirs?.delete(id);
       try {
         laneSession?.dispose();
       } catch (error) {
@@ -2130,6 +2167,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         handle: null,
         requestHandoff: null,
         gateAbort: null,
+        holdAbort: null,
         endWaits: null,
         done: Promise.resolve(),
       };
@@ -2150,6 +2188,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       ctl.stopReason = reason;
       // A pause only stops sessions; a running gate doesn't use the provider, so let it finish.
       if (reason !== 'paused') ctl.gateAbort?.abort();
+      ctl.holdAbort?.abort();
       // Waits end before the process does, so an answer during a slow exit reaches the card.
       ctl.endWaits?.();
       await ctl.handle?.stop();

@@ -86,6 +86,7 @@ import { createGit, memoryPinStore, resolveGit } from '../git';
 import { createGh, createSystemGhExec, resolveGh, type Gh } from '../github';
 import { createInboxService } from '../inbox';
 import { createKeepAwake, systemCaffeinate, type CaffeinateSpawner } from '../keep-awake';
+import { createLaneTempDirs, createLoadMonitor, type LoadMonitorOptions } from '../load';
 import { createLogger, fileDestination, rotateLogFile, type Logger } from '../log';
 import { protectedPaths } from '../guard';
 import { createBuilderMcpHandler } from '../builder';
@@ -189,6 +190,11 @@ export interface DaemonOptions {
   ) => Promise<SystemCheckDto>;
   /** `false` turns the file watcher off (tests that don't need it). */
   readonly watch?: WatchFn | false;
+  /** What reads the load and the busy processes, and how much and how long counts as overloaded; tests replace them. */
+  readonly load?: Pick<
+    LoadMonitorOptions,
+    'read' | 'processes' | 'sampleMs' | 'overloadFactor' | 'sustainedMs' | 'clearFactor'
+  >;
 }
 
 export interface RunningDaemon {
@@ -363,6 +369,21 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       answerBranchCard?.(item, answer);
     },
   });
+  // Sustained overload holds new lane sessions and gates and raises one card naming what is busy.
+  const laneTempDirs = createLaneTempDirs();
+  const loadGuard = createLoadMonitor({
+    state,
+    inbox,
+    clock,
+    logger: logger.child({ component: 'load' }),
+    daemonPid: process.pid,
+    tempRoot: sandboxTempRoot,
+    tempDirs: laneTempDirs,
+    onCleared: () => {
+      scheduler?.requestTick();
+    },
+    ...opts.load,
+  });
   const git = createGit({
     onRefused: createGitRefusalHandler({ db: state.db, inbox, logger }),
     onTrusted: createCheckoutTrustedHandler({ db: state.db, inbox }),
@@ -406,6 +427,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     slots: gateSlots,
     clock,
     logger: logger.child({ component: 'gate' }),
+    hold: loadGuard,
   });
   const answerGit = createGitCardAnswers(git);
   answerGitCard = (item, answer) => {
@@ -460,6 +482,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     sessionEnv: () => launcher.projectEnv(),
     identifyProcess: (pid) => processes.identify(pid),
     isRunning: (id) => runner?.isRunning(id) ?? false,
+    load: loadGuard,
   });
   answerBatchCard = createBatchCardAnswers({
     retry: (id, note) => {
@@ -593,6 +616,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const createdRunner = createRunner({
     protectedPaths: guarded,
     laneSandbox,
+    hold: loadGuard,
+    laneTempDirs,
     state,
     adapter,
     inbox,
@@ -649,6 +674,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       flagWorktreeMissing(inbox, batch, path);
     },
     awaitedHolders: () => claimWaits.awaitedHolders(),
+    held: () => loadGuard.overloaded,
   });
   scheduler = createdScheduler;
 
@@ -807,6 +833,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   );
   createdScheduler.start();
   createdScheduler.requestTick();
+  loadGuard.start();
   prWatch.start();
   logger.info({ port, dataDir: opts.dataDir }, 'daemon started');
 
@@ -830,6 +857,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       // A probe in flight writes to the database; the runner can ask for another while it stops.
       await preparer.idle();
       await createdRunner.stopAll('shutdown');
+      // After the runner: a lane or gate held for load ends on its own stop, and nothing samples again.
+      loadGuard.stop();
       await preparer.idle();
       state.write((ctx) => {
         setAppSetting(ctx, CLEAN_SHUTDOWN_KEY, { at: ctx.now });
