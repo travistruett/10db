@@ -33,6 +33,7 @@ function result(overrides: Partial<GateResult> = {}): GateResult {
     logPath: '/logs/gate.log',
     timedOut: false,
     aborted: false,
+    blockedHosts: [],
     ...overrides,
   };
 }

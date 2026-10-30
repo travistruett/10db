@@ -2,6 +2,7 @@ import {
   BatchState,
   Delivery,
   isTerminal,
+  queueOrder,
   WorkstreamState,
   type BatchDto,
   type BatchId,
@@ -134,7 +135,8 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
     const blockedThisTick = new Set<string>();
     const awaited = opts.awaitedHolders?.() ?? new Set<WorkstreamId>();
     let launched = 0;
-    for (const ws of listWorkstreams(db, { states: [WorkstreamState.Queued] })) {
+    const line = listWorkstreams(db, { states: [WorkstreamState.Queued] }).toSorted(queueOrder);
+    for (const ws of line) {
       const overCaps = awaited.has(ws.id);
       if (!overCaps && global >= opts.caps.global) continue;
       // A runner that just re-queued this row is still unwinding; launch() would refuse it and
@@ -202,6 +204,7 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
         transitionWorkstream(ctx, ws.id, {
           to: WorkstreamState.Starting,
           fence: f,
+          patch: { runNextAt: null },
           reason: 'lane granted',
         });
         return f;

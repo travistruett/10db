@@ -25,6 +25,7 @@ export function projectDto(overrides: Partial<ProjectDto> = {}): ProjectDto {
     name: 'Demo',
     repoPath: '/tmp/demo',
     gateCommand: 'true',
+    changedCheckCommand: null,
     areas: [{ name: 'src', globs: ['src/**'] }],
     hazards: [],
     maxLanes: 2,
@@ -135,6 +136,7 @@ export function workstreamDto(overrides: Partial<WorkstreamDto> = {}): Workstrea
     pausedUntil: null,
     failureReason: null,
     lastActivityAt: AT,
+    runNextAt: null,
     createdAt: AT,
     updatedAt: AT,
     ...overrides,
@@ -197,6 +199,8 @@ export function stepDto(overrides: Partial<WorkstreamStep> = {}): WorkstreamStep
     startedAt: null,
     sessionFloor: 0,
     result: null,
+    earlier: [],
+    sentBack: 0,
     ...overrides,
   });
 }

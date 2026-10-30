@@ -69,6 +69,7 @@ describe('BoardColumnsSection', () => {
       `Backlog${SYSTEM_HINT.backlog}`,
       `Ready${SYSTEM_HINT.ready}`,
       `In progress${SYSTEM_HINT.in_progress}`,
+      `In review${SYSTEM_HINT.in_review}`,
       `Blocked${SYSTEM_HINT.blocked}`,
       `Done${SYSTEM_HINT.done}`,
     ]);

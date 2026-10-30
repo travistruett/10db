@@ -207,7 +207,9 @@ describe('gate runner', () => {
 });
 
 /** A stand-in for the gate sandbox: its runs wrap the command so the output shows they were used. */
-function recordingSandbox(options: { refuse?: Error; dockerRefused?: boolean } = {}): {
+function recordingSandbox(
+  options: { refuse?: Error; dockerRefused?: boolean; commandLines?: number } = {},
+): {
   sandbox: GateSandbox;
   inputs: GateRunInput[];
   disposed: () => number;
@@ -225,6 +227,7 @@ function recordingSandbox(options: { refuse?: Error; dockerRefused?: boolean } =
         cwd: input.project.repoPath,
         tmpDir: input.project.repoPath,
         commandEnv: {},
+        commandLines: options.commandLines ?? 1,
         dockerRefused: () => options.dockerRefused ?? false,
         dispose: () => {
           disposed += 1;
@@ -296,6 +299,118 @@ describe('gate runner with a sandbox', () => {
     const { sandbox } = recordingSandbox({ refuse: new Error('disk on fire') });
     const gate = createGateRunner({ sandbox, logger: silentLogger });
     await expect(gate.run(request())).rejects.toThrow('disk on fire');
+  });
+
+  describe('a host the sandbox blocked', () => {
+    // What srt's proxy says on its stderr, with SRT_DEBUG set, when it refuses a host.
+    const DEBUG_OUTPUT = [
+      '[SandboxDebug] Initializing sandbox...',
+      '[SandboxDebug] {',
+      '  "allowedDomains": ["registry.npmjs.org"]',
+      '}',
+      '[SandboxDebug] Command string mode (-c): FAKE_SECRET=hunter2 /bin/sh -c cargo build',
+      '[SandboxDebug] Connection blocked to Index.Crates.io:443',
+      'error: failed to download',
+      '[SandboxDebug] Connection blocked to static.crates.io:443',
+      '[SandboxDebug] Connection blocked to index.crates.io:443',
+    ];
+    const printing = (lines: readonly string[]) =>
+      `printf '%s\\n' ${lines.map((l) => `'${l}'`).join(' ')} >&2; exit 101`;
+
+    it('names each blocked host once and says the gate was blocked, without the debug lines', async () => {
+      const { sandbox } = recordingSandbox();
+      const gate = createGateRunner({ sandbox, logger: silentLogger });
+      const result = await gate.run(request({ command: printing(DEBUG_OUTPUT) }));
+      expect(result.exitCode).toBe(101);
+      expect(result.blockedHosts).toEqual(['index.crates.io', 'static.crates.io']);
+      expect(result.tail).toContain('error: failed to download');
+      expect(result.tail).toContain(
+        'The gate was blocked from reaching index.crates.io and static.crates.io',
+      );
+      for (const text of [result.tail, readFileSync(result.logPath, 'utf8')]) {
+        expect(text).not.toContain('SandboxDebug');
+        expect(text).not.toContain('hunter2');
+        expect(text).not.toContain('allowedDomains');
+      }
+    });
+
+    it('says the install was blocked, not the gate, when the run is a package install', async () => {
+      const { sandbox } = recordingSandbox();
+      const gate = createGateRunner({ sandbox, logger: silentLogger });
+      const result = await gate.run({
+        ...request({
+          command: printing([
+            '[SandboxDebug] Connection blocked to registry.npmjs.org:443',
+            'ERR_PNPM_META_FETCH_FAIL',
+          ]),
+        }),
+        packageInstall: true,
+      });
+      expect(result.blockedHosts).toEqual(['registry.npmjs.org']);
+      for (const text of [result.tail, readFileSync(result.logPath, 'utf8')]) {
+        expect(text).toContain('The install was blocked from reaching registry.npmjs.org');
+        expect(text).not.toMatch(/\bgate\b/i);
+      }
+    });
+
+    it('names a host srt refused a plain HTTP request to', async () => {
+      const { sandbox } = recordingSandbox();
+      const gate = createGateRunner({ sandbox, logger: silentLogger });
+      const result = await gate.run(
+        request({
+          command: printing([
+            '[SandboxDebug] HTTP request blocked to example.com:80',
+            'curl: (22) The requested URL returned error: 403',
+          ]),
+        }),
+      );
+      expect(result.blockedHosts).toEqual(['example.com']);
+      expect(result.tail).toContain('curl: (22) The requested URL returned error: 403');
+      expect(result.tail).toContain('The gate was blocked from reaching example.com');
+      expect(result.tail).not.toContain('SandboxDebug');
+    });
+
+    it('drops every line of a command line srt echoes, as many as the sandbox says it takes', async () => {
+      const { sandbox } = recordingSandbox({ commandLines: 2 });
+      const gate = createGateRunner({ sandbox, logger: silentLogger });
+      const result = await gate.run(
+        request({
+          command: printing([
+            "[SandboxDebug] Command string mode (-c): /usr/bin/env TOKEN='one",
+            "  hunter2' /bin/sh -c 'cargo test'",
+            '  indented output of the command',
+          ]),
+        }),
+      );
+      expect(result.tail).not.toContain('hunter2');
+      expect(result.tail).toContain('  indented output of the command');
+    });
+
+    it('reports no blocked host for a gate nothing blocked', async () => {
+      const { sandbox } = recordingSandbox();
+      const gate = createGateRunner({ sandbox, logger: silentLogger });
+      const result = await gate.run(request({ command: 'echo fine' }));
+      expect(result.blockedHosts).toEqual([]);
+      expect(result.tail).not.toContain('blocked');
+    });
+
+    it('leaves a gate with no sandbox alone', async () => {
+      const result = await run(printing(DEBUG_OUTPUT));
+      expect(result.blockedHosts).toEqual([]);
+      expect(result.tail).toContain('SandboxDebug');
+    });
+
+    it('reads a line split across chunks', async () => {
+      const { sandbox } = recordingSandbox();
+      const gate = createGateRunner({ sandbox, logger: silentLogger });
+      const result = await gate.run(
+        request({
+          command:
+            "printf '[SandboxDebug] Connection blo' >&2; sleep 0.2; printf 'cked to a.example.com:443\\n' >&2; exit 1",
+        }),
+      );
+      expect(result.blockedHosts).toEqual(['a.example.com']);
+    });
   });
 
   it('says in the evidence when the gate tried to use Docker', async () => {

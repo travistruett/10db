@@ -135,6 +135,7 @@ export function limitGates(runner: GateRunner, options: LimitGatesOptions): Gate
           logPath: request.logPath,
           timedOut: false,
           aborted: true,
+          blockedHosts: [],
         };
       }
       try {

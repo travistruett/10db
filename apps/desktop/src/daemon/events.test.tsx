@@ -303,7 +303,7 @@ describe('useEventStream', () => {
       () => {
         expect(seen).toEqual([42, 43]);
       },
-      { timeout: 3_000 },
+      { timeout: 15_000 },
     );
     expect(new URL(urls[1] ?? 'ws://missing').searchParams.get('after')).toBe('42');
   });

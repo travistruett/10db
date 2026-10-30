@@ -59,7 +59,8 @@ function parkRefusal(task: TaskDto, dependent: string): string {
   return `${dependent} has started and waits on ${task.title}; park it once ${dependent} finishes`;
 }
 
-const LOCKED_DROP = 'Blocked and Done follow the task’s state; cards can’t be dropped there';
+const LOCKED_DROP =
+  'Blocked, In review and Done follow the task’s state; cards can’t be dropped there';
 
 /** Why cards in a column can't be dragged; null when they can. */
 export function dragRefusal(key: ColumnKey): string | null {
@@ -70,6 +71,8 @@ export function dragRefusal(key: ColumnKey): string | null {
       return null;
     case BoardStatus.InProgress:
       return 'In progress cards follow their workstream; they can’t be dragged';
+    case BoardStatus.InReview:
+      return 'In review cards follow their pull request; they can’t be dragged';
     case BoardStatus.Blocked:
       return 'Blocked cards wait for a retry or an answer; they can’t be dragged';
     case BoardStatus.Done:
@@ -153,6 +156,7 @@ export function resolveDrop(
             reason:
               'Only a Ready card starts by dragging; use Start in its menu to queue it until its dependencies finish',
           };
+    case BoardStatus.InReview:
     case BoardStatus.Blocked:
     case BoardStatus.Done:
       return { kind: 'refuse', reason: LOCKED_DROP };

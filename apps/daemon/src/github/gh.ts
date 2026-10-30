@@ -54,6 +54,8 @@ export interface PullRequest {
 export interface PullRequestStatus {
   readonly url: string;
   readonly state: PrState;
+  /** The commit the pull request's branch was at when GitHub last saw it; null when gh gives none. */
+  readonly headSha: string | null;
   readonly checks: PullRequestChecks;
   readonly failingChecks: FailingCheckDto[];
 }
@@ -224,7 +226,8 @@ export function createSystemGhExec(tools: GhTools): GhExec {
 }
 
 const PrView = z.object({ url: z.url(), state: z.enum(PrState) });
-const RepoView = z.object({ autoMergeAllowed: z.boolean() });
+/** The repository's REST answer; `gh repo view --json` has no auto-merge field in every gh. */
+const RepoSettings = z.object({ allow_auto_merge: z.boolean() });
 
 /**
  * A pull request URL in `repo` (`owner/name`), on any GitHub host: https and
@@ -275,6 +278,10 @@ function rollupEntry(raw: unknown): CheckRollupEntry {
 const PrStatusView = z.object({
   url: z.url(),
   state: z.enum(PrState),
+  headRefOid: z
+    .string()
+    .nullish()
+    .transform((oid) => (oid === undefined || oid === null || oid === '' ? null : oid)),
   statusCheckRollup: z.array(z.unknown().transform(rollupEntry)).nullish(),
 });
 
@@ -401,13 +408,26 @@ export function createGh(exec: GhExec): Gh {
       return parseOutput(PrView, args, out.stdout);
     },
     async prStatus({ repo, ref }, call) {
-      const args = ['pr', 'view', ref, '-R', repo, '--json', 'url,state,statusCheckRollup'];
+      const args = [
+        'pr',
+        'view',
+        ref,
+        '-R',
+        repo,
+        '--json',
+        'url,state,statusCheckRollup,headRefOid',
+      ];
       const out = await exec(args, call);
       if (out.exitCode !== 0 && (NO_PR.test(out.stderr) || PR_NOT_FOUND.test(out.stderr)))
         return null;
       if (out.exitCode !== 0) throw failure(args, out);
       const view = parseOutput(PrStatusView, args, out.stdout);
-      return { url: view.url, state: view.state, ...summariseChecks(view.statusCheckRollup ?? []) };
+      return {
+        url: view.url,
+        state: view.state,
+        headSha: view.headRefOid,
+        ...summariseChecks(view.statusCheckRollup ?? []),
+      };
     },
     async prCreate({ repo, base, head, title, bodyFile }, call) {
       const args = [
@@ -434,8 +454,8 @@ export function createGh(exec: GhExec): Gh {
       throw new GhError(GhFailure.Failed, `gh pr create printed no pull request URL for ${repo}`);
     },
     async repoAllowsAutoMerge(repo, call) {
-      const args = ['repo', 'view', repo, '--json', 'autoMergeAllowed'];
-      return parseOutput(RepoView, args, await ok(args, call)).autoMergeAllowed;
+      const args = ['api', `repos/${repo}`];
+      return parseOutput(RepoSettings, args, await ok(args, call)).allow_auto_merge;
     },
     async prAutoMerge({ repo, url }, call) {
       await ok(['pr', 'merge', url, '-R', repo, '--auto', '--squash'], call);

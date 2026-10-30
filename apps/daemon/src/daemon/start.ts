@@ -52,7 +52,9 @@ import { systemClock, type Clock } from '../clock';
 import {
   allCheckouts,
   createBaseUpdates,
+  createMigrationsBase,
   createBatchCardAnswers,
+  createBranchCardAnswers,
   createBatchStarter,
   createDeliveryJobs,
   createPrWatch,
@@ -62,6 +64,7 @@ import {
   flagWorktreeMissing,
   flagWrongBranch,
   recoverBatches,
+  removeMergedBranches,
   resolvePnpm,
   subscribePrWatch,
   subscribeShipTrigger,
@@ -113,7 +116,12 @@ import { createGateRunner, createGateSlots, limitGates } from '../verify';
 import { CLIENT_APP } from '../version';
 import { createWatcher, systemWatch, type WatchFn } from '../watcher';
 import { createProjectPinStore } from './checkout-pins';
-import { createGitCardAnswers, createGitRefusalHandler } from './git-refusal';
+import {
+  createCheckoutTrustedHandler,
+  createGitCardAnswers,
+  createGitRefusalHandler,
+  refusedTrustCheckouts,
+} from './git-refusal';
 import { acquireInstanceLock } from './instance-lock';
 import { removeRuntimeFiles, writeRuntimeFiles } from '../runtime-files';
 import { createAreaNamer } from './area-namer';
@@ -343,6 +351,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   let answerBatchCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerAccountCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerGitCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
+  let answerBranchCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
 
   const inbox = createInboxService({
     state,
@@ -357,6 +366,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       answerBatchCard?.(item, answer);
       answerAccountCard?.(item, answer);
       answerGitCard?.(item, answer);
+      answerBranchCard?.(item, answer);
     },
   });
   // Sustained overload holds new lane sessions and gates and raises one card naming what is busy.
@@ -376,6 +386,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   });
   const git = createGit({
     onRefused: createGitRefusalHandler({ db: state.db, inbox, logger }),
+    onTrusted: createCheckoutTrustedHandler({ db: state.db, inbox }),
+    refusedCheckouts: refusedTrustCheckouts(state.db),
     pins: createProjectPinStore(state, memoryPinStore()),
     bin: gitBin,
     checkouts: () => listProjects(state.db).map((project) => project.repoPath),
@@ -455,9 +467,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       resolvePnpm,
     }),
   };
+  answerBranchCard = createBranchCardAnswers(delivery);
   const starter = createBatchStarter(delivery);
   // One for the runner and the shipper alike, so a batch's verify and shipping gates run in turn.
   const baseUpdates = createBaseUpdates(delivery);
+  // Before a task gets the migrations hazard, from request_claim or at its start.
+  const migrationsBase = createMigrationsBase(delivery, baseUpdates);
   const shipper = createShipper({
     ...delivery,
     gate,
@@ -470,8 +485,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     load: loadGuard,
   });
   answerBatchCard = createBatchCardAnswers({
-    retry: (id) => {
-      const retried = retryWorkstream(state, id);
+    retry: (id, note) => {
+      const retried = retryWorkstream(state, id, note);
       if (retried.batchId !== null) starter.reopen(retried.batchId);
       scheduler?.requestTick();
     },
@@ -609,6 +624,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     git,
     gate,
     baseUpdates,
+    migrationsBase,
     clock,
     logger,
     dataDir: opts.dataDir,
@@ -695,6 +711,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     ctx: delivery,
     clock,
     ...(opts.prWatchIntervalMs ? { intervalMs: opts.prWatchIntervalMs } : {}),
+    // A merged pull request's local branch goes in the round that reads the merge.
+    afterRound: (signal) => removeMergedBranches(delivery, signal),
   });
   const unsubscribePrWatch = subscribePrWatch(bus, prWatch);
 
@@ -771,6 +789,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       waitObserverFor: (id) => live.get(id)?.observer,
       sessionSignal: (id) => live.get(id)?.signal,
       claimWaits,
+      migrationsBase,
     }),
   });
   const wss = new WebSocketServer({ noServer: true });

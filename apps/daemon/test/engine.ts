@@ -105,7 +105,7 @@ export interface TestEngine {
   /** Does what the scheduler does: claims, lease, STARTING, then launch. */
   launch(id: WorkstreamId): void;
   /** Retries a failed workstream the way the API does. */
-  retry(id: WorkstreamId): WorkstreamDto;
+  retry(id: WorkstreamId, note?: string): WorkstreamDto;
   close(): Promise<void>;
 }
 
@@ -124,6 +124,7 @@ export async function createTestEngine(
       | 'baseUpdates'
       | 'hold'
       | 'laneTempDirs'
+      | 'migrationsBase'
     >
   > = {},
   setup: { readonly account?: AccountInput; readonly secret?: string } = {},
@@ -346,7 +347,7 @@ export async function createTestEngine(
       });
       created.launch(id, fence);
     },
-    retry: (id) => retryWorkstream(state, id),
+    retry: (id, note) => retryWorkstream(state, id, note),
     async close() {
       moveBack.stop();
       await created.stopAll('shutdown');

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   findOpenByFoldKey,
   getInboxItem,
+  hasAnsweredByFoldKey,
   insertInboxItem,
   listInbox,
   openItemsForWorkstream,
@@ -59,6 +60,26 @@ describe('inbox', () => {
     );
     expect(findOpenByFoldKey(store.db, project.id, 'fold-1')).toBeUndefined();
   });
+
+  it.each([
+    { state: 'OPEN', answered: false },
+    { state: 'ANSWERED', answered: true },
+    { state: 'DELIVERING', answered: true },
+    { state: 'RESOLVED', answered: true },
+    { state: 'CANCELLED', answered: false },
+    { state: 'EXPIRED', answered: false },
+  ] as const)(
+    'counts a $state card with the fold key as answered: $answered',
+    ({ state, answered }) => {
+      const project = seedProject(store);
+      expect(hasAnsweredByFoldKey(store.db, project.id, 'fold-1')).toBe(false);
+      const item = store.write((ctx) => insertInboxItem(ctx, question(project.id))).value;
+      store.write((ctx) => updateInboxItem(ctx, item.id, { state }));
+      expect(hasAnsweredByFoldKey(store.db, project.id, 'fold-1')).toBe(answered);
+      expect(hasAnsweredByFoldKey(store.db, project.id, 'fold-2')).toBe(false);
+      expect(hasAnsweredByFoldKey(store.db, seedProject(store).id, 'fold-1')).toBe(false);
+    },
+  );
 
   it.each([
     { state: 'OPEN', included: true },
@@ -170,6 +191,26 @@ describe('inbox', () => {
     expect(() =>
       store.write((ctx) => updateInboxItem(ctx, mintId('InboxItem'), { state: 'CANCELLED' })),
     ).toThrow(/not found|inbox item/i);
+  });
+
+  it('lists only the most recently updated items, newest first, when asked for the recent ones', () => {
+    let tick = 0;
+    close();
+    ({ store, close } = createTestStore(() => new Date(Date.UTC(2026, 0, 1, 0, 0, tick++))));
+    const project = seedProject(store);
+    const ids = ['a', 'b', 'c'].map(
+      (foldKey) =>
+        store.write((ctx) => insertInboxItem(ctx, question(project.id, { foldKey }))).value.id,
+    );
+    // The oldest is updated last, so it is the newest now.
+    store.write((ctx) => {
+      updateInboxItem(ctx, ids[0] ?? mintId('InboxItem'), { state: 'RESOLVED' });
+    });
+    expect(listInbox(store.db, { recent: 2 }).map((i) => i.id)).toEqual([ids[0], ids[2]]);
+    expect(listInbox(store.db, { states: ['OPEN'], recent: 5 }).map((i) => i.id)).toEqual([
+      ids[2],
+      ids[1],
+    ]);
   });
 
   it('sorts high urgency first', () => {

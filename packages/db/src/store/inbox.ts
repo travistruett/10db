@@ -14,7 +14,7 @@ import {
   type Urgency,
   type WorkstreamId,
 } from '@10db/contracts';
-import { and, asc, eq, inArray, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, sql, type SQL } from 'drizzle-orm';
 import * as schema from '../schema';
 import type { Json } from '../json';
 import { assigneeFor } from './routing-rules';
@@ -103,20 +103,31 @@ export function getInboxItem(db: DbReader, id: InboxItemId): InboxItemDto {
 
 const URGENCY_ORDER = sql`CASE ${schema.inboxItems.urgency} WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END`;
 
+/**
+ * The inbox, most urgent and then oldest first. With `recent`, only that many items instead, the most
+ * recently updated first: for lists that only grow, such as the resolved cards.
+ */
 export function listInbox(
   db: DbReader,
-  filter: { states?: readonly InboxState[]; projectId?: ProjectId } = {},
+  filter: { states?: readonly InboxState[]; projectId?: ProjectId; recent?: number } = {},
 ): InboxItemDto[] {
   const where: SQL[] = [];
   if (filter.states) where.push(inArray(schema.inboxItems.state, [...filter.states]));
   if (filter.projectId) where.push(eq(schema.inboxItems.projectId, filter.projectId));
-  return db
+  const query = db
     .select()
     .from(schema.inboxItems)
-    .where(and(...where))
-    .orderBy(URGENCY_ORDER, asc(schema.inboxItems.createdAt), asc(schema.inboxItems.id))
-    .all()
-    .map(toDto);
+    .where(and(...where));
+  const rows =
+    filter.recent === undefined
+      ? query
+          .orderBy(URGENCY_ORDER, asc(schema.inboxItems.createdAt), asc(schema.inboxItems.id))
+          .all()
+      : query
+          .orderBy(desc(schema.inboxItems.updatedAt), desc(schema.inboxItems.id))
+          .limit(filter.recent)
+          .all();
+  return rows.map(toDto);
 }
 
 export function findOpenByFoldKey(
@@ -136,6 +147,32 @@ export function findOpenByFoldKey(
     )
     .get();
   return row ? toDto(row) : undefined;
+}
+
+/** The states of a card the builder answered, whether or not the answer has been delivered. */
+const ANSWERED_STATES: InboxState[] = [
+  InboxState.Answered,
+  InboxState.Delivering,
+  InboxState.Resolved,
+];
+
+/**
+ * Whether the builder ever answered a card of the project with this fold key. A card that is still
+ * open, or that was withdrawn or expired unanswered, doesn't count.
+ */
+export function hasAnsweredByFoldKey(db: DbReader, projectId: ProjectId, foldKey: string): boolean {
+  const row = db
+    .select({ id: schema.inboxItems.id })
+    .from(schema.inboxItems)
+    .where(
+      and(
+        eq(schema.inboxItems.projectId, projectId),
+        eq(schema.inboxItems.foldKey, foldKey),
+        inArray(schema.inboxItems.state, ANSWERED_STATES),
+      ),
+    )
+    .get();
+  return row !== undefined;
 }
 
 export function updateInboxItem(

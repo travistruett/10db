@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import {
+  CARD_RESOLUTION,
   CheckChoice,
   ConflictError,
   DECISION_CATEGORIES,
@@ -13,6 +14,7 @@ import {
   ProposalKind,
   QuestionCategory,
   Urgency,
+  type CardResolution,
   type InboxItemDto,
   type InboxItemId,
   type InboxOption,
@@ -38,6 +40,7 @@ import {
 } from '@10db/db';
 import type { StateStore } from '../events';
 import { storableRule } from '../permissions';
+import { applyGateHostChoice } from './gate-host-card';
 import { applyMcpApproval } from './mcp-approval';
 import { taskFieldsFromProposal } from './proposal-task';
 
@@ -78,6 +81,8 @@ interface FlagInput {
    */
   readonly refresh?: boolean;
   readonly options?: readonly InboxOption[];
+  /** The label of the option the card recommends. */
+  readonly recommendation?: string | null;
 }
 
 /** What a reword changes besides the body. */
@@ -100,6 +105,12 @@ export interface InboxService {
   reword(id: InboxItemId, body: string, card?: Rewording): void;
   /** Closes an open card whose question a later change made moot; a closed card is left as it was. */
   withdraw(id: InboxItemId): void;
+  /**
+   * Closes an open card as RESOLVED by 10db, because the action it reports as failed has succeeded
+   * since. The reason goes in `detail.resolution`, where the resolved view shows it; a card that is
+   * no longer open is returned as it was.
+   */
+  resolve(id: InboxItemId, reason: string): InboxItemDto;
   redeliver(id: InboxItemId): InboxItemDto;
 }
 
@@ -125,7 +136,7 @@ export function flagCard(ctx: WriteContext, input: FlagInput): InboxItemDto {
     title: input.title,
     body: input.body,
     options: input.options ? [...input.options] : [],
-    recommendation: null,
+    recommendation: input.recommendation ?? null,
     category: QuestionCategory.Other,
     urgency: Urgency.High,
     detail: input.detail ?? null,
@@ -380,7 +391,10 @@ export function createInboxService(deps: {
         }
         if (item.kind === InboxKind.Permission) applyPermissionChoice(ctx, updated, answer);
         if (item.kind === InboxKind.Proposal) applyProposalVerdict(ctx, updated, answer);
-        if (item.kind === InboxKind.Flag) applyMcpApproval(ctx, updated, answer);
+        if (item.kind === InboxKind.Flag) {
+          applyMcpApproval(ctx, updated, answer);
+          applyGateHostChoice(ctx, updated, answer);
+        }
         return updated;
       });
       afterCommit?.();
@@ -414,6 +428,18 @@ export function createInboxService(deps: {
     withdraw(id) {
       deps.state.write((ctx) => {
         withdrawCard(ctx, id);
+      });
+    },
+
+    resolve(id, reason) {
+      return deps.state.write((ctx) => {
+        const item = getInboxItem(ctx.tx, id);
+        if (item.state !== InboxState.Open) return item;
+        const resolution: CardResolution = { by: '10db', reason };
+        return updateInboxItem(ctx, id, {
+          state: InboxState.Resolved,
+          detail: { ...item.detail, [CARD_RESOLUTION]: resolution },
+        });
       });
     },
 

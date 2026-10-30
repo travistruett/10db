@@ -1319,6 +1319,8 @@ describe('startDaemon', () => {
     const logPath = join(dir.path, 'logs', 'daemon.log');
     // The descriptors that point at daemon.log, found by identity so the count does not depend on GC.
     const openLogHandles = () => {
+      // Not created yet: the destination hasn't opened it, so nothing points at it.
+      if (!existsSync(logPath)) return 0;
       const log = statSync(logPath);
       return readdirSync('/dev/fd').filter((name) => {
         try {

@@ -153,7 +153,17 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
         PATH: '/usr/bin:/bin:/usr/sbin:/sbin',
         HOME: home,
         CLAUDE_CODE_TMPDIR: run.tmpDir,
+        SRT_DEBUG: '1',
       });
+    });
+  });
+
+  it('says how many lines the command line srt echoes in its debug log takes', async () => {
+    // An env value can't hold a newline (the sandbox refuses it); a gate command can.
+    await withRun(input({ command: 'make gate\nmake check\nmake e2e' }), (run) => {
+      const inner = run.args[run.args.indexOf('-c') + 1] ?? '';
+      expect(inner.split('\n')).toHaveLength(3);
+      expect(run.commandLines).toBe(3);
     });
   });
 
@@ -339,6 +349,7 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
         'NODE_OPTIONS',
         'DOCKER_HOST',
         'CLAUDE_CODE_TMPDIR',
+        'SRT_DEBUG',
       ]) {
         expect(seen[name]).toBeUndefined();
       }

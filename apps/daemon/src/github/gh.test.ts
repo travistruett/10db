@@ -213,12 +213,16 @@ describe('createGh', () => {
   });
 
   it('asks the repository whether it lets pull requests merge by themselves', async () => {
-    const yes = scripted({ 'repo view': { exitCode: 0, stdout: '{"autoMergeAllowed":true}\n' } });
+    // The REST field: gh repo view --json has no autoMergeAllowed in gh 2.83, and refuses it.
+    const key = 'api repos/acme/widgets';
+    const yes = scripted({
+      [key]: { exitCode: 0, stdout: '{"allow_auto_merge":true,"name":"w"}\n' },
+    });
     await expect(createGh(yes.exec).repoAllowsAutoMerge('acme/widgets', CALL)).resolves.toBe(true);
-    expect(yes.seen[0]).toEqual(['repo', 'view', 'acme/widgets', '--json', 'autoMergeAllowed']);
-    const no = scripted({ 'repo view': { exitCode: 0, stdout: '{"autoMergeAllowed":false}' } });
+    expect(yes.seen[0]).toEqual(['api', 'repos/acme/widgets']);
+    const no = scripted({ [key]: { exitCode: 0, stdout: '{"allow_auto_merge":false}' } });
     await expect(createGh(no.exec).repoAllowsAutoMerge('acme/widgets', CALL)).resolves.toBe(false);
-    const odd = scripted({ 'repo view': { exitCode: 0, stdout: '{"other":1}' } });
+    const odd = scripted({ [key]: { exitCode: 0, stdout: '{"other":1}' } });
     await expect(
       createGh(odd.exec).repoAllowsAutoMerge('acme/widgets', CALL),
     ).rejects.toMatchObject({ name: 'GhError', kind: 'failed' });
