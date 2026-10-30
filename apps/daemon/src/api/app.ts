@@ -130,7 +130,7 @@ export function createApp(deps: ApiDeps) {
     .post(
       '/projects',
       validator('json', (value): ProjectInput => ProjectInput.parse(value)),
-      (c) => c.json(deps.services.createProject(c.req.valid('json')), 201),
+      async (c) => c.json(await deps.services.createProject(c.req.valid('json')), 201),
     )
     .get('/projects/:projectId/tasks', (c) =>
       c.json(deps.services.listTasks(ProjectId.parse(c.req.param('projectId')))),
@@ -195,6 +195,9 @@ export function createApp(deps: ApiDeps) {
         );
         return c.json(host, created ? 201 : 200);
       },
+    )
+    .post('/projects/:projectId/network-hosts/scan', async (c) =>
+      c.json(await deps.services.scanNetworkHosts(ProjectId.parse(c.req.param('projectId')))),
     )
     .delete('/projects/:projectId/network-hosts/:host', (c) =>
       c.json(

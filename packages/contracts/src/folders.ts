@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { FoundHostDto } from './entities';
 
 /** Where a candidate gate command was found in a folder. */
 export const GateSource = {
@@ -40,6 +41,11 @@ export const FolderInspection = z.object({
   github: z.string().nullable(),
   /** Best first; the first is prefilled. */
   gateCandidates: z.array(z.object({ command: z.string(), source: z.enum(GateSource) })),
+  /**
+   * The hosts the folder's package files name (lockfiles, package manager settings, toolchain
+   * files), which adding the folder as a project allows, each with the file that names it.
+   */
+  registryHosts: z.array(FoundHostDto),
 });
 export type FolderInspection = z.infer<typeof FolderInspection>;
 

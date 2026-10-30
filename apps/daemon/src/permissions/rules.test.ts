@@ -418,6 +418,7 @@ describe('matchPermissionRule', () => {
     toolName,
     pattern,
     sourceInboxId: null,
+    foundIn: null,
     createdAt: '2026-10-13T12:00:00.000Z',
   });
   const match = (toolName: string, input: unknown, rules: PermissionRuleDto[]): boolean =>

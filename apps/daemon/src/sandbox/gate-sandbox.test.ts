@@ -153,6 +153,7 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
         PATH: '/usr/bin:/bin:/usr/sbin:/sbin',
         HOME: home,
         CLAUDE_CODE_TMPDIR: run.tmpDir,
+        SRT_DEBUG: '1',
       });
     });
   });
@@ -339,6 +340,7 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
         'NODE_OPTIONS',
         'DOCKER_HOST',
         'CLAUDE_CODE_TMPDIR',
+        'SRT_DEBUG',
       ]) {
         expect(seen[name]).toBeUndefined();
       }

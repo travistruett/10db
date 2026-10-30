@@ -38,6 +38,7 @@ import {
 } from '@10db/db';
 import type { StateStore } from '../events';
 import { storableRule } from '../permissions';
+import { applyGateHostChoice } from './gate-host-card';
 import { applyMcpApproval } from './mcp-approval';
 import { taskFieldsFromProposal } from './proposal-task';
 
@@ -75,6 +76,8 @@ export interface InboxService {
     body: string;
     detail?: Record<string, Json>;
     foldKey?: string;
+    /** The label of the option the card recommends. */
+    recommendation?: string | null;
     options?: readonly InboxOption[];
   }): InboxItemDto;
   cancelForWorkstream(workstreamId: WorkstreamId): void;
@@ -321,7 +324,10 @@ export function createInboxService(deps: {
         }
         if (item.kind === InboxKind.Permission) applyPermissionChoice(ctx, updated, answer);
         if (item.kind === InboxKind.Proposal) applyProposalVerdict(ctx, updated, answer);
-        if (item.kind === InboxKind.Flag) applyMcpApproval(ctx, updated, answer);
+        if (item.kind === InboxKind.Flag) {
+          applyMcpApproval(ctx, updated, answer);
+          applyGateHostChoice(ctx, updated, answer);
+        }
         return updated;
       });
       afterCommit?.();
@@ -340,7 +346,7 @@ export function createInboxService(deps: {
           title: input.title,
           body: input.body,
           options: input.options ? [...input.options] : [],
-          recommendation: null,
+          recommendation: input.recommendation ?? null,
           category: QuestionCategory.Other,
           urgency: Urgency.High,
           detail: input.detail ?? null,

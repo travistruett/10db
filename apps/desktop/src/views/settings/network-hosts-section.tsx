@@ -1,17 +1,27 @@
-import type { ProjectDto } from '@10db/contracts';
+import type { NetworkHostDto, ProjectDto } from '@10db/contracts';
 import { Button, Group, List, Stack, Text, TextInput } from '@mantine/core';
 import { useState } from 'react';
 import {
   useAllowNetworkHost,
   useNetworkHosts,
   useRemoveNetworkHost,
+  useScanNetworkHosts,
 } from '../../daemon/network-host-queries';
+import { networkHostSourceText } from './network-host-source';
+
+/** What a look at the project's files found, in a line the builder reads. */
+function scanSummary(added: readonly NetworkHostDto[]): string {
+  if (added.length === 0) return 'The files name no new hosts.';
+  const names = added.map((h) => h.host).join(', ');
+  return `Allowed ${String(added.length)} ${added.length === 1 ? 'host' : 'hosts'} the files name: ${names}.`;
+}
 
 /** The hosts a project's tasks and checks may reach: the same rules an Inbox card's Always Allow stores. */
 export function NetworkHostsSection({ project }: { readonly project: ProjectDto }) {
   const hosts = useNetworkHosts(project.id);
   const allow = useAllowNetworkHost(project.id);
   const remove = useRemoveNetworkHost(project.id);
+  const scan = useScanNetworkHosts(project.id);
   const [host, setHost] = useState('');
   const list = hosts.data ?? [];
 
@@ -41,14 +51,23 @@ export function NetworkHostsSection({ project }: { readonly project: ProjectDto 
               key={entry.host}
               styles={{ itemWrapper: { width: '100%' }, itemLabel: { width: '100%' } }}
             >
-              <Group justify="space-between" wrap="nowrap">
-                <Text ff="monospace" size="sm">
-                  {entry.host}
-                </Text>
+              <Group justify="space-between" wrap="nowrap" align="flex-start">
+                <Stack gap={0}>
+                  <Text ff="monospace" size="sm">
+                    {entry.host}
+                  </Text>
+                  <Text size="xs" c="dimmed">
+                    {networkHostSourceText(entry.source)}
+                  </Text>
+                  {remove.isError && remove.variables === entry.host ? (
+                    <Text size="xs" c="red" role="alert">
+                      {remove.error.message}
+                    </Text>
+                  ) : null}
+                </Stack>
                 <Button
                   size="xs"
-                  variant="subtle"
-                  color="red"
+                  variant="default"
                   aria-label={`Remove ${entry.host}`}
                   loading={remove.isPending && remove.variables === entry.host}
                   onClick={() => {
@@ -62,11 +81,28 @@ export function NetworkHostsSection({ project }: { readonly project: ProjectDto 
           ))}
         </List>
       )}
-      {remove.error ? (
-        <Text size="sm" c="red" role="alert">
-          {remove.error.message}
-        </Text>
-      ) : null}
+      <Group align="center">
+        <Button
+          variant="default"
+          size="xs"
+          loading={scan.isPending}
+          onClick={() => {
+            scan.mutate();
+          }}
+        >
+          Look Again
+        </Button>
+        {scan.isSuccess ? (
+          <Text size="sm" c="dimmed">
+            {scanSummary(scan.data)}
+          </Text>
+        ) : null}
+        {scan.isError ? (
+          <Text size="sm" c="red" role="alert">
+            Couldn't read the project's files: {scan.error.message}
+          </Text>
+        ) : null}
+      </Group>
       <form
         onSubmit={(e) => {
           e.preventDefault();

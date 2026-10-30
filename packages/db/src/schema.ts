@@ -506,6 +506,7 @@ export const permissionRules = sqliteTable('permission_rules', {
   toolName: text('tool_name').notNull(),
   pattern: text('pattern'),
   sourceInboxId: text('source_inbox_id').$type<InboxItemId>(),
+  foundIn: text('found_in'),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });

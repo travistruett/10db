@@ -423,16 +423,31 @@ export const PermissionRuleDto = z.object({
   toolName: z.string(),
   pattern: z.string().nullable(),
   sourceInboxId: InboxItemId.nullable(),
+  /** The project file whose scan allowed the host (such as `Cargo.lock`); null for any other source. */
+  foundIn: z.string().nullable(),
   createdAt: Timestamp,
 });
 export type PermissionRuleDto = z.infer<typeof PermissionRuleDto>;
 
+/** Where an allowed host came from: a project file's scan, an Inbox card's Allow, or the builder typing it. */
+export const NetworkHostSource = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('file'), file: z.string() }),
+  z.object({ kind: z.literal('card') }),
+  z.object({ kind: z.literal('builder') }),
+]);
+export type NetworkHostSource = z.infer<typeof NetworkHostSource>;
+
 /** A host the builder allows a project's sessions and checks to reach: its project-wide network rule. */
 export const NetworkHostDto = z.object({
   host: z.string(),
+  source: NetworkHostSource,
   createdAt: Timestamp,
 });
 export type NetworkHostDto = z.infer<typeof NetworkHostDto>;
+
+/** A host a project's package files name, and the file that names it (its path from the project root). */
+export const FoundHostDto = z.object({ host: z.string(), file: z.string() });
+export type FoundHostDto = z.infer<typeof FoundHostDto>;
 
 /** What the builder types to allow a host; the daemon judges it and answers a refusal in words. */
 export const NetworkHostInput = z.object({ host: z.string() });

@@ -39,6 +39,20 @@ export function useAllowNetworkHost(projectId: ProjectId) {
   });
 }
 
+/** Reads the project's package files again; answers the hosts it newly allowed. */
+export function useScanNetworkHosts(projectId: ProjectId) {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () =>
+      readJson(
+        await client.projects[':projectId']['network-hosts'].scan.$post({ param: { projectId } }),
+        NetworkHostList,
+      ),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: NETWORK_HOSTS_KEY }),
+  });
+}
+
 export function useRemoveNetworkHost(projectId: ProjectId) {
   const { client } = useDaemon();
   const queryClient = useQueryClient();

@@ -6,7 +6,7 @@ import {
   type FolderInspectResult,
 } from '@10db/contracts';
 import { clearMocks, mockIPC } from '@tauri-apps/api/mocks';
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { accountDto, DEFAULT_ACCOUNT } from '../../test/account-fixtures';
@@ -50,6 +50,7 @@ function inspection(overrides: Partial<FolderInspection> = {}): FolderInspection
       { command: 'make gate', source: 'makefile' },
       { command: 'npm test', source: 'package_json' },
     ],
+    registryHosts: [],
     ...overrides,
   };
 }
@@ -276,6 +277,38 @@ describe('useProjectSetup', () => {
     expect(gate.value).toBe('npm test');
     fireEvent.mouseEnter(screen.getByRole('button', { name: /^make gate/ }));
     expect(await screen.findByText('from Makefile', {}, { timeout: 2000 })).toBeTruthy();
+  });
+
+  it('lists the hosts the folder’s files name, each with its file, as hosts the project will allow', async () => {
+    serve({
+      result: {
+        ok: true,
+        inspection: inspection({
+          registryHosts: [
+            { host: 'index.crates.io', file: 'Cargo.lock' },
+            { host: 'static.crates.io', file: 'Cargo.lock' },
+            { host: 'npm.corp.example.com', file: 'apps/web/.npmrc' },
+          ],
+        }),
+      },
+    });
+    await openInspected();
+    const list = await screen.findByRole('list', { name: 'Network hosts the project will allow' });
+    expect(
+      within(list)
+        .getAllByRole('listitem')
+        .map((i) => i.textContent),
+    ).toEqual([
+      'index.crates.ioFound in Cargo.lock',
+      'static.crates.ioFound in Cargo.lock',
+      'npm.corp.example.comFound in apps/web/.npmrc',
+    ]);
+  });
+
+  it('shows no host list when the folder’s files name none', async () => {
+    serve({ result: { ok: true, inspection: inspection() } });
+    await openInspected();
+    expect(screen.queryByRole('list', { name: 'Network hosts the project will allow' })).toBeNull();
   });
 
   it('an empty gate is allowed, says so, and is sent as null', async () => {

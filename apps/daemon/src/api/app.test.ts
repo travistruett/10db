@@ -55,6 +55,7 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
     listNetworkHosts: none,
     allowNetworkHost: none,
     removeNetworkHost: none,
+    scanNetworkHosts: none,
     listPersonas: track('listPersonas'),
     createPersona: track('createPersona'),
     patchPersona: track('patchPersona'),

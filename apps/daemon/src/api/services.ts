@@ -81,7 +81,8 @@ export interface TaskRemovalServices {
 /** What the HTTP layer needs from the daemon. Implemented in the daemon module. */
 export interface ApiServices {
   listProjects(): ProjectViewDto[];
-  createProject(input: ProjectInput): ProjectDto;
+  /** Registers the project and allows the registries its package files name. */
+  createProject(input: ProjectInput): Promise<ProjectDto>;
   listTasks(projectId: ProjectId): TaskDto[];
   createTask(projectId: ProjectId, input: TaskInput): TaskDto;
   startTask(taskId: TaskId): TaskStarted;
@@ -128,6 +129,11 @@ export interface ApiServices {
   ): { readonly host: NetworkHostDto; readonly created: boolean };
   /** Stops allowing a host; throws NotFoundError when it was not allowed. */
   removeNetworkHost(projectId: ProjectId, host: string): NetworkHostDto;
+  /**
+   * Reads the project's lockfiles, package manager settings and toolchain files again, as text and
+   * without running anything, and allows the hosts they name. Answers the hosts it newly allowed.
+   */
+  scanNetworkHosts(projectId: ProjectId): Promise<NetworkHostDto[]>;
   listPersonas(): PersonaDto[];
   createPersona(input: PersonaInput): PersonaDto;
   patchPersona(id: PersonaId, patch: PersonaPatch): PersonaDto;

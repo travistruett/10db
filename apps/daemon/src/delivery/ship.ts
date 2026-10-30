@@ -33,6 +33,7 @@ import {
 } from '@10db/db';
 import type { Clock } from '../clock';
 import { GitNetworkError, GitNetworkFailure } from '../git';
+import { raiseGateHostCards } from '../inbox';
 import type { GateResult, GateRunner } from '../verify';
 import { gateNote, type BaseUpdate, type BaseUpdates } from './base-update';
 import { shipCards, wrongBranchCard, type Card, type ShipFailure } from './cards';
@@ -215,7 +216,15 @@ export function createShipper(deps: ShipperDeps): Shipper {
       }),
     );
     // Shutdown killed the gate: record nothing; the batch stays SHIPPING and recovery re-runs it.
-    return result.aborted ? null : result;
+    if (result.aborted) return null;
+    // A host the sandbox blocked is the builder's to allow; the card names it and the gate's tail says so.
+    raiseGateHostCards(deps, {
+      projectId: project.id,
+      workstreamId: null,
+      command: gateCommand,
+      hosts: result.blockedHosts,
+    });
+    return result;
   }
 
   /** Logs the push's duration and output, landed or refused, so what git printed is on record. */

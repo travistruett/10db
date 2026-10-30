@@ -127,6 +127,7 @@ describe('ProjectSwitcher', () => {
             defaultBranch: null,
             github: null,
             gateCandidates: [{ command: 'make gate', source: 'makefile' }],
+            registryHosts: [],
           },
         }),
       ),
