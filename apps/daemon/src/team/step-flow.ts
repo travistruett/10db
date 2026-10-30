@@ -107,11 +107,16 @@ export function sendBackSteps(
   });
 }
 
-/** A retried workstream restarts its current step clean (no stale verdict, no counted attempts) in the same step. */
+/**
+ * A retried workstream restarts its current step clean (no stale verdict, no counted attempts, no counted
+ * endings without a verdict) in the same step. `sessions` is how many sessions the workstream has run.
+ * It keeps `sessionFloor`, so the step still finds its own handoffs from before the retry.
+ */
 export function restartStep(
   steps: readonly WorkstreamStep[],
   index: number,
   now: string,
+  sessions: number,
 ): WorkstreamStep[] {
   return steps.map((s, i) =>
     i === index
@@ -121,6 +126,7 @@ export function restartStep(
           attempts: 0,
           result: null,
           startedAt: now,
+          retryFloor: sessions,
         }
       : s,
   );

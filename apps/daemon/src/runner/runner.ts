@@ -9,6 +9,7 @@ import {
   parseFindings,
   PermissionChoice,
   REVIEW_CARD_DETAIL,
+  REVIEW_ROLES,
   StepRole,
   StepStatus,
   ToolAccess,
@@ -136,6 +137,7 @@ import {
   type RepoMcp,
   type SessionAdapter,
   type SessionHandle,
+  type TurnResult,
 } from '../sessions';
 import {
   advanceSteps,
@@ -250,7 +252,12 @@ type Outcome =
       /** The project moved while the lane waited for its start slot. */
       readonly kind: 'moved';
     }
-  | { readonly kind: 'step_done'; readonly withoutHandoff: boolean }
+  | {
+      readonly kind: 'step_done';
+      readonly withoutHandoff: boolean;
+      /** How the session ended, in a plain clause: what a step that records no result is failed with. */
+      readonly ending: string;
+    }
   | {
       readonly kind: 'parked';
       readonly inboxId: InboxItemId;
@@ -378,6 +385,10 @@ interface SessionState {
   firmSent: boolean;
   /** A read-only step that ended its turn without a result is asked once. */
   resultNudged: boolean;
+  /** How the session's last turn ended; null before any turn did. */
+  lastTurn: TurnResult | null;
+  /** The share of its context window the session last reported using. */
+  contextPct: number | null;
   parkedFor: InboxItemId | null;
   /**
    * The cards the session is waiting on, oldest first, with how many waits each has: a folded card can
@@ -389,6 +400,30 @@ interface SessionState {
   started: boolean;
   outcome: Outcome | null;
 }
+
+/**
+ * How a session ended, as one plain clause: its last turn (normal, at the turn limit, or an error) and
+ * the share of its context it had used. A session that gave no verdict is failed with this, so the card
+ * says whether a retry can help.
+ */
+function describeEnding(st: Pick<SessionState, 'lastTurn' | 'contextPct'>): string {
+  const how =
+    st.lastTurn === null
+      ? 'its session closed before any turn finished'
+      : st.lastTurn === 'max_turns'
+        ? 'its last turn stopped at the turn limit'
+        : st.lastTurn === 'error'
+          ? 'its last turn ended with an error'
+          : 'its last turn ended normally';
+  const context =
+    st.contextPct === null
+      ? ''
+      : `, with ${String(Math.round(st.contextPct))}% of its context used`;
+  return `${how}${context}.`;
+}
+
+/** A review that ends without a verdict is rerun once by itself; a second such ending fails the task. */
+const NO_VERDICT_ENDINGS_ALLOWED = 2;
 
 /** Reads the stop reason afresh: a stop can land at any await, which narrowing cannot see. */
 function stopRequested(ctl: { readonly stopReason: StopReason | null }): StopReason | null {
@@ -600,6 +635,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     id: WorkstreamId,
     ctl: Control,
     row: WorkstreamRow,
+    ending: string,
   ): Promise<'next' | 'stop'> {
     const step = currentStep(row);
     // A sent-back step still holds its earlier result; only one a session of this step recorded counts.
@@ -613,9 +649,27 @@ export function createRunner(opts: RunnerOptions): Runner {
           row.stepIndex,
         );
     switch (move.kind) {
-      case 'no_result':
-        fail(id, ctl.fence, `The ${step.role} step ended without calling complete_step`);
+      case 'no_result': {
+        // Sessions of this step since it started, or since the builder last retried it, that ended
+        // their turn with no verdict: this one included.
+        const floor = Math.max(step.sessionFloor, step.retryFloor ?? 0);
+        const noVerdict = listSessions(db, id).filter(
+          (s) => s.sequence > floor && s.exitReason === 'step_done',
+        ).length;
+        if (REVIEW_ROLES.includes(step.role) && noVerdict < NO_VERDICT_ENDINGS_ALLOWED) {
+          // The first such ending is no judgment of the work: the review runs again, from its handoff when it wrote one.
+          opts.logger.warn(
+            { workstreamId: id, role: step.role, ending },
+            'review ended without a verdict; running it once more',
+          );
+          opts.state.write((ctx) => {
+            patchWorkstream(ctx, id, ctl.fence, { nextAction: freshAction(ctx.tx, id) });
+          });
+          return 'next';
+        }
+        fail(id, ctl.fence, `The ${step.role} step ended without calling complete_step: ${ending}`);
         return 'stop';
+      }
       case 'done': {
         if (getProject(db, row.projectId).gateCommand === null) {
           // Nothing checked a read-only approval either: the builder checks what the steps produced.
@@ -1183,6 +1237,8 @@ export function createRunner(opts: RunnerOptions): Runner {
       awaitingBriefingBaseline: briefed && inheritedBaselinePct === null,
       firmSent: false,
       resultNudged: false,
+      lastTurn: null,
+      contextPct: null,
       parkedFor: null,
       waitingOn: new Map(),
       waitTimer: null,
@@ -1363,6 +1419,7 @@ export function createRunner(opts: RunnerOptions): Runner {
             });
             break;
           case 'context': {
+            st.contextPct = event.percentage;
             if (st.awaitingBriefingBaseline) {
               st.awaitingBriefingBaseline = false;
               st.briefingBaselinePct = event.percentage;
@@ -1438,6 +1495,7 @@ export function createRunner(opts: RunnerOptions): Runner {
             }
             break;
           case 'turn_complete': {
+            st.lastTurn = event.result ?? 'success';
             opts.state.write((ctx) => {
               updateSessionUsage(ctx, session.id, {
                 inputTokens: event.inputTokens,
@@ -1463,7 +1521,11 @@ export function createRunner(opts: RunnerOptions): Runner {
               st.resultNudged = true;
               handle.send(RESULT_NUDGE);
             } else {
-              st.outcome = { kind: 'step_done', withoutHandoff: st.handoffRequested };
+              st.outcome = {
+                kind: 'step_done',
+                withoutHandoff: st.handoffRequested,
+                ending: describeEnding(st),
+              };
               await handle.stop();
             }
             break;
@@ -1537,7 +1599,11 @@ export function createRunner(opts: RunnerOptions): Runner {
                   };
                   break;
                 case SessionEndReason.Completed:
-                  st.outcome = { kind: 'step_done', withoutHandoff: st.handoffRequested };
+                  st.outcome = {
+                    kind: 'step_done',
+                    withoutHandoff: st.handoffRequested,
+                    ending: describeEnding(st),
+                  };
                   break;
               }
             }
@@ -1973,7 +2039,7 @@ export function createRunner(opts: RunnerOptions): Runner {
             });
           }
           if (readOnly) {
-            if ((await finishReadOnlyStep(id, ctl, finished)) === 'next') continue;
+            if ((await finishReadOnlyStep(id, ctl, finished, outcome.ending)) === 'next') continue;
             return;
           }
           if (outcome.withoutHandoff) {

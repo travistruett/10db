@@ -22,6 +22,7 @@ import {
   insertEvidence,
   insertWorkstream,
   latestHandoffForStep,
+  listSessions,
   getAccount,
   listModelProfiles,
   listPersonas,
@@ -191,7 +192,9 @@ export function retryWorkstream(state: StateStore, id: WorkstreamId, note?: stri
     // outstanding for a session that starts fresh: the note was written after that start.
     const restarted =
       row.steps.length > 0
-        ? clearSendBacks(restartStep(row.steps, row.stepIndex, ctx.now))
+        ? clearSendBacks(
+            restartStep(row.steps, row.stepIndex, ctx.now, listSessions(ctx.tx, id).length),
+          )
         : row.steps;
     const steps =
       row.nextAction.kind === 'fix' && !evidence
