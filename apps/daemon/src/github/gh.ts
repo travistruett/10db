@@ -226,7 +226,8 @@ export function createSystemGhExec(tools: GhTools): GhExec {
 }
 
 const PrView = z.object({ url: z.url(), state: z.enum(PrState) });
-const RepoView = z.object({ autoMergeAllowed: z.boolean() });
+/** The repository's REST answer; `gh repo view --json` has no auto-merge field in every gh. */
+const RepoSettings = z.object({ allow_auto_merge: z.boolean() });
 
 /**
  * A pull request URL in `repo` (`owner/name`), on any GitHub host: https and
@@ -453,8 +454,8 @@ export function createGh(exec: GhExec): Gh {
       throw new GhError(GhFailure.Failed, `gh pr create printed no pull request URL for ${repo}`);
     },
     async repoAllowsAutoMerge(repo, call) {
-      const args = ['repo', 'view', repo, '--json', 'autoMergeAllowed'];
-      return parseOutput(RepoView, args, await ok(args, call)).autoMergeAllowed;
+      const args = ['api', `repos/${repo}`];
+      return parseOutput(RepoSettings, args, await ok(args, call)).allow_auto_merge;
     },
     async prAutoMerge({ repo, url }, call) {
       await ok(['pr', 'merge', url, '-R', repo, '--auto', '--squash'], call);
