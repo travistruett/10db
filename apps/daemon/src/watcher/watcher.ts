@@ -17,7 +17,11 @@ import type { StateStore } from '../events';
 import { existsAsEntry, GitTrustError, type Git } from '../git';
 import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
-import { holdsOnlyBookkeeping, isBookkeepingAt } from './claude-code-bookkeeping';
+import {
+  holdsOnlyBookkeeping,
+  ignoredBookkeepingWrite,
+  isBookkeepingAt,
+} from './claude-code-bookkeeping';
 import {
   bulkFoldKey,
   findForeignClaimWrites,
@@ -250,7 +254,28 @@ export function createWatcher(deps: {
     ordinary.forEach(single);
   }
 
-  async function processBatch(root: string, paths: readonly string[]): Promise<void> {
+  /**
+   * Drops the files Claude Code writes for its own bookkeeping, which raise no card, and logs each one so a new
+   * file it starts writing is easy to spot.
+   */
+  function withoutBookkeeping(
+    projectId: ProjectId,
+    root: string,
+    paths: readonly string[],
+  ): string[] {
+    return paths.filter((rel) => {
+      const ignored = ignoredBookkeepingWrite(root, rel);
+      if (ignored) {
+        deps.logger.info(
+          { projectId, root, path: rel, writtenBy: ignored.writtenBy },
+          'ignored a Claude Code bookkeeping write',
+        );
+      }
+      return !ignored;
+    });
+  }
+
+  async function processBatch(root: string, allPaths: readonly string[]): Promise<void> {
     const entry = watched.get(root);
     if (!entry) return;
     const { projectId, batchId } = entry;
@@ -259,6 +284,8 @@ export function createWatcher(deps: {
       unwatch(root);
       return;
     }
+    const paths = withoutBookkeeping(projectId, entry.root, allPaths);
+    if (paths.length === 0) return;
     // Only what git still sees as changed now. This drops ignored files and directories. It also drops files
     // already committed through 10db's claim-checked commit, whose claims may have been released since the write.
     // A checkout git refuses to run in (a lane may have written its config) has a card of its own; its
@@ -352,7 +379,7 @@ export function createWatcher(deps: {
       const root = checkoutOf(db, ws);
       if (!existsSync(root)) return [];
       const batchId = worktreeBatchOf(ws);
-      const changed = await deps.git.changedPaths(root);
+      const changed = withoutBookkeeping(ws.projectId, root, await deps.git.changedPaths(root));
       const { strays, candidates } = straysIn(
         project,
         batchId,
