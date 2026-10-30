@@ -69,12 +69,14 @@ export type TaskStarted =
   | { readonly kind: 'workstream'; readonly workstream: WorkstreamDto }
   | { readonly kind: 'batch'; readonly batch: BatchDto };
 
-/** Removing a task that hasn't started. */
+/** Removing a task that hasn't run. */
 export interface TaskRemovalServices {
   /**
-   * Cancels a task with no workstream and drops it from its project's list; answering a task
-   * already removed is a no-op. Throws TaskStartedError for a task that has run and
-   * TaskHasDependentsError while an open task waits on it.
+   * Cancels a task with no workstream, or whose only run is held, and drops it from its project's
+   * list; a held run is cancelled with it, and its batch ends and takes its worktree and branch
+   * with it once nothing in the batch is left. Answering a task already removed is a no-op. Throws
+   * TaskStartedError for a task that has run and TaskHasDependentsError while an open task waits
+   * on it.
    */
   removeTask(taskId: TaskId): TaskDto;
   /**
@@ -102,7 +104,13 @@ export interface ApiServices {
    * answer may come after asking origin.
    */
   createTask(projectId: ProjectId, input: TaskInput): TaskDto | Promise<TaskDto>;
+  /** Starts a task; a held one is queued again as the run it was, in any delivery mode. */
   startTask(taskId: TaskId): TaskStarted;
+  /**
+   * Sets aside a started task that has not run: its queued run becomes held, so it takes no lane
+   * and keeps its batch and worktree. A task that has begun running is refused (409).
+   */
+  holdTask(taskId: TaskId): WorkstreamDto;
   /**
    * Starts the tasks and answers every batch the start made or joined: one in shared mode (new, or
    * the project's open or failed batch), one per dependency group in worktree mode.

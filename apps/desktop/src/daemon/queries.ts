@@ -257,6 +257,38 @@ export function useStartTask() {
   });
 }
 
+/** A hold or a removal changes the task's run, its column and, for a removed run, its batch. */
+function invalidateTaskViews(queryClient: QueryClient): Promise<unknown> {
+  return Promise.all([
+    queryClient.invalidateQueries({ queryKey: ['tasks'] }),
+    queryClient.invalidateQueries({ queryKey: ['workstreams'] }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.projects }),
+    queryClient.invalidateQueries({ queryKey: ['batches'] }),
+  ]);
+}
+
+/** Sets a started task that has not run aside (`POST /tasks/:taskId/hold`): its run leaves the queue and keeps its worktree. */
+export function useHoldTask() {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (taskId: TaskId) =>
+      readJson(await client.tasks[':taskId'].hold.$post({ param: { taskId } }), WorkstreamDto),
+    onSuccess: () => invalidateTaskViews(queryClient),
+  });
+}
+
+/** Removes a task that has not run (`POST /tasks/:taskId/remove`); a held one takes its worktree and branch with it. */
+export function useRemoveTask() {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (taskId: TaskId) =>
+      readJson(await client.tasks[':taskId'].remove.$post({ param: { taskId } }), TaskDto),
+    onSuccess: () => invalidateTaskViews(queryClient),
+  });
+}
+
 /** Closes a task whose run failed; it leaves the Board, its run stays in Factory. */
 export function useCloseTask() {
   const { client } = useDaemon();

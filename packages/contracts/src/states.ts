@@ -2,6 +2,8 @@ type ValueOf<T> = T[keyof T];
 
 export const WorkstreamState = {
   Queued: 'QUEUED',
+  /** A queued run the builder set aside before it ran: it keeps its batch and worktree and takes no lane. */
+  Held: 'HELD',
   Starting: 'STARTING',
   Running: 'RUNNING',
   HandingOff: 'HANDING_OFF',

@@ -30,6 +30,7 @@ import { getBoardColumn } from './board-columns';
 import { getFlow } from './flows';
 import { getProject } from './projects';
 import type { DbReader, WriteContext } from './store';
+import { transitionWorkstream } from './workstreams';
 
 export interface BoardStatusInput {
   readonly taskStatus: TaskStatus;
@@ -63,6 +64,7 @@ export function deriveBoardStatus({
   if (
     workstreamState === WorkstreamState.WaitingHuman ||
     workstreamState === WorkstreamState.PausedLimit ||
+    workstreamState === WorkstreamState.Held ||
     workstreamState === WorkstreamState.Failed
   ) {
     return BoardStatus.Blocked;
@@ -295,7 +297,9 @@ export function cancelTask(ctx: WriteContext, id: TaskId): TaskDto {
   const task = getTask(ctx.tx, id);
   if (task.status === TaskStatus.Cancelled) return task;
   const run = latestRun(ctx.tx, id);
-  if (task.status !== TaskStatus.Open || run)
+  // A held run never ran, so it goes with its task; any other run belongs to the workstream's own cancel.
+  const held = run?.state === WorkstreamState.Held ? run : undefined;
+  if (task.status !== TaskStatus.Open || (run && !held))
     throw new TaskStartedError(
       task.title,
       run ? { id: run.id, live: !isTerminal(run.state) } : null,
@@ -317,6 +321,12 @@ export function cancelTask(ctx: WriteContext, id: TaskId): TaskDto {
       `Batch "${cutting.title}" is being cut; remove ${task.title} once it has started`,
     );
   refuseWhileOpenDependents(ctx, task, 'remove');
+  if (held)
+    transitionWorkstream(ctx, held.id, {
+      to: WorkstreamState.Cancelled,
+      fence: null,
+      reason: 'removed by the builder',
+    });
   return retireTask(ctx, id);
 }
 

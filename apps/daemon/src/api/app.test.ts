@@ -38,6 +38,7 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
     listTasks: () => [],
     createTask: none,
     startTask: none,
+    holdTask: none,
     listFlows: () => [],
     listWorkstreams: () => [],
     cancelWorkstream: none,

@@ -424,6 +424,9 @@ export function createApp(deps: ApiDeps) {
       if (!deps.taskRemoval) return c.json({ error: 'not_implemented' }, 501);
       return c.json(deps.taskRemoval.removeTask(taskId));
     })
+    .post('/tasks/:taskId/hold', (c) =>
+      c.json(deps.services.holdTask(TaskId.parse(c.req.param('taskId')))),
+    )
     .post('/tasks/:taskId/close', (c) => {
       const taskId = TaskId.parse(c.req.param('taskId'));
       if (!deps.taskRemoval) return c.json({ error: 'not_implemented' }, 501);
