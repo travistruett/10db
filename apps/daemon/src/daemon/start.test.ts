@@ -17,6 +17,7 @@ import {
   BenchmarkStatusDto,
   BoardColumnDto,
   EventsHead,
+  InboxItemDto,
   KeepAwakeStatus,
   McpServerStatusDto,
   mintId,
@@ -750,6 +751,73 @@ describe('startDaemon', () => {
       await api.post(`/workstreams/${ws.id}/cancel`, z.unknown());
       await waitForAsync(async () => ((await keepAwakeActive()) ? undefined : true));
       expect(closed).toEqual([repo.path]);
+    } finally {
+      await daemon?.stop();
+      daemon = null;
+      repo.cleanup();
+    }
+  });
+
+  it('starts no lane while the Mac is overloaded, raises one card naming what is busy, and starts the lane by itself once the load falls', async () => {
+    const repo = createTempRepo();
+    let load = 100;
+    const adapter = new FakeAdapter({ Alpha: [[{ do: 'turn_complete' }]] });
+    const specs: SessionSpec[] = [];
+    adapter.seen = (spec) => {
+      specs.push(spec);
+      return {};
+    };
+    try {
+      daemon = await startDaemon({
+        sandbox: null,
+        dataDir: dir.path,
+        port: 0,
+        adapter,
+        logLevel: 'warn',
+        tickMs: 20,
+        ...QUIET,
+        load: {
+          read: () => ({ load, cores: 10 }),
+          processes: {
+            rows: () =>
+              Promise.resolve([
+                { pid: 4242, ppid: 1, pgid: 4242, cpu: 99, command: 'sh busy-loop.sh' },
+              ]),
+            files: () => Promise.resolve(new Map()),
+          },
+          sampleMs: 20,
+          sustainedMs: 0,
+        },
+      });
+      const api = apiClient(daemon.url, daemon.token);
+      const project = await api.post('/projects', ProjectDto, {
+        name: 'demo',
+        repoPath: repo.path,
+        gateCommand: 'true',
+        flowId: await quickFlowId(api),
+        areas: [{ name: 'src', globs: ['src/**'] }],
+      });
+      const overloadCards = async () =>
+        (await api.get('/inbox?state=OPEN', z.array(InboxItemDto))).filter((item) =>
+          item.title.startsWith('The Mac is overloaded'),
+        );
+      // The card is up once the overload is declared, so the task below starts into a hold.
+      const card = await waitForAsync(async () => (await overloadCards())[0]);
+      expect(card.body).toContain('pid 4242 (sh busy-loop.sh) at 99% of a core: not 10db’s');
+      const task = await api.post(`/projects/${project.id}/tasks`, TaskDto, {
+        title: 'Alpha',
+        acceptanceCriteria: ['it works'],
+        areas: ['src'],
+      });
+      const ws = await api.post(`/tasks/${task.id}/start`, WorkstreamDto);
+      expect(await daemon.scheduler.tick()).toBe(0);
+      expect(specs).toEqual([]);
+      expect(getWorkstream(daemon.state.db, ws.id).state).toBe('QUEUED');
+      expect(await overloadCards()).toHaveLength(1);
+
+      load = 1;
+      await waitFor(() => specs.length > 0);
+      await waitForAsync(async () => ((await overloadCards()).length === 0 ? true : undefined));
     } finally {
       await daemon?.stop();
       daemon = null;

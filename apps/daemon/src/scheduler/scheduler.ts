@@ -59,6 +59,11 @@ export interface SchedulerOptions {
    * waiters filling the lanes would keep it, and so themselves, waiting for ever.
    */
   readonly awaitedHolders?: () => ReadonlySet<WorkstreamId>;
+  /**
+   * True while the Mac is overloaded: no queued work launches, awaited holders included, and it
+   * launches again on the first tick after this answers false.
+   */
+  readonly held?: () => boolean;
 }
 
 export interface Scheduler {
@@ -115,6 +120,7 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
   }
 
   function launchQueued(snapshot: CheckoutSnapshot): number {
+    if (opts.held?.()) return 0;
     const lanes = countLanes(db);
     let global = lanes.global;
     const byProject = new Map(lanes.byProject);

@@ -50,6 +50,7 @@ import {
 import { createEventBus, createStateStore, type EventBus, type StateStore } from '../src/events';
 import { createGit, type Git, type GitTrustError } from '../src/git';
 import { createInboxService, type InboxService } from '../src/inbox';
+import type { LoadGuard } from '../src/load';
 import { silentLogger } from '../src/log';
 import { systemProcesses } from '../src/recovery';
 import { seedTeam } from '../src/team';
@@ -197,6 +198,8 @@ export function createDeliveryHarness(
     /** Added to the network calls' environment, such as an ssh command for a hanging transport. */
     readonly networkEnv?: Readonly<Record<string, string>>;
     readonly trigger?: boolean;
+    /** What the shipper reads to say a failed gate ran while the Mac was overloaded. */
+    readonly load?: Pick<LoadGuard, 'overloadedSince'>;
   } = {},
 ): DeliveryHarness {
   const remote = createTempRepoWithOrigin();
@@ -272,6 +275,7 @@ export function createDeliveryHarness(
     sessionEnv: () => ({ PATH: '/usr/bin:/bin' }),
     identifyProcess: (pid) => systemProcesses.identify(pid),
     isRunning: (id) => running.has(id),
+    ...(opts.load ? { load: opts.load } : {}),
   });
   const unsubscribe =
     opts.trigger === false ? () => undefined : subscribeShipTrigger(bus, store.db, shipper);

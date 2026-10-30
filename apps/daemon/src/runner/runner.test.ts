@@ -1375,6 +1375,61 @@ describe('runner', () => {
     expect(listEvidence(engine.store.db, workstream.id)).toEqual([]);
   });
 
+  describe('while the Mac is overloaded', () => {
+    /** A hold the test opens, as the load guard does; `asked` counts the sessions that waited on it. */
+    function fakeHold() {
+      let open: () => void = () => undefined;
+      let overloaded = true;
+      const asked: (AbortSignal | undefined)[] = [];
+      return {
+        asked,
+        release: () => {
+          overloaded = false;
+          open();
+        },
+        hold: {
+          untilClear: (signal?: AbortSignal) => {
+            asked.push(signal);
+            if (!overloaded) return Promise.resolve(true);
+            return new Promise<boolean>((resolve) => {
+              open = () => {
+                resolve(true);
+              };
+              signal?.addEventListener('abort', () => {
+                resolve(false);
+              });
+            });
+          },
+        },
+      };
+    }
+
+    it('starts no session until the load falls, then runs the lane as usual', async () => {
+      const fake = fakeHold();
+      engine = await createTestEngine({ Alpha: [[turn]] }, {}, { hold: fake.hold });
+      const { workstream } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
+      await waitFor(() => fake.asked.length > 0);
+      expect(listSessions(engine.store.db, workstream.id)).toEqual([]);
+      expect(engine.adapter.prompts).toHaveLength(0);
+      fake.release();
+      await engine.runner.idle();
+      expect(ws(workstream.id).state).toBe('DONE');
+      expect(listSessions(engine.store.db, workstream.id)).toHaveLength(1);
+    });
+
+    it('ends a held lane at once when it is cancelled, with no session started', async () => {
+      const fake = fakeHold();
+      engine = await createTestEngine({ Alpha: [[turn]] }, {}, { hold: fake.hold });
+      const { workstream } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
+      await waitFor(() => fake.asked.length > 0);
+      await engine.runner.cancel(workstream.id);
+      expect(ws(workstream.id).state).toBe('CANCELLED');
+      expect(listSessions(engine.store.db, workstream.id)).toEqual([]);
+    });
+  });
+
   it('retries crashes as resume, then fresh, and fails after the limit with a flag', async () => {
     const crash = { do: 'crash' as const, message: 'boom' };
     engine = await createTestEngine({ Alpha: [[crash], [crash], [crash], [crash]] });
@@ -2749,6 +2804,34 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
     // The session ended, so its temp dir is gone.
     expect(readdirSync(probe.tmpRoot)).toEqual([]);
     expect(ws(workstream.id).state).toBe('DONE');
+  });
+
+  it("records the session's temp dir while it runs, for the load guard to name a lane by, and forgets it once the dir is gone", async () => {
+    const probe = sandboxProbe();
+    const recorded = new Map<string, string>();
+    const seen: string[] = [];
+    engine = await createTestEngine(
+      { Alpha: [[turn]] },
+      {},
+      {
+        laneSandbox: probe.laneSandbox,
+        laneTempDirs: {
+          set: (id, dir) => {
+            recorded.set(id, dir);
+            seen.push(dir);
+          },
+          delete: (id) => {
+            recorded.delete(id);
+          },
+        },
+      },
+    );
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(seen).toEqual(probe.sessions.map((s) => s.tmpDir));
+    expect(seen).toHaveLength(1);
+    expect(recorded.size).toBe(0);
   });
 
   it("hands Claude Code an approved stdio server only as its launch under srt, and removes its sandbox with the session's", async () => {

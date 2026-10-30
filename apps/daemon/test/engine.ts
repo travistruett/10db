@@ -122,6 +122,8 @@ export async function createTestEngine(
       | 'gate'
       | 'onLaneFreed'
       | 'baseUpdates'
+      | 'hold'
+      | 'laneTempDirs'
     >
   > = {},
   setup: { readonly account?: AccountInput; readonly secret?: string } = {},
