@@ -82,6 +82,24 @@ afterEach(() => {
 });
 
 describe('addWorktree', () => {
+  it('keeps Spotlight out of the worktree root, with no change in the copy’s git status', async () => {
+    const marker = join(root.path, '.metadata_never_index');
+    expect(existsSync(marker)).toBe(false);
+    await add('spot');
+    expect(existsSync(marker)).toBe(true);
+    expect(existsSync(join(at('spot'), '.metadata_never_index'))).toBe(false);
+    expect(raw(at('spot'), 'status', '--porcelain', '--ignored')).toBe('');
+    await add('spot-2');
+    expect(readFileSync(marker, 'utf8')).toBe('');
+  });
+
+  it('leaves a marker the root already holds as it is', async () => {
+    const marker = join(root.path, '.metadata_never_index');
+    writeFileSync(marker, 'kept');
+    await add('spot');
+    expect(readFileSync(marker, 'utf8')).toBe('kept');
+  });
+
   it('makes the branch at the start point and a locked worktree on it', async () => {
     const head = await add('a', '10db/a-1');
     expect(head).toBe(raw(main(), 'rev-parse', 'main'));

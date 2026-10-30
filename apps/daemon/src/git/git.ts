@@ -6,6 +6,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, normalize, posix, resolve, sep } from 'node:path';
@@ -372,6 +373,22 @@ interface Pinned extends Site {
 }
 
 /** A checkout as git finds it on its own, for reading what it is now, before or beside its pin. */
+/**
+ * Marks the worktree root so macOS Spotlight skips everything under it: a worktree is temporary,
+ * nobody searches it, and its node_modules and build output cost `mds_stores` a core. The marker
+ * lies in the root, never in a worktree, so it is no change in any worktree's git status, and it is
+ * there before the first worktree is. An existing entry is left as it is (`wx` also never follows
+ * a link). The builder's own checkouts are never marked. Best effort: a root that can't hold the
+ * marker costs indexing time, not a worktree.
+ */
+function keepSpotlightOut(root: string): void {
+  try {
+    writeFileSync(join(root, '.metadata_never_index'), '', { flag: 'wx', mode: 0o600 });
+  } catch {
+    // Already marked, or the marker can't be written.
+  }
+}
+
 const observed = (real: string): Site => ({ real, env: {} });
 
 /** `entries` as `GIT_CONFIG_COUNT` and its pairs, which keep a key holding `=` whole, unlike `-c`. */
@@ -1537,6 +1554,7 @@ export function createGit(opts: GitOptions = {}): Git {
       const target = join(realpathSync(dirname(input.path)), basename(input.path));
       if (!surelyInside(dirname(target), root))
         throw new InvalidError(`${target} is not under 10db's worktree root`);
+      keepSpotlightOut(root);
       const ref = `refs/heads/${input.branch}`;
       let made: string | null = null;
       if (input.startPoint !== null) {
