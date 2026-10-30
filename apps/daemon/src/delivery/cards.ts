@@ -19,6 +19,7 @@ import {
 import { GhError } from '../github';
 import type { GateResult } from '../verify';
 import type { BlockedTask, UnmergedDependency } from './deps';
+import type { GateStepFailure } from './gate-failures';
 import { INSTALL_SUMMARY, type DependencyRefresh } from './worktree-dependencies';
 
 /** A flag card's text. Every delivery card says what to fix (batch delivery spec §1). */
@@ -374,6 +375,48 @@ export function duration(ms: number): string {
 }
 const RETRY = "Press Retry in a task's drawer on the Board to ship again; nothing was merged.";
 
+/** How many failing tests a gate card lists. */
+const MAX_LISTED_TESTS = 5;
+
+const RERAN =
+  "Every failing test was in a file the batch didn't change and had passed in its tasks' own gates, so 10db ran the gate again by itself";
+
+/** " in test, lint", naming the failing steps after a gate card's title; empty when the gate named none. */
+function inSteps(steps: readonly GateStepFailure[]): string {
+  return steps.length === 0 ? '' : ` in ${steps.map((s) => s.name).join(', ')}`;
+}
+
+/** Up to five failing tests across the steps, as list lines, then how many more there are. */
+function testLines(steps: readonly GateStepFailure[]): string {
+  const tests = steps.flatMap((s) => s.tests);
+  const shown = tests
+    .slice(0, MAX_LISTED_TESTS)
+    .map(
+      (t) =>
+        `- ${t.name === null ? `${t.file} (the file failed to run)` : `${t.file} > ${t.name}`}`,
+    );
+  const extra = tests.length - MAX_LISTED_TESTS;
+  return [...shown, ...(extra > 0 ? [`- and ${String(extra)} more`] : [])].join('\n');
+}
+
+/** Each failing step with its rerun command, its failing tests and its full log. */
+function stepsText(steps: readonly GateStepFailure[]): string {
+  const failed = `Failed steps:\n${steps.map((s) => `- ${s.name}${s.command === null ? '' : `: ${s.command}`}`).join('\n')}`;
+  const tests = steps.some((s) => s.tests.length > 0)
+    ? `\n\nFailing tests:\n${testLines(steps)}`
+    : '';
+  const logs = steps.flatMap((s) =>
+    s.logPath === null ? [] : [`Full ${s.name} log: ${s.logPath}`],
+  );
+  return `${failed}${tests}${logs.length > 0 ? `\n\n${logs.join('\n')}` : ''}`;
+}
+
+/** The batch and the first failing step's log, which the desktop offers to open. */
+function stepsDetail(batch: BatchDto, steps: readonly GateStepFailure[]): Record<string, Json> {
+  const logPath = steps.find((s) => s.logPath !== null)?.logPath;
+  return { batchId: batch.id, ...(logPath ? { logPath } : {}) };
+}
+
 /** A shipping failure: the code the batch records and the card the builder reads. */
 export interface ShipFailure {
   readonly failure: BatchFailure;
@@ -390,14 +433,52 @@ export const shipCards = {
       detail: { batchId: batch.id },
     },
   }),
-  /** `note` says why the gate ran without the batch's base as origin has it, when it did. */
-  gateFailed: (batch: BatchDto, gate: GateResult, note: string | null = null): ShipFailure => ({
+  /**
+   * `note` says why the gate ran without the batch's base as origin has it, when it did. `steps` are
+   * the failing steps the gate named, each with its failing tests and log; with none, the card quotes
+   * the gate's last output. `reran` says 10db already ran this gate a second time by itself.
+   */
+  gateFailed: (
+    batch: BatchDto,
+    gate: GateResult,
+    note: string | null = null,
+    steps: readonly GateStepFailure[] = [],
+    reran = false,
+  ): ShipFailure => {
+    const what =
+      steps.length > 0
+        ? stepsText(steps)
+        : `Last output:\n${gate.tail.slice(-1500)}\n\nFull log: ${gate.logPath}`;
+    return {
+      failure: BatchFailure.GateFailed,
+      card: {
+        title: `${notShipped(batch)}: the gate failed (exit ${String(gate.exitCode)})${inSteps(steps)}`,
+        body: `${note === null ? '' : `${note}\n\n`}${reran ? `${RERAN}, and it failed again.\n\n` : ''}${what}\n\nStart a fix task in the batch (it reopens the batch), or ${RETRY.charAt(0).toLowerCase()}${RETRY.slice(1)}`,
+        detail: stepsDetail(batch, steps),
+      },
+    };
+  },
+  /**
+   * The second run 10db made by itself failed in tests the batch didn't change too: the failure looks
+   * like the batch's surroundings, so the card offers Retry and Abandon and no fix task.
+   */
+  gateFailedUnrelated: (
+    batch: BatchDto,
+    note: string | null,
+    steps: readonly GateStepFailure[],
+  ): ShipFailure => ({
     failure: BatchFailure.GateFailed,
     card: {
-      title: `${notShipped(batch)}: the gate failed (exit ${String(gate.exitCode)})`,
-      body: `${note === null ? '' : `${note}\n\n`}Last output:\n${gate.tail.slice(-1500)}\n\nFull log: ${gate.logPath}\n\nStart a fix task in the batch (it reopens the batch), or ${RETRY.charAt(0).toLowerCase()}${RETRY.slice(1)}`,
-      detail: { batchId: batch.id },
+      title: `${notShipped(batch)}: the gate failed twice, in tests the batch didn't change`,
+      body: `${note === null ? '' : `${note}\n\n`}This failure looks unrelated to the batch's work. ${RERAN}, and it failed again in tests the batch didn't change, so a flaky test, the base branch or this machine is the likelier cause. 10db started no fix session.\n\n${stepsText(steps)}\n\nPress Retry to run the gate and ship again, or Abandon to give up the batch; both are here and in a task's drawer on the Board. Nothing was merged.`,
+      detail: { ...stepsDetail(batch, steps), actions: ['retry', 'abandon'] },
     },
+  }),
+  /** The second run 10db made by itself passed, and the batch went on to ship. */
+  gatePassedOnRerun: (batch: BatchDto, steps: readonly GateStepFailure[]): Card => ({
+    title: `Batch "${batch.title}": the gate passed when 10db ran it again`,
+    body: `The shipping gate's first run failed${inSteps(steps)}. ${RERAN}, and it passed, so the batch went on to ship. These tests may be flaky:\n${testLines(steps)}`,
+    detail: { batchId: batch.id },
   }),
   gateTimedOut: (batch: BatchDto, timeoutMs: number, logPath: string): ShipFailure => ({
     failure: BatchFailure.GateTimedOut,
