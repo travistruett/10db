@@ -42,6 +42,14 @@ import {
   FolderInspection,
   FolderInspectResult,
 } from './folders';
+import {
+  GoalAdoptError,
+  GoalAdoptInput,
+  GoalBrief,
+  GoalCriterionDto,
+  GoalDigestDto,
+  GoalDto,
+} from './goals';
 import { HandoffInput } from './handoff';
 import { HealthResponse } from './health';
 import { McpToolInputs, McpToolName, McpToolOutputs } from './mcp-tools';
@@ -144,6 +152,12 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'team-dto': TeamDto,
   'team-input': TeamInput,
   'workstream-changes-dto': WorkstreamChangesDto,
+  'goal-adopt-error': GoalAdoptError,
+  'goal-adopt-input': GoalAdoptInput,
+  'goal-brief': GoalBrief,
+  'goal-criterion-dto': GoalCriterionDto,
+  'goal-digest-dto': GoalDigestDto,
+  'goal-dto': GoalDto,
   ...mcpSchemas,
   ...builderMcpSchemas,
 };
