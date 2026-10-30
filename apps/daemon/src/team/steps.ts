@@ -21,6 +21,7 @@ import {
   getWorkstreamRow,
   insertWorkstream,
   latestHandoffForStep,
+  listSessions,
   getAccount,
   listModelProfiles,
   listPersonas,
@@ -142,7 +143,9 @@ export function retryWorkstream(state: StateStore, id: WorkstreamId): Workstream
     // A step restarted to act on a note keeps its start, which is how the note stays outstanding for
     // a session that starts fresh: the note was written after that start.
     const restarted =
-      row.steps.length > 0 ? restartStep(row.steps, row.stepIndex, ctx.now) : row.steps;
+      row.steps.length > 0
+        ? restartStep(row.steps, row.stepIndex, ctx.now, listSessions(ctx.tx, id).length)
+        : row.steps;
     const steps =
       row.nextAction.kind === 'fix'
         ? restarted.map((s, i) =>

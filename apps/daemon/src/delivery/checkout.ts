@@ -14,9 +14,9 @@ export function checkoutOf(
 }
 
 /**
- * The batch whose areas a workstream's claims belong to: its batch when that batch has a worktree, since
+ * The batch whose copy a workstream's area and per-copy hazard claims belong to: its batch when that batch has a worktree, since
  * each worktree is its own checkout; otherwise none, and its areas are exclusive across the project.
- * Hazards are always project-wide.
+ * Other hazards are project-wide (`copyHazardNames` says which are per copy).
  */
 export function claimScopeOf(
   db: DbReader,

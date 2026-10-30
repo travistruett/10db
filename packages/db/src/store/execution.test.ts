@@ -4,6 +4,7 @@ import {
   acquireClaims,
   activeClaims,
   claimRequestsForTask,
+  copyHazardNames,
   releaseClaims,
   renewClaimLeases,
   type ClaimRequest,
@@ -277,6 +278,48 @@ describe('claims', () => {
       }),
     ).value;
     expect(third.ok).toBe(true);
+  });
+});
+
+describe('per-copy hazards', () => {
+  const lease = '2026-10-13T12:01:00.000Z';
+  const b1 = mintId('Batch');
+  const b2 = mintId('Batch');
+  const copyHazards = new Set(['harness']);
+  const take = (who: ReturnType<typeof seedWorkstream>, name: string, areaScope?: BatchId) =>
+    store.write((ctx) =>
+      acquireClaims(ctx, {
+        projectId: who.project.id,
+        workstreamId: who.ws.id,
+        requests: [{ kind: 'hazard', name }],
+        leaseExpiresAt: lease,
+        copyHazards,
+        ...(areaScope ? { areaScope } : {}),
+      }),
+    ).value;
+
+  it.each([
+    { name: 'two batches', first: b1, second: b2, ok: true },
+    { name: 'one batch', first: b1, second: b1, ok: false },
+    { name: 'a shared checkout, where every task shares the copy', ok: false },
+  ])('a per-copy hazard in $name', ({ first, second, ok }) => {
+    const a = seedWorkstream('A', ['api']);
+    const b = seedWorkstream('B', ['ui'], a.project);
+    expect(take(a, 'harness', first).ok).toBe(true);
+    expect(take(b, 'harness', second).ok).toBe(ok);
+  });
+
+  it('keeps a hazard that is not per copy exclusive across batches', () => {
+    const a = seedWorkstream('A', ['api']);
+    const b = seedWorkstream('B', ['ui'], a.project);
+    expect(take(a, 'migrations', b1).ok).toBe(true);
+    const refused = take(b, 'migrations', b2);
+    expect(refused).toMatchObject({ ok: false, conflict: { name: 'migrations', heldBy: a.ws.id } });
+  });
+
+  it('marks the stock hazards with their scope, from the project', () => {
+    const project = seedProject(store);
+    expect([...copyHazardNames(project)].sort()).toEqual(['deps', 'harness']);
   });
 });
 
