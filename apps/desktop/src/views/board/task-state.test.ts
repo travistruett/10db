@@ -70,6 +70,17 @@ describe('taskState', () => {
     expect(taskState(ws, undefined, 'make gate')).toEqual({ line, color });
   });
 
+  it.each([
+    { place: undefined, line: 'Queued' },
+    { place: 1, line: 'Queued · next in line' },
+    { place: 3, line: 'Queued · 3rd in line' },
+  ])('says a queued run in place $place as "$line"', ({ place, line }) => {
+    expect(taskState(workstreamDto({ state: 'QUEUED' }), undefined, null, place)).toEqual({
+      line,
+      color: 'gray',
+    });
+  });
+
   it('says Checking alone when the project has no gate command', () => {
     expect(taskState(workstreamDto({ state: 'VERIFYING' }), undefined, null)?.line).toBe(
       'Checking',

@@ -442,6 +442,9 @@ export function createApp(deps: ApiDeps) {
           return c.json(started.batch, 202);
       }
     })
+    .post('/tasks/:taskId/run-next', (c) =>
+      c.json(deps.services.runNext(TaskId.parse(c.req.param('taskId')))),
+    )
     .get(
       '/workstreams',
       validator('query', (query): { active?: string } =>

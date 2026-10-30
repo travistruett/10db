@@ -29,6 +29,7 @@ import {
   usePatchTask,
   useRemoveTask,
   useRetryWorkstream,
+  useRunNext,
   useStartTask,
 } from '../../daemon/queries';
 import { StateBadge } from '../factory/state-badge';
@@ -46,6 +47,8 @@ import {
   type LandingDraft,
 } from './landing-draft';
 import { LandingField } from './landing-field';
+import { ordinal, runNextNote } from './queue-place';
+import { canRunNext } from './run-next';
 import { RISK_LABEL } from './risk-labels';
 import { holdOption, isHeld, type HoldOption } from './task-hold';
 
@@ -66,6 +69,8 @@ export interface TaskDrawerProps {
   readonly workspaceMode?: WorkspaceMode;
   /** The project's gate command, named beside a failed gate's exit code. */
   readonly gateCommand?: string | null;
+  /** A queued task's place in line, counting from 1. */
+  readonly place?: number;
   /**
    * The project's base branch, when it delivers by pull request: the drawer then says where the
    * task lands, and lets the builder change it until the task has run.
@@ -84,6 +89,7 @@ export function TaskDrawer({
   workstreams = [],
   workspaceMode = WorkspaceMode.Shared,
   gateCommand = null,
+  place,
   pullRequestBase,
   onClose,
 }: TaskDrawerProps) {
@@ -179,10 +185,11 @@ export function TaskDrawer({
       <Stack gap="lg">
         {workstream ? (
           <WorkstreamLine
-            taskId={task.id}
+            task={task}
             workstream={workstream}
             holdable={holdOption(task, workstream)}
             batch={batch}
+            place={place}
             onClosed={onClose}
           />
         ) : null}
@@ -336,30 +343,36 @@ export function TaskDrawer({
 }
 
 /**
- * The workstream's state: for a failed one why, a way to retry it and a way to close its task, and
- * for a queued or held one Hold, Start and Remove.
+ * The workstream's state: for a failed one why, a way to retry it and a way to close its task; for
+ * a queued one its place in line, Run Next and Hold; for a held one Start and Remove.
  */
 function WorkstreamLine({
-  taskId,
+  task,
   workstream,
   holdable,
   batch,
+  place,
   onClosed,
 }: {
-  readonly taskId: TaskId;
+  readonly task: TaskDto;
   readonly workstream: WorkstreamDto;
   /** Hold for a started task that has not run, or why it can't be held; null when there is nothing to hold. */
   readonly holdable: HoldOption | null;
   readonly batch: BatchDto | undefined;
+  readonly place: number | undefined;
   readonly onClosed: () => void;
 }) {
+  const taskId = task.id;
   const retry = useRetryWorkstream();
   const [note, setNote] = useState('');
   const closeTask = useCloseTask();
+  const runNext = useRunNext();
   const hold = useHoldTask();
   const start = useStartTask();
   const remove = useRemoveTask();
   const failed = canRetry(workstream.state);
+  // A parked task never takes a lane, so putting it first would change nothing.
+  const queued = canRunNext(task, workstream.state);
   const held = isHeld(workstream);
   if (isTerminal(workstream.state) && !failed) {
     return null;
@@ -369,8 +382,27 @@ function WorkstreamLine({
   return (
     <Stack gap={4}>
       <Group justify="space-between" wrap="nowrap">
-        <StateBadge state={workstream.state} />
         <Group gap="xs" wrap="nowrap">
+          <StateBadge state={workstream.state} />
+          {queued && place !== undefined ? (
+            <Text size="xs" c="dimmed">
+              {place === 1 ? 'next in line' : `${ordinal(place)} in line`}
+            </Text>
+          ) : null}
+        </Group>
+        <Group gap="xs" wrap="nowrap">
+          {queued ? (
+            <Button
+              size="xs"
+              variant="default"
+              loading={runNext.isPending}
+              onClick={() => {
+                runNext.mutate(taskId);
+              }}
+            >
+              Run Next
+            </Button>
+          ) : null}
           {holdable ? (
             <Button
               size="xs"
@@ -482,6 +514,18 @@ function WorkstreamLine({
         <Text size="xs" c="dimmed">
           {closeNote(batch)}
         </Text>
+      ) : null}
+      {runNext.data ? (
+        <Text size="xs" c="dimmed">
+          {runNextNote(task.title, runNext.data.waitingOn)}
+        </Text>
+      ) : null}
+      {runNext.error ? (
+        <Text
+          size="xs"
+          c="red"
+          role="alert"
+        >{`Couldn't run it next: ${runNext.error.message}`}</Text>
       ) : null}
       {retry.error ? (
         <Text size="xs" c="red" role="alert">{`Couldn't retry: ${retry.error.message}`}</Text>

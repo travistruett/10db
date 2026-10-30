@@ -840,11 +840,143 @@ describe('BoardView', () => {
     renderApp('/board');
     // The workstream arrives on its own query; wait until the card shows it.
     const card = await screen.findByRole('listitem', { name: 'Next' });
-    expect(await within(card).findByText('Queued')).toBeTruthy();
+    expect(await within(card).findByText('Queued · next in line')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Actions for Base' }));
     const park = await screen.findByRole('menuitem', { name: /^Move to Icebox/, hidden: true });
     expect(park.hasAttribute('data-disabled')).toBe(true);
     expect(park.textContent).toContain('Next has started and waits on Base');
+  });
+
+  describe('Run Next', () => {
+    /** Two queued tasks started in order, and a third already running. */
+    function queued(extra?: { dependsOn?: TaskDto['id'][] }) {
+      const project = projectDto();
+      const wsOne = workstreamDto({
+        projectId: project.id,
+        state: 'QUEUED',
+        taskTitle: 'Big one',
+        createdAt: '2026-10-29T10:00:00.000Z',
+      });
+      const wsTwo = workstreamDto({
+        projectId: project.id,
+        state: 'QUEUED',
+        taskTitle: 'Urgent fix',
+        createdAt: '2026-10-29T11:00:00.000Z',
+      });
+      const running = workstreamDto({ projectId: project.id, state: 'RUNNING' });
+      const inProgress = (title: string, ws: typeof wsOne) =>
+        taskDto({
+          id: ws.taskId,
+          projectId: project.id,
+          title,
+          boardStatus: 'in_progress',
+          workstreamId: ws.id,
+        });
+      const bigOne = inProgress('Big one', wsOne);
+      const urgent = {
+        ...inProgress('Urgent fix', wsTwo),
+        ...(extra?.dependsOn ? { dependsOn: extra.dependsOn } : {}),
+      };
+      return { project, workstreams: [wsOne, wsTwo, running], tasks: [bigOne, urgent], urgent };
+    }
+
+    it('shows each queued card its place in line', async () => {
+      const { project, workstreams, tasks } = queued();
+      serve(
+        http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+        http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json(tasks)),
+        http.get(daemonUrl('/workstreams'), () => HttpResponse.json(workstreams)),
+      );
+      renderApp('/board');
+      const big = await screen.findByRole('listitem', { name: /^Big one/ });
+      expect(await within(big).findByText('Queued · next in line')).toBeTruthy();
+      const urgent = screen.getByRole('listitem', { name: /^Urgent fix/ });
+      expect(within(urgent).getByText('Queued · 2nd in line')).toBeTruthy();
+    });
+
+    it('puts the task first from its card menu, and the line follows', async () => {
+      const { project, workstreams, tasks, urgent } = queued();
+      let pushed: string | null = null;
+      serve(
+        http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+        http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json(tasks)),
+        http.get(daemonUrl('/workstreams'), () =>
+          HttpResponse.json(
+            pushed === null
+              ? workstreams
+              : workstreams.map((w) =>
+                  w.taskTitle === 'Urgent fix'
+                    ? { ...w, runNextAt: '2026-10-29T12:00:00.000Z' }
+                    : w,
+                ),
+          ),
+        ),
+        http.post(daemonUrl('/tasks/:taskId/run-next'), ({ params }) => {
+          pushed = String(params['taskId']);
+          const ws = workstreams[1];
+          return HttpResponse.json({ workstream: ws, waitingOn: [] });
+        }),
+      );
+      renderApp('/board');
+      fireEvent.click(await screen.findByRole('button', { name: 'Actions for Urgent fix' }));
+      fireEvent.click(await screen.findByRole('menuitem', { name: 'Run Next', hidden: true }));
+      await waitFor(() => {
+        expect(pushed).toBe(urgent.id);
+      });
+      expect(await screen.findByText('Urgent fix is next in line for a free lane.')).toBeTruthy();
+      const card = screen.getByRole('listitem', { name: /^Urgent fix/ });
+      expect(await within(card).findByText('Queued · next in line')).toBeTruthy();
+    });
+
+    it('says the task will run once its dependencies are done', async () => {
+      const base = taskDto({ title: 'Base', boardStatus: 'ready' });
+      const { project, workstreams, tasks, urgent } = queued({ dependsOn: [base.id] });
+      serve(
+        http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+        http.get(daemonUrl('/projects/:projectId/tasks'), () =>
+          HttpResponse.json([...tasks.slice(0, 1), urgent, { ...base, projectId: project.id }]),
+        ),
+        http.get(daemonUrl('/workstreams'), () => HttpResponse.json(workstreams)),
+        http.post(daemonUrl('/tasks/:taskId/run-next'), () =>
+          HttpResponse.json({ workstream: workstreams[1], waitingOn: ['Base'] }),
+        ),
+      );
+      renderApp('/board');
+      fireEvent.click(await screen.findByRole('button', { name: 'Actions for Urgent fix' }));
+      fireEvent.click(await screen.findByRole('menuitem', { name: 'Run Next', hidden: true }));
+      expect(
+        await screen.findByText(
+          'Urgent fix will run once Base is done, before the other queued tasks.',
+        ),
+      ).toBeTruthy();
+    });
+
+    it('offers Run Next only to a queued task', async () => {
+      const { project, workstreams, tasks } = queued();
+      const running = workstreamDto({
+        projectId: project.id,
+        state: 'RUNNING',
+        taskTitle: 'Busy',
+      });
+      const busy = taskDto({
+        id: running.taskId,
+        projectId: project.id,
+        title: 'Busy',
+        boardStatus: 'in_progress',
+        workstreamId: running.id,
+      });
+      serve(
+        http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+        http.get(daemonUrl('/projects/:projectId/tasks'), () =>
+          HttpResponse.json([...tasks, busy]),
+        ),
+        http.get(daemonUrl('/workstreams'), () => HttpResponse.json([...workstreams, running])),
+      );
+      renderApp('/board');
+      fireEvent.click(await screen.findByRole('button', { name: 'Actions for Busy' }));
+      await screen.findByRole('menu');
+      expect(screen.queryByRole('menuitem', { name: 'Run Next', hidden: true })).toBeNull();
+    });
   });
 
   it('shows the 20 most recent done tasks and the rest on request', async () => {

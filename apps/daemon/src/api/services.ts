@@ -55,6 +55,7 @@ import type {
   TaskDto,
   TaskId,
   TaskInput,
+  RunNextResult,
   TaskMove,
   TaskPatch,
   TeamDto,
@@ -106,6 +107,11 @@ export interface ApiServices {
   createTask(projectId: ProjectId, input: TaskInput): TaskDto | Promise<TaskDto>;
   /** Starts a task; a held one is queued again as the run it was, in any delivery mode. */
   startTask(taskId: TaskId): TaskStarted;
+  /**
+   * Puts the started task's queued workstream first in line for the next free lane. Throws
+   * ConflictError for a task whose latest workstream isn't waiting for one.
+   */
+  runNext(taskId: TaskId): RunNextResult;
   /**
    * Sets aside a started task that has not run: its queued run becomes held, so it takes no lane
    * and keeps its batch and worktree. A task that has begun running is refused (409).

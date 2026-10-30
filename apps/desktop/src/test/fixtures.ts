@@ -136,6 +136,7 @@ export function workstreamDto(overrides: Partial<WorkstreamDto> = {}): Workstrea
     pausedUntil: null,
     failureReason: null,
     lastActivityAt: AT,
+    runNextAt: null,
     createdAt: AT,
     updatedAt: AT,
     ...overrides,

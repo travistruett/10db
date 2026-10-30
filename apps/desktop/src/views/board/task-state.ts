@@ -8,6 +8,7 @@ import {
 } from '@10db/contracts';
 import type { MantineColor } from '@mantine/core';
 import { FAILURE_LABELS } from './batch-labels';
+import { ordinal } from './queue-place';
 
 const S = WorkstreamState;
 
@@ -50,11 +51,16 @@ export function taskState(
   workstream: WorkstreamDto | undefined,
   batch: BatchDto | undefined,
   gateCommand: string | null,
+  place?: number,
 ): TaskState | null {
   if (!workstream) return null;
   switch (workstream.state) {
     case S.Queued:
-      return { line: 'Queued', color: 'gray' };
+      if (place === undefined) return { line: 'Queued', color: 'gray' };
+      return {
+        line: place === 1 ? 'Queued · next in line' : `Queued · ${ordinal(place)} in line`,
+        color: 'gray',
+      };
     case S.Held:
       return { line: 'Held: not in the queue', color: 'gray' };
     case S.Starting:

@@ -25,6 +25,7 @@ interface Opts {
   readonly batch?: ReturnType<typeof batchDto>;
   readonly gateCommand?: string;
   readonly workstreams?: ReturnType<typeof workstreamDto>[];
+  readonly place?: number;
 }
 
 function open(opts: Opts = {}): { closed: () => number } {
@@ -38,6 +39,7 @@ function open(opts: Opts = {}): { closed: () => number } {
       {...(opts.batch ? { batch: opts.batch } : {})}
       {...(opts.gateCommand ? { gateCommand: opts.gateCommand } : {})}
       {...(opts.workstreams ? { workstreams: opts.workstreams } : {})}
+      {...(opts.place ? { place: opts.place } : {})}
       {...(opts.pullRequestBase ? { pullRequestBase: opts.pullRequestBase } : {})}
       onClose={() => {
         closes += 1;
@@ -382,6 +384,42 @@ describe('TaskDrawer', () => {
       expect(within(d).getByText('The gate failed twice')).toBeTruthy();
       const retry = within(d).getByRole('button', { name: 'Retry' });
       expect((retry as HTMLButtonElement).disabled).toBe(false);
+    });
+
+    it('a queued task shows its place in line and Run Next, which says what it waits on', async () => {
+      const ws = workstreamDto({ state: 'QUEUED' });
+      const asked: string[] = [];
+      serve(
+        http.post(daemonUrl('/tasks/:taskId/run-next'), ({ params }) => {
+          asked.push(String(params['taskId']));
+          return HttpResponse.json({ workstream: ws, waitingOn: ['Base'] });
+        }),
+      );
+      open({ task: { id: ws.taskId, title: 'Urgent fix' }, workstream: ws, place: 4 });
+      const d = await dialog();
+      expect(within(d).getByText('4th in line')).toBeTruthy();
+      fireEvent.click(within(d).getByRole('button', { name: 'Run Next' }));
+      expect(
+        await within(d).findByText(
+          'Urgent fix will run once Base is done, before the other queued tasks.',
+        ),
+      ).toBeTruthy();
+      expect(asked).toEqual([ws.taskId]);
+    });
+
+    it('offers no Run Next to a task that is running, or one parked in a column', async () => {
+      serve();
+      open({ workstream: workstreamDto({ state: 'RUNNING' }) });
+      expect(within(await dialog()).queryByRole('button', { name: 'Run Next' })).toBeNull();
+    });
+
+    it('offers no Run Next to a parked task whose run is queued', async () => {
+      serve();
+      open({
+        task: { boardColumnId: mintId('BoardColumn') },
+        workstream: workstreamDto({ state: 'QUEUED' }),
+      });
+      expect(within(await dialog()).queryByRole('button', { name: 'Run Next' })).toBeNull();
     });
 
     it('Retry posts /workstreams/:id/retry', async () => {

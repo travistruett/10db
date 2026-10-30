@@ -26,6 +26,8 @@ export interface TaskCardMenuProps {
   readonly moves: readonly MenuMove[];
   readonly onMove: (target: DropTarget) => void;
   readonly onStart: () => void;
+  /** Present when the task waits for a lane; it goes first in line. */
+  readonly onRunNext?: () => void;
   /** Hold for a started task that has not run, or why it can't be held; absent when there is nothing to hold. */
   readonly hold?: HoldOption | null;
   readonly onHold?: () => void;
@@ -51,6 +53,7 @@ export function TaskCardMenu({
   moves,
   onMove,
   onStart,
+  onRunNext,
   hold = null,
   onHold,
   onRemove,
@@ -93,6 +96,12 @@ export function TaskCardMenu({
                 ? 'Start'
                 : `Start (${parkedDependency} is parked; move it to Backlog or Ready first)`}
           </Menu.Item>
+        ) : null}
+        {onRunNext ? (
+          <>
+            {moves.length > 0 ? <Menu.Divider /> : null}
+            <Menu.Item onClick={onRunNext}>Run Next</Menu.Item>
+          </>
         ) : null}
         {hold ? (
           <Menu.Item
