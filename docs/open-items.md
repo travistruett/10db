@@ -55,7 +55,7 @@
 - [ ] M2a read-only shell: a read-only step's shell accepts only plain words and simple quoting, so unquoted globs, ~, $, braces and backslashes are refused (quote them), and so is any `=` at the start of a word or right after `=` or `:`, quoted or not (for example `'==='` or `'a:=b'`), so reviewers use the Grep tool for those. Revisit if real reviews hit it.
 - [ ] M2a read-only shell: aliases and functions in the user's shell configuration can rewrite plain words, which the read-only grammar cannot see; check whether Claude Code's Bash tool loads them.
 - [x] Batch delivery: worktrees and one PR per task (workspace_mode = worktree), the spec's expected fast-follow (batch delivery spec §9). Built: `docs/superpowers/specs/2026-10-27-10db-worktree-mode-design.md`, `docs/architecture/02-batch-delivery.md`.
-- [ ] Worktree mode: a port block per worktree (hazards still serialize the shared ports, spec §11).
+- [ ] Worktree mode: a port block per worktree (a project-wide hazard, the default for a hazard the builder adds, still serializes the shared ports, spec §11; `harness` and `deps` are per copy, `decisions/2026-10-29-per-copy-hazards-and-waiting-claims.md`).
 - [x] Worktree mode: a worktree whose lockfile is newer than the main checkout's install installs without the builder. Built for pnpm projects: `pnpm install --frozen-lockfile --ignore-scripts --ignore-pnpmfile` under the gate sandbox after the seed (`decisions/2026-10-28-worktree-dependency-install.md`). Not built: a setup command of the project's own, and an install inside a lane.
 - [ ] Worktree mode: seeding ignored files such as `.env`; `worktree_seed` names directories only.
 - [ ] Worktree mode: parallel ships behind a limit (one ship runs at a time per project now).

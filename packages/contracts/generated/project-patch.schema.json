@@ -131,6 +131,13 @@
               "type": "string",
               "minLength": 1
             }
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "copy",
+              "project"
+            ]
           }
         },
         "required": [

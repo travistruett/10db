@@ -51,12 +51,36 @@ export const AreaDef = z.object({ name: Name, globs: z.array(z.string().min(1)).
 export type AreaDef = z.infer<typeof AreaDef>;
 
 /**
+ * What a hazard is exclusive across. `copy`: one checkout, so tasks in separate worktrees hold it at
+ * the same time and tasks sharing a checkout (shared mode, or one batch) queue. `project`: every task
+ * of the project, whatever its checkout, because the hazard names something the copies share.
+ */
+export const HazardScope = { Copy: 'copy', Project: 'project' } as const;
+export type HazardScope = (typeof HazardScope)[keyof typeof HazardScope];
+
+/**
  * A hazard is an exclusive claim. `commands` are command prefixes that need it, as words: the guard
  * drops flags (and the value of flags like `--filter`) before comparing, so `pnpm -w add x` and
- * `pnpm --filter y add x` both match `pnpm add`.
+ * `pnpm --filter y add x` both match `pnpm add`. `scope` is absent in a project stored before
+ * hazards had one; `hazardScope` reads it.
  */
-export const HazardDef = AreaDef.extend({ commands: z.array(z.string().min(1)) });
+export const HazardDef = AreaDef.extend({
+  commands: z.array(z.string().min(1)),
+  scope: z.enum([HazardScope.Copy, HazardScope.Project]).optional(),
+});
 export type HazardDef = z.infer<typeof HazardDef>;
+
+/** The scope of the stock hazards, which a stored hazard of the same name with no scope takes. */
+const DEFAULT_HAZARD_SCOPES: Readonly<Record<string, HazardScope>> = {
+  migrations: HazardScope.Project,
+  deps: HazardScope.Copy,
+  harness: HazardScope.Copy,
+};
+
+/** A hazard's scope: its own, else its stock namesake's, else the whole project. */
+export function hazardScope(hazard: Pick<HazardDef, 'name' | 'scope'>): HazardScope {
+  return hazard.scope ?? DEFAULT_HAZARD_SCOPES[hazard.name] ?? HazardScope.Project;
+}
 
 /** Brackets and braces in a path pattern must close, in order. */
 function bracketsClose(glob: string): boolean {
@@ -89,6 +113,8 @@ export const DEFAULT_HAZARDS: readonly HazardDef[] = [
     name: 'migrations',
     globs: ['**/migrations/**', '**/drizzle/**'],
     commands: ['drizzle-kit generate', 'pnpm db:migrate'],
+    // The migrations run against a database every copy shares.
+    scope: HazardScope.Project,
   },
   {
     name: 'deps',
@@ -117,11 +143,15 @@ export const DEFAULT_HAZARDS: readonly HazardDef[] = [
       'cargo remove',
       'cargo update',
     ],
+    // Each copy has its own manifests, lockfile and node_modules; a clash is settled at merge.
+    scope: HazardScope.Copy,
   },
   {
     name: 'harness',
     globs: ['AGENTS.md', '**/AGENTS.md', '.claude/**', '.codex/**'],
     commands: [],
+    // Files each copy has its own version of.
+    scope: HazardScope.Copy,
   },
 ];
 

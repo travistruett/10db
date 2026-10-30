@@ -14,7 +14,6 @@ import {
   type SessionId,
 } from '@10db/contracts';
 import {
-  acquireClaims,
   activeClaims,
   findToolOp,
   getBatch,
@@ -36,12 +35,13 @@ import {
 } from '@10db/db';
 import type { z } from 'zod';
 import { buildContextPack } from '../briefing';
-import { checkoutOf, claimScopeOf } from '../delivery';
+import { checkoutOf } from '../delivery';
 import type { StateStore } from '../events';
 import type { Git } from '../git';
 import { judgeToolUse, type ProtectedPath } from '../guard';
 import type { InboxService, WaitObserver } from '../inbox';
 import type { Logger } from '../log';
+import { CLAIM_POLL_MS, claimOrWait } from './claim-wait';
 
 export interface McpDeps {
   readonly protectedPaths: readonly ProtectedPath[];
@@ -51,6 +51,8 @@ export interface McpDeps {
   readonly log: Logger;
   waitObserverFor(sessionId: SessionId): WaitObserver | undefined;
   sessionSignal(sessionId: SessionId): AbortSignal | undefined;
+  /** How often a task waiting for a claim looks again; tests shorten it. */
+  readonly claimPollMs?: number;
 }
 
 type In<K extends McpToolName> = z.output<(typeof McpToolInputs)[K]>;
@@ -69,7 +71,8 @@ export const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
   propose:
     'Propose a new task, a task change, or a principle. Proposals go to the builder; nothing changes until accepted.',
   report_deviation: 'Report a departure from the plan or a principle, with your signed reason.',
-  request_claim: 'Ask for an additional area or hazard claim before editing files in it.',
+  request_claim:
+    'Ask for an additional area or hazard claim before editing files in it. When another task holds it, this waits until it frees and returns granted: true, so do not carry on without it; the builder sees a card naming the holder and that you are waiting. Returns granted: false only when waiting would deadlock (the holder is waiting for a claim you hold).',
   commit:
     'Commit the named paths (and only those) under the repository lock. Returns the commit SHA. Retry with the same opId if unsure it completed.',
   record_evidence: 'Attach verification output: a command you ran, its exit code and a summary.',
@@ -243,9 +246,9 @@ export function createToolHandlers(
       );
     },
 
-    request_claim: (input) => {
+    request_claim: async (input) => {
       const done = prior(input.opId, McpToolName.RequestClaim);
-      if (done !== undefined) return Promise.resolve(McpToolOutputs.request_claim.parse(done));
+      if (done !== undefined) return McpToolOutputs.request_claim.parse(done);
       const { project } = context();
       // A name that is a project hazard is a hazard claim whatever kind the agent sent; claims are keyed on (kind, name).
       const hazardNames = project.hazards.map((h) => h.name);
@@ -256,42 +259,26 @@ export function createToolHandlers(
           `No area or hazard named ${input.name}. Areas: ${areaNames.join(', ')}. Hazards: ${hazardNames.join(', ')}`,
         );
       }
-      // The claim shares the workstream's lease, which the scheduler's heartbeat renews.
-      const outcome = deps.state.write((ctx) => {
-        const row = getWorkstreamRow(ctx.tx, workstreamId);
-        const areaScope = claimScopeOf(ctx.tx, row);
-        return acquireClaims(ctx, {
-          projectId: project.id,
-          workstreamId,
-          requests: [{ kind, name: input.name }],
-          leaseExpiresAt: row.leaseExpiresAt ?? ctx.now,
-          ...(areaScope ? { areaScope } : {}),
-        });
-      });
-      if (outcome.ok) {
-        const claim = outcome.claims.find((c) => c.kind === kind && c.name === input.name);
-        if (!claim) throw new InvalidError('Claim was granted but not found');
-        return Promise.resolve(
-          deps.state.write((ctx) =>
-            record('request_claim', input.opId, { granted: true, claimId: claim.id }, ctx),
-          ),
-        );
-      }
-      const card = deps.inbox.flag({
+      // A claim another task holds is waited for, not given up on: the call returns once it is ours.
+      const result = await claimOrWait({
+        state: deps.state,
+        inbox: deps.inbox,
         projectId: project.id,
         workstreamId,
-        title: `Claim conflict: ${kind} ${input.name}`,
-        body: `Another workstream holds it. Reason given: ${input.reason}`,
-        detail: { heldBy: outcome.conflict.heldBy },
+        kind,
+        name: input.name,
+        reason: input.reason,
+        signal: deps.sessionSignal(sessionId) ?? new AbortController().signal,
+        pollMs: deps.claimPollMs ?? CLAIM_POLL_MS,
       });
-      return Promise.resolve(
-        deps.state.write((ctx) =>
-          record(
-            'request_claim',
-            input.opId,
-            { granted: false, heldBy: outcome.conflict.heldBy, inboxId: card.id },
-            ctx,
-          ),
+      return deps.state.write((ctx) =>
+        record(
+          'request_claim',
+          input.opId,
+          result.granted
+            ? { granted: true, claimId: result.claim.id }
+            : { granted: false, heldBy: result.heldBy, inboxId: result.inboxId },
+          ctx,
         ),
       );
     },

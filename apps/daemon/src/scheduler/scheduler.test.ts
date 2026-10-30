@@ -575,7 +575,10 @@ describe('worktree batches', () => {
       delivery: 'pull_request',
       prTitlePrefix: 'feat(app)',
       maxLanes: 3,
-      hazards: [{ name: 'docker', globs: ['docker/**'], commands: [] }],
+      hazards: [
+        { name: 'docker', globs: ['docker/**'], commands: [] },
+        { name: 'harness', globs: ['AGENTS.md'], commands: [], scope: 'copy' },
+      ],
     });
     return claims.map((claim, i) => {
       const dir = tempDir('worktree');
@@ -632,6 +635,14 @@ describe('worktree batches', () => {
   it('a hazard still serializes them', async () => {
     worktrees(['docker', 'docker', 'docker']);
     expect(await scheduler({ global: 4 }).tick()).toBe(1);
+  });
+
+  it("launches three batches' work in one tick with a per-copy hazard claimed", async () => {
+    worktrees(['harness', 'harness', 'harness']);
+    expect(await scheduler({ global: 4 }).tick()).toBe(3);
+    const held = activeClaims('harness');
+    expect(held).toHaveLength(3);
+    expect(new Set(held.map((c) => c.scope)).size).toBe(3);
   });
 
   it('waits with one folded card while a worktree is missing', async () => {

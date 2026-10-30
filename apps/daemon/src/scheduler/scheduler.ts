@@ -12,6 +12,7 @@ import {
   acquireClaims,
   acquireLease,
   claimRequestsForTask,
+  copyHazardNames,
   countLanes,
   dependenciesDone,
   getBatch,
@@ -178,6 +179,7 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
           projectId: project.id,
           workstreamId: ws.id,
           requests: claimRequestsForTask(task, project),
+          copyHazards: copyHazardNames(project),
           leaseExpiresAt: leaseUntil,
           ...(areaScope ? { areaScope } : {}),
         });
