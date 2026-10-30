@@ -1,8 +1,9 @@
 import { existsSync, fstatSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { tempDir } from '../../test/fixtures';
 import { silentLogger } from '../log';
+import type { atPriority } from '../priority';
 import {
   DOCKER_REFUSAL,
   SandboxProfileError,
@@ -11,6 +12,19 @@ import {
   type GateSandbox,
 } from '../sandbox';
 import { createGateRunner, type GateRequest } from './index';
+
+// Passes through to the real wrapper, recording each tier asked for.
+const tiers = vi.hoisted((): string[] => []);
+vi.mock('../priority', async (importOriginal) => {
+  const original = await importOriginal<{ atPriority: typeof atPriority }>();
+  return {
+    ...original,
+    atPriority: (...args: Parameters<typeof atPriority>) => {
+      tiers.push(args[0]);
+      return original.atPriority(...args);
+    },
+  };
+});
 
 /** The test process's own env, as the strings a gate takes. */
 const env = Object.fromEntries(
@@ -42,6 +56,15 @@ function request(overrides: Partial<GateRequest> = {}): GateRequest {
 }
 
 const run = (command: string, timeoutMs = 10_000) => runner.run(request({ command, timeoutMs }));
+
+describe('priority', () => {
+  it('starts every gate at the gate tier', async () => {
+    tiers.length = 0;
+    const result = await run('echo still-runs');
+    expect(result.tail).toBe('still-runs\n');
+    expect(tiers).toEqual(['gate']);
+  });
+});
 
 const DEADLINE_MS = 10_000;
 
