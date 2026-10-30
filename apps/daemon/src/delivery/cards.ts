@@ -5,6 +5,7 @@ import {
   type CardResolvesWhen,
   type BatchId,
   type FailingCheckDto,
+  type InboxOption,
   type ProjectDto,
   type ProjectId,
   type TaskId,
@@ -34,9 +35,34 @@ export interface Card {
   /** A repeat that folds rewrites the open card with this one's body and detail. */
   readonly refresh?: boolean;
   readonly detail?: Record<string, Json>;
+  /** The answers the card offers; none for a card the builder only dismisses. */
+  readonly options?: readonly InboxOption[];
   /** What makes the card stale: 10db closes it itself when that happens (CardResolvesWhen). */
   readonly resolvesWhen?: CardResolvesWhen;
 }
+
+/** The answers of a card that offers to delete a task's local branch. */
+export const BranchChoice = { Delete: 'Delete Branch', Keep: 'Keep' } as const;
+export type BranchChoice = (typeof BranchChoice)[keyof typeof BranchChoice];
+
+/** The `detail` key of a card that offers to delete a batch's local branch; it holds the batch id. */
+export const BRANCH_CARD_DETAIL = 'branchCard';
+
+/** What a card carries to offer deleting `batch`'s local branch. */
+function branchOffer(batch: BatchDto): Pick<Card, 'options' | 'detail'> {
+  return {
+    options: [
+      {
+        label: BranchChoice.Delete,
+        description: `Delete ${batch.branch ?? 'the branch'} from your repository`,
+      },
+      { label: BranchChoice.Keep, description: 'Leave the branch where it is' },
+    ],
+    detail: { batchId: batch.id, [BRANCH_CARD_DETAIL]: { batchId: batch.id } },
+  };
+}
+
+const commitsOf = (count: number): string => `${String(count)} commit${count === 1 ? '' : 's'}`;
 
 export const MAX_LISTED_PATHS = 20;
 
@@ -225,7 +251,11 @@ export const worktreeCards = {
       paths === null
         ? `The batch is finished, but 10db couldn't read its worktree ${path}, so it may hold files you need, and kept it.`
         : `The batch is finished, but its worktree ${path} holds git-ignored files 10db didn't put there, such as a hand-made .env, so 10db kept it:\n${listPaths(paths)}`
-    }\n\nCopy what you need, then remove it with ${worktreeRemovalCommand(main, path)}.`,
+    }\n\nCopy what you need, then remove it with ${worktreeRemovalCommand(main, path)}.${
+      batch.branch === null
+        ? ''
+        : ` Its branch ${batch.branch} is checked out there, so 10db leaves the branch too until the worktree is gone.`
+    }`,
     foldKey: keptWorktreeKey.batchIgnored(batch.id),
     detail: { batchId: batch.id },
   }),
@@ -592,7 +622,7 @@ export const shipCards = {
     body:
       doneTitles.length > 0
         ? `These tasks stay done, but their code is unmerged, only on the local branch ${batch.branch ?? '(none)'}:\n${doneTitles.map((t) => `- ${t}`).join('\n')}`
-        : `Nothing in it finished. The local branch ${batch.branch ?? '(none)'} is kept.`,
+        : 'Nothing in it finished.',
     detail: { batchId: batch.id },
   }),
 };
@@ -749,13 +779,20 @@ export const prCards = {
       detail: prDetail(batch, link),
     };
   },
+  /** Offers to delete the local branch, which stays until the builder answers. */
   closed: (batch: BatchDto): Card => {
     const prUrl = batch.prUrl ?? '(no pull request)';
+    const offer = batch.branch === null ? {} : branchOffer(batch);
+    const keeps =
+      batch.branch === null
+        ? ''
+        : ` 10db keeps the local branch ${batch.branch} until you answer: Delete Branch removes it from your repository, Keep leaves it.`;
     return {
       title: `Pull request closed without merging: "${batch.title}"`,
-      body: `${prUrl}\n\nThe batch's tasks are in Blocked on the Board, because their code is not on ${batch.baseBranch}. 10db keeps the local branch ${batch.branch ?? '(none)'}.\n\nOn the Board, reopen a task to run it again, or close it if you don't want the work. To land the existing work instead, reopen the pull request on GitHub and merge it there; 10db doesn't follow a reopened pull request, so close the tasks once it merges.`,
+      body: `${prUrl}\n\nThe batch's tasks are in Blocked on the Board, because their code is not on ${batch.baseBranch}.${keeps}\n\nOn the Board, reopen a task to run it again, or close it if you don't want the work. To land the existing work instead, reopen the pull request on GitHub and merge it there; 10db doesn't follow a reopened pull request, so close the tasks once it merges.`,
       foldKey: prCardKey.closed(batch.id),
-      detail: prDetail(batch, prUrl),
+      ...offer,
+      detail: { ...prDetail(batch, prUrl), ...offer.detail },
     };
   },
   /**
@@ -790,4 +827,36 @@ export const prCards = {
       body: `gh couldn't reach GitHub: ${detailOf(error)}\n\nCheck your connection and run gh auth status in a terminal to see why. ${until}`,
     };
   },
+};
+
+/** The fold keys of the cards about a task's local branch. */
+export const branchCardKey = {
+  offer: (batchId: BatchId): string => `branch-offer:${batchId}`,
+  /** One per project: the branches no batch names. */
+  withoutBatch: 'branches-without-batch',
+} as const;
+
+/** What 10db tells the builder about the local branches of finished tasks. */
+export const branchCards = {
+  /** An abandoned task's branch holds work; `commits` counts what it has beyond its base. */
+  abandoned: (batch: BatchDto, commits: number): Card => ({
+    title: `Delete ${batch.branch ?? 'the branch'}? It holds ${commitsOf(commits)}`,
+    body: `Batch "${batch.title}" was abandoned, and its branch ${batch.branch ?? '(none)'} holds ${commitsOf(commits)} beyond ${batch.baseBranch}. 10db keeps it until you answer: Delete Branch removes it from your repository, so that work is gone; Keep leaves it.`,
+    foldKey: branchCardKey.offer(batch.id),
+    ...branchOffer(batch),
+  }),
+  /** A Delete Branch answer git can't carry out while the branch is checked out. */
+  checkedOut: (batch: BatchDto, path: string): Card => ({
+    title: `${batch.branch ?? 'The branch'} was not deleted: it is checked out`,
+    body: `${batch.branch ?? 'The branch'} is checked out in ${path}, and git won't delete a branch that is in use. Switch ${path} to another branch, then answer again.`,
+    foldKey: branchCardKey.offer(batch.id),
+    ...branchOffer(batch),
+  }),
+  /** `branches` is never empty. 10db never deletes these: nothing records that it made them. */
+  withoutBatch: (branches: readonly string[]): Card => ({
+    title: `${String(branches.length)} local branch${branches.length === 1 ? '' : 'es'} under 10db/ without a task`,
+    body: `10db has no task for these local branches, so it can't tell whether they are yours and leaves them alone:\n${listPaths(branches)}\n\nDelete the ones you don't need with git branch -D <name>.`,
+    foldKey: branchCardKey.withoutBatch,
+    refresh: true,
+  }),
 };

@@ -13,6 +13,7 @@ import {
   worktreePinKey,
   type Git,
 } from '../git';
+import { settleBranch } from './branch-cleanup';
 import { looseWork } from './build-output';
 import { baseConflictKey, baseKeptKey, keptWorktreeKey, worktreeCards } from './cards';
 import { raise, withdraw, type DeliveryContext } from './context';
@@ -52,7 +53,7 @@ export type Retirement =
 
 /**
  * After SHIPPED, CLOSED or ABANDONED, when no workstream of the batch can run again: remove the
- * worktree, delete a CLOSED batch's branch while it is still at its base, then drop the pin and
+ * worktree, settle the branch of a CLOSED or ABANDONED batch (`settleBranch`), then drop the pin and
  * clear `worktree_path` in one transaction. An ABANDONED batch's worktree is removed only when it
  * is clean, and any finished one only when it holds no git-ignored file outside the seeded
  * directories other than build output, such as a hand-made `.env`; both are checked here so no
@@ -106,8 +107,7 @@ async function retire(ctx: DeliveryContext, batchId: BatchId): Promise<Retiremen
     if (!removeIfEmptyDirectory(ctx.worktreeRoot, path))
       raise(ctx.inbox, batch.projectId, worktreeCards.leftBehind(batch, path));
   }
-  if (batch.state === BatchState.Closed && batch.branch !== null && batch.baseSha !== null)
-    await ctx.git.deleteBranchIfAt(main, batch.branch, batch.baseSha);
+  await settleBranch(ctx, batchId);
   // The tasks' starts on the merged base mean nothing once their worktree is gone; one git won't
   // delete is left for the startup sweep.
   for (const ws of listWorkstreams(ctx.state.db, { batchId }))

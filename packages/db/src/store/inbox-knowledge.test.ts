@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   findOpenByFoldKey,
   getInboxItem,
+  hasAnsweredByFoldKey,
   insertInboxItem,
   listInbox,
   openItemsForWorkstream,
@@ -59,6 +60,26 @@ describe('inbox', () => {
     );
     expect(findOpenByFoldKey(store.db, project.id, 'fold-1')).toBeUndefined();
   });
+
+  it.each([
+    { state: 'OPEN', answered: false },
+    { state: 'ANSWERED', answered: true },
+    { state: 'DELIVERING', answered: true },
+    { state: 'RESOLVED', answered: true },
+    { state: 'CANCELLED', answered: false },
+    { state: 'EXPIRED', answered: false },
+  ] as const)(
+    'counts a $state card with the fold key as answered: $answered',
+    ({ state, answered }) => {
+      const project = seedProject(store);
+      expect(hasAnsweredByFoldKey(store.db, project.id, 'fold-1')).toBe(false);
+      const item = store.write((ctx) => insertInboxItem(ctx, question(project.id))).value;
+      store.write((ctx) => updateInboxItem(ctx, item.id, { state }));
+      expect(hasAnsweredByFoldKey(store.db, project.id, 'fold-1')).toBe(answered);
+      expect(hasAnsweredByFoldKey(store.db, project.id, 'fold-2')).toBe(false);
+      expect(hasAnsweredByFoldKey(store.db, seedProject(store).id, 'fold-1')).toBe(false);
+    },
+  );
 
   it.each([
     { state: 'OPEN', included: true },
