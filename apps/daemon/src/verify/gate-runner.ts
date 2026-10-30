@@ -3,7 +3,7 @@ import { createWriteStream, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { PermissionRuleDto, ProjectDto } from '@10db/contracts';
 import type { Logger } from '../log';
-import { blockedHostsNote, createBlockedHostFilter } from './blocked-hosts';
+import { BlockedRun, blockedHostsNote, createBlockedHostFilter } from './blocked-hosts';
 import {
   DOCKER_REFUSAL,
   SandboxProfileError,
@@ -21,7 +21,8 @@ export interface GateResult {
   readonly aborted: boolean;
   /**
    * The hosts the sandbox refused a failed gate, lower case, each once. Empty for a gate that passed,
-   * was stopped, or ran with no sandbox; the tail says the gate was blocked when it is not.
+   * was stopped, or ran with no sandbox; when it is not, the tail ends saying the gate (or, for a
+   * package install, the install) was blocked.
    */
   readonly blockedHosts: readonly string[];
 }
@@ -46,7 +47,10 @@ export interface GateRequest {
    * gates ahead of it. Never called for a gate that starts at once.
    */
   readonly onWaiting?: (ahead: number) => void;
-  /** True for a run that installs packages with pnpm; the sandbox opens pnpm's lock directory for it. */
+  /**
+   * True for 10db's install of a worktree's packages with pnpm: the sandbox opens pnpm's lock
+   * directory for it, and its output calls it the install, not the gate, when a host was blocked.
+   */
   readonly packageInstall?: boolean;
   /**
    * Runs once the gate may start, after its slot and before its sandbox or command: work that must
@@ -194,7 +198,13 @@ function runGroup(
         exitCode === 0 || timedOut || aborted ? [] : [...(filter?.blocked() ?? [])];
       // Said last, so the evidence keeps it however much the gate printed before.
       if (sandboxed?.dockerRefused()) onData(`\n${DOCKER_REFUSAL}\n`);
-      if (blockedHosts.length > 0) onData(blockedHostsNote(blockedHosts));
+      if (blockedHosts.length > 0)
+        onData(
+          blockedHostsNote(
+            blockedHosts,
+            request.packageInstall === true ? BlockedRun.Install : BlockedRun.Gate,
+          ),
+        );
       endLog(() => {
         resolve({
           blockedHosts,

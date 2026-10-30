@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { blockedHostsNote, createBlockedHostFilter } from './blocked-hosts';
+import { BlockedRun, blockedHostsNote, createBlockedHostFilter } from './blocked-hosts';
 
 /** Feeds `lines` (each ended with a newline) through a filter; answers what it kept and the hosts. */
 function filter(lines: readonly string[], options?: { readonly commandLines?: number }) {
@@ -144,27 +144,39 @@ describe('the filter over a long line with no newline', () => {
 
 describe('what the gate’s evidence says about blocked hosts', () => {
   it('says nothing when nothing was blocked', () => {
-    expect(blockedHostsNote([])).toBe('');
+    expect(blockedHostsNote([], BlockedRun.Gate)).toBe('');
   });
 
   it('points a host the project may be given at the Inbox and Settings', () => {
-    const note = blockedHostsNote(['index.crates.io', 'static.crates.io']);
+    const note = blockedHostsNote(['index.crates.io', 'static.crates.io'], BlockedRun.Gate);
     expect(note).toContain(
       "The gate was blocked from reaching index.crates.io and static.crates.io: they are not among the project's allowed network hosts.",
     );
     expect(note).toContain('Settings › Network hosts');
+    expect(note).toContain('then run the gate again.');
   });
 
   it('says a host that can’t be allowed can’t be, and sends nobody to a card for it', () => {
-    const note = blockedHostsNote(['db', '*.example.com']);
+    const note = blockedHostsNote(['db', '*.example.com'], BlockedRun.Gate);
     expect(note).toContain('The gate was blocked from reaching db and *.example.com');
     expect(note).toContain("can't be allowed as network hosts");
     expect(note).not.toContain('Inbox');
   });
 
   it('words each case for itself when both appear', () => {
-    const note = blockedHostsNote(['index.crates.io', 'intranet']);
+    const note = blockedHostsNote(['index.crates.io', 'intranet'], BlockedRun.Gate);
     expect(note).toContain("index.crates.io: it is not among the project's allowed network hosts");
     expect(note).toContain("intranet: it can't be allowed as a network host");
+  });
+
+  it('says the install was blocked, and never the gate, when 10db’s install of a worktree’s packages was', () => {
+    for (const hosts of [['registry.npmjs.org'], ['db']]) {
+      const note = blockedHostsNote(hosts, BlockedRun.Install);
+      expect(note).toContain(`The install was blocked from reaching ${hosts.join('')}`);
+      expect(note).not.toMatch(/\bgate\b/i);
+    }
+    expect(blockedHostsNote(['registry.npmjs.org'], BlockedRun.Install)).toContain(
+      'Allow it for the project, from the Inbox or in Settings › Network hosts, then try again.',
+    );
   });
 });

@@ -350,8 +350,9 @@ Under the lane sandbox (**built**), the design column holds for a lane's Bash:
   manager settings and toolchain files name, found by reading them as text (no link followed, in a file's name or any
   folder on its way) and keeping only each URL's concrete host (never a token, a path or a `*` pattern). That is the
   only time the files allow anything: afterwards a lane may have written them, so Look Again in Settings only lists the
-  hosts they name that are not allowed, and the builder allows each one by name. A gate's denied host now raises one
-  card, read from srt's debug line, and a lane's card recommends Allow when the reading made at add time names the host
+  hosts they name that are not allowed, and the builder allows each one by name. A host denied to a gate, or to the
+  worktree install that runs under the gate's sandbox, raises one card for the project, read from srt's debug line, and
+  a lane's card recommends Allow when the reading made at add time names the host
   (`decisions/2026-10-29-network-hosts-from-package-files.md`).
 - **Run.** `autoAllowBashIfSandboxed` is off, so every command Claude Code doesn't treat as read-only reaches the
   broker. It allows the command without a card unless it is a hazard or something unread could make it one

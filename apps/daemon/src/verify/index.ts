@@ -1,3 +1,4 @@
+export { BlockedRun } from './blocked-hosts';
 export {
   createGateRunner,
   type GateRequest,

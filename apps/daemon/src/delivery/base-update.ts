@@ -12,7 +12,7 @@ import { baseCards, baseConflictKey, baseKeptKey, detailOf } from './cards';
 import { networkCall, raise, withdraw, type DeliveryContext } from './context';
 import { installedLockfile, recordInstall } from './installed-lockfile';
 import { startRef } from './start-refs';
-import { PNPM_LOCKFILE } from './worktree-dependencies';
+import { PNPM_LOCKFILE, raiseInstallHostCards } from './worktree-dependencies';
 
 /** What happened to a batch's branch before its gate (`decisions/2026-10-29-gate-with-base.md`). */
 export type BaseUpdate =
@@ -312,13 +312,25 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
           return { kind: 'aborted' };
         case 'failed': {
           ctx.logger.warn(
-            { batchId: batch.id, exitCode: installed.exitCode, logPath: installed.logPath },
+            {
+              batchId: batch.id,
+              exitCode: installed.exitCode,
+              logPath: installed.logPath,
+              blockedHosts: installed.blockedHosts,
+            },
             'worktree dependencies not installed before the gate',
           );
+          tell(batch, () => {
+            raiseInstallHostCards(ctx, project.id, installed);
+          });
           const how = installed.timedOut ? 'timed out' : `exit ${String(installed.exitCode)}`;
+          const blocked =
+            installed.blockedHosts.length === 0
+              ? ''
+              : ` The sandbox blocked it from reaching ${named(installed.blockedHosts)}.`;
           return {
             kind: 'done',
-            note: `The install this branch's lockfile needs failed (${how}; log: ${installed.logPath}), so its packages may not match it.`,
+            note: `The install this branch's lockfile needs failed (${how}; log: ${installed.logPath}), so its packages may not match it.${blocked}`,
           };
         }
         case 'installed':

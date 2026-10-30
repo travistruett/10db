@@ -1,7 +1,9 @@
+import type { ProjectId } from '@10db/contracts';
 import { createTestStore, listPermissionRules, seedProject, type Store } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { allowFoundHosts, listNetworkHosts, removeNetworkHost } from '../permissions';
+import { BlockedRun } from '../verify';
 import { GateHostChoice, raiseGateHostCards } from './gate-host-card';
 import { createInboxService, type InboxService } from './service';
 
@@ -19,11 +21,12 @@ afterEach(() => {
 });
 
 const COMMAND = 'cargo test --workspace';
+const INSTALL = 'pnpm install --frozen-lockfile --ignore-scripts --ignore-pnpmfile';
 
 function raise(hosts: readonly string[], projectId = seedProject(store).id) {
   return raiseGateHostCards(
     { state, inbox },
-    { projectId, workstreamId: null, command: COMMAND, hosts },
+    { projectId, run: BlockedRun.Gate, command: COMMAND, hosts },
   );
 }
 
@@ -112,4 +115,47 @@ describe('a gate blocked from a host', () => {
       expect(raise([host])).toEqual([]);
     },
   );
+});
+
+describe("10db's install of a worktree's packages blocked from a host", () => {
+  function raiseForInstall(hosts: readonly string[], projectId: ProjectId) {
+    return raiseGateHostCards(
+      { state, inbox },
+      { projectId, run: BlockedRun.Install, command: INSTALL, hosts },
+    );
+  }
+
+  it('names the install, its command and the file that needs the host, and never the gate', () => {
+    const project = seedProject(store);
+    allowFoundHosts(state, project.id, [{ host: 'registry.npmjs.org', file: 'pnpm-lock.yaml' }]);
+    removeNetworkHost(state, project.id, 'registry.npmjs.org');
+
+    const [card] = raiseForInstall(['registry.npmjs.org'], project.id);
+
+    expect(card?.title).toBe('Allow network access to registry.npmjs.org?');
+    expect(card?.body).toContain(
+      "The sandbox blocked 10db's install of a worktree's packages from reaching registry.npmjs.org, and the install failed.",
+    );
+    expect(card?.body).toContain(`Install: ${INSTALL}`);
+    expect(card?.body).toContain("The project's pnpm-lock.yaml needs registry.npmjs.org");
+    expect(card?.body).toContain('then try again.');
+    expect(card?.options.map((o) => o.label)).toEqual([GateHostChoice.Allow, GateHostChoice.Later]);
+    expect(card?.recommendation).toBe(GateHostChoice.Allow);
+    const words = [card?.body, ...(card?.options ?? []).map((o) => o.description)].join('\n');
+    expect(words).not.toMatch(/\bgate\b/i);
+  });
+
+  it('shares one card per host with a gate blocked from the same host, and Allow allows it', () => {
+    const project = seedProject(store);
+    const [installCard] = raiseForInstall(['registry.npmjs.org'], project.id);
+    const [gateCard] = raise(['registry.npmjs.org'], project.id);
+    if (!installCard) throw new Error('no card');
+    expect(gateCard?.id).toBe(installCard.id);
+
+    inbox.answer(installCard.id, { choice: GateHostChoice.Allow });
+
+    expect(listNetworkHosts(state.db, project.id).map((h) => h.host)).toEqual([
+      'registry.npmjs.org',
+    ]);
+  });
 });

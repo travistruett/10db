@@ -142,7 +142,7 @@ import {
   sendBackTarget,
   type StepEntry,
 } from '../team';
-import type { GateRequest, GateResult, GateRunner } from '../verify';
+import { BlockedRun, type GateRequest, type GateResult, type GateRunner } from '../verify';
 import { findClaimed } from '../watcher';
 import type { LiveSessions } from './live-sessions';
 import { checkedCommits, raiseBuilderCheck, waitsForCheck } from './builder-check';
@@ -1821,7 +1821,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     // A host the sandbox blocked is the builder's to allow; the card names it and the gate's evidence says so.
     raiseGateHostCards(opts, {
       projectId: project.id,
-      workstreamId: id,
+      run: BlockedRun.Gate,
       command: gateCommand,
       hosts: result.blockedHosts,
     });

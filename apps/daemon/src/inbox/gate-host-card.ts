@@ -1,10 +1,4 @@
-import {
-  InboxKind,
-  type InboxAnswer,
-  type InboxItemDto,
-  type ProjectId,
-  type WorkstreamId,
-} from '@10db/contracts';
+import { InboxKind, type InboxAnswer, type InboxItemDto, type ProjectId } from '@10db/contracts';
 import {
   insertDecision,
   insertPermissionRule,
@@ -19,6 +13,7 @@ import {
   matchPermissionRule,
   storableRule,
 } from '../permissions';
+import { BlockedRun } from '../verify';
 import type { InboxService } from './service';
 
 const NETWORK_TOOL = 'SandboxNetworkAccess';
@@ -46,29 +41,59 @@ export function foundHostReason(file: string, host: string): string {
   return `The project's ${file} needs ${host}, so allowing it for the project is recommended.`;
 }
 
-function cardBody(host: string, command: string, file: string | null): string {
+/** How a card names what the sandbox blocked, and what to do once the host is allowed. */
+const RUN_WORDS: Readonly<
+  Record<
+    BlockedRun,
+    {
+      readonly what: string;
+      readonly short: string;
+      readonly label: string;
+      readonly then: string;
+    }
+  >
+> = {
+  [BlockedRun.Gate]: {
+    what: 'the gate',
+    short: 'the gate',
+    label: 'Gate',
+    then: 'run the gate again',
+  },
+  [BlockedRun.Install]: {
+    what: "10db's install of a worktree's packages",
+    short: 'the install',
+    label: 'Install',
+    then: 'try again',
+  },
+};
+
+function cardBody(run: BlockedRun, host: string, command: string, file: string | null): string {
+  const words = RUN_WORDS[run];
   const lines = [
-    `The sandbox blocked the gate from reaching ${host}, and the gate failed.`,
-    `Gate: ${shown(command)}`,
+    `The sandbox blocked ${words.what} from reaching ${host}, and ${words.short} failed.`,
+    `${words.label}: ${shown(command)}`,
   ];
   if (file !== null) lines.push(foundHostReason(file, host));
   lines.push(
-    'Allow it for the project and every later task, check and approved MCP server can reach it; then run the gate again.',
+    `Allow it for the project and every later task, check and approved MCP server can reach it; then ${words.then}.`,
   );
   return lines.join('\n');
 }
 
 /**
- * Raises one card for each host a failed gate was blocked from: the host, the gate command and, when a
- * project file names the host as a registry, that file, with Allow for the project. A host already
- * allowed, or one a project may not be given (this machine, a whole top-level domain), gets no card.
- * A host asked about and not yet answered folds into its open card.
+ * Raises one card for each host a failed gate, or 10db's install of a worktree's packages under the
+ * gate's sandbox, was blocked from: the host, the command and, when a project file names the host as a
+ * registry, that file, with Allow for the project. A host already allowed, or one a project may not be
+ * given (this machine, a whole top-level domain), gets no card. A host asked about and not yet answered
+ * folds into its open card, whichever run asked. The card is the project's and targets no workstream:
+ * its answer allows the host for every lane and gate, and cancelling the lane whose gate raised it must
+ * not withdraw it while another gate needs the host.
  */
 export function raiseGateHostCards(
   deps: { readonly state: StateStore; readonly inbox: InboxService },
   input: {
     readonly projectId: ProjectId;
-    readonly workstreamId: WorkstreamId | null;
+    readonly run: BlockedRun;
     readonly command: string;
     readonly hosts: readonly string[];
   },
@@ -91,15 +116,18 @@ export function raiseGateHostCards(
     cards.push(
       deps.inbox.flag({
         projectId: input.projectId,
-        workstreamId: input.workstreamId,
+        workstreamId: null,
         title: `Allow network access to ${host}?`,
-        body: cardBody(host, input.command, file),
+        body: cardBody(input.run, host, input.command, file),
         options: [
           {
             label: GateHostChoice.Allow,
             description: 'Every task, check and approved MCP server in this project can reach it',
           },
-          { label: GateHostChoice.Later, description: 'Leave the gate failing for now' },
+          {
+            label: GateHostChoice.Later,
+            description: `Leave ${RUN_WORDS[input.run].short} failing for now`,
+          },
         ],
         recommendation: file === null ? null : GateHostChoice.Allow,
         detail: { [GATE_HOST_DETAIL]: host },

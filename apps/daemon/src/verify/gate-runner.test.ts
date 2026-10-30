@@ -334,6 +334,25 @@ describe('gate runner with a sandbox', () => {
       }
     });
 
+    it('says the install was blocked, not the gate, when the run is a package install', async () => {
+      const { sandbox } = recordingSandbox();
+      const gate = createGateRunner({ sandbox, logger: silentLogger });
+      const result = await gate.run({
+        ...request({
+          command: printing([
+            '[SandboxDebug] Connection blocked to registry.npmjs.org:443',
+            'ERR_PNPM_META_FETCH_FAIL',
+          ]),
+        }),
+        packageInstall: true,
+      });
+      expect(result.blockedHosts).toEqual(['registry.npmjs.org']);
+      for (const text of [result.tail, readFileSync(result.logPath, 'utf8')]) {
+        expect(text).toContain('The install was blocked from reaching registry.npmjs.org');
+        expect(text).not.toMatch(/\bgate\b/i);
+      }
+    });
+
     it('names a host srt refused a plain HTTP request to', async () => {
       const { sandbox } = recordingSandbox();
       const gate = createGateRunner({ sandbox, logger: silentLogger });

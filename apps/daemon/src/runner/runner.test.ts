@@ -273,9 +273,44 @@ describe('runner', () => {
     expect(cards).toHaveLength(1);
     expect(cards[0]?.body).toContain('cargo test');
     expect(cards[0]?.options.map((o) => o.label)).toContain('Allow for the project');
-    expect(cards[0]?.targets.map((t) => t.workstreamId)).toEqual([workstream.id]);
+    // The answer allows the host for the whole project, so the card is the project's, not the lane's.
+    expect(cards[0]?.targets).toEqual([]);
     const [gate] = listEvidence(engine.store.db, workstream.id);
     expect(gate?.summary).toContain('The gate was blocked from reaching index.crates.io');
+  });
+
+  it("keeps a blocked host's card open when the lane whose gate raised it is cancelled, while another lane's gate needs the host", async () => {
+    const blocked: GateResult = {
+      exitCode: 101,
+      durationMs: 1,
+      tail: 'error: failed to download',
+      logPath: '/dev/null',
+      timedOut: false,
+      aborted: false,
+      blockedHosts: ['index.crates.io'],
+    };
+    engine = await createTestEngine(
+      { Alpha: [[turn]], Beta: [[turn]] },
+      { gateCommand: 'cargo test' },
+      { gate: { run: () => Promise.resolve(blocked) } },
+    );
+    const alpha = engine.addTask('Alpha');
+    const beta = engine.addTask('Beta', ['ui']);
+    engine.launch(alpha.workstream.id);
+    await engine.runner.idle();
+    engine.launch(beta.workstream.id);
+    await engine.runner.idle();
+    const hostCards = () =>
+      listInbox(engine.store.db, { states: ['OPEN'] }).filter(
+        (c) => c.title === 'Allow network access to index.crates.io?',
+      );
+    expect(hostCards()).toHaveLength(1);
+
+    await engine.runner.cancel(alpha.workstream.id);
+
+    expect(ws(alpha.workstream.id).state).toBe('CANCELLED');
+    expect(ws(beta.workstream.id).state).toBe('QUEUED');
+    expect(hostCards()).toHaveLength(1);
   });
 
   it('parks a long wait, frees the lane, and resumes with the answer in a new session', async () => {

@@ -1,5 +1,12 @@
 import { checkConcreteHost } from '../permissions';
 
+/**
+ * What ran under the gate's sandbox when it was blocked from a host: the project's gate, or 10db's
+ * install of a worktree's packages. Its output and its card name it, and say what to do next.
+ */
+export const BlockedRun = { Gate: 'gate', Install: 'install' } as const;
+export type BlockedRun = (typeof BlockedRun)[keyof typeof BlockedRun];
+
 /** The marker srt puts before every message of its debug log, which it writes to stderr when `SRT_DEBUG` is set. */
 const DEBUG_MARKER = '[SandboxDebug]';
 /**
@@ -152,32 +159,39 @@ function askable(host: string): boolean {
   }
 }
 
+/** How a run's output names it, and what to do once the hosts it was blocked from are allowed. */
+const RUN_WORDS: Readonly<Record<BlockedRun, { readonly name: string; readonly then: string }>> = {
+  [BlockedRun.Gate]: { name: 'gate', then: 'run the gate again' },
+  [BlockedRun.Install]: { name: 'install', then: 'try again' },
+};
+
 /**
- * What the gate's evidence says when the sandbox blocked hosts; empty when it blocked none. A host the
+ * What a run's output says when the sandbox blocked hosts; empty when it blocked none. A host the
  * project may be given is sent to the Inbox and Settings; one it may not (a bare name, this machine, a
  * pattern) is said to be so, since no card is raised for it.
  */
-export function blockedHostsNote(hosts: readonly string[]): string {
+export function blockedHostsNote(hosts: readonly string[], run: BlockedRun): string {
   if (hosts.length === 0) return '';
+  const { name, then } = RUN_WORDS[run];
   const allowable = hosts.filter(askable);
   const refused = hosts.filter((host) => !askable(host));
   const lines: string[] = [];
   if (allowable.length > 0) {
     const one = allowable.length === 1;
     lines.push(
-      `10db: The gate was blocked from reaching ${joined(allowable)}: ` +
+      `10db: The ${name} was blocked from reaching ${joined(allowable)}: ` +
         `${one ? 'it is' : 'they are'} not among the project's allowed network hosts. ` +
         `Allow ${one ? 'it' : 'them'} for the project, from the Inbox or in Settings › Network hosts, ` +
-        'then run the gate again.',
+        `then ${then}.`,
     );
   }
   if (refused.length > 0) {
     const one = refused.length === 1;
     lines.push(
-      `10db: The gate was blocked from reaching ${joined(refused)}: ` +
+      `10db: The ${name} was blocked from reaching ${joined(refused)}: ` +
         `${one ? "it can't be allowed as a network host" : "they can't be allowed as network hosts"} ` +
         '(a project is given whole host names such as index.crates.io, never this machine or a pattern), ' +
-        `so the gate can't reach ${one ? 'it' : 'them'} from the sandbox.`,
+        `so the ${name} can't reach ${one ? 'it' : 'them'} from the sandbox.`,
     );
   }
   return `\n${lines.join('\n')}\n`;

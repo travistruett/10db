@@ -88,6 +88,21 @@ rule in the answer's transaction, with the card as its source. A host the projec
 a `*` is refused too, since a command can print the debug line itself) or one already allowed gets no card. Cards fold
 per project and host.
 
+**The worktree install's card.** 10db's install of a worktree's packages (`delivery/worktree-dependencies.ts`) runs
+through the same gate runner under the gate's sandbox, so its blocked hosts are read the same way. Its run is a package
+install (`GateRequest.packageInstall`), so its tail says `10db: The install was blocked from reaching <host>…` and
+ends `then try again`, never naming the gate. A failed install carries the hosts (`DependencyRefresh.blockedHosts`),
+and each of its three callers raises the same per-host card (`raiseInstallHostCards`), which names the install
+(`pnpm install --frozen-lockfile --ignore-scripts --ignore-pnpmfile`) and the file that needs the host: the cut of a new
+worktree, whose refusal card shows the tail; Retry's repair of a worktree, the same; and the install before a gate when
+the lockfile changed, whose note in the gate's evidence (and the shipping gate's failure card) says the sandbox blocked
+it from the host. An install's card and a gate's card for one host are one card.
+
+**Cards are the project's.** A blocked-host card targets no workstream, whichever lane's gate raised it: its answer
+allows the host for the whole project, and a card that targeted the lane would be cancelled with that lane while
+another lane's gate, the shipping gate or an install still needs the host. It also never becomes a card a lane waits on:
+a workstream parks on the oldest open card that targets it, which must be its own question.
+
 **Remove** in Settings › Network hosts is a default button, as DESIGN.md keeps red for failures, and a failed removal
 shows its message under that host.
 

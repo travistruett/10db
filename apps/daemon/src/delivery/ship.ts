@@ -34,7 +34,7 @@ import {
 import type { Clock } from '../clock';
 import { GitNetworkError, GitNetworkFailure } from '../git';
 import { raiseGateHostCards } from '../inbox';
-import type { GateResult, GateRunner } from '../verify';
+import { BlockedRun, type GateResult, type GateRunner } from '../verify';
 import { gateNote, type BaseUpdate, type BaseUpdates } from './base-update';
 import { shipCards, wrongBranchCard, type Card, type ShipFailure } from './cards';
 import { allCheckouts, projectAtCheckout } from './checkout';
@@ -220,7 +220,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
     // A host the sandbox blocked is the builder's to allow; the card names it and the gate's tail says so.
     raiseGateHostCards(deps, {
       projectId: project.id,
-      workstreamId: null,
+      run: BlockedRun.Gate,
       command: gateCommand,
       hosts: result.blockedHosts,
     });
