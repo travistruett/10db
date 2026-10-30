@@ -106,7 +106,7 @@ export const BuilderToolInputs = {
 } as const satisfies Record<BuilderToolName, z.ZodType>;
 
 /** What the tools list advertises: the strict shapes a client can fill in, for create and edit. */
-const AdvertisedInputs: Record<BuilderToolName, z.ZodType> = {
+export const AdvertisedBuilderToolInputs: Record<BuilderToolName, z.ZodType> = {
   ...BuilderToolInputs,
   [BuilderToolName.CreateTask]: TaskInput.extend({ projectId: ProjectId }),
   [BuilderToolName.EditTask]: z
@@ -161,7 +161,7 @@ export function builderToolList(): BuilderToolDefinition[] {
     name,
     description: DESCRIPTIONS[name],
     inputSchema: {
-      ...z.toJSONSchema(AdvertisedInputs[name], {
+      ...z.toJSONSchema(AdvertisedBuilderToolInputs[name], {
         target: 'draft-2020-12',
         io: 'input',
         unrepresentable: 'any',

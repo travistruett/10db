@@ -29,10 +29,21 @@ function failure(message: string): McpError {
   return new McpError(ErrorCode.InternalError, message);
 }
 
-/** Whether `fetch` failed because nothing listens on the port (the daemon stopped since daemon.json was written). */
+/**
+ * Whether `fetch` failed because nothing listens on the port (the daemon stopped since
+ * daemon.json was written). Node's fetch reports every network failure as TypeError('fetch
+ * failed'); only a refused connection means the call never reached 10db.
+ */
 function refusedConnection(error: unknown): boolean {
-  return error instanceof TypeError;
+  if (!(error instanceof TypeError)) return false;
+  const cause: unknown = error.cause;
+  return (
+    typeof cause === 'object' && cause !== null && 'code' in cause && cause.code === 'ECONNREFUSED'
+  );
 }
+
+const MAY_HAVE_COMPLETED =
+  'The connection to 10db failed, and the call may have completed: check with a list tool before trying again';
 
 /**
  * The stdio side of the builder's MCP endpoint. A client starts it once per session, so it
@@ -71,9 +82,7 @@ export function createBuilderBridge(options: BuilderBridgeOptions): McpServer {
       if (error instanceof DOMException && error.name === 'TimeoutError') {
         throw failure(`10db did not answer within ${String(options.timeoutMs / 1000)} seconds`);
       }
-      throw failure(
-        refusedConnection(error) ? NOT_RUNNING : '10db could not be reached: try again',
-      );
+      throw failure(refusedConnection(error) ? NOT_RUNNING : MAY_HAVE_COMPLETED);
     }
     if (response.status === 401) {
       throw failure('10db refused the builder token. It may be restarting: try again in a moment');

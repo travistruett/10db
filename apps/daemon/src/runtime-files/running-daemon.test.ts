@@ -1,8 +1,8 @@
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { tempDir, type TempDir } from '../../test/fixtures';
 import { defaultDataDir, readUiToken, runningDaemon, writeRuntimeFiles } from './index';
 
@@ -54,16 +54,49 @@ describe('runningDaemon', () => {
 
   it('answers null for a pid that has exited, without reading the token', () => {
     writeRuntimeFiles(dir.path, info(deadPid()), 'secret-token');
-    // A token that cannot be read would show if the code reached it.
-    rmSync(join(dir.path, 'ui-token'));
-    mkdirSync(join(dir.path, 'ui-token'));
-    expect(runningDaemon(dir.path)).toBeNull();
+    const readToken = vi.fn(readUiToken);
+    expect(runningDaemon(dir.path, readToken)).toBeNull();
+    expect(readToken).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { name: 'pid', next: { ...info(process.pid), pid: 1 } },
+    { name: 'startedAt', next: { ...info(process.pid), startedAt: '2026-10-29T11:00:00.000Z' } },
+  ])('answers null when daemon.json names another $name after the token is read', ({ next }) => {
+    writeRuntimeFiles(dir.path, info(process.pid), 'old-token');
+    const readToken = (dataDir: string): string => {
+      writeRuntimeFiles(dataDir, next, 'new-token');
+      return readUiToken(dataDir);
+    };
+    expect(runningDaemon(dir.path, readToken)).toBeNull();
+  });
+
+  it('answers null when daemon.json is gone after the token is read', () => {
+    writeRuntimeFiles(dir.path, info(process.pid), 'old-token');
+    const readToken = (dataDir: string): string => {
+      rmSync(join(dataDir, 'daemon.json'));
+      return readUiToken(dataDir);
+    };
+    expect(runningDaemon(dir.path, readToken)).toBeNull();
   });
 
   it('answers null for a live daemon whose token is missing', () => {
     writeRuntimeFiles(dir.path, info(process.pid), 'secret-token');
     rmSync(join(dir.path, 'ui-token'));
     expect(runningDaemon(dir.path)).toBeNull();
+  });
+});
+
+describe('writeRuntimeFiles', () => {
+  it('removes the old daemon.json before it writes the token', () => {
+    // A crashed daemon leaves daemon.json behind. A reader that sees the new token must never see
+    // that file beside it, so it goes first; a token write that fails shows the order.
+    writeRuntimeFiles(dir.path, info(process.pid), 'old-token');
+    mkdirSync(join(dir.path, `ui-token.${String(process.pid)}.tmp`));
+    expect(() => {
+      writeRuntimeFiles(dir.path, info(process.pid), 'new-token');
+    }).toThrow();
+    expect(existsSync(join(dir.path, 'daemon.json'))).toBe(false);
   });
 });
 

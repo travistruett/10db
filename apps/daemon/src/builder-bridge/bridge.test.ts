@@ -48,7 +48,7 @@ async function connect(timeoutMs = 2000): Promise<void> {
 
 /** An HTTP server standing in for the daemon: answers every request with `reply`, or never. */
 async function daemonAnswering(
-  reply: { status: number; body: string; type?: string } | 'hang',
+  reply: { status: number; body: string; type?: string } | 'hang' | 'reset',
   pid = process.pid,
 ): Promise<void> {
   stub = createServer((req: IncomingMessage, res) => {
@@ -60,6 +60,10 @@ async function daemonAnswering(
     req.on('end', () => {
       seen.push({ authorization: req.headers.authorization, body });
       if (reply === 'hang') return;
+      if (reply === 'reset') {
+        req.socket.destroy();
+        return;
+      }
       res.writeHead(reply.status, { 'content-type': reply.type ?? 'application/json' });
       res.end(reply.body);
     });
@@ -193,5 +197,13 @@ describe('the builder bridge with a daemon', () => {
     await closeStub();
     await connect();
     expect(await callCreate()).toContain(NOT_RUNNING);
+  });
+
+  it('says the call may have completed when the daemon drops the connection', async () => {
+    await daemonAnswering('reset');
+    await connect();
+    const message = await callCreate();
+    expect(message).not.toContain(NOT_RUNNING);
+    expect(message).toContain('may have completed');
   });
 });

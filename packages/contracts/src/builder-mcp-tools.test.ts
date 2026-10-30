@@ -109,10 +109,15 @@ describe('the builder tools', () => {
     }
   });
 
-  it('writes a schema file per tool', () => {
+  it('writes a schema file per tool, matching what tools/list advertises', () => {
     const files = renderJsonSchemas();
-    for (const name of Object.values(BuilderToolName))
-      expect(files.has(`builder-mcp-${name.replaceAll('_', '-')}-input.schema.json`)).toBe(true);
+    for (const tool of builderToolList()) {
+      const text = files.get(`builder-mcp-${tool.name.replaceAll('_', '-')}-input.schema.json`);
+      expect(text, tool.name).toBeDefined();
+      expect({ ...(JSON.parse(text ?? '{}') as object), type: 'object' }, tool.name).toEqual(
+        tool.inputSchema,
+      );
+    }
   });
 
   const taskId = mintId('Task');
