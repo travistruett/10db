@@ -139,6 +139,7 @@ import {
 } from '../sessions';
 import {
   advanceSteps,
+  countSendBack,
   failStep,
   moveAfter,
   sendBackSteps,
@@ -706,7 +707,10 @@ export function createRunner(opts: RunnerOptions): Runner {
             recordProfileOutcome(ctx, target.profileId, { firstPass: false, escalated: true });
           patchWorkstream(ctx, id, ctl.fence, {
             attempt,
-            steps: sendBackSteps(row.steps, row.stepIndex, move.to, up.step, entryFor(ctx, id)),
+            steps: countSendBack(
+              sendBackSteps(row.steps, row.stepIndex, move.to, up.step, entryFor(ctx, id)),
+              row.stepIndex,
+            ),
             stepIndex: move.to,
             nextAction: { kind: 'revise', reviewStep: row.stepIndex },
             model: up.step.model,

@@ -1396,6 +1396,25 @@ describe('runner', () => {
     expect(listInbox(engine.store.db, { states: ['OPEN'] }).map((i) => i.kind)).toEqual(['flag']);
   });
 
+  it('hands the builder’s retry note to the next session after crashes failed the workstream', async () => {
+    const crash = { do: 'crash' as const, message: 'boom' };
+    engine = await createTestEngine({
+      Alpha: [[crash], [crash], [crash], [crash], [turn]],
+    });
+    const { workstream } = engine.addTask('Alpha');
+    for (let i = 0; i < 4; i += 1) {
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+    }
+    expect(ws(workstream.id).state).toBe('FAILED');
+    engine.retry(workstream.id, 'The fixture server needs port 4100.');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(engine.adapter.prompts.at(-1)?.prompt).toContain(
+      'The builder sent the work back: The fixture server needs port 4100.',
+    );
+  });
+
   it('fails at once on a billing refusal, without retrying it as a crash', async () => {
     const refusal =
       "Billing check failed: expected the Claude subscription, got an API key. No prompt was sent. <b>Check</b> the project's billing mode.";
@@ -2394,6 +2413,9 @@ describe('flows', () => {
         attempt: 0,
         nextAction: { kind: 'revise', reviewStep: 1 },
       });
+      // The review has not run since the retry, so nothing it said before counts.
+      expect(rejectionsSentBack(ws(workstream.id))).toBe(0);
+      expect(reviewRounds(ws(workstream.id).steps)).toHaveLength(4);
       expect(step(workstream.id, 0)).toMatchObject({ status: 'running', result: null });
       await until(workstream.id, (s) => s === 'DONE');
       const prompt = engine.adapter.prompts.at(-2)?.prompt ?? '';

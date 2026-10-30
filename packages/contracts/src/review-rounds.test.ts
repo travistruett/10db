@@ -97,6 +97,20 @@ describe('findingBody', () => {
       body: 'The empty state has no test.',
     },
     {
+      name: 'a severity word that is also inside another word',
+      finding: {
+        severity: 'NOTE',
+        location: 'src/a.ts:1',
+        text: 'Denote the order NOTE src/a.ts:1',
+      },
+      body: 'Denote the order',
+    },
+    {
+      name: 'a lowercase severity word, which is no severity',
+      finding: { severity: 'BLOCKING', location: null, text: 'BLOCKING: blocking calls stall' },
+      body: 'blocking calls stall',
+    },
+    {
       name: 'nothing left once both are taken out',
       finding: { severity: 'NOTE', location: 'a.ts:1', text: 'NOTE a.ts:1' },
       body: 'NOTE a.ts:1',
@@ -132,6 +146,7 @@ const step = (over: Partial<WorkstreamStep>): WorkstreamStep => ({
   sessionFloor: 0,
   result: null,
   earlier: [],
+  sentBack: 0,
   ...over,
 });
 
@@ -181,27 +196,48 @@ describe('reviewRounds', () => {
 });
 
 describe('rejectionsSentBack', () => {
-  const rejected = step({ earlier: [result('reject', '2026-10-29T10:00:00.000Z')] });
+  const rejections = [
+    result('reject', '2026-10-29T10:00:00.000Z'),
+    result('reject', '2026-10-29T11:00:00.000Z'),
+    result('reject', '2026-10-29T11:30:00.000Z'),
+  ];
   it.each([
-    { name: 'no rounds', steps: [step({})], attempt: 2, count: 0 },
-    { name: 'a rejection inside the attempts', steps: [rejected], attempt: 1, count: 1 },
-    { name: 'attempts reset by a retry', steps: [rejected], attempt: 0, count: 0 },
+    { name: 'no rounds', steps: [step({})], count: 0 },
     {
-      name: 'a rejection that used the last attempt up',
+      name: 'a rejection that sent the work back',
+      steps: [step({ earlier: rejections.slice(0, 1), sentBack: 1 })],
+      count: 1,
+    },
+    {
+      name: 'the rejection that used the last attempt up, which sent nothing back',
       steps: [
         step({
-          earlier: [
-            result('reject', '2026-10-29T10:00:00.000Z'),
-            result('reject', '2026-10-29T11:00:00.000Z'),
-            result('reject', '2026-10-29T11:30:00.000Z'),
-          ],
+          earlier: rejections,
           result: result('reject', '2026-10-29T12:00:00.000Z'),
+          sentBack: 3,
         }),
       ],
-      attempt: 3,
       count: 3,
     },
-  ])('counts $name', ({ steps, attempt, count }) => {
-    expect(rejectionsSentBack({ steps, attempt })).toBe(count);
+    {
+      // The review rejected 4 times and the builder retried; the rerun implement step then failed
+      // its gate twice (attempt 2), and the review has not run since.
+      name: 'none since a retry, whatever came before it',
+      steps: [
+        step({ role: 'implement', tools: 'edit', attempts: 2 }),
+        step({ earlier: [...rejections, result('reject', '2026-10-29T12:00:00.000Z')] }),
+      ],
+      count: 0,
+    },
+    {
+      name: 'the send-backs of every step that gives a verdict',
+      steps: [
+        step({ role: 'plan_review', earlier: rejections.slice(0, 1), sentBack: 1 }),
+        step({ earlier: rejections.slice(1), sentBack: 1 }),
+      ],
+      count: 2,
+    },
+  ])('counts $name', ({ steps, count }) => {
+    expect(rejectionsSentBack({ steps })).toBe(count);
   });
 });

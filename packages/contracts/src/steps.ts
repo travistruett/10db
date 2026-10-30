@@ -39,6 +39,8 @@ export const WorkstreamStep = z.object({
   result: StepResult.nullable(),
   /** Results this step kept when it ran again (a rejection it was sent back for), oldest first. */
   earlier: z.array(StepResult).default([]),
+  /** Times this step's rejection sent the work back since the attempts last started over; a retry sets it to 0. */
+  sentBack: z.int().min(0).default(0),
 });
 export type WorkstreamStep = z.infer<typeof WorkstreamStep>;
 
@@ -101,5 +103,6 @@ export function currentStep(ws: StepPosition): WorkstreamStep {
     sessionFloor: 0,
     result: null,
     earlier: [],
+    sentBack: 0,
   };
 }

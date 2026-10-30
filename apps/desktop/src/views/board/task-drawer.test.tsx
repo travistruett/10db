@@ -311,6 +311,12 @@ describe('TaskDrawer', () => {
       );
       open({ workstream: ws });
       const d = await dialog();
+      // A gate failure, not a review: the note still reaches the next session, and says so.
+      expect(
+        within(d).getByText(
+          'The session the retry starts gets this note, and the review’s findings too when a review sent the work back.',
+        ),
+      ).toBeTruthy();
       fireEvent.click(within(d).getByRole('button', { name: 'Retry' }));
       await waitFor(() => {
         expect(bodies).toEqual([{}]);

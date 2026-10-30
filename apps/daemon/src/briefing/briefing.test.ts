@@ -253,7 +253,19 @@ describe('buildSessionPrompt', () => {
       action: { kind: 'fix', evidenceId: builder.id },
     });
     expect(sentBack).toContain('The builder sent the work back: Rename the badge prop');
+    expect(sentBack).toContain('Address it, commit, and end your turn.');
     expect(sentBack).not.toContain('The gate failed');
+    // A read-only step a retry restarted with the builder's note has nothing to commit.
+    const toReviewer = buildSessionPrompt({
+      ...base,
+      step: { ...implementStep, role: 'review', personaName: 'Reviewer', tools: 'read_only' },
+      evidence: builder,
+      action: { kind: 'fix', evidenceId: builder.id },
+    });
+    expect(toReviewer).toContain(
+      'The builder sent the work back: Rename the badge prop\nTake it into account, then call mcp__10db__complete_step.',
+    );
+    expect(toReviewer).not.toContain('commit, and end your turn');
     expect(
       buildSessionPrompt({
         ...base,

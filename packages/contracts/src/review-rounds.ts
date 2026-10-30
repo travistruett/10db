@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { StepRole, Verdict } from './states';
+import { StepRole } from './states';
 import type { StepResult, WorkstreamStep } from './steps';
 
 /** Times the work may be sent back, by a reviewer, a gate or the builder, before the workstream fails. */
@@ -26,10 +26,12 @@ const SEVERITY_TAG =
 const LOCATION =
   /(?<![\w/.@-])((?:[\w@.-]+\/)*[\w@-][\w@.-]*\.[A-Za-z][A-Za-z0-9]*):(\d+)(?:[-–](\d+))?/;
 
+/** The token a finding's severity was read from: a bracketed tag first, else a capitalised word. */
+const severityMatch = (headline: string): RegExpExecArray | null =>
+  SEVERITY_TAG.exec(headline) ?? SEVERITY_WORD.exec(headline);
+
 function severityOf(headline: string): string | null {
-  const tagged = SEVERITY_TAG.exec(headline)?.[1];
-  if (tagged) return tagged.toUpperCase();
-  return SEVERITY_WORD.exec(headline)?.[1] ?? null;
+  return severityMatch(headline)?.[1]?.toUpperCase() ?? null;
 }
 
 function locationOf(text: string): string | null {
@@ -71,10 +73,10 @@ export function parseFindings(summary: string): Finding[] {
  */
 export function findingBody(finding: Finding): string {
   let text = finding.text;
-  if (finding.severity) {
-    const word = finding.severity.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    text = text.replace(new RegExp(`[[(]?${word}[\\])]?`, 'i'), '');
-  }
+  // The same token the severity was read from, so a word that only contains it stays whole.
+  const severity = finding.severity ? severityMatch(text) : null;
+  if (severity)
+    text = text.slice(0, severity.index) + text.slice(severity.index + severity[0].length);
   if (finding.location) text = text.replace(finding.location, '');
   const body = text.replace(/^[\s:,\-–—`'"()[\]]+/, '').trim();
   return body === '' ? finding.text : body;
@@ -105,15 +107,12 @@ export function reviewRounds(steps: readonly WorkstreamStep[]): ReviewRound[] {
 }
 
 /**
- * How many times a reviewer sent the work back within the attempts the limit counts. A retry starts
- * the attempts over, so the rounds before it no longer count.
+ * How many times a reviewer sent the work back since the attempts last started over. Each step
+ * counts its own send-backs, and a retry sets every count to 0, so neither the rounds before a retry
+ * nor the gate failures that also use attempts up count here.
  */
-export function rejectionsSentBack(ws: {
-  readonly steps: readonly WorkstreamStep[];
-  readonly attempt: number;
-}): number {
-  const rejected = reviewRounds(ws.steps).filter((r) => r.result.verdict === Verdict.Reject).length;
-  return Math.min(rejected, ws.attempt);
+export function rejectionsSentBack(ws: { readonly steps: readonly WorkstreamStep[] }): number {
+  return ws.steps.reduce((sum, step) => sum + step.sentBack, 0);
 }
 
 /** The `detail` key of a failed workstream's card when a reviewer's rejection ended it. */

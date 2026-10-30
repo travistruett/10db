@@ -81,7 +81,7 @@ describe('TaskCard state', () => {
       sessionId: mintId('Session'),
       at,
     });
-    const reviewed = (attempt: number) =>
+    const reviewed = (sentBack: number, attempt = sentBack) =>
       workstreamDto({
         state: 'RUNNING',
         attempt,
@@ -91,6 +91,7 @@ describe('TaskCard state', () => {
             role: 'review',
             tools: 'read_only',
             earlier: [rejected('2026-10-29T10:00:00.000Z'), rejected('2026-10-29T11:00:00.000Z')],
+            sentBack,
           }),
         ],
       });
@@ -111,6 +112,12 @@ describe('TaskCard state', () => {
 
     it('starts over when a retry resets the attempts', () => {
       card({ workstream: reviewed(0) });
+      expect(screen.queryByText(/Review sent back/)).toBeNull();
+    });
+
+    it('counts no gate failure after a retry as a send-back', () => {
+      // The review sent it back before the retry; since then only the gate failed, twice.
+      card({ workstream: reviewed(0, 2) });
       expect(screen.queryByText(/Review sent back/)).toBeNull();
     });
   });

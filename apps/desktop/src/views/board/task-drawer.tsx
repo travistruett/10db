@@ -305,7 +305,7 @@ function WorkstreamLine({ workstream }: { readonly workstream: WorkstreamDto }) 
       {failed ? (
         <Textarea
           label="Note for the next session (optional)"
-          description="A retry after a review sent the work back gives the implementer the review's findings and this note."
+          description="The session the retry starts gets this note, and the review’s findings too when a review sent the work back."
           size="xs"
           autosize
           minRows={1}

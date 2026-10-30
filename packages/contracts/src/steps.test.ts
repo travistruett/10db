@@ -21,6 +21,7 @@ const base: WorkstreamStep = {
   sessionFloor: 0,
   result: null,
   earlier: [],
+  sentBack: 0,
 };
 
 describe('WorkstreamStep', () => {

@@ -195,6 +195,7 @@ export function stepDto(overrides: Partial<WorkstreamStep> = {}): WorkstreamStep
     sessionFloor: 0,
     result: null,
     earlier: [],
+    sentBack: 0,
     ...overrides,
   });
 }

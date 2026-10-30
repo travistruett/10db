@@ -47,6 +47,7 @@ const step = (role: WorkstreamStep['role'], sessionFloor = 0): WorkstreamStep =>
   sessionFloor,
   result: null,
   earlier: [],
+  sentBack: 0,
 });
 
 describe('planning fields', () => {
@@ -120,6 +121,21 @@ describe('planning fields', () => {
       model: 'opus',
       effort: 'high',
     });
+  });
+
+  it('reads a step stored before it kept earlier rounds and send-backs with neither yet', () => {
+    const project = seedProject(store);
+    const created = store.write((ctx) => insertTask(ctx, project.id, task)).value;
+    const ws = store.write((ctx) => insertWorkstream(ctx, created.id)).value;
+    // The JSON a step had before `earlier` and `sentBack` were added.
+    const older = JSON.parse(JSON.stringify(step('review'))) as Record<string, unknown>;
+    delete older['earlier'];
+    delete older['sentBack'];
+    store.db.$client
+      .prepare('UPDATE workstreams SET steps = ? WHERE id = ?')
+      .run(JSON.stringify([older]), ws.id);
+    expect(getWorkstreamRow(store.db, ws.id).steps).toEqual([step('review')]);
+    expect(getWorkstream(store.db, ws.id).steps).toEqual([step('review')]);
   });
 });
 

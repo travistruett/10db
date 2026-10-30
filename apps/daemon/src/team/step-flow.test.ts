@@ -1,6 +1,13 @@
 import { mintId, type StepRole, type Verdict, type WorkstreamStep } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
-import { advanceSteps, moveAfter, restartStep, sendBackSteps } from './step-flow';
+import {
+  advanceSteps,
+  clearSendBacks,
+  countSendBack,
+  moveAfter,
+  restartStep,
+  sendBackSteps,
+} from './step-flow';
 
 const NOW = '2026-10-17T12:00:00.000Z';
 const ENTRY = { now: NOW, sessions: 2 };
@@ -22,6 +29,7 @@ const step = (role: StepRole, verdict: Verdict | null | 'none' = 'none'): Workst
   startedAt: null,
   sessionFloor: 0,
   earlier: [],
+  sentBack: 0,
   result:
     verdict === 'none'
       ? null
@@ -176,5 +184,20 @@ describe('advanceSteps, sendBackSteps and restartStep', () => {
     const plan = step('plan', null);
     const moved = sendBackSteps([plan, step('plan_review', 'reject')], 1, 0, plan, ENTRY);
     expect(moved[0]?.earlier).toEqual([]);
+  });
+});
+
+describe('countSendBack and clearSendBacks', () => {
+  it('counts each send-back on the step whose rejection sent the work back', () => {
+    const steps = [step('plan'), step('plan_review', 'reject'), step('implement'), step('review')];
+    const twice = countSendBack(countSendBack(steps, 3), 3);
+    expect(countSendBack(twice, 1).map((s) => s.sentBack)).toEqual([0, 1, 0, 2]);
+  });
+
+  it('sets every count to 0 when the attempts start over, keeping the rounds', () => {
+    const rejected = { ...step('review', 'reject'), sentBack: 3 };
+    const cleared = clearSendBacks([{ ...step('plan_review'), sentBack: 1 }, rejected]);
+    expect(cleared.map((s) => s.sentBack)).toEqual([0, 0]);
+    expect(cleared[1]?.result).toEqual(rejected.result);
   });
 });
