@@ -3,10 +3,12 @@ import { describe, expect, it } from 'vitest';
 import { atPriority } from './index';
 
 describe('atPriority', () => {
-  it('runs lane work in the background on macOS, taskpolicy exec-ing the program', () => {
+  it('runs lane work clamped to utility and niced on macOS, below a gate, never in the background', () => {
+    // Background QoS (taskpolicy -b) also throttles disk and network, and slowed a lane's Claude Code
+    // start past the daemon's 15 s wait for its account (decisions/2026-10-30-lanes-at-utility-priority.md).
     expect(atPriority('lane', '/bin/claude', ['-p', 'x'], 'darwin')).toEqual({
-      file: '/usr/sbin/taskpolicy',
-      args: ['-b', '/bin/claude', '-p', 'x'],
+      file: '/usr/bin/nice',
+      args: ['-n', '10', '/usr/sbin/taskpolicy', '-c', 'utility', '/bin/claude', '-p', 'x'],
     });
   });
 
@@ -29,11 +31,11 @@ describe('atPriority', () => {
   });
 
   it('runs the program itself, so a gate wrapped for real still prints and exits as it does', () => {
-    // A gate's clamp is allowed inside a sandbox; a lane's background policy is not, so only the gate
-    // is run for real here (the lane's wrapper has the same shape and is checked above).
-    const launch = atPriority('gate', '/bin/sh', ['-c', 'echo hi; exit 3']);
-    const run = spawnSync(launch.file, [...launch.args], { encoding: 'utf8' });
-    expect(run.stdout).toBe('hi\n');
-    expect(run.status).toBe(3);
+    for (const tier of ['gate', 'lane'] as const) {
+      const launch = atPriority(tier, '/bin/sh', ['-c', 'echo hi; exit 3']);
+      const run = spawnSync(launch.file, [...launch.args], { encoding: 'utf8' });
+      expect(run.stdout).toBe('hi\n');
+      expect(run.status).toBe(3);
+    }
   });
 });
