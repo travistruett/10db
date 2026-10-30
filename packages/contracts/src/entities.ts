@@ -320,7 +320,9 @@ export const TaskPatchFields = z.object({
   flowId: FlowId.nullable(),
 });
 
-export const TaskPatch = TaskPatchFields.partial().refine((p) => Object.keys(p).length > 0, { message: 'Change at least one field' });
+export const TaskPatch = TaskPatchFields.partial().refine((p) => Object.keys(p).length > 0, {
+  message: 'Change at least one field',
+});
 export type TaskPatch = z.infer<typeof TaskPatch>;
 
 /** What the runner does the next time the workstream gets a lane. */
