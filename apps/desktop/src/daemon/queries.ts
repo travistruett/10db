@@ -164,13 +164,24 @@ export function useInbox() {
   return useQuery(inboxQueryOptions(client));
 }
 
-/** Resolved cards: the ones the builder answered and the ones 10db closed because their cause was gone. */
+/** How many resolved cards the Inbox fetches and shows, the most recent: the list only grows. */
+export const RESOLVED_SHOWN = 100;
+
+/**
+ * The most recent resolved cards, newest first: the ones the builder answered and the ones 10db
+ * closed because their cause was gone.
+ */
 export function useResolvedInbox() {
   const { client } = useDaemon();
   return useQuery({
     queryKey: queryKeys.inboxResolved,
     queryFn: async () =>
-      readJson(await client.inbox.$get({ query: { state: 'RESOLVED' } }), InboxList),
+      readJson(
+        await client.inbox.$get({
+          query: { state: 'RESOLVED', recent: String(RESOLVED_SHOWN) },
+        }),
+        InboxList,
+      ),
   });
 }
 

@@ -1,4 +1,4 @@
-import { realpathSync, renameSync } from 'node:fs';
+import { realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { InboxItemDto } from '@10db/contracts';
 import { createTestStore, insertBatch, listInbox, listProjects, seedProject } from '@10db/db';
@@ -14,6 +14,7 @@ import {
   createCheckoutTrustedHandler,
   createGitCardAnswers,
   createGitRefusalHandler,
+  refusedTrustCheckouts,
 } from './git-refusal';
 
 let close: () => void;
@@ -349,6 +350,50 @@ describe("the builder's answer to a re-trust card", () => {
     await createGitCardAnswers(git)(first, { choice: 'Trust the checkout as it is now' });
     await expect(git.currentBranch(repo.path)).rejects.toBeInstanceOf(GitTrustError);
     expect(listInbox(state.db)).toHaveLength(2);
+  });
+
+  describe('when the builder puts the checkout back instead of answering', () => {
+    const git$ = (...args: string[]) =>
+      execFileSync('git', ['-C', repo.path, ...args], { env: isolatedGitEnv(), stdio: 'pipe' });
+    const wired = () =>
+      createGit({
+        onRefused: handle,
+        onTrusted: createCheckoutTrustedHandler({ db: state.db, inbox }),
+        refusedCheckouts: refusedTrustCheckouts(state.db),
+        pins: createProjectPinStore(state, memoryPinStore()),
+      });
+
+    it('closes the changed-origin card on the next call that finds the pinned origin', async () => {
+      git$('remote', 'add', 'origin', 'https://github.com/acme/widgets.git');
+      const live = wired();
+      await live.head(repo.path);
+      git$('remote', 'set-url', 'origin', 'https://github.com/evil/widgets.git');
+      await expect(live.pinnedPushUrl(repo.path)).rejects.toBeInstanceOf(GitTrustError);
+      const raised = card();
+      git$('remote', 'set-url', 'origin', 'https://github.com/acme/widgets.git');
+      await live.head(repo.path);
+      expect(listInbox(state.db, { states: ['OPEN'] })).toEqual([]);
+      const resolved = listInbox(state.db, { states: ['RESOLVED'] });
+      expect(resolved).toHaveLength(1);
+      expect(resolved[0]).toMatchObject({
+        id: raised.id,
+        detail: { resolution: { by: '10db', reason: `${real} is trusted again` } },
+      });
+    });
+
+    it('closes a card raised before a restart, once the restarted daemon finds the checkout as pinned', async () => {
+      await wired().head(repo.path);
+      const aside = join(scratch.path, 'aside-git');
+      renameSync(join(repo.path, '.git'), aside);
+      writeFileSync(join(repo.path, '.git'), `gitdir: ${aside}\n`);
+      await expect(wired().head(repo.path)).rejects.toBeInstanceOf(GitTrustError);
+      rmSync(join(repo.path, '.git'));
+      renameSync(aside, join(repo.path, '.git'));
+      expect(refusedTrustCheckouts(state.db)).toEqual([real]);
+      await wired().head(repo.path);
+      expect(listInbox(state.db, { states: ['OPEN'] })).toEqual([]);
+      expect(listInbox(state.db, { states: ['RESOLVED'] })).toHaveLength(1);
+    });
   });
 
   it('keeps the pin in the database, so a restarted daemon still refuses', async () => {

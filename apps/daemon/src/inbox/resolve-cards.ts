@@ -9,7 +9,7 @@ import { listInbox, type DbReader } from '@10db/db';
 import type { InboxService } from './service';
 
 /** The open flags of `projectId` (every project when null) that said what makes them stale. */
-function cardsResolvedByEvent(
+export function cardsResolvedByEvent(
   db: DbReader,
   projectId: ProjectId | null,
 ): { readonly item: InboxItemDto; readonly when: CardResolvesWhen }[] {

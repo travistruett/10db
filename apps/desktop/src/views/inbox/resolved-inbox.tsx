@@ -3,9 +3,6 @@ import { Alert, Badge, Group, Paper, Stack, Text } from '@mantine/core';
 import { useResolvedInbox } from '../../daemon/queries';
 import { KIND_LABELS } from './permission-labels';
 
-/** The most recent resolved cards shown; the list only grows. */
-const SHOWN = 100;
-
 /** How the card was closed, in words: 10db's reason, the builder's answer, or just that it is done. */
 function resolvedHow(item: InboxItemDto): string {
   // The detail is JSON read back from the daemon: a boundary, so parse it.
@@ -18,9 +15,9 @@ function resolvedHow(item: InboxItemDto): string {
 /** The inbox's resolved view: cards that were answered, dismissed, or closed by 10db, newest first. */
 export function ResolvedInbox() {
   const resolved = useResolvedInbox();
-  const items = [...(resolved.data ?? [])]
-    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-    .slice(0, SHOWN);
+  // The daemon sends the most recent ones (RESOLVED_SHOWN); sorted here too, so the order never
+  // depends on the response's.
+  const items = [...(resolved.data ?? [])].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   return (
     <Stack gap="xs">
       {resolved.isError ? (

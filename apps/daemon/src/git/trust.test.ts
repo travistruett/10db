@@ -988,6 +988,48 @@ describe('the checkout is the one pinned for it', () => {
     if (now.kind !== 'moved') throw new Error('expected a moved checkout');
     await git.retrust(repo.path, now.candidate);
     expect(onTrusted).toHaveBeenCalledExactlyOnceWith(realpathSync(repo.path));
+    await git.head(repo.path);
+    expect(onTrusted).toHaveBeenCalledOnce();
+  });
+
+  it('tells onTrusted once when a changed origin is put back, and not while it still differs', async () => {
+    rawGit('remote', 'add', 'origin', 'https://github.com/acme/widgets.git');
+    const onTrusted = vi.fn();
+    const git = createGit({ onTrusted });
+    await git.head(repo.path);
+    rawGit('remote', 'set-url', 'origin', 'https://github.com/evil/widgets.git');
+    expect((await refusal(git.pinnedPushUrl(repo.path))).detail.kind).toBe('origin');
+    // head checks no origin, so it passes, but the checkout is not what was pinned yet.
+    await git.head(repo.path);
+    expect(onTrusted).not.toHaveBeenCalled();
+    rawGit('remote', 'set-url', 'origin', 'https://github.com/acme/widgets.git');
+    await git.head(repo.path);
+    expect(onTrusted).toHaveBeenCalledExactlyOnceWith(realpathSync(repo.path));
+    await git.head(repo.path);
+    expect(onTrusted).toHaveBeenCalledOnce();
+  });
+
+  it('tells onTrusted when a moved .git is put back', async () => {
+    const onTrusted = vi.fn();
+    const git = createGit({ onTrusted });
+    await git.head(repo.path);
+    const aside = join(scratch.path, 'aside-git');
+    renameSync(join(repo.path, '.git'), aside);
+    writeFileSync(join(repo.path, '.git'), `gitdir: ${aside}\n`);
+    expect((await refusal(git.head(repo.path))).detail.kind).toBe('moved');
+    rmSync(join(repo.path, '.git'));
+    renameSync(aside, join(repo.path, '.git'));
+    await git.head(repo.path);
+    expect(onTrusted).toHaveBeenCalledExactlyOnceWith(realpathSync(repo.path));
+  });
+
+  it('tells onTrusted of a checkout refused before it started, named in refusedCheckouts', async () => {
+    const pins = memoryPinStore();
+    await createGit({ pins }).head(repo.path);
+    const onTrusted = vi.fn();
+    const git = createGit({ pins, onTrusted, refusedCheckouts: [realpathSync(repo.path)] });
+    await git.head(repo.path);
+    expect(onTrusted).toHaveBeenCalledExactlyOnceWith(realpathSync(repo.path));
   });
 
   it('says what differs when a replaced .git sits at the same path', async () => {

@@ -689,23 +689,29 @@ describe('the resolved view', () => {
     updatedAt: '2026-10-30T11:00:00.000Z',
   });
 
-  function serveBoth(open: InboxItemDto[], resolved: InboxItemDto[]): void {
+  /** Serves the open and resolved lists; returns the `recent` count each resolved request asked for. */
+  function serveBoth(open: InboxItemDto[], resolved: InboxItemDto[]): (string | null)[] {
+    const recent: (string | null)[] = [];
     serve(
-      http.get(daemonUrl('/inbox'), ({ request }) =>
-        HttpResponse.json(
-          new URL(request.url).searchParams.get('state') === 'RESOLVED' ? resolved : open,
-        ),
-      ),
+      http.get(daemonUrl('/inbox'), ({ request }) => {
+        const params = new URL(request.url).searchParams;
+        if (params.get('state') !== 'RESOLVED') return HttpResponse.json(open);
+        recent.push(params.get('recent'));
+        return HttpResponse.json(resolved);
+      }),
     );
+    return recent;
   }
 
   it('lists resolved cards, newest first, saying who closed each and why', async () => {
-    serveBoth([color], [closedBy10db, answered]);
+    const recent = serveBoth([color], [closedBy10db, answered]);
     renderApp('/inbox');
     await screen.findByText('Which badge color?');
     fireEvent.click(screen.getByRole('tab', { name: 'Resolved' }));
 
     const rows = await screen.findAllByTestId('resolved-card');
+    // Only the most recent ones are fetched: the resolved list only grows.
+    expect(recent).toEqual(['100']);
     expect(rows.map((row) => row.textContent)).toEqual([
       expect.stringContaining('Which badge color?'),
       expect.stringContaining('Batch not started: 10db will not run git in /repo'),

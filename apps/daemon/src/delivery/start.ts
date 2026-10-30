@@ -38,6 +38,7 @@ import { batchBranchName } from './branch-name';
 import { forTasks, startCards, wrongBranchCard, type Card } from './cards';
 import { batchCheckout } from './checkout';
 import { ghCall, networkCall, raise, type DeliveryContext } from './context';
+import { forgetCuttingTasks, recordCuttingTasks } from './cutting-tasks';
 import { unfinishedDependencies, unmergedDependencies, type BlockedTask } from './deps';
 import { groupByDependency } from './grouping';
 import { jobKey, JobQueue } from './jobs';
@@ -114,9 +115,15 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
       ctx.jobs.run(queue, (signal) => join(existing.id, tasks, plans, inBatch, signal));
       return existing;
     }
-    const batch = ctx.state.write((w) =>
-      insertBatch(w, { projectId: project.id, title: input.title, baseBranch: project.baseBranch }),
-    );
+    const batch = ctx.state.write((w) => {
+      const inserted = insertBatch(w, {
+        projectId: project.id,
+        title: input.title,
+        baseBranch: project.baseBranch,
+      });
+      recordCuttingTasks(w, inserted.id, plans.keys());
+      return inserted;
+    });
     ctx.jobs.run(queue, (signal) => cut(batch.id, tasks, plans, inBatch, signal));
     return batch;
   }
@@ -211,7 +218,11 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
 
   function refuseUnfinished(projectId: ProjectId, blocked: readonly BlockedTask[]): void {
     if (blocked.length === 0) return;
-    const card = startCards.unfinishedDependencies(blocked);
+    // Names the blocked tasks, so it folds on a repeat and closes once they start.
+    const card = forTasks(
+      startCards.unfinishedDependencies(blocked),
+      blocked.map((b) => b.task.id),
+    );
     raise(ctx.inbox, projectId, card);
     throw new ConflictError(`${card.title}. ${card.body}`);
   }
@@ -244,6 +255,7 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
     const refuse = (card: Card): void => {
       ctx.state.write((w) => {
         deleteCuttingBatch(w, batchId, card.title);
+        forgetCuttingTasks(w, batchId);
       });
       raise(ctx.inbox, project.id, forTasks(card, plans.keys()));
     };
@@ -322,6 +334,7 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
         });
         transitionBatch(w, batchId, { to: BatchState.Open, reason: 'branch cut' });
         for (const [taskId, plan] of plans) insertPlannedWorkstream(w, taskId, plan, batchId);
+        forgetCuttingTasks(w, batchId);
       });
       ctx.logger.info(
         { batchId, projectId: project.id, branch, baseSha, repo },

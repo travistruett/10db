@@ -422,6 +422,19 @@ describe('dependencies', () => {
     expect(batch.state).toBe('OPEN');
   });
 
+  it('closes the unfinished-work card by itself once the task it refused starts', async () => {
+    const alpha = h.addTask('Alpha');
+    const beta = h.addTask('Beta', { areas: ['ui'], dependsOn: [alpha.id] });
+    expect(() => h.starter.startTask(beta.id)).toThrow(ConflictError);
+    const card = h.only(h.cards());
+    await started('Both', alpha, beta);
+    expect(h.cards()).toEqual([]);
+    expect(h.only(listInbox(h.store.db, { states: ['RESOLVED'] }))).toMatchObject({
+      id: card.id,
+      detail: { resolution: { by: '10db', reason: 'Beta started' } },
+    });
+  });
+
   it("refuses a task whose dependency finished in a batch whose pull request isn't merged, until it is", async () => {
     const alpha = h.addTask('Alpha');
     const first = await started('First', alpha);

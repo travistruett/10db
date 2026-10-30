@@ -153,6 +153,26 @@ describe('inbox', () => {
     ).toThrow(/not found|inbox item/i);
   });
 
+  it('lists only the most recently updated items, newest first, when asked for the recent ones', () => {
+    let tick = 0;
+    close();
+    ({ store, close } = createTestStore(() => new Date(Date.UTC(2026, 0, 1, 0, 0, tick++))));
+    const project = seedProject(store);
+    const ids = ['a', 'b', 'c'].map(
+      (foldKey) =>
+        store.write((ctx) => insertInboxItem(ctx, question(project.id, { foldKey }))).value.id,
+    );
+    // The oldest is updated last, so it is the newest now.
+    store.write((ctx) => {
+      updateInboxItem(ctx, ids[0] ?? mintId('InboxItem'), { state: 'RESOLVED' });
+    });
+    expect(listInbox(store.db, { recent: 2 }).map((i) => i.id)).toEqual([ids[0], ids[2]]);
+    expect(listInbox(store.db, { states: ['OPEN'], recent: 5 }).map((i) => i.id)).toEqual([
+      ids[2],
+      ids[1],
+    ]);
+  });
+
   it('sorts high urgency first', () => {
     const project = seedProject(store);
     store.write((ctx) =>

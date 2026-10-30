@@ -7,7 +7,7 @@ import {
 import type { DbReader } from '@10db/db';
 import { z } from 'zod';
 import { CheckoutPin, GitTrustError, trustCard, type Git } from '../git';
-import { resolveStaleCards, type InboxService } from '../inbox';
+import { cardsResolvedByEvent, resolveStaleCards, type InboxService } from '../inbox';
 import type { Logger } from '../log';
 import { projectAt } from './checkout-pins';
 
@@ -70,6 +70,17 @@ export function createCheckoutTrustedHandler(deps: {
       when.event === 'checkout_trusted' && when.repo === repo ? `${repo} is trusted again` : null,
     );
   };
+}
+
+/**
+ * The checkouts whose cards still offer to trust them, at startup: `Git` looks at each again on its
+ * next call, so a card raised before a restart closes too once the builder put the checkout back.
+ */
+export function refusedTrustCheckouts(db: DbReader): string[] {
+  const repos = new Set<string>();
+  for (const { when } of cardsResolvedByEvent(db, null))
+    if (when.event === 'checkout_trusted') repos.add(when.repo);
+  return [...repos];
 }
 
 /**

@@ -323,10 +323,16 @@ export interface GitOptions {
   /** Called with every refusal, so the builder hears of it whoever called. */
   onRefused?(error: GitTrustError): void;
   /**
-   * Called with the real path of a checkout once the builder's Trust answer pinned it, so the cards
-   * that refused it can go.
+   * Called with the real path of a checkout refused for a moved git dir or a changed origin once it
+   * is trusted again, so the cards that refused it can go: the builder's Trust answer pinned it, or
+   * a later call found it exactly as pinned (the move or the origin was put back). Once per refusal.
    */
   onTrusted?(repo: string): void;
+  /**
+   * Real paths of checkouts refused before this `Git` was made whose cards are still open, so a
+   * call that finds one as pinned again tells `onTrusted` too.
+   */
+  refusedCheckouts?: Iterable<string>;
   /** Where pins persist; the default lasts as long as this `Git`. */
   pins?: PinStore;
   /** The git to run for every call, as `resolveGit` found it; `git` on PATH otherwise. */
@@ -509,11 +515,36 @@ export function createGit(opts: GitOptions = {}): Git {
   const fetches = new Map<string, Promise<unknown>>();
   const pins = opts.pins ?? memoryPinStore();
   const bin = opts.bin ?? 'git';
+  // Checkouts refused for a state the builder can trust (a moved git dir, a changed origin) and not
+  // trusted since: a call that finds one exactly as pinned again tells `onTrusted`. Kept in memory,
+  // so the check costs a lookup on every other call.
+  const refused = new Set(opts.refusedCheckouts);
 
   function refusal(repo: string, detail: GitTrustDetail): GitTrustError {
     const error = new GitTrustError(repo, detail);
+    if (detail.kind === GitTrustFailure.Moved || detail.kind === GitTrustFailure.Origin)
+      refused.add(repo);
     opts.onRefused?.(error);
     return error;
+  }
+
+  /** Tells `onTrusted` once that `real` is trusted again; later calls for it do nothing. */
+  function trustedAgain(real: string): void {
+    if (refused.delete(real)) opts.onTrusted?.(real);
+  }
+
+  /**
+   * After a call passed the pin check for a refused checkout: whether its origin is the pinned one
+   * too, as `retrust` compares it. A read that fails leaves it refused, and the call goes on.
+   */
+  async function settleRefused(real: string, pin: CheckoutPin): Promise<void> {
+    try {
+      const fetchUrl = await pinnableUrl(observed(real), false);
+      const pushUrl = await pinnableUrl(observed(real), true);
+      if (fetchUrl === pin.fetchUrl && pushUrl === pin.pushUrl) trustedAgain(real);
+    } catch {
+      // Still refused: the next call looks again.
+    }
   }
 
   /** Runs `fn` after every earlier call under `key` in `held` has settled. */
@@ -698,6 +729,7 @@ export function createGit(opts: GitOptions = {}): Git {
       if (readIfPresent(file).trim() !== '')
         throw refusal(real, { kind: GitTrustFailure.Attributes, file });
     }
+    if (refused.has(real)) await settleRefused(real, pin);
     return { real, dirs, pin, env: { GIT_DIR: pin.gitDir, GIT_WORK_TREE: real } };
   }
 
@@ -1984,7 +2016,9 @@ export function createGit(opts: GitOptions = {}): Git {
       if (!same) throw mismatch(real, candidate, now);
       // `now` is the candidate's state with the device number the volume has today.
       pins.set(real, now);
-      opts.onTrusted?.(real);
+      // Told even when no refusal since this start is known: the builder answered a card.
+      refused.add(real);
+      trustedAgain(real);
     },
   };
 }
