@@ -61,7 +61,21 @@ a "Claim deadlock" card naming both tasks, and the agent decides (finish and rel
 checked when the wait starts and again whenever the holder changes. The waits it reads are the daemon's live
 waits, held in memory, not the cards: dismissing a wait card does not hide its wait, and a wait ends with the
 daemon that ran it. Startup withdraws the wait cards a stopped daemon left (`withdrawStaleClaimWaits`), and a new
-wait rewrites any card left under its fold key.
+wait rewrites any card left under its fold key. The deadlock card has a fold key per workstream and claim, so an
+agent asking again while the deadlock holds rewrites the one card rather than raising a second; a later ask for
+that claim that is granted, or that starts a plain wait, withdraws it, since the deadlock it describes is gone.
+
+**Lanes.** A waiting task stays `RUNNING` and keeps its lane, but the holder gives its lane up at every step
+boundary (a passed or failed gate, a crash retry, an answer after parking) while keeping its claims until `DONE`.
+With every lane of its project, its account or the machine held by tasks waiting on it, the holder could never
+launch again, so the waits would never end and nothing would call it a deadlock. So the scheduler launches a
+`QUEUED` workstream that some live wait is waiting on over the project's `maxLanes`, the account's `laneCap` and
+the global cap (`awaitedHolders`, read from the same `ClaimWaits`); the rest of its launch checks (account
+readiness and limits, branch, dependencies, a parked task) still apply, and each of those already raises its own
+card or clears on its own. A wait that starts, or whose holder changes, asks the scheduler to tick at once. The
+overshoot is bounded by the number of holders being waited on, and each such lane ends by freeing a claim
+someone is waiting for. A holder paused for its account's limit or waiting on the builder is not launched: it
+goes back to `QUEUED` when the account resumes or the builder answers, and the wait card names it meanwhile.
 
 **Changing a scope.** A claim row keeps the scope it was taken in, so a held hazard whose scope changed would be
 looked for in the other scope and granted to a second task. Saving a project that changes a hazard's scope
@@ -84,7 +98,10 @@ tool call and the workstream stays `RUNNING`); pushing the release to the waiter
 waiting task, with no new channel between the claims store and the MCP handlers); a call that waits until the
 claim frees however long it takes (Claude Code fails it at the tool timeout and the agent carries on without
 the claim); reading waits from the open cards for the deadlock check (the builder can dismiss one, and one
-outlives a crashed daemon).
+outlives a crashed daemon); not counting a waiting task against the lane caps (every waiter frees a lane, so
+the scheduler would launch queued work without bound while waiters stay alive, and they all resume at once when
+the claim frees); refusing the claim as a deadlock when the holder can't get a lane (it would hand the agent back
+the choice to carry on without the claim, for a wait that ends once the holder runs).
 
 Not done: the Board's proposal (`picker/pick.ts`) still treats two tasks that name the same hazard as clashing,
 since it does not yet know which batch a pick will join; the builder can still start both. A waiting task shows no

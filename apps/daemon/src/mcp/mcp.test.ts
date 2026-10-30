@@ -34,8 +34,7 @@ import { createGit } from '../git';
 import { protectedPaths } from '../guard';
 import { createInboxService, type InboxService } from '../inbox';
 import type { Logger } from '../log';
-import { withdrawStaleClaimWaits } from './claim-wait';
-import { createMcpHandler, mintSessionToken } from './index';
+import { ClaimWaits, createMcpHandler, mintSessionToken, withdrawStaleClaimWaits } from './index';
 
 const GUARDED = protectedPaths({
   dataDir: join(tmpdir(), 'mcp-test-data'),
@@ -57,6 +56,10 @@ let workstreamBranch: string | null = 'main';
 let sessionAbort = new AbortController();
 /** How long one request_claim call waits before answering "still waiting"; a test shortens it. */
 let claimWaitSliceMs = 60_000;
+/** The handler's claim waits, which the daemon also hands the scheduler. */
+let claimWaits: ClaimWaits;
+/** How many times a wait started and asked the scheduler to look again. */
+let waitsStarted = 0;
 
 interface LogEntry {
   readonly obj: object;
@@ -87,6 +90,12 @@ beforeEach(async () => {
   base = test.store;
   state = createStateStore(test.store, createEventBus());
   inbox = createInboxService({ state, onParkedAnswer: () => undefined });
+  waitsStarted = 0;
+  claimWaits = new ClaimWaits({
+    onWait: () => {
+      waitsStarted += 1;
+    },
+  });
   const handler = createMcpHandler({
     protectedPaths: GUARDED,
     state,
@@ -95,6 +104,7 @@ beforeEach(async () => {
     log: capturingLogger,
     waitObserverFor: () => undefined,
     sessionSignal: () => sessionAbort.signal,
+    claimWaits,
     claimPollMs: 5,
     get claimWaitSliceMs() {
       return claimWaitSliceMs;
@@ -584,6 +594,60 @@ describe('MCP tools', () => {
     expect(granted.json).toMatchObject({ granted: true });
     expect(activeClaims(state.db, a.workstream.id).map((c) => c.name)).toContain('ui');
     expect(openCards()).toEqual([]);
+  });
+
+  it('names the holder it waits on to the scheduler, and asks it to look again, until the wait ends', async () => {
+    const a = await seedSession(['api']);
+    const other = seedWorkstream(base, { project: a.project, title: 'Beta', areas: ['ui'] });
+    holdClaim(a.project, other, { kind: 'area', name: 'ui' });
+    expect(claimWaits.awaitedHolders()).toEqual(new Set());
+    const pending = a.call('request_claim', {
+      opId: 'op-awaited',
+      kind: 'area',
+      name: 'ui',
+      reason: 'badge',
+    });
+    await vi.waitFor(() => {
+      expect(openCards()).toHaveLength(1);
+    });
+    expect(claimWaits.awaitedHolders()).toEqual(new Set([other.workstream.id]));
+    expect(waitsStarted).toBe(1);
+    releaseHolder(other);
+    expect((await pending).json).toMatchObject({ granted: true });
+    expect(claimWaits.awaitedHolders()).toEqual(new Set());
+  });
+
+  it('keeps one deadlock card per claim, and withdraws it once a later wait for the claim needs none', async () => {
+    const a = await seedSession(['api']);
+    const b = await seedSession(['ui'], undefined, { project: a.project, title: 'Beta' });
+    const waiting = a.call('request_claim', {
+      opId: 'op-dfold-a',
+      kind: 'area',
+      name: 'ui',
+      reason: 'x',
+    });
+    await vi.waitFor(() => {
+      expect(openCards()).toHaveLength(1);
+    });
+    for (const opId of ['op-dfold-b1', 'op-dfold-b2'])
+      expect(
+        (await b.call('request_claim', { opId, kind: 'area', name: 'api', reason: 'x' })).json,
+      ).toMatchObject({ granted: false, waiting: false });
+    expect(openCards().filter((c) => c.title === 'Claim deadlock: area api')).toHaveLength(1);
+    // Beta lets ui go, so Alpha gets it and waits for nothing; Beta's next ask is a plain wait.
+    state.write((ctx) => releaseClaims(ctx, b.workstream.id));
+    expect((await waiting).json).toMatchObject({ granted: true });
+    const again = b.call('request_claim', {
+      opId: 'op-dfold-b3',
+      kind: 'area',
+      name: 'api',
+      reason: 'x',
+    });
+    await vi.waitFor(() => {
+      expect(openCards().map((c) => c.title)).toEqual(['Waiting for area api']);
+    });
+    sessionAbort.abort();
+    await again;
   });
 
   it('answers a retry of a finished wait from the recorded result', async () => {

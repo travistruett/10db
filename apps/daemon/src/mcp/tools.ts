@@ -51,6 +51,8 @@ export interface McpDeps {
   readonly log: Logger;
   waitObserverFor(sessionId: SessionId): WaitObserver | undefined;
   sessionSignal(sessionId: SessionId): AbortSignal | undefined;
+  /** Every session's claim waits; the daemon shares them with the scheduler. */
+  readonly claimWaits?: ClaimWaits;
   /** How often a task waiting for a claim looks again; tests shorten it. */
   readonly claimPollMs?: number;
   /** How long one request_claim call waits before answering "still waiting"; tests shorten it. */

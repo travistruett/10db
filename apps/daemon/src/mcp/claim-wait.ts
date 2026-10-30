@@ -11,6 +11,7 @@ import {
 import {
   acquireClaims,
   copyHazardNames,
+  findOpenByFoldKey,
   getProject,
   getTask,
   getWorkstream,
@@ -64,6 +65,7 @@ export interface LiveWait {
 }
 
 const WAIT_CARD = 'claim-wait';
+const DEADLOCK_CARD = 'claim-deadlock';
 
 /**
  * The claim waits in progress in this daemon. They live in memory, not in the cards, because a wait
@@ -72,6 +74,12 @@ const WAIT_CARD = 'claim-wait';
  */
 export class ClaimWaits {
   readonly #live = new Map<string, LiveWait>();
+  readonly #onWait: () => void;
+
+  /** `onWait` runs when a wait starts waiting on a holder; the daemon asks the scheduler to look again. */
+  constructor(opts: { readonly onWait?: () => void } = {}) {
+    this.#onWait = opts.onWait ?? (() => undefined);
+  }
 
   /** Joins the wait for this claim, or starts one; the returned wait's `done` never rejects unhandled. */
   join(a: Asking): LiveWait {
@@ -86,6 +94,22 @@ export class ClaimWaits {
     const entry = { state, done };
     this.#live.set(key, entry);
     return entry;
+  }
+
+  /** A wait started waiting on a holder, or on a new one. */
+  waitingOn(): void {
+    this.#onWait();
+  }
+
+  /**
+   * Every workstream some wait is waiting on now. The scheduler launches such a holder over the lane
+   * caps: its waiters keep their lanes, and could otherwise fill every lane it needs to finish and free
+   * the claim.
+   */
+  awaitedHolders(): ReadonlySet<WorkstreamId> {
+    const out = new Set<WorkstreamId>();
+    for (const { state } of this.#live.values()) if (state.heldBy !== null) out.add(state.heldBy);
+    return out;
   }
 
   /** The workstreams `workstreamId` is waiting on now. */
@@ -152,6 +176,9 @@ function waitBody(a: Asking, heldBy: WorkstreamId): string {
   ].join(' ');
 }
 
+const deadlockKey = (a: Asking): string => `${DEADLOCK_CARD}:${a.workstreamId}:${a.kind}:${a.name}`;
+
+/** One card per claim: a deadlock found again rewrites it, so the agent's retries raise no second card. */
 function deadlock(a: Asking, heldBy: WorkstreamId): ClaimResult {
   const db = a.state.db;
   const card = a.inbox.flag({
@@ -160,8 +187,16 @@ function deadlock(a: Asking, heldBy: WorkstreamId): ClaimResult {
     title: `Claim deadlock: ${a.kind} ${a.name}`,
     body: `Task "${taskTitleOf(db, heldBy)}" holds ${a.kind} ${a.name} and is itself waiting for a claim that task "${taskTitleOf(db, a.workstreamId)}" holds, so neither can go on. Reason given: ${a.reason}`,
     detail: { heldBy },
+    foldKey: deadlockKey(a),
+    refresh: true,
   });
   return { granted: false, heldBy, inboxId: card.id };
+}
+
+/** A deadlock card for this claim describes a deadlock that is gone once a later ask needs no refusal. */
+function withdrawDeadlock(a: Asking): void {
+  const card = findOpenByFoldKey(a.state.db, a.projectId, deadlockKey(a));
+  if (card) a.inbox.withdraw(card.id);
 }
 
 function sleep(ms: number, signal: AbortSignal): Promise<void> {
@@ -182,14 +217,19 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
  * the holder's task and says this task is waiting; it is withdrawn when the wait ends. When the holder
  * itself waits, through any chain, for something this task holds (checked again whenever the holder
  * changes), neither would ever move: the claim is refused with a card saying so, and the agent decides.
+ * Starting to wait on a holder, or on a new one, tells `waits`, so the scheduler can give that holder a lane.
  * Runs synchronously up to its first wait, so `wait` names the holder and card by the time
  * `ClaimWaits.join` returns.
  */
 async function claimOrWait(a: Asking, wait: WaitState, waits: ClaimWaits): Promise<ClaimResult> {
   let outcome = tryAcquire(a);
-  if (outcome.ok) return grantedFrom(a, outcome.claims);
+  if (outcome.ok) {
+    withdrawDeadlock(a);
+    return grantedFrom(a, outcome.claims);
+  }
   let heldBy = outcome.conflict.heldBy;
   if (waits.waitsOn(heldBy, a.workstreamId)) return deadlock(a, heldBy);
+  withdrawDeadlock(a);
   // A card a stopped daemon left with this fold key is rewritten to say who holds the claim now.
   const card: InboxItemDto = a.inbox.flag({
     projectId: a.projectId,
@@ -202,6 +242,7 @@ async function claimOrWait(a: Asking, wait: WaitState, waits: ClaimWaits): Promi
   });
   wait.heldBy = heldBy;
   wait.inboxId = card.id;
+  waits.waitingOn();
   try {
     while (!outcome.ok) {
       await sleep(a.pollMs, a.signal);
@@ -218,6 +259,7 @@ async function claimOrWait(a: Asking, wait: WaitState, waits: ClaimWaits): Promi
           options: card.options,
           detail: waitDetail(a, heldBy),
         });
+        waits.waitingOn();
       }
     }
   } finally {

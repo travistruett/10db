@@ -82,11 +82,12 @@ afterEach(() => {
   close();
 });
 
-function scheduler(caps = { global: 4 }) {
+function scheduler(caps = { global: 4 }, awaited: ReadonlySet<WorkstreamId> = new Set()) {
   return createScheduler({
     state,
     clock,
     caps,
+    awaitedHolders: () => awaited,
     instanceId: 'daemon-1',
     leaseMs: 60_000,
     tickMs: 2_000,
@@ -263,6 +264,20 @@ describe('scheduler', () => {
     moveWorkstream(first.id, 'QUEUED');
     expect(await scheduler().tick()).toBe(0);
     expect(getWorkstream(store.db, first.id).state).toBe('QUEUED');
+  });
+
+  it('launches a queued task a running task waits on for a claim, over every lane cap', async () => {
+    const first = queue({ maxLanes: 2 });
+    const second = add(first.project, ['api']);
+    const holder = add(first.project, ['ui']);
+    state.write((ctx) => patchAccount(ctx, first.project.accountId, { laneCap: 2 }));
+    // Both lanes are held by tasks that wait inside request_claim for a claim the holder keeps.
+    moveWorkstream(first.workstream.id, 'STARTING');
+    moveWorkstream(second.workstream.id, 'STARTING');
+    expect(await scheduler({ global: 2 }).tick()).toBe(0);
+    expect(await scheduler({ global: 2 }, new Set([holder.workstream.id])).tick()).toBe(1);
+    expect(launched.map((l) => l.id)).toEqual([holder.workstream.id]);
+    expect(getWorkstream(store.db, holder.workstream.id).state).toBe('STARTING');
   });
 
   it('waits for dependencies', async () => {

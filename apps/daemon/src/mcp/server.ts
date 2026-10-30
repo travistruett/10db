@@ -30,7 +30,7 @@ function errorText(error: unknown, deps: McpDeps, tool: string, args: unknown): 
 /** Stateless streamable-HTTP MCP endpoint; the bearer token identifies the calling session. */
 export function createMcpHandler(deps: McpDeps): (req: Request) => Promise<Response> {
   // Every session's claim waits in one place, so a deadlock check sees the waits of all of them.
-  const claimWaits = new ClaimWaits();
+  const claimWaits = deps.claimWaits ?? new ClaimWaits();
   return async (req) => {
     const token = /^Bearer (.+)$/.exec(req.headers.get('authorization') ?? '')?.[1];
     const session = token ? getLiveSessionByTokenHash(deps.state.db, hashToken(token)) : undefined;
