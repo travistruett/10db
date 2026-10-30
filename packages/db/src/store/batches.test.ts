@@ -19,6 +19,7 @@ import {
   clearWorktreePath,
   findBatchByWorktreePath,
   getProject,
+  getTask,
   getWorkstream,
   insertBatch,
   insertTask,
@@ -27,6 +28,7 @@ import {
   listBatches,
   listCheckoutReturns,
   listLiveWorktrees,
+  listTasks,
   listUnfinishedBatches,
   listProjectViews,
   listWorkstreams,
@@ -34,6 +36,7 @@ import {
   patchProject,
   seedAccount,
   seedProject,
+  setTaskStatus,
   transitionBatch,
   transitionWorkstream,
   type Store,
@@ -220,6 +223,30 @@ describe('batches', () => {
         transitionWorkstream(ctx, ws.id, { to, fence: null });
     });
     expect(latestDoneWorkstream(store.db, task.id)?.batchId).toBe(batch.id);
+  });
+
+  it("keeps a finished task out of Done while its batch ships, and moves it once it's shipped", () => {
+    const project = prProject();
+    const batch = newBatch(project.id);
+    move(batch.id, 'OPEN');
+    const task = addTask(project.id);
+    const ws = store.write((ctx) => insertWorkstream(ctx, task.id, { batchId: batch.id })).value;
+    store.write((ctx) => {
+      for (const to of ['STARTING', 'RUNNING', 'VERIFYING', 'DONE'] as const)
+        transitionWorkstream(ctx, ws.id, { to, fence: null });
+      setTaskStatus(ctx, task.id, 'done');
+    });
+    const column = () => getTask(store.db, task.id).boardStatus;
+    expect(column()).toBe('done');
+    move(batch.id, 'SHIPPING');
+    expect(column()).toBe('in_progress');
+    move(batch.id, 'FAILED');
+    expect(column()).toBe('blocked');
+    move(batch.id, 'SHIPPING');
+    expect(column()).toBe('in_progress');
+    move(batch.id, 'SHIPPED');
+    expect(column()).toBe('done');
+    expect(listTasks(store.db, project.id).map((t) => t.boardStatus)).toEqual(['done']);
   });
 });
 

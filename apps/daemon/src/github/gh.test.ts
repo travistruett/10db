@@ -79,8 +79,13 @@ describe('createGh', () => {
       kind: 'timeout',
     },
     {
-      name: 'a failure that is not a sign-out',
+      name: 'GitHub out of reach, which is not a sign-out',
       answer: { exitCode: 1, stderr: 'dial tcp: no such host' },
+      kind: 'unreachable',
+    },
+    {
+      name: 'a failure that is not a sign-out',
+      answer: { exitCode: 1, stderr: 'HTTP 502' },
       kind: 'failed',
     },
   ])('authLogin: $name', async ({ answer, expected, kind }) => {

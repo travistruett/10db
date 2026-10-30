@@ -667,6 +667,7 @@ describe('batch routes', () => {
     baseSha: null,
     repo: null,
     prUrl: null,
+    pr: null,
     gateExitCode: null,
     gateLogPath: null,
     failure: null,

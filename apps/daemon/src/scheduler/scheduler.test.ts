@@ -112,6 +112,13 @@ function scheduler(caps = { global: 4 }) {
               kind: 'moved',
               pinned: '/a/.git',
               found: '/b/.git',
+              pin: {
+                gitDir: '/a/.git',
+                commonDir: '/a/.git',
+                id: '1:2/1:2',
+                fetchUrl: null,
+                pushUrl: null,
+              },
               candidate: {
                 gitDir: '/b/.git',
                 commonDir: '/b/.git',

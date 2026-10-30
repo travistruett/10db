@@ -15,6 +15,7 @@ const batch = BatchDto.parse({
   baseSha: 'a'.repeat(40),
   repo: 'acme/widgets',
   prUrl: null,
+  pr: null,
   gateExitCode: 2,
   gateLogPath: '/data/logs/gate/b.log',
   failure: 'gate_failed',

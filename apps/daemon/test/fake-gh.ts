@@ -1,5 +1,13 @@
 import { readFileSync } from 'node:fs';
-import { GhError, PrState, type Gh, type PullRequest } from '../src/github';
+import {
+  GhError,
+  PrState,
+  summariseChecks,
+  type CheckRollupEntry,
+  type Gh,
+  type PullRequest,
+  type PullRequestStatus,
+} from '../src/github';
 
 export type GhMethod =
   | 'authStatus'
@@ -7,6 +15,7 @@ export type GhMethod =
   | 'repoView'
   | 'repoAllowsAutoMerge'
   | 'prView'
+  | 'prStatus'
   | 'prCreate'
   | 'prAutoMerge';
 export interface PrCreateCall {
@@ -26,14 +35,25 @@ export class FakeGh implements Gh {
   readonly autoMerged: string[] = [];
   /** One error per method, thrown by its next call only. */
   readonly failNext = new Map<GhMethod, GhError>();
+  /**
+   * Status reads of these pull request urls fail with their error, call after call, until removed:
+   * a pull request gh can't read while it reads the others.
+   */
+  readonly failRead = new Map<string, GhError>();
   readonly calls: { readonly method: GhMethod; readonly args: unknown }[] = [];
   private readonly byRef = new Map<
     string,
-    { pr: { url: string; state: PrState }; body: string; create: PrCreateCall | null }
+    {
+      pr: { url: string; state: PrState };
+      body: string;
+      create: PrCreateCall | null;
+      rollup: readonly CheckRollupEntry[];
+    }
   >();
   private next = 1;
 
-  private call<T>(method: GhMethod, args: unknown, answer: () => T): Promise<T> {
+  /** `fails` is this call's own failure, after gh's: a signed-out gh fails every call the same way. */
+  private call<T>(method: GhMethod, args: unknown, answer: () => T, fails?: GhError): Promise<T> {
     this.calls.push({ method, args });
     const queued = this.failNext.get(method);
     if (queued) {
@@ -44,6 +64,7 @@ export class FakeGh implements Gh {
       return Promise.reject(new GhError('not_installed', 'gh is not installed'));
     if (this.auth === 'signed_out')
       return Promise.reject(new GhError('signed_out', 'gh is not signed in'));
+    if (fails) return Promise.reject(fails);
     return Promise.resolve(answer());
   }
 
@@ -69,6 +90,21 @@ export class FakeGh implements Gh {
       const found = this.byRef.get(input.ref);
       return found ? { ...found.pr } : null;
     });
+  }
+
+  prStatus(input: {
+    readonly repo: string;
+    readonly ref: string;
+  }): Promise<PullRequestStatus | null> {
+    return this.call(
+      'prStatus',
+      input,
+      () => {
+        const found = this.byRef.get(input.ref);
+        return found ? { ...found.pr, ...summariseChecks(found.rollup) } : null;
+      },
+      this.failRead.get(input.ref),
+    );
   }
 
   prCreate(input: {
@@ -105,6 +141,13 @@ export class FakeGh implements Gh {
     found.pr.state = state;
   }
 
+  /** The checks the PR's rollup shows from now on; a new PR has none. */
+  setChecks(url: string, rollup: readonly CheckRollupEntry[]): void {
+    const found = this.byRef.get(url);
+    if (!found) throw new Error(`no PR ${url}`);
+    found.rollup = rollup;
+  }
+
   prCreates(): PrCreateCall[] {
     return [...new Set(this.byRef.values())].flatMap((e) => (e.create ? [e.create] : []));
   }
@@ -115,7 +158,7 @@ export class FakeGh implements Gh {
 
   private add(branch: string, state: PrState, body: string, create: PrCreateCall | null): string {
     const url = `https://github.com/${this.repo}/pull/${String(this.next++)}`;
-    const entry = { pr: { url, state }, body, create };
+    const entry = { pr: { url, state }, body, create, rollup: [] };
     this.byRef.set(branch, entry);
     this.byRef.set(url, entry);
     return url;

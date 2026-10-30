@@ -6,6 +6,7 @@ import { baseHandlers, daemonUrl, eventStream, renderApp, server } from '../../t
 import {
   batchDto,
   boardColumnDto,
+  inboxItemDto,
   projectDto,
   projectViewDto,
   stepDto,
@@ -351,7 +352,7 @@ describe('BoardView', () => {
     ).toBeTruthy();
   });
 
-  it('titles a refused start as a start, not a move', async () => {
+  it('says on the card why the daemon rejected a start, not as a move', async () => {
     const project = projectDto();
     const alpha = taskDto({ projectId: project.id, title: 'Alpha', boardStatus: 'ready' });
     serve(
@@ -368,10 +369,109 @@ describe('BoardView', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Actions for Alpha' }));
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Start', hidden: true }));
-    const alert = await screen.findByRole('alert');
-    expect(within(alert).getByText("Couldn't start the task")).toBeTruthy();
-    expect(within(alert).getByText('Task Alpha already has an active workstream')).toBeTruthy();
+    const card = within(await screen.findByRole('list', { name: 'Ready tasks' })).getByRole(
+      'listitem',
+      { name: 'Alpha' },
+    );
+    expect(
+      await within(card).findByText('Not started: Task Alpha already has an active workstream'),
+    ).toBeTruthy();
     expect(screen.queryByText("Couldn't move the task")).toBeNull();
+    // Nothing for the builder to open: the daemon raised no card for a rejected request.
+    expect(within(card).queryByRole('link', { name: 'Open in Inbox' })).toBeNull();
+  });
+
+  describe('a start the daemon accepts and then refuses', () => {
+    const project = projectDto();
+    const alpha = taskDto({ projectId: project.id, title: 'Alpha', boardStatus: 'ready' });
+    const refusal = inboxItemDto({
+      projectId: project.id,
+      kind: 'flag',
+      title: 'Batch not started: the checkout has uncommitted changes',
+      options: [],
+      detail: { taskIds: [alpha.id] },
+    });
+
+    function serveStart(
+      open: () => boolean,
+      onStart: () => Promise<void> = () => Promise.resolve(),
+    ) {
+      const posts: string[] = [];
+      serve(
+        http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+        http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([alpha])),
+        http.get(daemonUrl('/inbox'), () => HttpResponse.json(open() ? [refusal] : [])),
+        http.post(daemonUrl('/tasks/:taskId/start'), async ({ params }) => {
+          posts.push(String(params['taskId']));
+          await onStart();
+          return HttpResponse.json(batchDto({ projectId: project.id, state: 'CUTTING' }), {
+            status: 202,
+          });
+        }),
+      );
+      return posts;
+    }
+
+    async function readyCard(): Promise<HTMLElement> {
+      return within(await screen.findByRole('list', { name: 'Ready tasks' })).getByRole(
+        'listitem',
+        { name: 'Alpha' },
+      );
+    }
+
+    async function clickStart(card: HTMLElement, name: string | RegExp = 'Start'): Promise<void> {
+      fireEvent.click(within(card).getByRole('button', { name: 'Actions for Alpha' }));
+      fireEvent.click(await screen.findByRole('menuitem', { name, hidden: true }));
+    }
+
+    it('shows the reason on the card, with a link to the Inbox', async () => {
+      let refused = false;
+      const posts = serveStart(() => refused);
+      renderApp('/board');
+      const card = await readyCard();
+
+      refused = true;
+      await clickStart(card);
+
+      expect(await within(card).findByText(refusal.title)).toBeTruthy();
+      expect(within(card).getByRole('link', { name: 'Open in Inbox' }).getAttribute('href')).toBe(
+        '/inbox',
+      );
+      expect(within(card).queryByText('Starting…')).toBeNull();
+      expect(posts).toEqual([alpha.id]);
+    });
+
+    it('says Starting while the request is out, and Start can not be pressed again', async () => {
+      let release: () => void = () => undefined;
+      const answered = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const posts = serveStart(
+        () => false,
+        () => answered,
+      );
+      renderApp('/board');
+      const card = await readyCard();
+
+      await clickStart(card);
+      expect(await within(card).findByText('Starting…')).toBeTruthy();
+
+      fireEvent.click(within(card).getByRole('button', { name: 'Actions for Alpha' }));
+      const again = await screen.findByRole('menuitem', { name: /Starting/, hidden: true });
+      expect(again.getAttribute('data-disabled')).toBe('true');
+      fireEvent.click(again);
+      release();
+      await waitFor(() => {
+        expect(posts).toEqual([alpha.id]);
+      });
+    });
+
+    it('shows a refusal that was already open when the board loaded', async () => {
+      serveStart(() => true);
+      renderApp('/board');
+      const card = await readyCard();
+      expect(await within(card).findByText(refusal.title)).toBeTruthy();
+    });
   });
 
   it.each([
@@ -1229,6 +1329,68 @@ describe('BoardView', () => {
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Abandon', hidden: true }));
     await waitFor(() => {
       expect(abandoned).toEqual([batch.id]);
+    });
+  });
+
+  it('the card menu closes a failed task with a line on its branch, and a refusal names the blockers', async () => {
+    const batch = batchDto();
+    const project = projectViewDto({ id: batch.projectId, currentBatch: batch });
+    const failed = workstreamDto({
+      projectId: project.id,
+      batchId: batch.id,
+      taskTitle: 'Broken',
+      state: 'FAILED',
+    });
+    const fine = workstreamDto({ projectId: project.id, taskTitle: 'Fine', state: 'DONE' });
+    const tasks = [failed, fine].map((ws) =>
+      taskDto({
+        id: ws.taskId,
+        projectId: project.id,
+        title: ws.taskTitle,
+        boardStatus: ws === failed ? 'blocked' : 'done',
+        workstreamId: ws.id,
+      }),
+    );
+    const closed: string[] = [];
+    let refuse = true;
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json(tasks)),
+      http.get(daemonUrl('/projects/:projectId/batches'), () => HttpResponse.json([batch])),
+      http.get(daemonUrl('/workstreams'), () => HttpResponse.json([failed, fine])),
+      http.post(daemonUrl('/tasks/:taskId/close'), ({ params }) => {
+        closed.push(String(params['taskId']));
+        return refuse
+          ? HttpResponse.json(
+              { error: 'conflict', message: "Task Broken can't be closed while Child waits on it" },
+              { status: 409 },
+            )
+          : HttpResponse.json({ ...tasks[0], status: 'cancelled' });
+      }),
+    );
+    renderApp('/board');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Actions for Fine' }));
+    await screen.findByRole('menu', { hidden: true });
+    expect(screen.queryByRole('menuitem', { name: 'Close', hidden: true })).toBeNull();
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for Broken' }));
+    expect(
+      await screen.findByText('Close keeps the branch 10db/greetings-0a1b2c3d as it is.'),
+    ).toBeTruthy();
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Close', hidden: true }));
+    expect(await screen.findByText("Couldn't close the task")).toBeTruthy();
+    expect(screen.getByText("Task Broken can't be closed while Child waits on it")).toBeTruthy();
+
+    refuse = false;
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for Broken' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Close', hidden: true }));
+    await waitFor(() => {
+      expect(closed).toEqual([failed.taskId, failed.taskId]);
+    });
+    await waitFor(() => {
+      expect(screen.queryByText("Couldn't close the task")).toBeNull();
     });
   });
 

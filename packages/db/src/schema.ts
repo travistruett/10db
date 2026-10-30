@@ -16,6 +16,7 @@ import type {
   EventType,
   EvidenceId,
   EvidenceKind,
+  FailingCheckDto,
   FlowId,
   FlowStepDef,
   HandoffId,
@@ -38,6 +39,8 @@ import type {
   ProjectId,
   ProjectLanding,
   ProposalId,
+  PullRequestChecks,
+  PullRequestState,
   ProposalKind,
   Provider,
   QuestionCategory,
@@ -214,6 +217,15 @@ export const batches = sqliteTable(
      */
     returnBranch: text('return_branch'),
     returnSha: text('return_sha'),
+    /**
+     * What the PR watcher last read of the pull request. All null until the first read; the status
+     * is whole once `prCheckedAt` is set. `prUnknownReason` is set only while the state is unknown.
+     */
+    prState: text('pr_state').$type<PullRequestState>(),
+    prChecks: text('pr_checks').$type<PullRequestChecks>(),
+    prFailingChecks: text('pr_failing_checks', { mode: 'json' }).$type<FailingCheckDto[]>(),
+    prCheckedAt: text('pr_checked_at'),
+    prUnknownReason: text('pr_unknown_reason'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

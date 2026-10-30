@@ -401,6 +401,11 @@ export function createApp(deps: ApiDeps) {
       if (!deps.taskRemoval) return c.json({ error: 'not_implemented' }, 501);
       return c.json(deps.taskRemoval.removeTask(taskId));
     })
+    .post('/tasks/:taskId/close', (c) => {
+      const taskId = TaskId.parse(c.req.param('taskId'));
+      if (!deps.taskRemoval) return c.json({ error: 'not_implemented' }, 501);
+      return c.json(deps.taskRemoval.closeTask(taskId));
+    })
     .post('/tasks/:taskId/start', (c) => {
       const started = deps.services.startTask(TaskId.parse(c.req.param('taskId')));
       // A pull-request start answers before its branch is cut: 202, as a batch start does.

@@ -14,6 +14,7 @@ const batch = (overrides: Partial<BatchDto>): BatchDto => ({
   baseSha: 'a'.repeat(40),
   repo: 'acme/widgets',
   prUrl: null,
+  pr: null,
   gateExitCode: null,
   gateLogPath: null,
   failure: null,
