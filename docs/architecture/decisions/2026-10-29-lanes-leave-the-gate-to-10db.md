@@ -21,7 +21,9 @@ GATE FAIL: test — logs in .gate/; format 4s · lint 31s · test 92s (127s)
 The summary line stays last and unchanged. The fix brief after a failed gate reads those lines
 (`apps/daemon/src/briefing/failed-steps.ts`) and names each failing step, its command and its log; a gate
 whose output has none gets a brief that points at the output and says to rerun only the check that failed.
-No brief tells an agent to run the gate, and `apps/daemon/src/briefing/briefing.test.ts` fails if one does.
+No brief, harness skill or default persona tells an agent to run the gate (the `test-first` skill the default
+Implementer uses said to); `apps/daemon/src/briefing/briefing.test.ts` and `packages/harness/src/harness.test.ts`
+fail if one does.
 
 ## Why
 

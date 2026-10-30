@@ -497,17 +497,34 @@ describe('buildSessionPrompt for flow steps', () => {
   });
 });
 
+/**
+ * Sentences that tell an agent to run the gate. 10db runs the gate after each implement step, so a
+ * sentence that says not to, or that 10db runs it, is fine. In a brief, "run it" can only mean the gate.
+ * The harness plugin's test holds the same check without that.
+ */
+function gateInstructions(text: string): string[] {
+  return text
+    .split(/\n|(?<=[.!?:;])\s+/)
+    .filter((s) => !/\bnever\b|\bnot\b|\bdon't\b|10db (already )?r[au]ns?\b/i.test(s))
+    .filter((s) =>
+      /make gate|GATE PASS|\b(re-?)?run it\b|\b(re-?)?run\b[^.]*\bgate\b|\bexecute\b[^.]*\bgate\b/i.test(
+        s,
+      ),
+    );
+}
+
 describe('the gate in a brief', () => {
+  // Not `make gate`, so only the brief's own instructions can name it.
   const gateEvidence = (summary: string) => ({
     id: mintId('Evidence'),
     workstreamId: handoff.workstreamId,
     kind: 'gate' as const,
-    command: 'make gate',
+    command: 'scripts/check',
     exitCode: 1,
     summary,
     logPath: null,
     commitShas: [],
-    createdAt: handoff.createdAt,
+    createdAt: '2026-10-13T11:00:00.000Z',
   });
   const reviewStep = { ...implementStep, role: 'review', tools: 'read_only' } as const;
   const failed = gateEvidence('FAILED lint: pnpm lint (log .gate/lint.log)\nGATE FAIL: lint');
@@ -516,6 +533,7 @@ describe('the gate in a brief', () => {
     ['continue', { kind: 'continue_from_handoff', handoffId: handoff.id }],
     ['resume', { kind: 'resume', providerSessionId: 'p', reason: 'daemon restarted' }],
     ['fresh answer', { kind: 'answer', inboxId: mintId('InboxItem'), providerSessionId: null }],
+    ['resumed answer', { kind: 'answer', inboxId: mintId('InboxItem'), providerSessionId: 'p1' }],
     ['fix', { kind: 'fix', evidenceId: failed.id }],
     ['uncommitted', { kind: 'uncommitted', paths: ['src/ui/badge.tsx'] }],
     ['verify', { kind: 'verify' }],
@@ -536,9 +554,30 @@ describe('the gate in a brief', () => {
     ),
   );
 
+  it.each([
+    ['Run make gate before you end your turn.', true],
+    ['Done means `make gate` printed `GATE PASS`.', true],
+    ['Rerun `make gate` until it passes.', true],
+    ['Run the full gate before you end your turn.', true],
+    ['The gate failed. Run it, fix the cause, commit, and end your turn.', true],
+    ['Execute the gate command before ending your turn.', true],
+    ['Never run the full gate: 10db runs it after your turn ends.', false],
+    ['Fix the cause, commit, and end your turn; 10db runs the gate again.', false],
+  ])('the check reads %j as an instruction to run the gate: %s', (sentence, caught) => {
+    expect(gateInstructions(sentence).length > 0).toBe(caught);
+  });
+
+  it('briefs a fix from its handoff in one of the rows', () => {
+    expect(
+      briefs.some(
+        ([, brief]) =>
+          brief.includes('Continue from the handoff') && brief.includes('The gate failed'),
+      ),
+    ).toBe(true);
+  });
+
   it.each(briefs)('%s: never tells the agent to run the gate', (_name, brief) => {
-    expect(brief).not.toMatch(/make gate`? (yourself|again|now)|run (it|the gate)\b/i);
-    expect(brief).not.toMatch(/\brun\b[^.\n]*`make gate`/i);
+    expect(gateInstructions(brief)).toEqual([]);
   });
 
   it('tells a lane to run only the checks for what it changed', () => {

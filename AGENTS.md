@@ -35,7 +35,7 @@ A local macOS control plane that runs Claude Code sessions as a software factory
   Until the first published release the migration baseline is regenerated instead of extended
   (`packages/db/AGENTS.md`).
 - Done means `make gate` printed `GATE PASS`. Docs are part of done. An agent in a 10db lane leaves
-  the gate to 10db, which runs it after each step: it runs only the checks for what it changed (the
+  the gate to 10db, which runs it after each implement step: it runs only the checks for what it changed (the
   changed packages' tests, typecheck and lint, or the failing step's command) and never the full gate.
 
 ## Git

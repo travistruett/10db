@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs every repository check and prints one summary line, which gives each step's seconds in the order
+# Runs every repository check and ends with one summary line, which gives each step's seconds in the order
 # the steps ran. Each step's output goes to .gate/<step>.log.
 # GATE_STEPS="lint test" limits the run (used by tests and for quick reruns). GATE_SKIP_RUST=1
 # reports rust as skipped even when cargo is installed (the Ubuntu CI job: no Tauri system libraries).
