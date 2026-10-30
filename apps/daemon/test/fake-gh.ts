@@ -1,7 +1,14 @@
 import { readFileSync } from 'node:fs';
 import { GhError, PrState, type Gh, type PullRequest } from '../src/github';
 
-export type GhMethod = 'authStatus' | 'authLogin' | 'repoView' | 'prView' | 'prCreate';
+export type GhMethod =
+  | 'authStatus'
+  | 'authLogin'
+  | 'repoView'
+  | 'repoAllowsAutoMerge'
+  | 'prView'
+  | 'prCreate'
+  | 'prAutoMerge';
 export interface PrCreateCall {
   readonly repo: string;
   readonly base: string;
@@ -13,6 +20,10 @@ export interface PrCreateCall {
 export class FakeGh implements Gh {
   auth: 'ok' | 'signed_out' | 'not_installed' = 'ok';
   repo = 'acme/widgets';
+  /** Whether the repository allows auto-merge, as GitHub's setting does. */
+  autoMergeAllowed = true;
+  /** The pull requests auto-merge was turned on for, in order. */
+  readonly autoMerged: string[] = [];
   /** One error per method, thrown by its next call only. */
   readonly failNext = new Map<GhMethod, GhError>();
   readonly calls: { readonly method: GhMethod; readonly args: unknown }[] = [];
@@ -70,6 +81,16 @@ export class FakeGh implements Gh {
     return this.call('prCreate', input, () => {
       const create = { repo: input.repo, base: input.base, head: input.head, title: input.title };
       return this.add(input.head, PrState.Open, readFileSync(input.bodyFile, 'utf8'), create);
+    });
+  }
+
+  repoAllowsAutoMerge(): Promise<boolean> {
+    return this.call('repoAllowsAutoMerge', {}, () => this.autoMergeAllowed);
+  }
+
+  prAutoMerge(input: { readonly repo: string; readonly url: string }): Promise<void> {
+    return this.call('prAutoMerge', input, () => {
+      this.autoMerged.push(input.url);
     });
   }
 

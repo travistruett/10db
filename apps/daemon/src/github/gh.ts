@@ -63,6 +63,14 @@ export interface Gh {
     },
     call: GhCall,
   ): Promise<string>;
+  /** Whether the repository lets a pull request merge by itself once its required checks pass. */
+  repoAllowsAutoMerge(repo: string, call: GhCall): Promise<boolean>;
+  /**
+   * Turns on squash auto-merge for the pull request: GitHub merges it once its required checks
+   * pass. Throws a GhError when GitHub refuses, with its reason, such as a pull request that has
+   * nothing left to wait for.
+   */
+  prAutoMerge(input: { readonly repo: string; readonly url: string }, call: GhCall): Promise<void>;
 }
 
 export interface GhOutput {
@@ -181,6 +189,7 @@ export function createSystemGhExec(tools: GhTools): GhExec {
 }
 
 const PrView = z.object({ url: z.url(), state: z.enum(PrState) });
+const RepoView = z.object({ autoMergeAllowed: z.boolean() });
 
 /**
  * A pull request URL in `repo` (`owner/name`), on any GitHub host: https and
@@ -296,6 +305,13 @@ export function createGh(exec: GhExec): Gh {
         if (url.success) return url.data;
       }
       throw new GhError(GhFailure.Failed, `gh pr create printed no pull request URL for ${repo}`);
+    },
+    async repoAllowsAutoMerge(repo, call) {
+      const args = ['repo', 'view', repo, '--json', 'autoMergeAllowed'];
+      return parseOutput(RepoView, args, await ok(args, call)).autoMergeAllowed;
+    },
+    async prAutoMerge({ repo, url }, call) {
+      await ok(['pr', 'merge', url, '-R', repo, '--auto', '--squash'], call);
     },
   };
 }

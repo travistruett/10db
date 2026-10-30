@@ -684,6 +684,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     accounts: accountService,
     worktreeRoot,
     git,
+    branchOnOrigin: (repoPath, branch) =>
+      git.branchOnOrigin(repoPath, branch, {
+        env: delivery.networkEnv(),
+        timeoutMs: delivery.limits.networkTimeoutMs,
+      }),
     protectedRoots: [
       opts.dataDir,
       ...(sandboxTempRoot === null ? [] : [sandboxTempRoot]),

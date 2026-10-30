@@ -663,6 +663,7 @@ describe('batch routes', () => {
     state: 'CUTTING',
     branch: null,
     baseBranch: 'main',
+    autoMerge: true,
     baseSha: null,
     repo: null,
     prUrl: null,

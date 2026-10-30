@@ -83,7 +83,11 @@ export interface ApiServices {
   listProjects(): ProjectViewDto[];
   createProject(input: ProjectInput): ProjectDto;
   listTasks(projectId: ProjectId): TaskDto[];
-  createTask(projectId: ProjectId, input: TaskInput): TaskDto;
+  /**
+   * Throws InvalidError when the task's landing names a branch origin does not have, so the
+   * answer may come after asking origin.
+   */
+  createTask(projectId: ProjectId, input: TaskInput): TaskDto | Promise<TaskDto>;
   startTask(taskId: TaskId): TaskStarted;
   /**
    * Starts the tasks and answers every batch the start made or joined: one in shared mode (new, or
@@ -146,7 +150,7 @@ export interface ApiServices {
   setTeam(projectId: ProjectId, input: TeamInput): TeamDto;
   listRoutingRules(projectId: ProjectId): RoutingRuleDto[];
   setRoutingRules(projectId: ProjectId, input: RoutingRulesInput): RoutingRuleDto[];
-  patchTask(id: TaskId, patch: TaskPatch): TaskDto;
+  patchTask(id: TaskId, patch: TaskPatch): TaskDto | Promise<TaskDto>;
   /** Places a task in a column between new neighbours; throws ConflictError for a stale or locked move. */
   moveTask(id: TaskId, move: TaskMove): TaskDto;
   listBoardColumns(projectId: ProjectId): BoardColumnDto[];
