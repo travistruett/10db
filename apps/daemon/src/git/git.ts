@@ -1967,6 +1967,8 @@ export function createGit(opts: GitOptions = {}): Git {
         const log = await git(at, [
           'log',
           '--no-show-signature',
+          // log.mailmap is on by default and reads .mailmap from the checkout.
+          '--no-mailmap',
           `--max-count=${String(maxCommits)}`,
           '--no-merges',
           '--no-renames',
@@ -1975,7 +1977,9 @@ export function createGit(opts: GitOptions = {}): Git {
           '--name-only',
           '-z',
           `--format=${SURVEY_COMMIT_MARK}`,
+          // Without `--`, a file named HEAD makes the revision ambiguous and git stats the checkout.
           'HEAD',
+          '--',
         ]);
         return { files: tree.split('\0').filter((f) => f !== ''), commits: parseSurveyLog(log) };
       } catch (error) {

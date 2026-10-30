@@ -13,7 +13,8 @@ hazards changes with it.
 
 - **Signals, read without running the repository.** `Git.survey` reads the tracked files at HEAD
   (`ls-tree -r -z --name-only`) and the files of the latest 400 commits (`log --name-only -z`, no merges, no
-  renames, no external diff, no textconv, no signature check). That is git's object store only: no file of the
+  renames, no external diff, no textconv, no mailmap, no signature check, `HEAD --` so no path is ever
+  read as a revision). That is git's object store only: no file of the
   checkout is opened, no hook, filter, pager, fsmonitor, `diff.external` or `gpg.program` the repository
   configures can run (`trust.test.ts` runs `survey` against each), and the call is unpinned
   like `Git.inspect`, so a folder only being looked at raises no trust card. A commit that changed over 200 files
