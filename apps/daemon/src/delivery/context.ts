@@ -66,6 +66,7 @@ export function raise(inbox: InboxService, projectId: ProjectId, card: Card): vo
     title: card.title,
     body: card.body,
     ...(card.foldKey ? { foldKey: card.foldKey } : {}),
+    ...(card.refresh ? { refresh: true } : {}),
     ...(card.detail ? { detail: card.detail } : {}),
   });
 }

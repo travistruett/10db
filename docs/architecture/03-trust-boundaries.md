@@ -734,8 +734,10 @@ rm -rf dist/*`. The guard judges a command before it runs.
   a symbolic ref. A commit while HEAD is elsewhere is refused; HEAD moved during one (by the builder, since a lane
   can't write it) is reported on a card, and the commit stays on its branch.
 - **The checkout pin persists.** When a project is registered, the daemon records its checkout's git dir and
-  common dir (device and inode) and origin's URLs in the database, keyed by real path. A `.git` moved aside and
-  replaced, or a changed origin, refuses every call with a card. The card holds the state it found; Trust the
+  common dir (inode; the device number is stored but never compared, because macOS renumbers the Data volume
+  when it remounts it, as after an OS update) and origin's URLs in the database, keyed by real path. A `.git`
+  moved aside and replaced, or a changed origin, refuses every call with a card; when the refusal's two git dirs
+  are the same path, its message names the inodes instead. The card holds the state it found; Trust the
   checkout as it is now pins exactly that state, and only if the checkout still matches it, otherwise 10db
   refuses again with a new card. Each found state gets its own card. Restarting the daemon re-trusts nothing.
   A git dir inside any registered checkout (other than this checkout's own `.git`) or in a lane temp root is refused
