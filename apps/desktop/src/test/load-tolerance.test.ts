@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { getConfig } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import config from '../../vitest.config';
@@ -39,5 +39,25 @@ describe('load tolerance', () => {
       }
     }
     expect(offenders).toEqual([]);
+  });
+
+  // vi.useFakeTimers({ shouldAdvanceTime: true }) moves the fake clock with real time too, so an
+  // assertion made "N ms before a timer fires" holds only if the machine responds within N ms.
+  // This guard can't measure those margins from the source, so each file that uses the option is
+  // listed here once a reviewer has checked that it keeps seconds of slack around every timer.
+  // Add a file only after making that check. Prefer driving the clock by hand where you can.
+  const REVIEWED_SHOULD_ADVANCE_TIME = new Set([
+    // About 3 s of slack on both sides of the 4 s "Saved" timer.
+    'views/settings/project-general-form.test.tsx',
+  ]);
+
+  it('every test that lets real time move fake timers is reviewed for slack', () => {
+    const root = join(import.meta.dirname, '..');
+    const unreviewed = testFiles(root)
+      .filter((file) => !file.endsWith('load-tolerance.test.ts'))
+      .filter((file) => readFileSync(file, 'utf8').includes('shouldAdvanceTime'))
+      .map((file) => relative(root, file))
+      .filter((file) => !REVIEWED_SHOULD_ADVANCE_TIME.has(file));
+    expect(unreviewed).toEqual([]);
   });
 });
