@@ -52,6 +52,7 @@ import { systemClock, type Clock } from '../clock';
 import {
   allCheckouts,
   createBaseUpdates,
+  createMigrationsBase,
   createBatchCardAnswers,
   createBranchCardAnswers,
   createBatchStarter,
@@ -448,6 +449,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const starter = createBatchStarter(delivery);
   // One for the runner and the shipper alike, so a batch's verify and shipping gates run in turn.
   const baseUpdates = createBaseUpdates(delivery);
+  // Before a task gets the migrations hazard, from request_claim or at its start.
+  const migrationsBase = createMigrationsBase(delivery, baseUpdates);
   const shipper = createShipper({
     ...delivery,
     gate,
@@ -596,6 +599,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     git,
     gate,
     baseUpdates,
+    migrationsBase,
     clock,
     logger,
     dataDir: opts.dataDir,
@@ -759,6 +763,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       waitObserverFor: (id) => live.get(id)?.observer,
       sessionSignal: (id) => live.get(id)?.signal,
       claimWaits,
+      migrationsBase,
     }),
   });
   const wss = new WebSocketServer({ noServer: true });

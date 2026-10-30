@@ -1,6 +1,7 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import {
+  ClaimKind,
   ConflictError,
   currentStep,
   EventType,
@@ -60,6 +61,7 @@ import {
   openItemsForWorkstream,
   patchWorkstream,
   recordProfileOutcome,
+  releaseClaim,
   releaseClaims,
   setTaskStatus,
   StaleFenceError,
@@ -95,9 +97,11 @@ import {
   batchCardFields,
   checkoutOf,
   gateNote,
+  MIGRATIONS_HAZARD,
   projectAtCheckout,
   type BaseUpdate,
   type BaseUpdates,
+  type MigrationsBase,
 } from '../delivery';
 import type { StateStore } from '../events';
 import {
@@ -190,6 +194,11 @@ export interface RunnerOptions {
   readonly gate: GateRunner;
   /** Brings a batch's base as origin has it now into its branch before each of its gates. */
   readonly baseUpdates: BaseUpdates;
+  /**
+   * Brings a task's base into its branch before a run that holds the migrations hazard from its
+   * start; absent, it isn't.
+   */
+  readonly migrationsBase?: MigrationsBase;
   readonly clock: Clock;
   readonly logger: Logger;
   readonly dataDir: string;
@@ -1978,8 +1987,39 @@ export function createRunner(opts: RunnerOptions): Runner {
     });
   }
 
+  /**
+   * A run that holds the migrations hazard from its start (the task names it among its areas) takes
+   * its base first, as request_claim does, so a migration it generates is numbered after the base's
+   * latest. A branch that can't take its base gives the hazard back: the session runs without it, and
+   * asking for it again says why. Stopped like a gate is.
+   */
+  async function migrationsBaseFirst(id: WorkstreamId, ctl: Control): Promise<void> {
+    if (!opts.migrationsBase) return;
+    const row = getWorkstreamRow(db, id);
+    if (row.nextAction.kind === 'verify' || row.state === S.Verifying) return;
+    const claim = activeClaims(db, id).find(
+      (c) => c.kind === ClaimKind.Hazard && c.name === MIGRATIONS_HAZARD,
+    );
+    if (!claim) return;
+    const abort = new AbortController();
+    ctl.gateAbort = abort;
+    if (ctl.stopReason === 'cancelled' || ctl.stopReason === 'shutdown') abort.abort();
+    try {
+      const taken = await opts.migrationsBase.take(id, abort.signal);
+      if (taken.kind !== 'held') return;
+      opts.state.write((ctx) => releaseClaim(ctx, claim.id));
+      opts.logger.info(
+        { workstreamId: id, inboxId: taken.inboxId },
+        "migrations hazard held back: the branch can't take its base",
+      );
+    } finally {
+      ctl.gateAbort = null;
+    }
+  }
+
   async function run(id: WorkstreamId, ctl: Control): Promise<void> {
     try {
+      await migrationsBaseFirst(id, ctl);
       for (;;) {
         const row = getWorkstreamRow(db, id);
         const verifying = row.nextAction.kind === 'verify' || row.state === S.Verifying;
