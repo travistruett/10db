@@ -1,7 +1,11 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
+import { z } from 'zod';
 import { E2E_REPO, E2E_TOKEN } from './paths';
 import { daemonUrl } from './daemon-url';
+
+const Runs = z.array(z.object({ id: z.string(), taskTitle: z.string() }));
+const Changes = z.object({ commits: z.array(z.string()) });
 
 const TASK = 'Write the greeting';
 const OTHER = 'Tidy the readme';
@@ -175,6 +179,17 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   const factoryRow = page.getByRole('row', { name: new RegExp(TASK) });
   await expect(factoryRow.getByText('Done', { exact: true })).toBeVisible();
   await expectAccessible(page, 'factory, done, dark');
+
+  // The MCP commit really landed: the finished run's changes hold the one commit it made.
+  const auth = { Authorization: `Bearer ${E2E_TOKEN}` };
+  const runs = await request.get(`${daemonUrl}/workstreams?active=false`, { headers: auth });
+  const run = Runs.parse(await runs.json()).find((w) => w.taskTitle === TASK);
+  expect(run).toBeDefined();
+  const changes = await request.get(`${daemonUrl}/workstreams/${run?.id ?? ''}/changes`, {
+    headers: auth,
+  });
+  expect(changes.ok()).toBe(true);
+  expect(Changes.parse(await changes.json()).commits).toHaveLength(1);
 
   await open(page, 'Board');
   await expect(

@@ -342,7 +342,8 @@ export function cancelTask(ctx: WriteContext, id: TaskId): TaskDto {
  * Factory still shows the failed run, and nothing here touches the branch or worktree its batch holds.
  * A failed run released its claims when it failed. A task whose latest run is anything else is
  * refused: an unstarted one is removed, a live or cancelled run is cancelled or restarted. A
- * finished task is closed only once its pull request closed without merging. A task
+ * finished task, or a failed run shipped anyway, is closed only once its pull request closed
+ * without merging; while it is open or merged it is refused. A task
  * that open tasks wait on is refused, naming them. Closing a closed task answers it and emits nothing.
  */
 export function closeTask(ctx: WriteContext, id: TaskId): TaskDto {
@@ -355,6 +356,13 @@ export function closeTask(ctx: WriteContext, id: TaskId): TaskDto {
     throw new ConflictError(
       `Task ${task.title} hasn't failed, so it can't be closed; a task that never started is removed, and a running one is cancelled in Factory`,
     );
+  } else {
+    // A failed run shipped anyway is judged by its pull request, like a finished one.
+    const pr = latestPullRequest(ctx.tx, id);
+    if (pr && pr.state !== PullRequestState.Closed)
+      throw new ConflictError(
+        `Task ${task.title} shipped anyway and its pull request is ${pr.state === PullRequestState.Merged ? 'merged' : 'open'}, so it can't be closed`,
+      );
   }
   refuseWhileOpenDependents(ctx, task, 'close');
   return retireTask(ctx, id);
@@ -391,15 +399,30 @@ export function reopenTask(ctx: WriteContext, id: TaskId): TaskDto {
  * latest run is taken first, batch or not, so a reopened task's newer run hides the old pull request.
  */
 function pullRequestClosed(db: DbReader, taskId: TaskId): boolean {
+  return latestPullRequest(db, taskId)?.state === PullRequestState.Closed;
+}
+
+/**
+ * The pull request the task's latest run shipped in: its state last read (null before the first
+ * read). Null when that run is in no batch, or its batch has not shipped one.
+ */
+function latestPullRequest(
+  db: DbReader,
+  taskId: TaskId,
+): { readonly state: PullRequestState | null } | null {
   const batch = db
-    .select({ state: schema.batches.state, prState: schema.batches.prState })
+    .select({
+      state: schema.batches.state,
+      prUrl: schema.batches.prUrl,
+      prState: schema.batches.prState,
+    })
     .from(schema.workstreams)
     .leftJoin(schema.batches, eq(schema.batches.id, schema.workstreams.batchId))
     .where(eq(schema.workstreams.taskId, taskId))
     .orderBy(desc(schema.workstreams.createdAt), desc(schema.workstreams.id))
     .limit(1)
     .get();
-  return batch?.state === BatchState.Shipped && batch.prState === PullRequestState.Closed;
+  return batch?.state === BatchState.Shipped && batch.prUrl ? { state: batch.prState } : null;
 }
 
 function latestRun(db: DbReader, taskId: TaskId) {

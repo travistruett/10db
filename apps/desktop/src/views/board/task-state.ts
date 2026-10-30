@@ -7,6 +7,7 @@ import {
   type WorkstreamDto,
 } from '@10db/contracts';
 import type { MantineColor } from '@mantine/core';
+import { canClose, canRetry } from '../factory/workstream-state';
 import { FAILURE_LABELS } from './batch-labels';
 
 const S = WorkstreamState;
@@ -74,6 +75,31 @@ export function pullRequestState(batch: BatchDto | undefined): TaskState | null 
 /** Whether the batch's pull request closed without merging, so its tasks go back to the builder. */
 export function pullRequestClosed(batch: BatchDto | undefined): boolean {
   return batch?.state === BatchState.Shipped && batch.pr?.state === PullRequestState.Closed;
+}
+
+/**
+ * Whether a failed run can be retried: retry reopens its batch, and a batch shipped anyway never
+ * reopens, so a run whose batch shipped is run again with a fresh Start instead.
+ */
+export function canRetryRun(workstream: WorkstreamDto, batch: BatchDto | undefined): boolean {
+  return canRetry(workstream.state) && batch?.state !== BatchState.Shipped;
+}
+
+/**
+ * Whether a failed run's task can be closed. One shipped anyway is judged by its pull request, as
+ * the daemon does: refused while it is open or merged, allowed once it closed without merging.
+ */
+export function canCloseRun(workstream: WorkstreamDto, batch: BatchDto | undefined): boolean {
+  if (!canClose(workstream.state)) return false;
+  return batch?.state !== BatchState.Shipped || !batch.prUrl || pullRequestClosed(batch);
+}
+
+/** A failed run shipped anyway whose pull request closed without merging: Start runs it afresh. */
+export function shippedAnywayAndClosed(
+  workstream: WorkstreamDto | undefined,
+  batch: BatchDto | undefined,
+): boolean {
+  return workstream?.state === S.Failed && pullRequestClosed(batch);
 }
 
 /**

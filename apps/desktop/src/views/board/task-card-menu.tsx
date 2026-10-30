@@ -10,16 +10,28 @@ const STARTABLE: readonly BoardStatus[] = [BoardStatus.Ready, BoardStatus.Backlo
  */
 const RESTARTABLE: readonly WorkstreamState[] = [WorkstreamState.Cancelled, WorkstreamState.Done];
 
-/** A Backlog task queues until its dependencies finish; a parked task never starts. */
-export function canStart(task: TaskDto, latest: WorkstreamState | undefined): boolean {
-  if (task.boardColumnId !== null) return false;
-  if (task.status !== TaskStatus.Open || !STARTABLE.includes(task.boardStatus)) return false;
+/**
+ * A Backlog task queues until its dependencies finish; a parked task never starts. A failed run
+ * shipped anyway whose pull request then closed without merging (`shippedAnywayClosed`) sits in
+ * Blocked with nothing to retry, so it starts afresh from there.
+ */
+export function canStart(
+  task: TaskDto,
+  latest: WorkstreamState | undefined,
+  shippedAnywayClosed = false,
+): boolean {
+  if (task.boardColumnId !== null || task.status !== TaskStatus.Open) return false;
+  if (shippedAnywayClosed && latest === WorkstreamState.Failed)
+    return task.boardStatus === BoardStatus.Blocked;
+  if (!STARTABLE.includes(task.boardStatus)) return false;
   return task.workstreamId === null || (latest !== undefined && RESTARTABLE.includes(latest));
 }
 
 export interface TaskCardMenuProps {
   readonly task: TaskDto;
   readonly latest: WorkstreamState | undefined;
+  /** The latest run failed, shipped anyway, and its pull request closed without merging. */
+  readonly shippedAnywayClosed?: boolean;
   /** A Start for this task is out; asking again would only repeat it. */
   readonly starting?: boolean;
   /** Title of an unfinished dependency parked in a human column, which would keep a started task queued for ever. */
@@ -44,6 +56,7 @@ export interface TaskCardMenuProps {
 export function TaskCardMenu({
   task,
   latest,
+  shippedAnywayClosed = false,
   starting = false,
   parkedDependency,
   moves,
@@ -56,6 +69,7 @@ export function TaskCardMenu({
   onReopenTask,
   closeLine,
 }: TaskCardMenuProps) {
+  const startable = canStart(task, latest, shippedAnywayClosed);
   return (
     <Menu position="bottom-end" withinPortal>
       <Menu.Target>
@@ -80,8 +94,8 @@ export function TaskCardMenu({
             {m.refusal === null ? m.label : `${m.label} (${m.refusal})`}
           </Menu.Item>
         ))}
-        {moves.length > 0 && canStart(task, latest) ? <Menu.Divider /> : null}
-        {canStart(task, latest) ? (
+        {moves.length > 0 && startable ? <Menu.Divider /> : null}
+        {startable ? (
           <Menu.Item disabled={starting || parkedDependency !== null} onClick={onStart}>
             {starting
               ? 'Starting…'

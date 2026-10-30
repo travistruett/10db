@@ -320,7 +320,8 @@ describe('closeTask', () => {
 
 describe('a task whose pull request closed without merging', () => {
   const PR = 'https://github.com/o/r/pull/7';
-  const read = (state: 'open' | 'closed' | 'merged'): PullRequestStatusInput => ({
+  type PrState = 'open' | 'closed' | 'merged';
+  const read = (state: PrState): PullRequestStatusInput => ({
     state,
     checks: 'passing',
     failingChecks: [],
@@ -427,6 +428,50 @@ describe('a task whose pull request closed without merging', () => {
     const { task } = inReview(project.id, 'open');
     expect(() => store.write((ctx) => closeTask(ctx, task.id))).toThrow(ConflictError);
     expect(() => store.write((ctx) => reopenTask(ctx, task.id))).toThrow(ConflictError);
+  });
+
+  /** Ship anyway: the run failed, the task never reached done, and its batch shipped. */
+  function shippedAnyway(projectId: ReturnType<typeof seedProject>['id'], state: PrState) {
+    const { task, batch } = inReview(projectId, 'open');
+    store.db
+      .update(schema.tasks)
+      .set({ status: TaskStatus.Open })
+      .where(eq(schema.tasks.id, task.id))
+      .run();
+    store.db.update(schema.workstreams).set({ state: S.Failed }).run();
+    store.write((ctx) => recordPullRequestStatus(ctx, batch.id, read(state)));
+    return task;
+  }
+
+  it.each(['open', 'merged'] as const)(
+    'refuses to close a failed run shipped anyway while its pull request is %s',
+    (state) => {
+      const project = seedProject(store);
+      const task = shippedAnyway(project.id, state);
+      expect(() => store.write((ctx) => closeTask(ctx, task.id))).toThrow(
+        /pull request is (open|merged)/,
+      );
+      expect(getTask(store.db, task.id).status).toBe(TaskStatus.Open);
+    },
+  );
+
+  it('closes a failed run shipped anyway once its pull request closed without merging', () => {
+    const project = seedProject(store);
+    const task = shippedAnyway(project.id, 'closed');
+    expect(getTask(store.db, task.id).boardStatus).toBe('blocked');
+    const { value } = store.write((ctx) => closeTask(ctx, task.id));
+    expect(value.status).toBe(TaskStatus.Cancelled);
+  });
+
+  it('starts a failed run shipped anyway again once its pull request closed', () => {
+    const project = seedProject(store);
+    const task = shippedAnyway(project.id, 'closed');
+    const again = store.write((ctx) => insertWorkstream(ctx, task.id)).value;
+    expect(again.state).toBe(S.Queued);
+    expect(getTask(store.db, task.id)).toMatchObject({
+      status: TaskStatus.Open,
+      boardStatus: 'in_progress',
+    });
   });
 
   it('refuses a reopen for a task that never shipped', () => {

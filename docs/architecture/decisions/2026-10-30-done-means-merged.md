@@ -19,6 +19,12 @@
   (`POST /tasks/:id/reopen`, status back to `open`, so the task is Ready or Backlog and can be started
   again; its earlier run and batch stay as history) or Close (`POST /tasks/:id/close`, now also accepted for
   such a task). Both are refused while the pull request is open or merged.
+- A run shipped anyway is held to the same rule. Close (`closeTask`) is refused while its pull request is
+  open or merged, and the Board offers it only once that pull request closed. Retry is never offered on a
+  run whose batch shipped, since a shipped batch does not reopen. Its task is still `open`, so Reopen has
+  nothing to change. Once the pull request closed, the task stays in Blocked, where the card and the drawer
+  offer Start ("Start again" in the drawer) and Close. Start begins a new run, and the closed pull
+  request becomes history.
 - Passing the gate no longer raises a `review` card. Its only answer, accept, did nothing; the builder
   reviews the pull request, and In review shows the task until it merges. The `review` inbox kind stays
   in the contract for cards already stored.

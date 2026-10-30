@@ -167,8 +167,11 @@ const pullRequestRead = (state: 'open' | 'closed'): PullRequestStatusInput => ({
   unknownReason: null,
 });
 
-/** A task finished in a shipped batch whose pull request reads `state`. */
-async function shippedTask(projectId: ProjectId, state: 'open' | 'closed') {
+/**
+ * A task finished in a shipped batch whose pull request reads `state`; with `failed`, its run failed
+ * and the batch shipped anyway, so the task stays open.
+ */
+async function shippedTask(projectId: ProjectId, state: 'open' | 'closed', failed = false) {
   const task = await seedTask(projectId, 'shipped');
   daemon.state.write((ctx) => {
     const batch = insertBatch(ctx, { projectId, title: 'B', baseBranch: 'main' });
@@ -178,9 +181,11 @@ async function shippedTask(projectId: ProjectId, state: 'open' | 'closed') {
       patch: { prUrl: 'https://github.com/o/r/pull/3' },
     });
     const ws = insertWorkstream(ctx, task.id, { batchId: batch.id });
-    for (const to of ['STARTING', 'RUNNING', 'VERIFYING', 'DONE'] as const)
+    for (const to of failed
+      ? (['STARTING', 'RUNNING', 'FAILED'] as const)
+      : (['STARTING', 'RUNNING', 'VERIFYING', 'DONE'] as const))
       transitionWorkstream(ctx, ws.id, { to, fence: null });
-    setTaskStatus(ctx, task.id, 'done');
+    if (!failed) setTaskStatus(ctx, task.id, 'done');
     recordPullRequestStatus(ctx, batch.id, pullRequestRead(state));
   });
   return task;
@@ -230,5 +235,14 @@ describe('a task whose pull request closed without merging', () => {
     expect((await send(`/tasks/${fresh.id}/reopen`)).status).toBe(409);
     expect((await send(`/tasks/${mintId('Task')}/reopen`)).status).toBe(404);
     expect((await send('/tasks/not-an-id/reopen')).status).toBe(400);
+  });
+
+  it('refuses to close a failed run shipped anyway while its pull request is open', async () => {
+    const project = await seedProject();
+    const task = await shippedTask(project.id, 'open', true);
+    expect((await tasksOf(project.id)).map((t) => t.boardStatus)).toEqual(['in_review']);
+    const res = await send(`/tasks/${task.id}/close`);
+    expect(res.status).toBe(409);
+    expect((await tasksOf(project.id)).map((t) => t.status)).toEqual(['open']);
   });
 });

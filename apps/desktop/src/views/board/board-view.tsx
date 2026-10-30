@@ -28,7 +28,6 @@ import {
   useTasks,
   useWorkstreams,
 } from '../../daemon/queries';
-import { canClose, canRetry } from '../factory/workstream-state';
 import { FormModal } from '../../shell/form-modal';
 import { useSelectedProject } from '../../shell/selected-project';
 import { SplitButton } from '../../shell/split-button';
@@ -47,7 +46,13 @@ import { NewTaskForm } from './new-task-form';
 import { InboxLink } from './inbox-link';
 import { PullRequestLink } from './pull-request-link';
 import { cardSummary, TaskCard } from './task-card';
-import { pullRequestClosed, pullRequestState } from './task-state';
+import {
+  canCloseRun,
+  canRetryRun,
+  pullRequestClosed,
+  pullRequestState,
+  shippedAnywayAndClosed,
+} from './task-state';
 import { canStart, TaskCardMenu } from './task-card-menu';
 import { columnNameOf, TaskDrawer } from './task-drawer';
 import { useBoardActions } from './use-board-actions';
@@ -178,11 +183,10 @@ function BoardColumns({
   );
   const allTasks = new Map(layout.flatMap((c) => c.tasks).map((t) => [t.id, t] as const));
   // What the card says about a Start: asked and on its way, or refused and why.
-  const noteOf = (task: TaskDto) =>
-    actions.note(
-      task,
-      canStart(task, task.workstreamId ? workstreamById.get(task.workstreamId)?.state : undefined),
-    );
+  const noteOf = (task: TaskDto) => {
+    const ws = task.workstreamId ? workstreamById.get(task.workstreamId) : undefined;
+    return actions.note(task, canStart(task, ws?.state, shippedAnywayAndClosed(ws, batchOf(ws))));
+  };
   const drop = (taskId: TaskId, target: DropTarget) => {
     actions.apply(resolveDrop(layout, taskId, target, started), allTasks.get(taskId));
   };
@@ -313,7 +317,8 @@ function BoardColumns({
               <TaskCardMenu
                 task={task}
                 latest={ws?.state}
-                {...(ws && canRetry(ws.state)
+                shippedAnywayClosed={shippedAnywayAndClosed(ws, batch)}
+                {...(ws && canRetryRun(ws, batch)
                   ? {
                       onRetry: () => {
                         abandon.reset();
@@ -322,7 +327,7 @@ function BoardColumns({
                       },
                     }
                   : {})}
-                {...(ws && (canClose(ws.state) || closedPullRequestAwaits(task, ws, batch))
+                {...(ws && (canCloseRun(ws, batch) || closedPullRequestAwaits(task, ws, batch))
                   ? {
                       onCloseTask: () => {
                         retry.reset();
@@ -378,6 +383,9 @@ function BoardColumns({
           workstreams={workstreams}
           workspaceMode={project.workspaceMode}
           gateCommand={project.gateCommand}
+          onStart={() => {
+            actions.apply({ kind: 'start', taskId: openTask.id }, openTask);
+          }}
           onClose={() => {
             setOpenId(null);
           }}
