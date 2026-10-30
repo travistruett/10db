@@ -183,7 +183,7 @@ describe('runner', () => {
     expect(gate).toMatchObject({ kind: 'gate', exitCode: 0 });
     expect(gate?.commitShas).toHaveLength(1);
     expect(activeClaims(engine.store.db, workstream.id)).toEqual([]);
-    expect(listInbox(engine.store.db, { states: ['OPEN'] }).map((i) => i.kind)).toEqual(['review']);
+    expect(listInbox(engine.store.db, { states: ['OPEN'] })).toEqual([]);
     expect(
       engine.adapter.observations.find((o) => o.kind === 'denied_by_guard')?.detail['reason'],
     ).toContain('request_claim');
@@ -397,9 +397,7 @@ describe('runner', () => {
       await engine.runner.idle();
 
       expect(ws(workstream.id).state).toBe('DONE');
-      expect(listInbox(engine.store.db, { states: ['OPEN'] }).map((i) => i.kind)).toEqual([
-        'review',
-      ]);
+      expect(listInbox(engine.store.db, { states: ['OPEN'] })).toEqual([]);
       expect(
         engine.adapter.observations.filter(
           (o) => o.kind === 'tool_allowed' && o.detail['toolName'] === 'Bash',
@@ -433,7 +431,7 @@ describe('runner', () => {
     await engine.runner.idle();
 
     expect(ws(workstream.id).state).toBe('DONE');
-    expect(listInbox(engine.store.db, { states: ['OPEN'] }).map((i) => i.kind)).toEqual(['review']);
+    expect(listInbox(engine.store.db, { states: ['OPEN'] })).toEqual([]);
     expect(
       engine.adapter.observations.filter(
         (o) => o.kind === 'tool_allowed' && o.detail['toolName'] === 'Bash',
@@ -463,7 +461,7 @@ describe('runner', () => {
     await engine.runner.idle();
 
     expect(ws(workstream.id).state).toBe('DONE');
-    expect(listInbox(engine.store.db, { states: ['OPEN'] }).map((i) => i.kind)).toEqual(['review']);
+    expect(listInbox(engine.store.db, { states: ['OPEN'] })).toEqual([]);
     expect(
       engine.adapter.observations.filter(
         (o) => o.kind === 'tool_allowed' && o.detail['toolName'] === 'Bash',
@@ -1279,9 +1277,7 @@ describe('runner', () => {
         await engine.runner.idle();
         expect(ws(workstream.id).state).toBe('DONE');
         expect(engine.adapter.prompts[2]?.prompt).toContain(promptText);
-        expect(listInbox(engine.store.db, { states: ['OPEN'] }).map((i) => i.kind)).toEqual([
-          'review',
-        ]);
+        expect(listInbox(engine.store.db, { states: ['OPEN'] })).toEqual([]);
         expect(
           engine.adapter.observations.filter(
             (o) => o.kind === 'tool_allowed' && o.detail['toolName'] === 'Bash',
@@ -3622,12 +3618,13 @@ describe('without a gate command', () => {
       expect(reviewCards()).toEqual([]);
     });
 
-    it('with a gate, a finished task still raises its review card', async () => {
+    it('with a gate, a finished task raises no card: the pull request is where it is reviewed', async () => {
       engine = await createTestEngine({ Alpha: [implement('op-check-0003')] });
       const { workstream } = engine.addTask('Alpha');
       await runToWait(workstream.id);
       expect(ws(workstream.id).state).toBe('DONE');
-      expect(reviewCards()).toHaveLength(1);
+      expect(reviewCards()).toEqual([]);
+      expect(listInbox(engine.store.db, { states: ['OPEN'] })).toEqual([]);
     });
 
     it.each([

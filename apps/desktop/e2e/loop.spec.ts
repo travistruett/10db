@@ -188,9 +188,8 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
     page.getByRole('list', { name: 'Done tasks' }).getByRole('listitem', { name: TASK }),
   ).toBeVisible();
   await open(page, 'Inbox');
-  await expect(page.getByText(`Review: ${TASK}`)).toBeVisible();
-  // The MCP commit really landed: the runner counts the commits it recorded before the gate.
-  await expect(page.getByText('Gate passed with 1 commit(s).')).toBeVisible();
+  // A passing gate raises no card: the only answer it could offer was one that closed it.
+  await expect(page.getByText(`Review: ${TASK}`)).toHaveCount(0);
   await expect(page.getByText(QUESTION)).toHaveCount(0);
 
   // A locked card's reason is reachable from the keyboard, not only on hover.

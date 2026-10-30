@@ -86,6 +86,7 @@
         "backlog",
         "ready",
         "in_progress",
+        "in_review",
         "blocked",
         "done"
       ]

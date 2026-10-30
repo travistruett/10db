@@ -17,16 +17,24 @@ import * as schema from '../schema';
 import { activeClaims } from './claims';
 import { listEventsAfter } from './events';
 import type { Store } from './store';
-import { insertBatch } from './batches';
+import {
+  insertBatch,
+  recordPullRequestStatus,
+  transitionBatch,
+  type PullRequestStatusInput,
+} from './batches';
 import { insertBoardColumn } from './board-columns';
 import {
   cancelTask,
   closeTask,
+  dependenciesDone,
   getTask,
   insertTask,
   listTasks,
   moveTask,
   patchTask,
+  reopenTask,
+  setTaskStatus,
 } from './tasks';
 import { createTestStore, seedProject } from './test-support';
 import { insertWorkstream, listWorkstreams, transitionWorkstream } from './workstreams';
@@ -307,5 +315,112 @@ describe('closeTask', () => {
 
   it('answers NotFoundError for an unknown id', () => {
     expect(() => store.write((ctx) => closeTask(ctx, mintId('Task')))).toThrow(NotFoundError);
+  });
+});
+
+describe('a task whose pull request closed without merging', () => {
+  const PR = 'https://github.com/o/r/pull/7';
+  const read = (state: 'open' | 'closed' | 'merged'): PullRequestStatusInput => ({
+    state,
+    checks: 'passing',
+    failingChecks: [],
+    checkedAt: '2026-10-29T12:00:00.000Z',
+    unknownReason: null,
+  });
+
+  /** A task whose run is DONE in a SHIPPED batch whose pull request reads `state`. */
+  function inReview(projectId: ReturnType<typeof seedProject>['id'], state: 'open' | 'closed') {
+    const task = seedTask(projectId, 'A');
+    const batch = store.write((ctx) =>
+      insertBatch(ctx, { projectId, title: 'B', baseBranch: 'main' }),
+    ).value;
+    for (const to of ['OPEN', 'SHIPPING'] as const)
+      store.write((ctx) => transitionBatch(ctx, batch.id, { to }));
+    store.write((ctx) => transitionBatch(ctx, batch.id, { to: 'SHIPPED', patch: { prUrl: PR } }));
+    const ws = store.write((ctx) => insertWorkstream(ctx, task.id, { batchId: batch.id })).value;
+    for (const to of [S.Starting, S.Running, S.Verifying, S.Done])
+      store.write((ctx) => transitionWorkstream(ctx, ws.id, { to, fence: null }));
+    store.write((ctx) => {
+      setTaskStatus(ctx, task.id, 'done');
+    });
+    store.write((ctx) => recordPullRequestStatus(ctx, batch.id, read(state)));
+    return { task, batch };
+  }
+
+  it('is in review while the pull request is open, and back with the builder once it closes', () => {
+    const project = seedProject(store);
+    const { task, batch } = inReview(project.id, 'open');
+    expect(getTask(store.db, task.id).boardStatus).toBe('in_review');
+    store.write((ctx) => recordPullRequestStatus(ctx, batch.id, read('closed')));
+    expect(getTask(store.db, task.id).boardStatus).toBe('blocked');
+    store.write((ctx) => recordPullRequestStatus(ctx, batch.id, read('merged')));
+    expect(getTask(store.db, task.id).boardStatus).toBe('done');
+  });
+
+  it('counts a failed run that shipped anyway as done once its pull request merges, so dependents start', () => {
+    const project = seedProject(store);
+    const { task, batch } = inReview(project.id, 'open');
+    const child = seedTask(project.id, 'child', [task.id]);
+    // Ship anyway: the run failed, the task never reached done, and its batch shipped.
+    store.db
+      .update(schema.tasks)
+      .set({ status: TaskStatus.Open })
+      .where(eq(schema.tasks.id, task.id))
+      .run();
+    store.db.update(schema.workstreams).set({ state: S.Failed }).run();
+    expect(getTask(store.db, task.id).boardStatus).toBe('in_review');
+    expect(dependenciesDone(store.db, child.id)).toBe(false);
+    store.write((ctx) => recordPullRequestStatus(ctx, batch.id, read('merged')));
+    expect(getTask(store.db, task.id).boardStatus).toBe('done');
+    expect(getTask(store.db, child.id).boardStatus).toBe('ready');
+    expect(dependenciesDone(store.db, child.id)).toBe(true);
+  });
+
+  it('can be closed: it leaves the list and keeps its run', () => {
+    const project = seedProject(store);
+    const { task } = inReview(project.id, 'closed');
+    const { value } = store.write((ctx) => closeTask(ctx, task.id));
+    expect(value.status).toBe(TaskStatus.Cancelled);
+    expect(listTasks(store.db, project.id)).toEqual([]);
+    expect(listWorkstreams(store.db, { projectId: project.id })).toHaveLength(1);
+  });
+
+  it('can be reopened: open again, in Ready, announced', () => {
+    const project = seedProject(store);
+    const { task } = inReview(project.id, 'closed');
+    const { value, events } = store.write((ctx) => reopenTask(ctx, task.id));
+    expect(value).toMatchObject({ status: TaskStatus.Open, boardStatus: 'ready' });
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: EventType.TaskChanged,
+        entityId: task.id,
+        data: { status: TaskStatus.Open },
+      }),
+    ]);
+  });
+
+  it('can be reopened and then started again', () => {
+    const project = seedProject(store);
+    const { task } = inReview(project.id, 'closed');
+    store.write((ctx) => reopenTask(ctx, task.id));
+    const again = store.write((ctx) => insertWorkstream(ctx, task.id)).value;
+    expect(again.state).toBe(S.Queued);
+  });
+
+  it('is not closed or reopened while its pull request is open', () => {
+    const project = seedProject(store);
+    const { task } = inReview(project.id, 'open');
+    expect(() => store.write((ctx) => closeTask(ctx, task.id))).toThrow(ConflictError);
+    expect(() => store.write((ctx) => reopenTask(ctx, task.id))).toThrow(ConflictError);
+  });
+
+  it('refuses a reopen for a task that never shipped', () => {
+    const project = seedProject(store);
+    const task = seedTask(project.id);
+    expect(() => store.write((ctx) => reopenTask(ctx, task.id))).toThrow(ConflictError);
+  });
+
+  it('answers NotFoundError for an unknown id', () => {
+    expect(() => store.write((ctx) => reopenTask(ctx, mintId('Task')))).toThrow(NotFoundError);
   });
 });

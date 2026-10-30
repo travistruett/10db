@@ -11,6 +11,7 @@ import {
 import {
   cancelTask,
   closeTask,
+  reopenTask,
   deleteBoardColumn,
   getMcpApproval,
   getProject,
@@ -216,6 +217,7 @@ export function createServices(deps: {
       deps.state.write((ctx) => setRoutingRules(ctx, projectId, input)),
     removeTask: (id) => deps.state.write((ctx) => cancelTask(ctx, id)),
     closeTask: (id) => deps.state.write((ctx) => closeTask(ctx, id)),
+    reopenTask: (id) => deps.state.write((ctx) => reopenTask(ctx, id)),
     patchTask: (id, patch) => deps.state.write((ctx) => patchTask(ctx, id, patch)),
     moveTask: (id, move) => deps.state.write((ctx) => moveTask(ctx, id, move)),
     listBoardColumns(projectId) {

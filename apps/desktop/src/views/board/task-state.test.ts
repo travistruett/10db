@@ -1,3 +1,4 @@
+import type { BatchDto } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { batchDto, stepDto, workstreamDto } from '../../test/fixtures';
 import { taskState } from './task-state';
@@ -88,6 +89,89 @@ describe('taskState', () => {
       line,
       color,
     });
+  });
+
+  const PR = 'https://github.com/acme/widgets/pull/9';
+  const shipped = (pr: Partial<NonNullable<BatchDto['pr']>> | null) =>
+    batchDto({
+      state: 'SHIPPED',
+      prUrl: PR,
+      pr:
+        pr === null
+          ? null
+          : {
+              state: 'open',
+              checks: 'pending',
+              failingChecks: [],
+              checkedAt: '2026-10-29T12:00:00.000Z',
+              unknownReason: null,
+              ...pr,
+            },
+    });
+
+  it.each([
+    {
+      name: 'an open pull request not yet read',
+      batch: shipped(null),
+      line: 'Pull request open',
+      color: 'blue',
+    },
+    {
+      name: 'an open pull request with checks pending',
+      batch: shipped({ checks: 'pending' }),
+      line: 'Pull request open · checks pending',
+      color: 'blue',
+    },
+    {
+      name: 'an open pull request with checks passing',
+      batch: shipped({ checks: 'passing' }),
+      line: 'Pull request open · checks passing',
+      color: 'green',
+    },
+    {
+      name: 'an open pull request with checks failing',
+      batch: shipped({
+        checks: 'failing',
+        failingChecks: [{ name: 'build', url: null }],
+      }),
+      line: 'Pull request open · checks failing: build',
+      color: 'red',
+    },
+    {
+      name: 'an open pull request with no checks',
+      batch: shipped({ checks: 'none' }),
+      line: 'Pull request open · no checks',
+      color: 'gray',
+    },
+    {
+      name: 'a pull request whose state could not be read',
+      batch: shipped({ state: 'unknown', checks: 'passing', unknownReason: 'gh is signed out' }),
+      line: 'Pull request status unknown: gh is signed out',
+      color: 'orange',
+    },
+    {
+      name: 'a pull request closed without merging',
+      batch: shipped({ state: 'closed', checks: 'passing' }),
+      line: 'Pull request closed without merging',
+      color: 'red',
+    },
+  ] as const)('says $name', ({ batch, line, color }) => {
+    expect(taskState(workstreamDto({ state: 'DONE' }), batch, 'make gate')).toEqual({
+      line,
+      color,
+    });
+  });
+
+  it('says nothing once the pull request merged', () => {
+    expect(
+      taskState(workstreamDto({ state: 'DONE' }), shipped({ state: 'merged' }), 'make gate'),
+    ).toBeNull();
+  });
+
+  it('judges a failed run that shipped anyway by its pull request', () => {
+    expect(
+      taskState(workstreamDto({ state: 'FAILED' }), shipped({ checks: 'passing' }), null)?.line,
+    ).toBe('Pull request open · checks passing');
   });
 
   it.each(['DONE', 'CANCELLED'] as const)('says nothing for a %s run in an open batch', (state) => {

@@ -2,6 +2,7 @@ import {
   isTerminal,
   SYSTEM_COLUMN_LABEL,
   RiskTag,
+  TaskStatus,
   WorkspaceMode,
   type BatchDto,
   type FlowId,
@@ -22,7 +23,12 @@ import {
   TextInput,
 } from '@mantine/core';
 import { useState } from 'react';
-import { useCloseTask, usePatchTask, useRetryWorkstream } from '../../daemon/queries';
+import {
+  useCloseTask,
+  usePatchTask,
+  useReopenTask,
+  useRetryWorkstream,
+} from '../../daemon/queries';
 import { StateBadge } from '../factory/state-badge';
 import { canClose, canRetry } from '../factory/workstream-state';
 import { criteriaLines } from './areas-text';
@@ -30,6 +36,7 @@ import { closeNote } from './batch/close-note';
 import { BatchPanel } from './batch-panel';
 import { FlowSelect } from './flow-select';
 import { RISK_LABEL } from './risk-labels';
+import { pullRequestClosed } from './task-state';
 
 const RISKS: readonly RiskTag[] = Object.values(RiskTag);
 const isRisk = (value: string): value is RiskTag => RISKS.some((r) => r === value);
@@ -146,6 +153,9 @@ export function TaskDrawer({
             batch={batch}
             onClosed={onClose}
           />
+        ) : null}
+        {batch && task.status === TaskStatus.Done && pullRequestClosed(batch) ? (
+          <ClosedPullRequest taskId={task.id} batch={batch} onClosed={onClose} />
         ) : null}
         {batch ? (
           <BatchPanel
@@ -343,6 +353,61 @@ function WorkstreamLine({
       ) : null}
       {closeTask.error ? (
         <Text size="xs" c="red" role="alert">{`Couldn't close: ${closeTask.error.message}`}</Text>
+      ) : null}
+    </Stack>
+  );
+}
+
+/**
+ * A finished task whose pull request closed without merging goes back to the builder: reopen it to
+ * run it again, or close it to take it off the Board.
+ */
+function ClosedPullRequest({
+  taskId,
+  batch,
+  onClosed,
+}: {
+  readonly taskId: TaskId;
+  readonly batch: BatchDto;
+  readonly onClosed: () => void;
+}) {
+  const reopen = useReopenTask();
+  const closeTask = useCloseTask();
+  const error = reopen.error ?? closeTask.error;
+  return (
+    <Stack gap={4}>
+      <Text size="sm" c="red">
+        The pull request closed without merging.
+      </Text>
+      <Group gap="xs" wrap="nowrap">
+        <Button
+          size="xs"
+          variant="default"
+          loading={reopen.isPending}
+          onClick={() => {
+            closeTask.reset();
+            reopen.mutate(taskId, { onSuccess: onClosed });
+          }}
+        >
+          Reopen task
+        </Button>
+        <Button
+          size="xs"
+          variant="default"
+          loading={closeTask.isPending}
+          onClick={() => {
+            reopen.reset();
+            closeTask.mutate(taskId, { onSuccess: onClosed });
+          }}
+        >
+          Close task
+        </Button>
+      </Group>
+      <Text size="xs" c="dimmed">
+        Reopen puts the task back in Ready to run again. {closeNote(batch)}
+      </Text>
+      {error ? (
+        <Text size="xs" c="red" role="alert">{`Couldn't update the task: ${error.message}`}</Text>
       ) : null}
     </Stack>
   );

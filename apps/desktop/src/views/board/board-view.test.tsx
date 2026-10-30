@@ -599,6 +599,7 @@ describe('BoardView', () => {
       'Backlog tasks',
       'Ready tasks',
       'In progress tasks',
+      'In review tasks',
       'Blocked tasks',
       'Done tasks',
     ]);
@@ -1275,6 +1276,114 @@ describe('BoardView', () => {
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Abandon', hidden: true }));
     await waitFor(() => {
       expect(abandoned).toEqual([batch.id]);
+    });
+  });
+
+  describe('a task whose pull request is open or closed', () => {
+    const url = 'https://github.com/acme/widgets/pull/4';
+    const read = (state: 'open' | 'closed', checks: 'pending' | 'passing' | 'failing') => ({
+      state,
+      checks,
+      failingChecks: checks === 'failing' ? [{ name: 'build', url: null }] : [],
+      checkedAt: '2026-10-29T12:00:00.000Z',
+      unknownReason: null,
+    });
+
+    /** One finished task in a shipped batch whose pull request reads as given. */
+    function shipped(
+      boardStatus: 'in_review' | 'blocked',
+      pr: ReturnType<typeof read>,
+      ...extra: (RequestHandler | WebSocketHandler)[]
+    ) {
+      const batch = batchDto({ title: 'Alpha first', state: 'SHIPPED', prUrl: url, pr });
+      const project = projectViewDto({
+        id: batch.projectId,
+        delivery: 'pull_request',
+        prTitlePrefix: 'feat(app)',
+        currentBatch: batch,
+      });
+      const ws = workstreamDto({
+        projectId: project.id,
+        batchId: batch.id,
+        taskTitle: 'Alpha',
+        state: 'DONE',
+      });
+      const task = taskDto({
+        id: ws.taskId,
+        projectId: project.id,
+        title: 'Alpha',
+        boardStatus,
+        status: 'done',
+        boardOrder: 1,
+        workstreamId: ws.id,
+      });
+      serve(
+        http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+        http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([task])),
+        http.get(daemonUrl('/workstreams'), () => HttpResponse.json([ws])),
+        http.get(daemonUrl('/projects/:projectId/batches'), () => HttpResponse.json([batch])),
+        ...extra,
+      );
+      renderApp('/board');
+      return task;
+    }
+
+    it.each([
+      ['pending', 'Pull request open · checks pending'],
+      ['passing', 'Pull request open · checks passing'],
+      ['failing', 'Pull request open · checks failing: build'],
+    ] as const)(
+      'shows an open pull request with its checks %s in In review',
+      async (checks, line) => {
+        shipped('in_review', read('open', checks));
+        const column = await screen.findByRole('list', { name: 'In review tasks' });
+        const card = within(column).getByRole('listitem', { name: 'Alpha' });
+        expect(within(card).getByText(line)).toBeTruthy();
+        expect(within(card).getByRole('link', { name: 'Pull request' }).getAttribute('href')).toBe(
+          url,
+        );
+        expect(
+          within(screen.getByRole('list', { name: 'Done tasks' })).queryByText('Alpha'),
+        ).toBeNull();
+      },
+    );
+
+    it('says the pull request closed, and reopens or closes the task from its menu', async () => {
+      const calls: string[] = [];
+      const task = shipped(
+        'blocked',
+        read('closed', 'passing'),
+        http.post(daemonUrl('/tasks/:taskId/reopen'), ({ params }) => {
+          calls.push(`reopen ${String(params['taskId'])}`);
+          return HttpResponse.json({ ...taskDto(), id: params['taskId'], status: 'open' });
+        }),
+        http.post(daemonUrl('/tasks/:taskId/close'), ({ params }) => {
+          calls.push(`close ${String(params['taskId'])}`);
+          return HttpResponse.json({ ...taskDto(), id: params['taskId'], status: 'cancelled' });
+        }),
+      );
+      const blocked = await screen.findByRole('list', { name: 'Blocked tasks' });
+      expect(within(blocked).getByText('Pull request closed without merging')).toBeTruthy();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Actions for Alpha' }));
+      fireEvent.click(await screen.findByRole('menuitem', { name: 'Reopen', hidden: true }));
+      await waitFor(() => {
+        expect(calls).toEqual([`reopen ${task.id}`]);
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: 'Actions for Alpha' }));
+      fireEvent.click(await screen.findByRole('menuitem', { name: 'Close', hidden: true }));
+      await waitFor(() => {
+        expect(calls).toEqual([`reopen ${task.id}`, `close ${task.id}`]);
+      });
+    });
+
+    it('offers neither Reopen nor Close while the pull request is open', async () => {
+      shipped('in_review', read('open', 'pending'));
+      fireEvent.click(await screen.findByRole('button', { name: 'Actions for Alpha' }));
+      await screen.findByRole('menu', { hidden: true });
+      expect(screen.queryByRole('menuitem', { name: 'Reopen', hidden: true })).toBeNull();
+      expect(screen.queryByRole('menuitem', { name: 'Close', hidden: true })).toBeNull();
     });
   });
 

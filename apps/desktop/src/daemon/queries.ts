@@ -249,6 +249,21 @@ export function useCloseTask() {
   });
 }
 
+/** Opens a task again after its pull request closed without merging; it returns to Ready or Backlog. */
+export function useReopenTask() {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (taskId: TaskId) =>
+      readJson(await client.tasks[':taskId'].reopen.$post({ param: { taskId } }), TaskDto),
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['tasks'] }),
+        queryClient.invalidateQueries({ queryKey: ['candidates'] }),
+      ]),
+  });
+}
+
 export function useShipBatch() {
   const { client } = useDaemon();
   const queryClient = useQueryClient();

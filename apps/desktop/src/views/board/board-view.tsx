@@ -23,6 +23,7 @@ import {
   useBatches,
   useBoardColumns,
   useCloseTask,
+  useReopenTask,
   useRetryWorkstream,
   useTasks,
   useWorkstreams,
@@ -46,6 +47,7 @@ import { NewTaskForm } from './new-task-form';
 import { InboxLink } from './inbox-link';
 import { PullRequestLink } from './pull-request-link';
 import { cardSummary, TaskCard } from './task-card';
+import { pullRequestClosed, pullRequestState } from './task-state';
 import { canStart, TaskCardMenu } from './task-card-menu';
 import { columnNameOf, TaskDrawer } from './task-drawer';
 import { useBoardActions } from './use-board-actions';
@@ -72,7 +74,9 @@ function cardWorkstream(
 ): WorkstreamDto | undefined {
   if (!ws) return undefined;
   if (SHOWN_STATES.includes(ws.state)) return ws;
-  return ws.state === WorkstreamState.Done && batch && UNSHIPPED_BATCH_STATES.includes(batch.state)
+  if (ws.state !== WorkstreamState.Done || !batch) return undefined;
+  // Finished work shows its pull request's checks until the pull request merges.
+  return UNSHIPPED_BATCH_STATES.includes(batch.state) || pullRequestState(batch) !== null
     ? ws
     : undefined;
 }
@@ -95,7 +99,10 @@ function shippedPullRequest(
   workstream: WorkstreamDto | undefined,
   batchById: ReadonlyMap<BatchId, BatchDto>,
 ): string | undefined {
-  if (task.status !== TaskStatus.Done || !workstream?.batchId) return undefined;
+  if (!workstream?.batchId) return undefined;
+  // A failed run the builder shipped anyway has a pull request too.
+  if (task.status !== TaskStatus.Done && workstream.state !== WorkstreamState.Failed)
+    return undefined;
   return batchById.get(workstream.batchId)?.prUrl ?? undefined;
 }
 
@@ -136,6 +143,7 @@ function BoardColumns({
   const retry = useRetryWorkstream();
   const abandon = useAbandonBatch();
   const closeTask = useCloseTask();
+  const reopenTask = useReopenTask();
   const [showAllDone, setShowAllDone] = useState(false);
   // The task whose details are open, by ID, so the drawer follows the task as the board refetches.
   const [openId, setOpenId] = useState<TaskId | null>(null);
@@ -188,6 +196,11 @@ function BoardColumns({
       {closeTask.error ? (
         <Alert color="red" title="Couldn't close the task">
           {closeTask.error.message}
+        </Alert>
+      ) : null}
+      {reopenTask.error ? (
+        <Alert color="red" title="Couldn't reopen the task">
+          {reopenTask.error.message}
         </Alert>
       ) : null}
       <BoardScroll>
@@ -290,14 +303,25 @@ function BoardColumns({
                       },
                     }
                   : {})}
-                {...(ws && canClose(ws.state)
+                {...(ws && (canClose(ws.state) || pullRequestClosed(batch))
                   ? {
                       onCloseTask: () => {
                         retry.reset();
                         abandon.reset();
+                        reopenTask.reset();
                         closeTask.mutate(task.id);
                       },
                       closeLine: closeNote(batch),
+                    }
+                  : {})}
+                {...(task.status === TaskStatus.Done && pullRequestClosed(batch)
+                  ? {
+                      onReopenTask: () => {
+                        retry.reset();
+                        abandon.reset();
+                        closeTask.reset();
+                        reopenTask.mutate(task.id);
+                      },
                     }
                   : {})}
                 {...(batch && canAbandon
