@@ -13,7 +13,7 @@ import {
 import { listPermissionRules } from '@10db/db';
 import { z } from 'zod';
 import type { StateStore } from '../events';
-import { firstUnread, hazardHit, stringField } from '../guard';
+import { firstUnread, hazardHit, startsEndlessBackgroundLoop, stringField } from '../guard';
 import { matchPermissionRule, storableRule } from '../permissions';
 import { readAccess, readPathsOf, writeAccess, type FileAccessContext } from '../sandbox';
 import type { ToolDecision, ToolRequest } from '../sessions';
@@ -91,6 +91,24 @@ const HOST_CARD_BODY =
 // Lanes can't write it: it is shared with every other lane and the builder's own pnpm.
 const PNPM_CARD_BODY =
   "pnpm 12 locks its store in a /tmp directory shared with every lane and your own pnpm, which a lane can't write. Approving lets the command run, and it will fail on that lock. Run it yourself, or use npm.";
+
+const LOOP_CARD_BODY =
+  'This command starts something in the background that never ends (a loop with no exit, `yes`, or the like). It keeps running after the command and the session that started it, using a core until something stops it. 10db stops what a session leaves when the session ends, but a loop like this can still hold the Mac busy for the whole session and make gates and tests fail on timeouts.';
+
+/**
+ * What a lane is told when the builder denies a call. It names the call and says the denial covers
+ * its equivalents, because a lane that reads a refusal as being about one spelling tries the next
+ * (a `yes` loop denied, then a `while :` loop).
+ */
+export function denialMessage(toolName: string, summary: string, note: string | undefined): string {
+  const call = summary.length > 300 ? `${summary.slice(0, 300)}…` : summary;
+  const parts = [
+    `The builder denied this ${toolName} call: ${call}`,
+    'The denial covers any equivalent: the same effect written another way (another program, a loop, a script, a wrapper or a different tool) is denied too. Do not retry it or a variant of it; work without it, or ask the builder with ask_human what they would allow.',
+  ];
+  if (note) parts.push(`Note from the builder: ${note}`);
+  return parts.join('\n');
+}
 
 const NetworkInput = z.looseObject({ host: z.string().min(1) });
 
@@ -211,7 +229,7 @@ export function createPermissionBroker(
     if (ALLOWING.includes(result.choice)) return { behavior: 'allow' };
     return {
       behavior: 'deny',
-      message: `The builder denied ${req.toolName}.${result.note ? ` Note: ${result.note}` : ''}`,
+      message: denialMessage(req.toolName, summary, result.note),
     };
   }
 
@@ -292,6 +310,9 @@ export function createPermissionBroker(
     } catch (cause) {
       if (isTooDeep(cause)) return { summary: command };
       throw cause;
+    }
+    if (startsEndlessBackgroundLoop(command)) {
+      return { summary: command, body: `${command}\n\n${LOOP_CARD_BODY}` };
     }
     if (hit === null && !req.escalated && unread === null) return { behavior: 'allow' };
     return hit?.name === 'deps' && hit.words[0] === 'pnpm'

@@ -816,6 +816,40 @@ describe('permission broker in a sandboxed lane', () => {
     expect(onlyOpenCard().kind).toBe('permission');
   });
 
+  it('cards a command that starts background loops with no end, as the incident did', async () => {
+    const ws = seedWorkstream(base);
+    const command = 'for i in 1 2 3; do (while :; do :; done) & done; pnpm test';
+    const pending = sandboxed(ws)(request('Bash', { command }));
+    const card = onlyOpenCard();
+    expect(card.kind).toBe('permission');
+    expect(card.detail).toEqual({ toolName: 'Bash', summary: command });
+    expect(card.body).toContain(command);
+    expect(card.body).toContain('never ends');
+    inbox.answer(card.id, { choice: 'allow_once' });
+    expect(await pending).toEqual({ behavior: 'allow' });
+  });
+
+  it('cards the yes-loop form too, and passes the denial on in words that cover its equivalents', async () => {
+    const ws = seedWorkstream(base);
+    const pending = sandboxed(ws)(request('Bash', { command: 'yes > /dev/null &' }));
+    inbox.answer(onlyOpenCard().id, { choice: 'deny', note: 'no CPU load, please' });
+    const decision = await pending;
+    expect(decision.behavior).toBe('deny');
+    const message = decision.behavior === 'deny' ? decision.message : '';
+    expect(message).toContain('yes > /dev/null &');
+    expect(message).toContain('no CPU load, please');
+    expect(message).toMatch(/equivalent/i);
+    expect(message).toMatch(/another (form|way)/i);
+  });
+
+  it('does not card a loop that runs in the foreground', async () => {
+    const ws = seedWorkstream(base);
+    expect(await sandboxed(ws)(request('Bash', { command: 'while :; do :; done' }))).toEqual({
+      behavior: 'allow',
+    });
+    expect(openCards()).toEqual([]);
+  });
+
   const MAKE_MIGRATE: HazardDef = {
     name: 'schema',
     globs: ['db/**'],
