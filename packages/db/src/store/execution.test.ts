@@ -5,6 +5,7 @@ import {
   activeClaims,
   claimRequestsForTask,
   copyHazardNames,
+  releaseClaim,
   releaseClaims,
   renewClaimLeases,
   type ClaimRequest,
@@ -278,6 +279,31 @@ describe('claims', () => {
       }),
     ).value;
     expect(third.ok).toBe(true);
+  });
+
+  it('releases one claim and keeps the rest, once', () => {
+    const lease = '2026-10-13T12:01:00.000Z';
+    const a = seedWorkstream('A', ['api']);
+    const claimed = store.write((ctx) =>
+      acquireClaims(ctx, {
+        projectId: a.ws.projectId,
+        workstreamId: a.ws.id,
+        requests: [
+          { kind: 'area', name: 'api' },
+          { kind: 'hazard', name: 'migrations' },
+        ],
+        leaseExpiresAt: lease,
+      }),
+    ).value;
+    const hazard = claimed.ok ? claimed.claims.find((c) => c.kind === 'hazard') : undefined;
+    if (!hazard) throw new Error('no hazard claim');
+    const { value, events } = store.write((ctx) => releaseClaim(ctx, hazard.id));
+    expect(value).toBe(true);
+    expect(events.map((e) => [e.type, e.data])).toEqual([
+      ['claim.released', { workstreamId: a.ws.id, kind: 'hazard', name: 'migrations' }],
+    ]);
+    expect(activeClaims(store.db, a.ws.id).map((c) => c.name)).toEqual(['api']);
+    expect(store.write((ctx) => releaseClaim(ctx, hazard.id)).value).toBe(false);
   });
 });
 

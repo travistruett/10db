@@ -122,6 +122,7 @@ export async function createTestEngine(
       | 'gate'
       | 'onLaneFreed'
       | 'baseUpdates'
+      | 'migrationsBase'
     >
   > = {},
   setup: { readonly account?: AccountInput; readonly secret?: string } = {},

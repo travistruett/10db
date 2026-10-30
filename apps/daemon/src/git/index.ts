@@ -18,6 +18,7 @@ export {
   trustCard,
   worktreeMergeCommand,
   worktreeRemovalCommand,
+  worktreeRestoreCommand,
 } from './trust-card';
 export { GitTrustError, GitTrustFailure } from './trust-error';
 export { firstExecutable, installCandidates, INSTALL_PREFIXES_TEXT } from './install-prefixes';

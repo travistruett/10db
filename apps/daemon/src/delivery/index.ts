@@ -1,5 +1,17 @@
 export { batchBranchName } from './branch-name';
-export { createBaseUpdates, gateNote, type BaseUpdate, type BaseUpdates } from './base-update';
+export {
+  createBaseUpdates,
+  gateNote,
+  type BaseUpdate,
+  type BaseUpdates,
+  type BeforeGateOptions,
+} from './base-update';
+export {
+  createMigrationsBase,
+  MIGRATIONS_HAZARD,
+  type MigrationsBase,
+  type MigrationsBaseTake,
+} from './migrations-base';
 export { retireWorktree } from './worktree-cleanup';
 export { ensureWorktreeWhole } from './worktree-repair';
 export { DEFAULT_DELIVERY_LIMITS, type DeliveryContext, type DeliveryLimits } from './context';
