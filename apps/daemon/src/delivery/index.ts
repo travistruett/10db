@@ -1,11 +1,5 @@
 export { batchBranchName } from './branch-name';
-export {
-  createBaseUpdates,
-  gateNote,
-  type BaseUpdate,
-  type BaseUpdates,
-  type BeforeGateOptions,
-} from './base-update';
+export { createBaseUpdates, gateNote, type BaseUpdate, type BaseUpdates } from './base-update';
 export {
   createMigrationsBase,
   MIGRATIONS_HAZARD,
