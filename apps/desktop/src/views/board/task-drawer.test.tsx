@@ -312,6 +312,67 @@ describe('TaskDrawer', () => {
       expect(await screen.findByText(/^Couldn't retry: /)).toBeTruthy();
     });
 
+    it('a failed task offers Close with what happens to its branch and worktree', async () => {
+      serve();
+      const batch = batchDto({ worktreePath: '/tmp/wt' });
+      const ws = workstreamDto({ state: 'FAILED', failureReason: 'boom', batchId: batch.id });
+      open({ workstream: ws, batch, workstreams: [ws] });
+      const d = await dialog();
+      expect(within(d).getByRole('button', { name: 'Close task' })).toBeTruthy();
+      expect(
+        within(d).getByText(
+          'Close keeps the branch 10db/greetings-0a1b2c3d and its worktree as they are.',
+        ),
+      ).toBeTruthy();
+    });
+
+    it('Close posts /tasks/:id/close and closes the drawer', async () => {
+      const ws = workstreamDto({ state: 'FAILED', failureReason: 'boom' });
+      const task = taskDto({ workstreamId: ws.id });
+      const closed: string[] = [];
+      serve(
+        http.post(daemonUrl('/tasks/:taskId/close'), ({ params }) => {
+          closed.push(String(params['taskId']));
+          return HttpResponse.json({ ...task, status: 'cancelled' });
+        }),
+      );
+      const drawer = open({ task, workstream: ws });
+      fireEvent.click(within(await dialog()).getByRole('button', { name: 'Close task' }));
+      await waitFor(() => {
+        expect(closed).toEqual([task.id]);
+      });
+      await waitFor(() => {
+        expect(drawer.closed()).toBe(1);
+      });
+    });
+
+    it('a refusal to close names what blocks it', async () => {
+      const ws = workstreamDto({ state: 'FAILED', failureReason: 'boom' });
+      serve(
+        http.post(daemonUrl('/tasks/:taskId/close'), () =>
+          HttpResponse.json(
+            { error: 'conflict', message: "Task A can't be closed while Child waits on it" },
+            { status: 409 },
+          ),
+        ),
+      );
+      open({ workstream: ws });
+      fireEvent.click(within(await dialog()).getByRole('button', { name: 'Close task' }));
+      expect(
+        await screen.findByText("Couldn't close: Task A can't be closed while Child waits on it"),
+      ).toBeTruthy();
+    });
+
+    it.each(['QUEUED', 'RUNNING', 'WAITING_HUMAN', 'DONE', 'CANCELLED'] as const)(
+      'a %s workstream offers no Close',
+      async (state) => {
+        serve();
+        open({ workstream: workstreamDto({ state }) });
+        const d = await dialog();
+        expect(within(d).queryByRole('button', { name: 'Close task' })).toBeNull();
+      },
+    );
+
     it.each(['DONE', 'CANCELLED'] as const)(
       'a %s workstream shows no state line',
       async (state) => {
