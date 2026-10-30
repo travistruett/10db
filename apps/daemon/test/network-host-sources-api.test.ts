@@ -121,7 +121,8 @@ describe('hosts found when a project is added', () => {
       getAppSetting(daemon.state.db, `network-hosts-found:${project.id}`) ?? null,
       await eventsAfter(0),
     ]);
-    expect(stored).not.toMatch(/s3cr3t|deploy|8443/);
+    // The URL's own forms: a bare 8443 or deploy can turn up inside a random id.
+    expect(stored).not.toMatch(/s3cr3t|deploy:|:8443/);
   });
 
   it('is listed with the folder before it is added, with where each host came from', async () => {
