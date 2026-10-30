@@ -95,7 +95,7 @@
 - [ ] Accounts: spike carrying a cut-off conversation to the account a project moved to (`forkSession` and `getSessionMessages` on a per-account config directory, a subscription transcript resumed on Bedrock, thinking blocks, token cost). If it passes, a small follow-up plan resumes that conversation after a move instead of starting fresh from the handoff (accounts spec §11).
 - [ ] Accounts: the Accounts screen shows each project's fallback, the account it moved from and when 10db will ask to move it back.
 - [ ] Accounts: an in-memory Keychain for the fake-scripts daemon, so the secret form gets an end-to-end run.
-- [ ] First run: propose a project's areas from the repository (workspace packages, app folders, screens) instead of one `repo` area over `**`; the folder inspection is where it would go (first-run spec §13).
+- [x] First run: propose a project's areas from the repository (workspace packages, app folders, screens) instead of one `repo` area over `**`; the folder inspection is where it would go (first-run spec §13). (Adding a project proposes areas from HEAD's files and recent commits, named by a model, for the builder to edit; Settings can call the same `proposeAreas` later. Decision `2026-10-29-propose-areas-from-the-repository.md`.)
 - [ ] First run: propose a new task's areas from its description, and edit a task's areas and dependencies in the drawer (needs a task patch route).
 - [ ] First run: the sandbox check as a setup row; 10db checks its sandbox when a lane starts, and a row needs a daemon probe that doesn't exist yet.
 - [ ] First run: Codex as a second agent in the setup check's Agents card.
