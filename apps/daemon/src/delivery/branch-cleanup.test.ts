@@ -70,6 +70,35 @@ async function commitIn(batch: BatchDto, path: string): Promise<string> {
 /** Whether the local branch is in the main repository. */
 const exists = (branch: string | null): boolean => h.git$('branch', '--list', branch ?? '') !== '';
 
+/**
+ * What is left of branch `name` (or of every branch under it, for a prefix ending in `/`) in the main
+ * repository: local heads, remote-tracking refs and `branch.<name>` config keys, sorted.
+ */
+function leftOf(name: string | null): string[] {
+  const of = name ?? '?';
+  const refs = h
+    .git$('for-each-ref', '--format=%(refname)', `refs/heads/${of}`, `refs/remotes/origin/${of}`)
+    .split('\n');
+  const keys = h
+    .git$('config', '--local', '--name-only', '--list')
+    .split('\n')
+    .filter((key) =>
+      of.endsWith('/')
+        ? key.startsWith(`branch.${of}`)
+        : key.startsWith(`branch.${of}.`) && !key.slice(`branch.${of}.`.length).includes('.'),
+    );
+  return [...refs, ...keys].filter(Boolean).sort();
+}
+
+/** What 10db's push leaves for `branch`: its head, its remote-tracking ref and its upstream config. */
+const pushed = (branch: string | null): string[] =>
+  [
+    `branch.${branch ?? '?'}.merge`,
+    `branch.${branch ?? '?'}.remote`,
+    `refs/heads/${branch ?? '?'}`,
+    `refs/remotes/origin/${branch ?? '?'}`,
+  ].sort();
+
 /** The open cards that name the branch. */
 const cardsAbout = (branch: string | null): InboxItemDto[] =>
   h.cards().filter((c) => c.title.includes(branch ?? '?'));
@@ -177,6 +206,29 @@ describe('an abandoned task whose branch holds commits', () => {
     expect(exists(batch.branch)).toBe(false);
   });
 
+  it('refuses to delete a branch being rebased in the main checkout, where it shows as detached', async () => {
+    const { batch } = await opened();
+    await commitIn(batch, 'src/api/one.txt');
+    h.shipper.abandon(batch.id);
+    await h.jobs.idle();
+    const card = h.only(cardsAbout(batch.branch));
+    h.git$('switch', '-q', batch.branch ?? '');
+    // A rebase that stops after its first pick leaves the checkout detached, mid-rebase.
+    expect(() => h.git$('rebase', '-q', '--exec', 'false', 'HEAD~1')).toThrow();
+    expect(h.git$('branch', '--show-current')).toBe('');
+    inbox.answer(card.id, { choice: 'Delete Branch' });
+    await h.jobs.idle();
+    expect(exists(batch.branch)).toBe(true);
+    const again = h.only(cardsAbout(batch.branch));
+    expect(again.title).toBe(`${batch.branch ?? ''} was not deleted: it is checked out`);
+    // The rebase over and the checkout back on main, the second answer deletes it.
+    h.git$('rebase', '--abort');
+    h.git$('switch', '-q', 'main');
+    inbox.answer(again.id, { choice: 'Delete Branch' });
+    await h.jobs.idle();
+    expect(exists(batch.branch)).toBe(false);
+  });
+
   it('refuses to delete a branch checked out in another worktree', async () => {
     const { batch } = await opened();
     await commitIn(batch, 'src/api/one.txt');
@@ -256,12 +308,17 @@ describe('a pull request closed without merging', () => {
       cards.find((c) => c.title.includes('"Beta"')),
     ];
     if (!a || !b) throw new Error('a card per pull request expected');
+    expect(leftOf(first.batch.branch)).toEqual(pushed(first.batch.branch));
     inbox.answer(a.id, { choice: 'Delete Branch' });
     inbox.answer(b.id, { choice: 'Keep' });
     await h.jobs.idle();
     expect(exists(first.batch.branch)).toBe(false);
     expect(exists(second.batch.branch)).toBe(true);
     expect(getInboxItem(h.store.db, a.id).state).toBe('RESOLVED');
+    // Delete Branch takes its remote-tracking ref and config too; GitHub still holds the branch.
+    expect(leftOf(first.batch.branch)).toEqual([]);
+    expect(h.origin$('branch', '--list', first.batch.branch ?? '?')).not.toBe('');
+    expect(leftOf(second.batch.branch)).toEqual(pushed(second.batch.branch));
   });
 });
 
@@ -276,6 +333,33 @@ describe('a pull request that merged', () => {
     expect(getBatch(h.store.db, batch.id).pr?.state).toBe('merged');
     expect(exists(batch.branch)).toBe(false);
     expect(h.cards()).toEqual([]);
+  });
+
+  it('leaves no remote-tracking ref or branch config behind, so nothing of the task stays', async () => {
+    const { batch, tip, prUrl } = await shipped();
+    expect(leftOf('10db/')).toEqual(pushed(batch.branch));
+    h.gh.setState(prUrl, PrState.Merged);
+    h.gh.setHead(prUrl, tip);
+    // GitHub deletes the merged branch; 10db's own fetches never prune.
+    h.origin$('branch', '-D', batch.branch ?? '?');
+    const w = watch();
+    w.start();
+    await w.idle();
+    expect(leftOf('10db/')).toEqual([]);
+  });
+
+  it('keeps a remote-tracking ref that holds a commit the pull request did not carry', async () => {
+    const { batch, tip, prUrl } = await shipped();
+    const later = h.git$('commit-tree', `${tip}^{tree}`, '-p', tip, '-m', 'fetched later');
+    h.git$('update-ref', `refs/remotes/origin/${batch.branch ?? '?'}`, later);
+    h.gh.setState(prUrl, PrState.Merged);
+    h.gh.setHead(prUrl, tip);
+    const w = watch();
+    w.start();
+    await w.idle();
+    expect(exists(batch.branch)).toBe(false);
+    expect(h.git$('rev-parse', `refs/remotes/origin/${batch.branch ?? '?'}`)).toBe(later);
+    expect(leftOf(batch.branch)).toEqual([`refs/remotes/origin/${batch.branch ?? '?'}`]);
   });
 
   it('leaves a branch that is checked out in the main checkout', async () => {
@@ -367,6 +451,7 @@ describe('the sweep at startup', () => {
     expect(exists(batch.branch)).toBe(true);
     await removeMergedBranches(h.ctx, new AbortController().signal);
     expect(exists(batch.branch)).toBe(false);
+    expect(leftOf(batch.branch)).toEqual([]);
   });
 
   it('keeps the branch of a pull request that is still open', async () => {

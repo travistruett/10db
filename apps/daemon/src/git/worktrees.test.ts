@@ -412,6 +412,96 @@ describe('deleteBranchIfAt', () => {
     await expect(git.deleteBranchIfAt(main(), 'never-was', first)).resolves.toBe(false);
     before = mainState();
   });
+
+  /** The local config keys of branch `name`'s section, sorted. */
+  const branchKeys = (name: string) =>
+    raw(main(), 'config', '--local', '--name-only', '--list')
+      .split('\n')
+      .filter(
+        (key) => key.startsWith(`branch.${name}.`) && !key.slice(name.length + 8).includes('.'),
+      )
+      .sort();
+
+  /** A branch as 10db's push leaves it: head, remote-tracking ref and upstream config. */
+  const pushedBranch = (name: string, sha: string) => {
+    raw(main(), 'update-ref', `refs/heads/${name}`, sha);
+    raw(main(), 'update-ref', `refs/remotes/origin/${name}`, sha);
+    raw(main(), 'config', `branch.${name}.remote`, 'origin');
+    raw(main(), 'config', `branch.${name}.merge`, `refs/heads/${name}`);
+  };
+
+  it('deletes the remote-tracking ref with the branch, and the branch config, but no neighbour', async () => {
+    const first = raw(main(), 'rev-parse', 'HEAD');
+    pushedBranch('10db/a.b', first);
+    pushedBranch('10db/a.bc', first);
+    pushedBranch('10db/a.b.c', first);
+    await expect(git.deleteBranchIfAt(main(), '10db/a.b', first, first)).resolves.toBe(true);
+    expect(raw(main(), 'for-each-ref', '--format=%(refname)', 'refs/heads/10db/a.b')).toBe('');
+    expect(raw(main(), 'for-each-ref', '--format=%(refname)', 'refs/remotes/origin/10db/a.b')).toBe(
+      '',
+    );
+    expect(branchKeys('10db/a.b')).toEqual([]);
+    expect(branchKeys('10db/a.bc')).toEqual(['branch.10db/a.bc.merge', 'branch.10db/a.bc.remote']);
+    expect(branchKeys('10db/a.b.c')).toEqual([
+      'branch.10db/a.b.c.merge',
+      'branch.10db/a.b.c.remote',
+    ]);
+    expect(raw(main(), 'rev-parse', 'refs/remotes/origin/10db/a.bc')).toBe(first);
+  });
+
+  it('changes nothing when the remote-tracking ref moved, and leaves it when not named', async () => {
+    const first = raw(main(), 'rev-parse', 'HEAD');
+    pushedBranch('10db/x', first);
+    raw(main(), 'commit', '-q', '--allow-empty', '-m', 'second');
+    const second = raw(main(), 'rev-parse', 'HEAD');
+    raw(main(), 'update-ref', 'refs/remotes/origin/10db/x', second);
+    await expect(git.deleteBranchIfAt(main(), '10db/x', first, first)).resolves.toBe(false);
+    expect(raw(main(), 'rev-parse', 'refs/heads/10db/x')).toBe(first);
+    expect(raw(main(), 'rev-parse', 'refs/remotes/origin/10db/x')).toBe(second);
+    expect(branchKeys('10db/x')).toEqual(['branch.10db/x.merge', 'branch.10db/x.remote']);
+
+    await expect(git.deleteBranchIfAt(main(), '10db/x', first, null)).resolves.toBe(true);
+    expect(raw(main(), 'for-each-ref', '--format=%(refname)', 'refs/heads/10db/x')).toBe('');
+    expect(raw(main(), 'rev-parse', 'refs/remotes/origin/10db/x')).toBe(second);
+    expect(branchKeys('10db/x')).toEqual([]);
+    before = mainState();
+  });
+
+  it('reads the remote-tracking tip, and null when there is none', async () => {
+    const first = raw(main(), 'rev-parse', 'HEAD');
+    pushedBranch('10db/t', first);
+    await expect(git.trackingTip(main(), '10db/t')).resolves.toBe(first);
+    await expect(git.trackingTip(main(), '10db/none')).resolves.toBeNull();
+  });
+});
+
+describe('branchInUse', () => {
+  it('is null for a branch nothing has out', async () => {
+    raw(main(), 'branch', '10db/free');
+    await expect(git.branchInUse(main(), '10db/free')).resolves.toBeNull();
+  });
+
+  it('names the main checkout when the branch is checked out there', async () => {
+    await expect(git.branchInUse(main(), 'main')).resolves.toBe(realpathSync(main()));
+  });
+
+  it('names a worktree that has the branch checked out', async () => {
+    raw(main(), 'branch', '10db/out');
+    const other = join(elsewhere.path, 'out');
+    raw(main(), 'worktree', 'add', '-q', other, '10db/out');
+    await expect(git.branchInUse(main(), '10db/out')).resolves.toBe(realpathSync(other));
+  });
+
+  it('names a worktree that is rebasing the branch, where it shows as detached', async () => {
+    raw(main(), 'branch', '10db/rebasing');
+    const other = join(elsewhere.path, 'rebasing');
+    raw(main(), 'worktree', 'add', '-q', other, '10db/rebasing');
+    raw(other, 'commit', '-q', '--allow-empty', '-m', 'on the branch');
+    // A rebase that stops after its first pick leaves the worktree detached, mid-rebase.
+    expect(() => raw(other, 'rebase', '-q', '--exec', 'false', 'HEAD~1')).toThrow();
+    expect(raw(other, 'branch', '--show-current')).toBe('');
+    await expect(git.branchInUse(main(), '10db/rebasing')).resolves.toBe(realpathSync(other));
+  });
 });
 
 describe('localBranches', () => {

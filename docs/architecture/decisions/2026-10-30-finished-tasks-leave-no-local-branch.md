@@ -7,9 +7,15 @@
 
 - **What 10db may delete.** Only a local branch whose name starts with `10db/` and which a batch row names
   (`removeBranch` in `apps/daemon/src/delivery/branch-cleanup.ts` is the one place a branch is deleted). Never
-  a branch checked out in the main checkout or in any worktree (`git worktree list`), whatever the builder
-  answered. The delete names the tip it read (`update-ref -d <ref> <sha>`), so a branch that moved in between
-  stays.
+  a branch in use in the main checkout or in any worktree, whatever the builder answered: checked out
+  (`git worktree list`), or being rebased or bisected there, which leaves it detached (`Git.branchInUse`, the
+  check switch-back makes). The delete names the tip it read, so a branch that moved in between stays.
+- **What goes with it.** 10db's push records what `push -u` would: `refs/remotes/origin/<branch>` and the
+  `branch.<branch>` config section. Its own fetches name one branch and never prune, so both outlived every
+  branch. Now the remote-tracking ref is deleted in the same ref transaction as the branch
+  (`update-ref --stdin`, each at the tip read) when the same test the branch passed allows its tip (at or
+  behind the merged head; any tip for a Delete Branch answer, since GitHub still holds a closed pull request's
+  branch); one that holds something else stays. The config section is then removed, as `git branch -D` does.
 - **Merged.** After every pull request watch round (also one that read nothing, and the first, at startup),
   `removeMergedBranches` looks at each pull request project's shipped batches whose recorded pull request is
   `merged` and which still have their local branch. For each it asks gh for the pull request's head commit

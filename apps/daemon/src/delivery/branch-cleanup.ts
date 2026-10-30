@@ -11,16 +11,20 @@ export type BranchRemoval =
   | { readonly kind: 'absent' }
   /** Not a branch 10db makes: its name does not start with `10db/`. */
   | { readonly kind: 'foreign' }
-  /** Checked out in the main checkout or a worktree at `path`, where git won't let it go. */
+  /**
+   * Checked out, or being rebased or bisected, in the main checkout or a worktree at `path`, where
+   * git won't let it go.
+   */
   | { readonly kind: 'checked_out'; readonly path: string }
   /** `mayRemove` said no, or the branch moved while it was being removed. */
   | { readonly kind: 'kept' };
 
 /**
  * Deletes local branch `branch` of `repo`, the only way 10db deletes one. It refuses a name that is
- * not 10db's and a branch checked out anywhere (the main checkout or any worktree), and asks
- * `mayRemove` about the tip it read; the delete then names that tip, so a branch that moves in
- * between is left.
+ * not 10db's and a branch in use anywhere (checked out, rebased or bisected in the main checkout or
+ * any worktree), and asks `mayRemove` about the tip it read; the delete then names that tip, so a
+ * branch that moves in between is left. What 10db's push left goes with it: the remote-tracking ref
+ * `origin/<branch>`, when `mayRemove` allows its tip too, and the branch's config section.
  */
 export async function removeBranch(
   git: Git,
@@ -31,10 +35,14 @@ export async function removeBranch(
   if (!branch.startsWith(BRANCH_PREFIX)) return { kind: 'foreign' };
   const tip = await git.branchTip(repo, branch);
   if (tip === null) return { kind: 'absent' };
-  const holder = (await git.listWorktrees(repo)).find((e) => !e.bare && e.branch === branch);
-  if (holder) return { kind: 'checked_out', path: holder.path };
+  const holder = await git.branchInUse(repo, branch);
+  if (holder !== null) return { kind: 'checked_out', path: holder };
   if (!(await mayRemove(tip))) return { kind: 'kept' };
-  return (await git.deleteBranchIfAt(repo, branch, tip)) ? { kind: 'removed' } : { kind: 'kept' };
+  const tracking = await git.trackingTip(repo, branch);
+  const withTracking = tracking !== null && (tracking === tip || (await mayRemove(tracking)));
+  return (await git.deleteBranchIfAt(repo, branch, tip, withTracking ? tracking : null))
+    ? { kind: 'removed' }
+    : { kind: 'kept' };
 }
 
 /**

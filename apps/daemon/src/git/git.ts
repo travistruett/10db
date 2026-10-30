@@ -295,8 +295,25 @@ export interface Git {
   worktreeIgnoredFiles(repo: string, path: string): Promise<string[]>;
   /** Drops the entries of worktrees whose directory is gone, but not a locked one. */
   pruneWorktrees(repo: string): Promise<void>;
-  /** `update-ref -d refs/heads/<branch> <sha>`: true when deleted, false when missing or moved. */
-  deleteBranchIfAt(repo: string, branch: string, sha: string): Promise<boolean>;
+  /**
+   * Deletes local branch `branch` while it is at `sha` and, in the same ref transaction, its
+   * remote-tracking ref `refs/remotes/origin/<branch>` while it is at `tracking` (when given), then
+   * drops the branch's `branch.<branch>` config section, as `git branch -D` does. True when deleted;
+   * false when either ref is missing or moved, and then nothing changes.
+   */
+  deleteBranchIfAt(
+    repo: string,
+    branch: string,
+    sha: string,
+    tracking?: string | null,
+  ): Promise<boolean>;
+  /** The commit `refs/remotes/origin/<branch>` is at; null when there is no such ref. */
+  trackingTip(repo: string, branch: string): Promise<string | null>;
+  /**
+   * Where local branch `branch` is in use: the main checkout or a worktree that has it checked out,
+   * or is rebasing or bisecting it (which leaves it detached). Null when none is.
+   */
+  branchInUse(repo: string, branch: string): Promise<string | null>;
   /** The local branches whose names start with `prefix`, by name and sorted, each with its tip. */
   localBranches(repo: string, prefix: string): Promise<{ name: string; sha: string }[]>;
   /** The commit local branch `branch` is at; null when there is no such branch. */
@@ -1067,9 +1084,21 @@ export function createGit(opts: GitOptions = {}): Git {
    * and shows only in its git dir. `symbolic-ref` skips the check `git switch` makes, so this is it.
    */
   async function branchInUseElsewhere(c: Pinned, branch: string): Promise<string | null> {
+    return branchInUse(c, branch, (path) => samePath(comparablePath(path), c.real));
+  }
+
+  /**
+   * Where `branch` is in use in a worktree of the repository other than one `skip` names, or null:
+   * checked out there, which `worktree list` shows, or being rebased or bisected there, which leaves
+   * that worktree detached and shows only in its git dir.
+   */
+  async function branchInUse(
+    c: Pinned,
+    branch: string,
+    skip: (path: string) => boolean = () => false,
+  ): Promise<string | null> {
     const entries = await listWorktrees(c);
-    const self = (path: string): boolean => samePath(comparablePath(path), c.real);
-    const out = entries.find((e) => e.branch === branch && !self(e.path));
+    const out = entries.find((e) => e.branch === branch && !skip(e.path));
     if (out) return comparablePath(out.path);
     const ref = `refs/heads/${branch}`;
     const busy = (gitDir: string): boolean =>
@@ -1077,18 +1106,20 @@ export function createGit(opts: GitOptions = {}): Git {
         (dir) => readIfPresent(join(gitDir, dir, 'head-name')).trim() === ref,
       ) || readIfPresent(join(gitDir, 'BISECT_START')).trim() === branch;
     const { commonDir, gitDir } = c.dirs;
+    // The git dir that is `c`'s own is skipped with `c`.
+    const own = (dir: string): boolean => samePath(dir, gitDir) && skip(c.real);
     const linked = join(commonDir, 'worktrees');
     const names = existsAsEntry(linked) ? readdirSync(linked) : [];
     for (const name of names) {
       const dir = join(linked, name);
-      if (samePath(dir, gitDir) || !busy(dir)) continue;
+      if (own(dir) || !busy(dir)) continue;
       // `gitdir` names the worktree's `.git` file.
       const path = dirname(readIfPresent(join(dir, 'gitdir')).trim());
-      if (!self(path)) return comparablePath(path);
+      if (!skip(path)) return comparablePath(path);
     }
-    if (!samePath(commonDir, gitDir) && busy(commonDir)) {
+    if (!own(commonDir) && busy(commonDir)) {
       const main = entries.find((e) => !e.bare);
-      if (main && !self(main.path)) return comparablePath(main.path);
+      if (main && !skip(main.path)) return comparablePath(main.path);
     }
     return null;
   }
@@ -1870,15 +1901,29 @@ export function createGit(opts: GitOptions = {}): Git {
     async pruneWorktrees(repo) {
       await git(await pinned(repo), ['worktree', 'prune']);
     },
-    async deleteBranchIfAt(repo, branch, sha) {
+    async deleteBranchIfAt(repo, branch, sha, tracking = null) {
       const c = await pinned(repo);
+      // One transaction: both refs go, or, when either is missing or moved, neither does.
+      const deletes = [`delete refs/heads/${branch} ${sha}`];
+      if (tracking !== null) deletes.push(`delete refs/remotes/origin/${branch} ${tracking}`);
       try {
-        await git(c, ['update-ref', '-d', `refs/heads/${branch}`, sha]);
-        return true;
+        await git(c, ['update-ref', '--stdin'], { input: `${deletes.join('\n')}\n` });
       } catch (error) {
         if (error instanceof GitError) return false;
         throw error;
       }
+      // What `git branch -D` drops too: the section 10db's push wrote (`branch.<name>.remote`, `.merge`).
+      const section = `branch.${branch}.`;
+      const keys = (await git(c, ['config', '--local', '--name-only', '--list'])).split('\n');
+      if (keys.some((key) => key.startsWith(section) && !key.slice(section.length).includes('.')))
+        await git(c, ['config', '--local', '--remove-section', `branch.${branch}`]);
+      return true;
+    },
+    async trackingTip(repo, branch) {
+      return revParse(await pinned(repo), `refs/remotes/origin/${branch}`);
+    },
+    async branchInUse(repo, branch) {
+      return branchInUse(await pinned(repo), branch);
     },
     async localBranches(repo, prefix) {
       const out = await git(await pinned(repo), [
