@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import { checkNetworkHost } from '../permissions';
+import { checkConcreteHost } from '../permissions';
 import {
   CONFIG_FORMATS,
   LOCK_FORMATS,
@@ -51,7 +51,7 @@ async function readFormats(
 ): Promise<Named[]> {
   const found: Named[] = [];
   for (const format of formats) {
-    const text = await readRegularFile(join(root, folder, format.path));
+    const text = await readRegularFile(root, join(folder, format.path));
     if (text === null) continue;
     const file = folder === '' ? format.path : `${folder}/${format.path}`;
     for (const host of format.hosts(text, context)) found.push({ host, file });
@@ -64,7 +64,7 @@ async function registryNamed(root: string, folder: string): Promise<boolean> {
   const folders = folder === '' ? [''] : ['', folder];
   for (const dir of folders) {
     for (const name of ['.npmrc', '.yarnrc.yml']) {
-      const text = await readRegularFile(join(root, dir, name));
+      const text = await readRegularFile(root, join(dir, name));
       if (text !== null && namesNpmRegistry(text)) return true;
     }
   }
@@ -97,7 +97,7 @@ export async function findRegistryHosts(root: string): Promise<FoundHost[]> {
       if (allowed !== null && !hosts.has(allowed)) hosts.set(allowed, file);
     }
     if (next.depth >= MAX_DEPTH) continue;
-    for (const name of await realSubfolders(join(root, next.folder))) {
+    for (const name of await realSubfolders(root, next.folder)) {
       if (isSkipped(name)) continue;
       queue.push({
         folder: next.folder === '' ? name : `${next.folder}/${name}`,
@@ -111,7 +111,7 @@ export async function findRegistryHosts(root: string): Promise<FoundHost[]> {
 /** The host as a project may be given it, or null when the project may not. */
 function allowable(host: string): string | null {
   try {
-    return checkNetworkHost(host);
+    return checkConcreteHost(host);
   } catch {
     return null;
   }

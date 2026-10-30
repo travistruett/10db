@@ -51,13 +51,24 @@ describe('a gate blocked from a host', () => {
 
     const [card] = raise(['index.crates.io'], project.id);
 
-    expect(card?.body).toContain('Cargo.lock names index.crates.io as a package registry');
+    expect(card?.body).toContain("The project's Cargo.lock needs index.crates.io");
     expect(card?.recommendation).toBe(GateHostChoice.Allow);
+  });
+
+  it('says a toolchain file needs its host, without calling the file a registry', () => {
+    const project = seedProject(store);
+    allowFoundHosts(state, project.id, [{ host: 'nodejs.org', file: '.nvmrc' }]);
+    removeNetworkHost(state, project.id, 'nodejs.org');
+
+    const [card] = raise(['nodejs.org'], project.id);
+
+    expect(card?.body).toContain("The project's .nvmrc needs nodejs.org");
+    expect(card?.body).not.toMatch(/registry|names nodejs\.org/);
   });
 
   it('says nothing about a file when none names the host, and recommends nothing', () => {
     const [card] = raise(['telemetry.example.com']);
-    expect(card?.body).not.toMatch(/names .* as a package registry/);
+    expect(card?.body).not.toContain('needs');
     expect(card?.recommendation).toBeNull();
   });
 
@@ -95,7 +106,7 @@ describe('a gate blocked from a host', () => {
     expect(again.map((c) => c.id)).toEqual(first.map((c) => c.id));
   });
 
-  it.each(['localhost', '127.0.0.1', '*.com', 'not a host'])(
+  it.each(['localhost', '127.0.0.1', '*.com', 'not a host', '*.example.com', '*.s3.amazonaws.com'])(
     'raises no card for %s, which a project may not be given',
     (host) => {
       expect(raise([host])).toEqual([]);

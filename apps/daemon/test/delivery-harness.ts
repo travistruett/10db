@@ -52,7 +52,7 @@ import { createInboxService, type InboxService } from '../src/inbox';
 import { silentLogger } from '../src/log';
 import { systemProcesses } from '../src/recovery';
 import { seedTeam } from '../src/team';
-import { createGateRunner } from '../src/verify';
+import { createGateRunner, type GateRunner } from '../src/verify';
 import { measureForTests } from './catalogue';
 import { FakeGh } from './fake-gh';
 import { captureLogs, type LogCapture } from './log-capture';
@@ -195,6 +195,8 @@ export function createDeliveryHarness(
     /** Added to the network calls' environment, such as an ssh command for a hanging transport. */
     readonly networkEnv?: Readonly<Record<string, string>>;
     readonly trigger?: boolean;
+    /** Wraps the shipping gate's runner, as a test that needs a gate result the sandbox gives. */
+    readonly shipGate?: (gate: GateRunner) => GateRunner;
   } = {},
 ): DeliveryHarness {
   const remote = createTempRepoWithOrigin();
@@ -261,9 +263,10 @@ export function createDeliveryHarness(
     }),
   };
   const running = new Set<WorkstreamId>();
+  const shipGate = createGateRunner({ sandbox: null, logger: silentLogger });
   const shipper = createShipper({
     ...ctx,
-    gate: createGateRunner({ sandbox: null, logger: silentLogger }),
+    gate: opts.shipGate?.(shipGate) ?? shipGate,
     baseUpdates: createBaseUpdates(ctx),
     clock: new ManualClock(),
     dataDir: data.path,

@@ -14,7 +14,9 @@ export function hostOfUrl(raw: string): string | null {
   if (!/^https?:\/\//i.test(absolute)) return null;
   try {
     const host = new URL(absolute).hostname.replace(/\.$/, '');
-    return host === '' ? null : host;
+    // URL parsing keeps a `*` in a host name, but no package manager fetches from a wildcard: a
+    // found host is one concrete name, never a pattern that would allow a whole domain.
+    return host === '' || host.includes('*') ? null : host;
   } catch {
     return null;
   }

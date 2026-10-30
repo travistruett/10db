@@ -17,6 +17,7 @@ import { firstUnread, hazardHit, stringField } from '../guard';
 import { foundHostFile, matchPermissionRule, storableRule } from '../permissions';
 import { readAccess, readPathsOf, writeAccess, type FileAccessContext } from '../sandbox';
 import type { ToolDecision, ToolRequest } from '../sessions';
+import { foundHostReason } from './gate-host-card';
 import { ParkedError, type InboxService } from './service';
 
 export interface WaitObserver {
@@ -242,7 +243,7 @@ export function createPermissionBroker(
     }
     if (!hostsAsked.has(host)) {
       hostsAsked.add(host);
-      // A project file that names the host as a registry is a reason to allow it, not a grant.
+      // A project file that needs the host is a reason to allow it, not a grant.
       const file = foundHostFile(deps.state.db, ctx.projectId, host);
       const { answer } = deps.inbox.ask({
         projectId: ctx.projectId,
@@ -250,10 +251,7 @@ export function createPermissionBroker(
         sessionId: ctx.sessionId,
         kind: 'permission',
         title: `Allow network access to ${host}?`,
-        body:
-          file === null
-            ? HOST_CARD_BODY
-            : `${file} names ${host} as a package registry, so the project's own files point at it.\n${HOST_CARD_BODY}`,
+        body: file === null ? HOST_CARD_BODY : `${foundHostReason(file, host)}\n${HOST_CARD_BODY}`,
         options: permissionOptions(true).filter(
           (o) => o.label !== PermissionChoice.AllowWorkstream,
         ),

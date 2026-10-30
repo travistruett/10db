@@ -1,4 +1,4 @@
-import type { NetworkHostDto, NetworkHostSource } from '@10db/contracts';
+import type { FoundHostDto, NetworkHostDto, NetworkHostSource } from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
@@ -13,8 +13,8 @@ const BUILDER: NetworkHostSource = { kind: 'builder' };
 type Initial = string | readonly [string, NetworkHostSource];
 
 interface ServeOptions {
-  /** The hosts a scan allows; each is added to the list when the scan is asked for. */
-  readonly scan?: readonly NetworkHostDto[];
+  /** The hosts a scan finds that are not allowed; a scan allows none of them. */
+  readonly scan?: readonly FoundHostDto[];
   readonly failRemoving?: string;
 }
 
@@ -29,9 +29,7 @@ function serve(initial: readonly Initial[], options: ServeOptions = {}) {
     http.get(daemonUrl('/projects/:projectId/network-hosts'), () => HttpResponse.json(hosts)),
     http.post(daemonUrl('/projects/:projectId/network-hosts/scan'), ({ request }) => {
       sent.push({ method: 'POST', path: new URL(request.url).pathname, body: null });
-      const added = options.scan ?? [];
-      hosts = [...hosts, ...added];
-      return HttpResponse.json(added);
+      return HttpResponse.json(options.scan ?? []);
     }),
     http.post(daemonUrl('/projects/:projectId/network-hosts'), async ({ request }) => {
       const body = z.object({ host: z.string() }).parse(await request.json());
@@ -168,25 +166,76 @@ describe('NetworkHostsSection', () => {
   });
 
   describe('Look Again', () => {
-    it('reads the files again and says which hosts it allowed', async () => {
+    it('lists the hosts the files name that are not allowed, each with its file, and allows none', async () => {
       const sent = serve(['index.crates.io'], {
         scan: [
-          { host: 'rubygems.org', source: { kind: 'file', file: 'Gemfile.lock' }, createdAt: AT },
+          { host: 'rubygems.org', file: 'Gemfile.lock' },
+          { host: 'exfil.example.net', file: '.npmrc' },
         ],
       });
       fireEvent.click(await screen.findByRole('button', { name: 'Look Again' }));
 
-      expect(await screen.findByText('Allowed 1 host the files name: rubygems.org.')).toBeTruthy();
-      await screen.findByText('Found in Gemfile.lock');
+      const found = await screen.findByRole('list', { name: 'Hosts the files name' });
+      const items = within(found).getAllByRole('listitem');
+      expect(items.map((item) => item.textContent)).toEqual([
+        'rubygems.orgFound in Gemfile.lockAllow',
+        'exfil.example.netFound in .npmrcAllow',
+      ]);
+      expect(
+        within(screen.getByRole('list', { name: 'Network hosts' }))
+          .getAllByRole('listitem')
+          .map((item) => item.textContent),
+      ).toEqual(['index.crates.ioAdded by youRemove']);
       expect(sent).toEqual([
         { method: 'POST', path: `/projects/${project.id}/network-hosts/scan`, body: null },
       ]);
     });
 
-    it('says so when the files name nothing new', async () => {
+    it('allows only the host the builder chooses, and takes it off the found list', async () => {
+      const sent = serve([], {
+        scan: [
+          { host: 'rubygems.org', file: 'Gemfile.lock' },
+          { host: 'exfil.example.net', file: '.npmrc' },
+        ],
+      });
+      fireEvent.click(await screen.findByRole('button', { name: 'Look Again' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Allow rubygems.org' }));
+
+      await waitFor(() => {
+        expect(screen.queryByRole('button', { name: 'Allow rubygems.org' })).toBeNull();
+      });
+      expect(
+        within(await screen.findByRole('list', { name: 'Network hosts' }))
+          .getAllByRole('listitem')
+          .map((item) => item.textContent),
+      ).toEqual(['rubygems.orgAdded by youRemove']);
+      expect(screen.getByRole('button', { name: 'Allow exfil.example.net' })).toBeTruthy();
+      expect(sent.slice(1)).toEqual([
+        {
+          method: 'POST',
+          path: `/projects/${project.id}/network-hosts`,
+          body: { host: 'rubygems.org' },
+        },
+      ]);
+    });
+
+    it('shows a refused Allow beside that found host', async () => {
+      serve([], { scan: [{ host: 'localhost', file: '.npmrc' }] });
+      fireEvent.click(await screen.findByRole('button', { name: 'Look Again' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Allow localhost' }));
+
+      const found = await screen.findByRole('list', { name: 'Hosts the files name' });
+      expect((await within(found).findByRole('alert')).textContent).toBe(
+        "localhost is this machine: use the project's Allow localhost setting instead.",
+      );
+    });
+
+    it('says so when the files name no host that is not allowed', async () => {
       serve(['index.crates.io']);
       fireEvent.click(await screen.findByRole('button', { name: 'Look Again' }));
-      expect(await screen.findByText('The files name no new hosts.')).toBeTruthy();
+      expect(
+        await screen.findByText("The project's files name no host that isn't allowed."),
+      ).toBeTruthy();
     });
   });
 });

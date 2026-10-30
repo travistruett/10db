@@ -1380,7 +1380,8 @@ describe('permission broker in a sandboxed lane', () => {
 
     const card = onlyOpenCard();
     expect(card.recommendation).toBe('allow_project');
-    expect(card.body).toContain('Cargo.lock names index.crates.io as a package registry');
+    expect(card.body).toContain("The project's Cargo.lock needs index.crates.io");
+    expect(card.body).not.toContain('package registry');
     expect(card.body).toContain(HOST_BODY);
   });
 

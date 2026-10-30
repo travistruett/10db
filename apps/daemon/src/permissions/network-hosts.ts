@@ -120,6 +120,18 @@ export function checkNetworkHost(raw: string): string {
   return pattern;
 }
 
+/**
+ * A host a project file or a blocked gate names, folded as `checkNetworkHost` folds it, or an
+ * `InvalidError`. It must be one concrete name: a package manager never fetches from a wildcard, and
+ * a gate's output can print any name, so a `*` here is never turned into a pattern.
+ */
+export function checkConcreteHost(raw: string): string {
+  if (raw.includes('*')) {
+    throw refusal(`${raw.trim()} is a pattern, not a host: name the one host to reach.`);
+  }
+  return checkNetworkHost(raw);
+}
+
 function sourceOf(rule: PermissionRuleDto): NetworkHostSource {
   if (rule.foundIn !== null) return { kind: 'file', file: rule.foundIn };
   if (rule.sourceInboxId !== null) return { kind: 'card' };
@@ -162,7 +174,7 @@ export function allowFoundHosts(
     for (const { host: named, file } of found) {
       let host: string;
       try {
-        host = checkNetworkHost(named);
+        host = checkConcreteHost(named);
       } catch {
         continue;
       }
@@ -190,6 +202,34 @@ export function allowFoundHosts(
     }
     return added;
   });
+}
+
+/**
+ * The hosts a reading of the project's files found that the project may be given and is not given
+ * now, each with the file that names it, in the reading's order. Allows nothing and keeps nothing:
+ * the files may have been written by a lane since the project was added, so a host from them is
+ * allowed only when the builder allows it by name.
+ */
+export function unallowedFoundHosts(
+  db: DbReader,
+  projectId: ProjectId,
+  found: readonly FoundHostDto[],
+): FoundHostDto[] {
+  getProject(db, projectId);
+  const allowed = new Set(listNetworkHosts(db, projectId).map((h) => h.host));
+  const listed: FoundHostDto[] = [];
+  for (const { host: named, file } of found) {
+    let host: string;
+    try {
+      host = checkConcreteHost(named);
+    } catch {
+      continue;
+    }
+    if (allowed.has(host)) continue;
+    allowed.add(host);
+    listed.push({ host, file });
+  }
+  return listed;
 }
 
 /** Stores the project-wide rule a card's Always allow would; a host already allowed is answered, not stored again. */

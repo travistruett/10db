@@ -64,6 +64,11 @@ export interface GateRun {
   readonly tmpDir: string;
   /** The env the gate command runs with, set inside the sandbox. */
   readonly commandEnv: Readonly<Record<string, string>>;
+  /**
+   * How many lines the command line srt is given takes. srt echoes it in its debug log, project env
+   * and all, before the command starts; the gate runner drops that many lines.
+   */
+  readonly commandLines: number;
   /** True once the command has run `docker`, which no sandboxed gate can use. */
   dockerRefused(): boolean;
   /**
@@ -211,6 +216,7 @@ export function createGateSandbox(deps: GateSandboxDeps): GateSandbox {
           cwd: checkout,
           tmpDir,
           commandEnv,
+          commandLines: inner.split('\n').length,
           dockerRefused() {
             try {
               // The gate can write its temp dir, so the marker is only looked at, never followed.

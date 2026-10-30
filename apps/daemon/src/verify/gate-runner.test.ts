@@ -207,7 +207,9 @@ describe('gate runner', () => {
 });
 
 /** A stand-in for the gate sandbox: its runs wrap the command so the output shows they were used. */
-function recordingSandbox(options: { refuse?: Error; dockerRefused?: boolean } = {}): {
+function recordingSandbox(
+  options: { refuse?: Error; dockerRefused?: boolean; commandLines?: number } = {},
+): {
   sandbox: GateSandbox;
   inputs: GateRunInput[];
   disposed: () => number;
@@ -225,6 +227,7 @@ function recordingSandbox(options: { refuse?: Error; dockerRefused?: boolean } =
         cwd: input.project.repoPath,
         tmpDir: input.project.repoPath,
         commandEnv: {},
+        commandLines: options.commandLines ?? 1,
         dockerRefused: () => options.dockerRefused ?? false,
         dispose: () => {
           disposed += 1;
@@ -329,6 +332,39 @@ describe('gate runner with a sandbox', () => {
         expect(text).not.toContain('hunter2');
         expect(text).not.toContain('allowedDomains');
       }
+    });
+
+    it('names a host srt refused a plain HTTP request to', async () => {
+      const { sandbox } = recordingSandbox();
+      const gate = createGateRunner({ sandbox, logger: silentLogger });
+      const result = await gate.run(
+        request({
+          command: printing([
+            '[SandboxDebug] HTTP request blocked to example.com:80',
+            'curl: (22) The requested URL returned error: 403',
+          ]),
+        }),
+      );
+      expect(result.blockedHosts).toEqual(['example.com']);
+      expect(result.tail).toContain('curl: (22) The requested URL returned error: 403');
+      expect(result.tail).toContain('The gate was blocked from reaching example.com');
+      expect(result.tail).not.toContain('SandboxDebug');
+    });
+
+    it('drops every line of a command line srt echoes, as many as the sandbox says it takes', async () => {
+      const { sandbox } = recordingSandbox({ commandLines: 2 });
+      const gate = createGateRunner({ sandbox, logger: silentLogger });
+      const result = await gate.run(
+        request({
+          command: printing([
+            "[SandboxDebug] Command string mode (-c): /usr/bin/env TOKEN='one",
+            "  hunter2' /bin/sh -c 'cargo test'",
+            '  indented output of the command',
+          ]),
+        }),
+      );
+      expect(result.tail).not.toContain('hunter2');
+      expect(result.tail).toContain('  indented output of the command');
     });
 
     it('reports no blocked host for a gate nothing blocked', async () => {

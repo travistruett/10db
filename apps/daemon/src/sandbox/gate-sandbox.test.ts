@@ -158,6 +158,17 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
     });
   });
 
+  it('says how many lines the command line srt echoes in its debug log takes', async () => {
+    await withRun(
+      input({ command: 'make gate\nmake check', env: { PATH: '/usr/bin:/bin', LANG: 'a\nb\nc' } }),
+      (run) => {
+        const inner = run.args[run.args.indexOf('-c') + 1] ?? '';
+        expect(inner.split('\n')).toHaveLength(4);
+        expect(run.commandLines).toBe(4);
+      },
+    );
+  });
+
   it("writes only the checkout and the run's own temp dir, never git state or srt's shared temp", async () => {
     const other = createTempRepo();
     try {

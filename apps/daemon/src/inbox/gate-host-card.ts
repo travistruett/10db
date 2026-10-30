@@ -13,7 +13,12 @@ import {
   type WriteContext,
 } from '@10db/db';
 import type { StateStore } from '../events';
-import { checkNetworkHost, foundHostFile, matchPermissionRule, storableRule } from '../permissions';
+import {
+  checkConcreteHost,
+  foundHostFile,
+  matchPermissionRule,
+  storableRule,
+} from '../permissions';
 import type { InboxService } from './service';
 
 const NETWORK_TOOL = 'SandboxNetworkAccess';
@@ -32,16 +37,21 @@ function shown(command: string): string {
   return flat.length > MAX_COMMAND_CHARS ? `${flat.slice(0, MAX_COMMAND_CHARS)}…` : flat;
 }
 
+/**
+ * Why a card recommends Allow: the project's own file needs the host. A lockfile or a registry setting
+ * names it; a toolchain file (`.nvmrc`, `rust-toolchain.toml`) or `go.sum` only implies it, so the
+ * wording claims neither.
+ */
+export function foundHostReason(file: string, host: string): string {
+  return `The project's ${file} needs ${host}, so allowing it for the project is recommended.`;
+}
+
 function cardBody(host: string, command: string, file: string | null): string {
   const lines = [
     `The sandbox blocked the gate from reaching ${host}, and the gate failed.`,
     `Gate: ${shown(command)}`,
   ];
-  if (file !== null) {
-    lines.push(
-      `${file} names ${host} as a package registry, so the project's own files point at it.`,
-    );
-  }
+  if (file !== null) lines.push(foundHostReason(file, host));
   lines.push(
     'Allow it for the project and every later task, check and approved MCP server can reach it; then run the gate again.',
   );
@@ -67,7 +77,7 @@ export function raiseGateHostCards(
   for (const named of input.hosts) {
     let host: string;
     try {
-      host = checkNetworkHost(named);
+      host = checkConcreteHost(named);
     } catch {
       continue;
     }

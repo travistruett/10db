@@ -138,7 +138,8 @@ function runGroup(
     tail = (tail + chunk.toString()).slice(-TAIL_BYTES);
   };
   // Only a sandboxed gate has srt's proxy to refuse a host; its debug log shares the command's stderr.
-  const filter = sandboxed === null ? null : createBlockedHostFilter();
+  const filter =
+    sandboxed === null ? null : createBlockedHostFilter({ commandLines: sandboxed.commandLines });
   child.stdout.on('data', onData);
   if (filter === null) {
     child.stderr.on('data', onData);

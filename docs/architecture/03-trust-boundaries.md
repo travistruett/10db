@@ -347,9 +347,12 @@ Under the lane sandbox (**built**), the design column holds for a lane's Bash:
   (cargo: `index.crates.io`, `static.crates.io`) can pass. It refuses what the
   profile can't list, loopback, `*` and a whole top-level domain
   (`decisions/2026-10-29-project-network-hosts.md`). Adding a project also allows the registries its lockfiles, package
-  manager settings and toolchain files name, found by reading them as text and keeping only each URL's host (never a
-  token or a path); a gate's denied host now raises one card, read from srt's debug line, and a lane's card recommends
-  Allow when a file names the host (`decisions/2026-10-29-network-hosts-from-package-files.md`).
+  manager settings and toolchain files name, found by reading them as text (no link followed, in a file's name or any
+  folder on its way) and keeping only each URL's concrete host (never a token, a path or a `*` pattern). That is the
+  only time the files allow anything: afterwards a lane may have written them, so Look Again in Settings only lists the
+  hosts they name that are not allowed, and the builder allows each one by name. A gate's denied host now raises one
+  card, read from srt's debug line, and a lane's card recommends Allow when the reading made at add time names the host
+  (`decisions/2026-10-29-network-hosts-from-package-files.md`).
 - **Run.** `autoAllowBashIfSandboxed` is off, so every command Claude Code doesn't treat as read-only reaches the
   broker. It allows the command without a card unless it is a hazard or something unread could make it one
   (`decisions/2026-10-28-broker-unread-arguments.md`): a program it can't name (`$CMD`, a substitution, a glob, a

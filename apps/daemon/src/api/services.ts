@@ -24,6 +24,7 @@ import type {
   FlowInput,
   FlowPatch,
   FolderInspectResult,
+  FoundHostDto,
   InboxAnswer,
   InboxItemDto,
   InboxItemId,
@@ -131,9 +132,10 @@ export interface ApiServices {
   removeNetworkHost(projectId: ProjectId, host: string): NetworkHostDto;
   /**
    * Reads the project's lockfiles, package manager settings and toolchain files again, as text and
-   * without running anything, and allows the hosts they name. Answers the hosts it newly allowed.
+   * without running anything, and answers the hosts they name that are not allowed, each with its
+   * file. Allows nothing: the builder allows a host by name, after seeing it.
    */
-  scanNetworkHosts(projectId: ProjectId): Promise<NetworkHostDto[]>;
+  scanNetworkHosts(projectId: ProjectId): Promise<FoundHostDto[]>;
   listPersonas(): PersonaDto[];
   createPersona(input: PersonaInput): PersonaDto;
   patchPersona(id: PersonaId, patch: PersonaPatch): PersonaDto;

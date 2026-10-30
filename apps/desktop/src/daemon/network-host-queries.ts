@@ -1,10 +1,11 @@
-import { NetworkHostDto, type ProjectId } from '@10db/contracts';
+import { FoundHostDto, NetworkHostDto, type ProjectId } from '@10db/contracts';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
 import { readJson } from './client';
 import { useDaemon } from './provider';
 
 const NetworkHostList = z.array(NetworkHostDto);
+const FoundHostList = z.array(FoundHostDto);
 
 /** Prefix of every project's host list; events invalidate by it. */
 export const NETWORK_HOSTS_KEY = ['network-hosts'] as const;
@@ -39,17 +40,18 @@ export function useAllowNetworkHost(projectId: ProjectId) {
   });
 }
 
-/** Reads the project's package files again; answers the hosts it newly allowed. */
+/**
+ * Reads the project's package files again; answers the hosts they name that are not allowed, each
+ * with its file. It allows nothing: the builder allows each one by name.
+ */
 export function useScanNetworkHosts(projectId: ProjectId) {
   const { client } = useDaemon();
-  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async () =>
       readJson(
         await client.projects[':projectId']['network-hosts'].scan.$post({ param: { projectId } }),
-        NetworkHostList,
+        FoundHostList,
       ),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: NETWORK_HOSTS_KEY }),
   });
 }
 

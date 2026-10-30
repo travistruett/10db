@@ -2,9 +2,10 @@ export { foundHostFile } from './found-hosts';
 export {
   allowFoundHosts,
   allowNetworkHost,
-  checkNetworkHost,
+  checkConcreteHost,
   listNetworkHosts,
   removeNetworkHost,
+  unallowedFoundHosts,
 } from './network-hosts';
 export {
   allowedToolsFor,

@@ -65,6 +65,7 @@ import {
   allowNetworkHost,
   listNetworkHosts,
   removeNetworkHost,
+  unallowedFoundHosts,
 } from '../permissions';
 import { findRegistryHosts } from '../registries';
 import { proposeCandidates, resolveStepPlan, retryWorkstream, startTaskWithPlan } from '../team';
@@ -187,7 +188,8 @@ export function createServices(deps: {
     removeNetworkHost: (projectId, host) => removeNetworkHost(deps.state, projectId, host),
     async scanNetworkHosts(projectId) {
       const project = getProject(db, projectId);
-      return allowFoundHosts(deps.state, projectId, await findRegistryHosts(project.repoPath));
+      // Only listed: a lane may have written these files, so the builder allows each host by name.
+      return unallowedFoundHosts(db, projectId, await findRegistryHosts(project.repoPath));
     },
     listPersonas: () => listPersonas(db, { includeArchived: true }),
     createPersona: (input) => deps.state.write((ctx) => insertPersona(ctx, input)),

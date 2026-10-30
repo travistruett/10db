@@ -1,4 +1,4 @@
-import type { NetworkHostDto, ProjectDto } from '@10db/contracts';
+import type { FoundHostDto, ProjectDto, ProjectId } from '@10db/contracts';
 import { Button, Group, List, Stack, Text, TextInput } from '@mantine/core';
 import { useState } from 'react';
 import {
@@ -9,11 +9,67 @@ import {
 } from '../../daemon/network-host-queries';
 import { networkHostSourceText } from './network-host-source';
 
-/** What a look at the project's files found, in a line the builder reads. */
-function scanSummary(added: readonly NetworkHostDto[]): string {
-  if (added.length === 0) return 'The files name no new hosts.';
-  const names = added.map((h) => h.host).join(', ');
-  return `Allowed ${String(added.length)} ${added.length === 1 ? 'host' : 'hosts'} the files name: ${names}.`;
+/**
+ * The hosts a look at the project's files found that are not allowed, each with its file and an Allow
+ * the builder presses by name. A lane may have written those files, so nothing here is allowed unseen.
+ */
+function FoundHosts({
+  projectId,
+  found,
+}: {
+  readonly projectId: ProjectId;
+  readonly found: readonly FoundHostDto[];
+}) {
+  const allow = useAllowNetworkHost(projectId);
+  if (found.length === 0) {
+    return (
+      <Text size="sm" c="dimmed">
+        The project's files name no host that isn't allowed.
+      </Text>
+    );
+  }
+  return (
+    <Stack gap="xs">
+      <Text size="sm">
+        The project's files name these hosts, which aren't allowed. Allow the ones you expect.
+      </Text>
+      <List aria-label="Hosts the files name" listStyleType="none" spacing="xs">
+        {found.map((entry) => (
+          <List.Item
+            key={entry.host}
+            styles={{ itemWrapper: { width: '100%' }, itemLabel: { width: '100%' } }}
+          >
+            <Group justify="space-between" wrap="nowrap" align="flex-start">
+              <Stack gap={0}>
+                <Text ff="monospace" size="sm">
+                  {entry.host}
+                </Text>
+                <Text size="xs" c="dimmed">
+                  {networkHostSourceText({ kind: 'file', file: entry.file })}
+                </Text>
+                {allow.isError && allow.variables === entry.host ? (
+                  <Text size="xs" c="red" role="alert">
+                    {allow.error.message}
+                  </Text>
+                ) : null}
+              </Stack>
+              <Button
+                size="xs"
+                variant="default"
+                aria-label={`Allow ${entry.host}`}
+                loading={allow.isPending && allow.variables === entry.host}
+                onClick={() => {
+                  allow.mutate(entry.host);
+                }}
+              >
+                Allow
+              </Button>
+            </Group>
+          </List.Item>
+        ))}
+      </List>
+    </Stack>
+  );
 }
 
 /** The hosts a project's tasks and checks may reach: the same rules an Inbox card's Always Allow stores. */
@@ -92,17 +148,18 @@ export function NetworkHostsSection({ project }: { readonly project: ProjectDto 
         >
           Look Again
         </Button>
-        {scan.isSuccess ? (
-          <Text size="sm" c="dimmed">
-            {scanSummary(scan.data)}
-          </Text>
-        ) : null}
         {scan.isError ? (
           <Text size="sm" c="red" role="alert">
             Couldn't read the project's files: {scan.error.message}
           </Text>
         ) : null}
       </Group>
+      {scan.isSuccess ? (
+        <FoundHosts
+          projectId={project.id}
+          found={scan.data.filter((entry) => !list.some((h) => h.host === entry.host))}
+        />
+      ) : null}
       <form
         onSubmit={(e) => {
           e.preventDefault();

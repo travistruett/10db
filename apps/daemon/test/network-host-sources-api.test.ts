@@ -2,7 +2,6 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
   DaemonEvent,
-  EventType,
   FolderInspectResult,
   NetworkHostDto,
   ProjectDto,
@@ -158,56 +157,72 @@ describe('where an allowed host came from', () => {
 });
 
 describe('POST /projects/:id/network-hosts/scan: looking again', () => {
-  it('allows the hosts the files now name, answers only the new ones, and emits one event', async () => {
+  const FoundList = z.array(z.object({ host: z.string(), file: z.string() }).strict());
+
+  it('lists the hosts the files now name that are not allowed, each with its file, and allows none', async () => {
     writeInRepo('Cargo.lock', CRATES);
     const project = await createProject();
+    // A lane in a shared checkout can write any file: looking again must not turn that into a rule.
+    writeInRepo('.npmrc', '@x:registry=https://exfil.example.net/\n');
     writeInRepo('Gemfile.lock', 'GEM\n  remote: https://rubygems.org/\n');
     const before = await head();
+    const rulesBefore = listPermissionRules(daemon.state.db, project.id, null);
+    const readingBefore = getAppSetting(daemon.state.db, `network-hosts-found:${project.id}`);
 
     const res = await send('POST', `${hostsPath(project.id)}/scan`);
 
     expect(res.status).toBe(200);
-    expect(
-      z
-        .array(NetworkHostDto)
-        .parse(res.body)
-        .map((h) => h.host),
-    ).toEqual(['rubygems.org']);
+    expect(FoundList.parse(res.body)).toEqual([
+      { host: 'exfil.example.net', file: '.npmrc' },
+      { host: 'rubygems.org', file: 'Gemfile.lock' },
+    ]);
+    expect(listPermissionRules(daemon.state.db, project.id, null)).toEqual(rulesBefore);
     expect((await listHosts(project.id)).map((h) => h.host)).toEqual([
       'index.crates.io',
       'static.crates.io',
-      'rubygems.org',
     ]);
-    expect(
-      (await eventsAfter(before)).filter((e) => e.type === EventType.NetworkHostsChanged),
-    ).toHaveLength(1);
-  });
-
-  it('adds nothing and emits nothing when the files name nothing new', async () => {
-    writeInRepo('Cargo.lock', CRATES);
-    const project = await createProject();
-    const before = await head();
-
-    const res = await send('POST', `${hostsPath(project.id)}/scan`);
-
-    expect(z.array(NetworkHostDto).parse(res.body)).toEqual([]);
-    expect(listPermissionRules(daemon.state.db, project.id, null)).toHaveLength(2);
+    // The reading a lane's card consults stays the one made when the project was added.
+    expect(getAppSetting(daemon.state.db, `network-hosts-found:${project.id}`)).toEqual(
+      readingBefore,
+    );
     expect(await eventsAfter(before)).toEqual([]);
   });
 
-  it('allows a host the builder removed again, because they asked to look again', async () => {
+  it('allows a found host only once the builder allows it by name, as added by them', async () => {
+    const project = await createProject();
+    writeInRepo('Gemfile.lock', 'GEM\n  remote: https://rubygems.org/\n');
+    expect(FoundList.parse((await send('POST', `${hostsPath(project.id)}/scan`)).body)).toEqual([
+      { host: 'rubygems.org', file: 'Gemfile.lock' },
+    ]);
+    expect(await listHosts(project.id)).toEqual([]);
+
+    const allowed = await send('POST', hostsPath(project.id), { host: 'rubygems.org' });
+
+    expect(allowed.status).toBe(201);
+    expect((await listHosts(project.id)).map((h) => [h.host, h.source])).toEqual([
+      ['rubygems.org', { kind: 'builder' }],
+    ]);
+    expect(FoundList.parse((await send('POST', `${hostsPath(project.id)}/scan`)).body)).toEqual([]);
+  });
+
+  it('answers nothing when the files name nothing that is not allowed', async () => {
+    writeInRepo('Cargo.lock', CRATES);
+    const project = await createProject();
+
+    const res = await send('POST', `${hostsPath(project.id)}/scan`);
+
+    expect(FoundList.parse(res.body)).toEqual([]);
+  });
+
+  it('lists a host the builder removed again, without allowing it', async () => {
     writeInRepo('Cargo.lock', CRATES);
     const project = await createProject();
     await send('DELETE', `${hostsPath(project.id)}/static.crates.io`);
 
     const res = await send('POST', `${hostsPath(project.id)}/scan`);
 
-    expect(
-      z
-        .array(NetworkHostDto)
-        .parse(res.body)
-        .map((h) => h.host),
-    ).toEqual(['static.crates.io']);
+    expect(FoundList.parse(res.body)).toEqual([{ host: 'static.crates.io', file: 'Cargo.lock' }]);
+    expect((await listHosts(project.id)).map((h) => h.host)).toEqual(['index.crates.io']);
   });
 
   it('answers 404 for an unknown project', async () => {

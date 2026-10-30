@@ -197,6 +197,15 @@ const rows: Row[] = [
     expected: [],
   },
   {
+    name: 'a wildcard in a URL names no host: no package manager fetches from one',
+    files: {
+      '.npmrc': '@x:registry=https://*.s3.amazonaws.com/\n@y:registry=https://*.example.com/\n',
+      'Cargo.lock': 'source = "sparse+https://*.example.com/index/"\n',
+      'pip.conf': '[global]\ntrusted-host = *.example.com *.s3.amazonaws.com\n',
+    },
+    expected: [],
+  },
+  {
     name: 'node_modules, target and dot folders are not entered',
     files: {
       'node_modules/x/Cargo.lock':
@@ -233,6 +242,26 @@ describe('findRegistryHosts', () => {
     symlinkSync(join(outside, 'Cargo.lock'), join(root, 'Cargo.lock'));
     symlinkSync(outside, join(root, 'linked'));
     expect(await hostsOf(root)).toEqual([]);
+  });
+
+  it('does not follow a link in the middle of a path, such as .cargo linked to ~/.cargo', async () => {
+    // The builder's own cargo settings, which the sandboxes deny, outside the project.
+    const home = project({
+      '.cargo/config.toml': '[registries.corp]\nindex = "sparse+https://home-only.example.com/"\n',
+      'pkg/.npmrc': 'registry=https://home-npm.example.com/\n',
+    });
+    const root = project({ 'apps/web/package.json': '{}' });
+    symlinkSync(join(home, '.cargo'), join(root, '.cargo'));
+    symlinkSync(join(home, '.cargo'), join(root, 'apps', '.cargo'));
+    symlinkSync(join(home, 'pkg'), join(root, 'apps', 'web', 'pkg'));
+    expect(await hostsOf(root)).toEqual([]);
+  });
+
+  it('reads a project whose own path runs through a link', async () => {
+    const real = project({ 'Gemfile.lock': 'GEM\n  remote: https://rubygems.org/\n' });
+    const links = project({});
+    symlinkSync(real, join(links, 'project'));
+    expect(await hostsOf(join(links, 'project'))).toEqual(['rubygems.org <- Gemfile.lock']);
   });
 
   it('reads nothing from a folder that is not there', async () => {
