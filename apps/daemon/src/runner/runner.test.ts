@@ -36,7 +36,7 @@ import {
   transitionWorkstream,
   updateInboxItem,
 } from '@10db/db';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   HANDOFF_FIRM_NUDGE,
   HANDOFF_FIRM_NUDGE_ACCOUNT,
@@ -57,6 +57,7 @@ import {
   SandboxedMcpServer,
   SandboxProfileError,
   SandboxTempDirError,
+  type LaneProcessSetup,
   type LaneSandbox,
   type LaneSession,
   type LaneSessionInput,
@@ -2711,7 +2712,7 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
     if (probeRoot !== null) rmSync(probeRoot, { recursive: true, force: true });
     probeRoot = null;
   });
-  const sandboxProbe = (fail?: () => never): SandboxProbe => {
+  const sandboxProbe = (fail?: () => never, processes?: LaneProcessSetup): SandboxProbe => {
     probeRoot = realpathSync(mkdtempSync('/tmp/sbr-'));
     const home = join(probeRoot, 'h');
     const tmpRoot = join(probeRoot, 't');
@@ -2724,6 +2725,7 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
       tmpRoot,
       gitDirs: (path) => lanesGit.gitDirs(path),
       runtime: FAKE_SRT,
+      ...(processes === undefined ? {} : { processes }),
     });
     const inputs: LaneSessionInput[] = [];
     const sessions: LaneSession[] = [];
@@ -2785,6 +2787,80 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
     // The session ended, so its temp dir is gone.
     expect(readdirSync(probe.tmpRoot)).toEqual([]);
     expect(ws(workstream.id).state).toBe('DONE');
+  });
+
+  describe('the processes a session’s commands start', () => {
+    const STARTED = 'Thu Oct 30 12:00:00 2026';
+    /** claude (4000), a command's shell (4001) and two loops that outlive both (4002, 4003). */
+    let rows: { pid: number; ppid: number; pgid: number; startedAt: string }[];
+    const fakeProcesses = (): LaneProcessSetup => ({
+      table: () => Promise.resolve(rows.map((r) => ({ ...r }))),
+      signal: (target) => {
+        rows = rows.filter((r) => (target < 0 ? r.pgid !== -target : r.pid !== target));
+        return true;
+      },
+      sleep: () => Promise.resolve(),
+      ownPid: 1,
+      intervalMs: 3_600_000,
+    });
+    beforeEach(() => {
+      rows = [
+        { pid: 4000, ppid: 1, pgid: 4000, startedAt: STARTED },
+        { pid: 4001, ppid: 4000, pgid: 4001, startedAt: STARTED },
+        { pid: 4002, ppid: 4001, pgid: 4001, startedAt: STARTED },
+        { pid: 4003, ppid: 4001, pgid: 4001, startedAt: STARTED },
+      ];
+    });
+    /** Reports claude's pid at `started`, as the real adapter does. */
+    const reportPid = () => {
+      const real = engine.adapter.start.bind(engine.adapter);
+      return vi.spyOn(engine.adapter, 'start').mockImplementation((spec) => {
+        const handle = real(spec);
+        return {
+          ...handle,
+          events: (async function* () {
+            for await (const event of handle.events) {
+              yield event.type === 'started' ? { ...event, pid: 4000 } : event;
+            }
+          })(),
+        };
+      });
+    };
+
+    it('are stopped when the session ends, before its temp dir goes', async () => {
+      const probe = sandboxProbe(undefined, fakeProcesses());
+      engine = await createTestEngine(
+        { Alpha: [[turn]] },
+        {},
+        { laneSandbox: probe.laneSandbox, identifyProcess: () => Promise.resolve(STARTED) },
+      );
+      reportPid();
+      const { workstream } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+
+      expect(ws(workstream.id).state).toBe('DONE');
+      expect(rows).toEqual([]);
+      expect(readdirSync(probe.tmpRoot)).toEqual([]);
+    });
+
+    it('are stopped when the session is stopped, as the daemon stopping does', async () => {
+      const probe = sandboxProbe(undefined, fakeProcesses());
+      engine = await createTestEngine(
+        { Alpha: [[{ do: 'hang' }]] },
+        {},
+        { laneSandbox: probe.laneSandbox, identifyProcess: () => Promise.resolve(STARTED) },
+      );
+      reportPid();
+      const { workstream } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
+      await waitFor(() => ws(workstream.id).state === 'RUNNING');
+      expect(rows).toHaveLength(4);
+      await engine.runner.stopAll('shutdown');
+      await engine.runner.idle();
+
+      expect(rows).toEqual([]);
+    });
   });
 
   it("hands Claude Code an approved stdio server only as its launch under srt, and removes its sandbox with the session's", async () => {

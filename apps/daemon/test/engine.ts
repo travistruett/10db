@@ -119,6 +119,7 @@ export async function createTestEngine(
       | 'logger'
       | 'launcher'
       | 'laneSandbox'
+      | 'identifyProcess'
       | 'gate'
       | 'onLaneFreed'
       | 'baseUpdates'

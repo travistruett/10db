@@ -12,6 +12,14 @@ import {
 } from './mcp-sandbox';
 import { buildLaneProfile, type LaneSandboxSettings } from './profile';
 import { projectAccess, type ProjectAccessDeps } from './project-access';
+import {
+  createLaneProcessWatch,
+  createProcessLedger,
+  removeProcessLedger,
+  type LaneProcessWatch,
+  type LaneProcessSetup,
+} from './lane-processes';
+import { cachedProcessTable, systemProcessTable } from './process-table';
 import { isEqualOrUnder } from './protected-reads';
 import type { SandboxRuntime } from './srt-launch';
 import { createLaneTempDir, LANE_TEMP_ROOT, removeAll, removeLaneTempDir } from './temp-dir';
@@ -39,6 +47,17 @@ export interface LaneSession {
   /** Approved stdio servers left out because their sandbox couldn't be built. */
   readonly mcpFailures: readonly McpSandboxFailure[];
   setProviderSession(id: string): void;
+  /**
+   * Starts watching the processes under the session's own process, the lane's commands among them.
+   * Never rejects: a machine whose processes can't be read is told of in `endProcesses`.
+   */
+  trackProcesses(root: { readonly pid: number; readonly startedAt: string }): Promise<void>;
+  /**
+   * Stops every process the session's commands started that still runs, however the session ended.
+   * Run it once the lane process is gone and before `dispose`. Rejects when it could not read the
+   * machine's processes.
+   */
+  endProcesses(): Promise<void>;
   /** Removes the temp dirs and files, the servers' too. Run it once the lane process is gone. */
   dispose(): void;
 }
@@ -70,6 +89,8 @@ export interface LaneSandboxDeps extends Omit<ProjectAccessDeps, 'tmpRoot'> {
   readonly tmpRoot?: string;
   /** srt, which runs the repo's stdio MCP servers. */
   readonly runtime: SandboxRuntime;
+  /** How a session's processes are read and stopped; tests pass fakes. The system's by default. */
+  readonly processes?: LaneProcessSetup;
 }
 
 /** Removes a session's env file and temp dir; see `removeAll`. */
@@ -94,6 +115,11 @@ const ruleScope = (path: string): string => `/${path}`;
 /** Builds each lane session's sandbox: one profile, one temp dir and one file-tool context. */
 export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
   const tmpRoot = deps.tmpRoot ?? LANE_TEMP_ROOT;
+  // Every session samples together: one `ps` serves them all.
+  const processDeps: LaneProcessSetup = deps.processes ?? {
+    table: systemProcessTable,
+    sampleTable: cachedProcessTable(systemProcessTable, 500),
+  };
   return {
     async forSession(input) {
       const access = await projectAccess(
@@ -111,8 +137,12 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
       const secretFiles = [...access.checkoutSecrets, ...toolchain.secretFiles];
       const tmpDir = createLaneTempDir(tmpRoot);
       let envFile: string | null = null;
+      let ledger: string | null = null;
       let mcp: McpSandboxes | null = null;
       try {
+        // Outside every lane-writable dir: it names the processes to stop after a daemon restart.
+        ledger = createProcessLedger(tmpRoot);
+        const watch: LaneProcessWatch = createLaneProcessWatch({ ...processDeps, ledger });
         const commandEnv = prepareCommandEnv(tmpDir, deps.home, input.env);
         // Claude Code strips some of these from a sandboxed command's env; the shell sets every one
         // of them again from this file before each command.
@@ -197,6 +227,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           },
         };
         const ownEnvFile = envFile;
+        const ownLedger = ledger;
         const ownMcp = mcp;
         let disposed = false;
         return {
@@ -209,6 +240,8 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           setProviderSession(id) {
             providerSessionId = id;
           },
+          trackProcesses: (root) => watch.track(root),
+          endProcesses: () => watch.end(),
           dispose() {
             if (disposed) return;
             disposed = true;
@@ -218,6 +251,9 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
               },
               () => {
                 removeLaneFiles(ownEnvFile, tmpDir, tmpRoot);
+              },
+              () => {
+                removeProcessLedger(ownLedger, tmpRoot);
               },
             ]);
           },
@@ -236,6 +272,13 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
             () => {
               removeLaneFiles(envFile, tmpDir, tmpRoot);
             },
+            ...(ledger === null
+              ? []
+              : [
+                  () => {
+                    if (ledger !== null) removeProcessLedger(ledger, tmpRoot);
+                  },
+                ]),
           ]);
         } catch {
           // The error that stopped the session is the one to report.

@@ -11,9 +11,10 @@ import { basename } from 'node:path';
 /** How many levels of `sh -c` and `eval` are followed; deeper than this counts as endless. */
 const MAX_DEPTH = 4;
 
-type Token = { readonly kind: 'word' | 'op'; readonly value: string };
-
-const WORD_END = new Set([' ', '\t', '\n', ';', '&', '|', '(', ')']);
+interface Token {
+  readonly kind: 'word' | 'op';
+  readonly value: string;
+}
 
 /** Cuts a command into words (quotes removed) and operators. Linear: each character is read once. */
 function tokenize(text: string): Token[] {
@@ -178,11 +179,6 @@ function scan(text: string, depth: number): Scan {
   let background = false;
   let flagged = false;
   let atCommand = true;
-  const absorb = (script: string): void => {
-    const nested = scan(script, depth + 1);
-    endless ||= nested.endless;
-    flagged ||= nested.flagged;
-  };
   /** The words after `from`, up to the next operator. */
   const argsFrom = (from: number): string[] => {
     const args: string[] = [];
@@ -236,9 +232,15 @@ function scan(text: string, depth: number): Scan {
       const args = argsFrom(i + 1);
       const at = args.findIndex((a) => /^-[a-z]*c[a-z]*$/.test(a));
       const script = at < 0 ? undefined : args[at + 1];
-      if (script !== undefined) absorb(script);
+      if (script !== undefined) {
+        const nested = scan(script, depth + 1);
+        endless ||= nested.endless;
+        flagged ||= nested.flagged;
+      }
     } else if (name === 'eval') {
-      absorb(argsFrom(i + 1).join(' '));
+      const nested = scan(argsFrom(i + 1).join(' '), depth + 1);
+      endless ||= nested.endless;
+      flagged ||= nested.flagged;
     } else if (INTERPRETERS.has(name)) {
       const args = argsFrom(i + 1);
       if (args.some((a) => INTERPRETER_LOOP.test(a))) endless = true;

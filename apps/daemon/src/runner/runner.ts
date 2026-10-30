@@ -327,6 +327,23 @@ function permissionAnswer(item: InboxItemDto): {
   };
 }
 
+/** Stops what a lane session's commands left running; a failure is logged, never thrown, so the session still ends. */
+async function stopLaneProcesses(
+  laneSession: LaneSession | null,
+  workstreamId: WorkstreamId,
+  logger: Logger,
+): Promise<void> {
+  if (laneSession === null) return;
+  try {
+    await laneSession.endProcesses();
+  } catch (error) {
+    logger.warn(
+      { workstreamId, err: error instanceof Error ? error.message : String(error) },
+      'the processes a lane session started could not be stopped',
+    );
+  }
+}
+
 /** Why a session is asked to hand off: its context filled, or its account neared its usage limit. */
 type HandoffCause = 'context' | 'account';
 
@@ -1304,6 +1321,11 @@ export function createRunner(opts: RunnerOptions): Runner {
             st.started = true;
             releaseStart();
             const pidStart = await identify(event.pid);
+            // From here on, what the session's commands start is watched, so it can be stopped when
+            // the session ends, or after a daemon that died: see `LaneSession.trackProcesses`.
+            if (event.pid !== null && pidStart !== null) {
+              void laneSession?.trackProcesses({ pid: event.pid, startedAt: pidStart });
+            }
             opts.state.write((ctx) => {
               markSessionStarted(ctx, session.id, event.providerSessionId, event.pid, pidStart);
               // The session has the answer now. Kept as `answer`, a restart would send it again and
@@ -1532,6 +1554,10 @@ export function createRunner(opts: RunnerOptions): Runner {
       // Leaving the loop without `ended` (a stale fence, a failed write) must not leave the process running.
       if (!sawEnded) await handle.stop().catch(() => undefined);
       opts.live.unregister(session.id);
+      // However the session ended (finished, cancelled, handed off, the daemon stopping), nothing
+      // its commands started keeps running: a background loop would otherwise outlive the session
+      // and hold the Mac busy.
+      await stopLaneProcesses(laneSession, id, opts.logger);
       // Only once the lane process is gone: a command still running could swap a part of the tree.
       dispose();
       ctl.handle = null;

@@ -455,6 +455,60 @@ describe('startDaemon', () => {
     },
   );
 
+  // Same temp root as above.
+  it.skipIf(SANDBOXED)(
+    'stops the processes a dead daemon’s lane sessions left, from their ledgers, before any session starts',
+    async () => {
+      const tmpRoot = realpathSync(mkdtempSync('/tmp/sbd-'));
+      const T = 'Thu Oct 30 12:00:00 2026';
+      // Two loops that outlived their session, as the incident left them.
+      let rows = [
+        { pid: process.pid, ppid: 1, pgid: process.pid, startedAt: T },
+        { pid: 7001, ppid: 1, pgid: 7000, startedAt: T },
+        { pid: 7002, ppid: 1, pgid: 7000, startedAt: T },
+        { pid: 7003, ppid: 1, pgid: 7003, startedAt: T },
+      ];
+      try {
+        const ledger = join(tmpRoot, '10db-proc-0123456789ab.json');
+        writeFileSync(
+          ledger,
+          JSON.stringify({
+            version: 1,
+            members: [
+              { pid: 7001, pgid: 7000, startedAt: T },
+              { pid: 7002, pgid: 7000, startedAt: T },
+            ],
+          }),
+        );
+        daemon = await startDaemon({
+          dataDir: dir.path,
+          port: 0,
+          adapter: new FakeAdapter({}),
+          logLevel: 'warn',
+          sandbox: {
+            tmpRoot,
+            runtime: FAKE_SRT,
+            processes: {
+              table: () => Promise.resolve(rows.map((r) => ({ ...r }))),
+              signal: (target) => {
+                rows = rows.filter((r) => (target < 0 ? r.pgid !== -target : r.pid !== target));
+                return true;
+              },
+              sleep: () => Promise.resolve(),
+            },
+          },
+          ...QUIET,
+        });
+        expect(rows.map((r) => r.pid)).toEqual([process.pid, 7003]);
+        expect(readdirSync(tmpRoot)).toEqual([`10db-daemon-${String(process.pid)}`]);
+      } finally {
+        await daemon?.stop();
+        daemon = null;
+        rmSync(tmpRoot, { recursive: true, force: true });
+      }
+    },
+  );
+
   it('waits for an identity probe in flight before it closes the database', async () => {
     const repo = createTempRepo();
     try {

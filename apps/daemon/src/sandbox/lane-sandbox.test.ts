@@ -989,6 +989,84 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
   });
 });
 
+describe.skipIf(SANDBOXED)('a lane session’s processes', () => {
+  const T = 'Thu Oct 30 12:00:00 2026';
+  /** Fake processes: a signal ends the process (or the whole group when negative). */
+  let rows: { pid: number; ppid: number; pgid: number; startedAt: string }[];
+  function withProcesses(): LaneSandbox {
+    return createLaneSandbox({
+      home,
+      dataDir,
+      loginConfigDir: null,
+      tmpRoot,
+      gitDirs: (path) => git.gitDirs(path),
+      systemPrefixes: [],
+      runtime: FAKE_SRT,
+      processes: {
+        table: () => Promise.resolve(rows.map((r) => ({ ...r }))),
+        signal: (target) => {
+          const before = rows.length;
+          rows = rows.filter((r) => (target < 0 ? r.pgid !== -target : r.pid !== target));
+          return rows.length < before;
+        },
+        sleep: () => Promise.resolve(),
+        ownPid: 100,
+        timers: { setTimeout: () => ({ cancel: () => undefined }) },
+      },
+    });
+  }
+  beforeEach(() => {
+    rows = [
+      { pid: 100, ppid: 1, pgid: 100, startedAt: T },
+      { pid: 200, ppid: 100, pgid: 200, startedAt: T },
+      { pid: 300, ppid: 200, pgid: 300, startedAt: T },
+      { pid: 301, ppid: 300, pgid: 300, startedAt: T },
+    ];
+  });
+
+  it('stops what the session’s commands started when the session ends', async () => {
+    const session = await withProcesses().forSession(input());
+    try {
+      await session.trackProcesses({ pid: 200, startedAt: T });
+      await session.endProcesses();
+      expect(rows.map((r) => r.pid)).toEqual([100]);
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it('keeps a ledger in the temp root while the session lives, and removes it with the rest', async () => {
+    const session = await withProcesses().forSession(input());
+    expect(readdirSync(tmpRoot).filter((n) => n.startsWith('10db-proc-'))).toHaveLength(1);
+    session.dispose();
+    expect(readdirSync(tmpRoot)).toEqual([]);
+  });
+
+  it('writes the ledger a later daemon uses to stop what a dead one left', async () => {
+    const session = await withProcesses().forSession(input());
+    try {
+      await session.trackProcesses({ pid: 200, startedAt: T });
+      const name = readdirSync(tmpRoot).find((n) => n.startsWith('10db-proc-')) ?? '';
+      const ledger = JSON.parse(readFileSync(join(tmpRoot, name), 'utf8')) as {
+        members: { pid: number }[];
+      };
+      expect(ledger.members.map((m) => m.pid).sort()).toEqual([200, 300, 301]);
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it('does nothing at the end of a session that never started a process', async () => {
+    const session = await withProcesses().forSession(input());
+    try {
+      await session.endProcesses();
+      expect(rows).toHaveLength(4);
+    } finally {
+      session.dispose();
+    }
+  });
+});
+
 // Its checkout comes from the same `/tmp` fixtures.
 describe.skipIf(SANDBOXED)('secretFilesIn', () => {
   const failing = (dir: string, code: string) => (path: string) =>
