@@ -1,4 +1,4 @@
-import type { ContextPack, HandoffDto } from '@10db/contracts';
+import type { ContextPack, HandoffDto, NextAction } from '@10db/contracts';
 import { mintId } from '@10db/contracts';
 import { createTestStore, insertDecision, insertSource } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -494,5 +494,88 @@ describe('buildSessionPrompt for flow steps', () => {
       'Earlier steps:\n--- plan (Planner)\n1. Add <Badge/> to header.tsx\n---',
     );
     expect(prompt).toContain('--- review (Reviewer): rejected\n1. No empty-state test.\n---');
+  });
+});
+
+describe('the gate in a brief', () => {
+  const gateEvidence = (summary: string) => ({
+    id: mintId('Evidence'),
+    workstreamId: handoff.workstreamId,
+    kind: 'gate' as const,
+    command: 'make gate',
+    exitCode: 1,
+    summary,
+    logPath: null,
+    commitShas: [],
+    createdAt: handoff.createdAt,
+  });
+  const reviewStep = { ...implementStep, role: 'review', tools: 'read_only' } as const;
+  const failed = gateEvidence('FAILED lint: pnpm lint (log .gate/lint.log)\nGATE FAIL: lint');
+  const actions: readonly (readonly [string, NextAction])[] = [
+    ['start', { kind: 'start' }],
+    ['continue', { kind: 'continue_from_handoff', handoffId: handoff.id }],
+    ['resume', { kind: 'resume', providerSessionId: 'p', reason: 'daemon restarted' }],
+    ['fresh answer', { kind: 'answer', inboxId: mintId('InboxItem'), providerSessionId: null }],
+    ['fix', { kind: 'fix', evidenceId: failed.id }],
+    ['uncommitted', { kind: 'uncommitted', paths: ['src/ui/badge.tsx'] }],
+    ['verify', { kind: 'verify' }],
+    ['revise', { kind: 'revise', reviewStep: 0 }],
+    ['builder review', { kind: 'builder_review', inboxId: mintId('InboxItem') }],
+  ];
+  const briefs = actions.flatMap(([name, action]) =>
+    [implementStep, reviewStep].flatMap((step) =>
+      [false, true].flatMap((sandboxed) =>
+        [failed, null].map(
+          (evidence) =>
+            [
+              `${name}, ${step.role}${sandboxed ? ', sandboxed' : ''}${evidence ? ', after a failed gate' : ''}`,
+              buildSessionPrompt({ ...base, step, sandboxed, evidence, handoff, action }),
+            ] as const,
+        ),
+      ),
+    ),
+  );
+
+  it.each(briefs)('%s: never tells the agent to run the gate', (_name, brief) => {
+    expect(brief).not.toMatch(/make gate`? (yourself|again|now)|run (it|the gate)\b/i);
+    expect(brief).not.toMatch(/\brun\b[^.\n]*`make gate`/i);
+  });
+
+  it('tells a lane to run only the checks for what it changed', () => {
+    const brief = buildSessionPrompt({ ...base, action: { kind: 'start' } });
+    expect(brief).toContain('Run only the checks for what you changed');
+    expect(brief).toContain('never the full gate');
+  });
+
+  it.each([
+    [
+      'one failing step',
+      'FAILED lint: pnpm lint (log .gate/lint.log)\nGATE FAIL: lint — logs in .gate/',
+      ['`lint`: rerun `pnpm lint` (log `.gate/lint.log`)'],
+    ],
+    [
+      'two failing steps',
+      'FAILED lint: pnpm lint (log .gate/lint.log)\nFAILED test: pnpm test (log .gate/test.log)\nGATE FAIL: lint test',
+      ['`lint`: rerun `pnpm lint`', '`test`: rerun `pnpm test` (log `.gate/test.log`)'],
+    ],
+  ])('names the failing step and its command: %s', (_name, summary, named) => {
+    const evidence = gateEvidence(summary);
+    const brief = buildSessionPrompt({
+      ...base,
+      evidence,
+      action: { kind: 'fix', evidenceId: evidence.id },
+    });
+    for (const text of named) expect(brief).toContain(text);
+  });
+
+  it('points at the output when it names no failing step', () => {
+    const evidence = gateEvidence('FAIL badge.test.ts');
+    const brief = buildSessionPrompt({
+      ...base,
+      evidence,
+      action: { kind: 'fix', evidenceId: evidence.id },
+    });
+    expect(brief).toContain('rerun only the check that failed');
+    expect(brief).toContain('FAIL badge.test.ts');
   });
 });
