@@ -397,6 +397,36 @@ Adoption is deterministic:
   drawer-editr"). **Pick Again…** is the primary; Cancel closes it. The skill's `--dry-run` prints the same
   list.
 
+An example brief:
+
+```markdown
+---
+title: Real areas
+objective: 10db proposes a project's areas from its repository, proposes each task's areas, and lets the builder edit them.
+cares_most: Areas a non-engineer can read; no task blocked by an area it doesn't touch.
+criteria:
+  - text: A new project gets proposed areas it can edit before saving
+    check: task
+    task: propose-project-areas
+  - text: The builder accepts the area names after seeing them
+    check: accept
+tasks:
+  - key: task-patch-route
+    title: Patch a task's areas and dependencies
+    areas: [repo]
+    criteria: [PATCH /tasks/:id changes areas and dependencies, and refuses unknown areas]
+  - key: drawer-editor
+    title: Edit areas and dependencies in the task drawer
+    areas: [repo]
+    depends_on: [task-patch-route]
+  - key: propose-project-areas
+    title: Propose a new project's areas from its repository
+    areas: [repo]
+---
+
+Notes below the front matter are kept as the goal's description.
+```
+
 The first goal is **Real areas**, from the build order in the spec PR #131 (its first slice is PR #138),
 converted into a brief by hand. Its tasks use the project's current areas (`repo` over `**` today) until the
 areas work it builds lands. Extraction from a free-form document by an LLM is phase 4.
