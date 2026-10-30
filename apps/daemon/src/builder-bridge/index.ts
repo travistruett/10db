@@ -1,1 +1,1 @@
-export { createBuilderBridge, type BuilderBridgeOptions } from './bridge';
+export { createBuilderBridge } from './bridge';
