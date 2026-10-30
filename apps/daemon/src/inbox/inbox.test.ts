@@ -1958,3 +1958,34 @@ describe('a flag with a fold key', () => {
     });
   });
 });
+
+describe('a card 10db closes because its cause is gone', () => {
+  function flag(detail: Record<string, string>) {
+    const ws = seedWorkstream(base);
+    return inbox.flag({
+      projectId: ws.project.id,
+      workstreamId: null,
+      title: 'Batch not started: 10db will not run git',
+      body: 'Nothing was pushed.',
+      detail,
+    });
+  }
+
+  it('is resolved by 10db with the reason, keeping the rest of its detail', () => {
+    const card = flag({ keep: 'me' });
+    const resolved = inbox.resolve(card.id, 'Alpha started');
+    expect(resolved).toMatchObject({
+      state: 'RESOLVED',
+      detail: { keep: 'me', resolution: { by: '10db', reason: 'Alpha started' } },
+    });
+    expect(listInbox(state.db, { states: ['OPEN'] })).toEqual([]);
+    expect(listInbox(state.db, { states: ['RESOLVED'] }).map((i) => i.id)).toEqual([card.id]);
+  });
+
+  it('leaves a card the builder already closed as it was', () => {
+    const card = flag({});
+    inbox.answer(card.id, { choice: 'dismiss' });
+    const again = inbox.resolve(card.id, 'Alpha started');
+    expect(again.detail).toEqual({});
+  });
+});

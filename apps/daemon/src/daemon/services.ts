@@ -174,7 +174,11 @@ export function createServices(deps: {
       deps.scheduler.requestTick();
       return ws;
     },
-    listInbox: ({ states }) => listInbox(db, states ? { states } : {}),
+    listInbox: ({ states, recent }) =>
+      listInbox(db, {
+        ...(states ? { states } : {}),
+        ...(recent !== null ? { recent } : {}),
+      }),
     answerInbox(id, answer) {
       const item = deps.inbox.answer(id, answer);
       deps.scheduler.requestTick();

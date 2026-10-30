@@ -21,6 +21,7 @@ import { ghCall, networkCall, raise, type DeliveryContext } from './context';
 import { unmergedDependencies } from './deps';
 import { recordInstall } from './installed-lockfile';
 import { missingLandingBranch } from './landing';
+import { resolveStartCards } from './stale-cards';
 import { seedDirs, seedWorktree } from './worktree-seed';
 
 /** What a start hands its background job: the plans resolved in the request, by task. */
@@ -190,6 +191,7 @@ export async function cutWorktree(
       { batchId, projectId: project.id, branch, baseSha, repo, path },
       'batch worktree cut',
     );
+    resolveStartCards(db, ctx.inbox, project.id, plans.keys());
     ctx.onWorkQueued();
   } catch (error) {
     // An OPEN batch keeps its worktree, and a refusal that threw doesn't run twice: the job's log

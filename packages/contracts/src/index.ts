@@ -5,6 +5,7 @@ export * from './batches';
 export * from './benchmarks';
 export * from './builder-mcp-tools';
 export * from './board';
+export * from './card-resolution';
 export * from './command-runners';
 export * from './entities';
 export * from './errors';

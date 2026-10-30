@@ -119,7 +119,11 @@ export interface ApiServices {
   retryWorkstream(id: WorkstreamId): WorkstreamDto;
   /** The diff, commits and file counts of the workstream's work in its checkout, for the builder's check. */
   workstreamChanges(id: WorkstreamId): Promise<WorkstreamChangesDto>;
-  listInbox(filter: { readonly states: readonly InboxState[] | null }): InboxItemDto[];
+  /** With `recent`, only that many, the most recently updated first. */
+  listInbox(filter: {
+    readonly states: readonly InboxState[] | null;
+    readonly recent: number | null;
+  }): InboxItemDto[];
   answerInbox(id: InboxItemId, answer: InboxAnswer): InboxItemDto;
   eventsAfter(afterSeq: number, limit: number): DaemonEvent[];
   subscribe(listener: (event: DaemonEvent) => void): () => void;

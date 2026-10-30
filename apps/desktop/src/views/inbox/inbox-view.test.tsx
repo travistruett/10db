@@ -781,3 +781,63 @@ describe('InboxView', () => {
     });
   });
 });
+
+describe('the resolved view', () => {
+  const closedBy10db = inboxItemDto({
+    kind: 'flag',
+    state: 'RESOLVED',
+    title: 'Batch not started: 10db will not run git in /repo',
+    body: 'Nothing was pushed.',
+    options: [],
+    detail: { resolution: { by: '10db', reason: 'Alpha started' } },
+    updatedAt: '2026-10-30T10:00:00.000Z',
+  });
+  const answered = inboxItemDto({
+    kind: 'question',
+    state: 'RESOLVED',
+    title: 'Which badge color?',
+    answer: { choice: 'Teal' },
+    updatedAt: '2026-10-30T11:00:00.000Z',
+  });
+
+  /** Serves the open and resolved lists; returns the `recent` count each resolved request asked for. */
+  function serveBoth(open: InboxItemDto[], resolved: InboxItemDto[]): (string | null)[] {
+    const recent: (string | null)[] = [];
+    serve(
+      http.get(daemonUrl('/inbox'), ({ request }) => {
+        const params = new URL(request.url).searchParams;
+        if (params.get('state') !== 'RESOLVED') return HttpResponse.json(open);
+        recent.push(params.get('recent'));
+        return HttpResponse.json(resolved);
+      }),
+    );
+    return recent;
+  }
+
+  it('lists resolved cards, newest first, saying who closed each and why', async () => {
+    const recent = serveBoth([color], [closedBy10db, answered]);
+    renderApp('/inbox');
+    await screen.findByText('Which badge color?');
+    fireEvent.click(screen.getByRole('tab', { name: 'Resolved' }));
+
+    const rows = await screen.findAllByTestId('resolved-card');
+    // Only the most recent ones are fetched: the resolved list only grows.
+    expect(recent).toEqual(['100']);
+    expect(rows.map((row) => row.textContent)).toEqual([
+      expect.stringContaining('Which badge color?'),
+      expect.stringContaining('Batch not started: 10db will not run git in /repo'),
+    ]);
+    expect(rows[0]?.textContent).toContain('Answered: Teal');
+    expect(rows[1]?.textContent).toContain('Resolved by 10db: Alpha started');
+    // The open cards and their keys are not there.
+    expect(screen.queryByRole('button', { name: 'Send Answer' })).toBeNull();
+  });
+
+  it('says so when nothing has been resolved', async () => {
+    serveBoth([color], []);
+    renderApp('/inbox');
+    await screen.findByText('Which badge color?');
+    fireEvent.click(screen.getByRole('tab', { name: 'Resolved' }));
+    expect(await screen.findByText('Nothing has been resolved yet.')).toBeTruthy();
+  });
+});

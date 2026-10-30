@@ -41,6 +41,7 @@ import { gateNote, type BaseUpdate, type BaseUpdates } from './base-update';
 import { mergeCards, shipCards, wrongBranchCard, type Card, type ShipFailure } from './cards';
 import { allCheckouts, projectAtCheckout } from './checkout';
 import { returnCheckout } from './checkout-return';
+import { resolveShipCards } from './stale-cards';
 import { ghCall, pushCall, raise, type DeliveryContext, type DeliveryLimits } from './context';
 import { readGateFailures, touchedBy, type GateStepFailure } from './gate-failures';
 import { jobKey, JobQueue } from './jobs';
@@ -129,7 +130,12 @@ export function createShipper(deps: ShipperDeps): Shipper {
     });
     if (!moved) return;
     deps.logger.warn({ batchId: batch.id, failure, title: reason }, 'batch not shipped');
-    if (card) raise(deps.inbox, batch.projectId, card);
+    // A later ship of the batch that succeeds makes the card stale.
+    if (card)
+      raise(deps.inbox, batch.projectId, {
+        ...card,
+        resolvesWhen: { event: 'batch_shipped', batchId: batch.id },
+      });
   }
 
   /**
@@ -561,6 +567,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
         }),
       );
       deps.logger.info({ batchId, branch, prUrl }, 'batch shipped');
+      resolveShipCards(db, deps.inbox, getBatch(db, batchId));
       await afterEnd(batchId, worktreePath);
     } catch (error) {
       // Shutdown: leave SHIPPING; recovery re-runs from step 0.

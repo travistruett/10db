@@ -112,7 +112,12 @@ import { createGateRunner, createGateSlots, limitGates } from '../verify';
 import { CLIENT_APP } from '../version';
 import { createWatcher, systemWatch, type WatchFn } from '../watcher';
 import { createProjectPinStore } from './checkout-pins';
-import { createGitCardAnswers, createGitRefusalHandler } from './git-refusal';
+import {
+  createCheckoutTrustedHandler,
+  createGitCardAnswers,
+  createGitRefusalHandler,
+  refusedTrustCheckouts,
+} from './git-refusal';
 import { acquireInstanceLock } from './instance-lock';
 import { removeRuntimeFiles, writeRuntimeFiles } from '../runtime-files';
 import { createAreaNamer } from './area-namer';
@@ -355,6 +360,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   });
   const git = createGit({
     onRefused: createGitRefusalHandler({ db: state.db, inbox, logger }),
+    onTrusted: createCheckoutTrustedHandler({ db: state.db, inbox }),
+    refusedCheckouts: refusedTrustCheckouts(state.db),
     pins: createProjectPinStore(state, memoryPinStore()),
     bin: gitBin,
     checkouts: () => listProjects(state.db).map((project) => project.repoPath),

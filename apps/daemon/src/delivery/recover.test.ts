@@ -2,10 +2,12 @@ import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { BatchDto } from '@10db/contracts';
 import {
+  getAppSetting,
   getBatch,
   getBatchRow,
   insertBatch,
   listBatches,
+  listInbox,
   listWorkstreams,
   patchBatch,
   transitionBatch,
@@ -18,7 +20,8 @@ import { ManualClock } from '../clock';
 import { silentLogger } from '../log';
 import { systemProcesses } from '../recovery';
 import { createScheduler } from '../scheduler';
-import { batchBranchName, recoverBatches } from './index';
+import { cuttingTasksKey } from './cutting-tasks';
+import { batchBranchName, createBatchStarter, recoverBatches, type DeliveryJobs } from './index';
 
 let h: DeliveryHarness;
 afterEach(() => {
@@ -82,6 +85,36 @@ describe('recoverBatches', () => {
     expect(next.branch).not.toBe(leftover);
     const batchBranches = h.git$('branch', '--list', '--format=%(refname:short)', '10db/*');
     expect(batchBranches.split('\n').sort()).toEqual([leftover, next.branch].sort());
+  });
+
+  it('closes the cut-interrupted card by itself once its task starts after the restart', async () => {
+    h = createDeliveryHarness({}, { trigger: false });
+    const noJobs: DeliveryJobs = {
+      run: () => undefined,
+      idle: () => Promise.resolve(),
+      stop: () => Promise.resolve(),
+    };
+    const task = h.addTask('Alpha');
+    // The daemon stopped before the cut ran: the CUTTING row, and no workstream yet.
+    const cutting = h.only(
+      createBatchStarter({ ...h.ctx, jobs: noJobs }).startBatch(h.project.id, {
+        title: 'Greetings',
+        taskIds: [task.id],
+      }),
+    );
+    await recover();
+    const card = h.only(h.cards());
+    expect(card.title).toBe(
+      'Batch not started: 10db stopped while cutting the branch for "Greetings"',
+    );
+    h.starter.startBatch(h.project.id, { title: 'Greetings', taskIds: [task.id] });
+    await h.jobs.idle();
+    expect(h.cards()).toEqual([]);
+    expect(h.only(listInbox(h.store.db, { states: ['RESOLVED'] }))).toMatchObject({
+      id: card.id,
+      detail: { resolution: { by: '10db', reason: 'Alpha started' } },
+    });
+    expect(getAppSetting(h.store.db, cuttingTasksKey(cutting.id))).toBeUndefined();
   });
 
   it('fails an unfinished batch whose branch is not checked out, and launches nothing in it', async () => {
