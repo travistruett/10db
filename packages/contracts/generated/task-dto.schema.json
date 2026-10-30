@@ -133,6 +133,7 @@
         "backlog",
         "ready",
         "in_progress",
+        "in_review",
         "blocked",
         "done"
       ]
@@ -142,6 +143,17 @@
         {
           "type": "string",
           "pattern": "^ws_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "goalId": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^gol_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
         },
         {
           "type": "null"

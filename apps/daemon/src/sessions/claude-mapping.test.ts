@@ -88,6 +88,22 @@ describe('mapSdkMessage', () => {
     ]);
   });
 
+  it.each([
+    { subtype: 'error_max_turns', isError: true, result: 'max_turns' },
+    { subtype: 'error_during_execution', isError: true, result: 'error' },
+    { subtype: 'error_max_budget_usd', isError: true, result: 'error' },
+    { subtype: 'success', isError: true, result: 'error' },
+  ])('says how a $subtype result (is_error $isError) ended the turn: $result', (c) => {
+    const message = {
+      ...resultMessage({ input: 1, output: 1, costUsd: 0 }),
+      subtype: c.subtype,
+      is_error: c.isError,
+    } as unknown as Parameters<typeof mapSdkMessage>[0];
+    expect(mapSdkMessage(message, ctx)).toMatchObject([
+      { type: 'turn_complete', result: c.result },
+    ]);
+  });
+
   it('maps rate limit events, with the reset time', () => {
     expect(
       mapSdkMessage(rateLimitEvent({ status: 'allowed_warning', resetsAt: 1_791_000_000 }), ctx),

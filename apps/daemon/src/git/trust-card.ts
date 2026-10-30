@@ -70,6 +70,18 @@ export function worktreeMergeCommand(path: string, base: string): string {
     : `git -c core.hooksPath=/dev/null merge run in ${codeSpan(path)}, naming ${codeSpan(from)}`;
 }
 
+/**
+ * How the builder makes `dir` in the worktree at `path` exactly what origin's `base` holds, staged:
+ * its files back and the branch's own ones in it removed, as a generated directory is taken whole.
+ * A command to paste when every value is plain, otherwise the command to type.
+ */
+export function worktreeRestoreCommand(path: string, base: string, dir: string): string {
+  const from = `origin/${base}`;
+  return PASTE_SAFE.test(path) && PASTE_SAFE.test(from) && PASTE_SAFE.test(dir)
+    ? `git -C ${shellQuote(path)} restore --source=${shellQuote(from)} --staged --worktree -- ${shellQuote(dir)}`
+    : `git restore --source --staged --worktree run in ${codeSpan(path)}, naming ${codeSpan(from)} as the source and ${codeSpan(dir)} as the path`;
+}
+
 function body(error: GitTrustError): string {
   const { repo, detail } = error;
   const here = PASTE_SAFE.test(repo) ? ` in ${shellQuote(repo)}` : ` in ${codeSpan(repo)}`;

@@ -138,11 +138,12 @@ describe('column names', () => {
     expect(columnNameKey(a) === columnNameKey(b)).toBe(same);
   });
 
-  it('labels the five system columns', () => {
+  it('labels the six system columns', () => {
     expect(Object.values(SYSTEM_COLUMN_LABEL)).toEqual([
       'Backlog',
       'Ready',
       'In progress',
+      'In review',
       'Blocked',
       'Done',
     ]);

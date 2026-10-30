@@ -16,6 +16,7 @@ import {
   insertWorkstream,
   patchBatch,
   releaseClaims,
+  runNext,
   schema,
   seedProject,
   transitionBatch,
@@ -54,8 +55,11 @@ let prepared: { accountId: AccountId; projectId: ProjectId }[];
 let wrongBranch: { batchId: string; current: string | null }[];
 let wrongBranchAt: string[];
 let missing: { batchId: string; path: string }[];
+/** Whether the Mac is overloaded, as the scheduler's `held` reads it. */
+let held: boolean;
 
 beforeEach(() => {
+  held = false;
   clock = new ManualClock(new Date(2026, 9, 20, 12));
   ({ store, close } = createTestStore(() => clock.now()));
   state = createStateStore(store, createEventBus());
@@ -88,6 +92,7 @@ function scheduler(caps = { global: 4 }, awaited: ReadonlySet<WorkstreamId> = ne
     clock,
     caps,
     awaitedHolders: () => awaited,
+    held: () => held,
     instanceId: 'daemon-1',
     leaseMs: 60_000,
     tickMs: 2_000,
@@ -177,12 +182,67 @@ function moveWorkstream(id: WorkstreamId, to: 'STARTING' | 'FAILED' | 'CANCELLED
 }
 
 describe('scheduler', () => {
+  it('launches nothing while held, queued work and awaited holders alike, and launches it once released', async () => {
+    const waiting = queue();
+    queue();
+    held = true;
+    const s = scheduler({ global: 4 }, new Set([waiting.workstream.id]));
+    expect(await s.tick()).toBe(0);
+    expect(launched).toEqual([]);
+    held = false;
+    expect(await s.tick()).toBe(2);
+  });
+
   it('respects the global cap', async () => {
     queue();
     queue();
     queue();
     expect(await scheduler({ global: 2 }).tick()).toBe(2);
     expect(launched).toHaveLength(2);
+  });
+
+  describe('run next', () => {
+    const press = (taskId: Parameters<typeof runNext>[1]) => {
+      clock.advance(1_000);
+      state.write((ctx) => runNext(ctx, taskId));
+    };
+
+    it('gives the one free lane to the task the builder put first, not the oldest', async () => {
+      const a = queue();
+      const b = queue();
+      const c = queue();
+      press(c.task.id);
+      expect(await scheduler({ global: 1 }).tick()).toBe(1);
+      expect(launched.map((l) => l.id)).toEqual([c.workstream.id]);
+      // Once it holds a lane it no longer jumps the line: the rest keep the order they started in.
+      expect(getWorkstream(store.db, c.workstream.id).runNextAt).toBeNull();
+      moveWorkstream(c.workstream.id, 'CANCELLED');
+      launched = [];
+      await scheduler({ global: 1 }).tick();
+      expect(launched.map((l) => l.id)).toEqual([a.workstream.id]);
+      expect(getWorkstream(store.db, b.workstream.id).state).toBe('QUEUED');
+    });
+
+    it('takes the latest press first when several tasks were pushed', async () => {
+      const a = queue();
+      const b = queue();
+      queue();
+      press(a.task.id);
+      press(b.task.id);
+      await scheduler({ global: 2 }).tick();
+      expect(launched.map((l) => l.id)).toEqual([b.workstream.id, a.workstream.id]);
+    });
+
+    it('lets the next task run while the pushed one waits for its dependencies', async () => {
+      const first = queue();
+      const blocked = add(first.project, ['ui'], [first.task.id]);
+      const other = queue();
+      press(blocked.task.id);
+      await scheduler({ global: 1 }).tick();
+      // The pushed task isn't ready, so it takes no lane; the dependency it waits on goes first.
+      expect(launched.map((l) => l.id)).toEqual([first.workstream.id]);
+      expect(getWorkstream(store.db, other.workstream.id).state).toBe('QUEUED');
+    });
   });
 
   it('respects a project lane limit and the account lane cap', async () => {

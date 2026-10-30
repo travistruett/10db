@@ -33,6 +33,7 @@ function result(overrides: Partial<GateResult> = {}): GateResult {
     logPath: '/logs/gate.log',
     timedOut: false,
     aborted: false,
+    blockedHosts: [],
     ...overrides,
   };
 }
@@ -176,6 +177,74 @@ describe('gate slots', () => {
       expect(outcome.aborted).toBe(true);
       expect(started).toHaveLength(0);
       expect(slots.busy).toBe(0);
+    });
+  });
+
+  describe('while the Mac is overloaded', () => {
+    /** A hold the test opens and closes, as the load guard does. */
+    function fakeHold() {
+      let open: () => void = () => undefined;
+      let overloaded = true;
+      const asked: (AbortSignal | undefined)[] = [];
+      return {
+        asked,
+        release: () => {
+          overloaded = false;
+          open();
+        },
+        hold: {
+          untilClear: (signal?: AbortSignal) => {
+            asked.push(signal);
+            if (!overloaded) return Promise.resolve(true);
+            return new Promise<boolean>((resolve) => {
+              open = () => {
+                resolve(true);
+              };
+              signal?.addEventListener('abort', () => {
+                resolve(false);
+              });
+            });
+          },
+        },
+      };
+    }
+
+    it('starts no gate until the load falls, then starts it', async () => {
+      const { runner, started, finish } = controlledRunner();
+      const slots = createGateSlots(2);
+      const fake = fakeHold();
+      const gate = limitGates(runner, {
+        slots,
+        clock: new ManualClock(),
+        logger: silentLogger,
+        hold: fake.hold,
+      });
+      const run = gate.run(request({ command: 'held' }));
+      await settle();
+      expect(started).toEqual([]);
+      expect(slots.busy).toBe(0);
+      fake.release();
+      await settle();
+      expect(started.map((r) => r.command)).toEqual(['held']);
+      finish[0]?.(result());
+      expect((await run).exitCode).toBe(0);
+    });
+
+    it('stops a held gate that is aborted, without ever running it', async () => {
+      const { runner, started } = controlledRunner();
+      const fake = fakeHold();
+      const gate = limitGates(runner, {
+        slots: createGateSlots(1),
+        clock: new ManualClock(),
+        logger: silentLogger,
+        hold: fake.hold,
+      });
+      const controller = new AbortController();
+      const run = gate.run(request({ signal: controller.signal }));
+      await settle();
+      controller.abort();
+      expect(await run).toMatchObject({ aborted: true, exitCode: 130, timedOut: false });
+      expect(started).toEqual([]);
     });
   });
 

@@ -97,9 +97,12 @@ describe('CI workflow', () => {
     expect(unbounded.map(([name]) => name)).toEqual([]);
   });
 
-  it('re-runs every job when a PR title is edited, so policy lints the title that gets merged', () => {
+  it('runs on pull requests into main only, and re-runs every job when a PR title is edited', () => {
+    // Tasks land in the integration branch `next` without CI; the one pull request from `next`
+    // into main runs it (decisions/2026-10-30-integration-branch.md).
     const parsed = readWorkflow(CI);
     expect(parsed.on['pull_request']).toEqual({
+      branches: ['main'],
       types: ['opened', 'synchronize', 'reopened', 'edited'],
     });
     const skipsOnEvent = Object.entries(parsed.jobs).filter(([, job]) =>

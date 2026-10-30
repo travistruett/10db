@@ -96,10 +96,18 @@ export function createGateSlots(limit: number): GateSlots {
   };
 }
 
+/** Holds work back while the Mac is overloaded; the load guard is one. */
+export interface Hold {
+  /** Resolves true once work may start, and false when `signal` aborts first. */
+  untilClear(signal?: AbortSignal): Promise<boolean>;
+}
+
 export interface LimitGatesOptions {
   readonly slots: GateSlots;
   readonly clock: Clock;
   readonly logger: Logger;
+  /** A gate starts nothing, and holds no slot, until this lets it. */
+  readonly hold?: Hold;
 }
 
 /**
@@ -111,9 +119,13 @@ export function limitGates(runner: GateRunner, options: LimitGatesOptions): Gate
   return {
     async run(request: GateRequest): Promise<GateResult> {
       const asked = options.clock.now().getTime();
-      const slot = await options.slots.acquire(request.signal, (ahead) => {
-        request.onWaiting?.(ahead);
-      });
+      // Before the slot, so a gate held for load never keeps one from a gate that could run.
+      const released = (await options.hold?.untilClear(request.signal)) ?? true;
+      const slot = released
+        ? await options.slots.acquire(request.signal, (ahead) => {
+            request.onWaiting?.(ahead);
+          })
+        : null;
       if (slot === null) {
         options.logger.info({ logPath: request.logPath }, 'gate stopped while waiting for a slot');
         return {
@@ -123,6 +135,7 @@ export function limitGates(runner: GateRunner, options: LimitGatesOptions): Gate
           logPath: request.logPath,
           timedOut: false,
           aborted: true,
+          blockedHosts: [],
         };
       }
       try {

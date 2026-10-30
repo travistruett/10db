@@ -129,7 +129,7 @@ export function createBuilderTools(
     // builder's clients get the title alone: no body, options or detail to act on.
     [BuilderToolName.ListInbox]: (args) => {
       BuilderToolInputs.list_inbox.parse(args);
-      return services.listInbox({ states: [InboxState.Open] }).map((card) => ({
+      return services.listInbox({ states: [InboxState.Open], recent: null }).map((card) => ({
         id: card.id,
         kind: card.kind,
         projectId: card.projectId,

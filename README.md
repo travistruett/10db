@@ -51,6 +51,7 @@ checklist is in [CONTRIBUTING.md](CONTRIBUTING.md#set-up).
 - `make live-acceptance`: the manual §1.3 run on a Max subscription.
 - `make gate`: every check; prints one summary line with each step's seconds (`GATE PASS format 4s · lint 31s · … (210s)`). Its e2e step needs the WebKit browser that `make setup` installs. It picks free ports for its daemon and UI, so gates in separate worktrees can run at once, beside `pnpm dev`; a port another process takes before the servers bind it fails the run at startup.
 - `make check`: the fast check on what you changed.
+- `make check-changed`: format, lint, typecheck, tests and drift of the packages your diff touches and their dependents (about a minute and a half for a desktop-only change); it runs the full gate when it can't place a changed file. 10db runs it after each implement step when the project's "Check after each step" setting is `make check-changed`; the ship gate still runs `make gate`.
 
 Working rules for people and agents are in [AGENTS.md](AGENTS.md); how to contribute is in
 [CONTRIBUTING.md](CONTRIBUTING.md).
@@ -109,7 +110,8 @@ rejected push) is an inbox card that says what to fix; nothing is pushed. A fail
 Ship anyway, which ships the batch without that task once the rest is done or cancelled. A task's drawer on the
 board shows its branch and pull request, why the batch wasn't shipped, and offers Retry (when the batch failed),
 Ship anyway (when a task failed) and Abandon, which keeps the branch and cancels its unfinished tasks once
-nothing on it is running. When several tasks share a branch, one line above the columns names it. 10db
+nothing on it is running. Once a pull request merges, 10db deletes the task's local branch; a pull request
+closed without merging, or an abandoned task whose branch holds commits, gets a card offering to delete it. When several tasks share a branch, one line above the columns names it. 10db
 never force-pushes, and agents can't push, merge or open pull requests themselves.
 
 ## Accounts

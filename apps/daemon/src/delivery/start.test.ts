@@ -1,10 +1,11 @@
-import { writeFileSync } from 'node:fs';
+import { unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { BranchName, ConflictError, InvalidError, mintId, type TaskDto } from '@10db/contracts';
 import {
   getBatch,
   insertWorkstream,
   listBatches,
+  listInbox,
   listBoardColumns,
   listWorkstreams,
   moveTask,
@@ -226,6 +227,52 @@ describe('cutting a branch', () => {
     expect(h.cards()).toHaveLength(2);
   });
 
+  it('closes the refusal card by itself, saying why, once the same task starts', async () => {
+    const task = h.addTask('Alpha');
+    writeFileSync(join(h.repo, 'scratch.txt'), 'uncommitted\n');
+    h.starter.startBatch(h.project.id, { title: 'Greetings', taskIds: [task.id] });
+    await h.jobs.idle();
+    const card = h.only(h.cards());
+    unlinkSync(join(h.repo, 'scratch.txt'));
+    h.starter.startBatch(h.project.id, { title: 'Greetings', taskIds: [task.id] });
+    await h.jobs.idle();
+    expect(h.cards()).toEqual([]);
+    const [closed] = listInbox(h.store.db, { states: ['RESOLVED'] });
+    expect(closed).toMatchObject({
+      id: card.id,
+      state: 'RESOLVED',
+      detail: { resolution: { by: '10db', reason: 'Alpha started' } },
+    });
+  });
+
+  it('keeps a refusal card open while another task it named has not started', async () => {
+    const alpha = h.addTask('Alpha');
+    const beta = h.addTask('Beta', { areas: ['ui'] });
+    writeFileSync(join(h.repo, 'scratch.txt'), 'uncommitted\n');
+    h.starter.startBatch(h.project.id, { title: 'Greetings', taskIds: [alpha.id, beta.id] });
+    await h.jobs.idle();
+    const card = h.only(h.cards());
+    unlinkSync(join(h.repo, 'scratch.txt'));
+    h.starter.startBatch(h.project.id, { title: 'Alpha', taskIds: [alpha.id] });
+    await h.jobs.idle();
+    expect(h.cards().map((c) => c.id)).toEqual([card.id]);
+  });
+
+  it('leaves the refusal cards of other tasks open', async () => {
+    const alpha = h.addTask('Alpha');
+    const beta = h.addTask('Beta', { areas: ['ui'] });
+    writeFileSync(join(h.repo, 'scratch.txt'), 'uncommitted\n');
+    for (const task of [alpha, beta]) {
+      h.starter.startBatch(h.project.id, { title: task.title, taskIds: [task.id] });
+      await h.jobs.idle();
+    }
+    unlinkSync(join(h.repo, 'scratch.txt'));
+    h.starter.startBatch(h.project.id, { title: 'Alpha', taskIds: [alpha.id] });
+    await h.jobs.idle();
+    expect(h.only(h.cards()).title).toContain('uncommitted');
+    expect(listInbox(h.store.db, { states: ['RESOLVED'] })).toHaveLength(1);
+  });
+
   it('raises the origin card when origin is added after the checkout was pinned, and starts once it is trusted', async () => {
     h.git$('remote', 'remove', 'origin');
     // The first daemon git call pins the checkout, with no origin.
@@ -373,6 +420,19 @@ describe('dependencies', () => {
     expect(listBatches(h.store.db)).toEqual([]);
     const batch = await started('Both', alpha, beta);
     expect(batch.state).toBe('OPEN');
+  });
+
+  it('closes the unfinished-work card by itself once the task it refused starts', async () => {
+    const alpha = h.addTask('Alpha');
+    const beta = h.addTask('Beta', { areas: ['ui'], dependsOn: [alpha.id] });
+    expect(() => h.starter.startTask(beta.id)).toThrow(ConflictError);
+    const card = h.only(h.cards());
+    await started('Both', alpha, beta);
+    expect(h.cards()).toEqual([]);
+    expect(h.only(listInbox(h.store.db, { states: ['RESOLVED'] }))).toMatchObject({
+      id: card.id,
+      detail: { resolution: { by: '10db', reason: 'Beta started' } },
+    });
   });
 
   it("refuses a task whose dependency finished in a batch whose pull request isn't merged, until it is", async () => {

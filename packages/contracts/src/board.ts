@@ -10,6 +10,7 @@ export const SYSTEM_COLUMN_LABEL: Readonly<Record<BoardStatus, string>> = {
   [BoardStatus.Backlog]: 'Backlog',
   [BoardStatus.Ready]: 'Ready',
   [BoardStatus.InProgress]: 'In progress',
+  [BoardStatus.InReview]: 'In review',
   [BoardStatus.Blocked]: 'Blocked',
   [BoardStatus.Done]: 'Done',
 };
