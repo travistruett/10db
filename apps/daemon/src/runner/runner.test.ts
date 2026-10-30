@@ -2373,6 +2373,28 @@ describe('flows', () => {
       );
     });
 
+    it('gives a review the builder retried its own rerun again', async () => {
+      engine = await createTestEngine({
+        Alpha: [
+          implement('op-flow-002a'),
+          noVerdict,
+          noVerdict,
+          noVerdict,
+          [approve('op-flow-002b'), turn],
+        ],
+      });
+      const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+      await until(workstream.id, (s) => s === 'FAILED', 3);
+      expect(ws(workstream.id).state).toBe('FAILED');
+      engine.retry(workstream.id);
+      // The retried review ends without a verdict once more: it runs again rather than failing.
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+      expect(ws(workstream.id).state).toBe('DONE');
+      expect(step(workstream.id, 1)?.result?.verdict).toBe('approve');
+      expect(listSessions(engine.store.db, workstream.id)).toHaveLength(5);
+    });
+
     it('gives each review its own rerun after the work is sent back', async () => {
       engine = await createTestEngine({
         Alpha: [

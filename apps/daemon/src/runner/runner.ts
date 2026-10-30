@@ -635,9 +635,11 @@ export function createRunner(opts: RunnerOptions): Runner {
         );
     switch (move.kind) {
       case 'no_result': {
-        // Sessions of this step since it started that ended their turn with no verdict: this one included.
+        // Sessions of this step since it started, or since the builder last retried it, that ended
+        // their turn with no verdict: this one included.
+        const floor = Math.max(step.sessionFloor, step.retryFloor ?? 0);
         const noVerdict = listSessions(db, id).filter(
-          (s) => s.sequence > step.sessionFloor && s.exitReason === 'step_done',
+          (s) => s.sequence > floor && s.exitReason === 'step_done',
         ).length;
         if (REVIEW_ROLES.includes(step.role) && noVerdict < NO_VERDICT_ENDINGS_ALLOWED) {
           // The first such ending is no judgment of the work: the review runs again, from its handoff when it wrote one.
