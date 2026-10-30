@@ -1,4 +1,4 @@
-import { PROTOCOL_VERSION } from '@10db/contracts';
+import { mintId, PROTOCOL_VERSION } from '@10db/contracts';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
@@ -118,6 +118,25 @@ describe('App shell', () => {
   it('shows the open-card count on the Inbox link', async () => {
     server.use(
       http.get(daemonUrl('/inbox'), () => HttpResponse.json([inboxItemDto()])),
+      ...baseHandlers(),
+    );
+    renderApp('/factory');
+    expect(await screen.findByRole('link', { name: /Inbox.*1 open card/ })).toBeTruthy();
+  });
+
+  it('counts the Inbox rows, not the cards folded into them', async () => {
+    const project = mintId('Project');
+    const twins = [1, 2].map(() =>
+      inboxItemDto({
+        kind: 'flag',
+        title: 'Batch not started',
+        body: 'The batch did not start',
+        options: [],
+        projectId: project,
+      }),
+    );
+    server.use(
+      http.get(daemonUrl('/inbox'), () => HttpResponse.json(twins)),
       ...baseHandlers(),
     );
     renderApp('/factory');

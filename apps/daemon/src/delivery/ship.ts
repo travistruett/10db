@@ -33,9 +33,10 @@ import {
 } from '@10db/db';
 import type { Clock } from '../clock';
 import { GitNetworkError, GitNetworkFailure } from '../git';
+import { PrState } from '../github';
 import type { GateResult, GateRunner } from '../verify';
 import { gateNote, type BaseUpdate, type BaseUpdates } from './base-update';
-import { shipCards, wrongBranchCard, type Card, type ShipFailure } from './cards';
+import { mergeCards, shipCards, wrongBranchCard, type Card, type ShipFailure } from './cards';
 import { allCheckouts, projectAtCheckout } from './checkout';
 import { returnCheckout } from './checkout-return';
 import { ghCall, pushCall, raise, type DeliveryContext, type DeliveryLimits } from './context';
@@ -350,6 +351,41 @@ export function createShipper(deps: ShipperDeps): Shipper {
   }
 
   /**
+   * Has GitHub merge the batch's pull request by itself once its required checks pass, when the
+   * batch asked for that. The pull request is open either way, so a repository that doesn't allow
+   * auto-merge, or a refusal from GitHub, is a card and the pull request waits for the builder; only a
+   * shutdown stops the ship.
+   */
+  async function turnOnAutoMerge(
+    batch: BatchDto,
+    project: ProjectDto,
+    repo: string,
+    prUrl: string,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const call = ghCall(deps, signal);
+    try {
+      if (!(await deps.gh.repoAllowsAutoMerge(repo, call))) {
+        deps.logger.info(
+          { batchId: batch.id, repo, prUrl },
+          'repository does not allow auto-merge',
+        );
+        raise(deps.inbox, project.id, mergeCards.notAllowed(project, repo, batch, prUrl));
+        return;
+      }
+      await deps.gh.prAutoMerge({ repo, url: prUrl }, call);
+      deps.logger.info({ batchId: batch.id, repo, prUrl }, 'auto-merge turned on');
+    } catch (error) {
+      if (signal.aborted) throw error;
+      deps.logger.warn(
+        { batchId: batch.id, prUrl, err: error instanceof Error ? error.message : String(error) },
+        'auto-merge not turned on',
+      );
+      raise(deps.inbox, project.id, mergeCards.refused(batch, prUrl, error));
+    }
+  }
+
+  /**
    * Batch delivery spec §6, steps 0–5, in the batch's worktree when it has one (made whole first) and
    * in the project's checkout otherwise; the push always runs in the project's checkout, whose pin
    * holds the origin the builder trusted. Each step is safe to repeat, so a restart runs them all again.
@@ -435,6 +471,12 @@ export function createShipper(deps: ShipperDeps): Shipper {
       const prUrl =
         existing?.url ??
         (await createPr(batch, project, { repo, branch, baseSha: base, checkout }, signal));
+      // 4b. A pull request the batch wants merged by itself, unless an earlier run already closed
+      // or merged it.
+      if (batch.autoMerge && (existing === null || existing.state === PrState.Open)) {
+        step = 'gh pr merge --auto';
+        await turnOnAutoMerge(batch, project, repo, prUrl, signal);
+      }
       // 5. Record it.
       deps.state.write((w) =>
         transitionBatch(w, batchId, {

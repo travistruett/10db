@@ -14,6 +14,7 @@ import {
   UnstyledButton,
 } from '@mantine/core';
 import type { KeyboardEvent, RefObject } from 'react';
+import { ExternalLink } from '../board/pull-request-link';
 import { CheckCard } from './check-card';
 import { isDismissable } from './inbox-rows';
 import { McpApprovalDetails, mcpReview } from './mcp-approval';
@@ -59,6 +60,20 @@ function CardBody({ item }: { readonly item: InboxItemDto }) {
   );
 }
 
+/** The pages the desktop app's opener may open, as its capability (`opener:allow-open-url`) says. */
+const GITHUB_PAGE = 'https://github.com/';
+
+/**
+ * The page a flag card offers to open (`detail.link`, such as a failing check): a github.com page
+ * only. The daemon's text is not trusted to be a link, and the desktop app opens nothing else, so a
+ * check elsewhere (a third-party CI) gets no button; the card's body holds its address regardless.
+ */
+function cardLink(item: InboxItemDto): string | null {
+  if (item.kind !== InboxKind.Flag) return null;
+  const link = item.detail?.['link'];
+  return typeof link === 'string' && link.startsWith(GITHUB_PAGE) ? link : null;
+}
+
 // Destructured: reading `props.x` in render, with a ref among the props, trips react-hooks/refs.
 export function InboxCard({
   item,
@@ -82,16 +97,18 @@ export function InboxCard({
   const dismissable = isDismissable(item);
   // Every card waits on the builder, a flag included: yellow, never the red of a failure.
   const kind = (
-    <Badge size="sm" variant="light" color="yellow">
+    <Badge size="sm" variant="light" color="yellow" style={{ flexShrink: 0 }}>
       {review ? 'MCP server' : KIND_LABELS[item.kind]}
     </Badge>
   );
   const times =
     count > 1 ? (
-      <Badge size="sm" variant="default">
+      <Badge size="sm" variant="default" style={{ flexShrink: 0 }}>
         ×{count}
       </Badge>
     ) : null;
+  // The row's count in words, so the number in the sidebar has an explanation on screen.
+  const identical = count > 1 ? `${String(count)} identical flags` : null;
 
   if (!selected) {
     // What a flag is about, such as a path, is its body's first line.
@@ -110,11 +127,16 @@ export function InboxCard({
           <Group gap="sm" wrap="nowrap">
             {kind}
             {times}
-            <Text size="sm" lineClamp={1} style={{ flexShrink: 0 }}>
+            <Text size="sm" lineClamp={1} title={item.title} style={{ minWidth: 0 }}>
               {item.title}
             </Text>
+            {identical === null ? null : (
+              <Text size="xs" c="dimmed" style={{ flexShrink: 0, whiteSpace: 'nowrap' }}>
+                {identical}
+              </Text>
+            )}
             {about === '' ? null : (
-              <Text size="sm" c="dimmed" ff="monospace" lineClamp={1}>
+              <Text size="sm" c="dimmed" ff="monospace" lineClamp={1} style={{ minWidth: 0 }}>
                 {about}
               </Text>
             )}
@@ -127,7 +149,7 @@ export function InboxCard({
         ) : null}
         {dismissable ? (
           <Button size="xs" variant="subtle" loading={pending} onClick={onDismiss}>
-            Dismiss
+            {count > 1 ? 'Dismiss All' : 'Dismiss'}
           </Button>
         ) : null}
       </Group>
@@ -144,7 +166,9 @@ export function InboxCard({
           <Group gap="sm" wrap="nowrap">
             {kind}
             {times}
-            <Text fw={600}>{item.title}</Text>
+            <Text fw={600} style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
+              {item.title}
+            </Text>
           </Group>
         }
       />
@@ -158,6 +182,7 @@ export function InboxCard({
     }
   };
   const hasOptions = item.options.length > 0;
+  const link = cardLink(item);
 
   return (
     <Paper withBorder p="md" shadow="xs" {...{ [SELECTED_CARD_ATTRIBUTE]: true }}>
@@ -165,13 +190,21 @@ export function InboxCard({
         <Group gap="sm" wrap="nowrap">
           {kind}
           {times}
-          <Text fw={600}>{item.title}</Text>
+          <Text fw={600} style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
+            {item.title}
+          </Text>
         </Group>
+        {identical === null ? null : (
+          <Text size="sm" c="dimmed">
+            {identical} are open. Dismiss All closes all {count}.
+          </Text>
+        )}
         {review ? (
           <McpApprovalDetails review={review} body={item.body} />
         ) : (
           <CardBody item={item} />
         )}
+        {link === null ? null : <ExternalLink url={link} label="Open on GitHub" />}
         {hasOptions ? (
           <Radio.Group value={choice} onChange={onChoose} aria-label="Answer">
             <Stack gap="xs">

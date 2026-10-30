@@ -1,7 +1,5 @@
-import { Delivery, type AccountId, type ProjectInput } from '@10db/contracts';
+import { Delivery, type AccountId, type AreaDef, type ProjectInput } from '@10db/contracts';
 
-/** One area over the whole repository until Settings splits it, so no two tasks overlap by accident. */
-const REPO_AREA = { name: 'repo', globs: ['**'] };
 const HANDOFF_PCT = 40;
 const NUDGE_PCT = 50;
 
@@ -13,6 +11,8 @@ export interface ProjectChoices {
   readonly gateCommand: string;
   readonly delivery: Delivery;
   readonly baseBranch: string;
+  /** The areas the builder accepted, exactly as they left them. */
+  readonly areas: readonly AreaDef[];
   /** Set only when the builder could choose between accounts. */
   readonly accountId: AccountId | null;
 }
@@ -23,7 +23,7 @@ export function toProjectInput(choices: ProjectChoices): ProjectInput {
     name: choices.name.trim(),
     repoPath: choices.root,
     gateCommand: choices.gateCommand.trim() === '' ? null : choices.gateCommand.trim(),
-    areas: [REPO_AREA],
+    areas: [...choices.areas],
     handoffPct: HANDOFF_PCT,
     nudgePct: NUDGE_PCT,
     delivery: choices.delivery,

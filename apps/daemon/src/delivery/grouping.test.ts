@@ -25,6 +25,7 @@ function tasksNamed(deps: Record<string, readonly string[]>): Map<string, TaskDt
         areas: ['api'],
         riskTags: [],
         flowId: null,
+        landing: { kind: 'base' },
         status: 'open',
         boardOrder: 0,
         boardColumnId: null,

@@ -11,7 +11,12 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, normalize, posix, resolve, sep } from 'node:path';
 import { InvalidError } from '@10db/contracts';
 import { realPathOf, resolveInRepo } from '../guard';
-import { memoryPinStore, type CheckoutPin, type PinStore } from './checkout-pin';
+import {
+  memoryPinStore,
+  sameCheckoutIdentity,
+  type CheckoutPin,
+  type PinStore,
+} from './checkout-pin';
 import {
   checkoutIdentity,
   refusedCheckoutKeys,
@@ -20,7 +25,16 @@ import {
 } from './checkout-trust';
 import { parseScopedConfig, type ConfigEntry } from './config-trust';
 import { equalOrUnder, insideAny, isPlainDirectory, samePath, surelyInside } from './lane-writable';
-import { branchOfRef, firstLine, parseBranches, type RepoFacts, type RepoRefusal } from './inspect';
+import {
+  branchOfRef,
+  parseBranches,
+  parseSurveyLog,
+  refusalOf,
+  SURVEY_COMMIT_MARK,
+  type RepoFacts,
+  type RepoRefusal,
+  type RepoSurvey,
+} from './inspect';
 import { comparablePath, entryAt, existsAsEntry, foldedName, sameEntry } from './path-entries';
 import { gitNetwork, type NetworkCall, type NetworkRun } from './network';
 import { localRemotePath, parseRemoteUrl } from './remote-url';
@@ -185,6 +199,12 @@ export interface Git {
   /** Updates `origin/<branch>` from origin's recorded fetch URL; the checkout is untouched. */
   fetch(repo: string, branch: string, net: NetworkCall): Promise<NetworkRun>;
   /**
+   * Whether origin, at its recorded fetch URL, has a branch named `branch`. Asks only: nothing is
+   * fetched and the checkout is untouched. Throws a GitNetworkError when origin can't be asked, so
+   * an unreachable origin is never taken for a missing branch.
+   */
+  branchOnOrigin(repo: string, branch: string, net: NetworkCall): Promise<boolean>;
+  /**
    * Creates `name` at `startPoint` and checks it out, with no upstream. Resolves with where HEAD was
    * just before, read under the same lock, or null when HEAD named no commit.
    */
@@ -312,6 +332,13 @@ export interface Git {
    * looks at raises no card. A repository git won't read is answered, not thrown.
    */
   inspect(path: string): Promise<RepoFacts | RepoRefusal>;
+  /**
+   * The tracked files of HEAD and the files of its latest `maxCommits` commits, read from the object
+   * store as `inspect` reads: unpinned, nothing written, no refusal reaches `onRefused`. Git runs no
+   * program the repository configures: only plumbing and `log` with no external diff, no textconv
+   * and no signature check.
+   */
+  survey(path: string, maxCommits: number): Promise<RepoSurvey | RepoRefusal>;
 }
 
 export interface GitOptions {
@@ -624,11 +651,16 @@ export function createGit(opts: GitOptions = {}): Git {
 
   /** A refusal for a checkout that differs from `pin` in its git dirs or origin. */
   function mismatch(real: string, pin: CheckoutPin, now: CheckoutPin): GitTrustError {
-    if (now.id !== pin.id || now.gitDir !== pin.gitDir || now.commonDir !== pin.commonDir)
+    if (
+      !sameCheckoutIdentity(now.id, pin.id) ||
+      now.gitDir !== pin.gitDir ||
+      now.commonDir !== pin.commonDir
+    )
       return refusal(real, {
         kind: GitTrustFailure.Moved,
         pinned: pin.gitDir,
         found: now.gitDir,
+        pin,
         candidate: now,
       });
     const direction = now.fetchUrl === pin.fetchUrl ? 'push' : 'fetch';
@@ -666,7 +698,11 @@ export function createGit(opts: GitOptions = {}): Git {
         pushUrl: await pinnableUrl(observed(real), true),
       };
       pins.set(real, pin);
-    } else if (pin.id !== id || pin.gitDir !== dirs.gitDir || pin.commonDir !== dirs.commonDir) {
+    } else if (
+      !sameCheckoutIdentity(pin.id, id) ||
+      pin.gitDir !== dirs.gitDir ||
+      pin.commonDir !== dirs.commonDir
+    ) {
       throw mismatch(real, pin, await observe(real));
     }
     for (const name of ['alternates', 'http-alternates']) {
@@ -1264,6 +1300,26 @@ export function createGit(opts: GitOptions = {}): Git {
     );
   }
 
+  async function branchOnOriginOnce(
+    repo: string,
+    branch: string,
+    net: NetworkCall,
+  ): Promise<boolean> {
+    const c = await pinned(repo);
+    const network = await networkConfig(c, net);
+    const url = await pinnedUrl(c, 'fetch');
+    const ref = `refs/heads/${branch}`;
+    const run = await gitNetwork(
+      c.real,
+      network.config,
+      ['ls-remote', '--heads', '--', url, ref],
+      net,
+      { bin, env: { ...c.env, ...network.env } },
+    );
+    // Each answer line is `<sha>\t<ref>`; the pattern may match other refs, so compare the name.
+    return run.output.split('\n').some((line) => line.trim().endsWith(`\t${ref}`));
+  }
+
   async function mergeIntoBranch(input: MergeIntoBranchInput): Promise<BranchMerge> {
     // Inside the checkout's lock, so no commit of the daemon's moves the branch meanwhile.
     return withRepoLock(realpathSync(input.repo), async () => {
@@ -1707,6 +1763,9 @@ export function createGit(opts: GitOptions = {}): Git {
     async fetch(repo, branch, net) {
       return serialized(fetches, realpathSync(repo), () => fetchOnce(repo, branch, net));
     },
+    async branchOnOrigin(repo, branch, net) {
+      return branchOnOriginOnce(repo, branch, net);
+    },
     async switchNewBranch(repo, name, startPoint) {
       return withRepoLock(realpathSync(repo), async () =>
         switchCheckout(await pinned(repo), name, startPoint),
@@ -1917,17 +1976,43 @@ export function createGit(opts: GitOptions = {}): Git {
           originFetchUrl: url === null || url.trim() === '' ? null : url.trim(),
         };
       } catch (error) {
-        if (
-          error instanceof GitError &&
-          /not a git repository \((?:or any of the parent directories|or any parent up to mount point)/i.test(
-            error.stderr,
-          )
-        )
-          return { refused: 'not_a_repository', message: firstLine(error.stderr) };
-        return {
-          refused: 'unreadable',
-          message: firstLine(error instanceof GitError ? error.stderr : String(error)),
-        };
+        return refusalOf(error);
+      }
+    },
+    async survey(path, maxCommits) {
+      const site = observed(path);
+      try {
+        const bare = (await git(site, ['rev-parse', '--is-bare-repository'])).trim() === 'true';
+        if (bare) return { refused: 'bare_repository', message: 'This is a bare repository.' };
+        const at = observed(
+          realpathSync((await git(site, ['rev-parse', '--show-toplevel'])).trim()),
+        );
+        // An empty repository has no HEAD: it holds no file and has no history.
+        const head = await git(at, ['rev-parse', '-q', '--verify', 'HEAD^{commit}'], {
+          answerExitCodes: [1],
+        });
+        if (head.trim() === '') return { files: [], commits: [] };
+        const tree = await git(at, ['ls-tree', '-r', '-z', '--name-only', 'HEAD']);
+        const log = await git(at, [
+          'log',
+          '--no-show-signature',
+          // log.mailmap is on by default and reads .mailmap from the checkout.
+          '--no-mailmap',
+          `--max-count=${String(maxCommits)}`,
+          '--no-merges',
+          '--no-renames',
+          '--no-ext-diff',
+          '--no-textconv',
+          '--name-only',
+          '-z',
+          `--format=${SURVEY_COMMIT_MARK}`,
+          // Without `--`, a file named HEAD makes the revision ambiguous and git stats the checkout.
+          'HEAD',
+          '--',
+        ]);
+        return { files: tree.split('\0').filter((f) => f !== ''), commits: parseSurveyLog(log) };
+      } catch (error) {
+        return refusalOf(error);
       }
     },
     async ignoredDirectories(repo) {
@@ -1955,14 +2040,16 @@ export function createGit(opts: GitOptions = {}): Git {
       if (writable !== null)
         throw refusal(real, { kind: GitTrustFailure.Writable, gitDir: writable });
       const now = await observe(real);
+      // A restart may renumber the volume between the refusal and the answer; the inodes still hold.
       const same =
-        now.id === candidate.id &&
+        sameCheckoutIdentity(now.id, candidate.id) &&
         now.gitDir === candidate.gitDir &&
         now.commonDir === candidate.commonDir &&
         now.fetchUrl === candidate.fetchUrl &&
         now.pushUrl === candidate.pushUrl;
       if (!same) throw mismatch(real, candidate, now);
-      pins.set(real, candidate);
+      // `now` is the candidate's state with the device number the volume has today.
+      pins.set(real, now);
     },
   };
 }

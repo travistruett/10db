@@ -70,7 +70,8 @@ const git = (dir: string, ...args: string[]) =>
     .toString()
     .trim();
 
-async function start(systemCheck?: () => Promise<SystemCheck>) {
+/** Starts a daemon on the test's data dir; a second call after `daemon.stop()` is a restart. */
+async function boot(systemCheck?: () => Promise<SystemCheck>, prWatchIntervalMs?: number) {
   daemon = await startDaemon({
     sandbox: null,
     dataDir: data.path,
@@ -82,8 +83,13 @@ async function start(systemCheck?: () => Promise<SystemCheck>) {
     gh,
     networkEnv: () => ({ ...NETWORK_ENV, GIT_CONFIG_GLOBAL: network.global }),
     ...(systemCheck ? { systemCheck } : {}),
+    ...(prWatchIntervalMs ? { prWatchIntervalMs } : {}),
   });
-  const api = apiClient(daemon.url, daemon.token);
+  return apiClient(daemon.url, daemon.token);
+}
+
+async function start(systemCheck?: () => Promise<SystemCheck>, prWatchIntervalMs?: number) {
+  const api = await boot(systemCheck, prWatchIntervalMs);
   const project = await api.post('/projects', ProjectDto, {
     name: 'shop',
     repoPath: remote.repo.path,
@@ -141,6 +147,47 @@ describe('batch delivery through the daemon', () => {
     ).toEqual(['Add src/api/alpha.txt', 'Add src/ui/beta.txt']);
     expect(gh.body(shipped.prUrl ?? '')).toContain(`Shipped by 10db, batch ${shipped.id}`);
     expect(git(remote.origin.path, 'rev-parse', 'main')).toBe(shipped.baseSha);
+  });
+
+  it('shows a shipped batch’s pull request status through the API, before and after a restart', async () => {
+    const { api, project, alpha } = await start(undefined, 100);
+    const listed = (client = api) =>
+      client.get(`/projects/${project.id}/batches`, z.array(BatchDto));
+    const [batch] = await api.post(`/projects/${project.id}/batches`, z.tuple([BatchDto]), {
+      title: 'Alpha first',
+      taskIds: [alpha.id],
+    });
+    expect(batch.pr).toBeNull();
+    const shipped = await waitForAsync(async () => {
+      const found = (await listed()).find((b) => b.id === batch.id);
+      return found?.pr ? found : undefined;
+    }, 30_000);
+    expect(shipped).toMatchObject({
+      state: 'SHIPPED',
+      pr: { state: 'open', checks: 'none', failingChecks: [], unknownReason: null },
+    });
+
+    gh.setChecks(shipped.prUrl ?? '', [
+      {
+        __typename: 'CheckRun',
+        name: 'build',
+        status: 'COMPLETED',
+        conclusion: 'FAILURE',
+        detailsUrl: 'https://github.com/acme/widgets/actions/runs/1',
+      },
+    ]);
+    const failing = await waitForAsync(async () => {
+      const found = (await listed()).find((b) => b.id === batch.id);
+      return found?.pr?.checks === 'failing' ? found.pr : undefined;
+    }, 30_000);
+    expect(failing.failingChecks).toEqual([
+      { name: 'build', url: 'https://github.com/acme/widgets/actions/runs/1' },
+    ]);
+
+    await daemon?.stop();
+    const again = await boot(undefined, 100);
+    const after = (await listed(again)).find((b) => b.id === batch.id);
+    expect(after?.pr).toMatchObject({ state: 'open', checks: 'failing' });
   });
 
   it('keeps a shipped batch listed with its pull request, newest batch first, once the next batch starts', async () => {
