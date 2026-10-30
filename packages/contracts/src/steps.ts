@@ -36,6 +36,11 @@ export const WorkstreamStep = z.object({
   startedAt: z.iso.datetime().nullable(),
   /** Sessions the workstream had run when this step started; a handoff from one of them belongs to an earlier step. */
   sessionFloor: z.int().min(0),
+  /**
+   * Sessions the workstream had run when the builder last retried this step: a review's endings without
+   * a verdict before it don't count against the rerun it gets by itself. Absent, the step was never retried.
+   */
+  retryFloor: z.int().min(0).optional(),
   result: StepResult.nullable(),
 });
 export type WorkstreamStep = z.infer<typeof WorkstreamStep>;
