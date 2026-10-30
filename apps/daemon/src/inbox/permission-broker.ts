@@ -81,6 +81,11 @@ function permissionOptions(storable: boolean): InboxOption[] {
   ];
 }
 
+/** A card whose call is never stored as a rule: allow it this once, or deny it. */
+const ONCE_OPTIONS: readonly InboxOption[] = permissionOptions(false).filter(
+  (o) => o.label === PermissionChoice.AllowOnce || o.label === PermissionChoice.Deny,
+);
+
 const NETWORK_TOOL = 'SandboxNetworkAccess';
 const READ_FAMILY: ReadonlySet<string> = new Set(['Read', 'Grep', 'Glob', 'LS']);
 const EDIT_FAMILY: ReadonlySet<string> = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
@@ -93,7 +98,7 @@ const PNPM_CARD_BODY =
   "pnpm 12 locks its store in a /tmp directory shared with every lane and your own pnpm, which a lane can't write. Approving lets the command run, and it will fail on that lock. Run it yourself, or use npm.";
 
 const LOOP_CARD_BODY =
-  'This command starts something in the background that never ends (a loop with no exit, `yes`, or the like). It keeps running after the command and the session that started it, using a core until something stops it. 10db tries to stop what a session leaves when the session ends, but it cannot promise to find all of it (a process that moves out of the checkout and temp dir within a second escapes), and until then a loop like this holds the Mac busy and makes gates and tests fail on timeouts.';
+  'This command starts something in the background that never ends (a loop with no exit, `yes`, or the like). It keeps running after the command and the session that started it, using a core until something stops it. 10db tries to stop what a session leaves when the session ends, but it cannot promise to find all of it (a job that leaves the command’s process tree and group within a second, with no file open in the lane’s temp dir, escapes), and until then a loop like this holds the Mac busy and makes gates and tests fail on timeouts. Allowing it covers this call only: the next one is asked about again.';
 
 /**
  * What a lane is told when the builder denies a call. It names the call and says the denial covers
@@ -126,6 +131,11 @@ interface Ask {
   readonly summary: string;
   readonly body?: string;
   readonly realPaths?: readonly string[];
+  /**
+   * Only ever allowed once: no stored rule answers it and the card offers no rule to store, so the
+   * next such call is asked about again (an endless background loop).
+   */
+  readonly onceOnly?: boolean;
 }
 
 /**
@@ -199,8 +209,13 @@ export function createPermissionBroker(
   async function askPermission(req: ToolRequest, ask: Ask | null = null): Promise<ToolDecision> {
     const rules = listPermissionRules(deps.state.db, ctx.projectId, ctx.workstreamId);
     const paths = ask?.realPaths === undefined ? undefined : { realPaths: ask.realPaths };
+    const onceOnly = ask?.onceOnly === true;
     // A call the classifier handed to a person is answered by a person, never by a stored grant.
-    if (!req.escalated && unlessTooDeep(() => matchPermissionRule(req, rules, paths), undefined)) {
+    if (
+      !req.escalated &&
+      !onceOnly &&
+      unlessTooDeep(() => matchPermissionRule(req, rules, paths), undefined)
+    ) {
       return { behavior: 'allow' };
     }
     const summary = ask?.summary ?? summarize(req);
@@ -217,7 +232,8 @@ export function createPermissionBroker(
       kind: 'permission',
       title: `Allow ${req.toolName}?`,
       body: ask?.body ?? summary,
-      options: permissionOptions(storable),
+      // The service refuses a choice the card does not offer, so a once-only card stores no rule.
+      options: onceOnly ? ONCE_OPTIONS : permissionOptions(storable),
       recommendation: null,
       category: QuestionCategory.Environment,
       urgency: Urgency.Normal,
@@ -312,7 +328,7 @@ export function createPermissionBroker(
       throw cause;
     }
     if (startsEndlessBackgroundLoop(command)) {
-      return { summary: command, body: `${command}\n\n${LOOP_CARD_BODY}` };
+      return { summary: command, body: `${command}\n\n${LOOP_CARD_BODY}`, onceOnly: true };
     }
     if (hit === null && !req.escalated && unread === null) return { behavior: 'allow' };
     return hit?.name === 'deps' && hit.words[0] === 'pnpm'

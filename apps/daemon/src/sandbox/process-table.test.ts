@@ -1,19 +1,41 @@
 import { describe, expect, it } from 'vitest';
-import { cachedProcessTable, parseCwds, parseProcessTable, type ProcessRow } from './process-table';
+import {
+  cachedProcessTable,
+  parseOpenPaths,
+  parseProcessTable,
+  type ProcessRow,
+} from './process-table';
 
-describe('parseCwds', () => {
-  it('reads each process’s working directory from lsof’s field output', () => {
-    const output = ['p501', 'fcwd', 'n/Users/me/repo', 'p777', 'fcwd', 'n/private/tmp/x y', ''];
-    expect(parseCwds(output.join('\n'))).toEqual(
+describe('parseOpenPaths', () => {
+  it('reads each process’s working directory and open files from lsof’s field output', () => {
+    const output = [
+      'p501',
+      'fcwd',
+      'n/Users/me/repo',
+      'ftxt',
+      'n/bin/zsh',
+      'f1',
+      'n/private/tmp/10db-abc123/claude-501/s/tasks/b1.output',
+      'f3',
+      'nlocalhost:3000',
+      'p777',
+      'fcwd',
+      'n/private/tmp/x y',
+      '',
+    ];
+    expect(parseOpenPaths(output.join('\n'))).toEqual(
       new Map([
-        [501, '/Users/me/repo'],
-        [777, '/private/tmp/x y'],
+        [
+          501,
+          ['/Users/me/repo', '/bin/zsh', '/private/tmp/10db-abc123/claude-501/s/tasks/b1.output'],
+        ],
+        [777, ['/private/tmp/x y']],
       ]),
     );
   });
 
   it('leaves out a process with no path, and lines it cannot read', () => {
-    expect(parseCwds('p12\nfcwd\np13\nfcwd\nnrelative\npnot\nn/x\n')).toEqual(new Map());
+    expect(parseOpenPaths('p12\nfcwd\np13\nfcwd\nnrelative\npnot\nn/x\n')).toEqual(new Map());
   });
 });
 

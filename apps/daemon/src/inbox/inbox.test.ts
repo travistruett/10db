@@ -33,6 +33,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { seedWorkstream } from '../../test/fixtures';
 import { createEventBus, createStateStore, type StateStore } from '../events';
+import { storableRule } from '../permissions';
 import { protectedReads, type FileAccessContext } from '../sandbox';
 import {
   createInboxService,
@@ -840,6 +841,38 @@ describe('permission broker in a sandboxed lane', () => {
     expect(message).toContain('no CPU load, please');
     expect(message).toMatch(/equivalent/i);
     expect(message).toMatch(/another (form|way)/i);
+  });
+
+  it('offers only allow-once and deny on a loop card, so no rule lets the next loop run unasked', async () => {
+    const ws = seedWorkstream(base);
+    const first = sandboxed(ws)(request('Bash', { command: 'yes &' }));
+    const card = onlyOpenCard();
+    expect(card.options.map((o) => o.label)).toEqual(['allow_once', 'deny']);
+    expect(() => inbox.answer(card.id, { choice: 'allow_workstream' })).toThrow(InvalidError);
+    expect(() => inbox.answer(card.id, { choice: 'allow_project' })).toThrow(InvalidError);
+    inbox.answer(card.id, { choice: 'allow_once' });
+    expect(await first).toEqual({ behavior: 'allow' });
+    expect(listPermissionRules(state.db, ws.project.id, ws.workstream.id)).toEqual([]);
+    void sandboxed(ws)(request('Bash', { command: 'yes &' })).catch(() => undefined);
+    expect(onlyOpenCard().kind).toBe('permission');
+  });
+
+  it('cards a loop even when a stored rule covers the command', () => {
+    const ws = seedWorkstream(base);
+    // As an answer on an ordinary card for the same command would have stored it.
+    const rule = storableRule('Bash', 'yes &');
+    if (rule === undefined) throw new Error('expected a storable rule');
+    base.write((ctx) =>
+      insertPermissionRule(ctx, {
+        projectId: ws.project.id,
+        workstreamId: null,
+        toolName: rule.toolName,
+        pattern: rule.pattern,
+        sourceInboxId: null,
+      }),
+    );
+    void sandboxed(ws)(request('Bash', { command: 'yes &' })).catch(() => undefined);
+    expect(onlyOpenCard().kind).toBe('permission');
   });
 
   it('does not card a loop that runs in the foreground', async () => {

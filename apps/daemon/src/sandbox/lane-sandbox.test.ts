@@ -993,8 +993,8 @@ describe.skipIf(SANDBOXED)('a lane session’s processes', () => {
   const T = 'Thu Oct 30 12:00:00 2026';
   /** Fake processes: a signal ends the process (or the whole group when negative). */
   let rows: { pid: number; ppid: number; pgid: number; startedAt: string }[];
-  /** Working directories, by pid, as `lsof` would report them. */
-  let cwd: Map<number, string>;
+  /** Working directories and open files, by pid, as `lsof` would report them. */
+  let open: Map<number, string[]>;
   let tableFails: boolean;
   function withProcesses(): LaneSandbox {
     return createLaneSandbox({
@@ -1010,9 +1010,9 @@ describe.skipIf(SANDBOXED)('a lane session’s processes', () => {
           tableFails
             ? Promise.reject(new Error('ps failed'))
             : Promise.resolve(rows.map((r) => ({ ...r }))),
-        cwds: (pids) =>
+        openPaths: (pids) =>
           Promise.resolve(
-            new Map(pids.flatMap((pid) => (cwd.has(pid) ? [[pid, cwd.get(pid) ?? '']] : []))),
+            new Map(pids.flatMap((pid) => (open.has(pid) ? [[pid, open.get(pid) ?? []]] : []))),
           ),
         signal: (target) => {
           const before = rows.length;
@@ -1032,24 +1032,30 @@ describe.skipIf(SANDBOXED)('a lane session’s processes', () => {
       { pid: 300, ppid: 200, pgid: 300, startedAt: T },
       { pid: 301, ppid: 300, pgid: 300, startedAt: T },
     ];
-    cwd = new Map();
+    open = new Map();
     tableFails = false;
   });
 
-  it('stops a job its command handed to launchd at once, working in the checkout or the temp dir', async () => {
+  it('stops a job its command handed to launchd at once by a path in the temp dir, never by the checkout alone', async () => {
     const session = await withProcesses().forSession(input());
     try {
       rows.push(
         { pid: 600, ppid: 1, pgid: 600, startedAt: T },
         { pid: 610, ppid: 1, pgid: 610, startedAt: T },
         { pid: 700, ppid: 1, pgid: 700, startedAt: T },
+        { pid: 710, ppid: 1, pgid: 710, startedAt: T },
       );
-      cwd.set(600, join(realpathSync(repo.path), 'src'));
-      cwd.set(610, realpathSync(session.tmpDir));
-      cwd.set(700, home);
+      const checkoutDir = join(realpathSync(repo.path), 'src');
+      const tmp = realpathSync(session.tmpDir);
+      // `pnpm dev &`: works in the checkout, writes to the command's output file in the temp dir.
+      open.set(600, [checkoutDir, join(tmp, 'claude-501', 's', 'tasks', 'b1.output')]);
+      open.set(610, [tmp]);
+      open.set(700, [home]);
+      // Another lane's or the builder's job in the same checkout.
+      open.set(710, [checkoutDir, join(checkoutDir, 'dev.log')]);
       await session.trackProcesses({ pid: 200, startedAt: T });
       await session.endProcesses();
-      expect(rows.map((r) => r.pid)).toEqual([100, 700]);
+      expect(rows.map((r) => r.pid)).toEqual([100, 700, 710]);
     } finally {
       session.dispose();
     }
@@ -1063,6 +1069,8 @@ describe.skipIf(SANDBOXED)('a lane session’s processes', () => {
     session.dispose();
     const left = readdirSync(tmpRoot).filter((n) => n.startsWith('10db-proc-'));
     expect(left).toHaveLength(1);
+    // Named for the daemon that kept it, so a later daemon knows whether its owner still runs.
+    expect(left[0]).toMatch(/^10db-proc-100-[0-9a-f]{12}\.json$/);
     const ledger = JSON.parse(readFileSync(join(tmpRoot, left[0] ?? ''), 'utf8')) as {
       members: { pid: number }[];
     };

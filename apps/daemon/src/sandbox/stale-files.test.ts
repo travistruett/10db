@@ -138,12 +138,12 @@ describe('claimSandboxTempRoot', () => {
 
   it("leaves a dead daemon's process ledgers for the sweep that stops their processes", () => {
     // `reapLaneProcessLedgers` reads them next, then removes them; the claim must not.
-    writeFileSync(join(root, '10db-proc-0123456789ab.json'), '{"version":1,"members":[]}');
+    writeFileSync(join(root, '10db-proc-4321-0123456789ab.json'), '{"version":1,"members":[]}');
     const claim = claimSandboxTempRoot(root, process.pid);
     try {
       expect(readdirSync(root).sort()).toEqual([
         `10db-daemon-${String(process.pid)}`,
-        '10db-proc-0123456789ab.json',
+        '10db-proc-4321-0123456789ab.json',
       ]);
     } finally {
       claim.release();

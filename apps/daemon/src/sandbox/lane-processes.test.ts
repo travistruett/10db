@@ -1,4 +1,5 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawn, type ChildProcess } from 'node:child_process';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -26,7 +27,9 @@ class World {
   readonly ignoresTerm = new Set<number>();
   /** Each process's working directory, as `lsof` would report it. */
   readonly cwd = new Map<number, string>();
-  cwdReads = 0;
+  /** The files each process holds open, as `lsof` would report them. */
+  readonly files = new Map<number, string[]>();
+  pathReads = 0;
 
   add(pid: number, ppid: number, pgid: number, startedAt = T1): void {
     this.rows.push({ pid, ppid, pgid, startedAt });
@@ -40,12 +43,13 @@ class World {
     return this.rows.some((r) => r.pid === pid);
   }
   readonly table: ProcessTable = () => Promise.resolve(this.rows.map((r) => ({ ...r })));
-  readonly cwds = (pids: readonly number[]): Promise<ReadonlyMap<number, string>> => {
-    this.cwdReads += 1;
-    const found = new Map<number, string>();
+  readonly openPaths = (pids: readonly number[]): Promise<ReadonlyMap<number, string[]>> => {
+    this.pathReads += 1;
+    const found = new Map<number, string[]>();
     for (const pid of pids) {
+      if (!this.has(pid)) continue;
       const dir = this.cwd.get(pid);
-      if (dir !== undefined && this.has(pid)) found.set(pid, dir);
+      found.set(pid, [...(dir === undefined ? [] : [dir]), ...(this.files.get(pid) ?? [])]);
     }
     return Promise.resolve(found);
   };
@@ -67,9 +71,35 @@ beforeEach(() => {
   world = new World();
   dir = mkdtempSync(join(tmpdir(), 'lp-'));
 });
+const children: ChildProcess[] = [];
 afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
+  for (const child of children.splice(0)) child.kill('SIGKILL');
 });
+
+/** A real process that stays alive until the test ends: a daemon still running. */
+function livePid(): number {
+  const child = spawn(process.execPath, ['-e', 'setInterval(() => undefined, 1000)'], {
+    stdio: 'ignore',
+  });
+  children.push(child);
+  if (child.pid === undefined) throw new Error('no pid');
+  return child.pid;
+}
+
+/** The pid of a real process that has exited: a daemon that died. */
+async function deadPid(): Promise<number> {
+  const child = spawn(process.execPath, ['-e', ''], { stdio: 'ignore' });
+  const pid = child.pid;
+  await new Promise((resolve) => child.once('exit', resolve));
+  if (pid === undefined) throw new Error('no pid');
+  return pid;
+}
+
+/** The mark a running daemon keeps in the temp root (`claimSandboxTempRoot`). */
+function markDaemon(pid: number): void {
+  writeFileSync(join(dir, `10db-daemon-${String(pid)}`), '', { mode: 0o400 });
+}
 
 function deps(overrides: Partial<LaneProcessDeps> = {}): LaneProcessDeps {
   return {
@@ -209,37 +239,42 @@ describe('a lane process watch', () => {
   });
 
   describe('a job whose command returned at once, so its shell was never sampled', () => {
-    const WORKTREE = '/Users/me/.10db/worktrees/p/lane';
+    /** The checkout, shared with other lanes and the builder in Your folder mode. */
+    const CHECKOUT = '/Users/me/Projects/app';
     const LANE_TMP = '/private/tmp/10db-abc123';
+    /** Claude Code's file for a command's output, in the lane's CLAUDE_CODE_TMPDIR. */
+    const OUTPUT = `${LANE_TMP}/claude-501/-Users-me-Projects-app/s1/tasks/b1.output`;
     const T2 = 'Thu Oct 30 12:00:07 2026';
     function setup(): void {
       world.add(200, DAEMON, DAEMON_GROUP); // claude, in the daemon's group as spawned
-      // `pnpm dev > /dev/null 2>&1 &`: the command's shell (300) forked the job and exited within
-      // milliseconds, before any sample; the job went to launchd.
+      // `pnpm dev &`: the command's shell (300) forked the job and exited within milliseconds,
+      // before any sample; the job went to launchd, still writing to the command's output file.
       world.add(600, 1, 300, T2);
-      world.cwd.set(600, `${WORKTREE}/apps/web`);
+      world.cwd.set(600, `${CHECKOUT}/apps/web`);
+      world.files.set(600, [OUTPUT]);
       world.add(601, 600, 300, T2); // what the job started
-      // `(while :; do :; done) &` from the lane's temp dir.
+      // `(while :; do :; done) > /dev/null 2>&1 &` from the lane's temp dir.
       world.add(610, 1, 610, T2);
       world.cwd.set(610, LANE_TMP);
-      // Not the lane's: a launchd job started meanwhile elsewhere, and one in the worktree from
+      // Not the lane's: a launchd job started meanwhile elsewhere, and one in the checkout from
       // before the session began.
       world.add(700, 1, 700, T2);
       world.cwd.set(700, '/Applications/Other.app');
       world.add(701, 1, 701, T0);
-      world.cwd.set(701, WORKTREE);
-      // A worktree whose name merely starts with this one's.
+      world.cwd.set(701, CHECKOUT);
+      // A temp dir whose name merely starts with this one's.
       world.add(702, 1, 702, T2);
-      world.cwd.set(702, `${WORKTREE}-other`);
+      world.cwd.set(702, `${LANE_TMP}x`);
+      world.files.set(702, [`${LANE_TMP}x/out`]);
     }
     const watchDeps = (ledger: string | null = null) => ({
       ...deps(),
-      cwds: world.cwds,
-      places: [WORKTREE, LANE_TMP],
+      openPaths: world.openPaths,
+      places: [LANE_TMP],
       ledger,
     });
 
-    it('stops it when the session ends, by its working directory in the checkout or temp dir', async () => {
+    it('stops it when the session ends, by a file it holds open or its working dir in the lane’s temp dir', async () => {
       setup();
       const watch = createLaneProcessWatch(watchDeps());
       await watch.track(ROOT);
@@ -248,19 +283,54 @@ describe('a lane process watch', () => {
       for (const pid of [DAEMON, 700, 701, 702]) expect(world.has(pid)).toBe(true);
     });
 
+    it('never takes a job for working in the checkout alone: it may be another lane’s or the builder’s', async () => {
+      setup();
+      const ledger = createProcessLedger(dir);
+      const ticks: (() => void)[] = [];
+      const watch = createLaneProcessWatch({
+        ...watchDeps(ledger),
+        timers: {
+          setTimeout(fn) {
+            ticks.push(fn);
+            return { cancel: () => undefined };
+          },
+        },
+      });
+      await watch.track(ROOT);
+      // Another lane in the same checkout runs `pnpm dev > dev.log 2>&1 &`, and the builder runs
+      // `nohup pnpm dev &` from a terminal there, after this session began.
+      world.add(800, 1, 800, T2);
+      world.cwd.set(800, CHECKOUT);
+      world.files.set(800, [`${CHECKOUT}/dev.log`]);
+      world.add(801, 800, 800, T2);
+      world.add(810, 1, 810, T2);
+      world.cwd.set(810, `${CHECKOUT}/apps/web`);
+      world.files.set(810, [`${CHECKOUT}/apps/web/nohup.out`]);
+      // A sample runs while they do.
+      ticks.shift()?.();
+      await new Promise((r) => setImmediate(r));
+      const seen = JSON.parse(readFileSync(ledger, 'utf8')) as { members: { pid: number }[] };
+      expect(seen.members.map((m) => m.pid)).toEqual(expect.arrayContaining([600, 610]));
+      expect(seen.members.filter((m) => [800, 801, 810].includes(m.pid))).toEqual([]);
+      await watch.end();
+      for (const pid of [800, 801, 810]) expect(world.has(pid)).toBe(true);
+      expect(world.signals.some((s) => [800, 801, 810, -800, -810].includes(s.target))).toBe(false);
+    });
+
     it('finds one that left between the last sample and the end', async () => {
       world.add(200, DAEMON, DAEMON_GROUP);
       const watch = createLaneProcessWatch(watchDeps());
       await watch.track(ROOT);
       world.add(600, 1, 300, T2);
-      world.cwd.set(600, WORKTREE);
+      world.cwd.set(600, CHECKOUT);
+      world.files.set(600, [OUTPUT]);
       await watch.end();
       expect(world.has(600)).toBe(false);
     });
 
     it('records it in the ledger, so a daemon that dies before the end still has it stopped', async () => {
       setup();
-      const ledger = createProcessLedger(dir);
+      const ledger = createProcessLedger(dir, await deadPid());
       await createLaneProcessWatch(watchDeps(ledger)).track(ROOT);
       const seen = JSON.parse(readFileSync(ledger, 'utf8')) as { members: { pid: number }[] };
       expect(seen.members.map((m) => m.pid)).toEqual(expect.arrayContaining([600, 601, 610]));
@@ -270,7 +340,7 @@ describe('a lane process watch', () => {
       expect(world.has(700)).toBe(true);
     });
 
-    it('reads each new orphan’s working directory once, not on every sample', async () => {
+    it('reads each new orphan’s open files once, not on every sample', async () => {
       setup();
       const ticks: (() => void)[] = [];
       const watch = createLaneProcessWatch({
@@ -283,12 +353,12 @@ describe('a lane process watch', () => {
         },
       });
       await watch.track(ROOT);
-      const after = world.cwdReads;
+      const after = world.pathReads;
       for (let n = 0; n < 3; n += 1) {
         ticks.shift()?.();
         await new Promise((r) => setImmediate(r));
       }
-      expect(world.cwdReads).toBe(after);
+      expect(world.pathReads).toBe(after);
     });
   });
 
@@ -366,14 +436,67 @@ describe('processes left by a daemon that died', () => {
   });
 
   it('removes an unreadable ledger, and ignores files that are not ledgers', async () => {
-    writeFileSync(join(dir, '10db-proc-0123456789ab.json'), '{not json');
-    writeFileSync(join(dir, '10db-proc-notahexid.json'), '{"version":1,"members":[]}');
+    const owner = String(await deadPid());
+    writeFileSync(join(dir, `10db-proc-${owner}-0123456789ab.json`), '{not json');
+    writeFileSync(join(dir, `10db-proc-${owner}-notahexid.json`), '{"version":1,"members":[]}');
+    writeFileSync(join(dir, '10db-proc-0123456789ab.json'), '{"version":1,"members":[]}');
     writeFileSync(join(dir, 'unrelated.json'), '{}');
     const report = await reapLaneProcessLedgers(dir, deps());
     expect(report.ledgers).toBe(1);
-    expect(existsSync(join(dir, '10db-proc-0123456789ab.json'))).toBe(false);
-    expect(existsSync(join(dir, '10db-proc-notahexid.json'))).toBe(true);
-    expect(existsSync(join(dir, 'unrelated.json'))).toBe(true);
+    expect(readdirSync(dir).sort()).toEqual(
+      ['10db-proc-0123456789ab.json', `10db-proc-${owner}-notahexid.json`, 'unrelated.json'].sort(),
+    );
+  });
+
+  it('names the daemon that owns each ledger', () => {
+    expect(createProcessLedger(dir, 4321)).toMatch(/\/10db-proc-4321-[0-9a-f]{12}\.json$/);
+    expect(createProcessLedger(dir)).toContain(`/10db-proc-${String(process.pid)}-`);
+  });
+
+  it('stops a dead daemon’s leftovers while another daemon runs on the same root, and leaves the live one’s alone', async () => {
+    // The app daemon restarted for an install; a second daemon on another data dir kept running.
+    const other = livePid();
+    markDaemon(other);
+    const dead = await deadPid();
+    world.add(400, 1, 400); // the dead daemon's lane's loop
+    world.add(500, 1, 500); // the live daemon's lane's dev server, its session still running
+    const deadLedger = createProcessLedger(dir, dead);
+    writeFileSync(
+      deadLedger,
+      JSON.stringify({ version: 1, members: [{ pid: 400, pgid: 400, startedAt: T1 }] }),
+    );
+    const liveLedger = createProcessLedger(dir, other);
+    writeFileSync(
+      liveLedger,
+      JSON.stringify({ version: 1, members: [{ pid: 500, pgid: 500, startedAt: T1 }] }),
+    );
+
+    const report = await reapLaneProcessLedgers(dir, deps({ ownPid: 9999 }));
+    expect(report).toEqual({ ledgers: 1, stopped: 1 });
+    expect(world.has(400)).toBe(false);
+    expect(existsSync(deadLedger)).toBe(false);
+    expect(world.has(500)).toBe(true);
+    expect(existsSync(liveLedger)).toBe(true);
+  });
+
+  it('takes a ledger as a dead daemon’s when its owner runs but keeps no mark, or is this daemon', async () => {
+    // A dead daemon's pid now names an unrelated process; or the new daemon got the old one's pid.
+    const reused = livePid();
+    world.add(400, 1, 400);
+    world.add(410, 1, 410);
+    writeFileSync(
+      createProcessLedger(dir, reused),
+      JSON.stringify({ version: 1, members: [{ pid: 400, pgid: 400, startedAt: T1 }] }),
+    );
+    writeFileSync(
+      createProcessLedger(dir, 9999),
+      JSON.stringify({ version: 1, members: [{ pid: 410, pgid: 410, startedAt: T1 }] }),
+    );
+    markDaemon(9999);
+    const report = await reapLaneProcessLedgers(dir, deps({ ownPid: 9999 }));
+    expect(report).toEqual({ ledgers: 2, stopped: 2 });
+    expect(world.has(400)).toBe(false);
+    expect(world.has(410)).toBe(false);
   });
 
   it('leaves a process alone when its pid now belongs to another process', async () => {

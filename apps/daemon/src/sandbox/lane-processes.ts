@@ -2,8 +2,9 @@ import { randomBytes } from 'node:crypto';
 import { lstatSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { z } from 'zod';
-import type { CwdReader, ProcessRow, ProcessTable } from './process-table';
+import type { OpenPathReader, ProcessRow, ProcessTable } from './process-table';
 import { isEqualOrUnder } from './protected-reads';
+import { daemonMarkName, processAlive } from './stale-files';
 import { SandboxTempDirError } from './temp-dir';
 
 /**
@@ -15,13 +16,17 @@ import { SandboxTempDirError } from './temp-dir';
  * launchd, so a walk down from the session's pid finds nothing. So the watch samples the tree while
  * the session runs and remembers every process it saw, by pid and start time. It also remembers
  * their process groups: a group outlives its leader, so a process forked after the last sample into
- * a group the watch knows is found too. A command that returns at once (`pnpm dev > log 2>&1 &`)
- * hands its job to launchd before any sample sees its shell, so a child of launchd started since the
- * session began whose working directory is in the session's checkout or temp dir is the session's
- * too: its working directory is read (`lsof -d cwd`) once. The memory is a ledger file in the temp
- * root, which neither a lane's commands nor its file tools may write, so a daemon that restarts finds
- * and stops what the last one left. The process environment is never read, and nothing is signalled
- * unless its pid and start time still match.
+ * a group the watch knows is found too. A command that returns at once (`pnpm dev &`) hands its job
+ * to launchd before any sample sees its shell, so a child of launchd started since the session began
+ * is the session's too when it holds a path in the session's own temp dir: its working directory or
+ * an open file, such as the output file Claude Code gives each command there, which a job with no
+ * redirection of its own inherits. Its open paths are read (`lsof`) once. Working in the checkout
+ * alone never makes a process the session's: in Your folder mode, for local delivery and in a batch
+ * worktree, other lanes and the builder run their own jobs there. The memory is a ledger file in the
+ * temp root, named for the daemon that keeps it, which neither a lane's commands nor its file tools
+ * may write, so a daemon that restarts finds and stops what a dead one left, even while another
+ * daemon shares the root. The process environment is never read, and nothing is signalled unless its
+ * pid and start time still match.
  */
 
 /** What the watch remembers about one process. */
@@ -53,11 +58,12 @@ export interface LaneProcessDeps {
 export interface LaneProcessWatchDeps extends LaneProcessDeps {
   /** Where the watch writes what it has seen; null keeps it in memory only. */
   readonly ledger: string | null;
-  /** Reads processes' working directories; without it, launchd's children are never named. */
-  readonly cwds?: CwdReader;
+  /** Reads processes' open paths; without it, launchd's children are never named. */
+  readonly openPaths?: OpenPathReader;
   /**
-   * The session's checkout and temp dir, each spelled as `lsof` reports it (links resolved): a
-   * child of launchd started since the session began that works in one is the session's.
+   * The session's own temp dir, spelled as given and as `lsof` reports it (links resolved): a child
+   * of launchd started since the session began that works in it or holds a file open in it is the
+   * session's. Never a checkout, which other lanes and the builder share.
    */
   readonly places?: readonly string[];
   /** How often the tree is sampled while the session runs. */
@@ -249,20 +255,20 @@ export function createLaneProcessWatch(deps: LaneProcessWatchDeps): LaneProcessW
   const places = deps.places ?? [];
   /** The session's own process's start, in ms; NaN when unknown, and then the time doesn't narrow. */
   let since = Number.NaN;
-  /** Children of launchd whose working dir was read and found not to be the session's. */
+  /** Children of launchd whose open paths were read and found not to be the session's. */
   let judged = new Set<string>();
   const rowKey = (row: ProcessRow): string => `${String(row.pid)}@${row.startedAt}`;
 
   /**
-   * Children of launchd that started since the session began, with their working dir in its
-   * checkout or temp dir: jobs a command left when it returned before any sample saw its shell.
-   * Each is read once; one found not to be the session's is not read again.
+   * Children of launchd that started since the session began and hold a path in its temp dir (their
+   * working dir or an open file): jobs a command left when it returned before any sample saw its
+   * shell. Each is read once; one found not to be the session's is not read again.
    */
   async function orphansIn(
     rows: readonly ProcessRow[],
     members: readonly ProcessMember[],
   ): Promise<ProcessMember[]> {
-    if (deps.cwds === undefined || places.length === 0) return [];
+    if (deps.openPaths === undefined || places.length === 0) return [];
     const guard = protection(rows, ownPid);
     const mine = new Set(members.map((m) => m.pid));
     const present = new Set(rows.map(rowKey));
@@ -275,11 +281,11 @@ export function createLaneProcessWatch(deps: LaneProcessWatchDeps): LaneProcessW
       return Number.isNaN(since) || Number.isNaN(started) || started >= since;
     });
     if (candidates.length === 0) return [];
-    const dirs = await deps.cwds(candidates.map((row) => row.pid));
+    const open = await deps.openPaths(candidates.map((row) => row.pid));
     const found: ProcessMember[] = [];
     for (const row of candidates) {
-      const dir = dirs.get(row.pid);
-      if (dir !== undefined && places.some((place) => isEqualOrUnder(dir, place))) {
+      const paths = open.get(row.pid) ?? [];
+      if (paths.some((path) => places.some((place) => isEqualOrUnder(path, place)))) {
         found.push({ pid: row.pid, startedAt: row.startedAt, pgid: row.pgid });
       } else {
         judged.add(rowKey(row));
@@ -355,10 +361,13 @@ export function createLaneProcessWatch(deps: LaneProcessWatchDeps): LaneProcessW
   };
 }
 
-/** What a ledger file is called: `10db-proc-<12 hex>.json` in the sandbox temp root. */
+/**
+ * What a ledger file is called: `10db-proc-<owner pid>-<12 hex>.json` in the sandbox temp root,
+ * named for the daemon whose session keeps it, as its mark (`10db-daemon-<pid>`) is.
+ */
 const LEDGER_PREFIX = '10db-proc-';
 const LEDGER_SUFFIX = '.json';
-const LEDGER_NAME = /^10db-proc-[0-9a-f]{12}\.json$/;
+const LEDGER_NAME = /^10db-proc-([1-9][0-9]*)-[0-9a-f]{12}\.json$/;
 
 const Ledger = z.object({
   version: z.literal(1),
@@ -371,9 +380,13 @@ const Ledger = z.object({
   ),
 });
 
-/** Creates an empty ledger beside the lane temp dirs, outside every one of them, and returns its path. */
-export function createProcessLedger(root: string): string {
-  const file = join(root, `${LEDGER_PREFIX}${randomBytes(6).toString('hex')}${LEDGER_SUFFIX}`);
+/**
+ * Creates an empty ledger beside the lane temp dirs, outside every one of them, owned by the daemon
+ * `owner`, and returns its path.
+ */
+export function createProcessLedger(root: string, owner: number = process.pid): string {
+  const name = `${LEDGER_PREFIX}${String(owner)}-${randomBytes(6).toString('hex')}${LEDGER_SUFFIX}`;
+  const file = join(root, name);
   try {
     // `wx` never follows a link or reuses a file someone else left at the name.
     writeFileSync(file, JSON.stringify({ version: 1, members: [] }), { flag: 'wx', mode: 0o600 });
@@ -413,26 +426,34 @@ function readLedger(file: string): ProcessMember[] | null {
 
 /**
  * Stops what lane sessions left running when their daemon died, from the ledgers in the temp root,
- * and removes each ledger once its processes are gone. Run it once at start, before any session,
- * and only when no other live daemon uses the root. Reads the process table only when a ledger
- * names a process. A ledger it could not act on (the table was unreadable) stays for the next start,
- * and the error is thrown after the other ledgers were handled.
+ * and removes each ledger once its processes are gone. Run it once at start, before any session.
+ * A ledger whose owner is another daemon that still runs (its pid is alive and its mark is in the
+ * root) is that daemon's live session's, and is left alone; every other one is a dead daemon's,
+ * this daemon's own pid included, since this daemon has no session yet. Reads the process table
+ * only when a ledger names a process. A ledger it could not act on (the table was unreadable) stays
+ * for the next start, and the error is thrown after the other ledgers were handled.
  */
 export async function reapLaneProcessLedgers(
   root: string,
   deps: LaneProcessDeps,
 ): Promise<ReapReport> {
   const uid = process.getuid?.();
+  const ownPid = deps.ownPid ?? process.pid;
   let names: string[];
   try {
     names = readdirSync(root);
   } catch {
     return { ledgers: 0, stopped: 0 };
   }
+  const listed = new Set(names);
+  const ownerRuns = (owner: number): boolean =>
+    owner !== ownPid && listed.has(daemonMarkName(owner)) && processAlive(owner);
   let ledgers = 0;
   let stopped = 0;
   let failure: unknown = null;
-  for (const name of names.filter((n) => LEDGER_NAME.test(n))) {
+  for (const name of names) {
+    const owner = Number(LEDGER_NAME.exec(name)?.[1]);
+    if (!Number.isInteger(owner) || ownerRuns(owner)) continue;
     const file = join(root, name);
     try {
       const stat = lstatSync(file);

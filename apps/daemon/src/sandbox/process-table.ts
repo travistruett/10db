@@ -42,40 +42,45 @@ export const systemProcessTable: ProcessTable = async () => {
   return parseProcessTable(stdout);
 };
 
-/** Reads the working directory of each pid it can; a pid it cannot read (gone, another user's) is left out. */
-export type CwdReader = (pids: readonly number[]) => Promise<ReadonlyMap<number, string>>;
+/**
+ * Reads the paths each pid has open: its working directory, its program and every file it holds
+ * (its stdout among them). A pid it cannot read (gone, another user's) is left out.
+ */
+export type OpenPathReader = (pids: readonly number[]) => Promise<ReadonlyMap<number, string[]>>;
 
-/** Parses `lsof -Fn -d cwd` output: a `p<pid>` line, then the `n<path>` of its working directory. */
-export function parseCwds(output: string): Map<number, string> {
-  const dirs = new Map<number, string>();
+/** Parses `lsof -Fn` output: a `p<pid>` line, then an `n<path>` line for each file it has open. */
+export function parseOpenPaths(output: string): Map<number, string[]> {
+  const paths = new Map<number, string[]>();
   let pid: number | null = null;
   for (const line of output.split('\n')) {
     if (line.startsWith('p')) {
       const value = Number(line.slice(1));
       pid = Number.isInteger(value) && value > 0 ? value : null;
-    } else if (line.startsWith('n/') && pid !== null && !dirs.has(pid)) {
-      dirs.set(pid, line.slice(1));
+    } else if (line.startsWith('n/') && pid !== null) {
+      const list = paths.get(pid);
+      if (list === undefined) paths.set(pid, [line.slice(1)]);
+      else list.push(line.slice(1));
     }
   }
-  return dirs;
+  return paths;
 }
 
-/** Working directories by `lsof`. Throws when `lsof` cannot run; a pid it could not list is left out. */
-export const systemCwds: CwdReader = async (pids) => {
+/** Open paths by `lsof`. Throws when `lsof` cannot run; a pid it could not list is left out. */
+export const systemOpenPaths: OpenPathReader = async (pids) => {
   if (pids.length === 0) return new Map();
-  const args = ['-w', '-n', '-P', '-a', '-d', 'cwd', '-Fn', '-p', pids.join(',')];
+  const args = ['-w', '-n', '-P', '-Fn', '-p', pids.join(',')];
   try {
     const { stdout } = await run('/usr/sbin/lsof', args, {
       env: { LC_ALL: 'C' },
       maxBuffer: 16 * 1024 * 1024,
     });
-    return parseCwds(stdout);
+    return parseOpenPaths(stdout);
   } catch (error) {
     // lsof exits 1 when a pid is gone or can't be listed; what it did list still counts. A failure
     // to run it at all (no exit code) is thrown.
     const failed = error as { code?: unknown; stdout?: unknown };
     if (typeof failed.code === 'number' && typeof failed.stdout === 'string') {
-      return parseCwds(failed.stdout);
+      return parseOpenPaths(failed.stdout);
     }
     throw error;
   }

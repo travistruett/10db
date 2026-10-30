@@ -375,7 +375,7 @@ describe('writeAccess', () => {
 
   it('flags the sandbox temp root: a process ledger there names what the next start signals', () => {
     const temp = join(root, 't');
-    expect(writeAccess(join(temp, '10db-proc-0123456789ab.json'), context()).access).toBe(
+    expect(writeAccess(join(temp, '10db-proc-4321-0123456789ab.json'), context()).access).toBe(
       'sandbox-temp',
     );
     expect(writeAccess(join(temp, '10db-otherxyz', 'a'), context()).access).toBe('sandbox-temp');
@@ -385,7 +385,9 @@ describe('writeAccess', () => {
   it('flags the temp root through a link', () => {
     mkdirSync(join(root, 't'), { recursive: true });
     symlinkSync(join(root, 't'), join(checkout, 'tl'));
-    expect(writeAccess('tl/10db-proc-0123456789ab.json', context()).access).toBe('sandbox-temp');
+    expect(writeAccess('tl/10db-proc-4321-0123456789ab.json', context()).access).toBe(
+      'sandbox-temp',
+    );
   });
 
   it('allows the session’s own temp dir', () => {
@@ -446,7 +448,7 @@ describe('fileAccessJudge in the guard', () => {
 
   it('refuses a write into the sandbox temp root with no card, but not into the session’s own temp dir', () => {
     const judge = fileAccessJudge(context());
-    const ledger = join(root, 't', '10db-proc-0123456789ab.json');
+    const ledger = join(root, 't', '10db-proc-4321-0123456789ab.json');
     expect(guard(judge, 'Write', { file_path: ledger, content: '{}' })).toEqual({
       decision: 'deny',
       reason: `${ledger} is in 10db's sandbox temp root, outside this session's temp dir; 10db never lets a lane write there.`,

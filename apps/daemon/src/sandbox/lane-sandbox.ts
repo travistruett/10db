@@ -20,7 +20,7 @@ import {
   type LaneProcessWatch,
   type LaneProcessSetup,
 } from './lane-processes';
-import { cachedProcessTable, systemCwds, systemProcessTable } from './process-table';
+import { cachedProcessTable, systemOpenPaths, systemProcessTable } from './process-table';
 import { isEqualOrUnder } from './protected-reads';
 import type { SandboxRuntime } from './srt-launch';
 import { createLaneTempDir, LANE_TEMP_ROOT, removeAll, removeLaneTempDir } from './temp-dir';
@@ -129,7 +129,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
   const processDeps: LaneProcessSetup = deps.processes ?? {
     table: systemProcessTable,
     sampleTable: cachedProcessTable(systemProcessTable, 500),
-    cwds: systemCwds,
+    openPaths: systemOpenPaths,
   };
   return {
     async forSession(input) {
@@ -152,12 +152,15 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
       let mcp: McpSandboxes | null = null;
       try {
         // Outside every lane-writable dir: it names the processes to stop after a daemon restart.
-        ledger = createProcessLedger(tmpRoot);
-        // A job a command hands to launchd at once is named by working in the checkout or temp dir.
+        // Named for this daemon, so a later one leaves it alone while this one runs.
+        ledger = createProcessLedger(tmpRoot, processDeps.ownPid ?? process.pid);
+        // A job a command hands to launchd at once is named by a path it holds in the lane's own
+        // temp dir (its working dir, or the output file Claude Code gives each command there).
+        // Never by working in the checkout: other lanes and the builder run their jobs there too.
         const watch: LaneProcessWatch = createLaneProcessWatch({
           ...processDeps,
           ledger,
-          places: [...new Set([checkout, tmpDir, realPathOr(tmpDir)])],
+          places: [...new Set([tmpDir, realPathOr(tmpDir)])],
         });
         const commandEnv = prepareCommandEnv(tmpDir, deps.home, input.env);
         // Claude Code strips some of these from a sandboxed command's env; the shell sets every one

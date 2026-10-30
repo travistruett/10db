@@ -8,7 +8,7 @@ import {
   createProcessLedger,
   reapLaneProcessLedgers,
 } from './lane-processes';
-import { systemCwds, systemProcessTable } from './process-table';
+import { systemOpenPaths, systemProcessTable } from './process-table';
 
 /**
  * The real process table and real signals, on processes this test starts: a shell that leaves
@@ -78,7 +78,54 @@ describe('lane processes on the real machine', () => {
     expect(left).toEqual([]);
   });
 
-  it('stops a job a command handed to launchd before any sample, by its working directory', async (ctx) => {
+  it('stops a job a command handed to launchd before any sample by its open output file, and leaves one in the checkout alone', async (ctx) => {
+    if (!psWorks) ctx.skip();
+    // The lane's temp dir, and the checkout other lanes and the builder share.
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), 'lp-out-')));
+    const checkout = realpathSync(mkdtempSync(join(tmpdir(), 'lp-co-')));
+    try {
+      const root = spawn('/bin/sleep', ['300'], { detached: true, stdio: 'ignore' });
+      started.push(root);
+      const rootPid = root.pid ?? 0;
+      await until(async () => alive(rootPid));
+      const rootRow = (await systemProcessTable()).find((r) => r.pid === rootPid);
+      if (rootRow === undefined) throw new Error('root not listed');
+      const watch = createLaneProcessWatch({
+        table: systemProcessTable,
+        openPaths: systemOpenPaths,
+        places: [dir],
+        ledger: null,
+        graceMs: 3_000,
+      });
+      await watch.track({ pid: rootPid, startedAt: rootRow.startedAt });
+      // `sleep 304 &` in the checkout, its output going to Claude Code's file in the temp dir; and
+      // another lane's `sleep 305 > dev.log 2>&1 &` in the same checkout.
+      const run = (script: string) => {
+        const shell = spawn('/bin/sh', ['-c', script], {
+          cwd: checkout,
+          detached: true,
+          stdio: 'ignore',
+        });
+        started.push(shell);
+        return shell.pid ?? 0;
+      };
+      const mine = run(`sleep 304 > '${join(dir, 'b1.output')}' 2>&1 &`);
+      const theirs = run('sleep 305 > dev.log 2>&1 &');
+      await until(async () => !(await alive(mine)) && !(await alive(theirs)));
+      const job = async (group: number) =>
+        (await systemProcessTable()).filter((r) => r.pgid === group && r.ppid === 1);
+      expect((await job(mine)).length).toBe(1);
+      expect((await job(theirs)).length).toBe(1);
+      await watch.end();
+      expect(await job(mine)).toEqual([]);
+      expect((await job(theirs)).length).toBe(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(checkout, { recursive: true, force: true });
+    }
+  });
+
+  it('stops a job a command handed to launchd before any sample, by its working directory in the temp dir', async (ctx) => {
     if (!psWorks) ctx.skip();
     const dir = realpathSync(mkdtempSync(join(tmpdir(), 'lp-cwd-')));
     try {
@@ -91,7 +138,7 @@ describe('lane processes on the real machine', () => {
       if (rootRow === undefined) throw new Error('root not listed');
       const watch = createLaneProcessWatch({
         table: systemProcessTable,
-        cwds: systemCwds,
+        openPaths: systemOpenPaths,
         places: [dir],
         ledger: null,
         graceMs: 3_000,

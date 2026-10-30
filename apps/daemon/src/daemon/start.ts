@@ -384,10 +384,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   }
   // Before recovery and before any session: processes the lane sessions of a daemon that died left
   // running (a lane's background loops reparent to launchd when their session goes) are stopped
-  // from the ledgers those sessions kept. Another live daemon's sessions may be running, so with
-  // one sharing the root nothing is touched. A machine whose processes can't be read leaves the
-  // ledgers for the next start.
-  if (tempRoot && sandboxTempRoot !== null && tempRoot.sharedWith === null) {
+  // from the ledgers those sessions kept. Each ledger names its daemon: one sharing the root that
+  // still runs keeps its own, and every dead one's is reaped even then. A machine whose processes
+  // can't be read leaves the ledgers for the next start.
+  if (tempRoot && sandboxTempRoot !== null) {
     try {
       const reaped = await reapLaneProcessLedgers(
         sandboxTempRoot,
