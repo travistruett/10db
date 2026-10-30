@@ -45,6 +45,7 @@ function toBatchDto(row: BatchRow): BatchDto {
     state: row.state,
     branch: row.branch,
     baseBranch: row.baseBranch,
+    autoMerge: row.autoMerge,
     baseSha: row.baseSha,
     repo: row.repo,
     prUrl: row.prUrl,
@@ -174,6 +175,8 @@ export function insertBatch(
     readonly projectId: ProjectId;
     readonly title: string;
     readonly baseBranch: string;
+    /** Whether the pull request merges by itself once its checks pass; absent means it does. */
+    readonly autoMerge?: boolean;
     readonly id?: BatchId;
     /** A worktree batch names its worktree here; a shared batch leaves it out and runs alone. */
     readonly worktreePath?: string;
@@ -194,6 +197,7 @@ export function insertBatch(
     state: BatchState.Cutting,
     branch: null,
     baseBranch: input.baseBranch,
+    autoMerge: input.autoMerge ?? true,
     baseSha: null,
     repo: null,
     prUrl: null,

@@ -13,7 +13,10 @@ export const BatchDto = z.object({
   state: z.enum(BatchState),
   /** Null until the branch is cut. */
   branch: z.string().nullable(),
+  /** The branch it is cut from and its pull request targets: the project's, or the one its tasks named. */
   baseBranch: z.string(),
+  /** True when the pull request merges by itself once its required checks pass. */
+  autoMerge: z.boolean(),
   /** The commit the branch was cut from; null until it is cut. */
   baseSha: z.string().nullable(),
   /** The GitHub `owner/name`, recorded when the branch is cut. */
