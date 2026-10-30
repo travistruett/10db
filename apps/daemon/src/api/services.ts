@@ -18,6 +18,7 @@ import type {
   BoardColumnId,
   BoardColumnInput,
   BoardColumnPatch,
+  AreaProposalResult,
   DaemonEvent,
   FlowDto,
   FlowId,
@@ -78,6 +79,19 @@ export interface TaskRemovalServices {
    * on it.
    */
   removeTask(taskId: TaskId): TaskDto;
+  /**
+   * Closes a task whose latest run failed, as a remove does: it leaves the project's list, its
+   * workstreams stay, and its branch and worktree are untouched. Answering a task already closed is
+   * a no-op. Throws ConflictError for a task whose run didn't fail and TaskHasDependentsError while
+   * an open task waits on it.
+   */
+  closeTask(taskId: TaskId): TaskDto;
+}
+
+/** Reading one task, for the builder's tools that check its state before acting on it. */
+export interface TaskLookupServices {
+  /** Throws NotFoundError for an unknown task. */
+  getTask(taskId: TaskId): TaskDto;
 }
 
 /** What the HTTP layer needs from the daemon. Implemented in the daemon module. */
@@ -85,7 +99,11 @@ export interface ApiServices {
   listProjects(): ProjectViewDto[];
   createProject(input: ProjectInput): ProjectDto;
   listTasks(projectId: ProjectId): TaskDto[];
-  createTask(projectId: ProjectId, input: TaskInput): TaskDto;
+  /**
+   * Throws InvalidError when the task's landing names a branch origin does not have, so the
+   * answer may come after asking origin.
+   */
+  createTask(projectId: ProjectId, input: TaskInput): TaskDto | Promise<TaskDto>;
   /** Starts a task; a held one is queued again as the run it was, in any delivery mode. */
   startTask(taskId: TaskId): TaskStarted;
   /**
@@ -106,10 +124,14 @@ export interface ApiServices {
   listFlows(): FlowDto[];
   listWorkstreams(filter: { readonly active: boolean }): WorkstreamDto[];
   cancelWorkstream(id: WorkstreamId): Promise<WorkstreamDto>;
-  retryWorkstream(id: WorkstreamId): WorkstreamDto;
+  retryWorkstream(id: WorkstreamId, note?: string): WorkstreamDto;
   /** The diff, commits and file counts of the workstream's work in its checkout, for the builder's check. */
   workstreamChanges(id: WorkstreamId): Promise<WorkstreamChangesDto>;
-  listInbox(filter: { readonly states: readonly InboxState[] | null }): InboxItemDto[];
+  /** With `recent`, only that many, the most recently updated first. */
+  listInbox(filter: {
+    readonly states: readonly InboxState[] | null;
+    readonly recent: number | null;
+  }): InboxItemDto[];
   answerInbox(id: InboxItemId, answer: InboxAnswer): InboxItemDto;
   eventsAfter(afterSeq: number, limit: number): DaemonEvent[];
   subscribe(listener: (event: DaemonEvent) => void): () => void;
@@ -123,6 +145,11 @@ export interface ApiServices {
   reviewProjectMcp(projectId: ProjectId): McpServerStatusDto[];
   /** What a new project is prefilled from for the folder at `path`, or why it can't be one. */
   inspectFolder(path: string): Promise<FolderInspectResult>;
+  /**
+   * Areas for the repository at `path`, each with its globs and a reason, for a new project or for
+   * Settings. Reads git's object store only and runs nothing the repository names.
+   */
+  proposeAreas(path: string): Promise<AreaProposalResult>;
   /** The hosts the project's tasks and checks may reach: its project-wide network rules, one per host. */
   listNetworkHosts(projectId: ProjectId): NetworkHostDto[];
   /**
@@ -154,7 +181,7 @@ export interface ApiServices {
   setTeam(projectId: ProjectId, input: TeamInput): TeamDto;
   listRoutingRules(projectId: ProjectId): RoutingRuleDto[];
   setRoutingRules(projectId: ProjectId, input: RoutingRulesInput): RoutingRuleDto[];
-  patchTask(id: TaskId, patch: TaskPatch): TaskDto;
+  patchTask(id: TaskId, patch: TaskPatch): TaskDto | Promise<TaskDto>;
   /** Places a task in a column between new neighbours; throws ConflictError for a stale or locked move. */
   moveTask(id: TaskId, move: TaskMove): TaskDto;
   listBoardColumns(projectId: ProjectId): BoardColumnDto[];

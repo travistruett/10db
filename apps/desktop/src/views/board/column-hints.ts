@@ -5,9 +5,9 @@ import type { LayoutColumn } from './board-layout';
 export const SYSTEM_HINT: Readonly<Record<BoardStatus, string>> = {
   [BoardStatus.Backlog]: 'Waiting on another task to finish.',
   [BoardStatus.Ready]: 'Next up. Start Ready Tasks picks from here.',
-  [BoardStatus.InProgress]: 'Being worked on now.',
-  [BoardStatus.Blocked]: 'Waiting on you, paused at a limit, held or failed.',
-  [BoardStatus.Done]: 'Finished or cancelled.',
+  [BoardStatus.InProgress]: 'Being worked on now, or being shipped.',
+  [BoardStatus.Blocked]: 'Waiting on you, paused at a limit, held, failed, or not shipped.',
+  [BoardStatus.Done]: 'Finished, or cancelled.',
 };
 
 /** What a human column holds: work parked until the builder moves it. */

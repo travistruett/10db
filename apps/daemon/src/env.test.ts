@@ -1,5 +1,28 @@
 import { describe, expect, it } from 'vitest';
-import { EnvError, loadEnv } from './env';
+import { EnvError, loadDataDirEnv, loadEnv } from './env';
+
+describe('loadDataDirEnv', () => {
+  it('reads the data dir', () => {
+    expect(loadDataDirEnv({ TENDB_DATA_DIR: '/x/data' })).toBe('/x/data');
+  });
+
+  it.each([
+    { name: 'absent', source: {} },
+    { name: 'empty', source: { TENDB_DATA_DIR: '' } },
+  ])('is undefined when it is $name', ({ source }) => {
+    expect(loadDataDirEnv(source)).toBeUndefined();
+  });
+
+  it('ignores every other variable, valid or not', () => {
+    expect(
+      loadDataDirEnv({
+        TENDB_PORT: 'abc',
+        TENDB_DEV_UI_ORIGIN: 'https://example.com',
+        TENDB_DATA_DIR: '/x/data',
+      }),
+    ).toBe('/x/data');
+  });
+});
 
 describe('loadEnv', () => {
   it('applies defaults', () => {

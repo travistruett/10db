@@ -12,6 +12,7 @@ import {
   acquireClaims,
   acquireLease,
   claimRequestsForTask,
+  copyHazardNames,
   countLanes,
   dependenciesDone,
   getBatch,
@@ -52,6 +53,12 @@ export interface SchedulerOptions {
   readonly onWrongBranch: (batch: BatchDto, current: string | null, checkout: string) => void;
   /** An open batch's work waits because its worktree is gone. */
   readonly onWorktreeMissing: (batch: BatchDto, path: string) => void;
+  /**
+   * The workstreams holding a claim that a running task waits for inside request_claim. Such a waiter
+   * keeps its lane, so a holder that has to queue for a lane launches over every lane cap; otherwise
+   * waiters filling the lanes would keep it, and so themselves, waiting for ever.
+   */
+  readonly awaitedHolders?: () => ReadonlySet<WorkstreamId>;
 }
 
 export interface Scheduler {
@@ -119,9 +126,11 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
     // Account and project pairs found blocked this tick: each project is asked once, so it gets its
     // own card, and a project with several queued lanes isn't asked again.
     const blockedThisTick = new Set<string>();
+    const awaited = opts.awaitedHolders?.() ?? new Set<WorkstreamId>();
     let launched = 0;
     for (const ws of listWorkstreams(db, { states: [WorkstreamState.Queued] })) {
-      if (global >= opts.caps.global) break;
+      const overCaps = awaited.has(ws.id);
+      if (!overCaps && global >= opts.caps.global) continue;
       // A runner that just re-queued this row is still unwinding; launch() would refuse it and
       // leave it STARTING with a lane. Its lane-freed callback ticks again once it has exited.
       if (opts.runner.isRunning(ws.id)) continue;
@@ -142,8 +151,8 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
         }
         open.add(account.id);
       }
-      if ((byProject.get(project.id) ?? 0) >= project.maxLanes) continue;
-      if ((byAccount.get(account.id) ?? 0) >= account.laneCap) continue;
+      if (!overCaps && (byProject.get(project.id) ?? 0) >= project.maxLanes) continue;
+      if (!overCaps && (byAccount.get(account.id) ?? 0) >= account.laneCap) continue;
       const batch = ws.batchId ? getBatch(db, ws.batchId) : null;
       if (project.delivery === Delivery.PullRequest) {
         const checkout = batch?.worktreePath ?? project.repoPath;
@@ -178,6 +187,7 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
           projectId: project.id,
           workstreamId: ws.id,
           requests: claimRequestsForTask(task, project),
+          copyHazards: copyHazardNames(project),
           leaseExpiresAt: leaseUntil,
           ...(areaScope ? { areaScope } : {}),
         });

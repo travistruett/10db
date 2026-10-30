@@ -1,0 +1,254 @@
+import { ConflictError, type BatchDto, type TaskDto } from '@10db/contracts';
+import { getBatch, listBatches, listWorkstreams } from '@10db/db';
+import { afterEach, describe, expect, it } from 'vitest';
+import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
+import { GhError } from '../github';
+
+let h: DeliveryHarness;
+afterEach(() => {
+  h.close();
+});
+
+/** Starts the tasks as one batch and waits for its cut. */
+async function start(title: string, ...tasks: TaskDto[]): Promise<BatchDto> {
+  const batch = h.only(
+    h.starter.startBatch(h.project.id, { title, taskIds: tasks.map((t) => t.id) }),
+  );
+  await h.jobs.idle();
+  return getBatch(h.store.db, batch.id);
+}
+
+/** Commits a file, finishes every workstream of the batch and waits for it to ship. */
+async function ship(batch: BatchDto): Promise<BatchDto> {
+  h.commit(`src/api/${batch.id}.txt`);
+  for (const ws of listWorkstreams(h.store.db, { batchId: batch.id })) h.settle(ws.id, 'DONE');
+  await h.jobs.idle();
+  return getBatch(h.store.db, batch.id);
+}
+
+const autoMergeCalls = () => h.gh.calls.filter((c) => c.method === 'prAutoMerge');
+
+describe('a pull request that lands in the base branch', () => {
+  it('is opened against it and merges by itself once checks pass', async () => {
+    h = createDeliveryHarness();
+    const batch = await start('Greetings', h.addTask('Alpha'));
+    expect(batch).toMatchObject({ baseBranch: 'main', autoMerge: true });
+    const shipped = await ship(batch);
+    expect(shipped.state).toBe('SHIPPED');
+    expect(h.gh.prCreates()).toMatchObject([{ base: 'main', head: batch.branch }]);
+    expect(h.gh.autoMerged).toEqual([shipped.prUrl]);
+  });
+
+  it('turns auto-merge on for a pull request an earlier run opened, but not one already merged', async () => {
+    h = createDeliveryHarness();
+    const batch = await start('Greetings', h.addTask('Alpha'));
+    const url = h.gh.openPr(batch.branch ?? '');
+    const shipped = await ship(batch);
+    expect(h.gh.prCreates()).toEqual([]);
+    expect(shipped.prUrl).toBe(url);
+    expect(h.gh.autoMerged).toEqual([url]);
+
+    h.close();
+    h = createDeliveryHarness();
+    const second = await start('Second', h.addTask('Beta'));
+    h.gh.openPr(second.branch ?? '', 'MERGED');
+    await ship(second);
+    expect(h.gh.autoMerged).toEqual([]);
+  });
+});
+
+describe('a pull request held for the builder', () => {
+  it.each([
+    {
+      name: 'a task set to hold',
+      project: {},
+      landing: { kind: 'hold' } as const,
+    },
+    {
+      name: 'a task that starts from a project that holds',
+      project: { landing: 'hold' } as const,
+      landing: undefined,
+    },
+  ])('never merges by itself: $name', async ({ project, landing }) => {
+    h = createDeliveryHarness(project);
+    const batch = await start('Greetings', h.addTask('Alpha', landing ? { landing } : {}));
+    expect(batch).toMatchObject({ baseBranch: 'main', autoMerge: false });
+    const shipped = await ship(batch);
+    expect(shipped.state).toBe('SHIPPED');
+    expect(h.gh.prCreates()).toMatchObject([{ base: 'main' }]);
+    expect(autoMergeCalls()).toEqual([]);
+    expect(h.gh.calls.some((c) => c.method === 'repoAllowsAutoMerge')).toBe(false);
+    expect(h.cards()).toEqual([]);
+  });
+
+  it('lets a task merge although its project holds', async () => {
+    h = createDeliveryHarness({ landing: 'hold' });
+    const batch = await start('Greetings', h.addTask('Alpha', { landing: { kind: 'base' } }));
+    const shipped = await ship(batch);
+    expect(h.gh.autoMerged).toEqual([shipped.prUrl]);
+  });
+});
+
+describe('a pull request that lands in another branch', () => {
+  it('is built from that branch, targets it and merges by itself', async () => {
+    h = createDeliveryHarness();
+    const feature = h.teammatePush('feature/x', 'src/api/feature.txt');
+    const task = h.addTask('Alpha', { landing: { kind: 'branch', branch: 'feature/x' } });
+    const batch = await start('Greetings', task);
+    expect(batch).toMatchObject({ baseBranch: 'feature/x', autoMerge: true, baseSha: feature });
+    expect(h.git$('rev-parse', 'HEAD')).toBe(feature);
+    const shipped = await ship(batch);
+    expect(shipped.state).toBe('SHIPPED');
+    expect(h.gh.prCreates()).toMatchObject([{ base: 'feature/x', head: batch.branch }]);
+    expect(h.gh.autoMerged).toEqual([shipped.prUrl]);
+  });
+
+  it('refuses a branch origin does not have, in plain words, before anything starts', async () => {
+    h = createDeliveryHarness();
+    const before = h.git$('rev-parse', 'HEAD');
+    const task = h.addTask('Alpha', { landing: { kind: 'branch', branch: 'feature/nope' } });
+    h.starter.startBatch(h.project.id, { title: 'Greetings', taskIds: [task.id] });
+    await h.jobs.idle();
+    const card = h.only(h.cards());
+    expect(card.title).toBe('Not started: origin has no branch named feature/nope');
+    expect(card.body).toContain('feature/nope');
+    expect(card.body).toContain('Create it on origin');
+    expect(listBatches(h.store.db, { projectId: h.project.id })).toEqual([]);
+    expect(h.git$('rev-parse', 'HEAD')).toBe(before);
+    expect(h.git$('branch', '--show-current')).toBe('main');
+    expect(listWorkstreams(h.store.db, {})).toEqual([]);
+  });
+});
+
+describe('when the repository does not allow auto-merge', () => {
+  it('says so once in a card and leaves the pull request for the builder', async () => {
+    h = createDeliveryHarness();
+    h.gh.autoMergeAllowed = false;
+    const first = await ship(await start('One', h.addTask('Alpha')));
+    expect(first.state).toBe('SHIPPED');
+    expect(first.prUrl).not.toBeNull();
+    expect(autoMergeCalls()).toEqual([]);
+    const card = h.only(h.cards());
+    expect(card.title).toBe("This repository doesn't allow auto-merge");
+    expect(card.body).toContain(first.prUrl ?? '');
+    expect(card.body).toContain('Allow auto-merge');
+
+    // A second pull request in the same project raises no second card.
+    await ship(await start('Two', h.addTask('Beta')));
+    expect(h.cards().map((c) => c.title)).toEqual(["This repository doesn't allow auto-merge"]);
+    expect(autoMergeCalls()).toEqual([]);
+  });
+
+  it('says nothing about it for a pull request held anyway', async () => {
+    h = createDeliveryHarness({ landing: 'hold' });
+    h.gh.autoMergeAllowed = false;
+    await ship(await start('One', h.addTask('Alpha')));
+    expect(h.cards()).toEqual([]);
+  });
+});
+
+describe('when GitHub refuses to turn auto-merge on', () => {
+  it('still ships, and tells the builder the pull request waits for them', async () => {
+    h = createDeliveryHarness();
+    h.gh.failNext.set(
+      'prAutoMerge',
+      new GhError('failed', 'gh pr merge failed (exit 1): Pull request is in clean status'),
+    );
+    const shipped = await ship(await start('One', h.addTask('Alpha')));
+    expect(shipped.state).toBe('SHIPPED');
+    const card = h.only(h.cards());
+    expect(card.title).toContain('not set to merge by itself');
+    expect(card.body).toContain(shipped.prUrl ?? '');
+    expect(card.body).toContain('clean status');
+  });
+});
+
+describe('tasks that land differently', () => {
+  it('are not started as one batch', () => {
+    h = createDeliveryHarness();
+    const merging = h.addTask('Alpha');
+    const held = h.addTask('Beta', { landing: { kind: 'hold' } });
+    expect(() =>
+      h.starter.startBatch(h.project.id, { title: 'Both', taskIds: [merging.id, held.id] }),
+    ).toThrow(ConflictError);
+    expect(() =>
+      h.starter.startBatch(h.project.id, { title: 'Both', taskIds: [merging.id, held.id] }),
+    ).toThrow(/Alpha.*Beta|Beta.*Alpha/);
+    expect(listBatches(h.store.db, { projectId: h.project.id })).toEqual([]);
+  });
+
+  it('are not added to a batch that lands another way', async () => {
+    h = createDeliveryHarness({}, { trigger: false });
+    const batch = await start('Greetings', h.addTask('Alpha'));
+    const held = h.addTask('Fix', { landing: { kind: 'hold' } });
+    expect(() =>
+      h.starter.startBatch(h.project.id, { title: 'Fix', taskIds: [held.id], batchId: batch.id }),
+    ).toThrow(/Greetings.*merges into main/);
+  });
+
+  it('may join a batch that lands the same way', async () => {
+    h = createDeliveryHarness({}, { trigger: false });
+    const batch = await start('Greetings', h.addTask('Alpha'));
+    const fix = h.addTask('Fix', { landing: { kind: 'branch', branch: 'main' } });
+    h.starter.startBatch(h.project.id, { title: 'Fix', taskIds: [fix.id], batchId: batch.id });
+    await h.jobs.idle();
+    expect(listWorkstreams(h.store.db, { batchId: batch.id })).toHaveLength(2);
+  });
+});
+
+describe('in worktree mode', () => {
+  it('gives each landing its own batch and pull request', async () => {
+    h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+    h.teammatePush('feature/x', 'src/api/feature.txt');
+    const tasks = [
+      h.addTask('Alpha'),
+      h.addTask('Beta', { landing: { kind: 'hold' } }),
+      h.addTask('Gamma', { landing: { kind: 'branch', branch: 'feature/x' } }),
+    ];
+    const batches = h.starter.startBatch(h.project.id, {
+      title: 'All',
+      taskIds: tasks.map((t) => t.id),
+    });
+    await h.jobs.idle();
+    expect(
+      batches.map((b) => {
+        const now = getBatch(h.store.db, b.id);
+        return [now.title, now.baseBranch, now.autoMerge, now.state];
+      }),
+    ).toEqual([
+      ['Alpha', 'main', true, 'OPEN'],
+      ['Beta', 'main', false, 'OPEN'],
+      ['Gamma', 'feature/x', true, 'OPEN'],
+    ]);
+  });
+
+  it('refuses tasks that share a worktree but land differently', () => {
+    h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+    const base = h.addTask('Alpha');
+    const dependent = h.addTask('Beta', { dependsOn: [base.id], landing: { kind: 'hold' } });
+    expect(() =>
+      h.starter.startBatch(h.project.id, { title: 'Both', taskIds: [base.id, dependent.id] }),
+    ).toThrow(/Alpha.*Beta.*share|share.*Alpha.*Beta/s);
+    expect(listBatches(h.store.db, { projectId: h.project.id })).toEqual([]);
+  });
+
+  it('cuts a branch-landing worktree from that branch and refuses one origin lacks', async () => {
+    h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+    const feature = h.teammatePush('feature/x', 'src/api/feature.txt');
+    const there = h.addTask('Alpha', { landing: { kind: 'branch', branch: 'feature/x' } });
+    const batch = h.only(h.starter.startBatch(h.project.id, { title: 'A', taskIds: [there.id] }));
+    await h.jobs.idle();
+    expect(getBatch(h.store.db, batch.id)).toMatchObject({ baseSha: feature, state: 'OPEN' });
+
+    const missing = h.addTask('Beta', { landing: { kind: 'branch', branch: 'feature/nope' } });
+    const refused = h.only(
+      h.starter.startBatch(h.project.id, { title: 'B', taskIds: [missing.id] }),
+    );
+    await h.jobs.idle();
+    expect(listBatches(h.store.db, { projectId: h.project.id }).map((b) => b.id)).toEqual([
+      batch.id,
+    ]);
+    expect(refused.id).not.toBe(batch.id);
+    expect(h.only(h.cards()).title).toBe('Not started: origin has no branch named feature/nope');
+  });
+});

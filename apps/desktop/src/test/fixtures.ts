@@ -41,6 +41,7 @@ export function projectDto(overrides: Partial<ProjectDto> = {}): ProjectDto {
     budgetCeiling: null,
     delivery: 'local',
     baseBranch: 'main',
+    landing: 'merge',
     prTitlePrefix: null,
     allowedCommands: [],
     sandboxLoopback: false,
@@ -64,6 +65,7 @@ export function batchDto(overrides: Partial<BatchDto> = {}): BatchDto {
     state: 'OPEN',
     branch: '10db/greetings-0a1b2c3d',
     baseBranch: 'main',
+    autoMerge: true,
     baseSha: 'a'.repeat(40),
     repo: 'acme/widgets',
     prUrl: null,
@@ -99,6 +101,7 @@ export function taskDto(overrides: Partial<TaskDto> = {}): TaskDto {
     areas: ['src'],
     riskTags: [],
     flowId: null,
+    landing: { kind: 'base' },
     status: 'open',
     boardOrder: 1,
     boardColumnId: null,
@@ -194,6 +197,8 @@ export function stepDto(overrides: Partial<WorkstreamStep> = {}): WorkstreamStep
     startedAt: null,
     sessionFloor: 0,
     result: null,
+    earlier: [],
+    sentBack: 0,
     ...overrides,
   });
 }

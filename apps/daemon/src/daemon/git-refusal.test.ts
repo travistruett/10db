@@ -1,4 +1,4 @@
-import { realpathSync, renameSync } from 'node:fs';
+import { realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { InboxItemDto } from '@10db/contracts';
 import { createTestStore, insertBatch, listInbox, listProjects, seedProject } from '@10db/db';
@@ -10,7 +10,12 @@ import { createGit, GitTrustError, memoryPinStore, type Git } from '../git';
 import { createInboxService, type InboxService } from '../inbox';
 import { silentLogger } from '../log';
 import { createProjectPinStore } from './checkout-pins';
-import { createGitCardAnswers, createGitRefusalHandler } from './git-refusal';
+import {
+  createCheckoutTrustedHandler,
+  createGitCardAnswers,
+  createGitRefusalHandler,
+  refusedTrustCheckouts,
+} from './git-refusal';
 
 let close: () => void;
 let state: StateStore;
@@ -64,10 +69,47 @@ describe('a refusal of the daemon git', () => {
           kind: 'moved',
           pinned: `${real}/.git`,
           found: '/elsewhere/.git',
+          pin: candidate(`${real}/.git`),
           candidate: candidate('/elsewhere/.git'),
         }),
       title: () =>
         `10db won't run git in ${real}: its git dir is /elsewhere/.git, not ${real}/.git as 10db recorded`,
+      body: () => 'Trust the checkout as it is now',
+      retrust: true,
+    },
+    {
+      name: 'a git dir replaced at the same path',
+      error: () =>
+        new GitTrustError(real, {
+          kind: 'moved',
+          pinned: `${real}/.git`,
+          found: `${real}/.git`,
+          pin: candidate(`${real}/.git`, '9:100/9:100'),
+          candidate: candidate(`${real}/.git`, '9:200/9:200'),
+        }),
+      title: () =>
+        `10db won't run git in ${real}: ${real}/.git is at the same path but is a different repository now (inode 200, was 100)`,
+      body: () => 'Trust the checkout as it is now',
+      retrust: true,
+    },
+    {
+      name: 'a worktree whose common dir was replaced at the same path, its own git dir kept',
+      error: () =>
+        new GitTrustError(real, {
+          kind: 'moved',
+          pinned: `${real}/.git/worktrees/wt`,
+          found: `${real}/.git/worktrees/wt`,
+          pin: {
+            ...candidate(`${real}/.git/worktrees/wt`, '9:300/9:100'),
+            commonDir: `${real}/.git`,
+          },
+          candidate: {
+            ...candidate(`${real}/.git/worktrees/wt`, '9:300/9:200'),
+            commonDir: `${real}/.git`,
+          },
+        }),
+      title: () =>
+        `10db won't run git in ${real}: its common git dir ${real}/.git is at the same path but is a different repository now (inode 200, was 100)`,
       body: () => 'Trust the checkout as it is now',
       retrust: true,
     },
@@ -151,10 +193,69 @@ describe('a refusal of the daemon git', () => {
           kind: 'moved',
           pinned: `${real}/.git`,
           found: `${real}/.git`,
+          pin: candidate(`${real}/.git`, '0:0/0:0'),
           candidate: candidate(`${real}/.git`, id),
         }),
       );
     expect(listInbox(state.db)).toHaveLength(2);
+  });
+
+  it('folds a move refused again after the volume gets a new device number into the open card', () => {
+    for (const id of ['1:200/1:200', '7:200/7:200'])
+      handle(
+        new GitTrustError(real, {
+          kind: 'moved',
+          pinned: `${real}/.git`,
+          found: `${real}/.git`,
+          pin: candidate(`${real}/.git`, '1:100/1:100'),
+          candidate: candidate(`${real}/.git`, id),
+        }),
+      );
+    expect(listInbox(state.db)).toHaveLength(1);
+  });
+
+  it('closes the checkout’s re-trust cards by itself, saying why, once the checkout is trusted again', () => {
+    const moved = (id: string) =>
+      new GitTrustError(real, {
+        kind: 'moved',
+        pinned: `${real}/.git`,
+        found: `${real}/.git`,
+        pin: candidate(`${real}/.git`, '0:0/0:0'),
+        candidate: candidate(`${real}/.git`, id),
+      });
+    // Two moves, and a cause trusting the checkout does not touch.
+    handle(moved('1:2/1:2'));
+    handle(moved('3:4/3:4'));
+    handle(
+      new GitTrustError(real, {
+        kind: 'config',
+        keys: [{ key: 'core.sshcommand', file: `${real}/.git/config` }],
+      }),
+    );
+    const [project] = listProjects(state.db);
+    if (!project) throw new Error('expected a project');
+    // Another checkout's card.
+    inbox.flag({
+      projectId: project.id,
+      workstreamId: null,
+      title: 'Elsewhere',
+      body: 'x',
+      detail: { resolvesWhen: { event: 'checkout_trusted', repo: '/elsewhere' } },
+    });
+    expect(listInbox(state.db, { states: ['OPEN'] })).toHaveLength(4);
+
+    createCheckoutTrustedHandler({ db: state.db, inbox })(real);
+
+    const open = listInbox(state.db, { states: ['OPEN'] });
+    expect(open.map((i) => i.title).sort()).toEqual(
+      [`10db won't fetch or push in ${real}: its config sets core.sshcommand`, 'Elsewhere'].sort(),
+    );
+    const resolved = listInbox(state.db, { states: ['RESOLVED'] });
+    expect(resolved).toHaveLength(2);
+    for (const card of resolved)
+      expect(card.detail).toMatchObject({
+        resolution: { by: '10db', reason: `${real} is trusted again` },
+      });
   });
 
   it('raises no card for a checkout no project uses', () => {
@@ -163,6 +264,7 @@ describe('a refusal of the daemon git', () => {
         kind: 'moved',
         pinned: '/a',
         found: '/b',
+        pin: candidate('/a'),
         candidate: candidate('/b'),
       }),
     );
@@ -248,6 +350,50 @@ describe("the builder's answer to a re-trust card", () => {
     await createGitCardAnswers(git)(first, { choice: 'Trust the checkout as it is now' });
     await expect(git.currentBranch(repo.path)).rejects.toBeInstanceOf(GitTrustError);
     expect(listInbox(state.db)).toHaveLength(2);
+  });
+
+  describe('when the builder puts the checkout back instead of answering', () => {
+    const git$ = (...args: string[]) =>
+      execFileSync('git', ['-C', repo.path, ...args], { env: isolatedGitEnv(), stdio: 'pipe' });
+    const wired = () =>
+      createGit({
+        onRefused: handle,
+        onTrusted: createCheckoutTrustedHandler({ db: state.db, inbox }),
+        refusedCheckouts: refusedTrustCheckouts(state.db),
+        pins: createProjectPinStore(state, memoryPinStore()),
+      });
+
+    it('closes the changed-origin card on the next call that finds the pinned origin', async () => {
+      git$('remote', 'add', 'origin', 'https://github.com/acme/widgets.git');
+      const live = wired();
+      await live.head(repo.path);
+      git$('remote', 'set-url', 'origin', 'https://github.com/evil/widgets.git');
+      await expect(live.pinnedPushUrl(repo.path)).rejects.toBeInstanceOf(GitTrustError);
+      const raised = card();
+      git$('remote', 'set-url', 'origin', 'https://github.com/acme/widgets.git');
+      await live.head(repo.path);
+      expect(listInbox(state.db, { states: ['OPEN'] })).toEqual([]);
+      const resolved = listInbox(state.db, { states: ['RESOLVED'] });
+      expect(resolved).toHaveLength(1);
+      expect(resolved[0]).toMatchObject({
+        id: raised.id,
+        detail: { resolution: { by: '10db', reason: `${real} is trusted again` } },
+      });
+    });
+
+    it('closes a card raised before a restart, once the restarted daemon finds the checkout as pinned', async () => {
+      await wired().head(repo.path);
+      const aside = join(scratch.path, 'aside-git');
+      renameSync(join(repo.path, '.git'), aside);
+      writeFileSync(join(repo.path, '.git'), `gitdir: ${aside}\n`);
+      await expect(wired().head(repo.path)).rejects.toBeInstanceOf(GitTrustError);
+      rmSync(join(repo.path, '.git'));
+      renameSync(aside, join(repo.path, '.git'));
+      expect(refusedTrustCheckouts(state.db)).toEqual([real]);
+      await wired().head(repo.path);
+      expect(listInbox(state.db, { states: ['OPEN'] })).toEqual([]);
+      expect(listInbox(state.db, { states: ['RESOLVED'] })).toHaveLength(1);
+    });
   });
 
   it('keeps the pin in the database, so a restarted daemon still refuses', async () => {

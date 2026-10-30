@@ -55,7 +55,7 @@
 - [ ] M2a read-only shell: a read-only step's shell accepts only plain words and simple quoting, so unquoted globs, ~, $, braces and backslashes are refused (quote them), and so is any `=` at the start of a word or right after `=` or `:`, quoted or not (for example `'==='` or `'a:=b'`), so reviewers use the Grep tool for those. Revisit if real reviews hit it.
 - [ ] M2a read-only shell: aliases and functions in the user's shell configuration can rewrite plain words, which the read-only grammar cannot see; check whether Claude Code's Bash tool loads them.
 - [x] Batch delivery: worktrees and one PR per task (workspace_mode = worktree), the spec's expected fast-follow (batch delivery spec §9). Built: `docs/superpowers/specs/2026-10-27-10db-worktree-mode-design.md`, `docs/architecture/02-batch-delivery.md`.
-- [ ] Worktree mode: a port block per worktree (hazards still serialize the shared ports, spec §11).
+- [ ] Worktree mode: a port block per worktree (a project-wide hazard, the default for a hazard the builder adds, still serializes the shared ports, spec §11; `harness` and `deps` are per copy, `decisions/2026-10-29-per-copy-hazards-and-waiting-claims.md`).
 - [x] Worktree mode: a worktree whose lockfile is newer than the main checkout's install installs without the builder. Built for pnpm projects: `pnpm install --frozen-lockfile --ignore-scripts --ignore-pnpmfile` under the gate sandbox after the seed (`decisions/2026-10-28-worktree-dependency-install.md`). Not built: a setup command of the project's own, and an install inside a lane.
 - [ ] Worktree mode: seeding ignored files such as `.env`; `worktree_seed` names directories only.
 - [ ] Worktree mode: parallel ships behind a limit (one ship runs at a time per project now).
@@ -66,7 +66,8 @@
       daemon change, anything that would break the dev server mid-iteration) gets its own worktree. Areas, hazards
       and dependencies are the inputs; the planner proposes the lane count and each task's placement, and the
       builder confirms. Worktrees make rapid UI iteration across screens harder, so a project-wide switch isn't
-      enough. Keep `tasks.workspace_mode` for this rather than dropping it.
+      enough. Keep `tasks.workspace_mode` for this rather than dropping it. Designed:
+      `docs/superpowers/specs/2026-10-29-10db-task-placement-design.md`; not built.
 - [x] Worktree mode: removing a clean leftover worktree also removed its git-ignored files, such as a
       hand-made `.env`. Built: a finished or orphaned worktree holding ignored files outside matched
       directories and the seed is kept with a card (`decisions/2026-10-28-worktree-keeps-ignored-files.md`).
@@ -95,13 +96,15 @@
 - [ ] Accounts: spike carrying a cut-off conversation to the account a project moved to (`forkSession` and `getSessionMessages` on a per-account config directory, a subscription transcript resumed on Bedrock, thinking blocks, token cost). If it passes, a small follow-up plan resumes that conversation after a move instead of starting fresh from the handoff (accounts spec §11).
 - [ ] Accounts: the Accounts screen shows each project's fallback, the account it moved from and when 10db will ask to move it back.
 - [ ] Accounts: an in-memory Keychain for the fake-scripts daemon, so the secret form gets an end-to-end run.
-- [ ] First run: propose a project's areas from the repository (workspace packages, app folders, screens) instead of one `repo` area over `**`; the folder inspection is where it would go (first-run spec §13).
+- [x] First run: propose a project's areas from the repository (workspace packages, app folders, screens) instead of one `repo` area over `**`; the folder inspection is where it would go (first-run spec §13). (Adding a project proposes areas from HEAD's files and recent commits, named by a model, for the builder to edit; Settings can call the same `proposeAreas` later. Decision `2026-10-29-propose-areas-from-the-repository.md`.)
 - [ ] First run: propose a new task's areas from its description, and edit a task's areas and dependencies in the drawer (needs a task patch route).
 - [ ] First run: the sandbox check as a setup row; 10db checks its sandbox when a lane starts, and a row needs a daemon probe that doesn't exist yet.
 - [ ] First run: Codex as a second agent in the setup check's Agents card.
 - [ ] Settings: the base branch as a Select of the checkout's branches; it needs inspection of an existing project's checkout, so it stays a text input.
 - [ ] Settings: the global Models section, and the fallback model as two selects.
-- [ ] Board: goals and the shaping flow (`scratch/design-note-2026-10-28-starting-work-and-goals.md`), voice capture for a task, and a sharpen assist that rewrites vague acceptance criteria.
+- [ ] Goals and Factory as goal mission control, designed in `docs/superpowers/specs/2026-10-29-10db-goals-design.md` (phases 1–4; its §14 lists what is open).
+- [ ] Board: voice capture for a task, and a sharpen assist that rewrites vague acceptance criteria.
+- [ ] Factory: row keys like the Inbox's (up/down or j/k between goals, Enter to open, a ? list), sharing `use-inbox-keys.ts`'s approach; after the goals spec's phase 1 Factory.
 - [ ] Desktop: a written type scale and spacing rhythm in `DESIGN.md`, with one pass over every view.
 - [ ] First run: the native folder panel and the Tauri window are checked by hand; the browser run covers the form and its axe scan (`e2e/first-run.spec.ts`).
 - [ ] Desktop: split the rest of `apps/desktop/src/daemon/queries.ts` and `test/fixtures.ts` per entity, as accounts already is; deferred until no big branches are in flight.

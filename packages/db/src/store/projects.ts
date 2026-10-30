@@ -5,6 +5,7 @@ import {
   DEFAULT_BOARD_COLUMN,
   Delivery,
   EventType,
+  hazardScope,
   InvalidError,
   isMetered,
   mintId,
@@ -14,6 +15,7 @@ import {
   Provider,
   WorkspaceMode,
   type AccountId,
+  type HazardDef,
   type ProjectDto,
   type ProjectId,
   type ProjectViewDto,
@@ -104,9 +106,13 @@ function checkClaimedNames(
   current: ProjectDto,
   next: {
     readonly areas: readonly { name: string }[];
-    readonly hazards: readonly { name: string }[];
+    readonly hazards: readonly Pick<HazardDef, 'name' | 'scope'>[];
   },
 ): void {
+  // A claim row keeps the scope it was taken in, so a held hazard whose scope changed would be
+  // looked for where it isn't, and granted to a second task.
+  const scopeNow = new Map(current.hazards.map((h) => [h.name, hazardScope(h)]));
+  const scopeNext = new Map(next.hazards.map((h) => [h.name, hazardScope(h)]));
   const kept = {
     [ClaimKind.Area]: new Set(next.areas.map((a) => a.name)),
     [ClaimKind.Hazard]: new Set(next.hazards.map((h) => h.name)),
@@ -130,6 +136,11 @@ function checkClaimedNames(
     if (known[claim.kind].has(claim.name) && !kept[claim.kind].has(claim.name))
       throw new ConflictError(
         `Can't remove or rename ${claim.kind} "${claim.name}": the running task "${claim.title}" holds it. Finish or stop that task first.`,
+      );
+    const [before, after] = [scopeNow.get(claim.name), scopeNext.get(claim.name)];
+    if (claim.kind === ClaimKind.Hazard && before && after && before !== after)
+      throw new ConflictError(
+        `Can't change whether hazard "${claim.name}" is held per copy (its scope): the running task "${claim.title}" holds it. Finish or stop that task first.`,
       );
   }
 }

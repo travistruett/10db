@@ -10,7 +10,14 @@ import {
   type ProjectId,
   type WorkstreamId,
 } from '@10db/contracts';
-import { activeClaims, getBatch, getProject, getWorkstream, listWorkstreams } from '@10db/db';
+import {
+  activeClaims,
+  copyHazardNames,
+  getBatch,
+  getProject,
+  getWorkstream,
+  listWorkstreams,
+} from '@10db/db';
 import type { Clock, Timer } from '../clock';
 import { checkoutOf } from '../delivery';
 import type { StateStore } from '../events';
@@ -40,6 +47,17 @@ const WATCHED_STATES = [...LANE_STATES, WorkstreamState.WaitingHuman];
  * lane's claim by someone else is the real-time batch's to report, as a foreign write.
  */
 const STEP_END_CLAIM_STATES = ACTIVE_STATES.filter((s) => s !== WorkstreamState.TakenOver);
+
+/**
+ * Whether a claim is exclusive per copy of the repository (every area, and a per-copy hazard), so it
+ * excuses or blocks writes only in its holder's checkout, rather than in every checkout of the project.
+ */
+function perCopyClaims(
+  project: Pick<ProjectDto, 'hazards'>,
+): (claim: { readonly kind: ClaimKind; readonly name: string }) => boolean {
+  const copyHazards = copyHazardNames(project);
+  return (claim) => claim.kind === ClaimKind.Area || copyHazards.has(claim.name);
+}
 
 export type WatchFn = (
   root: string,
@@ -171,8 +189,9 @@ export function createWatcher(deps: {
 
   /**
    * Strays among `paths` against the claims of the workstreams in `claimStates`, plus any in `alsoHeldBy`.
-   * Area claims count from the batch's workstreams in a worktree and from the project's workstreams outside any worktree in the main checkout; hazard
-   * claims always count from the project's, since a hazard is shared across worktrees.
+   * Area claims and per-copy hazard claims count from the batch's workstreams in a worktree and from the project's
+   * workstreams outside any worktree in the main checkout; the other hazard claims always count from the project's,
+   * since that hazard names something the worktrees share.
    */
   function straysIn(
     project: ProjectDto,
@@ -181,6 +200,7 @@ export function createWatcher(deps: {
     claimStates: readonly WorkstreamState[],
     alsoHeldBy: WorkstreamId | null,
   ): { strays: string[]; candidates: WorkstreamId[] } {
+    const isPerCopy = perCopyClaims(project);
     const inScope = (ws: { readonly batchId: BatchId | null }) => worktreeBatchOf(ws) === batchId;
     const holders = listWorkstreams(db, { states: claimStates, projectId: project.id });
     const ids = holders.map((ws) => ws.id);
@@ -191,7 +211,7 @@ export function createWatcher(deps: {
     }
     const claims = ids.flatMap((id) =>
       activeClaims(db, id)
-        .filter((c) => c.kind === ClaimKind.Hazard || areaHolders.has(id))
+        .filter((c) => !isPerCopy(c) || areaHolders.has(id))
         .map((c) => ({ kind: c.kind, name: c.name })),
     );
     const candidates = listWorkstreams(db, { states: WATCHED_STATES, projectId: project.id })
@@ -208,6 +228,7 @@ export function createWatcher(deps: {
     paths: readonly string[],
   ): void {
     if (paths.length === 0) return;
+    const isPerCopy = perCopyClaims(project);
     const holders: ClaimHolder[] = listWorkstreams(db, {
       states: ACTIVE_STATES,
       projectId: project.id,
@@ -216,7 +237,7 @@ export function createWatcher(deps: {
       // A lane in another checkout holds its claims but isn't writing here, so a write into them is foreign.
       running: LANE_STATES.includes(ws.state) && worktreeBatchOf(ws) === batchId,
       claims: activeClaims(db, ws.id)
-        .filter((c) => c.kind === ClaimKind.Hazard || worktreeBatchOf(ws) === batchId)
+        .filter((c) => !isPerCopy(c) || worktreeBatchOf(ws) === batchId)
         .map((c) => ({ kind: c.kind, name: c.name })),
     }));
     const foreign = findForeignClaimWrites(paths, project, holders);

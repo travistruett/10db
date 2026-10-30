@@ -1,5 +1,6 @@
 import {
   isTerminal,
+  NEW_TASK_NO_CRITERIA,
   SYSTEM_COLUMN_LABEL,
   RiskTag,
   WorkspaceMode,
@@ -23,6 +24,7 @@ import {
 } from '@mantine/core';
 import { useState } from 'react';
 import {
+  useCloseTask,
   useHoldTask,
   usePatchTask,
   useRemoveTask,
@@ -30,12 +32,22 @@ import {
   useStartTask,
 } from '../../daemon/queries';
 import { StateBadge } from '../factory/state-badge';
-import { canRetry } from '../factory/workstream-state';
+import { canClose, canRetry } from '../factory/workstream-state';
+import { ReviewRoundsList } from '../review/review-rounds-list';
 import { criteriaLines } from './areas-text';
+import { closeNote } from './batch/close-note';
 import { BatchPanel } from './batch-panel';
 import { FlowSelect } from './flow-select';
+import {
+  draftOf,
+  landingChanged,
+  landingFromDraft,
+  landingLine,
+  type LandingDraft,
+} from './landing-draft';
+import { LandingField } from './landing-field';
 import { RISK_LABEL } from './risk-labels';
-import { holdOption, isHeld } from './task-hold';
+import { holdOption, isHeld, type HoldOption } from './task-hold';
 
 const RISKS: readonly RiskTag[] = Object.values(RiskTag);
 const isRisk = (value: string): value is RiskTag => RISKS.some((r) => r === value);
@@ -54,6 +66,11 @@ export interface TaskDrawerProps {
   readonly workspaceMode?: WorkspaceMode;
   /** The project's gate command, named beside a failed gate's exit code. */
   readonly gateCommand?: string | null;
+  /**
+   * The project's base branch, when it delivers by pull request: the drawer then says where the
+   * task lands, and lets the builder change it until the task has run.
+   */
+  readonly pullRequestBase?: string;
   readonly onClose: () => void;
 }
 
@@ -67,9 +84,14 @@ export function TaskDrawer({
   workstreams = [],
   workspaceMode = WorkspaceMode.Shared,
   gateCommand = null,
+  pullRequestBase,
   onClose,
 }: TaskDrawerProps) {
   const patch = usePatchTask();
+  const [landing, setLanding] = useState<LandingDraft>(() => draftOf(task.landing));
+  const [landingError, setLandingError] = useState<string | null>(null);
+  // Once the task has run its batch decides where its pull request lands.
+  const landingEditable = task.workstreamId === null;
   const initialCriteria = task.acceptanceCriteria.join('\n');
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description);
@@ -90,7 +112,8 @@ export function TaskDrawer({
     criteria !== initialCriteria ||
     flowId !== task.flowId ||
     risks.length !== task.riskTags.length ||
-    risks.some((r) => !task.riskTags.includes(r));
+    risks.some((r) => !task.riskTags.includes(r)) ||
+    (pullRequestBase !== undefined && landingEditable && landingChanged(task.landing, landing));
 
   // Every way out (close button, Escape, outside click, Cancel) comes through here.
   const requestClose = () => {
@@ -108,10 +131,18 @@ export function TaskDrawer({
       return;
     }
     if (lines.length === 0) {
-      setError('Add at least one acceptance criterion');
+      setError(NEW_TASK_NO_CRITERIA);
+      return;
+    }
+    const changesLanding =
+      pullRequestBase !== undefined && landingEditable && landingChanged(task.landing, landing);
+    const where = landingFromDraft(landing);
+    if (changesLanding && !where.ok) {
+      setLandingError(where.error);
       return;
     }
     setError(null);
+    setLandingError(null);
     patch.mutate(
       {
         taskId: task.id,
@@ -121,6 +152,7 @@ export function TaskDrawer({
           acceptanceCriteria: lines,
           flowId,
           riskTags: risks,
+          ...(changesLanding && where.ok ? { landing: where.landing } : {}),
         },
       },
       { onSuccess: onClose },
@@ -145,7 +177,16 @@ export function TaskDrawer({
       padding="lg"
     >
       <Stack gap="lg">
-        {workstream ? <WorkstreamLine task={task} workstream={workstream} /> : null}
+        {workstream ? (
+          <WorkstreamLine
+            taskId={task.id}
+            workstream={workstream}
+            holdable={holdOption(task, workstream)}
+            batch={batch}
+            onClosed={onClose}
+          />
+        ) : null}
+        {workstream ? <ReviewRoundsList steps={workstream.steps} /> : null}
         {batch ? (
           <BatchPanel
             batch={batch}
@@ -214,6 +255,24 @@ export function TaskDrawer({
             setRisks(values.filter(isRisk));
           }}
         />
+        {pullRequestBase === undefined ? null : landingEditable ? (
+          <LandingField
+            baseBranch={pullRequestBase}
+            value={landing}
+            error={landingError}
+            onChange={(draft) => {
+              setLanding(draft);
+              setLandingError(null);
+            }}
+          />
+        ) : (
+          <Stack gap={2}>
+            <Text size="sm" fw={500}>
+              Where it lands
+            </Text>
+            <Text size="sm">{landingLine(task, batch, pullRequestBase)}</Text>
+          </Stack>
+        )}
       </Stack>
       {/* Pinned to the drawer's bottom edge, so Save never scrolls away. */}
       <Group
@@ -276,20 +335,31 @@ export function TaskDrawer({
   );
 }
 
-/** The workstream's state; for a failed one why and a way to retry it, and for a queued or held one Hold, Start and Remove. */
+/**
+ * The workstream's state: for a failed one why, a way to retry it and a way to close its task, and
+ * for a queued or held one Hold, Start and Remove.
+ */
 function WorkstreamLine({
-  task,
+  taskId,
   workstream,
+  holdable,
+  batch,
+  onClosed,
 }: {
-  readonly task: TaskDto;
+  readonly taskId: TaskId;
   readonly workstream: WorkstreamDto;
+  /** Hold for a started task that has not run, or why it can't be held; null when there is nothing to hold. */
+  readonly holdable: HoldOption | null;
+  readonly batch: BatchDto | undefined;
+  readonly onClosed: () => void;
 }) {
   const retry = useRetryWorkstream();
+  const [note, setNote] = useState('');
+  const closeTask = useCloseTask();
   const hold = useHoldTask();
   const start = useStartTask();
   const remove = useRemoveTask();
   const failed = canRetry(workstream.state);
-  const holdable = holdOption(task, workstream);
   const held = isHeld(workstream);
   if (isTerminal(workstream.state) && !failed) {
     return null;
@@ -308,7 +378,7 @@ function WorkstreamLine({
               disabled={holdable.kind === 'refused' || busy}
               loading={hold.isPending}
               onClick={() => {
-                hold.mutate(task.id);
+                hold.mutate(taskId);
               }}
             >
               Hold
@@ -322,7 +392,7 @@ function WorkstreamLine({
                 disabled={busy}
                 loading={start.isPending}
                 onClick={() => {
-                  start.mutate(task.id);
+                  start.mutate(taskId);
                 }}
               >
                 Start
@@ -334,7 +404,7 @@ function WorkstreamLine({
                 disabled={busy}
                 loading={remove.isPending}
                 onClick={() => {
-                  remove.mutate(task.id);
+                  remove.mutate(taskId, { onSuccess: onClosed });
                 }}
               >
                 Remove
@@ -347,10 +417,27 @@ function WorkstreamLine({
               variant="default"
               loading={retry.isPending}
               onClick={() => {
-                retry.mutate(workstream.id);
+                closeTask.reset();
+                const text = note.trim();
+                retry.mutate(
+                  text === '' ? { id: workstream.id } : { id: workstream.id, note: text },
+                );
               }}
             >
               Retry
+            </Button>
+          ) : null}
+          {canClose(workstream.state) ? (
+            <Button
+              size="xs"
+              variant="default"
+              loading={closeTask.isPending}
+              onClick={() => {
+                retry.reset();
+                closeTask.mutate(taskId, { onSuccess: onClosed });
+              }}
+            >
+              Close task
             </Button>
           ) : null}
         </Group>
@@ -376,8 +463,31 @@ function WorkstreamLine({
           {workstream.failureReason}
         </Text>
       ) : null}
+      {failed ? (
+        <Textarea
+          label="Note for the next session (optional)"
+          description="The session the retry starts gets this note, and the review’s findings too when a review sent the work back."
+          size="xs"
+          autosize
+          minRows={1}
+          maxRows={6}
+          maxLength={4000}
+          value={note}
+          onChange={(e) => {
+            setNote(e.currentTarget.value);
+          }}
+        />
+      ) : null}
+      {canClose(workstream.state) ? (
+        <Text size="xs" c="dimmed">
+          {closeNote(batch)}
+        </Text>
+      ) : null}
       {retry.error ? (
         <Text size="xs" c="red" role="alert">{`Couldn't retry: ${retry.error.message}`}</Text>
+      ) : null}
+      {closeTask.error ? (
+        <Text size="xs" c="red" role="alert">{`Couldn't close: ${closeTask.error.message}`}</Text>
       ) : null}
     </Stack>
   );

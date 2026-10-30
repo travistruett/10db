@@ -6,14 +6,16 @@ import {
   isTerminal,
   mintId,
   NotFoundError,
+  PullRequestState,
   UNFINISHED_BATCH_STATES,
   WorkstreamState,
   type BatchDto,
   type BatchFailure,
   type BatchId,
   type ProjectId,
+  type PullRequestStatusDto,
 } from '@10db/contracts';
-import { and, asc, desc, eq, inArray, isNotNull, isNull, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNotNull, isNull, or, type SQL } from 'drizzle-orm';
 import type { Json } from '../json';
 import * as schema from '../schema';
 import type { DbReader, WriteContext } from './store';
@@ -36,6 +38,18 @@ export interface BatchPatch {
   readonly returnSha?: string | null;
 }
 
+/** The pull request status a batch row holds; null until the watcher has read it once. */
+function toPullRequestStatus(row: BatchRow): PullRequestStatusDto | null {
+  if (row.prCheckedAt === null || row.prState === null || row.prChecks === null) return null;
+  return {
+    state: row.prState,
+    checks: row.prChecks,
+    failingChecks: row.prFailingChecks ?? [],
+    checkedAt: row.prCheckedAt,
+    unknownReason: row.prUnknownReason,
+  };
+}
+
 /** The gate pid and the checkout's return place stay internal: only delivery reads them. */
 function toBatchDto(row: BatchRow): BatchDto {
   return {
@@ -45,9 +59,11 @@ function toBatchDto(row: BatchRow): BatchDto {
     state: row.state,
     branch: row.branch,
     baseBranch: row.baseBranch,
+    autoMerge: row.autoMerge,
     baseSha: row.baseSha,
     repo: row.repo,
     prUrl: row.prUrl,
+    pr: toPullRequestStatus(row),
     gateExitCode: row.gateExitCode,
     gateLogPath: row.gateLogPath,
     failure: row.failure,
@@ -174,6 +190,8 @@ export function insertBatch(
     readonly projectId: ProjectId;
     readonly title: string;
     readonly baseBranch: string;
+    /** Whether the pull request merges by itself once its checks pass; absent means it does. */
+    readonly autoMerge?: boolean;
     readonly id?: BatchId;
     /** A worktree batch names its worktree here; a shared batch leaves it out and runs alone. */
     readonly worktreePath?: string;
@@ -194,6 +212,7 @@ export function insertBatch(
     state: BatchState.Cutting,
     branch: null,
     baseBranch: input.baseBranch,
+    autoMerge: input.autoMerge ?? true,
     baseSha: null,
     repo: null,
     prUrl: null,
@@ -205,6 +224,11 @@ export function insertBatch(
     worktreePath: input.worktreePath ?? null,
     returnBranch: null,
     returnSha: null,
+    prState: null,
+    prChecks: null,
+    prFailingChecks: null,
+    prCheckedAt: null,
+    prUnknownReason: null,
     createdAt: ctx.now,
     updatedAt: ctx.now,
   };
@@ -239,6 +263,77 @@ export function patchBatch(ctx: WriteContext, id: BatchId, patch: BatchPatch): B
     .run();
   emitBatch(ctx, id, { changed: Object.keys(patch) });
   return getBatch(ctx.tx, id);
+}
+
+/** What the PR watcher read of a pull request; stored whole, so a read is never half a status. */
+export type PullRequestStatusInput = PullRequestStatusDto;
+
+/** Whether a read says anything the stored status does not, `checkedAt` aside. */
+function prStatusChanged(row: BatchRow, status: PullRequestStatusInput): boolean {
+  return (
+    row.prState !== status.state ||
+    row.prChecks !== status.checks ||
+    row.prUnknownReason !== status.unknownReason ||
+    JSON.stringify(row.prFailingChecks ?? []) !== JSON.stringify(status.failingChecks)
+  );
+}
+
+/**
+ * Stores the latest read of a batch's pull request. A read that changes the status bumps
+ * `updatedAt` and tells the UI with `batch.updated {changed:['pr']}`; one that changes nothing
+ * only advances `checkedAt`, so a poll every two minutes leaves no event row behind.
+ */
+export function recordPullRequestStatus(
+  ctx: WriteContext,
+  id: BatchId,
+  status: PullRequestStatusInput,
+): BatchDto {
+  const row = getBatchRow(ctx.tx, id);
+  if (row.prCheckedAt !== null && !prStatusChanged(row, status)) {
+    ctx.tx
+      .update(schema.batches)
+      .set({ prCheckedAt: status.checkedAt })
+      .where(eq(schema.batches.id, id))
+      .run();
+    return getBatch(ctx.tx, id);
+  }
+  ctx.tx
+    .update(schema.batches)
+    .set({
+      prState: status.state,
+      prChecks: status.checks,
+      prFailingChecks: status.failingChecks,
+      prCheckedAt: status.checkedAt,
+      prUnknownReason: status.unknownReason,
+      updatedAt: ctx.now,
+    })
+    .where(eq(schema.batches.id, id))
+    .run();
+  emitBatch(ctx, id, { changed: ['pr'] });
+  return getBatch(ctx.tx, id);
+}
+
+/**
+ * The shipped batches whose pull request the watcher still follows, oldest first: one with a
+ * pull request url whose state was never read, or reads open or unknown. Merged and closed are final.
+ */
+export function listWatchedPullRequests(db: DbReader): BatchDto[] {
+  return db
+    .select()
+    .from(schema.batches)
+    .where(
+      and(
+        eq(schema.batches.state, BatchState.Shipped),
+        isNotNull(schema.batches.prUrl),
+        or(
+          isNull(schema.batches.prState),
+          inArray(schema.batches.prState, [PullRequestState.Open, PullRequestState.Unknown]),
+        ),
+      ),
+    )
+    .orderBy(asc(schema.batches.createdAt), asc(schema.batches.id))
+    .all()
+    .map(toBatchDto);
 }
 
 /** Forgets the worktree of a finished batch, so the daemon stops treating it as live. */

@@ -48,6 +48,8 @@ export const queryKeys = {
   boardColumns: (projectId: ProjectId) => ['board-columns', projectId] as const,
   workstreams: (active: boolean) => ['workstreams', { active }] as const,
   inbox: ['inbox'],
+  // Under `inbox`, so the events that refresh the open cards refresh these too.
+  inboxResolved: ['inbox', 'resolved'],
   workstreamChanges: (id: WorkstreamId | undefined, head: string | null) =>
     ['workstream-changes', id, head] as const,
   keepAwake: ['keep-awake'],
@@ -162,6 +164,27 @@ export function useInbox() {
   return useQuery(inboxQueryOptions(client));
 }
 
+/** How many resolved cards the Inbox fetches and shows, the most recent: the list only grows. */
+export const RESOLVED_SHOWN = 100;
+
+/**
+ * The most recent resolved cards, newest first: the ones the builder answered and the ones 10db
+ * closed because their cause was gone.
+ */
+export function useResolvedInbox() {
+  const { client } = useDaemon();
+  return useQuery({
+    queryKey: queryKeys.inboxResolved,
+    queryFn: async () =>
+      readJson(
+        await client.inbox.$get({
+          query: { state: 'RESOLVED', recent: String(RESOLVED_SHOWN) },
+        }),
+        InboxList,
+      ),
+  });
+}
+
 export function useKeepAwake() {
   const { client } = useDaemon();
   return useQuery({
@@ -222,9 +245,10 @@ export function useStartTask() {
   return useMutation({
     mutationFn: async (taskId: TaskId) =>
       readJson(await client.tasks[':taskId'].start.$post({ param: { taskId } }), TaskStartResult),
-    // A pull-request start also changes the project's batch.
+    // A pull-request start also changes the project's batch, and a refused one raises an Inbox card.
     onSuccess: () =>
       Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.inbox }),
         queryClient.invalidateQueries({ queryKey: ['tasks'] }),
         queryClient.invalidateQueries({ queryKey: ['workstreams'] }),
         queryClient.invalidateQueries({ queryKey: queryKeys.projects }),
@@ -262,6 +286,21 @@ export function useRemoveTask() {
     mutationFn: async (taskId: TaskId) =>
       readJson(await client.tasks[':taskId'].remove.$post({ param: { taskId } }), TaskDto),
     onSuccess: () => invalidateTaskViews(queryClient),
+  });
+}
+
+/** Closes a task whose run failed; it leaves the Board, its run stays in Factory. */
+export function useCloseTask() {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (taskId: TaskId) =>
+      readJson(await client.tasks[':taskId'].close.$post({ param: { taskId } }), TaskDto),
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['tasks'] }),
+        queryClient.invalidateQueries({ queryKey: ['candidates'] }),
+      ]),
   });
 }
 
@@ -313,8 +352,14 @@ export function useRetryWorkstream() {
   const { client } = useDaemon();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (id: WorkstreamId) =>
-      readJson(await client.workstreams[':id'].retry.$post({ param: { id } }), WorkstreamDto),
+    mutationFn: async ({ id, note }: { readonly id: WorkstreamId; readonly note?: string }) =>
+      readJson(
+        await client.workstreams[':id'].retry.$post({
+          param: { id },
+          json: note ? { note } : {},
+        }),
+        WorkstreamDto,
+      ),
     onSuccess: () =>
       Promise.all([
         queryClient.invalidateQueries({ queryKey: ['workstreams'] }),

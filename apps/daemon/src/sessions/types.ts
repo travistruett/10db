@@ -69,6 +69,9 @@ export const SessionEndReason = {
 } as const;
 export type SessionEndReason = (typeof SessionEndReason)[keyof typeof SessionEndReason];
 
+/** How a turn ended: normally, at the session's turn limit, or with an error (including a spent budget). */
+export type TurnResult = 'success' | 'max_turns' | 'error';
+
 export type SessionEvent =
   | { readonly type: 'started'; readonly providerSessionId: string; readonly pid: number | null }
   | { readonly type: 'activity'; readonly kind: 'text' | 'tool'; readonly summary: string }
@@ -80,6 +83,8 @@ export type SessionEvent =
     }
   | {
       readonly type: 'turn_complete';
+      /** How the turn ended; absent counts as `success`. */
+      readonly result?: TurnResult;
       readonly inputTokens: number;
       readonly outputTokens: number;
       readonly cachedTokens: number;
@@ -121,8 +126,26 @@ export class AccountProbeError extends Error {
   override readonly name = 'AccountProbeError';
 }
 
+/** One question to a model: no tool, no settings, no project files. */
+export interface CompletionSpec {
+  /** An empty folder of 10db's own: Claude Code starts here and finds nothing to read. */
+  readonly cwd: string;
+  readonly prompt: string;
+  readonly model: string;
+  readonly env: Readonly<Record<string, string>>;
+  /** The account the model must be, checked before the prompt is sent. */
+  readonly account: AccountExpectation;
+}
+
+/** The model gave no answer: it was refused, it failed, or it did not answer in time. */
+export class CompletionError extends Error {
+  override readonly name = 'CompletionError';
+}
+
 export interface SessionAdapter {
   readonly provider: Provider;
+  /** Sends `prompt` to the model once and resolves with its text; rejects with a `CompletionError`. */
+  complete(spec: CompletionSpec): Promise<string>;
   start(spec: SessionSpec): SessionHandle;
   /** Starts Claude Code with no prompt only to read who it is. */
   probeAccount(probe: AccountProbeSpec): Promise<SeenAccount>;
