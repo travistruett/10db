@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import { getConfig } from '@testing-library/react';
+import { getConfig, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import config from '../../vitest.config';
 
@@ -20,6 +20,22 @@ function testFiles(dir: string): string[] {
 describe('load tolerance', () => {
   it('testing-library waits at least 10 s for an async query', () => {
     expect(getConfig().asyncUtilTimeout).toBeGreaterThanOrEqual(MIN_ASYNC_WAIT_MS);
+  });
+
+  it('a query still finds an element that a busy machine renders 2.5 s late', async () => {
+    // The gate failures waited 1.2 to 2.9 s. This reproduces that delay in-process, with a timer
+    // rather than load, so the check never adds load to the Mac it runs on.
+    const late = setTimeout(() => {
+      const note = document.createElement('p');
+      note.textContent = 'Rendered late';
+      document.body.append(note);
+    }, 2500);
+    try {
+      expect((await screen.findByText('Rendered late')).tagName).toBe('P');
+    } finally {
+      clearTimeout(late);
+      document.body.replaceChildren();
+    }
   });
 
   it('vitest lets a test and a hook outlast that wait', () => {
