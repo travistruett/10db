@@ -85,6 +85,7 @@ import { createInboxService } from '../inbox';
 import { createKeepAwake, systemCaffeinate, type CaffeinateSpawner } from '../keep-awake';
 import { createLogger, fileDestination, rotateLogFile, type Logger } from '../log';
 import { protectedPaths } from '../guard';
+import { createBuilderMcpHandler } from '../builder';
 import { ClaimWaits, createMcpHandler, withdrawStaleClaimWaits } from '../mcp';
 import { recoverOnStartup, systemProcesses, type ProcessTerminator } from '../recovery';
 import {
@@ -113,7 +114,7 @@ import { createWatcher, systemWatch, type WatchFn } from '../watcher';
 import { createProjectPinStore } from './checkout-pins';
 import { createGitCardAnswers, createGitRefusalHandler } from './git-refusal';
 import { acquireInstanceLock } from './instance-lock';
-import { removeRuntimeFiles, writeRuntimeFiles } from './runtime-files';
+import { removeRuntimeFiles, writeRuntimeFiles } from '../runtime-files';
 import { createAreaNamer } from './area-namer';
 import { createServices } from './services';
 import { assertWorktreeRootAllowed, DEFAULT_WORKTREE_BASE, worktreeRootFor } from './worktree-root';
@@ -730,6 +731,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     token,
     services,
     taskRemoval: services,
+    builderMcp: createBuilderMcpHandler({ services, log: logger }),
     upgradeWebSocket,
     onUnexpectedError: (error) => {
       logger.error({ err: error }, 'unhandled API error');

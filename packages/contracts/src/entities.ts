@@ -349,17 +349,20 @@ export const TaskDto = z.object({
 });
 export type TaskDto = z.infer<typeof TaskDto>;
 
-export const TaskPatch = z
-  .object({
-    title: Title,
-    description: z.string(),
-    acceptanceCriteria: z.array(z.string().min(1)).min(1),
-    riskTags: z.array(z.enum(RiskTag)),
-    flowId: FlowId.nullable(),
-    landing: TaskLanding,
-  })
+/** The fields of a task the builder can change; each is optional in a patch. */
+export const TaskPatchFields = z.object({
+  title: Title,
+  description: z.string(),
+  acceptanceCriteria: z.array(z.string().min(1)).min(1),
+  riskTags: z.array(z.enum(RiskTag)),
+  flowId: FlowId.nullable(),
+});
+
+export const TaskPatch = TaskPatchFields.extend({ landing: TaskLanding })
   .partial()
-  .refine((p) => Object.keys(p).length > 0, { message: 'Change at least one field' });
+  .refine((p) => Object.keys(p).length > 0, {
+    message: 'Change at least one field',
+  });
 export type TaskPatch = z.infer<typeof TaskPatch>;
 
 /** What the runner does the next time the workstream gets a lane. */

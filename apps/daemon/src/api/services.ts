@@ -86,6 +86,12 @@ export interface TaskRemovalServices {
   closeTask(taskId: TaskId): TaskDto;
 }
 
+/** Reading one task, for the builder's tools that check its state before acting on it. */
+export interface TaskLookupServices {
+  /** Throws NotFoundError for an unknown task. */
+  getTask(taskId: TaskId): TaskDto;
+}
+
 /** What the HTTP layer needs from the daemon. Implemented in the daemon module. */
 export interface ApiServices {
   listProjects(): ProjectViewDto[];
