@@ -34,6 +34,8 @@ const ID_SCHEMAS = {
   ModelProfile: idSchema('mpf', 'ModelProfileId'),
   Batch: idSchema('bat', 'BatchId'),
   BoardColumn: idSchema('bcl', 'BoardColumnId'),
+  Goal: idSchema('gol', 'GoalId'),
+  GoalCriterion: idSchema('gcr', 'GoalCriterionId'),
 } as const;
 
 const ID_PREFIX = {
@@ -59,6 +61,8 @@ const ID_PREFIX = {
   ModelProfile: 'mpf',
   Batch: 'bat',
   BoardColumn: 'bcl',
+  Goal: 'gol',
+  GoalCriterion: 'gcr',
 } as const satisfies Record<keyof typeof ID_SCHEMAS, string>;
 
 export type IdKind = keyof typeof ID_SCHEMAS;
@@ -115,5 +119,9 @@ export const BatchId = ID_SCHEMAS.Batch;
 export type BatchId = IdOf<'Batch'>;
 export const BoardColumnId = ID_SCHEMAS.BoardColumn;
 export type BoardColumnId = IdOf<'BoardColumn'>;
+export const GoalId = ID_SCHEMAS.Goal;
+export type GoalId = IdOf<'Goal'>;
+export const GoalCriterionId = ID_SCHEMAS.GoalCriterion;
+export type GoalCriterionId = IdOf<'GoalCriterion'>;
 export const AccountId = ID_SCHEMAS.Account;
 export type AccountId = IdOf<'Account'>;
