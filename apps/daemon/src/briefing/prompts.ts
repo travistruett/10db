@@ -74,7 +74,8 @@ const clip = (text: string): string =>
 function renderDenials(denials: readonly Denial[]): string[] {
   if (denials.length === 0) return [];
   const lines = denials.map(
-    (d) => `${d.toolName}: ${clip(d.summary)}${d.note ? `\n  Note from the builder: ${clip(d.note)}` : ''}`,
+    (d) =>
+      `${d.toolName}: ${clip(d.summary)}${d.note ? `\n  Note from the builder: ${clip(d.note)}` : ''}`,
   );
   return [
     'The builder denied these calls in this workstream. Each denial covers any equivalent: the same effect written another way (another program, a loop, a script, a wrapper or a different tool) is denied too. Do not run them or equivalents; work without them, or ask with ask_human.',
