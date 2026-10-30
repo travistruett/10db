@@ -63,7 +63,7 @@ describe('load tolerance', () => {
   // listed here once a reviewer has checked that it keeps seconds of slack around every timer.
   // Add a file only after making that check. Prefer driving the clock by hand where you can.
   const REVIEWED_SHOULD_ADVANCE_TIME = new Set([
-    // About 3 s of slack on both sides of the 4 s "Saved" timer.
+    // 2 s of slack before the second save and 1.5 s after it, around the 4 s "Saved" timer.
     'views/settings/project-general-form.test.tsx',
   ]);
 

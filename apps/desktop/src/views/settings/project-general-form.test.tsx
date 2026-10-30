@@ -351,29 +351,32 @@ describe('ProjectGeneralForm', () => {
     await open();
     type('Name', 'Renamed');
     // shouldAdvanceTime lets findBy and waitFor poll, but it also moves the fake clock with real
-    // time. On a saturated Mac that drift can be seconds, so every check below keeps about 3 s of
-    // slack on each side of a 4 s timer (see src/test/load-tolerance.test.ts).
+    // time. On a saturated Mac that drift can be seconds, so the checks below leave 2 s of slack
+    // before the second save and 1.5 s after it (see src/test/load-tolerance.test.ts).
     vi.useFakeTimers({ shouldAdvanceTime: true });
     save();
     const status = await screen.findByRole('status');
     expect(status.textContent).toBe('Saved');
     expect(status.querySelector('svg')).not.toBeNull();
-    // A second save restarts the 4 s, so the first timer must not hide this note.
+    // A second save restarts the 4 s, so the first timer must not hide this note. The first timer
+    // has 2 s left here, so it is still pending when the second save succeeds unless the edit and
+    // save take 2 s of real time.
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(3900);
+      await vi.advanceTimersByTimeAsync(2000);
     });
     type('Name', 'Renamed again');
     save();
     await waitFor(() => {
       expect(screen.getByRole('status').textContent).toBe('Saved');
     });
-    // The first save was over 4.9 s ago; the second under 4 s unless real time drifts by 3 s.
+    // The first save is now at least 4.5 s old, so its timer would have hidden the note; the
+    // second is 2.5 s old, under 4 s unless real time drifts by 1.5 s.
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(1000);
+      await vi.advanceTimersByTimeAsync(2500);
     });
     expect(screen.getByRole('status').textContent).toBe('Saved');
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(3100);
+      await vi.advanceTimersByTimeAsync(2000);
     });
     await waitFor(() => {
       expect(screen.queryByRole('status')).toBeNull();
