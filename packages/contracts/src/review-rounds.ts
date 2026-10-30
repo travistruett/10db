@@ -17,7 +17,8 @@ export const Finding = z.object({
 });
 export type Finding = z.infer<typeof Finding>;
 
-const NUMBERED = /^\s*\d+[.)]\s+(.*)$/;
+// `\S` after the spaces, so no tab can match both `\s+` and the text: a long run of tabs stays linear.
+const NUMBERED = /^\s*\d+[.)]\s+(\S.*)?$/;
 const SEVERITY_WORD =
   /\b(BLOCKING|BLOCKER|CRITICAL|MAJOR|MINOR|NIT|NOTE|WARNING|INFO|HIGH|MEDIUM|LOW)\b/;
 const SEVERITY_TAG =
