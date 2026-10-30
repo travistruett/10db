@@ -200,6 +200,42 @@ describe('InboxView', () => {
     });
   });
 
+  it.each([
+    {
+      name: 'links a flag card to the failing check on GitHub',
+      link: 'https://github.com/acme/widgets/actions/runs/1',
+      shown: true,
+    },
+    { name: 'offers no link when the detail has none', link: undefined, shown: false },
+    { name: 'offers no link that is not https', link: 'javascript:alert(1)', shown: false },
+    {
+      name: 'offers no button for a check off github.com, which the app cannot open',
+      link: 'https://ci.example.com/job/1',
+      shown: false,
+    },
+    {
+      name: 'offers no button for a host that only starts like github.com',
+      link: 'https://github.com.example.net/acme/widgets',
+      shown: false,
+    },
+  ])('$name', async ({ link, shown }) => {
+    const card = inboxItemDto({
+      kind: 'flag',
+      title: 'Pull request checks failed for "Alpha": build',
+      body: 'https://github.com/acme/widgets/actions/runs/1\n\nFailing:\n- build',
+      options: [],
+      detail: link === undefined ? { batchId: 'bat_x' } : { batchId: 'bat_x', link },
+    });
+    inbox([card]);
+    renderApp('/inbox');
+
+    fireEvent.click(await screen.findByText(card.title));
+    await screen.findByText('Failing:', { exact: false });
+    const anchor = screen.queryByRole('link', { name: 'Open on GitHub' });
+    if (shown) expect(anchor?.getAttribute('href')).toBe(link);
+    else expect(anchor).toBeNull();
+  });
+
   it('explains a card answered elsewhere and refreshes the list', async () => {
     let gets = 0;
     serve(

@@ -7,6 +7,7 @@ import {
   NotFoundError,
   PROTOCOL_VERSION,
   WorkstreamDto,
+  type AreaProposalResult,
   type DaemonEvent,
 } from '@10db/contracts';
 import { defineWebSocketHelper } from 'hono/ws';
@@ -52,6 +53,7 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
     eventsHead: () => 0,
     reviewProjectMcp: none,
     inspectFolder: none,
+    proposeAreas: none,
     listNetworkHosts: none,
     allowNetworkHost: none,
     removeNetworkHost: none,
@@ -111,6 +113,7 @@ function app(
     services,
     upgradeWebSocket: noUpgrade,
     mcp: () => Promise.resolve(new Response('mcp')),
+    builderMcp: () => Promise.resolve(new Response('builder')),
   });
 }
 const auth = { headers: { Authorization: `Bearer ${TOKEN}` } };
@@ -216,6 +219,30 @@ describe('API', () => {
       (await app().request('/projects', { headers: { Authorization: 'Bearer wrong' } })).status,
     ).toBe(401);
     expect((await app().request('/projects', auth)).status).toBe(200);
+  });
+
+  it('serves /builder/mcp to the UI token only', async () => {
+    const post = (headers: Record<string, string>) =>
+      app().request('/builder/mcp', { method: 'POST', headers });
+    expect((await post({})).status).toBe(401);
+    // A managed session's token is not the UI token.
+    expect((await post({ Authorization: 'Bearer lane-session-token' })).status).toBe(401);
+    const ok = await post(auth.headers);
+    expect(ok.status).toBe(200);
+    expect(await ok.text()).toBe('builder');
+  });
+
+  it('answers 501 on /builder/mcp when the daemon has no builder endpoint', async () => {
+    const bare = createApp({
+      onUnexpectedError: () => undefined,
+      startedAt,
+      allowedOrigins: [],
+      token: TOKEN,
+      services: stubServices(),
+      upgradeWebSocket: noUpgrade,
+      mcp: () => Promise.resolve(new Response('mcp')),
+    });
+    expect((await bare.request('/builder/mcp', { method: 'POST', ...auth })).status).toBe(501);
   });
 
   it('takes the token from the query string on the event stream only', async () => {
@@ -663,9 +690,11 @@ describe('batch routes', () => {
     state: 'CUTTING',
     branch: null,
     baseBranch: 'main',
+    autoMerge: true,
     baseSha: null,
     repo: null,
     prUrl: null,
+    pr: null,
     gateExitCode: null,
     gateLogPath: null,
     failure: null,
@@ -930,5 +959,42 @@ describe('folder inspection route', () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual(refusal);
     expect(seen).toEqual(['/nowhere']);
+  });
+});
+
+describe('area proposal route', () => {
+  it('POST /folders/propose-areas refuses a relative path with 400', async () => {
+    const res = await app().request('/folders/propose-areas', {
+      method: 'POST',
+      ...json,
+      body: JSON.stringify({ path: 'relative/dir' }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('POST /folders/propose-areas answers the proposal the service makes for the path', async () => {
+    const proposal: AreaProposalResult = {
+      ok: true,
+      proposal: {
+        namedBy: 'structure',
+        areas: [{ name: 'root', globs: ['*'], reason: 'The top of the repository.' }],
+      },
+    };
+    const seen: string[] = [];
+    const res = await app(
+      stubServices({
+        proposeAreas: (path) => {
+          seen.push(path);
+          return Promise.resolve(proposal);
+        },
+      }),
+    ).request('/folders/propose-areas', {
+      method: 'POST',
+      ...json,
+      body: JSON.stringify({ path: '/repo' }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual(proposal);
+    expect(seen).toEqual(['/repo']);
   });
 });

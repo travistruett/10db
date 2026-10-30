@@ -1,9 +1,12 @@
 import { execFileSync } from 'node:child_process';
 import {
   chmodSync,
+  closeSync,
+  constants,
   existsSync,
   lstatSync,
   mkdirSync,
+  openSync,
   readFileSync,
   readlinkSync,
   realpathSync,
@@ -168,6 +171,7 @@ describe('no program from the checkout runs in a daemon git call', () => {
       },
     },
     { name: 'keptRefs', act: (git) => git.keptRefs(repo.path, 'refs/10db/starts/') },
+    { name: 'survey', act: (git) => git.survey(repo.path, 50) },
     { name: 'deleteKeptRef', act: (git) => git.deleteKeptRef(repo.path, 'refs/10db/starts/x') },
     {
       // After the commits, so main has its own: a merge commit, read-tree -m -u and update-ref.
@@ -928,6 +932,63 @@ describe('the checkout is the one pinned for it', () => {
     expect(await restarted.currentBranch(repo.path)).toBe('main');
   });
 
+  /** The pin with every device number swapped for another, as after the volume is remounted. */
+  function renumbered(id: string): string {
+    return id.replace(/(^|\/)\d+:/g, '$1987654321:');
+  }
+
+  it('keeps trusting the checkout after the volume gets a new device number', async () => {
+    const pins = memoryPinStore();
+    const onRefused = vi.fn();
+    await createGit({ pins }).head(repo.path);
+    const real = realpathSync(repo.path);
+    const pin = pins.get(real);
+    if (!pin) throw new Error('expected a pin');
+    expect(renumbered(pin.id)).not.toBe(pin.id);
+    pins.set(real, { ...pin, id: renumbered(pin.id) });
+    const restarted = createGit({ pins, onRefused });
+    await expect(restarted.currentBranch(repo.path)).resolves.toBe('main');
+    expect(onRefused).not.toHaveBeenCalled();
+  });
+
+  it('still refuses a replaced .git when the device number changed too', async () => {
+    const pins = memoryPinStore();
+    await createGit({ pins }).head(repo.path);
+    const real = realpathSync(repo.path);
+    const pin = pins.get(real);
+    if (!pin) throw new Error('expected a pin');
+    pins.set(real, { ...pin, id: renumbered(pin.id) });
+    replaceGitDir();
+    const { detail } = await refusal(createGit({ pins }).currentBranch(repo.path));
+    expect(detail.kind).toBe('moved');
+  });
+
+  it('takes the Trust answer to a moved card after the volume gets a new device number', async () => {
+    const onRefused = vi.fn();
+    const git = createGit({ onRefused });
+    await git.head(repo.path);
+    replaceGitDir();
+    const { detail } = await refusal(git.head(repo.path));
+    if (detail.kind !== 'moved') throw new Error('expected a moved checkout');
+    onRefused.mockClear();
+    const candidate = { ...detail.candidate, id: renumbered(detail.candidate.id) };
+    expect(candidate.id).not.toBe(detail.candidate.id);
+    await expect(git.retrust(repo.path, candidate)).resolves.toBeUndefined();
+    expect(await git.currentBranch(repo.path)).toBe('main');
+    expect(onRefused).not.toHaveBeenCalled();
+  });
+
+  it('says what differs when a replaced .git sits at the same path', async () => {
+    const git = createGit();
+    await git.head(repo.path);
+    replaceGitDir();
+    const error = await refusal(git.head(repo.path));
+    const dir = join(realpathSync(repo.path), '.git');
+    expect(error.message).not.toContain(`its git dir is ${dir}, not ${dir}`);
+    expect(error.message).toContain('at the same path but is a different repository now');
+    expect(error.message).toMatch(/inode \d+, was \d+/);
+  });
+
   it('re-trusts only the state the refusal found: a second swap before the answer is refused anew', async () => {
     const onRefused = vi.fn();
     const git = createGit({ onRefused });
@@ -1495,6 +1556,36 @@ describe('fetch and push', () => {
       paths: [{ path: '.gitattributes', filter: 'lfs' }],
     });
     expect(gitIn(remote.origin.path, 'rev-parse', 'refs/heads/main')).toBe(before);
+  });
+});
+
+describe('survey', () => {
+  it('reads no .mailmap from the checkout', async () => {
+    const fifo = join(repo.path, '.mailmap');
+    execFileSync('mkfifo', [fifo]);
+    const surveyed = createGit().survey(repo.path, 50);
+    const first = await Promise.race([
+      surveyed.then(() => 'surveyed'),
+      new Promise((resolve) => {
+        setTimeout(() => {
+          resolve('still reading');
+        }, 5000);
+      }),
+    ]);
+    // A git that opened the FIFO waits for a writer; opening it for writing ends that read.
+    try {
+      closeSync(openSync(fifo, constants.O_WRONLY | constants.O_NONBLOCK));
+    } catch {
+      // No reader has it open: nothing waits on it.
+    }
+    await surveyed;
+    expect(first).toBe('surveyed');
+  });
+
+  it('surveys a checkout that holds a file named HEAD', async () => {
+    write('HEAD', 'not a ref\n');
+    const surveyed = await createGit().survey(repo.path, 50);
+    expect(surveyed).toHaveProperty('commits');
   });
 });
 

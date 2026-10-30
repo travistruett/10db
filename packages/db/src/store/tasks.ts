@@ -14,6 +14,7 @@ import {
   TaskPatch,
   TaskStartedError,
   TaskStatus,
+  taskLandingFor,
   Title,
   WorkstreamState,
   type ProjectId,
@@ -21,6 +22,7 @@ import {
   type TaskConfig,
   type TaskDto,
   type TaskId,
+  type TaskLanding,
 } from '@10db/contracts';
 import { and, asc, desc, eq, inArray, max, ne } from 'drizzle-orm';
 import * as schema from '../schema';
@@ -33,16 +35,26 @@ export interface BoardStatusInput {
   readonly taskStatus: TaskStatus;
   readonly depsDone: boolean;
   readonly workstreamState: WorkstreamState | null;
+  /** The state of the batch the task's latest run ships in; null when it is in none. */
+  readonly batchState?: BatchState | null;
 }
 
-/** Board column for a task (spec §5.1): Ready means deps done and nothing blocking. */
+/**
+ * Board column for a task (spec §5.1): Ready means deps done and nothing blocking. A finished task
+ * is not Done until its pull request is open: while its batch ships it is In progress, and when the
+ * ship failed it is Blocked, where the builder retries it.
+ */
 export function deriveBoardStatus({
   taskStatus,
   depsDone,
   workstreamState,
+  batchState = null,
 }: BoardStatusInput): BoardStatus {
   switch (taskStatus) {
     case TaskStatus.Done:
+      if (batchState === BatchState.Shipping) return BoardStatus.InProgress;
+      if (batchState === BatchState.Failed) return BoardStatus.Blocked;
+      return BoardStatus.Done;
     case TaskStatus.Cancelled:
       return BoardStatus.Done;
     case TaskStatus.Open:
@@ -57,6 +69,33 @@ export function deriveBoardStatus({
   }
   if (workstreamState !== null && !isTerminal(workstreamState)) return BoardStatus.InProgress;
   return depsDone ? BoardStatus.Ready : BoardStatus.Backlog;
+}
+
+/** The two columns that hold a task's landing. */
+function landingColumns(landing: TaskLanding): {
+  landing: TaskLanding['kind'];
+  landingBranch: string | null;
+} {
+  return {
+    landing: landing.kind,
+    landingBranch: landing.kind === 'branch' ? landing.branch : null,
+  };
+}
+
+function landingOf(row: {
+  landing: TaskLanding['kind'];
+  landingBranch: string | null;
+}): TaskLanding {
+  switch (row.landing) {
+    case 'hold':
+      return { kind: 'hold' };
+    case 'branch':
+      return row.landingBranch === null
+        ? { kind: 'base' }
+        : { kind: 'branch', branch: row.landingBranch };
+    case 'base':
+      return { kind: 'base' };
+  }
 }
 
 export function insertTask(ctx: WriteContext, projectId: ProjectId, input: TaskInput): TaskDto {
@@ -86,7 +125,11 @@ export function insertTask(ctx: WriteContext, projectId: ProjectId, input: TaskI
     if (deps.some((d) => d.status === TaskStatus.Cancelled))
       throw new InvalidError('A removed task cannot be a dependency');
   }
-  return writeTask(ctx, projectId, { ...config, proposalId: null });
+  return writeTask(ctx, projectId, {
+    ...config,
+    landing: config.landing ?? taskLandingFor(project.landing),
+    proposalId: null,
+  });
 }
 
 /**
@@ -103,6 +146,7 @@ export function insertTaskFromProposal(
   },
 ): TaskDto {
   return writeTask(ctx, input.projectId, {
+    landing: taskLandingFor(getProject(ctx.tx, input.projectId).landing),
     title: Title.parse(input.title),
     description: input.description,
     acceptanceCriteria: [],
@@ -118,7 +162,10 @@ export function insertTaskFromProposal(
 function writeTask(
   ctx: WriteContext,
   projectId: ProjectId,
-  config: TaskConfig & { readonly proposalId: ProposalId | null },
+  config: Omit<TaskConfig, 'landing'> & {
+    readonly landing: TaskLanding;
+    readonly proposalId: ProposalId | null;
+  },
 ): TaskDto {
   const order = ctx.tx
     .select({ value: max(schema.tasks.boardOrder) })
@@ -135,6 +182,7 @@ function writeTask(
     riskTags: config.riskTags,
     flowId: config.flowId,
     proposalId: config.proposalId,
+    ...landingColumns(config.landing),
     status: TaskStatus.Open,
     boardOrder: (order?.value ?? 0) + 1,
     workspaceMode: 'shared' as const,
@@ -180,8 +228,13 @@ function toTaskDto(db: DbReader, row: typeof schema.tasks.$inferSelect): TaskDto
     .where(eq(schema.taskDeps.taskId, row.id))
     .all();
   const latest = db
-    .select({ id: schema.workstreams.id, state: schema.workstreams.state })
+    .select({
+      id: schema.workstreams.id,
+      state: schema.workstreams.state,
+      batchState: schema.batches.state,
+    })
     .from(schema.workstreams)
+    .leftJoin(schema.batches, eq(schema.batches.id, schema.workstreams.batchId))
     .where(eq(schema.workstreams.taskId, row.id))
     .orderBy(desc(schema.workstreams.createdAt), desc(schema.workstreams.id))
     .limit(1)
@@ -195,6 +248,7 @@ function toTaskDto(db: DbReader, row: typeof schema.tasks.$inferSelect): TaskDto
     areas: row.areas,
     riskTags: row.riskTags,
     flowId: row.flowId,
+    landing: landingOf(row),
     status: row.status,
     boardOrder: row.boardOrder,
     boardColumnId: row.boardColumnId,
@@ -203,6 +257,7 @@ function toTaskDto(db: DbReader, row: typeof schema.tasks.$inferSelect): TaskDto
       taskStatus: row.status,
       depsDone: dependenciesDone(db, row.id),
       workstreamState: latest?.state ?? null,
+      batchState: latest?.batchState ?? null,
     }),
     workstreamId: latest?.id ?? null,
     createdAt: row.createdAt,
@@ -239,13 +294,7 @@ export function listTasks(db: DbReader, projectId: ProjectId): TaskDto[] {
 export function cancelTask(ctx: WriteContext, id: TaskId): TaskDto {
   const task = getTask(ctx.tx, id);
   if (task.status === TaskStatus.Cancelled) return task;
-  const run = ctx.tx
-    .select({ id: schema.workstreams.id, state: schema.workstreams.state })
-    .from(schema.workstreams)
-    .where(eq(schema.workstreams.taskId, id))
-    .orderBy(desc(schema.workstreams.createdAt), desc(schema.workstreams.id))
-    .limit(1)
-    .get();
+  const run = latestRun(ctx.tx, id);
   if (task.status !== TaskStatus.Open || run)
     throw new TaskStartedError(
       task.title,
@@ -267,18 +316,64 @@ export function cancelTask(ctx: WriteContext, id: TaskId): TaskDto {
     throw new ConflictError(
       `Batch "${cutting.title}" is being cut; remove ${task.title} once it has started`,
     );
+  refuseWhileOpenDependents(ctx, task, 'remove');
+  return retireTask(ctx, id);
+}
+
+/**
+ * Closes a task whose latest run failed: the same soft remove as `cancelTask`, so it keeps its row,
+ * id and edges and drops out of the project's list. Its workstreams are left as they are, so the
+ * Factory still shows the failed run, and nothing here touches the branch or worktree its batch holds.
+ * A failed run released its claims when it failed. A task whose latest run is anything else is
+ * refused: an unstarted one is removed, a live or cancelled run is cancelled or restarted. A task
+ * that open tasks wait on is refused, naming them. Closing a closed task answers it and emits nothing.
+ */
+export function closeTask(ctx: WriteContext, id: TaskId): TaskDto {
+  const task = getTask(ctx.tx, id);
+  if (task.status === TaskStatus.Cancelled) return task;
+  if (task.status !== TaskStatus.Open)
+    throw new ConflictError(`Task ${task.title} is finished and can't be closed`);
+  if (latestRun(ctx.tx, id)?.state !== WorkstreamState.Failed)
+    throw new ConflictError(
+      `Task ${task.title} hasn't failed, so it can't be closed; a task that never started is removed, and a running one is cancelled in Factory`,
+    );
+  refuseWhileOpenDependents(ctx, task, 'close');
+  return retireTask(ctx, id);
+}
+
+function latestRun(db: DbReader, taskId: TaskId) {
+  return db
+    .select({ id: schema.workstreams.id, state: schema.workstreams.state })
+    .from(schema.workstreams)
+    .where(eq(schema.workstreams.taskId, taskId))
+    .orderBy(desc(schema.workstreams.createdAt), desc(schema.workstreams.id))
+    .limit(1)
+    .get();
+}
+
+/** A cancelled dependency is never done, so an open dependent would wait for ever. */
+function refuseWhileOpenDependents(
+  ctx: WriteContext,
+  task: Pick<TaskDto, 'id' | 'title'>,
+  how: 'remove' | 'close',
+): void {
   const dependents = ctx.tx
     .select({ title: schema.tasks.title })
     .from(schema.taskDeps)
     .innerJoin(schema.tasks, eq(schema.tasks.id, schema.taskDeps.taskId))
-    .where(and(eq(schema.taskDeps.dependsOnId, id), eq(schema.tasks.status, TaskStatus.Open)))
+    .where(and(eq(schema.taskDeps.dependsOnId, task.id), eq(schema.tasks.status, TaskStatus.Open)))
     .orderBy(asc(schema.tasks.boardOrder))
     .all();
   if (dependents.length > 0)
     throw new TaskHasDependentsError(
       task.title,
       dependents.map((d) => d.title),
+      how,
     );
+}
+
+/** The soft remove both routes end in: status cancelled, parked column cleared, one event. */
+function retireTask(ctx: WriteContext, id: TaskId): TaskDto {
   ctx.tx
     .update(schema.tasks)
     .set({ status: TaskStatus.Cancelled, boardColumnId: null, updatedAt: ctx.now })
@@ -298,9 +393,27 @@ export function patchTask(ctx: WriteContext, id: TaskId, patch: TaskPatch): Task
   if (getTask(ctx.tx, id).status === TaskStatus.Cancelled)
     throw new ConflictError('A removed task can no longer be edited');
   if (changes.flowId) getFlow(ctx.tx, changes.flowId);
+  const { landing, ...fields } = changes;
+  if (landing !== undefined) {
+    // The branch is cut and the pull request opened for the task's batch, so once the task has run
+    // its landing is its batch's.
+    const started = ctx.tx
+      .select({ id: schema.workstreams.id })
+      .from(schema.workstreams)
+      .where(eq(schema.workstreams.taskId, id))
+      .get();
+    if (started)
+      throw new ConflictError(
+        `${getTask(ctx.tx, id).title} has already started, so where its work lands is fixed`,
+      );
+  }
   ctx.tx
     .update(schema.tasks)
-    .set({ ...changes, updatedAt: ctx.now })
+    .set({
+      ...fields,
+      ...(landing === undefined ? {} : landingColumns(landing)),
+      updatedAt: ctx.now,
+    })
     .where(eq(schema.tasks.id, id))
     .run();
   ctx.emit({ type: EventType.TaskChanged, entityType: 'task', entityId: id });
