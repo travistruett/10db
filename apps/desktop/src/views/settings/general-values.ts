@@ -30,6 +30,8 @@ export function checkSeedNames(names: readonly string[]): {
 export interface GeneralValues {
   readonly name: string;
   readonly gateCommand: string;
+  /** '' means none: every step is checked by the gate command. */
+  readonly changedCheckCommand: string;
   readonly maxLanes: number | '';
   readonly handoffPct: number | '';
   readonly nudgePct: number | '';
@@ -58,6 +60,7 @@ export function generalValues(project: ProjectDto): GeneralValues {
   return {
     name: project.name,
     gateCommand: project.gateCommand ?? '',
+    changedCheckCommand: project.changedCheckCommand ?? '',
     maxLanes: project.maxLanes,
     handoffPct: project.handoffPct,
     nudgePct: project.nudgePct,
@@ -130,6 +133,9 @@ export function checkGeneral(project: ProjectDto, values: GeneralValues): Genera
   // An empty gate is no gate: finished work then waits for the builder's check.
   const gate = gateCommand === '' ? null : gateCommand;
   if (gate !== project.gateCommand) patch.gateCommand = gate;
+  const changedCheck = values.changedCheckCommand.trim();
+  const changed = changedCheck === '' ? null : changedCheck;
+  if (changed !== project.changedCheckCommand) patch.changedCheckCommand = changed;
   if (values.maxLanes !== '' && values.maxLanes !== project.maxLanes)
     patch.maxLanes = values.maxLanes;
   if (values.handoffPct !== '' && values.handoffPct !== project.handoffPct)

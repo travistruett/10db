@@ -123,6 +123,30 @@ describe('BoardView', () => {
     expect(screen.queryByText('OPEN')).toBeNull();
   });
 
+  it("names the project's changed-packages check on a card that is being checked", async () => {
+    const project = projectViewDto({
+      gateCommand: 'make gate',
+      changedCheckCommand: 'make check-changed',
+    });
+    const ws = workstreamDto({ projectId: project.id, taskTitle: 'Alpha', state: 'VERIFYING' });
+    const alpha = taskDto({
+      id: ws.taskId,
+      projectId: project.id,
+      title: 'Alpha',
+      boardStatus: 'in_progress',
+      workstreamId: ws.id,
+    });
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([alpha])),
+      http.get(daemonUrl('/workstreams'), () => HttpResponse.json([ws])),
+    );
+    renderApp('/board');
+
+    expect(await screen.findByText('Checking: make check-changed')).toBeTruthy();
+    expect(screen.queryByText('Checking: make gate')).toBeNull();
+  });
+
   it('shows one line above the columns when several tasks share a branch', async () => {
     const batch = batchDto();
     const project = projectViewDto({

@@ -80,6 +80,16 @@ describe('checkGeneral', () => {
       expected: { ok: true, patch: { gateCommand: null } },
     },
     {
+      name: 'a changed-packages check, trimmed',
+      change: { changedCheckCommand: ' make check-changed ' },
+      expected: { ok: true, patch: { changedCheckCommand: 'make check-changed' } },
+    },
+    {
+      name: 'an emptied changed-packages check clears it',
+      change: { changedCheckCommand: ' ' },
+      expected: { ok: true, patch: null },
+    },
+    {
       name: 'an empty lane cap',
       change: { maxLanes: '' },
       expected: { ok: false, errors: { maxLanes: 'Enter the lane cap' } },

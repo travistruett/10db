@@ -25,6 +25,7 @@ export function projectDto(overrides: Partial<ProjectDto> = {}): ProjectDto {
     name: 'Demo',
     repoPath: '/tmp/demo',
     gateCommand: 'true',
+    changedCheckCommand: null,
     areas: [{ name: 'src', globs: ['src/**'] }],
     hazards: [],
     maxLanes: 2,

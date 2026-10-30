@@ -211,6 +211,18 @@ describe('shipping', () => {
     expect(card.body).toMatch(/^origin\/main has 1 commit this branch doesn't\./);
   });
 
+  it("runs the project's full gate before the push, never its changed-packages check", async () => {
+    h = createDeliveryHarness({ gateCommand: 'false', changedCheckCommand: 'true' });
+    const { batch } = await openBatch('Add greetings', 'Alpha');
+    h.commit('src/api/alpha.txt');
+    const failed = await finishAll(batch);
+    expect(failed.state).toBe('FAILED');
+    expect(onOrigin(batch.branch)).toBeNull();
+    expect(batchLines(batch.id).find((line) => line['msg'] === 'gate started')).toMatchObject({
+      command: 'false',
+    });
+  });
+
   it('ships a batch without a gate step when the project has none', async () => {
     h = createDeliveryHarness({ gateCommand: null });
     const { batch } = await openBatch('Add greetings', 'Alpha');

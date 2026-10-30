@@ -1728,7 +1728,10 @@ export function createRunner(opts: RunnerOptions): Runner {
       sendBackUncommitted(id, ctl, row, uncommitted);
       return;
     }
-    const gateCommand = project.gateCommand;
+    // A project with a changed-packages check has each step checked by it; the ship gate runs the
+    // full gate command before the push. Without a gate command the builder checks, as ever.
+    const gateCommand =
+      project.gateCommand === null ? null : (project.changedCheckCommand ?? project.gateCommand);
     if (gateCommand === null) {
       await finishWithoutGate(id, ctl, row, checkout);
       return;

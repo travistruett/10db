@@ -18,6 +18,12 @@
         "null"
       ]
     },
+    "changedCheckCommand": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "areas": {
       "type": "array",
       "items": {
@@ -474,6 +480,7 @@
     "name",
     "repoPath",
     "gateCommand",
+    "changedCheckCommand",
     "areas",
     "hazards",
     "maxLanes",
