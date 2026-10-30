@@ -189,7 +189,10 @@ function expectCutDeleted(batch: BatchDto, cardTitle: string): void {
   expect(listBatches(h.store.db)).toEqual([]);
   const ws = h.only(listWorkstreams(h.store.db, {}));
   expect(ws).toMatchObject({ state: 'CANCELLED', batchId: null });
-  expect(h.only(h.cards()).title).toBe(cardTitle);
+  // A branch the crash left behind has no batch any more, and is listed in a card of its own.
+  expect(h.only(h.cards().filter((c) => !c.title.includes('without a task'))).title).toBe(
+    cardTitle,
+  );
   expect(getAppSetting(h.store.db, `checkout_pin.${batch.id}`)).toBeUndefined();
 }
 
@@ -228,6 +231,8 @@ describe('recoverBatches with worktrees', () => {
         await recover();
         expectCutDeleted(batch, CUT_INTERRUPTED);
         expect(branchExists(branch)).toBe(true);
+        const stray = h.only(h.cards().filter((c) => c.title.includes('without a task')));
+        expect(stray.body).toContain(branch);
       },
     },
     {

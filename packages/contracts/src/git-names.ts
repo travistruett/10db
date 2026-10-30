@@ -30,7 +30,8 @@ export const PrTitlePrefix = z
     'a Conventional Commit type and scope, such as feat(daemon)',
   );
 
-const BRANCH_PREFIX = '10db/';
+/** What every branch 10db makes for a batch starts with. */
+export const BRANCH_PREFIX = '10db/';
 const MAX_SLUG = 40;
 
 /**

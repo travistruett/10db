@@ -75,6 +75,7 @@ function flagOf(projectId: ProjectId, card: Card) {
           },
         }
       : {}),
+    ...(card.options ? { options: card.options } : {}),
   };
 }
 
