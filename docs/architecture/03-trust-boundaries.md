@@ -554,6 +554,10 @@ Under the lane sandbox (**built**), the design column holds for a lane's Bash:
     builder's own config says; `read-tree -m -u` from the old tip to the merge, after refusing for an
     uncommitted change at a path it writes, or anything git doesn't track (an ignored file included) at a
     path it adds or where an added path needs a directory; then the compare-and-swap `update-ref`.
+    A conflict it settles (`decisions/2026-10-30-a-batch-settles-its-own-conflicts-with-main.md`) is settled in
+    objects too: `cat-file` reads the merged blob, `hash-object -w` writes the union, and a private index
+    (`update-index --cacheinfo`, `read-tree --prefix`, `write-tree`) makes the tree; a generated directory's
+    generator then runs under the gate's sandbox, as the install does.
     It writes the worktree's files and its own index. A task's start on the merged base is a commit
     `mergedCommit` keeps at `refs/10db/<level>/starts/<workstream id>`, unsigned and never pushed, touching no file,
     index or branch. A base whose tree asks for a filter is refused, as its push would be. The fetch before it

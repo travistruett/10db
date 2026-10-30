@@ -285,17 +285,43 @@ export const worktreeCards = {
 /** The fold key of a batch's conflict-with-its-base card, so a clean merge can withdraw it. */
 export const baseConflictKey = (batchId: BatchId): string => `base-conflict:${batchId}`;
 
+/** The fold key of a batch's regeneration-failed card; the builder dismisses it once the files are regenerated. */
+export const baseRegenerateKey = (batchId: BatchId): string => `base-regenerate:${batchId}`;
+
 /** The fold key of a batch's files-in-the-way card, so a clean merge can withdraw it. */
 export const baseKeptKey = (batchId: BatchId): string => `base-kept:${batchId}`;
 
 /** What delivery tells the builder when a worktree batch's branch can't take its base before a gate. */
 export const baseCards = {
   /** `worktree` is the batch's worktree, where the builder can merge by hand. */
-  conflict: (batch: BatchDto, worktree: string, paths: readonly string[]): Card => ({
+  conflict: (
+    batch: BatchDto,
+    worktree: string,
+    paths: readonly string[],
+    /** Why each of `paths` stayed a conflict, when 10db tried to settle it. */
+    reasons: ReadonlyMap<string, string> = new Map(),
+  ): Card => ({
     title: `Batch "${batch.title}" conflicts with ${batch.baseBranch}`,
-    body: `${batch.baseBranch} on origin changed these files in ways that conflict with the batch's own changes:\n${listPaths(paths)}\n\nBefore each gate 10db merges ${batch.baseBranch} into the batch's branch, so the gate tests what the pull request would merge. It can't resolve a conflict: a lane commits only its own files and never records a merge. Until the conflict is resolved, the gates test the branch without ${batch.baseBranch}'s newer commits, so a failure they fix still shows.\n\nOnce the pull request is open, resolve it there (GitHub's Update branch, then Resolve conflicts). Or merge it yourself in the worktree: ${worktreeMergeCommand(worktree, batch.baseBranch)}. That command turns the repository's hooks off, because lanes write in the worktree, so the hook config there is theirs to choose. The next gate tests the result, and this card goes once the branch holds ${batch.baseBranch}.`,
+    body: `${batch.baseBranch} on origin changed these files in ways that conflict with the batch's own changes, and 10db couldn't settle them itself:\n${listPaths(paths.map((p) => (reasons.has(p) ? `${p}: ${reasons.get(p) ?? ''}` : p)))}\n\nBefore each gate 10db merges ${batch.baseBranch} into the batch's branch, so the gate tests what the pull request would merge. It settles a conflict by itself when both sides only added lines at the same place, and regenerates generated files; anything else needs a choice. A lane commits only its own files and never records a merge, so it can't make it. Until the conflict is resolved, the gates test the branch without ${batch.baseBranch}'s newer commits, so a failure they fix still shows.\n\nOnce the pull request is open, resolve it there (GitHub's Update branch, then Resolve conflicts). Or merge it yourself in the worktree: ${worktreeMergeCommand(worktree, batch.baseBranch)}. That command turns the repository's hooks off, because lanes write in the worktree, so the hook config there is theirs to choose. The next gate tests the result, and this card goes once the branch holds ${batch.baseBranch}.`,
     foldKey: baseConflictKey(batch.id),
     detail: { batchId: batch.id, paths: paths.slice(0, MAX_LISTED_PATHS) },
+  }),
+  /**
+   * 10db merged the base but couldn't finish the generated files in `dirs`: they hold the base's
+   * version. `why` is the first line of the reason, `worktree` the batch's worktree.
+   */
+  regenerate: (
+    batch: BatchDto,
+    worktree: string,
+    dirs: readonly string[],
+    why: string,
+    logPath: string | null,
+  ): Card => ({
+    title: `Batch "${batch.title}": 10db couldn't regenerate files after merging ${batch.baseBranch}`,
+    body: `10db merged ${batch.baseBranch} into the batch's branch. Both sides changed generated files, which are regenerated from their sources and never merged by hand, but ${why}. These directories now hold ${batch.baseBranch}'s version:\n${listPaths(dirs)}\n\nRegenerate them in the worktree ${worktree} (the package's generate script) and commit the result. Until then the gates see generated files that don't match the sources${logPath === null ? '' : `. The log: ${logPath}`}.`,
+    foldKey: baseRegenerateKey(batch.id),
+    refresh: true,
+    detail: { batchId: batch.id, paths: dirs.slice(0, MAX_LISTED_PATHS) },
   }),
   /** `worktree` is the batch's worktree, which holds `paths`. */
   kept: (batch: BatchDto, worktree: string, paths: readonly string[]): Card => ({

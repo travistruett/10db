@@ -13,6 +13,7 @@ import { networkCall, raise, withdraw, type DeliveryContext } from './context';
 import { installedLockfile, recordInstall } from './installed-lockfile';
 import { startRef } from './start-refs';
 import { PNPM_LOCKFILE } from './worktree-dependencies';
+import { GENERATED_DIRS } from './worktree-generated';
 
 /** What happened to a batch's branch before its gate (`decisions/2026-10-29-gate-with-base.md`). */
 export type BaseUpdate =
@@ -195,13 +196,112 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     };
   }
 
+  /**
+   * What a merge that settled conflicts leaves to do. The generated directories hold the base's
+   * version, so their generators run in the worktree and the files they change are committed on top
+   * of the merge; what the branch had there that the base lacks must come back out of them. Never
+   * throws. Resolves with the branch's head and the note to add, or with a stop.
+   */
+  async function settled(
+    batch: BatchDto,
+    project: ProjectDto,
+    branch: string,
+    path: string,
+    merged: Extract<BranchMerge, { readonly kind: 'merged' }>,
+    signal: AbortSignal,
+  ): Promise<
+    { readonly head: string; readonly note: string | null } | { readonly kind: 'aborted' }
+  > {
+    const resolved = merged.resolved ?? [];
+    if (resolved.length === 0) return { head: merged.head, note: null };
+    const origin = `origin/${batch.baseBranch}`;
+    ctx.logger.info(
+      { batchId: batch.id, base: merged.from, files: resolved.map((r) => r.path) },
+      'base conflicts settled',
+    );
+    const said = resolved
+      .map(
+        (r) =>
+          `${r.path} (${r.how === 'regenerated' ? 'regenerated from its sources' : "kept both sides' added lines"})`,
+      )
+      .join(', ');
+    const settledNote = `10db merged ${origin} into this branch and settled its conflicts with it: ${said}. The merge commit lists them.`;
+    const regenerate = merged.regenerate ?? [];
+    if (regenerate.length === 0) return { head: merged.head, note: settledNote };
+    const dirs = regenerate.map((r) => r.dir);
+    // What went wrong, if anything: the card says it, and so does the gate's note.
+    let problem: { readonly why: string; readonly log: string | null } | null = null;
+    let head = merged.head;
+    try {
+      const generated = await ctx.generators.regenerate({ batch, project, path, dirs, signal });
+      if (generated.kind === 'aborted') return { kind: 'aborted' };
+      if (generated.kind === 'failed') {
+        const how = generated.timedOut ? 'timed out' : `exit ${String(generated.exitCode)}`;
+        problem = { why: `regenerating them failed (${how})`, log: generated.logPath };
+      } else {
+        const changed = (await ctx.git.changedPaths(path)).filter((file) =>
+          dirs.some((dir) => file.startsWith(dir)),
+        );
+        if (changed.length > 0) {
+          await ctx.git.commit({
+            repo: path,
+            paths: changed,
+            message: `Regenerate ${dirs.join(', ')} after merging ${origin}`,
+            opId: `regenerate-${merged.head}`,
+            branch,
+          });
+          head = await ctx.git.head(path);
+        }
+        // A migration the branch made that the generator didn't make again is lost from the branch's
+        // tree: a hand-written one, or one the sources no longer produce.
+        const made = new Set<string>();
+        for (const file of changed.filter((f) => f.endsWith('.sql'))) {
+          const oid = await ctx.git.blobAt(path, 'HEAD', file);
+          if (oid !== null) made.add(oid);
+        }
+        const missing: string[] = [];
+        for (const file of regenerate.flatMap((r) => r.dropped).filter((f) => f.endsWith('.sql'))) {
+          const was = await ctx.git.blobAt(path, `${merged.head}^1`, file);
+          const is = await ctx.git.blobAt(path, 'HEAD', file);
+          if (was !== null && was !== is && !made.has(was)) missing.push(file);
+        }
+        if (missing.length > 0)
+          problem = {
+            why: `${named(missing)} from the batch's branch ${missing.length === 1 ? 'is' : 'are'} gone from it, and regenerating did not make ${missing.length === 1 ? 'it' : 'them'} again`,
+            log: generated.logPath,
+          };
+      }
+    } catch (error) {
+      if (signal.aborted) return { kind: 'aborted' };
+      problem = { why: `10db couldn't run the generators (${why(error)})`, log: null };
+    }
+    if (problem === null) return { head, note: settledNote };
+    const { why: reason, log } = problem;
+    ctx.logger.warn(
+      { batchId: batch.id, dirs, reason, logPath: log },
+      'generated files not regenerated after the base merged',
+    );
+    tell(batch, () => {
+      raise(ctx.inbox, batch.projectId, baseCards.regenerate(batch, path, dirs, reason, log));
+    });
+    return {
+      head,
+      note: joined(
+        settledNote,
+        `${named(dirs)} hold ${origin}'s version because ${reason}, so this gate may see generated files that don't match their sources; the builder has a card.`,
+      ),
+    };
+  }
+
   /** A worktree 10db made: the base is merged into its branch. */
   async function merge(
     batch: BatchDto,
+    project: ProjectDto,
     branch: string,
     path: string,
     from: string,
-  ): Promise<Merged> {
+    signal: AbortSignal,
+  ): Promise<BaseUpdate> {
     const origin = `origin/${batch.baseBranch}`;
     let merged: BranchMerge;
     try {
@@ -210,6 +310,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
         branch,
         from,
         message: `Merge ${origin} into ${branch}`,
+        resolve: { generated: GENERATED_DIRS },
       });
     } catch (error) {
       return notMerged(
@@ -221,8 +322,9 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     switch (merged.kind) {
       case 'conflict': {
         const { paths } = merged;
+        const reasons = new Map((merged.unresolved ?? []).map((u) => [u.path, u.reason]));
         tell(batch, () => {
-          raise(ctx.inbox, batch.projectId, baseCards.conflict(batch, path, paths));
+          raise(ctx.inbox, batch.projectId, baseCards.conflict(batch, path, paths, reasons));
         });
         return notMerged(
           batch,
@@ -272,17 +374,24 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
       unmoved = `${held} but couldn't move the batch's base to it (${why(error)}), so this task's changes may still count ${origin}'s as its own.`;
     }
     if (merged.kind === 'up_to_date') return { kind: 'up_to_date', note: unmoved };
+    const finished = await settled(batch, project, branch, path, merged, signal);
+    if ('kind' in finished) return finished;
     ctx.logger.info(
       {
         batchId: batch.id,
         base: merged.from,
-        head: merged.head,
+        head: finished.head,
         fastForward: merged.fastForward,
         files: merged.paths.length,
       },
       'base merged into the batch branch',
     );
-    return { kind: 'merged', base: merged.from, head: merged.head, note: unmoved };
+    return {
+      kind: 'merged',
+      base: merged.from,
+      head: finished.head,
+      note: joined(finished.note, unmoved),
+    };
   }
 
   /**
@@ -348,7 +457,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
       return notMerged(batch, 'no branch', 'The batch has no branch yet, so nothing was merged.');
     const project = getProject(db, batch.projectId);
     const from = `refs/remotes/origin/${batch.baseBranch}`;
-    let merged: Merged | null = null;
+    let merged: BaseUpdate | null = null;
     // Once per gate, in the project's checkout, whose pin holds the origin the builder trusted; a
     // worktree shares its refs.
     try {
@@ -365,7 +474,8 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     merged ??=
       batch.worktreePath === null
         ? await shared(batch, batch.branch, from)
-        : await merge(batch, batch.branch, batch.worktreePath, from);
+        : await merge(batch, project, batch.branch, batch.worktreePath, from, signal);
+    if (merged.kind === 'aborted' || stopped()) return { kind: 'aborted' };
     if (batch.worktreePath === null) return merged;
     const installed = await install(batch, project, batch.worktreePath, signal);
     if (installed.kind === 'aborted' || stopped()) return { kind: 'aborted' };
