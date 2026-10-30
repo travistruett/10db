@@ -18,7 +18,7 @@ work on different screens at once; backend tasks in separate copies, which they 
 cannot do both.
 
 This design moves the choice to the task. The project keeps a default. Each task shows where it will run before it
-starts, is proposed from its areas and risks, and can be changed whenever Start could start it (P3).
+starts, is proposed from its areas and risks, and can be changed while it is open and not started (P3).
 
 **Success means** (the acceptance criteria; §9 turns each into tests):
 
@@ -71,7 +71,7 @@ The lane cap is one budget per project: the scheduler skips a project whose runn
 |---|---|---|
 | P1 | Placement lives on the task: `tasks.workspace_mode` is `shared` or `worktree`. `projects.workspace_mode` becomes the default for new tasks, changeable at any time. `worktree` still needs `pull_request` delivery. In `local` delivery every task is `shared` and the choice is hidden. | The task is what the builder reasons about ("this is a screen I watch", "this is a migration"). The project's mode changing no longer needs an idle project, because it changes nothing that already exists. |
 | P2 | A task is proposed a placement when it is made (the builder MCP `create_task` in `mcp/tools.ts`, an accepted proposal in `inbox/proposal-task.ts`, the desktop form). **Worktree** when any of its `areas` names an entry in the project's new `isolate` list, or its `riskTags` include `migration` or `dependency`; **otherwise the project default**. A short reason is kept (`tasks.placement_reason`, "touches migrations"). An explicit placement from the planner or the form wins and has no reason. The default `isolate` is the stock hazards `migrations` and `deps` (`DEFAULT_HAZARDS`, `packages/contracts/src/entities.ts`). Any other entry, such as `contracts`, is per-project configuration the builder adds in Settings; the stock list holds only names every project has (builder's answer, 2026-10-29). **(call: `isolate` names areas and hazards, not globs; and the reason is stored rather than derived)** | A task's `areas` already hold hazard names (`claimRequestsForTask` reads them that way), so a task that edits the lockfile carries `deps` and one that adds a migration carries `migrations`. Names keep the rule short and checkable. A stored reason survives a later change to `isolate`; a derived one would explain a placement the rule no longer gives. Covers success criterion 4: migrations and the lockfile in every project by default; contracts in a project whose `isolate` names its contracts area. 10db itself has one area today (`repo`, `**`), so a `contracts` entry matches nothing there until that area is split; the contracts clause does not hold for 10db until then. |
-| P3 | The rule for changing a placement: **it can change exactly when Start could start the task**, that is, the task is open and its latest workstream, if any, is not in an active state (`checkStartable`, `delivery/start.ts`, with `ACTIVE_STATES` from `packages/contracts/src/workflow.ts`, so `patchTask` in `packages/db` can apply the same test). So it can change before the first start and again after a run that failed or was cancelled, and never while the task runs or after it is done. While it can change, the card and the task drawer show a "Your folder" / "Separate copy" badge with the reason as its tooltip, and the drawer and the batch sheet change it. Once it can't, the badge and the control are not shown, and the card shows its batch as today. Every start writes the placement it used onto each task it starts. | The builder confirms the proposal (the open-items goal). A re-start makes a new workstream in a new or joined batch, so where a failed run worked binds nothing; this is looser than the landing rule (`dec_01a18a8e`, "until it has a workstream") on purpose. Showing the badge only while it can change means it never states a placement the task did not, or will not, use. |
+| P3 | The rule for changing a placement: **it can change while the task is open and not started**. That means the task's status is open, its latest workstream, if any, is not in an active state (`ACTIVE_STATES`, `packages/contracts/src/workflow.ts`), and no join of it is pending (§5). This is `checkStartable`'s test (`delivery/start.ts`) without its parking check. A task parked in a board column has not started, so it keeps its badge and its placement can still change. `patchTask` in `packages/db` applies the status and workstream test, and the daemon's task service adds the pending-join test (§5). Pressing Start closes the window in the same request: a start writes each task's placement and then either makes its workstream or marks its join pending, before it answers (§5). So a placement can change before the first start and again after a run that failed or was cancelled. It can't change from Start until that run ends, or after the task is done. While it can change, the card and the task drawer show a "Your folder" / "Separate copy" badge with the reason as its tooltip, and the drawer and the batch sheet change it. Once it can't, the badge and the control are not shown, and the card shows its batch as today. | The builder confirms the proposal (the open-items goal). A re-start makes a new workstream in a new or joined batch, so where a failed run worked binds nothing; this is looser than the landing rule (`dec_01a18a8e`, "until it has a workstream") on purpose. Parking is about when a task runs, not where, and hiding a parked task's placement would break "shows where it will run before it starts". Closing the window at Start, not when the async cut or join finishes, stops a task from being moved and started a second time while its first start is still pending (§5). Showing the badge only while it can change means it never states a placement the task did not, or will not, use. |
 | P4 | A start partitions its tasks by placement: shared tasks go to `startShared`, worktree tasks to `startWorktrees`. `POST /projects/:id/batches` answers `BatchDto[]` as it does for worktree mode now. A start whose tasks are linked by a dependency across the two placements is refused in plain words, naming both tasks and where each runs. **(call: refuse, or move the shared half of the chain to a copy)** A fix task sent with `batchId` takes that batch's placement, and the start writes it onto the task (P3). Every check of both parts runs before either part writes (§5). | The dependency check already refuses a dependency that is neither in the group nor merged (`unfinishedDependencies`), so refusing needs only a better message. Moving a task from the folder the builder watches to a copy behind their back is the surprising one. |
 | P5 | A project holds one unfinished shared batch and any number of worktree batches; the existing partial index already allows this. An unfinished batch's kind is whether `worktree_path` is set (no new column). `jobKey` keys on the batch's kind: the project's single queue for a shared batch, `<project>:cut` and `<project>:ship` for a worktree batch. `ProjectViewDto.currentBatch` becomes the project's unfinished shared batch (`findUnfinishedBatch`), else its newest finished batch, else none: it never names a copy's unfinished batch. `openBatches` lists every unfinished batch of both kinds, and the Board's strip (`stripBatches`) lists `openBatches` in every project, falling back to `currentBatch` when none is open. | The shared cut and ship read and switch the main checkout, so they stay on one queue; worktree work never touches it and must not wait behind it. `currentBatch` drives the sheet's join, fix and busy states (`sheet-mode.ts`), which are about the shared batch only; today it would follow a newer copy. The strip must show a copy's batch beside the shared one. |
 | P6 | The shared cut's and the switch back's lane check counts only lanes whose checkout is the project's `repoPath` (`checkoutOf(ws) === project.repoPath`). A worktree lane no longer blocks a cut, and a shared lane still does. The daemon switches the main checkout's branch only while no lane works in it. Git concurrency is checked, below. | The check exists because the cut moves the branch under the files a lane is editing. A lane in a copy edits other files. |
@@ -86,7 +86,7 @@ Forward-only migration (`packages/db/AGENTS.md`; v0.1.0 is released), written by
 - `tasks.workspace_mode` widens from `'shared'` to `'shared' | 'worktree'` in the column's TypeScript type; the SQL
   stays text. The migration sets `worktree` on every task of a project whose `workspace_mode` is `worktree` and
   leaves every other task `shared`. That is where Start would run each task today, which is all the stored value
-  has to say: P3 shows it, and a start reads it, only while the task can be started. A finished batch no longer
+  has to say: P3 shows it, and a start reads it, only while the placement can change. A finished batch no longer
   records its kind (§2), so the migration does not try to recover where a finished task ran; its value is never
   shown.
 - `tasks.placement_reason` (nullable text).
@@ -95,9 +95,9 @@ Forward-only migration (`packages/db/AGENTS.md`; v0.1.0 is released), written by
 
 **Contracts:** `TaskDto` gains `workspaceMode` and `placementReason`; `TaskPatch` gains `workspaceMode`; `TaskInput`
 gains an optional `workspaceMode`; `ProjectDto` / `ProjectInput` / `ProjectPatch` gain `isolate`; `ProjectDto`'s
-`workspaceMode` is documented as the default. A patch to `workspaceMode` is refused with a plain message when Start
-could not start the task (P3: it is not open, or its latest workstream is active) or when the project does not
-deliver by pull request.
+`workspaceMode` is documented as the default. A patch to `workspaceMode` is refused with a plain message when the
+placement can't change (P3: the task is not open, its latest workstream is active, or a join of it is pending;
+parking does not count) or when the project does not deliver by pull request.
 
 ## 5. Lifecycle
 
@@ -108,22 +108,49 @@ the planner, the form and an accepted proposal agree.
 every task takes that batch's placement and the start is today's for that batch's kind (`startShared` with its
 `batchId` refusal, or `joinWorktree`). Otherwise it runs in two phases, so a refused start writes nothing:
 
-1. **Check, both parts, no writes.** `checkStartable` for every task; the cross-placement dependency refusal (P4);
-   for the shared part, `startShared`'s refusal of a shared batch that is `CUTTING` or `SHIPPING`, and
-   `unfinishedDependencies`; for the worktree part, `groupByDependency` and `unfinishedDependencies` per
-   dependency-linked group; `planForStart` for every task.
+1. **Check, both parts, no writes.** `checkStartable` for every task, which also refuses a task with a pending join
+   (below); the cross-placement dependency refusal (P4); for the shared part, `startShared`'s refusal of a shared
+   batch that is `CUTTING` or `SHIPPING`, and `unfinishedDependencies`; for the worktree part, `groupByDependency`
+   and `unfinishedDependencies` per dependency-linked group; `planForStart` for every task.
 2. **Write.** Only when every check passed: the placement onto each task (P3), then the shared batch (insert or
-   join) and each copy's batch, each in its own transaction as today, and their cut jobs.
+   join) and each copy's batch, each in its own transaction as today, and their cut jobs. A new shared batch is
+   inserted `CUTTING` with its tasks' workstreams `QUEUED` in the same transaction, as `startWorktrees` already
+   does for a copy. A join's task ids are marked pending (below).
 
 Today `startShared` checks and inserts in one function and `startWorktrees` inserts as soon as its own checks pass,
 so calling one after the other would leave a copy's `CUTTING` batch behind when the shared part is refused. T2
 splits each into its check and its write. Both parts return their batches in one array.
 
+**Closing the window at Start (P3).** Today a shared start inserts its batch `CUTTING` at once. It inserts the
+tasks' workstreams only in the cut's last write, after `switchNewBranch` (`cut` in `start.ts`). Until then the
+task has no active workstream, so `checkStartable` passes. Under this design the builder could change such a task
+to a copy and start it again, and the copy's batch would get the task's workstream. The shared cut's last write
+would then fail on `insertWorkstream`'s one-active-workstream guard (`packages/db/src/store/workstreams.ts`). That
+refuses the whole shared batch after the checkout was switched, and leaves the checkout on a branch that has no
+batch. The guard stops a task from running twice, but not that. So the start closes the window itself:
+
+- **A new shared batch** gets its workstreams `QUEUED` when it is inserted, so the task's latest workstream is
+  active from the moment Start answers. This is safe for three reasons. The scheduler waits on a batch that is not
+  `OPEN` (`batchLaunchVerdict`, `delivery/launch-rule.ts`). The cut's lane check counts lane states, which do not
+  include `QUEUED` (`countLanes`). A refused cut, or a restart mid-cut, cancels the workstreams with the batch
+  (`deleteCuttingBatch`, which `recover.ts` also calls), as a refused copy's cut already does. A cancelled latest
+  workstream shows no state line on the card (`task-state.ts`), and the task can be started again. The cut's last
+  write then only records the branch and opens the batch.
+- **A join** (a shared start into the `OPEN` batch, or a fix task sent with `batchId`) can't insert early. Its batch
+  is open, so the scheduler would launch a `QUEUED` workstream before the join's checks (the batch's branch, and
+  unmerged dependencies on GitHub) finish. Instead the starter keeps each pending join's task ids in memory, from
+  the request until the join job writes or refuses. `checkStartable` refuses those tasks, and so does a placement
+  patch through the daemon's task service (`daemon/services.ts`). The set ends with the process, as the job does.
+  Without the set, a join that loses this race fails its whole write and refuses every task in it, though it
+  never switches the checkout. During the window the stored placement is the one the join will use, so the badge
+  is still right.
+
 The lane cap stays one budget per project across both placements (§2): a copy's lane and a shared lane each count
 toward `maxLanes`.
 
-**Cut.** The shared cut is today's, with P6's lane check. A copy's cut is today's. The two queues of P5 mean a copy
-can be cut while a shared batch is `OPEN`.
+**Cut.** The shared cut is today's, with P6's lane check, and its last write no longer inserts workstreams (they
+came with the batch, above). A copy's cut is today's. The two queues of P5 mean a copy can be cut while a shared
+batch is `OPEN`.
 
 **Ship, retry, abandon, recovery.** Unchanged: they already read the batch. The switch back counts only lanes in
 the main checkout (P6). A project with a shared batch and copies recovers each on its own.
@@ -174,11 +201,11 @@ Nothing else is new. A copy's lane profile is today's. The shared cut and the sw
 
 | Unit | Change |
 |---|---|
-| `packages/db` | the migration and columns of §4; `insertTask` takes a placement and reason; `patchTask` refuses a placement change when Start could not start the task (P3); `patchProject` drops the idle-project test for the mode and keeps the `pull_request` one; `currentBatch` returns the unfinished shared batch, else the newest finished batch (P5) |
+| `packages/db` | the migration and columns of §4; `insertTask` takes a placement and reason; `patchTask` refuses a placement change for a task that is not open or whose latest workstream is active, and not for a parked one (P3); `patchProject` drops the idle-project test for the mode and keeps the `pull_request` one; `currentBatch` returns the unfinished shared batch, else the newest finished batch (P5) |
 | `packages/contracts` | §4's fields |
-| `apps/daemon/src/delivery/` | `startBatch` partitions by placement and checks both parts before writing either (§5); the start writes each task's placement; the shared cut and `runningIn` count lanes in the main checkout only; `jobKey` takes the batch's kind; a clearer cross-placement dependency refusal |
+| `apps/daemon/src/delivery/` | `startBatch` partitions by placement and checks both parts before writing either (§5); the start writes each task's placement; a new shared batch is inserted with its workstreams, and a pending join's tasks are held in the starter, refused by `checkStartable` and by the placement patch in `daemon/services.ts` (§5); the shared cut and `runningIn` count lanes in the main checkout only; `jobKey` takes the batch's kind; a clearer cross-placement dependency refusal |
 | `apps/daemon/src/api`, `mcp/tools.ts`, `inbox/proposal-task.ts` | the shared proposal function; `create_task` accepts `workspaceMode` |
-| `apps/desktop` | the badge and the drawer and sheet controls, shown while the task can be started; `sheet-mode.ts` and `batch-panel.tsx` following the batch's kind; `stripBatches` in `board-view.tsx` listing `openBatches` in every project; the project form's default and its `isolate` list |
+| `apps/desktop` | the badge and the drawer and sheet controls, shown while the placement can change (P3, parked tasks included); `sheet-mode.ts` and `batch-panel.tsx` following the batch's kind; `stripBatches` in `board-view.tsx` listing `openBatches` in every project; the project form's default and its `isolate` list |
 | docs | `02-batch-delivery.md`, `03-trust-boundaries.md`, `docs/open-items.md` |
 
 PR-sized build tasks, with what each depends on:
@@ -186,8 +213,8 @@ PR-sized build tasks, with what each depends on:
 | Task | Delivers | Depends on |
 |---|---|---|
 | T1 | `db` and `contracts`: the migration, the task and project fields, the patch rules, `currentBatch` | none |
-| T2 | the daemon: start by placement with checks before writes, the shared cut's and switch back's lane scoping, `jobKey` by batch kind | T1 |
-| T3 | the proposal rule and the `isolate` setting, in `create_task`, accepted proposals and the API | T1 |
+| T2 | the daemon: start by placement with checks before writes, the window closed at Start (shared workstreams with the batch, pending joins), the shared cut's and switch back's lane scoping, `jobKey` by batch kind | T1 |
+| T3 | the proposal rule and the `isolate` setting, in `create_task`, accepted proposals and the API. It does not seed 10db's own `isolate` with `contracts`: that waits for 10db's `repo` area to be split (§10, `dec_01a18abb`) | T1 |
 | T4 | the desktop: badge, controls, sheet, the Board's strip and project form | T2, T3 |
 | T5 | docs: `02-batch-delivery.md`, `03-trust-boundaries.md` (the seed call), `open-items.md` | T2 |
 
@@ -198,9 +225,10 @@ Red first in each task, named here by where it belongs.
 - **T1.**
   - The migration sets `worktree` on every task of a worktree-mode project, started or not, and leaves every task
     of a shared-mode project `shared`.
-  - A placement patch is accepted for a task with no workstream and for one whose latest run failed or was
-    cancelled; it is refused while the latest workstream is active, for a task that is not open, and for a
-    `local` project.
+  - A placement patch is accepted for a task with no workstream, for one whose latest run failed or was
+    cancelled, and for an unstarted task parked in a board column. It is refused while the latest workstream is
+    active, including a `QUEUED` one in a `CUTTING` shared batch, for a task that is not open, and for a `local`
+    project.
   - `currentBatch` in a project with an `OPEN` shared batch and a newer `OPEN` copy's batch is the shared one;
     with only a copy's batch open and an older shipped batch, it is the shipped batch; with only a copy's batch,
     it is none.
@@ -213,6 +241,13 @@ Red first in each task, named here by where it belongs.
   - A mixed start while the shared batch is `SHIPPING` is refused and leaves no new batch, no workstream and no
     changed task; likewise a mixed start whose worktree part has an unfinished dependency.
   - A cross-placement dependency is refused with a card naming both.
+  - A new shared batch's tasks have `QUEUED` workstreams as soon as the start answers. While that batch is
+    `CUTTING`, a placement patch to one of its tasks is refused, and a second start of it is refused and makes no
+    copy's batch. A refused shared cut, and a restart mid-cut, leave those workstreams `CANCELLED` and the tasks
+    startable again.
+  - While a join is pending (a shared start into the `OPEN` batch, and a fix task with `batchId`), a second start
+    of one of its tasks and a placement patch to it are both refused. Once the join writes or refuses, both are
+    allowed again by the pending-join test.
   - A shared task and a copy's task on the same area launch in one tick; two shared tasks on overlapping areas do
     not; on disjoint areas they do.
   - A shared cut succeeds while a copy's lane runs, and is refused while a shared lane runs; the switch back does
@@ -223,8 +258,9 @@ Red first in each task, named here by where it belongs.
   - A runner's cwd is `repoPath` for a shared task while copies are live.
   - A copy's creation and a shared cut together finish with the right refs.
 - **T4.**
-  - The badge, the drawer control and the sheet render and send the right patch while the task can be started,
-    and are absent for a running or done task.
+  - The badge, the drawer control and the sheet render and send the right patch while the placement can change
+    (P3), and are absent for a running or done task and for a task whose shared batch is `CUTTING`.
+  - The badge and the drawer control are shown on an unstarted card parked in a board column.
   - A mixed project with an open shared batch and an open copy's batch, each with two tasks, shows both strips
     on the Board (`stripBatches`); a shared-default project with only a copy's batch open shows that one.
 - **All.** The existing delivery, scheduler, runner and desktop suites pass unchanged.
@@ -235,7 +271,9 @@ Red first in each task, named here by where it belongs.
 
 A port block per worktree; the planner choosing the lane count; changes to the switch back beyond P6; parallel ships;
 a per-task choice of landing (that has its own record: `dec_01a18a8e`); splitting 10db's own `repo` area so a
-`contracts` area and `isolate` entry exist for it (P2). Each goes to `docs/open-items.md` if it is not there.
+`contracts` area and `isolate` entry exist for it (P2). Seeding 10db's `isolate` with `contracts` (`dec_01a18abb`)
+waits for that split, because until then the entry matches nothing; it is not a T3 item. Each goes to
+`docs/open-items.md` if it is not there.
 
 ## 11. Calls to review
 
@@ -243,5 +281,5 @@ P2 (names, not globs; the reason stored), P4 (refuse, or move a chain), and §7 
 have written `node_modules`).
 
 Settled since the first draft: the default `isolate` holds only `migrations` and `deps`, and `contracts` is a
-project's own entry (the builder, 2026-10-29); a placement can change exactly when Start could start the task
-(P3).
+project's own entry (the builder, 2026-10-29); a placement can change while the task is open and not started,
+parking does not close that window, and pressing Start closes it at once (P3, §5).

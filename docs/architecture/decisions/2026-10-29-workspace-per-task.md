@@ -12,12 +12,15 @@ still needs `pull_request` delivery; in `local` delivery every task is `shared`.
 A task is proposed a placement when it is made: a separate copy when one of its areas names an entry in the
 project's `isolate` list or its risk tags include `migration` or `dependency`, otherwise the project default.
 The stock `isolate` list is the hazards `migrations` and `deps`; other entries, such as `contracts`, are the
-project's own. The builder can change a task's placement exactly when Start could start it: the task is open and
-its latest workstream, if any, is not active.
+project's own. The builder can change a task's placement while the task is open and not started: its latest
+workstream, if any, is not active, and no join of it is pending. Parking a task in a board column does not close
+that window. Pressing Start closes it in the same request, because the start makes the task's workstream, or marks
+its join pending, before it answers.
 
 A start partitions its tasks by placement and checks both parts before it writes either. A project holds one
-unfinished shared batch and any number of worktree batches. The shared cut and the switch back count only the lanes working in the main checkout. The batch stays
-the unit of delivery (W2): nothing about cut, ship, retry, abandon or recovery changes.
+unfinished shared batch and any number of worktree batches. The shared cut and the switch back count only the
+lanes working in the main checkout. The batch stays the unit of delivery (W2): cut, ship, retry, abandon and
+recovery still work one batch at a time.
 
 The design is `docs/superpowers/specs/2026-10-29-10db-task-placement-design.md`. It is designed, not built.
 
