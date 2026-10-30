@@ -1,6 +1,11 @@
 import { realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { AreaProposalSource, type AreaProposalResult, type ProposedArea } from '@10db/contracts';
+import {
+  AreaProposalSource,
+  WHOLE_REPOSITORY_GLOBS,
+  type AreaProposalResult,
+  type ProposedArea,
+} from '@10db/contracts';
 import { equalOrUnder, type Git } from '../git';
 import { deriveAreaCandidates, mergeCoupledCandidates } from './area-candidates';
 import { areasFromModel, areasFromStructure, namingPrompt } from './area-naming';
@@ -25,7 +30,7 @@ export interface ProposeAreasDeps {
 const EVERYTHING: ProposedArea = {
   name: 'repo',
   reason: 'The repository has no committed files yet, so one area holds them all.',
-  globs: ['**'],
+  globs: [...WHOLE_REPOSITORY_GLOBS],
 };
 
 const refuse = (message: string): AreaProposalResult => ({ ok: false, message });

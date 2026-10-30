@@ -21,18 +21,27 @@ hazards changes with it.
 - **Candidates from structure** (`area-candidates.ts`, pure). A folder holding a manifest (`package.json`,
   `Cargo.toml`, `go.mod`, `pyproject.toml` and the like) is a unit: one candidate, never merged with another
   unit. A framework app with route groups (`app/(group)/…` or `pages/`) is split by group and, where a group
-  holds at least three screens, by screen; its other top folders (`lib/`) stand beside them. Other folders with
+  holds at least three screens, by screen; its other top folders (`lib/`) stand beside them, and so do the
+  other folders on the way to its routes (`src/components/` beside `src/app/`). Other folders with
   at least three files are candidates; what is left (top-level files, small folders) is one more. A repository
   that is one package is split by its top folders. Together the candidates hold every tracked file, and each
-  file matches the globs of the candidate that holds it and no other. `dir/**` skips dot folders and dotfiles,
-  so each candidate also gets a glob that matches those. A folder name is taken literally (`literal-glob.ts`):
-  each character glob syntax reads becomes a class that matches only itself, so a Next.js screen `[orgId]` gets
-  `[[]orgId]/**`, not a class matching `o/`. Node's matcher reads a backslash as a separator, never an escape,
-  and a project refuses one, so where no exact glob exists (a backslash, a stray bracket, braces holding a comma
-  or `..`) those characters become `?`, which also matches a name differing only there.
+  file matches the globs of the candidate that holds it and no other; a test checks that over hundreds of
+  layouts made at random. Node's matcher lets no `*` or `**` match a name that starts with a dot, so each
+  file's glob comes from where its candidate holds it: below a folder held whole, `dir/**` takes the files
+  with no dot name, `dir/**/.*` the dotfiles and `dir/**/.*/**` the files below one dot folder, at any depth.
+  A file below a second dot name is taken from its last dot folder (`dir/.storybook/**/.*`), because the
+  matcher never matches a dot name at the end of a pattern holding two `**`: `**/.*/**/.*` matches nothing.
+  A folder name is taken literally (`literal-glob.ts`): each character glob syntax reads becomes a class that
+  matches only itself, so a Next.js screen `[orgId]` gets `[[]orgId]/**`, not a class matching `o/`. Node's
+  matcher reads a backslash as a separator, never an escape, and a project refuses one, so where no exact glob
+  exists (a backslash, a stray bracket, braces holding a comma or `..`) those characters become `?`, which also
+  matches a name differing only there.
 - **Candidates merged by history.** Two folder or route candidates that changed together in at least four
   commits, and in at least three quarters of the commits of the one that changed less, are merged. A commit that
-  touched more than four candidates says nothing about any pair.
+  touched more than four candidates says nothing about any pair. A commit's files are placed by the folders each
+  candidate holds, not by matching globs, so a file the commit removed counts too, and each file costs a few
+  map lookups. Both steps run on the daemon's event loop: for 100,000 files and 400 commits they take under a
+  tenth of a second together, where matching every commit file against every glob took most of a second.
 - **A model names and merges the candidates.** The daemon sends the default account's `haiku` one question
   (`SessionAdapter.complete`): the numbered candidates with their path, kind and file count, as text. The model
   runs in a new empty folder with no tool, no settings file, no MCP server and no saved session, after the same
@@ -45,7 +54,9 @@ hazards changes with it.
   line, and its reason. The builder renames, merges (an area into another), removes and adds areas, and Create
   Project waits for a valid list: names the project would accept, none repeated or taken by a hazard, every area
   with a valid glob, at least one area. The project is created with exactly that list. When the proposal fails
-  the form starts from one area, `repo`, over `**`, says so, and still lets the builder split it.
+  the form starts from one area, `repo`, says so, and still lets the builder split it; a repository with no
+  commit is proposed the same one area. Its globs are `WHOLE_REPOSITORY_GLOBS` in `@10db/contracts`: `**`,
+  `**/.*` and `**/.*/**`, every file with at most one dot name in its path.
 
 ## Why
 

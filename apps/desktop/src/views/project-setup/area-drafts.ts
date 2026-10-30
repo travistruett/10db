@@ -1,4 +1,10 @@
-import { AreaDef, DEFAULT_HAZARDS, PathPattern, type ProposedArea } from '@10db/contracts';
+import {
+  AreaDef,
+  DEFAULT_HAZARDS,
+  PathPattern,
+  WHOLE_REPOSITORY_GLOBS,
+  type ProposedArea,
+} from '@10db/contracts';
 
 /** One area as the builder is editing it: the globs are the text of a box, one to a line. */
 export interface AreaDraft {
@@ -10,10 +16,10 @@ export interface AreaDraft {
   readonly reason: string;
 }
 
-/** What setup offered before it proposed anything: one area over every file. */
+/** What setup offers when no proposal came: one area over the whole repository. */
 export const WHOLE_REPOSITORY: ProposedArea = {
   name: 'repo',
-  globs: ['**'],
+  globs: [...WHOLE_REPOSITORY_GLOBS],
   reason: 'The whole repository.',
 };
 

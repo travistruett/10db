@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, matchesGlob } from 'node:path';
 import {
   AreaProposalResult,
   AreaProposalSource,
@@ -97,7 +97,11 @@ describe('proposeAreas without a model', () => {
     });
     const { areas } = await proposal(repo.path);
     expect(areas).toHaveLength(1);
-    expect(areas[0]?.globs).toEqual(['**']);
+    for (const file of ['README.md', 'src/a.ts', '.gitignore', '.github/workflows/ci.yml'])
+      expect(
+        areas[0]?.globs.some((glob) => matchesGlob(file, glob)),
+        file,
+      ).toBe(true);
   });
 
   it('proposes the packages of a repository with no file at its top', async () => {

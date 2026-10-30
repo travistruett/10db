@@ -61,6 +61,14 @@ export const ProposedArea = AreaDef.extend({
 });
 export type ProposedArea = z.infer<typeof ProposedArea>;
 
+/**
+ * The globs of one area that holds every file of a repository, for a project nothing was proposed
+ * for. Node's glob matcher, which 10db matches paths with, lets no `*` or `**` match a name that
+ * starts with a dot, so dotfiles and the files below a dot folder have globs of their own. A file
+ * below a second dot name, such as a dotfile in a dot folder, is still left out.
+ */
+export const WHOLE_REPOSITORY_GLOBS: readonly string[] = ['**', '**/.*', '**/.*/**'];
+
 /** Who named and merged the areas. */
 export const AreaProposalSource = {
   /** A model named and merged the candidates. */

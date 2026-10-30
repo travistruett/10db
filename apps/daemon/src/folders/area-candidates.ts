@@ -1,4 +1,4 @@
-import { matchesGlob, posix } from 'node:path';
+import { posix } from 'node:path';
 import { literalGlob } from './literal-glob';
 
 /** What kind of place a candidate area is, which decides what may merge with it. */
@@ -14,8 +14,16 @@ export const AreaCandidateKind = {
 } as const;
 export type AreaCandidateKind = (typeof AreaCandidateKind)[keyof typeof AreaCandidateKind];
 
+/** The folders something holds: some with everything below them, some for their own files only. */
+interface Holder {
+  /** Folders held with every file below them. */
+  readonly trees: readonly string[];
+  /** Folders held for the files directly in them, and not for the folders below them. */
+  readonly directs: readonly string[];
+}
+
 /** A place in the repository that could be an area, before anyone has named it. */
-export interface AreaCandidate {
+export interface AreaCandidate extends Holder {
   readonly kind: AreaCandidateKind;
   /** The path that names the candidate (`.` for the top of the repository). */
   readonly label: string;
@@ -91,12 +99,10 @@ const holdsUnit = (dir: Dir): boolean =>
 const isRouteGroup = (name: string) => /^\(.+\)$/u.test(name);
 
 /** Where in the repository a draft candidate lives: whole folders and folders' own files. */
-interface Draft {
+interface Draft extends Holder {
   readonly kind: AreaCandidateKind;
   readonly label: string;
-  /** Folders taken with everything below them. */
   readonly trees: string[];
-  /** Folders taken for the files directly in them only. */
   readonly directs: string[];
 }
 
@@ -107,18 +113,32 @@ const draftOf = (kind: AreaCandidateKind, label: string, tree: string): Draft =>
   directs: [],
 });
 
-/** The folder `steps` below `dir`, or undefined when one step is missing. */
-function descend(dir: Dir, steps: readonly string[]): Dir | undefined {
-  let at: Dir | undefined = dir;
-  for (const step of steps) at = at?.dirs.get(step);
-  return at;
+/** The folders `steps` below `dir`, one for each step, or null when one step is missing. */
+function descend(dir: Dir, steps: readonly string[]): Dir[] | null {
+  const way: Dir[] = [];
+  let at = dir;
+  for (const step of steps) {
+    const next = at.dirs.get(step);
+    if (next === undefined) return null;
+    way.push(next);
+    at = next;
+  }
+  return way;
 }
 
-/** The route folder of a framework app, when it has route groups. */
-function routeRootOf(unit: Dir): Dir | null {
+/** The route folder of a framework app, and the folders between the app and it (`src` of `src/app`). */
+interface RouteRoot {
+  readonly routes: Dir;
+  readonly between: readonly Dir[];
+}
+
+/** Where a framework app keeps its routes, when it has route groups. */
+function routeRootOf(unit: Dir): RouteRoot | null {
   for (const candidate of ROUTE_ROOTS) {
-    const dir = descend(unit, candidate.split('/'));
-    if (dir && [...dir.dirs.keys()].some(isRouteGroup)) return dir;
+    const way = descend(unit, candidate.split('/'));
+    const routes = way?.at(-1);
+    if (way && routes && [...routes.dirs.keys()].some(isRouteGroup))
+      return { routes, between: way.slice(0, -1) };
   }
   return null;
 }
@@ -139,16 +159,19 @@ function screensOf(group: Dir): { container: Dir; passed: Dir[] } | null {
   }
 }
 
-/** A framework app split by route group and screen, with its other top folders beside them. */
-function splitRoutes(unit: Dir, routes: Dir): Draft[] {
+/**
+ * A framework app split by route group and screen. The app and each folder on the way to its routes
+ * keep their own files, and their other folders stand beside the screens.
+ */
+function splitRoutes(unit: Dir, { routes, between }: RouteRoot): Draft[] {
   const drafts: Draft[] = [];
+  const way = [unit, ...between, routes];
   const own: Draft = {
     kind: AreaCandidateKind.Unit,
     label: unit.path,
     trees: [],
-    directs: [unit.path],
+    directs: way.map((dir) => dir.path),
   };
-  const routesOwn: string[] = [routes.path];
   for (const [name, child] of routes.dirs) {
     if (!isRouteGroup(name)) {
       own.trees.push(child.path);
@@ -169,12 +192,14 @@ function splitRoutes(unit: Dir, routes: Dir): Draft[] {
       drafts.push(draftOf(AreaCandidateKind.Route, screen.path, screen.path));
     drafts.push(left);
   }
-  own.directs.push(...routesOwn);
-  for (const child of unit.dirs.values()) {
-    if (child === routes || routes.path.startsWith(`${child.path}/`)) continue;
-    if (child.total >= MIN_FILES)
-      drafts.push(draftOf(AreaCandidateKind.Folder, child.path, child.path));
-    else own.trees.push(child.path);
+  for (const [n, dir] of way.slice(0, -1).entries()) {
+    const next = way[n + 1];
+    for (const child of dir.dirs.values()) {
+      if (child === next) continue;
+      if (child.total >= MIN_FILES)
+        drafts.push(draftOf(AreaCandidateKind.Folder, child.path, child.path));
+      else own.trees.push(child.path);
+    }
   }
   return [own, ...drafts];
 }
@@ -207,9 +232,9 @@ function splitLarge(dir: Dir): Draft[] {
 
 function visit(dir: Dir, drafts: Draft[], leftovers: Draft): void {
   if (isManifestDir(dir)) {
-    const routes = routeRootOf(dir);
-    if (routes === null) drafts.push(draftOf(AreaCandidateKind.Unit, dir.path, dir.path));
-    else drafts.push(...splitRoutes(dir, routes));
+    const routeRoot = routeRootOf(dir);
+    if (routeRoot === null) drafts.push(draftOf(AreaCandidateKind.Unit, dir.path, dir.path));
+    else drafts.push(...splitRoutes(dir, routeRoot));
     return;
   }
   if (holdsUnit(dir)) {
@@ -223,9 +248,9 @@ function visit(dir: Dir, drafts: Draft[], leftovers: Draft): void {
 
 /** The top of a repository that is one package: its folders become the candidates. */
 function visitTopOfPackage(root: Dir, drafts: Draft[], leftovers: Draft): void {
-  const routes = routeRootOf(root);
-  if (routes !== null) {
-    const parts = splitRoutes(root, routes);
+  const routeRoot = routeRootOf(root);
+  if (routeRoot !== null) {
+    const parts = splitRoutes(root, routeRoot);
     // The root's own files stay with the top of the repository, not with a candidate named for it.
     for (const part of parts) {
       if (part.label === root.path) {
@@ -241,58 +266,90 @@ function visitTopOfPackage(root: Dir, drafts: Draft[], leftovers: Draft): void {
   }
 }
 
+/** Which holder each folder belongs to: whole, or for the files directly in it. */
+interface Holdings<T> {
+  readonly trees: ReadonlyMap<string, T>;
+  readonly directs: ReadonlyMap<string, T>;
+}
+
+function holdingsOf<T extends Holder>(holders: readonly T[]): Holdings<T> {
+  const trees = new Map<string, T>();
+  const directs = new Map<string, T>();
+  for (const holder of holders) {
+    for (const tree of holder.trees) if (!trees.has(tree)) trees.set(tree, holder);
+    for (const direct of holder.directs) if (!directs.has(direct)) directs.set(direct, holder);
+  }
+  return { trees, directs };
+}
+
+/** Where a path is held: by whom, at which folder, and whether that folder is held for its own files. */
+interface Held<T> {
+  readonly holder: T;
+  readonly folder: string;
+  readonly direct: boolean;
+}
+
+const parentOf = (path: string) => path.slice(0, Math.max(path.lastIndexOf('/'), 0));
+
+/**
+ * Who holds the file at `path`, which may be one a commit removed: whoever holds its own folder for
+ * that folder's files, else whoever holds the deepest folder above it whole.
+ */
+function heldAt<T>(holdings: Holdings<T>, path: string): Held<T> | undefined {
+  const folder = parentOf(path);
+  const direct = holdings.directs.get(folder);
+  if (direct !== undefined) return { holder: direct, folder, direct: true };
+  for (let above = folder; ; above = parentOf(above)) {
+    const holder = holdings.trees.get(above);
+    if (holder !== undefined) return { holder, folder: above, direct: false };
+    if (above === '') return undefined;
+  }
+}
+
+const isDotName = (name: string) => name.startsWith('.');
+
+/** A glob as the folder it starts at and the pattern below that folder. */
+interface FolderGlob {
+  readonly folder: string;
+  readonly pattern: string;
+}
+
+// The glob that takes `file` in where it is held. Node's matcher lets no `*` or `**` match a name that
+// starts with a dot, so below a folder held whole, `**` takes the files with no dot name, `**/.*` the
+// dotfiles, and `**/.*/**` the files below one dot folder, at any depth. A file below a second dot name
+// is taken from its last dot folder instead: the matcher never matches a dot name at the end of a
+// pattern with two `**`, so `**/.*/**/.*` would take nothing.
+function globOf(file: string, { folder, direct }: Held<unknown>): FolderGlob {
+  const below = (folder === '' ? file : file.slice(folder.length + 1)).split('/');
+  const dotfile = isDotName(below.at(-1) ?? '');
+  if (direct) return { folder, pattern: dotfile ? '.*' : '*' };
+  const dots = below.filter(isDotName).length;
+  if (dots === 0) return { folder, pattern: '**' };
+  if (dots === 1) return { folder, pattern: dotfile ? '**/.*' : '**/.*/**' };
+  const lastDotFolder = below.slice(0, -1).findLastIndex(isDotName);
+  const through = below.slice(0, lastDotFolder + 1).join('/');
+  return {
+    folder: folder === '' ? through : `${folder}/${through}`,
+    pattern: dotfile ? '**/.*' : '**',
+  };
+}
+
 /** `glob` inside the folder `dir`, whose name is taken literally whatever characters it holds. */
 const prefixed = (dir: string, glob: string) => (dir === '' ? glob : `${literalGlob(dir)}/${glob}`);
 
-/** The files directly in `dir` (not below it) and whether any of them is a dotfile. */
-function directGlobs(dir: Dir | undefined): string[] {
-  if (dir === undefined) return [];
-  const names = dir.direct.map(baseName);
-  return [
-    ...(names.some((n) => !n.startsWith('.')) ? [prefixed(dir.path, '*')] : []),
-    ...(names.some((n) => n.startsWith('.')) ? [prefixed(dir.path, '.*')] : []),
-  ];
-}
-
-function dirAt(root: Dir, path: string): Dir | undefined {
-  return descend(root, path === '' ? [] : path.split('/'));
-}
-
-/** The part of `file` through its first dot folder (or the file itself when it is a dotfile). */
-function dotPrefix(file: string, tree: string): string | null {
-  const parts = file.split('/');
-  const from = tree === '' ? 0 : tree.split('/').length;
-  const at = parts.findIndex((p, i) => i >= from && p.startsWith('.'));
-  if (at === -1) return null;
-  return at === parts.length - 1
-    ? prefixed(parts.slice(0, at).join('/'), '.*')
-    : prefixed(parts.slice(0, at + 1).join('/'), '**');
-}
-
-/**
- * The globs for a draft. `dir/**` skips a dot folder and a dotfile below it, so those get a glob each
- * that does match them.
- */
-function globsOf(draft: Draft, root: Dir, owned: readonly string[]): string[] {
-  const globs = new Set<string>();
-  for (const tree of draft.trees) globs.add(prefixed(tree, '**'));
-  for (const direct of draft.directs)
-    for (const g of directGlobs(dirAt(root, direct))) globs.add(g);
-  for (const file of owned) {
-    if ([...globs].some((g) => matchesGlob(file, g))) continue;
-    const tree = draft.trees.find((t) => file.startsWith(`${t}/`)) ?? '';
-    const fix = dotPrefix(file, tree);
-    if (fix !== null) globs.add(fix);
-  }
-  return [...globs];
-}
-
 const REST_LABEL = '.';
+
+/** A draft's files: how many, and the patterns that take them in, by the folder they are held at. */
+interface Holding {
+  files: number;
+  readonly patterns: Map<string, Set<string>>;
+}
 
 /**
  * The places in a repository that could be areas, from its tracked files alone: a package or app is
  * one candidate, a framework app is split by route group and screen, and what is left over is one more.
- * Together the candidates hold every file.
+ * Together the candidates hold every file, and each file matches the globs of the one that holds it
+ * and no other's.
  */
 export function deriveAreaCandidates(files: readonly string[]): AreaCandidate[] {
   const root = buildTree(files);
@@ -310,38 +367,42 @@ export function deriveAreaCandidates(files: readonly string[]): AreaCandidate[] 
   }
   const all = [...drafts, leftovers];
 
-  // A file belongs to the first draft that names its folder, the deepest folder winning.
-  const owner = new Map<string, Draft>();
-  const rank = new Map<string, number>();
-  const claim = (draft: Draft, folder: string, direct: boolean) => {
-    const folderDir = dirAt(root, folder);
-    if (folderDir === undefined) return;
-    const depth = folder === '' ? 0 : folder.split('/').length;
-    const stack = [folderDir];
-    for (let dir = stack.pop(); dir !== undefined; dir = stack.pop()) {
-      for (const file of dir.direct) {
-        const was = rank.get(file) ?? -1;
-        if (depth >= was) {
-          owner.set(file, draft);
-          rank.set(file, depth);
-        }
-      }
-      if (!direct) stack.push(...dir.dirs.values());
-    }
-  };
-  for (const draft of all) {
-    for (const tree of draft.trees) claim(draft, tree, false);
-    for (const direct of draft.directs) claim(draft, direct, true);
+  const holdings = holdingsOf(all);
+  // A folder held whole gets `**` whatever it holds, so the files it gains later are in it too.
+  const held = new Map<Draft, Holding>(
+    all.map((d) => [d, { files: 0, patterns: new Map(d.trees.map((t) => [t, new Set(['**'])])) }]),
+  );
+  for (const file of files) {
+    // Every folder has a holder; a file none took would still be the rest's, by its folder.
+    const at = heldAt(holdings, file) ?? {
+      holder: leftovers,
+      folder: parentOf(file),
+      direct: true,
+    };
+    const holding = held.get(at.holder);
+    if (holding === undefined) continue;
+    holding.files += 1;
+    const { folder, pattern } = globOf(file, at);
+    holding.patterns.set(folder, (holding.patterns.get(folder) ?? new Set<string>()).add(pattern));
   }
-  const owned = new Map<Draft, string[]>(all.map((d) => [d, []]));
-  for (const file of files) (owned.get(owner.get(file) ?? leftovers) ?? []).push(file);
 
-  // A draft that ends up owning no file is no area: it would have no glob, and an area needs one.
+  // A draft that ends up holding no file is no area: it would have no glob, and an area needs one.
   return all.flatMap((draft): AreaCandidate[] => {
-    const mine = owned.get(draft) ?? [];
-    const globs = globsOf(draft, root, mine);
-    if (mine.length === 0 || globs.length === 0) return [];
-    return [{ kind: draft.kind, label: draft.label, globs, files: mine.length }];
+    const holding = held.get(draft);
+    if (holding === undefined || holding.files === 0) return [];
+    const globs = [...holding.patterns].flatMap(([folder, patterns]) =>
+      [...patterns].map((pattern) => prefixed(folder, pattern)),
+    );
+    return [
+      {
+        kind: draft.kind,
+        label: draft.label,
+        globs,
+        files: holding.files,
+        trees: [...draft.trees],
+        directs: [...draft.directs],
+      },
+    ];
   });
 }
 
@@ -353,14 +414,20 @@ export function mergeCoupledCandidates(
   candidates: readonly AreaCandidate[],
   commits: readonly (readonly string[])[],
 ): AreaCandidate[] {
-  const mergeable = candidates.flatMap((c, i) =>
-    c.kind === AreaCandidateKind.Route || c.kind === AreaCandidateKind.Folder ? [i] : [],
+  const holdings = holdingsOf(candidates);
+  const mergeable = new Map(
+    candidates.flatMap((c, i) =>
+      c.kind === AreaCandidateKind.Route || c.kind === AreaCandidateKind.Folder ? [[c, i]] : [],
+    ),
   );
   const touched = (commit: readonly string[]): Set<number> => {
     const hit = new Set<number>();
     for (const file of commit) {
-      const at = mergeable.find((i) => candidates[i]?.globs.some((g) => matchesGlob(file, g)));
+      const holder = heldAt(holdings, file)?.holder;
+      const at = holder === undefined ? undefined : mergeable.get(holder);
       if (at !== undefined) hit.add(at);
+      // Past the spread the commit is passed over, whatever else it touches.
+      if (hit.size > MAX_COMMIT_SPREAD) break;
     }
     return hit;
   };
@@ -405,6 +472,8 @@ export function mergeCoupledCandidates(
         label: members.map((m) => m.label).join(' + '),
         globs: [...new Set(members.flatMap((m) => m.globs))],
         files: members.reduce((sum, m) => sum + m.files, 0),
+        trees: members.flatMap((m) => m.trees),
+        directs: members.flatMap((m) => m.directs),
       },
     ];
   });

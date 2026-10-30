@@ -3,6 +3,7 @@ import {
   FolderInspectInput,
   FolderRefusalReason,
   SystemCheckDto,
+  WHOLE_REPOSITORY_GLOBS,
   type AreaProposalResult,
   type FolderInspection,
   type FolderInspectResult,
@@ -703,7 +704,9 @@ describe('the areas in the new project', () => {
     expect(screen.getByText(/Couldn't propose areas/)).toBeTruthy();
     expect(names()).toEqual(['repo']);
     expect(area(1)).toBeTruthy();
-    expect(await createAndRead(served)).toMatchObject({ areas: [{ name: 'repo', globs: ['**'] }] });
+    expect(await createAndRead(served)).toMatchObject({
+      areas: [{ name: 'repo', globs: [...WHOLE_REPOSITORY_GLOBS] }],
+    });
   });
 
   it('starts from one area over the whole repository when the daemon declines to propose', async () => {

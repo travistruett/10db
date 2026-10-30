@@ -1,3 +1,4 @@
+import { WHOLE_REPOSITORY_GLOBS } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import {
   addDraft,
@@ -139,7 +140,9 @@ describe('draftProblems', () => {
 });
 
 describe('WHOLE_REPOSITORY', () => {
-  it('is the one area over every file that setup used before it proposed any', () => {
-    expect(areasOf(draftsFromAreas([WHOLE_REPOSITORY]))).toEqual([{ name: 'repo', globs: ['**'] }]);
+  it('is one area over the whole repository, dotfiles and dot folders included', () => {
+    expect(areasOf(draftsFromAreas([WHOLE_REPOSITORY]))).toEqual([
+      { name: 'repo', globs: [...WHOLE_REPOSITORY_GLOBS] },
+    ]);
   });
 });
