@@ -22,4 +22,4 @@ severe first. Skip praise.
   `utils` grab-bags, no new dependency without a reason.
 - **Secrets:** no tokens, keys or personal data in code, logs or fixtures.
 
-If you find a problem in your own change, fix it, then re-run the gate.
+If you find a problem in your own change, fix it, then rerun the checks for what you changed.

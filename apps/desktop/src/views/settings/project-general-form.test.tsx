@@ -87,6 +87,22 @@ const rows: readonly Row[] = [
     sent: { baseBranch: 'develop' },
   },
   {
+    name: 'When checks pass, merging',
+    project: pullRequests,
+    label: 'When checks pass',
+    line: 'GitHub merges each pull request into main by itself once its required checks pass. A task can choose another branch, or hold.',
+    change: () => fireEvent.click(screen.getByRole('radio', { name: 'Hold for my review' })),
+    sent: { landing: 'hold' },
+  },
+  {
+    name: 'When checks pass, holding',
+    project: { ...pullRequests, landing: 'hold' },
+    label: 'When checks pass',
+    line: 'Pull requests wait for you to merge them. A task can choose to merge.',
+    change: () => fireEvent.click(screen.getByRole('radio', { name: 'Merge into main' })),
+    sent: { landing: 'merge' },
+  },
+  {
     name: 'Pull request title',
     project: pullRequests,
     label: 'Pull request title',
@@ -219,6 +235,28 @@ describe('ProjectGeneralForm', () => {
   });
 
   it.each([
+    { name: 'a local project', project: {}, shown: false },
+    { name: 'a pull-request project', project: pullRequests, shown: true },
+  ])('When checks pass shows only for pull requests: $name', async (row) => {
+    serve(projectDto(row.project));
+    renderApp('/settings/general');
+    await open();
+    expect(screen.queryByText('When checks pass') !== null).toBe(row.shown);
+  });
+
+  it('names the base branch the form shows in the merge choice', async () => {
+    serve(projectDto({ ...pullRequests, baseBranch: 'develop' }));
+    renderApp('/settings/general');
+    await open();
+    expect(screen.getByRole('radio', { name: 'Merge into develop' })).toBeTruthy();
+    expect(
+      screen.getByText(
+        'GitHub merges each pull request into develop by itself once its required checks pass. A task can choose another branch, or hold.',
+      ),
+    ).toBeTruthy();
+  });
+
+  it.each([
     { name: 'Your folder', project: pullRequests, shown: false },
     { name: 'Separate copies', project: worktrees, shown: true },
   ])("Copy into each task's copy shows only for Separate copies: $name", async (row) => {
@@ -312,26 +350,33 @@ describe('ProjectGeneralForm', () => {
     renderApp('/settings/general');
     await open();
     type('Name', 'Renamed');
+    // shouldAdvanceTime lets findBy and waitFor poll, but it also moves the fake clock with real
+    // time. On a saturated Mac that drift can be seconds, so the checks below leave 2 s of slack
+    // before the second save and 1.5 s after it (see src/test/load-tolerance.test.ts).
     vi.useFakeTimers({ shouldAdvanceTime: true });
     save();
     const status = await screen.findByRole('status');
     expect(status.textContent).toBe('Saved');
     expect(status.querySelector('svg')).not.toBeNull();
+    // A second save restarts the 4 s, so the first timer must not hide this note. The first timer
+    // has 2 s left here, so it is still pending when the second save succeeds unless the edit and
+    // save take 2 s of real time.
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(3000);
+      await vi.advanceTimersByTimeAsync(2000);
     });
-    // A second save restarts the 4 s, so the first timer must not hide this note.
     type('Name', 'Renamed again');
     save();
     await waitFor(() => {
       expect(screen.getByRole('status').textContent).toBe('Saved');
     });
+    // The first save is now at least 4.5 s old, so its timer would have hidden the note; the
+    // second is 2.5 s old, under 4 s unless real time drifts by 1.5 s.
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(3500);
+      await vi.advanceTimersByTimeAsync(2500);
     });
     expect(screen.getByRole('status').textContent).toBe('Saved');
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(700);
+      await vi.advanceTimersByTimeAsync(2000);
     });
     await waitFor(() => {
       expect(screen.queryByRole('status')).toBeNull();

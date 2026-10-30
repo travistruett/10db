@@ -1,4 +1,4 @@
-import { AreaDef } from '@10db/contracts';
+import { AreaDef, normaliseCriteria } from '@10db/contracts';
 
 export type ParsedAreas =
   { readonly ok: true; readonly areas: AreaDef[] } | { readonly ok: false; readonly error: string };
@@ -45,8 +45,5 @@ export function formatAreas(areas: readonly AreaDef[]): string {
 
 /** One acceptance criterion per non-blank line. */
 export function criteriaLines(text: string): string[] {
-  return text
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line !== '');
+  return normaliseCriteria([text]);
 }

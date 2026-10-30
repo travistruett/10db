@@ -2,6 +2,8 @@ type ValueOf<T> = T[keyof T];
 
 export const WorkstreamState = {
   Queued: 'QUEUED',
+  /** A queued run the builder set aside before it ran: it keeps its batch and worktree and takes no lane. */
+  Held: 'HELD',
   Starting: 'STARTING',
   Running: 'RUNNING',
   HandingOff: 'HANDING_OFF',
@@ -205,6 +207,25 @@ export const BatchState = {
   Abandoned: 'ABANDONED',
 } as const;
 export type BatchState = ValueOf<typeof BatchState>;
+
+/** Where a shipped batch's pull request stands on GitHub; `unknown` when gh could not say. */
+export const PullRequestState = {
+  Open: 'open',
+  Merged: 'merged',
+  Closed: 'closed',
+  Unknown: 'unknown',
+} as const;
+export type PullRequestState = ValueOf<typeof PullRequestState>;
+
+/** A pull request's checks; `none` means the pull request has no checks at all. */
+export const PullRequestChecks = {
+  Pending: 'pending',
+  Passing: 'passing',
+  Failing: 'failing',
+  None: 'none',
+  Unknown: 'unknown',
+} as const;
+export type PullRequestChecks = ValueOf<typeof PullRequestChecks>;
 
 /** Why shipping stopped; the batch's flag card carries the detail. */
 export const BatchFailure = {

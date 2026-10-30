@@ -4,10 +4,12 @@ import {
   findFlowByName,
   getBatch,
   getWorkstream,
+  getWorkstreamRow,
   insertBatch,
   insertTask,
   insertWorkstream,
   listBoardColumns,
+  listEvidence,
   listWorkstreams,
   moveTask,
   patchAccount,
@@ -21,6 +23,7 @@ import { readDefaultPersonas } from '@10db/harness';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { measureForTests } from '../../test/catalogue';
 import { createEventBus, createStateStore, type StateStore } from '../events';
+import { outstandingFixEvidence } from '../runner';
 import { seedTeam } from './seed';
 import { resolveStepPlan, retryWorkstream, startTaskWithPlan } from './steps';
 
@@ -234,6 +237,43 @@ describe('retryWorkstream', () => {
     const { first } = failedThenCancelled();
     expect(() => retryWorkstream(state, first.id)).toThrow(ConflictError);
     expect(getWorkstream(state.db, first.id).state).toBe('FAILED');
+  });
+
+  describe('a note on a failure no rejection caused', () => {
+    /** A planned workstream whose implement step failed, as the gate or a crash fails it. */
+    const failedPlanned = () => {
+      const ws = startTaskWithPlan(state, addTask().id);
+      state.write((ctx) => {
+        for (const to of ['STARTING', 'RUNNING', 'FAILED'] as const)
+          transitionWorkstream(ctx, ws.id, { to, fence: null });
+      });
+      return ws;
+    };
+
+    it('reaches the restarted step as the builder’s fix', () => {
+      const ws = failedPlanned();
+      const retried = retryWorkstream(state, ws.id, '  Pin the version.  ');
+      const builder = listEvidence(state.db, ws.id).filter((e) => e.kind === 'builder');
+      expect(builder).toMatchObject([{ summary: 'Pin the version.' }]);
+      expect(retried).toMatchObject({
+        state: 'QUEUED',
+        stepIndex: 0,
+        nextAction: { kind: 'fix', evidenceId: builder[0]?.id },
+      });
+      // A session that starts fresh, after a crash say, still finds the note outstanding.
+      expect(outstandingFixEvidence(state.db, getWorkstreamRow(state.db, ws.id))).toBe(
+        builder[0]?.id,
+      );
+    });
+
+    it.each([
+      { name: 'no note', note: undefined },
+      { name: 'a blank note', note: ' \n ' },
+    ])('with $name, retries as before', ({ note }) => {
+      const ws = failedPlanned();
+      expect(retryWorkstream(state, ws.id, note).nextAction).toEqual({ kind: 'start' });
+      expect(listEvidence(state.db, ws.id)).toEqual([]);
+    });
   });
 
   it('refuses the full sequence: fail, start again, cancel, park, retry the first run', () => {

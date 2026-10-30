@@ -9,6 +9,7 @@ import {
   BoardColumnId,
   BoardColumnInput,
   BoardColumnPatch,
+  AreaProposalInput,
   DomainError,
   EventsHead,
   FlowId,
@@ -33,6 +34,7 @@ import {
   ProjectInput,
   ProjectPatch,
   PROTOCOL_VERSION,
+  RetryInput,
   RoutingRulesInput,
   SystemCheckDto,
   TaskId,
@@ -65,6 +67,8 @@ export interface ApiDeps {
   readonly upgradeWebSocket: UpgradeWebSocket;
   /** The MCP endpoint; it authenticates sessions itself. */
   mcp(req: Request): Promise<Response>;
+  /** The builder's MCP endpoint, for the builder's own clients; the UI token guards it. */
+  builderMcp?(req: Request): Promise<Response>;
   /** Called with every error the API answers as a 500, so the daemon can log it. */
   onUnexpectedError(error: unknown): void;
 }
@@ -84,6 +88,14 @@ const Cursor = z.coerce.number().int().min(0).catch(0);
 /** `recheck` is `1` or absent; anything else is a 400. */
 const SystemQuery = z.object({ recheck: z.literal('1').optional() });
 const Limit = z.coerce.number().int().min(1).max(1000).catch(500);
+/** How many of the most recently updated inbox items to list; absent lists them all. */
+const RecentCount = z
+  .string()
+  .regex(/^\d+$/)
+  .transform(Number)
+  .pipe(z.number().int().min(1).max(1000))
+  .optional()
+  .transform((n) => n ?? null);
 const StateList = z
   .string()
   .optional()
@@ -117,6 +129,12 @@ export function createApp(deps: ApiDeps) {
       return next();
     })
     .all('/mcp', (c) => deps.mcp(c.req.raw))
+    // Behind the UI-token middleware above: a managed session's token fails it.
+    .all('/builder/mcp', async (c) =>
+      deps.builderMcp
+        ? await deps.builderMcp(c.req.raw)
+        : c.json({ error: 'not_implemented', message: 'This daemon has no builder endpoint' }, 501),
+    )
     .get('/health', (c) =>
       c.json(
         HealthResponse.parse({
@@ -138,9 +156,12 @@ export function createApp(deps: ApiDeps) {
     .post(
       '/projects/:projectId/tasks',
       validator('json', (value): TaskInput => TaskInput.parse(value)),
-      (c) =>
+      async (c) =>
         c.json(
-          deps.services.createTask(ProjectId.parse(c.req.param('projectId')), c.req.valid('json')),
+          await deps.services.createTask(
+            ProjectId.parse(c.req.param('projectId')),
+            c.req.valid('json'),
+          ),
           201,
         ),
     )
@@ -169,6 +190,11 @@ export function createApp(deps: ApiDeps) {
       '/folders/inspect',
       validator('json', (value): FolderInspectInput => FolderInspectInput.parse(value)),
       async (c) => c.json(await deps.services.inspectFolder(c.req.valid('json').path)),
+    )
+    .post(
+      '/folders/propose-areas',
+      validator('json', (value): AreaProposalInput => AreaProposalInput.parse(value)),
+      async (c) => c.json(await deps.services.proposeAreas(c.req.valid('json').path)),
     )
     .get('/flows', (c) => c.json(deps.services.listFlows()))
     .patch(
@@ -342,8 +368,10 @@ export function createApp(deps: ApiDeps) {
     .patch(
       '/tasks/:taskId',
       validator('json', (value): TaskPatch => TaskPatch.parse(value)),
-      (c) =>
-        c.json(deps.services.patchTask(TaskId.parse(c.req.param('taskId')), c.req.valid('json'))),
+      async (c) =>
+        c.json(
+          await deps.services.patchTask(TaskId.parse(c.req.param('taskId')), c.req.valid('json')),
+        ),
     )
     .post(
       '/tasks/:taskId/move',
@@ -396,6 +424,9 @@ export function createApp(deps: ApiDeps) {
       if (!deps.taskRemoval) return c.json({ error: 'not_implemented' }, 501);
       return c.json(deps.taskRemoval.removeTask(taskId));
     })
+    .post('/tasks/:taskId/hold', (c) =>
+      c.json(deps.services.holdTask(TaskId.parse(c.req.param('taskId')))),
+    )
     .post('/tasks/:taskId/close', (c) => {
       const taskId = TaskId.parse(c.req.param('taskId'));
       if (!deps.taskRemoval) return c.json({ error: 'not_implemented' }, 501);
@@ -425,19 +456,38 @@ export function createApp(deps: ApiDeps) {
     .post('/workstreams/:id/cancel', async (c) =>
       c.json(await deps.services.cancelWorkstream(WorkstreamId.parse(c.req.param('id')))),
     )
-    .post('/workstreams/:id/retry', (c) =>
-      c.json(deps.services.retryWorkstream(WorkstreamId.parse(c.req.param('id')))),
+    .post(
+      '/workstreams/:id/retry',
+      // No body is a retry with no note: the validator hands over {} when the request is not JSON.
+      validator('json', (value): RetryInput => RetryInput.parse(value)),
+      (c) => {
+        const { note } = c.req.valid('json');
+        const id = WorkstreamId.parse(c.req.param('id'));
+        return c.json(
+          note === undefined
+            ? deps.services.retryWorkstream(id)
+            : deps.services.retryWorkstream(id, note),
+        );
+      },
     )
     .get('/workstreams/:id/changes', async (c) =>
       c.json(await deps.services.workstreamChanges(WorkstreamId.parse(c.req.param('id')))),
     )
     .get(
       '/inbox',
-      validator('query', (query): { state?: string } =>
-        typeof query['state'] === 'string' ? { state: query['state'] } : {},
-      ),
-      (c) =>
-        c.json(deps.services.listInbox({ states: StateList.parse(c.req.valid('query').state) })),
+      validator('query', (query): { state?: string; recent?: string } => ({
+        ...(typeof query['state'] === 'string' ? { state: query['state'] } : {}),
+        ...(typeof query['recent'] === 'string' ? { recent: query['recent'] } : {}),
+      })),
+      (c) => {
+        const query = c.req.valid('query');
+        return c.json(
+          deps.services.listInbox({
+            states: StateList.parse(query.state),
+            recent: RecentCount.parse(query.recent),
+          }),
+        );
+      },
     )
     .post(
       '/inbox/:id/answer',

@@ -10,6 +10,7 @@ import {
 } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { listEventsAfter } from './events';
+import { holdTask, resumeTask } from './holds';
 import { createTestStore, seedProject } from './test-support';
 import type { Store } from './store';
 import { insertTask, setTaskStatus } from './tasks';
@@ -83,7 +84,7 @@ describe('runNext', () => {
     });
   });
 
-  it.each([WorkstreamState.Starting, WorkstreamState.Cancelled])(
+  it.each([WorkstreamState.Starting, WorkstreamState.Held, WorkstreamState.Cancelled])(
     'refuses a task whose latest workstream is %s',
     (to) => {
       const a = queued('a');
@@ -91,6 +92,18 @@ describe('runNext', () => {
       expect(() => store.write((ctx) => runNext(ctx, a.task.id))).toThrow(ConflictError);
     },
   );
+
+  it('takes a held task out of the line: started again, it waits its turn in start order', () => {
+    queued('a');
+    queued('b');
+    const c = queued('c');
+    store.write((ctx) => runNext(ctx, c.task.id));
+    expect(lineOf()).toEqual(['c', 'a', 'b']);
+    store.write((ctx) => holdTask(ctx, c.task.id));
+    expect(getWorkstream(store.db, c.workstream.id).runNextAt).toBeNull();
+    store.write((ctx) => resumeTask(ctx, c.task.id));
+    expect(lineOf()).toEqual(['a', 'b', 'c']);
+  });
 
   it('refuses a task that never started', () => {
     const task = store.write((ctx) =>

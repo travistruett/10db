@@ -16,20 +16,29 @@ afterEach(() => {
   close();
 });
 
-function holdArea(projectId: ProjectId, area: string, title: string) {
+function holdClaim(
+  projectId: ProjectId,
+  claim: { kind: 'area' | 'hazard'; name: string },
+  title: string,
+) {
   const task = store.write((ctx) =>
-    insertTask(ctx, projectId, { title, acceptanceCriteria: ['x'], areas: [area] }),
+    insertTask(ctx, projectId, { title, acceptanceCriteria: ['x'], areas: [claim.name] }),
   ).value;
   const ws = store.write((ctx) => insertWorkstream(ctx, task.id)).value;
-  store.write((ctx) =>
+  const held = store.write((ctx) =>
     acquireClaims(ctx, {
       projectId,
       workstreamId: ws.id,
-      requests: [{ kind: 'area', name: area }],
+      requests: [claim],
       leaseExpiresAt: '2099-01-01T00:00:00.000Z',
     }),
-  );
+  ).value;
+  expect(held.ok).toBe(true);
 }
+
+const holdArea = (projectId: ProjectId, area: string, title: string) => {
+  holdClaim(projectId, { kind: 'area', name: area }, title);
+};
 
 describe('patching areas and hazards', () => {
   it('replaces both lists on the same project row', () => {
@@ -88,6 +97,39 @@ describe('patching areas and hazards', () => {
       ),
     ).toThrow(/Fix the login bug/);
     expect(getProject(store.db, project.id).areas.map((a) => a.name)).toEqual(['api', 'ui']);
+  });
+
+  it.each([
+    { name: 'deps', from: 'copy', to: 'project' },
+    { name: 'docker', from: 'project', to: 'copy' },
+  ] as const)(
+    'refuses to change the scope of hazard $name from $from to $to while a running task holds it',
+    ({ name, from, to }) => {
+      const hazard = { name, globs: [`${name}/**`], commands: [] };
+      const project = seedProject(store, { hazards: [{ ...hazard, scope: from }] });
+      holdClaim(project.id, { kind: 'hazard', name }, 'Bump a package');
+      const change = () =>
+        store.write((ctx) =>
+          patchProject(ctx, project.id, { hazards: [{ ...hazard, scope: to }] }),
+        );
+      expect(change).toThrow(ConflictError);
+      expect(change).toThrow(/scope.*Bump a package/);
+      // Its paths can still change, keeping its scope; a hazard nobody holds can change scope.
+      const moved = { ...hazard, globs: ['elsewhere/**'], scope: from };
+      expect(
+        store.write((ctx) => patchProject(ctx, project.id, { hazards: [moved] })).value.hazards,
+      ).toEqual([moved]);
+    },
+  );
+
+  it('treats a stored hazard with no scope as its stock scope, so saving the same scope is no change', () => {
+    const deps = { name: 'deps', globs: ['pnpm-lock.yaml'], commands: [] };
+    const project = seedProject(store, { hazards: [deps] });
+    holdClaim(project.id, { kind: 'hazard', name: 'deps' }, 'Bump a package');
+    const same = [{ ...deps, scope: 'copy' as const }];
+    expect(
+      store.write((ctx) => patchProject(ctx, project.id, { hazards: same })).value.hazards,
+    ).toEqual(same);
   });
 
   it('lets a held area change its paths', () => {

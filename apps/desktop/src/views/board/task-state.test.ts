@@ -60,6 +60,12 @@ describe('taskState', () => {
       color: 'red',
     },
     { name: 'a queued run', ws: workstreamDto({ state: 'QUEUED' }), line: 'Queued', color: 'gray' },
+    {
+      name: 'a held run',
+      ws: workstreamDto({ state: 'HELD' }),
+      line: 'Held: not in the queue',
+      color: 'gray',
+    },
   ] as const)('says $name in one line', ({ ws, line, color }) => {
     expect(taskState(ws, undefined, 'make gate')).toEqual({ line, color });
   });

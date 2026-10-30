@@ -11,9 +11,11 @@ const batch = BatchDto.parse({
   state: 'FAILED',
   branch: '10db/greetings-0a1b2c3d',
   baseBranch: 'main',
+  autoMerge: true,
   baseSha: 'a'.repeat(40),
   repo: 'acme/widgets',
   prUrl: null,
+  pr: null,
   gateExitCode: 2,
   gateLogPath: '/data/logs/gate/b.log',
   failure: 'gate_failed',
@@ -42,6 +44,9 @@ const cards: Record<string, Card> = {
   'wrong branch, not shipped': wrongBranchCard(batch, 'main', '/repo', 'not_shipped'),
   'dirty checkout': shipCards.dirtyCheckout(batch, ['a.ts']).card,
   'gate failed': shipCards.gateFailed(batch, gate).card,
+  'gate failed twice, unrelated': shipCards.gateFailedUnrelated(batch, null, [
+    { name: 'test', command: 'pnpm test', logPath: '/repo/.gate/test.log', tests: [] },
+  ]).card,
   'gate timed out': shipCards.gateTimedOut(batch, 60_000, '/data/logs/gate/b.log').card,
   'push timed out': shipCards.pushTimedOut(batch, 60_000).card,
 };

@@ -1,16 +1,16 @@
 import { existsSync } from 'node:fs';
 // Aliased: the bundle's banner declares its own `createRequire`.
 import { createRequire as requireFrom } from 'node:module';
-import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { DB_MIGRATIONS_DIR } from '@10db/db';
 import { HARNESS_PLUGIN_DIR } from '@10db/harness';
 import type { DaemonEnv } from './env';
+import { defaultDataDir } from './runtime-files';
 import type { SandboxRuntime } from './sandbox';
 
 /** All 10db state lives under this one directory (spec §12). */
 export function resolveDataDir(env: DaemonEnv): string {
-  return env.TENDB_DATA_DIR ?? join(homedir(), 'Library', 'Application Support', '10db');
+  return env.TENDB_DATA_DIR ?? defaultDataDir();
 }
 
 /** The bundle carries migrations beside itself; from source, use the db package's folder. */

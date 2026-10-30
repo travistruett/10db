@@ -207,6 +207,17 @@ export function insertWorkstream(
   return toDto(ctx.tx, row);
 }
 
+/** The task's newest workstream, whatever its state; undefined for a task that never started. */
+export function latestWorkstreamOf(db: DbReader, taskId: TaskId): WorkstreamRow | undefined {
+  return db
+    .select()
+    .from(schema.workstreams)
+    .where(eq(schema.workstreams.taskId, taskId))
+    .orderBy(desc(schema.workstreams.createdAt), desc(schema.workstreams.id))
+    .limit(1)
+    .get();
+}
+
 /** The task's most recent DONE workstream: where its code was finished, and in which batch. */
 export function latestDoneWorkstream(db: DbReader, taskId: TaskId): WorkstreamRow | undefined {
   return db
