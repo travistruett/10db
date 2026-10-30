@@ -26,7 +26,9 @@ import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery
 import { isolatedGitEnv } from '../../test/fixtures';
 import { hangingSsh } from '../../test/hanging-ssh';
 import { parseWorktreeList, type WorktreeEntry } from '../git';
+import { allowFoundHosts, removeNetworkHost } from '../permissions';
 import { batchBranchName, createBatchStarter } from './index';
+import { INSTALL_SUMMARY } from './worktree-dependencies';
 
 let h: DeliveryHarness;
 beforeEach(() => {
@@ -291,6 +293,37 @@ describe('installing a new worktree’s dependencies', () => {
     expect(existsSync(path)).toBe(false);
     expect(worktrees()).toHaveLength(1);
     expect(branches10db()).toEqual([]);
+  });
+
+  it('asks about a host the sandbox blocked the install from, naming the install and the file that needs the host', async () => {
+    withPnpmProject();
+    // The project's pnpm-lock.yaml named the host when it was added; the builder removed it since.
+    allowFoundHosts(h.state, h.project.id, [
+      { host: 'registry.npmjs.org', file: 'pnpm-lock.yaml' },
+    ]);
+    removeNetworkHost(h.state, h.project.id, 'registry.npmjs.org');
+    h.pnpm.blockedFrom('registry.npmjs.org');
+
+    h.starter.startTask(h.addTask('Alpha').id);
+    await h.jobs.idle();
+
+    const host = h.only(
+      h.cards().filter((c) => c.title === 'Allow network access to registry.npmjs.org?'),
+    );
+    expect(host.body).toContain(
+      "The sandbox blocked 10db's install of a worktree's packages from reaching registry.npmjs.org",
+    );
+    expect(host.body).toContain(`Install: ${INSTALL_SUMMARY}`);
+    expect(host.body).toContain("The project's pnpm-lock.yaml needs registry.npmjs.org");
+    expect(host.recommendation).toBe('Allow for the project');
+    expect(host.targets).toEqual([]);
+    // The cut's own card ends with what the install's output says: the install, not a gate, was blocked.
+    const refused = h.only(
+      h.cards().filter((c) => c.title.includes("couldn't install the dependencies")),
+    );
+    expect(refused.body).toContain('The install was blocked from reaching registry.npmjs.org');
+    expect(refused.body).not.toContain('SandboxDebug');
+    expect(refused.body).not.toMatch(/the gate was blocked|run the gate again/i);
   });
 });
 

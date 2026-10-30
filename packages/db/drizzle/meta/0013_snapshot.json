@@ -1,8 +1,8 @@
 {
-  "id": "4a27c417-6ab7-4097-ba2b-7a23a2f9d610",
-  "prevId": "8e183720-a95e-48f4-b27f-c0896a2a7034",
   "version": "6",
   "dialect": "sqlite",
+  "id": "196c3643-875f-41bc-8b0a-1bebfb779e2a",
+  "prevId": "8e183720-a95e-48f4-b27f-c0896a2a7034",
   "tables": {
     "aa_models": {
       "name": "aa_models",
@@ -376,23 +376,23 @@
           "columns": [
             "project_id"
           ],
-          "where": "state IN ('CUTTING', 'OPEN', 'SHIPPING', 'FAILED') AND worktree_path IS NULL",
-          "isUnique": true
+          "isUnique": true,
+          "where": "state IN ('CUTTING', 'OPEN', 'SHIPPING', 'FAILED') AND worktree_path IS NULL"
         }
       },
       "foreignKeys": {
         "batches_project_id_projects_id_fk": {
           "name": "batches_project_id_projects_id_fk",
           "tableFrom": "batches",
+          "tableTo": "projects",
           "columnsFrom": [
             "project_id"
           ],
-          "tableTo": "projects",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -459,15 +459,15 @@
         "board_columns_project_id_projects_id_fk": {
           "name": "board_columns_project_id_projects_id_fk",
           "tableFrom": "board_columns",
+          "tableTo": "projects",
           "columnsFrom": [
             "project_id"
           ],
-          "tableTo": "projects",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -564,8 +564,8 @@
             "kind",
             "name"
           ],
-          "where": "released_at IS NULL",
-          "isUnique": true
+          "isUnique": true,
+          "where": "released_at IS NULL"
         },
         "claims_workstream_idx": {
           "name": "claims_workstream_idx",
@@ -579,28 +579,28 @@
         "claims_project_id_projects_id_fk": {
           "name": "claims_project_id_projects_id_fk",
           "tableFrom": "claims",
+          "tableTo": "projects",
           "columnsFrom": [
             "project_id"
           ],
-          "tableTo": "projects",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "claims_workstream_id_workstreams_id_fk": {
           "name": "claims_workstream_id_workstreams_id_fk",
           "tableFrom": "claims",
+          "tableTo": "workstreams",
           "columnsFrom": [
             "workstream_id"
           ],
-          "tableTo": "workstreams",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -700,28 +700,28 @@
         "decisions_project_id_projects_id_fk": {
           "name": "decisions_project_id_projects_id_fk",
           "tableFrom": "decisions",
+          "tableTo": "projects",
           "columnsFrom": [
             "project_id"
           ],
-          "tableTo": "projects",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "decisions_source_id_sources_id_fk": {
           "name": "decisions_source_id_sources_id_fk",
           "tableFrom": "decisions",
+          "tableTo": "sources",
           "columnsFrom": [
             "source_id"
           ],
-          "tableTo": "sources",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -807,28 +807,28 @@
         "deviations_project_id_projects_id_fk": {
           "name": "deviations_project_id_projects_id_fk",
           "tableFrom": "deviations",
+          "tableTo": "projects",
           "columnsFrom": [
             "project_id"
           ],
-          "tableTo": "projects",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "deviations_source_id_sources_id_fk": {
           "name": "deviations_source_id_sources_id_fk",
           "tableFrom": "deviations",
+          "tableTo": "sources",
           "columnsFrom": [
             "source_id"
           ],
-          "tableTo": "sources",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -959,15 +959,15 @@
         "evidence_workstream_id_workstreams_id_fk": {
           "name": "evidence_workstream_id_workstreams_id_fk",
           "tableFrom": "evidence",
+          "tableTo": "workstreams",
           "columnsFrom": [
             "workstream_id"
           ],
-          "tableTo": "workstreams",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1092,28 +1092,28 @@
         "handoffs_workstream_id_workstreams_id_fk": {
           "name": "handoffs_workstream_id_workstreams_id_fk",
           "tableFrom": "handoffs",
+          "tableTo": "workstreams",
           "columnsFrom": [
             "workstream_id"
           ],
-          "tableTo": "workstreams",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "handoffs_session_id_sessions_id_fk": {
           "name": "handoffs_session_id_sessions_id_fk",
           "tableFrom": "handoffs",
+          "tableTo": "sessions",
           "columnsFrom": [
             "session_id"
           ],
-          "tableTo": "sessions",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1264,15 +1264,15 @@
         "inbox_items_project_id_projects_id_fk": {
           "name": "inbox_items_project_id_projects_id_fk",
           "tableFrom": "inbox_items",
+          "tableTo": "projects",
           "columnsFrom": [
             "project_id"
           ],
-          "tableTo": "projects",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1345,15 +1345,15 @@
         "mcp_server_approvals_project_id_projects_id_fk": {
           "name": "mcp_server_approvals_project_id_projects_id_fk",
           "tableFrom": "mcp_server_approvals",
+          "tableTo": "projects",
           "columnsFrom": [
             "project_id"
           ],
-          "tableTo": "projects",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -1632,6 +1632,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "found_in": {
+          "name": "found_in",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "text",
@@ -1652,15 +1659,15 @@
         "permission_rules_project_id_projects_id_fk": {
           "name": "permission_rules_project_id_projects_id_fk",
           "tableFrom": "permission_rules",
+          "tableTo": "projects",
           "columnsFrom": [
             "project_id"
           ],
-          "tableTo": "projects",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1999,54 +2006,54 @@
         "projects_account_id_accounts_id_fk": {
           "name": "projects_account_id_accounts_id_fk",
           "tableFrom": "projects",
+          "tableTo": "accounts",
           "columnsFrom": [
             "account_id"
           ],
-          "tableTo": "accounts",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "projects_moved_from_account_id_accounts_id_fk": {
           "name": "projects_moved_from_account_id_accounts_id_fk",
           "tableFrom": "projects",
+          "tableTo": "accounts",
           "columnsFrom": [
             "moved_from_account_id"
           ],
-          "tableTo": "accounts",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "projects_fallback_account_id_accounts_id_fk": {
           "name": "projects_fallback_account_id_accounts_id_fk",
           "tableFrom": "projects",
+          "tableTo": "accounts",
           "columnsFrom": [
             "fallback_account_id"
           ],
-          "tableTo": "accounts",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "projects_flow_id_flows_id_fk": {
           "name": "projects_flow_id_flows_id_fk",
           "tableFrom": "projects",
+          "tableTo": "flows",
           "columnsFrom": [
             "flow_id"
           ],
-          "tableTo": "flows",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -2132,28 +2139,28 @@
         "proposals_project_id_projects_id_fk": {
           "name": "proposals_project_id_projects_id_fk",
           "tableFrom": "proposals",
+          "tableTo": "projects",
           "columnsFrom": [
             "project_id"
           ],
-          "tableTo": "projects",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "proposals_source_id_sources_id_fk": {
           "name": "proposals_source_id_sources_id_fk",
           "tableFrom": "proposals",
+          "tableTo": "sources",
           "columnsFrom": [
             "source_id"
           ],
-          "tableTo": "sources",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -2226,28 +2233,28 @@
         "routing_rules_project_id_projects_id_fk": {
           "name": "routing_rules_project_id_projects_id_fk",
           "tableFrom": "routing_rules",
+          "tableTo": "projects",
           "columnsFrom": [
             "project_id"
           ],
-          "tableTo": "projects",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "routing_rules_person_id_people_id_fk": {
           "name": "routing_rules_person_id_people_id_fk",
           "tableFrom": "routing_rules",
+          "tableTo": "people",
           "columnsFrom": [
             "person_id"
           ],
-          "tableTo": "people",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -2456,28 +2463,28 @@
         "sessions_workstream_id_workstreams_id_fk": {
           "name": "sessions_workstream_id_workstreams_id_fk",
           "tableFrom": "sessions",
+          "tableTo": "workstreams",
           "columnsFrom": [
             "workstream_id"
           ],
-          "tableTo": "workstreams",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "sessions_account_id_accounts_id_fk": {
           "name": "sessions_account_id_accounts_id_fk",
           "tableFrom": "sessions",
+          "tableTo": "accounts",
           "columnsFrom": [
             "account_id"
           ],
-          "tableTo": "accounts",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -2545,28 +2552,28 @@
         "task_deps_task_id_tasks_id_fk": {
           "name": "task_deps_task_id_tasks_id_fk",
           "tableFrom": "task_deps",
+          "tableTo": "tasks",
           "columnsFrom": [
             "task_id"
           ],
-          "tableTo": "tasks",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "task_deps_depends_on_id_tasks_id_fk": {
           "name": "task_deps_depends_on_id_tasks_id_fk",
           "tableFrom": "task_deps",
+          "tableTo": "tasks",
           "columnsFrom": [
             "depends_on_id"
           ],
-          "tableTo": "tasks",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -2719,54 +2726,54 @@
         "tasks_project_id_projects_id_fk": {
           "name": "tasks_project_id_projects_id_fk",
           "tableFrom": "tasks",
+          "tableTo": "projects",
           "columnsFrom": [
             "project_id"
           ],
-          "tableTo": "projects",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "tasks_flow_id_flows_id_fk": {
           "name": "tasks_flow_id_flows_id_fk",
           "tableFrom": "tasks",
+          "tableTo": "flows",
           "columnsFrom": [
             "flow_id"
           ],
-          "tableTo": "flows",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "tasks_proposal_id_proposals_id_fk": {
           "name": "tasks_proposal_id_proposals_id_fk",
           "tableFrom": "tasks",
+          "tableTo": "proposals",
           "columnsFrom": [
             "proposal_id"
           ],
-          "tableTo": "proposals",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "tasks_board_column_id_board_columns_id_fk": {
           "name": "tasks_board_column_id_board_columns_id_fk",
           "tableFrom": "tasks",
+          "tableTo": "board_columns",
           "columnsFrom": [
             "board_column_id"
           ],
-          "tableTo": "board_columns",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -2803,28 +2810,28 @@
         "team_bindings_project_id_projects_id_fk": {
           "name": "team_bindings_project_id_projects_id_fk",
           "tableFrom": "team_bindings",
+          "tableTo": "projects",
           "columnsFrom": [
             "project_id"
           ],
-          "tableTo": "projects",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "team_bindings_persona_id_personas_id_fk": {
           "name": "team_bindings_persona_id_personas_id_fk",
           "tableFrom": "team_bindings",
+          "tableTo": "personas",
           "columnsFrom": [
             "persona_id"
           ],
-          "tableTo": "personas",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -2862,28 +2869,28 @@
         "team_members_project_id_projects_id_fk": {
           "name": "team_members_project_id_projects_id_fk",
           "tableFrom": "team_members",
+          "tableTo": "projects",
           "columnsFrom": [
             "project_id"
           ],
-          "tableTo": "projects",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "team_members_person_id_people_id_fk": {
           "name": "team_members_person_id_people_id_fk",
           "tableFrom": "team_members",
+          "tableTo": "people",
           "columnsFrom": [
             "person_id"
           ],
-          "tableTo": "people",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -2965,15 +2972,15 @@
         "tool_ops_workstream_id_workstreams_id_fk": {
           "name": "tool_ops_workstream_id_workstreams_id_fk",
           "tableFrom": "tool_ops",
+          "tableTo": "workstreams",
           "columnsFrom": [
             "workstream_id"
           ],
-          "tableTo": "workstreams",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -3202,41 +3209,41 @@
         "workstreams_task_id_tasks_id_fk": {
           "name": "workstreams_task_id_tasks_id_fk",
           "tableFrom": "workstreams",
+          "tableTo": "tasks",
           "columnsFrom": [
             "task_id"
           ],
-          "tableTo": "tasks",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "workstreams_project_id_projects_id_fk": {
           "name": "workstreams_project_id_projects_id_fk",
           "tableFrom": "workstreams",
+          "tableTo": "projects",
           "columnsFrom": [
             "project_id"
           ],
-          "tableTo": "projects",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "workstreams_batch_id_batches_id_fk": {
           "name": "workstreams_batch_id_batches_id_fk",
           "tableFrom": "workstreams",
+          "tableTo": "batches",
           "columnsFrom": [
             "batch_id"
           ],
-          "tableTo": "batches",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -3247,9 +3254,9 @@
   "views": {},
   "enums": {},
   "_meta": {
-    "columns": {},
     "schemas": {},
-    "tables": {}
+    "tables": {},
+    "columns": {}
   },
   "internal": {
     "indexes": {}

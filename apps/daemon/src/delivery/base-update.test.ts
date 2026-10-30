@@ -15,6 +15,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { isolatedGitEnv } from '../../test/fixtures';
 import { createBaseUpdates, ensureWorktreeWhole, workstreamChanges } from './index';
+import { INSTALL_SUMMARY } from './worktree-dependencies';
 
 let h: DeliveryHarness;
 afterEach(() => {
@@ -154,6 +155,26 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
     expect(update.kind === 'merged' && update.note).toMatch(
       /^The install this branch's lockfile needs failed \(exit 1; log: .+\.log\), so its packages may not match it\.$/,
     );
+  });
+
+  it("names the host the sandbox blocked the install after the merge from, in the gate's note and on a card", async () => {
+    h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+    withLockfile();
+    const { batch } = await opened();
+    await commitOnBatch(batch, 'src/api/alpha.txt');
+    h.teammatePush('main', 'pnpm-lock.yaml', 'lockfileVersion: 9\npackages: {}\n');
+    h.pnpm.blockedFrom('registry.npmjs.org');
+
+    const update = await createBaseUpdates(h.ctx).beforeGate(batch.id, signal);
+
+    expect(update).toMatchObject({ kind: 'merged' });
+    expect(update.kind === 'merged' && update.note).toMatch(
+      /^The install this branch's lockfile needs failed \(exit 1; log: .+\.log\), so its packages may not match it\. The sandbox blocked it from reaching registry\.npmjs\.org\.$/,
+    );
+    const host = h.only(h.cards());
+    expect(host.title).toBe('Allow network access to registry.npmjs.org?');
+    expect(host.body).toContain(`Install: ${INSTALL_SUMMARY}`);
+    expect(host.targets).toEqual([]);
   });
 
   it('installs again at the next gate when the last install failed, and not once one passed', async () => {

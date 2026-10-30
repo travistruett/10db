@@ -110,6 +110,7 @@ import type { Git } from '../git';
 import { judgeToolUse, type ProtectedPath } from '../guard';
 import {
   createPermissionBroker,
+  raiseGateHostCards,
   requestMcpApproval,
   type InboxService,
   type WaitObserver,
@@ -147,7 +148,7 @@ import {
   sendBackTarget,
   type StepEntry,
 } from '../team';
-import type { GateRequest, GateResult, GateRunner } from '../verify';
+import { BlockedRun, type GateRequest, type GateResult, type GateRunner } from '../verify';
 import { findClaimed } from '../watcher';
 import type { LiveSessions } from './live-sessions';
 import { checkedCommits, raiseBuilderCheck, waitsForCheck } from './builder-check';
@@ -431,7 +432,15 @@ function stopRequested(ctl: { readonly stopReason: StopReason | null }): StopRea
 
 /** A gate stopped before it started, while it waited for its batch's turn. */
 function stoppedWaiting(logPath: string): GateResult {
-  return { exitCode: 130, durationMs: 0, tail: '', logPath, timedOut: false, aborted: true };
+  return {
+    exitCode: 130,
+    durationMs: 0,
+    tail: '',
+    logPath,
+    timedOut: false,
+    aborted: true,
+    blockedHosts: [],
+  };
 }
 
 /** The most of a gate's output its evidence keeps, a note on its base included. */
@@ -1874,6 +1883,13 @@ export function createRunner(opts: RunnerOptions): Runner {
     }
     // Shutdown killed the gate: record nothing. The workstream stays VERIFYING and recovery re-runs it.
     if (result.aborted) return;
+    // A host the sandbox blocked is the builder's to allow; the card names it and the gate's evidence says so.
+    raiseGateHostCards(opts, {
+      projectId: project.id,
+      run: BlockedRun.Gate,
+      command: gateCommand,
+      hosts: result.blockedHosts,
+    });
     const head = await opts.git.head(checkout);
     const commitShas = await opts.git.commitsSince(checkout, row.baseHead ?? head);
     // A cancel that landed while git was read must not be overwritten by the verdict.

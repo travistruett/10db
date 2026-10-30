@@ -33,6 +33,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { seedWorkstream } from '../../test/fixtures';
 import { createEventBus, createStateStore, type StateStore } from '../events';
+import { allowFoundHosts, removeNetworkHost } from '../permissions';
 import { protectedReads, type FileAccessContext } from '../sandbox';
 import {
   createInboxService,
@@ -1367,6 +1368,29 @@ describe('permission broker in a sandboxed lane', () => {
       detail: { toolName: 'SandboxNetworkAccess', summary: 'example.com' },
     });
     expect(card.options.map((o) => o.label)).toEqual(['allow_once', 'allow_project', 'deny']);
+  });
+
+  it('recommends Allow for the project, and says why, when a project file names the host as a registry', async () => {
+    const ws = seedWorkstream(base);
+    // The builder removed the host after setup; Cargo.lock still names it.
+    allowFoundHosts(state, ws.project.id, [{ host: 'index.crates.io', file: 'Cargo.lock' }]);
+    removeNetworkHost(state, ws.project.id, 'index.crates.io');
+
+    await sandboxed(ws)(request('SandboxNetworkAccess', { host: 'index.crates.io' }));
+
+    const card = onlyOpenCard();
+    expect(card.recommendation).toBe('allow_project');
+    expect(card.body).toContain("The project's Cargo.lock needs index.crates.io");
+    expect(card.body).not.toContain('package registry');
+    expect(card.body).toContain(HOST_BODY);
+  });
+
+  it('recommends nothing for a host no project file names', async () => {
+    const ws = seedWorkstream(base);
+    allowFoundHosts(state, ws.project.id, [{ host: 'index.crates.io', file: 'Cargo.lock' }]);
+    await sandboxed(ws)(request('SandboxNetworkAccess', { host: 'example.com' }));
+    expect(onlyOpenCard().recommendation).toBeNull();
+    expect(onlyOpenCard().body).toBe(HOST_BODY);
   });
 
   it('denies a network ask that names no host, with no card', async () => {

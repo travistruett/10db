@@ -280,7 +280,7 @@ describe('migrating a database that holds Review cards', () => {
 
   beforeEach(() => {
     // The last migration before passing the gate stopped raising a Review card.
-    migrateDatabase(db, migrationsThrough('0012_dashing_viper'));
+    migrateDatabase(db, migrationsThrough('0013_short_roughhouse'));
     const run = (sql: string, ...args: string[]): void => {
       db.$client.prepare(sql).run(...args);
     };
