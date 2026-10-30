@@ -1,4 +1,5 @@
 import {
+  BoardStatus,
   TaskStatus,
   type BatchDto,
   type TaskDto,
@@ -18,7 +19,7 @@ export interface TaskCardProps {
   /** The project's gate command, named while the task is checked. */
   readonly gateCommand?: string | null | undefined;
   /** Titles and statuses of the project's tasks, for the dependency marker. */
-  readonly peers: ReadonlyMap<TaskId, Pick<TaskDto, 'title' | 'status'>>;
+  readonly peers: ReadonlyMap<TaskId, Pick<TaskDto, 'title' | 'status' | 'boardStatus'>>;
   /** The pull request of the batch that shipped a finished task. */
   readonly pullRequest?: string | undefined;
   /** A Start asked for and not yet answered, or refused; it takes the place of the task's own line. */
@@ -38,7 +39,7 @@ function noteState(note: StartNote): TaskState {
 function waitsOn(task: TaskDto, peers: TaskCardProps['peers']): string[] {
   return task.dependsOn.flatMap((id) => {
     const peer = peers.get(id);
-    return peer && peer.status !== TaskStatus.Done ? [peer.title] : [];
+    return peer && peer.boardStatus !== BoardStatus.Done ? [peer.title] : [];
   });
 }
 

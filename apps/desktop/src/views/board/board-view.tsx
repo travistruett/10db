@@ -69,22 +69,38 @@ const UNSHIPPED_BATCH_STATES: readonly BatchState[] = [BatchState.Shipping, Batc
 
 /** The workstream a card says something about: a live or failed one, or finished work that is not shipped. */
 function cardWorkstream(
+  task: TaskDto,
   ws: WorkstreamDto | undefined,
   batch: BatchDto | undefined,
 ): WorkstreamDto | undefined {
   if (!ws) return undefined;
   if (SHOWN_STATES.includes(ws.state)) return ws;
-  if (ws.state !== WorkstreamState.Done || !batch) return undefined;
+  // A reopened task is open again; its finished run and that run's pull request are history.
+  if (ws.state !== WorkstreamState.Done || task.status !== TaskStatus.Done || !batch)
+    return undefined;
   // Finished work shows its pull request's checks until the pull request merges.
   return UNSHIPPED_BATCH_STATES.includes(batch.state) || pullRequestState(batch) !== null
     ? ws
     : undefined;
 }
 
+/**
+ * Whether the task's pull request closed without merging and the task waits on the builder: it is
+ * finished, or its failed run was shipped anyway. A reopened task is open with a finished run.
+ */
+function closedPullRequestAwaits(
+  task: TaskDto,
+  ws: WorkstreamDto | undefined,
+  batch: BatchDto | undefined,
+): boolean {
+  if (!pullRequestClosed(batch)) return false;
+  return task.status === TaskStatus.Done || ws?.state === WorkstreamState.Failed;
+}
+
 /** The first unfinished dependency that sits in a human column, if any. */
 function parkedDependencyOf(
   task: TaskDto,
-  peers: ReadonlyMap<TaskId, Pick<TaskDto, 'title' | 'status' | 'boardColumnId'>>,
+  peers: ReadonlyMap<TaskId, Pick<TaskDto, 'title' | 'status' | 'boardStatus' | 'boardColumnId'>>,
 ): string | null {
   for (const id of task.dependsOn) {
     const peer = peers.get(id);
@@ -120,7 +136,10 @@ interface BoardColumnsProps {
   /** Every workstream, for the drawer's batch actions. */
   readonly workstreams: readonly WorkstreamDto[];
   readonly project: ProjectViewDto;
-  readonly peers: ReadonlyMap<TaskId, Pick<TaskDto, 'title' | 'status' | 'boardColumnId'>>;
+  readonly peers: ReadonlyMap<
+    TaskId,
+    Pick<TaskDto, 'title' | 'status' | 'boardStatus' | 'boardColumnId'>
+  >;
   /** For each task, a dependent that has started and waits on it; such a task can't be parked. */
   readonly started: ReadonlyMap<TaskId, string>;
   /** Opens the New Task form from the foot of Ready. */
@@ -254,7 +273,7 @@ function BoardColumns({
             return (
               <TaskCard
                 task={task}
-                workstream={cardWorkstream(ws, batch)}
+                workstream={cardWorkstream(task, ws, batch)}
                 batch={batch}
                 gateCommand={project.gateCommand}
                 pullRequest={shippedPullRequest(task, ws, batchById)}
@@ -277,7 +296,7 @@ function BoardColumns({
             const batch = batchOf(ws);
             return cardSummary(
               task,
-              cardWorkstream(ws, batch),
+              cardWorkstream(task, ws, batch),
               peers,
               batch,
               project.gateCommand,
@@ -303,7 +322,7 @@ function BoardColumns({
                       },
                     }
                   : {})}
-                {...(ws && (canClose(ws.state) || pullRequestClosed(batch))
+                {...(ws && (canClose(ws.state) || closedPullRequestAwaits(task, ws, batch))
                   ? {
                       onCloseTask: () => {
                         retry.reset();

@@ -386,12 +386,15 @@ export function reopenTask(ctx: WriteContext, id: TaskId): TaskDto {
   return getTask(ctx.tx, id);
 }
 
-/** Whether the task's latest run shipped in a batch whose pull request closed without merging. */
+/**
+ * Whether the task's latest run shipped in a batch whose pull request closed without merging. The
+ * latest run is taken first, batch or not, so a reopened task's newer run hides the old pull request.
+ */
 function pullRequestClosed(db: DbReader, taskId: TaskId): boolean {
   const batch = db
     .select({ state: schema.batches.state, prState: schema.batches.prState })
     .from(schema.workstreams)
-    .innerJoin(schema.batches, eq(schema.batches.id, schema.workstreams.batchId))
+    .leftJoin(schema.batches, eq(schema.batches.id, schema.workstreams.batchId))
     .where(eq(schema.workstreams.taskId, taskId))
     .orderBy(desc(schema.workstreams.createdAt), desc(schema.workstreams.id))
     .limit(1)

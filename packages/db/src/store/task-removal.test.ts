@@ -407,6 +407,21 @@ describe('a task whose pull request closed without merging', () => {
     expect(again.state).toBe(S.Queued);
   });
 
+  it('judges a reopened task by its new run, not the earlier closed pull request', () => {
+    const project = seedProject(store);
+    const { task } = inReview(project.id, 'closed');
+    store.write((ctx) => reopenTask(ctx, task.id));
+    // The new run finishes before it is put in a batch.
+    const again = store.write((ctx) => insertWorkstream(ctx, task.id)).value;
+    for (const to of [S.Starting, S.Running, S.Verifying, S.Done])
+      store.write((ctx) => transitionWorkstream(ctx, again.id, { to, fence: null }));
+    store.write((ctx) => {
+      setTaskStatus(ctx, task.id, 'done');
+    });
+    expect(() => store.write((ctx) => closeTask(ctx, task.id))).toThrow(ConflictError);
+    expect(() => store.write((ctx) => reopenTask(ctx, task.id))).toThrow(ConflictError);
+  });
+
   it('is not closed or reopened while its pull request is open', () => {
     const project = seedProject(store);
     const { task } = inReview(project.id, 'open');

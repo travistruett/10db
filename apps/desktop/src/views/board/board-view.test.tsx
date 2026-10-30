@@ -54,6 +54,8 @@ describe('BoardView', () => {
       projectId: project.id,
       title: 'Alpha',
       boardStatus: 'in_progress',
+      // The daemon marks a task done when its run finishes.
+      status: 'done',
       workstreamId: ws.id,
     });
     const shipped: string[] = [];
@@ -422,11 +424,12 @@ describe('BoardView', () => {
 
   it.each([
     ['RUNNING', 'Building', 'in_progress', false],
-    ['DONE', 'Done', 'ready', false],
+    // An open task in Ready whose latest run finished was reopened after its pull request closed.
+    ['DONE', 'Done', 'ready', true],
     ['FAILED', 'Failed', 'blocked', false],
     ['CANCELLED', 'Cancelled', 'ready', true],
   ] as const)(
-    'offers Start only when the latest workstream %s leaves the task Backlog or Ready and ended without finishing',
+    'offers Start only when the latest workstream %s leaves the open task Backlog or Ready',
     async (state, label, boardStatus, startable) => {
       const project = projectDto();
       const ws = workstreamDto({ projectId: project.id, state, taskTitle: 'Busy' });
@@ -1291,7 +1294,7 @@ describe('BoardView', () => {
 
     /** One finished task in a shipped batch whose pull request reads as given. */
     function shipped(
-      boardStatus: 'in_review' | 'blocked',
+      boardStatus: 'in_review' | 'blocked' | 'ready',
       pr: ReturnType<typeof read>,
       ...extra: (RequestHandler | WebSocketHandler)[]
     ) {
@@ -1313,7 +1316,8 @@ describe('BoardView', () => {
         projectId: project.id,
         title: 'Alpha',
         boardStatus,
-        status: 'done',
+        // A reopened task is open again in Ready; its latest run is still the finished one.
+        status: boardStatus === 'ready' ? 'open' : 'done',
         boardOrder: 1,
         workstreamId: ws.id,
       });
@@ -1384,6 +1388,19 @@ describe('BoardView', () => {
       await screen.findByRole('menu', { hidden: true });
       expect(screen.queryByRole('menuitem', { name: 'Reopen', hidden: true })).toBeNull();
       expect(screen.queryByRole('menuitem', { name: 'Close', hidden: true })).toBeNull();
+    });
+
+    it('starts a reopened task from its card, with no closed line and no Close', async () => {
+      shipped('ready', read('closed', 'passing'));
+      const ready = await screen.findByRole('list', { name: 'Ready tasks' });
+      const card = await within(ready).findByRole('listitem', { name: 'Alpha' });
+      expect(within(card).queryByText('Pull request closed without merging')).toBeNull();
+      expect(within(card).queryByRole('link', { name: 'Pull request' })).toBeNull();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Actions for Alpha' }));
+      expect(await screen.findByRole('menuitem', { name: 'Start', hidden: true })).toBeTruthy();
+      expect(screen.queryByRole('menuitem', { name: 'Close', hidden: true })).toBeNull();
+      expect(screen.queryByRole('menuitem', { name: 'Reopen', hidden: true })).toBeNull();
     });
   });
 

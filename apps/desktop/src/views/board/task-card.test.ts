@@ -36,4 +36,12 @@ describe('cardSummary', () => {
     );
     expect(summary).toContain('Not shipped: the gate failed.');
   });
+
+  it('waits on a dependency until it is in Done, even one shipped anyway and then merged', () => {
+    const dep = taskDto({ title: 'Dep', status: 'open', boardStatus: 'in_review' });
+    const task = taskDto({ dependsOn: [dep.id] });
+    expect(cardSummary(task, undefined, new Map([[dep.id, dep]]))).toContain('Waits on Dep.');
+    const merged = { ...dep, boardStatus: 'done' as const };
+    expect(cardSummary(task, undefined, new Map([[dep.id, merged]]))).not.toContain('Waits on');
+  });
 });
