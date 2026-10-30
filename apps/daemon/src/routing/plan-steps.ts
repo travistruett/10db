@@ -78,6 +78,8 @@ function routedStep(
     );
     return {
       ...base,
+      earlier: [],
+      sentBack: 0,
       profileId: pinned?.id ?? null,
       model: pin.model,
       effort: pin.effort,
@@ -102,6 +104,8 @@ function routedStep(
     });
     return {
       ...base,
+      earlier: [],
+      sentBack: 0,
       score: choice.score,
       profileId: choice.profile.id,
       model: choice.profile.model,
@@ -124,6 +128,8 @@ function routedStep(
       );
     return {
       ...base,
+      earlier: [],
+      sentBack: 0,
       profileId: fallback.profile.id,
       model: fallback.profile.model,
       effort: fallback.profile.effort,

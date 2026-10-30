@@ -7,6 +7,7 @@ import {
   PickerProposalDto,
   ProjectDto,
   ProjectViewDto,
+  RunNextResult,
   SystemCheckDto,
   TaskDto,
   TaskStartResult,
@@ -48,6 +49,8 @@ export const queryKeys = {
   boardColumns: (projectId: ProjectId) => ['board-columns', projectId] as const,
   workstreams: (active: boolean) => ['workstreams', { active }] as const,
   inbox: ['inbox'],
+  // Under `inbox`, so the events that refresh the open cards refresh these too.
+  inboxResolved: ['inbox', 'resolved'],
   workstreamChanges: (id: WorkstreamId | undefined, head: string | null) =>
     ['workstream-changes', id, head] as const,
   keepAwake: ['keep-awake'],
@@ -162,6 +165,27 @@ export function useInbox() {
   return useQuery(inboxQueryOptions(client));
 }
 
+/** How many resolved cards the Inbox fetches and shows, the most recent: the list only grows. */
+export const RESOLVED_SHOWN = 100;
+
+/**
+ * The most recent resolved cards, newest first: the ones the builder answered and the ones 10db
+ * closed because their cause was gone.
+ */
+export function useResolvedInbox() {
+  const { client } = useDaemon();
+  return useQuery({
+    queryKey: queryKeys.inboxResolved,
+    queryFn: async () =>
+      readJson(
+        await client.inbox.$get({
+          query: { state: 'RESOLVED', recent: String(RESOLVED_SHOWN) },
+        }),
+        InboxList,
+      ),
+  });
+}
+
 export function useKeepAwake() {
   const { client } = useDaemon();
   return useQuery({
@@ -234,6 +258,56 @@ export function useStartTask() {
   });
 }
 
+/** Puts a queued task first in line for the next free lane. */
+export function useRunNext() {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (taskId: TaskId) =>
+      readJson(
+        await client.tasks[':taskId']['run-next'].$post({ param: { taskId } }),
+        RunNextResult,
+      ),
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['tasks'] }),
+        queryClient.invalidateQueries({ queryKey: ['workstreams'] }),
+      ]),
+  });
+}
+
+/** A hold or a removal changes the task's run, its column and, for a removed run, its batch. */
+function invalidateTaskViews(queryClient: QueryClient): Promise<unknown> {
+  return Promise.all([
+    queryClient.invalidateQueries({ queryKey: ['tasks'] }),
+    queryClient.invalidateQueries({ queryKey: ['workstreams'] }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.projects }),
+    queryClient.invalidateQueries({ queryKey: ['batches'] }),
+  ]);
+}
+
+/** Sets a started task that has not run aside (`POST /tasks/:taskId/hold`): its run leaves the queue and keeps its worktree. */
+export function useHoldTask() {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (taskId: TaskId) =>
+      readJson(await client.tasks[':taskId'].hold.$post({ param: { taskId } }), WorkstreamDto),
+    onSuccess: () => invalidateTaskViews(queryClient),
+  });
+}
+
+/** Removes a task that has not run (`POST /tasks/:taskId/remove`); a held one takes its worktree and branch with it. */
+export function useRemoveTask() {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (taskId: TaskId) =>
+      readJson(await client.tasks[':taskId'].remove.$post({ param: { taskId } }), TaskDto),
+    onSuccess: () => invalidateTaskViews(queryClient),
+  });
+}
+
 /** Closes a task whose run failed; it leaves the Board, its run stays in Factory. */
 export function useCloseTask() {
   const { client } = useDaemon();
@@ -241,6 +315,21 @@ export function useCloseTask() {
   return useMutation({
     mutationFn: async (taskId: TaskId) =>
       readJson(await client.tasks[':taskId'].close.$post({ param: { taskId } }), TaskDto),
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['tasks'] }),
+        queryClient.invalidateQueries({ queryKey: ['candidates'] }),
+      ]),
+  });
+}
+
+/** Opens a task again after its pull request closed without merging; it returns to Ready or Backlog. */
+export function useReopenTask() {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (taskId: TaskId) =>
+      readJson(await client.tasks[':taskId'].reopen.$post({ param: { taskId } }), TaskDto),
     onSuccess: () =>
       Promise.all([
         queryClient.invalidateQueries({ queryKey: ['tasks'] }),
@@ -297,8 +386,14 @@ export function useRetryWorkstream() {
   const { client } = useDaemon();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (id: WorkstreamId) =>
-      readJson(await client.workstreams[':id'].retry.$post({ param: { id } }), WorkstreamDto),
+    mutationFn: async ({ id, note }: { readonly id: WorkstreamId; readonly note?: string }) =>
+      readJson(
+        await client.workstreams[':id'].retry.$post({
+          param: { id },
+          json: note ? { note } : {},
+        }),
+        WorkstreamDto,
+      ),
     onSuccess: () =>
       Promise.all([
         queryClient.invalidateQueries({ queryKey: ['workstreams'] }),

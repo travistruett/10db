@@ -31,6 +31,7 @@ import {
   WorkspaceMode,
   WorkstreamState,
 } from './states';
+import { DEFAULT_PROJECT_LANDING, ProjectLanding, TaskLanding } from './landing';
 import { WorkstreamStep } from './steps';
 
 const Name = z.string().regex(/^[a-z][a-z0-9-]*$/, 'lowercase letters, digits and hyphens');
@@ -51,12 +52,36 @@ export const AreaDef = z.object({ name: Name, globs: z.array(z.string().min(1)).
 export type AreaDef = z.infer<typeof AreaDef>;
 
 /**
+ * What a hazard is exclusive across. `copy`: one checkout, so tasks in separate worktrees hold it at
+ * the same time and tasks sharing a checkout (shared mode, or one batch) queue. `project`: every task
+ * of the project, whatever its checkout, because the hazard names something the copies share.
+ */
+export const HazardScope = { Copy: 'copy', Project: 'project' } as const;
+export type HazardScope = (typeof HazardScope)[keyof typeof HazardScope];
+
+/**
  * A hazard is an exclusive claim. `commands` are command prefixes that need it, as words: the guard
  * drops flags (and the value of flags like `--filter`) before comparing, so `pnpm -w add x` and
- * `pnpm --filter y add x` both match `pnpm add`.
+ * `pnpm --filter y add x` both match `pnpm add`. `scope` is absent in a project stored before
+ * hazards had one; `hazardScope` reads it.
  */
-export const HazardDef = AreaDef.extend({ commands: z.array(z.string().min(1)) });
+export const HazardDef = AreaDef.extend({
+  commands: z.array(z.string().min(1)),
+  scope: z.enum([HazardScope.Copy, HazardScope.Project]).optional(),
+});
 export type HazardDef = z.infer<typeof HazardDef>;
+
+/** The scope of the stock hazards, which a stored hazard of the same name with no scope takes. */
+const DEFAULT_HAZARD_SCOPES: Readonly<Record<string, HazardScope>> = {
+  migrations: HazardScope.Project,
+  deps: HazardScope.Copy,
+  harness: HazardScope.Copy,
+};
+
+/** A hazard's scope: its own, else its stock namesake's, else the whole project. */
+export function hazardScope(hazard: Pick<HazardDef, 'name' | 'scope'>): HazardScope {
+  return hazard.scope ?? DEFAULT_HAZARD_SCOPES[hazard.name] ?? HazardScope.Project;
+}
 
 /** Brackets and braces in a path pattern must close, in order. */
 function bracketsClose(glob: string): boolean {
@@ -89,6 +114,8 @@ export const DEFAULT_HAZARDS: readonly HazardDef[] = [
     name: 'migrations',
     globs: ['**/migrations/**', '**/drizzle/**'],
     commands: ['drizzle-kit generate', 'pnpm db:migrate'],
+    // The migrations run against a database every copy shares.
+    scope: HazardScope.Project,
   },
   {
     name: 'deps',
@@ -117,11 +144,15 @@ export const DEFAULT_HAZARDS: readonly HazardDef[] = [
       'cargo remove',
       'cargo update',
     ],
+    // Each copy has its own manifests, lockfile and node_modules; a clash is settled at merge.
+    scope: HazardScope.Copy,
   },
   {
     name: 'harness',
     globs: ['AGENTS.md', '**/AGENTS.md', '.claude/**', '.codex/**'],
     commands: [],
+    // Files each copy has its own version of.
+    scope: HazardScope.Copy,
   },
 ];
 
@@ -148,6 +179,12 @@ export const ProjectInput = z
     repoPath: z.string().startsWith('/'),
     /** The command that checks a task's work; null means the builder checks each finished task. */
     gateCommand: z.string().min(1).nullable().default(null),
+    /**
+     * The command that checks only what a task's diff touched. 10db runs it after each implement
+     * step instead of the gate command; the ship gate still runs the gate command. Null keeps the
+     * gate command for both.
+     */
+    changedCheckCommand: z.string().min(1).nullable().default(null),
     areas: z.array(AreaDef).min(1),
     hazards: z.array(HazardDef).default(() => [...DEFAULT_HAZARDS]),
     maxLanes: z.int().min(1).max(16).default(2),
@@ -163,6 +200,8 @@ export const ProjectInput = z
     delivery: z.enum(Delivery).default(Delivery.Local),
     /** The branch on `origin` a batch is cut from and its pull request targets. */
     baseBranch: BranchName.default('main'),
+    /** What a finished task's pull request does unless the task says otherwise. */
+    landing: z.enum(ProjectLanding).default(DEFAULT_PROJECT_LANDING),
     /**
      * `pull_request` delivery titles each PR `<prefix>: <batch title>`; null derives
      * `<type>(<scope>): <subject>` from the batch's tasks and the paths it changed.
@@ -209,6 +248,7 @@ export const ProjectDto = z.object({
   name: z.string(),
   repoPath: z.string(),
   gateCommand: z.string().nullable(),
+  changedCheckCommand: z.string().nullable(),
   areas: z.array(AreaDef),
   hazards: z.array(HazardDef),
   maxLanes: z.int(),
@@ -230,6 +270,7 @@ export const ProjectDto = z.object({
   budgetCeiling: z.number().nullable(),
   delivery: z.enum(Delivery),
   baseBranch: z.string(),
+  landing: z.enum(ProjectLanding),
   prTitlePrefix: z.string().nullable(),
   allowedCommands: z.array(z.string()),
   sandboxLoopback: z.boolean(),
@@ -245,6 +286,7 @@ export const ProjectPatch = z
   .object({
     name: z.string().min(1),
     gateCommand: z.string().min(1).nullable(),
+    changedCheckCommand: z.string().min(1).nullable(),
     maxLanes: z.int().min(1).max(16),
     handoffPct: z.int().min(5).max(95),
     nudgePct: z.int().min(6).max(98),
@@ -254,6 +296,7 @@ export const ProjectPatch = z
     budgetCeiling: z.number().positive().nullable(),
     delivery: z.enum(Delivery),
     baseBranch: BranchName,
+    landing: z.enum(ProjectLanding),
     prTitlePrefix: PrTitlePrefix.nullable(),
     /** Replaces the project's areas; one that a running task holds can't be removed or renamed. */
     areas: z.array(AreaDef.extend({ globs: z.array(PathPattern).min(1) })).min(1),
@@ -287,6 +330,8 @@ export const TaskInput = z.object({
   dependsOn: z.array(TaskId).default([]),
   riskTags: z.array(z.enum(RiskTag)).default([]),
   flowId: FlowId.nullable().default(null),
+  /** Where the work lands; absent starts from what the project does by default. */
+  landing: TaskLanding.optional(),
 });
 export type TaskInput = z.input<typeof TaskInput>;
 export type TaskConfig = z.output<typeof TaskInput>;
@@ -300,6 +345,7 @@ export const TaskDto = z.object({
   areas: z.array(z.string()),
   riskTags: z.array(z.enum(RiskTag)),
   flowId: FlowId.nullable(),
+  landing: TaskLanding,
   status: z.enum(TaskStatus),
   boardOrder: z.number(),
   boardColumnId: BoardColumnId.nullable(),
@@ -311,16 +357,20 @@ export const TaskDto = z.object({
 });
 export type TaskDto = z.infer<typeof TaskDto>;
 
-export const TaskPatch = z
-  .object({
-    title: Title,
-    description: z.string(),
-    acceptanceCriteria: z.array(z.string().min(1)).min(1),
-    riskTags: z.array(z.enum(RiskTag)),
-    flowId: FlowId.nullable(),
-  })
+/** The fields of a task the builder can change; each is optional in a patch. */
+export const TaskPatchFields = z.object({
+  title: Title,
+  description: z.string(),
+  acceptanceCriteria: z.array(z.string().min(1)).min(1),
+  riskTags: z.array(z.enum(RiskTag)),
+  flowId: FlowId.nullable(),
+});
+
+export const TaskPatch = TaskPatchFields.extend({ landing: TaskLanding })
   .partial()
-  .refine((p) => Object.keys(p).length > 0, { message: 'Change at least one field' });
+  .refine((p) => Object.keys(p).length > 0, {
+    message: 'Change at least one field',
+  });
 export type TaskPatch = z.infer<typeof TaskPatch>;
 
 /** What the runner does the next time the workstream gets a lane. */
@@ -369,6 +419,8 @@ export const WorkstreamDto = z.object({
   pausedUntil: Timestamp.nullable(),
   failureReason: z.string().nullable(),
   lastActivityAt: Timestamp.nullable(),
+  /** When the builder put it first in line; null for a workstream that waits in the order it started. */
+  runNextAt: Timestamp.nullable(),
   createdAt: Timestamp,
   updatedAt: Timestamp,
 });
@@ -382,6 +434,10 @@ export const InboxAnswer = z.object({
   note: z.string().max(4000).optional(),
 });
 export type InboxAnswer = z.infer<typeof InboxAnswer>;
+
+/** `POST /workstreams/:id/retry`: the builder's note, for the session a retry sends the work to. */
+export const RetryInput = z.object({ note: z.string().max(4000).optional() });
+export type RetryInput = z.infer<typeof RetryInput>;
 
 /** The two answers to a check card: the work is right, or it goes back with a note. */
 export const CheckChoice = {
@@ -423,16 +479,31 @@ export const PermissionRuleDto = z.object({
   toolName: z.string(),
   pattern: z.string().nullable(),
   sourceInboxId: InboxItemId.nullable(),
+  /** The project file whose scan allowed the host (such as `Cargo.lock`); null for any other source. */
+  foundIn: z.string().nullable(),
   createdAt: Timestamp,
 });
 export type PermissionRuleDto = z.infer<typeof PermissionRuleDto>;
 
+/** Where an allowed host came from: a project file's scan, an Inbox card's Allow, or the builder typing it. */
+export const NetworkHostSource = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('file'), file: z.string() }),
+  z.object({ kind: z.literal('card') }),
+  z.object({ kind: z.literal('builder') }),
+]);
+export type NetworkHostSource = z.infer<typeof NetworkHostSource>;
+
 /** A host the builder allows a project's sessions and checks to reach: its project-wide network rule. */
 export const NetworkHostDto = z.object({
   host: z.string(),
+  source: NetworkHostSource,
   createdAt: Timestamp,
 });
 export type NetworkHostDto = z.infer<typeof NetworkHostDto>;
+
+/** A host a project's package files name, and the file that names it (its path from the project root). */
+export const FoundHostDto = z.object({ host: z.string(), file: z.string() });
+export type FoundHostDto = z.infer<typeof FoundHostDto>;
 
 /** What the builder types to allow a host; the daemon judges it and answers a refusal in words. */
 export const NetworkHostInput = z.object({ host: z.string() });

@@ -418,6 +418,7 @@ describe('matchPermissionRule', () => {
     toolName,
     pattern,
     sourceInboxId: null,
+    foundIn: null,
     createdAt: '2026-10-13T12:00:00.000Z',
   });
   const match = (toolName: string, input: unknown, rules: PermissionRuleDto[]): boolean =>
@@ -466,6 +467,41 @@ describe('matchPermissionRule', () => {
         'SandboxNetworkAccess',
         { host: 'x.registry.npmjs.org' },
         'registry.npmjs.org',
+        false,
+      ],
+      [
+        'a *. rule matches a subdomain, as the sandbox reads it',
+        'SandboxNetworkAccess',
+        { host: 'Index.Crates.io' },
+        '*.crates.io',
+        true,
+      ],
+      [
+        'a *. rule matches a deeper subdomain',
+        'SandboxNetworkAccess',
+        { host: 'a.b.crates.io' },
+        '*.crates.io',
+        true,
+      ],
+      [
+        'a *. rule does not match the domain itself',
+        'SandboxNetworkAccess',
+        { host: 'crates.io' },
+        '*.crates.io',
+        false,
+      ],
+      [
+        'a *. rule does not match a host that only ends in the same letters',
+        'SandboxNetworkAccess',
+        { host: 'evilcrates.io' },
+        '*.crates.io',
+        false,
+      ],
+      [
+        'a *. rule does not match an address',
+        'SandboxNetworkAccess',
+        { host: '10.0.0.1' },
+        '*.0.1',
         false,
       ],
       [
@@ -781,6 +817,39 @@ describe('a project with no gate command', () => {
     );
     const without = allowedToolsFor({ gateCommand: null, allowedCommands: [] }, 'read_only');
     expect(without).toEqual(withGate);
+  });
+});
+
+describe('a project with a changed-packages check command', () => {
+  const project = {
+    gateCommand: 'make gate',
+    changedCheckCommand: 'make check-changed',
+    allowedCommands: [],
+  };
+
+  it('lets an edit step run it without a card, beside the gate', () => {
+    const tools = allowedToolsFor(project, 'edit');
+    expect(tools).toContain('Bash(make gate)');
+    expect(tools).toContain('Bash(make check-changed)');
+    expect(matchesAllowedTool('Bash', bash('make check-changed'), tools, repo.path)).toBe(true);
+    expect(matchesAllowedTool('Bash', bash('make check-changed --foo'), tools, repo.path)).toBe(
+      false,
+    );
+  });
+
+  it('keeps it out of a read-only step, as the gate is', () => {
+    const tools = allowedToolsFor(project, 'read_only');
+    expect(tools).not.toContain('Bash(make check-changed)');
+    expect(tools).not.toContain('Bash(make gate)');
+  });
+
+  it('adds nothing for a project without one', () => {
+    expect(allowedToolsFor({ gateCommand: 'make gate', allowedCommands: [] }, 'edit')).toEqual(
+      allowedToolsFor(
+        { gateCommand: 'make gate', changedCheckCommand: null, allowedCommands: [] },
+        'edit',
+      ),
+    );
   });
 });
 

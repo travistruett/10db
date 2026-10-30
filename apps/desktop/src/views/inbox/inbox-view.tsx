@@ -1,12 +1,13 @@
 import { InboxKind, type InboxItemDto } from '@10db/contracts';
-import { Alert, Group, Stack, Text, Title } from '@mantine/core';
+import { Alert, Group, Stack, Tabs, Text, Title } from '@mantine/core';
 import { useQueryClient } from '@tanstack/react-query';
-import { useRef, useState } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import { DaemonRequestError } from '../../daemon/client';
 import { queryKeys, useAnswerInbox, useInbox } from '../../daemon/queries';
 import { InboxCard } from './inbox-card';
 import { inboxRows, isDismissable, type InboxRow } from './inbox-rows';
 import { InboxShortcuts } from './inbox-shortcuts';
+import { ResolvedInbox } from './resolved-inbox';
 import { useInboxKeys } from './use-inbox-keys';
 
 /** Flag cards have no options; the daemon accepts any choice and closes them. */
@@ -26,7 +27,39 @@ interface Draft {
   readonly error: string | null;
 }
 
+type Tab = 'open' | 'resolved';
+
+/** The Inbox: the cards that wait on the builder, and a view of the ones already closed. */
 export function InboxView() {
+  const [tab, setTab] = useState<Tab>('open');
+  const tabs = (
+    <Tabs
+      value={tab}
+      onChange={(value) => {
+        setTab(value === 'resolved' ? 'resolved' : 'open');
+      }}
+    >
+      <Tabs.List>
+        <Tabs.Tab value="open">Open</Tabs.Tab>
+        <Tabs.Tab value="resolved">Resolved</Tabs.Tab>
+      </Tabs.List>
+    </Tabs>
+  );
+  // Each view is its own component, so the open view's keys are only live while it is shown.
+  return tab === 'open' ? (
+    <OpenInbox tabs={tabs} />
+  ) : (
+    <Stack>
+      <Group justify="space-between">
+        <Title order={2}>Inbox</Title>
+        {tabs}
+      </Group>
+      <ResolvedInbox />
+    </Stack>
+  );
+}
+
+function OpenInbox({ tabs }: { readonly tabs: ReactNode }) {
   const inbox = useInbox();
   const answer = useAnswerInbox();
   const queryClient = useQueryClient();
@@ -163,15 +196,18 @@ export function InboxView() {
     <Stack>
       <Group justify="space-between">
         <Title order={2}>Inbox</Title>
-        <InboxShortcuts
-          opened={helpOpen}
-          onOpen={() => {
-            setHelpOpen(true);
-          }}
-          onClose={() => {
-            setHelpOpen(false);
-          }}
-        />
+        <Group gap="sm">
+          {tabs}
+          <InboxShortcuts
+            opened={helpOpen}
+            onOpen={() => {
+              setHelpOpen(true);
+            }}
+            onClose={() => {
+              setHelpOpen(false);
+            }}
+          />
+        </Group>
       </Group>
       {inbox.isError ? (
         <Alert color="red" title="Couldn't load the inbox">

@@ -3,7 +3,8 @@ import { WorkstreamState as S, type WorkstreamState } from './states';
 /** Allowed workstream transitions (spec §5.1). Anything not listed is forbidden. */
 export const WORKSTREAM_TRANSITIONS: Readonly<Record<WorkstreamState, readonly WorkstreamState[]>> =
   {
-    [S.Queued]: [S.Starting, S.Cancelled],
+    [S.Queued]: [S.Starting, S.Held, S.Cancelled],
+    [S.Held]: [S.Queued, S.Cancelled],
     [S.Starting]: [S.Running, S.Verifying, S.Recovering, S.PausedLimit, S.Failed, S.Cancelled],
     [S.Running]: [
       S.HandingOff,

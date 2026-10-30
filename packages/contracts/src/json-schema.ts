@@ -17,6 +17,7 @@ import {
   AccountUsageDto,
 } from './accounts';
 import { AaModelDto, BenchmarkStatusDto } from './benchmarks';
+import { AdvertisedBuilderToolInputs, BuilderToolName } from './builder-mcp-tools';
 import {
   BoardColumnDelete,
   BoardColumnDto,
@@ -34,12 +35,19 @@ import {
 } from './entities';
 import { DaemonEvent } from './events';
 import { FlowDto, FlowInput, FlowPatch } from './flows';
-import { FolderInspectInput, FolderInspection, FolderInspectResult } from './folders';
+import {
+  AreaProposalInput,
+  AreaProposalResult,
+  FolderInspectInput,
+  FolderInspection,
+  FolderInspectResult,
+} from './folders';
 import { HandoffInput } from './handoff';
 import { HealthResponse } from './health';
 import { McpToolInputs, McpToolName, McpToolOutputs } from './mcp-tools';
 import { ModelProfileDto, ModelProfilePatch } from './model-profiles';
 import { PickerProposalDto } from './picker';
+import { RunNextResult } from './run-next';
 import { StepPlanDto } from './steps';
 import { WorkstreamChangesDto } from './workstream-changes';
 import {
@@ -66,6 +74,13 @@ const mcpSchemas: Record<string, z.ZodType> = Object.fromEntries(
   Object.values(McpToolName).flatMap((tool): [string, z.ZodType][] => [
     [`mcp-${tool.replaceAll('_', '-')}-input`, McpToolInputs[tool]],
     [`mcp-${tool.replaceAll('_', '-')}-output`, McpToolOutputs[tool]],
+  ]),
+);
+
+const builderMcpSchemas: Record<string, z.ZodType> = Object.fromEntries(
+  Object.values(BuilderToolName).map((tool): [string, z.ZodType] => [
+    `builder-mcp-${tool.replaceAll('_', '-')}-input`,
+    AdvertisedBuilderToolInputs[tool],
   ]),
 );
 
@@ -106,12 +121,15 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'board-column-input': BoardColumnInput,
   'board-column-patch': BoardColumnPatch,
   'task-move': TaskMove,
+  'run-next-result': RunNextResult,
   'flow-dto': FlowDto,
   'flow-input': FlowInput,
   'flow-patch': FlowPatch,
   'folder-inspect-input': FolderInspectInput,
   'folder-inspection': FolderInspection,
   'folder-inspect-result': FolderInspectResult,
+  'area-proposal-input': AreaProposalInput,
+  'area-proposal-result': AreaProposalResult,
   'model-profile-dto': ModelProfileDto,
   'model-profile-patch': ModelProfilePatch,
   'picker-proposal-dto': PickerProposalDto,
@@ -127,6 +145,7 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'team-input': TeamInput,
   'workstream-changes-dto': WorkstreamChangesDto,
   ...mcpSchemas,
+  ...builderMcpSchemas,
 };
 
 /** Renders each registered schema as JSON Schema text, keyed by file name. */

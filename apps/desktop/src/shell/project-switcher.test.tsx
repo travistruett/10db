@@ -127,6 +127,16 @@ describe('ProjectSwitcher', () => {
             defaultBranch: null,
             github: null,
             gateCandidates: [{ command: 'make gate', source: 'makefile' }],
+            registryHosts: [],
+          },
+        }),
+      ),
+      http.post(daemonUrl('/folders/propose-areas'), () =>
+        HttpResponse.json({
+          ok: true,
+          proposal: {
+            namedBy: 'structure',
+            areas: [{ name: 'root', globs: ['*', '.*'], reason: 'The top of the repository.' }],
           },
         }),
       ),
@@ -144,6 +154,7 @@ describe('ProjectSwitcher', () => {
     fireEvent.change(path, { target: { value: '/Users/x/gamma' } });
     fireEvent.blur(path);
     await within(dialog).findByRole('textbox', { name: 'Name' });
+    await within(dialog).findByRole('group', { name: 'Area 1' });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Create Project' }));
 
     expect(

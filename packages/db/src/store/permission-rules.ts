@@ -17,9 +17,16 @@ export function insertPermissionRule(
     readonly toolName: string;
     readonly pattern: string | null;
     readonly sourceInboxId: InboxItemId | null;
+    /** The project file a scan found the host in; left out for every other source. */
+    readonly foundIn?: string | null;
   },
 ): PermissionRuleDto {
-  const row: PermissionRuleDto = { id: mintId('PermissionRule'), ...input, createdAt: ctx.now };
+  const row: PermissionRuleDto = {
+    id: mintId('PermissionRule'),
+    ...input,
+    foundIn: input.foundIn ?? null,
+    createdAt: ctx.now,
+  };
   ctx.tx
     .insert(schema.permissionRules)
     .values({ ...row, updatedAt: ctx.now })

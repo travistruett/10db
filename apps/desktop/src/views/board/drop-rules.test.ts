@@ -8,7 +8,9 @@ const icebox = boardColumnDto({ name: 'Icebox', position: 0 });
 const exploring = boardColumnDto({ name: 'Exploring', position: 1 });
 const ICEBOX: ColumnKey = { kind: 'human', id: icebox.id };
 const EXPLORING: ColumnKey = { kind: 'human', id: exploring.id };
-const system = (status: 'backlog' | 'ready' | 'in_progress' | 'blocked' | 'done'): ColumnKey => ({
+const system = (
+  status: 'backlog' | 'ready' | 'in_progress' | 'in_review' | 'blocked' | 'done',
+): ColumnKey => ({
   kind: 'system',
   status,
 });
@@ -30,7 +32,13 @@ const ready2 = taskDto({ title: 'ready2', boardStatus: 'ready', boardOrder: 4 })
 const waiting = taskDto({ title: 'waiting', boardStatus: 'backlog', boardOrder: 5 });
 const running = taskDto({ title: 'running', boardStatus: 'in_progress', boardOrder: 6 });
 const shipped = taskDto({ title: 'shipped', boardStatus: 'done', status: 'done', boardOrder: 7 });
-const tasks: TaskDto[] = [idea1, idea2, ready1, ready2, waiting, running, shipped];
+const reviewing = taskDto({
+  title: 'reviewing',
+  boardStatus: 'in_review',
+  status: 'done',
+  boardOrder: 8,
+});
+const tasks: TaskDto[] = [idea1, idea2, ready1, ready2, waiting, running, shipped, reviewing];
 const layout = boardLayout([icebox, exploring], tasks);
 /** `running` has started and waits on `waiting`. */
 const STARTED = new Map([[waiting.id, running.title]]);
@@ -144,7 +152,16 @@ describe('resolveDrop', () => {
       to: { key: system('blocked'), index: 0 },
       expected: {
         kind: 'refuse',
-        reason: 'Blocked and Done follow the task’s state; cards can’t be dropped there',
+        reason: 'Blocked, In review and Done follow the task’s state; cards can’t be dropped there',
+      },
+    },
+    {
+      name: 'a ready card to In review',
+      task: ready1,
+      to: { key: system('in_review'), index: 0 },
+      expected: {
+        kind: 'refuse',
+        reason: 'Blocked, In review and Done follow the task’s state; cards can’t be dropped there',
       },
     },
     {
@@ -153,7 +170,16 @@ describe('resolveDrop', () => {
       to: { key: system('done'), index: 0 },
       expected: {
         kind: 'refuse',
-        reason: 'Blocked and Done follow the task’s state; cards can’t be dropped there',
+        reason: 'Blocked, In review and Done follow the task’s state; cards can’t be dropped there',
+      },
+    },
+    {
+      name: 'an in-review card anywhere',
+      task: reviewing,
+      to: { key: system('ready'), index: 0 },
+      expected: {
+        kind: 'refuse',
+        reason: 'In review cards follow their pull request; they can’t be dragged',
       },
     },
     {

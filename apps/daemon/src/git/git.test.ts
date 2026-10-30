@@ -736,6 +736,29 @@ describe('network calls', () => {
     await expect(failure).rejects.toMatchObject({ kind: 'failed' });
   });
 
+  it('says whether origin has a branch, without fetching it or touching the checkout', async () => {
+    pushFromElsewhere('feature/x', 'x.txt');
+    const before = local('rev-parse', 'HEAD');
+    expect(await git.branchOnOrigin(remote.repo.path, 'main', net)).toBe(true);
+    expect(await git.branchOnOrigin(remote.repo.path, 'feature/x', net)).toBe(true);
+    expect(await git.branchOnOrigin(remote.repo.path, 'feature/y', net)).toBe(false);
+    // Only a whole branch name counts, not one that merely ends the same way.
+    expect(await git.branchOnOrigin(remote.repo.path, 'x', net)).toBe(false);
+    expect(local('rev-parse', 'HEAD')).toBe(before);
+    expect(local('branch', '--list', '-r')).not.toContain('feature/x');
+  });
+
+  it('fails, rather than answering no, when origin cannot be asked', async () => {
+    local('remote', 'set-url', 'origin', 'git@example.invalid:hang.git');
+    const hang = {
+      env: { ...NETWORK_ENV, GIT_SSH_COMMAND: 'sleep 5; true', GIT_SSH_VARIANT: 'simple' },
+      timeoutMs: 300,
+    };
+    await expect(git.branchOnOrigin(remote.repo.path, 'main', hang)).rejects.toMatchObject({
+      kind: 'timeout',
+    });
+  });
+
   it('pushes a branch and records its upstream, and pushing it again changes nothing', async () => {
     await git.switchNewBranch(remote.repo.path, '10db/x-0a1b2c3d', 'main');
     writeFileSync(join(remote.repo.path, 'x.txt'), 'x');

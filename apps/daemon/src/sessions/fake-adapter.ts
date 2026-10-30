@@ -17,8 +17,10 @@ import { matchesAllowedTool } from '../permissions';
 import { checkAccount, credentialProblem, modelMatches, type SeenAccount } from './account-check';
 import { createChannel } from './channel';
 import {
+  CompletionError,
   SessionEndReason,
   type AccountProbeSpec,
+  type CompletionSpec,
   type SessionAdapter,
   type SessionEvent,
   type SessionHandle,
@@ -80,7 +82,10 @@ export const FakeStep = z.discriminatedUnion('do', [
   z.object({ do: z.literal('tool'), toolName: z.string(), input: z.record(z.string(), Json) }),
   z.object({ do: z.literal('mcp'), tool: z.string(), args: z.record(z.string(), Json) }),
   z.object({ do: z.literal('await_message'), contains: z.string() }),
-  z.object({ do: z.literal('turn_complete') }),
+  z.object({
+    do: z.literal('turn_complete'),
+    result: z.enum(['success', 'max_turns', 'error']).optional(),
+  }),
   z.object({
     do: z.literal('rate_limit'),
     status: z.enum(['allowed', 'allowed_warning', 'rejected']),
@@ -150,11 +155,21 @@ export class FakeAdapter implements SessionAdapter {
     apiKeySource: 'none',
   };
   readonly probes: AccountProbeSpec[] = [];
+  /** Every question put to the model by `complete`. */
+  readonly completions: CompletionSpec[] = [];
+  /** What the model answers; the default has none, so a caller falls back to what it can do without. */
+  answer: (ask: CompletionSpec) => Promise<string> = () =>
+    Promise.reject(new CompletionError('The fake adapter has no model to ask.'));
 
   private readonly book: FakeScriptBook;
 
   constructor(book: FakeScriptBook) {
     this.book = book;
+  }
+
+  complete(ask: CompletionSpec): Promise<string> {
+    this.completions.push(ask);
+    return this.answer(ask);
   }
 
   probeAccount(probe: AccountProbeSpec): Promise<SeenAccount> {
@@ -363,6 +378,7 @@ export class FakeAdapter implements SessionAdapter {
         case 'turn_complete':
           channel.push({
             type: 'turn_complete',
+            ...(step.result ? { result: step.result } : {}),
             inputTokens: 1000,
             outputTokens: 200,
             cachedTokens: 0,

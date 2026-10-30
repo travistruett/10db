@@ -46,7 +46,7 @@ export interface RecoveryReport {
 }
 
 /** States that keep their place: only the dead daemon's lease, session and processes are cleaned up. */
-const KEEP_STATE = new Set<string>([S.Queued, S.PausedLimit]);
+const KEEP_STATE = new Set<string>([S.Queued, S.Held, S.PausedLimit]);
 
 /** The most dirty files one recovery event records. */
 const MAX_DIRTY_FILES = 200;

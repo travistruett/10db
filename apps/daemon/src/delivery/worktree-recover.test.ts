@@ -9,6 +9,7 @@ import {
   getBatch,
   insertBatch,
   listBatches,
+  listInbox,
   listLiveWorktrees,
   listWorkstreams,
   patchBatch,
@@ -196,6 +197,21 @@ function expectCutDeleted(batch: BatchDto, cardTitle: string): void {
 }
 
 describe('recoverBatches with worktrees', () => {
+  it('closes the cut-interrupted card by itself once its task starts after the restart', async () => {
+    const { batch } = cuttingRow();
+    const ws = h.only(listWorkstreams(h.store.db, { batchId: batch.id }));
+    await recover();
+    const card = h.only(h.cards());
+    expect(card.title).toBe(CUT_INTERRUPTED);
+    h.starter.startTask(ws.taskId);
+    await h.jobs.idle();
+    expect(h.cards()).toEqual([]);
+    expect(h.only(listInbox(h.store.db, { states: ['RESOLVED'] }))).toMatchObject({
+      id: card.id,
+      detail: { resolution: { by: '10db', reason: 'Alpha started' } },
+    });
+  });
+
   it.each<CrashPoint>([
     {
       name: 'after the CUTTING insert',

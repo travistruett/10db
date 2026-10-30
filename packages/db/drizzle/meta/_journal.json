@@ -71,6 +71,41 @@
       "when": 1793312894704,
       "tag": "0009_far_nebula",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1793328826596,
+      "tag": "0010_mushy_tinkerer",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1793379496581,
+      "tag": "0011_futuristic_dexter_bennett",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1793380432888,
+      "tag": "0012_dashing_viper",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1793383292399,
+      "tag": "0013_short_roughhouse",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1793385216855,
+      "tag": "0014_withdraw_review_cards",
+      "breakpoints": true
     }
   ]
 }

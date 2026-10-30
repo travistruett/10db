@@ -45,10 +45,13 @@ checklist is in [CONTRIBUTING.md](CONTRIBUTING.md#set-up).
 - `pnpm dev`: run the daemon and the browser UI with a shared dev token, with state in `.dev/`.
 - `pnpm --filter @10db/desktop dev:shell`: open the Tauri window ("10db Dev", its own app identifier, data in `.dev/data`) against that daemon. It runs beside the installed app. Run `pnpm --filter @10db/desktop sidecar` once first.
 - `pnpm dev:factory`: the UI with hot reload over your installed 10db; see [Hot-reload the UI over your real 10db](#hot-reload-the-ui-over-your-real-10db).
+- 10db's tools in Claude Code, Codex or another MCP client (list, create, edit and start tasks; read the
+  Inbox): one command adds them, with no token to copy. See [docs/builder-mcp.md](docs/builder-mcp.md).
 - Factory and preview: the installed app runs 10db's tasks on this repo; `pnpm dev` with `dev:shell` or http://localhost:1420 only previews the checkout and never runs tasks. While a task holds the checkout, don't hand-edit it; use a worktree in `../10db-worktrees/`.
 - `make live-acceptance`: the manual §1.3 run on a Max subscription.
 - `make gate`: every check; prints one summary line with each step's seconds (`GATE PASS format 4s · lint 31s · … (210s)`). Its e2e step needs the WebKit browser that `make setup` installs. It picks free ports for its daemon and UI, so gates in separate worktrees can run at once, beside `pnpm dev`; a port another process takes before the servers bind it fails the run at startup.
 - `make check`: the fast check on what you changed.
+- `make check-changed`: format, lint, typecheck, tests and drift of the packages your diff touches and their dependents (about a minute and a half for a desktop-only change); it runs the full gate when it can't place a changed file. 10db runs it after each implement step when the project's "Check after each step" setting is `make check-changed`; the ship gate still runs `make gate`.
 
 Working rules for people and agents are in [AGENTS.md](AGENTS.md); how to contribute is in
 [CONTRIBUTING.md](CONTRIBUTING.md).

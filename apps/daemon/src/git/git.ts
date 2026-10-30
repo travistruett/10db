@@ -25,7 +25,16 @@ import {
 } from './checkout-trust';
 import { parseScopedConfig, type ConfigEntry } from './config-trust';
 import { equalOrUnder, insideAny, isPlainDirectory, samePath, surelyInside } from './lane-writable';
-import { branchOfRef, firstLine, parseBranches, type RepoFacts, type RepoRefusal } from './inspect';
+import {
+  branchOfRef,
+  parseBranches,
+  parseSurveyLog,
+  refusalOf,
+  SURVEY_COMMIT_MARK,
+  type RepoFacts,
+  type RepoRefusal,
+  type RepoSurvey,
+} from './inspect';
 import { comparablePath, entryAt, existsAsEntry, foldedName, sameEntry } from './path-entries';
 import { gitNetwork, type NetworkCall, type NetworkRun } from './network';
 import { localRemotePath, parseRemoteUrl } from './remote-url';
@@ -190,6 +199,12 @@ export interface Git {
   /** Updates `origin/<branch>` from origin's recorded fetch URL; the checkout is untouched. */
   fetch(repo: string, branch: string, net: NetworkCall): Promise<NetworkRun>;
   /**
+   * Whether origin, at its recorded fetch URL, has a branch named `branch`. Asks only: nothing is
+   * fetched and the checkout is untouched. Throws a GitNetworkError when origin can't be asked, so
+   * an unreachable origin is never taken for a missing branch.
+   */
+  branchOnOrigin(repo: string, branch: string, net: NetworkCall): Promise<boolean>;
+  /**
    * Creates `name` at `startPoint` and checks it out, with no upstream. Resolves with where HEAD was
    * just before, read under the same lock, or null when HEAD named no commit.
    */
@@ -338,11 +353,29 @@ export interface Git {
    * looks at raises no card. A repository git won't read is answered, not thrown.
    */
   inspect(path: string): Promise<RepoFacts | RepoRefusal>;
+  /**
+   * The tracked files of HEAD and the files of its latest `maxCommits` commits, read from the object
+   * store as `inspect` reads: unpinned, nothing written, no refusal reaches `onRefused`. Git runs no
+   * program the repository configures: only plumbing and `log` with no external diff, no textconv
+   * and no signature check.
+   */
+  survey(path: string, maxCommits: number): Promise<RepoSurvey | RepoRefusal>;
 }
 
 export interface GitOptions {
   /** Called with every refusal, so the builder hears of it whoever called. */
   onRefused?(error: GitTrustError): void;
+  /**
+   * Called with the real path of a checkout refused for a moved git dir or a changed origin once it
+   * is trusted again, so the cards that refused it can go: the builder's Trust answer pinned it, or
+   * a later call found it exactly as pinned (the move or the origin was put back). Once per refusal.
+   */
+  onTrusted?(repo: string): void;
+  /**
+   * Real paths of checkouts refused before this `Git` was made whose cards are still open, so a
+   * call that finds one as pinned again tells `onTrusted` too.
+   */
+  refusedCheckouts?: Iterable<string>;
   /** Where pins persist; the default lasts as long as this `Git`. */
   pins?: PinStore;
   /** The git to run for every call, as `resolveGit` found it; `git` on PATH otherwise. */
@@ -525,11 +558,36 @@ export function createGit(opts: GitOptions = {}): Git {
   const fetches = new Map<string, Promise<unknown>>();
   const pins = opts.pins ?? memoryPinStore();
   const bin = opts.bin ?? 'git';
+  // Checkouts refused for a state the builder can trust (a moved git dir, a changed origin) and not
+  // trusted since: a call that finds one exactly as pinned again tells `onTrusted`. Kept in memory,
+  // so the check costs a lookup on every other call.
+  const refused = new Set(opts.refusedCheckouts);
 
   function refusal(repo: string, detail: GitTrustDetail): GitTrustError {
     const error = new GitTrustError(repo, detail);
+    if (detail.kind === GitTrustFailure.Moved || detail.kind === GitTrustFailure.Origin)
+      refused.add(repo);
     opts.onRefused?.(error);
     return error;
+  }
+
+  /** Tells `onTrusted` once that `real` is trusted again; later calls for it do nothing. */
+  function trustedAgain(real: string): void {
+    if (refused.delete(real)) opts.onTrusted?.(real);
+  }
+
+  /**
+   * After a call passed the pin check for a refused checkout: whether its origin is the pinned one
+   * too, as `retrust` compares it. A read that fails leaves it refused, and the call goes on.
+   */
+  async function settleRefused(real: string, pin: CheckoutPin): Promise<void> {
+    try {
+      const fetchUrl = await pinnableUrl(observed(real), false);
+      const pushUrl = await pinnableUrl(observed(real), true);
+      if (fetchUrl === pin.fetchUrl && pushUrl === pin.pushUrl) trustedAgain(real);
+    } catch {
+      // Still refused: the next call looks again.
+    }
   }
 
   /** Runs `fn` after every earlier call under `key` in `held` has settled. */
@@ -714,6 +772,7 @@ export function createGit(opts: GitOptions = {}): Git {
       if (readIfPresent(file).trim() !== '')
         throw refusal(real, { kind: GitTrustFailure.Attributes, file });
     }
+    if (refused.has(real)) await settleRefused(real, pin);
     return { real, dirs, pin, env: { GIT_DIR: pin.gitDir, GIT_WORK_TREE: real } };
   }
 
@@ -1313,6 +1372,26 @@ export function createGit(opts: GitOptions = {}): Git {
     );
   }
 
+  async function branchOnOriginOnce(
+    repo: string,
+    branch: string,
+    net: NetworkCall,
+  ): Promise<boolean> {
+    const c = await pinned(repo);
+    const network = await networkConfig(c, net);
+    const url = await pinnedUrl(c, 'fetch');
+    const ref = `refs/heads/${branch}`;
+    const run = await gitNetwork(
+      c.real,
+      network.config,
+      ['ls-remote', '--heads', '--', url, ref],
+      net,
+      { bin, env: { ...c.env, ...network.env } },
+    );
+    // Each answer line is `<sha>\t<ref>`; the pattern may match other refs, so compare the name.
+    return run.output.split('\n').some((line) => line.trim().endsWith(`\t${ref}`));
+  }
+
   async function mergeIntoBranch(input: MergeIntoBranchInput): Promise<BranchMerge> {
     // Inside the checkout's lock, so no commit of the daemon's moves the branch meanwhile.
     return withRepoLock(realpathSync(input.repo), async () => {
@@ -1756,6 +1835,9 @@ export function createGit(opts: GitOptions = {}): Git {
     async fetch(repo, branch, net) {
       return serialized(fetches, realpathSync(repo), () => fetchOnce(repo, branch, net));
     },
+    async branchOnOrigin(repo, branch, net) {
+      return branchOnOriginOnce(repo, branch, net);
+    },
     async switchNewBranch(repo, name, startPoint) {
       return withRepoLock(realpathSync(repo), async () =>
         switchCheckout(await pinned(repo), name, startPoint),
@@ -2001,17 +2083,43 @@ export function createGit(opts: GitOptions = {}): Git {
           originFetchUrl: url === null || url.trim() === '' ? null : url.trim(),
         };
       } catch (error) {
-        if (
-          error instanceof GitError &&
-          /not a git repository \((?:or any of the parent directories|or any parent up to mount point)/i.test(
-            error.stderr,
-          )
-        )
-          return { refused: 'not_a_repository', message: firstLine(error.stderr) };
-        return {
-          refused: 'unreadable',
-          message: firstLine(error instanceof GitError ? error.stderr : String(error)),
-        };
+        return refusalOf(error);
+      }
+    },
+    async survey(path, maxCommits) {
+      const site = observed(path);
+      try {
+        const bare = (await git(site, ['rev-parse', '--is-bare-repository'])).trim() === 'true';
+        if (bare) return { refused: 'bare_repository', message: 'This is a bare repository.' };
+        const at = observed(
+          realpathSync((await git(site, ['rev-parse', '--show-toplevel'])).trim()),
+        );
+        // An empty repository has no HEAD: it holds no file and has no history.
+        const head = await git(at, ['rev-parse', '-q', '--verify', 'HEAD^{commit}'], {
+          answerExitCodes: [1],
+        });
+        if (head.trim() === '') return { files: [], commits: [] };
+        const tree = await git(at, ['ls-tree', '-r', '-z', '--name-only', 'HEAD']);
+        const log = await git(at, [
+          'log',
+          '--no-show-signature',
+          // log.mailmap is on by default and reads .mailmap from the checkout.
+          '--no-mailmap',
+          `--max-count=${String(maxCommits)}`,
+          '--no-merges',
+          '--no-renames',
+          '--no-ext-diff',
+          '--no-textconv',
+          '--name-only',
+          '-z',
+          `--format=${SURVEY_COMMIT_MARK}`,
+          // Without `--`, a file named HEAD makes the revision ambiguous and git stats the checkout.
+          'HEAD',
+          '--',
+        ]);
+        return { files: tree.split('\0').filter((f) => f !== ''), commits: parseSurveyLog(log) };
+      } catch (error) {
+        return refusalOf(error);
       }
     },
     async ignoredDirectories(repo) {
@@ -2049,6 +2157,9 @@ export function createGit(opts: GitOptions = {}): Git {
       if (!same) throw mismatch(real, candidate, now);
       // `now` is the candidate's state with the device number the volume has today.
       pins.set(real, now);
+      // Told even when no refusal since this start is known: the builder answered a card.
+      refused.add(real);
+      trustedAgain(real);
     },
   };
 }

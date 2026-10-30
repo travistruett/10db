@@ -10,14 +10,25 @@ import {
   type ProjectId,
   type WorkstreamId,
 } from '@10db/contracts';
-import { activeClaims, getBatch, getProject, getWorkstream, listWorkstreams } from '@10db/db';
+import {
+  activeClaims,
+  copyHazardNames,
+  getBatch,
+  getProject,
+  getWorkstream,
+  listWorkstreams,
+} from '@10db/db';
 import type { Clock, Timer } from '../clock';
 import { checkoutOf } from '../delivery';
 import type { StateStore } from '../events';
 import { existsAsEntry, GitTrustError, type Git } from '../git';
 import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
-import { holdsOnlyBookkeeping, isBookkeepingAt } from './claude-code-bookkeeping';
+import {
+  bookkeepingAt,
+  ignoredBookkeepingWrite,
+  isInsideClaudeCodeBookkeeping,
+} from './claude-code-bookkeeping';
 import {
   bulkFoldKey,
   findForeignClaimWrites,
@@ -40,6 +51,17 @@ const WATCHED_STATES = [...LANE_STATES, WorkstreamState.WaitingHuman];
  * lane's claim by someone else is the real-time batch's to report, as a foreign write.
  */
 const STEP_END_CLAIM_STATES = ACTIVE_STATES.filter((s) => s !== WorkstreamState.TakenOver);
+
+/**
+ * Whether a claim is exclusive per copy of the repository (every area, and a per-copy hazard), so it
+ * excuses or blocks writes only in its holder's checkout, rather than in every checkout of the project.
+ */
+function perCopyClaims(
+  project: Pick<ProjectDto, 'hazards'>,
+): (claim: { readonly kind: ClaimKind; readonly name: string }) => boolean {
+  const copyHazards = copyHazardNames(project);
+  return (claim) => claim.kind === ClaimKind.Area || copyHazards.has(claim.name);
+}
 
 export type WatchFn = (
   root: string,
@@ -171,8 +193,9 @@ export function createWatcher(deps: {
 
   /**
    * Strays among `paths` against the claims of the workstreams in `claimStates`, plus any in `alsoHeldBy`.
-   * Area claims count from the batch's workstreams in a worktree and from the project's workstreams outside any worktree in the main checkout; hazard
-   * claims always count from the project's, since a hazard is shared across worktrees.
+   * Area claims and per-copy hazard claims count from the batch's workstreams in a worktree and from the project's
+   * workstreams outside any worktree in the main checkout; the other hazard claims always count from the project's,
+   * since that hazard names something the worktrees share.
    */
   function straysIn(
     project: ProjectDto,
@@ -181,6 +204,7 @@ export function createWatcher(deps: {
     claimStates: readonly WorkstreamState[],
     alsoHeldBy: WorkstreamId | null,
   ): { strays: string[]; candidates: WorkstreamId[] } {
+    const isPerCopy = perCopyClaims(project);
     const inScope = (ws: { readonly batchId: BatchId | null }) => worktreeBatchOf(ws) === batchId;
     const holders = listWorkstreams(db, { states: claimStates, projectId: project.id });
     const ids = holders.map((ws) => ws.id);
@@ -191,7 +215,7 @@ export function createWatcher(deps: {
     }
     const claims = ids.flatMap((id) =>
       activeClaims(db, id)
-        .filter((c) => c.kind === ClaimKind.Hazard || areaHolders.has(id))
+        .filter((c) => !isPerCopy(c) || areaHolders.has(id))
         .map((c) => ({ kind: c.kind, name: c.name })),
     );
     const candidates = listWorkstreams(db, { states: WATCHED_STATES, projectId: project.id })
@@ -208,6 +232,7 @@ export function createWatcher(deps: {
     paths: readonly string[],
   ): void {
     if (paths.length === 0) return;
+    const isPerCopy = perCopyClaims(project);
     const holders: ClaimHolder[] = listWorkstreams(db, {
       states: ACTIVE_STATES,
       projectId: project.id,
@@ -216,7 +241,7 @@ export function createWatcher(deps: {
       // A lane in another checkout holds its claims but isn't writing here, so a write into them is foreign.
       running: LANE_STATES.includes(ws.state) && worktreeBatchOf(ws) === batchId,
       claims: activeClaims(db, ws.id)
-        .filter((c) => c.kind === ClaimKind.Hazard || worktreeBatchOf(ws) === batchId)
+        .filter((c) => !isPerCopy(c) || worktreeBatchOf(ws) === batchId)
         .map((c) => ({ kind: c.kind, name: c.name })),
     }));
     const foreign = findForeignClaimWrites(paths, project, holders);
@@ -250,7 +275,33 @@ export function createWatcher(deps: {
     ordinary.forEach(single);
   }
 
-  async function processBatch(root: string, paths: readonly string[]): Promise<void> {
+  /** Logs a path dropped because it is Claude Code's bookkeeping, so the log shows what the list hides. */
+  function logBookkeeping(
+    projectId: ProjectId,
+    root: string,
+    rel: string,
+    entries: readonly { writtenBy: string }[],
+  ): void {
+    deps.logger.info(
+      { projectId, root, path: rel, writtenBy: entries.map((e) => e.writtenBy).join(' ') },
+      'ignored a Claude Code bookkeeping write',
+    );
+  }
+
+  /** Drops the files Claude Code writes for its own bookkeeping, which raise no card, and logs each one. */
+  function withoutBookkeeping(
+    projectId: ProjectId,
+    root: string,
+    paths: readonly string[],
+  ): string[] {
+    return paths.filter((rel) => {
+      const ignored = ignoredBookkeepingWrite(root, rel);
+      if (ignored) logBookkeeping(projectId, root, rel, [ignored]);
+      return !ignored;
+    });
+  }
+
+  async function processBatch(root: string, allPaths: readonly string[]): Promise<void> {
     const entry = watched.get(root);
     if (!entry) return;
     const { projectId, batchId } = entry;
@@ -259,6 +310,8 @@ export function createWatcher(deps: {
       unwatch(root);
       return;
     }
+    const paths = withoutBookkeeping(projectId, entry.root, allPaths);
+    if (paths.length === 0) return;
     // Only what git still sees as changed now. This drops ignored files and directories. It also drops files
     // already committed through 10db's claim-checked commit, whose claims may have been released since the write.
     // A checkout git refuses to run in (a lane may have written its config) has a card of its own; its
@@ -275,15 +328,16 @@ export function createWatcher(deps: {
     const { strays, candidates } = straysIn(project, batchId, reported, ACTIVE_STATES, null);
     // Ignored or unreported paths that can change what runs are flagged whatever the claims say. Claude Code's
     // staging directory, as a real directory, is its bookkeeping, and a sensitive directory holding only that is
-    // the `.claude/` a session start made for it.
-    const hidden = paths.filter(
-      (rel) =>
-        !changed.has(rel) &&
-        isSensitivePath(rel) &&
-        existsAsEntry(join(entry.root, rel)) &&
-        !isBookkeepingAt(entry.root, rel) &&
-        !holdsOnlyBookkeeping(entry.root, rel),
-    );
+    // the `.claude/` a session start made for it. Each one dropped as bookkeeping is logged.
+    const hidden: string[] = [];
+    for (const rel of paths) {
+      if (changed.has(rel)) continue;
+      if (!isSensitivePath(rel) && !isInsideClaudeCodeBookkeeping(rel)) continue;
+      if (!existsAsEntry(join(entry.root, rel))) continue;
+      const bookkeeping = bookkeepingAt(entry.root, rel);
+      if (bookkeeping.length > 0) logBookkeeping(projectId, entry.root, rel, bookkeeping);
+      else if (isSensitivePath(rel)) hidden.push(rel);
+    }
     raise(project, site, [...strays, ...hidden], candidates, null);
     const outside = new Set(strays);
     raiseForeign(
@@ -352,7 +406,7 @@ export function createWatcher(deps: {
       const root = checkoutOf(db, ws);
       if (!existsSync(root)) return [];
       const batchId = worktreeBatchOf(ws);
-      const changed = await deps.git.changedPaths(root);
+      const changed = withoutBookkeeping(ws.projectId, root, await deps.git.changedPaths(root));
       const { strays, candidates } = straysIn(
         project,
         batchId,

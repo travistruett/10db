@@ -284,8 +284,10 @@ describe('the pull request watch', () => {
     expect(card.body).toContain(prUrl);
     expect(card.body).toContain('main');
     expect(card.body).toContain('10db/Alpha');
-    // Shipped tasks are done and can't start again, so the card offers only what works: reopen and
-    // merge on GitHub, which 10db doesn't follow, or delete the local branch.
+    // The tasks are in Blocked, where the builder reopens or closes them; reopening the pull request
+    // on GitHub is not followed, and the local branch stays until the builder answers.
+    expect(card.body).toContain('in Blocked on the Board');
+    expect(card.body).toContain('reopen a task to run it again, or close it');
     expect(card.body).toContain('reopen the pull request on GitHub and merge it');
     expect(card.body).toContain("10db doesn't follow a reopened pull request");
     expect(card.body).toContain('keeps the local branch 10db/Alpha until you answer');
@@ -756,6 +758,8 @@ describe('gh unavailable', () => {
       authLogin: () => h.gh.authLogin(),
       prView: (input) => h.gh.prView(input),
       prCreate: (input) => h.gh.prCreate(input),
+      repoAllowsAutoMerge: () => h.gh.repoAllowsAutoMerge(),
+      prAutoMerge: (input) => h.gh.prAutoMerge(input),
       prStatus: () => Promise.reject(new GhError('failed', 'HTTP 502')),
     };
     const w = watcher({ ...h.ctx, gh: offline });
@@ -847,6 +851,8 @@ describe('restart and stop', () => {
       authLogin: () => h.gh.authLogin(),
       prView: (input) => h.gh.prView(input),
       prCreate: (input) => h.gh.prCreate(input),
+      repoAllowsAutoMerge: () => h.gh.repoAllowsAutoMerge(),
+      prAutoMerge: (input) => h.gh.prAutoMerge(input),
       prStatus: (_input, call) =>
         new Promise((_resolve, reject) => {
           entered = true;

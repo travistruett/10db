@@ -6,17 +6,22 @@ import {
   InvalidError,
   type McpServerStatusDto,
   ProjectInput,
+  type ProjectDto,
+  WorkstreamState,
   type SystemCheckDto,
+  type TaskLanding,
 } from '@10db/contracts';
 import {
   cancelTask,
   closeTask,
+  reopenTask,
   deleteBoardColumn,
   getMcpApproval,
   getProject,
   getTask,
   getTeam,
   getWorkstream,
+  holdTask,
   insertBoardColumn,
   insertFlow,
   insertPerson,
@@ -24,6 +29,7 @@ import {
   insertProject,
   insertTask,
   latestEventSeq,
+  latestWorkstreamOf,
   listAaModels,
   listBatches,
   listBoardColumns,
@@ -45,23 +51,32 @@ import {
   patchPersona,
   patchProject,
   patchTask,
+  resumeTask,
+  runNext,
   setRoutingRules,
   setTeam,
 } from '@10db/db';
 import { MoveCause, type AccountMoves, type AccountService } from '../accounts';
 import { syncWarning, type BenchmarkSync } from '../benchmarks';
-import type { ApiServices, TaskRemovalServices } from '../api';
+import type { ApiServices, TaskLookupServices, TaskRemovalServices } from '../api';
 import { workstreamChanges, type BatchStarter, type Shipper } from '../delivery';
 import { markGhRequired } from '../environment';
 import type { EventBus, StateStore } from '../events';
-import { inspectFolder } from '../folders';
+import { inspectFolder, proposeAreas, type AreaNamer } from '../folders';
 import type { Git } from '../git';
 import { requestMcpApproval, type InboxService } from '../inbox';
 import type { KeepAwake } from '../keep-awake';
 import type { Runner } from '../runner';
 import type { Scheduler } from '../scheduler';
 import { ProjectMcpError, readRepoMcp, type RepoMcp } from '../sessions';
-import { allowNetworkHost, listNetworkHosts, removeNetworkHost } from '../permissions';
+import {
+  allowFoundHosts,
+  allowNetworkHost,
+  listNetworkHosts,
+  removeNetworkHost,
+  unallowedFoundHosts,
+} from '../permissions';
+import { findRegistryHosts } from '../registries';
 import { proposeCandidates, resolveStepPlan, retryWorkstream, startTaskWithPlan } from '../team';
 import { checkoutConflictsWithRoot } from './worktree-root';
 
@@ -84,17 +99,45 @@ export function createServices(deps: {
   readonly worktreeRoot: string;
   /** The daemon's git, for inspecting a folder before it is a project. */
   readonly git: Git;
+  /** Whether origin, for the checkout at `repoPath`, has the branch. Throws when origin can't be asked. */
+  readonly branchOnOrigin: (repoPath: string, branch: string) => Promise<boolean>;
   /** 10db's own places a project may not be: the data dir, the lane temp root, the worktree root. */
   readonly protectedRoots: readonly string[];
+  /** Names and merges proposed areas; null leaves them named from their paths. */
+  readonly areaNamer: AreaNamer | null;
   /** Records a new project's checkout as the daemon trusts it (lane sandbox spec D13). */
   readonly pinCheckout: (repoPath: string) => void;
-}): ApiServices & TaskRemovalServices {
+}): ApiServices & TaskRemovalServices & TaskLookupServices {
   const db = deps.state.db;
   // The tool check and gh's login are probed on the first request and on a recheck, never otherwise.
   let lastCheck: Promise<SystemCheckDto> | null = null;
+
+  /**
+   * A task that lands in a branch other than its project's base is built from that branch, so it has
+   * to be on origin; refused here, before the task exists, in the words the builder reads.
+   */
+  async function refuseMissingLandingBranch(
+    project: ProjectDto,
+    landing: TaskLanding | undefined,
+  ): Promise<void> {
+    if (landing?.kind !== 'branch' || project.delivery !== Delivery.PullRequest) return;
+    if (landing.branch === project.baseBranch) return;
+    let there: boolean;
+    try {
+      there = await deps.branchOnOrigin(project.repoPath, landing.branch);
+    } catch (error) {
+      throw new InvalidError(
+        `10db couldn't ask origin whether it has ${landing.branch}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    if (!there)
+      throw new InvalidError(
+        `origin has no branch named ${landing.branch}. Create it on origin, or choose another place for this task to land.`,
+      );
+  }
   return {
     listProjects: () => listProjectViews(db),
-    createProject(input) {
+    async createProject(input) {
       const config = ProjectInput.parse(input);
       if (!existsSync(join(config.repoPath, '.git'))) {
         throw new InvalidError(`${config.repoPath} is not a git repository`);
@@ -106,15 +149,26 @@ export function createServices(deps: {
       }
       const project = deps.state.write((ctx) => insertProject(ctx, config));
       deps.pinCheckout(project.repoPath);
+      // The registries the project's own files name are allowed from the start; reading them runs nothing.
+      allowFoundHosts(deps.state, project.id, await findRegistryHosts(project.repoPath));
       return project;
     },
     listTasks: (projectId) => listTasks(db, projectId),
-    createTask(projectId, input) {
+    async createTask(projectId, input) {
+      await refuseMissingLandingBranch(getProject(db, projectId), input.landing);
       const task = deps.state.write((ctx) => insertTask(ctx, projectId, input));
       deps.scheduler.requestTick();
       return task;
     },
+    holdTask: (taskId) => deps.state.write((ctx) => holdTask(ctx, taskId)),
     startTask(taskId) {
+      // A held task already has its run, and its batch and worktree if it has them: it only queues again.
+      const held = latestWorkstreamOf(db, taskId);
+      if (held?.state === WorkstreamState.Held) {
+        const workstream = deps.state.write((ctx) => resumeTask(ctx, taskId));
+        deps.scheduler.requestTick();
+        return { kind: 'workstream', workstream };
+      }
       const project = getProject(db, getTask(db, taskId).projectId);
       if (project.delivery === Delivery.PullRequest) {
         const batch = deps.starter.startTask(taskId);
@@ -124,6 +178,11 @@ export function createServices(deps: {
       const workstream = startTaskWithPlan(deps.state, taskId);
       deps.scheduler.requestTick();
       return { kind: 'workstream', workstream };
+    },
+    runNext(taskId) {
+      const result = deps.state.write((ctx) => runNext(ctx, taskId));
+      deps.scheduler.requestTick();
+      return result;
     },
     startBatch: (projectId, input) => deps.starter.startBatch(projectId, input),
     // The store lists oldest first; the API answers newest first.
@@ -137,13 +196,17 @@ export function createServices(deps: {
       return getWorkstream(db, id);
     },
     workstreamChanges: (id) => workstreamChanges({ db, git: deps.git }, id),
-    retryWorkstream(id) {
-      const ws = retryWorkstream(deps.state, id);
+    retryWorkstream(id, note) {
+      const ws = retryWorkstream(deps.state, id, note);
       if (ws.batchId !== null) deps.starter.reopen(ws.batchId);
       deps.scheduler.requestTick();
       return ws;
     },
-    listInbox: ({ states }) => listInbox(db, states ? { states } : {}),
+    listInbox: ({ states, recent }) =>
+      listInbox(db, {
+        ...(states ? { states } : {}),
+        ...(recent !== null ? { recent } : {}),
+      }),
     answerInbox(id, answer) {
       const item = deps.inbox.answer(id, answer);
       deps.scheduler.requestTick();
@@ -178,6 +241,11 @@ export function createServices(deps: {
     },
     allowNetworkHost: (projectId, host) => allowNetworkHost(deps.state, projectId, host),
     removeNetworkHost: (projectId, host) => removeNetworkHost(deps.state, projectId, host),
+    async scanNetworkHosts(projectId) {
+      const project = getProject(db, projectId);
+      // Only listed: a lane may have written these files, so the builder allows each host by name.
+      return unallowedFoundHosts(db, projectId, await findRegistryHosts(project.repoPath));
+    },
     listPersonas: () => listPersonas(db, { includeArchived: true }),
     createPersona: (input) => deps.state.write((ctx) => insertPersona(ctx, input)),
     patchPersona: (id, patch) => deps.state.write((ctx) => patchPersona(ctx, id, patch)),
@@ -215,8 +283,13 @@ export function createServices(deps: {
     setRoutingRules: (projectId, input) =>
       deps.state.write((ctx) => setRoutingRules(ctx, projectId, input)),
     removeTask: (id) => deps.state.write((ctx) => cancelTask(ctx, id)),
+    getTask: (id) => getTask(db, id),
     closeTask: (id) => deps.state.write((ctx) => closeTask(ctx, id)),
-    patchTask: (id, patch) => deps.state.write((ctx) => patchTask(ctx, id, patch)),
+    reopenTask: (id) => deps.state.write((ctx) => reopenTask(ctx, id)),
+    async patchTask(id, patch) {
+      await refuseMissingLandingBranch(getProject(db, getTask(db, id).projectId), patch.landing);
+      return deps.state.write((ctx) => patchTask(ctx, id, patch));
+    },
     moveTask: (id, move) => deps.state.write((ctx) => moveTask(ctx, id, move)),
     listBoardColumns(projectId) {
       getProject(db, projectId);
@@ -232,7 +305,17 @@ export function createServices(deps: {
     proposeCandidates: (projectId, size) => proposeCandidates(db, projectId, size),
     inspectFolder: (path) =>
       inspectFolder(
-        { git: deps.git, projects: listProjects(db), protectedRoots: deps.protectedRoots },
+        {
+          git: deps.git,
+          projects: listProjects(db),
+          protectedRoots: deps.protectedRoots,
+          registryHosts: findRegistryHosts,
+        },
+        path,
+      ),
+    proposeAreas: (path) =>
+      proposeAreas(
+        { git: deps.git, namer: deps.areaNamer, protectedRoots: deps.protectedRoots },
         path,
       ),
     reviewProjectMcp(projectId) {

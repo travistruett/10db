@@ -37,6 +37,7 @@ import type {
   PersonId,
   ProfileSource,
   ProjectId,
+  ProjectLanding,
   ProposalId,
   PullRequestChecks,
   PullRequestState,
@@ -53,6 +54,7 @@ import type {
   StepRole,
   SupportedAccountKind,
   TaskId,
+  TaskLanding,
   TaskStatus,
   ToolAccess,
   ToolOpId,
@@ -65,6 +67,7 @@ import type {
 import { USAGE_HANDOFF_AT } from '@10db/contracts';
 import { sql } from 'drizzle-orm';
 import {
+  customType,
   index,
   integer,
   primaryKey,
@@ -77,6 +80,20 @@ import type { Json } from './json';
 
 const createdAt = () => text('created_at').notNull();
 const updatedAt = () => text('updated_at').notNull();
+
+/**
+ * A workstream's step plan, as JSON text. A step stored before a field was added reads back with
+ * that field's default, the one the contract gives it: `earlier` [] and `sentBack` 0. Nothing else
+ * is checked here, so one odd row can't stop the board from loading.
+ */
+const workstreamSteps = customType<{ data: WorkstreamStep[]; driverData: string }>({
+  dataType: () => 'text',
+  toDriver: (steps) => JSON.stringify(steps),
+  fromDriver: (stored) =>
+    (JSON.parse(stored) as Partial<WorkstreamStep>[]).map(
+      (step) => ({ earlier: [], sentBack: 0, ...step }) as WorkstreamStep,
+    ),
+});
 
 /** App-wide settings keyed by name; values are JSON validated by their readers. */
 export const appSettings = sqliteTable('app_settings', {
@@ -123,6 +140,7 @@ export const projects = sqliteTable('projects', {
   name: text('name').notNull(),
   repoPath: text('repo_path').notNull().unique(),
   gateCommand: text('gate_command'),
+  changedCheckCommand: text('changed_check_command'),
   areas: text('areas', { mode: 'json' }).$type<AreaDef[]>().notNull(),
   hazards: text('hazards', { mode: 'json' }).$type<HazardDef[]>().notNull(),
   maxLanes: integer('max_lanes').notNull(),
@@ -154,6 +172,8 @@ export const projects = sqliteTable('projects', {
   budgetCeiling: real('budget_ceiling'),
   delivery: text('delivery').$type<Delivery>().notNull().default('local'),
   baseBranch: text('base_branch').notNull().default('main'),
+  /** What a finished task's pull request does unless its task says otherwise. */
+  landing: text('landing').$type<ProjectLanding>().notNull().default('merge'),
   prTitlePrefix: text('pr_title_prefix'),
   /** Command prefixes a lane runs without a permission card, beyond the gate command. */
   allowedCommands: text('allowed_commands', { mode: 'json' })
@@ -187,7 +207,10 @@ export const batches = sqliteTable(
     title: text('title').notNull(),
     state: text('state').$type<BatchState>().notNull(),
     branch: text('branch'),
+    /** The branch the batch is cut from and its pull request targets. */
     baseBranch: text('base_branch').notNull(),
+    /** Whether the pull request merges by itself once its required checks pass. */
+    autoMerge: integer('auto_merge', { mode: 'boolean' }).notNull().default(false),
     baseSha: text('base_sha'),
     /** The GitHub `owner/name` from `gh repo view`, recorded at cut. */
     repo: text('repo'),
@@ -270,6 +293,9 @@ export const tasks = sqliteTable(
     proposalId: text('proposal_id')
       .$type<ProposalId>()
       .references(() => proposals.id),
+    /** Where the work lands: `base`, `branch` (named by `landingBranch`) or `hold`. */
+    landing: text('landing').$type<TaskLanding['kind']>().notNull().default('base'),
+    landingBranch: text('landing_branch'),
     status: text('status').$type<TaskStatus>().notNull(),
     boardOrder: real('board_order').notNull(),
     /** Set: parked in that human column. Null: planned, with its column derived from its state. */
@@ -345,8 +371,7 @@ export const workstreams = sqliteTable(
     recoveryAttempts: integer('recovery_attempts').notNull(),
     model: text('model').notNull(),
     effort: text('effort').$type<Effort>().notNull(),
-    steps: text('steps', { mode: 'json' })
-      .$type<WorkstreamStep[]>()
+    steps: workstreamSteps('steps')
       .notNull()
       .default(sql`'[]'`),
     stepIndex: integer('step_index').notNull().default(0),
@@ -367,6 +392,8 @@ export const workstreams = sqliteTable(
     pausedUntil: text('paused_until'),
     failureReason: text('failure_reason'),
     lastActivityAt: text('last_activity_at'),
+    /** When the builder put the queued workstream first in line; cleared once it gets a lane. */
+    runNextAt: text('run_next_at'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -518,6 +545,7 @@ export const permissionRules = sqliteTable('permission_rules', {
   toolName: text('tool_name').notNull(),
   pattern: text('pattern'),
   sourceInboxId: text('source_inbox_id').$type<InboxItemId>(),
+  foundIn: text('found_in'),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });

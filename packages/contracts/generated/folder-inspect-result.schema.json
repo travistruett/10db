@@ -70,6 +70,24 @@
                   "source"
                 ]
               }
+            },
+            "registryHosts": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "host": {
+                    "type": "string"
+                  },
+                  "file": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "host",
+                  "file"
+                ]
+              }
             }
           },
           "required": [
@@ -78,7 +96,8 @@
             "branches",
             "defaultBranch",
             "github",
-            "gateCandidates"
+            "gateCandidates",
+            "registryHosts"
           ]
         }
       },

@@ -17,6 +17,7 @@ import {
   type ProjectInput,
   type TaskDto,
   type TaskId,
+  type TaskLanding,
   type WorkstreamId,
   type WorkstreamState,
 } from '@10db/contracts';
@@ -51,8 +52,9 @@ import { createGit, type Git, type GitTrustError } from '../src/git';
 import { createInboxService, type InboxService } from '../src/inbox';
 import { silentLogger } from '../src/log';
 import { systemProcesses } from '../src/recovery';
+import type { GateSandbox } from '../src/sandbox';
 import { seedTeam } from '../src/team';
-import { createGateRunner } from '../src/verify';
+import { createGateRunner, type GateRunner } from '../src/verify';
 import { measureForTests } from './catalogue';
 import { FakeGh } from './fake-gh';
 import { captureLogs, type LogCapture } from './log-capture';
@@ -80,11 +82,18 @@ function fakePnpm(root: string): FakePnpm {
     [
       '#!/bin/sh',
       `printf '%s | %s\\n' "$PWD" "$*" >> '${log}'`,
+      `if [ -f '${verdict}.stderr' ]; then cat '${verdict}.stderr' >&2; fi`,
       `if [ -f '${verdict}' ]; then cat '${verdict}'; read -r code < '${verdict}.code'; exit "$code"; fi`,
       '',
     ].join('\n'),
   );
   chmodSync(script, 0o755);
+  const fail = (exitCode: number, output: string, stderr: string | null): void => {
+    writeFileSync(verdict, `${output}\n`);
+    writeFileSync(`${verdict}.code`, `${String(exitCode)}\n`);
+    if (stderr === null) rmSync(`${verdict}.stderr`, { force: true });
+    else writeFileSync(`${verdict}.stderr`, `${stderr}\n`);
+  };
   return {
     bin,
     calls: () =>
@@ -94,15 +103,42 @@ function fakePnpm(root: string): FakePnpm {
             .filter((line) => line !== '')
         : [],
     failWith(exitCode, output) {
-      writeFileSync(verdict, `${output}\n`);
-      writeFileSync(`${verdict}.code`, `${String(exitCode)}\n`);
+      fail(exitCode, output, null);
+    },
+    blockedFrom(host) {
+      fail(
+        1,
+        `ERR_PNPM_META_FETCH_FAIL GET https://${host}/pkg: request to https://${host}/pkg failed, reason: CONNECT tunnel failed, response 403`,
+        `[SandboxDebug] Connection blocked to ${host}:443`,
+      );
     },
     succeed() {
       rmSync(verdict, { force: true });
       rmSync(`${verdict}.code`, { force: true });
+      rmSync(`${verdict}.stderr`, { force: true });
     },
   };
 }
+
+/**
+ * Stands in for the gate sandbox a worktree's install runs under: it runs the command as it is, with
+ * its env, in its checkout. The gate runner reads its stderr as a sandboxed run's, so a line the fake
+ * pnpm prints as srt's proxy does names a blocked host.
+ */
+const installSandbox: GateSandbox = {
+  forRun: (input) =>
+    Promise.resolve({
+      file: '/bin/sh',
+      args: ['-c', input.command],
+      env: input.env,
+      cwd: input.project.repoPath,
+      tmpDir: input.project.repoPath,
+      commandEnv: {},
+      commandLines: 1,
+      dockerRefused: () => false,
+      dispose: () => Promise.resolve(),
+    }),
+};
 
 /** The shortest run of allowed transitions from `from` to `to`, as the runner would take it. */
 function pathBetween(from: WorkstreamState, to: WorkstreamState): WorkstreamState[] {
@@ -131,6 +167,11 @@ export interface FakePnpm {
   calls(): string[];
   /** Makes every later call print `output` and exit with `exitCode`. */
   failWith(exitCode: number, output: string): void;
+  /**
+   * Makes every later call fail as pnpm does when the sandbox's proxy refuses `host`: srt's debug line
+   * on stderr, pnpm's error, exit 1.
+   */
+  blockedFrom(host: string): void;
   /** Makes every later call succeed again. */
   succeed(): void;
 }
@@ -169,6 +210,7 @@ export interface DeliveryHarness {
       readonly dependsOn?: TaskId[];
       readonly description?: string;
       readonly acceptanceCriteria?: string[];
+      readonly landing?: TaskLanding;
     },
   ): TaskDto;
   /** Moves a workstream on from where it is, as the runner would; DONE also marks its task done. */
@@ -195,6 +237,8 @@ export function createDeliveryHarness(
     /** Added to the network calls' environment, such as an ssh command for a hanging transport. */
     readonly networkEnv?: Readonly<Record<string, string>>;
     readonly trigger?: boolean;
+    /** Wraps the shipping gate's runner, as a test that needs a gate result the sandbox gives. */
+    readonly shipGate?: (gate: GateRunner) => GateRunner;
   } = {},
 ): DeliveryHarness {
   const remote = createTempRepoWithOrigin();
@@ -250,7 +294,7 @@ export function createDeliveryHarness(
     },
     worktreeRoot,
     dependencies: createWorktreeDependencies({
-      gate: createGateRunner({ sandbox: null, logger: silentLogger }),
+      gate: createGateRunner({ sandbox: installSandbox, logger: silentLogger }),
       clock: new ManualClock(),
       dataDir: data.path,
       sessionEnv: () => ({ PATH: `${pnpm.bin}:/usr/bin:/bin`, pnpm_config_store_dir: pnpm.bin }),
@@ -261,9 +305,10 @@ export function createDeliveryHarness(
     }),
   };
   const running = new Set<WorkstreamId>();
+  const shipGate = createGateRunner({ sandbox: null, logger: silentLogger });
   const shipper = createShipper({
     ...ctx,
-    gate: createGateRunner({ sandbox: null, logger: silentLogger }),
+    gate: opts.shipGate?.(shipGate) ?? shipGate,
     baseUpdates: createBaseUpdates(ctx),
     clock: new ManualClock(),
     dataDir: data.path,
@@ -309,6 +354,7 @@ export function createDeliveryHarness(
           acceptanceCriteria: opts.acceptanceCriteria ?? ['it works'],
           areas: opts.areas ?? ['api'],
           dependsOn: opts.dependsOn ?? [],
+          ...(opts.landing === undefined ? {} : { landing: opts.landing }),
         }),
       );
     },

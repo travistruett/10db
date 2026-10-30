@@ -1,4 +1,4 @@
-import type { ProjectId } from '@10db/contracts';
+import { CARD_RESOLVES_WHEN, type ProjectId } from '@10db/contracts';
 import { findOpenByFoldKey, type WriteContext } from '@10db/db';
 import type { StateStore } from '../events';
 import type { Git, NetworkCall } from '../git';
@@ -67,7 +67,14 @@ function flagOf(projectId: ProjectId, card: Card) {
     body: card.body,
     ...(card.foldKey ? { foldKey: card.foldKey } : {}),
     ...(card.refresh ? { refresh: true } : {}),
-    ...(card.detail ? { detail: card.detail } : {}),
+    ...(card.detail || card.resolvesWhen
+      ? {
+          detail: {
+            ...card.detail,
+            ...(card.resolvesWhen ? { [CARD_RESOLVES_WHEN]: card.resolvesWhen } : {}),
+          },
+        }
+      : {}),
     ...(card.options ? { options: card.options } : {}),
   };
 }

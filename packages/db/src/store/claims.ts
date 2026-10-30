@@ -1,6 +1,8 @@
 import {
   ClaimKind,
   EventType,
+  hazardScope,
+  HazardScope,
   mintId,
   type BatchId,
   type ProjectDto,
@@ -42,12 +44,28 @@ export function claimRequestsForTask(
   }));
 }
 
-/** An area is exclusive within its batch when it has one, else within the project; a hazard within the project. */
+/** The names of the project's hazards that are exclusive per copy of the repository, not per project. */
+export function copyHazardNames(project: Pick<ProjectDto, 'hazards'>): Set<string> {
+  return new Set(
+    project.hazards.filter((h) => hazardScope(h) === HazardScope.Copy).map((h) => h.name),
+  );
+}
+
+/**
+ * An area, and a per-copy hazard, is exclusive within its batch when it has a worktree, else within the
+ * project (one shared checkout is one copy); any other hazard within the project.
+ */
 function scopeOf(
   request: ClaimRequest,
-  input: { readonly projectId: ProjectId; readonly areaScope?: BatchId },
+  input: {
+    readonly projectId: ProjectId;
+    readonly areaScope?: BatchId;
+    readonly copyHazards?: ReadonlySet<string>;
+  },
 ): ProjectId | BatchId {
-  return request.kind === ClaimKind.Area ? (input.areaScope ?? input.projectId) : input.projectId;
+  const perCopy =
+    request.kind === ClaimKind.Area || (input.copyHazards?.has(request.name) ?? false);
+  return perCopy ? (input.areaScope ?? input.projectId) : input.projectId;
 }
 
 function activeHolder(
@@ -77,8 +95,10 @@ export function acquireClaims(
     readonly workstreamId: WorkstreamId;
     readonly requests: readonly ClaimRequest[];
     readonly leaseExpiresAt: string;
-    /** The batch whose areas these are; absent, areas are scoped to the project. */
+    /** The batch whose copy these are; absent, areas and per-copy hazards are scoped to the project. */
     readonly areaScope?: BatchId;
+    /** The hazards (`copyHazardNames`) exclusive per copy; any other hazard is exclusive across the project. */
+    readonly copyHazards?: ReadonlySet<string>;
   },
 ): AcquireResult {
   const toInsert: ClaimRequest[] = [];

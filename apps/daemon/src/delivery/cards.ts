@@ -2,10 +2,12 @@ import {
   BatchFailure,
   BatchState,
   type BatchDto,
+  type CardResolvesWhen,
   type BatchId,
   type FailingCheckDto,
   type InboxOption,
   type ProjectDto,
+  type ProjectId,
   type TaskId,
 } from '@10db/contracts';
 import type { Json } from '@10db/db';
@@ -19,6 +21,7 @@ import {
 import { GhError } from '../github';
 import type { GateResult } from '../verify';
 import type { BlockedTask, UnmergedDependency } from './deps';
+import type { GateStepFailure } from './gate-failures';
 import { INSTALL_SUMMARY, type DependencyRefresh } from './worktree-dependencies';
 
 /** A flag card's text. Every delivery card says what to fix (batch delivery spec §1). */
@@ -32,6 +35,8 @@ export interface Card {
   readonly detail?: Record<string, Json>;
   /** The answers the card offers; none for a card the builder only dismisses. */
   readonly options?: readonly InboxOption[];
+  /** What makes the card stale: 10db closes it itself when that happens (CardResolvesWhen). */
+  readonly resolvesWhen?: CardResolvesWhen;
 }
 
 /** The answers of a card that offers to delete a task's local branch. */
@@ -133,6 +138,10 @@ export const startCards = {
   fetchFailed: (base: string, error: unknown): Card => ({
     title: `${NOT_STARTED}: git fetch origin ${base} failed`,
     body: `${detailOf(error)}\n\nCheck that ${base} exists on origin and that git reaches origin from your login shell (its credential helper or SSH agent), then start again.`,
+  }),
+  branchMissing: (branch: string): Card => ({
+    title: `Not started: origin has no branch named ${branch}`,
+    body: `A task set to merge into ${branch} is built from it, and its pull request targets it, so ${branch} has to exist on origin first. Create it on origin (git push origin <commit>:refs/heads/${branch}), or change where the task lands, then start again.`,
   }),
   ghUnavailable: (error: unknown): Card =>
     ghCard(NOT_STARTED, error, 'start again') ?? {
@@ -343,6 +352,7 @@ export function forTasks(card: Card, taskIds: Iterable<TaskId>): Card {
     foldKey: card.foldKey ?? `start-refused:${[...ids].sort().join(',')}:${card.title}`,
     refresh: true,
     detail: { ...card.detail, taskIds: ids },
+    ...(ids.length > 0 ? { resolvesWhen: { event: 'tasks_started', taskIds: ids } } : {}),
   };
 }
 
@@ -399,6 +409,48 @@ export function duration(ms: number): string {
 }
 const RETRY = "Press Retry in a task's drawer on the Board to ship again; nothing was merged.";
 
+/** How many failing tests a gate card lists. */
+const MAX_LISTED_TESTS = 5;
+
+const RERAN =
+  "Every failing test was in a file the batch didn't change and had passed in its tasks' own gates, so 10db ran the gate again by itself";
+
+/** " in test, lint", naming the failing steps after a gate card's title; empty when the gate named none. */
+function inSteps(steps: readonly GateStepFailure[]): string {
+  return steps.length === 0 ? '' : ` in ${steps.map((s) => s.name).join(', ')}`;
+}
+
+/** Up to five failing tests across the steps, as list lines, then how many more there are. */
+function testLines(steps: readonly GateStepFailure[]): string {
+  const tests = steps.flatMap((s) => s.tests);
+  const shown = tests
+    .slice(0, MAX_LISTED_TESTS)
+    .map(
+      (t) =>
+        `- ${t.name === null ? `${t.file} (the file failed to run)` : `${t.file} > ${t.name}`}`,
+    );
+  const extra = tests.length - MAX_LISTED_TESTS;
+  return [...shown, ...(extra > 0 ? [`- and ${String(extra)} more`] : [])].join('\n');
+}
+
+/** Each failing step with its rerun command, its failing tests and its full log. */
+function stepsText(steps: readonly GateStepFailure[]): string {
+  const failed = `Failed steps:\n${steps.map((s) => `- ${s.name}${s.command === null ? '' : `: ${s.command}`}`).join('\n')}`;
+  const tests = steps.some((s) => s.tests.length > 0)
+    ? `\n\nFailing tests:\n${testLines(steps)}`
+    : '';
+  const logs = steps.flatMap((s) =>
+    s.logPath === null ? [] : [`Full ${s.name} log: ${s.logPath}`],
+  );
+  return `${failed}${tests}${logs.length > 0 ? `\n\n${logs.join('\n')}` : ''}`;
+}
+
+/** The batch and the first failing step's log, which the desktop offers to open. */
+function stepsDetail(batch: BatchDto, steps: readonly GateStepFailure[]): Record<string, Json> {
+  const logPath = steps.find((s) => s.logPath !== null)?.logPath;
+  return { batchId: batch.id, ...(logPath ? { logPath } : {}) };
+}
+
 /** A shipping failure: the code the batch records and the card the builder reads. */
 export interface ShipFailure {
   readonly failure: BatchFailure;
@@ -415,14 +467,52 @@ export const shipCards = {
       detail: { batchId: batch.id },
     },
   }),
-  /** `note` says why the gate ran without the batch's base as origin has it, when it did. */
-  gateFailed: (batch: BatchDto, gate: GateResult, note: string | null = null): ShipFailure => ({
+  /**
+   * `note` says why the gate ran without the batch's base as origin has it, when it did. `steps` are
+   * the failing steps the gate named, each with its failing tests and log; with none, the card quotes
+   * the gate's last output. `reran` says 10db already ran this gate a second time by itself.
+   */
+  gateFailed: (
+    batch: BatchDto,
+    gate: GateResult,
+    note: string | null = null,
+    steps: readonly GateStepFailure[] = [],
+    reran = false,
+  ): ShipFailure => {
+    const what =
+      steps.length > 0
+        ? stepsText(steps)
+        : `Last output:\n${gate.tail.slice(-1500)}\n\nFull log: ${gate.logPath}`;
+    return {
+      failure: BatchFailure.GateFailed,
+      card: {
+        title: `${notShipped(batch)}: the gate failed (exit ${String(gate.exitCode)})${inSteps(steps)}`,
+        body: `${note === null ? '' : `${note}\n\n`}${reran ? `${RERAN}, and it failed again.\n\n` : ''}${what}\n\nStart a fix task in the batch (it reopens the batch), or ${RETRY.charAt(0).toLowerCase()}${RETRY.slice(1)}`,
+        detail: stepsDetail(batch, steps),
+      },
+    };
+  },
+  /**
+   * The second run 10db made by itself failed in tests the batch didn't change too: the failure looks
+   * like the batch's surroundings, so the card offers Retry and Abandon and no fix task.
+   */
+  gateFailedUnrelated: (
+    batch: BatchDto,
+    note: string | null,
+    steps: readonly GateStepFailure[],
+  ): ShipFailure => ({
     failure: BatchFailure.GateFailed,
     card: {
-      title: `${notShipped(batch)}: the gate failed (exit ${String(gate.exitCode)})`,
-      body: `${note === null ? '' : `${note}\n\n`}Last output:\n${gate.tail.slice(-1500)}\n\nFull log: ${gate.logPath}\n\nStart a fix task in the batch (it reopens the batch), or ${RETRY.charAt(0).toLowerCase()}${RETRY.slice(1)}`,
-      detail: { batchId: batch.id },
+      title: `${notShipped(batch)}: the gate failed twice, in tests the batch didn't change`,
+      body: `${note === null ? '' : `${note}\n\n`}This failure looks unrelated to the batch's work. ${RERAN}, and it failed again in tests the batch didn't change, so a flaky test, the base branch or this machine is the likelier cause. 10db started no fix session.\n\n${stepsText(steps)}\n\nPress Retry to run the gate and ship again, or Abandon to give up the batch; both are here and in a task's drawer on the Board. Nothing was merged.`,
+      detail: { ...stepsDetail(batch, steps), actions: ['retry', 'abandon'] },
     },
+  }),
+  /** The second run 10db made by itself passed, and the batch went on to ship. */
+  gatePassedOnRerun: (batch: BatchDto, steps: readonly GateStepFailure[]): Card => ({
+    title: `Batch "${batch.title}": the gate passed when 10db ran it again`,
+    body: `The shipping gate's first run failed${inSteps(steps)}. ${RERAN}, and it passed, so the batch went on to ship. These tests may be flaky:\n${testLines(steps)}`,
+    detail: { batchId: batch.id },
   }),
   gateTimedOut: (batch: BatchDto, timeoutMs: number, logPath: string): ShipFailure => ({
     failure: BatchFailure.GateTimedOut,
@@ -470,6 +560,38 @@ export const shipCards = {
         : 'Nothing in it finished.',
     detail: { batchId: batch.id },
   }),
+};
+
+/** The fold key of the project's repository-doesn't-allow-auto-merge card: one stays open at a time. */
+export const autoMergeOffKey = (projectId: ProjectId): string => `auto-merge-off:${projectId}`;
+
+/** What delivery tells the builder when a pull request that should merge by itself can't. */
+export const mergeCards = {
+  /** The repository's own setting is off; every later pull request of the project waits the same way. */
+  notAllowed: (
+    project: Pick<ProjectDto, 'id'>,
+    repo: string,
+    batch: BatchDto,
+    prUrl: string,
+  ): Card => ({
+    title: "This repository doesn't allow auto-merge",
+    body: `GitHub's "Allow auto-merge" setting is off for ${repo}, so a pull request can't merge itself when its checks pass. The pull request for batch "${batch.title}" is open and waits for you to merge it: ${prUrl}\n\nTurn on Allow auto-merge in ${repo}'s settings on GitHub (Settings, General, Pull Requests) and 10db will have later pull requests merge by themselves.`,
+    foldKey: autoMergeOffKey(project.id),
+    detail: { batchId: batch.id },
+  }),
+  /** GitHub turned this one pull request down, or gh could not ask. */
+  refused: (batch: BatchDto, prUrl: string, error: unknown): Card => {
+    const detail = detailOf(error);
+    const nothingToWaitFor = /clean status/i.test(detail)
+      ? `\n\nGitHub says nothing is left for it to wait for, which usually means ${batch.baseBranch} has no required checks, so there is nothing for auto-merge to wait on.`
+      : '';
+    return {
+      title: `Pull request opened but not set to merge by itself: batch "${batch.title}"`,
+      body: `${detail}${nothingToWaitFor}\n\nThe pull request is open and waits for you to merge it: ${prUrl}`,
+      foldKey: `auto-merge-refused:${batch.id}`,
+      detail: { batchId: batch.id },
+    };
+  },
 };
 
 /** The place 10db switches a checkout back to, in words. */
@@ -596,9 +718,13 @@ export const prCards = {
   closed: (batch: BatchDto): Card => {
     const prUrl = batch.prUrl ?? '(no pull request)';
     const offer = batch.branch === null ? {} : branchOffer(batch);
+    const keeps =
+      batch.branch === null
+        ? ''
+        : ` 10db keeps the local branch ${batch.branch} until you answer: Delete Branch removes it from your repository, Keep leaves it.`;
     return {
       title: `Pull request closed without merging: "${batch.title}"`,
-      body: `${prUrl}\n\nThe batch's tasks stay done, but their code is not on ${batch.baseBranch}. 10db keeps the local branch ${batch.branch ?? '(none)'} until you answer: Delete Branch removes it from your repository, Keep leaves it.\n\nTo land the work instead, reopen the pull request on GitHub and merge it there. 10db doesn't follow a reopened pull request.`,
+      body: `${prUrl}\n\nThe batch's tasks are in Blocked on the Board, because their code is not on ${batch.baseBranch}.${keeps}\n\nOn the Board, reopen a task to run it again, or close it if you don't want the work. To land the existing work instead, reopen the pull request on GitHub and merge it there; 10db doesn't follow a reopened pull request, so close the tasks once it merges.`,
       foldKey: prCardKey.closed(batch.id),
       ...offer,
       detail: { ...prDetail(batch, prUrl), ...offer.detail },

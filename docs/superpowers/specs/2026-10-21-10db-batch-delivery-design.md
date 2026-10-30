@@ -203,9 +203,9 @@ once through `POST /projects/:id/batches`.
 - **Worktrees and one PR per task.** `workspace_mode = worktree` gives each task its own worktree and branch.
   A task then ships alone through the same shipping steps, and a batch becomes only a grouping. Parallel
   batches in one project become possible.
-- **Auto-merge or deploy on ship.** Choose an after-ship action when starting a batch or task: `none` (today),
-  `auto_merge` (`gh pr merge --auto --squash`, which waits for required checks), or a project-defined deploy
-  command run after the merge. Each is an additive column on `batches` and one more step after §6 step 5.
+- **Auto-merge or deploy on ship.** Auto-merge is built, chosen per task (merge into the base, merge into another
+  branch, or hold for the builder): `decisions/2026-10-29-where-a-pull-request-lands.md`. A project-defined deploy
+  command run after the merge is still only designed.
 - Stacked batches, where a batch builds on an unmerged one.
 - Rebasing or updating an unmerged PR, and hosts other than GitHub.
 

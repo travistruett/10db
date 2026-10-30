@@ -71,7 +71,46 @@ describe('the areas and hazards editor', () => {
             { name: 'server', globs: ['src/server/**', 'src/shared/**'] },
             { name: 'docs', globs: ['docs/**'] },
           ],
-          hazards: [{ name: 'lock', globs: ['pnpm-lock.yaml'], commands: [] }],
+          hazards: [{ name: 'lock', globs: ['pnpm-lock.yaml'], commands: [], scope: 'project' }],
+        },
+      ]);
+    });
+  });
+
+  it('shows which hazards are held per copy, keeps the choice on save, and lets the builder change it', async () => {
+    const patched: unknown[] = [];
+    const stored = projectDto({
+      areas: project.areas,
+      hazards: [
+        // No scope stored, as before hazards had one: deps is read as per copy by its name.
+        { name: 'deps', globs: ['**/package.json'], commands: ['pnpm add'] },
+        { name: 'migrations', globs: ['**/migrations/**'], commands: [], scope: 'project' },
+      ],
+    });
+    server.use(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([stored])),
+      http.patch(daemonUrl('/projects/:projectId'), async ({ request }) => {
+        patched.push(await request.json());
+        return HttpResponse.json(stored);
+      }),
+      ...baseHandlers(),
+    );
+    renderApp('/settings/areas');
+    const deps = await screen.findByRole('checkbox', { name: 'Hazard 1 is held per copy' });
+    const migrations = screen.getByRole('checkbox', { name: 'Hazard 2 is held per copy' });
+    expect(deps).toHaveProperty('checked', true);
+    expect(migrations).toHaveProperty('checked', false);
+
+    fireEvent.click(migrations);
+    fireEvent.click(deps);
+    fireEvent.click(screen.getByRole('button', { name: 'Save areas and hazards' }));
+    await waitFor(() => {
+      expect(patched).toMatchObject([
+        {
+          hazards: [
+            { name: 'deps', scope: 'project' },
+            { name: 'migrations', scope: 'copy' },
+          ],
         },
       ]);
     });

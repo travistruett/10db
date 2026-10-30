@@ -20,6 +20,9 @@ import { forTasks, startCards, worktreeCards, type Card } from './cards';
 import { ghCall, networkCall, raise, type DeliveryContext } from './context';
 import { unmergedDependencies } from './deps';
 import { recordInstall } from './installed-lockfile';
+import { missingLandingBranch } from './landing';
+import { resolveStartCards } from './stale-cards';
+import { raiseInstallHostCards } from './worktree-dependencies';
 import { seedDirs, seedWorktree } from './worktree-seed';
 
 /** What a start hands its background job: the plans resolved in the request, by task. */
@@ -87,6 +90,11 @@ export async function cutWorktree(
       return;
     }
     try {
+      const missing = await missingLandingBranch(ctx, project, batch, signal);
+      if (missing) {
+        await refuse(missing);
+        return;
+      }
       await ctx.git.fetch(main, batch.baseBranch, networkCall(ctx, signal));
     } catch (error) {
       if (!stopped()) await refuse(startCards.fetchFailed(batch.baseBranch, error));
@@ -164,6 +172,7 @@ export async function cutWorktree(
         return;
       case 'failed':
         await refuse(worktreeCards.installFailed(batch, installed));
+        raiseInstallHostCards(ctx, project.id, installed);
         return;
       case 'installed':
         ctx.logger.info(
@@ -184,6 +193,7 @@ export async function cutWorktree(
       { batchId, projectId: project.id, branch, baseSha, repo, path },
       'batch worktree cut',
     );
+    resolveStartCards(db, ctx.inbox, project.id, plans.keys());
     ctx.onWorkQueued();
   } catch (error) {
     // An OPEN batch keeps its worktree, and a refusal that threw doesn't run twice: the job's log

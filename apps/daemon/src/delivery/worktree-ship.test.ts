@@ -27,6 +27,7 @@ import {
 } from './index';
 import { baseCards } from './cards';
 import { raise } from './context';
+import { INSTALL_SUMMARY } from './worktree-dependencies';
 
 let h: DeliveryHarness;
 /** Where the gate writes the directory it ran in. */
@@ -455,6 +456,30 @@ describe('Retry of a FAILED worktree batch', () => {
     expect(h.only(h.cards()).body).toContain('ERR_PNPM_META_FETCH_FAIL');
     expect(existsSync(wt)).toBe(false);
     expect(worktreePaths()).toEqual([realpathSync(h.repo)]);
+  });
+
+  it('asks about a host the sandbox blocked the install of a replaced worktree from', async () => {
+    h.commit('pnpm-lock.yaml', 'lockfileVersion: 9\n');
+    h.git$('push', '-q', 'origin', 'main');
+    const { batch } = await failedAfterWork();
+    writeFileSync(join(h.repo, '.gitignore'), 'node_modules/\n');
+    mkdirSync(join(h.repo, 'node_modules'), { recursive: true });
+    rmSync(pathOf(batch), { recursive: true, force: true });
+    h.pnpm.blockedFrom('registry.npmjs.org');
+
+    const outcome = await ensureWorktreeWhole(h.ctx, batch, new AbortController().signal);
+
+    expect(outcome).toBe('refused');
+    const host = h.only(
+      h.cards().filter((c) => c.title === 'Allow network access to registry.npmjs.org?'),
+    );
+    expect(host.body).toContain(`Install: ${INSTALL_SUMMARY}`);
+    expect(host.targets).toEqual([]);
+    const refused = h.only(
+      h.cards().filter((c) => c.title.includes("couldn't install the dependencies")),
+    );
+    expect(refused.body).toContain('The install was blocked from reaching registry.npmjs.org');
+    expect(refused.body).not.toMatch(/the gate was blocked|run the gate again/i);
   });
 
   it('refuses, and removes nothing, when git no longer trusts the worktree', async () => {
