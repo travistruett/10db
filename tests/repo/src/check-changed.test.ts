@@ -68,6 +68,29 @@ describe('scripts/check-changed.mjs', () => {
   });
 
   it.each([
+    ['an agent file', 'apps/daemon/AGENTS.md', 'apps/daemon'],
+    ['a package README', 'packages/db/README.md', 'packages/db'],
+    ['a package manifest', 'apps/desktop/package.json', 'apps/desktop'],
+    ['the Tauri config', 'apps/desktop/src-tauri/tauri.conf.json', 'apps/desktop'],
+    ['the Cargo lockfile', 'apps/desktop/src-tauri/Cargo.lock', 'apps/desktop'],
+    ['the e2e config', 'apps/desktop/e2e/playwright.config.ts', 'apps/desktop'],
+    ['a package script', 'apps/daemon/scripts/live-acceptance.ts', 'apps/daemon'],
+    ['a vitest config', 'packages/db/vitest.config.ts', 'packages/db'],
+    ['the daemon env example', 'apps/daemon/.env.example', 'apps/daemon'],
+    ['a daemon git test', 'apps/daemon/src/git/git.ts', 'apps/daemon'],
+    ['the daemon test fixtures', 'apps/daemon/test/fixtures.ts', 'apps/daemon'],
+  ])('adds the repo rule tests for %s, which they read', (_name, file, owner) => {
+    const plan = planFor(file);
+    expect(plan.full).toBe(false);
+    expect(plan.changed).toEqual([owner]);
+    expect(plan.affected).toContain('tests/repo');
+  });
+
+  it('leaves the repo rule tests out for a package source change they do not read', () => {
+    expect(planFor('apps/daemon/src/runner/runner.ts').affected).not.toContain('tests/repo');
+  });
+
+  it.each([
     ['the lockfile', 'pnpm-lock.yaml'],
     ['the root manifest', 'package.json'],
     ['the lint config', 'eslint.config.js'],

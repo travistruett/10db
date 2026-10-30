@@ -5,7 +5,7 @@
 // `make check-changed`); the ship gate still runs the full `make gate` before the push.
 //
 // The diff is everything since the branch left its base, uncommitted and untracked files included.
-// The base is the merge-base with the upstream branch, else origin/main, else main. With no base,
+// The base is the merge-base with origin/main, else the upstream branch, else main. With no base,
 // or with a changed file this script cannot place in a package or a docs-like path (a root config,
 // the lockfile, the gate script, CI), it runs the full gate: it never narrows what it cannot place.
 //
@@ -25,6 +25,21 @@ const LIGHT_OUTSIDE = [/^docs\//, /^spikes\//, /^\.claude\//, /^\.codex\//, /^[^
 const SCRIPT_OUTSIDE = /^scripts\/(?!gate\.sh$)/;
 /** The Tauri shell: a change there also runs the Rust checks, as the gate's rust step does. */
 const RUST_DIR = 'apps/desktop/src-tauri/';
+/**
+ * Files inside a package that the repo rule tests (tests/repo) read or run, so a change to one also
+ * runs them: every manifest, Markdown file (AGENTS.md, CLAUDE.md, cited decisions), env file and
+ * vitest or vite config; the Tauri shell's config and Cargo files; the apps' e2e and scripts folders;
+ * and the daemon tests that git-hook-variables.test.ts runs. Keep this in step with tests/repo.
+ */
+const READ_BY_REPO_TESTS = [
+  /(^|\/)package\.json$/,
+  /\.md$/,
+  /(^|\/)\.env[^/]*$/,
+  /(^|\/)(vitest|vite)\.config\.[cm]?[jt]s$/,
+  /^apps\/desktop\/src-tauri\//,
+  /^apps\/[^/]+\/(e2e|scripts)\//,
+  /^apps\/daemon\/(test|src\/git|src\/watcher)\//,
+];
 
 /**
  * @typedef {{ name: string, dir: string, deps: string[], scripts: string[] }} Pkg
@@ -83,11 +98,13 @@ function planFor(files, packages) {
   /** @type {string[]} */
   const unplaced = [];
   let rust = false;
+  let readByRepoTests = false;
   for (const file of files) {
     const owner = packages.find((p) => file.startsWith(`${p.dir}/`));
     if (owner) {
       changed.add(owner.name);
       if (file.startsWith(RUST_DIR)) rust = true;
+      if (READ_BY_REPO_TESTS.some((re) => re.test(file))) readByRepoTests = true;
     } else if (LIGHT_OUTSIDE.some((re) => re.test(file)) || SCRIPT_OUTSIDE.test(file)) {
       outside.push(file);
     } else {
@@ -97,10 +114,11 @@ function planFor(files, packages) {
   if (unplaced.length > 0) {
     return { full: true, reason: `not in a package: ${unplaced.join(', ')}`, files };
   }
-  // The repo-wide rule tests read docs, scripts and the agent files, so they run for those.
+  // The repo-wide rule tests read docs, scripts, the agent files and some package files, so they
+  // run for those.
   const testSeed = new Set(changed);
   const repoChecks = packages.find((p) => p.dir === 'tests/repo');
-  if (outside.length > 0 && repoChecks) testSeed.add(repoChecks.name);
+  if ((outside.length > 0 || readByRepoTests) && repoChecks) testSeed.add(repoChecks.name);
   const affected = withDependents(packages, new Set([...changed, ...testSeed]));
   const byName = (/** @type {Set<string>} */ set) =>
     packages.filter((p) => set.has(p.name)).map((p) => p.dir);
@@ -135,9 +153,13 @@ function git(args, allowFail = false) {
   }
 }
 
-/** The merge-base with the first of upstream, origin/main and main that exists; null when none. */
+/**
+ * The merge-base with the first of origin/main, upstream and main that exists; null when none.
+ * origin/main comes first because a pushed branch's upstream is often the branch itself, whose
+ * merge-base is the pushed tip, not where the branch left its base.
+ */
 function baseRef() {
-  for (const ref of ['@{upstream}', 'origin/main', 'main']) {
+  for (const ref of ['origin/main', '@{upstream}', 'main']) {
     if (git(['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], true) === null) continue;
     const base = git(['merge-base', 'HEAD', ref], true);
     if (base) return base;

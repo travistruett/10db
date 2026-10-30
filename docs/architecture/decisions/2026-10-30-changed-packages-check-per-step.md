@@ -22,13 +22,18 @@ Settings › General, "Check after each step").
 
 For this repository the command is `make check-changed` (`scripts/check-changed.mjs`). The builder sets it in
 Settings; the database holds it, so no file in the repository does. It diffs against the branch's base
-(upstream, else `origin/main`, else `main`), places each changed file in a workspace package, and runs, for the
+(`origin/main`, else upstream, else `main`; `origin/main` comes first because a pushed branch's upstream is
+often the branch itself), places each changed file in a workspace package, and runs, for the
 changed packages, format, lint and drift, and for them and everything that depends on them, typecheck and the
 tests. Format, lint and typecheck run together and the tests alone, because the UI tests' wait timeouts flake
 when lint shares the machine. It runs the full gate (`scripts/gate.sh`) instead when it cannot place a file:
 no base to diff against, or a changed file outside every package that is not documentation or a script (the
 lockfile, a root config, CI, the Makefile, the gate script). A change to `apps/desktop/src-tauri` adds the Rust
-checks. Changes to docs or scripts add `tests/repo`, whose tests read them.
+checks. `tests/repo` runs for any change its tests read: docs and scripts outside the packages, and inside a
+package every `package.json`, Markdown file (`AGENTS.md`, `CLAUDE.md`), env file and vitest or vite config,
+`apps/desktop/src-tauri`, the apps' `e2e` and `scripts` folders, and the daemon tests it runs
+(`READ_BY_REPO_TESTS` in the script, kept in step with `tests/repo`). It doesn't run for every change: that
+would roughly double a desktop-only check (about 40 seconds to about 80 here).
 
 ## Why
 
