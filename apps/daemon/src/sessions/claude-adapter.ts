@@ -570,6 +570,8 @@ function startSession(
         subscriptionType: account?.subscriptionType,
         claudeCodeVersion: init.claude_code_version,
         model: init.model,
+        // The mode in effect, which is `default` where auto mode is unavailable whatever was asked for.
+        permissionMode: init.permissionMode,
       },
       'claude session billing',
     );

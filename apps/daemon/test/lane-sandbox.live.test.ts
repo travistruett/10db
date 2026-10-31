@@ -34,7 +34,6 @@ import { createEventBus, createStateStore } from '../src/events';
 import { createGit } from '../src/git';
 import { judgePreToolUse, protectedPaths } from '../src/guard';
 import { createInboxService, createPermissionBroker } from '../src/inbox';
-import { createLogger } from '../src/log';
 import { resolveSandboxRuntime } from '../src/paths';
 import { allowedToolsFor } from '../src/permissions';
 import {
@@ -47,6 +46,7 @@ import {
 } from '../src/sandbox';
 import { createClaudeAdapter, type SessionEvent } from '../src/sessions';
 import { isolatedGitEnv, seedWorkstream, TEST_REPO_CONFIG } from './fixtures';
+import { captureLogs } from './log-capture';
 
 const live = loadEnv(process.env).TENDB_LIVE_CLAUDE === '1';
 
@@ -183,6 +183,11 @@ interface LaneRun {
   }[];
   readonly cards: InboxItemDto[];
   readonly events: SessionEvent[];
+  /**
+   * The permission mode Claude Code's init reported, as the adapter logs it: the mode in effect,
+   * which is `default` where auto mode is unavailable whatever the session asked for.
+   */
+  readonly permissionModes: unknown[];
   readonly profile: unknown;
   /** The session's `CLAUDE_ENV_FILE`, and its content and mode once the session ended. */
   readonly envFile: { path: string; content: string; mode: number };
@@ -227,11 +232,11 @@ async function runLane(opts: {
   const login = await captureLoginEnv({ inherited: process.env });
   const claudePath = findClaude();
   if (!claudePath) throw new Error('claude is not installed where 10db looks for it');
-  const logger = createLogger({ level: 'warn', destination: { write: () => undefined } });
+  const logs = captureLogs();
   const adapter = createClaudeAdapter({
     claudePath,
     pluginDir: HARNESS_PLUGIN_DIR,
-    logger,
+    logger: logs.logger,
     ...(opts.autoMode ? { lanePermissionMode: 'auto' as const } : {}),
   });
   const launcher = createLauncher({
@@ -418,6 +423,10 @@ async function runLane(opts: {
       brokerCalls,
       cards,
       events,
+      permissionModes: logs
+        .lines()
+        .filter((line) => line['msg'] === 'claude session billing')
+        .map((line) => line['permissionMode']),
       profile: lane.spec.settings,
       envFile: {
         path: run.envFile,
@@ -442,6 +451,7 @@ function report(name: string, run: LaneRun, canaries: readonly Canary[]): void {
     brokerCalls: run.brokerCalls,
     cards: run.cards.map((c) => ({ title: c.title, body: c.body, detail: c.detail })),
     events: run.events.filter((e) => e.type !== 'activity' || e.kind === 'text'),
+    permissionModes: run.permissionModes,
     profile: run.profile,
   };
   console.info(`${name}: ${scrub(JSON.stringify(observed, null, 2))}`);
@@ -849,6 +859,18 @@ function commandOf(input: unknown): string {
 const REFUSED = /denied|blocked|hazard claim/i;
 
 /**
+ * Fails the case unless Claude Code's init reported auto mode. Where auto mode is unavailable it
+ * starts in default mode, where hazards and new hosts reach 10db anyway, so a pass would prove
+ * nothing about auto mode.
+ */
+function expectAutoMode(run: LaneRun): void {
+  expect(
+    run.permissionModes,
+    'Claude Code did not report auto mode, so this run proves nothing about it',
+  ).toEqual(['auto']);
+}
+
+/**
  * Lanes run in default mode until these pass on the builder's machine; then LANE_PERMISSION_MODE in
  * claude-adapter.ts becomes 'auto' (docs/architecture/decisions/2026-10-30-lanes-wait-for-auto-mode-proof.md).
  * Run them with:
@@ -892,6 +914,7 @@ describe.skipIf(!live)('lane sandbox in auto mode, live', () => {
       report('auto-hazards', run, []);
 
       expect(run.events.at(-1)).toMatchObject({ type: 'ended', reason: 'stopped' });
+      expectAutoMode(run);
       // The hazard write: the guard's PreToolUse hook refuses it, as in default mode.
       expect(existsSync(migration)).toBe(false);
       expect(
@@ -957,6 +980,7 @@ describe.skipIf(!live)('lane sandbox in auto mode, live', () => {
       report('auto-own-network', run, []);
 
       expect(run.events.at(-1)).toMatchObject({ type: 'ended', reason: 'stopped' });
+      expectAutoMode(run);
       // Neither goes through the sandbox's network proxy, so neither gets its per-host card: the
       // hook asks, and each must reach the broker and become a card, which the test denies.
       for (const tool of ['WebFetch', 'Monitor']) {
@@ -1024,6 +1048,7 @@ describe.skipIf(!live)('lane sandbox in auto mode, live', () => {
       report('auto-hosts', run, []);
 
       expect(run.events.at(-1)).toMatchObject({ type: 'ended', reason: 'stopped' });
+      expectAutoMode(run);
       // The sandbox's network prompt reached canUseTool for each host the project doesn't list.
       const asked = run.brokerCalls
         .filter((c) => c.toolName === 'SandboxNetworkAccess')
@@ -1070,6 +1095,7 @@ describe.skipIf(!live)('lane sandbox in auto mode, live', () => {
       report('auto-escalation', run, [secret]);
 
       expect(run.events.at(-1)).toMatchObject({ type: 'ended', reason: 'stopped' });
+      expectAutoMode(run);
       expect(run.transcript).not.toContain(secret.token);
       const escalated = run.brokerCalls.filter((c) => c.escalated);
       expect(escalated.length, 'a call reached 10db marked as needing a person').toBeGreaterThan(0);
@@ -1122,6 +1148,7 @@ describe.skipIf(!live)('lane sandbox in auto mode, live', () => {
       report('auto-no-cards', run, []);
 
       expect(run.events.at(-1)).toMatchObject({ type: 'ended', reason: 'stopped' });
+      expectAutoMode(run);
       // Each call ran, rather than only being asked for: a call auto mode refused is in the
       // transcript too, with an error result.
       const bash = (start: string) =>
