@@ -33,7 +33,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { seedWorkstream } from '../../test/fixtures';
 import { createEventBus, createStateStore, type StateStore } from '../events';
-import { allowFoundHosts, removeNetworkHost } from '../permissions';
+import { allowFoundHosts, removeNetworkHost, storableRule } from '../permissions';
 import { protectedReads, type FileAccessContext } from '../sandbox';
 import {
   createInboxService,
@@ -815,6 +815,128 @@ describe('permission broker in a sandboxed lane', () => {
     const ws = seedWorkstream(base);
     void sandboxed(ws)(request('Bash', { command: 'pnpm test' }, true)).catch(() => undefined);
     expect(onlyOpenCard().kind).toBe('permission');
+  });
+
+  it('cards a command that starts background loops with no end, as the incident did', async () => {
+    const ws = seedWorkstream(base);
+    const command = 'for i in 1 2 3; do (while :; do :; done) & done; pnpm test';
+    const pending = sandboxed(ws)(request('Bash', { command }));
+    const card = onlyOpenCard();
+    expect(card.kind).toBe('permission');
+    expect(card.detail).toEqual({ toolName: 'Bash', summary: command });
+    expect(card.body).toContain(command);
+    expect(card.body).toContain('never ends');
+    inbox.answer(card.id, { choice: 'allow_once' });
+    expect(await pending).toEqual({ behavior: 'allow' });
+  });
+
+  it('cards the yes-loop form too, and passes the denial on in words that cover its equivalents', async () => {
+    const ws = seedWorkstream(base);
+    const pending = sandboxed(ws)(request('Bash', { command: 'yes > /dev/null &' }));
+    inbox.answer(onlyOpenCard().id, { choice: 'deny', note: 'no CPU load, please' });
+    const decision = await pending;
+    expect(decision.behavior).toBe('deny');
+    const message = decision.behavior === 'deny' ? decision.message : '';
+    expect(message).toContain('yes > /dev/null &');
+    expect(message).toContain('no CPU load, please');
+    expect(message).toMatch(/equivalent/i);
+    expect(message).toMatch(/another (form|way)/i);
+  });
+
+  it('offers only allow-once and deny on a loop card, so no rule lets the next loop run unasked', async () => {
+    const ws = seedWorkstream(base);
+    const first = sandboxed(ws)(request('Bash', { command: 'yes &' }));
+    const card = onlyOpenCard();
+    expect(card.options.map((o) => o.label)).toEqual(['allow_once', 'deny']);
+    expect(() => inbox.answer(card.id, { choice: 'allow_workstream' })).toThrow(InvalidError);
+    expect(() => inbox.answer(card.id, { choice: 'allow_project' })).toThrow(InvalidError);
+    inbox.answer(card.id, { choice: 'allow_once' });
+    expect(await first).toEqual({ behavior: 'allow' });
+    expect(listPermissionRules(state.db, ws.project.id, ws.workstream.id)).toEqual([]);
+    void sandboxed(ws)(request('Bash', { command: 'yes &' })).catch(() => undefined);
+    expect(onlyOpenCard().kind).toBe('permission');
+  });
+
+  it('cards a loop even when a stored rule covers the command', () => {
+    const ws = seedWorkstream(base);
+    // As an answer on an ordinary card for the same command would have stored it.
+    const rule = storableRule('Bash', 'yes &');
+    if (rule === undefined) throw new Error('expected a storable rule');
+    base.write((ctx) =>
+      insertPermissionRule(ctx, {
+        projectId: ws.project.id,
+        workstreamId: null,
+        toolName: rule.toolName,
+        pattern: rule.pattern,
+        sourceInboxId: null,
+      }),
+    );
+    void sandboxed(ws)(request('Bash', { command: 'yes &' })).catch(() => undefined);
+    expect(onlyOpenCard().kind).toBe('permission');
+  });
+
+  it('does not card a loop that runs in the foreground', async () => {
+    const ws = seedWorkstream(base);
+    expect(await sandboxed(ws)(request('Bash', { command: 'while :; do :; done' }))).toEqual({
+      behavior: 'allow',
+    });
+    expect(openCards()).toEqual([]);
+  });
+
+  it('cards a loop the Bash tool runs in the background itself, offering only allow-once and deny', async () => {
+    const ws = seedWorkstream(base);
+    const command = 'while :; do :; done';
+    const pending = sandboxed(ws)(request('Bash', { command, run_in_background: true }));
+    const card = onlyOpenCard();
+    expect(card.options.map((o) => o.label)).toEqual(['allow_once', 'deny']);
+    expect(card.detail).toEqual({ toolName: 'Bash', summary: command });
+    expect(card.body).toContain(command);
+    expect(card.body).toContain('never ends');
+    expect(card.body).toContain('background flag');
+    inbox.answer(card.id, { choice: 'deny', note: 'no busy loops' });
+    const decision = await pending;
+    expect(decision.behavior).toBe('deny');
+    expect(decision.behavior === 'deny' ? decision.message : '').toMatch(/equivalent/i);
+  });
+
+  const BACKGROUND_FLAG: readonly {
+    readonly name: string;
+    readonly input: Record<string, unknown>;
+    readonly outcome: 'allow' | 'card';
+  }[] = [
+    {
+      name: 'yes, run in the background by the flag',
+      input: { command: 'yes > /dev/null', run_in_background: true },
+      outcome: 'card',
+    },
+    {
+      // Claude Code may read a string flag as the boolean; the broker asks rather than miss it.
+      name: 'a loop with the flag spelled as a string',
+      input: { command: 'while :; do :; done', run_in_background: 'true' },
+      outcome: 'card',
+    },
+    {
+      name: 'a loop with the flag off',
+      input: { command: 'while :; do :; done', run_in_background: false },
+      outcome: 'allow',
+    },
+    {
+      name: 'a dev server run in the background by the flag',
+      input: { command: 'pnpm dev', run_in_background: true },
+      outcome: 'allow',
+    },
+  ];
+
+  it.each(BACKGROUND_FLAG)('$outcome: $name', async ({ input, outcome }) => {
+    const ws = seedWorkstream(base);
+    const pending = sandboxed(ws)(request('Bash', input));
+    if (outcome === 'allow') {
+      expect(await pending).toEqual({ behavior: 'allow' });
+      expect(openCards()).toEqual([]);
+      return;
+    }
+    void pending.catch(() => undefined);
+    expect(onlyOpenCard().options.map((o) => o.label)).toEqual(['allow_once', 'deny']);
   });
 
   const MAKE_MIGRATE: HazardDef = {

@@ -13,7 +13,7 @@ import {
 import { listPermissionRules } from '@10db/db';
 import { z } from 'zod';
 import type { StateStore } from '../events';
-import { firstUnread, hazardHit, stringField } from '../guard';
+import { firstUnread, hazardHit, startsEndlessBackgroundLoop, stringField } from '../guard';
 import { foundHostFile, matchPermissionRule, storableRule } from '../permissions';
 import {
   isOwnTaskOutputPath,
@@ -89,6 +89,11 @@ function permissionOptions(storable: boolean): InboxOption[] {
   ];
 }
 
+/** A card whose call is never stored as a rule: allow it this once, or deny it. */
+const ONCE_OPTIONS: readonly InboxOption[] = permissionOptions(false).filter(
+  (o) => o.label === PermissionChoice.AllowOnce || o.label === PermissionChoice.Deny,
+);
+
 const NETWORK_TOOL = 'SandboxNetworkAccess';
 const READ_FAMILY: ReadonlySet<string> = new Set(['Read', 'Grep', 'Glob', 'LS']);
 const EDIT_FAMILY: ReadonlySet<string> = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
@@ -101,6 +106,34 @@ const HOST_CARD_BODY =
 // Lanes can't write it: it is shared with every other lane and the builder's own pnpm.
 const PNPM_CARD_BODY =
   "pnpm 12 locks its store in a /tmp directory shared with every lane and your own pnpm, which a lane can't write. Approving lets the command run, and it will fail on that lock. Run it yourself, or use npm.";
+
+const LOOP_CARD_BODY =
+  'This command runs something that never ends (a loop with no exit, `yes`, or the like) in the background, behind an `&` or the Bash tool’s own background flag: the lane goes on working while it holds a core, until something stops it. Behind an `&` it also outlives the command and the session that started it. 10db tries to stop what a session leaves when the session ends, but it cannot promise to find all of it (a job that leaves the command’s process tree and group within a second, with no file open in the lane’s temp dir, escapes), and until then a loop like this holds the Mac busy and makes gates and tests fail on timeouts. Allowing it covers this call only: the next one is asked about again.';
+
+/**
+ * Whether Claude Code runs a Bash call in the background itself (`run_in_background`). Anything but
+ * an absent or false flag counts, so a spelling Claude Code reads as true is never missed: a value
+ * it refuses fails the call before it runs, so asking about it costs nothing.
+ */
+function runsInBackground(input: Readonly<Record<string, unknown>>): boolean {
+  const flag = input['run_in_background'];
+  return flag !== undefined && flag !== null && flag !== false && flag !== 'false';
+}
+
+/**
+ * What a lane is told when the builder denies a call. It names the call and says the denial covers
+ * its equivalents, because a lane that reads a refusal as being about one spelling tries the next
+ * (a `yes` loop denied, then a `while :` loop).
+ */
+export function denialMessage(toolName: string, summary: string, note: string | undefined): string {
+  const call = summary.length > 300 ? `${summary.slice(0, 300)}…` : summary;
+  const parts = [
+    `The builder denied this ${toolName} call: ${call}`,
+    'The denial covers any equivalent: the same effect written another way (another program, a loop, a script, a wrapper or a different tool) is denied too. Do not retry it or a variant of it; work without it, or ask the builder with ask_human what they would allow.',
+  ];
+  if (note) parts.push(`Note from the builder: ${note}`);
+  return parts.join('\n');
+}
 
 const NetworkInput = z.looseObject({ host: z.string().min(1) });
 
@@ -118,6 +151,11 @@ interface Ask {
   readonly summary: string;
   readonly body?: string;
   readonly realPaths?: readonly string[];
+  /**
+   * Only ever allowed once: no stored rule answers it and the card offers no rule to store, so the
+   * next such call is asked about again (an endless background loop).
+   */
+  readonly onceOnly?: boolean;
 }
 
 /**
@@ -191,8 +229,13 @@ export function createPermissionBroker(
   async function askPermission(req: ToolRequest, ask: Ask | null = null): Promise<ToolDecision> {
     const rules = listPermissionRules(deps.state.db, ctx.projectId, ctx.workstreamId);
     const paths = ask?.realPaths === undefined ? undefined : { realPaths: ask.realPaths };
+    const onceOnly = ask?.onceOnly === true;
     // A call the classifier handed to a person is answered by a person, never by a stored grant.
-    if (!req.escalated && unlessTooDeep(() => matchPermissionRule(req, rules, paths), undefined)) {
+    if (
+      !req.escalated &&
+      !onceOnly &&
+      unlessTooDeep(() => matchPermissionRule(req, rules, paths), undefined)
+    ) {
       return { behavior: 'allow' };
     }
     const summary = ask?.summary ?? summarize(req);
@@ -209,7 +252,8 @@ export function createPermissionBroker(
       kind: 'permission',
       title: `Allow ${req.toolName}?`,
       body: ask?.body ?? summary,
-      options: permissionOptions(storable),
+      // The service refuses a choice the card does not offer, so a once-only card stores no rule.
+      options: onceOnly ? ONCE_OPTIONS : permissionOptions(storable),
       recommendation: null,
       category: QuestionCategory.Environment,
       urgency: Urgency.Normal,
@@ -221,7 +265,7 @@ export function createPermissionBroker(
     if (ALLOWING.includes(result.choice)) return { behavior: 'allow' };
     return {
       behavior: 'deny',
-      message: `The builder denied ${req.toolName}.${result.note ? ` Note: ${result.note}` : ''}`,
+      message: denialMessage(req.toolName, summary, result.note),
     };
   }
 
@@ -304,6 +348,10 @@ export function createPermissionBroker(
     } catch (cause) {
       if (isTooDeep(cause)) return { summary: command };
       throw cause;
+    }
+    // A background call never blocks the lane, so its loop holds a core while the lane goes on.
+    if (startsEndlessBackgroundLoop(command, { background: runsInBackground(req.input) })) {
+      return { summary: command, body: `${command}\n\n${LOOP_CARD_BODY}`, onceOnly: true };
     }
     if (hit === null && !req.escalated && unread === null) return { behavior: 'allow' };
     return hit?.name === 'deps' && hit.words[0] === 'pnpm'
