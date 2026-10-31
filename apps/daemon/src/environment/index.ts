@@ -2,6 +2,7 @@ export {
   AA_KEY_ACCOUNT,
   KeychainError,
   keychainWith,
+  OPENROUTER_KEY_ACCOUNT,
   secretFingerprint,
   systemKeychain,
   unavailableKeychain,

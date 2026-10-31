@@ -25,6 +25,10 @@ function securityDouble(opts: { mangle?: (s: string) => string } = {}) {
       return '';
     }
     const account = args[args.indexOf('-a') + 1] ?? '';
+    if (args[0] === 'delete-generic-password') {
+      if (!items.delete(account)) throw Object.assign(new Error('not found'), { status: 44 });
+      return '';
+    }
     const value = items.get(account);
     if (value === undefined) throw Object.assign(new Error('not found'), { status: 44 });
     return `${value}\n`;
@@ -75,6 +79,49 @@ describe('keychainWith', () => {
     expect(write).not.toThrow(/SECRET/);
   });
 
+  it('removes an item, and removing a missing one is not an error', () => {
+    const security = securityDouble();
+    const keychain = keychainWith(security.exec);
+    keychain.write('openrouter-api-key', 'fake-router-key-SECRET-1234');
+    keychain.remove('openrouter-api-key');
+    expect(keychain.read('openrouter-api-key')).toBeNull();
+    expect(() => {
+      keychain.remove('openrouter-api-key');
+    }).not.toThrow();
+    const removal = security.calls.find((c) => c.args[0] === 'delete-generic-password');
+    expect(removal?.args).toEqual([
+      'delete-generic-password',
+      '-s',
+      '10db',
+      '-a',
+      'openrouter-api-key',
+    ]);
+  });
+
+  it('refuses to remove an account name security would misread, before running anything', () => {
+    const security = securityDouble();
+    const keychain = keychainWith(security.exec);
+    expect(() => {
+      keychain.remove('a b');
+    }).toThrow(KeychainError);
+    expect(security.calls).toEqual([]);
+  });
+
+  it.each([
+    ['user denied (status 51)', { status: 51 }, /status 51/],
+    ['a timeout', { code: 'ETIMEDOUT', status: null, signal: 'SIGTERM' }, /timed out/],
+  ])('throws a KeychainError when removing fails: %s', (_name, props, message) => {
+    const keychain = keychainWith(() => {
+      throw Object.assign(new Error('Command failed: security ... fake-LEAK'), props);
+    });
+    const remove = () => {
+      keychain.remove('openrouter-api-key');
+    };
+    expect(remove).toThrow(KeychainError);
+    expect(remove).toThrow(message);
+    expect(remove).not.toThrow(/LEAK/);
+  });
+
   it('reads nothing for a missing or empty item', () => {
     const security = securityDouble();
     security.items.set('account:empty', '');
@@ -102,6 +149,9 @@ describe('keychainWith', () => {
     expect(unavailableKeychain.read('anything')).toBeNull();
     expect(() => {
       unavailableKeychain.write('account:acc_1', 'sk-ant-SECRET-1234');
+    }).toThrow(KeychainError);
+    expect(() => {
+      unavailableKeychain.remove('account:acc_1');
     }).toThrow(KeychainError);
   });
 

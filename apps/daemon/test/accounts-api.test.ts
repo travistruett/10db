@@ -196,6 +196,7 @@ describe('accounts over HTTP', () => {
             `Writing the Keychain item ${account} failed (security exit status 36)`,
           );
         },
+        remove: () => undefined,
       },
     });
     const { account } = await api.post('/accounts', AccountCreatedDto, {
@@ -491,6 +492,9 @@ describe('account identity over HTTP', () => {
       keychain: {
         write: (name, secret) => {
           memory.write(name, secret);
+        },
+        remove: (name) => {
+          memory.remove(name);
         },
         read: (name) => {
           if (locked)

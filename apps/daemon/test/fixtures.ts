@@ -260,6 +260,9 @@ export function createMemoryKeychain(items: Record<string, string> = {}): Keycha
     write: (account, secret) => {
       map.set(account, secret);
     },
+    remove: (account) => {
+      map.delete(account);
+    },
   };
 }
 

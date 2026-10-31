@@ -5,6 +5,8 @@ import { SECRET_CHARACTERS } from '@10db/contracts';
 export const KEYCHAIN_SERVICE = '10db';
 /** The Keychain account of the builder's Artificial Analysis key. */
 export const AA_KEY_ACCOUNT = 'artificial-analysis-api-key';
+/** The Keychain account of the builder's OpenRouter key. */
+export const OPENROUTER_KEY_ACCOUNT = 'openrouter-api-key';
 const KEYCHAIN_TIMEOUT_MS = 5_000;
 /** `security` exits with this status when the Keychain has no such item. */
 const ITEM_NOT_FOUND = 44;
@@ -28,6 +30,8 @@ export interface Keychain {
   read(account: string): string | null;
   /** Adds or replaces the item, then reads it back. */
   write(account: string, secret: string): void;
+  /** Deletes the item; one that is already missing is not an error. */
+  remove(account: string): void;
 }
 
 function failure(error: unknown): string {
@@ -82,6 +86,24 @@ export function keychainWith(exec: KeychainExec): Keychain {
       if (read(account) !== secret)
         throw new KeychainError(`The Keychain did not store the secret for ${account} as given`);
     },
+    remove(account) {
+      if (!SAFE_ACCOUNT.test(account))
+        throw new KeychainError(`${account} is not a Keychain account name 10db removes`);
+      try {
+        exec(
+          '/usr/bin/security',
+          ['delete-generic-password', '-s', KEYCHAIN_SERVICE, '-a', account],
+          {
+            encoding: 'utf8',
+            stdio: ['ignore', 'ignore', 'ignore'],
+            timeout: KEYCHAIN_TIMEOUT_MS,
+          },
+        );
+      } catch (error) {
+        if ((error as { status?: unknown }).status === ITEM_NOT_FOUND) return;
+        throw new KeychainError(`Removing the Keychain item ${account} failed (${failure(error)})`);
+      }
+    },
   };
 }
 
@@ -93,6 +115,11 @@ export const unavailableKeychain: Keychain = {
   write: (account) => {
     throw new KeychainError(
       `No Keychain is available to this daemon, so ${account} was not written`,
+    );
+  },
+  remove: (account) => {
+    throw new KeychainError(
+      `No Keychain is available to this daemon, so ${account} was not removed`,
     );
   },
 };
