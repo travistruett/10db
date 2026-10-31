@@ -440,15 +440,23 @@ function failure(args: readonly string[], out: GhOutput): GhError {
 
 /** gh's exit codes for `gh pr checks`: 0 all passed, 1 one failed, 8 one pending. */
 const CHECKS_EXITS = new Set([0, 1, 8]);
-const NO_REQUIRED_CHECKS = /no required checks reported/i;
-const RUN_IN_PROGRESS = /still in progress/i;
+/**
+ * gh's two messages of none, matched against the whole of stderr. "no checks reported on the '<branch>'
+ * branch" comes when the head commit has no checks at all, which gh says before it filters to
+ * `--required`: a base with no CI, or a pull request pushed before GitHub lists its runs. "no required
+ * checks reported …" comes when checks exist and none is required. Both are in gh 2.83.2's binary.
+ */
+const NO_CHECKS = /^no (?:required )?checks reported on the '.*' branch$/i;
+/** gh's `job <id> is still in progress; logs will be available when it is complete` (or `run <id> …`). */
+const RUN_IN_PROGRESS =
+  /^(?:job|run) \d+ is still in progress; logs will be available when it is complete$/i;
 
 /**
  * Reads what `gh pr checks --required --json …` printed, from its exit code and both streams together.
  * With a list on stdout (and exit 0, 1 or 8, gh's codes for passed, failed and pending) the list decides.
- * "No required checks reported" is an error on stderr with exit 1 and nothing on stdout: that, and only
- * that, is `none`. Any other failure, a network or auth error with the same exit code included, throws
- * a GhError, so it is never read as `none`.
+ * gh's message of none ("no checks reported …" or "no required checks reported …") as the whole of
+ * stderr, with exit 1 and nothing on stdout, is `none`; nothing else is. Any other failure, a network or
+ * auth error with the same exit code included, throws a GhError, so it is never read as `none`.
  */
 export function parseRequiredChecks(args: readonly string[], out: GhOutput): RequiredChecks {
   const none: RequiredChecks = { state: 'none', failing: [], pending: [] };
@@ -463,7 +471,11 @@ export function parseRequiredChecks(args: readonly string[], out: GhOutput): Req
         name: item.name,
         link,
         ...jobIdsOfLink(link),
-        description: item.description ?? null,
+        // gh prints "" for a check with no description.
+        description:
+          item.description === undefined || item.description === null || item.description === ''
+            ? null
+            : item.description,
       };
       switch (item.bucket) {
         case 'pass':
@@ -487,7 +499,7 @@ export function parseRequiredChecks(args: readonly string[], out: GhOutput): Req
     if (pending.length > 0) return { state: 'pending', failing, pending };
     return items.length === 0 ? none : { state: 'passing', failing, pending };
   }
-  if (out.exitCode === 1 && empty && NO_REQUIRED_CHECKS.test(out.stderr)) return none;
+  if (out.exitCode === 1 && empty && NO_CHECKS.test(out.stderr.trim())) return none;
   throw failure(args, out);
 }
 
@@ -497,7 +509,7 @@ export function parseRequiredChecks(args: readonly string[], out: GhOutput): Req
  */
 export function parseJobLog(args: readonly string[], out: GhOutput): JobLog {
   if (out.exitCode === 0) return { kind: 'ready', log: out.stdout };
-  if (out.exitCode !== AUTH_REQUIRED_EXIT && RUN_IN_PROGRESS.test(out.stderr))
+  if (out.exitCode !== AUTH_REQUIRED_EXIT && RUN_IN_PROGRESS.test(out.stderr.trim()))
     return { kind: 'not_yet' };
   throw failure(args, out);
 }
