@@ -70,8 +70,12 @@ export interface FileAccessJudge {
   write(path: string): 'ok' | { refuse: string };
 }
 
+/**
+ * `ask` sends the call to the permission broker even where an allow rule or the permission mode
+ * would approve it.
+ */
 export type GuardVerdict =
-  { readonly decision: 'allow' } | { readonly decision: 'deny'; readonly reason: string };
+  { readonly decision: 'allow' } | { readonly decision: 'deny' | 'ask'; readonly reason: string };
 
 const ALLOW: GuardVerdict = { decision: 'allow' };
 const deny = (reason: string): GuardVerdict => ({ decision: 'deny', reason });
