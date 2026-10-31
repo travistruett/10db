@@ -14,6 +14,8 @@ import { askModel, type ModelAnswer } from './openrouter';
 
 /** How long a decision waits for a model before today's rule applies. */
 export const JUDGE_TIMEOUT_MS = 4_000;
+/** Logged calls are kept this long; older rows are deleted when the daemon starts. */
+export const JUDGE_LOG_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 /** The connection test waits longer: it may be the first call to a cold model. */
 const TEST_TIMEOUT_MS = 15_000;
 
