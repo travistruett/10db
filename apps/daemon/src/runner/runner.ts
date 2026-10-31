@@ -1481,7 +1481,7 @@ export function createRunner(opts: RunnerOptions): Runner {
           // Auto mode's classifier settles a sandboxed call no rule asks about, and it never
           // reaches the broker, so what must still be carded is handed over here.
           if (verdict.decision === 'deny' || !laneSession) return verdict;
-          return sandboxedAsk(req, project.hazards) ?? verdict;
+          return sandboxedAsk(req, project.hazards, fileAccess ?? undefined) ?? verdict;
         },
         canUseTool: createPermissionBroker(
           { state: opts.state, inbox: opts.inbox },

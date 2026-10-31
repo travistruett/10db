@@ -2057,8 +2057,15 @@ describe('file access judge', () => {
   const refusing: FileAccessJudge = {
     read: () => ({ refuse: 'no reads' }),
     write: () => ({ refuse: 'no writes' }),
+    readAsk: () => null,
+    writeAsk: () => null,
   };
-  const permissive: FileAccessJudge = { read: () => 'ok', write: () => 'ok' };
+  const permissive: FileAccessJudge = {
+    read: () => 'ok',
+    write: () => 'ok',
+    readAsk: () => null,
+    writeAsk: () => null,
+  };
   const withJudge = (
     fileAccess: FileAccessJudge | undefined,
     toolName: string,

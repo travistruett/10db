@@ -2,7 +2,7 @@ import type { HazardDef } from '@10db/contracts';
 import { z } from 'zod';
 import { startsEndlessBackgroundLoop } from './background-loops';
 import { hazardHit } from './hazards';
-import type { GuardVerdict } from './judge';
+import { stringField, type FileAccessJudge, type GuardVerdict } from './judge';
 
 /** The Monitor input keys a card-free call may carry; any other (`ws`, or one added later) is asked about. */
 export const MONITOR_INPUT_KEYS: ReadonlySet<string> = new Set([
@@ -19,6 +19,9 @@ export interface SandboxedAsk {
 
 /** What a PreToolUse hook answers: the guard's allow or deny, or a sandboxed lane's ask. */
 export type PreToolUseVerdict = GuardVerdict | SandboxedAsk;
+
+const READ_FAMILY: ReadonlySet<string> = new Set(['Read', 'Grep', 'Glob', 'LS']);
+const EDIT_FAMILY: ReadonlySet<string> = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 
 const ToolInput = z.record(z.string(), z.unknown());
 const ask = (reason: string): SandboxedAsk => ({ decision: 'ask', reason });
@@ -67,12 +70,25 @@ function commandAsk(
  * card are named here: a hazard command, a background loop with no end, a Monitor call with an input
  * key beyond command, description and timeout_ms (`ws` opens a socket from Claude Code's own process,
  * outside the sandbox's network proxy), and the tools that act outside that proxy (WebFetch,
- * WebSearch and repo MCP tools). The broker then applies stored rules and raises today's cards.
+ * WebSearch and repo MCP tools), and the file tools, which the sandbox does not bound: a read outside
+ * what lanes may read and a write to a Claude Code configuration path. The broker then applies stored
+ * rules and raises today's cards.
  */
 export function sandboxedAsk(
   req: { readonly toolName: string; readonly input: unknown },
   hazards: readonly HazardDef[],
+  fileAccess?: FileAccessJudge,
 ): SandboxedAsk | null {
+  if (fileAccess !== undefined && READ_FAMILY.has(req.toolName)) {
+    const reason = fileAccess.readAsk(req.toolName, req.input);
+    return reason === null ? null : ask(reason);
+  }
+  if (fileAccess !== undefined && EDIT_FAMILY.has(req.toolName)) {
+    const path = stringField(req.input, 'file_path') ?? stringField(req.input, 'notebook_path');
+    const reason =
+      path === null ? 'The path of this edit could not be read.' : fileAccess.writeAsk(path);
+    return reason === null ? null : ask(reason);
+  }
   if (actsOutsideSandboxProxy(req.toolName)) {
     return ask(`${req.toolName} acts outside the sandbox's network proxy.`);
   }

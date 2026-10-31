@@ -303,6 +303,27 @@ export function fileAccessJudge(ctx: FileAccessContext): FileAccessJudge {
         return { refuse: refusalFor(path, error) };
       }
     },
+    readAsk(toolName, input) {
+      try {
+        for (const path of readPathsOf(toolName, input)) {
+          if (readAccess(path, ctx, toolName !== 'Read').access === 'ask') {
+            return `${path} is outside the paths a lane may read without asking.`;
+          }
+        }
+        return null;
+      } catch {
+        return `${toolName} could not be judged.`;
+      }
+    },
+    writeAsk(path) {
+      try {
+        return writeAccess(path, ctx).access === 'claude-protected'
+          ? `${path} is a Claude Code configuration path.`
+          : null;
+      } catch {
+        return `${path} could not be judged.`;
+      }
+    },
     write(path) {
       if (isOverLongPath(path)) return { refuse: OVER_LONG_PATH_REFUSAL };
       try {

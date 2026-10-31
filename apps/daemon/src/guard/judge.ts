@@ -68,6 +68,10 @@ export interface GuardInput {
 export interface FileAccessJudge {
   read(toolName: string, input: unknown): 'ok' | { refuse: string };
   write(path: string): 'ok' | { refuse: string };
+  /** Why a read of these paths needs a person (outside what lanes may read), or null. */
+  readAsk(toolName: string, input: unknown): string | null;
+  /** Why a write to this path needs a person (a Claude Code config path), or null. */
+  writeAsk(path: string): string | null;
 }
 
 export type GuardVerdict =

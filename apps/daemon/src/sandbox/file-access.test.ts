@@ -742,3 +742,27 @@ describe('the judge at its boundary', () => {
     });
   });
 });
+
+describe('fileAccessJudge asks', () => {
+  it.each([
+    [
+      'a read of a file under the home directory',
+      'Read',
+      { file_path: '~/.aws/credentials' },
+      true,
+    ],
+    ['a read of a file in the checkout', 'Read', { file_path: 'src/a.ts' }, false],
+    ['a search of a sibling directory', 'Grep', { pattern: 'x', path: '../other' }, true],
+  ])('readAsk: %s', (_name, toolName, input, asks) => {
+    const reason = fileAccessJudge(context()).readAsk(toolName, input);
+    expect(reason !== null).toBe(asks);
+  });
+
+  it.each([
+    ['a file under .claude', '.claude/hooks/new.sh', true],
+    ['a file in the home directory shell setup', '~/.zshrc', true],
+    ['a source file', 'src/a.ts', false],
+  ])('writeAsk: %s', (_name, path, asks) => {
+    expect(fileAccessJudge(context()).writeAsk(path) !== null).toBe(asks);
+  });
+});

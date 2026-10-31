@@ -1,5 +1,6 @@
 import type { HazardDef } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
+import type { FileAccessJudge } from './judge';
 import { sandboxedAsk } from './sandboxed-asks';
 
 const HAZARDS: readonly HazardDef[] = [
@@ -93,5 +94,38 @@ describe('sandboxedAsk', () => {
     const verdict = sandboxedAsk({ toolName: row.toolName, input: row.input }, HAZARDS);
     expect(verdict?.decision ?? null).toBe(row.asks ? 'ask' : null);
     if (verdict !== null) expect(verdict.reason.length).toBeGreaterThan(0);
+  });
+});
+
+describe('sandboxedAsk for file tools', () => {
+  const access: FileAccessJudge = {
+    read: () => 'ok',
+    write: () => 'ok',
+    readAsk: (_tool, input) =>
+      JSON.stringify(input).includes('outside') ? 'outside what lanes read' : null,
+    writeAsk: (path) => (path.includes('.claude') ? 'a Claude Code config path' : null),
+  };
+  it.each([
+    ['Read', { file_path: '/outside/x' }, true],
+    ['Grep', { pattern: 'x', path: '/outside' }, true],
+    ['Read', { file_path: '/repo/a.ts' }, false],
+  ])('read family: %s %j asks %s', (toolName, input, asks) => {
+    expect(sandboxedAsk({ toolName, input }, HAZARDS, access)?.decision ?? null).toBe(
+      asks ? 'ask' : null,
+    );
+  });
+  it.each([
+    ['Edit', { file_path: '/repo/.claude/settings.json' }, true],
+    ['NotebookEdit', { notebook_path: '/repo/.claude/n.ipynb' }, true],
+    ['Write', { file_path: '/repo/a.ts' }, false],
+  ])('edit family: %s %j asks %s', (toolName, input, asks) => {
+    expect(sandboxedAsk({ toolName, input }, HAZARDS, access)?.decision ?? null).toBe(
+      asks ? 'ask' : null,
+    );
+  });
+  it('asks for nothing about files without a file-access judge', () => {
+    expect(
+      sandboxedAsk({ toolName: 'Read', input: { file_path: '/outside/x' } }, HAZARDS),
+    ).toBeNull();
   });
 });
