@@ -228,6 +228,21 @@ function settingsRecheckHooks(deps: QueryDeps): NonNullable<Options['hooks']> {
   };
 }
 
+/**
+ * The inline settings of a sandboxed session. Claude Code reads `autoMode` only from user, managed
+ * or inline settings, never the repository's, so a repository cannot loosen the classifier's rules.
+ * The SDK's `settings` type has no `autoMode`; the object comes from `autoModeRules`, which validates it.
+ */
+function sandboxedSettings(
+  sandbox: NonNullable<SessionSpec['sandbox']>,
+): NonNullable<Options['settings']> {
+  return {
+    autoCompactEnabled: true,
+    permissions: { ask: [...sandbox.askRules] },
+    autoMode: sandbox.autoMode,
+  };
+}
+
 export function buildQueryOptions(spec: SessionSpec, deps: QueryDeps): Options {
   const sandbox = spec.sandbox ?? null;
   return {
@@ -245,9 +260,7 @@ export function buildQueryOptions(spec: SessionSpec, deps: QueryDeps): Options {
     strictMcpConfig: true,
     // Set explicitly: the builder's own autoCompactEnabled: false (global ~/.claude.json) reaches the session despite
     // settingSources. Compaction stays on as the emergency fallback.
-    settings: sandbox
-      ? { autoCompactEnabled: true, permissions: { ask: [...sandbox.askRules] } }
-      : { autoCompactEnabled: true },
+    settings: sandbox ? sandboxedSettings(sandbox) : { autoCompactEnabled: true },
     ...(sandbox
       ? { sandbox: sandbox.settings, disallowedTools: [...sandbox.disallowedTools] }
       : {}),

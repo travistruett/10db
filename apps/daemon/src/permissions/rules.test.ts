@@ -889,15 +889,26 @@ describe('allowedToolsFor', () => {
     const scope = `/${checkout}/**`;
     const sandboxed = { sandboxed: { checkout: repo.path } };
     expect(allowedToolsFor(project, 'edit', sandboxed)).toEqual(
-      baseAllowedTools(project).map((entry) =>
-        ['Read', 'Glob', 'Grep', 'LS'].includes(entry) ? `${entry}(${scope})` : entry,
-      ),
+      baseAllowedTools(project)
+        .filter((entry) => entry !== 'Bash(make gate)')
+        .map((entry) =>
+          ['Read', 'Glob', 'Grep', 'LS'].includes(entry) ? `${entry}(${scope})` : entry,
+        ),
     );
     const readOnly = allowedToolsFor(project, 'read_only', sandboxed);
     for (const tool of ['Read', 'Glob', 'Grep', 'LS']) {
       expect(readOnly).toContain(`${tool}(${scope})`);
       expect(readOnly).not.toContain(tool);
     }
+  });
+
+  it('leaves the gate command out of a sandboxed lane, so the classifier can refuse it', () => {
+    const withChecks = { ...project, changedCheckCommand: 'make check-changed' };
+    const sandboxed = { sandboxed: { checkout: repo.path } };
+    const edit = allowedToolsFor(withChecks, 'edit', sandboxed);
+    expect(edit).not.toContain('Bash(make gate)');
+    expect(edit).toContain('Bash(make check-changed)');
+    expect(allowedToolsFor(withChecks, 'edit')).toContain('Bash(make gate)');
   });
 
   it('names the real path when the checkout is reached through a link', () => {

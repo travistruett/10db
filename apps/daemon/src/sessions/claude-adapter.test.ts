@@ -36,7 +36,7 @@ import {
   toolUseBlock,
 } from './claude-test-support';
 import { AccountProbeError } from './index';
-import type { LaneSandboxSpec } from '../sandbox';
+import { autoModeRules, type LaneSandboxSpec } from '../sandbox';
 import { CompletionError, type SessionEvent, type SessionSpec } from './types';
 
 function spec(overrides: Partial<SessionSpec> = {}): SessionSpec {
@@ -301,6 +301,7 @@ const laneSandbox: LaneSandboxSpec = {
   },
   env: { CLAUDE_CODE_TMPDIR: '/private/tmp/10db-x', GIT_CONFIG_GLOBAL: '/dev/null' },
   disallowedTools: ['Read(//h/.claude.json)', 'Read(//repo/.env)'],
+  autoMode: autoModeRules('make gate'),
   askRules: ['Edit(//repo/.mcp.json)', 'Write(//repo/.mcp.json)'],
 };
 
@@ -398,6 +399,22 @@ describe('buildQueryOptions', () => {
     expect(options.settings).toMatchObject({
       permissions: { ask: ['Edit(//repo/.mcp.json)', 'Write(//repo/.mcp.json)'] },
     });
+  });
+
+  it('hands a sandboxed session the classifier rules, keeping the built-in ones', () => {
+    const options = buildQueryOptions(spec({ sandbox: laneSandbox }), deps);
+    const settings = options.settings as {
+      autoMode: { hard_deny: string[]; soft_deny: string[] };
+    };
+    expect(settings.autoMode.hard_deny).toHaveLength(3);
+    expect(settings.autoMode.soft_deny).toHaveLength(2);
+    expect(settings.autoMode.hard_deny[0]).toBe('$defaults');
+    expect(settings.autoMode.soft_deny[0]).toBe('$defaults');
+    expect(options.settings).toMatchObject({ permissions: { ask: laneSandbox.askRules } });
+  });
+
+  it('gives an unsandboxed session no classifier rules', () => {
+    expect(buildQueryOptions(spec(), deps).settings).toEqual({ autoCompactEnabled: true });
   });
 
   it('never runs an unsandboxed session in auto mode, whatever the lane permission mode', () => {
