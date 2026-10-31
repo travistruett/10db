@@ -141,6 +141,7 @@ export async function createTestEngine(
       | 'laneTempDirs'
       | 'migrationsBase'
       | 'judge'
+      | 'git'
     >
   > = {},
   setup: { readonly account?: AccountInput; readonly secret?: string } = {},

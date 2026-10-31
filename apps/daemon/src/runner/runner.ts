@@ -715,15 +715,27 @@ export function createRunner(opts: RunnerOptions): Runner {
     clearLease(ctx, id);
   }
 
-  /** Whether the commits since the batch's base touch Markdown files and nothing else. */
+  /**
+   * Whether the commits since the batch's base touch Markdown files and nothing else. A git failure
+   * (checkout gone, index locked) answers false: QA stays in the plan rather than the error ending
+   * the workstream.
+   */
   async function changesOnlyMarkdown(row: WorkstreamRow, checkout: string): Promise<boolean> {
     if (row.baseHead === null) return false;
-    const files = await opts.git.filesChangedBetween(
-      checkout,
-      row.baseHead,
-      await opts.git.head(checkout),
-    );
-    return files.length > 0 && files.every((f) => f.endsWith('.md'));
+    try {
+      const files = await opts.git.filesChangedBetween(
+        checkout,
+        row.baseHead,
+        await opts.git.head(checkout),
+      );
+      return files.length > 0 && files.every((f) => f.endsWith('.md'));
+    } catch (err) {
+      opts.logger.warn(
+        { workstreamId: row.id, err: err instanceof Error ? err.message : String(err) },
+        'keeping the QA step: the changed files could not be listed',
+      );
+      return false;
+    }
   }
 
   /**

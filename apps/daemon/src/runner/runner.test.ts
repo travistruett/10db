@@ -57,7 +57,7 @@ import {
 import { createLauncher, KeychainError } from '../environment';
 import { recoverOnStartup, systemProcesses } from '../recovery';
 import { DEFAULT_RUNNER_LIMITS } from '../runner';
-import { createGit } from '../git';
+import { createGit, type Git } from '../git';
 import type { Judge, JudgeAnswer, JudgeRequest } from '../judge';
 import { silentLogger } from '../log';
 import { createGateRunner, type GateRequest, type GateResult } from '../verify';
@@ -5266,6 +5266,37 @@ describe('the review size decision', () => {
     // The plan and implement sessions only: neither the review nor QA ran.
     expect(engine.adapter.prompts).toHaveLength(2);
     expect(outcomes()).toEqual(['acted']);
+  });
+
+  it('keeps QA when the changed-file list cannot be read after the judge skipped the review', async () => {
+    const { judge } = scriptedJudge({ kind: 'answered', choice: 'skip', confidence: 0.95 });
+    const git: Git = {
+      ...createGit(),
+      filesChangedBetween: () => Promise.reject(new Error('index.lock exists')),
+    };
+    engine = await createTestEngine(
+      {
+        Alpha: [
+          planStep('op-size-0121'),
+          [write('src/api/a.md', '# A design'), commit('op-size-0122', ['src/api/a.md']), turn],
+          [
+            {
+              do: 'mcp' as const,
+              tool: 'complete_step',
+              args: { opId: 'op-size-0123', summary: 'Works.', verdict: 'approve' },
+            },
+            turn,
+          ],
+        ],
+      },
+      {},
+      { judge, git },
+    );
+    const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'full', criteria: 4 });
+    await until(workstream.id, (s) => s === 'DONE' || s === 'FAILED');
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(ws(workstream.id).steps.map((s) => s.role)).toEqual(['plan', 'implement', 'qa']);
+    expect(engine.adapter.prompts).toHaveLength(3);
   });
 
   it('runs the review below the floor, recording that', async () => {
