@@ -1565,6 +1565,24 @@ describe('permission broker in a sandboxed lane', () => {
     });
   });
 
+  it.each([
+    'EnterWorktree',
+    'ExitWorktree',
+    'CronCreate',
+    'ScheduleWakeup',
+    'RemoteTrigger',
+    'PushNotification',
+    'SendMessage',
+    'LSP',
+    'SomeToolAddedLater',
+  ])('cards %s, a tool the hook hands over', (toolName) => {
+    const ws = seedWorkstream(base);
+    void sandboxed(ws)(request(toolName, {})).catch(() => undefined);
+    const card = onlyOpenCard();
+    expect(card.kind).toBe('permission');
+    expect(card.detail?.['toolName']).toBe(toolName);
+  });
+
   it('denies an unlisted host at once and raises one card', async () => {
     const ws = seedWorkstream(base);
     const decide = sandboxed(ws);

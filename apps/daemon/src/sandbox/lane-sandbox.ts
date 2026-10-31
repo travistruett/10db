@@ -29,6 +29,21 @@ import type { SandboxRuntime } from './srt-launch';
 import { autoModeRules, type AutoModeSettings } from './auto-mode-rules';
 import { createLaneTempDir, LANE_TEMP_ROOT, removeAll, removeLaneTempDir } from './temp-dir';
 
+/**
+ * Tools a lane never needs: 10db makes its worktrees, and nothing a lane starts may outlive it. The
+ * PreToolUse hook asks about them too, in case a later Claude Code names a new one.
+ */
+const LANE_DISALLOWED_TOOLS: readonly string[] = [
+  'EnterWorktree',
+  'ExitWorktree',
+  'CronCreate',
+  'CronDelete',
+  'CronList',
+  'ScheduleWakeup',
+  'RemoteTrigger',
+  'PushNotification',
+];
+
 /** What a sandboxed session hands Claude Code on top of its ordinary options. */
 export interface LaneSandboxSpec {
   readonly settings: LaneSandboxSettings;
@@ -266,6 +281,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           settings,
           env,
           disallowedTools: [
+            ...LANE_DISALLOWED_TOOLS,
             ...deniedToFileTools.flatMap((path) => [
               `Read(${ruleScope(path)})`,
               `Read(${ruleScope(path)}/**)`,

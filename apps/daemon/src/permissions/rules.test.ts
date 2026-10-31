@@ -911,6 +911,34 @@ describe('allowedToolsFor', () => {
     expect(allowedToolsFor(withChecks, 'edit')).toContain('Bash(make gate)');
   });
 
+  it.each([
+    ['a prefix that covers the gate', ['make'], 'Bash(make:*)'],
+    ['a longer prefix that covers the gate', ['make gate'], 'Bash(make gate:*)'],
+  ])('leaves out %s from a sandboxed lane', (_name, allowedCommands, entry) => {
+    const sandboxed = { sandboxed: { checkout: repo.path } };
+    const listed = allowedToolsFor({ ...project, allowedCommands }, 'edit', sandboxed);
+    expect(listed).not.toContain(entry);
+    expect(allowedToolsFor({ ...project, allowedCommands }, 'edit')).toContain(entry);
+  });
+
+  it('keeps an allowed prefix that does not cover the gate', () => {
+    const sandboxed = { sandboxed: { checkout: repo.path } };
+    expect(
+      allowedToolsFor(
+        { ...project, allowedCommands: ['make test', 'pnpm test'] },
+        'edit',
+        sandboxed,
+      ),
+    ).toEqual(expect.arrayContaining(['Bash(make test:*)', 'Bash(pnpm test:*)']));
+  });
+
+  it('keeps the gate out of a sandboxed lane even when it is also the changed-check command', () => {
+    const same = { ...project, changedCheckCommand: 'make gate' };
+    const sandboxed = { sandboxed: { checkout: repo.path } };
+    expect(allowedToolsFor(same, 'edit', sandboxed)).not.toContain('Bash(make gate)');
+    expect(allowedToolsFor(same, 'edit')).toContain('Bash(make gate)');
+  });
+
   it('names the real path when the checkout is reached through a link', () => {
     const linked = join(away.path, 'via');
     symlinkSync(repo.path, linked);

@@ -45,6 +45,41 @@ const OUT_OF_PROXY_TOOLS: ReadonlySet<string> = new Set([
 const READ_FAMILY: ReadonlySet<string> = new Set(['Read', 'Grep', 'Glob', 'LS']);
 const EDIT_FAMILY: ReadonlySet<string> = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 
+/**
+ * The tools Claude Code's classifier may decide, each still subject to the checks below. Every other
+ * tool name, including one added by a later Claude Code, goes to the broker: some of them act from
+ * Claude Code's own unsandboxed process (EnterWorktree runs `git worktree add`) or outlive the lane
+ * (CronCreate, ScheduleWakeup, RemoteTrigger).
+ */
+const CLASSIFIER_TOOLS: ReadonlySet<string> = new Set([
+  'Read',
+  'Glob',
+  'Grep',
+  'LS',
+  'Edit',
+  'Write',
+  'MultiEdit',
+  'NotebookEdit',
+  'NotebookRead',
+  'Bash',
+  'Monitor',
+  'BashOutput',
+  'KillShell',
+  'TaskStop',
+  'TodoWrite',
+  'TaskCreate',
+  'TaskGet',
+  'TaskUpdate',
+  'TaskList',
+  'Task',
+  'Agent',
+  'Skill',
+  'AskUserQuestion',
+  'ToolSearch',
+  'EnterPlanMode',
+  'ExitPlanMode',
+]);
+
 function actsOutsideSandboxProxy(toolName: string): boolean {
   if (OUT_OF_PROXY_TOOLS.has(toolName)) return true;
   return toolName.startsWith('mcp__') && !toolName.startsWith('mcp__10db__');
@@ -81,6 +116,9 @@ function brokerAsk(input: GuardInput): string | null {
   if (actsOutsideSandboxProxy(input.toolName)) {
     return `${input.toolName} acts outside the sandbox's network proxy; 10db judges every call.`;
   }
+  if (!CLASSIFIER_TOOLS.has(input.toolName) && !input.toolName.startsWith('mcp__10db__')) {
+    return `${input.toolName} is not a tool the classifier may decide for a lane; 10db judges it.`;
+  }
   if (input.fileAccess !== undefined) {
     if (READ_FAMILY.has(input.toolName)) {
       return input.fileAccess.readAsk(input.toolName, input.toolInput);
@@ -104,7 +142,10 @@ function brokerAsk(input: GuardInput): string | null {
     return input.toolName === 'Monitor' ? 'Monitor carried no command to read.' : null;
   }
   // A background call never blocks the lane, so a loop with no end holds a core while it goes on.
-  const background = runsInBackground(ToolInputRecord.safeParse(input.toolInput).data ?? {});
+  // A Monitor command always runs beside the lane.
+  const background =
+    input.toolName === 'Monitor' ||
+    runsInBackground(ToolInputRecord.safeParse(input.toolInput).data ?? {});
   if (startsEndlessBackgroundLoop(command, { background })) {
     return `"${command}" starts something that never ends in the background, so the builder is asked.`;
   }

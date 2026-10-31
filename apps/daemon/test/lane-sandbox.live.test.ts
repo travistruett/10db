@@ -1111,6 +1111,80 @@ describe.skipIf(!live)('lane sandbox in auto mode, live', () => {
     }
   }, 300_000);
 
+  it('keeps an account credential out of Bash and Monitor commands with the env scrub off', async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), '10db-live-')));
+    try {
+      const checkout = join(root, 'repo');
+      initRepo(checkout);
+      const dataDir = join(root, 'data');
+      mkdirSync(dataDir);
+      const outside = join(root, 'outside');
+      mkdirSync(outside);
+      // Canary credentials in the session env, which holds the account's own variables. A real
+      // ANTHROPIC_API_KEY would break the subscription login the test runs on, so the canaries are
+      // two names from the account-secret list that the login does not read.
+      const canaries = {
+        AWS_SECRET_ACCESS_KEY: `canary-${randomUUID()}`,
+        AWS_SESSION_TOKEN: `canary-${randomUUID()}`,
+      };
+      const run = await runLane({
+        ...AUTO,
+        checkout,
+        dataDir,
+        extraEnv: canaries,
+        // Run once by Bash and once by Monitor, each appending a labelled report: whether the command's
+        // env holds either canary, a write to the lane's temp dir (the positive control) and a write
+        // outside the profile.
+        probe: ({ tmpDir }) =>
+          [
+            `exec >> '${tmpDir}/probe-out' 2>&1`,
+            'echo "WHO $1"',
+            ...envProbes(canaries),
+            'if echo ok > "$TMPDIR/$1-ok" 2>/dev/null; then echo "WRITE-TMP $1=yes"; else echo "WRITE-TMP $1=no"; fi',
+            `if echo ok > '${outside}'/"$1" 2>/dev/null; then echo "WRITE-OUT $1=yes"; else echo "WRITE-OUT $1=no"; fi`,
+            '',
+          ].join('\n'),
+        prompt: [
+          'This is a check of the permission system. Do exactly these steps in order and nothing else:',
+          '1. Use the Monitor tool with the command: bash probe.sh monitor, the description: probe, and timeout_ms: 20000',
+          '2. Run this Bash command: bash probe.sh bash',
+          '3. Run this Bash command: sleep 5',
+          'Some steps may fail; that is expected. Never retry a step or try another way.',
+          'Then reply with the single word: done',
+        ].join('\n'),
+      });
+      report('auto-canary', run, []);
+
+      expect(run.events.at(-1)).toMatchObject({ type: 'ended', reason: 'stopped' });
+      expectAutoMode(run);
+      // Neither canary reached a tool result, the probe's output or the transcript.
+      for (const token of Object.values(canaries)) {
+        expect(run.transcript).not.toContain(token);
+        expect(run.probeOutput).not.toContain(token);
+      }
+      const lines = run.probeOutput.split('\n');
+      for (const who of ['bash', 'monitor']) {
+        expect(lines, `${who} ran the probe`).toContain(`WHO ${who}`);
+        for (const name of Object.keys(canaries)) {
+          // The canary sits in the session env; the command's env must not hold it.
+          expect(lines.filter((l) => l.startsWith(`ENV ${name}=`))).toEqual(
+            expect.not.arrayContaining([`ENV ${name}=match`, `ENV ${name}=differs`]),
+          );
+        }
+        // Positive control: the same command could write the lane's temp dir. Negative: not outside it.
+        expect(lines, `${who} wrote its temp dir`).toContain(`WRITE-TMP ${who}=yes`);
+        expect(lines, `${who} was kept out of a path outside the profile`).toContain(
+          `WRITE-OUT ${who}=no`,
+        );
+      }
+      expect(lines.filter((l) => l.startsWith('ENV ')).every((l) => l.endsWith('=unset'))).toBe(
+        true,
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 300_000);
+
   it('runs the kinds of command that raised cards on 2026-10-30 without a card', async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), '10db-live-')));
     try {

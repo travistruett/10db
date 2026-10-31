@@ -354,7 +354,11 @@ export function createPermissionBroker(
       throw cause;
     }
     // A background call never blocks the lane, so its loop holds a core while the lane goes on.
-    if (startsEndlessBackgroundLoop(command, { background: runsInBackground(req.input) })) {
+    if (
+      startsEndlessBackgroundLoop(command, {
+        background: req.toolName === 'Monitor' || runsInBackground(req.input),
+      })
+    ) {
       return { summary: command, body: `${command}\n\n${LOOP_CARD_BODY}`, onceOnly: true };
     }
     if (hit === null && !req.escalated && unread === null && unreadable === null)

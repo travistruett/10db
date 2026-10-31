@@ -63,10 +63,15 @@ export function allowedToolsFor(
   if (tools === ToolAccess.Edit) {
     // An allow rule settles a call before Claude Code's auto-mode classifier sees it, so the exact
     // gate command stays out of a sandboxed lane's list: the classifier's hard deny refuses it.
-    const gate = project.gateCommand === null ? null : `Bash(${project.gateCommand})`;
-    const check = project.changedCheckCommand ? `Bash(${project.changedCheckCommand})` : null;
-    const listed = opts.sandboxed && gate !== check ? base.filter((tool) => tool !== gate) : base;
-    return [...listed, ...project.allowedCommands.map((command) => `Bash(${command}:*)`)];
+    // The same goes for a prefix that covers it (`make` covers `make gate`), and for a gate that is
+    // also the changed-check command: the per-step check then runs like any command.
+    const gate = project.gateCommand;
+    const covers = (prefix: string): boolean =>
+      gate !== null && (gate === prefix || gate.startsWith(`${prefix} `));
+    const listed =
+      opts.sandboxed && gate !== null ? base.filter((tool) => tool !== `Bash(${gate})`) : base;
+    const extra = project.allowedCommands.filter((command) => !(opts.sandboxed && covers(command)));
+    return [...listed, ...extra.map((command) => `Bash(${command}:*)`)];
   }
   const gates = [project.gateCommand, project.changedCheckCommand ?? null].flatMap((c) =>
     c ? [`Bash(${c})`] : [],

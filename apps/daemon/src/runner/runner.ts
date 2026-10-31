@@ -1606,7 +1606,18 @@ export function createRunner(opts: RunnerOptions): Runner {
         account: launch.expect,
         projectMcpServers: { ...mcpServers.remote, ...laneSession?.mcpServers },
         sandbox: laneSession?.spec ?? null,
-        ...(laneSession ? { lanePermissionMode: laneAutoMode(db) ? 'auto' : 'default' } : {}),
+        ...(laneSession
+          ? {
+              lanePermissionMode: laneAutoMode(db, (stored) => {
+                opts.logger.warn(
+                  { stored },
+                  'the lane auto mode setting is not a boolean; using default mode',
+                );
+              })
+                ? 'auto'
+                : 'default',
+            }
+          : {}),
         allowedTools: allowedToolsFor(
           project,
           step.tools,

@@ -81,6 +81,35 @@ describe('tools that act outside the sandbox proxy, and the file tools', () => {
   });
 });
 
+describe('a tool the classifier may not decide is handed to the broker', () => {
+  it.each([
+    'EnterWorktree',
+    'ExitWorktree',
+    'CronCreate',
+    'ScheduleWakeup',
+    'RemoteTrigger',
+    'PushNotification',
+    'SendMessage',
+    'LSP',
+    'SomeToolAddedLater',
+  ])('%s -> ask', (tool) => {
+    expect(pre(tool, {}, ALL_HAZARDS)).toBe('ask');
+  });
+  it.each([
+    ['Task', { description: 'x', prompt: 'y' }],
+    ['Agent', { description: 'x', prompt: 'y' }],
+    ['TodoWrite', { todos: [] }],
+    ['Skill', { skill: 'x' }],
+    ['AskUserQuestion', { questions: [] }],
+    ['BashOutput', { bash_id: '1' }],
+    ['KillShell', { shell_id: '1' }],
+    ['NotebookRead', { notebook_path: '/tmp/x' }],
+    ['mcp__10db__complete_step', {}],
+  ])('%s -> allow, the classifier may decide it', (tool, input) => {
+    expect(pre(tool, input, ALL_HAZARDS)).toBe('allow');
+  });
+});
+
 describe('background loops ask whatever the task has claimed', () => {
   it.each<[string, Record<string, unknown>, 'allow' | 'ask']>([
     ['a backgrounded busy loop', { command: '(while :; do :; done) &' }, 'ask'],
@@ -93,6 +122,12 @@ describe('background loops ask whatever the task has claimed', () => {
   ])('%s -> %s', (_name, input, expected) => {
     expect(pre('Bash', input, ALL_HAZARDS)).toBe(expected);
   });
+  it.each(['yes > /dev/null', 'while :; do :; done', '(while true; do :; done)'])(
+    'a Monitor of %s asks',
+    (command) => {
+      expect(pre('Monitor', { command }, ALL_HAZARDS)).toBe('ask');
+    },
+  );
 });
 
 describe('a Monitor command is judged as a Bash command', () => {

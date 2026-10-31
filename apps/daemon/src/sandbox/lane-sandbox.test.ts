@@ -578,6 +578,17 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
     }
   });
 
+  it('forbids the tools that start worktrees, schedules and remote triggers outside the lane', async () => {
+    const session = await sandbox().forSession(input());
+    try {
+      expect(session.spec.disallowedTools).toEqual(
+        expect.arrayContaining(['EnterWorktree', 'CronCreate', 'ScheduleWakeup', 'RemoteTrigger']),
+      );
+    } finally {
+      session.dispose();
+    }
+  });
+
   it('gives a lane command none of an account credential, though the session env holds them all', async () => {
     const names = [...SECRET_VARIABLES, 'AWS_ACCESS_KEY_ID', 'AWS_PROFILE', 'ANTHROPIC_BASE_URL'];
     const session = await sandbox().forSession(
