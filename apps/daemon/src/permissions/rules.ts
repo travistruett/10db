@@ -1,4 +1,5 @@
 import { ToolAccess, type PermissionRuleDto, type ProjectDto } from '@10db/contracts';
+import { isIP } from 'node:net';
 import { isAbsolute } from 'node:path';
 import { z } from 'zod';
 import {
@@ -17,7 +18,9 @@ import { isLiteralSegment, plainSegments, type PlainSegment } from './plain-segm
 import { runsOtherCommands, runsUnnamedProgram } from './runner-forms';
 
 /** Allow rules injected into every managed session. The guard still checks claims. */
-export function baseAllowedTools(project: Pick<ProjectDto, 'gateCommand'>): string[] {
+export function baseAllowedTools(
+  project: Pick<ProjectDto, 'gateCommand'> & Partial<Pick<ProjectDto, 'changedCheckCommand'>>,
+): string[] {
   return [
     'Read',
     'Glob',
@@ -30,6 +33,7 @@ export function baseAllowedTools(project: Pick<ProjectDto, 'gateCommand'>): stri
     'TodoWrite',
     'mcp__10db__*',
     ...(project.gateCommand === null ? [] : [`Bash(${project.gateCommand})`]),
+    ...(project.changedCheckCommand ? [`Bash(${project.changedCheckCommand})`] : []),
     'Bash(git status:*)',
     'Bash(git diff:*)',
     'Bash(git log:*)',
@@ -50,16 +54,19 @@ const WRITE_TOOLS: ReadonlySet<string> = new Set(['Edit', 'Write', 'MultiEdit', 
  * so `pnpm test` covers `pnpm test --run`; the guard still judges every command first.
  */
 export function allowedToolsFor(
-  project: Pick<ProjectDto, 'gateCommand' | 'allowedCommands'>,
+  project: Pick<ProjectDto, 'gateCommand' | 'allowedCommands'> &
+    Partial<Pick<ProjectDto, 'changedCheckCommand'>>,
   tools: ToolAccess,
   opts: { readonly sandboxed?: { readonly checkout: string } } = {},
 ): string[] {
   const base = scopedReads(baseAllowedTools(project), opts.sandboxed?.checkout);
   if (tools === ToolAccess.Edit)
     return [...base, ...project.allowedCommands.map((command) => `Bash(${command}:*)`)];
-  const gate = project.gateCommand === null ? null : `Bash(${project.gateCommand})`;
+  const gates = [project.gateCommand, project.changedCheckCommand ?? null].flatMap((c) =>
+    c ? [`Bash(${c})`] : [],
+  );
   return [
-    ...base.filter((t) => !WRITE_TOOLS.has(t) && t !== gate),
+    ...base.filter((t) => !WRITE_TOOLS.has(t) && !gates.includes(t)),
     ...[...READ_COMMANDS].map((c) => `Bash(${c}:*)`),
   ];
 }
@@ -231,6 +238,16 @@ function storable(pattern: string, words: readonly string[]): string | null {
 }
 
 /**
+ * True when a network rule's pattern covers the host, as the sandbox's `allowedDomains` reads it:
+ * `*.crates.io` covers every subdomain of crates.io but not crates.io itself, and never an address;
+ * any other pattern covers only its own host.
+ */
+function hostMatches(host: string, pattern: string): boolean {
+  if (!pattern.startsWith('*.')) return host === pattern;
+  return isIP(host.replace(/^\[|\]$/g, '')) === 0 && host.endsWith(pattern.slice(1));
+}
+
+/**
  * The stored rule that permits the call, if any: a Bash pattern must cover every plain segment, a
  * file rule's pattern every real path in `paths`, and a network rule's pattern the host. A sandboxed
  * lane passes `paths` (empty for a host), and there an unscoped file or network rule matches
@@ -247,7 +264,7 @@ export function matchPermissionRule(
       if (rule.toolName !== req.toolName) return false;
       if (pattern === null) return paths === undefined;
       const host = stringField(req.input, 'host');
-      return host !== null && host.toLowerCase() === pattern;
+      return host !== null && hostMatches(host.toLowerCase(), pattern);
     }
     if (pattern !== null && READ_TOOLS.has(req.toolName)) {
       const real = paths?.realPaths ?? [];

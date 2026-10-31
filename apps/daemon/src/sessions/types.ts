@@ -69,6 +69,9 @@ export const SessionEndReason = {
 } as const;
 export type SessionEndReason = (typeof SessionEndReason)[keyof typeof SessionEndReason];
 
+/** How a turn ended: normally, at the session's turn limit, or with an error (including a spent budget). */
+export type TurnResult = 'success' | 'max_turns' | 'error';
+
 export type SessionEvent =
   | { readonly type: 'started'; readonly providerSessionId: string; readonly pid: number | null }
   | { readonly type: 'activity'; readonly kind: 'text' | 'tool'; readonly summary: string }
@@ -80,6 +83,10 @@ export type SessionEvent =
     }
   | {
       readonly type: 'turn_complete';
+      /** How the turn ended; absent counts as `success`. */
+      readonly result?: TurnResult;
+      /** What the model wrote in the turn's last message, when it wrote any (capped by the adapter). */
+      readonly text?: string;
       readonly inputTokens: number;
       readonly outputTokens: number;
       readonly cachedTokens: number;

@@ -5,11 +5,12 @@ import {
   activeClaims,
   claimRequestsForTask,
   copyHazardNames,
+  releaseClaim,
   releaseClaims,
   renewClaimLeases,
   type ClaimRequest,
 } from './claims';
-import { findToolOp, insertToolOp } from './tool-ops';
+import { findToolOp, insertToolOp, replaceToolOp } from './tool-ops';
 import { getSession, getSessionByProviderId, insertSession, markSessionStarted } from './sessions';
 import type { Store } from './store';
 import { insertTask } from './tasks';
@@ -279,6 +280,31 @@ describe('claims', () => {
     ).value;
     expect(third.ok).toBe(true);
   });
+
+  it('releases one claim and keeps the rest, once', () => {
+    const lease = '2026-10-13T12:01:00.000Z';
+    const a = seedWorkstream('A', ['api']);
+    const claimed = store.write((ctx) =>
+      acquireClaims(ctx, {
+        projectId: a.ws.projectId,
+        workstreamId: a.ws.id,
+        requests: [
+          { kind: 'area', name: 'api' },
+          { kind: 'hazard', name: 'migrations' },
+        ],
+        leaseExpiresAt: lease,
+      }),
+    ).value;
+    const hazard = claimed.ok ? claimed.claims.find((c) => c.kind === 'hazard') : undefined;
+    if (!hazard) throw new Error('no hazard claim');
+    const { value, events } = store.write((ctx) => releaseClaim(ctx, hazard.id));
+    expect(value).toBe(true);
+    expect(events.map((e) => [e.type, e.data])).toEqual([
+      ['claim.released', { workstreamId: a.ws.id, kind: 'hazard', name: 'migrations' }],
+    ]);
+    expect(activeClaims(store.db, a.ws.id).map((c) => c.name)).toEqual(['api']);
+    expect(store.write((ctx) => releaseClaim(ctx, hazard.id)).value).toBe(false);
+  });
 });
 
 describe('per-copy hazards', () => {
@@ -543,6 +569,36 @@ describe('tool ops', () => {
     expect(findToolOp(store.db, ws.id, 'op-00000001')).toEqual({
       tool: 'commit',
       result: { sha: 'a' },
+      sessionId,
+    });
+  });
+
+  it('gives an operation ID to a later session that replaces it', () => {
+    const { ws } = seedWorkstream();
+    const first = mintId('Session');
+    const later = mintId('Session');
+    store.write((ctx) => {
+      insertToolOp(ctx, {
+        workstreamId: ws.id,
+        sessionId: first,
+        opId: 'op-00000002',
+        tool: 'complete_step',
+        result: { text: 'first' },
+      });
+    });
+    store.write((ctx) => {
+      replaceToolOp(ctx, {
+        workstreamId: ws.id,
+        sessionId: later,
+        opId: 'op-00000002',
+        tool: 'complete_step',
+        result: { text: 'later' },
+      });
+    });
+    expect(findToolOp(store.db, ws.id, 'op-00000002')).toEqual({
+      tool: 'complete_step',
+      result: { text: 'later' },
+      sessionId: later,
     });
   });
 });

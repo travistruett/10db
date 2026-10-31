@@ -230,9 +230,14 @@ function failedStepsSection(output: string): string {
   return `Failing steps; rerun only these while you fix them:\n${bullets(lines)}`;
 }
 
-const gateFailure = (evidence: EvidenceDto): string =>
+/** A read-only step (one a retry restarted with the builder's note) has nothing to commit. */
+const gateFailure = (evidence: EvidenceDto, tools: ToolAccess): string =>
   evidence.kind === EvidenceKind.Builder
-    ? `The builder sent the work back: ${evidence.summary}\nAddress it, commit, and end your turn.`
+    ? `The builder sent the work back: ${evidence.summary}\n${
+        tools === ToolAccess.Edit
+          ? 'Address it, commit, and end your turn.'
+          : 'Take it into account, then call mcp__10db__complete_step.'
+      }`
     : `The gate failed (exit ${String(evidence.exitCode)} from \`${evidence.command}\`).\n${failedStepsSection(evidence.summary)}\nFix the cause, commit, and end your turn; 10db runs the gate again.\n\nGate output (end):\n\`\`\`\n${evidence.summary}\n\`\`\``;
 
 function actionSection(input: PromptInput): string {
@@ -256,11 +261,15 @@ function actionSection(input: PromptInput): string {
         input.handoff && briefedFromHandoff(input.action, input.handoff, input.evidence)
           ? fromHandoff(input.handoff)
           : 'The previous session left no handoff, so inspect git status first.';
-      return [brief, ...(input.evidence ? [gateFailure(input.evidence)] : []), answer].join('\n\n');
+      return [
+        brief,
+        ...(input.evidence ? [gateFailure(input.evidence, input.step.tools)] : []),
+        answer,
+      ].join('\n\n');
     }
     case 'fix': {
       const gate = input.evidence
-        ? gateFailure(input.evidence)
+        ? gateFailure(input.evidence, input.step.tools)
         : "The gate failed and 10db kept no output from it. Run the changed packages' tests, typecheck and lint, fix the cause, commit, and end your turn; 10db runs the gate again.";
       // A fix session that was cut off left a handoff after the failure; the next one starts from it.
       return input.handoff && briefedFromHandoff(input.action, input.handoff, input.evidence)

@@ -1,5 +1,12 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import {
   BatchDto,
@@ -9,6 +16,7 @@ import {
   InboxItemDto,
   ProjectDto,
   TaskDto,
+  WorkstreamDto,
 } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -89,7 +97,7 @@ const git = (dir: string, ...args: string[]) =>
     .toString()
     .trim();
 
-async function start(gateCommand = 'true') {
+async function start(gateCommand = 'true', maxLanes = 3) {
   daemon = await startDaemon({
     sandbox: null,
     dataDir: data.path,
@@ -109,7 +117,7 @@ async function start(gateCommand = 'true') {
     repoPath: remote.repo.path,
     gateCommand,
     flowId: await quickFlowId(api),
-    maxLanes: 3,
+    maxLanes,
     areas: [{ name: 'ui', globs: ['src/ui/**'] }],
     delivery: 'pull_request',
     prTitlePrefix: 'feat(app)',
@@ -217,13 +225,15 @@ describe('worktree mode through the daemon', () => {
     }
 
     // No worktree is left: git lists only the main checkout, and the root holds only the project's
-    // empty directory.
+    // empty directory beside the marker that keeps Spotlight out.
     const listed = parseWorktreeList(git(main, 'worktree', 'list', '--porcelain', '-z') + '\0');
     expect(listed.map((e) => e.path)).toEqual([realpathSync(main)]);
     const levels = readdirSync(worktrees.path);
     expect(levels).toHaveLength(1);
     const level = join(worktrees.path, levels[0] ?? '');
-    const projectDirs = readdirSync(level);
+    const entries = readdirSync(level);
+    expect(entries).toContain('.metadata_never_index');
+    const projectDirs = entries.filter((e) => e !== '.metadata_never_index');
     expect(projectDirs).toHaveLength(1);
     expect(readdirSync(join(level, projectDirs[0] ?? ''))).toEqual([]);
 
@@ -288,6 +298,77 @@ describe('worktree mode through the daemon', () => {
   }, 90_000);
 });
 
+describe('holding a queued task in worktree mode', () => {
+  it('keeps its worktree while held, and removing it deletes the worktree and its branch', async () => {
+    // One lane: Alpha runs and Beta waits for it, queued in a worktree of its own.
+    const { api, project, tasks, request, answerQuestions } = await start('true', 1);
+    const main = remote.repo.path;
+    await api.post(`/projects/${project.id}/batches`, BatchStartResult, {
+      title: 'Widgets',
+      taskIds: tasks.slice(0, 2).map((t) => t.id),
+    });
+    const queued = await waitForAsync(async () => {
+      const batches = await api.get(`/projects/${project.id}/batches`, z.array(BatchDto));
+      const runs = await api.get('/workstreams', z.array(WorkstreamDto));
+      const waiting = runs.filter((w) => w.state === 'QUEUED');
+      return batches.length === 2 &&
+        batches.every((b) => b.state === 'OPEN') &&
+        waiting.length === 1
+        ? waiting[0]
+        : undefined;
+    }, 30_000);
+    const batchOf = async () =>
+      (await api.get(`/projects/${project.id}/batches`, z.array(BatchDto))).find(
+        (b) => b.id === queued.batchId,
+      );
+    const cut = await batchOf();
+    const path = cut?.worktreePath ?? '';
+    const branch = cut?.branch ?? '';
+    expect(existsSync(path)).toBe(true);
+    expect(git(main, 'branch', '--list', branch)).not.toBe('');
+
+    // Hold: it leaves the queue, and its batch, worktree and branch stay.
+    const held = await api.post(`/tasks/${queued.taskId}/hold`, WorkstreamDto);
+    expect(held).toMatchObject({ id: queued.id, state: 'HELD' });
+    expect((await batchOf())?.state).toBe('OPEN');
+    expect(existsSync(path)).toBe(true);
+
+    // Start again: the same run is queued, in the same batch.
+    const again = await request('POST', `/tasks/${queued.taskId}/start`, {});
+    expect(again.status).toBe(201);
+    expect(WorkstreamDto.parse(await again.json())).toMatchObject({
+      id: queued.id,
+      state: 'QUEUED',
+      batchId: queued.batchId,
+    });
+    await api.post(`/tasks/${queued.taskId}/hold`, WorkstreamDto);
+
+    // Remove: the batch closes, and its worktree and branch go.
+    const removed = await request('POST', `/tasks/${queued.taskId}/remove`, {});
+    expect(removed.status).toBe(200);
+    const closed = await waitForAsync(async () => {
+      const batch = await batchOf();
+      return batch?.state === 'CLOSED' && batch.worktreePath === null ? batch : undefined;
+    }, 30_000);
+    expect(closed.state).toBe('CLOSED');
+    expect(existsSync(path)).toBe(false);
+    expect(git(main, 'branch', '--list', branch)).toBe('');
+    expect(
+      parseWorktreeList(git(main, 'worktree', 'list', '--porcelain', '-z') + '\0').map(
+        (e) => e.path,
+      ),
+    ).not.toContain(path);
+
+    // The other task is unaffected and ships.
+    const other = tasks.slice(0, 2).find((t) => t.id !== queued.taskId);
+    await answerQuestions([other?.title ?? '']);
+    await waitForAsync(async () => {
+      const batches = await api.get(`/projects/${project.id}/batches`, z.array(BatchDto));
+      return batches.some((b) => b.state === 'SHIPPED') ? true : undefined;
+    }, 60_000);
+  }, 120_000);
+});
+
 describe('worktree mode settings through a real store', () => {
   it('PATCH refuses worktree mode with local delivery (400)', async () => {
     const { project, request } = await start();
@@ -296,7 +377,7 @@ describe('worktree mode settings through a real store', () => {
     expect(await res.text()).toContain('needs pull request delivery');
   });
 
-  it('PATCH refuses a mode change while a batch is unfinished (409)', async () => {
+  it('PATCH changes the default mode while a batch is unfinished', async () => {
     const { api, project, tasks, request, answerQuestions } = await start();
     const [alpha] = tasks;
     if (!alpha) throw new Error('no Alpha task');
@@ -311,8 +392,9 @@ describe('worktree mode settings through a real store', () => {
         : undefined,
     );
     const res = await request('PATCH', `/projects/${project.id}`, { workspaceMode: 'shared' });
-    expect(res.status).toBe(409);
-    expect(await res.text()).toContain('workspace mode');
+    // The project's mode is only the default for new tasks, so work in flight doesn't block it.
+    expect(res.status).toBe(200);
+    expect(ProjectDto.parse(await res.json())).toMatchObject({ workspaceMode: 'shared' });
     await answerQuestions(['Alpha']);
   });
 });

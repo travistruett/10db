@@ -1,5 +1,6 @@
 import {
   BatchState,
+  BoardStatus,
   TaskStatus,
   type BatchDto,
   type BatchId,
@@ -14,6 +15,17 @@ export interface BlockedTask {
   readonly deps: readonly TaskDto[];
 }
 
+/**
+ * Done, or still open though its failed run shipped anyway: the board puts the latter in Done
+ * once its pull request has merged.
+ */
+function finished(task: TaskDto): boolean {
+  return (
+    task.status === TaskStatus.Done ||
+    (task.status === TaskStatus.Open && task.boardStatus === BoardStatus.Done)
+  );
+}
+
 /** Dependencies that are not done and not in the batch (batch delivery spec §5). */
 export function unfinishedDependencies(
   db: DbReader,
@@ -26,7 +38,7 @@ export function unfinishedDependencies(
       deps: task.dependsOn
         .filter((id) => !inBatch.has(id))
         .map((id) => getTask(db, id))
-        .filter((dep) => dep.status !== TaskStatus.Done),
+        .filter((dep) => !finished(dep)),
     }))
     .filter((b) => b.deps.length > 0);
 }

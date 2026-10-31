@@ -3,6 +3,7 @@ import { lstat, open, stat } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import {
   FolderRefusalReason,
+  type FoundHostDto,
   type FolderInspectResult,
   type FolderInspection,
   type ProjectDto,
@@ -24,6 +25,8 @@ export interface InspectFolderDeps {
   readonly projects: readonly ProjectDto[];
   /** The data dir, the lane temp root and the worktree root: 10db's own places. */
   readonly protectedRoots: readonly string[];
+  /** The hosts the folder's package files name; left out, a folder names none. */
+  readonly registryHosts?: (root: string) => Promise<readonly FoundHostDto[]>;
 }
 
 const refuse = (reason: FolderRefusalReason, message: string): FolderInspectResult => ({
@@ -190,6 +193,8 @@ export async function inspectFolder(
     defaultBranch: facts.defaultBranch,
     github: githubOf(facts.originFetchUrl),
     gateCandidates: gateCandidates(await readFolderFiles(root)),
+    registryHosts:
+      (await deps.registryHosts?.(root))?.map(({ host, file }) => ({ host, file })) ?? [],
   };
   return { ok: true, inspection };
 }

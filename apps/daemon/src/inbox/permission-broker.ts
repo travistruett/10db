@@ -14,9 +14,10 @@ import { listPermissionRules } from '@10db/db';
 import { z } from 'zod';
 import type { StateStore } from '../events';
 import { firstUnread, hazardHit, startsEndlessBackgroundLoop, stringField } from '../guard';
-import { matchPermissionRule, storableRule } from '../permissions';
+import { foundHostFile, matchPermissionRule, storableRule } from '../permissions';
 import { readAccess, readPathsOf, writeAccess, type FileAccessContext } from '../sandbox';
 import type { ToolDecision, ToolRequest } from '../sessions';
+import { foundHostReason } from './gate-host-card';
 import { ParkedError, type InboxService } from './service';
 
 export interface WaitObserver {
@@ -286,17 +287,19 @@ export function createPermissionBroker(
     }
     if (!hostsAsked.has(host)) {
       hostsAsked.add(host);
+      // A project file that needs the host is a reason to allow it, not a grant.
+      const file = foundHostFile(deps.state.db, ctx.projectId, host);
       const { answer } = deps.inbox.ask({
         projectId: ctx.projectId,
         workstreamId: ctx.workstreamId,
         sessionId: ctx.sessionId,
         kind: 'permission',
         title: `Allow network access to ${host}?`,
-        body: HOST_CARD_BODY,
+        body: file === null ? HOST_CARD_BODY : `${foundHostReason(file, host)}\n${HOST_CARD_BODY}`,
         options: permissionOptions(true).filter(
           (o) => o.label !== PermissionChoice.AllowWorkstream,
         ),
-        recommendation: null,
+        recommendation: file === null ? null : PermissionChoice.AllowProject,
         category: QuestionCategory.Environment,
         urgency: Urgency.Normal,
         detail: { toolName: NETWORK_TOOL, summary: host },

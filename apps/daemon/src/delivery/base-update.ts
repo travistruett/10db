@@ -11,8 +11,9 @@ import type { BranchMerge } from '../git';
 import { baseCards, baseConflictKey, baseKeptKey, detailOf } from './cards';
 import { networkCall, raise, withdraw, type DeliveryContext } from './context';
 import { installedLockfile, recordInstall } from './installed-lockfile';
+import { journalDirs, takenNumbers, type TakenNumber } from './migration-numbers';
 import { startRef } from './start-refs';
-import { PNPM_LOCKFILE } from './worktree-dependencies';
+import { PNPM_LOCKFILE, raiseInstallHostCards } from './worktree-dependencies';
 
 /** What happened to a batch's branch before its gate (`decisions/2026-10-29-gate-with-base.md`). */
 export type BaseUpdate =
@@ -25,10 +26,31 @@ export type BaseUpdate =
       readonly head: string;
       readonly note: string | null;
     }
-  /** The gate tests the branch as it is; `note` says why. */
-  | { readonly kind: 'not_merged'; readonly note: string }
+  /**
+   * The gate tests the branch as it is; `note` says why. `held`, asked for the migrations hazard
+   * only, says what in the branch kept the base out.
+   */
+  | { readonly kind: 'not_merged'; readonly note: string; readonly held?: BaseHeld }
   /** Shutdown or a cancel stopped it: no gate runs. */
   | { readonly kind: 'aborted' };
+
+/** What in a worktree batch's branch kept its base out. */
+export interface BaseHeld {
+  /** Both sides changed `paths`; uncommitted changes, or files git doesn't track, are in the way. */
+  readonly reason: 'conflict' | 'uncommitted' | 'untracked';
+  readonly paths: readonly string[];
+  /** The fold key of the builder's card about it; null when the task can clear it itself. */
+  readonly foldKey: string | null;
+}
+
+export interface BeforeGateOptions {
+  /**
+   * Brings the base in for the task named here, which asked for the migrations hazard, instead of
+   * for a gate: no install runs (the next gate's does), a card says the task is held back, and a
+   * branch that can't take the base says why in `held`.
+   */
+  readonly forMigrations?: { readonly task: string };
+}
 
 export interface BaseUpdates {
   /**
@@ -38,7 +60,11 @@ export interface BaseUpdates {
    * behind its base it is. A gate runs it as its `beforeStart`, inside `gate`, so no other gate's merge
    * changes the tree under it. Never throws: whatever kept the base or the install out is the note.
    */
-  beforeGate(batchId: BatchId, signal: AbortSignal): Promise<BaseUpdate>;
+  beforeGate(
+    batchId: BatchId,
+    signal: AbortSignal,
+    options?: BeforeGateOptions,
+  ): Promise<BaseUpdate>;
   /**
    * Runs `run`, one gate of the batch's at a time: a batch's gates share its checkout, so one gate's
    * base update must wait until the gate before it has finished, whatever the number of gate slots.
@@ -88,6 +114,14 @@ function joined(...notes: readonly (string | null)[]): string | null {
 /** Where the merge left the branch, before the install has its say. */
 type Merged = Exclude<BaseUpdate, { readonly kind: 'aborted' }>;
 
+type NotMerged = Extract<BaseUpdate, { readonly kind: 'not_merged' }>;
+
+/** Where drizzle-kit keeps a migration directory's journal, relative to the directory. */
+const JOURNAL_PATH = 'meta/_journal.json';
+
+/** A journal past this is not one drizzle-kit wrote for a project's migrations: it is not read. */
+const JOURNAL_MAX_BYTES = 1024 * 1024;
+
 /** What the install before a gate came to: a note to add, or a stop. */
 type Installed =
   { readonly kind: 'done'; readonly note: string | null } | { readonly kind: 'aborted' };
@@ -95,7 +129,7 @@ type Installed =
 export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
   const db = ctx.state.db;
 
-  function notMerged(batch: BatchDto, reason: string, note: string): Merged {
+  function notMerged(batch: BatchDto, reason: string, note: string): NotMerged {
     ctx.logger.warn(
       { batchId: batch.id, baseBranch: batch.baseBranch, reason },
       'base not merged before the gate',
@@ -195,13 +229,40 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     };
   }
 
+  /**
+   * The branch's migrations whose number the base already gives another, in the drizzle journals
+   * that conflict. Read from the commits, so nothing in the worktree changes; none when they can't be read.
+   */
+  async function takenIn(path: string, base: string, paths: readonly string[]) {
+    const taken: TakenNumber[] = [];
+    for (const dir of journalDirs(paths)) {
+      const journal = dir === '.' ? JOURNAL_PATH : `${dir}/${JOURNAL_PATH}`;
+      try {
+        const [ours, theirs] = await Promise.all(
+          ['HEAD', base].map(async (rev) => {
+            const found = await ctx.git.fileAt(path, rev, journal, JOURNAL_MAX_BYTES);
+            return found.kind === 'file' ? found.text : null;
+          }),
+        );
+        taken.push(...takenNumbers(dir, ours ?? null, theirs ?? null));
+      } catch (error) {
+        ctx.logger.warn({ path, journal, err: why(error) }, 'migration journal not read');
+      }
+    }
+    return taken;
+  }
+
   /** A worktree 10db made: the base is merged into its branch. */
   async function merge(
     batch: BatchDto,
     branch: string,
     path: string,
     from: string,
+    options: BeforeGateOptions,
   ): Promise<Merged> {
+    const migrationsFor = options.forMigrations?.task;
+    const context = migrationsFor === undefined ? {} : { migrationsFor };
+    const holding = (held: BaseHeld) => (migrationsFor === undefined ? {} : { held });
     const origin = `origin/${batch.baseBranch}`;
     let merged: BranchMerge;
     try {
@@ -221,33 +282,50 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     switch (merged.kind) {
       case 'conflict': {
         const { paths } = merged;
+        const taken = await takenIn(path, merged.from, paths);
         tell(batch, () => {
-          raise(ctx.inbox, batch.projectId, baseCards.conflict(batch, path, paths));
+          raise(
+            ctx.inbox,
+            batch.projectId,
+            baseCards.conflict(batch, path, paths, { ...context, taken }),
+          );
         });
-        return notMerged(
-          batch,
-          `conflict in ${named(paths)}`,
-          `${origin} conflicts with this branch in ${named(paths)}, so this gate ran without its newer commits: a failure they fix shows here until the conflict is resolved, which the builder has a card for.`,
-        );
+        return {
+          ...notMerged(
+            batch,
+            `conflict in ${named(paths)}`,
+            `${origin} conflicts with this branch in ${named(paths)}, so this gate ran without its newer commits: a failure they fix shows here until the conflict is resolved, which the builder has a card for.`,
+          ),
+          ...holding({ reason: 'conflict', paths, foldKey: baseConflictKey(batch.id) }),
+        };
       }
       case 'blocked': {
         const { changed, kept } = merged;
         if (kept.length > 0)
           tell(batch, () => {
-            raise(ctx.inbox, batch.projectId, baseCards.kept(batch, path, kept));
+            raise(ctx.inbox, batch.projectId, baseCards.kept(batch, path, kept, context));
           });
-        return notMerged(
-          batch,
-          `in the way: ${named([...changed, ...kept])}`,
-          joined(
-            changed.length === 0
-              ? null
-              : `Uncommitted changes in ${named(changed)} are in the way of ${origin}'s newer commits, so this gate ran without them.`,
-            kept.length === 0
-              ? null
-              : `10db didn't merge ${origin} because files in the worktree that git doesn't track are in the way (${named(kept)}). Don't remove or move them: they may be the builder's, and the builder has a card about them. This gate ran without ${origin}'s newer commits.`,
-          ) ?? `Files are in the way of ${origin}'s newer commits, so this gate ran without them.`,
-        );
+        return {
+          ...notMerged(
+            batch,
+            `in the way: ${named([...changed, ...kept])}`,
+            joined(
+              changed.length === 0
+                ? null
+                : `Uncommitted changes in ${named(changed)} are in the way of ${origin}'s newer commits, so this gate ran without them.`,
+              kept.length === 0
+                ? null
+                : `10db didn't merge ${origin} because files in the worktree that git doesn't track are in the way (${named(kept)}). Don't remove or move them: they may be the builder's, and the builder has a card about them. This gate ran without ${origin}'s newer commits.`,
+            ) ??
+              `Files are in the way of ${origin}'s newer commits, so this gate ran without them.`,
+          ),
+          // The builder's files outrank the task's own: only the builder can move them.
+          ...holding(
+            kept.length > 0
+              ? { reason: 'untracked', paths: kept, foldKey: baseKeptKey(batch.id) }
+              : { reason: 'uncommitted', paths: changed, foldKey: null },
+          ),
+        };
       }
       case 'up_to_date':
       case 'merged':
@@ -312,13 +390,25 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
           return { kind: 'aborted' };
         case 'failed': {
           ctx.logger.warn(
-            { batchId: batch.id, exitCode: installed.exitCode, logPath: installed.logPath },
+            {
+              batchId: batch.id,
+              exitCode: installed.exitCode,
+              logPath: installed.logPath,
+              blockedHosts: installed.blockedHosts,
+            },
             'worktree dependencies not installed before the gate',
           );
+          tell(batch, () => {
+            raiseInstallHostCards(ctx, project.id, installed);
+          });
           const how = installed.timedOut ? 'timed out' : `exit ${String(installed.exitCode)}`;
+          const blocked =
+            installed.blockedHosts.length === 0
+              ? ''
+              : ` The sandbox blocked it from reaching ${named(installed.blockedHosts)}.`;
           return {
             kind: 'done',
-            note: `The install this branch's lockfile needs failed (${how}; log: ${installed.logPath}), so its packages may not match it.`,
+            note: `The install this branch's lockfile needs failed (${how}; log: ${installed.logPath}), so its packages may not match it.${blocked}`,
           };
         }
         case 'installed':
@@ -340,7 +430,11 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     }
   }
 
-  async function update(batchId: BatchId, signal: AbortSignal): Promise<BaseUpdate> {
+  async function update(
+    batchId: BatchId,
+    signal: AbortSignal,
+    options: BeforeGateOptions,
+  ): Promise<BaseUpdate> {
     // A function, so a check after an await is not narrowed away by the one before it.
     const stopped = (): boolean => signal.aborted;
     const batch = getBatch(db, batchId);
@@ -365,8 +459,9 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     merged ??=
       batch.worktreePath === null
         ? await shared(batch, batch.branch, from)
-        : await merge(batch, batch.branch, batch.worktreePath, from);
-    if (batch.worktreePath === null) return merged;
+        : await merge(batch, batch.branch, batch.worktreePath, from, options);
+    // Asked for the migrations hazard, the task's session waits on it: the next gate installs.
+    if (batch.worktreePath === null || options.forMigrations) return merged;
     const installed = await install(batch, project, batch.worktreePath, signal);
     if (installed.kind === 'aborted' || stopped()) return { kind: 'aborted' };
     switch (merged.kind) {
@@ -411,12 +506,12 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
       });
       return next;
     },
-    async beforeGate(batchId, signal) {
+    async beforeGate(batchId, signal, options = {}) {
       // A function, so the check in the catch below is not narrowed away by the one before it.
       const stopped = (): boolean => signal.aborted;
       if (stopped()) return { kind: 'aborted' };
       try {
-        return await update(batchId, signal);
+        return await update(batchId, signal, options);
       } catch (error) {
         if (stopped()) return { kind: 'aborted' };
         ctx.logger.warn({ batchId, err: why(error) }, 'base not merged before the gate');

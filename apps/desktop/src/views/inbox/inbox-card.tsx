@@ -15,8 +15,10 @@ import {
 } from '@mantine/core';
 import type { KeyboardEvent, RefObject } from 'react';
 import { ExternalLink } from '../board/pull-request-link';
+import { BatchCardActions } from './batch-card-actions';
 import { CheckCard } from './check-card';
 import { isDismissable } from './inbox-rows';
+import { ReviewRejection, reviewRejection } from '../review/review-rejection';
 import { McpApprovalDetails, mcpReview } from './mcp-approval';
 import { SELECTED_CARD_ATTRIBUTE } from './use-inbox-keys';
 import { KIND_LABELS, optionLabel } from './permission-labels';
@@ -94,6 +96,7 @@ export function InboxCard({
   onDismiss,
 }: InboxCardProps) {
   const review = mcpReview(item);
+  const rejection = reviewRejection(item);
   const dismissable = isDismissable(item);
   // Every card waits on the builder, a flag included: yellow, never the red of a failure.
   const kind = (
@@ -204,7 +207,9 @@ export function InboxCard({
         ) : (
           <CardBody item={item} />
         )}
+        {rejection ? <ReviewRejection review={rejection} /> : null}
         {link === null ? null : <ExternalLink url={link} label="Open on GitHub" />}
+        <BatchCardActions item={item} onDone={onDismiss} />
         {hasOptions ? (
           <Radio.Group value={choice} onChange={onChoose} aria-label="Answer">
             <Stack gap="xs">

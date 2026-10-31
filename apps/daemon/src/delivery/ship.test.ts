@@ -1,6 +1,6 @@
 import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ConflictError, type BatchDto, type TaskDto } from '@10db/contracts';
+import { ConflictError, mintId, type BatchDto, type TaskDto } from '@10db/contracts';
 import {
   activeClaims,
   acquireClaims,
@@ -9,7 +9,10 @@ import {
   getBatchRow,
   getTask,
   getWorkstream,
+  insertInboxItem,
+  listInbox,
   listWorkstreams,
+  patchProject,
   schema,
   transitionBatch,
 } from '@10db/db';
@@ -210,6 +213,46 @@ describe('shipping', () => {
     expect(failed.state).toBe('FAILED');
     const card = h.only(h.cards().filter((c) => c.title.includes('the gate failed')));
     expect(card.body).toMatch(/^origin\/main has 1 commit this branch doesn't\./);
+  });
+
+  it('raises one card per host the sandbox blocked the shipping gate from, naming the command', async () => {
+    // The sandbox's runner reports the hosts its proxy refused; this one reports them for any failure.
+    h = createDeliveryHarness(
+      { gateCommand: 'cargo test; exit 101' },
+      {
+        shipGate: (gate) => ({
+          run: async (request) => {
+            const result = await gate.run(request);
+            return { ...result, blockedHosts: ['index.crates.io', 'static.crates.io'] };
+          },
+        }),
+      },
+    );
+    const { batch } = await openBatch('Add greetings', 'Alpha');
+    h.commit('src/api/alpha.txt');
+
+    const failed = await finishAll(batch);
+
+    expect(failed.state).toBe('FAILED');
+    const hostCards = h.cards().filter((c) => c.title.startsWith('Allow network access to'));
+    expect(hostCards.map((c) => c.title)).toEqual([
+      'Allow network access to index.crates.io?',
+      'Allow network access to static.crates.io?',
+    ]);
+    expect(hostCards[0]?.body).toContain('cargo test; exit 101');
+    expect(hostCards[0]?.options.map((o) => o.label)).toEqual(['Allow for the project', 'Not now']);
+  });
+
+  it("runs the project's full gate before the push, never its changed-packages check", async () => {
+    h = createDeliveryHarness({ gateCommand: 'false', changedCheckCommand: 'true' });
+    const { batch } = await openBatch('Add greetings', 'Alpha');
+    h.commit('src/api/alpha.txt');
+    const failed = await finishAll(batch);
+    expect(failed.state).toBe('FAILED');
+    expect(onOrigin(batch.branch)).toBeNull();
+    expect(batchLines(batch.id).find((line) => line['msg'] === 'gate started')).toMatchObject({
+      command: 'false',
+    });
   });
 
   it('ships a batch without a gate step when the project has none', async () => {
@@ -553,6 +596,42 @@ describe('Ship anyway, Retry and Abandon', () => {
     const shipped = getBatch(h.store.db, batch.id);
     expect(shipped.state).toBe('SHIPPED');
     expect(h.gh.body(shipped.prUrl ?? '')).toContain('- Beta (failed)');
+  });
+
+  it('closes the not-shipped card by itself, saying why, once a retried ship succeeds', async () => {
+    h = createDeliveryHarness({ gateCommand: 'echo broken >&2; exit 3' });
+    const { batch } = await openBatch('Greetings', 'Alpha');
+    h.commit('src/api/alpha.txt');
+    const failed = await finishAll(batch);
+    expect(failed.state).toBe('FAILED');
+    const card = h.only(h.cards().filter((c) => c.title.includes('the gate failed')));
+    // Another batch's card, for the same project, stays as it is.
+    const other = h.state.write((c) =>
+      insertInboxItem(c, {
+        projectId: h.project.id,
+        kind: 'flag',
+        title: 'Batch "Other" not shipped: the gate failed (exit 1)',
+        body: 'x',
+        options: [],
+        recommendation: null,
+        category: 'other',
+        urgency: 'high',
+        detail: { resolvesWhen: { event: 'batch_shipped', batchId: mintId('Batch') } },
+        foldKey: null,
+        targets: [],
+      }),
+    );
+    h.state.write((c) => patchProject(c, h.project.id, { gateCommand: 'true' }));
+    expect(h.shipper.ship(batch.id).state).toBe('SHIPPING');
+    await h.jobs.idle();
+    expect(getBatch(h.store.db, batch.id).state).toBe('SHIPPED');
+    expect(h.cards().map((c) => c.id)).toEqual([other.id]);
+    const closed = listInbox(h.store.db, { states: ['RESOLVED'] });
+    expect(closed).toHaveLength(1);
+    expect(closed[0]).toMatchObject({
+      id: card.id,
+      detail: { resolution: { by: '10db', reason: 'Batch "Greetings" shipped' } },
+    });
   });
 
   it('retries a failed batch: ships it when its work is settled, reopens it when work is unfinished', async () => {

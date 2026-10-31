@@ -33,7 +33,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { seedWorkstream } from '../../test/fixtures';
 import { createEventBus, createStateStore, type StateStore } from '../events';
-import { storableRule } from '../permissions';
+import { allowFoundHosts, removeNetworkHost, storableRule } from '../permissions';
 import { protectedReads, type FileAccessContext } from '../sandbox';
 import {
   createInboxService,
@@ -1492,6 +1492,29 @@ describe('permission broker in a sandboxed lane', () => {
     expect(card.options.map((o) => o.label)).toEqual(['allow_once', 'allow_project', 'deny']);
   });
 
+  it('recommends Allow for the project, and says why, when a project file names the host as a registry', async () => {
+    const ws = seedWorkstream(base);
+    // The builder removed the host after setup; Cargo.lock still names it.
+    allowFoundHosts(state, ws.project.id, [{ host: 'index.crates.io', file: 'Cargo.lock' }]);
+    removeNetworkHost(state, ws.project.id, 'index.crates.io');
+
+    await sandboxed(ws)(request('SandboxNetworkAccess', { host: 'index.crates.io' }));
+
+    const card = onlyOpenCard();
+    expect(card.recommendation).toBe('allow_project');
+    expect(card.body).toContain("The project's Cargo.lock needs index.crates.io");
+    expect(card.body).not.toContain('package registry');
+    expect(card.body).toContain(HOST_BODY);
+  });
+
+  it('recommends nothing for a host no project file names', async () => {
+    const ws = seedWorkstream(base);
+    allowFoundHosts(state, ws.project.id, [{ host: 'index.crates.io', file: 'Cargo.lock' }]);
+    await sandboxed(ws)(request('SandboxNetworkAccess', { host: 'example.com' }));
+    expect(onlyOpenCard().recommendation).toBeNull();
+    expect(onlyOpenCard().body).toBe(HOST_BODY);
+  });
+
   it('denies a network ask that names no host, with no card', async () => {
     const ws = seedWorkstream(base);
     const decision = await sandboxed(ws)(request('SandboxNetworkAccess', {}));
@@ -2079,5 +2102,36 @@ describe('a flag with a fold key', () => {
       title: 'Batch not started: b.txt',
       body: 'b.txt is in the way.',
     });
+  });
+});
+
+describe('a card 10db closes because its cause is gone', () => {
+  function flag(detail: Record<string, string>) {
+    const ws = seedWorkstream(base);
+    return inbox.flag({
+      projectId: ws.project.id,
+      workstreamId: null,
+      title: 'Batch not started: 10db will not run git',
+      body: 'Nothing was pushed.',
+      detail,
+    });
+  }
+
+  it('is resolved by 10db with the reason, keeping the rest of its detail', () => {
+    const card = flag({ keep: 'me' });
+    const resolved = inbox.resolve(card.id, 'Alpha started');
+    expect(resolved).toMatchObject({
+      state: 'RESOLVED',
+      detail: { keep: 'me', resolution: { by: '10db', reason: 'Alpha started' } },
+    });
+    expect(listInbox(state.db, { states: ['OPEN'] })).toEqual([]);
+    expect(listInbox(state.db, { states: ['RESOLVED'] }).map((i) => i.id)).toEqual([card.id]);
+  });
+
+  it('leaves a card the builder already closed as it was', () => {
+    const card = flag({});
+    inbox.answer(card.id, { choice: 'dismiss' });
+    const again = inbox.resolve(card.id, 'Alpha started');
+    expect(again.detail).toEqual({});
   });
 });

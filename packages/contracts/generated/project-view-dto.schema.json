@@ -18,6 +18,12 @@
         "null"
       ]
     },
+    "changedCheckCommand": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "areas": {
       "type": "array",
       "items": {
@@ -205,6 +211,12 @@
       ]
     },
     "worktreeSeed": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "isolate": {
       "type": "array",
       "items": {
         "type": "string"
@@ -638,6 +650,7 @@
     "name",
     "repoPath",
     "gateCommand",
+    "changedCheckCommand",
     "areas",
     "hazards",
     "maxLanes",
@@ -660,6 +673,7 @@
     "sandboxLoopback",
     "workspaceMode",
     "worktreeSeed",
+    "isolate",
     "createdAt",
     "updatedAt"
   ]

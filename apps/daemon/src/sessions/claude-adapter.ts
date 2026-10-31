@@ -15,12 +15,14 @@ import { Provider, type AccountRefusal } from '@10db/contracts';
 import { z } from 'zod';
 import { systemClock, type Clock } from '../clock';
 import type { Logger } from '../log';
+import { atPriority } from '../priority';
 import {
   checkAccount,
   checkInitCredentials,
   credentialProblem,
   missingAccountRefusal,
   modelMatches,
+  noAccountWhy,
   seenFrom,
   type SeenAccount,
 } from './account-check';
@@ -48,8 +50,16 @@ import {
 } from './types';
 
 export const CLAUDE_MCP_SERVER = TENDB_MCP_SERVER;
-/** How long Claude Code may take to report its account before the prompt is sent. */
-const BILLING_PREFLIGHT_MS = 15_000;
+/**
+ * How long one start of Claude Code may take to report its account before the prompt is sent. A lane
+ * runs at background priority, so on a busy Mac a start can be slow; a signed-out account is noticed
+ * after this wait on each of `START_ATTEMPTS` starts.
+ */
+const BILLING_PREFLIGHT_MS = 30_000;
+/** How many times a session starts Claude Code before no account from it reads as a signed-out account. */
+const START_ATTEMPTS = 2;
+/** The latest stderr of one start that is kept to say what Claude Code printed. */
+const STDERR_KEPT_CHARS = 4_000;
 /** How long an identity probe waits for `accountInfo()`. */
 const IDENTITY_PROBE_MS = 15_000;
 const STOP_GRACE_MS = 5_000;
@@ -116,7 +126,9 @@ function spawnClaude(
   deps: Pick<QueryDeps, 'onSpawn' | 'onStderr'>,
 ): SpawnedProcess {
   // The SDK's forwarded signal fires after its graceful stdin-close path, so it is not handed to spawn().
-  const child = spawn(options.command, options.args, {
+  // Background priority for the session and everything it starts: the lane's commands, its repo MCP servers.
+  const launch = atPriority('lane', options.command, options.args);
+  const child = spawn(launch.file, [...launch.args], {
     cwd: options.cwd,
     env: options.env,
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -292,10 +304,24 @@ function failedServersNote(names: readonly string[]): string {
   );
 }
 
+/** Where one start of Claude Code stands among the starts a session may make. */
+interface StartAttempt {
+  /** What each earlier start printed on stderr; one entry per earlier start that got no account. */
+  readonly earlier: readonly string[];
+  /** More starts follow this one. */
+  readonly last: boolean;
+  /**
+   * This start got no account and is closed without an `ended` event, so the session starts again:
+   * what it printed, and the messages sent to it that never reached claude.
+   */
+  readonly unanswered: (printed: string, unsent: readonly string[]) => void;
+}
+
 function startSession(
   spec: SessionSpec,
   opts: ClaudeAdapterOptions,
   runQuery: QueryFn,
+  attempt: StartAttempt,
 ): SessionHandle {
   const graceMs = opts.stopGraceMs ?? STOP_GRACE_MS;
   const clock = opts.clock ?? systemClock;
@@ -337,6 +363,12 @@ function startSession(
   const finished = new Promise<void>((resolve) => {
     markFinished = resolve;
   });
+  /** The latest of what claude printed on stderr, for the refusal when it reports no account. */
+  let stderrTail = '';
+  /** Closed without an `ended` event: the session starts claude again. */
+  let closedForRetry = false;
+  /** Messages sent before the prompt, which wait for the preflight and are lost if it fails. */
+  const unsent: string[] = [];
 
   const emit = (event: SessionEvent): void => {
     if (!ended) events.push(event);
@@ -347,14 +379,15 @@ function startSession(
     resolvePreflight(false);
     resolveVerified(false);
     input.end();
-    events.push({
-      type: 'ended',
-      reason,
-      message,
-      ...(failureRefusal && reason === SessionEndReason.AccountRefused
-        ? { refusal: failureRefusal }
-        : {}),
-    });
+    if (!closedForRetry)
+      events.push({
+        type: 'ended',
+        reason,
+        message,
+        ...(failureRefusal && reason === SessionEndReason.AccountRefused
+          ? { refusal: failureRefusal }
+          : {}),
+      });
     events.end();
     markFinished();
   };
@@ -410,6 +443,7 @@ function startSession(
         return haltOutput;
       },
       onStderr: (chunk) => {
+        stderrTail = (stderrTail + chunk).slice(-STDERR_KEPT_CHARS);
         log.debug({ stderr: chunk.slice(0, STDERR_LOG_CHARS) }, 'claude stderr');
       },
     }),
@@ -434,9 +468,23 @@ function startSession(
     account = await settleWithin(clock, q.accountInfo(), BILLING_PREFLIGHT_MS);
     if (ended || failure) return;
     if (!account) {
-      const why = `Claude Code reported no account within ${String(BILLING_PREFLIGHT_MS / 1_000)} s`;
+      if (!attempt.last && !stopRequested) {
+        // One slow start says nothing about the account: close this claude and let the session start another.
+        // Nothing is logged of what it printed beyond its length; the refusal, if it comes, says it.
+        log.warn(
+          { printedChars: stderrTail.length },
+          'claude reported no account; starting it again',
+        );
+        closedForRetry = true;
+        end(SessionEndReason.Error, null);
+        void settleWithin(clock, q.interrupt(), graceMs);
+        abortController.abort();
+        attempt.unanswered(stderrTail, unsent);
+        return;
+      }
+      const { why, printed } = noAccountWhy(BILLING_PREFLIGHT_MS, [...attempt.earlier, stderrTail]);
       // A signed-out subscription may answer nothing: the account waits for its sign-in, the lane doesn't fail.
-      const signedOut = missingAccountRefusal(spec.account, why);
+      const signedOut = missingAccountRefusal(spec.account, why, printed);
       if (signedOut)
         refuse(
           SessionEndReason.AccountRefused,
@@ -446,7 +494,7 @@ function startSession(
       else
         refuse(
           SessionEndReason.BillingRefused,
-          `Account check failed: ${why}. No prompt was sent. ${fixHint}`,
+          `Account check failed: ${why}. ${printed}. No prompt was sent. ${fixHint}`,
         );
       return;
     }
@@ -639,6 +687,7 @@ function startSession(
         input.push(userMessage(text, 'next'));
         return;
       }
+      unsent.push(text);
       void preflightOk.then((ok) => {
         if (ok && !halted()) input.push(userMessage(text, 'next'));
       });
@@ -657,6 +706,69 @@ function startSession(
       await finished;
       abortTimer.cancel();
       forceTimer.cancel();
+    },
+  };
+}
+
+/**
+ * A session that starts Claude Code again when a start gets no account from it, up to `START_ATTEMPTS`
+ * starts. A slow start (a lane runs at background priority) is not a signed-out account: only the
+ * last start's silence is refused. The first start closes without any event, so the caller sees one
+ * session; messages sent meanwhile go to the next start, and a stop in between ends it as stopped.
+ */
+function startWithRetry(
+  spec: SessionSpec,
+  opts: ClaudeAdapterOptions,
+  runQuery: QueryFn,
+): SessionHandle {
+  const log = opts.logger.child({ sessionId: spec.sessionId, workstreamId: spec.workstreamId });
+  const events = createChannel<SessionEvent>();
+  /** What each start that got no account printed. */
+  const printed: string[] = [];
+  /** Set by a start that closed for another; its unsent messages grow while the next one is made. */
+  let pending: { readonly unsent: string[] } | null = null;
+  let stopRequested = false;
+  let current: SessionHandle | null = null;
+  // Read through a function: TypeScript would otherwise keep the narrowing from the assignments.
+  const closedStart = (): { readonly unsent: string[] } | null => pending;
+  const stopAsked = (): boolean => stopRequested;
+  const settled = (async () => {
+    let carried: readonly string[] = [];
+    for (let number = 1; number <= START_ATTEMPTS; number += 1) {
+      pending = null;
+      const handle = startSession(spec, opts, runQuery, {
+        earlier: [...printed],
+        last: number === START_ATTEMPTS,
+        unanswered: (text, unsent) => {
+          printed.push(text);
+          pending = { unsent: [...unsent] };
+        },
+      });
+      current = handle;
+      for (const text of carried) handle.send(text);
+      for await (const event of handle.events) events.push(event);
+      const closed = closedStart();
+      if (!closed) break;
+      if (stopAsked()) {
+        events.push({ type: 'ended', reason: SessionEndReason.Stopped, message: null });
+        break;
+      }
+      log.info({ starts: number }, 'claude session starts again');
+      carried = closed.unsent;
+    }
+    events.end();
+  })();
+  return {
+    events,
+    send(text) {
+      const waiting = closedStart();
+      if (waiting) waiting.unsent.push(text);
+      else current?.send(text);
+    },
+    async stop() {
+      stopRequested = true;
+      await current?.stop();
+      await settled;
     },
   };
 }
@@ -786,7 +898,7 @@ export function createClaudeAdapter(opts: ClaudeAdapterOptions): SessionAdapter 
     start: (spec) =>
       (spec.sandbox ?? null) === null && opts.allowUnsandboxed !== true
         ? refusedSession(UNSANDBOXED_REFUSAL)
-        : startSession(spec, opts, runQuery),
+        : startWithRetry(spec, opts, runQuery),
     probeAccount: (probe) => probeAccount(probe, opts, runQuery),
     complete: (ask) => complete(ask, opts, runQuery),
   };
