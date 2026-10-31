@@ -2,7 +2,7 @@
 
 - **Date:** 2026-10-31
 - **Amends:** factory spec §7 for routing only (a model may now skip a review step); permissions stay as
-  `decisions/2026-10-31-lanes-run-in-auto-mode-inside-the-sandbox.md` says.
+  the decision that lanes run in auto mode inside the sandbox (2026-10-31) says.
 
 ## Decision
 

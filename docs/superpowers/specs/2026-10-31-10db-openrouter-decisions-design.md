@@ -24,7 +24,7 @@ decision can change without code.
 4. The first decision: **does this change need its review step?** It acts from day one.
 
 **Non-goals:** permissions (lanes use Claude Code's auto mode for those,
-`decisions/2026-10-31-lanes-run-in-auto-mode-inside-the-sandbox.md`); the decisions that come next (rerun or fix a
+the decision that lanes run in auto mode inside the sandbox, 2026-10-31); the decisions that come next (rerun or fix a
 red CI check, how much to check on the Mac, a task's steps, model and effort, areas from a task's words), which plug
 into the same judge later; running lanes on OpenRouter models.
 
