@@ -2063,7 +2063,9 @@ describe('permission broker in a sandboxed lane', () => {
         DEFAULT_HAZARDS,
         createGit(),
       )(request('SandboxNetworkAccess', { host: 'exfil.example.net' }));
-      const cards = openCards().filter((c) => c.title.includes('exfil.example.net'));
+      const cards = openCards().filter(
+        (c) => c.title === 'Allow network access to exfil.example.net?',
+      );
       expect(cards.map((c) => c.recommendation)).toEqual([null]);
     } finally {
       repo.cleanup();
@@ -2112,7 +2114,9 @@ describe('permission broker in a sandboxed lane', () => {
         DEFAULT_HAZARDS,
         git,
       )(request('SandboxNetworkAccess', { host: 'index.crates.io' }));
-      const crates = openCards().filter((c) => c.title.includes('index.crates.io'));
+      const crates = openCards().filter(
+        (c) => c.title === 'Allow network access to index.crates.io?',
+      );
       expect(crates.map((c) => c.recommendation)).toEqual(['allow_project']);
       expect(listNetworkHosts(state.db, project.id)).toEqual([]);
     } finally {
