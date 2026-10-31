@@ -5320,6 +5320,55 @@ describe('the review size decision', () => {
     expect(outcomes()).toEqual([]);
   });
 
+  it.each([
+    ['a cancel', 'CANCELLED'],
+    ['a shutdown', 'VERIFYING'],
+  ] as const)(
+    'cuts the judge call short on %s: the review neither runs nor is skipped',
+    async (_name, finalState) => {
+      let reached: () => void = () => undefined;
+      const inCall = new Promise<void>((resolve) => {
+        reached = resolve;
+      });
+      const signals: AbortSignal[] = [];
+      // Like the real judge, it answers only when its signal aborts: no model is asked, no clock moves.
+      const judge: Judge = {
+        off: false,
+        choose: (req) =>
+          new Promise<JudgeAnswer>((resolve) => {
+            const signal = req.signal;
+            if (!signal) throw new Error('the runner passed no signal');
+            signals.push(signal);
+            reached();
+            signal.addEventListener('abort', () => {
+              resolve({
+                kind: 'fallback',
+                reason: 'error',
+                detail: 'aborted',
+                callId: mintId('JudgeCall'),
+              });
+            });
+          }),
+      };
+      engine = await createTestEngine(
+        { Alpha: [implement('op-size-0091'), [approve('op-size-0092'), turn]] },
+        {},
+        { judge },
+      );
+      const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+      engine.launch(workstream.id);
+      await inCall;
+      if (finalState === 'CANCELLED') await engine.runner.cancel(workstream.id);
+      else await engine.runner.stop(workstream.id, 'shutdown');
+      await engine.runner.idle();
+      expect(signals[0]?.aborted).toBe(true);
+      expect(ws(workstream.id).state).toBe(finalState);
+      // Only the implement session ran; the review was neither run nor dropped from the plan.
+      expect(engine.adapter.prompts).toHaveLength(1);
+      expect(ws(workstream.id).steps.map((x) => x.role)).toEqual(['implement', 'review']);
+    },
+  );
+
   const forcing: {
     name: string;
     riskTags?: ('security' | 'auth' | 'migration' | 'dependency')[];

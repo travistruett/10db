@@ -2160,16 +2160,27 @@ export function createRunner(opts: RunnerOptions): Runner {
       const step = currentStep(row);
       const move = moveAfter(row.steps, row.stepIndex);
       const planned = move.kind === 'advance' ? row.steps[move.to] : undefined;
-      // A review the judge skips leaves the plan, as a QA step of docs alone does.
-      const skipped =
-        move.kind === 'advance' && planned?.role === StepRole.Review
-          ? await reviewSkippedByJudge(id, row, planned, checkout, gateAbort.signal)
-          : null;
+      // A review the judge skips leaves the plan, as a QA step of docs alone does. A cancel or a
+      // shutdown cuts the call short through the same handle that stops a gate.
+      let skipped: string | null = null;
+      if (move.kind === 'advance' && planned?.role === StepRole.Review) {
+        const judgeAbort = new AbortController();
+        ctl.gateAbort = judgeAbort;
+        const already = stopRequested(ctl);
+        if (already === 'cancelled' || already === 'shutdown') judgeAbort.abort();
+        try {
+          skipped = await reviewSkippedByJudge(id, row, planned, checkout, judgeAbort.signal);
+        } finally {
+          ctl.gateAbort = null;
+        }
+      }
       // The judge's call took time; a cancel that landed meanwhile must not be overwritten.
       if (stopRequested(ctl) === 'cancelled') {
         cancelNow(id, ctl.fence);
         return;
       }
+      // Shutdown cut the call short: record nothing, and recovery runs the gate again.
+      if (stopRequested(ctl) === 'shutdown') return;
       const steps =
         skipped === null
           ? row.steps
