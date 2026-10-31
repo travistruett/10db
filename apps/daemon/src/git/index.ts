@@ -7,8 +7,6 @@ export {
   WorktreeNotOursError,
   type BranchMerge,
   type CheckoutPlace,
-  type ResolvedConflict,
-  type UnresolvedConflict,
   type Git,
   type SwitchBack,
 } from './git';
