@@ -28,15 +28,26 @@ import {
   listTasks,
   schema,
   searchDecisions,
+  seedProject,
   updateInboxItem,
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { createTempRepo, isolatedGitEnv, seedWorkstream } from '../../test/fixtures';
+import {
+  createTempRepo,
+  createTempRepoWithOrigin,
+  isolatedGitEnv,
+  seedWorkstream,
+} from '../../test/fixtures';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit, type Git } from '../git';
 import { silentLogger } from '../log';
-import { allowFoundHosts, listNetworkHosts, removeNetworkHost } from '../permissions';
+import {
+  allowFoundHosts,
+  foundHostFile,
+  listNetworkHosts,
+  removeNetworkHost,
+} from '../permissions';
 import { protectedReads, type FileAccessContext } from '../sandbox';
 import {
   createInboxService,
@@ -48,7 +59,7 @@ import {
 
 /** A git that reads no repository: a project with no reading gets none from it. */
 const NO_GIT = {
-  regularFilesAt: () => Promise.reject(new Error('no repository')),
+  folderAt: () => Promise.reject(new Error('no repository')),
   fileAt: () => Promise.resolve({ kind: 'missing' as const }),
 };
 
@@ -741,7 +752,7 @@ describe('permission broker in a sandboxed lane', () => {
     ws: ReturnType<typeof seedWorkstream>,
     sandbox = true,
     hazards: readonly HazardDef[] = DEFAULT_HAZARDS,
-    git: Pick<Git, 'regularFilesAt' | 'fileAt'> = NO_GIT,
+    git: Pick<Git, 'folderAt' | 'fileAt'> = NO_GIT,
   ) {
     return createPermissionBroker(
       { state, inbox, git, logger: silentLogger },
@@ -1409,7 +1420,9 @@ describe('permission broker in a sandboxed lane', () => {
       rawGit('commit', '-q', '-m', 'lock');
       // The lane's own uncommitted line must not become its card's reason.
       writeFileSync(join(repo.path, '.npmrc'), '@x:registry=https://exfil.example.net/\n');
-      const ws = seedWorkstream(base, { repoPath: repo.path });
+      // Under pull_request delivery the base branch moves only by merged pull requests.
+      const project = seedProject(base, { repoPath: repo.path, delivery: 'pull_request' });
+      const ws = seedWorkstream(base, { project });
       // No reading was ever written for this project, as for one added before 10db kept readings.
 
       await sandboxed(
@@ -1435,6 +1448,56 @@ describe('permission broker in a sandboxed lane', () => {
       expect(cards.map((c) => c.recommendation)).toEqual([null]);
     } finally {
       repo.cleanup();
+    }
+  });
+
+  it('under local delivery reads only origin’s base branch, never a lane’s commit on the local one', async () => {
+    const remote = createTempRepoWithOrigin();
+    const { repo } = remote;
+    try {
+      const rawGit = (...args: string[]) =>
+        execFileSync('git', ['-C', repo.path, ...args], { env: isolatedGitEnv(), stdio: 'pipe' });
+      mkdirSync(join(repo.path, 'apps/desktop/src-tauri'), { recursive: true });
+      writeFileSync(
+        join(repo.path, 'apps/desktop/src-tauri/Cargo.lock'),
+        'source = "registry+https://github.com/rust-lang/crates.io-index"\n',
+      );
+      rawGit('add', 'apps');
+      rawGit('commit', '-q', '-m', 'lock');
+      rawGit('push', '-q', 'origin', 'main');
+      const git = createGit();
+      // A local lane's commit tool commits on the checked-out branch: here, main itself.
+      writeFileSync(join(repo.path, '.npmrc'), '@x:registry=https://exfil.example.net/\n');
+      await git.commit({
+        repo: repo.path,
+        paths: ['.npmrc'],
+        message: 'registry',
+        opId: 'op-lane-npmrc',
+        branch: 'main',
+      });
+      const project = seedProject(base, { repoPath: repo.path, delivery: 'local' });
+      const ws = seedWorkstream(base, { project });
+
+      await sandboxed(
+        ws,
+        true,
+        DEFAULT_HAZARDS,
+        git,
+      )(request('SandboxNetworkAccess', { host: 'exfil.example.net' }));
+      expect(onlyOpenCard().recommendation).toBeNull();
+      expect(foundHostFile(state.db, project.id, 'exfil.example.net')).toBeNull();
+
+      await sandboxed(
+        ws,
+        true,
+        DEFAULT_HAZARDS,
+        git,
+      )(request('SandboxNetworkAccess', { host: 'index.crates.io' }));
+      const crates = openCards().filter((c) => c.title.includes('index.crates.io'));
+      expect(crates.map((c) => c.recommendation)).toEqual(['allow_project']);
+      expect(listNetworkHosts(state.db, project.id)).toEqual([]);
+    } finally {
+      remote.cleanup();
     }
   });
 

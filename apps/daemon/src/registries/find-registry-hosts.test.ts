@@ -457,6 +457,29 @@ describe('findRegistryHostsAt', () => {
     const repo = committed({});
     await expect(findRegistryHostsAt(git, repo, 'refs/heads/nope')).rejects.toThrow();
   });
+
+  it('lists each folder once, as the walk reaches it, never below three levels', async () => {
+    const repo = committed({
+      'a/b/c/Cargo.lock': 'source = "registry+https://github.com/rust-lang/crates.io-index"\n',
+      'a/b/c/d/e/Gemfile.lock': 'GEM\n  remote: https://rubygems.org/\n',
+      'node_modules/x/y/z.txt': 'z',
+    });
+    const listed: string[] = [];
+    const counting = {
+      fileAt: git.fileAt.bind(git),
+      folderAt: (r: string, rev: string, folder: string) => {
+        listed.push(folder);
+        return git.folderAt(r, rev, folder);
+      },
+    };
+
+    const found = await findRegistryHostsAt(counting, repo, 'refs/heads/main');
+
+    expect(found.map((f) => f.host)).toEqual(['index.crates.io', 'static.crates.io']);
+    expect(new Set(listed).size).toBe(listed.length);
+    expect(listed.filter((f) => !f.includes('.'))).toEqual(['', 'a', 'a/b', 'a/b/c']);
+    expect(listed.some((f) => f.startsWith('node_modules') || f.startsWith('a/b/c/d'))).toBe(false);
+  });
 });
 
 /** Every file findRegistryHosts reads in a folder: settings files, lockfiles and toolchain files. */

@@ -20,6 +20,7 @@ import {
   acquireLease,
   activeClaims,
   countLanes,
+  deleteAppSetting,
   getAccount,
   getProject,
   getTask,
@@ -55,7 +56,7 @@ import { createGit } from '../git';
 import { silentLogger } from '../log';
 import { createGateRunner, type GateRequest, type GateResult } from '../verify';
 import type { BaseUpdate, BaseUpdates, MigrationsBase, MigrationsBaseTake } from '../delivery';
-import { allowedToolsFor } from '../permissions';
+import { allowedToolsFor, listNetworkHosts } from '../permissions';
 import {
   createLaneSandbox,
   SandboxedMcpServer,
@@ -319,6 +320,53 @@ describe('runner', () => {
     expect(cards[0]?.targets).toEqual([]);
     const [gate] = listEvidence(engine.store.db, workstream.id);
     expect(gate?.summary).toContain('The gate was blocked from reaching index.crates.io');
+  });
+
+  it("names the file and recommends Allow on a blocked gate's card for a project added before readings", async () => {
+    const blocked: GateResult = {
+      exitCode: 101,
+      durationMs: 1,
+      tail: 'error: failed to download',
+      logPath: '/dev/null',
+      timedOut: false,
+      aborted: false,
+      blockedHosts: ['index.crates.io'],
+    };
+    engine = await createTestEngine(
+      { Alpha: [[turn]] },
+      { gateCommand: 'cargo test' },
+      { gate: { run: () => Promise.resolve(blocked) } },
+    );
+    // The default branch, as origin holds it, commits a Cargo.lock; no reading was ever kept.
+    const repoGit = (...args: string[]) =>
+      execFileSync('git', ['-C', engine.repoPath, ...args], {
+        env: isolatedGitEnv(),
+        stdio: 'pipe',
+      });
+    mkdirSync(join(engine.repoPath, 'apps/desktop/src-tauri'), { recursive: true });
+    writeFileSync(
+      join(engine.repoPath, 'apps/desktop/src-tauri/Cargo.lock'),
+      'source = "registry+https://github.com/rust-lang/crates.io-index"\n',
+    );
+    repoGit('add', 'apps');
+    repoGit('commit', '-q', '-m', 'lock');
+    repoGit('update-ref', 'refs/remotes/origin/main', 'HEAD');
+    engine.state.write((ctx) => {
+      deleteAppSetting(ctx, `network-hosts-found:${engine.project.id}`);
+    });
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+
+    const cards = listInbox(engine.store.db, { states: ['OPEN'] }).filter(
+      (c) => c.title === 'Allow network access to index.crates.io?',
+    );
+    expect(cards).toHaveLength(1);
+    expect(cards[0]?.body).toContain(
+      "The project's apps/desktop/src-tauri/Cargo.lock needs index.crates.io",
+    );
+    expect(cards[0]?.recommendation).toBe('Allow for the project');
+    expect(listNetworkHosts(engine.state.db, engine.project.id)).toEqual([]);
   });
 
   it("keeps a blocked host's card open when the lane whose gate raised it is cancelled, while another lane's gate needs the host", async () => {

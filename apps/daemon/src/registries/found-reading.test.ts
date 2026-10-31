@@ -4,7 +4,12 @@ import { dirname, join } from 'node:path';
 import { createTestStore, deleteAppSetting, listPermissionRules, seedProject } from '@10db/db';
 import type { Store } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createTempRepo, isolatedGitEnv, type TempDir } from '../../test/fixtures';
+import {
+  createTempRepo,
+  createTempRepoWithOrigin,
+  isolatedGitEnv,
+  type TempDir,
+} from '../../test/fixtures';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit } from '../git';
 import { createInboxService, raiseGateHostCards } from '../inbox';
@@ -54,8 +59,8 @@ function commit(name: string, text: string): void {
 }
 
 /** A project added before 10db kept a reading: its checkout is `repo`, and no reading was ever written. */
-function oldProject() {
-  const project = seedProject(store, { repoPath: repo.path });
+function oldProject(delivery: 'local' | 'pull_request' = 'pull_request') {
+  const project = seedProject(store, { repoPath: repo.path, delivery });
   state.write((ctx) => {
     deleteAppSetting(ctx, `network-hosts-found:${project.id}`);
   });
@@ -162,7 +167,11 @@ describe('taking a reading for a project added before 10db kept one', () => {
   });
 
   it('takes none, and says nothing, when the default branch can’t be read; a later call tries again', async () => {
-    const project = seedProject(store, { repoPath: repo.path, baseBranch: 'nope' });
+    const project = seedProject(store, {
+      repoPath: repo.path,
+      baseBranch: 'nope',
+      delivery: 'pull_request',
+    });
     state.write((ctx) => {
       deleteAppSetting(ctx, `network-hosts-found:${project.id}`);
     });
@@ -180,11 +189,89 @@ describe('taking a reading for a project added before 10db kept one', () => {
     ]);
   });
 
-  it('takes the reading for the same project once when asked twice at the same time', async () => {
+  it('keeps a reading made while it read, never replacing it', async () => {
     commit('Cargo.lock', CRATES);
     const project = oldProject();
-    await Promise.all([take(project.id), take(project.id)]);
-    expect(readFoundHosts(state.db, project.id)).toHaveLength(2);
+    const made = [{ host: 'rubygems.org', file: 'Gemfile.lock' }];
+    // Another caller (or createProject) keeps its reading while this one is still listing the branch.
+    const racing = {
+      fileAt: git.fileAt.bind(git),
+      folderAt: async (r: string, rev: string, folder: string) => {
+        const listing = await git.folderAt(r, rev, folder);
+        if (folder === '' && readFoundHosts(state.db, project.id).length === 0) {
+          state.write((ctx) => {
+            writeFoundHosts(ctx, project.id, made);
+          });
+        }
+        return listing;
+      },
+    };
+
+    await takeFoundHostsReading({ state, git: racing, logger: silentLogger }, project.id);
+
+    expect(readFoundHosts(state.db, project.id)).toEqual(made);
+  });
+});
+
+describe('under local delivery', () => {
+  let origin: ReturnType<typeof createTempRepoWithOrigin>;
+  beforeEach(() => {
+    repo.cleanup();
+    origin = createTempRepoWithOrigin();
+    repo = origin.repo;
+  });
+  afterEach(() => {
+    origin.origin.cleanup();
+  });
+
+  it('reads origin’s copy of the default branch', async () => {
+    commit('Cargo.lock', CRATES);
+    run('push', '-q', 'origin', 'main');
+    const project = oldProject('local');
+
+    await take(project.id);
+
+    expect(readFoundHosts(state.db, project.id).map((f) => f.host)).toEqual([
+      'index.crates.io',
+      'static.crates.io',
+    ]);
+  });
+
+  it('never reads the local default branch, which a lane’s commit tool can move', async () => {
+    commit('Cargo.lock', CRATES);
+    run('push', '-q', 'origin', 'main');
+    // The lane commits on main itself, as a local lane on the builder's checkout does.
+    write('.npmrc', '@x:registry=https://exfil.example.net/\n');
+    await git.commit({
+      repo: repo.path,
+      paths: ['.npmrc'],
+      message: 'registry',
+      opId: 'op-lane-npmrc',
+      branch: 'main',
+    });
+    const project = oldProject('local');
+
+    await take(project.id);
+
+    expect(foundHostFile(state.db, project.id, 'exfil.example.net')).toBeNull();
+    expect(readFoundHosts(state.db, project.id).map((f) => f.host)).toEqual([
+      'index.crates.io',
+      'static.crates.io',
+    ]);
+  });
+
+  it('takes no reading when origin has no copy of the default branch', async () => {
+    commit('Cargo.lock', CRATES);
+    run('update-ref', '-d', 'refs/remotes/origin/main');
+    const project = oldProject('local');
+
+    await take(project.id);
+
+    expect(readFoundHosts(state.db, project.id)).toEqual([]);
+    commit('Gemfile.lock', 'GEM\n  remote: https://rubygems.org/\n');
+    run('push', '-q', 'origin', 'main');
+    await take(project.id);
+    expect(readFoundHosts(state.db, project.id).map((f) => f.host)).toContain('rubygems.org');
   });
 });
 

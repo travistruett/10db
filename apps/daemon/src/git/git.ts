@@ -222,6 +222,12 @@ const REGULAR_FILE_MODES: readonly string[] = ['100644', '100755'];
 /** One `ls-tree --long -z` entry: mode, type, object, size (`-` for a tree), then the path. */
 const LS_TREE_ENTRY = /^(\d{6}) (\w+) ([0-9a-f]+) +(\S+)\t([\s\S]*)$/;
 
+/** What one folder of a commit holds directly: its regular files with their sizes, and its folders. */
+export interface FolderAt {
+  readonly files: readonly { readonly name: string; readonly bytes: number }[];
+  readonly folders: readonly string[];
+}
+
 /** Where a checkout's HEAD was: on `branch` at `sha`, or detached at `sha` when `branch` is null. */
 export interface CheckoutPlace {
   readonly branch: string | null;
@@ -410,11 +416,13 @@ export interface Git {
    */
   fileAt(repo: string, rev: string, path: string, maxBytes: number): Promise<FileAt>;
   /**
-   * The regular files (never a link, a submodule or a directory) commit `rev` holds, at any depth, with
-   * each one's size in bytes and sorted by path, read from the object store as `fileAt` reads: nothing
-   * from the worktree. A `rev` git can't resolve is a `GitError`.
+   * What one folder of commit `rev` holds directly (`folder` a path from the root, `''` for the root):
+   * its regular files, with each one's size in bytes, and its folders (never a link or a submodule),
+   * each sorted by name. Read from the object store as `fileAt` reads, one folder and nothing below it,
+   * so a caller walking a big tree pays only for the folders it visits. A folder that is not there
+   * holds nothing; a `rev` git can't resolve is a `GitError`.
    */
-  regularFilesAt(repo: string, rev: string): Promise<{ path: string; bytes: number }[]>;
+  folderAt(repo: string, rev: string, folder: string): Promise<FolderAt>;
   /**
    * What the repository at or above `path` holds, read as git finds it with no pin: nothing is
    * written, nothing is pinned and no refusal reaches `onRefused`, so a folder the builder only
@@ -2329,20 +2337,36 @@ export function createGit(opts: GitOptions = {}): Git {
       if (!Number.isSafeInteger(bytes) || bytes > maxBytes) return { kind: 'too_large', bytes };
       return { kind: 'file', text: await git(c, ['cat-file', 'blob', oid]) };
     },
-    async regularFilesAt(repo, rev) {
+    async folderAt(repo, rev, folder) {
       const c = await pinned(repo);
-      const out = await git(c, ['ls-tree', '-r', '-z', '--long', '--full-tree', rev]);
-      const files: { path: string; bytes: number }[] = [];
+      const prefix = folder === '' ? '' : `${folder}/`;
+      // Without -r, git lists only the entries directly inside the folder the trailing slash names.
+      const out = await git(
+        c,
+        ['ls-tree', '-z', '--long', '--full-tree', rev, ...(prefix === '' ? [] : ['--', prefix])],
+        { env: { GIT_LITERAL_PATHSPECS: '1' } },
+      );
+      const files: { name: string; bytes: number }[] = [];
+      const folders: string[] = [];
       for (const record of out.split('\0')) {
         const entry = LS_TREE_ENTRY.exec(record);
         if (!entry) continue;
         const [, mode = '', type, , size = '', path = ''] = entry;
+        if (!path.startsWith(prefix)) continue;
+        const name = path.slice(prefix.length);
+        if (name === '' || name.includes('/')) continue;
         const bytes = Number(size);
         if (type === 'blob' && REGULAR_FILE_MODES.includes(mode) && Number.isSafeInteger(bytes)) {
-          files.push({ path, bytes });
+          files.push({ name, bytes });
+        } else if (type === 'tree') {
+          folders.push(name);
         }
       }
-      return files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+      const byName = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+      return {
+        files: files.sort((a, b) => byName(a.name, b.name)),
+        folders: folders.sort(byName),
+      };
     },
     async inspect(path) {
       const site = observed(path);

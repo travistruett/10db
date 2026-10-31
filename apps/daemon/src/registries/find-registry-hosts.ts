@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import type { Git } from '../git';
+import type { FolderAt, Git } from '../git';
 import { checkConcreteHost } from '../permissions';
 import {
   CONFIG_FORMATS,
@@ -133,31 +133,34 @@ export function findRegistryHosts(root: string): Promise<FoundHost[]> {
  * A `rev` git can't resolve is an error, not an empty answer.
  */
 export async function findRegistryHostsAt(
-  git: Pick<Git, 'regularFilesAt' | 'fileAt'>,
+  git: Pick<Git, 'folderAt' | 'fileAt'>,
   repo: string,
   rev: string,
 ): Promise<FoundHost[]> {
-  const sizes = new Map<string, number>();
-  const folders = new Map<string, Set<string>>();
-  for (const { path, bytes } of await git.regularFilesAt(repo, rev)) {
-    sizes.set(path, bytes);
-    // Every folder on the way to a regular file is a real folder: a link or a submodule holds none.
-    const parts = path.split('/');
-    for (let i = 0; i < parts.length - 1; i += 1) {
-      const parent = parts.slice(0, i).join('/');
-      const children = folders.get(parent) ?? new Set<string>();
-      children.add(parts[i] ?? '');
-      folders.set(parent, children);
+  // Each folder is listed once, when the walk first reaches it, so the work stays within the walk's
+  // depth and folder limits however big the tree is.
+  const listings = new Map<string, Promise<FolderAt>>();
+  const folderAt = (folder: string): Promise<FolderAt> => {
+    let listing = listings.get(folder);
+    if (listing === undefined) {
+      listing = git.folderAt(repo, rev, folder);
+      listings.set(folder, listing);
     }
-  }
+    return listing;
+  };
+  // The root is listed first so a `rev` git can't resolve fails the reading, not each file.
+  await folderAt('');
   return readHosts({
     async read(file) {
-      const bytes = sizes.get(file);
-      if (bytes === undefined || bytes > MAX_FILE_BYTES) return null;
+      const slash = file.lastIndexOf('/');
+      const folder = slash < 0 ? '' : file.slice(0, slash);
+      const name = file.slice(slash + 1);
+      const entry = (await folderAt(folder)).files.find((f) => f.name === name);
+      if (entry === undefined || entry.bytes > MAX_FILE_BYTES) return null;
       const found = await git.fileAt(repo, rev, file, MAX_FILE_BYTES);
       return found.kind === 'file' ? found.text : null;
     },
-    subfolders: (folder) => Promise.resolve([...(folders.get(folder) ?? [])].sort()),
+    subfolders: async (folder) => [...(await folderAt(folder)).folders],
   });
 }
 

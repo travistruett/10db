@@ -66,7 +66,7 @@ export async function raiseInstallHostCards(
   deps: {
     readonly state: StateStore;
     readonly inbox: InboxService;
-    readonly git: Pick<Git, 'regularFilesAt' | 'fileAt'>;
+    readonly git: Pick<Git, 'folderAt' | 'fileAt'>;
     readonly logger: Logger;
   },
   projectId: ProjectId,

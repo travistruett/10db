@@ -237,27 +237,50 @@ describe('history queries', () => {
   });
 });
 
-describe('regularFilesAt', () => {
-  it('lists the regular files of a commit at any depth, not links, and not the worktree', async () => {
+describe('folderAt', () => {
+  beforeEach(() => {
     mkdirSync(join(repo.path, 'a/b'), { recursive: true });
+    mkdirSync(join(repo.path, 'a*'));
     write('a/b/x.lock', 'x');
+    write('a/y.lock', 'yy');
+    write('a*/z.lock', 'z');
     write('top.txt', 'top');
+    symlinkSync('a', join(repo.path, 'linked'));
     symlinkSync('top.txt', join(repo.path, 'link.txt'));
     rawGit('add', '--all');
     rawGit('commit', '-q', '-m', 'files');
     write('untracked.txt', 'not committed');
+  });
 
-    const files = await git.regularFilesAt(repo.path, 'refs/heads/main');
+  it('lists only what the root holds directly: regular files and folders, not links or the worktree', async () => {
+    expect(await git.folderAt(repo.path, 'refs/heads/main', '')).toEqual({
+      files: [
+        { name: 'README.md', bytes: 10 },
+        { name: 'top.txt', bytes: 3 },
+      ],
+      folders: ['a', 'a*'],
+    });
+  });
 
-    expect(files).toEqual([
-      { path: 'README.md', bytes: 10 },
-      { path: 'a/b/x.lock', bytes: 1 },
-      { path: 'top.txt', bytes: 3 },
-    ]);
+  it('lists one folder, nothing below it, and reads a folder name literally', async () => {
+    expect(await git.folderAt(repo.path, 'refs/heads/main', 'a')).toEqual({
+      files: [{ name: 'y.lock', bytes: 2 }],
+      folders: ['b'],
+    });
+    expect(await git.folderAt(repo.path, 'refs/heads/main', 'a*')).toEqual({
+      files: [{ name: 'z.lock', bytes: 1 }],
+      folders: [],
+    });
+  });
+
+  it('holds nothing for a folder that is not there or is a link', async () => {
+    const empty = { files: [], folders: [] };
+    expect(await git.folderAt(repo.path, 'refs/heads/main', 'nope')).toEqual(empty);
+    expect(await git.folderAt(repo.path, 'refs/heads/main', 'linked')).toEqual(empty);
   });
 
   it('rejects a branch that is not there', async () => {
-    await expect(git.regularFilesAt(repo.path, 'refs/heads/nope')).rejects.toThrow();
+    await expect(git.folderAt(repo.path, 'refs/heads/nope', '')).rejects.toThrow();
   });
 });
 
