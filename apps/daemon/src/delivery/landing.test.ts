@@ -1,8 +1,10 @@
-import { ConflictError, type BatchDto, type TaskDto } from '@10db/contracts';
+import { BatchDto, ConflictError, NOTICE_BODY_MAX, type TaskDto } from '@10db/contracts';
 import { getBatch, listBatches, listWorkstreams } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { GhError } from '../github';
+import { autoMergeOffKey, autoMergeRefusedKey } from './cards';
+import { raise } from './context';
 
 let h: DeliveryHarness;
 afterEach(() => {
@@ -121,21 +123,23 @@ describe('a pull request that lands in another branch', () => {
 });
 
 describe('when the repository does not allow auto-merge', () => {
-  it('says so once in a card and leaves the pull request for the builder', async () => {
+  it("says so on the batch's tasks, with no card, and leaves the pull request for the builder", async () => {
     h = createDeliveryHarness();
     h.gh.autoMergeAllowed = false;
     const first = await ship(await start('One', h.addTask('Alpha')));
     expect(first.state).toBe('SHIPPED');
     expect(first.prUrl).not.toBeNull();
     expect(autoMergeCalls()).toEqual([]);
-    const card = h.only(h.cards());
-    expect(card.title).toBe("This repository doesn't allow auto-merge");
-    expect(card.body).toContain(first.prUrl ?? '');
-    expect(card.body).toContain('Allow auto-merge');
+    expect(h.cards()).toEqual([]);
+    const notice = h.only(first.notices);
+    expect(notice.line).toContain("acme/widgets doesn't allow auto-merge");
+    expect(notice.body).toContain(first.prUrl ?? '');
+    expect(notice.body).toContain('Allow auto-merge');
 
-    // A second pull request in the same project raises no second card.
-    await ship(await start('Two', h.addTask('Beta')));
-    expect(h.cards().map((c) => c.title)).toEqual(["This repository doesn't allow auto-merge"]);
+    // A second pull request in the same project says the same on its own tasks, and still no card.
+    const second = await ship(await start('Two', h.addTask('Beta')));
+    expect(h.only(second.notices).body).toContain(second.prUrl ?? '');
+    expect(h.cards()).toEqual([]);
     expect(autoMergeCalls()).toEqual([]);
   });
 
@@ -148,7 +152,7 @@ describe('when the repository does not allow auto-merge', () => {
 });
 
 describe('when GitHub refuses to turn auto-merge on', () => {
-  it('still ships, and tells the builder the pull request waits for them', async () => {
+  it("still ships, and tells the batch's tasks the pull request waits for the builder", async () => {
     h = createDeliveryHarness();
     h.gh.failNext.set(
       'prAutoMerge',
@@ -156,11 +160,61 @@ describe('when GitHub refuses to turn auto-merge on', () => {
     );
     const shipped = await ship(await start('One', h.addTask('Alpha')));
     expect(shipped.state).toBe('SHIPPED');
-    const card = h.only(h.cards());
-    expect(card.title).toContain('not set to merge by itself');
-    expect(card.body).toContain(shipped.prUrl ?? '');
-    expect(card.body).toContain('draft status');
+    expect(h.cards()).toEqual([]);
+    const notice = h.only(shipped.notices);
+    expect(notice.line).toContain('not set to merge by itself');
+    expect(notice.body).toContain(shipped.prUrl ?? '');
+    expect(notice.body).toContain('draft status');
     expect(h.gh.calls.some((c) => c.method === 'prMerge')).toBe(false);
+  });
+
+  it('closes the auto-merge cards an earlier build raised once a pull request is set to merge by itself', async () => {
+    h = createDeliveryHarness();
+    const batch = await start('One', h.addTask('Alpha'));
+    raise(h.inbox, h.project.id, {
+      title: "This repository doesn't allow auto-merge",
+      body: 'x',
+      foldKey: autoMergeOffKey(h.project.id),
+    });
+    raise(h.inbox, h.project.id, {
+      title: 'Pull request opened but not set to merge by itself',
+      body: 'x',
+      foldKey: autoMergeRefusedKey(batch.id),
+    });
+    expect(h.cards()).toHaveLength(2);
+    await ship(batch);
+    expect(h.gh.autoMerged).toHaveLength(1);
+    expect(h.cards()).toEqual([]);
+  });
+
+  it('closes the refusal card an earlier build raised when the refusal shows as a notice', async () => {
+    h = createDeliveryHarness();
+    const batch = await start('One', h.addTask('Alpha'));
+    raise(h.inbox, h.project.id, {
+      title: 'Pull request opened but not set to merge by itself',
+      body: 'x',
+      foldKey: autoMergeRefusedKey(batch.id),
+    });
+    h.gh.failNext.set('prAutoMerge', new GhError('failed', 'gh pr merge failed (exit 1): draft'));
+    const shipped = await ship(batch);
+    expect(shipped.notices).toHaveLength(1);
+    expect(h.cards()).toEqual([]);
+  });
+
+  it('keeps the link and a board that loads when gh says far more than a notice holds', async () => {
+    h = createDeliveryHarness();
+    const graphql = `GraphQL: ${'Base branch was modified. Review and try the merge again. '.repeat(400)}`;
+    h.gh.failNext.set(
+      'prAutoMerge',
+      new GhError('failed', `gh pr merge failed (exit 1): ${graphql}`),
+    );
+    const shipped = await ship(await start('One', h.addTask('Alpha')));
+    expect(() => BatchDto.parse(shipped)).not.toThrow();
+    const notice = h.only(shipped.notices);
+    expect(notice.body.length).toBeLessThanOrEqual(NOTICE_BODY_MAX);
+    expect(notice.body).toContain('Base branch was modified');
+    expect(notice.body).toContain('…');
+    expect(notice.body).toContain(shipped.prUrl ?? 'no pull request');
   });
 });
 
@@ -177,7 +231,7 @@ describe('when the base branch has no required checks', () => {
     expect(read?.state).toBe('MERGED');
   });
 
-  it('tells the builder why, with the link, when the immediate merge fails', async () => {
+  it("tells the batch's tasks why, with the link, when the immediate merge fails", async () => {
     h = createDeliveryHarness();
     h.gh.noRequiredChecks = true;
     h.gh.failNext.set(
@@ -187,10 +241,11 @@ describe('when the base branch has no required checks', () => {
     const shipped = await ship(await start('One', h.addTask('Alpha')));
     expect(shipped.state).toBe('SHIPPED');
     expect(h.gh.merged).toEqual([]);
-    const card = h.only(h.cards());
-    expect(card.title).toContain('not merged');
-    expect(card.body).toContain('merge conflict');
-    expect(card.body).toContain(shipped.prUrl ?? '');
+    expect(h.cards()).toEqual([]);
+    const notice = h.only(shipped.notices);
+    expect(notice.line).toContain('GitHub refused to merge it');
+    expect(notice.body).toContain('merge conflict');
+    expect(notice.body).toContain(shipped.prUrl ?? '');
   });
 
   it('never merges a pull request held for the builder', async () => {

@@ -6,6 +6,7 @@ export {
   MergeBlocked,
   parseJobLog,
   parseRequiredChecks,
+  PrMergeable,
   PrState,
   createSystemGhExec,
   summariseChecks,

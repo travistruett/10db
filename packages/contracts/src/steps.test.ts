@@ -55,8 +55,31 @@ describe('WorkstreamStep', () => {
       ok: false,
     },
     { name: 'a negative attempt count', step: { ...base, attempts: -1 }, ok: false },
+    {
+      name: 'a step that shipped at the retry limit and names its follow-up task',
+      step: {
+        ...base,
+        shippedAtLimit: { followUpTaskId: mintId('Task'), followUpTitle: 'Resolve the findings' },
+      },
+      ok: true,
+    },
+    {
+      name: 'a limit shipment that names no follow-up task',
+      step: { ...base, shippedAtLimit: { followUpTitle: 'Resolve the findings' } },
+      ok: false,
+    },
   ])('$name', ({ step, ok }) => {
     expect(WorkstreamStep.safeParse(step).success).toBe(ok);
+  });
+
+  it('keeps the limit shipment when it parses', () => {
+    const shippedAtLimit = {
+      followUpTaskId: mintId('Task'),
+      followUpTitle: 'Resolve the findings',
+    };
+    expect(WorkstreamStep.parse({ ...base, shippedAtLimit }).shippedAtLimit).toEqual(
+      shippedAtLimit,
+    );
   });
 });
 

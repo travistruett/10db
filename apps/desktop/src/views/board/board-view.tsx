@@ -17,7 +17,7 @@ import {
 import { Alert, Button, Group, Loader, Menu, ScrollArea, Stack, Text } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { IconColumns, IconPlayerPlay, IconPlus } from '@tabler/icons-react';
-import { useNavigate } from '@tanstack/react-router';
+import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useState } from 'react';
 import {
   useAbandonBatch,
@@ -154,6 +154,8 @@ interface BoardColumnsProps {
   readonly started: ReadonlyMap<TaskId, string>;
   /** Opens the New Task form from the foot of Ready. */
   readonly onAddTask: () => void;
+  /** The task whose drawer is open when the board appears: the one a `?task=` link names. */
+  readonly initialOpenId: TaskId | null;
 }
 
 /** The columns and their cards, with drag and drop; split out so the actions hook gets a project. */
@@ -167,6 +169,7 @@ function BoardColumns({
   peers,
   started,
   onAddTask,
+  initialOpenId,
 }: BoardColumnsProps) {
   const actions = useBoardActions(projectId);
   const retry = useRetryWorkstream();
@@ -178,7 +181,7 @@ function BoardColumns({
     project.gateCommand === null ? null : (project.changedCheckCommand ?? project.gateCommand);
   const [showAllDone, setShowAllDone] = useState(false);
   // The task whose details are open, by ID, so the drawer follows the task as the board refetches.
-  const [openId, setOpenId] = useState<TaskId | null>(null);
+  const [openId, setOpenId] = useState<TaskId | null>(initialOpenId);
   const openTask = layout.flatMap((c) => c.tasks).find((t) => t.id === openId);
   const openWorkstream = openTask?.workstreamId
     ? workstreamById.get(openTask.workstreamId)
@@ -452,6 +455,7 @@ export function BoardView() {
   const workstreams = useWorkstreams({ active: false });
   const batches = useBatches(project?.id ?? null);
   const navigate = useNavigate();
+  const { task } = useSearch({ from: '/board' });
   const [taskOpen, taskModal] = useDisclosure(false);
   const [taskStatus, setTaskStatus] = useState<{ pending: boolean; error: string | null }>({
     pending: false,
@@ -574,6 +578,7 @@ export function BoardView() {
           peers={peers}
           started={started}
           onAddTask={taskModal.open}
+          initialOpenId={task ?? null}
         />
       ) : null}
 

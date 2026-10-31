@@ -174,6 +174,7 @@ describe('Gh.prStatus', () => {
         url: INPUT.ref,
         state: 'OPEN',
         headRefOid: HEAD,
+        mergeable: 'CONFLICTING',
         statusCheckRollup: [
           {
             __typename: 'CheckRun',
@@ -193,6 +194,7 @@ describe('Gh.prStatus', () => {
       state: 'OPEN',
       headSha: HEAD,
       mergeBlocked: null,
+      mergeable: 'CONFLICTING',
       checks: 'failing',
       failingChecks: [{ name: 'build', url: 'https://github.com/acme/widgets/actions/runs/1' }],
     });
@@ -203,8 +205,23 @@ describe('Gh.prStatus', () => {
       '-R',
       'acme/widgets',
       '--json',
-      'url,state,statusCheckRollup,headRefOid,mergeStateStatus',
+      'url,state,statusCheckRollup,headRefOid,mergeStateStatus,mergeable',
     ]);
+  });
+
+  it('reads whether the pull request merges cleanly, and unknown for an answer it does not know', async () => {
+    const read = async (mergeable: unknown) =>
+      (
+        await view({
+          exitCode: 0,
+          stdout: JSON.stringify({ url: INPUT.ref, state: 'OPEN', mergeable }),
+        }).gh.prStatus(INPUT, CALL)
+      )?.mergeable;
+    expect(await read('MERGEABLE')).toBe('MERGEABLE');
+    expect(await read('CONFLICTING')).toBe('CONFLICTING');
+    expect(await read('UNKNOWN')).toBe('UNKNOWN');
+    expect(await read('SOMETHING_NEW')).toBe('UNKNOWN');
+    expect(await read(undefined)).toBe('UNKNOWN');
   });
 
   it("reads a merged pull request's head commit, and none when gh gives none", async () => {
@@ -369,6 +386,7 @@ describe('Gh.prStatus', () => {
         state: 'OPEN',
         headSha: null,
         mergeBlocked: null,
+        mergeable: 'UNKNOWN',
         checks,
         failingChecks: failing,
       });

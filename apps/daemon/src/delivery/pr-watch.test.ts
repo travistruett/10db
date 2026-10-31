@@ -5,6 +5,7 @@ import {
   listEventsAfter,
   listWorkstreams,
   seedProject,
+  setBatchNotice,
   transitionBatch,
 } from '@10db/db';
 import type { BatchId, ProjectId } from '@10db/contracts';
@@ -14,6 +15,7 @@ import { waitFor } from '../../test/fixtures';
 import { ManualClock } from '../clock';
 import { GhError, UNREADABLE_CHECK, type CheckRollupItem, type Gh } from '../github';
 import { createPrWatch, subscribePrWatch, type PrWatch } from './index';
+import { baseNotices } from './notices';
 
 const INTERVAL = 120_000;
 
@@ -79,6 +81,15 @@ const prEvents = (id: BatchId) =>
       e.entityId === id &&
       JSON.stringify(e.data) === JSON.stringify({ changed: ['pr'] }),
   );
+
+const notices = (id: BatchId) => getBatch(h.store.db, id).notices.map((n) => n.key);
+const noticeEvents = (id: BatchId) =>
+  listEventsAfter(h.store.db, 0, 10_000).filter(
+    (e) =>
+      e.type === 'batch.updated' &&
+      e.entityId === id &&
+      JSON.stringify(e.data) === JSON.stringify({ changed: ['notices'] }),
+  ).length;
 
 const polls = () => h.gh.calls.filter((c) => c.method === 'prStatus').length;
 /** How many times gh was asked for this pull request's status. */
@@ -302,6 +313,49 @@ describe('the pull request watch', () => {
     await round(w, INTERVAL * 4);
     expect(polls()).toBe(before);
     expect(h.cards()).toHaveLength(1);
+  });
+
+  it('clears the conflict notice once GitHub says the pull request merges cleanly, with no card', async () => {
+    setup();
+    const { id, prUrl } = shipped(h.project.id, 'Alpha');
+    h.state.write((w) => {
+      setBatchNotice(w, id, baseNotices.shippedConflict(getBatch(w.tx, id)));
+    });
+    h.gh.setMergeable(prUrl, 'CONFLICTING');
+    const w = watcher();
+    w.start();
+    await w.idle();
+    expect(notices(id)).toEqual(['base-conflict']);
+
+    // GitHub is still working it out after Update branch: the notice stays.
+    h.gh.setMergeable(prUrl, 'UNKNOWN');
+    await round(w);
+    expect(notices(id)).toEqual(['base-conflict']);
+
+    h.gh.setMergeable(prUrl, 'MERGEABLE');
+    await round(w);
+    expect(notices(id)).toEqual([]);
+    expect(h.cards()).toEqual([]);
+  });
+
+  it('shows a conflict that comes up after shipping on the tasks, once, and keeps a notice it already has', async () => {
+    setup();
+    const { id, prUrl } = shipped(h.project.id, 'Alpha');
+    const w = watcher();
+    w.start();
+    await w.idle();
+    expect(notices(id)).toEqual([]);
+
+    h.gh.setMergeable(prUrl, 'CONFLICTING');
+    await round(w);
+    expect(getBatch(h.store.db, id).notices).toEqual([
+      baseNotices.shippedConflict(getBatch(h.store.db, id)),
+    ]);
+    const written = noticeEvents(id);
+    await round(w);
+    await round(w);
+    expect(noticeEvents(id)).toBe(written);
+    expect(h.cards()).toEqual([]);
   });
 
   it('withdraws the checks card when the pull request merges', async () => {

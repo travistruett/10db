@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import {
   GhError,
+  PrMergeable,
   PrState,
   summariseChecks,
   type CheckRollupEntry,
@@ -67,6 +68,7 @@ export class FakeGh implements Gh {
       pr: { url: string; state: PrState };
       headSha: string | null;
       mergeBlocked: MergeBlocked | null;
+      mergeable: PrMergeable;
       body: string;
       create: PrCreateCall | null;
       rollup: readonly CheckRollupEntry[];
@@ -128,6 +130,7 @@ export class FakeGh implements Gh {
               ...found.pr,
               headSha: found.headSha,
               mergeBlocked: found.mergeBlocked,
+              mergeable: found.mergeable,
               ...summariseChecks(found.rollup),
             }
           : null;
@@ -234,6 +237,13 @@ export class FakeGh implements Gh {
     this.jobLogs.set(jobId, log);
   }
 
+  /** Whether GitHub says the PR merges cleanly from now on; a new PR does. */
+  setMergeable(url: string, mergeable: PrMergeable): void {
+    const found = this.byRef.get(url);
+    if (!found) throw new Error(`no PR ${url}`);
+    found.mergeable = mergeable;
+  }
+
   /** The checks the PR's rollup shows from now on; a new PR has none. */
   setChecks(url: string, rollup: readonly CheckRollupEntry[]): void {
     const found = this.byRef.get(url);
@@ -255,6 +265,7 @@ export class FakeGh implements Gh {
       pr: { url, state },
       headSha: null,
       mergeBlocked: null,
+      mergeable: PrMergeable.Mergeable,
       body,
       create,
       rollup: [],

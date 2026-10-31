@@ -1,3 +1,4 @@
+import { TaskId } from '@10db/contracts';
 import {
   createRootRoute,
   createRoute,
@@ -70,6 +71,11 @@ const inboxRoute = createRoute({
 const boardRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/board',
+  // `task` opens that task's drawer, so a link from elsewhere (a recent decision) lands on the task.
+  validateSearch: (search: Record<string, unknown>): { task?: TaskId } => {
+    const task = TaskId.safeParse(search['task']);
+    return task.success ? { task: task.data } : {};
+  },
   component: BoardPage,
 });
 const tasksRoute = createRoute({
