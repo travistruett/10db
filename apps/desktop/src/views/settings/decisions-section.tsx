@@ -216,8 +216,10 @@ function RecentCall({ call }: { readonly call: JudgeCallDto }) {
         <Group gap="xs">
           <Text size="xs">{outcomeText(call)}</Text>
           {call.taskId ? (
-            <Text size="xs" component={Link} to="/board">
-              Open on the board
+            <Text size="xs" component="span">
+              <Link to="/board" search={{ task: call.taskId }}>
+                Open on the board
+              </Link>
             </Text>
           ) : null}
         </Group>

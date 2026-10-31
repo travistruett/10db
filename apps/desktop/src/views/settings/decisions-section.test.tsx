@@ -159,7 +159,7 @@ describe('Settings › Decisions', () => {
     expect(within(first).getByText('Skipped the review')).toBeTruthy();
     expect(
       within(first).getByRole('link', { name: 'Open on the board' }).getAttribute('href'),
-    ).toBe('/board');
+    ).toBe(`/board?task=${taskId}`);
     expect(within(second).getByText('Timed out; the review ran')).toBeTruthy();
     expect(within(second).queryByRole('link')).toBeNull();
   });
