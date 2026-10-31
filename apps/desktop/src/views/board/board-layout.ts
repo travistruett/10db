@@ -21,6 +21,7 @@ export const SYSTEM_COLUMNS: readonly BoardStatus[] = [
   BoardStatus.Backlog,
   BoardStatus.Ready,
   BoardStatus.InProgress,
+  BoardStatus.InReview,
   BoardStatus.Blocked,
   BoardStatus.Done,
 ];

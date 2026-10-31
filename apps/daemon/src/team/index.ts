@@ -9,6 +9,7 @@ export {
 } from './steps';
 export {
   advanceSteps,
+  countSendBack,
   failStep,
   moveAfter,
   sendBackSteps,

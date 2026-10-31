@@ -1,4 +1,4 @@
-.PHONY: setup gate check rust-check deny github-settings live-acceptance install-app rollback-app
+.PHONY: setup gate check check-changed rust-check deny github-settings live-acceptance install-app rollback-app
 
 TAURI_DIR := apps/desktop/src-tauri
 # install-app takes REF from the make command line only; a REF exported by the shell is ignored.
@@ -15,6 +15,10 @@ gate:
 ## check: fast focused check on changed files.
 check:
 	@bash scripts/check.sh
+
+## check-changed: format, lint, typecheck, tests and drift of the packages the diff touches and their dependents; 10db runs it after each implement step. The full gate still runs before the push.
+check-changed:
+	@node scripts/check-changed.mjs
 
 ## rust-check: fmt, clippy (pedantic, warnings are errors) and tests for the Tauri shell.
 rust-check:

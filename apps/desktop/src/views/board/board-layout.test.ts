@@ -14,6 +14,7 @@ describe('boardLayout', () => {
       'Backlog',
       'Ready',
       'In progress',
+      'In review',
       'Blocked',
       'Done',
     ]);
@@ -40,6 +41,14 @@ describe('boardLayout', () => {
         taskDto({ title: 'orphan', boardStatus: 'backlog', boardColumnId: boardColumnDto().id }),
       ],
       expected: { Backlog: ['orphan'], Icebox: [] },
+    },
+    {
+      name: 'a task whose pull request is open in In review, in board order',
+      tasks: [
+        taskDto({ title: 'r2', boardStatus: 'in_review', status: 'done', boardOrder: 2 }),
+        taskDto({ title: 'r1', boardStatus: 'in_review', status: 'done', boardOrder: 1 }),
+      ],
+      expected: { 'In review': ['r1', 'r2'], Done: [] },
     },
     {
       name: 'done tasks most recently finished first',

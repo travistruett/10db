@@ -136,6 +136,24 @@ describe('mergeIntoBranch', () => {
         resolve: { generated: GENERATED },
       });
 
+    /** A drizzle journal holding `tags`, numbered in order as drizzle-kit writes it. */
+    const journal = (...tags: string[]): string =>
+      `${JSON.stringify(
+        {
+          version: '7',
+          dialect: 'sqlite',
+          entries: tags.map((tag, idx) => ({
+            idx,
+            version: '6',
+            when: idx,
+            tag,
+            breakpoints: true,
+          })),
+        },
+        null,
+        2,
+      )}\n`;
+
     /** Puts `files` in the history both branches share. */
     function seed(files: Record<string, string>): void {
       rawGit('switch', '-q', 'main');
@@ -196,6 +214,15 @@ describe('mergeIntoBranch', () => {
         theirs: { 'package.json': '{\n  "a": 1,\n  "c": 3\n  "z": 9\n}\n' },
         path: 'package.json',
         reason: 'the merged file is not valid JSON',
+      },
+      {
+        // Each side only appended an entry, so a line merge would give two migrations one number.
+        name: 'both sides added a migration to a drizzle journal',
+        seeded: { 'drizzle/meta/_journal.json': journal('0000_init') },
+        ours: { 'drizzle/meta/_journal.json': journal('0000_init', '0001_ours') },
+        theirs: { 'drizzle/meta/_journal.json': journal('0000_init', '0001_theirs') },
+        path: 'drizzle/meta/_journal.json',
+        reason: "drizzle numbers its migrations in order, so its journal isn't merged by line",
       },
     ])('leaves a conflict where $name, and writes nothing', async (c) => {
       if (Object.keys(c.seeded).length > 0) seed(c.seeded);

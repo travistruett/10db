@@ -1,8 +1,10 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import type { BatchDto, PermissionRuleDto, ProjectDto } from '@10db/contracts';
+import type { BatchDto, PermissionRuleDto, ProjectDto, ProjectId } from '@10db/contracts';
 import type { Clock } from '../clock';
-import type { GateRunner } from '../verify';
+import type { StateStore } from '../events';
+import { raiseGateHostCards, type InboxService } from '../inbox';
+import { BlockedRun, type GateRunner } from '../verify';
 
 /** The lockfile that says a project's packages are pnpm's. */
 export const PNPM_LOCKFILE = 'pnpm-lock.yaml';
@@ -47,9 +49,28 @@ export type DependencyRefresh =
       /** The end of the install's output. */
       readonly tail: string;
       readonly logPath: string;
+      /** The hosts the sandbox refused the install, lower case, each once: each gets a card. */
+      readonly blockedHosts: readonly string[];
     }
   /** Shutdown stopped the install. */
   | { readonly kind: 'aborted' };
+
+/**
+ * Asks the builder about each host the sandbox refused a failed install: one card per host for the
+ * project, naming the install, which folds into a blocked gate's card for the same host.
+ */
+export function raiseInstallHostCards(
+  deps: { readonly state: StateStore; readonly inbox: InboxService },
+  projectId: ProjectId,
+  failure: Extract<DependencyRefresh, { readonly kind: 'failed' }>,
+): void {
+  raiseGateHostCards(deps, {
+    projectId,
+    run: BlockedRun.Install,
+    command: INSTALL_SUMMARY,
+    hosts: failure.blockedHosts,
+  });
+}
 
 export interface WorktreeDependencies {
   refresh(input: {
@@ -107,7 +128,7 @@ export function createWorktreeDependencies(deps: WorktreeDependenciesDeps): Work
           "No trustworthy pnpm was found on the login shell's PATH: it must be a program outside the project's checkouts, not a script and not a version manager's shim.";
         mkdirSync(dirname(logPath), { recursive: true });
         writeFileSync(logPath, `${tail}\n`);
-        return { kind: 'failed', exitCode: 127, timedOut: false, tail, logPath };
+        return { kind: 'failed', exitCode: 127, timedOut: false, tail, logPath, blockedHosts: [] };
       }
       const result = await deps.gate.run({
         project: { repoPath: path, sandboxLoopback: project.sandboxLoopback },
@@ -128,6 +149,7 @@ export function createWorktreeDependencies(deps: WorktreeDependenciesDeps): Work
           timedOut: result.timedOut,
           tail: result.tail,
           logPath: result.logPath,
+          blockedHosts: result.blockedHosts,
         };
       return { kind: 'installed', logPath: result.logPath, durationMs: result.durationMs };
     },

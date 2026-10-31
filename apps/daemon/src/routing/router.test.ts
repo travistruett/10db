@@ -265,6 +265,8 @@ describe('escalateStep', () => {
       startedAt: null,
       sessionFloor: 0,
       result: null,
+      earlier: [],
+      sentBack: 0,
       ...extra,
     };
   };
@@ -382,6 +384,8 @@ describe('escalateStep without scores', () => {
       startedAt: null,
       sessionFloor: 0,
       result: null,
+      earlier: [],
+      sentBack: 0,
     };
   };
   const escalate = (from: string) =>
@@ -465,6 +469,8 @@ describe('escalateStep on a profile it cannot compare', () => {
       startedAt: null,
       sessionFloor: 0,
       result: null,
+      earlier: [],
+      sentBack: 0,
     };
     const result = escalateStep(step, {
       provider: 'claude',

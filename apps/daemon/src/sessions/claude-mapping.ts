@@ -5,12 +5,15 @@ import type {
   SDKMessage,
   SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
+import { MAX_STEP_SUMMARY } from '@10db/contracts';
 import type { GuardVerdict } from '../guard';
 import { SandboxedMcpServer } from '../sandbox';
-import type { SessionEvent, SessionMcpServer, ToolDecision } from './types';
+import type { SessionEvent, SessionMcpServer, ToolDecision, TurnResult } from './types';
 
 export const SUMMARY_CHARS = 200;
 const BRIEF_CHARS = 80;
+/** The most of a turn's last message a turn_complete event carries: what a step result may hold. */
+const TURN_TEXT_CHARS = MAX_STEP_SUMMARY;
 /** Unix seconds stay below this until the year 33658; milliseconds are already above it. */
 const MILLISECONDS_FLOOR = 1e12;
 
@@ -99,9 +102,20 @@ export function mapSdkMessage(
   }
   if (msg.type === 'result') {
     const usage = msg.usage;
+    const result: TurnResult =
+      msg.subtype === 'error_max_turns'
+        ? 'max_turns'
+        : msg.subtype !== 'success' || msg.is_error
+          ? 'error'
+          : 'success';
+    // What the model wrote last: a review that never calls complete_step may have put its findings here.
+    const text = msg.subtype === 'success' ? msg.result.trim().slice(0, TURN_TEXT_CHARS) : '';
     return [
       {
         type: 'turn_complete',
+        // Only a turn that didn't end normally says so; the others stay as they were.
+        ...(result === 'success' ? {} : { result }),
+        ...(text === '' ? {} : { text }),
         inputTokens: usage.input_tokens + usage.cache_creation_input_tokens,
         outputTokens: usage.output_tokens,
         cachedTokens: usage.cache_read_input_tokens,

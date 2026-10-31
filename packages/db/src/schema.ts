@@ -67,6 +67,7 @@ import type {
 import { USAGE_HANDOFF_AT } from '@10db/contracts';
 import { sql } from 'drizzle-orm';
 import {
+  customType,
   index,
   integer,
   primaryKey,
@@ -79,6 +80,20 @@ import type { Json } from './json';
 
 const createdAt = () => text('created_at').notNull();
 const updatedAt = () => text('updated_at').notNull();
+
+/**
+ * A workstream's step plan, as JSON text. A step stored before a field was added reads back with
+ * that field's default, the one the contract gives it: `earlier` [] and `sentBack` 0. Nothing else
+ * is checked here, so one odd row can't stop the board from loading.
+ */
+const workstreamSteps = customType<{ data: WorkstreamStep[]; driverData: string }>({
+  dataType: () => 'text',
+  toDriver: (steps) => JSON.stringify(steps),
+  fromDriver: (stored) =>
+    (JSON.parse(stored) as Partial<WorkstreamStep>[]).map(
+      (step) => ({ earlier: [], sentBack: 0, ...step }) as WorkstreamStep,
+    ),
+});
 
 /** App-wide settings keyed by name; values are JSON validated by their readers. */
 export const appSettings = sqliteTable('app_settings', {
@@ -125,6 +140,7 @@ export const projects = sqliteTable('projects', {
   name: text('name').notNull(),
   repoPath: text('repo_path').notNull().unique(),
   gateCommand: text('gate_command'),
+  changedCheckCommand: text('changed_check_command'),
   areas: text('areas', { mode: 'json' }).$type<AreaDef[]>().notNull(),
   hazards: text('hazards', { mode: 'json' }).$type<HazardDef[]>().notNull(),
   maxLanes: integer('max_lanes').notNull(),
@@ -164,13 +180,18 @@ export const projects = sqliteTable('projects', {
     .$type<string[]>()
     .notNull()
     .default(sql`'[]'`),
-  /** Where tasks work: the one checkout, or a git worktree per started task. */
+  /** Where a new task works unless it says otherwise; each task keeps its own (`tasks.workspace_mode`). */
   workspaceMode: text('workspace_mode').$type<WorkspaceMode>().notNull().default('shared'),
   /** Ignored directories of the main checkout a new worktree gets copies of. */
   worktreeSeed: text('worktree_seed', { mode: 'json' })
     .$type<string[]>()
     .notNull()
     .default(sql`'["node_modules"]'`),
+  /** Area and hazard names whose tasks are proposed a separate copy. */
+  isolate: text('isolate', { mode: 'json' })
+    .$type<string[]>()
+    .notNull()
+    .default(sql`'["migrations","deps"]'`),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
@@ -286,7 +307,13 @@ export const tasks = sqliteTable(
     boardColumnId: text('board_column_id')
       .$type<BoardColumnId>()
       .references(() => boardColumns.id),
-    workspaceMode: text('workspace_mode').$type<'shared'>().notNull(),
+    /**
+     * Where the task runs when next started: the project's checkout or a copy of its own. Read only
+     * while the task can be started; a finished task's batch says where it ran.
+     */
+    workspaceMode: text('workspace_mode').$type<WorkspaceMode>().notNull(),
+    /** Why the placement was proposed; null when it was chosen or took the project default. */
+    placementReason: text('placement_reason'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -355,8 +382,7 @@ export const workstreams = sqliteTable(
     recoveryAttempts: integer('recovery_attempts').notNull(),
     model: text('model').notNull(),
     effort: text('effort').$type<Effort>().notNull(),
-    steps: text('steps', { mode: 'json' })
-      .$type<WorkstreamStep[]>()
+    steps: workstreamSteps('steps')
       .notNull()
       .default(sql`'[]'`),
     stepIndex: integer('step_index').notNull().default(0),
@@ -377,6 +403,8 @@ export const workstreams = sqliteTable(
     pausedUntil: text('paused_until'),
     failureReason: text('failure_reason'),
     lastActivityAt: text('last_activity_at'),
+    /** When the builder put the queued workstream first in line; cleared once it gets a lane. */
+    runNextAt: text('run_next_at'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -528,6 +556,7 @@ export const permissionRules = sqliteTable('permission_rules', {
   toolName: text('tool_name').notNull(),
   pattern: text('pattern'),
   sourceInboxId: text('source_inbox_id').$type<InboxItemId>(),
+  foundIn: text('found_in'),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });

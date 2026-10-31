@@ -22,7 +22,10 @@ the conflicted file info (`<mode> <oid> <stage> <path>`), and settles a conflict
   files that changed under those directories as `Regenerate <dirs> after merging origin/<base>`.
 
 Anything else stays a conflict: two edits of one line, a deletion on one side, a file both sides added, a binary or
-large file, a mode change, `pnpm-lock.yaml`, a JSON file the union breaks. When any conflict stays, the whole
+large file, a mode change, `pnpm-lock.yaml`, a drizzle journal (`meta/_journal.json`) outside a generated
+directory, a JSON file the union breaks. Two tasks that each append a migration to a journal only add lines, so a
+union would give two migrations one number; that conflict keeps its card, which says how to generate the
+branch's migration again on top of the base (`decisions/2026-10-30-migrations-hazard-takes-the-base-first.md`). When any conflict stays, the whole
 merge is refused as before, nothing is written, and the one `base-conflict:<batch id>` card now says for each
 file why 10db could not settle it, besides the two ways out it already gave. The card is the only way the
 builder hears of a conflict that was not settled, and it goes once the branch holds the base.
@@ -66,7 +69,8 @@ Turned down:
 Left open:
 
 - The migration-number collision between two tasks is covered by "Stop two tasks generating the same migration
-  number from different bases"; this only keeps a collision from becoming a conflict card.
+  number from different bases"; this only keeps a collision in a generated directory from becoming a conflict
+  card.
 - Regeneration commits are made by the daemon, one parent, and a crash between the merge and that commit leaves
   the generated directories as the base's until the next gate's merge finds nothing to do. The `base-regenerate`
   card is not raised in that case.

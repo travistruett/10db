@@ -15,7 +15,18 @@ import {
   type ProjectId,
   type PullRequestStatusDto,
 } from '@10db/contracts';
-import { and, asc, desc, eq, inArray, isNotNull, isNull, or, type SQL } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  inArray,
+  isNotNull,
+  isNull,
+  notInArray,
+  or,
+  type SQL,
+} from 'drizzle-orm';
 import type { Json } from '../json';
 import * as schema from '../schema';
 import type { DbReader, WriteContext } from './store';
@@ -115,14 +126,22 @@ export function listUnfinishedBatches(db: DbReader, projectId: ProjectId): Batch
     .map(toBatchDto);
 }
 
-/** The batch a project view shows: the newest unfinished one, else the latest. */
+/**
+ * The batch a project view shows (task placement spec, P5): the unfinished shared batch, else the
+ * newest finished one, else none. Never a copy's unfinished batch: `openBatches` lists those.
+ */
 export function currentBatch(db: DbReader, projectId: ProjectId): BatchDto | null {
-  const newest = listUnfinishedBatches(db, projectId)[0];
-  if (newest) return newest;
+  const shared = findUnfinishedBatch(db, projectId);
+  if (shared) return shared;
   const latest = db
     .select()
     .from(schema.batches)
-    .where(eq(schema.batches.projectId, projectId))
+    .where(
+      and(
+        eq(schema.batches.projectId, projectId),
+        notInArray(schema.batches.state, [...UNFINISHED_BATCH_STATES]),
+      ),
+    )
     .orderBy(desc(schema.batches.createdAt), desc(schema.batches.id))
     .limit(1)
     .get();

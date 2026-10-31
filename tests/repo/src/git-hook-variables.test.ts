@@ -166,7 +166,9 @@ describe('git hook variables', () => {
       .map((line) => line.split('=')[0]);
     expect(names).toContain('HOOK_ENV_RECORD');
     expect(names.filter((name) => REPO_VARIABLES.includes(name ?? ''))).toEqual([]);
-  });
+    // lefthook install and a real push through the hook: seconds of child processes, more under
+    // the full suite's load than the 5s default allows.
+  }, 60_000);
 
   it('cannot steer the daemon tests that create, commit to and configure repositories', () => {
     const { repo, variables } = decoy();

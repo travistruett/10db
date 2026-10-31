@@ -16,6 +16,7 @@ import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery
 import { isolatedGitEnv } from '../../test/fixtures';
 import type { DeliveryContext } from './context';
 import { createBaseUpdates, ensureWorktreeWhole, workstreamChanges } from './index';
+import { INSTALL_SUMMARY } from './worktree-dependencies';
 
 let h: DeliveryHarness;
 afterEach(() => {
@@ -155,6 +156,26 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
     expect(update.kind === 'merged' && update.note).toMatch(
       /^The install this branch's lockfile needs failed \(exit 1; log: .+\.log\), so its packages may not match it\.$/,
     );
+  });
+
+  it("names the host the sandbox blocked the install after the merge from, in the gate's note and on a card", async () => {
+    h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+    withLockfile();
+    const { batch } = await opened();
+    await commitOnBatch(batch, 'src/api/alpha.txt');
+    h.teammatePush('main', 'pnpm-lock.yaml', 'lockfileVersion: 9\npackages: {}\n');
+    h.pnpm.blockedFrom('registry.npmjs.org');
+
+    const update = await createBaseUpdates(h.ctx).beforeGate(batch.id, signal);
+
+    expect(update).toMatchObject({ kind: 'merged' });
+    expect(update.kind === 'merged' && update.note).toMatch(
+      /^The install this branch's lockfile needs failed \(exit 1; log: .+\.log\), so its packages may not match it\. The sandbox blocked it from reaching registry\.npmjs\.org\.$/,
+    );
+    const host = h.only(h.cards());
+    expect(host.title).toBe('Allow network access to registry.npmjs.org?');
+    expect(host.body).toContain(`Install: ${INSTALL_SUMMARY}`);
+    expect(host.targets).toEqual([]);
   });
 
   it('installs again at the next gate when the last install failed, and not once one passed', async () => {
@@ -693,6 +714,88 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       kind: 'aborted',
     });
     expect(state(pathOf(batch))).toEqual(before);
+  });
+});
+
+describe('a migration numbered the same as one the base added since the batch was cut', () => {
+  // A migration directory 10db doesn't regenerate itself, so the conflict stays the builder's. One in
+  // a generated directory is settled by regenerating it (the settled-conflicts tests above).
+  const DRIZZLE = 'apps/api/drizzle';
+  const JOURNAL = `${DRIZZLE}/meta/_journal.json`;
+
+  /** A drizzle journal holding `tags`, numbered in order as drizzle-kit writes it. */
+  function journal(...tags: string[]): string {
+    const entries = tags.map((tag, idx) => ({
+      idx,
+      version: '6',
+      when: idx,
+      tag,
+      breakpoints: true,
+    }));
+    return `${JSON.stringify({ version: '7', dialect: 'sqlite', entries }, null, 2)}\n`;
+  }
+
+  /** The batch generated 0001 on its old base; main gained its own 0001 meanwhile. */
+  async function collided(): Promise<BatchDto> {
+    h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+    h.commit(JOURNAL, journal('0000_init'));
+    h.git$('push', '-q', 'origin', 'main');
+    const { batch } = await opened();
+    await commitOnBatch(batch, `${DRIZZLE}/0001_branch_change.sql`, 'ALTER TABLE a ADD b text;\n');
+    await commitOnBatch(batch, JOURNAL, journal('0000_init', '0001_branch_change'));
+    h.teammatePush('main', `${DRIZZLE}/0001_track_prs.sql`, 'ALTER TABLE c ADD d text;\n');
+    h.teammatePush('main', JOURNAL, journal('0000_init', '0001_track_prs'));
+    return batch;
+  }
+
+  it("raises one card before the gate saying the branch's migration must be regenerated on top of the base", async () => {
+    const batch = await collided();
+    const path = pathOf(batch);
+    const updates = createBaseUpdates(h.ctx);
+    const update = await updates.beforeGate(batch.id, signal);
+    expect(update.kind).toBe('not_merged');
+    expect(update.kind === 'not_merged' && update.note).toMatch(
+      /^origin\/main conflicts with this branch in apps\/api\/drizzle\/meta\/_journal\.json/,
+    );
+    await updates.beforeGate(batch.id, signal);
+    const card = h.only(h.cards());
+    expect(card.title).toBe(
+      'Batch "Alpha" must regenerate migration 0001_branch_change on top of main',
+    );
+    expect(card.body).toContain(
+      "Migration 0001_branch_change takes number 0001, which main's 0001_track_prs already has.",
+    );
+    expect(card.body).toContain(`git -C '${path}' -c core.hooksPath=/dev/null merge 'origin/main'`);
+    expect(card.body).toContain(
+      `git -C '${path}' restore --source='origin/main' --staged --worktree -- '${DRIZZLE}'`,
+    );
+    expect(card.body).toContain('drizzle-kit generate');
+    expect(card.body).toContain(`- ${JOURNAL}`);
+    expect(card.detail).toEqual({ batchId: batch.id, paths: [JOURNAL] });
+  });
+
+  it('withdraws the card once the branch holds the base with its migration numbered after it', async () => {
+    const batch = await collided();
+    const path = pathOf(batch);
+    const updates = createBaseUpdates(h.ctx);
+    await updates.beforeGate(batch.id, signal);
+    expect(h.cards()).toHaveLength(1);
+    // The builder follows the card: merge, take main's migrations whole, regenerate, commit.
+    expect(() =>
+      gitIn(path, '-c', 'core.hooksPath=/dev/null', 'merge', '-q', 'origin/main'),
+    ).toThrow();
+    gitIn(path, 'restore', '--source=origin/main', '--staged', '--worktree', '--', DRIZZLE);
+    expect(existsSync(join(path, DRIZZLE, '0001_branch_change.sql'))).toBe(false);
+    // What drizzle-kit generate writes on top of main's migrations.
+    writeFileSync(join(path, DRIZZLE, '0002_branch_change.sql'), 'ALTER TABLE a ADD b text;\n');
+    writeFileSync(
+      join(path, JOURNAL),
+      journal('0000_init', '0001_track_prs', '0002_branch_change'),
+    );
+    gitIn(path, 'add', DRIZZLE);
+    gitIn(path, '-c', 'core.hooksPath=/dev/null', 'commit', '-q', '--no-edit');
+    expect((await updates.beforeGate(batch.id, signal)).kind).toBe('up_to_date');
+    expect(h.cards()).toEqual([]);
   });
 });
 

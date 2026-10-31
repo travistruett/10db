@@ -8,14 +8,17 @@ import { batchCardFields, createBatchCardAnswers } from './index';
 
 let h: DeliveryHarness;
 let inbox: InboxService;
+let retries: { id: string; note: string | undefined }[];
 beforeEach(() => {
+  retries = [];
   h = createDeliveryHarness();
   inbox = createInboxService({
     state: h.state,
     onParkedAnswer: () => undefined,
     onFlagAnswer: createBatchCardAnswers({
-      retry: (id) => {
-        retryWorkstream(h.state, id);
+      retry: (id, note) => {
+        retries.push({ id, note });
+        retryWorkstream(h.state, id, note);
       },
       shipper: h.shipper,
     }),
@@ -69,6 +72,20 @@ describe('the failed workstream card', () => {
     expect(inbox.answer(card.id, { choice: 'Retry' }).state).toBe('RESOLVED');
     expect(getWorkstream(h.store.db, failed).state).toBe('QUEUED');
     expect(getBatch(h.store.db, batchId).state).toBe('OPEN');
+  });
+
+  it.each([
+    {
+      name: 'a typed note',
+      answer: { choice: 'Retry', note: 'Reuse the card.' },
+      note: 'Reuse the card.',
+    },
+    { name: 'no note', answer: { choice: 'Retry' }, note: undefined },
+    { name: 'a blank note', answer: { choice: 'Retry', note: '  ' }, note: undefined },
+  ])('hands the retry $name', async ({ answer, note }) => {
+    const { card, failed } = await failedInBatch('DONE');
+    inbox.answer(card.id, answer);
+    expect(retries).toEqual([{ id: failed, note }]);
   });
 
   it('refuses Ship anyway while other work is unfinished, keeping the card open, then ships', async () => {

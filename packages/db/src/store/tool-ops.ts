@@ -8,9 +8,13 @@ export function findToolOp(
   db: DbReader,
   workstreamId: WorkstreamId,
   opId: string,
-): { tool: string; result: Json } | undefined {
+): { tool: string; result: Json; sessionId: SessionId } | undefined {
   return db
-    .select({ tool: schema.toolOps.tool, result: schema.toolOps.result })
+    .select({
+      tool: schema.toolOps.tool,
+      result: schema.toolOps.result,
+      sessionId: schema.toolOps.sessionId,
+    })
     .from(schema.toolOps)
     .where(and(eq(schema.toolOps.workstreamId, workstreamId), eq(schema.toolOps.opId, opId)))
     .get();
@@ -29,6 +33,29 @@ export function insertToolOp(
   ctx.tx
     .insert(schema.toolOps)
     .values({ id: mintId('ToolOp'), ...input, createdAt: ctx.now })
+    .run();
+}
+
+/**
+ * Gives an opId's record to a new session and result. An opId is unique per workstream, so a call
+ * that must run again under an opId an earlier session used takes over its row instead of adding one.
+ */
+export function replaceToolOp(
+  ctx: WriteContext,
+  input: {
+    readonly workstreamId: WorkstreamId;
+    readonly sessionId: SessionId;
+    readonly opId: string;
+    readonly tool: string;
+    readonly result: Json;
+  },
+): void {
+  ctx.tx
+    .update(schema.toolOps)
+    .set({ sessionId: input.sessionId, tool: input.tool, result: input.result, createdAt: ctx.now })
+    .where(
+      and(eq(schema.toolOps.workstreamId, input.workstreamId), eq(schema.toolOps.opId, input.opId)),
+    )
     .run();
 }
 

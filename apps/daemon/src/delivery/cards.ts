@@ -2,8 +2,10 @@ import {
   BatchFailure,
   BatchState,
   type BatchDto,
+  type CardResolvesWhen,
   type BatchId,
   type FailingCheckDto,
+  type InboxOption,
   type ProjectDto,
   type ProjectId,
   type TaskId,
@@ -14,12 +16,14 @@ import {
   GitNetworkError,
   worktreeMergeCommand,
   worktreeRemovalCommand,
+  worktreeRestoreCommand,
   type CheckoutPlace,
 } from '../git';
 import { GhError } from '../github';
 import type { GateResult } from '../verify';
 import type { BlockedTask, UnmergedDependency } from './deps';
 import type { GateStepFailure } from './gate-failures';
+import type { TakenNumber } from './migration-numbers';
 import { INSTALL_SUMMARY, type DependencyRefresh } from './worktree-dependencies';
 
 /** A flag card's text. Every delivery card says what to fix (batch delivery spec §1). */
@@ -31,7 +35,34 @@ export interface Card {
   /** A repeat that folds rewrites the open card with this one's body and detail. */
   readonly refresh?: boolean;
   readonly detail?: Record<string, Json>;
+  /** The answers the card offers; none for a card the builder only dismisses. */
+  readonly options?: readonly InboxOption[];
+  /** What makes the card stale: 10db closes it itself when that happens (CardResolvesWhen). */
+  readonly resolvesWhen?: CardResolvesWhen;
 }
+
+/** The answers of a card that offers to delete a task's local branch. */
+export const BranchChoice = { Delete: 'Delete Branch', Keep: 'Keep' } as const;
+export type BranchChoice = (typeof BranchChoice)[keyof typeof BranchChoice];
+
+/** The `detail` key of a card that offers to delete a batch's local branch; it holds the batch id. */
+export const BRANCH_CARD_DETAIL = 'branchCard';
+
+/** What a card carries to offer deleting `batch`'s local branch. */
+function branchOffer(batch: BatchDto): Pick<Card, 'options' | 'detail'> {
+  return {
+    options: [
+      {
+        label: BranchChoice.Delete,
+        description: `Delete ${batch.branch ?? 'the branch'} from your repository`,
+      },
+      { label: BranchChoice.Keep, description: 'Leave the branch where it is' },
+    ],
+    detail: { batchId: batch.id, [BRANCH_CARD_DETAIL]: { batchId: batch.id } },
+  };
+}
+
+const commitsOf = (count: number): string => `${String(count)} commit${count === 1 ? '' : 's'}`;
 
 export const MAX_LISTED_PATHS = 20;
 
@@ -220,7 +251,11 @@ export const worktreeCards = {
       paths === null
         ? `The batch is finished, but 10db couldn't read its worktree ${path}, so it may hold files you need, and kept it.`
         : `The batch is finished, but its worktree ${path} holds git-ignored files 10db didn't put there, such as a hand-made .env, so 10db kept it:\n${listPaths(paths)}`
-    }\n\nCopy what you need, then remove it with ${worktreeRemovalCommand(main, path)}.`,
+    }\n\nCopy what you need, then remove it with ${worktreeRemovalCommand(main, path)}.${
+      batch.branch === null
+        ? ''
+        : ` Its branch ${batch.branch} is checked out there, so 10db leaves the branch too until the worktree is gone.`
+    }`,
     foldKey: keptWorktreeKey.batchIgnored(batch.id),
     detail: { batchId: batch.id },
   }),
@@ -291,21 +326,75 @@ export const baseRegenerateKey = (batchId: BatchId): string => `base-regenerate:
 /** The fold key of a batch's files-in-the-way card, so a clean merge can withdraw it. */
 export const baseKeptKey = (batchId: BatchId): string => `base-kept:${batchId}`;
 
+/** Why a base card was raised beyond the gate, and what more it found. */
+export interface BaseCardContext {
+  /** The task that asked for the migrations hazard, which 10db holds back until the branch holds its base. */
+  readonly migrationsFor?: string;
+  /** The branch's migrations whose number the base already gives another. */
+  readonly taken?: readonly TakenNumber[];
+  /** Why each conflicting path stayed a conflict, when 10db tried to settle it. */
+  readonly reasons?: ReadonlyMap<string, string>;
+}
+
+/** What a task held back from the migrations hazard is told on the card, after its first paragraph. */
+function migrationsHeld(batch: BatchDto, context: BaseCardContext, until: string): string {
+  return context.migrationsFor === undefined
+    ? ''
+    : `\n\nTask "${context.migrationsFor}" asked for the migrations hazard. 10db gives it only once this branch holds ${batch.baseBranch}, so that a migration it generates is numbered after ${batch.baseBranch}'s latest: until ${until}, the task generates no migration.`;
+}
+
+/** The migrations a conflict renumbers, in a title: "migration 0009_x" or "migrations 0009_x, 0010_y". */
+function migrationNames(taken: readonly TakenNumber[]): string {
+  const tags = [...new Set(taken.map((t) => t.ours))];
+  return `${tags.length === 1 ? 'migration' : 'migrations'} ${tags.join(', ')}`;
+}
+
+/** How the builder makes the branch's migrations again on top of the base, step by step. */
+function regenerateSteps(batch: BatchDto, worktree: string, taken: readonly TakenNumber[]): string {
+  const base = batch.baseBranch;
+  const dirs = [...new Set(taken.map((t) => t.dir))];
+  const named = dirs.map((d) => `${d}/`).join(' and ');
+  const each = taken
+    .map(
+      (t) =>
+        `Migration ${t.ours} takes number ${t.number}, which ${base}'s ${t.theirs} already has.`,
+    )
+    .join('\n');
+  const restores = dirs.map((d) => worktreeRestoreCommand(worktree, base, d)).join(', then ');
+  return `${each}\n\nMigrations are numbered in order, and ${named} is generated, so it is never merged by hand: the batch's migration has to be generated again on top of ${base}. In the worktree:\n1. ${worktreeMergeCommand(worktree, base)}, which stops at the conflict.\n2. ${restores}, which takes ${base}'s migrations whole and drops the batch's own.\n3. Run drizzle-kit generate the way the project does, in the package that holds ${named}, so the batch's schema change becomes the migration after ${base}'s latest.\n4. Resolve any other file listed above, then git add and git commit, with hooks off as in step 1.\n\nUntil then the gates test the branch without ${base}'s newer commits. The next gate tests the result, and this card goes once the branch holds ${base}.`;
+}
+
 /** What delivery tells the builder when a worktree batch's branch can't take its base before a gate. */
 export const baseCards = {
-  /** `worktree` is the batch's worktree, where the builder can merge by hand. */
+  /**
+   * `worktree` is the batch's worktree, where the builder can merge by hand. A conflict that renumbers
+   * a migration says how to generate it again instead of how to merge.
+   */
   conflict: (
     batch: BatchDto,
     worktree: string,
     paths: readonly string[],
-    /** Why each of `paths` stayed a conflict, when 10db tried to settle it. */
-    reasons: ReadonlyMap<string, string> = new Map(),
-  ): Card => ({
-    title: `Batch "${batch.title}" conflicts with ${batch.baseBranch}`,
-    body: `${batch.baseBranch} on origin changed these files in ways that conflict with the batch's own changes, and 10db couldn't settle them itself:\n${listPaths(paths.map((p) => (reasons.has(p) ? `${p}: ${reasons.get(p) ?? ''}` : p)))}\n\nBefore each gate 10db merges ${batch.baseBranch} into the batch's branch, so the gate tests what the pull request would merge. It settles a conflict by itself when both sides only added lines at the same place, and regenerates generated files; anything else needs a choice. A lane commits only its own files and never records a merge, so it can't make it. Until the conflict is resolved, the gates test the branch without ${batch.baseBranch}'s newer commits, so a failure they fix still shows.\n\nOnce the pull request is open, resolve it there (GitHub's Update branch, then Resolve conflicts). Or merge it yourself in the worktree: ${worktreeMergeCommand(worktree, batch.baseBranch)}. That command turns the repository's hooks off, because lanes write in the worktree, so the hook config there is theirs to choose. The next gate tests the result, and this card goes once the branch holds ${batch.baseBranch}.`,
-    foldKey: baseConflictKey(batch.id),
-    detail: { batchId: batch.id, paths: paths.slice(0, MAX_LISTED_PATHS) },
-  }),
+    context: BaseCardContext = {},
+  ): Card => {
+    const taken = context.taken ?? [];
+    const reasons = context.reasons ?? new Map<string, string>();
+    const conflicting = `${batch.baseBranch} on origin changed these files in ways that conflict with the batch's own changes, and 10db couldn't settle them itself:\n${listPaths(paths.map((p) => (reasons.has(p) ? `${p}: ${reasons.get(p) ?? ''}` : p)))}`;
+    const held = migrationsHeld(batch, context, 'the conflict is resolved');
+    return {
+      title:
+        taken.length > 0
+          ? `Batch "${batch.title}" must regenerate ${migrationNames(taken)} on top of ${batch.baseBranch}`
+          : `Batch "${batch.title}" conflicts with ${batch.baseBranch}`,
+      body:
+        taken.length > 0
+          ? `${conflicting}${held}\n\n${regenerateSteps(batch, worktree, taken)}`
+          : `${conflicting}${held}\n\nBefore each gate 10db merges ${batch.baseBranch} into the batch's branch, so the gate tests what the pull request would merge. It settles a conflict by itself when both sides only added lines at the same place, and regenerates generated files; anything else needs a choice. A lane commits only its own files and never records a merge, so it can't make it. Until the conflict is resolved, the gates test the branch without ${batch.baseBranch}'s newer commits, so a failure they fix still shows.\n\nOnce the pull request is open, resolve it there (GitHub's Update branch, then Resolve conflicts). Or merge it yourself in the worktree: ${worktreeMergeCommand(worktree, batch.baseBranch)}. That command turns the repository's hooks off, because lanes write in the worktree, so the hook config there is theirs to choose. The next gate tests the result, and this card goes once the branch holds ${batch.baseBranch}.`,
+      foldKey: baseConflictKey(batch.id),
+      // Asked for the migrations hazard, the open card is rewritten to say the task is held back.
+      ...(context.migrationsFor === undefined ? {} : { refresh: true }),
+      detail: { batchId: batch.id, paths: paths.slice(0, MAX_LISTED_PATHS) },
+    };
+  },
   /**
    * 10db merged the base but couldn't finish the generated files in `dirs`: they hold the base's
    * version. `why` is the first line of the reason, `worktree` the batch's worktree.
@@ -324,10 +413,16 @@ export const baseCards = {
     detail: { batchId: batch.id, paths: dirs.slice(0, MAX_LISTED_PATHS) },
   }),
   /** `worktree` is the batch's worktree, which holds `paths`. */
-  kept: (batch: BatchDto, worktree: string, paths: readonly string[]): Card => ({
+  kept: (
+    batch: BatchDto,
+    worktree: string,
+    paths: readonly string[],
+    context: BaseCardContext = {},
+  ): Card => ({
     title: `Batch "${batch.title}" can't take ${batch.baseBranch}: files git doesn't track are in the way`,
-    body: `${batch.baseBranch} on origin adds files where the batch's worktree ${worktree} holds files git doesn't track, most likely ignored ones such as a hand-made .env or a build directory:\n${listPaths(paths)}\n\n10db never overwrites or deletes them, so it didn't merge ${batch.baseBranch}, and the gates test the branch without its newer commits. A fix session is told to leave them. If you don't need them, move or delete them; otherwise leave the merge to the pull request. The next gate tries again, and this card goes once the branch holds ${batch.baseBranch}.`,
+    body: `${batch.baseBranch} on origin adds files where the batch's worktree ${worktree} holds files git doesn't track, most likely ignored ones such as a hand-made .env or a build directory:\n${listPaths(paths)}${migrationsHeld(batch, context, 'they are out of the way')}\n\n10db never overwrites or deletes them, so it didn't merge ${batch.baseBranch}, and the gates test the branch without its newer commits. A fix session is told to leave them. If you don't need them, move or delete them; otherwise leave the merge to the pull request. The next gate tries again, and this card goes once the branch holds ${batch.baseBranch}.`,
     foldKey: baseKeptKey(batch.id),
+    ...(context.migrationsFor === undefined ? {} : { refresh: true }),
     detail: { batchId: batch.id, paths: paths.slice(0, MAX_LISTED_PATHS) },
   }),
 };
@@ -345,6 +440,7 @@ export function forTasks(card: Card, taskIds: Iterable<TaskId>): Card {
     foldKey: card.foldKey ?? `start-refused:${[...ids].sort().join(',')}:${card.title}`,
     refresh: true,
     detail: { ...card.detail, taskIds: ids },
+    ...(ids.length > 0 ? { resolvesWhen: { event: 'tasks_started', taskIds: ids } } : {}),
   };
 }
 
@@ -506,11 +602,16 @@ export const shipCards = {
     body: `The shipping gate's first run failed${inSteps(steps)}. ${RERAN}, and it passed, so the batch went on to ship. These tests may be flaky:\n${testLines(steps)}`,
     detail: { batchId: batch.id },
   }),
-  gateTimedOut: (batch: BatchDto, timeoutMs: number, logPath: string): ShipFailure => ({
+  gateTimedOut: (
+    batch: BatchDto,
+    timeoutMs: number,
+    logPath: string,
+    note: string | null = null,
+  ): ShipFailure => ({
     failure: BatchFailure.GateTimedOut,
     card: {
       title: `${notShipped(batch)}: the gate timed out after ${duration(timeoutMs)}`,
-      body: `10db stopped the gate and pushed nothing. Log: ${logPath}\n\n${RETRY}`,
+      body: `${note === null ? '' : `${note}\n\n`}10db stopped the gate and pushed nothing. Log: ${logPath}\n\n${RETRY}`,
       detail: { batchId: batch.id },
     },
   }),
@@ -549,7 +650,7 @@ export const shipCards = {
     body:
       doneTitles.length > 0
         ? `These tasks stay done, but their code is unmerged, only on the local branch ${batch.branch ?? '(none)'}:\n${doneTitles.map((t) => `- ${t}`).join('\n')}`
-        : `Nothing in it finished. The local branch ${batch.branch ?? '(none)'} is kept.`,
+        : 'Nothing in it finished.',
     detail: { batchId: batch.id },
   }),
 };
@@ -706,13 +807,20 @@ export const prCards = {
       detail: prDetail(batch, link),
     };
   },
+  /** Offers to delete the local branch, which stays until the builder answers. */
   closed: (batch: BatchDto): Card => {
     const prUrl = batch.prUrl ?? '(no pull request)';
+    const offer = batch.branch === null ? {} : branchOffer(batch);
+    const keeps =
+      batch.branch === null
+        ? ''
+        : ` 10db keeps the local branch ${batch.branch} until you answer: Delete Branch removes it from your repository, Keep leaves it.`;
     return {
       title: `Pull request closed without merging: "${batch.title}"`,
-      body: `${prUrl}\n\nThe batch's tasks stay done, but their code is not on ${batch.baseBranch}. 10db keeps the local branch ${batch.branch ?? '(none)'}.\n\nTo land the work, reopen the pull request on GitHub and merge it there. 10db doesn't follow a reopened pull request, so this card stays until you dismiss it: dismiss it once the pull request merges, or now if you don't want the work.`,
+      body: `${prUrl}\n\nThe batch's tasks are in Blocked on the Board, because their code is not on ${batch.baseBranch}.${keeps}\n\nOn the Board, reopen a task to run it again, or close it if you don't want the work. To land the existing work instead, reopen the pull request on GitHub and merge it there; 10db doesn't follow a reopened pull request, so close the tasks once it merges.`,
       foldKey: prCardKey.closed(batch.id),
-      detail: prDetail(batch, prUrl),
+      ...offer,
+      detail: { ...prDetail(batch, prUrl), ...offer.detail },
     };
   },
   /**
@@ -747,4 +855,36 @@ export const prCards = {
       body: `gh couldn't reach GitHub: ${detailOf(error)}\n\nCheck your connection and run gh auth status in a terminal to see why. ${until}`,
     };
   },
+};
+
+/** The fold keys of the cards about a task's local branch. */
+export const branchCardKey = {
+  offer: (batchId: BatchId): string => `branch-offer:${batchId}`,
+  /** One per project: the branches no batch names. */
+  withoutBatch: 'branches-without-batch',
+} as const;
+
+/** What 10db tells the builder about the local branches of finished tasks. */
+export const branchCards = {
+  /** An abandoned task's branch holds work; `commits` counts what it has beyond its base. */
+  abandoned: (batch: BatchDto, commits: number): Card => ({
+    title: `Delete ${batch.branch ?? 'the branch'}? It holds ${commitsOf(commits)}`,
+    body: `Batch "${batch.title}" was abandoned, and its branch ${batch.branch ?? '(none)'} holds ${commitsOf(commits)} beyond ${batch.baseBranch}. 10db keeps it until you answer: Delete Branch removes it from your repository, so that work is gone; Keep leaves it.`,
+    foldKey: branchCardKey.offer(batch.id),
+    ...branchOffer(batch),
+  }),
+  /** A Delete Branch answer git can't carry out while the branch is checked out. */
+  checkedOut: (batch: BatchDto, path: string): Card => ({
+    title: `${batch.branch ?? 'The branch'} was not deleted: it is checked out`,
+    body: `${batch.branch ?? 'The branch'} is checked out in ${path}, and git won't delete a branch that is in use. Switch ${path} to another branch, then answer again.`,
+    foldKey: branchCardKey.offer(batch.id),
+    ...branchOffer(batch),
+  }),
+  /** `branches` is never empty. 10db never deletes these: nothing records that it made them. */
+  withoutBatch: (branches: readonly string[]): Card => ({
+    title: `${String(branches.length)} local branch${branches.length === 1 ? '' : 'es'} under 10db/ without a task`,
+    body: `10db has no task for these local branches, so it can't tell whether they are yours and leaves them alone:\n${listPaths(branches)}\n\nDelete the ones you don't need with git branch -D <name>.`,
+    foldKey: branchCardKey.withoutBatch,
+    refresh: true,
+  }),
 };
