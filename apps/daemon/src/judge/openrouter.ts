@@ -63,7 +63,7 @@ const SystemOneResponse = z.object({
       type: z.literal('choice'),
       choice: z.string(),
       confidence: z.number().min(0).max(1),
-      probabilities: z.record(z.string(), z.number()),
+      probabilities: z.record(z.string(), z.number().min(0).max(1)),
     }),
   }),
   usage: Cost,
