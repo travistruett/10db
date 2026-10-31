@@ -9,6 +9,12 @@ import { parseShell, type ShellSegment } from '../guard';
  * `2>/dev/null`. Every file the command names must pass `isOwnFile`, and every program that reads
  * names at least one, unless a pipe feeds it. So the command can only read the files `isOwnFile`
  * accepts and write nothing.
+ *
+ * A command may start with plain assignments, `name=<path>;` one after another, where each path
+ * passes `isOwnFile`. Its names then stand for those paths wherever a word is exactly `"$name"` or
+ * `$name`; the command is judged with the paths written in, so the grammar never sees an expansion.
+ * A name that is not assigned there, a `${name}`, a name inside a longer word or in single quotes,
+ * and an assignment anywhere but the start stay refused as before.
  */
 
 /** Words that start a command inside a loop or a condition. */
@@ -185,10 +191,81 @@ function segmentReads(
 }
 
 /**
+ * A value the shell passes as one literal word: no space, glob, tilde, quote, expansion or escape.
+ * Unquoted, or wrapped in one pair of quotes.
+ */
+const VALUE = String.raw`(?:"([A-Za-z0-9_./:@%+,=-]+)"|'([A-Za-z0-9_./:@%+,=-]+)'|([A-Za-z0-9_./:@%+,=-]+))`;
+const ASSIGNMENT = new RegExp(String.raw`^[ \t]*([A-Za-z_][A-Za-z0-9_]*)=${VALUE}[ \t]*(?:;|\n)`);
+const NAME_AT = /^\$([A-Za-z_][A-Za-z0-9_]*)/;
+const QUOTED_NAME_AT = /^"\$([A-Za-z_][A-Za-z0-9_]*)"/;
+/** What may stand before and after a word that is only a variable. */
+const BEFORE_WORD = new Set([' ', '\t', '\n', ';', '|']);
+const AFTER_WORD = new Set([' ', '\t', '\n', ';', '|', '&']);
+/**
+ * Variables the shell reads itself: setting one to a path changes how a later word is split, found
+ * or run. Never a name for a file, whatever its case.
+ */
+const SPECIAL_NAMES =
+  /^(?:ifs|path|cdpath|fpath|manpath|module_path|mailpath|mail|mailcheck|home|shell|env|bash_env|bash.*|zsh.*|shellopts|ps\d|prompt.*|histchars|ld_.*|dyld_.*|_|pwd|oldpwd|options|argv|status)$/i;
+
+/**
+ * The command with its leading `name=<own file>;` assignments taken off and each word that is just
+ * `$name` or `"$name"` written out as the path. The command unchanged when it has no leading
+ * assignment, or when any of them names something `isOwnFile` refuses (the grammar then refuses the
+ * assignment itself).
+ */
+function withNamesWritten(command: string, isOwnFile: (path: string) => boolean): string {
+  const names = new Map<string, string>();
+  let rest = command;
+  for (;;) {
+    const match = ASSIGNMENT.exec(rest);
+    if (match === null) break;
+    const name = match[1] ?? '';
+    const value = match[2] ?? match[3] ?? match[4] ?? '';
+    if (SPECIAL_NAMES.test(name) || !isOwnFile(value)) return command;
+    names.set(name, value);
+    rest = rest.slice(match[0].length);
+  }
+  if (names.size === 0) return command;
+
+  let out = '';
+  let quote: "'" | '"' | null = null;
+  let at = 0;
+  while (at < rest.length) {
+    const ch = rest[at] ?? '';
+    if (quote !== null) {
+      if (ch === quote) quote = null;
+    } else if (ch === '$' || ch === '"') {
+      const match = (ch === '$' ? NAME_AT : QUOTED_NAME_AT).exec(rest.slice(at));
+      const path = match === null ? undefined : names.get(match[1] ?? '');
+      const before = at === 0 ? '\n' : (rest[at - 1] ?? '');
+      const after = rest[at + (match?.[0].length ?? 0)];
+      if (
+        match !== null &&
+        path !== undefined &&
+        BEFORE_WORD.has(before) &&
+        (after === undefined || AFTER_WORD.has(after))
+      ) {
+        out += path;
+        at += match[0].length;
+        continue;
+      }
+      if (ch === '"') quote = '"';
+    } else if (ch === "'") {
+      quote = "'";
+    }
+    out += ch;
+    at += 1;
+  }
+  return out;
+}
+
+/**
  * Whether a Monitor command only waits on and reads files that `isOwnFile` accepts. False for
  * anything the grammar above does not cover; the caller then asks a person.
  */
-export function readsOnlyOwnFiles(command: string, isOwnFile: (path: string) => boolean): boolean {
+export function readsOnlyOwnFiles(original: string, isOwnFile: (path: string) => boolean): boolean {
+  const command = withNamesWritten(original, isOwnFile);
   if (hasUnreadText(command)) return false;
   const parsed = parseShell(command);
   if (!parsed.certain || parsed.segments.length === 0) return false;

@@ -1573,6 +1573,169 @@ describe('permission broker in a sandboxed lane', () => {
       },
       { name: 'a variable in the path', command: (d) => `cat ${d}/$f`, outcome: 'card' },
       { name: 'a glob in the path', command: (d) => `cat ${d}/*.output`, outcome: 'card' },
+      // A variable that names the lane's own output file, set at the start of the command.
+      {
+        name: 'the 2026-10-30 shape: a variable for the file, quoted in the loop and the grep',
+        command: (d) =>
+          `f=${d}/b1.output; until grep -qE "Duration|Test Files" "$f" 2>/dev/null; do sleep 5; done; grep -E "×|FAIL|Test Files|Tests |Duration|Error:" "$f"`,
+        outcome: 'allow',
+      },
+      {
+        name: 'an own file named by an unquoted variable',
+        command: (d) => `f=${d}/b1.output; until [ -s $f ]; do sleep 2; done; tail -n 5 $f`,
+        outcome: 'allow',
+      },
+      {
+        name: 'two variables, one for each own file',
+        command: (d) => `a=${d}/b1.output; b=${d}/later.output; cat "$a" "$b"`,
+        outcome: 'allow',
+      },
+      {
+        name: 'a quoted value and an assignment on its own line',
+        command: (d) => `f="${d}/b1.output"\ng='${d}/b1.output'\ncat "$f" $g`,
+        outcome: 'allow',
+      },
+      {
+        name: 'a variable for a file outside the lane',
+        command: () => 'f=/etc/passwd; cat "$f"',
+        outcome: 'card',
+      },
+      {
+        name: 'a variable for another session of this lane',
+        command: () => `f=${siblingTasks()}/b1.output; cat "$f"`,
+        outcome: 'card',
+      },
+      {
+        name: 'one of two variables outside the lane',
+        command: (d) => `a=${d}/b1.output; b=/etc/passwd; cat "$a" "$b"`,
+        outcome: 'card',
+      },
+      {
+        name: 'a variable set twice, the first an own file and the last not',
+        command: (d) => `f=${d}/b1.output; f=/etc/passwd; cat "$f"`,
+        outcome: 'card',
+      },
+      {
+        name: 'an own variable set but a different one used',
+        command: (d) => `f=${d}/b1.output; cat "$g"`,
+        outcome: 'card',
+      },
+      { name: 'a variable used with no assignment', command: () => 'cat "$f"', outcome: 'card' },
+      {
+        name: 'a variable set after its use',
+        command: (d) => `cat "$f"; f=${d}/b1.output`,
+        outcome: 'card',
+      },
+      {
+        name: 'a variable assigned in the loop',
+        command: (d) => `until [ -s ${d}/b1.output ]; do f=${d}/b1.output; done; cat "$f"`,
+        outcome: 'card',
+      },
+      {
+        name: 'a command substitution as the value',
+        command: (d) => `f=$(echo ${d}/b1.output); cat "$f"`,
+        outcome: 'card',
+      },
+      {
+        name: 'a backtick substitution as the value',
+        command: (d) => 'f=`echo ' + d + '/b1.output`; cat "$f"',
+        outcome: 'card',
+      },
+      {
+        name: 'a value that holds an expansion',
+        command: (d) => `d=${d}; f=$d/b1.output; cat "$f"`,
+        outcome: 'card',
+      },
+      {
+        name: 'a value that holds an expansion in double quotes',
+        command: (d) => `f="${d}/$HOME"; cat "$f"`,
+        outcome: 'card',
+      },
+      {
+        name: 'a value with a glob',
+        command: (d) => `f=${d}/*.output; cat $f`,
+        outcome: 'card',
+      },
+      {
+        name: 'a value with a tilde',
+        command: () => 'f=~/x; cat "$f"',
+        outcome: 'card',
+      },
+      {
+        name: 'a value that holds a space',
+        command: (d) => `f="${d}/b1.output /etc/passwd"; cat $f`,
+        outcome: 'card',
+      },
+      {
+        name: 'a variable inside a longer word',
+        command: (d) => `f=${d}; cat "$f/b1.output"`,
+        outcome: 'card',
+      },
+      {
+        name: 'a variable with a suffix',
+        command: (d) => `f=${d}/b1.output; cat $f.bak`,
+        outcome: 'card',
+      },
+      {
+        name: 'a braced variable',
+        command: (d) => `f=${d}/b1.output; cat "\${f}"`,
+        outcome: 'card',
+      },
+      {
+        name: 'a variable in single quotes stays literal text, so cat reads no own file',
+        command: (d) => `f=${d}/b1.output; cat '$f'`,
+        outcome: 'card',
+      },
+      {
+        name: 'a variable as a redirect target',
+        command: (d) => `f=${d}/b1.output; echo hi >$f`,
+        outcome: 'card',
+      },
+      {
+        name: 'a variable as the program',
+        command: (d) => `f=${d}/b1.output; $f`,
+        outcome: 'card',
+      },
+      {
+        name: 'IFS set to a path',
+        command: (d) => `IFS=${d}/b1.output; f=${d}/b1.output; cat $f`,
+        outcome: 'card',
+      },
+      {
+        name: 'PATH set to a path',
+        command: (d) => `PATH=${d}/b1.output; cat ${d}/b1.output`,
+        outcome: 'card',
+      },
+      {
+        name: 'an exported assignment',
+        command: (d) => `export f=${d}/b1.output; cat "$f"`,
+        outcome: 'card',
+      },
+      {
+        name: 'an assignment before a program, as its environment',
+        command: (d) => `f=${d}/b1.output cat "$f"`,
+        outcome: 'card',
+      },
+      {
+        name: 'an assignment run in the background',
+        command: (d) => `f=${d}/b1.output & cat "$f"`,
+        outcome: 'card',
+      },
+      {
+        name: 'assignments and nothing else',
+        command: (d) => `f=${d}/b1.output;`,
+        outcome: 'card',
+      },
+      {
+        name: 'an assignment that is not at the start',
+        command: (d) => `sleep 1; f=${d}/b1.output; cat "$f"`,
+        outcome: 'card',
+      },
+      {
+        name: 'a variable named for a file, then a read of another with the same prefix',
+        command: (d) => `f=${d}/b1.output; cat "$f" /etc/passwd`,
+        outcome: 'card',
+      },
       {
         name: 'a variable in the pattern',
         command: (d) => `grep "$x" ${d}/b1.output`,
