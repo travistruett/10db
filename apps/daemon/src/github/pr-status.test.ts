@@ -193,6 +193,7 @@ describe('Gh.prStatus', () => {
       url: INPUT.ref,
       state: 'OPEN',
       headSha: HEAD,
+      mergeBlocked: null,
       mergeable: 'CONFLICTING',
       checks: 'failing',
       failingChecks: [{ name: 'build', url: 'https://github.com/acme/widgets/actions/runs/1' }],
@@ -204,7 +205,7 @@ describe('Gh.prStatus', () => {
       '-R',
       'acme/widgets',
       '--json',
-      'url,state,statusCheckRollup,headRefOid,mergeable',
+      'url,state,statusCheckRollup,headRefOid,mergeStateStatus,mergeable',
     ]);
   });
 
@@ -234,6 +235,34 @@ describe('Gh.prStatus', () => {
       stdout: JSON.stringify({ url: INPUT.ref, state: 'MERGED', headRefOid: '' }),
     });
     await expect(bare.gh.prStatus(INPUT, CALL)).resolves.toMatchObject({ headSha: null });
+  });
+
+  // GitHub's mergeStateStatus: DIRTY is a merge conflict, BEHIND a base that moved on; everything
+  // else (CLEAN, BLOCKED, UNSTABLE, HAS_HOOKS, DRAFT, UNKNOWN, a value added later) is not 10db's call.
+  it.each([
+    ['DIRTY', 'conflicts'],
+    ['BEHIND', 'behind'],
+    ['CLEAN', null],
+    ['BLOCKED', null],
+    ['UNSTABLE', null],
+    ['HAS_HOOKS', null],
+    ['DRAFT', null],
+    ['UNKNOWN', null],
+    ['SOMETHING_NEW', null],
+    ['', null],
+    [null, null],
+    [undefined, null],
+  ])('reads mergeStateStatus %s as %s', async (mergeStateStatus, mergeBlocked) => {
+    const { gh } = view({
+      exitCode: 0,
+      stdout: JSON.stringify({
+        url: INPUT.ref,
+        state: 'OPEN',
+        statusCheckRollup: [],
+        ...(mergeStateStatus === undefined ? {} : { mergeStateStatus }),
+      }),
+    });
+    await expect(gh.prStatus(INPUT, CALL)).resolves.toMatchObject({ mergeBlocked });
   });
 
   it('reads a pull request with no checks', async () => {
@@ -356,6 +385,7 @@ describe('Gh.prStatus', () => {
         url: INPUT.ref,
         state: 'OPEN',
         headSha: null,
+        mergeBlocked: null,
         mergeable: 'UNKNOWN',
         checks,
         failingChecks: failing,
