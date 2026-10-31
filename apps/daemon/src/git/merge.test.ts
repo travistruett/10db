@@ -297,6 +297,36 @@ describe('mergeIntoBranch', () => {
       expect(rawGit('status', '--porcelain', '--untracked-files=all')).toBe('');
     });
 
+    it('names every conflicted path of a merge it leaves, those it would have settled included', async () => {
+      seed({
+        'packages/db/drizzle/meta/_journal.json': journal('0000_init'),
+        'README.md': '# base\n',
+      });
+      commitFiles(
+        {
+          'packages/db/drizzle/meta/_journal.json': journal('0000_init', '0001_mine'),
+          'README.md': '# ours\n',
+        },
+        'mine',
+      );
+      const base = onMain(
+        {
+          'packages/db/drizzle/meta/_journal.json': journal('0000_init', '0001_theirs'),
+          'README.md': '# theirs\n',
+        },
+        'theirs',
+      );
+      const before = snapshot();
+      expect(await resolving()).toMatchObject({
+        kind: 'conflict',
+        from: base,
+        paths: ['README.md'],
+        unresolved: [{ path: 'README.md' }],
+        conflicted: ['README.md', 'packages/db/drizzle/meta/_journal.json'],
+      });
+      expect(snapshot()).toEqual(before);
+    });
+
     it('leaves every conflict in a generated directory, with the reason given, when told it cannot be regenerated now', async () => {
       seed({
         'packages/db/drizzle/notes.md': 'a\nz\n',
