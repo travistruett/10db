@@ -1349,12 +1349,21 @@ describe('permission broker in a sandboxed lane', () => {
   });
 
   describe('Monitor', () => {
+    // Claude Code's own layout: `claude-<uid>`, then the session's working dir with every
+    // character but a letter or digit made `-`.
+    const claudeDir = `claude-${String(process.getuid?.() ?? 0)}`;
+    const slug = (): string => realpathSync(fileAccess.checkout).replace(/[^a-zA-Z0-9]/g, '-');
     const tasks = (): string =>
-      join(fileAccess.sandboxTemp.own, 'claude-501', 'slug', 'own-id', 'tasks');
+      join(fileAccess.sandboxTemp.own, claudeDir, slug(), 'own-id', 'tasks');
     const siblingTasks = (): string =>
-      join(fileAccess.sandboxTemp.own, 'claude-501', 'slug', 'other-id', 'tasks');
+      join(fileAccess.sandboxTemp.own, claudeDir, slug(), 'other-id', 'tasks');
     const otherLaneTasks = (): string =>
-      join(fileAccess.sandboxTemp.root, '10db-othabc', 'claude-501', 'slug', 'own-id', 'tasks');
+      join(fileAccess.sandboxTemp.root, '10db-othabc', claudeDir, slug(), 'own-id', 'tasks');
+    // Lookalikes the lane can make in its own temp dir: another uid's dir, another slug.
+    const otherUidTasks = (): string =>
+      join(fileAccess.sandboxTemp.own, 'claude-99999', slug(), 'own-id', 'tasks');
+    const otherSlugTasks = (): string =>
+      join(fileAccess.sandboxTemp.own, claudeDir, 'x', 'own-id', 'tasks');
 
     interface MonitorCase {
       readonly name: string;
@@ -1405,6 +1414,16 @@ describe('permission broker in a sandboxed lane', () => {
         command: (d) => `[ -s ${d}/later.output ]`,
         outcome: 'allow',
       },
+      {
+        name: 'a single quote inside a double-quoted pattern',
+        command: (d) => `grep -q "it's done" ${d}/b1.output`,
+        outcome: 'allow',
+      },
+      {
+        name: 'a double quote inside a single-quoted pattern',
+        command: (d) => `grep -q 'say "done"' ${d}/b1.output`,
+        outcome: 'allow',
+      },
       // Reads anywhere else.
       {
         name: 'a file in the checkout',
@@ -1425,6 +1444,41 @@ describe('permission broker in a sandboxed lane', () => {
       {
         name: 'another lane with the same session id',
         command: () => `cat ${otherLaneTasks()}/b1.output`,
+        outcome: 'card',
+      },
+      {
+        name: 'a lookalike task dir under another uid',
+        command: () => `cat ${otherUidTasks()}/b1.output`,
+        outcome: 'card',
+      },
+      {
+        name: 'a lookalike task dir under another slug',
+        command: () => `cat ${otherSlugTasks()}/b1.output`,
+        outcome: 'card',
+      },
+      {
+        name: 'a `$_` hidden behind a single quote in double quotes',
+        command: (d) => `echo "'" ../../../../../../../../etc/passwd; cat "${d}/$_"`,
+        outcome: 'card',
+      },
+      {
+        name: 'a `$HOME` hidden behind a single quote in double quotes',
+        command: (d) => `echo "'"; cat "${d}/$HOME"`,
+        outcome: 'card',
+      },
+      {
+        name: 'a quoted >/dev/null as a cat argument',
+        command: (d) => `cat '>/dev/null' ${d}/b1.output`,
+        outcome: 'card',
+      },
+      {
+        name: 'a quoted 2>&1 as a cat argument',
+        command: (d) => `cat "2>&1" ${d}/b1.output`,
+        outcome: 'card',
+      },
+      {
+        name: 'a quoted 2>/dev/null as an extra grep file',
+        command: (d) => `grep -q DONE ${d}/b1.output '2>/dev/null'`,
         outcome: 'card',
       },
       { name: 'stdin', command: () => 'grep -q DONE', outcome: 'card' },
@@ -1518,7 +1572,13 @@ describe('permission broker in a sandboxed lane', () => {
     ];
 
     beforeEach(() => {
-      for (const dir of [tasks(), siblingTasks(), otherLaneTasks()]) {
+      for (const dir of [
+        tasks(),
+        siblingTasks(),
+        otherLaneTasks(),
+        otherUidTasks(),
+        otherSlugTasks(),
+      ]) {
         mkdirSync(dir, { recursive: true });
         writeFileSync(join(dir, 'b1.output'), 'x');
       }

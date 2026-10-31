@@ -5,7 +5,7 @@ import { parseShell, type ShellSegment } from '../guard';
  * background with `until [ -s <file> ]; do sleep 2; done`, `until grep -q … <file>`, or a `grep`,
  * `tail` or `cat` of the file. Only a small grammar is read, and a command outside it is not one
  * this module vouches for: a program from the list below, plain words, and no expansion, nested
- * script, background job or redirection but `2>&1`, `>/dev/null` and `2>/dev/null`. Every file the
+ * script, background job or redirection but an unquoted `2>&1`, `>/dev/null` and `2>/dev/null`. Every file the
  * command names must pass `isOwnFile`, and every program that reads names at least one, unless a
  * pipe feeds it. So the command can only read the files `isOwnFile` accepts and write nothing.
  */
@@ -123,12 +123,27 @@ function programReads(program: string, args: readonly string[], reader: Reader):
   }
 }
 
-/** Whether the text uses an expansion, substitution or escape the scan cannot read, outside single quotes. */
-function expandsOutsideSingleQuotes(command: string): boolean {
-  let single = false;
+/**
+ * Whether the text holds something the word checks below cannot read: an expansion, substitution or
+ * escape (`$`, a backtick, `\`) outside single quotes, or a `<` or `>` inside quotes. Quotes are
+ * tracked as the shell does: a `'` inside double quotes is literal, and `$`, a backtick and `\` still
+ * count there. A quoted `<` or `>` is refused because a redirection is recognised by its text once
+ * quotes are removed, so `'>/dev/null'` as an argument would look like one.
+ */
+function hasUnreadText(command: string): boolean {
+  let quote: "'" | '"' | null = null;
   for (const ch of command) {
-    if (ch === "'") single = !single;
-    else if (!single && (ch === '$' || ch === '`' || ch === '\\')) return true;
+    if (quote === "'") {
+      if (ch === "'") quote = null;
+      else if (ch === '<' || ch === '>') return true;
+    } else if (quote === '"') {
+      if (ch === '"') quote = null;
+      else if (ch === '$' || ch === '`' || ch === '\\' || ch === '<' || ch === '>') return true;
+    } else if (ch === "'" || ch === '"') {
+      quote = ch;
+    } else if (ch === '$' || ch === '`' || ch === '\\') {
+      return true;
+    }
   }
   return false;
 }
@@ -171,7 +186,7 @@ function segmentReads(
  * anything the grammar above does not cover; the caller then asks a person.
  */
 export function readsOnlyOwnFiles(command: string, isOwnFile: (path: string) => boolean): boolean {
-  if (expandsOutsideSingleQuotes(command)) return false;
+  if (hasUnreadText(command)) return false;
   const parsed = parseShell(command);
   if (!parsed.certain || parsed.segments.length === 0) return false;
   let piped = false;

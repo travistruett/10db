@@ -316,31 +316,44 @@ export function fileAccessJudge(ctx: FileAccessContext): FileAccessJudge {
 }
 
 /**
- * True only for a file directly in this session's own Claude Code task output directory:
- * `<own temp dir>/claude-<uid>/<slug>/<providerSessionId>/tasks/<file>`. The file need not exist yet.
+ * Claude Code's name for a working dir's project: every character but an ASCII letter or digit made
+ * `-`. A name it would shorten and hash (over 200 characters) is not derived; such a session's task
+ * output is asked about.
  */
-function isOwnTaskOutput(realPath: string, ctx: FileAccessContext): boolean {
-  if (ctx.providerSessionId === null) return false;
-  const sessionId = foldPathCase(ctx.providerSessionId);
+const CLAUDE_SLUG_MAX = 200;
+function claudeProjectSlug(dir: string): string | null {
+  const slug = dir.replace(/[^a-zA-Z0-9]/g, '-');
+  return slug.length > CLAUDE_SLUG_MAX ? null : slug;
+}
+
+/**
+ * The session's own Claude Code task output directories, by exact derivation:
+ * `<own temp dir>/claude-<this process's uid>/<slug of the checkout>/<providerSessionId>/tasks`, for
+ * each spelling of the temp dir and the checkout. Only those: the lane can make a lookalike under its
+ * own temp dir (another uid, another slug) and write it, but not the real one, which the sandbox
+ * profile denies.
+ */
+function ownTaskDirs(ctx: FileAccessContext): string[] {
+  const uid = process.getuid?.();
+  if (ctx.providerSessionId === null || uid === undefined) return [];
+  const slugs = spellings(ctx.checkout)
+    .map(claudeProjectSlug)
+    .filter((slug): slug is string => slug !== null);
+  return spellings(ctx.sandboxTemp.own).flatMap((own) =>
+    slugs.map((slug) =>
+      foldPathCase(join(own, `claude-${String(uid)}`, slug, ctx.providerSessionId ?? '', 'tasks')),
+    ),
+  );
+}
+
+/** True only for a file directly in one of `dirs`. The file need not exist yet. */
+function isOwnTaskOutput(realPath: string, dirs: readonly string[]): boolean {
   const folded = foldPathCase(realPath);
-  for (const own of spellings(ctx.sandboxTemp.own)) {
-    const base = foldPathCase(own);
-    if (!folded.startsWith(`${base}/`)) continue;
-    const [claude, slug, id, tasks, file, ...rest] = folded.slice(base.length + 1).split('/');
-    if (
-      claude?.startsWith('claude-') === true &&
-      slug !== undefined &&
-      slug !== '' &&
-      id === sessionId &&
-      tasks === 'tasks' &&
-      file !== undefined &&
-      file !== '' &&
-      rest.length === 0
-    ) {
-      return true;
-    }
-  }
-  return false;
+  return dirs.some((dir) => {
+    if (!folded.startsWith(`${dir}/`)) return false;
+    const file = folded.slice(dir.length + 1);
+    return file !== '' && !file.includes('/');
+  });
 }
 
 /**
@@ -350,8 +363,10 @@ function isOwnTaskOutput(realPath: string, ctx: FileAccessContext): boolean {
  */
 export function isOwnTaskOutputPath(path: string, ctx: FileAccessContext): boolean {
   if (!isAbsolute(path)) return false;
+  const dirs = ownTaskDirs(ctx);
+  if (dirs.length === 0) return false;
   try {
-    return candidates(path, ctx).every((real) => isOwnTaskOutput(real, ctx));
+    return candidates(path, ctx).every((real) => isOwnTaskOutput(real, dirs));
   } catch (error) {
     if (error instanceof PathResolutionError) return false;
     throw error;
