@@ -11,6 +11,7 @@ import {
 } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
+  ClaimKind,
   WorkstreamState,
   type InboxItemDto,
   type ProjectDto,
@@ -89,7 +90,8 @@ let watcher: Watcher;
 
 beforeEach(() => {
   ({ store: base, close } = createTestStore());
-  state = createStateStore(base, createEventBus());
+  const bus = createEventBus();
+  state = createStateStore(base, bus);
   inbox = createInboxService({ state, onParkedAnswer: () => undefined });
   repo = createTempRepo();
   project = seedProject(base, { repoPath: repo.path });
@@ -102,6 +104,7 @@ beforeEach(() => {
   };
   watcher = createWatcher({
     state,
+    bus,
     inbox,
     git: createGit(),
     logger: recording,
@@ -799,6 +802,8 @@ describe('worktree checkouts', () => {
     title: string,
     claim: string,
     workstreamState: WorkstreamState = WorkstreamState.Running,
+    /** False launches it holding nothing, as the scheduler launches a task with no areas. */
+    claimed = true,
   ) {
     const dir = tempDir('worktree');
     dirs.push(dir);
@@ -826,7 +831,7 @@ describe('worktree checkouts', () => {
       acquireClaims(ctx, {
         projectId: project.id,
         workstreamId: workstream.id,
-        requests: claimRequestsForTask(task, project),
+        requests: claimed ? claimRequestsForTask(task, project) : [],
         leaseExpiresAt: '2999-01-01T00:00:00.000Z',
         areaScope: batch.id,
         copyHazards: copyHazardNames(project),
@@ -967,6 +972,52 @@ describe('worktree checkouts', () => {
       });
       await watcher.flush();
       expect(flags()).toEqual([]);
+    });
+
+    /**
+     * The 2026-10-31 cards. Every watched lane state is entered through the scheduler's acquire of the
+     * task's areas, and nothing releases an area claim while a lane runs, so a lane only lacks the claim
+     * when its task named none (a task filed from an accepted proposal has no areas) and it takes the
+     * claim later through request_claim. The writes the watcher saw before the grant were carded, and
+     * those cards stayed open beside a lane that by then held a claim covering every one of them.
+     */
+    it('resolves the cards for its writes once it takes the claim that covers them', async () => {
+      const lane = inWorktree('Alpha', 'repo', WorkstreamState.Running, false);
+      watcher.sync();
+      for (const rel of [...WHOLE_REPO, '.env.local']) writeAt(lane.path, rel);
+      await watcher.flush();
+      expect(flags()).toHaveLength(WHOLE_REPO.length + 1);
+      expect(flags()[0]?.detail).toMatchObject({ candidates: [lane.workstream.id] });
+      state.write((ctx) =>
+        acquireClaims(ctx, {
+          projectId: project.id,
+          workstreamId: lane.workstream.id,
+          requests: [{ kind: ClaimKind.Area, name: 'repo' }],
+          leaseExpiresAt: '2999-01-01T00:00:00.000Z',
+          areaScope: lane.batch.id,
+        }),
+      );
+      await watcher.flush();
+      expect(flags().map((f) => f.body)).toEqual([`${lane.path}: .env.local`]);
+    });
+
+    it("keeps a card that a claim taken in another copy doesn't cover", async () => {
+      const lane = inWorktree('Alpha', 'repo', WorkstreamState.Running, false);
+      const other = inWorktree('Beta', 'repo', WorkstreamState.Running, false);
+      watcher.sync();
+      writeAt(lane.path, 'docs/stray.md');
+      await watcher.flush();
+      state.write((ctx) =>
+        acquireClaims(ctx, {
+          projectId: project.id,
+          workstreamId: other.workstream.id,
+          requests: [{ kind: ClaimKind.Area, name: 'repo' }],
+          leaseExpiresAt: '2999-01-01T00:00:00.000Z',
+          areaScope: other.batch.id,
+        }),
+      );
+      await watcher.flush();
+      expect(flags().map((f) => f.body)).toEqual([`${lane.path}: docs/stray.md`]);
     });
 
     it('still flags a write no held claim covers', async () => {

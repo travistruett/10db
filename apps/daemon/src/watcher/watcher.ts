@@ -3,6 +3,9 @@ import { join, sep } from 'node:path';
 import {
   ACTIVE_STATES,
   ClaimKind,
+  EventType,
+  InboxKind,
+  InboxState,
   LANE_STATES,
   WorkstreamState,
   type BatchId,
@@ -16,11 +19,12 @@ import {
   getBatch,
   getProject,
   getWorkstream,
+  listInbox,
   listWorkstreams,
 } from '@10db/db';
 import type { Clock, Timer } from '../clock';
 import { checkoutOf } from '../delivery';
-import type { StateStore } from '../events';
+import type { EventBus, StateStore } from '../events';
 import { existsAsEntry, GitTrustError, type Git } from '../git';
 import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
@@ -92,8 +96,12 @@ export interface Watcher {
   stop(): void;
 }
 
+const STRAY_TITLE = 'Write outside every claim';
+
 export function createWatcher(deps: {
   readonly state: StateStore;
+  /** When given, a claim granted mid-run resolves the stray cards it now covers (`resolveCovered`). */
+  readonly bus?: EventBus;
   readonly inbox: InboxService;
   readonly git: Git;
   readonly logger: Logger;
@@ -169,7 +177,7 @@ export function createWatcher(deps: {
       deps.inbox.flag({
         projectId: project.id,
         workstreamId,
-        title: 'Write outside every claim',
+        title: STRAY_TITLE,
         body: labelled(site, rel),
         detail: { path: rel, candidates: [...candidates] },
         foldKey: strayFoldKey(site.scope, rel),
@@ -275,6 +283,34 @@ export function createWatcher(deps: {
     ordinary.forEach(single);
   }
 
+  /**
+   * Resolves each open stray card in a watched checkout whose path a claim held there by a lane now covers.
+   * A lane can run before it holds the claim its work needs (a task with no areas launches holding
+   * nothing, and takes one through request_claim), so the writes the watcher saw before the grant were
+   * carded; once the lane holds a claim over them they are its own work. Sensitive paths stay carded.
+   */
+  function resolveCovered(): void {
+    if (stopped) return;
+    const open = listInbox(db, { states: [InboxState.Open] }).filter(
+      (item) => item.kind === InboxKind.Flag && item.title === STRAY_TITLE,
+    );
+    if (open.length === 0) return;
+    for (const { projectId, batchId, root } of watched.values()) {
+      const project = getProject(db, projectId);
+      const site = siteOf(project, batchId, root);
+      for (const item of open) {
+        const path = item.detail?.['path'];
+        if (item.projectId !== projectId || typeof path !== 'string') continue;
+        if (item.body !== labelled(site, path) || isSensitivePath(path)) continue;
+        if (straysIn(project, batchId, [path], WATCHED_STATES, null).strays.length > 0) continue;
+        deps.inbox.resolve(
+          item.id,
+          'A lane working in this checkout now holds a claim covering it.',
+        );
+      }
+    }
+  }
+
   /** Logs a path dropped because it is Claude Code's bookkeeping, so the log shows what the list hides. */
   function logBookkeeping(
     projectId: ProjectId,
@@ -369,6 +405,16 @@ export function createWatcher(deps: {
     return chain;
   }
 
+  // Queued behind any batch in progress, so a card that batch raises is checked too; outside the write
+  // that published the grant, since resolving a card is a write of its own.
+  const unsubscribe =
+    deps.bus?.subscribe((event) => {
+      if (event.type !== EventType.ClaimAcquired || stopped) return;
+      chain = chain.then(resolveCovered).catch((error: unknown) => {
+        deps.logger.warn({ err: String(error) }, 'could not re-check stray cards after a claim');
+      });
+    }) ?? (() => undefined);
+
   return {
     sync() {
       if (stopped) return;
@@ -426,6 +472,7 @@ export function createWatcher(deps: {
 
     stop() {
       stopped = true;
+      unsubscribe();
       timer?.cancel();
       timer = null;
       for (const root of [...watched.keys()]) unwatch(root);
