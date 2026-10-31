@@ -760,7 +760,6 @@ export function createRunner(opts: RunnerOptions): Runner {
     row: WorkstreamRow,
     review: WorkstreamStep,
     checkout: string,
-    gate: string,
     signal: AbortSignal,
   ): Promise<string | null> {
     const config = getJudgeConfig(db);
@@ -776,10 +775,11 @@ export function createRunner(opts: RunnerOptions): Runner {
       opts.logger.warn({ workstreamId: id, err: error }, 'review size: the diff could not be read');
       return null;
     }
-    if (reviewSizeRule(task, changes, review) === 'review') return null;
+    if (reviewSizeRule(task, changes, review, getProject(db, row.projectId).hazards) === 'review')
+      return null;
     const answer = await opts.judge.choose({
       decision: JudgeDecision.ReviewSize,
-      state: reviewSizeState(task, changes, gate),
+      state: reviewSizeState(task, changes),
       question: REVIEW_SIZE_QUESTION,
       options: ['review', 'skip'],
       workstreamId: id,
@@ -2162,14 +2162,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       // A review the judge skips leaves the plan, as a QA step of docs alone does.
       const skipped =
         move.kind === 'advance' && planned?.role === StepRole.Review
-          ? await reviewSkippedByJudge(
-              id,
-              row,
-              planned,
-              checkout,
-              evidence.summary,
-              gateAbort.signal,
-            )
+          ? await reviewSkippedByJudge(id, row, planned, checkout, gateAbort.signal)
           : null;
       // The judge's call took time; a cancel that landed meanwhile must not be overwritten.
       if (stopRequested(ctl) === 'cancelled') {

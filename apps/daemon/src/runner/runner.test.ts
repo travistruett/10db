@@ -5211,6 +5211,7 @@ describe('the review size decision', () => {
     });
     expect(asked[0]?.state).toContain(`Task: ${task.title}`);
     expect(asked[0]?.state).toContain('src/api/a.txt');
+    expect(asked[0]?.state).toContain('Gate result: gate passed (exit 0)');
     expect(outcomes()).toEqual(['acted']);
     expect(
       reasons(workstream.id).some(
