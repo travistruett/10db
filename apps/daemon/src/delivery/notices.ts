@@ -25,6 +25,8 @@ export interface BaseNoticeContext {
   readonly migrationsFor?: string;
   /** The branch's migrations whose number the base already gives another. */
   readonly taken?: readonly TakenNumber[];
+  /** Why each conflicting path stayed a conflict, when 10db tried to settle it. */
+  readonly reasons?: ReadonlyMap<string, string>;
 }
 
 /** What a task held back from the migrations hazard is told, after the first paragraph. */
@@ -76,7 +78,8 @@ export const baseNotices = {
     context: BaseNoticeContext = {},
   ): Notice => {
     const taken = context.taken ?? [];
-    const conflicting = `${batch.baseBranch} on origin changed these files in ways that conflict with the batch's own changes:\n${listPaths(paths)}`;
+    const reasons = context.reasons ?? new Map<string, string>();
+    const conflicting = `${batch.baseBranch} on origin changed these files in ways that conflict with the batch's own changes, and 10db couldn't settle them itself:\n${listPaths(paths.map((p) => (reasons.has(p) ? `${p}: ${reasons.get(p) ?? ''}` : p)))}`;
     const held = migrationsHeld(batch, context, 'the conflict is resolved');
     return {
       key: NOTICE_KEY.baseConflict,
@@ -88,7 +91,7 @@ export const baseNotices = {
       body:
         taken.length > 0
           ? `${conflicting}${held}\n\n${regenerateSteps(batch, worktree, taken)}`
-          : `${conflicting}${held}\n\nBefore each gate 10db merges ${batch.baseBranch} into the batch's branch, so the gate tests what the pull request would merge. It can't resolve a conflict: a lane commits only its own files and never records a merge. Until the conflict is resolved, the gates test the branch without ${batch.baseBranch}'s newer commits, so a failure they fix still shows.\n\nOnce the pull request is open, resolve it there (GitHub's Update branch, then Resolve conflicts). Or merge it yourself in the worktree: ${worktreeMergeCommand(worktree, batch.baseBranch)}. That command turns the repository's hooks off, because lanes write in the worktree, so the hook config there is theirs to choose. The next gate tests the result, and this notice goes once the branch holds ${batch.baseBranch}.`,
+          : `${conflicting}${held}\n\nBefore each gate 10db merges ${batch.baseBranch} into the batch's branch, so the gate tests what the pull request would merge. It settles a conflict by itself when both sides only added lines at the same place, and regenerates the generated directories it knows the generator of; anything else needs a choice. A lane commits only its own files and never records a merge, so it can't make it. Until the conflict is resolved, the gates test the branch without ${batch.baseBranch}'s newer commits, so a failure they fix still shows.\n\nOnce the pull request is open, resolve it there (GitHub's Update branch, then Resolve conflicts). Or merge it yourself in the worktree: ${worktreeMergeCommand(worktree, batch.baseBranch)}. That command turns the repository's hooks off, because lanes write in the worktree, so the hook config there is theirs to choose. The next gate tests the result, and this notice goes once the branch holds ${batch.baseBranch}.`,
     };
   },
   /**

@@ -175,6 +175,8 @@ export const projects = sqliteTable('projects', {
   baseBranch: text('base_branch').notNull().default('main'),
   /** What a finished task's pull request does unless its task says otherwise. */
   landing: text('landing').$type<ProjectLanding>().notNull().default('merge'),
+  /** The branch of origin new tasks land in when `landing` is `branch`; null otherwise. */
+  landingBranch: text('landing_branch'),
   prTitlePrefix: text('pr_title_prefix'),
   /** Command prefixes a lane runs without a permission card, beyond the gate command. */
   allowedCommands: text('allowed_commands', { mode: 'json' })

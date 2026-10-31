@@ -185,7 +185,14 @@
       "type": "string",
       "enum": [
         "merge",
+        "branch",
         "hold"
+      ]
+    },
+    "landingBranch": {
+      "type": [
+        "string",
+        "null"
       ]
     },
     "prTitlePrefix": {
@@ -740,6 +747,7 @@
     "delivery",
     "baseBranch",
     "landing",
+    "landingBranch",
     "prTitlePrefix",
     "allowedCommands",
     "sandboxLoopback",

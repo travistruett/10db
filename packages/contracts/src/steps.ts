@@ -5,6 +5,12 @@ import { Effort, ROLE_SCORE, ScoreKind, StepRole, StepStatus, ToolAccess, Verdic
 /** Longest result a step may record: a plan or a review's notes. */
 export const MAX_STEP_SUMMARY = 8000;
 
+/**
+ * The line 10db puts after a review's notes before the follow-up tasks that review filed, one per
+ * line, so the builder reads them in the step's result.
+ */
+export const FOLLOW_UPS_HEADING = 'Follow-up tasks filed:';
+
 export const StepResult = z.object({
   summary: z.string().min(1).max(MAX_STEP_SUMMARY),
   verdict: z.enum(Verdict).nullable(),

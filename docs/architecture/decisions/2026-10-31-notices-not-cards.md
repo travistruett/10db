@@ -3,7 +3,8 @@
 - **Date:** 2026-10-31
 - **Amends:** `decisions/2026-10-29-per-copy-hazards-and-waiting-claims.md` (the wait is a notice, not a card),
   `decisions/2026-10-29-gate-with-base.md` (a conflict with the base is a notice, not a card) and
-  `decisions/2026-10-30-migrations-hazard-takes-the-base-first.md` (a held hazard names no card)
+  `decisions/2026-10-30-migrations-hazard-takes-the-base-first.md` (a held hazard names no card) and
+  `decisions/2026-10-30-a-batch-settles-its-own-conflicts-with-main.md` (the conflict it leaves is a notice)
 
 ## Decision
 
@@ -13,7 +14,7 @@
   asked nothing. They are now notices, shown where the builder already looks for a task: its card on the Board and
   its drawer.
 - **A `Notice`** (`packages/contracts/src/entities.ts`: `key`, `tone` `info` or `warning`, one `line`, a `body`) is
-  stored in two places (migration `0017`): `workstreams.notice`, one per run, and `batches.notices`, a list keyed by
+  stored in two places (migration `0018`): `workstreams.notice`, one per run, and `batches.notices`, a list keyed by
   `key`, which every task of the batch shows. `WorkstreamDto.notice` and `BatchDto.notices` carry them, both with
   defaults so an older body still parses.
   - A task **waiting for another task's claim** (`request_claim`, `mcp/claim-wait.ts`) has the run notice
@@ -22,8 +23,8 @@
     "still waiting" answer of `request_claim` has `inboxId: null`.
   - A **batch that conflicts with its base**, or whose base is kept out by files git doesn't track, has the batch
     notice `base-conflict` or `base-kept` (`delivery/notices.ts`, `baseNotices`), written by the gate's base update. Its
-    body is what the card said: the files, how to resolve them, and for a renumbered migration the steps to
-    regenerate it. It is cleared when a gate finds the branch holds the base. Retiring the worktree clears it, except a
+    body is what the card said: the files, each with why 10db couldn't settle it, how to resolve them, and for a
+    renumbered migration the steps to regenerate it, read from every conflicted path, settled ones included. It is cleared when a gate finds the branch holds the base. Retiring the worktree clears it, except a
     conflict that stood when the batch shipped: that becomes "Pull request conflicts with <base>". Once shipped, the
     pull request watch (`delivery/pr-watch.ts`) follows GitHub's `mergeable`: `MERGEABLE` clears the notice (the
     builder resolved it, or Update branch did), `CONFLICTING` writes "Pull request conflicts with <base>" when no
@@ -45,9 +46,9 @@
   conflict changes nothing, and the builder has nothing to dismiss. There is no card to fold, so a dismissed card
   can't come back.
 - **A conflict that "needs the builder"** is the job of "Resolve a batch's conflicts with main by itself": it
-  settles what it can and raises the one card for the rest. This change gives that card nothing to compete with: the
-  gate no longer raises a conflict card. Until it lands, a conflict that stands is shown on the tasks and, once
-  shipped, on the pull request.
+  settles what it can, and what it leaves is the `base-conflict` notice above, not a card. A merge that stands but
+  whose generated directories 10db couldn't regenerate still raises its one `base-regenerate:<id>` card: that is not
+  one of the cards this decision moves.
 - **What stays in the Inbox from here** is a card with answer options, or a question. Cards an earlier build raised for
   a batch's conflict and for waiting (`base-conflict:<id>`, `base-kept:<id>`, `detail.waitingFor`) are still closed:
   the base cards whenever a gate writes or clears the batch's base notice and at worktree removal, the wait cards at

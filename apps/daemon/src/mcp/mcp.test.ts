@@ -17,7 +17,9 @@ import {
   insertSession,
   insertTask,
   insertWorkstream,
+  listBoardColumns,
   listInbox,
+  listTasks,
   patchWorkstream,
   releaseClaims,
   schema,
@@ -26,7 +28,13 @@ import {
   transitionBatch,
   type Store,
 } from '@10db/db';
-import type { ProjectDto, WorkstreamId, WorkstreamStep } from '@10db/contracts';
+import {
+  MAX_STEP_SUMMARY,
+  parseFindings,
+  type ProjectDto,
+  type WorkstreamId,
+  type WorkstreamStep,
+} from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { createTempRepo, isolatedGitEnv, seedWorkstream, tempDir } from '../../test/fixtures';
@@ -1371,6 +1379,112 @@ describe('complete_step', () => {
       verdict: 'approve',
     });
     expect(getWorkstream(base.db, s.workstream.id).steps[1]?.result?.verdict).toBeNull();
+  });
+
+  describe('follow-ups', () => {
+    const followUps = [
+      {
+        title: 'Make errors name the file',
+        description: 'The upload error says nothing about which file failed.',
+        acceptanceCriteria: ['The error names the file'],
+      },
+      { title: 'Cover the empty badge', description: 'No test renders it empty.' },
+    ];
+    const tasksOf = (projectId: ProjectDto['id']) => listTasks(base.db, projectId);
+
+    it('files each one as an Icebox task in the same project on the same landing, and names them in the result', async () => {
+      const s = await onStep('review');
+      const first = await s.call('complete_step', {
+        opId: 'op-step-0010',
+        summary: 'Fixed as asked.',
+        verdict: 'approve',
+        followUps,
+      });
+      expect(first.isError).toBe(false);
+      const filed = tasksOf(s.project.id).filter((t) => t.id !== s.task.id);
+      expect(filed.map((t) => t.title)).toEqual(followUps.map((f) => f.title));
+      const icebox = listBoardColumns(base.db, s.project.id)[0];
+      for (const task of filed) {
+        expect(task).toMatchObject({
+          projectId: s.project.id,
+          status: 'open',
+          boardColumnId: icebox?.id,
+          landing: s.task.landing,
+        });
+        expect(task.description).toContain(s.task.title);
+        expect(task.description).toContain(s.task.id);
+      }
+      expect(filed[0]?.acceptanceCriteria).toEqual(['The error names the file']);
+      expect(first.json).toMatchObject({
+        followUps: filed.map((t) => ({ taskId: t.id, title: t.title })),
+      });
+      const result = getWorkstream(base.db, s.workstream.id).steps[1]?.result;
+      expect(result?.summary.startsWith('Fixed as asked.')).toBe(true);
+      expect(result?.summary).toContain('Follow-up tasks filed:');
+      for (const task of filed) expect(result?.summary).toContain(`${task.id} ${task.title}`);
+    });
+
+    it('files them once on an opId replay', async () => {
+      const s = await onStep('review');
+      const args = { opId: 'op-step-0011', summary: 'Fine.', verdict: 'approve', followUps };
+      const first = await s.call('complete_step', args);
+      const retry = await s.call('complete_step', args);
+      expect(retry.json).toEqual(first.json);
+      expect(tasksOf(s.project.id)).toHaveLength(1 + followUps.length);
+    });
+
+    it('keeps a rejection a rejection when it also files follow-ups', async () => {
+      const s = await onStep('review');
+      await s.call('complete_step', {
+        opId: 'op-step-0012',
+        summary: '1. BLOCKING a.ts:1 still broken.',
+        verdict: 'reject',
+        followUps: followUps.slice(0, 1),
+      });
+      const result = getWorkstream(base.db, s.workstream.id).steps[1]?.result;
+      expect(result?.verdict).toBe('reject');
+      expect(parseFindings(result?.summary ?? '')).toHaveLength(1);
+    });
+
+    it('files no follow-ups from a plan step, and says why', async () => {
+      const s = await onStep('plan');
+      const result = await s.call('complete_step', {
+        opId: 'op-step-0013',
+        summary: '1. Do it.',
+        verdict: null,
+        followUps,
+      });
+      expect(result.isError).toBe(true);
+      expect(result.text).toContain('review');
+      expect(tasksOf(s.project.id)).toHaveLength(1);
+    });
+
+    it('records nothing when the result with its follow-up list would be too long', async () => {
+      const s = await onStep('review');
+      const result = await s.call('complete_step', {
+        opId: 'op-step-0014',
+        summary: 'x'.repeat(MAX_STEP_SUMMARY),
+        verdict: 'approve',
+        followUps,
+      });
+      expect(result.isError).toBe(true);
+      expect(result.text).toContain('shorter');
+      expect(tasksOf(s.project.id)).toHaveLength(1);
+      expect(getWorkstream(base.db, s.workstream.id).steps[1]?.result).toBeNull();
+    });
+
+    it('leaves the result as written when there are none', async () => {
+      const s = await onStep('review');
+      const result = await s.call('complete_step', {
+        opId: 'op-step-0015',
+        summary: 'Looks right.',
+        verdict: 'approve',
+      });
+      expect(result.json).toMatchObject({ followUps: [] });
+      expect(getWorkstream(base.db, s.workstream.id).steps[1]?.result?.summary).toBe(
+        'Looks right.',
+      );
+    });
   });
 
   it('accepts a plan with no verdict', async () => {

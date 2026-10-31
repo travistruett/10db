@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "a49c4b2d-8832-4633-b0ec-4db744c68a9b",
+  "id": "9afcc3cc-5682-4f54-8701-38aa411acb3c",
   "prevId": "6b3c44d5-ff94-4e35-b561-41d982bd3142",
   "tables": {
     "aa_models": {
@@ -347,14 +347,6 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
-        },
-        "notices": {
-          "name": "notices",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'[]'"
         },
         "created_at": {
           "name": "created_at",
@@ -1955,6 +1947,13 @@
           "autoincrement": false,
           "default": "'merge'"
         },
+        "landing_branch": {
+          "name": "landing_branch",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "pr_title_prefix": {
           "name": "pr_title_prefix",
           "type": "text",
@@ -3185,13 +3184,6 @@
         },
         "run_next_at": {
           "name": "run_next_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "notice": {
-          "name": "notice",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

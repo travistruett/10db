@@ -330,6 +330,33 @@ export const baseKeptKey = (batchId: BatchId): string => `base-kept:${batchId}`;
 export const autoMergeOffKey = (projectId: ProjectId): string => `auto-merge-off:${projectId}`;
 export const autoMergeRefusedKey = (batchId: BatchId): string => `auto-merge-refused:${batchId}`;
 
+/** The fold key of a batch's regeneration-failed card; the builder dismisses it once the files are regenerated. */
+export const baseRegenerateKey = (batchId: BatchId): string => `base-regenerate:${batchId}`;
+
+/**
+ * What delivery tells the builder when a worktree batch's branch took its base but its generated files
+ * could not be made again. A conflict or files in the way are notices instead (`notices.ts`).
+ */
+export const baseCards = {
+  /**
+   * 10db merged the base, taking its version of the generated directories `dirs`, but couldn't
+   * regenerate them. `why` is the reason; `restored` says it removed what a failed run wrote there.
+   * `worktree` is the batch's worktree.
+   */
+  regenerate: (
+    batch: BatchDto,
+    worktree: string,
+    dirs: readonly string[],
+    problem: { readonly why: string; readonly logPath: string | null; readonly restored: boolean },
+  ): Card => ({
+    title: `Batch "${batch.title}": 10db couldn't regenerate files after merging ${batch.baseBranch}`,
+    body: `10db merged ${batch.baseBranch} into the batch's branch. Both sides changed generated files, which are regenerated from their sources and never merged by hand, so 10db took ${batch.baseBranch}'s version of these directories to regenerate them:\n${listPaths(dirs)}\n\nBut ${problem.why}.${problem.restored ? ` 10db removed what the failed run wrote there, so they hold ${batch.baseBranch}'s version as the merge left them.` : ''}\n\nRegenerate them in the worktree ${worktree} (each package's generate script) and commit the result. Until then the gates see generated files that may not match the sources${problem.logPath === null ? '' : `. The log: ${problem.logPath}`}.`,
+    foldKey: baseRegenerateKey(batch.id),
+    refresh: true,
+    detail: { batchId: batch.id, paths: dirs.slice(0, MAX_LISTED_PATHS) },
+  }),
+};
+
 /**
  * A refused start's card names its tasks (and the batch it tried to join), so a client can tell a
  * refused start from a join that is still on its way: a joined task gets a workstream instead.

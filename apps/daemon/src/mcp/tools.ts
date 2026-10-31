@@ -2,7 +2,9 @@ import {
   ClaimKind,
   currentStep,
   EventType,
+  FOLLOW_UPS_HEADING,
   InvalidError,
+  MAX_STEP_SUMMARY,
   McpToolName,
   McpToolOutputs,
   QuestionCategory,
@@ -25,6 +27,7 @@ import {
   insertDeviation,
   insertEvidence,
   insertHandoff,
+  insertFollowUpTask,
   insertInboxItem,
   insertProposal,
   insertSource,
@@ -470,7 +473,30 @@ export function createToolHandlers(
             throw new InvalidError('This review step needs a verdict: approve or reject.');
           // Only a review role gives a verdict; a plan step's is dropped so a later reader cannot mistake it for one.
           const verdict = REVIEW_ROLES.includes(step.role) ? input.verdict : null;
-          const result = { summary: input.summary, verdict, sessionId, at: ctx.now };
+          if (input.followUps.length > 0 && !REVIEW_ROLES.includes(step.role))
+            throw new InvalidError(
+              'Only a review, plan review or QA step files follow-up tasks; leave followUps out of a plan.',
+            );
+          const filed = input.followUps.map((followUp) => {
+            const task = insertFollowUpTask(ctx, row.taskId, followUp);
+            return { taskId: task.id, title: task.title };
+          });
+          // The builder finds the follow-ups from the step's result, so they are written into it.
+          const summary =
+            filed.length === 0
+              ? input.summary
+              : [
+                  input.summary,
+                  '',
+                  FOLLOW_UPS_HEADING,
+                  ...filed.map((f) => `- ${f.taskId} ${f.title}`),
+                ].join('\n');
+          // Throwing here rolls back the tasks filed above.
+          if (summary.length > MAX_STEP_SUMMARY)
+            throw new InvalidError(
+              `Your notes and the list of follow-up tasks 10db adds are over ${String(MAX_STEP_SUMMARY)} characters; send shorter notes.`,
+            );
+          const result = { summary, verdict, sessionId, at: ctx.now };
           patchWorkstream(ctx, workstreamId, null, {
             steps: row.steps.map((s, i) => (i === row.stepIndex ? { ...s, result } : s)),
           });
@@ -478,9 +504,14 @@ export function createToolHandlers(
             type: EventType.StepChanged,
             entityType: 'workstream',
             entityId: workstreamId,
-            data: { stepIndex: row.stepIndex, role: step.role, verdict },
+            data: {
+              stepIndex: row.stepIndex,
+              role: step.role,
+              verdict,
+              followUps: filed.map((f) => f.taskId),
+            },
           });
-          const reply = { instruction: 'Recorded. End your turn now.' };
+          const reply = { instruction: 'Recorded. End your turn now.', followUps: filed };
           if (!earlier) return record('complete_step', input.opId, reply, ctx);
           replaceToolOp(ctx, {
             workstreamId,

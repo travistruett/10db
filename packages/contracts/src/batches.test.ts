@@ -392,6 +392,7 @@ describe('worktree mode contracts', () => {
       delivery: 'local',
       baseBranch: 'main',
       landing: 'merge',
+      landingBranch: null,
       prTitlePrefix: null,
       allowedCommands: [],
       sandboxLoopback: false,
