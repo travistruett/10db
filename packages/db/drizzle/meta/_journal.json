@@ -127,6 +127,13 @@
       "when": 1793428367620,
       "tag": "0017_woozy_tyger_tiger",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1793466870619,
+      "tag": "0018_sloppy_mojo",
+      "breakpoints": true
     }
   ]
 }

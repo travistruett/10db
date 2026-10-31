@@ -53,6 +53,38 @@ export interface PromptInput {
   readonly revisedBy: { readonly role: StepRole; readonly personaName: string } | null;
   /** The session runs in the lane sandbox, which loads no repo settings and blocks paths outside its profile. */
   readonly sandboxed?: boolean;
+  /** Calls the builder denied for this workstream, in any of its sessions; every session is told. */
+  readonly denials?: readonly Denial[];
+}
+
+/** A call the builder denied, and the note they gave. */
+export interface Denial {
+  readonly toolName: string;
+  readonly summary: string;
+  readonly note: string | null;
+}
+
+/** The longest call or note a prompt repeats; a denial is a pointer, not a transcript. */
+const MAX_DENIAL_CHARS = 400;
+
+const clip = (text: string): string =>
+  text.length > MAX_DENIAL_CHARS ? `${text.slice(0, MAX_DENIAL_CHARS)}…` : text;
+
+/**
+ * What the builder denied in this workstream, in words that cover equivalents. Empty when nothing
+ * was denied. A denial is the builder's answer for the whole workstream, so a new session, a resumed
+ * one and a compacted one all see it.
+ */
+function renderDenials(denials: readonly Denial[]): string[] {
+  if (denials.length === 0) return [];
+  const lines = denials.map(
+    (d) =>
+      `${d.toolName}: ${clip(d.summary)}${d.note ? `\n  Note from the builder: ${clip(d.note)}` : ''}`,
+  );
+  return [
+    'The builder denied these calls in this workstream. Each denial covers any equivalent: the same effect written another way (another program, a loop, a script, a wrapper or a different tool) is denied too. Do not run them or equivalents; work without them, or ask with ask_human.',
+    bullets(lines),
+  ];
 }
 
 export const HANDOFF_NUDGE =
@@ -357,11 +389,13 @@ export function buildSessionPrompt(input: PromptInput): string {
     '',
     'Context pack:',
     renderKnowledge(input.contextPack),
+    ...(input.denials && input.denials.length > 0 ? ['', ...renderDenials(input.denials)] : []),
     '',
     actionSection(input),
   ].join('\n');
 }
 
-export function compactionReinjection(pack: ContextPack): string {
-  return `10db: your conversation was compacted. Here is your context pack again:\n${JSON.stringify(pack, null, 2)}`;
+export function compactionReinjection(pack: ContextPack, denials: readonly Denial[] = []): string {
+  const again = `10db: your conversation was compacted. Here is your context pack again:\n${JSON.stringify(pack, null, 2)}`;
+  return denials.length === 0 ? again : [again, '', ...renderDenials(denials)].join('\n');
 }
