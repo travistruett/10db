@@ -42,7 +42,14 @@ import { takeFoundHostsReading } from '../registries';
 import { BlockedRun, type GateResult, type GateRunner } from '../verify';
 import { gateNote, type BaseUpdate, type BaseUpdates } from './base-update';
 import { settleBranch } from './branch-cleanup';
-import { mergeCards, shipCards, wrongBranchCard, type Card, type ShipFailure } from './cards';
+import {
+  mergeCards,
+  nothingToWaitFor,
+  shipCards,
+  wrongBranchCard,
+  type Card,
+  type ShipFailure,
+} from './cards';
 import { allCheckouts, projectAtCheckout } from './checkout';
 import { returnCheckout } from './checkout-return';
 import { resolveShipCards } from './stale-cards';
@@ -450,11 +457,40 @@ export function createShipper(deps: ShipperDeps): Shipper {
       deps.logger.info({ batchId: batch.id, repo, prUrl }, 'auto-merge turned on');
     } catch (error) {
       if (signal.aborted) throw error;
+      if (nothingToWaitFor(error)) {
+        await mergeNow(batch, project, repo, prUrl, signal);
+        return;
+      }
       deps.logger.warn(
         { batchId: batch.id, prUrl, err: error instanceof Error ? error.message : String(error) },
         'auto-merge not turned on',
       );
       raise(deps.inbox, project.id, mergeCards.refused(batch, prUrl, error));
+    }
+  }
+
+  /**
+   * GitHub said the pull request has nothing to wait for (its base has no required checks), so
+   * auto-merge has no use: squash-merge it now, as auto-merge would have. The pull request watch
+   * reads the merge next, which is what puts its tasks in Done. A refusal is a card.
+   */
+  async function mergeNow(
+    batch: BatchDto,
+    project: ProjectDto,
+    repo: string,
+    prUrl: string,
+    signal: AbortSignal,
+  ): Promise<void> {
+    try {
+      await deps.gh.prMerge({ repo, url: prUrl }, ghCall(deps, signal));
+      deps.logger.info({ batchId: batch.id, repo, prUrl }, 'pull request merged at once');
+    } catch (error) {
+      if (signal.aborted) throw error;
+      deps.logger.warn(
+        { batchId: batch.id, prUrl, err: error instanceof Error ? error.message : String(error) },
+        'pull request not merged at once',
+      );
+      raise(deps.inbox, project.id, mergeCards.mergeRefused(batch, prUrl, error));
     }
   }
 

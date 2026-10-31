@@ -522,7 +522,9 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
       case 'conflict': {
         const { paths } = merged;
         const reasons = new Map((merged.unresolved ?? []).map((u) => [u.path, u.reason]));
-        const taken = await takenIn(path, merged.from, paths);
+        // Read every conflicted path, not only the ones 10db left: a journal it would have settled by
+        // taking the base's directory still shows the migration the branch must renumber.
+        const taken = await takenIn(path, merged.from, merged.conflicted ?? paths);
         tell(batch, () => {
           raise(
             ctx.inbox,
