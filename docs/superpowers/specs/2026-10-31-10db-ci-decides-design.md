@@ -119,11 +119,13 @@ keyed by the root, so none is raised twice. The required checks are stored as `p
 | every required check `pass` or `skipping`         | `passing`           |                                                                |
 | any `pending`, or `cancel`, and none `fail`       | `pending`           | a cancelled run is usually one a newer push replaced           |
 | any `fail`                                        | `failing`           | the failing jobs, with links                                   |
-| "no required checks reported" (exit 1, on stderr) | `none`              | before GitHub lists the runs, or a base without required checks |
+| "no required checks reported" (exit 1, on stderr) | `none`              | a base with checks but none of them required |
+| "no checks reported" (exit 1, on stderr)          | `none`              | the head has no checks: before GitHub lists the runs, or no CI |
 | any other error                                   | unchanged           | the watch's unknown read, as today                             |
 
-The parser takes the exit code and both streams together; "none" is matched on stderr only, so a network or auth
-failure is never read as no required checks. `gh pr view` also gains `mergeStateStatus`, stored as
+The parser takes the exit code and both streams together; "none" is matched against the whole of stderr, so a
+network or auth failure is never read as no required checks. What gh 2.83.2 prints is recorded in
+`docs/architecture/research/spike-15-gh-ci-checks.md`. `gh pr view` also gains `mergeStateStatus`, stored as
 `pr_merge_blocked` (`conflicts` for `DIRTY`, `behind` for `BEHIND`, else null): GitHub runs no workflow on a pull
 request that conflicts, so the card says that rather than "CI running" (§5).
 
