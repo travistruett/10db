@@ -103,7 +103,7 @@ describe('a tool the classifier may not decide is handed to the broker', () => {
     ['AskUserQuestion', { questions: [] }],
     ['BashOutput', { bash_id: '1' }],
     ['KillShell', { shell_id: '1' }],
-    ['NotebookRead', { notebook_path: '/tmp/x' }],
+    ['NotebookRead', { notebook_path: 'notebook.ipynb' }],
     ['mcp__10db__complete_step', {}],
   ])('%s -> allow, the classifier may decide it', (tool, input) => {
     expect(pre(tool, input, ALL_HAZARDS)).toBe('allow');
