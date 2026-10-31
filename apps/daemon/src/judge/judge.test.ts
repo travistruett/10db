@@ -263,6 +263,8 @@ describe('judge.choose falls back', () => {
       () => json(systemOneBody({ maybe: 0.9, review: 0.1 })),
       /maybe/,
     ],
+    ['a probability above one', () => json(systemOneBody({ review: 0.1, skip: 1.4 })), /answer/i],
+    ['a probability below zero', () => json(systemOneBody({ review: -0.3, skip: 0.9 })), /answer/i],
     [
       'a request that fails',
       () => {
