@@ -106,10 +106,12 @@ import {
   claimSandboxTempRoot,
   createGateSandbox,
   createLaneSandbox,
+  createLedgerSweep,
   LANE_TEMP_ROOT,
   reapLaneProcessLedgers,
   systemProcessTable,
   type LaneProcessSetup,
+  type LedgerSweep,
   type SandboxRuntime,
 } from '../sandbox';
 import { createScheduler, type Scheduler } from '../scheduler';
@@ -418,14 +420,34 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // Before recovery and before any session: processes the lane sessions of a daemon that died left
   // running (a lane's background loops reparent to launchd when their session goes) are stopped
   // from the ledgers those sessions kept. Each ledger names its daemon: one sharing the root that
-  // still runs keeps its own, and every dead one's is reaped even then. A machine whose processes
-  // can't be read leaves the ledgers for the next start.
+  // still runs keeps its own, and every dead one's is reaped even then. What a machine whose
+  // processes can't be read leaves is swept again while the daemon runs, and so is what a session
+  // of this daemon could not stop as it ended; the next start takes whatever is still left.
+  const laneProcesses = opts.sandbox?.processes ?? { table: systemProcessTable };
+  let ledgerSweep: LedgerSweep | null = null;
   if (tempRoot && sandboxTempRoot !== null) {
+    let sweepFailing = false;
+    ledgerSweep = createLedgerSweep(sandboxTempRoot, laneProcesses, {
+      onSwept: (report) => {
+        sweepFailing = false;
+        if (report.ledgers === 0) return;
+        logger.info(
+          { ledgers: report.ledgers, stopped: report.stopped },
+          'stopped the processes ended lane sessions left running',
+        );
+      },
+      onFailed: (error) => {
+        // Once until a sweep reads the machine again: one runs every half minute meanwhile.
+        if (sweepFailing) return;
+        sweepFailing = true;
+        logger.warn(
+          { err: error instanceof Error ? error.message : String(error) },
+          'could not stop the processes ended lane sessions left running; trying again',
+        );
+      },
+    });
     try {
-      const reaped = await reapLaneProcessLedgers(
-        sandboxTempRoot,
-        opts.sandbox?.processes ?? { table: systemProcessTable },
-      );
+      const reaped = await reapLaneProcessLedgers(sandboxTempRoot, laneProcesses);
       if (reaped.ledgers > 0) {
         logger.info(
           { ledgers: reaped.ledgers, stopped: reaped.stopped },
@@ -435,8 +457,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     } catch (error) {
       logger.error(
         { err: error instanceof Error ? error.message : String(error) },
-        'could not stop the processes a previous daemon’s lane sessions left running',
+        'could not stop the processes a previous daemon’s lane sessions left running; trying again while the daemon runs',
       );
+      ledgerSweep.later();
     }
   }
   // Shared by every gate: a task's, at its green run, and a batch's, at ship. One limiter caps them
@@ -644,6 +667,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
           gitDirs: (repo) => git.gitDirs(repo),
           ...(opts.sandbox.tmpRoot === undefined ? {} : { tmpRoot: opts.sandbox.tmpRoot }),
           ...(opts.sandbox.processes === undefined ? {} : { processes: opts.sandbox.processes }),
+          ...(ledgerSweep === null ? {} : { ledgers: ledgerSweep }),
+          log: logger.child({ component: 'sandbox' }),
           runtime,
         })
       : null;
@@ -893,6 +918,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       await createdRunner.stopAll('shutdown');
       // After the runner: a lane or gate held for load ends on its own stop, and nothing samples again.
       loadGuard.stop();
+      // After the runner too: what its sessions could not stop stays for the next start.
+      ledgerSweep?.stop();
       await preparer.idle();
       state.write((ctx) => {
         setAppSetting(ctx, CLEAN_SHUTDOWN_KEY, { at: ctx.now });

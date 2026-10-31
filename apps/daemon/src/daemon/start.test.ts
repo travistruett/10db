@@ -533,6 +533,68 @@ describe('startDaemon', () => {
     },
   );
 
+  // Same temp root as above.
+  it.skipIf(SANDBOXED)(
+    'tries again while it runs to stop what a dead daemon’s lane sessions left, when it could not read the machine at start',
+    async () => {
+      const tmpRoot = realpathSync(mkdtempSync('/tmp/sbd-'));
+      const T = 'Thu Oct 30 12:00:00 2026';
+      const dead = spawn(process.execPath, ['-e', ''], { stdio: 'ignore' });
+      const deadPid = dead.pid ?? 0;
+      await new Promise((resolve) => dead.once('exit', resolve));
+      let rows = [
+        { pid: process.pid, ppid: 1, pgid: process.pid, startedAt: T },
+        { pid: 7001, ppid: 1, pgid: 7001, startedAt: T },
+      ];
+      const ledger = join(tmpRoot, `10db-proc-${String(deadPid)}-0123456789ab.json`);
+      // An overloaded Mac: `ps` can't fork as the daemon starts, and can again later.
+      let readable = false;
+      const timers = new ManualClock();
+      try {
+        writeFileSync(
+          ledger,
+          JSON.stringify({
+            version: 1,
+            daemonGroup: 7000,
+            members: [{ pid: 7001, pgid: 7001, startedAt: T }],
+          }),
+        );
+        daemon = await startDaemon({
+          dataDir: dir.path,
+          port: 0,
+          adapter: new FakeAdapter({}),
+          logLevel: 'warn',
+          sandbox: {
+            tmpRoot,
+            runtime: FAKE_SRT,
+            processes: {
+              table: () =>
+                readable
+                  ? Promise.resolve(rows.map((r) => ({ ...r })))
+                  : Promise.reject(new Error('ps: fork failed')),
+              signal: (target) => {
+                rows = rows.filter((r) => (target < 0 ? r.pgid !== -target : r.pid !== target));
+                return true;
+              },
+              sleep: () => Promise.resolve(),
+              timers,
+            },
+          },
+          ...QUIET,
+        });
+        expect(existsSync(ledger)).toBe(true);
+        readable = true;
+        timers.advance(30_000);
+        await waitFor(() => !existsSync(ledger));
+        expect(rows.map((r) => r.pid)).toEqual([process.pid]);
+      } finally {
+        await daemon?.stop();
+        daemon = null;
+        rmSync(tmpRoot, { recursive: true, force: true });
+      }
+    },
+  );
+
   it('waits for an identity probe in flight before it closes the database', async () => {
     const repo = createTempRepo();
     try {

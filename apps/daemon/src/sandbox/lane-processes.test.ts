@@ -1,10 +1,21 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  closeSync,
+  existsSync,
+  mkdtempSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { ManualClock } from '../clock';
 import {
   createLaneProcessWatch,
+  createLedgerSweep,
   createProcessLedger,
   reapLaneProcessLedgers,
   removeProcessLedger,
@@ -473,6 +484,74 @@ describe('a lane process watch', () => {
     expect(watch.pending()).toBe(false);
   });
 
+  it('still remembers the tree when the open paths cannot be read, and stops it at the end', async () => {
+    const loops = incident();
+    world.add(600, 1, 600); // a child of launchd started since, whose open paths are to be read
+    const ledger = createProcessLedger(dir);
+    const watch = createLaneProcessWatch({
+      ...deps(),
+      openPaths: () => Promise.reject(new Error('lsof: fork failed')),
+      places: ['/private/tmp/10db-abc123'],
+      ledger,
+    });
+    await watch.track(ROOT);
+    const seen = JSON.parse(readFileSync(ledger, 'utf8')) as { members: { pid: number }[] };
+    expect(seen.members.map((m) => m.pid)).toEqual(expect.arrayContaining([200, 300, ...loops]));
+    // claude and the command's shell die; the loops go to launchd.
+    world.die(200);
+    world.die(300);
+    await watch.end();
+    for (const pid of loops) expect(world.has(pid)).toBe(false);
+    expect(world.has(600)).toBe(true);
+  });
+
+  it('tells what it could not do by kind: write its ledger, read the table, read open paths', async () => {
+    incident();
+    world.add(600, 1, 600);
+    const clock = new ManualClock();
+    const failing = { table: false };
+    const failures: unknown[] = [];
+    const watch = createLaneProcessWatch({
+      ...deps({
+        table: () => (failing.table ? Promise.reject(new Error('ps failed')) : world.table()),
+      }),
+      openPaths: () => Promise.reject(new Error('lsof failed')),
+      places: ['/private/tmp/10db-abc123'],
+      // In a dir that is gone, so no write of it can succeed.
+      ledger: join(dir, 'gone', '10db-proc-100-0123456789ab.json'),
+      timers: clock,
+      intervalMs: 1_000,
+      onError: (failure) => failures.push(failure),
+    });
+    await watch.track(ROOT);
+    failing.table = true;
+    clock.advance(1_000);
+    await new Promise((r) => setImmediate(r));
+    expect([...new Set(failures)].sort()).toEqual(['ledger', 'open_paths', 'table']);
+  });
+
+  it('replaces its ledger whole on each write, so a reader holding it never sees a part of one', async () => {
+    world.add(200, DAEMON, 200);
+    const ledger = createProcessLedger(dir);
+    const clock = new ManualClock();
+    const watch = createLaneProcessWatch({ ...deps(), ledger, timers: clock, intervalMs: 1_000 });
+    await watch.track(ROOT);
+    const before = readFileSync(ledger, 'utf8');
+    const held = openSync(ledger, 'r');
+    try {
+      world.add(300, 200, 300);
+      clock.advance(1_000);
+      await new Promise((r) => setImmediate(r));
+      // The file a reader opened is still the whole ledger it was; the name holds the next one.
+      expect(readFileSync(held, 'utf8')).toBe(before);
+      const after = JSON.parse(readFileSync(ledger, 'utf8')) as { members: { pid: number }[] };
+      expect(after.members.map((m) => m.pid).sort()).toEqual([200, 300]);
+      expect(readdirSync(dir)).toEqual([basename(ledger)]);
+    } finally {
+      closeSync(held);
+    }
+  });
+
   it('survives a table it cannot read: it stops nothing and says so', async () => {
     const watch = createLaneProcessWatch({
       ...deps({ table: () => Promise.reject(new Error('ps failed')) }),
@@ -598,5 +677,163 @@ describe('processes left by a daemon that died', () => {
       reapLaneProcessLedgers(dir, deps({ table: () => Promise.reject(new Error('ps failed')) })),
     ).rejects.toThrow('ps failed');
     expect(existsSync(ledger)).toBe(true);
+  });
+
+  it('stops what shared the dead daemon’s process group by pid alone, and leaves the rest of that group running', async () => {
+    // A dev daemon run from a terminal: pnpm (50) leads the job's group, which holds turbo (51),
+    // vite (52), tsx watch (53) and the daemon. Claude Code was spawned into that group, and so was a
+    // command's shell and the loop it left; another job of the command leads a group of its own.
+    world.rows = [
+      { pid: 1, ppid: 0, pgid: 1, startedAt: T0 },
+      { pid: 50, ppid: 1, pgid: 50, startedAt: T0 },
+      { pid: 51, ppid: 50, pgid: 50, startedAt: T0 },
+      { pid: 52, ppid: 51, pgid: 50, startedAt: T0 },
+      { pid: 53, ppid: 51, pgid: 50, startedAt: T0 },
+      { pid: DAEMON, ppid: 53, pgid: 50, startedAt: T0 },
+    ];
+    world.add(200, DAEMON, 50); // claude
+    world.add(300, 200, 50); // the command's shell
+    world.add(400, 300, 50); // its `(while :; do :; done) &`
+    world.add(600, 300, 600); // a job in a group of its own
+    await createLaneProcessWatch({ ...deps(), ledger: createProcessLedger(dir) }).track(ROOT);
+    // The daemon dies with claude still in its turn. tsx watch starts the dev daemon again in the
+    // job's group, and the job's group gains a process no sample saw.
+    world.die(DAEMON);
+    world.add(150, 53, 50);
+    world.add(601, 1, 600);
+    // The app's daemon, in a group of its own, starts and reaps the ledger.
+    world.add(900, 1, 900);
+    await reapLaneProcessLedgers(dir, deps({ ownPid: 900 }));
+    for (const pid of [200, 300, 400, 600, 601]) expect(world.has(pid)).toBe(false);
+    for (const pid of [50, 51, 52, 53, 150, 900]) expect(world.has(pid)).toBe(true);
+    expect(world.signals.some((s) => s.target === -50)).toBe(false);
+  });
+
+  it('signals no process group for a ledger that does not say which group its daemon was in', async () => {
+    world.add(400, 1, 400);
+    world.add(401, 1, 400);
+    writeFileSync(
+      createProcessLedger(dir),
+      JSON.stringify({ version: 1, members: [{ pid: 400, pgid: 400, startedAt: T1 }] }),
+    );
+    await reapLaneProcessLedgers(dir, deps({ ownPid: 9999 }));
+    expect(world.has(400)).toBe(false);
+    expect(world.signals.every((s) => s.target > 0)).toBe(true);
+  });
+
+  it('never reads a ledger’s next content as the ledger, and removes what a dead daemon left of one', async () => {
+    world.add(400, 1, 400);
+    world.add(500, 1, 500);
+    const next = (ledger: string, pid: number): string => {
+      // A daemon killed between writing a ledger's next content and putting it in place.
+      const file = `${ledger}.0123456789ab.tmp`;
+      writeFileSync(
+        file,
+        JSON.stringify({ version: 1, members: [{ pid, pgid: pid, startedAt: T1 }] }),
+      );
+      return file;
+    };
+    const deadLedger = createProcessLedger(dir, await deadPid());
+    const deadNext = next(deadLedger, 400);
+    const other = livePid();
+    markDaemon(other);
+    const liveNext = next(createProcessLedger(dir, other), 500);
+    const report = await reapLaneProcessLedgers(dir, deps({ ownPid: 9999 }));
+    expect(report).toEqual({ ledgers: 1, stopped: 0 });
+    expect(world.has(400)).toBe(true);
+    expect(existsSync(deadLedger)).toBe(false);
+    expect(existsSync(deadNext)).toBe(false);
+    // A running daemon's write is its own.
+    expect(existsSync(liveNext)).toBe(true);
+  });
+});
+
+describe('a sweep of the ledgers while the daemon runs', () => {
+  /** Lets the round a timer started finish: everything it awaits is already settled. */
+  const settle = () => new Promise((r) => setImmediate(r));
+  const SWEEP_PAUSE = 30_000;
+
+  it('stops what a kept ledger names once the machine can be read, and never touches a held one', async () => {
+    const clock = new ManualClock();
+    world.add(400, 1, 400); // an ended session's loop, kept when its end could not read the table
+    world.add(500, 1, 500); // a running session's dev server
+    const ledgerOf = (pid: number): string => {
+      const file = createProcessLedger(dir, DAEMON);
+      writeFileSync(
+        file,
+        JSON.stringify({
+          version: 1,
+          daemonGroup: DAEMON_GROUP,
+          members: [{ pid, pgid: pid, startedAt: T1 }],
+        }),
+      );
+      return file;
+    };
+    const kept = ledgerOf(400);
+    const held = ledgerOf(500);
+    const readable = { now: false };
+    const failures: unknown[] = [];
+    const swept: unknown[] = [];
+    const sweep = createLedgerSweep(
+      dir,
+      {
+        ...deps({
+          table: () => (readable.now ? world.table() : Promise.reject(new Error('ps failed'))),
+        }),
+        timers: clock,
+      },
+      { onSwept: (report) => swept.push(report), onFailed: (error) => failures.push(error) },
+    );
+    sweep.hold(held);
+    sweep.later();
+    clock.advance(SWEEP_PAUSE);
+    await settle();
+    expect(failures).toHaveLength(1);
+    expect(world.has(400)).toBe(true);
+    // It keeps trying while the table can't be read.
+    readable.now = true;
+    clock.advance(SWEEP_PAUSE);
+    await settle();
+    expect(world.has(400)).toBe(false);
+    expect(existsSync(kept)).toBe(false);
+    expect(swept).toEqual([{ ledgers: 1, stopped: 1 }]);
+    expect(world.has(500)).toBe(true);
+    expect(existsSync(held)).toBe(true);
+    // Once a round has read the machine, nothing is armed until something else is kept.
+    expect(clock.pendingTimers()).toBe(0);
+    // A released ledger is a kept one.
+    sweep.release(held);
+    sweep.later();
+    clock.advance(SWEEP_PAUSE);
+    await settle();
+    expect(world.has(500)).toBe(false);
+    expect(existsSync(held)).toBe(false);
+  });
+
+  it('sweeps no more once stopped, even if a timer fires anyway, leaving what is kept for the next start', async () => {
+    world.add(400, 1, 400);
+    const kept = createProcessLedger(dir, DAEMON);
+    writeFileSync(
+      kept,
+      JSON.stringify({ version: 1, members: [{ pid: 400, pgid: 400, startedAt: T1 }] }),
+    );
+    // Timers whose cancel does nothing, fired by hand.
+    const armed: (() => void)[] = [];
+    const sweep = createLedgerSweep(dir, {
+      ...deps(),
+      timers: {
+        setTimeout(fn) {
+          armed.push(fn);
+          return { cancel: () => undefined };
+        },
+      },
+    });
+    sweep.later();
+    sweep.stop();
+    sweep.later();
+    for (const fn of armed.splice(0)) fn();
+    await settle();
+    expect(world.has(400)).toBe(true);
+    expect(existsSync(kept)).toBe(true);
   });
 });

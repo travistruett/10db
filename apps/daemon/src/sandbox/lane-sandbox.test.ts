@@ -22,6 +22,7 @@ import {
   tempDir,
   type TempDir,
 } from '../../test/fixtures';
+import { ManualClock } from '../clock';
 import { projectAtCheckout } from '../delivery';
 import { createGit } from '../git';
 import {
@@ -31,6 +32,7 @@ import {
   SandboxProfileError,
   SandboxTempDirError,
   SYSTEM_READS,
+  type LaneProcessSetup,
   type LaneSandbox,
   type LaneSessionInput,
 } from './index';
@@ -996,7 +998,10 @@ describe.skipIf(SANDBOXED)('a lane session’s processes', () => {
   /** Working directories and open files, by pid, as `lsof` would report them. */
   let open: Map<number, string[]>;
   let tableFails: boolean;
-  function withProcesses(): LaneSandbox {
+  function withProcesses(
+    overrides: Partial<LaneProcessSetup> = {},
+    log?: LaneSandboxDeps['log'],
+  ): LaneSandbox {
     return createLaneSandbox({
       home,
       dataDir,
@@ -1022,9 +1027,14 @@ describe.skipIf(SANDBOXED)('a lane session’s processes', () => {
         sleep: () => Promise.resolve(),
         ownPid: 100,
         timers: { setTimeout: () => ({ cancel: () => undefined }) },
+        ...overrides,
       },
+      ...(log === undefined ? {} : { log }),
     });
   }
+  /** Lets what a timer started finish: everything it awaits is already settled. */
+  const settle = () => new Promise((r) => setImmediate(r));
+  const ledgers = () => readdirSync(tmpRoot).filter((n) => n.startsWith('10db-proc-'));
   beforeEach(() => {
     rows = [
       { pid: 100, ppid: 1, pgid: 100, startedAt: T },
@@ -1075,6 +1085,83 @@ describe.skipIf(SANDBOXED)('a lane session’s processes', () => {
       members: { pid: number }[];
     };
     expect(ledger.members.map((m) => m.pid).sort()).toEqual([200, 300, 301]);
+  });
+
+  it('tells the log once per kind what it could not do while it watched a session’s processes', async () => {
+    const warnings: { fields: Record<string, unknown>; message: string }[] = [];
+    const clock = new ManualClock();
+    const session = await withProcesses(
+      {
+        timers: clock,
+        intervalMs: 1_000,
+        openPaths: () => Promise.reject(new Error('lsof failed')),
+      },
+      {
+        warn: (fields, message) => {
+          warnings.push({ fields: { ...fields }, message });
+        },
+      },
+    ).forSession(input());
+    try {
+      // A child of launchd started since the session began, whose open paths can't be read.
+      rows.push({ pid: 600, ppid: 1, pgid: 600, startedAt: T });
+      await session.trackProcesses({ pid: 200, startedAt: T });
+      // A sample every second, none of which can read the table.
+      tableFails = true;
+      for (let n = 0; n < 3; n += 1) {
+        clock.advance(1_000);
+        await settle();
+      }
+      expect(warnings.map((w) => w.fields['failure']).sort()).toEqual(['open_paths', 'table']);
+      expect(warnings.every((w) => w.fields['projectId'] === projectId)).toBe(true);
+    } finally {
+      tableFails = false;
+      await session.endProcesses();
+      session.dispose();
+    }
+  });
+
+  it('sweeps a kept ledger again while the daemon runs, and removes it once what it names is stopped', async () => {
+    const clock = new ManualClock();
+    const session = await withProcesses({ timers: clock }).forSession(input());
+    await session.trackProcesses({ pid: 200, startedAt: T });
+    tableFails = true;
+    await expect(session.endProcesses()).rejects.toThrow('ps failed');
+    session.dispose();
+    expect(ledgers()).toHaveLength(1);
+    // Half a minute on, the machine can be read again.
+    tableFails = false;
+    clock.advance(30_000);
+    await settle();
+    expect(rows.map((r) => r.pid)).toEqual([100]);
+    expect(readdirSync(tmpRoot)).toEqual([]);
+  });
+
+  it('never sweeps the ledger of a session that still runs', async () => {
+    const clock = new ManualClock();
+    const lanes = withProcesses({ timers: clock, intervalMs: 3_600_000 });
+    // A second session's claude and its dev server.
+    rows.push(
+      { pid: 250, ppid: 100, pgid: 250, startedAt: T },
+      { pid: 350, ppid: 250, pgid: 350, startedAt: T },
+    );
+    const ended = await lanes.forSession(input());
+    const running = await lanes.forSession(input());
+    try {
+      await ended.trackProcesses({ pid: 200, startedAt: T });
+      await running.trackProcesses({ pid: 250, startedAt: T });
+      tableFails = true;
+      await expect(ended.endProcesses()).rejects.toThrow('ps failed');
+      ended.dispose();
+      tableFails = false;
+      clock.advance(30_000);
+      await settle();
+      expect(rows.map((r) => r.pid).sort()).toEqual([100, 250, 350]);
+      expect(ledgers()).toHaveLength(1);
+    } finally {
+      await running.endProcesses();
+      running.dispose();
+    }
   });
 
   it('stops what the session’s commands started when the session ends', async () => {

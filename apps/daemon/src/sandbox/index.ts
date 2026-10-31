@@ -11,7 +11,12 @@ export { toolchainAccess } from './toolchain-reads';
 export { packageCacheEnv } from './package-cache';
 export { createLaneEnvFile, removeLaneEnvFile } from './env-file';
 export { claimSandboxTempRoot } from './stale-files';
-export { reapLaneProcessLedgers, type LaneProcessSetup } from './lane-processes';
+export {
+  createLedgerSweep,
+  reapLaneProcessLedgers,
+  type LaneProcessSetup,
+  type LedgerSweep,
+} from './lane-processes';
 export { systemProcessTable } from './process-table';
 export {
   createLaneTempDir,

@@ -1,5 +1,14 @@
 import { randomBytes } from 'node:crypto';
-import { lstatSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  closeSync,
+  lstatSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { z } from 'zod';
 import type { OpenPathReader, ProcessRow, ProcessTable } from './process-table';
@@ -16,17 +25,21 @@ import { SandboxTempDirError } from './temp-dir';
  * launchd, so a walk down from the session's pid finds nothing. So the watch samples the tree while
  * the session runs and remembers every process it saw, by pid and start time. It also remembers
  * their process groups: a group outlives its leader, so a process forked after the last sample into
- * a group the watch knows is found too. A command that returns at once (`pnpm dev &`) hands its job
- * to launchd before any sample sees its shell, so a child of launchd started since the session began
- * is the session's too when it holds a path in the session's own temp dir: its working directory or
- * an open file, such as the output file Claude Code gives each command there, which a job with no
- * redirection of its own inherits. Its open paths are read (`lsof`) once. Working in the checkout
- * alone never makes a process the session's: in Your folder mode, for local delivery and in a batch
- * worktree, other lanes and the builder run their own jobs there. The memory is a ledger file in the
- * temp root, named for the daemon that keeps it, which neither a lane's commands nor its file tools
- * may write, so a daemon that restarts finds and stops what a dead one left, even while another
- * daemon shares the root. The process environment is never read, and nothing is signalled unless its
- * pid and start time still match.
+ * a group the watch knows is found too. The daemon's own group is never one of them: Claude Code is
+ * spawned into it, and it is the group the daemon was started in (a terminal's job, the app's), so
+ * a session's process in it is signalled by pid alone. A command that returns at once
+ * (`pnpm dev &`) hands its job to launchd before any sample sees its shell, so a child of launchd
+ * started since the session began is the session's too when it holds a path in the session's own
+ * temp dir: its working directory or an open file, such as the output file Claude Code gives each
+ * command there, which a job with no redirection of its own inherits. Its open paths are read
+ * (`lsof`) once. Working in the checkout alone never makes a process the session's: in Your folder
+ * mode, for local delivery and in a batch worktree, other lanes and the builder run their own jobs
+ * there. The memory is a ledger file in the temp root, named for the daemon that keeps it and naming
+ * that daemon's group, which neither a lane's commands nor its file tools may write, so a daemon
+ * that restarts finds and stops what a dead one left, sparing the dead one's group as it did, even
+ * while another daemon shares the root. A ledger whose processes could not be stopped is swept
+ * again while the daemon runs. The process environment is never read, and nothing is signalled
+ * unless its pid and start time still match.
  */
 
 /** What the watch remembers about one process. */
@@ -39,6 +52,19 @@ export interface ProcessMember {
 }
 
 type Signaller = (target: number, signal: NodeJS.Signals) => boolean;
+
+type Timers = NonNullable<LaneProcessWatchDeps['timers']>;
+
+/** What a watch could not do, told to `onError` each time it fails. */
+export const LaneProcessFailure = {
+  /** Write its ledger: a daemon that dies then leaves running what the ledger lacks. */
+  Ledger: 'ledger',
+  /** Read the process table: nothing new is seen until a reading succeeds. */
+  Table: 'table',
+  /** Read launchd's children's open paths: a job a command handed off at once may go unnamed. */
+  OpenPaths: 'open_paths',
+} as const;
+export type LaneProcessFailure = (typeof LaneProcessFailure)[keyof typeof LaneProcessFailure];
 
 export interface LaneProcessDeps {
   /** A fresh reading of the machine's processes. */
@@ -71,7 +97,8 @@ export interface LaneProcessWatchDeps extends LaneProcessDeps {
   readonly timers?: {
     setTimeout(fn: () => void, ms: number): { cancel(): void };
   };
-  readonly onError?: (error: unknown) => void;
+  /** Told what the watch could not do, each time; a sample runs every second. */
+  readonly onError?: (failure: LaneProcessFailure, error: unknown) => void;
 }
 
 /** How a session's processes are read, sampled and signalled: the watch's deps without its ledger. */
@@ -120,7 +147,7 @@ const defaultSleep = (ms: number): Promise<void> =>
     setTimeout(resolve, ms);
   });
 
-const defaultTimers: NonNullable<LaneProcessWatchDeps['timers']> = {
+const defaultTimers: Timers = {
   setTimeout(fn, ms) {
     const handle = setTimeout(fn, ms);
     handle.unref();
@@ -132,25 +159,42 @@ const defaultTimers: NonNullable<LaneProcessWatchDeps['timers']> = {
   },
 };
 
-/** Which processes may never be signalled: launchd, the daemon and the group it leads or is in. */
-function protection(rows: readonly ProcessRow[], ownPid: number) {
+/**
+ * Process groups never followed or signalled beside launchd's and the daemon's own: the group of the
+ * daemon that kept a ledger, which it was started in (a terminal's job, the app's) and Claude Code
+ * was spawned into. Null when that group is not known, and then no group is: each process is
+ * signalled by its pid alone.
+ */
+type SparedGroups = readonly number[] | null;
+
+/**
+ * Which processes may never be signalled: launchd, the daemon, the group it leads or is in, and the
+ * `spared` groups.
+ */
+function protection(rows: readonly ProcessRow[], ownPid: number, spared: SparedGroups) {
   const own = rows.find((r) => r.pid === ownPid);
   return {
     pid: (pid: number): boolean => pid <= 1 || pid === ownPid,
-    group: (pgid: number): boolean => pgid <= 1 || pgid === ownPid || pgid === own?.pgid,
+    group: (pgid: number): boolean =>
+      spared === null ||
+      pgid <= 1 ||
+      pgid === ownPid ||
+      pgid === own?.pgid ||
+      spared.includes(pgid),
   };
 }
 
 /**
  * The processes in `rows` that belong to the session: the known ones that still run (same pid and
- * start time), everything below them, and everything in the groups they are in.
+ * start time), everything below them, and everything in the groups they are in but protected ones.
  */
 function findMembers(
   rows: readonly ProcessRow[],
   known: readonly ProcessMember[],
   ownPid: number,
+  spared: SparedGroups,
 ): ProcessMember[] {
-  const guard = protection(rows, ownPid);
+  const guard = protection(rows, ownPid, spared);
   const byPid = new Map(rows.map((r) => [r.pid, r]));
   const children = new Map<number, ProcessRow[]>();
   const groups = new Map<number, ProcessRow[]>();
@@ -187,8 +231,9 @@ function signalAll(
   send: Signaller,
   rows: readonly ProcessRow[],
   ownPid: number,
+  spared: SparedGroups,
 ): void {
-  const guard = protection(rows, ownPid);
+  const guard = protection(rows, ownPid, spared);
   for (const pgid of new Set(members.map((m) => m.pgid))) {
     if (!guard.group(pgid)) send(-pgid, signal);
   }
@@ -199,12 +244,13 @@ function signalAll(
 
 /**
  * Stops every process in `known` that still runs, and what it started, SIGTERM first and SIGKILL to
- * what is left after the grace. Returns how many distinct processes it signalled. Throws when the
- * process table cannot be read.
+ * what is left after the grace, following and signalling no `spared` group. Returns how many
+ * distinct processes it signalled. Throws when the process table cannot be read.
  */
 async function terminateMembers(
   known: readonly ProcessMember[],
   deps: LaneProcessDeps,
+  spared: SparedGroups,
 ): Promise<number> {
   const send = deps.signal ?? defaultSignal;
   const sleep = deps.sleep ?? defaultSleep;
@@ -215,27 +261,55 @@ async function terminateMembers(
   let remembered = [...known];
   for (let round = 0; round < MAX_ROUNDS; round += 1) {
     const rows = await deps.table();
-    const alive = findMembers(rows, remembered, ownPid);
+    const alive = findMembers(rows, remembered, ownPid, spared);
     if (alive.length === 0) break;
     remembered = alive;
     for (const member of alive) stopped.add(member.pid);
-    signalAll(alive, 'SIGTERM', send, rows, ownPid);
+    signalAll(alive, 'SIGTERM', send, rows, ownPid, spared);
     let waited = 0;
     let left = alive;
     while (waited < grace) {
       await sleep(poll);
       waited += poll;
-      left = findMembers(await deps.table(), alive, ownPid);
+      left = findMembers(await deps.table(), alive, ownPid, spared);
       if (left.length === 0) break;
     }
     if (left.length > 0) {
       const latest = await deps.table();
       for (const member of left) stopped.add(member.pid);
-      signalAll(left, 'SIGKILL', send, latest, ownPid);
+      signalAll(left, 'SIGKILL', send, latest, ownPid, spared);
       remembered = left;
     }
   }
   return stopped.size;
+}
+
+/** A ledger's next content goes to a file of its own beside it: `<ledger>.<12 hex>.tmp`. */
+const STAGING_SUFFIX = '.tmp';
+
+/**
+ * Replaces a ledger's content in one step, so a daemon killed while it writes leaves the last whole
+ * ledger: the text goes to a new file of its own, which is then renamed over the ledger.
+ */
+function writeLedger(file: string, text: string): void {
+  const staging = `${file}.${randomBytes(6).toString('hex')}${STAGING_SUFFIX}`;
+  // `wx` never follows a link or reuses a file someone else left at the name.
+  const fd = openSync(staging, 'wx', 0o600);
+  try {
+    try {
+      writeFileSync(fd, text);
+    } finally {
+      closeSync(fd);
+    }
+    renameSync(staging, file);
+  } catch (error) {
+    try {
+      rmSync(staging, { force: true });
+    } catch {
+      // A sweep or the next start removes it once the session is gone; it is never read.
+    }
+    throw error;
+  }
 }
 
 /** Watches one lane session's processes; see the module comment. */
@@ -252,17 +326,29 @@ export function createLaneProcessWatch(deps: LaneProcessWatchDeps): LaneProcessW
   const watching = { on: false };
   const isWatching = (): boolean => watching.on;
   let timer: { cancel(): void } | null = null;
+  /**
+   * The daemon's own process group, from the first reading that lists the daemon: a later daemon
+   * that reaps the ledger spares it, as this one does.
+   */
+  let daemonGroup: number | null = null;
+  const report = (failure: LaneProcessFailure, error: unknown): void => {
+    deps.onError?.(failure, error);
+  };
 
   function persist(): void {
     if (deps.ledger === null) return;
-    const text = JSON.stringify({ version: 1, members: known });
+    const text = JSON.stringify({ version: 1, daemonGroup, members: known });
     if (text === saved) return;
     try {
-      writeFileSync(deps.ledger, text, { mode: 0o600 });
+      writeLedger(deps.ledger, text);
       saved = text;
     } catch (error) {
-      deps.onError?.(error);
+      report(LaneProcessFailure.Ledger, error);
     }
+  }
+
+  function noteDaemonGroup(rows: readonly ProcessRow[]): void {
+    daemonGroup ??= rows.find((r) => r.pid === ownPid)?.pgid ?? null;
   }
 
   const places = deps.places ?? [];
@@ -282,7 +368,7 @@ export function createLaneProcessWatch(deps: LaneProcessWatchDeps): LaneProcessW
     members: readonly ProcessMember[],
   ): Promise<ProcessMember[]> {
     if (deps.openPaths === undefined || places.length === 0) return [];
-    const guard = protection(rows, ownPid);
+    const guard = protection(rows, ownPid, []);
     const mine = new Set(members.map((m) => m.pid));
     const present = new Set(rows.map(rowKey));
     // Forget what is gone, so the set stays the size of the machine.
@@ -323,26 +409,46 @@ export function createLaneProcessWatch(deps: LaneProcessWatchDeps): LaneProcessW
     return true;
   }
 
+  /**
+   * `orphansIn`, or none when the open paths can't be read: what the tree and groups give still
+   * counts, and the orphans are looked at again on the next reading.
+   */
+  async function orphansOrNone(
+    rows: readonly ProcessRow[],
+    members: readonly ProcessMember[],
+  ): Promise<ProcessMember[]> {
+    try {
+      return await orphansIn(rows, members);
+    } catch (error) {
+      report(LaneProcessFailure.OpenPaths, error);
+      return [];
+    }
+  }
+
   /** Who the session's processes are in `rows`: the known ones and theirs, and launchd's orphans. */
   async function membersIn(rows: readonly ProcessRow[]): Promise<ProcessMember[]> {
-    const members = findMembers(rows, known, ownPid);
-    const orphans = await orphansIn(rows, members);
-    return orphans.length === 0 ? members : findMembers(rows, [...members, ...orphans], ownPid);
+    // The daemon's own group is protected by its row; no other is spared while the session runs.
+    const members = findMembers(rows, known, ownPid, []);
+    const orphans = await orphansOrNone(rows, members);
+    return orphans.length === 0 ? members : findMembers(rows, [...members, ...orphans], ownPid, []);
   }
 
   async function sample(table: ProcessTable): Promise<void> {
+    let rows: readonly ProcessRow[];
     try {
-      const rows = await table();
-      if (!watching.on || !findRoot(rows)) return;
-      // What is gone is forgotten; what is new is remembered.
-      const members = await membersIn(rows);
-      // `end` may have run while the working dirs were read.
-      if (!isWatching()) return;
-      known = members;
-      persist();
+      rows = await table();
     } catch (error) {
-      deps.onError?.(error);
+      report(LaneProcessFailure.Table, error);
+      return;
     }
+    if (!watching.on || !findRoot(rows)) return;
+    noteDaemonGroup(rows);
+    // What is gone is forgotten; what is new is remembered.
+    const members = await membersIn(rows);
+    // `end` may have run while the open paths were read.
+    if (!isWatching()) return;
+    known = members;
+    persist();
   }
 
   /** Arms the next sample, unless the session is no longer watched. */
@@ -384,18 +490,22 @@ export function createLaneProcessWatch(deps: LaneProcessWatchDeps): LaneProcessW
         );
       }
       if (known.length === 0) return;
-      // What a command left since the last sample. A table that can't be read is told of below.
+      // What a command left since the last sample. A table that can't be read rejects below.
+      let rows: readonly ProcessRow[] | null = null;
       try {
-        const rows = await deps.table();
-        const orphans = await orphansIn(rows, findMembers(rows, known, ownPid));
+        rows = await deps.table();
+      } catch (error) {
+        report(LaneProcessFailure.Table, error);
+      }
+      if (rows !== null) {
+        noteDaemonGroup(rows);
+        const orphans = await orphansOrNone(rows, findMembers(rows, known, ownPid, []));
         if (orphans.length > 0) {
           known = [...known, ...orphans];
           persist();
         }
-      } catch (error) {
-        deps.onError?.(error);
       }
-      await terminateMembers(known, deps);
+      await terminateMembers(known, deps, []);
       known = [];
       persist();
     },
@@ -410,9 +520,13 @@ export function createLaneProcessWatch(deps: LaneProcessWatchDeps): LaneProcessW
 const LEDGER_PREFIX = '10db-proc-';
 const LEDGER_SUFFIX = '.json';
 const LEDGER_NAME = /^10db-proc-([1-9][0-9]*)-[0-9a-f]{12}\.json$/;
+/** A ledger's next content while it is written (`writeLedger`): the ledger's name, then its own. */
+const STAGING_NAME = /^(10db-proc-([1-9][0-9]*)-[0-9a-f]{12}\.json)\.[0-9a-f]{12}\.tmp$/;
 
 const Ledger = z.object({
   version: z.literal(1),
+  /** The process group of the daemon that kept it; null (or absent) when no reading listed it. */
+  daemonGroup: z.number().int().min(1).nullable().default(null),
   members: z.array(
     z.object({
       pid: z.number().int().min(2),
@@ -431,7 +545,10 @@ export function createProcessLedger(root: string, owner: number = process.pid): 
   const file = join(root, name);
   try {
     // `wx` never follows a link or reuses a file someone else left at the name.
-    writeFileSync(file, JSON.stringify({ version: 1, members: [] }), { flag: 'wx', mode: 0o600 });
+    writeFileSync(file, JSON.stringify({ version: 1, daemonGroup: null, members: [] }), {
+      flag: 'wx',
+      mode: 0o600,
+    });
   } catch {
     throw new SandboxTempDirError('Could not create the lane process ledger');
   }
@@ -457,27 +574,41 @@ export interface ReapReport {
   readonly stopped: number;
 }
 
-function readLedger(file: string): ProcessMember[] | null {
+function readLedger(file: string): z.infer<typeof Ledger> | null {
   try {
     const parsed = Ledger.safeParse(JSON.parse(readFileSync(file, 'utf8')));
-    return parsed.success ? parsed.data.members : null;
+    return parsed.success ? parsed.data : null;
   } catch {
     return null;
   }
 }
 
+/** Whether `file` is a plain file of this user's (`uid`), never following a link. */
+function ownFile(file: string, uid: number | undefined): boolean {
+  try {
+    const stat = lstatSync(file);
+    return stat.isFile() && (uid === undefined || stat.uid === uid);
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Stops what lane sessions left running when their daemon died, from the ledgers in the temp root,
- * and removes each ledger once its processes are gone. Run it once at start, before any session.
- * A ledger whose owner is another daemon that still runs (its pid is alive and its mark is in the
- * root) is that daemon's live session's, and is left alone; every other one is a dead daemon's,
- * this daemon's own pid included, since this daemon has no session yet. Reads the process table
- * only when a ledger names a process. A ledger it could not act on (the table was unreadable) stays
- * for the next start, and the error is thrown after the other ledgers were handled.
+ * and removes each ledger once its processes are gone. Run it at start, before any session, and
+ * again while the daemon runs (`createLedgerSweep`). A ledger in `held` is a running session's of
+ * this daemon, and one whose owner is another daemon that still runs (its pid is alive and its mark
+ * is in the root) is that daemon's live session's: both are left alone. Every other one is a dead
+ * daemon's, or one an ended session of this daemon kept, this daemon's own pid included. The group
+ * of the daemon that kept a ledger is never followed or signalled; with none recorded, no group is.
+ * Reads the process table only when a ledger names a process. A ledger it could not act on (the
+ * table was unreadable) stays, and the error is thrown after the other ledgers were handled. The
+ * next content of a ledger a dead daemon was writing is never read, and is removed.
  */
 export async function reapLaneProcessLedgers(
   root: string,
   deps: LaneProcessDeps,
+  held: ReadonlySet<string> = new Set(),
 ): Promise<ReapReport> {
   const uid = process.getuid?.();
   const ownPid = deps.ownPid ?? process.pid;
@@ -494,19 +625,31 @@ export async function reapLaneProcessLedgers(
   let stopped = 0;
   let failure: unknown = null;
   for (const name of names) {
-    const owner = Number(LEDGER_NAME.exec(name)?.[1]);
-    if (!Number.isInteger(owner) || ownerRuns(owner)) continue;
     const file = join(root, name);
-    try {
-      const stat = lstatSync(file);
-      if (!stat.isFile() || (uid !== undefined && stat.uid !== uid)) continue;
-    } catch {
+    const staged = STAGING_NAME.exec(name);
+    if (staged !== null) {
+      const [, ledgerName = '', owner = ''] = staged;
+      if (ownerRuns(Number(owner)) || held.has(join(root, ledgerName)) || !ownFile(file, uid)) {
+        continue;
+      }
+      try {
+        rmSync(file, { force: true });
+      } catch {
+        // Left for a later sweep; it is never read.
+      }
+      continue;
+    }
+    const owner = Number(LEDGER_NAME.exec(name)?.[1]);
+    if (!Number.isInteger(owner) || ownerRuns(owner) || held.has(file) || !ownFile(file, uid)) {
       continue;
     }
     ledgers += 1;
-    const members = readLedger(file);
+    const ledger = readLedger(file);
     try {
-      if (members !== null && members.length > 0) stopped += await terminateMembers(members, deps);
+      if (ledger !== null && ledger.members.length > 0) {
+        const spared = ledger.daemonGroup === null ? null : [ledger.daemonGroup];
+        stopped += await terminateMembers(ledger.members, deps, spared);
+      }
       rmSync(file, { force: true });
     } catch (error) {
       failure ??= error;
@@ -518,4 +661,93 @@ export async function reapLaneProcessLedgers(
       : new Error('could not stop a lane session’s processes');
   }
   return { ledgers, stopped };
+}
+
+/** How long a sweep waits before a round, and between rounds that could not read the machine. */
+const SWEEP_PAUSE_MS = 30_000;
+
+/**
+ * Sweeps the ledgers while the daemon runs, for what no session is left to stop: an ended session's
+ * whose end could not read the machine, or a dead daemon's the start could not. A round reaps every
+ * ledger but the held ones (running sessions') and another running daemon's.
+ */
+export interface LedgerSweep {
+  /** A running session's ledger: no round touches it until it is released. */
+  hold(file: string): void;
+  /** The session is gone: whatever its ledger still names is a later round's. */
+  release(file: string): void;
+  /** Runs a round after a pause, and another after each round that could not read the machine. */
+  later(): void;
+  /** Runs no more rounds; what is kept stays for the next start. */
+  stop(): void;
+}
+
+export interface LedgerSweepEvents {
+  /** A round that read the machine, with what it stopped. */
+  readonly onSwept?: (report: ReapReport) => void;
+  /** A round that could not; another follows after the pause. */
+  readonly onFailed?: (error: unknown) => void;
+}
+
+/** See `LedgerSweep`. Its rounds run one at a time, on `setup`'s timers. */
+export function createLedgerSweep(
+  root: string,
+  setup: LaneProcessSetup,
+  events: LedgerSweepEvents = {},
+): LedgerSweep {
+  const timers = setup.timers ?? defaultTimers;
+  const held = new Set<string>();
+  let timer: { cancel(): void } | null = null;
+  /** Whether a round runs, and whether another was asked for while it did. */
+  let running = false;
+  let again = false;
+  let stopped = false;
+
+  function round(): void {
+    timer = null;
+    if (stopped) return;
+    running = true;
+    void reapLaneProcessLedgers(root, setup, held)
+      .then(
+        (report) => {
+          running = false;
+          // A ledger kept while this round ran may have been listed before it was.
+          if (again) later();
+          events.onSwept?.(report);
+        },
+        (error: unknown) => {
+          running = false;
+          later();
+          events.onFailed?.(error);
+        },
+      )
+      .catch(() => {
+        // A report that could not be told takes nothing from the sweep.
+      });
+  }
+
+  function later(): void {
+    if (stopped) return;
+    if (running) {
+      again = true;
+      return;
+    }
+    again = false;
+    timer ??= timers.setTimeout(round, SWEEP_PAUSE_MS);
+  }
+
+  return {
+    hold(file) {
+      held.add(file);
+    },
+    release(file) {
+      held.delete(file);
+    },
+    later,
+    stop() {
+      stopped = true;
+      timer?.cancel();
+      timer = null;
+    },
+  };
 }
