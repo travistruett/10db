@@ -1,8 +1,10 @@
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { tempDir, type TempDir } from '../../test/fixtures';
-import { findRegistryHosts } from './index';
+import { createTempRepo, isolatedGitEnv, tempDir, type TempDir } from '../../test/fixtures';
+import { createGit } from '../git';
+import { findRegistryHosts, findRegistryHostsAt } from './index';
 import { CONFIG_FORMATS, LOCK_FORMATS, namesNpmRegistry } from './package-file-formats';
 
 const dirs: TempDir[] = [];
@@ -285,6 +287,24 @@ const rows: Row[] = [
     expected: ['index.crates.io <- apps/api/Cargo.lock', 'static.crates.io <- apps/api/Cargo.lock'],
   },
   {
+    name: 'files three folders down are read: a Tauri app’s src-tauri/Cargo.lock',
+    files: {
+      'apps/desktop/src-tauri/Cargo.lock':
+        'source = "registry+https://github.com/rust-lang/crates.io-index"\n',
+    },
+    expected: [
+      'index.crates.io <- apps/desktop/src-tauri/Cargo.lock',
+      'static.crates.io <- apps/desktop/src-tauri/Cargo.lock',
+    ],
+  },
+  {
+    name: 'files four folders down are not read',
+    files: {
+      'a/b/c/d/Cargo.lock': 'source = "registry+https://github.com/rust-lang/crates.io-index"\n',
+    },
+    expected: [],
+  },
+  {
     name: 'the first file to name a host is the one reported',
     files: {
       'Cargo.lock': 'source = "registry+https://github.com/rust-lang/crates.io-index"\n',
@@ -386,6 +406,79 @@ describe('findRegistryHosts', () => {
     const none = tempDir('none');
     dirs.push(none);
     expect(await findRegistryHosts(join(none.path, 'missing'))).toEqual([]);
+  });
+});
+
+describe('findRegistryHostsAt', () => {
+  const git = createGit();
+  const run = (repo: string, ...args: string[]) =>
+    execFileSync('git', ['-C', repo, ...args], { env: isolatedGitEnv(), stdio: 'pipe' });
+
+  /** A repository whose main branch commits `files` on top of the temp repo's README. */
+  function committed(files: Readonly<Record<string, string>>): string {
+    const repo = createTempRepo();
+    dirs.push(repo);
+    for (const [name, text] of Object.entries(files)) {
+      const path = join(repo.path, name);
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, text);
+    }
+    run(repo.path, 'add', '--all', '--force');
+    run(repo.path, 'commit', '-q', '--allow-empty', '-m', 'files');
+    return repo.path;
+  }
+
+  it.each(rows)('reads what the folder reader reads: $name', async ({ files, expected }) => {
+    const repo = committed(files);
+    const found = await findRegistryHostsAt(git, repo, 'refs/heads/main');
+    expect(found.map((f) => `${f.host} <- ${f.file}`).sort()).toEqual([...expected].sort());
+  });
+
+  it('reads the commit, not the files in the checkout', async () => {
+    const repo = committed({ 'Gemfile.lock': 'GEM\n  remote: https://rubygems.org/\n' });
+    writeFileSync(join(repo, 'Gemfile.lock'), 'GEM\n  remote: https://evil.example.net/\n');
+    writeFileSync(join(repo, '.npmrc'), '@x:registry=https://exfil.example.net/\n');
+    expect(await findRegistryHostsAt(git, repo, 'refs/heads/main')).toEqual([
+      { host: 'rubygems.org', file: 'Gemfile.lock' },
+    ]);
+  });
+
+  it('reads a linked file as absent', async () => {
+    const repo = createTempRepo();
+    dirs.push(repo);
+    writeFileSync(join(repo.path, 'real.lock'), 'GEM\n  remote: https://rubygems.org/\n');
+    symlinkSync('real.lock', join(repo.path, 'Gemfile.lock'));
+    run(repo.path, 'add', '--all');
+    run(repo.path, 'commit', '-q', '-m', 'link');
+    expect(await findRegistryHostsAt(git, repo.path, 'refs/heads/main')).toEqual([]);
+  });
+
+  it('throws for a branch that is not there', async () => {
+    const repo = committed({});
+    await expect(findRegistryHostsAt(git, repo, 'refs/heads/nope')).rejects.toThrow();
+  });
+
+  it('lists each folder once, as the walk reaches it, never below three levels', async () => {
+    const repo = committed({
+      'a/b/c/Cargo.lock': 'source = "registry+https://github.com/rust-lang/crates.io-index"\n',
+      'a/b/c/d/e/Gemfile.lock': 'GEM\n  remote: https://rubygems.org/\n',
+      'node_modules/x/y/z.txt': 'z',
+    });
+    const listed: string[] = [];
+    const counting = {
+      fileAt: git.fileAt.bind(git),
+      folderAt: (r: string, rev: string, folder: string) => {
+        listed.push(folder);
+        return git.folderAt(r, rev, folder);
+      },
+    };
+
+    const found = await findRegistryHostsAt(counting, repo, 'refs/heads/main');
+
+    expect(found.map((f) => f.host)).toEqual(['index.crates.io', 'static.crates.io']);
+    expect(new Set(listed).size).toBe(listed.length);
+    expect(listed.filter((f) => !f.includes('.'))).toEqual(['', 'a', 'a/b', 'a/b/c']);
+    expect(listed.some((f) => f.startsWith('node_modules') || f.startsWith('a/b/c/d'))).toBe(false);
   });
 });
 

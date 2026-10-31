@@ -29,6 +29,21 @@ export function writeFoundHosts(
   );
 }
 
+/**
+ * Keeps `found` as the project's reading when it has none, and answers whether it did. A reading made
+ * meanwhile (when the project was added, or by another caller) is left as it is: a reading, once kept,
+ * is never replaced this way. An empty reading counts as one.
+ */
+export function writeFoundHostsIfNone(
+  ctx: WriteContext,
+  projectId: ProjectId,
+  found: readonly FoundHostDto[],
+): boolean {
+  if (getAppSetting(ctx.tx, key(projectId)) !== undefined) return false;
+  writeFoundHosts(ctx, projectId, found);
+  return true;
+}
+
 /** The file that names `host` as a registry or toolchain host, or null when none does. */
 export function foundHostFile(db: DbReader, projectId: ProjectId, host: string): string | null {
   const wanted = host.trim().toLowerCase();

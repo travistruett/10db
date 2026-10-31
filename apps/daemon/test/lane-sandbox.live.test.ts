@@ -284,7 +284,7 @@ async function runLane(opts: {
     const cards: InboxItemDto[] = [];
     const fileAccess = fileAccessJudge(lane.fileAccess);
     const broker = createPermissionBroker(
-      { state, inbox },
+      { state, inbox, git: createGit(), logger },
       {
         projectId: run.project.id,
         workstreamId: run.workstreamId,
