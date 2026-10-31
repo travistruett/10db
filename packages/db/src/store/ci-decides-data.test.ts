@@ -27,9 +27,9 @@ describe('the pre-check command', () => {
   });
 
   it('is refused on a new project with no gate command', () => {
-    expect(() => seedProject(store, { gateCommand: null, precheckCommand: 'make precheck' })).toThrow(
-      /set a gate command first/i,
-    );
+    expect(() =>
+      seedProject(store, { gateCommand: null, precheckCommand: 'make precheck' }),
+    ).toThrow(/set a gate command first/i);
   });
 
   it('is refused on a project with no gate command, and the gate command stays while one is set', () => {

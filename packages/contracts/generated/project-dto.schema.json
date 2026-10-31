@@ -24,6 +24,12 @@
         "null"
       ]
     },
+    "precheckCommand": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "areas": {
       "type": "array",
       "items": {
@@ -246,6 +252,7 @@
     "repoPath",
     "gateCommand",
     "changedCheckCommand",
+    "precheckCommand",
     "areas",
     "hazards",
     "maxLanes",
