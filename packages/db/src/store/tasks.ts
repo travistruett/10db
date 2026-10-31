@@ -157,7 +157,7 @@ export function insertTask(ctx: WriteContext, projectId: ProjectId, input: TaskI
   }
   return writeTask(ctx, projectId, {
     ...config,
-    landing: config.landing ?? taskLandingFor(project.landing),
+    landing: config.landing ?? taskLandingFor(project),
     proposalId: null,
   });
 }
@@ -176,7 +176,7 @@ export function insertTaskFromProposal(
   },
 ): TaskDto {
   return writeTask(ctx, input.projectId, {
-    landing: taskLandingFor(getProject(ctx.tx, input.projectId).landing),
+    landing: taskLandingFor(getProject(ctx.tx, input.projectId)),
     title: Title.parse(input.title),
     description: input.description,
     acceptanceCriteria: [],

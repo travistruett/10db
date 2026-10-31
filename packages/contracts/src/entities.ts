@@ -173,6 +173,9 @@ const WorktreeSeed = z.array(WorktreeSeedName).max(32);
 
 const UsageHandoffAt = z.number().min(USAGE_HANDOFF_MIN).max(USAGE_HANDOFF_MAX);
 
+/** The refusal for a default landing in a branch that is not named. */
+export const NAME_LANDING_BRANCH = 'Name the branch new tasks land in';
+
 export const ProjectInput = z
   .object({
     name: z.string().min(1),
@@ -202,6 +205,8 @@ export const ProjectInput = z
     baseBranch: BranchName.default('main'),
     /** What a finished task's pull request does unless the task says otherwise. */
     landing: z.enum(ProjectLanding).default(DEFAULT_PROJECT_LANDING),
+    /** The branch of origin new tasks land in when `landing` is `branch`; null otherwise. */
+    landingBranch: BranchName.nullable().default(null),
     /**
      * `pull_request` delivery titles each PR `<prefix>: <batch title>`; null derives
      * `<type>(<scope>): <subject>` from the batch's tasks and the paths it changed.
@@ -232,6 +237,10 @@ export const ProjectInput = z
   .refine((p) => p.nudgePct > p.handoffPct, {
     message: 'nudgePct must be above handoffPct',
     path: ['nudgePct'],
+  })
+  .refine((p) => p.landing !== ProjectLanding.Branch || p.landingBranch !== null, {
+    message: NAME_LANDING_BRANCH,
+    path: ['landingBranch'],
   })
   .refine(
     (p) => p.workspaceMode !== WorkspaceMode.Worktree || p.delivery === Delivery.PullRequest,
@@ -271,6 +280,7 @@ export const ProjectDto = z.object({
   delivery: z.enum(Delivery),
   baseBranch: z.string(),
   landing: z.enum(ProjectLanding),
+  landingBranch: z.string().nullable(),
   prTitlePrefix: z.string().nullable(),
   allowedCommands: z.array(z.string()),
   sandboxLoopback: z.boolean(),
@@ -297,6 +307,8 @@ export const ProjectPatch = z
     delivery: z.enum(Delivery),
     baseBranch: BranchName,
     landing: z.enum(ProjectLanding),
+    /** The branch new tasks land in when `landing` is `branch`; a `landing` that is not `branch` forgets it. */
+    landingBranch: BranchName.nullable(),
     prTitlePrefix: PrTitlePrefix.nullable(),
     /** Replaces the project's areas; one that a running task holds can't be removed or renamed. */
     areas: z.array(AreaDef.extend({ globs: z.array(PathPattern).min(1) })).min(1),
