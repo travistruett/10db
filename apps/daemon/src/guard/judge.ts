@@ -344,6 +344,20 @@ type Dir = string | null;
 const union = (...lists: readonly (readonly Dir[])[]): Dir[] => [...new Set(lists.flat())];
 const DIRECTORY_CHANGES: ReadonlySet<string> = new Set(['cd', 'pushd', 'popd']);
 
+/**
+ * The words with every redirection and its target dropped, so `pnpm 2>/dev/null add x` reads as
+ * `pnpm add x`: the shell removes a redirection before it runs the command, wherever it stands.
+ */
+export function withoutRedirections(words: readonly string[]): string[] {
+  const kept: string[] = [];
+  for (let i = 0; i < words.length;) {
+    const span = redirectionSpan(words, i);
+    if (span > 0) i += span;
+    else kept.push(words[i++] ?? '');
+  }
+  return kept;
+}
+
 /** The command a segment runs, past reserved words, assignments and wrappers. */
 export function commandOf(segment: ShellSegment): {
   readonly words: string[];
@@ -590,7 +604,7 @@ function judgeShell(
       // After `! cd`, what follows `&&` runs when the cd failed.
       chained = negated ? union(dirs, moved) : moved;
     }
-    const forms = commandForms(words);
+    const forms = commandForms(withoutRedirections(words));
     if (DEPLOY.some((re) => forms.lines.some((l) => re.test(l))))
       return deny('Deploy and publish commands are never run by agents.');
     const line = words.join(' ');

@@ -17,6 +17,7 @@ import {
   hazardHit,
   MONITOR_INPUT_KEYS,
   runsInBackground,
+  sandboxedAsk,
   startsEndlessBackgroundLoop,
   stringField,
 } from '../guard';
@@ -345,7 +346,10 @@ export function createPermissionBroker(
     if (startsEndlessBackgroundLoop(command, { background: runsInBackground(req.input) })) {
       return { summary: command, body: `${command}\n\n${LOOP_CARD_BODY}`, onceOnly: true };
     }
-    if (hit === null && !req.escalated) return { behavior: 'allow' };
+    // What the hook asked about for a command it could not read is carded too.
+    const unreadable =
+      hit === null && sandboxedAsk({ toolName: 'Bash', input: req.input }, sandbox.hazards);
+    if (hit === null && !req.escalated && !unreadable) return { behavior: 'allow' };
     return hit?.name === 'deps' && hit.words[0] === 'pnpm'
       ? { summary: command, body: `${command}\n\n${PNPM_CARD_BODY}` }
       : { summary: command };

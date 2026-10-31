@@ -2,7 +2,14 @@ import type { HazardDef } from '@10db/contracts';
 import { z } from 'zod';
 import { startsEndlessBackgroundLoop } from './background-loops';
 import { hazardHit } from './hazards';
-import { stringField, type FileAccessJudge, type GuardVerdict } from './judge';
+import {
+  shellScripts,
+  withoutRedirections,
+  stringField,
+  type FileAccessJudge,
+  type GuardVerdict,
+} from './judge';
+import { leadingWords, parseShell } from './shell-words';
 
 /** The Monitor input keys a card-free call may carry; any other (`ws`, or one added later) is asked about. */
 export const MONITOR_INPUT_KEYS: ReadonlySet<string> = new Set([
@@ -36,10 +43,72 @@ export function runsInBackground(input: Readonly<Record<string, unknown>>): bool
   return flag !== undefined && flag !== null && flag !== false && flag !== 'false';
 }
 
+/** Tools that reach a host or an MCP server from Claude Code's own process. */
+const OUT_OF_PROXY_TOOLS: ReadonlySet<string> = new Set([
+  'WebFetch',
+  'WebSearch',
+  'ListMcpResourcesTool',
+  'ReadMcpResourceTool',
+]);
+
 /** A call to a tool whose traffic does not pass through the sandbox's network proxy. */
 function actsOutsideSandboxProxy(toolName: string): boolean {
-  if (toolName === 'WebFetch' || toolName === 'WebSearch') return true;
+  if (OUT_OF_PROXY_TOOLS.has(toolName)) return true;
   return toolName.startsWith('mcp__') && !toolName.startsWith('mcp__10db__');
+}
+
+/** A character that makes the shell replace a word with text 10db cannot read from the command. */
+const EXPANDING = /[$`*?[~{}]/;
+/** A program name written out in plain text. */
+const PLAIN_PROGRAM = /^(?:[A-Za-z0-9_@+%,:./-]+|\[\[?)$/;
+/** Programs whose arguments come from their input, so a hazard program behind them has its words unread. */
+const FEEDS_ARGUMENTS: ReadonlySet<string> = new Set(['xargs']);
+const SHELLS: ReadonlySet<string> = new Set(['sh', 'bash', 'zsh']);
+const MAX_DEPTH = 3;
+
+const baseName = (word: string): string => word.slice(word.lastIndexOf('/') + 1);
+
+/**
+ * A fail-closed reading of one command: a program that is not plain text, a hazard program followed
+ * by a word the shell expands, or a wrapper that runs a hazard program, each of which could spell a
+ * hazard 10db cannot see. Everything else is left to `hazardHit`.
+ */
+function unreadableHazard(
+  command: string,
+  hazardPrograms: ReadonlySet<string>,
+  depth = 0,
+): string | null {
+  for (const segment of parseShell(command).segments) {
+    const words = withoutRedirections(leadingWords(segment.words).command);
+    const [head = ''] = words;
+    // Assignments before the program are not the program.
+    const at = words.findIndex((word) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(word));
+    const program = at < 0 ? '' : (words[at] ?? '');
+    const rest = at < 0 ? [] : words.slice(at + 1);
+    if (program !== '' && !PLAIN_PROGRAM.test(program)) {
+      return `The program "${program}" is not written out, so 10db cannot tell what it runs.`;
+    }
+    const name = baseName(program);
+    // A hazard program anywhere in the command line (behind env, command, nice...) with a word the
+    // shell expands after it: the expansion could select a hazard form.
+    const at2 = [program, ...rest].findIndex((word) => hazardPrograms.has(baseName(word)));
+    if (at2 >= 0 && [program, ...rest].slice(at2 + 1).some((word) => EXPANDING.test(word))) {
+      return `A program with hazard forms is followed by a word the shell expands.`;
+    }
+    if (FEEDS_ARGUMENTS.has(name) && rest.some((word) => hazardPrograms.has(baseName(word)))) {
+      return `"${name}" feeds a program with hazard forms its arguments.`;
+    }
+    if (head === '') continue;
+    if (depth < MAX_DEPTH) {
+      const documents = SHELLS.has(baseName(program)) ? segment.hereDocuments : [];
+      const inner = [...segment.nested, ...documents, ...shellScripts(words)];
+      for (const body of inner) {
+        const found = unreadableHazard(body, hazardPrograms, depth + 1);
+        if (found !== null) return found;
+      }
+    }
+  }
+  return null;
 }
 
 /** The command's reason to ask: a hazard it runs, a loop that never ends, or text too deep to scan. */
@@ -54,6 +123,11 @@ function commandAsk(
     if (startsEndlessBackgroundLoop(command, { background })) {
       return ask('This command runs something that never ends in the background.');
     }
+    const programs = new Set(
+      hazards.flatMap((hazard) => hazard.commands.map((c) => baseName(c.split(' ')[0] ?? ''))),
+    );
+    const unreadable = unreadableHazard(command, programs);
+    if (unreadable !== null) return ask(unreadable);
   } catch (cause) {
     // A command nested deeply enough to overflow the stack is one nothing can read.
     if (cause instanceof Error && cause.name === 'RangeError') {

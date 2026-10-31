@@ -983,9 +983,9 @@ describe('permission broker in a sandboxed lane', () => {
     },
     { name: 'a subshell after then', command: 'if true; then (cd $d && ls); fi', outcome: 'allow' },
     { name: 'a variable argument to echo', command: 'echo "$HOME" "$(date)"', outcome: 'allow' },
-    { name: 'a variable after pnpm test', command: 'pnpm test $x', outcome: 'allow' },
-    { name: 'a glob argument to pnpm run', command: 'pnpm run build *.ts', outcome: 'allow' },
-    { name: 'pnpm exec of a known tool', command: 'pnpm exec tsc $x', outcome: 'allow' },
+    { name: 'a variable after pnpm test', command: 'pnpm test $x', outcome: 'card' },
+    { name: 'a glob argument to pnpm run', command: 'pnpm run build *.ts', outcome: 'card' },
+    { name: 'pnpm exec of a known tool', command: 'pnpm exec tsc $x', outcome: 'card' },
     {
       name: 'a redirection after the command',
       command: 'pnpm test 2>&1 | grep $x',
@@ -1020,18 +1020,18 @@ describe('permission broker in a sandboxed lane', () => {
     {
       name: 'pnpm filter with a quoted value',
       command: 'pnpm --filter "$pkg" test',
-      outcome: 'allow',
+      outcome: 'card',
     },
     {
       name: 'pnpm filter= with a quoted value',
       command: 'pnpm --filter="$pkg" test',
-      outcome: 'allow',
+      outcome: 'card',
     },
-    { name: 'pnpm -F with a quoted value', command: 'pnpm -F "$p" test', outcome: 'allow' },
+    { name: 'pnpm -F with a quoted value', command: 'pnpm -F "$p" test', outcome: 'card' },
     {
       name: 'a loop of pnpm filters',
       command: 'for p in daemon desktop; do pnpm --filter "@10db/$p" test; done',
-      outcome: 'allow',
+      outcome: 'card',
     },
     {
       name: 'a quoted filter, then a hazard in plain view',
@@ -1183,6 +1183,11 @@ describe('permission broker in a sandboxed lane', () => {
       outcome: 'allow',
     },
     { name: 'a function definition', command: 'f() { pnpm add x; }; f', outcome: 'card' },
+    // Spelled so the hazard scan cannot read it: the hook asks, and the broker cards it.
+    { name: 'pnpm with a variable word', command: 'x=add; pnpm $x lodash', outcome: 'card' },
+    { name: 'a variable as the program', command: 'p=pnpm; $p add x', outcome: 'card' },
+    { name: 'pnpm behind xargs', command: 'echo add x | xargs pnpm', outcome: 'card' },
+    { name: 'pnpm behind a redirection', command: 'pnpm 2>/dev/null add x', outcome: 'card' },
     // The classifier handed the call to a person.
     { name: 'escalated, a safe command', command: 'pnpm test', outcome: 'card', escalated: true },
     {

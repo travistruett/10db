@@ -1,6 +1,6 @@
 import type { HazardDef } from '@10db/contracts';
 import { commandForms, startsWithWords } from './command-forms';
-import { commandOf, shellQuote, shellScripts } from './judge';
+import { commandOf, shellQuote, shellScripts, withoutRedirections } from './judge';
 import { findExecCommands, parseShell } from './shell-words';
 
 /** The deepest `sh -c`, `eval` and `find -exec` nesting the guard follows. */
@@ -42,7 +42,7 @@ export function hazardHit(
       const found = hazardHit(next.body, hazards, next.depth);
       if (found !== null) return found;
     }
-    const forms = commandForms(words);
+    const forms = commandForms(withoutRedirections(words));
     for (const hazard of hazards) {
       if (hazard.commands.some((c) => forms.bare.some((f) => startsWithWords(f, c.split(' '))))) {
         return { name: hazard.name, words };

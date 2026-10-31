@@ -84,6 +84,8 @@ const ROWS: readonly Row[] = [
   { name: 'a monitor with no command', toolName: 'Monitor', input: {}, asks: true },
   { name: 'a web fetch', toolName: 'WebFetch', input: { url: 'https://example.org' }, asks: true },
   { name: 'a web search', toolName: 'WebSearch', input: { query: 'x' }, asks: true },
+  { name: 'listing MCP resources', toolName: 'ListMcpResourcesTool', input: {}, asks: true },
+  { name: 'reading an MCP resource', toolName: 'ReadMcpResourceTool', input: {}, asks: true },
   { name: 'a repo MCP tool', toolName: 'mcp__docs__search', input: {}, asks: true },
   { name: "10db's own MCP tool", toolName: 'mcp__10db__complete_step', input: {}, asks: false },
   { name: 'a file read', toolName: 'Read', input: { file_path: '/x' }, asks: false },
