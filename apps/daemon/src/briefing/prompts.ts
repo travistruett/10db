@@ -1,5 +1,6 @@
 import {
   EvidenceKind,
+  findingNotes,
   REVIEW_ROLES,
   ToolAccess,
   type ClaimKind,
@@ -264,6 +265,9 @@ function actionSection(input: PromptInput): string {
   }
 }
 
+const FOLLOW_UPS_ELSEWHERE =
+  '(It also filed follow-up tasks. They are separate tasks: do not do them in this one.)';
+
 const FOLLOW_UP_HOW =
   'Title each follow-up as an outcome (what is true when it is done) and describe what you saw and where; 10db files it as a task in the Icebox column and names it in your result.';
 
@@ -287,7 +291,7 @@ function roundSection(step: StepBrief, earlierResults: readonly StepResult[]): s
     `This is round ${String(rejections.length + 1)} of your step: the work was sent back after your last rejection. Check only whether each earlier finding is fixed, and what the fix's own changes broke. Do not read the whole change again for new problems.`,
     '',
     'Findings from your earlier rounds (check only these):',
-    latest.summary,
+    findingNotes(latest.summary),
     '',
     `Reject only for an earlier finding that is still not fixed or for something the fix's own changes broke, and number each one. A finding that is new and that the fix did not cause does not reject the work: put it in the followUps list of mcp__10db__complete_step. ${FOLLOW_UP_HOW} If every earlier finding is fixed and the fix broke nothing, approve.`,
   ];
@@ -304,7 +308,11 @@ function stepSection(input: PromptInput): string[] {
     lines.push('', 'Earlier steps:');
     for (const prior of input.priorResults) {
       const verdict = prior.result.verdict ? `: ${VERDICT_LABEL[prior.result.verdict]}` : '';
-      lines.push(`--- ${prior.role} (${prior.personaName})${verdict}`, prior.result.summary, '---');
+      const notes = findingNotes(prior.result.summary);
+      lines.push(`--- ${prior.role} (${prior.personaName})${verdict}`, notes);
+      // The follow-ups it filed are tasks of their own, so they are not this task's to do.
+      if (notes !== prior.result.summary) lines.push(FOLLOW_UPS_ELSEWHERE);
+      lines.push('---');
     }
   }
   if (input.previousResult) {

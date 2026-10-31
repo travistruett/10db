@@ -2522,6 +2522,43 @@ describe('flows', () => {
     );
   });
 
+  it('keeps the follow-ups a rejection filed out of the findings the next round and the fix are told about', async () => {
+    const followUp = {
+      title: 'Make errors name the file',
+      description: 'The upload error says nothing about which file failed.',
+    };
+    engine = await createTestEngine({
+      Alpha: [
+        implement('op-flow-0071'),
+        [
+          {
+            do: 'mcp' as const,
+            tool: 'complete_step',
+            args: {
+              opId: 'op-flow-0072',
+              summary: '1. BLOCKING a.ts:1 The empty state has no test.',
+              verdict: 'reject',
+              followUps: [followUp],
+            },
+          },
+          turn,
+        ],
+        implement('op-flow-0073'),
+        [approve('op-flow-0074'), turn],
+      ],
+    });
+    const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+    await until(workstream.id, (s) => s === 'DONE');
+    const revise = engine.adapter.prompts[2]?.prompt ?? '';
+    expect(revise).toContain('1. BLOCKING a.ts:1 The empty state has no test.');
+    expect(revise).not.toContain(followUp.title);
+    expect(revise).toContain('They are separate tasks: do not do them in this one.');
+    const second = engine.adapter.prompts[3]?.prompt ?? '';
+    expect(second).toContain('This is round 2');
+    expect(second).toContain('1. BLOCKING a.ts:1 The empty state has no test.');
+    expect(second).not.toContain(followUp.title);
+  });
+
   const noVerdict = [turn, { do: 'await_message' as const, contains: RESULT_NUDGE }, turn];
 
   describe('a review session that ends without a verdict', () => {

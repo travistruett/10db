@@ -50,14 +50,22 @@ function findingOf(lines: readonly string[]): Finding {
 }
 
 /**
+ * A step's own notes, without the list of follow-up tasks 10db appends after them. The follow-ups are
+ * separate tasks, so they are not findings for the next round or for the fix to address.
+ */
+export function findingNotes(summary: string): string {
+  const at = summary.indexOf(`\n${FOLLOW_UPS_HEADING}`);
+  return at === -1 ? summary : summary.slice(0, at).trimEnd();
+}
+
+/**
  * The findings in a review's notes. The reviewer persona writes each finding as a numbered note
  * (`1. BLOCKING path:line ...`); a finding's severity and location are what it wrote. Notes with no
  * numbering are one finding; text before the first number is not a finding.
  */
 export function parseFindings(summary: string): Finding[] {
   const items: string[][] = [];
-  // 10db's own list of the follow-up tasks the review filed comes last and holds no finding.
-  const notes = summary.split(`\n${FOLLOW_UPS_HEADING}`)[0] ?? summary;
+  const notes = findingNotes(summary);
   for (const line of notes.split('\n')) {
     const start = NUMBERED.exec(line);
     if (start) items.push([start[1] ?? '']);
