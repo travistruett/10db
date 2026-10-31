@@ -20,9 +20,9 @@ order:
 3. **Network access to a host outside the project's allowed domains is refused** by Claude Code's sandbox
    network classifier, which fails closed (spike row d). It no longer reaches `judgeHost`, so no card is raised
    before the refusal. Today's host card already denied first and asked after; in auto mode the lane sees the
-   refusal and can ask the builder itself. Where Claude Code's `PermissionDenied` hook fires for such a refusal,
-   10db raises today's "Allow network access to <host>?" card from it, so an allowed host works on the next try.
-   The builder accepted this on 2026-10-31: one host card was raised in the two days measured.
+   refusal and can ask the builder itself. 10db does not raise a card from Claude Code's `PermissionDenied` hook:
+   its input carries the tool name, input and a reason, with no host, and the refusal is the sandbox proxy's 403,
+   which the spike never saw reach a hook. The lane briefing tells lanes to ask the builder. The builder accepted this on 2026-10-31: one host card was raised in the two days measured.
 4. **Claude Code's auto-mode classifier** decides everything else: the plain reads, searches, test runs and
    builds that used to wait on an "Allow Bash?" or "Allow Monitor?" card.
 5. **What the classifier escalates** (`requiresUserInteraction`, or a classifier decision on `canUseTool`'s
