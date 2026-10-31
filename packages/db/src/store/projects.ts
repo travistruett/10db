@@ -182,15 +182,9 @@ export function patchProject(ctx: WriteContext, id: ProjectId, patch: ProjectPat
   }
   const delivery = changes.delivery ?? current.delivery;
   const workspaceMode = changes.workspaceMode ?? current.workspaceMode;
+  // The mode is only the default for new tasks, so it changes while work runs (task placement spec, P1).
   if (workspaceMode === WorkspaceMode.Worktree && delivery !== Delivery.PullRequest)
     throw new InvalidError('A worktree per task needs pull request delivery');
-  if (workspaceMode !== current.workspaceMode) {
-    const [open] = listUnfinishedBatches(ctx.tx, id);
-    if (open)
-      throw new ConflictError(
-        `Batch "${open.title}" is still ${open.state.toLowerCase()}; finish it before changing ${current.name}'s workspace mode`,
-      );
-  }
   // Re-saving the fallback the project already has asks nothing again, even while it runs on it.
   if (
     changes.fallbackAccountId !== undefined &&
