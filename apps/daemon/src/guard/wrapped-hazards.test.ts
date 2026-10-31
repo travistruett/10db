@@ -58,7 +58,7 @@ describe('git, gh and publish are refused through wrappers and feeders', () => {
   ])('%s', (command) => {
     expect(guard(command).decision).toBe('deny');
   });
-  it.each(['git ls-files | xargs git log', 'echo git push --force', 'grep -rn "git push" .'])(
+  it.each(['echo git push --force', 'grep -rn "git push" .'])(
     'does not refuse the harmless %s',
     (command) => {
       expect(guard(command).decision).toBe('allow');
@@ -114,7 +114,7 @@ describe('quoted literals and arguments are not asked about', () => {
   );
 });
 
-describe('git and gh behind a feeder run only a read-only subcommand', () => {
+describe('git and gh behind a feeder are always refused', () => {
   it.each([
     'echo x | xargs git push',
     'echo x | xargs git add',
@@ -122,30 +122,23 @@ describe('git and gh behind a feeder run only a read-only subcommand', () => {
     'echo x | xargs git config',
     'echo x | xargs -I{} git log {}',
     'echo x | xargs -I X git log X',
+    'echo x | xargs -xI{} git {}',
+    'echo x | xargs --replace git {}',
     'echo x | parallel git log {}',
     'echo x | xargs gh repo view',
-    'echo x | xargs -I{} git {}',
-    'echo x | xargs -I X git X',
     'echo x | xargs -i git',
     'echo x | xargs -J % git % --force',
     'echo x | parallel git {}',
     'echo x | xargs gh pr merge',
     'echo x | xargs gh api -X POST',
-    'echo x | xargs gh api --method DELETE',
-    'echo x | xargs gh api -f a=b repos/x/y',
-  ])('refuses %s', (command) => {
-    expect(guard(command).decision).toBe('deny');
-  });
-  it.each([
+    'echo --open-files-in-pager=sh | xargs git grep x',
+    'echo -XPOST | xargs gh api repos/x/y',
     'git ls-files | xargs git log',
-    'git ls-files | xargs git blame',
     'echo x | xargs git show',
     'echo x | xargs gh pr view',
-    'echo x | xargs gh run list',
     'echo x | xargs gh api repos/x/y',
-    'echo x | xargs gh api -X GET repos/x/y',
-  ])('allows %s', (command) => {
-    expect(guard(command).decision).toBe('allow');
+  ])('refuses %s', (command) => {
+    expect(guard(command).decision).toBe('deny');
   });
 });
 
