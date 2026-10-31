@@ -110,6 +110,21 @@ describe('FakeAdapter', () => {
     );
   });
 
+  it('sends an allow-listed tool to canUseTool when the guard asks', async () => {
+    const canUseTool = vi.fn<SessionSpec['canUseTool']>(() =>
+      Promise.resolve({ behavior: 'allow' }),
+    );
+    const adapter = new FakeAdapter({
+      Alpha: [[{ do: 'tool', toolName: 'Write', input: { file_path: 'out.txt', content: 'x' } }]],
+    });
+    await collect(
+      adapter.start(
+        spec({ canUseTool, preToolUse: () => ({ decision: 'ask', reason: 'a hazard' }) }),
+      ).events,
+    );
+    expect(canUseTool).toHaveBeenCalledTimes(1);
+  });
+
   it('treats a throwing preToolUse as a denial', async () => {
     const canUseTool = vi.fn<SessionSpec['canUseTool']>(() =>
       Promise.resolve({ behavior: 'allow' }),

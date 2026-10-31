@@ -12,7 +12,7 @@ import {
 } from '@10db/contracts';
 import { z } from 'zod';
 import type { AccountExpectation } from '../environment';
-import type { GuardVerdict } from '../guard';
+import type { PreToolUseVerdict } from '../guard';
 import { matchesAllowedTool } from '../permissions';
 import { checkAccount, credentialProblem, modelMatches, type SeenAccount } from './account-check';
 import { createChannel } from './channel';
@@ -249,7 +249,7 @@ export class FakeAdapter implements SessionAdapter {
     };
 
     // A throwing guard denies: the tool call must never proceed on a guard failure.
-    const guardVerdict = (toolName: string, input: Record<string, unknown>): GuardVerdict => {
+    const guardVerdict = (toolName: string, input: Record<string, unknown>): PreToolUseVerdict => {
       try {
         return spec.preToolUse({ toolName, input });
       } catch (error) {
@@ -325,6 +325,7 @@ export class FakeAdapter implements SessionAdapter {
           }
           let decision: ToolDecision = { behavior: 'allow' };
           if (
+            verdict.decision === 'ask' ||
             step.toolName === 'AskUserQuestion' ||
             !matchesAllowedTool(step.toolName, input, spec.allowedTools, spec.cwd)
           ) {

@@ -6,7 +6,7 @@ import type {
   SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
 import { MAX_STEP_SUMMARY } from '@10db/contracts';
-import type { GuardVerdict } from '../guard';
+import type { PreToolUseVerdict } from '../guard';
 import { SandboxedMcpServer } from '../sandbox';
 import type { SessionEvent, SessionMcpServer, ToolDecision, TurnResult } from './types';
 
@@ -160,12 +160,12 @@ export function toPermissionResult(
   };
 }
 
-export function toHookOutput(verdict: GuardVerdict): HookJSONOutput {
+export function toHookOutput(verdict: PreToolUseVerdict): HookJSONOutput {
   if (verdict.decision === 'allow') return {};
   return {
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',
-      permissionDecision: 'deny',
+      permissionDecision: verdict.decision,
       permissionDecisionReason: verdict.reason,
     },
   };

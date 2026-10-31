@@ -1,6 +1,6 @@
 import type { AccountRefusal, Effort, Provider, SessionId, WorkstreamId } from '@10db/contracts';
 import type { AccountExpectation } from '../environment';
-import type { GuardVerdict } from '../guard';
+import type { PreToolUseVerdict } from '../guard';
 import type { LaneSandboxSpec, SandboxedMcpServer } from '../sandbox';
 import type { SeenAccount } from './account-check';
 import type { RemoteMcpServer } from './project-mcp';
@@ -49,8 +49,11 @@ export interface SessionSpec {
     readonly token: string;
     readonly toolTimeoutMs: number;
   };
-  /** The workspace guard: runs before every tool call, before permission rules. */
-  preToolUse(req: { readonly toolName: string; readonly input: unknown }): GuardVerdict;
+  /**
+   * The workspace guard: runs before every tool call, before permission rules. An `ask` hands the call
+   * to `canUseTool` even where Claude Code's own classifier would have decided it.
+   */
+  preToolUse(req: { readonly toolName: string; readonly input: unknown }): PreToolUseVerdict;
   /** Called for questions and for tool calls no allow rule covers. */
   canUseTool(req: ToolRequest): Promise<ToolDecision>;
 }

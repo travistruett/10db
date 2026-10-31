@@ -13,7 +13,13 @@ import {
 import { listPermissionRules } from '@10db/db';
 import { z } from 'zod';
 import type { StateStore } from '../events';
-import { firstUnread, hazardHit, startsEndlessBackgroundLoop, stringField } from '../guard';
+import {
+  hazardHit,
+  MONITOR_INPUT_KEYS,
+  runsInBackground,
+  startsEndlessBackgroundLoop,
+  stringField,
+} from '../guard';
 import { foundHostFile, matchPermissionRule, storableRule } from '../permissions';
 import {
   isOwnTaskOutputPath,
@@ -97,8 +103,6 @@ const ONCE_OPTIONS: readonly InboxOption[] = permissionOptions(false).filter(
 const NETWORK_TOOL = 'SandboxNetworkAccess';
 const READ_FAMILY: ReadonlySet<string> = new Set(['Read', 'Grep', 'Glob', 'LS']);
 const EDIT_FAMILY: ReadonlySet<string> = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
-/** The Monitor input keys a card-free call may carry; any other (`ws`, or one added later) cards. */
-const MONITOR_INPUT_KEYS: ReadonlySet<string> = new Set(['command', 'description', 'timeout_ms']);
 
 const HOST_CARD_BODY =
   'The command was refused. Allow the host for the project and the next session gets it; allow once only reaches a session that is still running.';
@@ -109,16 +113,6 @@ const PNPM_CARD_BODY =
 
 const LOOP_CARD_BODY =
   'This command runs something that never ends (a loop with no exit, `yes`, or the like) in the background, behind an `&` or the Bash tool’s own background flag: the lane goes on working while it holds a core, until something stops it. Behind an `&` it also outlives the command and the session that started it. 10db tries to stop what a session leaves when the session ends, but it cannot promise to find all of it (a job that leaves the command’s process tree and group within a second, with no file open in the lane’s temp dir, escapes), and until then a loop like this holds the Mac busy and makes gates and tests fail on timeouts. Allowing it covers this call only: the next one is asked about again.';
-
-/**
- * Whether Claude Code runs a Bash call in the background itself (`run_in_background`). Anything but
- * an absent or false flag counts, so a spelling Claude Code reads as true is never missed: a value
- * it refuses fails the call before it runs, so asking about it costs nothing.
- */
-function runsInBackground(input: Readonly<Record<string, unknown>>): boolean {
-  const flag = input['run_in_background'];
-  return flag !== undefined && flag !== null && flag !== false && flag !== 'false';
-}
 
 /**
  * What a lane is told when the builder denies a call. It names the call and says the denial covers
@@ -330,9 +324,9 @@ export function createPermissionBroker(
   }
 
   /**
-   * A sandboxed Bash command runs without a card unless it is a hazard or something unread could
-   * make it one: a program 10db cannot name, a script it cannot read, or an argument that could
-   * select a hazard form. An unread argument to a program with no hazard form does not matter.
+   * A sandboxed Bash command that reaches the broker is carded when it is a hazard, an endless
+   * background loop or a classifier escalation. The sandbox bounds what an unread script can do, so
+   * a command whose program or arguments 10db cannot read is not carded for that alone.
    */
   function judgeBash(
     req: ToolRequest,
@@ -341,10 +335,8 @@ export function createPermissionBroker(
     const command = req.input['command'];
     if (typeof command !== 'string') return { summary: summarize(req) };
     let hit: ReturnType<typeof hazardHit>;
-    let unread: ReturnType<typeof firstUnread>;
     try {
       hit = hazardHit(command, sandbox.hazards);
-      unread = firstUnread(command, sandbox.hazards);
     } catch (cause) {
       if (isTooDeep(cause)) return { summary: command };
       throw cause;
@@ -353,7 +345,7 @@ export function createPermissionBroker(
     if (startsEndlessBackgroundLoop(command, { background: runsInBackground(req.input) })) {
       return { summary: command, body: `${command}\n\n${LOOP_CARD_BODY}`, onceOnly: true };
     }
-    if (hit === null && !req.escalated && unread === null) return { behavior: 'allow' };
+    if (hit === null && !req.escalated) return { behavior: 'allow' };
     return hit?.name === 'deps' && hit.words[0] === 'pnpm'
       ? { summary: command, body: `${command}\n\n${PNPM_CARD_BODY}` }
       : { summary: command };

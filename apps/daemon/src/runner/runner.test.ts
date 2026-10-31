@@ -3745,6 +3745,48 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
     expect(readdirSync(probe.tmpRoot)).toEqual([]);
   });
 
+  it("hands a sandboxed lane's hazards and out-of-proxy tools to the broker through its PreToolUse hook", async () => {
+    const probe = sandboxProbe();
+    engine = await createTestEngine(
+      { Alpha: [[{ do: 'hang' }]] },
+      {},
+      { laneSandbox: probe.laneSandbox },
+    );
+    const specs = recordSpecs();
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await waitFor(() => specs[0]);
+    const [spec] = specs;
+    if (!spec) throw new Error('the session was not started');
+    const hook = (toolName: string, input: Record<string, unknown>) =>
+      spec.preToolUse({ toolName, input });
+    expect(hook('Bash', { command: 'grep -n foo README.md' })).toEqual({ decision: 'allow' });
+    expect(hook('Bash', { command: '(while :; do :; done) &' })).toMatchObject({ decision: 'ask' });
+    expect(hook('Monitor', { command: 'tail -f out', ws: 'wss://example.org' })).toMatchObject({
+      decision: 'ask',
+    });
+    expect(hook('WebFetch', { url: 'https://example.org' })).toMatchObject({ decision: 'ask' });
+    expect(hook('WebSearch', { query: 'x' })).toMatchObject({ decision: 'ask' });
+    expect(hook('mcp__docs__search', {})).toMatchObject({ decision: 'ask' });
+    // The guard's own refusal still comes first.
+    expect(
+      hook('Read', { file_path: join(probe.home, 'Library', 'Keychains', 'x') }),
+    ).toMatchObject({ decision: 'deny' });
+    await engine.runner.cancel(workstream.id);
+  });
+
+  it("leaves an unsandboxed session's web tools to its allow rules, not to the hook", async () => {
+    engine = await createTestEngine({ Alpha: [[{ do: 'hang' }]] });
+    const specs = recordSpecs();
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await waitFor(() => specs[0]);
+    expect(
+      specs[0]?.preToolUse({ toolName: 'WebFetch', input: { url: 'https://example.org' } }),
+    ).toEqual({ decision: 'allow' });
+    await engine.runner.cancel(workstream.id);
+  });
+
   it.each([
     [
       'SandboxProfileError',

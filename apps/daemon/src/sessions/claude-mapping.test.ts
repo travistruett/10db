@@ -262,6 +262,18 @@ describe('permission and hook translation', () => {
     });
   });
 
+  it('turns a guard ask into a PreToolUse ask, which hands the call to canUseTool', () => {
+    expect(
+      toHookOutput({ decision: 'ask', reason: 'This command runs the "deps" hazard.' }),
+    ).toEqual({
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'ask',
+        permissionDecisionReason: 'This command runs the "deps" hazard.',
+      },
+    });
+  });
+
   it('builds a user message, with a priority when given', () => {
     expect(userMessage('hi')).toEqual({
       type: 'user',

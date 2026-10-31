@@ -113,7 +113,7 @@ import {
   type SessionLaunch,
 } from '../environment';
 import type { Git } from '../git';
-import { judgeToolUse, type ProtectedPath } from '../guard';
+import { judgeToolUse, sandboxedAsk, type ProtectedPath } from '../guard';
 import {
   createPermissionBroker,
   raiseGateHostCards,
@@ -1461,8 +1461,8 @@ export function createRunner(opts: RunnerOptions): Runner {
           laneSession ? { sandboxed: { checkout } } : {},
         ),
         mcp: { url: opts.mcpUrl(), token, toolTimeoutMs: (project.humanWaitMinutes + 5) * 60_000 },
-        preToolUse: (req) =>
-          judgeToolUse({
+        preToolUse: (req) => {
+          const verdict = judgeToolUse({
             toolName: req.toolName,
             toolInput: req.input,
             repoPath: checkout,
@@ -1477,7 +1477,12 @@ export function createRunner(opts: RunnerOptions): Runner {
               providerSessionId: st.providerSessionId ?? resumeId,
             },
             ...(fileAccess ? { fileAccess } : {}),
-          }),
+          });
+          // Auto mode's classifier settles a sandboxed call no rule asks about, and it never
+          // reaches the broker, so what must still be carded is handed over here.
+          if (verdict.decision === 'deny' || !laneSession) return verdict;
+          return sandboxedAsk(req, project.hazards) ?? verdict;
+        },
         canUseTool: createPermissionBroker(
           { state: opts.state, inbox: opts.inbox },
           {

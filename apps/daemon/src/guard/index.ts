@@ -16,4 +16,10 @@ export { EQUALS_EXPANSION } from './plain-command';
 export { plainWordReadings } from './command-forms';
 export { startsEndlessBackgroundLoop } from './background-loops';
 export { hazardFor, hazardHit } from './hazards';
-export { firstUnread } from './unread-commands';
+export {
+  MONITOR_INPUT_KEYS,
+  runsInBackground,
+  type PreToolUseVerdict,
+  sandboxedAsk,
+  type SandboxedAsk,
+} from './sandboxed-asks';
