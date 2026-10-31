@@ -14,10 +14,12 @@ without a card when all of these hold:
 - its `command` passes the checks a Bash command does (no hazard, nothing unread, not escalated);
 - its `command` is inside a small grammar (`inbox/monitor-command.ts`): `until`/`while`/`if` loops and
   `done`/`fi`, and the programs `[`, `test`, `grep`, `cat`, `head`, `tail`, `wc`, `sleep`, `echo`, `true`,
-  `false` and `:`, with plain words, no expansion, substitution, glob, background job, subshell or
-  here-document, and no redirection but an unquoted `2>&1`, `>/dev/null` and `2>/dev/null`. Quotes are
-  read as the shell reads them (a `'` inside double quotes is literal), and a `$`, backtick or `\` outside
-  single quotes, or a `<` or `>` inside quotes, makes the command unread;
+  `false` and `:`, with plain words, no expansion, substitution, glob, comment, background job, subshell
+  or here-document, and no redirection but an unquoted `2>&1`, `>/dev/null` and `2>/dev/null`. Quotes
+  are read as the shell reads them (a `'` inside double quotes is literal), and a `$`, backtick or `\`
+  outside single quotes, a `#` outside quotes, or a `<` or `>` inside quotes, makes the command unread.
+  The shell drops a comment unread, so a `'` in `# it's` would otherwise shift what the scan takes as
+  quoted and hide a later `$_` or quoted `2>&1`; a quoted `'#'` pattern is still read;
 - every file that command names is an absolute path to a file directly in the session's own task output
   directory, `<own temp dir>/claude-<daemon uid>/<slug of the checkout>/<provider session id>/tasks/<file>`,
   by its real path (`isOwnTaskOutputPath` in `sandbox/file-access.ts`). The uid and slug are derived

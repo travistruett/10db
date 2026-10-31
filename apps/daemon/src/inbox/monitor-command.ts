@@ -4,10 +4,11 @@ import { parseShell, type ShellSegment } from '../guard';
  * Reads the command of a Monitor call: a lane waits on the output of a command it started in the
  * background with `until [ -s <file> ]; do sleep 2; done`, `until grep -q … <file>`, or a `grep`,
  * `tail` or `cat` of the file. Only a small grammar is read, and a command outside it is not one
- * this module vouches for: a program from the list below, plain words, and no expansion, nested
- * script, background job or redirection but an unquoted `2>&1`, `>/dev/null` and `2>/dev/null`. Every file the
- * command names must pass `isOwnFile`, and every program that reads names at least one, unless a
- * pipe feeds it. So the command can only read the files `isOwnFile` accepts and write nothing.
+ * this module vouches for: a program from the list below, plain words, and no expansion, comment,
+ * nested script, background job or redirection but an unquoted `2>&1`, `>/dev/null` and
+ * `2>/dev/null`. Every file the command names must pass `isOwnFile`, and every program that reads
+ * names at least one, unless a pipe feeds it. So the command can only read the files `isOwnFile`
+ * accepts and write nothing.
  */
 
 /** Words that start a command inside a loop or a condition. */
@@ -125,10 +126,12 @@ function programReads(program: string, args: readonly string[], reader: Reader):
 
 /**
  * Whether the text holds something the word checks below cannot read: an expansion, substitution or
- * escape (`$`, a backtick, `\`) outside single quotes, or a `<` or `>` inside quotes. Quotes are
- * tracked as the shell does: a `'` inside double quotes is literal, and `$`, a backtick and `\` still
- * count there. A quoted `<` or `>` is refused because a redirection is recognised by its text once
- * quotes are removed, so `'>/dev/null'` as an argument would look like one.
+ * escape (`$`, a backtick, `\`) outside single quotes, a `#` outside quotes, or a `<` or `>` inside
+ * quotes. Quotes are tracked as the shell does: a `'` inside double quotes is literal, and `$`, a
+ * backtick and `\` still count there. A quoted `<` or `>` is refused because a redirection is
+ * recognised by its text once quotes are removed, so `'>/dev/null'` as an argument would look like
+ * one. An unquoted `#` is refused because the shell drops a comment unread, quotes and all: a `'`
+ * in `# it's` would otherwise make this scan see the rest of the command as quoted.
  */
 function hasUnreadText(command: string): boolean {
   let quote: "'" | '"' | null = null;
@@ -141,7 +144,7 @@ function hasUnreadText(command: string): boolean {
       else if (ch === '$' || ch === '`' || ch === '\\' || ch === '<' || ch === '>') return true;
     } else if (ch === "'" || ch === '"') {
       quote = ch;
-    } else if (ch === '$' || ch === '`' || ch === '\\') {
+    } else if (ch === '$' || ch === '`' || ch === '\\' || ch === '#') {
       return true;
     }
   }

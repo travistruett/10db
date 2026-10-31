@@ -1426,6 +1426,16 @@ describe('permission broker in a sandboxed lane', () => {
         command: (d) => `grep -q 'say "done"' ${d}/b1.output`,
         outcome: 'allow',
       },
+      {
+        name: 'a single-quoted # pattern',
+        command: (d) => `until grep -q '#' ${d}/b1.output; do sleep 1; done`,
+        outcome: 'allow',
+      },
+      {
+        name: 'a double-quoted # pattern',
+        command: (d) => `grep -c "# done" ${d}/b1.output`,
+        outcome: 'allow',
+      },
       // Reads anywhere else.
       {
         name: 'a file in the checkout',
@@ -1481,6 +1491,22 @@ describe('permission broker in a sandboxed lane', () => {
       {
         name: 'a quoted 2>/dev/null as an extra grep file',
         command: (d) => `grep -q DONE ${d}/b1.output '2>/dev/null'`,
+        outcome: 'card',
+      },
+      // A comment is dropped by the shell, so a quote inside it must not change what is quoted.
+      {
+        name: 'a `$_` hidden behind a single quote in a comment',
+        command: (d) => `echo ../../../../../../../../../etc/passwd # it's\ncat "${d}/$_" # '`,
+        outcome: 'card',
+      },
+      {
+        name: 'a quoted 2>&1 hidden behind a single quote in a comment',
+        command: (d) => `true # it's\ncat ${d}/b1.output '2>&1'`,
+        outcome: 'card',
+      },
+      {
+        name: 'a comment with no quote in it',
+        command: (d) => `cat ${d}/b1.output # the test run`,
         outcome: 'card',
       },
       { name: 'stdin', command: () => 'grep -q DONE', outcome: 'card' },
