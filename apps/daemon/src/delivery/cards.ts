@@ -585,9 +585,13 @@ export const shipCards = {
   }),
 };
 
-/** GitHub's answer to turning on auto-merge for a pull request that has nothing left to wait for. */
+/**
+ * GitHub's answer to turning on auto-merge for a pull request that has nothing left to wait for:
+ * either "is in clean status" (checks all pass), or "Protected branch rules not configured for
+ * this branch" (the base branch has no protection rules, as `next` has none).
+ */
 export function nothingToWaitFor(error: unknown): boolean {
-  return /clean status/i.test(detailOf(error));
+  return /clean status|protected branch rules not configured/i.test(detailOf(error));
 }
 
 /** The place 10db switches a checkout back to, in words. */
