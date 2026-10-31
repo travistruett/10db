@@ -1,4 +1,4 @@
-import { TaskMove, type BoardColumnDto, type TaskDto } from '@10db/contracts';
+import { mintId, TaskMove, type BoardColumnDto, type TaskDto } from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse, type RequestHandler, type WebSocketHandler } from 'msw';
 import { describe, expect, it } from 'vitest';
@@ -29,6 +29,37 @@ function type(label: string | RegExp, value: string, scope: HTMLElement): void {
 }
 
 describe('BoardView', () => {
+  describe('the ?task= link', () => {
+    function serveTasks(...titles: string[]) {
+      const project = projectViewDto({ gateCommand: null });
+      const tasks = titles.map((title) => taskDto({ projectId: project.id, title }));
+      serve(
+        http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+        http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json(tasks)),
+        http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
+      );
+      return tasks;
+    }
+
+    it('opens the drawer of the task it names', async () => {
+      const [, beta] = serveTasks('Alpha', 'Beta');
+      renderApp(`/board?task=${beta?.id ?? ''}`);
+      const drawer = await screen.findByRole('dialog', { name: 'Task' });
+      expect(within(drawer).getByDisplayValue('Beta')).toBeTruthy();
+    });
+
+    it.each([
+      ['no task', '/board'],
+      ['a task id that is not valid', '/board?task=nope'],
+      ['a task that is not on the board', `/board?task=${mintId('Task')}`],
+    ])('opens no drawer for %s', async (_name, path) => {
+      serveTasks('Alpha');
+      renderApp(path);
+      await screen.findByRole('button', { name: 'Alpha' });
+      expect(screen.queryByRole('dialog', { name: 'Task' })).toBeNull();
+    });
+  });
+
   it('says a failed ship once, on the card, and retries it from the drawer', async () => {
     const batch = batchDto({
       state: 'FAILED',

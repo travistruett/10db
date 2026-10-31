@@ -36,6 +36,7 @@ const ID_SCHEMAS = {
   BoardColumn: idSchema('bcl', 'BoardColumnId'),
   Goal: idSchema('gol', 'GoalId'),
   GoalCriterion: idSchema('gcr', 'GoalCriterionId'),
+  JudgeCall: idSchema('jdg', 'JudgeCallId'),
 } as const;
 
 const ID_PREFIX = {
@@ -63,6 +64,7 @@ const ID_PREFIX = {
   BoardColumn: 'bcl',
   Goal: 'gol',
   GoalCriterion: 'gcr',
+  JudgeCall: 'jdg',
 } as const satisfies Record<keyof typeof ID_SCHEMAS, string>;
 
 export type IdKind = keyof typeof ID_SCHEMAS;
@@ -123,5 +125,7 @@ export const GoalId = ID_SCHEMAS.Goal;
 export type GoalId = IdOf<'Goal'>;
 export const GoalCriterionId = ID_SCHEMAS.GoalCriterion;
 export type GoalCriterionId = IdOf<'GoalCriterion'>;
+export const JudgeCallId = ID_SCHEMAS.JudgeCall;
+export type JudgeCallId = IdOf<'JudgeCall'>;
 export const AccountId = ID_SCHEMAS.Account;
 export type AccountId = IdOf<'Account'>;
