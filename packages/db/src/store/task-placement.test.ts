@@ -41,7 +41,12 @@ const project = (overrides: Partial<ProjectInput> = {}) =>
   seedProject(store, { ...prConfig, ...overrides });
 const addTask = (projectId: ProjectId, extra: { workspaceMode?: 'shared' | 'worktree' } = {}) =>
   store.write((ctx) =>
-    insertTask(ctx, projectId, { title: 'Alpha', acceptanceCriteria: ['x'], areas: ['api'], ...extra }),
+    insertTask(ctx, projectId, {
+      title: 'Alpha',
+      acceptanceCriteria: ['x'],
+      areas: ['api'],
+      ...extra,
+    }),
   ).value;
 const place = (id: TaskId, workspaceMode: 'shared' | 'worktree') =>
   store.write((ctx) => patchTask(ctx, id, { workspaceMode })).value;
@@ -130,7 +135,9 @@ describe('task placement', () => {
   it('a placement patch is refused for a task that is not open', () => {
     const p = project();
     const task = addTask(p.id);
-    store.write((ctx) => setTaskStatus(ctx, task.id, 'done'));
+    store.write((ctx) => {
+      setTaskStatus(ctx, task.id, 'done');
+    });
     const error = refusal(() => place(task.id, 'worktree'));
     expect(error).toBeInstanceOf(ConflictError);
     expect(String(error)).toContain('Alpha is finished');
@@ -159,7 +166,9 @@ describe('project placement defaults', () => {
   it("a project's default mode changes with work in flight, and leaves its tasks where they are", () => {
     const p = project();
     const task = addTask(p.id);
-    store.write((ctx) => insertBatch(ctx, { projectId: p.id, title: 'Open one', baseBranch: 'main' }));
+    store.write((ctx) =>
+      insertBatch(ctx, { projectId: p.id, title: 'Open one', baseBranch: 'main' }),
+    );
     runIn(addTask(p.id).id, 'RUNNING');
     const patched = store.write((ctx) => patchProject(ctx, p.id, { workspaceMode: 'worktree' }));
     expect(patched.value.workspaceMode).toBe('worktree');
@@ -171,7 +180,12 @@ describe('project placement defaults', () => {
 describe('currentBatch', () => {
   const newBatch = (projectId: ProjectId, title: string, worktreePath?: string) =>
     store.write((ctx) =>
-      insertBatch(ctx, { projectId, title, baseBranch: 'main', ...(worktreePath ? { worktreePath } : {}) }),
+      insertBatch(ctx, {
+        projectId,
+        title,
+        baseBranch: 'main',
+        ...(worktreePath ? { worktreePath } : {}),
+      }),
     ).value;
   const ship = (id: Parameters<typeof transitionBatch>[1]) => {
     for (const to of ['OPEN', 'SHIPPING', 'SHIPPED'] as const)

@@ -420,23 +420,9 @@ describe('migrating a database that has a gate command and evidence', () => {
 describe('migrating to per-task placement', () => {
   const AT = '2026-10-29T12:00:00.000Z';
 
-  /** The migrations up to and including `tag`, so the placement migration runs over rows a real database holds. */
-  function migrationsThrough(tag: string): string {
-    const older = join(dir, 'through');
-    cpSync(DB_MIGRATIONS_DIR, older, { recursive: true });
-    const journalPath = join(older, 'meta/_journal.json');
-    const journal = JSON.parse(readFileSync(journalPath, 'utf8')) as {
-      entries: { tag: string }[];
-    };
-    const end = journal.entries.findIndex((e) => e.tag === tag);
-    if (end < 0) throw new Error(`no migration ${tag}`);
-    for (const later of journal.entries.splice(end + 1)) rmSync(join(older, `${later.tag}.sql`));
-    writeFileSync(journalPath, JSON.stringify(journal, null, 2));
-    return older;
-  }
-
   beforeEach(() => {
-    migrateDatabase(db, migrationsThrough('0010_mushy_tinkerer'));
+    // The last migration before placement moved onto the task.
+    migrateDatabase(db, migrationsThrough('0014_withdraw_review_cards'));
     const run = (sql: string, ...args: string[]): void => {
       db.$client.prepare(sql).run(...args);
     };
@@ -488,7 +474,7 @@ describe('migrating to per-task placement', () => {
     migrateDatabase(db);
   });
 
-  it("sets worktree on every task of a worktree-mode project, started or not, and shared on the rest", () => {
+  it('sets worktree on every task of a worktree-mode project, started or not, and shared on the rest', () => {
     const rows = db.$client
       .prepare('SELECT id, workspace_mode, placement_reason FROM tasks ORDER BY id')
       .all();
@@ -506,7 +492,7 @@ describe('migrating to per-task placement', () => {
     const rows = db.$client
       .prepare('SELECT id, workspace_mode, isolate FROM projects ORDER BY id')
       .all() as { id: string; workspace_mode: string; isolate: string }[];
-    expect(rows.map((r) => [r.id, r.workspace_mode, JSON.parse(r.isolate)])).toEqual([
+    expect(rows.map((r): unknown[] => [r.id, r.workspace_mode, JSON.parse(r.isolate)])).toEqual([
       ['prj_copies', 'worktree', ['migrations', 'deps']],
       ['prj_folder', 'shared', ['migrations', 'deps']],
       ['prj_local', 'shared', ['migrations', 'deps']],
