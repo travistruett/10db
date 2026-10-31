@@ -7,11 +7,13 @@ import {
   WorkspaceMode,
   type BatchDto,
   type FlowId,
+  type Notice,
   type TaskDto,
   type TaskId,
   type WorkstreamDto,
 } from '@10db/contracts';
 import {
+  Alert,
   Badge,
   Button,
   Drawer,
@@ -53,7 +55,14 @@ import { ordinal, runNextNote } from './queue-place';
 import { canRunNext } from './run-next';
 import { RISK_LABEL } from './risk-labels';
 import { holdOption, isHeld, type HoldOption } from './task-hold';
-import { canCloseRun, canRetryRun, pullRequestClosed, shippedAnywayAndClosed } from './task-state';
+import {
+  canCloseRun,
+  canRetryRun,
+  pullRequestClosed,
+  shippedAnywayAndClosed,
+  shippedAtLimitLine,
+  taskNotices,
+} from './task-state';
 
 const RISKS: readonly RiskTag[] = Object.values(RiskTag);
 const isRisk = (value: string): value is RiskTag => RISKS.some((r) => r === value);
@@ -117,6 +126,7 @@ export function TaskDrawer({
     return peer ? [peer.title] : [];
   });
   const live = workstream !== undefined && !isTerminal(workstream.state);
+  const limitLine = shippedAtLimitLine(workstream);
 
   const dirty =
     title !== task.title ||
@@ -199,6 +209,7 @@ export function TaskDrawer({
             onClosed={onClose}
           />
         ) : null}
+        <TaskNotices notices={taskNotices(workstream, batch)} />
         {batch && task.status === TaskStatus.Done && pullRequestClosed(batch) ? (
           <ClosedPullRequest taskId={task.id} batch={batch} onClosed={onClose} />
         ) : null}
@@ -209,6 +220,11 @@ export function TaskDrawer({
             onClosed={onClose}
             {...(onStart ? { onStart } : {})}
           />
+        ) : null}
+        {limitLine ? (
+          <Alert color="orange" variant="light" data-testid="shipped-at-limit">
+            {limitLine}
+          </Alert>
         ) : null}
         {workstream ? <ReviewRoundsList steps={workstream.steps} /> : null}
         {batch ? (
@@ -356,6 +372,31 @@ export function TaskDrawer({
         </Group>
       </Modal>
     </Drawer>
+  );
+}
+
+/**
+ * What stands beside the task's state that asks the builder nothing: another task's hazard it waits
+ * for, a conflict its batch has with the base. The line is what the card says; the body says the rest
+ * and how to fix it, with its line breaks. Nothing when there is none.
+ */
+function TaskNotices({ notices }: { readonly notices: readonly Notice[] }) {
+  if (notices.length === 0) return null;
+  return (
+    <Stack gap="xs" data-testid="task-notice">
+      {notices.map((notice) => (
+        <Alert
+          key={notice.key}
+          variant="light"
+          color={notice.tone === 'warning' ? 'orange' : 'blue'}
+          title={notice.line}
+        >
+          <Text size="sm" style={{ whiteSpace: 'pre-wrap' }}>
+            {notice.body}
+          </Text>
+        </Alert>
+      ))}
+    </Stack>
   );
 }
 

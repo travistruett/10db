@@ -35,6 +35,7 @@ import type {
   ModelPin,
   ModelProfileId,
   NextAction,
+  Notice,
   PermissionRuleId,
   PersonaId,
   PersonId,
@@ -252,6 +253,11 @@ export const batches = sqliteTable(
     prFailingChecks: text('pr_failing_checks', { mode: 'json' }).$type<FailingCheckDto[]>(),
     prCheckedAt: text('pr_checked_at'),
     prUnknownReason: text('pr_unknown_reason'),
+    /** What stands about the batch that its tasks show (a conflict with the base); no card is raised for it. */
+    notices: text('notices', { mode: 'json' })
+      .$type<Notice[]>()
+      .notNull()
+      .default(sql`'[]'`),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -410,6 +416,8 @@ export const workstreams = sqliteTable(
     lastActivityAt: text('last_activity_at'),
     /** When the builder put the queued workstream first in line; cleared once it gets a lane. */
     runNextAt: text('run_next_at'),
+    /** What the run waits for besides the builder (another task's claim); cleared when the wait ends. */
+    notice: text('notice', { mode: 'json' }).$type<Notice>(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
