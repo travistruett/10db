@@ -386,6 +386,24 @@ describe('buildQueryOptions', () => {
     expect(options.hooks?.PreToolUse).toHaveLength(1);
   });
 
+  it('runs a sandboxed session in the lane permission mode it is given, with the guard and the broker still wired', () => {
+    const options = buildQueryOptions(spec({ sandbox: laneSandbox }), {
+      ...deps,
+      lanePermissionMode: 'auto',
+    });
+    expect(options.permissionMode).toBe('auto');
+    expect(options.canUseTool).toBeTypeOf('function');
+    expect(options.hooks?.PreToolUse).toHaveLength(1);
+    expect(options.settings).toMatchObject({
+      permissions: { ask: ['Edit(//repo/.mcp.json)', 'Write(//repo/.mcp.json)'] },
+    });
+  });
+
+  it('never runs an unsandboxed session in auto mode, whatever the lane permission mode', () => {
+    const options = buildQueryOptions(spec(), { ...deps, lanePermissionMode: 'auto' });
+    expect(options.permissionMode).toBe('default');
+  });
+
   it('runs a sandboxed session under its profile, with no settings file, asking before protected edits', () => {
     const options = buildQueryOptions(spec({ sandbox: laneSandbox }), deps);
     expect(options).toMatchObject({
@@ -1498,6 +1516,24 @@ describe('createClaudeAdapter', () => {
     } finally {
       repo.cleanup();
     }
+  });
+
+  it.each<[string, 'default' | 'auto' | undefined, string]>([
+    ['the lane mode it was made with', 'auto', 'auto'],
+    ['default mode when made with none', undefined, 'default'],
+  ])('starts a sandboxed session in %s', async (_name, lanePermissionMode, expected) => {
+    const fake = fakeQuery({
+      messages: [initMessage(), resultMessage({ input: 1, output: 1, costUsd: 0 })],
+    });
+    const adapter = createClaudeAdapter({
+      claudePath: '/usr/local/bin/claude',
+      pluginDir: '/harness',
+      logger: silentLogger,
+      query: fake.query,
+      ...(lanePermissionMode === undefined ? {} : { lanePermissionMode }),
+    });
+    await collect(adapter.start(spec({ sandbox: laneSandbox })).events);
+    expect(fake.record.options?.permissionMode).toBe(expected);
   });
 
   it("tells a sandboxed session's builder to check the account, not a settings file it never loads", async () => {
