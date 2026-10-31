@@ -1,6 +1,7 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import {
+  ClaimKind,
   ConflictError,
   currentStep,
   EventType,
@@ -60,6 +61,7 @@ import {
   openItemsForWorkstream,
   patchWorkstream,
   recordProfileOutcome,
+  releaseClaim,
   releaseClaims,
   setTaskStatus,
   StaleFenceError,
@@ -95,9 +97,11 @@ import {
   batchCardFields,
   checkoutOf,
   gateNote,
+  MIGRATIONS_HAZARD,
   projectAtCheckout,
   type BaseUpdate,
   type BaseUpdates,
+  type MigrationsBase,
 } from '../delivery';
 import type { StateStore } from '../events';
 import {
@@ -148,7 +152,13 @@ import {
   sendBackTarget,
   type StepEntry,
 } from '../team';
-import { BlockedRun, type GateRequest, type GateResult, type GateRunner } from '../verify';
+import {
+  BlockedRun,
+  type GateRequest,
+  type GateResult,
+  type GateRunner,
+  type Hold,
+} from '../verify';
 import { findClaimed } from '../watcher';
 import type { LiveSessions } from './live-sessions';
 import { checkedCommits, raiseBuilderCheck, waitsForCheck } from './builder-check';
@@ -190,6 +200,11 @@ export interface RunnerOptions {
   readonly gate: GateRunner;
   /** Brings a batch's base as origin has it now into its branch before each of its gates. */
   readonly baseUpdates: BaseUpdates;
+  /**
+   * Brings a task's base into its branch before a run that holds the migrations hazard from its
+   * start; absent, it isn't.
+   */
+  readonly migrationsBase?: MigrationsBase;
   readonly clock: Clock;
   readonly logger: Logger;
   readonly dataDir: string;
@@ -211,6 +226,19 @@ export interface RunnerOptions {
   identifyProcess?(pid: number): Promise<string | null>;
   /** Runs every lane session under the lane sandbox; null (fake sessions and tests) runs none. */
   readonly laneSandbox: LaneSandbox | null;
+  /**
+   * While the Mac is overloaded no session starts: each one waits here, before anything is built or
+   * launched, and a stop or cancel ends the wait.
+   */
+  readonly hold?: Hold;
+  /**
+   * Told each lane session's temp dir while it runs and when it is gone, so the load guard can name
+   * the lane a busy process left in it belongs to.
+   */
+  readonly laneTempDirs?: {
+    set(id: WorkstreamId, dir: string): void;
+    delete(id: WorkstreamId): void;
+  };
 }
 
 /** What has to happen after the write that changed a workstream has committed. */
@@ -257,6 +285,8 @@ type Outcome =
       readonly withoutHandoff: boolean;
       /** How the session ended, in a plain clause: what a step that records no result is failed with. */
       readonly ending: string;
+      /** What the session wrote as its last message in its longest turn; '' when it wrote nothing. */
+      readonly wrote: string;
     }
   | {
       readonly kind: 'parked';
@@ -363,6 +393,8 @@ interface Control {
   requestHandoff: ((cause: HandoffCause, reason: string) => void) | null;
   /** Set while the gate runs; aborting it kills the gate's process group. */
   gateAbort: AbortController | null;
+  /** Set while the lane waits for an overloaded Mac to calm down before it starts a session. */
+  holdAbort: AbortController | null;
   /** Set while a session runs; ends its inbox waits so later answers go to the card. */
   endWaits: (() => void) | null;
   done: Promise<void>;
@@ -387,6 +419,12 @@ interface SessionState {
   resultNudged: boolean;
   /** How the session's last turn ended; null before any turn did. */
   lastTurn: TurnResult | null;
+  /**
+   * The longest last message any turn of the session wrote ('' when none did). A review that ends
+   * without recording a verdict has usually written its findings here, and the failure card shows them;
+   * the longest, because the turn after a nudge only says "done".
+   */
+  wrote: string;
   /** The share of its context window the session last reported using. */
   contextPct: number | null;
   parkedFor: InboxItemId | null;
@@ -623,6 +661,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     ctl: Control,
     row: WorkstreamRow,
     ending: string,
+    wrote: string,
   ): Promise<'next' | 'stop'> {
     const step = currentStep(row);
     // A sent-back step still holds its earlier result; only one a session of this step recorded counts.
@@ -654,7 +693,23 @@ export function createRunner(opts: RunnerOptions): Runner {
           });
           return 'next';
         }
-        fail(id, ctl.fence, `The ${step.role} step ended without calling complete_step: ${ending}`);
+        // A review that wrote its findings but never recorded them: the card carries what it wrote, so
+        // the builder can judge the work on it instead of rerunning the review.
+        const gave = REVIEW_ROLES.includes(step.role) && wrote !== '';
+        fail(
+          id,
+          ctl.fence,
+          `The ${step.role} step ended without calling complete_step: ${ending}${gave ? ' What it wrote is on the card.' : ''}`,
+          gave
+            ? {
+                role: step.role,
+                personaName: step.personaName,
+                at: opts.clock.now().toISOString(),
+                findings: parseFindings(wrote),
+                summary: wrote,
+              }
+            : undefined,
+        );
         return 'stop';
       }
       case 'done': {
@@ -1036,6 +1091,20 @@ export function createRunner(opts: RunnerOptions): Runner {
       return { kind: 'stopped', reason: ctl.stopReason, providerSessionId: savedResumeId };
     // So does a move: the account the lane read before the await may not be the project's now.
     if (getProject(db, row.projectId).accountId !== ctl.accountId) return { kind: 'moved' };
+    // An overloaded Mac starts no session: wait for it, unless a stop ends the wait first.
+    if (opts.hold) {
+      const holding = new AbortController();
+      ctl.holdAbort = holding;
+      try {
+        await opts.hold.untilClear(holding.signal);
+      } finally {
+        ctl.holdAbort = null;
+      }
+      const stoppedWhileHeld = stopRequested(ctl);
+      if (stoppedWhileHeld)
+        return { kind: 'stopped', reason: stoppedWhileHeld, providerSessionId: savedResumeId };
+      if (getProject(db, row.projectId).accountId !== ctl.accountId) return { kind: 'moved' };
+    }
     const answeredItem = action.kind === 'answer' ? getInboxItem(db, action.inboxId) : null;
     const resumeId =
       action.kind === 'resume' || action.kind === 'answer' ? action.providerSessionId : null;
@@ -1150,7 +1219,9 @@ export function createRunner(opts: RunnerOptions): Runner {
       { ...projectMcp, failures: [...projectMcp.failures, ...sandboxFailures] },
       opts.laneSandbox ? [] : Object.keys(mcpServers.stdio),
     );
+    if (laneSession) opts.laneTempDirs?.set(id, laneSession.tmpDir);
     const dispose = (): void => {
+      opts.laneTempDirs?.delete(id);
       try {
         laneSession?.dispose();
       } catch (error) {
@@ -1215,6 +1286,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       firmSent: false,
       resultNudged: false,
       lastTurn: null,
+      wrote: '',
       contextPct: null,
       parkedFor: null,
       waitingOn: new Map(),
@@ -1473,6 +1545,7 @@ export function createRunner(opts: RunnerOptions): Runner {
             break;
           case 'turn_complete': {
             st.lastTurn = event.result ?? 'success';
+            if (event.text && event.text.length > st.wrote.length) st.wrote = event.text;
             opts.state.write((ctx) => {
               updateSessionUsage(ctx, session.id, {
                 inputTokens: event.inputTokens,
@@ -1502,6 +1575,7 @@ export function createRunner(opts: RunnerOptions): Runner {
                 kind: 'step_done',
                 withoutHandoff: st.handoffRequested,
                 ending: describeEnding(st),
+                wrote: st.wrote,
               };
               await handle.stop();
             }
@@ -1580,6 +1654,7 @@ export function createRunner(opts: RunnerOptions): Runner {
                     kind: 'step_done',
                     withoutHandoff: st.handoffRequested,
                     ending: describeEnding(st),
+                    wrote: st.wrote,
                   };
                   break;
               }
@@ -1978,8 +2053,39 @@ export function createRunner(opts: RunnerOptions): Runner {
     });
   }
 
+  /**
+   * A run that holds the migrations hazard from its start (the task names it among its areas) takes
+   * its base first, as request_claim does, so a migration it generates is numbered after the base's
+   * latest. A branch that can't take its base gives the hazard back: the session runs without it, and
+   * asking for it again says why. Stopped like a gate is.
+   */
+  async function migrationsBaseFirst(id: WorkstreamId, ctl: Control): Promise<void> {
+    if (!opts.migrationsBase) return;
+    const row = getWorkstreamRow(db, id);
+    if (row.nextAction.kind === 'verify' || row.state === S.Verifying) return;
+    const claim = activeClaims(db, id).find(
+      (c) => c.kind === ClaimKind.Hazard && c.name === MIGRATIONS_HAZARD,
+    );
+    if (!claim) return;
+    const abort = new AbortController();
+    ctl.gateAbort = abort;
+    if (ctl.stopReason === 'cancelled' || ctl.stopReason === 'shutdown') abort.abort();
+    try {
+      const taken = await opts.migrationsBase.take(id, abort.signal);
+      if (taken.kind !== 'held') return;
+      opts.state.write((ctx) => releaseClaim(ctx, claim.id));
+      opts.logger.info(
+        { workstreamId: id, inboxId: taken.inboxId },
+        "migrations hazard held back: the branch can't take its base",
+      );
+    } finally {
+      ctl.gateAbort = null;
+    }
+  }
+
   async function run(id: WorkstreamId, ctl: Control): Promise<void> {
     try {
+      await migrationsBaseFirst(id, ctl);
       for (;;) {
         const row = getWorkstreamRow(db, id);
         const verifying = row.nextAction.kind === 'verify' || row.state === S.Verifying;
@@ -2026,7 +2132,11 @@ export function createRunner(opts: RunnerOptions): Runner {
             });
           }
           if (readOnly) {
-            if ((await finishReadOnlyStep(id, ctl, finished, outcome.ending)) === 'next') continue;
+            if (
+              (await finishReadOnlyStep(id, ctl, finished, outcome.ending, outcome.wrote)) ===
+              'next'
+            )
+              continue;
             return;
           }
           if (outcome.withoutHandoff) {
@@ -2090,6 +2200,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         handle: null,
         requestHandoff: null,
         gateAbort: null,
+        holdAbort: null,
         endWaits: null,
         done: Promise.resolve(),
       };
@@ -2110,6 +2221,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       ctl.stopReason = reason;
       // A pause only stops sessions; a running gate doesn't use the provider, so let it finish.
       if (reason !== 'paused') ctl.gateAbort?.abort();
+      ctl.holdAbort?.abort();
       // Waits end before the process does, so an answer during a slow exit reaches the card.
       ctl.endWaits?.();
       await ctl.handle?.stop();

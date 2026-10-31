@@ -29,13 +29,16 @@ import {
   insertProposal,
   insertSource,
   insertToolOp,
+  replaceToolOp,
   patchWorkstream,
+  releaseClaim,
   searchDecisions,
+  type ClaimRow,
   type Json,
 } from '@10db/db';
 import type { z } from 'zod';
 import { buildContextPack } from '../briefing';
-import { checkoutOf } from '../delivery';
+import { checkoutOf, MIGRATIONS_HAZARD, type MigrationsBase } from '../delivery';
 import type { StateStore } from '../events';
 import type { Git } from '../git';
 import { judgeToolUse, type ProtectedPath } from '../guard';
@@ -57,6 +60,8 @@ export interface McpDeps {
   readonly claimPollMs?: number;
   /** How long one request_claim call waits before answering "still waiting"; tests shorten it. */
   readonly claimWaitSliceMs?: number;
+  /** Brings a task's base into its branch before it gets the migrations hazard; absent, it isn't. */
+  readonly migrationsBase?: MigrationsBase;
 }
 
 type In<K extends McpToolName> = z.output<(typeof McpToolInputs)[K]>;
@@ -76,7 +81,7 @@ export const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
     'Propose a new task, a task change, or a principle. Proposals go to the builder; nothing changes until accepted.',
   report_deviation: 'Report a departure from the plan or a principle, with your signed reason.',
   request_claim:
-    'Ask for an additional area or hazard claim before editing files in it. When another task holds it, this waits until it frees and returns granted: true, so do not carry on without it; the builder sees a card naming the holder and that you are waiting. A long wait answers granted: false with waiting: true before the call times out: call again with the same opId to keep waiting. granted: false with waiting: false means waiting would deadlock (the holder is waiting for a claim you hold).',
+    'Ask for an additional area or hazard claim before editing files in it. When another task holds it, this waits until it frees and returns granted: true, so do not carry on without it; the builder sees a card naming the holder and that you are waiting. A long wait answers granted: false with waiting: true before the call times out: call again with the same opId to keep waiting. granted: false with waiting: false means waiting would deadlock (the holder is waiting for a claim you hold), or, for the migrations hazard, that your branch could not take its base first: follow the instruction it returns.',
   commit:
     'Commit the named paths (and only those) under the repository lock. Returns the commit SHA. Retry with the same opId if unsure it completed.',
   record_evidence: 'Attach verification output: a command you ran, its exit code and a summary.',
@@ -119,6 +124,66 @@ export function createToolHandlers(
     insertToolOp(ctx, { workstreamId, sessionId, opId, tool, result });
     return result;
   };
+
+  /** A claim call's settled result, recorded under its opId. */
+  const recordClaim = (opId: string, settled: ClaimResult): Out<'request_claim'> =>
+    deps.state.write((ctx) => {
+      // Two calls with the same opId can share one wait; the first records it, the second reads it.
+      const recorded = findToolOp(ctx.tx, workstreamId, opId);
+      if (recorded) return McpToolOutputs.request_claim.parse(recorded.result);
+      return record(
+        'request_claim',
+        opId,
+        settled.granted
+          ? { granted: true, claimId: settled.claim.id }
+          : {
+              granted: false,
+              heldBy: settled.heldBy,
+              inboxId: settled.inboxId,
+              waiting: false,
+              instruction: null,
+            },
+        ctx,
+      );
+    });
+
+  /**
+   * Brings the base into the task's branch before the migrations hazard just granted counts, so a
+   * migration the task generates is numbered after the base's latest. Null once it may have the hazard;
+   * otherwise what the call answers, unrecorded, so a retry with the same opId asks again. A branch that
+   * can't take its base gives the hazard back. The base still coming in when `slice` ends answers
+   * "still waiting" with the hazard kept, and the retry joins the same merge.
+   */
+  async function migrationsFirst(
+    claimId: ClaimRow['id'],
+    slice: Promise<'slice'>,
+  ): Promise<Out<'request_claim'> | null> {
+    if (!deps.migrationsBase) return null;
+    const signal = deps.sessionSignal(sessionId) ?? new AbortController().signal;
+    const taken = await Promise.race([deps.migrationsBase.take(workstreamId, signal), slice]);
+    if (taken === 'slice')
+      return {
+        granted: false,
+        waiting: true,
+        heldBy: null,
+        inboxId: null,
+        instruction:
+          "10db is still bringing this branch's base from origin into it, so that a migration you generate is numbered after the base's latest. Don't generate or write a migration yet: call request_claim again with the same opId, and edit nothing in it until a call returns granted: true.",
+      };
+    if (taken.kind === 'ready') return null;
+    deps.state.write((ctx) => releaseClaim(ctx, claimId));
+    if (taken.kind === 'aborted')
+      throw new InvalidError(
+        'This session stopped before 10db brought the base into its branch, so it did not get the migrations hazard. End your turn.',
+      );
+    return {
+      granted: false,
+      waiting: false,
+      heldBy: null,
+      inboxId: taken.inboxId,
+      instruction: taken.instruction,
+    };
+  }
 
   return {
     get_context: () => Promise.resolve(buildContextPack(db, getWorkstream(db, workstreamId))),
@@ -279,51 +344,37 @@ export function createToolHandlers(
         pollMs: deps.claimPollMs ?? CLAIM_POLL_MS,
       });
       let timer: NodeJS.Timeout | undefined;
-      // The slice listens to no signal: a session that stops ends the wait itself, with its error.
+      // The slice listens to no signal: a session that stops ends the wait itself, with its error. It
+      // covers the whole call, the base brought in for the migrations hazard included.
       const slice = new Promise<'slice'>((resolve) => {
         timer = setTimeout(() => {
           resolve('slice');
         }, deps.claimWaitSliceMs ?? CLAIM_WAIT_SLICE_MS);
       });
-      let result: ClaimResult | 'slice';
       try {
-        result = await Promise.race([wait.done, slice]);
+        let result = await Promise.race([wait.done, slice]);
+        if (result === 'slice') {
+          const { heldBy, inboxId } = wait.state;
+          if (heldBy !== null && inboxId !== null)
+            return {
+              granted: false,
+              waiting: true,
+              heldBy,
+              inboxId,
+              instruction: `Still waiting for ${kind} ${input.name}: task "${getTask(db, getWorkstream(db, heldBy).taskId).title}" holds it. Call request_claim again with the same opId to keep waiting, and edit nothing in it until a call returns granted: true.`,
+            };
+          // The wait ended as the slice did; its result is a moment away.
+          result = await wait.done;
+        }
+        const settled = result;
+        if (settled.granted && kind === ClaimKind.Hazard && input.name === MIGRATIONS_HAZARD) {
+          const refused = await migrationsFirst(settled.claim.id, slice);
+          if (refused) return refused;
+        }
+        return recordClaim(input.opId, settled);
       } finally {
         clearTimeout(timer);
       }
-      if (result === 'slice') {
-        const { heldBy, inboxId } = wait.state;
-        if (heldBy !== null && inboxId !== null)
-          return {
-            granted: false,
-            waiting: true,
-            heldBy,
-            inboxId,
-            instruction: `Still waiting for ${kind} ${input.name}: task "${getTask(db, getWorkstream(db, heldBy).taskId).title}" holds it. Call request_claim again with the same opId to keep waiting, and edit nothing in it until a call returns granted: true.`,
-          };
-        // The wait ended as the slice did; its result is a moment away.
-        result = await wait.done;
-      }
-      const settled = result;
-      return deps.state.write((ctx) => {
-        // Two calls with the same opId can share one wait; the first records it, the second reads it.
-        const recorded = findToolOp(ctx.tx, workstreamId, input.opId);
-        if (recorded) return McpToolOutputs.request_claim.parse(recorded.result);
-        return record(
-          'request_claim',
-          input.opId,
-          settled.granted
-            ? { granted: true, claimId: settled.claim.id }
-            : {
-                granted: false,
-                heldBy: settled.heldBy,
-                inboxId: settled.inboxId,
-                waiting: false,
-                instruction: null,
-              },
-          ctx,
-        );
-      });
     },
 
     commit: async (input) => {
@@ -396,8 +447,16 @@ export function createToolHandlers(
     },
 
     complete_step: (input) => {
-      const done = prior(input.opId, McpToolName.CompleteStep);
-      if (done !== undefined) return Promise.resolve(McpToolOutputs.complete_step.parse(done));
+      // A reply is replayed only to the session it was given to: that is a retry of a lost answer.
+      // An opId an earlier session of the task used is a new verdict, which must be recorded; replaying
+      // the old "Recorded" for it left a rerun review with no result, and the task failed for it.
+      const earlier = findToolOp(db, workstreamId, input.opId);
+      if (earlier && earlier.tool !== McpToolName.CompleteStep)
+        throw new InvalidError(
+          `opId ${input.opId} was already used for ${earlier.tool}; use a new opId`,
+        );
+      if (earlier?.sessionId === sessionId)
+        return Promise.resolve(McpToolOutputs.complete_step.parse(earlier.result));
       return Promise.resolve(
         deps.state.write((ctx) => {
           const row = getWorkstreamRow(ctx.tx, workstreamId);
@@ -420,12 +479,16 @@ export function createToolHandlers(
             entityId: workstreamId,
             data: { stepIndex: row.stepIndex, role: step.role, verdict },
           });
-          return record(
-            'complete_step',
-            input.opId,
-            { instruction: 'Recorded. End your turn now.' },
-            ctx,
-          );
+          const reply = { instruction: 'Recorded. End your turn now.' };
+          if (!earlier) return record('complete_step', input.opId, reply, ctx);
+          replaceToolOp(ctx, {
+            workstreamId,
+            sessionId,
+            opId: input.opId,
+            tool: McpToolName.CompleteStep,
+            result: reply,
+          });
+          return reply;
         }),
       );
     },

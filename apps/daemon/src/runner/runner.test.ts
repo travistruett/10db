@@ -14,6 +14,7 @@ import {
   ReviewCardDetail,
   reviewRounds,
   type AccountId,
+  type WorkstreamId,
 } from '@10db/contracts';
 import {
   acquireLease,
@@ -53,7 +54,7 @@ import { DEFAULT_RUNNER_LIMITS } from '../runner';
 import { createGit } from '../git';
 import { silentLogger } from '../log';
 import { createGateRunner, type GateRequest, type GateResult } from '../verify';
-import type { BaseUpdate, BaseUpdates } from '../delivery';
+import type { BaseUpdate, BaseUpdates, MigrationsBase, MigrationsBaseTake } from '../delivery';
 import { allowedToolsFor } from '../permissions';
 import {
   createLaneSandbox,
@@ -1477,6 +1478,61 @@ describe('runner', () => {
     expect(listEvidence(engine.store.db, workstream.id)).toEqual([]);
   });
 
+  describe('while the Mac is overloaded', () => {
+    /** A hold the test opens, as the load guard does; `asked` counts the sessions that waited on it. */
+    function fakeHold() {
+      let open: () => void = () => undefined;
+      let overloaded = true;
+      const asked: (AbortSignal | undefined)[] = [];
+      return {
+        asked,
+        release: () => {
+          overloaded = false;
+          open();
+        },
+        hold: {
+          untilClear: (signal?: AbortSignal) => {
+            asked.push(signal);
+            if (!overloaded) return Promise.resolve(true);
+            return new Promise<boolean>((resolve) => {
+              open = () => {
+                resolve(true);
+              };
+              signal?.addEventListener('abort', () => {
+                resolve(false);
+              });
+            });
+          },
+        },
+      };
+    }
+
+    it('starts no session until the load falls, then runs the lane as usual', async () => {
+      const fake = fakeHold();
+      engine = await createTestEngine({ Alpha: [[turn]] }, {}, { hold: fake.hold });
+      const { workstream } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
+      await waitFor(() => fake.asked.length > 0);
+      expect(listSessions(engine.store.db, workstream.id)).toEqual([]);
+      expect(engine.adapter.prompts).toHaveLength(0);
+      fake.release();
+      await engine.runner.idle();
+      expect(ws(workstream.id).state).toBe('DONE');
+      expect(listSessions(engine.store.db, workstream.id)).toHaveLength(1);
+    });
+
+    it('ends a held lane at once when it is cancelled, with no session started', async () => {
+      const fake = fakeHold();
+      engine = await createTestEngine({ Alpha: [[turn]] }, {}, { hold: fake.hold });
+      const { workstream } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
+      await waitFor(() => fake.asked.length > 0);
+      await engine.runner.cancel(workstream.id);
+      expect(ws(workstream.id).state).toBe('CANCELLED');
+      expect(listSessions(engine.store.db, workstream.id)).toEqual([]);
+    });
+  });
+
   it('retries crashes as resume, then fresh, and fails after the limit with a flag', async () => {
     const crash = { do: 'crash' as const, message: 'boom' };
     engine = await createTestEngine({ Alpha: [[crash], [crash], [crash], [crash]] });
@@ -2605,6 +2661,62 @@ describe('flows', () => {
     expect(step(workstream.id, 1)?.result?.verdict).toBe('approve');
   });
 
+  it('records a verdict whose opId an earlier session of the task already used', async () => {
+    // Two incident reviews reused one readable opId: the daemon answered "Recorded" from the first
+    // session's reply and wrote nothing, so the step failed for a verdict the reviewer had given.
+    engine = await createTestEngine({
+      Alpha: [
+        implement('op-flow-0033'),
+        [turn, { do: 'await_message', contains: RESULT_NUDGE }, reject('op-review-same'), turn],
+        implement('op-flow-0034'),
+        [turn, { do: 'await_message', contains: RESULT_NUDGE }, approve('op-review-same'), turn],
+      ],
+    });
+    const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+    await until(workstream.id, (s) => s === 'DONE');
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(step(workstream.id, 1)?.result?.verdict).toBe('approve');
+  });
+
+  describe('a review that wrote its findings as text and never recorded them', () => {
+    const FINDINGS = '1. BLOCKING src/api/a.txt:3 the empty state has no test.\n   Add one.';
+    const wrote = (text: string) => [
+      { do: 'turn_complete' as const, text },
+      { do: 'await_message' as const, contains: RESULT_NUDGE },
+      { do: 'turn_complete' as const, text: 'The findings are above.' },
+    ];
+
+    it('fails with a card that carries what it wrote, so the builder can act on it', async () => {
+      engine = await createTestEngine({
+        Alpha: [implement('op-flow-0035'), wrote(FINDINGS), wrote(FINDINGS)],
+      });
+      const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+      await until(workstream.id, (s) => s === 'FAILED', 2);
+      expect(ws(workstream.id).failureReason).toBe(
+        'The review step ended without calling complete_step: its last turn ended normally. What it wrote is on the card.',
+      );
+      const card = listInbox(engine.store.db, { states: ['OPEN'] }).find((i) => i.kind === 'flag');
+      const detail = ReviewCardDetail.parse(card?.detail?.['reviewRejection']);
+      expect(detail).toMatchObject({
+        role: 'review',
+        personaName: 'Reviewer',
+        summary: FINDINGS,
+        findings: [{ severity: 'BLOCKING', location: 'src/api/a.txt:3' }],
+      });
+      expect(card?.body).toContain('What it wrote is on the card.');
+    });
+
+    it('keeps the failure as before when the review wrote nothing', async () => {
+      engine = await createTestEngine({
+        Alpha: [implement('op-flow-0036'), noVerdict, noVerdict],
+      });
+      const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+      await until(workstream.id, (s) => s === 'FAILED', 2);
+      const card = listInbox(engine.store.db, { states: ['OPEN'] }).find((i) => i.kind === 'flag');
+      expect(card?.detail?.['reviewRejection']).toBeUndefined();
+    });
+  });
+
   describe('when the reviewer keeps rejecting', () => {
     const FINAL =
       '1. BLOCKING src/api/a.txt:3 the card hides what the reviewer found.\n   Show it.';
@@ -3100,6 +3212,34 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
     // The session ended, so its temp dir is gone.
     expect(readdirSync(probe.tmpRoot)).toEqual([]);
     expect(ws(workstream.id).state).toBe('DONE');
+  });
+
+  it("records the session's temp dir while it runs, for the load guard to name a lane by, and forgets it once the dir is gone", async () => {
+    const probe = sandboxProbe();
+    const recorded = new Map<string, string>();
+    const seen: string[] = [];
+    engine = await createTestEngine(
+      { Alpha: [[turn]] },
+      {},
+      {
+        laneSandbox: probe.laneSandbox,
+        laneTempDirs: {
+          set: (id, dir) => {
+            recorded.set(id, dir);
+            seen.push(dir);
+          },
+          delete: (id) => {
+            recorded.delete(id);
+          },
+        },
+      },
+    );
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(seen).toEqual(probe.sessions.map((s) => s.tmpDir));
+    expect(seen).toHaveLength(1);
+    expect(recorded.size).toBe(0);
   });
 
   it("hands Claude Code an approved stdio server only as its launch under srt, and removes its sandbox with the session's", async () => {
@@ -3632,6 +3772,55 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
         expect(listEvidence(engine.store.db, workstream.id)).toEqual([]);
       });
     });
+  });
+});
+
+describe('the base before a task that holds the migrations hazard from its start', () => {
+  /** Answers `answer`, recording each ask and how many sessions had started by then. */
+  function recordingMigrationsBase(answer: MigrationsBaseTake) {
+    const asked: { id: WorkstreamId; sessions: number }[] = [];
+    const migrationsBase: MigrationsBase = {
+      take: (id) => {
+        asked.push({ id, sessions: engine.adapter.prompts.length });
+        return Promise.resolve(answer);
+      },
+    };
+    return { asked, migrationsBase };
+  }
+
+  async function run(migrationsBase: MigrationsBase, areas: string[]) {
+    engine = await createTestEngine({ Alpha: [[turn]] }, {}, { migrationsBase });
+    const { workstream } = engine.addTask('Alpha', areas);
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    return workstream;
+  }
+
+  it('is brought in before its first session, which keeps the hazard', async () => {
+    const { asked, migrationsBase } = recordingMigrationsBase({ kind: 'ready' });
+    const workstream = await run(migrationsBase, ['api', 'migrations']);
+    expect(asked).toEqual([{ id: workstream.id, sessions: 0 }]);
+    expect(engine.adapter.prompts[0]?.prompt).toContain(
+      'Your claims: area api, hazard migrations.',
+    );
+  });
+
+  it("gives the hazard back when the branch can't take its base, and the session starts without it", async () => {
+    const { asked, migrationsBase } = recordingMigrationsBase({
+      kind: 'held',
+      inboxId: mintId('InboxItem'),
+      instruction: 'origin/main conflicts with this branch in README.md',
+    });
+    const workstream = await run(migrationsBase, ['api', 'migrations']);
+    expect(asked).toEqual([{ id: workstream.id, sessions: 0 }]);
+    expect(engine.adapter.prompts[0]?.prompt).toContain('Your claims: area api.');
+  });
+
+  it('is not asked for a task without the hazard', async () => {
+    const { asked, migrationsBase } = recordingMigrationsBase({ kind: 'ready' });
+    await run(migrationsBase, ['api']);
+    expect(asked).toEqual([]);
+    expect(engine.adapter.prompts).toHaveLength(1);
   });
 });
 

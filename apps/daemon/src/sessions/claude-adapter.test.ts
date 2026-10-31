@@ -77,6 +77,8 @@ interface Script {
   readonly mcpSet?: McpSetServersResult | Promise<McpSetServersResult> | 'reject';
   /** The message of the error a rejected setMcpServers() throws. */
   readonly mcpRejection?: string;
+  /** What claude prints on stderr as it starts. */
+  readonly stderr?: string;
 }
 
 interface Record_ {
@@ -91,10 +93,19 @@ interface Record_ {
   }[];
   /** The order of accountInfo(), setMcpServers() and the prompt reaching claude. */
   readonly order: string[];
+  /** How many times claude was started, and the abort signal each start was given. */
+  queries: number;
+  readonly signals: (AbortSignal | undefined)[];
+  /** How many fake claude processes were spawned, and how many have finished printing. */
+  spawned: number;
+  printed: number;
 }
 
-/** Stands in for the SDK's query(): the test boundary for Claude Code. */
-function fakeQuery(script: Script): { query: QueryFn; record: Record_ } {
+/**
+ * Stands in for the SDK's query(): the test boundary for Claude Code. One script serves every start;
+ * a list gives each start its own, the last one serving any after it.
+ */
+function fakeQuery(scripts: Script | readonly Script[]): { query: QueryFn; record: Record_ } {
   const record: Record_ = {
     options: null,
     inputs: [],
@@ -102,9 +113,30 @@ function fakeQuery(script: Script): { query: QueryFn; record: Record_ } {
     contextCalls: [],
     mcpCalls: [],
     order: [],
+    queries: 0,
+    signals: [],
+    spawned: 0,
+    printed: 0,
   };
   const query: QueryFn = ({ prompt, options }) => {
+    const list = 'messages' in scripts ? [scripts] : scripts;
+    const script = list[Math.min(record.queries, list.length - 1)] ?? { messages: [] };
+    record.queries += 1;
     record.options = options;
+    record.signals.push(options.abortController?.signal);
+    if (script.stderr !== undefined) {
+      record.spawned += 1;
+      const child = options.spawnClaudeCodeProcess?.({
+        command: '/bin/sh',
+        args: ['-c', `printf %s '${script.stderr}' >&2`],
+        env: { PATH: '/usr/bin:/bin' },
+        signal: new AbortController().signal,
+      });
+      // The SDK types the process by its events only; the one the adapter spawns is a ChildProcess.
+      (child as { stderr?: NodeJS.ReadableStream } | undefined)?.stderr?.once('end', () => {
+        record.printed += 1;
+      });
+    }
     let inputDone: () => void = () => undefined;
     const inputEnded = new Promise<void>((resolve) => {
       inputDone = resolve;
@@ -173,7 +205,11 @@ function fakeQuery(script: Script): { query: QueryFn; record: Record_ } {
   return { query, record };
 }
 
-function adapterFor(script: Script, stopGraceMs = 1_000, clock: Clock = systemClock) {
+function adapterFor(
+  script: Script | readonly Script[],
+  stopGraceMs = 1_000,
+  clock: Clock = systemClock,
+) {
   const fake = fakeQuery(script);
   const adapter = createClaudeAdapter({
     claudePath: '/usr/local/bin/claude',
@@ -228,7 +264,7 @@ async function callHook(record: Record_, toolName: string) {
 }
 
 /** The adapter's wait for accountInfo() before it gives up. */
-const BILLING_PREFLIGHT_MS = 15_000;
+const BILLING_PREFLIGHT_MS = 30_000;
 
 const deps = {
   claudePath: '/usr/local/bin/claude',
@@ -544,6 +580,31 @@ describe('buildQueryOptions', () => {
   });
 });
 
+// Lane sessions start at the lane tier. Inside a sandbox the background policy itself is refused, so
+// the wrapper is replaced by one that records the tier and runs the program unwrapped.
+const laneTiers = vi.hoisted((): string[] => []);
+vi.mock('../priority', () => ({
+  atPriority: (tier: string, file: string, args: readonly string[]) => {
+    laneTiers.push(tier);
+    return { file, args };
+  },
+}));
+
+describe('lane priority', () => {
+  it('starts claude at the lane tier', async () => {
+    laneTiers.length = 0;
+    const options = buildQueryOptions(spec(), { ...deps });
+    const child = options.spawnClaudeCodeProcess?.({
+      command: '/bin/sh',
+      args: ['-c', 'true'],
+      env: { PATH: '/usr/bin:/bin' },
+      signal: new AbortController().signal,
+    });
+    await new Promise((resolve) => child?.once('exit', resolve));
+    expect(laneTiers).toEqual(['lane']);
+  });
+});
+
 describe('createClaudeAdapter', () => {
   it('emits started, activity, context, turn_complete, then ended exactly once', async () => {
     const { adapter, record } = adapterFor({
@@ -693,6 +754,30 @@ describe('createClaudeAdapter', () => {
     ]);
   });
 
+  it('carries the last message a turn wrote, capped, and none for a turn that wrote nothing', async () => {
+    const { adapter } = adapterFor({
+      messages: [
+        initMessage(),
+        resultMessage({
+          input: 1,
+          output: 1,
+          costUsd: 0.01,
+          text: '  1. BLOCKING a.ts:3 no test.  ',
+        }),
+        resultMessage({ input: 1, output: 1, costUsd: 0.01, text: 'x'.repeat(9_000) }),
+        resultMessage({ input: 1, output: 1, costUsd: 0.01 }),
+      ],
+    });
+    const turns = (await collect(adapter.start(spec()).events)).filter(
+      (e) => e.type === 'turn_complete',
+    );
+    expect(turns.map((t) => t.text)).toEqual([
+      '1. BLOCKING a.ts:3 no test.',
+      'x'.repeat(8_000),
+      undefined,
+    ]);
+  });
+
   it('never sends the prompt when the billing preflight shows Bedrock on a subscription project', async () => {
     const { adapter, record } = adapterFor({
       messages: [initMessage('none'), assistantMessage([textBlock('working')])],
@@ -796,6 +881,28 @@ describe('createClaudeAdapter', () => {
       'never answers': () => new Promise<AccountInfo>(() => undefined),
       rejects: () => Promise.reject(new Error('control channel closed')),
     } as const;
+    /** Stops the session on a manual clock: its grace periods pass as the clock is advanced. */
+    async function stopOn(clock: ManualClock, handle: { stop(): Promise<void> }): Promise<void> {
+      const stopping = handle.stop();
+      const ticker = setInterval(() => {
+        clock.advance(1_000);
+      }, 5);
+      try {
+        await stopping;
+      } finally {
+        clearInterval(ticker);
+      }
+    }
+    /** Advances the clock one wait at a time, once claude has been started for each. */
+    async function pastWaits(clock: ManualClock, record: Record_, starts: number): Promise<void> {
+      for (let start = 1; start <= starts; start += 1) {
+        await vi.waitFor(() => {
+          expect(record.queries).toBe(start);
+          expect(record.printed).toBe(record.spawned);
+        });
+        clock.advance(BILLING_PREFLIGHT_MS);
+      }
+    }
     it.each<{
       how: keyof typeof noAnswer;
       kind: 'claude_subscription' | 'anthropic_api_key';
@@ -807,29 +914,29 @@ describe('createClaudeAdapter', () => {
         kind: 'claude_subscription',
         reason: 'account_refused',
         message:
-          /^Claude Code reported no account within 15 s for account "Claude plan".*No prompt was sent/,
+          /^Claude Code reported no account within 30 s on each of 2 starts for account "Claude plan", which looks signed out\. Claude Code printed nothing\. No prompt was sent/,
       },
       {
         how: 'rejects',
         kind: 'claude_subscription',
         reason: 'account_refused',
-        message: /^Claude Code reported no account.*No prompt was sent/,
+        message: /^Claude Code reported no account.*on each of 2 starts.*No prompt was sent/,
       },
       {
         how: 'never answers',
         kind: 'anthropic_api_key',
         reason: 'billing_refused',
         message:
-          /^Account check failed: Claude Code reported no account within 15 s.*No prompt was sent/,
+          /^Account check failed: Claude Code reported no account within 30 s on each of 2 starts\. Claude Code printed nothing\. No prompt was sent/,
       },
       {
         how: 'rejects',
         kind: 'anthropic_api_key',
         reason: 'billing_refused',
-        message: /^Account check failed: Claude Code reported no account.*No prompt was sent/,
+        message: /^Account check failed: Claude Code reported no account.*on each of 2 starts/,
       },
     ])(
-      '$kind: accountInfo() $how, so no prompt is sent',
+      '$kind: accountInfo() $how on both starts, so no prompt is sent',
       async ({ how, kind, reason, message }) => {
         const clock = new ManualClock();
         const { adapter, record } = adapterFor(
@@ -844,7 +951,7 @@ describe('createClaudeAdapter', () => {
           identity: kind === 'claude_subscription' ? 'builder@example.com' : null,
         };
         const done = collect(adapter.start(spec({ account })).events);
-        clock.advance(BILLING_PREFLIGHT_MS);
+        await pastWaits(clock, record, 2);
         const events = await done;
         expect(events.map((e) => e.type)).toEqual(['ended']);
         expect(events[0]).toMatchObject({ type: 'ended', reason });
@@ -853,9 +960,141 @@ describe('createClaudeAdapter', () => {
             refusal: { problem: 'signed_out', seenIdentity: null },
           });
         expect(endMessage(events[0])).toMatch(message);
+        expect(record.queries).toBe(2);
         expect(record.inputs).toEqual([]);
       },
     );
+
+    it('waits 30 s for each start: a slow lane at background priority is not a signed-out account', async () => {
+      const clock = new ManualClock();
+      const { adapter, record } = adapterFor(
+        { messages: [initMessage()], then: 'hang', account: noAnswer['never answers']() },
+        1_000,
+        clock,
+      );
+      const handle = adapter.start(spec());
+      const done = collect(handle.events);
+      await vi.waitFor(() => {
+        expect(record.queries).toBe(1);
+      });
+      clock.advance(29_999);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(record.queries).toBe(1);
+      expect(record.signals[0]?.aborted).toBe(false);
+      await stopOn(clock, handle);
+      await done;
+    });
+
+    it('starts claude again when the first start gets no account, and the second one runs the session', async () => {
+      const clock = new ManualClock();
+      const { adapter, record } = adapterFor(
+        [
+          { messages: [initMessage()], then: 'hang', account: noAnswer['never answers']() },
+          { messages: [initMessage(), resultMessage({ input: 1, output: 1, costUsd: 0 })] },
+        ],
+        1_000,
+        clock,
+      );
+      const done = collect(adapter.start(spec()).events);
+      await pastWaits(clock, record, 1);
+      const events = await done;
+      expect(record.queries).toBe(2);
+      // The slow first start is closed, not left running beside the second.
+      expect(record.signals[0]?.aborted).toBe(true);
+      expect(record.signals[1]?.aborted).toBe(false);
+      expect(events.map((e) => e.type)).toEqual(['started', 'turn_complete', 'ended']);
+      expect(events.at(-1)).toMatchObject({ type: 'ended', reason: 'completed' });
+      expect(record.inputs).toHaveLength(1);
+    });
+
+    it('retries when accountInfo() rejects at once, and asks a signed-in account only once', async () => {
+      const { adapter, record } = adapterFor([
+        { messages: [], then: 'hang', account: noAnswer.rejects() },
+        { messages: [initMessage(), resultMessage({ input: 1, output: 1, costUsd: 0 })] },
+      ]);
+      const events = await collect(adapter.start(spec()).events);
+      expect(record.queries).toBe(2);
+      expect(events.at(-1)).toMatchObject({ type: 'ended', reason: 'completed' });
+      const signedIn = adapterFor({
+        messages: [initMessage(), resultMessage({ input: 1, output: 1, costUsd: 0 })],
+      });
+      await collect(signedIn.adapter.start(spec()).events);
+      expect(signedIn.record.queries).toBe(1);
+    });
+
+    it('says what claude printed on each start in the refusal', async () => {
+      const clock = new ManualClock();
+      const { adapter, record } = adapterFor(
+        [
+          {
+            messages: [],
+            then: 'hang',
+            account: noAnswer['never answers'](),
+            stderr: 'warming up\nplugin cache locked',
+          },
+          {
+            messages: [],
+            then: 'hang',
+            account: noAnswer['never answers'](),
+            stderr: 'Error: not logged in',
+          },
+        ],
+        1_000,
+        clock,
+      );
+      const done = collect(adapter.start(spec()).events);
+      await pastWaits(clock, record, 2);
+      const [ended] = await done;
+      const message = endMessage(ended);
+      expect(message).toContain('on each of 2 starts');
+      expect(message).toContain('"warming up plugin cache locked"');
+      expect(message).toContain('"Error: not logged in"');
+      expect(ended).toMatchObject({
+        refusal: { message: expect.stringContaining('Error: not logged in') as string },
+      });
+    });
+
+    it('keeps a message sent during the first start for the second', async () => {
+      const clock = new ManualClock();
+      const { adapter, record } = adapterFor(
+        [
+          { messages: [initMessage()], then: 'hang', account: noAnswer['never answers']() },
+          { messages: [initMessage()], then: 'hang' },
+        ],
+        1_000,
+        clock,
+      );
+      const handle = adapter.start(spec());
+      const done = collect(handle.events);
+      handle.send('also: mind the lint');
+      await pastWaits(clock, record, 1);
+      await vi.waitFor(() => {
+        expect(record.inputs).toHaveLength(2);
+      });
+      expect(JSON.stringify(record.inputs[1])).toContain('also: mind the lint');
+      await stopOn(clock, handle);
+      await done;
+    });
+
+    it('does not start again after a stop', async () => {
+      const clock = new ManualClock();
+      const { adapter, record } = adapterFor(
+        { messages: [initMessage()], then: 'hang', account: noAnswer['never answers']() },
+        1_000,
+        clock,
+      );
+      const handle = adapter.start(spec());
+      const done = collect(handle.events);
+      await vi.waitFor(() => {
+        expect(record.queries).toBe(1);
+      });
+      await stopOn(clock, handle);
+      clock.advance(BILLING_PREFLIGHT_MS);
+      const events = await done;
+      expect(record.queries).toBe(1);
+      expect(events.map((e) => e.type)).toEqual(['ended']);
+      expect(events[0]).toMatchObject({ reason: 'stopped' });
+    });
   });
 
   it("registers 10db's and the repo's servers after the preflight and before the prompt", async () => {

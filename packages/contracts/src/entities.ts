@@ -8,6 +8,7 @@ import {
   BoardColumnId,
   EvidenceId,
   FlowId,
+  GoalId,
   HandoffId,
   InboxItemId,
   PermissionRuleId,
@@ -364,6 +365,8 @@ export const TaskDto = z.object({
   dependsOn: z.array(TaskId),
   boardStatus: z.enum(BoardStatus),
   workstreamId: WorkstreamId.nullable(),
+  /** The goal the task belongs to; absent or null for a task on its own. */
+  goalId: GoalId.nullable().optional(),
   createdAt: Timestamp,
   updatedAt: Timestamp,
 });

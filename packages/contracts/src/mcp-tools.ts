@@ -140,15 +140,18 @@ export const McpToolOutputs = {
     z.object({ granted: z.literal(true), claimId: ClaimId }),
     z.object({
       granted: z.literal(false),
+      /** The task holding the claim; null when no task does, as for a migrations hazard held back. */
       heldBy: WorkstreamId.nullable(),
-      inboxId: InboxItemId,
+      /** The card about it; null when the agent can fix the cause itself, as the instruction says. */
+      inboxId: InboxItemId.nullable(),
       /**
        * True while the wait goes on: the call answers before the session's tool timeout and the agent
        * calls again with the same opId. False (or absent, in a result recorded before this field) for
-       * a refusal: waiting would deadlock.
+       * a refusal: waiting would deadlock, or the migrations hazard is held back until the branch
+       * holds its base.
        */
       waiting: z.boolean().default(false),
-      /** What to do next while waiting; null on a refusal, whose card says it. */
+      /** What to do next; null on a deadlock refusal, whose card says it. */
       instruction: z.string().nullable().default(null),
     }),
   ]),

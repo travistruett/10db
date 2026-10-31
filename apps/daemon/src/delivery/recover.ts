@@ -15,6 +15,7 @@ import type { StateStore } from '../events';
 import { existsAsEntry, WorktreeNotOursError, worktreePinKey, type Git } from '../git';
 import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
+import { listStrayBranches, settleAbandonedBranches } from './branch-sweep';
 import { batchCheckout } from './checkout';
 import { forTasks, startCards, worktreeCards, wrongBranchCard, type Card } from './cards';
 import { cuttingTasks, forgetCuttingTasks } from './cutting-tasks';
@@ -195,6 +196,15 @@ export async function recoverBatches(deps: {
         logger: deps.logger,
       })),
     );
+  }
+
+  // 6b. Abandoned batches whose worktree is gone but whose branch was never settled get their branch
+  // deleted or offered, after step 5 retired what it could. Then one card for the 10db branches no
+  // batch names. The branches of merged pull requests go in the pull request watch's first round,
+  // which reads gh.
+  if (deps.worktrees) {
+    await settleAbandonedBranches(deps.worktrees.ctx);
+    await listStrayBranches(deps.worktrees.ctx);
   }
 
   // 7. OPEN batches whose work all settled ship.
