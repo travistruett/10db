@@ -10,7 +10,7 @@ import {
   renewClaimLeases,
   type ClaimRequest,
 } from './claims';
-import { findToolOp, insertToolOp } from './tool-ops';
+import { findToolOp, insertToolOp, replaceToolOp } from './tool-ops';
 import { getSession, getSessionByProviderId, insertSession, markSessionStarted } from './sessions';
 import type { Store } from './store';
 import { insertTask } from './tasks';
@@ -569,6 +569,36 @@ describe('tool ops', () => {
     expect(findToolOp(store.db, ws.id, 'op-00000001')).toEqual({
       tool: 'commit',
       result: { sha: 'a' },
+      sessionId,
+    });
+  });
+
+  it('gives an operation ID to a later session that replaces it', () => {
+    const { ws } = seedWorkstream();
+    const first = mintId('Session');
+    const later = mintId('Session');
+    store.write((ctx) => {
+      insertToolOp(ctx, {
+        workstreamId: ws.id,
+        sessionId: first,
+        opId: 'op-00000002',
+        tool: 'complete_step',
+        result: { text: 'first' },
+      });
+    });
+    store.write((ctx) => {
+      replaceToolOp(ctx, {
+        workstreamId: ws.id,
+        sessionId: later,
+        opId: 'op-00000002',
+        tool: 'complete_step',
+        result: { text: 'later' },
+      });
+    });
+    expect(findToolOp(store.db, ws.id, 'op-00000002')).toEqual({
+      tool: 'complete_step',
+      result: { text: 'later' },
+      sessionId: later,
     });
   });
 });
