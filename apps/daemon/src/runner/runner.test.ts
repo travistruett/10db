@@ -62,7 +62,7 @@ import type { Judge, JudgeAnswer, JudgeRequest } from '../judge';
 import { silentLogger } from '../log';
 import { createGateRunner, type GateRequest, type GateResult } from '../verify';
 import type { BaseUpdate, BaseUpdates, MigrationsBase, MigrationsBaseTake } from '../delivery';
-import { allowedToolsFor, listNetworkHosts } from '../permissions';
+import { allowedToolsFor, listNetworkHosts, setLaneAutoMode } from '../permissions';
 import {
   createLaneSandbox,
   SandboxedMcpServer,
@@ -3895,6 +3895,26 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
       expect(specs[0]?.prompt).not.toContain('mktemp');
     },
   );
+
+  it('reads the app-wide auto mode setting when each session starts', async () => {
+    const probe = sandboxProbe();
+    engine = await createTestEngine(
+      { Alpha: [[turn]], Beta: [[turn]] },
+      {},
+      { laneSandbox: probe.laneSandbox },
+    );
+    const specs = recordSpecs();
+    const first = engine.addTask('Alpha');
+    engine.launch(first.workstream.id);
+    await engine.runner.idle();
+    engine.state.write((ctx) => {
+      setLaneAutoMode(ctx, false);
+    });
+    const second = engine.addTask('Beta');
+    engine.launch(second.workstream.id);
+    await engine.runner.idle();
+    expect(specs.map((spec) => spec.lanePermissionMode)).toEqual(['auto', 'default']);
+  });
 
   it("reads the project's localhost switch when each session starts, so a change applies at the next one", async () => {
     const probe = sandboxProbe();

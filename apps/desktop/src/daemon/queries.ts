@@ -4,6 +4,7 @@ import {
   FlowDto,
   InboxItemDto,
   KeepAwakeStatus,
+  LanePermissionsDto,
   PickerProposalDto,
   ProjectDto,
   ProjectViewDto,
@@ -54,6 +55,7 @@ export const queryKeys = {
   workstreamChanges: (id: WorkstreamId | undefined, head: string | null) =>
     ['workstream-changes', id, head] as const,
   keepAwake: ['keep-awake'],
+  lanePermissions: ['lane-permissions'],
   system: ['system'],
   flows: ['flows'],
   candidates: (projectId: ProjectId, size: number) => ['candidates', projectId, size] as const,
@@ -422,6 +424,30 @@ export function useAnswerInbox() {
         queryClient.invalidateQueries({ queryKey: queryKeys.inbox }),
         queryClient.invalidateQueries({ queryKey: ['workstreams'] }),
       ]),
+  });
+}
+
+export function useLanePermissions() {
+  const { client } = useDaemon();
+  return useQuery({
+    queryKey: queryKeys.lanePermissions,
+    queryFn: async () =>
+      readJson(await client.settings['lane-permissions'].$get(), LanePermissionsDto),
+  });
+}
+
+export function useSetLanePermissions() {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (autoMode: boolean) =>
+      readJson(
+        await client.settings['lane-permissions'].$put({ json: { autoMode } }),
+        LanePermissionsDto,
+      ),
+    onSuccess: (status) => {
+      queryClient.setQueryData(queryKeys.lanePermissions, status);
+    },
   });
 }
 

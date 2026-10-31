@@ -182,7 +182,12 @@ describe.skipIf(!SEATBELT)('a repo stdio MCP server under the sandbox (Seatbelt)
       runtime: resolveSandboxRuntime(),
     }).forSession({
       // The project lets lane commands use localhost; its MCP servers still get none.
-      project: { id: mintId('Project'), repoPath: checkout, sandboxLoopback: true },
+      project: {
+        id: mintId('Project'),
+        repoPath: checkout,
+        sandboxLoopback: true,
+        gateCommand: 'make gate',
+      },
       env: sessionEnv(),
       rules: [],
       resumeProviderSessionId: null,

@@ -1,4 +1,4 @@
-import { KeepAwakeStatus } from '@10db/contracts';
+import { KeepAwakeStatus, LanePermissionsDto } from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
@@ -277,6 +277,28 @@ describe('SettingsView', () => {
     ).toEqual(['off', 'while_running', 'always']);
     expect(within(group).getByText('While tasks run')).toBeTruthy();
     expect(within(group).getByText('Never')).toBeTruthy();
+  });
+
+  it('shows the lane permission switch on, and turns it off', async () => {
+    const put: unknown[] = [];
+    server.use(
+      http.put(daemonUrl('/settings/lane-permissions'), async ({ request }) => {
+        put.push(await request.json());
+        return HttpResponse.json(LanePermissionsDto.parse({ autoMode: false }));
+      }),
+      ...baseHandlers(),
+    );
+    renderApp('/settings/lane-permissions');
+    const toggle = await screen.findByRole('switch', {
+      name: "Lanes decide routine permissions with Claude Code's auto mode",
+    });
+    await waitFor(() => {
+      expect((toggle as HTMLInputElement).checked).toBe(true);
+    });
+    fireEvent.click(toggle);
+    await waitFor(() => {
+      expect(put).toEqual([{ autoMode: false }]);
+    });
   });
 
   it('shows the other project\u2019s areas after switching projects, not the first one\u2019s', async () => {
