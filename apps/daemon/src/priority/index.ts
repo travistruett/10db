@@ -13,7 +13,12 @@ interface Launch {
   readonly args: readonly string[];
 }
 
-/** macOS: `taskpolicy -b` is background QoS and I/O throttling; `-c utility` caps the QoS at utility. */
+/**
+ * macOS: `taskpolicy -c utility` caps the QoS at utility, below the builder's apps; a lane is also niced, so
+ * it yields to a gate. Not `taskpolicy -b`: background QoS throttles disk and network too, and slowed a
+ * lane's Claude Code start past the daemon's wait for its account
+ * (`decisions/2026-10-30-lanes-at-utility-priority.md`).
+ */
 const TASKPOLICY = '/usr/sbin/taskpolicy';
 const NICE = '/usr/bin/nice';
 
@@ -24,10 +29,11 @@ export function atPriority(
   args: readonly string[],
   platform: NodeJS.Platform = process.platform,
 ): Launch {
-  if (platform === 'darwin')
-    return {
-      file: TASKPOLICY,
-      args: tier === 'lane' ? ['-b', file, ...args] : ['-c', 'utility', file, ...args],
-    };
+  if (platform === 'darwin') {
+    const clamped = ['-c', 'utility', file, ...args];
+    return tier === 'lane'
+      ? { file: NICE, args: ['-n', '10', TASKPOLICY, ...clamped] }
+      : { file: TASKPOLICY, args: clamped };
+  }
   return { file: NICE, args: ['-n', tier === 'lane' ? '19' : '10', file, ...args] };
 }
