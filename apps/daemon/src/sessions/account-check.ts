@@ -122,14 +122,51 @@ export function checkAccount(expect: AccountExpectation, seen: SeenAccount): Acc
 export function missingAccountRefusal(
   expect: AccountExpectation,
   why: string,
+  printed?: string,
 ): AccountRefusal | null {
   return expect.kind === AccountKind.ClaudeSubscription
     ? {
         problem: AccountProblem.SignedOut,
-        message: `${why} for account "${expect.label}", which looks signed out`,
+        message: `${why} for account "${expect.label}", which looks signed out${printed ? `. ${printed}` : ''}`,
         seenIdentity: null,
       }
     : null;
+}
+
+/** How much of what Claude Code printed a card quotes: the end, where the cause usually is. */
+const PRINTED_CHARS = 300;
+
+/** One line of what a start printed on stderr: no colour codes or control characters, the end of it. */
+function oneLine(raw: string): string {
+  const text = raw
+    // eslint-disable-next-line no-control-regex -- the point is to remove the escape character
+    .replace(/\u001b\[[0-9;?]*[A-Za-z]/g, '')
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\u0000-\u001f\u007f\s]+/g, ' ')
+    .trim()
+    .replace(/\.+$/, '');
+  return text.length > PRINTED_CHARS ? `…${text.slice(-PRINTED_CHARS).trimStart()}` : text;
+}
+
+/**
+ * What a session start that got no account from Claude Code says: how long it waited, how many starts
+ * got nothing, and what they printed, so the builder can tell a slow start from a real sign-out.
+ * `printed` holds one entry per start, the text its stderr held.
+ */
+export function noAccountWhy(
+  waitMs: number,
+  printed: readonly string[],
+): { readonly why: string; readonly printed: string } {
+  const starts = printed.length;
+  const wait = `Claude Code reported no account within ${String(waitMs / 1_000)} s`;
+  const seen = [...new Set(printed.map(oneLine).filter((line) => line !== ''))];
+  return {
+    why: starts > 1 ? `${wait} on each of ${String(starts)} starts` : wait,
+    printed:
+      seen.length === 0
+        ? 'Claude Code printed nothing'
+        : `Claude Code printed: ${seen.map((line) => `"${line}"`).join('; ')}`,
+  };
 }
 
 /** At the first init: the key source the CLI actually used, with the provider and plan the preflight saw. */
