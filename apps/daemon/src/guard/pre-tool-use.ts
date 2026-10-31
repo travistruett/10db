@@ -1,8 +1,10 @@
 import { ClaimKind, type HazardDef } from '@10db/contracts';
 import { z } from 'zod';
+import { runsInBackground, startsEndlessBackgroundLoop } from './background-loops';
 import { hazardHit } from './hazards';
 import { judgeToolUse, stringField, type GuardInput, type GuardVerdict } from './judge';
 import { firstUnread } from './unread-commands';
+import { hazardPrograms, unreadableHazard } from './unread-hazards';
 
 /**
  * Tools whose `allowed_domains` names hosts the command may reach. In auto mode Claude Code's
@@ -11,6 +13,7 @@ import { firstUnread } from './unread-commands';
  * filters results.
  */
 const HOST_LIST_TOOLS: ReadonlySet<string> = new Set(['Bash', 'Monitor']);
+const ToolInputRecord = z.record(z.string(), z.unknown());
 const HostList = z.looseObject({ allowed_domains: z.array(z.unknown()).min(1) });
 
 /**
@@ -25,6 +28,23 @@ const BROKER_JUDGES: Readonly<Record<string, string>> = {
     'WebFetch reaches its host from Claude Code itself, outside the sandbox; 10db judges every WebFetch.',
 };
 
+/**
+ * Tools that reach a host or an MCP server from Claude Code's own process, outside the sandbox's
+ * network proxy: web search, MCP resources, and the tools of a repo's MCP servers.
+ */
+const OUT_OF_PROXY_TOOLS: ReadonlySet<string> = new Set([
+  'WebSearch',
+  'ListMcpResourcesTool',
+  'ReadMcpResourceTool',
+]);
+const READ_FAMILY: ReadonlySet<string> = new Set(['Read', 'Grep', 'Glob', 'LS']);
+const EDIT_FAMILY: ReadonlySet<string> = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
+
+function actsOutsideSandboxProxy(toolName: string): boolean {
+  if (OUT_OF_PROXY_TOOLS.has(toolName)) return true;
+  return toolName.startsWith('mcp__') && !toolName.startsWith('mcp__10db__');
+}
+
 /** A command nested deeply enough to overflow the stack in a shell scanner is one nothing can read. */
 function isTooDeep(cause: unknown): boolean {
   return cause instanceof Error && cause.name === 'RangeError';
@@ -35,7 +55,11 @@ function mayRunHazard(command: string, hazards: readonly HazardDef[]): string | 
   try {
     const hit = hazardHit(command, hazards);
     if (hit !== null) return hit.words.join(' ');
-    return firstUnread(command, hazards)?.text ?? null;
+    const unread = firstUnread(command, hazards)?.text;
+    if (unread !== undefined) return unread;
+    // The checks `firstUnread` lacks: a word the shell fills in after a program with hazard forms,
+    // a wrapper or feeder in front of one, a parse that is uncertain, and eval's text.
+    return unreadableHazard(command, hazardPrograms(hazards));
   } catch (cause) {
     if (isTooDeep(cause)) return command;
     throw cause;
@@ -49,9 +73,29 @@ function mayRunHazard(command: string, hazards: readonly HazardDef[]): string | 
 function brokerAsk(input: GuardInput): string | null {
   const judged = BROKER_JUDGES[input.toolName];
   if (judged !== undefined) return judged;
+  if (actsOutsideSandboxProxy(input.toolName)) {
+    return `${input.toolName} acts outside the sandbox's network proxy; 10db judges every call.`;
+  }
+  if (input.fileAccess !== undefined) {
+    if (READ_FAMILY.has(input.toolName)) {
+      return input.fileAccess.readAsk(input.toolName, input.toolInput);
+    }
+    if (EDIT_FAMILY.has(input.toolName)) {
+      const path =
+        stringField(input.toolInput, 'file_path') ?? stringField(input.toolInput, 'notebook_path');
+      return path === null
+        ? 'The path of this edit could not be read.'
+        : input.fileAccess.writeAsk(path);
+    }
+  }
   if (input.toolName !== 'Bash') return null;
   const command = stringField(input.toolInput, 'command');
   if (command === null) return null;
+  // A background call never blocks the lane, so a loop with no end holds a core while it goes on.
+  const background = runsInBackground(ToolInputRecord.safeParse(input.toolInput).data ?? {});
+  if (startsEndlessBackgroundLoop(command, { background })) {
+    return `"${command}" starts something that never ends in the background, so the builder is asked.`;
+  }
   const unclaimed = input.hazards.filter(
     (hazard) =>
       hazard.commands.length > 0 &&

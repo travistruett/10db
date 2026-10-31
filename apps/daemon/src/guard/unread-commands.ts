@@ -366,7 +366,7 @@ function scanSegment(
   if (evaluatesUnread(head, words)) {
     return { reason: UnreadReason.Script, text };
   }
-  if (head === 'eval') return { reason: UnreadReason.Script, text };
+  // eval is read again as a command by `unreadableHazard`, from the words as written.
   if (SOURCING.has(head)) {
     const operand = sourceOperand(words);
     if (

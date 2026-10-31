@@ -14,7 +14,15 @@ import { listPermissionRules } from '@10db/db';
 import { z } from 'zod';
 import type { StateStore } from '../events';
 import type { Git } from '../git';
-import { firstUnread, hazardHit, startsEndlessBackgroundLoop, stringField } from '../guard';
+import {
+  firstUnread,
+  hazardHit,
+  hazardPrograms,
+  runsInBackground,
+  startsEndlessBackgroundLoop,
+  stringField,
+  unreadableHazard,
+} from '../guard';
 import type { Logger } from '../log';
 import { foundHostFile, matchPermissionRule, storableRule } from '../permissions';
 import { takeFoundHostsReading } from '../registries';
@@ -112,16 +120,6 @@ const PNPM_CARD_BODY =
 
 const LOOP_CARD_BODY =
   'This command runs something that never ends (a loop with no exit, `yes`, or the like) in the background, behind an `&` or the Bash tool’s own background flag: the lane goes on working while it holds a core, until something stops it. Behind an `&` it also outlives the command and the session that started it. 10db tries to stop what a session leaves when the session ends, but it cannot promise to find all of it (a job that leaves the command’s process tree and group within a second, with no file open in the lane’s temp dir, escapes), and until then a loop like this holds the Mac busy and makes gates and tests fail on timeouts. Allowing it covers this call only: the next one is asked about again.';
-
-/**
- * Whether Claude Code runs a Bash call in the background itself (`run_in_background`). Anything but
- * an absent or false flag counts, so a spelling Claude Code reads as true is never missed: a value
- * it refuses fails the call before it runs, so asking about it costs nothing.
- */
-function runsInBackground(input: Readonly<Record<string, unknown>>): boolean {
-  const flag = input['run_in_background'];
-  return flag !== undefined && flag !== null && flag !== false && flag !== 'false';
-}
 
 /**
  * What a lane is told when the builder denies a call. It names the call and says the denial covers
@@ -353,9 +351,11 @@ export function createPermissionBroker(
     if (typeof command !== 'string') return { summary: summarize(req) };
     let hit: ReturnType<typeof hazardHit>;
     let unread: ReturnType<typeof firstUnread>;
+    let unreadable: string | null;
     try {
       hit = hazardHit(command, sandbox.hazards);
       unread = firstUnread(command, sandbox.hazards);
+      unreadable = unreadableHazard(command, hazardPrograms(sandbox.hazards));
     } catch (cause) {
       if (isTooDeep(cause)) return { summary: command };
       throw cause;
@@ -364,7 +364,8 @@ export function createPermissionBroker(
     if (startsEndlessBackgroundLoop(command, { background: runsInBackground(req.input) })) {
       return { summary: command, body: `${command}\n\n${LOOP_CARD_BODY}`, onceOnly: true };
     }
-    if (hit === null && !req.escalated && unread === null) return { behavior: 'allow' };
+    if (hit === null && !req.escalated && unread === null && unreadable === null)
+      return { behavior: 'allow' };
     return hit?.name === 'deps' && hit.words[0] === 'pnpm'
       ? { summary: command, body: `${command}\n\n${PNPM_CARD_BODY}` }
       : { summary: command };

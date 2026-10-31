@@ -101,7 +101,8 @@ describe('judgePreToolUse', () => {
       AREA,
       'allow',
     ],
-    ['WebSearch', 'WebSearch', { query: 'drizzle-kit generate custom migration' }, AREA, 'allow'],
+    // WebSearch runs from Claude Code's own process, so the broker sees it.
+    ['WebSearch', 'WebSearch', { query: 'drizzle-kit generate custom migration' }, AREA, 'ask'],
     ['a read in the checkout', 'Read', { file_path: join(repo.path, 'README.md') }, AREA, 'allow'],
     // Monitor and WebFetch can reach a host from Claude Code's own process, outside the sandbox's
     // network proxy and its per-host cards, and a Monitor command is not judged here.
@@ -119,7 +120,8 @@ describe('judgePreToolUse', () => {
       AREA,
       'ask',
     ],
-    ['Monitor running a hazard', 'Monitor', { ...MONITOR, command: 'pnpm add x' }, AREA, 'ask'],
+    // The guard judges a Monitor command as a Bash command.
+    ['Monitor running a hazard', 'Monitor', { ...MONITOR, command: 'pnpm add x' }, AREA, 'deny'],
     [
       'WebFetch',
       'WebFetch',
@@ -155,7 +157,7 @@ describe('judgePreToolUse', () => {
       'WebSearch',
       { query: 'drizzle-kit', allowed_domains: ['orm.drizzle.team'] },
       AREA,
-      'allow',
+      'ask',
     ],
   ])('%s: %s', (_name, toolName, input, claims, decision) => {
     expect(judge(toolName, input, claims).decision).toBe(decision);
