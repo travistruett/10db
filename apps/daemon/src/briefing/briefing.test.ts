@@ -663,6 +663,29 @@ describe('the gate in a brief', () => {
     expect(gateInstructions(brief)).toEqual([]);
   });
 
+  it('tells an implement step to stop a long design or docs change and file the rest as follow-ups', () => {
+    const brief = buildSessionPrompt({ ...base, action: { kind: 'start' } });
+    expect(brief).toContain('past about 300 lines');
+    expect(brief).toContain('mcp__10db__file_follow_up');
+    expect(brief).toContain('Icebox');
+  });
+
+  it('tells a plan step to keep a design or docs plan to about one pull request', () => {
+    const brief = buildSessionPrompt({
+      ...base,
+      step: { ...implementStep, role: 'plan', personaName: 'Planner', tools: 'read_only' },
+      action: { kind: 'start' },
+    });
+    expect(brief).toContain('about 300 changed lines');
+    expect(brief).toContain('one per decision');
+    const review = buildSessionPrompt({
+      ...base,
+      step: { ...implementStep, role: 'review', personaName: 'Reviewer', tools: 'read_only' },
+      action: { kind: 'start' },
+    });
+    expect(review).not.toContain('about 300 changed lines');
+  });
+
   it('tells a lane to run only the checks for what it changed', () => {
     const brief = buildSessionPrompt({ ...base, action: { kind: 'start' } });
     expect(brief).toContain('Run only the checks for what you changed');
