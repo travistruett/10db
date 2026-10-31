@@ -277,6 +277,14 @@ export interface Git {
   deleteKeptRef(repo: string, ref: string): Promise<void>;
   /** True when commit `ancestor` is in the history of `tip`, `tip` itself included. */
   isAncestor(repo: string, ancestor: string, tip: string): Promise<boolean>;
+  /** Whether the object store of `repo` holds commit `sha`. */
+  hasCommit(repo: string, sha: string): Promise<boolean>;
+  /**
+   * Fetches commit `sha` from origin's recorded fetch URL into the object store, naming no ref and
+   * touching no branch or checkout: what GitHub made on a pull request (a branch update) and nobody
+   * pulled. Throws a GitNetworkError when origin can't be asked or does not give it.
+   */
+  fetchCommit(repo: string, sha: string, net: NetworkCall): Promise<NetworkRun>;
   /** The blob `path` holds in commit `rev`, read from the object store; null for anything else. */
   blobAt(repo: string, rev: string, path: string): Promise<string | null>;
   /**
@@ -1389,6 +1397,21 @@ export function createGit(opts: GitOptions = {}): Git {
     );
   }
 
+  /** One fetch of the commit `sha` from origin's pinned fetch URL, into the object store only. */
+  async function fetchCommitOnce(repo: string, sha: string, net: NetworkCall): Promise<NetworkRun> {
+    if (!OBJECT_ID.test(sha)) throw new InvalidError(`${sha} is not a commit id`);
+    const c = await pinned(repo);
+    const network = await networkConfig(c, net);
+    const url = await pinnedUrl(c, 'fetch');
+    return gitNetwork(
+      c.real,
+      network.config,
+      ['fetch', '--no-tags', '--no-recurse-submodules', '--no-write-fetch-head', '--', url, sha],
+      net,
+      { bin, env: { ...c.env, ...network.env } },
+    );
+  }
+
   async function branchOnOriginOnce(
     repo: string,
     branch: string,
@@ -1855,6 +1878,14 @@ export function createGit(opts: GitOptions = {}): Git {
     },
     async branchOnOrigin(repo, branch, net) {
       return branchOnOriginOnce(repo, branch, net);
+    },
+    async hasCommit(repo, sha) {
+      return (
+        OBJECT_ID.test(sha) && (await revParse(await pinned(repo), `${sha}^{commit}`)) !== null
+      );
+    },
+    async fetchCommit(repo, sha, net) {
+      return serialized(fetches, realpathSync(repo), () => fetchCommitOnce(repo, sha, net));
     },
     async switchNewBranch(repo, name, startPoint) {
       return withRepoLock(realpathSync(repo), async () =>

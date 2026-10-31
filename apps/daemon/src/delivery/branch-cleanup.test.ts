@@ -400,6 +400,79 @@ describe('a pull request that merged', () => {
     expect(exists(batch.branch)).toBe(false);
   });
 
+  it('does not let a pull request whose head this repository lacks hold back the branches after it', async () => {
+    const first = await shipped('Alpha');
+    const second = await shipped('Beta');
+    h.gh.setState(first.prUrl, PrState.Merged);
+    // A commit GitHub made that neither this repository nor origin has: nothing says what it holds.
+    h.gh.setHead(first.prUrl, 'a'.repeat(40));
+    h.gh.setState(second.prUrl, PrState.Merged);
+    h.gh.setHead(second.prUrl, second.tip);
+    const w = watch();
+    w.start();
+    await w.idle();
+    expect(exists(first.batch.branch)).toBe(true);
+    expect(exists(second.batch.branch)).toBe(false);
+  });
+
+  it('fetches a head commit GitHub made, such as a branch update, to see the branch is behind it', async () => {
+    const { batch, tip, prUrl } = await shipped();
+    const head = h.origin$('commit-tree', `${tip}^{tree}`, '-p', tip, '-m', 'Update branch');
+    h.origin$('update-ref', 'refs/pull/1/head', head);
+    h.gh.setState(prUrl, PrState.Merged);
+    h.gh.setHead(prUrl, head);
+    const w = watch();
+    w.start();
+    await w.idle();
+    expect(exists(batch.branch)).toBe(false);
+  });
+
+  it('keeps a branch holding a commit the fetched head does not carry', async () => {
+    const { batch, tip, prUrl } = await shipped();
+    const head = h.origin$('commit-tree', `${tip}^{tree}`, '-p', tip, '-m', 'Update branch');
+    h.origin$('update-ref', 'refs/pull/1/head', head);
+    h.gh.setState(prUrl, PrState.Merged);
+    h.gh.setHead(prUrl, head);
+    h.git$('update-ref', `refs/heads/${batch.branch ?? ''}`, h.commit('src/api/late.txt'));
+    const w = watch();
+    w.start();
+    await w.idle();
+    expect(exists(batch.branch)).toBe(true);
+  });
+
+  it('sweeps after a round that failed, so one pull request that breaks the watch holds nothing back', async () => {
+    const merged = await shipped('Alpha');
+    const open = await shipped('Beta');
+    h.gh.setState(merged.prUrl, PrState.Merged);
+    h.gh.setHead(merged.prUrl, merged.tip);
+    // Reading `open` records nothing: the write of the round fails after the merge is stored.
+    h.gh.setState(open.prUrl, PrState.Merged);
+    const real = h.ctx.state;
+    let writes = 0;
+    const ctx = {
+      ...h.ctx,
+      state: {
+        ...real,
+        write: ((fn: Parameters<typeof real.write>[0]) => {
+          writes += 1;
+          if (writes === 2) throw new Error('disk full');
+          return real.write(fn);
+        }) as typeof real.write,
+      },
+    };
+    const w = createPrWatch({
+      ctx,
+      clock: new ManualClock(),
+      intervalMs: 120_000,
+      afterRound: (signal) => removeMergedBranches(h.ctx, signal),
+    });
+    watches.push(w);
+    w.start();
+    await w.idle();
+    expect(getBatch(h.store.db, merged.batch.id).pr?.state).toBe('merged');
+    expect(exists(merged.batch.branch)).toBe(false);
+  });
+
   it('leaves the branch when gh gives no head commit', async () => {
     const { batch, prUrl } = await shipped();
     h.gh.setState(prUrl, PrState.Merged);
