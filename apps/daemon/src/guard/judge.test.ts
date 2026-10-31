@@ -1369,6 +1369,59 @@ describe('classifyPath', () => {
   });
 });
 
+describe('classifyPath with dotfiles', () => {
+  const REPO_AREA = [{ name: 'repo', globs: ['**'] }];
+
+  it.each(['.gitignore', '.github/workflows/ci.yml', '.claude/rules/testing.md', 'a/.b/.c/d'])(
+    'puts %s in an area whose glob is **',
+    (path) => {
+      expect(classifyPath(path, REPO_AREA, [])).toEqual({ areas: ['repo'], hazards: [] });
+    },
+  );
+
+  it('still routes a path a stock hazard covers to that hazard', () => {
+    expect(classifyPath('.claude/rules/testing.md', REPO_AREA, DEFAULT_HAZARDS)).toEqual({
+      areas: ['repo'],
+      hazards: ['harness'],
+    });
+  });
+
+  it('still lists a hazard that covers the path', () => {
+    expect(
+      classifyPath('.github/workflows/ci.yml', REPO_AREA, [
+        { name: 'ci', globs: ['.github/**'], commands: [] },
+      ]),
+    ).toEqual({ areas: ['repo'], hazards: ['ci'] });
+  });
+
+  it('leaves a hazard glob without dot matching', () => {
+    expect(
+      classifyPath('.github/ci.yml', REPO_AREA, [{ name: 'all', globs: ['**'], commands: [] }])
+        .hazards,
+    ).toEqual([]);
+  });
+
+  it('keeps a dot in a glob literal', () => {
+    const areas = [{ name: 'ts', globs: ['src/*.ts'] }];
+    expect(classifyPath('src/a.ts', areas, []).areas).toEqual(['ts']);
+    expect(classifyPath('src/ats', areas, []).areas).toEqual([]);
+  });
+
+  it('lets an area edit a dotfile once it claims the area', () => {
+    const verdict = judgeToolUse({
+      toolName: 'Edit',
+      toolInput: { file_path: '.gitignore' },
+      repoPath: repo.path,
+      areas: REPO_AREA,
+      hazards: DEFAULT_HAZARDS,
+      claims: [{ kind: 'area', name: 'repo' }],
+      readOnly: false,
+      protectedPaths: guarded(),
+    });
+    expect(verdict.decision).toBe('allow');
+  });
+});
+
 describe('stringField', () => {
   it.each<{ name: string; input: unknown; expected: string | null }>([
     { name: 'a string field', input: { command: 'ls' }, expected: 'ls' },

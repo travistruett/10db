@@ -174,13 +174,30 @@ export function isWithinOnEveryReading(dir: string, target: string): boolean {
   );
 }
 
+/** Stands in for a dot while an area glob is matched, so `*`, `?` and `**` read a dot name like any other. */
+const DOT = '';
+
+/**
+ * Whether an area glob covers `path`. Node's `matchesGlob` has no `dot` option and lets no `*` or
+ * `**` match a name that starts with a dot, so both sides are matched with every dot swapped for a
+ * private-use character: `**` then covers `.gitignore` and `.github/**` while `.github` stays literal.
+ */
+function areaMatches(path: string, glob: string): boolean {
+  if (path.includes(DOT) || glob.includes(DOT)) return matchesGlob(path, glob);
+  return matchesGlob(path.replaceAll('.', DOT), glob.replaceAll('.', DOT));
+}
+
+/**
+ * The areas and hazards a repo-relative path falls in. An area glob covers dot names (`**` takes in
+ * `.gitignore`); a hazard glob does not, as `matchesGlob` reads it.
+ */
 export function classifyPath(
   rel: string,
   areas: readonly AreaDef[],
   hazards: readonly HazardDef[],
 ): { areas: string[]; hazards: string[] } {
   const path = fold(rel);
-  const hits = (defs: readonly AreaDef[]) =>
-    defs.filter((d) => d.globs.some((g) => matchesGlob(path, fold(g)))).map((d) => d.name);
-  return { areas: hits(areas), hazards: hits(hazards) };
+  const hits = (defs: readonly AreaDef[], matches: (path: string, glob: string) => boolean) =>
+    defs.filter((d) => d.globs.some((g) => matches(path, fold(g)))).map((d) => d.name);
+  return { areas: hits(areas, areaMatches), hazards: hits(hazards, matchesGlob) };
 }
