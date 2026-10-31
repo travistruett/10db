@@ -712,6 +712,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     gate,
     baseUpdates,
     migrationsBase,
+    judge,
     clock,
     logger,
     dataDir: opts.dataDir,
