@@ -1,7 +1,15 @@
 import { z } from 'zod';
 import { Notice, ProjectDto, Title, WorkstreamDto } from './entities';
 import { BatchId, ProjectId, TaskId } from './ids';
-import { BatchFailure, BatchState, PullRequestChecks, PullRequestState } from './states';
+import {
+  BatchFailure,
+  BatchState,
+  CiStopped,
+  PullRequestChecks,
+  PullRequestMergeBlocked,
+  PullRequestState,
+  RequiredChecksState,
+} from './states';
 
 const Timestamp = z.iso.datetime();
 
@@ -28,6 +36,27 @@ export const PullRequestStatusDto = z.object({
 });
 export type PullRequestStatusDto = z.infer<typeof PullRequestStatusDto>;
 
+/**
+ * One required check that is failing or pending. `jobId` and `runId` come from an Actions job link
+ * and are null for a check with no Actions job.
+ */
+export const RequiredCheckJobDto = z.object({
+  name: z.string(),
+  link: z.string().nullable(),
+  jobId: z.string().nullable(),
+  runId: z.string().nullable(),
+  description: z.string().nullable(),
+});
+export type RequiredCheckJobDto = z.infer<typeof RequiredCheckJobDto>;
+
+/** What the watch last read of a pull request's required checks (CI-decides spec §4). */
+export const RequiredChecksDto = z.object({
+  state: z.enum(RequiredChecksState),
+  failing: z.array(RequiredCheckJobDto),
+  pending: z.array(RequiredCheckJobDto),
+});
+export type RequiredChecksDto = z.infer<typeof RequiredChecksDto>;
+
 /** One batch: one branch and one pull request (batch delivery spec §3). */
 export const BatchDto = z.object({
   id: BatchId,
@@ -47,6 +76,16 @@ export const BatchDto = z.object({
   prUrl: z.string().nullable(),
   /** The pull request's last read state; null until the daemon has read it (or there is no pull request). */
   pr: PullRequestStatusDto.nullable().default(null),
+  /** The pull request's required checks as last read; null until read. Kept on the root batch. */
+  prRequired: RequiredChecksDto.nullable().default(null),
+  /** Why GitHub will not merge the pull request as it is; null when nothing blocks it. */
+  prMergeBlocked: z.enum(PullRequestMergeBlocked).nullable().default(null),
+  /** For a CI fix batch: the root batch whose pull request it fixes; null for any other batch. */
+  ciFixOf: BatchId.nullable().default(null),
+  /** For a CI fix batch: the pull request head whose failing checks it fixes. */
+  ciFixHead: z.string().nullable().default(null),
+  /** Why 10db stopped fixing the pull request's failing checks; null while it has not. */
+  ciStopped: z.enum(CiStopped).nullable().default(null),
   gateExitCode: z.int().nullable(),
   gateLogPath: z.string().nullable(),
   failure: z.enum(BatchFailure).nullable(),

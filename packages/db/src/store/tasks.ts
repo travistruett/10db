@@ -23,6 +23,7 @@ import {
   Title,
   WorkstreamState,
   type BoardColumnId,
+  type CiStopped,
   WorkspaceMode,
   type ProjectDto,
   type ProjectId,
@@ -50,6 +51,8 @@ export interface BoardStatusInput {
   readonly pullRequest?: {
     readonly url: string | null;
     readonly state: PullRequestState | null;
+    /** Why 10db stopped fixing its failing required checks; null or absent while it has not. */
+    readonly ciStopped?: CiStopped | null;
   } | null;
 }
 
@@ -57,7 +60,8 @@ export interface BoardStatusInput {
  * Board column for a task (spec §5.1): Ready means deps done and nothing blocking. A finished task
  * is not Done until its pull request has merged: while its batch ships it is In progress, once the
  * pull request is open it is In review, and when the ship failed, or the pull request closed
- * without merging, it is Blocked, where the builder decides.
+ * without merging, it is Blocked, where the builder decides. An open pull request whose CI fixes
+ * stopped is Blocked too (CI-decides spec §4).
  */
 export function deriveBoardStatus({
   taskStatus,
@@ -66,10 +70,14 @@ export function deriveBoardStatus({
   batchState = null,
   pullRequest = null,
 }: BoardStatusInput): BoardStatus {
-  const shipped =
+  const column =
     batchState === BatchState.Shipped && pullRequest?.url
       ? pullRequestColumn(pullRequest.state)
       : null;
+  const shipped =
+    column === BoardStatus.InReview && (pullRequest?.ciStopped ?? null) !== null
+      ? BoardStatus.Blocked
+      : column;
   switch (taskStatus) {
     case TaskStatus.Done:
       if (batchState === BatchState.Shipping) return BoardStatus.InProgress;
@@ -405,6 +413,7 @@ function toTaskDto(db: DbReader, row: typeof schema.tasks.$inferSelect): TaskDto
       batchState: schema.batches.state,
       prUrl: schema.batches.prUrl,
       prState: schema.batches.prState,
+      ciStopped: schema.batches.ciStopped,
     })
     .from(schema.workstreams)
     .leftJoin(schema.batches, eq(schema.batches.id, schema.workstreams.batchId))
@@ -433,7 +442,9 @@ function toTaskDto(db: DbReader, row: typeof schema.tasks.$inferSelect): TaskDto
       depsDone: dependenciesDone(db, row.id),
       workstreamState: latest?.state ?? null,
       batchState: latest?.batchState ?? null,
-      pullRequest: latest ? { url: latest.prUrl, state: latest.prState } : null,
+      pullRequest: latest
+        ? { url: latest.prUrl, state: latest.prState, ciStopped: latest.ciStopped }
+        : null,
     }),
     workstreamId: latest?.id ?? null,
     createdAt: row.createdAt,

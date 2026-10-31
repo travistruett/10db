@@ -19,6 +19,7 @@ import { listEventsAfter } from './events';
 import type { Store } from './store';
 import {
   insertBatch,
+  patchBatch,
   recordPullRequestStatus,
   transitionBatch,
   type PullRequestStatusInput,
@@ -356,6 +357,15 @@ describe('a task whose pull request closed without merging', () => {
     expect(getTask(store.db, task.id).boardStatus).toBe('blocked');
     store.write((ctx) => recordPullRequestStatus(ctx, batch.id, read('merged')));
     expect(getTask(store.db, task.id).boardStatus).toBe('done');
+  });
+
+  it('is blocked while its open pull request has a CI stop reason, and back in review once cleared', () => {
+    const project = seedProject(store);
+    const { task, batch } = inReview(project.id, 'open');
+    store.write((ctx) => patchBatch(ctx, batch.id, { ciStopped: 'limit' }));
+    expect(getTask(store.db, task.id).boardStatus).toBe('blocked');
+    store.write((ctx) => patchBatch(ctx, batch.id, { ciStopped: null }));
+    expect(getTask(store.db, task.id).boardStatus).toBe('in_review');
   });
 
   it('counts a failed run that shipped anyway as done once its pull request merges, so dependents start', () => {
