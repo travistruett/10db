@@ -102,6 +102,25 @@ const rows: readonly Row[] = [
     sent: { landing: 'hold' },
   },
   {
+    name: 'When checks pass, merging into a branch',
+    project: { ...pullRequests, landing: 'branch', landingBranch: 'next' },
+    label: 'When checks pass',
+    line: 'GitHub merges each pull request into next by itself once its required checks pass. A task can choose another branch, or hold.',
+    change: () => type('New tasks land in', 'dev'),
+    sent: { landingBranch: 'dev' },
+  },
+  {
+    name: 'When checks pass, choosing a branch',
+    project: pullRequests,
+    label: 'When checks pass',
+    line: 'GitHub merges each pull request into main by itself once its required checks pass. A task can choose another branch, or hold.',
+    change: () => {
+      fireEvent.click(screen.getByRole('radio', { name: 'Merge into a branch' }));
+      type('New tasks land in', 'next');
+    },
+    sent: { landing: 'branch', landingBranch: 'next' },
+  },
+  {
     name: 'When checks pass, holding',
     project: { ...pullRequests, landing: 'hold' },
     label: 'When checks pass',

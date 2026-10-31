@@ -9,6 +9,7 @@ import {
   PROTOCOL_VERSION,
   type InboxAnswer,
   type InboxItemDto,
+  type ProjectDto,
   type SystemCheckDto,
   type WorkstreamId,
 } from '@10db/contracts';
@@ -60,6 +61,7 @@ import {
   createPrWatch,
   createShipper,
   createWorktreeDependencies,
+  createWorktreeGenerators,
   DEFAULT_DELIVERY_LIMITS,
   flagWorktreeMissing,
   flagWrongBranch,
@@ -437,6 +439,17 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     });
   };
   const deliveryJobs = createDeliveryJobs(logger.child({ component: 'delivery' }));
+  // What the install and the generators of a worktree run with: the gate's sandbox and login env.
+  const worktreeTools = {
+    gate: gateRunner,
+    clock,
+    dataDir: opts.dataDir,
+    sessionEnv: () => launcher.projectEnv(),
+    rules: (project: ProjectDto) => listPermissionRules(state.db, project.id, null),
+    checkouts: () => allCheckouts(state.db),
+    timeoutMs: limits.gateTimeoutMs,
+    resolvePnpm,
+  };
   const delivery: DeliveryContext = {
     state,
     git,
@@ -456,16 +469,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     worktreeRoot,
     // Not behind the gate slots: waiting out a long gate would hold the cut. Each cut downloads the
     // worktree's whole tree (the run's store is empty), so several cuts at once are several downloads.
-    dependencies: createWorktreeDependencies({
-      gate: gateRunner,
-      clock,
-      dataDir: opts.dataDir,
-      sessionEnv: () => launcher.projectEnv(),
-      rules: (project) => listPermissionRules(state.db, project.id, null),
-      checkouts: () => allCheckouts(state.db),
-      timeoutMs: limits.gateTimeoutMs,
-      resolvePnpm,
-    }),
+    dependencies: createWorktreeDependencies(worktreeTools),
+    generators: createWorktreeGenerators(worktreeTools),
   };
   answerBranchCard = createBranchCardAnswers(delivery);
   const starter = createBatchStarter(delivery);

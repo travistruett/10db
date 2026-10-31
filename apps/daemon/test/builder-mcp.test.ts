@@ -204,6 +204,25 @@ describe('the builder MCP endpoint', () => {
       });
     });
 
+    it('lands in the project default unless the call names a landing', async () => {
+      const project = await seedProject();
+      await api().patch(`/projects/${project.id}`, ProjectDto, { landing: 'hold' });
+      const input = {
+        projectId: project.id,
+        title: 't',
+        acceptanceCriteria: ['a'],
+        areas: ['src'],
+      };
+      const Created = z.object({ id: z.string() });
+      const plain = Created.parse(await callJson('create_task', input));
+      const explicit = Created.parse(
+        await callJson('create_task', { ...input, landing: { kind: 'base' } }),
+      );
+      const stored = await tasksOf(project.id);
+      expect(stored.find((t) => t.id === plain.id)?.landing).toEqual({ kind: 'hold' });
+      expect(stored.find((t) => t.id === explicit.id)?.landing).toEqual({ kind: 'base' });
+    });
+
     it.each([
       {
         name: 'no criteria',

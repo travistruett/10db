@@ -160,7 +160,7 @@ export function insertTask(ctx: WriteContext, projectId: ProjectId, input: TaskI
   }
   return writeTask(ctx, projectId, {
     ...config,
-    landing: config.landing ?? taskLandingFor(project.landing),
+    landing: config.landing ?? taskLandingFor(project),
     workspaceMode: placementFor(project, config.workspaceMode),
     proposalId: null,
   });
@@ -196,7 +196,7 @@ export function insertTaskFromProposal(
 ): TaskDto {
   const project = getProject(ctx.tx, input.projectId);
   return writeTask(ctx, input.projectId, {
-    landing: taskLandingFor(project.landing),
+    landing: taskLandingFor(project),
     workspaceMode: placementFor(project, undefined),
     title: Title.parse(input.title),
     description: input.description,
