@@ -5,6 +5,7 @@ import {
   ConflictError,
   currentStep,
   EventType,
+  findingNotes,
   FIX_ATTEMPT_LIMIT,
   InboxKind,
   parseFindings,
@@ -50,6 +51,7 @@ import {
   handoffForSession,
   insertDeviation,
   insertEvidence,
+  insertRetryLimitFollowUp,
   insertSession,
   insertSource,
   latestHandoffForStep,
@@ -70,6 +72,7 @@ import {
   type DbReader,
   transitionWorkstream,
   updateSessionUsage,
+  type RetryLimitFindings,
   type WorkstreamRow,
   type WriteContext,
 } from '@10db/db';
@@ -166,6 +169,7 @@ import { findClaimed } from '../watcher';
 import type { LiveSessions } from './live-sessions';
 import { checkedCommits, raiseBuilderCheck, waitsForCheck } from './builder-check';
 import { outstandingFixEvidence } from './fix-evidence';
+import { shipsAtRetryLimit } from './limit-ship';
 import { nextActionAfterCrash, nextActionOnAnotherAccount } from './next-action';
 
 /**
@@ -734,6 +738,96 @@ export function createRunner(opts: RunnerOptions): Runner {
     return { ...row, steps: row.steps.filter((_, i) => i !== qaIndex) };
   }
 
+  /**
+   * The steps once the current one is done and step `to` entered (-1: none). A rejection at the
+   * retry limit (`atLimit`) files its findings as a follow-up task in the same write and names it on
+   * the step.
+   */
+  function stepsAdvanced(
+    ctx: WriteContext,
+    row: WorkstreamRow,
+    to: number,
+    atLimit: RetryLimitFindings | null,
+  ): WorkstreamStep[] {
+    const steps = advanceSteps(row.steps, row.stepIndex, to, entryFor(ctx, row.id));
+    if (!atLimit) return steps;
+    const followUp = insertRetryLimitFollowUp(ctx, row.taskId, atLimit);
+    return steps.map((s, i) =>
+      i === row.stepIndex
+        ? { ...s, shippedAtLimit: { followUpTaskId: followUp.id, followUpTitle: followUp.title } }
+        : s,
+    );
+  }
+
+  /** Done with the current step: step `to` runs next, as it would after an approval. */
+  function advanceTo(
+    id: WorkstreamId,
+    ctl: Control,
+    row: WorkstreamRow,
+    step: WorkstreamStep,
+    to: number,
+    atLimit: RetryLimitFindings | null,
+  ): 'next' | 'stop' {
+    const next = row.steps[to];
+    if (!next) return 'stop';
+    opts.state.write((ctx) => {
+      countFinished(ctx, step);
+      patchWorkstream(ctx, id, ctl.fence, {
+        steps: stepsAdvanced(ctx, row, to, atLimit),
+        stepIndex: to,
+        nextAction: { kind: 'start' },
+        model: next.model,
+        effort: next.effort,
+      });
+      ctx.emit({
+        type: EventType.StepChanged,
+        entityType: 'workstream',
+        entityId: id,
+        data: { stepIndex: to, role: next.role },
+      });
+    });
+    return 'next';
+  }
+
+  /**
+   * The last read-only step is over and the work is done: DONE, or waiting for the builder's check
+   * when the project has no gate. A rejection at the retry limit (`atLimit`) ships the same way and,
+   * in the same write, files its findings as a follow-up task and names it on the step.
+   */
+  async function completeReadOnlySteps(
+    id: WorkstreamId,
+    ctl: Control,
+    row: WorkstreamRow,
+    step: WorkstreamStep,
+    ending: { readonly reason: string; readonly atLimit: RetryLimitFindings | null },
+  ): Promise<'stop'> {
+    const gateless = getProject(db, row.projectId).gateCommand === null;
+    // Nothing checked a read-only approval either: the builder checks what the steps produced.
+    const facts = gateless ? await checkFacts(row, checkoutOf(db, row)) : null;
+    if (stopRequested(ctl) === 'cancelled') {
+      cancelNow(id, ctl.fence);
+      return 'stop';
+    }
+    opts.state.write((ctx) => {
+      countFinished(ctx, step);
+      patchWorkstream(ctx, id, ctl.fence, {
+        steps: stepsAdvanced(ctx, row, -1, ending.atLimit),
+      });
+      if (facts) {
+        waitForBuilder(ctx, id, ctl.fence, row, facts);
+        return;
+      }
+      // The workflow has no RUNNING -> DONE edge; a read-only step changed no code, so no second gate.
+      transitionWorkstream(ctx, id, {
+        to: S.Verifying,
+        fence: ctl.fence,
+        reason: 'steps complete',
+      });
+      markDone(ctx, id, ctl.fence, row, ending.reason);
+    });
+    return 'stop';
+  }
+
   /** After a read-only step's session: the next step in this lane, DONE, a rework, or a failure. */
   async function finishReadOnlyStep(
     id: WorkstreamId,
@@ -793,69 +887,38 @@ export function createRunner(opts: RunnerOptions): Runner {
         );
         return 'stop';
       }
-      case 'done': {
-        if (getProject(db, row.projectId).gateCommand === null) {
-          // Nothing checked a read-only approval either: the builder checks what the steps produced.
-          const facts = await checkFacts(row, checkoutOf(db, row));
-          if (stopRequested(ctl) === 'cancelled') {
-            cancelNow(id, ctl.fence);
-            return 'stop';
-          }
-          opts.state.write((ctx) => {
-            countFinished(ctx, step);
-            patchWorkstream(ctx, id, ctl.fence, {
-              steps: advanceSteps(row.steps, row.stepIndex, -1, entryFor(ctx, id)),
-            });
-            waitForBuilder(ctx, id, ctl.fence, row, facts);
-          });
-          return 'stop';
-        }
-        opts.state.write((ctx) => {
-          countFinished(ctx, step);
-          patchWorkstream(ctx, id, ctl.fence, {
-            steps: advanceSteps(row.steps, row.stepIndex, -1, entryFor(ctx, id)),
-          });
-          // The workflow has no RUNNING -> DONE edge; a read-only step changed no code, so no second gate.
-          transitionWorkstream(ctx, id, {
-            to: S.Verifying,
-            fence: ctl.fence,
-            reason: 'steps complete',
-          });
-          markDone(
-            ctx,
-            id,
-            ctl.fence,
-            row,
-            `${step.role} approved${docsOnly ? '; QA skipped: only docs changed' : ''}`,
-          );
+      case 'done':
+        return completeReadOnlySteps(id, ctl, row, step, {
+          reason: `${step.role} approved${docsOnly ? '; QA skipped: only docs changed' : ''}`,
+          atLimit: null,
         });
-        return 'stop';
-      }
-      case 'advance': {
-        const next = row.steps[move.to];
-        if (!next) return 'stop';
-        opts.state.write((ctx) => {
-          countFinished(ctx, step);
-          patchWorkstream(ctx, id, ctl.fence, {
-            steps: advanceSteps(row.steps, row.stepIndex, move.to, entryFor(ctx, id)),
-            stepIndex: move.to,
-            nextAction: { kind: 'start' },
-            model: next.model,
-            effort: next.effort,
-          });
-          ctx.emit({
-            type: EventType.StepChanged,
-            entityType: 'workstream',
-            entityId: id,
-            data: { stepIndex: move.to, role: next.role },
-          });
-        });
-        return 'next';
-      }
+      case 'advance':
+        return advanceTo(id, ctl, row, step, move.to, null);
       case 'send_back': {
         const attempt = row.attempt + 1;
         if (attempt > opts.limits.maxFixAttempts) {
           const result = step.result;
+          if (
+            result &&
+            shipsAtRetryLimit({
+              role: step.role,
+              riskTags: getTask(db, row.taskId).riskTags,
+              evidence: listEvidence(db, id),
+            })
+          ) {
+            const atLimit = {
+              role: step.role === StepRole.Qa ? 'QA' : step.role,
+              notes: findingNotes(result.summary),
+            };
+            // The move an approval would get: a step that follows (QA after review) still runs. One
+            // that rejects there is past the limit too, so it ships the same way with its own follow-up.
+            const to = row.stepIndex + 1;
+            if (to < row.steps.length) return advanceTo(id, ctl, row, step, to, atLimit);
+            return completeReadOnlySteps(id, ctl, row, step, {
+              reason: `${step.role} rejected the work at the retry limit; shipped with its findings filed as a follow-up task`,
+              atLimit,
+            });
+          }
           fail(
             id,
             ctl.fence,

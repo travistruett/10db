@@ -717,6 +717,46 @@ describe('TaskDrawer', () => {
       expect(within(sentBack).getByText('1. BLOCKING src/a.ts:12 no test.')).toBeTruthy();
     });
 
+    it('says a task shipped at the retry limit with open findings, and names the follow-up task', async () => {
+      serve();
+      const rejected = result(
+        'reject',
+        '2026-10-29T11:00:00.000Z',
+        '1. BLOCKING src/a.ts:12 no test.',
+      );
+      open({
+        workstream: workstreamDto({
+          state: 'DONE',
+          steps: [
+            stepDto(),
+            stepDto({
+              role: 'review',
+              personaName: 'Reviewer',
+              tools: 'read_only',
+              result: rejected,
+              shippedAtLimit: {
+                followUpTaskId: mintId('Task'),
+                followUpTitle: 'Resolve the open findings of "Add the badge"',
+              },
+            }),
+          ],
+        }),
+      });
+      const d = await dialog();
+      const notice = within(d).getByTestId('shipped-at-limit');
+      expect(notice.textContent).toContain('Shipped at the retry limit with open findings');
+      expect(notice.textContent).toContain('Resolve the open findings of "Add the badge"');
+      expect(within(round(d, 0)).getByText('Open at the limit')).toBeTruthy();
+      expect(within(round(d, 0)).queryByText('Sent back')).toBeNull();
+    });
+
+    it('shows no limit notice for a task that was approved', async () => {
+      serve();
+      open({ workstream: reviewed('DONE') });
+      const d = await dialog();
+      expect(within(d).queryByTestId('shipped-at-limit')).toBeNull();
+    });
+
     it('shows no section for a task nobody reviewed', async () => {
       serve();
       open({ workstream: workstreamDto({ steps: [stepDto()] }) });

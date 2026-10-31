@@ -3,6 +3,7 @@ import {
   ROLE_LABEL,
   reviewRounds,
   Verdict,
+  type ReviewRound,
   type WorkstreamStep,
 } from '@10db/contracts';
 import { Badge, Group, Paper, Stack, Text } from '@mantine/core';
@@ -13,6 +14,11 @@ import { FindingsList, FullReview } from './review-findings';
 export function ReviewRoundsList({ steps }: { readonly steps: readonly WorkstreamStep[] }) {
   const rounds = reviewRounds(steps);
   if (rounds.length === 0) return null;
+  // The step's latest result is the rejection that used up the limit; its work shipped with it open.
+  const shippedAt = (round: ReviewRound) => {
+    const step = steps[round.stepIndex];
+    return step?.shippedAtLimit !== undefined && step.result === round.result;
+  };
   return (
     <Stack gap="xs">
       <Text size="sm" fw={600}>
@@ -31,9 +37,19 @@ export function ReviewRoundsList({ steps }: { readonly steps: readonly Workstrea
                 <Badge
                   size="sm"
                   variant="light"
-                  color={round.result.verdict === Verdict.Reject ? 'red' : 'green'}
+                  color={
+                    round.result.verdict !== Verdict.Reject
+                      ? 'green'
+                      : shippedAt(round)
+                        ? 'orange'
+                        : 'red'
+                  }
                 >
-                  {round.result.verdict === Verdict.Reject ? 'Sent back' : 'Approved'}
+                  {round.result.verdict !== Verdict.Reject
+                    ? 'Approved'
+                    : shippedAt(round)
+                      ? 'Open at the limit'
+                      : 'Sent back'}
                 </Badge>
                 <Text size="sm">{round.personaName || ROLE_LABEL[round.role]}</Text>
               </Group>
