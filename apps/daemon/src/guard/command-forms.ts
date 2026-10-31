@@ -146,6 +146,8 @@ export function startsWithWords(words: readonly string[], prefix: readonly strin
   return prefix.length > 0 && prefix.every((p, i) => words[i] === p);
 }
 
+/** The most readings of one package manager line followed; past it the line is refused as unread. */
+const VARIANT_LIMIT = 4000;
 const HELP_FLAGS: ReadonlySet<string> = new Set(['--version', '-v', '--help', '-h']);
 const RUN_ALIASES: ReadonlySet<string> = new Set(['run', 'run-script', 'rum', 'urn']);
 
@@ -213,7 +215,12 @@ function rewrites(plain: readonly string[], words: readonly string[]): string[][
 function packageManagerVariants(plain: readonly string[], words: readonly string[]): string[][] {
   const seen = new Map<string, string[]>();
   const queue = [[...plain]];
-  while (queue.length > 0 && seen.size < 32) {
+  while (queue.length > 0) {
+    // Every rewrite drops words or settles on a canonical name, so the readings are a few per
+    // suffix of the words; a count past this is a command nothing can read, not one to pass.
+    if (seen.size > VARIANT_LIMIT) {
+      throw new RangeError('A package manager command line has too many readings to follow.');
+    }
     const next = queue.pop();
     if (next === undefined) break;
     for (const variant of rewrites(next, words)) {

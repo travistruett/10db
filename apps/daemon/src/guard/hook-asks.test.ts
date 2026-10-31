@@ -223,6 +223,18 @@ describe('the hazard matcher reads script runners and aliases', () => {
   });
 });
 
+describe('a deliberately deep chain of script-runner prefixes is still read', () => {
+  const deep = `yarn ${'workspace a '.repeat(25)}${'run '.repeat(25)}db:migrate`;
+  it('reads through every prefix', () => {
+    expect(bash(deep)).toBe('deny');
+    expect(bash(deep, ALL_HAZARDS)).toBe('allow');
+  });
+  it('never gives up quietly: past the limit the search throws, which the hook turns into a refusal', () => {
+    const absurd = `yarn ${'workspace a '.repeat(3000)}db:migrate`;
+    expect(() => bash(absurd)).toThrow(RangeError);
+  });
+});
+
 describe('a hazard program with a word 10db cannot read asks while a hazard is unclaimed', () => {
   it.each([
     'x=add; pnpm $x lodash',

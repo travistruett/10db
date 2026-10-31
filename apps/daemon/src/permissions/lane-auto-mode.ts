@@ -1,7 +1,7 @@
 import { getAppSetting, setAppSetting, type DbReader, type WriteContext } from '@10db/db';
 import { z } from 'zod';
 
-export const LANE_AUTO_MODE_SETTING = 'lane_auto_mode';
+const LANE_AUTO_MODE_SETTING = 'lane_auto_mode';
 
 /** Lanes decide routine permissions with Claude Code's auto mode unless the builder turned it off. */
 export function laneAutoMode(db: DbReader): boolean {

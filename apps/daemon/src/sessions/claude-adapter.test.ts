@@ -9,7 +9,7 @@ import type {
   SDKUserMessage,
   SpawnedProcess,
 } from '@anthropic-ai/claude-agent-sdk';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { mintId } from '@10db/contracts';
 import { describe, expect, it, vi } from 'vitest';
@@ -432,6 +432,29 @@ describe('buildQueryOptions', () => {
     },
   );
 
+  it('starts no hook command or settings file for a sandboxed session: its hooks are callbacks', () => {
+    // With the env scrub off in auto mode, a child process outside the Bash sandbox would inherit the
+    // account's credential, so the session must start none that runs lane-writable code: Claude Code's
+    // own git is the only one, and the lane cannot write the git dir.
+    const options = buildQueryOptions(spec({ sandbox: laneSandbox }), deps);
+    expect(options.settingSources).toEqual([]);
+    expect(Object.keys(options.settings as object)).not.toContain('hooks');
+    const hooks = Object.values(options.hooks ?? {}).flat();
+    expect(hooks.length).toBeGreaterThan(0);
+    for (const matcher of hooks) {
+      for (const hook of matcher.hooks) expect(hook).toBeTypeOf('function');
+    }
+  });
+
+  it('ships a harness plugin with no hook command', () => {
+    const plugin = join(__dirname, '../../../../packages/harness/plugin');
+    expect(existsSync(join(plugin, 'hooks'))).toBe(false);
+    const manifest = JSON.parse(
+      readFileSync(join(plugin, '.claude-plugin', 'plugin.json'), 'utf8'),
+    ) as Record<string, unknown>;
+    expect(manifest).not.toHaveProperty('hooks');
+  });
+
   it('gives an unsandboxed session no classifier rules', () => {
     expect(buildQueryOptions(spec(), deps).settings).toEqual({ autoCompactEnabled: true });
   });
@@ -575,6 +598,29 @@ describe('buildQueryOptions', () => {
     expect(output).toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } });
     expect(canUseTool).not.toHaveBeenCalled();
     expect(preToolUse).not.toHaveBeenCalled();
+  });
+
+  it('turns a guard that throws into a deny, never a call that runs', async () => {
+    const preToolUse = vi.fn((): never => {
+      throw new RangeError('too many readings');
+    });
+    const hook = buildQueryOptions(spec({ preToolUse }), deps).hooks?.PreToolUse?.[0]?.hooks[0];
+    const output = await hook?.(
+      {
+        hook_event_name: 'PreToolUse',
+        tool_name: 'Bash',
+        tool_input: { command: 'yarn' },
+        tool_use_id: 'toolu_1',
+        session_id: 's',
+        transcript_path: '/t',
+        cwd: '/repo',
+      },
+      'toolu_1',
+      { signal: new AbortController().signal },
+    );
+    expect(output).toMatchObject({
+      hookSpecificOutput: { permissionDecision: 'deny' },
+    });
   });
 
   it('runs the guard as a PreToolUse hook', async () => {

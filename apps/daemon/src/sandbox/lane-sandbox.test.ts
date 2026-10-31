@@ -24,6 +24,7 @@ import {
 } from '../../test/fixtures';
 import { ManualClock } from '../clock';
 import { projectAtCheckout } from '../delivery';
+import { SECRET_VARIABLES } from '../environment';
 import { createGit } from '../git';
 import {
   createLaneSandbox,
@@ -572,6 +573,31 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       expect(denied).not.toContain('PATH');
       expect(denied).not.toContain('CLAUDE_CODE_TMPDIR');
       expect(denied).not.toContain('GIT_CONFIG_GLOBAL');
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it('gives a lane command none of an account credential, though the session env holds them all', async () => {
+    const names = [...SECRET_VARIABLES, 'AWS_ACCESS_KEY_ID', 'AWS_PROFILE', 'ANTHROPIC_BASE_URL'];
+    const session = await sandbox().forSession(
+      input({
+        env: {
+          PATH: '/usr/bin:/bin',
+          HOME: home,
+          ...Object.fromEntries(names.map((name) => [name, `secret-${name}`])),
+        },
+      }),
+    );
+    try {
+      const denied = new Set(session.spec.settings.credentials.envVars.map((entry) => entry.name));
+      for (const name of names) {
+        expect(denied.has(name), `${name} is denied to Bash`).toBe(true);
+        expect(session.commandEnv).not.toHaveProperty(name);
+        expect(readFileSync(session.spec.env['CLAUDE_ENV_FILE'] ?? '', 'utf8')).not.toContain(
+          `secret-${name}`,
+        );
+      }
     } finally {
       session.dispose();
     }

@@ -308,9 +308,17 @@ export function buildQueryOptions(spec: SessionSpec, deps: QueryDeps): Options {
               if (hookInput.hook_event_name !== 'PreToolUse') return {};
               if (!(await deps.billingVerified) || deps.isRefused())
                 return toHookOutput({ decision: 'deny', reason: BILLING_UNVERIFIED });
-              return toHookOutput(
-                spec.preToolUse({ toolName: hookInput.tool_name, input: hookInput.tool_input }),
-              );
+              try {
+                return toHookOutput(
+                  spec.preToolUse({ toolName: hookInput.tool_name, input: hookInput.tool_input }),
+                );
+              } catch (error) {
+                // A guard that fails must never let the call run.
+                return toHookOutput({
+                  decision: 'deny',
+                  reason: `10db's guard failed: ${error instanceof Error ? error.message : String(error)}`,
+                });
+              }
             },
           ],
         },
