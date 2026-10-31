@@ -12,6 +12,7 @@ export type {
   SessionEvent,
   SessionHandle,
   SessionSpec,
+  LanePermissionMode,
   ToolDecision,
   ToolRequest,
   TurnResult,

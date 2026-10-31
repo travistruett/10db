@@ -43,6 +43,7 @@ import {
   SessionEndReason,
   type AccountProbeSpec,
   type CompletionSpec,
+  type LanePermissionMode,
   type SessionAdapter,
   type SessionEvent,
   type SessionHandle,
@@ -94,21 +95,30 @@ export interface ClaudeAdapterOptions {
    */
   readonly allowUnsandboxed?: true;
   /**
-   * The permission mode a sandboxed session runs in; unset means `LANE_PERMISSION_MODE`. Only the
-   * live test sets it, to `auto`, to show what auto mode still hands 10db before lanes switch.
+   * The permission mode a sandboxed session runs in, over the one its spec carries. Only the live
+   * test sets it, to pin a mode whatever the app-wide setting says.
    */
   readonly lanePermissionMode?: LanePermissionMode;
 }
 
-/** Default: what no allow rule covers asks 10db. Auto: Claude Code's classifier decides first. */
-type LanePermissionMode = 'default' | 'auto';
+/**
+ * What a sandboxed lane runs in when neither the adapter nor the session's spec names a mode. The
+ * hook asks 10db about the calls the classifier must not settle
+ * (docs/architecture/decisions/2026-10-31-lanes-run-in-auto-mode-inside-the-sandbox.md).
+ */
+const LANE_PERMISSION_MODE: LanePermissionMode = 'auto';
 
 /**
- * What every real lane runs in. Auto mode's classifier approves calls itself, so lanes switch to it
- * only once the live test's auto-mode cases (`test/lane-sandbox.live.test.ts`) show that hazard hits
- * and new hosts still reach 10db: docs/architecture/decisions/2026-10-30-lanes-wait-for-auto-mode-proof.md.
+ * Claude Code forces `default` mode while `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` is `1`, so a session in
+ * auto mode sets it to `0`. The lane profile already denies every non-allowlisted name to Bash by
+ * name, and the processes outside the sandbox hold no lane-writable code.
  */
-const LANE_PERMISSION_MODE: LanePermissionMode = 'default';
+function laneMode(
+  spec: SessionSpec,
+  deps: Pick<QueryDeps, 'lanePermissionMode'>,
+): LanePermissionMode {
+  return deps.lanePermissionMode ?? spec.lanePermissionMode ?? LANE_PERMISSION_MODE;
+}
 
 export const UNSANDBOXED_REFUSAL =
   '10db refused to start Claude Code without the lane sandbox. This is a bug in 10db; nothing ran.';
@@ -133,7 +143,7 @@ interface QueryDeps {
   readonly recheckSettings: (what: string) => HookJSONOutput;
   /** True once the session has been refused after it started; every tool is denied from then on. */
   readonly isRefused: () => boolean;
-  /** The mode a sandboxed session runs in; `LANE_PERMISSION_MODE` when unset. */
+  /** The mode a sandboxed session runs in, over its spec's; `LANE_PERMISSION_MODE` when neither names one. */
   readonly lanePermissionMode?: LanePermissionMode;
 }
 
@@ -250,7 +260,13 @@ export function buildQueryOptions(spec: SessionSpec, deps: QueryDeps): Options {
     model: spec.model,
     effort: spec.effort,
     ...(spec.resumeProviderSessionId ? { resume: spec.resumeProviderSessionId } : {}),
-    env: sandbox ? { ...spec.env, ...sandbox.env } : { ...spec.env },
+    env: sandbox
+      ? {
+          ...spec.env,
+          ...sandbox.env,
+          CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: laneMode(spec, deps) === 'auto' ? '0' : '1',
+        }
+      : { ...spec.env },
     pathToClaudeCodeExecutable: deps.claudePath,
     // Never 'user' or 'local': user hooks and plugins stay out (spec §3), and settings.local.json can switch billing.
     // A sandboxed session loads no settings file at all, so the repo can't loosen its sandbox or its permissions.
@@ -268,7 +284,7 @@ export function buildQueryOptions(spec: SessionSpec, deps: QueryDeps): Options {
     allowedTools: [...spec.allowedTools],
     // In default mode what no allow rule covers reaches canUseTool. Only a sandboxed lane may run in
     // auto mode, whose classifier approves calls itself; an unsandboxed session never does.
-    permissionMode: sandbox ? (deps.lanePermissionMode ?? LANE_PERMISSION_MODE) : 'default',
+    permissionMode: sandbox ? laneMode(spec, deps) : 'default',
     canUseTool: async (toolName, input, options) => {
       if (!(await deps.billingVerified) || deps.isRefused())
         return { behavior: 'deny', message: BILLING_UNVERIFIED, interrupt: true };

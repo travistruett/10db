@@ -132,7 +132,7 @@ import {
 } from '../inbox';
 import type { Logger } from '../log';
 import { mintSessionToken } from '../mcp';
-import { allowedToolsFor, storableRule } from '../permissions';
+import { allowedToolsFor, laneAutoMode, storableRule } from '../permissions';
 import { takeFoundHostsReading } from '../registries';
 import { escalateStep, offeredProfiles } from '../routing';
 import {
@@ -1606,6 +1606,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         account: launch.expect,
         projectMcpServers: { ...mcpServers.remote, ...laneSession?.mcpServers },
         sandbox: laneSession?.spec ?? null,
+        ...(laneSession ? { lanePermissionMode: laneAutoMode(db) ? 'auto' : 'default' } : {}),
         allowedTools: allowedToolsFor(
           project,
           step.tools,

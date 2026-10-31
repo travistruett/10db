@@ -118,7 +118,7 @@ describe('judgePreToolUse', () => {
       'Monitor',
       { ...MONITOR, command: 'tail -f /tmp/x.output | grep -m1 DONE' },
       AREA,
-      'ask',
+      'allow',
     ],
     // The guard judges a Monitor command as a Bash command.
     ['Monitor running a hazard', 'Monitor', { ...MONITOR, command: 'pnpm add x' }, AREA, 'deny'],

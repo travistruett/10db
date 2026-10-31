@@ -107,8 +107,15 @@ describe('a Monitor command is judged as a Bash command', () => {
     expect(bash(command)).toBe('deny');
     expect(pre('Monitor', { command })).toBe('deny');
   });
-  it('keeps asking about a plain Monitor command', () => {
-    expect(pre('Monitor', { command: 'tail -f out.log' })).toBe('ask');
+  it('lets a plain Monitor command through: it runs inside the sandbox like Bash', () => {
+    expect(pre('Monitor', { command: 'tail -f out.log' })).toBe('allow');
+  });
+  it.each([
+    ['a socket key', { command: 'tail -f out', ws: 'wss://example.org' }],
+    ['no command', { description: 'x' }],
+    ['a backgrounded loop', { command: '(while :; do :; done) &' }],
+  ])('asks about a Monitor with %s', (_name, input) => {
+    expect(pre('Monitor', input)).toBe('ask');
   });
 });
 
@@ -197,6 +204,19 @@ describe('the hazard matcher reads script runners and aliases', () => {
     'bun install',
     'bun i',
     'bun update',
+    'npm clean-install',
+    'npm ic',
+    'npm install-clean',
+    'npm isntall-clean',
+    'npm uni x',
+    'npm unlink x',
+    'npm udpate',
+    'bun rm x',
+    'bun a x',
+    'pnpm rum db:migrate',
+    'pnpm urn db:migrate',
+    'npm rum db:migrate',
+    'yarn workspace a run db:migrate',
   ])('%s', (command) => {
     expect(bash(command)).toBe('deny');
     expect(bash(command, ALL_HAZARDS)).toBe('allow');

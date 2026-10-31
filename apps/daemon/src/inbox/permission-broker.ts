@@ -26,16 +26,9 @@ import {
 import type { Logger } from '../log';
 import { foundHostFile, matchPermissionRule, storableRule } from '../permissions';
 import { takeFoundHostsReading } from '../registries';
-import {
-  isOwnTaskOutputPath,
-  readAccess,
-  readPathsOf,
-  writeAccess,
-  type FileAccessContext,
-} from '../sandbox';
+import { readAccess, readPathsOf, writeAccess, type FileAccessContext } from '../sandbox';
 import type { ToolDecision, ToolRequest } from '../sessions';
 import { foundHostReason } from './gate-host-card';
-import { readsOnlyOwnFiles } from './monitor-command';
 import { ParkedError, type InboxService } from './service';
 
 export interface WaitObserver {
@@ -372,24 +365,21 @@ export function createPermissionBroker(
   }
 
   /**
-   * A sandboxed Monitor call that only waits on and reads files in the session's own task output
-   * directory runs without a card. It passes the checks a Bash command does, and then its own: a
-   * short grammar of reading programs over those files. Anything else is asked about, and so is a
-   * call with any input key but command, description and timeout_ms: Monitor's `ws` opens a socket
-   * from Claude Code's own process, outside the sandbox's network proxy, and a key a later Claude
-   * Code adds fails closed.
+   * A sandboxed Monitor call gets the checks a Bash command gets and no more: its command runs inside
+   * the sandbox, so it is judged as a Bash command, and any input key beyond command, description
+   * and timeout_ms is asked about (`ws` opens a socket from Claude Code's own process, outside the
+   * sandbox's network proxy).
    */
   function judgeMonitor(
     req: ToolRequest,
     sandbox: NonNullable<BrokerContext['sandbox']>,
-  ): ToolDecision | null {
-    if (!Object.keys(req.input).every((key) => MONITOR_INPUT_KEYS.has(key))) return null;
+  ): ToolDecision | Ask | null {
     const command = req.input['command'];
     if (typeof command !== 'string') return null;
-    const bash = judgeBash(req, sandbox);
-    if (!isDecision(bash) || bash.behavior !== 'allow') return null;
-    const own = (path: string): boolean => isOwnTaskOutputPath(path, sandbox.fileAccess);
-    return readsOnlyOwnFiles(command, own) ? { behavior: 'allow' } : null;
+    if (!Object.keys(req.input).every((key) => MONITOR_INPUT_KEYS.has(key))) {
+      return { summary: command };
+    }
+    return judgeBash(req, sandbox);
   }
 
   /** A read tool: protected paths are refused, the checkout and the read list are open, the rest is asked about by real path. */

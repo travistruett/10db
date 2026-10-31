@@ -17,16 +17,21 @@ const ToolInputRecord = z.record(z.string(), z.unknown());
 const HostList = z.looseObject({ allowed_domains: z.array(z.unknown()).min(1) });
 
 /**
- * Tools that reach a host from Claude Code's own process, outside the sandbox's network proxy and
- * its one card per host. A Monitor command is not judged by the guard either; the permission
- * broker judges both, and runs a lane's watch of its own output without a card.
+ * WebFetch reaches its host from Claude Code's own process, outside the sandbox's network proxy and
+ * its one card per host, so the broker judges every one.
  */
 const BROKER_JUDGES: Readonly<Record<string, string>> = {
-  Monitor:
-    'Monitor runs a command or opens a WebSocket from Claude Code itself; 10db judges every Monitor call.',
   WebFetch:
     'WebFetch reaches its host from Claude Code itself, outside the sandbox; 10db judges every WebFetch.',
 };
+
+/**
+ * A Monitor call that may run without the broker: its command runs inside the sandbox like a Bash
+ * command's (probed: a write outside the profile's paths fails in Monitor as in Bash), so it gets
+ * Bash's checks. Any other input key (`ws` opens a socket from Claude Code's own process, outside the
+ * sandbox's network proxy), or no command, goes to the broker.
+ */
+const MONITOR_INPUT_KEYS: ReadonlySet<string> = new Set(['command', 'description', 'timeout_ms']);
 
 /**
  * Tools that reach a host or an MCP server from Claude Code's own process, outside the sandbox's
@@ -88,9 +93,16 @@ function brokerAsk(input: GuardInput): string | null {
         : input.fileAccess.writeAsk(path);
     }
   }
-  if (input.toolName !== 'Bash') return null;
+  if (input.toolName === 'Monitor') {
+    const keys = Object.keys(ToolInputRecord.safeParse(input.toolInput).data ?? { '': 0 });
+    if (!keys.every((key) => MONITOR_INPUT_KEYS.has(key))) {
+      return 'Monitor carries an input beyond its command (a WebSocket opens from Claude Code itself); 10db judges it.';
+    }
+  } else if (input.toolName !== 'Bash') return null;
   const command = stringField(input.toolInput, 'command');
-  if (command === null) return null;
+  if (command === null) {
+    return input.toolName === 'Monitor' ? 'Monitor carried no command to read.' : null;
+  }
   // A background call never blocks the lane, so a loop with no end holds a core while it goes on.
   const background = runsInBackground(ToolInputRecord.safeParse(input.toolInput).data ?? {});
   if (startsEndlessBackgroundLoop(command, { background })) {
