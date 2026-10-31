@@ -660,9 +660,11 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
             },
             'worktree dependencies not installed before the gate',
           );
-          tell(batch, () => {
-            raiseInstallHostCards(ctx, project.id, installed);
-          });
+          try {
+            await raiseInstallHostCards(ctx, project.id, installed);
+          } catch (error) {
+            ctx.logger.warn({ batchId: batch.id, err: why(error) }, 'base card not updated');
+          }
           const how = installed.timedOut ? 'timed out' : `exit ${String(installed.exitCode)}`;
           const blocked =
             installed.blockedHosts.length === 0

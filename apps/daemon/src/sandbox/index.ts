@@ -12,6 +12,13 @@ export { packageCacheEnv } from './package-cache';
 export { createLaneEnvFile, removeLaneEnvFile } from './env-file';
 export { claimSandboxTempRoot } from './stale-files';
 export {
+  createLedgerSweep,
+  reapLaneProcessLedgers,
+  type LaneProcessSetup,
+  type LedgerSweep,
+} from './lane-processes';
+export { systemProcessTable } from './process-table';
+export {
   createLaneTempDir,
   LANE_TEMP_ROOT,
   MAX_SANDBOX_TMP_BYTES,

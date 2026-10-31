@@ -15,5 +15,6 @@ export { READ_COMMANDS } from './read-only';
 export { protectedPaths, type ProtectedPath } from './account-rules';
 export { EQUALS_EXPANSION } from './plain-command';
 export { plainWordReadings } from './command-forms';
+export { startsEndlessBackgroundLoop } from './background-loops';
 export { hazardFor, hazardHit } from './hazards';
 export { firstUnread } from './unread-commands';

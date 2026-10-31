@@ -138,7 +138,7 @@ async function makeWhole(
     await dropUninstalled();
     if (installed.kind === 'failed') {
       raise(ctx.inbox, batch.projectId, worktreeCards.installFailed(batch, installed));
-      raiseInstallHostCards(ctx, batch.projectId, installed);
+      await raiseInstallHostCards(ctx, batch.projectId, installed);
     }
     return 'refused';
   }
