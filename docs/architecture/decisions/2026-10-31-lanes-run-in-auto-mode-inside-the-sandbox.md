@@ -17,26 +17,35 @@ order:
 2. **The sandbox's ask rules** (`permissions.ask`, passed inline per session). Content-scoped ask rules prompt
    even in auto mode, so every hazard the broker cards today still reaches 10db's broker (`canUseTool`) and its
    card.
-3. **Network access to a new host** reaches the broker's `judgeHost` as it does today, never the classifier.
+3. **Network access to a host outside the project's allowed domains is refused** by Claude Code's sandbox
+   network classifier, which fails closed (spike row d). It no longer reaches `judgeHost`, so no card is raised
+   before the refusal. Today's host card already denied first and asked after; in auto mode the lane sees the
+   refusal and can ask the builder itself. Where Claude Code's `PermissionDenied` hook fires for such a refusal,
+   10db raises today's "Allow network access to <host>?" card from it, so an allowed host works on the next try.
+   The builder accepted this on 2026-10-31: one host card was raised in the two days measured.
 4. **Claude Code's auto-mode classifier** decides everything else: the plain reads, searches, test runs and
    builds that used to wait on an "Allow Bash?" or "Allow Monitor?" card.
 5. **What the classifier escalates** (`requiresUserInteraction`, or a classifier decision on `canUseTool`'s
    options) reaches the broker and becomes a card, and no stored rule or carried allowance answers it (decision
-   103's rule, unchanged).
+   103's rule, unchanged). The spike never saw an escalation (every classifier refusal was a denial), so this path
+   stays as a defensive one.
 
 The session also gets inline `autoMode` rules (`settings.autoMode`, which Claude Code reads only from user,
 managed or inline settings, never the repository's). These are the denials the builder kept typing as card
-answers:
+answers. The first two are `hard_deny`, because a `soft_deny` yields to a prompt that names the command, and
+lane briefings name `make gate` when they forbid it (spike row e); the third is `soft_deny`, since the sandbox
+already bounds paths:
 
-- never run the project's full gate (`make gate` or its command): 10db runs it after the step;
-- never generate CPU load (busy loops, `yes`, stress tools) on the builder's Mac;
-- never read or write outside the lane's worktree except the paths the sandbox already allows.
+- `hard_deny`: running the project's full gate (`make gate` or its gate command): 10db runs it after the step;
+- `hard_deny`: generating CPU load (busy loops, `yes`, stress tools) on the builder's Mac;
+- `soft_deny`: reading or writing outside the lane's worktree except the paths the sandbox already allows.
 
-The classifier model is `CLAUDE_CODE_AUTO_MODE_MODEL`, set by 10db to the fastest model the account offers that
-auto mode supports (Haiku 5.5 where offered). A sandboxed session still loads no settings file, so a repository
-cannot loosen any of this.
+A refusal reaches the session as "denied by the Claude Code auto mode classifier" without the rule's text, so
+the lane briefing says what the rules are. 10db does not set the classifier's model: nothing observable showed
+`CLAUDE_CODE_AUTO_MODE_MODEL` taking effect (spike row f). A sandboxed session still loads no settings file, so a
+repository cannot loosen any of this.
 
-A spike proves points 2, 3 and 5 against a real session before the switch flips. Its results are below.
+A spike checked these points against a real session before the switch flipped. Its results are below.
 
 ## Spike results
 

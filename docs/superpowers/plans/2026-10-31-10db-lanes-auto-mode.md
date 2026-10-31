@@ -55,12 +55,19 @@ design changes before task 2.
 Only after task 1's expectations hold.
 
 - [ ] Red first, in the adapter's existing tests (`apps/daemon/src/sessions/claude-adapter*.test.ts`): a
-      sandboxed session's options have `permissionMode: 'auto'`, keep the inline ask rules, carry the three
-      `autoMode` rules from the decision, and set `CLAUDE_CODE_AUTO_MODE_MODEL` in the session env; an
-      unsandboxed (fake) session is unchanged.
+      sandboxed session's options have `permissionMode: 'auto'`, keep the inline ask rules, and carry the
+      decision's `autoMode` rules (two `hard_deny`, one `soft_deny`); `CLAUDE_CODE_AUTO_MODE_MODEL` is not set;
+      an unsandboxed (fake) session is unchanged.
 - [ ] Implement in `claude-adapter.ts`. The `autoMode` rules live in one named module (not inline strings in
-      the adapter), worded as in the decision. The classifier model is chosen from the account's offered models
-      (the routing catalogue knows which are offered); fall back to leaving the variable unset.
+      the adapter), worded as in the decision, with the project's actual gate command named in the gate rule.
+      The SDK has no typing for `settings.autoMode`; validate the object you build with a zod schema in that
+      module and pass it with a commented cast at that boundary.
+- [ ] Network refusals: add a `PermissionDenied` hook (check the SDK's hook types) that, for a denied sandbox
+      network request naming a host, raises today's host card through the broker's existing host-card path
+      (`judgeHost`'s card), at most once per host per session. If the SDK offers no such hook or it does not
+      carry the host, skip this and say so in your report and in the decision file.
+- [ ] The lane briefing (`apps/daemon/src/briefing/`) tells lanes the three rules in a sentence each, and that a
+      new network host is refused and they should ask the builder (AskUserQuestion) if they need one.
 - [ ] The broker's classifier-escalation path (`escalated: isClassifierEscalation(options)`) already exists;
       add a test that an escalated call is carded and that no stored rule answers it.
 - [ ] Docs: `docs/architecture/03-trust-boundaries.md` (the "Default permission mode" bullet and the summary
