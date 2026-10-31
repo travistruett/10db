@@ -1,6 +1,9 @@
-import { globSync, readdirSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { globSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { isolatedGitEnvironment } from './fixtures';
 import { readRepoFile, repoRoot } from './workspace';
 
 /** Every note allowed in docs/architecture/research. A new note is read through before it joins. */
@@ -30,11 +33,42 @@ const PUBLIC_RESEARCH = [
 const LAST_NUMBERED_DECISION = 133;
 const DECISION_FILE = /^(\d{4}-\d{2}-\d{2})-[a-z0-9]+(?:-[a-z0-9]+)*\.md$/;
 
-function decisionFiles(): string[] {
-  return readdirSync(join(repoRoot, 'docs/architecture/decisions')).filter(
-    (name) => name !== 'README.md',
-  );
+/**
+ * A dot-entry is never a decision: Claude Code can leave an empty `.claude/.cc-writes` staging
+ * directory beside a file it writes, and that must not fail the gate.
+ */
+function decisionFiles(dir = join(repoRoot, 'docs/architecture/decisions')): string[] {
+  return readdirSync(dir).filter((name) => name !== 'README.md' && !name.startsWith('.'));
 }
+
+describe('decisionFiles', () => {
+  it('skips README.md and every dot-entry, such as a stray .cc-writes directory', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'decision-files-'));
+    try {
+      writeFileSync(join(dir, 'README.md'), '');
+      writeFileSync(join(dir, '2026-10-27-one.md'), '');
+      mkdirSync(join(dir, '.cc-writes'));
+      writeFileSync(join(dir, '.DS_Store'), '');
+      expect(decisionFiles(dir)).toEqual(['2026-10-27-one.md']);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('Claude Code write-staging directories', () => {
+  // The index only: an untracked leftover is the harness's, and must not fail a gate by itself.
+  it('are never committed: no tracked path has a .cc-writes directory', () => {
+    const paths = execFileSync('git', ['ls-files', '--cached', '-z'], {
+      cwd: repoRoot,
+      env: isolatedGitEnvironment(),
+      encoding: 'utf8',
+    })
+      .split('\0')
+      .filter((path) => path.split('/').includes('.cc-writes'));
+    expect(paths).toEqual([]);
+  });
+});
 
 describe('docs/architecture', () => {
   it('keeps the numbered decision log closed at 133, numbered from 1 with no gaps or repeats', () => {
