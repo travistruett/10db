@@ -300,3 +300,13 @@ export function startsEndlessBackgroundLoop(
   const result = scan(command, 0);
   return result.flagged || (options.background === true && result.endless);
 }
+
+/**
+ * Whether Claude Code runs a Bash call in the background itself (`run_in_background`). Anything but
+ * an absent or false flag counts, so a spelling Claude Code reads as true is never missed: a value
+ * it refuses fails the call before it runs, so asking about it costs nothing.
+ */
+export function runsInBackground(input: Readonly<Record<string, unknown>>): boolean {
+  const flag = input['run_in_background'];
+  return flag !== undefined && flag !== null && flag !== false && flag !== 'false';
+}

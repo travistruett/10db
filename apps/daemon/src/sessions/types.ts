@@ -24,6 +24,9 @@ export type ToolDecision =
 /** A repo MCP server as a session takes it: a stdio server only as its launch under the lane sandbox. */
 export type SessionMcpServer = SandboxedMcpServer | RemoteMcpServer;
 
+/** Default: what no allow rule covers asks 10db. Auto: Claude Code's classifier decides first. */
+export type LanePermissionMode = 'default' | 'auto';
+
 export interface SessionSpec {
   readonly sessionId: SessionId;
   readonly workstreamId: WorkstreamId;
@@ -39,6 +42,11 @@ export interface SessionSpec {
   /** The repo's approved MCP servers, already expanded; passed next to 10db's server. */
   readonly projectMcpServers: Readonly<Record<string, SessionMcpServer>>;
   readonly allowedTools: readonly string[];
+  /**
+   * The permission mode a sandboxed session runs in, read from the app-wide setting when the session
+   * starts. Unset means the adapter's default. An unsandboxed session always runs in `default`.
+   */
+  readonly lanePermissionMode?: LanePermissionMode;
   /**
    * The lane sandbox: Claude Code runs the session's commands under its profile, loads no settings
    * file and asks before every call no allow rule covers. Null or absent, the session runs unsandboxed.

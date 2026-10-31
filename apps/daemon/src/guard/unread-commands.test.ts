@@ -335,13 +335,13 @@ const ROWS: readonly Row[] = [
   { name: 'su', command: 'su -c ls', reason: UnreadReason.CommandName },
   { name: 'noglob', command: 'noglob ls', reason: UnreadReason.CommandName },
   { name: 'nocorrect', command: 'nocorrect ls', reason: UnreadReason.CommandName },
-  { name: 'coproc', command: 'coproc ls', reason: UnreadReason.CommandName },
   { name: 'repeat', command: 'repeat 3 ls', reason: UnreadReason.CommandName },
   { name: 'foreach', command: 'foreach x (a b); ls; end', reason: UnreadReason.Structure },
   { name: 'alias', command: 'alias p=pnpm', reason: UnreadReason.CommandName },
   // A script that is not read.
-  { name: 'eval of a variable', command: 'eval "$x"', reason: UnreadReason.Script },
-  { name: 'eval of a literal', command: 'eval ls', reason: UnreadReason.Script },
+  { name: 'eval of a variable', command: 'eval "$x"', reason: UnreadReason.CommandName },
+  { name: 'eval of a hazard form', command: "eval 'pnpm $X'", reason: UnreadReason.HazardForm },
+  { name: 'eval behind a wrapper', command: 'nice eval "$x"', reason: UnreadReason.CommandName },
   { name: 'sh -c of a variable', command: 'sh -c "$x"', reason: UnreadReason.Script },
   {
     name: 'sh -c with a substitution',

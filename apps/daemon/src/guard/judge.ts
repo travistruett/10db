@@ -16,6 +16,7 @@ import {
 } from './account-rules';
 import { commandForms, startsWithWords } from './command-forms';
 import { ghVerdict } from './gh-rules';
+import { executableTails, FEEDERS } from './wrapped-commands';
 import { gitVerdict } from './git-rules';
 import {
   classifyPath,
@@ -68,6 +69,10 @@ export interface GuardInput {
 export interface FileAccessJudge {
   read(toolName: string, input: unknown): 'ok' | { refuse: string };
   write(path: string): 'ok' | { refuse: string };
+  /** Why a read of these paths needs a person (outside what lanes may read), or null. */
+  readAsk(toolName: string, input: unknown): string | null;
+  /** Why a write to this path needs a person (a Claude Code config path), or null. */
+  writeAsk(path: string): string | null;
 }
 
 /**
@@ -91,7 +96,17 @@ const DEPLOY = [
   /^gh release create\b/,
 ];
 const PATH_READ_TOOLS = new Set(['Read', 'Grep', 'Glob', 'LS']);
-const SHELLS = new Set(['sh', 'bash', 'zsh']);
+/** Programs that read a script from `-c` or from standard input. */
+export const SHELLS: ReadonlySet<string> = new Set([
+  'sh',
+  'bash',
+  'zsh',
+  'dash',
+  'ksh',
+  'csh',
+  'tcsh',
+  'fish',
+]);
 const ToolInput = z.record(z.string(), z.unknown());
 
 /** Reads a string field from a tool's input, which arrives as untyped JSON. */
@@ -344,6 +359,69 @@ type Dir = string | null;
 const union = (...lists: readonly (readonly Dir[])[]): Dir[] => [...new Set(lists.flat())];
 const DIRECTORY_CHANGES: ReadonlySet<string> = new Set(['cd', 'pushd', 'popd']);
 
+/**
+ * The words with every redirection and its target dropped, so `pnpm 2>/dev/null add x` reads as
+ * `pnpm add x`: the shell removes a redirection before it runs the command, wherever it stands.
+ */
+export function withoutRedirections(words: readonly string[]): string[] {
+  const kept: string[] = [];
+  for (let i = 0; i < words.length;) {
+    const span = redirectionSpan(words, i);
+    if (span > 0) i += span;
+    else kept.push(words[i++] ?? '');
+  }
+  return kept;
+}
+
+/**
+ * The readings of a command's words a matcher must try. The parser keeps no mark of a quoted word,
+ * so a quoted `'>'` is an argument the stripped reading would lose: the words as written, with each
+ * redirection and its target dropped, and with only the operator words dropped. A match in any
+ * reading counts.
+ */
+export function redirectionViews(words: readonly string[]): string[][] {
+  const operatorsOnly = words.filter((_, i) => {
+    const before = i > 0 && redirectionSpan(words, i - 1) === 2;
+    return redirectionSpan(words, i) === 0 || before;
+  });
+  // Any word with a `<` or `>` goes, with a bare descriptor number before it (`2 >f`) and a
+  // `{name}` descriptor variable, whatever the parser made of them.
+  const angled = words.filter((word, i) => {
+    const next = words[i + 1] ?? '';
+    return !/[<>]/.test(word) && !(/^\d+$/.test(word) && /[<>]/.test(next));
+  });
+  return [[...words], withoutRedirections(words), operatorsOnly, angled];
+}
+
+/** The views of `redirectionViews`, each followed by the command lines wrapped inside it. */
+export function redirectionReadings(words: readonly string[]): string[][] {
+  return redirectionViews(words).flatMap((view) => [view, ...executableTails(view)]);
+}
+
+/** What the git and gh rules refuse about a command line that starts with either program. */
+function wrappedVerdict(line: readonly string[]): string | null {
+  const [program = ''] = line;
+  if (program === 'git') return gitVerdict(line)?.deny ?? null;
+  if (program === 'gh') return ghVerdict(line)?.deny ?? null;
+  return null;
+}
+
+/**
+ * git or gh behind `xargs` or `parallel`: the arguments arrive on standard input, so what is fed
+ * cannot be read: a fed word can be a subcommand or an option (`git grep --open-files-in-pager=…`,
+ * `gh api -XPOST`), so the line is always refused.
+ */
+function fedRefusal(words: readonly string[]): string | null {
+  const feeder = words.findIndex((word) => FEEDERS.has(commandName(word)));
+  if (feeder < 0) return null;
+  const at = words.findIndex((word, i) => i > feeder && (word === 'git' || word === 'gh'));
+  if (at < 0) return null;
+  const line = words.slice(at);
+  return (
+    wrappedVerdict(line) ?? `${line[0] ?? ''} is fed its arguments, which the guard cannot read.`
+  );
+}
+
 /** The command a segment runs, past reserved words, assignments and wrappers. */
 export function commandOf(segment: ShellSegment): {
   readonly words: string[];
@@ -571,14 +649,12 @@ function judgeShell(
         chained = union(dirs, moved);
       }
     }
-    if (head === 'git') {
-      const verdict = gitVerdict(words);
-      if (verdict) return deny(verdict.deny);
+    for (const line of [words, ...executableTails(words)]) {
+      const verdict = wrappedVerdict(line);
+      if (verdict) return deny(verdict);
     }
-    if (head === 'gh') {
-      const verdict = ghVerdict(words);
-      if (verdict) return deny(verdict.deny);
-    }
+    const refused = fedRefusal(leadingWords(segment.words).command);
+    if (refused) return deny(refused);
     if (head === 'rm') {
       const verdict = rmVerdict(input, words, afterCd, segment);
       if (verdict) return verdict;
@@ -590,13 +666,15 @@ function judgeShell(
       // After `! cd`, what follows `&&` runs when the cd failed.
       chained = negated ? union(dirs, moved) : moved;
     }
-    const forms = commandForms(words);
-    if (DEPLOY.some((re) => forms.lines.some((l) => re.test(l))))
+    const readings = redirectionReadings(words).map((reading) => commandForms(reading));
+    if (DEPLOY.some((re) => readings.some((forms) => forms.lines.some((l) => re.test(l)))))
       return deny('Deploy and publish commands are never run by agents.');
     const line = words.join(' ');
     for (const hazard of input.hazards) {
       if (
-        hazard.commands.some((c) => forms.bare.some((f) => startsWithWords(f, c.split(' ')))) &&
+        hazard.commands.some((c) =>
+          readings.some((forms) => forms.bare.some((f) => startsWithWords(f, c.split(' ')))),
+        ) &&
         !claimed(input, ClaimKind.Hazard, hazard.name)
       ) {
         return deny(
@@ -668,7 +746,9 @@ export function judgeToolUse(input: GuardInput): GuardVerdict {
     }
     return filePath === null ? ALLOW : judgeFile(input, filePath);
   }
-  if (input.toolName === 'Bash') {
+  // Monitor runs its command in a shell like Bash does, so the same rules judge it. A read-only step
+  // refuses it below, as it refuses every tool its list leaves out.
+  if (input.toolName === 'Bash' || (input.toolName === 'Monitor' && !input.readOnly)) {
     const command = stringField(input.toolInput, 'command');
     if (command === null) return ALLOW;
     if (input.readOnly) {

@@ -23,6 +23,7 @@ import {
   JudgeConfigPatch,
   JudgeKeyInput,
   KeepAwakeInput,
+  LanePermissionsDto,
   ModelProfileId,
   NetworkHostInput,
   Month,
@@ -558,6 +559,12 @@ export function createApp(deps: ApiDeps) {
       '/settings/keep-awake',
       validator('json', (value): z.infer<typeof KeepAwakeInput> => KeepAwakeInput.parse(value)),
       (c) => c.json(deps.services.setKeepAwake(c.req.valid('json').mode)),
+    )
+    .get('/settings/lane-permissions', (c) => c.json(deps.services.lanePermissions()))
+    .put(
+      '/settings/lane-permissions',
+      validator('json', (value): LanePermissionsDto => LanePermissionsDto.parse(value)),
+      (c) => c.json(deps.services.setLanePermissions(c.req.valid('json').autoMode)),
     )
     .get(
       STREAM_PATH,
