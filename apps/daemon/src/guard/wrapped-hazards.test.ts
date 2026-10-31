@@ -113,3 +113,62 @@ describe('quoted literals and arguments are not asked about', () => {
     },
   );
 });
+
+describe('git and gh behind a feeder run only a read-only subcommand', () => {
+  it.each([
+    'echo x | xargs git push',
+    'echo x | xargs git add',
+    'echo x | xargs git fetch',
+    'echo x | xargs git config',
+    'echo x | xargs -I{} git log {}',
+    'echo x | xargs -I X git log X',
+    'echo x | parallel git log {}',
+    'echo x | xargs gh repo view',
+    'echo x | xargs -I{} git {}',
+    'echo x | xargs -I X git X',
+    'echo x | xargs -i git',
+    'echo x | xargs -J % git % --force',
+    'echo x | parallel git {}',
+    'echo x | xargs gh pr merge',
+    'echo x | xargs gh api -X POST',
+    'echo x | xargs gh api --method DELETE',
+    'echo x | xargs gh api -f a=b repos/x/y',
+  ])('refuses %s', (command) => {
+    expect(guard(command).decision).toBe('deny');
+  });
+  it.each([
+    'git ls-files | xargs git log',
+    'git ls-files | xargs git blame',
+    'echo x | xargs git show',
+    'echo x | xargs gh pr view',
+    'echo x | xargs gh run list',
+    'echo x | xargs gh api repos/x/y',
+    'echo x | xargs gh api -X GET repos/x/y',
+  ])('allows %s', (command) => {
+    expect(guard(command).decision).toBe('allow');
+  });
+});
+
+describe('what the parser cannot classify next to a hazard program asks', () => {
+  it.each([
+    'pnpm {fd}>out add x',
+    'pnpm 2 >f add x',
+    'pnpm {a,b} x',
+    'pnpm {1..3}',
+    'pnpm exec foo {x',
+    `xcrun ${'-q '.repeat(20)}pnpm add x`,
+    'pnpm it',
+    'pnpm ci',
+    'pnpm install-test',
+    'bun add x',
+    'bun remove x',
+    'bun install',
+    'bun i',
+    'bun update',
+  ])('%s', (command) => {
+    expect(hook(command)?.decision ?? guard(command).decision).not.toBe('allow');
+  });
+  it('lets an uncertain command with no hazard program pass the hook', () => {
+    expect(hook('echo "unclosed')).toBeNull();
+  });
+});

@@ -57,8 +57,26 @@ export function takesDataArguments(program: string): boolean {
   return DATA_ARGUMENTS.has(commandName(program));
 }
 
-/** How far into a command line a wrapped program is looked for. */
+/** How far into a command line every word is tried as a wrapped program. */
 const MAX_TAILS = 16;
+/** Past that, a word is tried when it names a program the guard or a hazard has rules for. */
+const RULED_PROGRAMS: ReadonlySet<string> = new Set([
+  'pnpm',
+  'npm',
+  'yarn',
+  'bun',
+  'npx',
+  'cargo',
+  'git',
+  'gh',
+  'drizzle-kit',
+  'make',
+  'vercel',
+  'netlify',
+  'fly',
+  'kubectl',
+  'terraform',
+]);
 
 /** `pnpm@9` names pnpm; a scoped package (`@10db/x`) and a plain word are left as they are. */
 function withoutVersion(word: string): string {
@@ -76,10 +94,12 @@ export function executableTails(words: readonly string[]): string[][] {
   const [head = ''] = words;
   if (takesDataArguments(head)) return [];
   const tails: string[][] = [];
-  for (let i = 1; i < Math.min(words.length, MAX_TAILS); i += 1) {
+  for (let i = 1; i < words.length; i += 1) {
     const first = words[i] ?? '';
     if (first.startsWith('-')) continue;
-    tails.push([withoutVersion(first), ...words.slice(i + 1)]);
+    const program = withoutVersion(first);
+    if (i >= MAX_TAILS && !RULED_PROGRAMS.has(commandName(program))) continue;
+    tails.push([program, ...words.slice(i + 1)]);
   }
   return tails;
 }

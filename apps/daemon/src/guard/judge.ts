@@ -380,7 +380,13 @@ export function redirectionViews(words: readonly string[]): string[][] {
     const before = i > 0 && redirectionSpan(words, i - 1) === 2;
     return redirectionSpan(words, i) === 0 || before;
   });
-  return [[...words], withoutRedirections(words), operatorsOnly];
+  // Any word with a `<` or `>` goes, with a bare descriptor number before it (`2 >f`) and a
+  // `{name}` descriptor variable, whatever the parser made of them.
+  const angled = words.filter((word, i) => {
+    const next = words[i + 1] ?? '';
+    return !/[<>]/.test(word) && !(/^\d+$/.test(word) && /[<>]/.test(next));
+  });
+  return [[...words], withoutRedirections(words), operatorsOnly, angled];
 }
 
 /** The views of `redirectionViews`, each followed by the command lines wrapped inside it. */
@@ -396,9 +402,45 @@ function wrappedVerdict(line: readonly string[]): string | null {
   return null;
 }
 
+const FED_GIT_READS: ReadonlySet<string> = new Set([
+  'log',
+  'show',
+  'diff',
+  'ls-files',
+  'status',
+  'rev-parse',
+  'cat-file',
+  'blame',
+  'grep',
+]);
+const FED_GH_READS: ReadonlySet<string> = new Set([
+  'pr view',
+  'pr list',
+  'pr checks',
+  'run view',
+  'run list',
+]);
+/** gh api flags that make a request more than a read. */
+const GH_API_WRITES = /^(?:-f|-F|--field|--raw-field|--input)$/;
+
+/** Whether a gh api line sends only GET requests. */
+function ghApiReads(line: readonly string[]): boolean {
+  for (let i = 2; i < line.length; i += 1) {
+    const word = line[i] ?? '';
+    if (GH_API_WRITES.test(word)) return false;
+    if (word === '-X' || word === '--method') {
+      if ((line[i + 1] ?? '').toUpperCase() !== 'GET') return false;
+    } else if (/^(?:-X|--method=)/.test(word) && !/^(?:-XGET|--method=GET)$/i.test(word)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 /**
- * git or gh behind `xargs` or `parallel`: the arguments arrive on standard input, so the words that
- * follow are checked and a bare program is refused, since what it is fed could be `push --force`.
+ * git or gh behind `xargs` or `parallel`: the arguments arrive on standard input, so what is fed
+ * cannot be read. The line is refused unless it names a read-only subcommand, and always when the
+ * feeder replaces a placeholder (`-I`, `-i`, `-J`, `{}`), since the subcommand itself could be fed.
  */
 function fedRefusal(words: readonly string[]): string | null {
   const feeder = words.findIndex((word) => FEEDERS.has(commandName(word)));
@@ -408,9 +450,19 @@ function fedRefusal(words: readonly string[]): string | null {
   const line = words.slice(at);
   const refused = wrappedVerdict(line);
   if (refused) return refused;
-  return line.length <= 1
-    ? `${line[0] ?? ''} is fed its arguments, which the guard cannot read.`
-    : null;
+  const replaces = words
+    .slice(feeder + 1)
+    .some((word) => /^-[IiJ]/.test(word) || (word.includes('{') && word.includes('}')));
+  if (replaces)
+    return `${line[0] ?? ''} is fed through a replacement string the guard cannot read.`;
+  const [program = '', first = '', second = ''] = line;
+  const reads =
+    program === 'git'
+      ? FED_GIT_READS.has(first)
+      : FED_GH_READS.has(`${first} ${second}`) || (first === 'api' && ghApiReads(line));
+  return reads
+    ? null
+    : `${program} is fed its arguments, so only a read-only subcommand may follow.`;
 }
 
 /** The command a segment runs, past reserved words, assignments and wrappers. */

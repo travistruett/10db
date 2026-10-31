@@ -120,7 +120,11 @@ function unreadableHazard(
     const offset = segment.words.length - command.length;
     // A quoted literal such as '@10db/*' is text; only a word the shell fills in keeps its markers.
     const written = command.map((word, i) =>
-      segment.dynamicWords[offset + i] === true ? word : word.replaceAll(EXPANDING_ALL, '_'),
+      segment.dynamicWords[offset + i] === true
+        ? EXPANDING.test(word) || word.startsWith('~')
+          ? word
+          : `${word}$`
+        : word.replaceAll(EXPANDING_ALL, '_'),
     );
     // The parser keeps no mark of a quoted word, so every reading of the redirections is checked.
     for (const view of redirectionViews(written)) {
@@ -135,6 +139,13 @@ function unreadableHazard(
     const [head = ''] = words;
     const program = programOf(words);
     if (head === '') continue;
+    // A segment the parser is unsure of, around a program with hazard forms, cannot be read.
+    if (
+      (!segment.wordsCertain || !segment.bracesCertain) &&
+      words.some((word) => hazardPrograms.has(baseName(word)))
+    ) {
+      return 'The parser is unsure where this command around a hazard program begins and ends.';
+    }
     if (SHELLS.has(baseName(program)) && segments[index - 1]?.separator === '|') {
       return `"${program}" reads the script piped into it, which 10db cannot read.`;
     }

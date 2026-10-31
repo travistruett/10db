@@ -304,7 +304,8 @@ function scan(command: string, from: number, substitution: boolean): Scan {
           !SPLITTING.test(wordMask.replaceAll('\0', '')) &&
           onlyOneWordExpansions(word);
         singleWords.push(...kept.map(() => one));
-        dynamicWords.push(...kept.map(() => wordDynamic));
+        // An unquoted brace expansion is text the command line did not spell out either.
+        dynamicWords.push(...kept.map(() => wordDynamic || parameters.includes('{')));
       }
     }
     split = false;
