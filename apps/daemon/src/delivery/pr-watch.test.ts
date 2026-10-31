@@ -760,6 +760,7 @@ describe('gh unavailable', () => {
       prCreate: (input) => h.gh.prCreate(input),
       repoAllowsAutoMerge: () => h.gh.repoAllowsAutoMerge(),
       prAutoMerge: (input) => h.gh.prAutoMerge(input),
+      prMerge: (input) => h.gh.prMerge(input),
       prStatus: () => Promise.reject(new GhError('failed', 'HTTP 502')),
     };
     const w = watcher({ ...h.ctx, gh: offline });
@@ -853,6 +854,7 @@ describe('restart and stop', () => {
       prCreate: (input) => h.gh.prCreate(input),
       repoAllowsAutoMerge: () => h.gh.repoAllowsAutoMerge(),
       prAutoMerge: (input) => h.gh.prAutoMerge(input),
+      prMerge: (input) => h.gh.prMerge(input),
       prStatus: (_input, call) =>
         new Promise((_resolve, reject) => {
           entered = true;
