@@ -2118,7 +2118,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       if (taken.kind !== 'held') return;
       opts.state.write((ctx) => releaseClaim(ctx, claim.id));
       opts.logger.info(
-        { workstreamId: id, inboxId: taken.inboxId },
+        { workstreamId: id },
         "migrations hazard held back: the branch can't take its base",
       );
     } finally {

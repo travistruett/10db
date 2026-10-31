@@ -42,6 +42,17 @@ export class GhError extends Error {
 export const PrState = { Open: 'OPEN', Closed: 'CLOSED', Merged: 'MERGED' } as const;
 export type PrState = (typeof PrState)[keyof typeof PrState];
 
+/**
+ * Whether GitHub can merge the pull request into its base as it stands. `UNKNOWN` is GitHub still
+ * working it out (right after a push or an Update branch), or an answer 10db does not know.
+ */
+export const PrMergeable = {
+  Mergeable: 'MERGEABLE',
+  Conflicting: 'CONFLICTING',
+  Unknown: 'UNKNOWN',
+} as const;
+export type PrMergeable = (typeof PrMergeable)[keyof typeof PrMergeable];
+
 export interface PullRequest {
   readonly url: string;
   readonly state: PrState;
@@ -56,6 +67,8 @@ export interface PullRequestStatus {
   readonly state: PrState;
   /** The commit the pull request's branch was at when GitHub last saw it; null when gh gives none. */
   readonly headSha: string | null;
+  /** Whether the pull request conflicts with its base, as GitHub last worked it out. */
+  readonly mergeable: PrMergeable;
   readonly checks: PullRequestChecks;
   readonly failingChecks: FailingCheckDto[];
 }
@@ -287,6 +300,7 @@ const PrStatusView = z.object({
     .string()
     .nullish()
     .transform((oid) => (oid === undefined || oid === null || oid === '' ? null : oid)),
+  mergeable: z.enum(PrMergeable).catch(PrMergeable.Unknown),
   statusCheckRollup: z.array(z.unknown().transform(rollupEntry)).nullish(),
 });
 
@@ -420,7 +434,7 @@ export function createGh(exec: GhExec): Gh {
         '-R',
         repo,
         '--json',
-        'url,state,statusCheckRollup,headRefOid',
+        'url,state,statusCheckRollup,headRefOid,mergeable',
       ];
       const out = await exec(args, call);
       if (out.exitCode !== 0 && (NO_PR.test(out.stderr) || PR_NOT_FOUND.test(out.stderr)))
@@ -431,6 +445,7 @@ export function createGh(exec: GhExec): Gh {
         url: view.url,
         state: view.state,
         headSha: view.headRefOid,
+        mergeable: view.mergeable,
         ...summariseChecks(view.statusCheckRollup ?? []),
       };
     },

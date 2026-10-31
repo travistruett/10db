@@ -328,6 +328,55 @@ describe('TaskDrawer', () => {
     });
   });
 
+  describe('notices', () => {
+    it('says what the task waits for, naming the other task, in full', async () => {
+      serve();
+      open({
+        workstream: workstreamDto({
+          state: 'RUNNING',
+          notice: {
+            key: 'claim-wait:hazard:migrations',
+            tone: 'info',
+            line: 'Waiting for hazard migrations: task "Beta" holds it',
+            body: 'Task "Beta" holds hazard migrations. Task "Alpha" is waiting for it and continues when it frees.',
+          },
+        }),
+      });
+      const d = await dialog();
+      expect(
+        within(d).getByText('Waiting for hazard migrations: task "Beta" holds it'),
+      ).toBeTruthy();
+      expect(
+        within(d).getByText(/Task "Beta" holds hazard migrations\. Task "Alpha"/),
+      ).toBeTruthy();
+    });
+
+    it("says what the task's batch stands in, with the steps to fix it", async () => {
+      serve();
+      const batch = batchDto({
+        notices: [
+          {
+            key: 'base-conflict',
+            tone: 'warning',
+            line: 'Conflicts with main: README.md',
+            body: 'main on origin changed these files:\n- README.md\n\nResolve it on GitHub.',
+          },
+        ],
+      });
+      open({ workstream: workstreamDto({ state: 'DONE', batchId: batch.id }), batch });
+      const d = await dialog();
+      expect(within(d).getByText('Conflicts with main: README.md')).toBeTruthy();
+      expect(within(d).getByText(/Resolve it on GitHub\./)).toBeTruthy();
+    });
+
+    it('shows no notice for a task with none', async () => {
+      serve();
+      open({ workstream: workstreamDto({ state: 'RUNNING' }) });
+      const d = await dialog();
+      expect(within(d).queryByTestId('task-notice')).toBeNull();
+    });
+  });
+
   describe('delivery', () => {
     it('shows the branch, the pull request and Abandon with what Abandon does', async () => {
       serve();

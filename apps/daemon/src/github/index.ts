@@ -2,6 +2,7 @@ export {
   createGh,
   GhError,
   GhFailure,
+  PrMergeable,
   PrState,
   createSystemGhExec,
   summariseChecks,

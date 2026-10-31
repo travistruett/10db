@@ -3976,7 +3976,6 @@ describe('the base before a task that holds the migrations hazard from its start
   it("gives the hazard back when the branch can't take its base, and the session starts without it", async () => {
     const { asked, migrationsBase } = recordingMigrationsBase({
       kind: 'held',
-      inboxId: mintId('InboxItem'),
       instruction: 'origin/main conflicts with this branch in README.md',
     });
     const workstream = await run(migrationsBase, ['api', 'migrations']);
