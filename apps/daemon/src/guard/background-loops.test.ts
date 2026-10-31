@@ -99,3 +99,40 @@ describe('startsEndlessBackgroundLoop', () => {
     expect(startsEndlessBackgroundLoop(command)).toBe(true);
   });
 });
+
+/** Commands the Bash tool runs in the background itself (`run_in_background`), with no `&` of their own. */
+const ENDLESS_IN_BACKGROUND: readonly (readonly [string, string])[] = [
+  ['a busy loop', 'while :; do :; done'],
+  ['yes', 'yes > /dev/null'],
+  ['yes in a loop', 'while true; do yes > /dev/null; done'],
+  ['cat of /dev/zero', 'cat /dev/zero > /dev/null'],
+  ['a script run by sh -c', "sh -c 'while :; do :; done'"],
+  ['a python busy loop', "python3 -c 'while True: pass'"],
+  ['a loop after work that ends', 'pnpm build; while :; do :; done'],
+  ['a loop behind a wrapper', 'nice -n 19 yes'],
+];
+
+const ENDING_IN_BACKGROUND: readonly (readonly [string, string])[] = [
+  ['a dev server, which the scan does not take for a loop', 'pnpm dev'],
+  ['the tests', 'pnpm test'],
+  ['a for over a list', 'for f in a b c; do build $f; done'],
+  ['a loop that reads input', 'while read line; do echo $line; done < file.txt'],
+  ['a counted loop', 'i=0; while [ $i -lt 5 ]; do i=$((i+1)); done'],
+  ['the words in a quoted argument', 'git commit -m "stop the while true loop"'],
+];
+
+describe('startsEndlessBackgroundLoop for a command the Bash tool runs in the background', () => {
+  it.each(ENDLESS_IN_BACKGROUND)('flags %s', (_name, command) => {
+    expect(startsEndlessBackgroundLoop(command)).toBe(false);
+    expect(startsEndlessBackgroundLoop(command, { background: true })).toBe(true);
+  });
+
+  it.each(ENDING_IN_BACKGROUND)('allows %s', (_name, command) => {
+    expect(startsEndlessBackgroundLoop(command, { background: true })).toBe(false);
+  });
+
+  it('reads a foreground command as before when the flag is off', () => {
+    expect(startsEndlessBackgroundLoop('while :; do :; done', { background: false })).toBe(false);
+    expect(startsEndlessBackgroundLoop('yes &', { background: false })).toBe(true);
+  });
+});

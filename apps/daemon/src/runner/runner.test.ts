@@ -2844,6 +2844,56 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
       expect(readdirSync(probe.tmpRoot)).toEqual([]);
     });
 
+    it('are stopped even when the session’s start time could not be read at `started`', async () => {
+      const probe = sandboxProbe(undefined, fakeProcesses());
+      engine = await createTestEngine(
+        { Alpha: [[turn]] },
+        {},
+        // One failed `ps` as the session started, as an overloaded Mac can give.
+        { laneSandbox: probe.laneSandbox, identifyProcess: () => Promise.resolve(null) },
+      );
+      reportPid();
+      const { workstream } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+
+      expect(ws(workstream.id).state).toBe('DONE');
+      expect(rows).toEqual([]);
+    });
+
+    it('logs a warning when the session’s processes cannot be watched, and again when they cannot be stopped', async () => {
+      const logs = captureLogs();
+      const probe = sandboxProbe(undefined, {
+        ...fakeProcesses(),
+        table: () => Promise.reject(new Error('ps: fork failed')),
+      });
+      engine = await createTestEngine(
+        { Alpha: [[turn]] },
+        {},
+        {
+          laneSandbox: probe.laneSandbox,
+          identifyProcess: () => Promise.resolve(null),
+          logger: logs.logger,
+        },
+      );
+      reportPid();
+      const { workstream } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+
+      const warnings = logs
+        .lines()
+        .filter((line) => line['level'] === 40)
+        .map((line) => String(line['msg']));
+      expect(warnings).toEqual(
+        expect.arrayContaining([
+          expect.stringMatching(/process could not be read/),
+          'the processes a lane session started could not be stopped',
+        ]),
+      );
+      expect(ws(workstream.id).state).toBe('DONE');
+    });
+
     it('are stopped when the session is stopped, as the daemon stopping does', async () => {
       const probe = sandboxProbe(undefined, fakeProcesses());
       engine = await createTestEngine(

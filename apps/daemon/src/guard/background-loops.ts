@@ -2,10 +2,12 @@ import { basename } from 'node:path';
 
 /**
  * Finds a command that starts something that never ends in the background: a `while :` loop, `yes`,
- * `cat /dev/zero` and the like, followed by an ampersand. Such a process outlives the command that
- * started it, and a lane that is stopped first leaves it burning a core (a lane once did this with
- * twelve busy loops). The scan is a heuristic over a command's text, not a shell: it reads quotes,
- * comments and operators, follows `sh -c` and `eval` scripts, and errs toward asking.
+ * `cat /dev/zero` and the like, followed by an ampersand or run by the Bash tool's own background
+ * flag. Such a process keeps a core busy while the lane goes on, and one behind an ampersand
+ * outlives the command that started it, so a lane that is stopped first leaves it burning (a lane
+ * once did this with twelve busy loops). The scan is a heuristic over a command's text, not a
+ * shell: it reads quotes, comments and operators, follows `sh -c` and `eval` scripts, and errs
+ * toward asking.
  */
 
 /** How many levels of `sh -c` and `eval` are followed; deeper than this counts as endless. */
@@ -277,11 +279,24 @@ function scan(text: string, depth: number): Scan {
   return { endless, flagged: flagged || (endless && background) };
 }
 
+export interface LoopScanOptions {
+  /**
+   * The Bash tool runs the whole command in the background itself (its `run_in_background` flag),
+   * so the lane goes on while the command runs, as with an `&`.
+   */
+  readonly background?: boolean;
+}
+
 /**
- * True when the command runs something that never ends and puts it in the background, so it would
- * outlive the command. A loop or program that runs in the foreground is not flagged: the command
- * ends when it does, or the tool's timeout stops it.
+ * True when the command runs something that never ends in the background: behind an `&` or
+ * `coproc`, where it outlives the command, or anywhere in a command the Bash tool runs in the
+ * background itself. A loop or program in a foreground command is not flagged: the lane waits for
+ * the command, which ends when the loop does or at the tool's timeout.
  */
-export function startsEndlessBackgroundLoop(command: string): boolean {
-  return scan(command, 0).flagged;
+export function startsEndlessBackgroundLoop(
+  command: string,
+  options: LoopScanOptions = {},
+): boolean {
+  const result = scan(command, 0);
+  return result.flagged || (options.background === true && result.endless);
 }

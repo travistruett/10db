@@ -883,6 +883,62 @@ describe('permission broker in a sandboxed lane', () => {
     expect(openCards()).toEqual([]);
   });
 
+  it('cards a loop the Bash tool runs in the background itself, offering only allow-once and deny', async () => {
+    const ws = seedWorkstream(base);
+    const command = 'while :; do :; done';
+    const pending = sandboxed(ws)(request('Bash', { command, run_in_background: true }));
+    const card = onlyOpenCard();
+    expect(card.options.map((o) => o.label)).toEqual(['allow_once', 'deny']);
+    expect(card.detail).toEqual({ toolName: 'Bash', summary: command });
+    expect(card.body).toContain(command);
+    expect(card.body).toContain('never ends');
+    expect(card.body).toContain('background flag');
+    inbox.answer(card.id, { choice: 'deny', note: 'no busy loops' });
+    const decision = await pending;
+    expect(decision.behavior).toBe('deny');
+    expect(decision.behavior === 'deny' ? decision.message : '').toMatch(/equivalent/i);
+  });
+
+  const BACKGROUND_FLAG: readonly {
+    readonly name: string;
+    readonly input: Record<string, unknown>;
+    readonly outcome: 'allow' | 'card';
+  }[] = [
+    {
+      name: 'yes, run in the background by the flag',
+      input: { command: 'yes > /dev/null', run_in_background: true },
+      outcome: 'card',
+    },
+    {
+      // Claude Code may read a string flag as the boolean; the broker asks rather than miss it.
+      name: 'a loop with the flag spelled as a string',
+      input: { command: 'while :; do :; done', run_in_background: 'true' },
+      outcome: 'card',
+    },
+    {
+      name: 'a loop with the flag off',
+      input: { command: 'while :; do :; done', run_in_background: false },
+      outcome: 'allow',
+    },
+    {
+      name: 'a dev server run in the background by the flag',
+      input: { command: 'pnpm dev', run_in_background: true },
+      outcome: 'allow',
+    },
+  ];
+
+  it.each(BACKGROUND_FLAG)('$outcome: $name', async ({ input, outcome }) => {
+    const ws = seedWorkstream(base);
+    const pending = sandboxed(ws)(request('Bash', input));
+    if (outcome === 'allow') {
+      expect(await pending).toEqual({ behavior: 'allow' });
+      expect(openCards()).toEqual([]);
+      return;
+    }
+    void pending.catch(() => undefined);
+    expect(onlyOpenCard().options.map((o) => o.label)).toEqual(['allow_once', 'deny']);
+  });
+
   const MAKE_MIGRATE: HazardDef = {
     name: 'schema',
     globs: ['db/**'],

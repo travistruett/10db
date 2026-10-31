@@ -327,6 +327,31 @@ function permissionAnswer(item: InboxItemDto): {
   };
 }
 
+/**
+ * Starts watching what a lane session's commands start. A start time `ps` could not read is left to
+ * the watch, which reads the process itself; while nothing watches the session it is logged, so
+ * what its commands leave running is never stopped unexplained.
+ */
+function watchLaneProcesses(
+  laneSession: LaneSession,
+  pid: number | null,
+  startedAt: string | null,
+  log: Logger,
+): void {
+  if (pid === null) {
+    log.warn({}, 'the lane session reported no process, so what its commands start is not watched');
+    return;
+  }
+  void laneSession.trackProcesses({ pid, startedAt }).then((watched) => {
+    if (!watched) {
+      log.warn(
+        { pid },
+        'the lane session’s process could not be read, so what its commands start is watched only once a later reading finds it',
+      );
+    }
+  });
+}
+
 /** Stops what a lane session's commands left running; a failure is logged, never thrown, so the session still ends. */
 async function stopLaneProcesses(
   laneSession: LaneSession | null,
@@ -1323,9 +1348,7 @@ export function createRunner(opts: RunnerOptions): Runner {
             const pidStart = await identify(event.pid);
             // From here on, what the session's commands start is watched, so it can be stopped when
             // the session ends, or after a daemon that died: see `LaneSession.trackProcesses`.
-            if (event.pid !== null && pidStart !== null) {
-              void laneSession?.trackProcesses({ pid: event.pid, startedAt: pidStart });
-            }
+            if (laneSession !== null) watchLaneProcesses(laneSession, event.pid, pidStart, log);
             opts.state.write((ctx) => {
               markSessionStarted(ctx, session.id, event.providerSessionId, event.pid, pidStart);
               // The session has the answer now. Kept as `answer`, a restart would send it again and

@@ -78,11 +78,17 @@ export interface LaneProcessWatchDeps extends LaneProcessDeps {
 export type LaneProcessSetup = Omit<LaneProcessWatchDeps, 'ledger' | 'onError' | 'places'>;
 
 export interface LaneProcessWatch {
-  /** Starts watching under the session's own process, sampling now and then on an interval. */
-  track(root: { readonly pid: number; readonly startedAt: string }): Promise<void>;
+  /**
+   * Starts watching under the session's own process, sampling now and then on an interval. With no
+   * start time (`ps` failed as the session started) the watch reads the process itself: each sample
+   * reads the table fresh until one lists the pid. Resolves true once the session's own process is
+   * known, false while no reading has listed it. Never rejects.
+   */
+  track(root: { readonly pid: number; readonly startedAt: string | null }): Promise<boolean>;
   /**
    * Stops sampling and stops every process the session started that still runs. Rejects when the
-   * machine's processes cannot be read, having stopped nothing it could not identify.
+   * machine's processes cannot be read, or no reading ever listed the session's own process, having
+   * stopped nothing it could not identify.
    */
   end(): Promise<void>;
   /** True while it remembers processes it has not stopped: tracked, and not ended successfully. */
@@ -94,6 +100,11 @@ const DEFAULT_GRACE_MS = 1_500;
 const DEFAULT_POLL_MS = 100;
 /** How many times the tree is read and signalled again: a stopped process can have forked just before. */
 const MAX_ROUNDS = 4;
+
+/** What a session's processes could not be watched for. */
+class LaneProcessWatchError extends Error {
+  override readonly name = 'LaneProcessWatchError';
+}
 
 function defaultSignal(target: number, signal: NodeJS.Signals): boolean {
   try {
@@ -234,6 +245,8 @@ export function createLaneProcessWatch(deps: LaneProcessWatchDeps): LaneProcessW
   const ownPid = deps.ownPid ?? process.pid;
   const sampleTable = deps.sampleTable ?? deps.table;
   let known: ProcessMember[] = [];
+  /** The pid of the session's own process while no reading has given its start time. */
+  let unread: number | null = null;
   let saved = '';
   /** Whether the session is being watched; `end` clears it while a sample may be in flight. */
   const watching = { on: false };
@@ -294,6 +307,22 @@ export function createLaneProcessWatch(deps: LaneProcessWatchDeps): LaneProcessW
     return found;
   }
 
+  /**
+   * Takes the session's own process from `rows` when its start time was not known; false while
+   * `rows` don't list it. The session's process is the daemon's child and runs until the session
+   * ends, and nothing is read for it after `end`, so its pid in a reading is its own.
+   */
+  function findRoot(rows: readonly ProcessRow[]): boolean {
+    if (unread === null) return true;
+    const pid = unread;
+    const row = rows.find((r) => r.pid === pid);
+    if (row === undefined) return false;
+    unread = null;
+    since = Date.parse(row.startedAt);
+    known = [{ pid: row.pid, startedAt: row.startedAt, pgid: row.pgid }];
+    return true;
+  }
+
   /** Who the session's processes are in `rows`: the known ones and theirs, and launchd's orphans. */
   async function membersIn(rows: readonly ProcessRow[]): Promise<ProcessMember[]> {
     const members = findMembers(rows, known, ownPid);
@@ -304,7 +333,7 @@ export function createLaneProcessWatch(deps: LaneProcessWatchDeps): LaneProcessW
   async function sample(table: ProcessTable): Promise<void> {
     try {
       const rows = await table();
-      if (!watching.on) return;
+      if (!watching.on || !findRoot(rows)) return;
       // What is gone is forgotten; what is new is remembered.
       const members = await membersIn(rows);
       // `end` may have run while the working dirs were read.
@@ -322,7 +351,8 @@ export function createLaneProcessWatch(deps: LaneProcessWatchDeps): LaneProcessW
     timer?.cancel();
     timer = timers.setTimeout(() => {
       if (!watching.on) return;
-      void sample(sampleTable).then(() => {
+      // A shared reading may predate the session's process, so while it is unread each is fresh.
+      void sample(unread === null ? sampleTable : deps.table).then(() => {
         schedule();
       });
     }, interval);
@@ -331,16 +361,28 @@ export function createLaneProcessWatch(deps: LaneProcessWatchDeps): LaneProcessW
   return {
     async track(root) {
       watching.on = true;
-      since = Date.parse(root.startedAt);
-      known = [{ pid: root.pid, startedAt: root.startedAt, pgid: 0 }];
+      if (root.startedAt === null) {
+        unread = root.pid;
+        known = [];
+      } else {
+        since = Date.parse(root.startedAt);
+        known = [{ pid: root.pid, startedAt: root.startedAt, pgid: 0 }];
+      }
       // A fresh reading: a shared one may predate the session's process, and would forget it.
       await sample(deps.table);
       schedule();
+      return unread === null;
     },
     async end() {
       watching.on = false;
       timer?.cancel();
       timer = null;
+      if (unread !== null) {
+        // The session's process is gone by now, so a pid listed now is never taken for it.
+        throw new LaneProcessWatchError(
+          'the session’s own process was never read, so what its commands left running could not be found',
+        );
+      }
       if (known.length === 0) return;
       // What a command left since the last sample. A table that can't be read is told of below.
       try {

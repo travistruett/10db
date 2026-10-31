@@ -50,9 +50,14 @@ export interface LaneSession {
   setProviderSession(id: string): void;
   /**
    * Starts watching the processes under the session's own process, the lane's commands among them.
+   * With no start time (`ps` could not read it) the watch reads the process itself, on each sample
+   * until it does. Resolves true once it knows the session's process, false while it does not.
    * Never rejects: a machine whose processes can't be read is told of in `endProcesses`.
    */
-  trackProcesses(root: { readonly pid: number; readonly startedAt: string }): Promise<void>;
+  trackProcesses(root: {
+    readonly pid: number;
+    readonly startedAt: string | null;
+  }): Promise<boolean>;
   /**
    * Stops every process the session's commands started that still runs, however the session ended.
    * Run it once the lane process is gone and before `dispose`. Rejects when it could not read the

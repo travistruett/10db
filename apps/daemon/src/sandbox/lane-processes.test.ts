@@ -9,6 +9,7 @@ import {
   reapLaneProcessLedgers,
   removeProcessLedger,
   type LaneProcessDeps,
+  type LaneProcessWatchDeps,
 } from './lane-processes';
 import type { ProcessRow, ProcessTable } from './process-table';
 
@@ -215,6 +216,80 @@ describe('a lane process watch', () => {
     expect(world.signals.some((s) => s.sig === 'SIGKILL')).toBe(true);
   });
 
+  describe('when the session’s start time could not be read as it started', () => {
+    /** Timers that only fire when the test says so. */
+    function manualTimers(): {
+      readonly ticks: (() => void)[];
+      readonly timers: NonNullable<LaneProcessWatchDeps['timers']>;
+    } {
+      const ticks: (() => void)[] = [];
+      return {
+        ticks,
+        timers: {
+          setTimeout(fn) {
+            ticks.push(fn);
+            return { cancel: () => undefined };
+          },
+        },
+      };
+    }
+    const settle = () => new Promise((r) => setImmediate(r));
+    const failingPs = (): Promise<readonly ProcessRow[]> =>
+      Promise.reject(new Error('ps: fork failed'));
+
+    it('reads it from its own fresh reading, and still stops everything the session started', async () => {
+      const loops = incident();
+      const watch = createLaneProcessWatch({ ...deps(), ledger: null });
+      expect(await watch.track({ pid: 200, startedAt: null })).toBe(true);
+      world.die(200);
+      world.die(300);
+      await watch.end();
+      for (const pid of loops) expect(world.has(pid)).toBe(false);
+    });
+
+    it('keeps reading fresh on each sample until one finds the session’s process, and watches it from then on', async () => {
+      const loops = incident();
+      let failures = 2;
+      const table: ProcessTable = () => (failures-- > 0 ? failingPs() : world.table());
+      const { ticks, timers } = manualTimers();
+      const watch = createLaneProcessWatch({
+        ...deps({ table }),
+        // A shared reading from before the session's process began: it would never find it.
+        sampleTable: () => Promise.resolve(world.rows.filter((r) => r.pid < 200)),
+        ledger: null,
+        timers,
+      });
+      expect(await watch.track({ pid: 200, startedAt: null })).toBe(false);
+      ticks.shift()?.();
+      await settle();
+      ticks.shift()?.();
+      await settle();
+      // The daemon restarts: claude and the command's shell die, and the loops go to launchd.
+      world.die(200);
+      world.die(300);
+      await watch.end();
+      for (const pid of loops) expect(world.has(pid)).toBe(false);
+    });
+
+    it('rejects at the end when no reading ever found the session’s process, having signalled nothing', async () => {
+      incident();
+      let readable = false;
+      const table: ProcessTable = () => (readable ? world.table() : failingPs());
+      const ledger = createProcessLedger(dir);
+      const watch = createLaneProcessWatch({
+        ...deps({ table }),
+        ledger,
+        timers: manualTimers().timers,
+      });
+      expect(await watch.track({ pid: 200, startedAt: null })).toBe(false);
+      // By the end the session's process is gone, so a pid listed then is never taken for it.
+      readable = true;
+      await expect(watch.end()).rejects.toThrow(/never read/);
+      expect(world.signals).toEqual([]);
+      expect(watch.pending()).toBe(false);
+    });
+  });
+
   it('does nothing when nothing was tracked, and twice is the same as once', async () => {
     const watch = createLaneProcessWatch({ ...deps(), ledger: null });
     await watch.end();
@@ -403,7 +478,8 @@ describe('a lane process watch', () => {
       ...deps({ table: () => Promise.reject(new Error('ps failed')) }),
       ledger: null,
     });
-    await expect(watch.track(ROOT)).resolves.toBeUndefined();
+    // The session's process is known by its start time, so the table is only needed later.
+    await expect(watch.track(ROOT)).resolves.toBe(true);
     await expect(watch.end()).rejects.toThrow('ps failed');
   });
 });
