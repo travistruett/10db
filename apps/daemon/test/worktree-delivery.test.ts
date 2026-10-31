@@ -225,13 +225,15 @@ describe('worktree mode through the daemon', () => {
     }
 
     // No worktree is left: git lists only the main checkout, and the root holds only the project's
-    // empty directory.
+    // empty directory beside the marker that keeps Spotlight out.
     const listed = parseWorktreeList(git(main, 'worktree', 'list', '--porcelain', '-z') + '\0');
     expect(listed.map((e) => e.path)).toEqual([realpathSync(main)]);
     const levels = readdirSync(worktrees.path);
     expect(levels).toHaveLength(1);
     const level = join(worktrees.path, levels[0] ?? '');
-    const projectDirs = readdirSync(level);
+    const entries = readdirSync(level);
+    expect(entries).toContain('.metadata_never_index');
+    const projectDirs = entries.filter((e) => e !== '.metadata_never_index');
     expect(projectDirs).toHaveLength(1);
     expect(readdirSync(join(level, projectDirs[0] ?? ''))).toEqual([]);
 
