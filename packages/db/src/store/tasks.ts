@@ -2,7 +2,9 @@ import {
   ACTIVE_STATES,
   BatchState,
   BoardStatus,
+  columnNameKey,
   ConflictError,
+  DEFAULT_BOARD_COLUMN,
   Delivery,
   EventType,
   InvalidError,
@@ -19,6 +21,7 @@ import {
   taskLandingFor,
   Title,
   WorkstreamState,
+  type BoardColumnId,
   WorkspaceMode,
   type ProjectDto,
   type ProjectId,
@@ -30,7 +33,7 @@ import {
 } from '@10db/contracts';
 import { and, asc, desc, eq, inArray, max, ne } from 'drizzle-orm';
 import * as schema from '../schema';
-import { getBoardColumn } from './board-columns';
+import { getBoardColumn, listBoardColumns } from './board-columns';
 import { getFlow } from './flows';
 import { getProject } from './projects';
 import type { DbReader, WriteContext } from './store';
@@ -209,6 +212,44 @@ export function insertTaskFromProposal(
   });
 }
 
+/** What a step hands over for a follow-up task: the rest comes from the task it was found in. */
+export interface FollowUpFields {
+  readonly title: string;
+  readonly description: string;
+  readonly acceptanceCriteria?: readonly string[];
+}
+
+/**
+ * Files a follow-up found while a step checked `sourceId`: an open task in the same project, parked
+ * in the Icebox column (the project's first column when the builder renamed it, the derived board
+ * when it has none), landing where the source lands and touching the same areas. Its description
+ * names the source. It depends on nothing, so it never holds the source up.
+ */
+export function insertFollowUpTask(
+  ctx: WriteContext,
+  sourceId: TaskId,
+  fields: FollowUpFields,
+): TaskDto {
+  const source = getTask(ctx.tx, sourceId);
+  const iceboxKey = columnNameKey(DEFAULT_BOARD_COLUMN);
+  const columns = listBoardColumns(ctx.tx, source.projectId);
+  const icebox = columns.find((c) => columnNameKey(c.name) === iceboxKey) ?? columns[0];
+  const origin = `Found while checking the task "${source.title}" (${source.id}).`;
+  return writeTask(ctx, source.projectId, {
+    landing: source.landing,
+    workspaceMode: placementFor(getProject(ctx.tx, source.projectId), undefined),
+    title: Title.parse(fields.title),
+    description: `${origin}\n\n${fields.description}`,
+    acceptanceCriteria: [...(fields.acceptanceCriteria ?? [])],
+    areas: source.areas,
+    dependsOn: [],
+    riskTags: [],
+    flowId: null,
+    proposalId: null,
+    boardColumnId: icebox?.id ?? null,
+  });
+}
+
 /** Writes a task the caller has already validated, at the end of the board, and announces it with its proposal, if any. */
 function writeTask(
   ctx: WriteContext,
@@ -217,6 +258,8 @@ function writeTask(
     readonly landing: TaskLanding;
     readonly workspaceMode: WorkspaceMode;
     readonly proposalId: ProposalId | null;
+    /** The human column to park the task in; absent, it is planned. */
+    readonly boardColumnId?: BoardColumnId | null;
   },
 ): TaskDto {
   const order = ctx.tx
@@ -237,6 +280,7 @@ function writeTask(
     ...landingColumns(config.landing),
     status: TaskStatus.Open,
     boardOrder: (order?.value ?? 0) + 1,
+    boardColumnId: config.boardColumnId ?? null,
     workspaceMode: config.workspaceMode,
     placementReason: null,
     createdAt: ctx.now,
