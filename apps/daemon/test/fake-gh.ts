@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import {
   GhError,
+  PrMergeable,
   PrState,
   summariseChecks,
   type CheckRollupEntry,
@@ -54,6 +55,7 @@ export class FakeGh implements Gh {
     {
       pr: { url: string; state: PrState };
       headSha: string | null;
+      mergeable: PrMergeable;
       body: string;
       create: PrCreateCall | null;
       rollup: readonly CheckRollupEntry[];
@@ -111,7 +113,12 @@ export class FakeGh implements Gh {
       () => {
         const found = this.byRef.get(input.ref);
         return found
-          ? { ...found.pr, headSha: found.headSha, ...summariseChecks(found.rollup) }
+          ? {
+              ...found.pr,
+              headSha: found.headSha,
+              mergeable: found.mergeable,
+              ...summariseChecks(found.rollup),
+            }
           : null;
       },
       this.failRead.get(input.ref),
@@ -178,6 +185,13 @@ export class FakeGh implements Gh {
     found.headSha = sha;
   }
 
+  /** Whether GitHub says the PR merges cleanly from now on; a new PR does. */
+  setMergeable(url: string, mergeable: PrMergeable): void {
+    const found = this.byRef.get(url);
+    if (!found) throw new Error(`no PR ${url}`);
+    found.mergeable = mergeable;
+  }
+
   /** The checks the PR's rollup shows from now on; a new PR has none. */
   setChecks(url: string, rollup: readonly CheckRollupEntry[]): void {
     const found = this.byRef.get(url);
@@ -195,7 +209,14 @@ export class FakeGh implements Gh {
 
   private add(branch: string, state: PrState, body: string, create: PrCreateCall | null): string {
     const url = `https://github.com/${this.repo}/pull/${String(this.next++)}`;
-    const entry = { pr: { url, state }, headSha: null, body, create, rollup: [] };
+    const entry = {
+      pr: { url, state },
+      headSha: null,
+      mergeable: PrMergeable.Mergeable,
+      body,
+      create,
+      rollup: [],
+    };
     this.byRef.set(branch, entry);
     this.byRef.set(url, entry);
     return url;

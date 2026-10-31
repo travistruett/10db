@@ -324,7 +324,9 @@ export class FakeAdapter implements SessionAdapter {
             return 'continue';
           }
           let decision: ToolDecision = { behavior: 'allow' };
+          // A guard `ask` reaches canUseTool past any allow rule, as Claude Code's hook ask does.
           if (
+            verdict.decision === 'ask' ||
             step.toolName === 'AskUserQuestion' ||
             !matchesAllowedTool(step.toolName, input, spec.allowedTools, spec.cwd)
           ) {

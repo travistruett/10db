@@ -1,5 +1,5 @@
-import type { InboxItemId, WorkstreamId } from '@10db/contracts';
-import { findOpenByFoldKey, getBatch, getTask, getWorkstreamRow } from '@10db/db';
+import type { WorkstreamId } from '@10db/contracts';
+import { getBatch, getTask, getWorkstreamRow } from '@10db/db';
 import type { BaseHeld, BaseUpdates } from './base-update';
 import type { DeliveryContext } from './context';
 
@@ -14,12 +14,7 @@ export type MigrationsBaseTake =
    */
   | { readonly kind: 'ready' }
   /** The branch can't take its base: the task gets no hazard. `instruction` tells its agent why. */
-  | {
-      readonly kind: 'held';
-      /** The builder's card about it; null when the agent can clear it itself. */
-      readonly inboxId: InboxItemId | null;
-      readonly instruction: string;
-    }
+  | { readonly kind: 'held'; readonly instruction: string }
   /** The session stopped first. */
   | { readonly kind: 'aborted' };
 
@@ -41,9 +36,9 @@ function instructionFor(held: BaseHeld, base: string): string {
   const notGiven = `and has not given you the migrations hazard: a migration generated now would be numbered before ${base}'s latest. Don't generate or write a migration.`;
   switch (held.reason) {
     case 'conflict':
-      return `${origin} conflicts with this branch in ${files}, so 10db couldn't bring it in ${notGiven} The builder has a card to resolve the conflict. Carry on with your other work, and call request_claim again with the same opId once it is resolved; if the migration is all that is left, ask the builder with ask_human to resolve it.`;
+      return `${origin} conflicts with this branch in ${files}, so 10db couldn't bring it in ${notGiven} The batch's task cards show the conflict. Carry on with your other work, and call request_claim again with the same opId once it is resolved; if the migration is all that is left, ask the builder with ask_human to resolve it.`;
     case 'untracked':
-      return `Files git doesn't track (${files}) are in the way of ${origin}'s newer commits, so 10db couldn't bring them in ${notGiven} Leave those files alone: the builder has a card about them. Carry on with your other work, and call request_claim again with the same opId once they are out of the way; if the migration is all that is left, ask the builder with ask_human to move them.`;
+      return `Files git doesn't track (${files}) are in the way of ${origin}'s newer commits, so 10db couldn't bring them in ${notGiven} Leave those files alone: the batch's task cards show them. Carry on with your other work, and call request_claim again with the same opId once they are out of the way; if the migration is all that is left, ask the builder with ask_human to move them.`;
     case 'uncommitted':
       return `Uncommitted changes in ${files} are in the way of ${origin}'s newer commits, so 10db couldn't bring them in ${notGiven} Commit those files with the commit tool, or undo your change to them, then call request_claim again with the same opId.`;
   }
@@ -70,13 +65,7 @@ export function createMigrationsBase(
     if (update === null || update.kind === 'aborted') return { kind: 'aborted' };
     if (update.kind !== 'not_merged' || update.held === undefined) return { kind: 'ready' };
     const { held } = update;
-    const card =
-      held.foldKey === null ? undefined : findOpenByFoldKey(db, batch.projectId, held.foldKey);
-    return {
-      kind: 'held',
-      inboxId: card?.id ?? null,
-      instruction: instructionFor(held, batch.baseBranch),
-    };
+    return { kind: 'held', instruction: instructionFor(held, batch.baseBranch) };
   }
 
   return {
