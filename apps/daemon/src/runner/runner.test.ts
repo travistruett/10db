@@ -5247,6 +5247,27 @@ describe('the review size decision', () => {
     expect(engine.adapter.prompts[2]?.prompt).toContain('qa');
   });
 
+  it('still skips QA for a change of Markdown alone after the judge skipped the review', async () => {
+    const { judge } = scriptedJudge({ kind: 'answered', choice: 'skip', confidence: 0.95 });
+    engine = await createTestEngine(
+      {
+        Alpha: [
+          planStep('op-size-0111'),
+          [write('src/api/a.md', '# A design'), commit('op-size-0112', ['src/api/a.md']), turn],
+        ],
+      },
+      {},
+      { judge },
+    );
+    const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'full', criteria: 4 });
+    await until(workstream.id, (s) => s === 'DONE');
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(ws(workstream.id).steps.map((s) => s.role)).toEqual(['plan', 'implement']);
+    // The plan and implement sessions only: neither the review nor QA ran.
+    expect(engine.adapter.prompts).toHaveLength(2);
+    expect(outcomes()).toEqual(['acted']);
+  });
+
   it('runs the review below the floor, recording that', async () => {
     const { judge } = scriptedJudge({ kind: 'answered', choice: 'skip', confidence: 0.5 });
     engine = await createTestEngine(

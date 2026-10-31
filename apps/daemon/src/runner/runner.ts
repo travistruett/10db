@@ -715,6 +715,17 @@ export function createRunner(opts: RunnerOptions): Runner {
     clearLease(ctx, id);
   }
 
+  /** Whether the commits since the batch's base touch Markdown files and nothing else. */
+  async function changesOnlyMarkdown(row: WorkstreamRow, checkout: string): Promise<boolean> {
+    if (row.baseHead === null) return false;
+    const files = await opts.git.filesChangedBetween(
+      checkout,
+      row.baseHead,
+      await opts.git.head(checkout),
+    );
+    return files.length > 0 && files.every((f) => f.endsWith('.md'));
+  }
+
   /**
    * QA checks a change as its user would, and a change of Markdown files alone has no behavior to
    * exercise. Whether that is so is known only after implement, from the paths the commits touched, so
@@ -734,17 +745,8 @@ export function createRunner(opts: RunnerOptions): Runner {
       row.baseHead === null
     )
       return row;
-    const checkout = checkoutOf(db, row);
-    const files = await opts.git.filesChangedBetween(
-      checkout,
-      row.baseHead,
-      await opts.git.head(checkout),
-    );
-    if (files.length === 0 || !files.every((f) => f.endsWith('.md'))) return row;
-    opts.logger.info(
-      { workstreamId: id, files: files.length },
-      'skipping the QA step: only docs changed',
-    );
+    if (!(await changesOnlyMarkdown(row, checkoutOf(db, row)))) return row;
+    opts.logger.info({ workstreamId: id }, 'skipping the QA step: only docs changed');
     return { ...row, steps: row.steps.filter((_, i) => i !== qaIndex) };
   }
 
@@ -2174,6 +2176,11 @@ export function createRunner(opts: RunnerOptions): Runner {
           ctl.gateAbort = null;
         }
       }
+      // With the review gone, the step that follows it is QA, which a change of Markdown alone skips.
+      const afterReview =
+        skipped !== null && move.kind === 'advance' ? row.steps[move.to + 1] : undefined;
+      const skipsQa =
+        afterReview?.role === StepRole.Qa && (await changesOnlyMarkdown(row, checkout));
       // The judge's call took time; a cancel that landed meanwhile must not be overwritten.
       if (stopRequested(ctl) === 'cancelled') {
         cancelNow(id, ctl.fence);
@@ -2181,10 +2188,15 @@ export function createRunner(opts: RunnerOptions): Runner {
       }
       // Shutdown cut the call short: record nothing, and recovery runs the gate again.
       if (stopRequested(ctl) === 'shutdown') return;
-      const steps =
-        skipped === null
-          ? row.steps
-          : row.steps.filter((_, i) => i !== (move.kind === 'advance' ? move.to : -1));
+      const dropped = new Set<number>();
+      if (skipped !== null && move.kind === 'advance') {
+        dropped.add(move.to);
+        if (skipsQa) {
+          dropped.add(move.to + 1);
+          opts.logger.info({ workstreamId: id }, 'skipping the QA step: only docs changed');
+        }
+      }
+      const steps = row.steps.filter((_, i) => !dropped.has(i));
       const next = move.kind === 'advance' ? steps[move.to] : undefined;
       if (move.kind === 'advance' && next) {
         opts.state.write((ctx) => {
