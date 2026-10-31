@@ -53,6 +53,13 @@ sandbox, not the scan, bounds what a script can do. A hazard in plain view still
 scan cannot see it no longer does (the known gap class of decision 2026-10-29). Writes outside a lane's claims
 still card through the watcher.
 
+Known gaps, each bounded by the sandbox and not chased further: an alias defined in the same command and then
+used, a script written and then run, `node`, `perl`, `ruby` and `python` with `-e` or `-c`, `make` targets, and
+`npm run <script>`. Past the first 16 words of a command line the hook and the guard still try every word that
+names a program with rules (a package manager, git, gh, a deploy tool), so a long wrapper prefix does not hide
+one. An unquoted brace expansion counts as unread text, and a segment the parser is unsure of around a hazard
+program asks.
+
 The inline `autoMode` lists name `"$defaults"` first. Claude Code's documentation (auto-mode-config) says a
 `soft_deny`, `hard_deny`, `allow` or `environment` array without it replaces that section's built-in rules
 (force push, `curl | bash`, production deploys, the exfiltration rule), so a list without it would have dropped
