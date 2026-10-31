@@ -308,16 +308,17 @@ describe('worktree batches', () => {
     );
   });
 
-  it('currentBatch is the newest unfinished batch, else the latest', () => {
+  it('currentBatch is the unfinished shared batch, else the newest finished one', () => {
     const shared = prProject();
     const only = newBatch(shared.id);
     expect(currentBatch(store.db, shared.id)?.id).toBe(only.id);
 
+    // A copy's unfinished batch is never current (task placement spec, P5).
     const many = worktreeProject();
     newWorktree(many.id, 'A');
     newWorktree(many.id, 'B');
-    const newest = newWorktree(many.id, 'C');
-    expect(currentBatch(store.db, many.id)?.id).toBe(newest.id);
+    newWorktree(many.id, 'C');
+    expect(currentBatch(store.db, many.id)).toBeNull();
 
     const finished = worktreeProject();
     newWorktree(finished.id, 'A');
