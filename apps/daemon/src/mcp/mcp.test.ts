@@ -22,6 +22,7 @@ import {
   releaseClaims,
   schema,
   seedProject,
+  setWorkstreamNotice,
   transitionBatch,
   type Store,
 } from '@10db/db';
@@ -361,10 +362,11 @@ describe('MCP tools in a worktree batch', () => {
       return;
     }
     await vi.waitFor(() => {
-      expect(listInbox(state.db, { states: ['OPEN'] }).map((i) => i.title)).toEqual([
+      expect(getWorkstream(state.db, b.workstream.id).notice?.line).toContain(
         `Waiting for hazard ${claim}`,
-      ]);
+      );
     });
+    expect(listInbox(state.db, { states: ['OPEN'] })).toEqual([]);
     state.write((ctx) => releaseClaims(ctx, a.workstream.id));
     expect((await second).json).toMatchObject({ granted: true });
   });
@@ -571,10 +573,13 @@ describe('MCP tools', () => {
       }),
     );
   const openCards = () => listInbox(state.db, { states: ['OPEN'] });
+  /** What the session's task shows while it waits for a claim. */
+  const noticeOf = (s: { workstream: { id: WorkstreamId } }) =>
+    getWorkstream(state.db, s.workstream.id).notice;
   const releaseHolder = (holder: ReturnType<typeof seedWorkstream>) =>
     state.write((ctx) => releaseClaims(ctx, holder.workstream.id));
 
-  it('waits for a claim another workstream holds, with a card naming the holder, and gets it when it frees', async () => {
+  it('waits for a claim another workstream holds, with a notice on its task naming the holder and no Inbox card, and gets it when it frees', async () => {
     const a = await seedSession(['api']);
     const other = seedWorkstream(base, { project: a.project, title: 'Beta', areas: ['ui'] });
     holdClaim(a.project, other, { kind: 'area', name: 'ui' });
@@ -590,13 +595,17 @@ describe('MCP tools', () => {
         settled = true;
       });
     await vi.waitFor(() => {
-      expect(openCards()).toHaveLength(1);
+      expect(noticeOf(a)).not.toBeNull();
     });
-    const [card] = openCards();
-    expect(card).toMatchObject({ kind: 'flag', title: 'Waiting for area ui' });
-    expect(card?.body).toContain('"Beta" holds area ui');
-    expect(card?.body).toContain('"Alpha" is waiting for it');
-    expect(card?.body).toContain('need the badge');
+    expect(noticeOf(a)).toMatchObject({
+      key: 'claim-wait:area:ui',
+      tone: 'info',
+      line: 'Waiting for area ui: task "Beta" holds it',
+    });
+    expect(noticeOf(a)?.body).toContain('"Beta" holds area ui');
+    expect(noticeOf(a)?.body).toContain('"Alpha" is waiting for it');
+    expect(noticeOf(a)?.body).toContain('need the badge');
+    expect(openCards()).toEqual([]);
     // Several poll intervals pass, and the call is still waiting.
     await new Promise((r) => setTimeout(r, 40));
     expect(settled).toBe(false);
@@ -607,6 +616,39 @@ describe('MCP tools', () => {
     expect(granted.json).toMatchObject({ granted: true });
     expect(activeClaims(state.db, a.workstream.id).map((c) => c.name)).toContain('ui');
     expect(openCards()).toEqual([]);
+    expect(noticeOf(a)).toBeNull();
+  });
+
+  it('shows the new holder when the claim changes hands, and nothing in the Inbox', async () => {
+    const a = await seedSession(['api']);
+    const first = seedWorkstream(base, { project: a.project, title: 'Beta', areas: ['ui'] });
+    const second = seedWorkstream(base, { project: a.project, title: 'Gamma', areas: ['ui'] });
+    holdClaim(a.project, first, { kind: 'area', name: 'ui' });
+    const pending = a.call('request_claim', {
+      opId: 'op-claim-hands',
+      kind: 'area',
+      name: 'ui',
+      reason: 'badge',
+    });
+    await vi.waitFor(() => {
+      expect(noticeOf(a)?.line).toContain('"Beta"');
+    });
+    state.write((ctx) => {
+      releaseClaims(ctx, first.workstream.id);
+      acquireClaims(ctx, {
+        projectId: a.project.id,
+        workstreamId: second.workstream.id,
+        requests: [{ kind: 'area', name: 'ui' }],
+        leaseExpiresAt: ctx.now,
+      });
+    });
+    await vi.waitFor(() => {
+      expect(noticeOf(a)?.line).toBe('Waiting for area ui: task "Gamma" holds it');
+    });
+    expect(openCards()).toEqual([]);
+    releaseHolder(second);
+    expect((await pending).json).toMatchObject({ granted: true });
+    expect(noticeOf(a)).toBeNull();
   });
 
   it('names the holder it waits on to the scheduler, and asks it to look again, until the wait ends', async () => {
@@ -621,7 +663,7 @@ describe('MCP tools', () => {
       reason: 'badge',
     });
     await vi.waitFor(() => {
-      expect(openCards()).toHaveLength(1);
+      expect(noticeOf(a)).not.toBeNull();
     });
     expect(claimWaits.awaitedHolders()).toEqual(new Set([other.workstream.id]));
     expect(waitsStarted).toBe(1);
@@ -640,7 +682,7 @@ describe('MCP tools', () => {
       reason: 'x',
     });
     await vi.waitFor(() => {
-      expect(openCards()).toHaveLength(1);
+      expect(noticeOf(a)).not.toBeNull();
     });
     for (const opId of ['op-dfold-b1', 'op-dfold-b2'])
       expect(
@@ -657,8 +699,9 @@ describe('MCP tools', () => {
       reason: 'x',
     });
     await vi.waitFor(() => {
-      expect(openCards().map((c) => c.title)).toEqual(['Waiting for area api']);
+      expect(noticeOf(b)?.line).toBe('Waiting for area api: task "Alpha" holds it');
     });
+    expect(openCards()).toEqual([]);
     sessionAbort.abort();
     await again;
   });
@@ -670,7 +713,7 @@ describe('MCP tools', () => {
     const args = { opId: 'op-claim-ui-4', kind: 'area', name: 'ui', reason: 'badge' };
     const pending = a.call('request_claim', args);
     await vi.waitFor(() => {
-      expect(openCards()).toHaveLength(1);
+      expect(noticeOf(a)).not.toBeNull();
     });
     releaseHolder(other);
     const first = await pending;
@@ -678,7 +721,7 @@ describe('MCP tools', () => {
     expect(again.json).toEqual(first.json);
   });
 
-  it('stops waiting, and withdraws the card, when the session ends', async () => {
+  it('stops waiting, and clears the notice, when the session ends', async () => {
     const a = await seedSession(['api']);
     const other = seedWorkstream(base, { project: a.project, title: 'Beta', areas: ['ui'] });
     holdClaim(a.project, other, { kind: 'area', name: 'ui' });
@@ -689,13 +732,14 @@ describe('MCP tools', () => {
       reason: 'badge',
     });
     await vi.waitFor(() => {
-      expect(openCards()).toHaveLength(1);
+      expect(noticeOf(a)).not.toBeNull();
     });
     sessionAbort.abort();
     const ended = await pending;
     expect(ended.isError).toBe(true);
     expect(ended.text).toContain('stopped waiting');
     expect(openCards()).toEqual([]);
+    expect(noticeOf(a)).toBeNull();
     expect(activeClaims(state.db, a.workstream.id).map((c) => c.name)).not.toContain('ui');
   });
 
@@ -713,14 +757,15 @@ describe('MCP tools', () => {
       heldBy: other.workstream.id,
     });
     expect(String(first.json?.['instruction'])).toContain('same opId');
-    const [card] = openCards();
-    expect(first.json?.['inboxId']).toBe(card?.id);
-    // Two retries at once, with the same opId, share the wait: one card, no error, one result. Their
+    expect(first.json?.['inboxId']).toBeNull();
+    expect(noticeOf(a)?.line).toContain('"Beta"');
+    // Two retries at once, with the same opId, share the wait: one notice, no error, one result. Their
     // slice outlasts the test, so a slow machine can't end it before the holder lets go.
     claimWaitSliceMs = 60_000;
     const retries = [a.call('request_claim', args), a.call('request_claim', args)];
     await new Promise((r) => setTimeout(r, 10));
-    expect(openCards()).toHaveLength(1);
+    expect(noticeOf(a)).not.toBeNull();
+    expect(openCards()).toEqual([]);
     releaseHolder(other);
     const settled = await Promise.all(retries);
     for (const r of settled) {
@@ -839,16 +884,16 @@ describe('MCP tools', () => {
       reason: 'x',
     });
     await new Promise((r) => setTimeout(r, 20));
-    expect(openCards()).toHaveLength(1);
+    expect(noticeOf(a)).not.toBeNull();
     releaseHolder(other);
     expect((await second).json).toMatchObject({ granted: true });
     expect(openCards()).toEqual([]);
   });
 
-  it('refuses at once, naming both tasks, when waiting would deadlock, even after the wait card is dismissed', async () => {
+  it('refuses at once, naming both tasks, when waiting would deadlock', async () => {
     const a = await seedSession(['api']);
     const b = await seedSession(['ui'], undefined, { project: a.project, title: 'Beta' });
-    // Alpha waits for ui, which Beta holds; the builder dismisses Alpha's card.
+    // Alpha waits for ui, which Beta holds.
     const waiting = a.call('request_claim', {
       opId: 'op-dlock-a',
       kind: 'area',
@@ -856,9 +901,8 @@ describe('MCP tools', () => {
       reason: 'x',
     });
     await vi.waitFor(() => {
-      expect(openCards()).toHaveLength(1);
+      expect(noticeOf(a)).not.toBeNull();
     });
-    for (const card of openCards()) inbox.answer(card.id, { choice: 'dismiss' });
     const refused = await b.call('request_claim', {
       opId: 'op-dlock-b',
       kind: 'area',
@@ -887,7 +931,7 @@ describe('MCP tools', () => {
       reason: 'x',
     });
     await vi.waitFor(() => {
-      expect(openCards()).toHaveLength(1);
+      expect(noticeOf(a)).not.toBeNull();
     });
     // Beta waits for api, which Alpha holds; Alpha waits on Gamma, so that is no deadlock yet.
     const beta = b.call('request_claim', {
@@ -897,7 +941,7 @@ describe('MCP tools', () => {
       reason: 'x',
     });
     await vi.waitFor(() => {
-      expect(openCards()).toHaveLength(2);
+      expect(noticeOf(b)).not.toBeNull();
     });
     // Gamma hands migrations to Beta in one write, before Alpha looks again.
     state.write((ctx) => {
@@ -910,13 +954,13 @@ describe('MCP tools', () => {
       });
     });
     expect((await alpha).json).toMatchObject({ granted: false, heldBy: b.workstream.id });
-    expect(openCards().map((c) => c.title)).toContain('Claim deadlock: hazard migrations');
-    expect(openCards().map((c) => c.title)).not.toContain('Waiting for hazard migrations');
+    expect(openCards().map((c) => c.title)).toEqual(['Claim deadlock: hazard migrations']);
+    expect(noticeOf(a)).toBeNull();
     sessionAbort.abort();
     await beta;
   });
 
-  it('a wait card left by a crashed daemon causes no refusal, and startup withdraws it', async () => {
+  it('a wait left by a crashed daemon causes no refusal, and startup clears its notice and withdraws its old card', async () => {
     const a = await seedSession(['api']);
     const other = seedWorkstream(base, { project: a.project, title: 'Beta', areas: ['ui'] });
     holdClaim(a.project, other, { kind: 'area', name: 'ui' });
@@ -933,13 +977,22 @@ describe('MCP tools', () => {
       name: 'ui',
       reason: 'x',
     });
+    state.write((ctx) =>
+      setWorkstreamNotice(ctx, other.workstream.id, {
+        key: 'claim-wait:area:api',
+        tone: 'info',
+        line: 'Waiting for area api: task "Alpha" holds it',
+        body: 'x',
+      }),
+    );
     await vi.waitFor(() => {
-      expect(openCards().map((c) => c.title)).toContain('Waiting for area ui');
+      expect(noticeOf(a)?.line).toBe('Waiting for area ui: task "Beta" holds it');
     });
     releaseHolder(other);
     expect((await waiting).json).toMatchObject({ granted: true });
     withdrawStaleClaimWaits(state, inbox);
     expect(getInboxItem(state.db, stale.id).state).toBe('CANCELLED');
+    expect(noticeOf(other)).toBeNull();
   });
 
   it('treats a project hazard name as a hazard claim whatever kind the agent sends', async () => {
@@ -957,8 +1010,9 @@ describe('MCP tools', () => {
       reason: 'need a table',
     });
     await vi.waitFor(() => {
-      expect(openCards().map((c) => c.title)).toEqual(['Waiting for hazard migrations']);
+      expect(noticeOf(a)?.line).toBe('Waiting for hazard migrations: task "Beta" holds it');
     });
+    expect(openCards()).toEqual([]);
     releaseHolder(other);
     expect((await waiting).json).toMatchObject({ granted: true });
     const free = await a.call('request_claim', {

@@ -354,13 +354,14 @@ export function createToolHandlers(
       try {
         let result = await Promise.race([wait.done, slice]);
         if (result === 'slice') {
-          const { heldBy, inboxId } = wait.state;
-          if (heldBy !== null && inboxId !== null)
+          const { heldBy } = wait.state;
+          if (heldBy !== null)
             return {
               granted: false,
               waiting: true,
               heldBy,
-              inboxId,
+              // The wait shows on the task's card, not in the Inbox: the builder is asked nothing.
+              inboxId: null,
               instruction: `Still waiting for ${kind} ${input.name}: task "${getTask(db, getWorkstream(db, heldBy).taskId).title}" holds it. Call request_claim again with the same opId to keep waiting, and edit nothing in it until a call returns granted: true.`,
             };
           // The wait ended as the slice did; its result is a moment away.
