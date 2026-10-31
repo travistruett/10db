@@ -145,7 +145,9 @@ without it):
   `xargs`/`parallel` in front of one, an uncertain parse, `eval`'s text), an endless background loop, a Monitor call
   with an input key beyond command, description and timeout_ms, WebFetch, WebSearch, the MCP resource tools and
   repo MCP tools, a read outside the allowed paths and a Claude Code configuration write. A Monitor command runs
-  inside the sandbox like Bash's (probed), so the guard judges it as a Bash command. The hook refuses a command
+  inside the sandbox like Bash's (probed), so the guard judges it as a Bash command, and an endless loop in one
+  asks, since it always runs beside the lane. Any tool the hook does not name as one the classifier may decide
+  (EnterWorktree, CronCreate, ScheduleWakeup, RemoteTrigger, a tool a later Claude Code adds) goes to the broker. The hook refuses a command
   that brings its own host list (`allowed_domains`). A hook `ask` reaches `canUseTool` in auto mode, as does a
   content-scoped `permissions.ask` rule (spike rows g and h). A Bash command that reaches a host the project does
   not list is refused by the sandbox proxy with no card (the builder accepted that; the briefing tells the lane to

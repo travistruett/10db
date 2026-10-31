@@ -13,7 +13,8 @@
 
 Every sandboxed lane starts its Claude Code session with `permissionMode: 'auto'` (`LANE_PERMISSION_MODE`),
 unless the builder turns off the app-wide setting "Lanes decide routine permissions with Claude Code's auto mode"
-(Settings, Lane permissions; the `lane_auto_mode` app setting, on by default, read when each session starts).
+(Settings, Lane permissions; the `lane_auto_mode` app setting, on by default, read when each session starts; a
+stored value that is not a boolean runs the lane in default mode and logs a warning).
 There is no environment switch. An unsandboxed session, which only scripted tests start, always runs in `default`.
 
 In auto mode a call no rule asks about is settled by Claude Code's classifier and never reaches `canUseTool`, so
@@ -27,7 +28,13 @@ what must still reach 10db is decided before the classifier. In order:
      is not written out, a word the shell fills in after a program with hazard forms, a wrapper or
      `xargs`/`parallel` in front of one, a segment the parser is unsure of, and `eval`'s words read again as a
      command);
-   - an endless background loop, whatever is claimed;
+   - an endless background loop, whatever is claimed (a Monitor command always counts as running beside the lane);
+   - every tool the classifier may not decide: it may decide Read, Glob, Grep, LS, the edit tools, NotebookRead,
+     Bash, Monitor, BashOutput, KillShell, TaskStop, TodoWrite, the Task* list tools, Task, Agent, Skill,
+     AskUserQuestion, ToolSearch, the plan-mode tools and `mcp__10db__*`, each still subject to its checks; any
+     other name (EnterWorktree, ExitWorktree, CronCreate, ScheduleWakeup, RemoteTrigger, PushNotification,
+     SendMessage, LSP, or one a later Claude Code adds) goes to the broker. A lane also lists the worktree, cron,
+     wake-up, remote-trigger and push tools in `disallowedTools`, since it never needs them;
    - a Monitor call with an input key beyond `command`, `description` and `timeout_ms` (`ws` opens a socket from
      Claude Code's own process), or with no command. A Monitor command itself runs inside the sandbox (row j),
      so it gets Bash's checks and no more: `readsOnlyOwnFiles` no longer gates it;
@@ -52,7 +59,9 @@ settings, never the repository's): `hard_deny` the project's full gate (the comm
 command is safe in the sentence) and CPU load on the builder's Mac, `soft_deny` paths outside the worktree. Both
 lists name `"$defaults"` first: Claude Code's documentation says a list without it replaces the built-in rules
 (force push, `curl | bash`, production deploys, the exfiltration rule), and the settings test pins it. The exact
-gate command is not in a sandboxed lane's `allowedTools`, because an allow rule settles a call before the
+gate command, and any `allowedCommands` prefix that covers it (`make` covers `make gate`), is not in a sandboxed
+lane's `allowedTools`, nor is the gate when it is also the changed-check command (that check then runs like any
+command), because an allow rule settles a call before the
 classifier and the hard deny would never fire; the changed-check command stays allowed. `CLAUDE_CODE_AUTO_MODE_MODEL`
 is not used (row f).
 
