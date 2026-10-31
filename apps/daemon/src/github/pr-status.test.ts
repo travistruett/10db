@@ -165,6 +165,7 @@ describe('Gh.prStatus', () => {
     return { gh: createGh(exec), seen };
   };
   const INPUT = { repo: 'acme/widgets', ref: 'https://github.com/acme/widgets/pull/8' };
+  const HEAD = '0123456789abcdef0123456789abcdef01234567';
 
   it('reads state and checks, and asks for the rollup', async () => {
     const { gh, seen } = view({
@@ -172,6 +173,7 @@ describe('Gh.prStatus', () => {
       stdout: JSON.stringify({
         url: INPUT.ref,
         state: 'OPEN',
+        headRefOid: HEAD,
         statusCheckRollup: [
           {
             __typename: 'CheckRun',
@@ -189,6 +191,7 @@ describe('Gh.prStatus', () => {
     await expect(gh.prStatus(INPUT, CALL)).resolves.toEqual({
       url: INPUT.ref,
       state: 'OPEN',
+      headSha: HEAD,
       checks: 'failing',
       failingChecks: [{ name: 'build', url: 'https://github.com/acme/widgets/actions/runs/1' }],
     });
@@ -199,8 +202,21 @@ describe('Gh.prStatus', () => {
       '-R',
       'acme/widgets',
       '--json',
-      'url,state,statusCheckRollup',
+      'url,state,statusCheckRollup,headRefOid',
     ]);
+  });
+
+  it("reads a merged pull request's head commit, and none when gh gives none", async () => {
+    const merged = view({
+      exitCode: 0,
+      stdout: JSON.stringify({ url: INPUT.ref, state: 'MERGED', headRefOid: HEAD }),
+    });
+    await expect(merged.gh.prStatus(INPUT, CALL)).resolves.toMatchObject({ headSha: HEAD });
+    const bare = view({
+      exitCode: 0,
+      stdout: JSON.stringify({ url: INPUT.ref, state: 'MERGED', headRefOid: '' }),
+    });
+    await expect(bare.gh.prStatus(INPUT, CALL)).resolves.toMatchObject({ headSha: null });
   });
 
   it('reads a pull request with no checks', async () => {
@@ -322,6 +338,7 @@ describe('Gh.prStatus', () => {
       await expect(gh.prStatus(INPUT, CALL)).resolves.toEqual({
         url: INPUT.ref,
         state: 'OPEN',
+        headSha: null,
         checks,
         failingChecks: failing,
       });

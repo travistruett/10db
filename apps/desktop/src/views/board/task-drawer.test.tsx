@@ -514,6 +514,63 @@ describe('TaskDrawer', () => {
       });
     });
 
+    describe('when the pull request closed without merging', () => {
+      const closedPr = () =>
+        batchDto({
+          state: 'SHIPPED',
+          prUrl: 'https://github.com/acme/widgets/pull/4',
+          pr: {
+            state: 'closed',
+            checks: 'passing',
+            failingChecks: [],
+            checkedAt: '2026-10-29T12:00:00.000Z',
+            unknownReason: null,
+          },
+        });
+
+      it('says so, and posts /reopen from Reopen task and /close from Close task', async () => {
+        const batch = closedPr();
+        const ws = workstreamDto({ state: 'DONE', batchId: batch.id });
+        const task = taskDto({ workstreamId: ws.id, status: 'done', boardStatus: 'blocked' });
+        const calls: string[] = [];
+        serve(
+          http.post(daemonUrl('/tasks/:taskId/reopen'), ({ params }) => {
+            calls.push(`reopen ${String(params['taskId'])}`);
+            return HttpResponse.json({ ...task, status: 'open' });
+          }),
+          http.post(daemonUrl('/tasks/:taskId/close'), ({ params }) => {
+            calls.push(`close ${String(params['taskId'])}`);
+            return HttpResponse.json({ ...task, status: 'cancelled' });
+          }),
+        );
+        open({ task, workstream: ws, batch, workstreams: [ws] });
+        const d = await dialog();
+        expect(within(d).getByText('The pull request closed without merging.')).toBeTruthy();
+        fireEvent.click(within(d).getByRole('button', { name: 'Reopen task' }));
+        await waitFor(() => {
+          expect(calls).toEqual([`reopen ${task.id}`]);
+        });
+        fireEvent.click(within(d).getByRole('button', { name: 'Close task' }));
+        await waitFor(() => {
+          expect(calls).toEqual([`reopen ${task.id}`, `close ${task.id}`]);
+        });
+      });
+
+      it('offers neither while the pull request is open', async () => {
+        const batch = batchDto({
+          state: 'SHIPPED',
+          prUrl: 'https://github.com/acme/widgets/pull/4',
+        });
+        const ws = workstreamDto({ state: 'DONE', batchId: batch.id });
+        const task = taskDto({ workstreamId: ws.id, status: 'done', boardStatus: 'in_review' });
+        serve();
+        open({ task, workstream: ws, batch, workstreams: [ws] });
+        const d = await dialog();
+        expect(within(d).queryByRole('button', { name: 'Reopen task' })).toBeNull();
+        expect(within(d).queryByRole('button', { name: 'Close task' })).toBeNull();
+      });
+    });
+
     it('a refusal to close names what blocks it', async () => {
       const ws = workstreamDto({ state: 'FAILED', failureReason: 'boom' });
       serve(

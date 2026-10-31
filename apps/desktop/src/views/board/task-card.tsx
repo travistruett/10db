@@ -1,4 +1,5 @@
 import {
+  BoardStatus,
   TaskStatus,
   type BatchDto,
   type TaskDto,
@@ -18,7 +19,7 @@ export interface TaskCardProps {
   /** The project's gate command, named while the task is checked. */
   readonly gateCommand?: string | null | undefined;
   /** Titles and statuses of the project's tasks, for the dependency marker. */
-  readonly peers: ReadonlyMap<TaskId, Pick<TaskDto, 'title' | 'status'>>;
+  readonly peers: ReadonlyMap<TaskId, Pick<TaskDto, 'title' | 'status' | 'boardStatus'>>;
   /** The pull request of the batch that shipped a finished task. */
   readonly pullRequest?: string | undefined;
   /** Where the work will land, for a project that delivers by pull request. */
@@ -39,10 +40,16 @@ function noteState(note: StartNote): TaskState {
   return { line: note.line, color: NOTE_COLOR[note.kind] };
 }
 
+/**
+ * The dependencies the task waits on before it can start, by the daemon's rule: one is finished once it
+ * is done, even with its pull request still open, or once a run shipped anyway has merged (in Done).
+ * The daemon holds the task's batch at cut time until the pull requests merge.
+ */
 function waitsOn(task: TaskDto, peers: TaskCardProps['peers']): string[] {
   return task.dependsOn.flatMap((id) => {
     const peer = peers.get(id);
-    return peer && peer.status !== TaskStatus.Done ? [peer.title] : [];
+    const finished = peer?.status === TaskStatus.Done || peer?.boardStatus === BoardStatus.Done;
+    return peer && !finished ? [peer.title] : [];
   });
 }
 

@@ -13,6 +13,7 @@ export * from './events';
 export * from './flows';
 export * from './folders';
 export * from './git-names';
+export * from './goals';
 export * from './handoff';
 export { HealthResponse } from './health';
 export * from './ids';

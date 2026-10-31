@@ -3,11 +3,13 @@ import {
   BatchState,
   BoardStatus,
   ConflictError,
+  Delivery,
   EventType,
   InvalidError,
   isTerminal,
   mintId,
   NotFoundError,
+  PullRequestState,
   TaskInput,
   TaskHasDependentsError,
   TaskMove,
@@ -17,6 +19,8 @@ import {
   taskLandingFor,
   Title,
   WorkstreamState,
+  WorkspaceMode,
+  type ProjectDto,
   type ProjectId,
   type ProposalId,
   type TaskConfig,
@@ -38,27 +42,40 @@ export interface BoardStatusInput {
   readonly workstreamState: WorkstreamState | null;
   /** The state of the batch the task's latest run ships in; null when it is in none. */
   readonly batchState?: BatchState | null;
+  /** That batch's pull request: its url, and the state last read (null before the first read). */
+  readonly pullRequest?: {
+    readonly url: string | null;
+    readonly state: PullRequestState | null;
+  } | null;
 }
 
 /**
  * Board column for a task (spec §5.1): Ready means deps done and nothing blocking. A finished task
- * is not Done until its pull request is open: while its batch ships it is In progress, and when the
- * ship failed it is Blocked, where the builder retries it.
+ * is not Done until its pull request has merged: while its batch ships it is In progress, once the
+ * pull request is open it is In review, and when the ship failed, or the pull request closed
+ * without merging, it is Blocked, where the builder decides.
  */
 export function deriveBoardStatus({
   taskStatus,
   depsDone,
   workstreamState,
   batchState = null,
+  pullRequest = null,
 }: BoardStatusInput): BoardStatus {
+  const shipped =
+    batchState === BatchState.Shipped && pullRequest?.url
+      ? pullRequestColumn(pullRequest.state)
+      : null;
   switch (taskStatus) {
     case TaskStatus.Done:
       if (batchState === BatchState.Shipping) return BoardStatus.InProgress;
       if (batchState === BatchState.Failed) return BoardStatus.Blocked;
-      return BoardStatus.Done;
+      return shipped ?? BoardStatus.Done;
     case TaskStatus.Cancelled:
       return BoardStatus.Done;
     case TaskStatus.Open:
+      // A run marked failed but shipped anyway is judged by its pull request like a finished one.
+      if (workstreamState === WorkstreamState.Failed && shipped) return shipped;
       break;
   }
   if (
@@ -71,6 +88,20 @@ export function deriveBoardStatus({
   }
   if (workstreamState !== null && !isTerminal(workstreamState)) return BoardStatus.InProgress;
   return depsDone ? BoardStatus.Ready : BoardStatus.Backlog;
+}
+
+/** Where a shipped pull request puts its tasks; one not yet read, or unreadable, is still open. */
+function pullRequestColumn(state: PullRequestState | null): BoardStatus {
+  switch (state) {
+    case PullRequestState.Merged:
+      return BoardStatus.Done;
+    case PullRequestState.Closed:
+      return BoardStatus.Blocked;
+    case PullRequestState.Open:
+    case PullRequestState.Unknown:
+    case null:
+      return BoardStatus.InReview;
+  }
 }
 
 /** The two columns that hold a task's landing. */
@@ -130,8 +161,24 @@ export function insertTask(ctx: WriteContext, projectId: ProjectId, input: TaskI
   return writeTask(ctx, projectId, {
     ...config,
     landing: config.landing ?? taskLandingFor(project.landing),
+    workspaceMode: placementFor(project, config.workspaceMode),
     proposalId: null,
   });
+}
+
+const NO_COPY_WITHOUT_PULL_REQUESTS =
+  'A separate copy needs pull request delivery; in this project every task works in your folder';
+
+/**
+ * Where a new task works: the placement it names, else the project's default. Only a project that
+ * delivers by pull request has separate copies, so a local one refuses a copy (task placement spec, P1).
+ */
+function placementFor(project: ProjectDto, named: WorkspaceMode | undefined): WorkspaceMode {
+  if (project.delivery !== Delivery.PullRequest) {
+    if (named === WorkspaceMode.Worktree) throw new InvalidError(NO_COPY_WITHOUT_PULL_REQUESTS);
+    return WorkspaceMode.Shared;
+  }
+  return named ?? project.workspaceMode;
 }
 
 /**
@@ -147,8 +194,10 @@ export function insertTaskFromProposal(
     readonly description: string;
   },
 ): TaskDto {
+  const project = getProject(ctx.tx, input.projectId);
   return writeTask(ctx, input.projectId, {
-    landing: taskLandingFor(getProject(ctx.tx, input.projectId).landing),
+    landing: taskLandingFor(project.landing),
+    workspaceMode: placementFor(project, undefined),
     title: Title.parse(input.title),
     description: input.description,
     acceptanceCriteria: [],
@@ -164,8 +213,9 @@ export function insertTaskFromProposal(
 function writeTask(
   ctx: WriteContext,
   projectId: ProjectId,
-  config: Omit<TaskConfig, 'landing'> & {
+  config: Omit<TaskConfig, 'landing' | 'workspaceMode'> & {
     readonly landing: TaskLanding;
+    readonly workspaceMode: WorkspaceMode;
     readonly proposalId: ProposalId | null;
   },
 ): TaskDto {
@@ -187,7 +237,8 @@ function writeTask(
     ...landingColumns(config.landing),
     status: TaskStatus.Open,
     boardOrder: (order?.value ?? 0) + 1,
-    workspaceMode: 'shared' as const,
+    workspaceMode: config.workspaceMode,
+    placementReason: null,
     createdAt: ctx.now,
     updatedAt: ctx.now,
   };
@@ -213,6 +264,10 @@ export function setTaskStatus(ctx: WriteContext, id: TaskId, status: TaskStatus)
   ctx.emit({ type: EventType.TaskChanged, entityType: 'task', entityId: id, data: { status } });
 }
 
+/**
+ * Whether every dependency is done: finished, or an open task whose failed run shipped anyway and
+ * whose pull request has merged.
+ */
 export function dependenciesDone(db: DbReader, taskId: TaskId): boolean {
   const pending = db
     .select({ id: schema.tasks.id })
@@ -220,7 +275,28 @@ export function dependenciesDone(db: DbReader, taskId: TaskId): boolean {
     .innerJoin(schema.tasks, eq(schema.tasks.id, schema.taskDeps.dependsOnId))
     .where(and(eq(schema.taskDeps.taskId, taskId), ne(schema.tasks.status, TaskStatus.Done)))
     .all();
-  return pending.length === 0;
+  return pending.every(({ id }) => mergedDespiteFailure(db, id));
+}
+
+/** Whether the task's latest run failed but shipped anyway, and its pull request has merged. */
+export function mergedDespiteFailure(db: DbReader, taskId: TaskId): boolean {
+  const latest = db
+    .select({
+      state: schema.workstreams.state,
+      batchState: schema.batches.state,
+      prState: schema.batches.prState,
+    })
+    .from(schema.workstreams)
+    .leftJoin(schema.batches, eq(schema.batches.id, schema.workstreams.batchId))
+    .where(eq(schema.workstreams.taskId, taskId))
+    .orderBy(desc(schema.workstreams.createdAt), desc(schema.workstreams.id))
+    .limit(1)
+    .get();
+  return (
+    latest?.state === WorkstreamState.Failed &&
+    latest.batchState === BatchState.Shipped &&
+    latest.prState === PullRequestState.Merged
+  );
 }
 
 function toTaskDto(db: DbReader, row: typeof schema.tasks.$inferSelect): TaskDto {
@@ -234,6 +310,8 @@ function toTaskDto(db: DbReader, row: typeof schema.tasks.$inferSelect): TaskDto
       id: schema.workstreams.id,
       state: schema.workstreams.state,
       batchState: schema.batches.state,
+      prUrl: schema.batches.prUrl,
+      prState: schema.batches.prState,
     })
     .from(schema.workstreams)
     .leftJoin(schema.batches, eq(schema.batches.id, schema.workstreams.batchId))
@@ -251,6 +329,8 @@ function toTaskDto(db: DbReader, row: typeof schema.tasks.$inferSelect): TaskDto
     riskTags: row.riskTags,
     flowId: row.flowId,
     landing: landingOf(row),
+    workspaceMode: row.workspaceMode,
+    placementReason: row.placementReason,
     status: row.status,
     boardOrder: row.boardOrder,
     boardColumnId: row.boardColumnId,
@@ -260,6 +340,7 @@ function toTaskDto(db: DbReader, row: typeof schema.tasks.$inferSelect): TaskDto
       depsDone: dependenciesDone(db, row.id),
       workstreamState: latest?.state ?? null,
       batchState: latest?.batchState ?? null,
+      pullRequest: latest ? { url: latest.prUrl, state: latest.prState } : null,
     }),
     workstreamId: latest?.id ?? null,
     createdAt: row.createdAt,
@@ -335,20 +416,88 @@ export function cancelTask(ctx: WriteContext, id: TaskId): TaskDto {
  * id and edges and drops out of the project's list. Its workstreams are left as they are, so the
  * Factory still shows the failed run, and nothing here touches the branch or worktree its batch holds.
  * A failed run released its claims when it failed. A task whose latest run is anything else is
- * refused: an unstarted one is removed, a live or cancelled run is cancelled or restarted. A task
+ * refused: an unstarted one is removed, a live or cancelled run is cancelled or restarted. A
+ * finished task, or a failed run shipped anyway, is closed only once its pull request closed
+ * without merging; while it is open or merged it is refused. A task
  * that open tasks wait on is refused, naming them. Closing a closed task answers it and emits nothing.
  */
 export function closeTask(ctx: WriteContext, id: TaskId): TaskDto {
   const task = getTask(ctx.tx, id);
   if (task.status === TaskStatus.Cancelled) return task;
-  if (task.status !== TaskStatus.Open)
-    throw new ConflictError(`Task ${task.title} is finished and can't be closed`);
-  if (latestRun(ctx.tx, id)?.state !== WorkstreamState.Failed)
+  if (task.status === TaskStatus.Done) {
+    if (!pullRequestClosed(ctx.tx, id))
+      throw new ConflictError(`Task ${task.title} is finished and can't be closed`);
+  } else if (latestRun(ctx.tx, id)?.state !== WorkstreamState.Failed) {
     throw new ConflictError(
       `Task ${task.title} hasn't failed, so it can't be closed; a task that never started is removed, and a running one is cancelled in Factory`,
     );
+  } else {
+    // A failed run shipped anyway is judged by its pull request, like a finished one.
+    const pr = latestPullRequest(ctx.tx, id);
+    if (pr && pr.state !== PullRequestState.Closed)
+      throw new ConflictError(
+        `Task ${task.title} shipped anyway and its pull request is ${pr.state === PullRequestState.Merged ? 'merged' : 'open'}, so it can't be closed`,
+      );
+  }
   refuseWhileOpenDependents(ctx, task, 'close');
   return retireTask(ctx, id);
+}
+
+/**
+ * Opens a finished task again after its pull request closed without merging, so it is planned work
+ * once more: Ready, or Backlog while a dependency is unfinished, and the builder starts it afresh.
+ * Its earlier run and batch stay as history. A task whose pull request is anything but closed is
+ * refused.
+ */
+export function reopenTask(ctx: WriteContext, id: TaskId): TaskDto {
+  const task = getTask(ctx.tx, id);
+  if (task.status !== TaskStatus.Done || !pullRequestClosed(ctx.tx, id))
+    throw new ConflictError(
+      `Task ${task.title} can be reopened only once its pull request closed without merging`,
+    );
+  ctx.tx
+    .update(schema.tasks)
+    .set({ status: TaskStatus.Open, updatedAt: ctx.now })
+    .where(eq(schema.tasks.id, id))
+    .run();
+  ctx.emit({
+    type: EventType.TaskChanged,
+    entityType: 'task',
+    entityId: id,
+    data: { status: TaskStatus.Open },
+  });
+  return getTask(ctx.tx, id);
+}
+
+/**
+ * Whether the task's latest run shipped in a batch whose pull request closed without merging. The
+ * latest run is taken first, batch or not, so a reopened task's newer run hides the old pull request.
+ */
+function pullRequestClosed(db: DbReader, taskId: TaskId): boolean {
+  return latestPullRequest(db, taskId)?.state === PullRequestState.Closed;
+}
+
+/**
+ * The pull request the task's latest run shipped in: its state last read (null before the first
+ * read). Null when that run is in no batch, or its batch has not shipped one.
+ */
+function latestPullRequest(
+  db: DbReader,
+  taskId: TaskId,
+): { readonly state: PullRequestState | null } | null {
+  const batch = db
+    .select({
+      state: schema.batches.state,
+      prUrl: schema.batches.prUrl,
+      prState: schema.batches.prState,
+    })
+    .from(schema.workstreams)
+    .leftJoin(schema.batches, eq(schema.batches.id, schema.workstreams.batchId))
+    .where(eq(schema.workstreams.taskId, taskId))
+    .orderBy(desc(schema.workstreams.createdAt), desc(schema.workstreams.id))
+    .limit(1)
+    .get();
+  return batch?.state === BatchState.Shipped && batch.prUrl ? { state: batch.prState } : null;
 }
 
 function latestRun(db: DbReader, taskId: TaskId) {
@@ -417,17 +566,38 @@ export function patchTask(ctx: WriteContext, id: TaskId, patch: TaskPatch): Task
         `${getTask(ctx.tx, id).title} has already started, so where its work lands is fixed`,
       );
   }
+  if (fields.workspaceMode !== undefined) checkPlacementCanChange(ctx.tx, getTask(ctx.tx, id));
   ctx.tx
     .update(schema.tasks)
     .set({
       ...fields,
       ...(landing === undefined ? {} : landingColumns(landing)),
+      // A placement the builder chose has no proposal behind it.
+      ...(fields.workspaceMode === undefined ? {} : { placementReason: null }),
       updatedAt: ctx.now,
     })
     .where(eq(schema.tasks.id, id))
     .run();
   ctx.emit({ type: EventType.TaskChanged, entityType: 'task', entityId: id });
   return getTask(ctx.tx, id);
+}
+
+/**
+ * A task's placement changes exactly while Start could start it (task placement spec, P3): it is
+ * open and its latest run, if any, is not active. Parking doesn't count, since a parked task has not
+ * started. Only a project that delivers by pull request has separate copies. The daemon adds the
+ * pending-join test on top.
+ */
+function checkPlacementCanChange(db: DbReader, task: TaskDto): void {
+  if (getProject(db, task.projectId).delivery !== Delivery.PullRequest)
+    throw new InvalidError(NO_COPY_WITHOUT_PULL_REQUESTS);
+  if (task.status !== TaskStatus.Open)
+    throw new ConflictError(`${task.title} is finished, so where it worked can't change`);
+  const run = latestRun(db, task.id);
+  if (run && ACTIVE_STATES.includes(run.state))
+    throw new ConflictError(
+      `${task.title} has started, so where it works can't change until its run ends`,
+    );
 }
 
 /** Below this gap a midpoint loses precision, so the project is renumbered first. */

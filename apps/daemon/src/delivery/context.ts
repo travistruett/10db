@@ -8,6 +8,7 @@ import type { Logger } from '../log';
 import type { Card } from './cards';
 import type { DeliveryJobs } from './jobs';
 import type { WorktreeDependencies } from './worktree-dependencies';
+import type { WorktreeGenerators } from './worktree-generated';
 
 export interface DeliveryLimits {
   /** Each fetch and gh call. */
@@ -40,6 +41,8 @@ export interface DeliveryContext {
   readonly worktreeRoot: string;
   /** Brings a new worktree's seeded packages in line with its lockfile. */
   readonly dependencies: WorktreeDependencies;
+  /** Regenerates the generated files of a worktree after a merge with its base took the base's. */
+  readonly generators: WorktreeGenerators;
   /** The login environment network calls run in (environment/buildNetworkEnv). */
   networkEnv(): Readonly<Record<string, string>>;
   /** Asks the scheduler to look for work: a batch opened, grew or reopened. */
@@ -75,6 +78,7 @@ function flagOf(projectId: ProjectId, card: Card) {
           },
         }
       : {}),
+    ...(card.options ? { options: card.options } : {}),
   };
 }
 

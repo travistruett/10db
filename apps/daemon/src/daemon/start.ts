@@ -9,6 +9,7 @@ import {
   PROTOCOL_VERSION,
   type InboxAnswer,
   type InboxItemDto,
+  type ProjectDto,
   type SystemCheckDto,
   type WorkstreamId,
 } from '@10db/contracts';
@@ -52,16 +53,20 @@ import { systemClock, type Clock } from '../clock';
 import {
   allCheckouts,
   createBaseUpdates,
+  createMigrationsBase,
   createBatchCardAnswers,
+  createBranchCardAnswers,
   createBatchStarter,
   createDeliveryJobs,
   createPrWatch,
   createShipper,
   createWorktreeDependencies,
+  createWorktreeGenerators,
   DEFAULT_DELIVERY_LIMITS,
   flagWorktreeMissing,
   flagWrongBranch,
   recoverBatches,
+  removeMergedBranches,
   resolvePnpm,
   subscribePrWatch,
   subscribeShipTrigger,
@@ -83,6 +88,7 @@ import { createGit, memoryPinStore, resolveGit } from '../git';
 import { createGh, createSystemGhExec, resolveGh, type Gh } from '../github';
 import { createInboxService } from '../inbox';
 import { createKeepAwake, systemCaffeinate, type CaffeinateSpawner } from '../keep-awake';
+import { createLaneTempDirs, createLoadMonitor, type LoadMonitorOptions } from '../load';
 import { createLogger, fileDestination, rotateLogFile, type Logger } from '../log';
 import { protectedPaths } from '../guard';
 import { createBuilderMcpHandler } from '../builder';
@@ -186,6 +192,11 @@ export interface DaemonOptions {
   ) => Promise<SystemCheckDto>;
   /** `false` turns the file watcher off (tests that don't need it). */
   readonly watch?: WatchFn | false;
+  /** What reads the load and the busy processes, and how much and how long counts as overloaded; tests replace them. */
+  readonly load?: Pick<
+    LoadMonitorOptions,
+    'read' | 'processes' | 'sampleMs' | 'overloadFactor' | 'sustainedMs' | 'clearFactor'
+  >;
 }
 
 export interface RunningDaemon {
@@ -342,6 +353,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   let answerBatchCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerAccountCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerGitCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
+  let answerBranchCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
 
   const inbox = createInboxService({
     state,
@@ -356,7 +368,23 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       answerBatchCard?.(item, answer);
       answerAccountCard?.(item, answer);
       answerGitCard?.(item, answer);
+      answerBranchCard?.(item, answer);
     },
+  });
+  // Sustained overload holds new lane sessions and gates and raises one card naming what is busy.
+  const laneTempDirs = createLaneTempDirs();
+  const loadGuard = createLoadMonitor({
+    state,
+    inbox,
+    clock,
+    logger: logger.child({ component: 'load' }),
+    daemonPid: process.pid,
+    tempRoot: sandboxTempRoot,
+    tempDirs: laneTempDirs,
+    onCleared: () => {
+      scheduler?.requestTick();
+    },
+    ...opts.load,
   });
   const git = createGit({
     onRefused: createGitRefusalHandler({ db: state.db, inbox, logger }),
@@ -401,6 +429,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     slots: gateSlots,
     clock,
     logger: logger.child({ component: 'gate' }),
+    hold: loadGuard,
   });
   const answerGit = createGitCardAnswers(git);
   answerGitCard = (item, answer) => {
@@ -410,6 +439,17 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     });
   };
   const deliveryJobs = createDeliveryJobs(logger.child({ component: 'delivery' }));
+  // What the install and the generators of a worktree run with: the gate's sandbox and login env.
+  const worktreeTools = {
+    gate: gateRunner,
+    clock,
+    dataDir: opts.dataDir,
+    sessionEnv: () => launcher.projectEnv(),
+    rules: (project: ProjectDto) => listPermissionRules(state.db, project.id, null),
+    checkouts: () => allCheckouts(state.db),
+    timeoutMs: limits.gateTimeoutMs,
+    resolvePnpm,
+  };
   const delivery: DeliveryContext = {
     state,
     git,
@@ -429,20 +469,15 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     worktreeRoot,
     // Not behind the gate slots: waiting out a long gate would hold the cut. Each cut downloads the
     // worktree's whole tree (the run's store is empty), so several cuts at once are several downloads.
-    dependencies: createWorktreeDependencies({
-      gate: gateRunner,
-      clock,
-      dataDir: opts.dataDir,
-      sessionEnv: () => launcher.projectEnv(),
-      rules: (project) => listPermissionRules(state.db, project.id, null),
-      checkouts: () => allCheckouts(state.db),
-      timeoutMs: limits.gateTimeoutMs,
-      resolvePnpm,
-    }),
+    dependencies: createWorktreeDependencies(worktreeTools),
+    generators: createWorktreeGenerators(worktreeTools),
   };
+  answerBranchCard = createBranchCardAnswers(delivery);
   const starter = createBatchStarter(delivery);
   // One for the runner and the shipper alike, so a batch's verify and shipping gates run in turn.
   const baseUpdates = createBaseUpdates(delivery);
+  // Before a task gets the migrations hazard, from request_claim or at its start.
+  const migrationsBase = createMigrationsBase(delivery, baseUpdates);
   const shipper = createShipper({
     ...delivery,
     gate,
@@ -452,6 +487,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     sessionEnv: () => launcher.projectEnv(),
     identifyProcess: (pid) => processes.identify(pid),
     isRunning: (id) => runner?.isRunning(id) ?? false,
+    load: loadGuard,
   });
   answerBatchCard = createBatchCardAnswers({
     retry: (id, note) => {
@@ -585,12 +621,15 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const createdRunner = createRunner({
     protectedPaths: guarded,
     laneSandbox,
+    hold: loadGuard,
+    laneTempDirs,
     state,
     adapter,
     inbox,
     git,
     gate,
     baseUpdates,
+    migrationsBase,
     clock,
     logger,
     dataDir: opts.dataDir,
@@ -640,6 +679,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       flagWorktreeMissing(inbox, batch, path);
     },
     awaitedHolders: () => claimWaits.awaitedHolders(),
+    held: () => loadGuard.overloaded,
   });
   scheduler = createdScheduler;
 
@@ -676,6 +716,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     ctx: delivery,
     clock,
     ...(opts.prWatchIntervalMs ? { intervalMs: opts.prWatchIntervalMs } : {}),
+    // A merged pull request's local branch goes in the round that reads the merge.
+    afterRound: (signal) => removeMergedBranches(delivery, signal),
   });
   const unsubscribePrWatch = subscribePrWatch(bus, prWatch);
 
@@ -752,6 +794,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       waitObserverFor: (id) => live.get(id)?.observer,
       sessionSignal: (id) => live.get(id)?.signal,
       claimWaits,
+      migrationsBase,
     }),
   });
   const wss = new WebSocketServer({ noServer: true });
@@ -795,6 +838,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   );
   createdScheduler.start();
   createdScheduler.requestTick();
+  loadGuard.start();
   prWatch.start();
   logger.info({ port, dataDir: opts.dataDir }, 'daemon started');
 
@@ -818,6 +862,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       // A probe in flight writes to the database; the runner can ask for another while it stops.
       await preparer.idle();
       await createdRunner.stopAll('shutdown');
+      // After the runner: a lane or gate held for load ends on its own stop, and nothing samples again.
+      loadGuard.stop();
       await preparer.idle();
       state.write((ctx) => {
         setAppSetting(ctx, CLEAN_SHUTDOWN_KEY, { at: ctx.now });

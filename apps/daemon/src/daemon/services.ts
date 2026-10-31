@@ -14,6 +14,7 @@ import {
 import {
   cancelTask,
   closeTask,
+  reopenTask,
   deleteBoardColumn,
   getMcpApproval,
   getProject,
@@ -284,6 +285,7 @@ export function createServices(deps: {
     removeTask: (id) => deps.state.write((ctx) => cancelTask(ctx, id)),
     getTask: (id) => getTask(db, id),
     closeTask: (id) => deps.state.write((ctx) => closeTask(ctx, id)),
+    reopenTask: (id) => deps.state.write((ctx) => reopenTask(ctx, id)),
     async patchTask(id, patch) {
       await refuseMissingLandingBranch(getProject(db, getTask(db, id).projectId), patch.landing);
       return deps.state.write((ctx) => patchTask(ctx, id, patch));

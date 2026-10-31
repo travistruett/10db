@@ -25,10 +25,11 @@ import {
   transitionBatch,
   type Store,
 } from '@10db/db';
-import type { ProjectDto, WorkstreamStep } from '@10db/contracts';
+import type { ProjectDto, WorkstreamId, WorkstreamStep } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { createTempRepo, isolatedGitEnv, seedWorkstream, tempDir } from '../../test/fixtures';
+import type { MigrationsBase, MigrationsBaseTake } from '../delivery';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit } from '../git';
 import { protectedPaths } from '../guard';
@@ -58,6 +59,10 @@ let sessionAbort = new AbortController();
 let claimWaitSliceMs = 60_000;
 /** The handler's claim waits, which the daemon also hands the scheduler. */
 let claimWaits: ClaimWaits;
+/** What bringing the base in before the migrations hazard answers; a test replaces it. */
+let takeMigrationsBase: MigrationsBase['take'];
+/** The workstreams the base was brought in for, in order. */
+let migrationsBaseTaken: WorkstreamId[] = [];
 /** How many times a wait started and asked the scheduler to look again. */
 let waitsStarted = 0;
 
@@ -91,6 +96,8 @@ beforeEach(async () => {
   state = createStateStore(test.store, createEventBus());
   inbox = createInboxService({ state, onParkedAnswer: () => undefined });
   waitsStarted = 0;
+  migrationsBaseTaken = [];
+  takeMigrationsBase = () => Promise.resolve({ kind: 'ready' });
   claimWaits = new ClaimWaits({
     onWait: () => {
       waitsStarted += 1;
@@ -108,6 +115,12 @@ beforeEach(async () => {
     claimPollMs: 5,
     get claimWaitSliceMs() {
       return claimWaitSliceMs;
+    },
+    migrationsBase: {
+      take: (id, signal) => {
+        migrationsBaseTaken.push(id);
+        return takeMigrationsBase(id, signal);
+      },
     },
   });
   server = serve({ fetch: handler, hostname: '127.0.0.1', port: 0 });
@@ -702,12 +715,13 @@ describe('MCP tools', () => {
     expect(String(first.json?.['instruction'])).toContain('same opId');
     const [card] = openCards();
     expect(first.json?.['inboxId']).toBe(card?.id);
-    // Two retries at once, with the same opId, share the wait: one card, no error, one result.
+    // Two retries at once, with the same opId, share the wait: one card, no error, one result. Their
+    // slice outlasts the test, so a slow machine can't end it before the holder lets go.
+    claimWaitSliceMs = 60_000;
     const retries = [a.call('request_claim', args), a.call('request_claim', args)];
     await new Promise((r) => setTimeout(r, 10));
     expect(openCards()).toHaveLength(1);
     releaseHolder(other);
-    claimWaitSliceMs = 60_000;
     const settled = await Promise.all(retries);
     for (const r of settled) {
       expect(r.isError).toBe(false);
@@ -717,6 +731,98 @@ describe('MCP tools', () => {
     expect(activeClaims(state.db, a.workstream.id).filter((c) => c.name === 'ui')).toHaveLength(1);
     expect(openCards()).toEqual([]);
     expect((await a.call('request_claim', args)).json).toEqual(settled[0]?.json);
+  });
+
+  describe('the migrations hazard', () => {
+    const migrations = { kind: 'hazard', name: 'migrations', reason: 'add a column' };
+    const holdsMigrations = (id: WorkstreamId) =>
+      activeClaims(state.db, id).some((c) => c.kind === 'hazard' && c.name === 'migrations');
+
+    it("is granted once the base is in the task's branch, and no other claim waits for that", async () => {
+      const a = await seedSession(['api']);
+      const ui = await a.call('request_claim', {
+        opId: 'op-mig-ui',
+        kind: 'area',
+        name: 'ui',
+        reason: 'x',
+      });
+      expect(ui.json).toMatchObject({ granted: true });
+      expect(migrationsBaseTaken).toEqual([]);
+      const granted = await a.call('request_claim', { opId: 'op-mig-1', ...migrations });
+      expect(granted.json).toMatchObject({ granted: true });
+      expect(migrationsBaseTaken).toEqual([a.workstream.id]);
+      expect(holdsMigrations(a.workstream.id)).toBe(true);
+    });
+
+    it("is held back while the branch can't take its base, with the card and what to do, and a retry with the same opId asks again", async () => {
+      const a = await seedSession(['api']);
+      const card = inbox.flag({
+        projectId: a.project.id,
+        workstreamId: null,
+        title: 'Batch "Greetings" conflicts with main',
+        body: 'README.md',
+      });
+      const instruction = 'origin/main conflicts with this branch in README.md, so 10db…';
+      takeMigrationsBase = () => Promise.resolve({ kind: 'held', inboxId: card.id, instruction });
+      const args = { opId: 'op-mig-held', ...migrations };
+      const held = await a.call('request_claim', args);
+      expect(held.json).toEqual({
+        granted: false,
+        waiting: false,
+        heldBy: null,
+        inboxId: card.id,
+        instruction,
+      });
+      expect(holdsMigrations(a.workstream.id)).toBe(false);
+      expect(activeClaims(state.db, a.workstream.id).map((c) => c.name)).toEqual(['api']);
+
+      // The builder resolves the conflict; the same call now gets the hazard.
+      takeMigrationsBase = () => Promise.resolve({ kind: 'ready' });
+      expect((await a.call('request_claim', args)).json).toMatchObject({ granted: true });
+      expect(migrationsBaseTaken).toEqual([a.workstream.id, a.workstream.id]);
+      expect(holdsMigrations(a.workstream.id)).toBe(true);
+    });
+
+    it('is held back with no card when the agent can clear the cause itself', async () => {
+      const a = await seedSession(['api']);
+      takeMigrationsBase = () =>
+        Promise.resolve({ kind: 'held', inboxId: null, instruction: 'Commit README.md first.' });
+      const held = await a.call('request_claim', { opId: 'op-mig-self', ...migrations });
+      expect(held.json).toMatchObject({
+        granted: false,
+        inboxId: null,
+        instruction: 'Commit README.md first.',
+      });
+      expect(holdsMigrations(a.workstream.id)).toBe(false);
+    });
+
+    it('answers "still waiting" while the base is still coming in, and a retry with the same opId joins it', async () => {
+      claimWaitSliceMs = 30;
+      const a = await seedSession(['api']);
+      let finish: (taken: MigrationsBaseTake) => void = () => undefined;
+      const merging = new Promise<MigrationsBaseTake>((resolve) => {
+        finish = resolve;
+      });
+      takeMigrationsBase = () => merging;
+      const args = { opId: 'op-mig-slow', ...migrations };
+      const first = await a.call('request_claim', args);
+      expect(first.json).toMatchObject({
+        granted: false,
+        waiting: true,
+        heldBy: null,
+        inboxId: null,
+      });
+      expect(String(first.json?.['instruction'])).toContain(
+        "Don't generate or write a migration yet",
+      );
+      expect(String(first.json?.['instruction'])).toContain('same opId');
+      claimWaitSliceMs = 60_000;
+      const retry = a.call('request_claim', args);
+      await new Promise((r) => setTimeout(r, 10));
+      finish({ kind: 'ready' });
+      expect((await retry).json).toMatchObject({ granted: true });
+      expect(holdsMigrations(a.workstream.id)).toBe(true);
+    });
   });
 
   it('a call with a new opId for a claim already waited for joins that wait', async () => {
