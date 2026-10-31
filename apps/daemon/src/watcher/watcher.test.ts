@@ -26,7 +26,10 @@ import {
   insertTask,
   insertWorkstream,
   listInbox,
+  getProject,
   patchBatch,
+  patchProject,
+  renewClaimLeases,
   transitionBatch,
   releaseClaims,
   seedProject,
@@ -931,6 +934,82 @@ describe('worktree checkouts', () => {
     expect(open).toHaveLength(1);
     expect(open[0]).toMatchObject({ title: 'Write outside every claim', body: 'src/ui/x.ts' });
     expect(open[0]?.detail).toMatchObject({ candidates: [shared.workstream.id] });
+  });
+
+  describe('a lane holding the whole-repo area in its own copy', () => {
+    const WHOLE_REPO = [
+      'tests/repo/src/git-hook-variables.test.ts',
+      'apps/daemon/test/fixtures.ts',
+      'tests/git-isolation.setup.ts',
+    ];
+    const SENSITIVE = ['.env.local', '.mcp.json', '.claude/settings.json'];
+    beforeEach(() => {
+      state.write((ctx) =>
+        patchProject(ctx, project.id, { areas: [{ name: 'repo', globs: ['**'] }] }),
+      );
+      project = getProject(base.db, project.id);
+    });
+
+    it('raises no card for a write inside its own claim', async () => {
+      const lane = inWorktree('Alpha', 'repo');
+      watcher.sync();
+      for (const rel of WHOLE_REPO) writeAt(lane.path, rel);
+      await watcher.flush();
+      expect(flags()).toEqual([]);
+    });
+
+    it('raises no card for a write while the claim lease is renewed', async () => {
+      const lane = inWorktree('Alpha', 'repo');
+      watcher.sync();
+      for (const rel of WHOLE_REPO) writeAt(lane.path, rel);
+      state.write((ctx) => {
+        renewClaimLeases(ctx, [lane.workstream.id], '2999-06-01T00:00:00.000Z');
+      });
+      await watcher.flush();
+      expect(flags()).toEqual([]);
+    });
+
+    it('still flags a write no held claim covers', async () => {
+      const lane = inWorktree('Alpha', 'repo');
+      const idle = inWorktree('Beta', 'repo');
+      state.write((ctx) => {
+        releaseClaims(ctx, lane.workstream.id);
+        releaseClaims(ctx, idle.workstream.id);
+      });
+      watcher.sync();
+      writeAt(lane.path, 'docs/stray.md');
+      writeAt(idle.path, 'docs/stray.md');
+      await watcher.flush();
+      expect(
+        flags()
+          .map((f) => f.body)
+          .sort(),
+      ).toEqual([`${lane.path}: docs/stray.md`, `${idle.path}: docs/stray.md`].sort());
+    });
+
+    it('still flags sensitive paths whatever the claims say', async () => {
+      const lane = inWorktree('Alpha', 'repo');
+      watcher.sync();
+      for (const rel of SENSITIVE) writeAt(lane.path, rel);
+      await watcher.flush();
+      expect(
+        flags()
+          .map((f) => f.body)
+          .sort(),
+      ).toEqual(SENSITIVE.map((rel) => `${lane.path}: ${rel}`).sort());
+    });
+  });
+
+  it('flags a sensitive write at a step end even inside the workstream’s own claim', async () => {
+    state.write((ctx) =>
+      patchProject(ctx, project.id, { areas: [{ name: 'repo', globs: ['**'] }] }),
+    );
+    const lane = inWorktree('Alpha', 'repo');
+    mkdirSync(join(lane.path, 'src'), { recursive: true });
+    writeFileSync(join(lane.path, 'src/ok.ts'), 'x');
+    writeFileSync(join(lane.path, '.mcp.json'), '{}');
+    expect(await watcher.stepEnd(lane.workstream.id)).toEqual(['.mcp.json']);
+    expect(flags().map((f) => f.body)).toEqual([`${lane.path}: .mcp.json`]);
   });
 
   it('reads the worktree at a step end, scoped to its batch', async () => {

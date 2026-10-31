@@ -326,20 +326,22 @@ export function createWatcher(deps: {
     const reported = paths.filter((rel) => changed.has(rel));
     const site = siteOf(project, batchId, entry.root);
     const { strays, candidates } = straysIn(project, batchId, reported, ACTIVE_STATES, null);
-    // Ignored or unreported paths that can change what runs are flagged whatever the claims say. Claude Code's
-    // staging directory, as a real directory, is its bookkeeping, and a sensitive directory holding only that is
-    // the `.claude/` a session start made for it. Each one dropped as bookkeeping is logged.
+    // Paths that can change what runs are flagged whatever the claims say, whether git reports them or not: a
+    // claim over the whole repository covers a `.mcp.json` in it too. Claude Code's staging directory, as a
+    // real directory, is its bookkeeping, and a sensitive directory holding only that is the `.claude/` a
+    // session start made for it. Each one dropped as bookkeeping is logged.
     const hidden: string[] = [];
     for (const rel of paths) {
-      if (changed.has(rel)) continue;
+      if (changed.has(rel) && !isSensitivePath(rel)) continue;
       if (!isSensitivePath(rel) && !isInsideClaudeCodeBookkeeping(rel)) continue;
       if (!existsAsEntry(join(entry.root, rel))) continue;
       const bookkeeping = bookkeepingAt(entry.root, rel);
       if (bookkeeping.length > 0) logBookkeeping(projectId, entry.root, rel, bookkeeping);
       else if (isSensitivePath(rel)) hidden.push(rel);
     }
-    raise(project, site, [...strays, ...hidden], candidates, null);
-    const outside = new Set(strays);
+    const flagged = [...new Set([...strays, ...hidden])];
+    raise(project, site, flagged, candidates, null);
+    const outside = new Set(flagged);
     raiseForeign(
       project,
       site,
@@ -414,8 +416,10 @@ export function createWatcher(deps: {
         STEP_END_CLAIM_STATES,
         workstreamId,
       );
-      raise(project, siteOf(project, batchId, root), strays, candidates, workstreamId);
-      return strays;
+      // A write that can change what runs is flagged even inside the workstream's own claim.
+      const flagged = [...new Set([...strays, ...changed.filter(isSensitivePath)])];
+      raise(project, siteOf(project, batchId, root), flagged, candidates, workstreamId);
+      return flagged;
     },
 
     flush,
