@@ -1,6 +1,7 @@
 # A lane's Monitor may name its own output file through a variable
 
 - **Date:** 2026-10-31
+- **Superseded by:** `2026-10-31-lanes-run-in-auto-mode-inside-the-sandbox.md`.
 - **Amends:** `2026-10-30-lane-monitor-of-its-own-task-output.md`
 
 ## Decision

@@ -366,7 +366,12 @@ function scanSegment(
   if (evaluatesUnread(head, words)) {
     return { reason: UnreadReason.Script, text };
   }
-  if (head === 'eval') return { reason: UnreadReason.Script, text };
+  if (head === 'eval') {
+    // eval runs its words as a script: read that script, or call it unread past the depth limit.
+    if (depth >= MAX_DEPTH) return { reason: UnreadReason.Script, text };
+    const found = scanScript(words.slice(1).join(' '), depth + 1, scanner);
+    if (found !== null) return found;
+  }
   if (SOURCING.has(head)) {
     const operand = sourceOperand(words);
     if (
