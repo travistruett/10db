@@ -126,6 +126,168 @@
         }
       ]
     },
+    "prRequired": {
+      "default": null,
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "state": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "passing",
+                "failing",
+                "none"
+              ]
+            },
+            "failing": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "link": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "jobId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "runId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "description": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "name",
+                  "link",
+                  "jobId",
+                  "runId",
+                  "description"
+                ]
+              }
+            },
+            "pending": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "link": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "jobId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "runId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "description": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "name",
+                  "link",
+                  "jobId",
+                  "runId",
+                  "description"
+                ]
+              }
+            }
+          },
+          "required": [
+            "state",
+            "failing",
+            "pending"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "prMergeBlocked": {
+      "default": null,
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "conflicts",
+            "behind"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "ciFixOf": {
+      "default": null,
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^bat_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "ciFixHead": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "ciStopped": {
+      "default": null,
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "limit",
+            "no_change",
+            "no_log",
+            "no_cut"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "gateExitCode": {
       "anyOf": [
         {
