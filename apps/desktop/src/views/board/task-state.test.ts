@@ -1,7 +1,7 @@
 import type { BatchDto } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { batchDto, stepDto, workstreamDto } from '../../test/fixtures';
-import { taskState } from './task-state';
+import { taskNotices, taskState } from './task-state';
 
 describe('taskState', () => {
   it.each([
@@ -197,5 +197,109 @@ describe('taskState', () => {
 
   it('says nothing without a workstream', () => {
     expect(taskState(undefined, undefined, null)).toBeNull();
+  });
+
+  describe('notices', () => {
+    const waiting = {
+      key: 'claim-wait:hazard:migrations',
+      tone: 'info',
+      line: 'Waiting for hazard migrations: task "Beta" holds it',
+      body: 'Task "Beta" holds hazard migrations.',
+    } as const;
+    const conflict = {
+      key: 'base-conflict',
+      tone: 'warning',
+      line: 'Conflicts with main: README.md',
+      body: 'x',
+    } as const;
+
+    it("adds the run's own notice to what it is doing, naming the other task", () => {
+      expect(
+        taskState(workstreamDto({ state: 'RUNNING', notice: waiting }), undefined, null),
+      ).toEqual({
+        line: `Building · ${waiting.line}`,
+        color: 'blue',
+      });
+    });
+
+    it("adds a batch's conflict to each of its tasks, in orange", () => {
+      const batch = batchDto({ state: 'OPEN', notices: [conflict] });
+      expect(taskState(workstreamDto({ state: 'RUNNING' }), batch, null)).toEqual({
+        line: `Building · ${conflict.line}`,
+        color: 'orange',
+      });
+      expect(taskState(workstreamDto({ state: 'QUEUED' }), batch, null)).toEqual({
+        line: `Queued · ${conflict.line}`,
+        color: 'orange',
+      });
+    });
+
+    it('says a finished task in a batch that conflicts has the conflict, though it has nothing else to say', () => {
+      const batch = batchDto({ state: 'OPEN', notices: [conflict] });
+      expect(taskState(workstreamDto({ state: 'DONE' }), batch, null)).toEqual({
+        line: conflict.line,
+        color: 'orange',
+      });
+    });
+
+    it('keeps the color of a task that needs the builder or has failed', () => {
+      const batch = batchDto({ state: 'OPEN', notices: [conflict] });
+      expect(taskState(workstreamDto({ state: 'WAITING_HUMAN' }), batch, null)?.color).toBe(
+        'yellow',
+      );
+      expect(taskState(workstreamDto({ state: 'PAUSED_LIMIT' }), batch, null)?.color).toBe(
+        'orange',
+      );
+    });
+
+    it('says nothing of a notice on a cancelled or failed run', () => {
+      const batch = batchDto({ state: 'OPEN', notices: [conflict] });
+      expect(taskState(workstreamDto({ state: 'CANCELLED' }), batch, null)).toBeNull();
+      expect(
+        taskState(workstreamDto({ state: 'FAILED', failureReason: null }), batch, null),
+      ).toEqual({ line: 'Failed', color: 'red' });
+    });
+
+    it('shows a pull request that waits for the builder beside what its checks say, until it merges or closes', () => {
+      const notice = { ...conflict, key: 'pull-request-merge', line: 'Pull request waits for you' };
+      expect(
+        taskState(
+          workstreamDto({ state: 'DONE' }),
+          { ...shipped({ checks: 'passing' }), notices: [notice] },
+          null,
+        ),
+      ).toEqual({
+        line: 'Pull request open · checks passing · Pull request waits for you',
+        color: 'orange',
+      });
+      for (const state of ['merged', 'closed'] as const)
+        expect(
+          taskState(
+            workstreamDto({ state: 'DONE' }),
+            { ...shipped({ state }), notices: [notice] },
+            null,
+          )?.line ?? '',
+        ).not.toContain('waits for you');
+    });
+
+    it('says nothing of a batch that ended without shipping', () => {
+      for (const state of ['ABANDONED', 'CLOSED'] as const)
+        expect(
+          taskState(
+            workstreamDto({ state: 'DONE' }),
+            batchDto({ state, notices: [conflict] }),
+            null,
+          ),
+        ).toBeNull();
+    });
+
+    it('lists the notices a task shows, the run’s first', () => {
+      const batch = batchDto({ state: 'OPEN', notices: [conflict] });
+      expect(taskNotices(workstreamDto({ state: 'RUNNING', notice: waiting }), batch)).toEqual([
+        waiting,
+        conflict,
+      ]);
+      expect(taskNotices(undefined, batch)).toEqual([]);
+    });
   });
 });

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ProjectDto, Title, WorkstreamDto } from './entities';
+import { Notice, ProjectDto, Title, WorkstreamDto } from './entities';
 import { BatchId, ProjectId, TaskId } from './ids';
 import {
   BatchFailure,
@@ -91,6 +91,8 @@ export const BatchDto = z.object({
   failure: z.enum(BatchFailure).nullable(),
   /** The real path of the batch's worktree; null in shared mode and once the worktree is removed. */
   worktreePath: z.string().nullable(),
+  /** What stands about the batch that every one of its tasks shows, such as a conflict with its base. */
+  notices: z.array(Notice).default([]),
   createdAt: Timestamp,
   updatedAt: Timestamp,
 });

@@ -127,6 +127,20 @@
       "when": 1793428367620,
       "tag": "0017_woozy_tyger_tiger",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1793474326563,
+      "tag": "0018_condemned_old_lace",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1793479756534,
+      "tag": "0019_panoramic_abomination",
+      "breakpoints": true
     }
   ]
 }

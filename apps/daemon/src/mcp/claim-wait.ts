@@ -3,13 +3,14 @@ import {
   InboxState,
   InvalidError,
   type ClaimKind,
-  type InboxItemDto,
   type InboxItemId,
+  type Notice,
   type ProjectId,
   type WorkstreamId,
 } from '@10db/contracts';
 import {
   acquireClaims,
+  clearWorkstreamNotices,
   copyHazardNames,
   findOpenByFoldKey,
   getProject,
@@ -17,6 +18,7 @@ import {
   getWorkstream,
   getWorkstreamRow,
   listInbox,
+  setWorkstreamNotice,
   type ClaimRow,
   type DbReader,
 } from '@10db/db';
@@ -51,11 +53,10 @@ export interface Asking {
   readonly pollMs: number;
 }
 
-/** Where a wait in progress stands: who holds the claim now, and its card. */
+/** Where a wait in progress stands: who holds the claim now. */
 export interface WaitState {
   readonly workstreamId: WorkstreamId;
   heldBy: WorkstreamId | null;
-  inboxId: InboxItemId | null;
 }
 
 /** A wait in progress and how it ends. */
@@ -64,7 +65,6 @@ export interface LiveWait {
   readonly done: Promise<ClaimResult>;
 }
 
-const WAIT_CARD = 'claim-wait';
 const DEADLOCK_CARD = 'claim-deadlock';
 
 /**
@@ -86,7 +86,7 @@ export class ClaimWaits {
     const key = `${a.workstreamId}:${a.kind}:${a.name}`;
     const existing = this.#live.get(key);
     if (existing) return existing;
-    const state: WaitState = { workstreamId: a.workstreamId, heldBy: null, inboxId: null };
+    const state: WaitState = { workstreamId: a.workstreamId, heldBy: null };
     const done = claimOrWait(a, state, this).finally(() => {
       this.#live.delete(key);
     });
@@ -135,10 +135,12 @@ export class ClaimWaits {
 }
 
 /**
- * Closes the wait cards a stopped daemon left open. Their waits ended with it, and a card that outlived
- * its wait would name a holder nobody waits for.
+ * Clears the waits a stopped daemon left showing on its tasks. Their waits ended with it, and a notice
+ * that outlived its wait would name a holder nobody waits for. Also closes the wait cards an earlier
+ * build raised, which a task's card shows instead now.
  */
 export function withdrawStaleClaimWaits(state: StateStore, inbox: InboxService): void {
+  state.write((ctx) => clearWorkstreamNotices(ctx));
   for (const item of listInbox(state.db, { states: [InboxState.Open] }))
     if (item.kind === InboxKind.Flag && item.detail?.['waitingFor'] !== undefined)
       inbox.withdraw(item.id);
@@ -163,10 +165,6 @@ function tryAcquire(a: Asking) {
   });
 }
 
-function waitDetail(a: Asking, heldBy: WorkstreamId) {
-  return { waitingFor: { kind: a.kind, name: a.name }, heldBy };
-}
-
 function waitBody(a: Asking, heldBy: WorkstreamId): string {
   const db = a.state.db;
   return [
@@ -174,6 +172,19 @@ function waitBody(a: Asking, heldBy: WorkstreamId): string {
     `Task "${taskTitleOf(db, a.workstreamId)}" is waiting for it and continues when it frees.`,
     `Reason given: ${a.reason}`,
   ].join(' ');
+}
+
+/**
+ * What the waiting task's card and drawer say, naming the task that holds the claim. No Inbox card: the
+ * builder is asked nothing, and the wait ends by itself when the holder lets go.
+ */
+function waitNotice(a: Asking, heldBy: WorkstreamId): Notice {
+  return {
+    key: `claim-wait:${a.kind}:${a.name}`,
+    tone: 'info',
+    line: `Waiting for ${a.kind} ${a.name}: task "${taskTitleOf(a.state.db, heldBy)}" holds it`,
+    body: waitBody(a, heldBy),
+  };
 }
 
 const deadlockKey = (a: Asking): string => `${DEADLOCK_CARD}:${a.workstreamId}:${a.kind}:${a.name}`;
@@ -213,8 +224,8 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
 }
 
 /**
- * Takes the claim, or waits for the holder to free it and takes it then. The wait has a card that names
- * the holder's task and says this task is waiting; it is withdrawn when the wait ends. When the holder
+ * Takes the claim, or waits for the holder to free it and takes it then. The wait shows a notice on the
+ * waiting task that names the holder's task; it is cleared when the wait ends. When the holder
  * itself waits, through any chain, for something this task holds (checked again whenever the holder
  * changes), neither would ever move: the claim is refused with a card saying so, and the agent decides.
  * Starting to wait on a holder, or on a new one, tells `waits`, so the scheduler can give that holder a lane.
@@ -230,18 +241,9 @@ async function claimOrWait(a: Asking, wait: WaitState, waits: ClaimWaits): Promi
   let heldBy = outcome.conflict.heldBy;
   if (waits.waitsOn(heldBy, a.workstreamId)) return deadlock(a, heldBy);
   withdrawDeadlock(a);
-  // A card a stopped daemon left with this fold key is rewritten to say who holds the claim now.
-  const card: InboxItemDto = a.inbox.flag({
-    projectId: a.projectId,
-    workstreamId: a.workstreamId,
-    title: `Waiting for ${a.kind} ${a.name}`,
-    body: waitBody(a, heldBy),
-    detail: waitDetail(a, heldBy),
-    foldKey: `${WAIT_CARD}:${a.workstreamId}:${a.kind}:${a.name}`,
-    refresh: true,
-  });
+  const shown = waitNotice(a, heldBy);
+  a.state.write((ctx) => setWorkstreamNotice(ctx, a.workstreamId, shown));
   wait.heldBy = heldBy;
-  wait.inboxId = card.id;
   waits.waitingOn();
   try {
     while (!outcome.ok) {
@@ -255,16 +257,18 @@ async function claimOrWait(a: Asking, wait: WaitState, waits: ClaimWaits): Promi
         heldBy = outcome.conflict.heldBy;
         wait.heldBy = heldBy;
         if (waits.waitsOn(heldBy, a.workstreamId)) return deadlock(a, heldBy);
-        a.inbox.reword(card.id, waitBody(a, heldBy), {
-          options: card.options,
-          detail: waitDetail(a, heldBy),
-        });
+        const now = waitNotice(a, heldBy);
+        a.state.write((ctx) => setWorkstreamNotice(ctx, a.workstreamId, now));
         waits.waitingOn();
       }
     }
   } finally {
     wait.heldBy = null;
-    a.inbox.withdraw(card.id);
+    // Only this wait's own notice: a wait of the same task for another claim may have replaced it.
+    a.state.write((ctx) => {
+      if (getWorkstreamRow(ctx.tx, a.workstreamId).notice?.key === shown.key)
+        setWorkstreamNotice(ctx, a.workstreamId, null);
+    });
   }
   return grantedFrom(a, outcome.claims);
 }

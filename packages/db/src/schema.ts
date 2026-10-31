@@ -29,10 +29,14 @@ import type {
   InboxOption,
   InboxState,
   InboxTarget,
+  JudgeCallId,
+  JudgeDecision,
+  JudgeOutcome,
   McpVerdict,
   ModelPin,
   ModelProfileId,
   NextAction,
+  Notice,
   PermissionRuleId,
   PersonaId,
   PersonId,
@@ -266,6 +270,11 @@ export const batches = sqliteTable(
     ciFixHead: text('ci_fix_head'),
     /** Why 10db stopped fixing the pull request's failing checks. */
     ciStopped: text('ci_stopped').$type<CiStopped>(),
+    /** What stands about the batch that its tasks show (a conflict with the base); no card is raised for it. */
+    notices: text('notices', { mode: 'json' })
+      .$type<Notice[]>()
+      .notNull()
+      .default(sql`'[]'`),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -428,6 +437,8 @@ export const workstreams = sqliteTable(
     lastActivityAt: text('last_activity_at'),
     /** When the builder put the queued workstream first in line; cleared once it gets a lane. */
     runNextAt: text('run_next_at'),
+    /** What the run waits for besides the builder (another task's claim); cleared when the wait ends. */
+    notice: text('notice', { mode: 'json' }).$type<Notice>(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -795,3 +806,28 @@ export const aaModels = sqliteTable('aa_models', {
   data: text('data', { mode: 'json' }).$type<AaModelDto>().notNull(),
   updatedAt: text('updated_at').notNull(),
 });
+
+/**
+ * Every question 10db asked a fast model through OpenRouter, and what came of it. `state` and
+ * `question` are the text 10db built (task text and a capped diff), never a secret. The outcome is
+ * written when the call is logged and may be replaced once by the decision that acted on the answer.
+ */
+export const judgeCalls = sqliteTable(
+  'judge_calls',
+  {
+    id: text('id').$type<JudgeCallId>().primaryKey(),
+    decision: text('decision').$type<JudgeDecision>().notNull(),
+    model: text('model').notNull(),
+    state: text('state').notNull(),
+    question: text('question').notNull(),
+    answer: text('answer'),
+    confidence: real('confidence'),
+    outcome: text('outcome').$type<JudgeOutcome>().notNull(),
+    latencyMs: integer('latency_ms'),
+    costUsd: real('cost_usd'),
+    workstreamId: text('workstream_id').$type<WorkstreamId>(),
+    taskId: text('task_id').$type<TaskId>(),
+    createdAt: createdAt(),
+  },
+  (t) => [index('judge_calls_created_idx').on(t.createdAt)],
+);

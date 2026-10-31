@@ -9,6 +9,7 @@ import {
   listInbox,
   listWorkstreams,
   patchProject,
+  setBatchNotice,
   setAppSetting,
   transitionBatch,
 } from '@10db/db';
@@ -25,7 +26,8 @@ import {
   retireWorktree,
   type DeliveryContext,
 } from './index';
-import { baseCards } from './cards';
+import { baseConflictKey } from './cards';
+import { baseNotices } from './notices';
 import { raise } from './context';
 import { INSTALL_SUMMARY } from './worktree-dependencies';
 
@@ -265,7 +267,7 @@ describe("the base, brought into a worktree batch's branch before the shipping g
     expect(h.cards()).toEqual([]);
   });
 
-  it('ships the branch as it is when it conflicts with main; its conflict card goes with the worktree', async () => {
+  it("ships the branch as it is when it conflicts with main, with no card; the tasks say the pull request conflicts once the worktree's own notice goes", async () => {
     const { batch, ws } = await opened();
     const head = await commitIn(batch, 'README.md');
     h.teammatePush('main', 'README.md', '# theirs\n');
@@ -274,26 +276,41 @@ describe("the base, brought into a worktree batch's branch before the shipping g
 
     expect(shipped.state).toBe('SHIPPED');
     expect(onOrigin(batch.branch)).toBe(head);
-    // Raised by the shipping gate, then withdrawn with the worktree: the pull request shows it now.
-    const card = h.only(
-      listInbox(h.store.db, {}).filter(
-        (i) => i.title === `Batch "${batch.title}" conflicts with main`,
-      ),
-    );
-    expect(card.state).toBe('CANCELLED');
-    expect(h.cards()).toEqual([]);
+    // The shipping gate meets the conflict and raises nothing: the pull request shows it now.
+    expect(listInbox(h.store.db, {})).toEqual([]);
+    const [notice, ...rest] = getBatch(h.store.db, batch.id).notices;
+    expect(rest).toEqual([]);
+    expect(notice).toMatchObject({
+      key: 'base-conflict',
+      tone: 'warning',
+      line: 'Pull request conflicts with main',
+    });
+    expect(notice?.body).toContain('Update branch');
+    expect(notice?.body).not.toContain(batch.worktreePath ?? 'no worktree');
   });
 
-  it("withdraws the batch's base cards when its worktree goes", async () => {
+  it("clears the batch's base notices, and closes the cards an earlier build raised, when its worktree goes", async () => {
     const { batch, ws } = await opened();
     const path = pathOf(batch);
-    raise(h.inbox, h.project.id, baseCards.conflict(batch, path, ['README.md']));
-    raise(h.inbox, h.project.id, baseCards.kept(batch, path, ['build/']));
-    expect(h.cards()).toHaveLength(2);
+    h.state.write((w) => {
+      setBatchNotice(w, batch.id, baseNotices.conflict(batch, path, ['README.md']));
+      setBatchNotice(w, batch.id, baseNotices.kept(batch, path, ['build/']));
+    });
+    raise(h.inbox, h.project.id, {
+      title: 'Batch conflicts with main',
+      body: 'x',
+      foldKey: baseConflictKey(batch.id),
+    });
+    expect(getBatch(h.store.db, batch.id).notices).toHaveLength(2);
+    expect(h.cards()).toHaveLength(1);
     h.settle(ws.id, 'DONE');
     h.shipper.checkBatch(batch.id);
     await h.jobs.idle();
-    expect(getBatch(h.store.db, batch.id)).toMatchObject({ state: 'CLOSED', worktreePath: null });
+    expect(getBatch(h.store.db, batch.id)).toMatchObject({
+      state: 'CLOSED',
+      worktreePath: null,
+      notices: [],
+    });
     expect(h.cards()).toEqual([]);
   });
 

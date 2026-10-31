@@ -11,6 +11,7 @@ import {
   isTerminal,
   mintId,
   NotFoundError,
+  parseFindings,
   PullRequestState,
   TaskInput,
   TaskHasDependentsError,
@@ -255,6 +256,54 @@ export function insertFollowUpTask(
     flowId: null,
     proposalId: null,
     boardColumnId: icebox?.id ?? null,
+  });
+}
+
+/** What a step that rejected the work at the retry limit hands over: who it was and its notes. */
+export interface RetryLimitFindings {
+  /** The role that rejected, as a person reads it: "review" or "QA". */
+  readonly role: string;
+  /** The rejection's own notes, without any follow-up list 10db appended. */
+  readonly notes: string;
+}
+
+const LIMIT_TITLE_PREFIX = 'Resolve the open findings of ';
+const TITLE_MAX = 200;
+
+/**
+ * Files the findings of a rejection that used up the retry limit, for a task that shipped with them
+ * open: a task in the project's Ready column (planned, no human column), landing where the source
+ * landed and touching the same areas, with one acceptance criterion per finding. Its description
+ * names the source. It depends on nothing, so it never holds the source up.
+ */
+export function insertRetryLimitFollowUp(
+  ctx: WriteContext,
+  sourceId: TaskId,
+  found: RetryLimitFindings,
+): TaskDto {
+  const source = getTask(ctx.tx, sourceId);
+  const findings = parseFindings(found.notes);
+  const quoted = `"${source.title}"`;
+  const title = `${LIMIT_TITLE_PREFIX}${quoted}`;
+  return writeTask(ctx, source.projectId, {
+    landing: source.landing,
+    workspaceMode: placementFor(getProject(ctx.tx, source.projectId), undefined),
+    // Cut by characters, so the title stays one line within its limit however long the source's is.
+    title: Title.parse(title.length > TITLE_MAX ? `${title.slice(0, TITLE_MAX - 1)}…` : title),
+    description: [
+      `The task ${quoted} (${source.id}) shipped at the retry limit: the ${found.role} step still rejected the work. These findings are open:`,
+      found.notes,
+    ].join('\n\n'),
+    acceptanceCriteria:
+      findings.length > 0
+        ? findings.map((f) => `Fixed: ${f.text}`)
+        : ['The findings in the description are fixed'],
+    areas: source.areas,
+    dependsOn: [],
+    riskTags: [],
+    flowId: null,
+    proposalId: null,
+    boardColumnId: null,
   });
 }
 

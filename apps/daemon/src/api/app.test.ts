@@ -69,6 +69,12 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
     patchFlow: track('patchFlow'),
     listModelProfiles: track('listModelProfiles'),
     patchModelProfile: track('patchModelProfile'),
+    judgeStatus: track('judgeStatus'),
+    patchJudge: track('patchJudge'),
+    setJudgeKey: track('setJudgeKey'),
+    removeJudgeKey: track('removeJudgeKey'),
+    testJudge: track('testJudge'),
+    listJudgeCalls: track('listJudgeCalls'),
     benchmarkStatus: track('benchmarkStatus'),
     syncBenchmarks: track('syncBenchmarks'),
     listAaModels: track('listAaModels'),
@@ -748,6 +754,7 @@ describe('batch routes', () => {
     gateLogPath: null,
     failure: null,
     worktreePath: null,
+    notices: [] as never[],
     createdAt: '2026-10-21T12:00:00.000Z',
     updatedAt: '2026-10-21T12:00:00.000Z',
   } as const;
@@ -807,6 +814,7 @@ describe('batch routes', () => {
     failureReason: null,
     lastActivityAt: null,
     runNextAt: null,
+    notice: null,
     createdAt: batch.createdAt,
     updatedAt: batch.updatedAt,
   });
@@ -1065,5 +1073,67 @@ describe('area proposal route', () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual(proposal);
     expect(seen).toEqual(['/repo']);
+  });
+});
+
+describe('judge routes', () => {
+  it.each([
+    { route: 'GET /judge', method: 'GET', path: '/judge', service: 'judgeStatus' },
+    {
+      route: 'PATCH /judge',
+      method: 'PATCH',
+      path: '/judge',
+      body: { enabled: false },
+      service: 'patchJudge',
+    },
+    {
+      route: 'PUT /judge/key',
+      method: 'PUT',
+      path: '/judge/key',
+      body: { key: 'a-key' },
+      service: 'setJudgeKey',
+    },
+    { route: 'DELETE /judge/key', method: 'DELETE', path: '/judge/key', service: 'removeJudgeKey' },
+    { route: 'POST /judge/test', method: 'POST', path: '/judge/test', service: 'testJudge' },
+    { route: 'GET /judge/calls', method: 'GET', path: '/judge/calls', service: 'listJudgeCalls' },
+  ])('$route reaches $service behind the token', async ({ method, path, body, service }) => {
+    const init = { ...json, method, ...(body ? { body: JSON.stringify(body) } : {}) };
+    expect((await app().request(path, { method })).status).toBe(401);
+    expect((await app().request(path, init)).status).toBe(500);
+    expect(reached).toEqual([service]);
+  });
+
+  it.each([
+    ['PATCH /judge with an unknown field', 'PATCH', '/judge', { nope: 1 }],
+    [
+      'PATCH /judge with a floor above one',
+      'PATCH',
+      '/judge',
+      { decisions: { review_size: { floor: 2 } } },
+    ],
+    ['PUT /judge/key with an empty key', 'PUT', '/judge/key', { key: '' }],
+    ['PUT /judge/key with a space in the key', 'PUT', '/judge/key', { key: 'a b' }],
+    ['PUT /judge/key with an extra field', 'PUT', '/judge/key', { key: 'a-key', more: 1 }],
+  ])('answers 400 for %s without reaching a service', async (_name, method, path, body) => {
+    const res = await app().request(path, { ...json, method, body: JSON.stringify(body) });
+    expect(res.status).toBe(400);
+    expect(reached).toEqual([]);
+  });
+
+  it.each([
+    ['150', 100],
+    ['7', 7],
+    ['0', 20],
+    ['x', 20],
+  ])('asks for %s calls as %s', async (limit, asked) => {
+    const seen: number[] = [];
+    const services = stubServices({
+      listJudgeCalls: (n) => {
+        seen.push(n);
+        return [];
+      },
+    });
+    expect((await app(services).request(`/judge/calls?limit=${limit}`, auth)).status).toBe(200);
+    expect(seen).toEqual([asked]);
   });
 });

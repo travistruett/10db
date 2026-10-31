@@ -93,7 +93,22 @@ export interface ClaudeAdapterOptions {
    * sandboxes every real session, and this adapter refuses one that arrives without a sandbox.
    */
   readonly allowUnsandboxed?: true;
+  /**
+   * The permission mode a sandboxed session runs in; unset means `LANE_PERMISSION_MODE`. Only the
+   * live test sets it, to `auto`, to show what auto mode still hands 10db before lanes switch.
+   */
+  readonly lanePermissionMode?: LanePermissionMode;
 }
+
+/** Default: what no allow rule covers asks 10db. Auto: Claude Code's classifier decides first. */
+type LanePermissionMode = 'default' | 'auto';
+
+/**
+ * What every real lane runs in. Auto mode's classifier approves calls itself, so lanes switch to it
+ * only once the live test's auto-mode cases (`test/lane-sandbox.live.test.ts`) show that hazard hits
+ * and new hosts still reach 10db: docs/architecture/decisions/2026-10-30-lanes-wait-for-auto-mode-proof.md.
+ */
+const LANE_PERMISSION_MODE: LanePermissionMode = 'default';
 
 export const UNSANDBOXED_REFUSAL =
   '10db refused to start Claude Code without the lane sandbox. This is a bug in 10db; nothing ran.';
@@ -118,6 +133,8 @@ interface QueryDeps {
   readonly recheckSettings: (what: string) => HookJSONOutput;
   /** True once the session has been refused after it started; every tool is denied from then on. */
   readonly isRefused: () => boolean;
+  /** The mode a sandboxed session runs in; `LANE_PERMISSION_MODE` when unset. */
+  readonly lanePermissionMode?: LanePermissionMode;
 }
 
 /** Spawns claude as our own child, so recovery knows its pid and the log gets its stderr. */
@@ -170,9 +187,8 @@ export function buildMcpServers(spec: SessionSpec): Record<string, McpServerConf
 
 /**
  * What Claude Code adds to a permission request when it says the call needs a person. Its auto mode
- * classifier sets them, and lanes never run in auto mode, so the check is defensive: a marked call
- * still becomes a card that no stored rule answers. The SDK passes these fields at runtime but its
- * typings omit them.
+ * classifier sets them; a marked call becomes a card that no stored rule answers. The SDK passes
+ * these fields at runtime but its typings omit them.
  */
 const EscalationFields = z.looseObject({
   requiresUserInteraction: z.boolean().optional(),
@@ -237,9 +253,9 @@ export function buildQueryOptions(spec: SessionSpec, deps: QueryDeps): Options {
       : {}),
     plugins: [{ type: 'local', path: deps.pluginDir }],
     allowedTools: [...spec.allowedTools],
-    // What no allow rule covers reaches canUseTool; auto mode's classifier would approve calls the
-    // cards exist to ask about.
-    permissionMode: 'default',
+    // In default mode what no allow rule covers reaches canUseTool. Only a sandboxed lane may run in
+    // auto mode, whose classifier approves calls itself; an unsandboxed session never does.
+    permissionMode: sandbox ? (deps.lanePermissionMode ?? LANE_PERMISSION_MODE) : 'default',
     canUseTool: async (toolName, input, options) => {
       if (!(await deps.billingVerified) || deps.isRefused())
         return { behavior: 'deny', message: BILLING_UNVERIFIED, interrupt: true };
@@ -418,6 +434,9 @@ function startSession(
       pluginDir: opts.pluginDir,
       abortController,
       billingVerified,
+      ...(opts.lanePermissionMode === undefined
+        ? {}
+        : { lanePermissionMode: opts.lanePermissionMode }),
       onSpawn: (p) => {
         pid = p;
       },
@@ -551,6 +570,8 @@ function startSession(
         subscriptionType: account?.subscriptionType,
         claudeCodeVersion: init.claude_code_version,
         model: init.model,
+        // The mode in effect, which is `default` where auto mode is unavailable whatever was asked for.
+        permissionMode: init.permissionMode,
       },
       'claude session billing',
     );
