@@ -11,6 +11,7 @@ import {
   type AccountId,
   type BatchId,
   type NextAction,
+  type Notice,
   type ProjectId,
   type SessionId,
   type TaskId,
@@ -96,6 +97,7 @@ function toDto(db: DbReader, row: WorkstreamRow): WorkstreamDto {
     failureReason: row.failureReason,
     lastActivityAt: row.lastActivityAt,
     runNextAt: row.runNextAt,
+    notice: row.notice,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -194,6 +196,7 @@ export function insertWorkstream(
     failureReason: null,
     lastActivityAt: null,
     runNextAt: null,
+    notice: null,
     createdAt: ctx.now,
     updatedAt: ctx.now,
   };
@@ -328,6 +331,54 @@ export function patchWorkstream(
     .set({ ...patch, updatedAt: ctx.now })
     .where(eq(schema.workstreams.id, id))
     .run();
+}
+
+function emitWorkstreamNotice(ctx: WriteContext, row: WorkstreamRow): void {
+  ctx.emit({
+    type: EventType.WorkstreamChanged,
+    entityType: 'workstream',
+    entityId: row.id,
+    data: { from: row.state, to: row.state, reason: 'notice' },
+  });
+}
+
+/**
+ * Sets what the run waits for besides the builder, or clears it with null. Writes, and tells clients,
+ * only when that changes what the run says. It is not fenced: a wait is written by the session's tool
+ * call, not the lane that holds the lease. Resolves whether it changed.
+ */
+export function setWorkstreamNotice(
+  ctx: WriteContext,
+  id: WorkstreamId,
+  notice: Notice | null,
+): boolean {
+  const row = getWorkstreamRow(ctx.tx, id);
+  if (JSON.stringify(row.notice) === JSON.stringify(notice)) return false;
+  ctx.tx
+    .update(schema.workstreams)
+    .set({ notice, updatedAt: ctx.now })
+    .where(eq(schema.workstreams.id, id))
+    .run();
+  emitWorkstreamNotice(ctx, row);
+  return true;
+}
+
+/** Clears every run's notice, as a daemon start does: the waits they describe ended with the last one. */
+export function clearWorkstreamNotices(ctx: WriteContext): WorkstreamId[] {
+  const rows = ctx.tx
+    .select()
+    .from(schema.workstreams)
+    .where(isNotNull(schema.workstreams.notice))
+    .all();
+  for (const row of rows) {
+    ctx.tx
+      .update(schema.workstreams)
+      .set({ notice: null, updatedAt: ctx.now })
+      .where(eq(schema.workstreams.id, row.id))
+      .run();
+    emitWorkstreamNotice(ctx, row);
+  }
+  return rows.map((r) => r.id);
 }
 
 export function acquireLease(

@@ -310,6 +310,26 @@ describe('worktree mode contracts', () => {
     expect(BatchDto.parse({ ...batch, worktreePath: null }).worktreePath).toBe(null);
   });
 
+  it('BatchDto without notices reads as none', () => {
+    expect(BatchDto.parse(batch).notices).toEqual([]);
+  });
+
+  it('BatchDto carries the notices its tasks show', () => {
+    const notice = {
+      key: 'base-conflict',
+      tone: 'warning',
+      line: 'Conflicts with main',
+      body: 'x',
+    };
+    expect(BatchDto.parse({ ...batch, notices: [notice] }).notices).toEqual([notice]);
+    expect(BatchDto.safeParse({ ...batch, notices: [{ ...notice, line: '' }] }).success).toBe(
+      false,
+    );
+    expect(BatchDto.safeParse({ ...batch, notices: [{ ...notice, tone: 'red' }] }).success).toBe(
+      false,
+    );
+  });
+
   it('BatchDto without pr reads as null', () => {
     expect(BatchDto.parse(batch).pr).toBe(null);
   });

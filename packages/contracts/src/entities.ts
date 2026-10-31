@@ -440,6 +440,23 @@ export const NextAction = z.discriminatedUnion('kind', [
 ]);
 export type NextAction = z.infer<typeof NextAction>;
 
+/**
+ * Something a task's card and drawer say about the task or its batch that asks the builder nothing:
+ * 10db is waiting for another task's claim, or the batch's branch can't take its base yet. It stands
+ * until its cause is gone and raises no Inbox card (`decisions/2026-10-30-notices-not-cards.md`).
+ */
+export const Notice = z.object({
+  /** What the notice is about; a later notice with the same key in the same place replaces it. */
+  key: z.string().min(1).max(200),
+  /** `warning` is something the builder may need to act on, `info` is 10db waiting on its own. */
+  tone: z.enum(['info', 'warning']),
+  /** The one line a task's card shows. */
+  line: z.string().min(1).max(500),
+  /** What the drawer shows under the line: who, why, and what to do about it. */
+  body: z.string().max(8000),
+});
+export type Notice = z.infer<typeof Notice>;
+
 export const WorkstreamDto = z.object({
   id: WorkstreamId,
   taskId: TaskId,
@@ -463,6 +480,8 @@ export const WorkstreamDto = z.object({
   lastActivityAt: Timestamp.nullable(),
   /** When the builder put it first in line; null for a workstream that waits in the order it started. */
   runNextAt: Timestamp.nullable(),
+  /** What the run is waiting for or held by besides the builder, such as another task's hazard claim. */
+  notice: Notice.nullable().default(null),
   createdAt: Timestamp,
   updatedAt: Timestamp,
 });

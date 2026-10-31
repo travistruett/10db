@@ -405,6 +405,42 @@
                 "null"
               ]
             },
+            "notices": {
+              "default": [],
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "tone": {
+                    "type": "string",
+                    "enum": [
+                      "info",
+                      "warning"
+                    ]
+                  },
+                  "line": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  "body": {
+                    "type": "string",
+                    "maxLength": 8000
+                  }
+                },
+                "required": [
+                  "key",
+                  "tone",
+                  "line",
+                  "body"
+                ]
+              }
+            },
             "createdAt": {
               "type": "string",
               "format": "date-time",
@@ -612,6 +648,42 @@
               "string",
               "null"
             ]
+          },
+          "notices": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "tone": {
+                  "type": "string",
+                  "enum": [
+                    "info",
+                    "warning"
+                  ]
+                },
+                "line": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 500
+                },
+                "body": {
+                  "type": "string",
+                  "maxLength": 8000
+                }
+              },
+              "required": [
+                "key",
+                "tone",
+                "line",
+                "body"
+              ]
+            }
           },
           "createdAt": {
             "type": "string",

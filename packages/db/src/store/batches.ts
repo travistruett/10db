@@ -12,6 +12,7 @@ import {
   type BatchDto,
   type BatchFailure,
   type BatchId,
+  type Notice,
   type ProjectId,
   type PullRequestStatusDto,
 } from '@10db/contracts';
@@ -79,6 +80,7 @@ function toBatchDto(row: BatchRow): BatchDto {
     gateLogPath: row.gateLogPath,
     failure: row.failure,
     worktreePath: row.worktreePath,
+    notices: row.notices,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -248,6 +250,7 @@ export function insertBatch(
     prFailingChecks: null,
     prCheckedAt: null,
     prUnknownReason: null,
+    notices: [],
     createdAt: ctx.now,
     updatedAt: ctx.now,
   };
@@ -282,6 +285,39 @@ export function patchBatch(ctx: WriteContext, id: BatchId, patch: BatchPatch): B
     .run();
   emitBatch(ctx, id, { changed: Object.keys(patch) });
   return getBatch(ctx.tx, id);
+}
+
+/**
+ * Puts `notice` among the batch's notices, replacing the one with its key. Writes, and tells clients,
+ * only when that changes what the batch says, so a gate that finds the same thing again changes nothing.
+ * Resolves whether it changed.
+ */
+export function setBatchNotice(ctx: WriteContext, id: BatchId, notice: Notice): boolean {
+  const { notices } = getBatchRow(ctx.tx, id);
+  const at = notices.findIndex((n) => n.key === notice.key);
+  const current = notices[at];
+  if (current !== undefined && JSON.stringify(current) === JSON.stringify(notice)) return false;
+  const next = at < 0 ? [...notices, notice] : notices.map((n, i) => (i === at ? notice : n));
+  ctx.tx
+    .update(schema.batches)
+    .set({ notices: next, updatedAt: ctx.now })
+    .where(eq(schema.batches.id, id))
+    .run();
+  emitBatch(ctx, id, { changed: ['notices'] });
+  return true;
+}
+
+/** Takes the notice with this key off the batch; resolves whether there was one. */
+export function clearBatchNotice(ctx: WriteContext, id: BatchId, key: string): boolean {
+  const { notices } = getBatchRow(ctx.tx, id);
+  if (!notices.some((n) => n.key === key)) return false;
+  ctx.tx
+    .update(schema.batches)
+    .set({ notices: notices.filter((n) => n.key !== key), updatedAt: ctx.now })
+    .where(eq(schema.batches.id, id))
+    .run();
+  emitBatch(ctx, id, { changed: ['notices'] });
+  return true;
 }
 
 /** What the PR watcher read of a pull request; stored whole, so a read is never half a status. */
