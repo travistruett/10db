@@ -13,8 +13,11 @@ import {
 import { listPermissionRules } from '@10db/db';
 import { z } from 'zod';
 import type { StateStore } from '../events';
+import type { Git } from '../git';
 import { firstUnread, hazardHit, stringField } from '../guard';
+import type { Logger } from '../log';
 import { foundHostFile, matchPermissionRule, storableRule } from '../permissions';
+import { takeFoundHostsReading } from '../registries';
 import { readAccess, readPathsOf, writeAccess, type FileAccessContext } from '../sandbox';
 import type { ToolDecision, ToolRequest } from '../sessions';
 import { foundHostReason } from './gate-host-card';
@@ -137,7 +140,13 @@ function summarize(req: ToolRequest): string {
 
 /** Decides every canUseTool call: stored rules first, then a card for the builder. Never an LLM. */
 export function createPermissionBroker(
-  deps: { readonly state: StateStore; readonly inbox: InboxService },
+  deps: {
+    readonly state: StateStore;
+    readonly inbox: InboxService;
+    /** Reads a project's package files from its default branch, for a project with no reading yet. */
+    readonly git: Pick<Git, 'regularFilesAt' | 'fileAt'>;
+    readonly logger: Logger;
+  },
   ctx: BrokerContext,
 ): (req: ToolRequest) => Promise<ToolDecision> {
   let allowOnce = ctx.allowOnce ?? null;
@@ -220,7 +229,7 @@ export function createPermissionBroker(
   const hostsAllowedOnce = new Set<string>();
 
   /** A host the lane's command reached for: allowed by a rule or a one-time allowance, else refused and asked about once. */
-  function judgeHost(req: ToolRequest): ToolDecision {
+  async function judgeHost(req: ToolRequest): Promise<ToolDecision> {
     const parsed = NetworkInput.safeParse(req.input);
     if (!parsed.success) {
       return {
@@ -243,6 +252,8 @@ export function createPermissionBroker(
     }
     if (!hostsAsked.has(host)) {
       hostsAsked.add(host);
+      // A project added before 10db kept a reading of its package files gets one, from the default branch.
+      await takeFoundHostsReading(deps, ctx.projectId);
       // A project file that needs the host is a reason to allow it, not a grant.
       const file = foundHostFile(deps.state.db, ctx.projectId, host);
       const { answer } = deps.inbox.ask({

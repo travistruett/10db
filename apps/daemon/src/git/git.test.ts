@@ -237,6 +237,30 @@ describe('history queries', () => {
   });
 });
 
+describe('regularFilesAt', () => {
+  it('lists the regular files of a commit at any depth, not links, and not the worktree', async () => {
+    mkdirSync(join(repo.path, 'a/b'), { recursive: true });
+    write('a/b/x.lock', 'x');
+    write('top.txt', 'top');
+    symlinkSync('top.txt', join(repo.path, 'link.txt'));
+    rawGit('add', '--all');
+    rawGit('commit', '-q', '-m', 'files');
+    write('untracked.txt', 'not committed');
+
+    const files = await git.regularFilesAt(repo.path, 'refs/heads/main');
+
+    expect(files).toEqual([
+      { path: 'README.md', bytes: 10 },
+      { path: 'a/b/x.lock', bytes: 1 },
+      { path: 'top.txt', bytes: 3 },
+    ]);
+  });
+
+  it('rejects a branch that is not there', async () => {
+    await expect(git.regularFilesAt(repo.path, 'refs/heads/nope')).rejects.toThrow();
+  });
+});
+
 describe('gitDirs', () => {
   it('names one directory for both in an ordinary checkout', async () => {
     const gitDir = join(realpathSync(repo.path), '.git');

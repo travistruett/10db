@@ -9,7 +9,7 @@
 text: lockfiles (`pnpm-lock.yaml`, `package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`, `Cargo.lock`, `uv.lock`,
 `poetry.lock`, `Gemfile.lock`, `go.sum`), package manager settings (`.npmrc`, `.yarnrc.yml`, `.cargo/config.toml`,
 `pip.conf`, `pip.ini`, `uv.toml`, the index tables of `pyproject.toml`) and toolchain files (`rust-toolchain(.toml)`,
-`.nvmrc`, `.node-version`). It looks in the project root and two levels of folders below it, skipping dot folders,
+`.nvmrc`, `.node-version`). It looks in the project root and three levels of folders below it, skipping dot folders,
 `node_modules`, `target`, `dist`, `build`, `out`, `vendor`, `venv`, `__pycache__`, `coverage` and `Pods`. It runs
 nothing from the repository and starts no process: a file is read only when the real path of its folder is that
 folder under the root's real path (so a link anywhere below the root, such as `.cargo` linked to `~/.cargo`, is never
@@ -61,6 +61,18 @@ Allow beside each, and a host is allowed only when the builder presses Allow for
 again on Look Again, not allowed again. The reading made when the project was added is kept in `app_settings`
 (`network-hosts-found:<project id>`) so a card can say a file needs a host that is not allowed now. Look Again never
 rewrites it: it is a reading of the project as the builder added it, not of the files a lane has since written.
+
+**A project added before readings.** A project added before 10db kept a reading has none, so its cards could not name a
+file. The first time a card needs it (a lane's broker asks about a host, a gate or the worktree install is blocked from
+one), `takeFoundHostsReading` (`apps/daemon/src/registries/found-reading.ts`) reads the package files committed on the
+project's default branch (`refs/heads/<baseBranch>`, else `refs/remotes/origin/<baseBranch>`) through the daemon's git
+(`Git.regularFilesAt` lists the commit's regular files and `Git.fileAt` reads a blob: nothing in the checkout is read,
+followed or run), keeps the result as `network-hosts-found:<project id>` and **allows nothing** from it. It writes only
+when the project still has no reading, in the write's own transaction, so a reading is made once and never replaced; an
+empty one counts. A branch git can't read leaves the project without a reading, logged and tried again at the next card.
+The files are those of a commit the builder merged, not a lane's uncommitted edits, so the lane still never writes its own
+card's recommendation. Folders are read three levels below the root (it was two), so
+`apps/desktop/src-tauri/Cargo.lock` is found, for adding a project, the folder preview, Look Again and this reading alike.
 
 **A lane's card.** The blocked-host card for a lane recommends Allow for the project when that reading names the host,
 and its body says so: `The project's <file> needs <host>` (a toolchain file or `go.sum` only implies its host, so the

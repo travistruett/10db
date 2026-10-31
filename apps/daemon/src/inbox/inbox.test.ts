@@ -31,9 +31,12 @@ import {
   updateInboxItem,
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { seedWorkstream } from '../../test/fixtures';
+import { execFileSync } from 'node:child_process';
+import { createTempRepo, isolatedGitEnv, seedWorkstream } from '../../test/fixtures';
 import { createEventBus, createStateStore, type StateStore } from '../events';
-import { allowFoundHosts, removeNetworkHost } from '../permissions';
+import { createGit, type Git } from '../git';
+import { silentLogger } from '../log';
+import { allowFoundHosts, listNetworkHosts, removeNetworkHost } from '../permissions';
 import { protectedReads, type FileAccessContext } from '../sandbox';
 import {
   createInboxService,
@@ -42,6 +45,12 @@ import {
   type InboxService,
   type WaitObserver,
 } from './index';
+
+/** A git that reads no repository: a project with no reading gets none from it. */
+const NO_GIT = {
+  regularFilesAt: () => Promise.reject(new Error('no repository')),
+  fileAt: () => Promise.resolve({ kind: 'missing' as const }),
+};
 
 let close: () => void;
 let state: StateStore;
@@ -357,7 +366,7 @@ describe('permission broker', () => {
       onWaitEnd: () => events.push('end'),
     };
     return createPermissionBroker(
-      { state, inbox },
+      { state, inbox, git: NO_GIT, logger: silentLogger },
       {
         projectId: ws.project.id,
         workstreamId: ws.workstream.id,
@@ -459,7 +468,7 @@ describe('permission broker', () => {
   it('raises a card for an escalated call that matches the carried allow-once', () => {
     const ws = seedWorkstream(base);
     const decide = createPermissionBroker(
-      { state, inbox },
+      { state, inbox, git: NO_GIT, logger: silentLogger },
       {
         projectId: ws.project.id,
         workstreamId: ws.workstream.id,
@@ -478,7 +487,7 @@ describe('permission broker', () => {
   it('allows the first matching call once when an allow_once arrived after parking', async () => {
     const ws = seedWorkstream(base);
     const decide = createPermissionBroker(
-      { state, inbox },
+      { state, inbox, git: NO_GIT, logger: silentLogger },
       {
         projectId: ws.project.id,
         workstreamId: ws.workstream.id,
@@ -584,7 +593,7 @@ describe('permission broker without a storable pattern', () => {
     const ws = seedWorkstream(base);
     const observer: WaitObserver = { onWaitStart: () => undefined, onWaitEnd: () => undefined };
     const decide = createPermissionBroker(
-      { state, inbox },
+      { state, inbox, git: NO_GIT, logger: silentLogger },
       {
         projectId: ws.project.id,
         workstreamId: ws.workstream.id,
@@ -732,9 +741,10 @@ describe('permission broker in a sandboxed lane', () => {
     ws: ReturnType<typeof seedWorkstream>,
     sandbox = true,
     hazards: readonly HazardDef[] = DEFAULT_HAZARDS,
+    git: Pick<Git, 'regularFilesAt' | 'fileAt'> = NO_GIT,
   ) {
     return createPermissionBroker(
-      { state, inbox },
+      { state, inbox, git, logger: silentLogger },
       {
         projectId: ws.project.id,
         workstreamId: ws.workstream.id,
@@ -1385,6 +1395,49 @@ describe('permission broker in a sandboxed lane', () => {
     expect(card.body).toContain(HOST_BODY);
   });
 
+  it('names the file and recommends Allow for a project added before readings, from its default branch', async () => {
+    const repo = createTempRepo();
+    try {
+      mkdirSync(join(repo.path, 'apps/desktop/src-tauri'), { recursive: true });
+      writeFileSync(
+        join(repo.path, 'apps/desktop/src-tauri/Cargo.lock'),
+        'source = "registry+https://github.com/rust-lang/crates.io-index"\n',
+      );
+      const rawGit = (...args: string[]) =>
+        execFileSync('git', ['-C', repo.path, ...args], { env: isolatedGitEnv(), stdio: 'pipe' });
+      rawGit('add', 'apps');
+      rawGit('commit', '-q', '-m', 'lock');
+      // The lane's own uncommitted line must not become its card's reason.
+      writeFileSync(join(repo.path, '.npmrc'), '@x:registry=https://exfil.example.net/\n');
+      const ws = seedWorkstream(base, { repoPath: repo.path });
+      // No reading was ever written for this project, as for one added before 10db kept readings.
+
+      await sandboxed(
+        ws,
+        true,
+        DEFAULT_HAZARDS,
+        createGit(),
+      )(request('SandboxNetworkAccess', { host: 'index.crates.io' }));
+      const card = onlyOpenCard();
+      expect(card.recommendation).toBe('allow_project');
+      expect(card.body).toContain(
+        "The project's apps/desktop/src-tauri/Cargo.lock needs index.crates.io",
+      );
+      expect(listNetworkHosts(state.db, ws.project.id)).toEqual([]);
+
+      await sandboxed(
+        ws,
+        true,
+        DEFAULT_HAZARDS,
+        createGit(),
+      )(request('SandboxNetworkAccess', { host: 'exfil.example.net' }));
+      const cards = openCards().filter((c) => c.title.includes('exfil.example.net'));
+      expect(cards.map((c) => c.recommendation)).toEqual([null]);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
   it('recommends nothing for a host no project file names', async () => {
     const ws = seedWorkstream(base);
     allowFoundHosts(state, ws.project.id, [{ host: 'index.crates.io', file: 'Cargo.lock' }]);
@@ -1735,7 +1788,7 @@ describe('permission broker without a sandbox keeps its network cards', () => {
   it('stores an unscoped network rule on always allow, which then allows with no card', async () => {
     const ws = seedWorkstream(base);
     const decide = createPermissionBroker(
-      { state, inbox },
+      { state, inbox, git: NO_GIT, logger: silentLogger },
       {
         projectId: ws.project.id,
         workstreamId: ws.workstream.id,
@@ -1771,7 +1824,7 @@ describe('permission broker without a sandbox keeps its Read and Edit cards', ()
   ])('offers always-allow on a %s card and stores the unscoped rule', async (toolName, input) => {
     const ws = seedWorkstream(base);
     const decide = createPermissionBroker(
-      { state, inbox },
+      { state, inbox, git: NO_GIT, logger: silentLogger },
       {
         projectId: ws.project.id,
         workstreamId: ws.workstream.id,

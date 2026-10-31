@@ -3,7 +3,10 @@ import { dirname, join } from 'node:path';
 import type { BatchDto, PermissionRuleDto, ProjectDto, ProjectId } from '@10db/contracts';
 import type { Clock } from '../clock';
 import type { StateStore } from '../events';
+import type { Git } from '../git';
 import { raiseGateHostCards, type InboxService } from '../inbox';
+import type { Logger } from '../log';
+import { takeFoundHostsReading } from '../registries';
 import { BlockedRun, type GateRunner } from '../verify';
 
 /** The lockfile that says a project's packages are pnpm's. */
@@ -59,11 +62,18 @@ export type DependencyRefresh =
  * Asks the builder about each host the sandbox refused a failed install: one card per host for the
  * project, naming the install, which folds into a blocked gate's card for the same host.
  */
-export function raiseInstallHostCards(
-  deps: { readonly state: StateStore; readonly inbox: InboxService },
+export async function raiseInstallHostCards(
+  deps: {
+    readonly state: StateStore;
+    readonly inbox: InboxService;
+    readonly git: Pick<Git, 'regularFilesAt' | 'fileAt'>;
+    readonly logger: Logger;
+  },
   projectId: ProjectId,
   failure: Extract<DependencyRefresh, { readonly kind: 'failed' }>,
-): void {
+): Promise<void> {
+  // A project added before 10db kept a reading of its package files gets one, so the card can name the file.
+  if (failure.blockedHosts.length > 0) await takeFoundHostsReading(deps, projectId);
   raiseGateHostCards(deps, {
     projectId,
     run: BlockedRun.Install,

@@ -119,6 +119,7 @@ import {
 import type { Logger } from '../log';
 import { mintSessionToken } from '../mcp';
 import { allowedToolsFor, storableRule } from '../permissions';
+import { takeFoundHostsReading } from '../registries';
 import { escalateStep, offeredProfiles } from '../routing';
 import {
   fileAccessJudge,
@@ -1351,7 +1352,7 @@ export function createRunner(opts: RunnerOptions): Runner {
             ...(fileAccess ? { fileAccess } : {}),
           }),
         canUseTool: createPermissionBroker(
-          { state: opts.state, inbox: opts.inbox },
+          { state: opts.state, inbox: opts.inbox, git: opts.git, logger: opts.logger },
           {
             projectId: project.id,
             workstreamId: id,
@@ -1916,6 +1917,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     // Shutdown killed the gate: record nothing. The workstream stays VERIFYING and recovery re-runs it.
     if (result.aborted) return;
     // A host the sandbox blocked is the builder's to allow; the card names it and the gate's evidence says so.
+    if (result.blockedHosts.length > 0) await takeFoundHostsReading(opts, project.id);
     raiseGateHostCards(opts, {
       projectId: project.id,
       run: BlockedRun.Gate,

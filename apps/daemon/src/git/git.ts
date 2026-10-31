@@ -327,6 +327,12 @@ export interface Git {
    */
   fileAt(repo: string, rev: string, path: string, maxBytes: number): Promise<FileAt>;
   /**
+   * The regular files (never a link, a submodule or a directory) commit `rev` holds, at any depth, with
+   * each one's size in bytes and sorted by path, read from the object store as `fileAt` reads: nothing
+   * from the worktree. A `rev` git can't resolve is a `GitError`.
+   */
+  regularFilesAt(repo: string, rev: string): Promise<{ path: string; bytes: number }[]>;
+  /**
    * What the repository at or above `path` holds, read as git finds it with no pin: nothing is
    * written, nothing is pinned and no refusal reaches `onRefused`, so a folder the builder only
    * looks at raises no card. A repository git won't read is answered, not thrown.
@@ -1974,6 +1980,21 @@ export function createGit(opts: GitOptions = {}): Git {
       const bytes = Number(size);
       if (!Number.isSafeInteger(bytes) || bytes > maxBytes) return { kind: 'too_large', bytes };
       return { kind: 'file', text: await git(c, ['cat-file', 'blob', oid]) };
+    },
+    async regularFilesAt(repo, rev) {
+      const c = await pinned(repo);
+      const out = await git(c, ['ls-tree', '-r', '-z', '--long', '--full-tree', rev]);
+      const files: { path: string; bytes: number }[] = [];
+      for (const record of out.split('\0')) {
+        const entry = LS_TREE_ENTRY.exec(record);
+        if (!entry) continue;
+        const [, mode = '', type, , size = '', path = ''] = entry;
+        const bytes = Number(size);
+        if (type === 'blob' && REGULAR_FILE_MODES.includes(mode) && Number.isSafeInteger(bytes)) {
+          files.push({ path, bytes });
+        }
+      }
+      return files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
     },
     async inspect(path) {
       const site = observed(path);
