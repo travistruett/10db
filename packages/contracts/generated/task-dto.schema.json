@@ -98,6 +98,19 @@
         }
       ]
     },
+    "workspaceMode": {
+      "type": "string",
+      "enum": [
+        "shared",
+        "worktree"
+      ]
+    },
+    "placementReason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "status": {
       "type": "string",
       "enum": [
@@ -169,6 +182,8 @@
     "riskTags",
     "flowId",
     "landing",
+    "workspaceMode",
+    "placementReason",
     "status",
     "boardOrder",
     "boardColumnId",

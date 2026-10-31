@@ -210,6 +210,12 @@
         "type": "string"
       }
     },
+    "isolate": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
     "createdAt": {
       "type": "string",
       "format": "date-time",
@@ -248,6 +254,7 @@
     "sandboxLoopback",
     "workspaceMode",
     "worktreeSeed",
+    "isolate",
     "createdAt",
     "updatedAt"
   ]

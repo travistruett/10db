@@ -171,6 +171,15 @@ export const DEFAULT_WORKTREE_SEED = ['node_modules'] as const;
 
 const WorktreeSeed = z.array(WorktreeSeedName).max(32);
 
+/**
+ * The area and hazard names whose tasks are proposed a separate copy unless a project says
+ * otherwise: the stock hazards every project has. A project adds its own, such as `contracts`.
+ */
+export const DEFAULT_ISOLATE = ['migrations', 'deps'] as const;
+
+/** Area and hazard names, not globs; a name the project doesn't define yet matches no task. */
+const Isolate = z.array(Name).max(64);
+
 const UsageHandoffAt = z.number().min(USAGE_HANDOFF_MIN).max(USAGE_HANDOFF_MAX);
 
 export const ProjectInput = z
@@ -218,10 +227,15 @@ export const ProjectInput = z
      * to the lane; read when each session starts.
      */
     sandboxLoopback: z.boolean().default(false),
-    /** Where tasks work: the one checkout, or a git worktree per started task (pull request delivery only). */
+    /**
+     * Where a new task works unless it says otherwise: the one checkout, or a git worktree of its
+     * own (pull request delivery only).
+     */
     workspaceMode: z.enum(WorkspaceMode).default(WorkspaceMode.Shared),
     /** Ignored directories of the main checkout a new worktree gets copies of. */
     worktreeSeed: WorktreeSeed.default(() => [...DEFAULT_WORKTREE_SEED]),
+    /** Area and hazard names whose tasks are proposed a separate copy. */
+    isolate: Isolate.default(() => [...DEFAULT_ISOLATE]),
   })
   .refine((p) => p.nudgePct > p.handoffPct, {
     message: 'nudgePct must be above handoffPct',
@@ -267,8 +281,14 @@ export const ProjectDto = z.object({
   prTitlePrefix: z.string().nullable(),
   allowedCommands: z.array(z.string()),
   sandboxLoopback: z.boolean(),
+  /**
+   * The placement a new task gets unless it names one or its areas propose a copy; changing it
+   * moves no existing task. Each task's own placement is `TaskDto.workspaceMode`.
+   */
   workspaceMode: z.enum(WorkspaceMode),
   worktreeSeed: z.array(z.string()),
+  /** Area and hazard names whose tasks are proposed a separate copy. */
+  isolate: z.array(z.string()),
   createdAt: Timestamp,
   updatedAt: Timestamp,
 });
@@ -300,8 +320,10 @@ export const ProjectPatch = z
     usageHandoffAt: UsageHandoffAt,
     allowedCommands: AllowedCommands,
     sandboxLoopback: z.boolean(),
+    /** The default for new tasks; it can change while work runs, and moves no existing task. */
     workspaceMode: z.enum(WorkspaceMode),
     worktreeSeed: WorktreeSeed,
+    isolate: Isolate,
   })
   .partial()
   .refine((p) => Object.keys(p).length > 0, { message: 'Change at least one field' })
@@ -324,6 +346,8 @@ export const TaskInput = z.object({
   flowId: FlowId.nullable().default(null),
   /** Where the work lands; absent starts from what the project does by default. */
   landing: TaskLanding.optional(),
+  /** Where the task works; absent takes the project's default. A copy needs pull request delivery. */
+  workspaceMode: z.enum(WorkspaceMode).optional(),
 });
 export type TaskInput = z.input<typeof TaskInput>;
 export type TaskConfig = z.output<typeof TaskInput>;
@@ -338,6 +362,14 @@ export const TaskDto = z.object({
   riskTags: z.array(z.enum(RiskTag)),
   flowId: FlowId.nullable(),
   landing: TaskLanding,
+  /**
+   * Where the task runs when it is next started: the project's checkout (`shared`, "Your folder")
+   * or a git worktree of its own (`worktree`, "Separate copy"). Meaningful only while the task can
+   * be started; after that its batch says where it ran.
+   */
+  workspaceMode: z.enum(WorkspaceMode),
+  /** Why the placement was proposed ("touches migrations"); null when it was chosen or defaulted. */
+  placementReason: z.string().nullable(),
   status: z.enum(TaskStatus),
   boardOrder: z.number(),
   boardColumnId: BoardColumnId.nullable(),
@@ -358,7 +390,14 @@ export const TaskPatchFields = z.object({
   flowId: FlowId.nullable(),
 });
 
-export const TaskPatch = TaskPatchFields.extend({ landing: TaskLanding })
+/**
+ * `workspaceMode` changes only while the task could be started (it is open and its latest run is
+ * not active), and only in a project that delivers by pull request.
+ */
+export const TaskPatch = TaskPatchFields.extend({
+  landing: TaskLanding,
+  workspaceMode: z.enum(WorkspaceMode),
+})
   .partial()
   .refine((p) => Object.keys(p).length > 0, {
     message: 'Change at least one field',
