@@ -123,6 +123,7 @@ export const BUILDER_INSTRUCTIONS = [
   '- The title is the outcome, in one line under 200 characters. It becomes the pull request title in pull-request delivery.',
   '- Acceptance criteria are things the builder can see or measure. Never "tests pass": say what the behaviour is, and the agent writes the tests that prove it.',
   '- Areas come from list_projects, for the project the task belongs to. Hazards are not areas; an agent asks for one itself when it needs it.',
+  '- A task is about one pull request (~300 changed lines), design and docs tasks included. A large design is split into one task per decision, not written as one long document: a document that big is rejected round after round, each fix moving the target.',
   '- Add dependsOn (ids of open tasks from list_tasks) and riskTags only when needed. Omit flowId to use the project default. Omit landing too: a new task lands where the project says by default.',
   '- Create the task without asking for confirmation, then report its title and id. The builder reads the board, and can edit or remove it.',
   '',
