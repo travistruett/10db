@@ -322,10 +322,11 @@ async function main() {
     `check-changed: changed ${plan.changed.join(', ') || '(no package)'}; checking ${plan.affected.join(', ')}`,
   );
   const present = files.filter((f) => existsSync(join(root, f)));
-  const lintTargets = [
-    ...plan.changed,
-    ...plan.outside.filter((f) => /\.(ts|tsx|js|mjs|cjs)$/.test(f) && existsSync(join(root, f))),
-  ];
+  const lintable = (/** @type {string} */ f) => /\.(ts|tsx|js|mjs|cjs)$/.test(f);
+  // The pre-check lints the changed files only; the changed-packages check lints whole packages.
+  const lintTargets = precheck
+    ? present.filter(lintable)
+    : [...plan.changed, ...plan.outside.filter((f) => lintable(f) && existsSync(join(root, f)))];
   /** @type {Step[]} */
   const together = [];
   if (present.length > 0)
