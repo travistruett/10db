@@ -35,7 +35,7 @@ import {
   toolUseBlock,
 } from './claude-test-support';
 import { AccountProbeError } from './index';
-import type { LaneSandboxSpec } from '../sandbox';
+import { autoModeRules, type LaneSandboxSpec } from '../sandbox';
 import { CompletionError, type SessionEvent, type SessionSpec } from './types';
 
 function spec(overrides: Partial<SessionSpec> = {}): SessionSpec {
@@ -301,6 +301,7 @@ const laneSandbox: LaneSandboxSpec = {
   env: { CLAUDE_CODE_TMPDIR: '/private/tmp/10db-x', GIT_CONFIG_GLOBAL: '/dev/null' },
   disallowedTools: ['Read(//h/.claude.json)', 'Read(//repo/.env)'],
   askRules: ['Edit(//repo/.mcp.json)', 'Write(//repo/.mcp.json)'],
+  autoMode: autoModeRules('make gate'),
 };
 
 describe('buildQueryOptions', () => {
@@ -376,14 +377,30 @@ describe('buildQueryOptions', () => {
     },
   );
 
-  it.each<[string, Partial<SessionSpec>]>([
-    ['an unsandboxed', {}],
-    ['a sandboxed', { sandbox: laneSandbox }],
-  ])('runs %s session in default mode, with the guard and the broker wired', (_name, given) => {
-    const options = buildQueryOptions(spec(given), deps);
-    expect(options.permissionMode).toBe('default');
-    expect(options.canUseTool).toBeTypeOf('function');
-    expect(options.hooks?.PreToolUse).toHaveLength(1);
+  it.each<[string, Partial<SessionSpec>, string]>([
+    ['an unsandboxed', {}, 'default'],
+    ['a sandboxed', { sandbox: laneSandbox }, 'auto'],
+  ])(
+    'runs %s session in its permission mode, with the guard and the broker wired',
+    (_name, given, mode) => {
+      const options = buildQueryOptions(spec(given), deps);
+      expect(options.permissionMode).toBe(mode);
+      expect(options.canUseTool).toBeTypeOf('function');
+      expect(options.hooks?.PreToolUse).toHaveLength(1);
+    },
+  );
+
+  it('gives a sandboxed session the classifier rules, and leaves its model to Claude Code', () => {
+    const options = buildQueryOptions(spec({ sandbox: laneSandbox }), deps);
+    expect(options.settings).toMatchObject({ autoMode: laneSandbox.autoMode });
+    const settings = options.settings as { autoMode: { hard_deny: string[]; soft_deny: string[] } };
+    expect(settings.autoMode.hard_deny).toHaveLength(2);
+    expect(settings.autoMode.soft_deny).toHaveLength(1);
+    expect(options.env).not.toHaveProperty('CLAUDE_CODE_AUTO_MODE_MODEL');
+  });
+
+  it('gives an unsandboxed session no classifier rules', () => {
+    expect(buildQueryOptions(spec(), deps).settings).toEqual({ autoCompactEnabled: true });
   });
 
   it('runs a sandboxed session under its profile, with no settings file, asking before protected edits', () => {
@@ -400,6 +417,7 @@ describe('buildQueryOptions', () => {
       settings: {
         autoCompactEnabled: true,
         permissions: { ask: ['Edit(//repo/.mcp.json)', 'Write(//repo/.mcp.json)'] },
+        autoMode: laneSandbox.autoMode,
       },
       settingSources: [],
       strictMcpConfig: true,

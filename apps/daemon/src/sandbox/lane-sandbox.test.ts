@@ -569,6 +569,24 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
     }
   });
 
+  it("hands the classifier a rule naming the project's gate command", async () => {
+    const session = await sandbox().forSession(
+      input({
+        project: {
+          id: projectId,
+          repoPath: repo.path,
+          sandboxLoopback: false,
+          gateCommand: 'make gate',
+        },
+      }),
+    );
+    try {
+      expect(session.spec.autoMode.hard_deny[0]).toContain('`make gate`');
+    } finally {
+      session.dispose();
+    }
+  });
+
   it("keeps the default account's config dir out of disallowedTools, and lists the other protected reads", async () => {
     const session = await sandbox().forSession(input());
     try {

@@ -170,8 +170,8 @@ export function buildMcpServers(spec: SessionSpec): Record<string, McpServerConf
 
 /**
  * What Claude Code adds to a permission request when it says the call needs a person. Its auto mode
- * classifier sets them, and lanes never run in auto mode, so the check is defensive: a marked call
- * still becomes a card that no stored rule answers. The SDK passes these fields at runtime but its
+ * classifier sets them. A sandboxed lane runs in auto mode, but the spike never saw the classifier ask, so
+ * the check is defensive: a marked call becomes a card that no stored rule answers. The SDK passes these fields at runtime but its
  * typings omit them.
  */
 const EscalationFields = z.looseObject({
@@ -212,6 +212,17 @@ function settingsRecheckHooks(deps: QueryDeps): NonNullable<Options['hooks']> {
   };
 }
 
+/** The inline settings of a sandboxed session: Claude Code reads `autoMode` only from inline settings. */
+function sandboxedSettings(
+  sandbox: NonNullable<SessionSpec['sandbox']>,
+): NonNullable<Options['settings']> {
+  return {
+    autoCompactEnabled: true,
+    permissions: { ask: [...sandbox.askRules] },
+    autoMode: sandbox.autoMode,
+  };
+}
+
 export function buildQueryOptions(spec: SessionSpec, deps: QueryDeps): Options {
   const sandbox = spec.sandbox ?? null;
   return {
@@ -229,17 +240,15 @@ export function buildQueryOptions(spec: SessionSpec, deps: QueryDeps): Options {
     strictMcpConfig: true,
     // Set explicitly: the builder's own autoCompactEnabled: false (global ~/.claude.json) reaches the session despite
     // settingSources. Compaction stays on as the emergency fallback.
-    settings: sandbox
-      ? { autoCompactEnabled: true, permissions: { ask: [...sandbox.askRules] } }
-      : { autoCompactEnabled: true },
+    settings: sandbox ? sandboxedSettings(sandbox) : { autoCompactEnabled: true },
     ...(sandbox
       ? { sandbox: sandbox.settings, disallowedTools: [...sandbox.disallowedTools] }
       : {}),
     plugins: [{ type: 'local', path: deps.pluginDir }],
     allowedTools: [...spec.allowedTools],
-    // What no allow rule covers reaches canUseTool; auto mode's classifier would approve calls the
-    // cards exist to ask about.
-    permissionMode: 'default',
+    // A sandboxed lane lets Claude Code's classifier decide plain calls; the ask rules and the guard still
+    // come first. An unsandboxed session asks for everything no allow rule covers.
+    permissionMode: sandbox ? 'auto' : 'default',
     canUseTool: async (toolName, input, options) => {
       if (!(await deps.billingVerified) || deps.isRefused())
         return { behavior: 'deny', message: BILLING_UNVERIFIED, interrupt: true };
