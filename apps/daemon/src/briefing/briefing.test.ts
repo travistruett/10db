@@ -1,4 +1,4 @@
-import type { ContextPack, HandoffDto, NextAction } from '@10db/contracts';
+import type { ContextPack, HandoffDto, NextAction, StepResult } from '@10db/contracts';
 import { mintId } from '@10db/contracts';
 import { createTestStore, insertDecision, insertSource } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -85,6 +85,7 @@ const base = {
   step: implementStep,
   priorResults: [],
   previousResult: null,
+  earlierResults: [],
   revisedBy: null,
   task,
   claims: [{ kind: 'area' as const, name: 'ui' }],
@@ -542,6 +543,76 @@ describe('buildSessionPrompt for flow steps', () => {
       'Earlier steps:\n--- plan (Planner)\n1. Add <Badge/> to header.tsx\n---',
     );
     expect(prompt).toContain('--- review (Reviewer): rejected\n1. No empty-state test.\n---');
+  });
+});
+
+describe('review rounds in a brief', () => {
+  const reviewStep = {
+    ...implementStep,
+    index: 1,
+    count: 3,
+    role: 'review',
+    personaName: 'Reviewer',
+    tools: 'read_only',
+  } as const;
+  const rejection = (summary: string, at: string): StepResult => ({
+    summary,
+    verdict: 'reject',
+    sessionId: mintId('Session'),
+    at,
+  });
+  const brief = (step: Parameters<typeof buildSessionPrompt>[0]['step'], earlier: StepResult[]) =>
+    buildSessionPrompt({ ...base, step, earlierResults: earlier, action: { kind: 'start' } });
+
+  it.each(['review', 'qa', 'plan_review'] as const)(
+    'tells a %s step on its first round to list every blocking finding in one rejection',
+    (role) => {
+      const prompt = brief({ ...reviewStep, role }, []);
+      expect(prompt).toContain('This is round 1');
+      expect(prompt).toContain('every blocking finding');
+      expect(prompt).toContain('one rejection');
+      expect(prompt).not.toContain('Findings from your earlier rounds');
+    },
+  );
+
+  it('shows a later round the newest rejection and tells it to check only that, plus what the fix broke', () => {
+    const prompt = brief(reviewStep, [
+      rejection('1. BLOCKING a.ts:1 stale cache.', '2026-10-13T10:00:00.000Z'),
+      rejection('1. BLOCKING b.ts:2 still no test.', '2026-10-13T11:00:00.000Z'),
+    ]);
+    expect(prompt).toContain('This is round 3');
+    expect(prompt).toContain(
+      'Findings from your earlier rounds (check only these):\n1. BLOCKING b.ts:2 still no test.',
+    );
+    // An older round's finding that the newest rejection left out was judged fixed.
+    expect(prompt).not.toContain('stale cache');
+    expect(prompt).toContain('only whether each earlier finding is fixed');
+    expect(prompt).toContain("what the fix's own changes broke");
+    expect(prompt).not.toContain('every blocking finding');
+  });
+
+  it('says a new finding the fix did not cause is a follow-up, not a rejection', () => {
+    const prompt = brief(reviewStep, [
+      rejection('1. BLOCKING a.ts:1 stale cache.', '2026-10-13T10:00:00.000Z'),
+    ]);
+    expect(prompt).toContain('followUps');
+    expect(prompt).toContain('does not reject the work');
+    // Round 1 may file a real finding that is not blocking too.
+    expect(brief(reviewStep, [])).toContain('followUps');
+  });
+
+  it('does not count an approval as a rejection round', () => {
+    const approved: StepResult = {
+      ...rejection('Looks right.', '2026-10-13T10:00:00.000Z'),
+      verdict: 'approve',
+    };
+    expect(brief(reviewStep, [approved])).toContain('This is round 1');
+  });
+
+  it('adds nothing to an implement step', () => {
+    const prompt = brief(implementStep, []);
+    expect(prompt).not.toContain('This is round');
+    expect(prompt).not.toContain('followUps');
   });
 });
 

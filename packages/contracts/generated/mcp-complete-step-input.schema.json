@@ -28,6 +28,40 @@
           "type": "null"
         }
       ]
+    },
+    "followUps": {
+      "default": [],
+      "description": "Review, plan review and QA steps only: real problems that should not reject the work (on a later round, ones that are new and not caused by the fix). 10db files each as a task in the Icebox column and names it in your result.",
+      "maxItems": 10,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "The outcome, as what is true when it is done."
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "description": "What you saw, where, and why it matters."
+          },
+          "acceptanceCriteria": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "required": [
+          "title",
+          "description"
+        ]
+      }
     }
   },
   "required": [

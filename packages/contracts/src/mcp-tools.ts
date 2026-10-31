@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { InboxOption } from './entities';
+import { InboxOption, Title } from './entities';
 import { HandoffDto, HandoffInput } from './handoff';
 import {
   ClaimId,
@@ -9,6 +9,7 @@ import {
   HandoffId,
   InboxItemId,
   ProposalId,
+  TaskId,
   WorkstreamId,
 } from './ids';
 import { ClaimKind, ProposalKind, QuestionCategory, Severity, Urgency, Verdict } from './states';
@@ -62,6 +63,17 @@ export const ContextPack = z.object({
   }),
 });
 export type ContextPack = z.infer<typeof ContextPack>;
+
+/** Most follow-up tasks one step result may file. */
+export const MAX_FOLLOW_UPS = 10;
+
+/** A task a review step asks 10db to file: the rest (project, landing, areas, Icebox) comes from the task it reviews. */
+export const FollowUpInput = z.object({
+  title: Title.describe('The outcome, as what is true when it is done.'),
+  description: z.string().min(1).describe('What you saw, where, and why it matters.'),
+  acceptanceCriteria: z.array(z.string().min(1)).default([]),
+});
+export type FollowUpInput = z.infer<typeof FollowUpInput>;
 
 export const McpToolInputs = {
   get_context: z.object({}),
@@ -126,6 +138,13 @@ export const McpToolInputs = {
       .nullable()
       .default(null)
       .describe('Required for plan_review, review and QA steps; null for a plan step.'),
+    followUps: z
+      .array(FollowUpInput)
+      .max(MAX_FOLLOW_UPS)
+      .default([])
+      .describe(
+        'Review, plan review and QA steps only: real problems that should not reject the work (on a later round, ones that are new and not caused by the fix). 10db files each as a task in the Icebox column and names it in your result.',
+      ),
   }),
 } as const satisfies Record<McpToolName, z.ZodType>;
 
@@ -158,5 +177,9 @@ export const McpToolOutputs = {
   commit: z.object({ sha: z.string().regex(/^[0-9a-f]{40}$/), alreadyCommitted: z.boolean() }),
   record_evidence: z.object({ evidenceId: EvidenceId }),
   write_handoff: z.object({ handoffId: HandoffId, instruction: z.string() }),
-  complete_step: z.object({ instruction: z.string() }),
+  complete_step: z.object({
+    instruction: z.string(),
+    /** The tasks filed from `followUps`; absent in a result recorded before there were any. */
+    followUps: z.array(z.object({ taskId: TaskId, title: z.string() })).default([]),
+  }),
 } as const satisfies Record<McpToolName, z.ZodType>;

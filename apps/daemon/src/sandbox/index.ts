@@ -28,6 +28,7 @@ export {
 } from './temp-dir';
 export {
   fileAccessJudge,
+  isOwnTaskOutputPath,
   readAccess,
   readPathsOf,
   writeAccess,

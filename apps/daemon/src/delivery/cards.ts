@@ -320,6 +320,9 @@ export const worktreeCards = {
 /** The fold key of a batch's conflict-with-its-base card, so a clean merge can withdraw it. */
 export const baseConflictKey = (batchId: BatchId): string => `base-conflict:${batchId}`;
 
+/** The fold key of a batch's regeneration-failed card; the builder dismisses it once the files are regenerated. */
+export const baseRegenerateKey = (batchId: BatchId): string => `base-regenerate:${batchId}`;
+
 /** The fold key of a batch's files-in-the-way card, so a clean merge can withdraw it. */
 export const baseKeptKey = (batchId: BatchId): string => `base-kept:${batchId}`;
 
@@ -329,6 +332,8 @@ export interface BaseCardContext {
   readonly migrationsFor?: string;
   /** The branch's migrations whose number the base already gives another. */
   readonly taken?: readonly TakenNumber[];
+  /** Why each conflicting path stayed a conflict, when 10db tried to settle it. */
+  readonly reasons?: ReadonlyMap<string, string>;
 }
 
 /** What a task held back from the migrations hazard is told on the card, after its first paragraph. */
@@ -372,7 +377,8 @@ export const baseCards = {
     context: BaseCardContext = {},
   ): Card => {
     const taken = context.taken ?? [];
-    const conflicting = `${batch.baseBranch} on origin changed these files in ways that conflict with the batch's own changes:\n${listPaths(paths)}`;
+    const reasons = context.reasons ?? new Map<string, string>();
+    const conflicting = `${batch.baseBranch} on origin changed these files in ways that conflict with the batch's own changes, and 10db couldn't settle them itself:\n${listPaths(paths.map((p) => (reasons.has(p) ? `${p}: ${reasons.get(p) ?? ''}` : p)))}`;
     const held = migrationsHeld(batch, context, 'the conflict is resolved');
     return {
       title:
@@ -382,13 +388,30 @@ export const baseCards = {
       body:
         taken.length > 0
           ? `${conflicting}${held}\n\n${regenerateSteps(batch, worktree, taken)}`
-          : `${conflicting}${held}\n\nBefore each gate 10db merges ${batch.baseBranch} into the batch's branch, so the gate tests what the pull request would merge. It can't resolve a conflict: a lane commits only its own files and never records a merge. Until the conflict is resolved, the gates test the branch without ${batch.baseBranch}'s newer commits, so a failure they fix still shows.\n\nOnce the pull request is open, resolve it there (GitHub's Update branch, then Resolve conflicts). Or merge it yourself in the worktree: ${worktreeMergeCommand(worktree, batch.baseBranch)}. That command turns the repository's hooks off, because lanes write in the worktree, so the hook config there is theirs to choose. The next gate tests the result, and this card goes once the branch holds ${batch.baseBranch}.`,
+          : `${conflicting}${held}\n\nBefore each gate 10db merges ${batch.baseBranch} into the batch's branch, so the gate tests what the pull request would merge. It settles a conflict by itself when both sides only added lines at the same place, and regenerates the generated directories it knows the generator of; anything else needs a choice. A lane commits only its own files and never records a merge, so it can't make it. Until the conflict is resolved, the gates test the branch without ${batch.baseBranch}'s newer commits, so a failure they fix still shows.\n\nOnce the pull request is open, resolve it there (GitHub's Update branch, then Resolve conflicts). Or merge it yourself in the worktree: ${worktreeMergeCommand(worktree, batch.baseBranch)}. That command turns the repository's hooks off, because lanes write in the worktree, so the hook config there is theirs to choose. The next gate tests the result, and this card goes once the branch holds ${batch.baseBranch}.`,
       foldKey: baseConflictKey(batch.id),
       // Asked for the migrations hazard, the open card is rewritten to say the task is held back.
       ...(context.migrationsFor === undefined ? {} : { refresh: true }),
       detail: { batchId: batch.id, paths: paths.slice(0, MAX_LISTED_PATHS) },
     };
   },
+  /**
+   * 10db merged the base, taking its version of the generated directories `dirs`, but couldn't
+   * regenerate them. `why` is the reason; `restored` says it removed what a failed run wrote there.
+   * `worktree` is the batch's worktree.
+   */
+  regenerate: (
+    batch: BatchDto,
+    worktree: string,
+    dirs: readonly string[],
+    problem: { readonly why: string; readonly logPath: string | null; readonly restored: boolean },
+  ): Card => ({
+    title: `Batch "${batch.title}": 10db couldn't regenerate files after merging ${batch.baseBranch}`,
+    body: `10db merged ${batch.baseBranch} into the batch's branch. Both sides changed generated files, which are regenerated from their sources and never merged by hand, so 10db took ${batch.baseBranch}'s version of these directories to regenerate them:\n${listPaths(dirs)}\n\nBut ${problem.why}.${problem.restored ? ` 10db removed what the failed run wrote there, so they hold ${batch.baseBranch}'s version as the merge left them.` : ''}\n\nRegenerate them in the worktree ${worktree} (each package's generate script) and commit the result. Until then the gates see generated files that may not match the sources${problem.logPath === null ? '' : `. The log: ${problem.logPath}`}.`,
+    foldKey: baseRegenerateKey(batch.id),
+    refresh: true,
+    detail: { batchId: batch.id, paths: dirs.slice(0, MAX_LISTED_PATHS) },
+  }),
   /** `worktree` is the batch's worktree, which holds `paths`. */
   kept: (
     batch: BatchDto,
@@ -650,19 +673,28 @@ export const mergeCards = {
     detail: { batchId: batch.id },
   }),
   /** GitHub turned this one pull request down, or gh could not ask. */
-  refused: (batch: BatchDto, prUrl: string, error: unknown): Card => {
-    const detail = detailOf(error);
-    const nothingToWaitFor = /clean status/i.test(detail)
-      ? `\n\nGitHub says nothing is left for it to wait for, which usually means ${batch.baseBranch} has no required checks, so there is nothing for auto-merge to wait on.`
-      : '';
-    return {
-      title: `Pull request opened but not set to merge by itself: batch "${batch.title}"`,
-      body: `${detail}${nothingToWaitFor}\n\nThe pull request is open and waits for you to merge it: ${prUrl}`,
-      foldKey: `auto-merge-refused:${batch.id}`,
-      detail: { batchId: batch.id },
-    };
-  },
+  refused: (batch: BatchDto, prUrl: string, error: unknown): Card => ({
+    title: `Pull request opened but not set to merge by itself: batch "${batch.title}"`,
+    body: `${detailOf(error)}\n\nThe pull request is open and waits for you to merge it: ${prUrl}`,
+    foldKey: `auto-merge-refused:${batch.id}`,
+    detail: { batchId: batch.id },
+  }),
+  /**
+   * The pull request had nothing to wait for (its base branch has no required checks), so 10db
+   * merged it at once; GitHub refused that merge.
+   */
+  mergeRefused: (batch: BatchDto, prUrl: string, error: unknown): Card => ({
+    title: `Pull request opened but not merged: batch "${batch.title}"`,
+    body: `${batch.baseBranch} has no required checks, so 10db tried to merge the pull request at once, and GitHub refused:\n\n${detailOf(error)}\n\nThe pull request is open and waits for you to merge it: ${prUrl}`,
+    foldKey: `auto-merge-refused:${batch.id}`,
+    detail: { batchId: batch.id },
+  }),
 };
+
+/** GitHub's answer to turning on auto-merge for a pull request that has nothing left to wait for. */
+export function nothingToWaitFor(error: unknown): boolean {
+  return /clean status/i.test(detailOf(error));
+}
 
 /** The place 10db switches a checkout back to, in words. */
 function placeName(place: CheckoutPlace): string {
