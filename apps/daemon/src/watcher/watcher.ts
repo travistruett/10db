@@ -7,11 +7,12 @@ import {
   InboxKind,
   InboxState,
   LANE_STATES,
+  WorkstreamId,
   WorkstreamState,
   type BatchId,
+  type InboxItemDto,
   type ProjectDto,
   type ProjectId,
-  type WorkstreamId,
 } from '@10db/contracts';
 import {
   activeClaims,
@@ -283,31 +284,40 @@ export function createWatcher(deps: {
     ordinary.forEach(single);
   }
 
+  /** Whether a card names the lane: as the workstream it targets, or as one of its candidates. */
+  function names(item: InboxItemDto, lane: WorkstreamId): boolean {
+    const candidates = item.detail?.['candidates'];
+    return (
+      item.targets.some((t) => t.workstreamId === lane) ||
+      (Array.isArray(candidates) && candidates.includes(lane))
+    );
+  }
+
   /**
-   * Resolves each open stray card in a watched checkout whose path a claim held there by a lane now covers.
-   * A lane can run before it holds the claim its work needs (a task with no areas launches holding
-   * nothing, and takes one through request_claim), so the writes the watcher saw before the grant were
-   * carded; once the lane holds a claim over them they are its own work. Sensitive paths stay carded.
+   * Resolves each open stray card that names `lane`, in the lane's own checkout, whose path a claim the lane
+   * now holds covers. A lane can run before it holds the claim its work needs (a task with no areas launches
+   * holding nothing, and takes one through request_claim), so the writes the watcher saw before the grant
+   * were carded; once that lane holds a claim over them they are its own work. A claim granted to any other
+   * lane, in this checkout or another, resolves nothing: that lane didn't make the write, so the card stays.
+   * Sensitive paths stay carded.
    */
-  function resolveCovered(): void {
+  function resolveCovered(lane: WorkstreamId): void {
     if (stopped) return;
-    const open = listInbox(db, { states: [InboxState.Open] }).filter(
-      (item) => item.kind === InboxKind.Flag && item.title === STRAY_TITLE,
+    const ws = getWorkstream(db, lane);
+    const open = listInbox(db, { states: [InboxState.Open], projectId: ws.projectId }).filter(
+      (item) => item.kind === InboxKind.Flag && item.title === STRAY_TITLE && names(item, lane),
     );
     if (open.length === 0) return;
-    for (const { projectId, batchId, root } of watched.values()) {
-      const project = getProject(db, projectId);
-      const site = siteOf(project, batchId, root);
-      for (const item of open) {
-        const path = item.detail?.['path'];
-        if (item.projectId !== projectId || typeof path !== 'string') continue;
-        if (item.body !== labelled(site, path) || isSensitivePath(path)) continue;
-        if (straysIn(project, batchId, [path], WATCHED_STATES, null).strays.length > 0) continue;
-        deps.inbox.resolve(
-          item.id,
-          'A lane working in this checkout now holds a claim covering it.',
-        );
-      }
+    const project = getProject(db, ws.projectId);
+    const site = siteOf(project, worktreeBatchOf(ws), checkoutOf(db, ws));
+    // Every claim the lane holds counts in its own checkout, the one its per-copy claims are scoped to.
+    const claims = activeClaims(db, lane).map((c) => ({ kind: c.kind, name: c.name }));
+    for (const item of open) {
+      const path = item.detail?.['path'];
+      if (typeof path !== 'string' || isSensitivePath(path)) continue;
+      if (item.body !== labelled(site, path)) continue;
+      if (findStrays([path], project, claims).length > 0) continue;
+      deps.inbox.resolve(item.id, 'The lane it names now holds a claim covering it.');
     }
   }
 
@@ -406,13 +416,20 @@ export function createWatcher(deps: {
   }
 
   // Queued behind any batch in progress, so a card that batch raises is checked too; outside the write
-  // that published the grant, since resolving a card is a write of its own.
+  // that published the grant, since resolving a card is a write of its own. Only the lane granted the claim
+  // can clear cards, and only its own.
   const unsubscribe =
     deps.bus?.subscribe((event) => {
       if (event.type !== EventType.ClaimAcquired || stopped) return;
-      chain = chain.then(resolveCovered).catch((error: unknown) => {
-        deps.logger.warn({ err: String(error) }, 'could not re-check stray cards after a claim');
-      });
+      const lane = WorkstreamId.safeParse(event.data['workstreamId']);
+      if (!lane.success) return;
+      chain = chain
+        .then(() => {
+          resolveCovered(lane.data);
+        })
+        .catch((error: unknown) => {
+          deps.logger.warn({ err: String(error) }, 'could not re-check stray cards after a claim');
+        });
     }) ?? (() => undefined);
 
   return {
