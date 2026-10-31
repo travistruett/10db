@@ -3768,6 +3768,11 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
     expect(hook('WebFetch', { url: 'https://example.org' })).toMatchObject({ decision: 'ask' });
     expect(hook('WebSearch', { query: 'x' })).toMatchObject({ decision: 'ask' });
     expect(hook('mcp__docs__search', {})).toMatchObject({ decision: 'ask' });
+    // Monitor runs a shell command, so the guard judges it as it judges Bash.
+    expect(hook('Monitor', { command: 'npm publish' })).toMatchObject({ decision: 'deny' });
+    expect(hook('Monitor', { command: 'git reset --hard HEAD~3' })).toMatchObject({
+      decision: 'deny',
+    });
     // The guard's own refusal still comes first.
     expect(
       hook('Read', { file_path: join(probe.home, 'Library', 'Keychains', 'x') }),

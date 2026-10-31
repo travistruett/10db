@@ -2680,3 +2680,30 @@ describe('hazardFor agrees with the guard on which commands need a hazard claim'
     );
   });
 });
+
+describe('a Monitor command is judged as a Bash command', () => {
+  const UNSAFE = [
+    'git push --force origin main',
+    'gh pr merge 1 --admin',
+    'npm publish',
+    'git reset --hard HEAD~3',
+    'git commit --no-verify -m x',
+    `rm -rf ${join(repo.path, '.git')}`,
+    'pnpm add x',
+  ];
+  it.each(UNSAFE)('refuses %s through Monitor as through Bash', (command) => {
+    const viaBash = bash(command);
+    expect(viaBash.decision).toBe('deny');
+    expect(judge('Monitor', { command })).toEqual(viaBash);
+  });
+
+  it('allows a plain Monitor command', () => {
+    expect(judge('Monitor', { command: 'tail -f out.log' })).toEqual({ decision: 'allow' });
+  });
+
+  it('still refuses Monitor in a read-only step', () => {
+    expect(judge('Monitor', { command: 'tail -f out.log' }, API_AND_DB, true).decision).toBe(
+      'deny',
+    );
+  });
+});

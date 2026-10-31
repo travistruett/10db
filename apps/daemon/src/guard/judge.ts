@@ -668,7 +668,9 @@ export function judgeToolUse(input: GuardInput): GuardVerdict {
     }
     return filePath === null ? ALLOW : judgeFile(input, filePath);
   }
-  if (input.toolName === 'Bash') {
+  // Monitor runs its command in a shell like Bash does, so the same rules judge it. A read-only step
+  // refuses it below, as it refuses every tool its list leaves out.
+  if (input.toolName === 'Bash' || (input.toolName === 'Monitor' && !input.readOnly)) {
     const command = stringField(input.toolInput, 'command');
     if (command === null) return ALLOW;
     if (input.readOnly) {
