@@ -27,6 +27,7 @@ export const McpToolName = {
   RecordDecision: 'record_decision',
   Propose: 'propose',
   ReportDeviation: 'report_deviation',
+  FileFollowUp: 'file_follow_up',
   RequestClaim: 'request_claim',
   Commit: 'commit',
   RecordEvidence: 'record_evidence',
@@ -108,6 +109,7 @@ export const McpToolInputs = {
     severity: z.enum(Severity),
     reason: z.string().min(1),
   }),
+  file_follow_up: FollowUpInput.extend({ opId: OpId }),
   request_claim: z.object({
     opId: OpId,
     kind: z.enum(ClaimKind),
@@ -155,6 +157,7 @@ export const McpToolOutputs = {
   record_decision: z.object({ decisionId: DecisionId }),
   propose: z.object({ proposalId: ProposalId }),
   report_deviation: z.object({ deviationId: DeviationId }),
+  file_follow_up: z.object({ taskId: TaskId, title: z.string() }),
   request_claim: z.discriminatedUnion('granted', [
     z.object({ granted: z.literal(true), claimId: ClaimId }),
     z.object({

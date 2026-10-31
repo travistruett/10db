@@ -9,7 +9,7 @@ import {
   type HandoffDto,
   type NextAction,
   type StepResult,
-  type StepRole,
+  StepRole,
   type TaskDto,
   Verdict,
 } from '@10db/contracts';
@@ -129,6 +129,8 @@ const RULES = [
   'If you depart from the plan or a principle, call report_deviation with your reason.',
   PLAIN_COMMANDS,
   "Run only the checks for what you changed (the changed packages' tests, typecheck and lint), never the full gate: 10db runs it after your turn ends.",
+  // In the brief as well as the persona: a builder's edited persona is never overwritten.
+  'A task is about one pull request, design and docs included. When a design or docs change would grow past about 300 lines, stop at a coherent point so what you have stands on its own, and file each remaining section with mcp__10db__file_follow_up (one call each, a new opId): 10db parks it in the Icebox column and names this task in its description.',
   'When the acceptance criteria are met and committed, end your turn.',
   'If 10db asks you to hand off, finish your current step, call write_handoff, and end your turn.',
 ];
@@ -140,6 +142,11 @@ function readOnlyRules(role: StepRole): string[] {
     REVIEW_ROLES.includes(role)
       ? 'When you are done, call mcp__10db__complete_step with your findings and a verdict (approve or reject), then end your turn.'
       : 'When you are done, call mcp__10db__complete_step with your plan, then end your turn.',
+    ...(role === StepRole.Plan
+      ? [
+          'A task is about one pull request (about 300 changed lines), design and docs included. If a design or docs plan would grow past that, plan the part that stands alone and list the sections left out by name, one per decision, as follow-up tasks for the implementer to file.',
+        ]
+      : []),
     PLAIN_COMMANDS,
     'If 10db asks you to hand off, call mcp__10db__write_handoff, and end your turn.',
   ];
