@@ -13,15 +13,23 @@ import { systemOpenPaths, systemProcessTable } from './process-table';
 /**
  * The real process table and real signals, on processes this test starts: a shell that leaves
  * three `sleep`s behind in its own subshell, as a lane's command can. Skipped where `ps` cannot run,
- * such as inside a sandbox.
+ * such as inside a sandbox. The cases that find a job by its open files or working directory also
+ * need macOS's `lsof`, which CI's Linux image doesn't have.
  */
 let psWorks = false;
+let lsofWorks = false;
 beforeAll(async () => {
   try {
     await systemProcessTable();
     psWorks = true;
   } catch {
     psWorks = false;
+  }
+  try {
+    await systemOpenPaths([process.pid]);
+    lsofWorks = true;
+  } catch {
+    lsofWorks = false;
   }
 });
 
@@ -79,7 +87,7 @@ describe('lane processes on the real machine', () => {
   });
 
   it('stops a job a command handed to launchd before any sample by its open output file, and leaves one in the checkout alone', async (ctx) => {
-    if (!psWorks) ctx.skip();
+    if (!psWorks || !lsofWorks) ctx.skip();
     // The lane's temp dir, and the checkout other lanes and the builder share.
     const dir = realpathSync(mkdtempSync(join(tmpdir(), 'lp-out-')));
     const checkout = realpathSync(mkdtempSync(join(tmpdir(), 'lp-co-')));
@@ -126,7 +134,7 @@ describe('lane processes on the real machine', () => {
   });
 
   it('stops a job a command handed to launchd before any sample, by its working directory in the temp dir', async (ctx) => {
-    if (!psWorks) ctx.skip();
+    if (!psWorks || !lsofWorks) ctx.skip();
     const dir = realpathSync(mkdtempSync(join(tmpdir(), 'lp-cwd-')));
     try {
       // The session's own process, standing in for claude.
