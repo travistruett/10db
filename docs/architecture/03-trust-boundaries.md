@@ -136,8 +136,11 @@ without it):
   sessions, and R7 holds for them. The live test's widening row (a repo settings file that allows `Read` and
   `/Users`) holds for that reason.
 - **Default permission mode.** Every lane runs in `default` mode. Auto mode's classifier would approve calls
-  that never reach the broker, so hazards and new hosts would skip their cards. Lanes move to auto mode only
-  once the live test's auto-mode cases show they don't
+  that never reach the broker, so hazards and new hosts would skip their cards. The PreToolUse hook already
+  answers `ask` for the calls the broker must see that the guard allows: a command that may run an unclaimed
+  hazard but that the guard can't read, every `Monitor` and every `WebFetch`. It refuses a command that brings
+  its own host list (`allowed_domains`), which in auto mode only the classifier reviews. Lanes move to auto mode only
+  once the live test's auto-mode cases show that hazards and new hosts still reach the broker
   ([decisions/2026-10-30-lanes-wait-for-auto-mode-proof.md](decisions/2026-10-30-lanes-wait-for-auto-mode-proof.md)).
 - **Environment.** The sandbox sets, for lane commands, per-lane package caches (`CARGO_HOME` among them), the
   lane's own mise config (`MISE_CONFIG_DIR`, `MISE_GLOBAL_CONFIG_FILE`, `MISE_SYSTEM_DIR`,

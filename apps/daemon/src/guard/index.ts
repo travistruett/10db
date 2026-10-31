@@ -1,4 +1,5 @@
 export { judgeToolUse, stringField, type FileAccessJudge, type GuardVerdict } from './judge';
+export { judgePreToolUse } from './pre-tool-use';
 export { expandBraces } from './braces';
 export {
   classifyPath,

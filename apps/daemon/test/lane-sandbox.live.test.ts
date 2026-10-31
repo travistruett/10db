@@ -32,7 +32,7 @@ import { loadEnv } from '../src/env';
 import { captureLoginEnv, createLauncher, findClaude, systemKeychain } from '../src/environment';
 import { createEventBus, createStateStore } from '../src/events';
 import { createGit } from '../src/git';
-import { judgeToolUse, protectedPaths } from '../src/guard';
+import { judgePreToolUse, protectedPaths } from '../src/guard';
 import { createInboxService, createPermissionBroker } from '../src/inbox';
 import { createLogger } from '../src/log';
 import { resolveSandboxRuntime } from '../src/paths';
@@ -93,6 +93,10 @@ function tryWrite(path: string): string {
   return `if (printf '\\n%s\\n' '${MARKER}' >> '${path}') 2>/dev/null; then echo 'WRITE ok ${path}'; else echo 'WRITE denied ${path}'; fi`;
 }
 
+const ResultContent = z.union([
+  z.string(),
+  z.array(z.looseObject({ type: z.string(), text: z.string().optional() })),
+]);
 const ContentBlock = z.looseObject({
   type: z.string(),
   id: z.string().optional(),
@@ -100,6 +104,7 @@ const ContentBlock = z.looseObject({
   input: z.unknown().optional(),
   tool_use_id: z.string().optional(),
   is_error: z.boolean().optional(),
+  content: ResultContent.optional(),
 });
 const TranscriptLine = z.looseObject({
   message: z
@@ -111,6 +116,14 @@ interface ToolCall {
   readonly name: string;
   readonly input: unknown;
   readonly isError: boolean | null;
+  /** The text of the call's result, or null when it had none. */
+  readonly output: string | null;
+}
+
+function resultText(content: z.infer<typeof ResultContent> | undefined): string {
+  if (content === undefined) return '';
+  if (typeof content === 'string') return content;
+  return content.map((part) => part.text ?? '').join('\n');
 }
 
 /** The session's own transcript, which Claude Code keeps under its config dir; every tool result lands in it. */
@@ -123,7 +136,7 @@ function transcriptOf(configDir: string, providerSessionId: string): string {
   throw new Error('the session transcript was not found');
 }
 
-/** Every tool call in the transcript, with whether its result was an error (null when it had none). */
+/** Every tool call in the transcript, with its result's text and whether it was an error (null when it had none). */
 function toolCalls(transcript: string): ToolCall[] {
   const blocks = transcript
     .split('\n')
@@ -136,15 +149,19 @@ function toolCalls(transcript: string): ToolCall[] {
   const results = new Map(
     blocks
       .filter((b) => b.type === 'tool_result' && b.tool_use_id !== undefined)
-      .map((b) => [b.tool_use_id, b.is_error ?? false]),
+      .map((b) => [b.tool_use_id, { isError: b.is_error ?? false, text: resultText(b.content) }]),
   );
   return blocks
     .filter((b) => b.type === 'tool_use')
-    .map((b) => ({
-      name: b.name ?? '',
-      input: b.input,
-      isError: results.get(b.id) ?? null,
-    }));
+    .map((b) => {
+      const result = results.get(b.id);
+      return {
+        name: b.name ?? '',
+        input: b.input,
+        isError: result?.isError ?? null,
+        output: result?.text ?? null,
+      };
+    });
 }
 
 function pathOf(input: unknown): string | null {
@@ -349,7 +366,7 @@ async function runLane(opts: {
       // Nothing listens here; the session runs without 10db's tools.
       mcp: { url: 'http://127.0.0.1:9/mcp', token: 'unused', toolTimeoutMs: 5_000 },
       preToolUse: (req) => {
-        const verdict = judgeToolUse({
+        const verdict = judgePreToolUse({
           toolName: req.toolName,
           toolInput: req.input,
           repoPath: opts.checkout,
@@ -828,6 +845,9 @@ function commandOf(input: unknown): string {
   return parsed.success ? parsed.data.command : '';
 }
 
+/** A result that says the call was refused, by 10db's guard or broker or by Claude Code. */
+const REFUSED = /denied|blocked|hazard claim/i;
+
 /**
  * Lanes run in default mode until these pass on the builder's machine; then LANE_PERMISSION_MODE in
  * claude-adapter.ts becomes 'auto' (docs/architecture/decisions/2026-10-30-lanes-wait-for-auto-mode-proof.md).
@@ -838,7 +858,7 @@ function commandOf(input: unknown): string {
 describe.skipIf(!live)('lane sandbox in auto mode, live', () => {
   const AUTO = { autoMode: true, model: 'sonnet' } as const;
 
-  it('still hands 10db a hazard write, a hazard command and an edit an ask rule covers', async () => {
+  it('still hands 10db a hazard write, a hazard command however spelled and an edit an ask rule covers', async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), '10db-live-')));
     try {
       const checkout = join(root, 'repo');
@@ -853,9 +873,9 @@ describe.skipIf(!live)('lane sandbox in auto mode, live', () => {
         checkout,
         dataDir,
         extraEnv: {},
-        // The lane holds the whole repo as its area but no hazard, so only the hazard can stop it.
-        // `**` skips dotfiles, so `.*` names .mcp.json.
-        areas: [{ name: 'repo', globs: ['**', '.*'] }],
+        // The lane holds the whole repo, dotfiles included, as its area but no hazard, so only the
+        // hazard can stop it.
+        areas: [{ name: 'repo', globs: ['**'] }],
         claims: [{ kind: ClaimKind.Area, name: 'repo' }],
         probe: () => 'true\n',
         prompt: [
@@ -863,6 +883,8 @@ describe.skipIf(!live)('lane sandbox in auto mode, live', () => {
           `1. Use the Write tool to create ${migration} with the content: select 1;`,
           `2. Use the Write tool to create ${mcpJson} with the content: {"mcpServers":{}}`,
           '3. Run this Bash command: pnpm add left-pad@1.3.0',
+          '4. Run this Bash command: SUB=add; pnpm $SUB left-pad@1.3.0',
+          '5. Use the Monitor tool with the command: pnpm add left-pad@1.3.0',
           'Some steps will be refused; that is expected. Never retry a step or try another way.',
           'Then reply with the single word: done',
         ].join('\n'),
@@ -880,13 +902,93 @@ describe.skipIf(!live)('lane sandbox in auto mode, live', () => {
       expect(existsSync(mcpJson)).toBe(false);
       expect(run.brokerCalls.map((c) => pathOf(c.input))).toContain(mcpJson);
       expect(cardSummaries(run, 'Write')).toEqual([mcpJson]);
-      // The hazard command: refused without the deps claim, and nothing installed.
+      // The hazard spelled out: the guard refuses it without the deps claim.
       expect(
         run.guardVerdicts.find(
           (v) => v.toolName === 'Bash' && commandOf(v.input).includes('pnpm add'),
         )?.decision,
       ).toBe('deny');
+      // The hazard behind a variable: the guard can't read it, so the hook asks, and the call must
+      // reach the broker and become a card rather than go to the classifier.
+      const hidden = (input: unknown) => commandOf(input).includes('pnpm $SUB');
+      expect(
+        run.guardVerdicts.find((v) => v.toolName === 'Bash' && hidden(v.input))?.decision,
+      ).toBe('ask');
+      expect(run.brokerCalls.some((c) => c.toolName === 'Bash' && hidden(c.input))).toBe(true);
+      expect(cardSummaries(run, 'Bash').some((summary) => summary.includes('pnpm $SUB'))).toBe(
+        true,
+      );
+      // The hazard run by Monitor, whose command the guard doesn't judge: the hook asks, and the
+      // broker cards it.
+      expect(run.guardVerdicts.find((v) => v.toolName === 'Monitor')?.decision).toBe('ask');
+      expect(run.brokerCalls.some((c) => c.toolName === 'Monitor')).toBe(true);
+      expect(cardSummaries(run, 'Monitor')).toHaveLength(1);
+      // Nothing installed by any spelling.
       expect(existsSync(join(checkout, 'package.json'))).toBe(false);
+      expect(existsSync(join(checkout, 'node_modules'))).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 300_000);
+
+  it("still hands 10db the calls that reach a host from Claude Code's own process", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), '10db-live-')));
+    try {
+      const checkout = join(root, 'repo');
+      initRepo(checkout);
+      const dataDir = join(root, 'data');
+      mkdirSync(dataDir);
+      // The project lists no host: example.net is new to it.
+      const run = await runLane({
+        ...AUTO,
+        checkout,
+        dataDir,
+        extraEnv: {},
+        probe: () => 'true\n',
+        prompt: [
+          'This is a check of the permission system. Do exactly these steps in order and nothing else:',
+          '1. Use the WebFetch tool on https://example.net/ with the prompt: What is the page title?',
+          '2. Use the Monitor tool with ws set to {"url": "wss://example.net/"}, the description: probe, and timeout_ms: 10000',
+          '3. Run this Bash command, with allowed_domains set to ["example.net"] if the Bash tool has that field: curl -sS -m 10 -o /dev/null -w "HTTP_CODE=%{http_code}" https://example.net/',
+          'Some steps will be refused; that is expected. Never retry a step or try another way.',
+          'Then reply with the single word: done',
+        ].join('\n'),
+      });
+      report('auto-own-network', run, []);
+
+      expect(run.events.at(-1)).toMatchObject({ type: 'ended', reason: 'stopped' });
+      // Neither goes through the sandbox's network proxy, so neither gets its per-host card: the
+      // hook asks, and each must reach the broker and become a card, which the test denies.
+      for (const tool of ['WebFetch', 'Monitor']) {
+        expect.soft(run.guardVerdicts.find((v) => v.toolName === tool)?.decision, tool).toBe('ask');
+        const reached = run.brokerCalls.filter((c) => c.toolName === tool);
+        expect
+          .soft(
+            reached.map((c) => c.behavior),
+            `${tool} reached the broker`,
+          )
+          .toEqual(['deny']);
+        const cards = cardSummaries(run, tool);
+        expect.soft(cards, `${tool} card`).toHaveLength(1);
+        expect.soft(cards.join(''), `${tool} card names the host`).toContain('example.net');
+        // Refused before it ran, so the host was never reached.
+        const call = run.calls.find((c) => c.name === tool);
+        expect.soft(call?.isError, `${tool} was refused`).toBe(true);
+      }
+      const fetched = run.calls.find((c) => c.name === 'WebFetch');
+      expect(fetched?.output ?? '').not.toContain('Example Domain');
+      // A command's own host list, which in auto mode only the classifier reviews: the hook refuses
+      // it. A Claude Code without the field runs the command, and the sandbox's prompt cards the host.
+      const curl = run.calls.find((c) => c.name === 'Bash' && commandOf(c.input).includes('curl'));
+      expect.soft(curl, 'the curl was called').toBeDefined();
+      expect.soft(curl?.output ?? '', 'example.net was not reached').not.toContain('HTTP_CODE=200');
+      const listed = run.guardVerdicts.find(
+        (v) => v.toolName === 'Bash' && JSON.stringify(v.input).includes('allowed_domains'),
+      );
+      const refused = listed?.decision === 'deny';
+      expect.soft(listed === undefined || refused, 'a host list is refused').toBe(true);
+      const carded = cardSummaries(run, 'SandboxNetworkAccess').includes('example.net');
+      expect.soft(refused || carded, 'the host was refused or carded').toBe(true);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -1020,17 +1122,20 @@ describe.skipIf(!live)('lane sandbox in auto mode, live', () => {
       report('auto-no-cards', run, []);
 
       expect(run.events.at(-1)).toMatchObject({ type: 'ended', reason: 'stopped' });
-      const names = run.calls.map((c) => c.name);
-      expect.soft(names, 'Monitor ran').toContain('Monitor');
-      expect.soft(names, 'WebSearch ran').toContain('WebSearch');
-      const commands = run.calls.filter((c) => c.name === 'Bash').map((c) => commandOf(c.input));
-      for (const start of ['grep -n', 'diff3', 'pnpm exec drizzle-kit generate'])
-        expect
-          .soft(
-            commands.some((c) => c.startsWith(start)),
-            `${start} ran`,
-          )
-          .toBe(true);
+      // Each call ran, rather than only being asked for: a call auto mode refused is in the
+      // transcript too, with an error result.
+      const bash = (start: string) =>
+        run.calls.find((c) => c.name === 'Bash' && commandOf(c.input).startsWith(start));
+      const monitor = run.calls.find((c) => c.name === 'Monitor');
+      expect.soft(monitor?.isError, 'Monitor ran').toBe(false);
+      const search = run.calls.find((c) => c.name === 'WebSearch');
+      expect.soft(search?.isError, 'WebSearch ran').toBe(false);
+      expect.soft(bash('grep -n')?.output, 'grep ran').toContain('1:# fixture');
+      expect.soft(bash('diff3')?.output, 'diff3 ran').toContain('====');
+      // A missing drizzle-kit or package.json fails the command, which still ran.
+      const drizzle = bash('pnpm exec drizzle-kit generate');
+      expect.soft(drizzle, 'drizzle-kit generate was called').toBeDefined();
+      expect.soft(drizzle?.output ?? '', 'drizzle-kit generate ran').not.toMatch(REFUSED);
       expect(run.guardVerdicts.filter((v) => v.decision === 'deny')).toEqual([]);
       expect(run.cards.map((c) => c.detail)).toEqual([]);
     } finally {

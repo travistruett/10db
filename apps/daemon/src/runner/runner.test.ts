@@ -3182,6 +3182,24 @@ describe('the session guard', () => {
     await waitFor(() => denials().length > 0);
     expect(String(denials()[0]?.detail['reason'])).toContain('sign-in');
   });
+
+  it('asks the broker about a call it must see, whatever the permission mode', async () => {
+    engine = await createTestEngine({ Alpha: [[{ do: 'hang' }]] });
+    const specs: SessionSpec[] = [];
+    engine.adapter.seen = (spec) => {
+      specs.push(spec);
+      return {};
+    };
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    const spec = await waitFor(() => specs[0]);
+    const decision = (toolName: string, input: Record<string, unknown>) =>
+      spec.preToolUse({ toolName, input }).decision;
+    expect(decision('Bash', { command: 'SUB=add; pnpm $SUB left-pad@1.3.0' })).toBe('ask');
+    expect(decision('WebFetch', { url: 'https://example.net/', prompt: 'x' })).toBe('ask');
+    expect(decision('Bash', { command: 'pnpm test' })).toBe('allow');
+    await engine.runner.cancel(workstream.id);
+  });
 });
 
 // The probe's temp root is a short path under the shared `/tmp`, which no sandbox can write.
