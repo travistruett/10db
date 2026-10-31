@@ -42,7 +42,8 @@ const GH_DOWN: ReadonlySet<GhFailure> = new Set([
   GhFailure.Aborted,
 ]);
 
-const ghDown = (error: unknown): boolean => error instanceof GhError && GH_DOWN.has(error.kind);
+export const ghDown = (error: unknown): boolean =>
+  error instanceof GhError && GH_DOWN.has(error.kind);
 
 export interface PrWatch {
   /** Reads every followed pull request now, then every interval. */
@@ -262,9 +263,15 @@ export function createPrWatch(input: {
     current = (async () => {
       try {
         await round(controller.signal);
-        await afterRound?.(controller.signal);
       } catch (error) {
         logger.error({ err: detailOf(error) }, 'pull request watch round failed');
+      }
+      // Also after a round that failed: what earlier rounds learned still waits to be acted on, and a
+      // pull request that breaks the round must not keep a merged one's branch for ever.
+      try {
+        await afterRound?.(controller.signal);
+      } catch (error) {
+        logger.error({ err: detailOf(error) }, 'after-round work failed');
       }
       current = null;
       if (again) {
