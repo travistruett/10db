@@ -172,7 +172,7 @@ export async function cutWorktree(
         return;
       case 'failed':
         await refuse(worktreeCards.installFailed(batch, installed));
-        raiseInstallHostCards(ctx, project.id, installed);
+        await raiseInstallHostCards(ctx, project.id, installed);
         return;
       case 'installed':
         ctx.logger.info(
