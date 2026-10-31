@@ -7,6 +7,9 @@ import {
   EventType,
   FIX_ATTEMPT_LIMIT,
   InboxKind,
+  JudgeCallId,
+  JudgeDecision,
+  JudgeOutcome,
   parseFindings,
   PermissionChoice,
   REVIEW_CARD_DETAIL,
@@ -38,6 +41,7 @@ import {
   endSession,
   getAccount,
   getAccountRow,
+  getJudgeConfig,
   getEvidence,
   getInboxItem,
   getMcpApproval,
@@ -62,6 +66,7 @@ import {
   deniedPermissionsForWorkstream,
   openItemsForWorkstream,
   patchWorkstream,
+  recordJudgeOutcome,
   recordProfileOutcome,
   releaseClaim,
   releaseClaims,
@@ -114,6 +119,7 @@ import {
 } from '../environment';
 import type { Git } from '../git';
 import { judgeToolUse, sandboxedAsk, type ProtectedPath } from '../guard';
+import type { Judge } from '../judge';
 import {
   createPermissionBroker,
   raiseGateHostCards,
@@ -124,6 +130,7 @@ import {
 import type { Logger } from '../log';
 import { mintSessionToken } from '../mcp';
 import { allowedToolsFor, storableRule } from '../permissions';
+import { takeFoundHostsReading } from '../registries';
 import { escalateStep, offeredProfiles } from '../routing';
 import {
   fileAccessJudge,
@@ -165,6 +172,12 @@ import { findClaimed } from '../watcher';
 import type { LiveSessions } from './live-sessions';
 import { checkedCommits, raiseBuilderCheck, waitsForCheck } from './builder-check';
 import { outstandingFixEvidence } from './fix-evidence';
+import {
+  REVIEW_SIZE_DIFF_BYTES,
+  REVIEW_SIZE_QUESTION,
+  reviewSizeRule,
+  reviewSizeState,
+} from './review-size';
 import { nextActionAfterCrash, nextActionOnAnotherAccount } from './next-action';
 
 /**
@@ -202,6 +215,8 @@ export interface RunnerOptions {
   readonly gate: GateRunner;
   /** Brings a batch's base as origin has it now into its branch before each of its gates. */
   readonly baseUpdates: BaseUpdates;
+  /** Asked whether a review that is next in line is needed. */
+  readonly judge: Judge;
   /**
    * Brings a task's base into its branch before a run that holds the migrations hazard from its
    * start; absent, it isn't.
@@ -701,6 +716,29 @@ export function createRunner(opts: RunnerOptions): Runner {
   }
 
   /**
+   * Whether the commits since the batch's base touch Markdown files and nothing else. A git failure
+   * (checkout gone, index locked) answers false: QA stays in the plan rather than the error ending
+   * the workstream.
+   */
+  async function changesOnlyMarkdown(row: WorkstreamRow, checkout: string): Promise<boolean> {
+    if (row.baseHead === null) return false;
+    try {
+      const files = await opts.git.filesChangedBetween(
+        checkout,
+        row.baseHead,
+        await opts.git.head(checkout),
+      );
+      return files.length > 0 && files.every((f) => f.endsWith('.md'));
+    } catch (err) {
+      opts.logger.warn(
+        { workstreamId: row.id, err: err instanceof Error ? err.message : String(err) },
+        'keeping the QA step: the changed files could not be listed',
+      );
+      return false;
+    }
+  }
+
+  /**
    * QA checks a change as its user would, and a change of Markdown files alone has no behavior to
    * exercise. Whether that is so is known only after implement, from the paths the commits touched, so
    * it is decided when an approving review is about to hand over to QA. The QA step then leaves the
@@ -719,18 +757,68 @@ export function createRunner(opts: RunnerOptions): Runner {
       row.baseHead === null
     )
       return row;
-    const checkout = checkoutOf(db, row);
-    const files = await opts.git.filesChangedBetween(
-      checkout,
-      row.baseHead,
-      await opts.git.head(checkout),
-    );
-    if (files.length === 0 || !files.every((f) => f.endsWith('.md'))) return row;
-    opts.logger.info(
-      { workstreamId: id, files: files.length },
-      'skipping the QA step: only docs changed',
-    );
+    if (!(await changesOnlyMarkdown(row, checkoutOf(db, row)))) return row;
+    opts.logger.info({ workstreamId: id }, 'skipping the QA step: only docs changed');
     return { ...row, steps: row.steps.filter((_, i) => i !== qaIndex) };
+  }
+
+  /**
+   * Whether the review step that is next can be left out because a model judged the change small,
+   * clear and covered by its tests. The rules that force a review make no call; so does a judge the
+   * builder has switched off. The call is made outside any database write. Any answer but `skip` at
+   * or above the floor, and every fallback, runs the review. The reason names the model, so the
+   * builder sees who skipped it.
+   */
+  async function reviewSkippedByJudge(
+    id: WorkstreamId,
+    row: WorkstreamRow,
+    review: WorkstreamStep,
+    checkout: string,
+    signal: AbortSignal,
+  ): Promise<string | null> {
+    if (opts.judge.off) return null;
+    const config = getJudgeConfig(db);
+    const decision = config.decisions.review_size;
+    if (!config.enabled || !decision.enabled || row.baseHead === null) return null;
+    const task = getTask(db, row.taskId);
+    let changes: Awaited<ReturnType<Git['diffSince']>>;
+    try {
+      const head = await opts.git.head(checkout);
+      changes = await opts.git.diffSince(checkout, row.baseHead, head, REVIEW_SIZE_DIFF_BYTES);
+    } catch (error) {
+      // An unreadable diff is no reason to skip a review.
+      opts.logger.warn({ workstreamId: id, err: error }, 'review size: the diff could not be read');
+      return null;
+    }
+    if (reviewSizeRule(task, changes, review, getProject(db, row.projectId).hazards) === 'review')
+      return null;
+    const answer = await opts.judge.choose({
+      decision: JudgeDecision.ReviewSize,
+      state: reviewSizeState(task, changes),
+      question: REVIEW_SIZE_QUESTION,
+      options: ['review', 'skip'],
+      workstreamId: id,
+      taskId: task.id,
+      signal,
+    });
+    if (answer.kind === 'fallback') {
+      opts.logger.info(
+        { workstreamId: id, reason: answer.reason, detail: answer.detail },
+        'review size: the judge did not answer; the review runs',
+      );
+      return null;
+    }
+    const skips = answer.choice === 'skip' && answer.confidence >= decision.floor;
+    const callId = JudgeCallId.parse(answer.callId);
+    opts.state.write((ctx) => {
+      recordJudgeOutcome(
+        ctx,
+        callId,
+        skips || answer.choice === 'review' ? JudgeOutcome.Acted : JudgeOutcome.BelowFloor,
+      );
+    });
+    if (!skips) return null;
+    return `review skipped by ${answer.model} (${String(answer.confidence)}): small, clear and covered by its tests`;
   }
 
   /** After a read-only step's session: the next step in this lane, DONE, a rework, or a failure. */
@@ -1484,7 +1572,7 @@ export function createRunner(opts: RunnerOptions): Runner {
           return sandboxedAsk(req, project.hazards, fileAccess ?? undefined) ?? verdict;
         },
         canUseTool: createPermissionBroker(
-          { state: opts.state, inbox: opts.inbox },
+          { state: opts.state, inbox: opts.inbox, git: opts.git, logger: opts.logger },
           {
             projectId: project.id,
             workstreamId: id,
@@ -2064,6 +2152,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     // Shutdown killed the gate: record nothing. The workstream stays VERIFYING and recovery re-runs it.
     if (result.aborted) return;
     // A host the sandbox blocked is the builder's to allow; the card names it and the gate's evidence says so.
+    if (result.blockedHosts.length > 0) await takeFoundHostsReading(opts, project.id);
     raiseGateHostCards(opts, {
       projectId: project.id,
       run: BlockedRun.Gate,
@@ -2089,7 +2178,43 @@ export function createRunner(opts: RunnerOptions): Runner {
     if (result.exitCode === 0) {
       const step = currentStep(row);
       const move = moveAfter(row.steps, row.stepIndex);
-      const next = move.kind === 'advance' ? row.steps[move.to] : undefined;
+      const planned = move.kind === 'advance' ? row.steps[move.to] : undefined;
+      // A review the judge skips leaves the plan, as a QA step of docs alone does. A cancel or a
+      // shutdown cuts the call short through the same handle that stops a gate.
+      let skipped: string | null = null;
+      if (move.kind === 'advance' && planned?.role === StepRole.Review) {
+        const judgeAbort = new AbortController();
+        ctl.gateAbort = judgeAbort;
+        const already = stopRequested(ctl);
+        if (already === 'cancelled' || already === 'shutdown') judgeAbort.abort();
+        try {
+          skipped = await reviewSkippedByJudge(id, row, planned, checkout, judgeAbort.signal);
+        } finally {
+          ctl.gateAbort = null;
+        }
+      }
+      // With the review gone, the step that follows it is QA, which a change of Markdown alone skips.
+      const afterReview =
+        skipped !== null && move.kind === 'advance' ? row.steps[move.to + 1] : undefined;
+      const skipsQa =
+        afterReview?.role === StepRole.Qa && (await changesOnlyMarkdown(row, checkout));
+      // The judge's call took time; a cancel that landed meanwhile must not be overwritten.
+      if (stopRequested(ctl) === 'cancelled') {
+        cancelNow(id, ctl.fence);
+        return;
+      }
+      // Shutdown cut the call short: record nothing, and recovery runs the gate again.
+      if (stopRequested(ctl) === 'shutdown') return;
+      const dropped = new Set<number>();
+      if (skipped !== null && move.kind === 'advance') {
+        dropped.add(move.to);
+        if (skipsQa) {
+          dropped.add(move.to + 1);
+          opts.logger.info({ workstreamId: id }, 'skipping the QA step: only docs changed');
+        }
+      }
+      const steps = row.steps.filter((_, i) => !dropped.has(i));
+      const next = move.kind === 'advance' ? steps[move.to] : undefined;
       if (move.kind === 'advance' && next) {
         opts.state.write((ctx) => {
           insertEvidence(ctx, evidence);
@@ -2099,12 +2224,15 @@ export function createRunner(opts: RunnerOptions): Runner {
             fence: ctl.fence,
             patch: {
               nextAction: { kind: 'start' },
-              steps: advanceSteps(row.steps, row.stepIndex, move.to, entryFor(ctx, id)),
+              steps: advanceSteps(steps, row.stepIndex, move.to, entryFor(ctx, id)),
               stepIndex: move.to,
               model: next.model,
               effort: next.effort,
             },
-            reason: `gate passed; next: ${next.role}`,
+            reason:
+              skipped === null
+                ? `gate passed; next: ${next.role}`
+                : `gate passed; ${skipped}; next: ${next.role}`,
           });
           clearLease(ctx, id);
         });
@@ -2113,11 +2241,17 @@ export function createRunner(opts: RunnerOptions): Runner {
       opts.state.write((ctx) => {
         insertEvidence(ctx, evidence);
         countFinished(ctx, step);
-        if (row.steps.length > 0)
+        if (steps.length > 0)
           patchWorkstream(ctx, id, ctl.fence, {
-            steps: advanceSteps(row.steps, row.stepIndex, -1, entryFor(ctx, id)),
+            steps: advanceSteps(steps, row.stepIndex, -1, entryFor(ctx, id)),
           });
-        markDone(ctx, id, ctl.fence, row, 'gate passed');
+        markDone(
+          ctx,
+          id,
+          ctl.fence,
+          row,
+          skipped === null ? 'gate passed' : `gate passed; ${skipped}`,
+        );
       });
       return;
     }

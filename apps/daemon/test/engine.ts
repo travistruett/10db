@@ -1,6 +1,7 @@
 import type { AddressInfo } from 'node:net';
 import { homedir } from 'node:os';
 import { serve } from '@hono/node-server';
+import { mintId } from '@10db/contracts';
 import type {
   AccountId,
   BatchId,
@@ -54,6 +55,7 @@ import { ManualClock } from '../src/clock';
 import { createLauncher, secretFingerprint, type Keychain } from '../src/environment';
 import { createEventBus, createStateStore, type StateStore } from '../src/events';
 import { createGit } from '../src/git';
+import type { Judge } from '../src/judge';
 import { createInboxService, type InboxService } from '../src/inbox';
 import { silentLogger } from '../src/log';
 import { protectedPaths } from '../src/guard';
@@ -109,6 +111,18 @@ export interface TestEngine {
   close(): Promise<void>;
 }
 
+/** A judge that is off: every decision keeps today's rule. */
+export const offJudge: Judge = {
+  off: true,
+  choose: () =>
+    Promise.resolve({
+      kind: 'fallback',
+      reason: 'off',
+      detail: 'off',
+      callId: mintId('JudgeCall'),
+    }),
+};
+
 export async function createTestEngine(
   book: FakeScriptBook,
   project: Partial<ProjectInput> = {},
@@ -126,6 +140,8 @@ export async function createTestEngine(
       | 'hold'
       | 'laneTempDirs'
       | 'migrationsBase'
+      | 'judge'
+      | 'git'
     >
   > = {},
   setup: { readonly account?: AccountInput; readonly secret?: string } = {},
@@ -245,6 +261,8 @@ export async function createTestEngine(
       beforeGate: () => Promise.resolve({ kind: 'up_to_date', note: null }),
       gate: (_batchId, _signal, run) => run(),
     },
+    // No decision is asked of a model unless a test scripts one.
+    judge: offJudge,
     clock,
     logger: silentLogger,
     dataDir: data.path,
