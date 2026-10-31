@@ -181,8 +181,10 @@ const DOT = '';
  * Whether an area glob covers `path`. Node's `matchesGlob` has no `dot` option and lets no `*` or
  * `**` match a name that starts with a dot, so both sides are matched with every dot swapped for a
  * private-use character: `**` then covers `.gitignore` and `.github/**` while `.github` stays literal.
+ * A path with a `.git` part is in no area, so a claim never reaches git internals (hooks, config).
  */
 function areaMatches(path: string, glob: string): boolean {
+  if (path.split(/[\\/]/).includes('.git')) return false;
   if (path.includes(DOT) || glob.includes(DOT)) return matchesGlob(path, glob);
   return matchesGlob(path.replaceAll('.', DOT), glob.replaceAll('.', DOT));
 }

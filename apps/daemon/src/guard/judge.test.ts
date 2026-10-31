@@ -651,7 +651,10 @@ describe('resolveInRepo', () => {
   });
 });
 
-describe('paths that climb out of a link', () => {
+describe.each([
+  { setup: 'narrow areas', areas: AREAS, claim: 'api' },
+  { setup: 'a ** area', areas: [{ name: 'repo', globs: ['**'] }], claim: 'repo' },
+])('paths that climb out of a link ($setup)', ({ areas, claim }) => {
   const own = tempDir('guard-climb-link');
   beforeAll(() => {
     mkdirSync(join(own.path, '.git', 'hooks'), { recursive: true });
@@ -670,9 +673,9 @@ describe('paths that climb out of a link', () => {
       toolName,
       toolInput,
       repoPath: own.path,
-      areas: AREAS,
+      areas,
       hazards: DEFAULT_HAZARDS,
-      claims: [{ kind: 'area', name: 'api' }],
+      claims: [{ kind: 'area', name: claim }],
       readOnly: false,
       protectedPaths: guarded(),
     });
@@ -1420,6 +1423,27 @@ describe('classifyPath with dotfiles', () => {
     });
     expect(verdict.decision).toBe('allow');
   });
+
+  it.each(['.git/config', '.git', 'sub/.git', 'a/.git/b'])('keeps %s in no area', (path) => {
+    expect(classifyPath(path, REPO_AREA, []).areas).toEqual([]);
+  });
+
+  it.each(['.git/hooks/pre-commit', '.git/config'])(
+    'denies an edit of %s with the ** area claimed and no file-access judge',
+    (path) => {
+      const verdict = judgeToolUse({
+        toolName: 'Edit',
+        toolInput: { file_path: path },
+        repoPath: repo.path,
+        areas: REPO_AREA,
+        hazards: DEFAULT_HAZARDS,
+        claims: [{ kind: 'area', name: 'repo' }],
+        readOnly: false,
+        protectedPaths: guarded(),
+      });
+      expect(verdict.decision).toBe('deny');
+    },
+  );
 });
 
 describe('stringField', () => {
