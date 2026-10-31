@@ -160,12 +160,13 @@ export function toPermissionResult(
   };
 }
 
+/** An `ask` sends the call to canUseTool, past any allow rule and auto mode's classifier. */
 export function toHookOutput(verdict: GuardVerdict): HookJSONOutput {
   if (verdict.decision === 'allow') return {};
   return {
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',
-      permissionDecision: 'deny',
+      permissionDecision: verdict.decision,
       permissionDecisionReason: verdict.reason,
     },
   };

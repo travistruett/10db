@@ -16,6 +16,8 @@ import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery
 import { isolatedGitEnv } from '../../test/fixtures';
 import type { DeliveryContext } from './context';
 import { createBaseUpdates, ensureWorktreeWhole, workstreamChanges } from './index';
+import { baseConflictKey, baseKeptKey } from './cards';
+import { raise } from './context';
 import { INSTALL_SUMMARY } from './worktree-dependencies';
 
 let h: DeliveryHarness;
@@ -280,18 +282,22 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       );
     });
 
-    it('when the conflict card cannot be raised', async () => {
+    it('when the conflict notice cannot be written', async () => {
       h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
       const { batch } = await opened();
       await commitOnBatch(batch, 'README.md', '# ours\n');
       h.teammatePush('main', 'README.md', '# theirs\n');
-      const inbox = {
-        ...h.ctx.inbox,
-        flag: () => {
-          throw new Error('the inbox is closed');
+      const closed = Object.create(h.ctx.state, {
+        write: {
+          value: () => {
+            throw new Error('the database is closed');
+          },
         },
-      };
-      const update = await createBaseUpdates({ ...h.ctx, inbox }).beforeGate(batch.id, signal);
+      }) as typeof h.ctx.state;
+      const update = await createBaseUpdates({ ...h.ctx, state: closed }).beforeGate(
+        batch.id,
+        signal,
+      );
       expect(update.kind).toBe('not_merged');
       expect(update.kind === 'not_merged' && update.note).toMatch(/^origin\/main conflicts/);
     });
@@ -342,22 +348,31 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
     });
   });
 
-  it('raises one card for a conflict, however many gates meet it', async () => {
+  it('shows a conflict on the batch and raises no card, however many gates meet it', async () => {
     h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
     const { batch } = await opened();
     await commitOnBatch(batch, 'README.md', '# ours\n');
     h.teammatePush('main', 'README.md', '# theirs\n');
     const updates = createBaseUpdates(h.ctx);
     await updates.beforeGate(batch.id, signal);
+    const first = getBatch(h.store.db, batch.id);
     await updates.beforeGate(batch.id, signal);
-    const card = h.only(h.cards());
-    expect(card.title).toBe('Batch "Alpha" conflicts with main');
-    expect(card.body).toContain('- README.md: both sides changed the same lines');
-    expect(card.body).toContain(
+    await updates.beforeGate(batch.id, signal);
+    expect(h.cards()).toEqual([]);
+    const after = getBatch(h.store.db, batch.id);
+    const notice = h.only(after.notices);
+    expect(notice).toMatchObject({
+      key: 'base-conflict',
+      tone: 'warning',
+      line: 'Conflicts with main: README.md',
+    });
+    expect(notice.body).toContain('- README.md: both sides changed the same lines');
+    expect(notice.body).toContain(
       `git -C '${pathOf(batch)}' -c core.hooksPath=/dev/null merge 'origin/main'`,
     );
-    expect(card.body).toContain('Update branch');
-    expect(card.detail).toEqual({ batchId: batch.id, paths: ['README.md'] });
+    expect(notice.body).toContain('Update branch');
+    // The same finding again writes nothing, so no client is told a second time.
+    expect(after.updatedAt).toBe(first.updatedAt);
   });
 
   describe('settling conflicts with the base itself', () => {
@@ -451,7 +466,7 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       expect(logged('base conflicts settled')).toHaveLength(1);
     });
 
-    it('withdraws the conflict card of an earlier gate once the base merges', async () => {
+    it('clears the conflict notice of an earlier gate once the base merges', async () => {
       h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
       h.commit('src/index.ts', 'a\nz\n');
       h.git$('push', '-q', 'origin', 'main');
@@ -462,9 +477,12 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       h.teammatePush('main', 'README.md', '# theirs\n');
       const updates = createBaseUpdates(h.ctx);
       expect((await updates.beforeGate(batch.id, signal)).kind).toBe('not_merged');
-      expect(h.only(h.cards()).body).toContain('- README.md: both sides changed the same lines');
-      expect(h.only(h.cards()).body).not.toContain('src/index.ts');
-      // The builder resolves README.md by hand, as the card says.
+      expect(h.cards()).toEqual([]);
+      const notice = h.only(getBatch(h.store.db, batch.id).notices);
+      expect(notice.line).toBe('Conflicts with main: README.md');
+      expect(notice.body).toContain('- README.md: both sides changed the same lines');
+      expect(notice.body).not.toContain('src/index.ts');
+      // The builder resolves README.md by hand, as the notice says.
       gitIn(
         pathOf(batch),
         '-c',
@@ -476,10 +494,11 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
         'origin/main',
       );
       expect((await updates.beforeGate(batch.id, signal)).kind).toBe('up_to_date');
+      expect(getBatch(h.store.db, batch.id).notices).toEqual([]);
       expect(h.cards()).toEqual([]);
     });
 
-    it('raises one card with the renumber steps when an ordinary file also conflicts beside a migration collision', async () => {
+    it('shows one notice with the renumber steps when an ordinary file also conflicts beside a migration collision', async () => {
       h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
       const journal = (...tags: string[]): string =>
         `${JSON.stringify({ version: '7', dialect: 'sqlite', entries: tags.map((tag, idx) => ({ idx, version: '6', when: idx, tag, breakpoints: true })) }, null, 2)}\n`;
@@ -502,13 +521,14 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       const update = await createBaseUpdates(h.ctx).beforeGate(batch.id, signal);
       expect(update.kind).toBe('not_merged');
       expect(state(path)).toEqual(before);
-      const card = h.only(h.cards());
-      expect(card.title).toBe('Batch "Alpha" must regenerate migration 0001_mine on top of main');
-      expect(card.body).toContain('- README.md: both sides changed the same lines');
-      expect(card.body).toContain(
+      expect(h.cards()).toEqual([]);
+      const notice = h.only(getBatch(h.store.db, batch.id).notices);
+      expect(notice.line).toBe('Must regenerate migration 0001_mine on top of main');
+      expect(notice.body).toContain('- README.md: both sides changed the same lines');
+      expect(notice.body).toContain(
         "Migration 0001_mine takes number 0001, which main's 0001_theirs already has.",
       );
-      expect(card.body).toContain('drizzle-kit generate');
+      expect(notice.body).toContain('drizzle-kit generate');
     });
 
     it('regenerates generated files from their sources and commits them after the merge', async () => {
@@ -618,9 +638,10 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       expect(update.kind).toBe('not_merged');
       expect(run.ran).toBe(0);
       expect(state(pathOf(batch))).toEqual(before);
-      const card = h.only(h.cards());
-      expect(card.title).toBe('Batch "Alpha" conflicts with main');
-      expect(card.body).toContain(
+      expect(h.cards()).toEqual([]);
+      const notice = h.only(getBatch(h.store.db, batch.id).notices);
+      expect(notice.line).toBe(`Conflicts with main: ${DB}/meta/_journal.json`);
+      expect(notice.body).toContain(
         `- ${DB}/meta/_journal.json: drizzle numbers its migrations in order, so its journal isn't merged by line`,
       );
     });
@@ -725,8 +746,8 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
         held: { reason: 'conflict', paths: [`${DB}/meta/_journal.json`] },
       });
       expect(state(path)).toEqual(before);
-      const card = h.only(h.cards());
-      expect(card.body).toContain(
+      expect(h.cards()).toEqual([]);
+      expect(h.only(getBatch(h.store.db, batch.id).notices).body).toContain(
         `- ${DB}/meta/_journal.json: it is generated, and 10db regenerates it only at the batch's gate, not while a task's session works in the worktree`,
       );
     });
@@ -746,7 +767,7 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       expect(card.body).toContain('regenerating did not make it again');
     });
 
-    it('leaves a conflict in a lockfile for the builder, with one card that says so', async () => {
+    it('leaves a conflict in a lockfile for the builder, with one notice that says so', async () => {
       h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
       h.commit('pnpm-lock.yaml', 'a\nz\n');
       h.git$('push', '-q', 'origin', 'main');
@@ -755,13 +776,14 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       h.teammatePush('main', 'pnpm-lock.yaml', 'a\nc\nz\n');
       const update = await createBaseUpdates(h.ctx).beforeGate(batch.id, signal);
       expect(update.kind).toBe('not_merged');
-      expect(h.only(h.cards()).body).toContain(
+      expect(h.cards()).toEqual([]);
+      expect(h.only(getBatch(h.store.db, batch.id).notices).body).toContain(
         "- pnpm-lock.yaml: pnpm's lockfile is made by pnpm, not merged by line",
       );
     });
   });
 
-  it("raises a card for files git doesn't track in the way, tells the fix session to leave them, and withdraws it once the base merges", async () => {
+  it("shows files git doesn't track in the way on the batch, tells the fix session to leave them, and clears it once the base merges", async () => {
     h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
     h.commit('.gitignore', 'build/\n');
     h.git$('push', '-q', 'origin', 'main');
@@ -776,22 +798,25 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
     const blocked = await updates.beforeGate(batch.id, signal);
     expect(blocked).toEqual({
       kind: 'not_merged',
-      note: "10db didn't merge origin/main because files in the worktree that git doesn't track are in the way (build/). Don't remove or move them: they may be the builder's, and the builder has a card about them. This gate ran without origin/main's newer commits.",
+      note: "10db didn't merge origin/main because files in the worktree that git doesn't track are in the way (build/). Don't remove or move them: they may be the builder's, and the batch's tasks show them. This gate ran without origin/main's newer commits.",
     });
-    const card = h.only(h.cards());
-    expect(card.title).toBe(
-      `Batch "Alpha" can't take main: files git doesn't track are in the way`,
-    );
-    expect(card.body).toContain('- build/');
-    expect(card.body).toContain(path);
-    expect(card.detail).toEqual({ batchId: batch.id, paths: ['build/'] });
-    // A second gate meets the same files: still one card.
+    expect(h.cards()).toEqual([]);
+    const notice = h.only(getBatch(h.store.db, batch.id).notices);
+    expect(notice).toMatchObject({
+      key: 'base-kept',
+      tone: 'warning',
+      line: "Can't take main: files git doesn't track are in the way (build/)",
+    });
+    expect(notice.body).toContain('- build/');
+    expect(notice.body).toContain(path);
+    // A second gate meets the same files: still one notice, no card.
     await updates.beforeGate(batch.id, signal);
-    expect(h.cards()).toHaveLength(1);
-    // The builder moves the directory away; the next gate merges and the card goes.
+    expect(getBatch(h.store.db, batch.id).notices).toEqual([notice]);
+    expect(h.cards()).toEqual([]);
+    // The builder moves the directory away; the next gate merges and the notice goes.
     rmSync(join(path, 'build'), { recursive: true });
     expect((await updates.beforeGate(batch.id, signal)).kind).toBe('merged');
-    expect(h.cards()).toEqual([]);
+    expect(getBatch(h.store.db, batch.id).notices).toEqual([]);
   });
 
   it('runs one gate of a batch at a time, and the gates of other batches beside it', async () => {
@@ -876,14 +901,14 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
     expect(getBatch(h.store.db, batch.id).baseSha).toBe(batch.baseSha);
   });
 
-  it('withdraws the conflict card once the branch holds the base', async () => {
+  it('clears the conflict notice once the branch holds the base', async () => {
     h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
     const { batch } = await opened();
     await commitOnBatch(batch, 'README.md', '# ours\n');
     h.teammatePush('main', 'README.md', '# theirs\n');
     const updates = createBaseUpdates(h.ctx);
     await updates.beforeGate(batch.id, signal);
-    expect(h.cards()).toHaveLength(1);
+    expect(getBatch(h.store.db, batch.id).notices).toHaveLength(1);
     // The builder merges by hand in the worktree, keeping the batch's side of the conflict.
     gitIn(
       pathOf(batch),
@@ -898,6 +923,36 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       'origin/main',
     );
     expect((await updates.beforeGate(batch.id, signal)).kind).toBe('up_to_date');
+    expect(getBatch(h.store.db, batch.id).notices).toEqual([]);
+    expect(h.cards()).toEqual([]);
+  });
+
+  it('closes the conflict and in-the-way cards an earlier build raised, once a gate finds the branch holds the base', async () => {
+    h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+    const { batch } = await opened();
+    for (const foldKey of [baseConflictKey(batch.id), baseKeptKey(batch.id)])
+      raise(h.inbox, h.project.id, {
+        title: `Batch "${batch.title}" conflicts with main`,
+        body: 'x',
+        foldKey,
+      });
+    expect(h.cards()).toHaveLength(2);
+    expect((await createBaseUpdates(h.ctx).beforeGate(batch.id, signal)).kind).toBe('up_to_date');
+    expect(h.cards()).toEqual([]);
+  });
+
+  it('closes the conflict card an earlier build raised when a gate shows the conflict as a notice', async () => {
+    h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+    const { batch } = await opened();
+    raise(h.inbox, h.project.id, {
+      title: `Batch "${batch.title}" conflicts with main`,
+      body: 'x',
+      foldKey: baseConflictKey(batch.id),
+    });
+    await commitOnBatch(batch, 'README.md', '# ours\n');
+    h.teammatePush('main', 'README.md', '# theirs\n');
+    await createBaseUpdates(h.ctx).beforeGate(batch.id, signal);
+    expect(getBatch(h.store.db, batch.id).notices).toHaveLength(1);
     expect(h.cards()).toEqual([]);
   });
 
@@ -947,7 +1002,7 @@ describe('a migration numbered the same as one the base added since the batch wa
     return batch;
   }
 
-  it("raises one card before the gate saying the branch's migration must be regenerated on top of the base", async () => {
+  it("shows on the batch, before the gate, that the branch's migration must be regenerated on top of the base", async () => {
     const batch = await collided();
     const path = pathOf(batch);
     const updates = createBaseUpdates(h.ctx);
@@ -957,28 +1012,28 @@ describe('a migration numbered the same as one the base added since the batch wa
       /^origin\/main conflicts with this branch in apps\/api\/drizzle\/meta\/_journal\.json/,
     );
     await updates.beforeGate(batch.id, signal);
-    const card = h.only(h.cards());
-    expect(card.title).toBe(
-      'Batch "Alpha" must regenerate migration 0001_branch_change on top of main',
-    );
-    expect(card.body).toContain(
+    expect(h.cards()).toEqual([]);
+    const notice = h.only(getBatch(h.store.db, batch.id).notices);
+    expect(notice.line).toBe('Must regenerate migration 0001_branch_change on top of main');
+    expect(notice.body).toContain(
       "Migration 0001_branch_change takes number 0001, which main's 0001_track_prs already has.",
     );
-    expect(card.body).toContain(`git -C '${path}' -c core.hooksPath=/dev/null merge 'origin/main'`);
-    expect(card.body).toContain(
+    expect(notice.body).toContain(
+      `git -C '${path}' -c core.hooksPath=/dev/null merge 'origin/main'`,
+    );
+    expect(notice.body).toContain(
       `git -C '${path}' restore --source='origin/main' --staged --worktree -- '${DRIZZLE}'`,
     );
-    expect(card.body).toContain('drizzle-kit generate');
-    expect(card.body).toContain(`- ${JOURNAL}`);
-    expect(card.detail).toEqual({ batchId: batch.id, paths: [JOURNAL] });
+    expect(notice.body).toContain('drizzle-kit generate');
+    expect(notice.body).toContain(`- ${JOURNAL}`);
   });
 
-  it('withdraws the card once the branch holds the base with its migration numbered after it', async () => {
+  it('clears the notice once the branch holds the base with its migration numbered after it', async () => {
     const batch = await collided();
     const path = pathOf(batch);
     const updates = createBaseUpdates(h.ctx);
     await updates.beforeGate(batch.id, signal);
-    expect(h.cards()).toHaveLength(1);
+    expect(getBatch(h.store.db, batch.id).notices).toHaveLength(1);
     // The builder follows the card: merge, take main's migrations whole, regenerate, commit.
     expect(() =>
       gitIn(path, '-c', 'core.hooksPath=/dev/null', 'merge', '-q', 'origin/main'),
@@ -994,7 +1049,7 @@ describe('a migration numbered the same as one the base added since the batch wa
     gitIn(path, 'add', DRIZZLE);
     gitIn(path, '-c', 'core.hooksPath=/dev/null', 'commit', '-q', '--no-edit');
     expect((await updates.beforeGate(batch.id, signal)).kind).toBe('up_to_date');
-    expect(h.cards()).toEqual([]);
+    expect(getBatch(h.store.db, batch.id).notices).toEqual([]);
   });
 });
 

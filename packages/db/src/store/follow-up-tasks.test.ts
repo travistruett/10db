@@ -7,7 +7,7 @@ import {
   patchBoardColumn,
 } from './board-columns';
 import type { Store } from './store';
-import { getTask, insertFollowUpTask, insertTask } from './tasks';
+import { getTask, insertFollowUpTask, insertRetryLimitFollowUp, insertTask } from './tasks';
 import { createTestStore, seedProject } from './test-support';
 
 let store: Store;
@@ -90,5 +90,60 @@ describe('insertFollowUpTask', () => {
     expect(() =>
       store.write((ctx) => insertFollowUpTask(ctx, source.id, { ...followUp, title: 'a\nb' })),
     ).toThrow();
+  });
+});
+
+describe('insertRetryLimitFollowUp', () => {
+  const notes =
+    '1. BLOCKING src/api/a.ts:3 the empty state has no test.\n   Add one.\n2. NOTE the title is long.';
+
+  it('files a Ready task that names its source, holds the findings and lands where the source lands', () => {
+    const project = seedProject(store);
+    const source = store.write((ctx) =>
+      insertTask(ctx, project.id, input({ landing: { kind: 'branch', branch: 'feature/x' } })),
+    ).value;
+    const filed = store.write((ctx) =>
+      insertRetryLimitFollowUp(ctx, source.id, { role: 'review', notes }),
+    ).value;
+    expect(filed).toMatchObject({
+      projectId: project.id,
+      status: 'open',
+      boardColumnId: null,
+      boardStatus: 'ready',
+      landing: { kind: 'branch', branch: 'feature/x' },
+      areas: ['api'],
+      dependsOn: [],
+      riskTags: [],
+    });
+    expect(filed.title).toContain(source.title);
+    expect(filed.description).toContain(source.title);
+    expect(filed.description).toContain(source.id);
+    expect(filed.description).toContain('review');
+    expect(filed.description).toContain(notes);
+    expect(filed.acceptanceCriteria).toEqual([
+      'Fixed: BLOCKING src/api/a.ts:3 the empty state has no test.',
+      'Fixed: NOTE the title is long.',
+    ]);
+    expect(getTask(store.db, filed.id).boardColumnId).toBeNull();
+  });
+
+  it('keeps the title within its limit for a long source title', () => {
+    const project = seedProject(store);
+    const source = store.write((ctx) =>
+      insertTask(ctx, project.id, input({ title: 'T'.repeat(200) })),
+    ).value;
+    const filed = store.write((ctx) =>
+      insertRetryLimitFollowUp(ctx, source.id, { role: 'qa', notes }),
+    ).value;
+    expect(filed.title.length).toBeLessThanOrEqual(200);
+  });
+
+  it('still gives the task an acceptance criterion when the notes hold no finding', () => {
+    const project = seedProject(store);
+    const source = store.write((ctx) => insertTask(ctx, project.id, input())).value;
+    const filed = store.write((ctx) =>
+      insertRetryLimitFollowUp(ctx, source.id, { role: 'review', notes: '' }),
+    ).value;
+    expect(filed.acceptanceCriteria).toHaveLength(1);
   });
 });
