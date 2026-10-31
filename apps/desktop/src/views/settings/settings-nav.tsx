@@ -1,6 +1,7 @@
 import { NavLink, Stack, Text } from '@mantine/core';
 import {
   IconArrowLeft,
+  IconBolt,
   IconCoffee,
   IconColumns,
   IconCoin,
@@ -32,6 +33,7 @@ const SECTION_ICON: Readonly<Record<SettingsSectionKey, typeof IconSettings>> = 
   [SettingsSectionKey.RoutingRules]: IconRoute,
   [SettingsSectionKey.KeepAwake]: IconCoffee,
   [SettingsSectionKey.Accounts]: IconKey,
+  [SettingsSectionKey.Decisions]: IconBolt,
   [SettingsSectionKey.Models]: IconCpu,
   [SettingsSectionKey.PersonasAndFlows]: IconHierarchy,
 };
