@@ -74,8 +74,10 @@ import { ProjectMcpError, readRepoMcp, type RepoMcp } from '../sessions';
 import {
   allowFoundHosts,
   allowNetworkHost,
+  laneAutoMode,
   listNetworkHosts,
   removeNetworkHost,
+  setLaneAutoMode,
   unallowedFoundHosts,
 } from '../permissions';
 import { findRegistryHosts } from '../registries';
@@ -270,6 +272,13 @@ export function createServices(deps: {
     },
     keepAwake: () => deps.keepAwake.status(),
     setKeepAwake: (mode) => deps.keepAwake.setMode(mode),
+    lanePermissions: () => ({ autoMode: laneAutoMode(db) }),
+    setLanePermissions(autoMode) {
+      deps.state.write((ctx) => {
+        setLaneAutoMode(ctx, autoMode);
+      });
+      return { autoMode };
+    },
     eventsHead: () => latestEventSeq(db),
     listNetworkHosts(projectId) {
       getProject(db, projectId);

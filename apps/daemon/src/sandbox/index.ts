@@ -6,6 +6,7 @@ export {
   SYSTEM_READS,
   type LaneProfileInput,
 } from './profile';
+export { autoModeRules } from './auto-mode-rules';
 export { protectedReads } from './protected-reads';
 export { toolchainAccess } from './toolchain-reads';
 export { packageCacheEnv } from './package-cache';
@@ -28,7 +29,6 @@ export {
 } from './temp-dir';
 export {
   fileAccessJudge,
-  isOwnTaskOutputPath,
   readAccess,
   readPathsOf,
   writeAccess,

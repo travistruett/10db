@@ -26,7 +26,23 @@ import {
 import { cachedProcessTable, systemOpenPaths, systemProcessTable } from './process-table';
 import { isEqualOrUnder } from './protected-reads';
 import type { SandboxRuntime } from './srt-launch';
+import { autoModeRules, type AutoModeSettings } from './auto-mode-rules';
 import { createLaneTempDir, LANE_TEMP_ROOT, removeAll, removeLaneTempDir } from './temp-dir';
+
+/**
+ * Tools a lane never needs: 10db makes its worktrees, and nothing a lane starts may outlive it. The
+ * PreToolUse hook asks about them too, in case a later Claude Code names a new one.
+ */
+const LANE_DISALLOWED_TOOLS: readonly string[] = [
+  'EnterWorktree',
+  'ExitWorktree',
+  'CronCreate',
+  'CronDelete',
+  'CronList',
+  'ScheduleWakeup',
+  'RemoteTrigger',
+  'PushNotification',
+];
 
 /** What a sandboxed session hands Claude Code on top of its ordinary options. */
 export interface LaneSandboxSpec {
@@ -36,6 +52,8 @@ export interface LaneSandboxSpec {
   readonly disallowedTools: readonly string[];
   /** Permission rules that make Claude Code ask before the call, whatever the allow rules say. */
   readonly askRules: readonly string[];
+  /** The rules Claude Code's auto-mode classifier weighs every call against. */
+  readonly autoMode: AutoModeSettings;
 }
 
 /** One session's sandbox: its profile, its file-tool context and its temp dir. */
@@ -72,7 +90,7 @@ export interface LaneSession {
 }
 
 export interface LaneSessionInput {
-  readonly project: Pick<ProjectDto, 'id' | 'repoPath' | 'sandboxLoopback'>;
+  readonly project: Pick<ProjectDto, 'id' | 'repoPath' | 'sandboxLoopback' | 'gateCommand'>;
   /** The session's launch env, before the sandbox's own is merged over it. */
   readonly env: Readonly<Record<string, string>>;
   /** The project's and the workstream's stored permission rules. */
@@ -263,6 +281,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           settings,
           env,
           disallowedTools: [
+            ...LANE_DISALLOWED_TOOLS,
             ...deniedToFileTools.flatMap((path) => [
               `Read(${ruleScope(path)})`,
               `Read(${ruleScope(path)}/**)`,
@@ -279,6 +298,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
               `Write(${ruleScope(path)}/**)`,
             ]),
           ],
+          autoMode: autoModeRules(input.project.gateCommand),
         };
         let providerSessionId = input.resumeProviderSessionId;
         const fileAccess: FileAccessContext = {

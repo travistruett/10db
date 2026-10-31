@@ -73,7 +73,12 @@ function forSession(
     systemPrefixes: [],
     runtime,
   }).forSession({
-    project: { id: projectId, repoPath: repo.path, sandboxLoopback: false },
+    project: {
+      id: projectId,
+      repoPath: repo.path,
+      sandboxLoopback: false,
+      gateCommand: 'make gate',
+    },
     env: {
       PATH: '/usr/bin:/bin',
       HOME: home,
@@ -206,7 +211,12 @@ describe.skipIf(SANDBOXED)("a lane session's repo stdio MCP servers", () => {
     "reaches no host, not even the project's or localhost, with the project's loopback %s",
     async (_name, loopback) => {
       const session = await forSession({
-        project: { id: projectId, repoPath: repo.path, sandboxLoopback: loopback },
+        project: {
+          id: projectId,
+          repoPath: repo.path,
+          sandboxLoopback: loopback,
+          gateCommand: 'make gate',
+        },
       });
       try {
         // The lane's own commands still reach the project's hosts, and localhost by its switch.
@@ -234,7 +244,12 @@ describe.skipIf(SANDBOXED)("a lane session's repo stdio MCP servers", () => {
   it("reaches exactly the hosts its approval names, never the project's or localhost", async () => {
     const hosts = ['*.docs.example', 'api.example.org'];
     const session = await forSession({
-      project: { id: projectId, repoPath: repo.path, sandboxLoopback: true },
+      project: {
+        id: projectId,
+        repoPath: repo.path,
+        sandboxLoopback: true,
+        gateCommand: 'make gate',
+      },
       mcpServers: { docs: { ...SERVER, hosts }, other: { ...SERVER, hosts: [] } },
     });
     try {
