@@ -43,7 +43,7 @@ import {
   transitionWorkstream,
   updateInboxItem,
 } from '@10db/db';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   HANDOFF_FIRM_NUDGE,
   HANDOFF_FIRM_NUDGE_ACCOUNT,
@@ -64,6 +64,7 @@ import {
   SandboxedMcpServer,
   SandboxProfileError,
   SandboxTempDirError,
+  type LaneProcessSetup,
   type LaneSandbox,
   type LaneSession,
   type LaneSessionInput,
@@ -637,6 +638,42 @@ describe('runner', () => {
     expect(card).toMatchObject({ kind: 'permission', title: 'Allow Bash?', body: 'pnpm lint' });
     // The lane waits on the card until a person answers it.
     await waitFor(() => ws(workstream.id).state === 'WAITING_HUMAN');
+  });
+
+  it('tells every later session of the workstream what the builder denied, with the note', async () => {
+    engine = await createTestEngine(
+      {
+        Alpha: [
+          [
+            shell('pnpm lint'),
+            { do: 'context', percentage: 75 },
+            { do: 'await_message', contains: 'write_handoff' },
+            { do: 'context', percentage: 88 },
+            { do: 'await_message', contains: 'almost full' },
+            {
+              do: 'mcp',
+              tool: 'write_handoff',
+              args: handoffArgs('op-handoff-deny', 'Write the second file'),
+            },
+            turn,
+          ],
+          [write('src/api/b.txt'), commit('op-deny-002', ['src/api/b.txt']), turn],
+        ],
+      },
+      { allowedCommands: ['pnpm exec prettier'] },
+    );
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    const card = await waitFor(openCard);
+    engine.inbox.answer(card.id, { choice: 'deny', note: 'use pnpm exec eslint instead' });
+    await engine.runner.idle();
+
+    expect(ws(workstream.id).state).toBe('DONE');
+    const later = engine.adapter.prompts[1]?.prompt ?? '';
+    expect(later).toContain('The builder denied these calls in this workstream');
+    expect(later).toContain('Bash: pnpm lint');
+    expect(later).toContain('Note from the builder: use pnpm exec eslint instead');
+    expect(engine.adapter.prompts[0]?.prompt).not.toContain('The builder denied');
   });
 
   it('runs the gate in the session environment, never the daemon process environment', async () => {
@@ -3336,7 +3373,7 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
     if (probeRoot !== null) rmSync(probeRoot, { recursive: true, force: true });
     probeRoot = null;
   });
-  const sandboxProbe = (fail?: () => never): SandboxProbe => {
+  const sandboxProbe = (fail?: () => never, processes?: LaneProcessSetup): SandboxProbe => {
     probeRoot = realpathSync(mkdtempSync('/tmp/sbr-'));
     const home = join(probeRoot, 'h');
     const tmpRoot = join(probeRoot, 't');
@@ -3349,6 +3386,7 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
       tmpRoot,
       gitDirs: (path) => lanesGit.gitDirs(path),
       runtime: FAKE_SRT,
+      ...(processes === undefined ? {} : { processes }),
     });
     const inputs: LaneSessionInput[] = [];
     const sessions: LaneSession[] = [];
@@ -3410,6 +3448,130 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
     // The session ended, so its temp dir is gone.
     expect(readdirSync(probe.tmpRoot)).toEqual([]);
     expect(ws(workstream.id).state).toBe('DONE');
+  });
+
+  describe('the processes a session’s commands start', () => {
+    const STARTED = 'Thu Oct 30 12:00:00 2026';
+    /** claude (4000), a command's shell (4001) and two loops that outlive both (4002, 4003). */
+    let rows: { pid: number; ppid: number; pgid: number; startedAt: string }[];
+    const fakeProcesses = (): LaneProcessSetup => ({
+      table: () => Promise.resolve(rows.map((r) => ({ ...r }))),
+      signal: (target) => {
+        rows = rows.filter((r) => (target < 0 ? r.pgid !== -target : r.pid !== target));
+        return true;
+      },
+      sleep: () => Promise.resolve(),
+      ownPid: 1,
+      intervalMs: 3_600_000,
+    });
+    beforeEach(() => {
+      rows = [
+        { pid: 4000, ppid: 1, pgid: 4000, startedAt: STARTED },
+        { pid: 4001, ppid: 4000, pgid: 4001, startedAt: STARTED },
+        { pid: 4002, ppid: 4001, pgid: 4001, startedAt: STARTED },
+        { pid: 4003, ppid: 4001, pgid: 4001, startedAt: STARTED },
+      ];
+    });
+    /** Reports claude's pid at `started`, as the real adapter does. */
+    const reportPid = () => {
+      const real = engine.adapter.start.bind(engine.adapter);
+      return vi.spyOn(engine.adapter, 'start').mockImplementation((spec) => {
+        const handle = real(spec);
+        return {
+          ...handle,
+          events: (async function* () {
+            for await (const event of handle.events) {
+              yield event.type === 'started' ? { ...event, pid: 4000 } : event;
+            }
+          })(),
+        };
+      });
+    };
+
+    it('are stopped when the session ends, before its temp dir goes', async () => {
+      const probe = sandboxProbe(undefined, fakeProcesses());
+      engine = await createTestEngine(
+        { Alpha: [[turn]] },
+        {},
+        { laneSandbox: probe.laneSandbox, identifyProcess: () => Promise.resolve(STARTED) },
+      );
+      reportPid();
+      const { workstream } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+
+      expect(ws(workstream.id).state).toBe('DONE');
+      expect(rows).toEqual([]);
+      expect(readdirSync(probe.tmpRoot)).toEqual([]);
+    });
+
+    it('are stopped even when the session’s start time could not be read at `started`', async () => {
+      const probe = sandboxProbe(undefined, fakeProcesses());
+      engine = await createTestEngine(
+        { Alpha: [[turn]] },
+        {},
+        // One failed `ps` as the session started, as an overloaded Mac can give.
+        { laneSandbox: probe.laneSandbox, identifyProcess: () => Promise.resolve(null) },
+      );
+      reportPid();
+      const { workstream } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+
+      expect(ws(workstream.id).state).toBe('DONE');
+      expect(rows).toEqual([]);
+    });
+
+    it('logs a warning when the session’s processes cannot be watched, and again when they cannot be stopped', async () => {
+      const logs = captureLogs();
+      const probe = sandboxProbe(undefined, {
+        ...fakeProcesses(),
+        table: () => Promise.reject(new Error('ps: fork failed')),
+      });
+      engine = await createTestEngine(
+        { Alpha: [[turn]] },
+        {},
+        {
+          laneSandbox: probe.laneSandbox,
+          identifyProcess: () => Promise.resolve(null),
+          logger: logs.logger,
+        },
+      );
+      reportPid();
+      const { workstream } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+
+      const warnings = logs
+        .lines()
+        .filter((line) => line['level'] === 40)
+        .map((line) => String(line['msg']));
+      expect(warnings).toEqual(
+        expect.arrayContaining([
+          expect.stringMatching(/process could not be read/),
+          'the processes a lane session started could not be stopped',
+        ]),
+      );
+      expect(ws(workstream.id).state).toBe('DONE');
+    });
+
+    it('are stopped when the session is stopped, as the daemon stopping does', async () => {
+      const probe = sandboxProbe(undefined, fakeProcesses());
+      engine = await createTestEngine(
+        { Alpha: [[{ do: 'hang' }]] },
+        {},
+        { laneSandbox: probe.laneSandbox, identifyProcess: () => Promise.resolve(STARTED) },
+      );
+      reportPid();
+      const { workstream } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
+      await waitFor(() => ws(workstream.id).state === 'RUNNING');
+      expect(rows).toHaveLength(4);
+      await engine.runner.stopAll('shutdown');
+      await engine.runner.idle();
+
+      expect(rows).toEqual([]);
+    });
   });
 
   it("records the session's temp dir while it runs, for the load guard to name a lane by, and forgets it once the dir is gone", async () => {

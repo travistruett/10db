@@ -10,7 +10,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
@@ -448,6 +448,145 @@ describe('startDaemon', () => {
         expect(readdirSync(tmpRoot).sort()).toEqual(
           [`10db-daemon-${String(process.pid)}`, 'other.txt'].sort(),
         );
+      } finally {
+        await daemon?.stop();
+        daemon = null;
+        rmSync(tmpRoot, { recursive: true, force: true });
+      }
+    },
+  );
+
+  // Same temp root as above.
+  it.skipIf(SANDBOXED)(
+    'stops the processes a dead daemon’s lane sessions left, from their ledgers, before any session starts, even while another daemon shares the root',
+    async () => {
+      const tmpRoot = realpathSync(mkdtempSync('/tmp/sbd-'));
+      const T = 'Thu Oct 30 12:00:00 2026';
+      // Another daemon, on another data dir, still running with a lane session of its own.
+      const other = spawn(process.execPath, ['-e', 'setInterval(() => undefined, 1000)'], {
+        stdio: 'ignore',
+      });
+      const otherPid = other.pid ?? 0;
+      const dead = spawn(process.execPath, ['-e', ''], { stdio: 'ignore' });
+      const deadPid = dead.pid ?? 0;
+      await new Promise((resolve) => dead.once('exit', resolve));
+      // Two loops that outlived their session, as the incident left them, and the other daemon's
+      // lane's dev server.
+      let rows = [
+        { pid: process.pid, ppid: 1, pgid: process.pid, startedAt: T },
+        { pid: 7001, ppid: 1, pgid: 7000, startedAt: T },
+        { pid: 7002, ppid: 1, pgid: 7000, startedAt: T },
+        { pid: 7003, ppid: 1, pgid: 7003, startedAt: T },
+        { pid: 7004, ppid: 1, pgid: 7004, startedAt: T },
+      ];
+      try {
+        writeFileSync(join(tmpRoot, `10db-daemon-${String(otherPid)}`), '', { mode: 0o400 });
+        const live = join(tmpRoot, `10db-proc-${String(otherPid)}-00000000000a.json`);
+        writeFileSync(
+          live,
+          JSON.stringify({ version: 1, members: [{ pid: 7004, pgid: 7004, startedAt: T }] }),
+        );
+        const ledger = join(tmpRoot, `10db-proc-${String(deadPid)}-0123456789ab.json`);
+        writeFileSync(
+          ledger,
+          JSON.stringify({
+            version: 1,
+            members: [
+              { pid: 7001, pgid: 7000, startedAt: T },
+              { pid: 7002, pgid: 7000, startedAt: T },
+            ],
+          }),
+        );
+        daemon = await startDaemon({
+          dataDir: dir.path,
+          port: 0,
+          adapter: new FakeAdapter({}),
+          logLevel: 'warn',
+          sandbox: {
+            tmpRoot,
+            runtime: FAKE_SRT,
+            processes: {
+              table: () => Promise.resolve(rows.map((r) => ({ ...r }))),
+              signal: (target) => {
+                rows = rows.filter((r) => (target < 0 ? r.pgid !== -target : r.pid !== target));
+                return true;
+              },
+              sleep: () => Promise.resolve(),
+            },
+          },
+          ...QUIET,
+        });
+        expect(rows.map((r) => r.pid)).toEqual([process.pid, 7003, 7004]);
+        expect(readdirSync(tmpRoot).sort()).toEqual(
+          [
+            `10db-daemon-${String(otherPid)}`,
+            `10db-daemon-${String(process.pid)}`,
+            `10db-proc-${String(otherPid)}-00000000000a.json`,
+          ].sort(),
+        );
+      } finally {
+        await daemon?.stop();
+        daemon = null;
+        other.kill('SIGKILL');
+        rmSync(tmpRoot, { recursive: true, force: true });
+      }
+    },
+  );
+
+  // Same temp root as above.
+  it.skipIf(SANDBOXED)(
+    'tries again while it runs to stop what a dead daemon’s lane sessions left, when it could not read the machine at start',
+    async () => {
+      const tmpRoot = realpathSync(mkdtempSync('/tmp/sbd-'));
+      const T = 'Thu Oct 30 12:00:00 2026';
+      const dead = spawn(process.execPath, ['-e', ''], { stdio: 'ignore' });
+      const deadPid = dead.pid ?? 0;
+      await new Promise((resolve) => dead.once('exit', resolve));
+      let rows = [
+        { pid: process.pid, ppid: 1, pgid: process.pid, startedAt: T },
+        { pid: 7001, ppid: 1, pgid: 7001, startedAt: T },
+      ];
+      const ledger = join(tmpRoot, `10db-proc-${String(deadPid)}-0123456789ab.json`);
+      // An overloaded Mac: `ps` can't fork as the daemon starts, and can again later.
+      let readable = false;
+      const timers = new ManualClock();
+      try {
+        writeFileSync(
+          ledger,
+          JSON.stringify({
+            version: 1,
+            daemonGroup: 7000,
+            members: [{ pid: 7001, pgid: 7001, startedAt: T }],
+          }),
+        );
+        daemon = await startDaemon({
+          dataDir: dir.path,
+          port: 0,
+          adapter: new FakeAdapter({}),
+          logLevel: 'warn',
+          sandbox: {
+            tmpRoot,
+            runtime: FAKE_SRT,
+            processes: {
+              table: () =>
+                readable
+                  ? Promise.resolve(rows.map((r) => ({ ...r })))
+                  : Promise.reject(new Error('ps: fork failed')),
+              signal: (target) => {
+                rows = rows.filter((r) => (target < 0 ? r.pgid !== -target : r.pid !== target));
+                return true;
+              },
+              sleep: () => Promise.resolve(),
+              timers,
+            },
+          },
+          ...QUIET,
+        });
+        expect(existsSync(ledger)).toBe(true);
+        readable = true;
+        timers.advance(30_000);
+        await waitFor(() => !existsSync(ledger));
+        expect(rows.map((r) => r.pid)).toEqual([process.pid]);
       } finally {
         await daemon?.stop();
         daemon = null;

@@ -136,6 +136,20 @@ describe('claimSandboxTempRoot', () => {
     expect(existsSync(join(root, `10db-daemon-${String(process.pid)}`))).toBe(false);
   });
 
+  it("leaves a dead daemon's process ledgers for the sweep that stops their processes", () => {
+    // `reapLaneProcessLedgers` reads them next, then removes them; the claim must not.
+    writeFileSync(join(root, '10db-proc-4321-0123456789ab.json'), '{"version":1,"members":[]}');
+    const claim = claimSandboxTempRoot(root, process.pid);
+    try {
+      expect(readdirSync(root).sort()).toEqual([
+        `10db-daemon-${String(process.pid)}`,
+        '10db-proc-4321-0123456789ab.json',
+      ]);
+    } finally {
+      claim.release();
+    }
+  });
+
   it('claims a missing root without throwing', () => {
     const claim = claimSandboxTempRoot(join(base, 'missing'), process.pid);
     expect(claim).toMatchObject({ removed: 0, failed: 0, sharedWith: null });

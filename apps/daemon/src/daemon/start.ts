@@ -108,7 +108,12 @@ import {
   claimSandboxTempRoot,
   createGateSandbox,
   createLaneSandbox,
+  createLedgerSweep,
   LANE_TEMP_ROOT,
+  reapLaneProcessLedgers,
+  systemProcessTable,
+  type LaneProcessSetup,
+  type LedgerSweep,
   type SandboxRuntime,
 } from '../sandbox';
 import { createScheduler, type Scheduler } from '../scheduler';
@@ -140,9 +145,15 @@ export interface DaemonOptions {
    * The sandbox every lane and every gate runs under; `tmpRoot` (tests) moves its temp dirs off
    * `/private/tmp`, and `runtime` (tests) replaces srt, which runs the gate. Required, so no caller
    * can forget it: null runs lanes and gates unsandboxed, which only fake sessions and tests ask
-   * for, and the Claude adapter refuses such a session.
+   * for, and the Claude adapter refuses such a session. `processes` (tests) replaces how lane
+   * processes are read and signalled, for the sessions and for the start-up sweep of a dead
+   * daemon's leftovers.
    */
-  readonly sandbox: { readonly tmpRoot?: string; readonly runtime?: SandboxRuntime } | null;
+  readonly sandbox: {
+    readonly tmpRoot?: string;
+    readonly runtime?: SandboxRuntime;
+    readonly processes?: LaneProcessSetup;
+  } | null;
   /**
    * Where worktrees are made: a base directory, under which a level named after the data dir is
    * added. Defaults to `~/.10db/worktrees`. Nothing is created there until the first worktree is cut.
@@ -408,6 +419,51 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       'swept the sandbox temp root',
     );
   }
+  // Before recovery and before any session: processes the lane sessions of a daemon that died left
+  // running (a lane's background loops reparent to launchd when their session goes) are stopped
+  // from the ledgers those sessions kept. Each ledger names its daemon: one sharing the root that
+  // still runs keeps its own, and every dead one's is reaped even then. What a machine whose
+  // processes can't be read leaves is swept again while the daemon runs, and so is what a session
+  // of this daemon could not stop as it ended; the next start takes whatever is still left.
+  const laneProcesses = opts.sandbox?.processes ?? { table: systemProcessTable };
+  let ledgerSweep: LedgerSweep | null = null;
+  if (tempRoot && sandboxTempRoot !== null) {
+    let sweepFailing = false;
+    ledgerSweep = createLedgerSweep(sandboxTempRoot, laneProcesses, {
+      onSwept: (report) => {
+        sweepFailing = false;
+        if (report.ledgers === 0) return;
+        logger.info(
+          { ledgers: report.ledgers, stopped: report.stopped },
+          'stopped the processes ended lane sessions left running',
+        );
+      },
+      onFailed: (error) => {
+        // Once until a sweep reads the machine again: one runs every half minute meanwhile.
+        if (sweepFailing) return;
+        sweepFailing = true;
+        logger.warn(
+          { err: error instanceof Error ? error.message : String(error) },
+          'could not stop the processes ended lane sessions left running; trying again',
+        );
+      },
+    });
+    try {
+      const reaped = await reapLaneProcessLedgers(sandboxTempRoot, laneProcesses);
+      if (reaped.ledgers > 0) {
+        logger.info(
+          { ledgers: reaped.ledgers, stopped: reaped.stopped },
+          'stopped the processes a previous daemon’s lane sessions left running',
+        );
+      }
+    } catch (error) {
+      logger.error(
+        { err: error instanceof Error ? error.message : String(error) },
+        'could not stop the processes a previous daemon’s lane sessions left running; trying again while the daemon runs',
+      );
+      ledgerSweep.later();
+    }
+  }
   // Shared by every gate: a task's, at its green run, and a batch's, at ship. One limiter caps them
   // all, so the machine never runs more than `limits.gateSlots` at once.
   const gateRunner = createGateRunner({
@@ -615,6 +671,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
           loginConfigDir: launcher.loginConfigDir(),
           gitDirs: (repo) => git.gitDirs(repo),
           ...(opts.sandbox.tmpRoot === undefined ? {} : { tmpRoot: opts.sandbox.tmpRoot }),
+          ...(opts.sandbox.processes === undefined ? {} : { processes: opts.sandbox.processes }),
+          ...(ledgerSweep === null ? {} : { ledgers: ledgerSweep }),
+          log: logger.child({ component: 'sandbox' }),
           runtime,
         })
       : null;
@@ -864,6 +923,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       await createdRunner.stopAll('shutdown');
       // After the runner: a lane or gate held for load ends on its own stop, and nothing samples again.
       loadGuard.stop();
+      // After the runner too: what its sessions could not stop stays for the next start.
+      ledgerSweep?.stop();
       await preparer.idle();
       state.write((ctx) => {
         setAppSetting(ctx, CLEAN_SHUTDOWN_KEY, { at: ctx.now });
