@@ -303,6 +303,27 @@ export function fileAccessJudge(ctx: FileAccessContext): FileAccessJudge {
         return { refuse: refusalFor(path, error) };
       }
     },
+    readAsk(toolName, input) {
+      try {
+        for (const path of readPathsOf(toolName, input)) {
+          if (readAccess(path, ctx, toolName !== 'Read').access === 'ask') {
+            return `${path} is outside the paths a lane may read without asking.`;
+          }
+        }
+        return null;
+      } catch {
+        return `${toolName} could not be judged.`;
+      }
+    },
+    writeAsk(path) {
+      try {
+        return writeAccess(path, ctx).access === 'claude-protected'
+          ? `${path} is a Claude Code configuration path.`
+          : null;
+      } catch {
+        return `${path} could not be judged.`;
+      }
+    },
     write(path) {
       if (isOverLongPath(path)) return { refuse: OVER_LONG_PATH_REFUSAL };
       try {
@@ -327,64 +348,6 @@ export function fileAccessJudge(ctx: FileAccessContext): FileAccessJudge {
       }
     },
   };
-}
-
-/**
- * Claude Code's name for a working dir's project: every character but an ASCII letter or digit made
- * `-`. A name it would shorten and hash (over 200 characters) is not derived; such a session's task
- * output is asked about.
- */
-const CLAUDE_SLUG_MAX = 200;
-function claudeProjectSlug(dir: string): string | null {
-  const slug = dir.replace(/[^a-zA-Z0-9]/g, '-');
-  return slug.length > CLAUDE_SLUG_MAX ? null : slug;
-}
-
-/**
- * The session's own Claude Code task output directories, by exact derivation:
- * `<own temp dir>/claude-<this process's uid>/<slug of the checkout>/<providerSessionId>/tasks`, for
- * each spelling of the temp dir and the checkout. Only those: the lane can make a lookalike under its
- * own temp dir (another uid, another slug) and write it, but not the real one, which the sandbox
- * profile denies.
- */
-function ownTaskDirs(ctx: FileAccessContext): string[] {
-  const uid = process.getuid?.();
-  if (ctx.providerSessionId === null || uid === undefined) return [];
-  const slugs = spellings(ctx.checkout)
-    .map(claudeProjectSlug)
-    .filter((slug): slug is string => slug !== null);
-  return spellings(ctx.sandboxTemp.own).flatMap((own) =>
-    slugs.map((slug) =>
-      foldPathCase(join(own, `claude-${String(uid)}`, slug, ctx.providerSessionId ?? '', 'tasks')),
-    ),
-  );
-}
-
-/** True only for a file directly in one of `dirs`. The file need not exist yet. */
-function isOwnTaskOutput(realPath: string, dirs: readonly string[]): boolean {
-  const folded = foldPathCase(realPath);
-  return dirs.some((dir) => {
-    if (!folded.startsWith(`${dir}/`)) return false;
-    const file = folded.slice(dir.length + 1);
-    return file !== '' && !file.includes('/');
-  });
-}
-
-/**
- * Whether an absolute path names a file in this session's own task output directory, read both as
- * written and as the kernel opens it. A link that leads out, a `..` that climbs out and a path that
- * cannot be resolved are not.
- */
-export function isOwnTaskOutputPath(path: string, ctx: FileAccessContext): boolean {
-  if (!isAbsolute(path)) return false;
-  const dirs = ownTaskDirs(ctx);
-  if (dirs.length === 0) return false;
-  try {
-    return candidates(path, ctx).every((real) => isOwnTaskOutput(real, dirs));
-  } catch (error) {
-    if (error instanceof PathResolutionError) return false;
-    throw error;
-  }
 }
 
 /** An unexpected failure while judging is a refusal, never an error thrown into the hook. */

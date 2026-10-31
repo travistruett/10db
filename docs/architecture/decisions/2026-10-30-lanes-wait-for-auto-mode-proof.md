@@ -1,6 +1,7 @@
 # Lanes move to auto mode only after the live test proves it, and stay in default mode until then
 
 - **Date:** 2026-10-30
+- **Superseded by:** `2026-10-31-lanes-run-in-auto-mode-inside-the-sandbox.md`.
 - **Amends:** decision 124 ("auto mode is gone")
 
 ## Decision

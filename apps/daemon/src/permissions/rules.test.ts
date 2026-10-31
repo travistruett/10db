@@ -889,15 +889,54 @@ describe('allowedToolsFor', () => {
     const scope = `/${checkout}/**`;
     const sandboxed = { sandboxed: { checkout: repo.path } };
     expect(allowedToolsFor(project, 'edit', sandboxed)).toEqual(
-      baseAllowedTools(project).map((entry) =>
-        ['Read', 'Glob', 'Grep', 'LS'].includes(entry) ? `${entry}(${scope})` : entry,
-      ),
+      baseAllowedTools(project)
+        .filter((entry) => entry !== 'Bash(make gate)')
+        .map((entry) =>
+          ['Read', 'Glob', 'Grep', 'LS'].includes(entry) ? `${entry}(${scope})` : entry,
+        ),
     );
     const readOnly = allowedToolsFor(project, 'read_only', sandboxed);
     for (const tool of ['Read', 'Glob', 'Grep', 'LS']) {
       expect(readOnly).toContain(`${tool}(${scope})`);
       expect(readOnly).not.toContain(tool);
     }
+  });
+
+  it('leaves the gate command out of a sandboxed lane, so the classifier can refuse it', () => {
+    const withChecks = { ...project, changedCheckCommand: 'make check-changed' };
+    const sandboxed = { sandboxed: { checkout: repo.path } };
+    const edit = allowedToolsFor(withChecks, 'edit', sandboxed);
+    expect(edit).not.toContain('Bash(make gate)');
+    expect(edit).toContain('Bash(make check-changed)');
+    expect(allowedToolsFor(withChecks, 'edit')).toContain('Bash(make gate)');
+  });
+
+  it.each([
+    ['a prefix that covers the gate', ['make'], 'Bash(make:*)'],
+    ['a longer prefix that covers the gate', ['make gate'], 'Bash(make gate:*)'],
+  ])('leaves out %s from a sandboxed lane', (_name, allowedCommands, entry) => {
+    const sandboxed = { sandboxed: { checkout: repo.path } };
+    const listed = allowedToolsFor({ ...project, allowedCommands }, 'edit', sandboxed);
+    expect(listed).not.toContain(entry);
+    expect(allowedToolsFor({ ...project, allowedCommands }, 'edit')).toContain(entry);
+  });
+
+  it('keeps an allowed prefix that does not cover the gate', () => {
+    const sandboxed = { sandboxed: { checkout: repo.path } };
+    expect(
+      allowedToolsFor(
+        { ...project, allowedCommands: ['make test', 'pnpm test'] },
+        'edit',
+        sandboxed,
+      ),
+    ).toEqual(expect.arrayContaining(['Bash(make test:*)', 'Bash(pnpm test:*)']));
+  });
+
+  it('keeps the gate out of a sandboxed lane even when it is also the changed-check command', () => {
+    const same = { ...project, changedCheckCommand: 'make gate' };
+    const sandboxed = { sandboxed: { checkout: repo.path } };
+    expect(allowedToolsFor(same, 'edit', sandboxed)).not.toContain('Bash(make gate)');
+    expect(allowedToolsFor(same, 'edit')).toContain('Bash(make gate)');
   });
 
   it('names the real path when the checkout is reached through a link', () => {

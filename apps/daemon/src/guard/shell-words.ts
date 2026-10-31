@@ -14,6 +14,12 @@ export interface ShellSegment {
    * `$@`, `$*` or `${a[@]}` inside its quotes, so `"$pkg"` is one word and `$pkg` and `"$@"` are not.
    */
   readonly singleWords: boolean[];
+  /**
+   * Parallel to `words`: the shell fills in part of the word at run time, so its text is not what
+   * the command passes. True for an unquoted `$`, backtick, glob character or leading `~`, a `$` or
+   * backtick inside double quotes, and any substitution; false for a quoted literal such as `'a*'`.
+   */
+  readonly dynamicWords: boolean[];
   /** The operator that ended the segment: `&&`, `||`, `;`, `|`, `&`, `(`, `)`, newline, or empty at the end. */
   readonly separator: string;
   /** The subshells around the segment, outermost first, each numbered in the order it opens. */
@@ -184,6 +190,7 @@ const BEFORE_COMMAND: ReadonlySet<string> = new Set([
   'do',
   'while',
   'until',
+  'coproc',
 ]);
 /** Words after which a lone `{` still opens a group: the reserved words above, and `time`. */
 const GROUP_LEADERS: ReadonlySet<string> = new Set([...BEFORE_COMMAND, 'time']);
@@ -217,6 +224,8 @@ function scan(command: string, from: number, substitution: boolean): Scan {
   let inWord = false;
   let words: string[] = [];
   let singleWords: boolean[] = [];
+  let dynamicWords: boolean[] = [];
+  let wordDynamic = false;
   // An unquoted substitution is in the word, so its result is split into words.
   let split = false;
   let nested: string[] = [];
@@ -284,6 +293,7 @@ function scan(command: string, from: number, substitution: boolean): Scan {
         wordsCertain = false;
         words.push(word);
         singleWords.push(false);
+        dynamicWords.push(wordDynamic);
       } else {
         // An empty alternative drops out: `{nice,}` leaves `nice`, so the next word is the command.
         const kept = expanded.filter((w) => w !== '');
@@ -294,9 +304,12 @@ function scan(command: string, from: number, substitution: boolean): Scan {
           !SPLITTING.test(wordMask.replaceAll('\0', '')) &&
           onlyOneWordExpansions(word);
         singleWords.push(...kept.map(() => one));
+        // An unquoted brace expansion is text the command line did not spell out either.
+        dynamicWords.push(...kept.map(() => wordDynamic || parameters.includes('{')));
       }
     }
     split = false;
+    wordDynamic = false;
     word = '';
     wordMask = '';
     inWord = false;
@@ -312,6 +325,7 @@ function scan(command: string, from: number, substitution: boolean): Scan {
         words,
         separator,
         singleWords,
+        dynamicWords,
         subshells,
         nested,
         hereDocuments,
@@ -330,6 +344,7 @@ function scan(command: string, from: number, substitution: boolean): Scan {
     raw = '';
     words = [];
     singleWords = [];
+    dynamicWords = [];
     nested = [];
     hereDocuments = [];
     quotedHereDocuments = [];
@@ -359,6 +374,7 @@ function scan(command: string, from: number, substitution: boolean): Scan {
   // (`>(…)`, `<(…)`, where `at` is its parenthesis) forwards the segment's output or input.
   const substitute = (at: number, bodyStart: number): number => {
     if (command.charAt(at) === '(') processSubstitution = true;
+    wordDynamic = true;
     if (quote === null) split = true;
     const inner = scan(command, bodyStart, true);
     if (!inner.closed) certain = false;
@@ -406,6 +422,7 @@ function scan(command: string, from: number, substitution: boolean): Scan {
         j += command.charAt(j) === '\\' ? 2 : 1;
       if (j >= command.length) certain = false;
       const end = Math.min(j, command.length);
+      wordDynamic = true;
       if (quote === null) split = true;
       nested.push(command.slice(i + 1, end).replace(/\\([`$\\])/g, '$1'));
       append(command.slice(i, end + 1));
@@ -415,7 +432,10 @@ function scan(command: string, from: number, substitution: boolean): Scan {
     if (quote === '"') {
       raw += ch;
       if (ch === '"') quote = null;
-      else addWord(ch, false);
+      else {
+        if (ch === '$') wordDynamic = true;
+        addWord(ch, false);
+      }
       continue;
     }
     if (ch === '$' && next === "'") {
@@ -558,6 +578,7 @@ function scan(command: string, from: number, substitution: boolean): Scan {
     if (ch === ' ' || ch === '\t') {
       flushWord();
     } else {
+      if ('$*?['.includes(ch) || (ch === '~' && word === '')) wordDynamic = true;
       addWord(ch, true);
       lastPlain = ch;
       // A `>`, or a `&` that is part of a redirection, is an output redirection operator, so a `!`

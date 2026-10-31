@@ -37,6 +37,7 @@ import type {
   JudgeTestResultDto,
   KeepAwakeMode,
   KeepAwakeStatus,
+  LanePermissionsDto,
   McpServerStatusDto,
   ModelProfileDto,
   NetworkHostDto,
@@ -166,6 +167,9 @@ export interface ApiServices {
   systemCheck(options: { readonly recheck: boolean }): Promise<SystemCheckDto>;
   keepAwake(): KeepAwakeStatus;
   setKeepAwake(mode: KeepAwakeMode): KeepAwakeStatus;
+  /** Whether lanes decide routine permissions with Claude Code's auto mode; read when each session starts. */
+  lanePermissions(): LanePermissionsDto;
+  setLanePermissions(autoMode: boolean): LanePermissionsDto;
   /** The newest event seq (0 when there are none). */
   eventsHead(): number;
   /** Each server in the project's `.mcp.json` and its verdict; raises an approval card for each one with none. */
