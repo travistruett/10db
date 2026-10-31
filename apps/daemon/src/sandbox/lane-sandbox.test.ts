@@ -68,7 +68,12 @@ function sandbox(
 
 function input(overrides: Partial<LaneSessionInput> = {}): LaneSessionInput {
   return {
-    project: { id: projectId, repoPath: repo.path, sandboxLoopback: false },
+    project: {
+      id: projectId,
+      repoPath: repo.path,
+      sandboxLoopback: false,
+      gateCommand: 'make gate',
+    },
     env: { PATH: '/usr/bin:/bin', HOME: home, ANTHROPIC_API_KEY: 'sk-test' },
     rules: [],
     resumeProviderSessionId: null,
@@ -143,7 +148,9 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
     ['on', true, true],
   ])("opens localhost when the project's switch is %s", async (_name, sandboxLoopback, binding) => {
     const session = await sandbox().forSession(
-      input({ project: { id: projectId, repoPath: repo.path, sandboxLoopback } }),
+      input({
+        project: { id: projectId, repoPath: repo.path, sandboxLoopback, gateCommand: 'make gate' },
+      }),
     );
     try {
       expect(session.spec.settings.network.allowLocalBinding).toBe(binding);
@@ -209,7 +216,14 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       });
       const commonDir = join(checkout, '.git');
       const session = await sandbox().forSession(
-        input({ project: { id: projectId, repoPath: worktree, sandboxLoopback: false } }),
+        input({
+          project: {
+            id: projectId,
+            repoPath: worktree,
+            sandboxLoopback: false,
+            gateCommand: 'make gate',
+          },
+        }),
       );
       try {
         const { allowRead, allowWrite, denyWrite } = session.spec.settings.filesystem;
@@ -364,7 +378,12 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
         gitDirs: () => Promise.resolve({ gitDir: inner, commonDir: inner }),
       }).forSession(
         input({
-          project: { id: projectId, repoPath: work, sandboxLoopback: false },
+          project: {
+            id: projectId,
+            repoPath: work,
+            sandboxLoopback: false,
+            gateCommand: 'make gate',
+          },
           checkouts: [work],
         }),
       );
@@ -386,7 +405,14 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
     symlinkSync(checkout, link);
     const env = writeIn(checkout, '.env');
     const session = await sandbox().forSession(
-      input({ project: { id: projectId, repoPath: link, sandboxLoopback: false } }),
+      input({
+        project: {
+          id: projectId,
+          repoPath: link,
+          sandboxLoopback: false,
+          gateCommand: 'make gate',
+        },
+      }),
     );
     try {
       expect(session.spec.settings.filesystem.allowRead).toContain(checkout);
@@ -581,7 +607,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       }),
     );
     try {
-      expect(session.spec.autoMode.hard_deny[0]).toContain('`make gate`');
+      expect(session.spec.autoMode.hard_deny[0]).toContain(JSON.stringify('make gate'));
     } finally {
       session.dispose();
     }

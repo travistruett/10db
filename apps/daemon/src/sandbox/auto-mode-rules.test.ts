@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { autoModeRules, AutoModeRulesError } from './auto-mode-rules';
+import { autoModeRules } from './auto-mode-rules';
 
 describe('autoModeRules', () => {
   it('names the project gate command in the first hard deny', () => {
     const rules = autoModeRules('make gate');
     expect(rules.hard_deny).toHaveLength(2);
-    expect(rules.hard_deny[0]).toContain('`make gate`');
+    expect(rules.hard_deny[0]).toContain('"make gate"');
     expect(rules.hard_deny[0]).toContain('10db runs');
   });
 
@@ -31,7 +31,14 @@ describe('autoModeRules', () => {
     expect(rules.hard_deny[0]).not.toContain('``');
   });
 
-  it('refuses a gate command that would break the rule text', () => {
-    expect(() => autoModeRules('make `gate`')).toThrow(AutoModeRulesError);
+  it.each([
+    ['a backtick', 'make `gate`'],
+    ['a double quote', 'make "gate"'],
+    ['a newline', 'make\ngate'],
+    ['a backslash', 'make \\gate'],
+  ])('names a gate command with %s without throwing, as one quoted string', (_name, gate) => {
+    const [rule] = autoModeRules(gate).hard_deny;
+    expect(rule).toContain(JSON.stringify(gate.replaceAll(/\s+/g, ' ')));
+    expect(rule).toContain('10db runs it');
   });
 });

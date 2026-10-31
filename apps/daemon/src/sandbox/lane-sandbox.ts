@@ -75,8 +75,7 @@ export interface LaneSession {
 }
 
 export interface LaneSessionInput {
-  readonly project: Pick<ProjectDto, 'id' | 'repoPath' | 'sandboxLoopback'> &
-    Partial<Pick<ProjectDto, 'gateCommand'>>;
+  readonly project: Pick<ProjectDto, 'id' | 'repoPath' | 'sandboxLoopback' | 'gateCommand'>;
   /** The session's launch env, before the sandbox's own is merged over it. */
   readonly env: Readonly<Record<string, string>>;
   /** The project's and the workstream's stored permission rules. */
@@ -283,7 +282,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
               `Write(${ruleScope(path)}/**)`,
             ]),
           ],
-          autoMode: autoModeRules(input.project.gateCommand ?? null),
+          autoMode: autoModeRules(input.project.gateCommand),
         };
         let providerSessionId = input.resumeProviderSessionId;
         const fileAccess: FileAccessContext = {

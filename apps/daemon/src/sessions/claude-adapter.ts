@@ -170,9 +170,9 @@ export function buildMcpServers(spec: SessionSpec): Record<string, McpServerConf
 
 /**
  * What Claude Code adds to a permission request when it says the call needs a person. Its auto mode
- * classifier sets them. A sandboxed lane runs in auto mode, but the spike never saw the classifier ask, so
- * the check is defensive: a marked call becomes a card that no stored rule answers. The SDK passes these fields at runtime but its
- * typings omit them.
+ * classifier sets them. A sandboxed lane runs in auto mode, but the spike never saw the classifier
+ * ask, so the check is defensive: a marked call becomes a card that no stored rule answers. The SDK
+ * passes these fields at runtime but its typings omit them.
  */
 const EscalationFields = z.looseObject({
   requiresUserInteraction: z.boolean().optional(),

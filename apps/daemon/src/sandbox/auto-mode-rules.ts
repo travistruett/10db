@@ -1,10 +1,5 @@
 import { z } from 'zod';
 
-/** A gate command that cannot be quoted into a rule sentence. */
-export class AutoModeRulesError extends Error {
-  override readonly name = 'AutoModeRulesError';
-}
-
 /** The shape Claude Code reads from `settings.autoMode`: sentences its classifier weighs against a call. */
 const AutoModeSettings = z.strictObject({
   hard_deny: z.array(z.string().min(1)).length(2),
@@ -18,16 +13,12 @@ export type AutoModeSettings = z.infer<typeof AutoModeSettings>;
  * the gate when they forbid it. Paths are soft because the sandbox already bounds them.
  */
 export function autoModeRules(gateCommand: string | null): AutoModeSettings {
-  const command = gateCommand?.trim() ?? '';
-  if (command.includes('`')) {
-    throw new AutoModeRulesError(
-      'The gate command contains a backtick, which a rule cannot quote.',
-    );
-  }
+  const command = (gateCommand ?? '').replaceAll(/\s+/g, ' ').trim();
+  // A JSON string quotes any command, backticks and quotes included, so it cannot break the sentence.
   const gate =
     command === ''
       ? "Running the project's full gate: 10db runs it after the step, so a lane never does."
-      : `Running the project's full gate (\`${command}\`): 10db runs it after the step, so a lane never does.`;
+      : `Running the project's full gate, the command ${JSON.stringify(command)}: 10db runs it after the step, so a lane never does.`;
   return AutoModeSettings.parse({
     hard_deny: [
       gate,
