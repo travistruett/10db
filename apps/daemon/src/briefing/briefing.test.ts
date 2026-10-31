@@ -510,7 +510,10 @@ describe('buildSessionPrompt for flow steps', () => {
       expect(prompt).toContain('running the full gate');
       expect(prompt).toContain('CPU load');
       expect(prompt).toContain("outside this lane's worktree");
-      expect(prompt).toContain("A network host outside the project's allowed domains is refused");
+      expect(prompt).toContain(
+        "A command that reaches a network host outside the project's allowed domains is refused",
+      );
+      expect(prompt).toContain('wait on a card from the builder');
       expect(prompt).toContain('AskUserQuestion');
     },
   );

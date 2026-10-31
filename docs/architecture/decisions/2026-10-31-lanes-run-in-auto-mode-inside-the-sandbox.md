@@ -8,27 +8,48 @@
 
 ## Decision
 
-Every real lane starts its Claude Code session with `permissionMode: 'auto'`. What decides a tool call, in
-order:
+Every real lane starts its Claude Code session with `permissionMode: 'auto'`. In auto mode a call no rule asks
+about is settled by Claude Code's classifier and never reaches `canUseTool` (spike row a), so everything that must
+still hold for a sandboxed lane is decided before the classifier. What decides a tool call, in order:
 
 1. **10db's guard** (`judgeToolUse` in `apps/daemon/src/guard/judge.ts`, the PreToolUse hook). Its refusals
    (claims, protected paths, the data directory, read-only steps) stay hard denies, whatever the classifier
-   would say.
-2. **The sandbox's ask rules** (`permissions.ask`, passed inline per session). Content-scoped ask rules prompt
-   even in auto mode, so every hazard the broker cards today still reaches 10db's broker (`canUseTool`) and its
-   card.
-3. **Network access to a host outside the project's allowed domains is refused** by Claude Code's sandbox
-   network classifier, which fails closed (spike row d). It no longer reaches `judgeHost`, so no card is raised
-   before the refusal. Today's host card already denied first and asked after; in auto mode the lane sees the
-   refusal and can ask the builder itself. 10db does not raise a card from Claude Code's `PermissionDenied` hook:
-   its input carries the tool name, input and a reason, with no host, and the refusal is the sandbox proxy's 403,
-   which the spike never saw reach a hook. The lane briefing tells lanes to ask the builder. The builder accepted this on 2026-10-31: one host card was raised in the two days measured.
-4. **Claude Code's auto-mode classifier** decides everything else: the plain reads, searches, test runs and
+   would say. The hook runs first whatever the classifier decides (row c).
+2. **The same hook's asks** (`sandboxedAsk` in `apps/daemon/src/guard/sandboxed-asks.ts`). For a sandboxed lane
+   the hook answers `permissionDecision: 'ask'` for: a hazard command (also inside `sh -c`, `find -exec` and
+   compounds), a background loop with no end, a Monitor call with any input key beyond `command`, `description`
+   and `timeout_ms` (`ws` opens a socket from Claude Code's own process, outside the sandbox's network proxy),
+   WebFetch, WebSearch and repo MCP tools (they act outside the proxy), a read outside what lanes may read, and a
+   write to a Claude Code configuration path. An `ask` from a hook reaches `canUseTool` in auto mode (row g), so
+   the broker raises the cards it raises today, with today's bodies (the pnpm card, the loop card), and stored
+   rules answer them as before. A Monitor command gets the same checks as a Bash command (hazards, loops, extra
+   keys) and no more: `readsOnlyOwnFiles` no longer gates it, because in auto mode it would only add back the
+   friction the Bash path removed. The broker's checks stay as they were for the calls that reach it.
+3. **The sandbox's ask rules** (`permissions.ask`, passed inline per session) for the `.claude` paths. A
+   content-scoped ask rule reaches `canUseTool` in auto mode, compounded commands included (row h).
+4. **Network access to a host outside the project's allowed domains by a Bash command** is refused by the sandbox
+   proxy and Claude Code's network classifier, which fails closed (row d). It no longer reaches `judgeHost`, so
+   no card is raised before the refusal. Today's host card already denied first and asked after; in auto mode the
+   lane sees the refusal and can ask the builder itself. 10db does not raise a card from Claude Code's
+   `PermissionDenied` hook: its input carries the tool name, input and a reason, with no host. The lane briefing
+   tells lanes to ask the builder. The builder accepted this on 2026-10-31: one host card was raised in the two
+   days measured. WebFetch, WebSearch and MCP tools do not pass through the proxy; they are judged by the hook
+   asks in point 2.
+5. **Claude Code's auto-mode classifier** decides everything else: the plain reads, searches, test runs and
    builds that used to wait on an "Allow Bash?" or "Allow Monitor?" card.
-5. **What the classifier escalates** (`requiresUserInteraction`, or a classifier decision on `canUseTool`'s
+6. **What the classifier escalates** (`requiresUserInteraction`, or a classifier decision on `canUseTool`'s
    options) reaches the broker and becomes a card, and no stored rule or carried allowance answers it (decision
-   103's rule, unchanged). The spike never saw an escalation (every classifier refusal was a denial), so this path
-   stays as a defensive one.
+   103's rule, unchanged; tested in `inbox.test.ts`). The spike never saw an escalation, so this path stays
+   defensive.
+
+The scan for a program or script 10db cannot read (`firstUnread`) is dropped for sandboxed lanes, and its module
+is deleted. It carded `$CMD --help`, `sh -c "$x"` and the like; that is the friction auto mode removes, and the
+sandbox, not the scan, bounds what a script can do. A hazard in plain view still cards; one spelled so the hazard
+scan cannot see it no longer does (the known gap class of decision 2026-10-29). Writes outside a lane's claims
+still card through the watcher.
+
+The project's exact gate command is not in a sandboxed lane's allow list: an allow rule settles a call before the
+classifier, so the hard deny below would never fire. The changed-check command stays allowed.
 
 The session also gets inline `autoMode` rules (`settings.autoMode`, which Claude Code reads only from user,
 managed or inline settings, never the repository's). These are the denials the builder kept typing as card
@@ -89,8 +110,8 @@ and about three answers in four were a bare "allow once" of a plain command such
 `git status`. The builder trusts auto mode in their own sessions and asked for 10db to work the same way.
 
 Decision 124 removed auto mode because the classifier would approve the hazards and new hosts the sandbox's
-cards exist for. Points 2 and 3 answer that: hazards are content-scoped ask rules, which Claude Code prompts for
-even in auto mode, and network hosts go to the broker. The sandbox stays the boundary; the classifier is policy,
+cards exist for. The hook's asks (point 2) answer that: they hand hazards and the tools that act outside the proxy to the
+broker before the classifier, and the proxy refuses new hosts for commands. The sandbox stays the boundary; the classifier is policy,
 not a boundary (threat model §3), as decision 103 said.
 
 Turned down: a model of 10db's own (through OpenRouter) answering permission cards. Auto mode already does that

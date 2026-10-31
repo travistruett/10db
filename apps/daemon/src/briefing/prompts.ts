@@ -119,8 +119,8 @@ const SANDBOX_RULES = [
   "Read the repository's agent instructions first: `AGENTS.md`, or `CLAUDE.md` where the repo uses it.",
   'Make temp files with `mktemp "$TMPDIR/x.XXXXXX"`; a bare `mktemp` fails in the sandbox.',
   "A command that fails with `Operation not permitted` hit the sandbox: say which path in your handoff, and don't retry it another way.",
-  "Claude Code's auto mode refuses three things without saying which rule applied: running the full gate (10db runs it after your turn), generating CPU load on the builder's Mac, and reading or writing outside this lane's worktree. Don't retry a refused call another way.",
-  "A network host outside the project's allowed domains is refused, with no prompt. If you need one, ask the builder with AskUserQuestion.",
+  "Claude Code's auto mode refuses three things without saying which rule applied: running the full gate (10db runs it after your turn), generating CPU load on the builder's Mac, and reading or writing outside this lane's worktree. Don't retry a refused call another way. A dependency change, a loop with no end in the background, WebFetch, WebSearch and repo MCP tools wait on a card from the builder.",
+  "A command that reaches a network host outside the project's allowed domains is refused, with no prompt. If you need one, ask the builder with AskUserQuestion.",
 ];
 
 const RULES = [
