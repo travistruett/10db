@@ -762,6 +762,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     checkout: string,
     signal: AbortSignal,
   ): Promise<string | null> {
+    if (opts.judge.off) return null;
     const config = getJudgeConfig(db);
     const decision = config.decisions.review_size;
     if (!config.enabled || !decision.enabled || row.baseHead === null) return null;

@@ -50,6 +50,11 @@ export type JudgeAnswer =
 /** What a decision asks of the judge. */
 export interface Judge {
   /**
+   * The daemon was started with `TENDB_JUDGE=off`. A decision then keeps today's rule without calling
+   * `choose`, so no fallback row is logged for each of them.
+   */
+  readonly off: boolean;
+  /**
    * Asks the decision's configured model one question and logs the call. Never throws: off, no key,
    * a timeout, an HTTP error or an answer that does not parse is a `fallback`, and the caller applies
    * today's rule. The caller records what it did with an answer through `recordJudgeOutcome`.
@@ -289,5 +294,5 @@ export function createJudge(deps: JudgeDeps): JudgeService {
     };
   }
 
-  return { choose, test };
+  return { off: deps.off, choose, test };
 }

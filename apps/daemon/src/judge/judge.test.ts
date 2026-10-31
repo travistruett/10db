@@ -215,6 +215,12 @@ describe('judge.choose with a chat model', () => {
   });
 });
 
+describe('judge.off', () => {
+  it.each([true, false])('is %s when the daemon was started that way', (off) => {
+    expect(build({ off }).off).toBe(off);
+  });
+});
+
 describe('judge.choose falls back', () => {
   it('is off when the daemon is, without reading the key or calling out', async () => {
     const answer = await build({ off: true }).choose(request);

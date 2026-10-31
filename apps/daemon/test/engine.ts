@@ -113,6 +113,7 @@ export interface TestEngine {
 
 /** A judge that is off: every decision keeps today's rule. */
 export const offJudge: Judge = {
+  off: true,
   choose: () =>
     Promise.resolve({
       kind: 'fallback',

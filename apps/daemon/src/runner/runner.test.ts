@@ -5152,6 +5152,7 @@ describe('the review size decision', () => {
   function scriptedJudge(script: Scripted): { judge: Judge; asked: JudgeRequest[] } {
     const asked: JudgeRequest[] = [];
     const judge: Judge = {
+      off: false,
       choose: (req) => {
         asked.push(req);
         const answered = script.kind === 'answered';
@@ -5304,6 +5305,20 @@ describe('the review size decision', () => {
       expect(outcomes()).toEqual([`fallback_${reason}`]);
     },
   );
+
+  it('makes no call and logs no row when the daemon was started with the judge off', async () => {
+    const { judge, asked } = scriptedJudge({ kind: 'answered', choice: 'skip', confidence: 0.99 });
+    engine = await createTestEngine(
+      { Alpha: [implement('op-size-0081'), [approve('op-size-0082'), turn]] },
+      {},
+      { judge: { ...judge, off: true } },
+    );
+    const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+    await until(workstream.id, (s) => s === 'DONE');
+    expect(asked).toHaveLength(0);
+    expect(engine.adapter.prompts).toHaveLength(2);
+    expect(outcomes()).toEqual([]);
+  });
 
   const forcing: {
     name: string;
