@@ -53,6 +53,18 @@ sandbox, not the scan, bounds what a script can do. A hazard in plain view still
 scan cannot see it no longer does (the known gap class of decision 2026-10-29). Writes outside a lane's claims
 still card through the watcher.
 
+The inline `autoMode` lists name `"$defaults"` first. Claude Code's documentation (auto-mode-config) says a
+`soft_deny`, `hard_deny`, `allow` or `environment` array without it replaces that section's built-in rules
+(force push, `curl | bash`, production deploys, the exfiltration rule), so a list without it would have dropped
+them. A real session with rules lacking `$defaults` ran `git push --force` to a local bare remote unblocked; with
+`$defaults` it also ran, because the prompt named the exact command, which the documentation says clears a soft
+deny, so the probe cannot show the defaults blocking and the documentation is the evidence. A test pins both
+lists' first entry. The `-c` and `-e` scripts of `python`, `node`, `perl` and `ruby` are not read as shell by
+the guard or the hook (python is a heredoc data reader only, like node); that gap is accepted, as the sandbox
+bounds what they can do. Decisions `2026-10-30-lane-monitor-of-its-own-task-output.md` and
+`2026-10-31-lane-monitor-names-its-output-file-in-a-variable.md` described a Monitor grammar that no longer
+gates anything in auto mode and is removed.
+
 The project's exact gate command is not in a sandboxed lane's allow list: an allow rule settles a call before the
 classifier, so the hard deny below would never fire. The changed-check command stays allowed.
 

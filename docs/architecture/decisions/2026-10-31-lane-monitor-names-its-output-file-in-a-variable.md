@@ -1,6 +1,8 @@
 # A lane's Monitor may name its own output file through a variable
 
 - **Date:** 2026-10-31
+- **Superseded by:** `2026-10-31-lanes-run-in-auto-mode-inside-the-sandbox.md`: in auto mode a Monitor call gets the
+  checks a Bash command gets and no more, so this grammar no longer gates it.
 - **Amends:** `2026-10-30-lane-monitor-of-its-own-task-output.md`
 
 ## Decision
