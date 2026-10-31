@@ -495,6 +495,27 @@ describe('buildSessionPrompt for flow steps', () => {
   });
 
   it.each([
+    ['an implement step', implementStep],
+    ['a read-only step', reviewStep],
+  ])(
+    'tells %s what the auto-mode classifier refuses and that a new host is refused',
+    (_name, step) => {
+      const prompt = buildSessionPrompt({
+        ...base,
+        step,
+        action: { kind: 'start' },
+        sandboxed: true,
+      });
+      expect(prompt).toContain("Claude Code's auto mode refuses");
+      expect(prompt).toContain('running the full gate');
+      expect(prompt).toContain('CPU load');
+      expect(prompt).toContain("outside this lane's worktree");
+      expect(prompt).toContain("A network host outside the project's allowed domains is refused");
+      expect(prompt).toContain('AskUserQuestion');
+    },
+  );
+
+  it.each([
     ['sandboxed: false', { sandboxed: false }],
     ['no sandbox flag', {}],
   ])('says nothing of the sandbox with %s', (_name, flag) => {
@@ -503,6 +524,7 @@ describe('buildSessionPrompt for flow steps', () => {
       expect(prompt).not.toContain('mktemp');
       expect(prompt).not.toContain('Operation not permitted');
       expect(prompt).not.toContain('agent instructions');
+      expect(prompt).not.toContain('auto mode');
     }
   });
 
