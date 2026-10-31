@@ -245,6 +245,34 @@ describe('createGh', () => {
     ]);
   });
 
+  it('squash-merges a pull request now, naming everything as its own argument', async () => {
+    const { exec, seen } = scripted({ 'pr merge': { exitCode: 0 } });
+    await createGh(exec).prMerge(
+      { repo: 'acme/widgets', url: 'https://github.com/acme/widgets/pull/8' },
+      CALL,
+    );
+    expect(seen[0]).toEqual([
+      'pr',
+      'merge',
+      'https://github.com/acme/widgets/pull/8',
+      '-R',
+      'acme/widgets',
+      '--squash',
+    ]);
+  });
+
+  it('refuses a merge GitHub turns down as a typed error', async () => {
+    const { exec } = scripted({
+      'pr merge': { exitCode: 1, stderr: 'X Pull request is not mergeable' },
+    });
+    await expect(
+      createGh(exec).prMerge(
+        { repo: 'acme/widgets', url: 'https://github.com/acme/widgets/pull/8' },
+        CALL,
+      ),
+    ).rejects.toMatchObject({ name: 'GhError', kind: 'failed' });
+  });
+
   it.each([
     {
       name: 'a repository that does not allow it',

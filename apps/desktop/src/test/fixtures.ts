@@ -43,6 +43,7 @@ export function projectDto(overrides: Partial<ProjectDto> = {}): ProjectDto {
     delivery: 'local',
     baseBranch: 'main',
     landing: 'merge',
+    landingBranch: null,
     prTitlePrefix: null,
     allowedCommands: [],
     sandboxLoopback: false,

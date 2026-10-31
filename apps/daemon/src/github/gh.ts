@@ -95,6 +95,11 @@ export interface Gh {
    * nothing left to wait for.
    */
   prAutoMerge(input: { readonly repo: string; readonly url: string }, call: GhCall): Promise<void>;
+  /**
+   * Squash-merges the pull request now, for one with nothing to wait for. Throws a GhError when
+   * GitHub refuses, with its reason, such as a conflict or a branch rule.
+   */
+  prMerge(input: { readonly repo: string; readonly url: string }, call: GhCall): Promise<void>;
 }
 
 export interface GhOutput {
@@ -459,6 +464,9 @@ export function createGh(exec: GhExec): Gh {
     },
     async prAutoMerge({ repo, url }, call) {
       await ok(['pr', 'merge', url, '-R', repo, '--auto', '--squash'], call);
+    },
+    async prMerge({ repo, url }, call) {
+      await ok(['pr', 'merge', url, '-R', repo, '--squash'], call);
     },
   };
 }
