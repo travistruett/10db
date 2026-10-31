@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { SECRET_VARIABLES } from '../environment';
 import { deniedEnvNames } from './index';
 
 describe('deniedEnvNames', () => {
@@ -61,5 +62,17 @@ describe('deniedEnvNames', () => {
     'xcrun_db',
   ])('keeps %s', (name) => {
     expect(deniedEnvNames({ [name]: 'v' })).toEqual([]);
+  });
+
+  it.each([
+    ...SECRET_VARIABLES,
+    'AWS_ACCESS_KEY_ID',
+    'AWS_PROFILE',
+    'AWS_SECRET_ACCESS_KEY',
+    'ANTHROPIC_BASE_URL',
+    'CLAUDE_CODE_USE_BEDROCK',
+    'CLAUDE_CONFIG_DIR',
+  ])('denies the account variable %s to a sandboxed command', (name) => {
+    expect(deniedEnvNames({ [name]: 'x' })).toEqual([name]);
   });
 });

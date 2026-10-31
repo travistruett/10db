@@ -1,6 +1,7 @@
 # A sandboxed lane's Monitor of its own task output runs without a card
 
 - **Date:** 2026-10-30
+- **Superseded by:** `2026-10-31-lanes-run-in-auto-mode-inside-the-sandbox.md`.
 
 ## Decision
 

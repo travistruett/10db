@@ -24,6 +24,7 @@ import {
 } from '../../test/fixtures';
 import { ManualClock } from '../clock';
 import { projectAtCheckout } from '../delivery';
+import { SECRET_VARIABLES } from '../environment';
 import { createGit } from '../git';
 import {
   createLaneSandbox,
@@ -68,7 +69,12 @@ function sandbox(
 
 function input(overrides: Partial<LaneSessionInput> = {}): LaneSessionInput {
   return {
-    project: { id: projectId, repoPath: repo.path, sandboxLoopback: false },
+    project: {
+      id: projectId,
+      repoPath: repo.path,
+      sandboxLoopback: false,
+      gateCommand: 'make gate',
+    },
     env: { PATH: '/usr/bin:/bin', HOME: home, ANTHROPIC_API_KEY: 'sk-test' },
     rules: [],
     resumeProviderSessionId: null,
@@ -143,7 +149,9 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
     ['on', true, true],
   ])("opens localhost when the project's switch is %s", async (_name, sandboxLoopback, binding) => {
     const session = await sandbox().forSession(
-      input({ project: { id: projectId, repoPath: repo.path, sandboxLoopback } }),
+      input({
+        project: { id: projectId, repoPath: repo.path, sandboxLoopback, gateCommand: 'make gate' },
+      }),
     );
     try {
       expect(session.spec.settings.network.allowLocalBinding).toBe(binding);
@@ -209,7 +217,14 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       });
       const commonDir = join(checkout, '.git');
       const session = await sandbox().forSession(
-        input({ project: { id: projectId, repoPath: worktree, sandboxLoopback: false } }),
+        input({
+          project: {
+            id: projectId,
+            repoPath: worktree,
+            sandboxLoopback: false,
+            gateCommand: 'make gate',
+          },
+        }),
       );
       try {
         const { allowRead, allowWrite, denyWrite } = session.spec.settings.filesystem;
@@ -364,7 +379,12 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
         gitDirs: () => Promise.resolve({ gitDir: inner, commonDir: inner }),
       }).forSession(
         input({
-          project: { id: projectId, repoPath: work, sandboxLoopback: false },
+          project: {
+            id: projectId,
+            repoPath: work,
+            sandboxLoopback: false,
+            gateCommand: 'make gate',
+          },
           checkouts: [work],
         }),
       );
@@ -386,7 +406,14 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
     symlinkSync(checkout, link);
     const env = writeIn(checkout, '.env');
     const session = await sandbox().forSession(
-      input({ project: { id: projectId, repoPath: link, sandboxLoopback: false } }),
+      input({
+        project: {
+          id: projectId,
+          repoPath: link,
+          sandboxLoopback: false,
+          gateCommand: 'make gate',
+        },
+      }),
     );
     try {
       expect(session.spec.settings.filesystem.allowRead).toContain(checkout);
@@ -551,6 +578,42 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
     }
   });
 
+  it('forbids the tools that start worktrees, schedules and remote triggers outside the lane', async () => {
+    const session = await sandbox().forSession(input());
+    try {
+      expect(session.spec.disallowedTools).toEqual(
+        expect.arrayContaining(['EnterWorktree', 'CronCreate', 'ScheduleWakeup', 'RemoteTrigger']),
+      );
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it('gives a lane command none of an account credential, though the session env holds them all', async () => {
+    const names = [...SECRET_VARIABLES, 'AWS_ACCESS_KEY_ID', 'AWS_PROFILE', 'ANTHROPIC_BASE_URL'];
+    const session = await sandbox().forSession(
+      input({
+        env: {
+          PATH: '/usr/bin:/bin',
+          HOME: home,
+          ...Object.fromEntries(names.map((name) => [name, `secret-${name}`])),
+        },
+      }),
+    );
+    try {
+      const denied = new Set(session.spec.settings.credentials.envVars.map((entry) => entry.name));
+      for (const name of names) {
+        expect(denied.has(name), `${name} is denied to Bash`).toBe(true);
+        expect(session.commandEnv).not.toHaveProperty(name);
+        expect(readFileSync(session.spec.env['CLAUDE_ENV_FILE'] ?? '', 'utf8')).not.toContain(
+          `secret-${name}`,
+        );
+      }
+    } finally {
+      session.dispose();
+    }
+  });
+
   it("asks before an edit or write of the checkout's Claude-protected files and directories", async () => {
     const session = await sandbox().forSession(input());
     try {
@@ -564,6 +627,24 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
           `Write(/${hooks}/**)`,
         ]),
       );
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it("hands the classifier a rule naming the project's gate command", async () => {
+    const session = await sandbox().forSession(
+      input({
+        project: {
+          id: projectId,
+          repoPath: repo.path,
+          sandboxLoopback: false,
+          gateCommand: 'make gate',
+        },
+      }),
+    );
+    try {
+      expect(session.spec.autoMode.hard_deny[1]).toContain(JSON.stringify('make gate'));
     } finally {
       session.dispose();
     }
