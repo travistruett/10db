@@ -25,6 +25,7 @@ import {
   type ConfigRoots,
 } from './checkout-trust';
 import { parseScopedConfig, type ConfigEntry } from './config-trust';
+import { resolveAddedLines } from './conflict-text';
 import { equalOrUnder, insideAny, isPlainDirectory, samePath, surelyInside } from './lane-writable';
 import {
   branchOfRef,
@@ -111,6 +112,21 @@ export type FileAt =
   | { readonly kind: 'not_regular'; readonly mode: string }
   | { readonly kind: 'too_large'; readonly bytes: number };
 
+/** A conflicted file `mergeIntoBranch` could not settle, and why. */
+export interface UnresolvedConflict {
+  readonly path: string;
+  readonly reason: string;
+}
+
+/**
+ * A conflict `mergeIntoBranch` settled: `kept_both` where each side only added lines at the same place,
+ * `regenerated` where `path` is a generated directory (ending in `/`) that now holds the base's files.
+ */
+export interface ResolvedConflict {
+  readonly path: string;
+  readonly how: 'kept_both' | 'regenerated';
+}
+
 /** What `mergeIntoBranch` did; `from` is the commit it was asked to bring in. */
 export type BranchMerge =
   /** The branch already holds `from`; nothing moved. */
@@ -123,9 +139,26 @@ export type BranchMerge =
       /** True when the branch had nothing of its own and now names `from` itself. */
       readonly fastForward: boolean;
       readonly paths: readonly string[];
+      /** The conflicts `resolve` settled, only when there were any. */
+      readonly resolved?: readonly ResolvedConflict[];
+      /**
+       * The generated directories whose conflicts were settled by taking the base's version of the
+       * whole directory: the files the branch had there that the base lacks (`dropped`) are gone from
+       * the merge, and the caller regenerates the directory from its sources.
+       */
+      readonly regenerate?: readonly {
+        readonly dir: string;
+        readonly dropped: readonly string[];
+      }[];
     }
   /** Both sides changed these files in ways git can't combine; nothing was written. */
-  | { readonly kind: 'conflict'; readonly from: string; readonly paths: readonly string[] }
+  | {
+      readonly kind: 'conflict';
+      readonly from: string;
+      readonly paths: readonly string[];
+      /** Why each of `paths` was left; only when the caller asked for conflicts to be resolved. */
+      readonly unresolved?: readonly UnresolvedConflict[];
+    }
   /**
    * Files lie where the merge would write, so nothing was written: `changed` are uncommitted changes
    * and untracked files git reports at paths it writes; `kept` are files git doesn't track (ignored
@@ -159,7 +192,29 @@ export interface MergeIntoBranchInput {
   readonly from: string;
   /** The merge commit's message. */
   readonly message: string;
+  /**
+   * Settle conflicts instead of stopping at them. Text files where each side only added lines at the
+   * same place keep both; a conflict in a directory of `generated` (paths ending in `/`) takes the
+   * base's version of the directory. Anything else, such as two edits of one line, a deletion, a
+   * binary file or a lockfile, still stops the merge. Without it every conflict does.
+   * `generatedHeld`, for a caller that can't regenerate now, leaves every conflict in a directory of
+   * `generated` a conflict for that reason instead: a generated file is never merged by line.
+   */
+  readonly resolve?: { readonly generated: readonly string[]; readonly generatedHeld?: string };
 }
+
+/** One line of `merge-tree`'s conflicted file info: a side's version of a conflicted path. */
+interface ConflictEntry {
+  readonly mode: string;
+  readonly oid: string;
+  readonly stage: number;
+  readonly path: string;
+}
+
+const CONFLICT_ENTRY = /^(\d{6}) ([0-9a-f]{40}(?:[0-9a-f]{24})?) ([123])\t([\s\S]+)$/;
+
+/** The largest conflicted file whose lines 10db will merge itself. */
+const RESOLVABLE_BYTES = 1_000_000;
 
 /** The modes git stores a regular file with. */
 const REGULAR_FILE_MODES: readonly string[] = ['100644', '100755'];
@@ -233,6 +288,12 @@ export interface Git {
    * submodule runs.
    */
   changedPaths(repo: string, only?: readonly string[]): Promise<string[]>;
+  /**
+   * Puts the files under `dirs` back as HEAD has them: each changed one is rewritten and each one
+   * HEAD lacks is removed; ignored files stay. Runs nothing from the repository, and leaves the
+   * checkout's own index as it was. Resolves with the paths it put back, sorted.
+   */
+  restoreDirs(repo: string, dirs: readonly string[]): Promise<string[]>;
   /** Committed and uncommitted changes since `base`, sorted and unique. */
   changedFilesSince(repo: string, base: string): Promise<string[]>;
   /** Files whose committed content differs between `base` and `tip`, sorted; nothing uncommitted. */
@@ -1273,18 +1334,155 @@ export function createGit(opts: GitOptions = {}): Git {
     c: Pinned,
     ours: string,
     theirs: string,
-  ): Promise<{ tree: string; conflicted: string[] }> {
-    const [tree = '', ...conflicted] = (
-      await git(
-        c,
-        ['merge-tree', '--write-tree', '--name-only', '--no-messages', '-z', ours, theirs],
-        { answerExitCodes: [1] },
-      )
+  ): Promise<{ tree: string; conflicted: string[]; entries: ConflictEntry[] }> {
+    // diff3 style shows the common ancestor's lines in each conflict, which is how a conflict of two
+    // insertions is told from two edits of the same line.
+    const [tree = '', ...rest] = (
+      await git(c, ['merge-tree', '--write-tree', '--no-messages', '-z', ours, theirs], {
+        answerExitCodes: [1],
+        config: ['-c', 'merge.conflictStyle=diff3'],
+      })
+    ).split('\0');
+    if (!OBJECT_ID.test(tree)) throw new GitError(['merge-tree'], 'merge-tree named no tree', null);
+    const entries: ConflictEntry[] = [];
+    for (const chunk of rest) {
+      const match = CONFLICT_ENTRY.exec(chunk);
+      if (match)
+        entries.push({
+          mode: match[1] ?? '',
+          oid: match[2] ?? '',
+          stage: Number(match[3]),
+          path: match[4] ?? '',
+        });
+    }
+    return { tree, conflicted: [...new Set(entries.map((e) => e.path))].sort(), entries };
+  }
+
+  /** The text of the blob at `path` in `tree`, null when it isn't text 10db can merge by line. */
+  async function mergeableText(c: Pinned, tree: string, path: string): Promise<string | null> {
+    const size = Number((await git(c, ['cat-file', '-s', `${tree}:${path}`])).trim());
+    if (!Number.isFinite(size) || size > RESOLVABLE_BYTES) return null;
+    const text = await git(c, ['cat-file', 'blob', `${tree}:${path}`]);
+    return text.includes('\0') || text.includes('�') ? null : text;
+  }
+
+  /** What one conflicted text file comes to: its merged blob, or why it stays a conflict. */
+  async function resolveFile(
+    c: Pinned,
+    tree: string,
+    path: string,
+    sides: ReadonlyMap<number, ConflictEntry>,
+  ): Promise<{ oid: string; mode: string } | { reason: string }> {
+    if (path === 'pnpm-lock.yaml' || path.endsWith('/pnpm-lock.yaml'))
+      return { reason: "pnpm's lockfile is made by pnpm, not merged by line" };
+    // Both sides appending a migration only adds lines, so a line merge would number two alike.
+    if (path === 'meta/_journal.json' || path.endsWith('/meta/_journal.json'))
+      return {
+        reason: "drizzle numbers its migrations in order, so its journal isn't merged by line",
+      };
+    const base = sides.get(1);
+    const ours = sides.get(2);
+    const theirs = sides.get(3);
+    if (!base) return { reason: 'both sides added this file' };
+    if (!ours || !theirs) return { reason: 'one side deleted this file and the other changed it' };
+    if (
+      ours.mode !== theirs.mode ||
+      !REGULAR_FILE_MODES.includes(ours.mode) ||
+      !REGULAR_FILE_MODES.includes(base.mode)
     )
+      return { reason: "the sides differ in the file's type or mode, or it isn't a regular file" };
+    const text = await mergeableText(c, tree, path);
+    if (text === null) return { reason: "it isn't a text file small enough to merge by line" };
+    const resolution = resolveAddedLines(text);
+    if (resolution.kind === 'unresolved') return { reason: resolution.reason };
+    if (path.endsWith('.json')) {
+      try {
+        JSON.parse(resolution.text);
+      } catch {
+        return { reason: 'the merged file is not valid JSON' };
+      }
+    }
+    const oid = (await git(c, ['hash-object', '-w', '--stdin'], { input: resolution.text })).trim();
+    return { oid, mode: ours.mode };
+  }
+
+  /** The files of `dir` in commit `rev`. */
+  async function filesUnder(c: Pinned, rev: string, dir: string): Promise<string[]> {
+    return (await git(c, ['ls-tree', '-r', '--name-only', '-z', rev, '--', dir]))
       .split('\0')
       .filter(Boolean);
-    if (!OBJECT_ID.test(tree)) throw new GitError(['merge-tree'], 'merge-tree named no tree', null);
-    return { tree, conflicted: [...new Set(conflicted)].sort() };
+  }
+
+  /**
+   * Settles `entries`, the conflicts of the merge of `from` into `tip` whose tree is `tree`: the
+   * tree with them settled, or why some stay conflicts. Objects only; nothing is written to the
+   * checkout.
+   */
+  async function resolveConflicts(
+    c: Pinned,
+    tip: string,
+    from: string,
+    tree: string,
+    entries: readonly ConflictEntry[],
+    { generated, generatedHeld }: NonNullable<MergeIntoBranchInput['resolve']>,
+  ): Promise<
+    | {
+        kind: 'resolved';
+        tree: string;
+        resolved: ResolvedConflict[];
+        regenerate: { dir: string; dropped: string[] }[];
+      }
+    | { kind: 'unresolved'; unresolved: UnresolvedConflict[] }
+  > {
+    const sides = new Map<string, Map<number, ConflictEntry>>();
+    for (const entry of entries) {
+      const found = sides.get(entry.path) ?? new Map<number, ConflictEntry>();
+      found.set(entry.stage, entry);
+      sides.set(entry.path, found);
+    }
+    const byPath = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+    const unresolved: UnresolvedConflict[] = [];
+    const merged: { path: string; oid: string; mode: string }[] = [];
+    const dirs = new Set<string>();
+    for (const [path, found] of [...sides].sort(([a], [b]) => byPath(a, b))) {
+      const dir = generated.find((prefix) => path.startsWith(prefix));
+      if (dir !== undefined && generatedHeld !== undefined) {
+        unresolved.push({ path, reason: generatedHeld });
+        continue;
+      }
+      if (dir !== undefined) {
+        dirs.add(dir);
+        continue;
+      }
+      const file = await resolveFile(c, tree, path, found);
+      if ('reason' in file) unresolved.push({ path, reason: file.reason });
+      else merged.push({ path, ...file });
+    }
+    if (unresolved.length > 0) return { kind: 'unresolved', unresolved };
+    const regenerate: { dir: string; dropped: string[] }[] = [];
+    for (const dir of [...dirs].sort()) {
+      const theirs = new Set(await filesUnder(c, from, dir));
+      const dropped = (await filesUnder(c, tip, dir)).filter((file) => !theirs.has(file)).sort();
+      regenerate.push({ dir, dropped });
+    }
+    const resolved: ResolvedConflict[] = [
+      ...merged.map((m): ResolvedConflict => ({ path: m.path, how: 'kept_both' })),
+      ...regenerate.map((r): ResolvedConflict => ({ path: r.dir, how: 'regenerated' })),
+    ].sort((a, b) => byPath(a.path, b.path));
+    const settled = await withPrivateIndex(c, tree, async (env) => {
+      for (const m of merged)
+        await git(c, ['update-index', '--add', '--cacheinfo', `${m.mode},${m.oid},${m.path}`], {
+          env,
+        });
+      for (const { dir } of regenerate) {
+        const bare = dir.replace(/\/+$/, '');
+        await git(c, ['rm', '-r', '-f', '-q', '--cached', '--ignore-unmatch', '--', bare], { env });
+        if ((await revParse(c, `${from}:${bare}`)) !== null)
+          await git(c, ['read-tree', `--prefix=${bare}/`, `${from}:${bare}`], { env });
+      }
+      return (await git(c, ['write-tree'], { env })).trim();
+    });
+    return { kind: 'resolved', tree: settled, resolved, regenerate };
   }
 
   /**
@@ -1430,13 +1628,45 @@ export function createGit(opts: GitOptions = {}): Git {
       if (needed.length > 0) throw refusal(c.real, { kind: GitTrustFailure.Filter, paths: needed });
       const fastForward = await isAncestor(c, tip, from);
       let head = from;
+      let resolved: ResolvedConflict[] = [];
+      let regenerate: { dir: string; dropped: string[] }[] = [];
       if (!fastForward) {
-        const { tree, conflicted } = await mergeTree(c, tip, from);
-        if (conflicted.length > 0) return { kind: 'conflict', from, paths: conflicted };
+        const merging = await mergeTree(c, tip, from);
+        let tree = merging.tree;
+        if (merging.conflicted.length > 0) {
+          if (!input.resolve) return { kind: 'conflict', from, paths: merging.conflicted };
+          const settled = await resolveConflicts(
+            c,
+            tip,
+            from,
+            tree,
+            merging.entries,
+            input.resolve,
+          );
+          if (settled.kind === 'unresolved')
+            return {
+              kind: 'conflict',
+              from,
+              paths: settled.unresolved.map((u) => u.path),
+              unresolved: settled.unresolved,
+            };
+          tree = settled.tree;
+          resolved = settled.resolved;
+          regenerate = settled.regenerate;
+        }
         const sign = signing(c, await configEntries(c));
+        const settledNote = resolved.map((r) =>
+          r.how === 'regenerated'
+            ? `- ${r.path}: taken from ${input.from}, to be regenerated`
+            : `- ${r.path}: both sides' added lines kept`,
+        );
+        const message =
+          settledNote.length === 0
+            ? input.message
+            : `${input.message}\n\n10db settled these conflicts:\n${settledNote.join('\n')}`;
         head = (
           await git(c, ['commit-tree', ...sign.flags, tree, '-p', tip, '-p', from], {
-            input: `${input.message}\n`,
+            input: `${message}\n`,
             config: sign.config,
           })
         ).trim();
@@ -1484,7 +1714,14 @@ export function createGit(opts: GitOptions = {}): Git {
         if (!(error instanceof GitError)) throw error;
         throw refusal(c.real, { kind: GitTrustFailure.Ref, ref, reason: 'raced' });
       }
-      return { kind: 'merged', from, head, fastForward, paths };
+      return {
+        kind: 'merged',
+        from,
+        head,
+        fastForward,
+        paths,
+        ...(resolved.length === 0 ? {} : { resolved, regenerate }),
+      };
     });
   }
 
@@ -1897,6 +2134,29 @@ export function createGit(opts: GitOptions = {}): Git {
     },
     async changedPaths(repo, only) {
       return changes(await pinned(repo), only);
+    },
+    async restoreDirs(repo, dirs) {
+      const named = checkPaths(repo, dirs);
+      if (named.length === 0) return [];
+      return withRepoLock(realpathSync(repo), async () => {
+        const c = await pinned(repo);
+        const differing = await changes(c, named);
+        if (differing.length === 0) return [];
+        // In an index seeded from HEAD a file HEAD lacks is untracked, so `clean` removes it (a
+        // symlink itself, never what it points at) before `checkout-index` writes HEAD's files.
+        await withPrivateIndex(c, await revParse(c, 'HEAD^{commit}'), async (env) => {
+          await git(c, ['clean', '-f', '-d', '-q', '--', ...named], { env });
+          const tracked = (await git(c, ['ls-files', '-z', '--', ...differing], { env }))
+            .split('\0')
+            .filter(Boolean);
+          if (tracked.length > 0)
+            await git(c, ['checkout-index', '-f', '-q', '-z', '--stdin'], {
+              env,
+              input: `${tracked.join('\0')}\0`,
+            });
+        });
+        return differing;
+      });
     },
     async changedFilesSince(repo, base) {
       const c = await pinned(repo);
