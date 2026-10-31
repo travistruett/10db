@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ModelProfileId, PersonaId, SessionId } from './ids';
+import { ModelProfileId, PersonaId, SessionId, TaskId } from './ids';
 import { Effort, ROLE_SCORE, ScoreKind, StepRole, StepStatus, ToolAccess, Verdict } from './states';
 
 /** Longest result a step may record: a plan or a review's notes. */
@@ -19,6 +19,13 @@ export const StepResult = z.object({
   at: z.iso.datetime(),
 });
 export type StepResult = z.infer<typeof StepResult>;
+
+/** The follow-up task filed for the findings a task shipped with at the retry limit. */
+export const ShippedAtLimit = z.object({
+  followUpTaskId: TaskId,
+  followUpTitle: z.string().min(1),
+});
+export type ShippedAtLimit = z.infer<typeof ShippedAtLimit>;
 
 /** One step of a workstream's resolved plan, fixed when the task starts. */
 export const WorkstreamStep = z.object({
@@ -52,6 +59,11 @@ export const WorkstreamStep = z.object({
   earlier: z.array(StepResult).default([]),
   /** Times this step's rejection sent the work back since the attempts last started over; a retry sets it to 0. */
   sentBack: z.int().min(0).default(0),
+  /**
+   * Set on a review or QA step whose rejection used up the retry limit and shipped the work anyway:
+   * the follow-up task 10db filed for the findings that stayed open. Absent otherwise.
+   */
+  shippedAtLimit: ShippedAtLimit.optional(),
 });
 export type WorkstreamStep = z.infer<typeof WorkstreamStep>;
 

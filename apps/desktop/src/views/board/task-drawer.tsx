@@ -60,6 +60,7 @@ import {
   canRetryRun,
   pullRequestClosed,
   shippedAnywayAndClosed,
+  shippedAtLimitLine,
   taskNotices,
 } from './task-state';
 
@@ -125,6 +126,7 @@ export function TaskDrawer({
     return peer ? [peer.title] : [];
   });
   const live = workstream !== undefined && !isTerminal(workstream.state);
+  const limitLine = shippedAtLimitLine(workstream);
 
   const dirty =
     title !== task.title ||
@@ -218,6 +220,11 @@ export function TaskDrawer({
             onClosed={onClose}
             {...(onStart ? { onStart } : {})}
           />
+        ) : null}
+        {limitLine ? (
+          <Alert color="orange" variant="light" data-testid="shipped-at-limit">
+            {limitLine}
+          </Alert>
         ) : null}
         {workstream ? <ReviewRoundsList steps={workstream.steps} /> : null}
         {batch ? (
