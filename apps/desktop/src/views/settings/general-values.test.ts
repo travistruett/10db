@@ -35,6 +35,21 @@ describe('checkGeneral', () => {
       expected: { ok: true, patch: { landing: 'hold' } },
     },
     {
+      name: 'merging new tasks into a named branch',
+      change: { landing: 'branch', landingBranch: ' next ' },
+      expected: { ok: true, patch: { landing: 'branch', landingBranch: 'next' } },
+    },
+    {
+      name: 'a named branch with no name',
+      change: { landing: 'branch', landingBranch: ' ' },
+      expected: { ok: false, errors: { landingBranch: 'Name the branch new tasks land in' } },
+    },
+    {
+      name: 'a named branch that git would refuse',
+      change: { landing: 'branch', landingBranch: '-d' },
+      expected: { ok: false, errors: { landingBranch: 'Name the branch new tasks land in' } },
+    },
+    {
       name: 'a worktree per task',
       change: { delivery: 'pull_request', prTitlePrefix: 'feat(app)', workspaceMode: 'worktree' },
       expected: {
@@ -178,6 +193,21 @@ describe('checkGeneral', () => {
     },
   ])('answers $name', ({ allowedCommands, expected }) => {
     expect(checkGeneral(project, { ...base, allowedCommands })).toEqual(expected);
+  });
+
+  it('shows a branch default, renames it, and leaves it by choosing another landing', () => {
+    const onBranch = projectDto({ landing: 'branch', landingBranch: 'next' });
+    const values = generalValues(onBranch);
+    expect(values).toMatchObject({ landing: 'branch', landingBranch: 'next' });
+    expect(checkGeneral(onBranch, values)).toEqual({ ok: true, patch: null });
+    expect(checkGeneral(onBranch, { ...values, landingBranch: 'dev' })).toEqual({
+      ok: true,
+      patch: { landingBranch: 'dev' },
+    });
+    expect(checkGeneral(onBranch, { ...values, landing: 'merge' })).toEqual({
+      ok: true,
+      patch: { landing: 'merge' },
+    });
   });
 
   it('names the first line that is not a plain command prefix', () => {

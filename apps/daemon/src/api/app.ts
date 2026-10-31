@@ -200,9 +200,9 @@ export function createApp(deps: ApiDeps) {
     .patch(
       '/projects/:projectId',
       validator('json', (value): ProjectPatch => ProjectPatch.parse(value)),
-      (c) =>
+      async (c) =>
         c.json(
-          deps.services.patchProject(
+          await deps.services.patchProject(
             ProjectId.parse(c.req.param('projectId')),
             c.req.valid('json'),
           ),
