@@ -718,6 +718,30 @@ describe('createClaudeAdapter', () => {
     ]);
   });
 
+  it('carries the last message a turn wrote, capped, and none for a turn that wrote nothing', async () => {
+    const { adapter } = adapterFor({
+      messages: [
+        initMessage(),
+        resultMessage({
+          input: 1,
+          output: 1,
+          costUsd: 0.01,
+          text: '  1. BLOCKING a.ts:3 no test.  ',
+        }),
+        resultMessage({ input: 1, output: 1, costUsd: 0.01, text: 'x'.repeat(9_000) }),
+        resultMessage({ input: 1, output: 1, costUsd: 0.01 }),
+      ],
+    });
+    const turns = (await collect(adapter.start(spec()).events)).filter(
+      (e) => e.type === 'turn_complete',
+    );
+    expect(turns.map((t) => t.text)).toEqual([
+      '1. BLOCKING a.ts:3 no test.',
+      'x'.repeat(8_000),
+      undefined,
+    ]);
+  });
+
   it('never sends the prompt when the billing preflight shows Bedrock on a subscription project', async () => {
     const { adapter, record } = adapterFor({
       messages: [initMessage('none'), assistantMessage([textBlock('working')])],
