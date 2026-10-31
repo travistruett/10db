@@ -248,6 +248,22 @@ describe('when the base branch has no required checks', () => {
     expect(notice.body).toContain(shipped.prUrl ?? '');
   });
 
+  it('squash-merges at once when GitHub says the branch has no protection rules, with no card', async () => {
+    h = createDeliveryHarness();
+    h.gh.failNext.set(
+      'prAutoMerge',
+      new GhError(
+        'failed',
+        'gh pr merge failed (exit 1): GraphQL: Pull request Protected branch rules not configured for this branch (enablePullRequestAutoMerge)',
+      ),
+    );
+    const shipped = await ship(await start('One', h.addTask('Alpha')));
+    expect(shipped.state).toBe('SHIPPED');
+    expect(h.gh.merged).toEqual([shipped.prUrl]);
+    expect(h.cards()).toEqual([]);
+    expect(shipped.notices).toEqual([]);
+  });
+
   it('never merges a pull request held for the builder', async () => {
     h = createDeliveryHarness({ landing: 'hold' });
     h.gh.noRequiredChecks = true;
