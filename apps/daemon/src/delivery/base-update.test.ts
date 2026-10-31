@@ -15,6 +15,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { isolatedGitEnv } from '../../test/fixtures';
 import { createBaseUpdates, ensureWorktreeWhole, workstreamChanges } from './index';
+import { baseConflictKey, baseKeptKey } from './cards';
+import { raise } from './context';
 import { INSTALL_SUMMARY } from './worktree-dependencies';
 
 let h: DeliveryHarness;
@@ -513,6 +515,35 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
     );
     expect((await updates.beforeGate(batch.id, signal)).kind).toBe('up_to_date');
     expect(getBatch(h.store.db, batch.id).notices).toEqual([]);
+    expect(h.cards()).toEqual([]);
+  });
+
+  it('closes the conflict and in-the-way cards an earlier build raised, once a gate finds the branch holds the base', async () => {
+    h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+    const { batch } = await opened();
+    for (const foldKey of [baseConflictKey(batch.id), baseKeptKey(batch.id)])
+      raise(h.inbox, h.project.id, {
+        title: `Batch "${batch.title}" conflicts with main`,
+        body: 'x',
+        foldKey,
+      });
+    expect(h.cards()).toHaveLength(2);
+    expect((await createBaseUpdates(h.ctx).beforeGate(batch.id, signal)).kind).toBe('up_to_date');
+    expect(h.cards()).toEqual([]);
+  });
+
+  it('closes the conflict card an earlier build raised when a gate shows the conflict as a notice', async () => {
+    h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+    const { batch } = await opened();
+    raise(h.inbox, h.project.id, {
+      title: `Batch "${batch.title}" conflicts with main`,
+      body: 'x',
+      foldKey: baseConflictKey(batch.id),
+    });
+    await commitOnBatch(batch, 'README.md', '# ours\n');
+    h.teammatePush('main', 'README.md', '# theirs\n');
+    await createBaseUpdates(h.ctx).beforeGate(batch.id, signal);
+    expect(getBatch(h.store.db, batch.id).notices).toHaveLength(1);
     expect(h.cards()).toEqual([]);
   });
 

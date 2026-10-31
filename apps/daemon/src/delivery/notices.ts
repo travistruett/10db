@@ -115,6 +115,14 @@ export const baseNotices = {
   }),
 };
 
+/** gh's own words, cut so the notice keeps room for the link and the rest of what it says. */
+const GH_WORDS_MAX = 4000;
+
+function ghWords(error: unknown): string {
+  const words = detailOf(error);
+  return words.length <= GH_WORDS_MAX ? words : `${words.slice(0, GH_WORDS_MAX - 1)}…`;
+}
+
 /** What delivery shows on a shipped batch's tasks when its pull request can't merge by itself. */
 export const mergeNotices = {
   /** The repository's own setting is off; every later pull request of the project waits the same way. */
@@ -129,7 +137,7 @@ export const mergeNotices = {
     key: NOTICE_KEY.merge,
     tone: 'warning',
     line: 'Pull request waits for you to merge it: not set to merge by itself',
-    body: `${detailOf(error)}\n\nThe pull request is open and waits for you to merge it: ${prUrl}`,
+    body: `${ghWords(error)}\n\nThe pull request is open and waits for you to merge it: ${prUrl}`,
   }),
   /**
    * The pull request had nothing to wait for (its base branch has no required checks), so 10db
@@ -139,6 +147,6 @@ export const mergeNotices = {
     key: NOTICE_KEY.merge,
     tone: 'warning',
     line: 'Pull request waits for you to merge it: GitHub refused to merge it',
-    body: `${batch.baseBranch} has no required checks, so 10db tried to merge the pull request at once, and GitHub refused:\n\n${detailOf(error)}\n\nThe pull request is open and waits for you to merge it: ${prUrl}`,
+    body: `${batch.baseBranch} has no required checks, so 10db tried to merge the pull request at once, and GitHub refused:\n\n${ghWords(error)}\n\nThe pull request is open and waits for you to merge it: ${prUrl}`,
   }),
 };

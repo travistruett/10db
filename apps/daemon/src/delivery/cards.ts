@@ -7,6 +7,7 @@ import {
   type FailingCheckDto,
   type InboxOption,
   type ProjectDto,
+  type ProjectId,
   type TaskId,
 } from '@10db/contracts';
 import type { Json } from '@10db/db';
@@ -320,6 +321,14 @@ export const worktreeCards = {
  */
 export const baseConflictKey = (batchId: BatchId): string => `base-conflict:${batchId}`;
 export const baseKeptKey = (batchId: BatchId): string => `base-kept:${batchId}`;
+
+/**
+ * The fold keys of the cards an earlier build raised for a pull request that waits to be merged by hand:
+ * the project's repository doesn't allow auto-merge, and GitHub refused it for one batch. The batch's
+ * `pull-request-merge` notice says both now; a ship that writes or clears it closes such a card.
+ */
+export const autoMergeOffKey = (projectId: ProjectId): string => `auto-merge-off:${projectId}`;
+export const autoMergeRefusedKey = (batchId: BatchId): string => `auto-merge-refused:${batchId}`;
 
 /**
  * A refused start's card names its tasks (and the batch it tried to join), so a client can tell a

@@ -8,8 +8,8 @@ import {
   patchWorkstream,
 } from '@10db/db';
 import type { BranchMerge } from '../git';
-import { detailOf } from './cards';
-import { hideNotices, networkCall, showNotice, type DeliveryContext } from './context';
+import { baseConflictKey, baseKeptKey, detailOf } from './cards';
+import { hideNotices, networkCall, showNotice, withdraw, type DeliveryContext } from './context';
 import { installedLockfile, recordInstall } from './installed-lockfile';
 import { journalDirs, takenNumbers, type TakenNumber } from './migration-numbers';
 import { baseNotices, NOTICE_KEY } from './notices';
@@ -136,10 +136,17 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     return { kind: 'not_merged', note };
   }
 
-  /** Shows or clears a notice without letting the database stop the gate. */
+  /**
+   * Shows or clears a notice without letting the database stop the gate. The notice says what the cards
+   * an earlier build raised for it said, so those close here too.
+   */
   function tell(batch: BatchDto, act: () => void): void {
     try {
       act();
+      withdraw(ctx.state, ctx.inbox, batch.projectId, [
+        baseConflictKey(batch.id),
+        baseKeptKey(batch.id),
+      ]);
     } catch (error) {
       ctx.logger.warn({ batchId: batch.id, err: why(error) }, 'base notice not updated');
     }

@@ -8,18 +8,22 @@ import {
   type PullRequestStatusDto,
 } from '@10db/contracts';
 import {
+  clearBatchNotice,
   findOpenByFoldKey,
+  getBatch,
   listProjects,
   listWatchedPullRequests,
   recordPullRequestStatus,
+  setBatchNotice,
   type DbReader,
   type WriteContext,
 } from '@10db/db';
 import type { Clock, Timer } from '../clock';
 import type { EventBus } from '../events';
-import { GhError, GhFailure, PrState, type PullRequestStatus } from '../github';
+import { GhError, GhFailure, PrMergeable, PrState, type PullRequestStatus } from '../github';
 import { prCardKey, prCards, detailOf } from './cards';
 import { ghCall, raiseIn, rewriteIn, withdrawIn, type DeliveryContext } from './context';
+import { baseNotices, NOTICE_KEY } from './notices';
 
 /** How often the watch reads every followed pull request. */
 const PR_WATCH_INTERVAL_MS = 2 * 60_000;
@@ -165,6 +169,27 @@ export function createPrWatch(input: {
   }
 
   /**
+   * Keeps the batch's conflict notice in step with what GitHub says of the open pull request, in the
+   * caller's write: a pull request that merges cleanly has no conflict to show (the builder resolved
+   * it, or Update branch did), and one that conflicts says so on its tasks, without a card. A notice
+   * the gate wrote already is kept, and GitHub still working it out changes nothing.
+   */
+  function followConflict(
+    write: WriteContext,
+    batch: BatchDto,
+    read: PullRequestStatus | null,
+  ): void {
+    if (read?.state !== PrState.Open) return;
+    if (read.mergeable === PrMergeable.Mergeable)
+      clearBatchNotice(write, batch.id, NOTICE_KEY.baseConflict);
+    else if (read.mergeable === PrMergeable.Conflicting) {
+      const now = getBatch(write.tx, batch.id);
+      if (!now.notices.some((n) => n.key === NOTICE_KEY.baseConflict))
+        setBatchNotice(write, batch.id, baseNotices.shippedConflict(now));
+    }
+  }
+
+  /**
    * The projects with an open gh card. It is one card per daemon, but fold keys are per project
    * and the card's project can drop out of the watch (its last pull request merged) while the card
    * is open, so look in every project, not only the ones this round read.
@@ -237,6 +262,7 @@ export function createPrWatch(input: {
       const next = answer(batch, read);
       ctx.state.write((write) => {
         record(write, batch, next);
+        followConflict(write, batch, read);
       });
     }
     resumeAfter = ended?.at ?? null;

@@ -14,6 +14,7 @@ import {
   WorkstreamState,
   type BatchDto,
   type BatchId,
+  type Notice,
   type ProjectDto,
   type WorkstreamDto,
   type WorkstreamId,
@@ -41,7 +42,15 @@ import { raiseGateHostCards } from '../inbox';
 import { BlockedRun, type GateResult, type GateRunner } from '../verify';
 import { gateNote, type BaseUpdate, type BaseUpdates } from './base-update';
 import { settleBranch } from './branch-cleanup';
-import { nothingToWaitFor, shipCards, wrongBranchCard, type Card, type ShipFailure } from './cards';
+import {
+  autoMergeOffKey,
+  autoMergeRefusedKey,
+  nothingToWaitFor,
+  shipCards,
+  wrongBranchCard,
+  type Card,
+  type ShipFailure,
+} from './cards';
 import { allCheckouts, projectAtCheckout } from './checkout';
 import { returnCheckout } from './checkout-return';
 import { resolveShipCards } from './stale-cards';
@@ -51,6 +60,7 @@ import {
   pushCall,
   raise,
   showNotice,
+  withdraw,
   type DeliveryContext,
   type DeliveryLimits,
 } from './context';
@@ -431,6 +441,21 @@ export function createShipper(deps: ShipperDeps): Shipper {
   }
 
   /**
+   * Shows on the batch's tasks why its pull request waits for the builder, or clears that with null once
+   * it is set to merge (or merged). The cards an earlier build raised for it close too: the batch's
+   * refusal card always, and the project's auto-merge-is-off card once a pull request was set to merge,
+   * which shows the setting is on.
+   */
+  function tellMerge(batch: BatchDto, notice: Notice | null): void {
+    if (notice === null) hideNotices(deps.state, batch.id, [NOTICE_KEY.merge]);
+    else showNotice(deps.state, batch.id, notice);
+    withdraw(deps.state, deps.inbox, batch.projectId, [
+      autoMergeRefusedKey(batch.id),
+      ...(notice === null ? [autoMergeOffKey(batch.projectId)] : []),
+    ]);
+  }
+
+  /**
    * Has GitHub merge the batch's pull request by itself once its required checks pass, when the
    * batch asked for that. The pull request is open either way, so a repository that doesn't allow
    * auto-merge, or a refusal from GitHub, is a notice on the batch's tasks and the pull request waits for
@@ -450,11 +475,11 @@ export function createShipper(deps: ShipperDeps): Shipper {
           { batchId: batch.id, repo, prUrl },
           'repository does not allow auto-merge',
         );
-        showNotice(deps.state, batch.id, mergeNotices.notAllowed(repo, prUrl));
+        tellMerge(batch, mergeNotices.notAllowed(repo, prUrl));
         return;
       }
       await deps.gh.prAutoMerge({ repo, url: prUrl }, call);
-      hideNotices(deps.state, batch.id, [NOTICE_KEY.merge]);
+      tellMerge(batch, null);
       deps.logger.info({ batchId: batch.id, repo, prUrl }, 'auto-merge turned on');
     } catch (error) {
       if (signal.aborted) throw error;
@@ -466,14 +491,14 @@ export function createShipper(deps: ShipperDeps): Shipper {
         { batchId: batch.id, prUrl, err: error instanceof Error ? error.message : String(error) },
         'auto-merge not turned on',
       );
-      showNotice(deps.state, batch.id, mergeNotices.refused(prUrl, error));
+      tellMerge(batch, mergeNotices.refused(prUrl, error));
     }
   }
 
   /**
    * GitHub said the pull request has nothing to wait for (its base has no required checks), so
    * auto-merge has no use: squash-merge it now, as auto-merge would have. The pull request watch
-   * reads the merge next, which is what puts its tasks in Done. A refusal is a card.
+   * reads the merge next, which is what puts its tasks in Done. A refusal is a notice on its tasks.
    */
   async function mergeNow(
     batch: BatchDto,
@@ -483,7 +508,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
   ): Promise<void> {
     try {
       await deps.gh.prMerge({ repo, url: prUrl }, ghCall(deps, signal));
-      hideNotices(deps.state, batch.id, [NOTICE_KEY.merge]);
+      tellMerge(batch, null);
       deps.logger.info({ batchId: batch.id, repo, prUrl }, 'pull request merged at once');
     } catch (error) {
       if (signal.aborted) throw error;
@@ -491,7 +516,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
         { batchId: batch.id, prUrl, err: error instanceof Error ? error.message : String(error) },
         'pull request not merged at once',
       );
-      showNotice(deps.state, batch.id, mergeNotices.mergeRefused(batch, prUrl, error));
+      tellMerge(batch, mergeNotices.mergeRefused(batch, prUrl, error));
     }
   }
 

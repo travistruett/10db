@@ -10,6 +10,7 @@ import {
   WorkstreamState,
   type AccountId,
   type BatchId,
+  fitNotice,
   type NextAction,
   type Notice,
   type ProjectId,
@@ -350,8 +351,9 @@ function emitWorkstreamNotice(ctx: WriteContext, row: WorkstreamRow): void {
 export function setWorkstreamNotice(
   ctx: WriteContext,
   id: WorkstreamId,
-  notice: Notice | null,
+  given: Notice | null,
 ): boolean {
+  const notice = given === null ? null : fitNotice(given);
   const row = getWorkstreamRow(ctx.tx, id);
   if (JSON.stringify(row.notice) === JSON.stringify(notice)) return false;
   ctx.tx

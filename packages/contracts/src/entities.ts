@@ -440,10 +440,15 @@ export const NextAction = z.discriminatedUnion('kind', [
 ]);
 export type NextAction = z.infer<typeof NextAction>;
 
+/** The longest `Notice.line`: one line on a task's card. */
+export const NOTICE_LINE_MAX = 500;
+/** The longest `Notice.body`, shown in the drawer. */
+export const NOTICE_BODY_MAX = 8000;
+
 /**
  * Something a task's card and drawer say about the task or its batch that asks the builder nothing:
  * 10db is waiting for another task's claim, or the batch's branch can't take its base yet. It stands
- * until its cause is gone and raises no Inbox card (`decisions/2026-10-30-notices-not-cards.md`).
+ * until its cause is gone and raises no Inbox card (`decisions/2026-10-31-notices-not-cards.md`).
  */
 export const Notice = z.object({
   /** What the notice is about; a later notice with the same key in the same place replaces it. */
@@ -451,11 +456,27 @@ export const Notice = z.object({
   /** `warning` is something the builder may need to act on, `info` is 10db waiting on its own. */
   tone: z.enum(['info', 'warning']),
   /** The one line a task's card shows. */
-  line: z.string().min(1).max(500),
+  line: z.string().min(1).max(NOTICE_LINE_MAX),
   /** What the drawer shows under the line: who, why, and what to do about it. */
-  body: z.string().max(8000),
+  body: z.string().max(NOTICE_BODY_MAX),
 });
 export type Notice = z.infer<typeof Notice>;
+
+function cut(text: string, max: number): string {
+  return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
+}
+
+/**
+ * The notice cut to what `Notice` allows, ending in an ellipsis where it was cut: a gh error or a long
+ * list of paths must not make the batch or run that holds it fail to parse.
+ */
+export function fitNotice(notice: Notice): Notice {
+  return {
+    ...notice,
+    line: cut(notice.line, NOTICE_LINE_MAX),
+    body: cut(notice.body, NOTICE_BODY_MAX),
+  };
+}
 
 export const WorkstreamDto = z.object({
   id: WorkstreamId,

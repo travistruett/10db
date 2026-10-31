@@ -1,8 +1,10 @@
-import { ConflictError, type BatchDto, type TaskDto } from '@10db/contracts';
+import { BatchDto, ConflictError, NOTICE_BODY_MAX, type TaskDto } from '@10db/contracts';
 import { getBatch, listBatches, listWorkstreams } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { GhError } from '../github';
+import { autoMergeOffKey, autoMergeRefusedKey } from './cards';
+import { raise } from './context';
 
 let h: DeliveryHarness;
 afterEach(() => {
@@ -164,6 +166,55 @@ describe('when GitHub refuses to turn auto-merge on', () => {
     expect(notice.body).toContain(shipped.prUrl ?? '');
     expect(notice.body).toContain('draft status');
     expect(h.gh.calls.some((c) => c.method === 'prMerge')).toBe(false);
+  });
+
+  it('closes the auto-merge cards an earlier build raised once a pull request is set to merge by itself', async () => {
+    h = createDeliveryHarness();
+    const batch = await start('One', h.addTask('Alpha'));
+    raise(h.inbox, h.project.id, {
+      title: "This repository doesn't allow auto-merge",
+      body: 'x',
+      foldKey: autoMergeOffKey(h.project.id),
+    });
+    raise(h.inbox, h.project.id, {
+      title: 'Pull request opened but not set to merge by itself',
+      body: 'x',
+      foldKey: autoMergeRefusedKey(batch.id),
+    });
+    expect(h.cards()).toHaveLength(2);
+    await ship(batch);
+    expect(h.gh.autoMerged).toHaveLength(1);
+    expect(h.cards()).toEqual([]);
+  });
+
+  it('closes the refusal card an earlier build raised when the refusal shows as a notice', async () => {
+    h = createDeliveryHarness();
+    const batch = await start('One', h.addTask('Alpha'));
+    raise(h.inbox, h.project.id, {
+      title: 'Pull request opened but not set to merge by itself',
+      body: 'x',
+      foldKey: autoMergeRefusedKey(batch.id),
+    });
+    h.gh.failNext.set('prAutoMerge', new GhError('failed', 'gh pr merge failed (exit 1): draft'));
+    const shipped = await ship(batch);
+    expect(shipped.notices).toHaveLength(1);
+    expect(h.cards()).toEqual([]);
+  });
+
+  it('keeps the link and a board that loads when gh says far more than a notice holds', async () => {
+    h = createDeliveryHarness();
+    const graphql = `GraphQL: ${'Base branch was modified. Review and try the merge again. '.repeat(400)}`;
+    h.gh.failNext.set(
+      'prAutoMerge',
+      new GhError('failed', `gh pr merge failed (exit 1): ${graphql}`),
+    );
+    const shipped = await ship(await start('One', h.addTask('Alpha')));
+    expect(() => BatchDto.parse(shipped)).not.toThrow();
+    const notice = h.only(shipped.notices);
+    expect(notice.body.length).toBeLessThanOrEqual(NOTICE_BODY_MAX);
+    expect(notice.body).toContain('Base branch was modified');
+    expect(notice.body).toContain('…');
+    expect(notice.body).toContain(shipped.prUrl ?? 'no pull request');
   });
 });
 

@@ -11,6 +11,7 @@ import {
   WorkstreamState,
   type BatchDto,
   type BatchFailure,
+  fitNotice,
   type BatchId,
   type Notice,
   type ProjectId,
@@ -292,7 +293,8 @@ export function patchBatch(ctx: WriteContext, id: BatchId, patch: BatchPatch): B
  * only when that changes what the batch says, so a gate that finds the same thing again changes nothing.
  * Resolves whether it changed.
  */
-export function setBatchNotice(ctx: WriteContext, id: BatchId, notice: Notice): boolean {
+export function setBatchNotice(ctx: WriteContext, id: BatchId, given: Notice): boolean {
+  const notice = fitNotice(given);
   const { notices } = getBatchRow(ctx.tx, id);
   const at = notices.findIndex((n) => n.key === notice.key);
   const current = notices[at];

@@ -24,8 +24,10 @@
     notice `base-conflict` or `base-kept` (`delivery/notices.ts`, `baseNotices`), written by the gate's base update. Its
     body is what the card said: the files, how to resolve them, and for a renumbered migration the steps to
     regenerate it. It is cleared when a gate finds the branch holds the base. Retiring the worktree clears it, except a
-    conflict that stood when the batch shipped: that becomes "Pull request conflicts with <base>" until the pull
-    request merges or closes.
+    conflict that stood when the batch shipped: that becomes "Pull request conflicts with <base>". Once shipped, the
+    pull request watch (`delivery/pr-watch.ts`) follows GitHub's `mergeable`: `MERGEABLE` clears the notice (the
+    builder resolved it, or Update branch did), `CONFLICTING` writes "Pull request conflicts with <base>" when no
+    conflict notice stands, and `UNKNOWN` (GitHub still working it out) changes nothing.
   - A **pull request that can't merge by itself** (the repository's auto-merge setting is off, GitHub refused
     auto-merge, or the immediate merge of a base with no required checks failed) has the batch notice
     `pull-request-merge` (`mergeNotices`). It is cleared when a later ship turns auto-merge on or merges it.
@@ -33,6 +35,11 @@
     ("Building · Waiting for hazard migrations: task "Beta" holds it"), orange for a `warning` unless the line is
     already yellow, orange or red, and shows each notice's line and body in the drawer. A cancelled or failed run
     shows none; a batch's notices show until it ended without shipping, or its pull request merged or closed.
+- **A notice always fits its contract.** `Notice` allows a 500-character line and an 8000-character body
+  (`NOTICE_LINE_MAX`, `NOTICE_BODY_MAX`), and the desktop parses every answer against it, so one notice too long would
+  stop the board loading for its project. `setBatchNotice` and `setWorkstreamNotice` cut both with `fitNotice`, ending
+  in an ellipsis; the merge notices also cut gh's own words to 4000 characters, so the pull request's link after them
+  stays.
 - **No card is raised again for the same condition.** `setBatchNotice` and `setWorkstreamNotice` compare with what is
   stored and write nothing, and emit no event, when the notice is the same, so a later gate that meets the same
   conflict changes nothing, and the builder has nothing to dismiss. There is no card to fold, so a dismissed card
@@ -42,8 +49,10 @@
   gate no longer raises a conflict card. Until it lands, a conflict that stands is shown on the tasks and, once
   shipped, on the pull request.
 - **What stays in the Inbox from here** is a card with answer options, or a question. Cards an earlier build raised for
-  a batch's conflict and for waiting (`base-conflict:<id>`, `base-kept:<id>`, `detail.waitingFor`) are still closed
-  at worktree removal and at startup.
+  a batch's conflict and for waiting (`base-conflict:<id>`, `base-kept:<id>`, `detail.waitingFor`) are still closed:
+  the base cards whenever a gate writes or clears the batch's base notice and at worktree removal, the wait cards at
+  startup. A ship that writes or clears `pull-request-merge` closes the batch's `auto-merge-refused:<id>` card, and
+  one that sets a pull request to merge closes the project's `auto-merge-off:<projectId>` card.
 
 ## Why
 

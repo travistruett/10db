@@ -1,4 +1,10 @@
-import type { Notice } from '@10db/contracts';
+import {
+  BatchDto,
+  NOTICE_BODY_MAX,
+  NOTICE_LINE_MAX,
+  WorkstreamDto,
+  type Notice,
+} from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   clearBatchNotice,
@@ -129,5 +135,38 @@ describe('workstream notices', () => {
     const { value } = store.write((ctx) => clearWorkstreamNotices(ctx));
     expect(value).toEqual([workstream.id]);
     expect(getWorkstream(store.db, workstream.id).notice).toBeNull();
+  });
+});
+
+describe('a notice longer than the contract allows', () => {
+  const long: Notice = {
+    key: 'pull-request-merge',
+    tone: 'warning',
+    line: `Conflicts with main: ${'packages/contracts/generated/'.repeat(30)}`,
+    body: `GraphQL: ${'x'.repeat(NOTICE_BODY_MAX * 2)}`,
+  };
+
+  it('is cut to fit with an ellipsis, so the batch and the run still parse', () => {
+    const { batch, workstream } = seed();
+    store.write((ctx) => setBatchNotice(ctx, batch.id, long));
+    store.write((ctx) => setWorkstreamNotice(ctx, workstream.id, long));
+    const stored = getBatch(store.db, batch.id);
+    expect(() => BatchDto.parse(stored)).not.toThrow();
+    expect(() => WorkstreamDto.parse(getWorkstream(store.db, workstream.id))).not.toThrow();
+    const [notice] = stored.notices;
+    expect(notice?.line).toHaveLength(NOTICE_LINE_MAX);
+    expect(notice?.line.endsWith('…')).toBe(true);
+    expect(notice?.line.startsWith('Conflicts with main: packages/')).toBe(true);
+    expect(notice?.body).toHaveLength(NOTICE_BODY_MAX);
+    expect(notice?.body.endsWith('…')).toBe(true);
+    expect(getWorkstream(store.db, workstream.id).notice).toEqual(notice);
+  });
+
+  it('cut the same way twice writes nothing the second time', () => {
+    const { batch } = seed();
+    store.write((ctx) => setBatchNotice(ctx, batch.id, long));
+    const again = store.write((ctx) => setBatchNotice(ctx, batch.id, long));
+    expect(again.value).toBe(false);
+    expect(again.events).toEqual([]);
   });
 });
