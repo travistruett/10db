@@ -416,3 +416,87 @@ describe('migrating a database that has a gate command and evidence', () => {
     expect(db.$client.pragma('foreign_key_check')).toEqual([]);
   });
 });
+
+describe('migrating to per-task placement', () => {
+  const AT = '2026-10-29T12:00:00.000Z';
+
+  beforeEach(() => {
+    // The last migration before placement moved onto the task.
+    migrateDatabase(db, migrationsThrough('0014_withdraw_review_cards'));
+    const run = (sql: string, ...args: string[]): void => {
+      db.$client.prepare(sql).run(...args);
+    };
+    run(
+      `INSERT INTO accounts (id, kind, label, payer, settings, lane_cap, created_at, updated_at)
+       VALUES ('acc_x', 'subscription', 'main', 'me', '{}', 2, ?, ?)`,
+      AT,
+      AT,
+    );
+    for (const [id, mode, delivery] of [
+      ['prj_copies', 'worktree', 'pull_request'],
+      ['prj_folder', 'shared', 'pull_request'],
+      ['prj_local', 'shared', 'local'],
+    ] as const) {
+      run(
+        `INSERT INTO projects (id, name, repo_path, gate_command, areas, hazards, max_lanes, provider, account_id,
+           handoff_pct, nudge_pct, human_wait_minutes, delivery, workspace_mode, created_at, updated_at)
+         VALUES (?, ?, ?, 'true', '[]', '[]', 2, 'claude', 'acc_x', 40, 50, 10, ?, ?, ?, ?)`,
+        id,
+        id,
+        `/tmp/${id}`,
+        delivery,
+        mode,
+        AT,
+        AT,
+      );
+      for (const [suffix, status] of [
+        ['open', 'open'],
+        ['done', 'done'],
+      ] as const)
+        run(
+          `INSERT INTO tasks (id, project_id, title, description, acceptance_criteria, areas, status, board_order,
+             workspace_mode, created_at, updated_at)
+           VALUES (?, ?, 't', '', '[]', '[]', ?, 1, 'shared', ?, ?)`,
+          `tsk_${id}_${suffix}`,
+          id,
+          status,
+          AT,
+          AT,
+        );
+    }
+    run(
+      `INSERT INTO workstreams (id, task_id, project_id, state, next_action, attempt, recovery_attempts, model,
+         effort, fence, created_at, updated_at)
+       VALUES ('wst_a', 'tsk_prj_copies_done', 'prj_copies', 'DONE', '{"kind":"start"}', 0, 0, 'sonnet', 'medium', 0, ?, ?)`,
+      AT,
+      AT,
+    );
+    migrateDatabase(db);
+  });
+
+  it('sets worktree on every task of a worktree-mode project, started or not, and shared on the rest', () => {
+    const rows = db.$client
+      .prepare('SELECT id, workspace_mode, placement_reason FROM tasks ORDER BY id')
+      .all();
+    expect(rows).toEqual([
+      { id: 'tsk_prj_copies_done', workspace_mode: 'worktree', placement_reason: null },
+      { id: 'tsk_prj_copies_open', workspace_mode: 'worktree', placement_reason: null },
+      { id: 'tsk_prj_folder_done', workspace_mode: 'shared', placement_reason: null },
+      { id: 'tsk_prj_folder_open', workspace_mode: 'shared', placement_reason: null },
+      { id: 'tsk_prj_local_done', workspace_mode: 'shared', placement_reason: null },
+      { id: 'tsk_prj_local_open', workspace_mode: 'shared', placement_reason: null },
+    ]);
+  });
+
+  it('backfills every project to isolate migrations and deps, and keeps its default mode', () => {
+    const rows = db.$client
+      .prepare('SELECT id, workspace_mode, isolate FROM projects ORDER BY id')
+      .all() as { id: string; workspace_mode: string; isolate: string }[];
+    expect(rows.map((r): unknown[] => [r.id, r.workspace_mode, JSON.parse(r.isolate)])).toEqual([
+      ['prj_copies', 'worktree', ['migrations', 'deps']],
+      ['prj_folder', 'shared', ['migrations', 'deps']],
+      ['prj_local', 'shared', ['migrations', 'deps']],
+    ]);
+    expect(db.$client.pragma('foreign_key_check')).toEqual([]);
+  });
+});

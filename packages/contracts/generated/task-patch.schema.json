@@ -87,6 +87,13 @@
           ]
         }
       ]
+    },
+    "workspaceMode": {
+      "type": "string",
+      "enum": [
+        "shared",
+        "worktree"
+      ]
     }
   }
 }
