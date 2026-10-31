@@ -650,19 +650,28 @@ export const mergeCards = {
     detail: { batchId: batch.id },
   }),
   /** GitHub turned this one pull request down, or gh could not ask. */
-  refused: (batch: BatchDto, prUrl: string, error: unknown): Card => {
-    const detail = detailOf(error);
-    const nothingToWaitFor = /clean status/i.test(detail)
-      ? `\n\nGitHub says nothing is left for it to wait for, which usually means ${batch.baseBranch} has no required checks, so there is nothing for auto-merge to wait on.`
-      : '';
-    return {
-      title: `Pull request opened but not set to merge by itself: batch "${batch.title}"`,
-      body: `${detail}${nothingToWaitFor}\n\nThe pull request is open and waits for you to merge it: ${prUrl}`,
-      foldKey: `auto-merge-refused:${batch.id}`,
-      detail: { batchId: batch.id },
-    };
-  },
+  refused: (batch: BatchDto, prUrl: string, error: unknown): Card => ({
+    title: `Pull request opened but not set to merge by itself: batch "${batch.title}"`,
+    body: `${detailOf(error)}\n\nThe pull request is open and waits for you to merge it: ${prUrl}`,
+    foldKey: `auto-merge-refused:${batch.id}`,
+    detail: { batchId: batch.id },
+  }),
+  /**
+   * The pull request had nothing to wait for (its base branch has no required checks), so 10db
+   * merged it at once; GitHub refused that merge.
+   */
+  mergeRefused: (batch: BatchDto, prUrl: string, error: unknown): Card => ({
+    title: `Pull request opened but not merged: batch "${batch.title}"`,
+    body: `${batch.baseBranch} has no required checks, so 10db tried to merge the pull request at once, and GitHub refused:\n\n${detailOf(error)}\n\nThe pull request is open and waits for you to merge it: ${prUrl}`,
+    foldKey: `auto-merge-refused:${batch.id}`,
+    detail: { batchId: batch.id },
+  }),
 };
+
+/** GitHub's answer to turning on auto-merge for a pull request that has nothing left to wait for. */
+export function nothingToWaitFor(error: unknown): boolean {
+  return /clean status/i.test(detailOf(error));
+}
 
 /** The place 10db switches a checkout back to, in words. */
 function placeName(place: CheckoutPlace): string {
