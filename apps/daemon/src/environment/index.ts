@@ -1,5 +1,6 @@
 export {
   AA_KEY_ACCOUNT,
+  execFileAsync,
   KeychainError,
   keychainWith,
   OPENROUTER_KEY_ACCOUNT,

@@ -1,4 +1,8 @@
-import { execFileSync, type ExecFileSyncOptionsWithStringEncoding } from 'node:child_process';
+import {
+  execFile,
+  execFileSync,
+  type ExecFileSyncOptionsWithStringEncoding,
+} from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { SECRET_CHARACTERS } from '@10db/contracts';
 
@@ -19,6 +23,36 @@ type KeychainExec = (
   options: ExecFileSyncOptionsWithStringEncoding,
 ) => string;
 
+/** `exec` without blocking the event loop: what a read on a request or a decision uses. */
+type KeychainExecAsync = (
+  command: string,
+  args: readonly string[],
+  options: { readonly encoding: 'utf8'; readonly timeout: number },
+) => Promise<string>;
+
+/**
+ * `execFile` as a promise, failing with the shape `execFileSync` fails with (`status` the exit status,
+ * `code` ETIMEDOUT on a timeout), so one reading of a failure serves both.
+ */
+export const execFileAsync: KeychainExecAsync = (command, args, options) =>
+  new Promise((resolve, reject) => {
+    execFile(command, [...args], { ...options }, (error, stdout) => {
+      if (error === null) {
+        resolve(stdout);
+        return;
+      }
+      // Node reports an exit status as a numeric `code`, and a timeout as `killed` with a signal.
+      const e = error as { code?: unknown; killed?: boolean; signal?: string | null };
+      reject(
+        Object.assign(new Error('security failed'), {
+          status: typeof e.code === 'number' ? e.code : null,
+          code: e.killed === true ? 'ETIMEDOUT' : typeof e.code === 'string' ? e.code : undefined,
+          signal: e.signal ?? null,
+        }),
+      );
+    });
+  });
+
 /** The Keychain could not be read or written. The message names the item and the status, never a value. */
 export class KeychainError extends Error {
   override readonly name = 'KeychainError';
@@ -28,6 +62,8 @@ export class KeychainError extends Error {
 export interface Keychain {
   /** The secret, or null when the item is missing or empty. */
   read(account: string): string | null;
+  /** `read` without blocking the event loop, for a request or a decision that waits on it. */
+  readAsync(account: string): Promise<string | null>;
   /** Adds or replaces the item, then reads it back. */
   write(account: string, secret: string): void;
   /** Deletes the item; one that is already missing is not an error. */
@@ -47,23 +83,58 @@ function failure(error: unknown): string {
  * unreachable Keychain or a denied prompt throws, because telling the builder to add a secret that
  * exists would send them the wrong way.
  */
-export function keychainWith(exec: KeychainExec): Keychain {
+export function keychainWith(
+  exec: KeychainExec,
+  // A caller with no async exec reads through the sync one, which blocks only as long as it does.
+  execAsync: KeychainExecAsync = (command, args, options) =>
+    Promise.resolve().then(() =>
+      exec(command, args, { ...options, stdio: ['ignore', 'pipe', 'ignore'] }),
+    ),
+): Keychain {
+  const READ_ARGS = (account: string): string[] => [
+    'find-generic-password',
+    '-s',
+    KEYCHAIN_SERVICE,
+    '-a',
+    account,
+    '-w',
+  ];
+  const valueOf = (output: string): string | null => {
+    const value = output.trim();
+    return value.length > 0 ? value : null;
+  };
+  const readFailed = (account: string, error: unknown): null => {
+    // A thrown exec error has a numeric `status` when security ran and exited non-zero.
+    if ((error as { status?: unknown }).status === ITEM_NOT_FOUND) return null;
+    throw new KeychainError(`Reading the Keychain item ${account} failed (${failure(error)})`);
+  };
   const read = (account: string): string | null => {
     try {
-      const value = exec(
-        '/usr/bin/security',
-        ['find-generic-password', '-s', KEYCHAIN_SERVICE, '-a', account, '-w'],
-        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: KEYCHAIN_TIMEOUT_MS },
-      ).trim();
-      return value.length > 0 ? value : null;
+      return valueOf(
+        exec('/usr/bin/security', READ_ARGS(account), {
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'ignore'],
+          timeout: KEYCHAIN_TIMEOUT_MS,
+        }),
+      );
     } catch (error) {
-      // A thrown exec error has a numeric `status` when security ran and exited non-zero.
-      if ((error as { status?: unknown }).status === ITEM_NOT_FOUND) return null;
-      throw new KeychainError(`Reading the Keychain item ${account} failed (${failure(error)})`);
+      return readFailed(account, error);
     }
   };
   return {
     read,
+    async readAsync(account) {
+      try {
+        return valueOf(
+          await execAsync('/usr/bin/security', READ_ARGS(account), {
+            encoding: 'utf8',
+            timeout: KEYCHAIN_TIMEOUT_MS,
+          }),
+        );
+      } catch (error) {
+        return readFailed(account, error);
+      }
+    },
     write(account, secret) {
       if (!SAFE_ACCOUNT.test(account))
         throw new KeychainError(`${account} is not a Keychain account name 10db writes`);
@@ -107,11 +178,12 @@ export function keychainWith(exec: KeychainExec): Keychain {
   };
 }
 
-export const systemKeychain: Keychain = keychainWith(execFileSync);
+export const systemKeychain: Keychain = keychainWith(execFileSync, execFileAsync);
 
 /** For a daemon started without a Keychain (tests): nothing to read, and writing is refused. */
 export const unavailableKeychain: Keychain = {
   read: () => null,
+  readAsync: () => Promise.resolve(null),
   write: (account) => {
     throw new KeychainError(
       `No Keychain is available to this daemon, so ${account} was not written`,

@@ -109,11 +109,11 @@ export interface TaskLookupServices {
 /** What the HTTP layer needs from the daemon. Implemented in the daemon module. */
 export interface ApiServices {
   /** The judge's status, key, connection test and call log. */
-  judgeStatus(): JudgeStatusDto;
-  patchJudge(patch: JudgeConfigPatch): JudgeStatusDto;
+  judgeStatus(): Promise<JudgeStatusDto>;
+  patchJudge(patch: JudgeConfigPatch): Promise<JudgeStatusDto>;
   /** Write-only: the key goes to the Keychain and is never answered, logged or stored elsewhere. */
-  setJudgeKey(input: JudgeKeyInput): JudgeStatusDto;
-  removeJudgeKey(): JudgeStatusDto;
+  setJudgeKey(input: JudgeKeyInput): Promise<JudgeStatusDto>;
+  removeJudgeKey(): Promise<JudgeStatusDto>;
   testJudge(): Promise<JudgeTestResultDto>;
   /** The most recent calls, newest first. */
   listJudgeCalls(limit: number): JudgeCallDto[];

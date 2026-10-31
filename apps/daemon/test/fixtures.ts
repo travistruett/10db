@@ -257,6 +257,7 @@ export function createMemoryKeychain(items: Record<string, string> = {}): Keycha
   const map = new Map(Object.entries(items));
   return {
     read: (account) => map.get(account) ?? null,
+    readAsync: (account) => Promise.resolve(map.get(account) ?? null),
     write: (account, secret) => {
       map.set(account, secret);
     },

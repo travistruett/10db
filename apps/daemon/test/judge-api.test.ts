@@ -94,6 +94,19 @@ describe('GET /judge', () => {
     expect((await fetch(`${d.url}/judge`)).status).toBe(401);
   });
 
+  it('reads the key without blocking: the synchronous read is never used', async () => {
+    const memory = createMemoryKeychain({ [OPENROUTER_KEY_ACCOUNT]: KEY });
+    const { api } = await start({
+      keychain: {
+        ...memory,
+        read: () => {
+          throw new Error('the synchronous read blocks the event loop');
+        },
+      },
+    });
+    expect(await api.get('/judge', JudgeStatusDto)).toMatchObject({ keySet: true });
+  });
+
   it('reports a daemon started with the judge off, without reading the key', async () => {
     let reads = 0;
     const memory = createMemoryKeychain({ [OPENROUTER_KEY_ACCOUNT]: KEY });
@@ -104,6 +117,10 @@ describe('GET /judge', () => {
         read: (account) => {
           reads += 1;
           return memory.read(account);
+        },
+        readAsync: (account) => {
+          reads += 1;
+          return memory.readAsync(account);
         },
       },
     });

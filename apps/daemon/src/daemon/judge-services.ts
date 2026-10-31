@@ -12,9 +12,9 @@ export type JudgeApiServices = Pick<
 >;
 
 /** A Keychain that refuses is a conflict the builder can act on, not a server fault. */
-function keychainConflict<T>(fn: () => T): T {
+async function keychainConflict<T>(fn: () => T | Promise<T>): Promise<T> {
   try {
-    return fn();
+    return await fn();
   } catch (error) {
     if (error instanceof KeychainError) throw new ConflictError(error.message);
     throw error;
@@ -28,27 +28,30 @@ export function createJudgeServices(deps: {
   /** Started with `TENDB_JUDGE=off`: the key is not read, even to say whether it is set. */
   readonly off: boolean;
 }): JudgeApiServices {
-  const status = (): JudgeStatusDto => ({
+  const status = async (): Promise<JudgeStatusDto> => ({
     config: getJudgeConfig(deps.state.db),
+    // Read off the event loop: the status is asked for on every visit to Settings.
     keySet: deps.off
       ? false
-      : keychainConflict(() => deps.keychain.read(OPENROUTER_KEY_ACCOUNT) !== null),
+      : await keychainConflict(
+          async () => (await deps.keychain.readAsync(OPENROUTER_KEY_ACCOUNT)) !== null,
+        ),
     off: deps.off,
   });
   return {
     judgeStatus: status,
-    patchJudge(patch) {
+    async patchJudge(patch) {
       deps.state.write((ctx) => patchJudgeConfig(ctx, patch));
       return status();
     },
-    setJudgeKey(input) {
-      keychainConflict(() => {
+    async setJudgeKey(input) {
+      await keychainConflict(() => {
         deps.keychain.write(OPENROUTER_KEY_ACCOUNT, input.key);
       });
       return status();
     },
-    removeJudgeKey() {
-      keychainConflict(() => {
+    async removeJudgeKey() {
+      await keychainConflict(() => {
         deps.keychain.remove(OPENROUTER_KEY_ACCOUNT);
       });
       return status();

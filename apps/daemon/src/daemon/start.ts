@@ -359,7 +359,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     state,
     clock,
     fetch: opts.fetch ?? fetch,
-    readKey: () => (opts.judgeOff === true ? null : judgeKeychain.read(OPENROUTER_KEY_ACCOUNT)),
+    readKey: () =>
+      opts.judgeOff === true
+        ? Promise.resolve(null)
+        : judgeKeychain.readAsync(OPENROUTER_KEY_ACCOUNT),
     off: opts.judgeOff === true,
     logger: logger.child({ component: 'judge' }),
   });

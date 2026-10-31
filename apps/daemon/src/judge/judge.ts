@@ -67,7 +67,7 @@ export interface JudgeDeps {
   readonly clock: Clock;
   readonly fetch: typeof fetch;
   /** The builder's OpenRouter key, read fresh for every call; null when there is none. */
-  readonly readKey: () => string | null;
+  readonly readKey: () => Promise<string | null>;
   /** The daemon was started with `TENDB_JUDGE=off`: no key is read and nothing is sent. */
   readonly off: boolean;
   readonly logger: Logger;
@@ -99,6 +99,23 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : 'unknown error';
 }
 
+/** The promise's value, or a rejection as soon as `signal` aborts, whichever comes first. */
+function untilAborted<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = (): void => {
+      reject(new Error('aborted'));
+    };
+    if (signal.aborted) {
+      onAbort();
+      return;
+    }
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(resolve, reject).finally(() => {
+      signal.removeEventListener('abort', onAbort);
+    });
+  });
+}
+
 export function createJudge(deps: JudgeDeps): JudgeService {
   /** Replaces the key wherever it appears, so a server that echoes it back cannot put it in a log. */
   function scrub(text: string, key: string | null): string {
@@ -111,20 +128,6 @@ export function createJudge(deps: JudgeDeps): JudgeService {
     q: Pick<JudgeRequest, 'state' | 'question' | 'options' | 'signal'>,
     timeoutMs: number,
   ): Promise<Attempt> {
-    let key: string | null;
-    try {
-      key = deps.readKey();
-    } catch (error) {
-      return { kind: 'fallback', reason: 'error', detail: messageOf(error), latencyMs: null };
-    }
-    if (key === null) {
-      return {
-        kind: 'fallback',
-        reason: 'no_key',
-        detail: 'No OpenRouter key is set',
-        latencyMs: null,
-      };
-    }
     const controller = new AbortController();
     const timeout = { fired: false };
     const timer = deps.clock.setTimeout(() => {
@@ -138,7 +141,19 @@ export function createJudge(deps: JudgeDeps): JudgeService {
     q.signal?.addEventListener('abort', onCallerAbort, { once: true });
     const started = deps.clock.now().getTime();
     const elapsed = (): number => deps.clock.now().getTime() - started;
+    let key: string | null = null;
     try {
+      // The key read is part of the call: a slow Keychain counts against the same timeout.
+      key = await untilAborted(deps.readKey(), controller.signal);
+      // A call cut short while the key was read sends nothing.
+      controller.signal.throwIfAborted();
+      if (key === null)
+        return {
+          kind: 'fallback',
+          reason: 'no_key',
+          detail: 'No OpenRouter key is set',
+          latencyMs: null,
+        };
       const answer = await askModel({
         model,
         state: q.state,

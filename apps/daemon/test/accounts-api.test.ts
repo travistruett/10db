@@ -191,6 +191,7 @@ describe('accounts over HTTP', () => {
     const { api, url, token } = await start({
       keychain: {
         read: () => null,
+        readAsync: () => Promise.resolve(null),
         write: (account) => {
           throw new KeychainError(
             `Writing the Keychain item ${account} failed (security exit status 36)`,
@@ -501,6 +502,7 @@ describe('account identity over HTTP', () => {
             throw new KeychainError('Reading the Keychain failed (security exit status 51)');
           return memory.read(name);
         },
+        readAsync: (name) => Promise.resolve(memory.read(name)),
       },
     });
     const { account } = await api.post('/accounts', AccountCreatedDto, {

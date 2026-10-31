@@ -51,6 +51,7 @@ let handler: Handler;
 let keyReads: number;
 let key: string | null;
 let keyError: Error | null;
+let keyHangs: boolean;
 
 function build(options: { off?: boolean } = {}) {
   return createJudge({
@@ -71,8 +72,9 @@ function build(options: { off?: boolean } = {}) {
     },
     readKey: () => {
       keyReads += 1;
-      if (keyError) throw keyError;
-      return key;
+      if (keyError) return Promise.reject(keyError);
+      if (keyHangs) return new Promise<string | null>(() => undefined);
+      return Promise.resolve(key);
     },
     off: options.off ?? false,
     logger: silentLogger,
@@ -96,6 +98,7 @@ beforeEach(() => {
   keyReads = 0;
   key = KEY;
   keyError = null;
+  keyHangs = false;
   handler = () => json(systemOneBody({ review: 0.07, skip: 0.93 }));
 });
 afterEach(() => {
@@ -307,6 +310,25 @@ describe('judge.choose falls back', () => {
     const answer = await pending;
     expect(answer).toMatchObject({ kind: 'fallback', reason: 'timeout' });
     expect(logged()[0]).toMatchObject({ outcome: 'fallback_timeout', latencyMs: 4000 });
+  });
+
+  it('counts a key read that never answers in the four seconds', async () => {
+    keyHangs = true;
+    const pending = build().choose(request);
+    clock.advance(4_000);
+    expect(await pending).toMatchObject({ kind: 'fallback', reason: 'timeout' });
+    expect(seen).toEqual([]);
+    expect(logged()[0]).toMatchObject({ outcome: 'fallback_timeout' });
+    expect(clock.pendingTimers()).toBe(0);
+  });
+
+  it('stops waiting for the key when the caller aborts', async () => {
+    keyHangs = true;
+    const controller = new AbortController();
+    const pending = build().choose({ ...request, signal: controller.signal });
+    controller.abort();
+    expect(await pending).toMatchObject({ kind: 'fallback', reason: 'error' });
+    expect(seen).toEqual([]);
   });
 
   it('stops when the caller aborts', async () => {

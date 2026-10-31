@@ -376,18 +376,18 @@ export function createApp(deps: ApiDeps) {
           ),
         ),
     )
-    .get('/judge', (c) => c.json(deps.services.judgeStatus()))
+    .get('/judge', async (c) => c.json(await deps.services.judgeStatus()))
     .patch(
       '/judge',
       validator('json', (value): JudgeConfigPatch => JudgeConfigPatch.parse(value)),
-      (c) => c.json(deps.services.patchJudge(c.req.valid('json'))),
+      async (c) => c.json(await deps.services.patchJudge(c.req.valid('json'))),
     )
     .put(
       '/judge/key',
       validator('json', (value): JudgeKeyInput => JudgeKeyInput.parse(value)),
-      (c) => c.json(deps.services.setJudgeKey(c.req.valid('json'))),
+      async (c) => c.json(await deps.services.setJudgeKey(c.req.valid('json'))),
     )
-    .delete('/judge/key', (c) => c.json(deps.services.removeJudgeKey()))
+    .delete('/judge/key', async (c) => c.json(await deps.services.removeJudgeKey()))
     .post('/judge/test', async (c) => c.json(await deps.services.testJudge()))
     .get(
       '/judge/calls',
