@@ -2858,6 +2858,68 @@ describe('flows', () => {
     expect(ws(workstream.id).state).toBe('DONE');
   });
 
+  it('goes from an approving review to DONE with no QA session when only Markdown changed', async () => {
+    const plan = {
+      do: 'mcp' as const,
+      tool: 'complete_step',
+      args: { opId: 'op-docs-0001', summary: '1. Write src/api/a.md.', verdict: null },
+    };
+    engine = await createTestEngine({
+      Alpha: [
+        [plan, turn],
+        [write('src/api/a.md', '# A design'), commit('op-docs-0002', ['src/api/a.md']), turn],
+        [approve('op-docs-0003'), turn],
+      ],
+    });
+    const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'full', criteria: 4 });
+    expect(ws(workstream.id).steps.map((s) => s.role)).toEqual([
+      'plan',
+      'implement',
+      'review',
+      'qa',
+    ]);
+    await until(workstream.id, (s) => s === 'DONE');
+    expect(ws(workstream.id).state).toBe('DONE');
+    // The QA step leaves the plan, as a step an existing rule skips never enters it, and no QA session ran.
+    expect(ws(workstream.id).steps.map((s) => s.role)).toEqual(['plan', 'implement', 'review']);
+    expect(engine.adapter.prompts).toHaveLength(3);
+    const reasons = listEventsAfter(engine.store.db, 0, 1000)
+      .filter((e) => e.type === 'workstream.changed' && e.entityId === workstream.id)
+      .map((e) => e.data['reason']);
+    expect(reasons).toContain('review approved; QA skipped: only docs changed');
+  });
+
+  it('still runs QA when a commit changes a file that is not Markdown', async () => {
+    const plan = {
+      do: 'mcp' as const,
+      tool: 'complete_step',
+      args: { opId: 'op-docs-0011', summary: '1. Write both.', verdict: null },
+    };
+    engine = await createTestEngine({
+      Alpha: [
+        [plan, turn],
+        [
+          write('src/api/a.md', '# A design'),
+          write('src/api/b.txt', 'code'),
+          commit('op-docs-0012', ['src/api/a.md', 'src/api/b.txt']),
+          turn,
+        ],
+        [approve('op-docs-0013'), turn],
+        [approve('op-docs-0014'), turn],
+      ],
+    });
+    const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'full', criteria: 4 });
+    await until(workstream.id, (s) => s === 'DONE');
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(ws(workstream.id).steps.map((s) => s.role)).toEqual([
+      'plan',
+      'implement',
+      'review',
+      'qa',
+    ]);
+    expect(engine.adapter.prompts).toHaveLength(4);
+  });
+
   it('shows a plan sent back by plan review the plan it is told to fix', async () => {
     const plan = (opId: string, text: string) => ({
       do: 'mcp' as const,

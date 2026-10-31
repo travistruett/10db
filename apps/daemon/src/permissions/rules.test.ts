@@ -1052,13 +1052,41 @@ describe('commandPrefix: a flag whose value the guard cannot place', () => {
   });
 });
 
+/**
+ * The CPU time `fn` takes, in ms. CPU time, not wall time: under full-gate load the process is
+ * descheduled for a while, which adds wall time (2096 ms against a 2000 ms limit, for a 211 ms run)
+ * but no CPU time. Exponential backtracking burns CPU, so it still shows.
+ */
+function cpuMillis(fn: () => void): number {
+  const before = process.cpuUsage();
+  fn();
+  const used = process.cpuUsage(before);
+  return (used.user + used.system) / 1000;
+}
+
+/** Far above a linear run (about 200 ms) and far below exponential backtracking (hours). */
+const BACKTRACKING_LIMIT_MS = 10_000;
+
+describe('cpuMillis', () => {
+  it('measures a CPU-bound exponential function and not time spent waiting', () => {
+    const fib = (n: number): number => (n < 2 ? n : fib(n - 1) + fib(n - 2));
+    expect(cpuMillis(() => fib(34))).toBeGreaterThan(20);
+    const waited = cpuMillis(() => {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 300);
+    });
+    expect(waited).toBeLessThan(150);
+  });
+});
+
 describe('commandPrefix: a crafted command', () => {
   it('finishes within a deadline and is allowed once only', () => {
     const flags = Array.from({ length: 30 }, (_, i) => `--f${String(i)} v${String(i)}`).join(' ');
     const nested = Array.from({ length: 12 }, () => `pnpm ${flags} exec`).join(' ');
-    const started = performance.now();
-    const prefix = commandPrefix(nested);
-    expect(performance.now() - started).toBeLessThan(2000);
+    let prefix: string | null = 'unset';
+    const used = cpuMillis(() => {
+      prefix = commandPrefix(nested);
+    });
+    expect(used).toBeLessThan(BACKTRACKING_LIMIT_MS);
     expect(prefix).toBeNull();
   });
 });
