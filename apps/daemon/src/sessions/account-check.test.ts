@@ -7,6 +7,7 @@ import {
   credentialProblem,
   missingAccountRefusal,
   modelMatches,
+  noAccountWhy,
   type SeenAccount,
 } from './account-check';
 
@@ -210,6 +211,49 @@ describe('missingAccountRefusal', () => {
     );
     expect(refusal?.problem ?? null).toBe(problem);
     if (refusal) expect(refusal.message).toContain('Company A');
+  });
+});
+
+describe('noAccountWhy', () => {
+  it('names one start by the wait alone, and says nothing was printed', () => {
+    expect(noAccountWhy(30_000, [''])).toEqual({
+      why: 'Claude Code reported no account within 30 s',
+      printed: 'Claude Code printed nothing',
+    });
+  });
+
+  it('counts the starts and quotes what each printed, once for the same text', () => {
+    expect(
+      noAccountWhy(30_000, [
+        'warming up\n  plugin cache locked',
+        '',
+        'warming up plugin cache locked',
+      ]),
+    ).toEqual({
+      why: 'Claude Code reported no account within 30 s on each of 3 starts',
+      printed: 'Claude Code printed: "warming up plugin cache locked"',
+    });
+    expect(noAccountWhy(30_000, ['one', 'two']).printed).toBe('Claude Code printed: "one"; "two"');
+  });
+
+  it('keeps the end of a long print on one line, without control characters or a final full stop', () => {
+    const { printed } = noAccountWhy(30_000, [`${'x'.repeat(1_000)}\u001b[31m\nfailed.\r\n`]);
+    expect(printed).toMatch(/^Claude Code printed: "…x+ failed"$/);
+    expect(printed).not.toContain('\u001b');
+    expect(printed.length).toBeLessThan(400);
+  });
+});
+
+describe('missingAccountRefusal with what Claude Code printed', () => {
+  it('puts it after the signed-out reading, so the card can show both', () => {
+    const refusal = missingAccountRefusal(
+      expect_('claude_subscription'),
+      'Claude Code reported no account within 30 s on each of 2 starts',
+      'Claude Code printed nothing',
+    );
+    expect(refusal?.message).toBe(
+      'Claude Code reported no account within 30 s on each of 2 starts for account "Company A", which looks signed out. Claude Code printed nothing',
+    );
   });
 });
 

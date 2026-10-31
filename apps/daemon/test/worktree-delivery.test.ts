@@ -225,13 +225,15 @@ describe('worktree mode through the daemon', () => {
     }
 
     // No worktree is left: git lists only the main checkout, and the root holds only the project's
-    // empty directory.
+    // empty directory beside the marker that keeps Spotlight out.
     const listed = parseWorktreeList(git(main, 'worktree', 'list', '--porcelain', '-z') + '\0');
     expect(listed.map((e) => e.path)).toEqual([realpathSync(main)]);
     const levels = readdirSync(worktrees.path);
     expect(levels).toHaveLength(1);
     const level = join(worktrees.path, levels[0] ?? '');
-    const projectDirs = readdirSync(level);
+    const entries = readdirSync(level);
+    expect(entries).toContain('.metadata_never_index');
+    const projectDirs = entries.filter((e) => e !== '.metadata_never_index');
     expect(projectDirs).toHaveLength(1);
     expect(readdirSync(join(level, projectDirs[0] ?? ''))).toEqual([]);
 
@@ -375,7 +377,7 @@ describe('worktree mode settings through a real store', () => {
     expect(await res.text()).toContain('needs pull request delivery');
   });
 
-  it('PATCH refuses a mode change while a batch is unfinished (409)', async () => {
+  it('PATCH changes the default mode while a batch is unfinished', async () => {
     const { api, project, tasks, request, answerQuestions } = await start();
     const [alpha] = tasks;
     if (!alpha) throw new Error('no Alpha task');
@@ -390,8 +392,9 @@ describe('worktree mode settings through a real store', () => {
         : undefined,
     );
     const res = await request('PATCH', `/projects/${project.id}`, { workspaceMode: 'shared' });
-    expect(res.status).toBe(409);
-    expect(await res.text()).toContain('workspace mode');
+    // The project's mode is only the default for new tasks, so work in flight doesn't block it.
+    expect(res.status).toBe(200);
+    expect(ProjectDto.parse(await res.json())).toMatchObject({ workspaceMode: 'shared' });
     await answerQuestions(['Alpha']);
   });
 });

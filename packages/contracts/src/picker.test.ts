@@ -13,6 +13,8 @@ const task = {
   riskTags: [],
   flowId: null,
   landing: { kind: 'base' },
+  workspaceMode: 'shared',
+  placementReason: null,
   status: 'open',
   boardOrder: 1,
   boardColumnId: null,
