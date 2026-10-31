@@ -21,6 +21,7 @@ import {
   TaskStatus,
   taskLandingFor,
   Title,
+  WorkstreamId,
   WorkstreamState,
   type BoardColumnId,
   WorkspaceMode,
@@ -36,6 +37,7 @@ import { and, asc, desc, eq, inArray, max, ne } from 'drizzle-orm';
 import * as schema from '../schema';
 import { getBoardColumn, listBoardColumns } from './board-columns';
 import { getFlow } from './flows';
+import { getProposal } from './knowledge';
 import { getProject } from './projects';
 import type { DbReader, WriteContext } from './store';
 import { transitionWorkstream } from './workstreams';
@@ -186,8 +188,39 @@ function placementFor(project: ProjectDto, named: WorkspaceMode | undefined): Wo
 }
 
 /**
- * Files an accepted new-task proposal as an open task linked to it. The proposal names no areas or
- * acceptance criteria, so the task starts with none; its title meets the same rule as a task made by hand.
+ * The areas a task filed from a proposal works in: those of the task whose session raised it, else
+ * the project's only area. Empty when neither says (several areas and no raising task), and then the
+ * task can't start until the builder names them.
+ */
+function areasForProposal(
+  tx: DbReader,
+  proposalId: ProposalId,
+  project: ProjectDto,
+): readonly string[] {
+  const proposal = getProposal(tx, proposalId);
+  const source = tx
+    .select({ ref: schema.sources.ref })
+    .from(schema.sources)
+    .where(eq(schema.sources.id, proposal.sourceId))
+    .get();
+  const workstreamId = WorkstreamId.safeParse(source?.ref['workstreamId']);
+  if (workstreamId.success) {
+    const raiser = tx
+      .select({ areas: schema.tasks.areas })
+      .from(schema.workstreams)
+      .innerJoin(schema.tasks, eq(schema.tasks.id, schema.workstreams.taskId))
+      .where(eq(schema.workstreams.id, workstreamId.data))
+      .get();
+    if (raiser && raiser.areas.length > 0) return raiser.areas;
+  }
+  const [only, ...others] = project.areas;
+  return only && others.length === 0 ? [only.name] : [];
+}
+
+/**
+ * Files an accepted new-task proposal as an open task linked to it. The proposal names no acceptance
+ * criteria, so the task starts with none; its title meets the same rule as a task made by hand. Its
+ * areas come from the task that raised it, or the project's only area (`areasForProposal`).
  */
 export function insertTaskFromProposal(
   ctx: WriteContext,
@@ -205,7 +238,7 @@ export function insertTaskFromProposal(
     title: Title.parse(input.title),
     description: input.description,
     acceptanceCriteria: [],
-    areas: [],
+    areas: [...areasForProposal(ctx.tx, input.proposalId, project)],
     dependsOn: [],
     riskTags: [],
     flowId: null,
