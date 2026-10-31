@@ -9,8 +9,10 @@ import {
   InvalidError,
   isMetered,
   mintId,
+  NAME_LANDING_BRANCH,
   NotFoundError,
   ProjectInput,
+  ProjectLanding,
   ProjectPatch,
   Provider,
   WorkspaceMode,
@@ -73,6 +75,7 @@ export function insertProject(ctx: WriteContext, input: ProjectInput): ProjectDt
   const row: ProjectDto = {
     id: mintId('Project'),
     ...rest,
+    landingBranch: rest.landing === ProjectLanding.Branch ? rest.landingBranch : null,
     accountId,
     movedFromAccountId: null,
     moveBackAt: null,
@@ -179,21 +182,20 @@ export function patchProject(ctx: WriteContext, id: ProjectId, patch: ProjectPat
   }
   const delivery = changes.delivery ?? current.delivery;
   const workspaceMode = changes.workspaceMode ?? current.workspaceMode;
+  // The mode is only the default for new tasks, so it changes while work runs (task placement spec, P1).
   if (workspaceMode === WorkspaceMode.Worktree && delivery !== Delivery.PullRequest)
     throw new InvalidError('A worktree per task needs pull request delivery');
-  if (workspaceMode !== current.workspaceMode) {
-    const [open] = listUnfinishedBatches(ctx.tx, id);
-    if (open)
-      throw new ConflictError(
-        `Batch "${open.title}" is still ${open.state.toLowerCase()}; finish it before changing ${current.name}'s workspace mode`,
-      );
-  }
   // Re-saving the fallback the project already has asks nothing again, even while it runs on it.
   if (
     changes.fallbackAccountId !== undefined &&
     changes.fallbackAccountId !== current.fallbackAccountId
   )
     checkFallback(ctx, changes.accountId ?? current.accountId, changes.fallbackAccountId);
+  const landing = changes.landing ?? current.landing;
+  const landingBranch =
+    landing === ProjectLanding.Branch ? (changes.landingBranch ?? current.landingBranch) : null;
+  if (landing === ProjectLanding.Branch && landingBranch === null)
+    throw new InvalidError(NAME_LANDING_BRANCH);
   const moving = changes.accountId !== undefined && changes.accountId !== current.accountId;
   if (changes.accountId !== undefined && moving) {
     // Work in flight moves too: each lane's next session runs on the new account.
@@ -205,6 +207,9 @@ export function patchProject(ctx: WriteContext, id: ProjectId, patch: ProjectPat
     // Any move forgets an earlier move back; a move for a usage limit records its own after this write.
     .set({
       ...changes,
+      ...(changes.landing !== undefined || changes.landingBranch !== undefined
+        ? { landing, landingBranch }
+        : {}),
       ...(moving ? { movedFromAccountId: null, moveBackAt: null } : {}),
       updatedAt: ctx.now,
     })

@@ -174,19 +174,26 @@ export const projects = sqliteTable('projects', {
   baseBranch: text('base_branch').notNull().default('main'),
   /** What a finished task's pull request does unless its task says otherwise. */
   landing: text('landing').$type<ProjectLanding>().notNull().default('merge'),
+  /** The branch of origin new tasks land in when `landing` is `branch`; null otherwise. */
+  landingBranch: text('landing_branch'),
   prTitlePrefix: text('pr_title_prefix'),
   /** Command prefixes a lane runs without a permission card, beyond the gate command. */
   allowedCommands: text('allowed_commands', { mode: 'json' })
     .$type<string[]>()
     .notNull()
     .default(sql`'[]'`),
-  /** Where tasks work: the one checkout, or a git worktree per started task. */
+  /** Where a new task works unless it says otherwise; each task keeps its own (`tasks.workspace_mode`). */
   workspaceMode: text('workspace_mode').$type<WorkspaceMode>().notNull().default('shared'),
   /** Ignored directories of the main checkout a new worktree gets copies of. */
   worktreeSeed: text('worktree_seed', { mode: 'json' })
     .$type<string[]>()
     .notNull()
     .default(sql`'["node_modules"]'`),
+  /** Area and hazard names whose tasks are proposed a separate copy. */
+  isolate: text('isolate', { mode: 'json' })
+    .$type<string[]>()
+    .notNull()
+    .default(sql`'["migrations","deps"]'`),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
@@ -302,7 +309,13 @@ export const tasks = sqliteTable(
     boardColumnId: text('board_column_id')
       .$type<BoardColumnId>()
       .references(() => boardColumns.id),
-    workspaceMode: text('workspace_mode').$type<'shared'>().notNull(),
+    /**
+     * Where the task runs when next started: the project's checkout or a copy of its own. Read only
+     * while the task can be started; a finished task's batch says where it ran.
+     */
+    workspaceMode: text('workspace_mode').$type<WorkspaceMode>().notNull(),
+    /** Why the placement was proposed; null when it was chosen or took the project default. */
+    placementReason: text('placement_reason'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

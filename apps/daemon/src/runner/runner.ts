@@ -14,6 +14,7 @@ import {
   StepRole,
   StepStatus,
   ToolAccess,
+  Verdict,
   WorkstreamState as S,
   AccountKind,
   AccountProblem,
@@ -285,6 +286,8 @@ type Outcome =
       readonly withoutHandoff: boolean;
       /** How the session ended, in a plain clause: what a step that records no result is failed with. */
       readonly ending: string;
+      /** What the session wrote as its last message in its longest turn; '' when it wrote nothing. */
+      readonly wrote: string;
     }
   | {
       readonly kind: 'parked';
@@ -417,6 +420,12 @@ interface SessionState {
   resultNudged: boolean;
   /** How the session's last turn ended; null before any turn did. */
   lastTurn: TurnResult | null;
+  /**
+   * The longest last message any turn of the session wrote ('' when none did). A review that ends
+   * without recording a verdict has usually written its findings here, and the failure card shows them;
+   * the longest, because the turn after a nudge only says "done".
+   */
+  wrote: string;
   /** The share of its context window the session last reported using. */
   contextPct: number | null;
   parkedFor: InboxItemId | null;
@@ -647,14 +656,50 @@ export function createRunner(opts: RunnerOptions): Runner {
     clearLease(ctx, id);
   }
 
+  /**
+   * QA checks a change as its user would, and a change of Markdown files alone has no behavior to
+   * exercise. Whether that is so is known only after implement, from the paths the commits touched, so
+   * it is decided when an approving review is about to hand over to QA. The QA step then leaves the
+   * plan, as a step an existing skip rule drops never enters one, and the reason is logged.
+   */
+  async function withoutDocsOnlyQa(
+    id: WorkstreamId,
+    row: WorkstreamRow,
+    step: WorkstreamStep,
+  ): Promise<WorkstreamRow> {
+    const qaIndex = row.stepIndex + 1;
+    if (
+      step.role !== StepRole.Review ||
+      step.result?.verdict !== Verdict.Approve ||
+      row.steps[qaIndex]?.role !== StepRole.Qa ||
+      row.baseHead === null
+    )
+      return row;
+    const checkout = checkoutOf(db, row);
+    const files = await opts.git.filesChangedBetween(
+      checkout,
+      row.baseHead,
+      await opts.git.head(checkout),
+    );
+    if (files.length === 0 || !files.every((f) => f.endsWith('.md'))) return row;
+    opts.logger.info(
+      { workstreamId: id, files: files.length },
+      'skipping the QA step: only docs changed',
+    );
+    return { ...row, steps: row.steps.filter((_, i) => i !== qaIndex) };
+  }
+
   /** After a read-only step's session: the next step in this lane, DONE, a rework, or a failure. */
   async function finishReadOnlyStep(
     id: WorkstreamId,
     ctl: Control,
-    row: WorkstreamRow,
+    started: WorkstreamRow,
     ending: string,
+    wrote: string,
   ): Promise<'next' | 'stop'> {
-    const step = currentStep(row);
+    const step = currentStep(started);
+    const row = await withoutDocsOnlyQa(id, started, step);
+    const docsOnly = row.steps.length < started.steps.length;
     // A sent-back step still holds its earlier result; only one a session of this step recorded counts.
     const floorSession = (sessionId: SessionId) =>
       (listSessions(db, id).find((x) => x.id === sessionId)?.sequence ?? 0) > step.sessionFloor;
@@ -684,7 +729,23 @@ export function createRunner(opts: RunnerOptions): Runner {
           });
           return 'next';
         }
-        fail(id, ctl.fence, `The ${step.role} step ended without calling complete_step: ${ending}`);
+        // A review that wrote its findings but never recorded them: the card carries what it wrote, so
+        // the builder can judge the work on it instead of rerunning the review.
+        const gave = REVIEW_ROLES.includes(step.role) && wrote !== '';
+        fail(
+          id,
+          ctl.fence,
+          `The ${step.role} step ended without calling complete_step: ${ending}${gave ? ' What it wrote is on the card.' : ''}`,
+          gave
+            ? {
+                role: step.role,
+                personaName: step.personaName,
+                at: opts.clock.now().toISOString(),
+                findings: parseFindings(wrote),
+                summary: wrote,
+              }
+            : undefined,
+        );
         return 'stop';
       }
       case 'done': {
@@ -715,7 +776,13 @@ export function createRunner(opts: RunnerOptions): Runner {
             fence: ctl.fence,
             reason: 'steps complete',
           });
-          markDone(ctx, id, ctl.fence, row, `${step.role} approved`);
+          markDone(
+            ctx,
+            id,
+            ctl.fence,
+            row,
+            `${step.role} approved${docsOnly ? '; QA skipped: only docs changed' : ''}`,
+          );
         });
         return 'stop';
       }
@@ -1262,6 +1329,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       firmSent: false,
       resultNudged: false,
       lastTurn: null,
+      wrote: '',
       contextPct: null,
       parkedFor: null,
       waitingOn: new Map(),
@@ -1520,6 +1588,7 @@ export function createRunner(opts: RunnerOptions): Runner {
             break;
           case 'turn_complete': {
             st.lastTurn = event.result ?? 'success';
+            if (event.text && event.text.length > st.wrote.length) st.wrote = event.text;
             opts.state.write((ctx) => {
               updateSessionUsage(ctx, session.id, {
                 inputTokens: event.inputTokens,
@@ -1549,6 +1618,7 @@ export function createRunner(opts: RunnerOptions): Runner {
                 kind: 'step_done',
                 withoutHandoff: st.handoffRequested,
                 ending: describeEnding(st),
+                wrote: st.wrote,
               };
               await handle.stop();
             }
@@ -1627,6 +1697,7 @@ export function createRunner(opts: RunnerOptions): Runner {
                     kind: 'step_done',
                     withoutHandoff: st.handoffRequested,
                     ending: describeEnding(st),
+                    wrote: st.wrote,
                   };
                   break;
               }
@@ -2104,7 +2175,11 @@ export function createRunner(opts: RunnerOptions): Runner {
             });
           }
           if (readOnly) {
-            if ((await finishReadOnlyStep(id, ctl, finished, outcome.ending)) === 'next') continue;
+            if (
+              (await finishReadOnlyStep(id, ctl, finished, outcome.ending, outcome.wrote)) ===
+              'next'
+            )
+              continue;
             return;
           }
           if (outcome.withoutHandoff) {

@@ -17,7 +17,8 @@ export type GhMethod =
   | 'prView'
   | 'prStatus'
   | 'prCreate'
-  | 'prAutoMerge';
+  | 'prAutoMerge'
+  | 'prMerge';
 export interface PrCreateCall {
   readonly repo: string;
   readonly base: string;
@@ -31,8 +32,15 @@ export class FakeGh implements Gh {
   repo = 'acme/widgets';
   /** Whether the repository allows auto-merge, as GitHub's setting does. */
   autoMergeAllowed = true;
+  /**
+   * True when the pull request's base has no required checks: GitHub refuses auto-merge on it as
+   * "in clean status", and a direct merge is allowed.
+   */
+  noRequiredChecks = false;
   /** The pull requests auto-merge was turned on for, in order. */
   readonly autoMerged: string[] = [];
+  /** The pull requests merged directly, in order. */
+  readonly merged: string[] = [];
   /** One error per method, thrown by its next call only. */
   readonly failNext = new Map<GhMethod, GhError>();
   /**
@@ -128,8 +136,27 @@ export class FakeGh implements Gh {
   }
 
   prAutoMerge(input: { readonly repo: string; readonly url: string }): Promise<void> {
-    return this.call('prAutoMerge', input, () => {
-      this.autoMerged.push(input.url);
+    return this.call(
+      'prAutoMerge',
+      input,
+      () => {
+        this.autoMerged.push(input.url);
+      },
+      this.noRequiredChecks
+        ? new GhError(
+            'failed',
+            'gh pr merge failed (exit 1): GraphQL: Pull request Pull request is in clean status (enablePullRequestAutoMerge)',
+          )
+        : undefined,
+    );
+  }
+
+  prMerge(input: { readonly repo: string; readonly url: string }): Promise<void> {
+    return this.call('prMerge', input, () => {
+      const found = this.byRef.get(input.url);
+      if (!found) throw new Error(`no PR ${input.url}`);
+      found.pr.state = PrState.Merged;
+      this.merged.push(input.url);
     });
   }
 

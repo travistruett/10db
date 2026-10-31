@@ -5,6 +5,7 @@ import {
   columnNameKey,
   ConflictError,
   DEFAULT_BOARD_COLUMN,
+  Delivery,
   EventType,
   InvalidError,
   isTerminal,
@@ -21,6 +22,8 @@ import {
   Title,
   WorkstreamState,
   type BoardColumnId,
+  WorkspaceMode,
+  type ProjectDto,
   type ProjectId,
   type ProposalId,
   type TaskConfig,
@@ -160,9 +163,25 @@ export function insertTask(ctx: WriteContext, projectId: ProjectId, input: TaskI
   }
   return writeTask(ctx, projectId, {
     ...config,
-    landing: config.landing ?? taskLandingFor(project.landing),
+    landing: config.landing ?? taskLandingFor(project),
+    workspaceMode: placementFor(project, config.workspaceMode),
     proposalId: null,
   });
+}
+
+const NO_COPY_WITHOUT_PULL_REQUESTS =
+  'A separate copy needs pull request delivery; in this project every task works in your folder';
+
+/**
+ * Where a new task works: the placement it names, else the project's default. Only a project that
+ * delivers by pull request has separate copies, so a local one refuses a copy (task placement spec, P1).
+ */
+function placementFor(project: ProjectDto, named: WorkspaceMode | undefined): WorkspaceMode {
+  if (project.delivery !== Delivery.PullRequest) {
+    if (named === WorkspaceMode.Worktree) throw new InvalidError(NO_COPY_WITHOUT_PULL_REQUESTS);
+    return WorkspaceMode.Shared;
+  }
+  return named ?? project.workspaceMode;
 }
 
 /**
@@ -178,8 +197,10 @@ export function insertTaskFromProposal(
     readonly description: string;
   },
 ): TaskDto {
+  const project = getProject(ctx.tx, input.projectId);
   return writeTask(ctx, input.projectId, {
-    landing: taskLandingFor(getProject(ctx.tx, input.projectId).landing),
+    landing: taskLandingFor(project),
+    workspaceMode: placementFor(project, undefined),
     title: Title.parse(input.title),
     description: input.description,
     acceptanceCriteria: [],
@@ -216,6 +237,7 @@ export function insertFollowUpTask(
   const origin = `Found while checking the task "${source.title}" (${source.id}).`;
   return writeTask(ctx, source.projectId, {
     landing: source.landing,
+    workspaceMode: placementFor(getProject(ctx.tx, source.projectId), undefined),
     title: Title.parse(fields.title),
     description: `${origin}\n\n${fields.description}`,
     acceptanceCriteria: [...(fields.acceptanceCriteria ?? [])],
@@ -232,8 +254,9 @@ export function insertFollowUpTask(
 function writeTask(
   ctx: WriteContext,
   projectId: ProjectId,
-  config: Omit<TaskConfig, 'landing'> & {
+  config: Omit<TaskConfig, 'landing' | 'workspaceMode'> & {
     readonly landing: TaskLanding;
+    readonly workspaceMode: WorkspaceMode;
     readonly proposalId: ProposalId | null;
     /** The human column to park the task in; absent, it is planned. */
     readonly boardColumnId?: BoardColumnId | null;
@@ -258,7 +281,8 @@ function writeTask(
     status: TaskStatus.Open,
     boardOrder: (order?.value ?? 0) + 1,
     boardColumnId: config.boardColumnId ?? null,
-    workspaceMode: 'shared' as const,
+    workspaceMode: config.workspaceMode,
+    placementReason: null,
     createdAt: ctx.now,
     updatedAt: ctx.now,
   };
@@ -349,6 +373,8 @@ function toTaskDto(db: DbReader, row: typeof schema.tasks.$inferSelect): TaskDto
     riskTags: row.riskTags,
     flowId: row.flowId,
     landing: landingOf(row),
+    workspaceMode: row.workspaceMode,
+    placementReason: row.placementReason,
     status: row.status,
     boardOrder: row.boardOrder,
     boardColumnId: row.boardColumnId,
@@ -584,17 +610,38 @@ export function patchTask(ctx: WriteContext, id: TaskId, patch: TaskPatch): Task
         `${getTask(ctx.tx, id).title} has already started, so where its work lands is fixed`,
       );
   }
+  if (fields.workspaceMode !== undefined) checkPlacementCanChange(ctx.tx, getTask(ctx.tx, id));
   ctx.tx
     .update(schema.tasks)
     .set({
       ...fields,
       ...(landing === undefined ? {} : landingColumns(landing)),
+      // A placement the builder chose has no proposal behind it.
+      ...(fields.workspaceMode === undefined ? {} : { placementReason: null }),
       updatedAt: ctx.now,
     })
     .where(eq(schema.tasks.id, id))
     .run();
   ctx.emit({ type: EventType.TaskChanged, entityType: 'task', entityId: id });
   return getTask(ctx.tx, id);
+}
+
+/**
+ * A task's placement changes exactly while Start could start it (task placement spec, P3): it is
+ * open and its latest run, if any, is not active. Parking doesn't count, since a parked task has not
+ * started. Only a project that delivers by pull request has separate copies. The daemon adds the
+ * pending-join test on top.
+ */
+function checkPlacementCanChange(db: DbReader, task: TaskDto): void {
+  if (getProject(db, task.projectId).delivery !== Delivery.PullRequest)
+    throw new InvalidError(NO_COPY_WITHOUT_PULL_REQUESTS);
+  if (task.status !== TaskStatus.Open)
+    throw new ConflictError(`${task.title} is finished, so where it worked can't change`);
+  const run = latestRun(db, task.id);
+  if (run && ACTIVE_STATES.includes(run.state))
+    throw new ConflictError(
+      `${task.title} has started, so where it works can't change until its run ends`,
+    );
 }
 
 /** Below this gap a midpoint loses precision, so the project is renumbered first. */

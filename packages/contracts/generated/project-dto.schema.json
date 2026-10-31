@@ -185,7 +185,14 @@
       "type": "string",
       "enum": [
         "merge",
+        "branch",
         "hold"
+      ]
+    },
+    "landingBranch": {
+      "type": [
+        "string",
+        "null"
       ]
     },
     "prTitlePrefix": {
@@ -211,6 +218,12 @@
       ]
     },
     "worktreeSeed": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "isolate": {
       "type": "array",
       "items": {
         "type": "string"
@@ -250,11 +263,13 @@
     "delivery",
     "baseBranch",
     "landing",
+    "landingBranch",
     "prTitlePrefix",
     "allowedCommands",
     "sandboxLoopback",
     "workspaceMode",
     "worktreeSeed",
+    "isolate",
     "createdAt",
     "updatedAt"
   ]
