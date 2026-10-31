@@ -7,6 +7,7 @@ import {
   WorkspaceMode,
   type BatchDto,
   type FlowId,
+  type Notice,
   type TaskDto,
   type TaskId,
   type WorkstreamDto,
@@ -60,6 +61,7 @@ import {
   pullRequestClosed,
   shippedAnywayAndClosed,
   shippedAtLimitLine,
+  taskNotices,
 } from './task-state';
 
 const RISKS: readonly RiskTag[] = Object.values(RiskTag);
@@ -207,6 +209,7 @@ export function TaskDrawer({
             onClosed={onClose}
           />
         ) : null}
+        <TaskNotices notices={taskNotices(workstream, batch)} />
         {batch && task.status === TaskStatus.Done && pullRequestClosed(batch) ? (
           <ClosedPullRequest taskId={task.id} batch={batch} onClosed={onClose} />
         ) : null}
@@ -369,6 +372,31 @@ export function TaskDrawer({
         </Group>
       </Modal>
     </Drawer>
+  );
+}
+
+/**
+ * What stands beside the task's state that asks the builder nothing: another task's hazard it waits
+ * for, a conflict its batch has with the base. The line is what the card says; the body says the rest
+ * and how to fix it, with its line breaks. Nothing when there is none.
+ */
+function TaskNotices({ notices }: { readonly notices: readonly Notice[] }) {
+  if (notices.length === 0) return null;
+  return (
+    <Stack gap="xs" data-testid="task-notice">
+      {notices.map((notice) => (
+        <Alert
+          key={notice.key}
+          variant="light"
+          color={notice.tone === 'warning' ? 'orange' : 'blue'}
+          title={notice.line}
+        >
+          <Text size="sm" style={{ whiteSpace: 'pre-wrap' }}>
+            {notice.body}
+          </Text>
+        </Alert>
+      ))}
+    </Stack>
   );
 }
 
