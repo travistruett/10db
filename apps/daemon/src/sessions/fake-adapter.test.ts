@@ -110,6 +110,26 @@ describe('FakeAdapter', () => {
     );
   });
 
+  it('sends a call the guard asks about to canUseTool, though an allow rule covers it', async () => {
+    const canUseTool = vi.fn<SessionSpec['canUseTool']>(() =>
+      Promise.resolve({ behavior: 'deny', message: 'carded' }),
+    );
+    const adapter = new FakeAdapter({
+      Alpha: [[{ do: 'tool', toolName: 'Write', input: { file_path: 'x.txt', content: 'x' } }]],
+    });
+    await collect(
+      adapter.start(
+        spec({
+          canUseTool,
+          allowedTools: ['Write'],
+          preToolUse: () => ({ decision: 'ask', reason: 'the broker must see it' }),
+        }),
+      ).events,
+    );
+    expect(canUseTool).toHaveBeenCalledOnce();
+    expect(() => readFileSync(join(dir.path, 'x.txt'))).toThrow();
+  });
+
   it('treats a throwing preToolUse as a denial', async () => {
     const canUseTool = vi.fn<SessionSpec['canUseTool']>(() =>
       Promise.resolve({ behavior: 'allow' }),
