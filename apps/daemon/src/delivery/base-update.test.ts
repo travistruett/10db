@@ -479,6 +479,38 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       expect(h.cards()).toEqual([]);
     });
 
+    it('raises one card with the renumber steps when an ordinary file also conflicts beside a migration collision', async () => {
+      h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+      const journal = (...tags: string[]): string =>
+        `${JSON.stringify({ version: '7', dialect: 'sqlite', entries: tags.map((tag, idx) => ({ idx, version: '6', when: idx, tag, breakpoints: true })) }, null, 2)}\n`;
+      h.commit(
+        'packages/db/package.json',
+        `${JSON.stringify({ name: '@10db/db', scripts: { generate: 'drizzle-kit generate' } })}\n`,
+      );
+      h.commit(`${DB}/meta/_journal.json`, journal('0000_init'));
+      h.commit('README.md', '# base\n');
+      h.git$('push', '-q', 'origin', 'main');
+      const { batch } = await opened();
+      await commitOnBatch(batch, 'README.md', '# ours\n');
+      await commitOnBatch(batch, `${DB}/0001_mine.sql`, MINE);
+      await commitOnBatch(batch, `${DB}/meta/_journal.json`, journal('0000_init', '0001_mine'));
+      h.teammatePush('main', 'README.md', '# theirs\n');
+      h.teammatePush('main', `${DB}/0001_theirs.sql`, 'alter table a add c;\n');
+      h.teammatePush('main', `${DB}/meta/_journal.json`, journal('0000_init', '0001_theirs'));
+      const path = pathOf(batch);
+      const before = state(path);
+      const update = await createBaseUpdates(h.ctx).beforeGate(batch.id, signal);
+      expect(update.kind).toBe('not_merged');
+      expect(state(path)).toEqual(before);
+      const card = h.only(h.cards());
+      expect(card.title).toBe('Batch "Alpha" must regenerate migration 0001_mine on top of main');
+      expect(card.body).toContain('- README.md: both sides changed the same lines');
+      expect(card.body).toContain(
+        "Migration 0001_mine takes number 0001, which main's 0001_theirs already has.",
+      );
+      expect(card.body).toContain('drizzle-kit generate');
+    });
+
     it('regenerates generated files from their sources and commits them after the merge', async () => {
       h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
       const batch = await bothSidesChanged();

@@ -158,6 +158,11 @@ export type BranchMerge =
       readonly paths: readonly string[];
       /** Why each of `paths` was left; only when the caller asked for conflicts to be resolved. */
       readonly unresolved?: readonly UnresolvedConflict[];
+      /**
+       * Every path git found conflicted, those `resolve` would have settled included (`paths` holds
+       * only what it could not); only when the caller asked for conflicts to be resolved.
+       */
+      readonly conflicted?: readonly string[];
     }
   /**
    * Files lie where the merge would write, so nothing was written: `changed` are uncommitted changes
@@ -1672,6 +1677,7 @@ export function createGit(opts: GitOptions = {}): Git {
               from,
               paths: settled.unresolved.map((u) => u.path),
               unresolved: settled.unresolved,
+              conflicted: merging.conflicted,
             };
           tree = settled.tree;
           resolved = settled.resolved;
