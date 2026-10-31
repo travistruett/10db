@@ -407,34 +407,84 @@ const DEFAULT_HOSTS = [
 /**
  * Text a backtracking pattern can spend time quadratic or worse in its size on, as any package file. A
  * pattern does its matching on the daemon's only thread, so a slow one stalls the API, every lane's
- * broker and every gate.
+ * broker and every gate. `text(n)` is the text at size `n`: lines, or characters.
  */
-const CRAFTED: readonly { readonly name: string; readonly text: string }[] = [
-  { name: 'a run of blank lines', text: '\n'.repeat(200_000) },
-  { name: 'a run of blank Windows lines', text: '\r\n'.repeat(200_000) },
-  { name: 'a table header padded with spaces', text: `[${' '.repeat(50_000)}x\n` },
-  { name: 'an .npmrc key with no colon', text: `//${'a'.repeat(200_000)}\n` },
+const CRAFTED: readonly {
+  readonly name: string;
+  readonly size: number;
+  readonly text: (n: number) => string;
+}[] = [
+  { name: 'a run of blank lines', size: 200_000, text: (n) => '\n'.repeat(n) },
+  { name: 'a run of blank Windows lines', size: 200_000, text: (n) => '\r\n'.repeat(n) },
+  { name: 'a table header padded with spaces', size: 50_000, text: (n) => `[${' '.repeat(n)}x\n` },
+  { name: 'an .npmrc key with no colon', size: 200_000, text: (n) => `//${'a'.repeat(n)}\n` },
   {
     name: 'a setting whose value holds a lone carriage return',
-    text: `a=${' '.repeat(200_000)}x\ry\n`,
+    size: 200_000,
+    text: (n) => `a=${' '.repeat(n)}x\ry\n`,
   },
 ];
 
+/** How many times bigger the large text is than the small one its time is compared with. */
+const GROWTH = 8;
+/** Linear time grows about GROWTH times, quadratic time GROWTH ** 2 (64) times: this lies between. */
+const MAX_TIME_GROWTH = 24;
+/** Each input is run this many times and the fastest kept: load only ever adds time. */
+const ATTEMPTS = 5;
+/**
+ * The small text's time is never taken as less than this: below it a time is timer noise, and a linear
+ * reader's few milliseconds on the large text must not look like growth. A quadratic one takes seconds
+ * on the large text, far above MAX_TIME_GROWTH times this.
+ */
+const FLOOR_MS = 2;
+
+/**
+ * How many times longer `run` takes on the crafted text at its full size than at 1/GROWTH of it, both
+ * measured here, so a loaded machine slows both and the ratio holds. `prepare` builds a run's input
+ * outside the timing.
+ */
+async function timeGrowth<T>(
+  crafted: (typeof CRAFTED)[number],
+  prepare: (text: string) => T,
+  run: (input: T) => unknown,
+): Promise<number> {
+  async function fastest(text: string): Promise<number> {
+    const input = prepare(text);
+    let best = Infinity;
+    for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
+      const started = performance.now();
+      await run(input);
+      best = Math.min(best, performance.now() - started);
+    }
+    return best;
+  }
+  await fastest(crafted.text(crafted.size / GROWTH)); // warms the code before anything counts
+  const small = Math.max(await fastest(crafted.text(crafted.size / GROWTH)), FLOOR_MS);
+  const large = await fastest(crafted.text(crafted.size));
+  return large / small;
+}
+
 describe('the package files on crafted text', () => {
-  it.each(CRAFTED)('every format reads $name in time linear in its size', ({ text }) => {
-    const started = performance.now();
-    for (const format of FORMATS) format.hosts(text, { npmRegistryNamed: false });
-    namesNpmRegistry(text);
-    // Each format takes a few milliseconds over these texts; a quadratic one takes seconds.
-    expect(performance.now() - started).toBeLessThan(1_000);
+  it.each(CRAFTED)('every format reads $name in time linear in its size', async (crafted) => {
+    const growth = await timeGrowth(
+      crafted,
+      (text) => text,
+      (text) => {
+        for (const format of FORMATS) format.hosts(text, { npmRegistryNamed: false });
+        namesNpmRegistry(text);
+      },
+    );
+    expect(growth).toBeLessThan(MAX_TIME_GROWTH);
   });
 
-  it.each(CRAFTED)('findRegistryHosts reads $name in every package file', async ({ text }) => {
-    const root = project(Object.fromEntries(FORMATS.map((format) => [format.path, text])));
-    const started = performance.now();
-    const found = await hostsOf(root);
-    // Reading the files is most of this; a quadratic pattern alone takes far longer.
-    expect(performance.now() - started).toBeLessThan(5_000);
-    expect(found).toEqual(DEFAULT_HOSTS);
+  it.each(CRAFTED)('findRegistryHosts reads $name in every package file', async (crafted) => {
+    const growth = await timeGrowth(
+      crafted,
+      (text) => project(Object.fromEntries(FORMATS.map((format) => [format.path, text]))),
+      async (root) => {
+        expect(await hostsOf(root)).toEqual(DEFAULT_HOSTS);
+      },
+    );
+    expect(growth).toBeLessThan(MAX_TIME_GROWTH);
   });
 });
