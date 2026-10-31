@@ -32,15 +32,25 @@ const DECISION_LABEL: Readonly<Record<JudgeDecision, string>> = {
   [JudgeDecision.ReviewSize]: REVIEW_LABEL,
 };
 
-/** What 10db did, in the builder's words. */
-const OUTCOME_TEXT: Readonly<Record<JudgeOutcome, string>> = {
-  [JudgeOutcome.Acted]: 'Skipped the review',
+/** What 10db did, in the builder's words, for the outcomes that do not depend on the answer. */
+const OUTCOME_TEXT: Readonly<Record<Exclude<JudgeOutcome, 'acted'>, string>> = {
   [JudgeOutcome.BelowFloor]: 'Not sure enough; the review ran',
   [JudgeOutcome.FallbackOff]: 'Decisions were off; the review ran',
   [JudgeOutcome.FallbackNoKey]: 'No key; the review ran',
   [JudgeOutcome.FallbackTimeout]: 'Timed out; the review ran',
   [JudgeOutcome.FallbackError]: 'The call failed; the review ran',
 };
+
+/**
+ * `acted` means 10db followed the model's answer, which is a skip or a review: what it did depends on
+ * which, so the text follows the answer and the outcome together.
+ */
+function outcomeText(call: Pick<JudgeCallDto, 'outcome' | 'answer'>): string {
+  if (call.outcome !== JudgeOutcome.Acted) return OUTCOME_TEXT[call.outcome];
+  if (call.answer === 'skip') return 'Skipped the review';
+  if (call.answer === 'review') return 'Ran the review (model said review)';
+  return 'Followed the answer';
+}
 
 const UNREACHABLE = "Couldn't reach the daemon.";
 
@@ -204,7 +214,7 @@ function RecentCall({ call }: { readonly call: JudgeCallDto }) {
           {call.model} · {answer}
         </Text>
         <Group gap="xs">
-          <Text size="xs">{OUTCOME_TEXT[call.outcome]}</Text>
+          <Text size="xs">{outcomeText(call)}</Text>
           {call.taskId ? (
             <Text size="xs" component={Link} to="/board">
               Open on the board

@@ -164,6 +164,24 @@ describe('Settings › Decisions', () => {
     expect(within(second).queryByRole('link')).toBeNull();
   });
 
+  it.each([
+    ['skip acted on', 'acted', 'skip', 'Skipped the review'],
+    ['review acted on', 'acted', 'review', 'Ran the review (model said review)'],
+    ['skip below the floor', 'below_floor', 'skip', 'Not sure enough; the review ran'],
+    ['no answer, decisions off', 'fallback_off', null, 'Decisions were off; the review ran'],
+    ['no answer, no key', 'fallback_no_key', null, 'No key; the review ran'],
+    ['no answer, error', 'fallback_error', null, 'The call failed; the review ran'],
+  ] as const)(
+    'says what 10db did from the answer and the outcome together: %s',
+    async (_name, outcome, answer, text) => {
+      open({
+        calls: [judgeCallDto({ outcome, answer, confidence: answer === null ? null : 0.9 })],
+      });
+      const list = await screen.findByRole('list', { name: 'Recent decisions' });
+      expect(within(list).getByText(text)).toBeTruthy();
+    },
+  );
+
   it('says when there are no decisions yet', async () => {
     open();
     expect(await screen.findByText('No decisions yet.')).toBeTruthy();
