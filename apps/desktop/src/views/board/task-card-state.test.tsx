@@ -122,6 +122,49 @@ describe('TaskCard state', () => {
     });
   });
 
+  describe('shipped at the retry limit', () => {
+    const rejection = {
+      summary: '1. BLOCKING src/a.ts:1 no test.',
+      verdict: 'reject' as const,
+      sessionId: mintId('Session'),
+      at: '2026-10-29T10:00:00.000Z',
+    };
+    const shipped = () =>
+      workstreamDto({
+        state: 'DONE',
+        steps: [
+          stepDto({ status: 'done' }),
+          stepDto({
+            role: 'review',
+            tools: 'read_only',
+            status: 'done',
+            result: rejection,
+            sentBack: 3,
+            shippedAtLimit: {
+              followUpTaskId: mintId('Task'),
+              followUpTitle: 'Resolve the open findings of "Add the badge"',
+            },
+          }),
+        ],
+      });
+    const LINE =
+      'Shipped at the retry limit with open findings. Follow-up task: Resolve the open findings of "Add the badge"';
+
+    it('says so on the card and names the follow-up task', () => {
+      card({ workstream: shipped() });
+      expect(screen.getByText(LINE)).toBeTruthy();
+    });
+
+    it('says it to a screen reader too', () => {
+      expect(cardSummary(taskDto(), shipped(), new Map())).toContain(`${LINE}.`);
+    });
+
+    it('says nothing for a task that did not ship at the limit', () => {
+      card({ workstream: workstreamDto({ state: 'DONE', steps: [stepDto(), stepDto()] }) });
+      expect(screen.queryByText(/retry limit/)).toBeNull();
+    });
+  });
+
   it('names the gate command while it checks', () => {
     card({ workstream: workstreamDto({ state: 'VERIFYING' }), gateCommand: 'make gate' });
     expect(screen.getByText('Checking: make gate')).toBeTruthy();

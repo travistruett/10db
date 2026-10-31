@@ -12,6 +12,7 @@ import {
   type WorkstreamDto,
 } from '@10db/contracts';
 import {
+  Alert,
   Badge,
   Button,
   Drawer,
@@ -53,7 +54,13 @@ import { ordinal, runNextNote } from './queue-place';
 import { canRunNext } from './run-next';
 import { RISK_LABEL } from './risk-labels';
 import { holdOption, isHeld, type HoldOption } from './task-hold';
-import { canCloseRun, canRetryRun, pullRequestClosed, shippedAnywayAndClosed } from './task-state';
+import {
+  canCloseRun,
+  canRetryRun,
+  pullRequestClosed,
+  shippedAnywayAndClosed,
+  shippedAtLimitLine,
+} from './task-state';
 
 const RISKS: readonly RiskTag[] = Object.values(RiskTag);
 const isRisk = (value: string): value is RiskTag => RISKS.some((r) => r === value);
@@ -117,6 +124,7 @@ export function TaskDrawer({
     return peer ? [peer.title] : [];
   });
   const live = workstream !== undefined && !isTerminal(workstream.state);
+  const limitLine = shippedAtLimitLine(workstream);
 
   const dirty =
     title !== task.title ||
@@ -209,6 +217,11 @@ export function TaskDrawer({
             onClosed={onClose}
             {...(onStart ? { onStart } : {})}
           />
+        ) : null}
+        {limitLine ? (
+          <Alert color="orange" variant="light" data-testid="shipped-at-limit">
+            {limitLine}
+          </Alert>
         ) : null}
         {workstream ? <ReviewRoundsList steps={workstream.steps} /> : null}
         {batch ? (

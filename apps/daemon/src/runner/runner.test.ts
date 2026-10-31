@@ -2805,7 +2805,79 @@ describe('flows', () => {
     });
   });
 
-  describe('when the reviewer keeps rejecting', () => {
+  describe('when the reviewer rejects an ordinary task at the retry limit', () => {
+    const FINAL =
+      '1. BLOCKING src/api/a.txt:3 the card hides what the reviewer found.\n   Show it.\n2. NOTE the empty state has no test.';
+    const round = (n: number) => [
+      [turn],
+      [reject(`op-flow-05${String(n)}0`, n === 4 ? FINAL : `1. NOTE round ${String(n)}`), turn],
+    ];
+    const shipped = async () => {
+      engine = await createTestEngine({ Alpha: [...[1, 2, 3, 4].flatMap(round)] });
+      const { task, workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+      await until(workstream.id, (s) => s === 'DONE' || s === 'FAILED');
+      return { task, workstream };
+    };
+    const filedFor = (taskId: string) =>
+      listTasks(engine.store.db, engine.project.id).filter((t) => t.id !== taskId);
+
+    it('ships the task as an approved one is, without failing it', async () => {
+      const { task, workstream } = await shipped();
+      expect(ws(workstream.id)).toMatchObject({ state: 'DONE', failureReason: null });
+      expect(getTask(engine.store.db, task.id).status).toBe('done');
+      expect(step(workstream.id, 1)).toMatchObject({
+        status: 'done',
+        result: { verdict: 'reject' },
+      });
+      expect(activeClaims(engine.store.db, workstream.id)).toEqual([]);
+      expect(listInbox(engine.store.db, { states: ['OPEN'] })).toEqual([]);
+    });
+
+    it('files the last rejection as one Ready task that names the original', async () => {
+      const { task, workstream } = await shipped();
+      const [filed, ...rest] = filedFor(task.id);
+      expect(rest).toEqual([]);
+      expect(filed).toMatchObject({
+        status: 'open',
+        boardColumnId: null,
+        boardStatus: 'ready',
+        landing: task.landing,
+        areas: task.areas,
+      });
+      expect(filed?.description).toContain(task.title);
+      expect(filed?.description).toContain(task.id);
+      expect(filed?.description).toContain(FINAL);
+      expect(filed?.description).not.toContain('round 3');
+      expect(filed?.acceptanceCriteria).toHaveLength(2);
+      expect(step(workstream.id, 1)?.shippedAtLimit).toEqual({
+        followUpTaskId: filed?.id,
+        followUpTitle: filed?.title,
+      });
+    });
+
+    it('counts only the send-backs before the limit', async () => {
+      const { workstream } = await shipped();
+      expect(rejectionsSentBack(ws(workstream.id))).toBe(3);
+      expect(reviewRounds(ws(workstream.id).steps)).toHaveLength(4);
+    });
+
+    it('does not mark a task shipped at the limit when its review approved', async () => {
+      engine = await createTestEngine({
+        Alpha: [
+          [turn],
+          [reject('op-flow-0560', '1. NOTE once'), turn],
+          [turn],
+          [approve('op-flow-0561'), turn],
+        ],
+      });
+      const { task, workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+      await until(workstream.id, (s) => s === 'DONE');
+      expect(step(workstream.id, 1)?.shippedAtLimit).toBeUndefined();
+      expect(filedFor(task.id)).toEqual([]);
+    });
+  });
+
+  describe('when the reviewer keeps rejecting a task that must not ship with open findings', () => {
     const FINAL =
       '1. BLOCKING src/api/a.txt:3 the card hides what the reviewer found.\n   Show it.';
     const round = (n: number) => [
@@ -2821,7 +2893,10 @@ describe('flows', () => {
           [approve('op-flow-0499'), turn],
         ],
       });
-      const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+      const { workstream } = engine.addTask('Alpha', ['api'], [], {
+        flow: 'standard',
+        riskTags: ['security'],
+      });
       await until(workstream.id, (s) => s === 'FAILED');
       return workstream;
     };

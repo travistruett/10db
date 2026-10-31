@@ -6,6 +6,7 @@ import {
   rejectionsSentBack,
   WorkstreamState,
   type BatchDto,
+  type ShippedAtLimit,
   type WorkstreamDto,
 } from '@10db/contracts';
 import type { MantineColor } from '@mantine/core';
@@ -114,6 +115,19 @@ export function reviewSentBackLine(workstream: WorkstreamDto | undefined): strin
   const sentBack = rejectionsSentBack(workstream);
   return sentBack > 0
     ? `Review sent back ${String(sentBack)} of ${String(FIX_ATTEMPT_LIMIT)}`
+    : null;
+}
+
+/** The follow-up task filed when the work shipped at the retry limit with findings still open; null otherwise. */
+export function shippedAtLimit(workstream: WorkstreamDto | undefined): ShippedAtLimit | null {
+  return workstream?.steps.find((s) => s.shippedAtLimit)?.shippedAtLimit ?? null;
+}
+
+/** The sentence a card and the drawer say of work that shipped at the retry limit; null when it did not. */
+export function shippedAtLimitLine(workstream: WorkstreamDto | undefined): string | null {
+  const shipped = shippedAtLimit(workstream);
+  return shipped
+    ? `Shipped at the retry limit with open findings. Follow-up task: ${shipped.followUpTitle}`
     : null;
 }
 
