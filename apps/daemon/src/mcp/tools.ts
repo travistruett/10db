@@ -29,6 +29,7 @@ import {
   insertProposal,
   insertSource,
   insertToolOp,
+  replaceToolOp,
   patchWorkstream,
   releaseClaim,
   searchDecisions,
@@ -446,8 +447,16 @@ export function createToolHandlers(
     },
 
     complete_step: (input) => {
-      const done = prior(input.opId, McpToolName.CompleteStep);
-      if (done !== undefined) return Promise.resolve(McpToolOutputs.complete_step.parse(done));
+      // A reply is replayed only to the session it was given to: that is a retry of a lost answer.
+      // An opId an earlier session of the task used is a new verdict, which must be recorded; replaying
+      // the old "Recorded" for it left a rerun review with no result, and the task failed for it.
+      const earlier = findToolOp(db, workstreamId, input.opId);
+      if (earlier && earlier.tool !== McpToolName.CompleteStep)
+        throw new InvalidError(
+          `opId ${input.opId} was already used for ${earlier.tool}; use a new opId`,
+        );
+      if (earlier?.sessionId === sessionId)
+        return Promise.resolve(McpToolOutputs.complete_step.parse(earlier.result));
       return Promise.resolve(
         deps.state.write((ctx) => {
           const row = getWorkstreamRow(ctx.tx, workstreamId);
@@ -470,12 +479,16 @@ export function createToolHandlers(
             entityId: workstreamId,
             data: { stepIndex: row.stepIndex, role: step.role, verdict },
           });
-          return record(
-            'complete_step',
-            input.opId,
-            { instruction: 'Recorded. End your turn now.' },
-            ctx,
-          );
+          const reply = { instruction: 'Recorded. End your turn now.' };
+          if (!earlier) return record('complete_step', input.opId, reply, ctx);
+          replaceToolOp(ctx, {
+            workstreamId,
+            sessionId,
+            opId: input.opId,
+            tool: McpToolName.CompleteStep,
+            result: reply,
+          });
+          return reply;
         }),
       );
     },
