@@ -1218,463 +1218,55 @@ describe('permission broker in a sandboxed lane', () => {
   });
 
   describe('Monitor', () => {
-    // Claude Code's own layout: `claude-<uid>`, then the session's working dir with every
-    // character but a letter or digit made `-`.
-    const claudeDir = `claude-${String(process.getuid?.() ?? 0)}`;
-    const slug = (): string => realpathSync(fileAccess.checkout).replace(/[^a-zA-Z0-9]/g, '-');
-    const tasks = (): string =>
-      join(fileAccess.sandboxTemp.own, claudeDir, slug(), 'own-id', 'tasks');
-    const siblingTasks = (): string =>
-      join(fileAccess.sandboxTemp.own, claudeDir, slug(), 'other-id', 'tasks');
-    const otherLaneTasks = (): string =>
-      join(fileAccess.sandboxTemp.root, '10db-othabc', claudeDir, slug(), 'own-id', 'tasks');
-    // Lookalikes the lane can make in its own temp dir: another uid's dir, another slug.
-    const otherUidTasks = (): string =>
-      join(fileAccess.sandboxTemp.own, 'claude-99999', slug(), 'own-id', 'tasks');
-    const otherSlugTasks = (): string =>
-      join(fileAccess.sandboxTemp.own, claudeDir, 'x', 'own-id', 'tasks');
-
     interface MonitorCase {
       readonly name: string;
-      /** The command, given the session's own task output directory. */
-      readonly command: (own: string) => string;
+      readonly input: Record<string, unknown>;
       readonly outcome: 'allow' | 'card';
       readonly escalated?: boolean;
-      /** Input keys beside command, description and timeout_ms. */
-      readonly extra?: Readonly<Record<string, unknown>>;
+      /** Text the card's body must hold. */
+      readonly body?: string;
     }
+    // A Monitor call gets the checks a Bash command gets and no more.
     const MONITOR_CASES: readonly MonitorCase[] = [
-      // The 2026-10-30 shapes: wait for the file, then read it.
       {
-        name: 'until -s, then sleep',
-        command: (d) => `until [ -s ${d}/b1.output ]; do sleep 2; done`,
+        name: 'a plain wait',
+        input: { command: 'until [ -s out ]; do sleep 2; done' },
         outcome: 'allow',
       },
       {
-        name: 'until grep -q, then sleep',
-        command: (d) => `until grep -q "DONE" ${d}/b1.output; do sleep 2; done`,
+        name: 'a tail of any file',
+        input: { command: 'tail -f /var/log/x.log' },
         outcome: 'allow',
       },
       {
-        name: 'until grep with an alternation, quiet to /dev/null',
-        command: (d) =>
-          `until grep -qE 'passed|failed|Error' ${d}/b1.output 2>/dev/null; do sleep 1; done`,
-        outcome: 'allow',
+        name: 'a hazard command',
+        input: { command: 'pnpm add left-pad' },
+        outcome: 'card',
+        body: 'shared with every lane',
       },
       {
-        name: 'the wait, then a grep of the file',
-        command: (d) =>
-          `until [ -s ${d}/b1.output ]; do sleep 2; done; grep -E "Tests|FAIL" ${d}/b1.output`,
-        outcome: 'allow',
-      },
-      {
-        name: 'a while loop that tests for a missing file, then tail',
-        command: (d) =>
-          `while [ ! -s ${d}/b1.output ]; do sleep 1; done; tail -n 20 ${d}/b1.output`,
-        outcome: 'allow',
-      },
-      { name: 'tail -f of the file', command: (d) => `tail -f ${d}/b1.output`, outcome: 'allow' },
-      {
-        name: 'tail piped to grep, which names no file',
-        command: (d) => `tail -n 50 ${d}/b1.output | grep -i error`,
-        outcome: 'allow',
-      },
-      { name: 'cat of the file', command: (d) => `cat ${d}/b1.output`, outcome: 'allow' },
-      {
-        name: 'a file not yet written',
-        command: (d) => `[ -s ${d}/later.output ]`,
-        outcome: 'allow',
-      },
-      {
-        name: 'a single quote inside a double-quoted pattern',
-        command: (d) => `grep -q "it's done" ${d}/b1.output`,
-        outcome: 'allow',
-      },
-      {
-        name: 'a double quote inside a single-quoted pattern',
-        command: (d) => `grep -q 'say "done"' ${d}/b1.output`,
-        outcome: 'allow',
-      },
-      {
-        name: 'a single-quoted # pattern',
-        command: (d) => `until grep -q '#' ${d}/b1.output; do sleep 1; done`,
-        outcome: 'allow',
-      },
-      {
-        name: 'a double-quoted # pattern',
-        command: (d) => `grep -c "# done" ${d}/b1.output`,
-        outcome: 'allow',
-      },
-      // Reads anywhere else.
-      {
-        name: 'a file in the checkout',
-        command: () => 'until [ -s out.txt ]; do sleep 1; done',
+        name: 'a background loop with no end',
+        input: { command: '(while :; do :; done) &' },
         outcome: 'card',
       },
       {
-        name: 'a relative path',
-        command: () => 'until [ -s tasks/b1.output ]; do sleep 1; done',
+        name: 'a socket key',
+        input: { command: 'tail -f out', ws: 'wss://example.org' },
         outcome: 'card',
       },
-      { name: 'a system file', command: () => 'cat /etc/passwd', outcome: 'card' },
+      { name: 'no command', input: { description: 'x' }, outcome: 'card' },
       {
-        name: 'another session of this lane',
-        command: () => `cat ${siblingTasks()}/b1.output`,
-        outcome: 'card',
-      },
-      {
-        name: 'another lane with the same session id',
-        command: () => `cat ${otherLaneTasks()}/b1.output`,
-        outcome: 'card',
-      },
-      {
-        name: 'a lookalike task dir under another uid',
-        command: () => `cat ${otherUidTasks()}/b1.output`,
-        outcome: 'card',
-      },
-      {
-        name: 'a lookalike task dir under another slug',
-        command: () => `cat ${otherSlugTasks()}/b1.output`,
-        outcome: 'card',
-      },
-      {
-        name: 'a `$_` hidden behind a single quote in double quotes',
-        command: (d) => `echo "'" ../../../../../../../../etc/passwd; cat "${d}/$_"`,
-        outcome: 'card',
-      },
-      {
-        name: 'a `$HOME` hidden behind a single quote in double quotes',
-        command: (d) => `echo "'"; cat "${d}/$HOME"`,
-        outcome: 'card',
-      },
-      {
-        name: 'a quoted >/dev/null as a cat argument',
-        command: (d) => `cat '>/dev/null' ${d}/b1.output`,
-        outcome: 'card',
-      },
-      {
-        name: 'a quoted 2>&1 as a cat argument',
-        command: (d) => `cat "2>&1" ${d}/b1.output`,
-        outcome: 'card',
-      },
-      {
-        name: 'a quoted 2>/dev/null as an extra grep file',
-        command: (d) => `grep -q DONE ${d}/b1.output '2>/dev/null'`,
-        outcome: 'card',
-      },
-      // A comment is dropped by the shell, so a quote inside it must not change what is quoted.
-      {
-        name: 'a `$_` hidden behind a single quote in a comment',
-        command: (d) => `echo ../../../../../../../../../etc/passwd # it's\ncat "${d}/$_" # '`,
-        outcome: 'card',
-      },
-      {
-        name: 'a quoted 2>&1 hidden behind a single quote in a comment',
-        command: (d) => `true # it's\ncat ${d}/b1.output '2>&1'`,
-        outcome: 'card',
-      },
-      {
-        name: 'a comment with no quote in it',
-        command: (d) => `cat ${d}/b1.output # the test run`,
-        outcome: 'card',
-      },
-      { name: 'stdin', command: () => 'grep -q DONE', outcome: 'card' },
-      {
-        name: 'a path that climbs out',
-        command: (d) => `cat ${d}/../../x`,
-        outcome: 'card',
-      },
-      {
-        name: 'a link in the task dir that leads out',
-        command: (d) => `cat ${d}/link.output`,
-        outcome: 'card',
-      },
-      // Writes.
-      {
-        name: 'a redirect into the file',
-        command: (d) => `echo hi > ${d}/b1.output`,
-        outcome: 'card',
-      },
-      { name: 'an append', command: (d) => `echo hi >> ${d}/b1.output`, outcome: 'card' },
-      {
-        name: 'a redirect elsewhere',
-        command: (d) => `cat ${d}/b1.output > /private/tmp/x`,
-        outcome: 'card',
-      },
-      {
-        name: 'an input redirect',
-        command: (d) => `grep -q DONE < ${d}/b1.output`,
-        outcome: 'card',
-      },
-      {
-        name: 'tee',
-        command: (d) => `cat ${d}/b1.output | tee ${d}/b2.output`,
-        outcome: 'card',
-      },
-      { name: 'rm', command: (d) => `rm ${d}/b1.output`, outcome: 'card' },
-      { name: 'sed -i', command: (d) => `sed -i s/a/b/ ${d}/b1.output`, outcome: 'card' },
-      {
-        name: 'grep -f reads a pattern file',
-        command: (d) => `grep -f /etc/hosts ${d}/b1.output`,
-        outcome: 'card',
-      },
-      { name: 'grep -r', command: (d) => `grep -r DONE ${d}`, outcome: 'card' },
-      // Unread programs and shapes.
-      {
-        name: 'an unnamed program in the loop',
-        command: (d) => `until [ -s ${d}/b1.output ]; do ./wait.sh; done`,
-        outcome: 'card',
-      },
-      {
-        name: 'a program from a variable',
-        command: (d) => `$CMD ${d}/b1.output`,
-        outcome: 'card',
-      },
-      {
-        name: 'a program set by an assignment',
-        command: (d) => `X=1 cat ${d}/b1.output`,
-        outcome: 'card',
-      },
-      {
-        name: 'a substitution in the path',
-        command: (d) => `cat ${d}/$(date).output`,
-        outcome: 'card',
-      },
-      { name: 'a variable in the path', command: (d) => `cat ${d}/$f`, outcome: 'card' },
-      { name: 'a glob in the path', command: (d) => `cat ${d}/*.output`, outcome: 'card' },
-      // A variable that names the lane's own output file, set at the start of the command.
-      {
-        name: 'the 2026-10-30 shape: a variable for the file, quoted in the loop and the grep',
-        command: (d) =>
-          `f=${d}/b1.output; until grep -qE "Duration|Test Files" "$f" 2>/dev/null; do sleep 5; done; grep -E "×|FAIL|Test Files|Tests |Duration|Error:" "$f"`,
-        outcome: 'allow',
-      },
-      {
-        name: 'an own file named by an unquoted variable',
-        command: (d) => `f=${d}/b1.output; until [ -s $f ]; do sleep 2; done; tail -n 5 $f`,
-        outcome: 'allow',
-      },
-      {
-        name: 'two variables, one for each own file',
-        command: (d) => `a=${d}/b1.output; b=${d}/later.output; cat "$a" "$b"`,
-        outcome: 'allow',
-      },
-      {
-        name: 'a quoted value and an assignment on its own line',
-        command: (d) => `f="${d}/b1.output"\ng='${d}/b1.output'\ncat "$f" $g`,
-        outcome: 'allow',
-      },
-      {
-        name: 'a variable for a file outside the lane',
-        command: () => 'f=/etc/passwd; cat "$f"',
-        outcome: 'card',
-      },
-      {
-        name: 'a variable for another session of this lane',
-        command: () => `f=${siblingTasks()}/b1.output; cat "$f"`,
-        outcome: 'card',
-      },
-      {
-        name: 'one of two variables outside the lane',
-        command: (d) => `a=${d}/b1.output; b=/etc/passwd; cat "$a" "$b"`,
-        outcome: 'card',
-      },
-      {
-        name: 'a variable set twice, the first an own file and the last not',
-        command: (d) => `f=${d}/b1.output; f=/etc/passwd; cat "$f"`,
-        outcome: 'card',
-      },
-      {
-        name: 'an own variable set but a different one used',
-        command: (d) => `f=${d}/b1.output; cat "$g"`,
-        outcome: 'card',
-      },
-      { name: 'a variable used with no assignment', command: () => 'cat "$f"', outcome: 'card' },
-      {
-        name: 'a variable set after its use',
-        command: (d) => `cat "$f"; f=${d}/b1.output`,
-        outcome: 'card',
-      },
-      {
-        name: 'a variable assigned in the loop',
-        command: (d) => `until [ -s ${d}/b1.output ]; do f=${d}/b1.output; done; cat "$f"`,
-        outcome: 'card',
-      },
-      {
-        name: 'a command substitution as the value',
-        command: (d) => `f=$(echo ${d}/b1.output); cat "$f"`,
-        outcome: 'card',
-      },
-      {
-        name: 'a backtick substitution as the value',
-        command: (d) => 'f=`echo ' + d + '/b1.output`; cat "$f"',
-        outcome: 'card',
-      },
-      {
-        name: 'a value that holds an expansion',
-        command: (d) => `d=${d}; f=$d/b1.output; cat "$f"`,
-        outcome: 'card',
-      },
-      {
-        name: 'a value that holds an expansion in double quotes',
-        command: (d) => `f="${d}/$HOME"; cat "$f"`,
-        outcome: 'card',
-      },
-      {
-        name: 'a value with a glob',
-        command: (d) => `f=${d}/*.output; cat $f`,
-        outcome: 'card',
-      },
-      {
-        name: 'a value with a tilde',
-        command: () => 'f=~/x; cat "$f"',
-        outcome: 'card',
-      },
-      {
-        name: 'a value that holds a space',
-        command: (d) => `f="${d}/b1.output /etc/passwd"; cat $f`,
-        outcome: 'card',
-      },
-      {
-        name: 'a variable inside a longer word',
-        command: (d) => `f=${d}; cat "$f/b1.output"`,
-        outcome: 'card',
-      },
-      {
-        name: 'a variable with a suffix',
-        command: (d) => `f=${d}/b1.output; cat $f.bak`,
-        outcome: 'card',
-      },
-      {
-        name: 'a braced variable',
-        command: (d) => `f=${d}/b1.output; cat "\${f}"`,
-        outcome: 'card',
-      },
-      {
-        name: 'a variable in single quotes stays literal text, so cat reads no own file',
-        command: (d) => `f=${d}/b1.output; cat '$f'`,
-        outcome: 'card',
-      },
-      {
-        name: 'a variable as a redirect target',
-        command: (d) => `f=${d}/b1.output; echo hi >$f`,
-        outcome: 'card',
-      },
-      {
-        name: 'a variable as the program',
-        command: (d) => `f=${d}/b1.output; $f`,
-        outcome: 'card',
-      },
-      {
-        name: 'IFS set to a path',
-        command: (d) => `IFS=${d}/b1.output; f=${d}/b1.output; cat $f`,
-        outcome: 'card',
-      },
-      {
-        name: 'PATH set to a path',
-        command: (d) => `PATH=${d}/b1.output; cat ${d}/b1.output`,
-        outcome: 'card',
-      },
-      {
-        name: 'an exported assignment',
-        command: (d) => `export f=${d}/b1.output; cat "$f"`,
-        outcome: 'card',
-      },
-      {
-        name: 'an assignment before a program, as its environment',
-        command: (d) => `f=${d}/b1.output cat "$f"`,
-        outcome: 'card',
-      },
-      {
-        name: 'an assignment run in the background',
-        command: (d) => `f=${d}/b1.output & cat "$f"`,
-        outcome: 'card',
-      },
-      {
-        name: 'assignments and nothing else',
-        command: (d) => `f=${d}/b1.output;`,
-        outcome: 'card',
-      },
-      {
-        name: 'an assignment that is not at the start',
-        command: (d) => `sleep 1; f=${d}/b1.output; cat "$f"`,
-        outcome: 'card',
-      },
-      {
-        name: 'a variable named for a file, then a read of another with the same prefix',
-        command: (d) => `f=${d}/b1.output; cat "$f" /etc/passwd`,
-        outcome: 'card',
-      },
-      {
-        name: 'a variable in the pattern',
-        command: (d) => `grep "$x" ${d}/b1.output`,
-        outcome: 'card',
-      },
-      { name: 'a sub-shell', command: (d) => `(cat ${d}/b1.output)`, outcome: 'card' },
-      {
-        name: 'a command run in the background',
-        command: (d) => `cat ${d}/b1.output &`,
-        outcome: 'card',
-      },
-      { name: 'sh -c', command: (d) => `sh -c 'cat ${d}/b1.output'`, outcome: 'card' },
-      {
-        name: 'a hazard after the wait',
-        command: (d) => `until [ -s ${d}/b1.output ]; do sleep 1; done; pnpm add zod`,
-        outcome: 'card',
-      },
-      { name: 'an unclosed quote', command: (d) => `cat "${d}/b1.output`, outcome: 'card' },
-      {
-        name: 'escalated, the plain wait',
-        command: (d) => `cat ${d}/b1.output`,
+        name: 'an escalated plain wait',
+        input: { command: 'sleep 1' },
         outcome: 'card',
         escalated: true,
       },
-      // Input beside the command: a socket, or a key the broker does not know.
-      {
-        name: 'a WebSocket beside the plain wait',
-        command: (d) => `cat ${d}/b1.output`,
-        outcome: 'card',
-        extra: { ws: { url: 'wss://any.host/' } },
-      },
-      {
-        name: 'an empty ws key beside the plain wait',
-        command: (d) => `cat ${d}/b1.output`,
-        outcome: 'card',
-        extra: { ws: null },
-      },
-      {
-        name: 'an unknown key beside the plain wait',
-        command: (d) => `cat ${d}/b1.output`,
-        outcome: 'card',
-        extra: { cwd: '/' },
-      },
     ];
-
-    beforeEach(() => {
-      for (const dir of [
-        tasks(),
-        siblingTasks(),
-        otherLaneTasks(),
-        otherUidTasks(),
-        otherSlugTasks(),
-      ]) {
-        mkdirSync(dir, { recursive: true });
-        writeFileSync(join(dir, 'b1.output'), 'x');
-      }
-      symlinkSync('/etc/hosts', join(tasks(), 'link.output'));
-    });
-
     const cardedTools = () => openCards().map((card) => card.detail?.['toolName']);
 
     it.each(MONITOR_CASES)('$name -> $outcome', async (c) => {
       const ws = seedWorkstream(base);
-      const pending = sandboxed(ws)(
-        request(
-          'Monitor',
-          { command: c.command(tasks()), description: 'wait', timeout_ms: 60000, ...c.extra },
-          c.escalated ?? false,
-        ),
-      );
+      const pending = sandboxed(ws)(request('Monitor', c.input, c.escalated ?? false));
       pending.catch(() => undefined);
       await settle();
       if (c.outcome === 'allow') {
@@ -1682,32 +1274,17 @@ describe('permission broker in a sandboxed lane', () => {
         expect(await pending).toEqual({ behavior: 'allow' });
       } else {
         expect(cardedTools()).toEqual(['Monitor']);
+        if (c.body !== undefined) expect(onlyOpenCard().body).toContain(c.body);
+        const command = c.input['command'];
+        if (typeof command === 'string') {
+          expect(onlyOpenCard().detail?.['summary']).toBe(command);
+        }
       }
-    });
-
-    it('cards a call before the session has an id', async () => {
-      const ws = seedWorkstream(base);
-      fileAccess = { ...fileAccess, providerSessionId: null };
-      void sandboxed(ws)(request('Monitor', { command: `cat ${tasks()}/b1.output` })).catch(
-        () => undefined,
-      );
-      await settle();
-      expect(cardedTools()).toEqual(['Monitor']);
-    });
-
-    it('cards a Monitor call with no command', async () => {
-      const ws = seedWorkstream(base);
-      void sandboxed(ws)(request('Monitor', { description: 'x' })).catch(() => undefined);
-      await settle();
-      expect(cardedTools()).toEqual(['Monitor']);
     });
 
     it('cards Monitor without a sandbox', async () => {
       const ws = seedWorkstream(base);
-      void sandboxed(
-        ws,
-        false,
-      )(request('Monitor', { command: `cat ${tasks()}/b1.output` })).catch(() => undefined);
+      void sandboxed(ws, false)(request('Monitor', { command: 'sleep 1' })).catch(() => undefined);
       await settle();
       expect(cardedTools()).toEqual(['Monitor']);
     });
