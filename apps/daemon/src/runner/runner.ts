@@ -115,7 +115,7 @@ import {
   type SessionLaunch,
 } from '../environment';
 import type { Git } from '../git';
-import { judgeToolUse, type ProtectedPath } from '../guard';
+import { judgePreToolUse, type ProtectedPath } from '../guard';
 import {
   createPermissionBroker,
   raiseGateHostCards,
@@ -1452,7 +1452,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         ),
         mcp: { url: opts.mcpUrl(), token, toolTimeoutMs: (project.humanWaitMinutes + 5) * 60_000 },
         preToolUse: (req) =>
-          judgeToolUse({
+          judgePreToolUse({
             toolName: req.toolName,
             toolInput: req.input,
             repoPath: checkout,

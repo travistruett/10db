@@ -262,6 +262,16 @@ describe('permission and hook translation', () => {
     });
   });
 
+  it('turns a guard ask into a PreToolUse ask with the reason, so the call reaches canUseTool', () => {
+    expect(toHookOutput({ decision: 'ask', reason: '10db judges every WebFetch.' })).toEqual({
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'ask',
+        permissionDecisionReason: '10db judges every WebFetch.',
+      },
+    });
+  });
+
   it('builds a user message, with a priority when given', () => {
     expect(userMessage('hi')).toEqual({
       type: 'user',

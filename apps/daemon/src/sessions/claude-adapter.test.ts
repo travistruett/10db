@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import { mintId } from '@10db/contracts';
 import { describe, expect, it, vi } from 'vitest';
 import { SANDBOXED, tempDir } from '../../test/fixtures';
+import { captureLogs } from '../../test/log-capture';
 import { sandboxedMcpServer } from '../../test/sandboxed-mcp';
 import { ManualClock, systemClock, type Clock } from '../clock';
 import { createLogger, silentLogger } from '../log';
@@ -384,6 +385,24 @@ describe('buildQueryOptions', () => {
     expect(options.permissionMode).toBe('default');
     expect(options.canUseTool).toBeTypeOf('function');
     expect(options.hooks?.PreToolUse).toHaveLength(1);
+  });
+
+  it('runs a sandboxed session in the lane permission mode it is given, with the guard and the broker still wired', () => {
+    const options = buildQueryOptions(spec({ sandbox: laneSandbox }), {
+      ...deps,
+      lanePermissionMode: 'auto',
+    });
+    expect(options.permissionMode).toBe('auto');
+    expect(options.canUseTool).toBeTypeOf('function');
+    expect(options.hooks?.PreToolUse).toHaveLength(1);
+    expect(options.settings).toMatchObject({
+      permissions: { ask: ['Edit(//repo/.mcp.json)', 'Write(//repo/.mcp.json)'] },
+    });
+  });
+
+  it('never runs an unsandboxed session in auto mode, whatever the lane permission mode', () => {
+    const options = buildQueryOptions(spec(), { ...deps, lanePermissionMode: 'auto' });
+    expect(options.permissionMode).toBe('default');
   });
 
   it('runs a sandboxed session under its profile, with no settings file, asking before protected edits', () => {
@@ -1498,6 +1517,46 @@ describe('createClaudeAdapter', () => {
     } finally {
       repo.cleanup();
     }
+  });
+
+  it.each<[string, 'default' | 'auto' | undefined, string]>([
+    ['the lane mode it was made with', 'auto', 'auto'],
+    ['default mode when made with none', undefined, 'default'],
+  ])('starts a sandboxed session in %s', async (_name, lanePermissionMode, expected) => {
+    const fake = fakeQuery({
+      messages: [initMessage(), resultMessage({ input: 1, output: 1, costUsd: 0 })],
+    });
+    const adapter = createClaudeAdapter({
+      claudePath: '/usr/local/bin/claude',
+      pluginDir: '/harness',
+      logger: silentLogger,
+      query: fake.query,
+      ...(lanePermissionMode === undefined ? {} : { lanePermissionMode }),
+    });
+    await collect(adapter.start(spec({ sandbox: laneSandbox })).events);
+    expect(fake.record.options?.permissionMode).toBe(expected);
+  });
+
+  it('logs the permission mode Claude Code reports, not the one it was asked for', async () => {
+    // Claude Code starts in default mode where auto mode is unavailable; only init says so.
+    const logs = captureLogs();
+    const fake = fakeQuery({
+      messages: [
+        { ...initMessage(), permissionMode: 'default' as const },
+        resultMessage({ input: 1, output: 1, costUsd: 0 }),
+      ],
+    });
+    const adapter = createClaudeAdapter({
+      claudePath: '/usr/local/bin/claude',
+      pluginDir: '/harness',
+      logger: logs.logger,
+      query: fake.query,
+      lanePermissionMode: 'auto',
+    });
+    await collect(adapter.start(spec({ sandbox: laneSandbox })).events);
+    expect(fake.record.options?.permissionMode).toBe('auto');
+    const billing = logs.lines().filter((l) => l['msg'] === 'claude session billing');
+    expect(billing.map((l) => l['permissionMode'])).toEqual(['default']);
   });
 
   it("tells a sandboxed session's builder to check the account, not a settings file it never loads", async () => {
