@@ -35,9 +35,12 @@ import {
 } from '@10db/db';
 import type { Clock } from '../clock';
 import { GitNetworkError, GitNetworkFailure } from '../git';
+import { gateNote as overloadNote, type LoadGuard } from '../load';
 import { PrState } from '../github';
-import type { GateResult, GateRunner } from '../verify';
+import { raiseGateHostCards } from '../inbox';
+import { BlockedRun, type GateResult, type GateRunner } from '../verify';
 import { gateNote, type BaseUpdate, type BaseUpdates } from './base-update';
+import { settleBranch } from './branch-cleanup';
 import { mergeCards, shipCards, wrongBranchCard, type Card, type ShipFailure } from './cards';
 import { allCheckouts, projectAtCheckout } from './checkout';
 import { returnCheckout } from './checkout-return';
@@ -62,6 +65,8 @@ export interface ShipperDeps extends DeliveryContext {
   identifyProcess?(pid: number): Promise<string | null>;
   /** True while a runner holds the workstream (its lane is live). */
   isRunning(id: WorkstreamId): boolean;
+  /** Says whether the Mac was overloaded while a gate ran, so a failed gate's card can say so. */
+  readonly load?: Pick<LoadGuard, 'overloadedSince'>;
 }
 
 export interface Shipper {
@@ -153,11 +158,21 @@ export function createShipper(deps: ShipperDeps): Shipper {
 
   /**
    * After a batch ends, in its project's ship queue: a worktree batch's worktree goes, and a shared
-   * batch's checkout is switched back to where the cut found it.
+   * batch's checkout is switched back to where the cut found it and its branch settled, which a
+   * worktree batch's removal does itself.
    */
   async function afterEnd(batchId: BatchId, worktreePath: string | null): Promise<void> {
-    if (worktreePath !== null) await retire(batchId);
-    else await returnCheckout(deps, batchId);
+    if (worktreePath !== null) {
+      await retire(batchId);
+      return;
+    }
+    await returnCheckout(deps, batchId);
+    await settleBranch(deps, batchId).catch((error: unknown) => {
+      deps.logger.warn(
+        { batchId, err: error instanceof Error ? error.message : String(error) },
+        'batch branch not settled',
+      );
+    });
   }
 
   /**
@@ -225,7 +240,15 @@ export function createShipper(deps: ShipperDeps): Shipper {
       }),
     );
     // Shutdown killed the gate: record nothing; the batch stays SHIPPING and recovery re-runs it.
-    return result.aborted ? null : result;
+    if (result.aborted) return null;
+    // A host the sandbox blocked is the builder's to allow; the card names it and the gate's tail says so.
+    raiseGateHostCards(deps, {
+      projectId: project.id,
+      run: BlockedRun.Gate,
+      command: gateCommand,
+      hosts: result.blockedHosts,
+    });
+    return result;
   }
 
   /**
@@ -488,28 +511,55 @@ export function createShipper(deps: ShipperDeps): Shipper {
         step = 'the gate';
         // Once the gate holds its slot and no other gate of the batch runs, so no other gate's
         // merge changes the tree under it.
-        const gateOnce = async (): Promise<{ gate: GateResult; note: string | null } | null> => {
-          const before: { update: BaseUpdate | null } = { update: null };
+        const gateOnce = async (): Promise<{
+          gate: GateResult;
+          note: string | null;
+          /** When the gate got to start, after any wait for a slot or for the Mac to calm down. */
+          startedAt: Date;
+        } | null> => {
+          const before: { update: BaseUpdate | null; startedAt: Date } = {
+            update: null,
+            startedAt: deps.clock.now(),
+          };
           const gate = await deps.baseUpdates.gate(batchId, signal, () =>
             runGate(batch, projectAtCheckout(project, checkout), signal, async () => {
+              before.startedAt = deps.clock.now();
               const update = await deps.baseUpdates.beforeGate(batchId, signal);
               before.update = update;
               return update.kind !== 'aborted';
             }),
           );
           if (gate === null) return null;
-          return { gate, note: gateNote(before.update ?? { kind: 'up_to_date', note: null }) };
+          return {
+            gate,
+            note: gateNote(before.update ?? { kind: 'up_to_date', note: null }),
+            startedAt: before.startedAt,
+          };
+        };
+        // A failed gate's card says so when the Mac was overloaded at any time while the gate ran.
+        const cardNote = (run: { note: string | null; startedAt: Date }): string | null => {
+          const load = deps.load?.overloadedSince(run.startedAt);
+          if (!load) return run.note;
+          return run.note === null ? overloadNote(load) : `${run.note}\n\n${overloadNote(load)}`;
         };
         const first = await gateOnce();
         if (first === null) return;
         if (first.gate.timedOut) {
-          fail(batch, shipCards.gateTimedOut(batch, deps.limits.gateTimeoutMs, first.gate.logPath));
+          fail(
+            batch,
+            shipCards.gateTimedOut(
+              batch,
+              deps.limits.gateTimeoutMs,
+              first.gate.logPath,
+              cardNote(first),
+            ),
+          );
           return;
         }
         if (first.gate.exitCode !== 0) {
           const steps = await readGateFailures(checkout, first.gate.tail);
           if (!(await outsideTheBatch(batchId, checkout, steps))) {
-            fail(batch, shipCards.gateFailed(batch, first.gate, first.note, steps));
+            fail(batch, shipCards.gateFailed(batch, first.gate, cardNote(first), steps));
             return;
           }
           // Every failing test is one the batch couldn't have caused: one more run, by itself,
@@ -523,7 +573,12 @@ export function createShipper(deps: ShipperDeps): Shipper {
           if (second.gate.timedOut) {
             fail(
               batch,
-              shipCards.gateTimedOut(batch, deps.limits.gateTimeoutMs, second.gate.logPath),
+              shipCards.gateTimedOut(
+                batch,
+                deps.limits.gateTimeoutMs,
+                second.gate.logPath,
+                cardNote(second),
+              ),
             );
             return;
           }
@@ -532,8 +587,8 @@ export function createShipper(deps: ShipperDeps): Shipper {
             fail(
               batch,
               (await outsideTheBatch(batchId, checkout, again))
-                ? shipCards.gateFailedUnrelated(batch, second.note, again)
-                : shipCards.gateFailed(batch, second.gate, second.note, again, true),
+                ? shipCards.gateFailedUnrelated(batch, cardNote(second), again)
+                : shipCards.gateFailed(batch, second.gate, cardNote(second), again, true),
             );
             return;
           }

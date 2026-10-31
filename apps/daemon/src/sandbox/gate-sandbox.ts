@@ -64,6 +64,11 @@ export interface GateRun {
   readonly tmpDir: string;
   /** The env the gate command runs with, set inside the sandbox. */
   readonly commandEnv: Readonly<Record<string, string>>;
+  /**
+   * How many lines the command line srt is given takes. srt echoes it in its debug log, project env
+   * and all, before the command starts; the gate runner drops that many lines.
+   */
+  readonly commandLines: number;
   /** True once the command has run `docker`, which no sandboxed gate can use. */
   dockerRefused(): boolean;
   /**
@@ -190,7 +195,7 @@ export function createGateSandbox(deps: GateSandboxDeps): GateSandbox {
         // sent itself (from the gate's own group or from srt) into a failing one.
         const inner = [
           "trap 'exit 143' TERM; trap 'exit 130' INT;",
-          '/usr/bin/env -u CLAUDE_CODE_TMPDIR',
+          '/usr/bin/env -u CLAUDE_CODE_TMPDIR -u SRT_DEBUG',
           ...shellAssignments(commandEnv),
           '/bin/sh -c',
           singleQuoted(input.command),
@@ -205,10 +210,13 @@ export function createGateSandbox(deps: GateSandboxDeps): GateSandbox {
         return {
           file: deps.runtime.node,
           args: [deps.runtime.cli, '--settings', settingsFile, '-c', inner],
-          env: { PATH: HOST_PATH, HOME: deps.home, CLAUDE_CODE_TMPDIR: tmpDir },
+          // SRT_DEBUG makes srt's proxy say which host it refused; the gate runner reads that line and keeps
+          // the rest of the debug log out of the evidence. The command never sees the variable.
+          env: { PATH: HOST_PATH, HOME: deps.home, CLAUDE_CODE_TMPDIR: tmpDir, SRT_DEBUG: '1' },
           cwd: checkout,
           tmpDir,
           commandEnv,
+          commandLines: inner.split('\n').length,
           dockerRefused() {
             try {
               // The gate can write its temp dir, so the marker is only looked at, never followed.

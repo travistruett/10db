@@ -48,7 +48,9 @@
         "batch.updated",
         "board_column.saved",
         "board_column.deleted",
-        "network_hosts.changed"
+        "network_hosts.changed",
+        "goal.created",
+        "goal.changed"
       ]
     },
     "entityType": {

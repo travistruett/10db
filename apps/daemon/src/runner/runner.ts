@@ -1,11 +1,15 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import {
+  ClaimKind,
   ConflictError,
   currentStep,
   EventType,
+  FIX_ATTEMPT_LIMIT,
   InboxKind,
+  parseFindings,
   PermissionChoice,
+  REVIEW_CARD_DETAIL,
   REVIEW_ROLES,
   StepRole,
   StepStatus,
@@ -22,6 +26,7 @@ import {
   type NextAction,
   type ProjectDto,
   type ProjectId,
+  type ReviewCardDetail,
   type SessionId,
   type WorkstreamId,
   type WorkstreamStep,
@@ -44,7 +49,6 @@ import {
   handoffForSession,
   insertDeviation,
   insertEvidence,
-  insertInboxItem,
   insertSession,
   insertSource,
   latestHandoffForStep,
@@ -57,6 +61,7 @@ import {
   openItemsForWorkstream,
   patchWorkstream,
   recordProfileOutcome,
+  releaseClaim,
   releaseClaims,
   setTaskStatus,
   StaleFenceError,
@@ -92,9 +97,11 @@ import {
   batchCardFields,
   checkoutOf,
   gateNote,
+  MIGRATIONS_HAZARD,
   projectAtCheckout,
   type BaseUpdate,
   type BaseUpdates,
+  type MigrationsBase,
 } from '../delivery';
 import type { StateStore } from '../events';
 import {
@@ -107,6 +114,7 @@ import type { Git } from '../git';
 import { judgeToolUse, type ProtectedPath } from '../guard';
 import {
   createPermissionBroker,
+  raiseGateHostCards,
   requestMcpApproval,
   type InboxService,
   type WaitObserver,
@@ -137,13 +145,20 @@ import {
 } from '../sessions';
 import {
   advanceSteps,
+  countSendBack,
   failStep,
   moveAfter,
   sendBackSteps,
   sendBackTarget,
   type StepEntry,
 } from '../team';
-import type { GateRequest, GateResult, GateRunner } from '../verify';
+import {
+  BlockedRun,
+  type GateRequest,
+  type GateResult,
+  type GateRunner,
+  type Hold,
+} from '../verify';
 import { findClaimed } from '../watcher';
 import type { LiveSessions } from './live-sessions';
 import { checkedCommits, raiseBuilderCheck, waitsForCheck } from './builder-check';
@@ -169,7 +184,7 @@ export interface RunnerLimits {
 
 export const DEFAULT_RUNNER_LIMITS: RunnerLimits = {
   maxRecoveryAttempts: 3,
-  maxFixAttempts: 3,
+  maxFixAttempts: FIX_ATTEMPT_LIMIT,
   gateTimeoutMs: 30 * 60_000,
   // One at a time: a gate runs a whole test suite, and several at once overload the machine.
   gateSlots: 1,
@@ -185,6 +200,11 @@ export interface RunnerOptions {
   readonly gate: GateRunner;
   /** Brings a batch's base as origin has it now into its branch before each of its gates. */
   readonly baseUpdates: BaseUpdates;
+  /**
+   * Brings a task's base into its branch before a run that holds the migrations hazard from its
+   * start; absent, it isn't.
+   */
+  readonly migrationsBase?: MigrationsBase;
   readonly clock: Clock;
   readonly logger: Logger;
   readonly dataDir: string;
@@ -206,6 +226,19 @@ export interface RunnerOptions {
   identifyProcess?(pid: number): Promise<string | null>;
   /** Runs every lane session under the lane sandbox; null (fake sessions and tests) runs none. */
   readonly laneSandbox: LaneSandbox | null;
+  /**
+   * While the Mac is overloaded no session starts: each one waits here, before anything is built or
+   * launched, and a stop or cancel ends the wait.
+   */
+  readonly hold?: Hold;
+  /**
+   * Told each lane session's temp dir while it runs and when it is gone, so the load guard can name
+   * the lane a busy process left in it belongs to.
+   */
+  readonly laneTempDirs?: {
+    set(id: WorkstreamId, dir: string): void;
+    delete(id: WorkstreamId): void;
+  };
 }
 
 /** What has to happen after the write that changed a workstream has committed. */
@@ -358,6 +391,8 @@ interface Control {
   requestHandoff: ((cause: HandoffCause, reason: string) => void) | null;
   /** Set while the gate runs; aborting it kills the gate's process group. */
   gateAbort: AbortController | null;
+  /** Set while the lane waits for an overloaded Mac to calm down before it starts a session. */
+  holdAbort: AbortController | null;
   /** Set while a session runs; ends its inbox waits so later answers go to the card. */
   endWaits: (() => void) | null;
   done: Promise<void>;
@@ -427,7 +462,15 @@ function stopRequested(ctl: { readonly stopReason: StopReason | null }): StopRea
 
 /** A gate stopped before it started, while it waited for its batch's turn. */
 function stoppedWaiting(logPath: string): GateResult {
-  return { exitCode: 130, durationMs: 0, tail: '', logPath, timedOut: false, aborted: true };
+  return {
+    exitCode: 130,
+    durationMs: 0,
+    tail: '',
+    logPath,
+    timedOut: false,
+    aborted: true,
+    blockedHosts: [],
+  };
 }
 
 /** The most of a gate's output its evidence keeps, a note on its base included. */
@@ -525,22 +568,32 @@ export function createRunner(opts: RunnerOptions): Runner {
     clearLease(ctx, id);
   }
 
-  function flagFailed(row: WorkstreamRow, reason: string): void {
+  /** The failed card; `review` is the reviewer's rejection that ended the workstream, when one did. */
+  function flagFailed(row: WorkstreamRow, reason: string, review?: ReviewCardDetail): void {
+    const batch = batchCardFields(row);
     opts.inbox.flag({
       projectId: row.projectId,
       workstreamId: row.id,
       title: `Workstream failed: ${getTask(db, row.taskId).title}`,
       body: reason,
-      ...batchCardFields(row),
+      ...(batch ? { options: batch.options } : {}),
+      ...(batch || review
+        ? { detail: { ...batch?.detail, ...(review ? { [REVIEW_CARD_DETAIL]: review } : {}) } }
+        : {}),
     });
   }
 
-  function fail(id: WorkstreamId, fence: number | null, reason: string): void {
+  function fail(
+    id: WorkstreamId,
+    fence: number | null,
+    reason: string,
+    review?: ReviewCardDetail,
+  ): void {
     const row = getWorkstreamRow(db, id);
     opts.state.write((ctx) => {
       failIn(ctx, id, fence, row, reason);
     });
-    flagFailed(row, reason);
+    flagFailed(row, reason, review);
   }
 
   /** A step entered now; its floor is the sessions this workstream has run so far. */
@@ -576,7 +629,11 @@ export function createRunner(opts: RunnerOptions): Runner {
     return { step: result.step, moved: result.escalated };
   }
 
-  /** DONE: the task is done and its claims and lease are released. */
+  /**
+   * DONE: the task is done and its claims and lease are released. No review card is raised: the only
+   * answer one could offer is "looks good", which does nothing. The builder reviews the pull request,
+   * and the Board's In review column shows the task until it merges.
+   */
   function markDone(
     ctx: WriteContext,
     id: WorkstreamId,
@@ -588,31 +645,6 @@ export function createRunner(opts: RunnerOptions): Runner {
     setTaskStatus(ctx, row.taskId, 'done');
     releaseClaims(ctx, id);
     clearLease(ctx, id);
-  }
-
-  /** DONE after a gate (or a read-only approval) and the builder gets a review card (spec §7). */
-  function completeInTx(
-    ctx: WriteContext,
-    id: WorkstreamId,
-    fence: number,
-    row: WorkstreamRow,
-    commitShas: readonly string[],
-    reason: string,
-  ): void {
-    markDone(ctx, id, fence, row, reason);
-    insertInboxItem(ctx, {
-      projectId: row.projectId,
-      kind: 'review',
-      title: `Review: ${getTask(ctx.tx, row.taskId).title}`,
-      body: `Gate passed with ${String(commitShas.length)} commit(s).`,
-      options: [{ label: 'accept', description: 'Looks good' }],
-      recommendation: null,
-      category: 'product',
-      urgency: 'low',
-      detail: { workstreamId: id, commits: [...commitShas] },
-      foldKey: null,
-      targets: [],
-    });
   }
 
   /** After a read-only step's session: the next step in this lane, DONE, a rework, or a failure. */
@@ -672,9 +704,6 @@ export function createRunner(opts: RunnerOptions): Runner {
           });
           return 'stop';
         }
-        const lastGate = listEvidence(db, id)
-          .filter((e) => e.kind === 'gate' && e.exitCode === 0)
-          .at(-1);
         opts.state.write((ctx) => {
           countFinished(ctx, step);
           patchWorkstream(ctx, id, ctl.fence, {
@@ -686,14 +715,7 @@ export function createRunner(opts: RunnerOptions): Runner {
             fence: ctl.fence,
             reason: 'steps complete',
           });
-          completeInTx(
-            ctx,
-            id,
-            ctl.fence,
-            row,
-            lastGate?.commitShas ?? [],
-            `${step.role} approved`,
-          );
+          markDone(ctx, id, ctl.fence, row, `${step.role} approved`);
         });
         return 'stop';
       }
@@ -721,10 +743,20 @@ export function createRunner(opts: RunnerOptions): Runner {
       case 'send_back': {
         const attempt = row.attempt + 1;
         if (attempt > opts.limits.maxFixAttempts) {
+          const result = step.result;
           fail(
             id,
             ctl.fence,
             `The ${step.role} step rejected the work and the retry limit (${String(opts.limits.maxFixAttempts)}) is used up`,
+            result
+              ? {
+                  role: step.role,
+                  personaName: step.personaName,
+                  at: result.at,
+                  findings: parseFindings(result.summary),
+                  summary: result.summary,
+                }
+              : undefined,
           );
           return 'stop';
         }
@@ -736,7 +768,10 @@ export function createRunner(opts: RunnerOptions): Runner {
             recordProfileOutcome(ctx, target.profileId, { firstPass: false, escalated: true });
           patchWorkstream(ctx, id, ctl.fence, {
             attempt,
-            steps: sendBackSteps(row.steps, row.stepIndex, move.to, up.step, entryFor(ctx, id)),
+            steps: countSendBack(
+              sendBackSteps(row.steps, row.stepIndex, move.to, up.step, entryFor(ctx, id)),
+              row.stepIndex,
+            ),
             stepIndex: move.to,
             nextAction: { kind: 'revise', reviewStep: row.stepIndex },
             model: up.step.model,
@@ -1031,6 +1066,20 @@ export function createRunner(opts: RunnerOptions): Runner {
       return { kind: 'stopped', reason: ctl.stopReason, providerSessionId: savedResumeId };
     // So does a move: the account the lane read before the await may not be the project's now.
     if (getProject(db, row.projectId).accountId !== ctl.accountId) return { kind: 'moved' };
+    // An overloaded Mac starts no session: wait for it, unless a stop ends the wait first.
+    if (opts.hold) {
+      const holding = new AbortController();
+      ctl.holdAbort = holding;
+      try {
+        await opts.hold.untilClear(holding.signal);
+      } finally {
+        ctl.holdAbort = null;
+      }
+      const stoppedWhileHeld = stopRequested(ctl);
+      if (stoppedWhileHeld)
+        return { kind: 'stopped', reason: stoppedWhileHeld, providerSessionId: savedResumeId };
+      if (getProject(db, row.projectId).accountId !== ctl.accountId) return { kind: 'moved' };
+    }
     const answeredItem = action.kind === 'answer' ? getInboxItem(db, action.inboxId) : null;
     const resumeId =
       action.kind === 'resume' || action.kind === 'answer' ? action.providerSessionId : null;
@@ -1145,7 +1194,9 @@ export function createRunner(opts: RunnerOptions): Runner {
       { ...projectMcp, failures: [...projectMcp.failures, ...sandboxFailures] },
       opts.laneSandbox ? [] : Object.keys(mcpServers.stdio),
     );
+    if (laneSession) opts.laneTempDirs?.set(id, laneSession.tmpDir);
     const dispose = (): void => {
+      opts.laneTempDirs?.delete(id);
       try {
         laneSession?.dispose();
       } catch (error) {
@@ -1794,7 +1845,10 @@ export function createRunner(opts: RunnerOptions): Runner {
       sendBackUncommitted(id, ctl, row, uncommitted);
       return;
     }
-    const gateCommand = project.gateCommand;
+    // A project with a changed-packages check has each step checked by it; the ship gate runs the
+    // full gate command before the push. Without a gate command the builder checks, as ever.
+    const gateCommand =
+      project.gateCommand === null ? null : (project.changedCheckCommand ?? project.gateCommand);
     if (gateCommand === null) {
       await finishWithoutGate(id, ctl, row, checkout);
       return;
@@ -1875,6 +1929,13 @@ export function createRunner(opts: RunnerOptions): Runner {
     }
     // Shutdown killed the gate: record nothing. The workstream stays VERIFYING and recovery re-runs it.
     if (result.aborted) return;
+    // A host the sandbox blocked is the builder's to allow; the card names it and the gate's evidence says so.
+    raiseGateHostCards(opts, {
+      projectId: project.id,
+      run: BlockedRun.Gate,
+      command: gateCommand,
+      hosts: result.blockedHosts,
+    });
     const head = await opts.git.head(checkout);
     const commitShas = await opts.git.commitsSince(checkout, row.baseHead ?? head);
     // A cancel that landed while git was read must not be overwritten by the verdict.
@@ -1922,7 +1983,7 @@ export function createRunner(opts: RunnerOptions): Runner {
           patchWorkstream(ctx, id, ctl.fence, {
             steps: advanceSteps(row.steps, row.stepIndex, -1, entryFor(ctx, id)),
           });
-        completeInTx(ctx, id, ctl.fence, row, commitShas, 'gate passed');
+        markDone(ctx, id, ctl.fence, row, 'gate passed');
       });
       return;
     }
@@ -1963,8 +2024,39 @@ export function createRunner(opts: RunnerOptions): Runner {
     });
   }
 
+  /**
+   * A run that holds the migrations hazard from its start (the task names it among its areas) takes
+   * its base first, as request_claim does, so a migration it generates is numbered after the base's
+   * latest. A branch that can't take its base gives the hazard back: the session runs without it, and
+   * asking for it again says why. Stopped like a gate is.
+   */
+  async function migrationsBaseFirst(id: WorkstreamId, ctl: Control): Promise<void> {
+    if (!opts.migrationsBase) return;
+    const row = getWorkstreamRow(db, id);
+    if (row.nextAction.kind === 'verify' || row.state === S.Verifying) return;
+    const claim = activeClaims(db, id).find(
+      (c) => c.kind === ClaimKind.Hazard && c.name === MIGRATIONS_HAZARD,
+    );
+    if (!claim) return;
+    const abort = new AbortController();
+    ctl.gateAbort = abort;
+    if (ctl.stopReason === 'cancelled' || ctl.stopReason === 'shutdown') abort.abort();
+    try {
+      const taken = await opts.migrationsBase.take(id, abort.signal);
+      if (taken.kind !== 'held') return;
+      opts.state.write((ctx) => releaseClaim(ctx, claim.id));
+      opts.logger.info(
+        { workstreamId: id, inboxId: taken.inboxId },
+        "migrations hazard held back: the branch can't take its base",
+      );
+    } finally {
+      ctl.gateAbort = null;
+    }
+  }
+
   async function run(id: WorkstreamId, ctl: Control): Promise<void> {
     try {
+      await migrationsBaseFirst(id, ctl);
       for (;;) {
         const row = getWorkstreamRow(db, id);
         const verifying = row.nextAction.kind === 'verify' || row.state === S.Verifying;
@@ -2075,6 +2167,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         handle: null,
         requestHandoff: null,
         gateAbort: null,
+        holdAbort: null,
         endWaits: null,
         done: Promise.resolve(),
       };
@@ -2095,6 +2188,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       ctl.stopReason = reason;
       // A pause only stops sessions; a running gate doesn't use the provider, so let it finish.
       if (reason !== 'paused') ctl.gateAbort?.abort();
+      ctl.holdAbort?.abort();
       // Waits end before the process does, so an answer during a slow exit reaches the card.
       ctl.endWaits?.();
       await ctl.handle?.stop();

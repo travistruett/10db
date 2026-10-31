@@ -34,6 +34,7 @@ import {
   ProjectInput,
   ProjectPatch,
   PROTOCOL_VERSION,
+  RetryInput,
   RoutingRulesInput,
   SystemCheckDto,
   TaskId,
@@ -147,7 +148,7 @@ export function createApp(deps: ApiDeps) {
     .post(
       '/projects',
       validator('json', (value): ProjectInput => ProjectInput.parse(value)),
-      (c) => c.json(deps.services.createProject(c.req.valid('json')), 201),
+      async (c) => c.json(await deps.services.createProject(c.req.valid('json')), 201),
     )
     .get('/projects/:projectId/tasks', (c) =>
       c.json(deps.services.listTasks(ProjectId.parse(c.req.param('projectId')))),
@@ -220,6 +221,9 @@ export function createApp(deps: ApiDeps) {
         );
         return c.json(host, created ? 201 : 200);
       },
+    )
+    .post('/projects/:projectId/network-hosts/scan', async (c) =>
+      c.json(await deps.services.scanNetworkHosts(ProjectId.parse(c.req.param('projectId')))),
     )
     .delete('/projects/:projectId/network-hosts/:host', (c) =>
       c.json(
@@ -423,10 +427,18 @@ export function createApp(deps: ApiDeps) {
       if (!deps.taskRemoval) return c.json({ error: 'not_implemented' }, 501);
       return c.json(deps.taskRemoval.removeTask(taskId));
     })
+    .post('/tasks/:taskId/hold', (c) =>
+      c.json(deps.services.holdTask(TaskId.parse(c.req.param('taskId')))),
+    )
     .post('/tasks/:taskId/close', (c) => {
       const taskId = TaskId.parse(c.req.param('taskId'));
       if (!deps.taskRemoval) return c.json({ error: 'not_implemented' }, 501);
       return c.json(deps.taskRemoval.closeTask(taskId));
+    })
+    .post('/tasks/:taskId/reopen', (c) => {
+      const taskId = TaskId.parse(c.req.param('taskId'));
+      if (!deps.taskRemoval) return c.json({ error: 'not_implemented' }, 501);
+      return c.json(deps.taskRemoval.reopenTask(taskId));
     })
     .post('/tasks/:taskId/start', (c) => {
       const started = deps.services.startTask(TaskId.parse(c.req.param('taskId')));
@@ -438,6 +450,9 @@ export function createApp(deps: ApiDeps) {
           return c.json(started.batch, 202);
       }
     })
+    .post('/tasks/:taskId/run-next', (c) =>
+      c.json(deps.services.runNext(TaskId.parse(c.req.param('taskId')))),
+    )
     .get(
       '/workstreams',
       validator('query', (query): { active?: string } =>
@@ -449,8 +464,19 @@ export function createApp(deps: ApiDeps) {
     .post('/workstreams/:id/cancel', async (c) =>
       c.json(await deps.services.cancelWorkstream(WorkstreamId.parse(c.req.param('id')))),
     )
-    .post('/workstreams/:id/retry', (c) =>
-      c.json(deps.services.retryWorkstream(WorkstreamId.parse(c.req.param('id')))),
+    .post(
+      '/workstreams/:id/retry',
+      // No body is a retry with no note: the validator hands over {} when the request is not JSON.
+      validator('json', (value): RetryInput => RetryInput.parse(value)),
+      (c) => {
+        const { note } = c.req.valid('json');
+        const id = WorkstreamId.parse(c.req.param('id'));
+        return c.json(
+          note === undefined
+            ? deps.services.retryWorkstream(id)
+            : deps.services.retryWorkstream(id, note),
+        );
+      },
     )
     .get('/workstreams/:id/changes', async (c) =>
       c.json(await deps.services.workstreamChanges(WorkstreamId.parse(c.req.param('id')))),

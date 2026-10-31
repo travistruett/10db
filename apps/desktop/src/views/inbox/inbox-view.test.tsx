@@ -65,6 +65,76 @@ const corners = inboxItemDto({
   ],
 });
 
+const FULL_REVIEW =
+  '1. BLOCKING apps/daemon/src/runner/runner.ts:673 the card hides the findings.\n   Trigger: the retry limit.\n2. NOTE the empty state has no test.';
+const rejectedCard = inboxItemDto({
+  kind: 'flag',
+  title: 'Workstream failed: Track each shipped pull request',
+  body: 'The review step rejected the work and the retry limit (3) is used up',
+  options: [
+    { label: 'Retry', description: 'Run this workstream again in its batch' },
+    { label: 'Ship anyway', description: 'Ship the batch without it' },
+    { label: 'Later', description: 'Decide later' },
+  ],
+  detail: {
+    reviewRejection: {
+      role: 'review',
+      personaName: 'Reviewer',
+      at: '2026-10-29T12:00:00.000Z',
+      findings: [
+        {
+          severity: 'BLOCKING',
+          location: 'apps/daemon/src/runner/runner.ts:673',
+          text: 'BLOCKING apps/daemon/src/runner/runner.ts:673 the card hides the findings.',
+        },
+        { severity: 'NOTE', location: null, text: 'NOTE the empty state has no test.' },
+      ],
+      summary: FULL_REVIEW,
+    },
+  },
+});
+
+describe('InboxView review findings', () => {
+  it('shows each finding with its severity and file:line on a failed card', async () => {
+    inbox([rejectedCard]);
+    renderApp('/inbox');
+    await screen.findByText(rejectedCard.title);
+    const card = selectedCard();
+    expect(within(card).getByText('BLOCKING')).toBeTruthy();
+    expect(within(card).getByText('apps/daemon/src/runner/runner.ts:673')).toBeTruthy();
+    expect(within(card).getByText('NOTE')).toBeTruthy();
+  });
+
+  it('keeps the full review one click away', async () => {
+    inbox([rejectedCard]);
+    renderApp('/inbox');
+    await screen.findByText(rejectedCard.title);
+    const card = selectedCard();
+    expect(within(card).queryByText(/Trigger: the retry limit\./)).toBeNull();
+    fireEvent.click(within(card).getByRole('button', { name: 'Show the full review' }));
+    expect(
+      within(card).getByText((text) => text.includes('Trigger: the retry limit.')),
+    ).toBeTruthy();
+  });
+
+  it('sends the note with Retry', async () => {
+    const { answers } = inbox([rejectedCard]);
+    renderApp('/inbox');
+    await screen.findByText(rejectedCard.title);
+    const card = selectedCard();
+    fireEvent.click(within(card).getByRole('radio', { name: /Retry/ }));
+    fireEvent.change(within(card).getByLabelText('Note for the agent (optional)'), {
+      target: { value: 'Reuse the card component.' },
+    });
+    fireEvent.click(within(card).getByRole('button', { name: /Send answer/ }));
+    await waitFor(() => {
+      expect(answers).toEqual([
+        { id: rejectedCard.id, body: { choice: 'Retry', note: 'Reuse the card component.' } },
+      ]);
+    });
+  });
+});
+
 describe('InboxView', () => {
   it('says so when the inbox is empty', async () => {
     inbox([]);

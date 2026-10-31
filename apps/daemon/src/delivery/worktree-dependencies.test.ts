@@ -159,6 +159,39 @@ describe('refreshing a worktree’s dependencies', () => {
     expect(result.tail).toContain('registry 403');
   });
 
+  it('reports the hosts the sandbox blocked a failed install from', async () => {
+    fakePnpm();
+    withLockfileAndModules();
+    // The gate runner reads the hosts from the sandbox's stderr; this one reports them as it would.
+    const blocked: GateRunner = {
+      run: (request) =>
+        Promise.resolve({
+          exitCode: 1,
+          durationMs: 1,
+          tail: 'ERR_PNPM_META_FETCH_FAIL',
+          logPath: request.logPath,
+          timedOut: false,
+          aborted: false,
+          blockedHosts: ['registry.npmjs.org'],
+        }),
+    };
+    const deps = createWorktreeDependencies({
+      gate: blocked,
+      clock: new ManualClock(),
+      dataDir: join(tmp.path, 'data'),
+      sessionEnv: () => ({ PATH: `${bin}:/usr/bin:/bin` }),
+      resolvePnpm: () => Promise.resolve(join(bin, 'pnpm')),
+      rules: () => [],
+      checkouts: () => [],
+      timeoutMs: 20_000,
+    });
+    expect(await refresh(deps)).toMatchObject({
+      kind: 'failed',
+      exitCode: 1,
+      blockedHosts: ['registry.npmjs.org'],
+    });
+  });
+
   it('reports an install that outlives its limit as timed out', async () => {
     withLockfileAndModules();
     writeFileSync(join(bin, 'pnpm'), '#!/bin/sh\nsleep 30\n');
@@ -197,6 +230,7 @@ describe('refreshing a worktree’s dependencies', () => {
     expect(result.kind).toBe('failed');
     if (result.kind !== 'failed') return;
     expect(result.tail).toContain('No trustworthy pnpm');
+    expect(result.blockedHosts).toEqual([]);
     expect(existsSync(calls)).toBe(false);
   });
 

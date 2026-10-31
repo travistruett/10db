@@ -159,6 +159,28 @@ export function releaseClaims(ctx: WriteContext, workstreamId: WorkstreamId): nu
   return held.length;
 }
 
+/** Releases the one claim `claimId`, leaving its workstream's others; false when it was not active. */
+export function releaseClaim(ctx: WriteContext, claimId: ClaimRow['id']): boolean {
+  const claim = ctx.tx
+    .select()
+    .from(schema.claims)
+    .where(and(eq(schema.claims.id, claimId), isNull(schema.claims.releasedAt)))
+    .get();
+  if (!claim) return false;
+  ctx.tx
+    .update(schema.claims)
+    .set({ releasedAt: ctx.now, updatedAt: ctx.now })
+    .where(eq(schema.claims.id, claim.id))
+    .run();
+  ctx.emit({
+    type: EventType.ClaimReleased,
+    entityType: 'claim',
+    entityId: claim.id,
+    data: { workstreamId: claim.workstreamId, kind: claim.kind, name: claim.name },
+  });
+  return true;
+}
+
 export function activeClaims(db: DbReader, workstreamId: WorkstreamId): ClaimRow[] {
   return db
     .select()

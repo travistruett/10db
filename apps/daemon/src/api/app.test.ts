@@ -38,6 +38,8 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
     listTasks: () => [],
     createTask: none,
     startTask: none,
+    holdTask: none,
+    runNext: none,
     listFlows: () => [],
     listWorkstreams: () => [],
     cancelWorkstream: none,
@@ -57,6 +59,7 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
     listNetworkHosts: none,
     allowNetworkHost: none,
     removeNetworkHost: none,
+    scanNetworkHosts: none,
     listPersonas: track('listPersonas'),
     createPersona: track('createPersona'),
     patchPersona: track('patchPersona'),
@@ -351,6 +354,35 @@ describe('API', () => {
         })
       ).status,
     ).toBe(409);
+  });
+
+  it.each([
+    { name: 'a note', body: JSON.stringify({ note: 'Reuse the card.' }), note: 'Reuse the card.' },
+    { name: 'a body with no note', body: JSON.stringify({}), note: undefined },
+    { name: 'no body', body: undefined, note: undefined },
+  ])('hands a retry $name to the service', async ({ body, note }) => {
+    const seen: (string | undefined)[] = [];
+    const services = stubServices({
+      retryWorkstream: (_id, noted) => {
+        seen.push(noted);
+        throw new ConflictError('not failed');
+      },
+    });
+    await app(services).request(`/workstreams/${mintId('Workstream')}/retry`, {
+      method: 'POST',
+      ...(body === undefined ? auth : json),
+      ...(body === undefined ? {} : { body }),
+    });
+    expect(seen).toEqual([note]);
+  });
+
+  it('refuses a retry note over 4000 characters', async () => {
+    const res = await app(stubServices({})).request(`/workstreams/${mintId('Workstream')}/retry`, {
+      method: 'POST',
+      ...json,
+      body: JSON.stringify({ note: 'x'.repeat(4001) }),
+    });
+    expect(res.status).toBe(400);
   });
 
   it('answers 409 with the task named when a patch removes an area a running task holds', async () => {
@@ -774,6 +806,7 @@ describe('batch routes', () => {
     pausedUntil: null,
     failureReason: null,
     lastActivityAt: null,
+    runNextAt: null,
     createdAt: batch.createdAt,
     updatedAt: batch.updatedAt,
   });
@@ -797,6 +830,25 @@ describe('batch routes', () => {
     );
     expect(res.status).toBe(status);
     expect(await res.json()).toEqual(body);
+  });
+
+  it('answers Run Next with the workstream and what it waits on, and refuses a bad task id', async () => {
+    const result = { workstream, waitingOn: ['Fix the gate'] };
+    const services = stubServices({ runNext: () => result });
+    const res = await app(services).request(`/tasks/${mintId('Task')}/run-next`, post(''));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual(result);
+    expect((await app(services).request('/tasks/not-a-task/run-next', post(''))).status).toBe(400);
+  });
+
+  it("answers Run Next on a task that isn't queued with 409", async () => {
+    const services = stubServices({
+      runNext: () => {
+        throw new ConflictError("Task a isn't waiting for a lane");
+      },
+    });
+    const res = await app(services).request(`/tasks/${mintId('Task')}/run-next`, post(''));
+    expect(res.status).toBe(409);
   });
 
   it.each([

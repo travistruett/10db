@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^gcr_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "goalId": {
+      "type": "string",
+      "pattern": "^gol_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "text": {
+      "type": "string"
+    },
+    "check": {
+      "type": "string",
+      "enum": [
+        "task",
+        "merged",
+        "command",
+        "accept"
+      ]
+    },
+    "taskId": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^tsk_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "command": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "commandApproved": {
+      "type": "boolean"
+    },
+    "personId": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^psn_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "unproven",
+        "proven"
+      ]
+    },
+    "proof": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "provenAt": {
+      "anyOf": [
+        {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "provenBy": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "id",
+    "goalId",
+    "text",
+    "check",
+    "taskId",
+    "command",
+    "commandApproved",
+    "personId",
+    "state",
+    "proof",
+    "provenAt",
+    "provenBy"
+  ]
+}

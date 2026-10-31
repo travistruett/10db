@@ -215,6 +215,46 @@ describe('shipping', () => {
     expect(card.body).toMatch(/^origin\/main has 1 commit this branch doesn't\./);
   });
 
+  it('raises one card per host the sandbox blocked the shipping gate from, naming the command', async () => {
+    // The sandbox's runner reports the hosts its proxy refused; this one reports them for any failure.
+    h = createDeliveryHarness(
+      { gateCommand: 'cargo test; exit 101' },
+      {
+        shipGate: (gate) => ({
+          run: async (request) => {
+            const result = await gate.run(request);
+            return { ...result, blockedHosts: ['index.crates.io', 'static.crates.io'] };
+          },
+        }),
+      },
+    );
+    const { batch } = await openBatch('Add greetings', 'Alpha');
+    h.commit('src/api/alpha.txt');
+
+    const failed = await finishAll(batch);
+
+    expect(failed.state).toBe('FAILED');
+    const hostCards = h.cards().filter((c) => c.title.startsWith('Allow network access to'));
+    expect(hostCards.map((c) => c.title)).toEqual([
+      'Allow network access to index.crates.io?',
+      'Allow network access to static.crates.io?',
+    ]);
+    expect(hostCards[0]?.body).toContain('cargo test; exit 101');
+    expect(hostCards[0]?.options.map((o) => o.label)).toEqual(['Allow for the project', 'Not now']);
+  });
+
+  it("runs the project's full gate before the push, never its changed-packages check", async () => {
+    h = createDeliveryHarness({ gateCommand: 'false', changedCheckCommand: 'true' });
+    const { batch } = await openBatch('Add greetings', 'Alpha');
+    h.commit('src/api/alpha.txt');
+    const failed = await finishAll(batch);
+    expect(failed.state).toBe('FAILED');
+    expect(onOrigin(batch.branch)).toBeNull();
+    expect(batchLines(batch.id).find((line) => line['msg'] === 'gate started')).toMatchObject({
+      command: 'false',
+    });
+  });
+
   it('ships a batch without a gate step when the project has none', async () => {
     h = createDeliveryHarness({ gateCommand: null });
     const { batch } = await openBatch('Add greetings', 'Alpha');

@@ -96,6 +96,22 @@ describe('projects', () => {
     expect(listProjects(store.db).map((p) => p.gateCommand)).toEqual([null, null]);
   });
 
+  it('has no changed-packages check unless it was given one, and keeps a patched one', () => {
+    const project = seedProject(store);
+    expect(getProject(store.db, project.id).changedCheckCommand).toBeNull();
+    store.write((ctx) =>
+      patchProject(ctx, project.id, { changedCheckCommand: 'make check-changed' }),
+    );
+    expect(getProject(store.db, project.id).changedCheckCommand).toBe('make check-changed');
+    expect(getProject(store.db, project.id).gateCommand).toBe('true');
+    store.write((ctx) => patchProject(ctx, project.id, { changedCheckCommand: null }));
+    expect(getProject(store.db, project.id).changedCheckCommand).toBeNull();
+    expect(
+      seedProject(store, { repoPath: '/tmp/changed', changedCheckCommand: 'make check-changed' })
+        .changedCheckCommand,
+    ).toBe('make check-changed');
+  });
+
   it('has no extra allowed commands unless it was given some', () => {
     const project = seedProject(store);
     expect(getProject(store.db, project.id).allowedCommands).toEqual([]);
@@ -351,9 +367,107 @@ describe('deriveBoardStatus', () => {
       BoardStatus.Done,
     ],
     [
-      'done in a batch whose pull request is open',
+      'done in a shipped batch with no pull request',
       { taskStatus: 'done', depsDone: true, workstreamState: 'DONE', batchState: 'SHIPPED' },
       BoardStatus.Done,
+    ],
+    [
+      'done in a batch whose pull request has not been read yet',
+      {
+        taskStatus: 'done',
+        depsDone: true,
+        workstreamState: 'DONE',
+        batchState: 'SHIPPED',
+        pullRequest: { url: 'https://github.com/o/r/pull/1', state: null },
+      },
+      BoardStatus.InReview,
+    ],
+    [
+      'done in a batch whose pull request is open',
+      {
+        taskStatus: 'done',
+        depsDone: true,
+        workstreamState: 'DONE',
+        batchState: 'SHIPPED',
+        pullRequest: { url: 'https://github.com/o/r/pull/1', state: 'open' },
+      },
+      BoardStatus.InReview,
+    ],
+    [
+      'done in a batch whose pull request status is unknown',
+      {
+        taskStatus: 'done',
+        depsDone: true,
+        workstreamState: 'DONE',
+        batchState: 'SHIPPED',
+        pullRequest: { url: 'https://github.com/o/r/pull/1', state: 'unknown' },
+      },
+      BoardStatus.InReview,
+    ],
+    [
+      'done in a batch whose pull request merged',
+      {
+        taskStatus: 'done',
+        depsDone: true,
+        workstreamState: 'DONE',
+        batchState: 'SHIPPED',
+        pullRequest: { url: 'https://github.com/o/r/pull/1', state: 'merged' },
+      },
+      BoardStatus.Done,
+    ],
+    [
+      'failed but shipped anyway, pull request open',
+      {
+        taskStatus: 'open',
+        depsDone: true,
+        workstreamState: 'FAILED',
+        batchState: 'SHIPPED',
+        pullRequest: { url: 'https://github.com/o/r/pull/1', state: 'open' },
+      },
+      BoardStatus.InReview,
+    ],
+    [
+      'failed but shipped anyway, pull request merged',
+      {
+        taskStatus: 'open',
+        depsDone: true,
+        workstreamState: 'FAILED',
+        batchState: 'SHIPPED',
+        pullRequest: { url: 'https://github.com/o/r/pull/1', state: 'merged' },
+      },
+      BoardStatus.Done,
+    ],
+    [
+      'failed but shipped anyway, pull request closed',
+      {
+        taskStatus: 'open',
+        depsDone: true,
+        workstreamState: 'FAILED',
+        batchState: 'SHIPPED',
+        pullRequest: { url: 'https://github.com/o/r/pull/1', state: 'closed' },
+      },
+      BoardStatus.Blocked,
+    ],
+    [
+      'failed in a shipped batch with no pull request',
+      {
+        taskStatus: 'open',
+        depsDone: true,
+        workstreamState: 'FAILED',
+        batchState: 'SHIPPED',
+      },
+      BoardStatus.Blocked,
+    ],
+    [
+      'done in a batch whose pull request closed without merging',
+      {
+        taskStatus: 'done',
+        depsDone: true,
+        workstreamState: 'DONE',
+        batchState: 'SHIPPED',
+        pullRequest: { url: 'https://github.com/o/r/pull/1', state: 'closed' },
+      },
+      BoardStatus.Blocked,
     ],
     [
       'done in a batch that closed without a pull request',

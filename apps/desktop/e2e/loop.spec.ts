@@ -1,7 +1,11 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
+import { z } from 'zod';
 import { E2E_REPO, E2E_TOKEN } from './paths';
 import { daemonUrl } from './daemon-url';
+
+const Runs = z.array(z.object({ id: z.string(), taskTitle: z.string() }));
+const Changes = z.object({ commits: z.array(z.string()) });
 
 const TASK = 'Write the greeting';
 const OTHER = 'Tidy the readme';
@@ -176,6 +180,17 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await expect(factoryRow.getByText('Done', { exact: true })).toBeVisible();
   await expectAccessible(page, 'factory, done, dark');
 
+  // The MCP commit really landed: the finished run's changes hold the one commit it made.
+  const auth = { Authorization: `Bearer ${E2E_TOKEN}` };
+  const runs = await request.get(`${daemonUrl}/workstreams?active=false`, { headers: auth });
+  const run = Runs.parse(await runs.json()).find((w) => w.taskTitle === TASK);
+  expect(run).toBeDefined();
+  const changes = await request.get(`${daemonUrl}/workstreams/${run?.id ?? ''}/changes`, {
+    headers: auth,
+  });
+  expect(changes.ok()).toBe(true);
+  expect(Changes.parse(await changes.json()).commits).toHaveLength(1);
+
   await open(page, 'Board');
   await expect(
     page.getByRole('list', { name: 'Done tasks' }).getByRole('listitem', { name: TASK }),
@@ -188,9 +203,8 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
     page.getByRole('list', { name: 'Done tasks' }).getByRole('listitem', { name: TASK }),
   ).toBeVisible();
   await open(page, 'Inbox');
-  await expect(page.getByText(`Review: ${TASK}`)).toBeVisible();
-  // The MCP commit really landed: the runner counts the commits it recorded before the gate.
-  await expect(page.getByText('Gate passed with 1 commit(s).')).toBeVisible();
+  // A passing gate raises no card: the only answer it could offer was one that closed it.
+  await expect(page.getByText(`Review: ${TASK}`)).toHaveCount(0);
   await expect(page.getByText(QUESTION)).toHaveCount(0);
 
   // A locked card's reason is reachable from the keyboard, not only on hover.

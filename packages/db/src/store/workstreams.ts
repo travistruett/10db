@@ -24,7 +24,7 @@ import * as schema from '../schema';
 import { getBoardColumn } from './board-columns';
 import { getProject } from './projects';
 import type { DbReader, WriteContext } from './store';
-import { getTask } from './tasks';
+import { getTask, mergedDespiteFailure } from './tasks';
 
 export class StaleFenceError extends Error {
   override readonly name = 'StaleFenceError';
@@ -46,6 +46,7 @@ export interface WorkstreamPatch {
   readonly pausedUntil?: string | null;
   readonly failureReason?: string | null;
   readonly lastActivityAt?: string | null;
+  readonly runNextAt?: string | null;
   readonly baseHead?: string;
   readonly branch?: string;
   readonly gatePid?: number | null;
@@ -94,6 +95,7 @@ function toDto(db: DbReader, row: WorkstreamRow): WorkstreamDto {
     pausedUntil: row.pausedUntil,
     failureReason: row.failureReason,
     lastActivityAt: row.lastActivityAt,
+    runNextAt: row.runNextAt,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -191,6 +193,7 @@ export function insertWorkstream(
     pausedUntil: null,
     failureReason: null,
     lastActivityAt: null,
+    runNextAt: null,
     createdAt: ctx.now,
     updatedAt: ctx.now,
   };
@@ -202,6 +205,17 @@ export function insertWorkstream(
     data: { taskId, projectId: project.id, batchId: opts.batchId ?? null },
   });
   return toDto(ctx.tx, row);
+}
+
+/** The task's newest workstream, whatever its state; undefined for a task that never started. */
+export function latestWorkstreamOf(db: DbReader, taskId: TaskId): WorkstreamRow | undefined {
+  return db
+    .select()
+    .from(schema.workstreams)
+    .where(eq(schema.workstreams.taskId, taskId))
+    .orderBy(desc(schema.workstreams.createdAt), desc(schema.workstreams.id))
+    .limit(1)
+    .get();
 }
 
 /** The task's most recent DONE workstream: where its code was finished, and in which batch. */
@@ -250,6 +264,47 @@ export function transitionWorkstream(
     data: { from: row.state, to: opts.to, reason: opts.reason ?? null },
   });
   return getWorkstream(ctx.tx, id);
+}
+
+/**
+ * Puts the task's queued workstream first in line for the next free lane, ahead of work the
+ * builder pressed Run Next on earlier. Answers the titles of the dependencies still open: the
+ * workstream runs once they finish. Throws ConflictError for a task whose latest workstream isn't
+ * waiting for a lane.
+ */
+export function runNext(
+  ctx: WriteContext,
+  taskId: TaskId,
+): { readonly workstream: WorkstreamDto; readonly waitingOn: string[] } {
+  const task = getTask(ctx.tx, taskId);
+  const latest = ctx.tx
+    .select()
+    .from(schema.workstreams)
+    .where(eq(schema.workstreams.taskId, taskId))
+    .orderBy(desc(schema.workstreams.createdAt), desc(schema.workstreams.id))
+    .limit(1)
+    .get();
+  if (latest?.state !== WorkstreamState.Queued)
+    throw new ConflictError(`Task ${task.title} isn't waiting for a lane`);
+  ctx.tx
+    .update(schema.workstreams)
+    .set({ runNextAt: ctx.now, updatedAt: ctx.now })
+    .where(eq(schema.workstreams.id, latest.id))
+    .run();
+  ctx.emit({
+    type: EventType.WorkstreamChanged,
+    entityType: 'workstream',
+    entityId: latest.id,
+    data: { from: latest.state, to: latest.state, reason: 'run next' },
+  });
+  const waitingOn = task.dependsOn
+    .map((id) => getTask(ctx.tx, id))
+    .filter(
+      (dependency) =>
+        dependency.status !== TaskStatus.Done && !mergedDespiteFailure(ctx.tx, dependency.id),
+    )
+    .map((dependency) => dependency.title);
+  return { workstream: getWorkstream(ctx.tx, latest.id), waitingOn };
 }
 
 /** Frees every workstream of a batch that is about to be deleted. */

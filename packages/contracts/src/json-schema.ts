@@ -42,11 +42,20 @@ import {
   FolderInspection,
   FolderInspectResult,
 } from './folders';
+import {
+  GoalAdoptError,
+  GoalAdoptInput,
+  GoalBrief,
+  GoalCriterionDto,
+  GoalDigestDto,
+  GoalDto,
+} from './goals';
 import { HandoffInput } from './handoff';
 import { HealthResponse } from './health';
 import { McpToolInputs, McpToolName, McpToolOutputs } from './mcp-tools';
 import { ModelProfileDto, ModelProfilePatch } from './model-profiles';
 import { PickerProposalDto } from './picker';
+import { RunNextResult } from './run-next';
 import { StepPlanDto } from './steps';
 import { WorkstreamChangesDto } from './workstream-changes';
 import {
@@ -120,6 +129,7 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'board-column-input': BoardColumnInput,
   'board-column-patch': BoardColumnPatch,
   'task-move': TaskMove,
+  'run-next-result': RunNextResult,
   'flow-dto': FlowDto,
   'flow-input': FlowInput,
   'flow-patch': FlowPatch,
@@ -142,6 +152,12 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'team-dto': TeamDto,
   'team-input': TeamInput,
   'workstream-changes-dto': WorkstreamChangesDto,
+  'goal-adopt-error': GoalAdoptError,
+  'goal-adopt-input': GoalAdoptInput,
+  'goal-brief': GoalBrief,
+  'goal-criterion-dto': GoalCriterionDto,
+  'goal-digest-dto': GoalDigestDto,
+  'goal-dto': GoalDto,
   ...mcpSchemas,
   ...builderMcpSchemas,
 };
