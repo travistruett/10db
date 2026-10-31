@@ -14,7 +14,7 @@ import { installedLockfile, recordInstall } from './installed-lockfile';
 import { journalDirs, takenNumbers, type TakenNumber } from './migration-numbers';
 import { startRef } from './start-refs';
 import { PNPM_LOCKFILE, raiseInstallHostCards } from './worktree-dependencies';
-import { GENERATED_DIRS } from './worktree-generated';
+import { generatedIn } from './worktree-generated';
 
 /** What happened to a batch's branch before its gate (`decisions/2026-10-29-gate-with-base.md`). */
 export type BaseUpdate =
@@ -123,9 +123,48 @@ const JOURNAL_PATH = 'meta/_journal.json';
 /** A journal past this is not one drizzle-kit wrote for a project's migrations: it is not read. */
 const JOURNAL_MAX_BYTES = 1024 * 1024;
 
-/** What the install before a gate came to: a note to add, or a stop. */
+/** What the install before a gate came to: whether the packages match the lockfile, a note to add, or a stop. */
 type Installed =
-  { readonly kind: 'done'; readonly note: string | null } | { readonly kind: 'aborted' };
+  | { readonly kind: 'done'; readonly ok: boolean; readonly note: string | null }
+  | { readonly kind: 'aborted' };
+
+/** A merge that settled conflicts by itself. */
+type SettledMerge = Extract<BranchMerge, { readonly kind: 'merged' }>;
+
+/** Where merging left the branch, and the merge whose generated directories wait for the install. */
+interface Merging {
+  readonly update: BaseUpdate;
+  readonly regenerate: SettledMerge | null;
+}
+
+/** What kept a merge's generated directories from being regenerated. */
+interface Unregenerated {
+  readonly why: string;
+  readonly logPath: string | null;
+  /** 10db removed what a failed run wrote there. */
+  readonly restored: boolean;
+}
+
+type Regenerated =
+  | { readonly kind: 'done'; readonly head: string; readonly problem: Unregenerated | null }
+  | { readonly kind: 'aborted' };
+
+/**
+ * Why a generated directory's conflict stays one when a task asks for the migrations hazard: its
+ * session is working in the worktree, and its generators would read its uncommitted sources.
+ */
+const NOT_WHILE_WORKING =
+  "it is generated, and 10db regenerates it only at the batch's gate, not while a task's session works in the worktree";
+
+/**
+ * A stop between a merge and its regeneration: the next gate finds the branch holding the base and
+ * regenerates nothing, so the card is all that says so.
+ */
+const STOPPED: Unregenerated = {
+  why: '10db stopped before it regenerated them',
+  logPath: null,
+  restored: false,
+};
 
 export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
   const db = ctx.state.db;
@@ -137,6 +176,9 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     );
     return { kind: 'not_merged', note };
   }
+
+  /** Where merging left the branch, with nothing to regenerate. */
+  const alone = (update: BaseUpdate): Merging => ({ update, regenerate: null });
 
   /** Raises or withdraws a card without letting the inbox stop the gate. */
   function tell(batch: BatchDto, act: () => void): void {
@@ -230,25 +272,10 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     };
   }
 
-  /**
-   * What a merge that settled conflicts leaves to do. The generated directories hold the base's
-   * version, so their generators run in the worktree and the files they change are committed on top
-   * of the merge; what the branch had there that the base lacks must come back out of them. Never
-   * throws. Resolves with the branch's head and the note to add, or with a stop.
-   */
-  async function settled(
-    batch: BatchDto,
-    project: ProjectDto,
-    branch: string,
-    path: string,
-    merged: Extract<BranchMerge, { readonly kind: 'merged' }>,
-    signal: AbortSignal,
-  ): Promise<
-    { readonly head: string; readonly note: string | null } | { readonly kind: 'aborted' }
-  > {
+  /** What the gate's note says about the conflicts a merge settled; null when it settled none. */
+  function settledNote(batch: BatchDto, merged: SettledMerge): string | null {
     const resolved = merged.resolved ?? [];
-    if (resolved.length === 0) return { head: merged.head, note: null };
-    const origin = `origin/${batch.baseBranch}`;
+    if (resolved.length === 0) return null;
     ctx.logger.info(
       { batchId: batch.id, base: merged.from, files: resolved.map((r) => r.path) },
       'base conflicts settled',
@@ -259,72 +286,174 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
           `${r.path} (${r.how === 'regenerated' ? 'regenerated from its sources' : "kept both sides' added lines"})`,
       )
       .join(', ');
-    const settledNote = `10db merged ${origin} into this branch and settled its conflicts with it: ${said}. The merge commit lists them.`;
-    const regenerate = merged.regenerate ?? [];
-    if (regenerate.length === 0) return { head: merged.head, note: settledNote };
-    const dirs = regenerate.map((r) => r.dir);
-    // What went wrong, if anything: the card says it, and so does the gate's note.
-    let problem: { readonly why: string; readonly log: string | null } | null = null;
-    let head = merged.head;
-    try {
-      const generated = await ctx.generators.regenerate({ batch, project, path, dirs, signal });
-      if (generated.kind === 'aborted') return { kind: 'aborted' };
-      if (generated.kind === 'failed') {
-        const how = generated.timedOut ? 'timed out' : `exit ${String(generated.exitCode)}`;
-        problem = { why: `regenerating them failed (${how})`, log: generated.logPath };
-      } else {
-        const changed = (await ctx.git.changedPaths(path)).filter((file) =>
-          dirs.some((dir) => file.startsWith(dir)),
-        );
-        if (changed.length > 0) {
-          await ctx.git.commit({
-            repo: path,
-            paths: changed,
-            message: `Regenerate ${dirs.join(', ')} after merging ${origin}`,
-            opId: `regenerate-${merged.head}`,
-            branch,
-          });
-          head = await ctx.git.head(path);
-        }
-        // A migration the branch made that the generator didn't make again is lost from the branch's
-        // tree: a hand-written one, or one the sources no longer produce.
-        const made = new Set<string>();
-        for (const file of changed.filter((f) => f.endsWith('.sql'))) {
-          const oid = await ctx.git.blobAt(path, 'HEAD', file);
-          if (oid !== null) made.add(oid);
-        }
-        const missing: string[] = [];
-        for (const file of regenerate.flatMap((r) => r.dropped).filter((f) => f.endsWith('.sql'))) {
-          const was = await ctx.git.blobAt(path, `${merged.head}^1`, file);
-          const is = await ctx.git.blobAt(path, 'HEAD', file);
-          if (was !== null && was !== is && !made.has(was)) missing.push(file);
-        }
-        if (missing.length > 0)
-          problem = {
-            why: `${named(missing)} from the batch's branch ${missing.length === 1 ? 'is' : 'are'} gone from it, and regenerating did not make ${missing.length === 1 ? 'it' : 'them'} again`,
-            log: generated.logPath,
-          };
-      }
-    } catch (error) {
-      if (signal.aborted) return { kind: 'aborted' };
-      problem = { why: `10db couldn't run the generators (${why(error)})`, log: null };
+    return `10db merged origin/${batch.baseBranch} into this branch and settled its conflicts with it: ${said}. The merge commit lists them.`;
+  }
+
+  /**
+   * Runs the generators of the directories `merged` took from the base and commits what they change
+   * there on top of the merge; what the branch had there that the base lacks must come back out of
+   * them. The worktree must be clean first: the generators read its sources, and 10db commits only
+   * what they make. A failed run's files are removed again.
+   */
+  async function generate(
+    batch: BatchDto,
+    project: ProjectDto,
+    branch: string,
+    path: string,
+    merged: SettledMerge,
+    signal: AbortSignal,
+  ): Promise<Regenerated> {
+    const regenerating = merged.regenerate ?? [];
+    const dirs = regenerating.map((r) => r.dir);
+    const unchanged = (problem: Unregenerated): Regenerated => ({
+      kind: 'done',
+      head: merged.head,
+      problem,
+    });
+    const dirty = await ctx.git.changedPaths(path);
+    if (dirty.length > 0)
+      return unchanged({
+        why: `the worktree has uncommitted changes the generators would read (${named(dirty)})`,
+        logPath: null,
+        restored: false,
+      });
+    const generated = await ctx.generators.regenerate({ batch, project, path, dirs, signal });
+    if (generated.kind === 'aborted') {
+      // What a stopped run wrote would be in the next merge's way.
+      await ctx.git.restoreDirs(path, dirs).catch(() => []);
+      return { kind: 'aborted' };
     }
-    if (problem === null) return { head, note: settledNote };
-    const { why: reason, log } = problem;
+    if (generated.kind === 'failed') {
+      const how = generated.timedOut ? 'timed out' : `exit ${String(generated.exitCode)}`;
+      const restored = (await ctx.git.restoreDirs(path, dirs)).length > 0;
+      return unchanged({
+        why: `regenerating them failed (${how})`,
+        logPath: generated.logPath,
+        restored,
+      });
+    }
+    const changed = (await ctx.git.changedPaths(path)).filter((file) =>
+      dirs.some((dir) => file.startsWith(dir)),
+    );
+    let head = merged.head;
+    if (changed.length > 0) {
+      await ctx.git.commit({
+        repo: path,
+        paths: changed,
+        message: `Regenerate ${dirs.join(', ')} after merging origin/${batch.baseBranch}`,
+        opId: `regenerate-${merged.head}`,
+        branch,
+      });
+      head = await ctx.git.head(path);
+    }
+    const done = (problem: Unregenerated | null): Regenerated => ({ kind: 'done', head, problem });
+    // Each directory conflicted, so the branch's version of it differs from the base's, which the
+    // merge took: one the generators left as it was has lost the branch's changes there.
+    const same = dirs.filter((dir) => !changed.some((file) => file.startsWith(dir)));
+    if (same.length > 0)
+      return done({
+        why: `regenerating changed nothing in ${named(same)}, so the batch's own changes there are gone from it`,
+        logPath: generated.logPath,
+        restored: false,
+      });
+    // A migration the branch made that the generator didn't make again is lost from the branch's
+    // tree: a hand-written one, or one the sources no longer produce.
+    const made = new Set<string>();
+    for (const file of changed.filter((f) => f.endsWith('.sql'))) {
+      const oid = await ctx.git.blobAt(path, 'HEAD', file);
+      if (oid !== null) made.add(oid);
+    }
+    const missing: string[] = [];
+    for (const file of regenerating.flatMap((r) => r.dropped).filter((f) => f.endsWith('.sql'))) {
+      const was = await ctx.git.blobAt(path, `${merged.head}^1`, file);
+      const is = await ctx.git.blobAt(path, 'HEAD', file);
+      if (was !== null && was !== is && !made.has(was)) missing.push(file);
+    }
+    if (missing.length === 0) return done(null);
+    return done({
+      why: `${named(missing)} from the batch's branch ${missing.length === 1 ? 'is' : 'are'} gone from it, and regenerating did not make ${missing.length === 1 ? 'it' : 'them'} again`,
+      logPath: generated.logPath,
+      restored: false,
+    });
+  }
+
+  /**
+   * Regenerates the generated directories a merge took from the base, after the install the merged
+   * lockfile needs: run before it, an older generator would write the files, or the run would fail.
+   * What kept them from it is one card. Never throws. Resolves with the branch's head and the note to
+   * add, or with a stop.
+   */
+  async function regenerate(
+    batch: BatchDto,
+    project: ProjectDto,
+    branch: string,
+    path: string,
+    merged: SettledMerge,
+    installed: boolean,
+    signal: AbortSignal,
+  ): Promise<
+    | { readonly kind: 'done'; readonly head: string; readonly note: string | null }
+    | { readonly kind: 'aborted' }
+  > {
+    const dirs = (merged.regenerate ?? []).map((r) => r.dir);
+    let outcome: Regenerated;
+    try {
+      outcome = installed
+        ? await generate(batch, project, branch, path, merged, signal)
+        : {
+            kind: 'done',
+            head: merged.head,
+            problem: {
+              why: "the install the merged lockfile needs failed, so 10db didn't run the generators",
+              logPath: null,
+              restored: false,
+            },
+          };
+    } catch (error) {
+      const restored = await ctx.git.restoreDirs(path, dirs).then(
+        (paths) => paths.length > 0,
+        () => false,
+      );
+      outcome = signal.aborted
+        ? { kind: 'aborted' }
+        : {
+            kind: 'done',
+            head: await ctx.git.head(path).catch(() => merged.head),
+            problem: {
+              why: `10db couldn't run the generators (${why(error)})`,
+              logPath: null,
+              restored,
+            },
+          };
+    }
+    if (outcome.kind === 'aborted') {
+      unregenerated(batch, path, merged, STOPPED);
+      return outcome;
+    }
+    const { head, problem } = outcome;
+    if (problem === null) return { kind: 'done', head, note: null };
+    return { kind: 'done', head, note: unregenerated(batch, path, merged, problem) };
+  }
+
+  /**
+   * Tells the builder, on one card, what kept the generated directories `merged` took from the base
+   * from being regenerated. Resolves with what the gate's note says of it.
+   */
+  function unregenerated(
+    batch: BatchDto,
+    path: string,
+    merged: SettledMerge,
+    problem: Unregenerated,
+  ): string {
+    const dirs = (merged.regenerate ?? []).map((r) => r.dir);
     ctx.logger.warn(
-      { batchId: batch.id, dirs, reason, logPath: log },
+      { batchId: batch.id, dirs, reason: problem.why, logPath: problem.logPath },
       'generated files not regenerated after the base merged',
     );
     tell(batch, () => {
-      raise(ctx.inbox, batch.projectId, baseCards.regenerate(batch, path, dirs, reason, log));
+      raise(ctx.inbox, batch.projectId, baseCards.regenerate(batch, path, dirs, problem));
     });
-    return {
-      head,
-      note: joined(
-        settledNote,
-        `${named(dirs)} hold ${origin}'s version because ${reason}, so this gate may see generated files that don't match their sources; the builder has a card.`,
-      ),
-    };
+    return `10db couldn't regenerate ${named(dirs)} after merging origin/${batch.baseBranch}: ${problem.why}. This gate may see generated files that don't match their sources; the builder has a card.`;
   }
 
   /**
@@ -350,34 +479,43 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     return taken;
   }
 
-  /** A worktree 10db made: the base is merged into its branch. */
+  /**
+   * A worktree 10db made: the base is merged into its branch. The generated directories a settled
+   * merge took from the base are left to regenerate after the install (`regenerate`).
+   */
   async function merge(
     batch: BatchDto,
-    project: ProjectDto,
     branch: string,
     path: string,
     from: string,
-    signal: AbortSignal,
     options: BeforeGateOptions,
-  ): Promise<BaseUpdate> {
+  ): Promise<Merging> {
     const migrationsFor = options.forMigrations?.task;
     const context = migrationsFor === undefined ? {} : { migrationsFor };
     const holding = (held: BaseHeld) => (migrationsFor === undefined ? {} : { held });
     const origin = `origin/${batch.baseBranch}`;
     let merged: BranchMerge;
     try {
+      // Only the directories the project's own packages make, on the branch and on the base: in any
+      // other project the same paths are just files.
+      const generated = await generatedIn(ctx.git, path, [`refs/heads/${branch}`, from]);
       merged = await ctx.git.mergeIntoBranch({
         repo: path,
         branch,
         from,
         message: `Merge ${origin} into ${branch}`,
-        resolve: { generated: GENERATED_DIRS },
+        resolve:
+          migrationsFor === undefined
+            ? { generated }
+            : { generated, generatedHeld: NOT_WHILE_WORKING },
       });
     } catch (error) {
-      return notMerged(
-        batch,
-        why(error),
-        `10db couldn't merge ${origin} into this branch (${why(error)}), so this gate ran without its newer commits.`,
+      return alone(
+        notMerged(
+          batch,
+          why(error),
+          `10db couldn't merge ${origin} into this branch (${why(error)}), so this gate ran without its newer commits.`,
+        ),
       );
     }
     switch (merged.kind) {
@@ -392,14 +530,14 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
             baseCards.conflict(batch, path, paths, { ...context, taken, reasons }),
           );
         });
-        return {
+        return alone({
           ...notMerged(
             batch,
             `conflict in ${named(paths)}`,
             `${origin} conflicts with this branch in ${named(paths)}, so this gate ran without its newer commits: a failure they fix shows here until the conflict is resolved, which the builder has a card for.`,
           ),
           ...holding({ reason: 'conflict', paths, foldKey: baseConflictKey(batch.id) }),
-        };
+        });
       }
       case 'blocked': {
         const { changed, kept } = merged;
@@ -407,7 +545,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
           tell(batch, () => {
             raise(ctx.inbox, batch.projectId, baseCards.kept(batch, path, kept, context));
           });
-        return {
+        return alone({
           ...notMerged(
             batch,
             `in the way: ${named([...changed, ...kept])}`,
@@ -427,7 +565,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
               ? { reason: 'untracked', paths: kept, foldKey: baseKeptKey(batch.id) }
               : { reason: 'uncommitted', paths: changed, foldKey: null },
           ),
-        };
+        });
       }
       case 'up_to_date':
       case 'merged':
@@ -451,31 +589,32 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
           : `This branch already holds ${origin}`;
       unmoved = `${held} but couldn't move the batch's base to it (${why(error)}), so this task's changes may still count ${origin}'s as its own.`;
     }
-    if (merged.kind === 'up_to_date') return { kind: 'up_to_date', note: unmoved };
-    const finished = await settled(batch, project, branch, path, merged, signal);
-    if ('kind' in finished) return finished;
+    if (merged.kind === 'up_to_date') return alone({ kind: 'up_to_date', note: unmoved });
     ctx.logger.info(
       {
         batchId: batch.id,
         base: merged.from,
-        head: finished.head,
+        head: merged.head,
         fastForward: merged.fastForward,
         files: merged.paths.length,
       },
       'base merged into the batch branch',
     );
     return {
-      kind: 'merged',
-      base: merged.from,
-      head: finished.head,
-      note: joined(finished.note, unmoved),
+      update: {
+        kind: 'merged',
+        base: merged.from,
+        head: merged.head,
+        note: joined(settledNote(batch, merged), unmoved),
+      },
+      regenerate: (merged.regenerate ?? []).length > 0 ? merged : null,
     };
   }
 
   /**
    * Installs again when the lockfile at the worktree's HEAD is not the one its packages were last
    * installed from: a merge or a hand merge changed it, or the last install failed or was stopped.
-   * Resolves with the note to add, or with a stop.
+   * Resolves with whether the packages now match it and the note to add, or with a stop.
    */
   async function install(
     batch: BatchDto,
@@ -486,7 +625,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     try {
       const lockfile = await ctx.git.blobAt(path, 'HEAD', PNPM_LOCKFILE);
       if (lockfile === null || lockfile === installedLockfile(db, batch.id))
-        return { kind: 'done', note: null };
+        return { kind: 'done', ok: true, note: null };
       const installed = await ctx.dependencies.refresh({
         batch: getBatch(db, batch.id),
         project,
@@ -517,6 +656,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
               : ` The sandbox blocked it from reaching ${named(installed.blockedHosts)}.`;
           return {
             kind: 'done',
+            ok: false,
             note: `The install this branch's lockfile needs failed (${how}; log: ${installed.logPath}), so its packages may not match it.${blocked}`,
           };
         }
@@ -525,15 +665,16 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
             { batchId: batch.id, logPath: installed.logPath, durationMs: installed.durationMs },
             'worktree dependencies installed',
           );
-          return { kind: 'done', note: null };
+          return { kind: 'done', ok: true, note: null };
         case 'skipped':
-          return { kind: 'done', note: null };
+          return { kind: 'done', ok: true, note: null };
       }
     } catch (error) {
       if (signal.aborted) return { kind: 'aborted' };
       ctx.logger.warn({ batchId: batch.id, err: why(error) }, 'worktree install not run');
       return {
         kind: 'done',
+        ok: false,
         note: `10db couldn't run the install this branch's lockfile needs (${why(error)}), so its packages may not match it.`,
       };
     }
@@ -551,35 +692,63 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
       return notMerged(batch, 'no branch', 'The batch has no branch yet, so nothing was merged.');
     const project = getProject(db, batch.projectId);
     const from = `refs/remotes/origin/${batch.baseBranch}`;
-    let merged: BaseUpdate | null = null;
+    let merging: Merging | null = null;
     // Once per gate, in the project's checkout, whose pin holds the origin the builder trusted; a
     // worktree shares its refs.
     try {
       await ctx.git.fetch(project.repoPath, batch.baseBranch, networkCall(ctx, signal));
     } catch (error) {
       if (stopped()) return { kind: 'aborted' };
-      merged = notMerged(
-        batch,
-        why(error),
-        `10db couldn't fetch ${batch.baseBranch} from origin (${why(error)}), so this gate ran on the branch without any newer commits on ${batch.baseBranch}.`,
+      merging = alone(
+        notMerged(
+          batch,
+          why(error),
+          `10db couldn't fetch ${batch.baseBranch} from origin (${why(error)}), so this gate ran on the branch without any newer commits on ${batch.baseBranch}.`,
+        ),
       );
     }
     if (stopped()) return { kind: 'aborted' };
-    merged ??=
+    merging ??=
       batch.worktreePath === null
-        ? await shared(batch, batch.branch, from)
-        : await merge(batch, project, batch.branch, batch.worktreePath, from, signal, options);
-    if (merged.kind === 'aborted' || stopped()) return { kind: 'aborted' };
-    // Asked for the migrations hazard, the task's session waits on it: the next gate installs.
-    if (batch.worktreePath === null || options.forMigrations) return merged;
-    const installed = await install(batch, project, batch.worktreePath, signal);
-    if (installed.kind === 'aborted' || stopped()) return { kind: 'aborted' };
+        ? alone(await shared(batch, batch.branch, from))
+        : await merge(batch, batch.branch, batch.worktreePath, from, options);
+    const merged = merging.update;
+    const path = batch.worktreePath;
+    const pending = merging.regenerate;
+    const stop = (): BaseUpdate => {
+      if (pending !== null && path !== null) unregenerated(batch, path, pending, STOPPED);
+      return { kind: 'aborted' };
+    };
+    if (merged.kind === 'aborted' || stopped()) return stop();
+    // Asked for the migrations hazard, the task's session waits on it: the next gate installs. Its
+    // merge settled no generated directory (`NOT_WHILE_WORKING`), so none waits to be regenerated.
+    if (path === null || options.forMigrations) return merged;
+    const installed = await install(batch, project, path, signal);
+    if (installed.kind === 'aborted' || stopped()) return stop();
     switch (merged.kind) {
       case 'not_merged':
         return { kind: 'not_merged', note: joined(merged.note, installed.note) ?? merged.note };
       case 'up_to_date':
-      case 'merged':
         return { ...merged, note: joined(merged.note, installed.note) };
+      case 'merged': {
+        if (pending === null) return { ...merged, note: joined(merged.note, installed.note) };
+        // Its own stop says so on the card; once it has run, a stop leaves nothing undone.
+        const regenerated = await regenerate(
+          batch,
+          project,
+          batch.branch,
+          path,
+          pending,
+          installed.ok,
+          signal,
+        );
+        if (regenerated.kind === 'aborted' || stopped()) return { kind: 'aborted' };
+        return {
+          ...merged,
+          head: regenerated.head,
+          note: joined(merged.note, regenerated.note, installed.note),
+        };
+      }
     }
   }
 

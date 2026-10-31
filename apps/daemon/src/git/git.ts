@@ -197,8 +197,10 @@ export interface MergeIntoBranchInput {
    * same place keep both; a conflict in a directory of `generated` (paths ending in `/`) takes the
    * base's version of the directory. Anything else, such as two edits of one line, a deletion, a
    * binary file or a lockfile, still stops the merge. Without it every conflict does.
+   * `generatedHeld`, for a caller that can't regenerate now, leaves every conflict in a directory of
+   * `generated` a conflict for that reason instead: a generated file is never merged by line.
    */
-  readonly resolve?: { readonly generated: readonly string[] };
+  readonly resolve?: { readonly generated: readonly string[]; readonly generatedHeld?: string };
 }
 
 /** One line of `merge-tree`'s conflicted file info: a side's version of a conflicted path. */
@@ -286,6 +288,12 @@ export interface Git {
    * submodule runs.
    */
   changedPaths(repo: string, only?: readonly string[]): Promise<string[]>;
+  /**
+   * Puts the files under `dirs` back as HEAD has them: each changed one is rewritten and each one
+   * HEAD lacks is removed; ignored files stay. Runs nothing from the repository, and leaves the
+   * checkout's own index as it was. Resolves with the paths it put back, sorted.
+   */
+  restoreDirs(repo: string, dirs: readonly string[]): Promise<string[]>;
   /** Committed and uncommitted changes since `base`, sorted and unique. */
   changedFilesSince(repo: string, base: string): Promise<string[]>;
   /** Files whose committed content differs between `base` and `tip`, sorted; nothing uncommitted. */
@@ -1416,7 +1424,7 @@ export function createGit(opts: GitOptions = {}): Git {
     from: string,
     tree: string,
     entries: readonly ConflictEntry[],
-    generated: readonly string[],
+    { generated, generatedHeld }: NonNullable<MergeIntoBranchInput['resolve']>,
   ): Promise<
     | {
         kind: 'resolved';
@@ -1438,6 +1446,10 @@ export function createGit(opts: GitOptions = {}): Git {
     const dirs = new Set<string>();
     for (const [path, found] of [...sides].sort(([a], [b]) => byPath(a, b))) {
       const dir = generated.find((prefix) => path.startsWith(prefix));
+      if (dir !== undefined && generatedHeld !== undefined) {
+        unresolved.push({ path, reason: generatedHeld });
+        continue;
+      }
       if (dir !== undefined) {
         dirs.add(dir);
         continue;
@@ -1629,7 +1641,7 @@ export function createGit(opts: GitOptions = {}): Git {
             from,
             tree,
             merging.entries,
-            input.resolve.generated,
+            input.resolve,
           );
           if (settled.kind === 'unresolved')
             return {
@@ -2122,6 +2134,29 @@ export function createGit(opts: GitOptions = {}): Git {
     },
     async changedPaths(repo, only) {
       return changes(await pinned(repo), only);
+    },
+    async restoreDirs(repo, dirs) {
+      const named = checkPaths(repo, dirs);
+      if (named.length === 0) return [];
+      return withRepoLock(realpathSync(repo), async () => {
+        const c = await pinned(repo);
+        const differing = await changes(c, named);
+        if (differing.length === 0) return [];
+        // In an index seeded from HEAD a file HEAD lacks is untracked, so `clean` removes it (a
+        // symlink itself, never what it points at) before `checkout-index` writes HEAD's files.
+        await withPrivateIndex(c, await revParse(c, 'HEAD^{commit}'), async (env) => {
+          await git(c, ['clean', '-f', '-d', '-q', '--', ...named], { env });
+          const tracked = (await git(c, ['ls-files', '-z', '--', ...differing], { env }))
+            .split('\0')
+            .filter(Boolean);
+          if (tracked.length > 0)
+            await git(c, ['checkout-index', '-f', '-q', '-z', '--stdin'], {
+              env,
+              input: `${tracked.join('\0')}\0`,
+            });
+        });
+        return differing;
+      });
     },
     async changedFilesSince(repo, base) {
       const c = await pinned(repo);

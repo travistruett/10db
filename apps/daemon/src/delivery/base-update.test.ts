@@ -364,17 +364,26 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
     const DB = 'packages/db/drizzle';
     const MINE = 'alter table a add b;\n';
 
-    /** Main's history before the batch: a file both sides will add a line to, and a generated directory. */
-    function seedMain(): void {
+    /**
+     * Main's history before the batch: a file both sides will add a line to, and a migration
+     * directory. With `generator`, the package that makes the directory is there, as in 10db's own
+     * repository; without it the directory is just files.
+     */
+    function seedMain(generator: boolean): void {
+      if (generator)
+        h.commit(
+          'packages/db/package.json',
+          `${JSON.stringify({ name: '@10db/db', scripts: { generate: 'drizzle-kit generate' } })}\n`,
+        );
       h.commit('src/index.ts', "import a from './a';\nexport {};\n");
       h.commit(`${DB}/meta/_journal.json`, '["0000"]\n');
       h.commit(`${DB}/0000_init.sql`, 'create table a;\n');
       h.git$('push', '-q', 'origin', 'main');
     }
 
-    /** Both sides added a line to `src/index.ts` and a migration to the generated directory. */
-    async function bothSidesChanged(): Promise<BatchDto> {
-      seedMain();
+    /** Both sides added a line to `src/index.ts` and a migration to the migration directory. */
+    async function bothSidesChanged({ generator = true } = {}): Promise<BatchDto> {
+      seedMain(generator);
       const { batch } = await opened();
       await commitOnBatch(
         batch,
@@ -506,20 +515,25 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       expect(h.cards()).toEqual([]);
     });
 
-    it('raises one card, naming the directory and why, when the generator fails; the merge stands', async () => {
+    it('raises one card, naming the directory and why, when the generator fails; the merge stands and what the run wrote is removed', async () => {
       h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
       const batch = await bothSidesChanged();
+      const path = pathOf(batch);
       const update = await createBaseUpdates({
         ...h.ctx,
         generators: {
-          regenerate: () =>
-            Promise.resolve({
+          regenerate: () => {
+            // A run that gets halfway: a journal rewritten, a migration begun, then an error.
+            writeFileSync(join(path, DB, 'meta/_journal.json'), '["0000","0001_theirs","00');
+            writeFileSync(join(path, DB, '0002_half.sql'), 'alter table');
+            return Promise.resolve({
               kind: 'failed',
               exitCode: 1,
               timedOut: false,
               tail: 'drizzle-kit: schema.ts has a syntax error\n',
               logPath: '/logs/generate.log',
-            }),
+            });
+          },
         },
       }).beforeGate(batch.id, signal);
       expect(update.kind).toBe('merged');
@@ -529,7 +543,160 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       expect(card.body).toContain(`- ${DB}/`);
       expect(card.body).toContain('exit 1');
       expect(card.body).toContain('/logs/generate.log');
+      expect(card.body).toContain('10db removed what the failed run wrote there');
       expect(card.detail).toEqual({ batchId: batch.id, paths: [`${DB}/`] });
+      // The directory is as the merge left it, main's version, so the next merge isn't in its way.
+      expect(gitIn(path, 'show', '-s', '--format=%s', 'HEAD')).toBe(
+        `Merge origin/main into ${batch.branch ?? ''}`,
+      );
+      expect(state(path).status).toBe('');
+      expect(readFileSync(join(path, DB, 'meta/_journal.json'), 'utf8')).toBe(
+        '["0000","0001_theirs"]\n',
+      );
+    });
+
+    it('says on the card when it stopped after the merge and before regenerating, and removes what the run wrote', async () => {
+      h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+      const batch = await bothSidesChanged();
+      const path = pathOf(batch);
+      const update = await createBaseUpdates({
+        ...h.ctx,
+        generators: {
+          regenerate: () => {
+            writeFileSync(join(path, DB, '0002_half.sql'), 'alter table');
+            return Promise.resolve({ kind: 'aborted' });
+          },
+        },
+      }).beforeGate(batch.id, signal);
+      expect(update).toEqual({ kind: 'aborted' });
+      // The next gate finds the branch up to date and regenerates nothing: the card is all that says so.
+      expect(h.only(h.cards()).body).toContain('10db stopped before it regenerated them');
+      expect(state(path).status).toBe('');
+    });
+
+    it('leaves a conflict in a migration directory to the builder when the project has no package that generates it', async () => {
+      h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+      const batch = await bothSidesChanged({ generator: false });
+      const run = { ran: 0 };
+      const before = state(pathOf(batch));
+      const update = await createBaseUpdates({
+        ...h.ctx,
+        generators: generating({}, run),
+      }).beforeGate(batch.id, signal);
+      expect(update.kind).toBe('not_merged');
+      expect(run.ran).toBe(0);
+      expect(state(pathOf(batch))).toEqual(before);
+      const card = h.only(h.cards());
+      expect(card.title).toBe('Batch "Alpha" conflicts with main');
+      expect(card.body).toContain(
+        `- ${DB}/meta/_journal.json: drizzle numbers its migrations in order, so its journal isn't merged by line`,
+      );
+    });
+
+    it('raises a card when regenerating changed nothing in a directory the branch had changed', async () => {
+      h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+      const batch = await bothSidesChanged();
+      const update = await createBaseUpdates({
+        ...h.ctx,
+        generators: generating({}),
+      }).beforeGate(batch.id, signal);
+      expect(update.kind).toBe('merged');
+      const card = h.only(h.cards());
+      expect(card.title).toBe(`Batch "Alpha": 10db couldn't regenerate files after merging main`);
+      expect(card.body).toContain(
+        `regenerating changed nothing in ${DB}/, so the batch's own changes there are gone from it`,
+      );
+    });
+
+    it('installs the lockfile the merge brought before it runs the generators', async () => {
+      h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+      withLockfile();
+      const batch = await bothSidesChanged();
+      h.teammatePush('main', 'pnpm-lock.yaml', 'lockfileVersion: 9\npackages: {}\n');
+      const cut = h.pnpm.calls().length;
+      let installsBefore: number | null = null;
+      const generator = generating({
+        [`${DB}/meta/_journal.json`]: '["0000","0001_theirs","0002_mine"]\n',
+        [`${DB}/0002_mine.sql`]: MINE,
+      });
+      const update = await createBaseUpdates({
+        ...h.ctx,
+        generators: {
+          regenerate: (input) => {
+            installsBefore = h.pnpm.calls().length - cut;
+            return generator.regenerate(input);
+          },
+        },
+      }).beforeGate(batch.id, signal);
+      expect(installsBefore).toBe(1);
+      expect(update.kind).toBe('merged');
+      expect(h.cards()).toEqual([]);
+    });
+
+    it("runs no generator when the merged lockfile's install failed, and says so on the card", async () => {
+      h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+      withLockfile();
+      const batch = await bothSidesChanged();
+      h.teammatePush('main', 'pnpm-lock.yaml', 'lockfileVersion: 9\npackages: {}\n');
+      h.pnpm.failWith(1, 'ERR_PNPM_FETCH_403');
+      const run = { ran: 0 };
+      const update = await createBaseUpdates({
+        ...h.ctx,
+        generators: generating({}, run),
+      }).beforeGate(batch.id, signal);
+      expect(run.ran).toBe(0);
+      expect(update.kind).toBe('merged');
+      expect(h.only(h.cards()).body).toContain(
+        "the install the merged lockfile needs failed, so 10db didn't run the generators",
+      );
+    });
+
+    it('runs no generator while the worktree has uncommitted changes, and commits none of them', async () => {
+      h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+      const batch = await bothSidesChanged();
+      const path = pathOf(batch);
+      // A source the generator reads, edited and not committed.
+      mkdirSync(join(path, 'packages/db/src'), { recursive: true });
+      writeFileSync(join(path, 'packages/db/src/schema.ts'), 'export const b = 1;\n');
+      const run = { ran: 0 };
+      const update = await createBaseUpdates({
+        ...h.ctx,
+        generators: generating({ [`${DB}/0002_mine.sql`]: MINE }, run),
+      }).beforeGate(batch.id, signal);
+      expect(run.ran).toBe(0);
+      expect(update.kind).toBe('merged');
+      expect(gitIn(path, 'show', '-s', '--format=%s', 'HEAD')).toBe(
+        `Merge origin/main into ${batch.branch ?? ''}`,
+      );
+      expect(state(path).status).toBe('?? packages/db/src/schema.ts');
+      const card = h.only(h.cards());
+      expect(card.body).toContain(
+        'the worktree has uncommitted changes the generators would read (packages/db/src/schema.ts)',
+      );
+    });
+
+    it("holds the migrations hazard back on a conflict in a generated directory, running no generator while the task's session works", async () => {
+      h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+      const batch = await bothSidesChanged();
+      const path = pathOf(batch);
+      mkdirSync(join(path, 'packages/db/src'), { recursive: true });
+      writeFileSync(join(path, 'packages/db/src/schema.ts'), 'export const b = 1;\n');
+      const before = state(path);
+      const run = { ran: 0 };
+      const update = await createBaseUpdates({
+        ...h.ctx,
+        generators: generating({ [`${DB}/0002_mine.sql`]: MINE }, run),
+      }).beforeGate(batch.id, signal, { forMigrations: { task: 'Alpha' } });
+      expect(run.ran).toBe(0);
+      expect(update).toMatchObject({
+        kind: 'not_merged',
+        held: { reason: 'conflict', paths: [`${DB}/meta/_journal.json`] },
+      });
+      expect(state(path)).toEqual(before);
+      const card = h.only(h.cards());
+      expect(card.body).toContain(
+        `- ${DB}/meta/_journal.json: it is generated, and 10db regenerates it only at the batch's gate, not while a task's session works in the worktree`,
+      );
     });
 
     it("raises a card when the branch's own migration was not made again by the generator", async () => {

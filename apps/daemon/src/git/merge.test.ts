@@ -1,5 +1,14 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
 import { InvalidError } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -288,6 +297,33 @@ describe('mergeIntoBranch', () => {
       expect(rawGit('status', '--porcelain', '--untracked-files=all')).toBe('');
     });
 
+    it('leaves every conflict in a generated directory, with the reason given, when told it cannot be regenerated now', async () => {
+      seed({
+        'packages/db/drizzle/notes.md': 'a\nz\n',
+        'src/index.ts': 'a\nz\n',
+      });
+      commitFiles(
+        { 'packages/db/drizzle/notes.md': 'a\nb\nz\n', 'src/index.ts': 'a\nb\nz\n' },
+        'b',
+      );
+      onMain({ 'packages/db/drizzle/notes.md': 'a\nc\nz\n', 'src/index.ts': 'a\nc\nz\n' }, 'c');
+      const before = snapshot();
+      const merged = await git.mergeIntoBranch({
+        repo: repo.path,
+        branch: 'work',
+        from: 'main',
+        message: 'Merge main into work',
+        resolve: { generated: GENERATED, generatedHeld: 'not now' },
+      });
+      // Only added lines, but a generated file is never merged by line.
+      expect(merged).toMatchObject({
+        kind: 'conflict',
+        paths: ['packages/db/drizzle/notes.md'],
+        unresolved: [{ path: 'packages/db/drizzle/notes.md', reason: 'not now' }],
+      });
+      expect(snapshot()).toEqual(before);
+    });
+
     it("leaves a conflict in a file one side deleted, and in pnpm's lockfile", async () => {
       seed({ 'gone.txt': 'a\n', 'pnpm-lock.yaml': 'a\nz\n' });
       commitFiles({ 'gone.txt': 'changed\n', 'pnpm-lock.yaml': 'a\nb\nz\n' }, 'ours');
@@ -573,6 +609,47 @@ describe('mergedCommit', () => {
       InvalidError,
     );
     expect(rawGit('rev-parse', 'main')).toBe(theirs);
+  });
+});
+
+describe('restoreDirs', () => {
+  it('puts the files under the directories back as HEAD has them, and leaves the rest alone', async () => {
+    commitFiles({ '.gitignore': 'cache/\n' }, 'ignore');
+    commitFiles(
+      { 'gen/a.json': '{"a":1}\n', 'gen/gone.json': '{}\n', 'src/schema.ts': 'one\n' },
+      'gen',
+    );
+    write('gen/a.json', '{"a":2, partial');
+    rmSync(join(repo.path, 'gen/gone.json'));
+    write('gen/new/half.json', '{');
+    write('gen/cache/kept.bin', 'ignored\n');
+    write('src/schema.ts', 'an edit outside\n');
+    expect(await git.restoreDirs(repo.path, ['gen/'])).toEqual([
+      'gen/a.json',
+      'gen/gone.json',
+      'gen/new/half.json',
+    ]);
+    expect(read('gen/a.json')).toBe('{"a":1}\n');
+    expect(read('gen/gone.json')).toBe('{}\n');
+    expect(existsSync(join(repo.path, 'gen/new/half.json'))).toBe(false);
+    expect(read('gen/cache/kept.bin')).toBe('ignored\n');
+    expect(read('src/schema.ts')).toBe('an edit outside\n');
+    expect(rawGit('status', '--porcelain', '--untracked-files=all')).toBe('M src/schema.ts');
+  });
+
+  it('replaces a symlink a run put where a directory was, writing nothing through it', async () => {
+    const outside = tempDir('restore-outside');
+    try {
+      commitFiles({ 'gen/meta/journal.json': '[]\n' }, 'gen');
+      rmSync(join(repo.path, 'gen/meta'), { recursive: true });
+      symlinkSync(outside.path, join(repo.path, 'gen/meta'));
+      await git.restoreDirs(repo.path, ['gen/']);
+      expect(lstatSync(join(repo.path, 'gen/meta')).isDirectory()).toBe(true);
+      expect(read('gen/meta/journal.json')).toBe('[]\n');
+      expect(readdirSync(outside.path)).toEqual([]);
+    } finally {
+      outside.cleanup();
+    }
   });
 });
 

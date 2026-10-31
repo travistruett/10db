@@ -1,33 +1,86 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { BatchDto, ProjectDto } from '@10db/contracts';
+import type { Git } from '../git';
 import type { WorktreeDependenciesDeps } from './worktree-dependencies';
 
 /**
- * The directories made by a generator, never merged by hand (the root AGENTS.md), and the workspace
- * package whose `generate` script makes each. In the order they are generated: the database package
- * reads the contracts.
+ * A directory made by a generator, never merged by hand (10db's root AGENTS.md): the workspace
+ * package whose `generate` script makes it, and where that package's manifest is.
  */
-export const GENERATED = [
-  { dir: 'packages/contracts/generated/', filter: '@10db/contracts' },
-  { dir: 'packages/db/drizzle/', filter: '@10db/db' },
-] as const;
+export interface Generated {
+  readonly dir: string;
+  readonly manifest: string;
+  readonly name: string;
+}
 
-/** The generated directories, as `Git.mergeIntoBranch` is told them. */
-export const GENERATED_DIRS: readonly string[] = GENERATED.map((g) => g.dir);
+/**
+ * 10db's own generated directories, in the order they are generated: the database package reads the
+ * contracts. They count in a project only where its manifests name these packages (`generatedIn`):
+ * in any other project the same paths are just files.
+ */
+export const GENERATED: readonly Generated[] = [
+  {
+    dir: 'packages/contracts/generated/',
+    manifest: 'packages/contracts/package.json',
+    name: '@10db/contracts',
+  },
+  { dir: 'packages/db/drizzle/', manifest: 'packages/db/package.json', name: '@10db/db' },
+];
+
+/** A manifest past this is not a workspace package's: it is not read. */
+const MANIFEST_MAX_BYTES = 256 * 1024;
+
+/** Whether `manifest`, a package.json's text, is the package that makes `generated` with a generate script. */
+export function makesDir(generated: Generated, manifest: string | null): boolean {
+  if (manifest === null) return false;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(manifest);
+  } catch {
+    return false;
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return false;
+  const { name, scripts } = parsed as { name?: unknown; scripts?: unknown };
+  if (name !== generated.name || typeof scripts !== 'object' || scripts === null) return false;
+  return typeof (scripts as { generate?: unknown }).generate === 'string';
+}
+
+/**
+ * The generated directories of the project checked out at `repo`: those whose package makes them in
+ * each of `revs`, read from the commits, so nothing uncommitted counts.
+ */
+export async function generatedIn(
+  git: Pick<Git, 'fileAt'>,
+  repo: string,
+  revs: readonly string[],
+): Promise<string[]> {
+  const dirs: string[] = [];
+  for (const generated of GENERATED) {
+    const manifests = await Promise.all(
+      revs.map(async (rev) => {
+        const found = await git.fileAt(repo, rev, generated.manifest, MANIFEST_MAX_BYTES);
+        return found.kind === 'file' ? found.text : null;
+      }),
+    );
+    if (manifests.every((manifest) => makesDir(generated, manifest))) dirs.push(generated.dir);
+  }
+  return dirs;
+}
 
 const quoted = (text: string): string => `'${text.replaceAll("'", "'\\''")}'`;
 
 /**
  * The command that regenerates `dirs`: each one's package's `generate` script, with the pnpm the
  * daemon resolved (`pnpm`, an absolute path outside every checkout). Like the install, the program
- * is fixed here and the repository's own config can't choose it.
+ * is fixed here and the repository's own config can't choose it. A filter that matches no package
+ * fails the command: pnpm would otherwise run nothing and exit 0.
  */
 export function generateCommand(pnpm: string, dirs: readonly string[]): string {
   const env =
     'pnpm_config_manage_package_manager_versions=false COREPACK_ENABLE_STRICT=0 COREPACK_ENABLE_AUTO_PIN=0';
   return GENERATED.filter((g) => dirs.includes(g.dir))
-    .map((g) => `${env} ${quoted(pnpm)} --filter ${quoted(g.filter)} generate`)
+    .map((g) => `${env} ${quoted(pnpm)} --filter ${quoted(g.name)} --fail-if-no-match generate`)
     .join(' && ');
 }
 
@@ -45,7 +98,7 @@ export type Regeneration =
   | { readonly kind: 'aborted' };
 
 export interface WorktreeGenerators {
-  /** Runs the generators of `dirs` (members of `GENERATED_DIRS`) in the batch's worktree. */
+  /** Runs the generators of `dirs` (directories of `GENERATED`) in the batch's worktree. */
   regenerate(input: {
     readonly batch: BatchDto;
     readonly project: ProjectDto;

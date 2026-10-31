@@ -564,7 +564,10 @@ Under the lane sandbox (**built**), the design column holds for a lane's Bash:
     A conflict it settles (`decisions/2026-10-30-a-batch-settles-its-own-conflicts-with-main.md`) is settled in
     objects too: `cat-file` reads the merged blob, `hash-object -w` writes the union, and a private index
     (`update-index --cacheinfo`, `read-tree --prefix`, `write-tree`) makes the tree; a generated directory's
-    generator then runs under the gate's sandbox, as the install does.
+    generator then runs under the gate's sandbox, as the install does, only once the worktree has no
+    uncommitted change. `restoreDirs` puts a failed run's files back with `clean -f -d` and `checkout-index -f`
+    over a private index seeded from HEAD, under the same no-attributes config, so a symlink the run left is
+    removed, never written through.
     It writes the worktree's files and its own index. A task's start on the merged base is a commit
     `mergedCommit` keeps at `refs/10db/<level>/starts/<workstream id>`, unsigned and never pushed, touching no file,
     index or branch. A base whose tree asks for a filter is refused, as its push would be. The fetch before it
