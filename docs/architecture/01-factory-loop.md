@@ -27,3 +27,22 @@ A project with no gate command has no program to verify finished work, so the bu
   it was closed some other way. It reads git only when the card has to be raised, and never completes or starts
   anything. A send back that was committed is queued as a fix and recovery keeps its note for a fresh session
   until a step that started later has acted on it.
+
+## The review step a change does not need
+
+**Built.** When a step's gate has passed and the next step is `review`, the runner may leave the review out of the
+plan, as it does for the QA step when only Markdown changed
+([the decision](decisions/2026-10-31-openrouter-makes-routine-decisions.md)).
+
+- **Always review, with no call:** a `security`, `auth`, `migration` or `dependency` risk tag; a pinned review step;
+  a review that has already run (a rework is read again); a diff against the workstream's starting head over 400
+  changed lines or 15 files; the judge or this decision switched off in Settings › Decisions or by
+  `TENDB_JUDGE=off`.
+- **Otherwise ask** (`judge.choose`, outside any database write): the task's title, description and criteria, the
+  files with their counts, the diff cut at 24 KB and the gate's result; options `review` and `skip`.
+- **Skip** only when the answer is `skip` at or above the floor (0.8 by default). The review leaves the plan and
+  the workstream goes on to the step after it, or is done. The transition's reason reads
+  `gate passed; review skipped by <model> (<confidence>): small, clear and covered by its tests; next: <role>`
+  (or ends after the model when nothing follows). Every other answer, and every fallback, runs the review.
+- The call's logged outcome is `acted` for `skip` at or above the floor and for `review`, `below_floor` for `skip`
+  under it; a fallback keeps the outcome the judge logged. CI still decides before a pull request merges.
