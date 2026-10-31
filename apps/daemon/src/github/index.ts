@@ -12,7 +12,6 @@ export {
   UNREADABLE_CHECK,
   type CheckRollupEntry,
   type CheckRollupItem,
-  type CiJob,
   type Gh,
   type GhCall,
   type GhExec,
