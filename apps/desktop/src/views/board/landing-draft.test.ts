@@ -17,6 +17,13 @@ describe('landing draft', () => {
     expect(draftFor(projectDto({ landing: project }))).toEqual(expected);
   });
 
+  it('starts from a project default that names a branch', () => {
+    expect(draftFor(projectDto({ landing: 'branch', landingBranch: 'next' }))).toEqual({
+      kind: 'branch',
+      branch: 'next',
+    });
+  });
+
   it.each([
     { name: 'base', landing: { kind: 'base' }, expected: { kind: 'base', branch: '' } },
     { name: 'hold', landing: { kind: 'hold' }, expected: { kind: 'hold', branch: '' } },

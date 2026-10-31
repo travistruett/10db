@@ -195,7 +195,8 @@ export interface ApiServices {
   syncBenchmarks(): Promise<BenchmarkStatusDto>;
   /** AA's list as stored locally; the UI shows it only with AA's attribution. */
   listAaModels(): AaModelDto[];
-  patchProject(id: ProjectId, patch: ProjectPatch): ProjectDto;
+  /** Throws InvalidError when the default landing names a branch origin does not have, after asking origin. */
+  patchProject(id: ProjectId, patch: ProjectPatch): ProjectDto | Promise<ProjectDto>;
   getTeam(projectId: ProjectId): TeamDto;
   setTeam(projectId: ProjectId, input: TeamInput): TeamDto;
   listRoutingRules(projectId: ProjectId): RoutingRuleDto[];
