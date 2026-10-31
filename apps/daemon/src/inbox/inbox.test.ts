@@ -1371,6 +1371,8 @@ describe('permission broker in a sandboxed lane', () => {
       readonly command: (own: string) => string;
       readonly outcome: 'allow' | 'card';
       readonly escalated?: boolean;
+      /** Input keys beside command, description and timeout_ms. */
+      readonly extra?: Readonly<Record<string, unknown>>;
     }
     const MONITOR_CASES: readonly MonitorCase[] = [
       // The 2026-10-30 shapes: wait for the file, then read it.
@@ -1569,6 +1571,25 @@ describe('permission broker in a sandboxed lane', () => {
         outcome: 'card',
         escalated: true,
       },
+      // Input beside the command: a socket, or a key the broker does not know.
+      {
+        name: 'a WebSocket beside the plain wait',
+        command: (d) => `cat ${d}/b1.output`,
+        outcome: 'card',
+        extra: { ws: { url: 'wss://any.host/' } },
+      },
+      {
+        name: 'an empty ws key beside the plain wait',
+        command: (d) => `cat ${d}/b1.output`,
+        outcome: 'card',
+        extra: { ws: null },
+      },
+      {
+        name: 'an unknown key beside the plain wait',
+        command: (d) => `cat ${d}/b1.output`,
+        outcome: 'card',
+        extra: { cwd: '/' },
+      },
     ];
 
     beforeEach(() => {
@@ -1592,7 +1613,7 @@ describe('permission broker in a sandboxed lane', () => {
       const pending = sandboxed(ws)(
         request(
           'Monitor',
-          { command: c.command(tasks()), description: 'wait', timeout_ms: 60000 },
+          { command: c.command(tasks()), description: 'wait', timeout_ms: 60000, ...c.extra },
           c.escalated ?? false,
         ),
       );

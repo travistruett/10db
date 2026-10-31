@@ -92,6 +92,8 @@ function permissionOptions(storable: boolean): InboxOption[] {
 const NETWORK_TOOL = 'SandboxNetworkAccess';
 const READ_FAMILY: ReadonlySet<string> = new Set(['Read', 'Grep', 'Glob', 'LS']);
 const EDIT_FAMILY: ReadonlySet<string> = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
+/** The Monitor input keys a card-free call may carry; any other (`ws`, or one added later) cards. */
+const MONITOR_INPUT_KEYS: ReadonlySet<string> = new Set(['command', 'description', 'timeout_ms']);
 
 const HOST_CARD_BODY =
   'The command was refused. Allow the host for the project and the next session gets it; allow once only reaches a session that is still running.';
@@ -312,12 +314,16 @@ export function createPermissionBroker(
   /**
    * A sandboxed Monitor call that only waits on and reads files in the session's own task output
    * directory runs without a card. It passes the checks a Bash command does, and then its own: a
-   * short grammar of reading programs over those files. Anything else is asked about.
+   * short grammar of reading programs over those files. Anything else is asked about, and so is a
+   * call with any input key but command, description and timeout_ms: Monitor's `ws` opens a socket
+   * from Claude Code's own process, outside the sandbox's network proxy, and a key a later Claude
+   * Code adds fails closed.
    */
   function judgeMonitor(
     req: ToolRequest,
     sandbox: NonNullable<BrokerContext['sandbox']>,
   ): ToolDecision | null {
+    if (!Object.keys(req.input).every((key) => MONITOR_INPUT_KEYS.has(key))) return null;
     const command = req.input['command'];
     if (typeof command !== 'string') return null;
     const bash = judgeBash(req, sandbox);
