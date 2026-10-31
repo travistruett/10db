@@ -1,5 +1,5 @@
-import { CARD_RESOLVES_WHEN, type ProjectId } from '@10db/contracts';
-import { findOpenByFoldKey, type WriteContext } from '@10db/db';
+import { CARD_RESOLVES_WHEN, type BatchId, type Notice, type ProjectId } from '@10db/contracts';
+import { clearBatchNotice, findOpenByFoldKey, setBatchNotice, type WriteContext } from '@10db/db';
 import type { StateStore } from '../events';
 import type { Git, NetworkCall } from '../git';
 import type { Gh, GhCall } from '../github';
@@ -77,6 +77,21 @@ function flagOf(projectId: ProjectId, card: Card) {
       : {}),
     ...(card.options ? { options: card.options } : {}),
   };
+}
+
+/**
+ * Shows `notice` on the batch's tasks. Finding the same cause again writes nothing and tells no one,
+ * so a gate that meets a standing conflict again changes nothing.
+ */
+export function showNotice(state: StateStore, batchId: BatchId, notice: Notice): void {
+  state.write((w) => setBatchNotice(w, batchId, notice));
+}
+
+/** Takes the notices with these keys off the batch's tasks: what they said is gone. */
+export function hideNotices(state: StateStore, batchId: BatchId, keys: readonly string[]): void {
+  state.write((w) => {
+    for (const key of keys) clearBatchNotice(w, batchId, key);
+  });
 }
 
 /** Delivery cards belong to the project, not to one workstream. */

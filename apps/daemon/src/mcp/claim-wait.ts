@@ -3,7 +3,6 @@ import {
   InboxState,
   InvalidError,
   type ClaimKind,
-  type InboxItemDto,
   type InboxItemId,
   type Notice,
   type ProjectId,

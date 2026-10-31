@@ -8,10 +8,11 @@ import {
   patchWorkstream,
 } from '@10db/db';
 import type { BranchMerge } from '../git';
-import { baseCards, baseConflictKey, baseKeptKey, detailOf } from './cards';
-import { networkCall, raise, withdraw, type DeliveryContext } from './context';
+import { detailOf } from './cards';
+import { hideNotices, networkCall, showNotice, type DeliveryContext } from './context';
 import { installedLockfile, recordInstall } from './installed-lockfile';
 import { journalDirs, takenNumbers, type TakenNumber } from './migration-numbers';
+import { baseNotices, NOTICE_KEY } from './notices';
 import { startRef } from './start-refs';
 import { PNPM_LOCKFILE, raiseInstallHostCards } from './worktree-dependencies';
 
@@ -39,14 +40,12 @@ export interface BaseHeld {
   /** Both sides changed `paths`; uncommitted changes, or files git doesn't track, are in the way. */
   readonly reason: 'conflict' | 'uncommitted' | 'untracked';
   readonly paths: readonly string[];
-  /** The fold key of the builder's card about it; null when the task can clear it itself. */
-  readonly foldKey: string | null;
 }
 
 export interface BeforeGateOptions {
   /**
    * Brings the base in for the task named here, which asked for the migrations hazard, instead of
-   * for a gate: no install runs (the next gate's does), a card says the task is held back, and a
+   * for a gate: no install runs (the next gate's does), a notice says the task is held back, and a
    * branch that can't take the base says why in `held`.
    */
   readonly forMigrations?: { readonly task: string };
@@ -137,12 +136,12 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     return { kind: 'not_merged', note };
   }
 
-  /** Raises or withdraws a card without letting the inbox stop the gate. */
+  /** Shows or clears a notice without letting the database stop the gate. */
   function tell(batch: BatchDto, act: () => void): void {
     try {
       act();
     } catch (error) {
-      ctx.logger.warn({ batchId: batch.id, err: why(error) }, 'base card not updated');
+      ctx.logger.warn({ batchId: batch.id, err: why(error) }, 'base notice not updated');
     }
   }
 
@@ -283,27 +282,28 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
       case 'conflict': {
         const { paths } = merged;
         const taken = await takenIn(path, merged.from, paths);
+        // The batch's tasks show it; no card asks the builder anything about a conflict that stands.
         tell(batch, () => {
-          raise(
-            ctx.inbox,
-            batch.projectId,
-            baseCards.conflict(batch, path, paths, { ...context, taken }),
+          showNotice(
+            ctx.state,
+            batch.id,
+            baseNotices.conflict(batch, path, paths, { ...context, taken }),
           );
         });
         return {
           ...notMerged(
             batch,
             `conflict in ${named(paths)}`,
-            `${origin} conflicts with this branch in ${named(paths)}, so this gate ran without its newer commits: a failure they fix shows here until the conflict is resolved, which the builder has a card for.`,
+            `${origin} conflicts with this branch in ${named(paths)}, so this gate ran without its newer commits: a failure they fix shows here until the conflict is resolved, which the batch's tasks show.`,
           ),
-          ...holding({ reason: 'conflict', paths, foldKey: baseConflictKey(batch.id) }),
+          ...holding({ reason: 'conflict', paths }),
         };
       }
       case 'blocked': {
         const { changed, kept } = merged;
         if (kept.length > 0)
           tell(batch, () => {
-            raise(ctx.inbox, batch.projectId, baseCards.kept(batch, path, kept, context));
+            showNotice(ctx.state, batch.id, baseNotices.kept(batch, path, kept, context));
           });
         return {
           ...notMerged(
@@ -315,15 +315,15 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
                 : `Uncommitted changes in ${named(changed)} are in the way of ${origin}'s newer commits, so this gate ran without them.`,
               kept.length === 0
                 ? null
-                : `10db didn't merge ${origin} because files in the worktree that git doesn't track are in the way (${named(kept)}). Don't remove or move them: they may be the builder's, and the builder has a card about them. This gate ran without ${origin}'s newer commits.`,
+                : `10db didn't merge ${origin} because files in the worktree that git doesn't track are in the way (${named(kept)}). Don't remove or move them: they may be the builder's, and the batch's tasks show them. This gate ran without ${origin}'s newer commits.`,
             ) ??
               `Files are in the way of ${origin}'s newer commits, so this gate ran without them.`,
           ),
           // The builder's files outrank the task's own: only the builder can move them.
           ...holding(
             kept.length > 0
-              ? { reason: 'untracked', paths: kept, foldKey: baseKeptKey(batch.id) }
-              : { reason: 'uncommitted', paths: changed, foldKey: null },
+              ? { reason: 'untracked', paths: kept }
+              : { reason: 'uncommitted', paths: changed },
           ),
         };
       }
@@ -333,10 +333,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     }
     // The branch holds the base, the builder's own hand merge included: nothing is in its way.
     tell(batch, () => {
-      withdraw(ctx.state, ctx.inbox, batch.projectId, [
-        baseConflictKey(batch.id),
-        baseKeptKey(batch.id),
-      ]);
+      hideNotices(ctx.state, batch.id, [NOTICE_KEY.baseConflict, NOTICE_KEY.baseKept]);
     });
     let unmoved: string | null = null;
     try {

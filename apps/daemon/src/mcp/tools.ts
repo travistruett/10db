@@ -180,7 +180,7 @@ export function createToolHandlers(
       granted: false,
       waiting: false,
       heldBy: null,
-      inboxId: taken.inboxId,
+      inboxId: null,
       instruction: taken.instruction,
     };
   }

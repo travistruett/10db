@@ -748,6 +748,7 @@ describe('batch routes', () => {
     gateLogPath: null,
     failure: null,
     worktreePath: null,
+    notices: [] as never[],
     createdAt: '2026-10-21T12:00:00.000Z',
     updatedAt: '2026-10-21T12:00:00.000Z',
   } as const;
@@ -807,6 +808,7 @@ describe('batch routes', () => {
     failureReason: null,
     lastActivityAt: null,
     runNextAt: null,
+    notice: null,
     createdAt: batch.createdAt,
     updatedAt: batch.updatedAt,
   });

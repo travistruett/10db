@@ -41,20 +41,22 @@ import { raiseGateHostCards } from '../inbox';
 import { BlockedRun, type GateResult, type GateRunner } from '../verify';
 import { gateNote, type BaseUpdate, type BaseUpdates } from './base-update';
 import { settleBranch } from './branch-cleanup';
-import {
-  mergeCards,
-  nothingToWaitFor,
-  shipCards,
-  wrongBranchCard,
-  type Card,
-  type ShipFailure,
-} from './cards';
+import { nothingToWaitFor, shipCards, wrongBranchCard, type Card, type ShipFailure } from './cards';
 import { allCheckouts, projectAtCheckout } from './checkout';
 import { returnCheckout } from './checkout-return';
 import { resolveShipCards } from './stale-cards';
-import { ghCall, pushCall, raise, type DeliveryContext, type DeliveryLimits } from './context';
+import {
+  ghCall,
+  hideNotices,
+  pushCall,
+  raise,
+  showNotice,
+  type DeliveryContext,
+  type DeliveryLimits,
+} from './context';
 import { readGateFailures, touchedBy, type GateStepFailure } from './gate-failures';
 import { jobKey, JobQueue } from './jobs';
+import { mergeNotices, NOTICE_KEY } from './notices';
 import { readPrScopes, scopeOf } from './pr-scopes';
 import { prBody, prTitle, titlePrefix } from './pr-text';
 import { readPrTemplate } from './pr-template';
@@ -431,12 +433,12 @@ export function createShipper(deps: ShipperDeps): Shipper {
   /**
    * Has GitHub merge the batch's pull request by itself once its required checks pass, when the
    * batch asked for that. The pull request is open either way, so a repository that doesn't allow
-   * auto-merge, or a refusal from GitHub, is a card and the pull request waits for the builder; only a
+   * auto-merge, or a refusal from GitHub, is a notice on the batch's tasks and the pull request waits for
+   * the builder (no Inbox card: it asks nothing, and the tasks' cards say what they wait for); only a
    * shutdown stops the ship.
    */
   async function turnOnAutoMerge(
     batch: BatchDto,
-    project: ProjectDto,
     repo: string,
     prUrl: string,
     signal: AbortSignal,
@@ -448,22 +450,23 @@ export function createShipper(deps: ShipperDeps): Shipper {
           { batchId: batch.id, repo, prUrl },
           'repository does not allow auto-merge',
         );
-        raise(deps.inbox, project.id, mergeCards.notAllowed(project, repo, batch, prUrl));
+        showNotice(deps.state, batch.id, mergeNotices.notAllowed(repo, prUrl));
         return;
       }
       await deps.gh.prAutoMerge({ repo, url: prUrl }, call);
+      hideNotices(deps.state, batch.id, [NOTICE_KEY.merge]);
       deps.logger.info({ batchId: batch.id, repo, prUrl }, 'auto-merge turned on');
     } catch (error) {
       if (signal.aborted) throw error;
       if (nothingToWaitFor(error)) {
-        await mergeNow(batch, project, repo, prUrl, signal);
+        await mergeNow(batch, repo, prUrl, signal);
         return;
       }
       deps.logger.warn(
         { batchId: batch.id, prUrl, err: error instanceof Error ? error.message : String(error) },
         'auto-merge not turned on',
       );
-      raise(deps.inbox, project.id, mergeCards.refused(batch, prUrl, error));
+      showNotice(deps.state, batch.id, mergeNotices.refused(prUrl, error));
     }
   }
 
@@ -474,13 +477,13 @@ export function createShipper(deps: ShipperDeps): Shipper {
    */
   async function mergeNow(
     batch: BatchDto,
-    project: ProjectDto,
     repo: string,
     prUrl: string,
     signal: AbortSignal,
   ): Promise<void> {
     try {
       await deps.gh.prMerge({ repo, url: prUrl }, ghCall(deps, signal));
+      hideNotices(deps.state, batch.id, [NOTICE_KEY.merge]);
       deps.logger.info({ batchId: batch.id, repo, prUrl }, 'pull request merged at once');
     } catch (error) {
       if (signal.aborted) throw error;
@@ -488,7 +491,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
         { batchId: batch.id, prUrl, err: error instanceof Error ? error.message : String(error) },
         'pull request not merged at once',
       );
-      raise(deps.inbox, project.id, mergeCards.mergeRefused(batch, prUrl, error));
+      showNotice(deps.state, batch.id, mergeNotices.mergeRefused(batch, prUrl, error));
     }
   }
 
@@ -647,7 +650,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
       // or merged it.
       if (batch.autoMerge && (existing === null || existing.state === PrState.Open)) {
         step = 'gh pr merge --auto';
-        await turnOnAutoMerge(batch, project, repo, prUrl, signal);
+        await turnOnAutoMerge(batch, repo, prUrl, signal);
       }
       // 5. Record it.
       deps.state.write((w) =>

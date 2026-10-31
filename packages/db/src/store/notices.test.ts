@@ -1,4 +1,4 @@
-import { type Notice } from '@10db/contracts';
+import type { Notice } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   clearBatchNotice,
@@ -39,8 +39,9 @@ function seed() {
   const task = store.write((ctx) =>
     insertTask(ctx, project.id, { title: 'Alpha', acceptanceCriteria: ['x'], areas: ['api'] }),
   ).value;
-  const workstream = store.write((ctx) => insertWorkstream(ctx, task.id, { batchId: batch.id }))
-    .value;
+  const workstream = store.write((ctx) =>
+    insertWorkstream(ctx, task.id, { batchId: batch.id }),
+  ).value;
   return { batch, workstream };
 }
 
@@ -69,7 +70,12 @@ describe('batch notices', () => {
 
   it('a notice with the same key replaces the old one; another key stands beside it', () => {
     const { batch } = seed();
-    const other: Notice = { key: 'in-the-way', tone: 'warning', line: 'Files in the way', body: '' };
+    const other: Notice = {
+      key: 'in-the-way',
+      tone: 'warning',
+      line: 'Files in the way',
+      body: '',
+    };
     store.write((ctx) => setBatchNotice(ctx, batch.id, conflict));
     store.write((ctx) => setBatchNotice(ctx, batch.id, other));
     store.write((ctx) => setBatchNotice(ctx, batch.id, { ...conflict, body: 'src/b.ts' }));

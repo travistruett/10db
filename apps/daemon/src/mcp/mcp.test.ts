@@ -799,23 +799,17 @@ describe('MCP tools', () => {
       expect(holdsMigrations(a.workstream.id)).toBe(true);
     });
 
-    it("is held back while the branch can't take its base, with the card and what to do, and a retry with the same opId asks again", async () => {
+    it("is held back while the branch can't take its base, with what to do, and a retry with the same opId asks again", async () => {
       const a = await seedSession(['api']);
-      const card = inbox.flag({
-        projectId: a.project.id,
-        workstreamId: null,
-        title: 'Batch "Greetings" conflicts with main',
-        body: 'README.md',
-      });
       const instruction = 'origin/main conflicts with this branch in README.md, so 10db…';
-      takeMigrationsBase = () => Promise.resolve({ kind: 'held', inboxId: card.id, instruction });
+      takeMigrationsBase = () => Promise.resolve({ kind: 'held', instruction });
       const args = { opId: 'op-mig-held', ...migrations };
       const held = await a.call('request_claim', args);
       expect(held.json).toEqual({
         granted: false,
         waiting: false,
         heldBy: null,
-        inboxId: card.id,
+        inboxId: null,
         instruction,
       });
       expect(holdsMigrations(a.workstream.id)).toBe(false);
@@ -831,7 +825,7 @@ describe('MCP tools', () => {
     it('is held back with no card when the agent can clear the cause itself', async () => {
       const a = await seedSession(['api']);
       takeMigrationsBase = () =>
-        Promise.resolve({ kind: 'held', inboxId: null, instruction: 'Commit README.md first.' });
+        Promise.resolve({ kind: 'held', instruction: 'Commit README.md first.' });
       const held = await a.call('request_claim', { opId: 'op-mig-self', ...migrations });
       expect(held.json).toMatchObject({
         granted: false,

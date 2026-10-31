@@ -121,21 +121,23 @@ describe('a pull request that lands in another branch', () => {
 });
 
 describe('when the repository does not allow auto-merge', () => {
-  it('says so once in a card and leaves the pull request for the builder', async () => {
+  it("says so on the batch's tasks, with no card, and leaves the pull request for the builder", async () => {
     h = createDeliveryHarness();
     h.gh.autoMergeAllowed = false;
     const first = await ship(await start('One', h.addTask('Alpha')));
     expect(first.state).toBe('SHIPPED');
     expect(first.prUrl).not.toBeNull();
     expect(autoMergeCalls()).toEqual([]);
-    const card = h.only(h.cards());
-    expect(card.title).toBe("This repository doesn't allow auto-merge");
-    expect(card.body).toContain(first.prUrl ?? '');
-    expect(card.body).toContain('Allow auto-merge');
+    expect(h.cards()).toEqual([]);
+    const notice = h.only(first.notices);
+    expect(notice.line).toContain("acme/widgets doesn't allow auto-merge");
+    expect(notice.body).toContain(first.prUrl ?? '');
+    expect(notice.body).toContain('Allow auto-merge');
 
-    // A second pull request in the same project raises no second card.
-    await ship(await start('Two', h.addTask('Beta')));
-    expect(h.cards().map((c) => c.title)).toEqual(["This repository doesn't allow auto-merge"]);
+    // A second pull request in the same project says the same on its own tasks, and still no card.
+    const second = await ship(await start('Two', h.addTask('Beta')));
+    expect(h.only(second.notices).body).toContain(second.prUrl ?? '');
+    expect(h.cards()).toEqual([]);
     expect(autoMergeCalls()).toEqual([]);
   });
 
@@ -148,7 +150,7 @@ describe('when the repository does not allow auto-merge', () => {
 });
 
 describe('when GitHub refuses to turn auto-merge on', () => {
-  it('still ships, and tells the builder the pull request waits for them', async () => {
+  it("still ships, and tells the batch's tasks the pull request waits for the builder", async () => {
     h = createDeliveryHarness();
     h.gh.failNext.set(
       'prAutoMerge',
@@ -156,10 +158,11 @@ describe('when GitHub refuses to turn auto-merge on', () => {
     );
     const shipped = await ship(await start('One', h.addTask('Alpha')));
     expect(shipped.state).toBe('SHIPPED');
-    const card = h.only(h.cards());
-    expect(card.title).toContain('not set to merge by itself');
-    expect(card.body).toContain(shipped.prUrl ?? '');
-    expect(card.body).toContain('draft status');
+    expect(h.cards()).toEqual([]);
+    const notice = h.only(shipped.notices);
+    expect(notice.line).toContain('not set to merge by itself');
+    expect(notice.body).toContain(shipped.prUrl ?? '');
+    expect(notice.body).toContain('draft status');
     expect(h.gh.calls.some((c) => c.method === 'prMerge')).toBe(false);
   });
 });
@@ -177,7 +180,7 @@ describe('when the base branch has no required checks', () => {
     expect(read?.state).toBe('MERGED');
   });
 
-  it('tells the builder why, with the link, when the immediate merge fails', async () => {
+  it("tells the batch's tasks why, with the link, when the immediate merge fails", async () => {
     h = createDeliveryHarness();
     h.gh.noRequiredChecks = true;
     h.gh.failNext.set(
@@ -187,10 +190,11 @@ describe('when the base branch has no required checks', () => {
     const shipped = await ship(await start('One', h.addTask('Alpha')));
     expect(shipped.state).toBe('SHIPPED');
     expect(h.gh.merged).toEqual([]);
-    const card = h.only(h.cards());
-    expect(card.title).toContain('not merged');
-    expect(card.body).toContain('merge conflict');
-    expect(card.body).toContain(shipped.prUrl ?? '');
+    expect(h.cards()).toEqual([]);
+    const notice = h.only(shipped.notices);
+    expect(notice.line).toContain('GitHub refused to merge it');
+    expect(notice.body).toContain('merge conflict');
+    expect(notice.body).toContain(shipped.prUrl ?? '');
   });
 
   it('never merges a pull request held for the builder', async () => {
