@@ -5,9 +5,14 @@ import {
   summariseChecks,
   type CheckRollupEntry,
   type Gh,
+  type JobLog,
+  type MergeBlocked,
   type PullRequest,
   type PullRequestStatus,
+  type RequiredChecks,
 } from '../src/github';
+
+const NO_REQUIRED: RequiredChecks = { state: 'none', failing: [], pending: [] };
 
 export type GhMethod =
   | 'authStatus'
@@ -16,6 +21,9 @@ export type GhMethod =
   | 'repoAllowsAutoMerge'
   | 'prView'
   | 'prStatus'
+  | 'prRequiredChecks'
+  | 'jobLog'
+  | 'rerunFailed'
   | 'prCreate'
   | 'prAutoMerge'
   | 'prMerge';
@@ -49,11 +57,16 @@ export class FakeGh implements Gh {
    */
   readonly failRead = new Map<string, GhError>();
   readonly calls: { readonly method: GhMethod; readonly args: unknown }[] = [];
+  /** The Actions runs `rerunFailed` was asked to rerun, in order. */
+  readonly reruns: string[] = [];
+  private readonly required = new Map<string, RequiredChecks>();
+  private readonly jobLogs = new Map<string, JobLog>();
   private readonly byRef = new Map<
     string,
     {
       pr: { url: string; state: PrState };
       headSha: string | null;
+      mergeBlocked: MergeBlocked | null;
       body: string;
       create: PrCreateCall | null;
       rollup: readonly CheckRollupEntry[];
@@ -111,11 +124,37 @@ export class FakeGh implements Gh {
       () => {
         const found = this.byRef.get(input.ref);
         return found
-          ? { ...found.pr, headSha: found.headSha, ...summariseChecks(found.rollup) }
+          ? {
+              ...found.pr,
+              headSha: found.headSha,
+              mergeBlocked: found.mergeBlocked,
+              ...summariseChecks(found.rollup),
+            }
           : null;
       },
       this.failRead.get(input.ref),
     );
+  }
+
+  prRequiredChecks(input: {
+    readonly repo: string;
+    readonly url: string;
+  }): Promise<RequiredChecks> {
+    return this.call('prRequiredChecks', input, () => this.required.get(input.url) ?? NO_REQUIRED);
+  }
+
+  jobLog(input: { readonly repo: string; readonly jobId: string }): Promise<JobLog> {
+    return this.call(
+      'jobLog',
+      input,
+      () => this.jobLogs.get(input.jobId) ?? ({ kind: 'not_yet' } as const),
+    );
+  }
+
+  rerunFailed(input: { readonly repo: string; readonly runId: string }): Promise<void> {
+    return this.call('rerunFailed', input, () => {
+      this.reruns.push(input.runId);
+    });
   }
 
   prCreate(input: {
@@ -178,6 +217,23 @@ export class FakeGh implements Gh {
     found.headSha = sha;
   }
 
+  /** Why GitHub will not merge the PR as it is from now on; a new PR has no reason. */
+  setMergeBlocked(url: string, blocked: MergeBlocked | null): void {
+    const found = this.byRef.get(url);
+    if (!found) throw new Error(`no PR ${url}`);
+    found.mergeBlocked = blocked;
+  }
+
+  /** The required checks `prRequiredChecks` reports for the PR from now on; a new PR has none. */
+  setRequiredChecks(url: string, checks: RequiredChecks): void {
+    this.required.set(url, checks);
+  }
+
+  /** The log `jobLog` returns for the job from now on; until then the run is still in progress. */
+  setJobLog(jobId: string, log: JobLog): void {
+    this.jobLogs.set(jobId, log);
+  }
+
   /** The checks the PR's rollup shows from now on; a new PR has none. */
   setChecks(url: string, rollup: readonly CheckRollupEntry[]): void {
     const found = this.byRef.get(url);
@@ -195,7 +251,14 @@ export class FakeGh implements Gh {
 
   private add(branch: string, state: PrState, body: string, create: PrCreateCall | null): string {
     const url = `https://github.com/${this.repo}/pull/${String(this.next++)}`;
-    const entry = { pr: { url, state }, headSha: null, body, create, rollup: [] };
+    const entry = {
+      pr: { url, state },
+      headSha: null,
+      mergeBlocked: null,
+      body,
+      create,
+      rollup: [],
+    };
     this.byRef.set(branch, entry);
     this.byRef.set(url, entry);
     return url;
