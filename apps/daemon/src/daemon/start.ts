@@ -17,6 +17,7 @@ import {
   createStore,
   DB_MIGRATIONS_DIR,
   deleteAppSetting,
+  deleteJudgeCallsBefore,
   getAppSetting,
   listPermissionRules,
   listProjects,
@@ -43,6 +44,8 @@ import {
 } from '../accounts';
 import { createApp } from '../api';
 import { createBenchmarkSync, type BenchmarkSync } from '../benchmarks';
+import { createJudge, JUDGE_LOG_RETENTION_MS, type JudgeService } from '../judge';
+import { createJudgeServices } from './judge-services';
 import {
   backupDatabase,
   hasPendingMigrations,
@@ -78,6 +81,7 @@ import {
   ACCOUNT_NAMES_VERIFIED_ON,
   createLauncher,
   REQUIRED_TOOLS,
+  OPENROUTER_KEY_ACCOUNT,
   unavailableKeychain,
   type Keychain,
   type GhLoginProbe,
@@ -188,6 +192,8 @@ export interface DaemonOptions {
   /** The builder's Artificial Analysis key (the Keychain in production); absent means no sync. */
   readonly aaKey?: () => string | null;
   readonly fetch?: typeof fetch;
+  /** `TENDB_JUDGE=off`: the OpenRouter key is never read and no decision calls OpenRouter. */
+  readonly judgeOff?: boolean;
   /** The harness plugin folder the default personas are read from. */
   readonly harnessDir?: string;
   readonly allowedOrigins?: readonly string[];
@@ -219,6 +225,8 @@ export interface RunningDaemon {
   readonly runner: Runner;
   readonly scheduler: Scheduler;
   readonly benchmarks: BenchmarkSync;
+  /** What routine decisions ask; reads the OpenRouter key from `keychain` for each call. */
+  readonly judge: JudgeService;
   stop(): Promise<void>;
 }
 
@@ -346,6 +354,24 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     logger: logger.child({ component: 'benchmarks' }),
   });
   benchmarks.start();
+  const judgeKeychain = opts.keychain ?? unavailableKeychain;
+  const judge = createJudge({
+    state,
+    clock,
+    fetch: opts.fetch ?? fetch,
+    readKey: () =>
+      opts.judgeOff === true
+        ? Promise.resolve(null)
+        : judgeKeychain.readAsync(OPENROUTER_KEY_ACCOUNT),
+    off: opts.judgeOff === true,
+    logger: logger.child({ component: 'judge' }),
+  });
+  state.write((ctx) =>
+    deleteJudgeCallsBefore(
+      ctx,
+      new Date(clock.now().getTime() - JUDGE_LOG_RETENTION_MS).toISOString(),
+    ),
+  );
   const instanceId = randomUUID();
   const live = createLiveSessions();
   const limits: RunnerLimits = { ...DEFAULT_RUNNER_LIMITS, ...opts.limits };
@@ -689,6 +715,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     gate,
     baseUpdates,
     migrationsBase,
+    judge,
     clock,
     logger,
     dataDir: opts.dataDir,
@@ -809,6 +836,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
           )
         : noSystemCheck(),
     benchmarks,
+    judge: createJudgeServices({
+      state,
+      keychain: judgeKeychain,
+      judge,
+      off: opts.judgeOff === true,
+    }),
     starter,
     shipper,
     accounts: accountService,
@@ -960,6 +993,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     runner: createdRunner,
     scheduler: createdScheduler,
     benchmarks,
+    judge,
     stop() {
       stopping ??= shutdown();
       return stopping;

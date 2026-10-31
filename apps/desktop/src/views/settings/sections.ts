@@ -8,6 +8,7 @@ export const SettingsSectionKey = {
   RoutingRules: 'routing-rules',
   KeepAwake: 'keep-awake',
   Accounts: 'accounts',
+  Decisions: 'decisions',
   Models: 'models',
   PersonasAndFlows: 'personas-and-flows',
 } as const;
@@ -82,6 +83,12 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
     key: SettingsSectionKey.Accounts,
     group: SettingsGroup.Global,
     label: 'Accounts',
+    planned: null,
+  },
+  {
+    key: SettingsSectionKey.Decisions,
+    group: SettingsGroup.Global,
+    label: 'Decisions',
     planned: null,
   },
   {

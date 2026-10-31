@@ -13,4 +13,15 @@ describe('daemons that are not the installed app', () => {
   ])('%s turns the benchmark sync off', (_name, path) => {
     expect(readRepoFile(path)).toMatch(OFF);
   });
+
+  // The judge sends task text and diffs to OpenRouter on the builder's key and spends it.
+  const JUDGE_OFF = /TENDB_JUDGE\s*[:=]\s*['"]?off\b/;
+
+  it.each([
+    ['the e2e web server', 'apps/desktop/e2e/playwright.config.ts'],
+    ['pnpm dev', 'scripts/dev.sh'],
+    ['the live acceptance daemon', 'apps/daemon/scripts/live-acceptance.ts'],
+  ])('%s turns the judge off', (_name, path) => {
+    expect(readRepoFile(path)).toMatch(JUDGE_OFF);
+  });
 });

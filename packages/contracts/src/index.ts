@@ -17,6 +17,7 @@ export * from './goals';
 export * from './handoff';
 export { HealthResponse } from './health';
 export * from './ids';
+export * from './judge';
 export { CONTRACT_SCHEMAS, renderJsonSchemas } from './json-schema';
 export * from './landing';
 export * from './mcp-tools';
