@@ -607,7 +607,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       }),
     );
     try {
-      expect(session.spec.autoMode.hard_deny[0]).toContain(JSON.stringify('make gate'));
+      expect(session.spec.autoMode.hard_deny[1]).toContain(JSON.stringify('make gate'));
     } finally {
       session.dispose();
     }

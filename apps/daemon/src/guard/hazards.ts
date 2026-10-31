@@ -1,6 +1,6 @@
 import type { HazardDef } from '@10db/contracts';
 import { commandForms, startsWithWords } from './command-forms';
-import { commandOf, shellQuote, shellScripts, redirectionReadings } from './judge';
+import { SHELLS, commandOf, shellQuote, shellScripts, redirectionReadings } from './judge';
 import { findExecCommands, parseShell } from './shell-words';
 
 /** The deepest `sh -c`, `eval` and `find -exec` nesting the guard follows. */
@@ -29,7 +29,7 @@ export function hazardHit(
     const inner = [...segment.nested, ...segment.hereDocuments].map((body) => ({ body, depth }));
     if (depth < MAX_DEPTH) {
       const deeper = depth + 1;
-      if (head === 'sh' || head === 'bash' || head === 'zsh') {
+      if (SHELLS.has(head)) {
         inner.push(...shellScripts(words).map((body) => ({ body, depth: deeper })));
       }
       if (head === 'find') {

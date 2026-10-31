@@ -16,6 +16,7 @@ import {
 } from './account-rules';
 import { commandForms, startsWithWords } from './command-forms';
 import { ghVerdict } from './gh-rules';
+import { executableTails, FEEDERS } from './wrapped-commands';
 import { gitVerdict } from './git-rules';
 import {
   classifyPath,
@@ -91,7 +92,17 @@ const DEPLOY = [
   /^gh release create\b/,
 ];
 const PATH_READ_TOOLS = new Set(['Read', 'Grep', 'Glob', 'LS']);
-const SHELLS = new Set(['sh', 'bash', 'zsh']);
+/** Programs that read a script from `-c` or from standard input. */
+export const SHELLS: ReadonlySet<string> = new Set([
+  'sh',
+  'bash',
+  'zsh',
+  'dash',
+  'ksh',
+  'csh',
+  'tcsh',
+  'fish',
+]);
 const ToolInput = z.record(z.string(), z.unknown());
 
 /** Reads a string field from a tool's input, which arrives as untyped JSON. */
@@ -364,12 +375,42 @@ export function withoutRedirections(words: readonly string[]): string[] {
  * redirection and its target dropped, and with only the operator words dropped. A match in any
  * reading counts.
  */
-export function redirectionReadings(words: readonly string[]): string[][] {
+export function redirectionViews(words: readonly string[]): string[][] {
   const operatorsOnly = words.filter((_, i) => {
     const before = i > 0 && redirectionSpan(words, i - 1) === 2;
     return redirectionSpan(words, i) === 0 || before;
   });
   return [[...words], withoutRedirections(words), operatorsOnly];
+}
+
+/** The views of `redirectionViews`, each followed by the command lines wrapped inside it. */
+export function redirectionReadings(words: readonly string[]): string[][] {
+  return redirectionViews(words).flatMap((view) => [view, ...executableTails(view)]);
+}
+
+/** What the git and gh rules refuse about a command line that starts with either program. */
+function wrappedVerdict(line: readonly string[]): string | null {
+  const [program = ''] = line;
+  if (program === 'git') return gitVerdict(line)?.deny ?? null;
+  if (program === 'gh') return ghVerdict(line)?.deny ?? null;
+  return null;
+}
+
+/**
+ * git or gh behind `xargs` or `parallel`: the arguments arrive on standard input, so the words that
+ * follow are checked and a bare program is refused, since what it is fed could be `push --force`.
+ */
+function fedRefusal(words: readonly string[]): string | null {
+  const feeder = words.findIndex((word) => FEEDERS.has(commandName(word)));
+  if (feeder < 0) return null;
+  const at = words.findIndex((word, i) => i > feeder && (word === 'git' || word === 'gh'));
+  if (at < 0) return null;
+  const line = words.slice(at);
+  const refused = wrappedVerdict(line);
+  if (refused) return refused;
+  return line.length <= 1
+    ? `${line[0] ?? ''} is fed its arguments, which the guard cannot read.`
+    : null;
 }
 
 /** The command a segment runs, past reserved words, assignments and wrappers. */
@@ -599,14 +640,12 @@ function judgeShell(
         chained = union(dirs, moved);
       }
     }
-    if (head === 'git') {
-      const verdict = gitVerdict(words);
-      if (verdict) return deny(verdict.deny);
+    for (const line of [words, ...executableTails(words)]) {
+      const verdict = wrappedVerdict(line);
+      if (verdict) return deny(verdict);
     }
-    if (head === 'gh') {
-      const verdict = ghVerdict(words);
-      if (verdict) return deny(verdict.deny);
-    }
+    const refused = fedRefusal(leadingWords(segment.words).command);
+    if (refused) return deny(refused);
     if (head === 'rm') {
       const verdict = rmVerdict(input, words, afterCd, segment);
       if (verdict) return verdict;

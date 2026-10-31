@@ -146,6 +146,27 @@ export function startsWithWords(words: readonly string[], prefix: readonly strin
   return prefix.length > 0 && prefix.every((p, i) => words[i] === p);
 }
 
+const HELP_FLAGS: ReadonlySet<string> = new Set(['--version', '-v', '--help', '-h']);
+
+/**
+ * How a package manager reads the plain words other than as written: `run` and `run-script` name a
+ * script as the subcommand does (`pnpm run db:migrate` is `pnpm db:migrate`), pnpm and yarn run a
+ * package binary given as the subcommand (`pnpm drizzle-kit generate`), `yarn workspace <name>`
+ * runs the subcommand after it, and a bare `yarn` installs.
+ */
+function packageManagerVariants(plain: readonly string[], words: readonly string[]): string[][] {
+  const [manager, subcommand, ...rest] = plain;
+  if (manager !== 'pnpm' && manager !== 'npm' && manager !== 'yarn') return [];
+  const variants: string[][] = [];
+  if (subcommand === 'run' || subcommand === 'run-script') variants.push([manager, ...rest]);
+  if (manager !== 'npm' && subcommand !== undefined) variants.push(plain.slice(1));
+  if (manager === 'yarn' && subcommand === 'workspace') variants.push(['yarn', ...plain.slice(3)]);
+  if (manager === 'yarn' && plain.length === 1 && !words.some((w) => HELP_FLAGS.has(w))) {
+    variants.push(['yarn', 'install']);
+  }
+  return variants;
+}
+
 /**
  * Every way a command line can be read, each as one space-joined string: the line as written, the
  * line without flags (in every reading of its unknown flags), and, for a runner such as `npx` or
@@ -156,7 +177,7 @@ export function commandForms(words: readonly string[]): { bare: string[][]; line
   const lines = [words.join(' ')];
   for (const reading of plainWordReadings(words)) {
     const plain = reading.map((p) => p.word);
-    bare.push(plain);
+    bare.push(plain, ...packageManagerVariants(plain, words));
     lines.push(plain.join(' '));
     const runner = RUNNERS.find((r) => startsWithWords(plain, r));
     if (runner) {

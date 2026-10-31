@@ -394,8 +394,10 @@ describe('buildQueryOptions', () => {
     const options = buildQueryOptions(spec({ sandbox: laneSandbox }), deps);
     expect(options.settings).toMatchObject({ autoMode: laneSandbox.autoMode });
     const settings = options.settings as { autoMode: { hard_deny: string[]; soft_deny: string[] } };
-    expect(settings.autoMode.hard_deny).toHaveLength(2);
-    expect(settings.autoMode.soft_deny).toHaveLength(1);
+    expect(settings.autoMode.hard_deny).toHaveLength(3);
+    expect(settings.autoMode.soft_deny).toHaveLength(2);
+    expect(settings.autoMode.hard_deny[0]).toBe('$defaults');
+    expect(settings.autoMode.soft_deny[0]).toBe('$defaults');
     expect(options.env).not.toHaveProperty('CLAUDE_CODE_AUTO_MODE_MODEL');
   });
 
